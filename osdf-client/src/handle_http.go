@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
+	"path/filepath"
 	"time"
 
 	// curl "github.com/andelf/go-curl"
@@ -13,14 +15,34 @@ import (
 
 func main() {
 
-	url := os.Args[0]
-	dest := os.Args[1]
+	// declaration for method
+	urlArg := os.Args[1]
+	destArg := os.Args[2]
+	var destFinal string
 
-	// method := os.Args[2]
+	// Preprend URL
+	url := "http://hcc-stash.unl.edu:8000/" + urlArg
 
-	//payload??
+	// get absolute path
+	destPath, err := filepath.Abs(destArg)
 
-	DownloadHTTP(url, dest)
+	// Make sure there isnt a Stat error
+	destStat, err := os.Stat(destPath)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	//Check if path exists or if its in a folder
+	if _, err := os.Stat(destPath); os.IsNotExist(err) {
+		fmt.Println("file does not exist")
+		destFinal = destPath
+	} else if destStat.IsDir() {
+		destFinal = path.Base(destPath)
+	}
+
+	fmt.Printf("url=" + url + "dest=" + destFinal + "\n\n")
+	DownloadHTTP(url, destFinal)
 
 	// if method == "cvmfs" {
 	// 		download_cvmfs(url, dest, payload)
@@ -30,6 +52,14 @@ func main() {
 	// 		DownloadHTTP(url,dest)
 	// }
 
+}
+
+func IsDirectory(path string) (bool, error) {
+	fileInfo, err := os.Stat(path)
+	if err != nil {
+		return false, err
+	}
+	return fileInfo.IsDir(), err
 }
 
 // GetRedirect - Get the redirection for a URL
@@ -83,6 +113,6 @@ Loop:
 			break Loop
 		}
 	}
-	fmt.Printf("Download saved to", resp.Filename)
+	fmt.Printf("\nDownload saved to", resp.Filename)
 	return nil
 }
