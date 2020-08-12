@@ -3,7 +3,6 @@ package main
 import (
 	"os"
 	"path"
-	"time"
 
 	lumber "github.com/jcelliott/lumber"
 	shutil "github.com/termie/go-shutil"
@@ -29,9 +28,9 @@ func download_cvmfs(sourceFile string, destination string, payload payloadStruct
 		shutil.CopyFile(sourceFile, destination, true)
 		log.Debug("Succesfully copied file from CVMFS!")
 
-		var end1 int32 = int32(time.Now().Unix())
+		//	var end1 int32 = int32(time.Now().Unix())
 
-		payload := payloadStruct{tries: 1, cache: "CVMFS", host: "CVMFS"}
+		//	payload := payloadStruct{tries: 1, cache: "CVMFS", host: "CVMFS"}
 
 		if err != nil {
 			log.Warn("Unable to copy with CVMFS, even though file exists: %s", err)
