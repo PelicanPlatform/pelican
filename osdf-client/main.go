@@ -66,10 +66,14 @@ func main() {
 		destFinal = path.Join(destPath, sourceFilename)
 	}
 
-	fmt.Printf("url=" + srcURL.String() + " dest=" + destFinal + "\n")
-	if err := DownloadHTTP(srcURL.String(), destFinal); err != nil {
-		fmt.Printf("Download failed")
-	}
+	// fmt.Printf("url=" + srcURL.String() + " dest=" + destFinal + "\n")
+	// if err := DownloadHTTP(srcURL.String(), destFinal); err != nil {
+	// 	fmt.Printf("Download failed")
+	// }
+
+	payload := payloadStruct{tries: 0, cache: "", host: ""}
+
+	download_cvmfs(srcURL.String(), destFinal, payload)
 
 	//fmt.Printf("Trying URL: %v\n", u.String())
 	//redir := GetRedirect(u.String())
