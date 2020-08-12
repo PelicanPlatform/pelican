@@ -7,7 +7,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	
 )
 
 // Redirector
@@ -71,7 +70,7 @@ func main() {
 	if err := DownloadHTTP(srcURL.String(), destFinal); err != nil {
 		fmt.Printf("Download failed")
 	}
-	
+
 	//fmt.Printf("Trying URL: %v\n", u.String())
 	//redir := GetRedirect(u.String())
 	//fmt.Printf("ERROR: %v\n", redir)
@@ -80,83 +79,76 @@ func main() {
 
 	/*
 
-	userAgent := "stashcp/" + VERSION
+			userAgent := "stashcp/" + VERSION
 
-	main_redirector := "root://redirector.osgstorage.org"
-	stash_origin := "root://stash.osgconnect.net"
-	writeback_host := "http://stash-xrd.osgconnect.net:1094"
+			main_redirector := "root://redirector.osgstorage.org"
+			stash_origin := "root://stash.osgconnect.net"
+			writeback_host := "http://stash-xrd.osgconnect.net:1094"
 
-//Global variable for nearest cache
-	nearest_cache :=  ""// ?? what type
+		//Global variable for nearest cache
+			nearest_cache :=  ""// ?? what type
 
-// Ordered list of nearest caches  ***************************************
-	nearest_cache_list := []int{}
+		// Ordered list of nearest caches  ***************************************
+			nearest_cache_list := []int{}
 
-// Global variable for the location of the caches.json file
-	caches_json_location := ""
+		// Global variable for the location of the caches.json file
+			caches_json_location := ""
 
-// Global variable for the name of a pre-configured cache list
-	cache_list_name := ""
+		// Global variable for the name of a pre-configured cache list
+			cache_list_name := ""
 
-// Global variable for the location of the token to use for reading / writing
-	token_location := ""
+		// Global variable for the location of the token to use for reading / writing
+			token_location := ""
 
-// Global variable to print names of cache lists
-	print_cache_list_names := ""
+		// Global variable to print names of cache lists
+			print_cache_list_names := ""
 
-	TIMEOUT := 300
-	DIFF    := TIMEOUT * 10
+			TIMEOUT := 300
+			DIFF    := TIMEOUT * 10
 
 	*/
 
-	
-
 }
 
-
-func doWriteBack(source string,destination string,debug bool) /*unsure of return type*/{
+func doWriteBack(source string, destination string, debug bool) /*unsure of return type*/ {
 	/*
-	  Do a write back to Stash using SciTokens
+			  Do a write back to Stash using SciTokens
 
-    :param str source: The location of the local file
-    :param str destination: The location of the remote file, in stash:// format
+		    :param str source: The location of the local file
+		    :param str destination: The location of the remote file, in stash:// format
 	*/
 
 	//start1 := int(time.Now()*1000)
 	/*
-	scitoken_contents := ""//getToken()
-	if scitoken_contents == getToken() { 
-		errors.New("Unable to find scitokens.use file")
-		return
-	}
+		scitoken_contents := ""//getToken()
+		if scitoken_contents == getToken() {
+			errors.New("Unable to find scitokens.use file")
+			return
+		}
 
-	if debug == true {
-		output_mode := "-v"
-	} else {
-		output_mode := "-s"
-	}
+		if debug == true {
+			output_mode := "-v"
+		} else {
+			output_mode := "-s"
+		}
 	*/
 	/* Commented out for now
 
 	//Check if the source file is zero-length
 	statinfo := os.Stat(source)
-	
+
 	if statinfo.Size() == 0 {  //CHECK After rsoolving compilation error Size method should be in OS or Syscall
-		speed_time = "--speed-time 5 "	
+		speed_time = "--speed-time 5 "
 	} else {
 		speed_time := ""
 	}
 	command := fmt.Sprintf("curl %s --connect-timeout 30 %s--speed-limit 1024 -X PUT --fail --upload-file %s -H \"User-Agent: %s\" -H \"Authorization: Bearer %s\" %s%s",output_mode, speed_time, source, user_agent, scitoken_contents, writeback_host, destination)
-	
+
 	val, present := os.LookupEnv("http_proxy")
 	if present { // replace with go in method
 		(os.Environ).Clearenv()
 	}
 	*/
-
-
-
-
 
 }
 
@@ -167,10 +159,10 @@ func getToken() string {
 	//scitoken_file := ""
 
 	/*
-	// command line
-	if token_location {
-		scitoken_file = token_location
-	}
+		// command line
+		if token_location {
+			scitoken_file = token_location
+		}
 	*/
 
 	//if 'TOKEN'
