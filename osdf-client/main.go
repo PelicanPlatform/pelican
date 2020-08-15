@@ -14,6 +14,10 @@ var global_redirector string = "http://redirector.osgstorage.org:8000"
 var cache_host string = "http://hcc-stash.unl.edu:8000/"
 var VERSION string = "5.6.2"
 
+var nearest_cache string
+var nearest_cache_list string
+
+
 func main() {
 
 	// Basic flag declarations are available for string,
