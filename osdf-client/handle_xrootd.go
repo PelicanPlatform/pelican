@@ -2,15 +2,18 @@ package main
 
 import (
 	"os/exec"
+	"syscall"
+
 	lumber "github.com/jcelliott/lumber"
 )
 
-func download_xrootd(nearest_cache string, nearest_cache_list, sourceFile string, destination string, payload map[string]int){
+func download_xrootd(nearest_cache string, nearest_cache_list, sourceFile string, destination string, payload map[string]int) bool {
 
 	// Download from the nearest cache, if that fails, fallback to the stash origin.
 
 	// Check for xrootd, return quickly if it's not available
-	if check_for_xrootd() == false{
+	xrootd_check := check_for_xrootd()
+	if xrootd_check == "error" {
 		return false
 	}
 
@@ -20,9 +23,10 @@ func download_xrootd(nearest_cache string, nearest_cache_list, sourceFile string
 	// 	nearest_cache = get_best_stashcache()
 	// }
 	// cache = nearest_cache; (TODO: nearest cache not implemented yet)
+	return false
 }
 
-func check_for_xrootd(){
+func check_for_xrootd() string {
 
 	// Check if xrootd is installed by checking if the xrdcp command returns a reasonable output
 	var check_command string = "xrdcp -V 2>&1"
@@ -36,32 +40,31 @@ func check_for_xrootd(){
 	command_object := exec.Command(check_command)
 	stdout, err := command_object.StdoutPipe()
 	if err != nil {
-		log.Fatal(err)
+		log.Debug(err.Error())
 	}
 	if err := command_object.Start(); err != nil {
-		log.Fatal(err)
+		log.Debug(err.Error())
 	}
 	if err := command_object.Wait(); err != nil {
-		log.Fatal(err)
+		log.Debug(err.Error())
 	}
 	// return command output(xrdcp version)
 
 	xrdcp_version, err := command_object.StdoutPipe()
 	if nil != err {
-		log.Fatalf("Error obtaining stdout: %s", err.Error())
+		log.Debug("Error obtaining stdout: %s", err.Error())
 	}
 
 	if err := command_object.Wait(); err != nil {
-        if exiterr, ok := err.(*exec.ExitError); ok {
-            // The program has exited with an exit code != 0
-        if status, ok := exiterr.Sys().(syscall.WaitStatus); ok {
-			log.Debug("xrdcp command returned exit code: %d", status.ExitStatus())
-       		return false
-            }
-        } else {
-            logging.Debug("xrdcp version: %s", xrdcp_version)
-       	 	return xrdcp_version
-        }
-    }
-}
+		if exiterr, ok := err.(*exec.ExitError); ok {
+			// The program has exited with an exit code != 0
+			if status, ok := exiterr.Sys().(syscall.WaitStatus); ok {
+				log.Debug("xrdcp command returned exit code: %d", status.ExitStatus())
+				return "error"
+			}
 
+		}
+	}
+	log.Debug("xrdcp version: %s", xrdcp_version)
+	return string(xrdcp_version)
+}
