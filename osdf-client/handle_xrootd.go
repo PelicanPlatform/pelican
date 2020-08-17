@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"os/exec"
 	"syscall"
 
@@ -66,5 +67,9 @@ func check_for_xrootd() string {
 		}
 	}
 	log.Debug("xrdcp version: %s", xrdcp_version)
-	return string(xrdcp_version)
+
+	buf := new(bytes.Buffer)
+	buf.ReadFrom(xrdcp_version.Body)
+	xrdcp_version_string := buf.String()
+	return xrdcp_version_string
 }
