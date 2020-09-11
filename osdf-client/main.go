@@ -7,6 +7,8 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"math/rand"
+	lumber "github.com/jcelliott/lumber"
 )
 
 // Redirector
@@ -16,7 +18,7 @@ var VERSION string = "5.6.2"
 
 var nearest_cache string
 var nearest_cache_list string
-
+var caches_json_location string
 
 func main() {
 
@@ -175,4 +177,50 @@ func getToken() string {
 
 	//if 'TOKEN'
 	return ""
+}
+
+func get_best_stashcache() {
+	var nearest_cache_list string
+
+	// Use the geo ip service on the WLCG Web Proxy Auto Discovery machines
+	geo_ip_sites := [...]string{"wlcg-wpad.cern.ch", "wlcg-wpad.fnal.gov"}
+
+	 
+    //# Headers for the HTTP request
+	
+	req.Header.set("Cache-control", "max-age=0")
+	req.Header.set("User-Agent", "user_agent")
+	
+	// randomize the geo ip sites
+	rand.Seed(time.Now().UnixNano())
+	rand.Shuffle(len(geo_ip_sites), func(i, j int)){
+		geo_ip_sites[i], geo_ip_sites[j] = geo_ip_sites[j], geo_ip_sites[i]
+	}
+
+	//api_text := ""
+
+	//caches_list := []
+
+	
+	// Check if the user provided a caches json file location
+	if caches_json_location != nil {
+		if _, err := os.Stat(caches_json_location); os.IsNotExist(err) {
+			// path does not exist
+			log := lumber.NewConsoleLogger(lumber.WARN)
+			log.Error(caches_json_location + " does not exist")
+			return nil
+		  }
+
+		  //Use geo ip api on caches in provided json file
+		  caches_list := get_json_caches(caches_json_location)
+
+		  
+	}
+
+	
+
+}
+
+func get_json_caches(caches_json_location){
+	
 }

@@ -8,6 +8,8 @@ import (
 	lumber "github.com/jcelliott/lumber"
 )
 
+
+
 func download_xrootd(nearest_cache string, nearest_cache_list, sourceFile string, destination string, payload map[string]int) bool {
 
 	// Download from the nearest cache, if that fails, fallback to the stash origin.
@@ -19,11 +21,15 @@ func download_xrootd(nearest_cache string, nearest_cache_list, sourceFile string
 	}
 
 	// If the cache is not specified by the command line, then look for the closest
+	
 
 	// if nearest_cache.Size() == 0{
 	// 	nearest_cache = get_best_stashcache()
 	// }
+
 	// cache = nearest_cache; (TODO: nearest cache not implemented yet)
+
+
 	return false
 }
 
@@ -49,7 +55,6 @@ func check_for_xrootd() string {
 	if err := command_object.Wait(); err != nil {
 		log.Debug(err.Error())
 	}
-	// return command output(xrdcp version)
 
 	xrdcp_version, err := command_object.StdoutPipe()
 	if nil != err {
@@ -66,10 +71,12 @@ func check_for_xrootd() string {
 
 		}
 	}
-	log.Debug("xrdcp version: %s", xrdcp_version)
 
 	buf := new(bytes.Buffer)
-	buf.ReadFrom(xrdcp_version.Body)
+	buf.ReadFrom(xrdcp_version)
 	xrdcp_version_string := buf.String()
+	log.Debug("xrdcp version: %s", xrdcp_version_string)
+	//log.Debug("xrdcp version: %s", stdout)
+
 	return xrdcp_version_string
 }
