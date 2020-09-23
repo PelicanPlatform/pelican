@@ -6,12 +6,10 @@ import (
 	"fmt"
 	"net/url"
 	"net/http"
-	"io"
 	"os"
 	"path"
 	"path/filepath"
 	"math/rand"
-	"strconv"
 	"strings"
 	lumber "github.com/jcelliott/lumber"
 )
@@ -200,9 +198,10 @@ func get_best_stashcache() {
 	rand.Seed(time.Now().UnixNano())
 	rand.Shuffle(len(geo_ip_sites), func(i, j int){
 		geo_ip_sites[i], geo_ip_sites[j] = geo_ip_sites[j], geo_ip_sites[i]
-	}
+	})
 
-	var api_text string := ""
+
+	var api_text string = ""
 
 	//caches_list := []
 
@@ -213,6 +212,7 @@ func get_best_stashcache() {
 			// path does not exist
 			log := lumber.NewConsoleLogger(lumber.WARN)
 			log.Error(caches_json_location + " does not exist")
+			
 			return nil
 		  }
 
@@ -221,7 +221,7 @@ func get_best_stashcache() {
 		  var caches_string string = ""
 		
 		  for _,cache := range caches_list {
-			  parsed_url, err =: url.Parse(s)
+			  parsed_url, err := url.Parse(s)
 			  if err != nil {
 				  log.Error("Could not parse URL")
 			  }
@@ -241,15 +241,16 @@ func get_best_stashcache() {
 		}
 	}
 
-	responselines_b := []
+	var responselines_b []string
 
 	type header struct {
 		Host string		
 	}
 
-	i int := 0
+	var i int = 0
 
-	for len(responselines_b) = 0 ; i < len(geo_ip_sites) {
+	for len(responselines_b) == 0 ; i < len(geo_ip_sites); i++{
+
 		cur_site := geo_ip_sites[i]
 		var headers header
 		headers.Host = cur_site
@@ -260,7 +261,7 @@ func get_best_stashcache() {
 			log.Debug("Querying"+ final_url)
 
 			// Make the request
-			req := requests.get(final_url, headers=headers)
+			req := requests.get(final_url, headers==headers)
 			resp, err := http.Get(final_url)
 			if err != nil {
 				log.Error("Could not open URL")
@@ -277,7 +278,7 @@ func get_best_stashcache() {
 				defer resp.Body.Close()
 			} 
 		}
-	i+=1
+	
 	}
 	order_str := ""
 	
@@ -314,7 +315,7 @@ func get_best_stashcache() {
 
 		minsite = caches_list[int(ordered_list[0])-1]
 
-		nearest_cache := []
+		var nearest_cache []string 
 
 		for _,ordered_index := range ordered_list {
 			nearest_cache_list = append(caches_list[int(ordered_index)-1])	
@@ -352,12 +353,12 @@ func get_json_caches(caches_json_location) []string {
 	usable_caches := []string{}
 
 	for _,cache := range caches_list {
-		if caches_list.status = 0 {
+		if caches_list.status == 0 {
 			usable_caches = append(usable_caches, caches_list.name)
 		}	
 	}
 
-	if len(usable_caches) = 0 {
+	if len(usable_caches) == 0 {
 		log.Error("No cache names found in %s without zero status", caches_json_location)
 	}
 
@@ -366,22 +367,23 @@ func get_json_caches(caches_json_location) []string {
 }
 
 func get_ips(name) {
-	var ipv4s := []
-	var ipv6s := []
-
+	var ipv4s []string 
+	
+	var ipv6s []string 
+	
 	log := lumber.NewConsoleLogger(lumber.WARN)
 
 	info, err := net.LookupHost(name)
 	if err != nil {
 		log.Error("Unable to look up %s", name)
-		return []
+		return []string
 	}
 
 	for _,tuple := range info {
 	
-		if tuple[0] = syscall.AF_INET {
+		if tuple[0] == syscall.AF_INET {
 			ipv4s = append(ipv4s, tuple[4][0])
-		} else if tuple[0] = syscall.AF_INET6 {
+		} else if tuple[0] == syscall.AF_INET6 {
 			ipv6s = append(ipv4s, tuple[4][0])
 		}	
 	}
