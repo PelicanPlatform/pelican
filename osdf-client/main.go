@@ -1,13 +1,18 @@
 package main
 
 import (
+	"syscall"
 	"flag"
 	"fmt"
 	"net/url"
+	"net/http"
+	"io"
 	"os"
 	"path"
 	"path/filepath"
 	"math/rand"
+	"strconv"
+	"strings"
 	lumber "github.com/jcelliott/lumber"
 )
 
@@ -193,11 +198,11 @@ func get_best_stashcache() {
 	
 	// randomize the geo ip sites
 	rand.Seed(time.Now().UnixNano())
-	rand.Shuffle(len(geo_ip_sites), func(i, j int)){
+	rand.Shuffle(len(geo_ip_sites), func(i, j int){
 		geo_ip_sites[i], geo_ip_sites[j] = geo_ip_sites[j], geo_ip_sites[i]
 	}
 
-	//api_text := ""
+	var api_text string := ""
 
 	//caches_list := []
 
@@ -213,14 +218,180 @@ func get_best_stashcache() {
 
 		  //Use geo ip api on caches in provided json file
 		  caches_list := get_json_caches(caches_json_location)
+		  var caches_string string = ""
+		
+		  for _,cache := range caches_list {
+			  parsed_url, err =: url.Parse(s)
+			  if err != nil {
+				  log.Error("Could not parse URL")
+			  }
+			  
+			  caches_string = caches_string + parsed_url.hostname
 
-		  
+			  // Remove the first comma
+			  caches_string = string([]rune(caches_string)[1:])
+			  api_text = "api/v1.0/geo/stashcp/" + caches_string
+		  }
+	} else {
+		//Use Stashservers.dat api
+
+		api_text = "stashservers.dat"
+		if cache_list_name != nil {
+			api_text = api_text + "?list=" + cache_list_name
+		}
 	}
 
-	
+	responselines_b := []
 
+	type header struct {
+		Host string		
+	}
+
+	i int := 0
+
+	for len(responselines_b) = 0 ; i < len(geo_ip_sites) {
+		cur_site := geo_ip_sites[i]
+		var headers header
+		headers.Host = cur_site
+		log.Debug("Trying server site of %s", cur_site)
+		
+		for _, ip := range get_ips(cur_site) {
+			final_url := "http://" + ip + api_text
+			log.Debug("Querying"+ final_url)
+
+			// Make the request
+			req := requests.get(final_url, headers=headers)
+			resp, err := http.Get(final_url)
+			if err != nil {
+				log.Error("Could not open URL")
+			}
+
+			if resp.StatusCode == 200 {
+				log.Debug("Got OK code 200 from %s", cur_site)
+				responsetext_b := resp
+				responsetext_b, err := ioutil.ReadAll(resp.Body)
+				if err != nil {
+					log.Error("Could not aquire http response text")
+				}
+				strings.Split(responsetext_b,"/n")
+				defer resp.Body.Close()
+			} 
+		}
+	i+=1
+	}
+	order_str := ""
+	
+	if len(responselines_b) > 0 {
+		order_str = string(responselines_b[0])
+	} 
+
+	if order_str == "" {
+		if len(caches_list) == 0 {
+			log.Error("unable to get list of caches")
+			return nil
+		}
+		//Unable to find a geo_ip server to user, return random choice from caches
+		nearest_cache_list = cache_list
+		rand.Shuffle(len(nearest_cache_list), func(i, j string) { nearest_cache_list[i], nearest_cache_list[j] = nearest_cache_list[j], nearest_cache_list[i] })
+		minsite := nearest_cache_list[0]
+		log.Debug("Unable to use Geoip to find closest cache!  Returning random cache %s", minsite)
+		log.Debug("Randomized list of nearest caches: %s", str(nearest_cache_list))
+		return minsite
+	} else{
+		// The order string should be something like: 3,1,2
+		
+		ordered_list := strings.Trim(order_str)
+		strings.Split(ordered_list, ",")
+
+		if len(caches_list) == 0 {
+			//Used the stashservers.dat api
+			caches_list = get_stashservers_caches(responselines_b)
+
+			if caches_list == nil {
+				return nil
+			}
+		}
+
+		minsite = caches_list[int(ordered_list[0])-1]
+
+		nearest_cache := []
+
+		for _,ordered_index := range ordered_list {
+			nearest_cache_list = append(caches_list[int(ordered_index)-1])	
+		}
+
+        log.Debug("Returning closest cache: %s", minsite)
+        log.Debug("Ordered list of nearest caches: %s", string(nearest_cache_list))
+        return minsite
+	}
 }
 
-func get_json_caches(caches_json_location){
+
+// Return list of cache URLS
+func get_json_caches(caches_json_location) []string {
 	
+	log := lumber.NewConsoleLogger(lumber.WARN)
+
+	type cachesListMap struct {
+		status string
+		name  int
+	}
+	
+	// myMap := map[int][]cachesListMap{}
+			
+	f, _ := ioutil.ReadFile(filename)
+	var caches_list cachesListMap
+	err := json.Unmarshal(f, &caches_list)
+
+	if err != nil{		
+		log.Error("No cache names found in %s without zero status", caches_json_location)
+	}
+	
+	log.Debug("Loaded caches list from %s", caches_json_location)
+
+	usable_caches := []string{}
+
+	for _,cache := range caches_list {
+		if caches_list.status = 0 {
+			usable_caches = append(usable_caches, caches_list.name)
+		}	
+	}
+
+	if len(usable_caches) = 0 {
+		log.Error("No cache names found in %s without zero status", caches_json_location)
+	}
+
+	return usable_caches
+		
 }
+
+func get_ips(name) {
+	var ipv4s := []
+	var ipv6s := []
+
+	log := lumber.NewConsoleLogger(lumber.WARN)
+
+	info, err := net.LookupHost(name)
+	if err != nil {
+		log.Error("Unable to look up %s", name)
+		return []
+	}
+
+	for _,tuple := range info {
+	
+		if tuple[0] = syscall.AF_INET {
+			ipv4s = append(ipv4s, tuple[4][0])
+		} else if tuple[0] = syscall.AF_INET6 {
+			ipv6s = append(ipv4s, tuple[4][0])
+		}	
+	}
+	
+	//Randomize the order of each
+	rand.Shuffle(len(ipv4s), func(i, j string) { ipv4s[i], ipv4s[j] = ipv4s[j], ipv4s[i] })
+	rand.Shuffle(len(ipv6s), func(i, j string) { ipv6s[i], ipv6s[j] = ipv6s[j], ipv6s[i] })
+
+	// Always prefer IPv4
+	return ipv4s + ipv6s
+
+	}
+
