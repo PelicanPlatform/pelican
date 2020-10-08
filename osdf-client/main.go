@@ -361,20 +361,21 @@ func get_stashservers_caches(responselines_b){
         which would have caused it to have been split into multiple
 	    response "lines".
 	**/
+	log := lumber.NewConsoleLogger(lumber.WARN)
 
 	if len(responselines_b) < 8 {
-		log := lumber.NewConsoleLogger(lumber.WARN)
+		
 		log.Error("stashservers response too short, less than 8 lines")
 		return nil
 	}
 
 	 hashname_b := responselines_b[4][-5:]
 
-	if hashname_b != b"-sha1":{//key?
+	if hashname_b != "-sha1" {
 		log.Error("stashservers response does not have sha1 hash: %s", string(hashname_b))
 		return nil
 	}
-
+ 
 //???	hashedtext_b = b'\n'.join(responselines_b[1:5]) + b'\n'
 h := sha1.New()
 hashedtext_b := hex.Dump(h)
@@ -395,38 +396,83 @@ if destStat, err := os.Stat("/usr/bin/openssl"); os.IsNotExist(err) {
     // investigated.  Usually openssl is present.
 	log.Debug("openssl not installed, skipping signature check")	
 } else {
-	sig :=b'/n'.join(responselines_b[7:])	
+	sig :="/n".join(responselines_b[7])	
 
 	// Look for the OSG cvmfs public key to verify signature
-	prefix := os.Getenv("OSG_LOCATION", /)
+	prefix := os.Getenv("OSG_LOCATION", "/")
 	osgpub := "opensciencegrid.org.pub"
 	pubkey_files := []string{"/etc/cvmfs/keys/opensciencegrid.org/" + osgpub, path.Join(prefix, "etc/stashcache", osgpub), 
 	path.Join(prefix, "usr/share/stashcache", osgpub)}
 
-	if resource_filename, err {
-
-	}
-	if err != nil {
-		log.Debug("Unable to retrieve caches.json using resource string, trying other locations")
-	}
-
-	for _,pubkey_file := range pubkey_files {
+	if resource_filename != nil{
+			
+	for _, pubkey_file := range pubkey_files {
 		
 		if _, err := os.Stat(pubkey_file); err == nil {
 			break
-		  } 
-
-	} else{
-		log.Error("Unable to find osg cvmfs key in %r", pubkey_files)
+		}else{
+			log.Error("Unable to find osg cvmfs key in %r", pubkey_files)
 			return nil
+		} 
 	}
 
+	cmd := "/usr/bin/openssl rsautl -verify -pubin -inkey " + pubkey_file
+	log.Debug("Running %s", cmd)
+
+	command_object := exec.Command(cmd)
+	stdout, err := command_object.StdoutPipe()
+
+	decryptedhash := string(stdout)
+
+	if hash_str != decryptedhash{
+		log.Debug("stashservers hash %s does not match decrypted signature %s", hash_str, decryptedhash)
+		log.Error("stashservers signature does not verify")
+		return nil
+	}
+
+	log.Debug("Signature Matched")
+	
+	log.Debug("Cache list: %s", responselines_b[4]).split(';')
+
+	if print_cache_list_names {
+		names := ""
+		//Skip hash at the end
+
+		//?????
+		for _, l := range myList {
+		names = names+ "," + strings.Split(l,"=")
+
+		//Skip leading commas
+		fmt.Printf(names)
+		}
+
+		if caches_list_name != nil {
+			caches = strings.Split(lists,"=")		
+		}else {
+			for _, l := range lists {
+				n := len(caches_list_name)+1
+				
+				if(l == cache_list_name + "="){
+					caches = l
+				}
+			}
+		}
+
+		caches_list = strings.Split(caches,",")
+		for _, i := range len(caches_list) {
+			caches_list[i] = "root://" + caches_list[i]
+		}
+
+		return caches_list
+		
+	} else {
+		log.Debug("Unable to retrieve caches.json using resource string, trying other locations")
+	}
 
 }
 
 
 }
-
 
 // Return list of cache URLS
 func get_json_caches(caches_json_location) []string {
