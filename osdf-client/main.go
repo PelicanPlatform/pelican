@@ -1,18 +1,23 @@
 package main
 
 import (
-	"syscall"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io/ioutil"
+	"net"
 	"net/url"
-	"net/http"
+	"syscall"
+
+	//"net/http"
+	"math/rand"
 	"os"
 	"path"
 	"path/filepath"
-	"math/rand"
-	"crypto/sha1"
-	"encoding/hex"
-	"strings"
+
+	// "crypto/sha1"
+	// "encoding/hex"
+	// "strings"
 	lumber "github.com/jcelliott/lumber"
 )
 
@@ -23,6 +28,7 @@ var VERSION string = "5.6.2"
 
 var nearest_cache string
 var nearest_cache_list string
+var caches_list_name string
 var caches_json_location string
 
 func main() {
@@ -184,324 +190,34 @@ func getToken() string {
 	return ""
 }
 
-func get_best_stashcache() {
-	var nearest_cache_list string
-
-	// Use the geo ip service on the WLCG Web Proxy Auto Discovery machines
-	geo_ip_sites := [...]string{"wlcg-wpad.cern.ch", "wlcg-wpad.fnal.gov"}
-
-	 
-    // Headers for the HTTP request
-	
-	req.Header.set("Cache-control", "max-age=0")
-	req.Header.set("User-Agent", "user_agent")
-	
-	// randomize the geo ip sites
-	rand.Seed(time.Now().UnixNano())
-	rand.Shuffle(len(geo_ip_sites), func(i, j int){
-		geo_ip_sites[i], geo_ip_sites[j] = geo_ip_sites[j], geo_ip_sites[i]
-	})
-
-
-	var api_text string = ""
-
-	//caches_list := []
-
-	
-	// Check if the user provided a caches json file location
-	if caches_json_location != nil {
-		if _, err := os.Stat(caches_json_location); os.IsNotExist(err) {
-			// path does not exist
-			log := lumber.NewConsoleLogger(lumber.WARN)
-			log.Error(caches_json_location + " does not exist")
-			
-			return nil
-		  }
-
-		  //Use geo ip api on caches in provided json file
-		  caches_list := get_json_caches(caches_json_location)
-		  var caches_string string = ""
-		
-		  for _,cache := range caches_list {
-			  parsed_url, err := url.Parse(s)
-			  if err != nil {
-				  log.Error("Could not parse URL")
-			  }
-			  
-			  caches_string = caches_string + parsed_url.hostname
-
-			  // Remove the first comma
-			  caches_string = string([]rune(caches_string)[1:])
-			  api_text = "api/v1.0/geo/stashcp/" + caches_string
-		  }
-	} else {
-		//Use Stashservers.dat api
-
-		api_text = "stashservers.dat"
-		if cache_list_name != nil {
-			api_text = api_text + "?list=" + cache_list_name
-		}
-	}
-
-	var responselines_b []string
-
-	type header struct {
-		Host string		
-	}
-
-	var i int = 0
-
-	for len(responselines_b) == 0 ; i < len(geo_ip_sites); i++{
-
-		cur_site := geo_ip_sites[i]
-		var headers header
-		headers.Host = cur_site
-		log.Debug("Trying server site of %s", cur_site)
-		
-		for _, ip := range get_ips(cur_site) {
-			final_url := "http://" + ip + api_text
-			log.Debug("Querying"+ final_url)
-
-			// Make the request
-			req := requests.get(final_url, headers==headers)
-			resp, err := http.Get(final_url)
-			if err != nil {
-				log.Error("Could not open URL")
-			}
-
-			if resp.StatusCode == 200 {
-				log.Debug("Got OK code 200 from %s", cur_site)
-				responsetext_b := resp
-				responsetext_b, err := ioutil.ReadAll(resp.Body)
-				if err != nil {
-					log.Error("Could not aquire http response text")
-				}
-				strings.Split(responsetext_b,"/n")
-				defer resp.Body.Close()
-			} 
-		}
-	
-	}
-	order_str := ""
-	
-	if len(responselines_b) > 0 {
-		order_str = string(responselines_b[0])
-	} 
-
-	if order_str == "" {
-		if len(caches_list) == 0 {
-			log.Error("unable to get list of caches")
-			return nil
-		}
-		//Unable to find a geo_ip server to user, return random choice from caches
-		nearest_cache_list = cache_list
-		rand.Shuffle(len(nearest_cache_list), func(i, j string) { nearest_cache_list[i], nearest_cache_list[j] = nearest_cache_list[j], nearest_cache_list[i] })
-		minsite := nearest_cache_list[0]
-		log.Debug("Unable to use Geoip to find closest cache!  Returning random cache %s", minsite)
-		log.Debug("Randomized list of nearest caches: %s", str(nearest_cache_list))
-		return minsite
-	} else{
-		// The order string should be something like: 3,1,2
-		
-		ordered_list := strings.Trim(order_str)
-		strings.Split(ordered_list, ",")
-
-		if len(caches_list) == 0 {
-			//Used the stashservers.dat api
-			caches_list = get_stashservers_caches(responselines_b)
-
-			if caches_list == nil {
-				return nil
-			}
-		}
-
-		minsite = caches_list[int(ordered_list[0])-1]
-
-		var nearest_cache []string 
-
-		for _,ordered_index := range ordered_list {
-			nearest_cache_list = append(caches_list[int(ordered_index)-1])	
-		}
-
-        log.Debug("Returning closest cache: %s", minsite)
-        log.Debug("Ordered list of nearest caches: %s", string(nearest_cache_list))
-        return minsite
-	}
-}
-
-//
-func get_stashservers_caches(responselines_b){
-
-	/**
-	 After the geo order of the selected server list on line zero,
-      the rest of the response is in .cvmfswhitelist format.
-     This is done to avoid using https for every request on the
-      wlcg-wpad servers and takes advantage of conveniently
-      existing infrastructure.
-     The format contains the following lines:
-     1. Creation date stamp, e.g. 20200414170005.  For debugging
-        only.
-     2. Expiration date stamp, e.g. E20200421170005.  cvmfs clients
-        check this to avoid replay attacks, but for this api that
-        is not much of a risk so it is ignored.
-     3. "Repository" name, e.g. Nstash-servers.  cvmfs clients
-        also check this but it is not important here.
-     4. With cvmfs the 4th line has a repository fingerprint, but
-        for this api it instead contains a semi-colon separated list
-        of named server lists.  Each server list is of the form
-        name=servers where servers is comma-separated.  Ends with
-        "hash=-sha1" because cvmfs_server expects the hash name
-        to be there.  e.g.
-        xroot=stashcache.t2.ucsd.edu,sg-gftp.pace.gatech.edu;xroots=xrootd-local.unl.edu,stashcache.t2.ucsd.edu;hash=-sha1
-     5. A two-dash separator, i.e "--"
-     6. The sha1 hash of lines 1 through 4.
-     7. The signature, i.e. an RSA encryption of the hash that can
-        be decrypted by the OSG cvmfs public key.  Contains binary
-        information so it may contain a variable number of newlines
-        which would have caused it to have been split into multiple
-	    response "lines".
-	**/
-	log := lumber.NewConsoleLogger(lumber.WARN)
-
-	if len(responselines_b) < 8 {
-		
-		log.Error("stashservers response too short, less than 8 lines")
-		return nil
-	}
-
-	 hashname_b := responselines_b[4][-5:]
-
-	if hashname_b != "-sha1" {
-		log.Error("stashservers response does not have sha1 hash: %s", string(hashname_b))
-		return nil
-	}
- 
-//???	hashedtext_b = b'\n'.join(responselines_b[1:5]) + b'\n'
-h := sha1.New()
-hashedtext_b := hex.Dump(h)
-
-if string(responselines_b[6]) != hash_str{
-	log.Debug("stashservers hash %s does not match expected hash %s", string(responselines_b[6]), hash_str)
-	log.Debug("hashed text:\n%s", string(hashedtext_b))
-	log.Error("stashservers response hash does not match expected hash")
-	return nil
-}
-
-// Call out to /usr/bin/openssl if present, in order to avoid
-// python dependency on a crypto package.
-
-if destStat, err := os.Stat("/usr/bin/openssl"); os.IsNotExist(err) {
-	// The signature check isn't critical to be done everywhere;
-    // any tampering will likely to be caught somewhere and
-    // investigated.  Usually openssl is present.
-	log.Debug("openssl not installed, skipping signature check")	
-} else {
-	sig :="/n".join(responselines_b[7])	
-
-	// Look for the OSG cvmfs public key to verify signature
-	prefix := os.Getenv("OSG_LOCATION", "/")
-	osgpub := "opensciencegrid.org.pub"
-	pubkey_files := []string{"/etc/cvmfs/keys/opensciencegrid.org/" + osgpub, path.Join(prefix, "etc/stashcache", osgpub), 
-	path.Join(prefix, "usr/share/stashcache", osgpub)}
-
-	if resource_filename != nil{
-			
-	for _, pubkey_file := range pubkey_files {
-		
-		if _, err := os.Stat(pubkey_file); err == nil {
-			break
-		}else{
-			log.Error("Unable to find osg cvmfs key in %r", pubkey_files)
-			return nil
-		} 
-	}
-
-	cmd := "/usr/bin/openssl rsautl -verify -pubin -inkey " + pubkey_file
-	log.Debug("Running %s", cmd)
-
-	command_object := exec.Command(cmd)
-	stdout, err := command_object.StdoutPipe()
-
-	decryptedhash := string(stdout)
-
-	if hash_str != decryptedhash{
-		log.Debug("stashservers hash %s does not match decrypted signature %s", hash_str, decryptedhash)
-		log.Error("stashservers signature does not verify")
-		return nil
-	}
-
-	log.Debug("Signature Matched")
-	
-	log.Debug("Cache list: %s", responselines_b[4]).split(';')
-
-	if print_cache_list_names {
-		names := ""
-		//Skip hash at the end
-
-		//?????
-		for _, l := range myList {
-		names = names+ "," + strings.Split(l,"=")
-
-		//Skip leading commas
-		fmt.Printf(names)
-		}
-
-		if caches_list_name != nil {
-			caches = strings.Split(lists,"=")		
-		}else {
-			for _, l := range lists {
-				n := len(caches_list_name)+1
-				
-				if(l == cache_list_name + "="){
-					caches = l
-				}
-			}
-		}
-
-		caches_list = strings.Split(caches,",")
-		for _, i := range len(caches_list) {
-			caches_list[i] = "root://" + caches_list[i]
-		}
-
-		return caches_list
-		
-	} else {
-		log.Debug("Unable to retrieve caches.json using resource string, trying other locations")
-	}
-
-}
-
-
-}
-
 // Return list of cache URLS
-func get_json_caches(caches_json_location) []string {
-	
+func get_json_caches(caches_json_location string) []string {
+
 	log := lumber.NewConsoleLogger(lumber.WARN)
 
 	type cachesListMap struct {
 		status string
-		name  int
+		name   int
 	}
-	
+
 	// myMap := map[int][]cachesListMap{}
-			
+
 	f, _ := ioutil.ReadFile(filename)
 	var caches_list cachesListMap
 	err := json.Unmarshal(f, &caches_list)
 
-	if err != nil{		
+	if err != nil {
 		log.Error("No cache names found in %s without zero status", caches_json_location)
 	}
-	
+
 	log.Debug("Loaded caches list from %s", caches_json_location)
 
 	usable_caches := []string{}
 
-	for _,cache := range caches_list {
+	for _, cache := range caches_list {
 		if caches_list.status == 0 {
 			usable_caches = append(usable_caches, caches_list.name)
-		}	
+		}
 	}
 
 	if len(usable_caches) == 0 {
@@ -509,31 +225,33 @@ func get_json_caches(caches_json_location) []string {
 	}
 
 	return usable_caches
-		
+
 }
 
-func get_ips(name) {
-	var ipv4s []string 
-	
-	var ipv6s []string 
-	
+func get_ips(name string) {
+	var ipv4s []string
+
+	var ipv6s []string
+
 	log := lumber.NewConsoleLogger(lumber.WARN)
 
 	info, err := net.LookupHost(name)
 	if err != nil {
 		log.Error("Unable to look up %s", name)
-		return []string
+
+		var empty []string
+		return empty
 	}
 
-	for _,tuple := range info {
-	
+	for _, tuple := range info {
+
 		if tuple[0] == syscall.AF_INET {
 			ipv4s = append(ipv4s, tuple[4][0])
 		} else if tuple[0] == syscall.AF_INET6 {
 			ipv6s = append(ipv4s, tuple[4][0])
-		}	
+		}
 	}
-	
+
 	//Randomize the order of each
 	rand.Shuffle(len(ipv4s), func(i, j string) { ipv4s[i], ipv4s[j] = ipv4s[j], ipv4s[i] })
 	rand.Shuffle(len(ipv6s), func(i, j string) { ipv6s[i], ipv6s[j] = ipv6s[j], ipv6s[i] })
@@ -541,5 +259,4 @@ func get_ips(name) {
 	// Always prefer IPv4
 	return ipv4s + ipv6s
 
-	}
-
+}
