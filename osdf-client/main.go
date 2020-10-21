@@ -14,7 +14,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-
+	
 	// "crypto/sha1"
 	// "encoding/hex"
 	// "strings"
@@ -27,9 +27,9 @@ var cache_host string = "http://hcc-stash.unl.edu:8000/"
 var VERSION string = "5.6.2"
 
 var nearest_cache string
-var nearest_cache_list string
-var caches_list_name string
-var caches_json_location string
+var nearest_cache_list []string
+var caches_list_name string = ""
+var caches_json_location string = ""
 
 func main() {
 
@@ -174,20 +174,65 @@ func doWriteBack(source string, destination string, debug bool) /*unsure of retu
 }
 
 func getToken() string {
+	log := lumber.NewConsoleLogger(lumber.WARN)
 	// Get the token / scitoken from the environment in order to read/write
 
 	// Get the scitoken content
-	//scitoken_file := ""
+	scitoken_file := ""
 
-	/*
-		// command line
-		if token_location {
-			scitoken_file = token_location
+	// command line
+	if token_location != nil {
+			scitoken_file = token_location	
+	}
+
+	//Environ
+	// if "TOKEN" in os.environ:
+		//scitoken_file = os.environ['Token']
+	
+	// Backwards compatibility for getting scitokens
+
+	// if not scitoken_file and "_CONDOR_CREDS" in os.environ:
+		// Token wasn't specified on the command line, try the defaue scitoken
+	
+	if _, err := os.Stat(filepath.Join(/*os.environ["_CONDOR_CREDS"]*/, "scitokens.use")); os.IsNotExist(err) {
+		scitoken_file = filepath.Join(/*os.environ["_CONDOR_CREDS"]*/,"scitokens.use" )
+	}else if _, err := os.Stat(".condor_creds/scitokens.use")); os.IsNotExist(err) {
+		scitoken_file = filepath.Abs(".condor_creds/scitokens.use")
+	
+	//if the scitoken file is relative, then assume it's relative to the _CONDOR_CREDS directory
+	if !path.IsAbs(scitoken_file) ; /* "_CONDOR_CREDS" in os.environ */ {
+		filepath.Join(/*os.environ['_CONDOR_CREDS']*/, scitoken_file)
+	}
+
+	//Read in the JSON
+	log.Debug("Opening file: " + scitoken_file)
+    f, _ := ioutil.ReadFile(filename)
+	var caches_list cachesListMap
+	err := json.Unmarshal(f, &caches_list)
+
+		if err != nil {	
+			log.Debug("JSON failed. Falling back to old style scitoken parsing")
+			scitoken_file, err = file.Seek(0,0)
+			if err != nil {
+				log.Fatal(err)
+			 }
+
 		}
-	*/
+	}
+	return scitoken_file
+}
 
-	//if 'TOKEN'
-	return ""
+func doStashCPSingle(sourceFile,destination,methods){
+
+	// Parse the source and destination with URL parse
+	
+	source_url := url.Parse(sourceFile)
+	dest_url := url.Parse(destination)
+
+	var understodSchemes string[] = ["stash","file",""]
+
+	if source_url.scheme
+	
 }
 
 // Return list of cache URLS
@@ -228,7 +273,7 @@ func get_json_caches(caches_json_location string) []string {
 
 }
 
-func get_ips(name string) {
+func get_ips(name string) []string {
 	var ipv4s []string
 
 	var ipv6s []string
