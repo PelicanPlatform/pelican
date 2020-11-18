@@ -14,6 +14,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"time"
 	
 	// "crypto/sha1"
 	// "encoding/hex"
@@ -91,6 +92,11 @@ func main() {
 	payload := payloadStruct{tries: 0, cache: "", host: ""}
 
 	download_cvmfs(srcURL.String(), destFinal, payload)
+
+	// Parse the argument --methods (check for sure if that is argument in stashcp)
+	// the argument should be in the form of "cvmfs,http,xrootd", watch out for spaces between commas!
+	// Split by comma
+	methods := strings.split(args.methods, ",")
 
 	//fmt.Printf("Trying URL: %v\n", u.String())
 	//redir := GetRedirect(u.String())
@@ -173,39 +179,50 @@ func doWriteBack(source string, destination string, debug bool) /*unsure of retu
 
 }
 
-func getToken() string {
+func getToken() string, error {
 	log := lumber.NewConsoleLogger(lumber.WARN)
 	// Get the token / scitoken from the environment in order to read/write
 
 	// Get the scitoken content
 	scitoken_file := ""
 
-	// command line
-	if token_location != nil {
-			scitoken_file = token_location	
-	}
+	/* 
+		Search for the location of the authentiction token.  It can be set explicitly on the command line (TODO),
+		with the environment variable "TOKEN", or it can be searched in the standard HTCondor directory pointed 
+		to by the environment variable "_CONDOR_CREDS".
+	*/
 
-	//Environ
-	// if "TOKEN" in os.environ:
-		//scitoken_file = os.environ['Token']
-	
-	// Backwards compatibility for getting scitokens
 
-	// if not scitoken_file and "_CONDOR_CREDS" in os.environ:
-		// Token wasn't specified on the command line, try the defaue scitoken
-	
-	if _, err := os.Stat(filepath.Join(/*os.environ["_CONDOR_CREDS"]*/, "scitokens.use")); os.IsNotExist(err) {
-		scitoken_file = filepath.Join(/*os.environ["_CONDOR_CREDS"]*/,"scitokens.use" )
-	}else if _, err := os.Stat(".condor_creds/scitokens.use")); os.IsNotExist(err) {
-		scitoken_file = filepath.Abs(".condor_creds/scitokens.use")
-	
-	//if the scitoken file is relative, then assume it's relative to the _CONDOR_CREDS directory
-	if !path.IsAbs(scitoken_file) ; /* "_CONDOR_CREDS" in os.environ */ {
-		filepath.Join(/*os.environ['_CONDOR_CREDS']*/, scitoken_file)
+	if token_location == "" {
+		// https://golang.org/pkg/os/#LookupEnv
+		tokenFile, isTokenSet := os.LookupEnv("TOKEN")
+		credsDir, isCondorCredsSet := os.LookupEnv("_CONDOR_CREDS")
+		
+		// Backwards compatibility for getting scitokens
+		// If TOKEN is not set in environment, and _CONDOR_CREDS is set, then...
+		if isTokenSet {
+			token_location = tokenFile
+		} 
+		else if !isTokenSet && isCondorCredsSet {
+			// Token wasn't specified on the command line or environment, try the default scitoken
+			if _, err := os.Stat(filepath.Join(credsDir, "scitokens.use")); os.IsNotExist(err) {
+				token_location = filepath.Join(credsDir,"scitokens.use" )
+			} else if _, err := os.Stat(".condor_creds/scitokens.use")); os.IsNotExist(err) {
+				token_location = filepath.Abs(".condor_creds/scitokens.use")
+			}
+		}
+		else {
+			// Print out, can't find token!  Print out error and exit with non-zero exit status
+			// TODO: Better error message
+			return "", new Error("Failed to find token...")
+		}
+
 	}
+	}
+	
 
 	//Read in the JSON
-	log.Debug("Opening file: " + scitoken_file)
+	log.Debug("Opening file: " + token_location)
     f, _ := ioutil.ReadFile(filename)
 	var caches_list cachesListMap
 	err := json.Unmarshal(f, &caches_list)
@@ -222,7 +239,7 @@ func getToken() string {
 	return scitoken_file
 }
 
-func doStashCPSingle(sourceFile,destination,methods){
+func doStashCPSingle(sourceFile string, destination string, methods []string){
 
 	// Parse the source and destination with URL parse
 	
@@ -230,9 +247,163 @@ func doStashCPSingle(sourceFile,destination,methods){
 	dest_url := url.Parse(destination)
 
 	var understodSchemes string[] = ["stash","file",""]
-
-	if source_url.scheme
 	
+
+	_, foundSource = Find(understoodSchemes, source_url.Scheme)
+	if !found {
+		logging.error("Do not understand scheme: %s", source_url.scheme)
+		return 1
+	}
+
+	_, foundDest = Find(understoodSchemes, source_url.Scheme)
+	if !foundDest {
+		logging.error("Do not understand scheme: %s", dest_url.scheme)
+		return 1
+	} 
+	
+	if dest_url.scheme == "stash"{
+		return doWriteBack(source_url.path, dest_url.path, debug)	
+	}
+
+	if dest_url.scheme == "file"{
+		destination = dest_url.path
+	}
+
+	if source_url.scheme == "stash"{
+	sourceFile = source_url.path
+	}
+
+	if not sourceFile[0] == "/" {
+		sourceFile = "/" + sourceFile
+	}
+
+
+
+	sitename, found := os.LookupEnv("OSG_SITE_NAME")
+	if (!found) {
+		sitename = "siteNotFound"
+	}
+
+
+	//Fill out the payload as much as possible
+
+	filename = destination + "/" + string.Split(sourceFile, "/")
+
+	// ??
+	type payloadStruct struct {
+		filename string
+		sitename string
+		status   string
+		start1   int64
+		end1 	 int64
+		timestamp int64
+		downloadTime int64
+		fileSize int64 
+		downloadSize int64
+	}
+
+
+	payload := payloadStruct{filename: sourceFile, sitename: OSG_SITE_NAME}
+
+	parse_job_ad(payload)
+	// edit parse job method to return payload with struct values set??
+	//  payload.update(parse_job_ad())
+
+
+
+
+	start1 = tie.Now()
+	log := lumber.NewConsoleLogger(lumber.WARN)
+
+	// Go thru the download methods
+	
+	cur_method = method[0]
+	success := false
+
+	// switch statement?
+	for _, method := range methods {
+
+		switch method {
+		case "cvmfs":
+			log.Info("Trying CVMFS...")
+			if  download_cvmfs(sourceFile, destination, debug, payload){
+				sucess = true
+				break
+				//check if break still works
+			}
+		case "xrootd":
+			log.Info("Trying XROOTD...")
+			if download_xrootd(sourceFile, destination, debug, payload){
+				success = true
+				break
+			}
+		case "http":
+			log.Info("Trying HTTP...")
+			if download_http(sourceFile, destination, debug, payload){
+				success = true
+				break
+			}
+		default:
+			log.error("Unknown transfer method: %s", method)
+		}
+	}
+			
+	end1 := time.Now()
+
+	payload := payloadStruct{filename: sourceFile, sitename: OSG_SITE_NAME, 
+							start1: start1, end1: end1, timestamp: end1, downloadTime: (end1 - start1)}
+
+	if success {
+		payload := payloadStruct{filename: sourceFile, sitename: OSG_SITE_NAME, status: "Sucess" 
+			start1: start1, end1: end1, timestamp: end1, downloadTime: (end1 - start1)}
+	
+		// Get the final size of the download file
+
+		if destination.IsDir() {
+			destination += "/"
+		}
+
+		dest_dir, dest_filename  := filepath.Split(destination)
+		
+		if dest_filename {
+			final_destination = destination
+		} else {
+			final_destination = path.Join(dest_dir, path.Base(sourceFile))
+		}
+
+		info, err := os.Stat(final_destination)
+		if err != nil {
+			return err
+		}
+		destSize := info.Size()
+		// ?? redudancy
+		payload.status = "Success"
+		payload = payloadStruct{filename: sourceFile, sitename: OSG_SITE_NAME, status: "Sucess",
+			start1: start1, end1: end1, timestamp: end1, downloadTime: (end1 - start1),
+			fileSize: destSize, downloadSize: destSize}
+	} else{
+		log.Error("All methods failed! Unable to download file.")
+        payload := {status: "Fail"}
+	} 
+
+	if es_send(payload) {
+		return 0
+	}else {
+		return 1
+	}
+}
+ 
+
+// Find takes a slice and looks for an element in it. If found it will
+// return it's key, otherwise it will return -1 and a bool of false.
+// From https://golangcode.com/check-if-element-exists-in-slice/
+func Find(slice []string, val string) (int, bool) {
+    for i, item := range slice {
+        if item == val {
+            return i, true
+        }
+    }
+    return -1, false
 }
 
 // Return list of cache URLS
@@ -305,3 +476,105 @@ func get_ips(name string) []string {
 	return ipv4s + ipv6s
 
 }
+
+func parse_job_ad(){
+
+	//Parse the .job.ad file for the Owner (username) and ProjectName of the callee.
+
+	condorJobAd, isPresent := os.LookupEnv("_CONDOR_JOB_AD")
+	if isPresent { 
+		filename := condorJobAd
+	} else if _, err := os.Stat(".job.ad"); err == nil {
+		filename := ".job.ad"
+	  
+	} else {
+		return  {}	
+	}
+
+	file, err := os.Open(filename) {
+
+		/* ??
+		for line in job_file.readlines():
+                match = re.search('^\s*(Owner|ProjectName)\s=\s"(.*)"', line,  re.IGNORECASE)
+                if match:
+                    temp_list[match.group(1)] = match.group(2) 
+		*/
+		
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	return temp_list
+
+}
+
+
+func doStashcpdirectory(sourceDir string, destination string, methods string){
+
+
+	// ?? sourceItems = to_str(subprocess.Popen(["xrdfs", stash_origin, "ls", sourceDir], stdout=subprocess.PIPE).communicate()[0]).split()
+	
+	// ?? for remote_file in sourceItems:
+
+	command2 := "xrdfs " + stash_origin + " stat "+ remote_file + " | grep "IsDir" | wc -l"
+
+	//	?? isdir=to_str(subprocess.Popen([command2],stdout=subprocess.PIPE,shell=True).communicate()[0].split()[0])isdir=to_str(subprocess.Popen([command2],stdout=subprocess.PIPE,shell=True).communicate()[0].split()[0])
+
+	if isDir != 0 {
+		result := doStashcpdirectory(remote, destination /*debug variable??*/)
+	} else {
+		result := doStashCpSingle(remote_file, destination, methods, debug)
+	}
+
+	// Stop the transfer if something fails
+	if result != 0 {
+		return result
+	}
+
+	return 0
+}
+
+func es_send(payload) {
+	
+	type payloadStruct struct {
+		filename string
+		sitename string
+		status   string
+		start1   int64
+		end1 	 int64
+		timestamp int64
+		downloadTime int64
+		fileSize int64 
+		downloadSize int64
+	}
+
+	// calculate the current timestamp
+	timeStamp := int(time.Now())
+	payload := payloadStruct{timestamp:timeStamp}
+
+	/* Define this function inside ??
+	 def _es_send(payload):
+        data = payload
+        data=json.dumps(data)
+        try:
+            url = "http://collector.atlas-ml.org:9951"
+            req = Request(url, data=data.encode("utf-8"), headers={'Content-Type': 'application/json'})
+            f = urlopen(req)
+            f.read()
+            f.close()
+        except (URLError, UnicodeError) as e:
+            logging.warning("Error posting to ES: %s", str(e))
+*/
+
+	/*
+	    p = multiprocessing.Process(target=_es_send, name="_es_send", args=(payload,))
+    	p.start()
+    	p.join(5)
+   		p.terminate()
+	*/
+
+
+}
+
+def timed_transfer
