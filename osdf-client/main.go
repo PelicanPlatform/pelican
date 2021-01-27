@@ -31,6 +31,34 @@ var nearest_cache string
 var nearest_cache_list []string
 var caches_list_name string = ""
 var caches_json_location string = ""
+var token_location string = ""
+
+type payloadStruct struct {
+	filename string
+	sitename string
+	status   string
+	Owner    string
+	ProjectName string
+	start1   int64
+	end1 	 int64
+	timestamp int64
+	downloadTime int64
+	fileSize int64 
+	downloadSize int64
+}
+
+func main(){
+	
+	usage := "usage: %prog [options] source destination"
+
+	/*??
+	parser = optparse.OptionParser(usage, version="stashcp %s" % VERSION)
+    parser.add_option('-d', '--debug', dest='debug', action='store_true', help='debug')
+	*/
+
+	//?? log i shoud use
+
+}
 
 func main() {
 
@@ -57,14 +85,111 @@ func main() {
 
 	// Once all flags are declared, call `flag.Parse()`
 	// to execute the command-line parsing.
+	/* 
+	Options from stashcache:
+	--parser.add_option('-d', '--debug', dest='debug', action='store_true', help='debug')
+    parser.add_option('-r', dest='recursive', action='store_true', help='recursively copy')
+    parser.add_option('--closest', action='store_true', help="Return the closest cache and exit")
+    --parser.add_option('-c', '--cache', dest='cache', help="Cache to use")
+    parser.add_option('-j', '--caches-json', dest='caches_json', help="A JSON file containing the list of caches",
+                      default=None)
+    parser.add_option('-n', '--cache-list-name', dest='cache_list_name', help="Name of pre-configured cache list to use",
+                      default=None)
+    parser.add_option('--list-names', dest='list_names', action='store_true', help="Return the names of pre-configured cache lists and exit (first one is default for -n)")
+    parser.add_option('--methods', dest='methods', help="Comma separated list of methods to try, in order.  Default: cvmfs,xrootd,http", default="cvmfs,xrootd,http")
+    parser.add_option('-t', '--token', dest='token', help="Token file to use for reading and/or writing")
+	*/
+
+	usage := "usage: %prog [options] source destination"
+
+
+	// stashcp --debug
+	// stashcp -d
+	// Sets variable debug = true
+	var debug bool
+	flag.BoolVar(&debug, "debug", false, "Debug output")
+
+	// Cache option
+	var cache string
+	flag.StringVar(&cache, "cache", "", "Cache to use")
+
+	// Caches json
+	var cache_json string
+	flag.StringVar(&cache_json, "caches-json","","A json file")
+
+	var closest bool 
+	flag.StringVar(&closest, "closest", false, "Return the closest cache")
+
+	var listNames bool
+	flag.StringVar(&listNames, "listNames", false, "Return the names of pre-configured cache lists and exit") 
+	
+	//cache list name
+	// file path to a file that contains a list of caches to use
+	var caches_list_names string  
+	flag.StringVar(&caches_list_names, "caches_list_names", "", "Name of cache list to use")
+
+	//list of methods
+	var methods string
+	flag.StringVar(methods, "methods", "cvmfs,xrootd,http", "Comma separated list of methods")
+
+	//Token file
+	var token string
+	flag.StringVar(token, "token", "","Token file to use for reading")
+
 	flag.Parse()
 	args := flag.Args()
 	if len(args) < 2 {
 		fmt.Printf("Must have at least 2 arguments\n")
 		os.Exit(1)
 	}
+
 	source := args[0]
 	dest := args[1]
+
+	// Test all flags
+	if debug {
+		// Set logging to debug level
+
+	}
+
+	// Just return all the caches that it knows about
+	// Print out all of the caches and exit
+	if listNames {
+
+	/** ?? needed
+	  global print_cache_list_names
+        print_cache_list_names = True
+	**/
+
+		get_best_stashcache()
+	//doesnt return anything
+	}
+
+	if args.caches_json {
+		caches_json_location = caches_json
+
+	} else if val, jsonPresent := os.LookupEnv("CACHES_JSON"); jsonPresent {
+		caches_json_location = val
+	} else {
+		prefix = os.Getenv("OSG_LOCATION", "/")
+	}
+/**
+		
+
+	caches_file = filepath.Join(prefix, "etc/stashcache/caches.json")
+	} if os.path.exists(caches_file){
+		caches_json_location = caches_file
+	}
+
+
+**/
+	if _, err := os.Stat(filepath.Join(credsDir, "scitokens.use")); os.IsNotExist(err) {
+		token_location = filepath.Join(credsDir,"scitokens.use" )
+	}
+
+
+	val, present := os.LookupEnv("http_proxy")
+
 
 	// Combine the paths
 	srcURL, _ := url.Parse(cache_host)
@@ -145,8 +270,8 @@ func doWriteBack(source string, destination string, debug bool) /*unsure of retu
 		    :param str destination: The location of the remote file, in stash:// format
 	*/
 
-	//start1 := int(time.Now()*1000)
-	/*
+	start1 := int(time.Now()*1000)
+	
 		scitoken_contents := ""//getToken()
 		if scitoken_contents == getToken() {
 			errors.New("Unable to find scitokens.use file")
@@ -158,9 +283,7 @@ func doWriteBack(source string, destination string, debug bool) /*unsure of retu
 		} else {
 			output_mode := "-s"
 		}
-	*/
-	/* Commented out for now
-
+	
 	//Check if the source file is zero-length
 	statinfo := os.Stat(source)
 
@@ -175,7 +298,9 @@ func doWriteBack(source string, destination string, debug bool) /*unsure of retu
 	if present { // replace with go in method
 		(os.Environ).Clearenv()
 	}
-	*/
+	
+	
+
 
 }
 
@@ -225,7 +350,7 @@ func getToken() string, error {
 	log.Debug("Opening file: " + token_location)
     f, _ := ioutil.ReadFile(filename)
 	var caches_list cachesListMap
-	err := json.Unmarshal(f, &caches_list)
+	err := json.Unmarshal(f, &caches_list){
 
 		if err != nil {	
 			log.Debug("JSON failed. Falling back to old style scitoken parsing")
@@ -290,24 +415,12 @@ func doStashCPSingle(sourceFile string, destination string, methods []string){
 	filename = destination + "/" + string.Split(sourceFile, "/")
 
 	// ??
-	type payloadStruct struct {
-		filename string
-		sitename string
-		status   string
-		start1   int64
-		end1 	 int64
-		timestamp int64
-		downloadTime int64
-		fileSize int64 
-		downloadSize int64
-	}
-
+	
 
 	payload := payloadStruct{filename: sourceFile, sitename: OSG_SITE_NAME}
 
 	parse_job_ad(payload)
-	// edit parse job method to return payload with struct values set??
-	//  payload.update(parse_job_ad())
+	
 
 
 
@@ -477,7 +590,7 @@ func get_ips(name string) []string {
 
 }
 
-func parse_job_ad(){
+func parse_job_ad(payload payloadStruct){ // TODO: needs the payload
 
 	//Parse the .job.ad file for the Owner (username) and ProjectName of the callee.
 
@@ -488,70 +601,87 @@ func parse_job_ad(){
 		filename := ".job.ad"
 	  
 	} else {
-		return  {}	
+		return 
 	}
 
-	file, err := os.Open(filename) {
+	// https://stackoverflow.com/questions/28574609/how-to-apply-regexp-to-content-in-file-go
+	
+	b, err := ioutil.ReadFile(filename)
+	if err != nil {
+		log.Fatal(e)
+	}
 
-		/* ??
-		for line in job_file.readlines():
-                match = re.search('^\s*(Owner|ProjectName)\s=\s"(.*)"', line,  re.IGNORECASE)
-                if match:
-                    temp_list[match.group(1)] = match.group(2) 
-		*/
-		
-		if err != nil {
-			log.Fatal(err)
+	// Get all matches from file
+	classadRegex, e := regexp.Compile(`^\s*(Owner|ProjectName)\s=\s"(.*)"`)
+	if e != nil {
+    	log.Fatal(e)
+	}
+
+	matches := classadRegex.FindAll(b)
+
+	for _, match := range matches {
+		if match[0] == "Owner" {
+			payload.Owner = match[1]
+		} else if match[0] == "ProjectName" {
+			payload.ProjectName = match[1]
 		}
 	}
 
-	return temp_list
+	
+
+		
 
 }
 
+// NOT IMPLEMENTED
+// func doStashcpdirectory(sourceDir string, destination string, methods string){
 
-func doStashcpdirectory(sourceDir string, destination string, methods string){
 
-
-	// ?? sourceItems = to_str(subprocess.Popen(["xrdfs", stash_origin, "ls", sourceDir], stdout=subprocess.PIPE).communicate()[0]).split()
+// 	// ?? sourceItems = to_str(subprocess.Popen(["xrdfs", stash_origin, "ls", sourceDir], stdout=subprocess.PIPE).communicate()[0]).split()
 	
-	// ?? for remote_file in sourceItems:
+// 	// ?? for remote_file in sourceItems:
 
-	command2 := "xrdfs " + stash_origin + " stat "+ remote_file + " | grep "IsDir" | wc -l"
+// 	command2 := "xrdfs " + stash_origin + " stat "+ remote_file + " | grep "IsDir" | wc -l"
 
-	//	?? isdir=to_str(subprocess.Popen([command2],stdout=subprocess.PIPE,shell=True).communicate()[0].split()[0])isdir=to_str(subprocess.Popen([command2],stdout=subprocess.PIPE,shell=True).communicate()[0].split()[0])
+// 	//	?? isdir=to_str(subprocess.Popen([command2],stdout=subprocess.PIPE,shell=True).communicate()[0].split()[0])isdir=to_str(subprocess.Popen([command2],stdout=subprocess.PIPE,shell=True).communicate()[0].split()[0])
 
-	if isDir != 0 {
-		result := doStashcpdirectory(remote, destination /*debug variable??*/)
-	} else {
-		result := doStashCpSingle(remote_file, destination, methods, debug)
-	}
+// 	if isDir != 0 {
+// 		result := doStashcpdirectory(remote, destination /*debug variable??*/)
+// 	} else {
+// 		result := doStashCpSingle(remote_file, destination, methods, debug)
+// 	}
 
-	// Stop the transfer if something fails
-	if result != 0 {
-		return result
-	}
+// 	// Stop the transfer if something fails
+// 	if result != 0 {
+// 		return result
+// 	}
 
-	return 0
-}
+// 	return 0
+// }
 
-func es_send(payload) {
+func es_send(payload payloadStruct) {
+	log := lumber.NewConsoleLogger(lumber.WARN)
 	
-	type payloadStruct struct {
-		filename string
-		sitename string
-		status   string
-		start1   int64
-		end1 	 int64
-		timestamp int64
-		downloadTime int64
-		fileSize int64 
-		downloadSize int64
-	}
 
 	// calculate the current timestamp
 	timeStamp := int(time.Now())
-	payload := payloadStruct{timestamp:timeStamp}
+	payload.timestamp = timestamp
+
+	// convert payload to a JSON string (something with Marshall ...)
+
+
+	// Send a HTTP POST to collector.atlas-ml.org, with a timeout!
+		resp, err := http.Post("http://collector.atlas-ml.org:9951", "application/json", bytes.NewBuffer(jsonStr))
+		
+		if err != nil {
+			log.Warning("Can't get collector.atlas-ml.org")
+		}
+		defer resp.Body.Close()
+		body, err := ioutil.ReadAll(resp.Body)
+	// Convert the payload to json
+	// ?? not sure how to do this
+	// Timeout is set to 5 seconds
+    // or this??
 
 	/* Define this function inside ??
 	 def _es_send(payload):
@@ -565,7 +695,7 @@ func es_send(payload) {
             f.close()
         except (URLError, UnicodeError) as e:
             logging.warning("Error posting to ES: %s", str(e))
-*/
+	*/
 
 	/*
 	    p = multiprocessing.Process(target=_es_send, name="_es_send", args=(payload,))
@@ -577,4 +707,54 @@ func es_send(payload) {
 
 }
 
-def timed_transfer
+// timedTransfer goes in handle xrootd and call is made internally !!
+
+func timed_transfer(filename string, destination string){
+
+	//Transfer the filename from the cache to the destination using xrdcp
+
+	// All these values can be found the xrdc man page
+
+	os.Setenv("XRD_REQUESTTIMEOUT","1")
+	os.Setenv("XRD_CPCHUNKSIZE","8388608")
+	os.Setenv("XRD_TIMEOUTRESOLUTION","5")
+	os.Setenv("XRD_CONNECTIONWINDOW","30")
+	os.Setenv("XRD_CONNECTIONRETRY","2")
+	os.Setenv("XRD_STREAMTIMEOUT","30")
+
+	if !strings.HasPrefix(filename, "/")/*?? Correct not use?*/ {
+		filepath += cache + ":1094//" + filename
+	} else {
+		filepath := cache+":1094/"+ filename
+	}
+
+	if debug {
+		command := "xrdcp -d 2 --nopbar -f " + filepath + " " + destination
+	}else{
+		command := "xrdcp --nopbar -f " + filepath + " " + destination
+	}
+
+	filename = "./" + strings.split(filename, "/")
+
+	if fileExists(filename){
+		e := os.Remove(filename) 
+	}
+
+	// Set logger globally  
+	// https://github.com/sirupsen/logrus
+	log := lumber.NewConsoleLogger(lumber.WARN)
+	log.Debug("xrdcp command: %s", command)
+	if debug {
+		// Use https://golang.org/pkg/os/exec/
+		
+		// ?? xrdcp=subprocess.Popen([command ],shell=True,stdout=subprocess.PIPE)
+	} else {
+		// ?? xrdcp=subprocess.Popen([command ],shell=True,stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+	}
+
+//	xrdcp.communicate()
+// xrd_exit=xrdcp.returncode
+
+return string(xrd_exit)
+
+}
