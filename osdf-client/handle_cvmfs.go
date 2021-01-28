@@ -8,12 +8,6 @@ import (
 	shutil "github.com/termie/go-shutil"
 )
 
-type payloadStruct struct {
-	tries int
-	cache string
-	host  string
-}
-
 func download_cvmfs(sourceFile string, destination string, payload payloadStruct) {
 	//Check if file is available in cvfms
 	var cvmfs_file string = path.Join("/cvmfs/stash.osgstorage.org", sourceFile)

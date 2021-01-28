@@ -48,19 +48,6 @@ type payloadStruct struct {
 	downloadSize int64
 }
 
-func main(){
-	
-	usage := "usage: %prog [options] source destination"
-
-	/*??
-	parser = optparse.OptionParser(usage, version="stashcp %s" % VERSION)
-    parser.add_option('-d', '--debug', dest='debug', action='store_true', help='debug')
-	*/
-
-	//?? log i shoud use
-
-}
-
 func main() {
 
 	// Basic flag declarations are available for string,
@@ -122,12 +109,13 @@ func main() {
 	flag.StringVar(&closest, "closest", false, "Return the closest cache")
 
 	var listNames bool
-	flag.StringVar(&listNames, "listNames", false, "Return the names of pre-configured cache lists and exit") 
+	flag.StringVar(&listNames, "list-names", false, "Return the names of pre-configured cache lists and exit") 
 	
 	//cache list name
 	// file path to a file that contains a list of caches to use
-	var caches_list_names string  
-	flag.StringVar(&caches_list_names, "caches_list_names", "", "Name of cache list to use")
+	var cacheListName string  
+	flag.StringVar(&cacheListName, "cache-list-name", "", "Name of cache list to use")
+
 
 	//list of methods
 	var methods string
@@ -136,6 +124,19 @@ func main() {
 	//Token file
 	var token string
 	flag.StringVar(token, "token", "","Token file to use for reading")
+
+	// Just return all the caches that it knows about
+	// Print out all of the caches and exit
+	if listNames {
+        print_cache_list_names = true
+		get_best_stashcache()
+		exit(0)
+	}
+
+	if closest {
+		fmt.Println(get_best_stashcache())
+		os.Exit(0)
+	}
 
 	flag.Parse()
 	args := flag.Args()
@@ -153,18 +154,7 @@ func main() {
 
 	}
 
-	// Just return all the caches that it knows about
-	// Print out all of the caches and exit
-	if listNames {
 
-	/** ?? needed
-	  global print_cache_list_names
-        print_cache_list_names = True
-	**/
-
-		get_best_stashcache()
-	//doesnt return anything
-	}
 
 	if args.caches_json {
 		caches_json_location = caches_json
@@ -180,29 +170,16 @@ func main() {
 	}
 	
 	caches_list_name = args.cache_list_name
-	if args.closest || args.list_names {
-		fmt.Println(get_best_stashcache)
-		os.Exit(0)
-	}
 
-	//?? 879 What is opts
-	/** 
-		if len(opts) != 2:
-        logging.error('Source and Destination must be specified on command line')
-        parser.print_help()
-        sys.exit(1)
-    else:
-        source=opts[0]
-        destination=opts[1]
-	**/
-	
+
 	// Check for manually entered cache to use ??
 	nearestCache,nearestCacheIsPresent := os.LookupEnv("NEAREST_CACHE")
+	
 	if nearestCacheIsPresent {
-		nearest_cache_list = [nearest_cache] // ??
-	} else if args.cache && len(args.cache) > 0{
+		append(nearest_cache_list, nearest_cache)
+	} else if args.cache {
 		nearest_cache = args.cache
-		nearest_cache_list = [args.cache]
+		append(nearest_cache_list, cache)
 	}
 
 	if args.token {
@@ -210,42 +187,7 @@ func main() {
 	}
 
 	// Convert the methods
-	var methods = Strings.split(args.methods, ",")
-
-	if !args.recursive {
-		result := doStashCPSingle(source,dest,methods)
-	}
-	
-	// Exit with failure
-	os.Exit(result)
-
-	/** 
-	if __name__ == "__main__":
-    main()
-	**/
-
-
-/**
-		
-
-	
-	} if os.path.exists(caches_file){
-		caches_json_location = caches_file
-	}
-
-
-**/
-	if _, err := os.Stat(filepath.Join(credsDir, "scitokens.use")); os.IsNotExist(err) {
-		token_location = filepath.Join(credsDir,"scitokens.use" )
-	}
-
-
-	val, present := os.LookupEnv("http_proxy")
-
-
-	// Combine the paths
-	srcURL, _ := url.Parse(cache_host)
-	srcURL.Path = path.Join(srcURL.Path, source)
+	splitMethods := Strings.split(methods, ",")
 
 	// get absolute path
 	destPath, _ := filepath.Abs(dest)
@@ -253,7 +195,6 @@ func main() {
 
 	//Check if path exists or if its in a folder
 	if destStat, err := os.Stat(destPath); os.IsNotExist(err) {
-		fmt.Println("file does not exist")
 		destFinal = destPath
 	} else if destStat.IsDir() {
 		// Get the file name of the source
@@ -261,57 +202,12 @@ func main() {
 		destFinal = path.Join(destPath, sourceFilename)
 	}
 
-	// fmt.Printf("url=" + srcURL.String() + " dest=" + destFinal + "\n")
-	// if err := DownloadHTTP(srcURL.String(), destFinal); err != nil {
-	// 	fmt.Printf("Download failed")
-	// }
-
-	payload := payloadStruct{tries: 0, cache: "", host: ""}
-
-	download_cvmfs(srcURL.String(), destFinal, payload)
-
-	// Parse the argument --methods (check for sure if that is argument in stashcp)
-	// the argument should be in the form of "cvmfs,http,xrootd", watch out for spaces between commas!
-	// Split by comma
-	var methods = Strings.split(args.methods, ",")
-
-	//fmt.Printf("Trying URL: %v\n", u.String())
-	//redir := GetRedirect(u.String())
-	//fmt.Printf("ERROR: %v\n", redir)
-
-	// Started Here
-
-	/*
-
-			userAgent := "stashcp/" + VERSION
-
-			main_redirector := "root://redirector.osgstorage.org"
-			stash_origin := "root://stash.osgconnect.net"
-			writeback_host := "http://stash-xrd.osgconnect.net:1094"
-
-		//Global variable for nearest cache
-			nearest_cache :=  ""// ?? what type
-
-		// Ordered list of nearest caches  ***************************************
-			nearest_cache_list := []int{}
-
-		// Global variable for the location of the caches.json file
-			caches_json_location := ""
-
-		// Global variable for the name of a pre-configured cache list
-			cache_list_name := ""
-
-		// Global variable for the location of the token to use for reading / writing
-			token_location := ""
-
-		// Global variable to print names of cache lists
-			print_cache_list_names := ""
-
-			TIMEOUT := 300
-			DIFF    := TIMEOUT * 10
-
-	*/
-
+	if !args.recursive {
+		result := doStashCPSingle(source, destFinal, splitMethods)
+	}
+	
+	// Exit with failure
+	os.Exit(result)
 }
 
 func doWriteBack(source string, destination string, debug bool) /*unsure of return type*/ {
@@ -324,17 +220,17 @@ func doWriteBack(source string, destination string, debug bool) /*unsure of retu
 
 	start1 := int(time.Now()*1000)
 	
-		scitoken_contents := ""//getToken()
-		if scitoken_contents == getToken() {
-			errors.New("Unable to find scitokens.use file")
-			return
-		}
+	scitoken_contents := ""//getToken()
+	if scitoken_contents == getToken() {
+		errors.New("Unable to find scitokens.use file")
+		return
+	}
 
-		if debug == true {
-			output_mode := "-v"
-		} else {
-			output_mode := "-s"
-		}
+	if debug == true {
+		output_mode := "-v"
+	} else {
+		output_mode := "-s"
+	}
 	
 	//Check if the source file is zero-length
 	statinfo := os.Stat(source)
@@ -356,13 +252,17 @@ func doWriteBack(source string, destination string, debug bool) /*unsure of retu
 
 }
 
-func getToken() string, error {
+func getToken() (string, error) {
 	log := lumber.NewConsoleLogger(lumber.WARN)
 	// Get the token / scitoken from the environment in order to read/write
 
 	// Get the scitoken content
 	scitoken_file := ""
 
+	type tokenJson struct {
+		accessKey string `json`
+		
+	}
 	/* 
 		Search for the location of the authentiction token.  It can be set explicitly on the command line (TODO),
 		with the environment variable "TOKEN", or it can be searched in the standard HTCondor directory pointed 
@@ -379,39 +279,32 @@ func getToken() string, error {
 		// If TOKEN is not set in environment, and _CONDOR_CREDS is set, then...
 		if isTokenSet {
 			token_location = tokenFile
-		} 
-		else if !isTokenSet && isCondorCredsSet {
+		} else if !isTokenSet && isCondorCredsSet {
 			// Token wasn't specified on the command line or environment, try the default scitoken
 			if _, err := os.Stat(filepath.Join(credsDir, "scitokens.use")); os.IsNotExist(err) {
 				token_location = filepath.Join(credsDir,"scitokens.use" )
-			} else if _, err := os.Stat(".condor_creds/scitokens.use")); os.IsNotExist(err) {
+			} else if _, err := os.Stat(".condor_creds/scitokens.use"); os.IsNotExist(err) {
 				token_location = filepath.Abs(".condor_creds/scitokens.use")
 			}
-		}
-		else {
+		} else {
 			// Print out, can't find token!  Print out error and exit with non-zero exit status
 			// TODO: Better error message
-			return "", new Error("Failed to find token...")
+			return "", error.New("Failed to find token...")
 		}
 
 	}
-	}
-	
 
 	//Read in the JSON
 	log.Debug("Opening file: " + token_location)
-    f, _ := ioutil.ReadFile(filename)
-	var caches_list cachesListMap
-	err := json.Unmarshal(f, &caches_list){
-
-		if err != nil {	
-			log.Debug("JSON failed. Falling back to old style scitoken parsing")
-			scitoken_file, err = file.Seek(0,0)
-			if err != nil {
-				log.Fatal(err)
-			 }
-
+    tokenContents, _ := ioutil.ReadFile(filename)
+	if err := json.Unmarshal(tokenContents, &) err != nil {
+		log.Debug("JSON failed. Falling back to old style scitoken parsing")
+		scitoken_file, err = file.Seek(0,0)
+		if err != nil {
+			log.Fatal(err)
 		}
+
+
 	}
 	return scitoken_file
 }
