@@ -20,7 +20,7 @@ func get_best_stashcache() (string, error) {
 	// Use the geo ip service on the WLCG Web Proxy Auto Discovery machines
 	geo_ip_sites := [...]string{"wlcg-wpad.cern.ch", "wlcg-wpad.fnal.gov"}
 
-	// randomize the geo ip sites
+	// randomize the geo ip sitess
 	rand.Seed(time.Now().UnixNano())
 	rand.Shuffle(len(geo_ip_sites), func(i, j int) {
 		geo_ip_sites[i], geo_ip_sites[j] = geo_ip_sites[j], geo_ip_sites[i]
