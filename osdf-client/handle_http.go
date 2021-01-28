@@ -36,22 +36,22 @@ Loop:
 		case <-t.C:
 			// This should be made a debug logging level
 			/*
-			fmt.Printf("  transferred %v / %v bytes (%.2f%%) (%.2f MB/s)\n",
-				resp.BytesComplete(),
-				resp.Size,
-				100*resp.Progress(),
-				float32(resp.BytesPerSecond())/float32(1024*1024))
+				fmt.Printf("  transferred %v / %v bytes (%.2f%%) (%.2f MB/s)\n",
+					resp.BytesComplete(),
+					resp.Size,
+					100*resp.Progress(),
+					float32(resp.BytesPerSecond())/float32(1024*1024))
 			*/
 
 			// Check if we are downloading fast enough
 			if resp.BytesPerSecond() < float64(download_limit) {
 				// This should be warning level probably
 				/*
-				fmt.Printf("Cancelled transfer: transferred %v / %v bytes (%.2f%%) (%.2f MB/s)\n",
-					resp.BytesComplete(),
-					resp.Size,
-					100*resp.Progress(),
-					float32(resp.BytesPerSecond())/float32(1024*1024))
+					fmt.Printf("Cancelled transfer: transferred %v / %v bytes (%.2f%%) (%.2f MB/s)\n",
+						resp.BytesComplete(),
+						resp.Size,
+						100*resp.Progress(),
+						float32(resp.BytesPerSecond())/float32(1024*1024))
 				*/
 				// Cancel the transfer
 				cancel()

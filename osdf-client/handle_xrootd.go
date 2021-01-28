@@ -8,8 +8,6 @@ import (
 	lumber "github.com/jcelliott/lumber"
 )
 
-
-
 func download_xrootd(nearest_cache string, nearest_cache_list, sourceFile string, destination string, payload map[string]int) bool {
 
 	// Download from the nearest cache, if that fails, fallback to the stash origin.
@@ -21,14 +19,12 @@ func download_xrootd(nearest_cache string, nearest_cache_list, sourceFile string
 	}
 
 	// If the cache is not specified by the command line, then look for the closest
-	
 
 	// if nearest_cache.Size() == 0{
 	// 	nearest_cache = get_best_stashcache()
 	// }
 
 	// cache = nearest_cache; (TODO: nearest cache not implemented yet)
-
 
 	return false
 }
