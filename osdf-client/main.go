@@ -260,7 +260,8 @@ func getToken() (string, error) {
 	scitoken_file := ""
 
 	type tokenJson struct {
-		accessKey string `json`
+		accessKey string `json:"access_token"`
+		expiresIn int `json:"expires_in"`
 		
 	}
 	/* 
