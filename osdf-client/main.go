@@ -32,6 +32,7 @@ var nearest_cache_list []string
 var caches_list_name string = ""
 var caches_json_location string = ""
 var token_location string = ""
+var print_cache_list_names = false
 
 type payloadStruct struct {
 	filename string
@@ -172,11 +173,62 @@ func main() {
 		caches_json_location = val
 	} else {
 		prefix = os.Getenv("OSG_LOCATION", "/")
+		caches_file = filepath.Join(prefix, "etc/stashcache/caches.json")
+		if _, err := os.Stat(caches_file); err == nil {
+			caches_json_location = caches_file
+		}
 	}
+	
+	caches_list_name = args.cache_list_name
+	if args.closest || args.list_names {
+		fmt.Println(get_best_stashcache)
+		os.Exit(0)
+	}
+
+	//?? 879 What is opts
+	/** 
+		if len(opts) != 2:
+        logging.error('Source and Destination must be specified on command line')
+        parser.print_help()
+        sys.exit(1)
+    else:
+        source=opts[0]
+        destination=opts[1]
+	**/
+	
+	// Check for manually entered cache to use ??
+	nearestCache,nearestCacheIsPresent := os.LookupEnv("NEAREST_CACHE")
+	if nearestCacheIsPresent {
+		nearest_cache_list = [nearest_cache] // ??
+	} else if args.cache && len(args.cache) > 0{
+		nearest_cache = args.cache
+		nearest_cache_list = [args.cache]
+	}
+
+	if args.token {
+		token_location = args.token
+	}
+
+	// Convert the methods
+	var methods = Strings.split(args.methods, ",")
+
+	if !args.recursive {
+		result := doStashCPSingle(source,dest,methods)
+	}
+	
+	// Exit with failure
+	os.Exit(result)
+
+	/** 
+	if __name__ == "__main__":
+    main()
+	**/
+
+
 /**
 		
 
-	caches_file = filepath.Join(prefix, "etc/stashcache/caches.json")
+	
 	} if os.path.exists(caches_file){
 		caches_json_location = caches_file
 	}
@@ -221,7 +273,7 @@ func main() {
 	// Parse the argument --methods (check for sure if that is argument in stashcp)
 	// the argument should be in the form of "cvmfs,http,xrootd", watch out for spaces between commas!
 	// Split by comma
-	methods := strings.split(args.methods, ",")
+	var methods = Strings.split(args.methods, ",")
 
 	//fmt.Printf("Trying URL: %v\n", u.String())
 	//redir := GetRedirect(u.String())
