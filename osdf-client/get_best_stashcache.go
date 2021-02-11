@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -138,24 +139,31 @@ func get_best_stashcache() (string, error) {
 	} else {
 		// The order string should be something like: 3,1,2
 
-		ordered_list := strings.Trim(order_str)
-		strings.Split(ordered_list, ",")
+		ordered_list := strings.Split(strings.TrimSpace(order_str), ",")
 
 		if len(caches_list) == 0 {
 			//Used the stashservers.dat api
 			caches_list = get_stashservers_caches(responselines_s)
 
 			if caches_list == nil {
-				return nil
+				return "", errors.New("Caches List is empty")
 			}
 		}
 
-		minsite = caches_list[int(ordered_list[0])-1]
+		// Ordered list is an array of index values which are used
+		// to index into caches_list
+		minIndex, err := strconv.Atoi(ordered_list[0])
+		if err != nil {
+			log.Error("Received a non integer min site from the WPAD servers")
+			return "", errors.New("Received a non integer min site from the WPAD servers")
+		}
+		minsite := caches_list[minIndex-1]
 
 		var nearest_cache []string
 
 		for _, ordered_index := range ordered_list {
-			nearest_cache_list = append(caches_list[int(ordered_index)-1])
+			orderedIndex, err := strconv.Atoi(ordered_index)
+			nearest_cache_list = append(nearest_cache_list, caches_list[orderedIndex-1])
 		}
 
 		log.Debug("Returning closest cache: %s", minsite)

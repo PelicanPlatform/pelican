@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/sha1"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,7 +13,7 @@ import (
 	lumber "github.com/jcelliott/lumber"
 )
 
-func get_stashservers_caches(responselines_b string) {
+func get_stashservers_caches(responselines_b []string) ([]string, error) {
 
 	/**
 		 After the geo order of the selected server list on line zero,
@@ -48,21 +49,29 @@ func get_stashservers_caches(responselines_b string) {
 	if len(responselines_b) < 8 {
 
 		log.Error("stashservers response too short, less than 8 lines")
-		return nil
+		return []string{}, errors.New("stashservers response too short, less than 8 lines")
 	}
 
-	hashname_b := responselines_b[4][-5:]
+	// Get the 5th row (4th index), the last 5 characters
+	hashname_b := responselines_b[4][len(responselines_b[4])-5:]
 
 	if hashname_b != "-sha1" {
+
 		log.Error("stashservers response does not have sha1 hash: %s", string(hashname_b))
-		return nil
+		return []string{}, errors.New("stashservers response does not have sha1 hash: %s", hashname_b)
 	}
 
-	//???	hashedtext_b = b'\n'.join(responselines_b[1:5]) + b'\n'
-	h := sha1.New()
-	hashedtext_b := hex.Dump(h)
+	var hashedTextBuilder strings.Builder
+	// Loop through response lines 1 through 4
+	for i := 1; i < 5; i++ {
+		hashedTextBuilder.WriteString(responselines_b[i])
+		hashedTextBuilder.WriteString("\n")
+	}
+	sha1Hash := sha1.New()
+	sha1Hash.Write([]byte(hashedTextBuilder.String()))
+	hashStr := hex.EncodeToString(sha1Hash.Sum(nil))
 
-	if string(responselines_b[6]) != hash_str {
+	if string(responselines_b[6]) != hashStr {
 		log.Debug("stashservers hash %s does not match expected hash %s", string(responselines_b[6]), hash_str)
 		log.Debug("hashed text:\n%s", string(hashedtext_b))
 		log.Error("stashservers response hash does not match expected hash")
@@ -78,7 +87,7 @@ func get_stashservers_caches(responselines_b string) {
 		// investigated.  Usually openssl is present.
 		log.Debug("openssl not installed, skipping signature check")
 	} else {
-		sig := "/n".join(responselines_b[7])
+		sig := responselines_b[7]
 
 		// Look for the OSG cvmfs public key to verify signature
 		prefix := os.Getenv("OSG_LOCATION", "/")
@@ -102,9 +111,9 @@ func get_stashservers_caches(responselines_b string) {
 			log.Debug("Running %s", cmd)
 
 			command_object := exec.Command(cmd)
-			stdout, err := command_object.StdoutPipe()
-
-			decryptedhash := string(stdout)
+			stdin, err := command_object.StdinPipe()
+			io.WriteString(stdin, hashStr)
+			decryptedhash, err := cmd.CombinedOutput()
 
 			if hash_str != decryptedhash {
 				log.Debug("stashservers hash %s does not match decrypted signature %s", hash_str, decryptedhash)

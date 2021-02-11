@@ -1,12 +1,18 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net"
+	"net/http"
 	"net/url"
+	"regexp"
+	"strings"
 	"syscall"
 
 	//"net/http"
@@ -15,7 +21,7 @@ import (
 	"path"
 	"path/filepath"
 	"time"
-	
+
 	// "crypto/sha1"
 	// "encoding/hex"
 	// "strings"
@@ -35,16 +41,16 @@ var token_location string = ""
 var print_cache_list_names = false
 
 type payloadStruct struct {
-	filename string
-	sitename string
-	status   string
-	Owner    string
-	ProjectName string
-	start1   int64
-	end1 	 int64
-	timestamp int64
+	filename     string
+	sitename     string
+	status       string
+	Owner        string
+	ProjectName  string
+	start1       int64
+	end1         int64
+	timestamp    int64
 	downloadTime int64
-	fileSize int64 
+	fileSize     int64
 	downloadSize int64
 }
 
@@ -73,23 +79,22 @@ func main() {
 
 	// Once all flags are declared, call `flag.Parse()`
 	// to execute the command-line parsing.
-	/* 
-	Options from stashcache:
-	--parser.add_option('-d', '--debug', dest='debug', action='store_true', help='debug')
-    parser.add_option('-r', dest='recursive', action='store_true', help='recursively copy')
-    parser.add_option('--closest', action='store_true', help="Return the closest cache and exit")
-    --parser.add_option('-c', '--cache', dest='cache', help="Cache to use")
-    parser.add_option('-j', '--caches-json', dest='caches_json', help="A JSON file containing the list of caches",
-                      default=None)
-    parser.add_option('-n', '--cache-list-name', dest='cache_list_name', help="Name of pre-configured cache list to use",
-                      default=None)
-    parser.add_option('--list-names', dest='list_names', action='store_true', help="Return the names of pre-configured cache lists and exit (first one is default for -n)")
-    parser.add_option('--methods', dest='methods', help="Comma separated list of methods to try, in order.  Default: cvmfs,xrootd,http", default="cvmfs,xrootd,http")
-    parser.add_option('-t', '--token', dest='token', help="Token file to use for reading and/or writing")
+	/*
+			Options from stashcache:
+			--parser.add_option('-d', '--debug', dest='debug', action='store_true', help='debug')
+		    parser.add_option('-r', dest='recursive', action='store_true', help='recursively copy')
+		    parser.add_option('--closest', action='store_true', help="Return the closest cache and exit")
+		    --parser.add_option('-c', '--cache', dest='cache', help="Cache to use")
+		    parser.add_option('-j', '--caches-json', dest='caches_json', help="A JSON file containing the list of caches",
+		                      default=None)
+		    parser.add_option('-n', '--cache-list-name', dest='cache_list_name', help="Name of pre-configured cache list to use",
+		                      default=None)
+		    parser.add_option('--list-names', dest='list_names', action='store_true', help="Return the names of pre-configured cache lists and exit (first one is default for -n)")
+		    parser.add_option('--methods', dest='methods', help="Comma separated list of methods to try, in order.  Default: cvmfs,xrootd,http", default="cvmfs,xrootd,http")
+		    parser.add_option('-t', '--token', dest='token', help="Token file to use for reading and/or writing")
 	*/
 
 	usage := "usage: %prog [options] source destination"
-
 
 	// stashcp --debug
 	// stashcp -d
@@ -103,19 +108,18 @@ func main() {
 
 	// Caches json
 	var cache_json string
-	flag.StringVar(&cache_json, "caches-json","","A json file")
+	flag.StringVar(&cache_json, "caches-json", "", "A json file")
 
-	var closest bool 
+	var closest bool
 	flag.StringVar(&closest, "closest", false, "Return the closest cache")
 
 	var listNames bool
-	flag.StringVar(&listNames, "list-names", false, "Return the names of pre-configured cache lists and exit") 
-	
+	flag.StringVar(&listNames, "list-names", false, "Return the names of pre-configured cache lists and exit")
+
 	//cache list name
 	// file path to a file that contains a list of caches to use
-	var cacheListName string  
+	var cacheListName string
 	flag.StringVar(&cacheListName, "cache-list-name", "", "Name of cache list to use")
-
 
 	//list of methods
 	var methods string
@@ -123,12 +127,12 @@ func main() {
 
 	//Token file
 	var token string
-	flag.StringVar(token, "token", "","Token file to use for reading")
+	flag.StringVar(token, "token", "", "Token file to use for reading")
 
 	// Just return all the caches that it knows about
 	// Print out all of the caches and exit
 	if listNames {
-        print_cache_list_names = true
+		print_cache_list_names = true
 		get_best_stashcache()
 		exit(0)
 	}
@@ -154,8 +158,6 @@ func main() {
 
 	}
 
-
-
 	if args.caches_json {
 		caches_json_location = caches_json
 
@@ -168,13 +170,12 @@ func main() {
 			caches_json_location = caches_file
 		}
 	}
-	
+
 	caches_list_name = args.cache_list_name
 
-
 	// Check for manually entered cache to use ??
-	nearestCache,nearestCacheIsPresent := os.LookupEnv("NEAREST_CACHE")
-	
+	nearestCache, nearestCacheIsPresent := os.LookupEnv("NEAREST_CACHE")
+
 	if nearestCacheIsPresent {
 		append(nearest_cache_list, nearest_cache)
 	} else if args.cache {
@@ -205,7 +206,7 @@ func main() {
 	if !args.recursive {
 		result := doStashCPSingle(source, destFinal, splitMethods)
 	}
-	
+
 	// Exit with failure
 	os.Exit(result)
 }
@@ -218,9 +219,9 @@ func doWriteBack(source string, destination string, debug bool) /*unsure of retu
 		    :param str destination: The location of the remote file, in stash:// format
 	*/
 
-	start1 := int(time.Now()*1000)
-	
-	scitoken_contents := ""//getToken()
+	start1 := int(time.Now() * 1000)
+
+	scitoken_contents := "" //getToken()
 	if scitoken_contents == getToken() {
 		errors.New("Unable to find scitokens.use file")
 		return
@@ -231,24 +232,21 @@ func doWriteBack(source string, destination string, debug bool) /*unsure of retu
 	} else {
 		output_mode := "-s"
 	}
-	
+
 	//Check if the source file is zero-length
 	statinfo := os.Stat(source)
 
-	if statinfo.Size() == 0 {  //CHECK After rsoolving compilation error Size method should be in OS or Syscall
+	if statinfo.Size() == 0 { //CHECK After rsoolving compilation error Size method should be in OS or Syscall
 		speed_time = "--speed-time 5 "
 	} else {
 		speed_time := ""
 	}
-	command := fmt.Sprintf("curl %s --connect-timeout 30 %s--speed-limit 1024 -X PUT --fail --upload-file %s -H \"User-Agent: %s\" -H \"Authorization: Bearer %s\" %s%s",output_mode, speed_time, source, user_agent, scitoken_contents, writeback_host, destination)
+	command := fmt.Sprintf("curl %s --connect-timeout 30 %s--speed-limit 1024 -X PUT --fail --upload-file %s -H \"User-Agent: %s\" -H \"Authorization: Bearer %s\" %s%s", output_mode, speed_time, source, user_agent, scitoken_contents, writeback_host, destination)
 
 	val, present := os.LookupEnv("http_proxy")
 	if present { // replace with go in method
 		(os.Environ).Clearenv()
 	}
-	
-	
-
 
 }
 
@@ -261,21 +259,19 @@ func getToken() (string, error) {
 
 	type tokenJson struct {
 		accessKey string `json:"access_token"`
-		expiresIn int `json:"expires_in"`
-		
+		expiresIn int    `json:"expires_in"`
 	}
-	/* 
+	/*
 		Search for the location of the authentiction token.  It can be set explicitly on the command line (TODO),
-		with the environment variable "TOKEN", or it can be searched in the standard HTCondor directory pointed 
+		with the environment variable "TOKEN", or it can be searched in the standard HTCondor directory pointed
 		to by the environment variable "_CONDOR_CREDS".
 	*/
-
 
 	if token_location == "" {
 		// https://golang.org/pkg/os/#LookupEnv
 		tokenFile, isTokenSet := os.LookupEnv("TOKEN")
 		credsDir, isCondorCredsSet := os.LookupEnv("_CONDOR_CREDS")
-		
+
 		// Backwards compatibility for getting scitokens
 		// If TOKEN is not set in environment, and _CONDOR_CREDS is set, then...
 		if isTokenSet {
@@ -283,7 +279,7 @@ func getToken() (string, error) {
 		} else if !isTokenSet && isCondorCredsSet {
 			// Token wasn't specified on the command line or environment, try the default scitoken
 			if _, err := os.Stat(filepath.Join(credsDir, "scitokens.use")); os.IsNotExist(err) {
-				token_location = filepath.Join(credsDir,"scitokens.use" )
+				token_location = filepath.Join(credsDir, "scitokens.use")
 			} else if _, err := os.Stat(".condor_creds/scitokens.use"); os.IsNotExist(err) {
 				token_location = filepath.Abs(".condor_creds/scitokens.use")
 			}
@@ -297,28 +293,27 @@ func getToken() (string, error) {
 
 	//Read in the JSON
 	log.Debug("Opening file: " + token_location)
-    tokenContents, _ := ioutil.ReadFile(filename)
-	if err := json.Unmarshal(tokenContents, &) err != nil {
+	tokenContents, _ := ioutil.ReadFile(filename)
+	tokenParsed := tokenJson{}
+	if err := json.Unmarshal(tokenContents, &tokenParsed); err != nil {
 		log.Debug("JSON failed. Falling back to old style scitoken parsing")
-		scitoken_file, err = file.Seek(0,0)
+		scitoken_file, err = file.Seek(0, 0)
 		if err != nil {
 			log.Fatal(err)
 		}
-
 
 	}
 	return scitoken_file
 }
 
-func doStashCPSingle(sourceFile string, destination string, methods []string){
+func doStashCPSingle(sourceFile string, destination string, methods []string) {
 
 	// Parse the source and destination with URL parse
-	
+
 	source_url := url.Parse(sourceFile)
 	dest_url := url.Parse(destination)
 
-	var understodSchemes string[] = ["stash","file",""]
-	
+	understodSchemes := [...]string{"stash", "file", ""}
 
 	_, foundSource = Find(understoodSchemes, source_url.Scheme)
 	if !found {
@@ -330,52 +325,44 @@ func doStashCPSingle(sourceFile string, destination string, methods []string){
 	if !foundDest {
 		logging.error("Do not understand scheme: %s", dest_url.scheme)
 		return 1
-	} 
-	
-	if dest_url.scheme == "stash"{
-		return doWriteBack(source_url.path, dest_url.path, debug)	
 	}
 
-	if dest_url.scheme == "file"{
+	if dest_url.scheme == "stash" {
+		return doWriteBack(source_url.path, dest_url.path, debug)
+	}
+
+	if dest_url.scheme == "file" {
 		destination = dest_url.path
 	}
 
-	if source_url.scheme == "stash"{
-	sourceFile = source_url.path
+	if source_url.scheme == "stash" {
+		sourceFile = source_url.path
 	}
 
-	if not sourceFile[0] == "/" {
+	if sourceFile[0] != "/" {
 		sourceFile = "/" + sourceFile
 	}
 
-
-
 	sitename, found := os.LookupEnv("OSG_SITE_NAME")
-	if (!found) {
+	if !found {
 		sitename = "siteNotFound"
 	}
-
 
 	//Fill out the payload as much as possible
 
 	filename = destination + "/" + string.Split(sourceFile, "/")
 
 	// ??
-	
 
 	payload := payloadStruct{filename: sourceFile, sitename: OSG_SITE_NAME}
 
 	parse_job_ad(payload)
-	
-
-
-
 
 	start1 = tie.Now()
 	log := lumber.NewConsoleLogger(lumber.WARN)
 
 	// Go thru the download methods
-	
+
 	cur_method = method[0]
 	success := false
 
@@ -385,20 +372,20 @@ func doStashCPSingle(sourceFile string, destination string, methods []string){
 		switch method {
 		case "cvmfs":
 			log.Info("Trying CVMFS...")
-			if  download_cvmfs(sourceFile, destination, debug, payload){
+			if download_cvmfs(sourceFile, destination, debug, payload) {
 				sucess = true
 				break
 				//check if break still works
 			}
 		case "xrootd":
 			log.Info("Trying XROOTD...")
-			if download_xrootd(sourceFile, destination, debug, payload){
+			if download_xrootd(sourceFile, destination, debug, payload) {
 				success = true
 				break
 			}
 		case "http":
 			log.Info("Trying HTTP...")
-			if download_http(sourceFile, destination, debug, payload){
+			if download_http(sourceFile, destination, debug, payload) {
 				success = true
 				break
 			}
@@ -406,24 +393,23 @@ func doStashCPSingle(sourceFile string, destination string, methods []string){
 			log.error("Unknown transfer method: %s", method)
 		}
 	}
-			
+
 	end1 := time.Now()
 
-	payload := payloadStruct{filename: sourceFile, sitename: OSG_SITE_NAME, 
-							start1: start1, end1: end1, timestamp: end1, downloadTime: (end1 - start1)}
+	payload = payloadStruct{filename: sourceFile, sitename: OSG_SITE_NAME,
+		start1: start1, end1: end1, timestamp: end1, downloadTime: (end1 - start1)}
 
 	if success {
-		payload := payloadStruct{filename: sourceFile, sitename: OSG_SITE_NAME, status: "Sucess" 
-			start1: start1, end1: end1, timestamp: end1, downloadTime: (end1 - start1)}
-	
+		payload = payloadStruct{filename: sourceFile, sitename: OSG_SITE_NAME, status: "Success", start1: start1, end1: end1, timestamp: end1, downloadTime: (end1 - start1)}
+
 		// Get the final size of the download file
 
 		if destination.IsDir() {
 			destination += "/"
 		}
 
-		dest_dir, dest_filename  := filepath.Split(destination)
-		
+		dest_dir, dest_filename := filepath.Split(destination)
+
 		if dest_filename {
 			final_destination = destination
 		} else {
@@ -440,29 +426,28 @@ func doStashCPSingle(sourceFile string, destination string, methods []string){
 		payload = payloadStruct{filename: sourceFile, sitename: OSG_SITE_NAME, status: "Sucess",
 			start1: start1, end1: end1, timestamp: end1, downloadTime: (end1 - start1),
 			fileSize: destSize, downloadSize: destSize}
-	} else{
+	} else {
 		log.Error("All methods failed! Unable to download file.")
-        payload := {status: "Fail"}
-	} 
+		payload.status = "Fail"
+	}
 
 	if es_send(payload) {
 		return 0
-	}else {
+	} else {
 		return 1
 	}
 }
- 
 
 // Find takes a slice and looks for an element in it. If found it will
 // return it's key, otherwise it will return -1 and a bool of false.
 // From https://golangcode.com/check-if-element-exists-in-slice/
 func Find(slice []string, val string) (int, bool) {
-    for i, item := range slice {
-        if item == val {
-            return i, true
-        }
-    }
-    return -1, false
+	for i, item := range slice {
+		if item == val {
+			return i, true
+		}
+	}
+	return -1, false
 }
 
 // Return list of cache URLS
@@ -536,22 +521,22 @@ func get_ips(name string) []string {
 
 }
 
-func parse_job_ad(payload payloadStruct){ // TODO: needs the payload
+func parse_job_ad(payload payloadStruct) { // TODO: needs the payload
 
 	//Parse the .job.ad file for the Owner (username) and ProjectName of the callee.
 
 	condorJobAd, isPresent := os.LookupEnv("_CONDOR_JOB_AD")
-	if isPresent { 
+	if isPresent {
 		filename := condorJobAd
 	} else if _, err := os.Stat(".job.ad"); err == nil {
 		filename := ".job.ad"
-	  
+
 	} else {
-		return 
+		return
 	}
 
 	// https://stackoverflow.com/questions/28574609/how-to-apply-regexp-to-content-in-file-go
-	
+
 	b, err := ioutil.ReadFile(filename)
 	if err != nil {
 		log.Fatal(e)
@@ -560,7 +545,7 @@ func parse_job_ad(payload payloadStruct){ // TODO: needs the payload
 	// Get all matches from file
 	classadRegex, e := regexp.Compile(`^\s*(Owner|ProjectName)\s=\s"(.*)"`)
 	if e != nil {
-    	log.Fatal(e)
+		log.Fatal(e)
 	}
 
 	matches := classadRegex.FindAll(b)
@@ -573,18 +558,13 @@ func parse_job_ad(payload payloadStruct){ // TODO: needs the payload
 		}
 	}
 
-	
-
-		
-
 }
 
 // NOT IMPLEMENTED
 // func doStashcpdirectory(sourceDir string, destination string, methods string){
 
-
 // 	// ?? sourceItems = to_str(subprocess.Popen(["xrdfs", stash_origin, "ls", sourceDir], stdout=subprocess.PIPE).communicate()[0]).split()
-	
+
 // 	// ?? for remote_file in sourceItems:
 
 // 	command2 := "xrdfs " + stash_origin + " stat "+ remote_file + " | grep "IsDir" | wc -l"
@@ -607,7 +587,6 @@ func parse_job_ad(payload payloadStruct){ // TODO: needs the payload
 
 func es_send(payload payloadStruct) {
 	log := lumber.NewConsoleLogger(lumber.WARN)
-	
 
 	// calculate the current timestamp
 	timeStamp := int(time.Now())
@@ -615,92 +594,90 @@ func es_send(payload payloadStruct) {
 
 	// convert payload to a JSON string (something with Marshall ...)
 
-
 	// Send a HTTP POST to collector.atlas-ml.org, with a timeout!
-		resp, err := http.Post("http://collector.atlas-ml.org:9951", "application/json", bytes.NewBuffer(jsonStr))
-		
-		if err != nil {
-			log.Warning("Can't get collector.atlas-ml.org")
-		}
-		defer resp.Body.Close()
-		body, err := ioutil.ReadAll(resp.Body)
+	resp, err := http.Post("http://collector.atlas-ml.org:9951", "application/json", bytes.NewBuffer(jsonStr))
+
+	if err != nil {
+		log.Warning("Can't get collector.atlas-ml.org")
+	}
+	defer resp.Body.Close()
+	body, err := ioutil.ReadAll(resp.Body)
 	// Convert the payload to json
 	// ?? not sure how to do this
 	// Timeout is set to 5 seconds
-    // or this??
+	// or this??
 
 	/* Define this function inside ??
-	 def _es_send(payload):
-        data = payload
-        data=json.dumps(data)
-        try:
-            url = "http://collector.atlas-ml.org:9951"
-            req = Request(url, data=data.encode("utf-8"), headers={'Content-Type': 'application/json'})
-            f = urlopen(req)
-            f.read()
-            f.close()
-        except (URLError, UnicodeError) as e:
-            logging.warning("Error posting to ES: %s", str(e))
+		 def _es_send(payload):
+	        data = payload
+	        data=json.dumps(data)
+	        try:
+	            url = "http://collector.atlas-ml.org:9951"
+	            req = Request(url, data=data.encode("utf-8"), headers={'Content-Type': 'application/json'})
+	            f = urlopen(req)
+	            f.read()
+	            f.close()
+	        except (URLError, UnicodeError) as e:
+	            logging.warning("Error posting to ES: %s", str(e))
 	*/
 
 	/*
-	    p = multiprocessing.Process(target=_es_send, name="_es_send", args=(payload,))
-    	p.start()
-    	p.join(5)
-   		p.terminate()
+			    p = multiprocessing.Process(target=_es_send, name="_es_send", args=(payload,))
+		    	p.start()
+		    	p.join(5)
+		   		p.terminate()
 	*/
-
 
 }
 
 // timedTransfer goes in handle xrootd and call is made internally !!
 
-func timed_transfer(filename string, destination string){
+func timed_transfer(filename string, destination string) {
 
 	//Transfer the filename from the cache to the destination using xrdcp
 
 	// All these values can be found the xrdc man page
 
-	os.Setenv("XRD_REQUESTTIMEOUT","1")
-	os.Setenv("XRD_CPCHUNKSIZE","8388608")
-	os.Setenv("XRD_TIMEOUTRESOLUTION","5")
-	os.Setenv("XRD_CONNECTIONWINDOW","30")
-	os.Setenv("XRD_CONNECTIONRETRY","2")
-	os.Setenv("XRD_STREAMTIMEOUT","30")
+	os.Setenv("XRD_REQUESTTIMEOUT", "1")
+	os.Setenv("XRD_CPCHUNKSIZE", "8388608")
+	os.Setenv("XRD_TIMEOUTRESOLUTION", "5")
+	os.Setenv("XRD_CONNECTIONWINDOW", "30")
+	os.Setenv("XRD_CONNECTIONRETRY", "2")
+	os.Setenv("XRD_STREAMTIMEOUT", "30")
 
-	if !strings.HasPrefix(filename, "/")/*?? Correct not use?*/ {
+	if !strings.HasPrefix(filename, "/") /*?? Correct not use?*/ {
 		filepath += cache + ":1094//" + filename
 	} else {
-		filepath := cache+":1094/"+ filename
+		filepath := cache + ":1094/" + filename
 	}
 
 	if debug {
 		command := "xrdcp -d 2 --nopbar -f " + filepath + " " + destination
-	}else{
+	} else {
 		command := "xrdcp --nopbar -f " + filepath + " " + destination
 	}
 
-	filename = "./" + strings.split(filename, "/")
+	filename = "./" + strings.Split(filename, "/")
 
-	if fileExists(filename){
-		e := os.Remove(filename) 
+	if fileExists(filename) {
+		e := os.Remove(filename)
 	}
 
-	// Set logger globally  
+	// Set logger globally
 	// https://github.com/sirupsen/logrus
 	log := lumber.NewConsoleLogger(lumber.WARN)
 	log.Debug("xrdcp command: %s", command)
 	if debug {
 		// Use https://golang.org/pkg/os/exec/
-		
+
 		// ?? xrdcp=subprocess.Popen([command ],shell=True,stdout=subprocess.PIPE)
 	} else {
 		// ?? xrdcp=subprocess.Popen([command ],shell=True,stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 	}
 
-//	xrdcp.communicate()
-// xrd_exit=xrdcp.returncode
+	//	xrdcp.communicate()
+	// xrd_exit=xrdcp.returncode
 
-return string(xrd_exit)
+	return string(xrd_exit)
 
 }
