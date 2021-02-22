@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path"
@@ -13,7 +14,7 @@ import (
 	lumber "github.com/jcelliott/lumber"
 )
 
-func get_stashservers_caches(responselines_b []string) ([]string, error) {
+func get_stashservers_caches(responselines_b []string) []string {
 
 	/**
 		 After the geo order of the selected server list on line zero,

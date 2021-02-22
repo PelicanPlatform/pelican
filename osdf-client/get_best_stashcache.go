@@ -167,7 +167,7 @@ func get_best_stashcache() (string, error) {
 		}
 
 		log.Debug("Returning closest cache: %s", minsite)
-		log.Debug("Ordered list of nearest caches: %s", string(nearest_cache_list))
-		return minsite
+		log.Debug("Ordered list of nearest caches: %s", nearest_cache_list)
+		return minsite, errors.New("No errors")
 	}
 }
