@@ -59,7 +59,7 @@ func get_stashservers_caches(responselines_b []string) ([]string, error) {
 	if hashname_b != "-sha1" {
 
 		log.Error("stashservers response does not have sha1 hash: %s", string(hashname_b))
-		return []string{}, errors.New("stashservers response does not have sha1 hash: %s", hashname_b)
+		return []string{}, errors.New("stashservers response does not have sha1 hash")
 	}
 
 	var hashedTextBuilder strings.Builder
@@ -73,10 +73,10 @@ func get_stashservers_caches(responselines_b []string) ([]string, error) {
 	hashStr := hex.EncodeToString(sha1Hash.Sum(nil))
 
 	if string(responselines_b[6]) != hashStr {
-		log.Debug("stashservers hash %s does not match expected hash %s", string(responselines_b[6]), hash_str)
-		log.Debug("hashed text:\n%s", string(hashedtext_b))
+		log.Debug("stashservers hash %s does not match expected hash %s", string(responselines_b[6]), hashname_b)
+		log.Debug("hashed text:\n%s", string(hashname_b))
 		log.Error("stashservers response hash does not match expected hash")
-		return nil
+		return []string{}, errors.New("stashservers response hash does not match expected hash")
 	}
 
 	// Call out to /usr/bin/openssl if present, in order to avoid
@@ -91,10 +91,17 @@ func get_stashservers_caches(responselines_b []string) ([]string, error) {
 		sig := responselines_b[7]
 
 		// Look for the OSG cvmfs public key to verify signature
-		prefix := os.Getenv("OSG_LOCATION", "/")
+		prefix := os.Getenv("OSG_LOCATION")
 		osgpub := "opensciencegrid.org.pub"
 		pubkey_files := []string{"/etc/cvmfs/keys/opensciencegrid.org/" + osgpub, path.Join(prefix, "etc/stashcache", osgpub),
 			path.Join(prefix, "usr/share/stashcache", osgpub)}
+
+		/*
+		   from pkg_resources import resource_filename
+		   except ImportError as e:
+		       resource_filename = None
+
+		*/
 
 		if resource_filename != nil {
 
@@ -108,12 +115,12 @@ func get_stashservers_caches(responselines_b []string) ([]string, error) {
 				}
 			}
 
-			cmd := "/usr/bin/openssl rsautl -verify -pubin -inkey " + pubkey_file
+			cmd := "/usr/bin/openssl rsautl -verify -pubin -inkey " + pubkey_files
 			log.Debug("Running %s", cmd)
 
 			command_object := exec.Command(cmd)
 			stdin, err := command_object.StdinPipe()
-			io.WriteString(stdin, hashStr)
+			io.WriteString(stdin, hash_str)
 			decryptedhash, err := cmd.CombinedOutput()
 
 			if hash_str != decryptedhash {
@@ -149,7 +156,6 @@ func get_stashservers_caches(responselines_b []string) ([]string, error) {
 						}
 					}
 				}
-
 				caches_list = strings.Split(caches, ",")
 				for _, i := range len(caches_list) {
 					caches_list[i] = "root://" + caches_list[i]
