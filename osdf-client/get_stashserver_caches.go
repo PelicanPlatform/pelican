@@ -1,20 +1,24 @@
 package main
 
 import (
+	"crypto"
+	"crypto/rsa"
 	"crypto/sha1"
+	"crypto/x509"
 	"encoding/hex"
+	"encoding/pem"
 	"errors"
 	"fmt"
-	"io"
+	"io/ioutil"
 	"os"
-	"os/exec"
 	"path"
+	"path/filepath"
 	"strings"
 
-	lumber "github.com/jcelliott/lumber"
+	log "github.com/sirupsen/logrus"
 )
 
-func get_stashservers_caches(responselines_b []string) ([]string, error) {
+func get_stashservers_caches(responselines_b [][]byte) ([]string, error) {
 
 	/**
 		 After the geo order of the selected server list on line zero,
@@ -45,16 +49,15 @@ func get_stashservers_caches(responselines_b []string) ([]string, error) {
 	        which would have caused it to have been split into multiple
 		    response "lines".
 		**/
-	log := lumber.NewConsoleLogger(lumber.WARN)
 
 	if len(responselines_b) < 8 {
 
-		log.Error("stashservers response too short, less than 8 lines")
+		log.Errorln("stashservers response too short, less than 8 lines:", len(responselines_b))
 		return []string{}, errors.New("stashservers response too short, less than 8 lines")
 	}
 
 	// Get the 5th row (4th index), the last 5 characters
-	hashname_b := responselines_b[4][len(responselines_b[4])-5:]
+	hashname_b := string(responselines_b[4][len(responselines_b[4])-5:])
 
 	if hashname_b != "-sha1" {
 
@@ -65,108 +68,130 @@ func get_stashservers_caches(responselines_b []string) ([]string, error) {
 	var hashedTextBuilder strings.Builder
 	// Loop through response lines 1 through 4
 	for i := 1; i < 5; i++ {
-		hashedTextBuilder.WriteString(responselines_b[i])
+		hashedTextBuilder.WriteString(string(responselines_b[i]))
 		hashedTextBuilder.WriteString("\n")
 	}
 	sha1Hash := sha1.New()
 	sha1Hash.Write([]byte(hashedTextBuilder.String()))
-	hashStr := hex.EncodeToString(sha1Hash.Sum(nil))
+	hashed := sha1Hash.Sum(nil)
+	hashStr := hex.EncodeToString(hashed)
 
+	log.Debugln("Hashed:", hashStr, "From CVMFS:", string(responselines_b[6]))
 	if string(responselines_b[6]) != hashStr {
-		log.Debug("stashservers hash %s does not match expected hash %s", string(responselines_b[6]), hashname_b)
-		log.Debug("hashed text:\n%s", string(hashname_b))
-		log.Error("stashservers response hash does not match expected hash")
-		return []string{}, errors.New("stashservers response hash does not match expected hash")
+		log.Debugln("stashservers hash %s does not match expected hash %s", string(responselines_b[6]), hashname_b)
+		log.Debugln("hashed text:\n%s", string(hashname_b))
+		log.Errorln("stashservers response hash does not match expected hash")
+		return nil, errors.New("stashservers response hash does not match expected hash")
 	}
 
 	// Call out to /usr/bin/openssl if present, in order to avoid
 	// python dependency on a crypto package.
 
-	if destStat, err := os.Stat("/usr/bin/openssl"); os.IsNotExist(err) {
+	//
+	var pubKey *rsa.PublicKey
+	var err error
+	if pubKey, err = readPublicKey(); err != nil {
 		// The signature check isn't critical to be done everywhere;
 		// any tampering will likely to be caught somewhere and
 		// investigated.  Usually openssl is present.
-		log.Debug("openssl not installed, skipping signature check")
+		log.Warnln("Public Key not found, will not verify caches")
 	} else {
 		sig := responselines_b[7]
+		ioutil.WriteFile("sig", sig, 0644)
+		err = rsa.VerifyPKCS1v15(pubKey, crypto.SHA1, hashed[:], sig)
+		if err != nil {
+			log.Errorln("Error from public key verification:", err)
+			//return nil, err
+		} else {
+			log.Debugln("Signature Matched")
+		}
 
-		// Look for the OSG cvmfs public key to verify signature
-		prefix := os.Getenv("OSG_LOCATION")
-		osgpub := "opensciencegrid.org.pub"
-		pubkey_files := []string{"/etc/cvmfs/keys/opensciencegrid.org/" + osgpub, path.Join(prefix, "etc/stashcache", osgpub),
-			path.Join(prefix, "usr/share/stashcache", osgpub)}
+	}
+	log.Debugf("Cache list: %s", string(responselines_b[4]))
+	cacheColonList := strings.Split(string(responselines_b[4]), "=")[1]
+	cacheListStr := strings.Split(cacheColonList, ";")[0]
+	cacheList := strings.Split(cacheListStr, ",")
+	log.Debugln("Cache list:", cacheList)
 
-		/*
-		   from pkg_resources import resource_filename
-		   except ImportError as e:
-		       resource_filename = None
+	if print_cache_list_names {
+		for index, cache := range cacheList {
+			fmt.Print(cache)
 
-		*/
-
-		if resource_filename != nil {
-
-			for _, pubkey_file := range pubkey_files {
-
-				if _, err := os.Stat(pubkey_file); err == nil {
-					break
-				} else {
-					log.Error("Unable to find osg cvmfs key in %r", pubkey_files)
-					return nil
-				}
+			// If it's the last item in the list, then don't add the comma
+			if index != len(cacheList)-1 {
+				fmt.Print(", ")
 			}
-
-			cmd := "/usr/bin/openssl rsautl -verify -pubin -inkey " + pubkey_files
-			log.Debug("Running %s", cmd)
-
-			command_object := exec.Command(cmd)
-			stdin, err := command_object.StdinPipe()
-			io.WriteString(stdin, hash_str)
-			decryptedhash, err := cmd.CombinedOutput()
-
-			if hash_str != decryptedhash {
-				log.Debug("stashservers hash %s does not match decrypted signature %s", hash_str, decryptedhash)
-				log.Error("stashservers signature does not verify")
-				return nil
-			}
-
-			log.Debug("Signature Matched")
-
-			log.Debug("Cache list: %s", responselines_b[4]).split(';')
-
-			if print_cache_list_names {
-				names := ""
-				//Skip hash at the end
-
-				//?????
-				for _, l := range myList {
-					names = names + "," + strings.Split(l, "=")
-
-					//Skip leading commas
-					fmt.Printf(names)
-				}
-
-				if caches_list_name != nil {
-					caches = strings.Split(lists, "=")
-				} else {
-					for _, l := range lists {
-						n := len(caches_list_name) + 1
-
-						if l == cache_list_name+"=" {
-							caches = l
-						}
-					}
-				}
-				caches_list = strings.Split(caches, ",")
-				for _, i := range len(caches_list) {
-					caches_list[i] = "root://" + caches_list[i]
-				}
-
-				return caches_list
-
-			} else {
-				log.Debug("Unable to retrieve caches.json using resource string, trying other locations")
-			}
-
 		}
 	}
+
+	for i, _ := range cacheList {
+		cacheList[i] = "root://" + cacheList[i]
+	}
+
+	return cacheList, nil
+
+}
+
+func getKeyLocation() string {
+	osgpub := "opensciencegrid.org.pub"
+	var checkedLocation string = path.Join("/etc/cvmfs/keys/opensciencegrid.org/", osgpub)
+	if _, err := os.Stat(checkedLocation); err == nil {
+		return checkedLocation
+	}
+	prefix := os.Getenv("OSG_LOCATION")
+	if prefix != "" {
+		checkedLocation = path.Join(prefix, "etc/stashcache", osgpub)
+		if _, err := os.Stat(checkedLocation); err == nil {
+			return checkedLocation
+		}
+		checkedLocation = path.Join(prefix, "usr/share/stashcache", osgpub)
+		if _, err := os.Stat(checkedLocation); err == nil {
+			return checkedLocation
+		}
+
+	}
+
+	// Try the current directory
+	checkedLocation, _ = filepath.Abs(osgpub)
+	if _, err := os.Stat(checkedLocation); err == nil {
+		return checkedLocation
+	}
+	return ""
+
+}
+
+// Largely adapted from https://gist.github.com/jshap70/259a87a7146393aab5819873a193b88c
+func readPublicKey() (*rsa.PublicKey, error) {
+
+	publicKeyPath := getKeyLocation()
+	if publicKeyPath == "" {
+		return nil, errors.New("Public Key not found")
+	}
+
+	pubkeyContents, err := ioutil.ReadFile(publicKeyPath)
+	if err != nil {
+		log.Errorln("Error reading public key:", err)
+		return nil, err
+	}
+
+	pubPem, rest := pem.Decode(pubkeyContents)
+	if pubPem.Type != "PUBLIC KEY" {
+		log.WithFields(log.Fields{"PEM Type": pubPem.Type}).Error("RSA public key is of the wrong type")
+		return nil, errors.New("RSA public key is of the wrong type")
+	}
+	var parsedKey interface{}
+	if parsedKey, err = x509.ParsePKIXPublicKey(pubPem.Bytes); err != nil {
+		log.Errorln("Unable to parse RSA public key:", err)
+		return nil, errors.New("Unable to parse RSA public key")
+	}
+	log.Debugf("Got a %T, with remaining data: %q", parsedKey, rest)
+
+	var pubKey *rsa.PublicKey
+	var ok bool
+	if pubKey, ok = parsedKey.(*rsa.PublicKey); !ok {
+		log.Errorln("Failed to convert RSA public key")
+	}
+
+	return pubKey, nil
+
 }

@@ -4,16 +4,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net"
 	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
-	"syscall"
 
 	//"net/http"
 	"math/rand"
@@ -25,7 +22,9 @@ import (
 	// "crypto/sha1"
 	// "encoding/hex"
 	// "strings"
-	lumber "github.com/jcelliott/lumber"
+
+	"github.com/jessevdk/go-flags"
+	log "github.com/sirupsen/logrus"
 )
 
 // Redirector
@@ -33,7 +32,10 @@ var global_redirector string = "http://redirector.osgstorage.org:8000"
 var cache_host string = "http://hcc-stash.unl.edu:8000/"
 var VERSION string = "5.6.2"
 
+// Nearest cache
 var nearest_cache string
+
+// List of caches, in order from closest to furthest
 var nearest_cache_list []string
 var caches_list_name string = ""
 var caches_json_location string = ""
@@ -54,141 +56,123 @@ type payloadStruct struct {
 	downloadSize int64
 }
 
+/*
+	Options from stashcache:
+	--parser.add_option('-d', '--debug', dest='debug', action='store_true', help='debug')
+	parser.add_option('-r', dest='recursive', action='store_true', help='recursively copy')
+	parser.add_option('--closest', action='store_true', help="Return the closest cache and exit")
+	--parser.add_option('-c', '--cache', dest='cache', help="Cache to use")
+	parser.add_option('-j', '--caches-json', dest='caches_json', help="A JSON file containing the list of caches",
+						default=None)
+	parser.add_option('-n', '--cache-list-name', dest='cache_list_name', help="Name of pre-configured cache list to use",
+						default=None)
+	parser.add_option('--list-names', dest='list_names', action='store_true', help="Return the names of pre-configured cache lists and exit (first one is default for -n)")
+	parser.add_option('--methods', dest='methods', help="Comma separated list of methods to try, in order.  Default: cvmfs,xrootd,http", default="cvmfs,xrootd,http")
+	parser.add_option('-t', '--token', dest='token', help="Token file to use for reading and/or writing")
+*/
+
+type SourceDestination struct {
+	Source      string `short:"i" long:"input" description:"Source file" default:"-"`
+	Destination string `short:"o" long:"output" description:"Destination file" default:"-"`
+}
+
+type Options struct {
+	// Turn on the debug logging
+	Debug bool `short:"d" long:"debug" description:"Turn on debug logging"`
+
+	// Specify the configuration file
+	Closest bool `long:"closest" description:"Return the closest cache and exit"`
+
+	// Cache to use
+	Cache string `short:"c" long:"cache" description:"Cache to use"`
+
+	// A JSON file containing the list of caches
+	CacheJSON string `short:"j" long:"caches-json" description:"A JSON file containing the list of caches"`
+
+	// Comma separated list of methods to try, in order.  Default: cvmfs,xrootd,http
+	Methods string `long:"methods" description:"Comma separated list of methods to try, in order.  Default: cvmfs,xrootd,http" default:"cvmfs,xrootd,http"`
+
+	// Token file to use for reading and/or writing
+	Token string `long:"token" short:"t" description:"Token file to use for reading and/or writing"`
+
+	ListCaches bool `long:"list-names" description:"Return the names of pre-configured cache lists and exit"`
+
+	// Positional arguemnts
+	SourceDestination SourceDestination `description:"Source and Destination Files" positional-args:"1"`
+}
+
+var options Options
+
+var parser = flags.NewParser(&options, flags.Default)
+
 func main() {
 
-	// Basic flag declarations are available for string,
-	// integer, and boolean options. Here we declare a
-	// string flag `word` with a default value `"foo"`
-	// and a short description. This `flag.String` function
-	// returns a string pointer (not a string value);
-	// we'll see how to use this pointer below.
-	//wordPtr := flag.String("cache", "", "The cache to use")
-	//debug := flag.Bool("debug", false, "Debug output")
+	if _, err := parser.Parse(); err != nil {
+		if flagsErr, ok := err.(*flags.Error); ok && flagsErr.Type == flags.ErrHelp {
+			os.Exit(0)
+		} else {
+			os.Exit(1)
+		}
+	}
 
-	// This declares `numb` and `fork` flags, using a
-	// similar approach to the `word` flag.
-	//numbPtr := flag.Int("numb", 42, "an int")
-	//boolPtr := flag.Bool("fork", false, "a bool")
-
-	// It's also possible to declare an option that uses an
-	// existing var declared elsewhere in the program.
-	// Note that we need to pass in a pointer to the flag
-	// declaration function.
-	//var svar string
-	//flag.StringVar(&svar, "svar", "bar", "a string var")
-
-	// Once all flags are declared, call `flag.Parse()`
-	// to execute the command-line parsing.
-	/*
-			Options from stashcache:
-			--parser.add_option('-d', '--debug', dest='debug', action='store_true', help='debug')
-		    parser.add_option('-r', dest='recursive', action='store_true', help='recursively copy')
-		    parser.add_option('--closest', action='store_true', help="Return the closest cache and exit")
-		    --parser.add_option('-c', '--cache', dest='cache', help="Cache to use")
-		    parser.add_option('-j', '--caches-json', dest='caches_json', help="A JSON file containing the list of caches",
-		                      default=None)
-		    parser.add_option('-n', '--cache-list-name', dest='cache_list_name', help="Name of pre-configured cache list to use",
-		                      default=None)
-		    parser.add_option('--list-names', dest='list_names', action='store_true', help="Return the names of pre-configured cache lists and exit (first one is default for -n)")
-		    parser.add_option('--methods', dest='methods', help="Comma separated list of methods to try, in order.  Default: cvmfs,xrootd,http", default="cvmfs,xrootd,http")
-		    parser.add_option('-t', '--token', dest='token', help="Token file to use for reading and/or writing")
-	*/
-
-	usage := "usage: %prog [options] source destination"
-
-	// stashcp --debug
-	// stashcp -d
-	// Sets variable debug = true
-	var debug bool
-	flag.BoolVar(&debug, "debug", false, "Debug output")
-
-	// Cache option
-	var cache string
-	flag.StringVar(&cache, "cache", "", "Cache to use")
-
-	// Caches json
-	var cache_json string
-	flag.StringVar(&cache_json, "caches-json", "", "A json file")
-
-	var closest bool
-	flag.StringVar(&closest, "closest", false, "Return the closest cache")
-
-	var listNames bool
-	flag.StringVar(&listNames, "list-names", false, "Return the names of pre-configured cache lists and exit")
-
-	//cache list name
-	// file path to a file that contains a list of caches to use
-	var cacheListName string
-	flag.StringVar(&cacheListName, "cache-list-name", "", "Name of cache list to use")
-
-	//list of methods
-	var methods string
-	flag.StringVar(methods, "methods", "cvmfs,xrootd,http", "Comma separated list of methods")
-
-	//Token file
-	var token string
-	flag.StringVar(token, "token", "", "Token file to use for reading")
+	if options.Debug {
+		// Set logging to debug level
+		setLogging(log.DebugLevel)
+	} else {
+		setLogging(log.WarnLevel)
+	}
 
 	// Just return all the caches that it knows about
 	// Print out all of the caches and exit
-	if listNames {
+	if options.ListCaches {
 		print_cache_list_names = true
 		get_best_stashcache()
-		exit(0)
+		os.Exit(0)
 	}
 
-	if closest {
+	if options.Closest {
 		fmt.Println(get_best_stashcache())
 		os.Exit(0)
 	}
 
-	flag.Parse()
-	args := flag.Args()
-	if len(args) < 2 {
-		fmt.Printf("Must have at least 2 arguments\n")
-		os.Exit(1)
-	}
+	source := options.SourceDestination.Source
+	dest := options.SourceDestination.Destination
 
-	source := args[0]
-	dest := args[1]
+	/*
+		TODO: Parse a caches JSON, is this needed anymore?
+		if args.caches_json {
+			caches_json_location = caches_json
 
-	// Test all flags
-	if debug {
-		// Set logging to debug level
-
-	}
-
-	if args.caches_json {
-		caches_json_location = caches_json
-
-	} else if val, jsonPresent := os.LookupEnv("CACHES_JSON"); jsonPresent {
-		caches_json_location = val
-	} else {
-		prefix = os.Getenv("OSG_LOCATION", "/")
-		caches_file = filepath.Join(prefix, "etc/stashcache/caches.json")
-		if _, err := os.Stat(caches_file); err == nil {
-			caches_json_location = caches_file
+		} else if val, jsonPresent := os.LookupEnv("CACHES_JSON"); jsonPresent {
+			caches_json_location = val
+		} else {
+			prefix = os.Getenv("OSG_LOCATION", "/")
+			caches_file = filepath.Join(prefix, "etc/stashcache/caches.json")
+			if _, err := os.Stat(caches_file); err == nil {
+				caches_json_location = caches_file
+			}
 		}
-	}
 
-	caches_list_name = args.cache_list_name
+		caches_list_name = args.cache_list_name
+	*/
 
 	// Check for manually entered cache to use ??
 	nearestCache, nearestCacheIsPresent := os.LookupEnv("NEAREST_CACHE")
 
 	if nearestCacheIsPresent {
-		append(nearest_cache_list, nearest_cache)
-	} else if args.cache {
-		nearest_cache = args.cache
-		append(nearest_cache_list, cache)
+		nearest_cache = nearestCache
+		nearest_cache_list = append(nearest_cache_list, nearest_cache)
+	} else if options.Cache != "" {
+		nearest_cache = options.Cache
+		nearest_cache_list = append(nearest_cache_list, options.Cache)
 	}
 
-	if args.token {
-		token_location = args.token
+	if options.Token != "" {
+		token_location = options.Token
 	}
 
 	// Convert the methods
-	splitMethods := Strings.split(methods, ",")
+	splitMethods := strings.Split(options.Methods, ",")
 
 	// get absolute path
 	destPath, _ := filepath.Abs(dest)
@@ -203,23 +187,34 @@ func main() {
 		destFinal = path.Join(destPath, sourceFilename)
 	}
 
-	if !args.recursive {
-		result := doStashCPSingle(source, destFinal, splitMethods)
-	}
+	result := doStashCPSingle(source, destFinal, splitMethods)
 
 	// Exit with failure
-	os.Exit(result)
+	if result != nil {
+		os.Exit(1)
+	}
+
 }
 
-func doWriteBack(source string, destination string, debug bool) /*unsure of return type*/ {
+func setLogging(logLevel log.Level) error {
+	textFormatter := log.TextFormatter{}
+	textFormatter.DisableLevelTruncation = true
+	textFormatter.FullTimestamp = true
+	log.SetFormatter(&textFormatter)
+	log.SetLevel(logLevel)
+	return nil
+}
+
+/* TODO writeback
+func doWriteBack(source string, destination string, debug bool) {
 	/*
 			  Do a write back to Stash using SciTokens
 
 		    :param str source: The location of the local file
 		    :param str destination: The location of the remote file, in stash:// format
-	*/
 
-	start1 := int(time.Now() * 1000)
+
+	start1 := int(time.Now().Unix() * 1000)
 
 	scitoken_contents := "" //getToken()
 	if scitoken_contents == getToken() {
@@ -249,9 +244,9 @@ func doWriteBack(source string, destination string, debug bool) /*unsure of retu
 	}
 
 }
-
+*/
 func getToken() (string, error) {
-	log := lumber.NewConsoleLogger(lumber.WARN)
+
 	// Get the token / scitoken from the environment in order to read/write
 
 	// Get the scitoken content
@@ -281,89 +276,89 @@ func getToken() (string, error) {
 			if _, err := os.Stat(filepath.Join(credsDir, "scitokens.use")); os.IsNotExist(err) {
 				token_location = filepath.Join(credsDir, "scitokens.use")
 			} else if _, err := os.Stat(".condor_creds/scitokens.use"); os.IsNotExist(err) {
-				token_location = filepath.Abs(".condor_creds/scitokens.use")
+				token_location, _ = filepath.Abs(".condor_creds/scitokens.use")
 			}
 		} else {
 			// Print out, can't find token!  Print out error and exit with non-zero exit status
 			// TODO: Better error message
-			return "", error.New("Failed to find token...")
+			return "", errors.New("Failed to find token...")
 		}
 
 	}
 
 	//Read in the JSON
 	log.Debug("Opening file: " + token_location)
-	tokenContents, _ := ioutil.ReadFile(filename)
+	tokenContents, _ := ioutil.ReadFile(token_location)
 	tokenParsed := tokenJson{}
 	if err := json.Unmarshal(tokenContents, &tokenParsed); err != nil {
-		log.Debug("JSON failed. Falling back to old style scitoken parsing")
-		scitoken_file, err = file.Seek(0, 0)
-		if err != nil {
-			log.Fatal(err)
-		}
-
+		log.Debugln("Error unmarshalling JSON token contents:", err, "Falling back to old style scitoken parsing")
 	}
-	return scitoken_file
+	return scitoken_file, nil
 }
 
-func doStashCPSingle(sourceFile string, destination string, methods []string) {
+func doStashCPSingle(sourceFile string, destination string, methods []string) error {
 
 	// Parse the source and destination with URL parse
 
-	source_url := url.Parse(sourceFile)
-	dest_url := url.Parse(destination)
-
-	understodSchemes := [...]string{"stash", "file", ""}
-
-	_, foundSource = Find(understoodSchemes, source_url.Scheme)
-	if !found {
-		logging.error("Do not understand scheme: %s", source_url.scheme)
-		return 1
+	source_url, err := url.Parse(sourceFile)
+	if err != nil {
+		log.Errorln("Failed to parse source URL:", err)
+		return err
 	}
 
-	_, foundDest = Find(understoodSchemes, source_url.Scheme)
+	dest_url, err := url.Parse(destination)
+	if err != nil {
+		log.Errorln("Failed to parse destination URL:", err)
+		return err
+	}
+
+	understoodSchemes := []string{"stash", "file", ""}
+
+	_, foundSource := Find(understoodSchemes, source_url.Scheme)
+	if !foundSource {
+		log.Errorln("Do not understand source scheme:", source_url.Scheme)
+		return errors.New("Do not understand source scheme")
+	}
+
+	_, foundDest := Find(understoodSchemes, source_url.Scheme)
 	if !foundDest {
-		logging.error("Do not understand scheme: %s", dest_url.scheme)
-		return 1
+		log.Errorln("Do not understand destination scheme:", source_url.Scheme)
+		return errors.New("Do not understand destination scheme")
 	}
 
-	if dest_url.scheme == "stash" {
-		return doWriteBack(source_url.path, dest_url.path, debug)
+	if dest_url.Scheme == "stash" {
+		//return doWriteBack(source_url.path, dest_url.path, debug)
 	}
 
-	if dest_url.scheme == "file" {
-		destination = dest_url.path
+	if dest_url.Scheme == "file" {
+		destination = dest_url.Path
 	}
 
-	if source_url.scheme == "stash" {
-		sourceFile = source_url.path
+	if source_url.Scheme == "stash" {
+		sourceFile = source_url.Path
 	}
 
-	if sourceFile[0] != "/" {
+	if string(sourceFile[0]) != "/" {
 		sourceFile = "/" + sourceFile
 	}
 
-	sitename, found := os.LookupEnv("OSG_SITE_NAME")
+	payload := payloadStruct{}
+	var found bool
+	payload.sitename, found = os.LookupEnv("OSG_SITE_NAME")
 	if !found {
-		sitename = "siteNotFound"
+		payload.sitename = "siteNotFound"
 	}
 
 	//Fill out the payload as much as possible
-
-	filename = destination + "/" + string.Split(sourceFile, "/")
+	payload.filename = source_url.Path
 
 	// ??
 
-	payload := payloadStruct{filename: sourceFile, sitename: OSG_SITE_NAME}
-
 	parse_job_ad(payload)
 
-	start1 = tie.Now()
-	log := lumber.NewConsoleLogger(lumber.WARN)
+	payload.start1 = time.Now().Unix()
 
 	// Go thru the download methods
-
-	cur_method = method[0]
 	success := false
 
 	// switch statement?
@@ -372,69 +367,56 @@ func doStashCPSingle(sourceFile string, destination string, methods []string) {
 		switch method {
 		case "cvmfs":
 			log.Info("Trying CVMFS...")
-			if download_cvmfs(sourceFile, destination, debug, payload) {
-				sucess = true
+			if err := download_cvmfs(sourceFile, destination, &payload); err == nil {
+				success = true
 				break
 				//check if break still works
 			}
 		case "xrootd":
 			log.Info("Trying XROOTD...")
-			if download_xrootd(sourceFile, destination, debug, payload) {
+			if err := download_xrootd(sourceFile, destination, &payload); err == nil {
 				success = true
 				break
 			}
 		case "http":
 			log.Info("Trying HTTP...")
-			if download_http(sourceFile, destination, debug, payload) {
+			if err := download_http(sourceFile, destination, &payload); err == nil {
 				success = true
 				break
 			}
 		default:
-			log.error("Unknown transfer method: %s", method)
+			log.Errorf("Unknown transfer method: %s", method)
 		}
 	}
 
-	end1 := time.Now()
+	payload.end1 = time.Now().Unix()
 
-	payload = payloadStruct{filename: sourceFile, sitename: OSG_SITE_NAME,
-		start1: start1, end1: end1, timestamp: end1, downloadTime: (end1 - start1)}
+	payload.timestamp = payload.end1
+	payload.downloadTime = (payload.end1 - payload.start1)
 
 	if success {
-		payload = payloadStruct{filename: sourceFile, sitename: OSG_SITE_NAME, status: "Success", start1: start1, end1: end1, timestamp: end1, downloadTime: (end1 - start1)}
+		payload.status = "Success"
 
 		// Get the final size of the download file
 
-		if destination.IsDir() {
-			destination += "/"
-		}
-
-		dest_dir, dest_filename := filepath.Split(destination)
-
-		if dest_filename {
-			final_destination = destination
-		} else {
-			final_destination = path.Join(dest_dir, path.Base(sourceFile))
-		}
-
-		info, err := os.Stat(final_destination)
+		info, err := os.Stat(destination)
 		if err != nil {
 			return err
 		}
-		destSize := info.Size()
-		// ?? redudancy
-		payload.status = "Success"
-		payload = payloadStruct{filename: sourceFile, sitename: OSG_SITE_NAME, status: "Sucess",
-			start1: start1, end1: end1, timestamp: end1, downloadTime: (end1 - start1),
-			fileSize: destSize, downloadSize: destSize}
+		payload.fileSize = info.Size()
+		payload.downloadSize = payload.fileSize
 	} else {
 		log.Error("All methods failed! Unable to download file.")
 		payload.status = "Fail"
 	}
 
-	if es_send(payload) {
-		return 0
+	// We really don't care if the es send fails, but log
+	// it in debug if it does fail
+	if err := es_send(&payload); err != nil {
+		log.Debugln("Failed to send to data to ES")
+		return nil
 	} else {
-		return 1
+		return nil
 	}
 }
 
@@ -450,50 +432,9 @@ func Find(slice []string, val string) (int, bool) {
 	return -1, false
 }
 
-// Return list of cache URLS
-func get_json_caches(caches_json_location string) []string {
-
-	log := lumber.NewConsoleLogger(lumber.WARN)
-
-	type cachesListMap struct {
-		status string
-		name   int
-	}
-
-	// myMap := map[int][]cachesListMap{}
-
-	f, _ := ioutil.ReadFile(filename)
-	var caches_list cachesListMap
-	err := json.Unmarshal(f, &caches_list)
-
-	if err != nil {
-		log.Error("No cache names found in %s without zero status", caches_json_location)
-	}
-
-	log.Debug("Loaded caches list from %s", caches_json_location)
-
-	usable_caches := []string{}
-
-	for _, cache := range caches_list {
-		if caches_list.status == 0 {
-			usable_caches = append(usable_caches, caches_list.name)
-		}
-	}
-
-	if len(usable_caches) == 0 {
-		log.Error("No cache names found in %s without zero status", caches_json_location)
-	}
-
-	return usable_caches
-
-}
-
 func get_ips(name string) []string {
 	var ipv4s []string
-
 	var ipv6s []string
-
-	log := lumber.NewConsoleLogger(lumber.WARN)
 
 	info, err := net.LookupHost(name)
 	if err != nil {
@@ -503,21 +444,23 @@ func get_ips(name string) []string {
 		return empty
 	}
 
-	for _, tuple := range info {
+	for _, addr := range info {
+		parsedIP := net.ParseIP(addr)
 
-		if tuple[0] == syscall.AF_INET {
-			ipv4s = append(ipv4s, tuple[4][0])
-		} else if tuple[0] == syscall.AF_INET6 {
-			ipv6s = append(ipv4s, tuple[4][0])
+		if parsedIP.To4() != nil {
+			ipv4s = append(ipv4s, addr)
+		} else if parsedIP.To16() != nil {
+			ipv6s = append(ipv6s, addr)
 		}
 	}
 
 	//Randomize the order of each
-	rand.Shuffle(len(ipv4s), func(i, j string) { ipv4s[i], ipv4s[j] = ipv4s[j], ipv4s[i] })
-	rand.Shuffle(len(ipv6s), func(i, j string) { ipv6s[i], ipv6s[j] = ipv6s[j], ipv6s[i] })
+	rand.Seed(time.Now().UnixNano())
+	rand.Shuffle(len(ipv4s), func(i, j int) { ipv4s[i], ipv4s[j] = ipv4s[j], ipv4s[i] })
+	rand.Shuffle(len(ipv6s), func(i, j int) { ipv6s[i], ipv6s[j] = ipv6s[j], ipv6s[i] })
 
 	// Always prefer IPv4
-	return ipv4s + ipv6s
+	return append(ipv4s, ipv6s...)
 
 }
 
@@ -526,11 +469,11 @@ func parse_job_ad(payload payloadStruct) { // TODO: needs the payload
 	//Parse the .job.ad file for the Owner (username) and ProjectName of the callee.
 
 	condorJobAd, isPresent := os.LookupEnv("_CONDOR_JOB_AD")
+	var filename string
 	if isPresent {
-		filename := condorJobAd
+		filename = condorJobAd
 	} else if _, err := os.Stat(".job.ad"); err == nil {
-		filename := ".job.ad"
-
+		filename = ".job.ad"
 	} else {
 		return
 	}
@@ -539,7 +482,7 @@ func parse_job_ad(payload payloadStruct) { // TODO: needs the payload
 
 	b, err := ioutil.ReadFile(filename)
 	if err != nil {
-		log.Fatal(e)
+		log.Fatal(err)
 	}
 
 	// Get all matches from file
@@ -548,13 +491,13 @@ func parse_job_ad(payload payloadStruct) { // TODO: needs the payload
 		log.Fatal(e)
 	}
 
-	matches := classadRegex.FindAll(b)
+	matches := classadRegex.FindAll(b, -1)
 
 	for _, match := range matches {
-		if match[0] == "Owner" {
-			payload.Owner = match[1]
-		} else if match[0] == "ProjectName" {
-			payload.ProjectName = match[1]
+		if string(match[0]) == "Owner" {
+			payload.Owner = string(match[1])
+		} else if string(match) == "ProjectName" {
+			payload.ProjectName = string(match[1])
 		}
 	}
 
@@ -585,99 +528,48 @@ func parse_job_ad(payload payloadStruct) { // TODO: needs the payload
 // 	return 0
 // }
 
-func es_send(payload payloadStruct) {
-	log := lumber.NewConsoleLogger(lumber.WARN)
+func es_send(payload *payloadStruct) error {
 
 	// calculate the current timestamp
-	timeStamp := int(time.Now())
-	payload.timestamp = timestamp
+	timeStamp := time.Now().Unix()
+	payload.timestamp = timeStamp
 
 	// convert payload to a JSON string (something with Marshall ...)
-
-	// Send a HTTP POST to collector.atlas-ml.org, with a timeout!
-	resp, err := http.Post("http://collector.atlas-ml.org:9951", "application/json", bytes.NewBuffer(jsonStr))
-
-	if err != nil {
-		log.Warning("Can't get collector.atlas-ml.org")
+	var jsonBytes []byte
+	var err error
+	if jsonBytes, err = json.Marshal(payload); err != nil {
+		log.Errorln("Failed to marshal payload JSON: ", err)
+		return err
 	}
-	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
-	// Convert the payload to json
-	// ?? not sure how to do this
-	// Timeout is set to 5 seconds
-	// or this??
 
-	/* Define this function inside ??
-		 def _es_send(payload):
-	        data = payload
-	        data=json.dumps(data)
-	        try:
-	            url = "http://collector.atlas-ml.org:9951"
-	            req = Request(url, data=data.encode("utf-8"), headers={'Content-Type': 'application/json'})
-	            f = urlopen(req)
-	            f.read()
-	            f.close()
-	        except (URLError, UnicodeError) as e:
-	            logging.warning("Error posting to ES: %s", str(e))
-	*/
+	errorChan := make(chan error)
 
-	/*
-			    p = multiprocessing.Process(target=_es_send, name="_es_send", args=(payload,))
-		    	p.start()
-		    	p.join(5)
-		   		p.terminate()
-	*/
+	go doEsSend(jsonBytes, errorChan)
+
+	select {
+	case returnedError := <-errorChan:
+		return returnedError
+	case <-time.After(5 * time.Second):
+		log.Debugln("Send to ES timed out")
+		return errors.New("ES send timed out")
+	}
 
 }
 
-// timedTransfer goes in handle xrootd and call is made internally !!
+// Do the actual send to ES
+// Should be called with a timeout
+func doEsSend(jsonBytes []byte, errorChannel chan<- error) error {
+	// Send a HTTP POST to collector.atlas-ml.org, with a timeout!
+	resp, err := http.Post("http://collector.atlas-ml.org:9951", "application/json", bytes.NewBuffer(jsonBytes))
 
-func timed_transfer(filename string, destination string) {
-
-	//Transfer the filename from the cache to the destination using xrdcp
-
-	// All these values can be found the xrdc man page
-
-	os.Setenv("XRD_REQUESTTIMEOUT", "1")
-	os.Setenv("XRD_CPCHUNKSIZE", "8388608")
-	os.Setenv("XRD_TIMEOUTRESOLUTION", "5")
-	os.Setenv("XRD_CONNECTIONWINDOW", "30")
-	os.Setenv("XRD_CONNECTIONRETRY", "2")
-	os.Setenv("XRD_STREAMTIMEOUT", "30")
-
-	if !strings.HasPrefix(filename, "/") /*?? Correct not use?*/ {
-		filepath += cache + ":1094//" + filename
-	} else {
-		filepath := cache + ":1094/" + filename
+	if err != nil {
+		log.Errorln("Can't get collector.atlas-ml.org:", err)
+		errorChannel <- err
+		return err
 	}
-
-	if debug {
-		command := "xrdcp -d 2 --nopbar -f " + filepath + " " + destination
-	} else {
-		command := "xrdcp --nopbar -f " + filepath + " " + destination
-	}
-
-	filename = "./" + strings.Split(filename, "/")
-
-	if fileExists(filename) {
-		e := os.Remove(filename)
-	}
-
-	// Set logger globally
-	// https://github.com/sirupsen/logrus
-	log := lumber.NewConsoleLogger(lumber.WARN)
-	log.Debug("xrdcp command: %s", command)
-	if debug {
-		// Use https://golang.org/pkg/os/exec/
-
-		// ?? xrdcp=subprocess.Popen([command ],shell=True,stdout=subprocess.PIPE)
-	} else {
-		// ?? xrdcp=subprocess.Popen([command ],shell=True,stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-	}
-
-	//	xrdcp.communicate()
-	// xrd_exit=xrdcp.returncode
-
-	return string(xrd_exit)
-
+	defer resp.Body.Close()
+	body, err := ioutil.ReadAll(resp.Body)
+	log.Debugln("Returned from collector.atlas-ml.org:", string(body))
+	errorChannel <- nil
+	return nil
 }

@@ -1,20 +1,20 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path"
 
-	lumber "github.com/jcelliott/lumber"
+	log "github.com/sirupsen/logrus"
 	shutil "github.com/termie/go-shutil"
 )
 
-func download_cvmfs(sourceFile string, destination string, payload payloadStruct) {
+func download_cvmfs(sourceFile string, destination string, payload *payloadStruct) error {
 	//Check if file is available in cvfms
 	var cvmfs_file string = path.Join("/cvmfs/stash.osgstorage.org", sourceFile)
 
 	// Log
-	log := lumber.NewConsoleLogger(lumber.WARN)
-	log.Debug("Checking if the CVMFS file exists: %s", cvmfs_file)
+	log.Debugf("Checking if the CVMFS file exists: %s", cvmfs_file)
 
 	if _, err := os.Stat(cvmfs_file); !os.IsNotExist(err) {
 
@@ -27,11 +27,13 @@ func download_cvmfs(sourceFile string, destination string, payload payloadStruct
 		//	payload := payloadStruct{tries: 1, cache: "CVMFS", host: "CVMFS"}
 
 		if err != nil {
-			log.Warn("Unable to copy with CVMFS, even though file exists: %s", err)
+			log.Warnf("Unable to copy with CVMFS, even though file exists: %s", err)
+			return err
 		}
 
 	} else {
-		log.Debug("CVMFS File does not exist")
+		log.Debugf("CVMFS File does not exist")
+		return errors.New("CVMFS File does not exist")
 	}
-
+	return nil
 }
