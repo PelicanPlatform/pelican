@@ -1,7 +1,7 @@
 package main
 
 import (
-	"crypto"
+	"bytes"
 	"crypto/rsa"
 	"crypto/sha1"
 	"crypto/x509"
@@ -65,14 +65,9 @@ func get_stashservers_caches(responselines_b [][]byte) ([]string, error) {
 		return []string{}, errors.New("stashservers response does not have sha1 hash")
 	}
 
-	var hashedTextBuilder strings.Builder
-	// Loop through response lines 1 through 4
-	for i := 1; i < 5; i++ {
-		hashedTextBuilder.WriteString(string(responselines_b[i]))
-		hashedTextBuilder.WriteString("\n")
-	}
 	sha1Hash := sha1.New()
-	sha1Hash.Write([]byte(hashedTextBuilder.String()))
+	sha1Hash.Write(bytes.Join(responselines_b[1:5], []byte("\n")))
+	sha1Hash.Write([]byte("\n"))
 	hashed := sha1Hash.Sum(nil)
 	hashStr := hex.EncodeToString(hashed)
 
@@ -84,29 +79,25 @@ func get_stashservers_caches(responselines_b [][]byte) ([]string, error) {
 		return nil, errors.New("stashservers response hash does not match expected hash")
 	}
 
-	// Call out to /usr/bin/openssl if present, in order to avoid
-	// python dependency on a crypto package.
-
-	//
 	var pubKey *rsa.PublicKey
 	var err error
 	if pubKey, err = readPublicKey(); err != nil {
 		// The signature check isn't critical to be done everywhere;
 		// any tampering will likely to be caught somewhere and
-		// investigated.  Usually openssl is present.
+		// investigated.
 		log.Warnln("Public Key not found, will not verify caches")
 	} else {
-		sig := responselines_b[7]
-		ioutil.WriteFile("sig", sig, 0644)
-		err = rsa.VerifyPKCS1v15(pubKey, crypto.SHA1, hashed[:], sig)
+		sig := bytes.Join(responselines_b[7:], []byte("\n"))
+		err = rsa.VerifyPKCS1v15(pubKey, 0, []byte(hashStr), sig)
 		if err != nil {
-			log.Errorln("Error from public key verification:", err)
+			log.Errorln("Error from public key verification of cache list:", err)
 			//return nil, err
 		} else {
 			log.Debugln("Signature Matched")
 		}
 
 	}
+
 	log.Debugf("Cache list: %s", string(responselines_b[4]))
 	cacheColonList := strings.Split(string(responselines_b[4]), "=")[1]
 	cacheListStr := strings.Split(cacheColonList, ";")[0]
