@@ -6,5 +6,5 @@ require (
 	github.com/cavaliercoder/grab v2.0.0+incompatible
 	github.com/jessevdk/go-flags v1.4.0
 	github.com/sirupsen/logrus v1.8.1
-	github.com/termie/go-shutil v0.0.0-20140729215957-bcacb06fecae
+	github.com/studio-b12/gowebdav v0.0.0-20210203212356-8244b5a5f51a
 )

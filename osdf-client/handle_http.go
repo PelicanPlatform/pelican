@@ -3,12 +3,20 @@ package main
 import (
 	"context"
 	"errors"
+	"io/ioutil"
+	"net/http"
 	"net/url"
+	"os"
+	"path"
+	"sync/atomic"
 	"time"
 
 	grab "github.com/cavaliercoder/grab"
 	log "github.com/sirupsen/logrus"
+	"github.com/studio-b12/gowebdav"
 )
+
+var WRITEBACKHOST string = "stash-xrd.osgconnect.net:1094"
 
 func download_http(source string, destination string, payload *payloadStruct) error {
 	// Generate the url
@@ -22,7 +30,13 @@ func download_http(source string, destination string, payload *payloadStruct) er
 
 	log.Debugln("Trying the caches:", nearest_cache_list[:3])
 	var success bool = false
-	for _, cache := range nearest_cache_list[:3] {
+
+	// Make sure we only try as many caches as we have
+	cachesToTry := 3
+	if cachesToTry > len(nearest_cache_list) {
+		cachesToTry = len(nearest_cache_list)
+	}
+	for _, cache := range nearest_cache_list[:cachesToTry] {
 		// Parse the cache URL
 		cacheURL, _ := url.Parse(cache)
 		downloadURL.Host = cacheURL.Host + ":8000"
@@ -109,4 +123,139 @@ Loop:
 		return errors.New("failure status code")
 	}
 	return nil
+}
+
+// Wrap the io.Reader to get progress
+// Adapted from https://stackoverflow.com/questions/26050380/go-tracking-post-request-progress
+type ProgressReader struct {
+	file   *os.File
+	read   int64
+	size   int64
+	closed chan bool
+}
+
+func (pr *ProgressReader) Read(p []byte) (n int, err error) {
+	n, err = pr.file.Read(p)
+	atomic.AddInt64(&pr.read, int64(n))
+	return n, err
+}
+
+func (pr *ProgressReader) Close() error {
+	err := pr.file.Close()
+	// Also, send the closed channel a message
+	pr.closed <- true
+	return err
+}
+
+func UploadFile(src string, dest *url.URL, token string) error {
+
+	// Try opening the file to send
+	file, err := os.Open(src)
+	if err != nil {
+		log.Errorln("Error opening local file:", err)
+		return err
+	}
+	// Stat the file to get the size (for progress bar)
+	fileInfo, err := file.Stat()
+	if err != nil {
+		log.Errorln("Error stating local file ", src, ":", err)
+		return err
+	}
+	dest.Host = WRITEBACKHOST
+	dest.Scheme = "https"
+
+	// Check if the destination is a directory
+	isDestDir, err := IsDir(dest)
+	if err != nil {
+		return err
+	}
+	if isDestDir {
+		// Set the destination as the basename of the source
+		dest.Path = path.Join(dest.Path, path.Base(src))
+	}
+
+	// Create the wrapped reader and send it to the request
+	closed := make(chan bool, 1)
+	responseChan := make(chan *http.Response)
+	reader := &ProgressReader{file, 0, fileInfo.Size(), closed}
+	putContext, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	request, err := http.NewRequestWithContext(putContext, "PUT", dest.String(), reader)
+	if err != nil {
+		log.Errorln("Error creating request:", err)
+		return err
+	}
+	// Set the authorization header
+	request.Header.Set("Authorization", "Bearer "+token)
+	var lastKnownWritten int64
+	t := time.NewTicker(1 * time.Second)
+	defer t.Stop()
+
+	go doPut(request, responseChan)
+
+	// Do the select on a ticker, and the writeChan
+Loop:
+	for {
+		select {
+		case <-t.C:
+			// If we are not making any progress, if we haven't written 1MB in the last 5 seconds
+			currentRead := atomic.LoadInt64(&reader.read)
+			if lastKnownWritten < currentRead {
+				// We have made progress!
+				lastKnownWritten = currentRead
+			} else {
+				// No progress has been made in the last 1 second
+				log.Errorln("No progress made in last 1 second in upload")
+				break Loop
+			}
+
+		case <-closed:
+			// The file has been closed, we're done here
+			log.Debugln("File closed")
+		case response := <-responseChan:
+			log.Debugln("Received response:", response)
+			break Loop
+
+		}
+	}
+
+	return nil
+}
+
+// Actually perform the Put request to the server
+func doPut(request *http.Request, responseChan chan<- *http.Response) {
+	client := &http.Client{}
+	response, err := client.Do(request)
+	if err != nil {
+		log.Errorln("Error with PUT:", err)
+		responseChan <- response
+		return
+	}
+	if response.StatusCode != 200 {
+		log.Errorln("Error status code:", response.Status)
+		log.Debugln("From the server:")
+		textResponse, err := ioutil.ReadAll(response.Body)
+		if err != nil {
+			log.Errorln("Error reading response from server:", err)
+			responseChan <- response
+			return
+		}
+		log.Debugln(textResponse)
+	}
+	responseChan <- response
+
+}
+
+func IsDir(url *url.URL) (bool, error) {
+	rootUrl := *url
+	rootUrl.Path = ""
+	c := gowebdav.NewClient(rootUrl.String(), "", "")
+
+	info, err := c.Stat(url.Path)
+	if err != nil {
+		log.Errorln("Failed to ReadDir:", err)
+		return false, err
+	}
+	return info.IsDir(), nil
+
 }

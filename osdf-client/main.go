@@ -29,7 +29,6 @@ import (
 
 // Redirector
 var global_redirector string = "http://redirector.osgstorage.org:8000"
-var cache_host string = "http://hcc-stash.unl.edu:8000/"
 var VERSION string = "5.6.2"
 
 // Nearest cache
@@ -97,6 +96,8 @@ type Options struct {
 
 	ListCaches bool `long:"list-names" description:"Return the names of pre-configured cache lists and exit"`
 
+	ListDir bool `long:"list-dir" short:"l" description:"List the directory pointed to by source"`
+
 	// Positional arguemnts
 	SourceDestination SourceDestination `description:"Source and Destination Files" positional-args:"1"`
 }
@@ -135,8 +136,24 @@ func main() {
 		os.Exit(0)
 	}
 
+	if options.SourceDestination.Source == "" || options.SourceDestination.Destination == "" {
+		log.Errorln("No Source or Destination")
+		parser.WriteHelp(os.Stdout)
+		os.Exit(1)
+	}
 	source := options.SourceDestination.Source
 	dest := options.SourceDestination.Destination
+
+	if options.ListDir {
+		dirUrl, _ := url.Parse("http://stash.osgconnect.net:1094")
+		dirUrl.Path = source
+		isDir, err := IsDir(dirUrl)
+		if err != nil {
+			log.Errorln("Error getting directory listing:", err)
+		}
+		log.Debugln("Dir is a directory?", isDir)
+		return
+	}
 
 	/*
 		TODO: Parse a caches JSON, is this needed anymore?
@@ -174,20 +191,7 @@ func main() {
 	// Convert the methods
 	splitMethods := strings.Split(options.Methods, ",")
 
-	// get absolute path
-	destPath, _ := filepath.Abs(dest)
-	var destFinal string
-
-	//Check if path exists or if its in a folder
-	if destStat, err := os.Stat(destPath); os.IsNotExist(err) {
-		destFinal = destPath
-	} else if destStat.IsDir() {
-		// Get the file name of the source
-		sourceFilename := path.Base(source)
-		destFinal = path.Join(destPath, sourceFilename)
-	}
-
-	result := doStashCPSingle(source, destFinal, splitMethods)
+	result := doStashCPSingle(source, dest, splitMethods)
 
 	// Exit with failure
 	if result != nil {
@@ -205,64 +209,33 @@ func setLogging(logLevel log.Level) error {
 	return nil
 }
 
-/* TODO writeback
-func doWriteBack(source string, destination string, debug bool) {
-	/*
-			  Do a write back to Stash using SciTokens
+// Do writeback to stash using SciTokens
+func doWriteBack(source string, destination *url.URL) error {
 
-		    :param str source: The location of the local file
-		    :param str destination: The location of the remote file, in stash:// format
-
-
-	start1 := int(time.Now().Unix() * 1000)
-
-	scitoken_contents := "" //getToken()
-	if scitoken_contents == getToken() {
-		errors.New("Unable to find scitokens.use file")
-		return
+	scitoken_contents, err := getToken()
+	if err != nil {
+		return err
 	}
-
-	if debug == true {
-		output_mode := "-v"
-	} else {
-		output_mode := "-s"
-	}
-
-	//Check if the source file is zero-length
-	statinfo := os.Stat(source)
-
-	if statinfo.Size() == 0 { //CHECK After rsoolving compilation error Size method should be in OS or Syscall
-		speed_time = "--speed-time 5 "
-	} else {
-		speed_time := ""
-	}
-	command := fmt.Sprintf("curl %s --connect-timeout 30 %s--speed-limit 1024 -X PUT --fail --upload-file %s -H \"User-Agent: %s\" -H \"Authorization: Bearer %s\" %s%s", output_mode, speed_time, source, user_agent, scitoken_contents, writeback_host, destination)
-
-	val, present := os.LookupEnv("http_proxy")
-	if present { // replace with go in method
-		(os.Environ).Clearenv()
-	}
+	return UploadFile(source, destination, scitoken_contents)
 
 }
-*/
+
 func getToken() (string, error) {
 
-	// Get the token / scitoken from the environment in order to read/write
-
-	// Get the scitoken content
-	scitoken_file := ""
-
 	type tokenJson struct {
-		accessKey string `json:"access_token"`
-		expiresIn int    `json:"expires_in"`
+		AccessKey string `json:"access_token"`
+		ExpiresIn int    `json:"expires_in"`
 	}
 	/*
 		Search for the location of the authentiction token.  It can be set explicitly on the command line (TODO),
 		with the environment variable "TOKEN", or it can be searched in the standard HTCondor directory pointed
 		to by the environment variable "_CONDOR_CREDS".
 	*/
+	var token_location string
+	if options.Token != "" {
+		token_location = options.Token
+	} else {
 
-	if token_location == "" {
 		// https://golang.org/pkg/os/#LookupEnv
 		tokenFile, isTokenSet := os.LookupEnv("TOKEN")
 		credsDir, isCondorCredsSet := os.LookupEnv("_CONDOR_CREDS")
@@ -281,19 +254,26 @@ func getToken() (string, error) {
 		} else {
 			// Print out, can't find token!  Print out error and exit with non-zero exit status
 			// TODO: Better error message
-			return "", errors.New("Failed to find token...")
+			log.Errorln("Unable to find token file")
+			return "", errors.New("failed to find token...")
 		}
-
 	}
 
 	//Read in the JSON
-	log.Debug("Opening file: " + token_location)
-	tokenContents, _ := ioutil.ReadFile(token_location)
+	log.Debug("Opening token file: " + token_location)
+	tokenContents, err := ioutil.ReadFile(token_location)
+	if err != nil {
+		log.Errorln("Error reading token file:", err)
+		return "", err
+	}
 	tokenParsed := tokenJson{}
 	if err := json.Unmarshal(tokenContents, &tokenParsed); err != nil {
-		log.Debugln("Error unmarshalling JSON token contents:", err, "Falling back to old style scitoken parsing")
+		log.Debugln("Error unmarshalling JSON token contents:", err)
+		log.Debugln("Assuming the token file is not JSON, and only contains the TOKEN")
+		tokenStr := strings.TrimSpace(string(tokenContents))
+		return tokenStr, nil
 	}
-	return scitoken_file, nil
+	return tokenParsed.AccessKey, nil
 }
 
 func doStashCPSingle(sourceFile string, destination string, methods []string) error {
@@ -327,7 +307,8 @@ func doStashCPSingle(sourceFile string, destination string, methods []string) er
 	}
 
 	if dest_url.Scheme == "stash" {
-		//return doWriteBack(source_url.path, dest_url.path, debug)
+		log.Debugln("Detected writeback")
+		return doWriteBack(source_url.Path, dest_url)
 	}
 
 	if dest_url.Scheme == "file" {
@@ -340,6 +321,18 @@ func doStashCPSingle(sourceFile string, destination string, methods []string) er
 
 	if string(sourceFile[0]) != "/" {
 		sourceFile = "/" + sourceFile
+	}
+
+	// get absolute path
+	destPath, _ := filepath.Abs(destination)
+
+	//Check if path exists or if its in a folder
+	if destStat, err := os.Stat(destPath); os.IsNotExist(err) {
+		destination = destPath
+	} else if destStat.IsDir() {
+		// Get the file name of the source
+		sourceFilename := path.Base(sourceFile)
+		destination = path.Join(destPath, sourceFilename)
 	}
 
 	payload := payloadStruct{}
@@ -362,6 +355,7 @@ func doStashCPSingle(sourceFile string, destination string, methods []string) er
 	success := false
 
 	// switch statement?
+Loop:
 	for _, method := range methods {
 
 		switch method {
@@ -369,20 +363,20 @@ func doStashCPSingle(sourceFile string, destination string, methods []string) er
 			log.Info("Trying CVMFS...")
 			if err := download_cvmfs(sourceFile, destination, &payload); err == nil {
 				success = true
-				break
+				break Loop
 				//check if break still works
 			}
 		case "xrootd":
 			log.Info("Trying XROOTD...")
 			if err := download_xrootd(sourceFile, destination, &payload); err == nil {
 				success = true
-				break
+				break Loop
 			}
 		case "http":
 			log.Info("Trying HTTP...")
 			if err := download_http(sourceFile, destination, &payload); err == nil {
 				success = true
-				break
+				break Loop
 			}
 		default:
 			log.Errorf("Unknown transfer method: %s", method)

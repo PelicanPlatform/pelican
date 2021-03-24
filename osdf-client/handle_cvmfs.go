@@ -2,11 +2,11 @@ package main
 
 import (
 	"errors"
+	"io"
 	"os"
 	"path"
 
 	log "github.com/sirupsen/logrus"
-	shutil "github.com/termie/go-shutil"
 )
 
 func download_cvmfs(sourceFile string, destination string, payload *payloadStruct) error {
@@ -19,7 +19,30 @@ func download_cvmfs(sourceFile string, destination string, payload *payloadStruc
 	if _, err := os.Stat(cvmfs_file); !os.IsNotExist(err) {
 
 		// If path exists
-		shutil.CopyFile(sourceFile, destination, true)
+		in, err := os.Open(cvmfs_file)
+		if err != nil {
+			log.Debugln("Failed to open the source file:", err)
+			return err
+		}
+		defer in.Close()
+
+		out, err := os.Create(destination)
+		if err != nil {
+			log.Debugln("Failed to create destination file:", err)
+			return err
+		}
+		defer out.Close()
+
+		_, err = io.Copy(out, in)
+		if err != nil {
+			log.Debugln("Copy of file failed:", err)
+			return err
+		}
+		err = out.Close()
+		if err != nil {
+			log.Debugln("Error while closing output file:", err)
+			return err
+		}
 		log.Debug("Succesfully copied file from CVMFS!")
 
 		//	var end1 int32 = int32(time.Now().Unix())
