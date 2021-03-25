@@ -71,8 +71,7 @@ type payloadStruct struct {
 */
 
 type SourceDestination struct {
-	Source      string `short:"i" long:"input" description:"Source file" default:"-"`
-	Destination string `short:"o" long:"output" description:"Destination file" default:"-"`
+	Sources []string `positional-arg-name:"sources" short:"i" long:"input" description:"Source file" default:"-"`
 }
 
 type Options struct {
@@ -136,17 +135,20 @@ func main() {
 		os.Exit(0)
 	}
 
-	if options.SourceDestination.Source == "" || options.SourceDestination.Destination == "" {
+	log.Debugln("Len of source:", len(options.SourceDestination.Sources))
+	if len(options.SourceDestination.Sources) < 2 {
 		log.Errorln("No Source or Destination")
 		parser.WriteHelp(os.Stdout)
 		os.Exit(1)
 	}
-	source := options.SourceDestination.Source
-	dest := options.SourceDestination.Destination
+	source := options.SourceDestination.Sources[:len(options.SourceDestination.Sources)-1]
+	dest := options.SourceDestination.Sources[len(options.SourceDestination.Sources)-1]
 
+	log.Debugln("Sources:", source)
+	log.Debugln("Destination:", dest)
 	if options.ListDir {
 		dirUrl, _ := url.Parse("http://stash.osgconnect.net:1094")
-		dirUrl.Path = source
+		dirUrl.Path = source[0]
 		isDir, err := IsDir(dirUrl)
 		if err != nil {
 			log.Errorln("Error getting directory listing:", err)
@@ -191,7 +193,20 @@ func main() {
 	// Convert the methods
 	splitMethods := strings.Split(options.Methods, ",")
 
-	result := doStashCPSingle(source, dest, splitMethods)
+	if len(source) > 1 {
+		if destStat, err := os.Stat(dest); err != nil && destStat.IsDir() {
+			log.Errorln("Destination is not a directory")
+			os.Exit(1)
+		}
+	}
+
+	var result error
+	for _, src := range source {
+		result = doStashCPSingle(src, dest, splitMethods)
+		if result != nil {
+			break
+		}
+	}
 
 	// Exit with failure
 	if result != nil {
