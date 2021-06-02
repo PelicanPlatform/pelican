@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -16,7 +17,10 @@ import (
 	"github.com/studio-b12/gowebdav"
 )
 
-var WRITEBACKHOST string = "stash-xrd.osgconnect.net:1094"
+//var WRITEBACKHOST string = "stash-xrd.osgconnect.net:1094"
+
+var WRITEBACKHOST string = "stash-w.osgconnect.net:1094"
+var STASHREADABLE string = "stash.osgconnect.net:1094"
 
 func download_http(source string, destination string, payload *payloadStruct) error {
 	// Generate the url
@@ -149,6 +153,8 @@ func (pr *ProgressReader) Close() error {
 
 func UploadFile(src string, dest *url.URL, token string) error {
 
+	log.Debugln("In UploadFile")
+	log.Debugln("Dest", dest.String())
 	// Try opening the file to send
 	file, err := os.Open(src)
 	if err != nil {
@@ -165,13 +171,14 @@ func UploadFile(src string, dest *url.URL, token string) error {
 	dest.Scheme = "https"
 
 	// Check if the destination is a directory
-	isDestDir, err := IsDir(dest)
+	isDestDir, err := IsDir(dest, token)
 	if err != nil {
-		return err
+		log.Warnln("Received an error from checking if dest was a directory.  Going to continue as if there was no error")
 	}
 	if isDestDir {
 		// Set the destination as the basename of the source
 		dest.Path = path.Join(dest.Path, path.Base(src))
+		log.Debugln("Destination", dest.Path, "is a directory")
 	}
 
 	// Create the wrapped reader and send it to the request
@@ -181,6 +188,7 @@ func UploadFile(src string, dest *url.URL, token string) error {
 	putContext, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	request, err := http.NewRequestWithContext(putContext, "PUT", dest.String(), reader)
+	request.ContentLength = fileInfo.Size()
 	if err != nil {
 		log.Errorln("Error creating request:", err)
 		return err
@@ -188,10 +196,12 @@ func UploadFile(src string, dest *url.URL, token string) error {
 	// Set the authorization header
 	request.Header.Set("Authorization", "Bearer "+token)
 	var lastKnownWritten int64
-	t := time.NewTicker(1 * time.Second)
+	t := time.NewTicker(5 * time.Second)
 	defer t.Stop()
-
+	//log.Debug(formatRequest(request))
 	go doPut(request, responseChan)
+	done := false
+	var doneMu sync.Mutex
 
 	// Do the select on a ticker, and the writeChan
 Loop:
@@ -200,6 +210,12 @@ Loop:
 		case <-t.C:
 			// If we are not making any progress, if we haven't written 1MB in the last 5 seconds
 			currentRead := atomic.LoadInt64(&reader.read)
+			doneMu.Lock()
+			realDone := done
+			doneMu.Unlock()
+			if realDone {
+				break Loop
+			}
 			if lastKnownWritten < currentRead {
 				// We have made progress!
 				lastKnownWritten = currentRead
@@ -214,6 +230,9 @@ Loop:
 			log.Debugln("File closed")
 		case response := <-responseChan:
 			log.Debugln("Received response:", response)
+			doneMu.Lock()
+			done = true
+			doneMu.Unlock()
 			break Loop
 
 		}
@@ -240,20 +259,23 @@ func doPut(request *http.Request, responseChan chan<- *http.Response) {
 			responseChan <- response
 			return
 		}
-		log.Debugln(textResponse)
+		log.Debugln(string(textResponse))
 	}
 	responseChan <- response
 
 }
 
-func IsDir(url *url.URL) (bool, error) {
+func IsDir(url *url.URL, token string) (bool, error) {
 	rootUrl := *url
 	rootUrl.Path = ""
+	rootUrl.Host = STASHREADABLE
+	rootUrl.Scheme = "http"
 	c := gowebdav.NewClient(rootUrl.String(), "", "")
+	//c.SetHeader("Authorization", "Bearer "+token)
 
 	info, err := c.Stat(url.Path)
 	if err != nil {
-		log.Errorln("Failed to ReadDir:", err)
+		log.Debugln("Failed to ReadDir:", err, "for URL:", rootUrl.String())
 		return false, err
 	}
 	return info.IsDir(), nil

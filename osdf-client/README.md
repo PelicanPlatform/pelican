@@ -7,7 +7,7 @@ Building
 
 Download the repo and cd into the directory.  Build with the command:
 
-    $ make
+    $ go build
 
 
 Testing

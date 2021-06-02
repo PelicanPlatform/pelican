@@ -71,7 +71,11 @@ type payloadStruct struct {
 */
 
 type SourceDestination struct {
-	Sources []string `positional-arg-name:"sources" short:"i" long:"input" description:"Source file" default:"-"`
+	Sources []string `positional-arg-name:"sources" short:"i" long:"input" description:"Source file(s)" default:"-"`
+
+	// A useless variable.  It should alwasy be empty.  The Sources variable above should "grab" all of the positional arguments
+	// The only reason we have this variable is so the help message has the [sources...] [destination] help mesage.
+	Destination string `positional-arg-name:"destination" short:"o" long:"output" description:"Destination file/directory" default:"-"`
 }
 
 type Options struct {
@@ -119,7 +123,7 @@ func main() {
 		// Set logging to debug level
 		setLogging(log.DebugLevel)
 	} else {
-		setLogging(log.WarnLevel)
+		setLogging(log.ErrorLevel)
 	}
 
 	// Just return all the caches that it knows about
@@ -149,7 +153,7 @@ func main() {
 	if options.ListDir {
 		dirUrl, _ := url.Parse("http://stash.osgconnect.net:1094")
 		dirUrl.Path = source[0]
-		isDir, err := IsDir(dirUrl)
+		isDir, err := IsDir(dirUrl, "")
 		if err != nil {
 			log.Errorln("Error getting directory listing:", err)
 		}
@@ -249,6 +253,7 @@ func getToken() (string, error) {
 	var token_location string
 	if options.Token != "" {
 		token_location = options.Token
+		log.Debugln("Getting token location from command line:", options.Token)
 	} else {
 
 		// https://golang.org/pkg/os/#LookupEnv
@@ -261,11 +266,11 @@ func getToken() (string, error) {
 			token_location = tokenFile
 		} else if !isTokenSet && isCondorCredsSet {
 			// Token wasn't specified on the command line or environment, try the default scitoken
-			if _, err := os.Stat(filepath.Join(credsDir, "scitokens.use")); os.IsNotExist(err) {
+			if _, err := os.Stat(filepath.Join(credsDir, "scitokens.use")); err == nil {
 				token_location = filepath.Join(credsDir, "scitokens.use")
-			} else if _, err := os.Stat(".condor_creds/scitokens.use"); os.IsNotExist(err) {
-				token_location, _ = filepath.Abs(".condor_creds/scitokens.use")
 			}
+		} else if _, err := os.Stat(".condor_creds/scitokens.use"); err == nil {
+			token_location, _ = filepath.Abs(".condor_creds/scitokens.use")
 		} else {
 			// Print out, can't find token!  Print out error and exit with non-zero exit status
 			// TODO: Better error message
