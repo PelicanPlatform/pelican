@@ -92,7 +92,7 @@ type Options struct {
 	CacheJSON string `short:"j" long:"caches-json" description:"A JSON file containing the list of caches"`
 
 	// Comma separated list of methods to try, in order.  Default: cvmfs,xrootd,http
-	Methods string `long:"methods" description:"Comma separated list of methods to try, in order.  Default: cvmfs,xrootd,http" default:"cvmfs,xrootd,http"`
+	Methods string `long:"methods" description:"Comma separated list of methods to try, in order." default:"cvmfs,xrootd,http"`
 
 	// Token file to use for reading and/or writing
 	Token string `long:"token" short:"t" description:"Token file to use for reading and/or writing"`
@@ -135,7 +135,11 @@ func main() {
 	}
 
 	if options.Closest {
-		fmt.Println(get_best_stashcache())
+		closest, err := get_best_stashcache()
+		if err != nil {
+			log.Errorln("Failed to get best stashcache: ", err)
+		}
+		fmt.Println(closest)
 		os.Exit(0)
 	}
 

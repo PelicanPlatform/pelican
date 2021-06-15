@@ -19,7 +19,7 @@ import (
 
 //var WRITEBACKHOST string = "stash-xrd.osgconnect.net:1094"
 
-var WRITEBACKHOST string = "stash-w.osgconnect.net:1094"
+var WRITEBACKHOST string = "stash-xrd.osgconnect.net:1094"
 var STASHREADABLE string = "stash.osgconnect.net:1094"
 
 func download_http(source string, destination string, payload *payloadStruct) error {
