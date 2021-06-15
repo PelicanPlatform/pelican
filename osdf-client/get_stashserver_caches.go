@@ -14,9 +14,13 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	_ "embed"
 
 	log "github.com/sirupsen/logrus"
 )
+
+//go:embed opensciencegrid.org.pub
+var osgpubkey []byte
 
 func get_stashservers_caches(responselines_b [][]byte) ([]string, error) {
 
@@ -147,22 +151,25 @@ func getKeyLocation() string {
 	if _, err := os.Stat(checkedLocation); err == nil {
 		return checkedLocation
 	}
+
 	return ""
 
 }
 
 // Largely adapted from https://gist.github.com/jshap70/259a87a7146393aab5819873a193b88c
 func readPublicKey() (*rsa.PublicKey, error) {
-
+	var err error
 	publicKeyPath := getKeyLocation()
+	var pubkeyContents []byte
 	if publicKeyPath == "" {
-		return nil, errors.New("Public Key not found")
-	}
-
-	pubkeyContents, err := ioutil.ReadFile(publicKeyPath)
-	if err != nil {
-		log.Errorln("Error reading public key:", err)
-		return nil, err
+		pubkeyContents = osgpubkey
+	} else {
+		var err error
+		pubkeyContents, err = ioutil.ReadFile(publicKeyPath)
+		if err != nil {
+			log.Errorln("Error reading public key:", err)
+			return nil, err
+		}
 	}
 
 	pubPem, rest := pem.Decode(pubkeyContents)

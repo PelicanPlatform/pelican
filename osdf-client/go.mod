@@ -1,6 +1,6 @@
 module github.com/djw8605/stashcp
 
-go 1.14
+go 1.16
 
 require (
 	github.com/cavaliercoder/grab v2.0.0+incompatible
