@@ -29,7 +29,9 @@ import (
 
 // Redirector
 var global_redirector string = "http://redirector.osgstorage.org:8000"
-var VERSION string = "5.6.2"
+var VERSION string = "6.1.0"
+var builddate string
+var commit string
 
 // Nearest cache
 var nearest_cache string
@@ -41,9 +43,6 @@ var caches_json_location string = ""
 var token_location string = ""
 var print_cache_list_names = false
 
-var version string
-var builddate string
-var commit string
 
 type payloadStruct struct {
 	filename     string
@@ -134,7 +133,7 @@ func main() {
 	}
 
 	if options.Version {
-		fmt.Println("Version:", version)
+		fmt.Println("Version:", VERSION)
 		fmt.Println("Build Date:", builddate)
 		fmt.Println("Build Commit:", commit)
 		os.Exit(0)
