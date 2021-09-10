@@ -41,6 +41,10 @@ var caches_json_location string = ""
 var token_location string = ""
 var print_cache_list_names = false
 
+var version string
+var builddate string
+var commit string
+
 type payloadStruct struct {
 	filename     string
 	sitename     string
@@ -101,6 +105,9 @@ type Options struct {
 
 	ListDir bool `long:"list-dir" short:"l" description:"List the directory pointed to by source"`
 
+	// Version information
+	Version bool `long:"version" short:"v" description:"Print the version and exit"`
+
 	// Positional arguemnts
 	SourceDestination SourceDestination `description:"Source and Destination Files" positional-args:"1"`
 }
@@ -124,6 +131,13 @@ func main() {
 		setLogging(log.DebugLevel)
 	} else {
 		setLogging(log.ErrorLevel)
+	}
+
+	if options.Version {
+		fmt.Println("Version:", version)
+		fmt.Println("Build Date:", builddate)
+		fmt.Println("Build Commit:", commit)
+		os.Exit(0)
 	}
 
 	// Just return all the caches that it knows about
