@@ -17,15 +17,25 @@ import (
 	"github.com/studio-b12/gowebdav"
 )
 
-//var WRITEBACKHOST string = "stash-xrd.osgconnect.net:1094"
 
-var WRITEBACKHOST string = "stash-xrd.osgconnect.net:1094"
-var STASHREADABLE string = "stash.osgconnect.net:1094"
-
-func download_http(source string, destination string, payload *payloadStruct) error {
+func download_http(source string, destination string, payload *payloadStruct, namespace Namespace) error {
 	// Generate the url
 	var downloadURL url.URL
-	downloadURL.Scheme = "http"
+	if namespace.ReadHTTPS {
+		downloadURL.Scheme = "https"
+	} else {
+		downloadURL.Scheme = "http"
+	}
+	var token string
+	if namespace.UseTokenOnRead {
+		var err error
+		token, err = getToken()
+		if err != nil {
+			log.Errorln("Failed to get token though required to read from this namespace:", err)
+			return err
+		}
+	}
+
 	downloadURL.Path = source
 
 	if len(nearest_cache_list) == 0 {
@@ -43,10 +53,24 @@ func download_http(source string, destination string, payload *payloadStruct) er
 	for _, cache := range nearest_cache_list[:cachesToTry] {
 		// Parse the cache URL
 		cacheURL, _ := url.Parse(cache)
-		downloadURL.Host = cacheURL.Host + ":8000"
+		if namespace.ReadHTTPS {
+			downloadURL.Host = cacheURL.Host + ":8444"
+		} else {
+			downloadURL.Host = cacheURL.Host + ":8000"
+		}
 		log.Debugln("Constructed URL:", downloadURL.String())
-		if err := DownloadHTTP(downloadURL.String(), destination); err != nil {
+		if err := DownloadHTTP(downloadURL.String(), destination, token); err != nil {
+			if namespace.ReadHTTPS {
+				// Try also the port 8443
+				downloadURL.Host = cacheURL.Host + ":8443"
+				log.Debugln("Trying port 8443 for authenticated read")
+				if err := DownloadHTTP(downloadURL.String(), destination, token); err == nil {
+					success = true
+					break
+				}
+			}
 			log.Debugln("Error downloading from HTTP:", err)
+
 		} else {
 			success = true
 			break
@@ -61,14 +85,18 @@ func download_http(source string, destination string, payload *payloadStruct) er
 	}
 }
 
-// GetRedirect - Get the redirection for a URL
-func DownloadHTTP(url string, dest string) error {
+// DownloadHTTP - Perform the actual download of the file
+func DownloadHTTP(url string, dest string, token string) error {
 
 	// Create the client, request, and context
 	client := grab.NewClient()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	req, _ := grab.NewRequest(dest, url)
+	if token != "" {
+		req.HTTPRequest.Header.Set("Authorization", "Bearer " + token)
+	}
 	req.WithContext(ctx)
 
 	// Test the transfer speed every 5 seconds
@@ -76,7 +104,7 @@ func DownloadHTTP(url string, dest string) error {
 	defer t.Stop()
 
 	// Store the last downloaded amount, and the bottom limit of the download
-	var download_limit int64 = 1024 * 1024
+	var downloadLimit int64 = 1024 * 1024
 
 	// Start the transfer
 	resp := client.Do(req)
@@ -96,7 +124,7 @@ Loop:
 			*/
 
 			// Check if we are downloading fast enough
-			if resp.BytesPerSecond() < float64(download_limit) {
+			if resp.BytesPerSecond() < float64(downloadLimit) {
 				// This should be warning level probably
 				/*
 					fmt.Printf("Cancelled transfer: transferred %v / %v bytes (%.2f%%) (%.2f MB/s)\n",
@@ -129,7 +157,7 @@ Loop:
 	return nil
 }
 
-// Wrap the io.Reader to get progress
+// ProgressReader wraps the io.Reader to get progress
 // Adapted from https://stackoverflow.com/questions/26050380/go-tracking-post-request-progress
 type ProgressReader struct {
 	file   *os.File
@@ -138,12 +166,13 @@ type ProgressReader struct {
 	closed chan bool
 }
 
+// Read implements the common read function for io.Reader
 func (pr *ProgressReader) Read(p []byte) (n int, err error) {
 	n, err = pr.file.Read(p)
 	atomic.AddInt64(&pr.read, int64(n))
 	return n, err
 }
-
+// Close implments the close function of io.Closer
 func (pr *ProgressReader) Close() error {
 	err := pr.file.Close()
 	// Also, send the closed channel a message
@@ -151,7 +180,8 @@ func (pr *ProgressReader) Close() error {
 	return err
 }
 
-func UploadFile(src string, dest *url.URL, token string) error {
+// UploadFile Uploads a file using HTTP
+func UploadFile(src string, dest *url.URL, token string, namespace Namespace) error {
 
 	log.Debugln("In UploadFile")
 	log.Debugln("Dest", dest.String())
@@ -167,11 +197,16 @@ func UploadFile(src string, dest *url.URL, token string) error {
 		log.Errorln("Error stating local file ", src, ":", err)
 		return err
 	}
-	dest.Host = WRITEBACKHOST
+	// Parse the writeback host as a URL
+	writebackhostUrl, err := url.Parse(namespace.WriteBackHost)
+	if err != nil {
+		return err
+	}
+	dest.Host = writebackhostUrl.Host
 	dest.Scheme = "https"
 
 	// Check if the destination is a directory
-	isDestDir, err := IsDir(dest, token)
+	isDestDir, err := IsDir(dest, token, namespace)
 	if err != nil {
 		log.Warnln("Received an error from checking if dest was a directory.  Going to continue as if there was no error")
 	}
@@ -265,11 +300,23 @@ func doPut(request *http.Request, responseChan chan<- *http.Response) {
 
 }
 
-func IsDir(url *url.URL, token string) (bool, error) {
+func IsDir(url *url.URL, token string, namespace Namespace) (bool, error) {
 	rootUrl := *url
-	rootUrl.Path = ""
-	rootUrl.Host = STASHREADABLE
-	rootUrl.Scheme = "http"
+	if namespace.DirListHost != "" {
+		// Parse the dir list host
+		dirListURL, err := url.Parse(namespace.DirListHost)
+		if err != nil {
+			log.Errorln("Failed to parse dirlisthost from namespaces into URL:", err)
+			return false, err
+		}
+		rootUrl = *dirListURL
+
+	} else {
+		rootUrl.Path = ""
+		rootUrl.Host = "stash.osgconnect.net:1094"
+		rootUrl.Scheme = "http"
+	}
+
 	c := gowebdav.NewClient(rootUrl.String(), "", "")
 	//c.SetHeader("Authorization", "Bearer "+token)
 
