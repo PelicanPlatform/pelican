@@ -96,6 +96,10 @@ func get_best_stashcache(cacheListName string) ([]string, error) {
 			// Create an HTTP client
 			client := &http.Client{}
 			req, err := http.NewRequest("GET", GeoIpUrl.String(), nil)
+			if err != nil {
+				log.Errorln("Failed to create HTTP request:", err)
+				continue
+			}
 			req.Header.Add("Cache-control", "max-age=0")
 			req.Header.Add("User-Agent", "user_agent")
 			resp, err := client.Do(req)
