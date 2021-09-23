@@ -9,3 +9,6 @@ all:
 	go build \
     -ldflags "-w -s -X main.version=${VERSION} -X main.commit=${GIT_REV} -X main.builddate=${DATE}" \
     -a -o stashcp
+
+test:
+	go test
