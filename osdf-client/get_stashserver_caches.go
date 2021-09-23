@@ -18,7 +18,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-//go:embed opensciencegrid.org.pub
+//go:embed resources/opensciencegrid.org.pub
 var osgpubkey []byte
 
 func get_stashservers_caches(responselines_b [][]byte) (map[string][]string, error) {
