@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-//go:embed namespaces.yaml
+//go:embed resources/namespaces.yaml
 var namespacesYaml []byte
 
 // Namespace holds the structure of stash namespaces
