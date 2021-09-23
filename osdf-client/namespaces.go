@@ -8,11 +8,9 @@ import (
 )
 
 //go:embed namespaces.yaml
-var namespaces_yaml []byte
+var namespacesYaml []byte
 
-// /ospool/PROTECTED:
-//  readhttps: true
-//  writebackhost: https://origin-auth2001.chtc.wisc.edu:1094
+// Namespace holds the structure of stash namespaces
 type Namespace struct {
 	Path string `yaml:"path"`
 	ReadHTTPS bool `yaml:"readhttps"`
@@ -26,7 +24,7 @@ var namespaces []Namespace
 func getNamespaces() ([]Namespace, error) {
 	// Allocate the namespaces
 	var ns []Namespace
-	err := yaml.Unmarshal(namespaces_yaml, &ns)
+	err := yaml.Unmarshal(namespacesYaml, &ns)
 	if err != nil {
 		fmt.Println(err)
 		return nil, err
