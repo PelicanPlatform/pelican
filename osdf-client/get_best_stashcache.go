@@ -15,8 +15,14 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-func get_best_stashcache() (string, error) {
+func get_best_stashcache(cacheListName string) ([]string, error) {
 
+
+	if cacheListName == "" {
+		cacheListName = "xroot"
+	}
+
+	GeoIpUrl := url.URL{}
 	// Use the geo ip service on the WLCG Web Proxy Auto Discovery machines
 	geo_ip_sites := [...]string{"wlcg-wpad.cern.ch", "wlcg-wpad.fnal.gov"}
 
@@ -26,8 +32,6 @@ func get_best_stashcache() (string, error) {
 		geo_ip_sites[i], geo_ip_sites[j] = geo_ip_sites[j], geo_ip_sites[i]
 	})
 
-	var api_text string = ""
-
 	var caches_list []string
 
 	// Check if the user provided a caches json file location
@@ -36,7 +40,7 @@ func get_best_stashcache() (string, error) {
 			// path does not exist
 			log.Errorln(caches_json_location, "does not exist")
 
-			return "", errors.New("Unable to open caches json file at: " + caches_json_location)
+			return nil, errors.New("Unable to open caches json file at: " + caches_json_location)
 		}
 
 		//Use geo ip api on caches in provided json file
@@ -53,14 +57,18 @@ func get_best_stashcache() (string, error) {
 
 			// Remove the first comma
 			caches_string = string([]rune(caches_string)[1:])
-			api_text = "api/v1.0/geo/stashcp/" + caches_string
+			GeoIpUrl.Path = "api/v1.0/geo/stashcp/" + caches_string
 		}
 	} else {
 		//Use Stashservers.dat api
 
-		api_text = "stashservers.dat"
-		if caches_list_name != "" {
-			api_text = api_text + "?list=" + caches_list_name
+		//api_text = "stashservers.dat"
+		GeoIpUrl.Path = "stashservers.dat"
+
+		if cacheListName != "" {
+			queryParams := GeoIpUrl.Query()
+			queryParams.Set("list", cacheListName)
+			GeoIpUrl.RawQuery = queryParams.Encode()
 		}
 	}
 
@@ -80,18 +88,20 @@ func get_best_stashcache() (string, error) {
 		log.Debugf("Trying server site of %s", cur_site)
 
 		for _, ip := range get_ips(cur_site) {
-			final_url := url.URL{Host: ip, Path: api_text, Scheme: "http"}
-			log.Debugln("Querying", final_url.String())
+			GeoIpUrl.Host = ip
+			GeoIpUrl.Scheme = "http"
+			log.Debugln("Querying", GeoIpUrl.String())
 
 			// Headers for the HTTP request
 			// Create an HTTP client
 			client := &http.Client{}
-			req, err := http.NewRequest("GET", final_url.String(), nil)
+			req, err := http.NewRequest("GET", GeoIpUrl.String(), nil)
 			req.Header.Add("Cache-control", "max-age=0")
 			req.Header.Add("User-Agent", "user_agent")
 			resp, err := client.Do(req)
 			if err != nil {
-				log.Errorln("Could not open URL")
+				log.Errorln("Could not open URL", err)
+				continue
 			}
 
 			if resp.StatusCode == 200 {
@@ -123,30 +133,29 @@ func get_best_stashcache() (string, error) {
 	if order_str == "" {
 		if len(caches_list) == 0 {
 			log.Errorln("unable to get list of caches")
-			return "", errors.New("Unable to get the list of caches")
+			return nil, errors.New("Unable to get the list of caches")
 		}
 		//Unable to find a geo_ip server to user, return random choice from caches
-		nearest_cache_list = caches_list
-		rand.Shuffle(len(nearest_cache_list), func(i, j int) {
-			nearest_cache_list[i], nearest_cache_list[j] = nearest_cache_list[j], nearest_cache_list[i]
+		rand.Shuffle(len(caches_list), func(i, j int) {
+			caches_list[i], caches_list[j] = caches_list[j], caches_list[i]
 		})
-		minsite := nearest_cache_list[0]
+		minsite := caches_list[0]
+		nearest_cache_list = caches_list
 		log.Debugf("Unable to use Geoip to find closest cache!  Returning random cache %s", minsite)
-		log.Debugf("Randomized list of nearest caches: %s", strings.Join(nearest_cache_list, ","))
-		return minsite, nil
+		log.Debugf("Randomized list of nearest caches: %s", strings.Join(caches_list, ","))
+		return caches_list, nil
 	} else {
 		// The order string should be something like: 3,1,2
 		ordered_list := strings.Split(strings.TrimSpace(order_str), ",")
 		log.Debugln("Ordered list of caches:", ordered_list)
-		var caches_list []string
 
 		//Used the stashservers.dat api
 		var err error
-		caches_list, err = get_stashservers_caches(responselines_b)
+		cachesList, err := get_stashservers_caches(responselines_b)
 
 		if err != nil {
 			log.Errorln("Error from getting stashcache caches:", err)
-			return "", err
+			return nil, err
 		}
 
 		// Ordered list is an array of index values which are used
@@ -154,18 +163,18 @@ func get_best_stashcache() (string, error) {
 		minIndex, err := strconv.Atoi(ordered_list[0])
 		if err != nil {
 			log.Errorln("Received a non integer min site from the WPAD servers")
-			return "", errors.New("Received a non integer min site from the WPAD servers")
+			return nil, errors.New("Received a non integer min site from the WPAD servers")
 		}
-		minsite := caches_list[minIndex-1]
+		minsite := cachesList[cacheListName][minIndex-1]
 		log.Debugln("Closest cache:", minsite)
 
 		for _, ordered_index := range ordered_list {
 			orderedIndex, _ := strconv.Atoi(ordered_index)
-			nearest_cache_list = append(nearest_cache_list, caches_list[orderedIndex-1])
+			nearest_cache_list = append(nearest_cache_list, cachesList[cacheListName][orderedIndex-1])
 		}
 
 		log.Debugf("Returning closest cache: %s", minsite)
 		log.Debugf("Ordered list of nearest caches: %s", nearest_cache_list)
-		return minsite, nil
+		return nearest_cache_list, nil
 	}
 }

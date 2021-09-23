@@ -29,7 +29,9 @@ import (
 
 // Redirector
 var global_redirector string = "http://redirector.osgstorage.org:8000"
-var VERSION string = "5.6.2"
+var VERSION string = "6.1.0"
+var builddate string
+var commit string
 
 // Nearest cache
 var nearest_cache string
@@ -40,6 +42,7 @@ var caches_list_name string = ""
 var caches_json_location string = ""
 var token_location string = ""
 var print_cache_list_names = false
+
 
 type payloadStruct struct {
 	filename     string
@@ -101,6 +104,15 @@ type Options struct {
 
 	ListDir bool `long:"list-dir" short:"l" description:"List the directory pointed to by source"`
 
+	// Version information
+	Version bool `long:"version" short:"v" description:"Print the version and exit"`
+
+	// Namespace information
+	PrintNamespaces bool `long:"namespaces" description:"Print the namespace information and exit"`
+
+	// List Types (xroot or xroots)
+	ListType string `long:"cache-list-name" short:"n" description:"Cache list to use, currently either xroot or xroots" default:"xroot"`
+
 	// Positional arguemnts
 	SourceDestination SourceDestination `description:"Source and Destination Files" positional-args:"1"`
 }
@@ -126,20 +138,45 @@ func main() {
 		setLogging(log.ErrorLevel)
 	}
 
+	if options.Version {
+		fmt.Println("Version:", VERSION)
+		fmt.Println("Build Date:", builddate)
+		fmt.Println("Build Commit:", commit)
+		os.Exit(0)
+	}
+
+	if options.PrintNamespaces {
+		namespaces, err := getNamespaces()
+		if err != nil {
+			fmt.Println("Failed to get namespaces:", err)
+			os.Exit(1)
+		}
+		fmt.Printf("%+v\n", namespaces)
+		os.Exit(0)
+	}
+
 	// Just return all the caches that it knows about
 	// Print out all of the caches and exit
 	if options.ListCaches {
 		print_cache_list_names = true
-		get_best_stashcache()
+		cacheList, err := get_best_stashcache(options.ListType)
+		if err != nil {
+			log.Errorln("Failed to get best caches:", err)
+			os.Exit(1)
+		}
+		for _, cache := range cacheList {
+			fmt.Print(cache)
+		}
+		fmt.Println()
 		os.Exit(0)
 	}
 
 	if options.Closest {
-		closest, err := get_best_stashcache()
+		cacheList, err := get_best_stashcache(options.ListType)
 		if err != nil {
 			log.Errorln("Failed to get best stashcache: ", err)
 		}
-		fmt.Println(closest)
+		fmt.Println(cacheList[0])
 		os.Exit(0)
 	}
 
@@ -157,7 +194,7 @@ func main() {
 	if options.ListDir {
 		dirUrl, _ := url.Parse("http://stash.osgconnect.net:1094")
 		dirUrl.Path = source[0]
-		isDir, err := IsDir(dirUrl, "")
+		isDir, err := IsDir(dirUrl, "", Namespace{})
 		if err != nil {
 			log.Errorln("Error getting directory listing:", err)
 		}
@@ -233,13 +270,13 @@ func setLogging(logLevel log.Level) error {
 }
 
 // Do writeback to stash using SciTokens
-func doWriteBack(source string, destination *url.URL) error {
+func doWriteBack(source string, destination *url.URL, namespace Namespace) error {
 
 	scitoken_contents, err := getToken()
 	if err != nil {
 		return err
 	}
-	return UploadFile(source, destination, scitoken_contents)
+	return UploadFile(source, destination, scitoken_contents, namespace)
 
 }
 
@@ -300,6 +337,7 @@ func getToken() (string, error) {
 	return tokenParsed.AccessKey, nil
 }
 
+// Start the transfer, whether read or write back
 func doStashCPSingle(sourceFile string, destination string, methods []string) error {
 
 	// Parse the source and destination with URL parse
@@ -330,9 +368,17 @@ func doStashCPSingle(sourceFile string, destination string, methods []string) er
 		return errors.New("Do not understand destination scheme")
 	}
 
+	// Get the namespace of the remote filesystem
+	// For write back, it will be the destination
+	// For read it will be the source.
+
 	if dest_url.Scheme == "stash" {
 		log.Debugln("Detected writeback")
-		return doWriteBack(source_url.Path, dest_url)
+		ns, err := MatchNamespace(dest_url.Path)
+		if err != nil {
+			log.Errorln("Failed to get namespace information:", err)
+		}
+		return doWriteBack(source_url.Path, dest_url, ns)
 	}
 
 	if dest_url.Scheme == "file" {
@@ -345,6 +391,11 @@ func doStashCPSingle(sourceFile string, destination string, methods []string) er
 
 	if string(sourceFile[0]) != "/" {
 		sourceFile = "/" + sourceFile
+	}
+
+	ns, err := MatchNamespace(source_url.Path)
+	if err != nil {
+		return err
 	}
 
 	// get absolute path
@@ -398,7 +449,7 @@ Loop:
 			}
 		case "http":
 			log.Info("Trying HTTP...")
-			if err := download_http(sourceFile, destination, &payload); err == nil {
+			if err := download_http(sourceFile, destination, &payload, ns); err == nil {
 				success = true
 				break Loop
 			}
@@ -456,7 +507,7 @@ func get_ips(name string) []string {
 
 	info, err := net.LookupHost(name)
 	if err != nil {
-		log.Error("Unable to look up %s", name)
+		log.Error("Unable to look up", name)
 
 		var empty []string
 		return empty
