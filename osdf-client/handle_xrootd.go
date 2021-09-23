@@ -12,7 +12,7 @@ import (
 func download_xrootd(sourceFile string, destination string, payload *payloadStruct) error {
 
 	// Download from the nearest cache, if that fails, fallback to the stash origin.
-
+	return errors.New("XrootD not implemented")
 	// Check for xrootd, return quickly if it's not available
 	xrootd_check := check_for_xrootd()
 	if xrootd_check != nil {
@@ -21,7 +21,7 @@ func download_xrootd(sourceFile string, destination string, payload *payloadStru
 
 	// If the cache is not specified by the command line, then look for the closest
 	if len(nearest_cache_list) == 0 {
-		get_best_stashcache()
+		get_best_stashcache("xroot")
 	}
 
 	// if nearest_cache.Size() == 0{
@@ -51,7 +51,7 @@ func check_for_xrootd() error {
 
 	xrdcp_version, err := command_object.StdoutPipe()
 	if nil != err {
-		log.Debug("Error obtaining stdout: %s", err.Error())
+		log.Debug("Error obtaining stdout:", err.Error())
 		return err
 	}
 
@@ -59,7 +59,7 @@ func check_for_xrootd() error {
 		if exiterr, ok := err.(*exec.ExitError); ok {
 			// The program has exited with an exit code != 0
 			if status, ok := exiterr.Sys().(syscall.WaitStatus); ok {
-				log.Debug("xrdcp command returned exit code: %d", status.ExitStatus())
+				log.Debug("xrdcp command returned exit code:", status.ExitStatus())
 				return errors.New("xrdcp returned non-zero exit code")
 			}
 
@@ -69,7 +69,7 @@ func check_for_xrootd() error {
 	buf := new(bytes.Buffer)
 	buf.ReadFrom(xrdcp_version)
 	xrdcp_version_string := buf.String()
-	log.Debug("xrdcp version: %s", xrdcp_version_string)
+	log.Debug("xrdcp version:", xrdcp_version_string)
 	//log.Debug("xrdcp version: %s", stdout)
 
 	return nil
