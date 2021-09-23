@@ -1,4 +1,4 @@
-module github.com/djw8605/stashcp
+module github.com/opensciencegrid/stashcp
 
 go 1.16
 
