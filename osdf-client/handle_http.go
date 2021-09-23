@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"regexp"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -17,15 +18,15 @@ import (
 	"github.com/studio-b12/gowebdav"
 )
 
+// HasPort test the host if it includes a port
+func HasPort(host string) bool {
+	var checkPort = regexp.MustCompile("^.*:[0-9]+$")
+	return checkPort.MatchString(host)
+}
 
 func download_http(source string, destination string, payload *payloadStruct, namespace Namespace) error {
 	// Generate the url
 	var downloadURL url.URL
-	if namespace.ReadHTTPS {
-		downloadURL.Scheme = "https"
-	} else {
-		downloadURL.Scheme = "http"
-	}
 	var token string
 	if namespace.UseTokenOnRead {
 		var err error
@@ -37,12 +38,17 @@ func download_http(source string, destination string, payload *payloadStruct, na
 	}
 
 	downloadURL.Path = source
-
+	cacheListName := "xroot"
+	if namespace.ReadHTTPS || namespace.UseTokenOnRead {
+		cacheListName = "xroots"
+	}
 	if len(nearest_cache_list) == 0 {
-		get_best_stashcache()
+		_, err := get_best_stashcache(cacheListName)
+		if err != nil {
+			log.Errorln("Failed to get best caches:", err)
+		}
 	}
 
-	log.Debugln("Trying the caches:", nearest_cache_list[:3])
 	var success bool = false
 
 	// Make sure we only try as many caches as we have
@@ -50,17 +56,36 @@ func download_http(source string, destination string, payload *payloadStruct, na
 	if cachesToTry > len(nearest_cache_list) {
 		cachesToTry = len(nearest_cache_list)
 	}
+	log.Debugln("Trying the caches:", nearest_cache_list[:cachesToTry])
 	for _, cache := range nearest_cache_list[:cachesToTry] {
 		// Parse the cache URL
-		cacheURL, _ := url.Parse(cache)
+		log.Debugln("Cache:", cache)
+		cacheURL, err := url.Parse(cache)
+		if err != nil {
+			log.Errorln("Failed to parse cache:", cache, "error:", err)
+		}
+		if cacheURL.Host == "" {
+			// Assume the cache is just a hostname
+			cacheURL.Host = cache
+			cacheURL.Path = ""
+		}
+		log.Debugln("Parsed Cache:", cacheURL)
+		downloadURL.Host = cacheURL.Host
 		if namespace.ReadHTTPS {
-			downloadURL.Host = cacheURL.Host + ":8444"
+			if !HasPort(cacheURL.Host) {
+				downloadURL.Host += ":8444"
+			}
+			downloadURL.Scheme = "https"
 		} else {
-			downloadURL.Host = cacheURL.Host + ":8000"
+			if !HasPort(cacheURL.Host) {
+				downloadURL.Host += ":8000"
+			}
+			downloadURL.Scheme = "http"
 		}
 		log.Debugln("Constructed URL:", downloadURL.String())
 		if err := DownloadHTTP(downloadURL.String(), destination, token); err != nil {
-			if namespace.ReadHTTPS {
+			log.Debugln("Failed to download:", err)
+			if namespace.ReadHTTPS && !HasPort(cacheURL.Host) {
 				// Try also the port 8443
 				downloadURL.Host = cacheURL.Host + ":8443"
 				log.Debugln("Trying port 8443 for authenticated read")
@@ -218,10 +243,12 @@ func UploadFile(src string, dest *url.URL, token string, namespace Namespace) er
 
 	// Create the wrapped reader and send it to the request
 	closed := make(chan bool, 1)
+	errorChan := make(chan error, 1)
 	responseChan := make(chan *http.Response)
 	reader := &ProgressReader{file, 0, fileInfo.Size(), closed}
 	putContext, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	log.Debugln("Full destination URL:", dest.String())
 	request, err := http.NewRequestWithContext(putContext, "PUT", dest.String(), reader)
 	request.ContentLength = fileInfo.Size()
 	if err != nil {
@@ -234,7 +261,7 @@ func UploadFile(src string, dest *url.URL, token string, namespace Namespace) er
 	t := time.NewTicker(5 * time.Second)
 	defer t.Stop()
 	//log.Debug(formatRequest(request))
-	go doPut(request, responseChan)
+	go doPut(request, responseChan, errorChan)
 	done := false
 	var doneMu sync.Mutex
 
@@ -270,6 +297,13 @@ Loop:
 			doneMu.Unlock()
 			break Loop
 
+		case err := <-errorChan:
+			log.Warningln("Unexpected error when performing upload:", err)
+			doneMu.Lock()
+			done = true
+			doneMu.Unlock()
+			break Loop
+
 		}
 	}
 
@@ -277,12 +311,12 @@ Loop:
 }
 
 // Actually perform the Put request to the server
-func doPut(request *http.Request, responseChan chan<- *http.Response) {
+func doPut(request *http.Request, responseChan chan<- *http.Response, errorChan chan<- error) {
 	client := &http.Client{}
 	response, err := client.Do(request)
 	if err != nil {
 		log.Errorln("Error with PUT:", err)
-		responseChan <- response
+		errorChan <- err
 		return
 	}
 	if response.StatusCode != 200 {
