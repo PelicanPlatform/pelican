@@ -5,16 +5,15 @@ import (
 	"crypto/rsa"
 	"crypto/sha1"
 	"crypto/x509"
+	_ "embed"
 	"encoding/hex"
 	"encoding/pem"
 	"errors"
-	"fmt"
 	"io/ioutil"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
-	_ "embed"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -22,7 +21,7 @@ import (
 //go:embed opensciencegrid.org.pub
 var osgpubkey []byte
 
-func get_stashservers_caches(responselines_b [][]byte) ([]string, error) {
+func get_stashservers_caches(responselines_b [][]byte) (map[string][]string, error) {
 
 	/**
 		 After the geo order of the selected server list on line zero,
@@ -57,7 +56,7 @@ func get_stashservers_caches(responselines_b [][]byte) ([]string, error) {
 	if len(responselines_b) < 8 {
 
 		log.Errorln("stashservers response too short, less than 8 lines:", len(responselines_b))
-		return []string{}, errors.New("stashservers response too short, less than 8 lines")
+		return nil, errors.New("stashservers response too short, less than 8 lines")
 	}
 
 	// Get the 5th row (4th index), the last 5 characters
@@ -65,8 +64,8 @@ func get_stashservers_caches(responselines_b [][]byte) ([]string, error) {
 
 	if hashname_b != "-sha1" {
 
-		log.Error("stashservers response does not have sha1 hash: %s", string(hashname_b))
-		return []string{}, errors.New("stashservers response does not have sha1 hash")
+		log.Error("stashservers response does not have sha1 hash:", string(hashname_b))
+		return nil, errors.New("stashservers response does not have sha1 hash")
 	}
 
 	sha1Hash := sha1.New()
@@ -77,8 +76,8 @@ func get_stashservers_caches(responselines_b [][]byte) ([]string, error) {
 
 	log.Debugln("Hashed:", hashStr, "From CVMFS:", string(responselines_b[6]))
 	if string(responselines_b[6]) != hashStr {
-		log.Debugln("stashservers hash %s does not match expected hash %s", string(responselines_b[6]), hashname_b)
-		log.Debugln("hashed text:\n%s", string(hashname_b))
+		log.Debugln("stashservers hash", string(responselines_b[6]), "does not match expected hash ", hashname_b)
+		log.Debugln("hashed text:\n", string(hashname_b))
 		log.Errorln("stashservers response hash does not match expected hash")
 		return nil, errors.New("stashservers response hash does not match expected hash")
 	}
@@ -102,28 +101,15 @@ func get_stashservers_caches(responselines_b [][]byte) ([]string, error) {
 
 	}
 
+	// Split the caches by type (xroot, xroots) in the returned by the GeoIP service
+	var toReturn = make(map[string][]string)
 	log.Debugf("Cache list: %s", string(responselines_b[4]))
-	cacheColonList := strings.Split(string(responselines_b[4]), "=")[1]
-	cacheListStr := strings.Split(cacheColonList, ";")[0]
-	cacheList := strings.Split(cacheListStr, ",")
-	log.Debugln("Cache list:", cacheList)
-
-	if print_cache_list_names {
-		for index, cache := range cacheList {
-			fmt.Print(cache)
-
-			// If it's the last item in the list, then don't add the comma
-			if index != len(cacheList)-1 {
-				fmt.Print(", ")
-			}
-		}
+	for _, transferType := range strings.Split(string(responselines_b[4]), ";") {
+		splitType := strings.Split(transferType, "=")
+		toReturn[splitType[0]] = strings.Split(splitType[1], ",")
 	}
 
-	for i, _ := range cacheList {
-		cacheList[i] = "root://" + cacheList[i]
-	}
-
-	return cacheList, nil
+	return toReturn, nil
 
 }
 
