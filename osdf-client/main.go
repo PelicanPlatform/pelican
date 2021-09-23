@@ -110,6 +110,9 @@ type Options struct {
 	// Namespace information
 	PrintNamespaces bool `long:"namespaces" description:"Print the namespace information and exit"`
 
+	// List Types (xroot or xroots)
+	ListType string `long:"cache-list-name" short:"n" description:"Cache list to use, currently either xroot or xroots" default:"xroot"`
+
 	// Positional arguemnts
 	SourceDestination SourceDestination `description:"Source and Destination Files" positional-args:"1"`
 }
@@ -156,16 +159,24 @@ func main() {
 	// Print out all of the caches and exit
 	if options.ListCaches {
 		print_cache_list_names = true
-		get_best_stashcache()
+		cacheList, err := get_best_stashcache(options.ListType)
+		if err != nil {
+			log.Errorln("Failed to get best caches:", err)
+			os.Exit(1)
+		}
+		for _, cache := range cacheList {
+			fmt.Print(cache)
+		}
+		fmt.Println()
 		os.Exit(0)
 	}
 
 	if options.Closest {
-		closest, err := get_best_stashcache()
+		cacheList, err := get_best_stashcache(options.ListType)
 		if err != nil {
 			log.Errorln("Failed to get best stashcache: ", err)
 		}
-		fmt.Println(closest)
+		fmt.Println(cacheList[0])
 		os.Exit(0)
 	}
 
@@ -496,7 +507,7 @@ func get_ips(name string) []string {
 
 	info, err := net.LookupHost(name)
 	if err != nil {
-		log.Error("Unable to look up %s", name)
+		log.Error("Unable to look up", name)
 
 		var empty []string
 		return empty
