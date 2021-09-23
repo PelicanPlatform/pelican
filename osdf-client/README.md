@@ -7,8 +7,9 @@ Building
 
 Download the repo and cd into the directory.  Build with the command:
 
-    $ go build
+    $ make
 
+It will make two executables.  A static x86 executable, and an executable native to the building machine.
 
 Testing
 -------
