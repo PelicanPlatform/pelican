@@ -9,7 +9,6 @@ import (
 	"os"
 	"path"
 	"regexp"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -262,8 +261,6 @@ func UploadFile(src string, dest *url.URL, token string, namespace Namespace) er
 	defer t.Stop()
 	//log.Debug(formatRequest(request))
 	go doPut(request, responseChan, errorChan)
-	done := false
-	var doneMu sync.Mutex
 
 	// Do the select on a ticker, and the writeChan
 Loop:
@@ -272,12 +269,6 @@ Loop:
 		case <-t.C:
 			// If we are not making any progress, if we haven't written 1MB in the last 5 seconds
 			currentRead := atomic.LoadInt64(&reader.read)
-			doneMu.Lock()
-			realDone := done
-			doneMu.Unlock()
-			if realDone {
-				break Loop
-			}
 			if lastKnownWritten < currentRead {
 				// We have made progress!
 				lastKnownWritten = currentRead
@@ -292,16 +283,10 @@ Loop:
 			log.Debugln("File closed")
 		case response := <-responseChan:
 			log.Debugln("Received response:", response)
-			doneMu.Lock()
-			done = true
-			doneMu.Unlock()
 			break Loop
 
 		case err := <-errorChan:
 			log.Warningln("Unexpected error when performing upload:", err)
-			doneMu.Lock()
-			done = true
-			doneMu.Unlock()
 			break Loop
 
 		}

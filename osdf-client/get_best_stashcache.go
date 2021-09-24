@@ -78,7 +78,7 @@ func get_best_stashcache(cacheListName string) ([]string, error) {
 		Host string
 	}
 
-	var i int = 0
+	i := 0
 
 	for i = 0; i < len(geo_ip_sites); i++ {
 

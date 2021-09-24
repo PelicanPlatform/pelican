@@ -1,12 +1,7 @@
 package main
 
 import (
-	"bytes"
 	"errors"
-	"os/exec"
-	"syscall"
-
-	log "github.com/sirupsen/logrus"
 )
 
 func download_xrootd(sourceFile string, destination string, payload *payloadStruct) error {
@@ -14,6 +9,7 @@ func download_xrootd(sourceFile string, destination string, payload *payloadStru
 	// Download from the nearest cache, if that fails, fallback to the stash origin.
 	return errors.New("XrootD not implemented")
 	// Check for xrootd, return quickly if it's not available
+	/*
 	xrootd_check := check_for_xrootd()
 	if xrootd_check != nil {
 		return xrootd_check
@@ -23,16 +19,17 @@ func download_xrootd(sourceFile string, destination string, payload *payloadStru
 	if len(nearest_cache_list) == 0 {
 		get_best_stashcache("xroot")
 	}
-
+	*/
 	// if nearest_cache.Size() == 0{
 	// 	nearest_cache = get_best_stashcache()
 	// }
 
 	// cache = nearest_cache; (TODO: nearest cache not implemented yet)
 
-	return errors.New("XrootD not implemented")
+	//return errors.New("XrootD not implemented")
 }
 
+/*
 func check_for_xrootd() error {
 
 	// Check if xrootd is installed by checking if the xrdcp command returns a reasonable output
@@ -74,7 +71,7 @@ func check_for_xrootd() error {
 
 	return nil
 }
-
+*/
 // timedTransfer goes in handle xrootd and call is made internally !!
 /*
 func timed_transfer(filename string, destination string) {
