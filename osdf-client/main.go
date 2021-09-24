@@ -483,10 +483,14 @@ Loop:
 	// it in debug if it does fail
 	if err := es_send(&payload); err != nil {
 		log.Debugln("Failed to send to data to ES")
-		return nil
+	}
+
+	if !success {
+		return errors.New("failed to download file")
 	} else {
 		return nil
 	}
+
 }
 
 // Find takes a slice and looks for an element in it. If found it will
