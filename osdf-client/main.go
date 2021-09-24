@@ -28,8 +28,7 @@ import (
 )
 
 // Redirector
-var global_redirector string = "http://redirector.osgstorage.org:8000"
-var VERSION string = "6.1.0"
+var VERSION = "6.1.0"
 var builddate string
 var commit string
 
@@ -38,10 +37,7 @@ var nearest_cache string
 
 // List of caches, in order from closest to furthest
 var nearest_cache_list []string
-var caches_list_name string = ""
-var caches_json_location string = ""
-var token_location string = ""
-var print_cache_list_names = false
+var caches_json_location string
 
 
 type payloadStruct struct {
@@ -133,9 +129,16 @@ func main() {
 
 	if options.Debug {
 		// Set logging to debug level
-		setLogging(log.DebugLevel)
+		err := setLogging(log.DebugLevel)
+		if err != nil {
+			log.Panicln("Failed to set logging level to Debug:", err)
+		}
 	} else {
-		setLogging(log.ErrorLevel)
+		err := setLogging(log.ErrorLevel)
+		if err != nil {
+			log.Panicln("Failed to set logging level to Error:", err)
+		}
+
 	}
 
 	if options.Version {
@@ -158,7 +161,6 @@ func main() {
 	// Just return all the caches that it knows about
 	// Print out all of the caches and exit
 	if options.ListCaches {
-		print_cache_list_names = true
 		cacheList, err := get_best_stashcache(options.ListType)
 		if err != nil {
 			log.Errorln("Failed to get best caches:", err)
@@ -229,10 +231,6 @@ func main() {
 	} else if options.Cache != "" {
 		nearest_cache = options.Cache
 		nearest_cache_list = append(nearest_cache_list, options.Cache)
-	}
-
-	if options.Token != "" {
-		token_location = options.Token
 	}
 
 	// Convert the methods
@@ -617,7 +615,13 @@ func es_send(payload *payloadStruct) error {
 
 	errorChan := make(chan error)
 
-	go doEsSend(jsonBytes, errorChan)
+	// Need to make a closure in order to handle the error
+	go func() {
+		err := doEsSend(jsonBytes, errorChan)
+		if err != nil {
+			return
+		}
+	}()
 
 	select {
 	case returnedError := <-errorChan:
@@ -642,6 +646,10 @@ func doEsSend(jsonBytes []byte, errorChannel chan<- error) error {
 	}
 	defer resp.Body.Close()
 	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		errorChannel <- err
+		return err
+	}
 	log.Debugln("Returned from collector.atlas-ml.org:", string(body))
 	errorChannel <- nil
 	return nil
