@@ -88,7 +88,7 @@ func get_best_stashcache(cacheListName string) ([]string, error) {
 		log.Debugf("Trying server site of %s", cur_site)
 
 		for _, ip := range get_ips(cur_site) {
-			GeoIpUrl.Host = "[" + ip + "]"
+			GeoIpUrl.Host = ip
 			GeoIpUrl.Scheme = "http"
 			log.Debugln("Querying", GeoIpUrl.String())
 
