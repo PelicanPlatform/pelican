@@ -503,6 +503,9 @@ func Find(slice []string, val string) (int, bool) {
 	return -1, false
 }
 
+// get_ips will resolve a hostname and return all corresponding IP addresses
+// in DNS.  This can be used to randomly pick an IP when DNS round robin
+// is used
 func get_ips(name string) []string {
 	var ipv4s []string
 	var ipv6s []string
@@ -521,7 +524,7 @@ func get_ips(name string) []string {
 		if parsedIP.To4() != nil {
 			ipv4s = append(ipv4s, addr)
 		} else if parsedIP.To16() != nil {
-			ipv6s = append(ipv6s, addr)
+			ipv6s = append(ipv6s, "[" + addr + "]")
 		}
 	}
 

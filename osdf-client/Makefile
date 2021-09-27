@@ -11,7 +11,7 @@ all:
     -a -o stashcp
 
 test:
-	go test
+	go test -v
 
 lint:
 	go vet
