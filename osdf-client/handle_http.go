@@ -131,6 +131,7 @@ func DownloadHTTP(url string, dest string, token string) error {
 	var downloadLimit int64 = 1024 * 1024
 
 	// Start the transfer
+	log.Debugln("Starting the HTTP transfer...")
 	resp := client.Do(req)
 
 	// Loop of the download
@@ -178,6 +179,7 @@ Loop:
 		log.Debugln("Got failure status code:", resp.HTTPResponse.StatusCode)
 		return errors.New("failure status code")
 	}
+	log.Debugln("HTTP Transfer was successful")
 	return nil
 }
 
