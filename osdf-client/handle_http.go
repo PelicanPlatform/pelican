@@ -36,6 +36,10 @@ type TransferDetails struct {
 func NewTransferDetails(cache string, https bool) []TransferDetails {
 	details := make([]TransferDetails, 0)
 
+
+	_, canDisableProxy := os.LookupEnv("OSG_DISABLE_PROXY_FALLBACK")
+	canDisableProxy = !canDisableProxy
+
 	// Form the URL
 	cacheURL, err := url.Parse(cache)
 	if err != nil {
@@ -55,29 +59,34 @@ func NewTransferDetails(cache string, https bool) []TransferDetails {
 			cacheURL.Host += ":8444"
 			details = append(details, TransferDetails{
 				Url:   *cacheURL,
-				Proxy: true,
-			})
-			details = append(details, TransferDetails{
-				Url:   *cacheURL,
 				Proxy: false,
 			})
 			// Strip the port off and add 8443
 			cacheURL.Host = cacheURL.Host[:len(cacheURL.Host) - 5] + ":8443"
 		}
+		// Whether port is specified or not, add a transfer without proxy
+		details = append(details, TransferDetails{
+			Url:   *cacheURL,
+			Proxy: false,
+		})
 	} else {
 		cacheURL.Scheme = "http"
 		if !HasPort(cacheURL.Host) {
 			cacheURL.Host += ":8000"
 		}
+		details = append(details, TransferDetails{
+			Url:   *cacheURL,
+			Proxy: true,
+		})
+		if canDisableProxy {
+			details = append(details, TransferDetails{
+				Url:   *cacheURL,
+				Proxy: false,
+			})
+		}
 	}
-	details = append(details, TransferDetails{
-		Url:   *cacheURL,
-		Proxy: true,
-	})
-	details = append(details, TransferDetails{
-		Url:   *cacheURL,
-		Proxy: false,
-	})
+
+
 	return details
 }
 
