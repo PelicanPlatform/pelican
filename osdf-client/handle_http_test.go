@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/stretchr/testify/assert"
+	"os"
 	"testing"
 )
 
@@ -36,19 +37,13 @@ func TestNewTransferDetails(t *testing.T) {
 
 	// Case 2: cache with https
 	transfers = NewTransferDetails("cache.edu", true)
-	assert.Equal(t, 4, len(transfers))
+	assert.Equal(t, 2, len(transfers))
 	assert.Equal(t, "cache.edu:8444", transfers[0].Url.Host)
 	assert.Equal(t, "https", transfers[0].Url.Scheme)
-	assert.Equal(t, true, transfers[0].Proxy)
-	assert.Equal(t, "cache.edu:8444", transfers[1].Url.Host)
+	assert.Equal(t, false, transfers[0].Proxy)
+	assert.Equal(t, "cache.edu:8443", transfers[1].Url.Host)
 	assert.Equal(t, "https", transfers[1].Url.Scheme)
 	assert.Equal(t, false, transfers[1].Proxy)
-	assert.Equal(t, "cache.edu:8443", transfers[2].Url.Host)
-	assert.Equal(t, "https", transfers[1].Url.Scheme)
-	assert.Equal(t, true, transfers[2].Proxy)
-	assert.Equal(t, "cache.edu:8443", transfers[3].Url.Host)
-	assert.Equal(t, "https", transfers[3].Url.Scheme)
-	assert.Equal(t, false, transfers[3].Proxy)
 
 	// Case 3: cache with port with http
 	transfers = NewTransferDetails("cache.edu:1234", false)
@@ -62,13 +57,23 @@ func TestNewTransferDetails(t *testing.T) {
 
 	// Case 4. cache with port with https
 	transfers = NewTransferDetails("cache.edu:5678", true)
-	assert.Equal(t, 2, len(transfers))
+	assert.Equal(t, 1, len(transfers))
 	assert.Equal(t, "cache.edu:5678", transfers[0].Url.Host)
 	assert.Equal(t, "https", transfers[0].Url.Scheme)
-	assert.Equal(t, true, transfers[0].Proxy)
-	assert.Equal(t, "cache.edu:5678", transfers[1].Url.Host)
-	assert.Equal(t, "https", transfers[1].Url.Scheme)
-	assert.Equal(t, false, transfers[1].Proxy)
+	assert.Equal(t, false, transfers[0].Proxy)
 }
 
+func TestNewTransferDetailsEnv(t *testing.T) {
+	os.Setenv("OSG_DISABLE_PROXY_FALLBACK", "")
+	transfers := NewTransferDetails("cache.edu", false)
+	assert.Equal(t, 1, len(transfers))
+	assert.Equal(t, true, transfers[0].Proxy)
+
+	transfers = NewTransferDetails("cache.edu", true)
+	assert.Equal(t, 2, len(transfers))
+	assert.Equal(t, "https", transfers[0].Url.Scheme)
+	assert.Equal(t, false, transfers[0].Proxy)
+	assert.Equal(t, false, transfers[1].Proxy)
+	os.Unsetenv("OSG_DISABLE_PROXY_FALLBACK")
+}
 
