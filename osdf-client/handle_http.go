@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io/ioutil"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -23,9 +24,65 @@ func HasPort(host string) bool {
 	return checkPort.MatchString(host)
 }
 
+type TransferDetails struct {
+	// Url is the url.URL of the cache and port
+	Url url.URL
+
+	// Proxy specifies if a proxy should be used
+	Proxy bool
+}
+
+// NewTransferDetails creates the TransferDetails struct with the given cache
+func NewTransferDetails(cache string, https bool) []TransferDetails {
+	details := make([]TransferDetails, 0)
+
+	// Form the URL
+	cacheURL, err := url.Parse(cache)
+	if err != nil {
+		log.Errorln("Failed to parse cache:", cache, "error:", err)
+		return nil
+	}
+	if cacheURL.Host == "" {
+		// Assume the cache is just a hostname
+		cacheURL.Host = cache
+		cacheURL.Path = ""
+	}
+	log.Debugf("Parsed Cache: %+v\n", cacheURL)
+	if https {
+		cacheURL.Scheme = "https"
+		if !HasPort(cacheURL.Host) {
+			// Add port 8444 and 8443
+			cacheURL.Host += ":8444"
+			details = append(details, TransferDetails{
+				Url:   *cacheURL,
+				Proxy: true,
+			})
+			details = append(details, TransferDetails{
+				Url:   *cacheURL,
+				Proxy: false,
+			})
+			// Strip the port off and add 8443
+			cacheURL.Host = cacheURL.Host[:len(cacheURL.Host) - 5] + ":8443"
+		}
+	} else {
+		cacheURL.Scheme = "http"
+		if !HasPort(cacheURL.Host) {
+			cacheURL.Host += ":8000"
+		}
+	}
+	details = append(details, TransferDetails{
+		Url:   *cacheURL,
+		Proxy: true,
+	})
+	details = append(details, TransferDetails{
+		Url:   *cacheURL,
+		Proxy: false,
+	})
+	return details
+}
+
 func download_http(source string, destination string, payload *payloadStruct, namespace Namespace) error {
 	// Generate the url
-	var downloadURL url.URL
 	var token string
 	if namespace.UseTokenOnRead {
 		var err error
@@ -36,7 +93,6 @@ func download_http(source string, destination string, payload *payloadStruct, na
 		}
 	}
 
-	downloadURL.Path = source
 	cacheListName := "xroot"
 	if namespace.ReadHTTPS || namespace.UseTokenOnRead {
 		cacheListName = "xroots"
@@ -56,45 +112,21 @@ func download_http(source string, destination string, payload *payloadStruct, na
 		cachesToTry = len(nearest_cache_list)
 	}
 	log.Debugln("Trying the caches:", nearest_cache_list[:cachesToTry])
+	var transfers []TransferDetails
+
+	// Generate all of the transfer details to make a list of transfers
 	for _, cache := range nearest_cache_list[:cachesToTry] {
 		// Parse the cache URL
 		log.Debugln("Cache:", cache)
-		cacheURL, err := url.Parse(cache)
-		if err != nil {
-			log.Errorln("Failed to parse cache:", cache, "error:", err)
-		}
-		if cacheURL.Host == "" {
-			// Assume the cache is just a hostname
-			cacheURL.Host = cache
-			cacheURL.Path = ""
-		}
-		log.Debugln("Parsed Cache:", cacheURL)
-		downloadURL.Host = cacheURL.Host
-		if namespace.ReadHTTPS {
-			if !HasPort(cacheURL.Host) {
-				downloadURL.Host += ":8444"
-			}
-			downloadURL.Scheme = "https"
-		} else {
-			if !HasPort(cacheURL.Host) {
-				downloadURL.Host += ":8000"
-			}
-			downloadURL.Scheme = "http"
-		}
-		log.Debugln("Constructed URL:", downloadURL.String())
-		if err := DownloadHTTP(downloadURL.String(), destination, token); err != nil {
-			log.Debugln("Failed to download:", err)
-			if namespace.ReadHTTPS && !HasPort(cacheURL.Host) {
-				// Try also the port 8443
-				downloadURL.Host = cacheURL.Host + ":8443"
-				log.Debugln("Trying port 8443 for authenticated read")
-				if err := DownloadHTTP(downloadURL.String(), destination, token); err == nil {
-					success = true
-					break
-				}
-			}
-			log.Debugln("Error downloading from HTTP:", err)
+		transfers = append(transfers, NewTransferDetails(cache, namespace.ReadHTTPS || namespace.UseTokenOnRead)...)
+	}
 
+	for _, transfer := range transfers {
+		transfer.Url.Path = source
+		log.Debugln("Constructed URL:", transfer.Url.String())
+		if err := DownloadHTTP(transfer, destination, token); err != nil {
+			log.Debugln("Failed to download:", err)
+			continue
 		} else {
 			success = true
 			break
@@ -110,14 +142,30 @@ func download_http(source string, destination string, payload *payloadStruct, na
 }
 
 // DownloadHTTP - Perform the actual download of the file
-func DownloadHTTP(url string, dest string, token string) error {
+func DownloadHTTP(transfer TransferDetails, dest string, token string) error {
 
 	// Create the client, request, and context
 	client := grab.NewClient()
+	transport := http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   10 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		MaxIdleConns:          30,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   15 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+	if !transfer.Proxy {
+		transport.Proxy = nil
+	}
+	client.HTTPClient.Transport = &transport
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	req, _ := grab.NewRequest(dest, url)
+	log.Debugln("Transfer URL String:", transfer.Url.String())
+	req, _ := grab.NewRequest(dest, transfer.Url.String())
 	if token != "" {
 		req.HTTPRequest.Header.Set("Authorization", "Bearer " + token)
 	}
