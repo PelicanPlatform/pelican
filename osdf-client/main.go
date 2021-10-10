@@ -27,10 +27,13 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// Redirector
-var VERSION = "6.1.0"
-var builddate string
-var commit string
+var (
+    version = "dev"
+    commit  = "none"
+    date    = "unknown"
+    builtBy = "unknown"
+)
+
 
 // Nearest cache
 var nearest_cache string
@@ -142,8 +145,8 @@ func main() {
 	}
 
 	if options.Version {
-		fmt.Println("Version:", VERSION)
-		fmt.Println("Build Date:", builddate)
+		fmt.Println("Version:", version)
+		fmt.Println("Build Date:", date)
 		fmt.Println("Build Commit:", commit)
 		os.Exit(0)
 	}
