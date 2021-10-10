@@ -148,7 +148,7 @@ func main() {
 		fmt.Println("Version:", version)
 		fmt.Println("Build Date:", date)
 		fmt.Println("Build Commit:", commit)
-                fmt.Println("Built By:", builtBy)
+		fmt.Println("Built By:", builtBy)
 		os.Exit(0)
 	}
 
