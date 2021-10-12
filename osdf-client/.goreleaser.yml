@@ -33,14 +33,15 @@ changelog:
     exclude:
       - '^docs:'
       - '^test:'
+      - Merge pull request
+      - Merge branch
 
 nfpms:
   - package_name: stashcp
-    replacements:
-      amd64: 64-bit
-      386: 32-bit
-      darwin: macOS
-      linux: linux
+    builds:
+      - stashcp
+    file_name_template: '{{ .ProjectName }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}'
+    id: stashcp
     vendor: Open Science Grid
     homepage: https://github.com/opensciencegrid/stashcp
     maintainer: Derek Weitzel <dweitzel@unl.edu>
