@@ -257,6 +257,8 @@ func main() {
 
 	// Exit with failure
 	if result != nil {
+		// Print the list of errors
+		log.Errorln(GetErrors())
 		os.Exit(1)
 	}
 
