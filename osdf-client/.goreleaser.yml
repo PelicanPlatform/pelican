@@ -33,3 +33,31 @@ changelog:
     exclude:
       - '^docs:'
       - '^test:'
+
+nfpms:
+  - package_name: stashcp
+    replacements:
+      amd64: 64-bit
+      386: 32-bit
+      darwin: macOS
+      linux: linux
+    vendor: Open Science Grid
+    homepage: https://github.com/opensciencegrid/stashcp
+    maintainer: Derek Weitzel <dweitzel@unl.edu>
+    description: Client copy tool for the StashCache federation
+    license: Apache 2.0
+    formats:
+      - apk
+      - deb
+      - rpm
+    replaces:
+      - stashcache-client
+    bindir: /usr/bin
+    release: 1
+    section: default
+    priority: extra
+    overrides:
+      rpm:
+        replacements:
+          amd64: x86_64
+        file_name_template: "{{ .ProjectName }}-{{ .Version }}-{{ .Arch }}"
