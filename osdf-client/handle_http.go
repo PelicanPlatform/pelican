@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"regexp"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -135,6 +136,10 @@ func download_http(source string, destination string, payload *payloadStruct, na
 		log.Debugln("Constructed URL:", transfer.Url.String())
 		if err := DownloadHTTP(transfer, destination, token); err != nil {
 			log.Debugln("Failed to download:", err)
+			toAccum := errors.New("Failed to download from " + transfer.Url.String() +
+				" + proxy=" + strconv.FormatBool(transfer.Proxy) +
+				": " + err.Error())
+			AddError(toAccum)
 			continue
 		} else {
 			success = true
