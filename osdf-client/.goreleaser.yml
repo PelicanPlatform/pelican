@@ -64,4 +64,6 @@ nfpms:
       rpm:
         replacements:
           amd64: x86_64
-        file_name_template: "{{ .ProjectName }}-{{ .Version }}-{{ .Arch }}"
+        file_name_template: "{{ .ProjectName }}-{{ .Version }}-{{ .Release }}.{{ .Arch }}"
+      deb:
+        file_name_template: "{{ .ProjectName }}-{{ .Version }}-{{ .Release }}_{{ .Arch }}"
