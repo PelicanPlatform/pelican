@@ -112,6 +112,12 @@ type Options struct {
 	// List Types (xroot or xroots)
 	ListType string `long:"cache-list-name" short:"n" description:"Cache list to use, currently either xroot or xroots" default:"xroot"`
 
+	// Recursive walking of directories
+	Recursive bool `short:"r" description:"Recursively copy"`
+
+	// Progress bars
+	ProgessBars bool `long:"progress" short:"p" description:"Show progress bars"`
+
 	// Positional arguemnts
 	SourceDestination SourceDestination `description:"Source and Destination Files" positional-args:"1"`
 }
@@ -208,6 +214,7 @@ func main() {
 		return
 	}
 
+
 	/*
 		TODO: Parse a caches JSON, is this needed anymore?
 		if args.caches_json {
@@ -249,7 +256,7 @@ func main() {
 
 	var result error
 	for _, src := range source {
-		result = doStashCPSingle(src, dest, splitMethods)
+		result = doStashCPSingle(src, dest, splitMethods, options.Recursive)
 		if result != nil {
 			break
 		}
@@ -342,7 +349,7 @@ func getToken() (string, error) {
 }
 
 // Start the transfer, whether read or write back
-func doStashCPSingle(sourceFile string, destination string, methods []string) error {
+func doStashCPSingle(sourceFile string, destination string, methods []string, recursive bool) error {
 
 	// Parse the source and destination with URL parse
 
@@ -453,7 +460,7 @@ Loop:
 			}
 		case "http":
 			log.Info("Trying HTTP...")
-			if err := download_http(sourceFile, destination, &payload, ns); err == nil {
+			if err := download_http(sourceFile, destination, &payload, ns, recursive); err == nil {
 				success = true
 				break Loop
 			}
