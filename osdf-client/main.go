@@ -116,7 +116,7 @@ type Options struct {
 	Recursive bool `short:"r" description:"Recursively copy"`
 
 	// Progress bars
-	ProgessBars bool `long:"progress" short:"p" description:"Show progress bars"`
+	ProgessBars bool `long:"progress" short:"p" description:"Show progress bars, turned on if run from a terminal"`
 
 	// Positional arguemnts
 	SourceDestination SourceDestination `description:"Source and Destination Files" positional-args:"1"`
@@ -156,6 +156,12 @@ func main() {
 		fmt.Println("Build Commit:", commit)
 		fmt.Println("Built By:", builtBy)
 		os.Exit(0)
+	}
+
+	// Check if the program was executed from a terminal
+	// https://rosettacode.org/wiki/Check_output_device_is_a_terminal#Go
+	if fileInfo, _ := os.Stdout.Stat(); (fileInfo.Mode() & os.ModeCharDevice) != 0 {
+		options.ProgessBars = true
 	}
 
 	if options.PrintNamespaces {
