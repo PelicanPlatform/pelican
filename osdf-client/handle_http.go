@@ -255,6 +255,10 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) error {
 
 	// Store the last downloaded amount, and the bottom limit of the download
 	var downloadLimit int64 = 1024 * 1024
+	// If we are doing a recursive, decrease the download limit by the number of likely workers ~5
+	if options.Recursive {
+		downloadLimit /= 5
+	}
 
 	// Start the transfer
 	log.Debugln("Starting the HTTP transfer...")
@@ -297,6 +301,10 @@ Loop:
 
 			// Check if we are downloading fast enough
 			if resp.BytesPerSecond() < float64(downloadLimit) {
+				// Give the download 30 seconds to start
+				if resp.Start.Before(time.Now().Add(-time.Second * 30)) {
+					continue
+				}
 				cancel()
 				if options.ProgessBars {
 					var cancelledProgressBar = p.AddBar(0,
