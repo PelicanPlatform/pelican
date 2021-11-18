@@ -151,7 +151,7 @@ func download_http(source string, destination string, payload *payloadStruct, na
 	var wg sync.WaitGroup
 
 	workChan := make(chan string)
-	results := make(chan error, 5)
+	results := make(chan error, len(files))
 	//tf := TransferFiles{files: files}
 
 	// Start the workers

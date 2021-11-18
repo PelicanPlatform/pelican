@@ -113,7 +113,7 @@ type Options struct {
 	ListType string `long:"cache-list-name" short:"n" description:"Cache list to use, currently either xroot or xroots" default:"xroot"`
 
 	// Recursive walking of directories
-	Recursive bool `short:"r" description:"Recursively copy"`
+	Recursive bool `short:"r" description:"Recursively copy a directory.  Forces methods to only be http to get the freshest directory contents"`
 
 	// Progress bars
 	ProgessBars bool `long:"progress" short:"p" description:"Show progress bars, turned on if run from a terminal"`
@@ -445,6 +445,11 @@ func doStashCPSingle(sourceFile string, destination string, methods []string, re
 
 	// Go thru the download methods
 	success := false
+
+	// If recursive, only do http method to guarantee freshest directory contents
+	if options.Recursive {
+		methods = []string{"http"}
+	}
 
 	// switch statement?
 Loop:
