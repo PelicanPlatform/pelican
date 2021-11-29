@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 
 	//"net/http"
@@ -28,12 +29,11 @@ import (
 )
 
 var (
-    version = "dev"
-    commit  = "none"
-    date    = "unknown"
-    builtBy = "unknown"
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+	builtBy = "unknown"
 )
-
 
 // Nearest cache
 var nearest_cache string
@@ -41,7 +41,6 @@ var nearest_cache string
 // List of caches, in order from closest to furthest
 var nearest_cache_list []string
 var caches_json_location string
-
 
 type payloadStruct struct {
 	filename     string
@@ -301,22 +300,46 @@ func getToken() (string, error) {
 		log.Debugln("Getting token location from command line:", options.Token)
 	} else {
 
-		// https://golang.org/pkg/os/#LookupEnv
-		tokenFile, isTokenSet := os.LookupEnv("TOKEN")
-		credsDir, isCondorCredsSet := os.LookupEnv("_CONDOR_CREDS")
+		// WLCG Token Discovery
+		if bearerToken, isBearerTokenSet := os.LookupEnv("BEARER_TOKEN"); isBearerTokenSet {
+			return bearerToken, nil
+		} else if bearerTokenFile, isBearerTokenFileSet := os.LookupEnv("BEARER_TOKEN_FILE"); isBearerTokenFileSet {
+			if _, err := os.Stat(bearerTokenFile); err != nil {
+				log.Warningln("Environment variable BEARER_TOKEN_FILE is set, but file being point to does not exist:", err)
+			} else {
+				token_location = bearerTokenFile
+			}
+		}
+		if xdgRuntimeDir, xdgRuntimeDirSet := os.LookupEnv("XDG_RUNTIME_DIR"); token_location == "" && xdgRuntimeDirSet {
+			// Get the uid
+			uid := os.Getuid()
+			tmpTokenPath := filepath.Join(xdgRuntimeDir, "bt_u" + strconv.Itoa(uid))
+			if _, err := os.Stat(tmpTokenPath); err == nil {
+				token_location = tmpTokenPath
+			}
+		}
 
 		// Backwards compatibility for getting scitokens
 		// If TOKEN is not set in environment, and _CONDOR_CREDS is set, then...
-		if isTokenSet {
-			token_location = tokenFile
-		} else if !isTokenSet && isCondorCredsSet {
+		if tokenFile, isTokenSet := os.LookupEnv("TOKEN"); isTokenSet && token_location == "" {
+			if _, err := os.Stat(tokenFile); err != nil {
+				log.Warningln("Environment variable TOKEN is set, but file being point to does not exist:", err)
+			} else {
+				token_location = tokenFile
+			}
+		}
+		if credsDir, isCondorCredsSet := os.LookupEnv("_CONDOR_CREDS"); token_location == "" && isCondorCredsSet {
 			// Token wasn't specified on the command line or environment, try the default scitoken
-			if _, err := os.Stat(filepath.Join(credsDir, "scitokens.use")); err == nil {
+			if _, err := os.Stat(filepath.Join(credsDir, "scitokens.use")); err != nil {
+				log.Warningln("Environment variable _CONDOR_CREDS is set, but file being point to does not exist:", err)
+			} else {
 				token_location = filepath.Join(credsDir, "scitokens.use")
 			}
-		} else if _, err := os.Stat(".condor_creds/scitokens.use"); err == nil {
+		}
+		if _, err := os.Stat(".condor_creds/scitokens.use"); err == nil && token_location == "" {
 			token_location, _ = filepath.Abs(".condor_creds/scitokens.use")
-		} else {
+		}
+		if token_location == "" {
 			// Print out, can't find token!  Print out error and exit with non-zero exit status
 			// TODO: Better error message
 			log.Errorln("Unable to find token file")
@@ -530,7 +553,7 @@ func get_ips(name string) []string {
 		if parsedIP.To4() != nil {
 			ipv4s = append(ipv4s, addr)
 		} else if parsedIP.To16() != nil {
-			ipv6s = append(ipv6s, "[" + addr + "]")
+			ipv6s = append(ipv6s, "["+addr+"]")
 		}
 	}
 
