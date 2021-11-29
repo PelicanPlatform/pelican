@@ -96,15 +96,18 @@ func TestGetToken(t *testing.T) {
 	token_contents = "bearer_token_file_contents .condor_creds/scitokens.use"
 	tmpFile = []byte(token_contents)
 	bearer_token_file = filepath.Join(tmpDir, ".condor_creds", "scitokens.use")
-	os.Mkdir(filepath.Join(tmpDir, ".condor_creds"), 0755)
+	err = os.Mkdir(filepath.Join(tmpDir, ".condor_creds"), 0755)
+	assert.NoError(t, err)
 	err = os.WriteFile(bearer_token_file, tmpFile, 0644)
 	assert.NoError(t, err)
 	currentDir, err := os.Getwd()
-	os.Chdir(tmpDir)
+	assert.NoError(t, err)
+	err = os.Chdir(tmpDir)
 	assert.NoError(t, err)
 	token, err = getToken()
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, token)
-	os.Chdir(currentDir)
+	err = os.Chdir(currentDir)
+	assert.NoError(t, err)
 
 }
