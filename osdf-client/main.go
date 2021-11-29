@@ -112,6 +112,12 @@ type Options struct {
 	// List Types (xroot or xroots)
 	ListType string `long:"cache-list-name" short:"n" description:"Cache list to use, currently either xroot or xroots" default:"xroot"`
 
+	// Recursive walking of directories
+	Recursive bool `short:"r" description:"Recursively copy a directory.  Forces methods to only be http to get the freshest directory contents"`
+
+	// Progress bars
+	ProgessBars bool `long:"progress" short:"p" description:"Show progress bars, turned on if run from a terminal"`
+
 	// Positional arguemnts
 	SourceDestination SourceDestination `description:"Source and Destination Files" positional-args:"1"`
 }
@@ -150,6 +156,12 @@ func main() {
 		fmt.Println("Build Commit:", commit)
 		fmt.Println("Built By:", builtBy)
 		os.Exit(0)
+	}
+
+	// Check if the program was executed from a terminal
+	// https://rosettacode.org/wiki/Check_output_device_is_a_terminal#Go
+	if fileInfo, _ := os.Stdout.Stat(); (fileInfo.Mode() & os.ModeCharDevice) != 0 {
+		options.ProgessBars = true
 	}
 
 	if options.PrintNamespaces {
@@ -208,6 +220,7 @@ func main() {
 		return
 	}
 
+
 	/*
 		TODO: Parse a caches JSON, is this needed anymore?
 		if args.caches_json {
@@ -249,7 +262,7 @@ func main() {
 
 	var result error
 	for _, src := range source {
-		result = doStashCPSingle(src, dest, splitMethods)
+		result = doStashCPSingle(src, dest, splitMethods, options.Recursive)
 		if result != nil {
 			break
 		}
@@ -342,7 +355,7 @@ func getToken() (string, error) {
 }
 
 // Start the transfer, whether read or write back
-func doStashCPSingle(sourceFile string, destination string, methods []string) error {
+func doStashCPSingle(sourceFile string, destination string, methods []string, recursive bool) error {
 
 	// Parse the source and destination with URL parse
 
@@ -433,6 +446,11 @@ func doStashCPSingle(sourceFile string, destination string, methods []string) er
 	// Go thru the download methods
 	success := false
 
+	// If recursive, only do http method to guarantee freshest directory contents
+	if options.Recursive {
+		methods = []string{"http"}
+	}
+
 	// switch statement?
 Loop:
 	for _, method := range methods {
@@ -453,7 +471,7 @@ Loop:
 			}
 		case "http":
 			log.Info("Trying HTTP...")
-			if err := download_http(sourceFile, destination, &payload, ns); err == nil {
+			if err := download_http(sourceFile, destination, &payload, ns, recursive); err == nil {
 				success = true
 				break Loop
 			}

@@ -11,13 +11,19 @@ import (
 	"path"
 	"regexp"
 	"strconv"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	grab "github.com/cavaliercoder/grab"
 	log "github.com/sirupsen/logrus"
 	"github.com/studio-b12/gowebdav"
+	"github.com/vbauerster/mpb/v7"
+	"github.com/vbauerster/mpb/v7/decor"
 )
+
+var p = mpb.New()
 
 // HasPort test the host if it includes a port
 func HasPort(host string) bool {
@@ -36,7 +42,6 @@ type TransferDetails struct {
 // NewTransferDetails creates the TransferDetails struct with the given cache
 func NewTransferDetails(cache string, https bool) []TransferDetails {
 	details := make([]TransferDetails, 0)
-
 
 	_, canDisableProxy := os.LookupEnv("OSG_DISABLE_PROXY_FALLBACK")
 	canDisableProxy = !canDisableProxy
@@ -91,7 +96,7 @@ func NewTransferDetails(cache string, https bool) []TransferDetails {
 	return details
 }
 
-func download_http(source string, destination string, payload *payloadStruct, namespace Namespace) error {
+func download_http(source string, destination string, payload *payloadStruct, namespace Namespace, recursive bool) error {
 	// Generate the url
 	var token string
 	if namespace.UseTokenOnRead {
@@ -114,8 +119,6 @@ func download_http(source string, destination string, payload *payloadStruct, na
 		}
 	}
 
-	var success bool = false
-
 	// Make sure we only try as many caches as we have
 	cachesToTry := 3
 	if cachesToTry > len(nearest_cache_list) {
@@ -123,6 +126,19 @@ func download_http(source string, destination string, payload *payloadStruct, na
 	}
 	log.Debugln("Trying the caches:", nearest_cache_list[:cachesToTry])
 	var transfers []TransferDetails
+	url := url.URL{Path: source}
+	var files []string
+
+	if recursive {
+		var err error
+		files, err = walkDavDir(&url, token, namespace)
+		if err != nil {
+			log.Errorln("Error from walkDavDir", err)
+			return err
+		}
+	} else {
+		files = append(files, source)
+	}
 
 	// Generate all of the transfer details to make a list of transfers
 	for _, cache := range nearest_cache_list[:cachesToTry] {
@@ -131,27 +147,71 @@ func download_http(source string, destination string, payload *payloadStruct, na
 		transfers = append(transfers, NewTransferDetails(cache, namespace.ReadHTTPS || namespace.UseTokenOnRead)...)
 	}
 
-	for _, transfer := range transfers {
-		transfer.Url.Path = source
-		log.Debugln("Constructed URL:", transfer.Url.String())
-		if err := DownloadHTTP(transfer, destination, token); err != nil {
-			log.Debugln("Failed to download:", err)
-			toAccum := errors.New("Failed to download from " + transfer.Url.String() +
-				" + proxy=" + strconv.FormatBool(transfer.Proxy) +
-				": " + err.Error())
-			AddError(toAccum)
-			continue
-		} else {
-			success = true
-			break
-		}
+	// Create the wait group and the transfer files
+	var wg sync.WaitGroup
 
+	workChan := make(chan string)
+	results := make(chan error, len(files))
+	//tf := TransferFiles{files: files}
+
+	// Start the workers
+	for i := 1; i <= 5; i++ {
+		wg.Add(1)
+		go startDownloadWorker(source, destination, token, transfers, &wg, workChan, results)
 	}
-	if success {
-		return nil
+
+	// For each file, send it to the worker
+	for _, file := range files {
+		workChan <- file
+	}
+	close(workChan)
+
+	// Wait for all the transfers to complete
+	wg.Wait()
+
+	if len(results) > 0 {
+		return <- results
 	} else {
-		log.Debugln("Failed to download with HTTP")
-		return errors.New("failed to download with HTTP")
+		return nil
+	}
+
+}
+
+func startDownloadWorker(source string, destination string, token string, transfers []TransferDetails, wg *sync.WaitGroup, workChan <-chan string, results chan<- error) {
+
+	defer wg.Done()
+	var success bool
+	for file := range workChan {
+		// Remove the source from the file path
+		newFile := strings.Replace(file, source, "", 1)
+		finalDest := path.Join(destination, newFile)
+		directory := path.Dir(finalDest)
+		err := os.MkdirAll(directory, 0700)
+		if err != nil {
+			results <- errors.New("Failed to make directory:" + directory)
+			continue
+		}
+		for _, transfer := range transfers {
+			transfer.Url.Path = file
+			log.Debugln("Constructed URL:", transfer.Url.String())
+			if err := DownloadHTTP(transfer, finalDest, token); err != nil {
+				log.Debugln("Failed to download:", err)
+				toAccum := errors.New("Failed to download from " + transfer.Url.String() +
+					" + proxy=" + strconv.FormatBool(transfer.Proxy) +
+					": " + err.Error())
+				AddError(toAccum)
+				continue
+			} else {
+				success = true
+				break
+			}
+
+		}
+		if !success {
+			log.Debugln("Failed to download with HTTP")
+			results <- errors.New("failed to download with HTTP")
+			return
+		}
 	}
 }
 
@@ -189,45 +249,103 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) error {
 	t := time.NewTicker(5000 * time.Millisecond)
 	defer t.Stop()
 
+	// Progress ticker
+	progressTicker := time.NewTicker(500 * time.Millisecond)
+	defer progressTicker.Stop()
+
 	// Store the last downloaded amount, and the bottom limit of the download
 	var downloadLimit int64 = 1024 * 1024
+	// If we are doing a recursive, decrease the download limit by the number of likely workers ~5
+	if options.Recursive {
+		downloadLimit /= 5
+	}
 
 	// Start the transfer
 	log.Debugln("Starting the HTTP transfer...")
+	filename := path.Base(dest)
 	resp := client.Do(req)
+	var progressBar *mpb.Bar
+	if options.ProgessBars {
+		progressBar = p.AddBar(0,
+			mpb.PrependDecorators(
+				decor.Name(filename, decor.WCSyncSpaceR),
+				decor.CountersKibiByte("% .2f / % .2f"),
+			),
+			mpb.AppendDecorators(
+				decor.EwmaETA(decor.ET_STYLE_GO, 90),
+				decor.Name(" ] "),
+				decor.EwmaSpeed(decor.UnitKiB, "% .2f", 20),
+			),
+		)
+	}
 
+	var previousCompletedBytes int64 = 0
+	var previousCompletedTime = time.Now()
 	// Loop of the download
 Loop:
 	for {
 		select {
+		case <-progressTicker.C:
+			if options.ProgessBars {
+				progressBar.SetTotal(resp.Size, false)
+				currentCompletedBytes := resp.BytesComplete()
+				progressBar.IncrInt64(currentCompletedBytes - previousCompletedBytes)
+				previousCompletedBytes = currentCompletedBytes
+				currentCompletedTime := time.Now()
+				progressBar.DecoratorEwmaUpdate(currentCompletedTime.Sub(previousCompletedTime))
+				previousCompletedTime = currentCompletedTime
+			}
+
+
 		case <-t.C:
-			// This should be made a debug logging level
-			/*
-				fmt.Printf("  transferred %v / %v bytes (%.2f%%) (%.2f MB/s)\n",
-					resp.BytesComplete(),
-					resp.Size,
-					100*resp.Progress(),
-					float32(resp.BytesPerSecond())/float32(1024*1024))
-			*/
 
 			// Check if we are downloading fast enough
 			if resp.BytesPerSecond() < float64(downloadLimit) {
-				// This should be warning level probably
-				/*
-					fmt.Printf("Cancelled transfer: transferred %v / %v bytes (%.2f%%) (%.2f MB/s)\n",
-						resp.BytesComplete(),
-						resp.Size,
-						100*resp.Progress(),
-						float32(resp.BytesPerSecond())/float32(1024*1024))
-				*/
-				// Cancel the transfer
+				// Give the download 30 seconds to start
+				if resp.Start.Before(time.Now().Add(-time.Second * 30)) {
+					continue
+				}
 				cancel()
+				if options.ProgessBars {
+					var cancelledProgressBar = p.AddBar(0,
+						mpb.BarQueueAfter(progressBar),
+						mpb.BarFillerClearOnComplete(),
+						mpb.PrependDecorators(
+							decor.Name(filename, decor.WC{W: len(filename) + 1, C: decor.DidentRight}),
+							decor.OnComplete(decor.Name(filename, decor.WCSyncSpaceR), "cancelled, too slow!"),
+							decor.OnComplete(decor.EwmaETA(decor.ET_STYLE_MMSS, 0, decor.WCSyncWidth), ""),
+						),
+						mpb.AppendDecorators(
+							decor.OnComplete(decor.Percentage(decor.WC{W: 5}), ""),
+						),
+					)
+					progressBar.SetTotal(resp.Size, true)
+					cancelledProgressBar.SetTotal(resp.Size, true)
+				}
+
 				return errors.New("Cancelled transfer, too slow")
 
 			}
 
 		case <-resp.Done:
 			// download is complete
+			if options.ProgessBars {
+				var doneProgressBar = p.AddBar(resp.Size,
+					mpb.BarQueueAfter(progressBar),
+					mpb.BarFillerClearOnComplete(),
+					mpb.PrependDecorators(
+						decor.Name(filename, decor.WC{W: len(filename) + 1, C: decor.DidentRight}),
+						decor.OnComplete(decor.Name(filename, decor.WCSyncSpaceR), "done!"),
+						decor.OnComplete(decor.EwmaETA(decor.ET_STYLE_MMSS, 0, decor.WCSyncWidth), ""),
+					),
+					mpb.AppendDecorators(
+						decor.OnComplete(decor.Percentage(decor.WC{W: 5}), ""),
+					),
+				)
+
+				progressBar.SetTotal(resp.Size, true)
+				doneProgressBar.SetTotal(resp.Size, true)
+			}
 			break Loop
 		}
 	}
@@ -410,4 +528,79 @@ func IsDir(url *url.URL, token string, namespace Namespace) (bool, error) {
 	}
 	return info.IsDir(), nil
 
+}
+
+
+func walkDavDir(url *url.URL, token string, namespace Namespace) ([]string, error) {
+
+	// First, check if the url is a directory
+	isDir, err := IsDir(url, token, namespace)
+	if err != nil {
+		log.Errorln("Failed to check if path", url.Path, " is directory:", err)
+		return nil, err
+	}
+	if !isDir {
+		log.Errorln("Path ", url.Path, " is not a directory.")
+		return nil, errors.New("path " + url.Path + " is not a directory")
+	}
+
+	// Create the client to walk the filesystem
+	rootUrl := *url
+	if namespace.DirListHost != "" {
+		// Parse the dir list host
+		dirListURL, err := url.Parse(namespace.DirListHost)
+		if err != nil {
+			log.Errorln("Failed to parse dirlisthost from namespaces into URL:", err)
+			return nil, err
+		}
+		rootUrl = *dirListURL
+
+	} else {
+		rootUrl.Path = ""
+		rootUrl.Host = "stash.osgconnect.net:1094"
+		rootUrl.Scheme = "http"
+	}
+	log.Debugln("Dir list host: ", rootUrl.String())
+	c := gowebdav.NewClient(rootUrl.String(), "", "")
+
+	// XRootD does not like keep alives and kills things, so turn them off.
+	transport := http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   10 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		TLSHandshakeTimeout:   15 * time.Second,
+		DisableKeepAlives: true,
+	}
+	c.SetTransport(&transport)
+
+	files, err := walkDir(url.Path, c)
+	log.Debugln("Found files:", files)
+	return files, err
+
+
+}
+
+func walkDir(path string, client *gowebdav.Client) ([]string, error) {
+	var files []string
+	log.Debugln("Reading directory: ", path)
+	infos, err := client.ReadDir(path)
+	if err != nil {
+		return nil, err
+	}
+	for _, info := range infos {
+		newPath := path + "/" + info.Name()
+		if info.IsDir() {
+			returnedFiles, err := walkDir(newPath, client)
+			if err != nil {
+				return nil, err
+			}
+			files = append(files, returnedFiles...)
+		} else {
+			// It is a normal file
+			files = append(files, newPath)
+		}
+	}
+	return files, nil
 }
