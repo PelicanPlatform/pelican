@@ -254,7 +254,16 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) error {
 	defer progressTicker.Stop()
 
 	// Store the last downloaded amount, and the bottom limit of the download
+	// Check the environment variable STASHCP_MINIMUM_DOWNLOAD_SPEED
+	downloadLimitStr := os.Getenv("STASHCP_MINIMUM_DOWNLOAD_SPEED")
 	var downloadLimit int64 = 1024 * 1024
+	if downloadLimitStr != "" {
+		var err error
+		downloadLimit, err = strconv.ParseInt(downloadLimitStr, 10, 64)
+		if err != nil {
+			log.Errorln("Environment variable STASHCP_MINIMUM_DOWNLOAD_SPEED=", downloadLimitStr," is not parsable as integer:", err, "defaulting to 1MB/s")
+		}
+	}
 	// If we are doing a recursive, decrease the download limit by the number of likely workers ~5
 	if options.Recursive {
 		downloadLimit /= 5
@@ -302,7 +311,7 @@ Loop:
 			// Check if we are downloading fast enough
 			if resp.BytesPerSecond() < float64(downloadLimit) {
 				// Give the download 30 seconds to start
-				if resp.Start.Before(time.Now().Add(-time.Second * 30)) {
+				if resp.Duration() < time.Second * 10 {
 					continue
 				}
 				cancel()
