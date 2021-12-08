@@ -333,8 +333,7 @@ Loop:
 				}
 
 				// Craft the error message
-				var errorMsg string
-				errorMsg = "cancelled transfer, too slow.  Detected speed: " +
+				var errorMsg = "cancelled transfer, too slow.  Detected speed: " +
 					ByteCountSI(int64(resp.BytesPerSecond())) +
 					"/s, total transferred: " +
 					ByteCountSI(resp.BytesComplete()) +
