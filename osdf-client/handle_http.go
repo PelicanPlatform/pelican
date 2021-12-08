@@ -323,7 +323,15 @@ Loop:
 					cancelledProgressBar.SetTotal(resp.Size, true)
 				}
 
-				return errors.New("Cancelled transfer, too slow")
+				// Craft the error message
+				var errorMsg string
+				errorMsg = "cancelled transfer, too slow.  Detected speed: " +
+					ByteCountSI(int64(resp.BytesPerSecond())) +
+					"/s, total transferred: " +
+					ByteCountSI(resp.BytesComplete()) +
+					", total transfer time: " +
+					resp.Duration().String()
+				return errors.New(errorMsg)
 
 			}
 
