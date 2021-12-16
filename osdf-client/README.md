@@ -26,5 +26,6 @@ Configuration
 | Environment Variable      | Description |
 | ----------- | ----------- |
 | `OSG_DISABLE_PROXY_FALLBACK`      | Do not disable using proxies. By default, `stashcp` will try to use an HTTP proxy when connecting to a cache. If this environment variable is set (no value necessary, only if it's set), then `stashcp` will not fallback to no proxy if the proxy download fails.         |
+| `STASHCP_MINIMUM_DOWNLOAD_SPEED`  | The lower limit a download will be cancelled, in bytes per second |
 
 
