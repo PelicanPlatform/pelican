@@ -68,7 +68,7 @@ func NewTransferDetails(cache string, https bool) []TransferDetails {
 				Proxy: false,
 			})
 			// Strip the port off and add 8443
-			cacheURL.Host = cacheURL.Host[:len(cacheURL.Host) - 5] + ":8443"
+			cacheURL.Host = cacheURL.Host[:len(cacheURL.Host)-5] + ":8443"
 		}
 		// Whether port is specified or not, add a transfer without proxy
 		details = append(details, TransferDetails{
@@ -91,7 +91,6 @@ func NewTransferDetails(cache string, https bool) []TransferDetails {
 			})
 		}
 	}
-
 
 	return details
 }
@@ -170,7 +169,7 @@ func download_http(source string, destination string, payload *payloadStruct, na
 	wg.Wait()
 
 	if len(results) > 0 {
-		return <- results
+		return <-results
 	} else {
 		return nil
 	}
@@ -241,7 +240,7 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) error {
 	log.Debugln("Transfer URL String:", transfer.Url.String())
 	req, _ := grab.NewRequest(dest, transfer.Url.String())
 	if token != "" {
-		req.HTTPRequest.Header.Set("Authorization", "Bearer " + token)
+		req.HTTPRequest.Header.Set("Authorization", "Bearer "+token)
 	}
 	req.WithContext(ctx)
 
@@ -296,7 +295,6 @@ Loop:
 				previousCompletedTime = currentCompletedTime
 			}
 
-
 		case <-t.C:
 
 			// Check if we are downloading fast enough
@@ -330,12 +328,17 @@ Loop:
 		case <-resp.Done:
 			// download is complete
 			if options.ProgessBars {
+				downloadError := resp.Err()
+				completeMsg := "done!"
+				if downloadError != nil {
+					completeMsg = downloadError.Error()
+				}
 				var doneProgressBar = p.AddBar(resp.Size,
 					mpb.BarQueueAfter(progressBar),
 					mpb.BarFillerClearOnComplete(),
 					mpb.PrependDecorators(
 						decor.Name(filename, decor.WC{W: len(filename) + 1, C: decor.DidentRight}),
-						decor.OnComplete(decor.Name(filename, decor.WCSyncSpaceR), "done!"),
+						decor.OnComplete(decor.Name(filename, decor.WCSyncSpaceR), completeMsg),
 						decor.OnComplete(decor.EwmaETA(decor.ET_STYLE_MMSS, 0, decor.WCSyncWidth), ""),
 					),
 					mpb.AppendDecorators(
@@ -378,6 +381,7 @@ func (pr *ProgressReader) Read(p []byte) (n int, err error) {
 	atomic.AddInt64(&pr.read, int64(n))
 	return n, err
 }
+
 // Close implments the close function of io.Closer
 func (pr *ProgressReader) Close() error {
 	err := pr.file.Close()
@@ -530,7 +534,6 @@ func IsDir(url *url.URL, token string, namespace Namespace) (bool, error) {
 
 }
 
-
 func walkDavDir(url *url.URL, token string, namespace Namespace) ([]string, error) {
 
 	// First, check if the url is a directory
@@ -570,15 +573,14 @@ func walkDavDir(url *url.URL, token string, namespace Namespace) ([]string, erro
 			Timeout:   10 * time.Second,
 			KeepAlive: 30 * time.Second,
 		}).DialContext,
-		TLSHandshakeTimeout:   15 * time.Second,
-		DisableKeepAlives: true,
+		TLSHandshakeTimeout: 15 * time.Second,
+		DisableKeepAlives:   true,
 	}
 	c.SetTransport(&transport)
 
 	files, err := walkDir(url.Path, c)
 	log.Debugln("Found files:", files)
 	return files, err
-
 
 }
 
