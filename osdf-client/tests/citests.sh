@@ -1,4 +1,4 @@
-#!/bin/sh -xe
+#!/bin/bash -xe
 
 to_exit=0
 ./stashcp -d /osgconnect/public/dweitzel/blast/queries/query1 ./
