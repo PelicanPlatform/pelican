@@ -117,6 +117,9 @@ type Options struct {
 	// Progress bars
 	ProgessBars bool `long:"progress" short:"p" description:"Show progress bars, turned on if run from a terminal"`
 
+	// PluginInterface specifies how the output should be formatted
+	PluginInterface bool `long:"plugininterface" description:"Output in HTCondor plugin format.  Turned on if executable is named stash_plugin"`
+
 	// Positional arguemnts
 	SourceDestination SourceDestination `description:"Source and Destination Files" positional-args:"1"`
 }
@@ -127,15 +130,40 @@ var parser = flags.NewParser(&options, flags.Default)
 
 func main() {
 
+	// Capture the start time of the transfer
+	startTime := time.Now().Unix()
 	if _, err := parser.Parse(); err != nil {
 		if flagsErr, ok := err.(*flags.Error); ok && flagsErr.Type == flags.ErrHelp {
 			os.Exit(0)
 		} else {
+			log.Errorln(err)
 			os.Exit(1)
 		}
 	}
 
-	if options.Debug {
+	// Special case, HTCondor expects a response to "-classad", which is not supported by the go-flags package used
+	// for option parsing.  So make our own simple parsing.
+	if os.Args[1] == "-classad" {
+		fmt.Println("PluginVersion = \"0.3\"")
+		fmt.Println("PluginType = \"FileTransfer\"")
+		fmt.Println("SupportedMethods = \"stash\"")
+		os.Exit(0)
+	}
+
+	execPath, err := os.Executable()
+	if err != nil {
+		log.Errorln("Failed to get executable name:", err)
+	}
+	if path.Base(execPath) == "stash_plugin" {
+		options.PluginInterface = true
+	}
+
+	if options.PluginInterface && !options.Debug {
+		err := setLogging(log.PanicLevel)
+		if err != nil {
+			log.Panicln("Failed to set logging level to Panic:", err)
+		}
+	} else if options.Debug {
 		// Set logging to debug level
 		err := setLogging(log.DebugLevel)
 		if err != nil {
@@ -161,6 +189,11 @@ func main() {
 	// https://rosettacode.org/wiki/Check_output_device_is_a_terminal#Go
 	if fileInfo, _ := os.Stdout.Stat(); (fileInfo.Mode() & os.ModeCharDevice) != 0 {
 		options.ProgessBars = true
+	}
+
+	// Turn off progress bars if it's in plugin support
+	if options.PluginInterface {
+		options.ProgessBars = false
 	}
 
 	if options.PrintNamespaces {
@@ -219,7 +252,6 @@ func main() {
 		return
 	}
 
-
 	/*
 		TODO: Parse a caches JSON, is this needed anymore?
 		if args.caches_json {
@@ -267,11 +299,40 @@ func main() {
 		}
 	}
 
-	// Exit with failure
-	if result != nil {
-		// Print the list of errors
-		log.Errorln(GetErrors())
-		os.Exit(1)
+	if options.PluginInterface {
+		fmt.Print("TransferStartTime = ", startTime, "\n")
+		fmt.Print("TransferEndTime = ", time.Now().Unix(), "\n")
+		hostname, err := os.Hostname()
+		if err != nil {
+			log.Errorln("Error getting hostname: ", err)
+		}
+		fmt.Print("TransferLocalMachineName = \"", hostname, "\"", "\n")
+		fmt.Println("TransferProtocol = \"stash\"")
+		fmt.Print("TransferUrl = \"", source[0], "\"", "\n")
+		fmt.Println("TransferType = \"download\"")
+		if result != nil {
+			fmt.Println("TransferSuccess = false")
+			fmt.Print("TransferError = \"", GetErrors(), "\"", "\n")
+			fmt.Println("TransferFileBytes = 0")
+			fmt.Println("TransferTotalBytes = 0")
+			os.Exit(1)
+		} else {
+			// Stat the destination file
+			destInfo, err := os.Stat(dest)
+			if err != nil {
+				log.Errorln("Failed to stat file: ", err)
+			}
+			fmt.Println("TransferSuccess = true")
+			fmt.Print("TransferFileBytes = ", destInfo.Size(), "\n")
+			fmt.Print("TransferTotalBytes = ", destInfo.Size(), "\n")
+		}
+	} else {
+		// Exit with failure
+		if result != nil {
+			// Print the list of errors
+			log.Errorln(GetErrors())
+			os.Exit(1)
+		}
 	}
 
 }
@@ -326,7 +387,7 @@ func getToken() (string, error) {
 		if xdgRuntimeDir, xdgRuntimeDirSet := os.LookupEnv("XDG_RUNTIME_DIR"); token_location == "" && xdgRuntimeDirSet {
 			// Get the uid
 			uid := os.Getuid()
-			tmpTokenPath := filepath.Join(xdgRuntimeDir, "bt_u" + strconv.Itoa(uid))
+			tmpTokenPath := filepath.Join(xdgRuntimeDir, "bt_u"+strconv.Itoa(uid))
 			if _, err := os.Stat(tmpTokenPath); err == nil {
 				token_location = tmpTokenPath
 			}
