@@ -143,7 +143,7 @@ func main() {
 
 	// Special case, HTCondor expects a response to "-classad", which is not supported by the go-flags package used
 	// for option parsing.  So make our own simple parsing.
-	if os.Args[1] == "-classad" {
+	if len(os.Args) >= 2 && os.Args[1] == "-classad" {
 		fmt.Println("PluginVersion = \"0.3\"")
 		fmt.Println("PluginType = \"FileTransfer\"")
 		fmt.Println("SupportedMethods = \"stash\"")
