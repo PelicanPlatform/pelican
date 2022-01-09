@@ -214,10 +214,8 @@ func main() {
 			log.Errorln("Failed to get best caches:", err)
 			os.Exit(1)
 		}
-		for _, cache := range cacheList {
-			fmt.Print(cache)
-		}
-		fmt.Println()
+		// Print the caches, comma separated,
+		fmt.Println(strings.Join(cacheList[:], ","))
 		os.Exit(0)
 	}
 
