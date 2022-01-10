@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net"
 	"net/http"
@@ -290,8 +291,11 @@ func main() {
 	}
 
 	var result error
+	var downloaded int64 = 0
 	for _, src := range source {
-		result = doStashCPSingle(src, dest, splitMethods, options.Recursive)
+		var tmpDownloaded int64
+		tmpDownloaded, result = doStashCPSingle(src, dest, splitMethods, options.Recursive)
+		downloaded += tmpDownloaded
 		if result != nil {
 			break
 		}
@@ -316,13 +320,9 @@ func main() {
 			os.Exit(1)
 		} else {
 			// Stat the destination file
-			destInfo, err := os.Stat(dest)
-			if err != nil {
-				log.Errorln("Failed to stat file: ", err)
-			}
 			fmt.Println("TransferSuccess = true")
-			fmt.Print("TransferFileBytes = ", destInfo.Size(), "\n")
-			fmt.Print("TransferTotalBytes = ", destInfo.Size(), "\n")
+			fmt.Print("TransferFileBytes = ", downloaded, "\n")
+			fmt.Print("TransferTotalBytes = ", downloaded, "\n")
 		}
 	} else {
 		// Exit with failure
@@ -345,11 +345,11 @@ func setLogging(logLevel log.Level) error {
 }
 
 // Do writeback to stash using SciTokens
-func doWriteBack(source string, destination *url.URL, namespace Namespace) error {
+func doWriteBack(source string, destination *url.URL, namespace Namespace) (int64, error) {
 
 	scitoken_contents, err := getToken()
 	if err != nil {
-		return err
+		return 0, err
 	}
 	return UploadFile(source, destination, scitoken_contents, namespace)
 
@@ -437,20 +437,20 @@ func getToken() (string, error) {
 }
 
 // Start the transfer, whether read or write back
-func doStashCPSingle(sourceFile string, destination string, methods []string, recursive bool) error {
+func doStashCPSingle(sourceFile string, destination string, methods []string, recursive bool) (int64, error) {
 
 	// Parse the source and destination with URL parse
 
 	source_url, err := url.Parse(sourceFile)
 	if err != nil {
 		log.Errorln("Failed to parse source URL:", err)
-		return err
+		return 0, err
 	}
 
 	dest_url, err := url.Parse(destination)
 	if err != nil {
 		log.Errorln("Failed to parse destination URL:", err)
-		return err
+		return 0, err
 	}
 
 	understoodSchemes := []string{"stash", "file", ""}
@@ -458,13 +458,13 @@ func doStashCPSingle(sourceFile string, destination string, methods []string, re
 	_, foundSource := Find(understoodSchemes, source_url.Scheme)
 	if !foundSource {
 		log.Errorln("Do not understand source scheme:", source_url.Scheme)
-		return errors.New("Do not understand source scheme")
+		return 0, errors.New("Do not understand source scheme")
 	}
 
 	_, foundDest := Find(understoodSchemes, source_url.Scheme)
 	if !foundDest {
 		log.Errorln("Do not understand destination scheme:", source_url.Scheme)
-		return errors.New("Do not understand destination scheme")
+		return 0, errors.New("Do not understand destination scheme")
 	}
 
 	// Get the namespace of the remote filesystem
@@ -494,7 +494,7 @@ func doStashCPSingle(sourceFile string, destination string, methods []string, re
 
 	ns, err := MatchNamespace(source_url.Path)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	// get absolute path
@@ -534,26 +534,27 @@ func doStashCPSingle(sourceFile string, destination string, methods []string, re
 	}
 
 	// switch statement?
+	var downloaded int64 = 0
 Loop:
 	for _, method := range methods {
 
 		switch method {
 		case "cvmfs":
 			log.Info("Trying CVMFS...")
-			if err := download_cvmfs(sourceFile, destination, &payload); err == nil {
+			if downloaded, err = download_cvmfs(sourceFile, destination, &payload); err == nil {
 				success = true
 				break Loop
 				//check if break still works
 			}
 		case "xrootd":
 			log.Info("Trying XROOTD...")
-			if err := download_xrootd(sourceFile, destination, &payload); err == nil {
+			if downloaded, err = download_xrootd(sourceFile, destination, &payload); err == nil {
 				success = true
 				break Loop
 			}
 		case "http":
 			log.Info("Trying HTTP...")
-			if err := download_http(sourceFile, destination, &payload, ns, recursive); err == nil {
+			if downloaded, err = download_http(sourceFile, destination, &payload, ns, recursive); err == nil {
 				success = true
 				break Loop
 			}
@@ -571,13 +572,8 @@ Loop:
 		payload.status = "Success"
 
 		// Get the final size of the download file
-
-		info, err := os.Stat(destination)
-		if err != nil {
-			return err
-		}
-		payload.fileSize = info.Size()
-		payload.downloadSize = payload.fileSize
+		payload.fileSize = downloaded
+		payload.downloadSize = downloaded
 	} else {
 		log.Error("All methods failed! Unable to download file.")
 		payload.status = "Fail"
@@ -590,9 +586,9 @@ Loop:
 	}
 
 	if !success {
-		return errors.New("failed to download file")
+		return downloaded, errors.New("failed to download file")
 	} else {
-		return nil
+		return downloaded, nil
 	}
 
 }
@@ -753,7 +749,12 @@ func doEsSend(jsonBytes []byte, errorChannel chan<- error) error {
 		errorChannel <- err
 		return err
 	}
-	defer resp.Body.Close()
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			log.Errorln("Failed to close body when uploading payload")
+		}
+	}(resp.Body)
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		errorChannel <- err

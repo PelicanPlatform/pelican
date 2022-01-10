@@ -95,15 +95,20 @@ func NewTransferDetails(cache string, https bool) []TransferDetails {
 	return details
 }
 
-func download_http(source string, destination string, payload *payloadStruct, namespace Namespace, recursive bool) error {
-	// Generate the url
+type TransferResults struct {
+	Error      error
+	Downloaded int64
+}
+
+func download_http(source string, destination string, payload *payloadStruct, namespace Namespace, recursive bool) (int64, error) {
+	// Generate the downloadUrl
 	var token string
 	if namespace.UseTokenOnRead {
 		var err error
 		token, err = getToken()
 		if err != nil {
 			log.Errorln("Failed to get token though required to read from this namespace:", err)
-			return err
+			return 0, err
 		}
 	}
 
@@ -125,15 +130,15 @@ func download_http(source string, destination string, payload *payloadStruct, na
 	}
 	log.Debugln("Trying the caches:", nearest_cache_list[:cachesToTry])
 	var transfers []TransferDetails
-	url := url.URL{Path: source}
+	downloadUrl := url.URL{Path: source}
 	var files []string
 
 	if recursive {
 		var err error
-		files, err = walkDavDir(&url, token, namespace)
+		files, err = walkDavDir(&downloadUrl, token, namespace)
 		if err != nil {
 			log.Errorln("Error from walkDavDir", err)
-			return err
+			return 0, err
 		}
 	} else {
 		files = append(files, source)
@@ -150,7 +155,7 @@ func download_http(source string, destination string, payload *payloadStruct, na
 	var wg sync.WaitGroup
 
 	workChan := make(chan string)
-	results := make(chan error, len(files))
+	results := make(chan TransferResults, len(files))
 	//tf := TransferFiles{files: files}
 
 	// Start the workers
@@ -168,15 +173,27 @@ func download_http(source string, destination string, payload *payloadStruct, na
 	// Wait for all the transfers to complete
 	wg.Wait()
 
-	if len(results) > 0 {
-		return <-results
-	} else {
-		return nil
+	var downloaded int64
+	var downloadError error = nil
+	// Every transfer should send a TransferResults to the results channel
+	for i := 0; i < len(files); i++ {
+		select {
+		case result := <-results:
+			downloaded += result.Downloaded
+			if result.Error != nil {
+				downloadError = result.Error
+			}
+		default:
+			// Didn't get a result, that's weird
+			downloadError = errors.New("failed to get outputs from one of the transfers")
+		}
 	}
+
+	return downloaded, downloadError
 
 }
 
-func startDownloadWorker(source string, destination string, token string, transfers []TransferDetails, wg *sync.WaitGroup, workChan <-chan string, results chan<- error) {
+func startDownloadWorker(source string, destination string, token string, transfers []TransferDetails, wg *sync.WaitGroup, workChan <-chan string, results chan<- TransferResults) {
 
 	defer wg.Done()
 	var success bool
@@ -185,15 +202,16 @@ func startDownloadWorker(source string, destination string, token string, transf
 		newFile := strings.Replace(file, source, "", 1)
 		finalDest := path.Join(destination, newFile)
 		directory := path.Dir(finalDest)
+		var downloaded int64
 		err := os.MkdirAll(directory, 0700)
 		if err != nil {
-			results <- errors.New("Failed to make directory:" + directory)
+			results <- TransferResults{Error: errors.New("Failed to make directory:" + directory)}
 			continue
 		}
 		for _, transfer := range transfers {
 			transfer.Url.Path = file
 			log.Debugln("Constructed URL:", transfer.Url.String())
-			if err := DownloadHTTP(transfer, finalDest, token); err != nil {
+			if downloaded, err = DownloadHTTP(transfer, finalDest, token); err != nil {
 				log.Debugln("Failed to download:", err)
 				toAccum := errors.New("Failed to download from " + transfer.Url.String() +
 					" + proxy=" + strconv.FormatBool(transfer.Proxy) +
@@ -201,6 +219,7 @@ func startDownloadWorker(source string, destination string, token string, transf
 				AddError(toAccum)
 				continue
 			} else {
+				log.Debugln("Downloaded bytes:", downloaded)
 				success = true
 				break
 			}
@@ -208,14 +227,19 @@ func startDownloadWorker(source string, destination string, token string, transf
 		}
 		if !success {
 			log.Debugln("Failed to download with HTTP")
-			results <- errors.New("failed to download with HTTP")
+			results <- TransferResults{Error: errors.New("failed to download with HTTP")}
 			return
+		} else {
+			results <- TransferResults{
+				Downloaded: downloaded,
+				Error:      nil,
+			}
 		}
 	}
 }
 
 // DownloadHTTP - Perform the actual download of the file
-func DownloadHTTP(transfer TransferDetails, dest string, token string) error {
+func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, error) {
 
 	// Create the client, request, and context
 	client := grab.NewClient()
@@ -260,7 +284,7 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) error {
 		var err error
 		downloadLimit, err = strconv.ParseInt(downloadLimitStr, 10, 64)
 		if err != nil {
-			log.Errorln("Environment variable STASHCP_MINIMUM_DOWNLOAD_SPEED=", downloadLimitStr," is not parsable as integer:", err, "defaulting to 1MB/s")
+			log.Errorln("Environment variable STASHCP_MINIMUM_DOWNLOAD_SPEED=", downloadLimitStr, " is not parsable as integer:", err, "defaulting to 1MB/s")
 		}
 	}
 	// If we are doing a recursive, decrease the download limit by the number of likely workers ~5
@@ -309,7 +333,7 @@ Loop:
 			// Check if we are downloading fast enough
 			if resp.BytesPerSecond() < float64(downloadLimit) {
 				// Give the download 30 seconds to start
-				if resp.Duration() < time.Second * 10 {
+				if resp.Duration() < time.Second*10 {
 					continue
 				}
 				cancel()
@@ -337,7 +361,7 @@ Loop:
 					ByteCountSI(resp.BytesComplete()) +
 					", total transfer time: " +
 					resp.Duration().String()
-				return errors.New(errorMsg)
+				return 0, errors.New(errorMsg)
 
 			}
 
@@ -372,14 +396,14 @@ Loop:
 	err := resp.Err()
 	if err != nil {
 		log.Debugln("Got error from HTTP download", err)
-		return err
+		return 0, err
 	}
 	if resp.HTTPResponse.StatusCode != 200 {
 		log.Debugln("Got failure status code:", resp.HTTPResponse.StatusCode)
-		return errors.New("failure status code")
+		return 0, errors.New("failure status code")
 	}
 	log.Debugln("HTTP Transfer was successful")
-	return nil
+	return resp.BytesComplete(), nil
 }
 
 // ProgressReader wraps the io.Reader to get progress
@@ -407,7 +431,7 @@ func (pr *ProgressReader) Close() error {
 }
 
 // UploadFile Uploads a file using HTTP
-func UploadFile(src string, dest *url.URL, token string, namespace Namespace) error {
+func UploadFile(src string, dest *url.URL, token string, namespace Namespace) (int64, error) {
 
 	log.Debugln("In UploadFile")
 	log.Debugln("Dest", dest.String())
@@ -415,18 +439,18 @@ func UploadFile(src string, dest *url.URL, token string, namespace Namespace) er
 	file, err := os.Open(src)
 	if err != nil {
 		log.Errorln("Error opening local file:", err)
-		return err
+		return 0, err
 	}
 	// Stat the file to get the size (for progress bar)
 	fileInfo, err := file.Stat()
 	if err != nil {
 		log.Errorln("Error stating local file ", src, ":", err)
-		return err
+		return 0, err
 	}
 	// Parse the writeback host as a URL
 	writebackhostUrl, err := url.Parse(namespace.WriteBackHost)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	dest.Host = writebackhostUrl.Host
 	dest.Scheme = "https"
@@ -454,7 +478,7 @@ func UploadFile(src string, dest *url.URL, token string, namespace Namespace) er
 	request.ContentLength = fileInfo.Size()
 	if err != nil {
 		log.Errorln("Error creating request:", err)
-		return err
+		return 0, err
 	}
 	// Set the authorization header
 	request.Header.Set("Authorization", "Bearer "+token)
@@ -463,6 +487,7 @@ func UploadFile(src string, dest *url.URL, token string, namespace Namespace) er
 	defer t.Stop()
 	//log.Debug(formatRequest(request))
 	go doPut(request, responseChan, errorChan)
+	var lastError error = nil
 
 	// Do the select on a ticker, and the writeChan
 Loop:
@@ -476,7 +501,8 @@ Loop:
 				lastKnownWritten = currentRead
 			} else {
 				// No progress has been made in the last 1 second
-				log.Errorln("No progress made in last 1 second in upload")
+				log.Errorln("No progress made in last 5 second in upload")
+				lastError = errors.New("upload cancelled, no progress in 5 seconds")
 				break Loop
 			}
 
@@ -485,16 +511,18 @@ Loop:
 			log.Debugln("File closed")
 		case response := <-responseChan:
 			log.Debugln("Received response:", response)
+			lastError = errors.New("failed to upload: " + response.Status)
 			break Loop
 
 		case err := <-errorChan:
 			log.Warningln("Unexpected error when performing upload:", err)
+			lastError = err
 			break Loop
 
 		}
 	}
 
-	return nil
+	return atomic.LoadInt64(&reader.read), lastError
 }
 
 // Actually perform the Put request to the server

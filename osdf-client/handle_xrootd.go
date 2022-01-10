@@ -4,21 +4,21 @@ import (
 	"errors"
 )
 
-func download_xrootd(sourceFile string, destination string, payload *payloadStruct) error {
+func download_xrootd(sourceFile string, destination string, payload *payloadStruct) (int64, error) {
 
 	// Download from the nearest cache, if that fails, fallback to the stash origin.
-	return errors.New("XrootD not implemented")
+	return 0, errors.New("XrootD not implemented")
 	// Check for xrootd, return quickly if it's not available
 	/*
-	xrootd_check := check_for_xrootd()
-	if xrootd_check != nil {
-		return xrootd_check
-	}
+		xrootd_check := check_for_xrootd()
+		if xrootd_check != nil {
+			return xrootd_check
+		}
 
-	// If the cache is not specified by the command line, then look for the closest
-	if len(nearest_cache_list) == 0 {
-		get_best_stashcache("xroot")
-	}
+		// If the cache is not specified by the command line, then look for the closest
+		if len(nearest_cache_list) == 0 {
+			get_best_stashcache("xroot")
+		}
 	*/
 	// if nearest_cache.Size() == 0{
 	// 	nearest_cache = get_best_stashcache()
