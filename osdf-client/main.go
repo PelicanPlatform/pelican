@@ -293,7 +293,7 @@ func main() {
 	var result error
 	var downloaded int64 = 0
 	for _, src := range source {
-		var tmpDownloaded int64 = 0
+		var tmpDownloaded int64
 		tmpDownloaded, result = doStashCPSingle(src, dest, splitMethods, options.Recursive)
 		downloaded += tmpDownloaded
 		if result != nil {
