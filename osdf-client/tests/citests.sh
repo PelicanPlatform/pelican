@@ -7,11 +7,6 @@ to_exit=0
 cp ./stashcp ./stash_plugin
 classad_output=$(./stash_plugin -classad)
 
-if ! [[ $classad_output =~ "PluginVersion = \"0.3\"" ]]; then
-  echo "PluginVersion not in classad output"
-  to_exit=1
-fi
-
 if ! [[ $classad_output =~ "PluginType = \"FileTransfer\"" ]]; then
   echo "PluginType not in classad output"
   to_exit=1
