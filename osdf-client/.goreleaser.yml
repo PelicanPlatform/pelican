@@ -18,6 +18,8 @@ builds:
       - darwin
     id: "stashcp"
     binary: stashcp
+    tags:
+      - forceposix
     ignore:
       - goos: windows
         goarch: arm64
