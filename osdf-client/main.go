@@ -317,7 +317,13 @@ func main() {
 			fmt.Print("TransferError = \"", GetErrors(), "\"", "\n")
 			fmt.Println("TransferFileBytes = 0")
 			fmt.Println("TransferTotalBytes = 0")
-			os.Exit(1)
+			if ErrorsRetryable() {
+				fmt.Println("TransferRetryable = true")
+				os.Exit(11)
+			} else {
+				fmt.Println("TransferRetryable = false")
+				os.Exit(1)
+			}
 		} else {
 			// Stat the destination file
 			fmt.Println("TransferSuccess = true")
@@ -329,6 +335,10 @@ func main() {
 		if result != nil {
 			// Print the list of errors
 			log.Errorln(GetErrors())
+			if ErrorsRetryable() {
+				log.Errorln("Errors are retryable")
+				os.Exit(11)
+			}
 			os.Exit(1)
 		}
 	}
