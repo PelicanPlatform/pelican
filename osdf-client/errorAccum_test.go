@@ -7,10 +7,6 @@ import (
 	"testing"
 )
 
-func SetupAccumTest() {
-
-}
-
 //  TestErrorAccum tests simple adding and removing from the accumulator
 func TestErrorAccum(t *testing.T) {
 	bunchOfErrors = make([]error, 0)
