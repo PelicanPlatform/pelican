@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	grab "github.com/cavaliercoder/grab"
@@ -24,6 +25,47 @@ import (
 )
 
 var p = mpb.New()
+
+// SlowTransferError is an error that is returned when a transfer takes longer than the configured timeout
+type SlowTransferError struct {
+	BytesTransferred int64
+	BytesPerSecond   int64
+	BytesTotal       int64
+	Duration         time.Duration
+}
+
+func (e *SlowTransferError) Error() string {
+	return "cancelled transfer, too slow.  Detected speed: " +
+		ByteCountSI(e.BytesPerSecond) +
+		"/s, total transferred: " +
+		ByteCountSI(e.BytesTransferred) +
+		", total transfer time: " +
+		e.Duration.String()
+}
+
+func (e *SlowTransferError) Is(target error) bool {
+	_, ok := target.(*SlowTransferError)
+	return ok
+}
+
+// ConnectionSetupError is an error that is returned when a connection to the remote server fails
+type ConnectionSetupError struct {
+	URL string
+	Err error
+}
+
+func (e *ConnectionSetupError) Error() string {
+	return "Connection to remote server failed"
+}
+
+func (e *ConnectionSetupError) Unwrap() error {
+	return e.Err
+}
+
+func (e *ConnectionSetupError) Is(target error) bool {
+	_, ok := target.(*ConnectionSetupError)
+	return ok
+}
 
 // HasPort test the host if it includes a port
 func HasPort(host string) bool {
@@ -253,6 +295,7 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   15 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
+		ResponseHeaderTimeout: 10 * time.Second,
 	}
 	if !transfer.Proxy {
 		transport.Proxy = nil
@@ -296,6 +339,13 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 	log.Debugln("Starting the HTTP transfer...")
 	filename := path.Base(dest)
 	resp := client.Do(req)
+	// Check the error real quick
+	if resp.IsComplete() {
+		if err := resp.Err(); err != nil {
+			log.Errorln("Failed to download:", err)
+			return 0, &ConnectionSetupError{Err: err}
+		}
+	}
 	var progressBar *mpb.Bar
 	if options.ProgessBars {
 		progressBar = p.AddBar(0,
@@ -354,14 +404,12 @@ Loop:
 					cancelledProgressBar.SetTotal(resp.Size, true)
 				}
 
-				// Craft the error message
-				var errorMsg = "cancelled transfer, too slow.  Detected speed: " +
-					ByteCountSI(int64(resp.BytesPerSecond())) +
-					"/s, total transferred: " +
-					ByteCountSI(resp.BytesComplete()) +
-					", total transfer time: " +
-					resp.Duration().String()
-				return 0, errors.New(errorMsg)
+				return 0, &SlowTransferError{
+					BytesTransferred: resp.BytesComplete(),
+					BytesPerSecond:   int64(resp.BytesPerSecond()),
+					Duration:         resp.Duration(),
+					BytesTotal:       resp.Size,
+				}
 
 			}
 
@@ -395,6 +443,12 @@ Loop:
 	//fmt.Printf("\nDownload saved to", resp.Filename)
 	err := resp.Err()
 	if err != nil {
+		// Connection errors
+		if errors.Is(err, syscall.ECONNREFUSED) ||
+			errors.Is(err, syscall.ECONNRESET) ||
+			errors.Is(err, syscall.ECONNABORTED) {
+			return 0, &ConnectionSetupError{URL: resp.Request.URL().String()}
+		}
 		log.Debugln("Got error from HTTP download", err)
 		return 0, err
 	}
