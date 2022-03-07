@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -352,6 +353,16 @@ func setLogging(logLevel log.Level) error {
 	log.SetFormatter(&textFormatter)
 	log.SetLevel(logLevel)
 	return nil
+}
+
+type Transfer struct {
+	source      string
+	destination string
+}
+
+func readMultiTransfers(stdin bufio.Reader) (transfers []Transfer, err error) {
+	// Check stdin for a list of transfers
+
 }
 
 // Do writeback to stash using SciTokens

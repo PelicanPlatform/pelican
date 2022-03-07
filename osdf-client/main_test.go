@@ -111,3 +111,21 @@ func TestGetToken(t *testing.T) {
 	assert.NoError(t, err)
 
 }
+
+// TestReadMultiTransfer test if we can read multiple transfers from stdin
+func TestReadMultiTransfer(t *testing.T) {
+	t.Parallel()
+
+	// Test with a single transfer
+	stdin := "https://example.com/file.txt"
+	transfers := readMultiTransfer(strings.NewReader(stdin))
+	assert.Equal(t, 1, len(transfers))
+	assert.Equal(t, stdin, transfers[0])
+
+	// Test with multiple transfers
+	stdin = "https://example.com/file1.txt\nhttps://example.com/file2.txt"
+	transfers = readMultiTransfer(strings.NewReader(stdin))
+	assert.Equal(t, 2, len(transfers))
+	assert.Equal(t, "https://example.com/file1.txt", transfers[0])
+	assert.Equal(t, "https://example.com/file2.txt", transfers[1])
+}
