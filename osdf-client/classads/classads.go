@@ -24,6 +24,10 @@ func (c *ClassAd) Get(name string) (interface{}, error) {
 	}
 }
 
+func (c *ClassAd) Set(name string, value string) {
+	c.attributes[name] = value
+}
+
 // ReadClassAd reads a ClassAd from the given reader.
 func ReadClassAd(reader io.Reader) ([]ClassAd, error) {
 	var ads []ClassAd
@@ -55,18 +59,32 @@ func ReadClassAd(reader io.Reader) ([]ClassAd, error) {
 	if scanner.Err() != nil {
 		return nil, scanner.Err()
 	}
-	return nil, nil
+	return ads, nil
 }
 
 func ParseClassAd(line string) (ClassAd, error) {
 	var ad ClassAd
 	ad.attributes = make(map[string]interface{})
+
+	// Trim the spaces and "[" "]"
 	line = strings.TrimSpace(line)
 	line = strings.TrimPrefix(line, "[")
 	line = strings.TrimSuffix(line, "]")
+
+	// Split by "\n" or ";"
 	splitter := regexp.MustCompile(`[\n;]`)
 	splitted := splitter.Split(line, -1)
-	fmt.Println(splitted)
-	fmt.Println(len(splitted))
+
+	// For each attribute, split by the first "="
+	for _, attrStr := range splitted {
+		fmt.Println(attrStr)
+		attrSplit := strings.SplitN(attrStr, "=", 2)
+		name := strings.TrimSpace(attrSplit[0])
+		// Check for quoted attribute and remove it
+		value := strings.TrimSpace(attrSplit[1])
+		value = strings.TrimPrefix(value, "\"")
+		value = strings.TrimSuffix(value, "\"")
+		ad.Set(name, value)
+	}
 	return ad, nil
 }
