@@ -1,0 +1,1 @@
+package stash_plugin

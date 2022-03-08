@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/opensciencegrid/stashcp/classads"
 	"io"
 	"io/ioutil"
 	"net"
@@ -360,9 +361,29 @@ type Transfer struct {
 	destination string
 }
 
+// readMultiTransfers reads the transfers from a Reader, such as stdin
 func readMultiTransfers(stdin bufio.Reader) (transfers []Transfer, err error) {
 	// Check stdin for a list of transfers
+	ads, err := classads.ReadClassAd(&stdin)
+	if err != nil {
+		return nil, err
+	}
+	if ads == nil {
+		return nil, errors.New("No transfers found")
+	}
+	for _, ad := range ads {
+		url, err := ad.Get("Url")
+		if err != nil {
+			return nil, err
+		}
+		destination, err := ad.Get("LocalFileName")
+		if err != nil {
+			return nil, err
+		}
+		transfers = append(transfers, Transfer{url.(string), destination.(string)})
+	}
 
+	return transfers, nil
 }
 
 // Do writeback to stash using SciTokens

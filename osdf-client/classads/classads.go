@@ -24,7 +24,7 @@ func (c *ClassAd) Get(name string) (interface{}, error) {
 	}
 }
 
-func (c *ClassAd) Set(name string, value string) {
+func (c *ClassAd) Set(name string, value interface{}) {
 	c.attributes[name] = value
 }
 

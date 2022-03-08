@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"net"
 	"os"
 	"path/filepath"
@@ -116,16 +117,23 @@ func TestGetToken(t *testing.T) {
 func TestReadMultiTransfer(t *testing.T) {
 	t.Parallel()
 
-	// Test with a single transfer
-	stdin := "https://example.com/file.txt"
-	transfers := readMultiTransfer(strings.NewReader(stdin))
-	assert.Equal(t, 1, len(transfers))
-	assert.Equal(t, stdin, transfers[0])
-
 	// Test with multiple transfers
-	stdin = "https://example.com/file1.txt\nhttps://example.com/file2.txt"
-	transfers = readMultiTransfer(strings.NewReader(stdin))
-	assert.Equal(t, 2, len(transfers))
-	assert.Equal(t, "https://example.com/file1.txt", transfers[0])
-	assert.Equal(t, "https://example.com/file2.txt", transfers[1])
+	stdin := "[ LocalFileName = \"/path/to/local/copy/of/foo\"; Url = \"url://server/some/directory//foo\" ]\n[ LocalFileName = \"/path/to/local/copy/of/bar\"; Url = \"url://server/some/directory//bar\" ]\n[ LocalFileName = \"/path/to/local/copy/of/qux\"; Url = \"url://server/some/directory//qux\" ]"
+	transfers, err := readMultiTransfers(*bufio.NewReader(strings.NewReader(stdin)))
+	assert.NoError(t, err)
+	assert.Equal(t, 3, len(transfers))
+	assert.Equal(t, "/path/to/local/copy/of/foo", transfers[0].destination)
+	assert.Equal(t, "url://server/some/directory//foo", transfers[0].source)
+	assert.Equal(t, "/path/to/local/copy/of/bar", transfers[1].destination)
+	assert.Equal(t, "url://server/some/directory//bar", transfers[1].source)
+	assert.Equal(t, "/path/to/local/copy/of/qux", transfers[2].destination)
+	assert.Equal(t, "url://server/some/directory//qux", transfers[2].source)
+
+	// Test with single transfers
+	stdin = "[ LocalFileName = \"/path/to/local/copy/of/blah\"; Url = \"url://server/some/directory//blah\" ]"
+	transfers, err = readMultiTransfers(*bufio.NewReader(strings.NewReader(stdin)))
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(transfers))
+	assert.Equal(t, "url://server/some/directory//blah", transfers[0].source)
+	assert.Equal(t, "/path/to/local/copy/of/blah", transfers[0].destination)
 }
