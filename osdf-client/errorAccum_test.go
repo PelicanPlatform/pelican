@@ -1,10 +1,11 @@
-package main
+package stashcp
 
 import (
 	"errors"
-	"github.com/stretchr/testify/assert"
 	"net/url"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 //  TestErrorAccum tests simple adding and removing from the accumulator

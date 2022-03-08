@@ -1,4 +1,4 @@
-package main
+package stashcp
 
 import (
 	"context"
@@ -158,8 +158,8 @@ func download_http(source string, destination string, payload *payloadStruct, na
 	if namespace.ReadHTTPS || namespace.UseTokenOnRead {
 		cacheListName = "xroots"
 	}
-	if len(nearest_cache_list) == 0 {
-		_, err := get_best_stashcache(cacheListName)
+	if len(NearestCacheList) == 0 {
+		_, err := GetBestStashcache(cacheListName)
 		if err != nil {
 			log.Errorln("Failed to get best caches:", err)
 		}
@@ -167,10 +167,10 @@ func download_http(source string, destination string, payload *payloadStruct, na
 
 	// Make sure we only try as many caches as we have
 	cachesToTry := 3
-	if cachesToTry > len(nearest_cache_list) {
-		cachesToTry = len(nearest_cache_list)
+	if cachesToTry > len(NearestCacheList) {
+		cachesToTry = len(NearestCacheList)
 	}
-	log.Debugln("Trying the caches:", nearest_cache_list[:cachesToTry])
+	log.Debugln("Trying the caches:", NearestCacheList[:cachesToTry])
 	var transfers []TransferDetails
 	downloadUrl := url.URL{Path: source}
 	var files []string
@@ -187,7 +187,7 @@ func download_http(source string, destination string, payload *payloadStruct, na
 	}
 
 	// Generate all of the transfer details to make a list of transfers
-	for _, cache := range nearest_cache_list[:cachesToTry] {
+	for _, cache := range NearestCacheList[:cachesToTry] {
 		// Parse the cache URL
 		log.Debugln("Cache:", cache)
 		transfers = append(transfers, NewTransferDetails(cache, namespace.ReadHTTPS || namespace.UseTokenOnRead)...)
@@ -331,7 +331,7 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 		}
 	}
 	// If we are doing a recursive, decrease the download limit by the number of likely workers ~5
-	if options.Recursive {
+	if Options.Recursive {
 		downloadLimit /= 5
 	}
 
@@ -347,7 +347,7 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 		}
 	}
 	var progressBar *mpb.Bar
-	if options.ProgessBars {
+	if Options.ProgressBars {
 		progressBar = p.AddBar(0,
 			mpb.PrependDecorators(
 				decor.Name(filename, decor.WCSyncSpaceR),
@@ -368,7 +368,7 @@ Loop:
 	for {
 		select {
 		case <-progressTicker.C:
-			if options.ProgessBars {
+			if Options.ProgressBars {
 				progressBar.SetTotal(resp.Size, false)
 				currentCompletedBytes := resp.BytesComplete()
 				progressBar.IncrInt64(currentCompletedBytes - previousCompletedBytes)
@@ -387,7 +387,7 @@ Loop:
 					continue
 				}
 				cancel()
-				if options.ProgessBars {
+				if Options.ProgressBars {
 					var cancelledProgressBar = p.AddBar(0,
 						mpb.BarQueueAfter(progressBar),
 						mpb.BarFillerClearOnComplete(),
@@ -415,7 +415,7 @@ Loop:
 
 		case <-resp.Done:
 			// download is complete
-			if options.ProgessBars {
+			if Options.ProgressBars {
 				downloadError := resp.Err()
 				completeMsg := "done!"
 				if downloadError != nil {

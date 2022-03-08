@@ -1,7 +1,6 @@
-package main
+package stashcp
 
 import (
-	"github.com/stretchr/testify/assert"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +9,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 // TestIsPort calls main.hasPort with a hostname, checking

@@ -3,7 +3,6 @@ package classads
 import (
 	"bufio"
 	"bytes"
-	"fmt"
 	"io"
 	"regexp"
 	"strings"
@@ -48,7 +47,6 @@ func ReadClassAd(reader io.Reader) ([]ClassAd, error) {
 	for scanner.Scan() {
 		line := scanner.Text()
 		// Parse the classad
-		fmt.Println("Classad: " + line)
 		ad, err := ParseClassAd(line)
 		if err != nil {
 			return nil, err
@@ -77,7 +75,6 @@ func ParseClassAd(line string) (ClassAd, error) {
 
 	// For each attribute, split by the first "="
 	for _, attrStr := range splitted {
-		fmt.Println(attrStr)
 		attrSplit := strings.SplitN(attrStr, "=", 2)
 		name := strings.TrimSpace(attrSplit[0])
 		// Check for quoted attribute and remove it

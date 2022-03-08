@@ -17,7 +17,22 @@ builds:
       - windows
       - darwin
     id: "stashcp"
+    dir: ./cmd/stashcp
     binary: stashcp
+    tags:
+      - forceposix
+    ignore:
+      - goos: windows
+        goarch: arm64
+  - env:
+      - CGO_ENABLED=0
+    main: ./cmd/stash_plugin
+    goos:
+      - linux
+      - windows
+      - darwin
+    id: "stash_plugin"
+    binary: stash_plugin
     tags:
       - forceposix
     ignore:
@@ -51,6 +66,7 @@ nfpms:
   - package_name: stashcp
     builds:
       - stashcp
+      - stash_plugin
     file_name_template: '{{ .ProjectName }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}'
     id: stashcp
     vendor: Open Science Grid

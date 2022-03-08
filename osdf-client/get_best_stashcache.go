@@ -1,4 +1,4 @@
-package main
+package stashcp
 
 import (
 	"bytes"
@@ -15,8 +15,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-func get_best_stashcache(cacheListName string) ([]string, error) {
-
+func GetBestStashcache(cacheListName string) ([]string, error) {
 
 	if cacheListName == "" {
 		cacheListName = "xroot"
@@ -35,12 +34,12 @@ func get_best_stashcache(cacheListName string) ([]string, error) {
 	var caches_list []string
 
 	// Check if the user provided a caches json file location
-	if caches_json_location != "" {
-		if _, err := os.Stat(caches_json_location); os.IsNotExist(err) {
+	if CachesJsonLocation != "" {
+		if _, err := os.Stat(CachesJsonLocation); os.IsNotExist(err) {
 			// path does not exist
-			log.Errorln(caches_json_location, "does not exist")
+			log.Errorln(CachesJsonLocation, "does not exist")
 
-			return nil, errors.New("Unable to open caches json file at: " + caches_json_location)
+			return nil, errors.New("Unable to open caches json file at: " + CachesJsonLocation)
 		}
 
 		//Use geo ip api on caches in provided json file
@@ -144,7 +143,7 @@ func get_best_stashcache(cacheListName string) ([]string, error) {
 			caches_list[i], caches_list[j] = caches_list[j], caches_list[i]
 		})
 		minsite := caches_list[0]
-		nearest_cache_list = caches_list
+		NearestCacheList = caches_list
 		log.Debugf("Unable to use Geoip to find closest cache!  Returning random cache %s", minsite)
 		log.Debugf("Randomized list of nearest caches: %s", strings.Join(caches_list, ","))
 		return caches_list, nil
@@ -174,11 +173,11 @@ func get_best_stashcache(cacheListName string) ([]string, error) {
 
 		for _, ordered_index := range ordered_list {
 			orderedIndex, _ := strconv.Atoi(ordered_index)
-			nearest_cache_list = append(nearest_cache_list, cachesList[cacheListName][orderedIndex-1])
+			NearestCacheList = append(NearestCacheList, cachesList[cacheListName][orderedIndex-1])
 		}
 
 		log.Debugf("Returning closest cache: %s", minsite)
-		log.Debugf("Ordered list of nearest caches: %s", nearest_cache_list)
-		return nearest_cache_list, nil
+		log.Debugf("Ordered list of nearest caches: %s", NearestCacheList)
+		return NearestCacheList, nil
 	}
 }
