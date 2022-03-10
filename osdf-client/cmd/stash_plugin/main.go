@@ -9,6 +9,7 @@ import (
 
 	stashcp "github.com/opensciencegrid/stashcp"
 	"github.com/opensciencegrid/stashcp/classads"
+	log "github.com/sirupsen/logrus"
 )
 
 var (
@@ -44,6 +45,7 @@ func main() {
 	source := os.Args[:len(os.Args)-1]
 	dest := os.Args[len(os.Args)-1]
 	methods := []string{"cvmfs", "http"}
+	setLogging(log.PanicLevel)
 
 	// Set the options
 	stashcp.Options.Recursive = false
@@ -91,6 +93,15 @@ func main() {
 
 }
 
+func setLogging(logLevel log.Level) error {
+	textFormatter := log.TextFormatter{}
+	textFormatter.DisableLevelTruncation = true
+	textFormatter.FullTimestamp = true
+	log.SetFormatter(&textFormatter)
+	log.SetLevel(logLevel)
+	return nil
+}
+
 type Transfer struct {
 	source      string
 	destination string
@@ -120,3 +131,6 @@ func readMultiTransfers(stdin bufio.Reader) (transfers []Transfer, err error) {
 
 	return transfers, nil
 }
+
+
+
