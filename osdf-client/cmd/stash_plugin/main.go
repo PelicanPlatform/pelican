@@ -42,7 +42,7 @@ func main() {
 	}
 	
 
-	source := os.Args[:len(os.Args)-1]
+	source := os.Args[1:len(os.Args)-1]
 	dest := os.Args[len(os.Args)-1]
 	methods := []string{"cvmfs", "http"}
 	if err := setLogging(log.PanicLevel); err != nil {
