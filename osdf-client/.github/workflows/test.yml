@@ -23,5 +23,11 @@ jobs:
         distribution: goreleaser
         version: latest
         args: build --rm-dist --snapshot
+    - name: Copy files (Ubuntu)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        cp dist/stashcp_linux_amd64/stashcp ./
+        cp dist/stash_plugin_linux_amd64/stash_plugin ./
     - name: Run Integration Tests
+      if: matrix.os == 'ubuntu-latest'
       run: ./tests/citests.sh

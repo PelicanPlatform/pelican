@@ -4,7 +4,6 @@ to_exit=0
 ./stashcp -d /osgconnect/public/dweitzel/blast/queries/query1 ./
 
 # Test the plugin interface
-cp ./stashcp ./stash_plugin
 classad_output=$(./stash_plugin -classad)
 
 if ! [[ $classad_output =~ "PluginType = \"FileTransfer\"" ]]; then
