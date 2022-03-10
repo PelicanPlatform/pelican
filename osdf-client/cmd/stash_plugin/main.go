@@ -45,7 +45,9 @@ func main() {
 	source := os.Args[:len(os.Args)-1]
 	dest := os.Args[len(os.Args)-1]
 	methods := []string{"cvmfs", "http"}
-	setLogging(log.PanicLevel)
+	if err := setLogging(log.PanicLevel); err != nil {
+		log.Panicln("Failed to set log level")
+	}
 
 	// Set the options
 	stashcp.Options.Recursive = false
