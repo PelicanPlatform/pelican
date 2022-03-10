@@ -23,14 +23,23 @@ func main() {
 	// -classad print classad and exit
 	startTime := time.Now().Unix()
 
-	if os.Args[1] == "-classad" {
-		// Print classad and exit
-		fmt.Println("MultipleFileSupport = true")
-		fmt.Println("PluginVersion = \"" + version + "\"")
-		fmt.Println("PluginType = \"FileTransfer\"")
-		fmt.Println("SupportedMethods = \"stash\"")
-		os.Exit(0)
+	for _, arg := range os.Args[1:] {
+		if arg == "-classad" {
+			// Print classad and exit
+			fmt.Println("MultipleFileSupport = true")
+			fmt.Println("PluginVersion = \"" + version + "\"")
+			fmt.Println("PluginType = \"FileTransfer\"")
+			fmt.Println("SupportedMethods = \"stash\"")
+			os.Exit(0)
+		} else if arg == "-version" || arg == "-v" {
+			fmt.Println("Version:", version)
+			fmt.Println("Build Date:", date)
+			fmt.Println("Build Commit:", commit)
+			fmt.Println("Built By:", builtBy)
+			os.Exit(0)
+		}
 	}
+	
 
 	source := os.Args[:len(os.Args)-1]
 	dest := os.Args[len(os.Args)-1]
