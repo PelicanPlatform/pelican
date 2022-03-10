@@ -16,7 +16,12 @@ jobs:
       uses: actions/checkout@v2
     - name: Test
       run: go test ./...
-    - name: Build Binaries
-      run: make
+    - name: Run GoReleaser
+      uses: goreleaser/goreleaser-action@v2
+      with:
+        # either 'goreleaser' (default) or 'goreleaser-pro'
+        distribution: goreleaser
+        version: latest
+        args: build --rm-dist --snapshot
     - name: Run Integration Tests
       run: ./tests/citests.sh
