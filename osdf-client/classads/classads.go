@@ -46,6 +46,9 @@ func ReadClassAd(reader io.Reader) ([]ClassAd, error) {
 	scanner.Split(split)
 	for scanner.Scan() {
 		line := scanner.Text()
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
 		// Parse the classad
 		ad, err := ParseClassAd(line)
 		if err != nil {

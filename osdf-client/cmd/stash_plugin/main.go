@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	stashcp "github.com/opensciencegrid/stashcp"
@@ -24,43 +25,81 @@ func main() {
 	// -classad print classad and exit
 	startTime := time.Now().Unix()
 
-	for _, arg := range os.Args[1:] {
-		if arg == "-classad" {
+	var upload bool = false
+	// Set the options
+	stashcp.Options.Recursive = false
+	stashcp.Options.ProgressBars = false
+	if err := setLogging(log.PanicLevel); err != nil {
+		log.Panicln("Failed to set log level")
+	}
+	methods := []string{"cvmfs", "http"}
+
+	// Pop the executable off the args list
+	_, os.Args = os.Args[0], os.Args[1:]
+	for len(os.Args) > 0 {
+
+		if os.Args[0] == "-classad" {
 			// Print classad and exit
 			fmt.Println("MultipleFileSupport = true")
 			fmt.Println("PluginVersion = \"" + version + "\"")
 			fmt.Println("PluginType = \"FileTransfer\"")
 			fmt.Println("SupportedMethods = \"stash\"")
 			os.Exit(0)
-		} else if arg == "-version" || arg == "-v" {
+		} else if os.Args[0] == "-version" || os.Args[0] == "-v" {
 			fmt.Println("Version:", version)
 			fmt.Println("Build Date:", date)
 			fmt.Println("Build Commit:", commit)
 			fmt.Println("Built By:", builtBy)
 			os.Exit(0)
+		} else if os.Args[0] == "-upload" {
+			upload = true
+		} else if strings.HasPrefix(os.Args[0], "-") {
+			log.Errorln("Do not understand the option:", os.Args[0])
+			os.Exit(1)
+		} else {
+			// Must be the start of a source / destination
+			break
 		}
-	}
-	
-
-	source := os.Args[1:len(os.Args)-1]
-	dest := os.Args[len(os.Args)-1]
-	methods := []string{"cvmfs", "http"}
-	if err := setLogging(log.PanicLevel); err != nil {
-		log.Panicln("Failed to set log level")
+		// Pop off the args
+		_, os.Args = os.Args[0], os.Args[1:]
 	}
 
-	// Set the options
-	stashcp.Options.Recursive = false
-	stashcp.Options.ProgressBars = false
-
+	var source []string
+	var dest string
 	var result error
 	var downloaded int64 = 0
-	for _, src := range source {
-		var tmpDownloaded int64
-		tmpDownloaded, result = stashcp.DoStashCPSingle(src, dest, methods, false)
-		downloaded += tmpDownloaded
-		if result != nil {
-			break
+
+	if len(os.Args) == 0 {
+		// Read in classad from stdin
+		transfers, err := readMultiTransfers(*bufio.NewReader(os.Stdin))
+		if err != nil {
+			log.Errorln("Failed to read in from stdin:", err)
+			os.Exit(1)
+		}
+		for _, transfer := range transfers {
+			var tmpDownloaded int64
+			if upload {
+				source = append(source, transfer.localFile)
+				tmpDownloaded, result = stashcp.DoStashCPSingle(transfer.localFile, transfer.url, methods, false)
+			} else {
+				source = append(source, transfer.url)
+				tmpDownloaded, result = stashcp.DoStashCPSingle(transfer.url, transfer.localFile, methods, false)
+			}
+			if result != nil {
+				break
+			}
+			downloaded += tmpDownloaded
+		}
+	} else {
+		source = os.Args[:len(os.Args)-1]
+		dest = os.Args[len(os.Args)-1]
+		for _, src := range source {
+			var tmpDownloaded int64
+			tmpDownloaded, result = stashcp.DoStashCPSingle(src, dest, methods, false)
+			downloaded += tmpDownloaded
+			if result != nil {
+				break
+			}
 		}
 	}
 
@@ -105,8 +144,8 @@ func setLogging(logLevel log.Level) error {
 }
 
 type Transfer struct {
-	source      string
-	destination string
+	url       string
+	localFile string
 }
 
 // readMultiTransfers reads the transfers from a Reader, such as stdin
@@ -128,11 +167,8 @@ func readMultiTransfers(stdin bufio.Reader) (transfers []Transfer, err error) {
 		if err != nil {
 			return nil, err
 		}
-		transfers = append(transfers, Transfer{url.(string), destination.(string)})
+		transfers = append(transfers, Transfer{url: url.(string), localFile: destination.(string)})
 	}
 
 	return transfers, nil
 }
-
-
-

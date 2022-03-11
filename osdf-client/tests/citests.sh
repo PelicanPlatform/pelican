@@ -2,6 +2,7 @@
 
 to_exit=0
 ./stashcp -d /osgconnect/public/dweitzel/blast/queries/query1 ./
+rm query1
 
 # Test the plugin interface
 classad_output=$(./stash_plugin -classad)
@@ -17,6 +18,7 @@ if ! [[ $classad_output =~ "SupportedMethods = \"stash\"" ]]; then
 fi
 
 plugin_output=$(./stash_plugin stash:///osgconnect/public/dweitzel/blast/queries/query1 query1)
+rm query1
 
 if ! [[ $plugin_output =~ "TransferUrl = \"stash:///osgconnect/public/dweitzel/blast/queries/query1\"" ]]; then
   echo "TransferUrl not in plugin output"
@@ -27,5 +29,11 @@ if ! [[ $plugin_output =~ "TransferSuccess = true" ]]; then
   echo "TransferSuccess not in plugin output"
   to_exit=1
 fi
+
+./stash_plugin <<CLASSADLIST
+[ LocalFileName = "$PWD/query1"; Url = "stash:///osgconnect/public/dweitzel/blast/queries//query1" ]
+[ LocalFileName = "$PWD/query2"; Url = "stash:///osgconnect/public/dweitzel/blast/queries//query2" ]
+[ LocalFileName = "$PWD/query3"; Url = "stash:///osgconnect/public/dweitzel/blast/queries//query3" ]
+CLASSADLIST
 
 exit $to_exit
