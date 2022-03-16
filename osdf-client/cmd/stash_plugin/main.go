@@ -14,10 +14,11 @@ import (
 )
 
 var (
-	version = "dev"
-	commit  = "none"
-	date    = "unknown"
-	builtBy = "unknown"
+	version    = "dev"
+	commit     = "none"
+	date       = "unknown"
+	builtBy    = "unknown"
+	outputFile os.File
 )
 
 func main() {
@@ -33,6 +34,7 @@ func main() {
 		log.Panicln("Failed to set log level")
 	}
 	methods := []string{"cvmfs", "http"}
+	var infile, outfile string
 
 	// Pop the executable off the args list
 	_, os.Args = os.Args[0], os.Args[1:]
@@ -53,6 +55,12 @@ func main() {
 			os.Exit(0)
 		} else if os.Args[0] == "-upload" {
 			upload = true
+		} else if os.Args[0] == "-infile" {
+			infile = os.Args[1]
+			os.Args = os.Args[1:]
+		} else if os.Args[0] == "-outfile" {
+			outfile = os.Args[1]
+			os.Args = os.Args[1:]
 		} else if strings.HasPrefix(os.Args[0], "-") {
 			log.Errorln("Do not understand the option:", os.Args[0])
 			os.Exit(1)
@@ -69,9 +77,22 @@ func main() {
 	var result error
 	var downloaded int64 = 0
 
+	// Open the input and output files
+	infileFile, err := os.Open(infile)
+	if err != nil {
+		log.Panicln("Failed to open infile:", err)
+	}
+	defer infileFile.Close()
+
+	outputFile, err := os.Create(outfile)
+	if err != nil {
+		log.Panicln("Failed to open outfile:", err)
+	}
+	defer outputFile.Close()
+
 	if len(os.Args) == 0 {
 		// Read in classad from stdin
-		transfers, err := readMultiTransfers(*bufio.NewReader(os.Stdin))
+		transfers, err := readMultiTransfers(*bufio.NewReader(infileFile))
 		if err != nil {
 			log.Errorln("Failed to read in from stdin:", err)
 			os.Exit(1)
@@ -103,33 +124,33 @@ func main() {
 		}
 	}
 
-	fmt.Print("TransferStartTime = ", startTime, "\n")
-	fmt.Print("TransferEndTime = ", time.Now().Unix(), "\n")
+	fmt.Fprintln(outputFile, "TransferStartTime = ", startTime)
+	fmt.Fprintln(outputFile, "TransferEndTime = ", time.Now().Unix())
 	hostname, _ := os.Hostname()
 	//if err != nil {
 	//	log.Errorln("Error getting hostname: ", err)
 	//}
-	fmt.Print("TransferLocalMachineName = \"", hostname, "\"", "\n")
-	fmt.Println("TransferProtocol = \"stash\"")
-	fmt.Print("TransferUrl = \"", source[0], "\"", "\n")
-	fmt.Println("TransferType = \"download\"")
+	fmt.Fprintln(outputFile, "TransferLocalMachineName = \"", hostname, "\"")
+	fmt.Fprintln(outputFile, "TransferProtocol = \"stash\"")
+	fmt.Fprint(outputFile, "TransferUrl = \"", source[0], "\"", "\n")
+	fmt.Fprintln(outputFile, "TransferType = \"download\"")
 	if result != nil {
-		fmt.Println("TransferSuccess = false")
-		fmt.Print("TransferError = \"", stashcp.GetErrors(), "\"", "\n")
-		fmt.Println("TransferFileBytes = 0")
-		fmt.Println("TransferTotalBytes = 0")
+		fmt.Fprintln(outputFile, "TransferSuccess = false")
+		fmt.Fprint(outputFile, "TransferError = \"", stashcp.GetErrors(), "\"", "\n")
+		fmt.Fprintln(outputFile, "TransferFileBytes = 0")
+		fmt.Fprintln(outputFile, "TransferTotalBytes = 0")
 		if stashcp.ErrorsRetryable() {
-			fmt.Println("TransferRetryable = true")
+			fmt.Fprintln(outputFile, "TransferRetryable = true")
 			os.Exit(11)
 		} else {
-			fmt.Println("TransferRetryable = false")
+			fmt.Fprintln(outputFile, "TransferRetryable = false")
 			os.Exit(1)
 		}
 	} else {
 		// Stat the destination file
-		fmt.Println("TransferSuccess = true")
-		fmt.Print("TransferFileBytes = ", downloaded, "\n")
-		fmt.Print("TransferTotalBytes = ", downloaded, "\n")
+		fmt.Fprintln(outputFile, "TransferSuccess = true")
+		fmt.Fprintln(outputFile, "TransferFileBytes =", downloaded)
+		fmt.Fprintln(outputFile, "TransferTotalBytes =", downloaded)
 	}
 
 }

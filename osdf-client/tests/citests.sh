@@ -30,10 +30,12 @@ if ! [[ $plugin_output =~ "TransferSuccess = true" ]]; then
   to_exit=1
 fi
 
-./stash_plugin <<CLASSADLIST
+cat > infile <<EOF
 [ LocalFileName = "$PWD/query1"; Url = "stash:///osgconnect/public/dweitzel/blast/queries//query1" ]
 [ LocalFileName = "$PWD/query2"; Url = "stash:///osgconnect/public/dweitzel/blast/queries//query2" ]
 [ LocalFileName = "$PWD/query3"; Url = "stash:///osgconnect/public/dweitzel/blast/queries//query3" ]
-CLASSADLIST
+EOF
+
+./stash_plugin -infile $PWD/infile -outfile $PWD/outfile
 
 exit $to_exit
