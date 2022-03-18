@@ -162,7 +162,10 @@ func main() {
 
 	success := true
 	for _, resultAd := range resultAds {
-		outputFile.WriteString(resultAd.String() + "\n")
+		_, err := outputFile.WriteString(resultAd.String() + "\n")
+		if err != nil {
+			log.Panicln("Failed to write to outfile:", err)
+		}
 		transferSuccess, err := resultAd.Get("TransferSuccess")
 		if err != nil {
 			log.Errorln("Failed to get TransferSuccess:", err)
