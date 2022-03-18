@@ -55,7 +55,12 @@ type ConnectionSetupError struct {
 }
 
 func (e *ConnectionSetupError) Error() string {
-	return "Connection to remote server failed"
+	if e.Err != nil {
+		return "failed setup connection to " + e.URL + ": " + e.Err.Error()
+	} else {
+		return "Connection to remote server failed"
+	}
+
 }
 
 func (e *ConnectionSetupError) Unwrap() error {
