@@ -3,6 +3,8 @@ package classads
 import (
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestReadClassAd(t *testing.T) {
@@ -24,4 +26,62 @@ func TestReadClassAd(t *testing.T) {
 	if strInterface.(string) != "/path/to/local/copy/of/foo" {
 		t.Errorf("GetStringValue() returned %s, expected \"/path/to/local/copy/of/foo\"", strInterface.(string))
 	}
+}
+
+func TestStringClassAd(t *testing.T) {
+	ad := NewClassAd()
+	ad.Set("LocalFileName", "/path/to/local/copy/of/foo")
+	adStr := ad.String()
+	if adStr != "[LocalFileName = \"/path/to/local/copy/of/foo\"; ]" {
+		t.Errorf("ClassAd.String() returned %s, expected \"/path/to/local/copy/of/foo\"", adStr)
+	}
+
+	// Load the classad back into a new ClassAd
+	ad2, err := ParseClassAd(adStr)
+	if err != nil {
+		t.Errorf("ParseClassAd() failed: %s", err)
+	}
+	if ad2.String() != adStr {
+		t.Errorf("ParseClassAd() returned %s, expected %s", ad2.String(), adStr)
+	}
+	localFileName1, err := ad.Get("LocalFileName")
+	if err != nil {
+		t.Errorf("Get() failed: %s", err)
+	}
+	localFileName2, err := ad2.Get("LocalFileName")
+	if err != nil {
+		t.Errorf("Get() failed: %s", err)
+	}
+	assert.Equal(t, localFileName1, localFileName2)
+}
+
+func TestBoolClassAd(t *testing.T) {
+	ad := NewClassAd()
+	ad.Set("BooleanValue", true)
+	adStr := ad.String()
+	assert.Equal(t, "[BooleanValue = true; ]", adStr)
+
+	// Load the classad back into a new ClassAd
+	ad2, err := ParseClassAd(adStr)
+	assert.NoError(t, err, "ParseClassAd() failed")
+	assert.Equal(t, adStr, ad2.String())
+	boolValue1, err := ad2.Get("BooleanValue")
+	assert.NoError(t, err, "Get() failed")
+	assert.Equal(t, true, boolValue1.(bool))
+
+}
+
+func TestIntClassAd(t *testing.T) {
+	ad := NewClassAd()
+	ad.Set("IntValue", 42)
+	adStr := ad.String()
+	assert.Equal(t, "[IntValue = 42; ]", adStr)
+
+	// Load the classad back into a new ClassAd
+	ad2, err := ParseClassAd(adStr)
+	assert.NoError(t, err, "ParseClassAd() failed")
+	assert.Equal(t, adStr, ad2.String())
+	intValue1, err := ad2.Get("IntValue")
+	assert.NoError(t, err, "Get() failed")
+	assert.Equal(t, 42, intValue1.(int))
 }

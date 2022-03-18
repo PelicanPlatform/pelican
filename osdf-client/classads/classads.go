@@ -3,13 +3,21 @@ package classads
 import (
 	"bufio"
 	"bytes"
+	"fmt"
 	"io"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
 type ClassAd struct {
 	attributes map[string]interface{}
+}
+
+func NewClassAd() *ClassAd {
+	return &ClassAd{
+		attributes: make(map[string]interface{}),
+	}
 }
 
 // Get returns the value of the attribute with the given name.
@@ -25,6 +33,26 @@ func (c *ClassAd) Get(name string) (interface{}, error) {
 
 func (c *ClassAd) Set(name string, value interface{}) {
 	c.attributes[name] = value
+}
+
+func (c *ClassAd) String() string {
+	var buffer bytes.Buffer
+	buffer.WriteString("[")
+	for name, value := range c.attributes {
+		buffer.WriteString(name)
+		buffer.WriteString(" = ")
+		switch v := value.(type) {
+		case string:
+			buffer.WriteString("\"")
+			buffer.WriteString(v)
+			buffer.WriteString("\"")
+		default:
+			buffer.WriteString(fmt.Sprintf("%v", value))
+		}
+		buffer.WriteString("; ")
+	}
+	buffer.WriteString("]")
+	return buffer.String()
 }
 
 // ReadClassAd reads a ClassAd from the given reader.
@@ -78,13 +106,37 @@ func ParseClassAd(line string) (ClassAd, error) {
 
 	// For each attribute, split by the first "="
 	for _, attrStr := range splitted {
+		attrStr = strings.TrimSpace(attrStr)
+		if attrStr == "" {
+			continue
+		}
 		attrSplit := strings.SplitN(attrStr, "=", 2)
 		name := strings.TrimSpace(attrSplit[0])
 		// Check for quoted attribute and remove it
 		value := strings.TrimSpace(attrSplit[1])
-		value = strings.TrimPrefix(value, "\"")
-		value = strings.TrimSuffix(value, "\"")
-		ad.Set(name, value)
+		// If the value is quotes, we know it's a string
+		if strings.HasPrefix(value, "\"") && strings.HasSuffix(value, "\"") {
+			ad.Set(name, strings.Trim(value, "\""))
+		} else if _, err := strconv.Atoi(value); err == nil {
+			// If the value is a number, we know it's a number
+			intValue, err := strconv.Atoi(value)
+			if err == nil {
+				ad.Set(name, intValue)
+			}
+		} else if value == "true" || value == "false" {
+			// If the value is a boolean, we know it's a boolean
+			ad.Set(name, value == "true")
+		} else if _, err := strconv.ParseFloat(value, 64); err == nil {
+			// If the value is a float, we know it's a float
+			floatValue, err := strconv.ParseFloat(value, 64)
+			if err == nil {
+				ad.Set(name, floatValue)
+			}
+		} else {
+			// Otherwise, we assume it's a string
+			ad.Set(name, value)
+		}
+
 	}
 	return ad, nil
 }

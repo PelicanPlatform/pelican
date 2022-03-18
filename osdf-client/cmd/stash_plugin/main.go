@@ -14,17 +14,19 @@ import (
 )
 
 var (
-	version    = "dev"
-	commit     = "none"
-	date       = "unknown"
-	builtBy    = "unknown"
-	outputFile os.File
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+	builtBy = "unknown"
 )
+
+type Transfer struct {
+	url       string
+	localFile string
+}
 
 func main() {
 	// Parse command line arguments
-	// -classad print classad and exit
-	startTime := time.Now().Unix()
 
 	var upload bool = false
 	// Set the options
@@ -35,6 +37,7 @@ func main() {
 	}
 	methods := []string{"cvmfs", "http"}
 	var infile, outfile string
+	var useOutFile bool = false
 
 	// Pop the executable off the args list
 	_, os.Args = os.Args[0], os.Args[1:]
@@ -61,6 +64,7 @@ func main() {
 		} else if os.Args[0] == "-outfile" {
 			outfile = os.Args[1]
 			os.Args = os.Args[1:]
+			useOutFile = true
 		} else if strings.HasPrefix(os.Args[0], "-") {
 			log.Errorln("Do not understand the option:", os.Args[0])
 			os.Exit(1)
@@ -76,83 +80,104 @@ func main() {
 	var dest string
 	var result error
 	var downloaded int64 = 0
-
-	// Open the input and output files
-	infileFile, err := os.Open(infile)
-	if err != nil {
-		log.Panicln("Failed to open infile:", err)
-	}
-	defer infileFile.Close()
-
-	outputFile, err := os.Create(outfile)
-	if err != nil {
-		log.Panicln("Failed to open outfile:", err)
-	}
-	defer outputFile.Close()
+	var transfers []Transfer
 
 	if len(os.Args) == 0 {
+		// Open the input and output files
+		infileFile, err := os.Open(infile)
+		if err != nil {
+			log.Panicln("Failed to open infile:", err)
+		}
+		defer infileFile.Close()
 		// Read in classad from stdin
-		transfers, err := readMultiTransfers(*bufio.NewReader(infileFile))
+		transfers, err = readMultiTransfers(*bufio.NewReader(infileFile))
 		if err != nil {
 			log.Errorln("Failed to read in from stdin:", err)
 			os.Exit(1)
-		}
-		for _, transfer := range transfers {
-			var tmpDownloaded int64
-			if upload {
-				source = append(source, transfer.localFile)
-				tmpDownloaded, result = stashcp.DoStashCPSingle(transfer.localFile, transfer.url, methods, false)
-			} else {
-				source = append(source, transfer.url)
-				tmpDownloaded, result = stashcp.DoStashCPSingle(transfer.url, transfer.localFile, methods, false)
-			}
-			if result != nil {
-				break
-			}
-			downloaded += tmpDownloaded
 		}
 	} else {
 		source = os.Args[:len(os.Args)-1]
 		dest = os.Args[len(os.Args)-1]
 		for _, src := range source {
-			var tmpDownloaded int64
-			tmpDownloaded, result = stashcp.DoStashCPSingle(src, dest, methods, false)
-			downloaded += tmpDownloaded
-			if result != nil {
-				break
+			transfers = append(transfers, Transfer{url: src, localFile: dest})
+		}
+	}
+
+	var resultAds []*classads.ClassAd
+	retryable := false
+	for _, transfer := range transfers {
+
+		var tmpDownloaded int64
+		if upload {
+			source = append(source, transfer.localFile)
+			tmpDownloaded, result = stashcp.DoStashCPSingle(transfer.localFile, transfer.url, methods, false)
+		} else {
+			source = append(source, transfer.url)
+			tmpDownloaded, result = stashcp.DoStashCPSingle(transfer.url, transfer.localFile, methods, false)
+		}
+		startTime := time.Now().Unix()
+		resultAd := classads.NewClassAd()
+		resultAd.Set("TransferStartTime", startTime)
+		resultAd.Set("TransferEndTime", time.Now().Unix())
+		hostname, _ := os.Hostname()
+		resultAd.Set("TransferLocalMachineName", hostname)
+		resultAd.Set("TransferProtocol", "stash")
+		resultAd.Set("TransferUrl", transfer.url)
+		if upload {
+			resultAd.Set("TransferType", "upload")
+		} else {
+			resultAd.Set("TransferType", "download")
+		}
+		if result == nil {
+			resultAd.Set("TransferSuccess", true)
+			resultAd.Set("TransferFileBytes", tmpDownloaded)
+			resultAd.Set("TransferTotalBytes", downloaded)
+		} else {
+			resultAd.Set("TransferSuccess", false)
+			resultAd.Set("TransferError", stashcp.GetErrors())
+			resultAd.Set("TransferFileBytes", 0)
+			resultAd.Set("TransferTotalBytes", 0)
+			if stashcp.ErrorsRetryable() {
+				resultAd.Set("TransferRetryable", true)
+				retryable = true
+			} else {
+				resultAd.Set("TransferRetryable", false)
+				retryable = false
+
 			}
 		}
+		resultAds = append(resultAds, resultAd)
+
 	}
 
-	fmt.Fprintln(outputFile, "TransferStartTime = ", startTime)
-	fmt.Fprintln(outputFile, "TransferEndTime = ", time.Now().Unix())
-	hostname, _ := os.Hostname()
-	//if err != nil {
-	//	log.Errorln("Error getting hostname: ", err)
-	//}
-	fmt.Fprintln(outputFile, "TransferLocalMachineName = \"", hostname, "\"")
-	fmt.Fprintln(outputFile, "TransferProtocol = \"stash\"")
-	fmt.Fprint(outputFile, "TransferUrl = \"", source[0], "\"", "\n")
-	fmt.Fprintln(outputFile, "TransferType = \"download\"")
-	if result != nil {
-		fmt.Fprintln(outputFile, "TransferSuccess = false")
-		fmt.Fprint(outputFile, "TransferError = \"", stashcp.GetErrors(), "\"", "\n")
-		fmt.Fprintln(outputFile, "TransferFileBytes = 0")
-		fmt.Fprintln(outputFile, "TransferTotalBytes = 0")
-		if stashcp.ErrorsRetryable() {
-			fmt.Fprintln(outputFile, "TransferRetryable = true")
-			os.Exit(11)
-		} else {
-			fmt.Fprintln(outputFile, "TransferRetryable = false")
-			os.Exit(1)
+	outputFile := os.Stdout
+	if useOutFile {
+		var err error
+		outputFile, err = os.Create(outfile)
+		if err != nil {
+			log.Panicln("Failed to open outfile:", err)
 		}
-	} else {
-		// Stat the destination file
-		fmt.Fprintln(outputFile, "TransferSuccess = true")
-		fmt.Fprintln(outputFile, "TransferFileBytes =", downloaded)
-		fmt.Fprintln(outputFile, "TransferTotalBytes =", downloaded)
+		defer outputFile.Close()
 	}
 
+	success := true
+	for _, resultAd := range resultAds {
+		outputFile.WriteString(resultAd.String() + "\n")
+		transferSuccess, err := resultAd.Get("TransferSuccess")
+		if err != nil {
+			log.Errorln("Failed to get TransferSuccess:", err)
+			success = false
+		}
+		success = success && transferSuccess.(bool)
+	}
+
+	if success {
+		os.Exit(0)
+	} else if retryable {
+		os.Exit(11)
+	} else {
+		os.Exit(1)
+	}
 }
 
 func setLogging(logLevel log.Level) error {
@@ -162,11 +187,6 @@ func setLogging(logLevel log.Level) error {
 	log.SetFormatter(&textFormatter)
 	log.SetLevel(logLevel)
 	return nil
-}
-
-type Transfer struct {
-	url       string
-	localFile string
 }
 
 // readMultiTransfers reads the transfers from a Reader, such as stdin
