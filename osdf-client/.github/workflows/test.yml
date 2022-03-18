@@ -16,7 +16,18 @@ jobs:
       uses: actions/checkout@v2
     - name: Test
       run: go test ./...
-    - name: Build Binaries
-      run: make
+    - name: Run GoReleaser
+      uses: goreleaser/goreleaser-action@v2
+      with:
+        # either 'goreleaser' (default) or 'goreleaser-pro'
+        distribution: goreleaser
+        version: latest
+        args: build --rm-dist --snapshot
+    - name: Copy files (Ubuntu)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        cp dist/stashcp_linux_amd64/stashcp ./
+        cp dist/stash_plugin_linux_amd64/stash_plugin ./
     - name: Run Integration Tests
+      if: matrix.os == 'ubuntu-latest'
       run: ./tests/citests.sh

@@ -1,8 +1,9 @@
-package main
+package stashcp
 
 import (
-	"github.com/stretchr/testify/assert"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 // TestMatchNamespace calls MatchNamespace with a hostname, checking
@@ -42,6 +43,5 @@ func TestMatchNamespace(t *testing.T) {
 	assert.Equal(t, "/osgconnect", ns.Path)
 	assert.Equal(t, false, ns.ReadHTTPS)
 	assert.Equal(t, false, ns.UseTokenOnRead)
-
 
 }
