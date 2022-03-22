@@ -57,14 +57,21 @@ func main() {
 			fmt.Println("Built By:", builtBy)
 			os.Exit(0)
 		} else if os.Args[0] == "-upload" {
+			log.Debugln("Upload detected")
 			upload = true
 		} else if os.Args[0] == "-infile" {
 			infile = os.Args[1]
 			os.Args = os.Args[1:]
+			log.Debugln("Infile:", infile)
 		} else if os.Args[0] == "-outfile" {
 			outfile = os.Args[1]
 			os.Args = os.Args[1:]
 			useOutFile = true
+			log.Debugln("Outfile:", outfile)
+		} else if os.Args[0] == "-d" {
+			if err := setLogging(log.DebugLevel); err != nil {
+				log.Panicln("Failed to set log level to debug")
+			}
 		} else if strings.HasPrefix(os.Args[0], "-") {
 			log.Errorln("Do not understand the option:", os.Args[0])
 			os.Exit(1)
@@ -110,9 +117,11 @@ func main() {
 		var tmpDownloaded int64
 		if upload {
 			source = append(source, transfer.localFile)
+			log.Debugln("Uploading:", transfer.localFile, "to", transfer.url)
 			tmpDownloaded, result = stashcp.DoStashCPSingle(transfer.localFile, transfer.url, methods, false)
 		} else {
 			source = append(source, transfer.url)
+			log.Debugln("Downloading:", transfer.url, "to", transfer.localFile)
 			tmpDownloaded, result = stashcp.DoStashCPSingle(transfer.url, transfer.localFile, methods, false)
 		}
 		startTime := time.Now().Unix()
@@ -123,6 +132,7 @@ func main() {
 		resultAd.Set("TransferLocalMachineName", hostname)
 		resultAd.Set("TransferProtocol", "stash")
 		resultAd.Set("TransferUrl", transfer.url)
+		resultAd.Set("TransferFileName", transfer.localFile)
 		if upload {
 			resultAd.Set("TransferType", "upload")
 		} else {
@@ -134,7 +144,11 @@ func main() {
 			resultAd.Set("TransferTotalBytes", downloaded)
 		} else {
 			resultAd.Set("TransferSuccess", false)
-			resultAd.Set("TransferError", stashcp.GetErrors())
+			if stashcp.GetErrors() == "" {
+				resultAd.Set("TransferError", result.Error())
+			} else {
+				resultAd.Set("TransferError", stashcp.GetErrors())
+			}
 			resultAd.Set("TransferFileBytes", 0)
 			resultAd.Set("TransferTotalBytes", 0)
 			if stashcp.ErrorsRetryable() {
