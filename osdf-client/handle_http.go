@@ -570,7 +570,11 @@ Loop:
 			log.Debugln("File closed")
 		case response := <-responseChan:
 			log.Debugln("Received response:", response)
-			lastError = errors.New("failed to upload: " + response.Status)
+			if response.StatusCode != 200 {
+				log.Errorln("Got failure status code:", response.StatusCode)
+				lastError = errors.New("failure status code")
+				break Loop
+			}
 			break Loop
 
 		case err := <-errorChan:
