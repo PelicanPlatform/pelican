@@ -368,6 +368,7 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 
 	var previousCompletedBytes int64 = 0
 	var previousCompletedTime = time.Now()
+	var startBelowLimit int64 = 0
 	// Loop of the download
 Loop:
 	for {
@@ -387,10 +388,18 @@ Loop:
 
 			// Check if we are downloading fast enough
 			if resp.BytesPerSecond() < float64(downloadLimit) {
-				// Give the download 30 seconds to start
+				// Give the download 120 seconds to start
 				if resp.Duration() < time.Second*120 {
 					continue
+				} else if startBelowLimit == 0 {
+					log.Warnln("Download speed of ", resp.BytesPerSecond(), "bytes/s", " is below the limit of", downloadLimit, "bytes/s")
+					startBelowLimit = time.Now().Unix()
+					continue
+				} else if (time.Now().Unix() - startBelowLimit) < 30 {
+					// If the download is below the threshold for less than 30 seconds, continue
+					continue
 				}
+				// The download is below the threshold for more than 30 seconds, cancel the download
 				cancel()
 				if Options.ProgressBars {
 					var cancelledProgressBar = p.AddBar(0,
@@ -416,6 +425,9 @@ Loop:
 					BytesTotal:       resp.Size,
 				}
 
+			} else {
+				// The download is fast enough, reset the startBelowLimit
+				startBelowLimit = 0
 			}
 
 		case <-resp.Done:
