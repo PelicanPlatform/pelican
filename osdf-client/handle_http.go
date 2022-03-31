@@ -327,7 +327,7 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 	// Store the last downloaded amount, and the bottom limit of the download
 	// Check the environment variable STASHCP_MINIMUM_DOWNLOAD_SPEED
 	downloadLimitStr := os.Getenv("STASHCP_MINIMUM_DOWNLOAD_SPEED")
-	var downloadLimit int64 = 1024 * 1024
+	var downloadLimit int64 = 1024 * 100
 	if downloadLimitStr != "" {
 		var err error
 		downloadLimit, err = strconv.ParseInt(downloadLimitStr, 10, 64)
@@ -388,7 +388,7 @@ Loop:
 			// Check if we are downloading fast enough
 			if resp.BytesPerSecond() < float64(downloadLimit) {
 				// Give the download 30 seconds to start
-				if resp.Duration() < time.Second*10 {
+				if resp.Duration() < time.Second*120 {
 					continue
 				}
 				cancel()
