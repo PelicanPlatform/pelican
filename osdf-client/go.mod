@@ -1,4 +1,4 @@
-module github.com/opensciencegrid/stashcp
+module github.com/opensciencegrid/stashcp/v6
 
 go 1.16
 
