@@ -32,6 +32,10 @@ func (c *ClassAd) Get(name string) (interface{}, error) {
 }
 
 func (c *ClassAd) Set(name string, value interface{}) {
+	// Escape any quotes in the string
+	if valueStr, ok := value.(string); ok {
+		value = strings.Replace(valueStr, "\"", "\\\"", -1)
+	}
 	c.attributes[name] = value
 }
 
