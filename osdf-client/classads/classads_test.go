@@ -55,6 +55,13 @@ func TestStringClassAd(t *testing.T) {
 	assert.Equal(t, localFileName1, localFileName2)
 }
 
+func TestStringQuoteClassAd(t *testing.T) {
+	ad := NewClassAd()
+	ad.Set("StringValue", "Get quotes \"right\"")
+	adStr := ad.String()
+	assert.Equal(t, "[StringValue = \"Get quotes \\\"right\\\"\"; ]", adStr)
+}
+
 func TestBoolClassAd(t *testing.T) {
 	ad := NewClassAd()
 	ad.Set("BooleanValue", true)
