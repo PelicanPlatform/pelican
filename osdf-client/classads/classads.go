@@ -33,9 +33,6 @@ func (c *ClassAd) Get(name string) (interface{}, error) {
 
 func (c *ClassAd) Set(name string, value interface{}) {
 	// Escape any quotes in the string
-	if valueStr, ok := value.(string); ok {
-		value = strings.Replace(valueStr, "\"", "\\\"", -1)
-	}
 	c.attributes[name] = value
 }
 
@@ -48,7 +45,8 @@ func (c *ClassAd) String() string {
 		switch v := value.(type) {
 		case string:
 			buffer.WriteString("\"")
-			buffer.WriteString(v)
+			newVal := strings.Replace(v, "\"", "\\\"", -1)
+			buffer.WriteString(newVal)
 			buffer.WriteString("\"")
 		default:
 			buffer.WriteString(fmt.Sprintf("%v", value))
