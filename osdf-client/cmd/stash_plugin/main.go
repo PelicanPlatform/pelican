@@ -86,7 +86,7 @@ func main() {
 	var source []string
 	var dest string
 	var result error
-	var downloaded int64 = 0
+	//var downloaded int64 = 0
 	var transfers []Transfer
 
 	if len(os.Args) == 0 {
@@ -141,7 +141,7 @@ func main() {
 		if result == nil {
 			resultAd.Set("TransferSuccess", true)
 			resultAd.Set("TransferFileBytes", tmpDownloaded)
-			resultAd.Set("TransferTotalBytes", downloaded)
+			resultAd.Set("TransferTotalBytes", tmpDownloaded)
 		} else {
 			resultAd.Set("TransferSuccess", false)
 			if stashcp.GetErrors() == "" {
