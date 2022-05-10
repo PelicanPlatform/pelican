@@ -9,5 +9,4 @@ require (
 	github.com/stretchr/testify v1.2.2
 	github.com/studio-b12/gowebdav v0.0.0-20210203212356-8244b5a5f51a
 	github.com/vbauerster/mpb/v7 v7.1.5
-	gopkg.in/yaml.v2 v2.4.0
 )

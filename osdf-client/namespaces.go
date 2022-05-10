@@ -2,22 +2,21 @@ package stashcp
 
 import (
 	_ "embed"
+	"encoding/json"
 	"fmt"
 	"strings"
-
-	"gopkg.in/yaml.v2"
 )
 
-//go:embed resources/namespaces.yaml
-var namespacesYaml []byte
+//go:embed resources/namespaces.json
+var namespacesJson []byte
 
 // Namespace holds the structure of stash namespaces
 type Namespace struct {
-	Path           string `yaml:"path"`
-	ReadHTTPS      bool   `yaml:"readhttps"`
-	UseTokenOnRead bool   `yaml:"usetokenonread"`
-	WriteBackHost  string `yaml:"writebackhost"`
-	DirListHost    string `yaml:"dirlisthost"`
+	Path           string `json:"path"`
+	ReadHTTPS      bool   `json:"readhttps"`
+	UseTokenOnRead bool   `json:"usetokenonread"`
+	WriteBackHost  string `json:"writebackhost"`
+	DirListHost    string `json:"dirlisthost"`
 }
 
 var namespaces []Namespace
@@ -25,7 +24,7 @@ var namespaces []Namespace
 func GetNamespaces() ([]Namespace, error) {
 	// Allocate the namespaces
 	var ns []Namespace
-	err := yaml.Unmarshal(namespacesYaml, &ns)
+	err := json.Unmarshal(namespacesJson, &ns)
 	if err != nil {
 		fmt.Println(err)
 		return nil, err

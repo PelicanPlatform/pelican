@@ -9,21 +9,28 @@ import (
 // TestMatchNamespace calls MatchNamespace with a hostname, checking
 // for a valid return value.
 func TestMatchNamespace(t *testing.T) {
-	namespacesYaml = []byte(`
-- path: /ospool/PROTECTED
-  readhttps: true
-  usetokenonread: true
-  writebackhost: https://origin-auth2001.chtc.wisc.edu:1095
-  dirlisthost: https://origin-auth2001.chtc.wisc.edu:1095
-
-- path: /osgconnect/private
-  readhttps: true
-  usetokenonread: true
-  writebackhost: https://stash-xrd.osgconnect.net:1094
-
-- path: /osgconnect
-  writebackhost: https://stash-xrd.osgconnect.net:1094
-  dirlisthost: http://stash.osgconnect.net:1094
+	namespacesJson = []byte(`
+[
+  {
+    "path": "/ospool/PROTECTED",
+    "readhttps": true,
+    "usetokenonread": true,
+    "writebackhost": "https://origin-auth2001.chtc.wisc.edu:1095",
+    "dirlisthost": "https://origin-auth2001.chtc.wisc.edu:1095"
+  },
+  {
+	"path": "/osgconnect/private",
+	"readhttps": true,
+	"usetokenonread": true,
+	"writebackhost": "https://stash-xrd.osgconnect.net:1095",
+	"dirlisthost": "https://stash.osgconnect.net:1095"
+  },
+  {
+    "path": "/osgconnect",
+    "writebackhost": "https://stash-xrd.osgconnect.net:1094",
+    "dirlisthost": "http://stash.osgconnect.net:1094"
+  }
+]
 `)
 	ns, err := MatchNamespace("/osgconnect/private/path/to/file.txt")
 	assert.NoError(t, err, "Failed to parse namespace")
