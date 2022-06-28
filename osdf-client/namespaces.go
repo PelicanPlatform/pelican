@@ -107,7 +107,10 @@ func downloadNamespace() ([]byte, error) {
 		return nil, errors.New("Failed to download namespaces: " + resp.Status)
 	}
 	var out bytes.Buffer
-	io.Copy(&out, resp.Body)
+	_, err = io.Copy(&out, resp.Body)
+	if err != nil {
+		return nil, err
+	}
 	return out.Bytes(), nil
 }
 
