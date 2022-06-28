@@ -84,7 +84,7 @@ func TestGetNamespaces(t *testing.T) {
 	namespaces, err := GetNamespaces()
 	assert.NoError(t, err, "Failed to get namespaces")
 	assert.NotNil(t, namespaces, "Namespaces is nil")
-	assert.Equal(t, 2, len(namespaces))
+	assert.Equal(t, 3, len(namespaces))
 }
 
 func Test_intersect(t *testing.T) {
