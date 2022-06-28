@@ -170,12 +170,15 @@ func download_http(source string, destination string, payload *payloadStruct, na
 		}
 	}
 
+	// Now that we have the ordered list of caches, do an intersect for the caches for the namespace
+	closestNamespaceCaches := namespace.MatchCaches(NearestCacheList)
+
 	// Make sure we only try as many caches as we have
 	cachesToTry := 3
-	if cachesToTry > len(NearestCacheList) {
-		cachesToTry = len(NearestCacheList)
+	if cachesToTry > len(closestNamespaceCaches) {
+		cachesToTry = len(closestNamespaceCaches)
 	}
-	log.Debugln("Trying the caches:", NearestCacheList[:cachesToTry])
+	log.Debugln("Trying the caches:", closestNamespaceCaches[:cachesToTry])
 	var transfers []TransferDetails
 	downloadUrl := url.URL{Path: source}
 	var files []string
@@ -192,7 +195,7 @@ func download_http(source string, destination string, payload *payloadStruct, na
 	}
 
 	// Generate all of the transfer details to make a list of transfers
-	for _, cache := range NearestCacheList[:cachesToTry] {
+	for _, cache := range closestNamespaceCaches[:cachesToTry] {
 		// Parse the cache URL
 		log.Debugln("Cache:", cache)
 		transfers = append(transfers, NewTransferDetails(cache, namespace.ReadHTTPS || namespace.UseTokenOnRead)...)
@@ -554,7 +557,7 @@ func UploadFile(src string, dest *url.URL, token string, namespace Namespace) (i
 	// Set the authorization header
 	request.Header.Set("Authorization", "Bearer "+token)
 	var lastKnownWritten int64
-	t := time.NewTicker(5 * time.Second)
+	t := time.NewTicker(20 * time.Second)
 	defer t.Stop()
 	//log.Debug(formatRequest(request))
 	go doPut(request, responseChan, errorChan)
@@ -567,6 +570,8 @@ Loop:
 		case <-t.C:
 			// If we are not making any progress, if we haven't written 1MB in the last 5 seconds
 			currentRead := atomic.LoadInt64(&reader.read)
+			log.Debugln("Current read:", currentRead)
+			log.Debugln("Last known written:", lastKnownWritten)
 			if lastKnownWritten < currentRead {
 				// We have made progress!
 				lastKnownWritten = currentRead
