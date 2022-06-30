@@ -14,6 +14,22 @@ func TestMatchNamespace(t *testing.T) {
 	namespacesJson = []byte(`
 {
   "caches": [
+	{
+      "endpoint": "osg-houston-stashcache.nrp.internet2.edu:8000",
+      "resource": "Stashcache-Houston"
+    },
+    {
+      "endpoint": "osg-sunnyvale-stashcache.nrp.internet2.edu:8000",
+      "resource": "Stashcache-Sunnyvale"
+    },
+    {
+      "endpoint": "osg.newy32aoa.nrp.internet2.edu:8000",
+      "resource": "Stashcache-Manhattan"
+    },
+    {
+      "endpoint": "osg-chicago-stashcache.nrp.internet2.edu:8000",
+      "resource": "Stashcache-Chicago"
+    }
   ],
   "namespaces": [
     {
@@ -102,18 +118,24 @@ func Test_intersect(t *testing.T) {
 func TestNamespace_MatchCaches(t *testing.T) {
 	namespace := Namespace{
 		Path: "/ospool/PROTECTED",
-		Caches: []string{
-			"cache1",
-			"cache2",
-			"cache3",
+		Caches: []Cache{
+			{
+				Endpoint: "cache1.ospool.org:8000",
+			},
+			{
+				Endpoint: "cache2.ospool.org:8001",
+			},
+			{
+				Endpoint: "cache3.ospool.org:8002",
+			},
 		},
 	}
-	assert.Equal(t, []string{"cache1"}, namespace.MatchCaches([]string{"cache1"}))
-	assert.Equal(t, []string{"cache2"}, namespace.MatchCaches([]string{"cache2"}))
-	assert.Equal(t, []string{"cache3"}, namespace.MatchCaches([]string{"cache3"}))
-	assert.Equal(t, []string(nil), namespace.MatchCaches([]string{"cache4"}))
+	assert.Equal(t, []string{"cache1.ospool.org:8000"}, namespace.MatchCaches([]string{"cache1.ospool.org"}))
+	assert.Equal(t, []string{"cache2.ospool.org:8001"}, namespace.MatchCaches([]string{"cache2.ospool.org"}))
+	assert.Equal(t, []string{"cache3.ospool.org:8002"}, namespace.MatchCaches([]string{"cache3.ospool.org"}))
+	assert.Equal(t, []string(nil), namespace.MatchCaches([]string{"cache4.ospool.org"}))
 
-	assert.Equal(t, []string{"cache2", "cache3", "cache1"}, namespace.MatchCaches([]string{"cache2", "cache3", "cache1"}))
+	assert.Equal(t, []string{"cache2.ospool.org:8001", "cache3.ospool.org:8002", "cache1.ospool.org:8000"}, namespace.MatchCaches([]string{"cache2.ospool.org", "cache3.ospool.org", "cache1.ospool.org"}))
 
-	assert.Equal(t, []string{"cache2", "cache1"}, namespace.MatchCaches([]string{"cache5", "cache2", "cache4", "cache1"}))
+	assert.Equal(t, []string{"cache2.ospool.org:8001", "cache1.ospool.org:8000"}, namespace.MatchCaches([]string{"cache5.ospool.org", "cache2.ospool.org", "cache4.ospool.org", "cache1.ospool.org"}))
 }

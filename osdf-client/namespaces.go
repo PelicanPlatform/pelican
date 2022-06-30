@@ -16,34 +16,67 @@ import (
 //go:embed resources/namespaces.json
 var namespacesJson []byte
 
-// Namespace holds the structure of stash namespaces
-type Namespace struct {
-	Caches         []string `json:"caches"`
-	Path           string   `json:"path"`
-	ReadHTTPS      bool     `json:"readhttps"`
-	UseTokenOnRead bool     `json:"usetokenonread"`
-	WriteBackHost  string   `json:"writebackhost"`
-	DirListHost    string   `json:"dirlisthost"`
+// defaultCaches is list of caches to use if no caches are specified in the namespace
+var defaultCaches = []Cache{}
+
+// namespaces is a global list of namespaces
+var namespaces []Namespace
+
+// Cache
+type Cache struct {
+	Endpoint string `json:"endpoint"`
+	Resource string `json:"resource"`
 }
 
-var defaultCaches = []string{}
+// Namespace holds the structure of stash namespaces
+type Namespace struct {
+	Caches         []Cache `json:"caches"`
+	Path           string  `json:"path"`
+	ReadHTTPS      bool    `json:"readhttps"`
+	UseTokenOnRead bool    `json:"usetokenonread"`
+	WriteBackHost  string  `json:"writebackhost"`
+	DirListHost    string  `json:"dirlisthost"`
+}
 
 // GetCaches returns the list of caches for the namespace
-func (ns *Namespace) GetCaches() []string {
+func (ns *Namespace) GetCaches() []Cache {
 	if ns.Caches == nil || len(ns.Caches) == 0 {
 		return defaultCaches
 	}
 	return ns.Caches
 }
 
+func (ns *Namespace) GetCacheHosts() []string {
+	var caches []string
+	for _, cache := range ns.GetCaches() {
+		host := strings.Split(cache.Endpoint, ":")[0]
+		caches = append(caches, host)
+	}
+	return caches
+}
+
 // MatchCaches compares the caches passed in (presumably from an ordered list of caches)
 // to the caches for the namespace, and returns the intersection of the two
 func (ns *Namespace) MatchCaches(caches []string) []string {
 	// Get the caches for the namespace
-	nsCaches := ns.GetCaches()
+	nsCaches := ns.GetCacheHosts()
 
 	// Find the intersection of the two
-	return intersect(caches, nsCaches)
+	intersectedCaches := intersect(caches, nsCaches)
+
+	// map the intersectedCaches back to the endpoints (with ports)
+	var intersectedCachesWithEndpoints []string
+	// For each of the caches in the intersection
+	for _, cache := range intersectedCaches {
+		// Match to the caches in the namespace
+		for _, nsCache := range ns.GetCaches() {
+			host := strings.Split(nsCache.Endpoint, ":")[0]
+			if host == cache {
+				intersectedCachesWithEndpoints = append(intersectedCachesWithEndpoints, nsCache.Endpoint)
+			}
+		}
+	}
+	return intersectedCachesWithEndpoints
 }
 
 // intersect returns the intersection of two slices
@@ -63,11 +96,9 @@ func intersect(a, b []string) []string {
 }
 
 type NamespaceFull struct {
-	Caches     []string    `json:"caches"`
+	Caches     []Cache     `json:"caches"`
 	Namespaces []Namespace `json:"namespaces"`
 }
-
-var namespaces []Namespace
 
 // GetNamespaces returns the list of namespaces
 func GetNamespaces() ([]Namespace, error) {
@@ -86,6 +117,8 @@ func GetNamespaces() ([]Namespace, error) {
 		fmt.Println(err)
 		return nil, err
 	}
+
+	defaultCaches = nsfull.Caches
 
 	return nsfull.Namespaces, nil
 }

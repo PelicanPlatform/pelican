@@ -103,8 +103,10 @@ func NewTransferDetails(cache string, https bool) []TransferDetails {
 		// Assume the cache is just a hostname
 		cacheURL.Host = cache
 		cacheURL.Path = ""
+		cacheURL.Scheme = ""
+		cacheURL.Opaque = ""
 	}
-	log.Debugf("Parsed Cache: %+v\n", cacheURL)
+	log.Debugf("Parsed Cache: %s\n", cacheURL.String())
 	if https {
 		cacheURL.Scheme = "https"
 		if !HasPort(cacheURL.Host) {
@@ -170,8 +172,12 @@ func download_http(source string, destination string, payload *payloadStruct, na
 		}
 	}
 
+	log.Debugln("Nearest cache list:", NearestCacheList)
+	log.Debugln("Cache list name:", namespace.Caches)
+
 	// Now that we have the ordered list of caches, do an intersect for the caches for the namespace
 	closestNamespaceCaches := namespace.MatchCaches(NearestCacheList)
+	log.Debugln("Matched caches:", closestNamespaceCaches)
 
 	// Make sure we only try as many caches as we have
 	cachesToTry := 3
@@ -200,7 +206,7 @@ func download_http(source string, destination string, payload *payloadStruct, na
 		log.Debugln("Cache:", cache)
 		transfers = append(transfers, NewTransferDetails(cache, namespace.ReadHTTPS || namespace.UseTokenOnRead)...)
 	}
-
+	log.Debugln("Transfers:", transfers[0].Url.Opaque)
 	// Create the wait group and the transfer files
 	var wg sync.WaitGroup
 

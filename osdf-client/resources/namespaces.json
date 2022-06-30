@@ -1,5 +1,21 @@
 {
   "caches": [
+    {
+      "endpoint": "osg-houston-stashcache.nrp.internet2.edu:8000",
+      "resource": "Stashcache-Houston"
+    },
+    {
+      "endpoint": "osg-sunnyvale-stashcache.nrp.internet2.edu:8000",
+      "resource": "Stashcache-Sunnyvale"
+    },
+    {
+      "endpoint": "osg.newy32aoa.nrp.internet2.edu:8000",
+      "resource": "Stashcache-Manhattan"
+    },
+    {
+      "endpoint": "osg-chicago-stashcache.nrp.internet2.edu:8000",
+      "resource": "Stashcache-Chicago"
+    }
   ],
   "namespaces": [
     {
