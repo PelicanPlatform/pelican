@@ -13,6 +13,10 @@ import (
 	"strings"
 )
 
+// I don't think we actually want stashcp to download the namespace every build
+// Doesn't make for reproducible builds
+// //go:generate curl -s https://topology-itb.opensciencegrid.org/stashcache/namespaces.json -o resources/namespaces.json
+
 //go:embed resources/namespaces.json
 var namespacesJson []byte
 
@@ -24,8 +28,9 @@ var namespaces []Namespace
 
 // Cache
 type Cache struct {
-	Endpoint string `json:"endpoint"`
-	Resource string `json:"resource"`
+	AuthEndpoint string `json:"auth_endpoint"`
+	Endpoint     string `json:"endpoint"`
+	Resource     string `json:"resource"`
 }
 
 // Namespace holds the structure of stash namespaces
@@ -57,7 +62,7 @@ func (ns *Namespace) GetCacheHosts() []string {
 
 // MatchCaches compares the caches passed in (presumably from an ordered list of caches)
 // to the caches for the namespace, and returns the intersection of the two
-func (ns *Namespace) MatchCaches(caches []string) []string {
+func (ns *Namespace) MatchCaches(caches []string) []Cache {
 	// Get the caches for the namespace
 	nsCaches := ns.GetCacheHosts()
 
@@ -65,14 +70,14 @@ func (ns *Namespace) MatchCaches(caches []string) []string {
 	intersectedCaches := intersect(caches, nsCaches)
 
 	// map the intersectedCaches back to the endpoints (with ports)
-	var intersectedCachesWithEndpoints []string
+	var intersectedCachesWithEndpoints []Cache
 	// For each of the caches in the intersection
 	for _, cache := range intersectedCaches {
 		// Match to the caches in the namespace
 		for _, nsCache := range ns.GetCaches() {
 			host := strings.Split(nsCache.Endpoint, ":")[0]
 			if host == cache {
-				intersectedCachesWithEndpoints = append(intersectedCachesWithEndpoints, nsCache.Endpoint)
+				intersectedCachesWithEndpoints = append(intersectedCachesWithEndpoints, nsCache)
 			}
 		}
 	}

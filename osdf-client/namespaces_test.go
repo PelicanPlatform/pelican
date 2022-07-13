@@ -14,19 +14,28 @@ func TestMatchNamespace(t *testing.T) {
 	namespacesJson = []byte(`
 {
   "caches": [
-	{
-      "endpoint": "osg-houston-stashcache.nrp.internet2.edu:8000",
-      "resource": "Stashcache-Houston"
+    {
+      "auth_endpoint": "osg.kans.nrp.internet2.edu:8443",
+      "endpoint": "osg.kans.nrp.internet2.edu:8000",
+      "resource": "Stashcache-Kansas"
     },
     {
+      "auth_endpoint": "osg-sunnyvale-stashcache.nrp.internet2.edu:8443",
       "endpoint": "osg-sunnyvale-stashcache.nrp.internet2.edu:8000",
       "resource": "Stashcache-Sunnyvale"
     },
     {
+      "auth_endpoint": "osg-houston-stashcache.nrp.internet2.edu:8443",
+      "endpoint": "osg-houston-stashcache.nrp.internet2.edu:8000",
+      "resource": "Stashcache-Houston"
+    },
+    {
+      "auth_endpoint": "osg.newy32aoa.nrp.internet2.edu:8443",
       "endpoint": "osg.newy32aoa.nrp.internet2.edu:8000",
       "resource": "Stashcache-Manhattan"
     },
     {
+      "auth_endpoint": "osg-chicago-stashcache.nrp.internet2.edu:8443",
       "endpoint": "osg-chicago-stashcache.nrp.internet2.edu:8000",
       "resource": "Stashcache-Chicago"
     }
@@ -54,6 +63,7 @@ func TestMatchNamespace(t *testing.T) {
   ]
 }
 `)
+
 	ns, err := MatchNamespace("/osgconnect/private/path/to/file.txt")
 	assert.NoError(t, err, "Failed to parse namespace")
 
@@ -72,6 +82,16 @@ func TestMatchNamespace(t *testing.T) {
 	assert.Equal(t, "/osgconnect", ns.Path)
 	assert.Equal(t, false, ns.ReadHTTPS)
 	assert.Equal(t, false, ns.UseTokenOnRead)
+
+}
+
+func TestFullNamespace(t *testing.T) {
+	ns, err := MatchNamespace("/ospool/PROTECTED/dweitzel/test.txt")
+	assert.NoError(t, err, "Failed to parse namespace")
+	assert.Equal(t, true, ns.ReadHTTPS)
+	assert.Equal(t, true, ns.UseTokenOnRead)
+	assert.Equal(t, "/ospool/PROTECTED", ns.Path)
+	assert.Equal(t, "https://origin-auth2001.chtc.wisc.edu:1095", ns.WriteBackHost)
 
 }
 
@@ -116,26 +136,29 @@ func Test_intersect(t *testing.T) {
 }
 
 func TestNamespace_MatchCaches(t *testing.T) {
+	cache1 := Cache{
+		Endpoint: "cache1.ospool.org:8000",
+	}
+	cache2 := Cache{
+		Endpoint: "cache2.ospool.org:8001",
+	}
+	cache3 := Cache{
+		Endpoint: "cache3.ospool.org:8002",
+	}
 	namespace := Namespace{
 		Path: "/ospool/PROTECTED",
 		Caches: []Cache{
-			{
-				Endpoint: "cache1.ospool.org:8000",
-			},
-			{
-				Endpoint: "cache2.ospool.org:8001",
-			},
-			{
-				Endpoint: "cache3.ospool.org:8002",
-			},
+			cache1,
+			cache2,
+			cache3,
 		},
 	}
-	assert.Equal(t, []string{"cache1.ospool.org:8000"}, namespace.MatchCaches([]string{"cache1.ospool.org"}))
-	assert.Equal(t, []string{"cache2.ospool.org:8001"}, namespace.MatchCaches([]string{"cache2.ospool.org"}))
-	assert.Equal(t, []string{"cache3.ospool.org:8002"}, namespace.MatchCaches([]string{"cache3.ospool.org"}))
-	assert.Equal(t, []string(nil), namespace.MatchCaches([]string{"cache4.ospool.org"}))
+	assert.Equal(t, []Cache{cache1}, namespace.MatchCaches([]string{"cache1.ospool.org"}))
+	assert.Equal(t, []Cache{cache2}, namespace.MatchCaches([]string{"cache2.ospool.org"}))
+	assert.Equal(t, []Cache{cache3}, namespace.MatchCaches([]string{"cache3.ospool.org"}))
+	assert.Equal(t, []Cache(nil), namespace.MatchCaches([]string{"cache4.ospool.org"}))
 
-	assert.Equal(t, []string{"cache2.ospool.org:8001", "cache3.ospool.org:8002", "cache1.ospool.org:8000"}, namespace.MatchCaches([]string{"cache2.ospool.org", "cache3.ospool.org", "cache1.ospool.org"}))
+	assert.Equal(t, []Cache{cache2, cache3, cache1}, namespace.MatchCaches([]string{"cache2.ospool.org", "cache3.ospool.org", "cache1.ospool.org"}))
 
-	assert.Equal(t, []string{"cache2.ospool.org:8001", "cache1.ospool.org:8000"}, namespace.MatchCaches([]string{"cache5.ospool.org", "cache2.ospool.org", "cache4.ospool.org", "cache1.ospool.org"}))
+	assert.Equal(t, []Cache{cache2, cache1}, namespace.MatchCaches([]string{"cache5.ospool.org", "cache2.ospool.org", "cache4.ospool.org", "cache1.ospool.org"}))
 }

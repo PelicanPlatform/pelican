@@ -87,21 +87,26 @@ type TransferDetails struct {
 }
 
 // NewTransferDetails creates the TransferDetails struct with the given cache
-func NewTransferDetails(cache string, https bool) []TransferDetails {
+func NewTransferDetails(cache Cache, https bool) []TransferDetails {
 	details := make([]TransferDetails, 0)
-
+	var cacheEndpoint string
+	if https {
+		cacheEndpoint = cache.AuthEndpoint
+	} else {
+		cacheEndpoint = cache.Endpoint
+	}
 	_, canDisableProxy := os.LookupEnv("OSG_DISABLE_PROXY_FALLBACK")
 	canDisableProxy = !canDisableProxy
 
 	// Form the URL
-	cacheURL, err := url.Parse(cache)
+	cacheURL, err := url.Parse(cacheEndpoint)
 	if err != nil {
 		log.Errorln("Failed to parse cache:", cache, "error:", err)
 		return nil
 	}
 	if cacheURL.Host == "" {
 		// Assume the cache is just a hostname
-		cacheURL.Host = cache
+		cacheURL.Host = cacheEndpoint
 		cacheURL.Path = ""
 		cacheURL.Scheme = ""
 		cacheURL.Opaque = ""

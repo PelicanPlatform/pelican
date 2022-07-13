@@ -33,7 +33,12 @@ func TestIsPort(t *testing.T) {
 // TestNewTransferDetails checks the creation of transfer details
 func TestNewTransferDetails(t *testing.T) {
 	// Case 1: cache with http
-	transfers := NewTransferDetails("cache.edu", false)
+	testCache := Cache{
+		AuthEndpoint: "cache.edu:8443",
+		Endpoint:     "cache.edu:8000",
+		Resource:     "Cache",
+	}
+	transfers := NewTransferDetails(testCache, false)
 	assert.Equal(t, 2, len(transfers))
 	assert.Equal(t, "cache.edu:8000", transfers[0].Url.Host)
 	assert.Equal(t, "http", transfers[0].Url.Scheme)
@@ -43,7 +48,26 @@ func TestNewTransferDetails(t *testing.T) {
 	assert.Equal(t, false, transfers[1].Proxy)
 
 	// Case 2: cache with https
-	transfers = NewTransferDetails("cache.edu", true)
+	transfers = NewTransferDetails(testCache, true)
+	assert.Equal(t, 1, len(transfers))
+	assert.Equal(t, "cache.edu:8443", transfers[0].Url.Host)
+	assert.Equal(t, "https", transfers[0].Url.Scheme)
+	assert.Equal(t, false, transfers[0].Proxy)
+
+	testCache.Endpoint = "cache.edu"
+	// Case 3: cache without port with http
+	transfers = NewTransferDetails(testCache, false)
+	assert.Equal(t, 2, len(transfers))
+	assert.Equal(t, "cache.edu:8000", transfers[0].Url.Host)
+	assert.Equal(t, "http", transfers[0].Url.Scheme)
+	assert.Equal(t, true, transfers[0].Proxy)
+	assert.Equal(t, "cache.edu:8000", transfers[1].Url.Host)
+	assert.Equal(t, "http", transfers[1].Url.Scheme)
+	assert.Equal(t, false, transfers[1].Proxy)
+
+	// Case 4. cache without port with https
+	testCache.AuthEndpoint = "cache.edu"
+	transfers = NewTransferDetails(testCache, true)
 	assert.Equal(t, 2, len(transfers))
 	assert.Equal(t, "cache.edu:8444", transfers[0].Url.Host)
 	assert.Equal(t, "https", transfers[0].Url.Scheme)
@@ -51,36 +75,25 @@ func TestNewTransferDetails(t *testing.T) {
 	assert.Equal(t, "cache.edu:8443", transfers[1].Url.Host)
 	assert.Equal(t, "https", transfers[1].Url.Scheme)
 	assert.Equal(t, false, transfers[1].Proxy)
-
-	// Case 3: cache with port with http
-	transfers = NewTransferDetails("cache.edu:1234", false)
-	assert.Equal(t, 2, len(transfers))
-	assert.Equal(t, "cache.edu:1234", transfers[0].Url.Host)
-	assert.Equal(t, "http", transfers[0].Url.Scheme)
-	assert.Equal(t, true, transfers[0].Proxy)
-	assert.Equal(t, "cache.edu:1234", transfers[1].Url.Host)
-	assert.Equal(t, "http", transfers[1].Url.Scheme)
-	assert.Equal(t, false, transfers[1].Proxy)
-
-	// Case 4. cache with port with https
-	transfers = NewTransferDetails("cache.edu:5678", true)
-	assert.Equal(t, 1, len(transfers))
-	assert.Equal(t, "cache.edu:5678", transfers[0].Url.Host)
-	assert.Equal(t, "https", transfers[0].Url.Scheme)
-	assert.Equal(t, false, transfers[0].Proxy)
 }
 
 func TestNewTransferDetailsEnv(t *testing.T) {
+
+	testCache := Cache{
+		AuthEndpoint: "cache.edu:8443",
+		Endpoint:     "cache.edu:8000",
+		Resource:     "Cache",
+	}
+
 	os.Setenv("OSG_DISABLE_PROXY_FALLBACK", "")
-	transfers := NewTransferDetails("cache.edu", false)
+	transfers := NewTransferDetails(testCache, false)
 	assert.Equal(t, 1, len(transfers))
 	assert.Equal(t, true, transfers[0].Proxy)
 
-	transfers = NewTransferDetails("cache.edu", true)
-	assert.Equal(t, 2, len(transfers))
+	transfers = NewTransferDetails(testCache, true)
+	assert.Equal(t, 1, len(transfers))
 	assert.Equal(t, "https", transfers[0].Url.Scheme)
 	assert.Equal(t, false, transfers[0].Proxy)
-	assert.Equal(t, false, transfers[1].Proxy)
 	os.Unsetenv("OSG_DISABLE_PROXY_FALLBACK")
 }
 
@@ -95,7 +108,12 @@ func TestSlowTransfers(t *testing.T) {
 	defer svr.CloseClientConnections()
 	defer svr.Close()
 
-	transfers := NewTransferDetails(svr.URL, false)
+	testCache := Cache{
+		AuthEndpoint: svr.URL,
+		Endpoint:     svr.URL,
+		Resource:     "Cache",
+	}
+	transfers := NewTransferDetails(testCache, false)
 	assert.Equal(t, 2, len(transfers))
 	assert.Equal(t, svr.URL, transfers[0].Url.String())
 
