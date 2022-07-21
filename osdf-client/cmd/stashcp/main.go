@@ -109,10 +109,15 @@ func main() {
 		os.Exit(0)
 	}
 
+	// Set the progress bars to the command line option
+	stashcp.Options.ProgressBars = options.ProgessBars
+
 	// Check if the program was executed from a terminal
 	// https://rosettacode.org/wiki/Check_output_device_is_a_terminal#Go
 	if fileInfo, _ := os.Stdout.Stat(); (fileInfo.Mode() & os.ModeCharDevice) != 0 {
-		options.ProgessBars = true
+		stashcp.Options.ProgressBars = true
+	} else {
+		stashcp.Options.ProgressBars = false
 	}
 
 	if options.PrintNamespaces {
@@ -193,9 +198,11 @@ func main() {
 	if nearestCacheIsPresent {
 		stashcp.NearestCache = nearestCache
 		stashcp.NearestCacheList = append(stashcp.NearestCacheList, stashcp.NearestCache)
+		stashcp.CacheOverride = true
 	} else if options.Cache != "" {
 		stashcp.NearestCache = options.Cache
 		stashcp.NearestCacheList = append(stashcp.NearestCacheList, options.Cache)
+		stashcp.CacheOverride = true
 	}
 
 	// Convert the methods
