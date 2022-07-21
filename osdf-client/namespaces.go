@@ -133,7 +133,7 @@ func downloadNamespace() ([]byte, error) {
 	// Get the namespace url from the environment
 	namespaceUrl, gotNamespaceUrl := os.LookupEnv("STASH_NAMESPACE_URL")
 	if !gotNamespaceUrl {
-		namespaceUrl = "https://topology.opensciencegrid.org/stashcache/namespaces.json"
+		namespaceUrl = "https://topology.opensciencegrid.org/stashcache/namespaces"
 	}
 	resp, err := http.Get(namespaceUrl)
 	if err != nil {

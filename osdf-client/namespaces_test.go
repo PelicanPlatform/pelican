@@ -97,7 +97,7 @@ func TestFullNamespace(t *testing.T) {
 
 // TestDownloadNamespaces tests the download of the namespaces JSON
 func TestDownloadNamespaces(t *testing.T) {
-	os.Setenv("STASH_NAMESPACE_URL", "https://topology-itb.opensciencegrid.org/stashcache/namespaces.json")
+	os.Setenv("STASH_NAMESPACE_URL", "https://topology-itb.opensciencegrid.org/stashcache/namespaces")
 	defer os.Unsetenv("STASH_NAMESPACE_URL")
 	namespaceBytes, err := downloadNamespace()
 	assert.NoError(t, err, "Failed to download namespaces")
