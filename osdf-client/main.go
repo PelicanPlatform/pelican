@@ -35,6 +35,10 @@ type OptionsStruct struct {
 
 var Options OptionsStruct
 
+var (
+	version string
+)
+
 // Nearest cache
 var NearestCache string
 
@@ -42,12 +46,16 @@ var NearestCache string
 var NearestCacheList []string
 var CachesJsonLocation string
 
+// CacheOverride
+var CacheOverride bool
+
 type payloadStruct struct {
 	filename     string
 	sitename     string
 	status       string
 	Owner        string
 	ProjectName  string
+	version      string
 	start1       int64
 	end1         int64
 	timestamp    int64
@@ -237,6 +245,7 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 	}
 
 	payload := payloadStruct{}
+	payload.version = version
 	var found bool
 	payload.sitename, found = os.LookupEnv("OSG_SITE_NAME")
 	if !found {
