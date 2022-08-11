@@ -64,6 +64,7 @@ func TestMatchNamespace(t *testing.T) {
 }
 `)
 
+	os.Setenv("STASH_NAMESPACE_URL", "https://doesnotexist.edu/blah/nope")
 	ns, err := MatchNamespace("/osgconnect/private/path/to/file.txt")
 	assert.NoError(t, err, "Failed to parse namespace")
 
@@ -82,6 +83,8 @@ func TestMatchNamespace(t *testing.T) {
 	assert.Equal(t, "/osgconnect", ns.Path)
 	assert.Equal(t, false, ns.ReadHTTPS)
 	assert.Equal(t, false, ns.UseTokenOnRead)
+
+	os.Unsetenv("STASH_NAMESPACE_URL")
 
 }
 
