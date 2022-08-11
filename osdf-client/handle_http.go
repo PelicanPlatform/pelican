@@ -640,8 +640,8 @@ func doPut(request *http.Request, responseChan chan<- *http.Response, errorChan 
 
 }
 
-func IsDir(url *url.URL, token string, namespace Namespace) (bool, error) {
-	rootUrl := *url
+func IsDir(dirUrl *url.URL, token string, namespace Namespace) (bool, error) {
+	connectUrl := url.URL{}
 	if namespace.DirListHost != "" {
 		// Parse the dir list host
 		dirListURL, err := url.Parse(namespace.DirListHost)
@@ -649,22 +649,33 @@ func IsDir(url *url.URL, token string, namespace Namespace) (bool, error) {
 			log.Errorln("Failed to parse dirlisthost from namespaces into URL:", err)
 			return false, err
 		}
-		rootUrl = *dirListURL
+		connectUrl = *dirListURL
 
 	} else {
-		rootUrl.Path = ""
-		rootUrl.Host = "stash.osgconnect.net:1094"
-		rootUrl.Scheme = "http"
+		//rootUrl.Path = ""
+		connectUrl.Host = "stash.osgconnect.net:1094"
+		connectUrl.Scheme = "http"
 	}
 
-	c := gowebdav.NewClient(rootUrl.String(), "", "")
+	c := gowebdav.NewClient(connectUrl.String(), "", "")
 	//c.SetHeader("Authorization", "Bearer "+token)
 
-	info, err := c.Stat(url.Path)
+	// The path can have special characters in it like '#' and '?', so we have to collect
+	// the path parts and join them together
+	finalPath := dirUrl.Path
+	if dirUrl.RawQuery != "" {
+		finalPath += "?" + dirUrl.RawQuery
+	}
+	if dirUrl.Fragment != "" {
+		finalPath += "#" + dirUrl.Fragment
+	}
+	log.Debugln("Final webdav checked path:", finalPath)
+	info, err := c.Stat(finalPath)
 	if err != nil {
-		log.Debugln("Failed to ReadDir:", err, "for URL:", rootUrl.String())
+		log.Debugln("Failed to ReadDir:", err, "for URL:", dirUrl.String())
 		return false, err
 	}
+	log.Debugln("Got isDir response:", info.IsDir())
 	return info.IsDir(), nil
 
 }
