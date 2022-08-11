@@ -111,6 +111,7 @@ func main() {
 
 	// Set the progress bars to the command line option
 	stashcp.Options.ProgressBars = options.ProgessBars
+	stashcp.Options.Token = options.Token
 
 	// Check if the program was executed from a terminal
 	// https://rosettacode.org/wiki/Check_output_device_is_a_terminal#Go
