@@ -209,6 +209,11 @@ func main() {
 	// Convert the methods
 	splitMethods := strings.Split(options.Methods, ",")
 
+	// If the user overrides the cache, then only use HTTP
+	if stashcp.CacheOverride {
+		splitMethods = []string{"http"}
+	}
+
 	if len(source) > 1 {
 		if destStat, err := os.Stat(dest); err != nil && destStat.IsDir() {
 			log.Errorln("Destination is not a directory")
