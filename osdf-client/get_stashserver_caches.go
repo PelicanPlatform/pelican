@@ -9,7 +9,6 @@ import (
 	"encoding/hex"
 	"encoding/pem"
 	"errors"
-	"io/ioutil"
 	"os"
 	"path"
 	"path/filepath"
@@ -151,7 +150,7 @@ func readPublicKey() (*rsa.PublicKey, error) {
 		pubkeyContents = osgpubkey
 	} else {
 		var err error
-		pubkeyContents, err = ioutil.ReadFile(publicKeyPath)
+		pubkeyContents, err = os.ReadFile(publicKeyPath)
 		if err != nil {
 			log.Errorln("Error reading public key:", err)
 			return nil, err

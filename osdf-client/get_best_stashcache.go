@@ -3,7 +3,7 @@ package stashcp
 import (
 	"bytes"
 	"errors"
-	"io/ioutil"
+	"io"
 	"math/rand"
 	"net/http"
 	"net/url"
@@ -109,7 +109,7 @@ func GetBestStashcache(cacheListName string) ([]string, error) {
 
 			if resp.StatusCode == 200 {
 				log.Debugf("Got OK code 200 from %s", cur_site)
-				responsetext_b, err := ioutil.ReadAll(resp.Body)
+				responsetext_b, err := io.ReadAll(resp.Body)
 				if err != nil {
 					log.Errorln("Could not aquire http response text")
 				}
