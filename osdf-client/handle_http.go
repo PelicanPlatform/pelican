@@ -3,7 +3,7 @@ package stashcp
 import (
 	"context"
 	"errors"
-	"io/ioutil"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -628,7 +628,7 @@ func doPut(request *http.Request, responseChan chan<- *http.Response, errorChan 
 	if response.StatusCode != 200 {
 		log.Errorln("Error status code:", response.Status)
 		log.Debugln("From the server:")
-		textResponse, err := ioutil.ReadAll(response.Body)
+		textResponse, err := io.ReadAll(response.Body)
 		if err != nil {
 			log.Errorln("Error reading response from server:", err)
 			responseChan <- response

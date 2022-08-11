@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"net/url"
@@ -156,7 +155,7 @@ func getToken() (string, error) {
 
 	//Read in the JSON
 	log.Debug("Opening token file: " + token_location)
-	tokenContents, err := ioutil.ReadFile(token_location)
+	tokenContents, err := os.ReadFile(token_location)
 	if err != nil {
 		log.Errorln("Error reading token file:", err)
 		return "", err
@@ -392,7 +391,7 @@ func parse_job_ad(payload payloadStruct) { // TODO: needs the payload
 
 	// https://stackoverflow.com/questions/28574609/how-to-apply-regexp-to-content-in-file-go
 
-	b, err := ioutil.ReadFile(filename)
+	b, err := os.ReadFile(filename)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -491,7 +490,7 @@ func doEsSend(jsonBytes []byte, errorChannel chan<- error) error {
 			log.Errorln("Failed to close body when uploading payload")
 		}
 	}(resp.Body)
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		errorChannel <- err
 		return err
