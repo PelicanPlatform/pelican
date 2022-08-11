@@ -125,6 +125,15 @@ func getToken() (string, error) {
 			}
 		}
 
+		// Check for /tmp/bt_u<uid>
+		if token_location == "" {
+			uid := os.Getuid()
+			tmpTokenPath := "/tmp/bt_u" + strconv.Itoa(uid)
+			if _, err := os.Stat(tmpTokenPath); err == nil {
+				token_location = tmpTokenPath
+			}
+		}
+
 		// Backwards compatibility for getting scitokens
 		// If TOKEN is not set in environment, and _CONDOR_CREDS is set, then...
 		if tokenFile, isTokenSet := os.LookupEnv("TOKEN"); isTokenSet && token_location == "" {
