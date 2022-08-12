@@ -182,7 +182,7 @@ func download_http(source string, destination string, payload *payloadStruct, na
 
 	// Now that we have the ordered list of caches, do an intersect for the caches for the namespace
 	var closestNamespaceCaches []Cache
-	if CacheOverride == true {
+	if CacheOverride {
 		cache := Cache{
 			Endpoint:     NearestCache,
 			AuthEndpoint: NearestCache,
