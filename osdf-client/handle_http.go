@@ -181,7 +181,17 @@ func download_http(source string, destination string, payload *payloadStruct, na
 	log.Debugln("Cache list name:", namespace.Caches)
 
 	// Now that we have the ordered list of caches, do an intersect for the caches for the namespace
-	closestNamespaceCaches := namespace.MatchCaches(NearestCacheList)
+	var closestNamespaceCaches []Cache
+	if CacheOverride {
+		cache := Cache{
+			Endpoint:     NearestCache,
+			AuthEndpoint: NearestCache,
+			Resource:     NearestCache,
+		}
+		closestNamespaceCaches = []Cache{cache}
+	} else {
+		closestNamespaceCaches = namespace.MatchCaches(NearestCacheList)
+	}
 	log.Debugln("Matched caches:", closestNamespaceCaches)
 
 	// Make sure we only try as many caches as we have
