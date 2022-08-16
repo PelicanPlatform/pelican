@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httputil"
 	"net/url"
 	"os"
 	"path"
@@ -569,18 +570,23 @@ func UploadFile(src string, dest *url.URL, token string, namespace Namespace) (i
 	putContext, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	log.Debugln("Full destination URL:", dest.String())
-	request, err := http.NewRequestWithContext(putContext, "PUT", dest.String(), reader)
-	request.ContentLength = fileInfo.Size()
+	var request *http.Request
+	// For files that are 0 length, we need to send a PUT request with an nil body
+	if fileInfo.Size() > 0 {
+		request, err = http.NewRequestWithContext(putContext, "PUT", dest.String(), reader)
+	} else {
+		request, err = http.NewRequestWithContext(putContext, "PUT", dest.String(), http.NoBody)
+	}
 	if err != nil {
 		log.Errorln("Error creating request:", err)
 		return 0, err
 	}
+	request.ContentLength = fileInfo.Size()
 	// Set the authorization header
 	request.Header.Set("Authorization", "Bearer "+token)
 	var lastKnownWritten int64
 	t := time.NewTicker(20 * time.Second)
 	defer t.Stop()
-	//log.Debug(formatRequest(request))
 	go doPut(request, responseChan, errorChan)
 	var lastError error = nil
 
@@ -607,7 +613,6 @@ Loop:
 			// The file has been closed, we're done here
 			log.Debugln("File closed")
 		case response := <-responseChan:
-			log.Debugln("Received response:", response)
 			if response.StatusCode != 200 {
 				log.Errorln("Got failure status code:", response.StatusCode)
 				lastError = errors.New("failure status code")
@@ -623,18 +628,29 @@ Loop:
 		}
 	}
 
-	return atomic.LoadInt64(&reader.read), lastError
+	if fileInfo.Size() == 0 {
+		return 0, lastError
+	} else {
+		return atomic.LoadInt64(&reader.read), lastError
+	}
+
 }
+
+var UploadClient = &http.Client{}
 
 // Actually perform the Put request to the server
 func doPut(request *http.Request, responseChan chan<- *http.Response, errorChan chan<- error) {
-	client := &http.Client{}
+	client := UploadClient
+	dump, _ := httputil.DumpRequestOut(request, false)
+	log.Debugf("Dumping request: %s", dump)
 	response, err := client.Do(request)
 	if err != nil {
 		log.Errorln("Error with PUT:", err)
 		errorChan <- err
 		return
 	}
+	dump, _ = httputil.DumpResponse(response, true)
+	log.Debugf("Dumping response: %s", dump)
 	if response.StatusCode != 200 {
 		log.Errorln("Error status code:", response.Status)
 		log.Debugln("From the server:")
