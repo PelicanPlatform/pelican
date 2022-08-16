@@ -1,12 +1,14 @@
 package stashcp
 
 import (
+	"bytes"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -155,4 +157,98 @@ func TestConnectionError(t *testing.T) {
 
 	assert.IsType(t, &ConnectionSetupError{}, err)
 
+}
+
+func TestUploadZeroLengthFile(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+
+		//t.Logf("%s", dump)
+		assert.Equal(t, "PUT", r.Method, "Not PUT Method")
+		assert.Equal(t, int64(0), r.ContentLength, "ContentLength should be 0")
+	}))
+	defer ts.Close()
+	reader := bytes.NewReader([]byte{})
+	request, err := http.NewRequest("PUT", ts.URL, reader)
+	if err != nil {
+		assert.NoError(t, err)
+	}
+
+	request.Header.Set("Authorization", "Bearer test")
+	errorChan := make(chan error, 1)
+	responseChan := make(chan *http.Response)
+	go doPut(request, responseChan, errorChan)
+	select {
+	case err := <-errorChan:
+		assert.NoError(t, err)
+	case response := <-responseChan:
+		assert.Equal(t, http.StatusOK, response.StatusCode)
+	case <-time.After(time.Second * 2):
+		assert.Fail(t, "Timeout while waiting for response")
+	}
+}
+
+func TestFailedUpload(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+
+		//t.Logf("%s", dump)
+		assert.Equal(t, "PUT", r.Method, "Not PUT Method")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, err := w.Write([]byte("Error"))
+		assert.NoError(t, err)
+
+	}))
+	defer ts.Close()
+	reader := strings.NewReader("test")
+	request, err := http.NewRequest("PUT", ts.URL, reader)
+	if err != nil {
+		assert.NoError(t, err)
+	}
+	request.Header.Set("Authorization", "Bearer test")
+	errorChan := make(chan error, 1)
+	responseChan := make(chan *http.Response)
+	go doPut(request, responseChan, errorChan)
+	select {
+	case err := <-errorChan:
+		assert.Error(t, err)
+	case response := <-responseChan:
+		assert.Equal(t, http.StatusInternalServerError, response.StatusCode)
+	case <-time.After(time.Second * 2):
+		assert.Fail(t, "Timeout while waiting for response")
+	}
+}
+
+func TestFullUpload(t *testing.T) {
+	testFileContent := "test file content"
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+
+		//t.Logf("%s", dump)
+		assert.Equal(t, "PUT", r.Method, "Not PUT Method")
+		_, err := w.Write([]byte(":)"))
+		assert.NoError(t, err)
+	}))
+	defer ts.Close()
+
+	// Create the temporary file to upload
+	tempFile, err := os.CreateTemp(t.TempDir(), "test")
+	assert.NoError(t, err, "Error creating temp file")
+	defer os.Remove(tempFile.Name())
+	_, err = tempFile.WriteString(testFileContent)
+	assert.NoError(t, err, "Error writing to temp file")
+	tempFile.Close()
+
+	// Create the namespace (only the write back host is read)
+	testURL, err := url.Parse(ts.URL)
+	assert.NoError(t, err, "Error parsing test URL")
+	testNamespace := Namespace{
+		WriteBackHost: "https://" + testURL.Host,
+	}
+
+	// Upload the file
+	uploadURL, err := url.Parse("stash:///test/stuff/blah.txt")
+	assert.NoError(t, err, "Error parsing upload URL")
+	// Set the upload client to trust the server
+	UploadClient = ts.Client()
+	uploaded, err := UploadFile(tempFile.Name(), uploadURL, "Bearer test", testNamespace)
+	assert.NoError(t, err, "Error uploading file")
+	assert.Equal(t, int64(len(testFileContent)), uploaded, "Uploaded file size does not match")
 }
