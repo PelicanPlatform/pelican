@@ -89,6 +89,11 @@ func main() {
 	//var downloaded int64 = 0
 	var transfers []Transfer
 
+	if len(os.Args) == 0 && (infile == "" || outfile == "") {
+		fmt.Fprint(os.Stderr, "No source or destination specified\n")
+		os.Exit(1)
+	}
+
 	if len(os.Args) == 0 {
 		// Open the input and output files
 		infileFile, err := os.Open(infile)
