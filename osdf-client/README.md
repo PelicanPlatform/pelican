@@ -1,18 +1,31 @@
-Stashcp Go Client
-=================
+StashCP Client
+==============
+
+[![Version][github-release-shield]][github-release]
+![Go Mod][go-mod-version]
+![Builds][github-build]
+
+StashCP downloads files from the [Open Science Data Federation](https://osdf.osg-htc.org/) through a series of caches.  StashCP is used by multiple organizations to effeciently transfer input and output data.
+
+StashCP also includes an [HTCondor](https://htcondor.org/) file transfer [plugin](https://htcondor.readthedocs.io/en/latest/admin-manual/setting-up-special-environments.html#enabling-the-transfer-of-files-specified-by-a-url).  When configured, this plugin will allow the user to specify `transfer_input_files` with the `stash://` protocol which will be downloaded through the OSDF caches.  An example of a submit file:
+
+    ...
+    transfer_input_files = stash:///osgconnect/public/dweitzel/blast/queries/query1
+    ...
+
 
 
 Building
 --------
 
-Download the repo and cd into the directory.  Build with the command:
+Building is performed with the [goreleaser](https://goreleaser.com/) tool.  To build a snapshot (not release):
 
-    $ make
+    $ goreleaser --rm-dist --snapshot
 
-It will make two executables.  A static x86 executable, and an executable native to the building machine.
+The binaries will be located in `./dist` directory.
 
-Testing
--------
+Testing and Usage
+-----------------
 
 Run this simple command to download a test file
 
@@ -30,3 +43,10 @@ Configuration
 | `STASH_NAMESPACE_URL`             | The URL to download the namespace and cache information.  Default: https://topology.opensciencegrid.org/stashcache/namespaces                                                                                                                                                                                                 |
 
 
+
+
+<!-- MARKDOWN LINKS & IMAGES -->
+[go-mod-version]: https://img.shields.io/github/go-mod/go-version/opensciencegrid/stashcp
+[github-build]: https://img.shields.io/github/workflow/status/opensciencegrid/stashcp/Test
+[github-release-shield]: https://img.shields.io/github/v/release/opensciencegrid/stashcp
+[github-release]: https://github.com/opensciencegrid/stashcp/releases
