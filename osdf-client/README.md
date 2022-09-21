@@ -52,3 +52,4 @@ Configuration
 [github-build]: https://img.shields.io/github/workflow/status/htcondor/osdf-client/Test
 [github-release-shield]: https://img.shields.io/github/v/release/htcondor/osdf-client
 [github-release]: https://github.com/htcondor/osdf-client/releases
+[github-previous-repo]: https://github.com/opensciencegrid/stashcp
