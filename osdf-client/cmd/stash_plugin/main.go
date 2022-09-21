@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	stashcp "github.com/opensciencegrid/stashcp/v6"
-	"github.com/opensciencegrid/stashcp/v6/classads"
+	stashcp "github.com/htcondor/osdf-client/v6"
+	"github.com/htcondor/osdf-client/v6/classads"
 	log "github.com/sirupsen/logrus"
 )
 

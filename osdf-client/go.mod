@@ -1,4 +1,4 @@
-module github.com/opensciencegrid/stashcp/v6
+module github.com/htcondor/osdf-client/v6
 
 go 1.16
 

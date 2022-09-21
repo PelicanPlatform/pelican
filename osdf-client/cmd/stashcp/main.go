@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/jessevdk/go-flags"
-	stashcp "github.com/opensciencegrid/stashcp/v6"
+	stashcp "github.com/htcondor/osdf-client/v6"
 	log "github.com/sirupsen/logrus"
 )
 
