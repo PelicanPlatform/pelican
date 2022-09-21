@@ -1,19 +1,21 @@
-StashCP Client
-==============
+Open Science Data Federation (OSDF) Client
+==========================================
 
 [![Version][github-release-shield]][github-release]
 ![Go Mod][go-mod-version]
 ![Builds][github-build]
 
-StashCP downloads files from the [Open Science Data Federation](https://osdf.osg-htc.org/) through a series of caches.  StashCP is used by multiple organizations to effeciently transfer input and output data.
+The OSDF Client downloads files from the [Open Science Data Federation](https://osdf.osg-htc.org/) through a series of caches.  The OSDF is used by multiple organizations to effeciently transfer input and output data.
 
-StashCP also includes an [HTCondor](https://htcondor.org/) file transfer [plugin](https://htcondor.readthedocs.io/en/latest/admin-manual/setting-up-special-environments.html#enabling-the-transfer-of-files-specified-by-a-url).  When configured, this plugin will allow the user to specify `transfer_input_files` with the `stash://` protocol which will be downloaded through the OSDF caches.  An example of a submit file:
+The client consists of two parts: a command-line tool named StashCP, and an [HTCondor](https://htcondor.org/) file transfer [plugin](https://htcondor.readthedocs.io/en/latest/admin-manual/setting-up-special-environments.html#enabling-the-transfer-of-files-specified-by-a-url).
+
+When configured, this plugin will allow the user to specify `transfer_input_files` with the `stash://` protocol which will be downloaded through the OSDF caches.  An example of a submit file:
 
     ...
     transfer_input_files = stash:///osgconnect/public/dweitzel/blast/queries/query1
     ...
 
-
+Note: This repo is the continuation of [opensciencegrid/stashcp][github-previous-repo]; visit that repo for old issues and releases.
 
 Building
 --------
@@ -46,7 +48,7 @@ Configuration
 
 
 <!-- MARKDOWN LINKS & IMAGES -->
-[go-mod-version]: https://img.shields.io/github/go-mod/go-version/opensciencegrid/stashcp
-[github-build]: https://img.shields.io/github/workflow/status/opensciencegrid/stashcp/Test
-[github-release-shield]: https://img.shields.io/github/v/release/opensciencegrid/stashcp
-[github-release]: https://github.com/opensciencegrid/stashcp/releases
+[go-mod-version]: https://img.shields.io/github/go-mod/go-version/htcondor/osdf-client
+[github-build]: https://img.shields.io/github/workflow/status/htcondor/osdf-client/Test
+[github-release-shield]: https://img.shields.io/github/v/release/htcondor/osdf-client
+[github-release]: https://github.com/htcondor/osdf-client/releases
