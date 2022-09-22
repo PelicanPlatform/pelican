@@ -196,7 +196,7 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 		return 0, err
 	}
 
-	understoodSchemes := []string{"stash", "file", ""}
+	understoodSchemes := []string{"stash", "file", "osdf", ""}
 
 	_, foundSource := Find(understoodSchemes, source_url.Scheme)
 	if !foundSource {
@@ -214,7 +214,7 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 	// For write back, it will be the destination
 	// For read it will be the source.
 
-	if dest_url.Scheme == "stash" {
+	if dest_url.Scheme == "stash" || dest_url.Scheme == "osdf" {
 		log.Debugln("Detected writeback")
 		ns, err := MatchNamespace(dest_url.Path)
 		if err != nil {
@@ -227,7 +227,7 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 		destination = dest_url.Path
 	}
 
-	if source_url.Scheme == "stash" {
+	if source_url.Scheme == "stash" || source_url.Scheme == "osdf" {
 		sourceFile = source_url.Path
 	}
 
