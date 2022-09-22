@@ -89,6 +89,9 @@ nfpms:
           - src: README.md
             dst: "/usr/share/doc/{{ .PackageName }}-{{ .Version }}/README.md"
             type: doc
+          - src: resources/10-stash-plugin.conf
+            dst: "/etc/condor/config.d/10-stash-plugin.conf"
+            type: config|noreplace
         replacements:
           amd64: x86_64
         file_name_template: "{{ .PackageName }}-{{ .Version }}-{{ .Release }}.{{ .Arch }}"
@@ -98,6 +101,9 @@ nfpms:
             dst: "/usr/share/doc/{{ .PackageName }}/LICENSE.txt"
           - src: README.md
             dst: "/usr/share/doc/{{ .PackageName }}/README.md"
+          - src: resources/10-stash-plugin.conf
+            dst: "/etc/condor/config.d/10-stash-plugin.conf"
+            type: config|noreplace
         file_name_template: "{{ .PackageName }}-{{ .Version }}-{{ .Release }}_{{ .Arch }}"
   - package_name: stashcp
     builds:
