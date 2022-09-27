@@ -251,4 +251,13 @@ func TestFullUpload(t *testing.T) {
 	uploaded, err := UploadFile(tempFile.Name(), uploadURL, "Bearer test", testNamespace)
 	assert.NoError(t, err, "Error uploading file")
 	assert.Equal(t, int64(len(testFileContent)), uploaded, "Uploaded file size does not match")
+
+	// Upload an osdf file
+	uploadURL, err = url.Parse("osdf:///test/stuff/blah.txt")
+	assert.NoError(t, err, "Error parsing upload URL")
+	// Set the upload client to trust the server
+	UploadClient = ts.Client()
+	uploaded, err = UploadFile(tempFile.Name(), uploadURL, "Bearer test", testNamespace)
+	assert.NoError(t, err, "Error uploading file")
+	assert.Equal(t, int64(len(testFileContent)), uploaded, "Uploaded file size does not match")
 }

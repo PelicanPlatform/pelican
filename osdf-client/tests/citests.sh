@@ -12,7 +12,7 @@ if ! [[ $classad_output =~ "PluginType = \"FileTransfer\"" ]]; then
   to_exit=1
 fi
 
-if ! [[ $classad_output =~ "SupportedMethods = \"stash\"" ]]; then
+if ! [[ $classad_output =~ "SupportedMethods = \"stash, osdf\"" ]]; then
   echo "SupportedMethods not in classad output"
   to_exit=1
 fi

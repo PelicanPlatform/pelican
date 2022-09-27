@@ -48,7 +48,7 @@ func main() {
 			fmt.Println("MultipleFileSupport = true")
 			fmt.Println("PluginVersion = \"" + version + "\"")
 			fmt.Println("PluginType = \"FileTransfer\"")
-			fmt.Println("SupportedMethods = \"stash\"")
+			fmt.Println("SupportedMethods = \"stash, osdf\"")
 			os.Exit(0)
 		} else if os.Args[0] == "-version" || os.Args[0] == "-v" {
 			fmt.Println("Version:", version)
