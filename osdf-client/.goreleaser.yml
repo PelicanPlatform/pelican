@@ -104,6 +104,10 @@ nfpms:
           - src: resources/10-stash-plugin.conf
             dst: "/etc/condor/config.d/10-stash-plugin.conf"
             type: config|noreplace
+          # The libexec directory is elsewhere on Debian; I haven't been able to move the binary so I'm making a symlink
+          - src: "/usr/libexec/condor/stash_plugin"
+            dst: "/usr/lib/condor/libexec/stash_plugin"
+            type: symlink
         file_name_template: "{{ .PackageName }}-{{ .Version }}-{{ .Release }}_{{ .Arch }}"
   - package_name: stashcp
     builds:
