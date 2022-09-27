@@ -63,32 +63,88 @@ changelog:
       - Merge branch
 
 nfpms:
-  - package_name: osdf-client
+  - package_name: condor-stash-plugin
     builds:
-      - stashcp
       - stash_plugin
-    file_name_template: '{{ .ProjectName }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}'
-    id: osdf-client
+    file_name_template: '{{ .PackageName }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}'
+    id: condor-stash-plugin
     vendor: Open Science Grid
     homepage: https://github.com/htcondor/osdf-client
     maintainer: Derek Weitzel <dweitzel@unl.edu>
-    description: Client copy tools for the Open Science Data Federation
+    description: HTCondor file transfer plugin for the Open Science Data Federation
+    license: Apache 2.0
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/libexec/condor
+    release: 1
+    section: default
+    priority: extra
+    overrides:
+      rpm:
+        contents:
+          - src: LICENSE.txt
+            dst: "/usr/share/doc/{{ .PackageName }}-{{ .Version }}/LICENSE.txt"
+            type: doc
+          - src: README.md
+            dst: "/usr/share/doc/{{ .PackageName }}-{{ .Version }}/README.md"
+            type: doc
+          - src: resources/10-stash-plugin.conf
+            dst: "/etc/condor/config.d/10-stash-plugin.conf"
+            type: config|noreplace
+        replacements:
+          amd64: x86_64
+        file_name_template: "{{ .PackageName }}-{{ .Version }}-{{ .Release }}.{{ .Arch }}"
+      deb:
+        contents:
+          - src: LICENSE.txt
+            dst: "/usr/share/doc/{{ .PackageName }}/LICENSE.txt"
+          - src: README.md
+            dst: "/usr/share/doc/{{ .PackageName }}/README.md"
+          - src: resources/10-stash-plugin.conf
+            dst: "/etc/condor/config.d/10-stash-plugin.conf"
+            type: config|noreplace
+          # The libexec directory is elsewhere on Debian; I haven't been able to move the binary so I'm making a symlink
+          - src: "/usr/libexec/condor/stash_plugin"
+            dst: "/usr/lib/condor/libexec/stash_plugin"
+            type: symlink
+        file_name_template: "{{ .PackageName }}-{{ .Version }}-{{ .Release }}_{{ .Arch }}"
+  - package_name: stashcp
+    builds:
+      - stashcp
+    file_name_template: '{{ .PackageName }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}'
+    id: stashcp
+    vendor: Open Science Grid
+    homepage: https://github.com/htcondor/osdf-client
+    maintainer: Derek Weitzel <dweitzel@unl.edu>
+    description: Command-line copy tool for the Open Science Data Federation
     license: Apache 2.0
     formats:
       - apk
       - deb
       - rpm
     replaces:
-      - stashcache-client
-      - stashcp
+      - stashcache-client < 6.4.0
     bindir: /usr/bin
     release: 1
     section: default
     priority: extra
     overrides:
       rpm:
+        contents:
+          - src: LICENSE.txt
+            dst: "/usr/share/doc/{{ .PackageName }}-{{ .Version }}/LICENSE.txt"
+            type: doc
+          - src: README.md
+            dst: "/usr/share/doc/{{ .PackageName }}-{{ .Version }}/README.md"
+            type: doc
         replacements:
           amd64: x86_64
-        file_name_template: "{{ .ProjectName }}-{{ .Version }}-{{ .Release }}.{{ .Arch }}"
+        file_name_template: "{{ .PackageName }}-{{ .Version }}-{{ .Release }}.{{ .Arch }}"
       deb:
-        file_name_template: "{{ .ProjectName }}-{{ .Version }}-{{ .Release }}_{{ .Arch }}"
+        file_name_template: "{{ .PackageName }}-{{ .Version }}-{{ .Release }}_{{ .Arch }}"
+        contents:
+          - src: LICENSE.txt
+            dst: "/usr/share/doc/{{ .PackageName }}/LICENSE.txt"
+          - src: README.md
+            dst: "/usr/share/doc/{{ .PackageName }}/README.md"
