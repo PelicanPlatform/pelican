@@ -16,6 +16,11 @@ builds:
       - linux
       - windows
       - darwin
+    goarch:
+      - "386"
+      - "amd64"
+      - "arm64"
+      - "ppc64le"
     id: "stashcp"
     dir: ./cmd/stashcp
     binary: stashcp
@@ -24,6 +29,10 @@ builds:
     ignore:
       - goos: windows
         goarch: arm64
+      - goos: windows
+        goarch: ppc64le
+      - goos: darwin
+        goarch: ppc64le
   - env:
       - CGO_ENABLED=0
     main: ./cmd/stash_plugin
@@ -31,6 +40,11 @@ builds:
       - linux
       - windows
       - darwin
+    goarch:
+      - "386"
+      - "amd64"
+      - "arm64"
+      - "ppc64le"
     id: "stash_plugin"
     binary: stash_plugin
     tags:
@@ -38,6 +52,10 @@ builds:
     ignore:
       - goos: windows
         goarch: arm64
+      - goos: windows
+        goarch: ppc64le
+      - goos: darwin
+        goarch: ppc64le
 
 archives:
   - replacements:
