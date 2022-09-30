@@ -17,7 +17,6 @@ builds:
       - windows
       - darwin
     goarch:
-      - "386"
       - "amd64"
       - "arm64"
       - "ppc64le"
@@ -41,7 +40,6 @@ builds:
       - windows
       - darwin
     goarch:
-      - "386"
       - "amd64"
       - "arm64"
       - "ppc64le"
@@ -62,7 +60,7 @@ archives:
       darwin: Darwin
       linux: Linux
       windows: Windows
-      386: i386
+      # 386: i386
       amd64: x86_64
     format_overrides:
       - goos: windows
