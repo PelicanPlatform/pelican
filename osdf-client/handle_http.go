@@ -165,6 +165,9 @@ func download_http(source string, destination string, payload *payloadStruct, na
 			ret := fmt.Sprintf("Unrecoverable error (panic) occurred in download_http: %v", r)
 			err = errors.New(ret)
 			bytesTransferred = 0
+
+			// Attempt to add the panic to the error accumulator
+			AddError(errors.New(ret))
 		}
 	}()
 
