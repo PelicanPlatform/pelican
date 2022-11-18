@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"math/rand"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -89,23 +90,47 @@ func GetBestStashcache(cacheListName string) ([]string, error) {
 		for _, ip := range get_ips(cur_site) {
 			GeoIpUrl.Host = ip
 			GeoIpUrl.Scheme = "http"
-			log.Debugln("Querying", GeoIpUrl.String())
 
 			// Headers for the HTTP request
 			// Create an HTTP client
-			client := &http.Client{}
-			req, err := http.NewRequest("GET", GeoIpUrl.String(), nil)
-			if err != nil {
-				log.Errorln("Failed to create HTTP request:", err)
-				continue
-			}
-			req.Header.Add("Cache-control", "max-age=0")
-			req.Header.Add("User-Agent", "user_agent")
-			resp, err := client.Do(req)
-			if err != nil {
+			var resp *http.Response
+			disableProxy := false
+			skipResponse := false
+			for {
+				defaultTransport := http.DefaultTransport.(*http.Transport).Clone()
+				if (disableProxy) {
+					log.Debugln("Querying (without proxy)", GeoIpUrl.String())
+					defaultTransport.Proxy = nil
+				} else {
+					log.Debugln("Querying", GeoIpUrl.String())
+				}
+				client := &http.Client{Transport: defaultTransport}
+				req, err := http.NewRequest("GET", GeoIpUrl.String(), nil)
+				if err != nil {
+					log.Errorln("Failed to create HTTP request:", err)
+					skipResponse = true
+					break
+				}
+				req.Header.Add("Cache-control", "max-age=0")
+				req.Header.Add("User-Agent", "user_agent")
+				resp, err = client.Do(req)
+				if err == nil {
+					break
+				}
+				if urle, ok := err.(*url.Error); ok && urle.Unwrap() != nil {
+					if ope, ok := urle.Unwrap().(*net.OpError); ok && ope.Op == "proxyconnect" {
+						log.Warnln("Failed to connect to proxy; will retry without. ", ope)
+						if !disableProxy {
+							disableProxy = true
+							continue
+						}
+					}
+				}
 				log.Errorln("Could not open URL", err)
-				continue
+				skipResponse = true
+				break
 			}
+			if skipResponse {continue;}
 
 			if resp.StatusCode == 200 {
 				log.Debugf("Got OK code 200 from %s", cur_site)
