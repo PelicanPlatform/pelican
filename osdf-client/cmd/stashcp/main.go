@@ -6,8 +6,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/jessevdk/go-flags"
 	stashcp "github.com/htcondor/osdf-client/v6"
+	"github.com/jessevdk/go-flags"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -77,6 +77,8 @@ var parser = flags.NewParser(&options, flags.Default)
 
 func main() {
 
+	stashcp.Options.Version = version
+	
 	// Capture the start time of the transfer
 	if _, err := parser.Parse(); err != nil {
 		if flagsErr, ok := err.(*flags.Error); ok && flagsErr.Type == flags.ErrHelp {

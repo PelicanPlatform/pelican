@@ -32,6 +32,7 @@ func main() {
 	// Set the options
 	stashcp.Options.Recursive = false
 	stashcp.Options.ProgressBars = false
+	stashcp.Options.Version = version
 	if err := setLogging(log.PanicLevel); err != nil {
 		log.Panicln("Failed to set log level")
 	}

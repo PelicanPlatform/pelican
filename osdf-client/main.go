@@ -30,6 +30,7 @@ type OptionsStruct struct {
 	ProgressBars bool
 	Recursive    bool
 	Token        string
+	Version      string
 }
 
 var Options OptionsStruct
