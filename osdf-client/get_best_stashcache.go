@@ -98,7 +98,7 @@ func GetBestStashcache(cacheListName string) ([]string, error) {
 			skipResponse := false
 			for {
 				defaultTransport := http.DefaultTransport.(*http.Transport).Clone()
-				if (disableProxy) {
+				if disableProxy {
 					log.Debugln("Querying (without proxy)", GeoIpUrl.String())
 					defaultTransport.Proxy = nil
 				} else {
@@ -112,7 +112,7 @@ func GetBestStashcache(cacheListName string) ([]string, error) {
 					break
 				}
 				req.Header.Add("Cache-control", "max-age=0")
-				req.Header.Add("User-Agent", "user_agent")
+				req.Header.Add("User-Agent", "stashcp/"+Options.Version)
 				resp, err = client.Do(req)
 				if err == nil {
 					break
@@ -130,7 +130,9 @@ func GetBestStashcache(cacheListName string) ([]string, error) {
 				skipResponse = true
 				break
 			}
-			if skipResponse {continue;}
+			if skipResponse {
+				continue
+			}
 
 			if resp.StatusCode == 200 {
 				log.Debugf("Got OK code 200 from %s", cur_site)
