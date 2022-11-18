@@ -3,6 +3,7 @@ package stashcp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -155,7 +156,21 @@ type TransferResults struct {
 	Downloaded int64
 }
 
-func download_http(source string, destination string, payload *payloadStruct, namespace Namespace, recursive bool) (int64, error) {
+func download_http(source string, destination string, payload *payloadStruct, namespace Namespace, recursive bool) (bytesTransferred int64, err error) {
+
+	// First, create a handler for any panics that occur
+	defer func() {
+		if r := recover(); r != nil {
+			log.Errorln("Panic occurred in download_http:", r)
+			ret := fmt.Sprintf("Unrecoverable error (panic) occurred in download_http: %v", r)
+			err = errors.New(ret)
+			bytesTransferred = 0
+
+			// Attempt to add the panic to the error accumulator
+			AddError(errors.New(ret))
+		}
+	}()
+
 	// Generate the downloadUrl
 	var token string
 	if namespace.UseTokenOnRead {

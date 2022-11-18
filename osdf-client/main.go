@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -180,7 +181,20 @@ func getToken() (string, error) {
 }
 
 // Start the transfer, whether read or write back
-func DoStashCPSingle(sourceFile string, destination string, methods []string, recursive bool) (int64, error) {
+func DoStashCPSingle(sourceFile string, destination string, methods []string, recursive bool) (bytesTransferred int64, err error) {
+
+	// First, create a handler for any panics that occur
+	defer func() {
+		if r := recover(); r != nil {
+			log.Errorln("Panic captured while attempting to perform transfer (DoStashCPSingle):", r)
+			ret := fmt.Sprintf("Unrecoverable error (panic) captured in DoStashCPSingle: %v", r)
+			err = errors.New(ret)
+			bytesTransferred = 0
+
+			// Attempt to add the panic to the error accumulator
+			AddError(errors.New(ret))
+		}
+	}()
 
 	// Parse the source and destination with URL parse
 
