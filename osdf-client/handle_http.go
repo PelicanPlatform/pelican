@@ -222,7 +222,12 @@ func download_http(source string, destination string, payload *payloadStruct, na
 		log.Debugln("Cache:", cache)
 		transfers = append(transfers, NewTransferDetails(cache, namespace.ReadHTTPS || namespace.UseTokenOnRead)...)
 	}
-	log.Debugln("Transfers:", transfers[0].Url.Opaque)
+	if len(transfers) > 0 {
+		log.Debugln("Transfers:", transfers[0].Url.Opaque)
+	} else {
+		log.Debugln("No transfers possible as no caches are found")
+		return 0, errors.New("No transfers possible as no caches are found")
+	}
 	// Create the wait group and the transfer files
 	var wg sync.WaitGroup
 
