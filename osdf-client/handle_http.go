@@ -802,6 +802,8 @@ func walkDir(path string, client *gowebdav.Client) ([]string, error) {
 
 func stat_http(dest *url.URL, namespace Namespace) (uint64, error) {
 
+	token_name := getTokenName(dest)
+
 	// Parse the writeback host as a URL
 	writebackhostUrl, err := url.Parse(namespace.WriteBackHost)
 	if err != nil {
@@ -812,7 +814,7 @@ func stat_http(dest *url.URL, namespace Namespace) (uint64, error) {
 
 	var token string
 	if namespace.UseTokenOnRead {
-		token, err = getToken()
+		token, err = getToken(token_name)
 		if err != nil {
 			log.Errorln("Failed to get token though required to read from this namespace:", err)
 			return 0, err

@@ -142,7 +142,8 @@ func main() {
 			} else {
 					// Replace the osdf:// prefix with the local mount path
 				source_uri, err := url.Parse(source)
-				if err != nil && source_uri.Scheme == "osdf" {
+				source_uri_scheme := strings.SplitN(source_uri.Scheme, "+", 2)[0]
+				if err != nil && source_uri_scheme == "osdf" {
 					source_path := path.Clean("/" + source_uri.Path)
 					if (strings.HasPrefix(source_path, originPrefixPath)) {
 						sources = append(sources, options.MountPrefix + source_path[len(originPrefixPath):])
