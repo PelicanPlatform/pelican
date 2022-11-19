@@ -27,14 +27,14 @@ import (
 //
 //   and then running it through a SHA256 sum to produce a digest.
 //
-//   The hex digest of the SHA256 sum is returned
-func unique_hash(filePath string) (string, error) {
+//   The hex digest of the SHA256 sum is returned along with the file size
+func unique_hash(filePath string) (string, uint64, error) {
 	log.Debugf("Creating a unique hash for filename %s", filePath)
 
 	st, err := os.Stat(filePath)
 	if err != nil {
 		log.Debugln("Error while stat'ing file for metadata:", err)
-		return "", err;
+		return "", 0, err;
 	}
 
 	digest := sha256.New()
@@ -44,9 +44,9 @@ func unique_hash(filePath string) (string, error) {
 	buf := new(bytes.Buffer)
 	if err := binary.Write(buf, binary.BigEndian, time.Now().Unix()/86400); err != nil {
 		log.Debugln("Error while writing current Unix time to buffer:", err)
-		return "", err;
+		return "", 0, err;
 	}
 	digest.Write(buf.Bytes())
 
-	return fmt.Sprintf("%x", digest.Sum(nil)), nil
+	return fmt.Sprintf("%x", digest.Sum(nil)), uint64(st.Size()), nil
 }
