@@ -80,10 +80,20 @@ type payloadStruct struct {
 	parser.add_option('-t', '--token', dest='token', help="Token file to use for reading and/or writing")
 */
 
+// Determine the token name if it is embedded in the scheme, Condor-style
+func getTokenName(destination *url.URL) (tokenName string) {
+	schemePieces := strings.SplitN(destination.Scheme, "+", 2)
+	tokenName = ""
+	if len(schemePieces) > 1 {
+		tokenName = schemePieces[1]
+	}
+	return
+}
+
 // Do writeback to stash using SciTokens
 func doWriteBack(source string, destination *url.URL, namespace Namespace) (int64, error) {
 
-	scitoken_contents, err := getToken()
+	scitoken_contents, err := getToken(getTokenName(destination))
 	if err != nil {
 		return 0, err
 	}
@@ -91,7 +101,7 @@ func doWriteBack(source string, destination *url.URL, namespace Namespace) (int6
 
 }
 
-func getToken() (string, error) {
+func getToken(token_name string) (string, error) {
 
 	type tokenJson struct {
 		AccessKey string `json:"access_token"`
@@ -145,16 +155,22 @@ func getToken() (string, error) {
 				token_location = tokenFile
 			}
 		}
+
+		// Finally, look in the HTCondor runtime
+		token_filename := "scitokens.use"
+		if len(token_name) > 0 {
+			token_filename = token_name + ".use"
+		}
 		if credsDir, isCondorCredsSet := os.LookupEnv("_CONDOR_CREDS"); token_location == "" && isCondorCredsSet {
 			// Token wasn't specified on the command line or environment, try the default scitoken
-			if _, err := os.Stat(filepath.Join(credsDir, "scitokens.use")); err != nil {
+			if _, err := os.Stat(filepath.Join(credsDir, token_filename)); err != nil {
 				log.Warningln("Environment variable _CONDOR_CREDS is set, but file being point to does not exist:", err)
 			} else {
-				token_location = filepath.Join(credsDir, "scitokens.use")
+				token_location = filepath.Join(credsDir, token_filename)
 			}
 		}
-		if _, err := os.Stat(".condor_creds/scitokens.use"); err == nil && token_location == "" {
-			token_location, _ = filepath.Abs(".condor_creds/scitokens.use")
+		if _, err := os.Stat(".condor_creds/" + token_filename); err == nil && token_location == "" {
+			token_location, _ = filepath.Abs(".condor_creds/" + token_filename)
 		}
 		if token_location == "" {
 			// Print out, can't find token!  Print out error and exit with non-zero exit status
@@ -211,15 +227,18 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 		return 0, err
 	}
 
+	source_scheme_pieces := strings.SplitN(source_url.Scheme, "+", 2)
+	dest_scheme_pieces := strings.SplitN(dest_url.Scheme, "+", 2)
+
 	understoodSchemes := []string{"stash", "file", "osdf", ""}
 
-	_, foundSource := Find(understoodSchemes, source_url.Scheme)
+	_, foundSource := Find(understoodSchemes, source_scheme_pieces[0])
 	if !foundSource {
 		log.Errorln("Do not understand source scheme:", source_url.Scheme)
 		return 0, errors.New("Do not understand source scheme")
 	}
 
-	_, foundDest := Find(understoodSchemes, source_url.Scheme)
+	_, foundDest := Find(understoodSchemes, dest_scheme_pieces[0])
 	if !foundDest {
 		log.Errorln("Do not understand destination scheme:", source_url.Scheme)
 		return 0, errors.New("Do not understand destination scheme")
@@ -229,7 +248,7 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 	// For write back, it will be the destination
 	// For read it will be the source.
 
-	if dest_url.Scheme == "stash" || dest_url.Scheme == "osdf" {
+	if dest_scheme_pieces[0] == "stash" || dest_scheme_pieces[0] == "osdf" {
 		log.Debugln("Detected writeback")
 		ns, err := MatchNamespace(dest_url.Path)
 		if err != nil {
@@ -242,7 +261,7 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 		destination = dest_url.Path
 	}
 
-	if source_url.Scheme == "stash" || source_url.Scheme == "osdf" {
+	if source_scheme_pieces[0] == "stash" || source_scheme_pieces[0]== "osdf" {
 		sourceFile = source_url.Path
 	}
 
@@ -292,6 +311,8 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 		methods = []string{"http"}
 	}
 
+	token_name := getTokenName(source_url)
+
 	// switch statement?
 	var downloaded int64 = 0
 Loop:
@@ -313,7 +334,7 @@ Loop:
 			}
 		case "http":
 			log.Info("Trying HTTP...")
-			if downloaded, err = download_http(sourceFile, destination, &payload, ns, recursive); err == nil {
+			if downloaded, err = download_http(sourceFile, destination, &payload, ns, recursive, token_name); err == nil {
 				success = true
 				break Loop
 			}
