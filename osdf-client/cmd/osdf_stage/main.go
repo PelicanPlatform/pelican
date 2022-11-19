@@ -2,9 +2,11 @@ package main
 
 import (
 	"fmt"
+	"net/url"
+	"os"
+	"path"
 	"regexp"
 	"strings"
-	"os"
 
 	"github.com/jessevdk/go-flags"
 	stashcp "github.com/htcondor/osdf-client/v6"
@@ -35,11 +37,14 @@ type Options struct {
 	// Progress bars
 	ProgessBars bool `long:"progress" short:"p" description:"Show progress bars, turned on if run from a terminal"`
 
-	// Prefix; e.g., /mnt/stash/
-	OriginPrefix string `long:"mount" short:"m" description:"Prefix corresponding to the local mount point of the origin"`
+	// Mount prefix; e.g., /mnt/stash/ospool/osgconnect
+	MountPrefix string `long:"mount" short:"m" description:"Prefix corresponding to the local mount point of the origin"`
+
+	// Origin prefix; e.g., osdf://ospool/osgconnect
+	OriginPrefix string `long:"origin-prefix" short:"o" description:"Prefix corresponding to the local origin"`
 
 	// Shadow origin prefix; e.g., osdf://ospool/osgconnect-shadow/
-	ShadowOriginPrefix string `long:"prefix" description:"Prefix corresponding to the shadow origin"`
+	ShadowOriginPrefix string `long:"shadow-prefix" short:"s" description:"Prefix corresponding to the shadow origin"`
 
 	// Sources to ingest
 	Sources []string `positional-arg-name:"sources" short:"i" long:"input" description:"Source file(s)" default:"-"`
@@ -74,6 +79,17 @@ func main() {
 		}
 
 	}
+
+	originPrefixUri, err := url.Parse(options.OriginPrefix)
+	if err != nil {
+		log.Errorln("Origin prefix must be a URL (osdf://...):", err)
+		os.Exit(1)
+	}
+	if originPrefixUri.Scheme != "osdf" {
+		log.Errorln("Origin prefix scheme must be osdf://:", originPrefixUri.Scheme)
+		os.Exit(1)
+	}
+	originPrefixPath := path.Clean("/" + originPrefixUri.Path)
 
 	if options.Version {
 		fmt.Println("Version:", version)
@@ -121,9 +137,18 @@ func main() {
 		}
 		re := regexp.MustCompile("[,\\s]+")
 		for _, source := range re.Split(inputListStr, -1) {
-			if (strings.HasPrefix(source, options.OriginPrefix)) {
+			if (strings.HasPrefix(source, options.MountPrefix)) {
 				sources = append(sources, source)
 			} else {
+					// Replace the osdf:// prefix with the local mount path
+				source_uri, err := url.Parse(source)
+				if err != nil && source_uri.Scheme == "osdf" {
+					source_path := path.Clean("/" + source_uri.Path)
+					if (strings.HasPrefix(source_path, originPrefixPath)) {
+						sources = append(sources, options.MountPrefix + source_path[len(originPrefixPath):])
+						continue
+					}
+				}
 				extraSources = append(extraSources, source)
 			}
 		}
@@ -141,7 +166,7 @@ func main() {
 	var result error
 	var xformSources []string
 	for _, src := range sources {
-		_, newSource, result := stashcp.DoShadowIngest(src, options.OriginPrefix, options.ShadowOriginPrefix)
+		_, newSource, result := stashcp.DoShadowIngest(src, options.MountPrefix, options.ShadowOriginPrefix)
 		if result != nil {
 			break
 		}
