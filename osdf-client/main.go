@@ -197,6 +197,58 @@ func getToken(token_name string) (string, error) {
 	return tokenParsed.AccessKey, nil
 }
 
+// Check the size of a remote file in an origin
+func CheckOSDF(destination string, methods []string) (remoteSize uint64, err error) {
+
+	defer func() {
+		if r := recover(); r != nil {
+			log.Errorln("Panic captured while attempting to perform size check:", r)
+			ret := fmt.Sprintf("Unrecoverable error (panic) while check file size: %v", r)
+			err = errors.New(ret)
+			remoteSize = 0
+		}
+	}()
+
+	dest_uri, err := url.Parse(destination)
+	if err != nil {
+		log.Errorln("Failed to parse destination URL")
+		return 0, err
+	}
+
+	understoodSchemes := []string{"osdf", ""}
+
+	_, foundSource := Find(understoodSchemes, dest_uri.Scheme)
+	if !foundSource {
+		log.Errorln("Unknown schema provided:", dest_uri.Scheme)
+		return 0, errors.New("Unsupported scheme requested")
+	}
+
+	if dest_uri.Scheme == "" {
+		dest_uri.Scheme = "osdf"
+	}
+
+	ns, err := MatchNamespace(dest_uri.Path)
+	if err != nil {
+		return 0, err
+	}
+
+	for _, method := range methods {
+
+		switch method {
+		case "http":
+			log.Info("Trying HTTP...")
+			if remoteSize, err = stat_http(dest_uri, ns); err == nil {
+				return remoteSize, nil
+			}
+		default:
+			log.Errorf("Unknown transfer method: %s", method)
+			return 0, errors.New("Unknown transfer method")
+		}
+	}
+	return 0, err
+}
+
+
 // Start the transfer, whether read or write back
 func DoStashCPSingle(sourceFile string, destination string, methods []string, recursive bool) (bytesTransferred int64, err error) {
 

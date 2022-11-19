@@ -54,6 +54,28 @@ builds:
         goarch: ppc64le
       - goos: darwin
         goarch: ppc64le
+  - env:
+      - CGO_ENABLED=0
+    main: ./cmd/osdf_stage
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - "amd64"
+      - "arm64"
+      - "ppc64le"
+    id: "osdf_stage"
+    binary: osdf_stage
+    tags:
+      - forceposix
+    ignore:
+      - goos: windows
+        goarch: arm64
+      - goos: windows
+        goarch: ppc64le
+      - goos: darwin
+        goarch: ppc64le
 
 archives:
   - replacements:

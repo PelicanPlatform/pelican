@@ -799,3 +799,87 @@ func walkDir(path string, client *gowebdav.Client) ([]string, error) {
 	}
 	return files, nil
 }
+
+func stat_http(dest *url.URL, namespace Namespace) (uint64, error) {
+
+	// Parse the writeback host as a URL
+	writebackhostUrl, err := url.Parse(namespace.WriteBackHost)
+	if err != nil {
+		return 0, err
+	}
+	dest.Host = writebackhostUrl.Host
+	dest.Scheme = "https"
+
+	var token string
+	if namespace.UseTokenOnRead {
+		token, err = getToken()
+		if err != nil {
+			log.Errorln("Failed to get token though required to read from this namespace:", err)
+			return 0, err
+		}
+	}
+
+	_, canDisableProxy := os.LookupEnv("OSG_DISABLE_PROXY_FALLBACK")
+	canDisableProxy = !canDisableProxy
+
+	disableProxy := false
+	var resp *http.Response
+	for {
+		defaultTransport := http.DefaultTransport.(*http.Transport).Clone()
+		if disableProxy {
+			log.Debugln("Performing HEAD (without proxy)", dest.String())
+			defaultTransport.Proxy = nil
+		} else {
+			log.Debugln("Performing HEAD", dest.String())
+		}
+
+		client := &http.Client{Transport: defaultTransport}
+		req, err := http.NewRequest("HEAD", dest.String(), nil)
+		if err != nil {
+			log.Errorln("Failed to create HTTP request:", err)
+			return 0, err
+		}
+
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer " + token)
+		}
+
+		resp, err = client.Do(req)
+		if err == nil {
+			break
+		}
+		if urle, ok := err.(*url.Error); canDisableProxy && !disableProxy && ok && urle.Unwrap() != nil {
+			if ope, ok := urle.Unwrap().(*net.OpError); ok && ope.Op == "proxyconnect" {
+				log.Warnln("Failed to connect to proxy; will retry without:", ope)
+				disableProxy = true
+				continue
+			}
+		}
+		log.Errorln("Failed to get HTTP response:", err)
+		return 0, err
+	}
+
+	if resp.StatusCode == 200 {
+		defer resp.Body.Close()
+		contentLengthStr := resp.Header.Get("Content-Length")
+		if len(contentLengthStr) == 0 {
+			log.Errorln("HEAD response did not include Content-Length header")
+			return 0, errors.New("HEAD response did not include Content-Length header")
+		}
+		contentLength, err := strconv.ParseInt(contentLengthStr, 10, 64)
+		if err != nil {
+			log.Errorln("Unable to parse Content-Length header value (%s) as integer: %s", contentLengthStr, err)
+			return 0, err
+		}
+		return uint64(contentLength), nil
+	} else {
+		response_b, err := io.ReadAll(resp.Body)
+		if err != nil {
+			log.Errorln("Failed to read error message:", err)
+			return 0, err
+		}
+		defer resp.Body.Close()
+		return 0, errors.New(fmt.Sprintf("Request failed (HTTP status %d): %s", resp.StatusCode, string(response_b)))
+	}
+}
+
