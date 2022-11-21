@@ -161,10 +161,11 @@ func MatchNamespace(path string) (Namespace, error) {
 			return Namespace{}, err
 		}
 	}
+	var best Namespace
 	for _, namespace := range namespaces {
-		if strings.HasPrefix(path, namespace.Path) {
-			return namespace, nil
+		if strings.HasPrefix(path, namespace.Path) && len(namespace.Path) > len(best.Path) {
+			best = namespace
 		}
 	}
-	return Namespace{}, nil
+	return best, nil
 }
