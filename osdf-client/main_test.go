@@ -1,14 +1,14 @@
 package stashcp
 
 import (
+	"github.com/stretchr/testify/assert"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
-
-	"github.com/stretchr/testify/assert"
 )
 
 // TestGetIps calls main.get_ips with a hostname, checking
@@ -110,4 +110,44 @@ func TestGetToken(t *testing.T) {
 	err = os.Chdir(currentDir)
 	assert.NoError(t, err)
 
+}
+
+// TestGetTokenName tests getTokenName
+func TestGetTokenName(t *testing.T) {
+	cases := []struct {
+		url  string
+		name string
+	}{
+		{"osdf://blah+asdf", ""},
+		{"stash://blah+asdf", ""},
+		{"file://blah+asdf", ""},
+		{"osdf+tokename://blah+asdf", "tokename"},
+		{"stash+tokename://blah+asdf", "tokename"},
+		{"file+tokename://blah+asdf", "tokename"},
+		{"osdf+tokename+tokename2://blah+asdf", "tokename+tokename2"},
+		{"stash+Token+tokename2://blah+asdf", "Token+tokename2"},
+	}
+	for _, c := range cases {
+		url, err := url.Parse(c.url)
+		assert.NoError(t, err)
+		assert.Equal(t, c.name, getTokenName(url))
+	}
+
+}
+
+func FuzzGetTokenName(f *testing.F) {
+	testcases := []string{"tokename", "tokename+tokename2"}
+	for _, tc := range testcases {
+		f.Add(tc) // Use f.Add to provide a seed corpus
+	}
+	f.Fuzz(func(t *testing.T, orig string) {
+		// Make sure it's a valid URL
+		url, err := url.Parse("osdf+" + orig + "://blah+asdf")
+		// If it's not a valid URL, then it's not a valid token name
+		if err != nil {
+			return
+		}
+		assert.NoError(t, err)
+		assert.Equal(t, orig, getTokenName(url))
+	})
 }
