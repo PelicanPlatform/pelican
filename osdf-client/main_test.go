@@ -125,7 +125,7 @@ func TestGetTokenName(t *testing.T) {
 		{"stash+tokename://blah+asdf", "tokename"},
 		{"file+tokename://blah+asdf", "tokename"},
 		{"osdf+tokename+tokename2://blah+asdf", "tokename+tokename2"},
-		{"stash+Token+tokename2://blah+asdf", "Token+tokename2"},
+		{"stash+token+tokename2://blah+asdf", "token+tokename2"},
 	}
 	for _, c := range cases {
 		url, err := url.Parse(c.url)
@@ -136,18 +136,19 @@ func TestGetTokenName(t *testing.T) {
 }
 
 func FuzzGetTokenName(f *testing.F) {
-	testcases := []string{"tokename", "tokename+tokename2"}
+	testcases := []string{"", "tokename", "tokename+tokename2"}
 	for _, tc := range testcases {
 		f.Add(tc) // Use f.Add to provide a seed corpus
 	}
 	f.Fuzz(func(t *testing.T, orig string) {
 		// Make sure it's a valid URL
-		url, err := url.Parse("osdf+" + orig + "://blah+asdf")
+		urlString := "osdf+" + orig + "://blah+asdf"
+		url, err := url.Parse(urlString)
 		// If it's not a valid URL, then it's not a valid token name
-		if err != nil {
+		if err != nil || url.Scheme == "" {
 			return
 		}
 		assert.NoError(t, err)
-		assert.Equal(t, orig, getTokenName(url))
+		assert.Equal(t, strings.ToLower(orig), getTokenName(url), "URL: "+urlString+"URL String: "+url.String()+" Scheme: "+url.Scheme)
 	})
 }
