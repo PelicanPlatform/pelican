@@ -151,7 +151,7 @@ func GetConfigContents() (OSDFConfig, error) {
 			}
 			if typedPassword {
 				if err := SavePassword(password); err != nil {
-					fmt.Fprintf(os.Stderr, "Failed to save password:", err)
+					fmt.Fprintln(os.Stderr, "Failed to save password:", err)
 				}
 			}
 			foundKey = true
@@ -188,7 +188,23 @@ func GetConfigContents() (OSDFConfig, error) {
 	return config, err
 }
 
-func SaveConfigContents(config *OSDFConfig) (error) {
+func ResetPassword() error {
+	input_config, err := GetConfigContents()
+	if err != nil {
+		return err
+	}
+	err = SaveConfigContents_internal(&input_config, true)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func SaveConfigContents(config *OSDFConfig) error {
+	return SaveConfigContents_internal(config, false)
+}
+
+func SaveConfigContents_internal(config *OSDFConfig, forcePassword bool) error {
 	defaultConfig := OSDFConfig{}
 	if config == nil {
 		config = &defaultConfig
@@ -200,7 +216,7 @@ func SaveConfigContents(config *OSDFConfig) (error) {
 	}
 
 	password, err := TryGetPassword()
-	if len(password) == 0 || err != nil {
+	if forcePassword || len(password) == 0 || err != nil {
 		password, err = GetPassword()
 		if err != nil {
 			return err
