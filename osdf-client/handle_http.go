@@ -156,7 +156,7 @@ type TransferResults struct {
 	Downloaded int64
 }
 
-func download_http(source string, destination string, payload *payloadStruct, namespace Namespace, recursive bool) (bytesTransferred int64, err error) {
+func download_http(source string, destination string, payload *payloadStruct, namespace Namespace, recursive bool, tokenName string) (bytesTransferred int64, err error) {
 
 	// First, create a handler for any panics that occur
 	defer func() {
@@ -175,7 +175,7 @@ func download_http(source string, destination string, payload *payloadStruct, na
 	var token string
 	if namespace.UseTokenOnRead {
 		var err error
-		token, err = getToken()
+		token, err = getToken(tokenName)
 		if err != nil {
 			log.Errorln("Failed to get token though required to read from this namespace:", err)
 			return 0, err
@@ -396,6 +396,7 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 			return 0, &ConnectionSetupError{Err: err}
 		}
 	}
+
 	var progressBar *mpb.Bar
 	if Options.ProgressBars {
 		progressBar = p.AddBar(0,
