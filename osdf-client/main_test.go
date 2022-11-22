@@ -126,6 +126,8 @@ func TestGetTokenName(t *testing.T) {
 		{"file+tokename://blah+asdf", "tokename"},
 		{"osdf+tokename+tokename2://blah+asdf", "tokename+tokename2"},
 		{"stash+token+tokename2://blah+asdf", "token+tokename2"},
+		{"stash+token.use://blah+asdf", "token.use"},
+		{"stash+token.blah.asdf://blah+asdf", "token.blah.asdf"},
 	}
 	for _, c := range cases {
 		url, err := url.Parse(c.url)
