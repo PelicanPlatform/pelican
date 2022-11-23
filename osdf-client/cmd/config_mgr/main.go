@@ -45,7 +45,7 @@ func addConfigSubcommands(configCmd *cobra.Command) {
 	})
 
 	configCmd.AddCommand(&cobra.Command{
-		Use:   "replace",
+		Use:   "replace <file>",
 		Short: "Replace the configuration file",
 		Long:  "Replace the configuration file",
 		Args:  cobra.MinimumNArgs(1),
@@ -190,7 +190,7 @@ func addPrefixSubcommands(prefixCmd *cobra.Command) {
 	})
 
 	prefixCmd.AddCommand(&cobra.Command{
-		Use:   "delete",
+		Use:   "delete <prefix>",
 		Short: "Delete the oauth client",
 		Long:  "Delete the oauth client",
 		Args:  cobra.ExactArgs(1),
