@@ -2,14 +2,14 @@ package config
 
 import (
 	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/sha512"
 	"crypto/x509"
-	"crypto/rand"
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"path"
 	"os"
+	"path"
 
 	"github.com/youmark/pkcs8"
 	"golang.org/x/crypto/curve25519"
@@ -35,11 +35,14 @@ func GetEncryptedContents() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	
+
 	buf, err := os.ReadFile(filename)
 	if err != nil {
 		if _, ok := err.(*os.PathError); ok {
-			os.MkdirAll(path.Dir(filename), 0700)
+			err := os.MkdirAll(path.Dir(filename), 0700)
+			if err != nil {
+				return "", err
+			}
 			if fp, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY, 0600); err == nil {
 				defer fp.Close()
 			}
@@ -50,14 +53,17 @@ func GetEncryptedContents() (string, error) {
 	return string(buf), nil
 }
 
-func SaveEncryptedContents(encContents []byte) (error) {
+func SaveEncryptedContents(encContents []byte) error {
 	filename, err := GetEncryptedConfigName()
 	if err != nil {
 		return err
 	}
 
 	configDir := path.Dir(filename)
-	os.MkdirAll(configDir, 0700)
+	err = os.MkdirAll(configDir, 0700)
+	if err != nil {
+		return err
+	}
 	fp, err := os.CreateTemp(configDir, "oauth2-client.pem")
 	if err != nil {
 		return err
@@ -79,7 +85,7 @@ func SaveEncryptedContents(encContents []byte) (error) {
 	return nil
 }
 
-func ConvertX25519Key(ed25519_sk []byte) ([32]byte) {
+func ConvertX25519Key(ed25519_sk []byte) [32]byte {
 	hashed_sk := sha512.Sum512(ed25519_sk)
 	hashed_sk[0] &= 248
 	hashed_sk[31] &= 127
@@ -102,7 +108,12 @@ func GetPassword() ([]byte, error) {
 		return nil, err
 	}
 	defer fmt.Fprintf(os.Stderr, "\n")
-	defer term.Restore(stdin, oldState)
+	defer func(fd int, oldState *term.State) {
+		err := term.Restore(fd, oldState)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error restoring terminal state: %v\n", err)
+		}
+	}(stdin, oldState)
 	return term.ReadPassword(stdin)
 }
 
@@ -230,6 +241,9 @@ func SaveConfigContents_internal(config *OSDFConfig, forcePassword bool) error {
 
 	x25519_sk := ConvertX25519Key(ed25519_sk)
 	x25519_pk_slice, err := curve25519.X25519(x25519_sk[:], curve25519.Basepoint)
+	if err != nil {
+		return err
+	}
 	var x25519_pk [32]byte
 	copy(x25519_pk[:], x25519_pk_slice)
 
@@ -252,7 +266,7 @@ func SaveConfigContents_internal(config *OSDFConfig, forcePassword bool) error {
 		return err
 	}
 
-	pem_block := pem.Block{Type:"ENCRYPTED PRIVATE KEY", Bytes:key_bytes}
+	pem_block := pem.Block{Type: "ENCRYPTED PRIVATE KEY", Bytes: key_bytes}
 	if len(password) == 0 {
 		pem_block.Type = "PRIVATE KEY"
 	}
