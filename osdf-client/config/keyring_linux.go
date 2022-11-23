@@ -1,3 +1,4 @@
+//go:build linux && amd64
 // +build linux,amd64
 
 package config
@@ -25,7 +26,7 @@ func TryGetPassword() ([]byte, error) {
 	return data, nil
 }
 
-func SavePassword(password []byte) (error) {
+func SavePassword(password []byte) error {
 	keyring, err := keyctl.SessionKeyring()
 	if err != nil {
 		return err
@@ -34,7 +35,9 @@ func SavePassword(password []byte) (error) {
 	if err != nil {
 		return err
 	}
-	key.ExpireAfter(3600)
+	err = key.ExpireAfter(3600)
+	if err != nil {
+		return err
+	}
 	return nil
 }
-
