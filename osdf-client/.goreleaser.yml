@@ -20,6 +20,28 @@ builds:
       - "amd64"
       - "arm64"
       - "ppc64le"
+    id: "config_mgr"
+    dir: ./cmd/config_mgr
+    binary: osdf_config_mgr
+    tags:
+      - forceposix
+    ignore:
+      - goos: windows
+        goarch: arm64
+      - goos: windows
+        goarch: ppc64le
+      - goos: darwin
+        goarch: ppc64le
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - "amd64"
+      - "arm64"
+      - "ppc64le"
     id: "stashcp"
     dir: ./cmd/stashcp
     binary: stashcp
