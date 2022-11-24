@@ -93,7 +93,7 @@ func getTokenName(destination *url.URL) (tokenName string) {
 // Do writeback to stash using SciTokens
 func doWriteBack(source string, destination *url.URL, namespace Namespace) (int64, error) {
 
-	scitoken_contents, err := getToken(destination, namespace)
+	scitoken_contents, err := getToken(destination, namespace, true)
 	if err != nil {
 		return 0, err
 	}
@@ -101,7 +101,7 @@ func doWriteBack(source string, destination *url.URL, namespace Namespace) (int6
 
 }
 
-func getToken(destination *url.URL, namespace Namespace) (string, error) {
+func getToken(destination *url.URL, namespace Namespace, isWrite bool) (string, error) {
 	token_name := getTokenName(destination)
 
 	type tokenJson struct {
@@ -174,7 +174,7 @@ func getToken(destination *url.URL, namespace Namespace) (string, error) {
 			token_location, _ = filepath.Abs(".condor_creds/" + token_filename)
 		}
 		if token_location == "" {
-			value, err := acquireToken(destination, namespace)
+			value, err := AcquireToken(destination, namespace, isWrite)
 			if err == nil {
 				return value, nil
 			} else {
