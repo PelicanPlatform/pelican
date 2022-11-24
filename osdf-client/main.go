@@ -93,7 +93,7 @@ func getTokenName(destination *url.URL) (tokenName string) {
 // Do writeback to stash using SciTokens
 func doWriteBack(source string, destination *url.URL, namespace Namespace) (int64, error) {
 
-	scitoken_contents, err := getToken(getTokenName(destination))
+	scitoken_contents, err := getToken(destination, namespace)
 	if err != nil {
 		return 0, err
 	}
@@ -101,7 +101,8 @@ func doWriteBack(source string, destination *url.URL, namespace Namespace) (int6
 
 }
 
-func getToken(token_name string) (string, error) {
+func getToken(destination *url.URL, namespace Namespace) (string, error) {
+	token_name := getTokenName(destination)
 
 	type tokenJson struct {
 		AccessKey string `json:"access_token"`
@@ -173,6 +174,13 @@ func getToken(token_name string) (string, error) {
 			token_location, _ = filepath.Abs(".condor_creds/" + token_filename)
 		}
 		if token_location == "" {
+			value, err := acquireToken(destination, namespace)
+			if err == nil {
+				return value, nil
+			} else {
+				log.Warning("Failed to acquire token via OAuth:", err)
+			}
+
 			// Print out, can't find token!  Print out error and exit with non-zero exit status
 			// TODO: Better error message
 			log.Errorln("Unable to find token file")

@@ -16,7 +16,7 @@ type PrefixEntry struct {
 	Prefix       string `yaml:"prefix"`
 	ClientID     string `yaml:"client_id"`
 	ClientSecret string `yaml:"client_secret"`
-	Tokens       struct {
+	Tokens     []struct {
 		Expiration   int64  `yaml:"expiration"`
 		AccessToken  string `yaml:"access_token"`
 		RefreshToken string `yaml:"refresh_token,omitempty"`

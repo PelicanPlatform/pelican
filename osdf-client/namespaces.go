@@ -37,6 +37,7 @@ type Cache struct {
 type Namespace struct {
 	Caches         []Cache `json:"caches"`
 	Path           string  `json:"path"`
+	Issuer         string  `json:"issuer"`
 	ReadHTTPS      bool    `json:"readhttps"`
 	UseTokenOnRead bool    `json:"usetokenonread"`
 	WriteBackHost  string  `json:"writebackhost"`
