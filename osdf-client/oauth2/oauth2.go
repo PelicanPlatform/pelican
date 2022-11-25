@@ -61,11 +61,14 @@ func AcquireToken(issuerUrl string, entry *config.PrefixEntry, osdfPath string, 
 
 	if len(deviceAuth.VerificationURIComplete) > 0 {
 		fmt.Fprintln(os.Stdin, "To approve credentials for this operation, please navigate to the following URL and approve the request:")
+		fmt.Fprintln(os.Stdin, "")
 		fmt.Fprintln(os.Stdin, deviceAuth.VerificationURIComplete)
 	} else {
-		fmt.Fprintln(os.Stdin, "To approve credentials for this operation, please navigate to the following URL:\n")
+		fmt.Fprintln(os.Stdin, "To approve credentials for this operation, please navigate to the following URL:")
+		fmt.Fprintln(os.Stdin, "")
 		fmt.Fprintln(os.Stdin, deviceAuth.VerificationURIComplete)
-		fmt.Fprintln(os.Stdin, "\nand enter the following code\n")
+		fmt.Fprintln(os.Stdin, "\nand enter the following code")
+		fmt.Fprintln(os.Stdin, "")
 		fmt.Fprintln(os.Stdin, deviceAuth.UserCode)
 	}
 

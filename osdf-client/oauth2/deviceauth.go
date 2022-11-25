@@ -47,7 +47,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"mime"
 	"net/http"
 	"net/url"
@@ -71,7 +70,7 @@ const (
 type DeviceAuth struct {
 	DeviceCode              string `json:"device_code"`
 	UserCode                string `json:"user_code"`
-	VerificationURI         string `json:"verification_uri,verification_url"`
+	VerificationURI         string `json:"verification_uri"`
 	VerificationURIComplete string `json:"verification_uri_complete,omitempty"`
 	ExpiresIn               int    `json:"expires_in"`
 	Interval                int    `json:"interval,omitempty"`
@@ -113,7 +112,7 @@ func retrieveDeviceAuth(ctx context.Context, c *Config, v url.Values) (*DeviceAu
 		return nil, err
 	}
 
-	body, err := ioutil.ReadAll(io.LimitReader(r.Body, 1<<20))
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {
 		return nil, fmt.Errorf("oauth2: cannot auth device: %v", err)
 	}
@@ -210,7 +209,7 @@ func doTokenRoundTrip(ctx context.Context, req *http.Request) (*oauth2_upstream.
 	if err != nil {
 		return nil, err
 	}
-	body, err := ioutil.ReadAll(io.LimitReader(r.Body, 1<<20))
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	r.Body.Close()
 	if err != nil {
 		return nil, fmt.Errorf("oauth2: cannot fetch token: %v", err)
