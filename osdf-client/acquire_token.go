@@ -82,6 +82,9 @@ func TokenIsExpired(jwtSerialized string) bool {
 
 func RegisterClient(namespace Namespace) (*config.PrefixEntry, error) {
 	issuer, err := oauth2.GetIssuerMetadata(namespace.Issuer)
+	if err != nil {
+		return nil, err
+	}
 	if issuer.RegistrationURL == "" {
 		return nil, fmt.Errorf("Issuer %s does not support dynamic client registration", namespace.Issuer)
 	}
