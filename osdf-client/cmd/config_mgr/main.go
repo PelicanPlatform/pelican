@@ -279,9 +279,6 @@ func main() {
 		Use:   "prefix",
 		Short: "Manage the prefix configuration",
 		Long:  "Manage the prefix configuration",
-		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println(args)
-		},
 	}
 	addPrefixSubcommands(prefixCmd)
 

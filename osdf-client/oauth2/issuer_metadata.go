@@ -13,6 +13,7 @@ type OauthIssuer struct {
 	AuthURL string `json:"authorization_endpoint"`
 	DeviceAuthURL string `json:"device_authorization_endpoint"`
 	TokenURL string `json:"token_endpoint"`
+	RegistrationURL string `json:"registration_endpoint"`
 	GrantTypes []string `json:"grant_types_supported"`
 }
 

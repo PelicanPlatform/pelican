@@ -4,6 +4,7 @@ go 1.16
 
 require (
 	github.com/cavaliercoder/grab v2.0.0+incompatible
+	github.com/golang-jwt/jwt v3.2.2+incompatible
 	github.com/jessevdk/go-flags v1.5.0
 	github.com/jsipprell/keyctl v1.0.4-0.20211208153515-36ca02672b6c
 	github.com/sirupsen/logrus v1.8.1

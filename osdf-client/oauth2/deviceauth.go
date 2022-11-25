@@ -57,6 +57,7 @@ import (
 
 	"golang.org/x/net/context/ctxhttp"
 	oauth2_upstream "golang.org/x/oauth2"
+	log "github.com/sirupsen/logrus"
 )
 
 const (
@@ -64,6 +65,7 @@ const (
 	errSlowDown             = "slow_down"
 	errAccessDenied         = "access_denied"
 	errExpiredToken         = "expired_token"
+	errInvalidScope         = "invalid_scope"
 )
 
 type DeviceAuth struct {
@@ -213,6 +215,8 @@ func doTokenRoundTrip(ctx context.Context, req *http.Request) (*oauth2_upstream.
 	if err != nil {
 		return nil, fmt.Errorf("oauth2: cannot fetch token: %v", err)
 	}
+	log.Debugf("Token round trip response code: %v", r.StatusCode)
+	log.Debugf("Token round trip body: %s", body)
 	if code := r.StatusCode; code < 200 || code > 299 {
 		return nil, &oauth2_upstream.RetrieveError{
 			Response: r,
@@ -277,6 +281,7 @@ func (c *Config) Poll(ctx context.Context, da *DeviceAuth) (*oauth2_upstream.Tok
 	for {
 		time.Sleep(time.Duration(interval) * time.Second)
 
+		log.Debugf("After sleep of %v seconds, attempting to retrieve token.", interval)
 		tok, err := RetrieveToken(ctx, c.ClientID, c.ClientSecret, c.Endpoint.TokenURL, v)
 		if err == nil {
 			return tok, nil
@@ -284,13 +289,17 @@ func (c *Config) Poll(ctx context.Context, da *DeviceAuth) (*oauth2_upstream.Tok
 
 		errTyp := parseError(err)
 		switch errTyp {
-		case errAccessDenied, errExpiredToken:
+		case errAccessDenied, errExpiredToken, errInvalidScope:
 			return tok, errors.New("oauth2: " + errTyp)
 
 		case errSlowDown:
 			interval += 1
-			fallthrough
+			log.Debugf("Remote server requested we slow down; set poll interval to %v seconds", interval)
 		case errAuthorizationPending:
+			log.Debugf("Remote server responded that our authorization is pending")
+
+		default:
+			return tok, err
 		}
 	}
 }

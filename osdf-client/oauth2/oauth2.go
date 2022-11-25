@@ -11,6 +11,15 @@ import (
 	config "github.com/htcondor/osdf-client/v6/config"
 )
 
+func deviceCodeSupported(grantTypes *[]string) bool {
+	for _, grant := range *grantTypes {
+		if grant == "urn:ietf:params:oauth:grant-type:device_code" {
+			return true
+		}
+	}
+	return false
+}
+
 func AcquireToken(issuerUrl string, entry *config.PrefixEntry, osdfPath string, isWrite bool) (*config.TokenEntry, error) {
 
 	if fileInfo, _ := os.Stdout.Stat(); (fileInfo.Mode() & os.ModeCharDevice) == 0 {
@@ -20,6 +29,10 @@ func AcquireToken(issuerUrl string, entry *config.PrefixEntry, osdfPath string, 
 	issuerInfo, err := GetIssuerMetadata(issuerUrl)
 	if err != nil {
 		return nil, err
+	}
+
+	if !deviceCodeSupported(&issuerInfo.GrantTypes) {
+		return nil, fmt.Errorf("Issuer at %s for prefix %s does not support device flow", issuerUrl, entry.Prefix)
 	}
 
 	pathCleaned := path.Clean(osdfPath)[len(entry.Prefix):]
