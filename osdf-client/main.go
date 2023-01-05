@@ -81,11 +81,15 @@ type payloadStruct struct {
 */
 
 // Determine the token name if it is embedded in the scheme, Condor-style
-func getTokenName(destination *url.URL) (tokenName string) {
-	schemePieces := strings.SplitN(destination.Scheme, "+", 2)
+func getTokenName(destination *url.URL) (scheme, tokenName string) {
+	schemePieces := strings.Split(destination.Scheme, "+")
 	tokenName = ""
+	scheme = ""
+	// Scheme is always the last piece
+	scheme = schemePieces[len(schemePieces)-1]
+	// If there are 2 or more pieces, token name is everything but the last item, joined with a +
 	if len(schemePieces) > 1 {
-		tokenName = schemePieces[1]
+		tokenName = strings.Join(schemePieces[:len(schemePieces)-1], "+")
 	}
 	return
 }
@@ -93,7 +97,9 @@ func getTokenName(destination *url.URL) (tokenName string) {
 // Do writeback to stash using SciTokens
 func doWriteBack(source string, destination *url.URL, namespace Namespace) (int64, error) {
 
-	scitoken_contents, err := getToken(getTokenName(destination))
+	// Get the token name from the scheme
+	_, tokenName := getTokenName(destination)
+	scitoken_contents, err := getToken(tokenName)
 	if err != nil {
 		return 0, err
 	}
@@ -227,18 +233,18 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 		return 0, err
 	}
 
-	source_scheme_pieces := strings.SplitN(source_url.Scheme, "+", 2)
-	dest_scheme_pieces := strings.SplitN(dest_url.Scheme, "+", 2)
+	sourceScheme, _ := getTokenName(source_url)
+	destScheme, _ := getTokenName(dest_url)
 
 	understoodSchemes := []string{"stash", "file", "osdf", ""}
 
-	_, foundSource := Find(understoodSchemes, source_scheme_pieces[0])
+	_, foundSource := Find(understoodSchemes, sourceScheme)
 	if !foundSource {
 		log.Errorln("Do not understand source scheme:", source_url.Scheme)
 		return 0, errors.New("Do not understand source scheme")
 	}
 
-	_, foundDest := Find(understoodSchemes, dest_scheme_pieces[0])
+	_, foundDest := Find(understoodSchemes, destScheme)
 	if !foundDest {
 		log.Errorln("Do not understand destination scheme:", source_url.Scheme)
 		return 0, errors.New("Do not understand destination scheme")
@@ -248,7 +254,7 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 	// For write back, it will be the destination
 	// For read it will be the source.
 
-	if dest_scheme_pieces[0] == "stash" || dest_scheme_pieces[0] == "osdf" {
+	if destScheme == "stash" || destScheme == "osdf" {
 		log.Debugln("Detected writeback")
 		ns, err := MatchNamespace(dest_url.Path)
 		if err != nil {
@@ -261,7 +267,7 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 		destination = dest_url.Path
 	}
 
-	if source_scheme_pieces[0] == "stash" || source_scheme_pieces[0]== "osdf" {
+	if sourceScheme == "stash" || sourceScheme == "osdf" {
 		sourceFile = source_url.Path
 	}
 
@@ -311,7 +317,7 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 		methods = []string{"http"}
 	}
 
-	token_name := getTokenName(source_url)
+	_, token_name := getTokenName(source_url)
 
 	// switch statement?
 	var downloaded int64 = 0
