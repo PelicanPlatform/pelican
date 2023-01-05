@@ -115,24 +115,27 @@ func TestGetToken(t *testing.T) {
 // TestGetTokenName tests getTokenName
 func TestGetTokenName(t *testing.T) {
 	cases := []struct {
-		url  string
-		name string
+		url    string
+		name   string
+		scheme string
 	}{
-		{"osdf://blah+asdf", ""},
-		{"stash://blah+asdf", ""},
-		{"file://blah+asdf", ""},
-		{"osdf+tokename://blah+asdf", "tokename"},
-		{"stash+tokename://blah+asdf", "tokename"},
-		{"file+tokename://blah+asdf", "tokename"},
-		{"osdf+tokename+tokename2://blah+asdf", "tokename+tokename2"},
-		{"stash+token+tokename2://blah+asdf", "token+tokename2"},
-		{"stash+token.use://blah+asdf", "token.use"},
-		{"stash+token.blah.asdf://blah+asdf", "token.blah.asdf"},
+		{"osdf://blah+asdf", "", "osdf"},
+		{"stash://blah+asdf", "", "stash"},
+		{"file://blah+asdf", "", "file"},
+		{"tokename+osdf://blah+asdf", "tokename", "osdf"},
+		{"tokename+stash://blah+asdf", "tokename", "stash"},
+		{"tokename+file://blah+asdf", "tokename", "file"},
+		{"tokename+tokename2+osdf://blah+asdf", "tokename+tokename2", "osdf"},
+		{"token+tokename2+stash://blah+asdf", "token+tokename2", "stash"},
+		{"token.use+stash://blah+asdf", "token.use", "stash"},
+		{"token.blah.asdf+stash://blah+asdf", "token.blah.asdf", "stash"},
 	}
 	for _, c := range cases {
 		url, err := url.Parse(c.url)
 		assert.NoError(t, err)
-		assert.Equal(t, c.name, getTokenName(url))
+		scheme, tokenName := getTokenName(url)
+		assert.Equal(t, c.name, tokenName)
+		assert.Equal(t, c.scheme, scheme)
 	}
 
 }
@@ -144,51 +147,14 @@ func FuzzGetTokenName(f *testing.F) {
 	}
 	f.Fuzz(func(t *testing.T, orig string) {
 		// Make sure it's a valid URL
-		urlString := "osdf+" + orig + "://blah+asdf"
+		urlString := orig + "+osdf://blah+asdf"
 		url, err := url.Parse(urlString)
 		// If it's not a valid URL, then it's not a valid token name
 		if err != nil || url.Scheme == "" {
 			return
 		}
 		assert.NoError(t, err)
-		assert.Equal(t, strings.ToLower(orig), getTokenName(url), "URL: "+urlString+"URL String: "+url.String()+" Scheme: "+url.Scheme)
+		_, tokenName := getTokenName(url)
+		assert.Equal(t, strings.ToLower(orig), tokenName, "URL: "+urlString+"URL String: "+url.String()+" Scheme: "+url.Scheme)
 	})
-}
-
-func Test_getTokenName(t *testing.T) {
-
-	tests := []struct {
-		name          string
-		destination   *url.URL
-		wantTokenName string
-	}{
-		{
-			name:          "osdf",
-			destination:   urlMustParse("osdf://blah+asdf"),
-			wantTokenName: "",
-		},
-		{
-			name:          "ligo",
-			destination:   urlMustParse("ligo+stash://blah+asdf"),
-			wantTokenName: "ligo",
-		},
-		{
-			name:          "osdftoken",
-			destination:   urlMustParse("token+osdf://blah+asdf"),
-			wantTokenName: "token",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equalf(t, tt.wantTokenName, getTokenName(tt.destination), "getTokenName(%v)", tt.destination)
-		})
-	}
-}
-
-func urlMustParse(s string) *url.URL {
-	u, err := url.Parse(s)
-	if err != nil {
-		panic(err)
-	}
-	return u
 }
