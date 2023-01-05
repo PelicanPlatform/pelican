@@ -154,3 +154,41 @@ func FuzzGetTokenName(f *testing.F) {
 		assert.Equal(t, strings.ToLower(orig), getTokenName(url), "URL: "+urlString+"URL String: "+url.String()+" Scheme: "+url.Scheme)
 	})
 }
+
+func Test_getTokenName(t *testing.T) {
+
+	tests := []struct {
+		name          string
+		destination   *url.URL
+		wantTokenName string
+	}{
+		{
+			name:          "osdf",
+			destination:   urlMustParse("osdf://blah+asdf"),
+			wantTokenName: "",
+		},
+		{
+			name:          "ligo",
+			destination:   urlMustParse("ligo+stash://blah+asdf"),
+			wantTokenName: "ligo",
+		},
+		{
+			name:          "osdftoken",
+			destination:   urlMustParse("token+osdf://blah+asdf"),
+			wantTokenName: "token",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equalf(t, tt.wantTokenName, getTokenName(tt.destination), "getTokenName(%v)", tt.destination)
+		})
+	}
+}
+
+func urlMustParse(s string) *url.URL {
+	u, err := url.Parse(s)
+	if err != nil {
+		panic(err)
+	}
+	return u
+}

@@ -85,7 +85,7 @@ func getTokenName(destination *url.URL) (tokenName string) {
 	schemePieces := strings.SplitN(destination.Scheme, "+", 2)
 	tokenName = ""
 	if len(schemePieces) > 1 {
-		tokenName = schemePieces[1]
+		tokenName = schemePieces[0]
 	}
 	return
 }
@@ -261,7 +261,7 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 		destination = dest_url.Path
 	}
 
-	if source_scheme_pieces[0] == "stash" || source_scheme_pieces[0]== "osdf" {
+	if source_scheme_pieces[0] == "stash" || source_scheme_pieces[0] == "osdf" {
 		sourceFile = source_url.Path
 	}
 
