@@ -233,6 +233,15 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 		return 0, err
 	}
 
+	// If there is a host specified, prepend it to the path
+	if source_url.Host != "" {
+		source_url.Path = path.Join(source_url.Host, source_url.Path)
+	}
+
+	if dest_url.Host != "" {
+		dest_url.Path = path.Join(dest_url.Host, dest_url.Path)
+	}
+
 	sourceScheme, _ := getTokenName(source_url)
 	destScheme, _ := getTokenName(dest_url)
 
