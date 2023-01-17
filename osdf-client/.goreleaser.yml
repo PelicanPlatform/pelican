@@ -161,8 +161,6 @@ nfpms:
       - apk
       - deb
       - rpm
-    replaces:
-      - stashcache-client < 6.4.0
     bindir: /usr/bin
     release: 1
     section: default
@@ -178,6 +176,8 @@ nfpms:
             type: doc
         replacements:
           amd64: x86_64
+        replaces:
+          - stashcache-client < 6.4.0
         file_name_template: "{{ .PackageName }}-{{ .Version }}-{{ .Release }}.{{ .Arch }}"
       deb:
         file_name_template: "{{ .PackageName }}-{{ .Version }}-{{ .Release }}_{{ .Arch }}"
