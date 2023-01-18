@@ -166,7 +166,7 @@ func attributeSplitFunc(data []byte, atEOF bool) (advance int, token []byte, err
 	// Watch out for semi-colons inside quotes
 	insideQuotes := false
 	for i, curChar := range data {
-		if curChar == '"' && data[i-1] != '\\' {
+		if curChar == '"' && !(i > 0 && data[i-1] == '\\') {
 			insideQuotes = !insideQuotes
 		} else if curChar == ';' && !insideQuotes {
 			// Do not return the semi-colon
