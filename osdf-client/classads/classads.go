@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"regexp"
 	"strconv"
 	"strings"
 )
@@ -58,15 +57,29 @@ func (c *ClassAd) String() string {
 }
 
 // ReadClassAd reads a ClassAd from the given reader.
-func ReadClassAd(reader io.Reader) ([]ClassAd, error) {
-	var ads []ClassAd
+func ReadClassAd(reader io.Reader) (ads []ClassAd, err error) {
+
+	// Catch any panics and return an error instead
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("error reading classad: %v", r)
+		}
+	}()
+
 	scanner := bufio.NewScanner(reader)
 	split := func(data []byte, atEOF bool) (advance int, token []byte, err error) {
 		if atEOF && len(data) == 0 {
 			return 0, nil, nil
 		}
-		if i := bytes.IndexByte(data, ']'); i >= 0 {
-			return i + 1, data[0 : i+1], nil
+
+		// Watch out for brackets inside quotes
+		insideQuotes := false
+		for i, curChar := range data {
+			if curChar == '"' && !(i > 0 && data[i-1] == '\\') {
+				insideQuotes = !insideQuotes
+			} else if curChar == ']' && !insideQuotes {
+				return i + 1, data[0 : i+1], nil
+			}
 		}
 		if atEOF {
 			return len(data), data, nil
@@ -102,18 +115,19 @@ func ParseClassAd(line string) (ClassAd, error) {
 	line = strings.TrimPrefix(line, "[")
 	line = strings.TrimSuffix(line, "]")
 
-	// Split by "\n" or ";"
-	splitter := regexp.MustCompile(`[\n;]`)
-	splitted := splitter.Split(line, -1)
-
-	// For each attribute, split by the first "="
-	for _, attrStr := range splitted {
+	attributeScanner := bufio.NewScanner(strings.NewReader(line))
+	attributeScanner.Split(attributeSplitFunc)
+	for attributeScanner.Scan() {
+		attrStr := attributeScanner.Text()
 		attrStr = strings.TrimSpace(attrStr)
 		if attrStr == "" {
 			continue
 		}
+
+		// Split on the first "="
 		attrSplit := strings.SplitN(attrStr, "=", 2)
 		name := strings.TrimSpace(attrSplit[0])
+
 		// Check for quoted attribute and remove it
 		value := strings.TrimSpace(attrSplit[1])
 		// If the value is quotes, we know it's a string
@@ -141,4 +155,27 @@ func ParseClassAd(line string) (ClassAd, error) {
 
 	}
 	return ad, nil
+}
+
+// Split the classad by attribute, at the first semi-colon not in quotes
+func attributeSplitFunc(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	if atEOF && len(data) == 0 {
+		return 0, nil, nil
+	}
+
+	// Watch out for semi-colons inside quotes
+	insideQuotes := false
+	for i, curChar := range data {
+		if curChar == '"' && data[i-1] != '\\' {
+			insideQuotes = !insideQuotes
+		} else if curChar == ';' && !insideQuotes {
+			// Do not return the semi-colon
+			// Trim any spaces
+			return i + 1, bytes.TrimSpace(data[0:i]), nil
+		}
+	}
+	if atEOF {
+		return len(data), bytes.TrimSpace(data), nil
+	}
+	return 0, nil, nil
 }
