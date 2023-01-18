@@ -78,12 +78,12 @@ builds:
         goarch: ppc64le
 
 archives:
-  - replacements:
-      darwin: Darwin
-      linux: Linux
-      windows: Windows
-      # 386: i386
-      amd64: x86_64
+  - id: osdf-client
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else }}{{ .Arch }}{{ end }}
     format_overrides:
       - goos: windows
         format: zip
@@ -123,10 +123,8 @@ nfpms:
         contents:
           - src: LICENSE.txt
             dst: "/usr/share/doc/{{ .PackageName }}-{{ .Version }}/LICENSE.txt"
-            type: doc
           - src: README.md
             dst: "/usr/share/doc/{{ .PackageName }}-{{ .Version }}/README.md"
-            type: doc
           - src: resources/10-stash-plugin.conf
             dst: "/etc/condor/config.d/10-stash-plugin.conf"
             type: config|noreplace
@@ -170,10 +168,8 @@ nfpms:
         contents:
           - src: LICENSE.txt
             dst: "/usr/share/doc/{{ .PackageName }}-{{ .Version }}/LICENSE.txt"
-            type: doc
           - src: README.md
             dst: "/usr/share/doc/{{ .PackageName }}-{{ .Version }}/README.md"
-            type: doc
         replacements:
           amd64: x86_64
         replaces:
