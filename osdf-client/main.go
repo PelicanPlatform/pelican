@@ -106,7 +106,7 @@ func doWriteBack(source string, destination *url.URL, namespace Namespace) (int6
 }
 
 func getToken(destination *url.URL, namespace Namespace, isWrite bool) (string, error) {
-	token_name := getTokenName(destination)
+	_, token_name := getTokenName(destination)
 
 	type tokenJson struct {
 		AccessKey string `json:"access_token"`
