@@ -181,13 +181,9 @@ func getToken(destination *url.URL, namespace Namespace, isWrite bool) (string, 
 			value, err := AcquireToken(destination, namespace, isWrite)
 			if err == nil {
 				return value, nil
-			} else {
-				log.Warning("Failed to acquire token via OAuth:", err)
 			}
-
-			// Print out, can't find token!  Print out error and exit with non-zero exit status
-			// TODO: Better error message
-			log.Errorln("Unable to find token file")
+			log.Errorln("Failed to generate a new authorization token for this transfer: ", err)
+			log.Errorln("This transfer requires authorization to complete and no token is available")
 			return "", errors.New("failed to find token...")
 		}
 	}

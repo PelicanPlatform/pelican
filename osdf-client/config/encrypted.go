@@ -18,6 +18,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// If we prompted the user for a new password while setting up the file,
+// this global flag will be set to true.  This prevents us from asking for
+// the password again later.
+var setEmptyPassword = false
+
 func GetEncryptedConfigName() (string, error) {
 	config_dir := os.Getenv("XDG_CONFIG_HOME")
 	if len(config_dir) > 0 {
@@ -30,6 +35,20 @@ func GetEncryptedConfigName() (string, error) {
 	return path.Join(dirname, ".config", "osdf-client", "oauth2-client.pem"), nil
 }
 
+func EncryptedConfigExists() (bool, error) {
+	filename, err := GetEncryptedConfigName()
+	if err != nil {
+		return false, err
+	}
+	_, err = os.Stat(filename)
+	if os.IsNotExist(err) {
+		return false, nil;
+	} else if err != nil {
+		return false, err;
+	}
+	return true, nil;
+}
+
 func GetEncryptedContents() (string, error) {
 	filename, err := GetEncryptedConfigName()
 	if err != nil {
@@ -39,7 +58,17 @@ func GetEncryptedContents() (string, error) {
 	buf, err := os.ReadFile(filename)
 	if err != nil {
 		if _, ok := err.(*os.PathError); ok {
-			err := os.MkdirAll(path.Dir(filename), 0700)
+
+			password, err := GetPassword(true)
+			if len(password) > 0 {
+				if err := SavePassword(password); err != nil {
+					fmt.Fprintln(os.Stderr, "Failed to save password:", err)
+				}
+			} else {
+				setEmptyPassword = true
+			}
+
+			err = os.MkdirAll(path.Dir(filename), 0700)
 			if err != nil {
 				return "", err
 			}
@@ -95,11 +124,18 @@ func ConvertX25519Key(ed25519_sk []byte) [32]byte {
 	return result
 }
 
-func GetPassword() ([]byte, error) {
+func GetPassword(newFile bool) ([]byte, error) {
 	if fileInfo, _ := os.Stdin.Stat(); (fileInfo.Mode() & os.ModeCharDevice) == 0 {
 		return nil, errors.New("Cannot read password; not connected to a terminal")
 	}
-	fmt.Fprint(os.Stderr, "Enter password for OSDF client configuration: ")
+	if newFile {
+		fmt.Fprintln(os.Stderr, "The client is able to save the authorization in a local file.")
+		fmt.Fprintln(os.Stderr, "This prevents the need to reinitialize the authorization for each transfer.")
+		fmt.Fprintln(os.Stderr, "You will be asked for this password whenever a new session is started.")
+		fmt.Fprintln(os.Stderr, "Please provide a new password to encrypt the local OSDF client configuration file: ");
+	} else {
+		fmt.Fprintln(os.Stderr, "Enter your password for the local OSDF client configuration file: ")
+	}
 
 	stdin := int(os.Stdin.Fd())
 
@@ -148,7 +184,7 @@ func GetConfigContents() (OSDFConfig, error) {
 			password, _ := TryGetPassword()
 			typedPassword := false
 			if len(password) == 0 {
-				password, err = GetPassword()
+				password, err = GetPassword(false)
 				typedPassword = true
 			}
 			if err != nil {
@@ -227,8 +263,14 @@ func SaveConfigContents_internal(config *OSDFConfig, forcePassword bool) error {
 	}
 
 	password, err := TryGetPassword()
-	if forcePassword || len(password) == 0 || err != nil {
-		password, err = GetPassword()
+	if setEmptyPassword {
+		fmt.Fprintln(os.Stderr, "WARNING: empty password provided; the credentials will be saved unencrypted on disk")
+	} else if forcePassword || len(password) == 0 || err != nil {
+		if exists, err := EncryptedConfigExists(); err == nil && !exists {
+			password, err = GetPassword(true)
+		} else {
+			password, err = GetPassword(false)
+		}
 		if err != nil {
 			return err
 		}

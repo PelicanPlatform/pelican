@@ -35,7 +35,10 @@ func SavePassword(password []byte) error {
 	if err != nil {
 		return err
 	}
-	err = key.ExpireAfter(3600)
+	// IGTF guidelines state that unencrypted credentials should last for
+	// no longer than 1M seconds.  These credentials potentially last longer
+	// so instead we keep them unencrypted in memory for approximately a day.
+	err = key.ExpireAfter(100000)
 	if err != nil {
 		return err
 	}
