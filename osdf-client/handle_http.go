@@ -26,6 +26,8 @@ import (
 	"github.com/vbauerster/mpb/v7/decor"
 )
 
+var env_prefixes = [...] string {"OSG", "OSDF"}
+
 var p = mpb.New()
 
 // SlowTransferError is an error that is returned when a transfer takes longer than the configured timeout
@@ -48,6 +50,26 @@ func (e *SlowTransferError) Error() string {
 func (e *SlowTransferError) Is(target error) bool {
 	_, ok := target.(*SlowTransferError)
 	return ok
+}
+
+// Determines whether or not we can interact with the site HTTP proxy
+func IsProxyEnabled() bool {
+	for _, prefix := range env_prefixes {
+		if _, isSet := os.LookupEnv(prefix + "_DISABLE_HTTP_PROXY"); isSet {
+			return false
+		}
+	}
+	return true
+}
+
+// Determine whether we are allowed to skip the proxy as a fallback
+func CanDisableProxy() bool {
+	for _, prefix := range env_prefixes {
+		if _, isSet := os.LookupEnv(prefix + "_DISABLE_PROXY_FALLBACK"); isSet {
+			return false
+		}
+	}
+	return true
 }
 
 // ConnectionSetupError is an error that is returned when a connection to the remote server fails
@@ -97,8 +119,6 @@ func NewTransferDetails(cache Cache, https bool) []TransferDetails {
 	} else {
 		cacheEndpoint = cache.Endpoint
 	}
-	_, canDisableProxy := os.LookupEnv("OSG_DISABLE_PROXY_FALLBACK")
-	canDisableProxy = !canDisableProxy
 
 	// Form the URL
 	cacheURL, err := url.Parse(cacheEndpoint)
@@ -136,11 +156,12 @@ func NewTransferDetails(cache Cache, https bool) []TransferDetails {
 		if !HasPort(cacheURL.Host) {
 			cacheURL.Host += ":8000"
 		}
+		isProxyEnabled := IsProxyEnabled()
 		details = append(details, TransferDetails{
 			Url:   *cacheURL,
-			Proxy: true,
+			Proxy: isProxyEnabled,
 		})
-		if canDisableProxy {
+		if isProxyEnabled && CanDisableProxy() {
 			details = append(details, TransferDetails{
 				Url:   *cacheURL,
 				Proxy: false,
