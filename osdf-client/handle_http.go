@@ -203,36 +203,14 @@ func download_http(source string, destination string, payload *payloadStruct, na
 		}
 	}
 
-	cacheListName := "xroot"
-	if namespace.ReadHTTPS || namespace.UseTokenOnRead {
-		cacheListName = "xroots"
-	}
-	if len(NearestCacheList) == 0 {
-		_, err := GetBestCache(cacheListName)
-		if err != nil {
-			log.Errorln("Failed to get best caches:", err)
-		}
-	}
-
-	log.Debugln("Nearest cache list:", NearestCacheList)
-	log.Debugln("Cache list name:", namespace.Caches)
-
-	// Now that we have the ordered list of caches, do an intersect for the caches for the namespace
-	var closestNamespaceCaches []Cache
-	if CacheOverride {
-		cache := Cache{
-			Endpoint:     NearestCache,
-			AuthEndpoint: NearestCache,
-			Resource:     NearestCache,
-		}
-		closestNamespaceCaches = []Cache{cache}
-	} else {
-		closestNamespaceCaches = namespace.MatchCaches(NearestCacheList)
+	closestNamespaceCaches, err := GetCachesFromNamespace(namespace)
+	if err != nil {
+		log.Errorln("Failed to get namespaced caches (treated as non-fatal):", err)
 	}
 	log.Debugln("Matched caches:", closestNamespaceCaches)
 
 	// Make sure we only try as many caches as we have
-	cachesToTry := 3
+	cachesToTry := CachesToTry
 	if cachesToTry > len(closestNamespaceCaches) {
 		cachesToTry = len(closestNamespaceCaches)
 	}

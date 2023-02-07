@@ -37,8 +37,9 @@ func main() {
 		log.Panicln("Failed to set log level")
 	}
 	methods := []string{"cvmfs", "http"}
-	var infile, outfile string
+	var infile, outfile, testCachePath string
 	var useOutFile bool = false
+	var getCaches bool = false
 
 	// Pop the executable off the args list
 	_, os.Args = os.Args[0], os.Args[1:]
@@ -73,6 +74,14 @@ func main() {
 			if err := setLogging(log.DebugLevel); err != nil {
 				log.Panicln("Failed to set log level to debug")
 			}
+		} else if os.Args[0] == "-get-caches" {
+			if len(os.Args) < 2 {
+				log.Errorln("-get-caches requires an argument")
+				os.Exit(1)
+			}
+			testCachePath = os.Args[1]
+			os.Args = os.Args[1:]
+			getCaches = true
 		} else if strings.HasPrefix(os.Args[0], "-") {
 			log.Errorln("Do not understand the option:", os.Args[0])
 			os.Exit(1)
@@ -82,6 +91,23 @@ func main() {
 		}
 		// Pop off the args
 		_, os.Args = os.Args[0], os.Args[1:]
+	}
+
+	if getCaches {
+		urls, err := stashcp.GetCacheHostnames(testCachePath)
+		if err != nil {
+			log.Panicln("Failed to get cache URLs:", err)
+		}
+
+		cachesToTry := stashcp.CachesToTry
+		if cachesToTry > len(urls) {
+			cachesToTry = len(urls)
+		}
+
+		for _, url := range urls[:cachesToTry] {
+			fmt.Println(url)
+		}
+		os.Exit(0)
 	}
 
 	var source []string
