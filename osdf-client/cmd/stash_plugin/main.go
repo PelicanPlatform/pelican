@@ -76,7 +76,7 @@ func main() {
 			}
 		} else if os.Args[0] == "-get-caches" {
 			if len(os.Args) < 2 {
-				log.Errorln("-get-caches requires aan argument")
+				log.Errorln("-get-caches requires an argument")
 				os.Exit(1)
 			}
 			testCachePath = os.Args[1]
