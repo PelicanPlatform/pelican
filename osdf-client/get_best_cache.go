@@ -16,7 +16,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-func GetBestStashcache(cacheListName string) ([]string, error) {
+func GetBestCache(cacheListName string) ([]string, error) {
 
 	if cacheListName == "" {
 		cacheListName = "xroot"

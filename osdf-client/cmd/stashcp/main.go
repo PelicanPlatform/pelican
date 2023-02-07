@@ -136,7 +136,7 @@ func main() {
 	// Just return all the caches that it knows about
 	// Print out all of the caches and exit
 	if options.ListCaches {
-		cacheList, err := stashcp.GetBestStashcache(options.ListType)
+		cacheList, err := stashcp.GetBestCache(options.ListType)
 		if err != nil {
 			log.Errorln("Failed to get best caches:", err)
 			os.Exit(1)
@@ -147,7 +147,7 @@ func main() {
 	}
 
 	if options.Closest {
-		cacheList, err := stashcp.GetBestStashcache(options.ListType)
+		cacheList, err := stashcp.GetBestCache(options.ListType)
 		if err != nil {
 			log.Errorln("Failed to get best stashcache: ", err)
 		}
