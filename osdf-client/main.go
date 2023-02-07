@@ -218,7 +218,7 @@ func GetCachesFromNamespace(namespace Namespace) (caches []Cache, err error) {
 		cacheListName = "xroots"
 	}
 	if len(NearestCacheList) == 0 {
-		_, err = GetBestStashcache(cacheListName)
+		_, err = GetBestCache(cacheListName)
 		if err != nil {
 			log.Errorln("Failed to get best caches:", err)
 			return
