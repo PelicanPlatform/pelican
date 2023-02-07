@@ -47,6 +47,9 @@ var NearestCache string
 var NearestCacheList []string
 var CachesJsonLocation string
 
+// Number of caches to attempt to use in any invocation
+var CachesToTry int = 3
+
 // CacheOverride
 var CacheOverride bool
 
@@ -201,6 +204,60 @@ func getToken(token_name string) (string, error) {
 		return tokenStr, nil
 	}
 	return tokenParsed.AccessKey, nil
+}
+
+func GetCacheHostnames(testFile string) (urls []string, err error) {
+
+	ns, err := MatchNamespace(testFile)
+	if err != nil {
+		return
+	}
+
+	caches, err := GetCachesFromNamespace(ns)
+	if err != nil {
+		return
+	}
+
+	for _, cache := range caches {
+		url_string := cache.AuthEndpoint
+		host := strings.Split(url_string, ":")[0]
+		urls = append(urls, host)
+	}
+
+	return
+}
+
+func GetCachesFromNamespace(namespace Namespace) (caches []Cache, err error) {
+
+	cacheListName := "xroot"
+	if namespace.ReadHTTPS || namespace.UseTokenOnRead {
+		cacheListName = "xroots"
+	}
+	if len(NearestCacheList) == 0 {
+		_, err = GetBestStashcache(cacheListName)
+		if err != nil {
+			log.Errorln("Failed to get best caches:", err)
+			return
+		}
+	}
+
+	log.Debugln("Nearest cache list:", NearestCacheList)
+	log.Debugln("Cache list name:", namespace.Caches)
+
+	// The main routine can set a global cache to use
+	if CacheOverride {
+		cache := Cache{
+			Endpoint:     NearestCache,
+			AuthEndpoint: NearestCache,
+			Resource:     NearestCache,
+		}
+		caches = []Cache{cache}
+	} else {
+		caches = namespace.MatchCaches(NearestCacheList)
+	}
+	log.Debugln("Matched caches:", caches)
+
+	return
 }
 
 // Start the transfer, whether read or write back
