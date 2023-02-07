@@ -208,7 +208,7 @@ func download_http(source string, destination string, payload *payloadStruct, na
 		cacheListName = "xroots"
 	}
 	if len(NearestCacheList) == 0 {
-		_, err := GetBestStashcache(cacheListName)
+		_, err := GetBestCache(cacheListName)
 		if err != nil {
 			log.Errorln("Failed to get best caches:", err)
 		}
