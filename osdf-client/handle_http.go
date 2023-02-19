@@ -514,7 +514,9 @@ Loop:
 		log.Debugln("Got error from HTTP download", err)
 		return 0, err
 	}
-	if resp.HTTPResponse.StatusCode != 200 {
+        // Valid responses include 200 and 206.  The latter occurs if the download was resumed after a
+        // prior attempt.
+	if resp.HTTPResponse.StatusCode != 200 && resp.HTTPResponse.StatusCode != 206 {
 		log.Debugln("Got failure status code:", resp.HTTPResponse.StatusCode)
 		return 0, errors.New("failure status code")
 	}
