@@ -52,6 +52,19 @@ func (e *SlowTransferError) Is(target error) bool {
 	return ok
 }
 
+type FileDownloadError struct {
+	Text string
+	Err  error
+}
+
+func (e *FileDownloadError) Error() string {
+	return e.Text
+}
+
+func (e *FileDownloadError) Unwrap() error {
+	return e.Err
+}
+
 // Determines whether or not we can interact with the site HTTP proxy
 func IsProxyEnabled() bool {
 	if _, isSet := os.LookupEnv("http_proxy"); !isSet {
@@ -312,11 +325,29 @@ func startDownloadWorker(source string, destination string, token string, transf
 			log.Debugln("Constructed URL:", transfer.Url.String())
 			if downloaded, err = DownloadHTTP(transfer, finalDest, token); err != nil {
 				log.Debugln("Failed to download:", err)
-				toAccum := errors.New("Failed to download from " + transfer.Url.Hostname() + ":" +
-					transfer.Url.Port() +
-					" + proxy=" + strconv.FormatBool(transfer.Proxy) +
-					": " + err.Error())
-				AddError(toAccum)
+				var ope *net.OpError
+				var cse *ConnectionSetupError
+				errorString := "Failed to download from " + transfer.Url.Hostname() + ":" +
+					transfer.Url.Port() + " "
+				if errors.As(err, &ope) && ope.Op == "proxyconnect" {
+					log.Debugln(ope);
+					AddrString, _ := os.LookupEnv("http_proxy")
+					if ope.Addr != nil {
+						AddrString = " " + ope.Addr.String()
+					}
+					errorString += "due to proxy " + AddrString + " error: " + ope.Unwrap().Error()
+				} else if errors.As(err, &cse) {
+					errorString += "+ proxy=" + strconv.FormatBool(transfer.Proxy) + ": "
+					if sce, ok := cse.Unwrap().(grab.StatusCodeError); ok {
+						errorString += sce.Error()
+					} else {
+						errorString += err.Error()
+					}
+				} else {
+					errorString += "+ proxy=" + strconv.FormatBool(transfer.Proxy) +
+						": " + err.Error()
+				}
+				AddError(&FileDownloadError{errorString, err})
 				continue
 			} else {
 				log.Debugln("Downloaded bytes:", downloaded)

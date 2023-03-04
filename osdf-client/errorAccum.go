@@ -2,8 +2,12 @@ package stashcp
 
 import (
 	"errors"
+	"fmt"
+	"net/http"
 	"sync"
 	"time"
+
+	grab "github.com/cavaliercoder/grab"
 )
 
 type TimestampedError struct {
@@ -32,8 +36,8 @@ func GetErrors() string {
 	first := true
 	lastError := startup
 	var errorsFormatted []string
-	for _, theError := range bunchOfErrors {
-		errFmt := theError.err.Error()
+	for idx, theError := range bunchOfErrors {
+		errFmt := fmt.Sprintf("Attempt #%v: %s", idx + 1, theError.err.Error())
 		timeElapsed := theError.timestamp.Sub(lastError)
 		timeFormat := timeElapsed.Truncate(100*time.Millisecond).String()
 		errFmt += " (" + timeFormat
@@ -62,8 +66,22 @@ func GetErrors() string {
 
 // IsRetryable will return true if the error is retryable
 func IsRetryable(err error) bool {
-	if errors.Is(err, &SlowTransferError{}) ||
-		errors.Is(err, &ConnectionSetupError{}) {
+	if errors.Is(err, &SlowTransferError{}) {
+		return true
+	}
+	var cse *ConnectionSetupError
+	if errors.As(err, &cse) {
+		if sce, ok := cse.Unwrap().(grab.StatusCodeError); ok {
+			switch int(sce) {
+			case http.StatusInternalServerError:
+			case http.StatusBadGateway:
+			case http.StatusServiceUnavailable:
+			case http.StatusGatewayTimeout:
+				return true
+			default:
+				return false
+			}
+		}
 		return true
 	}
 	return false
