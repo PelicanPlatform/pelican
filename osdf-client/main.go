@@ -411,12 +411,6 @@ Loop:
 		payload.status = "Fail"
 	}
 
-	// We really don't care if the es send fails, but log
-	// it in debug if it does fail
-	if err := es_send(&payload); err != nil {
-		log.Debugln("Failed to send to data to ES")
-	}
-
 	if !success {
 		return downloaded, errors.New("failed to download file")
 	} else {
@@ -509,65 +503,4 @@ func parse_job_ad(payload payloadStruct) { // TODO: needs the payload
 		}
 	}
 
-}
-
-func es_send(payload *payloadStruct) error {
-
-	// calculate the current timestamp
-	timeStamp := time.Now().Unix()
-	payload.timestamp = timeStamp
-
-	// convert payload to a JSON string (something with Marshall ...)
-	var jsonBytes []byte
-	var err error
-	if jsonBytes, err = json.Marshal(payload); err != nil {
-		log.Errorln("Failed to marshal payload JSON: ", err)
-		return err
-	}
-
-	errorChan := make(chan error)
-
-	// Need to make a closure in order to handle the error
-	go func() {
-		err := doEsSend(jsonBytes, errorChan)
-		if err != nil {
-			return
-		}
-	}()
-
-	select {
-	case returnedError := <-errorChan:
-		return returnedError
-	case <-time.After(5 * time.Second):
-		log.Debugln("Send to ES timed out")
-		return errors.New("ES send timed out")
-	}
-
-}
-
-// Do the actual send to ES
-// Should be called with a timeout
-func doEsSend(jsonBytes []byte, errorChannel chan<- error) error {
-	// Send a HTTP POST to collector.atlas-ml.org, with a timeout!
-	resp, err := http.Post("http://collector.atlas-ml.org:9951", "application/json", bytes.NewBuffer(jsonBytes))
-
-	if err != nil {
-		log.Errorln("Can't get collector.atlas-ml.org:", err)
-		errorChannel <- err
-		return err
-	}
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
-		if err != nil {
-			log.Errorln("Failed to close body when uploading payload")
-		}
-	}(resp.Body)
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		errorChannel <- err
-		return err
-	}
-	log.Debugln("Returned from collector.atlas-ml.org:", string(body))
-	errorChannel <- nil
-	return nil
 }
