@@ -80,7 +80,11 @@ type ConnectionSetupError struct {
 
 func (e *ConnectionSetupError) Error() string {
 	if e.Err != nil {
-		return "failed setup connection to " + e.URL + ": " + e.Err.Error()
+		if len(e.URL) > 0 {
+			return "failed connection setup to " + e.URL + ": " + e.Err.Error()
+		} else {
+			return "failed connection setup: " + e.Err.Error()
+		}
 	} else {
 		return "Connection to remote server failed"
 	}
@@ -305,7 +309,8 @@ func startDownloadWorker(source string, destination string, token string, transf
 			log.Debugln("Constructed URL:", transfer.Url.String())
 			if downloaded, err = DownloadHTTP(transfer, finalDest, token); err != nil {
 				log.Debugln("Failed to download:", err)
-				toAccum := errors.New("Failed to download from " + transfer.Url.String() +
+				toAccum := errors.New("Failed to download from " + transfer.Url.Hostname() + ":" +
+					transfer.Url.Port() +
 					" + proxy=" + strconv.FormatBool(transfer.Proxy) +
 					": " + err.Error())
 				AddError(toAccum)
