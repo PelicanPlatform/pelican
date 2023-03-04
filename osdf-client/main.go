@@ -1,13 +1,10 @@
 package stashcp
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
-	"net/http"
 	"net/url"
 	"regexp"
 	"strconv"
