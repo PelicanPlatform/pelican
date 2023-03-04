@@ -84,7 +84,6 @@ type payloadStruct struct {
 func getTokenName(destination *url.URL) (scheme, tokenName string) {
 	schemePieces := strings.Split(destination.Scheme, "+")
 	tokenName = ""
-	scheme = ""
 	// Scheme is always the last piece
 	scheme = schemePieces[len(schemePieces)-1]
 	// If there are 2 or more pieces, token name is everything but the last item, joined with a +

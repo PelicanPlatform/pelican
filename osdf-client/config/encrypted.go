@@ -60,6 +60,9 @@ func GetEncryptedContents() (string, error) {
 		if _, ok := err.(*os.PathError); ok {
 
 			password, err := GetPassword(true)
+			if err != nil {
+				return "", err
+			}
 			if len(password) > 0 {
 				if err := SavePassword(password); err != nil {
 					fmt.Fprintln(os.Stderr, "Failed to save password:", err)
@@ -266,7 +269,8 @@ func SaveConfigContents_internal(config *OSDFConfig, forcePassword bool) error {
 	if setEmptyPassword {
 		fmt.Fprintln(os.Stderr, "WARNING: empty password provided; the credentials will be saved unencrypted on disk")
 	} else if forcePassword || len(password) == 0 || err != nil {
-		if exists, err := EncryptedConfigExists(); err == nil && !exists {
+		var exists bool;
+		if exists, err = EncryptedConfigExists(); err == nil && !exists {
 			password, err = GetPassword(true)
 		} else {
 			password, err = GetPassword(false)
