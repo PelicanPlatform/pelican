@@ -30,6 +30,13 @@ func AddError(err error) bool {
 	return true
 }
 
+func ClearErrors() {
+	mu.Lock()
+	defer mu.Unlock()
+
+	bunchOfErrors = make([]TimestampedError, 0)
+}
+
 func GetErrors() string {
 	mu.Lock()
 	defer mu.Unlock()

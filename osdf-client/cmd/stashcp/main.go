@@ -225,19 +225,23 @@ func main() {
 
 	var result error
 	var downloaded int64 = 0
+	lastSrc := ""
 	for _, src := range source {
 		var tmpDownloaded int64
 		tmpDownloaded, result = stashcp.DoStashCPSingle(src, dest, splitMethods, options.Recursive)
 		downloaded += tmpDownloaded
 		if result != nil {
+			lastSrc = src
 			break
+		} else {
+			stashcp.ClearErrors()
 		}
 	}
 
 	// Exit with failure
 	if result != nil {
 		// Print the list of errors
-		log.Errorln(stashcp.GetErrors())
+		log.Errorln("Failure downloading " + lastSrc + ": " + stashcp.GetErrors())
 		if stashcp.ErrorsRetryable() {
 			log.Errorln("Errors are retryable")
 			os.Exit(11)
