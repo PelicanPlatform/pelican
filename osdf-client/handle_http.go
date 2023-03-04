@@ -54,6 +54,9 @@ func (e *SlowTransferError) Is(target error) bool {
 
 // Determines whether or not we can interact with the site HTTP proxy
 func IsProxyEnabled() bool {
+	if _, isSet := os.LookupEnv("http_proxy"); !isSet {
+		return false
+	}
 	for _, prefix := range env_prefixes {
 		if _, isSet := os.LookupEnv(prefix + "_DISABLE_HTTP_PROXY"); isSet {
 			return false
