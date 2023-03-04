@@ -3,9 +3,12 @@ package main
 import (
 	"fmt"
 	"github.com/spf13/cobra"
+	"net/url"
 	"os"
+	"path"
 
 	config "github.com/htcondor/osdf-client/v6/config"
+	stashcp "github.com/htcondor/osdf-client/v6"
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
 )
@@ -101,6 +104,44 @@ func printOauthConfig() {
 	fmt.Println(string(config_b))
 
 }
+
+func addTokenSubcommands(tokenCmd *cobra.Command) {
+
+	tokenCmd.AddCommand(&cobra.Command{
+		Use:   "get <read|write> <prefix>",
+		Short: "Get a new token for a given prefix",
+		Long:  "Get a new token for a given prefix",
+		Args:  cobra.ExactArgs(2),
+		Run: func(cmd *cobra.Command, args []string) {
+
+			isWrite := false
+			switch args[0] {
+			case "read":
+			case "write":
+				isWrite = true
+			default:
+				fmt.Fprintln(os.Stderr, "Unknown value for operation type (must be 'read' or 'write')", args[0])
+				os.Exit(1)
+			}
+			dest := url.URL{Path: path.Clean("/" + args[1])}
+
+			namespace, err := stashcp.MatchNamespace(args[1])
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "Failed to get namespace for path:", err)
+				os.Exit(1)
+			}
+
+			token, err := stashcp.AcquireToken(&dest, namespace, isWrite)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "Failed to get a token:", err)
+				os.Exit(1)
+			}
+
+			fmt.Println(token)
+		},
+	})
+}
+
 func addPrefixSubcommands(prefixCmd *cobra.Command) {
 
 	prefixCmd.AddCommand(&cobra.Command{
@@ -222,7 +263,7 @@ func addPrefixSubcommands(prefixCmd *cobra.Command) {
 
 func main() {
 
-	// Define the config and prefix commands
+	// Define the config commands
 	configCmd := &cobra.Command{
 		Use:   "config",
 		Short: "Manage the configuration file",
@@ -238,11 +279,16 @@ func main() {
 		Use:   "prefix",
 		Short: "Manage the prefix configuration",
 		Long:  "Manage the prefix configuration",
-		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println(args)
-		},
 	}
 	addPrefixSubcommands(prefixCmd)
+
+	// Define the token commands
+	tokenCmd := &cobra.Command{
+		Use: "token",
+		Short: "Manage the available tokens",
+		Long: "Manage the available tokens",
+	}
+	addTokenSubcommands(tokenCmd)
 
 	// Add the config and prefix commands
 	var rootCmd = &cobra.Command{
@@ -262,6 +308,7 @@ func main() {
 	rootCmd.CompletionOptions.DisableDefaultCmd = true
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(prefixCmd)
+	rootCmd.AddCommand(tokenCmd)
 	err := rootCmd.Execute()
 	if err != nil {
 		log.Errorln(err)

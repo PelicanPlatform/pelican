@@ -36,9 +36,16 @@ func TestGetIps(t *testing.T) {
 // TestGetToken tests getToken
 func TestGetToken(t *testing.T) {
 
+	// Need a namespace for token acquisition
+	namespace, err := MatchNamespace("/user/foo")
+	assert.NoError(t, err)
+
+	url, err := url.Parse("osdf:///user/foo")
+	assert.NoError(t, err)
+
 	// ENVs to test: BEARER_TOKEN, BEARER_TOKEN_FILE, XDG_RUNTIME_DIR/bt_u<uid>, TOKEN, _CONDOR_CREDS/scitoken.use, .condor_creds/scitokens.use
 	os.Setenv("BEARER_TOKEN", "bearer_token_contents")
-	token, err := getToken("")
+	token, err := getToken(url, namespace, true)
 	assert.NoError(t, err)
 	assert.Equal(t, "bearer_token_contents", token)
 	os.Unsetenv("BEARER_TOKEN")
@@ -51,7 +58,7 @@ func TestGetToken(t *testing.T) {
 	err = os.WriteFile(bearer_token_file, tmpFile, 0644)
 	assert.NoError(t, err)
 	os.Setenv("BEARER_TOKEN_FILE", bearer_token_file)
-	token, err = getToken("")
+	token, err = getToken(url, namespace, true)
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, token)
 	os.Unsetenv("BEARER_TOKEN_FILE")
@@ -63,7 +70,7 @@ func TestGetToken(t *testing.T) {
 	err = os.WriteFile(bearer_token_file, tmpFile, 0644)
 	assert.NoError(t, err)
 	os.Setenv("XDG_RUNTIME_DIR", tmpDir)
-	token, err = getToken("")
+	token, err = getToken(url, namespace, true)
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, token)
 	os.Unsetenv("XDG_RUNTIME_DIR")
@@ -75,7 +82,7 @@ func TestGetToken(t *testing.T) {
 	err = os.WriteFile(bearer_token_file, tmpFile, 0644)
 	assert.NoError(t, err)
 	os.Setenv("TOKEN", bearer_token_file)
-	token, err = getToken("")
+	token, err = getToken(url, namespace, true)
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, token)
 	os.Unsetenv("TOKEN")
@@ -87,7 +94,7 @@ func TestGetToken(t *testing.T) {
 	err = os.WriteFile(bearer_token_file, tmpFile, 0644)
 	assert.NoError(t, err)
 	os.Setenv("_CONDOR_CREDS", tmpDir)
-	token, err = getToken("")
+	token, err = getToken(url, namespace, true)
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, token)
 	os.Unsetenv("_CONDOR_CREDS")
@@ -104,7 +111,7 @@ func TestGetToken(t *testing.T) {
 	assert.NoError(t, err)
 	err = os.Chdir(tmpDir)
 	assert.NoError(t, err)
-	token, err = getToken("")
+	token, err = getToken(url, namespace, true)
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, token)
 	err = os.Chdir(currentDir)

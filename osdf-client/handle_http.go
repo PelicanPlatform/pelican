@@ -196,7 +196,8 @@ func download_http(source string, destination string, payload *payloadStruct, na
 	var token string
 	if namespace.UseTokenOnRead {
 		var err error
-		token, err = getToken(tokenName)
+		sourceUrl := url.URL{Path: source}
+		token, err = getToken(&sourceUrl, namespace, false)
 		if err != nil {
 			log.Errorln("Failed to get token though required to read from this namespace:", err)
 			return 0, err
