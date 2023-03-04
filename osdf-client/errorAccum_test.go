@@ -21,7 +21,7 @@ func TestErrorAccum(t *testing.T) {
 	AddError(err2)
 
 	errStr := GetErrors()
-	assert.Equal(t, "error1;error2;", errStr)
+	assert.Equal(t, "Attempt #2: error2 (0s elapsed, 0s since start); Attempt #1: error1 (0s since start)", errStr)
 
 }
 
