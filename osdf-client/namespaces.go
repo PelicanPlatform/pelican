@@ -117,7 +117,13 @@ func GetNamespaces() ([]Namespace, error) {
 	} else {
 		namespacesJson = namespacesFromUrl
 	}
-	log.Debugln("Parsing namespaces: ", string(namespacesJson))
+	if len(namespacesJson) > 40 {
+		log.Debugf("Parsing namespaces: %s ... (%d characters total)",
+			strings.ReplaceAll(string(namespacesJson[:40]), "\n", " "),
+			len(namespacesJson))
+	} else {
+		log.Debugln("Parsing namespaces: ", strings.ReplaceAll(string(namespacesJson), "\n", " "))
+	}
 	err = json.Unmarshal(namespacesJson, &nsfull)
 	if err != nil {
 		fmt.Println(err)
