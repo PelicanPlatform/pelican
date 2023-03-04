@@ -171,7 +171,9 @@ func getToken(destination *url.URL, namespace Namespace, isWrite bool) (string, 
 			}
 			log.Errorln("Failed to generate a new authorization token for this transfer: ", err)
 			log.Errorln("This transfer requires authorization to complete and no token is available")
-			return "", errors.New("failed to find token...")
+			err = errors.New("failed to find or generate a token as required for " + destination.String())
+			AddError(err)
+			return "", err
 		}
 	}
 
