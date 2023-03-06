@@ -39,8 +39,8 @@ type Options struct {
 	// A JSON file containing the list of caches
 	CacheJSON string `short:"j" long:"caches-json" description:"A JSON file containing the list of caches"`
 
-	// Comma separated list of methods to try, in order.  Default: cvmfs,xrootd,http
-	Methods string `long:"methods" description:"Comma separated list of methods to try, in order." default:"cvmfs,xrootd,http"`
+	// Comma separated list of methods to try, in order.  Default: cvmfs,http
+	Methods string `long:"methods" description:"Comma separated list of methods to try, in order." default:"cvmfs,http"`
 
 	// Token file to use for reading and/or writing
 	Token string `long:"token" short:"t" description:"Token file to use for reading and/or writing"`
