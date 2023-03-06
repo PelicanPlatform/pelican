@@ -179,7 +179,15 @@ func main() {
 			if stashcp.GetErrors() == "" {
 				resultAd.Set("TransferError", result.Error())
 			} else {
-				resultAd.Set("TransferError", stashcp.GetErrors())
+				errMsg := " Failure "
+				if upload {
+					errMsg += "uploading "
+				} else {
+					errMsg += "downloading "
+				}
+				errMsg += transfer.url + ": " + stashcp.GetErrors()
+				resultAd.Set("TransferError", errMsg)
+				stashcp.ClearErrors()
 			}
 			resultAd.Set("TransferFileBytes", 0)
 			resultAd.Set("TransferTotalBytes", 0)

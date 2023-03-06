@@ -34,6 +34,8 @@ func TestIsPort(t *testing.T) {
 
 // TestNewTransferDetails checks the creation of transfer details
 func TestNewTransferDetails(t *testing.T) {
+	os.Setenv("http_proxy", "http://proxy.edu:3128")
+
 	// Case 1: cache with http
 	testCache := Cache{
 		AuthEndpoint: "cache.edu:8443",

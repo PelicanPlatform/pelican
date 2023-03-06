@@ -10,9 +10,9 @@ import (
 
 //  TestErrorAccum tests simple adding and removing from the accumulator
 func TestErrorAccum(t *testing.T) {
-	bunchOfErrors = make([]error, 0)
+	bunchOfErrors = make([]TimestampedError, 0)
 	defer func() {
-		bunchOfErrors = make([]error, 0)
+		bunchOfErrors = make([]TimestampedError, 0)
 	}()
 	// Case 1: cache with http
 	err := errors.New("error1")
@@ -21,15 +21,15 @@ func TestErrorAccum(t *testing.T) {
 	AddError(err2)
 
 	errStr := GetErrors()
-	assert.Equal(t, "error1;error2;", errStr)
+	assert.Equal(t, "Attempt #2: error2 (0s elapsed, 0s since start); Attempt #1: error1 (0s since start)", errStr)
 
 }
 
 // TestErrorsRetryableFalse tests that errors are not retryable
 func TestErrorsRetryableFalse(t *testing.T) {
-	bunchOfErrors = make([]error, 0)
+	bunchOfErrors = make([]TimestampedError, 0)
 	defer func() {
-		bunchOfErrors = make([]error, 0)
+		bunchOfErrors = make([]TimestampedError, 0)
 	}()
 	// Case 2: cache with http
 	AddError(&SlowTransferError{})
@@ -47,9 +47,9 @@ func TestErrorsRetryableFalse(t *testing.T) {
 
 // TestErrorsRetryableTrue tests that errors are retryable
 func TestErrorsRetryableTrue(t *testing.T) {
-	bunchOfErrors = make([]error, 0)
+	bunchOfErrors = make([]TimestampedError, 0)
 	defer func() {
-		bunchOfErrors = make([]error, 0)
+		bunchOfErrors = make([]TimestampedError, 0)
 	}()
 	// Try with a retryable error nested error
 	AddError(&url.Error{Err: &SlowTransferError{}})
