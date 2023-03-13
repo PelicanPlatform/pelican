@@ -22,7 +22,7 @@ Building
 
 Building is performed with the [goreleaser](https://goreleaser.com/) tool.  To build a snapshot (not release):
 
-    $ goreleaser --rm-dist --snapshot
+    $ goreleaser --clean --snapshot
 
 The binaries will be located in `./dist` directory.
 
