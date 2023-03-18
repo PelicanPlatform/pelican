@@ -137,7 +137,7 @@ func GetPassword(newFile bool) ([]byte, error) {
 		fmt.Fprintln(os.Stderr, "You will be asked for this password whenever a new session is started.")
 		fmt.Fprintln(os.Stderr, "Please provide a new password to encrypt the local OSDF client configuration file: ");
 	} else {
-		fmt.Fprintln(os.Stderr, "Enter your password for the local OSDF client configuration file: ")
+		fmt.Fprintln(os.Stderr, "The OSDF client configuration is encrypted.  Enter your password for the local OSDF client configuration file: ")
 	}
 
 	stdin := int(os.Stdin.Fd())
@@ -183,6 +183,9 @@ func GetConfigContents() (OSDFConfig, error) {
 				return config, err
 			}
 			foundKey = true
+			// If the private key exists and is unprotected, assume this is
+			// the same as the user explicitly setting an empty password.
+			setEmptyPassword = true
 		} else if block.Type == "ENCRYPTED PRIVATE KEY" {
 			password, _ := TryGetPassword()
 			typedPassword := false
