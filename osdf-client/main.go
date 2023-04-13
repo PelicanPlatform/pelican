@@ -89,6 +89,10 @@ func doWriteBack(source string, destination *url.URL, namespace Namespace) (int6
 
 }
 
+// getToken returns the token to use for the given destination
+//
+// If token_name is not empty, it will be used as the token name.
+// If token_name is empty, the token name will be determined from the destination URL (if possible) using getTokenName
 func getToken(destination *url.URL, namespace Namespace, isWrite bool, token_name string) (string, error) {
 	if token_name == "" {
 		_, token_name = getTokenName(destination)
