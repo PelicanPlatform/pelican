@@ -26,7 +26,7 @@ import (
 	"github.com/vbauerster/mpb/v7/decor"
 )
 
-var env_prefixes = [...] string {"OSG", "OSDF"}
+var env_prefixes = [...]string{"OSG", "OSDF"}
 
 var p = mpb.New()
 
@@ -217,7 +217,7 @@ func download_http(source string, destination string, payload *payloadStruct, na
 	if namespace.UseTokenOnRead {
 		var err error
 		sourceUrl := url.URL{Path: source}
-		token, err = getToken(&sourceUrl, namespace, false)
+		token, err = getToken(&sourceUrl, namespace, false, tokenName)
 		if err != nil {
 			log.Errorln("Failed to get token though required to read from this namespace:", err)
 			return 0, err
@@ -330,7 +330,7 @@ func startDownloadWorker(source string, destination string, token string, transf
 				errorString := "Failed to download from " + transfer.Url.Hostname() + ":" +
 					transfer.Url.Port() + " "
 				if errors.As(err, &ope) && ope.Op == "proxyconnect" {
-					log.Debugln(ope);
+					log.Debugln(ope)
 					AddrString, _ := os.LookupEnv("http_proxy")
 					if ope.Addr != nil {
 						AddrString = " " + ope.Addr.String()
@@ -554,8 +554,8 @@ Loop:
 		log.Debugln("Got error from HTTP download", err)
 		return 0, err
 	}
-        // Valid responses include 200 and 206.  The latter occurs if the download was resumed after a
-        // prior attempt.
+	// Valid responses include 200 and 206.  The latter occurs if the download was resumed after a
+	// prior attempt.
 	if resp.HTTPResponse.StatusCode != 200 && resp.HTTPResponse.StatusCode != 206 {
 		log.Debugln("Got failure status code:", resp.HTTPResponse.StatusCode)
 		return 0, errors.New("failure status code")
