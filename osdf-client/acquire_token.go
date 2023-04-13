@@ -81,12 +81,12 @@ func TokenIsExpired(jwtSerialized string) bool {
 }
 
 func RegisterClient(namespace Namespace) (*config.PrefixEntry, error) {
-	issuer, err := oauth2.GetIssuerMetadata(namespace.Issuer)
+	issuer, err := oauth2.GetIssuerMetadata(*namespace.CredentialGen.Issuer)
 	if err != nil {
 		return nil, err
 	}
 	if issuer.RegistrationURL == "" {
-		return nil, fmt.Errorf("Issuer %s does not support dynamic client registration", namespace.Issuer)
+		return nil, fmt.Errorf("Issuer %s does not support dynamic client registration", *namespace.CredentialGen.Issuer)
 	}
 
 	drcp := oauth2.DCRPConfig{ClientRegistrationEndpointURL: issuer.RegistrationURL, Metadata: oauth2.Metadata{
@@ -115,7 +115,15 @@ func RegisterClient(namespace Namespace) (*config.PrefixEntry, error) {
 func AcquireToken(destination *url.URL, namespace Namespace, isWrite bool) (string, error) {
 	log.Debugln("Acquiring a token from configuration and OAuth2")
 
-	if len(namespace.Issuer) == 0 {
+	if namespace.CredentialGen == nil || namespace.CredentialGen.Strategy == nil {
+		return "", fmt.Errorf("Credential generation scheme unknown for prefix %s", namespace.Path)
+	}
+	if *namespace.CredentialGen.Strategy != "OAuth2" {
+		return "", fmt.Errorf("Unknown credential generation strategy (%s) for prefix %s",
+                                      *namespace.CredentialGen.Strategy, namespace.Path)
+	}
+	issuer := *namespace.CredentialGen.Issuer
+	if len(issuer) == 0 {
 		return "", fmt.Errorf("Issuer for prefix %s is unknown", namespace.Path)
 	}
 
@@ -192,7 +200,7 @@ func AcquireToken(destination *url.URL, namespace Namespace, isWrite bool) (stri
 			RefreshToken: acceptableToken.RefreshToken,
 			Expiry: time.Unix(0, 0),
 		}
-		issuerInfo, err := oauth2.GetIssuerMetadata(namespace.Issuer)
+		issuerInfo, err := oauth2.GetIssuerMetadata(issuer)
 		if err == nil {
 			upstreamConfig := oauth2_upstream.Config{
 				ClientID: prefixEntry.ClientID,
@@ -220,10 +228,7 @@ func AcquireToken(destination *url.URL, namespace Namespace, isWrite bool) (stri
 		}
 	}
 
-	if len(namespace.Issuer) == 0 {
-		return "", fmt.Errorf("Unable to acquire new token; token issuer for %s is unknown", namespace.Path)
-	}
-	token, err := oauth2.AcquireToken(namespace.Issuer, prefixEntry, destination.Path, isWrite)
+	token, err := oauth2.AcquireToken(issuer, prefixEntry, destination.Path, isWrite)
 	if err != nil {
 		return "", err
 	}
