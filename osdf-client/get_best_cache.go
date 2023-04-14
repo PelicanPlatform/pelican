@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -207,4 +208,82 @@ func GetBestCache(cacheListName string) ([]string, error) {
 		log.Debugf("Ordered list of nearest caches: %s", NearestCacheList)
 		return NearestCacheList, nil
 	}
+}
+
+func GetCachesFromDirector(source string, directorUrl string) (caches []Cache, err error) {
+	resourceUrl := directorUrl + source
+
+	// Prevent following the Director's redirect
+	client := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	log.Debugln("Querying OSDF Director at", resourceUrl)
+	resp, err := client.Get(resourceUrl)
+	log.Debugln("Director's response:", resp)
+
+	if err != nil {
+		log.Errorln("Failed to get response from OSDF Director:", err)
+		return
+	}
+
+	// A non 307 response status code probably indicates something is wrong with the director
+	if resp.StatusCode != 307 {
+		err_str := "Unexpected response from Director: " + strconv.Itoa(resp.StatusCode) + ". Either the Director isn't working properly, or the requested namespace doesn't exist (404)"
+		err = errors.New(err_str)
+		return
+	}
+	defer resp.Body.Close()
+
+	// Get the Link header
+	linkHeader := resp.Header.Values("Link")
+
+	for _, linksStr := range strings.Split(linkHeader[0], ",") {
+		links := strings.Split(strings.ReplaceAll(linksStr, " ", ""), ";")
+
+		var endpoint string
+		// var rel string // "rel", as defined in the Metalink/HTTP RFC. Currently not being used by
+		// the OSDF Client, but is provided by the director.
+		var pri int
+		for _, val := range links {
+			if strings.HasPrefix(val, "<") {
+				endpoint = val[1 : len(val)-1]
+			} else if strings.HasPrefix(val, "pri") {
+				pri, _ = strconv.Atoi(val[4:])
+			}
+			// } else if strings.HasPrefix(val, "rel") {
+			// 	rel = val[5 : len(val)-1]
+			// }
+		}
+
+		// Construct the cache objects, populating only the url+port that will be used
+		// based on authentication. Also, cache.Resource is currently being set as
+		// the priority, because the Director at this time doesn't provide a resource
+		// name. Maybe there's a way to bake that into the LINK header for each cache
+		// while still following Metalink/HTTP?
+		var cache Cache
+		port := strings.Split(endpoint, ":")[1]
+		if port == "8000" {
+			cache.Endpoint = endpoint
+			cache.AuthEndpoint = "SHOULDNT_BE_USED"
+		} else if port == "8443" {
+			cache.Endpoint = "SHOULDNT_BE_USED"
+			cache.AuthEndpoint = endpoint
+		}
+		cache.Resource = strconv.Itoa(pri)
+		caches = append(caches, cache)
+	}
+
+	// Making the assumption that the Link header doesn't already provide the caches
+	// in order (even though it probably does). This sorts the caches and ensures
+	// we're using the "pri" tag to order them
+	sort.Slice(caches, func(i, j int) bool {
+		val1, _ := strconv.Atoi(caches[i].Resource)
+		val2, _ := strconv.Atoi(caches[j].Resource)
+		return val1 < val2
+	})
+
+	return caches, err
 }
