@@ -326,7 +326,19 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 		sourceFile = "/" + sourceFile
 	}
 
-	ns, err := MatchNamespace(source_url.Path)
+	OSDFDirectorUrl, useOSDFDirector := os.LookupEnv("OSDF_DIRECTOR_URL")
+
+	var ns Namespace
+	if useOSDFDirector {
+		dirResp, err := QueryDirector(sourceFile, OSDFDirectorUrl)
+		if err != nil {
+			log.Errorln("Error while querying the Director:", err)
+		}
+		err = CreateNSFromDirectorResp(dirResp, &ns)
+	} else {
+		ns, err = MatchNamespace(source_url.Path)
+	}
+
 	if err != nil {
 		return 0, err
 	}
@@ -389,10 +401,11 @@ Loop:
 			}
 		case "http":
 			log.Info("Trying HTTP...")
-			if downloaded, err = download_http(sourceFile, destination, &payload, ns, recursive, token_name); err == nil {
+			if downloaded, err = download_http(sourceFile, destination, &payload, ns, recursive, token_name, OSDFDirectorUrl); err == nil {
 				success = true
 				break Loop
 			}
+
 		default:
 			log.Errorf("Unknown transfer method: %s", method)
 		}
