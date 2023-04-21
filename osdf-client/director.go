@@ -19,10 +19,11 @@ type DirectorCache struct {
 
 // Simple parser to that takes a "values" string from a header and turns it
 // into a map of key/value pairs
-func HeaderParser(values string) (retMap map[string]string, err error) {
+func HeaderParser(values string) (retMap map[string]string) {
 	retMap = map[string]string{}
 
-	// Some headers might not have values
+	// Some headers might not have values, such as the
+	// X-OSDF-Authorization header when the resource is public
 	if values == "" {
 		return
 	}
@@ -37,22 +38,21 @@ func HeaderParser(values string) (retMap map[string]string, err error) {
 		retMap[split[0]] = split[1]
 	}
 
-	return retMap, err
+	return retMap
 }
 
 // Given the Director response, create the ordered list of caches
 // and store it as namespace.SortedDirectorCaches
 func CreateNSFromDirectorResp(dirResp *http.Response, namespace *Namespace) (err error) {
-
-	X_OSDF_Namespace, _ := HeaderParser(dirResp.Header.Values("X-Osdf-Namespace")[0])
-	namespace.Path = X_OSDF_Namespace["Namespace"]
-	namespace.UseTokenOnRead, _ = strconv.ParseBool(X_OSDF_Namespace["UseTokenOnRead"])
-	namespace.ReadHTTPS, _ = strconv.ParseBool(X_OSDF_Namespace["ReadHTTPS"])
+	X_OSDF_Namespace := HeaderParser(dirResp.Header.Values("X-Osdf-Namespace")[0])
+	namespace.Path = X_OSDF_Namespace["namespace"]
+	namespace.UseTokenOnRead, _ = strconv.ParseBool(X_OSDF_Namespace["use-token-on-read"])
+	namespace.ReadHTTPS, _ = strconv.ParseBool(X_OSDF_Namespace["readhttps"])
 
 	var X_OSDF_Authorization map[string]string
 	if len(dirResp.Header.Values("X-Osdf-Authorization")) > 0 {
-		X_OSDF_Authorization, _ = HeaderParser(dirResp.Header.Values("X-Osdf-Authorization")[0])
-		namespace.Issuer = X_OSDF_Authorization["Issuer"]
+		X_OSDF_Authorization = HeaderParser(dirResp.Header.Values("X-Osdf-Authorization")[0])
+		namespace.Issuer = X_OSDF_Authorization["issuer"]
 	}
 
 	// Create the caches slice
