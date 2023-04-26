@@ -201,7 +201,7 @@ func FuzzGetTokenName(f *testing.F) {
 	})
 }
 
-func TestParseJobAd(t *testing.T) {
+func TestParseNoJobAd(t *testing.T) {
 	// Job ad file does not exist
 	tempDir := t.TempDir()
 	path := filepath.Join(tempDir, ".job.ad")
