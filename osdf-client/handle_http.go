@@ -30,6 +30,15 @@ var env_prefixes = [...]string{"OSG", "OSDF"}
 
 var p = mpb.New()
 
+type StoppedTransferError struct {
+	Err 	string
+}
+
+func (e *StoppedTransferError) Error() string {
+	return e.Err
+}
+
+
 // SlowTransferError is an error that is returned when a transfer takes longer than the configured timeout
 type SlowTransferError struct {
 	BytesTransferred int64
@@ -454,6 +463,9 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 	var previousCompletedBytes int64 = 0
 	var previousCompletedTime = time.Now()
 	var startBelowLimit int64 = 0
+
+	var noProgressStartTime time.Time
+	var lastBytesComplete int64
 	// Loop of the download
 Loop:
 	for {
@@ -470,6 +482,22 @@ Loop:
 			}
 
 		case <-t.C:
+			
+			if resp.BytesComplete() == lastBytesComplete {
+				if noProgressStartTime.IsZero() {
+					noProgressStartTime = time.Now()
+				} else if time.Since(noProgressStartTime) > 100 * time.Second {
+					errMsg := "No progress for more than " + (time.Since(noProgressStartTime)/time.Second).String() + " seconds."
+					log.Errorln(errMsg)
+					return 5, &StoppedTransferError{
+						Err: errMsg,
+					}
+				}
+			} else {
+				noProgressStartTime = time.Time{}
+			}
+			lastBytesComplete = resp.BytesComplete()
+
 
 			// Check if we are downloading fast enough
 			if resp.BytesPerSecond() < float64(downloadLimit) {
@@ -503,6 +531,8 @@ Loop:
 					cancelledProgressBar.SetTotal(resp.Size, true)
 				}
 
+				log.Errorln("Download speed of ", resp.BytesPerSecond(), "bytes/s", " is below the limit of", downloadLimit, "bytes/s")
+				
 				return 0, &SlowTransferError{
 					BytesTransferred: resp.BytesComplete(),
 					BytesPerSecond:   int64(resp.BytesPerSecond()),
