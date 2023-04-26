@@ -494,7 +494,7 @@ func parse_job_ad(payload payloadStruct) { // TODO: needs the payload
 
 	b, err := os.ReadFile(filename)
 	if err != nil {
-		log.Fatal(err)
+		log.Warningln("Can not read .job.ad file", err)
 	}
 
 	// Get all matches from file
