@@ -230,8 +230,7 @@ func download_http(source string, destination string, payload *payloadStruct, na
 	var files []string
 	if OSDFDirectorUrl != "" {
 		log.Debugln("Using OSDF Director at ", OSDFDirectorUrl)
-		var closestNamespaceCaches []DirectorCache
-		closestNamespaceCaches = namespace.SortedDirectorCaches
+		var closestNamespaceCaches []DirectorCache = namespace.SortedDirectorCaches
 
 		log.Debugln("Matched caches:", closestNamespaceCaches)
 

@@ -333,14 +333,19 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 		dirResp, err := QueryDirector(sourceFile, OSDFDirectorUrl)
 		if err != nil {
 			log.Errorln("Error while querying the Director:", err)
+			return 0, err
 		}
 		err = CreateNSFromDirectorResp(dirResp, &ns)
+		if err != nil {
+			log.Errorln("Error parsing namespace information from Director:", err)
+			return 0, err
+		}
 	} else {
 		ns, err = MatchNamespace(source_url.Path)
-	}
-
-	if err != nil {
-		return 0, err
+		if err != nil {
+			log.Errorln("Error matching namespace:", err)
+			return 0, err
+		}
 	}
 
 	// get absolute path
