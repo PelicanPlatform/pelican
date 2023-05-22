@@ -379,17 +379,17 @@ func startDownloadWorker(source string, destination string, token string, transf
 }
 
 func parseTransferStatus(status string) (int, string) {
-    parts := strings.SplitN(status, ": ", 2)
-    if len(parts) != 2 {
-        return 0, ""
-    }
+	parts := strings.SplitN(status, ": ", 2)
+	if len(parts) != 2 {
+		return 0, ""
+	}
 
-    statusCode, err := strconv.Atoi(strings.TrimSpace(parts[0]))
-    if err != nil {
-        return 0, ""
-    }
+	statusCode, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+	if err != nil {
+		return 0, ""
+	}
 
-    return statusCode, strings.TrimSpace(parts[1])
+	return statusCode, strings.TrimSpace(parts[1])
 }
 
 // DownloadHTTP - Perform the actual download of the file
@@ -422,8 +422,8 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 		req.HTTPRequest.Header.Set("Authorization", "Bearer "+token)
 	}
 	// Set the headers
-    req.HTTPRequest.Header.Set("X-Transfer-Status", "true")
-    req.HTTPRequest.Header.Set("TE", "trailers")
+	req.HTTPRequest.Header.Set("X-Transfer-Status", "true")
+	req.HTTPRequest.Header.Set("TE", "trailers")
 	req.WithContext(ctx)
 
 	// Test the transfer speed every 5 seconds
@@ -610,7 +610,7 @@ Loop:
 				return 0, errors.New("transfer error: " + statusText)
 			}
 		}
-    }
+	}
 	// Valid responses include 200 and 206.  The latter occurs if the download was resumed after a
 	// prior attempt.
 	if resp.HTTPResponse.StatusCode != 200 && resp.HTTPResponse.StatusCode != 206 {
