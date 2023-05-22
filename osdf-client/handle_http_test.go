@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 	"github.com/stretchr/testify/assert"
+
+	"net/http/httputil"
 )
 
 // TestIsPort calls main.hasPort with a hostname, checking
@@ -232,6 +234,39 @@ func TestConnectionError(t *testing.T) {
 
 }
 
+func TestTrailerError(t *testing.T) {
+	// Set up an HTTP server that returns an error trailer
+	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Trailer", "X-Transfer-Status")
+		w.Header().Set("X-Transfer-Status", "500: Unable to read test.txt; input/output error")
+
+		chunkedWriter := httputil.NewChunkedWriter(w)
+		defer chunkedWriter.Close()
+
+		_, err := chunkedWriter.Write([]byte("Test data"))
+		if err != nil {
+			t.Fatalf("Error writing to chunked writer: %v", err)
+		}
+	}))
+
+	defer svr.Close()
+
+	testCache := Cache{
+		AuthEndpoint: svr.URL,
+		Endpoint:     svr.URL,
+		Resource:     "Cache",
+	}
+	transfers := NewTransferDetails(testCache, false)
+	assert.Equal(t, 2, len(transfers))
+	assert.Equal(t, svr.URL, transfers[0].Url.String())
+
+	// Call DownloadHTTP and check if the error is returned correctly
+	_, err := DownloadHTTP(transfers[0], filepath.Join(t.TempDir(), "test.txt"), "")
+
+	assert.NotNil(t, err)
+	assert.EqualError(t, err, "transfer error: Unable to read test.txt; input/output error")
+}
+
 func TestUploadZeroLengthFile(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 
@@ -334,3 +369,4 @@ func TestFullUpload(t *testing.T) {
 	assert.NoError(t, err, "Error uploading file")
 	assert.Equal(t, int64(len(testFileContent)), uploaded, "Uploaded file size does not match")
 }
+
