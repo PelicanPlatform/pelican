@@ -200,3 +200,13 @@ func FuzzGetTokenName(f *testing.F) {
 		assert.Equal(t, strings.ToLower(orig), tokenName, "URL: "+urlString+"URL String: "+url.String()+" Scheme: "+url.Scheme)
 	})
 }
+
+func TestParseNoJobAd(t *testing.T) {
+	// Job ad file does not exist
+	tempDir := t.TempDir()
+	path := filepath.Join(tempDir, ".job.ad")
+	os.Setenv("_CONDOR_JOB_AD", path)
+
+	payload := payloadStruct{}
+	parse_job_ad(payload)
+}
