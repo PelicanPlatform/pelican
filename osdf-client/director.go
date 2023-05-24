@@ -43,20 +43,20 @@ func HeaderParser(values string) (retMap map[string]string) {
 
 // Given the Director response, create the ordered list of caches
 // and store it as namespace.SortedDirectorCaches
-func CreateNSFromDirectorResp(dirResp *http.Response, namespace *Namespace) (err error) {
-	X_OSDF_Namespace := HeaderParser(dirResp.Header.Values("X-Osdf-Namespace")[0])
-	namespace.Path = X_OSDF_Namespace["namespace"]
-	namespace.UseTokenOnRead, _ = strconv.ParseBool(X_OSDF_Namespace["use-token-on-read"])
-	namespace.ReadHTTPS, _ = strconv.ParseBool(X_OSDF_Namespace["readhttps"])
+func CreateNsFromDirectorResp(dirResp *http.Response, namespace *Namespace) (err error) {
+	xOsdfNamespace := HeaderParser(dirResp.Header.Values("X-Osdf-Namespace")[0])
+	namespace.Path = xOsdfNamespace["namespace"]
+	namespace.UseTokenOnRead, _ = strconv.ParseBool(xOsdfNamespace["use-token-on-read"])
+	namespace.ReadHTTPS, _ = strconv.ParseBool(xOsdfNamespace["readhttps"])
 
-	var X_OSDF_Authorization map[string]string
+	var xOsdfAuthorization map[string]string
 	if len(dirResp.Header.Values("X-Osdf-Authorization")) > 0 {
-		X_OSDF_Authorization = HeaderParser(dirResp.Header.Values("X-Osdf-Authorization")[0])
-		namespace.Issuer = X_OSDF_Authorization["issuer"]
+		xOsdfAuthorization = HeaderParser(dirResp.Header.Values("X-Osdf-Authorization")[0])
+		namespace.Issuer = xOsdfAuthorization["issuer"]
 	}
 
 	// Create the caches slice
-	namespace.SortedDirectorCaches, err = GetCachesFromDirectorResponse(dirResp)
+	namespace.SortedDirectorCaches, err = GetCachesFromDirectorResponse(dirResp, namespace.UseTokenOnRead || namespace.ReadHTTPS)
 	if err != nil {
 		log.Errorln("Unable to construct ordered cache list:", err)
 		return
@@ -89,7 +89,7 @@ func QueryDirector(source string, directorUrl string) (resp *http.Response, err 
 	return
 }
 
-func GetCachesFromDirectorResponse(resp *http.Response) (caches []DirectorCache, err error) {
+func GetCachesFromDirectorResponse(resp *http.Response, needsToken bool) (caches []DirectorCache, err error) {
 	// Get the Link header
 	linkHeader := resp.Header.Values("Link")
 
@@ -98,7 +98,9 @@ func GetCachesFromDirectorResponse(resp *http.Response) (caches []DirectorCache,
 
 		var endpoint string
 		// var rel string // "rel", as defined in the Metalink/HTTP RFC. Currently not being used by
-		// the OSDF Client, but is provided by the director.
+		// the OSDF Client, but is provided by the director. Will be useful in the future when 
+		// we start looking at cases where we want to duplicate from caches if we're throttling
+		// connections to the origin.
 		var pri int
 		for _, val := range links {
 			if strings.HasPrefix(val, "<") {
@@ -111,21 +113,11 @@ func GetCachesFromDirectorResponse(resp *http.Response) (caches []DirectorCache,
 			// }
 		}
 
-		// Construct the cache objects, populating only the url+port that will be used
-		// based on authentication. Also, cache.Resource is currently being set as
-		// the priority, because the Director at this time doesn't provide a resource
-		// name. Maybe there's a way to bake that into the LINK header for each cache
-		// while still following Metalink/HTTP?
+		// Construct the cache objects, getting endpoint and auth requirements from
+		// Director
 		var cache DirectorCache
-		port := strings.Split(endpoint, ":")[1]
-		if port == "8000" {
-			cache.AuthedReq = false
-		} else if port == "8443" {
-			cache.AuthedReq = true
-		}
-		// Do we need to worry about other ports?
+		cache.AuthedReq = needsToken
 		cache.EndpointUrl = endpoint
-
 		cache.Priority = pri
 		caches = append(caches, cache)
 	}

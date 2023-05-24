@@ -197,6 +197,17 @@ type TransferResults struct {
 	Downloaded int64
 }
 
+type CacheInterface interface{}
+
+func GenerateTransferDetailsUsingCache(cache CacheInterface, needsToken bool) []TransferDetails {
+	if directorCache, ok := cache.(DirectorCache); ok {
+		return NewTransferDetailsUsingDirector(directorCache, needsToken)
+	} else if cache, ok := cache.(Cache); ok {
+		return NewTransferDetails(cache, needsToken)
+	}
+	return nil
+}
+
 func download_http(source string, destination string, payload *payloadStruct, namespace Namespace, recursive bool, tokenName string, OSDFDirectorUrl string) (bytesTransferred int64, err error) {
 
 	// First, create a handler for any panics that occur
@@ -225,74 +236,51 @@ func download_http(source string, destination string, payload *payloadStruct, na
 	}
 
 	// Check the env var "USE_OSDF_DIRECTOR" and decide if ordered caches should come from director
-	//var closestNamespaceCaches []Cache
 	var transfers []TransferDetails
 	var files []string
+	var closestNamespaceCaches []CacheInterface
 	if OSDFDirectorUrl != "" {
 		log.Debugln("Using OSDF Director at ", OSDFDirectorUrl)
-		var closestNamespaceCaches []DirectorCache = namespace.SortedDirectorCaches
-
-		log.Debugln("Matched caches:", closestNamespaceCaches)
-
-		// Make sure we only try as many caches as we have
-		cachesToTry := CachesToTry
-		if cachesToTry > len(closestNamespaceCaches) {
-			cachesToTry = len(closestNamespaceCaches)
-		}
-		log.Debugln("Trying the caches:", closestNamespaceCaches[:cachesToTry])
-		downloadUrl := url.URL{Path: source}
-
-		if recursive {
-			var err error
-			files, err = walkDavDir(&downloadUrl, token, namespace)
-			if err != nil {
-				log.Errorln("Error from walkDavDir", err)
-				return 0, err
-			}
-		} else {
-			files = append(files, source)
-		}
-
-		// Generate all of the transfer details to make a list of transfers
-		for _, cache := range closestNamespaceCaches[:cachesToTry] {
-			// Parse the cache URL
-			log.Debugln("Cache:", cache)
-			transfers = append(transfers, NewTransferDetailsUsingDirector(cache, namespace.ReadHTTPS || namespace.UseTokenOnRead)...)
+		closestNamespaceCaches = make([]CacheInterface, len(namespace.SortedDirectorCaches))
+		for i, v := range namespace.SortedDirectorCaches {
+			closestNamespaceCaches[i] = v
 		}
 	} else {
-		var closestNamespaceCaches []Cache
-		closestNamespaceCaches, err := GetCachesFromNamespace(namespace)
-
+		tmpCaches, err := GetCachesFromNamespace(namespace)
 		if err != nil {
 			log.Errorln("Failed to get namespaced caches (treated as non-fatal):", err)
 		}
-		log.Debugln("Matched caches:", closestNamespaceCaches)
 
-		// Make sure we only try as many caches as we have
-		cachesToTry := CachesToTry
-		if cachesToTry > len(closestNamespaceCaches) {
-			cachesToTry = len(closestNamespaceCaches)
+		closestNamespaceCaches = make([]CacheInterface, len(tmpCaches))
+		for i, v := range tmpCaches {
+			closestNamespaceCaches[i] = v
 		}
-		log.Debugln("Trying the caches:", closestNamespaceCaches[:cachesToTry])
-		downloadUrl := url.URL{Path: source}
+	}
+	log.Debugln("Matched caches:", closestNamespaceCaches)
 
-		if recursive {
-			var err error
-			files, err = walkDavDir(&downloadUrl, token, namespace)
-			if err != nil {
-				log.Errorln("Error from walkDavDir", err)
-				return 0, err
-			}
-		} else {
-			files = append(files, source)
-		}
+	// Make sure we only try as many caches as we have
+	cachesToTry := CachesToTry
+	if cachesToTry > len(closestNamespaceCaches) {
+		cachesToTry = len(closestNamespaceCaches)
+	}
+	log.Debugln("Trying the caches:", closestNamespaceCaches[:cachesToTry])
+	downloadUrl := url.URL{Path: source}
 
-		// Generate all of the transfer details to make a list of transfers
-		for _, cache := range closestNamespaceCaches[:cachesToTry] {
-			// Parse the cache URL
-			log.Debugln("Cache:", cache)
-			transfers = append(transfers, NewTransferDetails(cache, namespace.ReadHTTPS || namespace.UseTokenOnRead)...)
+	if recursive {
+		var err error
+		files, err = walkDavDir(&downloadUrl, token, namespace)
+		if err != nil {
+			log.Errorln("Error from walkDavDir", err)
+			return 0, err
 		}
+	} else {
+		files = append(files, source)
+	}
+
+	for _, cache := range closestNamespaceCaches[:cachesToTry] {
+		// Parse the cache URL
+		log.Debugln("Cache:", cache)
+		transfers = append(transfers, GenerateTransferDetailsUsingCache(cache, namespace.ReadHTTPS || namespace.UseTokenOnRead)...)
 	}
 
 	if len(transfers) > 0 {

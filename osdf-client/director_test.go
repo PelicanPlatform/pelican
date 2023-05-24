@@ -36,7 +36,7 @@ func TestGetCachesFromDirectorResponse(t *testing.T) {
 	}
 
 	// Call the function in question
-	caches, err := GetCachesFromDirectorResponse(directorResponse)
+	caches, err := GetCachesFromDirectorResponse(directorResponse, true)
 
 	// Test for expected outputs
 	assert.NoError(t, err, "Error getting caches from the Director's response")
@@ -50,7 +50,7 @@ func TestGetCachesFromDirectorResponse(t *testing.T) {
 	assert.Equal(t, true, caches[1].AuthedReq)
 }
 
-func TestCreateNSFromDirectorResp(t *testing.T) {
+func TestCreateNsFromDirectorResp(t *testing.T) {
 	//Craft the Director's response
 	directorHeaders := make(map[string][]string)
 	directorHeaders["Link"] = []string{"<my-cache.edu:8443>; rel=\"duplicate\"; pri=1, <another-cache.edu:8443>; rel=\"duplicate\"; pri=2"}
@@ -90,7 +90,7 @@ func TestCreateNSFromDirectorResp(t *testing.T) {
 
 	// Call the function in question
 	var ns Namespace
-	err := CreateNSFromDirectorResp(directorResponse, &ns)
+	err := CreateNsFromDirectorResp(directorResponse, &ns)
 
 	// Test for expected outputs
 	assert.NoError(t, err, "Error creating Namespace from Director response")

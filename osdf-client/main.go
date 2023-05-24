@@ -335,7 +335,7 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 			log.Errorln("Error while querying the Director:", err)
 			return 0, err
 		}
-		err = CreateNSFromDirectorResp(dirResp, &ns)
+		err = CreateNsFromDirectorResp(dirResp, &ns)
 		if err != nil {
 			log.Errorln("Error parsing namespace information from Director:", err)
 			return 0, err
