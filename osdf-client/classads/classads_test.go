@@ -1,6 +1,7 @@
 package classads
 
 import (
+	"bufio"
 	"strings"
 	"testing"
 
@@ -91,4 +92,47 @@ func TestIntClassAd(t *testing.T) {
 	intValue1, err := ad2.Get("IntValue")
 	assert.NoError(t, err, "Get() failed")
 	assert.Equal(t, 42, intValue1.(int))
+}
+
+func TestOddClassads(t *testing.T) {
+	// Test input with malformed URL (using semi-colon instead of comma)
+	input := `[ LocalFileName = "/var/lib/condor/execute/dir_22284/glide_9GSlr9/execute/dir_69758/file2"; Url = "stash:///osgconnect/public/$USER/file1; stash:///osgconnect/public/$USER/file2" ]`
+	ads, err := ReadClassAd(strings.NewReader(input))
+	assert.NoError(t, err, "ReafddClassAd() failed")
+	assert.Equal(t, 1, len(ads), "ReadClassAd() returned %d ads, expected 1", len(ads))
+	localFileName, err := ads[0].Get("LocalFileName")
+	assert.NoError(t, err, "Get(LocalFileName) failed")
+	assert.Equal(t, "/var/lib/condor/execute/dir_22284/glide_9GSlr9/execute/dir_69758/file2", localFileName.(string))
+	url, err := ads[0].Get("Url")
+	assert.NoError(t, err, "Get(Url) failed")
+	assert.Equal(t, "stash:///osgconnect/public/$USER/file1; stash:///osgconnect/public/$USER/file2", url.(string))
+
+	// Test input with a "[" in the value
+	input = `[ LocalFileName = "/var/lib/condor/execute/dir_22284/glide_9GSlr9/execute/dir_69758/file2"; Url = "stash:///osgconnect/public/$USER/file1[1]; stash:///osgconnect/public/$USER/file2" ]`
+	ads, err = ReadClassAd(strings.NewReader(input))
+	assert.NoError(t, err, "ReadClassAd() failed")
+	assert.Equal(t, 1, len(ads), "ReadClassAd() returned %d ads, expected 1", len(ads))
+	localFileName, err = ads[0].Get("LocalFileName")
+	assert.NoError(t, err, "Get(LocalFileName) failed")
+	assert.Equal(t, "/var/lib/condor/execute/dir_22284/glide_9GSlr9/execute/dir_69758/file2", localFileName.(string))
+	url, err = ads[0].Get("Url")
+	assert.NoError(t, err, "Get(Url) failed")
+	assert.Equal(t, "stash:///osgconnect/public/$USER/file1[1]; stash:///osgconnect/public/$USER/file2", url.(string))
+
+}
+
+func TestAttributeSplitFunc(t *testing.T) {
+	input := `LocalFileName = "/var/lib/condor/execute/dir_22284/glide_9GSlr9/execute/dir_69758/file2"; Url = "stash:///osgconnect/public/$USER/file1; stash:///osgconnect/public/$USER/file2"`
+
+	scanner := bufio.NewScanner(strings.NewReader(input))
+	scanner.Split(attributeSplitFunc)
+	attributes := make([]string, 0)
+	for scanner.Scan() {
+		attributes = append(attributes, scanner.Text())
+	}
+	assert.Equal(t, nil, scanner.Err(), "attributeSplitFunc() failed: %s", scanner.Err())
+	assert.Equal(t, 2, len(attributes), "attributeSplitFunc() returned %d attributes, expected 2", len(attributes))
+	assert.Equal(t, `LocalFileName = "/var/lib/condor/execute/dir_22284/glide_9GSlr9/execute/dir_69758/file2"`, attributes[0])
+	assert.Equal(t, `Url = "stash:///osgconnect/public/$USER/file1; stash:///osgconnect/public/$USER/file2"`, attributes[1])
+
 }

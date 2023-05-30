@@ -37,6 +37,7 @@ type Cache struct {
 type Namespace struct {
 	Caches         []Cache `json:"caches"`
 	Path           string  `json:"path"`
+	Issuer         string  `json:"issuer"`
 	ReadHTTPS      bool    `json:"readhttps"`
 	UseTokenOnRead bool    `json:"usetokenonread"`
 	WriteBackHost  string  `json:"writebackhost"`
@@ -116,7 +117,13 @@ func GetNamespaces() ([]Namespace, error) {
 	} else {
 		namespacesJson = namespacesFromUrl
 	}
-	log.Debugln("Parsing namespaces: ", string(namespacesJson))
+	if len(namespacesJson) > 40 {
+		log.Debugf("Parsing namespaces: %s ... (%d characters total)",
+			strings.ReplaceAll(string(namespacesJson[:40]), "\n", " "),
+			len(namespacesJson))
+	} else {
+		log.Debugln("Parsing namespaces: ", strings.ReplaceAll(string(namespacesJson), "\n", " "))
+	}
 	err = json.Unmarshal(namespacesJson, &nsfull)
 	if err != nil {
 		fmt.Println(err)
@@ -161,10 +168,11 @@ func MatchNamespace(path string) (Namespace, error) {
 			return Namespace{}, err
 		}
 	}
+	var best Namespace
 	for _, namespace := range namespaces {
-		if strings.HasPrefix(path, namespace.Path) {
-			return namespace, nil
+		if strings.HasPrefix(path, namespace.Path) && len(namespace.Path) > len(best.Path) {
+			best = namespace
 		}
 	}
-	return Namespace{}, nil
+	return best, nil
 }

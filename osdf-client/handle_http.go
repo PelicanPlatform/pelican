@@ -26,7 +26,18 @@ import (
 	"github.com/vbauerster/mpb/v7/decor"
 )
 
+var env_prefixes = [...]string{"OSG", "OSDF"}
+
 var p = mpb.New()
+
+type StoppedTransferError struct {
+	Err 	string
+}
+
+func (e *StoppedTransferError) Error() string {
+	return e.Err
+}
+
 
 // SlowTransferError is an error that is returned when a transfer takes longer than the configured timeout
 type SlowTransferError struct {
@@ -50,6 +61,42 @@ func (e *SlowTransferError) Is(target error) bool {
 	return ok
 }
 
+type FileDownloadError struct {
+	Text string
+	Err  error
+}
+
+func (e *FileDownloadError) Error() string {
+	return e.Text
+}
+
+func (e *FileDownloadError) Unwrap() error {
+	return e.Err
+}
+
+// Determines whether or not we can interact with the site HTTP proxy
+func IsProxyEnabled() bool {
+	if _, isSet := os.LookupEnv("http_proxy"); !isSet {
+		return false
+	}
+	for _, prefix := range env_prefixes {
+		if _, isSet := os.LookupEnv(prefix + "_DISABLE_HTTP_PROXY"); isSet {
+			return false
+		}
+	}
+	return true
+}
+
+// Determine whether we are allowed to skip the proxy as a fallback
+func CanDisableProxy() bool {
+	for _, prefix := range env_prefixes {
+		if _, isSet := os.LookupEnv(prefix + "_DISABLE_PROXY_FALLBACK"); isSet {
+			return false
+		}
+	}
+	return true
+}
+
 // ConnectionSetupError is an error that is returned when a connection to the remote server fails
 type ConnectionSetupError struct {
 	URL string
@@ -58,7 +105,11 @@ type ConnectionSetupError struct {
 
 func (e *ConnectionSetupError) Error() string {
 	if e.Err != nil {
-		return "failed setup connection to " + e.URL + ": " + e.Err.Error()
+		if len(e.URL) > 0 {
+			return "failed connection setup to " + e.URL + ": " + e.Err.Error()
+		} else {
+			return "failed connection setup: " + e.Err.Error()
+		}
 	} else {
 		return "Connection to remote server failed"
 	}
@@ -97,8 +148,6 @@ func NewTransferDetails(cache Cache, https bool) []TransferDetails {
 	} else {
 		cacheEndpoint = cache.Endpoint
 	}
-	_, canDisableProxy := os.LookupEnv("OSG_DISABLE_PROXY_FALLBACK")
-	canDisableProxy = !canDisableProxy
 
 	// Form the URL
 	cacheURL, err := url.Parse(cacheEndpoint)
@@ -136,11 +185,12 @@ func NewTransferDetails(cache Cache, https bool) []TransferDetails {
 		if !HasPort(cacheURL.Host) {
 			cacheURL.Host += ":8000"
 		}
+		isProxyEnabled := IsProxyEnabled()
 		details = append(details, TransferDetails{
 			Url:   *cacheURL,
-			Proxy: true,
+			Proxy: isProxyEnabled,
 		})
-		if canDisableProxy {
+		if isProxyEnabled && CanDisableProxy() {
 			details = append(details, TransferDetails{
 				Url:   *cacheURL,
 				Proxy: false,
@@ -175,43 +225,22 @@ func download_http(source string, destination string, payload *payloadStruct, na
 	var token string
 	if namespace.UseTokenOnRead {
 		var err error
-		token, err = getToken(tokenName)
+		sourceUrl := url.URL{Path: source}
+		token, err = getToken(&sourceUrl, namespace, false, tokenName)
 		if err != nil {
 			log.Errorln("Failed to get token though required to read from this namespace:", err)
 			return 0, err
 		}
 	}
 
-	cacheListName := "xroot"
-	if namespace.ReadHTTPS || namespace.UseTokenOnRead {
-		cacheListName = "xroots"
-	}
-	if len(NearestCacheList) == 0 {
-		_, err := GetBestStashcache(cacheListName)
-		if err != nil {
-			log.Errorln("Failed to get best caches:", err)
-		}
-	}
-
-	log.Debugln("Nearest cache list:", NearestCacheList)
-	log.Debugln("Cache list name:", namespace.Caches)
-
-	// Now that we have the ordered list of caches, do an intersect for the caches for the namespace
-	var closestNamespaceCaches []Cache
-	if CacheOverride {
-		cache := Cache{
-			Endpoint:     NearestCache,
-			AuthEndpoint: NearestCache,
-			Resource:     NearestCache,
-		}
-		closestNamespaceCaches = []Cache{cache}
-	} else {
-		closestNamespaceCaches = namespace.MatchCaches(NearestCacheList)
+	closestNamespaceCaches, err := GetCachesFromNamespace(namespace)
+	if err != nil {
+		log.Errorln("Failed to get namespaced caches (treated as non-fatal):", err)
 	}
 	log.Debugln("Matched caches:", closestNamespaceCaches)
 
 	// Make sure we only try as many caches as we have
-	cachesToTry := 3
+	cachesToTry := CachesToTry
 	if cachesToTry > len(closestNamespaceCaches) {
 		cachesToTry = len(closestNamespaceCaches)
 	}
@@ -305,10 +334,29 @@ func startDownloadWorker(source string, destination string, token string, transf
 			log.Debugln("Constructed URL:", transfer.Url.String())
 			if downloaded, err = DownloadHTTP(transfer, finalDest, token); err != nil {
 				log.Debugln("Failed to download:", err)
-				toAccum := errors.New("Failed to download from " + transfer.Url.String() +
-					" + proxy=" + strconv.FormatBool(transfer.Proxy) +
-					": " + err.Error())
-				AddError(toAccum)
+				var ope *net.OpError
+				var cse *ConnectionSetupError
+				errorString := "Failed to download from " + transfer.Url.Hostname() + ":" +
+					transfer.Url.Port() + " "
+				if errors.As(err, &ope) && ope.Op == "proxyconnect" {
+					log.Debugln(ope)
+					AddrString, _ := os.LookupEnv("http_proxy")
+					if ope.Addr != nil {
+						AddrString = " " + ope.Addr.String()
+					}
+					errorString += "due to proxy " + AddrString + " error: " + ope.Unwrap().Error()
+				} else if errors.As(err, &cse) {
+					errorString += "+ proxy=" + strconv.FormatBool(transfer.Proxy) + ": "
+					if sce, ok := cse.Unwrap().(grab.StatusCodeError); ok {
+						errorString += sce.Error()
+					} else {
+						errorString += err.Error()
+					}
+				} else {
+					errorString += "+ proxy=" + strconv.FormatBool(transfer.Proxy) +
+						": " + err.Error()
+				}
+				AddError(&FileDownloadError{errorString, err})
 				continue
 			} else {
 				log.Debugln("Downloaded bytes:", downloaded)
@@ -328,6 +376,20 @@ func startDownloadWorker(source string, destination string, token string, transf
 			}
 		}
 	}
+}
+
+func parseTransferStatus(status string) (int, string) {
+	parts := strings.SplitN(status, ": ", 2)
+	if len(parts) != 2 {
+		return 0, ""
+	}
+
+	statusCode, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+	if err != nil {
+		return 0, ""
+	}
+
+	return statusCode, strings.TrimSpace(parts[1])
 }
 
 // DownloadHTTP - Perform the actual download of the file
@@ -359,6 +421,9 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 	if token != "" {
 		req.HTTPRequest.Header.Set("Authorization", "Bearer "+token)
 	}
+	// Set the headers
+	req.HTTPRequest.Header.Set("X-Transfer-Status", "true")
+	req.HTTPRequest.Header.Set("TE", "trailers")
 	req.WithContext(ctx)
 
 	// Test the transfer speed every 5 seconds
@@ -415,6 +480,9 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 	var previousCompletedBytes int64 = 0
 	var previousCompletedTime = time.Now()
 	var startBelowLimit int64 = 0
+
+	var noProgressStartTime time.Time
+	var lastBytesComplete int64
 	// Loop of the download
 Loop:
 	for {
@@ -431,6 +499,22 @@ Loop:
 			}
 
 		case <-t.C:
+			
+			if resp.BytesComplete() == lastBytesComplete {
+				if noProgressStartTime.IsZero() {
+					noProgressStartTime = time.Now()
+				} else if time.Since(noProgressStartTime) > 100 * time.Second {
+					errMsg := "No progress for more than " + (time.Since(noProgressStartTime)/time.Second).String() + " seconds."
+					log.Errorln(errMsg)
+					return 5, &StoppedTransferError{
+						Err: errMsg,
+					}
+				}
+			} else {
+				noProgressStartTime = time.Time{}
+			}
+			lastBytesComplete = resp.BytesComplete()
+
 
 			// Check if we are downloading fast enough
 			if resp.BytesPerSecond() < float64(downloadLimit) {
@@ -464,6 +548,8 @@ Loop:
 					cancelledProgressBar.SetTotal(resp.Size, true)
 				}
 
+				log.Errorln("Download speed of ", resp.BytesPerSecond(), "bytes/s", " is below the limit of", downloadLimit, "bytes/s")
+				
 				return 0, &SlowTransferError{
 					BytesTransferred: resp.BytesComplete(),
 					BytesPerSecond:   int64(resp.BytesPerSecond()),
@@ -514,8 +600,20 @@ Loop:
 		}
 		log.Debugln("Got error from HTTP download", err)
 		return 0, err
+	} else {
+		// Check the trailers for any error information
+		trailer := resp.HTTPResponse.Trailer
+		if errorStatus := trailer.Get("X-Transfer-Status"); errorStatus != "" {
+			statusCode, statusText := parseTransferStatus(errorStatus)
+			if statusCode != 200 {
+				log.Debugln("Got error from file transfer")
+				return 0, errors.New("transfer error: " + statusText)
+			}
+		}
 	}
-	if resp.HTTPResponse.StatusCode != 200 {
+	// Valid responses include 200 and 206.  The latter occurs if the download was resumed after a
+	// prior attempt.
+	if resp.HTTPResponse.StatusCode != 200 && resp.HTTPResponse.StatusCode != 206 {
 		log.Debugln("Got failure status code:", resp.HTTPResponse.StatusCode)
 		return 0, errors.New("failure status code")
 	}

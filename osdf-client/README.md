@@ -22,7 +22,7 @@ Building
 
 Building is performed with the [goreleaser](https://goreleaser.com/) tool.  To build a snapshot (not release):
 
-    $ goreleaser --rm-dist --snapshot
+    $ goreleaser --clean --snapshot
 
 The binaries will be located in `./dist` directory.
 
@@ -49,7 +49,7 @@ Configuration
 
 <!-- MARKDOWN LINKS & IMAGES -->
 [go-mod-version]: https://img.shields.io/github/go-mod/go-version/htcondor/osdf-client
-[github-build]: https://img.shields.io/github/workflow/status/htcondor/osdf-client/Test
+[github-build]: https://img.shields.io/github/actions/workflow/status/htcondor/osdf-client/release.yml
 [github-release-shield]: https://img.shields.io/github/v/release/htcondor/osdf-client
 [github-release]: https://github.com/htcondor/osdf-client/releases
 [github-previous-repo]: https://github.com/opensciencegrid/stashcp

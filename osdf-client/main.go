@@ -1,13 +1,10 @@
 package stashcp
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
-	"net/http"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -47,6 +44,9 @@ var NearestCache string
 var NearestCacheList []string
 var CachesJsonLocation string
 
+// Number of caches to attempt to use in any invocation
+var CachesToTry int = 3
+
 // CacheOverride
 var CacheOverride bool
 
@@ -65,27 +65,15 @@ type payloadStruct struct {
 	downloadSize int64
 }
 
-/*
-	Options from stashcache:
-	--parser.add_option('-d', '--debug', dest='debug', action='store_true', help='debug')
-	parser.add_option('-r', dest='recursive', action='store_true', help='recursively copy')
-	parser.add_option('--closest', action='store_true', help="Return the closest cache and exit")
-	--parser.add_option('-c', '--cache', dest='cache', help="Cache to use")
-	parser.add_option('-j', '--caches-json', dest='caches_json', help="A JSON file containing the list of caches",
-						default=None)
-	parser.add_option('-n', '--cache-list-name', dest='cache_list_name', help="Name of pre-configured cache list to use",
-						default=None)
-	parser.add_option('--list-names', dest='list_names', action='store_true', help="Return the names of pre-configured cache lists and exit (first one is default for -n)")
-	parser.add_option('--methods', dest='methods', help="Comma separated list of methods to try, in order.  Default: cvmfs,xrootd,http", default="cvmfs,xrootd,http")
-	parser.add_option('-t', '--token', dest='token', help="Token file to use for reading and/or writing")
-*/
-
 // Determine the token name if it is embedded in the scheme, Condor-style
-func getTokenName(destination *url.URL) (tokenName string) {
-	schemePieces := strings.SplitN(destination.Scheme, "+", 2)
+func getTokenName(destination *url.URL) (scheme, tokenName string) {
+	schemePieces := strings.Split(destination.Scheme, "+")
 	tokenName = ""
+	// Scheme is always the last piece
+	scheme = schemePieces[len(schemePieces)-1]
+	// If there are 2 or more pieces, token name is everything but the last item, joined with a +
 	if len(schemePieces) > 1 {
-		tokenName = schemePieces[1]
+		tokenName = strings.Join(schemePieces[:len(schemePieces)-1], "+")
 	}
 	return
 }
@@ -93,7 +81,7 @@ func getTokenName(destination *url.URL) (tokenName string) {
 // Do writeback to stash using SciTokens
 func doWriteBack(source string, destination *url.URL, namespace Namespace) (int64, error) {
 
-	scitoken_contents, err := getToken(getTokenName(destination))
+	scitoken_contents, err := getToken(destination, namespace, true, "")
 	if err != nil {
 		return 0, err
 	}
@@ -101,7 +89,14 @@ func doWriteBack(source string, destination *url.URL, namespace Namespace) (int6
 
 }
 
-func getToken(token_name string) (string, error) {
+// getToken returns the token to use for the given destination
+//
+// If token_name is not empty, it will be used as the token name.
+// If token_name is empty, the token name will be determined from the destination URL (if possible) using getTokenName
+func getToken(destination *url.URL, namespace Namespace, isWrite bool, token_name string) (string, error) {
+	if token_name == "" {
+		_, token_name = getTokenName(destination)
+	}
 
 	type tokenJson struct {
 		AccessKey string `json:"access_token"`
@@ -161,6 +156,7 @@ func getToken(token_name string) (string, error) {
 		if len(token_name) > 0 {
 			token_filename = token_name + ".use"
 		}
+		log.Debugln("Looking for token file:", token_filename)
 		if credsDir, isCondorCredsSet := os.LookupEnv("_CONDOR_CREDS"); token_location == "" && isCondorCredsSet {
 			// Token wasn't specified on the command line or environment, try the default scitoken
 			if _, err := os.Stat(filepath.Join(credsDir, token_filename)); err != nil {
@@ -173,10 +169,15 @@ func getToken(token_name string) (string, error) {
 			token_location, _ = filepath.Abs(".condor_creds/" + token_filename)
 		}
 		if token_location == "" {
-			// Print out, can't find token!  Print out error and exit with non-zero exit status
-			// TODO: Better error message
-			log.Errorln("Unable to find token file")
-			return "", errors.New("failed to find token...")
+			value, err := AcquireToken(destination, namespace, isWrite)
+			if err == nil {
+				return value, nil
+			}
+			log.Errorln("Failed to generate a new authorization token for this transfer: ", err)
+			log.Errorln("This transfer requires authorization to complete and no token is available")
+			err = errors.New("failed to find or generate a token as required for " + destination.String())
+			AddError(err)
+			return "", err
 		}
 	}
 
@@ -248,6 +249,59 @@ func CheckOSDF(destination string, methods []string) (remoteSize uint64, err err
 	return 0, err
 }
 
+func GetCacheHostnames(testFile string) (urls []string, err error) {
+
+	ns, err := MatchNamespace(testFile)
+	if err != nil {
+		return
+	}
+
+	caches, err := GetCachesFromNamespace(ns)
+	if err != nil {
+		return
+	}
+
+	for _, cache := range caches {
+		url_string := cache.AuthEndpoint
+		host := strings.Split(url_string, ":")[0]
+		urls = append(urls, host)
+	}
+
+	return
+}
+
+func GetCachesFromNamespace(namespace Namespace) (caches []Cache, err error) {
+
+	cacheListName := "xroot"
+	if namespace.ReadHTTPS || namespace.UseTokenOnRead {
+		cacheListName = "xroots"
+	}
+	if len(NearestCacheList) == 0 {
+		_, err = GetBestCache(cacheListName)
+		if err != nil {
+			log.Errorln("Failed to get best caches:", err)
+			return
+		}
+	}
+
+	log.Debugln("Nearest cache list:", NearestCacheList)
+	log.Debugln("Cache list name:", namespace.Caches)
+
+	// The main routine can set a global cache to use
+	if CacheOverride {
+		cache := Cache{
+			Endpoint:     NearestCache,
+			AuthEndpoint: NearestCache,
+			Resource:     NearestCache,
+		}
+		caches = []Cache{cache}
+	} else {
+		caches = namespace.MatchCaches(NearestCacheList)
+	}
+	log.Debugln("Matched caches:", caches)
+
+	return
+}
 
 // Start the transfer, whether read or write back
 func DoStashCPSingle(sourceFile string, destination string, methods []string, recursive bool) (bytesTransferred int64, err error) {
@@ -279,18 +333,27 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 		return 0, err
 	}
 
-	source_scheme_pieces := strings.SplitN(source_url.Scheme, "+", 2)
-	dest_scheme_pieces := strings.SplitN(dest_url.Scheme, "+", 2)
+	// If there is a host specified, prepend it to the path
+	if source_url.Host != "" {
+		source_url.Path = path.Join(source_url.Host, source_url.Path)
+	}
+
+	if dest_url.Host != "" {
+		dest_url.Path = path.Join(dest_url.Host, dest_url.Path)
+	}
+
+	sourceScheme, _ := getTokenName(source_url)
+	destScheme, _ := getTokenName(dest_url)
 
 	understoodSchemes := []string{"stash", "file", "osdf", ""}
 
-	_, foundSource := Find(understoodSchemes, source_scheme_pieces[0])
+	_, foundSource := Find(understoodSchemes, sourceScheme)
 	if !foundSource {
 		log.Errorln("Do not understand source scheme:", source_url.Scheme)
 		return 0, errors.New("Do not understand source scheme")
 	}
 
-	_, foundDest := Find(understoodSchemes, dest_scheme_pieces[0])
+	_, foundDest := Find(understoodSchemes, destScheme)
 	if !foundDest {
 		log.Errorln("Do not understand destination scheme:", source_url.Scheme)
 		return 0, errors.New("Do not understand destination scheme")
@@ -300,7 +363,7 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 	// For write back, it will be the destination
 	// For read it will be the source.
 
-	if dest_scheme_pieces[0] == "stash" || dest_scheme_pieces[0] == "osdf" {
+	if destScheme == "stash" || destScheme == "osdf" {
 		log.Debugln("Detected writeback")
 		ns, err := MatchNamespace(dest_url.Path)
 		if err != nil {
@@ -313,7 +376,7 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 		destination = dest_url.Path
 	}
 
-	if source_scheme_pieces[0] == "stash" || source_scheme_pieces[0]== "osdf" {
+	if sourceScheme == "stash" || sourceScheme == "osdf" {
 		sourceFile = source_url.Path
 	}
 
@@ -363,7 +426,7 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 		methods = []string{"http"}
 	}
 
-	token_name := getTokenName(source_url)
+	_, token_name := getTokenName(source_url)
 
 	// switch statement?
 	var downloaded int64 = 0
@@ -372,17 +435,15 @@ Loop:
 
 		switch method {
 		case "cvmfs":
-			log.Info("Trying CVMFS...")
-			if downloaded, err = download_cvmfs(sourceFile, destination, &payload); err == nil {
-				success = true
-				break Loop
-				//check if break still works
-			}
-		case "xrootd":
-			log.Info("Trying XROOTD...")
-			if downloaded, err = download_xrootd(sourceFile, destination, &payload); err == nil {
-				success = true
-				break Loop
+			if strings.HasPrefix(sourceFile, "/osgconnect/") {
+				log.Info("Trying CVMFS...")
+				if downloaded, err = download_cvmfs(sourceFile, destination, &payload); err == nil {
+					success = true
+					break Loop
+					//check if break still works
+				}
+			} else {
+				log.Debug("Skipping CVMFS as file does not start with /osgconnect/")
 			}
 		case "http":
 			log.Info("Trying HTTP...")
@@ -409,12 +470,6 @@ Loop:
 	} else {
 		log.Error("All methods failed! Unable to download file.")
 		payload.status = "Fail"
-	}
-
-	// We really don't care if the es send fails, but log
-	// it in debug if it does fail
-	if err := es_send(&payload); err != nil {
-		log.Debugln("Failed to send to data to ES")
 	}
 
 	if !success {
@@ -490,7 +545,7 @@ func parse_job_ad(payload payloadStruct) { // TODO: needs the payload
 
 	b, err := os.ReadFile(filename)
 	if err != nil {
-		log.Fatal(err)
+		log.Warningln("Can not read .job.ad file", err)
 	}
 
 	// Get all matches from file
@@ -509,90 +564,4 @@ func parse_job_ad(payload payloadStruct) { // TODO: needs the payload
 		}
 	}
 
-}
-
-// NOT IMPLEMENTED
-// func doStashcpdirectory(sourceDir string, destination string, methods string){
-
-// 	// ?? sourceItems = to_str(subprocess.Popen(["xrdfs", stash_origin, "ls", sourceDir], stdout=subprocess.PIPE).communicate()[0]).split()
-
-// 	// ?? for remote_file in sourceItems:
-
-// 	command2 := "xrdfs " + stash_origin + " stat "+ remote_file + " | grep "IsDir" | wc -l"
-
-// 	//	?? isdir=to_str(subprocess.Popen([command2],stdout=subprocess.PIPE,shell=True).communicate()[0].split()[0])isdir=to_str(subprocess.Popen([command2],stdout=subprocess.PIPE,shell=True).communicate()[0].split()[0])
-
-// 	if isDir != 0 {
-// 		result := doStashcpdirectory(remote, destination /*debug variable??*/)
-// 	} else {
-// 		result := doStashCpSingle(remote_file, destination, methods, debug)
-// 	}
-
-// 	// Stop the transfer if something fails
-// 	if result != 0 {
-// 		return result
-// 	}
-
-// 	return 0
-// }
-
-func es_send(payload *payloadStruct) error {
-
-	// calculate the current timestamp
-	timeStamp := time.Now().Unix()
-	payload.timestamp = timeStamp
-
-	// convert payload to a JSON string (something with Marshall ...)
-	var jsonBytes []byte
-	var err error
-	if jsonBytes, err = json.Marshal(payload); err != nil {
-		log.Errorln("Failed to marshal payload JSON: ", err)
-		return err
-	}
-
-	errorChan := make(chan error)
-
-	// Need to make a closure in order to handle the error
-	go func() {
-		err := doEsSend(jsonBytes, errorChan)
-		if err != nil {
-			return
-		}
-	}()
-
-	select {
-	case returnedError := <-errorChan:
-		return returnedError
-	case <-time.After(5 * time.Second):
-		log.Debugln("Send to ES timed out")
-		return errors.New("ES send timed out")
-	}
-
-}
-
-// Do the actual send to ES
-// Should be called with a timeout
-func doEsSend(jsonBytes []byte, errorChannel chan<- error) error {
-	// Send a HTTP POST to collector.atlas-ml.org, with a timeout!
-	resp, err := http.Post("http://collector.atlas-ml.org:9951", "application/json", bytes.NewBuffer(jsonBytes))
-
-	if err != nil {
-		log.Errorln("Can't get collector.atlas-ml.org:", err)
-		errorChannel <- err
-		return err
-	}
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
-		if err != nil {
-			log.Errorln("Failed to close body when uploading payload")
-		}
-	}(resp.Body)
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		errorChannel <- err
-		return err
-	}
-	log.Debugln("Returned from collector.atlas-ml.org:", string(body))
-	errorChannel <- nil
-	return nil
 }

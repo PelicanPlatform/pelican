@@ -10,7 +10,7 @@ import (
 // TestMatchNamespace calls MatchNamespace with a hostname, checking
 // for a valid return value.
 func TestMatchNamespace(t *testing.T) {
-
+	namespaces = nil
 	namespacesJson = []byte(`
 {
   "caches": [
@@ -90,6 +90,49 @@ func TestMatchNamespace(t *testing.T) {
 	err = os.Unsetenv("STASH_NAMESPACE_URL")
 	if err != nil {
 		t.Error(err)
+	}
+
+}
+
+func TestMatchNamespaceSpecific(t *testing.T) {
+	var namesspacesBackup = namespaces
+	defer func() {
+		namespaces = namesspacesBackup
+	}()
+	namespaces = []Namespace{
+		{
+			Path: "/osgconnect",
+		},
+		{
+			Path: "/user",
+		},
+		{
+			Path: "/user/abcdef",
+		},
+		{
+			Path: "/user/ligo/blah",
+		},
+		{
+			Path: "/user/ligo",
+		},
+	}
+
+	var cases = []struct {
+		path string
+		want string
+	}{
+		{"/user/ligo/blah", "/user/ligo/blah"},
+		{"/user/ligo/blah/blah", "/user/ligo/blah"},
+		{"/user/ligo", "/user/ligo"},
+		{"/user/ligo/file/under/path", "/user/ligo"},
+		{"/user/anon/file", "/user"},
+		{"/user/abc/file", "/user"},
+	}
+
+	for _, c := range cases {
+		ns, err := MatchNamespace(c.path)
+		assert.NoError(t, err, "Failed to parse namespace")
+		assert.Equal(t, c.want, ns.Path, "Writeback host does not match when matching namespace for path %s", c.path)
 	}
 
 }
