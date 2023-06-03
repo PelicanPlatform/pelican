@@ -118,9 +118,13 @@ func AcquireToken(destination *url.URL, namespace Namespace, isWrite bool) (stri
 	if namespace.CredentialGen == nil || namespace.CredentialGen.Strategy == nil {
 		return "", fmt.Errorf("Credential generation scheme unknown for prefix %s", namespace.Path)
 	}
-	if *namespace.CredentialGen.Strategy != "OAuth2" {
+	switch strategy := *namespace.CredentialGen.Strategy; strategy {
+	case "OAuth2":
+	case "Vault":
+		return "", fmt.Errorf("Vault credential generation strategy is not supported")
+	default:
 		return "", fmt.Errorf("Unknown credential generation strategy (%s) for prefix %s",
-                                      *namespace.CredentialGen.Strategy, namespace.Path)
+                                      strategy, namespace.Path)
 	}
 	issuer := *namespace.CredentialGen.Issuer
 	if len(issuer) == 0 {
