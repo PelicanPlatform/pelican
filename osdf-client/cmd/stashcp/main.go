@@ -241,7 +241,11 @@ func main() {
 	// Exit with failure
 	if result != nil {
 		// Print the list of errors
-		log.Errorln("Failure downloading " + lastSrc + ": " + stashcp.GetErrors())
+		errMsg := stashcp.GetErrors()
+		if errMsg == "" {
+			errMsg = result.Error()
+		}
+		log.Errorln("Failure downloading " + lastSrc + ": " + errMsg)
 		if stashcp.ErrorsRetryable() {
 			log.Errorln("Errors are retryable")
 			os.Exit(11)
