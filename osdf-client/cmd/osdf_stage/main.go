@@ -44,7 +44,7 @@ type Options struct {
 	OriginPrefix string `long:"origin-prefix" short:"o" description:"Prefix corresponding to the local origin"`
 
 	// Shadow origin prefix; e.g., osdf://ospool/osgconnect-shadow/
-	ShadowOriginPrefix string `long:"shadow-prefix" short:"s" description:"Prefix corresponding to the shadow origin"`
+	ShadowOriginPrefix string `long:"shadow-prefix" short:"s" description:"Prefix corresponding to the shadow origin" required:"true"`
 
 	// Sources to ingest
 	Sources []string `positional-arg-name:"sources" short:"i" long:"input" description:"Source file(s)" default:"-"`
@@ -59,6 +59,22 @@ func main() {
 	// Capture the start time of the transfer
 	if _, err := parser.Parse(); err != nil {
 		if flagsErr, ok := err.(*flags.Error); ok && flagsErr.Type == flags.ErrHelp {
+			fmt.Fprintln(os.Stderr, `
+This utility parses a job ClassAd and, for each "osdf://" URL found in
+the input files that is in a locally-mounted origin, copies the file
+over to a "shadow origin".  The files in the shadow origin are given a
+unique based on their last modification time; this means that local
+files can be modified without causing cache consistency issues.
+
+Terminology:
+- Origin prefix: Where in the OSDF namespace the origin exports its
+  files.  Example: osdf://osg-connect/protected
+- Mount prefix: The location in the locally-mounted filesystem that
+  correspondings to the files in the origin prefix. Example:
+  /mnt/cephfs/protected
+- Shadow prefix: Where in the OSDF namespace the resulting files should
+  be uploaded.  Example: osdf://osg-connect-shadow/protected
+`);
 			os.Exit(0)
 		} else {
 			log.Errorln(err)
@@ -89,7 +105,8 @@ func main() {
 		log.Errorln("Origin prefix scheme must be osdf://:", originPrefixUri.Scheme)
 		os.Exit(1)
 	}
-	originPrefixPath := path.Clean("/" + originPrefixUri.Path)
+	originPrefixPath := path.Clean("/" + originPrefixUri.Host + "/" + originPrefixUri.Path)
+	log.Debugln("Local origin prefix:", originPrefixPath)
 
 	if options.Version {
 		fmt.Println("Version:", version)
@@ -126,7 +143,7 @@ func main() {
 			os.Exit(1)
 		}
 		inputList, err := classad.Get("TransferInput")
-		if err != nil {
+		if err != nil || inputList == nil {
 			// No TransferInput, no need to transform...
 			os.Exit(0)
 		}
@@ -137,14 +154,15 @@ func main() {
 		}
 		re := regexp.MustCompile("[,\\s]+")
 		for _, source := range re.Split(inputListStr, -1) {
+			log.Debugln("Examining transfer input file", source)
 			if (strings.HasPrefix(source, options.MountPrefix)) {
 				sources = append(sources, source)
 			} else {
 					// Replace the osdf:// prefix with the local mount path
 				source_uri, err := url.Parse(source)
 				source_uri_scheme := strings.SplitN(source_uri.Scheme, "+", 2)[0]
-				if err != nil && source_uri_scheme == "osdf" {
-					source_path := path.Clean("/" + source_uri.Path)
+				if err == nil && source_uri_scheme == "osdf" {
+					source_path := path.Clean("/" + source_uri.Host + "/" + source_uri.Path)
 					if (strings.HasPrefix(source_path, originPrefixPath)) {
 						sources = append(sources, options.MountPrefix + source_path[len(originPrefixPath):])
 						continue
@@ -169,7 +187,14 @@ func main() {
 	for _, src := range sources {
 		_, newSource, result := stashcp.DoShadowIngest(src, options.MountPrefix, options.ShadowOriginPrefix)
 		if result != nil {
-			break
+			// What's the correct behavior on failure?  For now, we silently put the transfer
+			// back on the original list.  This is arguably the wrong approach as it might
+			// give the user surprising semantics -- but keeping this until we have a bit more
+			// confidence in the approach.
+			extraSources = append(extraSources, src)
+			log.Errorf("Failed to ingest %s: %s.  Adding original back to the transfer list",
+				src, result.Error())
+			continue
 		}
 		xformSources = append(xformSources, newSource)
 	}

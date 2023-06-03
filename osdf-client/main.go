@@ -227,6 +227,10 @@ func CheckOSDF(destination string, methods []string) (remoteSize uint64, err err
 	if dest_uri.Scheme == "" {
 		dest_uri.Scheme = "osdf"
 	}
+	if dest_uri.Host != "" {
+		dest_uri.Path = path.Clean("/" + dest_uri.Host + "/" + dest_uri.Path)
+		dest_uri.Host = ""
+	}
 
 	ns, err := MatchNamespace(dest_uri.Path)
 	if err != nil {
@@ -238,7 +242,7 @@ func CheckOSDF(destination string, methods []string) (remoteSize uint64, err err
 		switch method {
 		case "http":
 			log.Info("Trying HTTP...")
-			if remoteSize, err = stat_http(dest_uri, ns); err == nil {
+			if remoteSize, err = StatHttp(dest_uri, ns); err == nil {
 				return remoteSize, nil
 			}
 		default:
@@ -339,7 +343,7 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 	}
 
 	if dest_url.Host != "" {
-		dest_url.Path = path.Join(dest_url.Host, dest_url.Path)
+		dest_url.Path = "/" + path.Join(dest_url.Host, dest_url.Path)
 	}
 
 	sourceScheme, _ := getTokenName(source_url)

@@ -37,6 +37,7 @@ func generate_destination(filePath string, originPrefix string, shadowOriginPref
 func DoShadowIngest(sourceFile string, originPrefix string, shadowOriginPrefix string) (int64, string, error) {
 	for idx := 0; idx < 10; idx++ {
 		shadowFile, localSize, err := generate_destination(sourceFile, originPrefix, shadowOriginPrefix)
+		log.Debugln("Resulting shadow URL:", shadowFile)
 		if err != nil {
 			return 0, "", err
 		}
@@ -48,12 +49,19 @@ func DoShadowIngest(sourceFile string, originPrefix string, shadowOriginPrefix s
 		maxRuntime := float64(localSize / 10*1024*1024) + 300
 		for {
 			remoteSize, err := CheckOSDF(shadowFile, methods)
-			if err != nil {
+			if httpErr, ok := err.(*HttpErrResp); ok {
+				if httpErr.Code == 404 {
+					break
+				} else {
+					return 0, "", err
+				}
+			} else if err != nil {
 				return 0, "", err
 			}
 			if (localSize == remoteSize) {
 				return 0, shadowFile, err
 			}
+			log.Debugf("Remote file exists but it is incorrect size; actual size %v, expected %v.", remoteSize, localSize)
 
 			// If the remote file size is growing, then wait a bit; perhaps someone
 			// else is uploading the same file concurrently.
@@ -71,8 +79,9 @@ func DoShadowIngest(sourceFile string, originPrefix string, shadowOriginPrefix s
 				log.Warnln("Remote uploader took too long to upload file; will do upload from this client")
 				break
 			}
+			log.Debugf("Will sleep for 5 seconds to see if another client is currently uploading the file")
 			// TODO: Could use a clever backoff scheme here.
-			time.Sleep(5)
+			time.Sleep(5 * time.Second)
 		}
 
 		uploadBytes, err := DoStashCPSingle(sourceFile, shadowFile, methods, false)

@@ -39,6 +39,16 @@ func (e *StoppedTransferError) Error() string {
 }
 
 
+type HttpErrResp struct {
+	Code int
+	Err string
+}
+
+func (e *HttpErrResp) Error() string {
+	return e.Err
+}
+
+
 // SlowTransferError is an error that is returned when a transfer takes longer than the configured timeout
 type SlowTransferError struct {
 	BytesTransferred int64
@@ -898,9 +908,12 @@ func walkDir(path string, client *gowebdav.Client) ([]string, error) {
 	return files, nil
 }
 
-func stat_http(dest *url.URL, namespace Namespace) (uint64, error) {
+func StatHttp(dest *url.URL, namespace Namespace) (uint64, error) {
 
-	token_name := getTokenName(dest)
+	scitoken_contents, err := getToken(dest, namespace, false, "")
+	if err != nil {
+		return 0, err
+	}
 
 	// Parse the writeback host as a URL
 	writebackhostUrl, err := url.Parse(namespace.WriteBackHost)
@@ -910,19 +923,9 @@ func stat_http(dest *url.URL, namespace Namespace) (uint64, error) {
 	dest.Host = writebackhostUrl.Host
 	dest.Scheme = "https"
 
-	var token string
-	if namespace.UseTokenOnRead {
-		token, err = getToken(token_name)
-		if err != nil {
-			log.Errorln("Failed to get token though required to read from this namespace:", err)
-			return 0, err
-		}
-	}
+	canDisableProxy := CanDisableProxy()
+	disableProxy := !IsProxyEnabled()
 
-	_, canDisableProxy := os.LookupEnv("OSG_DISABLE_PROXY_FALLBACK")
-	canDisableProxy = !canDisableProxy
-
-	disableProxy := false
 	var resp *http.Response
 	for {
 		defaultTransport := http.DefaultTransport.(*http.Transport).Clone()
@@ -940,8 +943,8 @@ func stat_http(dest *url.URL, namespace Namespace) (uint64, error) {
 			return 0, err
 		}
 
-		if token != "" {
-			req.Header.Set("Authorization", "Bearer " + token)
+		if scitoken_contents != "" {
+			req.Header.Set("Authorization", "Bearer " + scitoken_contents)
 		}
 
 		resp, err = client.Do(req)
@@ -979,7 +982,7 @@ func stat_http(dest *url.URL, namespace Namespace) (uint64, error) {
 			return 0, err
 		}
 		defer resp.Body.Close()
-		return 0, errors.New(fmt.Sprintf("Request failed (HTTP status %d): %s", resp.StatusCode, string(response_b)))
+		return 0, &HttpErrResp{resp.StatusCode, fmt.Sprintf("Request failed (HTTP status %d): %s", resp.StatusCode, string(response_b))}
 	}
 }
 
