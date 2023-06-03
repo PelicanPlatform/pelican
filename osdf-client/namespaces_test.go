@@ -76,9 +76,7 @@ func TestMatchNamespace(t *testing.T) {
 
 	// Check for empty
 	ns, err = MatchNamespace("/does/not/exist.txt")
-	assert.NoError(t, err, "Failed to parse namespace")
-	assert.Equal(t, "", ns.Path)
-	assert.Equal(t, Namespace{}.UseTokenOnRead, ns.UseTokenOnRead)
+	assert.Error(t, err)
 
 	// Check for not private
 	ns, err = MatchNamespace("/osgconnect/public/path/to/file.txt")
