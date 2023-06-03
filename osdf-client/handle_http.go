@@ -971,7 +971,7 @@ func StatHttp(dest *url.URL, namespace Namespace) (uint64, error) {
 		}
 		contentLength, err := strconv.ParseInt(contentLengthStr, 10, 64)
 		if err != nil {
-			log.Errorln("Unable to parse Content-Length header value (%s) as integer: %s", contentLengthStr, err)
+			log.Errorf("Unable to parse Content-Length header value (%s) as integer: %s", contentLengthStr, err)
 			return 0, err
 		}
 		return uint64(contentLength), nil

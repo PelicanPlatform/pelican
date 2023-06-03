@@ -35,6 +35,7 @@ func generate_destination(filePath string, originPrefix string, shadowOriginPref
 }
 
 func DoShadowIngest(sourceFile string, originPrefix string, shadowOriginPrefix string) (int64, string, error) {
+	// After each transfer attempt, we'll check to see if the local file was modified.  If so, we'll re-upload.
 	for idx := 0; idx < 10; idx++ {
 		shadowFile, localSize, err := generate_destination(sourceFile, originPrefix, shadowOriginPrefix)
 		log.Debugln("Resulting shadow URL:", shadowFile)
@@ -85,6 +86,9 @@ func DoShadowIngest(sourceFile string, originPrefix string, shadowOriginPrefix s
 		}
 
 		uploadBytes, err := DoStashCPSingle(sourceFile, shadowFile, methods, false)
+		if err != nil {
+			return 0, "", err
+		}
 
 		// See if the file was modified while we were uploading; if not, we'll return success
 		shadowFilePost, _, err := generate_destination(sourceFile, originPrefix, shadowOriginPrefix)

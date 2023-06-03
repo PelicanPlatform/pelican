@@ -73,8 +73,7 @@ Terminology:
   correspondings to the files in the origin prefix. Example:
   /mnt/cephfs/protected
 - Shadow prefix: Where in the OSDF namespace the resulting files should
-  be uploaded.  Example: osdf://osg-connect-shadow/protected
-`);
+  be uploaded.  Example: osdf://osg-connect-shadow/protected`);
 			os.Exit(0)
 		} else {
 			log.Errorln(err)
@@ -152,7 +151,7 @@ Terminology:
 			log.Errorln("TransferInput is not a string")
 			os.Exit(1)
 		}
-		re := regexp.MustCompile("[,\\s]+")
+		re := regexp.MustCompile(`[,\s]+`)
 		for _, source := range re.Split(inputListStr, -1) {
 			log.Debugln("Examining transfer input file", source)
 			if (strings.HasPrefix(source, options.MountPrefix)) {
