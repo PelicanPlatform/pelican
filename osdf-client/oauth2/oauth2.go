@@ -9,6 +9,7 @@ import (
 	"path"
 
 	config "github.com/htcondor/osdf-client/v6/config"
+	namespaces "github.com/htcondor/osdf-client/v6/namespaces"
 )
 
 func deviceCodeSupported(grantTypes *[]string) bool {
@@ -20,7 +21,7 @@ func deviceCodeSupported(grantTypes *[]string) bool {
 	return false
 }
 
-func AcquireToken(issuerUrl string, entry *config.PrefixEntry, osdfPath string, isWrite bool) (*config.TokenEntry, error) {
+func AcquireToken(issuerUrl string, entry *config.PrefixEntry, credentialGen *namespaces.CredentialGeneration, osdfPath string, isWrite bool) (*config.TokenEntry, error) {
 
 	if fileInfo, _ := os.Stdout.Stat(); (fileInfo.Mode() & os.ModeCharDevice) == 0 {
 		return nil, errors.New("This program must be run in a terminal to acquire a new token")
@@ -36,6 +37,10 @@ func AcquireToken(issuerUrl string, entry *config.PrefixEntry, osdfPath string, 
 	}
 
 	pathCleaned := path.Clean(osdfPath)[len(entry.Prefix):]
+	if credentialGen != nil && credentialGen.BasePath != nil && len(*credentialGen.BasePath) > 0 {
+		pathCleaned = path.Clean(osdfPath)[len(*credentialGen.BasePath):]
+	}
+
 	var storageScope string
 	if isWrite {
 		storageScope = "storage.create:"

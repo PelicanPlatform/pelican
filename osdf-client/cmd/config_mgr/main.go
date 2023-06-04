@@ -9,6 +9,7 @@ import (
 
 	config "github.com/htcondor/osdf-client/v6/config"
 	stashcp "github.com/htcondor/osdf-client/v6"
+	namespaces "github.com/htcondor/osdf-client/v6/namespaces"
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
 )
@@ -125,7 +126,7 @@ func addTokenSubcommands(tokenCmd *cobra.Command) {
 			}
 			dest := url.URL{Path: path.Clean("/" + args[1])}
 
-			namespace, err := stashcp.MatchNamespace(args[1])
+			namespace, err := namespaces.MatchNamespace(args[1])
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Failed to get namespace for path:", err)
 				os.Exit(1)

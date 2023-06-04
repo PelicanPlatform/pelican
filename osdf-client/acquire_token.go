@@ -9,13 +9,14 @@ import (
 	"time"
 
 	config "github.com/htcondor/osdf-client/v6/config"
+	namespaces "github.com/htcondor/osdf-client/v6/namespaces"
 	log "github.com/sirupsen/logrus"
 	jwt "github.com/golang-jwt/jwt"
 	oauth2 "github.com/htcondor/osdf-client/v6/oauth2"
 	oauth2_upstream "golang.org/x/oauth2"
 )
 
-func TokenIsAcceptable(jwtSerialized string, osdfPath string, namespace Namespace, isWrite bool) bool {
+func TokenIsAcceptable(jwtSerialized string, osdfPath string, namespace namespaces.Namespace, isWrite bool) bool {
 	parser := jwt.Parser{SkipClaimsValidation: true}
 	token, _, err := parser.ParseUnverified(jwtSerialized, &jwt.MapClaims{})
 	if err != nil {
@@ -33,7 +34,18 @@ func TokenIsAcceptable(jwtSerialized string, osdfPath string, namespace Namespac
 	if !strings.HasPrefix(osdfPathCleaned, namespace.Path) {
 		return false
 	}
+
+	// For some issuers, the token base path is distinct from the OSDF base path.
+	// Example:
+	// - Issuer base path: `/chtc`
+	// - Namespace path: `/chtc/PROTECTED`
+	// In this case, we want to strip out the issuer base path, not the
+	// namespace one, in order to see if the token has the right privs.
+
 	targetResource := path.Clean("/" + osdfPathCleaned[len(namespace.Path):])
+	if namespace.CredentialGen != nil && namespace.CredentialGen.BasePath != nil && len(*namespace.CredentialGen.BasePath) > 0 {
+		targetResource = path.Clean("/" + osdfPathCleaned[len(*namespace.CredentialGen.BasePath):])
+	}
 
 	scopes_iface := (*token.Claims.(*jwt.MapClaims))["scope"]
 	if scopes, ok := scopes_iface.(string); ok {
@@ -80,7 +92,7 @@ func TokenIsExpired(jwtSerialized string) bool {
 	return true
 }
 
-func RegisterClient(namespace Namespace) (*config.PrefixEntry, error) {
+func RegisterClient(namespace namespaces.Namespace) (*config.PrefixEntry, error) {
 	issuer, err := oauth2.GetIssuerMetadata(*namespace.CredentialGen.Issuer)
 	if err != nil {
 		return nil, err
@@ -112,7 +124,7 @@ func RegisterClient(namespace Namespace) (*config.PrefixEntry, error) {
 
 // Given a URL and a piece of the namespace, attempt to acquire a valid
 // token for that URL.
-func AcquireToken(destination *url.URL, namespace Namespace, isWrite bool) (string, error) {
+func AcquireToken(destination *url.URL, namespace namespaces.Namespace, isWrite bool) (string, error) {
 	log.Debugln("Acquiring a token from configuration and OAuth2")
 
 	if namespace.CredentialGen == nil || namespace.CredentialGen.Strategy == nil {
@@ -232,7 +244,7 @@ func AcquireToken(destination *url.URL, namespace Namespace, isWrite bool) (stri
 		}
 	}
 
-	token, err := oauth2.AcquireToken(issuer, prefixEntry, destination.Path, isWrite)
+	token, err := oauth2.AcquireToken(issuer, prefixEntry, namespace.CredentialGen, destination.Path, isWrite)
 	if err != nil {
 		return "", err
 	}

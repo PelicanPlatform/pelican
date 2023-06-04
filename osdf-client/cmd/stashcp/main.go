@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	stashcp "github.com/htcondor/osdf-client/v6"
+	namespaces "github.com/htcondor/osdf-client/v6/namespaces"
 	"github.com/jessevdk/go-flags"
 	log "github.com/sirupsen/logrus"
 )
@@ -124,7 +125,7 @@ func main() {
 	}
 
 	if options.PrintNamespaces {
-		namespaces, err := stashcp.GetNamespaces()
+		namespaces, err := namespaces.GetNamespaces()
 		if err != nil {
 			fmt.Println("Failed to get namespaces:", err)
 			os.Exit(1)
@@ -169,7 +170,7 @@ func main() {
 	if options.ListDir {
 		dirUrl, _ := url.Parse("http://stash.osgconnect.net:1094")
 		dirUrl.Path = source[0]
-		isDir, err := stashcp.IsDir(dirUrl, "", stashcp.Namespace{})
+		isDir, err := stashcp.IsDir(dirUrl, "", namespaces.Namespace{})
 		if err != nil {
 			log.Errorln("Error getting directory listing:", err)
 		}

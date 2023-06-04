@@ -22,6 +22,8 @@ import (
 	// "strings"
 
 	log "github.com/sirupsen/logrus"
+
+	namespaces "github.com/htcondor/osdf-client/v6/namespaces"
 )
 
 type OptionsStruct struct {
@@ -79,7 +81,7 @@ func getTokenName(destination *url.URL) (scheme, tokenName string) {
 }
 
 // Do writeback to stash using SciTokens
-func doWriteBack(source string, destination *url.URL, namespace Namespace) (int64, error) {
+func doWriteBack(source string, destination *url.URL, namespace namespaces.Namespace) (int64, error) {
 
 	scitoken_contents, err := getToken(destination, namespace, true, "")
 	if err != nil {
@@ -93,7 +95,7 @@ func doWriteBack(source string, destination *url.URL, namespace Namespace) (int6
 //
 // If token_name is not empty, it will be used as the token name.
 // If token_name is empty, the token name will be determined from the destination URL (if possible) using getTokenName
-func getToken(destination *url.URL, namespace Namespace, isWrite bool, token_name string) (string, error) {
+func getToken(destination *url.URL, namespace namespaces.Namespace, isWrite bool, token_name string) (string, error) {
 	if token_name == "" {
 		_, token_name = getTokenName(destination)
 	}
@@ -200,7 +202,7 @@ func getToken(destination *url.URL, namespace Namespace, isWrite bool, token_nam
 
 func GetCacheHostnames(testFile string) (urls []string, err error) {
 
-	ns, err := MatchNamespace(testFile)
+	ns, err := namespaces.MatchNamespace(testFile)
 	if err != nil {
 		return
 	}
@@ -219,7 +221,7 @@ func GetCacheHostnames(testFile string) (urls []string, err error) {
 	return
 }
 
-func GetCachesFromNamespace(namespace Namespace) (caches []Cache, err error) {
+func GetCachesFromNamespace(namespace namespaces.Namespace) (caches []namespaces.Cache, err error) {
 
 	cacheListName := "xroot"
 	if namespace.ReadHTTPS || namespace.UseTokenOnRead {
@@ -238,12 +240,12 @@ func GetCachesFromNamespace(namespace Namespace) (caches []Cache, err error) {
 
 	// The main routine can set a global cache to use
 	if CacheOverride {
-		cache := Cache{
+		cache := namespaces.Cache{
 			Endpoint:     NearestCache,
 			AuthEndpoint: NearestCache,
 			Resource:     NearestCache,
 		}
-		caches = []Cache{cache}
+		caches = []namespaces.Cache{cache}
 	} else {
 		caches = namespace.MatchCaches(NearestCacheList)
 	}
@@ -331,7 +333,7 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 
 	if destScheme == "stash" || destScheme == "osdf" {
 		log.Debugln("Detected writeback")
-		ns, err := MatchNamespace(dest_url.Path)
+		ns, err := namespaces.MatchNamespace(dest_url.Path)
 		if err != nil {
 			log.Errorln("Failed to get namespace information:", err)
 		}
@@ -365,7 +367,7 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 			return 0, err
 		}
 	} else {
-		ns, err = MatchNamespace(source_url.Path)
+		ns, err = namespaces.MatchNamespace(source_url.Path)
 		if err != nil {
 			AddError(err)
 			return 0, err

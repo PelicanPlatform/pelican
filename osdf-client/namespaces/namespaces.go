@@ -37,6 +37,7 @@ type Cache struct {
 // Credential generation information
 type CredentialGeneration struct {
 	Issuer        *string  `json:"issuer"`
+	BasePath      *string  `json:"base_path"`
 	MaxScopeDepth *int     `json:"max_scope_depth"`
 	Strategy      *string `json:"strategy"`
 	VaultServer   *string `json:"vault_server"`
