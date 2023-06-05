@@ -1,7 +1,6 @@
 package stashcp
 
 import (
-	"github.com/stretchr/testify/assert"
 	"net"
 	"net/url"
 	"os"
@@ -9,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 // TestGetIps calls main.get_ips with a hostname, checking
@@ -45,7 +46,7 @@ func TestGetToken(t *testing.T) {
 
 	// ENVs to test: BEARER_TOKEN, BEARER_TOKEN_FILE, XDG_RUNTIME_DIR/bt_u<uid>, TOKEN, _CONDOR_CREDS/scitoken.use, .condor_creds/scitokens.use
 	os.Setenv("BEARER_TOKEN", "bearer_token_contents")
-	token, err := getToken(url, namespace, true)
+	token, err := getToken(url, namespace, true, "")
 	assert.NoError(t, err)
 	assert.Equal(t, "bearer_token_contents", token)
 	os.Unsetenv("BEARER_TOKEN")
@@ -58,7 +59,7 @@ func TestGetToken(t *testing.T) {
 	err = os.WriteFile(bearer_token_file, tmpFile, 0644)
 	assert.NoError(t, err)
 	os.Setenv("BEARER_TOKEN_FILE", bearer_token_file)
-	token, err = getToken(url, namespace, true)
+	token, err = getToken(url, namespace, true, "")
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, token)
 	os.Unsetenv("BEARER_TOKEN_FILE")
@@ -70,7 +71,7 @@ func TestGetToken(t *testing.T) {
 	err = os.WriteFile(bearer_token_file, tmpFile, 0644)
 	assert.NoError(t, err)
 	os.Setenv("XDG_RUNTIME_DIR", tmpDir)
-	token, err = getToken(url, namespace, true)
+	token, err = getToken(url, namespace, true, "")
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, token)
 	os.Unsetenv("XDG_RUNTIME_DIR")
@@ -82,7 +83,7 @@ func TestGetToken(t *testing.T) {
 	err = os.WriteFile(bearer_token_file, tmpFile, 0644)
 	assert.NoError(t, err)
 	os.Setenv("TOKEN", bearer_token_file)
-	token, err = getToken(url, namespace, true)
+	token, err = getToken(url, namespace, true, "")
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, token)
 	os.Unsetenv("TOKEN")
@@ -94,7 +95,41 @@ func TestGetToken(t *testing.T) {
 	err = os.WriteFile(bearer_token_file, tmpFile, 0644)
 	assert.NoError(t, err)
 	os.Setenv("_CONDOR_CREDS", tmpDir)
-	token, err = getToken(url, namespace, true)
+	token, err = getToken(url, namespace, true, "")
+	assert.NoError(t, err)
+	assert.Equal(t, token_contents, token)
+	os.Unsetenv("_CONDOR_CREDS")
+
+	// _CONDOR_CREDS/renamed.use
+	token_contents = "bearer_token_file_contents renamed.use"
+	tmpFile = []byte(token_contents)
+	tmpDir = t.TempDir()
+	bearer_token_file = filepath.Join(tmpDir, "renamed.use")
+	err = os.WriteFile(bearer_token_file, tmpFile, 0644)
+	assert.NoError(t, err)
+	os.Setenv("_CONDOR_CREDS", tmpDir)
+	renamedUrl, err := url.Parse("renamed+osdf:///user/ligo/frames")
+	assert.NoError(t, err)
+	renamedNamespace, err := MatchNamespace("/user/ligo/frames")
+	assert.NoError(t, err)
+	token, err = getToken(renamedUrl, renamedNamespace, false, "")
+	assert.NoError(t, err)
+	assert.Equal(t, token_contents, token)
+	os.Unsetenv("_CONDOR_CREDS")
+
+	// _CONDOR_CREDS/renamed.use
+	token_contents = "bearer_token_file_contents renamed.use"
+	tmpFile = []byte(token_contents)
+	tmpDir = t.TempDir()
+	bearer_token_file = filepath.Join(tmpDir, "renamed.use")
+	err = os.WriteFile(bearer_token_file, tmpFile, 0644)
+	assert.NoError(t, err)
+	os.Setenv("_CONDOR_CREDS", tmpDir)
+	renamedUrl, err = url.Parse("/user/ligo/frames")
+	assert.NoError(t, err)
+	renamedNamespace, err = MatchNamespace("/user/ligo/frames")
+	assert.NoError(t, err)
+	token, err = getToken(renamedUrl, renamedNamespace, false, "renamed")
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, token)
 	os.Unsetenv("_CONDOR_CREDS")
@@ -111,7 +146,7 @@ func TestGetToken(t *testing.T) {
 	assert.NoError(t, err)
 	err = os.Chdir(tmpDir)
 	assert.NoError(t, err)
-	token, err = getToken(url, namespace, true)
+	token, err = getToken(url, namespace, true, "")
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, token)
 	err = os.Chdir(currentDir)
@@ -164,4 +199,14 @@ func FuzzGetTokenName(f *testing.F) {
 		_, tokenName := getTokenName(url)
 		assert.Equal(t, strings.ToLower(orig), tokenName, "URL: "+urlString+"URL String: "+url.String()+" Scheme: "+url.Scheme)
 	})
+}
+
+func TestParseNoJobAd(t *testing.T) {
+	// Job ad file does not exist
+	tempDir := t.TempDir()
+	path := filepath.Join(tempDir, ".job.ad")
+	os.Setenv("_CONDOR_JOB_AD", path)
+
+	payload := payloadStruct{}
+	parse_job_ad(payload)
 }

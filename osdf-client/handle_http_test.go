@@ -11,8 +11,9 @@ import (
 	"strings"
 	"testing"
 	"time"
-
 	"github.com/stretchr/testify/assert"
+
+	"net/http/httputil"
 )
 
 // TestIsPort calls main.hasPort with a hostname, checking
@@ -102,11 +103,23 @@ func TestNewTransferDetailsEnv(t *testing.T) {
 }
 
 func TestSlowTransfers(t *testing.T) {
-
 	channel := make(chan bool)
+	slowDownload := 1024 * 10 // 10 KiB/s < 100 KiB/s
 	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Don't send any response
-		<-channel
+		buffer := make([]byte, slowDownload)
+		for {
+			select {
+			case <-channel:
+				return
+			default:
+				_, err := w.Write(buffer)
+				if err != nil {
+					return
+				}
+				w.(http.Flusher).Flush()
+				time.Sleep(1 * time.Second)
+			}
+		}
 	}))
 
 	defer svr.CloseClientConnections()
@@ -128,12 +141,72 @@ func TestSlowTransfers(t *testing.T) {
 		_, err = DownloadHTTP(transfers[0], filepath.Join(t.TempDir(), "test.txt"), "")
 		finishedChannel <- true
 	}()
+
+	select {
+	case <-finishedChannel:
+		if err == nil {
+			t.Fatal("Error is nil, download should have failed")
+		}
+	case <-time.After(time.Second * 160):
+		// 120 seconds for warmup, 30 seconds for download
+		t.Fatal("Maximum downloading time reach, download should have failed")
+	}
+
+	// Close the channel to allow the download to complete
+	channel <- true
+
+	// Make sure the errors are correct
+	assert.NotNil(t, err)
+	assert.IsType(t, &SlowTransferError{}, err)
+}
+
+// Test stopped transfer
+func TestStoppedTransfer(t *testing.T) {
+	channel := make(chan bool)
+	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		buffer := make([]byte, 1024 * 100)
+		for {
+			select {
+			case <-channel:
+				return
+			default:
+				_, err := w.Write(buffer)
+				if err != nil {
+					return
+				}
+				w.(http.Flusher).Flush()
+				time.Sleep(1 * time.Second)
+				buffer = make([]byte, 0)
+			}
+		}
+	}))
+
+	defer svr.CloseClientConnections()
+	defer svr.Close()
+
+	testCache := Cache{
+		AuthEndpoint: svr.URL,
+		Endpoint:     svr.URL,
+		Resource:     "Cache",
+	}
+	transfers := NewTransferDetails(testCache, false)
+	assert.Equal(t, 2, len(transfers))
+	assert.Equal(t, svr.URL, transfers[0].Url.String())
+
+	finishedChannel := make(chan bool)
+	var err error
+
+	go func() {
+		_, err = DownloadHTTP(transfers[0], filepath.Join(t.TempDir(), "test.txt"), "")
+		finishedChannel <- true
+	}()
+
 	select {
 	case <-finishedChannel:
 		if err == nil {
 			t.Fatal("Download should have failed")
 		}
-	case <-time.After(time.Second * 12):
+	case <-time.After(time.Second * 150):
 		t.Fatal("Download should have failed")
 	}
 
@@ -142,9 +215,9 @@ func TestSlowTransfers(t *testing.T) {
 
 	// Make sure the errors are correct
 	assert.NotNil(t, err)
-	assert.IsType(t, &ConnectionSetupError{}, err, err.Error())
-
+	assert.IsType(t, &StoppedTransferError{}, err, err.Error())
 }
+
 
 // Test connection error
 func TestConnectionError(t *testing.T) {
@@ -159,6 +232,39 @@ func TestConnectionError(t *testing.T) {
 
 	assert.IsType(t, &ConnectionSetupError{}, err)
 
+}
+
+func TestTrailerError(t *testing.T) {
+	// Set up an HTTP server that returns an error trailer
+	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Trailer", "X-Transfer-Status")
+		w.Header().Set("X-Transfer-Status", "500: Unable to read test.txt; input/output error")
+
+		chunkedWriter := httputil.NewChunkedWriter(w)
+		defer chunkedWriter.Close()
+
+		_, err := chunkedWriter.Write([]byte("Test data"))
+		if err != nil {
+			t.Fatalf("Error writing to chunked writer: %v", err)
+		}
+	}))
+
+	defer svr.Close()
+
+	testCache := Cache{
+		AuthEndpoint: svr.URL,
+		Endpoint:     svr.URL,
+		Resource:     "Cache",
+	}
+	transfers := NewTransferDetails(testCache, false)
+	assert.Equal(t, 2, len(transfers))
+	assert.Equal(t, svr.URL, transfers[0].Url.String())
+
+	// Call DownloadHTTP and check if the error is returned correctly
+	_, err := DownloadHTTP(transfers[0], filepath.Join(t.TempDir(), "test.txt"), "")
+
+	assert.NotNil(t, err)
+	assert.EqualError(t, err, "transfer error: Unable to read test.txt; input/output error")
 }
 
 func TestUploadZeroLengthFile(t *testing.T) {
@@ -263,3 +369,4 @@ func TestFullUpload(t *testing.T) {
 	assert.NoError(t, err, "Error uploading file")
 	assert.Equal(t, int64(len(testFileContent)), uploaded, "Uploaded file size does not match")
 }
+

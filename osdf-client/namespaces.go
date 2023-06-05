@@ -34,11 +34,20 @@ type Cache struct {
 	Resource     string `json:"resource"`
 }
 
+// Credential generation information
+type CredentialGeneration struct {
+	Issuer        *string  `json:"issuer"`
+	MaxScopeDepth *int     `json:"max_scope_depth"`
+	Strategy      *string `json:"strategy"`
+	VaultServer   *string `json:"vault_server"`
+}
+
 // Namespace holds the structure of stash namespaces
 type Namespace struct {
 	Caches               []Cache `json:"caches"`
 	SortedDirectorCaches []DirectorCache
 	Path                 string `json:"path"`
+  CredentialGen *CredentialGeneration  `json:"credential_generation"`
 	Issuer               string `json:"issuer"`
 	ReadHTTPS            bool   `json:"readhttps"`
 	UseTokenOnRead       bool   `json:"usetokenonread"`

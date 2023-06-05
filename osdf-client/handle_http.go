@@ -26,9 +26,18 @@ import (
 	"github.com/vbauerster/mpb/v7/decor"
 )
 
-var env_prefixes = [...] string {"OSG", "OSDF"}
+var env_prefixes = [...]string{"OSG", "OSDF"}
 
 var p = mpb.New()
+
+type StoppedTransferError struct {
+	Err 	string
+}
+
+func (e *StoppedTransferError) Error() string {
+	return e.Err
+}
+
 
 // SlowTransferError is an error that is returned when a transfer takes longer than the configured timeout
 type SlowTransferError struct {
@@ -228,7 +237,7 @@ func download_http(source string, destination string, payload *payloadStruct, na
 	if namespace.UseTokenOnRead {
 		var err error
 		sourceUrl := url.URL{Path: source}
-		token, err = getToken(&sourceUrl, namespace, false)
+		token, err = getToken(&sourceUrl, namespace, false, tokenName)
 		if err != nil {
 			log.Errorln("Failed to get token though required to read from this namespace:", err)
 			return 0, err
@@ -395,6 +404,20 @@ func startDownloadWorker(source string, destination string, token string, transf
 	}
 }
 
+func parseTransferStatus(status string) (int, string) {
+	parts := strings.SplitN(status, ": ", 2)
+	if len(parts) != 2 {
+		return 0, ""
+	}
+
+	statusCode, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+	if err != nil {
+		return 0, ""
+	}
+
+	return statusCode, strings.TrimSpace(parts[1])
+}
+
 // DownloadHTTP - Perform the actual download of the file
 func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, error) {
 
@@ -424,6 +447,9 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 	if token != "" {
 		req.HTTPRequest.Header.Set("Authorization", "Bearer "+token)
 	}
+	// Set the headers
+	req.HTTPRequest.Header.Set("X-Transfer-Status", "true")
+	req.HTTPRequest.Header.Set("TE", "trailers")
 	req.WithContext(ctx)
 
 	// Test the transfer speed every 5 seconds
@@ -480,6 +506,9 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 	var previousCompletedBytes int64 = 0
 	var previousCompletedTime = time.Now()
 	var startBelowLimit int64 = 0
+
+	var noProgressStartTime time.Time
+	var lastBytesComplete int64
 	// Loop of the download
 Loop:
 	for {
@@ -496,6 +525,22 @@ Loop:
 			}
 
 		case <-t.C:
+			
+			if resp.BytesComplete() == lastBytesComplete {
+				if noProgressStartTime.IsZero() {
+					noProgressStartTime = time.Now()
+				} else if time.Since(noProgressStartTime) > 100 * time.Second {
+					errMsg := "No progress for more than " + (time.Since(noProgressStartTime)/time.Second).String() + " seconds."
+					log.Errorln(errMsg)
+					return 5, &StoppedTransferError{
+						Err: errMsg,
+					}
+				}
+			} else {
+				noProgressStartTime = time.Time{}
+			}
+			lastBytesComplete = resp.BytesComplete()
+
 
 			// Check if we are downloading fast enough
 			if resp.BytesPerSecond() < float64(downloadLimit) {
@@ -529,6 +574,8 @@ Loop:
 					cancelledProgressBar.SetTotal(resp.Size, true)
 				}
 
+				log.Errorln("Download speed of ", resp.BytesPerSecond(), "bytes/s", " is below the limit of", downloadLimit, "bytes/s")
+				
 				return 0, &SlowTransferError{
 					BytesTransferred: resp.BytesComplete(),
 					BytesPerSecond:   int64(resp.BytesPerSecond()),
@@ -579,9 +626,19 @@ Loop:
 		}
 		log.Debugln("Got error from HTTP download", err)
 		return 0, err
+	} else {
+		// Check the trailers for any error information
+		trailer := resp.HTTPResponse.Trailer
+		if errorStatus := trailer.Get("X-Transfer-Status"); errorStatus != "" {
+			statusCode, statusText := parseTransferStatus(errorStatus)
+			if statusCode != 200 {
+				log.Debugln("Got error from file transfer")
+				return 0, errors.New("transfer error: " + statusText)
+			}
+		}
 	}
-        // Valid responses include 200 and 206.  The latter occurs if the download was resumed after a
-        // prior attempt.
+	// Valid responses include 200 and 206.  The latter occurs if the download was resumed after a
+	// prior attempt.
 	if resp.HTTPResponse.StatusCode != 200 && resp.HTTPResponse.StatusCode != 206 {
 		log.Debugln("Got failure status code:", resp.HTTPResponse.StatusCode)
 		return 0, errors.New("failure status code")

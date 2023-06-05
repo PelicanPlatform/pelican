@@ -81,7 +81,7 @@ func getTokenName(destination *url.URL) (scheme, tokenName string) {
 // Do writeback to stash using SciTokens
 func doWriteBack(source string, destination *url.URL, namespace Namespace) (int64, error) {
 
-	scitoken_contents, err := getToken(destination, namespace, true)
+	scitoken_contents, err := getToken(destination, namespace, true, "")
 	if err != nil {
 		return 0, err
 	}
@@ -89,8 +89,14 @@ func doWriteBack(source string, destination *url.URL, namespace Namespace) (int6
 
 }
 
-func getToken(destination *url.URL, namespace Namespace, isWrite bool) (string, error) {
-	_, token_name := getTokenName(destination)
+// getToken returns the token to use for the given destination
+//
+// If token_name is not empty, it will be used as the token name.
+// If token_name is empty, the token name will be determined from the destination URL (if possible) using getTokenName
+func getToken(destination *url.URL, namespace Namespace, isWrite bool, token_name string) (string, error) {
+	if token_name == "" {
+		_, token_name = getTokenName(destination)
+	}
 
 	type tokenJson struct {
 		AccessKey string `json:"access_token"`
@@ -150,6 +156,7 @@ func getToken(destination *url.URL, namespace Namespace, isWrite bool) (string, 
 		if len(token_name) > 0 {
 			token_filename = token_name + ".use"
 		}
+		log.Debugln("Looking for token file:", token_filename)
 		if credsDir, isCondorCredsSet := os.LookupEnv("_CONDOR_CREDS"); token_location == "" && isCondorCredsSet {
 			// Token wasn't specified on the command line or environment, try the default scitoken
 			if _, err := os.Stat(filepath.Join(credsDir, token_filename)); err != nil {
@@ -505,7 +512,7 @@ func parse_job_ad(payload payloadStruct) { // TODO: needs the payload
 
 	b, err := os.ReadFile(filename)
 	if err != nil {
-		log.Fatal(err)
+		log.Warningln("Can not read .job.ad file", err)
 	}
 
 	// Get all matches from file
