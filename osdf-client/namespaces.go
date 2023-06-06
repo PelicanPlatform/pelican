@@ -124,7 +124,7 @@ func GetNamespaces() ([]Namespace, error) {
 	// Try downloading the namespaces, if it fails, use the embedded namespaces
 	namespacesFromUrl, err := downloadNamespace()
 	if err != nil {
-		log.Debugf("Failed to download namespaces: %s, continueing using built-in namespace configuration", err)
+		log.Debugf("Failed to download namespaces: %s, continuing using built-in namespace configuration", err)
 	} else {
 		namespacesJson = namespacesFromUrl
 	}
