@@ -165,28 +165,28 @@ func TestNewTransferDetailsUsingDirector(t *testing.T) {
 
 func TestQueryDirector(t *testing.T) {
 	// Construct a local server that we can poke with QueryDirector
-    expectedLocation := "http://redirect.com"
-    handler := func(w http.ResponseWriter, r *http.Request) {
-        w.Header().Set("Location", expectedLocation)
-        w.WriteHeader(http.StatusFound)
-    }
-    server := httptest.NewServer(http.HandlerFunc(handler))
-    defer server.Close()
+	expectedLocation := "http://redirect.com"
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", expectedLocation)
+		w.WriteHeader(http.StatusFound)
+	}
+	server := httptest.NewServer(http.HandlerFunc(handler))
+	defer server.Close()
 
-    // Call QueryDirector with the test server URL and a source path
-    actualResp, err := QueryDirector("/foo/bar", server.URL)
-    if err != nil {
-        t.Fatal(err)
-    }
+	// Call QueryDirector with the test server URL and a source path
+	actualResp, err := QueryDirector("/foo/bar", server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-    // Check the Location header
-    actualLocation := actualResp.Header.Get("Location")
-    if actualLocation != expectedLocation {
-        t.Errorf("Expected Location header %q, but got %q", expectedLocation, actualLocation)
-    }
+	// Check the Location header
+	actualLocation := actualResp.Header.Get("Location")
+	if actualLocation != expectedLocation {
+		t.Errorf("Expected Location header %q, but got %q", expectedLocation, actualLocation)
+	}
 
-    // Check the HTTP status code
-    if actualResp.StatusCode != http.StatusFound {
-        t.Errorf("Expected HTTP status code %d, but got %d", http.StatusFound, actualResp.StatusCode)
-    }
+	// Check the HTTP status code
+	if actualResp.StatusCode != http.StatusFound {
+		t.Errorf("Expected HTTP status code %d, but got %d", http.StatusFound, actualResp.StatusCode)
+	}
 }
