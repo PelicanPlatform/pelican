@@ -6,11 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	log "github.com/sirupsen/logrus"
 	"io"
 	"net/http"
 	"os"
 	"strings"
+
+	log "github.com/sirupsen/logrus"
 )
 
 // I don't think we actually want stashcp to download the namespace every build
@@ -43,13 +44,15 @@ type CredentialGeneration struct {
 
 // Namespace holds the structure of stash namespaces
 type Namespace struct {
-	Caches         []Cache               `json:"caches"`
-	Path           string                `json:"path"`
-	CredentialGen *CredentialGeneration  `json:"credential_generation"`
-	ReadHTTPS      bool                  `json:"readhttps"`
-	UseTokenOnRead bool                  `json:"usetokenonread"`
-	WriteBackHost  string                `json:"writebackhost"`
-	DirListHost    string                `json:"dirlisthost"`
+	Caches               []Cache `json:"caches"`
+	SortedDirectorCaches []DirectorCache
+	Path                 string `json:"path"`
+  CredentialGen *CredentialGeneration  `json:"credential_generation"`
+	Issuer               string `json:"issuer"`
+	ReadHTTPS            bool   `json:"readhttps"`
+	UseTokenOnRead       bool   `json:"usetokenonread"`
+	WriteBackHost        string `json:"writebackhost"`
+	DirListHost          string `json:"dirlisthost"`
 }
 
 // GetCaches returns the list of caches for the namespace

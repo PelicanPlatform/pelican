@@ -206,7 +206,18 @@ type TransferResults struct {
 	Downloaded int64
 }
 
-func download_http(source string, destination string, payload *payloadStruct, namespace Namespace, recursive bool, tokenName string) (bytesTransferred int64, err error) {
+type CacheInterface interface{}
+
+func GenerateTransferDetailsUsingCache(cache CacheInterface, needsToken bool) []TransferDetails {
+	if directorCache, ok := cache.(DirectorCache); ok {
+		return NewTransferDetailsUsingDirector(directorCache, needsToken)
+	} else if cache, ok := cache.(Cache); ok {
+		return NewTransferDetails(cache, needsToken)
+	}
+	return nil
+}
+
+func download_http(source string, destination string, payload *payloadStruct, namespace Namespace, recursive bool, tokenName string, OSDFDirectorUrl string) (bytesTransferred int64, err error) {
 
 	// First, create a handler for any panics that occur
 	defer func() {
@@ -233,9 +244,26 @@ func download_http(source string, destination string, payload *payloadStruct, na
 		}
 	}
 
-	closestNamespaceCaches, err := GetCachesFromNamespace(namespace)
-	if err != nil {
-		log.Errorln("Failed to get namespaced caches (treated as non-fatal):", err)
+	// Check the env var "USE_OSDF_DIRECTOR" and decide if ordered caches should come from director
+	var transfers []TransferDetails
+	var files []string
+	var closestNamespaceCaches []CacheInterface
+	if OSDFDirectorUrl != "" {
+		log.Debugln("Using OSDF Director at ", OSDFDirectorUrl)
+		closestNamespaceCaches = make([]CacheInterface, len(namespace.SortedDirectorCaches))
+		for i, v := range namespace.SortedDirectorCaches {
+			closestNamespaceCaches[i] = v
+		}
+	} else {
+		tmpCaches, err := GetCachesFromNamespace(namespace)
+		if err != nil {
+			log.Errorln("Failed to get namespaced caches (treated as non-fatal):", err)
+		}
+
+		closestNamespaceCaches = make([]CacheInterface, len(tmpCaches))
+		for i, v := range tmpCaches {
+			closestNamespaceCaches[i] = v
+		}
 	}
 	log.Debugln("Matched caches:", closestNamespaceCaches)
 
@@ -245,9 +273,7 @@ func download_http(source string, destination string, payload *payloadStruct, na
 		cachesToTry = len(closestNamespaceCaches)
 	}
 	log.Debugln("Trying the caches:", closestNamespaceCaches[:cachesToTry])
-	var transfers []TransferDetails
 	downloadUrl := url.URL{Path: source}
-	var files []string
 
 	if recursive {
 		var err error
@@ -260,12 +286,12 @@ func download_http(source string, destination string, payload *payloadStruct, na
 		files = append(files, source)
 	}
 
-	// Generate all of the transfer details to make a list of transfers
 	for _, cache := range closestNamespaceCaches[:cachesToTry] {
 		// Parse the cache URL
 		log.Debugln("Cache:", cache)
-		transfers = append(transfers, NewTransferDetails(cache, namespace.ReadHTTPS || namespace.UseTokenOnRead)...)
+		transfers = append(transfers, GenerateTransferDetailsUsingCache(cache, namespace.ReadHTTPS || namespace.UseTokenOnRead)...)
 	}
+
 	if len(transfers) > 0 {
 		log.Debugln("Transfers:", transfers[0].Url.Opaque)
 	} else {
