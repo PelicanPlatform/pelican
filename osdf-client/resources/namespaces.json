@@ -56,6 +56,11 @@
       "resource": "CINCINNATI_INTERNET2_OSDF_CACHE"
     },
     {
+      "auth_endpoint": "dtn-pas.denv.nrp.internet2.edu:8443",
+      "endpoint": "dtn-pas.denv.nrp.internet2.edu:8000",
+      "resource": "DENVER_INTERNET2_OSDF_CACHE"
+    },
+    {
       "auth_endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8443",
       "endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8000",
       "resource": "Stashcache-Kansas"
@@ -89,6 +94,11 @@
       "auth_endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8443",
       "endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8000",
       "resource": "Stashcache-KISTI"
+    },
+    {
+      "auth_endpoint": "osg-hawk-cache.cc.lehigh.edu:8443",
+      "endpoint": "osg-hawk-cache.cc.lehigh.edu:8000",
+      "resource": "LEHIGH-HAWK-OSDF-CACHE"
     },
     {
       "auth_endpoint": "mghpcc-cache.nationalresearchplatform.org:8443",
@@ -199,6 +209,11 @@
           "resource": "CINCINNATI_INTERNET2_OSDF_CACHE"
         },
         {
+          "auth_endpoint": "dtn-pas.denv.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.denv.nrp.internet2.edu:8000",
+          "resource": "DENVER_INTERNET2_OSDF_CACHE"
+        },
+        {
           "auth_endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8443",
           "endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8000",
           "resource": "Stashcache-Kansas"
@@ -232,6 +247,11 @@
           "auth_endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8443",
           "endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8000",
           "resource": "Stashcache-KISTI"
+        },
+        {
+          "auth_endpoint": "osg-hawk-cache.cc.lehigh.edu:8443",
+          "endpoint": "osg-hawk-cache.cc.lehigh.edu:8000",
+          "resource": "LEHIGH-HAWK-OSDF-CACHE"
         },
         {
           "auth_endpoint": "mghpcc-cache.nationalresearchplatform.org:8443",
@@ -334,6 +354,11 @@
           "resource": "CINCINNATI_INTERNET2_OSDF_CACHE"
         },
         {
+          "auth_endpoint": "dtn-pas.denv.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.denv.nrp.internet2.edu:8000",
+          "resource": "DENVER_INTERNET2_OSDF_CACHE"
+        },
+        {
           "auth_endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8443",
           "endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8000",
           "resource": "Stashcache-Kansas"
@@ -367,6 +392,11 @@
           "auth_endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8443",
           "endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8000",
           "resource": "Stashcache-KISTI"
+        },
+        {
+          "auth_endpoint": "osg-hawk-cache.cc.lehigh.edu:8443",
+          "endpoint": "osg-hawk-cache.cc.lehigh.edu:8000",
+          "resource": "LEHIGH-HAWK-OSDF-CACHE"
         },
         {
           "auth_endpoint": "mghpcc-cache.nationalresearchplatform.org:8443",
@@ -469,6 +499,11 @@
           "resource": "CINCINNATI_INTERNET2_OSDF_CACHE"
         },
         {
+          "auth_endpoint": "dtn-pas.denv.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.denv.nrp.internet2.edu:8000",
+          "resource": "DENVER_INTERNET2_OSDF_CACHE"
+        },
+        {
           "auth_endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8443",
           "endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8000",
           "resource": "Stashcache-Kansas"
@@ -502,6 +537,11 @@
           "auth_endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8443",
           "endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8000",
           "resource": "Stashcache-KISTI"
+        },
+        {
+          "auth_endpoint": "osg-hawk-cache.cc.lehigh.edu:8443",
+          "endpoint": "osg-hawk-cache.cc.lehigh.edu:8000",
+          "resource": "LEHIGH-HAWK-OSDF-CACHE"
         },
         {
           "auth_endpoint": "mghpcc-cache.nationalresearchplatform.org:8443",
@@ -604,6 +644,11 @@
           "resource": "CINCINNATI_INTERNET2_OSDF_CACHE"
         },
         {
+          "auth_endpoint": "dtn-pas.denv.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.denv.nrp.internet2.edu:8000",
+          "resource": "DENVER_INTERNET2_OSDF_CACHE"
+        },
+        {
           "auth_endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8443",
           "endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8000",
           "resource": "Stashcache-Kansas"
@@ -637,6 +682,11 @@
           "auth_endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8443",
           "endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8000",
           "resource": "Stashcache-KISTI"
+        },
+        {
+          "auth_endpoint": "osg-hawk-cache.cc.lehigh.edu:8443",
+          "endpoint": "osg-hawk-cache.cc.lehigh.edu:8000",
+          "resource": "LEHIGH-HAWK-OSDF-CACHE"
         },
         {
           "auth_endpoint": "mghpcc-cache.nationalresearchplatform.org:8443",
@@ -737,6 +787,11 @@
           "auth_endpoint": "dtn-pas.cinc.nrp.internet2.edu:8443",
           "endpoint": "dtn-pas.cinc.nrp.internet2.edu:8000",
           "resource": "CINCINNATI_INTERNET2_OSDF_CACHE"
+        },
+        {
+          "auth_endpoint": "dtn-pas.denv.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.denv.nrp.internet2.edu:8000",
+          "resource": "DENVER_INTERNET2_OSDF_CACHE"
         },
         {
           "auth_endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8443",
@@ -869,6 +924,11 @@
           "resource": "CINCINNATI_INTERNET2_OSDF_CACHE"
         },
         {
+          "auth_endpoint": "dtn-pas.denv.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.denv.nrp.internet2.edu:8000",
+          "resource": "DENVER_INTERNET2_OSDF_CACHE"
+        },
+        {
           "auth_endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8443",
           "endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8000",
           "resource": "Stashcache-Kansas"
@@ -955,7 +1015,7 @@
         }
       ],
       "credential_generation": {
-        "base_path": null,
+        "base_path": "/chtc",
         "issuer": "https://chtc.cs.wisc.edu",
         "max_scope_depth": 3,
         "strategy": "OAuth2",
@@ -1006,6 +1066,11 @@
           "resource": "CINCINNATI_INTERNET2_OSDF_CACHE"
         },
         {
+          "auth_endpoint": "dtn-pas.denv.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.denv.nrp.internet2.edu:8000",
+          "resource": "DENVER_INTERNET2_OSDF_CACHE"
+        },
+        {
           "auth_endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8443",
           "endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8000",
           "resource": "Stashcache-Kansas"
@@ -1039,6 +1104,156 @@
           "auth_endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8443",
           "endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8000",
           "resource": "Stashcache-KISTI"
+        },
+        {
+          "auth_endpoint": "osg-hawk-cache.cc.lehigh.edu:8443",
+          "endpoint": "osg-hawk-cache.cc.lehigh.edu:8000",
+          "resource": "LEHIGH-HAWK-OSDF-CACHE"
+        },
+        {
+          "auth_endpoint": "mghpcc-cache.nationalresearchplatform.org:8443",
+          "endpoint": "mghpcc-cache.nationalresearchplatform.org:8000",
+          "resource": "MGHPCC_NRP_OSDF_CACHE"
+        },
+        {
+          "auth_endpoint": "singapore.nationalresearchplatform.org:8443",
+          "endpoint": "singapore.nationalresearchplatform.org:8000",
+          "resource": "SINGAPORE_INTERNET2_OSDF_CACHE"
+        },
+        {
+          "auth_endpoint": "its-condor-xrootd1.syr.edu:8443",
+          "endpoint": "its-condor-xrootd1.syr.edu:8000",
+          "resource": "SU_STASHCACHE_CACHE"
+        },
+        {
+          "auth_endpoint": "fiona-r-uva.vlan7.uvalight.net:8443",
+          "endpoint": "fiona-r-uva.vlan7.uvalight.net:8000",
+          "resource": "Stashcache-UofA"
+        },
+        {
+          "auth_endpoint": "sdsc-cache.nationalresearchplatform.org:8443",
+          "endpoint": "sdsc-cache.nationalresearchplatform.org:8000",
+          "resource": "SDSC_NRP_OSDF_CACHE"
+        },
+        {
+          "auth_endpoint": "stashcache.t2.ucsd.edu:8443",
+          "endpoint": "stashcache.t2.ucsd.edu:8000",
+          "resource": "Stashcache-UCSD"
+        },
+        {
+          "auth_endpoint": "stashcache.uchicago.slateci.net:8443",
+          "endpoint": "stashcache.uchicago.slateci.net:8000",
+          "resource": "UCHICAGO_TEST_STASHCACHE_CACHE"
+        },
+        {
+          "auth_endpoint": "stashcache.edi.scotgrid.ac.uk:8443",
+          "endpoint": "stashcache.edi.scotgrid.ac.uk:8000",
+          "resource": "UKI-SCOTGRID-ECDF-STASHCACHE"
+        },
+        {
+          "auth_endpoint": "unl-cache.nationalresearchplatform.org:8443",
+          "endpoint": "unl-cache.nationalresearchplatform.org:8000",
+          "resource": "NEBRASKA_NRP_OSDF_CACHE"
+        },
+        {
+          "auth_endpoint": "sc-cache.chtc.wisc.edu:8443",
+          "endpoint": "sc-cache.chtc.wisc.edu:8000",
+          "resource": "CHTC_STASHCACHE_CACHE"
+        },
+        {
+          "auth_endpoint": "stash-cache.osg.chtc.io:8443",
+          "endpoint": "stash-cache.osg.chtc.io:8000",
+          "resource": "CHTC_TIGER_CACHE"
+        }
+      ],
+      "credential_generation": null,
+      "dirlisthost": null,
+      "path": "/data.lhncbc.nlm.nih.gov/public",
+      "readhttps": false,
+      "usetokenonread": false,
+      "writebackhost": null
+    },
+    {
+      "caches": [
+        {
+          "auth_endpoint": "osg-stash-sfu-computecanada-ca.nationalresearchplatform.org:8443",
+          "endpoint": "osg-stash-sfu-computecanada-ca.nationalresearchplatform.org:8000",
+          "resource": "ComputeCanada-Cedar-Cache"
+        },
+        {
+          "auth_endpoint": "osg-gftp2.pace.gatech.edu:8443",
+          "endpoint": "osg-gftp2.pace.gatech.edu:8000",
+          "resource": "Georgia_Tech_PACE_GridFTP2"
+        },
+        {
+          "auth_endpoint": "xcachevirgo.pic.es:8443",
+          "endpoint": "xcachevirgo.pic.es:8000",
+          "resource": "PIC_STASHCACHE_CACHE"
+        },
+        {
+          "auth_endpoint": "stash.farm.particle.cz:8443",
+          "endpoint": "stash.farm.particle.cz:8000",
+          "resource": "FZU_STASH"
+        },
+        {
+          "auth_endpoint": "dtn-pas.bois.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.bois.nrp.internet2.edu:8000",
+          "resource": "BOISE_INTERNET2_OSDF_CACHE"
+        },
+        {
+          "auth_endpoint": "osg-chicago-stashcache.nrp.internet2.edu:8443",
+          "endpoint": "osg-chicago-stashcache.nrp.internet2.edu:8000",
+          "resource": "Stashcache-Chicago"
+        },
+        {
+          "auth_endpoint": "dtn-pas.cinc.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.cinc.nrp.internet2.edu:8000",
+          "resource": "CINCINNATI_INTERNET2_OSDF_CACHE"
+        },
+        {
+          "auth_endpoint": "dtn-pas.denv.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.denv.nrp.internet2.edu:8000",
+          "resource": "DENVER_INTERNET2_OSDF_CACHE"
+        },
+        {
+          "auth_endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8443",
+          "endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8000",
+          "resource": "Stashcache-Kansas"
+        },
+        {
+          "auth_endpoint": "osg-houston-stashcache.nrp.internet2.edu:8443",
+          "endpoint": "osg-houston-stashcache.nrp.internet2.edu:8000",
+          "resource": "Stashcache-Houston"
+        },
+        {
+          "auth_endpoint": "dtn-pas.jack.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.jack.nrp.internet2.edu:8000",
+          "resource": "JACKSONVILLE_INTERNET2_OSDF_CACHE"
+        },
+        {
+          "auth_endpoint": "osg-new-york-stashcache.nrp.internet2.edu:8443",
+          "endpoint": "osg-new-york-stashcache.nrp.internet2.edu:8000",
+          "resource": "Stashcache-Manhattan"
+        },
+        {
+          "auth_endpoint": "osg-sunnyvale-stashcache.t2.ucsd.edu:8443",
+          "endpoint": "osg-sunnyvale-stashcache.t2.ucsd.edu:8000",
+          "resource": "Stashcache-Sunnyvale"
+        },
+        {
+          "auth_endpoint": "stashcache.jinr.ru:8443",
+          "endpoint": "stashcache.jinr.ru:8000",
+          "resource": "JINR_STASHCACHE"
+        },
+        {
+          "auth_endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8443",
+          "endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8000",
+          "resource": "Stashcache-KISTI"
+        },
+        {
+          "auth_endpoint": "osg-hawk-cache.cc.lehigh.edu:8443",
+          "endpoint": "osg-hawk-cache.cc.lehigh.edu:8000",
+          "resource": "LEHIGH-HAWK-OSDF-CACHE"
         },
         {
           "auth_endpoint": "mghpcc-cache.nationalresearchplatform.org:8443",
@@ -1141,6 +1356,11 @@
           "resource": "CINCINNATI_INTERNET2_OSDF_CACHE"
         },
         {
+          "auth_endpoint": "dtn-pas.denv.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.denv.nrp.internet2.edu:8000",
+          "resource": "DENVER_INTERNET2_OSDF_CACHE"
+        },
+        {
           "auth_endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8443",
           "endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8000",
           "resource": "Stashcache-Kansas"
@@ -1174,6 +1394,11 @@
           "auth_endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8443",
           "endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8000",
           "resource": "Stashcache-KISTI"
+        },
+        {
+          "auth_endpoint": "osg-hawk-cache.cc.lehigh.edu:8443",
+          "endpoint": "osg-hawk-cache.cc.lehigh.edu:8000",
+          "resource": "LEHIGH-HAWK-OSDF-CACHE"
         },
         {
           "auth_endpoint": "mghpcc-cache.nationalresearchplatform.org:8443",
@@ -1274,6 +1499,11 @@
           "auth_endpoint": "dtn-pas.cinc.nrp.internet2.edu:8443",
           "endpoint": "dtn-pas.cinc.nrp.internet2.edu:8000",
           "resource": "CINCINNATI_INTERNET2_OSDF_CACHE"
+        },
+        {
+          "auth_endpoint": "dtn-pas.denv.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.denv.nrp.internet2.edu:8000",
+          "resource": "DENVER_INTERNET2_OSDF_CACHE"
         },
         {
           "auth_endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8443",
@@ -1406,6 +1636,11 @@
           "resource": "CINCINNATI_INTERNET2_OSDF_CACHE"
         },
         {
+          "auth_endpoint": "dtn-pas.denv.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.denv.nrp.internet2.edu:8000",
+          "resource": "DENVER_INTERNET2_OSDF_CACHE"
+        },
+        {
           "auth_endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8443",
           "endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8000",
           "resource": "Stashcache-Kansas"
@@ -1439,6 +1674,11 @@
           "auth_endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8443",
           "endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8000",
           "resource": "Stashcache-KISTI"
+        },
+        {
+          "auth_endpoint": "osg-hawk-cache.cc.lehigh.edu:8443",
+          "endpoint": "osg-hawk-cache.cc.lehigh.edu:8000",
+          "resource": "LEHIGH-HAWK-OSDF-CACHE"
         },
         {
           "auth_endpoint": "mghpcc-cache.nationalresearchplatform.org:8443",
@@ -1539,6 +1779,11 @@
           "auth_endpoint": "dtn-pas.cinc.nrp.internet2.edu:8443",
           "endpoint": "dtn-pas.cinc.nrp.internet2.edu:8000",
           "resource": "CINCINNATI_INTERNET2_OSDF_CACHE"
+        },
+        {
+          "auth_endpoint": "dtn-pas.denv.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.denv.nrp.internet2.edu:8000",
+          "resource": "DENVER_INTERNET2_OSDF_CACHE"
         },
         {
           "auth_endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8443",
@@ -1671,6 +1916,11 @@
           "resource": "CINCINNATI_INTERNET2_OSDF_CACHE"
         },
         {
+          "auth_endpoint": "dtn-pas.denv.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.denv.nrp.internet2.edu:8000",
+          "resource": "DENVER_INTERNET2_OSDF_CACHE"
+        },
+        {
           "auth_endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8443",
           "endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8000",
           "resource": "Stashcache-Kansas"
@@ -1704,6 +1954,11 @@
           "auth_endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8443",
           "endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8000",
           "resource": "Stashcache-KISTI"
+        },
+        {
+          "auth_endpoint": "osg-hawk-cache.cc.lehigh.edu:8443",
+          "endpoint": "osg-hawk-cache.cc.lehigh.edu:8000",
+          "resource": "LEHIGH-HAWK-OSDF-CACHE"
         },
         {
           "auth_endpoint": "mghpcc-cache.nationalresearchplatform.org:8443",
@@ -1804,6 +2059,11 @@
           "auth_endpoint": "dtn-pas.cinc.nrp.internet2.edu:8443",
           "endpoint": "dtn-pas.cinc.nrp.internet2.edu:8000",
           "resource": "CINCINNATI_INTERNET2_OSDF_CACHE"
+        },
+        {
+          "auth_endpoint": "dtn-pas.denv.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.denv.nrp.internet2.edu:8000",
+          "resource": "DENVER_INTERNET2_OSDF_CACHE"
         },
         {
           "auth_endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8443",
@@ -1936,6 +2196,11 @@
           "resource": "CINCINNATI_INTERNET2_OSDF_CACHE"
         },
         {
+          "auth_endpoint": "dtn-pas.denv.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.denv.nrp.internet2.edu:8000",
+          "resource": "DENVER_INTERNET2_OSDF_CACHE"
+        },
+        {
           "auth_endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8443",
           "endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8000",
           "resource": "Stashcache-Kansas"
@@ -2064,6 +2329,11 @@
           "auth_endpoint": "dtn-pas.cinc.nrp.internet2.edu:8443",
           "endpoint": "dtn-pas.cinc.nrp.internet2.edu:8000",
           "resource": "CINCINNATI_INTERNET2_OSDF_CACHE"
+        },
+        {
+          "auth_endpoint": "dtn-pas.denv.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.denv.nrp.internet2.edu:8000",
+          "resource": "DENVER_INTERNET2_OSDF_CACHE"
         },
         {
           "auth_endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8443",
@@ -2196,6 +2466,11 @@
           "resource": "CINCINNATI_INTERNET2_OSDF_CACHE"
         },
         {
+          "auth_endpoint": "dtn-pas.denv.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.denv.nrp.internet2.edu:8000",
+          "resource": "DENVER_INTERNET2_OSDF_CACHE"
+        },
+        {
           "auth_endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8443",
           "endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8000",
           "resource": "Stashcache-Kansas"
@@ -2229,6 +2504,11 @@
           "auth_endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8443",
           "endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8000",
           "resource": "Stashcache-KISTI"
+        },
+        {
+          "auth_endpoint": "osg-hawk-cache.cc.lehigh.edu:8443",
+          "endpoint": "osg-hawk-cache.cc.lehigh.edu:8000",
+          "resource": "LEHIGH-HAWK-OSDF-CACHE"
         },
         {
           "auth_endpoint": "mghpcc-cache.nationalresearchplatform.org:8443",
@@ -2331,6 +2611,11 @@
           "resource": "CINCINNATI_INTERNET2_OSDF_CACHE"
         },
         {
+          "auth_endpoint": "dtn-pas.denv.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.denv.nrp.internet2.edu:8000",
+          "resource": "DENVER_INTERNET2_OSDF_CACHE"
+        },
+        {
           "auth_endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8443",
           "endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8000",
           "resource": "Stashcache-Kansas"
@@ -2364,6 +2649,11 @@
           "auth_endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8443",
           "endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8000",
           "resource": "Stashcache-KISTI"
+        },
+        {
+          "auth_endpoint": "osg-hawk-cache.cc.lehigh.edu:8443",
+          "endpoint": "osg-hawk-cache.cc.lehigh.edu:8000",
+          "resource": "LEHIGH-HAWK-OSDF-CACHE"
         },
         {
           "auth_endpoint": "mghpcc-cache.nationalresearchplatform.org:8443",
@@ -2469,6 +2759,11 @@
           "auth_endpoint": "dtn-pas.cinc.nrp.internet2.edu:8443",
           "endpoint": "dtn-pas.cinc.nrp.internet2.edu:8000",
           "resource": "CINCINNATI_INTERNET2_OSDF_CACHE"
+        },
+        {
+          "auth_endpoint": "dtn-pas.denv.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.denv.nrp.internet2.edu:8000",
+          "resource": "DENVER_INTERNET2_OSDF_CACHE"
         },
         {
           "auth_endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8443",
@@ -2584,6 +2879,11 @@
           "auth_endpoint": "dtn-pas.cinc.nrp.internet2.edu:8443",
           "endpoint": "dtn-pas.cinc.nrp.internet2.edu:8000",
           "resource": "CINCINNATI_INTERNET2_OSDF_CACHE"
+        },
+        {
+          "auth_endpoint": "dtn-pas.denv.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.denv.nrp.internet2.edu:8000",
+          "resource": "DENVER_INTERNET2_OSDF_CACHE"
         },
         {
           "auth_endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8443",
@@ -2716,6 +3016,11 @@
           "resource": "CINCINNATI_INTERNET2_OSDF_CACHE"
         },
         {
+          "auth_endpoint": "dtn-pas.denv.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.denv.nrp.internet2.edu:8000",
+          "resource": "DENVER_INTERNET2_OSDF_CACHE"
+        },
+        {
           "auth_endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8443",
           "endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8000",
           "resource": "Stashcache-Kansas"
@@ -2749,6 +3054,11 @@
           "auth_endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8443",
           "endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8000",
           "resource": "Stashcache-KISTI"
+        },
+        {
+          "auth_endpoint": "osg-hawk-cache.cc.lehigh.edu:8443",
+          "endpoint": "osg-hawk-cache.cc.lehigh.edu:8000",
+          "resource": "LEHIGH-HAWK-OSDF-CACHE"
         },
         {
           "auth_endpoint": "mghpcc-cache.nationalresearchplatform.org:8443",
@@ -2856,6 +3166,11 @@
           "resource": "CINCINNATI_INTERNET2_OSDF_CACHE"
         },
         {
+          "auth_endpoint": "dtn-pas.denv.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.denv.nrp.internet2.edu:8000",
+          "resource": "DENVER_INTERNET2_OSDF_CACHE"
+        },
+        {
           "auth_endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8443",
           "endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8000",
           "resource": "Stashcache-Kansas"
@@ -2889,6 +3204,11 @@
           "auth_endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8443",
           "endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8000",
           "resource": "Stashcache-KISTI"
+        },
+        {
+          "auth_endpoint": "osg-hawk-cache.cc.lehigh.edu:8443",
+          "endpoint": "osg-hawk-cache.cc.lehigh.edu:8000",
+          "resource": "LEHIGH-HAWK-OSDF-CACHE"
         },
         {
           "auth_endpoint": "mghpcc-cache.nationalresearchplatform.org:8443",
@@ -2991,6 +3311,11 @@
           "resource": "CINCINNATI_INTERNET2_OSDF_CACHE"
         },
         {
+          "auth_endpoint": "dtn-pas.denv.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.denv.nrp.internet2.edu:8000",
+          "resource": "DENVER_INTERNET2_OSDF_CACHE"
+        },
+        {
           "auth_endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8443",
           "endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8000",
           "resource": "Stashcache-Kansas"
@@ -3024,6 +3349,11 @@
           "auth_endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8443",
           "endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8000",
           "resource": "Stashcache-KISTI"
+        },
+        {
+          "auth_endpoint": "osg-hawk-cache.cc.lehigh.edu:8443",
+          "endpoint": "osg-hawk-cache.cc.lehigh.edu:8000",
+          "resource": "LEHIGH-HAWK-OSDF-CACHE"
         },
         {
           "auth_endpoint": "mghpcc-cache.nationalresearchplatform.org:8443",
@@ -3126,6 +3456,11 @@
           "resource": "CINCINNATI_INTERNET2_OSDF_CACHE"
         },
         {
+          "auth_endpoint": "dtn-pas.denv.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.denv.nrp.internet2.edu:8000",
+          "resource": "DENVER_INTERNET2_OSDF_CACHE"
+        },
+        {
           "auth_endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8443",
           "endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8000",
           "resource": "Stashcache-Kansas"
@@ -3159,6 +3494,11 @@
           "auth_endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8443",
           "endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8000",
           "resource": "Stashcache-KISTI"
+        },
+        {
+          "auth_endpoint": "osg-hawk-cache.cc.lehigh.edu:8443",
+          "endpoint": "osg-hawk-cache.cc.lehigh.edu:8000",
+          "resource": "LEHIGH-HAWK-OSDF-CACHE"
         },
         {
           "auth_endpoint": "mghpcc-cache.nationalresearchplatform.org:8443",
@@ -3261,6 +3601,11 @@
           "resource": "CINCINNATI_INTERNET2_OSDF_CACHE"
         },
         {
+          "auth_endpoint": "dtn-pas.denv.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.denv.nrp.internet2.edu:8000",
+          "resource": "DENVER_INTERNET2_OSDF_CACHE"
+        },
+        {
           "auth_endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8443",
           "endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8000",
           "resource": "Stashcache-Kansas"
@@ -3294,6 +3639,11 @@
           "auth_endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8443",
           "endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8000",
           "resource": "Stashcache-KISTI"
+        },
+        {
+          "auth_endpoint": "osg-hawk-cache.cc.lehigh.edu:8443",
+          "endpoint": "osg-hawk-cache.cc.lehigh.edu:8000",
+          "resource": "LEHIGH-HAWK-OSDF-CACHE"
         },
         {
           "auth_endpoint": "mghpcc-cache.nationalresearchplatform.org:8443",
@@ -3394,6 +3744,11 @@
           "auth_endpoint": "dtn-pas.cinc.nrp.internet2.edu:8443",
           "endpoint": "dtn-pas.cinc.nrp.internet2.edu:8000",
           "resource": "CINCINNATI_INTERNET2_OSDF_CACHE"
+        },
+        {
+          "auth_endpoint": "dtn-pas.denv.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.denv.nrp.internet2.edu:8000",
+          "resource": "DENVER_INTERNET2_OSDF_CACHE"
         },
         {
           "auth_endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8443",
@@ -3526,6 +3881,11 @@
           "resource": "CINCINNATI_INTERNET2_OSDF_CACHE"
         },
         {
+          "auth_endpoint": "dtn-pas.denv.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.denv.nrp.internet2.edu:8000",
+          "resource": "DENVER_INTERNET2_OSDF_CACHE"
+        },
+        {
           "auth_endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8443",
           "endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8000",
           "resource": "Stashcache-Kansas"
@@ -3559,6 +3919,11 @@
           "auth_endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8443",
           "endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8000",
           "resource": "Stashcache-KISTI"
+        },
+        {
+          "auth_endpoint": "osg-hawk-cache.cc.lehigh.edu:8443",
+          "endpoint": "osg-hawk-cache.cc.lehigh.edu:8000",
+          "resource": "LEHIGH-HAWK-OSDF-CACHE"
         },
         {
           "auth_endpoint": "mghpcc-cache.nationalresearchplatform.org:8443",
@@ -3659,6 +4024,11 @@
           "auth_endpoint": "dtn-pas.cinc.nrp.internet2.edu:8443",
           "endpoint": "dtn-pas.cinc.nrp.internet2.edu:8000",
           "resource": "CINCINNATI_INTERNET2_OSDF_CACHE"
+        },
+        {
+          "auth_endpoint": "dtn-pas.denv.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.denv.nrp.internet2.edu:8000",
+          "resource": "DENVER_INTERNET2_OSDF_CACHE"
         },
         {
           "auth_endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8443",
@@ -3798,6 +4168,11 @@
           "resource": "CINCINNATI_INTERNET2_OSDF_CACHE"
         },
         {
+          "auth_endpoint": "dtn-pas.denv.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.denv.nrp.internet2.edu:8000",
+          "resource": "DENVER_INTERNET2_OSDF_CACHE"
+        },
+        {
           "auth_endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8443",
           "endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8000",
           "resource": "Stashcache-Kansas"
@@ -3926,6 +4301,11 @@
           "auth_endpoint": "dtn-pas.cinc.nrp.internet2.edu:8443",
           "endpoint": "dtn-pas.cinc.nrp.internet2.edu:8000",
           "resource": "CINCINNATI_INTERNET2_OSDF_CACHE"
+        },
+        {
+          "auth_endpoint": "dtn-pas.denv.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.denv.nrp.internet2.edu:8000",
+          "resource": "DENVER_INTERNET2_OSDF_CACHE"
         },
         {
           "auth_endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8443",
@@ -4058,6 +4438,11 @@
           "resource": "CINCINNATI_INTERNET2_OSDF_CACHE"
         },
         {
+          "auth_endpoint": "dtn-pas.denv.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.denv.nrp.internet2.edu:8000",
+          "resource": "DENVER_INTERNET2_OSDF_CACHE"
+        },
+        {
           "auth_endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8443",
           "endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8000",
           "resource": "Stashcache-Kansas"
@@ -4091,6 +4476,11 @@
           "auth_endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8443",
           "endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8000",
           "resource": "Stashcache-KISTI"
+        },
+        {
+          "auth_endpoint": "osg-hawk-cache.cc.lehigh.edu:8443",
+          "endpoint": "osg-hawk-cache.cc.lehigh.edu:8000",
+          "resource": "LEHIGH-HAWK-OSDF-CACHE"
         },
         {
           "auth_endpoint": "mghpcc-cache.nationalresearchplatform.org:8443",
@@ -4191,6 +4581,11 @@
           "auth_endpoint": "dtn-pas.cinc.nrp.internet2.edu:8443",
           "endpoint": "dtn-pas.cinc.nrp.internet2.edu:8000",
           "resource": "CINCINNATI_INTERNET2_OSDF_CACHE"
+        },
+        {
+          "auth_endpoint": "dtn-pas.denv.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.denv.nrp.internet2.edu:8000",
+          "resource": "DENVER_INTERNET2_OSDF_CACHE"
         },
         {
           "auth_endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8443",
@@ -4330,6 +4725,11 @@
           "resource": "CINCINNATI_INTERNET2_OSDF_CACHE"
         },
         {
+          "auth_endpoint": "dtn-pas.denv.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.denv.nrp.internet2.edu:8000",
+          "resource": "DENVER_INTERNET2_OSDF_CACHE"
+        },
+        {
           "auth_endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8443",
           "endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8000",
           "resource": "Stashcache-Kansas"
@@ -4467,6 +4867,11 @@
           "resource": "CINCINNATI_INTERNET2_OSDF_CACHE"
         },
         {
+          "auth_endpoint": "dtn-pas.denv.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.denv.nrp.internet2.edu:8000",
+          "resource": "DENVER_INTERNET2_OSDF_CACHE"
+        },
+        {
           "auth_endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8443",
           "endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8000",
           "resource": "Stashcache-Kansas"
@@ -4565,6 +4970,293 @@
       "readhttps": true,
       "usetokenonread": true,
       "writebackhost": "https://ap22.uc.osg-htc.org:1094"
+    },
+    {
+      "caches": [
+        {
+          "auth_endpoint": "osg-stash-sfu-computecanada-ca.nationalresearchplatform.org:8443",
+          "endpoint": "osg-stash-sfu-computecanada-ca.nationalresearchplatform.org:8000",
+          "resource": "ComputeCanada-Cedar-Cache"
+        },
+        {
+          "auth_endpoint": "osg-gftp2.pace.gatech.edu:8443",
+          "endpoint": "osg-gftp2.pace.gatech.edu:8000",
+          "resource": "Georgia_Tech_PACE_GridFTP2"
+        },
+        {
+          "auth_endpoint": "xcachevirgo.pic.es:8443",
+          "endpoint": "xcachevirgo.pic.es:8000",
+          "resource": "PIC_STASHCACHE_CACHE"
+        },
+        {
+          "auth_endpoint": "stash.farm.particle.cz:8443",
+          "endpoint": "stash.farm.particle.cz:8000",
+          "resource": "FZU_STASH"
+        },
+        {
+          "auth_endpoint": "dtn-pas.bois.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.bois.nrp.internet2.edu:8000",
+          "resource": "BOISE_INTERNET2_OSDF_CACHE"
+        },
+        {
+          "auth_endpoint": "osg-chicago-stashcache.nrp.internet2.edu:8443",
+          "endpoint": "osg-chicago-stashcache.nrp.internet2.edu:8000",
+          "resource": "Stashcache-Chicago"
+        },
+        {
+          "auth_endpoint": "dtn-pas.cinc.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.cinc.nrp.internet2.edu:8000",
+          "resource": "CINCINNATI_INTERNET2_OSDF_CACHE"
+        },
+        {
+          "auth_endpoint": "dtn-pas.denv.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.denv.nrp.internet2.edu:8000",
+          "resource": "DENVER_INTERNET2_OSDF_CACHE"
+        },
+        {
+          "auth_endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8443",
+          "endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8000",
+          "resource": "Stashcache-Kansas"
+        },
+        {
+          "auth_endpoint": "osg-houston-stashcache.nrp.internet2.edu:8443",
+          "endpoint": "osg-houston-stashcache.nrp.internet2.edu:8000",
+          "resource": "Stashcache-Houston"
+        },
+        {
+          "auth_endpoint": "dtn-pas.jack.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.jack.nrp.internet2.edu:8000",
+          "resource": "JACKSONVILLE_INTERNET2_OSDF_CACHE"
+        },
+        {
+          "auth_endpoint": "osg-new-york-stashcache.nrp.internet2.edu:8443",
+          "endpoint": "osg-new-york-stashcache.nrp.internet2.edu:8000",
+          "resource": "Stashcache-Manhattan"
+        },
+        {
+          "auth_endpoint": "osg-sunnyvale-stashcache.t2.ucsd.edu:8443",
+          "endpoint": "osg-sunnyvale-stashcache.t2.ucsd.edu:8000",
+          "resource": "Stashcache-Sunnyvale"
+        },
+        {
+          "auth_endpoint": "stashcache.jinr.ru:8443",
+          "endpoint": "stashcache.jinr.ru:8000",
+          "resource": "JINR_STASHCACHE"
+        },
+        {
+          "auth_endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8443",
+          "endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8000",
+          "resource": "Stashcache-KISTI"
+        },
+        {
+          "auth_endpoint": "mghpcc-cache.nationalresearchplatform.org:8443",
+          "endpoint": "mghpcc-cache.nationalresearchplatform.org:8000",
+          "resource": "MGHPCC_NRP_OSDF_CACHE"
+        },
+        {
+          "auth_endpoint": "singapore.nationalresearchplatform.org:8443",
+          "endpoint": "singapore.nationalresearchplatform.org:8000",
+          "resource": "SINGAPORE_INTERNET2_OSDF_CACHE"
+        },
+        {
+          "auth_endpoint": "its-condor-xrootd1.syr.edu:8443",
+          "endpoint": "its-condor-xrootd1.syr.edu:8000",
+          "resource": "SU_STASHCACHE_CACHE"
+        },
+        {
+          "auth_endpoint": "fiona-r-uva.vlan7.uvalight.net:8443",
+          "endpoint": "fiona-r-uva.vlan7.uvalight.net:8000",
+          "resource": "Stashcache-UofA"
+        },
+        {
+          "auth_endpoint": "sdsc-cache.nationalresearchplatform.org:8443",
+          "endpoint": "sdsc-cache.nationalresearchplatform.org:8000",
+          "resource": "SDSC_NRP_OSDF_CACHE"
+        },
+        {
+          "auth_endpoint": "stashcache.t2.ucsd.edu:8443",
+          "endpoint": "stashcache.t2.ucsd.edu:8000",
+          "resource": "Stashcache-UCSD"
+        },
+        {
+          "auth_endpoint": "stashcache.edi.scotgrid.ac.uk:8443",
+          "endpoint": "stashcache.edi.scotgrid.ac.uk:8000",
+          "resource": "UKI-SCOTGRID-ECDF-STASHCACHE"
+        },
+        {
+          "auth_endpoint": "unl-cache.nationalresearchplatform.org:8443",
+          "endpoint": "unl-cache.nationalresearchplatform.org:8000",
+          "resource": "NEBRASKA_NRP_OSDF_CACHE"
+        },
+        {
+          "auth_endpoint": "sc-cache.chtc.wisc.edu:8443",
+          "endpoint": "sc-cache.chtc.wisc.edu:8000",
+          "resource": "CHTC_STASHCACHE_CACHE"
+        },
+        {
+          "auth_endpoint": "stash-cache.osg.chtc.io:8443",
+          "endpoint": "stash-cache.osg.chtc.io:8000",
+          "resource": "CHTC_TIGER_CACHE"
+        }
+      ],
+      "credential_generation": {
+        "base_path": null,
+        "issuer": "https://osg-htc.org/ospool/uc-shared",
+        "max_scope_depth": 4,
+        "strategy": "OAuth2",
+        "vault_issuer": null,
+        "vault_server": null
+      },
+      "dirlisthost": "https://ap23.uc.osg-htc.org:1095",
+      "path": "/ospool/uc-shared",
+      "readhttps": true,
+      "usetokenonread": true,
+      "writebackhost": "https://ap23.uc.osg-htc.org:1095"
+    },
+    {
+      "caches": [
+        {
+          "auth_endpoint": "osg-stash-sfu-computecanada-ca.nationalresearchplatform.org:8443",
+          "endpoint": "osg-stash-sfu-computecanada-ca.nationalresearchplatform.org:8000",
+          "resource": "ComputeCanada-Cedar-Cache"
+        },
+        {
+          "auth_endpoint": "osg-gftp2.pace.gatech.edu:8443",
+          "endpoint": "osg-gftp2.pace.gatech.edu:8000",
+          "resource": "Georgia_Tech_PACE_GridFTP2"
+        },
+        {
+          "auth_endpoint": "xcachevirgo.pic.es:8443",
+          "endpoint": "xcachevirgo.pic.es:8000",
+          "resource": "PIC_STASHCACHE_CACHE"
+        },
+        {
+          "auth_endpoint": "stash.farm.particle.cz:8443",
+          "endpoint": "stash.farm.particle.cz:8000",
+          "resource": "FZU_STASH"
+        },
+        {
+          "auth_endpoint": "dtn-pas.bois.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.bois.nrp.internet2.edu:8000",
+          "resource": "BOISE_INTERNET2_OSDF_CACHE"
+        },
+        {
+          "auth_endpoint": "osg-chicago-stashcache.nrp.internet2.edu:8443",
+          "endpoint": "osg-chicago-stashcache.nrp.internet2.edu:8000",
+          "resource": "Stashcache-Chicago"
+        },
+        {
+          "auth_endpoint": "dtn-pas.cinc.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.cinc.nrp.internet2.edu:8000",
+          "resource": "CINCINNATI_INTERNET2_OSDF_CACHE"
+        },
+        {
+          "auth_endpoint": "dtn-pas.denv.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.denv.nrp.internet2.edu:8000",
+          "resource": "DENVER_INTERNET2_OSDF_CACHE"
+        },
+        {
+          "auth_endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8443",
+          "endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8000",
+          "resource": "Stashcache-Kansas"
+        },
+        {
+          "auth_endpoint": "osg-houston-stashcache.nrp.internet2.edu:8443",
+          "endpoint": "osg-houston-stashcache.nrp.internet2.edu:8000",
+          "resource": "Stashcache-Houston"
+        },
+        {
+          "auth_endpoint": "dtn-pas.jack.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.jack.nrp.internet2.edu:8000",
+          "resource": "JACKSONVILLE_INTERNET2_OSDF_CACHE"
+        },
+        {
+          "auth_endpoint": "osg-new-york-stashcache.nrp.internet2.edu:8443",
+          "endpoint": "osg-new-york-stashcache.nrp.internet2.edu:8000",
+          "resource": "Stashcache-Manhattan"
+        },
+        {
+          "auth_endpoint": "osg-sunnyvale-stashcache.t2.ucsd.edu:8443",
+          "endpoint": "osg-sunnyvale-stashcache.t2.ucsd.edu:8000",
+          "resource": "Stashcache-Sunnyvale"
+        },
+        {
+          "auth_endpoint": "stashcache.jinr.ru:8443",
+          "endpoint": "stashcache.jinr.ru:8000",
+          "resource": "JINR_STASHCACHE"
+        },
+        {
+          "auth_endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8443",
+          "endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8000",
+          "resource": "Stashcache-KISTI"
+        },
+        {
+          "auth_endpoint": "osg-hawk-cache.cc.lehigh.edu:8443",
+          "endpoint": "osg-hawk-cache.cc.lehigh.edu:8000",
+          "resource": "LEHIGH-HAWK-OSDF-CACHE"
+        },
+        {
+          "auth_endpoint": "mghpcc-cache.nationalresearchplatform.org:8443",
+          "endpoint": "mghpcc-cache.nationalresearchplatform.org:8000",
+          "resource": "MGHPCC_NRP_OSDF_CACHE"
+        },
+        {
+          "auth_endpoint": "singapore.nationalresearchplatform.org:8443",
+          "endpoint": "singapore.nationalresearchplatform.org:8000",
+          "resource": "SINGAPORE_INTERNET2_OSDF_CACHE"
+        },
+        {
+          "auth_endpoint": "its-condor-xrootd1.syr.edu:8443",
+          "endpoint": "its-condor-xrootd1.syr.edu:8000",
+          "resource": "SU_STASHCACHE_CACHE"
+        },
+        {
+          "auth_endpoint": "fiona-r-uva.vlan7.uvalight.net:8443",
+          "endpoint": "fiona-r-uva.vlan7.uvalight.net:8000",
+          "resource": "Stashcache-UofA"
+        },
+        {
+          "auth_endpoint": "sdsc-cache.nationalresearchplatform.org:8443",
+          "endpoint": "sdsc-cache.nationalresearchplatform.org:8000",
+          "resource": "SDSC_NRP_OSDF_CACHE"
+        },
+        {
+          "auth_endpoint": "stashcache.t2.ucsd.edu:8443",
+          "endpoint": "stashcache.t2.ucsd.edu:8000",
+          "resource": "Stashcache-UCSD"
+        },
+        {
+          "auth_endpoint": "stashcache.uchicago.slateci.net:8443",
+          "endpoint": "stashcache.uchicago.slateci.net:8000",
+          "resource": "UCHICAGO_TEST_STASHCACHE_CACHE"
+        },
+        {
+          "auth_endpoint": "stashcache.edi.scotgrid.ac.uk:8443",
+          "endpoint": "stashcache.edi.scotgrid.ac.uk:8000",
+          "resource": "UKI-SCOTGRID-ECDF-STASHCACHE"
+        },
+        {
+          "auth_endpoint": "unl-cache.nationalresearchplatform.org:8443",
+          "endpoint": "unl-cache.nationalresearchplatform.org:8000",
+          "resource": "NEBRASKA_NRP_OSDF_CACHE"
+        },
+        {
+          "auth_endpoint": "sc-cache.chtc.wisc.edu:8443",
+          "endpoint": "sc-cache.chtc.wisc.edu:8000",
+          "resource": "CHTC_STASHCACHE_CACHE"
+        },
+        {
+          "auth_endpoint": "stash-cache.osg.chtc.io:8443",
+          "endpoint": "stash-cache.osg.chtc.io:8000",
+          "resource": "CHTC_TIGER_CACHE"
+        }
+      ],
+      "credential_generation": null,
+      "dirlisthost": "https://ap23.uc.osg-htc.org:1094",
+      "path": "/ospool/uc-shared/user",
+      "readhttps": false,
+      "usetokenonread": false,
+      "writebackhost": null
     },
     {
       "caches": [
@@ -4684,6 +5376,11 @@
           "resource": "CINCINNATI_INTERNET2_OSDF_CACHE"
         },
         {
+          "auth_endpoint": "dtn-pas.denv.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.denv.nrp.internet2.edu:8000",
+          "resource": "DENVER_INTERNET2_OSDF_CACHE"
+        },
+        {
           "auth_endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8443",
           "endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8000",
           "resource": "Stashcache-Kansas"
@@ -4717,6 +5414,11 @@
           "auth_endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8443",
           "endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8000",
           "resource": "Stashcache-KISTI"
+        },
+        {
+          "auth_endpoint": "osg-hawk-cache.cc.lehigh.edu:8443",
+          "endpoint": "osg-hawk-cache.cc.lehigh.edu:8000",
+          "resource": "LEHIGH-HAWK-OSDF-CACHE"
         },
         {
           "auth_endpoint": "mghpcc-cache.nationalresearchplatform.org:8443",
@@ -4819,6 +5521,11 @@
           "resource": "CINCINNATI_INTERNET2_OSDF_CACHE"
         },
         {
+          "auth_endpoint": "dtn-pas.denv.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.denv.nrp.internet2.edu:8000",
+          "resource": "DENVER_INTERNET2_OSDF_CACHE"
+        },
+        {
           "auth_endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8443",
           "endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8000",
           "resource": "Stashcache-Kansas"
@@ -4852,6 +5559,11 @@
           "auth_endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8443",
           "endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8000",
           "resource": "Stashcache-KISTI"
+        },
+        {
+          "auth_endpoint": "osg-hawk-cache.cc.lehigh.edu:8443",
+          "endpoint": "osg-hawk-cache.cc.lehigh.edu:8000",
+          "resource": "LEHIGH-HAWK-OSDF-CACHE"
         },
         {
           "auth_endpoint": "mghpcc-cache.nationalresearchplatform.org:8443",
@@ -4954,6 +5666,11 @@
           "resource": "CINCINNATI_INTERNET2_OSDF_CACHE"
         },
         {
+          "auth_endpoint": "dtn-pas.denv.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.denv.nrp.internet2.edu:8000",
+          "resource": "DENVER_INTERNET2_OSDF_CACHE"
+        },
+        {
           "auth_endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8443",
           "endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8000",
           "resource": "Stashcache-Kansas"
@@ -4987,6 +5704,11 @@
           "auth_endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8443",
           "endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8000",
           "resource": "Stashcache-KISTI"
+        },
+        {
+          "auth_endpoint": "osg-hawk-cache.cc.lehigh.edu:8443",
+          "endpoint": "osg-hawk-cache.cc.lehigh.edu:8000",
+          "resource": "LEHIGH-HAWK-OSDF-CACHE"
         },
         {
           "auth_endpoint": "mghpcc-cache.nationalresearchplatform.org:8443",
@@ -5098,6 +5820,11 @@
           "resource": "CINCINNATI_INTERNET2_OSDF_CACHE"
         },
         {
+          "auth_endpoint": "dtn-pas.denv.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.denv.nrp.internet2.edu:8000",
+          "resource": "DENVER_INTERNET2_OSDF_CACHE"
+        },
+        {
           "auth_endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8443",
           "endpoint": "osg-kansas-city-stashcache.nrp.internet2.edu:8000",
           "resource": "Stashcache-Kansas"
@@ -5131,6 +5858,11 @@
           "auth_endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8443",
           "endpoint": "daejeon-kreonet-net.nationalresearchplatform.org:8000",
           "resource": "Stashcache-KISTI"
+        },
+        {
+          "auth_endpoint": "osg-hawk-cache.cc.lehigh.edu:8443",
+          "endpoint": "osg-hawk-cache.cc.lehigh.edu:8000",
+          "resource": "LEHIGH-HAWK-OSDF-CACHE"
         },
         {
           "auth_endpoint": "mghpcc-cache.nationalresearchplatform.org:8443",
