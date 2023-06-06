@@ -185,5 +185,9 @@ func MatchNamespace(path string) (Namespace, error) {
 			best = namespace
 		}
 	}
+	if best.Path == "" {
+		return Namespace{}, errors.New("OSDF namespace not known for path " + path)
+	}
+	log.Debugln("Selected namespace:", best)
 	return best, nil
 }

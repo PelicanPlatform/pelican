@@ -252,6 +252,20 @@ func GetCachesFromNamespace(namespace Namespace) (caches []Cache, err error) {
 	return
 }
 
+func correctURLWithUnderscore(sourceFile string) (string, string) {
+	schemeIndex := strings.Index(sourceFile, "://")
+	if schemeIndex == -1 {
+		return sourceFile, ""
+	}
+	
+	originalScheme := sourceFile[:schemeIndex]
+	if strings.Contains(originalScheme, "_") {
+		scheme := strings.ReplaceAll(originalScheme, "_", ".")
+		sourceFile = scheme + sourceFile[schemeIndex:]
+	}
+	return sourceFile, originalScheme
+}
+
 // Start the transfer, whether read or write back
 func DoStashCPSingle(sourceFile string, destination string, methods []string, recursive bool) (bytesTransferred int64, err error) {
 
@@ -269,22 +283,25 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 	}()
 
 	// Parse the source and destination with URL parse
-
+	sourceFile, source_scheme := correctURLWithUnderscore(sourceFile)
 	source_url, err := url.Parse(sourceFile)
 	if err != nil {
 		log.Errorln("Failed to parse source URL:", err)
 		return 0, err
 	}
-
+	source_url.Scheme = source_scheme
+	
+	destination, dest_scheme := correctURLWithUnderscore(destination)
 	dest_url, err := url.Parse(destination)
 	if err != nil {
 		log.Errorln("Failed to parse destination URL:", err)
 		return 0, err
 	}
+	dest_url.Scheme = dest_scheme
 
 	// If there is a host specified, prepend it to the path
 	if source_url.Host != "" {
-		source_url.Path = path.Join(source_url.Host, source_url.Path)
+		source_url.Path = "/" + path.Join(source_url.Host, source_url.Path)
 	}
 
 	if dest_url.Host != "" {
@@ -344,13 +361,13 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 		}
 		err = CreateNsFromDirectorResp(dirResp, &ns)
 		if err != nil {
-			log.Errorln("Error parsing namespace information from Director:", err)
+			AddError(err)
 			return 0, err
 		}
 	} else {
 		ns, err = MatchNamespace(source_url.Path)
 		if err != nil {
-			log.Errorln("Error matching namespace:", err)
+			AddError(err)
 			return 0, err
 		}
 	}
