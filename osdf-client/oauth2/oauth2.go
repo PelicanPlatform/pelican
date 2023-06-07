@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"strings"
 
+        log "github.com/sirupsen/logrus"
 	config "github.com/htcondor/osdf-client/v6/config"
 	namespaces "github.com/htcondor/osdf-client/v6/namespaces"
 )
@@ -19,6 +21,30 @@ func deviceCodeSupported(grantTypes *[]string) bool {
 		}
 	}
 	return false
+}
+
+// Trim the path to a maximum number of components:
+//   trimPath("/a/b/c", 0) -> "/"
+//   trimPath("/a/b/c", 1) -> "/a"
+//   trimPath("/a/b/c", 2) -> "/a/b"
+//   trimPath("/a/b/c", 3) -> "/a/b/c"
+//   trimPath("/a/b/c", 4) -> "/a/b/c"
+
+func trimPath(pathName string, maxDepth int) string {
+	if maxDepth < 0 {
+		return "/"
+	}
+	// Ensure we have no double `/`
+	pathName = path.Clean(pathName)
+	pathComponents := strings.Split(pathName, "/")
+
+	// Ensure we don't slice past the end of the array
+	maxLength := maxDepth + 1
+	if maxLength > len(pathComponents) {
+		maxLength = len(pathComponents)
+	}
+
+	return "/" + path.Join(pathComponents[0:maxLength]...)
 }
 
 func AcquireToken(issuerUrl string, entry *config.PrefixEntry, credentialGen *namespaces.CredentialGeneration, osdfPath string, isWrite bool) (*config.TokenEntry, error) {
@@ -36,9 +62,22 @@ func AcquireToken(issuerUrl string, entry *config.PrefixEntry, credentialGen *na
 		return nil, fmt.Errorf("Issuer at %s for prefix %s does not support device flow", issuerUrl, entry.Prefix)
 	}
 
+	// Always trim the filename off the path
+	osdfPath = path.Dir(osdfPath)
+
 	pathCleaned := path.Clean(osdfPath)[len(entry.Prefix):]
-	if credentialGen != nil && credentialGen.BasePath != nil && len(*credentialGen.BasePath) > 0 {
-		pathCleaned = path.Clean(osdfPath)[len(*credentialGen.BasePath):]
+	// The credential generation object provides various hints and guidance about how
+	// to best create the OAuth2 credential
+	if credentialGen != nil {
+		// Tweak the relative path the issuer starts with
+		if credentialGen.BasePath != nil && len(*credentialGen.BasePath) > 0 {
+			pathCleaned = path.Clean(osdfPath)[len(*credentialGen.BasePath):]
+		}
+
+		// Potentially increase the coarseness of the token
+		if credentialGen.MaxScopeDepth != nil && *credentialGen.MaxScopeDepth >= 0 {
+			pathCleaned = trimPath(pathCleaned, *credentialGen.MaxScopeDepth)
+		}
 	}
 
 	var storageScope string
@@ -48,6 +87,7 @@ func AcquireToken(issuerUrl string, entry *config.PrefixEntry, credentialGen *na
 		storageScope = "storage.read:"
 	}
 	storageScope += pathCleaned
+	log.Debugln("Requesting a credential with the following scope:", storageScope)
 
 	oauth2Config := Config{
 		ClientID: entry.ClientID,
