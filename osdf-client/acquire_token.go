@@ -53,7 +53,7 @@ func TokenIsAcceptable(jwtSerialized string, osdfPath string, namespace namespac
 		for _, scope := range strings.Split(scopes, " ") {
 			scope_info := strings.Split(scope, ":")
 			scopeOK := false
-			if isWrite && (scope_info[0] == "storage.modify" || scope_info[0] == "storage.write") {
+			if isWrite && (scope_info[0] == "storage.modify" || scope_info[0] == "storage.create") {
 				scopeOK = true
 			} else if scope_info[0] == "storage.read" {
 				scopeOK = true
