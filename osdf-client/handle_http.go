@@ -211,15 +211,15 @@ type TransferResults struct {
 type CacheInterface interface{}
 
 func GenerateTransferDetailsUsingCache(cache CacheInterface, needsToken bool) []TransferDetails {
-	if directorCache, ok := cache.(DirectorCache); ok {
+	if directorCache, ok := cache.(namespaces.DirectorCache); ok {
 		return NewTransferDetailsUsingDirector(directorCache, needsToken)
-	} else if cache, ok := cache.(Cache); ok {
+	} else if cache, ok := cache.(namespaces.Cache); ok {
 		return NewTransferDetails(cache, needsToken)
 	}
 	return nil
 }
 
-func download_http(source string, destination string, payload *payloadStruct, namespace namespace.Namespace, recursive bool, tokenName string, OSDFDirectorUrl string) (bytesTransferred int64, err error) {
+func download_http(source string, destination string, payload *payloadStruct, namespace namespaces.Namespace, recursive bool, tokenName string, OSDFDirectorUrl string) (bytesTransferred int64, err error) {
 
 	// First, create a handler for any panics that occur
 	defer func() {

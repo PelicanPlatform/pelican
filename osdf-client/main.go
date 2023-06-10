@@ -354,7 +354,7 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 
 	OSDFDirectorUrl, useOSDFDirector := os.LookupEnv("OSDF_DIRECTOR_URL")
 
-	var ns Namespace
+	var ns namespaces.Namespace
 	if useOSDFDirector {
 		dirResp, err := QueryDirector(sourceFile, OSDFDirectorUrl)
 		if err != nil {

@@ -14,6 +14,8 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"net/http/httputil"
+
+	namespaces "github.com/htcondor/osdf-client/v6/namespaces"
 )
 
 // TestIsPort calls main.hasPort with a hostname, checking
@@ -38,7 +40,7 @@ func TestNewTransferDetails(t *testing.T) {
 	os.Setenv("http_proxy", "http://proxy.edu:3128")
 
 	// Case 1: cache with http
-	testCache := Cache{
+	testCache := namespaces.Cache{
 		AuthEndpoint: "cache.edu:8443",
 		Endpoint:     "cache.edu:8000",
 		Resource:     "Cache",
@@ -84,7 +86,7 @@ func TestNewTransferDetails(t *testing.T) {
 
 func TestNewTransferDetailsEnv(t *testing.T) {
 
-	testCache := Cache{
+	testCache := namespaces.Cache{
 		AuthEndpoint: "cache.edu:8443",
 		Endpoint:     "cache.edu:8000",
 		Resource:     "Cache",
@@ -125,7 +127,7 @@ func TestSlowTransfers(t *testing.T) {
 	defer svr.CloseClientConnections()
 	defer svr.Close()
 
-	testCache := Cache{
+	testCache := namespaces.Cache{
 		AuthEndpoint: svr.URL,
 		Endpoint:     svr.URL,
 		Resource:     "Cache",
@@ -184,7 +186,7 @@ func TestStoppedTransfer(t *testing.T) {
 	defer svr.CloseClientConnections()
 	defer svr.Close()
 
-	testCache := Cache{
+	testCache := namespaces.Cache{
 		AuthEndpoint: svr.URL,
 		Endpoint:     svr.URL,
 		Resource:     "Cache",
@@ -251,7 +253,7 @@ func TestTrailerError(t *testing.T) {
 
 	defer svr.Close()
 
-	testCache := Cache{
+	testCache := namespaces.Cache{
 		AuthEndpoint: svr.URL,
 		Endpoint:     svr.URL,
 		Resource:     "Cache",
@@ -347,7 +349,7 @@ func TestFullUpload(t *testing.T) {
 	// Create the namespace (only the write back host is read)
 	testURL, err := url.Parse(ts.URL)
 	assert.NoError(t, err, "Error parsing test URL")
-	testNamespace := Namespace{
+	testNamespace := namespaces.Namespace{
 		WriteBackHost: "https://" + testURL.Host,
 	}
 

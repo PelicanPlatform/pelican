@@ -8,6 +8,8 @@ import(
 	"io/ioutil"
 	"os"
 	"github.com/stretchr/testify/assert"
+
+	namespaces "github.com/htcondor/osdf-client/v6/namespaces"
 )
 
 func TestHeaderParser(t *testing.T) {
@@ -65,22 +67,22 @@ func TestCreateNsFromDirectorResp(t *testing.T) {
 	}
 
 	// Create a namespace instance to test against
-	cache1 := DirectorCache{
+	cache1 := namespaces.DirectorCache{
 		EndpointUrl: "my-cache.edu:8443",
 		Priority: 1,
 		AuthedReq: true,
 	} 
-	cache2 := DirectorCache{
+	cache2 := namespaces.DirectorCache{
 		EndpointUrl: "another-cache.edu:8443",
 		Priority: 2,
 		AuthedReq: true,
 	} 
 
-	caches := []DirectorCache{}
+	caches := []namespaces.DirectorCache{}
 	caches = append(caches, cache1)
 	caches = append(caches, cache2)
 	
-	constructedNamespace := &Namespace{
+	constructedNamespace := &namespaces.Namespace{
 		SortedDirectorCaches: caches,
 		Path: "/foo/bar",
 		Issuer: "https://get-your-tokens.org",
@@ -89,7 +91,7 @@ func TestCreateNsFromDirectorResp(t *testing.T) {
 	}
 
 	// Call the function in question
-	var ns Namespace
+	var ns namespaces.Namespace
 	err := CreateNsFromDirectorResp(directorResponse, &ns)
 
 	// Test for expected outputs
@@ -107,7 +109,7 @@ func TestNewTransferDetailsUsingDirector(t *testing.T) {
 
 	// Construct the input caches
 	// Cache with http
-	nonAuthCache := DirectorCache{
+	nonAuthCache := namespaces.DirectorCache{
 		ResourceName: "mycache",
 		EndpointUrl: "my-cache-url:8000",
 		Priority: 99,
@@ -115,7 +117,7 @@ func TestNewTransferDetailsUsingDirector(t *testing.T) {
 	}
 
 	// Cache with https
-	authCache := DirectorCache{
+	authCache := namespaces.DirectorCache{
 		ResourceName: "mycache",
 		EndpointUrl: "my-cache-url:8443",
 		Priority: 99,
