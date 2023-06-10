@@ -201,6 +201,43 @@ func FuzzGetTokenName(f *testing.F) {
 	})
 }
 
+func TestCorrectURLWithUnderscore(t *testing.T) {
+	tests := []struct {
+		name           string
+		url            string
+		expectedURL    string
+		expectedScheme string
+	}{
+		{
+			name:           "LIGO URL with underscore",
+			url:            "ligo_data://ligo.org/data/1",
+			expectedURL:    "ligo.data://ligo.org/data/1",
+			expectedScheme: "ligo_data",
+		},
+		{
+			name:           "URL without underscore",
+			url:            "http://example.com",
+			expectedURL:    "http://example.com",
+			expectedScheme: "http",
+		},
+		{
+			name:           "URL with no scheme",
+			url:            "example.com",
+			expectedURL:    "example.com",
+			expectedScheme: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			actualURL, actualScheme := correctURLWithUnderscore(tt.url)
+			if actualURL != tt.expectedURL || actualScheme != tt.expectedScheme {
+				t.Errorf("correctURLWithUnderscore(%v) = %v, %v; want %v, %v", tt.url, actualURL, actualScheme, tt.expectedURL, tt.expectedScheme)
+			}
+		})
+	}
+}
+
 func TestParseNoJobAd(t *testing.T) {
 	// Job ad file does not exist
 	tempDir := t.TempDir()

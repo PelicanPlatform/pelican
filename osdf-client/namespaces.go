@@ -6,11 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	log "github.com/sirupsen/logrus"
 	"io"
 	"net/http"
 	"os"
 	"strings"
+
+	log "github.com/sirupsen/logrus"
 )
 
 // I don't think we actually want stashcp to download the namespace every build
@@ -33,15 +34,25 @@ type Cache struct {
 	Resource     string `json:"resource"`
 }
 
+// Credential generation information
+type CredentialGeneration struct {
+	Issuer        *string  `json:"issuer"`
+	MaxScopeDepth *int     `json:"max_scope_depth"`
+	Strategy      *string `json:"strategy"`
+	VaultServer   *string `json:"vault_server"`
+}
+
 // Namespace holds the structure of stash namespaces
 type Namespace struct {
-	Caches         []Cache `json:"caches"`
-	Path           string  `json:"path"`
-	Issuer         string  `json:"issuer"`
-	ReadHTTPS      bool    `json:"readhttps"`
-	UseTokenOnRead bool    `json:"usetokenonread"`
-	WriteBackHost  string  `json:"writebackhost"`
-	DirListHost    string  `json:"dirlisthost"`
+	Caches               []Cache `json:"caches"`
+	SortedDirectorCaches []DirectorCache
+	Path                 string `json:"path"`
+  CredentialGen *CredentialGeneration  `json:"credential_generation"`
+	Issuer               string `json:"issuer"`
+	ReadHTTPS            bool   `json:"readhttps"`
+	UseTokenOnRead       bool   `json:"usetokenonread"`
+	WriteBackHost        string `json:"writebackhost"`
+	DirListHost          string `json:"dirlisthost"`
 }
 
 // GetCaches returns the list of caches for the namespace
@@ -113,7 +124,7 @@ func GetNamespaces() ([]Namespace, error) {
 	// Try downloading the namespaces, if it fails, use the embedded namespaces
 	namespacesFromUrl, err := downloadNamespace()
 	if err != nil {
-		log.Debugf("Failed to download namespaces: %s, continueing using built-in namespace configuration", err)
+		log.Debugf("Failed to download namespaces: %s, continuing using built-in namespace configuration", err)
 	} else {
 		namespacesJson = namespacesFromUrl
 	}
