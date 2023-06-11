@@ -8,10 +8,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 
 	log "github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
 )
 
 // I don't think we actually want stashcp to download the namespace every build
@@ -158,10 +158,8 @@ func GetNamespaces() ([]Namespace, error) {
 // downloadNamespace downloads the namespace information with timeouts
 func downloadNamespace() ([]byte, error) {
 	// Get the namespace url from the environment
-	namespaceUrl, gotNamespaceUrl := os.LookupEnv("STASH_NAMESPACE_URL")
-	if !gotNamespaceUrl {
-		namespaceUrl = "https://topology.opensciencegrid.org/stashcache/namespaces"
-	}
+	namespaceUrl := viper.GetString("NamespaceURL")
+	log.Debugln("Downloading namespaces information from", namespaceUrl)
 	resp, err := http.Get(namespaceUrl)
 	if err != nil {
 		return nil, err

@@ -2,12 +2,12 @@ package main
 
 import (
 	"fmt"
-	"net/url"
 	"os"
 	"strings"
 
 	stashcp "github.com/htcondor/osdf-client/v6"
 	namespaces "github.com/htcondor/osdf-client/v6/namespaces"
+	"github.com/htcondor/osdf-client/v6/config"
 	"github.com/jessevdk/go-flags"
 	log "github.com/sirupsen/logrus"
 )
@@ -79,7 +79,13 @@ var parser = flags.NewParser(&options, flags.Default)
 func main() {
 
 	stashcp.Options.Version = version
-	
+
+	err := config.Init()
+	if err != nil {
+		log.Errorln(err)
+		os.Exit(1)
+	}
+
 	// Capture the start time of the transfer
 	if _, err := parser.Parse(); err != nil {
 		if flagsErr, ok := err.(*flags.Error); ok && flagsErr.Type == flags.ErrHelp {
@@ -168,33 +174,9 @@ func main() {
 	log.Debugln("Sources:", source)
 	log.Debugln("Destination:", dest)
 	if options.ListDir {
-		dirUrl, _ := url.Parse("http://stash.osgconnect.net:1094")
-		dirUrl.Path = source[0]
-		isDir, err := stashcp.IsDir(dirUrl, "", namespaces.Namespace{})
-		if err != nil {
-			log.Errorln("Error getting directory listing:", err)
-		}
-		log.Debugln("Dir is a directory?", isDir)
-		return
+		log.Errorln("Directory listing not currently implemented")
+		os.Exit(1)
 	}
-
-	/*
-		TODO: Parse a caches JSON, is this needed anymore?
-		if args.caches_json {
-			caches_json_location = caches_json
-
-		} else if val, jsonPresent := os.LookupEnv("CACHES_JSON"); jsonPresent {
-			caches_json_location = val
-		} else {
-			prefix = os.Getenv("OSG_LOCATION", "/")
-			caches_file = filepath.Join(prefix, "etc/stashcache/caches.json")
-			if _, err := os.Stat(caches_file); err == nil {
-				caches_json_location = caches_file
-			}
-		}
-
-		caches_list_name = args.cache_list_name
-	*/
 
 	// Check for manually entered cache to use ??
 	nearestCache, nearestCacheIsPresent := os.LookupEnv("NEAREST_CACHE")

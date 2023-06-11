@@ -24,6 +24,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	namespaces "github.com/htcondor/osdf-client/v6/namespaces"
+	"github.com/spf13/viper"
 )
 
 type OptionsStruct struct {
@@ -54,7 +55,6 @@ var CacheOverride bool
 
 type payloadStruct struct {
 	filename     string
-	sitename     string
 	status       string
 	Owner        string
 	ProjectName  string
@@ -352,7 +352,8 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 		sourceFile = "/" + sourceFile
 	}
 
-	OSDFDirectorUrl, useOSDFDirector := os.LookupEnv("OSDF_DIRECTOR_URL")
+	OSDFDirectorUrl := viper.GetString("DirectorURL")
+	useOSDFDirector := viper.IsSet("DirectorURL")
 
 	var ns namespaces.Namespace
 	if useOSDFDirector {
@@ -388,11 +389,6 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 
 	payload := payloadStruct{}
 	payload.version = version
-	var found bool
-	payload.sitename, found = os.LookupEnv("OSG_SITE_NAME")
-	if !found {
-		payload.sitename = "siteNotFound"
-	}
 
 	//Fill out the payload as much as possible
 	payload.filename = source_url.Path

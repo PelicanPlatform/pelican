@@ -10,6 +10,7 @@ import (
 
 	stashcp "github.com/htcondor/osdf-client/v6"
 	"github.com/htcondor/osdf-client/v6/classads"
+	"github.com/htcondor/osdf-client/v6/config"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -26,8 +27,13 @@ type Transfer struct {
 }
 
 func main() {
-	// Parse command line arguments
+	err := config.Init()
+	if err != nil {
+		log.Errorln(err)
+		os.Exit(1)
+	}
 
+	// Parse command line arguments
 	var upload bool = false
 	// Set the options
 	stashcp.Options.Recursive = false
