@@ -5,18 +5,29 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
 	"github.com/stretchr/testify/assert"
+	"github.com/spf13/viper"
 
 	"net/http/httputil"
 
 	namespaces "github.com/htcondor/osdf-client/v6/namespaces"
+	"github.com/htcondor/osdf-client/v6/config"
 )
+
+func TestMain(m *testing.M) {
+	if err := config.Init(); err != nil {
+		os.Exit(1)
+	}
+	os.Exit(m.Run())
+}
 
 // TestIsPort calls main.hasPort with a hostname, checking
 // for a valid return value.
@@ -93,6 +104,8 @@ func TestNewTransferDetailsEnv(t *testing.T) {
 	}
 
 	os.Setenv("OSG_DISABLE_PROXY_FALLBACK", "")
+	err := config.Init()
+	assert.Nil(t, err)
 	transfers := NewTransferDetails(testCache, false)
 	assert.Equal(t, 1, len(transfers))
 	assert.Equal(t, true, transfers[0].Proxy)
@@ -102,9 +115,16 @@ func TestNewTransferDetailsEnv(t *testing.T) {
 	assert.Equal(t, "https", transfers[0].Url.Scheme)
 	assert.Equal(t, false, transfers[0].Proxy)
 	os.Unsetenv("OSG_DISABLE_PROXY_FALLBACK")
+	viper.Reset()
+	err = config.Init()
+	assert.Nil(t, err)
 }
 
 func TestSlowTransfers(t *testing.T) {
+	// Adjust down some timeouts to speed up the test
+        viper.Set("SlowTransferWindow", 5)
+        viper.Set("SlowTransferRampupTime", 10)
+
 	channel := make(chan bool)
 	slowDownload := 1024 * 10 // 10 KiB/s < 100 KiB/s
 	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -164,6 +184,10 @@ func TestSlowTransfers(t *testing.T) {
 
 // Test stopped transfer
 func TestStoppedTransfer(t *testing.T) {
+	// Adjust down the timeouts
+	viper.Set("StoppedTransferTimeout", 3)
+	viper.Set("SlowTransferRampupTime", 100)
+
 	channel := make(chan bool)
 	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		buffer := make([]byte, 1024 * 100)

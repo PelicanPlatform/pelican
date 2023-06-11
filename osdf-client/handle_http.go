@@ -488,6 +488,9 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 		)
 	}
 
+	stoppedTransferTimeout := viper.GetInt64("StoppedTransferTimeout")
+	slowTransferRampupTime := viper.GetInt64("SlowTransferRampupTime")
+	slowTransferWindow := viper.GetInt64("SlowTransferWindow")
 	var previousCompletedBytes int64 = 0
 	var previousCompletedTime = time.Now()
 	var startBelowLimit int64 = 0
@@ -514,8 +517,8 @@ Loop:
 			if resp.BytesComplete() == lastBytesComplete {
 				if noProgressStartTime.IsZero() {
 					noProgressStartTime = time.Now()
-				} else if time.Since(noProgressStartTime) > 100 * time.Second {
-					errMsg := "No progress for more than " + (time.Since(noProgressStartTime)/time.Second).String() + " seconds."
+				} else if time.Since(noProgressStartTime) > time.Duration(stoppedTransferTimeout) * time.Second {
+					errMsg := "No progress for more than " + time.Since(noProgressStartTime).Truncate(time.Millisecond).String()
 					log.Errorln(errMsg)
 					return 5, &StoppedTransferError{
 						Err: errMsg,
@@ -529,18 +532,18 @@ Loop:
 
 			// Check if we are downloading fast enough
 			if resp.BytesPerSecond() < float64(downloadLimit) {
-				// Give the download 120 seconds to start
-				if resp.Duration() < time.Second*120 {
+				// Give the download `slowTransferRampupTime` (default 120) seconds to start
+				if resp.Duration() < time.Second* time.Duration(slowTransferRampupTime) {
 					continue
 				} else if startBelowLimit == 0 {
 					log.Warnln("Download speed of ", resp.BytesPerSecond(), "bytes/s", " is below the limit of", downloadLimit, "bytes/s")
 					startBelowLimit = time.Now().Unix()
 					continue
-				} else if (time.Now().Unix() - startBelowLimit) < 30 {
-					// If the download is below the threshold for less than 30 seconds, continue
+				} else if (time.Now().Unix() - startBelowLimit) < slowTransferWindow {
+					// If the download is below the threshold for less than `SlowTransferWindow` (default 30) seconds, continue
 					continue
 				}
-				// The download is below the threshold for more than 30 seconds, cancel the download
+				// The download is below the threshold for more than `SlowTransferWindow` seconds, cancel the download
 				cancel()
 				if Options.ProgressBars {
 					var cancelledProgressBar = p.AddBar(0,

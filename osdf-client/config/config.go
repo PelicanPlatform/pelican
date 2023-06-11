@@ -2,7 +2,7 @@
 package config
 
 import (
-	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"os"
@@ -43,7 +43,7 @@ type OSDFConfig struct {
 // need to manually configure the location of the director endpoint.
 //
 func GetPreferredPrefix() string {
-	arg0 := strings.ToUpper(path.Base(os.Args[0]))
+	arg0 := strings.ToUpper(filepath.Base(os.Args[0]))
 	underscore_idx := strings.Index(arg0, "_")
 	if underscore_idx != -1 {
 		return arg0[0:underscore_idx]
@@ -76,8 +76,12 @@ func Init() error {
 	upper_prefix := GetPreferredPrefix()
 	lower_prefix := strings.ToLower(upper_prefix)
 
+	viper.SetDefault("StoppedTransferTimeout", 100)
+	viper.SetDefault("SlowTransferRampupTime", 100)
+	viper.SetDefault("SlowTransferWindow", 30)
+
 	if upper_prefix == "OSDF" || upper_prefix == "STASH" {
-		viper.Set("NamespaceURL", "https://topology.opensciencegrid.org/stashcache/namespaces")
+		viper.SetDefault("NamespaceURL", "https://topology.opensciencegrid.org/stashcache/namespaces")
 	}
 
 	viper.SetEnvPrefix(upper_prefix)
