@@ -40,7 +40,7 @@ func init() {
 	rootCmd.AddCommand(objectCmd)
 	rootCmd.AddCommand(originCmd)
 
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.pelican.yaml)")
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.config/pelican/pelican.yaml)")
 	rootCmd.PersistentFlags().BoolVarP(&outputJSON, "json", "", false, "output results in JSON format")
 	rootCmd.CompletionOptions.DisableDefaultCmd = true
 }
@@ -58,8 +58,9 @@ func initConfig() {
 		viper.SetConfigName("pelican.yaml")
 	}
 
+	viper.SetEnvPrefix("pelican")
 	viper.AutomaticEnv()
-	if err := viper.ReadInConfig(); err != nil {
+	if err := viper.MergeInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
 			cobra.CheckErr(err)
 		}

@@ -1,0 +1,11 @@
+Port: 8443
+ManagerPort: 1213
+SummaryMonitoringPort: 9931
+DetailedMonitoringPort: 9930
+TLSCertificate: /etc/pelican/certificates/tls.crt
+TLSKey: /etc/pelican/certificates/tls.key
+MacaroonsKeyFile: /etc/pelican/macaroons-secret
+RobotsTxtFile: /etc/pelican/robots.txt
+XrootdRun: /run/pelican/xrootd
+ScitokensConfig: /etc/pelican/xrootd/scitokens.cfg
+Authfile: /etc/pelican/xrootd/authfile
