@@ -23,7 +23,7 @@ var (
 	originServeCmd = &cobra.Command{
 		Use: "serve",
 		Short: "Start the origin service",
-		Run: serve,
+		RunE: serve,
 	}
 )
 

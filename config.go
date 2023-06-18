@@ -2,9 +2,19 @@ package pelican
 
 import (
 	"os"
+	"os/user"
 	"path/filepath"
 	"strings"
 )
+
+var (
+	isRootExec bool
+)
+
+func init () {
+	userObj, err := user.Current()
+	isRootExec = err == nil && userObj.Username == "root"
+}
 
 func GetPreferredPrefix() string {
 	arg0 := strings.ToUpper(filepath.Base(os.Args[0]))
@@ -18,4 +28,8 @@ func GetPreferredPrefix() string {
 		return "OSDF"
 	}
 	return "PELICAN"
+}
+
+func IsRootExecution() bool {
+	return isRootExec
 }
