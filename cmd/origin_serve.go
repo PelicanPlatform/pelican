@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bufio"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -23,6 +24,7 @@ import (
 	"text/template"
 	"time"
 
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/pelicanplatform/pelican"
@@ -456,52 +458,130 @@ func configXrootd() (string, error) {
 	return configPath, nil
 }
 
+func forwardCommandToLogger(daemonName string, cmd *exec.Cmd, isDoneChannel chan error) error {
+	cmdStdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	cmdStderr, err := cmd.StderrPipe()
+	if err != nil {
+		return err
+	}
+	go func() {
+		cmd_logger := log.WithFields(log.Fields{"daemon": daemonName})
+		stdout_scanner := bufio.NewScanner(cmdStdout)
+		stdout_lines := make(chan string, 10)
+
+		stderr_scanner := bufio.NewScanner(cmdStderr)
+		stderr_lines := make(chan string, 10)
+		go func() {
+			defer close(stdout_lines)
+			for stdout_scanner.Scan() {
+				stdout_lines <- stdout_scanner.Text()
+			}
+		}()
+		go func() {
+			defer close(stderr_lines)
+			for stderr_scanner.Scan() {
+				stderr_lines <- stderr_scanner.Text()
+			}
+		}()
+		for {
+			select {
+			case stdout_line, ok := <-stdout_lines:
+				if ok {
+					cmd_logger.Info(stdout_line)
+				} else {
+					stdout_lines = nil
+				}
+			case stderr_line, ok := <-stderr_lines:
+				if ok {
+					cmd_logger.Info(stderr_line)
+				} else {
+					stderr_lines = nil
+				}
+			}
+			if stdout_lines == nil && stderr_lines == nil {
+				break
+			}
+		}
+		result := cmd.Wait()
+		isDoneChannel <- result
+		close(isDoneChannel)
+	}()
+	return nil
+}
+
 func launchXrootd() error {
 	configPath, err := configXrootd()
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command("xrootd", "-f", "-c", configPath)
-	if cmd.Err != nil {
-		return cmd.Err
+	xrootdCmd := exec.Command("xrootd", "-f", "-c", configPath)
+	if xrootdCmd.Err != nil {
+		return xrootdCmd.Err
 	}
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
+	xrootdDoneChannel := make(chan error, 1)
+	if err := forwardCommandToLogger("xrootd", xrootdCmd, xrootdDoneChannel); err != nil {
 		return err
 	}
-	isDoneChannel := make(chan error, 1)
-	go func() {
-		result := cmd.Wait()
-		isDoneChannel <- result
-	}()
-	fmt.Println("Started xrootd")
+	if err := xrootdCmd.Start(); err != nil {
+		return err
+	}
+	log.Info("Successfully launched xrootd")
+
+	cmsdCmd := exec.Command("cmsd", "-f", "-c", configPath)
+	if cmsdCmd.Err != nil {
+		return cmsdCmd.Err
+	}
+	cmsdDoneChannel := make(chan error, 1)
+	if err := forwardCommandToLogger("cmsd", cmsdCmd, cmsdDoneChannel); err != nil {
+		return err
+	}
+	if err := cmsdCmd.Start(); err != nil {
+		return err
+	}
+	log.Info("Successfully launched cmsd")
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
-	var expiry time.Time
+	var xrootdExpiry time.Time
+	var cmsdExpiry time.Time
 	for {
 		timer := time.NewTimer(time.Second)
 		select {
 		case sig := <-sigs:
 			if sys_sig, ok := sig.(syscall.Signal); ok {
-				fmt.Printf("Forwarding signal %v to xrootd process\n", sys_sig)
-				syscall.Kill(cmd.Process.Pid, sys_sig)
+				log.Warnf("Forwarding signal %v to xrootd processes\n", sys_sig)
+				syscall.Kill(xrootdCmd.Process.Pid, sys_sig)
+				syscall.Kill(cmsdCmd.Process.Pid, sys_sig)
 			} else {
 				panic(errors.New("Unable to convert signal to syscall.Signal"))
 			}
-			expiry = time.Now().Add(10*time.Second)
-		case waitResult := <-isDoneChannel:
+			xrootdExpiry = time.Now().Add(10*time.Second)
+			cmsdExpiry = time.Now().Add(10*time.Second)
+		case waitResult := <-xrootdDoneChannel:
 			if waitResult != nil {
-				if !expiry.IsZero() {
+				if !cmsdExpiry.IsZero() {
 					return nil
 				}
-				return errors.Wrap(waitResult, "Xrootd process failed unexpectedly")
+				return errors.Wrap(waitResult, "xrootd process failed unexpectedly")
+			}
+			return nil
+		case waitResult := <-cmsdDoneChannel:
+			if waitResult != nil {
+				if !xrootdExpiry.IsZero() {
+					return nil
+				}
+				return errors.Wrap(waitResult, "cmsd process failed unexpectedly")
 			}
 			return nil
 		case <-timer.C:
-			if !expiry.IsZero() && time.Now().After(expiry) {
-				syscall.Kill(cmd.Process.Pid, syscall.SIGKILL)
+			if !xrootdExpiry.IsZero() && time.Now().After(xrootdExpiry) {
+				syscall.Kill(xrootdCmd.Process.Pid, syscall.SIGKILL)
+			}
+			if !cmsdExpiry.IsZero() && time.Now().After(cmsdExpiry) {
+				syscall.Kill(cmsdCmd.Process.Pid, syscall.SIGKILL)
 			}
 		}
 	}
@@ -516,15 +596,15 @@ func serve(/*cmd*/ *cobra.Command, /*args*/ []string) error {
 
 	err := checkDefaults()
 	if err != nil {
-		fmt.Println("Fatal error:")
-		fmt.Println(err.Error())
+		log.Error(err.Error())
 		return err
 	}
 
 	err = launchXrootd()
 	if err != nil {
-		fmt.Println("Fatal error:", err.Error())
+		log.Error("Fatal error:", err.Error())
 		return err
 	}
+	log.Info("Clean shutdown of the origin")
 	return nil
 }
