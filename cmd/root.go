@@ -7,7 +7,9 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 
+	"github.com/pelicanplatform/pelican"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -35,10 +37,14 @@ func Execute() {
 
 func init() {
 
+
+
 	cobra.OnInitialize(initConfig)
 
 	rootCmd.AddCommand(objectCmd)
 	rootCmd.AddCommand(originCmd)
+	preferredPrefix := pelican.GetPreferredPrefix()
+	rootCmd.Use = strings.ToLower(preferredPrefix)
 
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.config/pelican/pelican.yaml)")
 	rootCmd.PersistentFlags().BoolVarP(&outputJSON, "json", "", false, "output results in JSON format")
@@ -58,7 +64,8 @@ func initConfig() {
 		viper.SetConfigName("pelican.yaml")
 	}
 
-	viper.SetEnvPrefix("pelican")
+
+	viper.SetEnvPrefix(pelican.GetPreferredPrefix())
 	viper.AutomaticEnv()
 	if err := viper.MergeInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {

@@ -2,3 +2,5 @@ Port: 8443
 ManagerPort: 1213
 SummaryMonitoringPort: 9931
 DetailedMonitoringPort: 9930
+Mount: ""
+NamespacePrefix: ""

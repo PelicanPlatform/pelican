@@ -24,6 +24,7 @@ var (
 		Use: "serve",
 		Short: "Start the origin service",
 		RunE: serve,
+		SilenceUsage: true,
 	}
 )
 
