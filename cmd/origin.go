@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 var (
@@ -36,4 +37,6 @@ func config(/*cmd*/ *cobra.Command, /*args*/ []string) {
 func init() {
 	originCmd.AddCommand(originConfigCmd)
 	originCmd.AddCommand(originServeCmd)
+	originServeCmd.Flags().StringP("volume", "v", "", "Setting the volue to /SRC:/DEST will export the contents of /SRC as /DEST in the Pelican federation")
+	viper.BindPFlag("ExportVolume", originServeCmd.Flags().Lookup("volume"))
 }

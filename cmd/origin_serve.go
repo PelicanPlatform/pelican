@@ -298,6 +298,76 @@ func checkXrootdEnv() error {
 			" to desired daemon user %v", runtimeDir, username)
 	}
 
+	// If we use "volume mount" style options, configure the export directories.
+	volumeMount := viper.GetString("ExportVolume")
+	if volumeMount != "" {
+		volumeMount, err = filepath.Abs(volumeMount)
+		if err != nil {
+			return err
+		}
+		volumeMountSrc := volumeMount
+		volumeMountDst := volumeMount
+		volumeMountInfo := strings.SplitN(volumeMount, ":", 2)
+		if len(volumeMountInfo) == 2 {
+			volumeMountSrc = volumeMountInfo[0]
+			volumeMountDst = volumeMountInfo[1]
+		}
+		volumeMountDst = filepath.Clean(volumeMountDst)
+		if volumeMountDst == "" {
+			return fmt.Errorf("Export volume %v has empty destination path", volumeMount)
+		}
+		if volumeMountDst[0:1] != "/" {
+			return fmt.Errorf("Export volume %v has a relative destination path",
+				volumeMountDst)
+		}
+		destPath := path.Clean(filepath.Join(runtimeDir, "export",
+			volumeMountDst[1:len(volumeMountDst)]))
+		err = os.MkdirAll(filepath.Dir(destPath), 0755)
+		if err != nil {
+			return errors.Wrapf(err, "Unable to create export directory %v",
+				filepath.Dir(destPath))
+		}
+		err = os.Symlink(volumeMountSrc, destPath)
+		if err != nil {
+			return errors.Wrapf(err, "Failed to create export symlink")
+		}
+		viper.Set("NamespacePrefix", volumeMountDst)
+	} else {
+		mountPath := viper.GetString("Mount")
+		namespacePrefix := viper.GetString("NamespacePrefix")
+		if mountPath == "" || namespacePrefix == "" {
+			return errors.New(`Export information was not provided.
+Add command line flag:
+
+    -v /mnt/foo:/bar
+
+to export the directory /mnt/foo to the path /bar in the data federation`)
+		}
+		mountPath, err := filepath.Abs(mountPath)
+		if err != nil {
+			return err
+		}
+		mountPath = filepath.Clean(mountPath)
+		namespacePrefix = filepath.Clean(namespacePrefix)
+		if namespacePrefix[0:1] != "/" {
+			return fmt.Errorf("Namespace prefix %v must have an absolute path",
+				namespacePrefix)
+		}
+		destPath := path.Clean(filepath.Join(runtimeDir, "export",
+			namespacePrefix[1:len(namespacePrefix)]))
+		err = os.MkdirAll(filepath.Dir(destPath), 0755)
+		if err != nil {
+			return errors.Wrapf(err, "Unable to create export directory %v",
+				filepath.Dir(destPath))
+		}
+		srcPath := filepath.Join(mountPath, namespacePrefix[1:len(namespacePrefix)])
+		err = os.Symlink(srcPath, destPath)
+		if err != nil {
+			return errors.Wrapf(err, "Failed to create export symlink")
+		}
+	}
+	viper.Set("Mount", filepath.Join(runtimeDir, "export"))
+
 	// If no robots.txt, create a ephemeral one for xrootd to use
 	robotsTxtFile := viper.GetString("RobotsTxtFile")
 	if _, err := os.Open(robotsTxtFile); err != nil {
@@ -596,13 +666,11 @@ func serve(/*cmd*/ *cobra.Command, /*args*/ []string) error {
 
 	err := checkDefaults()
 	if err != nil {
-		log.Error(err.Error())
 		return err
 	}
 
 	err = launchXrootd()
 	if err != nil {
-		log.Error("Fatal error:", err.Error())
 		return err
 	}
 	log.Info("Clean shutdown of the origin")
