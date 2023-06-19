@@ -1,3 +1,4 @@
+//go:build !windows
 
 package main
 
@@ -6,6 +7,7 @@ import (
 	_ "embed"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/user"
 	"os/signal"
 	"path/filepath"
@@ -13,6 +15,7 @@ import (
 	"strings"
 	"syscall"
 	"text/template"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -229,16 +232,67 @@ func checkDefaults() error {
 	return nil
 }
 
-func launchXrootd() error {
+func configXrootd() (string, error) {
 	var config XrootdConfig
 	viper.Unmarshal(&config)
 	templ := template.Must(template.New("xrootd.cfg").Parse(xrootdCfg))
-	err := templ.Execute(os.Stdout, config)
+
+	xrootdRun := viper.GetString("XrootdRun")
+	configPath := filepath.Join(xrootdRun, "xrootd.cfg")
+	file, err := os.OpenFile(configPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	err = templ.Execute(file, config)
+	if err != nil {
+		return "", err
+	}
+
+	return configPath, nil
+}
+
+func launchXrootd() error {
+	configPath, err := configXrootd()
 	if err != nil {
 		return err
 	}
+	cmd := exec.Command("xrootd", "-f", "-c", configPath)
+	if cmd.Err != nil {
+		return cmd.Err
+	}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	isDoneChannel := make(chan error, 1)
+	go func() {
+		result := cmd.Wait()
+		isDoneChannel <- result
+	}()
+	fmt.Println("Started xrootd")
 
-	return nil
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+	var expiry time.Time
+	for {
+		timer := time.NewTimer(time.Second)
+		select {
+		case sig := <-sigs:
+			if sys_sig, ok := sig.(syscall.Signal); ok {
+				syscall.Kill(cmd.Process.Pid, sys_sig)
+			} else {
+				panic(errors.New("Unable to convert signal to syscall.Signal"))
+			}
+			expiry = time.Now().Add(10*time.Second)
+		case waitResult := <-isDoneChannel:
+			return waitResult
+		case <-timer.C:
+			if !expiry.IsZero() && time.Now().After(expiry) {
+				syscall.Kill(cmd.Process.Pid, syscall.SIGKILL)
+			}
+		}
+	}
 }
 
 func serve(/*cmd*/ *cobra.Command, /*args*/ []string) error {
