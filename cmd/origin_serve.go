@@ -3,13 +3,20 @@
 package main
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	_ "embed"
+	"encoding/pem"
 	"fmt"
 	"os"
 	"os/exec"
 	"os/user"
 	"os/signal"
+	"math/big"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -45,6 +52,7 @@ type XrootdConfig struct {
 	TLSCertificate string
 	TLSKey string
 	TLSCertDir string
+	TLSCertFile string
 	MacaroonsKeyFile string
 	RobotsTxtFile string
 	Sitename string
@@ -53,9 +61,9 @@ type XrootdConfig struct {
 	DetailedMonitoringHost string
 	DetailedMonitoringPort int
 	XrootdRun string
-	Mount string
 	Authfile string
 	ScitokensConfig string
+	Mount string
 	NamespacePrefix string
 }
 
@@ -105,6 +113,7 @@ func init() {
 			cleanupDirOnShutdown(dir)
 		}
 	}
+	viper.SetDefault("TLSCertFile", "/etc/pki/tls/cert.pem")
 
 	err := viper.MergeConfig(strings.NewReader(defaultsYaml))
 	if err != nil {
@@ -118,6 +127,110 @@ func init() {
 			panic(err)
 		}
 	}
+}
+
+func generateCert() error {
+	tlsCert := viper.GetString("TLSCertificate")
+	if file, err := os.Open(tlsCert); err == nil {
+		file.Close()
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	certDir := path.Dir(tlsCert)
+	if err := os.MkdirAll(certDir, 0750); err != nil {
+		return err
+	}
+
+	tlsKey := viper.GetString("TLSKey")
+	rest, err := os.ReadFile(tlsKey)
+	if err != nil {
+		return nil
+	}
+
+	var privateKey *ecdsa.PrivateKey
+	var block *pem.Block
+	for {
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			break
+		} else if block.Type == "EC PRIVATE KEY" {
+			privateKey, err = x509.ParseECPrivateKey(block.Bytes)
+			if err != nil {
+				return err
+			}
+			break
+		}
+	}
+	if privateKey == nil {
+		return fmt.Errorf("Private key file, %v, contains no private key", tlsKey)
+	}
+	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
+	serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
+	if err != nil {
+		return err
+	}
+	hostname, err := os.Hostname()
+	if err != nil {
+		return err
+	}
+	notBefore := time.Now()
+	template := x509.Certificate{
+		SerialNumber: serialNumber,
+		Subject: pkix.Name{
+			Organization: []string{"Pelican"},
+			CommonName: hostname,
+		},
+		NotBefore: notBefore,
+		NotAfter: notBefore.Add(365 * 24 * time.Hour),
+		KeyUsage: x509.KeyUsageDigitalSignature,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+		BasicConstraintsValid: true,
+	}
+	template.DNSNames = []string{hostname}
+	derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, &(privateKey.PublicKey),
+		privateKey)
+	if err != nil {
+		return err
+	}
+	file, err := os.OpenFile(tlsCert, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	pem.Encode(file, &pem.Block{Type: "CERTIFICATE", Bytes: derBytes})
+
+	return nil
+}
+
+func generatePrivateKey() error {
+	tlsKey := viper.GetString("TLSKey")
+	if file, err := os.Open(tlsKey); err == nil {
+		file.Close()
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	keyDir := path.Dir(tlsKey)
+	if err := os.MkdirAll(keyDir, 0750); err != nil {
+		return err
+	}
+	// In this case, the private key file doesn't exist.
+	file, err := os.OpenFile(tlsKey, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	defer file.Close()
+	priv, err := ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
+	if err != nil {
+		return err
+	}
+
+	bytes, err := x509.MarshalECPrivateKey(priv)
+	if err != nil {
+		return err
+	}
+	priv_block := pem.Block{Type: "EC PRIVATE KEY", Bytes: bytes}
+	pem.Encode(file, &priv_block)
+	return nil
 }
 
 func checkXrootdEnv() error {
@@ -215,6 +328,14 @@ func checkDefaults() error {
 		}
 	}
 
+	// As necessary, generate a private key and corresponding cert
+	if err := generatePrivateKey(); err != nil {
+		return err
+	}
+	if err := generateCert(); err != nil {
+		return err
+	}
+
 	// TODO: Could upgrade this to a check for a cert in the file...
 	if err := checkConfigFileReadable(viper.GetString("TLSCertificate"),
 			"A TLS certificate is required to serve HTTPS"); err != nil {
@@ -262,6 +383,8 @@ func launchXrootd() error {
 	if cmd.Err != nil {
 		return cmd.Err
 	}
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
 		return err
 	}
@@ -286,7 +409,10 @@ func launchXrootd() error {
 			}
 			expiry = time.Now().Add(10*time.Second)
 		case waitResult := <-isDoneChannel:
-			return waitResult
+			if waitResult != nil {
+				return errors.Wrap(waitResult, "Xrootd process failed unexpectedly")
+			}
+			return nil
 		case <-timer.C:
 			if !expiry.IsZero() && time.Now().After(expiry) {
 				syscall.Kill(cmd.Process.Pid, syscall.SIGKILL)
