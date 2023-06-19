@@ -11,6 +11,7 @@ import (
 	"crypto/x509/pkix"
 	_ "embed"
 	"encoding/base64"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"os"
@@ -24,6 +25,7 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/lestrrat-go/jwx/jwk"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -89,6 +91,7 @@ func init() {
 		viper.SetDefault("ScitokensConfig", "/etc/pelican/xrootd/scitokens.cfg")
 		viper.SetDefault("Authfile", "/etc/pelican/xrootd/authfile")
 		viper.SetDefault("MacaroonsKeyFile", "/etc/pelican/macaroons-secret")
+		viper.SetDefault("IssuerKey", "/etc/pelican/issuer.jwk")
 		viper.SetDefault("XrootdMultiuser", true)
 	} else {
 		home, err := os.UserHomeDir()
@@ -101,6 +104,7 @@ func init() {
 		viper.SetDefault("ScitokensConfig", filepath.Join(configBase, "xrootd", "scitokens.cfg"))
 		viper.SetDefault("Authfile", filepath.Join(configBase, "xrootd", "authfile"))
 		viper.SetDefault("MacaroonsKeyFile", filepath.Join(configBase, "macaroons-secret"))
+		viper.SetDefault("IssuerKey", filepath.Join(configBase, "issuer.jwk"))
 
 		if userRuntimeDir := os.Getenv("XDG_RUNTIME_DIR"); userRuntimeDir != "" {
 			runtimeDir := filepath.Join(userRuntimeDir, "pelican")
@@ -172,10 +176,16 @@ func generateCert() error {
 		block, rest = pem.Decode(rest)
 		if block == nil {
 			break
-		} else if block.Type == "EC PRIVATE KEY" {
-			privateKey, err = x509.ParseECPrivateKey(block.Bytes)
+		} else if block.Type == "PRIVATE KEY" {
+			genericPrivateKey, err := x509.ParsePKCS8PrivateKey(block.Bytes)
 			if err != nil {
 				return err
+			}
+			switch key := genericPrivateKey.(type) {
+			case *ecdsa.PrivateKey:
+				privateKey = key
+			default:
+				return fmt.Errorf("Unsupported private key type: %T", key)
 			}
 			break
 		}
@@ -226,7 +236,7 @@ func generateCert() error {
 	return nil
 }
 
-func generatePrivateKey() error {
+func generatePrivateKey(keyLocation string) error {
 	gid, err := pelican.GetDaemonGID()
 	if err != nil {
 		return err
@@ -236,37 +246,71 @@ func generatePrivateKey() error {
 		return err
 	}
 
-	tlsKey := viper.GetString("TLSKey")
-	if file, err := os.Open(tlsKey); err == nil {
+	if file, err := os.Open(keyLocation); err == nil {
 		file.Close()
 		return nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	keyDir := path.Dir(tlsKey)
+	keyDir := path.Dir(keyLocation)
 	if err := os.MkdirAll(keyDir, 0750); err != nil {
 		return err
 	}
 	// In this case, the private key file doesn't exist.
-	file, err := os.OpenFile(tlsKey, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0640)
+	file, err := os.OpenFile(keyLocation, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0640)
 	defer file.Close()
 	priv, err := ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
 	if err != nil {
 		return err
 	}
-	if err = os.Chown(tlsKey, -1, gid); err != nil {
+	if err = os.Chown(keyLocation, -1, gid); err != nil {
 		return errors.Wrapf(err, "Failed to chown generated key %v to daemon group %v",
-			tlsKey, groupname)
+			keyLocation, groupname)
 	}
 
 
-	bytes, err := x509.MarshalECPrivateKey(priv)
+	bytes, err := x509.MarshalPKCS8PrivateKey(priv)
 	if err != nil {
 		return err
 	}
-	priv_block := pem.Block{Type: "EC PRIVATE KEY", Bytes: bytes}
+	priv_block := pem.Block{Type: "PRIVATE KEY", Bytes: bytes}
 	pem.Encode(file, &priv_block)
 	return nil
+}
+
+func generateIssuerJWKS() (*jwk.Set, error) {
+	existingJWKS := viper.GetString("IssuerJWKS")
+	jwks := jwk.NewSet()
+	if existingJWKS != "" {
+		var err error
+		jwks, err = jwk.ReadFile(existingJWKS)
+		if err != nil {
+			return nil, errors.Wrap(err, "Failed to read issuer JWKS file")
+		}
+	}
+	issuerKeyFile := viper.GetString("IssuerKey")
+	if err := generatePrivateKey(issuerKeyFile); err != nil {
+		return nil, err
+	}
+	contents, err := os.ReadFile(issuerKeyFile)
+	if err != nil {
+		return nil, errors.Wrap(err, "Failed to read issuer key file")
+	}
+	key, err := jwk.ParseKey(contents, jwk.WithPEM(true))
+	if err != nil {
+		return nil, errors.Wrapf(err, "Failed to parse issuer key file %v", issuerKeyFile)
+	}
+	pkey, err := jwk.PublicKeyOf(key)
+	if err != nil {
+		return nil, errors.Wrapf(err, "Failed to generate public key from file %v", issuerKeyFile)
+	}
+	err = jwk.AssignKeyID(pkey)
+	if err != nil {
+		return nil, err
+	}
+	jwks.Add(pkey)
+	return &jwks, nil
+
 }
 
 func checkXrootdEnv() error {
@@ -298,6 +342,13 @@ func checkXrootdEnv() error {
 			" to desired daemon user %v", runtimeDir, username)
 	}
 
+	exportPath := filepath.Join(runtimeDir, "export")
+	if _, err := os.Stat(exportPath); err == nil {
+		if err = os.RemoveAll(exportPath); err != nil {
+			return errors.Wrap(err, "Failure when cleaning up temporary export tree")
+		}
+	}
+
 	// If we use "volume mount" style options, configure the export directories.
 	volumeMount := viper.GetString("ExportVolume")
 	if volumeMount != "" {
@@ -320,8 +371,7 @@ func checkXrootdEnv() error {
 			return fmt.Errorf("Export volume %v has a relative destination path",
 				volumeMountDst)
 		}
-		destPath := path.Clean(filepath.Join(runtimeDir, "export",
-			volumeMountDst[1:len(volumeMountDst)]))
+		destPath := path.Clean(filepath.Join(exportPath, volumeMountDst[1:len(volumeMountDst)]))
 		err = os.MkdirAll(filepath.Dir(destPath), 0755)
 		if err != nil {
 			return errors.Wrapf(err, "Unable to create export directory %v",
@@ -353,8 +403,7 @@ to export the directory /mnt/foo to the path /bar in the data federation`)
 			return fmt.Errorf("Namespace prefix %v must have an absolute path",
 				namespacePrefix)
 		}
-		destPath := path.Clean(filepath.Join(runtimeDir, "export",
-			namespacePrefix[1:len(namespacePrefix)]))
+		destPath := path.Clean(filepath.Join(exportPath, namespacePrefix[1:len(namespacePrefix)]))
 		err = os.MkdirAll(filepath.Dir(destPath), 0755)
 		if err != nil {
 			return errors.Wrapf(err, "Unable to create export directory %v",
@@ -366,7 +415,31 @@ to export the directory /mnt/foo to the path /bar in the data federation`)
 			return errors.Wrapf(err, "Failed to create export symlink")
 		}
 	}
-	viper.Set("Mount", filepath.Join(runtimeDir, "export"))
+	viper.Set("Mount", exportPath)
+
+	keys, err := generateIssuerJWKS()
+	if err != nil {
+		return err
+	}
+	wellKnownPath := filepath.Join(exportPath, ".well-known")
+	err = os.MkdirAll(wellKnownPath, 0755)
+	if err != nil {
+		return err
+	}
+	file, err := os.OpenFile(filepath.Join(wellKnownPath, "issuer.jwks"),
+		os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	buf, err := json.MarshalIndent(keys, "", " ")
+	if err != nil {
+		return errors.Wrap(err, "Failed to marshal public keys")
+	}
+	_, err = file.Write(buf)
+	if err != nil {
+		return errors.Wrap(err, "Failed to write public key set to export directory")
+	}
 
 	// If no robots.txt, create a ephemeral one for xrootd to use
 	robotsTxtFile := viper.GetString("RobotsTxtFile")
@@ -483,7 +556,7 @@ func checkDefaults() error {
 	}
 
 	// As necessary, generate a private key and corresponding cert
-	if err := generatePrivateKey(); err != nil {
+	if err := generatePrivateKey(viper.GetString("TLSKey")); err != nil {
 		return err
 	}
 	if err := generateCert(); err != nil {
