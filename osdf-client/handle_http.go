@@ -24,6 +24,8 @@ import (
 	"github.com/studio-b12/gowebdav"
 	"github.com/vbauerster/mpb/v7"
 	"github.com/vbauerster/mpb/v7/decor"
+
+	namespaces "github.com/htcondor/osdf-client/v6/namespaces"
 )
 
 var env_prefixes = [...]string{"OSG", "OSDF"}
@@ -140,7 +142,7 @@ type TransferDetails struct {
 }
 
 // NewTransferDetails creates the TransferDetails struct with the given cache
-func NewTransferDetails(cache Cache, https bool) []TransferDetails {
+func NewTransferDetails(cache namespaces.Cache, https bool) []TransferDetails {
 	details := make([]TransferDetails, 0)
 	var cacheEndpoint string
 	if https {
@@ -209,15 +211,15 @@ type TransferResults struct {
 type CacheInterface interface{}
 
 func GenerateTransferDetailsUsingCache(cache CacheInterface, needsToken bool) []TransferDetails {
-	if directorCache, ok := cache.(DirectorCache); ok {
+	if directorCache, ok := cache.(namespaces.DirectorCache); ok {
 		return NewTransferDetailsUsingDirector(directorCache, needsToken)
-	} else if cache, ok := cache.(Cache); ok {
+	} else if cache, ok := cache.(namespaces.Cache); ok {
 		return NewTransferDetails(cache, needsToken)
 	}
 	return nil
 }
 
-func download_http(source string, destination string, payload *payloadStruct, namespace Namespace, recursive bool, tokenName string, OSDFDirectorUrl string) (bytesTransferred int64, err error) {
+func download_http(source string, destination string, payload *payloadStruct, namespace namespaces.Namespace, recursive bool, tokenName string, OSDFDirectorUrl string) (bytesTransferred int64, err error) {
 
 	// First, create a handler for any panics that occur
 	defer func() {
@@ -672,7 +674,7 @@ func (pr *ProgressReader) Close() error {
 }
 
 // UploadFile Uploads a file using HTTP
-func UploadFile(src string, dest *url.URL, token string, namespace Namespace) (int64, error) {
+func UploadFile(src string, dest *url.URL, token string, namespace namespaces.Namespace) (int64, error) {
 
 	log.Debugln("In UploadFile")
 	log.Debugln("Dest", dest.String())
@@ -811,7 +813,7 @@ func doPut(request *http.Request, responseChan chan<- *http.Response, errorChan 
 
 }
 
-func IsDir(dirUrl *url.URL, token string, namespace Namespace) (bool, error) {
+func IsDir(dirUrl *url.URL, token string, namespace namespaces.Namespace) (bool, error) {
 	connectUrl := url.URL{}
 	if namespace.DirListHost != "" {
 		// Parse the dir list host
@@ -851,7 +853,7 @@ func IsDir(dirUrl *url.URL, token string, namespace Namespace) (bool, error) {
 
 }
 
-func walkDavDir(url *url.URL, token string, namespace Namespace) ([]string, error) {
+func walkDavDir(url *url.URL, token string, namespace namespaces.Namespace) ([]string, error) {
 
 	// First, check if the url is a directory
 	isDir, err := IsDir(url, token, namespace)

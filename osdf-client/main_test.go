@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	namespaces "github.com/htcondor/osdf-client/v6/namespaces"
 )
 
 // TestGetIps calls main.get_ips with a hostname, checking
@@ -38,7 +40,7 @@ func TestGetIps(t *testing.T) {
 func TestGetToken(t *testing.T) {
 
 	// Need a namespace for token acquisition
-	namespace, err := MatchNamespace("/user/foo")
+	namespace, err := namespaces.MatchNamespace("/user/foo")
 	assert.NoError(t, err)
 
 	url, err := url.Parse("osdf:///user/foo")
@@ -110,7 +112,7 @@ func TestGetToken(t *testing.T) {
 	os.Setenv("_CONDOR_CREDS", tmpDir)
 	renamedUrl, err := url.Parse("renamed+osdf:///user/ligo/frames")
 	assert.NoError(t, err)
-	renamedNamespace, err := MatchNamespace("/user/ligo/frames")
+	renamedNamespace, err := namespaces.MatchNamespace("/user/ligo/frames")
 	assert.NoError(t, err)
 	token, err = getToken(renamedUrl, renamedNamespace, false, "")
 	assert.NoError(t, err)
@@ -127,7 +129,7 @@ func TestGetToken(t *testing.T) {
 	os.Setenv("_CONDOR_CREDS", tmpDir)
 	renamedUrl, err = url.Parse("/user/ligo/frames")
 	assert.NoError(t, err)
-	renamedNamespace, err = MatchNamespace("/user/ligo/frames")
+	renamedNamespace, err = namespaces.MatchNamespace("/user/ligo/frames")
 	assert.NoError(t, err)
 	token, err = getToken(renamedUrl, renamedNamespace, false, "renamed")
 	assert.NoError(t, err)

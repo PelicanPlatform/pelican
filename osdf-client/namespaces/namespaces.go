@@ -34,9 +34,18 @@ type Cache struct {
 	Resource     string `json:"resource"`
 }
 
+// Cache information from the Director service
+type DirectorCache struct {
+	ResourceName string
+	EndpointUrl  string
+	Priority     int
+	AuthedReq    bool
+}
+
 // Credential generation information
 type CredentialGeneration struct {
 	Issuer        *string  `json:"issuer"`
+	BasePath      *string  `json:"base_path"`
 	MaxScopeDepth *int     `json:"max_scope_depth"`
 	Strategy      *string `json:"strategy"`
 	VaultServer   *string `json:"vault_server"`
