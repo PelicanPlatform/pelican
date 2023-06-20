@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"fmt"
 
 	namespaces "github.com/htcondor/osdf-client/v6/namespaces"
 	log "github.com/sirupsen/logrus"
@@ -54,10 +53,9 @@ func CreateNsFromDirectorResp(dirResp *http.Response, namespace *namespaces.Name
 	if len(dirResp.Header.Values("X-Osdf-Token-Generation")) > 0 {
 		xOsdfTokenGeneration = HeaderParser(dirResp.Header.Values("X-Osdf-Token-Generation")[0])
 
+		// Instantiate the cred gen struct
 		namespace.CredentialGen = &namespaces.CredentialGeneration{}
-		fmt.Println()
-		fmt.Println("New token generation map: ", xOsdfTokenGeneration)
-		fmt.Println()
+
 		// We wind up with a duplicate issuer here as the encapsulating ns also encodes this
 		issuer := xOsdfTokenGeneration["issuer"]
 		namespace.CredentialGen.Issuer = &issuer
