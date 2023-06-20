@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"fmt"
 
 	namespaces "github.com/htcondor/osdf-client/v6/namespaces"
 	log "github.com/sirupsen/logrus"
@@ -47,6 +48,33 @@ func CreateNsFromDirectorResp(dirResp *http.Response, namespace *namespaces.Name
 	if len(dirResp.Header.Values("X-Osdf-Authorization")) > 0 {
 		xOsdfAuthorization = HeaderParser(dirResp.Header.Values("X-Osdf-Authorization")[0])
 		namespace.Issuer = xOsdfAuthorization["issuer"]
+	}
+
+	var xOsdfTokenGeneration map[string]string
+	if len(dirResp.Header.Values("X-Osdf-Token-Generation")) > 0 {
+		xOsdfTokenGeneration = HeaderParser(dirResp.Header.Values("X-Osdf-Token-Generation")[0])
+
+		namespace.CredentialGen = &namespaces.CredentialGeneration{}
+		fmt.Println()
+		fmt.Println("New token generation map: ", xOsdfTokenGeneration)
+		fmt.Println()
+		// We wind up with a duplicate issuer here as the encapsulating ns also encodes this
+		issuer := xOsdfTokenGeneration["issuer"]
+		namespace.CredentialGen.Issuer = &issuer
+
+		base_path := xOsdfTokenGeneration["base-path"]
+		namespace.CredentialGen.BasePath = &base_path
+
+		max_scope_depth, _ := strconv.Atoi(xOsdfTokenGeneration["max-scope-depth"])
+		namespace.CredentialGen.MaxScopeDepth = &max_scope_depth
+
+		strategy := xOsdfTokenGeneration["strategy"]
+		namespace.CredentialGen.Strategy = &strategy
+		
+		// The Director only returns a vault server if the strategy is vault.
+		if vs, exists := xOsdfTokenGeneration["vault-server"]; exists {
+			namespace.CredentialGen.VaultServer = &vs
+		}
 	}
 
 	// Create the caches slice
