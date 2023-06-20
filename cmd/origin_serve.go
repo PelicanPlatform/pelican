@@ -18,6 +18,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"math/big"
+	"net/http"
 	"path"
 	"path/filepath"
 	"strings"
@@ -25,6 +26,7 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/lestrrat-go/jwx/jwk"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -69,6 +71,7 @@ type XrootdConfig struct {
 	Mount string
 	NamespacePrefix string
 	XrootdMultiuser bool
+	LocalMonitoringPort int
 }
 
 func cleanupDirOnShutdown(dir string) {
@@ -122,6 +125,7 @@ func init() {
 		viper.SetDefault("XrootdMultiuser", false)
 	}
 	viper.SetDefault("TLSCertFile", "/etc/pki/tls/cert.pem")
+
 	hostname, err := os.Hostname()
 	if err != nil {
 		panic(err)
@@ -582,6 +586,7 @@ func checkDefaults() error {
 
 func configXrootd() (string, error) {
 	var config XrootdConfig
+	config.LocalMonitoringPort = -1
 	viper.Unmarshal(&config)
 	templ := template.Must(template.New("xrootd.cfg").Parse(xrootdCfg))
 
@@ -737,11 +742,26 @@ func serve(/*cmd*/ *cobra.Command, /*args*/ []string) error {
 		}
 	} ()
 
-	err := checkDefaults()
+	monitorPort, err := pelican.ConfigureMonitoring()
+	if err != nil {
+		return err
+	}
+	viper.Set("LocalMonitoringPort", monitorPort)
+
+	err = checkDefaults()
 	if err != nil {
 		return err
 	}
 
+	engine := gin.Default()
+	if err = pelican.ConfigureMetrics(engine); err != nil {
+		return err
+	}
+	engine.GET("/api/v1.0/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "healthy"})
+	})
+
+	go engine.Run()
 	err = launchXrootd()
 	if err != nil {
 		return err
