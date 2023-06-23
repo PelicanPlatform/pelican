@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/pelicanplatform/pelican"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -47,6 +48,9 @@ func init() {
 	rootCmd.Use = strings.ToLower(preferredPrefix)
 
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.config/pelican/pelican.yaml)")
+
+	rootCmd.PersistentFlags().BoolP("debug", "d", false, "Enable debug logs")
+
 	rootCmd.PersistentFlags().BoolVarP(&outputJSON, "json", "", false, "output results in JSON format")
 	rootCmd.CompletionOptions.DisableDefaultCmd = true
 }
@@ -63,7 +67,7 @@ func initConfig() {
 		viper.SetConfigType("yaml")
 		viper.SetConfigName("pelican.yaml")
 	}
-
+	viper.BindPFlag("Debug", rootCmd.Flags().Lookup("debug"))
 
 	viper.SetEnvPrefix(pelican.GetPreferredPrefix())
 	viper.AutomaticEnv()
@@ -71,5 +75,9 @@ func initConfig() {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
 			cobra.CheckErr(err)
 		}
+	}
+
+	if viper.GetBool("Debug") {
+		log.SetLevel(log.DebugLevel)
 	}
 }

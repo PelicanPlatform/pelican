@@ -6,3 +6,4 @@ MonitoringPortLower: 9930
 MonitoringPortHigher: 9999
 Mount: ""
 NamespacePrefix: ""
+Debug: false
