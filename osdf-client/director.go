@@ -49,6 +49,32 @@ func CreateNsFromDirectorResp(dirResp *http.Response, namespace *namespaces.Name
 		namespace.Issuer = xOsdfAuthorization["issuer"]
 	}
 
+	var xOsdfTokenGeneration map[string]string
+	if len(dirResp.Header.Values("X-Osdf-Token-Generation")) > 0 {
+		xOsdfTokenGeneration = HeaderParser(dirResp.Header.Values("X-Osdf-Token-Generation")[0])
+
+		// Instantiate the cred gen struct
+		namespace.CredentialGen = &namespaces.CredentialGeneration{}
+
+		// We wind up with a duplicate issuer here as the encapsulating ns also encodes this
+		issuer := xOsdfTokenGeneration["issuer"]
+		namespace.CredentialGen.Issuer = &issuer
+
+		base_path := xOsdfTokenGeneration["base-path"]
+		namespace.CredentialGen.BasePath = &base_path
+
+		max_scope_depth, _ := strconv.Atoi(xOsdfTokenGeneration["max-scope-depth"])
+		namespace.CredentialGen.MaxScopeDepth = &max_scope_depth
+
+		strategy := xOsdfTokenGeneration["strategy"]
+		namespace.CredentialGen.Strategy = &strategy
+		
+		// The Director only returns a vault server if the strategy is vault.
+		if vs, exists := xOsdfTokenGeneration["vault-server"]; exists {
+			namespace.CredentialGen.VaultServer = &vs
+		}
+	}
+
 	// Create the caches slice
 	namespace.SortedDirectorCaches, err = GetCachesFromDirectorResponse(dirResp, namespace.UseTokenOnRead || namespace.ReadHTTPS)
 	if err != nil {
