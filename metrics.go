@@ -91,12 +91,12 @@ var (
 	TransferOps = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "xrootd_transfer_operations_count",
 		Help: "Number of transfer operations performed",
-	}, []string{"path", "ap", "dn", "role", "org"})
+	}, []string{"path", "ap", "dn", "role", "org", "type"})
 
 	TransferBytes = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "xrootd_transfer_bytes",
 		Help: "Bytes of transfers",
-	}, []string{"path", "ap", "dn", "role", "org"})
+	}, []string{"path", "ap", "dn", "role", "org", "type"})
 
 	sessions = ttlcache.New[UserId, UserRecord](ttlcache.WithTTL[UserId, UserRecord](24 * time.Hour))
 	transfers = ttlcache.New[FileId, FileRecord](ttlcache.WithTTL[FileId, FileRecord](24 * time.Hour))
@@ -197,16 +197,20 @@ func ComputePrefix(inputPath string) string {
 }
 
 func GetSIDRest(info []byte) (UserId, string, error) {
+	log.Debugln("GetSIDRest inputs:", string(info))
 	infoSplit := strings.SplitN(string(info), "\n", 2)
 	if len(infoSplit) == 1 {
 		return UserId{}, "", errors.New("Unable to parse SID")
 	}
 
-	sidInfo := strings.Split(string(info[0]), ":")
+	sidInfo := strings.Split(string(infoSplit[0]), ":")
 	if len(sidInfo) == 1 {
 		return UserId{}, "", errors.New("Unable to parse valid SID")
 	}
-	sid, err := strconv.Atoi(sidInfo[len(sidInfo)-1])
+	// form: 82215220691948@localhost
+	sidAtHostname := sidInfo[len(sidInfo)-1]
+	sidAtHostnameInfo := strings.SplitN(sidAtHostname, "@", 2)
+	sid, err := strconv.Atoi(sidAtHostnameInfo[0])
 	if err != nil {
 		return UserId{}, "", err
 	}
@@ -279,15 +283,20 @@ func HandlePacket(packet []byte) error {
 			if err != nil {
 				return err
 			}
-			bytesRemain -= uint16(fileHdr.RecSize)
-
 			switch(fileHdr.RecType) {
 			case 0: // XrdXrootdMonFileHdr::isClose
-				log.Debug("Received a f-stream file-close packet")
+				log.Debugln("Received a f-stream file-close packet of size ",
+					fileHdr.RecSize)
 				fileId := FileId{Id: fileHdr.FileId}
 				xferRecord := transfers.Get(fileId)
 				transfers.Delete(fileId)
-				labels := prometheus.Labels{}
+				labels := prometheus.Labels{
+					"path": "/",
+					"ap":   "",
+					"dn":   "",
+					"role": "",
+					"org":  "",
+				}
 				var oldReadvSegs uint64 = 0
 				var oldReadOps uint32 = 0
 				var oldReadvOps uint32 = 0
@@ -318,7 +327,7 @@ func HandlePacket(packet []byte) error {
 					opsOffset := uint32(8 + 24)
 					counter := TransferReadvSegs.With(labels)
 					counter.Add(float64(int64(binary.BigEndian.Uint64(
-						packet[offset + opsOffset + 16:offset + opsOffset + 20]) -
+						packet[offset + opsOffset + 16:offset + opsOffset + 24]) -
 						oldReadvSegs)))
 					labels["type"] = "read"
 					counter = TransferOps.With(labels)
@@ -397,6 +406,7 @@ func HandlePacket(packet []byte) error {
 					"of type %v", fileHdr.RecType)
 			}
 
+			bytesRemain -= uint16(fileHdr.RecSize)
 			offset += uint32(fileHdr.RecSize)
 		}
 	case 'g':
@@ -424,7 +434,7 @@ func HandlePacket(packet []byte) error {
 			}
 			sessions.Set(userid, record, ttlcache.DefaultTTL)
 		} else {
-			log.Error("Unable to parse user login packet")
+			return err
 		}
 	default:
 		log.Debug("MonPacket: Received an unhandled monitoring packet of type %v", header.Code)
