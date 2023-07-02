@@ -1,11 +1,8 @@
-package pelican
+package config
 
 import (
-	"os"
 	"os/user"
-	"path/filepath"
 	"strconv"
-	"strings"
 
 	"github.com/pkg/errors"
 )
@@ -74,20 +71,6 @@ func init () {
 		// This decision should be revisited if we ever enable CGO.
 		group = userObj.Gid
 	}
-}
-
-func GetPreferredPrefix() string {
-	arg0 := strings.ToUpper(filepath.Base(os.Args[0]))
-	underscore_idx := strings.Index(arg0, "_")
-	if underscore_idx != -1 {
-		return arg0[0:underscore_idx]
-	}
-	if strings.HasPrefix(arg0, "STASH") {
-		return "STASH"
-	} else if strings.HasPrefix(arg0, "OSDF") {
-		return "OSDF"
-	}
-	return "PELICAN"
 }
 
 func IsRootExecution() bool {

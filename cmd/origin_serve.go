@@ -32,6 +32,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/pelicanplatform/pelican"
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pkg/errors"
 )
 
@@ -86,7 +87,7 @@ func cleanupDirOnShutdown(dir string) {
 
 func init() {
 	viper.SetConfigType("yaml")
-	if pelican.IsRootExecution() {
+	if config.IsRootExecution() {
 		viper.SetDefault("TLSCertificate", "/etc/pelican/certificates/tls.crt")
 		viper.SetDefault("TLSKey", "/etc/pelican/certificates/tls.key")
 		viper.SetDefault("XrootdRun", "/run/pelican/xrootd")
@@ -137,7 +138,7 @@ func init() {
 		panic(err)
 	}
 
-	prefix := pelican.GetPreferredPrefix()
+	prefix := config.GetPreferredPrefix()
 	if prefix == "OSDF" {
 		err := viper.MergeConfig(strings.NewReader(osdfDefaultsYaml))
 		if err != nil {
@@ -147,11 +148,11 @@ func init() {
 }
 
 func generateCert() error {
-	gid, err := pelican.GetDaemonGID()
+	gid, err := config.GetDaemonGID()
 	if err != nil {
 		return err
 	}
-	groupname, err := pelican.GetDaemonGroup()
+	groupname, err := config.GetDaemonGroup()
 	if err != nil {
 		return err
 	}
@@ -241,11 +242,11 @@ func generateCert() error {
 }
 
 func generatePrivateKey(keyLocation string) error {
-	gid, err := pelican.GetDaemonGID()
+	gid, err := config.GetDaemonGID()
 	if err != nil {
 		return err
 	}
-	groupname, err := pelican.GetDaemonGroup()
+	groupname, err := config.GetDaemonGroup()
 	if err != nil {
 		return err
 	}
@@ -318,19 +319,19 @@ func generateIssuerJWKS() (*jwk.Set, error) {
 }
 
 func checkXrootdEnv() error {
-	uid, err := pelican.GetDaemonUID()
+	uid, err := config.GetDaemonUID()
 	if err != nil {
 		return err
 	}
-	gid, err := pelican.GetDaemonGID()
+	gid, err := config.GetDaemonGID()
 	if err != nil {
 		return err
 	}
-	username, err := pelican.GetDaemonUser()
+	username, err := config.GetDaemonUser()
 	if err != nil {
 		return err
 	}
-	groupname, err := pelican.GetDaemonGroup()
+	groupname, err := config.GetDaemonGroup()
 	if err != nil {
 		return err
 	}
