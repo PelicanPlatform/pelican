@@ -9,7 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path"
+	"path/filepath"
 
 	"github.com/youmark/pkcs8"
 	"golang.org/x/crypto/curve25519"
@@ -24,15 +24,23 @@ import (
 var setEmptyPassword = false
 
 func GetEncryptedConfigName() (string, error) {
-	config_dir := os.Getenv("XDG_CONFIG_HOME")
-	if len(config_dir) > 0 {
-		return path.Join(config_dir, "osdf-client", "oauth2-client.pem"), nil
+	if IsRootExecution() {
+		return "/etc/pelican/credentials/client-credentials.pem", nil
 	}
-	dirname, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
+	config_location := filepath.Join("pelican", "client-credentials.pem")
+	if GetPreferredPrefix() != "PELICAN" {
+		config_location = filepath.Join("osdf-client", "oauth2-client.pem")
 	}
-	return path.Join(dirname, ".config", "osdf-client", "oauth2-client.pem"), nil
+	config_root := os.Getenv("XDG_CONFIG_HOME")
+	if len(config_root) == 0 {
+		dirname, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		config_root = filepath.Join(dirname, ".config")
+	}
+	fmt.Printf("Final location: %v/%v", config_root, config_location)
+	return filepath.Join(config_root, config_location), nil
 }
 
 func EncryptedConfigExists() (bool, error) {
@@ -71,7 +79,7 @@ func GetEncryptedContents() (string, error) {
 				setEmptyPassword = true
 			}
 
-			err = os.MkdirAll(path.Dir(filename), 0700)
+			err = os.MkdirAll(filepath.Dir(filename), 0700)
 			if err != nil {
 				return "", err
 			}
@@ -91,7 +99,7 @@ func SaveEncryptedContents(encContents []byte) error {
 		return err
 	}
 
-	configDir := path.Dir(filename)
+	configDir := filepath.Dir(filename)
 	err = os.MkdirAll(configDir, 0700)
 	if err != nil {
 		return err
