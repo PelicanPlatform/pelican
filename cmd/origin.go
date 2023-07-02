@@ -18,7 +18,7 @@ var (
 	originConfigCmd = &cobra.Command{
 		Use: "config",
 		Short: "Launch the Pelican web service in configuration mode",
-		Run: config,
+		Run: configOrigin,
 	}
 
 	originServeCmd = &cobra.Command{
@@ -29,7 +29,7 @@ var (
 	}
 )
 
-func config(/*cmd*/ *cobra.Command, /*args*/ []string) {
+func configOrigin(/*cmd*/ *cobra.Command, /*args*/ []string) {
 	fmt.Println("'origin config' command is not yet implemented")
 	os.Exit(1)
 }

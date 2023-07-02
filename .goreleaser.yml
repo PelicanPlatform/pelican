@@ -27,3 +27,62 @@ builds:
         goarch: ppc64le
       - goos: darwin
         goarch: ppc64le
+
+archives:
+  - id: pelican
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else }}{{ .Arch }}{{ end }}
+    format_overrides:
+      - goos: windows
+        format: zip
+checksum:
+  name_template: 'checksums.txt'
+snapshot:
+  name_template: "{{ incpatch .Version }}-next"
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - Merge pull request
+      - Merge branch
+
+nfpms:
+  - package_name: pelican
+    builds:
+      - pelican
+    file_name_template: '{{ .PackageName }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}'
+    id: pelican
+    vendor: OSG Consortium
+    homepage: https://github.com/PelicanProject/pelican
+    maintainer: Brian Bockelman <bbockelman@morgridge.org>
+    description: Command-line copy tool for the Open Science Data Federation
+    license: Apache 2.0
+    formats:
+      - apk
+      - deb
+      - rpm
+    bindir: /usr/bin
+    release: 1
+    section: default
+    priority: extra
+    overrides:
+      rpm:
+        contents:
+          - src: LICENSE
+            dst: "/usr/share/doc/{{ .PackageName }}-{{ .Version }}/LICENSE.txt"
+          - src: README.md
+            dst: "/usr/share/doc/{{ .PackageName }}-{{ .Version }}/README.md"
+        file_name_template: >-
+          {{ .PackageName }}-{{ .Version }}-{{ .Release }}.{{ if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
+      deb:
+        file_name_template: "{{ .PackageName }}-{{ .Version }}-{{ .Release }}_{{ .Arch }}"
+        contents:
+          - src: LICENSE
+            dst: "/usr/share/doc/{{ .PackageName }}/LICENSE.txt"
+          - src: README.md
+            dst: "/usr/share/doc/{{ .PackageName }}/README.md"

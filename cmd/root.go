@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/pelicanplatform/pelican"
+	"github.com/pelicanplatform/pelican/config"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -43,8 +43,11 @@ func init() {
 	cobra.OnInitialize(initConfig)
 
 	rootCmd.AddCommand(objectCmd)
+	objectCmd.CompletionOptions.DisableDefaultCmd = true
 	rootCmd.AddCommand(originCmd)
-	preferredPrefix := pelican.GetPreferredPrefix()
+	rootCmd.AddCommand(rootConfigCmd)
+	rootCmd.AddCommand(rootPluginCmd)
+	preferredPrefix := config.GetPreferredPrefix()
 	rootCmd.Use = strings.ToLower(preferredPrefix)
 
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.config/pelican/pelican.yaml)")
@@ -69,7 +72,7 @@ func initConfig() {
 	}
 	viper.BindPFlag("Debug", rootCmd.Flags().Lookup("debug"))
 
-	viper.SetEnvPrefix(pelican.GetPreferredPrefix())
+	viper.SetEnvPrefix(config.GetPreferredPrefix())
 	viper.AutomaticEnv()
 	if err := viper.MergeInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
