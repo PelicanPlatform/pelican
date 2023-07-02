@@ -16,8 +16,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/spf13/viper"
 
-	"net/http/httputil"
-
 	namespaces "github.com/htcondor/osdf-client/v6/namespaces"
 	"github.com/htcondor/osdf-client/v6/config"
 )
