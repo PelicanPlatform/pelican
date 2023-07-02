@@ -1,0 +1,182 @@
+# This is an example .goreleaser.yml file with some sensible defaults.
+# Make sure to check the documentation at https://goreleaser.com
+
+project_name: osdf-client
+
+before:
+  hooks:
+    # You may remove this if you don't use go modules.
+    - go mod tidy
+    # you may remove this if you don't need go generate
+    - go generate ./...
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - "amd64"
+      - "arm64"
+      - "ppc64le"
+    id: "config_mgr"
+    dir: ./cmd/config_mgr
+    binary: osdf_config_mgr
+    tags:
+      - forceposix
+    ignore:
+      - goos: windows
+        goarch: arm64
+      - goos: windows
+        goarch: ppc64le
+      - goos: darwin
+        goarch: ppc64le
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - "amd64"
+      - "arm64"
+      - "ppc64le"
+    id: "stashcp"
+    dir: ./cmd/stashcp
+    binary: stashcp
+    tags:
+      - forceposix
+    ignore:
+      - goos: windows
+        goarch: arm64
+      - goos: windows
+        goarch: ppc64le
+      - goos: darwin
+        goarch: ppc64le
+  - env:
+      - CGO_ENABLED=0
+    main: ./cmd/stash_plugin
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - "amd64"
+      - "arm64"
+      - "ppc64le"
+    id: "stash_plugin"
+    binary: stash_plugin
+    tags:
+      - forceposix
+    ignore:
+      - goos: windows
+        goarch: arm64
+      - goos: windows
+        goarch: ppc64le
+      - goos: darwin
+        goarch: ppc64le
+
+archives:
+  - id: osdf-client
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else }}{{ .Arch }}{{ end }}
+    format_overrides:
+      - goos: windows
+        format: zip
+checksum:
+  name_template: 'checksums.txt'
+snapshot:
+  name_template: "{{ incpatch .Version }}-next"
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - Merge pull request
+      - Merge branch
+
+nfpms:
+  - package_name: condor-stash-plugin
+    builds:
+      - stash_plugin
+    file_name_template: '{{ .PackageName }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}'
+    id: condor-stash-plugin
+    vendor: Open Science Grid
+    homepage: https://github.com/htcondor/osdf-client
+    maintainer: Derek Weitzel <dweitzel@unl.edu>
+    description: HTCondor file transfer plugin for the Open Science Data Federation
+    license: Apache 2.0
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/libexec/condor
+    release: 1
+    section: default
+    priority: extra
+    overrides:
+      rpm:
+        contents:
+          - src: LICENSE.txt
+            dst: "/usr/share/doc/{{ .PackageName }}-{{ .Version }}/LICENSE.txt"
+          - src: README.md
+            dst: "/usr/share/doc/{{ .PackageName }}-{{ .Version }}/README.md"
+          - src: resources/10-stash-plugin.conf
+            dst: "/etc/condor/config.d/10-stash-plugin.conf"
+            type: config|noreplace
+        file_name_template: >-
+          {{ .PackageName }}-{{ .Version }}-{{ .Release }}.{{ if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
+      deb:
+        contents:
+          - src: LICENSE.txt
+            dst: "/usr/share/doc/{{ .PackageName }}/LICENSE.txt"
+          - src: README.md
+            dst: "/usr/share/doc/{{ .PackageName }}/README.md"
+          - src: resources/10-stash-plugin.conf
+            dst: "/etc/condor/config.d/10-stash-plugin.conf"
+            type: config|noreplace
+          # The libexec directory is elsewhere on Debian; I haven't been able to move the binary so I'm making a symlink
+          - src: "/usr/libexec/condor/stash_plugin"
+            dst: "/usr/lib/condor/libexec/stash_plugin"
+            type: symlink
+        file_name_template: "{{ .PackageName }}-{{ .Version }}-{{ .Release }}_{{ .Arch }}"
+  - package_name: stashcp
+    builds:
+      - stashcp
+    file_name_template: '{{ .PackageName }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}'
+    id: stashcp
+    vendor: Open Science Grid
+    homepage: https://github.com/htcondor/osdf-client
+    maintainer: Derek Weitzel <dweitzel@unl.edu>
+    description: Command-line copy tool for the Open Science Data Federation
+    license: Apache 2.0
+    formats:
+      - apk
+      - deb
+      - rpm
+    bindir: /usr/bin
+    release: 1
+    section: default
+    priority: extra
+    overrides:
+      rpm:
+        contents:
+          - src: LICENSE.txt
+            dst: "/usr/share/doc/{{ .PackageName }}-{{ .Version }}/LICENSE.txt"
+          - src: README.md
+            dst: "/usr/share/doc/{{ .PackageName }}-{{ .Version }}/README.md"
+        replaces:
+          - stashcache-client < 6.4.0
+        file_name_template: >-
+          {{ .PackageName }}-{{ .Version }}-{{ .Release }}.{{ if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
+      deb:
+        file_name_template: "{{ .PackageName }}-{{ .Version }}-{{ .Release }}_{{ .Arch }}"
+        contents:
+          - src: LICENSE.txt
+            dst: "/usr/share/doc/{{ .PackageName }}/LICENSE.txt"
+          - src: README.md
+            dst: "/usr/share/doc/{{ .PackageName }}/README.md"
