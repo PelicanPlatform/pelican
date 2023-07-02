@@ -80,7 +80,8 @@ func initConfig() {
 		}
 	}
 
+	setLogging(log.PanicLevel)
 	if viper.GetBool("Debug") {
-		log.SetLevel(log.DebugLevel)
+		setLogging(log.DebugLevel)
 	}
 }

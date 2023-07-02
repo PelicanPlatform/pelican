@@ -3,6 +3,7 @@ package pelican
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/xml"
 	"fmt"
 	"net"
 	"path"
@@ -75,6 +76,22 @@ type (
 		End int32
 		SID int64
 	}
+
+	SummaryStat struct {
+		Id   string `xml:"id,attr"`
+		// Relevant for id="link"
+		LinkConnections int `xml:"tot"`
+		LinkInBytes int `xml:"in"`
+		LinkOutBytes int `xml:"out"`
+		// Relevant for id="sched"
+		Threads int `xml:"threads"`
+		ThreadsIdle int `xml:"idle"`
+	}
+
+	SummaryStatistics struct {
+		Version string `xml:"ver,attr"`
+		Stats []SummaryStat `xml:"stats"`
+	}
 )
 
 var (
@@ -97,6 +114,23 @@ var (
 		Name: "xrootd_transfer_bytes",
 		Help: "Bytes of transfers",
 	}, []string{"path", "ap", "dn", "role", "org", "type"})
+
+	Threads = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "xrootd_sched_thread_count",
+		Help: "Number of scheduler threads",
+	}, []string{"state"})
+
+	Connections = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_server_connection_count",
+		Help: "Aggregate number of server connections",
+	})
+
+	BytesXfer = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "xrootd_server_bytes",
+		Help: "Number of bytes read into the server",
+	}, []string{"direction"})
+
+	lastStats SummaryStat
 
 	sessions = ttlcache.New[UserId, UserRecord](ttlcache.WithTTL[UserId, UserRecord](24 * time.Hour))
 	transfers = ttlcache.New[FileId, FileRecord](ttlcache.WithTTL[FileId, FileRecord](24 * time.Hour))
@@ -242,6 +276,10 @@ func NullTermToString(nullTermBytes []byte) (str string) {
 }
 
 func HandlePacket(packet []byte) error {
+	// XML '<' character indicates a summary packet
+	if len(packet) > 0 && packet[0] == '<' {
+		return HandleSummaryPacket(packet)
+	}
 
 	if len(packet) < 8 {
 		return errors.New("Packet is too small to be valid XRootD monitoring packet")
@@ -402,8 +440,8 @@ func HandlePacket(packet []byte) error {
 				userId := UserId{Id: fileHdr.UserId}
 				sessions.Delete(userId)
 			default:
-				log.Debugf("MonPacket: Received an unhandled file monitoring packet " +
-					"of type %v", fileHdr.RecType)
+				log.Debug("MonPacket: Received an unhandled file monitoring packet " +
+					"of type ", fileHdr.RecType)
 			}
 
 			bytesRemain -= uint16(fileHdr.RecSize)
@@ -442,4 +480,168 @@ func HandlePacket(packet []byte) error {
 
 	return nil
 
+}
+
+// Unlike the highly-compressed binary format that is the detailed monitoring, the summary monitoring
+// is a mostly-compliant chunk of XML.  I copy below the pretty-printed version of a sample packet:
+/*
+   <statistics tod="1687524138" ver="v5.2.0" src="hcc-briantest7.unl.edu:8443" tos="1687523538" pgm="xrootd" ins="anon" pid="3852923" site="hcc-briantest7.unl.edu">
+  <stats id="info">
+    <host>hcc-briantest7.unl.edu</host>
+    <port>8443</port>
+    <name>anon</name>
+  </stats>
+  <stats id="buff">
+    <reqs>2</reqs>
+    <mem>1049600</mem>
+    <buffs>2</buffs>
+    <adj>0</adj>
+    <xlreqs>0</xlreqs>
+    <xlmem>0</xlmem>
+    <xlbuffs>0</xlbuffs>
+  </stats>
+  <stats id="link">
+    <num>0</num>
+    <maxn>1</maxn>
+    <tot>1</tot>
+    <in>474</in>
+    <out>1117</out>
+    <ctime>0</ctime>
+    <tmo>0</tmo>
+    <stall>0</stall>
+    <sfps>0</sfps>
+  </stats>
+  <stats id="poll">
+    <att>0</att>
+    <en>1</en>
+    <ev>1</ev>
+    <int>0</int>
+  </stats>
+  <stats id="proc">
+    <usr>
+      <s>0</s>
+      <u>42946</u>
+    </usr>
+    <sys>
+      <s>0</s>
+      <u>52762</u>
+    </sys>
+  </stats>
+  <stats id="xrootd">
+    <num>1</num>
+    <ops>
+      <open>1</open>
+      <rf>0</rf>
+      <rd>1</rd>
+      <pr>0</pr>
+      <rv>0</rv>
+      <rs>0</rs>
+      <wv>0</wv>
+      <ws>0</ws>
+      <wr>0</wr>
+      <sync>0</sync>
+      <getf>0</getf>
+      <putf>0</putf>
+      <misc>2</misc>
+    </ops>
+    <sig>
+      <ok>0</ok>
+      <bad>0</bad>
+      <ign>0</ign>
+    </sig>
+    <aio>
+      <num>0</num>
+      <max>0</max>
+      <rej>0</rej>
+    </aio>
+    <err>0</err>
+    <rdr>0</rdr>
+    <dly>0</dly>
+    <lgn>
+      <num>0</num>
+      <af>0</af>
+      <au>0</au>
+      <ua>0</ua>
+    </lgn>
+  </stats>
+  <stats id="ofs">
+    <role>server</role>
+    <opr>0</opr>
+    <opw>0</opw>
+    <opp>0</opp>
+    <ups>0</ups>
+    <han>0</han>
+    <rdr>0</rdr>
+    <bxq>0</bxq>
+    <rep>0</rep>
+    <err>0</err>
+    <dly>0</dly>
+    <sok>0</sok>
+    <ser>0</ser>
+    <tpc>
+      <grnt>0</grnt>
+      <deny>0</deny>
+      <err>0</err>
+      <exp>0</exp>
+    </tpc>
+  </stats>
+  <stats id="oss" v="2">
+    <paths>1<stats id="0"><lp>"/test"</lp><rp>"/run/user/1221/pelican/export/test"</rp><tot>1562624</tot><free>1529424</free><ino>786432</ino><ifr>786405</ifr></stats></paths>
+    <space>0</space>
+  </stats>
+  <stats id="sched">
+    <jobs>188</jobs>
+    <inq>0</inq>
+    <maxinq>5</maxinq>
+    <threads>7</threads>
+    <idle>5</idle>
+    <tcr>7</tcr>
+    <tde>0</tde>
+    <tlimr>0</tlimr>
+  </stats>
+  <stats id="sgen">
+    <as>0</as>
+    <et>1</et>
+    <toe>1687524138</toe>
+  </stats>
+</statistics>
+*/
+
+func HandleSummaryPacket(packet []byte) error {
+	summaryStats := SummaryStatistics{}
+	if err := xml.Unmarshal(packet, &summaryStats); err != nil {
+		return err
+	}
+	log.Debug("Received a summary statistics packet")
+	for _, stat := range summaryStats.Stats {
+		switch stat.Id {
+
+		case "link":
+			incBy := float64(stat.LinkConnections - lastStats.LinkConnections)
+			if stat.LinkConnections < lastStats.LinkConnections {
+				incBy = float64(stat.LinkConnections)
+			}
+			Connections.Add(incBy)
+			lastStats.LinkConnections = stat.LinkConnections
+
+			incBy = float64(stat.LinkInBytes - lastStats.LinkInBytes)
+			if stat.LinkInBytes < lastStats.LinkInBytes {
+				incBy = float64(stat.LinkInBytes)
+			}
+			BytesXfer.With(prometheus.Labels{"direction": "rx"}).Add(incBy)
+			lastStats.LinkInBytes = stat.LinkInBytes
+
+			incBy = float64(stat.LinkOutBytes - lastStats.LinkOutBytes)
+			if stat.LinkOutBytes < lastStats.LinkOutBytes {
+				incBy = float64(stat.LinkOutBytes)
+			}
+			BytesXfer.With(prometheus.Labels{"direction": "tx"}).Add(incBy)
+			lastStats.LinkOutBytes = stat.LinkOutBytes
+		case "sched":
+			Threads.With(prometheus.Labels{"state": "idle"}).Set(float64(stat.ThreadsIdle))
+			Threads.With(prometheus.Labels{"state": "running"}).Set(float64(stat.Threads -
+				stat.ThreadsIdle))
+		}
+	}
+	return nil
 }
