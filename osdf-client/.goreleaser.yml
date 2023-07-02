@@ -128,9 +128,8 @@ nfpms:
           - src: resources/10-stash-plugin.conf
             dst: "/etc/condor/config.d/10-stash-plugin.conf"
             type: config|noreplace
-        replacements:
-          amd64: x86_64
-        file_name_template: "{{ .PackageName }}-{{ .Version }}-{{ .Release }}.{{ .Arch }}"
+        file_name_template: >-
+          {{ .PackageName }}-{{ .Version }}-{{ .Release }}.{{ if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
       deb:
         contents:
           - src: LICENSE.txt
@@ -170,11 +169,10 @@ nfpms:
             dst: "/usr/share/doc/{{ .PackageName }}-{{ .Version }}/LICENSE.txt"
           - src: README.md
             dst: "/usr/share/doc/{{ .PackageName }}-{{ .Version }}/README.md"
-        replacements:
-          amd64: x86_64
         replaces:
           - stashcache-client < 6.4.0
-        file_name_template: "{{ .PackageName }}-{{ .Version }}-{{ .Release }}.{{ .Arch }}"
+        file_name_template: >-
+          {{ .PackageName }}-{{ .Version }}-{{ .Release }}.{{ if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
       deb:
         file_name_template: "{{ .PackageName }}-{{ .Version }}-{{ .Release }}_{{ .Arch }}"
         contents:
