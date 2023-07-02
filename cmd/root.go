@@ -43,6 +43,7 @@ func init() {
 	cobra.OnInitialize(initConfig)
 
 	rootCmd.AddCommand(objectCmd)
+	objectCmd.CompletionOptions.DisableDefaultCmd = true
 	rootCmd.AddCommand(originCmd)
 	rootCmd.AddCommand(rootConfigCmd)
 	rootCmd.AddCommand(rootPluginCmd)

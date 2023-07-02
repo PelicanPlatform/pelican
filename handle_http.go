@@ -557,7 +557,7 @@ Loop:
 				cancel()
 				if ObjectClientOptions.ProgressBars {
 					var cancelledProgressBar = p.AddBar(0,
-						mpb.BarQueueAfter(progressBar, false),
+						mpb.BarQueueAfter(progressBar, true),
 						mpb.BarFillerClearOnComplete(),
 						mpb.PrependDecorators(
 							decor.Name(filename, decor.WC{W: len(filename) + 1, C: decor.DidentRight}),
@@ -595,7 +595,7 @@ Loop:
 					completeMsg = downloadError.Error()
 				}
 				var doneProgressBar = p.AddBar(resp.Size,
-					mpb.BarQueueAfter(progressBar, false),
+					mpb.BarQueueAfter(progressBar, true),
 					mpb.BarFillerClearOnComplete(),
 					mpb.PrependDecorators(
 						decor.Name(filename, decor.WC{W: len(filename) + 1, C: decor.DidentRight}),
