@@ -1,13 +1,13 @@
-// +build darwin
+// +build windows
 
-package stashcp
+package pelican
 
 import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
-	"syscall"
+	"os"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -22,8 +22,7 @@ import (
 //   take the concatenation of the following byte buffers:
 //
 //   - basename of the path.
-//   - inode # as a 64-bit integer serialized to a byte buffer, represented in network order.
-//   - ctime # as a double serialized to a buffer.
+//   - mtime # as a double string
 //   - Current unix epoch time, as integer, divided by 86400
 //
 //   and then running it through a SHA256 sum to produce a digest.
@@ -32,33 +31,22 @@ import (
 func unique_hash(filePath string) (string, uint64, error) {
 	log.Debugf("Creating a unique hash for filename %s", filePath)
 
-	var st syscall.Stat_t
-	if err := syscall.Stat(filePath, &st); err != nil {
+	st, err := os.Stat(filePath)
+	if err != nil {
 		log.Debugln("Error while stat'ing file for metadata:", err)
-		return "", 0, err;
-	}
-
-	buf := new(bytes.Buffer)
-	if err := binary.Write(buf, binary.BigEndian, st.Ino); err != nil {
-		log.Debugln("Error while writing inode to buffer:", err)
-		return "", 0, err;
-	}
-	if err := binary.Write(buf, binary.BigEndian, st.Ctimespec.Sec); err != nil {
-		log.Debugln("Error while writing ctime to buffer:", err)
-		return "", 0, err;
-	}
-	if err := binary.Write(buf, binary.BigEndian, st.Ctimespec.Nsec); err != nil {
-		log.Debugln("Error while writing ctime nanoseconds to buffer:", err)
-		return "", 0, err;
-	}
-	if err := binary.Write(buf, binary.BigEndian, time.Now().Unix()/86400); err != nil {
-		log.Debugln("Error while writing current Unix time to buffer:", err)
 		return "", 0, err;
 	}
 
 	digest := sha256.New()
 	digest.Write([]byte(filePath))
+	digest.Write([]byte(st.ModTime().Format(time.RFC3339Nano)))
+
+	buf := new(bytes.Buffer)
+	if err := binary.Write(buf, binary.BigEndian, time.Now().Unix()/86400); err != nil {
+		log.Debugln("Error while writing current Unix time to buffer:", err)
+		return "", 0, err;
+	}
 	digest.Write(buf.Bytes())
 
-	return fmt.Sprintf("%x", digest.Sum(nil)), uint64(st.Size), nil
+	return fmt.Sprintf("%x", digest.Sum(nil)), uint64(st.Size()), nil
 }

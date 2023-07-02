@@ -8,59 +8,31 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/jessevdk/go-flags"
-	stashcp "github.com/htcondor/osdf-client/v6"
-	"github.com/htcondor/osdf-client/v6/classads"
+	"github.com/pelicanplatform/pelican"
+	"github.com/pelicanplatform/pelican/classads"
 	log "github.com/sirupsen/logrus"
+	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
-var (
-	version = "dev"
-	commit  = "none"
-	date    = "unknown"
-	builtBy = "unknown"
-)
+func init() {
+	// Define the file transfer plugin command
+	stageCmd := &cobra.Command{
+		Use:   "stage",
+		Short: "Run pelican CLI to stage files as a HTCSS shadow plugin",
+	}
+	stageCmd.Flags().StringP("token", "t", "", "Token file to use for reading and/or writing")
+	viper.BindPFlag("StagePlugin.Token", stageCmd.Flags().Lookup("token"))
+	stageCmd.Flags().Bool("hook", false, "Implement the HTCondor hook behavior")
+	viper.BindPFlag("StagePlugin.Hook", stageCmd.Flags().Lookup("hook"))
+	stageCmd.Flags().StringP("mount", "m", "", "Prefix corresponding to the local mount point of the origin")
+	viper.BindPFlag("StagePlugin.LocalMount", stageCmd.Flags().Lookup("mount"))
+	stageCmd.Flags().StringP("origin-prefix", "o", "", "Prefix corresponding to the local origin")
+	viper.BindPFlag("StagePlugin.OriginPrefix", stageCmd.Flags().Lookup("origin-prefix"))
+	stageCmd.Flags().StringP("shadow-prefix", "s", "", "Prefix corresponding to the shadow origin")
+	viper.BindPFlag("StagePlugin.ShadowPrefix", stageCmd.Flags().Lookup("shadow-prefix"))
 
-type Options struct {
-	// Turn on the debug logging
-	Debug bool `short:"d" long:"debug" description:"Turn on debug logging"`
-
-	// Token file to use for reading and/or writing
-	Token string `long:"token" short:"t" description:"Token file to use for reading and/or writing"`
-
-	// Version information
-	Version bool `long:"version" short:"v" description:"Print the version and exit"`
-
-	// Use the hook protocol
-	Hook bool `long:"hook" description:"Implement the HTCondor hook behavior"`
-
-	// Progress bars
-	ProgessBars bool `long:"progress" short:"p" description:"Show progress bars, turned on if run from a terminal"`
-
-	// Mount prefix; e.g., /mnt/stash/ospool/osgconnect
-	MountPrefix string `long:"mount" short:"m" description:"Prefix corresponding to the local mount point of the origin"`
-
-	// Origin prefix; e.g., osdf://ospool/osgconnect
-	OriginPrefix string `long:"origin-prefix" short:"o" description:"Prefix corresponding to the local origin"`
-
-	// Shadow origin prefix; e.g., osdf://ospool/osgconnect-shadow/
-	ShadowOriginPrefix string `long:"shadow-prefix" short:"s" description:"Prefix corresponding to the shadow origin" required:"true"`
-
-	// Sources to ingest
-	Sources []string `positional-arg-name:"sources" short:"i" long:"input" description:"Source file(s)" default:"-"`
-}
-
-var options Options
-
-var parser = flags.NewParser(&options, flags.Default)
-
-func main() {
-
-	// Capture the start time of the transfer
-	if _, err := parser.Parse(); err != nil {
-		if flagsErr, ok := err.(*flags.Error); ok && flagsErr.Type == flags.ErrHelp {
-			fmt.Fprintln(os.Stderr, `
-This utility parses a job ClassAd and, for each "osdf://" URL found in
+	usage := stageCmd.HelpTemplate() + `This utility parses a job ClassAd and, for each "osdf://" URL found in
 the input files that is in a locally-mounted origin, copies the file
 over to a "shadow origin".  The files in the shadow origin are given a
 unique based on their last modification time; this means that local
@@ -73,29 +45,23 @@ Terminology:
   correspondings to the files in the origin prefix. Example:
   /mnt/cephfs/protected
 - Shadow prefix: Where in the OSDF namespace the resulting files should
-  be uploaded.  Example: osdf://osg-connect-shadow/protected`);
-			os.Exit(0)
-		} else {
-			log.Errorln(err)
-			os.Exit(1)
-		}
+  be uploaded.  Example: osdf://osg-connect-shadow/protected
+`
+
+	stageCmd.SetHelpTemplate(usage)
+
+	stageCmd.CompletionOptions.DisableDefaultCmd = true
+	rootPluginCmd.AddCommand(stageCmd)
+}
+
+func stagePluginMain(cmd *cobra.Command, args []string) {
+
+	originPrefixStr := viper.GetString("StagePlugin.OriginPrefix")
+	if len(originPrefixStr) == 0 {
+		log.Errorln("Origin prefix not specified; must be a URL (osdf://...)")
+		os.Exit(1)
 	}
-
-	if options.Debug {
-		// Set logging to debug level
-		err := setLogging(log.DebugLevel)
-		if err != nil {
-			log.Panicln("Failed to set logging level to Debug:", err)
-		}
-	} else {
-		err := setLogging(log.ErrorLevel)
-		if err != nil {
-			log.Panicln("Failed to set logging level to Error:", err)
-		}
-
-	}
-
-	originPrefixUri, err := url.Parse(options.OriginPrefix)
+	originPrefixUri, err := url.Parse(originPrefixStr)
 	if err != nil {
 		log.Errorln("Origin prefix must be a URL (osdf://...):", err)
 		os.Exit(1)
@@ -107,29 +73,33 @@ Terminology:
 	originPrefixPath := path.Clean("/" + originPrefixUri.Host + "/" + originPrefixUri.Path)
 	log.Debugln("Local origin prefix:", originPrefixPath)
 
-	if options.Version {
-		fmt.Println("Version:", version)
-		fmt.Println("Build Date:", date)
-		fmt.Println("Build Commit:", commit)
-		fmt.Println("Built By:", builtBy)
-		os.Exit(0)
+	mountPrefixStr := viper.GetString("StagePlugin.MountPrefix")
+	if len(mountPrefixStr) == 0 {
+		log.Errorln("Mount prefix is required; must be a local path (/mnt/foo/...)")
+		os.Exit(1)
+	}
+
+	shadowOriginPrefixStr := viper.GetString("StagePlugin.ShadowOriginPrefix")
+	if len(shadowOriginPrefixStr) == 0 {
+		log.Errorln("Shadow origin prefix is required; must be a URL (osdf://....)")
+		os.Exit(1)
 	}
 
 	// Set the progress bars to the command line option
-	stashcp.Options.ProgressBars = options.ProgessBars
-	stashcp.Options.Token = options.Token
+	pelican.ObjectClientOptions.Token = viper.GetString("StagePlugin.Token")
 
 	// Check if the program was executed from a terminal
 	// https://rosettacode.org/wiki/Check_output_device_is_a_terminal#Go
 	if fileInfo, _ := os.Stdout.Stat(); (fileInfo.Mode() & os.ModeCharDevice) != 0 {
-		stashcp.Options.ProgressBars = true
+		pelican.ObjectClientOptions.ProgressBars = true
 	} else {
-		stashcp.Options.ProgressBars = false
+		pelican.ObjectClientOptions.ProgressBars = false
 	}
 
 	var sources []string
 	var extraSources []string
-	if options.Hook {
+	isHook := viper.GetBool("StagePlugin.Hook")
+	if isHook {
 		buffer := make([]byte, 100*1024)
 		bytesread, err := os.Stdin.Read(buffer)
 		if err != nil {
@@ -154,7 +124,7 @@ Terminology:
 		re := regexp.MustCompile(`[,\s]+`)
 		for _, source := range re.Split(inputListStr, -1) {
 			log.Debugln("Examining transfer input file", source)
-			if (strings.HasPrefix(source, options.MountPrefix)) {
+			if (strings.HasPrefix(source, mountPrefixStr)) {
 				sources = append(sources, source)
 			} else {
 					// Replace the osdf:// prefix with the local mount path
@@ -163,7 +133,7 @@ Terminology:
 				if err == nil && source_uri_scheme == "osdf" {
 					source_path := path.Clean("/" + source_uri.Host + "/" + source_uri.Path)
 					if (strings.HasPrefix(source_path, originPrefixPath)) {
-						sources = append(sources, options.MountPrefix + source_path[len(originPrefixPath):])
+						sources = append(sources, mountPrefixStr + source_path[len(originPrefixPath):])
 						continue
 					}
 				}
@@ -171,20 +141,20 @@ Terminology:
 			}
 		}
 	} else {
-		log.Debugln("Len of source:", len(options.Sources))
-		if len(options.Sources) < 1 {
+		log.Debugln("Len of source:", len(args))
+		if len(args) < 1 {
 			log.Errorln("No ingest sources")
-			parser.WriteHelp(os.Stdout)
+			cmd.Help()
 			os.Exit(1)
 		}
-		sources = options.Sources
+		sources = args
 	}
 	log.Debugln("Sources:", sources)
 
 	var result error
 	var xformSources []string
 	for _, src := range sources {
-		_, newSource, result := stashcp.DoShadowIngest(src, options.MountPrefix, options.ShadowOriginPrefix)
+		_, newSource, result := pelican.DoShadowIngest(src, mountPrefixStr, shadowOriginPrefixStr)
 		if result != nil {
 			// What's the correct behavior on failure?  For now, we silently put the transfer
 			// back on the original list.  This is arguably the wrong approach as it might
@@ -201,14 +171,14 @@ Terminology:
 	// Exit with failure
 	if result != nil {
 		// Print the list of errors
-		log.Errorln(stashcp.GetErrors())
-		if stashcp.ErrorsRetryable() {
+		log.Errorln(pelican.GetErrors())
+		if pelican.ErrorsRetryable() {
 			log.Errorln("Errors are retryable")
 			os.Exit(11)
 		}
 		os.Exit(1)
 	}
-	if options.Hook {
+	if isHook {
 		inputsStr := strings.Join(extraSources, ", ")
 		if len(extraSources) > 0 && len(xformSources) > 0 {
 			inputsStr = inputsStr + ", " + strings.Join(xformSources, ", ")
@@ -217,13 +187,4 @@ Terminology:
 		}
 		fmt.Printf("TransferInput = \"%s\"", inputsStr)
 	}
-}
-
-func setLogging(logLevel log.Level) error {
-	textFormatter := log.TextFormatter{}
-	textFormatter.DisableLevelTruncation = true
-	textFormatter.FullTimestamp = true
-	log.SetFormatter(&textFormatter)
-	log.SetLevel(logLevel)
-	return nil
 }

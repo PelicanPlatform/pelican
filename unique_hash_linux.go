@@ -1,6 +1,6 @@
 // +build linux
 
-package stashcp
+package pelican
 
 import (
 	"bytes"

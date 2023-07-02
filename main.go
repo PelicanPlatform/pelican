@@ -234,7 +234,7 @@ func CheckOSDF(destination string, methods []string) (remoteSize uint64, err err
 		dest_uri.Host = ""
 	}
 
-	ns, err := MatchNamespace(dest_uri.Path)
+	ns, err := namespaces.MatchNamespace(dest_uri.Path)
 	if err != nil {
 		return 0, err
 	}

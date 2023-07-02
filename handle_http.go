@@ -920,7 +920,7 @@ func walkDir(path string, client *gowebdav.Client) ([]string, error) {
 	return files, nil
 }
 
-func StatHttp(dest *url.URL, namespace Namespace) (uint64, error) {
+func StatHttp(dest *url.URL, namespace namespaces.Namespace) (uint64, error) {
 
 	scitoken_contents, err := getToken(dest, namespace, false, "")
 	if err != nil {
