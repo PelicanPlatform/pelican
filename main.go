@@ -200,6 +200,61 @@ func getToken(destination *url.URL, namespace namespaces.Namespace, isWrite bool
 	return tokenParsed.AccessKey, nil
 }
 
+// Check the size of a remote file in an origin
+func CheckOSDF(destination string, methods []string) (remoteSize uint64, err error) {
+
+	defer func() {
+		if r := recover(); r != nil {
+			log.Errorln("Panic captured while attempting to perform size check:", r)
+			ret := fmt.Sprintf("Unrecoverable error (panic) while check file size: %v", r)
+			err = errors.New(ret)
+			remoteSize = 0
+		}
+	}()
+
+	dest_uri, err := url.Parse(destination)
+	if err != nil {
+		log.Errorln("Failed to parse destination URL")
+		return 0, err
+	}
+
+	understoodSchemes := []string{"osdf", ""}
+
+	_, foundSource := Find(understoodSchemes, dest_uri.Scheme)
+	if !foundSource {
+		log.Errorln("Unknown schema provided:", dest_uri.Scheme)
+		return 0, errors.New("Unsupported scheme requested")
+	}
+
+	if dest_uri.Scheme == "" {
+		dest_uri.Scheme = "osdf"
+	}
+	if dest_uri.Host != "" {
+		dest_uri.Path = path.Clean("/" + dest_uri.Host + "/" + dest_uri.Path)
+		dest_uri.Host = ""
+	}
+
+	ns, err := MatchNamespace(dest_uri.Path)
+	if err != nil {
+		return 0, err
+	}
+
+	for _, method := range methods {
+
+		switch method {
+		case "http":
+			log.Info("Trying HTTP...")
+			if remoteSize, err = StatHttp(dest_uri, ns); err == nil {
+				return remoteSize, nil
+			}
+		default:
+			log.Errorf("Unknown transfer method: %s", method)
+			return 0, errors.New("Unknown transfer method")
+		}
+	}
+	return 0, err
+}
+
 func GetCacheHostnames(testFile string) (urls []string, err error) {
 
 	ns, err := namespaces.MatchNamespace(testFile)
@@ -307,7 +362,7 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 	}
 
 	if dest_url.Host != "" {
-		dest_url.Path = path.Join(dest_url.Host, dest_url.Path)
+		dest_url.Path = "/" + path.Join(dest_url.Host, dest_url.Path)
 	}
 
 	sourceScheme, _ := getTokenName(source_url)
@@ -360,6 +415,7 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 		dirResp, err := QueryDirector(sourceFile, OSDFDirectorUrl)
 		if err != nil {
 			log.Errorln("Error while querying the Director:", err)
+			AddError(err)
 			return 0, err
 		}
 		err = CreateNsFromDirectorResp(dirResp, &ns)
