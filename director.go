@@ -1,4 +1,4 @@
-package stashcp
+package pelican
 
 import (
 	"net/http"
@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	namespaces "github.com/htcondor/osdf-client/v6/namespaces"
+	namespaces "github.com/pelicanplatform/pelican/namespaces"
 	log "github.com/sirupsen/logrus"
 )
 

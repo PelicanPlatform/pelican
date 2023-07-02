@@ -1,4 +1,4 @@
-package stashcp
+package pelican
 
 import(
 	"testing"
@@ -9,7 +9,7 @@ import(
 	"os"
 	"github.com/stretchr/testify/assert"
 
-	namespaces "github.com/htcondor/osdf-client/v6/namespaces"
+	namespaces "github.com/pelicanplatform/pelican/namespaces"
 )
 
 func TestHeaderParser(t *testing.T) {

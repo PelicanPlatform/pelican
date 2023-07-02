@@ -1,4 +1,4 @@
-package stashcp
+package pelican
 
 import (
 	"context"
@@ -26,7 +26,7 @@ import (
 	"github.com/vbauerster/mpb/v7"
 	"github.com/vbauerster/mpb/v7/decor"
 
-	namespaces "github.com/htcondor/osdf-client/v6/namespaces"
+	namespaces "github.com/pelicanplatform/pelican/namespaces"
 )
 
 var p = mpb.New()
@@ -457,7 +457,7 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 	downloadLimit := viper.GetInt("MinimumDownloadSPeed")
 
 	// If we are doing a recursive, decrease the download limit by the number of likely workers ~5
-	if Options.Recursive {
+	if ObjectClientOptions.Recursive {
 		downloadLimit /= 5
 	}
 
@@ -474,7 +474,7 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 	}
 
 	var progressBar *mpb.Bar
-	if Options.ProgressBars {
+	if ObjectClientOptions.ProgressBars {
 		progressBar = p.AddBar(0,
 			mpb.PrependDecorators(
 				decor.Name(filename, decor.WCSyncSpaceR),
@@ -502,7 +502,7 @@ Loop:
 	for {
 		select {
 		case <-progressTicker.C:
-			if Options.ProgressBars {
+			if ObjectClientOptions.ProgressBars {
 				progressBar.SetTotal(resp.Size, false)
 				currentCompletedBytes := resp.BytesComplete()
 				progressBar.IncrInt64(currentCompletedBytes - previousCompletedBytes)
@@ -545,9 +545,9 @@ Loop:
 				}
 				// The download is below the threshold for more than `SlowTransferWindow` seconds, cancel the download
 				cancel()
-				if Options.ProgressBars {
+				if ObjectClientOptions.ProgressBars {
 					var cancelledProgressBar = p.AddBar(0,
-						mpb.BarQueueAfter(progressBar),
+						mpb.BarQueueAfter(progressBar, false),
 						mpb.BarFillerClearOnComplete(),
 						mpb.PrependDecorators(
 							decor.Name(filename, decor.WC{W: len(filename) + 1, C: decor.DidentRight}),
@@ -578,14 +578,14 @@ Loop:
 
 		case <-resp.Done:
 			// download is complete
-			if Options.ProgressBars {
+			if ObjectClientOptions.ProgressBars {
 				downloadError := resp.Err()
 				completeMsg := "done!"
 				if downloadError != nil {
 					completeMsg = downloadError.Error()
 				}
 				var doneProgressBar = p.AddBar(resp.Size,
-					mpb.BarQueueAfter(progressBar),
+					mpb.BarQueueAfter(progressBar, false),
 					mpb.BarFillerClearOnComplete(),
 					mpb.PrependDecorators(
 						decor.Name(filename, decor.WC{W: len(filename) + 1, C: decor.DidentRight}),

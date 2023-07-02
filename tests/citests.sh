@@ -1,5 +1,8 @@
 #!/bin/bash -xe
 
+cp pelican stashcp
+cp pelican stash_plugin
+
 to_exit=0
 ./stashcp -d /osgconnect/public/dweitzel/blast/queries/query1 ./
 rm query1

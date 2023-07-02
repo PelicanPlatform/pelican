@@ -45,6 +45,7 @@ func init() {
 	rootCmd.AddCommand(objectCmd)
 	rootCmd.AddCommand(originCmd)
 	rootCmd.AddCommand(rootConfigCmd)
+	rootCmd.AddCommand(rootPluginCmd)
 	preferredPrefix := config.GetPreferredPrefix()
 	rootCmd.Use = strings.ToLower(preferredPrefix)
 

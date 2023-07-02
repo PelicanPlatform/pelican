@@ -1,4 +1,4 @@
-package stashcp
+package pelican
 
 import (
 	"bytes"
@@ -16,8 +16,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/spf13/viper"
 
-	namespaces "github.com/htcondor/osdf-client/v6/namespaces"
-	"github.com/htcondor/osdf-client/v6/config"
+	"github.com/pelicanplatform/pelican/namespaces"
+	"github.com/pelicanplatform/pelican/config"
 )
 
 func TestMain(m *testing.M) {

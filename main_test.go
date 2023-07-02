@@ -1,4 +1,4 @@
-package stashcp
+package pelican
 
 import (
 	"net"
@@ -11,7 +11,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	namespaces "github.com/htcondor/osdf-client/v6/namespaces"
+	namespaces "github.com/pelicanplatform/pelican/namespaces"
 )
 
 // TestGetIps calls main.get_ips with a hostname, checking

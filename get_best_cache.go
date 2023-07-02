@@ -1,4 +1,4 @@
-package stashcp
+package pelican
 
 import (
 	"bytes"
@@ -112,7 +112,7 @@ func GetBestCache(cacheListName string) ([]string, error) {
 					break
 				}
 				req.Header.Add("Cache-control", "max-age=0")
-				req.Header.Add("User-Agent", "stashcp/"+Options.Version)
+				req.Header.Add("User-Agent", "pelican/"+ObjectClientOptions.Version)
 				resp, err = client.Do(req)
 				if err == nil {
 					break

@@ -1,4 +1,4 @@
-package stashcp
+package pelican
 
 import (
 	"bytes"
