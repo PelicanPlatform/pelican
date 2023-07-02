@@ -1,4 +1,4 @@
-package stashcp
+package namespaces
 
 import (
 	"os"
@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/spf13/viper"
 
-	"github.com/htcondor/osdf-client/v6/config"
+	"github.com/pelicanplatform/pelican/config"
 )
 
 // TestMatchNamespace calls MatchNamespace with a hostname, checking

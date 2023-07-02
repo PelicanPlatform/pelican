@@ -1,4 +1,4 @@
-package stashcp
+package pelican
 
 import (
 	"context"
@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
-	config "github.com/htcondor/osdf-client/v6/config"
-	namespaces "github.com/htcondor/osdf-client/v6/namespaces"
+	config "github.com/pelicanplatform/pelican/config"
+	namespaces "github.com/pelicanplatform/pelican/namespaces"
 	log "github.com/sirupsen/logrus"
 	jwt "github.com/golang-jwt/jwt"
-	oauth2 "github.com/htcondor/osdf-client/v6/oauth2"
+	oauth2 "github.com/pelicanplatform/pelican/oauth2"
 	oauth2_upstream "golang.org/x/oauth2"
 )
 

@@ -7,26 +7,25 @@ import (
 	"os"
 	"path"
 
-	config "github.com/htcondor/osdf-client/v6/config"
-	stashcp "github.com/htcondor/osdf-client/v6"
-	namespaces "github.com/htcondor/osdf-client/v6/namespaces"
+	"github.com/pelicanplatform/pelican"
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/namespaces"
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
 )
 
 var (
-	version = "dev"
-	/*
-		commit  = "none"
-		date    = "unknown"
-		builtBy = "unknown"
-	*/
+	// Add the config and prefix commands
+	rootConfigCmd = &cobra.Command{
+		Use:     "credentials",
+		Short:   "Interact with the credential configuration file",
+	}
 )
 
 func printConfig() {
 	config, err := config.GetConfigContents()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Failed to get configuration contents:", err)
+		fmt.Fprintln(os.Stderr, "Failed to get credential configuration contents:", err)
 		os.Exit(1)
 	}
 	config_b, err := yaml.Marshal(&config)
@@ -41,8 +40,8 @@ func addConfigSubcommands(configCmd *cobra.Command) {
 
 	configCmd.AddCommand(&cobra.Command{
 		Use:   "print",
-		Short: "Print the configuration file",
-		Long:  "Print the configuration file",
+		Short: "Print the credential configuration file",
+		Long:  "Print the credential configuration file",
 		Run: func(cmd *cobra.Command, args []string) {
 			printConfig()
 		},
@@ -50,8 +49,8 @@ func addConfigSubcommands(configCmd *cobra.Command) {
 
 	configCmd.AddCommand(&cobra.Command{
 		Use:   "replace <file>",
-		Short: "Replace the configuration file",
-		Long:  "Replace the configuration file",
+		Short: "Replace the credential configuration file",
+		Long:  "Replace the credential configuration file",
 		Args:  cobra.MinimumNArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			input_config_b, err := os.ReadFile(args[0])
@@ -132,7 +131,7 @@ func addTokenSubcommands(tokenCmd *cobra.Command) {
 				os.Exit(1)
 			}
 
-			token, err := stashcp.AcquireToken(&dest, namespace, isWrite)
+			token, err := pelican.AcquireToken(&dest, namespace, isWrite)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Failed to get a token:", err)
 				os.Exit(1)
@@ -262,18 +261,10 @@ func addPrefixSubcommands(prefixCmd *cobra.Command) {
 
 }
 
-func main() {
+func init() {
 
 	// Define the config commands
-	configCmd := &cobra.Command{
-		Use:   "config",
-		Short: "Manage the configuration file",
-		Long:  "Manage the configuration file",
-		Run: func(cmd *cobra.Command, args []string) {
-			printConfig()
-		},
-	}
-	addConfigSubcommands(configCmd)
+	addConfigSubcommands(rootConfigCmd)
 
 	// Define the prefix commands
 	prefixCmd := &cobra.Command{
@@ -291,30 +282,9 @@ func main() {
 	}
 	addTokenSubcommands(tokenCmd)
 
-	// Add the config and prefix commands
-	var rootCmd = &cobra.Command{
-		Use:     "config_mgr",
-		Version: version,
-	}
-	var Debug bool
-	rootCmd.PersistentFlags().BoolVarP(&Debug, "debug", "d", false, "Debug output")
-	rootCmd.PersistentPreRun = func(cmd *cobra.Command, args []string) {
-		if Debug {
-			setLogging(log.DebugLevel)
-		} else {
-			setLogging(log.ErrorLevel)
-		}
-	}
-
-	rootCmd.CompletionOptions.DisableDefaultCmd = true
-	rootCmd.AddCommand(configCmd)
-	rootCmd.AddCommand(prefixCmd)
-	rootCmd.AddCommand(tokenCmd)
-	err := rootCmd.Execute()
-	if err != nil {
-		log.Errorln(err)
-	}
-
+	rootConfigCmd.CompletionOptions.DisableDefaultCmd = true
+	rootConfigCmd.AddCommand(prefixCmd)
+	rootConfigCmd.AddCommand(tokenCmd)
 }
 
 func setLogging(logLevel log.Level) {

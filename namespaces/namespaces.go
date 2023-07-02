@@ -1,4 +1,4 @@
-package stashcp
+package namespaces
 
 import (
 	"bytes"
@@ -14,7 +14,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-// I don't think we actually want stashcp to download the namespace every build
+// I don't think we actually want pelican to download the namespace every build
 // Doesn't make for reproducible builds
 // //go:generate curl -s https://topology-itb.opensciencegrid.org/stashcache/namespaces.json -o resources/namespaces.json
 

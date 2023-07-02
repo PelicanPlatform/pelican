@@ -10,8 +10,8 @@ import (
 	"strings"
 
         log "github.com/sirupsen/logrus"
-	config "github.com/htcondor/osdf-client/v6/config"
-	namespaces "github.com/htcondor/osdf-client/v6/namespaces"
+	config "github.com/pelicanplatform/pelican/config"
+	namespaces "github.com/pelicanplatform/pelican/namespaces"
 )
 
 func deviceCodeSupported(grantTypes *[]string) bool {
