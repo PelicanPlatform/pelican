@@ -81,7 +81,7 @@ func Init() error {
 	viper.SetDefault("SlowTransferWindow", 30)
 
 	if upper_prefix == "OSDF" || upper_prefix == "STASH" {
-		viper.SetDefault("NamespaceURL", "https://topology.opensciencegrid.org/stashcache/namespaces")
+		viper.SetDefault("NamespaceURL", "https://topology.opensciencegrid.org/osdf/namespaces")
 	}
 
 	viper.SetEnvPrefix(upper_prefix)
