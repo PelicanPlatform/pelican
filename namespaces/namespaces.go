@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/pelicanplatform/pelican/config"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 )
@@ -133,7 +134,12 @@ func GetNamespaces() ([]Namespace, error) {
 	// Try downloading the namespaces, if it fails, use the embedded namespaces
 	namespacesFromUrl, err := downloadNamespace()
 	if err != nil {
-		log.Debugf("Failed to download namespaces: %s, continuing using built-in namespace configuration", err)
+		log.Debugf("Failed to download namespaces: %s", err)
+		if config.GetPreferredPrefix() == "PELICAN" {
+			return nil, err
+		} else {
+			log.Debug("Continuing using built-in namespace configuration")
+		}
 	} else {
 		namespacesJson = namespacesFromUrl
 	}
@@ -159,6 +165,9 @@ func GetNamespaces() ([]Namespace, error) {
 func downloadNamespace() ([]byte, error) {
 	// Get the namespace url from the environment
 	namespaceUrl := viper.GetString("NamespaceURL")
+	if len(namespaceUrl) == 0 {
+		return nil, errors.New("NamespaceURL is not set; unable to locate valid caches")
+	}
 	log.Debugln("Downloading namespaces information from", namespaceUrl)
 	resp, err := http.Get(namespaceUrl)
 	if err != nil {

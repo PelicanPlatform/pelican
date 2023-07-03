@@ -2,11 +2,18 @@
 package config
 
 import (
+	"encoding/json"
+	"io/ioutil"
+	"net/http"
+	"net/url"
+	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"os"
+	"time"
 
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 )
@@ -34,6 +41,13 @@ type OSDFConfig struct {
 		// List of OAuth2 client configurations
 		OauthClient [] PrefixEntry `yaml:"oauth_client,omitempty"`
 	} `yaml:"OSDF"`
+}
+
+type FederationDiscovery struct {
+	DirectorEndpoint string `json:"director_endpoint"`
+	NamespaceRegistrationEndpoint string `json:"namespace_registration_endpoint"`
+	CollectorEndpoint string `json:"collector_endpoint"`
+	JwksUri string `json:"jwks_uri"`
 }
 
 //
@@ -70,6 +84,59 @@ func GetAllPrefixes() []string {
 		prefixes = append(prefixes, "OSDF", "PELICAN")
 	}
 	return prefixes
+}
+
+func DiscoverFederation() error {
+	federationStr := viper.GetString("FederationURL")
+	if len(federationStr) == 0 {
+		return nil
+	}
+	curDirectorURL := viper.GetString("DirectorURL")
+	if len(curDirectorURL) != 0 {
+		return nil
+	}
+
+	federationUrl, err := url.Parse(federationStr)
+	if err != nil {
+		return errors.Wrapf(err, "Invalid federation value %s:", federationStr)
+	}
+	federationUrl.Scheme = "https"
+	if len(federationUrl.Path) > 0 && len(federationUrl.Host) == 0 {
+		federationUrl.Host = federationUrl.Path
+		federationUrl.Path = ""
+	}
+
+	discoveryUrl, _ := url.Parse(federationUrl.String())
+	discoveryUrl.Path = path.Join(".well-known/pelican-configuration", federationUrl.Path)
+
+	httpClient := http.Client{
+		Timeout: time.Second * 5,
+	}
+	req, err := http.NewRequest(http.MethodGet, discoveryUrl.String(), nil)
+	req.Header.Set("User-Agent", "pelican/7")
+
+	result, err := httpClient.Do(req)
+	if err != nil {
+		return errors.Wrapf(err, "Failure when doing federation metadata lookup to %s", discoveryUrl)
+	}
+
+	if result.Body != nil {
+		defer result.Body.Close()
+	}
+
+	body, err := ioutil.ReadAll(result.Body)
+	if err != nil {
+		return errors.Wrapf(err, "Failure when doing federation metadata read to %s", discoveryUrl)
+	}
+
+	metadata := FederationDiscovery{}
+	err = json.Unmarshal(body, &metadata)
+	if err != nil {
+		return errors.Wrapf(err, "Failure when parsing federation metadata at %s", discoveryUrl)
+	}
+	viper.Set("DirectorURL", metadata.DirectorEndpoint)
+
+	return nil
 }
 
 func Init() error {
@@ -158,5 +225,5 @@ func Init() error {
 	}
 	viper.Set("MinimumDownloadSpeed", downloadLimit)
 
-	return nil
+	return DiscoverFederation()
 }

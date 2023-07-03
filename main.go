@@ -23,7 +23,8 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	namespaces "github.com/pelicanplatform/pelican/namespaces"
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/namespaces"
 	"github.com/spf13/viper"
 )
 
@@ -218,7 +219,7 @@ func CheckOSDF(destination string, methods []string) (remoteSize uint64, err err
 		return 0, err
 	}
 
-	understoodSchemes := []string{"osdf", ""}
+	understoodSchemes := []string{"osdf", "pelican", ""}
 
 	_, foundSource := Find(understoodSchemes, dest_uri.Scheme)
 	if !foundSource {
@@ -226,12 +227,19 @@ func CheckOSDF(destination string, methods []string) (remoteSize uint64, err err
 		return 0, errors.New("Unsupported scheme requested")
 	}
 
-	if dest_uri.Scheme == "" {
+	origScheme := dest_uri.Scheme
+	if config.GetPreferredPrefix() != "PELICAN" && origScheme == "" {
 		dest_uri.Scheme = "osdf"
 	}
-	if dest_uri.Host != "" {
+	if (dest_uri.Scheme == "osdf" || dest_uri.Scheme == "stash") && dest_uri.Host != "" {
 		dest_uri.Path = path.Clean("/" + dest_uri.Host + "/" + dest_uri.Path)
 		dest_uri.Host = ""
+	} else if dest_uri.Scheme == "pelican" {
+		federationUrl, _ := url.Parse(dest_uri.String())
+		federationUrl.Scheme = "https"
+		federationUrl.Path = ""
+		viper.Set("FederationURL", federationUrl.String())
+		config.DiscoverFederation()
 	}
 
 	ns, err := namespaces.MatchNamespace(dest_uri.Path)
@@ -356,19 +364,35 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 	}
 	dest_url.Scheme = dest_scheme
 
-	// If there is a host specified, prepend it to the path
+	// If there is a host specified, prepend it to the path in the osdf case
 	if source_url.Host != "" {
-		source_url.Path = "/" + path.Join(source_url.Host, source_url.Path)
+		if source_url.Scheme == "osdf" || source_url.Scheme == "stash" {
+			source_url.Path = "/" + path.Join(source_url.Host, source_url.Path)
+		} else if source_url.Scheme == "pelican" {
+			federationUrl, _ := url.Parse(source_url.String())
+			federationUrl.Scheme = "https"
+			federationUrl.Path = ""
+			viper.Set("FederationURL", federationUrl.String())
+			config.DiscoverFederation()
+		}
 	}
 
 	if dest_url.Host != "" {
-		dest_url.Path = "/" + path.Join(dest_url.Host, dest_url.Path)
+		if dest_url.Scheme == "osdf" || dest_url.Scheme == "stash" {
+			dest_url.Path = "/" + path.Join(dest_url.Host, dest_url.Path)
+		} else if dest_url.Scheme == "pelican" {
+			federationUrl, _ := url.Parse(dest_url.String())
+			federationUrl.Scheme = "https"
+			federationUrl.Path = ""
+			viper.Set("FederationURL", federationUrl.String())
+			config.DiscoverFederation()
+		}
 	}
 
 	sourceScheme, _ := getTokenName(source_url)
 	destScheme, _ := getTokenName(dest_url)
 
-	understoodSchemes := []string{"stash", "file", "osdf", ""}
+	understoodSchemes := []string{"stash", "file", "osdf", "pelican", ""}
 
 	_, foundSource := Find(understoodSchemes, sourceScheme)
 	if !foundSource {
@@ -386,7 +410,7 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 	// For write back, it will be the destination
 	// For read it will be the source.
 
-	if destScheme == "stash" || destScheme == "osdf" {
+	if destScheme == "stash" || destScheme == "osdf" || destScheme == "pelican" {
 		log.Debugln("Detected writeback")
 		ns, err := namespaces.MatchNamespace(dest_url.Path)
 		if err != nil {
@@ -399,7 +423,7 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 		destination = dest_url.Path
 	}
 
-	if sourceScheme == "stash" || sourceScheme == "osdf" {
+	if sourceScheme == "stash" || sourceScheme == "osdf" || sourceScheme == "pelican" {
 		sourceFile = source_url.Path
 	}
 

@@ -54,6 +54,9 @@ func init() {
 
 	rootCmd.PersistentFlags().BoolP("debug", "d", false, "Enable debug logs")
 
+	rootCmd.PersistentFlags().StringP("federation", "f", "", "Pelican federation to utilize")
+	viper.BindPFlag("FederationURL", rootCmd.PersistentFlags().Lookup("federation"))
+
 	rootCmd.PersistentFlags().BoolVarP(&outputJSON, "json", "", false, "output results in JSON format")
 	rootCmd.CompletionOptions.DisableDefaultCmd = true
 }
@@ -80,7 +83,7 @@ func initConfig() {
 		}
 	}
 
-	setLogging(log.PanicLevel)
+	setLogging(log.ErrorLevel)
 	if viper.GetBool("Debug") {
 		setLogging(log.DebugLevel)
 	}

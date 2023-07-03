@@ -59,7 +59,7 @@ func copyMain(cmd *cobra.Command, args []string) {
 	if val, err := cmd.Flags().GetBool("debug"); err == nil && val {
 		setLogging(log.DebugLevel)
 	} else {
-		setLogging(log.PanicLevel)
+		setLogging(log.ErrorLevel)
 	}
 
 	err := config.Init()
