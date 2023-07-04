@@ -128,7 +128,10 @@ func copyMain(cmd *cobra.Command, args []string) {
 	log.Debugln("Len of source:", len(args))
 	if len(args) < 2 {
 		log.Errorln("No Source or Destination")
-		cmd.Help()
+		err = cmd.Help()
+		if err != nil {
+			log.Errorln("Failed to print out help:", err)
+		}
 		os.Exit(1)
 	}
 	source := args[:len(args)-1]

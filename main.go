@@ -239,7 +239,10 @@ func CheckOSDF(destination string, methods []string) (remoteSize uint64, err err
 		federationUrl.Scheme = "https"
 		federationUrl.Path = ""
 		viper.Set("FederationURL", federationUrl.String())
-		config.DiscoverFederation()
+		err = config.DiscoverFederation()
+		if err != nil {
+			return 0, err
+		}
 	}
 
 	ns, err := namespaces.MatchNamespace(dest_uri.Path)
@@ -373,7 +376,10 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 			federationUrl.Scheme = "https"
 			federationUrl.Path = ""
 			viper.Set("FederationURL", federationUrl.String())
-			config.DiscoverFederation()
+			err = config.DiscoverFederation()
+			if err != nil {
+				return 0, err
+			}
 		}
 	}
 
@@ -385,7 +391,10 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 			federationUrl.Scheme = "https"
 			federationUrl.Path = ""
 			viper.Set("FederationURL", federationUrl.String())
-			config.DiscoverFederation()
+			err = config.DiscoverFederation()
+			if err != nil {
+				return 0, err
+			}
 		}
 	}
 

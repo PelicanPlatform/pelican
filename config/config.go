@@ -130,6 +130,9 @@ func DiscoverFederation() error {
 		Timeout: time.Second * 5,
 	}
 	req, err := http.NewRequest(http.MethodGet, discoveryUrl.String(), nil)
+	if err != nil {
+		return errors.Wrapf(err, "Failure when doing federation metadata request creation for %s", discoveryUrl)
+	}
 	req.Header.Set("User-Agent", "pelican/7")
 
 	result, err := httpClient.Do(req)

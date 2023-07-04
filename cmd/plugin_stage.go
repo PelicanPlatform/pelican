@@ -20,17 +20,28 @@ func init() {
 	stageCmd := &cobra.Command{
 		Use:   "stage",
 		Short: "Run pelican CLI to stage files as a HTCSS shadow plugin",
+		Run: stagePluginMain,
 	}
 	stageCmd.Flags().StringP("token", "t", "", "Token file to use for reading and/or writing")
-	viper.BindPFlag("StagePlugin.Token", stageCmd.Flags().Lookup("token"))
+	if err := viper.BindPFlag("StagePlugin.Token", stageCmd.Flags().Lookup("token")); err != nil {
+		panic(err)
+	}
 	stageCmd.Flags().Bool("hook", false, "Implement the HTCondor hook behavior")
-	viper.BindPFlag("StagePlugin.Hook", stageCmd.Flags().Lookup("hook"))
+	if err := viper.BindPFlag("StagePlugin.Hook", stageCmd.Flags().Lookup("hook")); err != nil {
+		panic(err)
+	}
 	stageCmd.Flags().StringP("mount", "m", "", "Prefix corresponding to the local mount point of the origin")
-	viper.BindPFlag("StagePlugin.LocalMount", stageCmd.Flags().Lookup("mount"))
+	if err := viper.BindPFlag("StagePlugin.LocalMount", stageCmd.Flags().Lookup("mount")); err != nil {
+		panic(err)
+	}
 	stageCmd.Flags().StringP("origin-prefix", "o", "", "Prefix corresponding to the local origin")
-	viper.BindPFlag("StagePlugin.OriginPrefix", stageCmd.Flags().Lookup("origin-prefix"))
+	if err := viper.BindPFlag("StagePlugin.OriginPrefix", stageCmd.Flags().Lookup("origin-prefix")); err != nil {
+		panic(err)
+	}
 	stageCmd.Flags().StringP("shadow-prefix", "s", "", "Prefix corresponding to the shadow origin")
-	viper.BindPFlag("StagePlugin.ShadowPrefix", stageCmd.Flags().Lookup("shadow-prefix"))
+	if err := viper.BindPFlag("StagePlugin.ShadowPrefix", stageCmd.Flags().Lookup("shadow-prefix")); err != nil {
+		panic(err)
+	}
 
 	usage := stageCmd.HelpTemplate() + `This utility parses a job ClassAd and, for each "osdf://" URL found in
 the input files that is in a locally-mounted origin, copies the file
@@ -144,7 +155,9 @@ func stagePluginMain(cmd *cobra.Command, args []string) {
 		log.Debugln("Len of source:", len(args))
 		if len(args) < 1 {
 			log.Errorln("No ingest sources")
-			cmd.Help()
+			if err = cmd.Help(); err != nil {
+				log.Errorln("Failure when printing out help:", err)
+			}
 			os.Exit(1)
 		}
 		sources = args

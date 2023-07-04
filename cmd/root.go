@@ -55,7 +55,9 @@ func init() {
 	rootCmd.PersistentFlags().BoolP("debug", "d", false, "Enable debug logs")
 
 	rootCmd.PersistentFlags().StringP("federation", "f", "", "Pelican federation to utilize")
-	viper.BindPFlag("FederationURL", rootCmd.PersistentFlags().Lookup("federation"))
+	if err := viper.BindPFlag("FederationURL", rootCmd.PersistentFlags().Lookup("federation")); err != nil {
+		panic(err)
+	}
 
 	rootCmd.PersistentFlags().BoolVarP(&outputJSON, "json", "", false, "output results in JSON format")
 	rootCmd.CompletionOptions.DisableDefaultCmd = true
@@ -73,7 +75,9 @@ func initConfig() {
 		viper.SetConfigType("yaml")
 		viper.SetConfigName("pelican.yaml")
 	}
-	viper.BindPFlag("Debug", rootCmd.Flags().Lookup("debug"))
+	if err := viper.BindPFlag("Debug", rootCmd.Flags().Lookup("debug")); err != nil {
+		panic(err)
+	}
 
 	viper.SetEnvPrefix(config.GetPreferredPrefix())
 	viper.AutomaticEnv()

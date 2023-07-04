@@ -38,5 +38,8 @@ func init() {
 	originCmd.AddCommand(originConfigCmd)
 	originCmd.AddCommand(originServeCmd)
 	originServeCmd.Flags().StringP("volume", "v", "", "Setting the volue to /SRC:/DEST will export the contents of /SRC as /DEST in the Pelican federation")
-	viper.BindPFlag("ExportVolume", originServeCmd.Flags().Lookup("volume"))
+	err := viper.BindPFlag("ExportVolume", originServeCmd.Flags().Lookup("volume"))
+	if err != nil {
+		panic(err)
+	}
 }

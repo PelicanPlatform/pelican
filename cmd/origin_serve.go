@@ -236,7 +236,9 @@ func generateCert() error {
 			tlsCert, groupname)
 	}
 
-	pem.Encode(file, &pem.Block{Type: "CERTIFICATE", Bytes: derBytes})
+	if err = pem.Encode(file, &pem.Block{Type: "CERTIFICATE", Bytes: derBytes}); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -263,6 +265,9 @@ func generatePrivateKey(keyLocation string) error {
 	}
 	// In this case, the private key file doesn't exist.
 	file, err := os.OpenFile(keyLocation, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0640)
+	if err != nil {
+		return err
+	}
 	defer file.Close()
 	priv, err := ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
 	if err != nil {
@@ -279,7 +284,9 @@ func generatePrivateKey(keyLocation string) error {
 		return err
 	}
 	priv_block := pem.Block{Type: "PRIVATE KEY", Bytes: bytes}
-	pem.Encode(file, &priv_block)
+	if err = pem.Encode(file, &priv_block); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -376,7 +383,7 @@ func checkXrootdEnv() error {
 			return fmt.Errorf("Export volume %v has a relative destination path",
 				volumeMountDst)
 		}
-		destPath := path.Clean(filepath.Join(exportPath, volumeMountDst[1:len(volumeMountDst)]))
+		destPath := path.Clean(filepath.Join(exportPath, volumeMountDst[1:]))
 		err = os.MkdirAll(filepath.Dir(destPath), 0755)
 		if err != nil {
 			return errors.Wrapf(err, "Unable to create export directory %v",
@@ -408,13 +415,13 @@ to export the directory /mnt/foo to the path /bar in the data federation`)
 			return fmt.Errorf("Namespace prefix %v must have an absolute path",
 				namespacePrefix)
 		}
-		destPath := path.Clean(filepath.Join(exportPath, namespacePrefix[1:len(namespacePrefix)]))
+		destPath := path.Clean(filepath.Join(exportPath, namespacePrefix[1:]))
 		err = os.MkdirAll(filepath.Dir(destPath), 0755)
 		if err != nil {
 			return errors.Wrapf(err, "Unable to create export directory %v",
 				filepath.Dir(destPath))
 		}
-		srcPath := filepath.Join(mountPath, namespacePrefix[1:len(namespacePrefix)])
+		srcPath := filepath.Join(mountPath, namespacePrefix[1:])
 		err = os.Symlink(srcPath, destPath)
 		if err != nil {
 			return errors.Wrapf(err, "Failed to create export symlink")
@@ -588,7 +595,9 @@ func checkDefaults() error {
 func configXrootd() (string, error) {
 	var config XrootdConfig
 	config.LocalMonitoringPort = -1
-	viper.Unmarshal(&config)
+	if err := viper.Unmarshal(&config); err != nil {
+		return "", err
+	}
 	templ := template.Must(template.New("xrootd.cfg").Parse(xrootdCfg))
 
 	xrootdRun := viper.GetString("XrootdRun")
@@ -702,8 +711,12 @@ func launchXrootd() error {
 		case sig := <-sigs:
 			if sys_sig, ok := sig.(syscall.Signal); ok {
 				log.Warnf("Forwarding signal %v to xrootd processes\n", sys_sig)
-				syscall.Kill(xrootdCmd.Process.Pid, sys_sig)
-				syscall.Kill(cmsdCmd.Process.Pid, sys_sig)
+				if err = syscall.Kill(xrootdCmd.Process.Pid, sys_sig); err != nil {
+					return errors.Wrap(err, "Failed to forward signal to xrootd process")
+				}
+				if err = syscall.Kill(cmsdCmd.Process.Pid, sys_sig); err != nil {
+					return errors.Wrap(err, "Failed to forward signal to cmsd process")
+				}
 			} else {
 				panic(errors.New("Unable to convert signal to syscall.Signal"))
 			}
@@ -727,10 +740,14 @@ func launchXrootd() error {
 			return nil
 		case <-timer.C:
 			if !xrootdExpiry.IsZero() && time.Now().After(xrootdExpiry) {
-				syscall.Kill(xrootdCmd.Process.Pid, syscall.SIGKILL)
+				if err = syscall.Kill(xrootdCmd.Process.Pid, syscall.SIGKILL); err != nil {
+					return errors.Wrap(err, "Failed to SIGKILL the xrootd process")
+				}
 			}
 			if !cmsdExpiry.IsZero() && time.Now().After(cmsdExpiry) {
-				syscall.Kill(cmsdCmd.Process.Pid, syscall.SIGKILL)
+				if err = syscall.Kill(cmsdCmd.Process.Pid, syscall.SIGKILL); err != nil {
+					return errors.Wrap(err, "Failed to SIGKILL the cmsd process")
+				}
 			}
 		}
 	}
@@ -762,7 +779,12 @@ func serve(/*cmd*/ *cobra.Command, /*args*/ []string) error {
 		c.JSON(http.StatusOK, gin.H{"status": "healthy"})
 	})
 
-	go engine.Run()
+	go func() {
+		err = engine.Run()
+		if err != nil {
+			panic(err)
+		}
+	}()
 	err = launchXrootd()
 	if err != nil {
 		return err
