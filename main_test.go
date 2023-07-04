@@ -10,8 +10,10 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/spf13/viper"
 
-	namespaces "github.com/pelicanplatform/pelican/namespaces"
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/namespaces"
 )
 
 // TestGetIps calls main.get_ips with a hostname, checking
@@ -40,6 +42,12 @@ func TestGetIps(t *testing.T) {
 func TestGetToken(t *testing.T) {
 
 	// Need a namespace for token acquisition
+	defer os.Unsetenv("PELICAN_NAMESPACE_URL")
+	os.Setenv("PELICAN_NAMESPACE_URL", "https://topology.opensciencegrid.org/osdf/namespaces")
+	viper.Reset()
+	err := config.Init()
+	assert.Nil(t, err)
+
 	namespace, err := namespaces.MatchNamespace("/user/foo")
 	assert.NoError(t, err)
 

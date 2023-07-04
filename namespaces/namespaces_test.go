@@ -71,6 +71,10 @@ func TestMatchNamespace(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
+	// Reset the prefix to get old OSDF fallback behavior.
+	oldPrefix := config.SetPreferredPrefix("OSDF")
+	defer config.SetPreferredPrefix(oldPrefix)
+
 	viper.Reset()
 	err = config.Init()
 	assert.Nil(t, err)
@@ -143,6 +147,11 @@ func TestMatchNamespaceSpecific(t *testing.T) {
 }
 
 func TestFullNamespace(t *testing.T) {
+	os.Setenv("PELICAN_NAMESPACE_URL", "https://topology.opensciencegrid.org/osdf/namespaces")
+	viper.Reset()
+	err := config.Init()
+	assert.Nil(t, err)
+
 	ns, err := MatchNamespace("/ospool/PROTECTED/dweitzel/test.txt")
 	assert.NoError(t, err, "Failed to parse namespace")
 	assert.Equal(t, true, ns.ReadHTTPS)
@@ -178,11 +187,13 @@ func TestDownloadNamespacesFail(t *testing.T) {
 
 func TestGetNamespaces(t *testing.T) {
 	// Set the environment to an invalid URL, so it is forced to use the "built-in" namespaces.json
-	os.Setenv("PELICAN_NAMESPACE_URL", "https://doesnotexist.org.blah/namespaces.json")
+	os.Setenv("OSDF_NAMESPACE_URL", "https://doesnotexist.org.blah/namespaces.json")
+	oldPrefix := config.SetPreferredPrefix("OSDF")
+	defer config.SetPreferredPrefix(oldPrefix)
 	viper.Reset()
 	err := config.Init()
 	assert.Nil(t, err)
-	defer os.Unsetenv("PELICAN_NAMESPACE_URL")
+	defer os.Unsetenv("OSDF_NAMESPACE_URL")
 	namespaces, err := GetNamespaces()
 	assert.NoError(t, err, "Failed to get namespaces")
 	assert.NotNil(t, namespaces, "Namespaces is nil")

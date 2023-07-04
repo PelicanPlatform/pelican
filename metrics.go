@@ -312,7 +312,7 @@ func HandlePacket(packet []byte) error {
 		}
 		firstHeaderSize := binary.BigEndian.Uint16(packet[10:12])
 		if firstHeaderSize < 24 {
-			return fmt.Errorf("First entry in f-stream packet is %v bytes, smaller than the minimum XrdXrootdMonFileTOD size of 24 bytes")
+			return fmt.Errorf("First entry in f-stream packet is %v bytes, smaller than the minimum XrdXrootdMonFileTOD size of 24 bytes", firstHeaderSize)
 		}
 		offset := uint32(firstHeaderSize + 8)
 		bytesRemain := header.Plen - uint16(offset)
@@ -475,7 +475,7 @@ func HandlePacket(packet []byte) error {
 			return err
 		}
 	default:
-		log.Debug("MonPacket: Received an unhandled monitoring packet of type %v", header.Code)
+		log.Debugf("MonPacket: Received an unhandled monitoring packet of type %v", header.Code)
 	}
 
 	return nil

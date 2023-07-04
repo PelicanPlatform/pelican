@@ -50,6 +50,11 @@ type FederationDiscovery struct {
 	JwksUri string `json:"jwks_uri"`
 }
 
+
+// Some of the unit tests probe behavior specific to OSDF vs Pelican.  Hence,
+// we need a way to override the preferred prefix.
+var testingPreferredPrefix string
+
 //
 // Based on the name of the current binary, determine the preferred "style"
 // of behavior.  For example, a binary with the "osdf_" prefix should utilize
@@ -57,6 +62,10 @@ type FederationDiscovery struct {
 // need to manually configure the location of the director endpoint.
 //
 func GetPreferredPrefix() string {
+	// Testing override to programmatically force different behaviors.
+	if testingPreferredPrefix != "" {
+		return testingPreferredPrefix
+	}
 	arg0 := strings.ToUpper(filepath.Base(os.Args[0]))
 	underscore_idx := strings.Index(arg0, "_")
 	if underscore_idx != -1 {
@@ -68,6 +77,14 @@ func GetPreferredPrefix() string {
 		return "OSDF"
 	}
 	return "PELICAN"
+}
+
+// Override the auto-detected preferred prefix; mostly meant for unittests.
+// Returns the old preferred prefix.
+func SetPreferredPrefix(newPref string) string {
+	oldPref := testingPreferredPrefix
+	testingPreferredPrefix = newPref
+	return oldPref
 }
 
 //
