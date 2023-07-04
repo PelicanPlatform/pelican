@@ -26,8 +26,7 @@ jobs:
     - name: Copy files (Ubuntu)
       if: matrix.os == 'ubuntu-latest'
       run: |
-        cp dist/stashcp_linux_amd64_v1/stashcp ./
-        cp dist/stash_plugin_linux_amd64_v1/stash_plugin ./
+        cp dist/pelican_linux_amd64_v1/pelican ./
     - name: Run Integration Tests
       if: matrix.os == 'ubuntu-latest'
       run: ./tests/citests.sh
