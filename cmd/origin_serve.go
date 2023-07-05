@@ -91,6 +91,8 @@ func init() {
 		viper.SetDefault("TLSCertificate", "/etc/pelican/certificates/tls.crt")
 		viper.SetDefault("TLSKey", "/etc/pelican/certificates/tls.key")
 		viper.SetDefault("XrootdRun", "/run/pelican/xrootd")
+		viper.SetDefault("GeoIPLocation", "/run/pelican/geoip/GeoIP2.mmdb")
+		viper.SetDefault("MaxMindKeyFile", "/run/pelican/maxmind/maxmind.key")
 		viper.SetDefault("RobotsTxtFile", "/etc/pelican/robots.txt")
 		viper.SetDefault("ScitokensConfig", "/etc/pelican/xrootd/scitokens.cfg")
 		viper.SetDefault("Authfile", "/etc/pelican/xrootd/authfile")
@@ -109,20 +111,28 @@ func init() {
 		viper.SetDefault("Authfile", filepath.Join(configBase, "xrootd", "authfile"))
 		viper.SetDefault("MacaroonsKeyFile", filepath.Join(configBase, "macaroons-secret"))
 		viper.SetDefault("IssuerKey", filepath.Join(configBase, "issuer.jwk"))
+		viper.SetDefault("MaxMindKeyFile", filepath.Join(configBase, "maxmind.key")
 
+		var runtimeDir string
 		if userRuntimeDir := os.Getenv("XDG_RUNTIME_DIR"); userRuntimeDir != "" {
-			runtimeDir := filepath.Join(userRuntimeDir, "pelican")
-			err := os.MkdirAll(runtimeDir, 0750)
-			if err != nil {
-				cobra.CheckErr(err)
-			}
-			viper.SetDefault("XrootdRun", runtimeDir)
+			runtimeDir = filepath.Join(userRuntimeDir, "pelican")
 		} else {
-			dir, err := os.MkdirTemp("", "pelican-xrootd-*")
+			runtimeDir, err = os.MkdirTemp("", "pelican-xrootd-*")
 			cobra.CheckErr(err)
-			viper.SetDefault("XrootdRun", dir)
-			cleanupDirOnShutdown(dir)
+			cleanupDirOnShutdown(runtimeDir)
 		}
+		xrootdRuntimeDir := filepath.Join(runtimeDir, "xrootd")
+		if err = os.MkdirAll(xrootdRuntimeDir, 0750); err != nil {
+			cobra.CheckErr(err)
+		}
+		viper.SetDefault("XrootdRun", xrootdRuntimeDir)
+
+		geoipRuntimeDir := filepath.Join(runtimeDir, "geoip")
+		if err = os.MkdirAll(geoipRuntimeDir, 0750); err != nil {
+			cobra.CheckErr(err)
+		}
+		viper.SetDefault("GeoIPLocation", filepath.Join(geoipRuntimeDir, "GeoIP2.mmdb"))
+
 		viper.SetDefault("XrootdMultiuser", false)
 	}
 	viper.SetDefault("TLSCertFile", "/etc/pki/tls/cert.pem")
