@@ -1,6 +1,10 @@
 package director
 
 import (
+	"errors"
+	"fmt"
+	"net"
+	"net/netip"
 	"net/url"
 	"path"
 	"strings"
@@ -8,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
+	log "github.com/sirupsen/logrus"
 )
 
 type (
@@ -48,6 +53,41 @@ var (
 	serverAds = ttlcache.New[ServerAd, []NamespaceAd](ttlcache.WithTTL[ServerAd, []NamespaceAd](15 * time.Minute))
 	serverAdMutex = sync.RWMutex{}
 )
+
+func RecordAd(ad ServerAd, namespaceAds *[]NamespaceAd) {
+	if err := UpdateLatLong(&ad); err != nil {
+		log.Debugln("Failed to lookup GeoIP coordinates for host", ad.URL.Host)
+	}
+	serverAdMutex.Lock()
+	defer serverAdMutex.Unlock()
+
+	serverAds.Set(ad, *namespaceAds, ttlcache.DefaultTTL)
+}
+
+func UpdateLatLong(ad *ServerAd) error {
+	if ad == nil {
+		return errors.New("Cannot provide a nil ad to UpdateLatLong")
+	}
+	hostname := strings.Split(ad.URL.Host, ":")[0]
+	ip, err := net.LookupIP(hostname)
+	if err != nil {
+		return err
+	}
+	if len(ip) == 0 {
+		return fmt.Errorf("Unable to find an IP address for hostname %s", hostname)
+	}
+	addr, ok := netip.AddrFromSlice(ip[0])
+	if !ok {
+		return errors.New("Failed to create address object from IP")
+	}
+	lat, long, err := GetLatLong(addr)
+	if err != nil {
+		return err
+	}
+	ad.Latitude = lat
+	ad.Longitude = long
+	return nil
+}
 
 func matchesPrefix(reqPath string, namespaceAds []NamespaceAd) *NamespaceAd {
 	for _, namespace := range namespaceAds {
