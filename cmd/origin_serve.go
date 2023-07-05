@@ -111,7 +111,7 @@ func init() {
 		viper.SetDefault("Authfile", filepath.Join(configBase, "xrootd", "authfile"))
 		viper.SetDefault("MacaroonsKeyFile", filepath.Join(configBase, "macaroons-secret"))
 		viper.SetDefault("IssuerKey", filepath.Join(configBase, "issuer.jwk"))
-		viper.SetDefault("MaxMindKeyFile", filepath.Join(configBase, "maxmind.key")
+		viper.SetDefault("MaxMindKeyFile", filepath.Join(configBase, "maxmind.key"))
 
 		var runtimeDir string
 		if userRuntimeDir := os.Getenv("XDG_RUNTIME_DIR"); userRuntimeDir != "" {

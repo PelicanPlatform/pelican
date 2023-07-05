@@ -61,7 +61,8 @@ func RedirectToCache(ginCtx *gin.Context) {
 		} else {
 			linkHeader += ", "
 		}
-		linkHeader += fmt.Sprintf(`<%s>; rel="duplicate"; prio=%s`, getRedirectURL(reqPath, ad.URL), idx + 1)
+		redirectURL := getRedirectURL(reqPath, ad.URL)
+		linkHeader += fmt.Sprintf(`<%s>; rel="duplicate"; prio=%d`, redirectURL.String(), idx + 1)
 	}
 	ginCtx.Writer.Header()["Link"] = []string{linkHeader}
 
@@ -70,7 +71,7 @@ func RedirectToCache(ginCtx *gin.Context) {
 
 		tokenGen := ""
 		first := true
-		hdrVals := []string{namespaceAd.Issuer.String(), string(namespaceAd.MaxScopeDepth), string(namespaceAd.Strategy),
+		hdrVals := []string{namespaceAd.Issuer.String(), fmt.Sprint(namespaceAd.MaxScopeDepth), string(namespaceAd.Strategy),
 			namespaceAd.BasePath, namespaceAd.VaultServer}
 		for idx, hdrKey := range []string{"issuer", "max-scope-depth", "strategy", "base-path", "vault-server"} {
 			hdrVal := hdrVals[idx]
