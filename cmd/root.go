@@ -75,7 +75,7 @@ func initConfig() {
 		viper.SetConfigType("yaml")
 		viper.SetConfigName("pelican.yaml")
 	}
-	if err := viper.BindPFlag("Debug", rootCmd.Flags().Lookup("debug")); err != nil {
+	if err := viper.BindPFlag("Debug", rootCmd.PersistentFlags().Lookup("debug")); err != nil {
 		panic(err)
 	}
 

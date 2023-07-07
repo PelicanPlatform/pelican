@@ -771,7 +771,22 @@ func serve(/*cmd*/ *cobra.Command, /*args*/ []string) error {
 		return err
 	}
 
-	engine := gin.Default()
+	engine := gin.New()
+	engine.Use(gin.Recovery())
+	webLogger := log.WithFields(log.Fields{"daemon": "gin"})
+	engine.Use(func(ctx *gin.Context) {
+		startTime := time.Now()
+
+		ctx.Next()
+
+		latency := time.Since(startTime)
+		webLogger.WithFields(log.Fields{"method": ctx.Request.Method,
+			"status": ctx.Writer.Status(),
+			"time": latency.String(),
+			"client": ctx.RemoteIP(),
+			"resource": ctx.Request.URL.Path},
+		).Info("Served Request")
+	})
 	if err = pelican.ConfigureMetrics(engine); err != nil {
 		return err
 	}
