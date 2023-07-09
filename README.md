@@ -45,6 +45,16 @@ Similarly, the `osdf` binary can be used to download from the OSDF:
 $ osdf object get /osgconnect/public/dweitzel/blast/queries/query1 ./
 ```
 
+To ease the transition of `stashcp`
+[users](https://github.com/htcondor/osdf-client) to pelican, the tool can also
+be renamed or symlinked to `stashcp`:
+
+```
+$ stashcp /osgconnect/public/dweitzel/blast/queries/query1 ./
+```
+
+and it shares the same defaults and behavior as stashcp.
+
 
 Building
 --------
