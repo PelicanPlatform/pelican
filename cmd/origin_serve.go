@@ -26,6 +26,7 @@ import (
 	"github.com/spf13/viper"
 	"github.com/pelicanplatform/pelican"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/origin_ui"
 	"github.com/pkg/errors"
 )
 
@@ -605,6 +606,10 @@ func serve(/*cmd*/ *cobra.Command, /*args*/ []string) error {
 	if err = pelican.ConfigureMetrics(engine); err != nil {
 		return err
 	}
+	if err = origin_ui.ConfigureOriginUI(engine); err != nil {
+		return err
+	}
+
 	engine.GET("/api/v1.0/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "healthy"})
 	})

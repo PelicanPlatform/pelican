@@ -11,11 +11,16 @@ import (
 	"math/big"
 	"path/filepath"
 	"os"
+	"sync/atomic"
 	"time"
 
 	"github.com/lestrrat-go/jwx/jwk"
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
+)
+
+var (
+	privateKey atomic.Pointer[jwk.Key]
 )
 
 func GenerateCert() error {
@@ -194,4 +199,22 @@ func GenerateIssuerJWKS() (*jwk.Set, error) {
 	jwks.Add(pkey)
 	return &jwks, nil
 
+}
+
+func GetOriginJWK() (*jwk.Key, error) {
+	key := privateKey.Load()
+	if key == nil {
+		issuerKeyFile := viper.GetString("IssuerKey")
+		contents, err := os.ReadFile(issuerKeyFile)
+		if err != nil {
+			return nil, errors.Wrap(err, "Failed to read key file")
+		}
+		newKey, err := jwk.ParseKey(contents, jwk.WithPEM(true))
+		if err != nil {
+			return nil, errors.Wrapf(err, "Failed to parse key file")
+		}
+		privateKey.Store(&newKey)
+		key = &newKey
+	}
+	return key, nil
 }
