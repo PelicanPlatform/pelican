@@ -76,6 +76,9 @@ func IsRetryable(err error) bool {
 	if errors.Is(err, &SlowTransferError{}) {
 		return true
 	}
+	if errors.Is(err, grab.ErrBadLength) {
+		return false
+	}
 	var cse *ConnectionSetupError
 	if errors.As(err, &cse) {
 		if sce, ok := cse.Unwrap().(grab.StatusCodeError); ok {
