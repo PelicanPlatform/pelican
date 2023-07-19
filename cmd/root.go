@@ -45,6 +45,7 @@ func init() {
 	rootCmd.AddCommand(objectCmd)
 	objectCmd.CompletionOptions.DisableDefaultCmd = true
 	rootCmd.AddCommand(originCmd)
+	rootCmd.AddCommand(namespaceCmd)
 	rootCmd.AddCommand(rootConfigCmd)
 	rootCmd.AddCommand(rootPluginCmd)
 	preferredPrefix := config.GetPreferredPrefix()
@@ -55,9 +56,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolP("debug", "d", false, "Enable debug logs")
 
 	rootCmd.PersistentFlags().StringP("federation", "f", "", "Pelican federation to utilize")
-	if err := viper.BindPFlag("FederationURL", rootCmd.PersistentFlags().Lookup("federation")); err != nil {
-		panic(err)
-	}
+	viper.BindPFlag("FederationURL", rootCmd.PersistentFlags().Lookup("federation"))
 
 	rootCmd.PersistentFlags().BoolVarP(&outputJSON, "json", "", false, "output results in JSON format")
 	rootCmd.CompletionOptions.DisableDefaultCmd = true
@@ -75,9 +74,7 @@ func initConfig() {
 		viper.SetConfigType("yaml")
 		viper.SetConfigName("pelican.yaml")
 	}
-	if err := viper.BindPFlag("Debug", rootCmd.PersistentFlags().Lookup("debug")); err != nil {
-		panic(err)
-	}
+	viper.BindPFlag("Debug", rootCmd.Flags().Lookup("debug"))
 
 	viper.SetEnvPrefix(config.GetPreferredPrefix())
 	viper.AutomaticEnv()
