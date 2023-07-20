@@ -479,8 +479,7 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 	if resp.IsComplete() {
 		if err := resp.Err(); err != nil {
 			if errors.Is(err, grab.ErrBadLength) {
-				grab.ErrBadLength = errors.New("Local copy of file is larger than remote copy")
-				err = grab.ErrBadLength
+				err = fmt.Errorf("Local copy of file is larger than remote copy %w", grab.ErrBadLength)
 			}
 			log.Errorln("Failed to download:", err)
 			return 0, &ConnectionSetupError{Err: err}
