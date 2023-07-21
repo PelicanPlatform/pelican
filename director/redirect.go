@@ -5,14 +5,25 @@ import (
 	"net/netip"
 	"net/url"
 	"path"
+
 	"github.com/gin-gonic/gin"
 )
 
-func getRedirectURL(reqPath string, serverURL url.URL) (redirectURL url.URL) {
+func getRedirectURL(reqPath string, ad ServerAd, requiresAuth bool) (redirectURL url.URL) {
+	var serverURL url.URL
+	if requiresAuth {
+		serverURL = ad.AuthURL
+	} else {
+		serverURL = ad.URL
+	}
 	reqPath = path.Clean("/" + reqPath)
-	redirectURL.Scheme = "https"
+	if requiresAuth {
+		redirectURL.Scheme = "https"
+	} else {
+		redirectURL.Scheme = "http"
+	}
 	redirectURL.Host = serverURL.Host
-	redirectURL.Path = path.Clean(serverURL.Path + reqPath)
+	redirectURL.Path = reqPath
 	return
 }
 
@@ -37,21 +48,19 @@ func RedirectToCache(ginCtx *gin.Context) {
 	}
 	namespaceAd, ads := GetCacheAdsForPath(reqPath)
 	if len(ads) == 0 {
-		ginCtx.String(404, "No cache found for path")
+		ginCtx.String(404, "No cache found for path\n")
 		return
 	}
 	if namespaceAd.Path == "" {
-		ginCtx.String(404, "No origin found for path")
+		ginCtx.String(404, "No origin found for path\n")
 		return
 	}
-
 	ads, err := SortCaches(ipAddr, ads)
 	if err != nil {
 		ginCtx.String(500, "Failed to determine server ordering")
 		return
 	}
-
-	redirectURL := getRedirectURL(reqPath, ads[0].URL)
+	redirectURL := getRedirectURL(reqPath, ads[0], namespaceAd.RequireToken)
 
 	linkHeader := ""
 	first := true
@@ -61,11 +70,11 @@ func RedirectToCache(ginCtx *gin.Context) {
 		} else {
 			linkHeader += ", "
 		}
-		redirectURL := getRedirectURL(reqPath, ad.URL)
-		linkHeader += fmt.Sprintf(`<%s>; rel="duplicate"; prio=%d`, redirectURL.String(), idx + 1)
+		redirectURL := getRedirectURL(reqPath, ad, namespaceAd.RequireToken)
+		linkHeader += fmt.Sprintf(`<%s>; rel="duplicate"; pri=%d`, redirectURL.String(), idx+1)
 	}
 	ginCtx.Writer.Header()["Link"] = []string{linkHeader}
-
+	fmt.Println("here 5")
 	if namespaceAd.Issuer.Host != "" {
 		ginCtx.Writer.Header()["X-Pelican-Authorization"] = []string{"issuer=" + namespaceAd.Issuer.String()}
 
@@ -94,6 +103,10 @@ func RedirectToCache(ginCtx *gin.Context) {
 	ginCtx.Redirect(307, redirectURL.String())
 }
 
+// func RedirectToOrigin(ginCtx *gin.Context) {
+// Eventually we want a function that can redirect caches to the appropriate origin
+// }
+
 func RegisterDirector(router *gin.RouterGroup) {
-	router.GET("/", RedirectToCache)
+	router.GET("/*any", RedirectToCache)
 }

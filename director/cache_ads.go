@@ -17,29 +17,32 @@ import (
 
 type (
 	NamespaceAd struct {
-		RequireToken bool
-		Path string
-		Issuer url.URL
+		RequireToken  bool
+		Path          string
+		Issuer        url.URL
 		MaxScopeDepth uint
-		Strategy StrategyType
-		BasePath string
-		VaultServer string
+		Strategy      StrategyType
+		BasePath      string
+		VaultServer   string
 	}
 
 	ServerAd struct {
 		Name string
-		URL url.URL
-		Type ServerType
-		Latitude float64
+		// Need to account for authed and
+		// non-authed URLs wrt caches
+		AuthURL   url.URL
+		URL       url.URL
+		Type      ServerType
+		Latitude  float64
 		Longitude float64
 	}
 
-	ServerType string
+	ServerType   string
 	StrategyType string
 )
 
 const (
-	CacheType ServerType = "Cache"
+	CacheType  ServerType = "Cache"
 	OriginType ServerType = "Origin"
 )
 
@@ -47,10 +50,9 @@ const (
 	OAuthStrategy StrategyType = "OAuth2"
 	VaultStrategy StrategyType = "Vault"
 )
-	
 
 var (
-	serverAds = ttlcache.New[ServerAd, []NamespaceAd](ttlcache.WithTTL[ServerAd, []NamespaceAd](15 * time.Minute))
+	serverAds     = ttlcache.New[ServerAd, []NamespaceAd](ttlcache.WithTTL[ServerAd, []NamespaceAd](15 * time.Minute))
 	serverAdMutex = sync.RWMutex{}
 )
 
@@ -60,7 +62,6 @@ func RecordAd(ad ServerAd, namespaceAds *[]NamespaceAd) {
 	}
 	serverAdMutex.Lock()
 	defer serverAdMutex.Unlock()
-
 	serverAds.Set(ad, *namespaceAds, ttlcache.DefaultTTL)
 }
 
@@ -92,10 +93,13 @@ func UpdateLatLong(ad *ServerAd) error {
 func matchesPrefix(reqPath string, namespaceAds []NamespaceAd) *NamespaceAd {
 	for _, namespace := range namespaceAds {
 		serverPath := namespace.Path
-		if serverPath == reqPath {
+		if strings.Compare(serverPath, reqPath) == 0 {
 			return &namespace
 		}
-		serverPath += "/"
+		// Some namespaces in Topology already have the trailing /, some don't
+		if serverPath[len(serverPath)-1:] != "/" {
+			serverPath += "/"
+		}
 		if strings.HasPrefix(reqPath, serverPath) {
 			return &namespace
 		}
@@ -105,8 +109,9 @@ func matchesPrefix(reqPath string, namespaceAds []NamespaceAd) *NamespaceAd {
 
 func GetCacheAdsForPath(reqPath string) (originNamespace NamespaceAd, ads []ServerAd) {
 	serverAdMutex.RLock()
-	defer serverAdMutex.Unlock()
+	defer serverAdMutex.RUnlock()
 	reqPath = path.Clean(reqPath)
+
 	for _, item := range serverAds.Items() {
 		if item == nil {
 			continue
@@ -118,9 +123,11 @@ func GetCacheAdsForPath(reqPath string) (originNamespace NamespaceAd, ads []Serv
 				originNamespace = *ns
 			}
 			continue
-		} else if serverAd.Type == CacheType && matchesPrefix(reqPath, item.Value()) != nil{
-			ads = append(ads, serverAd)
+		} else if serverAd.Type == CacheType {
+			if matchesPrefix(reqPath, item.Value()) != nil {
+				ads = append(ads, serverAd)
+			}
 		}
-	} 
+	}
 	return
 }

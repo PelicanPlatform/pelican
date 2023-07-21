@@ -14,11 +14,11 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"math/big"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
-	"math/big"
-	"net/http"
 	"path"
 	"path/filepath"
 	"strings"
@@ -28,12 +28,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/lestrrat-go/jwx/jwk"
-	log "github.com/sirupsen/logrus"
-	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 	"github.com/pelicanplatform/pelican"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
+	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 var (
@@ -52,27 +52,27 @@ var (
 )
 
 type XrootdConfig struct {
-	Port int
-	ManagerHost string
-	ManagerPort string
-	TLSCertificate string
-	TLSKey string
-	TLSCertDir string
-	TLSCertFile string
-	MacaroonsKeyFile string
-	RobotsTxtFile string
-	Sitename string
-	SummaryMonitoringHost string
-	SummaryMonitoringPort int
+	Port                   int
+	ManagerHost            string
+	ManagerPort            string
+	TLSCertificate         string
+	TLSKey                 string
+	TLSCertDir             string
+	TLSCertFile            string
+	MacaroonsKeyFile       string
+	RobotsTxtFile          string
+	Sitename               string
+	SummaryMonitoringHost  string
+	SummaryMonitoringPort  int
 	DetailedMonitoringHost string
 	DetailedMonitoringPort int
-	XrootdRun string
-	Authfile string
-	ScitokensConfig string
-	Mount string
-	NamespacePrefix string
-	XrootdMultiuser bool
-	LocalMonitoringPort int
+	XrootdRun              string
+	Authfile               string
+	ScitokensConfig        string
+	Mount                  string
+	NamespacePrefix        string
+	XrootdMultiuser        bool
+	LocalMonitoringPort    int
 }
 
 func cleanupDirOnShutdown(dir string) {
@@ -222,12 +222,12 @@ func generateCert() error {
 		SerialNumber: serialNumber,
 		Subject: pkix.Name{
 			Organization: []string{"Pelican"},
-			CommonName: hostname,
+			CommonName:   hostname,
 		},
-		NotBefore: notBefore,
-		NotAfter: notBefore.Add(365 * 24 * time.Hour),
-		KeyUsage: x509.KeyUsageDigitalSignature,
-		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+		NotBefore:             notBefore,
+		NotAfter:              notBefore.Add(365 * 24 * time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 		BasicConstraintsValid: true,
 	}
 	template.DNSNames = []string{hostname}
@@ -287,7 +287,6 @@ func generatePrivateKey(keyLocation string) error {
 		return errors.Wrapf(err, "Failed to chown generated key %v to daemon group %v",
 			keyLocation, groupname)
 	}
-
 
 	bytes, err := x509.MarshalPKCS8PrivateKey(priv)
 	if err != nil {
@@ -360,7 +359,7 @@ func checkXrootdEnv() error {
 		return errors.Wrapf(err, "Unable to create runtime directory %v", runtimeDir)
 	}
 	if err = os.Chown(runtimeDir, uid, -1); err != nil {
-		return errors.Wrapf(err, "Unable to change ownership of runtime directory %v" +
+		return errors.Wrapf(err, "Unable to change ownership of runtime directory %v"+
 			" to desired daemon user %v", runtimeDir, username)
 	}
 
@@ -515,7 +514,7 @@ to export the directory /mnt/foo to the path /bar in the data federation`)
 		}
 	}
 	if err = os.Chown(macaroonsSecret, -1, gid); err != nil {
-		return errors.Wrapf(err, "Unable to change ownership of macaroons secret %v" +
+		return errors.Wrapf(err, "Unable to change ownership of macaroons secret %v"+
 			" to desired daemon group %v", macaroonsSecret, groupname)
 	}
 
@@ -532,7 +531,7 @@ to export the directory /mnt/foo to the path /bar in the data federation`)
 		return err
 	}
 	if err = os.Chown(authfile, -1, gid); err != nil {
-		return errors.Wrapf(err, "Unable to change ownership of authfile %v" +
+		return errors.Wrapf(err, "Unable to change ownership of authfile %v"+
 			" to desired daemon group %v", macaroonsSecret, groupname)
 	}
 
@@ -548,7 +547,7 @@ to export the directory /mnt/foo to the path /bar in the data federation`)
 		return err
 	}
 	if err = os.Chown(scitokensCfg, -1, gid); err != nil {
-		return errors.Wrapf(err, "Unable to change ownership of scitokens config %v" +
+		return errors.Wrapf(err, "Unable to change ownership of scitokens config %v"+
 			" to desired daemon group %v", scitokensCfg, groupname)
 	}
 
@@ -557,7 +556,7 @@ to export the directory /mnt/foo to the path /bar in the data federation`)
 
 func checkConfigFileReadable(fileName string, errMsg string) error {
 	if _, err := os.Open(fileName); errors.Is(err, os.ErrNotExist) {
-		return errors.New(fmt.Sprintf("%v: the specified path in the configuration (%v) " +
+		return errors.New(fmt.Sprintf("%v: the specified path in the configuration (%v) "+
 			"does not exist", errMsg, fileName))
 	} else if err != nil {
 		return errors.New(fmt.Sprintf("%v; an error occurred when reading %v: %v", errMsg,
@@ -587,11 +586,11 @@ func checkDefaults() error {
 
 	// TODO: Could upgrade this to a check for a cert in the file...
 	if err := checkConfigFileReadable(viper.GetString("TLSCertificate"),
-			"A TLS certificate is required to serve HTTPS"); err != nil {
+		"A TLS certificate is required to serve HTTPS"); err != nil {
 		return err
 	}
 	if err := checkConfigFileReadable(viper.GetString("TLSKey"),
-			"A TLS key is required to serve HTTPS"); err != nil {
+		"A TLS key is required to serve HTTPS"); err != nil {
 		return err
 	}
 
@@ -730,8 +729,8 @@ func launchXrootd() error {
 			} else {
 				panic(errors.New("Unable to convert signal to syscall.Signal"))
 			}
-			xrootdExpiry = time.Now().Add(10*time.Second)
-			cmsdExpiry = time.Now().Add(10*time.Second)
+			xrootdExpiry = time.Now().Add(10 * time.Second)
+			cmsdExpiry = time.Now().Add(10 * time.Second)
 		case waitResult := <-xrootdDoneChannel:
 			if waitResult != nil {
 				if !cmsdExpiry.IsZero() {
@@ -763,12 +762,12 @@ func launchXrootd() error {
 	}
 }
 
-func serve(/*cmd*/ *cobra.Command, /*args*/ []string) error {
+func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	defer func() {
 		if tempRunDir != "" {
 			os.RemoveAll(tempRunDir)
 		}
-	} ()
+	}()
 
 	monitorPort, err := pelican.ConfigureMonitoring()
 	if err != nil {

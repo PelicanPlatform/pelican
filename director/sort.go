@@ -34,7 +34,7 @@ var (
 type (
 	SwapMap struct {
 		Distance float64
-		Index int
+		Index    int
 	}
 
 	SwapMaps []SwapMap
@@ -67,7 +67,6 @@ func GetLatLong(addr netip.Addr) (lat float64, long float64, err error) {
 	long = record.Location.Longitude
 	return
 }
-
 
 func SortCaches(addr netip.Addr, ads []ServerAd) ([]ServerAd, error) {
 	distances := make(SwapMaps, len(ads))
@@ -104,7 +103,7 @@ func DownloadDB(localFile string) error {
 	licenseKey := strings.TrimSpace(string(contents))
 	url := fmt.Sprintf(maxMindURL, licenseKey)
 	localDir := filepath.Dir(localFile)
-	fileHandle, err := os.CreateTemp(localDir, filepath.Base(localFile) + ".tmp")
+	fileHandle, err := os.CreateTemp(localDir, filepath.Base(localFile)+".tmp")
 	if err != nil {
 		return err
 	}
@@ -133,7 +132,7 @@ func DownloadDB(localFile string) error {
 		if baseName != "GeoLite2-City.mmdb" {
 			continue
 		}
-		if _, err = io.Copy(fileHandle, resp.Body); err != nil {
+		if _, err = io.Copy(fileHandle, tr); err != nil {
 			os.Remove(fileHandle.Name())
 			return err
 		}
@@ -186,6 +185,9 @@ func InitializeDB() {
 	maxMindReader.Store(localReader)
 }
 
-func init() {
-	InitializeDB()
-}
+// Including this init() func will cause InitializeDB() to be called before
+// anything else whenever the director package is imported -- causes failures
+// because happens before the configuration files have been loaded/parsed
+// func init() {
+// 	InitializeDB()
+// }
