@@ -4,17 +4,11 @@ package main
 
 import (
 	"bufio"
-	"crypto/ecdsa"
-	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/x509"
-	"crypto/x509/pkix"
 	_ "embed"
 	"encoding/base64"
 	"encoding/json"
-	"encoding/pem"
 	"fmt"
-	"math/big"
 	"net/http"
 	"os"
 	"os/exec"
@@ -27,9 +21,9 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/lestrrat-go/jwx/jwk"
 	"github.com/pelicanplatform/pelican"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/origin_ui"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -157,183 +151,6 @@ func init() {
 	}
 }
 
-func generateCert() error {
-	gid, err := config.GetDaemonGID()
-	if err != nil {
-		return err
-	}
-	groupname, err := config.GetDaemonGroup()
-	if err != nil {
-		return err
-	}
-
-	tlsCert := viper.GetString("TLSCertificate")
-	if file, err := os.Open(tlsCert); err == nil {
-		file.Close()
-		return nil
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	certDir := path.Dir(tlsCert)
-	if err := os.MkdirAll(certDir, 0755); err != nil {
-		return err
-	}
-
-	tlsKey := viper.GetString("TLSKey")
-	rest, err := os.ReadFile(tlsKey)
-	if err != nil {
-		return nil
-	}
-
-	var privateKey *ecdsa.PrivateKey
-	var block *pem.Block
-	for {
-		block, rest = pem.Decode(rest)
-		if block == nil {
-			break
-		} else if block.Type == "PRIVATE KEY" {
-			genericPrivateKey, err := x509.ParsePKCS8PrivateKey(block.Bytes)
-			if err != nil {
-				return err
-			}
-			switch key := genericPrivateKey.(type) {
-			case *ecdsa.PrivateKey:
-				privateKey = key
-			default:
-				return fmt.Errorf("Unsupported private key type: %T", key)
-			}
-			break
-		}
-	}
-	if privateKey == nil {
-		return fmt.Errorf("Private key file, %v, contains no private key", tlsKey)
-	}
-	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
-	serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
-	if err != nil {
-		return err
-	}
-	hostname, err := os.Hostname()
-	if err != nil {
-		return err
-	}
-	notBefore := time.Now()
-	template := x509.Certificate{
-		SerialNumber: serialNumber,
-		Subject: pkix.Name{
-			Organization: []string{"Pelican"},
-			CommonName:   hostname,
-		},
-		NotBefore:             notBefore,
-		NotAfter:              notBefore.Add(365 * 24 * time.Hour),
-		KeyUsage:              x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
-		BasicConstraintsValid: true,
-	}
-	template.DNSNames = []string{hostname}
-	derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, &(privateKey.PublicKey),
-		privateKey)
-	if err != nil {
-		return err
-	}
-	file, err := os.OpenFile(tlsCert, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0640)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	if err = os.Chown(tlsCert, -1, gid); err != nil {
-		return errors.Wrapf(err, "Failed to chown generated certificate %v to daemon group %v",
-			tlsCert, groupname)
-	}
-
-	if err = pem.Encode(file, &pem.Block{Type: "CERTIFICATE", Bytes: derBytes}); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func generatePrivateKey(keyLocation string) error {
-	gid, err := config.GetDaemonGID()
-	if err != nil {
-		return err
-	}
-	groupname, err := config.GetDaemonGroup()
-	if err != nil {
-		return err
-	}
-
-	if file, err := os.Open(keyLocation); err == nil {
-		file.Close()
-		return nil
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	keyDir := path.Dir(keyLocation)
-	if err := os.MkdirAll(keyDir, 0750); err != nil {
-		return err
-	}
-	// In this case, the private key file doesn't exist.
-	file, err := os.OpenFile(keyLocation, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0640)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	priv, err := ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
-	if err != nil {
-		return err
-	}
-	if err = os.Chown(keyLocation, -1, gid); err != nil {
-		return errors.Wrapf(err, "Failed to chown generated key %v to daemon group %v",
-			keyLocation, groupname)
-	}
-
-	bytes, err := x509.MarshalPKCS8PrivateKey(priv)
-	if err != nil {
-		return err
-	}
-	priv_block := pem.Block{Type: "PRIVATE KEY", Bytes: bytes}
-	if err = pem.Encode(file, &priv_block); err != nil {
-		return err
-	}
-	return nil
-}
-
-func generateIssuerJWKS() (*jwk.Set, error) {
-	existingJWKS := viper.GetString("IssuerJWKS")
-	jwks := jwk.NewSet()
-	if existingJWKS != "" {
-		var err error
-		jwks, err = jwk.ReadFile(existingJWKS)
-		if err != nil {
-			return nil, errors.Wrap(err, "Failed to read issuer JWKS file")
-		}
-	}
-	issuerKeyFile := viper.GetString("IssuerKey")
-	if err := generatePrivateKey(issuerKeyFile); err != nil {
-		return nil, err
-	}
-	contents, err := os.ReadFile(issuerKeyFile)
-	if err != nil {
-		return nil, errors.Wrap(err, "Failed to read issuer key file")
-	}
-	key, err := jwk.ParseKey(contents, jwk.WithPEM(true))
-	if err != nil {
-		return nil, errors.Wrapf(err, "Failed to parse issuer key file %v", issuerKeyFile)
-	}
-	pkey, err := jwk.PublicKeyOf(key)
-	if err != nil {
-		return nil, errors.Wrapf(err, "Failed to generate public key from file %v", issuerKeyFile)
-	}
-	err = jwk.AssignKeyID(pkey)
-	if err != nil {
-		return nil, err
-	}
-	jwks.Add(pkey)
-	return &jwks, nil
-
-}
-
 func checkXrootdEnv() error {
 	uid, err := config.GetDaemonUID()
 	if err != nil {
@@ -438,7 +255,7 @@ to export the directory /mnt/foo to the path /bar in the data federation`)
 	}
 	viper.Set("Mount", exportPath)
 
-	keys, err := generateIssuerJWKS()
+	keys, err := config.GenerateIssuerJWKS()
 	if err != nil {
 		return err
 	}
@@ -577,10 +394,10 @@ func checkDefaults() error {
 	}
 
 	// As necessary, generate a private key and corresponding cert
-	if err := generatePrivateKey(viper.GetString("TLSKey")); err != nil {
+	if err := config.GeneratePrivateKey(viper.GetString("TLSKey")); err != nil {
 		return err
 	}
-	if err := generateCert(); err != nil {
+	if err := config.GenerateCert(); err != nil {
 		return err
 	}
 
@@ -780,10 +597,29 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		return err
 	}
 
-	engine := gin.Default()
+	engine := gin.New()
+	engine.Use(gin.Recovery())
+	webLogger := log.WithFields(log.Fields{"daemon": "gin"})
+	engine.Use(func(ctx *gin.Context) {
+		startTime := time.Now()
+
+		ctx.Next()
+
+		latency := time.Since(startTime)
+		webLogger.WithFields(log.Fields{"method": ctx.Request.Method,
+			"status": ctx.Writer.Status(),
+			"time": latency.String(),
+			"client": ctx.RemoteIP(),
+			"resource": ctx.Request.URL.Path},
+		).Info("Served Request")
+	})
 	if err = pelican.ConfigureMetrics(engine); err != nil {
 		return err
 	}
+	if err = origin_ui.ConfigureOriginUI(engine); err != nil {
+		return err
+	}
+
 	engine.GET("/api/v1.0/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "healthy"})
 	})
