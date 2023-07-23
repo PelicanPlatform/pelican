@@ -13,7 +13,9 @@ func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	director.InitializeDB()
 
 	log.Info("Generating/advertising server ads...")
-	director.AdvertiseOSDF()
+	if err := director.AdvertiseOSDF(); err != nil {
+		panic(err)
+	}
 
 	gin.SetMode(gin.ReleaseMode)
 	cacheEngine := gin.Default()
