@@ -90,6 +90,7 @@ func init() {
 		viper.SetDefault("Authfile", "/etc/pelican/xrootd/authfile")
 		viper.SetDefault("MacaroonsKeyFile", "/etc/pelican/macaroons-secret")
 		viper.SetDefault("IssuerKey", "/etc/pelican/issuer.jwk")
+		viper.SetDefault("OriginUI.PasswordFile", "/etc/pelican/origin-ui-passwd")
 		viper.SetDefault("XrootdMultiuser", true)
 	} else {
 		home, err := os.UserHomeDir()
@@ -103,6 +104,7 @@ func init() {
 		viper.SetDefault("Authfile", filepath.Join(configBase, "xrootd", "authfile"))
 		viper.SetDefault("MacaroonsKeyFile", filepath.Join(configBase, "macaroons-secret"))
 		viper.SetDefault("IssuerKey", filepath.Join(configBase, "issuer.jwk"))
+		viper.SetDefault("OriginUI.PasswordFile", filepath.Join(configBase, "origin-ui-passwd"))
 
 		if userRuntimeDir := os.Getenv("XDG_RUNTIME_DIR"); userRuntimeDir != "" {
 			runtimeDir := filepath.Join(userRuntimeDir, "pelican")
@@ -620,6 +622,11 @@ func serve(/*cmd*/ *cobra.Command, /*args*/ []string) error {
 			panic(err)
 		}
 	}()
+
+	// Ensure we wait until the origin has been initialized
+	// before launching XRootD.
+	origin_ui.WaitUntilLogin()
+
 	err = launchXrootd()
 	if err != nil {
 		return err

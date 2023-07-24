@@ -2,6 +2,9 @@ package origin_ui
 
 import (
 	"bufio"
+	"crypto/ecdsa"
+	"fmt"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"os"
@@ -66,6 +69,26 @@ func periodicReload() {
 	}
 }
 
+func WaitUntilLogin() {
+	if authDB.Load() != nil {
+		return
+	}
+	for {
+		previousCode.Store(currentCode.Load())
+		newCode := fmt.Sprintf("%06v", rand.Intn(1000000))
+		currentCode.Store(&newCode)
+		fmt.Println("Pelican admin interface is not initialized; to initialize, login at https://localhost:8080 with the following code:")
+		fmt.Println(*currentCode.Load())
+		start := time.Now()
+		for time.Since(start) < 30 * time.Second {
+			time.Sleep(100 * time.Millisecond)
+			if authDB.Load() != nil {
+				return
+			}
+		}
+	}
+}
+
 func writePasswordEntry(user, password string) error {
 	fileName := viper.GetString("OriginUI.PasswordFile")
 	passwordBytes := []byte(password)
@@ -76,7 +99,7 @@ func writePasswordEntry(user, password string) error {
 	if err != nil {
 		return err
 	}
-	entry := user + ":" + string(hashed)
+	entry := user + ":" + string(hashed) + "\n"
 
 	directory := filepath.Dir(fileName)
 	err = os.MkdirAll(directory, 0750)
@@ -110,6 +133,7 @@ func configureAuthDB() error {
 	if err != nil {
 		return err
 	}
+	defer fp.Close()
 	scanner := bufio.NewScanner(fp)
 	scanner.Split(bufio.ScanLines)
 	hasAdmin := false
@@ -156,14 +180,20 @@ func setLoginCookie(ctx *gin.Context, user string) {
 		ctx.JSON(500, gin.H{"error": "Failed to build token"})
 		return
 	}
-	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, key))
+	log.Debugf("Type of *key: %T\n", key)
+	var raw ecdsa.PrivateKey
+	if err = (*key).Raw(&raw); err != nil {
+		ctx.JSON(500, gin.H{"error": "Unable to sign login cookie"})
+		return
+	}
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES512, raw))
 	if err != nil {
 		log.Errorln("Failure when signing the login cookie:", err)
 		ctx.JSON(500, gin.H{"error": "Unable to sign login cookie"})
 		return
 	}
 
-	ctx.SetCookie("login", string(signed), 30 * 60, "/api/v1/origin-ui",
+	ctx.SetCookie("login", string(signed), 30 * 60, "/api/v1.0/origin-ui",
 		ctx.Request.URL.Host, true, true)
 	ctx.SetSameSite(http.SameSiteStrictMode)
 }
@@ -177,7 +207,11 @@ func getUser(ctx *gin.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	parsed, err := jwt.Parse([]byte(token), jwt.WithKey(jwa.ES256, key))
+	var raw ecdsa.PrivateKey
+	if err = (*key).Raw(&raw); err != nil {
+		return "", errors.New("Failed to extract cookie signing key")
+	}
+	parsed, err := jwt.Parse([]byte(token), jwt.WithKey(jwa.ES512, raw.PublicKey))
 	if err != nil {
 		return "", err
 	}
