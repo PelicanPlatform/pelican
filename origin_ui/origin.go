@@ -84,10 +84,10 @@ func writePasswordEntry(user, password string) error {
 		return err
 	}
 	fp, err := os.OpenFile(fileName, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0600)
-	defer fp.Close()
 	if err != nil {
 		return err
 	}
+	defer fp.Close()
 	if _, err = fp.Write([]byte(entry)); err != nil {
 		return err
 	}
@@ -166,7 +166,6 @@ func setLoginCookie(ctx *gin.Context, user string) {
 	ctx.SetCookie("login", string(signed), 30 * 60, "/api/v1/origin-ui",
 		ctx.Request.URL.Host, true, true)
 	ctx.SetSameSite(http.SameSiteStrictMode)
-	return
 }
 
 func getUser(ctx *gin.Context) (string, error) {
@@ -220,7 +219,6 @@ func loginHandler(ctx *gin.Context) {
 
 	setLoginCookie(ctx, login.User)
 	ctx.JSON(200, gin.H{"msg": "Success"})
-	return
 }
 
 func initLoginHandler(ctx *gin.Context) {
@@ -273,7 +271,6 @@ func resetLoginHandler(ctx *gin.Context) {
 	if err := configureAuthDB(); err != nil {
 		log.Errorln("Error in reloading authDB:", err)
 	}
-	return
 }
 
 func ConfigureOriginUI(router *gin.Engine) error {
