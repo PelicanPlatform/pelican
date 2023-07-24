@@ -78,6 +78,7 @@ func signPayload(payload []byte, privateKey *ecdsa.PrivateKey) ([]byte, error) {
     return signature, nil
 }
 
+/*
 func writeSignatureToFile(signature []byte, filename string) error {
 	err := ioutil.WriteFile(filename, signature, 0644)
 	if err != nil {
@@ -98,6 +99,7 @@ func verifySignature(payload []byte, signature []byte, publicKey *ecdsa.PublicKe
 	hash := sha256.Sum256(payload)
 	return ecdsa.VerifyASN1(publicKey, hash[:], signature)
 }
+*/
 
 func generateNonce() (string, error) {
     nonce := make([]byte, 32)
@@ -112,6 +114,10 @@ func make_request(url string, method string, data map[string]interface{}) ([]byt
 	payload, _ := json.Marshal(data)
 
 	req, err := http.NewRequest(method, url, bytes.NewBuffer(payload))
+	if err != nil {
+		panic(err)
+	}
+
 	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{}
