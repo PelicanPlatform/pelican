@@ -13,15 +13,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/spf13/viper"
+	"github.com/stretchr/testify/assert"
 
-	"github.com/pelicanplatform/pelican/namespaces"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/namespaces"
 )
 
 func TestMain(m *testing.M) {
-	if err := config.Init(); err != nil {
+	if err := config.InitClient(); err != nil {
 		os.Exit(1)
 	}
 	os.Exit(m.Run())
@@ -102,7 +102,7 @@ func TestNewTransferDetailsEnv(t *testing.T) {
 	}
 
 	os.Setenv("OSG_DISABLE_PROXY_FALLBACK", "")
-	err := config.Init()
+	err := config.InitClient()
 	assert.Nil(t, err)
 	transfers := NewTransferDetails(testCache, false)
 	assert.Equal(t, 1, len(transfers))
@@ -114,14 +114,14 @@ func TestNewTransferDetailsEnv(t *testing.T) {
 	assert.Equal(t, false, transfers[0].Proxy)
 	os.Unsetenv("OSG_DISABLE_PROXY_FALLBACK")
 	viper.Reset()
-	err = config.Init()
+	err = config.InitClient()
 	assert.Nil(t, err)
 }
 
 func TestSlowTransfers(t *testing.T) {
 	// Adjust down some timeouts to speed up the test
-        viper.Set("SlowTransferWindow", 5)
-        viper.Set("SlowTransferRampupTime", 10)
+	viper.Set("SlowTransferWindow", 5)
+	viper.Set("SlowTransferRampupTime", 10)
 
 	channel := make(chan bool)
 	slowDownload := 1024 * 10 // 10 KiB/s < 100 KiB/s
@@ -188,7 +188,7 @@ func TestStoppedTransfer(t *testing.T) {
 
 	channel := make(chan bool)
 	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		buffer := make([]byte, 1024 * 100)
+		buffer := make([]byte, 1024*100)
 		for {
 			select {
 			case <-channel:
@@ -241,7 +241,6 @@ func TestStoppedTransfer(t *testing.T) {
 	assert.NotNil(t, err)
 	assert.IsType(t, &StoppedTransferError{}, err, err.Error())
 }
-
 
 // Test connection error
 func TestConnectionError(t *testing.T) {
@@ -393,4 +392,3 @@ func TestFullUpload(t *testing.T) {
 	assert.NoError(t, err, "Error uploading file")
 	assert.Equal(t, int64(len(testFileContent)), uploaded, "Uploaded file size does not match")
 }
-

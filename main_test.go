@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/spf13/viper"
+	"github.com/stretchr/testify/assert"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/namespaces"
@@ -45,7 +45,7 @@ func TestGetToken(t *testing.T) {
 	defer os.Unsetenv("PELICAN_NAMESPACE_URL")
 	os.Setenv("PELICAN_NAMESPACE_URL", "https://topology.opensciencegrid.org/osdf/namespaces")
 	viper.Reset()
-	err := config.Init()
+	err := config.InitClient()
 	assert.Nil(t, err)
 
 	namespace, err := namespaces.MatchNamespace("/user/foo")
