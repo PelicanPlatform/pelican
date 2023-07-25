@@ -3,6 +3,7 @@ package origin_ui
 import (
 	"bufio"
 	"crypto/ecdsa"
+	"embed"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -44,6 +45,9 @@ var (
 	authDB atomic.Pointer[htpasswd.File]
 	currentCode atomic.Pointer[string]
 	previousCode atomic.Pointer[string]
+
+	//go:embed assets/*
+	webAssets embed.FS
 )
 
 func doReload() error {
@@ -320,6 +324,24 @@ func ConfigureOriginUI(router *gin.Engine) error {
 	group.POST("/login", loginHandler)
 	group.POST("/initLogin", initLoginHandler)
 	group.POST("/resetLogin", resetLoginHandler)
+
+	router.StaticFS("/assets", http.FS(webAssets))
+	router.GET("favicon.ico", func(ctx *gin.Context) {
+		file, _ := webAssets.ReadFile("assets/favicon.ico")
+		ctx.Data(
+			http.StatusOK,
+			"image/x-icon",
+			file,
+		)
+	})
+	router.GET("/", func (ctx *gin.Context) {
+		file, _ := webAssets.ReadFile("assets/index.html")
+		ctx.Data(
+			http.StatusOK,
+			"text/html",
+			file,
+		)
+	})
 
 	go periodicReload()
 

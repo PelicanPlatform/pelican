@@ -48,7 +48,7 @@ func init() {
 }
 
 func stashPluginMain(args []string) {
-	err := config.Init()
+	err := config.InitClient()
 	if err != nil {
 		log.Errorln(err)
 		os.Exit(1)

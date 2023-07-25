@@ -32,17 +32,11 @@ import (
 
 var (
 
-	//go:embed resources/defaults.yaml
-	defaultsYaml string
-	//go:embed resources/osdf.yaml
-	osdfDefaultsYaml string
 	//go:embed resources/xrootd.cfg
 	xrootdCfg string
 	//go:embed resources/robots.txt
 	robotsTxt string
 
-	// Potentially holds a directory to cleanup
-	tempRunDir string
 )
 
 type XrootdConfig struct {
@@ -69,78 +63,9 @@ type XrootdConfig struct {
 	LocalMonitoringPort int
 }
 
-func cleanupDirOnShutdown(dir string) {
-	sigs := make(chan os.Signal, 1)
-	tempRunDir = dir
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
-	go func() {
-		<-sigs
-		os.RemoveAll(dir)
-	}()
-}
-
 func init() {
-	viper.SetConfigType("yaml")
-	if config.IsRootExecution() {
-		viper.SetDefault("TLSCertificate", "/etc/pelican/certificates/tls.crt")
-		viper.SetDefault("TLSKey", "/etc/pelican/certificates/tls.key")
-		viper.SetDefault("XrootdRun", "/run/pelican/xrootd")
-		viper.SetDefault("RobotsTxtFile", "/etc/pelican/robots.txt")
-		viper.SetDefault("ScitokensConfig", "/etc/pelican/xrootd/scitokens.cfg")
-		viper.SetDefault("Authfile", "/etc/pelican/xrootd/authfile")
-		viper.SetDefault("MacaroonsKeyFile", "/etc/pelican/macaroons-secret")
-		viper.SetDefault("IssuerKey", "/etc/pelican/issuer.jwk")
-		viper.SetDefault("OriginUI.PasswordFile", "/etc/pelican/origin-ui-passwd")
-		viper.SetDefault("XrootdMultiuser", true)
-	} else {
-		home, err := os.UserHomeDir()
-		cobra.CheckErr(err)
-
-		configBase := filepath.Join(home, ".config", "pelican")
-		viper.SetDefault("TLSCertificate", filepath.Join(configBase, "certificates", "tls.crt"))
-		viper.SetDefault("TLSKey", filepath.Join(configBase, "certificates", "tls.key"))
-		viper.SetDefault("RobotsTxtFile", filepath.Join(configBase, "robots.txt"))
-		viper.SetDefault("ScitokensConfig", filepath.Join(configBase, "xrootd", "scitokens.cfg"))
-		viper.SetDefault("Authfile", filepath.Join(configBase, "xrootd", "authfile"))
-		viper.SetDefault("MacaroonsKeyFile", filepath.Join(configBase, "macaroons-secret"))
-		viper.SetDefault("IssuerKey", filepath.Join(configBase, "issuer.jwk"))
-		viper.SetDefault("OriginUI.PasswordFile", filepath.Join(configBase, "origin-ui-passwd"))
-
-		if userRuntimeDir := os.Getenv("XDG_RUNTIME_DIR"); userRuntimeDir != "" {
-			runtimeDir := filepath.Join(userRuntimeDir, "pelican")
-			err := os.MkdirAll(runtimeDir, 0750)
-			if err != nil {
-				cobra.CheckErr(err)
-			}
-			viper.SetDefault("XrootdRun", runtimeDir)
-		} else {
-			dir, err := os.MkdirTemp("", "pelican-xrootd-*")
-			cobra.CheckErr(err)
-			viper.SetDefault("XrootdRun", dir)
-			cleanupDirOnShutdown(dir)
-		}
-		viper.SetDefault("XrootdMultiuser", false)
-	}
-	viper.SetDefault("TLSCertFile", "/etc/pki/tls/cert.pem")
-
-	hostname, err := os.Hostname()
-	if err != nil {
-		panic(err)
-	}
-	viper.SetDefault("Sitename", hostname)
-
-	err = viper.MergeConfig(strings.NewReader(defaultsYaml))
-	if err != nil {
-		panic(err)
-	}
-
-	prefix := config.GetPreferredPrefix()
-	if prefix == "OSDF" {
-		err := viper.MergeConfig(strings.NewReader(osdfDefaultsYaml))
-		if err != nil {
-			panic(err)
-		}
-	}
+	err := config.InitServer()
+	cobra.CheckErr(err)
 }
 
 func checkXrootdEnv() error {
@@ -572,11 +497,7 @@ func launchXrootd() error {
 }
 
 func serve(/*cmd*/ *cobra.Command, /*args*/ []string) error {
-	defer func() {
-		if tempRunDir != "" {
-			os.RemoveAll(tempRunDir)
-		}
-	} ()
+	defer config.CleanupTempResources()
 
 	monitorPort, err := pelican.ConfigureMonitoring()
 	if err != nil {
@@ -589,6 +510,7 @@ func serve(/*cmd*/ *cobra.Command, /*args*/ []string) error {
 		return err
 	}
 
+	gin.SetMode(gin.ReleaseMode)
 	engine := gin.New()
 	engine.Use(gin.Recovery())
 	webLogger := log.WithFields(log.Fields{"daemon": "gin"})

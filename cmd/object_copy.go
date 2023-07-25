@@ -62,7 +62,7 @@ func copyMain(cmd *cobra.Command, args []string) {
 		setLogging(log.ErrorLevel)
 	}
 
-	err := config.Init()
+	err := config.InitClient()
 	if err != nil {
 		log.Errorln(err)
 		os.Exit(1)
