@@ -2,15 +2,19 @@
 package config
 
 import (
+	_ "embed"
 	"encoding/json"
 	"io/ioutil"
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/pkg/errors"
@@ -50,10 +54,20 @@ type FederationDiscovery struct {
 	JwksUri string `json:"jwks_uri"`
 }
 
+var (
+	// Some of the unit tests probe behavior specific to OSDF vs Pelican.  Hence,
+	// we need a way to override the preferred prefix.
+	testingPreferredPrefix string
 
-// Some of the unit tests probe behavior specific to OSDF vs Pelican.  Hence,
-// we need a way to override the preferred prefix.
-var testingPreferredPrefix string
+	//go:embed resources/defaults.yaml
+	defaultsYaml string
+	//go:embed resources/osdf.yaml
+	osdfDefaultsYaml string
+
+	// Potentially holds a directory to cleanup
+	tempRunDir string
+	cleanupOnce sync.Once
+)
 
 //
 // Based on the name of the current binary, determine the preferred "style"
@@ -159,7 +173,95 @@ func DiscoverFederation() error {
 	return nil
 }
 
-func Init() error {
+func cleanupDirOnShutdown(dir string) {
+	sigs := make(chan os.Signal, 1)
+	tempRunDir = dir
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+	go func() {
+		<-sigs
+		CleanupTempResources()
+	}()
+}
+
+func CleanupTempResources() {
+	cleanupOnce.Do(func() {
+		if tempRunDir != "" {
+			os.RemoveAll(tempRunDir)
+			tempRunDir = ""
+		}
+	})
+}
+
+func InitServer() error {
+	viper.SetConfigType("yaml")
+	if IsRootExecution() {
+		viper.SetDefault("TLSCertificate", "/etc/pelican/certificates/tls.crt")
+		viper.SetDefault("TLSKey", "/etc/pelican/certificates/tls.key")
+		viper.SetDefault("XrootdRun", "/run/pelican/xrootd")
+		viper.SetDefault("RobotsTxtFile", "/etc/pelican/robots.txt")
+		viper.SetDefault("ScitokensConfig", "/etc/pelican/xrootd/scitokens.cfg")
+		viper.SetDefault("Authfile", "/etc/pelican/xrootd/authfile")
+		viper.SetDefault("MacaroonsKeyFile", "/etc/pelican/macaroons-secret")
+		viper.SetDefault("IssuerKey", "/etc/pelican/issuer.jwk")
+		viper.SetDefault("OriginUI.PasswordFile", "/etc/pelican/origin-ui-passwd")
+		viper.SetDefault("XrootdMultiuser", true)
+	} else {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return err
+		}
+
+		configBase := filepath.Join(home, ".config", "pelican")
+		viper.SetDefault("TLSCertificate", filepath.Join(configBase, "certificates", "tls.crt"))
+		viper.SetDefault("TLSKey", filepath.Join(configBase, "certificates", "tls.key"))
+		viper.SetDefault("RobotsTxtFile", filepath.Join(configBase, "robots.txt"))
+		viper.SetDefault("ScitokensConfig", filepath.Join(configBase, "xrootd", "scitokens.cfg"))
+		viper.SetDefault("Authfile", filepath.Join(configBase, "xrootd", "authfile"))
+		viper.SetDefault("MacaroonsKeyFile", filepath.Join(configBase, "macaroons-secret"))
+		viper.SetDefault("IssuerKey", filepath.Join(configBase, "issuer.jwk"))
+		viper.SetDefault("OriginUI.PasswordFile", filepath.Join(configBase, "origin-ui-passwd"))
+
+		if userRuntimeDir := os.Getenv("XDG_RUNTIME_DIR"); userRuntimeDir != "" {
+			runtimeDir := filepath.Join(userRuntimeDir, "pelican")
+			err := os.MkdirAll(runtimeDir, 0750)
+			if err != nil {
+				return err
+			}
+			viper.SetDefault("XrootdRun", runtimeDir)
+		} else {
+			dir, err := os.MkdirTemp("", "pelican-xrootd-*")
+			if err != nil {
+				return err
+			}
+			viper.SetDefault("XrootdRun", dir)
+			cleanupDirOnShutdown(dir)
+		}
+		viper.SetDefault("XrootdMultiuser", false)
+	}
+	viper.SetDefault("TLSCertFile", "/etc/pki/tls/cert.pem")
+
+	hostname, err := os.Hostname()
+	if err != nil {
+		return err
+	}
+	viper.SetDefault("Sitename", hostname)
+
+	err = viper.MergeConfig(strings.NewReader(defaultsYaml))
+	if err != nil {
+		return err
+	}
+
+	prefix := GetPreferredPrefix()
+	if prefix == "OSDF" {
+		err := viper.MergeConfig(strings.NewReader(osdfDefaultsYaml))
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func InitClient() error {
 	upper_prefix := GetPreferredPrefix()
 	lower_prefix := strings.ToLower(upper_prefix)
 
