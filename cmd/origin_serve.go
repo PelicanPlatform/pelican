@@ -4,6 +4,7 @@ package main
 
 import (
 	"bufio"
+	"crypto/elliptic"
 	"crypto/rand"
 	_ "embed"
 	"encoding/base64"
@@ -310,7 +311,7 @@ func checkDefaults() error {
 	}
 
 	// As necessary, generate a private key and corresponding cert
-	if err := config.GeneratePrivateKey(viper.GetString("TLSKey")); err != nil {
+	if err := config.GeneratePrivateKey(viper.GetString("TLSKey"), elliptic.P256()); err != nil {
 		return err
 	}
 	if err := config.GenerateCert(); err != nil {
