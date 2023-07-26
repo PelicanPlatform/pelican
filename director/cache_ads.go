@@ -27,9 +27,7 @@ type (
 	}
 
 	ServerAd struct {
-		Name string
-		// Need to account for authed and
-		// non-authed URLs wrt caches
+		Name      string
 		AuthURL   url.URL
 		URL       url.URL
 		Type      ServerType
@@ -97,6 +95,8 @@ func matchesPrefix(reqPath string, namespaceAds []NamespaceAd) *NamespaceAd {
 			return &namespace
 		}
 		// Some namespaces in Topology already have the trailing /, some don't
+		// Perhaps this should be standardized, but in case it isn't we need to
+		// handle it
 		if serverPath[len(serverPath)-1:] != "/" {
 			serverPath += "/"
 		}
@@ -107,7 +107,7 @@ func matchesPrefix(reqPath string, namespaceAds []NamespaceAd) *NamespaceAd {
 	return nil
 }
 
-func GetCacheAdsForPath(reqPath string) (originNamespace NamespaceAd, ads []ServerAd) {
+func GetAdsForPath(reqPath string) (originNamespace NamespaceAd, originAds []ServerAd, cacheAds []ServerAd) {
 	serverAdMutex.RLock()
 	defer serverAdMutex.RUnlock()
 	reqPath = path.Clean(reqPath)
@@ -121,13 +121,24 @@ func GetCacheAdsForPath(reqPath string) (originNamespace NamespaceAd, ads []Serv
 			ns := matchesPrefix(reqPath, item.Value())
 			if ns != nil {
 				originNamespace = *ns
+				originAds = append(originAds, serverAd)
 			}
 			continue
 		} else if serverAd.Type == CacheType {
 			if matchesPrefix(reqPath, item.Value()) != nil {
-				ads = append(ads, serverAd)
+				cacheAds = append(cacheAds, serverAd)
 			}
 		}
 	}
 	return
+}
+
+func PeriodicCacheReload() {
+	for {
+		// The ad cache times out every 15 minutes, so update it every
+		// 10. If a key isn't updated, it will survive for 5 minutes
+		// and then disappear
+		time.Sleep(time.Minute * 10)
+		AdvertiseOSDF()
+	}
 }

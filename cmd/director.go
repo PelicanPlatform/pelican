@@ -8,20 +8,19 @@ import (
 	"github.com/spf13/viper"
 )
 
-// directorCmd represents the director command
 var (
 	directorCmd = &cobra.Command{
 		Use:   "director",
 		Short: "Launch a Pelican Director",
 		Long: `Launch a Pelican Director service:
 		
-		The Pelican Director is responsible for origin/cache discovery within
-		the Pelican Platform. When a client asks the Director how to obtain a
-		specific namespaced resource, the Director will respond with the info
-		needed by the client (usually a cache and some authentication details)
-		to obtain that information. When a cache asks the Director for the same
-		namespaced resource, the Director will point the cache to the origin
-		responsible for serving the object.`,
+		The Pelican Director is the primary mechanism by which clients/caches
+		can discover the source of a requested resource. It has two endpoints
+		at /api/v1.0/director/origin/ and /api/v1.0/director/object/, where the
+		former redirects to the closest origin supporting the object and the 
+		latter redirects to the closest cache. As a shortcut, requests to the
+		director at /foo/bar will be treated as a request for the object from
+		cache.`,
 	}
 
 	directorServeCmd = &cobra.Command{
@@ -37,16 +36,9 @@ func init() {
 	directorCmd.AddCommand(directorServeCmd)
 
 	// Set up flags for the command
-	directorServeCmd.Flags().StringP("cache-port", "p", "", "Set the port to which the Director's cache redirect service should be bound")
-	err := viper.BindPFlag("cachePort", directorServeCmd.Flags().Lookup("cache-port"))
+	directorServeCmd.Flags().StringP("port", "p", "", "Set the port to which the Director's redirect services should be bound")
+	err := viper.BindPFlag("port", directorServeCmd.Flags().Lookup("port"))
 	if err != nil {
 		panic(err)
 	}
-
-	directorServeCmd.Flags().StringP("origin-port", "P", "", "Set the port to which the Director's origin redirect service should be bound")
-	err = viper.BindPFlag("originPort", directorServeCmd.Flags().Lookup("origin-port"))
-	if err != nil {
-		panic(err)
-	}
-
 }

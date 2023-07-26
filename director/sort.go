@@ -68,7 +68,7 @@ func GetLatLong(addr netip.Addr) (lat float64, long float64, err error) {
 	return
 }
 
-func SortCaches(addr netip.Addr, ads []ServerAd) ([]ServerAd, error) {
+func SortServers(addr netip.Addr, ads []ServerAd) ([]ServerAd, error) {
 	distances := make(SwapMaps, len(ads))
 	lat, long, err := GetLatLong(addr)
 	isInvalid := err != nil
@@ -148,9 +148,13 @@ func DownloadDB(localFile string) error {
 	return nil
 }
 
-func PeriodicReload() {
+func PeriodicMaxMindReload() {
+	// The MaxMindDB updates Tuesday/Thursday. While a free API key
+	// does get 1000 downloads a month, we might still want to change
+	// this eventually to guarantee we only update on those days...
 	for {
-		time.Sleep(time.Hour * 24)
+		// Update once every other day
+		time.Sleep(time.Hour * 48)
 		localFile := viper.GetString("GeoIPLocation")
 		if err := DownloadDB(localFile); err != nil {
 			log.Warningln("Failed to download GeoIP database:", err)
@@ -166,7 +170,7 @@ func PeriodicReload() {
 }
 
 func InitializeDB() {
-	go PeriodicReload()
+	go PeriodicMaxMindReload()
 	localFile := viper.GetString("GeoIPLocation")
 	localReader, err := geoip2.Open(localFile)
 	if err != nil {
@@ -184,10 +188,3 @@ func InitializeDB() {
 	}
 	maxMindReader.Store(localReader)
 }
-
-// Including this init() func will cause InitializeDB() to be called before
-// anything else whenever the director package is imported -- causes failures
-// because happens before the configuration files have been loaded/parsed
-// func init() {
-// 	InitializeDB()
-// }
