@@ -2,11 +2,13 @@
 package web_ui
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
 	"github.com/zsais/go-gin-prometheus"
 )
 
@@ -45,7 +47,12 @@ func GetEngine() (*gin.Engine, error) {
 }
 
 func RunEngine(engine *gin.Engine) {
-	err := engine.Run()
+	certFile := viper.GetString("TLSCertificate")
+	keyFile := viper.GetString("TLSKey")
+
+	addr := fmt.Sprintf("%v:%v", viper.GetString("WebAddress"), viper.GetInt("WebPort"))
+
+	err := engine.RunTLS(addr, certFile, keyFile)
 	if err != nil {
 		panic(err)
 	}
