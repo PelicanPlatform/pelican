@@ -352,6 +352,22 @@ func ConfigureOriginUI(router *gin.Engine) error {
 	group.POST("/login", loginHandler)
 	group.POST("/initLogin", initLoginHandler)
 	group.POST("/resetLogin", resetLoginHandler)
+	group.GET("/whoami", func(ctx *gin.Context) {
+		user := ctx.GetString("User")
+		if user == "" {
+			ctx.JSON(200, gin.H{"authenticated": false})
+		} else {
+			ctx.JSON(200, gin.H{"authenticated": true, "user": user})
+		}
+	})
+	group.GET("/loginInitialized", func(ctx *gin.Context) {
+		db := authDB.Load()
+		if db == nil {
+			ctx.JSON(200, gin.H{"initialized": false})
+		} else {
+			ctx.JSON(200, gin.H{"initialized": true})
+		}
+	})
 
 	router.StaticFS("/assets", http.FS(webAssets))
 	router.GET("favicon.ico", func(ctx *gin.Context) {
