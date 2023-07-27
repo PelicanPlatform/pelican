@@ -92,6 +92,10 @@ func SortServers(addr netip.Addr, ads []ServerAd) ([]ServerAd, error) {
 }
 
 func DownloadDB(localFile string) error {
+	err := os.MkdirAll(filepath.Dir(localFile), 0755)
+	if err != nil {
+		return err
+	}
 	keyFile := viper.GetString("MaxMindKeyFile")
 	if keyFile == "" {
 		return errors.New("No MaxMind license key found in MaxMindKeyFile config parameter")
@@ -143,6 +147,7 @@ func DownloadDB(localFile string) error {
 		return errors.New("GeoIP database not found in downloaded resource")
 	}
 	if err = os.Rename(fileHandle.Name(), localFile); err != nil {
+		fmt.Println("HERERERE")
 		return err
 	}
 	return nil
@@ -177,12 +182,12 @@ func InitializeDB() {
 		log.Warningln("Local GeoIP database file not present; will attempt a download.", err)
 		err = DownloadDB(localFile)
 		if err != nil {
-			log.Errorln("Failed to download GeoIP database!  Will not be available", err)
+			log.Errorln("Failed to download GeoIP database!  Will not be available:", err)
 			return
 		}
 		localReader, err = geoip2.Open(localFile)
 		if err != nil {
-			log.Errorln("Failed to reopen GeoIP database!  Will not be available", err)
+			log.Errorln("Failed to reopen GeoIP database!  Will not be available:", err)
 			return
 		}
 	}

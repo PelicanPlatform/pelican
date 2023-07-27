@@ -1,4 +1,3 @@
-
 package config
 
 import (
@@ -31,11 +30,11 @@ type TokenEntry struct {
 }
 
 type PrefixEntry struct {
-// OSDF namespace prefix
-	Prefix       string `yaml:"prefix"`
-	ClientID     string `yaml:"client_id"`
-	ClientSecret string `yaml:"client_secret"`
-	Tokens     []TokenEntry `yaml:"tokens,omitempty"`
+	// OSDF namespace prefix
+	Prefix       string       `yaml:"prefix"`
+	ClientID     string       `yaml:"client_id"`
+	ClientSecret string       `yaml:"client_secret"`
+	Tokens       []TokenEntry `yaml:"tokens,omitempty"`
 }
 
 type OSDFConfig struct {
@@ -43,15 +42,15 @@ type OSDFConfig struct {
 	// Top-level OSDF object
 	OSDF struct {
 		// List of OAuth2 client configurations
-		OauthClient [] PrefixEntry `yaml:"oauth_client,omitempty"`
+		OauthClient []PrefixEntry `yaml:"oauth_client,omitempty"`
 	} `yaml:"OSDF"`
 }
 
 type FederationDiscovery struct {
-	DirectorEndpoint string `json:"director_endpoint"`
+	DirectorEndpoint              string `json:"director_endpoint"`
 	NamespaceRegistrationEndpoint string `json:"namespace_registration_endpoint"`
-	CollectorEndpoint string `json:"collector_endpoint"`
-	JwksUri string `json:"jwks_uri"`
+	CollectorEndpoint             string `json:"collector_endpoint"`
+	JwksUri                       string `json:"jwks_uri"`
 }
 
 var (
@@ -65,16 +64,14 @@ var (
 	osdfDefaultsYaml string
 
 	// Potentially holds a directory to cleanup
-	tempRunDir string
+	tempRunDir  string
 	cleanupOnce sync.Once
 )
 
-//
 // Based on the name of the current binary, determine the preferred "style"
 // of behavior.  For example, a binary with the "osdf_" prefix should utilize
 // the known URLs for OSDF.  For "pelican"-style commands, the user will
 // need to manually configure the location of the director endpoint.
-//
 func GetPreferredPrefix() string {
 	// Testing override to programmatically force different behaviors.
 	if testingPreferredPrefix != "" {
@@ -101,11 +98,9 @@ func SetPreferredPrefix(newPref string) string {
 	return oldPref
 }
 
-//
 // Get the list of valid prefixes for this binary.  Given there's been so
 // many renames of the project (stash -> osdf -> pelican), we allow multiple
 // prefixes when searching through environment variables.
-//
 func GetAllPrefixes() []string {
 	prefixes := []string{GetPreferredPrefix()}
 
@@ -205,6 +200,7 @@ func InitServer() error {
 		viper.SetDefault("IssuerKey", "/etc/pelican/issuer.jwk")
 		viper.SetDefault("OriginUI.PasswordFile", "/etc/pelican/origin-ui-passwd")
 		viper.SetDefault("XrootdMultiuser", true)
+		viper.SetDefault("GeoIPLocation", "/var/lib/pelican/GeoLite2-City.mmdb")
 	} else {
 		home, err := os.UserHomeDir()
 		if err != nil {
@@ -220,6 +216,7 @@ func InitServer() error {
 		viper.SetDefault("MacaroonsKeyFile", filepath.Join(configBase, "macaroons-secret"))
 		viper.SetDefault("IssuerKey", filepath.Join(configBase, "issuer.jwk"))
 		viper.SetDefault("OriginUI.PasswordFile", filepath.Join(configBase, "origin-ui-passwd"))
+		viper.SetDefault("GeoIPLocation", filepath.Join(configBase, "GeoLite2-City.mmdb"))
 
 		if userRuntimeDir := os.Getenv("XDG_RUNTIME_DIR"); userRuntimeDir != "" {
 			runtimeDir := filepath.Join(userRuntimeDir, "pelican")
@@ -330,7 +327,7 @@ func InitClient() error {
 	var downloadLimit int64 = 1024 * 100
 	var prefixes_with_cp []string
 	for _, prefix := range prefixes {
-		prefixes_with_cp = append(prefixes_with_cp, prefix + "CP")
+		prefixes_with_cp = append(prefixes_with_cp, prefix+"CP")
 	}
 	for _, prefix := range append(prefixes, prefixes_with_cp...) {
 		downloadLimitStr := os.Getenv(prefix + "_MINIMUM_DOWNLOAD_SPEED")
@@ -341,7 +338,7 @@ func InitClient() error {
 		downloadLimit, err = strconv.ParseInt(downloadLimitStr, 10, 64)
 		if err != nil {
 			log.Errorf("Environment variable %s_MINIMUM_DOWNLOAD_SPEED=%s is not parsable as integer: %s",
-			    prefixes, downloadLimitStr, err.Error())
+				prefixes, downloadLimitStr, err.Error())
 		}
 		break
 	}
