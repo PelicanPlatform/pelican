@@ -20,7 +20,7 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/pelicanplatform/pelican"
+	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/origin_ui"
 	"github.com/pelicanplatform/pelican/web_ui"
@@ -66,6 +66,8 @@ type XrootdConfig struct {
 func init() {
 	err := config.InitServer()
 	cobra.CheckErr(err)
+	metrics.SetComponentHealthStatus("xrootd", "critical", "xrootd has not been started")
+	metrics.SetComponentHealthStatus("cmsd", "critical", "cmsd has not been started")
 }
 
 func checkXrootdEnv() error {
@@ -430,6 +432,7 @@ func launchXrootd() error {
 		return err
 	}
 	log.Info("Successfully launched xrootd")
+	metrics.SetComponentHealthStatus("xrootd", "ok", "")
 
 	cmsdCmd := exec.Command("cmsd", "-f", "-c", configPath)
 	if cmsdCmd.Err != nil {
@@ -443,6 +446,7 @@ func launchXrootd() error {
 		return err
 	}
 	log.Info("Successfully launched cmsd")
+	metrics.SetComponentHealthStatus("cmsd", "ok", "")
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
@@ -470,6 +474,8 @@ func launchXrootd() error {
 				if !cmsdExpiry.IsZero() {
 					return nil
 				}
+				metrics.SetComponentHealthStatus("xrootd", "critical",
+					"xrootd process failed unexpectedly")
 				return errors.Wrap(waitResult, "xrootd process failed unexpectedly")
 			}
 			return nil
@@ -478,6 +484,8 @@ func launchXrootd() error {
 				if !xrootdExpiry.IsZero() {
 					return nil
 				}
+				metrics.SetComponentHealthStatus("cmsd", "critical",
+					"cmsd process failed unexpectedly")
 				return errors.Wrap(waitResult, "cmsd process failed unexpectedly")
 			}
 			return nil
@@ -499,7 +507,7 @@ func launchXrootd() error {
 func serveOrigin(/*cmd*/ *cobra.Command, /*args*/ []string) error {
 	defer config.CleanupTempResources()
 
-	monitorPort, err := pelican.ConfigureMonitoring()
+	monitorPort, err := metrics.ConfigureMonitoring()
 	if err != nil {
 		return err
 	}
@@ -519,12 +527,14 @@ func serveOrigin(/*cmd*/ *cobra.Command, /*args*/ []string) error {
 	}
 
 	go web_ui.RunEngine(engine)
+	metrics.SetComponentHealthStatus("web-ui", "warning", "Authentication not initialized")
 
 	// Ensure we wait until the origin has been initialized
 	// before launching XRootD.
 	if err = origin_ui.WaitUntilLogin(); err != nil {
 		return err
 	}
+	metrics.SetComponentHealthStatus("web-ui", "ok", "")
 
 	err = launchXrootd()
 	if err != nil {

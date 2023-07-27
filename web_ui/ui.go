@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pelicanplatform/pelican/metrics"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/zsais/go-gin-prometheus"
@@ -17,7 +18,8 @@ func ConfigureMetrics(engine *gin.Engine) error {
 	prometheusMonitor.Use(engine)
 
 	engine.GET("/api/v1.0/health", func(ctx *gin.Context) {
-		ctx.JSON(http.StatusOK, gin.H{"status": "healthy"})
+		healthStatus := metrics.GetHealthStatus()
+		ctx.JSON(http.StatusOK, healthStatus)
 	})
 	return nil
 }
