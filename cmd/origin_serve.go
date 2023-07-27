@@ -4,12 +4,12 @@ package main
 
 import (
 	"bufio"
+	"crypto/elliptic"
 	"crypto/rand"
 	_ "embed"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -20,10 +20,10 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/pelicanplatform/pelican"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/origin_ui"
+	"github.com/pelicanplatform/pelican/web_ui"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -311,7 +311,7 @@ func checkDefaults() error {
 	}
 
 	// As necessary, generate a private key and corresponding cert
-	if err := config.GeneratePrivateKey(viper.GetString("TLSKey")); err != nil {
+	if err := config.GeneratePrivateKey(viper.GetString("TLSKey"), elliptic.P256()); err != nil {
 		return err
 	}
 	if err := config.GenerateCert(); err != nil {
@@ -510,44 +510,21 @@ func serveOrigin(/*cmd*/ *cobra.Command, /*args*/ []string) error {
 		return err
 	}
 
-	gin.SetMode(gin.ReleaseMode)
-	engine := gin.New()
-	engine.Use(gin.Recovery())
-	webLogger := log.WithFields(log.Fields{"daemon": "gin"})
-	engine.Use(func(ctx *gin.Context) {
-		startTime := time.Now()
-
-		ctx.Next()
-
-		latency := time.Since(startTime)
-		webLogger.WithFields(log.Fields{"method": ctx.Request.Method,
-			"status": ctx.Writer.Status(),
-			"time": latency.String(),
-			"client": ctx.RemoteIP(),
-			"resource": ctx.Request.URL.Path},
-		).Info("Served Request")
-	})
-	if err = pelican.ConfigureMetrics(engine); err != nil {
+	engine, err := web_ui.GetEngine()
+	if err != nil {
 		return err
 	}
 	if err = origin_ui.ConfigureOriginUI(engine); err != nil {
 		return err
 	}
 
-	engine.GET("/api/v1.0/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "healthy"})
-	})
-
-	go func() {
-		err = engine.Run()
-		if err != nil {
-			panic(err)
-		}
-	}()
+	go web_ui.RunEngine(engine)
 
 	// Ensure we wait until the origin has been initialized
 	// before launching XRootD.
-	origin_ui.WaitUntilLogin()
+	if err = origin_ui.WaitUntilLogin(); err != nil {
+		return err
+	}
 
 	err = launchXrootd()
 	if err != nil {
