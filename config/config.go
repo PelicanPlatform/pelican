@@ -200,7 +200,7 @@ func InitServer() error {
 		viper.SetDefault("IssuerKey", "/etc/pelican/issuer.jwk")
 		viper.SetDefault("OriginUI.PasswordFile", "/etc/pelican/origin-ui-passwd")
 		viper.SetDefault("XrootdMultiuser", true)
-		viper.SetDefault("GeoIPLocation", "/var/lib/pelican/GeoLite2-City.mmdb")
+		viper.SetDefault("GeoIPLocation", "/var/cache/pelican/maxmind/GeoLite2-City.mmdb")
 	} else {
 		home, err := os.UserHomeDir()
 		if err != nil {
