@@ -147,7 +147,6 @@ func DownloadDB(localFile string) error {
 		return errors.New("GeoIP database not found in downloaded resource")
 	}
 	if err = os.Rename(fileHandle.Name(), localFile); err != nil {
-		fmt.Println("HERERERE")
 		return err
 	}
 	return nil

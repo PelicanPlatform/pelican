@@ -59,7 +59,7 @@ func RedirectToCache(ginCtx *gin.Context) {
 		return
 	}
 	if namespaceAd.Path == "" {
-		ginCtx.String(404, "No origin found for path\n")
+		ginCtx.String(404, "No namespace found for path. Either it doesn't exist, or the Director is experiencing problems\n")
 		return
 	}
 	cacheAds, err = SortServers(ipAddr, cacheAds)
