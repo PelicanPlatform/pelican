@@ -32,17 +32,11 @@ import (
 
 var (
 
-	//go:embed resources/defaults.yaml
-	defaultsYaml string
-	//go:embed resources/osdf.yaml
-	osdfDefaultsYaml string
 	//go:embed resources/xrootd.cfg
 	xrootdCfg string
 	//go:embed resources/robots.txt
 	robotsTxt string
 
-	// Potentially holds a directory to cleanup
-	tempRunDir string
 )
 
 type XrootdConfig struct {
@@ -69,86 +63,9 @@ type XrootdConfig struct {
 	LocalMonitoringPort    int
 }
 
-func cleanupDirOnShutdown(dir string) {
-	sigs := make(chan os.Signal, 1)
-	tempRunDir = dir
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
-	go func() {
-		<-sigs
-		os.RemoveAll(dir)
-	}()
-}
-
 func init() {
-	viper.SetConfigType("yaml")
-	if config.IsRootExecution() {
-		viper.SetDefault("TLSCertificate", "/etc/pelican/certificates/tls.crt")
-		viper.SetDefault("TLSKey", "/etc/pelican/certificates/tls.key")
-		viper.SetDefault("XrootdRun", "/run/pelican/xrootd")
-		viper.SetDefault("GeoIPLocation", "/run/pelican/geoip/GeoIP2.mmdb")
-		viper.SetDefault("MaxMindKeyFile", "/run/pelican/maxmind/maxmind.key")
-		viper.SetDefault("RobotsTxtFile", "/etc/pelican/robots.txt")
-		viper.SetDefault("ScitokensConfig", "/etc/pelican/xrootd/scitokens.cfg")
-		viper.SetDefault("Authfile", "/etc/pelican/xrootd/authfile")
-		viper.SetDefault("MacaroonsKeyFile", "/etc/pelican/macaroons-secret")
-		viper.SetDefault("IssuerKey", "/etc/pelican/issuer.jwk")
-		viper.SetDefault("XrootdMultiuser", true)
-	} else {
-		home, err := os.UserHomeDir()
-		cobra.CheckErr(err)
-
-		configBase := filepath.Join(home, ".config", "pelican")
-		viper.SetDefault("TLSCertificate", filepath.Join(configBase, "certificates", "tls.crt"))
-		viper.SetDefault("TLSKey", filepath.Join(configBase, "certificates", "tls.key"))
-		viper.SetDefault("RobotsTxtFile", filepath.Join(configBase, "robots.txt"))
-		viper.SetDefault("ScitokensConfig", filepath.Join(configBase, "xrootd", "scitokens.cfg"))
-		viper.SetDefault("Authfile", filepath.Join(configBase, "xrootd", "authfile"))
-		viper.SetDefault("MacaroonsKeyFile", filepath.Join(configBase, "macaroons-secret"))
-		viper.SetDefault("IssuerKey", filepath.Join(configBase, "issuer.jwk"))
-		viper.SetDefault("MaxMindKeyFile", filepath.Join(configBase, "maxmind.key"))
-
-		var runtimeDir string
-		if userRuntimeDir := os.Getenv("XDG_RUNTIME_DIR"); userRuntimeDir != "" {
-			runtimeDir = filepath.Join(userRuntimeDir, "pelican")
-		} else {
-			runtimeDir, err = os.MkdirTemp("", "pelican-xrootd-*")
-			cobra.CheckErr(err)
-			cleanupDirOnShutdown(runtimeDir)
-		}
-		xrootdRuntimeDir := filepath.Join(runtimeDir, "xrootd")
-		if err = os.MkdirAll(xrootdRuntimeDir, 0750); err != nil {
-			cobra.CheckErr(err)
-		}
-		viper.SetDefault("XrootdRun", xrootdRuntimeDir)
-
-		geoipRuntimeDir := filepath.Join(runtimeDir, "geoip")
-		if err = os.MkdirAll(geoipRuntimeDir, 0750); err != nil {
-			cobra.CheckErr(err)
-		}
-		viper.SetDefault("GeoIPLocation", filepath.Join(geoipRuntimeDir, "GeoIP2.mmdb"))
-
-		viper.SetDefault("XrootdMultiuser", false)
-	}
-	viper.SetDefault("TLSCertFile", "/etc/pki/tls/cert.pem")
-
-	hostname, err := os.Hostname()
-	if err != nil {
-		panic(err)
-	}
-	viper.SetDefault("Sitename", hostname)
-
-	err = viper.MergeConfig(strings.NewReader(defaultsYaml))
-	if err != nil {
-		panic(err)
-	}
-
-	prefix := config.GetPreferredPrefix()
-	if prefix == "OSDF" {
-		err := viper.MergeConfig(strings.NewReader(osdfDefaultsYaml))
-		if err != nil {
-			panic(err)
-		}
-	}
+	err := config.InitServer()
+	cobra.CheckErr(err)
 }
 
 func checkXrootdEnv() error {
@@ -579,12 +496,8 @@ func launchXrootd() error {
 	}
 }
 
-func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
-	defer func() {
-		if tempRunDir != "" {
-			os.RemoveAll(tempRunDir)
-		}
-	}()
+func serveOrigin(/*cmd*/ *cobra.Command, /*args*/ []string) error {
+	defer config.CleanupTempResources()
 
 	monitorPort, err := pelican.ConfigureMonitoring()
 	if err != nil {
@@ -597,6 +510,7 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		return err
 	}
 
+	gin.SetMode(gin.ReleaseMode)
 	engine := gin.New()
 	engine.Use(gin.Recovery())
 	webLogger := log.WithFields(log.Fields{"daemon": "gin"})
@@ -630,6 +544,11 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 			panic(err)
 		}
 	}()
+
+	// Ensure we wait until the origin has been initialized
+	// before launching XRootD.
+	origin_ui.WaitUntilLogin()
+
 	err = launchXrootd()
 	if err != nil {
 		return err
