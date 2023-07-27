@@ -118,7 +118,8 @@ func DiscoverFederation() error {
 		return nil
 	}
 	curDirectorURL := viper.GetString("DirectorURL")
-	if len(curDirectorURL) != 0 {
+	curNamespaceURL := viper.GetString("DirectorURL")
+	if len(curDirectorURL) != 0 && len(curNamespaceURL) != 0 {
 		return nil
 	}
 
@@ -163,7 +164,12 @@ func DiscoverFederation() error {
 	if err != nil {
 		return errors.Wrapf(err, "Failure when parsing federation metadata at %s", discoveryUrl)
 	}
-	viper.Set("DirectorURL", metadata.DirectorEndpoint)
+	if curDirectorURL == "" {
+		viper.Set("DirectorURL", metadata.DirectorEndpoint)
+	}
+	if curNamespaceURL == "" {
+		viper.Set("NamespaceURL", metadata.NamespaceRegistrationEndpoint)
+	}
 
 	return nil
 }
