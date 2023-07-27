@@ -132,13 +132,3 @@ func GetAdsForPath(reqPath string) (originNamespace NamespaceAd, originAds []Ser
 	}
 	return
 }
-
-func PeriodicCacheReload() {
-	for {
-		// The ad cache times out every 15 minutes, so update it every
-		// 10. If a key isn't updated, it will survive for 5 minutes
-		// and then disappear
-		time.Sleep(time.Minute * 10)
-		AdvertiseOSDF()
-	}
-}

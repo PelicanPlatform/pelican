@@ -116,6 +116,9 @@ func RedirectToOrigin(ginCtx *gin.Context) {
 	// Each namespace may be exported by several origins, so we must still
 	// do the geolocation song and dance if we want to get the closest origin...
 	ipAddr, err := getRealIP(ginCtx)
+	if err != nil {
+		return
+	}
 
 	namespaceAd, originAds, _ := GetAdsForPath(reqPath)
 	if namespaceAd.Path == "" {

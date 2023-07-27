@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
@@ -172,4 +173,18 @@ func AdvertiseOSDF() error {
 	}
 
 	return nil
+}
+
+func PeriodicCacheReload() {
+	for {
+		// The ad cache times out every 15 minutes, so update it every
+		// 10. If a key isn't updated, it will survive for 5 minutes
+		// and then disappear
+		time.Sleep(time.Minute * 10)
+		err := AdvertiseOSDF()
+		if err != nil {
+			log.Warningf("Failed to re-advertise: %s. Will try again later",
+				err)
+		}
+	}
 }
