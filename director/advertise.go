@@ -2,13 +2,14 @@ package director
 
 import (
 	"encoding/json"
-	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 )
@@ -55,7 +56,7 @@ func AdvertiseOSDF() error {
 
 	req, err := http.NewRequest("GET", namespaceURL, nil)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "Failure when getting OSDF namespace data from topology")
 	}
 
 	req.Header.Set("Accept", "application/json")
@@ -63,19 +64,22 @@ func AdvertiseOSDF() error {
 	client := http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "Failure when getting response for OSDF namespace data")
 	}
-
 	defer resp.Body.Close()
+
+	if resp.StatusCode > 299 {
+		return fmt.Errorf("Error response %v from OSDF namespace endpoint: %v", resp.StatusCode, resp.Status)
+	}
 
 	respBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "Failure when reading OSDF namespace response")
 	}
 
 	var namespaces NamespaceJSON
 	if err = json.Unmarshal(respBytes, &namespaces); err != nil {
-		return err
+		return errors.Wrapf(err, "Failure when parsing JSON response from topology URL %v", namespaceURL)
 	}
 
 	cacheAdMap := make(map[ServerAd][]NamespaceAd)
@@ -86,7 +90,8 @@ func AdvertiseOSDF() error {
 		nsAd.Path = ns.Path
 		issuerURL, err := url.Parse(ns.CredentialGeneration.Issuer)
 		if err != nil {
-			return err
+			log.Warningf("Invalid URL %v when parsing topology response: %v\n", ns.CredentialGeneration.Issuer, err)
+			continue
 		}
 		nsAd.Issuer = *issuerURL
 		nsAd.MaxScopeDepth = uint(ns.CredentialGeneration.MaxScopeDepth)
