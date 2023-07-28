@@ -1,0 +1,64 @@
+# This file contains structured documentation about the Pelican parameters.
+# While it is somewhat human-readable, it is meant to help with the documentation
+# generation.
+---
+name ConfigBase
+description: >-
+  The directory containing the Pelican configurations and data when the utility
+  is run as non-root.  Automatically configured; cannot be overridden.
+default: "~/.config/pelican"
+components: ["*"]
+type: filename
+---
+name: TLSCertificate
+description: >-
+  The name of a file containing an X.509 host certificate to use for TLS 
+  authentication when running server components of Pelican.
+type: filename
+root_default: /etc/pelican/certificates/tls.crt
+default: "$ConfigBase/certificates/tls.crt"
+components: ["origin", "namespace", "director"]
+---
+name: TLSKey
+description: >-
+  The name of a file containing a private key corresponding to the TLSCertificate.
+  Used when running server components of Pelican.
+type: filename
+root_default: /etc/pelican/certificates/tls.key
+default: "$ConfigBase/certificates/tls.key"
+components: ["origin", "namespace", "director"]
+---
+name: XrootdRun
+description: >-
+  A directory where temporary configurations will be stored for the xrootd daemon
+  started by the origin.
+
+  For non-root servers, if $XDG_RUNTIME_DIR is not set, a temporary directory will
+  be created (and removed on shutdown)
+type: filename
+root_default: /run/pelican/xrootd
+default: $XDG_RUNTIME_DIR/pelican
+components: ["origin"]
+---
+name: RobotsTxtFile
+description: >-
+  Origins may be indexed by web search engines; to control the behavior of search
+  engines, one may provide local policy via a [robots.txt file](https://en.wikipedia.org/wiki/Robots.txt).
+
+  If this file is not present, it will be auto-created with a default policy of
+  blocking all indexing.
+type: filename
+root_default: /etc/pelican/robots.txt
+default: $ConfigBase/robots.txt
+components: ["origin"]
+---
+name: ScitokensConfig
+description: >-
+  The location of a file configuring xrootd's
+  [token-based authorization subsystem](https://github.com/xrootd/xrootd/blob/master/src/XrdSciTokens/README.md).
+  This file allows arbitrary changes to the authorization configuration and will be merged with any
+  auto-generated configuration; it's recommended for use by experts only.
+type: filename
+root_default: /etc/pelican/xrootd/scitokens.cfg
+default: $ConfigBase/xrootd/scitokens.cfg
+---
