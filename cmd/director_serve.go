@@ -1,11 +1,14 @@
 package main
 
 import (
-	"github.com/gin-gonic/gin"
+	"os"
+	"os/signal"
+	"syscall"
+
 	"github.com/pelicanplatform/pelican/director"
+	"github.com/pelicanplatform/pelican/web_ui"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
 func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
@@ -21,21 +24,23 @@ func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	}
 	go director.PeriodicCacheReload()
 
-	gin.SetMode(gin.ReleaseMode)
-	cacheEngine := gin.Default()
+	engine, err := web_ui.GetEngine()
+	if err != nil {
+		return err
+	}
 
 	// Use the shortcut middleware so that GET /foo/bar
 	// acts the same as GET /api/v1.0/director/object/foo/bar
-	cacheEngine.Use(director.ShortcutMiddleware())
-	director.RegisterDirector(cacheEngine.Group("/"))
+	engine.Use(director.ShortcutMiddleware())
+	director.RegisterDirector(engine.Group("/"))
 
-	// serve the Director on specified port
-	port := viper.GetString("port")
-	log.Info("Serving director on port", port)
-	err := cacheEngine.Run(":" + port)
-	if err != nil {
-		panic(err)
-	}
+	log.Info("Starting web engine...")
+	go web_ui.RunEngine(engine)
+
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+	sig := <-sigs
+	_ = sig
 
 	return nil
 }
