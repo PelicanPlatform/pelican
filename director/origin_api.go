@@ -22,7 +22,7 @@ type (
 	OriginAdvertise struct {
 		Name string `json:"name"`
 		URL string  `json:"url"`
-		Namespace string `json:"namespace"`
+		Namespaces []NamespaceAd `json:"namespaces"`
 	}
 
 )
@@ -96,7 +96,7 @@ func VerifyAdvertiseToken(token, namespace string) (bool, error) {
 		return false, err
 	}
 
-	tok, err := jwt.Parse([]byte(token), jwt.WithKeySet(keyset))
+	tok, err := jwt.Parse([]byte(token), jwt.WithKeySet(keyset), jwt.WithValidate(true))
 	if err != nil {
 		return false, err
 	}
