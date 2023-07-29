@@ -2,6 +2,7 @@ package origin_ui
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -70,6 +71,12 @@ func AdvertiseOrigin() error {
 	req.Header.Set("Content-Type", "application/json")
 
 	client := http.Client{}
+	if viper.GetBool("TLSSkipVerify") {
+		tr := &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		}
+		client = http.Client{Transport: tr}
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return errors.Wrap(err, "Failed to start request for director registration")
