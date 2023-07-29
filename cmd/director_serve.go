@@ -5,6 +5,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/web_ui"
 	log "github.com/sirupsen/logrus"
@@ -15,12 +16,14 @@ func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	log.Info("Initializing Director GeoIP database...")
 	director.InitializeDB()
 
-	log.Info("Generating/advertising server ads...")
+	if config.GetPreferredPrefix() == "OSDF" {
+		log.Info("Generating/advertising server ads from OSG topology service...")
 
-	// Get the ads from topology, populate the cache, and keep the cache
-	// updated with fresh info
-	if err := director.AdvertiseOSDF(); err != nil {
-		panic(err)
+		// Get the ads from topology, populate the cache, and keep the cache
+		// updated with fresh info
+		if err := director.AdvertiseOSDF(); err != nil {
+			panic(err)
+		}
 	}
 	go director.PeriodicCacheReload()
 

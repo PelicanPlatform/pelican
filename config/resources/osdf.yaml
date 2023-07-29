@@ -1,3 +1,4 @@
 ManagerHost: redirector.osgstorage.org
 SummaryMonitoringHost: xrd-report.osgstorage.org
 DetailedMonitoringHost: xrd-mon.osgstorage.org
+TopologyNamespaceURL: https://topology.opensciencegrid.org/stashcache/namespaces.json

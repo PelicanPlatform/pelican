@@ -49,9 +49,9 @@ type (
 
 // Populate internal cache with origin/cache ads
 func AdvertiseOSDF() error {
-	namespaceURL := viper.GetString("NamespaceURL")
+	namespaceURL := viper.GetString("TopologyNamespaceURL")
 	if namespaceURL == "" {
-		return errors.New("NamespaceURL configuration option not set")
+		return errors.New("Topology namespaces.json configuration option (`TopologyNamespaceURL`) not set")
 	}
 
 	req, err := http.NewRequest("GET", namespaceURL, nil)
