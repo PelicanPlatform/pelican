@@ -6,11 +6,32 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"time"
 
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 )
+
+func PeriodicAdvertiseOrigin() error {
+	ticker := time.NewTicker(1 * time.Minute)
+	go func() {
+		err := AdvertiseOrigin()
+		if err != nil {
+			log.Warningln("Origin advertise failed:", err)
+		}
+		for {
+			<-ticker.C
+			err := AdvertiseOrigin()
+			if err != nil {
+				log.Warningln("Origin advertise failed:", err)
+			}
+		}
+	}()
+
+	return nil
+}
 
 func AdvertiseOrigin() error {
 	name := viper.GetString("Sitename")

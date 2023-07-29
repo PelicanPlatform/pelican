@@ -517,6 +517,9 @@ func serveOrigin(/*cmd*/ *cobra.Command, /*args*/ []string) error {
 	if err = origin_ui.ConfigureOriginUI(engine); err != nil {
 		return err
 	}
+	if err = origin_ui.PeriodicAdvertiseOrigin(); err != nil {
+		return err
+	}
 
 	go web_ui.RunEngine(engine)
 
