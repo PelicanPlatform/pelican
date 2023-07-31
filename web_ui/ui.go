@@ -13,6 +13,11 @@ import (
 )
 
 func ConfigureMetrics(engine *gin.Engine) error {
+	err := ConfigureEmbeddedPrometheus(engine)
+	if err != nil {
+		return err
+	}
+
 	prometheusMonitor := ginprometheus.NewPrometheus("gin")
 	prometheusMonitor.Use(engine)
 
