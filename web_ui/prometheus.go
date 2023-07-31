@@ -88,9 +88,6 @@ func init() {
 }
 
 type flagConfig struct {
-	configFile string
-
-	agentStoragePath    string
 	serverStoragePath   string
 	forGracePeriod      model.Duration
 	outageTolerance     model.Duration
@@ -104,9 +101,6 @@ type flagConfig struct {
 	queryMaxSamples     int
 	RemoteFlushDeadline model.Duration
 
-	featureList []string
-	// These options are extracted from featureList
-	// for ease of use.
 	enableExpandExternalLabels bool
 	enablePerStepStats         bool
 }
@@ -147,24 +141,23 @@ func runtimeInfo() (api_v1.RuntimeInfo, error) {
 func ConfigureEmbeddedPrometheus(engine *gin.Engine) error {
 
 	cfg := flagConfig{}
-	cfg.configFile = "prometheus.yml"
-	ListenAddress := "0.0.0.0:9090"
-	cfg.webTimeout.Set("5m")
+	ListenAddress := fmt.Sprintf("0.0.0.0:%v", viper.GetInt("WebPort"))
+	cfg.webTimeout = model.Duration(5 * time.Minute)
 	cfg.serverStoragePath = viper.GetString("MonitoringData")
-	cfg.tsdb.MinBlockDuration.Set("2h")
+	cfg.tsdb.MinBlockDuration = model.Duration(2 * time.Hour)
 	cfg.tsdb.NoLockfile = false
 	cfg.tsdb.WALCompression = true
 	cfg.tsdb.HeadChunksWriteQueueSize = 0
 	cfg.tsdb.SamplesPerChunk = 120
-	cfg.RemoteFlushDeadline.Set("1m")
-	cfg.outageTolerance.Set("1h")
-	cfg.forGracePeriod.Set("10m")
-	cfg.resendDelay.Set("1m")
-	cfg.lookbackDelta.Set("5m")
-	cfg.queryTimeout.Set("2m")
+	cfg.RemoteFlushDeadline = model.Duration(1 * time.Minute)
+	cfg.outageTolerance = model.Duration(1 * time.Hour)
+	cfg.forGracePeriod = model.Duration(10 * time.Minute)
+	cfg.resendDelay = model.Duration(1 * time.Minute)
+	cfg.lookbackDelta = model.Duration(5 * time.Minute)
+	cfg.queryTimeout = model.Duration(2 * time.Minute)
 	cfg.queryConcurrency = 20
 	cfg.queryMaxSamples = 50000000
-	cfg.scrape.DiscoveryReloadInterval.Set("5s")
+	cfg.scrape.DiscoveryReloadInterval = model.Duration(5 * time.Second)
 
 	RemoteReadSampleLimit := int(5e7)
 	RemoteReadConcurrencyLimit := 10
@@ -179,7 +172,7 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine) error {
 
 	external_url, err := url.Parse("https://" + pelican_config.ComputeExternalAddress())
 	if err != nil {
-		return fmt.Errorf("parse external URL https://: %w", pelican_config.ComputeExternalAddress(), err)
+		return fmt.Errorf("parse external URL https://%v: %w", pelican_config.ComputeExternalAddress(), err)
 	}
 
 	CORSOrigin, err := compileCORSRegexString(".*")
@@ -206,7 +199,7 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine) error {
 	scrapeConfig.HTTPClientConfig = common_config.DefaultHTTPClientConfig
 	scrapeConfig.HTTPClientConfig.TLSConfig.InsecureSkipVerify = true
 	promCfg.ScrapeConfigs[0] = &scrapeConfig
-	promCfg.GlobalConfig.ScrapeInterval.Set("15s")
+	promCfg.GlobalConfig.ScrapeInterval = model.Duration(15 * time.Second)
 
 	if promCfg.StorageConfig.TSDBConfig != nil {
 		cfg.tsdb.OutOfOrderTimeWindow = promCfg.StorageConfig.TSDBConfig.OutOfOrderTimeWindow
@@ -412,7 +405,8 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine) error {
 				// Don't forget to release the reloadReady channel so that waiting blocks can exit normally.
 				select {
 				case <-term:
-					level.Warn(logger).Log("msg", "Received SIGTERM, exiting gracefully...")
+					err := level.Warn(logger).Log("msg", "Received SIGTERM, exiting gracefully...")
+					_ = err
 					reloadReady.Close()
 				//case <-webHandler.Quit():
 				//	level.Warn(logger).Log("msg", "Received termination request via web service, exiting gracefully...")
@@ -433,11 +427,13 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine) error {
 		g.Add(
 			func() error {
 				err := discoveryManagerScrape.Run()
-				level.Info(logger).Log("msg", "Scrape discovery manager stopped")
+				err2 := level.Info(logger).Log("msg", "Scrape discovery manager stopped")
+				_ = err2
 				return err
 			},
 			func(err error) {
-				level.Info(logger).Log("msg", "Stopping scrape discovery manager...")
+				err2 := level.Info(logger).Log("msg", "Stopping scrape discovery manager...")
+				_ = err2
 				cancelScrape()
 			},
 		)
@@ -453,7 +449,8 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine) error {
 				<-reloadReady.C
 
 				err := scrapeManager.Run(discoveryManagerScrape.SyncCh())
-				level.Info(logger).Log("msg", "Scrape manager stopped")
+				err2 := level.Info(logger).Log("msg", "Scrape manager stopped")
+				_ = err2
 				return err
 			},
 			func(err error) {
@@ -461,7 +458,8 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine) error {
 				// so that it doesn't try to write samples to a closed storage.
 				// We should also wait for rule manager to be fully stopped to ensure
 				// we don't trigger any false positive alerts for rules using absent().
-				level.Info(logger).Log("msg", "Stopping scrape manager...")
+				err2 := level.Info(logger).Log("msg", "Stopping scrape manager...")
+				_ = err2
 				scrapeManager.Stop()
 			},
 		)
@@ -478,12 +476,13 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine) error {
 				}
 
 				if err := reloadConfig(&promCfg, cfg.enableExpandExternalLabels, cfg.tsdb.EnableExemplarStorage, logger, noStepSubqueryInterval, reloaders...); err != nil {
-					return fmt.Errorf("error loading config from %q: %w", cfg.configFile, err)
+					return fmt.Errorf("error loading config: %w", err)
 				}
 				reloadReady.Close()
 
 				readyHandler.SetReady(true)
-				level.Info(logger).Log("msg", "Server is ready to receive web requests.")   
+				err2 := level.Info(logger).Log("msg", "Server is ready to receive web requests.")
+				_ = err2
 				<-cancel
 				return nil
 			},
@@ -499,7 +498,8 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine) error {
 		cancel := make(chan struct{})
 		g.Add(
 			func() error {
-				level.Info(logger).Log("msg", "Starting TSDB ...")
+				err = level.Info(logger).Log("msg", "Starting TSDB ...")
+				_ = err
 				if cfg.tsdb.WALSegmentSize != 0 {
 					if cfg.tsdb.WALSegmentSize < 10*1024*1024 || cfg.tsdb.WALSegmentSize > 256*1024*1024 {
 						return errors.New("flag 'storage.tsdb.wal-segment-size' must be set between 10MB and 256MB")
@@ -516,8 +516,9 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine) error {
 					return fmt.Errorf("opening storage failed: %w", err)
 				}
 
-				level.Info(logger).Log("msg", "TSDB started")
-				level.Debug(logger).Log("msg", "TSDB options",
+				err = level.Info(logger).Log("msg", "TSDB started")
+				_ = err
+				err = level.Debug(logger).Log("msg", "TSDB options",
 					"MinBlockDuration", cfg.tsdb.MinBlockDuration,
 					"MaxBlockDuration", cfg.tsdb.MaxBlockDuration,
 					"MaxBytes", cfg.tsdb.MaxBytes,
@@ -526,6 +527,7 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine) error {
 					"WALSegmentSize", cfg.tsdb.WALSegmentSize,
 					"WALCompression", cfg.tsdb.WALCompression,
 				)
+				_ = err
 
 				startTimeMargin := int64(2 * time.Duration(cfg.tsdb.MinBlockDuration).Seconds() * 1000)
 				localStorage.Set(db, startTimeMargin)
@@ -536,7 +538,8 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine) error {
 			},
 			func(err error) {
 				if err := fanoutStorage.Close(); err != nil {
-					level.Error(logger).Log("msg", "Error stopping storage", "err", err)
+					err = level.Error(logger).Log("msg", "Error stopping storage", "err", err)
+					_ = err
 				}
 				close(cancel)
 			},
@@ -544,7 +547,8 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine) error {
 	}
 	go func() {
 		if err := g.Run(); err != nil {
-			level.Error(logger).Log("err", err)
+			err = level.Error(logger).Log("err", err)
+			_ = err
 		}
 	}()
 
@@ -621,7 +625,8 @@ func reloadConfig(conf *config.Config, expandExternalLabels, enableExemplarStora
 	for _, rl := range rls {
 		rstart := time.Now()
 		if err := rl.reloader(conf); err != nil {
-			level.Error(logger).Log("msg", "Failed to apply configuration", "err", err)
+			err = level.Error(logger).Log("msg", "Failed to apply configuration", "err", err)
+			_ = err
 			failed = true
 		}
 		timings = append(timings, rl.name, time.Since(rstart))
@@ -632,7 +637,8 @@ func reloadConfig(conf *config.Config, expandExternalLabels, enableExemplarStora
 
 	noStepSuqueryInterval.Set(conf.GlobalConfig.EvaluationInterval)
 	l := []interface{}{"msg", "Completed loading of configuration", "totalDuration", time.Since(start)}
-	level.Info(logger).Log(append(l, timings...)...)
+	err = level.Info(logger).Log(append(l, timings...)...)
+	_ = err
 	return nil
 }
 
