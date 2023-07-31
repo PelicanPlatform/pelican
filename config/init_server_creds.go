@@ -140,7 +140,7 @@ func GeneratePrivateKey(keyLocation string, curve elliptic.Curve) error {
 		return err
 	}
 	// In this case, the private key file doesn't exist.
-	file, err := os.OpenFile(keyLocation, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0640)
+	file, err := os.OpenFile(keyLocation, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
 		return err
 	}
