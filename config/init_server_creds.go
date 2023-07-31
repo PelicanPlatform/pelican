@@ -67,7 +67,7 @@ func LoadPublicKey(existingJWKS string, issuerKeyFile string) (*jwk.Set, error) 
 		}
 	}
 	
-	if err := GeneratePrivateKey(issuerKeyFile); err != nil {
+	if err := GeneratePrivateKey(issuerKeyFile, elliptic.P521()); err != nil {
 		return nil, err
 	}
 	contents, err := os.ReadFile(issuerKeyFile)
