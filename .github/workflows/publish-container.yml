@@ -56,7 +56,6 @@ jobs:
       - name: make date tag
         id: mkdatetag
         run: echo "dtag=$(date +%Y%m%d-%H%M)" >> $GITHUB_OUTPUT
-        #run: echo "::set-output name=dtag::$(date +%Y%m%d-%H%M)"
 
   build:
     runs-on: ubuntu-latest
