@@ -1,9 +1,10 @@
 package main
 
 import (
-	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
+	log "github.com/sirupsen/logrus"
 )
 
 // These functions are just placeholders. You need to provide actual implementation.
@@ -18,33 +19,54 @@ var privkeyPath string
 func registerANamespace(cmd *cobra.Command, args []string) {
 	endpoint := host + "/registry"
 	if prefix == "" {
-		fmt.Println("Error: prefix is required")
-		return
+		log.Error("Error: prefix is required")
+		os.Exit(1)
 	}
 
 	if withIdentity {
-		namespace_register_with_identity(pubkeyPath, privkeyPath, endpoint, prefix)
+		err := namespace_register_with_identity(pubkeyPath, privkeyPath, endpoint, prefix)
+		if err != nil {
+			log.Error(err)
+			os.Exit(1)
+		}
 	} else {
-		namespace_register(pubkeyPath, privkeyPath, endpoint, "", prefix)
+		err := namespace_register(pubkeyPath, privkeyPath, endpoint, "", prefix)
+		if err != nil {
+			log.Error(err)
+			os.Exit(1)
+		}
 	}
 }
 
 func deleteANamespace(cmd *cobra.Command, args []string) {
 	endpoint := host + "/" + prefix
-	delete_namespace(endpoint)
+	err := delete_namespace(endpoint)
+	if err != nil {
+		log.Error(err)
+		os.Exit(1)
+	}
 }
 
 func listAllNamespaces(cmd *cobra.Command, args []string) {
 	endpoint := host
-	list_namespaces(endpoint)
+	err := list_namespaces(endpoint)
+	if err != nil {
+		log.Error(err)
+		os.Exit(1)
+	}
 }
 
 func getNamespace(cmd *cobra.Command, args []string) {
 	if jwks {
 		endpoint := host + "/" + prefix + "/issuer.jwks"
-		get_namespace(endpoint)
+		err := get_namespace(endpoint)
+		if err != nil {
+			log.Error(err)
+			os.Exit(1)
+		}
 	} else {
-		fmt.Println("Get command is not yet implemented.")
+		log.Error("Error: get command requires --jwks flag")
+		os.Exit(1)
 	}
 }
 

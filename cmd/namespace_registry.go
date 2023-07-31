@@ -5,68 +5,19 @@ import (
 	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/sha256"
-	"crypto/x509"
-	"crypto/elliptic"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"encoding/pem"
 	"fmt"
 	"io/ioutil"
 	"os"
-	"math/big"
 	"net/http"
 	"bytes"
 	"bufio"
+	"math/big"
+	"encoding/base64"
+
+	"github.com/pelicanplatform/pelican/config"
 )
-
-type JWKS struct {
-	Keys []JWK `json:"keys"`
-}
-
-type JWK struct {
-	Crv string `json:"crv"`
-	Kid string `json:"kid"`
-	Kty string `json:"kty"`
-	X   string `json:"x"`
-	Y   string `json:"y"`
-}
-
-func loadPrivateKey(privateKeyPath string) (*ecdsa.PrivateKey, error) {
-	keyInBytes, err := ioutil.ReadFile(privateKeyPath)
-	if err != nil {
-		return nil, err
-	}
-	block, _ := pem.Decode(keyInBytes)
-	privateKey, err := x509.ParsePKCS8PrivateKey(block.Bytes)
-	if err != nil {
-		return nil, err
-	}
-	return privateKey.(*ecdsa.PrivateKey), nil
-}
-
-func loadPublicKey(publicKeyPath string) (*ecdsa.PublicKey, error) {
-	keyInBytes, err := ioutil.ReadFile(publicKeyPath)
-	if err != nil {
-		return nil, err
-	}
-	var jwks JWKS
-	err = json.Unmarshal(keyInBytes, &jwks)
-	if err != nil {
-		return nil, err
-	}
-	keyData := jwks.Keys[0]  // Assumes there's at least one key
-	xBytes, _ := base64.RawURLEncoding.DecodeString(keyData.X)
-	yBytes, _ := base64.RawURLEncoding.DecodeString(keyData.Y)
-	x := new(big.Int).SetBytes(xBytes)
-	y := new(big.Int).SetBytes(yBytes)
-	publicKey := &ecdsa.PublicKey{
-		Curve: elliptic.P521(),
-		X:     x,
-		Y:     y,
-	}
-	return publicKey, nil
-}
 
 
 func signPayload(payload []byte, privateKey *ecdsa.PrivateKey) ([]byte, error) {
@@ -78,29 +29,6 @@ func signPayload(payload []byte, privateKey *ecdsa.PrivateKey) ([]byte, error) {
     return signature, nil
 }
 
-/*
-func writeSignatureToFile(signature []byte, filename string) error {
-	err := ioutil.WriteFile(filename, signature, 0644)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func loadSignatureFromFile(filename string) ([]byte, error) {
-	signature, err := ioutil.ReadFile(filename)
-	if err != nil {
-		return nil, err
-	}
-	return signature, nil
-}
-
-func verifySignature(payload []byte, signature []byte, publicKey *ecdsa.PublicKey) bool {
-	hash := sha256.Sum256(payload)
-	return ecdsa.VerifyASN1(publicKey, hash[:], signature)
-}
-*/
-
 func generateNonce() (string, error) {
     nonce := make([]byte, 32)
     _, err := rand.Read(nonce)
@@ -110,12 +38,12 @@ func generateNonce() (string, error) {
     return hex.EncodeToString(nonce), nil
 }
 
-func make_request(url string, method string, data map[string]interface{}) ([]byte) {
+func make_request(url string, method string, data map[string]interface{}) ([]byte, error) {
 	payload, _ := json.Marshal(data)
 
 	req, err := http.NewRequest(method, url, bytes.NewBuffer(payload))
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -123,12 +51,12 @@ func make_request(url string, method string, data map[string]interface{}) ([]byt
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		panic(err)
+		return nil,err
 	}
 	defer resp.Body.Close()
 
 	body, _ := ioutil.ReadAll(resp.Body)
-	return body
+	return body, nil
 }
 
 func resp_to_json(body []byte) (map[string]string) {
@@ -141,11 +69,14 @@ func resp_to_json(body []byte) (map[string]string) {
 	return respData
 }
 
-func namespace_register_with_identity(publicKeyPath string, privateKeyPath string, namespaceRegistryEndpoint string, prefix string) () {
+func namespace_register_with_identity(publicKeyPath string, privateKeyPath string, namespaceRegistryEndpoint string, prefix string) (error) {
 	data := map[string]interface{}{
 		"identity_required": "true",
 	}
-	resp := make_request(namespaceRegistryEndpoint, "POST", data)
+	resp, err := make_request(namespaceRegistryEndpoint, "POST", data)
+	if err != nil {
+		return fmt.Errorf("Failed to make request: %v\n", err)
+	}
 	respData := resp_to_json(resp)
 
 	verification_url := respData["verification_url"]
@@ -158,7 +89,10 @@ func namespace_register_with_identity(publicKeyPath string, privateKeyPath strin
 			"identity_required": "true",
 			"device_code": device_code,
 		}
-		resp = make_request(namespaceRegistryEndpoint, "POST", data)
+		resp, err = make_request(namespaceRegistryEndpoint, "POST", data)
+		if err != nil {
+			return fmt.Errorf("Failed to make request: %v\n", err)
+		}
 		respData = resp_to_json(resp)
 
 		if respData["status"] == "APPROVED" {
@@ -168,40 +102,43 @@ func namespace_register_with_identity(publicKeyPath string, privateKeyPath strin
 			reader := bufio.NewReader(os.Stdin)
 			fmt.Print("Press Enter after verification")
 			_, _ = reader.ReadString('\n')
-			// time.Sleep(60 * time.Second)
 		}
 	}
 	access_token := respData["access_token"]
 	fmt.Printf("Access token: %s\n", access_token)
-	namespace_register(publicKeyPath, privateKeyPath, namespaceRegistryEndpoint, access_token, prefix)
-
+	return namespace_register(publicKeyPath, privateKeyPath, namespaceRegistryEndpoint, access_token, prefix)
 }
 
-func namespace_register(publicKeyPath string, privateKeyPath string, namespaceRegistryEndpoint string, access_token string, prefix string) () {
-	publicKey, err := loadPublicKey(publicKeyPath)
+func namespace_register(publicKeyPath string, privateKeyPath string, namespaceRegistryEndpoint string, access_token string, prefix string) (error) {
+	publicKey, err := config.LoadPublicKey(publicKeyPath, privateKeyPath)
 	if err != nil {
-		fmt.Printf("Failed to load public key: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("Failed to load public key: %v\n", err)
 	}
 
-	privateKey, err := loadPrivateKey(privateKeyPath)
+	jwks, err := config.JWKSMap(publicKey)
 	if err != nil {
-		fmt.Printf("Failed to load private key: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("Failed to convert public key to JWKS: %v\n", err)
+	}
+
+	privateKey, err := config.LoadPrivateKey(privateKeyPath)
+	if err != nil {
+		return fmt.Errorf("Failed to load private key: %v\n", err)
 	}
 
 	client_nonce, err := generateNonce()
 	if err != nil {
-		fmt.Printf("Failed to generate nonce: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("Failed to generate client nonce: %v\n", err)
 	}
 
 	data := map[string]interface{}{
 		"client_nonce": client_nonce,
-		"pubkey":   fmt.Sprintf("%x", publicKey.X.Bytes()),
+		"pubkey":   fmt.Sprintf("%x", jwks["x"]),
 	}
 
-	resp := make_request(namespaceRegistryEndpoint, "POST", data)
+	resp, err := make_request(namespaceRegistryEndpoint, "POST", data)
+	if err != nil {
+		return fmt.Errorf("Failed to make request: %v\n", err)
+	}
 	respData := resp_to_json(resp)
 
 	// Create client payload by concatenating client_nonce and server_nonce
@@ -210,17 +147,20 @@ func namespace_register(publicKeyPath string, privateKeyPath string, namespaceRe
 	// Sign the payload
 	signature, err := signPayload([]byte(clientPayload), privateKey)
 	if err != nil {
-		panic(err)
+		return fmt.Errorf("Failed to sign payload: %v\n", err)
 	}
 
 	// Create data for the second POST request
+	xBytes, _ := base64.RawURLEncoding.DecodeString(jwks["x"])
+	yBytes, _ := base64.RawURLEncoding.DecodeString(jwks["y"])
+
 	data2 := map[string]interface{}{
 		"client_nonce":      client_nonce,
 		"server_nonce":      respData["server_nonce"],
 		"pubkey":        	 map[string]string{
-			"x": publicKey.X.String(),
-			"y": publicKey.Y.String(),
-			"curve": "P-521",
+			"x" : new(big.Int).SetBytes(xBytes).String(),
+			"y" : new(big.Int).SetBytes(yBytes).String(),
+			"curve": jwks["crv"],
 		},
 		"client_payload":    clientPayload,
 		"client_signature":  hex.EncodeToString(signature),
@@ -231,23 +171,36 @@ func namespace_register(publicKeyPath string, privateKeyPath string, namespaceRe
 	}
 
 	// Send the second POST request
-	make_request(namespaceRegistryEndpoint, "POST", data2)
-	fmt.Printf("Namespace registered successfully\n")
+	_, err = make_request(namespaceRegistryEndpoint, "POST", data2)
+	if err != nil {
+		return fmt.Errorf("Failed to make request: %v\n", err)
+	}
+	return nil
 }
 
-func list_namespaces(endpoint string) {
-	respData := make_request(endpoint, "GET", nil)
+func list_namespaces(endpoint string) (error) {
+	respData, err := make_request(endpoint, "GET", nil)
+	if err != nil {
+		return fmt.Errorf("Failed to make request: %v\n", err)
+	}
 	fmt.Println(string(respData))
+	return nil
 }
 
-func get_namespace(endpoint string) {
-	respData := make_request(endpoint, "GET", nil)
+func get_namespace(endpoint string) (error) {
+	respData, err := make_request(endpoint, "GET", nil)
+	if err != nil {
+		return fmt.Errorf("Failed to make request: %v\n", err)
+	}
 	fmt.Println(string(respData))
+	return nil
 }
 
-func delete_namespace(endpoint string) {
-	respData := make_request(endpoint, "DELETE", nil)
+func delete_namespace(endpoint string) (error) {
+	respData, err := make_request(endpoint, "DELETE", nil)
+	if err != nil {
+		return fmt.Errorf("Failed to make request: %v\n", err)
+	}
 	fmt.Println(string(respData))
+	return nil
 }
-
-
