@@ -2,13 +2,19 @@ package origin_ui
 
 import (
 	"bufio"
+	"crypto/ecdsa"
+	"embed"
+	"fmt"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"path"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -41,6 +47,9 @@ var (
 	authDB atomic.Pointer[htpasswd.File]
 	currentCode atomic.Pointer[string]
 	previousCode atomic.Pointer[string]
+
+	//go:embed assets/*
+	webAssets embed.FS
 )
 
 func doReload() error {
@@ -66,6 +75,34 @@ func periodicReload() {
 	}
 }
 
+func WaitUntilLogin() error {
+	if authDB.Load() != nil {
+		return nil
+	}
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+
+	for {
+		previousCode.Store(currentCode.Load())
+		newCode := fmt.Sprintf("%06v", rand.Intn(1000000))
+		currentCode.Store(&newCode)
+		fmt.Println("Pelican admin interface is not initialized; to initialize, login at https://localhost:8080 with the following code:")
+		fmt.Println(*currentCode.Load())
+		start := time.Now()
+		for time.Since(start) < 30 * time.Second {
+			select {
+			case <-sigs:
+				return errors.New("Process terminated...")
+			default:
+				time.Sleep(100 * time.Millisecond)
+			}
+			if authDB.Load() != nil {
+				return nil
+			}
+		}
+	}
+}
+
 func writePasswordEntry(user, password string) error {
 	fileName := viper.GetString("OriginUI.PasswordFile")
 	passwordBytes := []byte(password)
@@ -76,7 +113,7 @@ func writePasswordEntry(user, password string) error {
 	if err != nil {
 		return err
 	}
-	entry := user + ":" + string(hashed)
+	entry := user + ":" + string(hashed) + "\n"
 
 	directory := filepath.Dir(fileName)
 	err = os.MkdirAll(directory, 0750)
@@ -110,6 +147,7 @@ func configureAuthDB() error {
 	if err != nil {
 		return err
 	}
+	defer fp.Close()
 	scanner := bufio.NewScanner(fp)
 	scanner.Split(bufio.ScanLines)
 	hasAdmin := false
@@ -156,14 +194,20 @@ func setLoginCookie(ctx *gin.Context, user string) {
 		ctx.JSON(500, gin.H{"error": "Failed to build token"})
 		return
 	}
-	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, key))
+	log.Debugf("Type of *key: %T\n", key)
+	var raw ecdsa.PrivateKey
+	if err = (*key).Raw(&raw); err != nil {
+		ctx.JSON(500, gin.H{"error": "Unable to sign login cookie"})
+		return
+	}
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES512, raw))
 	if err != nil {
 		log.Errorln("Failure when signing the login cookie:", err)
 		ctx.JSON(500, gin.H{"error": "Unable to sign login cookie"})
 		return
 	}
 
-	ctx.SetCookie("login", string(signed), 30 * 60, "/api/v1/origin-ui",
+	ctx.SetCookie("login", string(signed), 30 * 60, "/api/v1.0/origin-ui",
 		ctx.Request.URL.Host, true, true)
 	ctx.SetSameSite(http.SameSiteStrictMode)
 }
@@ -177,7 +221,11 @@ func getUser(ctx *gin.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	parsed, err := jwt.Parse([]byte(token), jwt.WithKey(jwa.ES256, key))
+	var raw ecdsa.PrivateKey
+	if err = (*key).Raw(&raw); err != nil {
+		return "", errors.New("Failed to extract cookie signing key")
+	}
+	parsed, err := jwt.Parse([]byte(token), jwt.WithKey(jwa.ES512, raw.PublicKey))
 	if err != nil {
 		return "", err
 	}
@@ -286,6 +334,24 @@ func ConfigureOriginUI(router *gin.Engine) error {
 	group.POST("/login", loginHandler)
 	group.POST("/initLogin", initLoginHandler)
 	group.POST("/resetLogin", resetLoginHandler)
+
+	router.StaticFS("/assets", http.FS(webAssets))
+	router.GET("favicon.ico", func(ctx *gin.Context) {
+		file, _ := webAssets.ReadFile("assets/favicon.ico")
+		ctx.Data(
+			http.StatusOK,
+			"image/x-icon",
+			file,
+		)
+	})
+	router.GET("/", func (ctx *gin.Context) {
+		file, _ := webAssets.ReadFile("assets/index.html")
+		ctx.Data(
+			http.StatusOK,
+			"text/html",
+			file,
+		)
+	})
 
 	go periodicReload()
 

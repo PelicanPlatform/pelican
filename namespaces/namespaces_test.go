@@ -4,8 +4,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/spf13/viper"
+	"github.com/stretchr/testify/assert"
 
 	"github.com/pelicanplatform/pelican/config"
 )
@@ -76,7 +76,7 @@ func TestMatchNamespace(t *testing.T) {
 	defer config.SetPreferredPrefix(oldPrefix)
 
 	viper.Reset()
-	err = config.Init()
+	err = config.InitClient()
 	assert.Nil(t, err)
 
 	ns, err := MatchNamespace("/osgconnect/private/path/to/file.txt")
@@ -149,7 +149,7 @@ func TestMatchNamespaceSpecific(t *testing.T) {
 func TestFullNamespace(t *testing.T) {
 	os.Setenv("PELICAN_NAMESPACE_URL", "https://topology.opensciencegrid.org/osdf/namespaces")
 	viper.Reset()
-	err := config.Init()
+	err := config.InitClient()
 	assert.Nil(t, err)
 
 	ns, err := MatchNamespace("/ospool/PROTECTED/dweitzel/test.txt")
@@ -165,7 +165,7 @@ func TestFullNamespace(t *testing.T) {
 func TestDownloadNamespaces(t *testing.T) {
 	os.Setenv("PELICAN_NAMESPACE_URL", "https://topology-itb.opensciencegrid.org/stashcache/namespaces")
 	viper.Reset()
-	err := config.Init()
+	err := config.InitClient()
 	assert.Nil(t, err)
 	defer os.Unsetenv("PELICAN_NAMESPACE_URL")
 	namespaceBytes, err := downloadNamespace()
@@ -177,7 +177,7 @@ func TestDownloadNamespaces(t *testing.T) {
 func TestDownloadNamespacesFail(t *testing.T) {
 	os.Setenv("PELICAN_NAMESPACE_URL", "https://doesnotexist.org.blah/namespaces.json")
 	viper.Reset()
-	err := config.Init()
+	err := config.InitClient()
 	assert.Nil(t, err)
 	defer os.Unsetenv("PELICAN_NAMESPACE_URL")
 	namespaceBytes, err := downloadNamespace()
@@ -191,7 +191,7 @@ func TestGetNamespaces(t *testing.T) {
 	oldPrefix := config.SetPreferredPrefix("OSDF")
 	defer config.SetPreferredPrefix(oldPrefix)
 	viper.Reset()
-	err := config.Init()
+	err := config.InitClient()
 	assert.Nil(t, err)
 	defer os.Unsetenv("OSDF_NAMESPACE_URL")
 	namespaces, err := GetNamespaces()

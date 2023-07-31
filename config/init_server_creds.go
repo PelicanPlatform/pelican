@@ -163,7 +163,7 @@ func GenerateCert() error {
 	return nil
 }
 
-func GeneratePrivateKey(keyLocation string) error {
+func GeneratePrivateKey(keyLocation string, curve elliptic.Curve) error {
 	gid, err := GetDaemonGID()
 	if err != nil {
 		return err
@@ -189,7 +189,7 @@ func GeneratePrivateKey(keyLocation string) error {
 		return err
 	}
 	defer file.Close()
-	priv, err := ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
+	priv, err := ecdsa.GenerateKey(curve, rand.Reader)
 	if err != nil {
 		return err
 	}

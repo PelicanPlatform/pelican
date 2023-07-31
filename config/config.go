@@ -1,16 +1,19 @@
-
 package config
 
 import (
+	_ "embed"
 	"encoding/json"
 	"io/ioutil"
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/pkg/errors"
@@ -27,11 +30,11 @@ type TokenEntry struct {
 }
 
 type PrefixEntry struct {
-// OSDF namespace prefix
-	Prefix       string `yaml:"prefix"`
-	ClientID     string `yaml:"client_id"`
-	ClientSecret string `yaml:"client_secret"`
-	Tokens     []TokenEntry `yaml:"tokens,omitempty"`
+	// OSDF namespace prefix
+	Prefix       string       `yaml:"prefix"`
+	ClientID     string       `yaml:"client_id"`
+	ClientSecret string       `yaml:"client_secret"`
+	Tokens       []TokenEntry `yaml:"tokens,omitempty"`
 }
 
 type OSDFConfig struct {
@@ -39,28 +42,36 @@ type OSDFConfig struct {
 	// Top-level OSDF object
 	OSDF struct {
 		// List of OAuth2 client configurations
-		OauthClient [] PrefixEntry `yaml:"oauth_client,omitempty"`
+		OauthClient []PrefixEntry `yaml:"oauth_client,omitempty"`
 	} `yaml:"OSDF"`
 }
 
 type FederationDiscovery struct {
-	DirectorEndpoint string `json:"director_endpoint"`
+	DirectorEndpoint              string `json:"director_endpoint"`
 	NamespaceRegistrationEndpoint string `json:"namespace_registration_endpoint"`
-	CollectorEndpoint string `json:"collector_endpoint"`
-	JwksUri string `json:"jwks_uri"`
+	CollectorEndpoint             string `json:"collector_endpoint"`
+	JwksUri                       string `json:"jwks_uri"`
 }
 
+var (
+	// Some of the unit tests probe behavior specific to OSDF vs Pelican.  Hence,
+	// we need a way to override the preferred prefix.
+	testingPreferredPrefix string
 
-// Some of the unit tests probe behavior specific to OSDF vs Pelican.  Hence,
-// we need a way to override the preferred prefix.
-var testingPreferredPrefix string
+	//go:embed resources/defaults.yaml
+	defaultsYaml string
+	//go:embed resources/osdf.yaml
+	osdfDefaultsYaml string
 
-//
+	// Potentially holds a directory to cleanup
+	tempRunDir  string
+	cleanupOnce sync.Once
+)
+
 // Based on the name of the current binary, determine the preferred "style"
 // of behavior.  For example, a binary with the "osdf_" prefix should utilize
 // the known URLs for OSDF.  For "pelican"-style commands, the user will
 // need to manually configure the location of the director endpoint.
-//
 func GetPreferredPrefix() string {
 	// Testing override to programmatically force different behaviors.
 	if testingPreferredPrefix != "" {
@@ -87,11 +98,9 @@ func SetPreferredPrefix(newPref string) string {
 	return oldPref
 }
 
-//
 // Get the list of valid prefixes for this binary.  Given there's been so
 // many renames of the project (stash -> osdf -> pelican), we allow multiple
 // prefixes when searching through environment variables.
-//
 func GetAllPrefixes() []string {
 	prefixes := []string{GetPreferredPrefix()}
 
@@ -159,7 +168,97 @@ func DiscoverFederation() error {
 	return nil
 }
 
-func Init() error {
+func cleanupDirOnShutdown(dir string) {
+	sigs := make(chan os.Signal, 1)
+	tempRunDir = dir
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+	go func() {
+		<-sigs
+		CleanupTempResources()
+	}()
+}
+
+func CleanupTempResources() {
+	cleanupOnce.Do(func() {
+		if tempRunDir != "" {
+			os.RemoveAll(tempRunDir)
+			tempRunDir = ""
+		}
+	})
+}
+
+func InitServer() error {
+	viper.SetConfigType("yaml")
+	if IsRootExecution() {
+		viper.SetDefault("TLSCertificate", "/etc/pelican/certificates/tls.crt")
+		viper.SetDefault("TLSKey", "/etc/pelican/certificates/tls.key")
+		viper.SetDefault("XrootdRun", "/run/pelican/xrootd")
+		viper.SetDefault("RobotsTxtFile", "/etc/pelican/robots.txt")
+		viper.SetDefault("ScitokensConfig", "/etc/pelican/xrootd/scitokens.cfg")
+		viper.SetDefault("Authfile", "/etc/pelican/xrootd/authfile")
+		viper.SetDefault("MacaroonsKeyFile", "/etc/pelican/macaroons-secret")
+		viper.SetDefault("IssuerKey", "/etc/pelican/issuer.jwk")
+		viper.SetDefault("OriginUI.PasswordFile", "/etc/pelican/origin-ui-passwd")
+		viper.SetDefault("XrootdMultiuser", true)
+		viper.SetDefault("GeoIPLocation", "/var/cache/pelican/maxmind/GeoLite2-City.mmdb")
+	} else {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return err
+		}
+
+		configBase := filepath.Join(home, ".config", "pelican")
+		viper.SetDefault("TLSCertificate", filepath.Join(configBase, "certificates", "tls.crt"))
+		viper.SetDefault("TLSKey", filepath.Join(configBase, "certificates", "tls.key"))
+		viper.SetDefault("RobotsTxtFile", filepath.Join(configBase, "robots.txt"))
+		viper.SetDefault("ScitokensConfig", filepath.Join(configBase, "xrootd", "scitokens.cfg"))
+		viper.SetDefault("Authfile", filepath.Join(configBase, "xrootd", "authfile"))
+		viper.SetDefault("MacaroonsKeyFile", filepath.Join(configBase, "macaroons-secret"))
+		viper.SetDefault("IssuerKey", filepath.Join(configBase, "issuer.jwk"))
+		viper.SetDefault("OriginUI.PasswordFile", filepath.Join(configBase, "origin-ui-passwd"))
+		viper.SetDefault("GeoIPLocation", filepath.Join(configBase, "GeoLite2-City.mmdb"))
+
+		if userRuntimeDir := os.Getenv("XDG_RUNTIME_DIR"); userRuntimeDir != "" {
+			runtimeDir := filepath.Join(userRuntimeDir, "pelican")
+			err := os.MkdirAll(runtimeDir, 0750)
+			if err != nil {
+				return err
+			}
+			viper.SetDefault("XrootdRun", runtimeDir)
+		} else {
+			dir, err := os.MkdirTemp("", "pelican-xrootd-*")
+			if err != nil {
+				return err
+			}
+			viper.SetDefault("XrootdRun", dir)
+			cleanupDirOnShutdown(dir)
+		}
+		viper.SetDefault("XrootdMultiuser", false)
+	}
+	viper.SetDefault("TLSCertFile", "/etc/pki/tls/cert.pem")
+
+	hostname, err := os.Hostname()
+	if err != nil {
+		return err
+	}
+	viper.SetDefault("Sitename", hostname)
+
+	err = viper.MergeConfig(strings.NewReader(defaultsYaml))
+	if err != nil {
+		return err
+	}
+
+	prefix := GetPreferredPrefix()
+	if prefix == "OSDF" {
+		err := viper.MergeConfig(strings.NewReader(osdfDefaultsYaml))
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func InitClient() error {
 	upper_prefix := GetPreferredPrefix()
 	lower_prefix := strings.ToLower(upper_prefix)
 
@@ -228,7 +327,7 @@ func Init() error {
 	var downloadLimit int64 = 1024 * 100
 	var prefixes_with_cp []string
 	for _, prefix := range prefixes {
-		prefixes_with_cp = append(prefixes_with_cp, prefix + "CP")
+		prefixes_with_cp = append(prefixes_with_cp, prefix+"CP")
 	}
 	for _, prefix := range append(prefixes, prefixes_with_cp...) {
 		downloadLimitStr := os.Getenv(prefix + "_MINIMUM_DOWNLOAD_SPEED")
@@ -239,7 +338,7 @@ func Init() error {
 		downloadLimit, err = strconv.ParseInt(downloadLimitStr, 10, 64)
 		if err != nil {
 			log.Errorf("Environment variable %s_MINIMUM_DOWNLOAD_SPEED=%s is not parsable as integer: %s",
-			    prefixes, downloadLimitStr, err.Error())
+				prefixes, downloadLimitStr, err.Error())
 		}
 		break
 	}

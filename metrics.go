@@ -11,14 +11,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/jellydator/ttlcache/v3"
         "github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
         log "github.com/sirupsen/logrus"
         "github.com/spf13/viper"
-	"github.com/zsais/go-gin-prometheus"
 )
 
 type (
@@ -182,17 +180,6 @@ func ConfigureMonitoring() (int, error) {
 
 	return addr.Port, nil
 }
-
-func ConfigureMetrics(engine *gin.Engine) error {
-	prometheusMonitor := ginprometheus.NewPrometheus("gin")
-	prometheusMonitor.Use(engine)
-	/*handler := promhttp.Handler()
-	engine.GET("/metrics", func(context *gin.Context) {
-		handler.ServeHTTP(context.Writer, context.Request)
-	})*/
-	return nil
-}
-
 
 
 func ComputePrefix(inputPath string) string {
