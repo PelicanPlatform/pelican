@@ -115,13 +115,17 @@ func GetAllPrefixes() []string {
 func DiscoverFederation() error {
 	federationStr := viper.GetString("FederationURL")
 	if len(federationStr) == 0 {
+		log.Debugln("Federation URL is unset; skipping discovery")
 		return nil
 	}
+	log.Debugln("Federation URL:", federationStr)
 	curDirectorURL := viper.GetString("DirectorURL")
-	if len(curDirectorURL) != 0 {
+	curNamespaceURL := viper.GetString("DirectorURL")
+	if len(curDirectorURL) != 0 && len(curNamespaceURL) != 0 {
 		return nil
 	}
 
+	log.Debugln("Performing federation service discovery against endpoint", federationStr)
 	federationUrl, err := url.Parse(federationStr)
 	if err != nil {
 		return errors.Wrapf(err, "Invalid federation value %s:", federationStr)
@@ -163,7 +167,15 @@ func DiscoverFederation() error {
 	if err != nil {
 		return errors.Wrapf(err, "Failure when parsing federation metadata at %s", discoveryUrl)
 	}
-	viper.Set("DirectorURL", metadata.DirectorEndpoint)
+	if curDirectorURL == "" {
+		log.Debugln("Federation service discovery resulted in director URL", metadata.DirectorEndpoint)
+		viper.Set("DirectorURL", metadata.DirectorEndpoint)
+	}
+	if curNamespaceURL == "" {
+		log.Debugln("Federation service discovery resulted in namespace registration URL",
+			metadata.NamespaceRegistrationEndpoint)
+		viper.Set("NamespaceURL", metadata.NamespaceRegistrationEndpoint)
+	}
 
 	return nil
 }

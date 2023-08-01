@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	log "github.com/sirupsen/logrus"
 )
 
 func getRedirectURL(reqPath string, ad ServerAd, requiresAuth bool) (redirectURL url.URL) {
@@ -154,8 +155,53 @@ func ShortcutMiddleware() gin.HandlerFunc {
 	}
 }
 
+func RegisterOrigin (ctx *gin.Context) {
+	tokens, present := ctx.Request.Header["Authorization"]
+	if !present || len(tokens) == 0 {
+		ctx.JSON(401, gin.H{"error": "Bearer token not present in the 'Authorization' header"})
+		return
+	}
+	ad := OriginAdvertise{}
+	if ctx.ShouldBind(&ad) != nil {
+		ctx.JSON(400, gin.H{"error": "Invalid origin registration"})
+		return
+	}
+
+	for _, namespace := range(ad.Namespaces) {
+		ok, err := VerifyAdvertiseToken(tokens[0], namespace.Path)
+		if err != nil {
+			log.Warningln("Failed to verify token:", err)
+			ctx.JSON(400, gin.H{"error": "Authorization token verification failed"})
+			return
+		}
+		if !ok {
+			log.Warningf("Origin %v advertised to namespace %v without valid registration\n",
+				ad.Name, namespace.Path)
+			ctx.JSON(400, gin.H{"error": "Origin not authorized to advertise to this namespace"})
+			return
+		}
+	}
+
+	ad_url, err := url.Parse(ad.URL)
+	if err != nil {
+		log.Warningf("Failed to parse origin URL %v: %v\n", ad.URL, err)
+		ctx.JSON(400, gin.H{"error": "Invalid origin URL"})
+		return
+	}
+
+	originAd := ServerAd{
+		Name:    ad.Name,
+		AuthURL: *ad_url,
+		URL:     *ad_url,
+		Type:    OriginType,
+	}
+	RecordAd(originAd, &ad.Namespaces)
+	ctx.JSON(200, gin.H{"msg": "Successful registration"})
+}
+
 func RegisterDirector(router *gin.RouterGroup) {
 	// Establish the routes used for cache/origin redirection
 	router.GET("/api/v1.0/director/object/*any", RedirectToCache)
 	router.GET("/api/v1.0/director/origin/*any", RedirectToOrigin)
+	router.POST("/api/v1.0/director/registerOrigin", RegisterOrigin)
 }
