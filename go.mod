@@ -4,6 +4,7 @@ go 1.18
 
 require (
 	github.com/cavaliercoder/grab v2.0.0+incompatible
+	github.com/gin-contrib/static v0.0.1
 	github.com/gin-gonic/gin v1.9.1
 	github.com/golang-jwt/jwt v3.2.2+incompatible
 	github.com/jellydator/ttlcache/v3 v3.0.1

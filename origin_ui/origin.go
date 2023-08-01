@@ -5,7 +5,10 @@ import (
 	"crypto/ecdsa"
 	"embed"
 	"fmt"
+	"github.com/gin-contrib/static"
+	"io/fs"
 	"math/rand"
+	"mime"
 	"net/http"
 	"net/url"
 	"os"
@@ -18,9 +21,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwt"
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/spf13/viper"
 	"github.com/tg123/go-htpasswd"
 	"golang.org/x/crypto/bcrypt"
@@ -28,7 +31,7 @@ import (
 
 type (
 	Login struct {
-		User string `form:"user"`
+		User     string `form:"user"`
 		Password string `form:"password"`
 	}
 
@@ -42,11 +45,11 @@ type (
 )
 
 var (
-	authDB atomic.Pointer[htpasswd.File]
-	currentCode atomic.Pointer[string]
+	authDB       atomic.Pointer[htpasswd.File]
+	currentCode  atomic.Pointer[string]
 	previousCode atomic.Pointer[string]
 
-	//go:embed assets/*
+	//go:embed src/out/*
 	webAssets embed.FS
 )
 
@@ -81,10 +84,10 @@ func WaitUntilLogin() {
 		previousCode.Store(currentCode.Load())
 		newCode := fmt.Sprintf("%06v", rand.Intn(1000000))
 		currentCode.Store(&newCode)
-		fmt.Println("Pelican admin interface is not initialized; to initialize, login at https://localhost:8080 with the following code:")
+		fmt.Println("Pelican admin interface is not initialized; to initialize, login at http://localhost:8080 with the following code:")
 		fmt.Println(*currentCode.Load())
 		start := time.Now()
-		for time.Since(start) < 30 * time.Second {
+		for time.Since(start) < 30*time.Second {
 			time.Sleep(100 * time.Millisecond)
 			if authDB.Load() != nil {
 				return
@@ -197,7 +200,7 @@ func setLoginCookie(ctx *gin.Context, user string) {
 		return
 	}
 
-	ctx.SetCookie("login", string(signed), 30 * 60, "/api/v1.0/origin-ui",
+	ctx.SetCookie("login", string(signed), 30*60, "/api/v1.0/origin-ui",
 		ctx.Request.URL.Host, true, true)
 	ctx.SetSameSite(http.SameSiteStrictMode)
 }
@@ -277,7 +280,7 @@ func initLoginHandler(ctx *gin.Context) {
 		ctx.JSON(400, gin.H{"error": "Login code not provided"})
 		return
 	}
-	
+
 	if code.Code != *curCode && (prevCode == nil || code.Code != *prevCode) {
 		ctx.JSON(401, gin.H{"error": "Invalid login code"})
 		return
@@ -311,6 +314,31 @@ func resetLoginHandler(ctx *gin.Context) {
 	}
 }
 
+type embedFileSystem struct {
+	http.FileSystem
+}
+
+func (e embedFileSystem) Exists(prefix string, path string) bool {
+	fmt.Println(path)
+	fmt.Println("Exists")
+	_, err := e.Open(path + "/index.html")
+	if err != nil {
+		return false
+	}
+	return true
+}
+
+func EmbedFolder(fsEmbed embed.FS, targetPath string) static.ServeFileSystem {
+	fsys, err := fs.Sub(fsEmbed, targetPath)
+
+	if err != nil {
+		panic(err)
+	}
+	return embedFileSystem{
+		FileSystem: http.FS(fsys),
+	}
+}
+
 func ConfigureOriginUI(router *gin.Engine) error {
 	if router == nil {
 		return errors.New("Origin configuration passed a nil pointer")
@@ -325,22 +353,24 @@ func ConfigureOriginUI(router *gin.Engine) error {
 	group.POST("/initLogin", initLoginHandler)
 	group.POST("/resetLogin", resetLoginHandler)
 
-	router.StaticFS("/assets", http.FS(webAssets))
-	router.GET("favicon.ico", func(ctx *gin.Context) {
-		file, _ := webAssets.ReadFile("assets/favicon.ico")
+	router.GET("/view/*path", func(ctx *gin.Context) {
+		path := ctx.Param("path")
+
+		if strings.HasSuffix(path, "/") {
+			path += "index.html"
+		}
+
+		filePath := "src/out" + path
+		file, _ := webAssets.ReadFile(filePath)
 		ctx.Data(
 			http.StatusOK,
-			"image/x-icon",
+			mime.TypeByExtension(filePath),
 			file,
 		)
 	})
-	router.GET("/", func (ctx *gin.Context) {
-		file, _ := webAssets.ReadFile("assets/index.html")
-		ctx.Data(
-			http.StatusOK,
-			"text/html",
-			file,
-		)
+
+	router.NoRoute(func(ctx *gin.Context) {
+		fmt.Println(ctx.FullPath())
 	})
 
 	go periodicReload()
