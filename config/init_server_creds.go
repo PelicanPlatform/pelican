@@ -25,7 +25,6 @@ var (
 )
 
 func LoadPrivateKey(tlsKey string)(*ecdsa.PrivateKey, error) {
-	fmt.Println("new load Private Key")
 	rest, err := os.ReadFile(tlsKey)
 	if err != nil {
 		return nil, nil
