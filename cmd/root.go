@@ -42,6 +42,7 @@ func init() {
 	rootCmd.AddCommand(directorCmd)
 	objectCmd.CompletionOptions.DisableDefaultCmd = true
 	rootCmd.AddCommand(originCmd)
+	rootCmd.AddCommand(namespaceCmd)
 	rootCmd.AddCommand(rootConfigCmd)
 	rootCmd.AddCommand(rootPluginCmd)
 	preferredPrefix := config.GetPreferredPrefix()
