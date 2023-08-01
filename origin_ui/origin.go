@@ -5,7 +5,10 @@ import (
 	"crypto/ecdsa"
 	"embed"
 	"fmt"
+	"github.com/gin-contrib/static"
+	"io/fs"
 	"math/rand"
+	"mime"
 	"net/http"
 	"net/url"
 	"os"
@@ -49,7 +52,7 @@ var (
 	currentCode  atomic.Pointer[string]
 	previousCode atomic.Pointer[string]
 
-	//go:embed assets/*
+	//go:embed src/out/*
 	webAssets embed.FS
 )
 
@@ -339,6 +342,31 @@ func resetLoginHandler(ctx *gin.Context) {
 	}
 }
 
+type embedFileSystem struct {
+	http.FileSystem
+}
+
+func (e embedFileSystem) Exists(prefix string, path string) bool {
+	fmt.Println(path)
+	fmt.Println("Exists")
+	_, err := e.Open(path + "/index.html")
+	if err != nil {
+		return false
+	}
+	return true
+}
+
+func EmbedFolder(fsEmbed embed.FS, targetPath string) static.ServeFileSystem {
+	fsys, err := fs.Sub(fsEmbed, targetPath)
+
+	if err != nil {
+		panic(err)
+	}
+	return embedFileSystem{
+		FileSystem: http.FS(fsys),
+	}
+}
+
 func ConfigureOriginUI(router *gin.Engine) error {
 	if router == nil {
 		return errors.New("Origin configuration passed a nil pointer")
@@ -369,12 +397,18 @@ func ConfigureOriginUI(router *gin.Engine) error {
 		}
 	})
 
-	router.StaticFS("/assets", http.FS(webAssets))
-	router.GET("favicon.ico", func(ctx *gin.Context) {
-		file, _ := webAssets.ReadFile("assets/favicon.ico")
+	router.GET("/view/*path", func(ctx *gin.Context) {
+		path := ctx.Param("path")
+
+		if strings.HasSuffix(path, "/") {
+			path += "index.html"
+		}
+
+		filePath := "src/out" + path
+		file, _ := webAssets.ReadFile(filePath)
 		ctx.Data(
 			http.StatusOK,
-			"image/x-icon",
+			mime.TypeByExtension(filePath),
 			file,
 		)
 	})
