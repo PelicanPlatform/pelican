@@ -296,7 +296,7 @@ func InitClient() error {
 	viper.SetDefault("SlowTransferWindow", 30)
 
 	if upper_prefix == "OSDF" || upper_prefix == "STASH" {
-		viper.SetDefault("NamespaceURL", "https://topology.opensciencegrid.org/osdf/namespaces")
+		viper.SetDefault("TopologyNamespaceURL", "https://topology.opensciencegrid.org/osdf/namespaces")
 	}
 
 	viper.SetEnvPrefix(upper_prefix)
