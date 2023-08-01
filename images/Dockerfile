@@ -9,7 +9,6 @@ RUN yum -y update \
     && yum clean all \
     && rm -rf /var/cache/yum/
 
-RUN mkdir /pelican
 WORKDIR /pelican
 
 # Copy over needed files
