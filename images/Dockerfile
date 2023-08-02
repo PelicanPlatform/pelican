@@ -19,7 +19,7 @@ RUN useradd -o -u 10940 -g 10940 -s /bin/sh xrootd
 # The build+push action that builds this dockerfile will copy the
 # linux/amd64 pelican artifact into the correct spot whenever the action
 # is triggered.
-COPY pelican /pelican/pelican
+COPY pelican /pelican/osdf-client
 COPY supervisord/supervisord.conf /etc/supervisord.conf
 
 # Eventually add more entrypoint commands and corresponding supervisor
@@ -27,7 +27,7 @@ COPY supervisord/supervisord.conf /etc/supervisord.conf
 COPY supervisord/pelican_director_serve.conf /etc/supervisord.d/pelican_director_serve.conf
 COPY entrypoint.sh /entrypoint.sh
 
-RUN chmod +x /pelican/pelican \
+RUN chmod +x /pelican/osdf-client \
     && chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]
