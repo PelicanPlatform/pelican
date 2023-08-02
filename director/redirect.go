@@ -140,18 +140,29 @@ func RedirectToOrigin(ginCtx *gin.Context) {
 
 // Middleware sends GET /foo/bar to the RedirectToCache function, as if the
 // original request had been made to /api/v1.0/director/object/foo/bar
-func ShortcutMiddleware() gin.HandlerFunc {
+func ShortcutMiddleware(defaultEndpoint string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if !strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/director") {
-			// If not, redirect to the RedirectToCache route
-			c.Request.URL.Path = "/api/v1.0/director/object" + c.Request.URL.Path
-			RedirectToCache(c)
-			c.Abort()
-			return
-		}
+		// If we're configured for cache mode or we haven't set the flag,
+		// we should use cache middleware
+		if defaultEndpoint == "cache" || defaultEndpoint == "" {
+			if !strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/director") {
+				c.Request.URL.Path = "/api/v1.0/director/object" + c.Request.URL.Path
+				RedirectToCache(c)
+				c.Abort()
+				return
+			}
 
-		// If the path starts with the correct prefix, continue with the next handler
-		c.Next()
+			// If the path starts with the correct prefix, continue with the next handler
+			c.Next()
+		} else if defaultEndpoint == "origin" {
+			if !strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/director") {
+				c.Request.URL.Path = "/api/v1.0/director/origin" + c.Request.URL.Path
+				RedirectToOrigin(c)
+				c.Abort()
+				return
+			}
+			c.Next()
+		}
 	}
 }
 

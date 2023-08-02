@@ -41,4 +41,10 @@ func init() {
 	if err != nil {
 		panic(err)
 	}
+
+	directorServeCmd.Flags().StringP("default-endpoint", "e", "", "Set whether the default endpoint should redirect to caches or origins")
+	err = viper.BindPFlag("DirectorDefaultEndpoint", directorServeCmd.Flags().Lookup("default-endpoint"))
+	if err != nil {
+		panic(err)
+	}
 }

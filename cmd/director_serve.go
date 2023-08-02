@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/elliptic"
+	"errors"
 	"os"
 	"os/signal"
 	"syscall"
@@ -52,9 +53,14 @@ func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		return err
 	}
 
-	// Use the shortcut middleware so that GET /foo/bar
-	// acts the same as GET /api/v1.0/director/object/foo/bar
-	engine.Use(director.ShortcutMiddleware())
+	// Configure the shortcut middleware to either redirect to a cache
+	// or to an origin
+	defaultEndpoint := viper.GetString("DirectorDefaultEndpoint")
+	if !(defaultEndpoint == "cache" || defaultEndpoint == "origin" || defaultEndpoint == "") {
+		return errors.New("The director's default endpoint must either be set to 'cache' or 'origin'." +
+		" Was there a typo?")
+	}
+	engine.Use(director.ShortcutMiddleware(defaultEndpoint))
 	director.RegisterDirector(engine.Group("/"))
 
 	log.Info("Starting web engine...")
