@@ -37,7 +37,7 @@ func init() {
 
 	// Set up flags for the command
 	directorServeCmd.Flags().StringP("port", "p", "", "Set the port to which the Director's redirect services should be bound")
-	err := viper.BindPFlag("port", directorServeCmd.Flags().Lookup("port"))
+	err := viper.BindPFlag("WebPort", directorServeCmd.Flags().Lookup("port"))
 	if err != nil {
 		panic(err)
 	}

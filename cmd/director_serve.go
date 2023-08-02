@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/elliptic"
 	"os"
 	"os/signal"
 	"syscall"
@@ -10,7 +11,21 @@ import (
 	"github.com/pelicanplatform/pelican/web_ui"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
+
+func generateTLSCertIfNeeded() error {
+
+	// As necessary, generate a private key and corresponding cert
+	if err := config.GeneratePrivateKey(viper.GetString("TLSKey"), elliptic.P256()); err != nil {
+		return err
+	}
+	if err := config.GenerateCert(); err != nil {
+		return err
+	}
+
+	return nil
+}
 
 func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	log.Info("Initializing Director GeoIP database...")
@@ -26,6 +41,11 @@ func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		}
 	}
 	go director.PeriodicCacheReload()
+
+	err := generateTLSCertIfNeeded()
+	if err != nil {
+		return err
+	}
 
 	engine, err := web_ui.GetEngine()
 	if err != nil {
