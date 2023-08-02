@@ -124,8 +124,9 @@ jobs:
         # For now, only working about the linux amd64 artifact,
         # but we should probably look at building containers for
         # multiple platforms at some point...
+        # Also, set name of binary to osdf-client to run in that mode
         run: |
-          cp ~/dist/pelican_linux_amd64_v1/pelican .
+          cp ~/dist/pelican_linux_amd64_v1/pelican ./osdf-client
         working-directory: ./images 
 
       - name: Set up Docker Buildx

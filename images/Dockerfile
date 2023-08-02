@@ -11,6 +11,10 @@ RUN yum -y update \
 
 WORKDIR /pelican
 
+# Create the xrootd user with a fixed GID/UID
+RUN groupadd -o -g 10940 xrootd
+RUN useradd -o -u 10940 -g 10940 -s /bin/sh xrootd
+
 # Copy over needed files
 # The build+push action that builds this dockerfile will copy the
 # linux/amd64 pelican artifact into the correct spot whenever the action
