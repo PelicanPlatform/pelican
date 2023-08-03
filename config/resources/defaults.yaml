@@ -9,3 +9,5 @@ MonitoringPortHigher: 9999
 Mount: ""
 NamespacePrefix: ""
 Debug: false
+Director:
+  DefaultResponse: cache
