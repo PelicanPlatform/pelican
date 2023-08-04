@@ -79,6 +79,8 @@ func initConfig() {
 
 	viper.SetEnvPrefix(config.GetPreferredPrefix())
 	viper.AutomaticEnv()
+	// This line allows viper to use an env var like ORIGIN_VALUE to override the viper string "Origin.Value"
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	if err := viper.MergeInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
 			cobra.CheckErr(err)
