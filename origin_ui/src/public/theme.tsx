@@ -11,7 +11,6 @@ const poppins = Poppins({
 
 let theme = createTheme({
     palette: {
-
         primary: {
             main: "#0885ff",
             light: "#CFE4FF"

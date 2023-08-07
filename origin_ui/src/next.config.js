@@ -1,6 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-    output: process.env.NODE_ENV ? "standalone" : 'export',
+    output: process.env.NODE_ENV == "dev" ? "standalone" : 'export',
     basePath: '/view',
     trailingSlash: true,
     images: { unoptimized: true }
