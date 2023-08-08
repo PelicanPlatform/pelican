@@ -1,4 +1,6 @@
 
+SHELL := /bin/bash
+
 ifeq ($(OS),Windows_NT)
     goos := windows
     ifeq ($(PROCESSOR_ARCHITEW6432),AMD64)
@@ -40,9 +42,19 @@ web-clean:
 web-build:
 	@cd $(WEBSITE_SRC_PATH) && npm install && npm run build
 
+
+.PHONY: web-docker-build
+web-docker-build:
+	cd $(WEBSITE_SRC_PATH) && docker build -t origin-ui . && docker run --rm -v `pwd`:/webapp -it origin-ui npm run build
+
 .PHONY: web-serve
 web-serve:
 	@cd $(WEBSITE_SRC_PATH) && npm install && npm run dev
+
+.PHONE: web-docker-serve
+web-docker-serve:
+	@cd $(WEBSITE_SRC_PATH) && docker build -t origin-ui . && docker run --rm -v `pwd`:/webapp -p 3000:3000 -it origin-ui npm run dev
+
 
 .PHONY: web-serve-from-go
 web-serve-from-go: web-clean web-build pelican-serve-test-origin
@@ -64,3 +76,8 @@ pelican-build:
 pelican-serve-test-origin:
 	@echo SERVE TEST ORIGIN
 	@cd $(PELICAN_DIST_PATH)/pelican_$(goos)_$(goarch) && cp pelican osdf && ./osdf origin serve  -f https://osg-htc.org -v /tmp/stash/:/test
+
+.PHONY: pelican-docker-serve-test-origin
+pelican-docker-serve-test-origin:
+	@echo SERVE TEST ORIGIN
+	@cd $(PELICAN_DIST_PATH)/pelican_$(goos)_$(goarch) && cp pelican osdf && docker run --rm -v `pwd`:/webapp -v /tmp/stash/:/test -it origin-ui ./osdf origin serve  -f https://osg-htc.org -v /test
