@@ -2,7 +2,7 @@
 # While it is somewhat human-readable, it is meant to help with the documentation
 # generation.
 ---
-name ConfigBase
+name: ConfigBase
 description: >-
   The directory containing the Pelican configurations and data when the utility
   is run as non-root.  Automatically configured; cannot be overridden.
