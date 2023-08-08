@@ -3,17 +3,17 @@ ARG BASE_OSG_SERIES=3.6
 
 FROM opensciencegrid/software-base:$BASE_OSG_SERIES-el7-$BASE_YUM_REPO
 
+# Create the xrootd user with a fixed GID/UID
+RUN groupadd -o -g 10940 xrootd
+RUN useradd -o -u 10940 -g 10940 -s /bin/sh xrootd
+
 # Install dependencies
 RUN yum -y update \
-    && yum -y install golang xrootd xrootd-client xrootd-server\
+    && yum -y install golang xrootd xrootd-client xrootd-server \
     && yum clean all \
     && rm -rf /var/cache/yum/
 
 WORKDIR /pelican
-
-# Create the xrootd user with a fixed GID/UID
-RUN groupadd -o -g 10940 xrootd
-RUN useradd -o -u 10940 -g 10940 -s /bin/sh xrootd
 
 # Copy over needed files
 # The build+push action that builds this dockerfile will copy the
