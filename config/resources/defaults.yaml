@@ -1,4 +1,6 @@
 Port: 8443
+WebPort: 8444
+WebAddress: "0.0.0.0"
 ManagerPort: 1213
 SummaryMonitoringPort: 9931
 DetailedMonitoringPort: 9930
@@ -7,3 +9,5 @@ MonitoringPortHigher: 9999
 Mount: ""
 NamespacePrefix: ""
 Debug: false
+Director:
+  DefaultResponse: cache

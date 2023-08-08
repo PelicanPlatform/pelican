@@ -12,10 +12,12 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"path"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -76,21 +78,29 @@ func periodicReload() {
 	}
 }
 
-func WaitUntilLogin() {
+func WaitUntilLogin() error {
 	if authDB.Load() != nil {
-		return
+		return nil
 	}
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+
 	for {
 		previousCode.Store(currentCode.Load())
 		newCode := fmt.Sprintf("%06v", rand.Intn(1000000))
 		currentCode.Store(&newCode)
-		fmt.Println("Pelican admin interface is not initialized; to initialize, login at http://localhost:8080 with the following code:")
+		fmt.Println("Pelican admin interface is not initialized; to initialize, login at https://localhost:8080 with the following code:")
 		fmt.Println(*currentCode.Load())
 		start := time.Now()
 		for time.Since(start) < 30*time.Second {
-			time.Sleep(100 * time.Millisecond)
+			select {
+			case <-sigs:
+				return errors.New("Process terminated...")
+			default:
+				time.Sleep(100 * time.Millisecond)
+			}
 			if authDB.Load() != nil {
-				return
+				return nil
 			}
 		}
 	}

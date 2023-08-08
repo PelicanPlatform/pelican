@@ -1,6 +1,5 @@
 /*
 Copyright 2023 Brian Bockelman <bbockelman@morgridge.org>
-
 */
 package main
 
@@ -15,9 +14,8 @@ import (
 	"github.com/spf13/viper"
 )
 
-
 var (
-	cfgFile string
+	cfgFile    string
 	outputJSON bool
 
 	rootCmd = &cobra.Command{
@@ -38,13 +36,13 @@ func Execute() {
 
 func init() {
 
-
-
 	cobra.OnInitialize(initConfig)
 
 	rootCmd.AddCommand(objectCmd)
+	rootCmd.AddCommand(directorCmd)
 	objectCmd.CompletionOptions.DisableDefaultCmd = true
 	rootCmd.AddCommand(originCmd)
+	rootCmd.AddCommand(namespaceCmd)
 	rootCmd.AddCommand(rootConfigCmd)
 	rootCmd.AddCommand(rootPluginCmd)
 	preferredPrefix := config.GetPreferredPrefix()
@@ -73,7 +71,7 @@ func initConfig() {
 		viper.AddConfigPath(filepath.Join(home, ".config", "pelican"))
 		viper.AddConfigPath(filepath.Join("/etc", "pelican"))
 		viper.SetConfigType("yaml")
-		viper.SetConfigName("pelican.yaml")
+		viper.SetConfigName("pelican")
 	}
 	if err := viper.BindPFlag("Debug", rootCmd.PersistentFlags().Lookup("debug")); err != nil {
 		panic(err)
@@ -81,6 +79,8 @@ func initConfig() {
 
 	viper.SetEnvPrefix(config.GetPreferredPrefix())
 	viper.AutomaticEnv()
+	// This line allows viper to use an env var like ORIGIN_VALUE to override the viper string "Origin.Value"
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	if err := viper.MergeInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
 			cobra.CheckErr(err)
