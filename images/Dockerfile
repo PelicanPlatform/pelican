@@ -5,7 +5,7 @@ FROM opensciencegrid/software-base:$BASE_OSG_SERIES-el7-$BASE_YUM_REPO
 
 # Install dependencies
 RUN yum -y update \
-    && yum -y install golang \
+    && yum -y install golang xrootd xrootd-client xrootd-server\
     && yum clean all \
     && rm -rf /var/cache/yum/
 
