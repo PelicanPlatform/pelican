@@ -1,5 +1,6 @@
 
-SHELL := /bin/bash
+
+CONTAINER_TOOL := podman
 
 ifeq ($(OS),Windows_NT)
     goos := windows
@@ -37,27 +38,22 @@ web-clean:
 	@echo CLEAN $(WEBSITE_CLEAN_LIST)
 	@rm -rf $(WEBSITE_CLEAN_LIST)
 
-
 .PHONY: web-build
 web-build:
 	@cd $(WEBSITE_SRC_PATH) && npm install && npm run build
-
-
-.PHONY: web-docker-build
-web-docker-build:
-	cd $(WEBSITE_SRC_PATH) && docker build -t origin-ui . && docker run --rm -v `pwd`:/webapp -it origin-ui npm run build
 
 .PHONY: web-serve
 web-serve:
 	@cd $(WEBSITE_SRC_PATH) && npm install && npm run dev
 
+.PHONY: web-docker-build
+web-docker-build:
+	cd $(WEBSITE_SRC_PATH) && $(CONTAINER_TOOL) build -t origin-ui . && $(CONTAINER_TOOL) run --rm -v `pwd`:/webapp -it origin-ui npm run build
+
 .PHONE: web-docker-serve
 web-docker-serve:
-	@cd $(WEBSITE_SRC_PATH) && docker build -t origin-ui . && docker run --rm -v `pwd`:/webapp -p 3000:3000 -it origin-ui npm run dev
+	@cd $(WEBSITE_SRC_PATH) && $(CONTAINER_TOOL) build -t origin-ui . && $(CONTAINER_TOOL) run --rm -v `pwd`:/webapp -p 3000:3000 -it origin-ui npm run dev
 
-
-.PHONY: web-serve-from-go
-web-serve-from-go: web-clean web-build pelican-serve-test-origin
 
 PELICAN_DIST_PATH := dist
 
@@ -67,17 +63,27 @@ pelican-clean:
 	@rm -rf $(PELICAN_DIST_PATH)
 
 .PHONY: pelican-build
-pelican-build:
+pelican-build: web-build
 	@echo PELICAN BUILD
 	@goreleaser --clean --snapshot
 
+# This take awhile to run due to the file mount
+.PHONY: pelican-docker-build
+pelican-docker-build: web-docker-build
+	@echo PELICAN BUILD
+	@$(CONTAINER_TOOL) run -w /app -v $(PWD):/app goreleaser/goreleaser --clean --snapshot
 
 .PHONY: pelican-serve-test-origin
-pelican-serve-test-origin:
+pelican-serve-test-origin: pelican-build
 	@echo SERVE TEST ORIGIN
 	@cd $(PELICAN_DIST_PATH)/pelican_$(goos)_$(goarch) && cp pelican osdf && ./osdf origin serve  -f https://osg-htc.org -v /tmp/stash/:/test
 
 .PHONY: pelican-docker-serve-test-origin
-pelican-docker-serve-test-origin:
+pelican-docker-serve-test-origin: pelican-docker-build
 	@echo SERVE TEST ORIGIN
-	@cd $(PELICAN_DIST_PATH)/pelican_$(goos)_$(goarch) && cp pelican osdf && docker run --rm -v `pwd`:/webapp -v /tmp/stash/:/test -it origin-ui ./osdf origin serve  -f https://osg-htc.org -v /test
+	@cd $(PELICAN_DIST_PATH)/pelican_$(goos)_$(goarch) && cp pelican osdf && $(CONTAINER_TOOL) run --rm -v `pwd`:/webapp -v /tmp/stash/:/test -it origin-ui ./osdf origin serve  -f https://osg-htc.org -v /test
+
+.PHONY: pelican-build-server-image
+pelican-build-server-image:
+	@echo BUILD SERVER IMAGE
+	@$(CONTAINER_TOOL) build -t pelican-server -f images/Dockerfile .

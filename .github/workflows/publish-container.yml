@@ -16,38 +16,6 @@ permissions:
   contents: write
 
 jobs:
-  goreleaser:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
-
-      - name: Set up Go
-        uses: actions/setup-go@v4
-        with:
-          go-version: 1.19
-
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v4
-        with:
-          # either 'goreleaser' (default) or 'goreleaser-pro'
-          distribution: goreleaser
-          version: latest
-          # Switch this to release by removing snapshot later
-          args: release --clean --snapshot
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Your GoReleaser Pro key, if you are using the 'goreleaser-pro' distribution
-          # GORELEASER_KEY: ${{ secrets.GORELEASER_KEY }}
-
-      - name: Upload GoReleaser artifacts
-        uses: actions/upload-artifact@v3
-        with: 
-          name: pelican-artifacts
-          path: dist/
-
   make-date-tag:
     runs-on: ubuntu-latest
     outputs:
@@ -59,17 +27,11 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
-    needs: [goreleaser, make-date-tag]
+    needs: [make-date-tag]
     strategy:
       fail-fast: False
     steps:
       - uses: actions/checkout@v2
-
-      - name: Download GoReleaser Artifact
-        uses: actions/download-artifact@v3
-        with:
-          name: pelican-artifacts
-          path: ~/dist
 
       - name: Generate tag list
         id: generate-tag-list
@@ -119,14 +81,6 @@ jobs:
           registry: hub.opensciencegrid.org
           username: ${{ secrets.PELICAN_HARBOR_ROBOT_USER }}
           password: ${{ secrets.PELICAN_HARBOR_ROBOT_PASSWORD }}
-          
-      - name: Copy GoReleaser Artifact into Docker context
-        # For now, only working about the linux amd64 artifact,
-        # but we should probably look at building containers for
-        # multiple platforms at some point...
-        run: |
-          cp ~/dist/pelican_linux_amd64_v1/pelican .
-        working-directory: ./images 
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
@@ -134,6 +88,7 @@ jobs:
       - name: Build and push Docker images
         uses: docker/build-push-action@v4
         with:
-          context: ./images
+          context: .
+          file: ./images/Dockerfile
           push: true
           tags: "${{ steps.generate-tag-list.outputs.taglist }}"
