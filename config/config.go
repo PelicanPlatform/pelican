@@ -199,6 +199,15 @@ func CleanupTempResources() {
 	})
 }
 
+func getConfigBase() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+
+	return filepath.Join(home, ".config", "pelican"), nil
+}
+
 func InitServer() error {
 	viper.SetConfigType("yaml")
 	if IsRootExecution() {
@@ -214,12 +223,10 @@ func InitServer() error {
 		viper.SetDefault("XrootdMultiuser", true)
 		viper.SetDefault("GeoIPLocation", "/var/cache/pelican/maxmind/GeoLite2-City.mmdb")
 	} else {
-		home, err := os.UserHomeDir()
+		configBase, err := getConfigBase()
 		if err != nil {
 			return err
 		}
-
-		configBase := filepath.Join(home, ".config", "pelican")
 		viper.SetDefault("TLSCertificate", filepath.Join(configBase, "certificates", "tls.crt"))
 		viper.SetDefault("TLSKey", filepath.Join(configBase, "certificates", "tls.key"))
 		viper.SetDefault("RobotsTxtFile", filepath.Join(configBase, "robots.txt"))
@@ -271,6 +278,16 @@ func InitServer() error {
 }
 
 func InitClient() error {
+	if IsRootExecution() {
+		viper.SetDefault("IssuerKey", "/etc/pelican/issuer.jwk")
+	} else {
+		configBase, err := getConfigBase()
+		if err != nil {
+			return err
+		}
+		viper.SetDefault("IssuerKey", filepath.Join(configBase, "issuer.jwk"))
+	}
+
 	upper_prefix := GetPreferredPrefix()
 	lower_prefix := strings.ToLower(upper_prefix)
 
@@ -279,7 +296,7 @@ func InitClient() error {
 	viper.SetDefault("SlowTransferWindow", 30)
 
 	if upper_prefix == "OSDF" || upper_prefix == "STASH" {
-		viper.SetDefault("NamespaceURL", "https://topology.opensciencegrid.org/osdf/namespaces")
+		viper.SetDefault("TopologyNamespaceURL", "https://topology.opensciencegrid.org/osdf/namespaces")
 	}
 
 	viper.SetEnvPrefix(upper_prefix)

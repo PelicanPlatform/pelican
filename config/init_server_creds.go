@@ -67,7 +67,7 @@ func LoadPublicKey(existingJWKS string, issuerKeyFile string) (*jwk.Set, error) 
 	}
 	
 	if err := GeneratePrivateKey(issuerKeyFile, elliptic.P521()); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "Failed to generate new private key")
 	}
 	contents, err := os.ReadFile(issuerKeyFile)
 	if err != nil {
@@ -83,7 +83,7 @@ func LoadPublicKey(existingJWKS string, issuerKeyFile string) (*jwk.Set, error) 
 	}
 	err = jwk.AssignKeyID(pkey)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "Failed to assign key ID to public key")
 	}
 	jwks.Add(pkey)
 	return &jwks, nil
@@ -176,7 +176,7 @@ func GeneratePrivateKey(keyLocation string, curve elliptic.Curve) error {
 		file.Close()
 		return nil
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
+		return errors.Wrap(err, "Failed to load private key due to I/O error")
 	}
 	keyDir := filepath.Dir(keyLocation)
 	if err := os.MkdirAll(keyDir, 0750); err != nil {
@@ -185,7 +185,7 @@ func GeneratePrivateKey(keyLocation string, curve elliptic.Curve) error {
 	// In this case, the private key file doesn't exist.
 	file, err := os.OpenFile(keyLocation, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "Failed to create new private key file")
 	}
 	defer file.Close()
 	priv, err := ecdsa.GenerateKey(curve, rand.Reader)

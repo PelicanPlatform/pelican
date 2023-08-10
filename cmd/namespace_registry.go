@@ -69,7 +69,7 @@ func resp_to_json(body []byte) (map[string]string) {
 	return respData
 }
 
-func namespace_register_with_identity(publicKeyPath string, privateKeyPath string, namespaceRegistryEndpoint string, prefix string) (error) {
+func namespace_register_with_identity(privateKeyPath string, namespaceRegistryEndpoint string, prefix string) (error) {
 	data := map[string]interface{}{
 		"identity_required": "true",
 	}
@@ -106,13 +106,13 @@ func namespace_register_with_identity(publicKeyPath string, privateKeyPath strin
 	}
 	access_token := respData["access_token"]
 	fmt.Printf("Access token: %s\n", access_token)
-	return namespace_register(publicKeyPath, privateKeyPath, namespaceRegistryEndpoint, access_token, prefix)
+	return namespace_register(privateKeyPath, namespaceRegistryEndpoint, access_token, prefix)
 }
 
-func namespace_register(publicKeyPath string, privateKeyPath string, namespaceRegistryEndpoint string, access_token string, prefix string) (error) {
-	publicKey, err := config.LoadPublicKey(publicKeyPath, privateKeyPath)
+func namespace_register(privateKeyPath string, namespaceRegistryEndpoint string, access_token string, prefix string) (error) {
+	publicKey, err := config.LoadPublicKey("", privateKeyPath)
 	if err != nil {
-		return fmt.Errorf("Failed to load public key: %v\n", err)
+		return fmt.Errorf("Failed to retrieve public key: %v\n", err)
 	}
 
 	jwks, err := config.JWKSMap(publicKey)
