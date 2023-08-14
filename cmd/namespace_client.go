@@ -4,14 +4,15 @@ import (
 	"errors"
 	"os"
 
+	"github.com/pelicanplatform/pelican/namespace-registry"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	log "github.com/sirupsen/logrus"
 )
 
-// These functions are just placeholders. You need to provide actual implementation.
-
+// Variables to which command line arguments will
+// be bound, for using internally
 var withIdentity bool
 var prefix string
 var namespaceURL string
@@ -59,13 +60,13 @@ func registerANamespace(cmd *cobra.Command, args []string) {
 	}
 
 	if withIdentity {
-		err := namespace_register_with_identity(privkey, endpoint, prefix)
+		err := nsregistry.NamespaceRegisterWithIdentity(privkey, endpoint, prefix)
 		if err != nil {
 			log.Error(err)
 			os.Exit(1)
 		}
 	} else {
-		err := namespace_register(privkey, endpoint, "", prefix)
+		err := nsregistry.NamespaceRegister(privkey, endpoint, "", prefix)
 		if err != nil {
 			log.Error(err)
 			os.Exit(1)
@@ -86,7 +87,7 @@ func deleteANamespace(cmd *cobra.Command, args []string) {
 	}
 
 	endpoint := namespaceEndpoint + "/" + prefix
-	err = delete_namespace(endpoint)
+	err = nsregistry.NamespaceDelete(endpoint)
 	if err != nil {
 		log.Error(err)
 		os.Exit(1)
@@ -106,7 +107,7 @@ func listAllNamespaces(cmd *cobra.Command, args []string) {
 	}
 
 	endpoint := namespaceEndpoint
-	err = list_namespaces(endpoint)
+	err = nsregistry.NamespaceList(endpoint)
 	if err != nil {
 		log.Error(err)
 		os.Exit(1)
@@ -128,7 +129,7 @@ func getNamespace(cmd *cobra.Command, args []string) {
 		}
 
 		endpoint := namespaceEndpoint + "/" + prefix + "/issuer.jwks"
-		err = get_namespace(endpoint)
+		err = nsregistry.NamespaceGet(endpoint)
 		if err != nil {
 			log.Error(err)
 			os.Exit(1)

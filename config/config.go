@@ -222,6 +222,9 @@ func InitServer() error {
 		viper.SetDefault("OriginUI.PasswordFile", "/etc/pelican/origin-ui-passwd")
 		viper.SetDefault("XrootdMultiuser", true)
 		viper.SetDefault("GeoIPLocation", "/var/cache/pelican/maxmind/GeoLite2-City.mmdb")
+		viper.SetDefault("NSRegistryLocation", "/var/lib/pelican/ns-registry/registry.sqlite")
+		viper.SetDefault("OIDCClientIDFile", "/etc/pelican/ns-registry/client-id")
+		viper.SetDefault("OIDCClientSecretFile", "/etc/pelican/ns-registry/client-secret")
 	} else {
 		configBase, err := getConfigBase()
 		if err != nil {
@@ -235,7 +238,10 @@ func InitServer() error {
 		viper.SetDefault("MacaroonsKeyFile", filepath.Join(configBase, "macaroons-secret"))
 		viper.SetDefault("IssuerKey", filepath.Join(configBase, "issuer.jwk"))
 		viper.SetDefault("OriginUI.PasswordFile", filepath.Join(configBase, "origin-ui-passwd"))
-		viper.SetDefault("GeoIPLocation", filepath.Join(configBase, "GeoLite2-City.mmdb"))
+		viper.SetDefault("GeoIPLocation", filepath.Join(configBase, "maxmind", "GeoLite2-City.mmdb"))
+		viper.SetDefault("NSRegistryLocation", filepath.Join(configBase, "ns-registry", "registry.sqlite"))
+		viper.SetDefault("OIDCClientIDFile", filepath.Join(configBase, "ns-registry", "client-id"))
+		viper.SetDefault("OIDCClientSecretFile", filepath.Join(configBase, "ns-registry", "client-idclient-secret"))
 
 		if userRuntimeDir := os.Getenv("XDG_RUNTIME_DIR"); userRuntimeDir != "" {
 			runtimeDir := filepath.Join(userRuntimeDir, "pelican")
