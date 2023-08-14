@@ -33,7 +33,7 @@ func makeRequest(url string, method string, data map[string]interface{}) ([]byte
 	// }
 	// client := &http.Client{Transport: tr}
 
-	Use the following line for normal TLS verification
+	// Use the following line for normal TLS verification
 	client := &http.Client{}
 
 	resp, err := client.Do(req)
