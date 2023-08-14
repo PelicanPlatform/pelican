@@ -28,13 +28,13 @@ func makeRequest(url string, method string, data map[string]interface{}) ([]byte
 	req.Header.Set("Content-Type", "application/json")
 
 	// Use this to ignore TLS while testing (remove or comment out in production)
-	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-	}
-	client := &http.Client{Transport: tr}
+	// tr := &http.Transport{
+	// 	TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	// }
+	// client := &http.Client{Transport: tr}
 
-	// Use the following line for normal TLS verification
-	// client := &http.Client{}
+	Use the following line for normal TLS verification
+	client := &http.Client{}
 
 	resp, err := client.Do(req)
 	if err != nil {
