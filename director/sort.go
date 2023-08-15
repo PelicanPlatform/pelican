@@ -86,7 +86,7 @@ func SortServers(addr netip.Addr, ads []ServerAd) ([]ServerAd, error) {
 	sort.Sort(distances)
 	resultAds := make([]ServerAd, len(ads))
 	for idx, distance := range distances {
-		resultAds[distance.Index] = ads[idx]
+		resultAds[idx] = ads[distance.Index]
 	}
 	return resultAds, nil
 }
