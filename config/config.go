@@ -3,6 +3,7 @@ package config
 import (
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -199,6 +200,14 @@ func CleanupTempResources() {
 	})
 }
 
+func ComputeExternalAddress() string {
+	config_url := viper.GetString("ExternalAddress")
+	if config_url != "" {
+		return config_url
+	}
+	return fmt.Sprintf("%v:%v", viper.GetString("Hostname"), viper.GetInt("WebPort"))
+}
+
 func getConfigBase() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -222,6 +231,7 @@ func InitServer() error {
 		viper.SetDefault("OriginUI.PasswordFile", "/etc/pelican/origin-ui-passwd")
 		viper.SetDefault("XrootdMultiuser", true)
 		viper.SetDefault("GeoIPLocation", "/var/cache/pelican/maxmind/GeoLite2-City.mmdb")
+		viper.SetDefault("MonitoringData", "/var/lib/pelican/monitoring/data")
 	} else {
 		configBase, err := getConfigBase()
 		if err != nil {
@@ -236,6 +246,7 @@ func InitServer() error {
 		viper.SetDefault("IssuerKey", filepath.Join(configBase, "issuer.jwk"))
 		viper.SetDefault("OriginUI.PasswordFile", filepath.Join(configBase, "origin-ui-passwd"))
 		viper.SetDefault("GeoIPLocation", filepath.Join(configBase, "GeoLite2-City.mmdb"))
+		viper.SetDefault("MonitoringData", filepath.Join(configBase, "monitoring/data"))
 
 		if userRuntimeDir := os.Getenv("XDG_RUNTIME_DIR"); userRuntimeDir != "" {
 			runtimeDir := filepath.Join(userRuntimeDir, "pelican")
@@ -256,12 +267,18 @@ func InitServer() error {
 	}
 	viper.SetDefault("TLSCertFile", "/etc/pki/tls/cert.pem")
 
+	err := os.MkdirAll(viper.GetString("MonitoringData"), 0700)
+	if err != nil {
+		return errors.Wrapf(err, "Failure when creating a directory for the monitoring data")
+	}
+
 	hostname, err := os.Hostname()
 	if err != nil {
 		return err
 	}
 	viper.SetDefault("Hostname", hostname)
 	viper.SetDefault("Sitename", hostname)
+	viper.SetDefault("Hostname", hostname)
 
 	err = viper.MergeConfig(strings.NewReader(defaultsYaml))
 	if err != nil {
