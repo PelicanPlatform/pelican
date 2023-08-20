@@ -517,6 +517,11 @@ func launchXrootd() error {
 func serveOrigin(/*cmd*/ *cobra.Command, /*args*/ []string) error {
 	defer config.CleanupTempResources()
 
+	err := config.DiscoverFederation()
+	if err != nil {
+		log.Warningln("Failed to do service auto-discovery:", err)
+	}
+
 	monitorPort, err := metrics.ConfigureMonitoring()
 	if err != nil {
 		return err
@@ -533,6 +538,9 @@ func serveOrigin(/*cmd*/ *cobra.Command, /*args*/ []string) error {
 		return err
 	}
 	if err = origin_ui.ConfigureOriginUI(engine); err != nil {
+		return err
+	}
+	if err = origin_ui.PeriodicAdvertiseOrigin(); err != nil {
 		return err
 	}
 

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	log "github.com/sirupsen/logrus"
 )
 
 func getRedirectURL(reqPath string, ad ServerAd, requiresAuth bool) (redirectURL url.URL) {
@@ -139,23 +140,79 @@ func RedirectToOrigin(ginCtx *gin.Context) {
 
 // Middleware sends GET /foo/bar to the RedirectToCache function, as if the
 // original request had been made to /api/v1.0/director/object/foo/bar
-func ShortcutMiddleware() gin.HandlerFunc {
+func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if !strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/director") {
-			// If not, redirect to the RedirectToCache route
-			c.Request.URL.Path = "/api/v1.0/director/object" + c.Request.URL.Path
-			RedirectToCache(c)
-			c.Abort()
+		// If we're configured for cache mode or we haven't set the flag,
+		// we should use cache middleware
+		if defaultResponse == "cache" {
+			if !strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/director") {
+				c.Request.URL.Path = "/api/v1.0/director/object" + c.Request.URL.Path
+				RedirectToCache(c)
+				c.Abort()
+				return
+			}
+
+			// If the path starts with the correct prefix, continue with the next handler
+			c.Next()
+		} else if defaultResponse == "origin" {
+			if !strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/director") {
+				c.Request.URL.Path = "/api/v1.0/director/origin" + c.Request.URL.Path
+				RedirectToOrigin(c)
+				c.Abort()
+				return
+			}
+			c.Next()
+		}
+	}
+}
+
+func RegisterOrigin (ctx *gin.Context) {
+	tokens, present := ctx.Request.Header["Authorization"]
+	if !present || len(tokens) == 0 {
+		ctx.JSON(401, gin.H{"error": "Bearer token not present in the 'Authorization' header"})
+		return
+	}
+	ad := OriginAdvertise{}
+	if ctx.ShouldBind(&ad) != nil {
+		ctx.JSON(400, gin.H{"error": "Invalid origin registration"})
+		return
+	}
+
+	for _, namespace := range(ad.Namespaces) {
+		ok, err := VerifyAdvertiseToken(tokens[0], namespace.Path)
+		if err != nil {
+			log.Warningln("Failed to verify token:", err)
+			ctx.JSON(400, gin.H{"error": "Authorization token verification failed"})
 			return
 		}
-
-		// If the path starts with the correct prefix, continue with the next handler
-		c.Next()
+		if !ok {
+			log.Warningf("Origin %v advertised to namespace %v without valid registration\n",
+				ad.Name, namespace.Path)
+			ctx.JSON(400, gin.H{"error": "Origin not authorized to advertise to this namespace"})
+			return
+		}
 	}
+
+	ad_url, err := url.Parse(ad.URL)
+	if err != nil {
+		log.Warningf("Failed to parse origin URL %v: %v\n", ad.URL, err)
+		ctx.JSON(400, gin.H{"error": "Invalid origin URL"})
+		return
+	}
+
+	originAd := ServerAd{
+		Name:    ad.Name,
+		AuthURL: *ad_url,
+		URL:     *ad_url,
+		Type:    OriginType,
+	}
+	RecordAd(originAd, &ad.Namespaces)
+	ctx.JSON(200, gin.H{"msg": "Successful registration"})
 }
 
 func RegisterDirector(router *gin.RouterGroup) {
 	// Establish the routes used for cache/origin redirection
 	router.GET("/api/v1.0/director/object/*any", RedirectToCache)
 	router.GET("/api/v1.0/director/origin/*any", RedirectToOrigin)
+	router.POST("/api/v1.0/director/registerOrigin", RegisterOrigin)
 }
