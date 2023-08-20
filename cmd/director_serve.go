@@ -1,41 +1,76 @@
 package main
 
 import (
-	"github.com/gin-gonic/gin"
+	"crypto/elliptic"
+	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
+
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
+	"github.com/pelicanplatform/pelican/web_ui"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
+func generateTLSCertIfNeeded() error {
+
+	// As necessary, generate a private key and corresponding cert
+	if err := config.GeneratePrivateKey(viper.GetString("TLSKey"), elliptic.P256()); err != nil {
+		return err
+	}
+	if err := config.GenerateCert(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	log.Info("Initializing Director GeoIP database...")
 	director.InitializeDB()
 
-	log.Info("Generating/advertising server ads...")
+	if config.GetPreferredPrefix() == "OSDF" {
+		log.Info("Generating/advertising server ads from OSG topology service...")
 
-	// Get the ads from topology, populate the cache, and keep the cache
-	// updated with fresh info
-	if err := director.AdvertiseOSDF(); err != nil {
-		panic(err)
+		// Get the ads from topology, populate the cache, and keep the cache
+		// updated with fresh info
+		if err := director.AdvertiseOSDF(); err != nil {
+			panic(err)
+		}
 	}
 	go director.PeriodicCacheReload()
 
-	gin.SetMode(gin.ReleaseMode)
-	cacheEngine := gin.Default()
-
-	// Use the shortcut middleware so that GET /foo/bar
-	// acts the same as GET /api/v1.0/director/object/foo/bar
-	cacheEngine.Use(director.ShortcutMiddleware())
-	director.RegisterDirector(cacheEngine.Group("/"))
-
-	// serve the Director on specified port
-	port := viper.GetString("port")
-	log.Info("Serving director on port", port)
-	err := cacheEngine.Run(":" + port)
+	err := generateTLSCertIfNeeded()
 	if err != nil {
-		panic(err)
+		return err
 	}
+
+	engine, err := web_ui.GetEngine()
+	if err != nil {
+		return err
+	}
+
+	// Configure the shortcut middleware to either redirect to a cache
+	// or to an origin
+	defaultResponse := viper.GetString("Director.DefaultResponse")
+	if !(defaultResponse == "cache" || defaultResponse == "origin") {
+		return fmt.Errorf("The director's default response must either be set to 'cache' or 'origin'," +
+		" but you provided %q. Was there a typo?", defaultResponse)
+	}
+	log.Debugf("The director will redirect to %ss by default", defaultResponse)
+	engine.Use(director.ShortcutMiddleware(defaultResponse))
+	director.RegisterDirector(engine.Group("/"))
+
+	log.Info("Starting web engine...")
+	go web_ui.RunEngine(engine)
+
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+	sig := <-sigs
+	_ = sig
 
 	return nil
 }

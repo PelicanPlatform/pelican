@@ -116,13 +116,17 @@ func GetAllPrefixes() []string {
 func DiscoverFederation() error {
 	federationStr := viper.GetString("FederationURL")
 	if len(federationStr) == 0 {
+		log.Debugln("Federation URL is unset; skipping discovery")
 		return nil
 	}
+	log.Debugln("Federation URL:", federationStr)
 	curDirectorURL := viper.GetString("DirectorURL")
-	if len(curDirectorURL) != 0 {
+	curNamespaceURL := viper.GetString("DirectorURL")
+	if len(curDirectorURL) != 0 && len(curNamespaceURL) != 0 {
 		return nil
 	}
 
+	log.Debugln("Performing federation service discovery against endpoint", federationStr)
 	federationUrl, err := url.Parse(federationStr)
 	if err != nil {
 		return errors.Wrapf(err, "Invalid federation value %s:", federationStr)
@@ -164,7 +168,15 @@ func DiscoverFederation() error {
 	if err != nil {
 		return errors.Wrapf(err, "Failure when parsing federation metadata at %s", discoveryUrl)
 	}
-	viper.Set("DirectorURL", metadata.DirectorEndpoint)
+	if curDirectorURL == "" {
+		log.Debugln("Federation service discovery resulted in director URL", metadata.DirectorEndpoint)
+		viper.Set("DirectorURL", metadata.DirectorEndpoint)
+	}
+	if curNamespaceURL == "" {
+		log.Debugln("Federation service discovery resulted in namespace registration URL",
+			metadata.NamespaceRegistrationEndpoint)
+		viper.Set("NamespaceURL", metadata.NamespaceRegistrationEndpoint)
+	}
 
 	return nil
 }
@@ -196,6 +208,15 @@ func ComputeExternalAddress() string {
 	return fmt.Sprintf("%v:%v", viper.GetString("Hostname"), viper.GetInt("WebPort"))
 }
 
+func getConfigBase() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+
+	return filepath.Join(home, ".config", "pelican"), nil
+}
+
 func InitServer() error {
 	viper.SetConfigType("yaml")
 	if IsRootExecution() {
@@ -212,12 +233,10 @@ func InitServer() error {
 		viper.SetDefault("GeoIPLocation", "/var/cache/pelican/maxmind/GeoLite2-City.mmdb")
 		viper.SetDefault("MonitoringData", "/var/lib/pelican/monitoring/data")
 	} else {
-		home, err := os.UserHomeDir()
+		configBase, err := getConfigBase()
 		if err != nil {
 			return err
 		}
-
-		configBase := filepath.Join(home, ".config", "pelican")
 		viper.SetDefault("TLSCertificate", filepath.Join(configBase, "certificates", "tls.crt"))
 		viper.SetDefault("TLSKey", filepath.Join(configBase, "certificates", "tls.key"))
 		viper.SetDefault("RobotsTxtFile", filepath.Join(configBase, "robots.txt"))
@@ -276,6 +295,16 @@ func InitServer() error {
 }
 
 func InitClient() error {
+	if IsRootExecution() {
+		viper.SetDefault("IssuerKey", "/etc/pelican/issuer.jwk")
+	} else {
+		configBase, err := getConfigBase()
+		if err != nil {
+			return err
+		}
+		viper.SetDefault("IssuerKey", filepath.Join(configBase, "issuer.jwk"))
+	}
+
 	upper_prefix := GetPreferredPrefix()
 	lower_prefix := strings.ToLower(upper_prefix)
 
@@ -284,7 +313,7 @@ func InitClient() error {
 	viper.SetDefault("SlowTransferWindow", 30)
 
 	if upper_prefix == "OSDF" || upper_prefix == "STASH" {
-		viper.SetDefault("NamespaceURL", "https://topology.opensciencegrid.org/osdf/namespaces")
+		viper.SetDefault("TopologyNamespaceURL", "https://topology.opensciencegrid.org/osdf/namespaces")
 	}
 
 	viper.SetEnvPrefix(upper_prefix)
