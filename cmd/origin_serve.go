@@ -20,7 +20,7 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/pelicanplatform/pelican"
+	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/origin_ui"
 	"github.com/pelicanplatform/pelican/web_ui"
@@ -65,6 +65,10 @@ type XrootdConfig struct {
 
 func init() {
 	err := config.InitServer()
+	cobra.CheckErr(err)
+	err = metrics.SetComponentHealthStatus("xrootd", "critical", "xrootd has not been started")
+	cobra.CheckErr(err)
+	err = metrics.SetComponentHealthStatus("cmsd", "critical", "cmsd has not been started")
 	cobra.CheckErr(err)
 }
 
@@ -430,6 +434,9 @@ func launchXrootd() error {
 		return err
 	}
 	log.Info("Successfully launched xrootd")
+	if err := metrics.SetComponentHealthStatus("xrootd", "ok", ""); err != nil {
+		return err
+	}
 
 	cmsdCmd := exec.Command("cmsd", "-f", "-c", configPath)
 	if cmsdCmd.Err != nil {
@@ -443,6 +450,9 @@ func launchXrootd() error {
 		return err
 	}
 	log.Info("Successfully launched cmsd")
+	if err := metrics.SetComponentHealthStatus("cmsd", "ok", ""); err != nil {
+		return err
+	}
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
@@ -470,12 +480,20 @@ func launchXrootd() error {
 				if !cmsdExpiry.IsZero() {
 					return nil
 				}
+				if err = metrics.SetComponentHealthStatus("xrootd", "critical",
+					"xrootd process failed unexpectedly"); err != nil {
+					return err
+				}
 				return errors.Wrap(waitResult, "xrootd process failed unexpectedly")
 			}
 			return nil
 		case waitResult := <-cmsdDoneChannel:
 			if waitResult != nil {
 				if !xrootdExpiry.IsZero() {
+					return nil
+				}
+				if err = metrics.SetComponentHealthStatus("cmsd", "critical",
+					"cmsd process failed unexpectedly"); err != nil {
 					return nil
 				}
 				return errors.Wrap(waitResult, "cmsd process failed unexpectedly")
@@ -504,7 +522,7 @@ func serveOrigin(/*cmd*/ *cobra.Command, /*args*/ []string) error {
 		log.Warningln("Failed to do service auto-discovery:", err)
 	}
 
-	monitorPort, err := pelican.ConfigureMonitoring()
+	monitorPort, err := metrics.ConfigureMonitoring()
 	if err != nil {
 		return err
 	}
@@ -527,10 +545,16 @@ func serveOrigin(/*cmd*/ *cobra.Command, /*args*/ []string) error {
 	}
 
 	go web_ui.RunEngine(engine)
+	if err = metrics.SetComponentHealthStatus("web-ui", "warning", "Authentication not initialized"); err != nil {
+		return err
+	}
 
 	// Ensure we wait until the origin has been initialized
 	// before launching XRootD.
 	if err = origin_ui.WaitUntilLogin(); err != nil {
+		return err
+	}
+	if err = metrics.SetComponentHealthStatus("web-ui", "ok", ""); err != nil {
 		return err
 	}
 

@@ -1,4 +1,4 @@
-package pelican
+package metrics
 
 import (
 	"bytes"

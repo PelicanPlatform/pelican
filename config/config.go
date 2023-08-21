@@ -3,6 +3,7 @@ package config
 import (
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -199,6 +200,14 @@ func CleanupTempResources() {
 	})
 }
 
+func ComputeExternalAddress() string {
+	config_url := viper.GetString("ExternalAddress")
+	if config_url != "" {
+		return config_url
+	}
+	return fmt.Sprintf("%v:%v", viper.GetString("Hostname"), viper.GetInt("WebPort"))
+}
+
 func getConfigBase() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -225,6 +234,7 @@ func InitServer() error {
 		viper.SetDefault("NSRegistryLocation", "/var/lib/pelican/ns-registry/registry.sqlite")
 		viper.SetDefault("OIDCClientIDFile", "/etc/pelican/ns-registry/client-id")
 		viper.SetDefault("OIDCClientSecretFile", "/etc/pelican/ns-registry/client-secret")
+		viper.SetDefault("MonitoringData", "/var/lib/pelican/monitoring/data")
 	} else {
 		configBase, err := getConfigBase()
 		if err != nil {
@@ -242,6 +252,8 @@ func InitServer() error {
 		viper.SetDefault("NSRegistryLocation", filepath.Join(configBase, "ns-registry", "registry.sqlite"))
 		viper.SetDefault("OIDCClientIDFile", filepath.Join(configBase, "ns-registry", "client-id"))
 		viper.SetDefault("OIDCClientSecretFile", filepath.Join(configBase, "ns-registry", "client-idclient-secret"))
+		viper.SetDefault("GeoIPLocation", filepath.Join(configBase, "GeoLite2-City.mmdb"))
+		viper.SetDefault("MonitoringData", filepath.Join(configBase, "monitoring/data"))
 
 		if userRuntimeDir := os.Getenv("XDG_RUNTIME_DIR"); userRuntimeDir != "" {
 			runtimeDir := filepath.Join(userRuntimeDir, "pelican")
@@ -262,11 +274,18 @@ func InitServer() error {
 	}
 	viper.SetDefault("TLSCertFile", "/etc/pki/tls/cert.pem")
 
+	err := os.MkdirAll(viper.GetString("MonitoringData"), 0700)
+	if err != nil {
+		return errors.Wrapf(err, "Failure when creating a directory for the monitoring data")
+	}
+
 	hostname, err := os.Hostname()
 	if err != nil {
 		return err
 	}
+	viper.SetDefault("Hostname", hostname)
 	viper.SetDefault("Sitename", hostname)
+	viper.SetDefault("Hostname", hostname)
 
 	err = viper.MergeConfig(strings.NewReader(defaultsYaml))
 	if err != nil {
