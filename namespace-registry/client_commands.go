@@ -1,7 +1,6 @@
 package nsregistry
 
 import (
-	// Uncomment if turning off TLS for local testing
 	"crypto/tls"
 
 	"encoding/hex"
@@ -16,6 +15,7 @@ import (
 	"encoding/base64"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/spf13/viper"
 )
 
 func makeRequest(url string, method string, data map[string]interface{}) ([]byte, error) {
@@ -27,14 +27,13 @@ func makeRequest(url string, method string, data map[string]interface{}) ([]byte
 
 	req.Header.Set("Content-Type", "application/json")
 
-	// Use this to ignore TLS while testing (remove or comment out in production)
-	// tr := &http.Transport{
-	// 	TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-	// }
-	// client := &http.Client{Transport: tr}
-
-	// Use the following line for normal TLS verification
 	client := &http.Client{}
+	if viper.GetBool("TLSSkipVerify") {
+		tr := &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		}
+		client = &http.Client{Transport: tr}
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {
