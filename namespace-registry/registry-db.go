@@ -7,6 +7,7 @@ import (
 	"os"
 	"fmt"
 
+	"github.com/pkg/errors"
 	"github.com/spf13/viper"
 	// commented sqlite driver requires CGO
 	// _ "github.com/mattn/go-sqlite3" // SQLite driver
@@ -57,11 +58,14 @@ func addNamespace(ns *Namespace) error {
 	return err
 }
 
+/**
+ * Commenting this out until we are ready to use it.  -BB
 func updateNamespace(ns *Namespace) error {
 	query := `UPDATE namespace SET pubkey = ?, identity = ?, admin_metadata = ? WHERE prefix = ?`
 	_, err := db.Exec(query, ns.Pubkey, ns.Identity, ns.AdminMetadata, ns.Prefix)
 	return err
 }
+ */
 
 func deleteNamespace(prefix string) error {
 	query := `DELETE FROM namespace WHERE prefix = ?`
@@ -69,6 +73,8 @@ func deleteNamespace(prefix string) error {
 	return err
 }
 
+/**
+ * Commenting this out until we are ready to use it.  -BB
 func getNamespace(prefix string) (*Namespace, error) {
 	ns := &Namespace{}
 	query := `SELECT * FROM namespace WHERE prefix = ?`
@@ -78,6 +84,7 @@ func getNamespace(prefix string) (*Namespace, error) {
 	}
 	return ns, nil
 }
+*/
 
 func getAllNamespaces() ([]*Namespace, error) {
 	query := `SELECT * FROM namespace`
@@ -100,15 +107,19 @@ func getAllNamespaces() ([]*Namespace, error) {
 }
 
 func InitializeDB() error {
-	var err error
 	dbPath := viper.GetString("NSRegistryLocation")
 	if dbPath == "" {
-		log.Fatal("Could not get path for the namespace registry database.")
+		err := errors.New("Could not get path for the namespace registry database.")
+		log.Fatal(err)
+		return err
 	}
 
 	// Before attempting to create the database, the path
 	// must exist or sql.Open will panic.
-	os.MkdirAll(filepath.Dir(dbPath), 0755)
+	err := os.MkdirAll(filepath.Dir(dbPath), 0755)
+	if err != nil {
+		return errors.Wrap(err, "Failed to create directory for namespace registry database")
+	}
 	db, err = sql.Open("sqlite", dbPath)
 	if err != nil {
 		return fmt.Errorf("Failed to open the database: %s", err)

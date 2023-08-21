@@ -196,7 +196,7 @@ Handler functions called upon by the gin router
 func cliRegisterNamespace(c *gin.Context) {
 	var requestData map[string]interface{}
 	if err := c.BindJSON(&requestData); err != nil {
-		log.Errorf("Bad Request: %w", err)
+		log.Errorln("Bad Request", err)
 		c.JSON(http.StatusBadRequest, gin.H{"status": "Bad Request"})
 		return
 	}
@@ -364,6 +364,8 @@ func dbDeleteNamespace(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "success"})
 }
 
+/**
+ * Commenting out until we're ready to use it.  -BB
 func cliListNamespaces(c *gin.Context) {
 	prefix := c.Param("prefix")
 	log.Debugf("Trying to get namespace data for prefix %s", prefix)
@@ -375,6 +377,7 @@ func cliListNamespaces(c *gin.Context) {
 
 	c.JSON(http.StatusOK, ns)
 }
+*/
 
 func dbGetAllNamespaces(c *gin.Context) {
 	nss, err := getAllNamespaces()
@@ -385,6 +388,8 @@ func dbGetAllNamespaces(c *gin.Context) {
 	c.JSON(http.StatusOK, nss)
 }
 
+/**
+ * Commenting out until we're ready to use it.  -BB
 func getJwks(c *gin.Context) {
 	prefix := c.Param("prefix")
 	c.JSON(http.StatusOK, gin.H{"status": "Get JWKS is not implemented", "prefix": prefix})
@@ -394,6 +399,7 @@ func getOpenIDConfiguration(c *gin.Context) {
 	prefix := c.Param("prefix")
 	c.JSON(http.StatusOK, gin.H{"status": "getOpenIDConfiguration is not implemented", "prefix": prefix})
 }
+*/
 
 func RegisterNamespaceRegistry(router *gin.RouterGroup) {
 	// Establish various routes to be used by the namespace registry
