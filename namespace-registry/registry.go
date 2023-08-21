@@ -4,7 +4,6 @@ import (
 	"github.com/gin-gonic/gin"
 	// "github.com/joho/godotenv"
 	"net/http"
-	"fmt"
 	"crypto/rand"
 	"encoding/hex"
 	"crypto"
@@ -19,6 +18,7 @@ import (
 	"github.com/spf13/viper"
 	"os"
 	"strings"
+	"sync"
 	log "github.com/sirupsen/logrus"
 	
 	// use this sqlite driver instead of the one from
@@ -34,6 +34,11 @@ var (
 	DeviceAuthEndpoint string = "https://cilogon.org/oauth2/device_authorization"
 	TokenEndpoint      string = "https://cilogon.org/oauth2/token"
 	GrantType          string = "urn:ietf:params:oauth:grant-type:device_code"
+
+	// Loading of public/private keys for signing challenges
+	serverCredsLoad        sync.Once
+	serverCredsPrivKey    *ecdsa.PrivateKey
+	serverCredsErr         error
 )
 
 type Response struct {
@@ -78,6 +83,16 @@ func generateNonce() (string, error) {
     return hex.EncodeToString(nonce), nil
 }
 
+func loadServerKeys() (*ecdsa.PrivateKey, error) {
+	// Note: go 1.21 introduces `OnceValues` which automates this procedure.
+	// TODO: Reimplement the function once we switch to a minimum of 1.21
+	serverCredsLoad.Do(func() {
+		issuerFileName := viper.GetString("IssuerKey")
+		serverCredsPrivKey, serverCredsErr = config.LoadPrivateKey(issuerFileName)
+	})
+	return serverCredsPrivKey, serverCredsErr
+}
+
 func signPayload(payload []byte, privateKey *ecdsa.PrivateKey) ([]byte, error) {
     hash := sha256.Sum256(payload)
     signature, err := privateKey.Sign(rand.Reader, hash[:], crypto.SHA256)  // Use crypto.SHA256 instead of the hash[:]
@@ -92,34 +107,36 @@ func verifySignature(payload []byte, signature []byte, publicKey *ecdsa.PublicKe
 	return ecdsa.VerifyASN1(publicKey, hash[:], signature)
 }
 
-func keySignChallengeInit(c *gin.Context, data map[string]interface{}) {
+func keySignChallengeInit(ctx *gin.Context, data map[string]interface{}) {
     clientNonce, _ := data["client_nonce"].(string)
 	serverNonce, err := generateNonce()
 	if err != nil {
 		log.Errorln("Error generating nonce")
+		ctx.JSON(500, gin.H{"error": "Failed to generate nonce for key sign challenge"})
+		return
 	}
 
     serverPayload := []byte(clientNonce + serverNonce)
-	_, err = config.LoadPublicKey("", "/app/key/server.key")
+
+	privateKey, err := loadServerKeys()
 	if err != nil {
-		fmt.Println("Could not load public key")
-		os.Exit(1)
+		log.Warningln("Failure to load the server's private key:", err)
+		ctx.JSON(500, gin.H{"error": "Server is unable to generate a key sign challenge"})
+		return
 	}
 
-    privateKey, err := config.LoadPrivateKey("/app/key/server.key")
+    serverSignature, err := signPayload(serverPayload, privateKey)
 	if err != nil {
-		fmt.Println("Could not load private key")
-		os.Exit(1)
-	} 
-
-    serverSignature, _ := signPayload(serverPayload, privateKey)
-    c.JSON(http.StatusOK, gin.H{
+		log.Warningln("Failure when signing the challenge:", err)
+		ctx.JSON(500, gin.H{"error": "Failure when signing the challenge"})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{
         "server_nonce": serverNonce,
         "client_nonce": clientNonce,
         "server_payload": hex.EncodeToString(serverPayload),
         "server_signature": hex.EncodeToString(serverSignature),
     })
-
 }
 
 func jwksToEcdsaPublicKey(jwks map[string]interface{}) *ecdsa.PublicKey {
@@ -137,29 +154,39 @@ func jwksToEcdsaPublicKey(jwks map[string]interface{}) *ecdsa.PublicKey {
 	return clientPubkey
 }	
 
-func keySignChallengeCommit(c *gin.Context, data map[string]interface{}, action string) {
+func keySignChallengeCommit(ctx *gin.Context, data map[string]interface{}, action string) {
     clientNonce, _ := data["client_nonce"].(string)
     serverNonce, _ := data["server_nonce"].(string)
     jsonPublicKey := data["pubkey"].(map[string]interface{})
 
 	clientPubkey := jwksToEcdsaPublicKey(jsonPublicKey)
 	clientPayload := []byte(clientNonce + serverNonce)
-    clientSignature, _ := hex.DecodeString(data["client_signature"].(string))
+	clientSignature, err := hex.DecodeString(data["client_signature"].(string))
+	if err != nil {
+		log.Warningln("Failed to decode 'client_signature' value:", err)
+		ctx.JSON(500, gin.H{"error": "Failed to decode 'client_signature' value"})
+		return
+	}
 	clientVerified := verifySignature(clientPayload, clientSignature, clientPubkey)
 
 	serverPayload, _ := hex.DecodeString(data["server_payload"].(string))
 	serverSignature, _ := hex.DecodeString(data["server_signature"].(string))
-	serverPrivateKey, _ := config.LoadPrivateKey("/app/key/server.key")
+	serverPrivateKey, err := loadServerKeys()
+	if err != nil {
+		log.Warningln("Failed to load server private key:", err)
+		ctx.JSON(500, gin.H{"error": "Failed to load server private key"})
+		return
+	}
 	serverPubkey := serverPrivateKey.PublicKey
 	serverVerified := verifySignature(serverPayload, serverSignature, &serverPubkey)
 
     if clientVerified && serverVerified {
         if action == "register" {
 			log.Debug("Registering namespace", data["prefix"])
-			dbAddNamespace(c, data)
+			dbAddNamespace(ctx, data)
         } 
     } else {
-        c.JSON(http.StatusMultipleChoices, gin.H{"status": "Key Sign Challenge FAILED"})
+        ctx.JSON(http.StatusMultipleChoices, gin.H{"status": "Key Sign Challenge FAILED"})
     }
 }
 
