@@ -29,6 +29,7 @@ import (
 	"github.com/spf13/viper"
 	"github.com/tg123/go-htpasswd"
 	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/term"
 )
 
 type (
@@ -85,12 +86,29 @@ func WaitUntilLogin() error {
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 
+	hostname := viper.GetString("Hostname")
+	webPort := viper.GetInt("WebPort")
+	isTTY := false
+	if term.IsTerminal(int(os.Stdout.Fd())) {
+		isTTY = true
+		fmt.Printf("\n\n\n\n")
+	}
+
 	for {
 		previousCode.Store(currentCode.Load())
 		newCode := fmt.Sprintf("%06v", rand.Intn(1000000))
 		currentCode.Store(&newCode)
-		fmt.Println("Pelican admin interface is not initialized; to initialize, login at https://localhost:8080 with the following code:")
-		fmt.Println(*currentCode.Load())
+		if isTTY {
+			fmt.Printf("\033[A\033[A\033[A\033[A")
+			fmt.Printf("\033[2K\n")
+			fmt.Printf("\033[2K\rPelican admin interface is not initialized\n\033[2KTo initialize, "+
+				"login at \033[1;34mhttps://%v:%v\033[0m with the following code:\n",
+				hostname, webPort)
+			fmt.Printf("\033[2K\r\033[1;34m%v\033[0m\n", *currentCode.Load())
+		} else {
+			fmt.Printf("Pelican admin interface is not initialized\n To initialize, login at https://%v:%v with the following code:\n", hostname, webPort)
+			fmt.Println(*currentCode.Load())
+		}
 		start := time.Now()
 		for time.Since(start) < 30*time.Second {
 			select {
@@ -362,6 +380,22 @@ func ConfigureOriginUI(router *gin.Engine) error {
 	group.POST("/login", loginHandler)
 	group.POST("/initLogin", initLoginHandler)
 	group.POST("/resetLogin", resetLoginHandler)
+	group.GET("/whoami", func(ctx *gin.Context) {
+		user := ctx.GetString("User")
+		if user == "" {
+			ctx.JSON(200, gin.H{"authenticated": false})
+		} else {
+			ctx.JSON(200, gin.H{"authenticated": true, "user": user})
+		}
+	})
+	group.GET("/loginInitialized", func(ctx *gin.Context) {
+		db := authDB.Load()
+		if db == nil {
+			ctx.JSON(200, gin.H{"initialized": false})
+		} else {
+			ctx.JSON(200, gin.H{"initialized": true})
+		}
+	})
 
 	router.GET("/view/*path", func(ctx *gin.Context) {
 		path := ctx.Param("path")

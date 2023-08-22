@@ -3,6 +3,7 @@ package config
 import (
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -199,6 +200,23 @@ func CleanupTempResources() {
 	})
 }
 
+func ComputeExternalAddress() string {
+	config_url := viper.GetString("ExternalAddress")
+	if config_url != "" {
+		return config_url
+	}
+	return fmt.Sprintf("%v:%v", viper.GetString("Hostname"), viper.GetInt("WebPort"))
+}
+
+func getConfigBase() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+
+	return filepath.Join(home, ".config", "pelican"), nil
+}
+
 func InitServer() error {
 	viper.SetConfigType("yaml")
 	if IsRootExecution() {
@@ -213,13 +231,12 @@ func InitServer() error {
 		viper.SetDefault("OriginUI.PasswordFile", "/etc/pelican/origin-ui-passwd")
 		viper.SetDefault("XrootdMultiuser", true)
 		viper.SetDefault("GeoIPLocation", "/var/cache/pelican/maxmind/GeoLite2-City.mmdb")
+		viper.SetDefault("MonitoringData", "/var/lib/pelican/monitoring/data")
 	} else {
-		home, err := os.UserHomeDir()
+		configBase, err := getConfigBase()
 		if err != nil {
 			return err
 		}
-
-		configBase := filepath.Join(home, ".config", "pelican")
 		viper.SetDefault("TLSCertificate", filepath.Join(configBase, "certificates", "tls.crt"))
 		viper.SetDefault("TLSKey", filepath.Join(configBase, "certificates", "tls.key"))
 		viper.SetDefault("RobotsTxtFile", filepath.Join(configBase, "robots.txt"))
@@ -229,6 +246,7 @@ func InitServer() error {
 		viper.SetDefault("IssuerKey", filepath.Join(configBase, "issuer.jwk"))
 		viper.SetDefault("OriginUI.PasswordFile", filepath.Join(configBase, "origin-ui-passwd"))
 		viper.SetDefault("GeoIPLocation", filepath.Join(configBase, "GeoLite2-City.mmdb"))
+		viper.SetDefault("MonitoringData", filepath.Join(configBase, "monitoring/data"))
 
 		if userRuntimeDir := os.Getenv("XDG_RUNTIME_DIR"); userRuntimeDir != "" {
 			runtimeDir := filepath.Join(userRuntimeDir, "pelican")
@@ -249,11 +267,18 @@ func InitServer() error {
 	}
 	viper.SetDefault("TLSCertFile", "/etc/pki/tls/cert.pem")
 
+	err := os.MkdirAll(viper.GetString("MonitoringData"), 0700)
+	if err != nil {
+		return errors.Wrapf(err, "Failure when creating a directory for the monitoring data")
+	}
+
 	hostname, err := os.Hostname()
 	if err != nil {
 		return err
 	}
+	viper.SetDefault("Hostname", hostname)
 	viper.SetDefault("Sitename", hostname)
+	viper.SetDefault("Hostname", hostname)
 
 	err = viper.MergeConfig(strings.NewReader(defaultsYaml))
 	if err != nil {
@@ -271,6 +296,16 @@ func InitServer() error {
 }
 
 func InitClient() error {
+	if IsRootExecution() {
+		viper.SetDefault("IssuerKey", "/etc/pelican/issuer.jwk")
+	} else {
+		configBase, err := getConfigBase()
+		if err != nil {
+			return err
+		}
+		viper.SetDefault("IssuerKey", filepath.Join(configBase, "issuer.jwk"))
+	}
+
 	upper_prefix := GetPreferredPrefix()
 	lower_prefix := strings.ToLower(upper_prefix)
 
@@ -279,7 +314,7 @@ func InitClient() error {
 	viper.SetDefault("SlowTransferWindow", 30)
 
 	if upper_prefix == "OSDF" || upper_prefix == "STASH" {
-		viper.SetDefault("NamespaceURL", "https://topology.opensciencegrid.org/osdf/namespaces")
+		viper.SetDefault("TopologyNamespaceURL", "https://topology.opensciencegrid.org/osdf/namespaces")
 	}
 
 	viper.SetEnvPrefix(upper_prefix)

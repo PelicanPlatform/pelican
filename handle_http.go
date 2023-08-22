@@ -32,23 +32,21 @@ import (
 var p = mpb.New()
 
 type StoppedTransferError struct {
-	Err 	string
+	Err string
 }
 
 func (e *StoppedTransferError) Error() string {
 	return e.Err
 }
 
-
 type HttpErrResp struct {
 	Code int
-	Err string
+	Err  string
 }
 
 func (e *HttpErrResp) Error() string {
 	return e.Err
 }
-
 
 // SlowTransferError is an error that is returned when a transfer takes longer than the configured timeout
 type SlowTransferError struct {
@@ -478,6 +476,9 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 	// Check the error real quick
 	if resp.IsComplete() {
 		if err := resp.Err(); err != nil {
+			if errors.Is(err, grab.ErrBadLength) {
+				err = fmt.Errorf("Local copy of file is larger than remote copy %w", grab.ErrBadLength)
+			}
 			log.Errorln("Failed to download:", err)
 			return 0, &ConnectionSetupError{Err: err}
 		}
@@ -523,11 +524,11 @@ Loop:
 			}
 
 		case <-t.C:
-			
+
 			if resp.BytesComplete() == lastBytesComplete {
 				if noProgressStartTime.IsZero() {
 					noProgressStartTime = time.Now()
-				} else if time.Since(noProgressStartTime) > time.Duration(stoppedTransferTimeout) * time.Second {
+				} else if time.Since(noProgressStartTime) > time.Duration(stoppedTransferTimeout)*time.Second {
 					errMsg := "No progress for more than " + time.Since(noProgressStartTime).Truncate(time.Millisecond).String()
 					log.Errorln(errMsg)
 					return 5, &StoppedTransferError{
@@ -539,11 +540,10 @@ Loop:
 			}
 			lastBytesComplete = resp.BytesComplete()
 
-
 			// Check if we are downloading fast enough
 			if resp.BytesPerSecond() < float64(downloadLimit) {
 				// Give the download `slowTransferRampupTime` (default 120) seconds to start
-				if resp.Duration() < time.Second* time.Duration(slowTransferRampupTime) {
+				if resp.Duration() < time.Second*time.Duration(slowTransferRampupTime) {
 					continue
 				} else if startBelowLimit == 0 {
 					log.Warnln("Download speed of ", resp.BytesPerSecond(), "bytes/s", " is below the limit of", downloadLimit, "bytes/s")
@@ -573,7 +573,7 @@ Loop:
 				}
 
 				log.Errorln("Download speed of ", resp.BytesPerSecond(), "bytes/s", " is below the limit of", downloadLimit, "bytes/s")
-				
+
 				return 0, &SlowTransferError{
 					BytesTransferred: resp.BytesComplete(),
 					BytesPerSecond:   int64(resp.BytesPerSecond()),
@@ -956,7 +956,7 @@ func StatHttp(dest *url.URL, namespace namespaces.Namespace) (uint64, error) {
 		}
 
 		if scitoken_contents != "" {
-			req.Header.Set("Authorization", "Bearer " + scitoken_contents)
+			req.Header.Set("Authorization", "Bearer "+scitoken_contents)
 		}
 
 		resp, err = client.Do(req)
@@ -997,4 +997,3 @@ func StatHttp(dest *url.URL, namespace namespaces.Namespace) (uint64, error) {
 		return 0, &HttpErrResp{resp.StatusCode, fmt.Sprintf("Request failed (HTTP status %d): %s", resp.StatusCode, string(response_b))}
 	}
 }
-
