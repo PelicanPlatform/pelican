@@ -1,6 +1,6 @@
 
 
-CONTAINER_TOOL := podman
+CONTAINER_TOOL := docker
 
 ifeq ($(OS),Windows_NT)
     goos := windows
