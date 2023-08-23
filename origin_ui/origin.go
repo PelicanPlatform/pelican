@@ -5,8 +5,6 @@ import (
 	"crypto/ecdsa"
 	"embed"
 	"fmt"
-	"github.com/gin-contrib/static"
-	"io/fs"
 	"math/rand"
 	"mime"
 	"net/http"
@@ -339,31 +337,6 @@ func resetLoginHandler(ctx *gin.Context) {
 	}
 	if err := configureAuthDB(); err != nil {
 		log.Errorln("Error in reloading authDB:", err)
-	}
-}
-
-type embedFileSystem struct {
-	http.FileSystem
-}
-
-func (e embedFileSystem) Exists(prefix string, path string) bool {
-	fmt.Println(path)
-	fmt.Println("Exists")
-	_, err := e.Open(path + "/index.html")
-	if err != nil {
-		return false
-	}
-	return true
-}
-
-func EmbedFolder(fsEmbed embed.FS, targetPath string) static.ServeFileSystem {
-	fsys, err := fs.Sub(fsEmbed, targetPath)
-
-	if err != nil {
-		panic(err)
-	}
-	return embedFileSystem{
-		FileSystem: http.FS(fsys),
 	}
 }
 

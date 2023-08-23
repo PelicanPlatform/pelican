@@ -1,6 +1,6 @@
 
 
-CONTAINER_TOOL := podman
+CONTAINER_TOOL := docker
 
 ifeq ($(OS),Windows_NT)
     goos := windows
@@ -48,11 +48,11 @@ web-serve:
 
 .PHONY: web-docker-build
 web-docker-build:
-	cd $(WEBSITE_SRC_PATH) && $(CONTAINER_TOOL) build -t origin-ui . && $(CONTAINER_TOOL) run --rm -v `pwd`:/webapp -it origin-ui npm run build
+	cd $(WEBSITE_SRC_PATH) && $(CONTAINER_TOOL) build -t origin-ui . && $(CONTAINER_TOOL) run --rm -v `pwd`:/webapp -it origin-ui npm install && npm run build
 
 .PHONE: web-docker-serve
 web-docker-serve:
-	@cd $(WEBSITE_SRC_PATH) && $(CONTAINER_TOOL) build -t origin-ui . && $(CONTAINER_TOOL) run --rm -v `pwd`:/webapp -p 3000:3000 -it origin-ui npm run dev
+	@cd $(WEBSITE_SRC_PATH) && $(CONTAINER_TOOL) build -t origin-ui . && $(CONTAINER_TOOL) run --rm -v `pwd`:/webapp -p 3000:3000 -it origin-ui npm install && npm run dev
 
 
 PELICAN_DIST_PATH := dist
