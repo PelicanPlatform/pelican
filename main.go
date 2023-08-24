@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/url"
 	"regexp"
+	"runtime/debug"
 	"strconv"
 	"strings"
 
@@ -206,7 +207,8 @@ func CheckOSDF(destination string, methods []string) (remoteSize uint64, err err
 
 	defer func() {
 		if r := recover(); r != nil {
-			log.Errorln("Panic captured while attempting to perform size check:", r)
+			log.Debugln("Panic captured while attempting to perform size check:", r)
+			log.Debugln("Panic caused by the following", string(debug.Stack()))
 			ret := fmt.Sprintf("Unrecoverable error (panic) while check file size: %v", r)
 			err = errors.New(ret)
 			remoteSize = 0
@@ -340,7 +342,8 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 	// First, create a handler for any panics that occur
 	defer func() {
 		if r := recover(); r != nil {
-			log.Errorln("Panic captured while attempting to perform transfer (DoStashCPSingle):", r)
+			log.Debugln("Panic captured while attempting to perform transfer (DoStashCPSingle):", r)
+			log.Debugln("Panic caused by the following", string(debug.Stack()))
 			ret := fmt.Sprintf("Unrecoverable error (panic) captured in DoStashCPSingle: %v", r)
 			err = errors.New(ret)
 			bytesTransferred = 0
