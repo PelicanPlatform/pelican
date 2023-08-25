@@ -24,6 +24,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/origin_ui"
 	"github.com/pelicanplatform/pelican/web_ui"
+	"github.com/pelicanplatform/pelican/xrootd"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -577,7 +578,12 @@ func serveOrigin(/*cmd*/ *cobra.Command, /*args*/ []string) error {
 		return err
 	}
 
-	err = launchXrootd()
+	configPath, err := configXrootd()
+	if err != nil {
+		return err
+	}
+	privileged := viper.GetBool("Origin.Multiuser")
+	err = xrootd.LaunchXrootd(privileged, configPath)
 	if err != nil {
 		return err
 	}
