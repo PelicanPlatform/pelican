@@ -39,7 +39,13 @@ var (
 
 )
 
-type XrootdConfig struct {
+type (
+
+OriginConfig struct {
+	Multiuser bool
+}
+
+XrootdConfig struct {
 	Port                   int
 	ManagerHost            string
 	ManagerPort            string
@@ -59,9 +65,11 @@ type XrootdConfig struct {
 	ScitokensConfig        string
 	Mount                  string
 	NamespacePrefix        string
-	XrootdMultiuser        bool
 	LocalMonitoringPort    int
+	Origin                 OriginConfig
 }
+
+)
 
 func init() {
 	err := config.InitServer()
@@ -340,11 +348,22 @@ func checkDefaults() error {
 }
 
 func configXrootd() (string, error) {
-	var config XrootdConfig
-	config.LocalMonitoringPort = -1
-	if err := viper.Unmarshal(&config); err != nil {
+	var xrdConfig XrootdConfig
+	xrdConfig.LocalMonitoringPort = -1
+	if err := viper.Unmarshal(&xrdConfig); err != nil {
 		return "", err
 	}
+
+	if xrdConfig.Origin.Multiuser {
+		ok, err := config.HasMultiuserCaps()
+		if err != nil {
+			return "", errors.Wrap(err, "Failed to determine if the origin can run in multiuser mode")
+		}
+		if !ok {
+			return "", errors.New("Origin.Multiuser is set to `true` but the command was run without sufficient privilege; was it launched as root?")
+		}
+	}
+
 	templ := template.Must(template.New("xrootd.cfg").Parse(xrootdCfg))
 
 	xrootdRun := viper.GetString("XrootdRun")
@@ -355,7 +374,7 @@ func configXrootd() (string, error) {
 	}
 	defer file.Close()
 
-	err = templ.Execute(file, config)
+	err = templ.Execute(file, xrdConfig)
 	if err != nil {
 		return "", err
 	}
