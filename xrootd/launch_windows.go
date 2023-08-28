@@ -4,8 +4,9 @@ package xrootd
 
 import (
 	"github.com/pkg/errors"
-	"github.com/spf13/cobra"
 )
+
+type PrivilegedXrootdLauncher struct {}
 
 func LaunchOrigin() error {
 	return errors.New("'origin serve' command is not supported on Windows")
