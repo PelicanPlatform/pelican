@@ -267,7 +267,7 @@ func InitServer() error {
 	}
 	viper.SetDefault("TLSCertFile", "/etc/pki/tls/cert.pem")
 
-	err := os.MkdirAll(viper.GetString("MonitoringData"), 0700)
+	err := os.MkdirAll(viper.GetString("MonitoringData"), 0750)
 	if err != nil {
 		return errors.Wrapf(err, "Failure when creating a directory for the monitoring data")
 	}

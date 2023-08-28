@@ -101,7 +101,7 @@ func checkXrootdEnv() error {
 
 	// Ensure the runtime directory exists
 	runtimeDir := viper.GetString("XrootdRun")
-	err = os.MkdirAll(runtimeDir, 0755)
+	err = config.MkdirAll(runtimeDir, 0755, uid, gid)
 	if err != nil {
 		return errors.Wrapf(err, "Unable to create runtime directory %v", runtimeDir)
 	}
@@ -140,7 +140,7 @@ func checkXrootdEnv() error {
 				volumeMountDst)
 		}
 		destPath := path.Clean(filepath.Join(exportPath, volumeMountDst[1:]))
-		err = os.MkdirAll(filepath.Dir(destPath), 0755)
+		err = config.MkdirAll(filepath.Dir(destPath), 0755, uid, gid)
 		if err != nil {
 			return errors.Wrapf(err, "Unable to create export directory %v",
 				filepath.Dir(destPath))
@@ -172,7 +172,7 @@ to export the directory /mnt/foo to the path /bar in the data federation`)
 				namespacePrefix)
 		}
 		destPath := path.Clean(filepath.Join(exportPath, namespacePrefix[1:]))
-		err = os.MkdirAll(filepath.Dir(destPath), 0755)
+		err = config.MkdirAll(filepath.Dir(destPath), 0755, uid, gid)
 		if err != nil {
 			return errors.Wrapf(err, "Unable to create export directory %v",
 				filepath.Dir(destPath))
@@ -190,7 +190,7 @@ to export the directory /mnt/foo to the path /bar in the data federation`)
 		return err
 	}
 	wellKnownPath := filepath.Join(exportPath, ".well-known")
-	err = os.MkdirAll(wellKnownPath, 0755)
+	err = config.MkdirAll(wellKnownPath, 0755, -1, gid)
 	if err != nil {
 		return err
 	}
@@ -214,7 +214,7 @@ to export the directory /mnt/foo to the path /bar in the data federation`)
 	if _, err := os.Open(robotsTxtFile); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			newPath := filepath.Join(runtimeDir, "robots.txt")
-			err = os.MkdirAll(path.Dir(newPath), 0755)
+			err = config.MkdirAll(path.Dir(newPath), 0755, -1, gid)
 			if err != nil {
 				return errors.Wrapf(err, "Unable to create directory %v",
 					path.Dir(newPath))
@@ -237,7 +237,7 @@ to export the directory /mnt/foo to the path /bar in the data federation`)
 	macaroonsSecret := viper.GetString("MacaroonsKeyFile")
 	if _, err := os.Open(macaroonsSecret); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			err = os.MkdirAll(path.Dir(macaroonsSecret), 0755)
+			err = config.MkdirAll(path.Dir(macaroonsSecret), 0755, -1, gid)
 			if err != nil {
 				return errors.Wrapf(err, "Unable to create directory %v",
 					path.Dir(macaroonsSecret))
@@ -267,7 +267,7 @@ to export the directory /mnt/foo to the path /bar in the data federation`)
 
 	// If the authfile or scitokens.cfg does not exist, create one
 	authfile := viper.GetString("Authfile")
-	err = os.MkdirAll(path.Dir(authfile), 0755)
+	err = config.MkdirAll(path.Dir(authfile), 0755, -1, gid)
 	if err != nil {
 		return errors.Wrapf(err, "Unable to create directory %v",
 			path.Dir(authfile))
@@ -283,7 +283,7 @@ to export the directory /mnt/foo to the path /bar in the data federation`)
 	}
 
 	scitokensCfg := viper.GetString("ScitokensConfig")
-	err = os.MkdirAll(path.Dir(scitokensCfg), 0755)
+	err = config.MkdirAll(path.Dir(scitokensCfg), 0755, -1, gid)
 	if err != nil {
 		return errors.Wrapf(err, "Unable to create directory %v",
 			path.Dir(scitokensCfg))
@@ -349,6 +349,11 @@ func checkDefaults() error {
 }
 
 func configXrootd() (string, error) {
+	gid, err := config.GetDaemonGID()
+	if err != nil {
+		return "", err
+	}
+
 	var xrdConfig XrootdConfig
 	xrdConfig.LocalMonitoringPort = -1
 	if err := viper.Unmarshal(&xrdConfig); err != nil {
@@ -369,10 +374,15 @@ func configXrootd() (string, error) {
 
 	xrootdRun := viper.GetString("XrootdRun")
 	configPath := filepath.Join(xrootdRun, "xrootd.cfg")
-	file, err := os.OpenFile(configPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	file, err := os.OpenFile(configPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0640)
 	if err != nil {
 		return "", err
 	}
+	if err = os.Chown(configPath, -1, gid); err != nil {
+		return "", errors.Wrapf(err, "Unable to change ownership of configuration file %v"+
+			" to desired daemon gid %v", configPath, gid)
+	}
+
 	defer file.Close()
 
 	err = templ.Execute(file, xrdConfig)
