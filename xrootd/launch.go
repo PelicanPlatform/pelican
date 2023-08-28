@@ -10,11 +10,14 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pkg/errors"
+	"github.com/spf13/viper"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -72,7 +75,10 @@ func forwardCommandToLogger(ctx context.Context, daemonName string, cmdStdout io
 }
 
 func (UnprivilegedXrootdLauncher) Launch(ctx context.Context, daemonName string, configPath string) (context.Context, int, error) {
-	cmd := exec.CommandContext(ctx, daemonName, "-f", "-c", configPath)
+	xrootdRun := viper.GetString("XrootdRun")
+	pidFile := filepath.Join(xrootdRun, "xrootd.pid")
+
+	cmd := exec.CommandContext(ctx, daemonName, "-f", "-s", pidFile, "-c", configPath)
 	if cmd.Err != nil {
 		return ctx, -1, cmd.Err
 	}
@@ -83,6 +89,19 @@ func (UnprivilegedXrootdLauncher) Launch(ctx context.Context, daemonName string,
 	cmdStderr, err := cmd.StderrPipe()
 	if err != nil {
 		return ctx, -1, err
+	}
+
+	if config.IsRootExecution() {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+		uid, err := config.GetDaemonUID()
+		if err != nil {
+			return ctx, -1, err
+		}
+		gid, err := config.GetDaemonGID()
+		if err != nil {
+			return ctx, -1, err
+		}
+		cmd.SysProcAttr.Credential = &syscall.Credential{Uid: uint32(uid), Gid: uint32(gid)}
 	}
 
 	if err := cmd.Start(); err != nil {
@@ -143,7 +162,7 @@ func LaunchXrootd(privileged bool, configPath string) (err error) {
 			xrootdExpiry = time.Now().Add(10 * time.Second)
 			cmsdExpiry = time.Now().Add(10 * time.Second)
 		case <- xrootdCtx.Done():
-			if waitResult := xrootdCtx.Err(); waitResult != context.Canceled {
+			if waitResult := context.Cause(xrootdCtx); waitResult != nil {
 				if !xrootdExpiry.IsZero() {
 					return nil
 				}
@@ -153,9 +172,10 @@ func LaunchXrootd(privileged bool, configPath string) (err error) {
 				}
 				return errors.Wrap(waitResult, "xrootd process failed unexpectedly")
 			}
+			log.Debugln("Xrootd daemon has shut down successfully")
 			return nil
 		case <-cmsdCtx.Done():
-			if waitResult := cmsdCtx.Err(); waitResult != context.Canceled {
+			if waitResult := context.Cause(cmsdCtx); waitResult != context.Canceled {
 				if !cmsdExpiry.IsZero() {
 					return nil
 				}
@@ -165,6 +185,7 @@ func LaunchXrootd(privileged bool, configPath string) (err error) {
 				}
 				return errors.Wrap(waitResult, "cmsd process failed unexpectedly")
 			}
+			log.Debugln("Cmsd daemon has shut down successfully")
 			return nil
 		case <-timer.C:
 			if !xrootdExpiry.IsZero() && time.Now().After(xrootdExpiry) {
