@@ -135,6 +135,9 @@ func LaunchXrootd(privileged bool, configPath string) (err error) {
 	}
 
 	cmsdCtx, cmsdPid, err := launcher.Launch(ctx, "cmsd", configPath)
+	if err != nil {
+		return errors.Wrap(err, "Failed to launch cmsd daemon")
+	}
 	log.Info("Successfully launched cmsd")
 	if err := metrics.SetComponentHealthStatus("cmsd", "ok", ""); err != nil {
 		return err

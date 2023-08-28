@@ -83,14 +83,24 @@ func (PrivilegedXrootdLauncher) Launch(ctx context.Context, daemonName string, c
 	if err != nil {
 		return ctx, -1, err
 	}
-	bound_caps.SetFlag(cap.Inheritable, false, cap.SETUID, cap.SETGID)
-	iab.Fill(cap.Bound, bound_caps, cap.Inheritable)
+	if err = bound_caps.SetFlag(cap.Inheritable, false, cap.SETUID, cap.SETGID); err != nil {
+		return ctx, -1, err
+	}
+	if err = iab.Fill(cap.Bound, bound_caps, cap.Inheritable); err != nil {
+		return ctx, -1, err
+	}
 
 	// Raising the ambient capabilities will also set the inheritable caps
 	amb_caps := cap.NewSet()
-	amb_caps.SetFlag(cap.Inheritable, true, cap.SETUID, cap.SETGID)
-	iab.Fill(cap.Inh, amb_caps, cap.Inheritable)
-	iab.Fill(cap.Amb, amb_caps, cap.Inheritable)
+	if err = amb_caps.SetFlag(cap.Inheritable, true, cap.SETUID, cap.SETGID); err != nil {
+		return ctx, -1, err
+	}
+	if err = iab.Fill(cap.Inh, amb_caps, cap.Inheritable); err != nil {
+		return ctx, -1, err
+	}
+	if err = iab.Fill(cap.Amb, amb_caps, cap.Inheritable); err != nil {
+		return ctx, -1, err
+	}
 	launcher.SetIAB(iab)
 
 	gid, err := config.GetDaemonGID()

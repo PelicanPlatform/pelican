@@ -11,7 +11,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"time"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -27,7 +26,6 @@ func GetBestCache(cacheListName string) ([]string, error) {
 	geo_ip_sites := [...]string{"wlcg-wpad.cern.ch", "wlcg-wpad.fnal.gov"}
 
 	// randomize the geo ip sitess
-	rand.Seed(time.Now().UnixNano())
 	rand.Shuffle(len(geo_ip_sites), func(i, j int) {
 		geo_ip_sites[i], geo_ip_sites[j] = geo_ip_sites[j], geo_ip_sites[i]
 	})

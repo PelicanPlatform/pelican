@@ -3,7 +3,6 @@
 package main
 
 import (
-	"bufio"
 	"crypto/elliptic"
 	"crypto/rand"
 	_ "embed"
@@ -11,14 +10,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
-	"os/signal"
 	"path"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"text/template"
-	"time"
 
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/config"
@@ -391,157 +386,6 @@ func configXrootd() (string, error) {
 	}
 
 	return configPath, nil
-}
-
-func forwardCommandToLogger(daemonName string, cmd *exec.Cmd, isDoneChannel chan error) error {
-	cmdStdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return err
-	}
-	cmdStderr, err := cmd.StderrPipe()
-	if err != nil {
-		return err
-	}
-	go func() {
-		cmd_logger := log.WithFields(log.Fields{"daemon": daemonName})
-		stdout_scanner := bufio.NewScanner(cmdStdout)
-		stdout_lines := make(chan string, 10)
-
-		stderr_scanner := bufio.NewScanner(cmdStderr)
-		stderr_lines := make(chan string, 10)
-		go func() {
-			defer close(stdout_lines)
-			for stdout_scanner.Scan() {
-				stdout_lines <- stdout_scanner.Text()
-			}
-		}()
-		go func() {
-			defer close(stderr_lines)
-			for stderr_scanner.Scan() {
-				stderr_lines <- stderr_scanner.Text()
-			}
-		}()
-		for {
-			select {
-			case stdout_line, ok := <-stdout_lines:
-				if ok {
-					cmd_logger.Info(stdout_line)
-				} else {
-					stdout_lines = nil
-				}
-			case stderr_line, ok := <-stderr_lines:
-				if ok {
-					cmd_logger.Info(stderr_line)
-				} else {
-					stderr_lines = nil
-				}
-			}
-			if stdout_lines == nil && stderr_lines == nil {
-				break
-			}
-		}
-		result := cmd.Wait()
-		isDoneChannel <- result
-		close(isDoneChannel)
-	}()
-	return nil
-}
-
-func launchXrootd() error {
-	configPath, err := configXrootd()
-	if err != nil {
-		return err
-	}
-	xrootdCmd := exec.Command("xrootd", "-f", "-c", configPath)
-	if xrootdCmd.Err != nil {
-		return xrootdCmd.Err
-	}
-	xrootdDoneChannel := make(chan error, 1)
-	if err := forwardCommandToLogger("xrootd", xrootdCmd, xrootdDoneChannel); err != nil {
-		return err
-	}
-	if err := xrootdCmd.Start(); err != nil {
-		return err
-	}
-	log.Info("Successfully launched xrootd")
-	if err := metrics.SetComponentHealthStatus("xrootd", "ok", ""); err != nil {
-		return err
-	}
-
-	cmsdCmd := exec.Command("cmsd", "-f", "-c", configPath)
-	if cmsdCmd.Err != nil {
-		return cmsdCmd.Err
-	}
-	cmsdDoneChannel := make(chan error, 1)
-	if err := forwardCommandToLogger("cmsd", cmsdCmd, cmsdDoneChannel); err != nil {
-		return err
-	}
-	if err := cmsdCmd.Start(); err != nil {
-		return err
-	}
-	log.Info("Successfully launched cmsd")
-	if err := metrics.SetComponentHealthStatus("cmsd", "ok", ""); err != nil {
-		return err
-	}
-
-	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
-	var xrootdExpiry time.Time
-	var cmsdExpiry time.Time
-	for {
-		timer := time.NewTimer(time.Second)
-		select {
-		case sig := <-sigs:
-			if sys_sig, ok := sig.(syscall.Signal); ok {
-				log.Warnf("Forwarding signal %v to xrootd processes\n", sys_sig)
-				if err = syscall.Kill(xrootdCmd.Process.Pid, sys_sig); err != nil {
-					return errors.Wrap(err, "Failed to forward signal to xrootd process")
-				}
-				if err = syscall.Kill(cmsdCmd.Process.Pid, sys_sig); err != nil {
-					return errors.Wrap(err, "Failed to forward signal to cmsd process")
-				}
-			} else {
-				panic(errors.New("Unable to convert signal to syscall.Signal"))
-			}
-			xrootdExpiry = time.Now().Add(10 * time.Second)
-			cmsdExpiry = time.Now().Add(10 * time.Second)
-		case waitResult := <-xrootdDoneChannel:
-			if waitResult != nil {
-				if !cmsdExpiry.IsZero() {
-					return nil
-				}
-				if err = metrics.SetComponentHealthStatus("xrootd", "critical",
-					"xrootd process failed unexpectedly"); err != nil {
-					return err
-				}
-				return errors.Wrap(waitResult, "xrootd process failed unexpectedly")
-			}
-			return nil
-		case waitResult := <-cmsdDoneChannel:
-			if waitResult != nil {
-				if !xrootdExpiry.IsZero() {
-					return nil
-				}
-				if err = metrics.SetComponentHealthStatus("cmsd", "critical",
-					"cmsd process failed unexpectedly"); err != nil {
-					return nil
-				}
-				return errors.Wrap(waitResult, "cmsd process failed unexpectedly")
-			}
-			return nil
-		case <-timer.C:
-			if !xrootdExpiry.IsZero() && time.Now().After(xrootdExpiry) {
-				if err = syscall.Kill(xrootdCmd.Process.Pid, syscall.SIGKILL); err != nil {
-					return errors.Wrap(err, "Failed to SIGKILL the xrootd process")
-				}
-			}
-			if !cmsdExpiry.IsZero() && time.Now().After(cmsdExpiry) {
-				if err = syscall.Kill(cmsdCmd.Process.Pid, syscall.SIGKILL); err != nil {
-					return errors.Wrap(err, "Failed to SIGKILL the cmsd process")
-				}
-			}
-		}
-	}
 }
 
 func serveOrigin(/*cmd*/ *cobra.Command, /*args*/ []string) error {
