@@ -229,7 +229,6 @@ func NamespaceGet(endpoint string) (error) {
 	}
 	fmt.Println(string(respData))
 	return nil
-	return nil
 }
 
 func NamespaceDelete(endpoint string) (error) {

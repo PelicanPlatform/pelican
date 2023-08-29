@@ -17,7 +17,6 @@ import (
 var withIdentity bool
 var prefix string
 var namespaceURL string
-var jwks bool
 var pubkeyPath string
 var privkeyPath string
 

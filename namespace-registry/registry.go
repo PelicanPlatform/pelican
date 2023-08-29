@@ -238,11 +238,11 @@ type jwks struct {
 
 func jwksToEcdsaPublicKey(jwks *jwks) (*ecdsa.PublicKey, error) {
 	xBigInt, err := new(big.Int).SetString(jwks.X, 10)
-	if err != true {
+	if !err {
 		return nil, errors.New("Failed to convert jwks.x to Big Int")
 	}
 	yBigInt, err := new(big.Int).SetString(jwks.Y, 10)
-	if err != true {
+	if !err {
 		return nil, errors.New("Failed to convert jwks.y to Big Int")
 	}
 
@@ -348,12 +348,12 @@ func cliRegisterNamespace(ctx *gin.Context) {
 		}
 
 		resp, err := http.PostForm(OIDC.UserInfoEndpoint, payload)
-		defer resp.Body.Close()
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error making request to user info endpoint"})
 			log.Errorf("Failed to execute post form to user info endpoint %s: %v", OIDC.UserInfoEndpoint, err)
 			return
 		}
+		defer resp.Body.Close()
 
 		// Check the status code
 		if resp.StatusCode != 200 {
@@ -402,7 +402,6 @@ func cliRegisterNamespace(ctx *gin.Context) {
 		payload.Set("scope", OIDC.Scope)
 
 		response, err := http.PostForm(OIDC.DeviceAuthEndpoint, payload)
-		defer response.Body.Close()
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered error requesting device code"})
 			log.Errorf("Failed to execute post form to device auth endpoint %s: %v", OIDC.DeviceAuthEndpoint, err)
@@ -445,12 +444,12 @@ func cliRegisterNamespace(ctx *gin.Context) {
 		payload.Set("grant_type", OIDC.GrantType)
 
 		response, err := http.PostForm(OIDC.TokenEndpoint, payload)
-		defer response.Body.Close()
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error while making request to token endpoint"})
 			log.Errorf("Failed to execute post form to token endpoint %s: %v", OIDC.TokenEndpoint, err)
 			return
 		}
+		defer response.Body.Close()
 
 		// Check the status code
 		// We accept either a 200, or a 400.
