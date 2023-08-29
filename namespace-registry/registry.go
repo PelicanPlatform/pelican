@@ -2,7 +2,6 @@ package nsregistry
 
 import (
 	"github.com/gin-gonic/gin"
-	// "github.com/joho/godotenv"
 	"net/http"
 	"crypto/rand"
 	"encoding/hex"
@@ -10,6 +9,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/sha256"
 	"encoding/json"
+	"github.com/pkg/errors"
 	"io/ioutil"
 	"net/url"
 	"math/big"
@@ -27,14 +27,17 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-var (
-	OIDCClientID       string
-	OIDCClientSecret   string
-	OIDCScope          string = "openid profile email org.cilogon.userinfo"
-	DeviceAuthEndpoint string = "https://cilogon.org/oauth2/device_authorization"
-	TokenEndpoint      string = "https://cilogon.org/oauth2/token"
-	GrantType          string = "urn:ietf:params:oauth:grant-type:device_code"
+var OIDC struct {
+	ClientID           string
+	ClientSecret       string
+	Scope              string
+	DeviceAuthEndpoint string
+	TokenEndpoint      string
+	UserInfoEndpoint   string
+	GrantType          string
+}
 
+var (
 	// Loading of public/private keys for signing challenges
 	serverCredsLoad        sync.Once
 	serverCredsPrivKey    *ecdsa.PrivateKey
@@ -48,39 +51,56 @@ type Response struct {
 
 type TokenResponse struct {
 	AccessToken string `json:"access_token"`
+	Error       string `json:"error"`
 }
 
 /*
 Various auxiliary functions used for client-server security handshakes
 */
-func keySignChallenge(c *gin.Context, data map[string]interface{}, action string) {
-	_, cnOk := data["client_nonce"].(string)
-	_, cpdOk := data["client_payload"].(string)
-	_, csOk := data["client_signature"].(string)
+type registrationData struct {
+	ClientNonce      string `json:"client_nonce"`
+	ClientPayload    string `json:"client_payload"`
+	ClientSignature  string `json:"client_signature"`
 
-	_, snOk := data["server_nonce"].(string)
-	_, spOk := data["server_payload"].(string)
-	_, ssOk := data["server_signature"].(string)
+	ServerNonce      string `json:"server_nonce"`
+	ServerPayload    string `json:"server_payload"`
+	ServerSignature  string `json:"server_signature"`
 
-	_, cpOk := data["pubkey"].(map[string]interface{})
+	Pubkey           json.RawMessage `json:"pubkey"`
+	AccessToken      string `json:"access_token"`
+	Identity         string `json:"identity"`
+	IdentityRequired string `json:"identity_required"`
+	DeviceCode       string `json:"device_code"`
+	Prefix           string `json:"prefix"`
+}
 
-	if cnOk && snOk && cpOk && cpdOk && csOk && spOk && ssOk {
-		keySignChallengeCommit(c, data, action)
-	} else if cnOk {
-		keySignChallengeInit(c, data)
+func keySignChallenge(ctx *gin.Context, data *registrationData, action string) error {
+	if data.ClientNonce != "" && data.ClientPayload != "" && data.ClientSignature != "" &&
+		data.ServerNonce != "" && data.ServerPayload != "" && data.ServerSignature != "" {
+		err := keySignChallengeCommit(ctx, data, action)
+		if err != nil {
+			return errors.Wrap(err, "commit failed")
+		}
+	} else if data.ClientNonce != "" {
+		err := keySignChallengeInit(ctx, data)
+		if err != nil {
+			return errors.Wrap(err, "init failed")
+		}
+
 	} else {
-		log.Warningln("key sign challenge was missing parameters")
-		c.JSON(http.StatusMultipleChoices, gin.H{"status": "MISSING PARAMETERS"})
+		ctx.JSON(http.StatusMultipleChoices, gin.H{"error": "MISSING PARAMETERS"})
+		return errors.New("key sign challenge was missing parameters")
 	}
+	return nil
 }
 
 func generateNonce() (string, error) {
-    nonce := make([]byte, 32)
-    _, err := rand.Read(nonce)
-    if err != nil {
-        return "", err
-    }
-    return hex.EncodeToString(nonce), nil
+	nonce := make([]byte, 32)
+	_, err := rand.Read(nonce)
+	if err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(nonce), nil
 }
 
 func loadServerKeys() (*ecdsa.PrivateKey, error) {
@@ -93,13 +113,87 @@ func loadServerKeys() (*ecdsa.PrivateKey, error) {
 	return serverCredsPrivKey, serverCredsErr
 }
 
+func loadOIDC() error {
+	// Load OIDC.ClientID
+	OIDCClientIDFile := viper.GetString("OIDC.ClientIDFile")
+	OIDCClientIDFromEnv := viper.GetString("OIDCCLIENTID")
+	if OIDCClientIDFile != "" {
+		contents, err := os.ReadFile(OIDCClientIDFile)
+		if err != nil {
+			return errors.Wrapf(err, "Failed reading provided OIDC.ClientIDFile %s", OIDCClientIDFile)
+		}
+		OIDC.ClientID = strings.TrimSpace(string(contents))
+	} else if OIDCClientIDFromEnv != "" {
+		OIDC.ClientID = OIDCClientIDFromEnv
+	} else {
+		return errors.New("An OIDC Client Identity file must be specified in the config (OIDC.ClientIDFile)," +
+			" or the identity must be provided via the environment variable PELICAN_OIDCCLIENTID")
+	}
+
+	// load OIDC.ClientSecret
+	OIDCClientSecretFile := viper.GetString("OIDCClientSecretFile")
+	OIDCClientSecretFromEnv := viper.GetString("OIDCCLIENTSECRET")
+	if OIDCClientSecretFile != "" {
+		contents, err := os.ReadFile(OIDCClientSecretFile)
+		if err != nil {
+			return errors.Wrapf(err, "Failed reading provided OIDCClientSecretFile %s", OIDCClientSecretFile)
+		}
+		OIDC.ClientSecret = strings.TrimSpace(string(contents))
+	} else if OIDCClientSecretFromEnv != "" {
+		OIDC.ClientSecret = OIDCClientSecretFromEnv
+	} else {
+		return errors.New("An OIDC Client Secret file must be specified in the config (OIDC.ClientSecretFile)," +
+			" or the secret must be provided via the environment variable PELICAN_OIDCCLIENTSECRET")
+	}
+
+	// Load OIDC.DeviceAuthEndpoint
+	deviceAuthEndpoint := viper.GetString("OIDC.DeviceAuthEndpoint")
+	if deviceAuthEndpoint == "" {
+		return errors.New("Nothing set for config parameter OIDC.DeviceAuthEndpoint, so registration with identity not supported")
+	}
+	deviceAuthEndpointURL, err := url.Parse(deviceAuthEndpoint)
+	if err != nil {
+		return errors.New("Failed to parse URL for parameter OIDC.DeviceAuthEndpoint")
+	}
+	OIDC.DeviceAuthEndpoint = deviceAuthEndpointURL.String()
+
+	// Load OIDC.TokenEndpoint
+	tokenEndpoint := viper.GetString("OIDC.TokenEndpoint")
+	if tokenEndpoint == "" {
+		return errors.New("Nothing set for config parameter OIDC.TokenEndpoint, so registration with identity not supported")
+	}
+	tokenAuthEndpointURL, err := url.Parse(tokenEndpoint)
+	if err != nil {
+		return errors.New("Failed to parse URL for parameter OIDC.TokenEndpoint")
+	}
+	OIDC.TokenEndpoint = tokenAuthEndpointURL.String()
+
+	// Load OIDC.UserInfoEndpoint
+	userInfoEndpoint := viper.GetString("OIDC.UserInfoEndpoint")
+	if userInfoEndpoint == "" {
+		return errors.New("Nothing set for config parameter OIDC.UserInfoEndpoint, so registration with identity not supported")
+	}
+	userInfoEndpointURL, err := url.Parse(userInfoEndpoint)
+	if err != nil {
+		return errors.New("Failed to parse URL for parameter OIDC.UserInfoEndpoint")
+	}
+	OIDC.UserInfoEndpoint = userInfoEndpointURL.String()
+
+	// Set the scope
+	OIDC.Scope = "openid profile email org.cilogon.userinfo"
+
+	// Set the grant type
+	OIDC.GrantType =  "urn:ietf:params:oauth:grant-type:device_code"
+	return nil
+}
+
 func signPayload(payload []byte, privateKey *ecdsa.PrivateKey) ([]byte, error) {
-    hash := sha256.Sum256(payload)
-    signature, err := privateKey.Sign(rand.Reader, hash[:], crypto.SHA256)  // Use crypto.SHA256 instead of the hash[:]
-    if err != nil {
-        return nil, err
-    }
-    return signature, nil
+	hash := sha256.Sum256(payload)
+	signature, err := privateKey.Sign(rand.Reader, hash[:], crypto.SHA256)  // Use crypto.SHA256 instead of the hash[:]
+	if err != nil {
+		return nil, err
+	}
+	return signature, nil
 }
 
 func verifySignature(payload []byte, signature []byte, publicKey *ecdsa.PublicKey) bool {
@@ -107,43 +201,50 @@ func verifySignature(payload []byte, signature []byte, publicKey *ecdsa.PublicKe
 	return ecdsa.VerifyASN1(publicKey, hash[:], signature)
 }
 
-func keySignChallengeInit(ctx *gin.Context, data map[string]interface{}) {
-    clientNonce, _ := data["client_nonce"].(string)
+func keySignChallengeInit(ctx *gin.Context, data *registrationData) error {
 	serverNonce, err := generateNonce()
 	if err != nil {
-		log.Errorln("Error generating nonce")
 		ctx.JSON(500, gin.H{"error": "Failed to generate nonce for key sign challenge"})
-		return
+		return errors.Wrap(err, "Failed to generate nonce for key-sign challenge")
 	}
 
-    serverPayload := []byte(clientNonce + serverNonce)
+	serverPayload := []byte(data.ClientNonce + data.ServerNonce)
 
 	privateKey, err := loadServerKeys()
 	if err != nil {
-		log.Warningln("Failure to load the server's private key:", err)
 		ctx.JSON(500, gin.H{"error": "Server is unable to generate a key sign challenge"})
-		return
+		return errors.Wrap(err, "Failed to load the server's private key")
 	}
 
     serverSignature, err := signPayload(serverPayload, privateKey)
 	if err != nil {
-		log.Warningln("Failure when signing the challenge:", err)
 		ctx.JSON(500, gin.H{"error": "Failure when signing the challenge"})
-		return
+		return errors.Wrap(err, "Failed to sign payload for key-sign challenge")
 	}
+
 	ctx.JSON(http.StatusOK, gin.H{
-        "server_nonce": serverNonce,
-        "client_nonce": clientNonce,
-        "server_payload": hex.EncodeToString(serverPayload),
-        "server_signature": hex.EncodeToString(serverSignature),
-    })
+		"server_nonce": serverNonce,
+		"client_nonce": data.ClientNonce,
+		"server_payload": hex.EncodeToString(serverPayload),
+		"server_signature": hex.EncodeToString(serverSignature),
+	})
+	return nil
 }
 
-func jwksToEcdsaPublicKey(jwks map[string]interface{}) *ecdsa.PublicKey {
-	x := jwks["x"].(string)
-	y := jwks["y"].(string)
-	xBigInt, _ := new(big.Int).SetString(x, 10)
-	yBigInt, _ := new(big.Int).SetString(y, 10)
+type jwks struct {
+	X string `json:"x"`
+	Y string `json:"y"`
+}
+
+func jwksToEcdsaPublicKey(jwks *jwks) (*ecdsa.PublicKey, error) {
+	xBigInt, err := new(big.Int).SetString(jwks.X, 10)
+	if err != true {
+		return nil, errors.New("Failed to convert jwks.x to Big Int")
+	}
+	yBigInt, err := new(big.Int).SetString(jwks.Y, 10)
+	if err != true {
+		return nil, errors.New("Failed to convert jwks.y to Big Int")
+	}
 
 	clientPubkey := &ecdsa.PublicKey{
 		Curve: elliptic.P521(),
@@ -151,139 +252,186 @@ func jwksToEcdsaPublicKey(jwks map[string]interface{}) *ecdsa.PublicKey {
 		Y:     yBigInt,
 	}
 
-	return clientPubkey
+	return clientPubkey, nil
 }	
 
-func keySignChallengeCommit(ctx *gin.Context, data map[string]interface{}, action string) {
-    clientNonce, _ := data["client_nonce"].(string)
-    serverNonce, _ := data["server_nonce"].(string)
-    jsonPublicKey := data["pubkey"].(map[string]interface{})
+func keySignChallengeCommit(ctx *gin.Context, data *registrationData, action string) error {
+	var pubkeyJwks jwks
+	if err := json.Unmarshal(data.Pubkey, &pubkeyJwks); err != nil {
+		ctx.JSON(500, gin.H{"error": "Failed to unmarshal the provided pubkey"})
+		return errors.Wrap(err, "Failed to unmarshal the provided pubkey")
+	}
 
-	clientPubkey := jwksToEcdsaPublicKey(jsonPublicKey)
-	clientPayload := []byte(clientNonce + serverNonce)
-	clientSignature, err := hex.DecodeString(data["client_signature"].(string))
+	clientPubkey, err := jwksToEcdsaPublicKey(&pubkeyJwks)
 	if err != nil {
-		log.Warningln("Failed to decode 'client_signature' value:", err)
-		ctx.JSON(500, gin.H{"error": "Failed to decode 'client_signature' value"})
-		return
+		return errors.Wrap(err, "Failed to convert jwks to ECDSA pubkey")
+	}
+	clientPayload := []byte(data.ClientNonce + data.ServerNonce)
+	clientSignature, err := hex.DecodeString(data.ClientSignature)
+	if err != nil {
+		ctx.JSON(500, gin.H{"error": "Failed to decode client's signature"})
+		return errors.Wrap(err, "Failed to decode the client's signature")
 	}
 	clientVerified := verifySignature(clientPayload, clientSignature, clientPubkey)
 
-	serverPayload, _ := hex.DecodeString(data["server_payload"].(string))
-	serverSignature, _ := hex.DecodeString(data["server_signature"].(string))
+	serverPayload, err := hex.DecodeString(data.ServerPayload)
+	if err != nil {
+		ctx.JSON(500, gin.H{"error": "Failed to decode the server's payload"})
+		return errors.Wrap(err, "Failed to decode the server's payload")
+	}
+
+	serverSignature, err := hex.DecodeString(data.ServerSignature)
+	if err != nil {
+		ctx.JSON(500, gin.H{"error": "Failed to decode the server's signature"})
+		return errors.Wrap(err, "Failed to decode the server's signature")
+	}
+
 	serverPrivateKey, err := loadServerKeys()
 	if err != nil {
-		log.Warningln("Failed to load server private key:", err)
-		ctx.JSON(500, gin.H{"error": "Failed to load server private key"})
-		return
+		ctx.JSON(500, gin.H{"error": "Failed to load server's private key"})
+		return errors.Wrap(err, "Failed to decode the server's private key")
 	}
 	serverPubkey := serverPrivateKey.PublicKey
 	serverVerified := verifySignature(serverPayload, serverSignature, &serverPubkey)
 
-    if clientVerified && serverVerified {
-        if action == "register" {
-			log.Debug("Registering namespace", data["prefix"])
-			dbAddNamespace(ctx, data)
-        } 
-    } else {
-        ctx.JSON(http.StatusMultipleChoices, gin.H{"status": "Key Sign Challenge FAILED"})
-    }
+	if clientVerified && serverVerified {
+		if action == "register" {
+			log.Debug("Registering namespace ", data.Prefix)
+			err = dbAddNamespace(ctx, data)
+			if err != nil {
+				ctx.JSON(500, gin.H{"error": "The server encountered an error while attempting to add the prefix to its database"})
+				return errors.Wrapf(err, "Failed while trying to add to database")
+			}
+			return nil
+		}
+	} else {
+		ctx.JSON(500, gin.H{"error": "Server was either unable to verify the client's public key, or an encountered an error with its own"})
+		return errors.Errorf("Either the server or the client could not be verified: " +
+			"server verified:%t, client verified:%t", serverVerified, clientVerified)
+	}
+	return nil
 }
 
 /*
 Handler functions called upon by the gin router
 */
-func cliRegisterNamespace(c *gin.Context) {
-	var requestData map[string]interface{}
-	if err := c.BindJSON(&requestData); err != nil {
-		log.Errorln("Bad Request", err)
-		c.JSON(http.StatusBadRequest, gin.H{"status": "Bad Request"})
+func cliRegisterNamespace(ctx *gin.Context) {
+	var reqData registrationData
+	if err := ctx.BindJSON(&reqData); err != nil {
+		log.Errorln("Bad request: ", err)
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Bad Request"})
 		return
 	}
 
-	accessToken := requestData["access_token"]
-	if accessToken != nil && accessToken != "" {
-		payload := url.Values{}
-		payload.Set("access_token", accessToken.(string))
+	// Check if prefix exists before doing anything else
+	exists, err := namespaceExists(reqData.Prefix)
+	if err != nil {
+		log.Errorf("failed to check if namespace already exists: %v", err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error checking if namespace already exists"})
+		return
+	}
+	if exists {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "The prefix already exists so it cannot be created. Did you mean to update it?"})
+		log.Errorf("namespace prefix %s already exists so it cannot be created", reqData.Prefix)
+		return
+	}
 
-		resp, err := http.PostForm("https://cilogon.org/oauth2/userinfo", payload)
+	if reqData.AccessToken != "" {
+		payload := url.Values{}
+		payload.Set("access_token", reqData.AccessToken)
+
+		err := loadOIDC()
 		if err != nil {
-			panic(err)
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server has malformed OIDC configuration"})
+			log.Errorf("Failed to load OIDC information for registration with identity: %v", err)
+			return
 		}
 
+		resp, err := http.PostForm(OIDC.UserInfoEndpoint, payload)
 		defer resp.Body.Close()
+		if err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error making request to user info endpoint"})
+			log.Errorf("Failed to execute post form to user info endpoint %s: %v", OIDC.UserInfoEndpoint, err)
+			return
+		}
+
+		// Check the status code
+		if resp.StatusCode != 200 {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server received non-200 status from user info endpoint"})
+			log.Errorf("The user info endpoint %s responded with status code %d", OIDC.UserInfoEndpoint, resp.StatusCode)
+			return
+		}
 
 		body, err := ioutil.ReadAll(resp.Body)
 		if err != nil {
-			panic(err)
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Server encountered an error reading response from user info endpoint"})
+			log.Errorf("Failed to read body from user info endpoint %s: %v", OIDC.UserInfoEndpoint, err)
+			return
 		}
 
-		requestData["identity"] = string(body)
-		keySignChallenge(c, requestData, "register")
-		return 
-	}
-
-	identity_required := requestData["identity_required"]
-
-	if identity_required == nil || identity_required == "false" {
-		keySignChallenge(c, requestData, "register")
-		return 
-	}
-
-	device_code := requestData["device_code"]
-
-	OIDCClientIDFile := viper.GetString("OIDCClientIDFile")
-	OIDCClientIDFromEnv := viper.GetString("OIDCCLIENTID")
-	if OIDCClientIDFile != "" {
-		contents, err := os.ReadFile(OIDCClientIDFile)
+		reqData.Identity = string(body)
+		err = keySignChallenge(ctx, &reqData, "register")
 		if err != nil {
-			log.Errorln(err)
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error during key-sign challenge"})
+			log.Errorf("Failed to complete key sign challenge with identity requirement: %v", err)
 		}
-		OIDCClientID = strings.TrimSpace(string(contents))
-	} else if OIDCClientIDFromEnv != "" {
-		OIDCClientID = OIDCClientIDFromEnv
-	} else {
-		log.Errorln("An OIDC Client Identity file must be specified in the config (OIDCClientIDFile), or the identity must be provided via the environment variable PELICAN_OIDCCLIENTID")
+		return
 	}
 
-	OIDCClientSecretFile := viper.GetString("OIDCClientSecretFile")
-	OIDCClientSecretFromEnv := viper.GetString("OIDCCLIENTSECRET")
-	if OIDCClientSecretFile != "" {
-		contents, err := os.ReadFile(OIDCClientSecretFile)
+	if reqData.IdentityRequired == "false" || reqData.IdentityRequired == "" {
+		err := keySignChallenge(ctx, &reqData, "register")
 		if err != nil {
-			log.Errorln(err)
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error during key-sign challenge"})
+			log.Errorf("Failed to complete key sign challenge without identity requirement: %v", err)
 		}
-		OIDCClientSecret = strings.TrimSpace(string(contents))
-	} else if OIDCClientSecretFromEnv != "" {
-		OIDCClientSecret = OIDCClientSecretFromEnv
-	} else {
-		log.Errorln("An OIDC Client Secret file must be specified in the config (OIDCClientSecretFile), or the secret must be provided via the environment variable PELICAN_OIDCCLIENTSECRET")
+		return
 	}
 
-	if device_code == nil || device_code == "" {
+	err = loadOIDC()
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server has malformed OIDC configuration"})
+		log.Errorf("Failed to load OIDC information for registration with identity: %v", err)
+		return
+	}
+
+	if reqData.DeviceCode == "" {
 		log.Debug("Getting Device Code")
 		payload := url.Values{}
-		payload.Set("client_id", OIDCClientID)
-		payload.Set("client_secret", OIDCClientSecret)
-		payload.Set("scope", OIDCScope)
-	
-		response, err := http.PostForm(DeviceAuthEndpoint, payload)
+		payload.Set("client_id", OIDC.ClientID)
+		payload.Set("client_secret", OIDC.ClientSecret)
+		payload.Set("scope", OIDC.Scope)
+
+		response, err := http.PostForm(OIDC.DeviceAuthEndpoint, payload)
+		defer response.Body.Close()
 		if err != nil {
-			log.Fatalln(err)
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered error requesting device code"})
+			log.Errorf("Failed to execute post form to device auth endpoint %s: %v", OIDC.DeviceAuthEndpoint, err)
+			return
 		}
 		defer response.Body.Close()
+
+		// Check the response code
+		if response.StatusCode != 200 {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server received non-200 status code from OIDC device auth endpoint"})
+			log.Errorf("The device auth endpoint %s responded with status code %d", OIDC.DeviceAuthEndpoint, response.StatusCode)
+			return
+		}
 		body, err := ioutil.ReadAll(response.Body)
 		if err != nil {
-			log.Fatalln(err)
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered error reading response from device auth endpoint"})
+			log.Errorf("Failed to read body from device auth endpoint %s: %v", OIDC.DeviceAuthEndpoint, err)
+			return
 		}
 		var res Response
 		err = json.Unmarshal(body, &res)
 		if err != nil {
-			log.Fatalln(err)
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server could not parse response from device auth endpoint"})
+			log.Errorf("Failed to unmarshal body from device auth endpoint %s: %v", OIDC.DeviceAuthEndpoint, err)
+			return
 		}
 		verificationURL := res.VerificationURLComplete
 		deviceCode := res.DeviceCode
-		c.JSON(http.StatusOK, gin.H{
+		ctx.JSON(http.StatusOK, gin.H{
 			"device_code": deviceCode,
 			"verification_url": verificationURL,
 		})
@@ -291,35 +439,56 @@ func cliRegisterNamespace(c *gin.Context) {
 	} else {
 		log.Debug("Verifying Device Code")
 		payload := url.Values{}
-		payload.Set("client_id", OIDCClientID)
-		payload.Set("client_secret", OIDCClientSecret)
-		payload.Set("device_code", device_code.(string))
-		payload.Set("grant_type", GrantType)
+		payload.Set("client_id", OIDC.ClientID)
+		payload.Set("client_secret", OIDC.ClientSecret)
+		payload.Set("device_code", reqData.DeviceCode)
+		payload.Set("grant_type", OIDC.GrantType)
 
-		response, err := http.PostForm(TokenEndpoint, payload)
-		if err != nil {
-			log.Fatalln(err)
-		}
+		response, err := http.PostForm(OIDC.TokenEndpoint, payload)
 		defer response.Body.Close()
+		if err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error while making request to token endpoint"})
+			log.Errorf("Failed to execute post form to token endpoint %s: %v", OIDC.TokenEndpoint, err)
+			return
+		}
+
+		// Check the status code
+		// We accept either a 200, or a 400.
+		if response.StatusCode != 200 && response.StatusCode != 400 {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server received bad status code from token endpoint"})
+			log.Errorf("The token endpoint %s responded with status code %d", OIDC.TokenEndpoint, response.StatusCode)
+			return
+		}
 
 		body, err := ioutil.ReadAll(response.Body)
 		if err != nil {
-			log.Fatalln(err)
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error reading response from token endpoint"})
+			log.Errorf("Failed to read body from token endpoint %s: %v", OIDC.TokenEndpoint, err)
+			return
 		}
 
 		var tokenResponse TokenResponse
 		err = json.Unmarshal(body, &tokenResponse)
 		if err != nil {
-			log.Fatalln(err)
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server could not parse error from token endpoint"})
+			log.Errorf("Failed to unmarshal body from token endpoint %s: %v", OIDC.TokenEndpoint, err)
+			return
 		}
 
-
+		// Now we check the status code for a specific case. If it was 400, we check the error in the body
+		// to make sure it's "authorization_pending"
 		if tokenResponse.AccessToken == "" {
-			c.JSON(http.StatusOK, gin.H{
-				"status": "PENDING",
-			})
+			if response.StatusCode == 400 && tokenResponse.Error == "authorization_pending" {
+				ctx.JSON(http.StatusOK, gin.H{
+					"status": "PENDING",
+				})
+			} else {
+				ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered unknown error waiting for token"})
+				log.Errorf("Token endpoint did not provide a token, and responded with unkown error: %s", string(body))
+				return
+			}
 		} else {
-			c.JSON(http.StatusOK, gin.H{
+			ctx.JSON(http.StatusOK, gin.H{
 				"status": "APPROVED",
 				"access_token": tokenResponse.AccessToken,
 			})
@@ -328,40 +497,60 @@ func cliRegisterNamespace(c *gin.Context) {
 	}
 }
 
-func dbAddNamespace(c *gin.Context, data map[string]interface{}) {
+func dbAddNamespace(ctx *gin.Context, data *registrationData) error {
 	var ns Namespace
+	ns.Prefix = data.Prefix
 
-	ns.Prefix = data["prefix"].(string)
-	pubkeyData, _ := json.Marshal(data["pubkey"].(map[string]interface{}))
-	ns.Pubkey = string(pubkeyData)
-	if data["identity"] != nil {
-		ns.Identity = data["identity"].(string)
-	}
-
-	err := addNamespace(&ns)
+	pubkeyData, err := json.Marshal(data.Pubkey)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+		return errors.Wrapf(err, "Failed to marshal the pubkey for prefix %s", ns.Prefix)
+	}
+	ns.Pubkey = string(pubkeyData)
+	if data.Identity != "" {
+		ns.Identity = data.Identity
 	}
 
-	c.JSON(http.StatusOK, gin.H{"status": "success"})
+	err = addNamespace(&ns)
+	if err != nil {
+		return errors.Wrapf(err, "Failed to add prefix %s", ns.Prefix)
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"status": "success"})
+	return nil
 }
 
-func dbDeleteNamespace(c *gin.Context) {
-	prefix := c.Param("wildcard")
+func dbDeleteNamespace(ctx *gin.Context) {
+	/*
+	A weird feature of gin is that wildcards always
+	add a preceding /. Since the URL parsing that happens
+	upstream removes the prefixed / that gets sent, we
+	can just leave the one that's added back by the wildcard
+	because that reflects the path that's getting stored.
+	*/
+	prefix := ctx.Param("wildcard")
+	log.Debug("Attempting to delete prefix ", prefix)
 
-	// A weird feature of gin is that wildcards always
-	// add a preceding /. We need to trim it here...
-	prefix = strings.TrimPrefix(prefix, "/")
-	log.Debug("Attempting to delete prefix", prefix)
-
-	err := deleteNamespace(prefix)
+	// Check if prefix exists before trying to delete it
+	exists, err := namespaceExists(prefix)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error checking if namespace already exists"})
+		log.Errorf("Failed to check if the namespace already exists: %v", err)
+		return
+	}
+	if !exists {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "the prefix does not exist so it cannot be deleted"})
+		log.Errorln("prefix could not be deleted because it does not exist")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"status": "success"})
+	err = deleteNamespace(prefix)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error deleting namespace from database"})
+		log.Errorf("Failed to delete namespace from database: %v", err)
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"status": "success"})
 }
 
 /**
@@ -379,14 +568,42 @@ func cliListNamespaces(c *gin.Context) {
 }
 */
 
-func dbGetAllNamespaces(c *gin.Context) {
+func dbGetAllNamespaces(ctx *gin.Context) {
 	nss, err := getAllNamespaces()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error trying to list all namespaces"})
 		return
 	}
-	c.JSON(http.StatusOK, nss)
+	ctx.JSON(http.StatusOK, nss)
 }
+
+// func metadataHandler(ctx *gin.Context) {
+// 	path := ctx.Param("wildcard")
+
+// 	// A weird feature of gin is that wildcards always
+// 	// add a preceding /. We need to trim it here...
+// 	path = strings.TrimPrefix(path, "/")
+// 	log.Debug("Working with path ", path)
+
+// 	// Get JWKS
+// 	if filepath.Base(path) == "issuer.jwks" {
+// 		// do something
+// 	}
+
+// 	// Get OpenID config info
+// 	match, err := filepath.Match("*/\\.well-known/openid-configuration", path)
+// 	if err != nil {
+// 		log.Errorf("Failed to check incoming path for match: %v", err)
+//		return
+// 	}
+// 	if match {
+// 		// do something
+// 	} else {
+// 		log.Errorln("Unknown request")
+//		return
+// 	}
+
+// }
 
 /**
  * Commenting out until we're ready to use it.  -BB
@@ -402,10 +619,13 @@ func getOpenIDConfiguration(c *gin.Context) {
 */
 
 func RegisterNamespaceRegistry(router *gin.RouterGroup) {
-	// Establish various routes to be used by the namespace registry
-	router.POST("/cli-namespaces/registry", cliRegisterNamespace)
-	router.GET("/cli-namespaces", dbGetAllNamespaces)
-	// router.GET("/cli-namespaces/:prefix/issuer.jwks", getJwks)
-	// router.GET("/cli-namespaces/:prefix/.well-known/openid-configuration", getOpenIDConfiguration)
-	router.DELETE("/cli-namespaces/*wildcard", dbDeleteNamespace)
+	registry := router.Group("/api/v1.0/registry")
+	{
+		registry.POST("", cliRegisterNamespace)
+		registry.GET("", dbGetAllNamespaces)
+		// Will handle getting jwks, openid config, and listing namespaces
+		// registry.GET("/*wildcard", metadataHandler)
+
+		registry.DELETE("/*wildcard", dbDeleteNamespace)
+	}
 }

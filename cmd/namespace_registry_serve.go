@@ -1,17 +1,15 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
+	"github.com/pkg/errors"
 
-	// "github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/namespace-registry"
 	"github.com/pelicanplatform/pelican/web_ui"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	// "github.com/spf13/viper"
 )
 
 
@@ -21,13 +19,13 @@ func serveNamespaceRegistry( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	// Initialize the registry's sqlite database
 	err := nsregistry.InitializeDB()
 	if err != nil {
-		return fmt.Errorf("Unable to initialize the namespace registry database: %q", err)
+		return errors.Wrapf(err, "Unable to initialize the namespace registry database: %q")
 	}
 
 	// function defined in director_serve
 	err = generateTLSCertIfNeeded()
 	if err != nil {
-		return fmt.Errorf("Failed to generate TLS certificate: %q", err)
+		return errors.Wrapf(err, "Failed to generate TLS certificate: %q")
 	}
 
 	engine, err := web_ui.GetEngine()

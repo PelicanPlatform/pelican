@@ -1,11 +1,12 @@
 package main
 
 import (
-	"errors"
+	"net/url"
 	"os"
 
 	"github.com/pelicanplatform/pelican/namespace-registry"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	log "github.com/sirupsen/logrus"
@@ -28,13 +29,20 @@ func getNamespaceEndpoint() (string, error) {
 	if namespaceEndpoint == "" {
 		return "", errors.New("No namespace registry specified; either give the federation name (-f) or specify the namespace API endpoint directly (e.g., --namespace-url=https://namespace.osg-htc.org/namespaces)")
 	}
-	return namespaceEndpoint, nil
+
+	namespaceEndpointURL, err := url.Parse(namespaceEndpoint)
+	if err != nil {
+		return "", errors.Wrap(err, "Unable to parse namespace url")
+	}
+
+	// Return the string, as opposed to a pointer to the URL object
+	return namespaceEndpointURL.String(), nil
 }
 
 func registerANamespace(cmd *cobra.Command, args []string) {
 	err := config.InitClient()
 	if err != nil {
-		log.Error(err)
+		log.Errorln("Failed to initialize the client: ", err)
 		os.Exit(1)
 	}
 
@@ -49,26 +57,31 @@ func registerANamespace(cmd *cobra.Command, args []string) {
 
 	namespaceEndpoint, err := getNamespaceEndpoint()
 	if err != nil {
-		log.Error(err)
+		log.Errorln("Failed to get NamespaceURL from config: ", err)
 		os.Exit(1)
 	}
 
-	endpoint := namespaceEndpoint + "/registry"
+	// Parse the namespace URL to make sure it's okay
+	registrationEndpointURL, err := url.JoinPath(namespaceEndpoint, "api", "v1.0", "registry")
+	if err != nil {
+		log.Errorf("Failed to construction registration endpoint URL: %v", err)
+	}
+	// registrationEndpoint := url.JoinPath(namespaceEndpoint, "/api/v1.0/registry/register").String()
 	if prefix == "" {
 		log.Error("Error: prefix is required")
 		os.Exit(1)
 	}
 
 	if withIdentity {
-		err := nsregistry.NamespaceRegisterWithIdentity(privkey, endpoint, prefix)
+		err := nsregistry.NamespaceRegisterWithIdentity(privkey, registrationEndpointURL, prefix)
 		if err != nil {
-			log.Error(err)
+			log.Errorf("Failed to register prefix %s with identity: %v", prefix, err)
 			os.Exit(1)
 		}
 	} else {
-		err := nsregistry.NamespaceRegister(privkey, endpoint, "", prefix)
+		err := nsregistry.NamespaceRegister(privkey, registrationEndpointURL, "", prefix)
 		if err != nil {
-			log.Error(err)
+			log.Errorf("Failed to register prefix %s: %v", prefix, err)
 			os.Exit(1)
 		}
 	}
@@ -77,19 +90,24 @@ func registerANamespace(cmd *cobra.Command, args []string) {
 func deleteANamespace(cmd *cobra.Command, args []string) {
 	err := config.InitClient()
 	if err != nil {
-		log.Error(err)
-		os.Exit(1)
-	}
-	namespaceEndpoint, err := getNamespaceEndpoint()
-	if err != nil {
-		log.Error(err)
+		log.Errorln("Failed to initialize the client: ", err)
 		os.Exit(1)
 	}
 
-	endpoint := namespaceEndpoint + "/" + prefix
-	err = nsregistry.NamespaceDelete(endpoint)
+	namespaceEndpoint, err := getNamespaceEndpoint()
 	if err != nil {
-		log.Error(err)
+		log.Errorln("Failed to get NamespaceURL from config: ", err)
+		os.Exit(1)
+	}
+
+	deletionEndpointURL, err := url.JoinPath(namespaceEndpoint, "api", "v1.0", "registry", prefix)
+	if err != nil {
+		log.Errorf("Failed to construction deletion endpoint URL: %v", err)
+	}
+
+	err = nsregistry.NamespaceDelete(deletionEndpointURL)
+	if err != nil {
+		log.Errorf("Failed to delete prefix %s: %v", prefix, err)
 		os.Exit(1)
 	}
 }
@@ -97,48 +115,55 @@ func deleteANamespace(cmd *cobra.Command, args []string) {
 func listAllNamespaces(cmd *cobra.Command, args []string) {
 	err := config.InitClient()
 	if err != nil {
-		log.Error(err)
+		log.Errorln("Failed to initialize the client: ", err)
 		os.Exit(1)
 	}
+
 	namespaceEndpoint, err := getNamespaceEndpoint()
 	if err != nil {
-		log.Error(err)
+		log.Errorln("Failed to get NamespaceURL from config: ", err)
 		os.Exit(1)
 	}
 
-	endpoint := namespaceEndpoint
-	err = nsregistry.NamespaceList(endpoint)
+	listEndpoint, err := url.JoinPath(namespaceEndpoint, "api", "v1.0", "registry")
 	if err != nil {
-		log.Error(err)
+		log.Errorf("Failed to construction list endpoint URL: %v", err)
+	}
+
+	err = nsregistry.NamespaceList(listEndpoint)
+	if err != nil {
+		log.Errorf("Failed to list namespace information: %v", err)
 		os.Exit(1)
 	}
 }
 
-func getNamespace(cmd *cobra.Command, args []string) {
-	err := config.InitClient()
-	if err != nil {
-		log.Error(err)
-		os.Exit(1)
-	}
+// Commenting until we're ready to use -- JH
 
-	if jwks {
-		namespaceEndpoint, err := getNamespaceEndpoint()
-		if err != nil {
-			log.Error(err)
-			os.Exit(1)
-		}
+// func getNamespace(cmd *cobra.Command, args []string) {
+// 	err := config.InitClient()
+// 	if err != nil {
+// 		log.Errorln("Failed to initialize the client:", err)
+// 		os.Exit(1)
+// 	}
 
-		endpoint := namespaceEndpoint + "/" + prefix + "/issuer.jwks"
-		err = nsregistry.NamespaceGet(endpoint)
-		if err != nil {
-			log.Error(err)
-			os.Exit(1)
-		}
-	} else {
-		log.Error("Error: get command requires --jwks flag")
-		os.Exit(1)
-	}
-}
+// 	if jwks {
+// 		namespaceEndpoint, err := getNamespaceEndpoint()
+// 		if err != nil {
+// 			log.Errorln("Failed to get NamespaceURL from config:", err)
+// 			os.Exit(1)
+// 		}
+
+// 		endpoint := url.JoinPath(namespaceEndpoint, prefix, "issuer.jwks")
+// 		err = nsregistry.NamespaceGet(endpoint)
+// 		if err != nil {
+// 			log.Errorf("Failed to get jwks info for prefix %s: %v", prefix, err)
+// 			os.Exit(1)
+// 		}
+// 	} else {
+// 		log.Error("Error: get command requires --jwks flag")
+// 		os.Exit(1)
+// 	}
+// }
 
 var namespaceCmd = &cobra.Command{
 	Use:   "namespace",
@@ -163,17 +188,18 @@ var listCmd = &cobra.Command{
 	Run:   listAllNamespaces,
 }
 
-var getCmd = &cobra.Command{
-	Use:   "get",
-	Short: "Get a specific namespace",
-	Run:   getNamespace,
-}
+// Commenting until we use -- JH
+// var getCmd = &cobra.Command{
+// 	Use:   "get",
+// 	Short: "Get a specific namespace",
+// 	Run:   getNamespace,
+// }
 
 func init() {
 	registerCmd.Flags().StringVar(&prefix, "prefix", "", "prefix for registering namespace")
 	registerCmd.Flags().BoolVar(&withIdentity, "with-identity", false, "Register a namespace with an identity")
-	getCmd.Flags().StringVar(&prefix, "prefix", "", "prefix for get namespace")
-	getCmd.Flags().BoolVar(&jwks, "jwks", false, "Get the jwks of the namespace")
+	//getCmd.Flags().StringVar(&prefix, "prefix", "", "prefix for get namespace")
+	//getCmd.Flags().BoolVar(&jwks, "jwks", false, "Get the jwks of the namespace")
 	deleteCmd.Flags().StringVar(&prefix, "prefix", "", "prefix for delete namespace")
 
 	namespaceCmd.PersistentFlags().StringVar(&namespaceURL, "namespace-url", "", "Endpoint for the namespace registry")
@@ -182,5 +208,6 @@ func init() {
 	namespaceCmd.AddCommand(registerCmd)
 	namespaceCmd.AddCommand(deleteCmd)
 	namespaceCmd.AddCommand(listCmd)
-	namespaceCmd.AddCommand(getCmd)
+	// Commenting until we use -- JH
+	//namespaceCmd.AddCommand(getCmd)
 }

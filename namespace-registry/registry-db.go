@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"log"
 	"os"
-	"fmt"
 
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
@@ -47,6 +46,22 @@ func createNamespaceTable() {
 	}
 }
 
+func namespaceExists(prefix string) (bool, error) {
+	checkQuery := `SELECT prefix FROM namespace WHERE prefix = ?`
+	result, err := db.Query(checkQuery, prefix)
+	if err != nil {
+		return false, err
+	}
+	defer result.Close()
+	
+	found := false
+	for result.Next() {
+		found = true
+		break
+	}
+	return found, nil
+}
+
 /*
 Some generic functions for CRUD actions on namespaces,
 used BY the registry (as opposed to the parallel
@@ -68,9 +83,13 @@ func updateNamespace(ns *Namespace) error {
  */
 
 func deleteNamespace(prefix string) error {
-	query := `DELETE FROM namespace WHERE prefix = ?`
-	_, err := db.Exec(query, prefix)
-	return err
+	deleteQuery := `DELETE FROM namespace WHERE prefix = ?`
+	_, err := db.Exec(deleteQuery, prefix)
+	if err != nil {
+		return errors.Wrap(err, "Failed to execute deletion query")
+	}
+	
+	return nil
 }
 
 /**
@@ -120,10 +139,23 @@ func InitializeDB() error {
 	if err != nil {
 		return errors.Wrap(err, "Failed to create directory for namespace registry database")
 	}
+
+	fileInfo, err := os.Stat(dbPath)
+	if err != nil {
+		return errors.Wrap(err, "Error checking NSRegistryLocation filepath information")
+	}
+
+	// Check if it's a directory
+	if fileInfo.IsDir() { // if directory, we add the filename to it
+		dbPath = filepath.Join(dbPath, "nsregistry.sqlite")
+	}
+
+	if len(filepath.Ext(dbPath)) == 0 { // No fp extension, let's add .sqlite
+		dbPath += ".sqlite"
+	}
 	db, err = sql.Open("sqlite", dbPath)
 	if err != nil {
-		return fmt.Errorf("Failed to open the database: %s", err)
-		// log.Fatalf("Failed to open database: %v", err)
+		return errors.Wrapf(err, "Failed to open the database with path: %s", dbPath)
 	}
 
 	createNamespaceTable()

@@ -1,6 +1,3 @@
-/*
-Copyright © 2023 Justin Hiemstra <jhiemstra@morgridge.org>
-*/
 package main
 
 import (
