@@ -19,13 +19,13 @@ func serveNamespaceRegistry( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	// Initialize the registry's sqlite database
 	err := nsregistry.InitializeDB()
 	if err != nil {
-		return errors.Wrapf(err, "Unable to initialize the namespace registry database: %q")
+		return errors.Wrap(err, "Unable to initialize the namespace registry database")
 	}
 
 	// function defined in director_serve
 	err = generateTLSCertIfNeeded()
 	if err != nil {
-		return errors.Wrapf(err, "Failed to generate TLS certificate: %q")
+		return errors.Wrap(err, "Failed to generate TLS certificate")
 	}
 
 	engine, err := web_ui.GetEngine()

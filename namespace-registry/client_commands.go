@@ -104,7 +104,7 @@ func NamespaceRegisterWithIdentity(privateKeyPath string, namespaceRegistryEndpo
 		if respData.Status == "APPROVED" {
 			done = true
 		} else {
-			fmt.Println("Waiting for approval. Press Enter after verification.\n")
+			fmt.Println("Waiting for approval. Press Enter after verification.")
 			reader := bufio.NewReader(os.Stdin)
 			_, _ = reader.ReadString('\n')
 		}
