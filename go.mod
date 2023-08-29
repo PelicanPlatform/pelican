@@ -1,6 +1,6 @@
 module github.com/pelicanplatform/pelican
 
-go 1.18
+go 1.20
 
 require (
 	github.com/alecthomas/units v0.0.0-20211218093645-b94a6e3cc137
@@ -37,6 +37,7 @@ require (
 	golang.org/x/term v0.10.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.25.0
+	kernel.org/pub/linux/libs/security/libcap/cap v1.2.69
 )
 
 require (
@@ -161,4 +162,5 @@ require (
 	modernc.org/opt v0.1.3 // indirect
 	modernc.org/strutil v1.1.3 // indirect
 	modernc.org/token v1.0.1 // indirect
+	kernel.org/pub/linux/libs/security/libcap/psx v1.2.69 // indirect
 )

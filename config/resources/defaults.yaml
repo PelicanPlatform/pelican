@@ -11,3 +11,5 @@ NamespacePrefix: ""
 Debug: false
 Director:
   DefaultResponse: cache
+Origin:
+  Multiuser: false

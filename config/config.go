@@ -4,7 +4,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -158,7 +158,7 @@ func DiscoverFederation() error {
 		defer result.Body.Close()
 	}
 
-	body, err := ioutil.ReadAll(result.Body)
+	body, err := io.ReadAll(result.Body)
 	if err != nil {
 		return errors.Wrapf(err, "Failure when doing federation metadata read to %s", discoveryUrl)
 	}
@@ -273,7 +273,7 @@ func InitServer() error {
 	}
 	viper.SetDefault("TLSCertFile", "/etc/pki/tls/cert.pem")
 
-	err := os.MkdirAll(viper.GetString("MonitoringData"), 0700)
+	err := os.MkdirAll(viper.GetString("MonitoringData"), 0750)
 	if err != nil {
 		return errors.Wrapf(err, "Failure when creating a directory for the monitoring data")
 	}

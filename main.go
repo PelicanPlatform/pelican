@@ -589,7 +589,6 @@ func get_ips(name string) []string {
 	}
 
 	//Randomize the order of each
-	rand.Seed(time.Now().UnixNano())
 	rand.Shuffle(len(ipv4s), func(i, j int) { ipv4s[i], ipv4s[j] = ipv4s[j], ipv4s[i] })
 	rand.Shuffle(len(ipv6s), func(i, j int) { ipv6s[i], ipv6s[j] = ipv6s[j], ipv6s[i] })
 

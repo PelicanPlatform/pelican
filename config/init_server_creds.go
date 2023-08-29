@@ -107,7 +107,7 @@ func GenerateCert() error {
 		return err
 	}
 	certDir := filepath.Dir(tlsCert)
-	if err := os.MkdirAll(certDir, 0755); err != nil {
+	if err := MkdirAll(certDir, 0755, -1, gid); err != nil {
 		return err
 	}
 
@@ -179,11 +179,11 @@ func GeneratePrivateKey(keyLocation string, curve elliptic.Curve) error {
 		return errors.Wrap(err, "Failed to load private key due to I/O error")
 	}
 	keyDir := filepath.Dir(keyLocation)
-	if err := os.MkdirAll(keyDir, 0750); err != nil {
+	if err := MkdirAll(keyDir, 0750, -1, gid); err != nil {
 		return err
 	}
 	// In this case, the private key file doesn't exist.
-	file, err := os.OpenFile(keyLocation, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	file, err := os.OpenFile(keyLocation, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0400)
 	if err != nil {
 		return errors.Wrap(err, "Failed to create new private key file")
 	}
@@ -192,7 +192,7 @@ func GeneratePrivateKey(keyLocation string, curve elliptic.Curve) error {
 	if err != nil {
 		return err
 	}
-	if err = os.Chown(keyLocation, -1, gid); err != nil {
+	if err = os.Chown(keyLocation, uid, gid); err != nil {
 		return errors.Wrapf(err, "Failed to chown generated key %v to daemon group %v",
 			keyLocation, groupname)
 	}

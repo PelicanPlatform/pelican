@@ -1,11 +1,11 @@
 package pelican
 
 import(
+	"io"
 	"testing"
 	"net/http"
 	"net/http/httptest"
 	"bytes"
-	"io/ioutil"
 	"os"
 	"github.com/stretchr/testify/assert"
 
@@ -34,7 +34,7 @@ func TestGetCachesFromDirectorResponse(t *testing.T) {
 	directorResponse := &http.Response{
 		StatusCode: 307,
 		Header: directorHeaders,
-		Body: ioutil.NopCloser(bytes.NewReader(directorBody)),
+		Body: io.NopCloser(bytes.NewReader(directorBody)),
 	}
 
 	// Call the function in question
@@ -63,7 +63,7 @@ func TestCreateNsFromDirectorResp(t *testing.T) {
 	directorResponse := &http.Response{
 		StatusCode: 307,
 		Header: directorHeaders,
-		Body: ioutil.NopCloser(bytes.NewReader(directorBody)),
+		Body: io.NopCloser(bytes.NewReader(directorBody)),
 	}
 
 	// Create a namespace instance to test against
