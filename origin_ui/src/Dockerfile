@@ -1,5 +1,6 @@
-FROM node:18
+FROM node:18-alpine
 
 WORKDIR /webapp
-COPY package.json /
+COPY package.json package.json
+
 RUN npm install
