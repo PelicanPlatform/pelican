@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	namespaces "github.com/pelicanplatform/pelican/namespaces"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -38,39 +39,49 @@ func HeaderParser(values string) (retMap map[string]string) {
 // Given the Director response, create the ordered list of caches
 // and store it as namespace.SortedDirectorCaches
 func CreateNsFromDirectorResp(dirResp *http.Response, namespace *namespaces.Namespace) (err error) {
-	xOsdfNamespace := HeaderParser(dirResp.Header.Values("X-Osdf-Namespace")[0])
-	namespace.Path = xOsdfNamespace["namespace"]
-	namespace.UseTokenOnRead, _ = strconv.ParseBool(xOsdfNamespace["use-token-on-read"])
-	namespace.ReadHTTPS, _ = strconv.ParseBool(xOsdfNamespace["readhttps"])
+	pelicanNamespaceHdr := dirResp.Header.Values("X-Pelican-Namespace")
+	if len(pelicanNamespaceHdr) == 0 {
+		return errors.New("Pelican director did not include mandatory X-Pelican-Namespace header in response")
+	}
+	xPelicanNamespace := HeaderParser(pelicanNamespaceHdr[0])
+	namespace.Path = xPelicanNamespace["namespace"]
+	namespace.UseTokenOnRead, _ = strconv.ParseBool(xPelicanNamespace["use-token-on-read"])
+	namespace.ReadHTTPS, _ = strconv.ParseBool(xPelicanNamespace["readhttps"])
 
-	var xOsdfAuthorization map[string]string
-	if len(dirResp.Header.Values("X-Osdf-Authorization")) > 0 {
-		xOsdfAuthorization = HeaderParser(dirResp.Header.Values("X-Osdf-Authorization")[0])
-		namespace.Issuer = xOsdfAuthorization["issuer"]
+	var xPelicanAuthorization map[string]string
+	if len(dirResp.Header.Values("X-Pelican-Authorization")) > 0 {
+		xPelicanAuthorization = HeaderParser(dirResp.Header.Values("X-Pelican-Authorization")[0])
+		namespace.Issuer = xPelicanAuthorization["issuer"]
 	}
 
-	var xOsdfTokenGeneration map[string]string
-	if len(dirResp.Header.Values("X-Osdf-Token-Generation")) > 0 {
-		xOsdfTokenGeneration = HeaderParser(dirResp.Header.Values("X-Osdf-Token-Generation")[0])
+	var xPelicanTokenGeneration map[string]string
+	if len(dirResp.Header.Values("X-Pelican-Token-Generation")) > 0 {
+		xPelicanTokenGeneration = HeaderParser(dirResp.Header.Values("X-Pelican-Token-Generation")[0])
 
 		// Instantiate the cred gen struct
 		namespace.CredentialGen = &namespaces.CredentialGeneration{}
 
 		// We wind up with a duplicate issuer here as the encapsulating ns also encodes this
-		issuer := xOsdfTokenGeneration["issuer"]
+		issuer := xPelicanTokenGeneration["issuer"]
 		namespace.CredentialGen.Issuer = &issuer
 
-		base_path := xOsdfTokenGeneration["base-path"]
+		base_path := xPelicanTokenGeneration["base-path"]
 		namespace.CredentialGen.BasePath = &base_path
 
-		max_scope_depth, _ := strconv.Atoi(xOsdfTokenGeneration["max-scope-depth"])
-		namespace.CredentialGen.MaxScopeDepth = &max_scope_depth
+		if max_scope_depth, exists := xPelicanTokenGeneration["max-scope-depth"]; exists {
+			max_scope_depth_int, err := strconv.Atoi(max_scope_depth)
+			if err != nil {
+				log.Debugln("Server sent an invalid max scope depth; ignoring:", max_scope_depth)
+			} else {
+				namespace.CredentialGen.MaxScopeDepth = &max_scope_depth_int
+			}
+		}
 
-		strategy := xOsdfTokenGeneration["strategy"]
+		strategy := xPelicanTokenGeneration["strategy"]
 		namespace.CredentialGen.Strategy = &strategy
 		
 		// The Director only returns a vault server if the strategy is vault.
-		if vs, exists := xOsdfTokenGeneration["vault-server"]; exists {
+		if vs, exists := xPelicanTokenGeneration["vault-server"]; exists {
 			namespace.CredentialGen.VaultServer = &vs
 		}
 	}

@@ -103,9 +103,9 @@ func RedirectToCache(ginCtx *gin.Context) {
 		if tokenGen != "" {
 			ginCtx.Writer.Header()["X-Pelican-Token-Generation"] = []string{tokenGen}
 		}
-		ginCtx.Writer.Header()["X-Pelican-Namespace"] = []string{fmt.Sprintf("namespace=%s, require-token=%v",
-			namespaceAd.Path, namespaceAd.RequireToken)}
 	}
+	ginCtx.Writer.Header()["X-Pelican-Namespace"] = []string{fmt.Sprintf("namespace=%s, require-token=%v",
+		namespaceAd.Path, namespaceAd.RequireToken)}
 
 	ginCtx.Redirect(307, redirectURL.String())
 }
