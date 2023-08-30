@@ -7,7 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"os"
 	"net/http"
 	"bytes"
@@ -53,7 +53,7 @@ func makeRequest(url string, method string, data map[string]interface{}) ([]byte
 	defer resp.Body.Close()
 
 	// Check HTTP response -- should be 200, else something went wrong
-	body, _ := ioutil.ReadAll(resp.Body)
+	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != 200 {
 		return body, errors.Errorf("The URL %s replied with status code %d", url, resp.StatusCode)
 	}

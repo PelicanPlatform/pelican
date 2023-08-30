@@ -2,6 +2,7 @@ package nsregistry
 
 import (
 	"github.com/gin-gonic/gin"
+	"io"
 	"net/http"
 	"crypto/rand"
 	"encoding/hex"
@@ -10,7 +11,6 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"github.com/pkg/errors"
-	"io/ioutil"
 	"net/url"
 	"math/big"
 	"crypto/elliptic"
@@ -362,7 +362,7 @@ func cliRegisterNamespace(ctx *gin.Context) {
 			return
 		}
 
-		body, err := ioutil.ReadAll(resp.Body)
+		body, err := io.ReadAll(resp.Body)
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Server encountered an error reading response from user info endpoint"})
 			log.Errorf("Failed to read body from user info endpoint %s: %v", OIDC.UserInfoEndpoint, err)
@@ -415,7 +415,7 @@ func cliRegisterNamespace(ctx *gin.Context) {
 			log.Errorf("The device auth endpoint %s responded with status code %d", OIDC.DeviceAuthEndpoint, response.StatusCode)
 			return
 		}
-		body, err := ioutil.ReadAll(response.Body)
+		body, err := io.ReadAll(response.Body)
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered error reading response from device auth endpoint"})
 			log.Errorf("Failed to read body from device auth endpoint %s: %v", OIDC.DeviceAuthEndpoint, err)
@@ -459,7 +459,7 @@ func cliRegisterNamespace(ctx *gin.Context) {
 			return
 		}
 
-		body, err := ioutil.ReadAll(response.Body)
+		body, err := io.ReadAll(response.Body)
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error reading response from token endpoint"})
 			log.Errorf("Failed to read body from token endpoint %s: %v", OIDC.TokenEndpoint, err)
