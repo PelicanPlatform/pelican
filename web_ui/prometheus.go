@@ -189,7 +189,7 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine) error {
 	scrapeConfig.ServiceDiscoveryConfigs = make([]discovery.Config, 1)
 	scrapeConfig.ServiceDiscoveryConfigs[0] = discovery.StaticConfig{
 		&targetgroup.Group{
-			Targets: []model.LabelSet{model.LabelSet{
+			Targets: []model.LabelSet{{
 				model.AddressLabel: model.LabelValue(pelican_config.ComputeExternalAddress()),
 			}},
 		},
