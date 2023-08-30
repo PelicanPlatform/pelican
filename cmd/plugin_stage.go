@@ -20,7 +20,7 @@ func init() {
 	stageCmd := &cobra.Command{
 		Use:   "stage",
 		Short: "Run pelican CLI to stage files as a HTCSS shadow plugin",
-		Run: stagePluginMain,
+		Run:   stagePluginMain,
 	}
 	stageCmd.Flags().StringP("token", "t", "", "Token file to use for reading and/or writing")
 	if err := viper.BindPFlag("StagePlugin.Token", stageCmd.Flags().Lookup("token")); err != nil {
@@ -135,16 +135,16 @@ func stagePluginMain(cmd *cobra.Command, args []string) {
 		re := regexp.MustCompile(`[,\s]+`)
 		for _, source := range re.Split(inputListStr, -1) {
 			log.Debugln("Examining transfer input file", source)
-			if (strings.HasPrefix(source, mountPrefixStr)) {
+			if strings.HasPrefix(source, mountPrefixStr) {
 				sources = append(sources, source)
 			} else {
-					// Replace the osdf:// prefix with the local mount path
+				// Replace the osdf:// prefix with the local mount path
 				source_uri, err := url.Parse(source)
 				source_uri_scheme := strings.SplitN(source_uri.Scheme, "+", 2)[0]
 				if err == nil && source_uri_scheme == "osdf" {
 					source_path := path.Clean("/" + source_uri.Host + "/" + source_uri.Path)
-					if (strings.HasPrefix(source_path, originPrefixPath)) {
-						sources = append(sources, mountPrefixStr + source_path[len(originPrefixPath):])
+					if strings.HasPrefix(source_path, originPrefixPath) {
+						sources = append(sources, mountPrefixStr+source_path[len(originPrefixPath):])
 						continue
 					}
 				}

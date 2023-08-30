@@ -18,20 +18,17 @@ import (
 )
 
 type (
-
 	OriginAdvertise struct {
-		Name string `json:"name"`
-		URL string  `json:"url"`
+		Name       string        `json:"name"`
+		URL        string        `json:"url"`
 		Namespaces []NamespaceAd `json:"namespaces"`
 	}
-
 )
 
 var (
-	namespaceKeys = ttlcache.New[string, *jwk.AutoRefresh](ttlcache.WithTTL[string, *jwk.AutoRefresh](15 * time.Minute))
+	namespaceKeys      = ttlcache.New[string, *jwk.AutoRefresh](ttlcache.WithTTL[string, *jwk.AutoRefresh](15 * time.Minute))
 	namespaceKeysMutex = sync.RWMutex{}
 )
-
 
 func CreateAdvertiseToken(namespace string) (string, error) {
 	key, err := config.GetOriginJWK()
@@ -65,7 +62,6 @@ func CreateAdvertiseToken(namespace string) (string, error) {
 	return string(signed), nil
 }
 
-//
 // Given a token and a location in the namespace to advertise in,
 // see if the entity is authorized to advertise an origin for the
 // namespace
@@ -86,7 +82,7 @@ func VerifyAdvertiseToken(token, namespace string) (bool, error) {
 	ctx := context.Background()
 	if ar == nil {
 		ar := jwk.NewAutoRefresh(ctx)
-		ar.Configure(issuer_url, jwk.WithMinRefreshInterval(15 * time.Minute))
+		ar.Configure(issuer_url, jwk.WithMinRefreshInterval(15*time.Minute))
 		namespaceKeysMutex.Lock()
 		defer namespaceKeysMutex.Unlock()
 		namespaceKeys.Set(namespace, ar, ttlcache.DefaultTTL)
@@ -112,7 +108,7 @@ func VerifyAdvertiseToken(token, namespace string) (bool, error) {
 
 	scopes := strings.Split(scope, " ")
 
-	for _, scope := range(scopes) {
+	for _, scope := range scopes {
 		if scope == "pelican.advertise" {
 			return true, nil
 		}

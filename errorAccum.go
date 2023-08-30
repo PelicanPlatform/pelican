@@ -11,7 +11,7 @@ import (
 )
 
 type TimestampedError struct {
-	err error
+	err       error
 	timestamp time.Time
 }
 
@@ -19,7 +19,7 @@ var (
 	bunchOfErrors []TimestampedError
 	mu            sync.Mutex
 	// We will generate an error string including the time since startup
-	startup       time.Time = time.Now()
+	startup time.Time = time.Now()
 )
 
 // AddError will add an accumulated error to the error stack
@@ -44,15 +44,15 @@ func GetErrors() string {
 	lastError := startup
 	var errorsFormatted []string
 	for idx, theError := range bunchOfErrors {
-		errFmt := fmt.Sprintf("Attempt #%v: %s", idx + 1, theError.err.Error())
+		errFmt := fmt.Sprintf("Attempt #%v: %s", idx+1, theError.err.Error())
 		timeElapsed := theError.timestamp.Sub(lastError)
-		timeFormat := timeElapsed.Truncate(100*time.Millisecond).String()
+		timeFormat := timeElapsed.Truncate(100 * time.Millisecond).String()
 		errFmt += " (" + timeFormat
 		if first {
 			errFmt += " since start)"
 		} else {
 			timeSinceStart := theError.timestamp.Sub(startup)
-			timeSinceStartFormat := timeSinceStart.Truncate(100*time.Millisecond).String()
+			timeSinceStartFormat := timeSinceStart.Truncate(100 * time.Millisecond).String()
 			errFmt += " elapsed, " + timeSinceStartFormat + " since start)"
 		}
 		lastError = theError.timestamp
@@ -61,7 +61,7 @@ func GetErrors() string {
 	}
 	var toReturn string
 	first = true
-	for idx := len(errorsFormatted)-1; idx >= 0; idx-- {
+	for idx := len(errorsFormatted) - 1; idx >= 0; idx-- {
 		if !first {
 			toReturn += "; "
 		}

@@ -1,9 +1,8 @@
-
 package main
 
 import (
-	"path/filepath"
 	"os"
+	"path/filepath"
 )
 
 func main() {
@@ -19,4 +18,3 @@ func main() {
 		Execute()
 	}
 }
-

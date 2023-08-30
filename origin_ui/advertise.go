@@ -43,8 +43,8 @@ func AdvertiseOrigin() error {
 	originUrl := "https://localhost:8444"
 
 	ad := director.OriginAdvertise{
-		Name: name,
-		URL:  originUrl,
+		Name:       name,
+		URL:        originUrl,
 		Namespaces: make([]director.NamespaceAd, 0),
 	}
 

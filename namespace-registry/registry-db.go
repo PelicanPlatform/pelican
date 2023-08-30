@@ -2,9 +2,9 @@ package nsregistry
 
 import (
 	"database/sql"
-	"path/filepath"
 	"log"
 	"os"
+	"path/filepath"
 
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
@@ -20,12 +20,13 @@ type Namespace struct {
 	Identity      string
 	AdminMetadata string
 }
+
 /*
 Declare the DB handle as an unexported global so that all
 functions in the package can access it without having to
 pass it around. This simplifies the HTTP handlers, and
 the handle is already thread-safe! The approach being used
-is based off of 1.b from 
+is based off of 1.b from
 https://www.alexedwards.net/blog/organising-database-access
 */
 var db *sql.DB
@@ -53,7 +54,7 @@ func namespaceExists(prefix string) (bool, error) {
 		return false, err
 	}
 	defer result.Close()
-	
+
 	found := false
 	for result.Next() {
 		found = true
@@ -80,7 +81,7 @@ func updateNamespace(ns *Namespace) error {
 	_, err := db.Exec(query, ns.Pubkey, ns.Identity, ns.AdminMetadata, ns.Prefix)
 	return err
 }
- */
+*/
 
 func deleteNamespace(prefix string) error {
 	deleteQuery := `DELETE FROM namespace WHERE prefix = ?`
@@ -88,7 +89,7 @@ func deleteNamespace(prefix string) error {
 	if err != nil {
 		return errors.Wrap(err, "Failed to execute deletion query")
 	}
-	
+
 	return nil
 }
 
@@ -161,4 +162,3 @@ func InitializeDB() error {
 	createNamespaceTable()
 	return db.Ping()
 }
-

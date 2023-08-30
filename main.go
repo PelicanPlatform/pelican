@@ -327,7 +327,7 @@ func correctURLWithUnderscore(sourceFile string) (string, string) {
 	if schemeIndex == -1 {
 		return sourceFile, ""
 	}
-	
+
 	originalScheme := sourceFile[:schemeIndex]
 	if strings.Contains(originalScheme, "_") {
 		scheme := strings.ReplaceAll(originalScheme, "_", ".")
@@ -361,7 +361,7 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 		return 0, err
 	}
 	source_url.Scheme = source_scheme
-	
+
 	destination, dest_scheme := correctURLWithUnderscore(destination)
 	dest_url, err := url.Parse(destination)
 	if err != nil {

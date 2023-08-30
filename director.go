@@ -79,7 +79,7 @@ func CreateNsFromDirectorResp(dirResp *http.Response, namespace *namespaces.Name
 
 		strategy := xPelicanTokenGeneration["strategy"]
 		namespace.CredentialGen.Strategy = &strategy
-		
+
 		// The Director only returns a vault server if the strategy is vault.
 		if vs, exists := xPelicanTokenGeneration["vault-server"]; exists {
 			namespace.CredentialGen.VaultServer = &vs
@@ -129,7 +129,7 @@ func GetCachesFromDirectorResponse(resp *http.Response, needsToken bool) (caches
 
 		var endpoint string
 		// var rel string // "rel", as defined in the Metalink/HTTP RFC. Currently not being used by
-		// the OSDF Client, but is provided by the director. Will be useful in the future when 
+		// the OSDF Client, but is provided by the director. Will be useful in the future when
 		// we start looking at cases where we want to duplicate from caches if we're throttling
 		// connections to the origin.
 		var pri int

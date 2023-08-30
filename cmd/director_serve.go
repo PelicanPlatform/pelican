@@ -57,8 +57,8 @@ func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	// or to an origin
 	defaultResponse := viper.GetString("Director.DefaultResponse")
 	if !(defaultResponse == "cache" || defaultResponse == "origin") {
-		return fmt.Errorf("The director's default response must either be set to 'cache' or 'origin'," +
-		" but you provided %q. Was there a typo?", defaultResponse)
+		return fmt.Errorf("The director's default response must either be set to 'cache' or 'origin',"+
+			" but you provided %q. Was there a typo?", defaultResponse)
 	}
 	log.Debugf("The director will redirect to %ss by default", defaultResponse)
 	engine.Use(director.ShortcutMiddleware(defaultResponse))

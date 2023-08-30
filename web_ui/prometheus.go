@@ -31,9 +31,9 @@ import (
 
 	"github.com/alecthomas/units"
 	"github.com/gin-gonic/gin"
+	kit_log "github.com/go-kit/kit/log/logrus"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-	kit_log "github.com/go-kit/kit/log/logrus"
 	"github.com/grafana/regexp"
 	"github.com/mwitkow/go-conntrack"
 	"github.com/oklog/run"
@@ -72,9 +72,8 @@ var (
 	defaultRetentionString   = "15d"
 	defaultRetentionDuration model.Duration
 
-	globalConfig config.Config
+	globalConfig    config.Config
 	globalConfigMtx sync.RWMutex
-
 )
 
 func init() {
@@ -105,7 +104,6 @@ type flagConfig struct {
 	enablePerStepStats         bool
 }
 
-
 type ReadyHandler struct {
 	ready atomic.Uint32
 }
@@ -113,15 +111,15 @@ type ReadyHandler struct {
 func (h *ReadyHandler) SetReady(v bool) {
 	if v {
 		h.ready.Store(1)
-		return 
-	}               
+		return
+	}
 
 	h.ready.Store(0)
-}               
+}
 
-func (h *ReadyHandler) isReady() bool {     
-	return h.ready.Load() > 0      
-}               
+func (h *ReadyHandler) isReady() bool {
+	return h.ready.Load() > 0
+}
 
 func (h *ReadyHandler) testReady(f http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -131,8 +129,8 @@ func (h *ReadyHandler) testReady(f http.HandlerFunc) http.HandlerFunc {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			fmt.Fprintf(w, "Service Unavailable")
 		}
-	}       
-}               
+	}
+}
 
 func runtimeInfo() (api_v1.RuntimeInfo, error) {
 	return api_v1.RuntimeInfo{}, nil
@@ -182,7 +180,7 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine) error {
 
 	// Throw error for invalid config before starting other components.
 	promCfg := config.Config{
-		GlobalConfig: config.DefaultGlobalConfig,
+		GlobalConfig:  config.DefaultGlobalConfig,
 		ScrapeConfigs: make([]*config.ScrapeConfig, 1),
 	}
 	scrapeConfig := config.DefaultScrapeConfig
@@ -225,8 +223,8 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine) error {
 	noStepSubqueryInterval.Set(config.DefaultGlobalConfig.EvaluationInterval)
 
 	var (
-		localStorage  = &readyStorage{stats: tsdb.NewDBStats()}
-		scraper       = &readyScrapeManager{}
+		localStorage = &readyStorage{stats: tsdb.NewDBStats()}
+		scraper      = &readyScrapeManager{}
 		//remoteStorage = remote.NewStorage(log.With(logger, "component", "remote"), prometheus.DefaultRegisterer, localStorage.StartTime, localStoragePath, time.Duration(cfg.RemoteFlushDeadline), scraper)
 		//fanoutStorage = storage.NewFanout(logger, localStorage, remoteStorage)
 		fanoutStorage = storage.NewFanout(logger, localStorage)
@@ -244,7 +242,7 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine) error {
 	discoveryManagerScrape = discovery.NewManager(ctxScrape, log.With(logger, "component", "discovery manager scrape"), discovery.Name("scrape"))
 
 	var (
-		scrapeManager  = scrape.NewManager(&cfg.scrape, log.With(logger, "component", "scrape manager"), fanoutStorage)
+		scrapeManager = scrape.NewManager(&cfg.scrape, log.With(logger, "component", "scrape manager"), fanoutStorage)
 
 		queryEngine *promql.Engine
 	)
@@ -318,7 +316,7 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine) error {
 			ListenAddress: ListenAddress,
 			Host:          external_url.Host,
 			Scheme:        external_url.Scheme,
-		},  
+		},
 		readyHandler.testReady,
 		localStorage,
 		TSDBDir,
@@ -337,20 +335,20 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine) error {
 		nil,
 	)
 	av1 := route.New().WithPrefix("/api/v1.0/prometheus")
-		//WithInstrumentation(h.metrics.instrumentHandlerWithPrefix("/api/v1")).
-		//WithInstrumentation(setPathWithPrefix("/api/v1"))
+	//WithInstrumentation(h.metrics.instrumentHandlerWithPrefix("/api/v1")).
+	//WithInstrumentation(setPathWithPrefix("/api/v1"))
 	apiV1.Register(av1)
 
 	engine.GET("/api/v1.0/prometheus/*any", gin.WrapH(av1))
 
 	reloaders := []reloader{
-		{                       
+		{
 			name:     "db_storage",
 			reloader: localStorage.ApplyConfig,
-		},/* {
+		}, /* {
 			name:     "web_handler",
 			reloader: webHandler.ApplyConfig,
-		},*/ {
+		},*/{
 			name: "query_engine",
 			reloader: func(cfg *config.Config) error {
 				queryEngine.SetQueryLogger(nil)

@@ -4,12 +4,12 @@ import (
 	"net/url"
 	"os"
 
-	"github.com/pelicanplatform/pelican/namespace-registry"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/namespace-registry"
 	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-	log "github.com/sirupsen/logrus"
 )
 
 // Variables to which command line arguments will

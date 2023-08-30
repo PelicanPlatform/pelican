@@ -20,9 +20,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwt"
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/spf13/viper"
 	"github.com/tg123/go-htpasswd"
 	"golang.org/x/crypto/bcrypt"
@@ -31,7 +31,7 @@ import (
 
 type (
 	Login struct {
-		User string `form:"user"`
+		User     string `form:"user"`
 		Password string `form:"password"`
 	}
 
@@ -45,8 +45,8 @@ type (
 )
 
 var (
-	authDB atomic.Pointer[htpasswd.File]
-	currentCode atomic.Pointer[string]
+	authDB       atomic.Pointer[htpasswd.File]
+	currentCode  atomic.Pointer[string]
 	previousCode atomic.Pointer[string]
 
 	//go:embed assets/*
@@ -107,7 +107,7 @@ func WaitUntilLogin() error {
 			fmt.Println(*currentCode.Load())
 		}
 		start := time.Now()
-		for time.Since(start) < 30 * time.Second {
+		for time.Since(start) < 30*time.Second {
 			select {
 			case <-sigs:
 				return errors.New("Process terminated...")
@@ -225,7 +225,7 @@ func setLoginCookie(ctx *gin.Context, user string) {
 		return
 	}
 
-	ctx.SetCookie("login", string(signed), 30 * 60, "/api/v1.0/origin-ui",
+	ctx.SetCookie("login", string(signed), 30*60, "/api/v1.0/origin-ui",
 		ctx.Request.URL.Host, true, true)
 	ctx.SetSameSite(http.SameSiteStrictMode)
 }
@@ -305,7 +305,7 @@ func initLoginHandler(ctx *gin.Context) {
 		ctx.JSON(400, gin.H{"error": "Login code not provided"})
 		return
 	}
-	
+
 	if code.Code != *curCode && (prevCode == nil || code.Code != *prevCode) {
 		ctx.JSON(401, gin.H{"error": "Invalid login code"})
 		return
@@ -378,7 +378,7 @@ func ConfigureOriginUI(router *gin.Engine) error {
 			file,
 		)
 	})
-	router.GET("/", func (ctx *gin.Context) {
+	router.GET("/", func(ctx *gin.Context) {
 		file, _ := webAssets.ReadFile("assets/index.html")
 		ctx.Data(
 			http.StatusOK,

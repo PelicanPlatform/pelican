@@ -45,9 +45,9 @@ type DirectorCache struct {
 
 // Credential generation information
 type CredentialGeneration struct {
-	Issuer        *string  `json:"issuer"`
-	BasePath      *string  `json:"base_path"`
-	MaxScopeDepth *int     `json:"max_scope_depth"`
+	Issuer        *string `json:"issuer"`
+	BasePath      *string `json:"base_path"`
+	MaxScopeDepth *int    `json:"max_scope_depth"`
 	Strategy      *string `json:"strategy"`
 	VaultServer   *string `json:"vault_server"`
 }
@@ -56,13 +56,13 @@ type CredentialGeneration struct {
 type Namespace struct {
 	Caches               []Cache `json:"caches"`
 	SortedDirectorCaches []DirectorCache
-	Path                 string `json:"path"`
-  CredentialGen *CredentialGeneration  `json:"credential_generation"`
-	Issuer               string `json:"issuer"`
-	ReadHTTPS            bool   `json:"readhttps"`
-	UseTokenOnRead       bool   `json:"usetokenonread"`
-	WriteBackHost        string `json:"writebackhost"`
-	DirListHost          string `json:"dirlisthost"`
+	Path                 string                `json:"path"`
+	CredentialGen        *CredentialGeneration `json:"credential_generation"`
+	Issuer               string                `json:"issuer"`
+	ReadHTTPS            bool                  `json:"readhttps"`
+	UseTokenOnRead       bool                  `json:"usetokenonread"`
+	WriteBackHost        string                `json:"writebackhost"`
+	DirListHost          string                `json:"dirlisthost"`
 }
 
 // GetCaches returns the list of caches for the namespace

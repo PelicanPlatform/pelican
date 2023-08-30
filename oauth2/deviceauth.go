@@ -54,9 +54,9 @@ import (
 	"strings"
 	"time"
 
+	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/context/ctxhttp"
 	oauth2_upstream "golang.org/x/oauth2"
-	log "github.com/sirupsen/logrus"
 )
 
 const (
@@ -150,7 +150,6 @@ func parseError(err error) string {
 	return ""
 }
 
-
 // AuthDevice returns a device auth struct which contains a device code
 // and authorization information provided for users to enter on another device.
 func (c *Config) AuthDevice(ctx context.Context) (*DeviceAuth, error) {
@@ -175,7 +174,9 @@ func newTokenRequest(tokenURL, clientID, clientSecret string, v url.Values) (*ht
 }
 
 var HTTPClient ContextKey
+
 type ContextKey struct{}
+
 func ContextClient(ctx context.Context) *http.Client {
 	if ctx != nil {
 		if hc, ok := ctx.Value(HTTPClient).(*http.Client); ok {
@@ -199,10 +200,10 @@ func RetrieveToken(ctx context.Context, clientID, clientSecret, tokenURL string,
 }
 
 type tokenJSON struct {
-	AccessToken  string         `json:"access_token"`
-	TokenType    string         `json:"token_type"`
-	RefreshToken string         `json:"refresh_token"`
-	ExpiresIn    int            `json:"expires_in"`
+	AccessToken  string `json:"access_token"`
+	TokenType    string `json:"token_type"`
+	RefreshToken string `json:"refresh_token"`
+	ExpiresIn    int    `json:"expires_in"`
 }
 
 func doTokenRoundTrip(ctx context.Context, req *http.Request) (*oauth2_upstream.Token, error) {

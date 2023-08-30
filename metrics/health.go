@@ -1,4 +1,3 @@
-
 package metrics
 
 import (
@@ -7,22 +6,20 @@ import (
 )
 
 type (
-
 	ComponentStatus struct {
-		Status string `json:"status"`
+		Status  string `json:"status"`
 		Message string `json:"message,omitempty"`
 	}
 
 	componentStatusInternal struct {
-		Status int
+		Status  int
 		Message string
 	}
 
 	HealthStatus struct {
-		OverallStatus string `json:"status"`
+		OverallStatus   string                     `json:"status"`
 		ComponentStatus map[string]ComponentStatus `json:"components"`
 	}
-
 )
 
 var (

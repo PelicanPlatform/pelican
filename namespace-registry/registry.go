@@ -1,26 +1,26 @@
 package nsregistry
 
 import (
-	"github.com/gin-gonic/gin"
-	"io"
-	"net/http"
-	"crypto/rand"
-	"encoding/hex"
 	"crypto"
 	"crypto/ecdsa"
-	"crypto/sha256"
-	"encoding/json"
-	"github.com/pkg/errors"
-	"net/url"
-	"math/big"
 	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"github.com/gin-gonic/gin"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
+	"io"
+	"math/big"
+	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
-	log "github.com/sirupsen/logrus"
-	
+
 	// use this sqlite driver instead of the one from
 	// github.com/mattn/go-sqlite3, because this one
 	// doesn't require compilation with CGO_ENABLED
@@ -39,9 +39,9 @@ var OIDC struct {
 
 var (
 	// Loading of public/private keys for signing challenges
-	serverCredsLoad        sync.Once
-	serverCredsPrivKey    *ecdsa.PrivateKey
-	serverCredsErr         error
+	serverCredsLoad    sync.Once
+	serverCredsPrivKey *ecdsa.PrivateKey
+	serverCredsErr     error
 )
 
 type Response struct {
@@ -58,20 +58,20 @@ type TokenResponse struct {
 Various auxiliary functions used for client-server security handshakes
 */
 type registrationData struct {
-	ClientNonce      string `json:"client_nonce"`
-	ClientPayload    string `json:"client_payload"`
-	ClientSignature  string `json:"client_signature"`
+	ClientNonce     string `json:"client_nonce"`
+	ClientPayload   string `json:"client_payload"`
+	ClientSignature string `json:"client_signature"`
 
-	ServerNonce      string `json:"server_nonce"`
-	ServerPayload    string `json:"server_payload"`
-	ServerSignature  string `json:"server_signature"`
+	ServerNonce     string `json:"server_nonce"`
+	ServerPayload   string `json:"server_payload"`
+	ServerSignature string `json:"server_signature"`
 
 	Pubkey           json.RawMessage `json:"pubkey"`
-	AccessToken      string `json:"access_token"`
-	Identity         string `json:"identity"`
-	IdentityRequired string `json:"identity_required"`
-	DeviceCode       string `json:"device_code"`
-	Prefix           string `json:"prefix"`
+	AccessToken      string          `json:"access_token"`
+	Identity         string          `json:"identity"`
+	IdentityRequired string          `json:"identity_required"`
+	DeviceCode       string          `json:"device_code"`
+	Prefix           string          `json:"prefix"`
 }
 
 func keySignChallenge(ctx *gin.Context, data *registrationData, action string) error {
@@ -183,13 +183,13 @@ func loadOIDC() error {
 	OIDC.Scope = "openid profile email org.cilogon.userinfo"
 
 	// Set the grant type
-	OIDC.GrantType =  "urn:ietf:params:oauth:grant-type:device_code"
+	OIDC.GrantType = "urn:ietf:params:oauth:grant-type:device_code"
 	return nil
 }
 
 func signPayload(payload []byte, privateKey *ecdsa.PrivateKey) ([]byte, error) {
 	hash := sha256.Sum256(payload)
-	signature, err := privateKey.Sign(rand.Reader, hash[:], crypto.SHA256)  // Use crypto.SHA256 instead of the hash[:]
+	signature, err := privateKey.Sign(rand.Reader, hash[:], crypto.SHA256) // Use crypto.SHA256 instead of the hash[:]
 	if err != nil {
 		return nil, err
 	}
@@ -216,16 +216,16 @@ func keySignChallengeInit(ctx *gin.Context, data *registrationData) error {
 		return errors.Wrap(err, "Failed to load the server's private key")
 	}
 
-    serverSignature, err := signPayload(serverPayload, privateKey)
+	serverSignature, err := signPayload(serverPayload, privateKey)
 	if err != nil {
 		ctx.JSON(500, gin.H{"error": "Failure when signing the challenge"})
 		return errors.Wrap(err, "Failed to sign payload for key-sign challenge")
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{
-		"server_nonce": serverNonce,
-		"client_nonce": data.ClientNonce,
-		"server_payload": hex.EncodeToString(serverPayload),
+		"server_nonce":     serverNonce,
+		"client_nonce":     data.ClientNonce,
+		"server_payload":   hex.EncodeToString(serverPayload),
 		"server_signature": hex.EncodeToString(serverSignature),
 	})
 	return nil
@@ -253,7 +253,7 @@ func jwksToEcdsaPublicKey(jwks *jwks) (*ecdsa.PublicKey, error) {
 	}
 
 	return clientPubkey, nil
-}	
+}
 
 func keySignChallengeCommit(ctx *gin.Context, data *registrationData, action string) error {
 	var pubkeyJwks jwks
@@ -306,7 +306,7 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData, action str
 		}
 	} else {
 		ctx.JSON(500, gin.H{"error": "Server was either unable to verify the client's public key, or an encountered an error with its own"})
-		return errors.Errorf("Either the server or the client could not be verified: " +
+		return errors.Errorf("Either the server or the client could not be verified: "+
 			"server verified:%t, client verified:%t", serverVerified, clientVerified)
 	}
 	return nil
@@ -431,10 +431,10 @@ func cliRegisterNamespace(ctx *gin.Context) {
 		verificationURL := res.VerificationURLComplete
 		deviceCode := res.DeviceCode
 		ctx.JSON(http.StatusOK, gin.H{
-			"device_code": deviceCode,
+			"device_code":      deviceCode,
 			"verification_url": verificationURL,
 		})
-		return 
+		return
 	} else {
 		log.Debug("Verifying Device Code")
 		payload := url.Values{}
@@ -488,11 +488,11 @@ func cliRegisterNamespace(ctx *gin.Context) {
 			}
 		} else {
 			ctx.JSON(http.StatusOK, gin.H{
-				"status": "APPROVED",
+				"status":       "APPROVED",
 				"access_token": tokenResponse.AccessToken,
 			})
 		}
-		return 
+		return
 	}
 }
 
@@ -520,11 +520,11 @@ func dbAddNamespace(ctx *gin.Context, data *registrationData) error {
 
 func dbDeleteNamespace(ctx *gin.Context) {
 	/*
-	A weird feature of gin is that wildcards always
-	add a preceding /. Since the URL parsing that happens
-	upstream removes the prefixed / that gets sent, we
-	can just leave the one that's added back by the wildcard
-	because that reflects the path that's getting stored.
+		A weird feature of gin is that wildcards always
+		add a preceding /. Since the URL parsing that happens
+		upstream removes the prefixed / that gets sent, we
+		can just leave the one that's added back by the wildcard
+		because that reflects the path that's getting stored.
 	*/
 	prefix := ctx.Param("wildcard")
 	log.Debug("Attempting to delete prefix ", prefix)

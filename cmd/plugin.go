@@ -23,8 +23,8 @@ var (
 
 	// Holds the various plugin commands
 	rootPluginCmd = &cobra.Command{
-		Use:     "plugin",
-		Short:   "Plugin management for HTCSS",
+		Use:   "plugin",
+		Short: "Plugin management for HTCSS",
 	}
 )
 
@@ -36,11 +36,11 @@ type Transfer struct {
 func init() {
 	// Define the file transfer plugin command
 	xferCmd := &cobra.Command{
-		Use:   "transfer",
-		Short: "Run pelican CLI in HTCSS file transfer plugin mode",
-		Args: cobra.ArbitraryArgs,
+		Use:                "transfer",
+		Short:              "Run pelican CLI in HTCSS file transfer plugin mode",
+		Args:               cobra.ArbitraryArgs,
 		DisableFlagParsing: true, // We have custom flag handling to match HTCSS style.
-		Run: func(_ *cobra.Command, args []string) {stashPluginMain(args)},
+		Run:                func(_ *cobra.Command, args []string) { stashPluginMain(args) },
 	}
 
 	rootPluginCmd.CompletionOptions.DisableDefaultCmd = true

@@ -1,4 +1,3 @@
-
 package oauth2
 
 import (
@@ -9,9 +8,9 @@ import (
 	"path"
 	"strings"
 
-        log "github.com/sirupsen/logrus"
 	config "github.com/pelicanplatform/pelican/config"
 	namespaces "github.com/pelicanplatform/pelican/namespaces"
+	log "github.com/sirupsen/logrus"
 )
 
 func deviceCodeSupported(grantTypes *[]string) bool {
@@ -90,12 +89,12 @@ func AcquireToken(issuerUrl string, entry *config.PrefixEntry, credentialGen *na
 	log.Debugln("Requesting a credential with the following scope:", storageScope)
 
 	oauth2Config := Config{
-		ClientID: entry.ClientID,
+		ClientID:     entry.ClientID,
 		ClientSecret: entry.ClientSecret,
 		Endpoint: Endpoint{AuthURL: issuerInfo.AuthURL,
-		                   TokenURL: issuerInfo.TokenURL,
-		                   DeviceAuthURL: issuerInfo.DeviceAuthURL},
-		Scopes : []string{"wlcg", "offline_access", storageScope},
+			TokenURL:      issuerInfo.TokenURL,
+			DeviceAuthURL: issuerInfo.DeviceAuthURL},
+		Scopes: []string{"wlcg", "offline_access", storageScope},
 	}
 
 	ctx := context.Background()
@@ -123,8 +122,8 @@ func AcquireToken(issuerUrl string, entry *config.PrefixEntry, credentialGen *na
 	}
 
 	token := config.TokenEntry{
-		Expiration: upstream_token.Expiry.Unix(),
-		AccessToken: upstream_token.AccessToken,
+		Expiration:   upstream_token.Expiry.Unix(),
+		AccessToken:  upstream_token.AccessToken,
 		RefreshToken: upstream_token.RefreshToken,
 	}
 	return &token, nil

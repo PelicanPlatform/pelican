@@ -12,11 +12,11 @@ import (
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
-        "github.com/pkg/errors"
+	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
-        log "github.com/sirupsen/logrus"
-        "github.com/spf13/viper"
+	log "github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
 )
 
 type (
@@ -26,9 +26,9 @@ type (
 
 	UserRecord struct {
 		AuthenticationProtocol string
-		DN string
-		Role string
-		Org string
+		DN                     string
+		Role                   string
+		Org                    string
 	}
 
 	FileId struct {
@@ -36,13 +36,13 @@ type (
 	}
 
 	FileRecord struct {
-		UserId UserId
-		Path string
-		ReadOps uint32
-		ReadvOps uint32
-		WriteOps uint32
-		ReadvSegs uint64
-		ReadBytes uint64
+		UserId     UserId
+		Path       string
+		ReadOps    uint32
+		ReadvOps   uint32
+		WriteOps   uint32
+		ReadvSegs  uint64
+		ReadBytes  uint64
 		ReadvBytes uint64
 		WriteBytes uint64
 	}
@@ -76,19 +76,19 @@ type (
 	}
 
 	SummaryStat struct {
-		Id   string `xml:"id,attr"`
+		Id string `xml:"id,attr"`
 		// Relevant for id="link"
 		LinkConnections int `xml:"tot"`
-		LinkInBytes int `xml:"in"`
-		LinkOutBytes int `xml:"out"`
+		LinkInBytes     int `xml:"in"`
+		LinkOutBytes    int `xml:"out"`
 		// Relevant for id="sched"
-		Threads int `xml:"threads"`
+		Threads     int `xml:"threads"`
 		ThreadsIdle int `xml:"idle"`
 	}
 
 	SummaryStatistics struct {
-		Version string `xml:"ver,attr"`
-		Stats []SummaryStat `xml:"stats"`
+		Version string        `xml:"ver,attr"`
+		Stats   []SummaryStat `xml:"stats"`
 	}
 )
 
@@ -130,8 +130,8 @@ var (
 
 	lastStats SummaryStat
 
-	sessions = ttlcache.New[UserId, UserRecord](ttlcache.WithTTL[UserId, UserRecord](24 * time.Hour))
-	transfers = ttlcache.New[FileId, FileRecord](ttlcache.WithTTL[FileId, FileRecord](24 * time.Hour))
+	sessions     = ttlcache.New[UserId, UserRecord](ttlcache.WithTTL[UserId, UserRecord](24 * time.Hour))
+	transfers    = ttlcache.New[FileId, FileRecord](ttlcache.WithTTL[FileId, FileRecord](24 * time.Hour))
 	monitorPaths []PathList
 )
 
@@ -181,7 +181,6 @@ func ConfigureMonitoring() (int, error) {
 	return addr.Port, nil
 }
 
-
 func ComputePrefix(inputPath string) string {
 	if len(monitorPaths) == 0 {
 		return "/"
@@ -190,11 +189,11 @@ func ComputePrefix(inputPath string) string {
 	segments := strings.Split(path.Clean(inputPath), "/")
 
 	maxlen := 0
-	for _, pathList := range(monitorPaths) {
+	for _, pathList := range monitorPaths {
 		if len(pathList.Paths) > len(segments) {
 			continue
 		}
-		for idx, segment := range(pathList.Paths) {
+		for idx, segment := range pathList.Paths {
 			if len(segments) <= idx {
 				break
 			}
@@ -207,14 +206,14 @@ func ComputePrefix(inputPath string) string {
 		}
 	}
 	if maxlen == 0 {
-		return "/";
+		return "/"
 	}
 
 	result := ""
-	for idx := 1; idx < maxlen + 1; idx++ {
-		result += "/" + segments[idx];
+	for idx := 1; idx < maxlen+1; idx++ {
+		result += "/" + segments[idx]
 	}
-	return path.Clean(result);
+	return path.Clean(result)
 }
 
 func GetSIDRest(info []byte) (UserId, string, error) {
@@ -246,10 +245,10 @@ func ParseFileHeader(packet []byte) (XrdXrootdMonFileHdr, error) {
 		RecType: packet[0],
 		RecFlag: packet[1],
 		RecSize: int16(binary.BigEndian.Uint16(packet[2:4])),
-		FileId: binary.BigEndian.Uint32(packet[4:8]),
-		UserId: binary.BigEndian.Uint32(packet[4:8]),
-		NRecs0: int16(binary.BigEndian.Uint16(packet[4:6])),
-		NRecs1: int16(binary.BigEndian.Uint16(packet[6:8])),
+		FileId:  binary.BigEndian.Uint32(packet[4:8]),
+		UserId:  binary.BigEndian.Uint32(packet[4:8]),
+		NRecs0:  int16(binary.BigEndian.Uint16(packet[4:6])),
+		NRecs1:  int16(binary.BigEndian.Uint16(packet[6:8])),
 	}
 	return fileHdr, nil
 }
@@ -289,12 +288,12 @@ func HandlePacket(packet []byte) error {
 		if err != nil {
 			return errors.Wrapf(err, "Failed to parse XRootD monitoring packet")
 		}
-		path := ComputePrefix(rest);
+		path := ComputePrefix(rest)
 		transfers.Set(fileid, FileRecord{UserId: userid, Path: path}, ttlcache.DefaultTTL)
 	case 'f':
 		log.Debug("HandlePacket: Received a f-stream packet")
 		// sizeof(XrdXrootdMonHeader) + sizeof(XrdXrootdMonFileTOD)
-		if len(packet) < 8 + 24 {
+		if len(packet) < 8+24 {
 			return errors.New("Packet is too small to be a valid f-stream packet")
 		}
 		firstHeaderSize := binary.BigEndian.Uint16(packet[10:12])
@@ -304,11 +303,11 @@ func HandlePacket(packet []byte) error {
 		offset := uint32(firstHeaderSize + 8)
 		bytesRemain := header.Plen - uint16(offset)
 		for bytesRemain > 0 {
-			fileHdr, err := ParseFileHeader(packet[offset:offset + 8])
+			fileHdr, err := ParseFileHeader(packet[offset : offset+8])
 			if err != nil {
 				return err
 			}
-			switch(fileHdr.RecType) {
+			switch fileHdr.RecType {
 			case 0: // XrdXrootdMonFileHdr::isClose
 				log.Debugln("Received a f-stream file-close packet of size ",
 					fileHdr.RecSize)
@@ -347,58 +346,57 @@ func HandlePacket(packet []byte) error {
 					oldReadvBytes = xferRecord.Value().ReadvBytes
 					oldWriteBytes = xferRecord.Value().WriteBytes
 				}
-				if fileHdr.RecFlag & 0x02 == 0x02 { // XrdXrootdMonFileHdr::hasOPS
+				if fileHdr.RecFlag&0x02 == 0x02 { // XrdXrootdMonFileHdr::hasOPS
 					// sizeof(XrdXrootdMonFileHdr) + sizeof(XrdXrootdMonStatXFR)
 					opsOffset := uint32(8 + 24)
 					counter := TransferReadvSegs.With(labels)
 					counter.Add(float64(int64(binary.BigEndian.Uint64(
-						packet[offset + opsOffset + 16:offset + opsOffset + 24]) -
+						packet[offset+opsOffset+16:offset+opsOffset+24]) -
 						oldReadvSegs)))
 					labels["type"] = "read"
 					counter = TransferOps.With(labels)
 					counter.Add(float64(int32(binary.BigEndian.Uint32(
-						packet[offset + opsOffset:offset + opsOffset + 4]) -
+						packet[offset+opsOffset:offset+opsOffset+4]) -
 						oldReadOps)))
 					labels["type"] = "readv"
 					counter = TransferOps.With(labels)
 					counter.Add(float64(int32(binary.BigEndian.Uint32(
-						packet[offset + opsOffset + 4:offset + opsOffset + 8]) -
+						packet[offset+opsOffset+4:offset+opsOffset+8]) -
 						oldReadvOps)))
 					labels["type"] = "write"
 					counter = TransferOps.With(labels)
 					counter.Add(float64(int32(binary.BigEndian.Uint32(
-						packet[offset + opsOffset + 8:offset + opsOffset + 12]) -
+						packet[offset+opsOffset+8:offset+opsOffset+12]) -
 						oldWriteOps)))
 				}
 				xfrOffset := uint32(8) // sizeof(XrdXrootdMonFileHdr)
 				labels["type"] = "read"
 				counter := TransferBytes.With(labels)
 				counter.Add(float64(int64(binary.BigEndian.Uint64(
-					packet[offset + xfrOffset:offset + xfrOffset + 8]) -
+					packet[offset+xfrOffset:offset+xfrOffset+8]) -
 					oldReadBytes)))
 				labels["type"] = "readv"
 				counter = TransferBytes.With(labels)
 				counter.Add(float64(int64(binary.BigEndian.Uint64(
-					packet[offset + xfrOffset + 8:offset + xfrOffset + 16]) -
+					packet[offset+xfrOffset+8:offset+xfrOffset+16]) -
 					oldReadvBytes)))
 				labels["type"] = "write"
 				counter = TransferBytes.With(labels)
 				counter.Add(float64(int64(binary.BigEndian.Uint64(
-					packet[offset + xfrOffset + 16:offset + xfrOffset + 24]) -
+					packet[offset+xfrOffset+16:offset+xfrOffset+24]) -
 					oldWriteBytes)))
 			case 1: // XrdXrootdMonFileHdr::isOpen
 				log.Debug("MonPacket: Received a f-stream file-open packet")
 				fileid := FileId{Id: fileHdr.FileId}
 				path := ""
-				if fileHdr.RecFlag & 0x01 == 0x01 { // hasLFN
+				if fileHdr.RecFlag&0x01 == 0x01 { // hasLFN
 					lfnSize := uint32(fileHdr.RecSize - 20)
-					lfn := NullTermToString(packet[offset + 20:offset + lfnSize + 20])
+					lfn := NullTermToString(packet[offset+20 : offset+lfnSize+20])
 					path := ComputePrefix(lfn)
 					log.Debugf("MonPacket: User LFN %v matches prefix %v",
 						lfn, path)
 				}
-				userid := UserId{Id: binary.BigEndian.Uint32(packet[offset + 16:
-					offset + 20])}
+				userid := UserId{Id: binary.BigEndian.Uint32(packet[offset+16 : offset+20])}
 				transfers.Set(fileid, FileRecord{UserId: userid, Path: path},
 					ttlcache.DefaultTTL)
 			case 2: // XrdXrootdMonFileHdr::isTime
@@ -411,9 +409,9 @@ func HandlePacket(packet []byte) error {
 				fileid := FileId{Id: fileHdr.FileId}
 				item := transfers.Get(fileid)
 				var record FileRecord
-				readBytes := binary.BigEndian.Uint64(packet[offset + 8:offset + 16])
-				readvBytes := binary.BigEndian.Uint64(packet[offset + 16:offset + 24])
-				writeBytes := binary.BigEndian.Uint64(packet[offset + 24:offset + 32])
+				readBytes := binary.BigEndian.Uint64(packet[offset+8 : offset+16])
+				readvBytes := binary.BigEndian.Uint64(packet[offset+16 : offset+24])
+				writeBytes := binary.BigEndian.Uint64(packet[offset+24 : offset+32])
 				if item != nil {
 					record = item.Value()
 				}
@@ -427,7 +425,7 @@ func HandlePacket(packet []byte) error {
 				userId := UserId{Id: fileHdr.UserId}
 				sessions.Delete(userId)
 			default:
-				log.Debug("MonPacket: Received an unhandled file monitoring packet " +
+				log.Debug("MonPacket: Received an unhandled file monitoring packet "+
 					"of type ", fileHdr.RecType)
 			}
 
@@ -439,7 +437,7 @@ func HandlePacket(packet []byte) error {
 	case 'u':
 		log.Debug("MonPacket: Received a user login packet")
 		infoSize := uint32(header.Plen - 12)
-		if userid, auth, err := GetSIDRest(packet[12:12 + infoSize]); err == nil {
+		if userid, auth, err := GetSIDRest(packet[12 : 12+infoSize]); err == nil {
 			var record UserRecord
 			for _, pair := range strings.Split(auth, "&") {
 				keyVal := strings.SplitN(pair, "=", 2)

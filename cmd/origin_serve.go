@@ -15,8 +15,8 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/origin_ui"
 	"github.com/pelicanplatform/pelican/web_ui"
 	"github.com/pelicanplatform/pelican/xrootd"
@@ -32,39 +32,36 @@ var (
 	xrootdCfg string
 	//go:embed resources/robots.txt
 	robotsTxt string
-
 )
 
 type (
+	OriginConfig struct {
+		Multiuser bool
+	}
 
-OriginConfig struct {
-	Multiuser bool
-}
-
-XrootdConfig struct {
-	Port                   int
-	ManagerHost            string
-	ManagerPort            string
-	TLSCertificate         string
-	TLSKey                 string
-	TLSCertDir             string
-	TLSCertFile            string
-	MacaroonsKeyFile       string
-	RobotsTxtFile          string
-	Sitename               string
-	SummaryMonitoringHost  string
-	SummaryMonitoringPort  int
-	DetailedMonitoringHost string
-	DetailedMonitoringPort int
-	XrootdRun              string
-	Authfile               string
-	ScitokensConfig        string
-	Mount                  string
-	NamespacePrefix        string
-	LocalMonitoringPort    int
-	Origin                 OriginConfig
-}
-
+	XrootdConfig struct {
+		Port                   int
+		ManagerHost            string
+		ManagerPort            string
+		TLSCertificate         string
+		TLSKey                 string
+		TLSCertDir             string
+		TLSCertFile            string
+		MacaroonsKeyFile       string
+		RobotsTxtFile          string
+		Sitename               string
+		SummaryMonitoringHost  string
+		SummaryMonitoringPort  int
+		DetailedMonitoringHost string
+		DetailedMonitoringPort int
+		XrootdRun              string
+		Authfile               string
+		ScitokensConfig        string
+		Mount                  string
+		NamespacePrefix        string
+		LocalMonitoringPort    int
+		Origin                 OriginConfig
+	}
 )
 
 func init() {
@@ -388,7 +385,7 @@ func configXrootd() (string, error) {
 	return configPath, nil
 }
 
-func serveOrigin(/*cmd*/ *cobra.Command, /*args*/ []string) error {
+func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	defer config.CleanupTempResources()
 
 	err := config.DiscoverFederation()
