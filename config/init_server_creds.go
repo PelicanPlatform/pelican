@@ -6,14 +6,14 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"math/big"
-	"path/filepath"
 	"os"
+	"path/filepath"
 	"sync/atomic"
 	"time"
-	"encoding/json"
 
 	"github.com/lestrrat-go/jwx/jwk"
 	"github.com/pkg/errors"
@@ -24,7 +24,7 @@ var (
 	privateKey atomic.Pointer[jwk.Key]
 )
 
-func LoadPrivateKey(tlsKey string)(*ecdsa.PrivateKey, error) {
+func LoadPrivateKey(tlsKey string) (*ecdsa.PrivateKey, error) {
 	rest, err := os.ReadFile(tlsKey)
 	if err != nil {
 		return nil, nil
@@ -65,7 +65,7 @@ func LoadPublicKey(existingJWKS string, issuerKeyFile string) (*jwk.Set, error) 
 			return nil, errors.Wrap(err, "Failed to read issuer JWKS file")
 		}
 	}
-	
+
 	if err := GeneratePrivateKey(issuerKeyFile, elliptic.P521()); err != nil {
 		return nil, errors.Wrap(err, "Failed to generate new private key")
 	}
@@ -131,12 +131,12 @@ func GenerateCert() error {
 		SerialNumber: serialNumber,
 		Subject: pkix.Name{
 			Organization: []string{"Pelican"},
-			CommonName: hostname,
+			CommonName:   hostname,
 		},
-		NotBefore: notBefore,
-		NotAfter: notBefore.Add(365 * 24 * time.Hour),
-		KeyUsage: x509.KeyUsageDigitalSignature,
-		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+		NotBefore:             notBefore,
+		NotAfter:              notBefore.Add(365 * 24 * time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 		BasicConstraintsValid: true,
 	}
 	template.DNSNames = []string{hostname}
@@ -233,28 +233,28 @@ func GetOriginJWK() (*jwk.Key, error) {
 }
 
 func JWKSMap(jwks *jwk.Set) (map[string]string, error) {
-    // Marshal the set into JSON
-    jsonBytes, err := json.MarshalIndent(jwks, "", "  ")
-    if err != nil {
-        return nil, err
-    }
+	// Marshal the set into JSON
+	jsonBytes, err := json.MarshalIndent(jwks, "", "  ")
+	if err != nil {
+		return nil, err
+	}
 
-    // Parse the JSON into a structure we can manipulate
-    var parsed map[string][]map[string]interface{}
-    err = json.Unmarshal(jsonBytes, &parsed)
-    if err != nil {
-        return nil, err
-    }
+	// Parse the JSON into a structure we can manipulate
+	var parsed map[string][]map[string]interface{}
+	err = json.Unmarshal(jsonBytes, &parsed)
+	if err != nil {
+		return nil, err
+	}
 
-    // Convert the map[string]interface{} to map[string]string
-    stringMaps := make([]map[string]string, len(parsed["keys"]))
-    for i, m := range parsed["keys"] {
-        stringMap := make(map[string]string)
-        for k, v := range m {
-            stringMap[k] = fmt.Sprintf("%v", v)
-        }
-        stringMaps[i] = stringMap
-    }
+	// Convert the map[string]interface{} to map[string]string
+	stringMaps := make([]map[string]string, len(parsed["keys"]))
+	for i, m := range parsed["keys"] {
+		stringMap := make(map[string]string)
+		for k, v := range m {
+			stringMap[k] = fmt.Sprintf("%v", v)
+		}
+		stringMaps[i] = stringMap
+	}
 
-    return stringMaps[0], nil
+	return stringMaps[0], nil
 }

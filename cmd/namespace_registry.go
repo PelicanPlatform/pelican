@@ -9,7 +9,7 @@ var (
 	namespaceRegistryCmd = &cobra.Command{
 		Use:   "registry",
 		Short: "Interact with a Pelican namespace registry service",
-		Long:  `Interact with a Pelican namespace registry service:
+		Long: `Interact with a Pelican namespace registry service:
 		
 		The namespace registry lies at the core of Pelican's security model
 		by serving as the central point for clients to fetch the public keys

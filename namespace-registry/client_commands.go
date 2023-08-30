@@ -4,23 +4,23 @@ import (
 	"crypto/tls"
 	"github.com/pkg/errors"
 
+	"bufio"
+	"bytes"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
-	"net/http"
-	"bytes"
-	"bufio"
 	"math/big"
-	"encoding/base64"
+	"net/http"
+	"os"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/spf13/viper"
 )
 
 type clientResponseData struct {
-    VerificationURL string `json:"verification_url"`
+	VerificationURL string `json:"verification_url"`
 	DeviceCode      string `json:"device_code"`
 	Status          string `json:"status"`
 	AccessToken     string `json:"access_token"`
@@ -61,16 +61,16 @@ func makeRequest(url string, method string, data map[string]interface{}) ([]byte
 	return body, nil
 }
 
-func NamespaceRegisterWithIdentity(privateKeyPath string, namespaceRegistryEndpoint string, prefix string) (error) {
+func NamespaceRegisterWithIdentity(privateKeyPath string, namespaceRegistryEndpoint string, prefix string) error {
 	identifiedPayload := map[string]interface{}{
 		"identity_required": "true",
-		"prefix": prefix,
+		"prefix":            prefix,
 		// we'll also send the prefix so we can avoid more work if
 		// it's also registered already
 
 	}
 	resp, err := makeRequest(namespaceRegistryEndpoint, "POST", identifiedPayload)
-	
+
 	var respData clientResponseData
 	// Handle case where there was an error encoded in the body
 	if err != nil {
@@ -90,7 +90,7 @@ func NamespaceRegisterWithIdentity(privateKeyPath string, namespaceRegistryEndpo
 	for !done {
 		identifiedPayload = map[string]interface{}{
 			"identity_required": "true",
-			"device_code": respData.DeviceCode,
+			"device_code":       respData.DeviceCode,
 		}
 		resp, err = makeRequest(namespaceRegistryEndpoint, "POST", identifiedPayload)
 		if err != nil {
@@ -112,7 +112,7 @@ func NamespaceRegisterWithIdentity(privateKeyPath string, namespaceRegistryEndpo
 	return NamespaceRegister(privateKeyPath, namespaceRegistryEndpoint, respData.AccessToken, prefix)
 }
 
-func NamespaceRegister(privateKeyPath string, namespaceRegistryEndpoint string, accessToken string, prefix string) (error) {
+func NamespaceRegister(privateKeyPath string, namespaceRegistryEndpoint string, accessToken string, prefix string) error {
 	publicKey, err := config.LoadPublicKey("", privateKeyPath)
 	if err != nil {
 		return errors.Wrap(err, "Failed to retrieve public key")
@@ -135,11 +135,11 @@ func NamespaceRegister(privateKeyPath string, namespaceRegistryEndpoint string, 
 
 	data := map[string]interface{}{
 		"client_nonce": clientNonce,
-		"pubkey":   fmt.Sprintf("%x", jwks["x"]),
+		"pubkey":       fmt.Sprintf("%x", jwks["x"]),
 	}
 
 	resp, err := makeRequest(namespaceRegistryEndpoint, "POST", data)
-	
+
 	var respData clientResponseData
 	// Handle case where there was an error encoded in the body
 	if err != nil {
@@ -174,11 +174,11 @@ func NamespaceRegister(privateKeyPath string, namespaceRegistryEndpoint string, 
 	}
 
 	unidentifiedPayload := map[string]interface{}{
-		"client_nonce":      clientNonce,
-		"server_nonce":      respData.ServerNonce,
-		"pubkey":        	 map[string]string{
-			"x" : new(big.Int).SetBytes(xBytes).String(),
-			"y" : new(big.Int).SetBytes(yBytes).String(),
+		"client_nonce": clientNonce,
+		"server_nonce": respData.ServerNonce,
+		"pubkey": map[string]string{
+			"x":     new(big.Int).SetBytes(xBytes).String(),
+			"y":     new(big.Int).SetBytes(yBytes).String(),
 			"curve": jwks["crv"],
 		},
 		"client_payload":    clientPayload,
@@ -205,7 +205,7 @@ func NamespaceRegister(privateKeyPath string, namespaceRegistryEndpoint string, 
 	return nil
 }
 
-func NamespaceList(endpoint string) (error) {
+func NamespaceList(endpoint string) error {
 	respData, err := makeRequest(endpoint, "GET", nil)
 	var respErr clientResponseData
 	if err != nil {
@@ -218,7 +218,7 @@ func NamespaceList(endpoint string) (error) {
 	return nil
 }
 
-func NamespaceGet(endpoint string) (error) {
+func NamespaceGet(endpoint string) error {
 	respData, err := makeRequest(endpoint, "GET", nil)
 	var respErr clientResponseData
 	if err != nil {
@@ -231,7 +231,7 @@ func NamespaceGet(endpoint string) (error) {
 	return nil
 }
 
-func NamespaceDelete(endpoint string) (error) {
+func NamespaceDelete(endpoint string) error {
 	respData, err := makeRequest(endpoint, "DELETE", nil)
 	var respErr clientResponseData
 	if err != nil {

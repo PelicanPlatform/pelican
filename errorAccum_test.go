@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-//  TestErrorAccum tests simple adding and removing from the accumulator
+// TestErrorAccum tests simple adding and removing from the accumulator
 func TestErrorAccum(t *testing.T) {
 	bunchOfErrors = make([]TimestampedError, 0)
 	defer func() {

@@ -47,7 +47,7 @@ func DoShadowIngest(sourceFile string, originPrefix string, shadowOriginPrefix s
 		lastRemoteSize := uint64(0)
 		lastUpdateTime := time.Now()
 		startTime := lastUpdateTime
-		maxRuntime := float64(localSize / 10*1024*1024) + 300
+		maxRuntime := float64(localSize/10*1024*1024) + 300
 		for {
 			remoteSize, err := CheckOSDF(shadowFile, methods)
 			if httpErr, ok := err.(*HttpErrResp); ok {
@@ -59,7 +59,7 @@ func DoShadowIngest(sourceFile string, originPrefix string, shadowOriginPrefix s
 			} else if err != nil {
 				return 0, "", err
 			}
-			if (localSize == remoteSize) {
+			if localSize == remoteSize {
 				return 0, shadowFile, err
 			}
 			log.Debugf("Remote file exists but it is incorrect size; actual size %v, expected %v.", remoteSize, localSize)
@@ -67,15 +67,15 @@ func DoShadowIngest(sourceFile string, originPrefix string, shadowOriginPrefix s
 			// If the remote file size is growing, then wait a bit; perhaps someone
 			// else is uploading the same file concurrently.
 			if duration_s := time.Since(lastUpdateTime).Seconds(); duration_s > 10 {
-					// Other uploader is too slow; let's do it ourselves
-				if float64(remoteSize - lastRemoteSize) / duration_s < 1024*1024 {
+				// Other uploader is too slow; let's do it ourselves
+				if float64(remoteSize-lastRemoteSize)/duration_s < 1024*1024 {
 					log.Warnln("Remote uploader is too slow; will do upload from this client")
-					break;
+					break
 				}
 				lastRemoteSize = remoteSize
 				lastUpdateTime = time.Now()
 			}
-				// Out of an abundance of caution, never wait more than 10m.
+			// Out of an abundance of caution, never wait more than 10m.
 			if time.Since(startTime).Seconds() > maxRuntime {
 				log.Warnln("Remote uploader took too long to upload file; will do upload from this client")
 				break
@@ -95,7 +95,7 @@ func DoShadowIngest(sourceFile string, originPrefix string, shadowOriginPrefix s
 		if err != nil {
 			return 0, "", err
 		}
-		if shadowFilePost == shadowFile {	
+		if shadowFilePost == shadowFile {
 			return uploadBytes, shadowFile, err
 		}
 	}

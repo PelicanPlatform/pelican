@@ -1,17 +1,16 @@
 package main
 
 import (
+	"github.com/pkg/errors"
 	"os"
 	"os/signal"
 	"syscall"
-	"github.com/pkg/errors"
 
 	"github.com/pelicanplatform/pelican/namespace-registry"
 	"github.com/pelicanplatform/pelican/web_ui"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
-
 
 func serveNamespaceRegistry( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	log.Info("Initializing the namespace registry's database...")

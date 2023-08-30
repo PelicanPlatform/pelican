@@ -17,20 +17,18 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pkg/errors"
-	"github.com/spf13/viper"
 	log "github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
 )
 
 type (
+	XrootdLauncher interface {
+		Launch(ctx context.Context, daemonName string, configPath string) (context.Context, int, error)
+	}
 
-XrootdLauncher interface {
-	Launch(ctx context.Context, daemonName string, configPath string) (context.Context, int, error)
-}
+	PrivilegedXrootdLauncher struct{}
 
-PrivilegedXrootdLauncher struct {}
-
-UnprivilegedXrootdLauncher struct {}
-
+	UnprivilegedXrootdLauncher struct{}
 )
 
 func forwardCommandToLogger(ctx context.Context, daemonName string, cmdStdout io.ReadCloser, cmdStderr io.ReadCloser) {
@@ -71,7 +69,7 @@ func forwardCommandToLogger(ctx context.Context, daemonName string, cmdStdout io
 			break
 		}
 	}
-	<- ctx.Done()
+	<-ctx.Done()
 }
 
 func (UnprivilegedXrootdLauncher) Launch(ctx context.Context, daemonName string, configPath string) (context.Context, int, error) {
@@ -164,7 +162,7 @@ func LaunchXrootd(privileged bool, configPath string) (err error) {
 			}
 			xrootdExpiry = time.Now().Add(10 * time.Second)
 			cmsdExpiry = time.Now().Add(10 * time.Second)
-		case <- xrootdCtx.Done():
+		case <-xrootdCtx.Done():
 			if waitResult := context.Cause(xrootdCtx); waitResult != nil {
 				if !xrootdExpiry.IsZero() {
 					return nil

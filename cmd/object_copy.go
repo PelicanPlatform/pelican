@@ -17,7 +17,7 @@ var (
 	copyCmd = &cobra.Command{
 		Use:   "copy {source ...} {destination}",
 		Short: "Copy a file to/from a Pelican federation",
-		Run: copyMain,
+		Run:   copyMain,
 	}
 )
 

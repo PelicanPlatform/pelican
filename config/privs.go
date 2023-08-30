@@ -10,18 +10,18 @@ import (
 var (
 	isRootExec bool
 
-	uidErr error
-	gidErr error
+	uidErr      error
+	gidErr      error
 	usernameErr error
-	groupErr error
+	groupErr    error
 
-	uid int
-	gid int
+	uid      int
+	gid      int
 	username string
-	group string
+	group    string
 )
 
-func init () {
+func init() {
 	userObj, err := user.Current()
 	isRootExec = err == nil && userObj.Username == "root"
 
@@ -39,7 +39,7 @@ func init () {
 		desiredUsername = "xrootd"
 		userObj, err = user.Lookup(desiredUsername)
 		if err != nil {
-			err = errors.Wrap(err, "Unable to lookup the xrootd runtime user" +
+			err = errors.Wrap(err, "Unable to lookup the xrootd runtime user"+
 				" information; does the xrootd user exist?")
 			uidErr = err
 			gidErr = err

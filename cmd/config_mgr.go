@@ -17,8 +17,8 @@ import (
 var (
 	// Add the config and prefix commands
 	rootConfigCmd = &cobra.Command{
-		Use:     "credentials",
-		Short:   "Interact with the credential configuration file",
+		Use:   "credentials",
+		Short: "Interact with the credential configuration file",
 	}
 )
 
@@ -276,9 +276,9 @@ func init() {
 
 	// Define the token commands
 	tokenCmd := &cobra.Command{
-		Use: "token",
+		Use:   "token",
 		Short: "Manage the available tokens",
-		Long: "Manage the available tokens",
+		Long:  "Manage the available tokens",
 	}
 	addTokenSubcommands(tokenCmd)
 

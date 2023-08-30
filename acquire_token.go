@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
+	jwt "github.com/golang-jwt/jwt"
 	config "github.com/pelicanplatform/pelican/config"
 	namespaces "github.com/pelicanplatform/pelican/namespaces"
-	log "github.com/sirupsen/logrus"
-	jwt "github.com/golang-jwt/jwt"
 	oauth2 "github.com/pelicanplatform/pelican/oauth2"
+	log "github.com/sirupsen/logrus"
 	oauth2_upstream "golang.org/x/oauth2"
 )
 
@@ -102,12 +102,12 @@ func RegisterClient(namespace namespaces.Namespace) (*config.PrefixEntry, error)
 	}
 
 	drcp := oauth2.DCRPConfig{ClientRegistrationEndpointURL: issuer.RegistrationURL, Metadata: oauth2.Metadata{
-		RedirectURIs: []string{"https://localhost/osdf-client"},
+		RedirectURIs:            []string{"https://localhost/osdf-client"},
 		TokenEndpointAuthMethod: "client_secret_basic",
-		GrantTypes: []string{"refresh_token", "urn:ietf:params:oauth:grant-type:device_code"},
-		ResponseTypes: []string{"code"},
-		ClientName: "OSDF Command Line Client",
-		Scopes: []string{"offline_access", "wlcg", "storage.read:/", "storage.modify:/", "storage.create:/"},
+		GrantTypes:              []string{"refresh_token", "urn:ietf:params:oauth:grant-type:device_code"},
+		ResponseTypes:           []string{"code"},
+		ClientName:              "OSDF Command Line Client",
+		Scopes:                  []string{"offline_access", "wlcg", "storage.read:/", "storage.modify:/", "storage.create:/"},
 	}}
 
 	resp, err := drcp.Register()
@@ -115,8 +115,8 @@ func RegisterClient(namespace namespaces.Namespace) (*config.PrefixEntry, error)
 		return nil, err
 	}
 	newEntry := config.PrefixEntry{
-		Prefix: namespace.Path,
-		ClientID: resp.ClientID,
+		Prefix:       namespace.Path,
+		ClientID:     resp.ClientID,
 		ClientSecret: resp.ClientSecret,
 	}
 	return &newEntry, nil
@@ -136,7 +136,7 @@ func AcquireToken(destination *url.URL, namespace namespaces.Namespace, isWrite 
 		return "", fmt.Errorf("Vault credential generation strategy is not supported")
 	default:
 		return "", fmt.Errorf("Unknown credential generation strategy (%s) for prefix %s",
-                                      strategy, namespace.Path)
+			strategy, namespace.Path)
 	}
 	issuer := *namespace.CredentialGen.Issuer
 	if len(issuer) == 0 {
@@ -164,7 +164,7 @@ func AcquireToken(destination *url.URL, namespace namespaces.Namespace, isWrite 
 			return "", err
 		}
 		osdfConfig.OSDF.OauthClient = append(osdfConfig.OSDF.OauthClient, *prefixEntry)
-		prefixEntry = &osdfConfig.OSDF.OauthClient[len(osdfConfig.OSDF.OauthClient) - 1]
+		prefixEntry = &osdfConfig.OSDF.OauthClient[len(osdfConfig.OSDF.OauthClient)-1]
 		newEntry = true
 	} else {
 		prefixEntry = &osdfConfig.OSDF.OauthClient[prefixIdx]
@@ -212,17 +212,17 @@ func AcquireToken(destination *url.URL, namespace namespaces.Namespace, isWrite 
 
 		// We have a reasonable token; let's try refreshing it.
 		upstreamToken := oauth2_upstream.Token{
-			AccessToken: acceptableToken.AccessToken,
+			AccessToken:  acceptableToken.AccessToken,
 			RefreshToken: acceptableToken.RefreshToken,
-			Expiry: time.Unix(0, 0),
+			Expiry:       time.Unix(0, 0),
 		}
 		issuerInfo, err := oauth2.GetIssuerMetadata(issuer)
 		if err == nil {
 			upstreamConfig := oauth2_upstream.Config{
-				ClientID: prefixEntry.ClientID,
+				ClientID:     prefixEntry.ClientID,
 				ClientSecret: prefixEntry.ClientSecret,
 				Endpoint: oauth2_upstream.Endpoint{
-					AuthURL: issuerInfo.AuthURL,
+					AuthURL:  issuerInfo.AuthURL,
 					TokenURL: issuerInfo.TokenURL,
 				}}
 			ctx := context.Background()
@@ -258,4 +258,3 @@ func AcquireToken(destination *url.URL, namespace namespaces.Namespace, isWrite 
 
 	return token.AccessToken, nil
 }
-

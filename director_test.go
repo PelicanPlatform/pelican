@@ -1,13 +1,13 @@
 package pelican
 
-import(
+import (
+	"bytes"
+	"github.com/stretchr/testify/assert"
 	"io"
-	"testing"
 	"net/http"
 	"net/http/httptest"
-	"bytes"
 	"os"
-	"github.com/stretchr/testify/assert"
+	"testing"
 
 	namespaces "github.com/pelicanplatform/pelican/namespaces"
 )
@@ -30,11 +30,11 @@ func TestGetCachesFromDirectorResponse(t *testing.T) {
 	directorHeaders := make(map[string][]string)
 	directorHeaders["Link"] = []string{"<my-cache.edu:8443>; rel=\"duplicate\"; pri=1, <another-cache.edu:8443>; rel=\"duplicate\"; pri=2"}
 	directorBody := []byte(`{"key": "value"}`)
-	
+
 	directorResponse := &http.Response{
 		StatusCode: 307,
-		Header: directorHeaders,
-		Body: io.NopCloser(bytes.NewReader(directorBody)),
+		Header:     directorHeaders,
+		Body:       io.NopCloser(bytes.NewReader(directorBody)),
 	}
 
 	// Call the function in question
@@ -42,7 +42,7 @@ func TestGetCachesFromDirectorResponse(t *testing.T) {
 
 	// Test for expected outputs
 	assert.NoError(t, err, "Error getting caches from the Director's response")
-	
+
 	assert.Equal(t, "my-cache.edu:8443", caches[0].EndpointUrl)
 	assert.Equal(t, 1, caches[0].Priority)
 	assert.Equal(t, true, caches[0].AuthedReq)
@@ -62,32 +62,32 @@ func TestCreateNsFromDirectorResp(t *testing.T) {
 
 	directorResponse := &http.Response{
 		StatusCode: 307,
-		Header: directorHeaders,
-		Body: io.NopCloser(bytes.NewReader(directorBody)),
+		Header:     directorHeaders,
+		Body:       io.NopCloser(bytes.NewReader(directorBody)),
 	}
 
 	// Create a namespace instance to test against
 	cache1 := namespaces.DirectorCache{
 		EndpointUrl: "my-cache.edu:8443",
-		Priority: 1,
-		AuthedReq: true,
-	} 
+		Priority:    1,
+		AuthedReq:   true,
+	}
 	cache2 := namespaces.DirectorCache{
 		EndpointUrl: "another-cache.edu:8443",
-		Priority: 2,
-		AuthedReq: true,
-	} 
+		Priority:    2,
+		AuthedReq:   true,
+	}
 
 	caches := []namespaces.DirectorCache{}
 	caches = append(caches, cache1)
 	caches = append(caches, cache2)
-	
+
 	constructedNamespace := &namespaces.Namespace{
 		SortedDirectorCaches: caches,
-		Path: "/foo/bar",
-		Issuer: "https://get-your-tokens.org",
-		ReadHTTPS: true,
-		UseTokenOnRead: true,
+		Path:                 "/foo/bar",
+		Issuer:               "https://get-your-tokens.org",
+		ReadHTTPS:            true,
+		UseTokenOnRead:       true,
 	}
 
 	// Call the function in question
@@ -111,17 +111,17 @@ func TestNewTransferDetailsUsingDirector(t *testing.T) {
 	// Cache with http
 	nonAuthCache := namespaces.DirectorCache{
 		ResourceName: "mycache",
-		EndpointUrl: "my-cache-url:8000",
-		Priority: 99,
-		AuthedReq: false,
+		EndpointUrl:  "my-cache-url:8000",
+		Priority:     99,
+		AuthedReq:    false,
 	}
 
 	// Cache with https
 	authCache := namespaces.DirectorCache{
 		ResourceName: "mycache",
-		EndpointUrl: "my-cache-url:8443",
-		Priority: 99,
-		AuthedReq: true,
+		EndpointUrl:  "my-cache-url:8443",
+		Priority:     99,
+		AuthedReq:    true,
 	}
 
 	// Case 1: cache with http

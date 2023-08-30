@@ -12,7 +12,7 @@ func TryGetPassword() ([]byte, error) {
 	return make([]byte, 0), nil
 }
 
-func SavePassword(new_pass []byte) (error) {
+func SavePassword(new_pass []byte) error {
 	saved_password_val = new_pass
 	saved_password = true
 	return nil

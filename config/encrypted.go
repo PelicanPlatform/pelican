@@ -50,11 +50,11 @@ func EncryptedConfigExists() (bool, error) {
 	}
 	_, err = os.Stat(filename)
 	if os.IsNotExist(err) {
-		return false, nil;
+		return false, nil
 	} else if err != nil {
-		return false, err;
+		return false, err
 	}
-	return true, nil;
+	return true, nil
 }
 
 func GetEncryptedContents() (string, error) {
@@ -143,7 +143,7 @@ func GetPassword(newFile bool) ([]byte, error) {
 		fmt.Fprintln(os.Stderr, "The client is able to save the authorization in a local file.")
 		fmt.Fprintln(os.Stderr, "This prevents the need to reinitialize the authorization for each transfer.")
 		fmt.Fprintln(os.Stderr, "You will be asked for this password whenever a new session is started.")
-		fmt.Fprintln(os.Stderr, "Please provide a new password to encrypt the local OSDF client configuration file: ");
+		fmt.Fprintln(os.Stderr, "Please provide a new password to encrypt the local OSDF client configuration file: ")
 	} else {
 		fmt.Fprintln(os.Stderr, "The OSDF client configuration is encrypted.  Enter your password for the local OSDF client configuration file: ")
 	}
@@ -280,7 +280,7 @@ func SaveConfigContents_internal(config *OSDFConfig, forcePassword bool) error {
 	if setEmptyPassword {
 		fmt.Fprintln(os.Stderr, "WARNING: empty password provided; the credentials will be saved unencrypted on disk")
 	} else if forcePassword || len(password) == 0 || err != nil {
-		var exists bool;
+		var exists bool
 		if exists, err = EncryptedConfigExists(); err == nil && !exists {
 			password, err = GetPassword(true)
 		} else {

@@ -40,9 +40,9 @@ func GetEngine() (*gin.Engine, error) {
 
 		latency := time.Since(startTime)
 		webLogger.WithFields(log.Fields{"method": ctx.Request.Method,
-			"status": ctx.Writer.Status(),
-			"time": latency.String(),
-			"client": ctx.RemoteIP(),
+			"status":   ctx.Writer.Status(),
+			"time":     latency.String(),
+			"client":   ctx.RemoteIP(),
 			"resource": ctx.Request.URL.Path},
 		).Info("Served Request")
 	})
