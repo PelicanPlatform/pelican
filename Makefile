@@ -33,6 +33,10 @@ WEBSITE_CACHE_PATH := origin_ui/src/.next
 WEBSITE_CLEAN_LIST := $(WEBSITE_OUT_PATH) \
 					  $(WEBSITE_CACHE_PATH)
 
+
+.PHONY: all
+all: pelican-build
+
 .PHONY: web-clean
 web-clean:
 	@echo CLEAN $(WEBSITE_CLEAN_LIST)
