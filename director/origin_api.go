@@ -82,7 +82,9 @@ func VerifyAdvertiseToken(token, namespace string) (bool, error) {
 	ctx := context.Background()
 	if ar == nil {
 		ar := jwk.NewCache(ctx)
-		ar.Register(issuer_url, jwk.WithMinRefreshInterval(15*time.Minute))
+		if err = ar.Register(issuer_url, jwk.WithMinRefreshInterval(15*time.Minute)); err != nil {
+			return false, err
+		}
 		namespaceKeysMutex.Lock()
 		defer namespaceKeysMutex.Unlock()
 		namespaceKeys.Set(namespace, ar, ttlcache.DefaultTTL)

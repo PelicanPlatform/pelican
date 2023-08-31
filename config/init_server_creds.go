@@ -85,7 +85,9 @@ func LoadPublicKey(existingJWKS string, issuerKeyFile string) (*jwk.Set, error) 
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to assign key ID to public key")
 	}
-	jwks.AddKey(pkey)
+	if err = jwks.AddKey(pkey); err != nil {
+		return nil, errors.Wrap(err, "Failed to add public key to new JWKS")
+	}
 	return &jwks, nil
 }
 
