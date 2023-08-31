@@ -58,6 +58,7 @@ func RunEngine(engine *gin.Engine) {
 
 	addr := fmt.Sprintf("%v:%v", viper.GetString("WebAddress"), viper.GetInt("WebPort"))
 
+	log.Debugln("Starting web engine at address", addr)
 	err := engine.RunTLS(addr, certFile, keyFile)
 	if err != nil {
 		panic(err)

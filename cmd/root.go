@@ -6,13 +6,17 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/pelicanplatform/pelican/config"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 )
+
+type uint16Value uint16
 
 var (
 	cfgFile    string
@@ -25,7 +29,38 @@ var (
 with data federations, enabling the sharing of objects and collections
 across multiple dataset providers.`,
 	}
+
+	// We want the value of this port flag to correspond to the WebPort viper key.
+	// However, only one flag pointer can correspond to the key.  If we define this
+	// in `pelican registry serve` and `pelican director serve`, then whatever init()
+	// function is run second will be the only one that is set (the first definition
+	// of the flag is overwritten and thus ignored).
+	//
+	// Accordingly, we define the flag once globally and strategically insert the
+	// pointer into any command that may want to define the port.
+	emptyPort = uint16(0)
+	portFlag  = &pflag.Flag{
+		Name:      "port",
+		Shorthand: "p",
+		Usage:     "Set the port at which the web server should be accessible",
+		Value:     (*uint16Value)(&emptyPort),
+	}
 )
+
+// The Value member of the portFlag object must implement the pflag.Value interface.
+// Unfortunately, the pflag module does not currently export any types that implement
+// this interface so we have to reimplement it here.
+func (i *uint16Value) Set(s string) error {
+	v, err := strconv.ParseUint(s, 0, 16)
+	*i = uint16Value(v)
+	return err
+}
+
+func (i *uint16Value) Type() string {
+	return "uint16"
+}
+
+func (i *uint16Value) String() string { return strconv.FormatUint(uint64(*i), 10) }
 
 func Execute() {
 	err := rootCmd.Execute()
@@ -75,6 +110,9 @@ func initConfig() {
 		viper.SetConfigName("pelican")
 	}
 	if err := viper.BindPFlag("Debug", rootCmd.PersistentFlags().Lookup("debug")); err != nil {
+		panic(err)
+	}
+	if err := viper.BindPFlag("WebPort", portFlag); err != nil {
 		panic(err)
 	}
 

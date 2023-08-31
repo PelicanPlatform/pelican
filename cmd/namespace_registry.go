@@ -2,7 +2,6 @@ package main
 
 import (
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
 var (
@@ -36,11 +35,6 @@ var (
 func init() {
 	// Tie the registryServe command to the root CLI command
 	namespaceRegistryCmd.AddCommand(registryServeCmd)
-
 	// Set up flags for the command
-	registryServeCmd.Flags().StringP("port", "p", "", "Set the port at which the namespace registry should be accessible.")
-	err := viper.BindPFlag("WebPort", registryServeCmd.Flags().Lookup("port"))
-	if err != nil {
-		panic(err)
-	}
+	registryServeCmd.Flags().AddFlag(portFlag)
 }
