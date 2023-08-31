@@ -15,7 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/lestrrat-go/jwx/jwk"
+	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
 )
@@ -85,7 +85,9 @@ func LoadPublicKey(existingJWKS string, issuerKeyFile string) (*jwk.Set, error) 
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to assign key ID to public key")
 	}
-	jwks.Add(pkey)
+	if err = jwks.AddKey(pkey); err != nil {
+		return nil, errors.Wrap(err, "Failed to add public key to new JWKS")
+	}
 	return &jwks, nil
 }
 

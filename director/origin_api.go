@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
-	"github.com/lestrrat-go/jwx/jwa"
-	"github.com/lestrrat-go/jwx/jwk"
-	"github.com/lestrrat-go/jwx/jwt"
+	"github.com/lestrrat-go/jwx/v2/jwa"
+	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/spf13/viper"
 )
@@ -26,7 +26,7 @@ type (
 )
 
 var (
-	namespaceKeys      = ttlcache.New[string, *jwk.AutoRefresh](ttlcache.WithTTL[string, *jwk.AutoRefresh](15 * time.Minute))
+	namespaceKeys      = ttlcache.New[string, *jwk.Cache](ttlcache.WithTTL[string, *jwk.Cache](15 * time.Minute))
 	namespaceKeysMutex = sync.RWMutex{}
 )
 
@@ -55,7 +55,7 @@ func CreateAdvertiseToken(namespace string) (string, error) {
 		return "", err
 	}
 
-	signed, err := jwt.Sign(tok, jwa.ES512, key)
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES512, key))
 	if err != nil {
 		return "", err
 	}
@@ -70,7 +70,7 @@ func VerifyAdvertiseToken(token, namespace string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	var ar *jwk.AutoRefresh
+	var ar *jwk.Cache
 	{
 		namespaceKeysMutex.RLock()
 		defer namespaceKeysMutex.Unlock()
@@ -81,13 +81,15 @@ func VerifyAdvertiseToken(token, namespace string) (bool, error) {
 	}
 	ctx := context.Background()
 	if ar == nil {
-		ar := jwk.NewAutoRefresh(ctx)
-		ar.Configure(issuer_url, jwk.WithMinRefreshInterval(15*time.Minute))
+		ar := jwk.NewCache(ctx)
+		if err = ar.Register(issuer_url, jwk.WithMinRefreshInterval(15*time.Minute)); err != nil {
+			return false, err
+		}
 		namespaceKeysMutex.Lock()
 		defer namespaceKeysMutex.Unlock()
 		namespaceKeys.Set(namespace, ar, ttlcache.DefaultTTL)
 	}
-	keyset, err := ar.Fetch(ctx, issuer_url)
+	keyset, err := ar.Get(ctx, issuer_url)
 	if err != nil {
 		return false, err
 	}
