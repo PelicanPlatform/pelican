@@ -507,17 +507,6 @@ Loop:
 	for _, method := range methods {
 
 		switch method {
-		case "cvmfs":
-			if strings.HasPrefix(sourceFile, "/osgconnect/") {
-				log.Info("Trying CVMFS...")
-				if downloaded, err = download_cvmfs(sourceFile, destination, &payload); err == nil {
-					success = true
-					break Loop
-					//check if break still works
-				}
-			} else {
-				log.Debug("Skipping CVMFS as file does not start with /osgconnect/")
-			}
 		case "http":
 			log.Info("Trying HTTP...")
 			if downloaded, err = download_http(sourceFile, destination, &payload, ns, recursive, token_name, OSDFDirectorUrl); err == nil {

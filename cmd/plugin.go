@@ -61,7 +61,7 @@ func stashPluginMain(args []string) {
 	pelican.ObjectClientOptions.ProgressBars = false
 	pelican.ObjectClientOptions.Version = version
 	setLogging(log.PanicLevel)
-	methods := []string{"cvmfs", "http"}
+	methods := []string{"http"}
 	var infile, outfile, testCachePath string
 	var useOutFile bool = false
 	var getCaches bool = false

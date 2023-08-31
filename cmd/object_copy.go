@@ -38,7 +38,7 @@ func init() {
 		flagSet.Bool("closest", false, "Return the closest cache and exit")
 		flagSet.BoolP("debug", "d", false, "Enable debug logs") // Typically set by the root command (which doesn't exist in stashcp mode)
 		flagSet.Bool("list-names", false, "Return the names of pre-configured cache lists and exit")
-		flagSet.String("methods", "cvmfs,http", "Comma separated list of methods to try, in order")
+		flagSet.String("methods", "http", "Comma separated list of methods to try, in order")
 		flagSet.Bool("namespaces", false, "Print the namespace information and exit")
 		flagSet.Bool("plugininterface", false, "Output in HTCondor plugin format.  Turned on if executable is named stash_plugin")
 		flagSet.Lookup("plugininterface").Hidden = true // This has been a no-op for quite some time.
