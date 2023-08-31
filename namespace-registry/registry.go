@@ -1,25 +1,26 @@
 package nsregistry
 
 import (
+	"context"
 	"crypto"
 	"crypto/ecdsa"
-	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"github.com/gin-gonic/gin"
-	"github.com/pelicanplatform/pelican/config"
-	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"io"
-	"math/big"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
 	"sync"
+
+	"github.com/gin-gonic/gin"
+	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
 
 	// use this sqlite driver instead of the one from
 	// github.com/mattn/go-sqlite3, because this one
@@ -231,83 +232,78 @@ func keySignChallengeInit(ctx *gin.Context, data *registrationData) error {
 	return nil
 }
 
-type jwks struct {
-	X string `json:"x"`
-	Y string `json:"y"`
-}
-
-func jwksToEcdsaPublicKey(jwks *jwks) (*ecdsa.PublicKey, error) {
-	xBigInt, err := new(big.Int).SetString(jwks.X, 10)
-	if !err {
-		return nil, errors.New("Failed to convert jwks.x to Big Int")
-	}
-	yBigInt, err := new(big.Int).SetString(jwks.Y, 10)
-	if !err {
-		return nil, errors.New("Failed to convert jwks.y to Big Int")
-	}
-
-	clientPubkey := &ecdsa.PublicKey{
-		Curve: elliptic.P521(),
-		X:     xBigInt,
-		Y:     yBigInt,
-	}
-
-	return clientPubkey, nil
-}
-
 func keySignChallengeCommit(ctx *gin.Context, data *registrationData, action string) error {
-	var pubkeyJwks jwks
-	if err := json.Unmarshal(data.Pubkey, &pubkeyJwks); err != nil {
-		ctx.JSON(500, gin.H{"error": "Failed to unmarshal the provided pubkey"})
-		return errors.Wrap(err, "Failed to unmarshal the provided pubkey")
+	// Parse the client's jwks as a set here
+	clientJwks, err := jwk.Parse(data.Pubkey)
+	if err != nil {
+		return errors.Wrap(err, "Couldn't parse the pubkey from the client")
 	}
 
-	clientPubkey, err := jwksToEcdsaPublicKey(&pubkeyJwks)
-	if err != nil {
-		return errors.Wrap(err, "Failed to convert jwks to ECDSA pubkey")
-	}
-	clientPayload := []byte(data.ClientNonce + data.ServerNonce)
-	clientSignature, err := hex.DecodeString(data.ClientSignature)
-	if err != nil {
-		ctx.JSON(500, gin.H{"error": "Failed to decode client's signature"})
-		return errors.Wrap(err, "Failed to decode the client's signature")
-	}
-	clientVerified := verifySignature(clientPayload, clientSignature, clientPubkey)
-
-	serverPayload, err := hex.DecodeString(data.ServerPayload)
-	if err != nil {
-		ctx.JSON(500, gin.H{"error": "Failed to decode the server's payload"})
-		return errors.Wrap(err, "Failed to decode the server's payload")
-	}
-
-	serverSignature, err := hex.DecodeString(data.ServerSignature)
-	if err != nil {
-		ctx.JSON(500, gin.H{"error": "Failed to decode the server's signature"})
-		return errors.Wrap(err, "Failed to decode the server's signature")
-	}
-
-	serverPrivateKey, err := loadServerKeys()
-	if err != nil {
-		ctx.JSON(500, gin.H{"error": "Failed to load server's private key"})
-		return errors.Wrap(err, "Failed to decode the server's private key")
-	}
-	serverPubkey := serverPrivateKey.PublicKey
-	serverVerified := verifySignature(serverPayload, serverSignature, &serverPubkey)
-
-	if clientVerified && serverVerified {
-		if action == "register" {
-			log.Debug("Registering namespace ", data.Prefix)
-			err = dbAddNamespace(ctx, data)
-			if err != nil {
-				ctx.JSON(500, gin.H{"error": "The server encountered an error while attempting to add the prefix to its database"})
-				return errors.Wrapf(err, "Failed while trying to add to database")
-			}
-			return nil
+	if log.GetLevel() == log.DebugLevel || log.GetLevel() == log.TraceLevel {
+		// Let's check that we can convert to JSON and get the right thing...
+		jsonbuf, err := json.Marshal(clientJwks)
+		if err != nil {
+			return errors.Wrap(err, "failed to marshal the client's keyset into JSON")
 		}
-	} else {
-		ctx.JSON(500, gin.H{"error": "Server was either unable to verify the client's public key, or an encountered an error with its own"})
-		return errors.Errorf("Either the server or the client could not be verified: "+
-			"server verified:%t, client verified:%t", serverVerified, clientVerified)
+		log.Debugf("Client JWKS as seen by the registry server: %s\n", jsonbuf)
+	}
+
+	// Now iterate through the jwks and verify signatures:
+	// Note that the examples in the docs for lestrrat/jwx/v2/jwk are outdated and still point to the
+	// old v1 method for iterating throug keysets (ie they use clientJWKS.Iterate(context.Background()) instead of
+	// clientJWKS.Keys(context.Background()))
+	for it := clientJwks.Keys(context.Background()); it.Next(context.Background()); {
+		pair := it.Pair()
+		key := pair.Value.(jwk.Key)
+
+		var rawkey interface{} // This is the raw key, like *rsa.PrivateKey or *ecdsa.PrivateKey
+		if err := key.Raw(&rawkey); err != nil {
+			return errors.Wrap(err, "failed to generate raw pubkey from jwks")
+		}
+
+		clientPayload := []byte(data.ClientNonce + data.ServerNonce)
+		clientSignature, err := hex.DecodeString(data.ClientSignature)
+		if err != nil {
+			ctx.JSON(500, gin.H{"error": "Failed to decode client's signature"})
+			return errors.Wrap(err, "Failed to decode the client's signature")
+		}
+		clientVerified := verifySignature(clientPayload, clientSignature, (rawkey).(*ecdsa.PublicKey))
+
+		serverPayload, err := hex.DecodeString(data.ServerPayload)
+		if err != nil {
+			ctx.JSON(500, gin.H{"error": "Failed to decode the server's payload"})
+			return errors.Wrap(err, "Failed to decode the server's payload")
+		}
+
+		serverSignature, err := hex.DecodeString(data.ServerSignature)
+		if err != nil {
+			ctx.JSON(500, gin.H{"error": "Failed to decode the server's signature"})
+			return errors.Wrap(err, "Failed to decode the server's signature")
+		}
+
+		serverPrivateKey, err := loadServerKeys()
+		if err != nil {
+			ctx.JSON(500, gin.H{"error": "Failed to load server's private key"})
+			return errors.Wrap(err, "Failed to decode the server's private key")
+		}
+		serverPubkey := serverPrivateKey.PublicKey
+		serverVerified := verifySignature(serverPayload, serverSignature, &serverPubkey)
+
+		if clientVerified && serverVerified {
+			if action == "register" {
+				log.Debug("Registering namespace ", data.Prefix)
+				err = dbAddNamespace(ctx, data)
+				if err != nil {
+					ctx.JSON(500, gin.H{"error": "The server encountered an error while attempting to add the prefix to its database"})
+					return errors.Wrapf(err, "Failed while trying to add to database")
+				}
+				return nil
+			}
+		} else {
+			ctx.JSON(500, gin.H{"error": "Server was either unable to verify the client's public key, or an encountered an error with its own"})
+			return errors.Errorf("Either the server or the client could not be verified: "+
+				"server verified:%t, client verified:%t", serverVerified, clientVerified)
+		}
 	}
 	return nil
 }

@@ -6,16 +6,15 @@ import (
 
 	"bufio"
 	"bytes"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
-	"math/big"
 	"net/http"
 	"os"
 
 	"github.com/pelicanplatform/pelican/config"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 )
 
@@ -118,9 +117,13 @@ func NamespaceRegister(privateKeyPath string, namespaceRegistryEndpoint string, 
 		return errors.Wrap(err, "Failed to retrieve public key")
 	}
 
-	jwks, err := config.JWKSMap(publicKey)
-	if err != nil {
-		return errors.Wrap(err, "Failed to convert public key to JWKS")
+	if log.GetLevel() == log.DebugLevel || log.GetLevel() == log.TraceLevel {
+		// Let's check that we can convert to JSON and get the right thing...
+		jsonbuf, err := json.Marshal(publicKey)
+		if err != nil {
+			return errors.Wrap(err, "failed to marshal the public key into JWKS JSON")
+		}
+		log.Debugf("Constructed JWKS from loading public key: %s\n", jsonbuf)
 	}
 
 	privateKey, err := config.LoadPrivateKey(privateKeyPath)
@@ -135,7 +138,7 @@ func NamespaceRegister(privateKeyPath string, namespaceRegistryEndpoint string, 
 
 	data := map[string]interface{}{
 		"client_nonce": clientNonce,
-		"pubkey":       fmt.Sprintf("%x", jwks["x"]),
+		"pubkey":       publicKey,
 	}
 
 	resp, err := makeRequest(namespaceRegistryEndpoint, "POST", data)
@@ -163,24 +166,11 @@ func NamespaceRegister(privateKeyPath string, namespaceRegistryEndpoint string, 
 		return errors.Wrap(err, "Failed to sign payload")
 	}
 
-	// Create data for the second POST request
-	xBytes, err := base64.RawURLEncoding.DecodeString(jwks["x"])
-	if err != nil {
-		return errors.Wrap(err, "Failed to decode jwks.x")
-	}
-	yBytes, err := base64.RawURLEncoding.DecodeString(jwks["y"])
-	if err != nil {
-		return errors.Wrap(err, "Failed to decode jwks.y")
-	}
-
+	// // Create data for the second POST request
 	unidentifiedPayload := map[string]interface{}{
-		"client_nonce": clientNonce,
-		"server_nonce": respData.ServerNonce,
-		"pubkey": map[string]string{
-			"x":     new(big.Int).SetBytes(xBytes).String(),
-			"y":     new(big.Int).SetBytes(yBytes).String(),
-			"curve": jwks["crv"],
-		},
+		"client_nonce":      clientNonce,
+		"server_nonce":      respData.ServerNonce,
+		"pubkey":            publicKey,
 		"client_payload":    clientPayload,
 		"client_signature":  hex.EncodeToString(signature),
 		"server_payload":    respData.ServerPayload,
