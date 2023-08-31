@@ -40,4 +40,5 @@ func init() {
 	if err := viper.BindPFlag("ExportVolume", originServeCmd.Flags().Lookup("volume")); err != nil {
 		panic(err)
 	}
+	originServeCmd.Flags().AddFlag(portFlag)
 }

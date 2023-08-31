@@ -36,14 +36,10 @@ func init() {
 	directorCmd.AddCommand(directorServeCmd)
 
 	// Set up flags for the command
-	directorServeCmd.Flags().StringP("port", "p", "", "Set the port to which the Director's redirect services should be bound")
-	err := viper.BindPFlag("WebPort", directorServeCmd.Flags().Lookup("port"))
-	if err != nil {
-		panic(err)
-	}
+	directorServeCmd.Flags().AddFlag(portFlag)
 
 	directorServeCmd.Flags().StringP("default-response", "", "", "Set whether the default endpoint should redirect clients to caches or origins")
-	err = viper.BindPFlag("Director.DefaultResponse", directorServeCmd.Flags().Lookup("default-response"))
+	err := viper.BindPFlag("Director.DefaultResponse", directorServeCmd.Flags().Lookup("default-response"))
 	if err != nil {
 		panic(err)
 	}
