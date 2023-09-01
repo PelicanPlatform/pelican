@@ -120,7 +120,9 @@ func CreateNsFromDirectorResp(dirResp *http.Response, namespace *namespaces.Name
 func QueryDirector(source string, directorUrl string) (resp *http.Response, err error) {
 	resourceUrl := directorUrl + source
 
-
+	// Here we use http.Transport to prevent the client from following the director's
+	// redirect. We use the Location url elsewhere (plus we still need to do the token
+	// dance!)
 	var client *http.Client
 	if viper.GetBool("TLSSkipVerify") {
 		tr := &http.Transport{
@@ -139,14 +141,6 @@ func QueryDirector(source string, directorUrl string) (resp *http.Response, err 
 			},
 		}
 	}
-
-	// // Prevent following the Director's redirect
-	// client := &http.Client{
-	// 	CheckRedirect: func(req *http.Request, via []*http.Request) error {
-	// 		return http.ErrUseLastResponse
-	// 	},
-	
-	// }
 
 	log.Debugln("Querying OSDF Director at", resourceUrl)
 	resp, err = client.Get(resourceUrl)
