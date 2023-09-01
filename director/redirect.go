@@ -2,6 +2,7 @@ package director
 
 import (
 	"fmt"
+	"net/http"
 	"net/netip"
 	"net/url"
 	"path"
@@ -47,13 +48,36 @@ func getRealIP(ginCtx *gin.Context) (ipAddr netip.Addr, err error) {
 
 }
 
+func getAuthzEscaped(req *http.Request) (authzEscaped string) {
+	if authzQuery := req.URL.Query()["authz"]; len(authzQuery) > 0 {
+		authzEscaped = authzQuery[0]
+	} else if authzHeader := req.Header["Authorization"]; len(authzHeader) > 0 {
+		authzEscaped = url.QueryEscape(authzHeader[0])
+	}
+	return
+}
+
+func getFinalRedirectURL(rurl url.URL, authzEscaped string) string {
+	if len(authzEscaped) > 0 {
+		if len(rurl.RawQuery) > 0 {
+			rurl.RawQuery += "&"
+		}
+		rurl.RawQuery += "authz=" + authzEscaped
+	}
+	return rurl.String()
+}
+
 func RedirectToCache(ginCtx *gin.Context) {
 	reqPath := path.Clean("/" + ginCtx.Request.URL.Path)
 	reqPath = strings.TrimPrefix(reqPath, "/api/v1.0/director/object")
 	ipAddr, err := getRealIP(ginCtx)
 	if err != nil {
+		ginCtx.String(500, "Internal error: Unable to determine client IP")
 		return
 	}
+
+	authzBearerEscaped := getAuthzEscaped(ginCtx.Request)
+
 	namespaceAd, _, cacheAds := GetAdsForPath(reqPath)
 	if len(cacheAds) == 0 {
 		ginCtx.String(404, "No cache found for path\n")
@@ -107,7 +131,11 @@ func RedirectToCache(ginCtx *gin.Context) {
 	ginCtx.Writer.Header()["X-Pelican-Namespace"] = []string{fmt.Sprintf("namespace=%s, require-token=%v",
 		namespaceAd.Path, namespaceAd.RequireToken)}
 
-	ginCtx.Redirect(307, redirectURL.String())
+	// Note we only append the `authz` query parameter in the case of the redirect response and not the
+	// duplicate link metadata above.  This is purposeful: the Link header might get too long if we repeat
+	// the token 20 times for 20 caches.  This means a "normal HTTP client" will correctly redirect but
+	// anything parsing the `Link` header for metalinks will need logic for redirecting appropriately.
+	ginCtx.Redirect(307, getFinalRedirectURL(redirectURL, authzBearerEscaped))
 }
 
 func RedirectToOrigin(ginCtx *gin.Context) {
@@ -120,6 +148,8 @@ func RedirectToOrigin(ginCtx *gin.Context) {
 	if err != nil {
 		return
 	}
+
+	authzBearerEscaped := getAuthzEscaped(ginCtx.Request)
 
 	namespaceAd, originAds, _ := GetAdsForPath(reqPath)
 	if namespaceAd.Path == "" {
@@ -134,7 +164,9 @@ func RedirectToOrigin(ginCtx *gin.Context) {
 	}
 
 	redirectURL := getRedirectURL(reqPath, originAds[0], namespaceAd.RequireToken)
-	ginCtx.Redirect(307, redirectURL.String())
+	// See note in RedirectToCache as to why we only add the authz query parameter to this URL,
+	// not those in the `Link`.
+	ginCtx.Redirect(307, getFinalRedirectURL(redirectURL, authzBearerEscaped))
 
 }
 
