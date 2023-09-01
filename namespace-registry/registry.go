@@ -1,7 +1,7 @@
 package nsregistry
 
 import (
-	"context"
+	// "context"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/rand"
@@ -239,71 +239,73 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData, action str
 		return errors.Wrap(err, "Couldn't parse the pubkey from the client")
 	}
 
-	if log.GetLevel() == log.DebugLevel || log.GetLevel() == log.TraceLevel {
+	if log.IsLevelEnabled(log.DebugLevel) {
 		// Let's check that we can convert to JSON and get the right thing...
 		jsonbuf, err := json.Marshal(clientJwks)
 		if err != nil {
 			return errors.Wrap(err, "failed to marshal the client's keyset into JSON")
 		}
-		log.Debugf("Client JWKS as seen by the registry server: %s\n", jsonbuf)
+		log.Debugln("Client JWKS as seen by the registry server:", string(jsonbuf))
 	}
 
-	// Now iterate through the jwks and verify signatures:
-	// Note that the examples in the docs for lestrrat/jwx/v2/jwk are outdated and still point to the
-	// old v1 method for iterating throug keysets (ie they use clientJWKS.Iterate(context.Background()) instead of
-	// clientJWKS.Keys(context.Background()))
-	for it := clientJwks.Keys(context.Background()); it.Next(context.Background()); {
-		pair := it.Pair()
-		key := pair.Value.(jwk.Key)
+	/*
+	 * TODO: This section makes the assumption that the incoming jwks only contains a single
+	 *       key, a property that is enforced by the client at the origin. Eventually we need
+	 *       to support the addition of other keys in the jwks stored for the origin. There is
+	 *       a similar TODO listed in client_commands.go, as the choices made there mirror the
+	 *       choices made here.
+	 */
+	key, exists := clientJwks.Key(0)
+	if !exists {
+		return errors.New("There was no key at index 0 in the client's JWKS. Something is wrong")
+	}
 
-		var rawkey interface{} // This is the raw key, like *rsa.PrivateKey or *ecdsa.PrivateKey
-		if err := key.Raw(&rawkey); err != nil {
-			return errors.Wrap(err, "failed to generate raw pubkey from jwks")
-		}
+	var rawkey interface{} // This is the raw key, like *rsa.PrivateKey or *ecdsa.PrivateKey
+	if err := key.Raw(&rawkey); err != nil {
+		return errors.Wrap(err, "failed to generate raw pubkey from jwks")
+	}
 
-		clientPayload := []byte(data.ClientNonce + data.ServerNonce)
-		clientSignature, err := hex.DecodeString(data.ClientSignature)
-		if err != nil {
-			ctx.JSON(500, gin.H{"error": "Failed to decode client's signature"})
-			return errors.Wrap(err, "Failed to decode the client's signature")
-		}
-		clientVerified := verifySignature(clientPayload, clientSignature, (rawkey).(*ecdsa.PublicKey))
+	clientPayload := []byte(data.ClientNonce + data.ServerNonce)
+	clientSignature, err := hex.DecodeString(data.ClientSignature)
+	if err != nil {
+		ctx.JSON(500, gin.H{"error": "Failed to decode client's signature"})
+		return errors.Wrap(err, "Failed to decode the client's signature")
+	}
+	clientVerified := verifySignature(clientPayload, clientSignature, (rawkey).(*ecdsa.PublicKey))
+	serverPayload, err := hex.DecodeString(data.ServerPayload)
+	if err != nil {
+		ctx.JSON(500, gin.H{"error": "Failed to decode the server's payload"})
+		return errors.Wrap(err, "Failed to decode the server's payload")
+	}
 
-		serverPayload, err := hex.DecodeString(data.ServerPayload)
-		if err != nil {
-			ctx.JSON(500, gin.H{"error": "Failed to decode the server's payload"})
-			return errors.Wrap(err, "Failed to decode the server's payload")
-		}
+	serverSignature, err := hex.DecodeString(data.ServerSignature)
+	if err != nil {
+		ctx.JSON(500, gin.H{"error": "Failed to decode the server's signature"})
+		return errors.Wrap(err, "Failed to decode the server's signature")
+	}
 
-		serverSignature, err := hex.DecodeString(data.ServerSignature)
-		if err != nil {
-			ctx.JSON(500, gin.H{"error": "Failed to decode the server's signature"})
-			return errors.Wrap(err, "Failed to decode the server's signature")
-		}
+	serverPrivateKey, err := loadServerKeys()
+	if err != nil {
+		ctx.JSON(500, gin.H{"error": "Failed to load server's private key"})
+		return errors.Wrap(err, "Failed to decode the server's private key")
+	}
+	serverPubkey := serverPrivateKey.PublicKey
+	serverVerified := verifySignature(serverPayload, serverSignature, &serverPubkey)
 
-		serverPrivateKey, err := loadServerKeys()
-		if err != nil {
-			ctx.JSON(500, gin.H{"error": "Failed to load server's private key"})
-			return errors.Wrap(err, "Failed to decode the server's private key")
-		}
-		serverPubkey := serverPrivateKey.PublicKey
-		serverVerified := verifySignature(serverPayload, serverSignature, &serverPubkey)
-
-		if clientVerified && serverVerified {
-			if action == "register" {
-				log.Debug("Registering namespace ", data.Prefix)
-				err = dbAddNamespace(ctx, data)
-				if err != nil {
-					ctx.JSON(500, gin.H{"error": "The server encountered an error while attempting to add the prefix to its database"})
-					return errors.Wrapf(err, "Failed while trying to add to database")
-				}
-				return nil
+	if clientVerified && serverVerified {
+		if action == "register" {
+			log.Debug("Registering namespace ", data.Prefix)
+			err = dbAddNamespace(ctx, data)
+			if err != nil {
+				ctx.JSON(500, gin.H{"error": "The server encountered an error while attempting to add the prefix to its database"})
+				return errors.Wrapf(err, "Failed while trying to add to database")
 			}
-		} else {
-			ctx.JSON(500, gin.H{"error": "Server was either unable to verify the client's public key, or an encountered an error with its own"})
-			return errors.Errorf("Either the server or the client could not be verified: "+
-				"server verified:%t, client verified:%t", serverVerified, clientVerified)
+			return nil
 		}
+	} else {
+		ctx.JSON(500, gin.H{"error": "Server was either unable to verify the client's public key, or an encountered an error with its own"})
+		return errors.Errorf("Either the server or the client could not be verified: "+
+			"server verified:%t, client verified:%t", serverVerified, clientVerified)
 	}
 	return nil
 }

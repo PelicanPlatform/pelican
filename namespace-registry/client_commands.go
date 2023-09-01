@@ -2,6 +2,7 @@ package nsregistry
 
 import (
 	"crypto/tls"
+
 	"github.com/pkg/errors"
 
 	"bufio"
@@ -117,13 +118,24 @@ func NamespaceRegister(privateKeyPath string, namespaceRegistryEndpoint string, 
 		return errors.Wrap(err, "Failed to retrieve public key")
 	}
 
-	if log.GetLevel() == log.DebugLevel || log.GetLevel() == log.TraceLevel {
+	/*
+	 * TODO: For now, we only allow namespace registration to occur with a single key, but
+	 *       at some point we should expose an API for adding additional pubkeys to each
+	 *       namespace. There is a similar TODO listed in registry.go, as the choices made
+	 *       there mirror the choices made here.
+	 * To enforce that we're only trying to register one key, we check the length here
+	 */
+	if (*publicKey).Len() > 1 {
+		return errors.Errorf("Only one public key can be registered in this step, but %d were provided\n", (*publicKey).Len())
+	}
+
+	if log.IsLevelEnabled(log.DebugLevel) {
 		// Let's check that we can convert to JSON and get the right thing...
 		jsonbuf, err := json.Marshal(publicKey)
 		if err != nil {
 			return errors.Wrap(err, "failed to marshal the public key into JWKS JSON")
 		}
-		log.Debugf("Constructed JWKS from loading public key: %s\n", jsonbuf)
+		log.Debugln("Constructed JWKS from loading public key:", string(jsonbuf))
 	}
 
 	privateKey, err := config.LoadPrivateKey(privateKeyPath)
