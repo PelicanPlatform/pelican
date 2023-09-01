@@ -141,19 +141,10 @@ func InitializeDB() error {
 		return errors.Wrap(err, "Failed to create directory for namespace registry database")
 	}
 
-	fileInfo, err := os.Stat(dbPath)
-	if err != nil {
-		return errors.Wrap(err, "Error checking NSRegistryLocation filepath information")
-	}
-
-	// Check if it's a directory
-	if fileInfo.IsDir() { // if directory, we add the filename to it
-		dbPath = filepath.Join(dbPath, "nsregistry.sqlite")
-	}
-
-	if len(filepath.Ext(dbPath)) == 0 { // No fp extension, let's add .sqlite
+	if len(filepath.Ext(dbPath)) == 0 { // No fp extension, let's add .sqlite so it's obvious what the file is
 		dbPath += ".sqlite"
 	}
+
 	db, err = sql.Open("sqlite", dbPath)
 	if err != nil {
 		return errors.Wrapf(err, "Failed to open the database with path: %s", dbPath)
