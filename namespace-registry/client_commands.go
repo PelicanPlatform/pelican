@@ -31,8 +31,13 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/director"
+	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/lestrrat-go/jwx/v2/jwt"
+	"github.com/lestrrat-go/jwx/v2/jwa"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 )
@@ -48,7 +53,7 @@ type clientResponseData struct {
 	Error           string `json:"error"`
 }
 
-func makeRequest(url string, method string, data map[string]interface{}) ([]byte, error) {
+func makeRequest(url string, method string, data map[string]interface{}, headers map[string]string) ([]byte, error) {
 	payload, _ := json.Marshal(data)
 	req, err := http.NewRequest(method, url, bytes.NewBuffer(payload))
 	if err != nil {
@@ -56,6 +61,9 @@ func makeRequest(url string, method string, data map[string]interface{}) ([]byte
 	}
 
 	req.Header.Set("Content-Type", "application/json")
+	for key, val := range headers {
+		req.Header.Set(key, val)
+	}
 
 	client := &http.Client{}
 	if viper.GetBool("TLSSkipVerify") {
@@ -87,7 +95,7 @@ func NamespaceRegisterWithIdentity(privateKeyPath string, namespaceRegistryEndpo
 		// it's also registered already
 
 	}
-	resp, err := makeRequest(namespaceRegistryEndpoint, "POST", identifiedPayload)
+	resp, err := makeRequest(namespaceRegistryEndpoint, "POST", identifiedPayload, nil)
 
 	var respData clientResponseData
 	// Handle case where there was an error encoded in the body
@@ -110,7 +118,7 @@ func NamespaceRegisterWithIdentity(privateKeyPath string, namespaceRegistryEndpo
 			"identity_required": "true",
 			"device_code":       respData.DeviceCode,
 		}
-		resp, err = makeRequest(namespaceRegistryEndpoint, "POST", identifiedPayload)
+		resp, err = makeRequest(namespaceRegistryEndpoint, "POST", identifiedPayload, nil)
 		if err != nil {
 			return errors.Wrap(err, "Failed to make request")
 		}
@@ -171,7 +179,7 @@ func NamespaceRegister(privateKeyPath string, namespaceRegistryEndpoint string, 
 		"pubkey":       publicKey,
 	}
 
-	resp, err := makeRequest(namespaceRegistryEndpoint, "POST", data)
+	resp, err := makeRequest(namespaceRegistryEndpoint, "POST", data, nil)
 
 	var respData clientResponseData
 	// Handle case where there was an error encoded in the body
@@ -211,7 +219,7 @@ func NamespaceRegister(privateKeyPath string, namespaceRegistryEndpoint string, 
 	}
 
 	// Send the second POST request
-	resp, err = makeRequest(namespaceRegistryEndpoint, "POST", unidentifiedPayload)
+	resp, err = makeRequest(namespaceRegistryEndpoint, "POST", unidentifiedPayload, nil)
 
 	var respData2 clientResponseData
 	// Handle case where there was an error encoded in the body
@@ -226,7 +234,7 @@ func NamespaceRegister(privateKeyPath string, namespaceRegistryEndpoint string, 
 }
 
 func NamespaceList(endpoint string) error {
-	respData, err := makeRequest(endpoint, "GET", nil)
+	respData, err := makeRequest(endpoint, "GET", nil, nil)
 	var respErr clientResponseData
 	if err != nil {
 		if jsonErr := json.Unmarshal(respData, &respErr); jsonErr == nil { // Error creating json
@@ -239,7 +247,7 @@ func NamespaceList(endpoint string) error {
 }
 
 func NamespaceGet(endpoint string) error {
-	respData, err := makeRequest(endpoint, "GET", nil)
+	respData, err := makeRequest(endpoint, "GET", nil, nil)
 	var respErr clientResponseData
 	if err != nil {
 		if jsonErr := json.Unmarshal(respData, &respErr); jsonErr == nil { // Error creating json
@@ -251,8 +259,63 @@ func NamespaceGet(endpoint string) error {
 	return nil
 }
 
-func NamespaceDelete(endpoint string) error {
-	respData, err := makeRequest(endpoint, "DELETE", nil)
+func NamespaceDelete(endpoint string, prefix string) error {
+	// First we create a token for the registry to check that the deletion
+	// request is valid
+
+	// TODO: We might consider moving widely-useful functions like `GetIssuerURL`
+	//       to a more generic `pelican/utils` package so that they're easier to find
+	//       and more likely to be used.
+	issuerURL, err := director.GetIssuerURL(prefix)
+	if err != nil {
+		return errors.Wrap(err, "Failed to determine issuer URL for creating deletion token")
+	}
+
+	// TODO: Eventually we should think about a naming scheme for
+	//       including an audience with these tokens. 
+	// TODO: Investigate whether 1 min is a good expiration interval
+	//       or whether this should be altered.
+	now := time.Now()
+	tok, err := jwt.NewBuilder().
+		Issuer(issuerURL).
+		Claim("scope", "pelican.namespace_delete").
+		IssuedAt(now).
+		Expiration(now.Add(1 * time.Minute)).
+		NotBefore(now).
+		Subject("origin").
+		Build()
+	if err != nil {
+		return errors.Wrap(err, "Failed to generated deletion token")
+	}
+
+	// Now that we have a token, it needs signing
+	key, err := config.GetOriginJWK()
+	if err != nil {
+		return errors.Wrap(err, "failed to load the origin's JWK")
+	}
+
+	// Get/assign the kid, needed for verification by the client
+	err = jwk.AssignKeyID(*key)
+	if err != nil {
+		return errors.Wrap(err, "Failed to assign kid to the token")
+	}
+
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES512, *key))
+	if err != nil {
+		return errors.Wrap(err, "Failed to sign the deletion token")
+	}
+
+	// We're at the client, so it *should* be safe to print the signed token to
+	// stdout when the client asks for debug -- a future attacker will only find
+	// expired tokens, and an attacker with current access can just use the priv
+	// key to create their own. Famous last words?
+	log.Debugln("Signed deletion token:", string(signed))
+	
+	authHeader := map[string]string{
+		"Authorization": "Bearer " + string(signed),
+	}
+
+	respData, err := makeRequest(endpoint, "DELETE", nil, authHeader)
 	var respErr clientResponseData
 	if err != nil {
 		if unmarshalErr := json.Unmarshal(respData, &respErr); unmarshalErr == nil { // Error creating json

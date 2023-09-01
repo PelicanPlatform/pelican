@@ -122,7 +122,7 @@ func deleteANamespace(cmd *cobra.Command, args []string) {
 		log.Errorf("Failed to construction deletion endpoint URL: %v", err)
 	}
 
-	err = nsregistry.NamespaceDelete(deletionEndpointURL)
+	err = nsregistry.NamespaceDelete(deletionEndpointURL, prefix)
 	if err != nil {
 		log.Errorf("Failed to delete prefix %s: %v", prefix, err)
 		os.Exit(1)
