@@ -314,6 +314,30 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData, action str
 	if clientVerified && serverVerified {
 		if action == "register" {
 			log.Debug("Registering namespace ", data.Prefix)
+
+			// Check if prefix exists before doing anything else
+			exists, err := namespaceExists(data.Prefix)
+			if err != nil {
+				log.Errorf("Failed to check if namespace already exists: %v", err)
+				return errors.Wrap(err, "Server encountered an error checking if namespace already exists")
+			}
+			if exists {
+				return errors.New("The prefix already is registered")
+			}
+			reqPrefix, err := validateNSPath(data.Prefix)
+			if err != nil {
+				err = errors.Wrapf(err, "Requested namespace %s failed validation", reqPrefix)
+				log.Errorln(err)
+				return err
+			}
+			data.Prefix = reqPrefix
+
+			// Verify the requested path is a valid prefix
+			if err != nil {
+				ctx.JSON(http.StatusForbidden, gin.H{"error": "Namespace prefix cannot be registered as it is invalid"})
+				return errors.Wrapf(err, "Namespace prefix %s cannot be registered as it is invalid", data.Prefix)
+			}
+
 			err = dbAddNamespace(ctx, data)
 			if err != nil {
 				ctx.JSON(500, gin.H{"error": "The server encountered an error while attempting to add the prefix to its database"})
@@ -329,6 +353,42 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData, action str
 	return nil
 }
 
+func validateNSPath(nspath string) (string, error) {
+	if len(nspath) == 0 {
+		return "", errors.New("Path prefix may not be empty")
+	}
+	if nspath[0] != '/' {
+		return "", errors.New("Path prefix must be absolute - relative paths are not allowed")
+	}
+	components := strings.Split(nspath, "/")[1:]
+	if len(components) == 0 {
+		return "", errors.New("Cannot register the prefix '/' for an origin")
+	} else if components[0] == "api" {
+		return "", errors.New("Cannot register a prefix starting with '/api'")
+	} else if components[0] == "view" {
+		return "", errors.New("Cannot register a prefix starting with '/view'")
+	} else if components[0] == "pelican" {
+		return "", errors.New("Cannot register a prefix starting with '/pelican'")
+	}
+	result := ""
+	for _, component := range components {
+		if len(component) == 0 {
+			continue
+		} else if component == "." {
+			return "", errors.New("Path component cannot be '.'")
+		} else if component == ".." {
+			return "", errors.New("Path component cannot be '..'")
+		} else if component[0] == '.' {
+			return "", errors.New("Path component cannot begin with a '.'")
+		}
+		result += "/" + component
+	}
+	if result == "/" || len(result) == 0 {
+		return "", errors.New("Cannot register the prefix '/' for an origin")
+	}
+	return result, nil
+}
+
 /*
 Handler functions called upon by the gin router
 */
@@ -337,19 +397,6 @@ func cliRegisterNamespace(ctx *gin.Context) {
 	if err := ctx.BindJSON(&reqData); err != nil {
 		log.Errorln("Bad request: ", err)
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Bad Request"})
-		return
-	}
-
-	// Check if prefix exists before doing anything else
-	exists, err := namespaceExists(reqData.Prefix)
-	if err != nil {
-		log.Errorf("failed to check if namespace already exists: %v", err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error checking if namespace already exists"})
-		return
-	}
-	if exists {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "The prefix already exists so it cannot be created. Did you mean to update it?"})
-		log.Errorf("namespace prefix %s already exists so it cannot be created", reqData.Prefix)
 		return
 	}
 
@@ -404,7 +451,7 @@ func cliRegisterNamespace(ctx *gin.Context) {
 		return
 	}
 
-	err = loadOIDC()
+	err := loadOIDC()
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server has malformed OIDC configuration"})
 		log.Errorf("Failed to load OIDC information for registration with identity: %v", err)
@@ -554,9 +601,8 @@ func dbDeleteNamespace(ctx *gin.Context) {
 		return
 	}
 	if !exists {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "the prefix does not exist so it cannot be deleted"})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "the prefix does not exist so it cannot be deleted"})
 		log.Errorln("prefix could not be deleted because it does not exist")
-		return
 	}
 
 	/*
