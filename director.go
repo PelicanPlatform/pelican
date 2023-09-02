@@ -63,7 +63,7 @@ func CreateNsFromDirectorResp(dirResp *http.Response, namespace *namespaces.Name
 	}
 	xPelicanNamespace := HeaderParser(pelicanNamespaceHdr[0])
 	namespace.Path = xPelicanNamespace["namespace"]
-	namespace.UseTokenOnRead, _ = strconv.ParseBool(xPelicanNamespace["use-token-on-read"])
+	namespace.UseTokenOnRead, _ = strconv.ParseBool(xPelicanNamespace["require-token"])
 	namespace.ReadHTTPS, _ = strconv.ParseBool(xPelicanNamespace["readhttps"])
 
 	var xPelicanAuthorization map[string]string
