@@ -34,15 +34,11 @@ import (
 // be bound, for using internally
 var withIdentity bool
 var prefix string
-var namespaceURL string
 var pubkeyPath string
 var privkeyPath string
 
 func getNamespaceEndpoint() (string, error) {
-	namespaceEndpoint := namespaceURL
-	if namespaceEndpoint == "" {
-		namespaceEndpoint = viper.GetString("NamespaceURL")
-	}
+	namespaceEndpoint := viper.GetString("NamespaceURL")
 	if namespaceEndpoint == "" {
 		return "", errors.New("No namespace registry specified; either give the federation name (-f) or specify the namespace API endpoint directly (e.g., --namespace-url=https://namespace.osg-htc.org/namespaces)")
 	}
@@ -219,7 +215,12 @@ func init() {
 	//getCmd.Flags().BoolVar(&jwks, "jwks", false, "Get the jwks of the namespace")
 	deleteCmd.Flags().StringVar(&prefix, "prefix", "", "prefix for delete namespace")
 
-	namespaceCmd.PersistentFlags().StringVar(&namespaceURL, "namespace-url", "", "Endpoint for the namespace registry")
+	namespaceCmd.PersistentFlags().String("namespace-url", "", "Endpoint for the namespace registry")
+	err := viper.BindPFlag("NamespaceURL", namespaceCmd.PersistentFlags().Lookup("namespace-url"))
+	if err != nil {
+		panic(err)
+	}
+
 	namespaceCmd.PersistentFlags().StringVar(&pubkeyPath, "pubkey", "", "Path to the public key")
 	namespaceCmd.PersistentFlags().StringVar(&privkeyPath, "privkey", "", "Path to the private key")
 	namespaceCmd.AddCommand(registerCmd)
