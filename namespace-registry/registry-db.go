@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
 	// commented sqlite driver requires CGO
@@ -79,6 +80,25 @@ func namespaceExists(prefix string) (bool, error) {
 		break
 	}
 	return found, nil
+}
+
+func getPrefixJwks(prefix string) (*jwk.Set, error) {
+	jwksQuery := `SELECT pubkey FROM namespace WHERE prefix = ?`
+	var pubkeyStr string
+	err := db.QueryRow(jwksQuery, prefix).Scan(&pubkeyStr)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, errors.New("prefix not found in database")
+		}
+		return nil, errors.Wrap(err, "error performing origin pubkey query")
+	}
+
+	set, err := jwk.ParseString(pubkeyStr)
+	if err != nil {
+		return nil, errors.Wrap(err, "Failed to parse pubkey as a jwks")
+	}
+
+	return &set, nil
 }
 
 /*

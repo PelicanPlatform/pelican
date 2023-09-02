@@ -32,6 +32,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
@@ -94,6 +95,13 @@ func LoadPublicKey(existingJWKS string, issuerKeyFile string) (*jwk.Set, error) 
 	if err != nil {
 		return nil, errors.Wrapf(err, "Failed to parse issuer key file %v", issuerKeyFile)
 	}
+
+	// Add the algorithm to the key, needed for verifying tokens elsewhere
+	err = key.Set(jwk.AlgorithmKey, jwa.ES512)
+	if err != nil {
+		return nil, errors.Wrap(err, "Failed to add alg specification to key header")
+	}
+
 	pkey, err := jwk.PublicKeyOf(key)
 	if err != nil {
 		return nil, errors.Wrapf(err, "Failed to generate public key from file %v", issuerKeyFile)
