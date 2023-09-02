@@ -19,25 +19,26 @@
 package nsregistry
 
 import (
+	// "context"
 	"crypto"
 	"crypto/ecdsa"
-	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"github.com/gin-gonic/gin"
-	"github.com/pelicanplatform/pelican/config"
-	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"io"
-	"math/big"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
 	"sync"
+
+	"github.com/gin-gonic/gin"
+	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
 
 	// use this sqlite driver instead of the one from
 	// github.com/mattn/go-sqlite3, because this one
@@ -249,49 +250,46 @@ func keySignChallengeInit(ctx *gin.Context, data *registrationData) error {
 	return nil
 }
 
-type jwks struct {
-	X string `json:"x"`
-	Y string `json:"y"`
-}
-
-func jwksToEcdsaPublicKey(jwks *jwks) (*ecdsa.PublicKey, error) {
-	xBigInt, err := new(big.Int).SetString(jwks.X, 10)
-	if !err {
-		return nil, errors.New("Failed to convert jwks.x to Big Int")
-	}
-	yBigInt, err := new(big.Int).SetString(jwks.Y, 10)
-	if !err {
-		return nil, errors.New("Failed to convert jwks.y to Big Int")
-	}
-
-	clientPubkey := &ecdsa.PublicKey{
-		Curve: elliptic.P521(),
-		X:     xBigInt,
-		Y:     yBigInt,
-	}
-
-	return clientPubkey, nil
-}
-
 func keySignChallengeCommit(ctx *gin.Context, data *registrationData, action string) error {
-	var pubkeyJwks jwks
-	if err := json.Unmarshal(data.Pubkey, &pubkeyJwks); err != nil {
-		ctx.JSON(500, gin.H{"error": "Failed to unmarshal the provided pubkey"})
-		return errors.Wrap(err, "Failed to unmarshal the provided pubkey")
+	// Parse the client's jwks as a set here
+	clientJwks, err := jwk.Parse(data.Pubkey)
+	if err != nil {
+		return errors.Wrap(err, "Couldn't parse the pubkey from the client")
 	}
 
-	clientPubkey, err := jwksToEcdsaPublicKey(&pubkeyJwks)
-	if err != nil {
-		return errors.Wrap(err, "Failed to convert jwks to ECDSA pubkey")
+	if log.IsLevelEnabled(log.DebugLevel) {
+		// Let's check that we can convert to JSON and get the right thing...
+		jsonbuf, err := json.Marshal(clientJwks)
+		if err != nil {
+			return errors.Wrap(err, "failed to marshal the client's keyset into JSON")
+		}
+		log.Debugln("Client JWKS as seen by the registry server:", string(jsonbuf))
 	}
+
+	/*
+	 * TODO: This section makes the assumption that the incoming jwks only contains a single
+	 *       key, a property that is enforced by the client at the origin. Eventually we need
+	 *       to support the addition of other keys in the jwks stored for the origin. There is
+	 *       a similar TODO listed in client_commands.go, as the choices made there mirror the
+	 *       choices made here.
+	 */
+	key, exists := clientJwks.Key(0)
+	if !exists {
+		return errors.New("There was no key at index 0 in the client's JWKS. Something is wrong")
+	}
+
+	var rawkey interface{} // This is the raw key, like *rsa.PrivateKey or *ecdsa.PrivateKey
+	if err := key.Raw(&rawkey); err != nil {
+		return errors.Wrap(err, "failed to generate raw pubkey from jwks")
+	}
+
 	clientPayload := []byte(data.ClientNonce + data.ServerNonce)
 	clientSignature, err := hex.DecodeString(data.ClientSignature)
 	if err != nil {
 		ctx.JSON(500, gin.H{"error": "Failed to decode client's signature"})
 		return errors.Wrap(err, "Failed to decode the client's signature")
 	}
-	clientVerified := verifySignature(clientPayload, clientSignature, clientPubkey)
-
+	clientVerified := verifySignature(clientPayload, clientSignature, (rawkey).(*ecdsa.PublicKey))
 	serverPayload, err := hex.DecodeString(data.ServerPayload)
 	if err != nil {
 		ctx.JSON(500, gin.H{"error": "Failed to decode the server's payload"})
