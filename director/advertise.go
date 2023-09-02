@@ -148,10 +148,7 @@ func AdvertiseOSDF() error {
 			}
 			originAd.URL = *originURL
 
-			originNS := NamespaceAd{}
-			originNS.Path = ns.Path
-			originNS.RequireToken = ns.UseTokenOnRead
-			originAdMap[originAd] = append(originAdMap[originAd], originNS)
+			originAdMap[originAd] = append(originAdMap[originAd], nsAd)
 		}
 
 		for _, cache := range ns.Caches {
