@@ -24,8 +24,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/pkg/errors"
 	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/pkg/errors"
 	"github.com/spf13/viper"
 	// commented sqlite driver requires CGO
 	// _ "github.com/mattn/go-sqlite3" // SQLite driver

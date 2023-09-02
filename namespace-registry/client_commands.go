@@ -33,11 +33,11 @@ import (
 	"os"
 	"time"
 
-	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/director"
+	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
-	"github.com/lestrrat-go/jwx/v2/jwa"
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/director"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 )
@@ -272,7 +272,7 @@ func NamespaceDelete(endpoint string, prefix string) error {
 	}
 
 	// TODO: Eventually we should think about a naming scheme for
-	//       including an audience with these tokens. 
+	//       including an audience with these tokens.
 	// TODO: Investigate whether 1 min is a good expiration interval
 	//       or whether this should be altered.
 	now := time.Now()
@@ -310,7 +310,7 @@ func NamespaceDelete(endpoint string, prefix string) error {
 	// expired tokens, and an attacker with current access can just use the priv
 	// key to create their own. Famous last words?
 	log.Debugln("Signed deletion token:", string(signed))
-	
+
 	authHeader := map[string]string{
 		"Authorization": "Bearer " + string(signed),
 	}
