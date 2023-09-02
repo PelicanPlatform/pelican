@@ -19,7 +19,7 @@
 package nsregistry
 
 import (
-	// "context"
+	"context"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/rand"
@@ -563,7 +563,7 @@ func dbDeleteNamespace(ctx *gin.Context) {
 	*  Need to check that we were provided a token and that it's valid for the origin
 	*  TODO: Should we also investigate checking for the token in the url, in case we
 	*		 need that option at a later point?
-	*/
+	 */
 	authHeader := ctx.GetHeader("Authorization")
 	delTokenStr := strings.TrimPrefix(authHeader, "Bearer ")
 
@@ -586,12 +586,27 @@ func dbDeleteNamespace(ctx *gin.Context) {
 	/*
 	* The signature is verified, now we need to make sure this token actually gives us
 	* permission to delete the namespace from the db. Let's check the subject and the scope.
-	* Here, valid
 	* NOTE: The validate function also handles checking `iat` and `exp` to make sure the token
 	*       remains valid.
-	* TODO: Investigate any other portions of the payload that need to be validated
-	*/
-	if err = jwt.Validate(parsed, jwt.WithSubject("origin"), jwt.WithClaimValue("scope", "pelican.namespace_delete")); err != nil {
+	 */
+	scopeValidator := jwt.ValidatorFunc(func(_ context.Context, tok jwt.Token) jwt.ValidationError {
+		scope_any, present := tok.Get("scope")
+		if !present {
+			return jwt.NewValidationError(errors.New("No scope is present; required for authorization"))
+		}
+		scope, ok := scope_any.(string)
+		if !ok {
+			return jwt.NewValidationError(errors.New("scope claim in token is not string-valued"))
+		}
+
+		for _, scope := range strings.Split(scope, " ") {
+			if scope == "pelican.namespace_delete" {
+				return nil
+			}
+		}
+		return jwt.NewValidationError(errors.New("Token does not contain namespace deletion authorization"))
+	})
+	if err = jwt.Validate(parsed, jwt.WithValidator(scopeValidator)); err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server could not validate the provided deletion token"})
 		log.Errorf("Failed to validate the token: %v", err)
 		return
