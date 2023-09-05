@@ -393,6 +393,12 @@ func InitClient() error {
 			break
 		}
 	}
+	for _, prefix := range prefixes {
+		if val, isSet := os.LookupEnv(prefix + "_TOPOLOGYNAMESPACEURL"); isSet {
+			viper.Set("TopologyNamespaceURL", val)
+			break
+		}
+	}
 
 	// Check the environment variable STASHCP_MINIMUM_DOWNLOAD_SPEED (and all the prefix variants)
 	var downloadLimit int64 = 1024 * 100
