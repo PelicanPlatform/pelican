@@ -33,10 +33,12 @@ import {
 } from 'chart.js';
 
 import {Line} from "react-chartjs-2";
-import {Skeleton} from "@mui/material";
+import {Box, Skeleton, Typography} from "@mui/material";
 
 import {query_rate, DataPoint} from "@/components/graphs/prometheus";
 import {ChartData} from "chart.js";
+import {Simulate} from "react-dom/test-utils";
+import error = Simulate.error;
 
 ChartJS.register(
     CategoryScale,
@@ -60,6 +62,7 @@ interface RateGraphProps {
 export default function RateGraph({metric, rate, duration, resolution, options, datasetOptions}: RateGraphProps) {
 
     let [data, setData] = useState<DataPoint[]>([])
+    let [error, setError] = useState<string>("")
     let [_rate, setRate] = useState(rate ? rate : "1h")
     let [_duration, setDuration] = useState(duration ? duration : "24h")
     let [_resolution, setResolution] = useState(resolution ? resolution : "1h")
@@ -75,8 +78,20 @@ export default function RateGraph({metric, rate, duration, resolution, options, 
         query_rate(metric, _rate, _duration, _resolution)
             .then((response) => {
                 setData(response)
+                if(response.length === 0){
+                    setError("Response was empty, please allow some time for data to be collected.")
+                }
             })
     }, [])
+
+
+    if(error){
+        return (
+            <Box>
+                <Typography variant={"h6"}>{error}</Typography>
+            </Box>
+        )
+    }
 
     if(data.length === 0){
         return <Skeleton sx={{borderRadius: "1"}} variant={"rectangular"} width={"100%"} height={"100%"} />

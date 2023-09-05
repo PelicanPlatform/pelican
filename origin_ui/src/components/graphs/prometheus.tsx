@@ -40,6 +40,11 @@ export async function query_raw(query: string): Promise<DataPoint[]> {
         throw new Error(`Prometheus query returned status ${json.status}`)
     }
 
+
+    if(json.data.result.length == 0){
+        return []
+    }
+
     // This will return the list of time and value tuples [1693918800,"0"],[1693919100,"0"]...
     let label_data_tuples = json.data.result[0].values
     let data: DataPoint[] = []
