@@ -74,7 +74,7 @@ func TestCreateNsFromDirectorResp(t *testing.T) {
 	//Craft the Director's response
 	directorHeaders := make(map[string][]string)
 	directorHeaders["Link"] = []string{"<my-cache.edu:8443>; rel=\"duplicate\"; pri=1, <another-cache.edu:8443>; rel=\"duplicate\"; pri=2"}
-	directorHeaders["X-Pelican-Namespace"] = []string{"namespace=/foo/bar, readhttps=True, use-token-on-read=True"}
+	directorHeaders["X-Pelican-Namespace"] = []string{"namespace=/foo/bar, readhttps=True, require-token=True"}
 	directorHeaders["X-Pelican-Authorization"] = []string{"issuer=https://get-your-tokens.org, base-path=/foo/bar"}
 	directorBody := []byte(`{"key": "value"}`)
 
