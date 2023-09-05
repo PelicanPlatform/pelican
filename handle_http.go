@@ -438,23 +438,39 @@ func parseTransferStatus(status string) (int, string) {
 	return statusCode, strings.TrimSpace(parts[1])
 }
 
+func setupTransport() http.Transport {
+	//Getting timeouts and other information from defaults.yaml
+	maxIdleConns := viper.GetInt("Transport.MaxIdleIcons")
+	idleConnTimeout := viper.GetDuration("Transport.IdleConnTimeout")
+	transportTLSHandshakeTimeout := viper.GetDuration("Transport.TLSHandshakeTimeout")
+	expectContinueTimeout := viper.GetDuration("Transport.ExpectContinueTimeout")
+	responseHeaderTimeout := viper.GetDuration("Transport.ResponseHeaderTimeout")
+
+	transportDialerTimeout := viper.GetDuration("Transport.Dialer.Timeout")
+	transportKeepAlive := viper.GetDuration("Transport.Dialer.KeepAlive")
+
+	//Set up the transport
+	transport := http.Transport {
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout: transportDialerTimeout,
+			KeepAlive: transportKeepAlive,
+		}).DialContext,
+		MaxIdleConns: maxIdleConns,
+		IdleConnTimeout: idleConnTimeout,
+		TLSHandshakeTimeout: transportTLSHandshakeTimeout,
+		ExpectContinueTimeout: expectContinueTimeout,
+		ResponseHeaderTimeout: responseHeaderTimeout,
+	}
+	return transport
+}
+
 // DownloadHTTP - Perform the actual download of the file
 func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, error) {
 
 	// Create the client, request, and context
 	client := grab.NewClient()
-	transport := http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-		DialContext: (&net.Dialer{
-			Timeout:   10 * time.Second,
-			KeepAlive: 30 * time.Second,
-		}).DialContext,
-		MaxIdleConns:          30,
-		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   15 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
-		ResponseHeaderTimeout: 10 * time.Second,
-	}
+	transport := setupTransport()
 	if !transfer.Proxy {
 		transport.Proxy = nil
 	}
@@ -797,7 +813,8 @@ Loop:
 
 }
 
-var UploadClient = &http.Client{}
+var transport = setupTransport()
+var UploadClient = &http.Client{Transport: &transport} //Global: Used by handle_http_test.go but nothing else
 
 // Actually perform the Put request to the server
 func doPut(request *http.Request, responseChan chan<- *http.Response, errorChan chan<- error) {
@@ -898,15 +915,7 @@ func walkDavDir(url *url.URL, token string, namespace namespaces.Namespace) ([]s
 	c := gowebdav.NewClient(rootUrl.String(), "", "")
 
 	// XRootD does not like keep alives and kills things, so turn them off.
-	transport := http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-		DialContext: (&net.Dialer{
-			Timeout:   10 * time.Second,
-			KeepAlive: 30 * time.Second,
-		}).DialContext,
-		TLSHandshakeTimeout: 15 * time.Second,
-		DisableKeepAlives:   true,
-	}
+	transport := setupTransport()
 	c.SetTransport(&transport)
 
 	files, err := walkDir(url.Path, c)
@@ -958,15 +967,15 @@ func StatHttp(dest *url.URL, namespace namespaces.Namespace) (uint64, error) {
 
 	var resp *http.Response
 	for {
-		defaultTransport := http.DefaultTransport.(*http.Transport).Clone()
+		transport := setupTransport()
 		if disableProxy {
 			log.Debugln("Performing HEAD (without proxy)", dest.String())
-			defaultTransport.Proxy = nil
+			transport.Proxy = nil
 		} else {
 			log.Debugln("Performing HEAD", dest.String())
 		}
 
-		client := &http.Client{Transport: defaultTransport}
+		client := &http.Client{Transport: &transport}
 		req, err := http.NewRequest("HEAD", dest.String(), nil)
 		if err != nil {
 			log.Errorln("Failed to create HTTP request:", err)
