@@ -403,14 +403,6 @@ func ConfigureOriginUI(router *gin.Engine) error {
 			file,
 		)
 	})
-	router.GET("/", func(ctx *gin.Context) {
-		file, _ := webAssets.ReadFile("assets/index.html")
-		ctx.Data(
-			http.StatusOK,
-			"text/html",
-			file,
-		)
-	})
 
 	// Redirect root to /view for now
 	router.GET("/", func(c *gin.Context) {
