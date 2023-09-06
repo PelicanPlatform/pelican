@@ -73,15 +73,29 @@ export default function LineGraph({ boxProps, metric, duration, resolution, opti
         }]
     }
 
-    useEffect(() => {
+    async function _setData(){
         query_basic(metric, _duration, _resolution)
             .then((response) => {
                 setData(response)
                 setLoading(false)
                 if(response.length === 0){
-                    setError("Data length is 0, metrics will show 10 minutes past initialization.")
+                    let date = new Date(Date.now()).toLocaleTimeString()
+                    setError(`No data returned by database as of ${date}; plot will auto-refresh`)
+                } else {
+                    setError("")
                 }
             })
+    }
+
+    useEffect(() => {
+
+        // Do the initial data fetch
+        _setData()
+
+        // Refetch the data every 1 minute
+        const interval = setInterval(() => _setData(), 60000);
+        return () => clearInterval(interval);
+
     }, [])
 
 

@@ -78,15 +78,29 @@ export default function RateGraph({boxProps, metric, rate, duration, resolution,
         }]
     }
 
-    useEffect(() => {
+    function _setData(){
         query_rate(metric, _rate, _duration, _resolution)
             .then((response) => {
                 setData(response)
                 setLoading(false)
-                if(response.length == 0){
-                    setError("Data length is 0, metrics will show 10 minutes past initialization.")
+                if(response.length === 0){
+                    let date = new Date(Date.now()).toLocaleTimeString()
+                    setError(`No data returned by database as of ${date}; plot will auto-refresh`)
+                } else {
+                    setError("")
                 }
             })
+    }
+
+    useEffect(() => {
+
+        // Do the initial data fetch
+        _setData()
+
+        // Refetch the data every minute
+        const interval = setInterval(() => _setData(), 60000);
+        return () => clearInterval(interval);
+
     }, [])
 
 
@@ -96,7 +110,7 @@ export default function RateGraph({boxProps, metric, rate, duration, resolution,
 
     return (
         <Box>
-            <Box  {...boxProps}>
+            <Box m={"auto"} {...boxProps}>
                 <Line
                     data={chartData}
                     options={options}

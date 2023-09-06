@@ -43,7 +43,8 @@ export default function Home() {
                                 boxProps={{
                                     maxHeight:"400px",
                                     flexGrow:1,
-                                    justifyContent:"center"
+                                    justifyContent:"center",
+                                    display:"flex"
                                 }}
                             />
                         </Box>
@@ -60,7 +61,8 @@ export default function Home() {
                                 boxProps={{
                                     maxHeight:"400px",
                                     flexGrow:1,
-                                    justifyContent:"center"
+                                    justifyContent:"center",
+                                    display:"flex"
                                 }}
                             />
                         </Box>
