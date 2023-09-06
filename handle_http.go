@@ -20,6 +20,7 @@ package pelican
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -36,7 +37,6 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
-	"crypto/tls"
 
 	grab "github.com/cavaliercoder/grab"
 	log "github.com/sirupsen/logrus"
@@ -829,8 +829,7 @@ Loop:
 
 }
 
-//transport = getTransport()
-var UploadClient = &http.Client{Transport: transport} //Global: Used by handle_http_test.go but nothing else
+var UploadClient = &http.Client{Transport: getTransport()}
 
 // Actually perform the Put request to the server
 func doPut(request *http.Request, responseChan chan<- *http.Response, errorChan chan<- error) {
