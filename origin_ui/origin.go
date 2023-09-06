@@ -118,11 +118,11 @@ func WaitUntilLogin() error {
 			fmt.Printf("\033[A\033[A\033[A\033[A")
 			fmt.Printf("\033[2K\n")
 			fmt.Printf("\033[2K\rPelican admin interface is not initialized\n\033[2KTo initialize, "+
-				"login at \033[1;34mhttps://%v:%v\033[0m with the following code:\n",
+				"login at \033[1;34mhttps://%v:%v/view/initialization/code/\033[0m with the following code:\n",
 				hostname, webPort)
 			fmt.Printf("\033[2K\r\033[1;34m%v\033[0m\n", *currentCode.Load())
 		} else {
-			fmt.Printf("Pelican admin interface is not initialized\n To initialize, login at https://%v:%v with the following code:\n", hostname, webPort)
+			fmt.Printf("Pelican admin interface is not initialized\n To initialize, login at https://%v:%v/view/initialization/code/ with the following code:\n", hostname, webPort)
 			fmt.Println(*currentCode.Load())
 		}
 		start := time.Now()
@@ -403,13 +403,10 @@ func ConfigureOriginUI(router *gin.Engine) error {
 			file,
 		)
 	})
-	router.GET("/", func(ctx *gin.Context) {
-		file, _ := webAssets.ReadFile("assets/index.html")
-		ctx.Data(
-			http.StatusOK,
-			"text/html",
-			file,
-		)
+
+	// Redirect root to /view for now
+	router.GET("/", func(c *gin.Context) {
+		c.Redirect(http.StatusFound, "/view/")
 	})
 
 	go periodicReload()
