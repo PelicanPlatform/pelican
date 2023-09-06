@@ -19,7 +19,6 @@
 package pelican
 
 import (
-	"crypto/tls"
 	"net/http"
 	"net/url"
 	"sort"
@@ -29,7 +28,6 @@ import (
 	namespaces "github.com/pelicanplatform/pelican/namespaces"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 )
 
 // Simple parser to that takes a "values" string from a header and turns it
@@ -123,22 +121,12 @@ func QueryDirector(source string, directorUrl string) (resp *http.Response, err 
 	// redirect. We use the Location url elsewhere (plus we still need to do the token
 	// dance!)
 	var client *http.Client
-	if viper.GetBool("TLSSkipVerify") {
-		tr := &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		}
-		client = &http.Client{
-			Transport: tr,
-			CheckRedirect: func(req *http.Request, via []*http.Request) error {
-				return http.ErrUseLastResponse
-			},
-		}
-	} else {
-		client = &http.Client{
-			CheckRedirect: func(req *http.Request, via []*http.Request) error {
-				return http.ErrUseLastResponse
-			},
-		}
+	tr := getTransport()
+	client = &http.Client{
+		Transport: tr,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
 	}
 
 	log.Debugln("Querying OSDF Director at", resourceUrl)

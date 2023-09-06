@@ -36,6 +36,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+	"crypto/tls"
 
 	grab "github.com/cavaliercoder/grab"
 	log "github.com/sirupsen/logrus"
@@ -48,6 +49,11 @@ import (
 )
 
 var p = mpb.New()
+
+var (
+	transport     *http.Transport
+	onceTransport sync.Once
+)
 
 type StoppedTransferError struct {
 	Err string
@@ -438,7 +444,7 @@ func parseTransferStatus(status string) (int, string) {
 	return statusCode, strings.TrimSpace(parts[1])
 }
 
-func setupTransport() http.Transport {
+func setupTransport() *http.Transport {
 	//Getting timeouts and other information from defaults.yaml
 	maxIdleConns := viper.GetInt("Transport.MaxIdleIcons")
 	idleConnTimeout := viper.GetDuration("Transport.IdleConnTimeout")
@@ -450,7 +456,7 @@ func setupTransport() http.Transport {
 	transportKeepAlive := viper.GetDuration("Transport.Dialer.KeepAlive")
 
 	//Set up the transport
-	transport := http.Transport{
+	return &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 		DialContext: (&net.Dialer{
 			Timeout:   transportDialerTimeout,
@@ -462,6 +468,16 @@ func setupTransport() http.Transport {
 		ExpectContinueTimeout: expectContinueTimeout,
 		ResponseHeaderTimeout: responseHeaderTimeout,
 	}
+}
+
+// function to get/setup the transport (only once)
+func getTransport() *http.Transport {
+	onceTransport.Do(func() {
+		transport = setupTransport()
+		if viper.GetBool("TLSSkipVerify") {
+			transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+		}
+	})
 	return transport
 }
 
@@ -470,11 +486,11 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 
 	// Create the client, request, and context
 	client := grab.NewClient()
-	transport := setupTransport()
+	transport := getTransport()
 	if !transfer.Proxy {
 		transport.Proxy = nil
 	}
-	client.HTTPClient.Transport = &transport
+	client.HTTPClient.Transport = transport
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -813,8 +829,8 @@ Loop:
 
 }
 
-var transport = setupTransport()
-var UploadClient = &http.Client{Transport: &transport} //Global: Used by handle_http_test.go but nothing else
+//transport = getTransport()
+var UploadClient = &http.Client{Transport: transport} //Global: Used by handle_http_test.go but nothing else
 
 // Actually perform the Put request to the server
 func doPut(request *http.Request, responseChan chan<- *http.Response, errorChan chan<- error) {
@@ -915,8 +931,8 @@ func walkDavDir(url *url.URL, token string, namespace namespaces.Namespace) ([]s
 	c := gowebdav.NewClient(rootUrl.String(), "", "")
 
 	// XRootD does not like keep alives and kills things, so turn them off.
-	transport := setupTransport()
-	c.SetTransport(&transport)
+	transport = getTransport()
+	c.SetTransport(transport)
 
 	files, err := walkDir(url.Path, c)
 	log.Debugln("Found files:", files)
@@ -967,7 +983,7 @@ func StatHttp(dest *url.URL, namespace namespaces.Namespace) (uint64, error) {
 
 	var resp *http.Response
 	for {
-		transport := setupTransport()
+		transport := getTransport()
 		if disableProxy {
 			log.Debugln("Performing HEAD (without proxy)", dest.String())
 			transport.Proxy = nil
@@ -975,7 +991,7 @@ func StatHttp(dest *url.URL, namespace namespaces.Namespace) (uint64, error) {
 			log.Debugln("Performing HEAD", dest.String())
 		}
 
-		client := &http.Client{Transport: &transport}
+		client := &http.Client{Transport: transport}
 		req, err := http.NewRequest("HEAD", dest.String(), nil)
 		if err != nil {
 			log.Errorln("Failed to create HTTP request:", err)
