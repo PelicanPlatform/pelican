@@ -394,7 +394,7 @@ func InitClient() error {
 		}
 	}
 	for _, prefix := range prefixes {
-		if val, isSet := os.LookupEnv(prefix + "_TOPOLOGYNAMESPACEURL"); isSet {
+		if val, isSet := os.LookupEnv(prefix + "_TOPOLOGY_NAMESPACE_URL"); isSet {
 			viper.Set("TopologyNamespaceURL", val)
 			break
 		}

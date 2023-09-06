@@ -450,15 +450,15 @@ func setupTransport() http.Transport {
 	transportKeepAlive := viper.GetDuration("Transport.Dialer.KeepAlive")
 
 	//Set up the transport
-	transport := http.Transport {
+	transport := http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 		DialContext: (&net.Dialer{
-			Timeout: transportDialerTimeout,
+			Timeout:   transportDialerTimeout,
 			KeepAlive: transportKeepAlive,
 		}).DialContext,
-		MaxIdleConns: maxIdleConns,
-		IdleConnTimeout: idleConnTimeout,
-		TLSHandshakeTimeout: transportTLSHandshakeTimeout,
+		MaxIdleConns:          maxIdleConns,
+		IdleConnTimeout:       idleConnTimeout,
+		TLSHandshakeTimeout:   transportTLSHandshakeTimeout,
 		ExpectContinueTimeout: expectContinueTimeout,
 		ResponseHeaderTimeout: responseHeaderTimeout,
 	}

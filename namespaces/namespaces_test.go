@@ -85,7 +85,7 @@ func TestMatchNamespace(t *testing.T) {
 }
 `)
 
-	err := os.Setenv("PELICAN_TOPOLOGYNAMESPACEURL", "https://doesnotexist.edu/blah/nope")
+	err := os.Setenv("PELICAN_TOPOLOGY_NAMESPACE_URL", "https://doesnotexist.edu/blah/nope")
 	if err != nil {
 		t.Error(err)
 	}
@@ -181,11 +181,11 @@ func TestFullNamespace(t *testing.T) {
 
 // TestDownloadNamespaces tests the download of the namespaces JSON
 func TestDownloadNamespaces(t *testing.T) {
-	os.Setenv("PELICAN_TOPOLOGYNAMESPACEURL", "https://topology-itb.opensciencegrid.org/stashcache/namespaces")
+	os.Setenv("PELICAN_TOPOLOGY_NAMESPACE_URL", "https://topology-itb.opensciencegrid.org/stashcache/namespaces")
 	viper.Reset()
 	err := config.InitClient()
 	assert.Nil(t, err)
-	defer os.Unsetenv("PELICAN_TOPOLOGYNAMESPACEURL")
+	defer os.Unsetenv("PELICAN_TOPOLOGY_NAMESPACE_URL")
 	namespaceBytes, err := downloadNamespace()
 	assert.NoError(t, err, "Failed to download namespaces")
 	assert.NotNil(t, namespaceBytes, "Namespace bytes is nil")
@@ -193,11 +193,11 @@ func TestDownloadNamespaces(t *testing.T) {
 }
 
 func TestDownloadNamespacesFail(t *testing.T) {
-	os.Setenv("PELICAN_TOPOLOGYNAMESPACEURL", "https://doesnotexist.org.blah/namespaces.json")
+	os.Setenv("PELICAN_TOPOLOGY_NAMESPACE_URL", "https://doesnotexist.org.blah/namespaces.json")
 	viper.Reset()
 	err := config.InitClient()
 	assert.Nil(t, err)
-	defer os.Unsetenv("PELICAN_TOPOLOGYNAMESPACEURL")
+	defer os.Unsetenv("PELICAN_TOPOLOGY_NAMESPACE_URL")
 	namespaceBytes, err := downloadNamespace()
 	assert.Error(t, err, "Failed to download namespaces")
 	assert.Nil(t, namespaceBytes, "Namespace bytes is nil")
@@ -205,13 +205,13 @@ func TestDownloadNamespacesFail(t *testing.T) {
 
 func TestGetNamespaces(t *testing.T) {
 	// Set the environment to an invalid URL, so it is forced to use the "built-in" namespaces.json
-	os.Setenv("OSDF_TOPOLOGYNAMESPACEURL", "https://doesnotexist.org.blah/namespaces.json")
+	os.Setenv("OSDF_TOPOLOGY_NAMESPACE_URL", "https://doesnotexist.org.blah/namespaces.json")
 	oldPrefix := config.SetPreferredPrefix("OSDF")
 	defer config.SetPreferredPrefix(oldPrefix)
 	viper.Reset()
 	err := config.InitClient()
 	assert.Nil(t, err)
-	defer os.Unsetenv("OSDF_TOPOLOGYNAMESPACEURL")
+	defer os.Unsetenv("OSDF_TOPOLOGY_NAMESPACE_URL")
 	namespaces, err := GetNamespaces()
 	assert.NoError(t, err, "Failed to get namespaces")
 	assert.NotNil(t, namespaces, "Namespaces is nil")
