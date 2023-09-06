@@ -57,7 +57,7 @@ COPY images/supervisord/supervisord.conf /etc/supervisord.conf
 
 # Eventually add more entrypoint commands and corresponding supervisor
 # daemons here
-COPY images/supervisord/pelican_director_serve.conf /etc/supervisord.d/pelican_director_serve.conf
+COPY images/supervisord/* /etc/supervisord.d/
 COPY images/entrypoint.sh /entrypoint.sh
 
 RUN chmod +x /pelican/osdf-client \
