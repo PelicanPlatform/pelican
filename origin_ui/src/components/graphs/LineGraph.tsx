@@ -33,7 +33,8 @@ import {
 } from 'chart.js';
 
 import {Line} from "react-chartjs-2";
-import {Skeleton, Box, Typography} from "@mui/material";
+import {Skeleton, Box, BoxProps, Typography} from "@mui/material";
+
 
 import {query_basic, DataPoint} from "@/components/graphs/prometheus";
 import {ChartData} from "chart.js";
@@ -49,6 +50,7 @@ ChartJS.register(
 );
 
 interface LineGraphProps {
+    boxProps?: BoxProps;
     metric: string;
     duration?: string;
     resolution?: string;
@@ -56,9 +58,10 @@ interface LineGraphProps {
     datasetOptions?: Partial<ChartDataset<"line">>
 }
 
-export default function LineGraph({metric, duration, resolution, options, datasetOptions}: LineGraphProps) {
+export default function LineGraph({ boxProps, metric, duration, resolution, options, datasetOptions}: LineGraphProps) {
 
     let [data, setData] = useState<DataPoint[]>([])
+    let [loading, setLoading] = useState<boolean>(true)
     let [error, setError] = useState<string>("")
     let [_duration, setDuration] = useState(duration ? duration : "24h")
     let [_resolution, setResolution] = useState(resolution ? resolution : "1h")
@@ -74,30 +77,30 @@ export default function LineGraph({metric, duration, resolution, options, datase
         query_basic(metric, _duration, _resolution)
             .then((response) => {
                 setData(response)
+                setLoading(false)
                 if(response.length === 0){
-                    setError("Response was empty, please allow ~10 minutes for initial data to be collected.")
+                    setError("Data length is 0, metrics will show 10 minutes past initialization.")
                 }
             })
     }, [])
 
-    if(error){
-        return (
-            <Box>
-                <Typography variant={"h6"}>{error}</Typography>
-            </Box>
-        )
-    }
 
-    if(data.length === 0){
+    if(loading){
         return <Skeleton sx={{borderRadius: "1"}} variant={"rectangular"} width={"100%"} height={"100%"} />
     }
 
     return (
-        <Line
-            data={chartData}
-            options={options}
-        >
-        </Line>
+        <Box>
+            <Box  {...boxProps}>
+                <Line
+                    data={chartData}
+                    options={options}
+                />
+            </Box>
+            <Box display={"flex"}>
+                <Typography m={"auto"} color={"red"} variant={"body2"}>{error}</Typography>
+            </Box>
+        </Box>
     )
 
 }
