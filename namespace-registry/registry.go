@@ -151,7 +151,7 @@ func loadOIDC() error {
 	}
 
 	// load OIDC.ClientSecret
-	OIDCClientSecretFile := viper.GetString("OIDCClientSecretFile")
+	OIDCClientSecretFile := viper.GetString("OIDC.ClientSecretFile")
 	OIDCClientSecretFromEnv := viper.GetString("OIDCCLIENTSECRET")
 	if OIDCClientSecretFile != "" {
 		contents, err := os.ReadFile(OIDCClientSecretFile)
