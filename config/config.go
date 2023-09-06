@@ -250,8 +250,8 @@ func InitServer() error {
 		viper.SetDefault("XrootdMultiuser", true)
 		viper.SetDefault("GeoIPLocation", "/var/cache/pelican/maxmind/GeoLite2-City.mmdb")
 		viper.SetDefault("NSRegistryLocation", "/var/lib/pelican/registry.sqlite")
-		viper.SetDefault("OIDCClientIDFile", "/etc/pelican/oidc-client-id")
-		viper.SetDefault("OIDCClientSecretFile", "/etc/pelican/oidc-client-secret")
+		viper.SetDefault("OIDC.ClientIDFile", "/etc/pelican/oidc-client-id")
+		viper.SetDefault("OIDC.ClientSecretFile", "/etc/pelican/oidc-client-secret")
 		viper.SetDefault("MonitoringData", "/var/lib/pelican/monitoring/data")
 	} else {
 		configBase, err := getConfigBase()
@@ -268,8 +268,8 @@ func InitServer() error {
 		viper.SetDefault("OriginUI.PasswordFile", filepath.Join(configBase, "origin-ui-passwd"))
 		viper.SetDefault("GeoIPLocation", filepath.Join(configBase, "maxmind", "GeoLite2-City.mmdb"))
 		viper.SetDefault("NSRegistryLocation", filepath.Join(configBase, "ns-registry.sqlite"))
-		viper.SetDefault("OIDCClientIDFile", filepath.Join(configBase, "oidc-client-id"))
-		viper.SetDefault("OIDCClientSecretFile", filepath.Join(configBase, "oidc-client-secret"))
+		viper.SetDefault("OIDC.ClientIDFile", filepath.Join(configBase, "oidc-client-id"))
+		viper.SetDefault("OIDC.ClientSecretFile", filepath.Join(configBase, "oidc-client-secret"))
 		viper.SetDefault("MonitoringData", filepath.Join(configBase, "monitoring/data"))
 
 		if userRuntimeDir := os.Getenv("XDG_RUNTIME_DIR"); userRuntimeDir != "" {
