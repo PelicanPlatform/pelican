@@ -19,15 +19,18 @@
 package main
 
 import (
+	"crypto/elliptic"
 	"github.com/pkg/errors"
 	"os"
 	"os/signal"
 	"syscall"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/namespace-registry"
 	"github.com/pelicanplatform/pelican/web_ui"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 func serveNamespaceRegistry( /*cmd*/ *cobra.Command /*args*/, []string) error {
@@ -45,6 +48,12 @@ func serveNamespaceRegistry( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		return errors.Wrap(err, "Failed to generate TLS certificate")
 	}
 
+	// The registry needs its own private key. If one doesn't exist, this will generate it
+	issuerKeyFile := viper.GetString("IssuerKey")
+	err = config.GeneratePrivateKey(issuerKeyFile, elliptic.P521())
+	if err != nil {
+		return errors.Wrap(err, "Failed to generate registry private key")
+	}
 	engine, err := web_ui.GetEngine()
 	if err != nil {
 		return err
