@@ -54,8 +54,6 @@ func PeriodicAdvertiseOrigin() error {
 
 func AdvertiseOrigin() error {
 	name := viper.GetString("Sitename")
-
-	fmt.Printf("\n\n\nORIGIN SITENAME: %s\n\n\n", name)
 	if name == "" {
 		return errors.New("Origin name isn't set")
 	}
