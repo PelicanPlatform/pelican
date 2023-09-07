@@ -32,6 +32,8 @@ import {
     ChartDataset,
 } from 'chart.js';
 
+import {BoxProps} from "@mui/material";
+
 import {Line} from "react-chartjs-2";
 import {Box, Skeleton, Typography} from "@mui/material";
 
@@ -51,6 +53,7 @@ ChartJS.register(
 );
 
 interface RateGraphProps {
+    boxProps?: BoxProps;
     metric: string;
     rate?: string;
     duration?: string;
@@ -59,9 +62,10 @@ interface RateGraphProps {
     datasetOptions?: Partial<ChartDataset<"line">>
 }
 
-export default function RateGraph({metric, rate, duration, resolution, options, datasetOptions}: RateGraphProps) {
+export default function RateGraph({boxProps, metric, rate, duration, resolution, options, datasetOptions}: RateGraphProps) {
 
     let [data, setData] = useState<DataPoint[]>([])
+    let [loading, setLoading] = useState<boolean>(true)
     let [error, setError] = useState<string>("")
     let [_rate, setRate] = useState(rate ? rate : "1h")
     let [_duration, setDuration] = useState(duration ? duration : "24h")
@@ -74,35 +78,48 @@ export default function RateGraph({metric, rate, duration, resolution, options, 
         }]
     }
 
-    useEffect(() => {
+    function _setData(){
         query_rate(metric, _rate, _duration, _resolution)
             .then((response) => {
                 setData(response)
+                setLoading(false)
                 if(response.length === 0){
-                    setError("Response was empty, please allow some time for data to be collected.")
+                    let date = new Date(Date.now()).toLocaleTimeString()
+                    setError(`No data returned by database as of ${date}; plot will auto-refresh`)
+                } else {
+                    setError("")
                 }
             })
+    }
+
+    useEffect(() => {
+
+        // Do the initial data fetch
+        _setData()
+
+        // Refetch the data every minute
+        const interval = setInterval(() => _setData(), 60000);
+        return () => clearInterval(interval);
+
     }, [])
 
 
-    if(error){
-        return (
-            <Box>
-                <Typography variant={"h6"}>{error}</Typography>
-            </Box>
-        )
-    }
-
-    if(data.length === 0){
+    if(loading){
         return <Skeleton sx={{borderRadius: "1"}} variant={"rectangular"} width={"100%"} height={"100%"} />
     }
 
     return (
-        <Line
-            data={chartData}
-            options={options}
-        >
-        </Line>
+        <Box>
+            <Box m={"auto"} {...boxProps}>
+                <Line
+                    data={chartData}
+                    options={options}
+                />
+            </Box>
+            <Box display={"flex"}>
+                <Typography m={"auto"} color={"red"} variant={"body2"}>{error}</Typography>
+            </Box>
+        </Box>
     )
 
 }

@@ -20,6 +20,8 @@
 
 import {ChartData} from "chart.js";
 
+import {isLoggedIn} from "@/helpers/login";
+
 const USEFUL_METRICS = ["xrootd_server_connection_count", "xrootd_monitoring_packets_received"]
 
 export interface DataPoint {
@@ -28,6 +30,12 @@ export interface DataPoint {
 }
 
 export async function query_raw(query: string): Promise<DataPoint[]> {
+
+    //Check if the user is logged in
+    if(!(await isLoggedIn())){
+        window.location.replace("/view/initialization/code/")
+    }
+
     let response = await fetch(`/api/v1.0/prometheus/query?query=${query}`)
 
     if (response.status !== 200) {
