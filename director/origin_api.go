@@ -89,17 +89,22 @@ func VerifyAdvertiseToken(token, namespace string) (bool, error) {
 		return false, err
 	}
 	var ar *jwk.Cache
-	{
+
+	// defer statements are scoped to function, not lexical enclosure,
+	// which is why we wrap these defer statements in anon funcs
+	func () {
 		namespaceKeysMutex.RLock()
-		defer namespaceKeysMutex.Unlock()
+		defer namespaceKeysMutex.RUnlock()
 		item := namespaceKeys.Get(namespace)
-		if !item.IsExpired() {
-			ar = item.Value()
+		if item != nil {
+			if !item.IsExpired() {
+				ar = item.Value()
+			}
 		}
-	}
+	}()
 	ctx := context.Background()
 	if ar == nil {
-		ar := jwk.NewCache(ctx)
+		ar = jwk.NewCache(ctx)
 		if err = ar.Register(issuer_url, jwk.WithMinRefreshInterval(15*time.Minute)); err != nil {
 			return false, err
 		}

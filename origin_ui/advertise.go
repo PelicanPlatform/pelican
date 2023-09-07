@@ -54,16 +54,40 @@ func PeriodicAdvertiseOrigin() error {
 
 func AdvertiseOrigin() error {
 	name := viper.GetString("Sitename")
+
+	fmt.Printf("\n\n\nORIGIN SITENAME: %s\n\n\n", name)
 	if name == "" {
 		return errors.New("Origin name isn't set")
 	}
 	// TODO: waiting on a different branch to merge origin URL generation
 	originUrl := "https://localhost:8444"
 
+	// Here we instantiate the namespaceAd slice, but we still need to define the namespace
+	namespaceUrl, err := url.Parse(viper.GetString("NamespaceUrl"))
+	if err != nil {
+		return errors.New("Bad namespaceUrl")
+	}
+	if namespaceUrl.String() == "" {
+		return errors.New("No NamespaceUrl is set")
+	}
+
+	prefix := viper.GetString("NamespacePrefix")
+
+	// TODO: Need to figure out where to get some of these values
+	// 		 so that they aren't hardcoded...
+	nsAd := director.NamespaceAd{
+		RequireToken:  false,
+		Path:          prefix,
+		Issuer:        *namespaceUrl,
+		MaxScopeDepth: 3,
+		Strategy:     "OAuth2",
+		BasePath:      "/",
+	}
 	ad := director.OriginAdvertise{
 		Name:       name,
 		URL:        originUrl,
-		Namespaces: make([]director.NamespaceAd, 0),
+		// Namespaces: make([]director.NamespaceAd, 0),
+		Namespaces: []director.NamespaceAd{nsAd},
 	}
 
 	body, err := json.Marshal(ad)
@@ -81,12 +105,16 @@ func AdvertiseOrigin() error {
 	}
 	directorUrl.Path = "/api/v1.0/director/registerOrigin"
 
+	token, err := director.CreateAdvertiseToken(prefix)
+	log.Debugln("Signed advertise token:", token)
+
 	req, err := http.NewRequest("POST", directorUrl.String(), bytes.NewBuffer(body))
 	if err != nil {
 		return errors.Wrap(err, "Failed to create POST request for director registration")
 	}
 
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer " + token)
 
 	client := http.Client{}
 	if viper.GetBool("TLSSkipVerify") {
