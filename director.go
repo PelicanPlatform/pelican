@@ -117,9 +117,13 @@ func CreateNsFromDirectorResp(dirResp *http.Response, namespace *namespaces.Name
 
 func QueryDirector(source string, directorUrl string) (resp *http.Response, err error) {
 	resourceUrl := directorUrl + source
-
-	// Prevent following the Director's redirect
-	client := &http.Client{
+	// Here we use http.Transport to prevent the client from following the director's
+	// redirect. We use the Location url elsewhere (plus we still need to do the token
+	// dance!)
+	var client *http.Client
+	tr := getTransport()
+	client = &http.Client{
+		Transport: tr,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
