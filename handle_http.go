@@ -474,10 +474,10 @@ func setupTransport() *http.Transport {
 func getTransport() *http.Transport {
 	onceTransport.Do(func() {
 		transport = setupTransport()
-		if viper.GetBool("TLSSkipVerify") {
-			transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
-		}
 	})
+	if viper.GetBool("TLSSkipVerify") {
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	}
 	return transport
 }
 
