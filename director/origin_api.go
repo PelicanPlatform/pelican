@@ -108,7 +108,7 @@ func VerifyAdvertiseToken(token, namespace string) (bool, error) {
 
 	// defer statements are scoped to function, not lexical enclosure,
 	// which is why we wrap these defer statements in anon funcs
-	func () {
+	func() {
 		namespaceKeysMutex.RLock()
 		defer namespaceKeysMutex.RUnlock()
 		item := namespaceKeys.Get(namespace)
