@@ -30,6 +30,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -614,7 +615,7 @@ func dbDeleteNamespace(ctx *gin.Context) {
 	delTokenStr := strings.TrimPrefix(authHeader, "Bearer ")
 
 	// Have the token, now we need to load the JWKS for the prefix
-	originJwks, err := getPrefixJwks(prefix)
+	originJwks, err := dbGetPrefixJwks(prefix)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error loading the prefix's stored jwks"})
 		log.Errorf("Failed to get prefix's stored jwks: %v", err)
@@ -688,46 +689,57 @@ func dbGetAllNamespaces(ctx *gin.Context) {
 	nss, err := getAllNamespaces()
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error trying to list all namespaces"})
+		log.Errorln("Failed to get all namespaces: ", err)
 		return
 	}
 	ctx.JSON(http.StatusOK, nss)
 }
 
-// func metadataHandler(ctx *gin.Context) {
-// 	path := ctx.Param("wildcard")
+func metadataHandler(ctx *gin.Context) {
+	// A weird feature of gin is that wildcards always
+	// add a preceding /. Since the prefix / was trimmed
+	// out during the url parsing, we can just leave the
+	// new / here!
+	path := ctx.Param("wildcard")
 
-// 	// A weird feature of gin is that wildcards always
-// 	// add a preceding /. We need to trim it here...
-// 	path = strings.TrimPrefix(path, "/")
-// 	log.Debug("Working with path ", path)
+	// Get the prefix's JWKS
+	if filepath.Base(path) == "issuer.jwks" {
+		// do something
+		prefix := strings.TrimSuffix(path, "/.well-known/issuer.jwks")
+		jwks, err := dbGetPrefixJwks(prefix)
+		if err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error trying to get jwks for prefix"})
+			log.Errorf("Failed to load jwks for prefix %s: %v", prefix, err)
+			return
+		}
+		ctx.JSON(http.StatusOK, jwks)
+	}
 
-// 	// Get JWKS
-// 	if filepath.Base(path) == "issuer.jwks" {
-// 		// do something
-// 	}
+	// // Get OpenID config info
+	// match, err := filepath.Match("*/\\.well-known/openid-configuration", path)
+	// if err != nil {
+	// 	log.Errorf("Failed to check incoming path for match: %v", err)
+	// 	return
+	// }
+	// if match {
+	// 	// do something
+	// } else {
+	// 	log.Errorln("Unknown request")
+	// 	return
+	// }
 
-// 	// Get OpenID config info
-// 	match, err := filepath.Match("*/\\.well-known/openid-configuration", path)
-// 	if err != nil {
-// 		log.Errorf("Failed to check incoming path for match: %v", err)
-//		return
-// 	}
-// 	if match {
-// 		// do something
-// 	} else {
-// 		log.Errorln("Unknown request")
-//		return
-// 	}
-
-// }
-
-/**
- * Commenting out until we're ready to use it.  -BB
-func getJwks(c *gin.Context) {
-	prefix := c.Param("prefix")
-	c.JSON(http.StatusOK, gin.H{"status": "Get JWKS is not implemented", "prefix": prefix})
 }
 
+// func getJwks(prefix string) (*jwk.Set, error) {
+// 	jwks, err := dbGetPrefixJwks(prefix)
+// 	if err != nil {
+// 		return nil, errors.Wrapf(err, "Could not load jwks for prefix %s", prefix)
+// 	}
+// 	return jwks, nil
+// }
+
+/*
+ Commenting out until we're ready to use it.  -BB
 func getOpenIDConfiguration(c *gin.Context) {
 	prefix := c.Param("prefix")
 	c.JSON(http.StatusOK, gin.H{"status": "getOpenIDConfiguration is not implemented", "prefix": prefix})
@@ -740,7 +752,7 @@ func RegisterNamespaceRegistry(router *gin.RouterGroup) {
 		registry.POST("", cliRegisterNamespace)
 		registry.GET("", dbGetAllNamespaces)
 		// Will handle getting jwks, openid config, and listing namespaces
-		// registry.GET("/*wildcard", metadataHandler)
+		registry.GET("/*wildcard", metadataHandler)
 
 		registry.DELETE("/*wildcard", dbDeleteNamespace)
 	}
