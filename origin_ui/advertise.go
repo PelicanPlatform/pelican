@@ -74,7 +74,7 @@ func AdvertiseOrigin() error {
 	// TODO: Need to figure out where to get some of these values
 	// 		 so that they aren't hardcoded...
 	nsAd := director.NamespaceAd{
-		RequireToken:  false,
+		RequireToken:  true,
 		Path:          prefix,
 		Issuer:        *namespaceUrl,
 		MaxScopeDepth: 3,
