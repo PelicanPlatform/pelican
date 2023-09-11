@@ -20,7 +20,9 @@ package director
 
 import (
 	"context"
-	"errors"
+	"crypto/tls"
+	"encoding/json"
+	"net/http"
 	"net/url"
 	"path"
 	"strings"
@@ -32,6 +34,8 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 )
 
@@ -49,11 +53,10 @@ var (
 )
 
 func CreateAdvertiseToken(namespace string) (string, error) {
-	key, err := config.GetOriginJWK()
-	if err != nil {
-		return "", err
-	}
-	issuer_url, err := GetIssuerURL(namespace)
+	// TODO: Need to come back and carefully consider a few naming practices.
+	//       Here, issuerUrl is actually the registry database url, and not
+	//       the token issuer url for this namespace
+	issuerUrl, err := GetIssuerURL(namespace)
 	if err != nil {
 		return "", err
 	}
@@ -64,7 +67,7 @@ func CreateAdvertiseToken(namespace string) (string, error) {
 
 	tok, err := jwt.NewBuilder().
 		Claim("scope", "pelican.advertise").
-		Issuer(issuer_url).
+		Issuer(issuerUrl).
 		Audience([]string{director}).
 		Subject("origin").
 		Expiration(time.Now().Add(time.Minute)).
@@ -73,7 +76,20 @@ func CreateAdvertiseToken(namespace string) (string, error) {
 		return "", err
 	}
 
-	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES512, key))
+	key, err := config.GetOriginJWK()
+	if err != nil {
+		return "", errors.Wrap(err, "failed to load the origin's JWK")
+	}
+
+	// Get/assign the kid, needed for verification of the token by the director
+	// TODO: Create more generic "tokenCreate" functions so we don't have to do
+	//       this by hand all the time
+	err = jwk.AssignKeyID(*key)
+	if err != nil {
+		return "", errors.Wrap(err, "Failed to assign kid to the token")
+	}
+
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES512, *key))
 	if err != nil {
 		return "", err
 	}
@@ -84,30 +100,54 @@ func CreateAdvertiseToken(namespace string) (string, error) {
 // see if the entity is authorized to advertise an origin for the
 // namespace
 func VerifyAdvertiseToken(token, namespace string) (bool, error) {
-	issuer_url, err := GetIssuerURL(namespace)
+	issuerUrl, err := GetIssuerURL(namespace)
 	if err != nil {
 		return false, err
 	}
 	var ar *jwk.Cache
-	{
+
+	// defer statements are scoped to function, not lexical enclosure,
+	// which is why we wrap these defer statements in anon funcs
+	func() {
 		namespaceKeysMutex.RLock()
-		defer namespaceKeysMutex.Unlock()
+		defer namespaceKeysMutex.RUnlock()
 		item := namespaceKeys.Get(namespace)
-		if !item.IsExpired() {
-			ar = item.Value()
+		if item != nil {
+			if !item.IsExpired() {
+				ar = item.Value()
+			}
 		}
-	}
+	}()
 	ctx := context.Background()
 	if ar == nil {
-		ar := jwk.NewCache(ctx)
-		if err = ar.Register(issuer_url, jwk.WithMinRefreshInterval(15*time.Minute)); err != nil {
+		ar = jwk.NewCache(ctx)
+		// This should be switched to use the common transport, but that must first be exported
+		client := &http.Client{}
+		if viper.GetBool("TLSSkipVerify") {
+			tr := &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			}
+			client = &http.Client{Transport: tr}
+		}
+		if err = ar.Register(issuerUrl, jwk.WithMinRefreshInterval(15*time.Minute), jwk.WithHTTPClient(client)); err != nil {
 			return false, err
 		}
 		namespaceKeysMutex.Lock()
 		defer namespaceKeysMutex.Unlock()
 		namespaceKeys.Set(namespace, ar, ttlcache.DefaultTTL)
 	}
-	keyset, err := ar.Get(ctx, issuer_url)
+	log.Debugln("Attempting to fetch keys from ", issuerUrl)
+	keyset, err := ar.Get(ctx, issuerUrl)
+
+	if log.IsLevelEnabled(log.DebugLevel) {
+		// Let's check that we can convert to JSON and get the right thing...
+		jsonbuf, err := json.Marshal(keyset)
+		if err != nil {
+			return false, errors.Wrap(err, "failed to marshal the public keyset into JWKS JSON")
+		}
+		log.Debugln("Constructed JWKS from fetching jwks:", string(jsonbuf))
+	}
+
 	if err != nil {
 		return false, err
 	}
@@ -145,6 +185,6 @@ func GetIssuerURL(prefix string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	namespace_url.Path = path.Join(namespace_url.Path, "namespaces", prefix)
+	namespace_url.Path = path.Join(namespace_url.Path, "api", "v1.0", "registry", prefix, ".well-known", "issuer.jwks")
 	return namespace_url.String(), nil
 }

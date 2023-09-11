@@ -229,7 +229,9 @@ func RegisterOrigin(ctx *gin.Context) {
 	}
 
 	for _, namespace := range ad.Namespaces {
-		ok, err := VerifyAdvertiseToken(tokens[0], namespace.Path)
+		// We're assuming there's only one token in the slice
+		token := strings.TrimPrefix(tokens[0], "Bearer ")
+		ok, err := VerifyAdvertiseToken(token, namespace.Path)
 		if err != nil {
 			log.Warningln("Failed to verify token:", err)
 			ctx.JSON(400, gin.H{"error": "Authorization token verification failed"})

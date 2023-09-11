@@ -82,7 +82,7 @@ func namespaceExists(prefix string) (bool, error) {
 	return found, nil
 }
 
-func getPrefixJwks(prefix string) (*jwk.Set, error) {
+func dbGetPrefixJwks(prefix string) (*jwk.Set, error) {
 	jwksQuery := `SELECT pubkey FROM namespace WHERE prefix = ?`
 	var pubkeyStr string
 	err := db.QueryRow(jwksQuery, prefix).Scan(&pubkeyStr)
