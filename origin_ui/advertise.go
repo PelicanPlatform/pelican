@@ -57,13 +57,16 @@ func AdvertiseOrigin() error {
 	if name == "" {
 		return errors.New("Origin name isn't set")
 	}
+
 	// TODO: waiting on a different branch to merge origin URL generation
-	originUrl := "https://localhost:8444"
+	// The checkdefaults func that runs before the origin is served checks for and
+	// parses the originUrl, so it should be safe to just grab it as a string here.
+	originUrl := viper.GetString("OriginUrl")
 
 	// Here we instantiate the namespaceAd slice, but we still need to define the namespace
 	namespaceUrl, err := url.Parse(viper.GetString("NamespaceUrl"))
 	if err != nil {
-		return errors.New("Bad namespaceUrl")
+		return errors.Wrap(err, "Bad NamespaceUrl")
 	}
 	if namespaceUrl.String() == "" {
 		return errors.New("No NamespaceUrl is set")

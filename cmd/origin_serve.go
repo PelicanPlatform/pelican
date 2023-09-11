@@ -27,6 +27,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -353,6 +354,29 @@ func checkDefaults() error {
 
 	if err := checkXrootdEnv(); err != nil {
 		return err
+	}
+
+	// Check that OriginUrl is defined in the config file. Make sure it parses.
+	// Fail if either condition isn't met, although note that url.Parse doesn't
+	// generate errors for many things that are not recognizable urls.
+	originUrlStr := viper.GetString("OriginUrl")
+	if originUrlStr == "" {
+		return errors.New("OriginUrl must be configured to serve an origin")
+	}
+	originUrlParsed, err := url.Parse(originUrlStr)
+	if err != nil {
+		return errors.Wrap(err, "Could not parse the provided OriginUrl")
+	}
+
+	if originUrlParsed.Port() == "" {
+		// No port was specified, let's tack on whatever was passed in the
+		// command line argument
+		viper.Set("OriginUrl", originUrlParsed.String()+":"+viper.GetString("WebPort"))
+	} else if originUrlParsed.Port() != viper.GetString("WebPort") {
+		// The web port configured via the config file and the webport configured
+		// via commandline don't match. Perhaps the user is confused?
+		return errors.New("Mismatched webports: from command line: " + viper.GetString("WebPort") +
+			", from config file: " + originUrlParsed.Port() + ". Please ensure these match")
 	}
 
 	return nil
