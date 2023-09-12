@@ -117,7 +117,9 @@ func TestDirectorRegistration(t *testing.T) {
 
 	// Perform injections (ar.Register will create a jwk.keyset with the publickey in it)
 	func() {
-		ar.Register(issuerURL.String(), jwk.WithMinRefreshInterval(15*time.Minute))
+		if err = ar.Register(issuerURL.String(), jwk.WithMinRefreshInterval(15*time.Minute)); err != nil {
+			t.Errorf("this should never happen, should actually be impossible, including check for the linter")
+		}
 		namespaceKeysMutex.Lock()
 		defer namespaceKeysMutex.Unlock()
 		namespaceKeys.Set("/foo/bar", &ar, ttlcache.DefaultTTL)
