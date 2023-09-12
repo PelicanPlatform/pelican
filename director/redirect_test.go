@@ -61,25 +61,21 @@ func TestDirectorRegistration(t *testing.T) {
 	// Create a private key to use for the test
 	privateKey, err := ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
 	assert.NoError(t, err, "Error generating private key")
-	privateKey2, _ := ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
 
 	// Convert from raw ecdsa to jwk.Key
-	p_key, err := jwk.FromRaw(privateKey)
+	pKey, err := jwk.FromRaw(privateKey)
 	assert.NoError(t, err, "Unable to convert ecdsa.PrivateKey to jwk.Key")
-	p_key2, _ := jwk.FromRaw(privateKey2)
 
 	//Assign Key id to the private key
-	err = jwk.AssignKeyID(p_key)
+	err = jwk.AssignKeyID(pKey)
 	assert.NoError(t, err, "Error assigning kid to private key")
-	jwk.AssignKeyID(p_key)
 
 	//Set an algorithm for the key
-	err = p_key.Set(jwk.AlgorithmKey, jwa.ES512)
-	assert.NoError(t, err, "Unable to set algorithm for p_key")
-	p_key2.Set(jwk.AlgorithmKey, jwa.ES512)
+	err = pKey.Set(jwk.AlgorithmKey, jwa.ES512)
+	assert.NoError(t, err, "Unable to set algorithm for pKey")
 
 	// Create a public key from the private key
-	publicKey, err := jwk.PublicKeyOf(p_key)
+	publicKey, err := jwk.PublicKeyOf(pKey)
 	assert.NoError(t, err, "Error creating public key from private key")
 
 	// Create a token to be inserted
@@ -98,7 +94,7 @@ func TestDirectorRegistration(t *testing.T) {
 	assert.NoError(t, err, "Error creating token")
 
 	// Sign token with previously created private key
-	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES512, p_key))
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES512, pKey))
 	assert.NoError(t, err, "Error signing token")
 
 	// Inject into the cache, using a mock cache to avoid dealing with
@@ -170,7 +166,7 @@ func TestDirectorRegistration(t *testing.T) {
 
 	//Set an algorithm for the key
 	err = pKeyInv.Set(jwk.AlgorithmKey, jwa.ES512)
-	assert.NoError(t, err, "Unable to set algorithm for p_key")
+	assert.NoError(t, err, "Unable to set algorithm for pKey")
 
 	// Create a token to be inserted
 	issuerURL.Host = cInv.Request.URL.Host
