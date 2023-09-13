@@ -33,7 +33,7 @@ description: >-
 type: filename
 root_default: /etc/pelican/certificates/tls.crt
 default: "$ConfigBase/certificates/tls.crt"
-components: ["origin", "namespace", "director"]
+components: ["origin", "nsregistry", "director"]
 ---
 name: TLSKey
 description: >-
@@ -42,7 +42,14 @@ description: >-
 type: filename
 root_default: /etc/pelican/certificates/tls.key
 default: "$ConfigBase/certificates/tls.key"
-components: ["origin", "namespace", "director"]
+components: ["origin", "nsregistry", "director"]
+---
+name: TLSSkipVerify
+description: >-
+  When set to true, Pelican will skip TLS verification. Do not use unless you understand the consequences!
+type: bool
+default: false
+components: ["origin", "nsregistry", "director"]
 ---
 name: XrootdRun
 description: >-
@@ -78,3 +85,119 @@ type: filename
 root_default: /etc/pelican/xrootd/scitokens.cfg
 default: $ConfigBase/xrootd/scitokens.cfg
 ---
+name: Director.DefaultResponse
+description: >-
+  The default response type of a redirect for a director instance. Can be either "cache" or "origin". If a director
+  is hosted at https://director.com, then a GET request to https://director.com/foo/bar.txt will either redirect to
+  the nearest cache for namespace /foo if Director.DefaultResponse is set to "cache" or to the origin for /foo if 
+  it is set to "origin".
+type: string
+default: cache
+components: ["director"]
+---
+name: TopologyNamespaceURL
+description: >-
+  A URL containing topology namespace information for origins and caches configured via Topology (legacy). The URL
+  should point to the hosted namespace.json.
+type: url
+osdf_default: https://topology.opensciencegrid.org/stashcache/namespaces.json
+components: ["director"]
+---
+name: MaxMindKeyFile
+description: >-
+  A filepath to a MaxMind API key. The director service uses the MaxMind GeoLite City database (available [here](https://dev.maxmind.com/geoip/docs/databases/city-and-country))
+  to determine which cache is nearest to a client's IP address. The database, if not already found, will be downloaded
+  automatically when a director is served and a valid key is present.
+type: url
+default: none
+components: ["director"]
+---
+name: GeoIPLocation
+description: >-
+  A filepath to the intended location of the MaxMind GeoLite City database. This option can be used either to load
+  an existing database, or to configure the preferred download location if Pelican has a MaxMind API key.
+type: filename
+root_default: /var/cache/pelican/maxmind/GeoLite2-City.mmdb
+default: $ConfigBase/maxmind/GeoLite2-city.mmdb
+components: ["director"]
+---
+name: DirectorUrl
+description: >-
+  A URL indicating where a director service is hosted.
+type: url
+osdf_default: Default is determined dynamically through metadata at <federation URL>/.well-known/pelican-configuration
+default: none
+components: ["client", "origin"]
+---
+name: NamespaceUrl
+description: >-
+  A URL indicating where the namespace registry service is hosted.
+osdf_default: Default is determined dynamically through metadata at <federation URL>/.well-known/pelican-configuration
+default: none
+components: ["client", "director", "origin"]
+---
+name: IssuerKey
+description: >-
+  The name of the file containing a service's private `issuer.jwk` key.
+type: filename
+root_default: /etc/pelican/issuer.jwk
+default: $ConfigBase/issuer.jwk
+components: ["client", "nsregistry", "director"]
+---
+name: NSRegistryLocation
+description: >-
+  A filepath to the intended location of the namespace registry's database.
+type: filename
+root_default: /var/lib/pelican/registry.sqlite
+default: $ConfigBase/ns-registry.sqlite
+components: ["nsregistry"]
+---
+name: OIDC.ClientIDFile
+description: >-
+  A filepath to a file containing an OIDC Client ID. This is used by the namespace registry to establish OIDC information
+  for authenticated registration. 
+type: filename
+root_default: /etc/pelican/oidc-client-id
+default: $ConfigBase/oidc-client-id
+components: ["nsregistry"]
+---
+name: OIDC.ClientSecretFile
+description: >-
+  A filepath to a file containing an OIDC Client Secret. This is used by the namespace registry to establish OIDC information
+  for authenticated registration.
+type: filename
+root_default: /etc/pelican/oidc-client-secret
+default: $ConfigBase/oidc-client-secret
+components: ["nsregistry"]
+---
+name: OIDC.DeviceAuthEndpoint
+description: >-
+  A URL describing an OIDC Device Auth Endpoint. This is used by the namespace registry to establish OIDC information
+  for authenticated registration.
+type: url
+default: none
+components: ["nsregistry"]
+---
+name: OIDC.TokenEndpoint
+description: >-
+  A URL describing an OIDC Token Endpoint. This is used by the namespace registry to establish OIDC information
+  for authenticated registration.
+type: url
+default: none
+components: ["nsregistry"]
+---
+name: OIDC.UserInfoEndpoint
+description: >-
+  A URL describing an OIDC User Info Endpoint. This is used by the namespace registry to establish OIDC information
+  for authenticated registration.
+type: url
+default: none
+components: ["nsregistry"]
+---
+name: WebPort
+description: >-
+  The port number a service will be bound to.
+type: int
+default: 8444
+components: ["nsregistry", "director", "origin"]
+
