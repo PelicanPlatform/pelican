@@ -42,8 +42,8 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/studio-b12/gowebdav"
-	"github.com/vbauerster/mpb/v7"
-	"github.com/vbauerster/mpb/v7/decor"
+	"github.com/vbauerster/mpb/v8"
+	"github.com/vbauerster/mpb/v8/decor"
 
 	namespaces "github.com/pelicanplatform/pelican/namespaces"
 )
@@ -512,7 +512,7 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 	progressTicker := time.NewTicker(500 * time.Millisecond)
 	defer progressTicker.Stop()
 
-	downloadLimit := viper.GetInt("MinimumDownloadSPeed")
+	downloadLimit := viper.GetInt("MinimumDownloadSpeed")
 
 	// If we are doing a recursive, decrease the download limit by the number of likely workers ~5
 	if ObjectClientOptions.Recursive {
@@ -542,9 +542,9 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 				decor.CountersKibiByte("% .2f / % .2f"),
 			),
 			mpb.AppendDecorators(
-				decor.EwmaETA(decor.ET_STYLE_GO, 90),
-				decor.Name(" ] "),
-				decor.EwmaSpeed(decor.UnitKiB, "% .2f", 20),
+				decor.OnComplete(decor.EwmaETA(decor.ET_STYLE_GO, 90), ""),
+				decor.OnComplete(decor.Name(" ] "), ""),
+				decor.OnComplete(decor.EwmaSpeed(decor.SizeB1024(0), "% .2f", 20), "Done!"),
 			),
 		)
 	}
@@ -553,7 +553,6 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 	slowTransferRampupTime := viper.GetInt64("SlowTransferRampupTime")
 	slowTransferWindow := viper.GetInt64("SlowTransferWindow")
 	var previousCompletedBytes int64 = 0
-	var previousCompletedTime = time.Now()
 	var startBelowLimit int64 = 0
 
 	var noProgressStartTime time.Time
@@ -568,9 +567,8 @@ Loop:
 				currentCompletedBytes := resp.BytesComplete()
 				progressBar.IncrInt64(currentCompletedBytes - previousCompletedBytes)
 				previousCompletedBytes = currentCompletedBytes
-				currentCompletedTime := time.Now()
-				progressBar.DecoratorEwmaUpdate(currentCompletedTime.Sub(previousCompletedTime))
-				previousCompletedTime = currentCompletedTime
+				start := time.Now()
+				progressBar.EwmaIncrement(time.Since(start))
 			}
 
 		case <-t.C:
@@ -607,7 +605,7 @@ Loop:
 				cancel()
 				if ObjectClientOptions.ProgressBars {
 					var cancelledProgressBar = p.AddBar(0,
-						mpb.BarQueueAfter(progressBar, true),
+						mpb.BarQueueAfter(progressBar),
 						mpb.BarFillerClearOnComplete(),
 						mpb.PrependDecorators(
 							decor.Name(filename, decor.WC{W: len(filename) + 1, C: decor.DidentRight}),
@@ -638,28 +636,14 @@ Loop:
 
 		case <-resp.Done:
 			// download is complete
-			if ObjectClientOptions.ProgressBars {
-				downloadError := resp.Err()
-				completeMsg := "done!"
-				if downloadError != nil {
-					completeMsg = downloadError.Error()
-				}
-				var doneProgressBar = p.AddBar(resp.Size,
-					mpb.BarQueueAfter(progressBar, true),
-					mpb.BarFillerClearOnComplete(),
-					mpb.PrependDecorators(
-						decor.Name(filename, decor.WC{W: len(filename) + 1, C: decor.DidentRight}),
-						decor.OnComplete(decor.Name(filename, decor.WCSyncSpaceR), completeMsg),
-						decor.OnComplete(decor.EwmaETA(decor.ET_STYLE_MMSS, 0, decor.WCSyncWidth), ""),
-					),
-					mpb.AppendDecorators(
-						decor.OnComplete(decor.Percentage(decor.WC{W: 5}), ""),
-					),
-				)
-
-				progressBar.SetTotal(resp.Size, true)
-				doneProgressBar.SetTotal(resp.Size, true)
+			downloadError := resp.Err()
+			if downloadError != nil {
+				log.Errorln(downloadError.Error())
 			}
+			progressBar.SetTotal(-1, true)
+			// call wait here for the bar to complete and flush
+			p.Wait()
+
 			break Loop
 		}
 	}
