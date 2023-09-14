@@ -63,9 +63,8 @@ func makeRequest(url string, method string, data map[string]interface{}, headers
 		req.Header.Set(key, val)
 	}
 
-	client := &http.Client{}
 	tr := pelican.GetTransport()
-	client = &http.Client{Transport: tr}
+	client := &http.Client{Transport: tr}
 
 	resp, err := client.Do(req)
 	if err != nil {
