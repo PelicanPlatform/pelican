@@ -511,7 +511,6 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 	// Progress ticker
 	progressTicker := time.NewTicker(500 * time.Millisecond)
 	defer progressTicker.Stop()
-
 	downloadLimit := viper.GetInt("MinimumDownloadSpeed")
 
 	// If we are doing a recursive, decrease the download limit by the number of likely workers ~5
@@ -572,7 +571,6 @@ Loop:
 			}
 
 		case <-t.C:
-
 			if resp.BytesComplete() == lastBytesComplete {
 				if noProgressStartTime.IsZero() {
 					noProgressStartTime = time.Now()
@@ -594,30 +592,20 @@ Loop:
 				if resp.Duration() < time.Second*time.Duration(slowTransferRampupTime) {
 					continue
 				} else if startBelowLimit == 0 {
-					log.Warnln("Download speed of ", resp.BytesPerSecond(), "bytes/s", " is below the limit of", downloadLimit, "bytes/s")
+					//log.Warnln("Download speed of ", resp.BytesPerSecond(), "bytes/s", " is below the limit of", downloadLimit, "bytes/s")
 					startBelowLimit = time.Now().Unix()
 					continue
-				} else if (time.Now().Unix() - startBelowLimit) < slowTransferWindow {
+				} else if (time.Now().Unix() - startBelowLimit) < int64(slowTransferWindow) {
 					// If the download is below the threshold for less than `SlowTransferWindow` (default 30) seconds, continue
 					continue
 				}
 				// The download is below the threshold for more than `SlowTransferWindow` seconds, cancel the download
 				cancel()
 				if ObjectClientOptions.ProgressBars {
-					var cancelledProgressBar = p.AddBar(0,
-						mpb.BarQueueAfter(progressBar),
-						mpb.BarFillerClearOnComplete(),
-						mpb.PrependDecorators(
-							decor.Name(filename, decor.WC{W: len(filename) + 1, C: decor.DidentRight}),
-							decor.OnComplete(decor.Name(filename, decor.WCSyncSpaceR), "cancelled, too slow!"),
-							decor.OnComplete(decor.EwmaETA(decor.ET_STYLE_MMSS, 0, decor.WCSyncWidth), ""),
-						),
-						mpb.AppendDecorators(
-							decor.OnComplete(decor.Percentage(decor.WC{W: 5}), ""),
-						),
-					)
-					progressBar.SetTotal(resp.Size, true)
-					cancelledProgressBar.SetTotal(resp.Size, true)
+					progressBar.Abort(true)
+					log.Errorln("cancelled, too slow!")
+					log.Info("retrying...")
+					//cancelledProgressBar.SetTotal(resp.Size, true)
 				}
 
 				log.Errorln("Download speed of ", resp.BytesPerSecond(), "bytes/s", " is below the limit of", downloadLimit, "bytes/s")
@@ -636,14 +624,15 @@ Loop:
 
 		case <-resp.Done:
 			// download is complete
-			downloadError := resp.Err()
-			if downloadError != nil {
-				log.Errorln(downloadError.Error())
+			if ObjectClientOptions.ProgressBars {
+				downloadError := resp.Err()
+				if downloadError != nil {
+					log.Errorln(downloadError.Error())
+				}
+				progressBar.SetTotal(resp.Size, true)
+				// call wait here for the bar to complete and flush
+				p.Wait()
 			}
-			progressBar.SetTotal(-1, true)
-			// call wait here for the bar to complete and flush
-			p.Wait()
-
 			break Loop
 		}
 	}
