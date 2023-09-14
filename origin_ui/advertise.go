@@ -121,9 +121,8 @@ func AdvertiseOrigin() error {
 
 	// We should switch this over to use the common transport, but for that to happen
 	// that function needs to be exported from pelican
-	client := http.Client{}
 	tr := pelican.GetTransport()
-	client = http.Client{Transport: tr}
+	client := http.Client{Transport: tr}
 
 	resp, err := client.Do(req)
 	if err != nil {
