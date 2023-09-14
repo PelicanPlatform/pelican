@@ -20,13 +20,13 @@ package origin_ui
 
 import (
 	"bytes"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
 	"time"
 
+	"github.com/pelicanplatform/pelican"
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -121,13 +121,9 @@ func AdvertiseOrigin() error {
 
 	// We should switch this over to use the common transport, but for that to happen
 	// that function needs to be exported from pelican
-	client := http.Client{}
-	if viper.GetBool("TLSSkipVerify") {
-		tr := &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		}
-		client = http.Client{Transport: tr}
-	}
+	tr := pelican.GetTransport()
+	client := http.Client{Transport: tr}
+
 	resp, err := client.Do(req)
 	if err != nil {
 		return errors.Wrap(err, "Failed to start request for director registration")
