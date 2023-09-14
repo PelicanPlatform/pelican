@@ -2,7 +2,7 @@
 run:
   # Pelican has gotten large enough that the GitHub Action sometimes
   # times out on a cold cache
-  timeout: 2m
+  timeout: 3m
 
 linters:
   enable:
