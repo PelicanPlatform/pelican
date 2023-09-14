@@ -107,22 +107,39 @@ func UpdateLatLong(ad *ServerAd) error {
 }
 
 func matchesPrefix(reqPath string, namespaceAds []NamespaceAd) *NamespaceAd {
+	var best *NamespaceAd
 	for _, namespace := range namespaceAds {
 		serverPath := namespace.Path
 		if strings.Compare(serverPath, reqPath) == 0 {
 			return &namespace
 		}
+
 		// Some namespaces in Topology already have the trailing /, some don't
 		// Perhaps this should be standardized, but in case it isn't we need to
 		// handle it
 		if serverPath[len(serverPath)-1:] != "/" {
 			serverPath += "/"
 		}
-		if strings.HasPrefix(reqPath, serverPath) {
-			return &namespace
+
+		// The assignment of best doesn't account for the trailing / that we need to consider
+		// Account for that by setting up a tmpBest string that adds the / if needed
+		var tmpBest string
+		if best != nil {
+			tmpBest = best.Path
+			if tmpBest[len(tmpBest)-1:] != "/" {
+				tmpBest += "/"
+			}
+		}
+
+		// Make the len comparison with tmpBest, becasue serverPath is one char longer now
+		if strings.HasPrefix(reqPath, serverPath) && len(serverPath) > len(tmpBest) {
+			if best == nil {
+				best = new(NamespaceAd)
+			}
+			*best = namespace
 		}
 	}
-	return nil
+	return best
 }
 
 func GetAdsForPath(reqPath string) (originNamespace NamespaceAd, originAds []ServerAd, cacheAds []ServerAd) {
