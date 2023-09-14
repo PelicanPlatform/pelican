@@ -47,8 +47,15 @@ type (
 	}
 )
 
+// Create interface
+// Add it to namespacekeys in place of jwk.cache
+type NamespaceCache interface {
+	Register(u string, options ...jwk.RegisterOption) error
+	Get(ctx context.Context, u string) (jwk.Set, error)
+}
+
 var (
-	namespaceKeys      = ttlcache.New[string, *jwk.Cache](ttlcache.WithTTL[string, *jwk.Cache](15 * time.Minute))
+	namespaceKeys      = ttlcache.New[string, NamespaceCache](ttlcache.WithTTL[string, NamespaceCache](15 * time.Minute))
 	namespaceKeysMutex = sync.RWMutex{}
 )
 
@@ -104,7 +111,8 @@ func VerifyAdvertiseToken(token, namespace string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	var ar *jwk.Cache
+
+	var ar NamespaceCache
 
 	// defer statements are scoped to function, not lexical enclosure,
 	// which is why we wrap these defer statements in anon funcs
