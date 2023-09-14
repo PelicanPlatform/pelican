@@ -1,6 +1,6 @@
 # Origin UI
 
-This ui is generated with Next.js. 
+This ui is generated with Next.js.
 
 ## Development
 
