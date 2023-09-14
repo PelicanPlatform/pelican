@@ -19,8 +19,6 @@
 package nsregistry
 
 import (
-	"crypto/tls"
-
 	"github.com/pkg/errors"
 
 	"bufio"
@@ -36,10 +34,10 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
+	"github.com/pelicanplatform/pelican"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 )
 
 type clientResponseData struct {
@@ -66,12 +64,9 @@ func makeRequest(url string, method string, data map[string]interface{}, headers
 	}
 
 	client := &http.Client{}
-	if viper.GetBool("TLSSkipVerify") {
-		tr := &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		}
-		client = &http.Client{Transport: tr}
-	}
+	tr := pelican.GetTransport()
+	client = &http.Client{Transport: tr}
+
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err

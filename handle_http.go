@@ -471,7 +471,7 @@ func setupTransport() *http.Transport {
 }
 
 // function to get/setup the transport (only once)
-func getTransport() *http.Transport {
+func GetTransport() *http.Transport {
 	onceTransport.Do(func() {
 		transport = setupTransport()
 	})
@@ -486,7 +486,7 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 
 	// Create the client, request, and context
 	client := grab.NewClient()
-	transport := getTransport()
+	transport := GetTransport()
 	if !transfer.Proxy {
 		transport.Proxy = nil
 	}
@@ -829,7 +829,7 @@ Loop:
 
 }
 
-var UploadClient = &http.Client{Transport: getTransport()}
+var UploadClient = &http.Client{Transport: GetTransport()}
 
 // Actually perform the Put request to the server
 func doPut(request *http.Request, responseChan chan<- *http.Response, errorChan chan<- error) {
@@ -930,7 +930,7 @@ func walkDavDir(url *url.URL, token string, namespace namespaces.Namespace) ([]s
 	c := gowebdav.NewClient(rootUrl.String(), "", "")
 
 	// XRootD does not like keep alives and kills things, so turn them off.
-	transport = getTransport()
+	transport = GetTransport()
 	c.SetTransport(transport)
 
 	files, err := walkDir(url.Path, c)
@@ -982,7 +982,7 @@ func StatHttp(dest *url.URL, namespace namespaces.Namespace) (uint64, error) {
 
 	var resp *http.Response
 	for {
-		transport := getTransport()
+		transport := GetTransport()
 		if disableProxy {
 			log.Debugln("Performing HEAD (without proxy)", dest.String())
 			transport.Proxy = nil
