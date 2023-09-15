@@ -1,5 +1,7 @@
 on: [push, pull_request]
 name: Test
+permissions:
+  pull-requests: write
 jobs:
   test:
     strategy:
@@ -17,7 +19,46 @@ jobs:
     - name: Test
       run: |
         make web-build
-        go test ./...
+        go test -coverpkg=./... -coverprofile=coverage.out -covermode=count ./...
+    - name: Get total code coverage
+      if: matrix.os == 'ubuntu-latest' && github.event_name == 'pull_request'
+      id: cc
+      run: |
+        set -x
+        cc_total=`go tool cover -func=coverage.out | grep total | grep -Eo '[0-9]+\.[0-9]+'`
+        echo "cc_total=$cc_total" >> $GITHUB_OUTPUT
+    - name: Restore base test coverage
+      id: base-coverage
+      if: matrix.os == 'ubuntu-latest' && github.event.pull_request.base.sha != ''
+      uses: actions/cache@v3
+      with:
+        path: |
+          unit-base.txt
+        # Use base sha for PR or new commit hash for master/main push in test result key.
+        key: ${{ runner.os }}-unit-test-coverage-${{ (github.event.pull_request.base.sha != github.event.after) && github.event.pull_request.base.sha || github.event.after }}
+    - name: Run test for base code
+      if: matrix.os == 'ubuntu-latest' && steps.base-coverage.outputs.cache-hit != 'true' && github.event.pull_request.base.sha != ''
+      run: |
+        git fetch origin main ${{ github.event.pull_request.base.sha }}
+        HEAD=$(git rev-parse HEAD)
+        git reset --hard ${{ github.event.pull_request.base.sha }}
+        make web-build
+        go test -coverpkg=./... -coverprofile=base_coverage.out -covermode=count ./...
+        go tool cover -func=base_coverage.out > unit-base.txt
+        git reset --hard $HEAD
+    - name: Get base code coverage value
+      if: matrix.os == 'ubuntu-latest' && github.event_name == 'pull_request'
+      id: cc_b
+      run: |
+        set -x
+        cc_base_total=`grep total ./unit-base.txt | grep -Eo '[0-9]+\.[0-9]+'`
+        echo "cc_base_total=$cc_base_total" >> $GITHUB_OUTPUT
+    - name: Add Coverage to PR Comment
+      uses: marocchino/sticky-pull-request-comment@v2
+      if: github.event_name == 'pull_request' && matrix.os == 'ubuntu-latest'    
+      with:
+        message: |
+          Current code coverage from unit tests: ${{steps.cc.outputs.cc_total}}% Prev: ${{steps.cc_b.outputs.cc_base_total}}%    
     - name: Run GoReleaser
       uses: goreleaser/goreleaser-action@v4
       with:
