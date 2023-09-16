@@ -28,11 +28,11 @@ var (
 		Use:   "director",
 		Short: "Launch a Pelican Director",
 		Long: `Launch a Pelican Director service:
-		
+
 		The Pelican Director is the primary mechanism by which clients/caches
 		can discover the source of a requested resource. It has two endpoints
 		at /api/v1.0/director/origin/ and /api/v1.0/director/object/, where the
-		former redirects to the closest origin supporting the object and the 
+		former redirects to the closest origin supporting the object and the
 		latter redirects to the closest cache. As a shortcut, requests to the
 		director at /foo/bar will be treated as a request for the object from
 		cache.`,
