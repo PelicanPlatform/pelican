@@ -112,6 +112,18 @@ func IsRetryable(err error) bool {
 		}
 		return true
 	}
+	var hep *HttpErrResp
+	if errors.As(err, &hep) {
+		switch int(hep.Code) {
+		case http.StatusInternalServerError:
+		case http.StatusBadGateway:
+		case http.StatusServiceUnavailable:
+		case http.StatusGatewayTimeout:
+			return true
+		default:
+			return false
+		}
+	}
 	return false
 }
 

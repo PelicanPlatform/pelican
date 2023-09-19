@@ -210,7 +210,7 @@ func copyMain(cmd *cobra.Command, args []string) {
 		if errMsg == "" {
 			errMsg = result.Error()
 		}
-		log.Errorln("Failure downloading " + lastSrc + ": " + errMsg)
+		log.Errorln("Failure transferring " + lastSrc + ": " + errMsg)
 		if pelican.ErrorsRetryable() {
 			log.Errorln("Errors are retryable")
 			os.Exit(11)
