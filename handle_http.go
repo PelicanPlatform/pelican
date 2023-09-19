@@ -553,7 +553,7 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 	slowTransferWindow := viper.GetInt64("SlowTransferWindow")
 	var previousCompletedBytes int64 = 0
 	var startBelowLimit int64 = 0
-
+	var previousCompletedTime = time.Now()
 	var noProgressStartTime time.Time
 	var lastBytesComplete int64
 	// Loop of the download
@@ -564,13 +564,15 @@ Loop:
 			if ObjectClientOptions.ProgressBars {
 				progressBar.SetTotal(resp.Size, false)
 				currentCompletedBytes := resp.BytesComplete()
-				progressBar.IncrInt64(currentCompletedBytes - previousCompletedBytes)
+				bytesDelta := currentCompletedBytes - previousCompletedBytes
 				previousCompletedBytes = currentCompletedBytes
-				start := time.Now()
-				progressBar.EwmaIncrement(time.Since(start))
+				currentCompletedTime := time.Now()
+				progressBar.EwmaIncrInt64(bytesDelta, currentCompletedTime.Sub(previousCompletedTime))
+				previousCompletedTime = currentCompletedTime
 			}
 
 		case <-t.C:
+			// Check that progress is being made and that it is not too slow
 			if resp.BytesComplete() == lastBytesComplete {
 				if noProgressStartTime.IsZero() {
 					noProgressStartTime = time.Now()
@@ -592,10 +594,11 @@ Loop:
 				if resp.Duration() < time.Second*time.Duration(slowTransferRampupTime) {
 					continue
 				} else if startBelowLimit == 0 {
-					//log.Warnln("Download speed of ", resp.BytesPerSecond(), "bytes/s", " is below the limit of", downloadLimit, "bytes/s")
+					warning := []byte("Warning! Downloading too slow...\n")
+					p.Write(warning)
 					startBelowLimit = time.Now().Unix()
 					continue
-				} else if (time.Now().Unix() - startBelowLimit) < int64(slowTransferWindow) {
+				} else if (time.Now().Unix() - startBelowLimit) < slowTransferWindow {
 					// If the download is below the threshold for less than `SlowTransferWindow` (default 30) seconds, continue
 					continue
 				}
@@ -603,12 +606,10 @@ Loop:
 				cancel()
 				if ObjectClientOptions.ProgressBars {
 					progressBar.Abort(true)
-					log.Errorln("cancelled, too slow!")
-					log.Info("retrying...")
-					//cancelledProgressBar.SetTotal(resp.Size, true)
+					progressBar.Wait()
 				}
 
-				log.Errorln("Download speed of ", resp.BytesPerSecond(), "bytes/s", " is below the limit of", downloadLimit, "bytes/s")
+				log.Errorln("Cancelled: Download speed of ", resp.BytesPerSecond(), "bytes/s", " is below the limit of", downloadLimit, "bytes/s")
 
 				return 0, &SlowTransferError{
 					BytesTransferred: resp.BytesComplete(),
