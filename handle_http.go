@@ -595,7 +595,11 @@ Loop:
 					continue
 				} else if startBelowLimit == 0 {
 					warning := []byte("Warning! Downloading too slow...\n")
-					p.Write(warning)
+					status, err := p.Write(warning)
+					if err != nil {
+						log.Errorln("Problem displaying slow message", err, status)
+						continue
+					}
 					startBelowLimit = time.Now().Unix()
 					continue
 				} else if (time.Now().Unix() - startBelowLimit) < slowTransferWindow {
