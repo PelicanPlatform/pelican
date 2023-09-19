@@ -53,12 +53,6 @@ jobs:
         set -x
         cc_base_total=`grep total ./unit-base.txt | grep -Eo '[0-9]+\.[0-9]+'`
         echo "cc_base_total=$cc_base_total" >> $GITHUB_OUTPUT
-    - name: Add Coverage to PR Comment
-      uses: marocchino/sticky-pull-request-comment@v2
-      if: github.event_name == 'pull_request' && matrix.os == 'ubuntu-latest'    
-      with:
-        message: |
-          Current code coverage from unit tests: ${{steps.cc.outputs.cc_total}}% Prev: ${{steps.cc_b.outputs.cc_base_total}}%    
     - name: Run GoReleaser
       uses: goreleaser/goreleaser-action@v4
       with:
