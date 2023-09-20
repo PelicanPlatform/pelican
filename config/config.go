@@ -40,6 +40,8 @@ import (
 	"github.com/spf13/viper"
 )
 
+//go:generate go run ../generate/param_generator.go
+
 // Structs holding the OAuth2 state (and any other OSDF config needed)
 
 type TokenEntry struct {
@@ -238,11 +240,12 @@ func getConfigBase() (string, error) {
 func InitServer() error {
 	viper.SetConfigType("yaml")
 	if IsRootExecution() {
-		viper.SetDefault("TLSCertificate", "/etc/pelican/certificates/tls.crt")
-		viper.SetDefault("TLSKey", "/etc/pelican/certificates/tls.key")
-		viper.SetDefault("XrootdRun", "/run/pelican/xrootd")
-		viper.SetDefault("RobotsTxtFile", "/etc/pelican/robots.txt")
-		viper.SetDefault("ScitokensConfig", "/etc/pelican/xrootd/scitokens.cfg")
+		SetRoot(true)
+		TLSCertificate.SetPath()
+		TLSKey.SetPath()
+		XrootdRun.SetPath()
+		RobotsTxtFile.SetPath()
+		ScitokensConfig.SetPath()
 		viper.SetDefault("Authfile", "/etc/pelican/xrootd/authfile")
 		viper.SetDefault("MacaroonsKeyFile", "/etc/pelican/macaroons-secret")
 		viper.SetDefault("IssuerKey", "/etc/pelican/issuer.jwk")
@@ -258,10 +261,12 @@ func InitServer() error {
 		if err != nil {
 			return err
 		}
-		viper.SetDefault("TLSCertificate", filepath.Join(configBase, "certificates", "tls.crt"))
-		viper.SetDefault("TLSKey", filepath.Join(configBase, "certificates", "tls.key"))
-		viper.SetDefault("RobotsTxtFile", filepath.Join(configBase, "robots.txt"))
-		viper.SetDefault("ScitokensConfig", filepath.Join(configBase, "xrootd", "scitokens.cfg"))
+		SetRoot(false)
+		SetConfigBase(configBase)
+		TLSCertificate.SetPath()
+		TLSKey.SetPath()
+		RobotsTxtFile.SetPath()
+		ScitokensConfig.SetPath()
 		viper.SetDefault("Authfile", filepath.Join(configBase, "xrootd", "authfile"))
 		viper.SetDefault("MacaroonsKeyFile", filepath.Join(configBase, "macaroons-secret"))
 		viper.SetDefault("IssuerKey", filepath.Join(configBase, "issuer.jwk"))
