@@ -126,7 +126,7 @@ func GenerateCert() error {
 		return err
 	}
 
-	tlsCert := viper.GetString("TLSCertificate")
+	tlsCert := TLSCertificate.GetPath()
 	if file, err := os.Open(tlsCert); err == nil {
 		file.Close()
 		return nil
@@ -138,7 +138,7 @@ func GenerateCert() error {
 		return err
 	}
 
-	tlsKey := viper.GetString("TLSKey")
+	tlsKey := TLSKey.GetPath()
 	privateKey, err := LoadPrivateKey(tlsKey)
 	if err != nil {
 		return err

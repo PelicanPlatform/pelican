@@ -30,7 +30,6 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"kernel.org/pub/linux/libs/security/libcap/cap"
 )
 
@@ -81,7 +80,7 @@ func (PrivilegedXrootdLauncher) Launch(ctx context.Context, daemonName string, c
 		return ctx, -1, errors.Wrapf(err, "Unable to create stderr pipe for %s", daemonName)
 	}
 
-	xrootdRun := viper.GetString("XrootdRun")
+	xrootdRun := config.XrootdRun.GetPath()
 	pidFile := filepath.Join(xrootdRun, "xrootd.pid")
 
 	executable, err := findDaemon(daemonName)
