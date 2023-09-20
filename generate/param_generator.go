@@ -1,5 +1,7 @@
 package main
 
+// This should not be included in any release of pelican, instead only the generated "parameters.go" should packaged
+
 import (
 	"fmt"
 	"io"
@@ -12,12 +14,16 @@ import (
 )
 
 func main() {
-	Config()
+	GenParamEnum()
 }
 
 var requiredKeys = [4]string{"name", "description", "default", "type"}
 
-func Config() {
+func GenParamEnum() {
+	/*
+	* This generated a file "config/parameters.go" that is based off of docs/parameters.yaml to be used
+	* instead of explicit calls to viper.Get*
+	 */
 	filename, _ := filepath.Abs("../docs/parameters.yaml")
 	yamlFile, err := os.Open(filename)
 
@@ -25,6 +31,7 @@ func Config() {
 		panic(err)
 	}
 
+	// This decoder and for loop is needed because the yaml file has multiple '---' delineated docs
 	decoder := yaml.NewDecoder(yamlFile)
 
 	var values []interface{}
@@ -42,13 +49,13 @@ func Config() {
 
 	configMap := make(map[string]string)
 
-	configEntry := values[0].(map[string]interface{})
-	configBase := configEntry["default"].(string)
-
+	// Skip the first parameter (ConfigBase is special)
+	// Save the first parameter seperately in order to do "<pname> Param = iota" for the enums
 	firstEntry := values[1].(map[string]interface{})
 	firstEnumKey := firstEntry["name"].(string)
 	firstEnumBase := strings.SplitAfterN(firstEntry["default"].(string), "/", 2)[1]
 
+	// Parse and check the values of each parameter against the required Keys
 	for i := 1; i < len(values)-1; i++ {
 		entry := values[i].(map[string]interface{})
 		for j := 0; j < len(requiredKeys); j++ {
@@ -66,18 +73,19 @@ func Config() {
 		}
 	}
 
+	// Create the file to be generated
 	f, err := os.Create("parameters.go")
 	if err != nil {
 		panic(err)
 	}
 	defer f.Close()
 
+	// Generate the code based on the template
 	err = packageTemplate.Execute(f, struct {
-		FirstKey   string
-		FirstRoot  string
-		ConfigBase string
-		Params     map[string]string
-	}{FirstKey: firstEnumKey, FirstRoot: firstEnumBase, ConfigBase: configBase, Params: configMap})
+		FirstKey  string
+		FirstRoot string
+		Params    map[string]string
+	}{FirstKey: firstEnumKey, FirstRoot: firstEnumBase, Params: configMap})
 
 	if err != nil {
 		panic(err)
