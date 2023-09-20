@@ -27,6 +27,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 var (
@@ -67,4 +68,36 @@ func TestEmitCfg(t *testing.T) {
 	t.Run("SimpleIssuer", configTester(&ScitokensCfg{Global: globalCfg, Issuers: []Issuer{issuer}}, simpleOutput))
 	issuer2 := Issuer{Name: "WLCG", Issuer: "https://wlcg.cnaf.infn.it", BasePaths: []string{"/baz"}}
 	t.Run("DualIssuers", configTester(&ScitokensCfg{Global: globalCfg, Issuers: []Issuer{issuer, issuer2}}, dualOutput))
+}
+
+func TestLoadConfig(t *testing.T) {
+	dirname := t.TempDir()
+	os.Setenv("PELICAN_XROOTDRUN", dirname)
+	defer os.Unsetenv("PELICAN_XROOTDRUN")
+	viper.Reset()
+	err := config.InitClient()
+	assert.Nil(t, err)
+
+	configTester := func(configResult string) func(t *testing.T) {
+		return func(t *testing.T) {
+			cfgFname := filepath.Join(dirname, "scitokens-test.cfg")
+			err := os.WriteFile(cfgFname, []byte(configResult), 0600)
+			require.NoError(t, err)
+
+			cfg, err := LoadConfig(cfgFname)
+			require.NoError(t, err)
+
+			err = EmitScitokensConfiguration(&cfg)
+			assert.NoError(t, err)
+
+			genCfg, err := os.ReadFile(filepath.Join(dirname, "scitokens-generated.cfg"))
+			assert.NoError(t, err)
+
+			assert.Equal(t, string(configResult), string(genCfg))
+		}
+	}
+
+	t.Run("EmptyConfig", configTester(emptyOutput))
+	t.Run("SimpleIssuer", configTester(simpleOutput))
+	t.Run("DualIssuers", configTester(dualOutput))
 }

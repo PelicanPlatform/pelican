@@ -32,6 +32,7 @@ import (
 	"strings"
 	"text/template"
 
+	"github.com/go-ini/ini"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
@@ -112,10 +113,67 @@ func EmitScitokensConfiguration(cfg *ScitokensCfg) error {
 }
 
 // Given a filename, load and parse the file into a ScitokensCfg object
-func LoadConfig(fileName string) (ScitokensCfg, error) {
-	cfg := ScitokensCfg{}
+func LoadConfig(fileName string) (cfg ScitokensCfg, err error) {
+	configIni, err := ini.Load(fileName)
+	if err != nil {
+		return cfg, errors.Wrapf(err, "Unable to load the scitokens.cfg at %s", fileName)
+	}
 
-	return cfg, errors.New("Config loader not implemented!")
+	if section, err := configIni.GetSection("Global"); err == nil {
+		audienceKey := section.Key("audience")
+		if audienceKey != nil {
+			for _, audience := range audienceKey.Strings(",") {
+				cfg.Global.Audience = append(cfg.Global.Audience, strings.TrimSpace(audience))
+			}
+		}
+		audienceKey = section.Key("audience_json")
+		if audienceKey != nil {
+			var audiences []string
+			if err := json.Unmarshal([]byte(audienceKey.String()), &audiences); err != nil {
+				return cfg, errors.Wrapf(err, "Unable to parse audience_json from %s", fileName)
+			}
+			for _, audience := range audiences {
+				cfg.Global.Audience = append(cfg.Global.Audience, strings.TrimSpace(audience))
+			}
+		}
+	}
+
+	for _, sectionName := range configIni.Sections() {
+		if !strings.HasPrefix(sectionName.Name(), "Issuer ") {
+			continue
+		}
+		var newIssuer Issuer
+		newIssuer.Name = sectionName.Name()[len("Issuer "):]
+		if issuerKey := sectionName.Key("issuer"); issuerKey != nil {
+			newIssuer.Issuer = issuerKey.String()
+		}
+
+		if basePathsKey := sectionName.Key("base_path"); basePathsKey != nil {
+			for _, path := range basePathsKey.Strings(",") {
+				newIssuer.BasePaths = append(newIssuer.BasePaths, strings.TrimSpace(path))
+			}
+		}
+
+		if mapSubjectKey := sectionName.Key("map_subject"); mapSubjectKey != nil {
+			newIssuer.MapSubject = mapSubjectKey.MustBool()
+		}
+
+		if defaultUserKey := sectionName.Key("default_user"); defaultUserKey != nil {
+			newIssuer.DefaultUser = defaultUserKey.String()
+		}
+
+		if nameMapfileKey := sectionName.Key("name_mapfile"); nameMapfileKey != nil {
+			newIssuer.NameMapfile = nameMapfileKey.String()
+		}
+
+		if usernameClaimKey := sectionName.Key("username_claim"); usernameClaimKey != nil {
+			newIssuer.UsernameClaim = usernameClaimKey.String()
+		}
+
+		cfg.Issuers = append(cfg.Issuers, newIssuer)
+	}
+
+	return cfg, nil
 }
 
 // We have a special issuer just for self-monitoring the origin.

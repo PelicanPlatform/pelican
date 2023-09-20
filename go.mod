@@ -6,6 +6,7 @@ require (
 	github.com/alecthomas/units v0.0.0-20211218093645-b94a6e3cc137
 	github.com/cavaliercoder/grab v2.0.0+incompatible
 	github.com/gin-gonic/gin v1.9.1
+	github.com/go-ini/ini v1.67.0
 	github.com/go-kit/kit v0.12.0
 	github.com/go-kit/log v0.2.1
 	github.com/golang-jwt/jwt v3.2.2+incompatible
