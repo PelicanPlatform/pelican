@@ -23,7 +23,7 @@ import (
 	"os"
 
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/namespace-registry"
+	nsregistry "github.com/pelicanplatform/pelican/namespace-registry"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -38,7 +38,7 @@ var pubkeyPath string
 var privkeyPath string
 
 func getNamespaceEndpoint() (string, error) {
-	namespaceEndpoint := viper.GetString("NamespaceURL")
+	namespaceEndpoint := config.NamespaceUrl.GetString()
 	if namespaceEndpoint == "" {
 		return "", errors.New("No namespace registry specified; either give the federation name (-f) or specify the namespace API endpoint directly (e.g., --namespace-url=https://namespace.osg-htc.org/namespaces)")
 	}
@@ -61,7 +61,7 @@ func registerANamespace(cmd *cobra.Command, args []string) {
 
 	privkey := privkeyPath
 	if privkey == "" {
-		privkey = viper.GetString("IssuerKey")
+		privkey = config.IssuerKey.GetString()
 	}
 	if privkey == "" {
 		log.Error("Private key file is not set; specify its location with the --privkey option or by setting the IssuerKey configuration variable")

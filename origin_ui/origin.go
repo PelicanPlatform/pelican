@@ -103,7 +103,7 @@ func WaitUntilLogin() error {
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 
 	hostname := viper.GetString("Hostname")
-	webPort := viper.GetInt("WebPort")
+	webPort := config.WebPort.GetInt()
 	isTTY := false
 	if term.IsTerminal(int(os.Stdout.Fd())) {
 		isTTY = true

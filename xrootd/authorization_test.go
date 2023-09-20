@@ -124,7 +124,7 @@ func TestGenerateConfig(t *testing.T) {
 	issuer, err = GenerateMonitoringIssuer()
 	require.NoError(t, err)
 	assert.Equal(t, issuer.Name, "Built-in Monitoring")
-	assert.Equal(t, issuer.Issuer, "https://"+viper.GetString("Hostname")+":"+fmt.Sprint(viper.GetInt("WebPort")))
+	assert.Equal(t, issuer.Issuer, "https://"+viper.GetString("Hostname")+":"+fmt.Sprint(config.WebPort.GetInt()))
 	require.Equal(t, len(issuer.BasePaths), 1)
 	assert.Equal(t, issuer.BasePaths[0], "/pelican/monitoring")
 	assert.Equal(t, issuer.DefaultUser, "xrootd")
@@ -143,7 +143,7 @@ func TestWriteOriginScitokensConfig(t *testing.T) {
 	err := config.InitServer()
 	require.Nil(t, err)
 
-	scitokensCfg := viper.GetString("ScitokensConfig")
+	scitokensCfg := config.ScitokensConfig.GetString()
 	err = config.MkdirAll(filepath.Dir(scitokensCfg), 0755, -1, -1)
 	require.NoError(t, err)
 	err = os.WriteFile(scitokensCfg, []byte(toMergeOutput), 0640)

@@ -128,7 +128,7 @@ func GenerateCert() error {
 		return err
 	}
 
-	tlsCert := viper.GetString("TLSCertificate")
+	tlsCert := TLSCertificate.GetString()
 	if file, err := os.Open(tlsCert); err == nil {
 		file.Close()
 		return nil
@@ -140,7 +140,7 @@ func GenerateCert() error {
 		return err
 	}
 
-	tlsKey := viper.GetString("TLSKey")
+	tlsKey := TLSKey.GetString()
 	privateKey, err := LoadPrivateKey(tlsKey)
 	if err != nil {
 		return err
@@ -254,14 +254,14 @@ func GeneratePrivateKey(keyLocation string, curve elliptic.Curve) error {
 
 func GenerateIssuerJWKS() (*jwk.Set, error) {
 	existingJWKS := viper.GetString("IssuerJWKS")
-	issuerKeyFile := viper.GetString("IssuerKey")
+	issuerKeyFile := IssuerKey.GetString()
 	return LoadPublicKey(existingJWKS, issuerKeyFile)
 }
 
 func GetOriginJWK() (*jwk.Key, error) {
 	key := privateKey.Load()
 	if key == nil {
-		issuerKeyFile := viper.GetString("IssuerKey")
+		issuerKeyFile := IssuerKey.GetString()
 		contents, err := os.ReadFile(issuerKeyFile)
 		if err != nil {
 			return nil, errors.Wrap(err, "Failed to read key file")

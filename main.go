@@ -465,7 +465,7 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 		sourceFile = "/" + sourceFile
 	}
 
-	OSDFDirectorUrl := viper.GetString("DirectorURL")
+	OSDFDirectorUrl := config.DirectorUrl.GetString()
 	useOSDFDirector := viper.IsSet("DirectorURL")
 
 	var ns namespaces.Namespace

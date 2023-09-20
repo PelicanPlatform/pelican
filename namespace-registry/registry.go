@@ -128,7 +128,7 @@ func loadServerKeys() (*ecdsa.PrivateKey, error) {
 	// Note: go 1.21 introduces `OnceValues` which automates this procedure.
 	// TODO: Reimplement the function once we switch to a minimum of 1.21
 	serverCredsLoad.Do(func() {
-		issuerFileName := viper.GetString("IssuerKey")
+		issuerFileName := config.IssuerKey.GetString()
 		serverCredsPrivKey, serverCredsErr = config.LoadPrivateKey(issuerFileName)
 	})
 	return serverCredsPrivKey, serverCredsErr
@@ -136,7 +136,7 @@ func loadServerKeys() (*ecdsa.PrivateKey, error) {
 
 func loadOIDC() error {
 	// Load OIDC.ClientID
-	OIDCClientIDFile := viper.GetString("OIDC.ClientIDFile")
+	OIDCClientIDFile := config.OIDC_ClientIDFile.GetString()
 	OIDCClientIDFromEnv := viper.GetString("OIDCCLIENTID")
 	if OIDCClientIDFile != "" {
 		contents, err := os.ReadFile(OIDCClientIDFile)
@@ -152,7 +152,7 @@ func loadOIDC() error {
 	}
 
 	// load OIDC.ClientSecret
-	OIDCClientSecretFile := viper.GetString("OIDC.ClientSecretFile")
+	OIDCClientSecretFile := config.OIDC_ClientSecretFile.GetString()
 	OIDCClientSecretFromEnv := viper.GetString("OIDCCLIENTSECRET")
 	if OIDCClientSecretFile != "" {
 		contents, err := os.ReadFile(OIDCClientSecretFile)
@@ -168,7 +168,7 @@ func loadOIDC() error {
 	}
 
 	// Load OIDC.DeviceAuthEndpoint
-	deviceAuthEndpoint := viper.GetString("OIDC.DeviceAuthEndpoint")
+	deviceAuthEndpoint := config.OIDC_DeviceAuthEndpoint.GetString()
 	if deviceAuthEndpoint == "" {
 		return errors.New("Nothing set for config parameter OIDC.DeviceAuthEndpoint, so registration with identity not supported")
 	}
@@ -179,7 +179,7 @@ func loadOIDC() error {
 	OIDC.DeviceAuthEndpoint = deviceAuthEndpointURL.String()
 
 	// Load OIDC.TokenEndpoint
-	tokenEndpoint := viper.GetString("OIDC.TokenEndpoint")
+	tokenEndpoint := config.OIDC_TokenEndpoint.GetString()
 	if tokenEndpoint == "" {
 		return errors.New("Nothing set for config parameter OIDC.TokenEndpoint, so registration with identity not supported")
 	}
@@ -190,7 +190,7 @@ func loadOIDC() error {
 	OIDC.TokenEndpoint = tokenAuthEndpointURL.String()
 
 	// Load OIDC.UserInfoEndpoint
-	userInfoEndpoint := viper.GetString("OIDC.UserInfoEndpoint")
+	userInfoEndpoint := config.OIDC_TokenEndpoint.GetString()
 	if userInfoEndpoint == "" {
 		return errors.New("Nothing set for config parameter OIDC.UserInfoEndpoint, so registration with identity not supported")
 	}

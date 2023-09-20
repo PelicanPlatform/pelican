@@ -111,7 +111,7 @@ func checkXrootdEnv() error {
 	}
 
 	// Ensure the runtime directory exists
-	runtimeDir := viper.GetString("XrootdRun")
+	runtimeDir := config.XrootdRun.GetString()
 	err = config.MkdirAll(runtimeDir, 0755, uid, gid)
 	if err != nil {
 		return errors.Wrapf(err, "Unable to create runtime directory %v", runtimeDir)
@@ -221,7 +221,7 @@ to export the directory /mnt/foo to the path /bar in the data federation`)
 	}
 
 	// If no robots.txt, create a ephemeral one for xrootd to use
-	robotsTxtFile := viper.GetString("RobotsTxtFile")
+	robotsTxtFile := config.RobotsTxtFile.GetString()
 	if _, err := os.Open(robotsTxtFile); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			newPath := filepath.Join(runtimeDir, "robots.txt")
@@ -293,7 +293,7 @@ to export the directory /mnt/foo to the path /bar in the data federation`)
 			" to desired daemon group %v", macaroonsSecret, groupname)
 	}
 
-	scitokensCfg := viper.GetString("ScitokensConfig")
+	scitokensCfg := config.ScitokensConfig.GetString()
 	err = config.MkdirAll(path.Dir(scitokensCfg), 0755, -1, gid)
 	if err != nil {
 		return errors.Wrapf(err, "Unable to create directory %v",
@@ -327,7 +327,7 @@ func checkDefaults() error {
 	requiredConfigs := []string{"ManagerHost", "SummaryMonitoringHost", "DetailedMonitoringHost",
 		"TLSCertificate", "TLSKey", "XrootdRun", "RobotsTxtFile"}
 	for _, configName := range requiredConfigs {
-		mgr := viper.GetString(configName)
+		mgr := viper.GetString(configName) // TODO: Remove direct access once all parameters are generated
 		if mgr == "" {
 			return errors.New(fmt.Sprintf("Required value of '%v' is not set in config",
 				configName))
@@ -335,7 +335,7 @@ func checkDefaults() error {
 	}
 
 	// As necessary, generate a private key and corresponding cert
-	if err := config.GeneratePrivateKey(viper.GetString("TLSKey"), elliptic.P256()); err != nil {
+	if err := config.GeneratePrivateKey(config.TLSKey.GetString(), elliptic.P256()); err != nil {
 		return err
 	}
 	if err := config.GenerateCert(); err != nil {
@@ -343,11 +343,11 @@ func checkDefaults() error {
 	}
 
 	// TODO: Could upgrade this to a check for a cert in the file...
-	if err := checkConfigFileReadable(viper.GetString("TLSCertificate"),
+	if err := checkConfigFileReadable(config.TLSCertificate.GetString(),
 		"A TLS certificate is required to serve HTTPS"); err != nil {
 		return err
 	}
-	if err := checkConfigFileReadable(viper.GetString("TLSKey"),
+	if err := checkConfigFileReadable(config.TLSKey.GetString(),
 		"A TLS key is required to serve HTTPS"); err != nil {
 		return err
 	}
@@ -371,11 +371,11 @@ func checkDefaults() error {
 	if originUrlParsed.Port() == "" {
 		// No port was specified, let's tack on whatever was passed in the
 		// command line argument
-		viper.Set("OriginUrl", originUrlParsed.String()+":"+viper.GetString("WebPort"))
-	} else if originUrlParsed.Port() != viper.GetString("WebPort") {
+		viper.Set("OriginUrl", originUrlParsed.String()+":"+fmt.Sprint(config.WebPort.GetInt()))
+	} else if originUrlParsed.Port() != fmt.Sprint(config.WebPort.GetInt()) {
 		// The web port configured via the config file and the webport configured
 		// via commandline don't match. Perhaps the user is confused?
-		return errors.New("Mismatched webports: from command line: " + viper.GetString("WebPort") +
+		return errors.New("Mismatched webports: from command line: " + fmt.Sprint(config.WebPort.GetInt()) +
 			", from config file: " + originUrlParsed.Port() + ". Please ensure these match")
 	}
 
@@ -406,7 +406,7 @@ func configXrootd() (string, error) {
 
 	templ := template.Must(template.New("xrootd.cfg").Parse(xrootdCfg))
 
-	xrootdRun := viper.GetString("XrootdRun")
+	xrootdRun := config.XrootdRun.GetString()
 	configPath := filepath.Join(xrootdRun, "xrootd.cfg")
 	file, err := os.OpenFile(configPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0640)
 	if err != nil {

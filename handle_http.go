@@ -45,6 +45,7 @@ import (
 	"github.com/vbauerster/mpb/v8"
 	"github.com/vbauerster/mpb/v8/decor"
 
+	"github.com/pelicanplatform/pelican/config"
 	namespaces "github.com/pelicanplatform/pelican/namespaces"
 )
 
@@ -475,7 +476,7 @@ func GetTransport() *http.Transport {
 	onceTransport.Do(func() {
 		transport = setupTransport()
 	})
-	if viper.GetBool("TLSSkipVerify") {
+	if config.TLSSkipVerify.GetBool() {
 		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 	}
 	return transport

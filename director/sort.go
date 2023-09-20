@@ -37,6 +37,7 @@ import (
 	"time"
 
 	"github.com/oschwald/geoip2-golang"
+	"github.com/pelicanplatform/pelican/config"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 )
@@ -116,7 +117,7 @@ func DownloadDB(localFile string) error {
 	}
 
 	var licenseKey string
-	keyFile := viper.GetString("MaxMindKeyFile")
+	keyFile := config.MaxMindKeyFile.GetString()
 	keyFromEnv := viper.GetString("MAXMINDKEY")
 	if keyFile != "" {
 		contents, err := os.ReadFile(keyFile)
@@ -184,7 +185,7 @@ func PeriodicMaxMindReload() {
 	for {
 		// Update once every other day
 		time.Sleep(time.Hour * 48)
-		localFile := viper.GetString("GeoIPLocation")
+		localFile := config.GeoIPLocation.GetString()
 		if err := DownloadDB(localFile); err != nil {
 			log.Warningln("Failed to download GeoIP database:", err)
 		} else {
@@ -200,7 +201,7 @@ func PeriodicMaxMindReload() {
 
 func InitializeDB() {
 	go PeriodicMaxMindReload()
-	localFile := viper.GetString("GeoIPLocation")
+	localFile := config.GeoIPLocation.GetString()
 	localReader, err := geoip2.Open(localFile)
 	if err != nil {
 		log.Warningln("Local GeoIP database file not present; will attempt a download.", err)

@@ -59,6 +59,8 @@ and it shares the same defaults and behavior as stashcp.
 Building
 --------
 
+If the `parameters.yaml` file was altered, regenerate `parameters.go` by running `go generate` in the `./config` directory
+
 Building is performed with the [goreleaser](https://goreleaser.com/) tool.  To build a snapshot (not release):
 
     $ goreleaser --clean --snapshot
