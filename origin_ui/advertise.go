@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/pelicanplatform/pelican"
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -64,7 +65,7 @@ func AdvertiseOrigin() error {
 	originUrl := viper.GetString("OriginUrl")
 
 	// Here we instantiate the namespaceAd slice, but we still need to define the namespace
-	namespaceUrl, err := url.Parse(viper.GetString("NamespaceUrl"))
+	namespaceUrl, err := url.Parse(config.NamespaceUrl.GetString())
 	if err != nil {
 		return errors.Wrap(err, "Bad NamespaceUrl")
 	}
@@ -95,7 +96,7 @@ func AdvertiseOrigin() error {
 		return errors.Wrap(err, "Failed to generate JSON description of origin")
 	}
 
-	directorUrlStr := viper.GetString("DirectorURL")
+	directorUrlStr := config.DirectorUrl.GetString()
 	if directorUrlStr == "" {
 		return errors.New("Director endpoint URL is not known")
 	}

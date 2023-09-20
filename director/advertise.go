@@ -27,9 +27,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 )
 
 type (
@@ -67,7 +67,7 @@ type (
 
 // Populate internal cache with origin/cache ads
 func AdvertiseOSDF() error {
-	namespaceURL := viper.GetString("TopologyNamespaceURL")
+	namespaceURL := config.TopologyNamespaceURL.GetString()
 	if namespaceURL == "" {
 		return errors.New("Topology namespaces.json configuration option (`TopologyNamespaceURL`) not set")
 	}

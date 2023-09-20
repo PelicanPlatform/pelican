@@ -89,7 +89,7 @@ name: Director.DefaultResponse
 description: >-
   The default response type of a redirect for a director instance. Can be either "cache" or "origin". If a director
   is hosted at https://director.com, then a GET request to https://director.com/foo/bar.txt will either redirect to
-  the nearest cache for namespace /foo if Director.DefaultResponse is set to "cache" or to the origin for /foo if 
+  the nearest cache for namespace /foo if Director.DefaultResponse is set to "cache" or to the origin for /foo if
   it is set to "origin".
 type: string
 default: cache
@@ -101,6 +101,7 @@ description: >-
   should point to the hosted namespace.json.
 type: url
 osdf_default: https://topology.opensciencegrid.org/stashcache/namespaces.json
+default: none
 components: ["director"]
 ---
 name: MaxMindKeyFile
@@ -132,6 +133,7 @@ components: ["client", "origin"]
 name: NamespaceUrl
 description: >-
   A URL indicating where the namespace registry service is hosted.
+type: url
 osdf_default: Default is determined dynamically through metadata at <federation URL>/.well-known/pelican-configuration
 default: none
 components: ["client", "director", "origin"]
@@ -155,7 +157,7 @@ components: ["nsregistry"]
 name: OIDC.ClientIDFile
 description: >-
   A filepath to a file containing an OIDC Client ID. This is used by the namespace registry to establish OIDC information
-  for authenticated registration. 
+  for authenticated registration.
 type: filename
 root_default: /etc/pelican/oidc-client-id
 default: $ConfigBase/oidc-client-id
@@ -200,4 +202,3 @@ description: >-
 type: int
 default: 8444
 components: ["nsregistry", "director", "origin"]
-

@@ -58,6 +58,7 @@ import (
 	"github.com/prometheus/prometheus/promql"
 	"github.com/prometheus/prometheus/scrape"
 	"github.com/prometheus/prometheus/storage"
+
 	//"github.com/prometheus/prometheus/storage/remote"
 	"github.com/prometheus/prometheus/tsdb"
 	"github.com/prometheus/prometheus/tsdb/agent"
@@ -139,7 +140,7 @@ func runtimeInfo() (api_v1.RuntimeInfo, error) {
 func ConfigureEmbeddedPrometheus(engine *gin.Engine) error {
 
 	cfg := flagConfig{}
-	ListenAddress := fmt.Sprintf("0.0.0.0:%v", viper.GetInt("WebPort"))
+	ListenAddress := fmt.Sprintf("0.0.0.0:%v", pelican_config.WebPort.GetInt())
 	cfg.webTimeout = model.Duration(5 * time.Minute)
 	cfg.serverStoragePath = viper.GetString("MonitoringData")
 	cfg.tsdb.MinBlockDuration = model.Duration(2 * time.Hour)

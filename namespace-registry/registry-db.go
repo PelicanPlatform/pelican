@@ -25,8 +25,9 @@ import (
 	"path/filepath"
 
 	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pkg/errors"
-	"github.com/spf13/viper"
+
 	// commented sqlite driver requires CGO
 	// _ "github.com/mattn/go-sqlite3" // SQLite driver
 	_ "modernc.org/sqlite"
@@ -165,7 +166,7 @@ func getAllNamespaces() ([]*Namespace, error) {
 }
 
 func InitializeDB() error {
-	dbPath := viper.GetString("NSRegistryLocation")
+	dbPath := config.NSRegistryLocation.GetString()
 	if dbPath == "" {
 		err := errors.New("Could not get path for the namespace registry database.")
 		log.Fatal(err)

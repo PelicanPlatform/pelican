@@ -30,7 +30,6 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 )
 
 // I don't think we actually want pelican to download the namespace every build
@@ -182,7 +181,7 @@ func GetNamespaces() ([]Namespace, error) {
 // downloadNamespace downloads the namespace information with timeouts
 func downloadNamespace() ([]byte, error) {
 	// Get the namespace url from the environment
-	namespaceUrl := viper.GetString("TopologyNamespaceURL")
+	namespaceUrl := config.TopologyNamespaceURL.GetString()
 	if len(namespaceUrl) == 0 {
 		return nil, errors.New("NamespaceURL is not set; unable to locate valid caches")
 	}
