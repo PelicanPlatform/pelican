@@ -27,6 +27,7 @@ package xrootd
 import (
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -89,7 +90,7 @@ func EmitScitokensConfiguration(cfg *ScitokensCfg) error {
 	configPath := filepath.Join(xrootdRun, "scitokens-generated.cfg.tmp")
 	file, err := os.OpenFile(configPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0640)
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "Failed to create a temporary scitokens file %s", configPath)
 	}
 	if err = os.Chown(configPath, -1, gid); err != nil {
 		return errors.Wrapf(err, "Unable to change ownership of generated scitokens"+
@@ -99,7 +100,7 @@ func EmitScitokensConfiguration(cfg *ScitokensCfg) error {
 
 	err = templ.Execute(file, cfg)
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "Unable to create scitokens.cfg template")
 	}
 
 	// Note that we write to the file then rename it into place.  This is because the
@@ -107,7 +108,7 @@ func EmitScitokensConfiguration(cfg *ScitokensCfg) error {
 	// we may want to update it without restarting the server.
 	finalConfigPath := filepath.Join(xrootdRun, "scitokens-generated.cfg")
 	if err = os.Rename(configPath, finalConfigPath); err != nil {
-		return err
+		return errors.Wrapf(err, "Failed to rename scitokens.cfg to final location")
 	}
 	return nil
 }
@@ -177,11 +178,52 @@ func LoadConfig(fileName string) (cfg ScitokensCfg, err error) {
 }
 
 // We have a special issuer just for self-monitoring the origin.
-func GenerateMonitoringIssuer() (ScitokensCfg, error) {
-	return ScitokensCfg{}, errors.New("GenerateMonitoringIssuer is not implemented")
+func GenerateMonitoringIssuer() (issuer Issuer, err error) {
+	if val := viper.GetBool("Origin.SelfTest"); !val {
+		return
+	}
+	issuer.Name = "Built-in Monitoring"
+	issuer.Issuer = "https://" + viper.GetString("Hostname") + ":" + fmt.Sprint(viper.GetInt("WebPort"))
+	issuer.BasePaths = []string{"/pelican/monitoring"}
+	issuer.DefaultUser = "xrootd"
+
+	return
 }
 
 // Writes out the origin's scitokens.cfg configuration
 func WriteOriginScitokensConfig() error {
-	return errors.New("WriteOriginScitokensConfig is not implemented")
+
+	gid, err := config.GetDaemonGID()
+	if err != nil {
+		return err
+	}
+
+	// Create the scitokens.cfg file if it's not already present
+	scitokensCfg := viper.GetString("ScitokensConfig")
+	err = config.MkdirAll(filepath.Dir(scitokensCfg), 0755, -1, gid)
+	if err != nil {
+		return errors.Wrapf(err, "Unable to create directory %v",
+			filepath.Dir(scitokensCfg))
+	}
+	if file, err := os.OpenFile(scitokensCfg, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0640); err == nil {
+		file.Close()
+	} else if !errors.Is(err, os.ErrExist) {
+		return err
+	}
+	if err = os.Chown(scitokensCfg, -1, gid); err != nil {
+		return errors.Wrapf(err, "Unable to change ownership of scitokens config %v"+
+			" to desired daemon group %v", scitokensCfg, gid)
+	}
+
+	cfg, err := LoadConfig(scitokensCfg)
+	if err != nil {
+		return errors.Wrapf(err, "Failed to load scitokens configuration at %s", scitokensCfg)
+	}
+
+	if issuer, err := GenerateMonitoringIssuer(); err == nil && len(issuer.Name) > 0 {
+		cfg.Issuers = append(cfg.Issuers, issuer)
+		cfg.Global.Audience = append(cfg.Global.Audience, issuer.Issuer)
+	}
+
+	return EmitScitokensConfiguration(&cfg)
 }

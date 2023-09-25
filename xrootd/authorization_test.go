@@ -1,3 +1,5 @@
+//go:build !windows
+
 /***************************************************************
  *
  * Copyright (C) 2023, Pelican Project, Morgridge Institute for Research
@@ -20,6 +22,7 @@ package xrootd
 
 import (
 	_ "embed"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -39,6 +42,12 @@ var (
 
 	//go:embed resources/test-scitokens-2issuers.cfg
 	dualOutput string
+
+	//go:embed resources/test-scitokens-tomerge.cfg
+	toMergeOutput string
+
+	//go:embed resources/test-scitokens-monitoring.cfg
+	monitoringOutput string
 )
 
 func TestEmitCfg(t *testing.T) {
@@ -100,4 +109,48 @@ func TestLoadConfig(t *testing.T) {
 	t.Run("EmptyConfig", configTester(emptyOutput))
 	t.Run("SimpleIssuer", configTester(simpleOutput))
 	t.Run("DualIssuers", configTester(dualOutput))
+}
+
+func TestGenerateConfig(t *testing.T) {
+	viper.Set("Origin.SelfTest", false)
+	issuer, err := GenerateMonitoringIssuer()
+	require.NoError(t, err)
+	assert.Equal(t, issuer.Name, "")
+
+	viper.Set("Origin.SelfTest", true)
+	issuer, err = GenerateMonitoringIssuer()
+	require.NoError(t, err)
+	assert.Equal(t, issuer.Name, "Built-in Monitoring")
+	assert.Equal(t, issuer.Issuer, "https://"+viper.GetString("Hostname")+":"+fmt.Sprint(viper.GetInt("WebPort")))
+	require.Equal(t, len(issuer.BasePaths), 1)
+	assert.Equal(t, issuer.BasePaths[0], "/pelican/monitoring")
+	assert.Equal(t, issuer.DefaultUser, "xrootd")
+}
+
+func TestWriteOriginScitokensConfig(t *testing.T) {
+	dirname := t.TempDir()
+	os.Setenv("PELICAN_XROOTDRUN", dirname)
+	defer os.Unsetenv("PELICAN_XROOTDRUN")
+	config_dirname := t.TempDir()
+	viper.Reset()
+	viper.Set("Origin.SelfTest", true)
+	viper.Set("ConfigDir", config_dirname)
+	viper.Set("XrootdRun", dirname)
+	viper.Set("Hostname", "origin.example.com")
+	err := config.InitServer()
+	require.Nil(t, err)
+
+	scitokensCfg := viper.GetString("ScitokensConfig")
+	err = config.MkdirAll(filepath.Dir(scitokensCfg), 0755, -1, -1)
+	require.NoError(t, err)
+	err = os.WriteFile(scitokensCfg, []byte(toMergeOutput), 0640)
+	require.NoError(t, err)
+
+	err = WriteOriginScitokensConfig()
+	require.NoError(t, err)
+
+	genCfg, err := os.ReadFile(filepath.Join(dirname, "scitokens-generated.cfg"))
+	require.NoError(t, err)
+
+	assert.Equal(t, string(monitoringOutput), string(genCfg))
 }
