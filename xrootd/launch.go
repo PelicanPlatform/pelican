@@ -150,13 +150,17 @@ func LaunchXrootd(privileged bool, configPath string) (err error) {
 		return err
 	}
 
-	cmsdCtx, cmsdPid, err := launcher.Launch(ctx, "cmsd", configPath)
-	if err != nil {
-		return errors.Wrap(err, "Failed to launch cmsd daemon")
-	}
-	log.Info("Successfully launched cmsd")
-	if err := metrics.SetComponentHealthStatus("cmsd", "ok", ""); err != nil {
-		return err
+	cmsdCtx := context.Background()
+	cmsdPid := -1
+	if viper.GetBool("Origin.UseCmsd") {
+		cmsdCtx, cmsdPid, err = launcher.Launch(ctx, "cmsd", configPath)
+		if err != nil {
+			return errors.Wrap(err, "Failed to launch cmsd daemon")
+		}
+		log.Info("Successfully launched cmsd")
+		if err := metrics.SetComponentHealthStatus("cmsd", "ok", ""); err != nil {
+			return err
+		}
 	}
 
 	sigs := make(chan os.Signal, 1)
@@ -172,8 +176,10 @@ func LaunchXrootd(privileged bool, configPath string) (err error) {
 				if err = syscall.Kill(xrootdPid, sys_sig); err != nil {
 					return errors.Wrap(err, "Failed to forward signal to xrootd process")
 				}
-				if err = syscall.Kill(cmsdPid, sys_sig); err != nil {
-					return errors.Wrap(err, "Failed to forward signal to cmsd process")
+				if cmsdPid != -1 {
+					if err = syscall.Kill(cmsdPid, sys_sig); err != nil {
+						return errors.Wrap(err, "Failed to forward signal to cmsd process")
+					}
 				}
 			} else {
 				panic(errors.New("Unable to convert signal to syscall.Signal"))
@@ -212,7 +218,7 @@ func LaunchXrootd(privileged bool, configPath string) (err error) {
 					return errors.Wrap(err, "Failed to SIGKILL the xrootd process")
 				}
 			}
-			if !cmsdExpiry.IsZero() && time.Now().After(cmsdExpiry) {
+			if cmsdPid != -1 && !cmsdExpiry.IsZero() && time.Now().After(cmsdExpiry) {
 				if err = syscall.Kill(cmsdPid, syscall.SIGKILL); err != nil {
 					return errors.Wrap(err, "Failed to SIGKILL the cmsd process")
 				}

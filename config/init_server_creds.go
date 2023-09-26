@@ -35,6 +35,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 )
 
@@ -116,6 +117,83 @@ func LoadPublicKey(existingJWKS string, issuerKeyFile string) (*jwk.Set, error) 
 	return &jwks, nil
 }
 
+func GenerateCACert() error {
+	gid, err := GetDaemonGID()
+	if err != nil {
+		return err
+	}
+	groupname, err := GetDaemonGroup()
+	if err != nil {
+		return err
+	}
+
+	tlsCert := viper.GetString("TLSCACertFile")
+	if file, err := os.Open(tlsCert); err == nil {
+		file.Close()
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	certDir := filepath.Dir(tlsCert)
+	if err := MkdirAll(certDir, 0755, -1, gid); err != nil {
+		return err
+	}
+
+	tlsKey := viper.GetString("TLSCAKey")
+	if err := GeneratePrivateKey(tlsKey, elliptic.P256()); err != nil {
+		return err
+	}
+	privateKey, err := LoadPrivateKey(tlsKey)
+	if err != nil {
+		return err
+	}
+
+	log.Debugln("Will generate a new CA certificate for the server")
+	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
+	serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
+	if err != nil {
+		return err
+	}
+	hostname, err := os.Hostname()
+	if err != nil {
+		return err
+	}
+	notBefore := time.Now()
+	template := x509.Certificate{
+		SerialNumber: serialNumber,
+		Subject: pkix.Name{
+			Organization: []string{"Pelican CA"},
+			CommonName:   hostname,
+		},
+		NotBefore:             notBefore,
+		NotAfter:              notBefore.Add(10 * 365 * 24 * time.Hour),
+		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+	template.DNSNames = []string{hostname}
+	derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, &(privateKey.PublicKey),
+		privateKey)
+	if err != nil {
+		return err
+	}
+	file, err := os.OpenFile(tlsCert, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0640)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	if err = os.Chown(tlsCert, -1, gid); err != nil {
+		return errors.Wrapf(err, "Failed to chown generated certificate %v to daemon group %v",
+			tlsCert, groupname)
+	}
+
+	if err = pem.Encode(file, &pem.Block{Type: "CERTIFICATE", Bytes: derBytes}); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func GenerateCert() error {
 	gid, err := GetDaemonGID()
 	if err != nil {
@@ -133,6 +211,12 @@ func GenerateCert() error {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
+
+	// In this case, no host certificate exists - we should generate our own.
+	if err := GenerateCACert(); err != nil {
+		return err
+	}
+
 	certDir := filepath.Dir(tlsCert)
 	if err := MkdirAll(certDir, 0755, -1, gid); err != nil {
 		return err
@@ -144,6 +228,7 @@ func GenerateCert() error {
 		return err
 	}
 
+	log.Debugln("Will generate a new host certificate for the server")
 	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
 	serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
 	if err != nil {

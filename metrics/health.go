@@ -77,6 +77,10 @@ func SetComponentHealthStatus(name, state, msg string) error {
 	return nil
 }
 
+func DeleteComponentHealthStatus(name string) {
+	healthStatus.Delete(name)
+}
+
 func GetHealthStatus() HealthStatus {
 	status := HealthStatus{}
 	status.OverallStatus = "unknown"

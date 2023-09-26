@@ -248,9 +248,11 @@ func InitServer() error {
 			}
 			configDir = configTmp
 		}
+		viper.SetDefault("ConfigDir", configDir)
 	}
 	viper.SetDefault("TLSCertificate", filepath.Join(configDir, "certificates", "tls.crt"))
 	viper.SetDefault("TLSKey", filepath.Join(configDir, "certificates", "tls.key"))
+	viper.SetDefault("TLSCAKey", filepath.Join(configDir, "certificates", "tlsca.key"))
 	viper.SetDefault("RobotsTxtFile", filepath.Join(configDir, "robots.txt"))
 	viper.SetDefault("ScitokensConfig", filepath.Join(configDir, "xrootd", "scitokens.cfg"))
 	viper.SetDefault("Authfile", filepath.Join(configDir, "xrootd", "authfile"))
@@ -287,9 +289,13 @@ func InitServer() error {
 		}
 		viper.SetDefault("XrootdMultiuser", false)
 	}
-	viper.SetDefault("TLSCertFile", "/etc/pki/tls/cert.pem")
+	// Any platform-specific paths should go here
+	err := InitServerOSDefaults()
+	if err != nil {
+		return errors.Wrapf(err, "Failure when setting up OS-specific configuration")
+	}
 
-	err := os.MkdirAll(viper.GetString("MonitoringData"), 0750)
+	err = os.MkdirAll(viper.GetString("MonitoringData"), 0750)
 	if err != nil {
 		return errors.Wrapf(err, "Failure when creating a directory for the monitoring data")
 	}

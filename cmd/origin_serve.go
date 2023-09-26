@@ -55,7 +55,10 @@ var (
 
 type (
 	OriginConfig struct {
-		Multiuser bool
+		Multiuser    bool
+		UseCmsd      bool
+		UseMacaroons bool
+		UseVoms      bool
 	}
 
 	XrootdConfig struct {
@@ -65,7 +68,7 @@ type (
 		TLSCertificate         string
 		TLSKey                 string
 		TLSCertDir             string
-		TLSCertFile            string
+		TLSCACertFile          string
 		MacaroonsKeyFile       string
 		RobotsTxtFile          string
 		Sitename               string
@@ -324,14 +327,21 @@ func checkConfigFileReadable(fileName string, errMsg string) error {
 }
 
 func checkDefaults() error {
-	requiredConfigs := []string{"ManagerHost", "SummaryMonitoringHost", "DetailedMonitoringHost",
-		"TLSCertificate", "TLSKey", "XrootdRun", "RobotsTxtFile"}
+	requiredConfigs := []string{"TLSCertificate", "TLSKey", "XrootdRun", "RobotsTxtFile"}
 	for _, configName := range requiredConfigs {
 		mgr := viper.GetString(configName)
 		if mgr == "" {
 			return errors.New(fmt.Sprintf("Required value of '%v' is not set in config",
 				configName))
 		}
+	}
+
+	if managerHost := viper.GetString("ManagerHost"); managerHost == "" {
+		log.Debug("No manager host specified for the cmsd process in origin; assuming no xrootd protocol support")
+		viper.SetDefault("Origin.UseCmsd", false)
+		metrics.DeleteComponentHealthStatus("cmsd")
+	} else {
+		viper.SetDefault("Origin.UseCmsd", true)
 	}
 
 	// As necessary, generate a private key and corresponding cert

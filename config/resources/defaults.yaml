@@ -29,6 +29,8 @@ Director:
   DefaultResponse: cache
 Origin:
   Multiuser: false
+  UseMacaroons: true
+  UseVoms: true
 Transport:
   Dialer:
     Timeout: 10s
