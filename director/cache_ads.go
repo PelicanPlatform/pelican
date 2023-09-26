@@ -163,8 +163,7 @@ func GetAdsForPath(reqPath string) (originNamespace NamespaceAd, originAds []Ser
 		}
 		serverAd := item.Key()
 		if serverAd.Type == OriginType {
-			ns := matchesPrefix(reqPath, item.Value())
-			if ns != nil {
+			if ns := matchesPrefix(reqPath, item.Value()); ns != nil {
 				if best == nil || len(ns.Path) > len(best.Path) {
 					best = ns
 					// If anything was previously set by a namespace that constituted a shorter
