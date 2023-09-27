@@ -28,7 +28,9 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sync/atomic"
 	"time"
 
@@ -194,6 +196,10 @@ func GeneratePrivateKey(keyLocation string, curve elliptic.Curve) error {
 	if err != nil {
 		return err
 	}
+	user, err := GetDaemonUser()
+	if err != nil {
+		return err
+	}
 	groupname, err := GetDaemonGroup()
 	if err != nil {
 		return err
@@ -219,9 +225,20 @@ func GeneratePrivateKey(keyLocation string, curve elliptic.Curve) error {
 	if err != nil {
 		return err
 	}
-	if err = os.Chown(keyLocation, uid, gid); err != nil {
-		return errors.Wrapf(err, "Failed to chown generated key %v to daemon group %v",
-			keyLocation, groupname)
+	// Windows does not have "chown", has to work differently
+	currentOS := runtime.GOOS
+	if currentOS == "windows" {
+		cmd := exec.Command("icacls", keyLocation, "/grant", user+":F")
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return errors.Wrapf(err, "Failed to chown generated key %v to daemon group %v: %s",
+				keyLocation, groupname, string(output))
+		}
+	} else { // Else we are running on linux/mac
+		if err = os.Chown(keyLocation, uid, gid); err != nil {
+			return errors.Wrapf(err, "Failed to chown generated key %v to daemon group %v",
+				keyLocation, groupname)
+		}
 	}
 
 	bytes, err := x509.MarshalPKCS8PrivateKey(priv)

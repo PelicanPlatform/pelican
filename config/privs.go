@@ -20,7 +20,9 @@ package config
 
 import (
 	"os/user"
+	"runtime"
 	"strconv"
+	"strings"
 
 	"github.com/pkg/errors"
 )
@@ -30,11 +32,13 @@ var (
 
 	uidErr      error
 	gidErr      error
+	sidErr      error
 	usernameErr error
 	groupErr    error
 
 	uid      int
 	gid      int
+	sid      string
 	username string
 	group    string
 )
@@ -45,9 +49,11 @@ func init() {
 
 	uid = -1
 	gid = -1
+	sid = ""
 	if err != nil {
 		uidErr = err
 		gidErr = err
+		sidErr = err
 		usernameErr = err
 		groupErr = err
 		return
@@ -66,29 +72,46 @@ func init() {
 			return
 		}
 	}
-	username = desiredUsername
-	uid, err = strconv.Atoi(userObj.Uid)
-	if err != nil {
-		uid = -1
-		uidErr = err
-	}
-	gid, err = strconv.Atoi(userObj.Gid)
-	if err != nil {
-		gid = -1
-		gidErr = err
-	}
-	groupObj, err := user.LookupGroupId(userObj.Gid)
-	if err == nil {
-		group = groupObj.Name
-	} else {
-		// Fall back to using the GID as the group name.  This is done because,
-		// currently, the group name is just for logging strings.  The group name
-		// lookup often fails because we've disabled CGO and only CGO will use the
-		// full glibc stack to resolve information via SSSD.
-		//
-		// This decision should be revisited if we ever enable CGO.
+	//Windows has userId's different from mac and linux, need to parse to get it
+	currentOS := runtime.GOOS
+	if currentOS == "windows" {
+		//Get the user ID from the SID
+		sidParts := strings.Split(userObj.Uid, "-")
+		uidString := sidParts[len(sidParts)-1]
+		uid, err = strconv.Atoi(uidString)
+		if err != nil {
+			uid = -1
+			uidErr = err
+		}
+		sid = userObj.Gid
+		//group is just the whole SID
 		group = userObj.Gid
+	} else { //Mac and linux have similar enough uid's so can group them here
+		uid, err = strconv.Atoi(userObj.Uid)
+		if err != nil {
+			uid = -1
+			uidErr = err
+		}
+		gid, err = strconv.Atoi(userObj.Gid)
+		if err != nil {
+			gid = -1
+			gidErr = err
+		}
+		groupObj, err := user.LookupGroupId(userObj.Gid)
+		if err == nil {
+			group = groupObj.Name
+		} else {
+			// Fall back to using the GID as the group name.  This is done because,
+			// currently, the group name is just for logging strings.  The group name
+			// lookup often fails because we've disabled CGO and only CGO will use the
+			// full glibc stack to resolve information via SSSD.
+			//
+			// This decision should be revisited if we ever enable CGO.
+			group = userObj.Gid
+		}
 	}
+	// username same for both windows, linux, and mac
+	username = desiredUsername
 }
 
 func IsRootExecution() bool {
@@ -105,6 +128,10 @@ func GetDaemonUser() (string, error) {
 
 func GetDaemonGID() (int, error) {
 	return gid, gidErr
+}
+
+func GetDaemonSID() (string, error) {
+	return sid, sidErr
 }
 
 func GetDaemonGroup() (string, error) {
