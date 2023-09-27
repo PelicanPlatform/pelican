@@ -17,6 +17,7 @@ package web_ui
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"errors"
 	"fmt"
 	"math"
@@ -35,6 +36,8 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/grafana/regexp"
+	"github.com/lestrrat-go/jwx/v2/jwa"
+	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/mwitkow/go-conntrack"
 	"github.com/oklog/run"
 	pelican_config "github.com/pelicanplatform/pelican/config"
@@ -58,6 +61,7 @@ import (
 	"github.com/prometheus/prometheus/promql"
 	"github.com/prometheus/prometheus/scrape"
 	"github.com/prometheus/prometheus/storage"
+
 	//"github.com/prometheus/prometheus/storage/remote"
 	"github.com/prometheus/prometheus/tsdb"
 	"github.com/prometheus/prometheus/tsdb/agent"
@@ -134,6 +138,51 @@ func (h *ReadyHandler) testReady(f http.HandlerFunc) http.HandlerFunc {
 
 func runtimeInfo() (api_v1.RuntimeInfo, error) {
 	return api_v1.RuntimeInfo{}, nil
+}
+
+func checkPromToken(av1 *route.Router) gin.HandlerFunc {
+	/* A function which wraps around the av1 router to force a jwk token check using
+	 * the origin's private key. It will check the request's URL and Header for a token
+	 * and if found it will then attempt to validate the token. If valid, it will continue
+	 * the routing as normal, otherwise it will return an error"
+	 */
+	return func(c *gin.Context) {
+		req := c.Request
+		var token string
+		if authzQuery := req.URL.Query()["authz"]; len(authzQuery) > 0 {
+			token = authzQuery[0]
+		} else if authzHeader := req.Header["Authorization"]; len(authzHeader) > 0 {
+			token = strings.TrimPrefix(authzHeader[0], "Bearer ")
+		} else {
+			c.JSON(403, gin.H{"error": "Permission Denied: Missing token"})
+		}
+
+		privKey, err := pelican_config.GetOriginJWK()
+		if err != nil {
+			c.JSON(400, gin.H{"error": "Failed to retrieve private key"})
+			return
+		}
+
+		var raw ecdsa.PrivateKey
+		if err = (*privKey).Raw(&raw); err != nil {
+			c.JSON(400, gin.H{"error": "Failed to extract signing key"})
+			return
+		}
+
+		if err != nil {
+			c.JSON(400, gin.H{"error": "Private Key Retrieval Failed"})
+			return
+		}
+
+		_, err = jwt.Parse([]byte(token), jwt.WithKey(jwa.ES512, raw.PublicKey), jwt.WithValidate(true))
+
+		if err != nil {
+			c.JSON(403, gin.H{"error": "Permission Denied: Invalid token"})
+			return
+		}
+
+		av1.ServeHTTP(c.Writer, c.Request)
+	}
 }
 
 func ConfigureEmbeddedPrometheus(engine *gin.Engine) error {
@@ -339,7 +388,7 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine) error {
 	//WithInstrumentation(setPathWithPrefix("/api/v1"))
 	apiV1.Register(av1)
 
-	engine.GET("/api/v1.0/prometheus/*any", gin.WrapH(av1))
+	engine.GET("/api/v1.0/prometheus/*any", checkPromToken(av1))
 
 	reloaders := []reloader{
 		{
