@@ -183,7 +183,7 @@ func TestDirectorRegistration(t *testing.T) {
 	rInv.POST("/", RegisterOrigin)
 	cInv.Request, _ = http.NewRequest(http.MethodPost, "/", bytes.NewBuffer([]byte(`{"Namespaces": [{"Path": "/foo/bar", "URL": "https://get-your-tokens.org"}]}`)))
 
-	cInv.Request.Header.Set("Authorization", string(signedInv))
+	cInv.Request.Header.Set("Authorization", "Bearer "+string(signedInv))
 	cInv.Request.Header.Set("Content-Type", "application/json")
 
 	rInv.ServeHTTP(wInv, cInv.Request)
