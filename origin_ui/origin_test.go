@@ -20,7 +20,6 @@ package origin_ui
 
 import (
 	"fmt"
-	"io/ioutil"
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
@@ -29,8 +28,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/gin-gonic/gin"
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 )
@@ -44,7 +43,7 @@ func TestMain(m *testing.M) {
 	gin.SetMode(gin.TestMode)
 
 	//set a temporary password file:
-	tempPasswdFile, err := ioutil.TempFile("", "origin-ui-passwd")
+	tempPasswdFile, err := os.CreateTemp("", "origin-ui-passwd")
 	if err != nil {
 		fmt.Println("Failed to setup origin-ui-passwd file")
 		os.Exit(1)
@@ -54,7 +53,7 @@ func TestMain(m *testing.M) {
 	viper.Set("OriginUI.PasswordFile", tempPasswdFile.Name())
 
 	//Make a testing issuer.jwk file to get a cookie
-	tempJWKDir, err := ioutil.TempDir("", "tempDir")
+	tempJWKDir, err := os.MkdirTemp("", "tempDir")
 	if err != nil {
 		fmt.Println("Error making temp jwk dir")
 		os.Exit(1)
@@ -74,7 +73,8 @@ func TestMain(m *testing.M) {
 
 func TestCodeBasedLogin(t *testing.T) {
 	//Configure UI
-	ConfigureOriginUI(router)
+	err := ConfigureOriginUI(router)
+	assert.NoError(t, err)
 	//Invoke the code login API with the correct code, ensure we get a valid code back
 	t.Run("With valid code", func(t *testing.T) {
 		newCode := fmt.Sprintf("%06v", rand.Intn(1000000))
@@ -117,14 +117,15 @@ func TestCodeBasedLogin(t *testing.T) {
 }
 
 func TestPasswordResetAPI(t *testing.T) {
-//////////////////////////////SETUP////////////////////////////////
+	//////////////////////////////SETUP////////////////////////////////
 	//Add an admin user to file to configure
 	content := "admin:password\n"
 	_, err := tempPasswdFile.WriteString(content)
 	assert.NoError(t, err, "Error writing to temp password file")
 
 	//Configure UI
-	ConfigureOriginUI(router)
+	err = ConfigureOriginUI(router)
+	assert.NoError(t, err)
 
 	//Create a user for testing
 	err = writePasswordEntry("user", "password")
@@ -149,8 +150,8 @@ func TestPasswordResetAPI(t *testing.T) {
 	//Get the cookie to pass to password reset
 	loginCookie := recorder.Result().Cookies()
 	cookieValue := loginCookie[0].Value
-	
-///////////////////////////////////////////////////////////////////
+
+	///////////////////////////////////////////////////////////////////
 	//Test invoking reset with valid authorization
 	t.Run("With valid authorization", func(t *testing.T) {
 		resetPayload := `{"password": "newpassword"}`
@@ -159,8 +160,8 @@ func TestPasswordResetAPI(t *testing.T) {
 
 		reqReset.Header.Set("Content-Type", "application/json")
 
-		reqReset.AddCookie(&http.Cookie {
-			Name: "login",
+		reqReset.AddCookie(&http.Cookie{
+			Name:  "login",
 			Value: cookieValue,
 		})
 
@@ -171,7 +172,6 @@ func TestPasswordResetAPI(t *testing.T) {
 		assert.Equal(t, 200, recorderReset.Code)
 		//Check that success message returned
 		assert.JSONEq(t, `{"msg":"Success"}`, recorderReset.Body.String())
-
 
 		//After password reset, test authorization with newly generated password
 		loginWithNewPasswordPayload := `{"user": "user", "password": "newpassword"}`
@@ -211,21 +211,22 @@ func TestPasswordResetAPI(t *testing.T) {
 }
 
 func TestPasswordBasedLoginAPI(t *testing.T) {
-///////////////////////////SETUP///////////////////////////////////
+	///////////////////////////SETUP///////////////////////////////////
 	//Add an admin user to file to configure
 	content := "admin:password\n"
 	_, err := tempPasswdFile.WriteString(content)
 	assert.NoError(t, err, "Error writing to temp password file")
 
 	//Configure UI
-	ConfigureOriginUI(router)
+	err = ConfigureOriginUI(router)
+	assert.NoError(t, err)
 
 	//Create a user for testing
 	err = writePasswordEntry("user", "password")
 	assert.NoError(t, err, "error writing a user")
 	password := "password"
 	user := "user"
-///////////////////////////////////////////////////////////////////
+	///////////////////////////////////////////////////////////////////
 
 	//Invoke with valid password, should get a cookie back
 	t.Run("Successful Login", func(t *testing.T) {
@@ -286,14 +287,14 @@ func TestPasswordBasedLoginAPI(t *testing.T) {
 }
 
 func TestWhoamiAPI(t *testing.T) {
-///////////////////////////SETUP///////////////////////////////////
+	///////////////////////////SETUP///////////////////////////////////
 	//Add an admin user to file to configure
 	content := "admin:password\n"
 	_, err := tempPasswdFile.WriteString(content)
 	assert.NoError(t, err, "Error writing to temp password file")
 
 	//Configure UI
-	ConfigureOriginUI(router)
+	err = ConfigureOriginUI(router)
 
 	//Create a user for testing
 	err = writePasswordEntry("user", "password")
@@ -317,16 +318,16 @@ func TestWhoamiAPI(t *testing.T) {
 	//Get the cookie to test 'whoami'
 	loginCookie := recorder.Result().Cookies()
 	cookieValue := loginCookie[0].Value
-	
-///////////////////////////////////////////////////////////////////
-	
+
+	///////////////////////////////////////////////////////////////////
+
 	//Invoked with valid cookie, should return the username in the cookie
 	t.Run("With valid cookie", func(t *testing.T) {
 		req, err = http.NewRequest("GET", "/api/v1.0/origin-ui/whoami", nil)
 		assert.NoError(t, err)
 
-		req.AddCookie(&http.Cookie {
-			Name: "login",
+		req.AddCookie(&http.Cookie{
+			Name:  "login",
 			Value: cookieValue,
 		})
 
@@ -350,4 +351,3 @@ func TestWhoamiAPI(t *testing.T) {
 		assert.JSONEq(t, `{"authenticated":false}`, recorder.Body.String())
 	})
 }
-
