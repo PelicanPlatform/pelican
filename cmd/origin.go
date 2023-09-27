@@ -55,6 +55,8 @@ var (
 		Use:   "create",
 		Short: "Create a Pelican origin token",
 		Long: `Create a JSON web token (JWT) using the origin's signing keys:
+Usage: pelican origin token create [FLAGS] claims
+E.g. pelican origin token create --profile scitokens2 aud=my-audience scope="read:/storage" scope="write:/storage"
 
 Pelican origins use JWTs as bearer tokens for authorizing specific requests,
 such as reading from or writing to the origin's underlying storage, advertising
