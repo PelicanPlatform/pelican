@@ -295,6 +295,7 @@ func TestWhoamiAPI(t *testing.T) {
 
 	//Configure UI
 	err = ConfigureOriginUI(router)
+	assert.NoError(t, err)
 
 	//Create a user for testing
 	err = writePasswordEntry("user", "password")
