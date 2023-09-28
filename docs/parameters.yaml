@@ -196,7 +196,7 @@ components: ["nsregistry"]
 ---
 name: WebPort
 description: >-
-  The port number a service will be bound to.
+  The port number the Pelican web interface will be bound to.
 type: int
 default: 8444
 components: ["nsregistry", "director", "origin"]
