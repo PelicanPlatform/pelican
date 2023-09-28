@@ -43,12 +43,12 @@ func TestMain(m *testing.M) {
 	gin.SetMode(gin.TestMode)
 
 	//set a temporary password file:
-	tempPasswdFile, err := os.CreateTemp("", "origin-ui-passwd")
+	tempFile, err := os.CreateTemp("", "origin-ui-passwd")
 	if err != nil {
 		fmt.Println("Failed to setup origin-ui-passwd file")
 		os.Exit(1)
 	}
-	defer tempPasswdFile.Close()
+	tempPasswdFile = tempFile
 	//Override viper default for testing
 	viper.Set("OriginUI.PasswordFile", tempPasswdFile.Name())
 
@@ -58,7 +58,6 @@ func TestMain(m *testing.M) {
 		fmt.Println("Error making temp jwk dir")
 		os.Exit(1)
 	}
-	defer os.RemoveAll(tempJWKDir)
 
 	//Override viper default for testing
 	viper.Set("IssuerKey", filepath.Join(tempJWKDir, "issuer.jwk"))
@@ -69,12 +68,23 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	router = gin.Default()
+
+	//Configure UI
+	err = ConfigureOriginUI(router)
+	if err != nil {
+		fmt.Println("Error configuring origin UI")
+		os.Exit(1)
+	}
+	//Run the tests
+	exitCode := m.Run()
+
+	//Clean up created files by removing them and exit
+	os.Remove(tempPasswdFile.Name())
+	os.RemoveAll(tempJWKDir)
+	os.Exit(exitCode)
 }
 
 func TestCodeBasedLogin(t *testing.T) {
-	//Configure UI
-	err := ConfigureOriginUI(router)
-	assert.NoError(t, err)
 	//Invoke the code login API with the correct code, ensure we get a valid code back
 	t.Run("With valid code", func(t *testing.T) {
 		newCode := fmt.Sprintf("%06v", rand.Intn(1000000))
@@ -124,7 +134,7 @@ func TestPasswordResetAPI(t *testing.T) {
 	assert.NoError(t, err, "Error writing to temp password file")
 
 	//Configure UI
-	err = ConfigureOriginUI(router)
+	err = configureAuthDB()
 	assert.NoError(t, err)
 
 	//Create a user for testing
@@ -218,7 +228,7 @@ func TestPasswordBasedLoginAPI(t *testing.T) {
 	assert.NoError(t, err, "Error writing to temp password file")
 
 	//Configure UI
-	err = ConfigureOriginUI(router)
+	err = configureAuthDB()
 	assert.NoError(t, err)
 
 	//Create a user for testing
@@ -270,6 +280,36 @@ func TestPasswordBasedLoginAPI(t *testing.T) {
 		assert.JSONEq(t, `{"error":"Login failed"}`, recorder.Body.String())
 	})
 
+	//Invoke with incorrect password should fail
+	t.Run("With incorrect password", func(t *testing.T) {
+		payload := fmt.Sprintf(`{"user": "%s", "password": "%s"}`, user, "incorrectpassword")
+		//Create a request
+		req, err := http.NewRequest("POST", "/api/v1.0/origin-ui/login", strings.NewReader(payload))
+		assert.NoError(t, err)
+		req.Header.Set("Content-Type", "application/json")
+
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+		//Check http reponse code 401
+		assert.Equal(t, 401, recorder.Code)
+		assert.JSONEq(t, `{"error":"Login failed"}`, recorder.Body.String())
+	})
+
+	//Invoke with incorrect user should fail
+	t.Run("With incorrect user", func(t *testing.T) {
+		payload := fmt.Sprintf(`{"user": "%s", "password": "%s"}`, "incorrectuser", password)
+		//Create a request
+		req, err := http.NewRequest("POST", "/api/v1.0/origin-ui/login", strings.NewReader(payload))
+		assert.NoError(t, err)
+		req.Header.Set("Content-Type", "application/json")
+
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+		//Check http reponse code 401
+		assert.Equal(t, 401, recorder.Code)
+		assert.JSONEq(t, `{"error":"Login failed"}`, recorder.Body.String())
+	})
+
 	//Invoke with invalid user, should fail
 	t.Run("Without user", func(t *testing.T) {
 		payload := fmt.Sprintf(`{"password": "%s"}`, password)
@@ -294,7 +334,7 @@ func TestWhoamiAPI(t *testing.T) {
 	assert.NoError(t, err, "Error writing to temp password file")
 
 	//Configure UI
-	err = ConfigureOriginUI(router)
+	err = configureAuthDB()
 	assert.NoError(t, err)
 
 	//Create a user for testing
