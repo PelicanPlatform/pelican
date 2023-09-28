@@ -57,7 +57,6 @@ func GetEncryptedConfigName() (string, error) {
 		}
 		config_root = filepath.Join(dirname, ".config")
 	}
-	fmt.Printf("Final location: %v/%v", config_root, config_location)
 	return filepath.Join(config_root, config_location), nil
 }
 
