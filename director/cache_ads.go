@@ -133,7 +133,7 @@ func matchesPrefix(reqPath string, namespaceAds []NamespaceAd) *NamespaceAd {
 			}
 		}
 
-		// Make the len comparison with tmpBest, becasue serverPath is one char longer now
+		// Make the len comparison with tmpBest, because serverPath is one char longer now
 		if strings.HasPrefix(reqPath, serverPath) && len(serverPath) > len(tmpBest) {
 			if best == nil {
 				best = new(NamespaceAd)
