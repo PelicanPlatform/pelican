@@ -123,7 +123,6 @@ func TestParseClaims(t *testing.T) {
 	assert.EqualError(t, err, "The claim 'barbaz' is invalid. Did you forget an '='?")
 }
 
-
 func TestCreateEncodedToken(t *testing.T) {
 	// Some viper pre-requisites
 	viper.Reset()
