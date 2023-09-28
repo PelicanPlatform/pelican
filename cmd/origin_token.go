@@ -2,22 +2,20 @@ package main
 
 import (
 	"fmt"
+	"net/url"
+	"regexp"
+	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
-	"net/url"
-	"regexp"
-	"time"
-
-	"strconv"
-	"strings"
-
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+
+	"github.com/pelicanplatform/pelican/config"
 )
 
 // The verifyCreate* funcs only act on the provided claims maps, because they attempt
@@ -30,6 +28,7 @@ func verifyCreateSciTokens2(claimsMap *map[string]string) error {
 		- exp
 		- nbf
 		- iss
+		- jti
 	*/
 	if len(*claimsMap) == 0 {
 		return errors.New("To create a valid SciToken, the 'aud' and 'scope' claims must be passed, but none were found.")
@@ -54,7 +53,8 @@ func verifyCreateSciTokens2(claimsMap *map[string]string) error {
 				re := regexp.MustCompile(verPattern)
 
 				if !re.MatchString(val) {
-					errMsg := "The provided version '" + val + "' is not valid. It must match 'scitokens:<version>', where version is of the form 2.x"
+					errMsg := "The provided version '" + val +
+						"' is not valid. It must match 'scitokens:<version>', where version is of the form 2.x"
 					return errors.New(errMsg)
 				}
 			}
@@ -64,7 +64,7 @@ func verifyCreateSciTokens2(claimsMap *map[string]string) error {
 	return nil
 }
 
-func verifyCreateWLCG1(claimsMap *map[string]string) error {
+func verifyCreateWLCG(claimsMap *map[string]string) error {
 	/*
 		Don't check for the following claims because ALL base tokens have them:
 		- iat
@@ -85,7 +85,8 @@ func verifyCreateWLCG1(claimsMap *map[string]string) error {
 				(*claimsMap)["wlcg.ver"] = "1.0"
 			} else {
 				// We can't set the rest
-				errMsg := "The claim '" + reqClaim + "' is required for the wlcg1 profile, but it could not be found."
+				errMsg := "The claim '" + reqClaim +
+					"' is required for the wlcg profile, but it could not be found."
 				return errors.New(errMsg)
 			}
 		} else {
@@ -105,17 +106,12 @@ func verifyCreateWLCG1(claimsMap *map[string]string) error {
 
 func parseClaims(claims []string) (map[string]string, error) {
 	claimsMap := make(map[string]string)
-	// We assume each claim has exactly one "=" delimiter
 	for _, claim := range claims {
-		parts := strings.Split(claim, "=")
-		if len(parts) != 2 {
-			if len(parts) < 2 {
-				errMsg := "The claim '" + claim + "' is invalid. Did you forget an '='?"
-				return nil, errors.New(errMsg)
-			} else {
-				errMsg := "The claim '" + claim + "' is invalid. Does it contain more than one '='?"
-				return nil, errors.New(errMsg)
-			}
+		// Split by the first "=" delimiter
+		parts := strings.SplitN(claim, "=", 2)
+		if len(parts) < 2 {
+			errMsg := "The claim '" + claim + "' is invalid. Did you forget an '='?"
+			return nil, errors.New(errMsg)
 		}
 		key := parts[0]
 		val := parts[1]
@@ -129,7 +125,7 @@ func parseClaims(claims []string) (map[string]string, error) {
 	return claimsMap, nil
 }
 
-func createEncodedToken(claimsMap map[string]string, profile string, lifetime int) (string, error) {
+func CreateEncodedToken(claimsMap map[string]string, profile string, lifetime int) (string, error) {
 	var err error
 	if profile != "" {
 		if profile == "scitokens2" {
@@ -137,13 +133,14 @@ func createEncodedToken(claimsMap map[string]string, profile string, lifetime in
 			if err != nil {
 				return "", errors.Wrap(err, "Token does not conform to scitokens2 requirements")
 			}
-		} else if profile == "wlcg1" {
-			err = verifyCreateWLCG1(&claimsMap)
+		} else if profile == "wlcg" {
+			err = verifyCreateWLCG(&claimsMap)
 			if err != nil {
-				return "", errors.Wrap(err, "Token does not conform to wlcg1 requirements")
+				return "", errors.Wrap(err, "Token does not conform to wlcg requirements")
 			}
 		} else {
-			errMsg := "The provided profile '" + profile + "' is not recognized. Valid options are 'scitokens2' or 'wlcg1'"
+			errMsg := "The provided profile '" + profile +
+				"' is not recognized. Valid options are 'scitokens2' or 'wlcg'"
 			return "", errors.New(errMsg)
 		}
 	}
@@ -160,6 +157,22 @@ func createEncodedToken(claimsMap map[string]string, profile string, lifetime in
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to parse the configured IssuerUrl")
 	}
+	// issuer might be empty if not configured, so we need to be careful as it's required
+	issuerFound := true
+	if issuerUrl.String() == "" {
+		issuerFound = false
+	}
+
+	// We allow the audience to be passed in the map, but we need to convert it to a list of strings
+	extractAudFromClaims := func(claimsMap *map[string]string) []string {
+		audience, exists := (*claimsMap)["aud"]
+		if !exists {
+			return nil
+		}
+		audienceSlice := strings.Split(audience, " ")
+		delete(*claimsMap, "aud")
+		return audienceSlice
+	}(&claimsMap)
 
 	now := time.Now()
 	builder := jwt.NewBuilder()
@@ -167,12 +180,20 @@ func createEncodedToken(claimsMap map[string]string, profile string, lifetime in
 		IssuedAt(now).
 		Expiration(now.Add(time.Second * lifetimeDuration)).
 		NotBefore(now).
+		Audience(extractAudFromClaims).
 		JwtID(u.String())
 
 	// Add cli-passed claims after setting up the basic token so that we
 	// expose a method to override anything we already set.
 	for key, val := range claimsMap {
 		builder.Claim(key, val)
+		if key == "iss" && val != "" {
+			issuerFound = true
+		}
+	}
+
+	if !issuerFound {
+		return "", errors.New("No issuer was found in the configuration file, and none was provided as a claim")
 	}
 
 	tok, err := builder.Build()
@@ -185,7 +206,8 @@ func createEncodedToken(claimsMap map[string]string, profile string, lifetime in
 	// file path has already been bound to IssuerKey
 	key, err := config.GetOriginJWK()
 	if err != nil {
-		return "", errors.Wrap(err, "Failed to load signing keys. Either generate one at the default location by serving an origin, or provide one via the --private-key flag")
+		return "", errors.Wrap(err, "Failed to load signing keys. Either generate one at the default "+
+			"location by serving an origin, or provide one via the --private-key flag")
 	}
 
 	// Get/assign the kid, needed for verification by the client
@@ -202,21 +224,79 @@ func createEncodedToken(claimsMap map[string]string, profile string, lifetime in
 	return string(signed), nil
 }
 
-func cliTokenCreate( /*cmd*/ cmd *cobra.Command /*args*/, args []string) error {
+// Take an input slice and append its claim name
+func parseInputSlice(rawSlice *[]string, claimPrefix string) []string {
+	if len(*rawSlice) == 0 {
+		return nil
+	}
+	slice := []string{}
+	for _, val := range *rawSlice {
+		slice = append(slice, claimPrefix+"="+val)
+	}
+
+	return slice
+}
+
+func cliTokenCreate(cmd *cobra.Command, args []string) error {
+	// Additional claims can be passed via the --claims flag, or
+	// they can be passed as args. We join those two slices here
+	claimsSlice, err := cmd.Flags().GetStringSlice("claim")
+	if err != nil {
+		return errors.Wrap(err, "Failed to load claims passed via --claim flag")
+	}
+	args = append(args, claimsSlice...)
+
+	// Similarly for scopes. Scopes could be passed like --scope "read:/storage write:/storage"
+	// or they could be pased like --scope read:/storage --scope write:/storage. However, because
+	// we already know the name of these claims and don't expect naming via the cli, we parse the
+	// claims to name them here
+	rawScopesSlice, err := cmd.Flags().GetStringSlice("scope")
+	if err != nil {
+		return errors.Wrap(err, "Failed to load scopes passed via --scope flag")
+	}
+	scopesSlice := parseInputSlice(&rawScopesSlice, "scope")
+	if len(scopesSlice) > 0 {
+		args = append(args, scopesSlice...)
+	}
+
+	// Like scopes, we allow multiple audiences and we need to add the claim name.
+	rawAudSlice, err := cmd.Flags().GetStringSlice("audience")
+	if err != nil {
+		return errors.Wrap(err, "Failed to load audience passed via --audience flag")
+	}
+	audSlice := parseInputSlice(&rawAudSlice, "aud")
+	if len(audSlice) > 0 {
+		args = append(args, audSlice...)
+	}
+
 	claimsMap, err := parseClaims(args)
 	if err != nil {
 		return errors.Wrap(err, "Failed to parse token claims")
 	}
 
-	// Check if a profile was provided and verify what we need to from the claimsMap
-	profile := cmd.Flags().Lookup("profile").Value.String()
-
-	lifetime, err := strconv.Atoi(cmd.Flags().Lookup("lifetime").Value.String())
+	// Get flags used for auxiliary parts of token creation that can't be fed directly to claimsMap
+	profile, err := cmd.Flags().GetString("profile")
 	if err != nil {
-		return errors.Wrapf(err, "Failed to parse lifetime '%d' as an integer", lifetime)
+		return errors.Wrapf(err, "Failed to get profile '%s' from input", profile)
 	}
 
-	token, err := createEncodedToken(claimsMap, profile, lifetime)
+	lifetime, err := cmd.Flags().GetInt("lifetime")
+	if err != nil {
+		return errors.Wrapf(err, "Failed to get lifetime '%d' from input", lifetime)
+	}
+
+	// Flags to populate claimsMap
+	// Note that we don't get the issuer here, because that's bound to viper
+	subject, err := cmd.Flags().GetString("subject")
+	if err != nil {
+		return errors.Wrapf(err, "Failed to get subject '%s' from input", subject)
+	}
+	if subject != "" {
+		claimsMap["sub"] = subject
+	}
+
+	// Finally, create the token
+	token, err := CreateEncodedToken(claimsMap, profile, lifetime)
 	if err != nil {
 		return errors.Wrap(err, "Failed to create the token")
 	}
@@ -225,6 +305,6 @@ func cliTokenCreate( /*cmd*/ cmd *cobra.Command /*args*/, args []string) error {
 	return nil
 }
 
-func verifyToken( /*cmd*/ cmd *cobra.Command /*args*/, args []string) error {
+func verifyToken(cmd *cobra.Command, args []string) error {
 	return errors.New("Token verification not yet implemented")
 }

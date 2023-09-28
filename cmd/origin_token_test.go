@@ -20,12 +20,15 @@ package main
 
 import (
 	// "net/url"
-	"os"
+	// "os"
 	"path/filepath"
 	"testing"
+	// "fmt"
+	// "bytes"
+	// "io/ioutil"
 
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/spf13/cobra"
+	// "github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 )
@@ -64,36 +67,36 @@ func TestVerifyCreateSciTokens2(t *testing.T) {
 	assert.Equal(t, claimsMap["sub"], "origin")
 }
 
-func TestVerifyCreateWLCG1(t *testing.T) {
+func TestVerifyCreateWLCG(t *testing.T) {
 	// Start by feeding it a valid claims map
 	claimsMap := map[string]string{"sub": "foo", "wlcg.ver": "1.0", "jti": "1234", "aud": "director"}
-	err := verifyCreateWLCG1(&claimsMap)
+	err := verifyCreateWLCG(&claimsMap)
 	assert.NoError(t, err)
 
 	// Fail to give it a sub
 	claimsMap = map[string]string{"wlcg.ver": "1.0", "jti": "1234", "aud": "director"}
-	err = verifyCreateWLCG1(&claimsMap)
-	assert.EqualError(t, err, "The claim 'sub' is required for the wlcg1 profile, but it could not be found.")
+	err = verifyCreateWLCG(&claimsMap)
+	assert.EqualError(t, err, "The claim 'sub' is required for the wlcg profile, but it could not be found.")
 
 	// Fail to give it an aud
 	claimsMap = map[string]string{"wlcg.ver": "1.0", "jti": "1234", "sub": "foo"}
-	err = verifyCreateWLCG1(&claimsMap)
-	assert.EqualError(t, err, "The claim 'aud' is required for the wlcg1 profile, but it could not be found.")
+	err = verifyCreateWLCG(&claimsMap)
+	assert.EqualError(t, err, "The claim 'aud' is required for the wlcg profile, but it could not be found.")
 
 	// Give it bad version
 	claimsMap = map[string]string{"sub": "foo", "wlcg.ver": "1.xxxx", "jti": "1234", "aud": "director"}
-	err = verifyCreateWLCG1(&claimsMap)
+	err = verifyCreateWLCG(&claimsMap)
 	assert.EqualError(t, err, "The provided version '1.xxxx' is not valid. It must be of the form '1.x'")
 
 	// Don't give it a version and make sure it gets set correctly
 	claimsMap = map[string]string{"sub": "foo", "jti": "1234", "aud": "director"}
-	err = verifyCreateWLCG1(&claimsMap)
+	err = verifyCreateWLCG(&claimsMap)
 	assert.NoError(t, err)
 	assert.Equal(t, claimsMap["wlcg.ver"], "1.0")
 
 	// Give it a non-required claim to make sure it makes it through
 	claimsMap = map[string]string{"sub": "foo", "wlcg.ver": "1.0", "jti": "1234", "aud": "director", "anotherClaim": "bar"}
-	err = verifyCreateWLCG1(&claimsMap)
+	err = verifyCreateWLCG(&claimsMap)
 	assert.NoError(t, err)
 	assert.Equal(t, claimsMap["anotherClaim"], "bar")
 }
@@ -118,25 +121,13 @@ func TestParseClaims(t *testing.T) {
 	claims = []string{"foo=boo", "barbaz"}
 	_, err = parseClaims(claims)
 	assert.EqualError(t, err, "The claim 'barbaz' is invalid. Did you forget an '='?")
-
-	// Give it something with extra =
-	claims = []string{"foo=boo", "bar==baz"}
-	_, err = parseClaims(claims)
-	assert.EqualError(t, err, "The claim 'bar==baz' is invalid. Does it contain more than one '='?")
 }
 
-func TestCreateToken(t *testing.T) {
-	// For now, the test doesn't actually test for token validity
 
-	// Redirect stdout to a buffer to prevent printing the token during tests
-	// In theory, we could use this to grab the actual tokens as well.
-	// TODO: Figure out how to generate consistent tokens
-	old := os.Stdout
-	_, w, _ := os.Pipe()
-	os.Stdout = w
-
-	// Create temp dir for the origin key file
+func TestCreateEncodedToken(t *testing.T) {
+	// Some viper pre-requisites
 	viper.Reset()
+	viper.Set("IssuerUrl", "https://my-issuer.com")
 	tDir := t.TempDir()
 	kfile := filepath.Join(tDir, "testKey")
 	viper.Set("IssuerKey", kfile)
@@ -145,40 +136,62 @@ func TestCreateToken(t *testing.T) {
 	_, err := config.LoadPublicKey("", kfile)
 	assert.NoError(t, err)
 
-	// Create a profile-less token
-	cmd := &cobra.Command{}
-	cmd.Flags().Int("lifetime", 1200, "Lifetime")
-	cmd.Flags().String("profile", "", "creation profile")
-	cmd.Flags().String("private-key", kfile, "private key path")
-	// Here, we pin various time-related values so we can get a consistent token
-	testArgs := []string{"scope=foo", "aud=bar", "iat=12345", "exp=12345", "nbf=12345"}
-	err = cliTokenCreate(cmd, testArgs)
+	// Test that the wlcg profile works
+	claims := map[string]string{
+		"aud": "foo",
+		"sub": "bar",
+	}
+	_, err = CreateEncodedToken(claims, "wlcg", 1200)
 	assert.NoError(t, err)
 
-	// Create a scitokens token
-	cmd = &cobra.Command{}
-	cmd.Flags().Int("lifetime", 1200, "Lifetime")
-	cmd.Flags().String("profile", "scitokens2", "creation profile")
-	testArgs = []string{"aud=foo", "scope=read:/storage", "iat=12345", "exp=12345", "nbf=12345"}
-	err = cliTokenCreate(cmd, testArgs)
+	// Test that the wlcg profile fails if neither sub or aud not found
+	claims = map[string]string{}
+	_, err = CreateEncodedToken(claims, "wlcg", 1200)
+	assert.EqualError(t, err, "Token does not conform to wlcg requirements: To create a valid wlcg, "+
+		"the 'aud' and 'sub' claims must be passed, but none were found.")
+
+	// Test that the scitokens2 profile works
+	claims = map[string]string{
+		"aud":   "foo",
+		"scope": "bar",
+	}
+	_, err = CreateEncodedToken(claims, "scitokens2", 1200)
 	assert.NoError(t, err)
 
-	// Create a wlcg token
-	cmd = &cobra.Command{}
-	cmd.Flags().Int("lifetime", 1200, "Lifetime")
-	cmd.Flags().String("profile", "wlcg1", "creation profile")
-	testArgs = []string{"sub=foo", "wlcg.ver=1.0", "jti=1234", "aud=director"}
-	err = cliTokenCreate(cmd, testArgs)
+	// Test that the scitokens2 profile fails if claims not found
+	claims = map[string]string{}
+	_, err = CreateEncodedToken(claims, "scitokens2", 1200)
+	assert.EqualError(t, err, "Token does not conform to scitokens2 requirements: To create a valid SciToken, "+
+		"the 'aud' and 'scope' claims must be passed, but none were found.")
+
+	// Test an unrecognized profile
+	_, err = CreateEncodedToken(claims, "unknown_profile", 1200)
+	assert.EqualError(t, err, "The provided profile 'unknown_profile' is not recognized. "+
+		"Valid options are 'scitokens2' or 'wlcg'")
+
+	// Test providing issuer via claim
+	viper.Set("IssuerUrl", "")
+	claims = map[string]string{
+		"aud": "foo",
+		"sub": "bar",
+		"iss": "https://new-issuer.com",
+	}
+	_, err = CreateEncodedToken(claims, "wlcg", 1200)
 	assert.NoError(t, err)
 
-	// Pass an invalid profile
-	cmd = &cobra.Command{}
-	cmd.Flags().Int("lifetime", 1200, "Lifetime")
-	cmd.Flags().String("profile", "foobar", "creation profile")
-	testArgs = []string{"sub=foo", "wlcg.ver=1.0", "jti=1234", "aud=director"}
-	err = cliTokenCreate(cmd, testArgs)
-	assert.EqualError(t, err, "Failed to create the token: The provided profile 'foobar' is not recognized. Valid options are 'scitokens2' or 'wlcg1'")
+	// Test without configured issuer
+	claims = map[string]string{
+		"aud": "foo",
+		"sub": "bar",
+	}
+	_, err = CreateEncodedToken(claims, "wlcg", 1200)
+	assert.EqualError(t, err, "No issuer was found in the configuration file, "+
+		"and none was provided as a claim")
+}
 
-	w.Close()
-	os.Stdout = old
+func TestParseInputSlice(t *testing.T) {
+	// A quick test, just to make sure this gets what it needs to
+	rawSlice := []string{"https://my-issuer.com"}
+	parsedSlice := parseInputSlice(&rawSlice, "iss")
+	assert.Equal(t, parsedSlice, []string{"iss=https://my-issuer.com"})
 }
