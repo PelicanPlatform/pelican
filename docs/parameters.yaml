@@ -97,7 +97,7 @@ components: ["director"]
 ---
 name: TopologyNamespaceURL
 description: >-
-  A URL containing topology namespace information for origins and caches configured via Topology (legacy). The URL
+  A URL containing namespace information for origins and caches configured via the OSG Topology application (a legacy integration). The URL
   should point to the hosted namespace.json.
 type: url
 osdf_default: https://topology.opensciencegrid.org/stashcache/namespaces.json
