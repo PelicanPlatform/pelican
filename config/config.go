@@ -236,41 +236,39 @@ func getConfigBase() (string, error) {
 }
 
 func InitServer() error {
+	configDir := viper.GetString("ConfigDir")
 	viper.SetConfigType("yaml")
+	if configDir == "" {
+		if IsRootExecution() {
+			configDir = "/etc/pelican"
+		} else {
+			configTmp, err := getConfigBase()
+			if err != nil {
+				return err
+			}
+			configDir = configTmp
+		}
+	}
+	viper.SetDefault("TLSCertificate", filepath.Join(configDir, "certificates", "tls.crt"))
+	viper.SetDefault("TLSKey", filepath.Join(configDir, "certificates", "tls.key"))
+	viper.SetDefault("RobotsTxtFile", filepath.Join(configDir, "robots.txt"))
+	viper.SetDefault("ScitokensConfig", filepath.Join(configDir, "xrootd", "scitokens.cfg"))
+	viper.SetDefault("Authfile", filepath.Join(configDir, "xrootd", "authfile"))
+	viper.SetDefault("MacaroonsKeyFile", filepath.Join(configDir, "macaroons-secret"))
+	viper.SetDefault("IssuerKey", filepath.Join(configDir, "issuer.jwk"))
+	viper.SetDefault("OriginUI.PasswordFile", filepath.Join(configDir, "origin-ui-passwd"))
+	viper.SetDefault("OIDC.ClientIDFile", filepath.Join(configDir, "oidc-client-id"))
+	viper.SetDefault("OIDC.ClientSecretFile", filepath.Join(configDir, "oidc-client-secret"))
 	if IsRootExecution() {
-		viper.SetDefault("TLSCertificate", "/etc/pelican/certificates/tls.crt")
-		viper.SetDefault("TLSKey", "/etc/pelican/certificates/tls.key")
 		viper.SetDefault("XrootdRun", "/run/pelican/xrootd")
-		viper.SetDefault("RobotsTxtFile", "/etc/pelican/robots.txt")
-		viper.SetDefault("ScitokensConfig", "/etc/pelican/xrootd/scitokens.cfg")
-		viper.SetDefault("Authfile", "/etc/pelican/xrootd/authfile")
-		viper.SetDefault("MacaroonsKeyFile", "/etc/pelican/macaroons-secret")
-		viper.SetDefault("IssuerKey", "/etc/pelican/issuer.jwk")
-		viper.SetDefault("OriginUI.PasswordFile", "/etc/pelican/origin-ui-passwd")
 		viper.SetDefault("XrootdMultiuser", true)
 		viper.SetDefault("GeoIPLocation", "/var/cache/pelican/maxmind/GeoLite2-City.mmdb")
 		viper.SetDefault("NSRegistryLocation", "/var/lib/pelican/registry.sqlite")
-		viper.SetDefault("OIDC.ClientIDFile", "/etc/pelican/oidc-client-id")
-		viper.SetDefault("OIDC.ClientSecretFile", "/etc/pelican/oidc-client-secret")
 		viper.SetDefault("MonitoringData", "/var/lib/pelican/monitoring/data")
 	} else {
-		configBase, err := getConfigBase()
-		if err != nil {
-			return err
-		}
-		viper.SetDefault("TLSCertificate", filepath.Join(configBase, "certificates", "tls.crt"))
-		viper.SetDefault("TLSKey", filepath.Join(configBase, "certificates", "tls.key"))
-		viper.SetDefault("RobotsTxtFile", filepath.Join(configBase, "robots.txt"))
-		viper.SetDefault("ScitokensConfig", filepath.Join(configBase, "xrootd", "scitokens.cfg"))
-		viper.SetDefault("Authfile", filepath.Join(configBase, "xrootd", "authfile"))
-		viper.SetDefault("MacaroonsKeyFile", filepath.Join(configBase, "macaroons-secret"))
-		viper.SetDefault("IssuerKey", filepath.Join(configBase, "issuer.jwk"))
-		viper.SetDefault("OriginUI.PasswordFile", filepath.Join(configBase, "origin-ui-passwd"))
-		viper.SetDefault("GeoIPLocation", filepath.Join(configBase, "maxmind", "GeoLite2-City.mmdb"))
-		viper.SetDefault("NSRegistryLocation", filepath.Join(configBase, "ns-registry.sqlite"))
-		viper.SetDefault("OIDC.ClientIDFile", filepath.Join(configBase, "oidc-client-id"))
-		viper.SetDefault("OIDC.ClientSecretFile", filepath.Join(configBase, "oidc-client-secret"))
-		viper.SetDefault("MonitoringData", filepath.Join(configBase, "monitoring/data"))
+		viper.SetDefault("GeoIPLocation", filepath.Join(configDir, "maxmind", "GeoLite2-City.mmdb"))
+		viper.SetDefault("NSRegistryLocation", filepath.Join(configDir, "ns-registry.sqlite"))
+		viper.SetDefault("MonitoringData", filepath.Join(configDir, "monitoring/data"))
 
 		if userRuntimeDir := os.Getenv("XDG_RUNTIME_DIR"); userRuntimeDir != "" {
 			runtimeDir := filepath.Join(userRuntimeDir, "pelican")
