@@ -43,7 +43,10 @@ var (
 	//go:embed resources/test-scitokens-2issuers.cfg
 	dualOutput string
 
-	//go:embed resources/test-scitokens-tomerge.cfg
+	// For now, this unit test uses the same input as the prior one;
+	// duplicating the variable name to make it clear these are different
+	// tests.
+	//go:embed resources/test-scitokens-2issuers.cfg
 	toMergeOutput string
 
 	//go:embed resources/test-scitokens-monitoring.cfg
