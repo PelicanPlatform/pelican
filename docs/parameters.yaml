@@ -46,7 +46,7 @@ components: ["origin", "nsregistry", "director"]
 ---
 name: TLSSkipVerify
 description: >-
-  When set to true, Pelican will skip TLS verification. Do not use unless you understand the consequences!
+  When set to true, Pelican will skip TLS verification.  This allows a "man in the middle" attack on the connection but can simplify testing.  Intended for developers.
 type: bool
 default: false
 components: ["origin", "nsregistry", "director"]
