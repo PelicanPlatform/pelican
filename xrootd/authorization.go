@@ -114,7 +114,7 @@ func EmitScitokensConfiguration(cfg *ScitokensCfg) error {
 }
 
 // Given a filename, load and parse the file into a ScitokensCfg object
-func LoadConfig(fileName string) (cfg ScitokensCfg, err error) {
+func LoadScitokensConfig(fileName string) (cfg ScitokensCfg, err error) {
 	configIni, err := ini.Load(fileName)
 	if err != nil {
 		return cfg, errors.Wrapf(err, "Unable to load the scitokens.cfg at %s", fileName)
@@ -215,7 +215,7 @@ func WriteOriginScitokensConfig() error {
 			" to desired daemon group %v", scitokensCfg, gid)
 	}
 
-	cfg, err := LoadConfig(scitokensCfg)
+	cfg, err := LoadScitokensConfig(scitokensCfg)
 	if err != nil {
 		return errors.Wrapf(err, "Failed to load scitokens configuration at %s", scitokensCfg)
 	}

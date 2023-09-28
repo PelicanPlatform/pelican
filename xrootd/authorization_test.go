@@ -79,7 +79,7 @@ func TestEmitCfg(t *testing.T) {
 	t.Run("DualIssuers", configTester(&ScitokensCfg{Global: globalCfg, Issuers: []Issuer{issuer, issuer2}}, dualOutput))
 }
 
-func TestLoadConfig(t *testing.T) {
+func TestLoadScitokensConfig(t *testing.T) {
 	dirname := t.TempDir()
 	os.Setenv("PELICAN_XROOTDRUN", dirname)
 	defer os.Unsetenv("PELICAN_XROOTDRUN")
@@ -93,7 +93,7 @@ func TestLoadConfig(t *testing.T) {
 			err := os.WriteFile(cfgFname, []byte(configResult), 0600)
 			require.NoError(t, err)
 
-			cfg, err := LoadConfig(cfgFname)
+			cfg, err := LoadScitokensConfig(cfgFname)
 			require.NoError(t, err)
 
 			err = EmitScitokensConfiguration(&cfg)
