@@ -543,7 +543,7 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 			mpb.AppendDecorators(
 				decor.OnComplete(decor.EwmaETA(decor.ET_STYLE_GO, 90), ""),
 				decor.OnComplete(decor.Name(" ] "), ""),
-				decor.OnComplete(decor.EwmaSpeed(decor.SizeB1024(0), "% .2f", 20), "Done!"),
+				decor.OnComplete(decor.EwmaSpeed(decor.SizeB1024(0), "% .2f", 5), "Done!"),
 			),
 		)
 	}
