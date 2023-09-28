@@ -107,46 +107,88 @@ func UpdateLatLong(ad *ServerAd) error {
 }
 
 func matchesPrefix(reqPath string, namespaceAds []NamespaceAd) *NamespaceAd {
+	var best *NamespaceAd
+
 	for _, namespace := range namespaceAds {
 		serverPath := namespace.Path
 		if strings.Compare(serverPath, reqPath) == 0 {
 			return &namespace
 		}
+
 		// Some namespaces in Topology already have the trailing /, some don't
 		// Perhaps this should be standardized, but in case it isn't we need to
-		// handle it
+		// handle it throughout this function. Note that reqPath already has the
+		// tail from being called by GetAdsForPath
 		if serverPath[len(serverPath)-1:] != "/" {
 			serverPath += "/"
 		}
-		if strings.HasPrefix(reqPath, serverPath) {
-			return &namespace
+
+		// The assignment of best doesn't account for the trailing / that we need to consider
+		// Account for that by setting up a tmpBest string that adds the / if needed
+		var tmpBest string
+		if best != nil {
+			tmpBest = best.Path
+			if tmpBest[len(tmpBest)-1:] != "/" {
+				tmpBest += "/"
+			}
+		}
+
+		// Make the len comparison with tmpBest, because serverPath is one char longer now
+		if strings.HasPrefix(reqPath, serverPath) && len(serverPath) > len(tmpBest) {
+			if best == nil {
+				best = new(NamespaceAd)
+			}
+			*best = namespace
 		}
 	}
-	return nil
+	return best
 }
 
 func GetAdsForPath(reqPath string) (originNamespace NamespaceAd, originAds []ServerAd, cacheAds []ServerAd) {
 	serverAdMutex.RLock()
 	defer serverAdMutex.RUnlock()
-	reqPath = path.Clean(reqPath)
 
+	// Clean the path, but re-append a trailing / to deal with some namespaces
+	// from topo that have a trailing /
+	reqPath = path.Clean(reqPath)
+	reqPath += "/"
+
+	// Iterate through all of the server ads. For each "item", the key
+	// is the server ad itself (either cache or origin), and the value
+	// is a slice of namespace prefixes are supported by that server
+	var best *NamespaceAd
 	for _, item := range serverAds.Items() {
 		if item == nil {
 			continue
 		}
 		serverAd := item.Key()
 		if serverAd.Type == OriginType {
-			ns := matchesPrefix(reqPath, item.Value())
-			if ns != nil {
-				originNamespace = *ns
-				originAds = append(originAds, serverAd)
+			if ns := matchesPrefix(reqPath, item.Value()); ns != nil {
+				if best == nil || len(ns.Path) > len(best.Path) {
+					best = ns
+					// If anything was previously set by a namespace that constituted a shorter
+					// prefix, we overwrite that here because we found a better ns. We also clear
+					// the other slice of server ads, because we know those aren't good anymore
+					originAds = append(originAds[:0], serverAd)
+					cacheAds = []ServerAd{}
+				} else if ns.Path == best.Path {
+					originAds = append(originAds, serverAd)
+				}
 			}
 			continue
 		} else if serverAd.Type == CacheType {
-			if matchesPrefix(reqPath, item.Value()) != nil {
-				cacheAds = append(cacheAds, serverAd)
+			if ns := matchesPrefix(reqPath, item.Value()); ns != nil {
+				if best == nil || len(ns.Path) > len(best.Path) {
+					best = ns
+					cacheAds = append(cacheAds[:0], serverAd)
+					originAds = []ServerAd{}
+				} else if ns.Path == best.Path {
+					cacheAds = append(cacheAds, serverAd)
+				}
 			}
 		}
 	}
+
+	originNamespace = *best
 	return
 }
