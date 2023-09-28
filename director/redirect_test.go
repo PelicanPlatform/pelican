@@ -24,7 +24,7 @@ import (
 
 type MockCache struct {
 	GetFn      func(u string, kset *jwk.Set) (jwk.Set, error)
-	RegisterFn func(kset *jwk.Set) error
+	RegisterFn func(*MockCache) error
 
 	keyset jwk.Set
 }
@@ -35,7 +35,7 @@ func (m *MockCache) Get(ctx context.Context, u string) (jwk.Set, error) {
 
 func (m *MockCache) Register(u string, options ...jwk.RegisterOption) error {
 	m.keyset = jwk.NewSet()
-	return m.RegisterFn(&m.keyset)
+	return m.RegisterFn(m)
 }
 
 func TestDirectorRegistration(t *testing.T) {
@@ -44,6 +44,8 @@ func TestDirectorRegistration(t *testing.T) {
 	* corresponding token and invokes the registration endpoint, it then does
 	* so again with an invalid token and confirms that the correct error is returned
 	 */
+
+	viper.Reset()
 
 	// Setup httptest recorder and context for the the unit test
 	w := httptest.NewRecorder()
@@ -106,8 +108,8 @@ func TestDirectorRegistration(t *testing.T) {
 			}
 			return *keyset, nil
 		},
-		RegisterFn: func(keyset *jwk.Set) error {
-			err := jwk.Set.AddKey(*keyset, publicKey)
+		RegisterFn: func(m *MockCache) error {
+			err := jwk.Set.AddKey(m.keyset, publicKey)
 			if err != nil {
 				t.Error(err)
 			}
