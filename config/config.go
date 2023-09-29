@@ -300,7 +300,6 @@ func InitServer() error {
 	}
 	viper.SetDefault("Hostname", hostname)
 	viper.SetDefault("Sitename", hostname)
-	viper.SetDefault("Hostname", hostname)
 
 	err = viper.MergeConfig(strings.NewReader(defaultsYaml))
 	if err != nil {
