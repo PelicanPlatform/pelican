@@ -303,7 +303,7 @@ func download_http(source string, destination string, payload *payloadStruct, na
 
 	if recursive {
 		var err error
-		files, err = walkDavDir(&downloadUrl, token, namespace)
+		files, err = walkDavDir(&downloadUrl, namespace)
 		if err != nil {
 			log.Errorln("Error from walkDavDir", err)
 			return 0, err
@@ -723,17 +723,6 @@ func UploadFile(src string, dest *url.URL, token string, namespace namespaces.Na
 	dest.Host = writebackhostUrl.Host
 	dest.Scheme = "https"
 
-	// Check if the destination is a directory
-	isDestDir, err := IsDir(dest, token, namespace)
-	if err != nil {
-		log.Warnln("Received an error from checking if dest was a directory.  Going to continue as if there was no error")
-	}
-	if isDestDir {
-		// Set the destination as the basename of the source
-		dest.Path = path.Join(dest.Path, path.Base(src))
-		log.Debugln("Destination", dest.Path, "is a directory")
-	}
-
 	// Create the wrapped reader and send it to the request
 	closed := make(chan bool, 1)
 	errorChan := make(chan error, 1)
@@ -839,57 +828,7 @@ func doPut(request *http.Request, responseChan chan<- *http.Response, errorChan 
 
 }
 
-func IsDir(dirUrl *url.URL, token string, namespace namespaces.Namespace) (bool, error) {
-	connectUrl := url.URL{}
-	if namespace.DirListHost != "" {
-		// Parse the dir list host
-		dirListURL, err := url.Parse(namespace.DirListHost)
-		if err != nil {
-			log.Errorln("Failed to parse dirlisthost from namespaces into URL:", err)
-			return false, err
-		}
-		connectUrl = *dirListURL
-
-	} else {
-		log.Errorln("Host for directory listings is unknown")
-		return false, errors.New("Host for directory listings is unknown")
-	}
-
-	c := gowebdav.NewClient(connectUrl.String(), "", "")
-	//c.SetHeader("Authorization", "Bearer "+token)
-
-	// The path can have special characters in it like '#' and '?', so we have to collect
-	// the path parts and join them together
-	finalPath := dirUrl.Path
-	if dirUrl.RawQuery != "" {
-		finalPath += "?" + dirUrl.RawQuery
-	}
-	if dirUrl.Fragment != "" {
-		finalPath += "#" + dirUrl.Fragment
-	}
-	log.Debugln("Final webdav checked path:", finalPath)
-	info, err := c.Stat(finalPath)
-	if err != nil {
-		log.Debugln("Failed to ReadDir:", err, "for URL:", dirUrl.String())
-		return false, err
-	}
-	log.Debugln("Got isDir response:", info.IsDir())
-	return info.IsDir(), nil
-
-}
-
-func walkDavDir(url *url.URL, token string, namespace namespaces.Namespace) ([]string, error) {
-
-	// First, check if the url is a directory
-	isDir, err := IsDir(url, token, namespace)
-	if err != nil {
-		log.Errorln("Failed to check if path", url.Path, " is directory:", err)
-		return nil, err
-	}
-	if !isDir {
-		log.Errorln("Path ", url.Path, " is not a directory.")
-		return nil, errors.New("path " + url.Path + " is not a directory")
-	}
+func walkDavDir(url *url.URL, namespace namespaces.Namespace) ([]string, error) {
 
 	// Create the client to walk the filesystem
 	rootUrl := *url
