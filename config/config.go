@@ -139,7 +139,7 @@ func DiscoverFederation() error {
 	}
 	log.Debugln("Federation URL:", federationStr)
 	curDirectorURL := viper.GetString("DirectorURL")
-	curNamespaceURL := viper.GetString("DirectorURL")
+	curNamespaceURL := viper.GetString("NamespaceURL")
 	if len(curDirectorURL) != 0 && len(curNamespaceURL) != 0 {
 		return nil
 	}
