@@ -21,17 +21,20 @@ package metrics
 import (
 	"fmt"
 	"sync"
+	"time"
 )
 
 type (
 	ComponentStatus struct {
-		Status  string `json:"status"`
-		Message string `json:"message,omitempty"`
+		Status     string `json:"status"`
+		Message    string `json:"message,omitempty"`
+		LastUpdate int64  `json:"last_update"`
 	}
 
 	componentStatusInternal struct {
-		Status  int
-		Message string
+		Status     int
+		Message    string
+		LastUpdate time.Time
 	}
 
 	HealthStatus struct {
@@ -73,7 +76,7 @@ func SetComponentHealthStatus(name, state, msg string) error {
 	if err != nil {
 		return err
 	}
-	healthStatus.Store(name, componentStatusInternal{statusInt, msg})
+	healthStatus.Store(name, componentStatusInternal{statusInt, msg, time.Now()})
 	return nil
 }
 
@@ -100,6 +103,7 @@ func GetHealthStatus() HealthStatus {
 		status.ComponentStatus[componentString] = ComponentStatus{
 			intToStatus(componentStatus.Status),
 			componentStatus.Message,
+			componentStatus.LastUpdate.Unix(),
 		}
 		if componentStatus.Status < overallStatus {
 			overallStatus = componentStatus.Status
