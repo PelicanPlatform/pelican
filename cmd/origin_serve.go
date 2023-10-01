@@ -21,11 +21,11 @@
 package main
 
 import (
+	"bytes"
 	"crypto/elliptic"
 	"crypto/rand"
 	_ "embed"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
@@ -59,6 +59,7 @@ type (
 		UseCmsd      bool
 		UseMacaroons bool
 		UseVoms      bool
+		SelfTest     bool
 	}
 
 	XrootdConfig struct {
@@ -77,8 +78,6 @@ type (
 		DetailedMonitoringHost string
 		DetailedMonitoringPort int
 		XrootdRun              string
-		Authfile               string
-		ScitokensConfig        string
 		Mount                  string
 		NamespacePrefix        string
 		LocalMonitoringPort    int
@@ -199,28 +198,14 @@ to export the directory /mnt/foo to the path /bar in the data federation`)
 	}
 	viper.Set("Mount", exportPath)
 
-	keys, err := config.GenerateIssuerJWKS()
-	if err != nil {
+	if viper.GetBool("Origin.SelfTest") {
+		if err := origin_ui.ConfigureXrootdMonitoringDir(); err != nil {
+			return err
+		}
+	}
+
+	if err = xrootd.EmitIssuerMetadata(exportPath); err != nil {
 		return err
-	}
-	wellKnownPath := filepath.Join(exportPath, ".well-known")
-	err = config.MkdirAll(wellKnownPath, 0755, -1, gid)
-	if err != nil {
-		return err
-	}
-	file, err := os.OpenFile(filepath.Join(wellKnownPath, "issuer.jwks"),
-		os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	buf, err := json.MarshalIndent(keys, "", " ")
-	if err != nil {
-		return errors.Wrap(err, "Failed to marshal public keys")
-	}
-	_, err = file.Write(buf)
-	if err != nil {
-		return errors.Wrap(err, "Failed to write public key set to export directory")
 	}
 
 	// If no robots.txt, create a ephemeral one for xrootd to use
@@ -295,21 +280,12 @@ to export the directory /mnt/foo to the path /bar in the data federation`)
 		return errors.Wrapf(err, "Unable to change ownership of authfile %v"+
 			" to desired daemon group %v", macaroonsSecret, groupname)
 	}
-
-	scitokensCfg := viper.GetString("ScitokensConfig")
-	err = config.MkdirAll(path.Dir(scitokensCfg), 0755, -1, gid)
-	if err != nil {
-		return errors.Wrapf(err, "Unable to create directory %v",
-			path.Dir(scitokensCfg))
-	}
-	if file, err := os.OpenFile(scitokensCfg, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0640); err == nil {
-		file.Close()
-	} else if !errors.Is(err, os.ErrExist) {
+	if err := xrootd.EmitAuthfile(); err != nil {
 		return err
 	}
-	if err = os.Chown(scitokensCfg, -1, gid); err != nil {
-		return errors.Wrapf(err, "Unable to change ownership of scitokens config %v"+
-			" to desired daemon group %v", scitokensCfg, groupname)
+
+	if err := xrootd.WriteOriginScitokensConfig(); err != nil {
+		return errors.Wrap(err, "Failed to create scitokens configuration for the origin")
 	}
 
 	return nil
@@ -485,6 +461,11 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	if err != nil {
 		return err
 	}
+
+	if viper.GetBool("Origin.SelfTest") {
+		go origin_ui.PeriodicSelfTest()
+	}
+
 	privileged := viper.GetBool("Origin.Multiuser")
 	err = xrootd.LaunchXrootd(privileged, configPath)
 	if err != nil {

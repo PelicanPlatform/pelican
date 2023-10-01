@@ -166,8 +166,8 @@ func GenerateCACert() error {
 			CommonName:   hostname,
 		},
 		NotBefore:             notBefore,
-		NotAfter:              notBefore.Add(10 * 365 * 24 * time.Hour),
-		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		NotAfter:              notBefore.AddDate(10, 0, 0),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
 		BasicConstraintsValid: true,
 		IsCA:                  true,
 	}
@@ -194,6 +194,32 @@ func GenerateCACert() error {
 	return nil
 }
 
+func LoadCertficate(certFile string) (*x509.Certificate, error) {
+	rest, err := os.ReadFile(certFile)
+	if err != nil {
+		return nil, err
+	}
+
+	var cert *x509.Certificate
+	var block *pem.Block
+	for {
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			break
+		} else if block.Type == "CERTIFICATE" {
+			cert, err = x509.ParseCertificate(block.Bytes)
+			if err != nil {
+				return nil, err
+			}
+			break
+		}
+	}
+	if cert == nil {
+		return nil, fmt.Errorf("Certificate file, %v, contains no certificate", certFile)
+	}
+	return cert, nil
+}
+
 func GenerateCert() error {
 	gid, err := GetDaemonGID()
 	if err != nil {
@@ -216,6 +242,10 @@ func GenerateCert() error {
 	if err := GenerateCACert(); err != nil {
 		return err
 	}
+	caCert, err := LoadCertficate(viper.GetString("TLSCACertFile"))
+	if err != nil {
+		return err
+	}
 
 	certDir := filepath.Dir(tlsCert)
 	if err := MkdirAll(certDir, 0755, -1, gid); err != nil {
@@ -224,6 +254,11 @@ func GenerateCert() error {
 
 	tlsKey := viper.GetString("TLSKey")
 	privateKey, err := LoadPrivateKey(tlsKey)
+	if err != nil {
+		return err
+	}
+
+	caPrivateKey, err := LoadPrivateKey(viper.GetString("TLSCAKey"))
 	if err != nil {
 		return err
 	}
@@ -252,8 +287,8 @@ func GenerateCert() error {
 		BasicConstraintsValid: true,
 	}
 	template.DNSNames = []string{hostname}
-	derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, &(privateKey.PublicKey),
-		privateKey)
+	derBytes, err := x509.CreateCertificate(rand.Reader, &template, caCert, &(privateKey.PublicKey),
+		caPrivateKey)
 	if err != nil {
 		return err
 	}

@@ -31,6 +31,7 @@ Origin:
   Multiuser: false
   UseMacaroons: true
   UseVoms: true
+  SelfTest: true
 Transport:
   Dialer:
     Timeout: 10s
