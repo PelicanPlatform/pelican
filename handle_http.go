@@ -21,6 +21,7 @@ package pelican
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -45,7 +46,8 @@ import (
 	"github.com/vbauerster/mpb/v7"
 	"github.com/vbauerster/mpb/v7/decor"
 
-	namespaces "github.com/pelicanplatform/pelican/namespaces"
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/namespaces"
 )
 
 var p = mpb.New()
@@ -477,6 +479,14 @@ func GetTransport() *http.Transport {
 	})
 	if viper.GetBool("TLSSkipVerify") {
 		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	}
+	// If there's a custom CA file present, add it to the list of system trust roots
+	if caCert, err := config.LoadCertficate(viper.GetString("TLSCACertFile")); err == nil {
+		systemPool, err := x509.SystemCertPool()
+		if err == nil {
+			systemPool.AddCert(caCert)
+			transport.TLSClientConfig = &tls.Config{RootCAs: systemPool}
+		}
 	}
 	return transport
 }
