@@ -109,7 +109,6 @@ func AdvertiseOrigin() error {
 	if err != nil {
 		return errors.Wrap(err, "Failed to generate advertise token")
 	}
-	log.Debugln("Signed advertise token:", token)
 
 	req, err := http.NewRequest("POST", directorUrl.String(), bytes.NewBuffer(body))
 	if err != nil {
