@@ -80,10 +80,11 @@ func generateMonitoringScitoken() (string, error) {
 		return "", errors.Wrap(err, "Failed to assign kid to the token")
 	}
 
-	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES512, *key))
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, *key))
 	if err != nil {
 		return "", err
 	}
+
 	return string(signed), nil
 }
 

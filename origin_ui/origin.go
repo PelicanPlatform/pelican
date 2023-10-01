@@ -237,7 +237,7 @@ func setLoginCookie(ctx *gin.Context, user string) {
 		ctx.JSON(500, gin.H{"error": "Unable to sign login cookie"})
 		return
 	}
-	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES512, raw))
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, raw))
 	if err != nil {
 		log.Errorln("Failure when signing the login cookie:", err)
 		ctx.JSON(500, gin.H{"error": "Unable to sign login cookie"})
@@ -262,7 +262,7 @@ func getUser(ctx *gin.Context) (string, error) {
 	if err = (*key).Raw(&raw); err != nil {
 		return "", errors.New("Failed to extract cookie signing key")
 	}
-	parsed, err := jwt.Parse([]byte(token), jwt.WithKey(jwa.ES512, raw.PublicKey))
+	parsed, err := jwt.Parse([]byte(token), jwt.WithKey(jwa.ES256, raw.PublicKey))
 	if err != nil {
 		return "", err
 	}

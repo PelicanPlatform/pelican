@@ -71,7 +71,7 @@ func TestDirectorRegistration(t *testing.T) {
 	assert.NoError(t, err, "Error assigning kid to private key")
 
 	//Set an algorithm for the key
-	err = pKey.Set(jwk.AlgorithmKey, jwa.ES512)
+	err = pKey.Set(jwk.AlgorithmKey, jwa.ES256)
 	assert.NoError(t, err, "Unable to set algorithm for pKey")
 
 	// Create a public key from the private key
@@ -94,7 +94,7 @@ func TestDirectorRegistration(t *testing.T) {
 	assert.NoError(t, err, "Error creating token")
 
 	// Sign token with previously created private key
-	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES512, pKey))
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, pKey))
 	assert.NoError(t, err, "Error signing token")
 
 	// Inject into the cache, using a mock cache to avoid dealing with
@@ -167,14 +167,14 @@ func TestDirectorRegistration(t *testing.T) {
 	assert.NoError(t, err, "Error assigning kid to private key")
 
 	//Set an algorithm for the key
-	err = pKeyInv.Set(jwk.AlgorithmKey, jwa.ES512)
+	err = pKeyInv.Set(jwk.AlgorithmKey, jwa.ES256)
 	assert.NoError(t, err, "Unable to set algorithm for pKey")
 
 	// Create a token to be inserted
 	issuerURL.Host = cInv.Request.URL.Host
 
 	// Sign token with previously created private key (mismatch to what's in the keyset)
-	signedInv, err := jwt.Sign(tok, jwt.WithKey(jwa.ES512, pKeyInv))
+	signedInv, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, pKeyInv))
 	assert.NoError(t, err, "Error signing token")
 
 	// Create the  request and set the headers

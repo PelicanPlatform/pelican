@@ -85,7 +85,7 @@ func LoadPublicKey(existingJWKS string, issuerKeyFile string) (*jwk.Set, error) 
 		}
 	}
 
-	if err := GeneratePrivateKey(issuerKeyFile, elliptic.P521()); err != nil {
+	if err := GeneratePrivateKey(issuerKeyFile, elliptic.P256()); err != nil {
 		return nil, errors.Wrap(err, "Failed to generate new private key")
 	}
 	contents, err := os.ReadFile(issuerKeyFile)
@@ -98,7 +98,7 @@ func LoadPublicKey(existingJWKS string, issuerKeyFile string) (*jwk.Set, error) 
 	}
 
 	// Add the algorithm to the key, needed for verifying tokens elsewhere
-	err = key.Set(jwk.AlgorithmKey, jwa.ES512)
+	err = key.Set(jwk.AlgorithmKey, jwa.ES256)
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to add alg specification to key header")
 	}
