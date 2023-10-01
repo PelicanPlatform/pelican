@@ -398,6 +398,15 @@ func configXrootd() (string, error) {
 		return "", err
 	}
 
+	if log.IsLevelEnabled(log.DebugLevel) {
+		buffer := new(bytes.Buffer)
+		err = templ.Execute(buffer, xrdConfig)
+		if err != nil {
+			return "", err
+		}
+		log.Debugln("XRootD configuration file contents:\n", buffer.String())
+	}
+
 	return configPath, nil
 }
 
