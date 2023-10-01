@@ -313,6 +313,13 @@ func InitServer() error {
 		return err
 	}
 
+	port := viper.GetInt("Port")
+	if port != 443 {
+		viper.SetDefault("OriginUrl", fmt.Sprintf("https://%v:%v", viper.GetString("Hostname"), port))
+	} else {
+		viper.SetDefault("OriginUrl", fmt.Sprintf("https://%v", viper.GetString("Hostname")))
+	}
+
 	prefix := GetPreferredPrefix()
 	if prefix == "OSDF" {
 		err := viper.MergeConfig(strings.NewReader(osdfDefaultsYaml))
