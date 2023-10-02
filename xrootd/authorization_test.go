@@ -28,6 +28,7 @@ import (
 	"testing"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -43,7 +44,10 @@ var (
 	//go:embed resources/test-scitokens-2issuers.cfg
 	dualOutput string
 
-	//go:embed resources/test-scitokens-tomerge.cfg
+	// For now, this unit test uses the same input as the prior one;
+	// duplicating the variable name to make it clear these are different
+	// tests.
+	//go:embed resources/test-scitokens-2issuers.cfg
 	toMergeOutput string
 
 	//go:embed resources/test-scitokens-monitoring.cfg
@@ -79,7 +83,7 @@ func TestEmitCfg(t *testing.T) {
 	t.Run("DualIssuers", configTester(&ScitokensCfg{Global: globalCfg, Issuers: []Issuer{issuer, issuer2}}, dualOutput))
 }
 
-func TestLoadConfig(t *testing.T) {
+func TestLoadScitokensConfig(t *testing.T) {
 	dirname := t.TempDir()
 	os.Setenv("PELICAN_XROOTDRUN", dirname)
 	defer os.Unsetenv("PELICAN_XROOTDRUN")
@@ -93,7 +97,7 @@ func TestLoadConfig(t *testing.T) {
 			err := os.WriteFile(cfgFname, []byte(configResult), 0600)
 			require.NoError(t, err)
 
-			cfg, err := LoadConfig(cfgFname)
+			cfg, err := LoadScitokensConfig(cfgFname)
 			require.NoError(t, err)
 
 			err = EmitScitokensConfiguration(&cfg)
@@ -123,7 +127,7 @@ func TestGenerateConfig(t *testing.T) {
 	issuer, err = GenerateMonitoringIssuer()
 	require.NoError(t, err)
 	assert.Equal(t, issuer.Name, "Built-in Monitoring")
-	assert.Equal(t, issuer.Issuer, "https://"+viper.GetString("Hostname")+":"+fmt.Sprint(viper.GetInt("Port")))
+	assert.Equal(t, issuer.Issuer, "https://"+viper.GetString("Hostname")+":"+fmt.Sprint(param.WebPort.GetInt()))
 	require.Equal(t, len(issuer.BasePaths), 1)
 	assert.Equal(t, issuer.BasePaths[0], "/pelican/monitoring")
 	assert.Equal(t, issuer.DefaultUser, "xrootd")
@@ -142,7 +146,7 @@ func TestWriteOriginScitokensConfig(t *testing.T) {
 	err := config.InitServer()
 	require.Nil(t, err)
 
-	scitokensCfg := viper.GetString("ScitokensConfig")
+	scitokensCfg := param.ScitokensConfig.GetString()
 	err = config.MkdirAll(filepath.Dir(scitokensCfg), 0755, -1, -1)
 	require.NoError(t, err)
 	err = os.WriteFile(scitokensCfg, []byte(toMergeOutput), 0640)

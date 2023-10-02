@@ -28,12 +28,15 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sync/atomic"
 	"time"
 
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
@@ -230,7 +233,7 @@ func GenerateCert() error {
 		return err
 	}
 
-	tlsCert := viper.GetString("TLSCertificate")
+	tlsCert := param.TLSCertificate.GetString()
 	if file, err := os.Open(tlsCert); err == nil {
 		file.Close()
 		return nil
@@ -252,7 +255,7 @@ func GenerateCert() error {
 		return err
 	}
 
-	tlsKey := viper.GetString("TLSKey")
+	tlsKey := param.TLSKey.GetString()
 	privateKey, err := LoadPrivateKey(tlsKey)
 	if err != nil {
 		return err
@@ -314,6 +317,10 @@ func GeneratePrivateKey(keyLocation string, curve elliptic.Curve) error {
 	if err != nil {
 		return err
 	}
+	user, err := GetDaemonUser()
+	if err != nil {
+		return err
+	}
 	groupname, err := GetDaemonGroup()
 	if err != nil {
 		return err
@@ -339,9 +346,20 @@ func GeneratePrivateKey(keyLocation string, curve elliptic.Curve) error {
 	if err != nil {
 		return err
 	}
-	if err = os.Chown(keyLocation, uid, gid); err != nil {
-		return errors.Wrapf(err, "Failed to chown generated key %v to daemon group %v",
-			keyLocation, groupname)
+	// Windows does not have "chown", has to work differently
+	currentOS := runtime.GOOS
+	if currentOS == "windows" {
+		cmd := exec.Command("icacls", keyLocation, "/grant", user+":F")
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return errors.Wrapf(err, "Failed to chown generated key %v to daemon group %v: %s",
+				keyLocation, groupname, string(output))
+		}
+	} else { // Else we are running on linux/mac
+		if err = os.Chown(keyLocation, uid, gid); err != nil {
+			return errors.Wrapf(err, "Failed to chown generated key %v to daemon group %v",
+				keyLocation, groupname)
+		}
 	}
 
 	bytes, err := x509.MarshalPKCS8PrivateKey(priv)
@@ -357,14 +375,14 @@ func GeneratePrivateKey(keyLocation string, curve elliptic.Curve) error {
 
 func GenerateIssuerJWKS() (*jwk.Set, error) {
 	existingJWKS := viper.GetString("IssuerJWKS")
-	issuerKeyFile := viper.GetString("IssuerKey")
+	issuerKeyFile := param.IssuerKey.GetString()
 	return LoadPublicKey(existingJWKS, issuerKeyFile)
 }
 
 func GetOriginJWK() (*jwk.Key, error) {
 	key := privateKey.Load()
 	if key == nil {
-		issuerKeyFile := viper.GetString("IssuerKey")
+		issuerKeyFile := param.IssuerKey.GetString()
 		contents, err := os.ReadFile(issuerKeyFile)
 		if err != nil {
 			return nil, errors.Wrap(err, "Failed to read key file")

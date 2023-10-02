@@ -43,11 +43,12 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/studio-b12/gowebdav"
-	"github.com/vbauerster/mpb/v7"
-	"github.com/vbauerster/mpb/v7/decor"
+	"github.com/vbauerster/mpb/v8"
+	"github.com/vbauerster/mpb/v8/decor"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/namespaces"
+	"github.com/pelicanplatform/pelican/param"
 )
 
 var p = mpb.New()
@@ -305,7 +306,7 @@ func download_http(source string, destination string, payload *payloadStruct, na
 
 	if recursive {
 		var err error
-		files, err = walkDavDir(&downloadUrl, token, namespace)
+		files, err = walkDavDir(&downloadUrl, namespace)
 		if err != nil {
 			log.Errorln("Error from walkDavDir", err)
 			return 0, err
@@ -477,7 +478,7 @@ func GetTransport() *http.Transport {
 	onceTransport.Do(func() {
 		transport = setupTransport()
 	})
-	if viper.GetBool("TLSSkipVerify") {
+	if param.TLSSkipVerify.GetBool() {
 		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 	}
 	// If there's a custom CA file present, add it to the list of system trust roots
@@ -521,8 +522,7 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 	// Progress ticker
 	progressTicker := time.NewTicker(500 * time.Millisecond)
 	defer progressTicker.Stop()
-
-	downloadLimit := viper.GetInt("MinimumDownloadSPeed")
+	downloadLimit := viper.GetInt("MinimumDownloadSpeed")
 
 	// If we are doing a recursive, decrease the download limit by the number of likely workers ~5
 	if ObjectClientOptions.Recursive {
@@ -552,9 +552,9 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 				decor.CountersKibiByte("% .2f / % .2f"),
 			),
 			mpb.AppendDecorators(
-				decor.EwmaETA(decor.ET_STYLE_GO, 90),
-				decor.Name(" ] "),
-				decor.EwmaSpeed(decor.UnitKiB, "% .2f", 20),
+				decor.OnComplete(decor.EwmaETA(decor.ET_STYLE_GO, 90), ""),
+				decor.OnComplete(decor.Name(" ] "), ""),
+				decor.OnComplete(decor.EwmaSpeed(decor.SizeB1024(0), "% .2f", 5), "Done!"),
 			),
 		)
 	}
@@ -563,9 +563,8 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 	slowTransferRampupTime := viper.GetInt64("SlowTransferRampupTime")
 	slowTransferWindow := viper.GetInt64("SlowTransferWindow")
 	var previousCompletedBytes int64 = 0
-	var previousCompletedTime = time.Now()
 	var startBelowLimit int64 = 0
-
+	var previousCompletedTime = time.Now()
 	var noProgressStartTime time.Time
 	var lastBytesComplete int64
 	// Loop of the download
@@ -576,15 +575,15 @@ Loop:
 			if ObjectClientOptions.ProgressBars {
 				progressBar.SetTotal(resp.Size, false)
 				currentCompletedBytes := resp.BytesComplete()
-				progressBar.IncrInt64(currentCompletedBytes - previousCompletedBytes)
+				bytesDelta := currentCompletedBytes - previousCompletedBytes
 				previousCompletedBytes = currentCompletedBytes
 				currentCompletedTime := time.Now()
-				progressBar.DecoratorEwmaUpdate(currentCompletedTime.Sub(previousCompletedTime))
+				progressBar.EwmaIncrInt64(bytesDelta, currentCompletedTime.Sub(previousCompletedTime))
 				previousCompletedTime = currentCompletedTime
 			}
 
 		case <-t.C:
-
+			// Check that progress is being made and that it is not too slow
 			if resp.BytesComplete() == lastBytesComplete {
 				if noProgressStartTime.IsZero() {
 					noProgressStartTime = time.Now()
@@ -606,7 +605,12 @@ Loop:
 				if resp.Duration() < time.Second*time.Duration(slowTransferRampupTime) {
 					continue
 				} else if startBelowLimit == 0 {
-					log.Warnln("Download speed of ", resp.BytesPerSecond(), "bytes/s", " is below the limit of", downloadLimit, "bytes/s")
+					warning := []byte("Warning! Downloading too slow...\n")
+					status, err := p.Write(warning)
+					if err != nil {
+						log.Errorln("Problem displaying slow message", err, status)
+						continue
+					}
 					startBelowLimit = time.Now().Unix()
 					continue
 				} else if (time.Now().Unix() - startBelowLimit) < slowTransferWindow {
@@ -616,23 +620,11 @@ Loop:
 				// The download is below the threshold for more than `SlowTransferWindow` seconds, cancel the download
 				cancel()
 				if ObjectClientOptions.ProgressBars {
-					var cancelledProgressBar = p.AddBar(0,
-						mpb.BarQueueAfter(progressBar, true),
-						mpb.BarFillerClearOnComplete(),
-						mpb.PrependDecorators(
-							decor.Name(filename, decor.WC{W: len(filename) + 1, C: decor.DidentRight}),
-							decor.OnComplete(decor.Name(filename, decor.WCSyncSpaceR), "cancelled, too slow!"),
-							decor.OnComplete(decor.EwmaETA(decor.ET_STYLE_MMSS, 0, decor.WCSyncWidth), ""),
-						),
-						mpb.AppendDecorators(
-							decor.OnComplete(decor.Percentage(decor.WC{W: 5}), ""),
-						),
-					)
-					progressBar.SetTotal(resp.Size, true)
-					cancelledProgressBar.SetTotal(resp.Size, true)
+					progressBar.Abort(true)
+					progressBar.Wait()
 				}
 
-				log.Errorln("Download speed of ", resp.BytesPerSecond(), "bytes/s", " is below the limit of", downloadLimit, "bytes/s")
+				log.Errorln("Cancelled: Download speed of ", resp.BytesPerSecond(), "bytes/s", " is below the limit of", downloadLimit, "bytes/s")
 
 				return 0, &SlowTransferError{
 					BytesTransferred: resp.BytesComplete(),
@@ -650,25 +642,12 @@ Loop:
 			// download is complete
 			if ObjectClientOptions.ProgressBars {
 				downloadError := resp.Err()
-				completeMsg := "done!"
 				if downloadError != nil {
-					completeMsg = downloadError.Error()
+					log.Errorln(downloadError.Error())
 				}
-				var doneProgressBar = p.AddBar(resp.Size,
-					mpb.BarQueueAfter(progressBar, true),
-					mpb.BarFillerClearOnComplete(),
-					mpb.PrependDecorators(
-						decor.Name(filename, decor.WC{W: len(filename) + 1, C: decor.DidentRight}),
-						decor.OnComplete(decor.Name(filename, decor.WCSyncSpaceR), completeMsg),
-						decor.OnComplete(decor.EwmaETA(decor.ET_STYLE_MMSS, 0, decor.WCSyncWidth), ""),
-					),
-					mpb.AppendDecorators(
-						decor.OnComplete(decor.Percentage(decor.WC{W: 5}), ""),
-					),
-				)
-
 				progressBar.SetTotal(resp.Size, true)
-				doneProgressBar.SetTotal(resp.Size, true)
+				// call wait here for the bar to complete and flush
+				p.Wait()
 			}
 			break Loop
 		}
@@ -754,17 +733,6 @@ func UploadFile(src string, dest *url.URL, token string, namespace namespaces.Na
 	}
 	dest.Host = writebackhostUrl.Host
 	dest.Scheme = "https"
-
-	// Check if the destination is a directory
-	isDestDir, err := IsDir(dest, token, namespace)
-	if err != nil {
-		log.Warnln("Received an error from checking if dest was a directory.  Going to continue as if there was no error")
-	}
-	if isDestDir {
-		// Set the destination as the basename of the source
-		dest.Path = path.Join(dest.Path, path.Base(src))
-		log.Debugln("Destination", dest.Path, "is a directory")
-	}
 
 	// Create the wrapped reader and send it to the request
 	closed := make(chan bool, 1)
@@ -871,57 +839,7 @@ func doPut(request *http.Request, responseChan chan<- *http.Response, errorChan 
 
 }
 
-func IsDir(dirUrl *url.URL, token string, namespace namespaces.Namespace) (bool, error) {
-	connectUrl := url.URL{}
-	if namespace.DirListHost != "" {
-		// Parse the dir list host
-		dirListURL, err := url.Parse(namespace.DirListHost)
-		if err != nil {
-			log.Errorln("Failed to parse dirlisthost from namespaces into URL:", err)
-			return false, err
-		}
-		connectUrl = *dirListURL
-
-	} else {
-		log.Errorln("Host for directory listings is unknown")
-		return false, errors.New("Host for directory listings is unknown")
-	}
-
-	c := gowebdav.NewClient(connectUrl.String(), "", "")
-	//c.SetHeader("Authorization", "Bearer "+token)
-
-	// The path can have special characters in it like '#' and '?', so we have to collect
-	// the path parts and join them together
-	finalPath := dirUrl.Path
-	if dirUrl.RawQuery != "" {
-		finalPath += "?" + dirUrl.RawQuery
-	}
-	if dirUrl.Fragment != "" {
-		finalPath += "#" + dirUrl.Fragment
-	}
-	log.Debugln("Final webdav checked path:", finalPath)
-	info, err := c.Stat(finalPath)
-	if err != nil {
-		log.Debugln("Failed to ReadDir:", err, "for URL:", dirUrl.String())
-		return false, err
-	}
-	log.Debugln("Got isDir response:", info.IsDir())
-	return info.IsDir(), nil
-
-}
-
-func walkDavDir(url *url.URL, token string, namespace namespaces.Namespace) ([]string, error) {
-
-	// First, check if the url is a directory
-	isDir, err := IsDir(url, token, namespace)
-	if err != nil {
-		log.Errorln("Failed to check if path", url.Path, " is directory:", err)
-		return nil, err
-	}
-	if !isDir {
-		log.Errorln("Path ", url.Path, " is not a directory.")
-		return nil, errors.New("path " + url.Path + " is not a directory")
-	}
+func walkDavDir(url *url.URL, namespace namespaces.Namespace) ([]string, error) {
 
 	// Create the client to walk the filesystem
 	rootUrl := *url

@@ -28,7 +28,7 @@ require (
 	github.com/stretchr/testify v1.8.4
 	github.com/studio-b12/gowebdav v0.9.0
 	github.com/tg123/go-htpasswd v1.2.1
-	github.com/vbauerster/mpb/v7 v7.5.3
+	github.com/vbauerster/mpb/v8 v8.6.1
 	github.com/youmark/pkcs8 v0.0.0-20201027041543-1326539a0a0a
 	github.com/zsais/go-gin-prometheus v0.1.0
 	go.uber.org/atomic v1.11.0
@@ -106,7 +106,7 @@ require (
 	github.com/magiconair/properties v1.8.7 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/mattn/go-isatty v0.0.19 // indirect
-	github.com/mattn/go-runewidth v0.0.13 // indirect
+	github.com/mattn/go-runewidth v0.0.15 // indirect
 	github.com/mattn/go-sqlite3 v1.14.17 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.4 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
@@ -125,7 +125,7 @@ require (
 	github.com/prometheus/exporter-toolkit v0.10.0 // indirect
 	github.com/prometheus/procfs v0.11.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
-	github.com/rivo/uniseg v0.2.0 // indirect
+	github.com/rivo/uniseg v0.4.4 // indirect
 	github.com/segmentio/asm v1.2.0 // indirect
 	github.com/shurcooL/httpfs v0.0.0-20230704072500-f1e31cf0ba5c // indirect
 	github.com/spf13/afero v1.9.5 // indirect
@@ -144,7 +144,7 @@ require (
 	golang.org/x/exp v0.0.0-20230713183714-613f0c0eb8a1 // indirect
 	golang.org/x/mod v0.12.0 // indirect
 	golang.org/x/sync v0.3.0 // indirect
-	golang.org/x/sys v0.10.0 // indirect
+	golang.org/x/sys v0.11.0 // indirect
 	golang.org/x/text v0.11.0 // indirect
 	golang.org/x/time v0.3.0 // indirect
 	golang.org/x/tools v0.11.0 // indirect

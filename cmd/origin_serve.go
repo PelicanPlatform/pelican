@@ -37,6 +37,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/origin_ui"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/web_ui"
 	"github.com/pelicanplatform/pelican/xrootd"
 	"github.com/pkg/errors"
@@ -113,7 +114,7 @@ func checkXrootdEnv() error {
 	}
 
 	// Ensure the runtime directory exists
-	runtimeDir := viper.GetString("XrootdRun")
+	runtimeDir := param.XrootdRun.GetString()
 	err = config.MkdirAll(runtimeDir, 0755, uid, gid)
 	if err != nil {
 		return errors.Wrapf(err, "Unable to create runtime directory %v", runtimeDir)
@@ -209,7 +210,7 @@ to export the directory /mnt/foo to the path /bar in the data federation`)
 	}
 
 	// If no robots.txt, create a ephemeral one for xrootd to use
-	robotsTxtFile := viper.GetString("RobotsTxtFile")
+	robotsTxtFile := param.RobotsTxtFile.GetString()
 	if _, err := os.Open(robotsTxtFile); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			newPath := filepath.Join(runtimeDir, "robots.txt")
@@ -280,7 +281,8 @@ to export the directory /mnt/foo to the path /bar in the data federation`)
 		return errors.Wrapf(err, "Unable to change ownership of authfile %v"+
 			" to desired daemon group %v", macaroonsSecret, groupname)
 	}
-	if err := xrootd.EmitAuthfile(); err != nil {
+
+  if err := xrootd.EmitAuthfile(); err != nil {
 		return err
 	}
 
@@ -305,7 +307,7 @@ func checkConfigFileReadable(fileName string, errMsg string) error {
 func checkDefaults() error {
 	requiredConfigs := []string{"TLSCertificate", "TLSKey", "XrootdRun", "RobotsTxtFile"}
 	for _, configName := range requiredConfigs {
-		mgr := viper.GetString(configName)
+		mgr := viper.GetString(configName) // TODO: Remove direct access once all parameters are generated
 		if mgr == "" {
 			return errors.New(fmt.Sprintf("Required value of '%v' is not set in config",
 				configName))
@@ -321,7 +323,7 @@ func checkDefaults() error {
 	}
 
 	// As necessary, generate a private key and corresponding cert
-	if err := config.GeneratePrivateKey(viper.GetString("TLSKey"), elliptic.P256()); err != nil {
+	if err := config.GeneratePrivateKey(param.TLSKey.GetString(), elliptic.P256()); err != nil {
 		return err
 	}
 	if err := config.GenerateCert(); err != nil {
@@ -329,11 +331,11 @@ func checkDefaults() error {
 	}
 
 	// TODO: Could upgrade this to a check for a cert in the file...
-	if err := checkConfigFileReadable(viper.GetString("TLSCertificate"),
+	if err := checkConfigFileReadable(param.TLSCertificate.GetString(),
 		"A TLS certificate is required to serve HTTPS"); err != nil {
 		return err
 	}
-	if err := checkConfigFileReadable(viper.GetString("TLSKey"),
+	if err := checkConfigFileReadable(param.TLSKey.GetString(),
 		"A TLS key is required to serve HTTPS"); err != nil {
 		return err
 	}
@@ -349,7 +351,8 @@ func checkDefaults() error {
 	if originUrlStr == "" {
 		return errors.New("OriginUrl must be configured to serve an origin")
 	}
-	if _, err := url.Parse(originUrlStr); err != nil {
+
+  if _, err := url.Parse(originUrlStr); err != nil {
 		return errors.Wrapf(err, "Could not parse the provided OriginUrl (%v)", originUrlStr)
 	}
 
@@ -380,7 +383,7 @@ func configXrootd() (string, error) {
 
 	templ := template.Must(template.New("xrootd.cfg").Parse(xrootdCfg))
 
-	xrootdRun := viper.GetString("XrootdRun")
+	xrootdRun := param.XrootdRun.GetString()
 	configPath := filepath.Join(xrootdRun, "xrootd.cfg")
 	file, err := os.OpenFile(configPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0640)
 	if err != nil {

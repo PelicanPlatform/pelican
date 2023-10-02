@@ -37,6 +37,7 @@ import (
 
 	"github.com/go-ini/ini"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
 )
@@ -93,7 +94,7 @@ func EmitScitokensConfiguration(cfg *ScitokensCfg) error {
 		return err
 	}
 
-	xrootdRun := viper.GetString("XrootdRun")
+	xrootdRun := param.XrootdRun.GetString()
 	configPath := filepath.Join(xrootdRun, "scitokens-generated.cfg.tmp")
 	file, err := os.OpenFile(configPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0640)
 	if err != nil {
@@ -170,7 +171,7 @@ func EmitAuthfile() error {
 }
 
 // Given a filename, load and parse the file into a ScitokensCfg object
-func LoadConfig(fileName string) (cfg ScitokensCfg, err error) {
+func LoadScitokensConfig(fileName string) (cfg ScitokensCfg, err error) {
 	configIni, err := ini.Load(fileName)
 	if err != nil {
 		return cfg, errors.Wrapf(err, "Unable to load the scitokens.cfg at %s", fileName)
@@ -255,7 +256,7 @@ func WriteOriginScitokensConfig() error {
 	}
 
 	// Create the scitokens.cfg file if it's not already present
-	scitokensCfg := viper.GetString("ScitokensConfig")
+	scitokensCfg := param.ScitokensConfig.GetString()
 	err = config.MkdirAll(filepath.Dir(scitokensCfg), 0755, -1, gid)
 	if err != nil {
 		return errors.Wrapf(err, "Unable to create directory %v",
@@ -271,7 +272,7 @@ func WriteOriginScitokensConfig() error {
 			" to desired daemon group %v", scitokensCfg, gid)
 	}
 
-	cfg, err := LoadConfig(scitokensCfg)
+	cfg, err := LoadScitokensConfig(scitokensCfg)
 	if err != nil {
 		return errors.Wrapf(err, "Failed to load scitokens configuration at %s", scitokensCfg)
 	}

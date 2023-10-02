@@ -53,6 +53,9 @@ jobs:
         set -x
         cc_base_total=`grep total ./unit-base.txt | grep -Eo '[0-9]+\.[0-9]+'`
         echo "cc_base_total=$cc_base_total" >> $GITHUB_OUTPUT
+    - name: Add coverage information to action summary
+      if: matrix.os == 'ubuntu-latest' && github.event_name == 'pull_request'
+      run: echo 'Code coverage ' ${{steps.cc.outputs.cc_total}}'% Prev ' ${{steps.cc_b.outputs.cc_base_total}}'%' >> $GITHUB_STEP_SUMMARY
     - name: Run GoReleaser
       uses: goreleaser/goreleaser-action@v4
       with:
