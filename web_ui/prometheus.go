@@ -20,6 +20,7 @@ import (
 	"crypto/ecdsa"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"net/url"
@@ -37,6 +38,7 @@ import (
 	"github.com/go-kit/log/level"
 	"github.com/grafana/regexp"
 	"github.com/lestrrat-go/jwx/v2/jwa"
+	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/mwitkow/go-conntrack"
 	"github.com/oklog/run"
@@ -149,33 +151,65 @@ func checkPromToken(av1 *route.Router) gin.HandlerFunc {
 	 */
 	return func(c *gin.Context) {
 		req := c.Request
-		var token string
+
+		var strToken string
+		var token jwt.Token
+		var err error
 		if authzQuery := req.URL.Query()["authz"]; len(authzQuery) > 0 {
-			token = authzQuery[0]
+			strToken = authzQuery[0]
 		} else if authzHeader := req.Header["Authorization"]; len(authzHeader) > 0 {
-			token = strings.TrimPrefix(authzHeader[0], "Bearer ")
+			strToken = strings.TrimPrefix(authzHeader[0], "Bearer ")
 		} else {
 			c.JSON(403, gin.H{"error": "Permission Denied: Missing token"})
-		}
-
-		privKey, err := pelican_config.GetOriginJWK()
-		if err != nil {
-			c.JSON(400, gin.H{"error": "Failed to retrieve private key"})
 			return
 		}
 
+		token, err = jwt.Parse([]byte(strToken), jwt.WithVerify(false))
+
+		if err != nil {
+			c.JSON(400, gin.H{"error": "Failed to parse token"})
+		}
+
+		fedURL := viper.GetString("FederationURL")
+
+		var bKey *jwk.Key
+		if fedURL == token.Issuer() {
+			err := pelican_config.DiscoverFederation()
+			if err != nil {
+				c.JSON(400, gin.H{"error": "Failed to discover the federation information"})
+			}
+			fedURIFile := viper.GetString("FederationURI")
+			response, err := http.Get(fedURIFile)
+			if err != nil {
+				c.JSON(400, gin.H{"error": "Failed to get federation key file"})
+			}
+			defer response.Body.Close()
+			contents, err := io.ReadAll(response.Body)
+			if err != nil {
+				c.JSON(400, gin.H{"error": "Failed to read federation key file"})
+				return
+			}
+			key, err := jwk.ParseKey(contents, jwk.WithPEM(true))
+			if err != nil {
+				c.JSON(400, gin.H{"error": "Failed to parse Federation key file"})
+				return
+			}
+			bKey = &key
+		} else {
+			bKey, err = pelican_config.GetOriginJWK()
+			if err != nil {
+				c.JSON(400, gin.H{"error": "Failed to retrieve private key"})
+				return
+			}
+		}
+
 		var raw ecdsa.PrivateKey
-		if err = (*privKey).Raw(&raw); err != nil {
+		if err = (*bKey).Raw(&raw); err != nil {
 			c.JSON(400, gin.H{"error": "Failed to extract signing key"})
 			return
 		}
 
-		if err != nil {
-			c.JSON(400, gin.H{"error": "Private Key Retrieval Failed"})
-			return
-		}
-
-		_, err = jwt.Parse([]byte(token), jwt.WithKey(jwa.ES512, raw.PublicKey), jwt.WithValidate(true))
+		_, err = jwt.Parse([]byte(strToken), jwt.WithKey(jwa.ES512, raw.PublicKey), jwt.WithValidate(true))
 
 		if err != nil {
 			c.JSON(403, gin.H{"error": "Permission Denied: Invalid token"})

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -25,9 +26,11 @@ import (
 func TestPrometheusProtection(t *testing.T) {
 
 	/*
-	* Tests that prometheus metrics are behind the origin's token. Specifically it signs a token
-	* with the origin's keyand invokes a prometheus GET endpoint with both URL and Header authorization,
-	* it then does so again with an invalid token and confirms that the correct error is returned
+	* Tests that prometheus metrics are behind the origin's and federation's token. Specifically it signs a token
+	* with the origin's key and invokes a prometheus GET endpoint with both URL and Header authorization, with the
+	* URL authorization, it mimics matching the Federation URL to ensure that check is done, but intercepts with
+	* returning the origin jwk for testing purposes.
+	* This then does so again with an invalid token and confirms that the correct error is returned
 	 */
 
 	// Setup httptest recorder and context for the the unit test
@@ -37,10 +40,17 @@ func TestPrometheusProtection(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	c, r := gin.CreateTestContext(w)
+	// Note, this handler function intercepts the "http.Get call to the federation uri
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		assert.Equal(t, "GET", req.Method, "Not GET Method")
-		_, err := w.Write([]byte(":)"))
-		assert.NoError(t, err)
+		issuerKeyFile := viper.GetString("IssuerKey")
+		contents, err := os.ReadFile(issuerKeyFile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = w.Write(contents)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}))
 	defer ts.Close()
 	c.Request = &http.Request{
@@ -53,9 +63,6 @@ func TestPrometheusProtection(t *testing.T) {
 
 	//Setup a private key and a token
 	viper.Set("IssuerKey", kfile)
-
-	viper.Set("NamespaceURL", "https://get-your-tokens.org")
-	viper.Set("DirectorURL", "https://director-url.org")
 
 	// Generate the origin private and public keys
 	_, err := config.LoadPublicKey("", kfile)
@@ -72,7 +79,7 @@ func TestPrometheusProtection(t *testing.T) {
 	// Create a token
 	issuerURL := url.URL{}
 	issuerURL.Scheme = "https"
-	issuerURL.Host = "test-host"
+	issuerURL.Host = "test-http"
 	now := time.Now()
 	tok, err := jwt.NewBuilder().
 		Issuer(issuerURL.String()).
@@ -92,6 +99,12 @@ func TestPrometheusProtection(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	//Set the Federation information so as not to run through all of DiscoverFederation (that should be a tested elsewhere)
+	viper.Set("FederationURL", "https://test-http")
+	viper.Set("DirectorURL", "https://test-director")
+	viper.Set("NamespaceURL", "https://test-namesapce")
+	viper.Set("FederationURI", ts.URL)
+
 	// Set the request to run through the checkPromToken function
 	r.GET("/api/v1.0/prometheus/*any", checkPromToken(av1))
 	c.Request, _ = http.NewRequest(http.MethodGet, "/api/v1.0/prometheus/test", bytes.NewBuffer([]byte(`{}`)))
@@ -109,12 +122,6 @@ func TestPrometheusProtection(t *testing.T) {
 	// Create a new Recorder and Context for the next HTTPtest call
 	wH := httptest.NewRecorder()
 	cH, rH := gin.CreateTestContext(wH)
-	tsH := httptest.NewServer(http.HandlerFunc(func(wH http.ResponseWriter, req *http.Request) {
-		assert.Equal(t, "GET", req.Method, "Not GET Method")
-		_, err := wH.Write([]byte(":)"))
-		assert.NoError(t, err)
-	}))
-	defer tsH.Close()
 
 	// Set the request to go through the checkPromToken function
 	rH.GET("/api/v1.0/prometheus/*any", checkPromToken(av1))
@@ -124,6 +131,8 @@ func TestPrometheusProtection(t *testing.T) {
 	cH.Request.Header.Set("Authorization", "Bearer "+string(signed))
 	cH.Request.Header.Set("Content-Type", "application/json")
 
+	viper.Set("FederationURL", "")
+
 	rH.ServeHTTP(wH, cH.Request)
 	// Check to see that the code exits with status code 404 after given it a good token
 	assert.Equal(t, 404, wH.Result().StatusCode, "Expected status code of 404 representing failure due to minimal server setup, not token check")
@@ -131,12 +140,7 @@ func TestPrometheusProtection(t *testing.T) {
 	// Create a new Recorder and Context for testing an invalid token
 	wI := httptest.NewRecorder()
 	cI, rI := gin.CreateTestContext(wI)
-	tsI := httptest.NewServer(http.HandlerFunc(func(wI http.ResponseWriter, req *http.Request) {
-		assert.Equal(t, "GET", req.Method, "Not GET Method")
-		_, err := wI.Write([]byte(":)"))
-		assert.NoError(t, err)
-	}))
-	defer tsI.Close()
+
 	c.Request = &http.Request{
 		URL: &url.URL{},
 	}

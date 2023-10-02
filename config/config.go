@@ -204,6 +204,8 @@ func DiscoverFederation() error {
 		viper.Set("NamespaceURL", metadata.NamespaceRegistrationEndpoint)
 	}
 
+	viper.Set("FederationURI", metadata.JwksUri)
+
 	return nil
 }
 
