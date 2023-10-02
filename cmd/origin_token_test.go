@@ -19,16 +19,10 @@
 package main
 
 import (
-	// "net/url"
-	// "os"
 	"path/filepath"
 	"testing"
-	// "fmt"
-	// "bytes"
-	// "io/ioutil"
 
 	"github.com/pelicanplatform/pelican/config"
-	// "github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 )

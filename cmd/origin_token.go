@@ -1,13 +1,14 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"net/url"
 	"regexp"
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
@@ -146,11 +147,12 @@ func CreateEncodedToken(claimsMap map[string]string, profile string, lifetime in
 	}
 
 	lifetimeDuration := time.Duration(lifetime)
-	// Create a jti using uuid4. This will be added to all tokens.
-	u, err := uuid.NewRandom()
-	if err != nil {
-		return "", errors.Wrap(err, "Failed to generate uuid4 for token jti")
+	// Create a json token identifier (jti). This will be added to all tokens.
+	jti_bytes := make([]byte, 16)
+	if _, err := rand.Read(jti_bytes); err != nil {
+		return "", err
 	}
+	jti := base64.RawURLEncoding.EncodeToString(jti_bytes)
 
 	issuerUrlStr := viper.GetString("IssuerUrl")
 	issuerUrl, err := url.Parse(issuerUrlStr)
@@ -181,7 +183,7 @@ func CreateEncodedToken(claimsMap map[string]string, profile string, lifetime in
 		Expiration(now.Add(time.Second * lifetimeDuration)).
 		NotBefore(now).
 		Audience(extractAudFromClaims).
-		JwtID(u.String())
+		JwtID(jti)
 
 	// Add cli-passed claims after setting up the basic token so that we
 	// expose a method to override anything we already set.
