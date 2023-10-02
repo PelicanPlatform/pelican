@@ -44,6 +44,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/namespaces"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/spf13/viper"
 )
 
@@ -465,7 +466,7 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 		sourceFile = "/" + sourceFile
 	}
 
-	OSDFDirectorUrl := config.DirectorUrl.GetString()
+	OSDFDirectorUrl := param.DirectorUrl.GetString()
 	useOSDFDirector := viper.IsSet("DirectorURL")
 
 	var ns namespaces.Namespace

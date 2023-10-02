@@ -25,7 +25,7 @@ import (
 	"path/filepath"
 
 	"github.com/lestrrat-go/jwx/v2/jwk"
-	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 
 	// commented sqlite driver requires CGO
@@ -166,7 +166,7 @@ func getAllNamespaces() ([]*Namespace, error) {
 }
 
 func InitializeDB() error {
-	dbPath := config.NSRegistryLocation.GetString()
+	dbPath := param.NSRegistryLocation.GetString()
 	if dbPath == "" {
 		err := errors.New("Could not get path for the namespace registry database.")
 		log.Fatal(err)

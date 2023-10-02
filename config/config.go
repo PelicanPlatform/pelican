@@ -35,12 +35,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 )
-
-//go:generate go run ../generate/param_generator.go
 
 // Structs holding the OAuth2 state (and any other OSDF config needed)
 
@@ -140,8 +139,8 @@ func DiscoverFederation() error {
 		return nil
 	}
 	log.Debugln("Federation URL:", federationStr)
-	curDirectorURL := DirectorUrl.GetString()
-	curNamespaceURL := NamespaceUrl.GetString()
+	curDirectorURL := param.DirectorUrl.GetString()
+	curNamespaceURL := param.NamespaceUrl.GetString()
 	if len(curDirectorURL) != 0 && len(curNamespaceURL) != 0 {
 		return nil
 	}
@@ -225,7 +224,7 @@ func ComputeExternalAddress() string {
 	if config_url != "" {
 		return config_url
 	}
-	return fmt.Sprintf("%v:%v", viper.GetString("Hostname"), WebPort.GetInt())
+	return fmt.Sprintf("%v:%v", viper.GetString("Hostname"), param.WebPort.GetInt())
 }
 
 func getConfigBase() (string, error) {

@@ -24,8 +24,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
+	"github.com/pelicanplatform/pelican/param"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	ginprometheus "github.com/zsais/go-gin-prometheus"
@@ -72,10 +72,10 @@ func GetEngine() (*gin.Engine, error) {
 }
 
 func RunEngine(engine *gin.Engine) {
-	certFile := config.TLSCertificate.GetString()
-	keyFile := config.TLSKey.GetString()
+	certFile := param.TLSCertificate.GetString()
+	keyFile := param.TLSKey.GetString()
 
-	addr := fmt.Sprintf("%v:%v", viper.GetString("WebAddress"), config.WebPort.GetInt())
+	addr := fmt.Sprintf("%v:%v", viper.GetString("WebAddress"), param.WebPort.GetInt())
 
 	log.Debugln("Starting web engine at address", addr)
 	err := engine.RunTLS(addr, certFile, keyFile)

@@ -40,6 +40,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
@@ -103,7 +104,7 @@ func WaitUntilLogin() error {
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 
 	hostname := viper.GetString("Hostname")
-	webPort := config.WebPort.GetInt()
+	webPort := param.WebPort.GetInt()
 	isTTY := false
 	if term.IsTerminal(int(os.Stdout.Fd())) {
 		isTTY = true
