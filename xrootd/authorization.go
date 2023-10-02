@@ -35,6 +35,7 @@ import (
 
 	"github.com/go-ini/ini"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
 )
@@ -86,7 +87,7 @@ func EmitScitokensConfiguration(cfg *ScitokensCfg) error {
 		return err
 	}
 
-	xrootdRun := config.XrootdRun.GetString()
+	xrootdRun := param.XrootdRun.GetString()
 	configPath := filepath.Join(xrootdRun, "scitokens-generated.cfg.tmp")
 	file, err := os.OpenFile(configPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0640)
 	if err != nil {
@@ -183,7 +184,7 @@ func GenerateMonitoringIssuer() (issuer Issuer, err error) {
 		return
 	}
 	issuer.Name = "Built-in Monitoring"
-	issuer.Issuer = "https://" + viper.GetString("Hostname") + ":" + fmt.Sprint(config.WebPort.GetInt())
+	issuer.Issuer = "https://" + viper.GetString("Hostname") + ":" + fmt.Sprint(param.WebPort.GetInt())
 	issuer.BasePaths = []string{"/pelican/monitoring"}
 	issuer.DefaultUser = "xrootd"
 
@@ -199,7 +200,7 @@ func WriteOriginScitokensConfig() error {
 	}
 
 	// Create the scitokens.cfg file if it's not already present
-	scitokensCfg := config.ScitokensConfig.GetString()
+	scitokensCfg := param.ScitokensConfig.GetString()
 	err = config.MkdirAll(filepath.Dir(scitokensCfg), 0755, -1, gid)
 	if err != nil {
 		return errors.Wrapf(err, "Unable to create directory %v",

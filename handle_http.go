@@ -45,8 +45,8 @@ import (
 	"github.com/vbauerster/mpb/v8"
 	"github.com/vbauerster/mpb/v8/decor"
 
-	"github.com/pelicanplatform/pelican/config"
 	namespaces "github.com/pelicanplatform/pelican/namespaces"
+	"github.com/pelicanplatform/pelican/param"
 )
 
 var p = mpb.New()
@@ -476,7 +476,7 @@ func GetTransport() *http.Transport {
 	onceTransport.Do(func() {
 		transport = setupTransport()
 	})
-	if config.TLSSkipVerify.GetBool() {
+	if param.TLSSkipVerify.GetBool() {
 		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 	}
 	return transport

@@ -34,6 +34,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
@@ -66,7 +67,7 @@ func CreateAdvertiseToken(namespace string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	director := config.DirectorUrl.GetString()
+	director := param.DirectorUrl.GetString()
 	if director == "" {
 		return "", errors.New("Director URL is not known; cannot create advertise token")
 	}
@@ -130,7 +131,7 @@ func VerifyAdvertiseToken(token, namespace string) (bool, error) {
 		ar = jwk.NewCache(ctx)
 		// This should be switched to use the common transport, but that must first be exported
 		client := &http.Client{}
-		if config.TLSSkipVerify.GetBool() {
+		if param.TLSSkipVerify.GetBool() {
 			tr := &http.Transport{
 				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 			}
@@ -184,7 +185,7 @@ func VerifyAdvertiseToken(token, namespace string) (bool, error) {
 }
 
 func GetIssuerURL(prefix string) (string, error) {
-	namespace_url_string := config.NamespaceUrl.GetString()
+	namespace_url_string := param.NamespaceUrl.GetString()
 	if namespace_url_string == "" {
 		return "", errors.New("Namespace URL is not set")
 	}

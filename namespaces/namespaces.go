@@ -29,6 +29,7 @@ import (
 	"strings"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -181,7 +182,7 @@ func GetNamespaces() ([]Namespace, error) {
 // downloadNamespace downloads the namespace information with timeouts
 func downloadNamespace() ([]byte, error) {
 	// Get the namespace url from the environment
-	namespaceUrl := config.TopologyNamespaceURL.GetString()
+	namespaceUrl := param.TopologyNamespaceURL.GetString()
 	if len(namespaceUrl) == 0 {
 		return nil, errors.New("NamespaceURL is not set; unable to locate valid caches")
 	}

@@ -28,6 +28,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	nsregistry "github.com/pelicanplatform/pelican/namespace-registry"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/web_ui"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -49,7 +50,7 @@ func serveNamespaceRegistry( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	}
 
 	// The registry needs its own private key. If one doesn't exist, this will generate it
-	issuerKeyFile := config.IssuerKey.GetString()
+	issuerKeyFile := param.IssuerKey.GetString()
 	err = config.GeneratePrivateKey(issuerKeyFile, elliptic.P521())
 	if err != nil {
 		return errors.Wrap(err, "Failed to generate registry private key")

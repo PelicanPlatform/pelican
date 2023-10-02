@@ -37,6 +37,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/origin_ui"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/web_ui"
 	"github.com/pelicanplatform/pelican/xrootd"
 	"github.com/pkg/errors"
@@ -111,7 +112,7 @@ func checkXrootdEnv() error {
 	}
 
 	// Ensure the runtime directory exists
-	runtimeDir := config.XrootdRun.GetString()
+	runtimeDir := param.XrootdRun.GetString()
 	err = config.MkdirAll(runtimeDir, 0755, uid, gid)
 	if err != nil {
 		return errors.Wrapf(err, "Unable to create runtime directory %v", runtimeDir)
@@ -221,7 +222,7 @@ to export the directory /mnt/foo to the path /bar in the data federation`)
 	}
 
 	// If no robots.txt, create a ephemeral one for xrootd to use
-	robotsTxtFile := config.RobotsTxtFile.GetString()
+	robotsTxtFile := param.RobotsTxtFile.GetString()
 	if _, err := os.Open(robotsTxtFile); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			newPath := filepath.Join(runtimeDir, "robots.txt")
@@ -293,7 +294,7 @@ to export the directory /mnt/foo to the path /bar in the data federation`)
 			" to desired daemon group %v", macaroonsSecret, groupname)
 	}
 
-	scitokensCfg := config.ScitokensConfig.GetString()
+	scitokensCfg := param.ScitokensConfig.GetString()
 	err = config.MkdirAll(path.Dir(scitokensCfg), 0755, -1, gid)
 	if err != nil {
 		return errors.Wrapf(err, "Unable to create directory %v",
@@ -335,7 +336,7 @@ func checkDefaults() error {
 	}
 
 	// As necessary, generate a private key and corresponding cert
-	if err := config.GeneratePrivateKey(config.TLSKey.GetString(), elliptic.P256()); err != nil {
+	if err := config.GeneratePrivateKey(param.TLSKey.GetString(), elliptic.P256()); err != nil {
 		return err
 	}
 	if err := config.GenerateCert(); err != nil {
@@ -343,11 +344,11 @@ func checkDefaults() error {
 	}
 
 	// TODO: Could upgrade this to a check for a cert in the file...
-	if err := checkConfigFileReadable(config.TLSCertificate.GetString(),
+	if err := checkConfigFileReadable(param.TLSCertificate.GetString(),
 		"A TLS certificate is required to serve HTTPS"); err != nil {
 		return err
 	}
-	if err := checkConfigFileReadable(config.TLSKey.GetString(),
+	if err := checkConfigFileReadable(param.TLSKey.GetString(),
 		"A TLS key is required to serve HTTPS"); err != nil {
 		return err
 	}
@@ -371,11 +372,11 @@ func checkDefaults() error {
 	if originUrlParsed.Port() == "" {
 		// No port was specified, let's tack on whatever was passed in the
 		// command line argument
-		viper.Set("OriginUrl", originUrlParsed.String()+":"+fmt.Sprint(config.WebPort.GetInt()))
-	} else if originUrlParsed.Port() != fmt.Sprint(config.WebPort.GetInt()) {
+		viper.Set("OriginUrl", originUrlParsed.String()+":"+fmt.Sprint(param.WebPort.GetInt()))
+	} else if originUrlParsed.Port() != fmt.Sprint(param.WebPort.GetInt()) {
 		// The web port configured via the config file and the webport configured
 		// via commandline don't match. Perhaps the user is confused?
-		return errors.New("Mismatched webports: from command line: " + fmt.Sprint(config.WebPort.GetInt()) +
+		return errors.New("Mismatched webports: from command line: " + fmt.Sprint(param.WebPort.GetInt()) +
 			", from config file: " + originUrlParsed.Port() + ". Please ensure these match")
 	}
 
@@ -406,7 +407,7 @@ func configXrootd() (string, error) {
 
 	templ := template.Must(template.New("xrootd.cfg").Parse(xrootdCfg))
 
-	xrootdRun := config.XrootdRun.GetString()
+	xrootdRun := param.XrootdRun.GetString()
 	configPath := filepath.Join(xrootdRun, "xrootd.cfg")
 	file, err := os.OpenFile(configPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0640)
 	if err != nil {

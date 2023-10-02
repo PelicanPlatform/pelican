@@ -27,7 +27,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
@@ -67,7 +67,7 @@ type (
 
 // Populate internal cache with origin/cache ads
 func AdvertiseOSDF() error {
-	namespaceURL := config.TopologyNamespaceURL.GetString()
+	namespaceURL := param.TopologyNamespaceURL.GetString()
 	if namespaceURL == "" {
 		return errors.New("Topology namespaces.json configuration option (`TopologyNamespaceURL`) not set")
 	}
