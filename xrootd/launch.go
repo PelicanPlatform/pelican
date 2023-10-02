@@ -34,9 +34,9 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 )
 
 type (
@@ -91,7 +91,7 @@ func forwardCommandToLogger(ctx context.Context, daemonName string, cmdStdout io
 }
 
 func (UnprivilegedXrootdLauncher) Launch(ctx context.Context, daemonName string, configPath string) (context.Context, int, error) {
-	xrootdRun := viper.GetString("XrootdRun")
+	xrootdRun := param.XrootdRun.GetString()
 	pidFile := filepath.Join(xrootdRun, "xrootd.pid")
 
 	cmd := exec.CommandContext(ctx, daemonName, "-f", "-s", pidFile, "-c", configPath)

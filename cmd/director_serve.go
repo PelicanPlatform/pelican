@@ -27,16 +27,16 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/web_ui"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
 func generateTLSCertIfNeeded() error {
 
 	// As necessary, generate a private key and corresponding cert
-	if err := config.GeneratePrivateKey(viper.GetString("TLSKey"), elliptic.P256()); err != nil {
+	if err := config.GeneratePrivateKey(param.TLSKey.GetString(), elliptic.P256()); err != nil {
 		return err
 	}
 	if err := config.GenerateCert(); err != nil {
@@ -73,7 +73,7 @@ func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
 
 	// Configure the shortcut middleware to either redirect to a cache
 	// or to an origin
-	defaultResponse := viper.GetString("Director.DefaultResponse")
+	defaultResponse := param.Director_DefaultResponse.GetString()
 	if !(defaultResponse == "cache" || defaultResponse == "origin") {
 		return fmt.Errorf("The director's default response must either be set to 'cache' or 'origin',"+
 			" but you provided %q. Was there a typo?", defaultResponse)
