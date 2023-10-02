@@ -25,6 +25,7 @@ jobs:
         run: |
           mkdir -p origin_ui/src/out
           touch origin_ui/src/out/placeholder
+          go generate ./...
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v3
         with:
