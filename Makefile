@@ -72,6 +72,7 @@ web-clean:
 .PHONY: web-build
 web-build: origin_ui/src/out/index.html
 origin_ui/src/out/index.html : $(WEBSITE_SRC_FILES)
+	go generate ./...
 ifeq ($(USE_DOCKER),0)
 	@cd $(WEBSITE_SRC_PATH) && npm install && npm run build
 else
