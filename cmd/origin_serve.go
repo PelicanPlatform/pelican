@@ -282,7 +282,7 @@ to export the directory /mnt/foo to the path /bar in the data federation`)
 			" to desired daemon group %v", macaroonsSecret, groupname)
 	}
 
-  if err := xrootd.EmitAuthfile(); err != nil {
+	if err := xrootd.EmitAuthfile(); err != nil {
 		return err
 	}
 
@@ -352,7 +352,7 @@ func checkDefaults() error {
 		return errors.New("OriginUrl must be configured to serve an origin")
 	}
 
-  if _, err := url.Parse(originUrlStr); err != nil {
+	if _, err := url.Parse(originUrlStr); err != nil {
 		return errors.Wrapf(err, "Could not parse the provided OriginUrl (%v)", originUrlStr)
 	}
 

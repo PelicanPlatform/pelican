@@ -127,7 +127,7 @@ func TestGenerateConfig(t *testing.T) {
 	issuer, err = GenerateMonitoringIssuer()
 	require.NoError(t, err)
 	assert.Equal(t, issuer.Name, "Built-in Monitoring")
-	assert.Equal(t, issuer.Issuer, "https://"+viper.GetString("Hostname")+":"+fmt.Sprint(param.WebPort.GetInt()))
+	assert.Equal(t, issuer.Issuer, "https://"+viper.GetString("Hostname")+":"+fmt.Sprint(viper.GetInt("Port")))
 	require.Equal(t, len(issuer.BasePaths), 1)
 	assert.Equal(t, issuer.BasePaths[0], "/pelican/monitoring")
 	assert.Equal(t, issuer.DefaultUser, "xrootd")
