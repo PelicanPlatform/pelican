@@ -21,7 +21,7 @@ package origin_ui
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"time"
@@ -32,6 +32,10 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 )
+
+type directorResponse struct {
+	Error string `json:"error"`
+}
 
 func PeriodicAdvertiseOrigin() error {
 	ticker := time.NewTicker(1 * time.Minute)
@@ -132,8 +136,16 @@ func AdvertiseOrigin() error {
 	}
 	defer resp.Body.Close()
 
+	body, _ = io.ReadAll(resp.Body)
 	if resp.StatusCode > 299 {
-		return fmt.Errorf("Error response %v from director registration: %v", resp.StatusCode, resp.Status)
+		// return fmt.Errorf("Error response %v from director registration: %v", resp.StatusCode, resp.Status)
+
+		var respErr directorResponse
+		if unmarshalErr := json.Unmarshal(body, &respErr); unmarshalErr != nil { // Error creating json
+			return errors.Wrapf(unmarshalErr, "Could not unmarshall the director's response, which responded %v from director registration: %v", resp.StatusCode, resp.Status)
+		}
+		return errors.Errorf("Error during director registration: %v\n", respErr.Error)
+
 	}
 
 	return nil
