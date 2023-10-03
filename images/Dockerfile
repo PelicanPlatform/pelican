@@ -37,6 +37,8 @@ COPY --from=website-build /webapp/out ./origin_ui/src/out
 
 RUN goreleaser --clean --snapshot
 
+FROM hub.opensciencegrid.org/sciauth/scitokens-oauth2-server:release AS scitokens-oauth2-server
+
 FROM --platform=linux/amd64 opensciencegrid/software-base:$BASE_OSG_SERIES-el8-$BASE_YUM_REPO
 
 # Create the xrootd user with a fixed GID/UID
@@ -47,6 +49,7 @@ RUN useradd -o -u 10940 -g 10940 -s /bin/sh xrootd
 RUN yum -y update \
     && yum -y install xrootd xrootd-client xrootd-server \
     && yum clean all \
+    && yum install -y curl java-11-openjdk-headless java-11-openjdk-devel \
     && rm -rf /var/cache/yum/
 
 WORKDIR /pelican
@@ -59,6 +62,61 @@ COPY images/supervisord/supervisord.conf /etc/supervisord.conf
 # daemons here
 COPY images/supervisord/* /etc/supervisord.d/
 COPY images/entrypoint.sh /entrypoint.sh
+
+
+####
+# Now, start installing the SciTokens OA4MP server from
+# - https://github.com/scitokens/scitokens-oauth2-server/blob/master/Dockerfile
+####
+
+# Download and install tomcat
+RUN useradd -r -s /sbin/nologin tomcat ;\
+    mkdir -p /opt/tomcat ;\
+    curl -s -L https://archive.apache.org/dist/tomcat/tomcat-9/v9.0.80/bin/apache-tomcat-9.0.80.tar.gz | tar -zxf - -C /opt/tomcat --strip-components=1 ;\
+    chgrp -R tomcat /opt/tomcat/conf ;\
+    chmod g+rwx /opt/tomcat/conf ;\
+    chmod g+r /opt/tomcat/conf/* ;\
+    chown -R tomcat /opt/tomcat/logs/ /opt/tomcat/temp/ /opt/tomcat/webapps/ /opt/tomcat/work/ ;\
+    chgrp -R tomcat /opt/tomcat/bin /opt/tomcat/lib ;\
+    chmod g+rwx /opt/tomcat/bin ;\
+    chmod g+r /opt/tomcat/bin/* ;\
+    ln -s /usr/lib64/libapr-1.so.0 /opt/tomcat/lib/libapr-1.so.0
+
+RUN \
+    # Create various empty directories needed by the webapp
+    mkdir -p /opt/tomcat/webapps/scitokens-server ;\
+    curl -s -L https://github.com/javaee/javamail/releases/download/JAVAMAIL-1_6_2/javax.mail.jar > /opt/tomcat/lib/javax.mail.jar ;\
+    # Install support for the QDL CLI
+    curl -L -s https://github.com/ncsa/OA4MP/releases/download/v5.3.1/oa2-qdl-installer.jar >/tmp/oa2-qdl-installer.jar ;\
+    java -jar /tmp/oa2-qdl-installer.jar -dir /opt/qdl ;\
+    rm /tmp/oa2-qdl-installer.jar ;\
+    mkdir -p /opt/qdl/var/scripts ;\
+    # Remove the default manager apps and examples -- we don't use these
+    rm -rf /opt/tomcat/webapps/ROOT /opt/tomcat/webapps/docs /opt/tomcat/webapps/examples /opt/tomcat/webapps/host-manager /opt/tomcat/webapps/manager ;\
+    true;
+
+# The generate_jwk.sh script is part of the documented bootstrap of the container.
+COPY --from=scitokens-oauth2-server /usr/local/bin/generate_jwk.sh /usr/local/bin/generate_jwk.sh
+
+# Add other QDL CLI tools and configs
+COPY --from=scitokens-oauth2-server /opt/qdl /opt/qdl
+
+# Add in the tomcat server configuration
+COPY --from=scitokens-oauth2-server --chown=root:tomcat /opt/tomcat/conf/server.xml /opt/tomcat/conf/server.xml
+
+# Copy over the OA4MP webapp.
+COPY --from=scitokens-oauth2-server --chown=tomcat:tomcat /opt/tomcat/webapps/scitokens-server/WEB-INF/web.xml /opt/tomcat/webapps/scitokens-server/WEB-INF/web.xml
+COPY --from=scitokens-oauth2-server --chown=tomcat:tomcat /opt/scitokens-server/ /opt/scitokens-server/
+
+ENV JAVA_HOME=/usr/lib/jvm/jre \
+    CATALINA_PID=/opt/tomcat/temp/tomcat.pid \
+    CATALINA_HOME=/opt/tomcat \
+    CATALINA_BASE=/opt/tomcat \
+    CATALINA_OPTS="-Xms512M -Xmx1024M -server -XX:+UseParallelGC" \
+    JAVA_OPTS="-Djava.awt.headless=true -Djava.security.egd=file:/dev/./urandom -Djava.library.path=/opt/tomcat/lib" \
+    ST_HOME="/opt/scitokens-server" \
+    QDL_HOME="/opt/qdl" \
+    PATH="${ST_HOME}/bin:${QDL_HOME}/bin:${PATH}"
 
 RUN chmod +x /pelican/osdf-client \
     && chmod +x /entrypoint.sh
