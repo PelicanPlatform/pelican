@@ -51,6 +51,7 @@ import (
 type OptionsStruct struct {
 	ProgressBars bool
 	Recursive    bool
+	Plugin       bool
 	Token        string
 	Version      string
 }
@@ -192,15 +193,22 @@ func getToken(destination *url.URL, namespace namespaces.Namespace, isWrite bool
 			token_location, _ = filepath.Abs(".condor_creds/" + token_filename)
 		}
 		if token_location == "" {
-			value, err := AcquireToken(destination, namespace, isWrite)
-			if err == nil {
-				return value, nil
+			if !ObjectClientOptions.Plugin {
+				value, err := AcquireToken(destination, namespace, isWrite)
+				if err == nil {
+					return value, nil
+				}
+				log.Errorln("Failed to generate a new authorization token for this transfer: ", err)
+				log.Errorln("This transfer requires authorization to complete and no token is available")
+				err = errors.New("failed to find or generate a token as required for " + destination.String())
+				AddError(err)
+				return "", err
+			} else {
+				log.Errorln("Credential is required, but currently mssing")
+				err := errors.New("Credential is required for " + destination.String() + " but is currently missing")
+				AddError(err)
+				return "", err
 			}
-			log.Errorln("Failed to generate a new authorization token for this transfer: ", err)
-			log.Errorln("This transfer requires authorization to complete and no token is available")
-			err = errors.New("failed to find or generate a token as required for " + destination.String())
-			AddError(err)
-			return "", err
 		}
 	}
 

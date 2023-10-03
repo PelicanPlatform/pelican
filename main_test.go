@@ -180,6 +180,11 @@ func TestGetToken(t *testing.T) {
 	err = os.Chdir(currentDir)
 	assert.NoError(t, err)
 
+	ObjectClientOptions.Plugin = true
+	_, err = getToken(url, namespace, true, "")
+	assert.EqualError(t, err, "Credential is required for osdf:///user/foo but is currently missing")
+	ObjectClientOptions.Plugin = false
+
 }
 
 // TestGetTokenName tests getTokenName

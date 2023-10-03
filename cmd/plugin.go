@@ -78,6 +78,7 @@ func stashPluginMain(args []string) {
 	pelican.ObjectClientOptions.Recursive = false
 	pelican.ObjectClientOptions.ProgressBars = false
 	pelican.ObjectClientOptions.Version = version
+	pelican.ObjectClientOptions.Plugin = true
 	setLogging(log.PanicLevel)
 	methods := []string{"http"}
 	var infile, outfile, testCachePath string
