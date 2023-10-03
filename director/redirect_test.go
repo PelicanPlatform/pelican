@@ -134,6 +134,9 @@ func TestDirectorRegistration(t *testing.T) {
 
 	c.Request.Header.Set("Authorization", string(signed))
 	c.Request.Header.Set("Content-Type", "application/json")
+	// Hard code the current min version. When this test starts failing because of new stuff in the Director,
+	// we'll know that means it's time to update the min version in redirect.go
+	c.Request.Header.Set("User-Agent", "pelican-origin/7.0.0")
 
 	r.ServeHTTP(w, c.Request)
 
@@ -183,9 +186,62 @@ func TestDirectorRegistration(t *testing.T) {
 
 	cInv.Request.Header.Set("Authorization", string(signedInv))
 	cInv.Request.Header.Set("Content-Type", "application/json")
+	// Hard code the current min version. When this test starts failing because of new stuff in the Director,
+	// we'll know that means it's time to update the min version in redirect.go
+	cInv.Request.Header.Set("User-Agent", "pelican-origin/7.0.0")
 
 	rInv.ServeHTTP(wInv, cInv.Request)
 	assert.Equal(t, 400, wInv.Result().StatusCode, "Expected failing status code of 400")
 	body, _ := io.ReadAll(wInv.Result().Body)
 	assert.Equal(t, `{"error":"Authorization token verification failed"}`, string(body), "Failure wasn't because token verification failed")
+
+	// Repeat again but with bad origin version
+	wInv = httptest.NewRecorder()
+	cInv, rInv = gin.CreateTestContext(wInv)
+	tsInv = httptest.NewServer(http.HandlerFunc(func(wInv http.ResponseWriter, req *http.Request) {
+		assert.Equal(t, "POST", req.Method, "Not POST Method")
+		_, err := wInv.Write([]byte(":)"))
+		assert.NoError(t, err)
+	}))
+	defer tsInv.Close()
+	cInv.Request = &http.Request{
+		URL: &url.URL{},
+	}
+
+	// Create a private key to use for the test
+	privateKeyInv, err = ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
+	assert.NoError(t, err, "Error generating private key")
+
+	// Convert from raw ecdsa to jwk.Key
+	pKeyInv, err = jwk.FromRaw(privateKeyInv)
+	assert.NoError(t, err, "Unable to convert ecdsa.PrivateKey to jwk.Key")
+
+	//Assign Key id to the private key
+	err = jwk.AssignKeyID(pKeyInv)
+	assert.NoError(t, err, "Error assigning kid to private key")
+
+	//Set an algorithm for the key
+	err = pKeyInv.Set(jwk.AlgorithmKey, jwa.ES512)
+	assert.NoError(t, err, "Unable to set algorithm for pKey")
+
+	// Create a token to be inserted
+	issuerURL.Host = cInv.Request.URL.Host
+
+	// Sign token with previously created private key (mismatch to what's in the keyset)
+	signedInv, err = jwt.Sign(tok, jwt.WithKey(jwa.ES512, pKeyInv))
+	assert.NoError(t, err, "Error signing token")
+
+	// Create the request and set the headers
+	rInv.POST("/", RegisterOrigin)
+	cInv.Request, _ = http.NewRequest(http.MethodPost, "/", bytes.NewBuffer([]byte(`{"Namespaces": [{"Path": "/foo/bar", "URL": "https://get-your-tokens.org"}]}`)))
+
+	cInv.Request.Header.Set("Authorization", string(signedInv))
+	cInv.Request.Header.Set("Content-Type", "application/json")
+	cInv.Request.Header.Set("User-Agent", "pelican-origin/6.0.0")
+
+	rInv.ServeHTTP(wInv, cInv.Request)
+	assert.Equal(t, 500, wInv.Result().StatusCode, "Expected failing status code of 500")
+	body, _ = io.ReadAll(wInv.Result().Body)
+	assert.Equal(t, `{"error":"Incompatible versions detected: The director does not support your origin version (6.0.0). Please update to 7.0.0 or newer."}`,
+		string(body), "Failure wasn't because of version incompatibility")
 }

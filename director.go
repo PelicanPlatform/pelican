@@ -19,6 +19,8 @@
 package pelican
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/url"
 	"sort"
@@ -29,6 +31,10 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
+
+type directorResponse struct {
+	Error string `json:"error"`
+}
 
 // Simple parser to that takes a "values" string from a header and turns it
 // into a map of key/value pairs
@@ -129,16 +135,37 @@ func QueryDirector(source string, directorUrl string) (resp *http.Response, err 
 		},
 	}
 
-	log.Debugln("Querying OSDF Director at", resourceUrl)
-	resp, err = client.Get(resourceUrl)
-	log.Debugln("Director's response:", resp)
-
+	req, err := http.NewRequest("GET", resourceUrl, nil)
 	if err != nil {
-		log.Errorln("Failed to get response from OSDF Director:", err)
-		return
+		log.Errorln("Failed to create an HTTP request:", err)
+		return nil, err
 	}
 
+	// Include the Client's version as a User-Agent header. The Director will decide
+	// if it supports the version, and provide an error message in the case that it
+	// cannot.
+	userAgent := "pelican-client/" + ObjectClientOptions.Version
+	req.Header.Set("User-Agent", userAgent)
+
+	// Perform the HTTP request
+	resp, err = client.Do(req)
+	if err != nil {
+		log.Errorln("Failed to get response from the director:", err)
+		return
+	}
 	defer resp.Body.Close()
+	log.Debugln("Director's response:", resp)
+
+	// Check HTTP response -- should be 307 (redirect), else something went wrong
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 307 {
+		var respErr directorResponse
+		if unmarshalErr := json.Unmarshal(body, &respErr); unmarshalErr != nil { // Error creating json
+			return nil, errors.Wrap(unmarshalErr, "Could not unmarshall the director's response")
+		}
+		return nil, errors.Errorf("The director reported an error: %s\n", respErr.Error)
+	}
+
 	return
 }
 
