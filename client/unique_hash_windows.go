@@ -19,7 +19,7 @@
  *
  ***************************************************************/
 
-package pelican
+package client
 
 import (
 	"bytes"
