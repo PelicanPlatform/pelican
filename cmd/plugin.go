@@ -78,6 +78,7 @@ func stashPluginMain(args []string) {
 	client.ObjectClientOptions.Recursive = false
 	client.ObjectClientOptions.ProgressBars = false
 	client.ObjectClientOptions.Version = version
+	client.ObjectClientOptions.Plugin = true
 	setLogging(log.PanicLevel)
 	methods := []string{"http"}
 	var infile, outfile, testCachePath string
