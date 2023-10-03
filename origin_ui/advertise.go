@@ -26,7 +26,7 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/pelicanplatform/pelican"
+	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
@@ -128,7 +128,7 @@ func AdvertiseOrigin() error {
 
 	// We should switch this over to use the common transport, but for that to happen
 	// that function needs to be exported from pelican
-	tr := pelican.GetTransport()
+	tr := client.GetTransport()
 	client := http.Client{Transport: tr}
 
 	resp, err := client.Do(req)

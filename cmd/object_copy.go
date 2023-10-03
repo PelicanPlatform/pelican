@@ -24,7 +24,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/pelicanplatform/pelican"
+	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/namespaces"
 	log "github.com/sirupsen/logrus"
@@ -72,7 +72,7 @@ func init() {
 
 func copyMain(cmd *cobra.Command, args []string) {
 
-	pelican.ObjectClientOptions.Version = version
+	client.ObjectClientOptions.Version = version
 
 	if val, err := cmd.Flags().GetBool("debug"); err == nil && val {
 		setLogging(log.DebugLevel)
@@ -95,14 +95,14 @@ func copyMain(cmd *cobra.Command, args []string) {
 	}
 
 	// Set the progress bars to the command line option
-	pelican.ObjectClientOptions.Token, _ = cmd.Flags().GetString("token")
+	client.ObjectClientOptions.Token, _ = cmd.Flags().GetString("token")
 
 	// Check if the program was executed from a terminal
 	// https://rosettacode.org/wiki/Check_output_device_is_a_terminal#Go
 	if fileInfo, _ := os.Stdout.Stat(); (fileInfo.Mode() & os.ModeCharDevice) != 0 {
-		pelican.ObjectClientOptions.ProgressBars = true
+		client.ObjectClientOptions.ProgressBars = true
 	} else {
-		pelican.ObjectClientOptions.ProgressBars = false
+		client.ObjectClientOptions.ProgressBars = false
 	}
 
 	if val, err := cmd.Flags().GetBool("namespaces"); err == nil && val {
@@ -119,7 +119,7 @@ func copyMain(cmd *cobra.Command, args []string) {
 	// Print out all of the caches and exit
 	if val, err := cmd.Flags().GetBool("list-names"); err == nil && val {
 		listName, _ := cmd.Flags().GetString("cache-list-name")
-		cacheList, err := pelican.GetBestCache(listName)
+		cacheList, err := client.GetBestCache(listName)
 		if err != nil {
 			log.Errorln("Failed to get best caches:", err)
 			os.Exit(1)
@@ -135,7 +135,7 @@ func copyMain(cmd *cobra.Command, args []string) {
 			log.Errorln("Failed to determine correct cache list")
 			os.Exit(1)
 		}
-		cacheList, err := pelican.GetBestCache(listName)
+		cacheList, err := client.GetBestCache(listName)
 		if err != nil {
 			log.Errorln("Failed to get best cache: ", err)
 		}
@@ -162,13 +162,13 @@ func copyMain(cmd *cobra.Command, args []string) {
 	nearestCache, nearestCacheIsPresent := os.LookupEnv("NEAREST_CACHE")
 
 	if nearestCacheIsPresent {
-		pelican.NearestCache = nearestCache
-		pelican.NearestCacheList = append(pelican.NearestCacheList, pelican.NearestCache)
-		pelican.CacheOverride = true
+		client.NearestCache = nearestCache
+		client.NearestCacheList = append(client.NearestCacheList, client.NearestCache)
+		client.CacheOverride = true
 	} else if cache, _ := cmd.Flags().GetString("cache"); cache != "" {
-		pelican.NearestCache = cache
-		pelican.NearestCacheList = append(pelican.NearestCacheList, cache)
-		pelican.CacheOverride = true
+		client.NearestCache = cache
+		client.NearestCacheList = append(client.NearestCacheList, cache)
+		client.CacheOverride = true
 	}
 
 	// Convert the methods
@@ -176,7 +176,7 @@ func copyMain(cmd *cobra.Command, args []string) {
 	splitMethods := strings.Split(methodNames, ",")
 
 	// If the user overrides the cache, then only use HTTP
-	if pelican.CacheOverride {
+	if client.CacheOverride {
 		splitMethods = []string{"http"}
 	}
 
@@ -193,25 +193,25 @@ func copyMain(cmd *cobra.Command, args []string) {
 	for _, src := range source {
 		var tmpDownloaded int64
 		isRecursive, _ := cmd.Flags().GetBool("recursive")
-		tmpDownloaded, result = pelican.DoStashCPSingle(src, dest, splitMethods, isRecursive)
+		tmpDownloaded, result = client.DoStashCPSingle(src, dest, splitMethods, isRecursive)
 		downloaded += tmpDownloaded
 		if result != nil {
 			lastSrc = src
 			break
 		} else {
-			pelican.ClearErrors()
+			client.ClearErrors()
 		}
 	}
 
 	// Exit with failure
 	if result != nil {
 		// Print the list of errors
-		errMsg := pelican.GetErrors()
+		errMsg := client.GetErrors()
 		if errMsg == "" {
 			errMsg = result.Error()
 		}
 		log.Errorln("Failure transferring " + lastSrc + ": " + errMsg)
-		if pelican.ErrorsRetryable() {
+		if client.ErrorsRetryable() {
 			log.Errorln("Errors are retryable")
 			os.Exit(11)
 		}
