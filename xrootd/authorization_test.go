@@ -56,9 +56,8 @@ var (
 
 func TestEmitCfg(t *testing.T) {
 	dirname := t.TempDir()
-	os.Setenv("PELICAN_XROOTD_RUNLOCATION", dirname)
-	defer os.Unsetenv("PELICAN_XROOTD_RUNLOCATION")
 	viper.Reset()
+	viper.Set("Xrootd.RunLocation", dirname)
 	err := config.InitClient()
 	assert.Nil(t, err)
 
@@ -85,9 +84,8 @@ func TestEmitCfg(t *testing.T) {
 
 func TestLoadScitokensConfig(t *testing.T) {
 	dirname := t.TempDir()
-	os.Setenv("PELICAN_XROOTD_RUNLOCATION", dirname)
-	defer os.Unsetenv("PELICAN_XROOTD_RUNLOCATION")
 	viper.Reset()
+	viper.Set("Xrootd.RunLocation", dirname)
 	err := config.InitClient()
 	assert.Nil(t, err)
 
