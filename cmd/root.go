@@ -25,6 +25,7 @@ import (
 	"strings"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -104,7 +105,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolP("debug", "d", false, "Enable debug logs")
 
 	rootCmd.PersistentFlags().StringP("federation", "f", "", "Pelican federation to utilize")
-	if err := viper.BindPFlag("FederationURL", rootCmd.PersistentFlags().Lookup("federation")); err != nil {
+	if err := viper.BindPFlag("Federation.DiscoveryUrl", rootCmd.PersistentFlags().Lookup("federation")); err != nil {
 		panic(err)
 	}
 
@@ -127,7 +128,7 @@ func initConfig() {
 	if err := viper.BindPFlag("Debug", rootCmd.PersistentFlags().Lookup("debug")); err != nil {
 		panic(err)
 	}
-	if err := viper.BindPFlag("WebPort", portFlag); err != nil {
+	if err := viper.BindPFlag("Server.WebPort", portFlag); err != nil {
 		panic(err)
 	}
 
@@ -142,7 +143,7 @@ func initConfig() {
 	}
 
 	setLogging(log.ErrorLevel)
-	if viper.GetBool("Debug") {
+	if param.Debug.GetBool() {
 		setLogging(log.DebugLevel)
 	}
 }

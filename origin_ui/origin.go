@@ -43,7 +43,6 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"github.com/tg123/go-htpasswd"
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/term"
@@ -103,8 +102,8 @@ func WaitUntilLogin() error {
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 
-	hostname := viper.GetString("Hostname")
-	webPort := param.WebPort.GetInt()
+	hostname := param.Server_Hostname.GetString()
+	webPort := param.Server_WebPort.GetInt()
 	isTTY := false
 	if term.IsTerminal(int(os.Stdout.Fd())) {
 		isTTY = true
@@ -142,7 +141,7 @@ func WaitUntilLogin() error {
 }
 
 func writePasswordEntry(user, password string) error {
-	fileName := viper.GetString("OriginUI.PasswordFile")
+	fileName := param.Origin_UIPasswordFile.GetString()
 	passwordBytes := []byte(password)
 	if len(passwordBytes) > 72 {
 		return errors.New("Password too long")
@@ -177,7 +176,7 @@ func writePasswordEntry(user, password string) error {
 }
 
 func configureAuthDB() error {
-	fileName := viper.GetString("OriginUI.PasswordFile")
+	fileName := param.Origin_UIPasswordFile.GetString()
 	if fileName == "" {
 		return errors.New("Location of password file not set")
 	}

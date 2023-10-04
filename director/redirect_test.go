@@ -137,7 +137,7 @@ func TestDirectorRegistration(t *testing.T) {
 	}()
 
 	// Set the namespaceurl
-	viper.Set("NamespaceURL", "https://get-your-tokens.org")
+	viper.Set("Federation.NamespaceURL", "https://get-your-tokens.org")
 
 	// Create the  request and set the headers
 	r.POST("/", RegisterOrigin)

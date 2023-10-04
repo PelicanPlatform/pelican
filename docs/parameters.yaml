@@ -17,6 +17,10 @@
 # This file contains structured documentation about the Pelican parameters.
 # While it is somewhat human-readable, it is meant to help with the documentation
 # generation.
+
+############################
+#     Top-Level Configs    #
+############################
 ---
 name: ConfigBase
 description: >-
@@ -26,23 +30,12 @@ default: "~/.config/pelican"
 components: ["*"]
 type: filename
 ---
-name: TLSCertificate
+name: Debug
 description: >-
-  The name of a file containing an X.509 host certificate to use for TLS
-  authentication when running server components of Pelican.
-type: filename
-root_default: /etc/pelican/certificates/tls.crt
-default: "$ConfigBase/certificates/tls.crt"
-components: ["origin", "nsregistry", "director"]
----
-name: TLSKey
-description: >-
-  The name of a file containing a private key corresponding to the TLSCertificate.
-  Used when running server components of Pelican.
-type: filename
-root_default: /etc/pelican/certificates/tls.key
-default: "$ConfigBase/certificates/tls.key"
-components: ["origin", "nsregistry", "director"]
+  A bool indicating whether Pelican should emit debug messages in its log.
+type: bool
+default: false
+components: ["*"]
 ---
 name: TLSSkipVerify
 description: >-
@@ -51,7 +44,277 @@ type: bool
 default: false
 components: ["origin", "nsregistry", "director"]
 ---
-name: XrootdRun
+name: IssuerKey
+description: >-
+  The name of the file containing a service's private `issuer.jwk` key.
+type: filename
+root_default: /etc/pelican/issuer.jwk
+default: $ConfigBase/issuer.jwk
+components: ["client", "nsregistry", "director"]
+---
+name: WebAddress
+description: >-
+  A string-encoded IP address that the origin is configured to listen on.
+type: string
+default: 0.0.0.0
+components: ["origin"]
+---
+
+############################
+# Federation-Level Configs #
+############################
+name: Federation.DiscoveryUrl
+description: >-
+  A URL pointing to the federation's metadata discovery host.
+type: url
+default: none
+components: ["*"]
+---
+name: Federation.TopologyNamespaceUrl
+description: >-
+  A URL containing namespace information for origins and caches configured via the OSG Topology application (a legacy integration). The URL
+  should point to the hosted namespace.json.
+type: url
+osdf_default: https://topology.opensciencegrid.org/stashcache/namespaces.json
+default: none
+components: ["director"]
+---
+name: Federation.DirectorUrl
+description: >-
+  A URL indicating where a director service is hosted.
+type: url
+osdf_default: Default is determined dynamically through metadata at <federation URL>/.well-known/pelican-configuration
+default: none
+components: ["client", "origin"]
+---
+name: Federation.NamespaceUrl
+description: >-
+  A URL indicating where the namespace registry service is hosted.
+type: url
+osdf_default: Default is determined dynamically through metadata at <federation URL>/.well-known/pelican-configuration
+default: none
+components: ["client", "director", "origin"]
+---
+
+############################
+#   Client-Level Configs   #
+############################
+name: Client.StoppedTransferTimeout
+description: >-
+  A timeout indicating when a "stopped transfer" event should be triggered.
+type: int
+default: 100
+components: ["client"]
+---
+name: Client.SlowTransferRampupTime
+description: >-
+  A duration indicating the rampup period for a slow transfer.
+type: int
+default: 30
+components: ["client"]
+---
+name: Client.SlowTransferWindow
+description: >-
+  A duration indicating the sliding window over which to consider transfer speeds for slow transfers.
+type: int
+default: 30
+components: ["client"]
+---
+name: Client.DisableHttpProxy
+description: >-
+  A bool indicating whether the client's HTTP proxy should be disabled.
+type: bool
+default: false
+components: ["client"]
+---
+name: Client.DisableProxyFallback
+description: >-
+  A bool indicating whether the a proxy fallback should be used by the client.
+type: bool
+default: false
+components: ["client"]
+---
+name: Client.MinimumDownloadSpeed
+description: >-
+  The minimum speed allowed for a client download before an error is thrown.
+type: int
+default: 102400
+components: ["client"]
+---
+
+############################
+#   Origin-level Configs   #
+############################
+name: Origin.ExportVolume
+description: >-
+  A path to the volume exported by an origin.
+type: string
+default: none
+components: ["origin"]
+---
+name: Origin.NamespacePrefix
+description: >-
+  The filepath prefix at which an origin's contents are made globally available, eg /pelican/PUBLIC.
+type: string
+default: none
+components: ["origin"]
+---
+name: Origin.Multiuser
+description: >-
+  A bool indicating whether an origin is "multiuser", ie whether the underlying XRootD instance must be configured in multi user mode.
+type: bool
+root_default: true
+default: false
+components: ["origin"]
+---
+name: Origin.UIPasswordFile
+description: >-
+  A filepath specifying where the Origin UI password file should be stored.
+type: string
+default: $ConfigBase/origin-ui-passwd
+components: ["origin"]
+---
+
+############################
+#  Director-level configs  #
+############################
+name: Director.DefaultResponse
+description: >-
+  The default response type of a redirect for a director instance. Can be either "cache" or "origin". If a director
+  is hosted at https://director.com, then a GET request to https://director.com/foo/bar.txt will either redirect to
+  the nearest cache for namespace /foo if Director.DefaultResponse is set to "cache" or to the origin for /foo if
+  it is set to "origin".
+type: string
+default: cache
+components: ["director"]
+---
+name: Director.MaxMindKeyFile
+description: >-
+  A filepath to a MaxMind API key. The director service uses the MaxMind GeoLite City database (available [here](https://dev.maxmind.com/geoip/docs/databases/city-and-country))
+  to determine which cache is nearest to a client's IP address. The database, if not already found, will be downloaded
+  automatically when a director is served and a valid key is present.
+type: url
+default: none
+components: ["director"]
+---
+name: Director.GeoIPLocation
+description: >-
+  A filepath to the intended location of the MaxMind GeoLite City database. This option can be used either to load
+  an existing database, or to configure the preferred download location if Pelican has a MaxMind API key.
+type: filename
+root_default: /var/cache/pelican/maxmind/GeoLite2-City.mmdb
+default: $ConfigBase/maxmind/GeoLite2-city.mmdb
+components: ["director"]
+---
+
+############################
+#  Registry-level configs  #
+############################
+name: Registry.DbLocation
+description: >-
+  A filepath to the intended location of the namespace registry's database.
+type: filename
+root_default: /var/lib/pelican/registry.sqlite
+default: $ConfigBase/ns-registry.sqlite
+components: ["nsregistry"]
+---
+name: Registry.OIDCClientIDFile
+description: >-
+  A filepath to a file containing an OIDC Client ID. This is used by the namespace registry to establish OIDC information
+  for authenticated registration.
+type: filename
+root_default: /etc/pelican/oidc-client-id
+default: $ConfigBase/oidc-client-id
+components: ["nsregistry"]
+---
+name: Registry.OIDCClientSecretFile
+description: >-
+  A filepath to a file containing an OIDC Client Secret. This is used by the namespace registry to establish OIDC information
+  for authenticated registration.
+type: filename
+root_default: /etc/pelican/oidc-client-secret
+default: $ConfigBase/oidc-client-secret
+components: ["nsregistry"]
+---
+name: Registry.OIDCDeviceAuthEndpoint
+description: >-
+  A URL describing an OIDC Device Auth Endpoint. This is used by the namespace registry to establish OIDC information
+  for authenticated registration.
+type: url
+default: none
+components: ["nsregistry"]
+---
+name: Registry.OIDCTokenEndpoint
+description: >-
+  A URL describing an OIDC Token Endpoint. This is used by the namespace registry to establish OIDC information
+  for authenticated registration.
+type: url
+default: none
+components: ["nsregistry"]
+---
+name: Registry.OIDCUserInfoEndpoint
+description: >-
+  A URL describing an OIDC User Info Endpoint. This is used by the namespace registry to establish OIDC information
+  for authenticated registration.
+type: url
+default: none
+components: ["nsregistry"]
+---
+
+############################
+#   Server-level configs   #
+############################
+name: Server.TLSCertificate
+description: >-
+  The name of a file containing an X.509 host certificate to use for TLS
+  authentication when running server components of Pelican.
+type: filename
+root_default: /etc/pelican/certificates/tls.crt
+default: "$ConfigBase/certificates/tls.crt"
+components: ["origin", "nsregistry", "director"]
+---
+name: Server.TLSKey
+description: >-
+  The name of a file containing a private key corresponding to the TLSCertificate.
+  Used when running server components of Pelican.
+type: filename
+root_default: /etc/pelican/certificates/tls.key
+default: "$ConfigBase/certificates/tls.key"
+components: ["origin", "nsregistry", "director"]
+---
+name: Server.WebPort
+description: >-
+  The port number the Pelican web interface will be bound to.
+type: int
+default: 8444
+components: ["nsregistry", "director", "origin"]
+---
+name: Server.ExternalAddress
+description: >-
+  A URL indicating the server's address as it appears externally.
+type: url
+default: none
+components: ["origin", "director", "nsregistry"]
+---
+name: Server.Hostname
+description: >-
+  The server's hostname
+type: url
+default: none
+components: ["origin", "director", "nsregistry"]
+---
+name: Server.IssuerJwks
+description: >-
+  A filepath indicating where the server's public JSON web keyset can be found.
+type: string
+default: none
+components: ["origin", "director", "nsregistry"]
+---
+
+############################
+#   XRootD-level Configs   #
+############################
+name: Xrootd.RunLocation
 description: >-
   A directory where temporary configurations will be stored for the xrootd daemon
   started by the origin.
@@ -63,7 +326,7 @@ root_default: /run/pelican/xrootd
 default: $XDG_RUNTIME_DIR/pelican
 components: ["origin"]
 ---
-name: RobotsTxtFile
+name: Xrootd.RobotsTxtFile
 description: >-
   Origins may be indexed by web search engines; to control the behavior of search
   engines, one may provide local policy via a [robots.txt file](https://en.wikipedia.org/wiki/Robots.txt).
@@ -75,7 +338,7 @@ root_default: /etc/pelican/robots.txt
 default: $ConfigBase/robots.txt
 components: ["origin"]
 ---
-name: ScitokensConfig
+name: Xrootd.ScitokensConfig
 description: >-
   The location of a file configuring xrootd's
   [token-based authorization subsystem](https://github.com/xrootd/xrootd/blob/master/src/XrdSciTokens/README.md).
@@ -85,120 +348,91 @@ type: filename
 root_default: /etc/pelican/xrootd/scitokens.cfg
 default: $ConfigBase/xrootd/scitokens.cfg
 ---
-name: Director.DefaultResponse
+name: Xrootd.Mount
 description: >-
-  The default response type of a redirect for a director instance. Can be either "cache" or "origin". If a director
-  is hosted at https://director.com, then a GET request to https://director.com/foo/bar.txt will either redirect to
-  the nearest cache for namespace /foo if Director.DefaultResponse is set to "cache" or to the origin for /foo if
-  it is set to "origin".
+  The mount path for an instance of XRootD.
 type: string
-default: cache
-components: ["director"]
----
-name: TopologyNamespaceURL
-description: >-
-  A URL containing namespace information for origins and caches configured via the OSG Topology application (a legacy integration). The URL
-  should point to the hosted namespace.json.
-type: url
-osdf_default: https://topology.opensciencegrid.org/stashcache/namespaces.json
 default: none
-components: ["director"]
+components: ["origin"]
 ---
-name: MaxMindKeyFile
+name: Xrootd.MacaroonsKeyFile
 description: >-
-  A filepath to a MaxMind API key. The director service uses the MaxMind GeoLite City database (available [here](https://dev.maxmind.com/geoip/docs/databases/city-and-country))
-  to determine which cache is nearest to a client's IP address. The database, if not already found, will be downloaded
-  automatically when a director is served and a valid key is present.
-type: url
+  The filepath to a Macaroons key for setting up authorization in XRootD.
+type: string
 default: none
-components: ["director"]
+components: ["origin"]
 ---
-name: GeoIPLocation
+name: Xrootd.Authfile
 description: >-
-  A filepath to the intended location of the MaxMind GeoLite City database. This option can be used either to load
-  an existing database, or to configure the preferred download location if Pelican has a MaxMind API key.
-type: filename
-root_default: /var/cache/pelican/maxmind/GeoLite2-City.mmdb
-default: $ConfigBase/maxmind/GeoLite2-city.mmdb
-components: ["director"]
----
-name: DirectorUrl
-description: >-
-  A URL indicating where a director service is hosted.
-type: url
-osdf_default: Default is determined dynamically through metadata at <federation URL>/.well-known/pelican-configuration
+  The filepath to an auth file for setting up authorization in XRootD.
+type: string
 default: none
-components: ["client", "origin"]
+components: ["origin"]
 ---
-name: NamespaceUrl
+name: Xrootd.ManagerHost
 description: >-
-  A URL indicating where the namespace registry service is hosted.
-type: url
-osdf_default: Default is determined dynamically through metadata at <federation URL>/.well-known/pelican-configuration
-default: none
-components: ["client", "director", "origin"]
----
-name: IssuerKey
-description: >-
-  The name of the file containing a service's private `issuer.jwk` key.
-type: filename
-root_default: /etc/pelican/issuer.jwk
-default: $ConfigBase/issuer.jwk
-components: ["client", "nsregistry", "director"]
----
-name: NSRegistryLocation
-description: >-
-  A filepath to the intended location of the namespace registry's database.
-type: filename
-root_default: /var/lib/pelican/registry.sqlite
-default: $ConfigBase/ns-registry.sqlite
-components: ["nsregistry"]
----
-name: OIDC.ClientIDFile
-description: >-
-  A filepath to a file containing an OIDC Client ID. This is used by the namespace registry to establish OIDC information
-  for authenticated registration.
-type: filename
-root_default: /etc/pelican/oidc-client-id
-default: $ConfigBase/oidc-client-id
-components: ["nsregistry"]
----
-name: OIDC.ClientSecretFile
-description: >-
-  A filepath to a file containing an OIDC Client Secret. This is used by the namespace registry to establish OIDC information
-  for authenticated registration.
-type: filename
-root_default: /etc/pelican/oidc-client-secret
-default: $ConfigBase/oidc-client-secret
-components: ["nsregistry"]
----
-name: OIDC.DeviceAuthEndpoint
-description: >-
-  A URL describing an OIDC Device Auth Endpoint. This is used by the namespace registry to establish OIDC information
-  for authenticated registration.
+  A URL pointing toward the XRootD instance's Manager Host.
 type: url
 default: none
-components: ["nsregistry"]
+components: ["origin"]
 ---
-name: OIDC.TokenEndpoint
+name: Xrootd.SummaryMonitoringHost
 description: >-
-  A URL describing an OIDC Token Endpoint. This is used by the namespace registry to establish OIDC information
-  for authenticated registration.
+  A URL pointing toward the XRootD instance's Summary Monitoring Host.
 type: url
 default: none
-components: ["nsregistry"]
+components: ["origin"]
 ---
-name: OIDC.UserInfoEndpoint
+name: Xrootd.DetailedMonitoringHost
 description: >-
-  A URL describing an OIDC User Info Endpoint. This is used by the namespace registry to establish OIDC information
-  for authenticated registration.
+  A URL pointing toward the XRootD instance's Detailed Monitoring Host.
 type: url
 default: none
-components: ["nsregistry"]
+components: ["origin"]
 ---
-name: WebPort
+name: Xrootd.LocalMonitoringHost
 description: >-
-  The port number the Pelican web interface will be bound to.
+  A URL pointing toward the XRootD instance's Local Monitoring Host.
+type: url
+default: none
+components: ["origin"]
+---
+name: Xrootd.TLSCertFile
+description: >-
+  A filepath for a TLS certificate to be used by XRootD.
+type: string
+default: /etc/pki/tls/cert.pem
+components: ["origin"]
+---
+name: Xrootd.Sitename
+description: >-
+  The sitename, as configured for XRootD.
+type: string
+default: none
+components: ["origin"]
+---
+
+############################
+# Prometheus-level configs #
+############################
+name: Prometheus.MonitoringData
+description: >-
+  A filepath where Prometheus should host its monitoring data.
+type: string
+root_default: /var/lib/pelican/monitoring/data
+default: $ConfigBase/monitoring/data
+components: ["origin"]
+---
+name: Prometheus.MonitoringPortLower
+description: >-
+  The lower end of a range of monitoring ports for Prometheus configuration.
 type: int
-default: 8444
-components: ["nsregistry", "director", "origin"]
+default: 9930
+components: ["origin"]
+---
+name: Prometheus.MonitoringPortHigher
+description: >-
+  The lower end of a range of monitoring ports for Prometheus configuration.
+type: int
+default: 9999
+components: ["origin"]

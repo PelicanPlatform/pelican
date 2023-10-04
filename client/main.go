@@ -259,7 +259,7 @@ func CheckOSDF(destination string, methods []string) (remoteSize uint64, err err
 		federationUrl, _ := url.Parse(dest_uri.String())
 		federationUrl.Scheme = "https"
 		federationUrl.Path = ""
-		viper.Set("FederationURL", federationUrl.String())
+		viper.Set("Federation.DiscoveryUrl", federationUrl.String())
 		err = config.DiscoverFederation()
 		if err != nil {
 			return 0, err
@@ -397,7 +397,7 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 			federationUrl, _ := url.Parse(source_url.String())
 			federationUrl.Scheme = "https"
 			federationUrl.Path = ""
-			viper.Set("FederationURL", federationUrl.String())
+			viper.Set("Federation.DiscoveryUrl", federationUrl.String())
 			err = config.DiscoverFederation()
 			if err != nil {
 				return 0, err
@@ -412,7 +412,7 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 			federationUrl, _ := url.Parse(dest_url.String())
 			federationUrl.Scheme = "https"
 			federationUrl.Path = ""
-			viper.Set("FederationURL", federationUrl.String())
+			viper.Set("Federation.DiscoveryUrl", federationUrl.String())
 			err = config.DiscoverFederation()
 			if err != nil {
 				return 0, err
@@ -466,8 +466,8 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 		sourceFile = "/" + sourceFile
 	}
 
-	OSDFDirectorUrl := param.DirectorUrl.GetString()
-	useOSDFDirector := viper.IsSet("DirectorURL")
+	OSDFDirectorUrl := param.Federation_DirectorUrl.GetString()
+	useOSDFDirector := viper.IsSet("Federation.DirectorURL")
 
 	var ns namespaces.Namespace
 	if useOSDFDirector {

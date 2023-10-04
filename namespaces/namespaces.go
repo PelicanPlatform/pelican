@@ -182,12 +182,12 @@ func GetNamespaces() ([]Namespace, error) {
 // downloadNamespace downloads the namespace information with timeouts
 func downloadNamespace() ([]byte, error) {
 	// Get the namespace url from the environment
-	namespaceUrl := param.TopologyNamespaceURL.GetString()
-	if len(namespaceUrl) == 0 {
-		return nil, errors.New("NamespaceURL is not set; unable to locate valid caches")
+	topoNamespaceUrl := param.Federation_TopologyNamespaceUrl.GetString()
+	if len(topoNamespaceUrl) == 0 {
+		return nil, errors.New("Federation.TopologyNamespaceUrl is not set; unable to locate valid caches")
 	}
-	log.Debugln("Downloading namespaces information from", namespaceUrl)
-	resp, err := http.Get(namespaceUrl)
+	log.Debugln("Downloading namespaces information from", topoNamespaceUrl)
+	resp, err := http.Get(topoNamespaceUrl)
 	if err != nil {
 		return nil, err
 	}

@@ -94,7 +94,7 @@ func EmitScitokensConfiguration(cfg *ScitokensCfg) error {
 		return err
 	}
 
-	xrootdRun := param.XrootdRun.GetString()
+	xrootdRun := param.Xrootd_RunLocation.GetString()
 	configPath := filepath.Join(xrootdRun, "scitokens-generated.cfg.tmp")
 	file, err := os.OpenFile(configPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0640)
 	if err != nil {
@@ -256,7 +256,7 @@ func WriteOriginScitokensConfig() error {
 	}
 
 	// Create the scitokens.cfg file if it's not already present
-	scitokensCfg := param.ScitokensConfig.GetString()
+	scitokensCfg := param.Xrootd_ScitokensConfig.GetString()
 	err = config.MkdirAll(filepath.Dir(scitokensCfg), 0755, -1, gid)
 	if err != nil {
 		return errors.Wrapf(err, "Unable to create directory %v",
