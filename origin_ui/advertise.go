@@ -123,7 +123,7 @@ func AdvertiseOrigin() error {
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
-	userAgent := "pelican-origin/" + pelican.ObjectClientOptions.Version
+	userAgent := "pelican-origin/" + client.ObjectClientOptions.Version
 	req.Header.Set("User-Agent", userAgent)
 
 	// We should switch this over to use the common transport, but for that to happen
