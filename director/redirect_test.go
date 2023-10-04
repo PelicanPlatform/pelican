@@ -208,27 +208,8 @@ func TestDirectorRegistration(t *testing.T) {
 		URL: &url.URL{},
 	}
 
-	// Create a private key to use for the test
-	privateKeyInv, err = ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
-	assert.NoError(t, err, "Error generating private key")
-
-	// Convert from raw ecdsa to jwk.Key
-	pKeyInv, err = jwk.FromRaw(privateKeyInv)
-	assert.NoError(t, err, "Unable to convert ecdsa.PrivateKey to jwk.Key")
-
-	//Assign Key id to the private key
-	err = jwk.AssignKeyID(pKeyInv)
-	assert.NoError(t, err, "Error assigning kid to private key")
-
-	//Set an algorithm for the key
-	err = pKeyInv.Set(jwk.AlgorithmKey, jwa.ES512)
-	assert.NoError(t, err, "Unable to set algorithm for pKey")
-
-	// Create a token to be inserted
-	issuerURL.Host = cInv.Request.URL.Host
-
-	// Sign token with previously created private key (mismatch to what's in the keyset)
-	signedInv, err = jwt.Sign(tok, jwt.WithKey(jwa.ES512, pKeyInv))
+	// Sign token with the good key
+	signedInv, err = jwt.Sign(tok, jwt.WithKey(jwa.ES512, pKey))
 	assert.NoError(t, err, "Error signing token")
 
 	// Create the request and set the headers

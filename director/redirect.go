@@ -132,9 +132,6 @@ func versionCompatCheck(ginCtx *gin.Context) error {
 	case "origin":
 		minCompatVer = minOriginVersion
 	}
-	if err != nil {
-		return errors.Wrapf(err, "Could not parse min version compatible for service %s\n", service)
-	}
 
 	if reqVer.LessThan(minCompatVer) {
 		return errors.Errorf("The director does not support your %s version (%s). Please update to %s or newer.", service, reqVer.String(), minCompatVer.String())

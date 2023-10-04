@@ -160,7 +160,6 @@ func QueryDirector(source string, directorUrl string) (resp *http.Response, err 
 	// Check HTTP response -- should be 307 (redirect), else something went wrong
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != 307 {
-		fmt.Printf("\n\n\nresp.StatusCode %d\n\n\n", resp.StatusCode)
 		var respErr directorResponse
 		if unmarshalErr := json.Unmarshal(body, &respErr); unmarshalErr != nil { // Error creating json
 			return nil, errors.Wrap(unmarshalErr, "Could not unmarshall the director's response")
