@@ -48,7 +48,6 @@ import (
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/common/version"
 	"github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"go.uber.org/atomic"
 
 	common_config "github.com/prometheus/common/config"
@@ -257,9 +256,9 @@ func checkPromToken(av1 *route.Router) gin.HandlerFunc {
 func ConfigureEmbeddedPrometheus(engine *gin.Engine) error {
 
 	cfg := flagConfig{}
-	ListenAddress := fmt.Sprintf("0.0.0.0:%v", param.WebPort.GetInt())
+	ListenAddress := fmt.Sprintf("0.0.0.0:%v", param.Server_WebPort.GetInt())
 	cfg.webTimeout = model.Duration(5 * time.Minute)
-	cfg.serverStoragePath = viper.GetString("MonitoringData")
+	cfg.serverStoragePath = param.Prometheus_MonitoringData.GetString()
 	cfg.tsdb.MinBlockDuration = model.Duration(2 * time.Hour)
 	cfg.tsdb.NoLockfile = false
 	cfg.tsdb.WALCompression = true

@@ -39,7 +39,7 @@ var pubkeyPath string
 var privkeyPath string
 
 func getNamespaceEndpoint() (string, error) {
-	namespaceEndpoint := param.NamespaceUrl.GetString()
+	namespaceEndpoint := param.Federation_NamespaceUrl.GetString()
 	if namespaceEndpoint == "" {
 		return "", errors.New("No namespace registry specified; either give the federation name (-f) or specify the namespace API endpoint directly (e.g., --namespace-url=https://namespace.osg-htc.org/namespaces)")
 	}

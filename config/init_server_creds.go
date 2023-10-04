@@ -233,7 +233,7 @@ func GenerateCert() error {
 		return err
 	}
 
-	tlsCert := param.TLSCertificate.GetString()
+	tlsCert := param.Server_TLSCertificate.GetString()
 	if file, err := os.Open(tlsCert); err == nil {
 		file.Close()
 		return nil
@@ -255,7 +255,7 @@ func GenerateCert() error {
 		return err
 	}
 
-	tlsKey := param.TLSKey.GetString()
+	tlsKey := param.Server_TLSKey.GetString()
 	privateKey, err := LoadPrivateKey(tlsKey)
 	if err != nil {
 		return err
@@ -385,7 +385,7 @@ func GeneratePrivateKey(keyLocation string, curve elliptic.Curve) error {
 }
 
 func GenerateIssuerJWKS() (*jwk.Set, error) {
-	existingJWKS := viper.GetString("IssuerJWKS")
+	existingJWKS := param.Server_IssuerJwks.GetString()
 	issuerKeyFile := param.IssuerKey.GetString()
 	return LoadPublicKey(existingJWKS, issuerKeyFile)
 }

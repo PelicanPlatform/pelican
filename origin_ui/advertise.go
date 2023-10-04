@@ -59,7 +59,7 @@ func PeriodicAdvertiseOrigin() error {
 }
 
 func AdvertiseOrigin() error {
-	name := viper.GetString("Sitename")
+	name := param.Xrootd_Sitename.GetString()
 	if name == "" {
 		return errors.New("Origin name isn't set")
 	}
@@ -70,7 +70,7 @@ func AdvertiseOrigin() error {
 	originUrl := viper.GetString("OriginUrl")
 
 	// Here we instantiate the namespaceAd slice, but we still need to define the namespace
-	namespaceUrl, err := url.Parse(param.NamespaceUrl.GetString())
+	namespaceUrl, err := url.Parse(param.Federation_NamespaceUrl.GetString())
 	if err != nil {
 		return errors.Wrap(err, "Bad NamespaceUrl")
 	}
@@ -78,7 +78,7 @@ func AdvertiseOrigin() error {
 		return errors.New("No NamespaceUrl is set")
 	}
 
-	prefix := viper.GetString("NamespacePrefix")
+	prefix := param.Origin_NamespacePrefix.GetString()
 
 	// TODO: Need to figure out where to get some of these values
 	// 		 so that they aren't hardcoded...
@@ -101,13 +101,13 @@ func AdvertiseOrigin() error {
 		return errors.Wrap(err, "Failed to generate JSON description of origin")
 	}
 
-	directorUrlStr := param.DirectorUrl.GetString()
+	directorUrlStr := param.Federation_DirectorUrl.GetString()
 	if directorUrlStr == "" {
 		return errors.New("Director endpoint URL is not known")
 	}
 	directorUrl, err := url.Parse(directorUrlStr)
 	if err != nil {
-		return errors.Wrap(err, "Failed to parse DirectorURL")
+		return errors.Wrap(err, "Failed to parse Federation.DirectorURL")
 	}
 	directorUrl.Path = "/api/v1.0/director/registerOrigin"
 

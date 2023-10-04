@@ -92,7 +92,7 @@ func forwardCommandToLogger(ctx context.Context, daemonName string, cmdStdout io
 }
 
 func (UnprivilegedXrootdLauncher) Launch(ctx context.Context, daemonName string, configPath string) (context.Context, int, error) {
-	xrootdRun := param.XrootdRun.GetString()
+	xrootdRun := param.Xrootd_RunLocation.GetString()
 	pidFile := filepath.Join(xrootdRun, "xrootd.pid")
 
 	cmd := exec.CommandContext(ctx, daemonName, "-f", "-s", pidFile, "-c", configPath)
