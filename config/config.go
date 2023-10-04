@@ -270,7 +270,6 @@ func setupTransport() {
 		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 	}
 
-	return
 }
 
 // function to get/setup the transport (only once)
