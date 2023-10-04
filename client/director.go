@@ -25,6 +25,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/pelicanplatform/pelican/config"
 	namespaces "github.com/pelicanplatform/pelican/namespaces"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -121,7 +122,7 @@ func QueryDirector(source string, directorUrl string) (resp *http.Response, err 
 	// redirect. We use the Location url elsewhere (plus we still need to do the token
 	// dance!)
 	var client *http.Client
-	tr := GetTransport()
+	tr := config.GetTransport()
 	client = &http.Client{
 		Transport: tr,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {

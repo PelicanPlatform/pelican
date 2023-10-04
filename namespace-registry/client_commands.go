@@ -34,7 +34,6 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
-	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
 	log "github.com/sirupsen/logrus"
@@ -62,8 +61,7 @@ func makeRequest(url string, method string, data map[string]interface{}, headers
 	for key, val := range headers {
 		req.Header.Set(key, val)
 	}
-
-	tr := client.GetTransport()
+	tr := config.GetTransport()
 	client := &http.Client{Transport: tr}
 
 	resp, err := client.Do(req)
