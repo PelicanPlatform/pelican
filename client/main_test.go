@@ -60,7 +60,7 @@ func TestGetIps(t *testing.T) {
 func TestGetToken(t *testing.T) {
 
 	// Need a namespace for token acquisition
-	defer os.Unsetenv("PELICAN_FEDERATIONTOPOLOGYNAMESPACEURL")
+	defer os.Unsetenv("PELICAN_FEDERATION_TOPOLOGYNAMESPACEURL")
 	os.Setenv("PELICAN_TOPOLOGY_NAMESPACE_URL", "https://topology.opensciencegrid.org/osdf/namespaces")
 	viper.Reset()
 	err := config.InitClient()
