@@ -19,10 +19,12 @@
 package config
 
 import (
+	"crypto/tls"
 	_ "embed"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -86,6 +88,10 @@ var (
 	// Potentially holds a directory to cleanup
 	tempRunDir  string
 	cleanupOnce sync.Once
+
+	// Our global transports that only will get reconfigured if needed
+	transport     *http.Transport
+	onceTransport sync.Once
 )
 
 // Based on the name of the current binary, determine the preferred "style"
@@ -236,6 +242,45 @@ func getConfigBase() (string, error) {
 	return filepath.Join(home, ".config", "pelican"), nil
 }
 
+func setupTransport() {
+	//Getting timeouts and other information from defaults.yaml
+	maxIdleConns := viper.GetInt("Transport.MaxIdleIcons")
+	idleConnTimeout := viper.GetDuration("Transport.IdleConnTimeout")
+	transportTLSHandshakeTimeout := viper.GetDuration("Transport.TLSHandshakeTimeout")
+	expectContinueTimeout := viper.GetDuration("Transport.ExpectContinueTimeout")
+	responseHeaderTimeout := viper.GetDuration("Transport.ResponseHeaderTimeout")
+
+	transportDialerTimeout := viper.GetDuration("Transport.Dialer.Timeout")
+	transportKeepAlive := viper.GetDuration("Transport.Dialer.KeepAlive")
+
+	//Set up the transport
+	transport = &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   transportDialerTimeout,
+			KeepAlive: transportKeepAlive,
+		}).DialContext,
+		MaxIdleConns:          maxIdleConns,
+		IdleConnTimeout:       idleConnTimeout,
+		TLSHandshakeTimeout:   transportTLSHandshakeTimeout,
+		ExpectContinueTimeout: expectContinueTimeout,
+		ResponseHeaderTimeout: responseHeaderTimeout,
+	}
+	if param.TLSSkipVerify.GetBool() {
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	}
+
+	return
+}
+
+// function to get/setup the transport (only once)
+func GetTransport() *http.Transport {
+	onceTransport.Do(func() {
+		setupTransport()
+	})
+	return transport
+}
+
 func InitServer() error {
 	configDir := viper.GetString("ConfigDir")
 	viper.SetConfigType("yaml")
@@ -314,6 +359,9 @@ func InitServer() error {
 			return err
 		}
 	}
+
+	setupTransport()
+
 	return nil
 }
 
@@ -418,6 +466,8 @@ func InitClient() error {
 		break
 	}
 	viper.Set("MinimumDownloadSpeed", downloadLimit)
+
+	setupTransport()
 
 	return DiscoverFederation()
 }
