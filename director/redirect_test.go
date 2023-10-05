@@ -39,13 +39,13 @@ func (m *MockCache) Register(u string, options ...jwk.RegisterOption) error {
 }
 
 func NamespaceAdContainsPath(ns []NamespaceAd, path string) bool {
-	for _, v := range(ns) {
+	for _, v := range ns {
 		if v.Path == path {
 			return true
 		}
 	}
 	return false
-} 
+}
 
 func TestDirectorRegistration(t *testing.T) {
 	/*
@@ -203,7 +203,7 @@ func TestDirectorRegistration(t *testing.T) {
 	assert.Equal(t, 400, wInv.Result().StatusCode, "Expected failing status code of 400")
 	body, _ := io.ReadAll(wInv.Result().Body)
 	assert.Equal(t, `{"error":"Authorization token verification failed"}`, string(body), "Failure wasn't because token verification failed")
-	
+
 	namaspaceADs = ListNamespacesFromOrigins()
 	assert.False(t, NamespaceAdContainsPath(namaspaceADs, "/foo/bar"), "Found namespace in the director cache even if the token validation failed.")
 	serverAds.DeleteAll()
