@@ -261,6 +261,8 @@ func GenerateCert() error {
 		return err
 	}
 
+	// Note: LoadPrivateKey will return nil for the private key if the file
+	// doesn't exist.  In that case, we'll do a self-signed certificate
 	caPrivateKey, err := LoadPrivateKey(viper.GetString("TLSCAKey"))
 	if err != nil {
 		return err
@@ -290,8 +292,17 @@ func GenerateCert() error {
 		BasicConstraintsValid: true,
 	}
 	template.DNSNames = []string{hostname}
-	derBytes, err := x509.CreateCertificate(rand.Reader, &template, caCert, &(privateKey.PublicKey),
-		caPrivateKey)
+
+	// If there's pre-existing CA certificates, self-sign instead of using the generated CA
+	signingCert := caCert
+	signingKey := caPrivateKey
+	if signingKey == nil {
+		signingCert = &template
+		signingKey = privateKey
+	}
+
+	derBytes, err := x509.CreateCertificate(rand.Reader, &template, signingCert, &(privateKey.PublicKey),
+		signingKey)
 	if err != nil {
 		return err
 	}
