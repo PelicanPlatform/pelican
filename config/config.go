@@ -231,7 +231,7 @@ func ComputeExternalAddress() string {
 	if config_url != "" {
 		return config_url
 	}
-	return fmt.Sprintf("%v:%v", param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
+	return fmt.Sprintf("%v:%v", param.Server_Hostname.GetString(), param.Server_Port.GetInt())
 }
 
 func getConfigBase() (string, error) {
@@ -318,18 +318,18 @@ func InitServer() error {
 	viper.SetDefault("Xrootd.MacaroonsKeyFile", filepath.Join(configDir, "macaroons-secret"))
 	viper.SetDefault("IssuerKey", filepath.Join(configDir, "issuer.jwk"))
 	viper.SetDefault("Origin.UIPasswordFile", filepath.Join(configDir, "origin-ui-passwd"))
-	viper.SetDefault("Registry.OIDCClientIDFile", filepath.Join(configDir, "oidc-client-id"))
-	viper.SetDefault("Registry.OIDCClientSecretFile", filepath.Join(configDir, "oidc-client-secret"))
+	viper.SetDefault("OIDC.ClientIDFile", filepath.Join(configDir, "oidc-client-id"))
+	viper.SetDefault("OIDC.ClientSecretFile", filepath.Join(configDir, "oidc-client-secret"))
 	if IsRootExecution() {
 		viper.SetDefault("Xrootd.RunLocation", "/run/pelican/xrootd")
 		viper.SetDefault("Origin.Multiuser", true)
 		viper.SetDefault("Director.GeoIPLocation", "/var/cache/pelican/maxmind/GeoLite2-City.mmdb")
 		viper.SetDefault("Registry.DbLocation", "/var/lib/pelican/registry.sqlite")
-		viper.SetDefault("Prometheus.MonitoringData", "/var/lib/pelican/monitoring/data")
+		viper.SetDefault("Monitoring.DataLocation", "/var/lib/pelican/monitoring/data")
 	} else {
 		viper.SetDefault("Director.GeoIPLocation", filepath.Join(configDir, "maxmind", "GeoLite2-City.mmdb"))
 		viper.SetDefault("Registry.DbLocation", filepath.Join(configDir, "ns-registry.sqlite"))
-		viper.SetDefault("Prometheus.MonitoringData", filepath.Join(configDir, "monitoring/data"))
+		viper.SetDefault("Monitoring.DataLocation", filepath.Join(configDir, "monitoring/data"))
 
 		if userRuntimeDir := os.Getenv("XDG_RUNTIME_DIR"); userRuntimeDir != "" {
 			runtimeDir := filepath.Join(userRuntimeDir, "pelican")
@@ -491,7 +491,19 @@ func InitClient() error {
 		}
 		break
 	}
-	viper.Set("Client.MinimumDownloadSpeed", downloadLimit)
+	if viper.IsSet("MinimumDownloadSpeed") {
+		viper.SetDefault("Client.MinimumDownloadSpeed", viper.GetString("MinimumDownloadSpeed"))
+	} else {
+		viper.Set("Client.MinimumDownloadSpeed", downloadLimit)
+	}
+
+	// Handle more legacy config options
+	if viper.IsSet("DisableProxyFallback") {
+		viper.SetDefault("Client.DisableProxyFallback", viper.GetString("DisableProxyFallback"))
+	}
+	if viper.IsSet("DisableHttpProxy") {
+		viper.SetDefault("Client.DisableHttpProxy", viper.GetString("DisableHttpProxy"))
+	}
 
 	setupTransport()
 

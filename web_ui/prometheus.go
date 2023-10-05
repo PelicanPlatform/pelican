@@ -140,9 +140,9 @@ func runtimeInfo() (api_v1.RuntimeInfo, error) {
 func ConfigureEmbeddedPrometheus(engine *gin.Engine) error {
 
 	cfg := flagConfig{}
-	ListenAddress := fmt.Sprintf("0.0.0.0:%v", param.Server_WebPort.GetInt())
+	ListenAddress := fmt.Sprintf("0.0.0.0:%v", param.Server_Port.GetInt())
 	cfg.webTimeout = model.Duration(5 * time.Minute)
-	cfg.serverStoragePath = param.Prometheus_MonitoringData.GetString()
+	cfg.serverStoragePath = param.Monitoring_DataLocation.GetString()
 	cfg.tsdb.MinBlockDuration = model.Duration(2 * time.Hour)
 	cfg.tsdb.NoLockfile = false
 	cfg.tsdb.WALCompression = true
