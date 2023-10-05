@@ -11,6 +11,7 @@ require (
 	github.com/go-kit/log v0.2.1
 	github.com/golang-jwt/jwt v3.2.2+incompatible
 	github.com/grafana/regexp v0.0.0-20221122212121-6b5c0a4cb7fd
+	github.com/hashicorp/go-version v1.6.0
 	github.com/jellydator/ttlcache/v3 v3.0.1
 	github.com/jsipprell/keyctl v1.0.4-0.20211208153515-36ca02672b6c
 	github.com/lestrrat-go/jwx/v2 v2.0.11
