@@ -19,13 +19,13 @@
 package director
 
 // List all namespaces from origins registered at the director
-func ListNamespaces() []NamespaceAd {
+func ListNamespacesFromOrigins() []NamespaceAd {
 
 	serverAdMutex.RLock()
 	defer serverAdMutex.RUnlock()
 
 	serverAdItems := serverAds.Items()
-	namespaces := make([]NamespaceAd, len(serverAdItems), 0)
+	namespaces := make([]NamespaceAd, 0, len(serverAdItems))
 	for _, item := range serverAdItems {
 		if item.Key().Type == OriginType {
 			for _, v := range item.Value() {
