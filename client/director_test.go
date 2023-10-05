@@ -188,7 +188,7 @@ func TestQueryDirector(t *testing.T) {
 	expectedLocation := "http://redirect.com"
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Location", expectedLocation)
-		w.WriteHeader(http.StatusTemporaryRedirect)
+		w.WriteHeader(http.StatusFound)
 	}
 	server := httptest.NewServer(http.HandlerFunc(handler))
 	defer server.Close()
@@ -206,7 +206,7 @@ func TestQueryDirector(t *testing.T) {
 	}
 
 	// Check the HTTP status code
-	if actualResp.StatusCode != http.StatusTemporaryRedirect {
+	if actualResp.StatusCode != http.StatusFound {
 		t.Errorf("Expected HTTP status code %d, but got %d", http.StatusFound, actualResp.StatusCode)
 	}
 }

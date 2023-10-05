@@ -24,18 +24,10 @@ import (
 	"net/netip"
 	"net/url"
 	"path"
-	"regexp"
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/hashicorp/go-version"
-	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-)
-
-var (
-	minClientVersion, _ = version.NewVersion("7.0.0")
-	minOriginVersion, _ = version.NewVersion("7.0.0")
 )
 
 func getRedirectURL(reqPath string, ad ServerAd, requiresAuth bool) (redirectURL url.URL) {
@@ -93,61 +85,7 @@ func getFinalRedirectURL(rurl url.URL, authzEscaped string) string {
 	return rurl.String()
 }
 
-func versionCompatCheck(ginCtx *gin.Context) error {
-	// Check that the version of whichever service (eg client, origin, etc) is talking to the Director
-	// is actually something the Director thinks it can communicate with
-
-	// The service/version is sent via User-Agent header in the form "pelican-<service>/<version>"
-	userAgentSlc := ginCtx.Request.Header["User-Agent"]
-	if len(userAgentSlc) < 1 {
-		return errors.New("No user agent could be found")
-	}
-
-	// gin gives us a slice of user agents. Since pelican services should only ever
-	// send one UA, assume that it is the 0-th element of the slice.
-	userAgent := userAgentSlc[0]
-
-	// Make sure we're working with something that's formatted the way we expect. If we
-	// don't match, then we're definitely not coming from one of the services, so we
-	// let things go without an error. Maybe someone is using curl?
-	uaRegExp := regexp.MustCompile(`^pelican-[^\/]+\/\d+\.\d+\.\d+`)
-	if matches := uaRegExp.MatchString(userAgent); !matches {
-		return nil
-	}
-
-	userAgentSplit := strings.Split(userAgent, "/")
-	// Grab the actual service/version that's using the Director. There may be different versioning
-	// requirements between origins, clients, and other services.
-	service := (strings.Split(userAgentSplit[0], "-"))[1]
-	reqVerStr := userAgentSplit[1]
-	reqVer, err := version.NewVersion(reqVerStr)
-	if err != nil {
-		return errors.Wrapf(err, "Could not parse service version as a semantic version: %s\n", reqVerStr)
-	}
-
-	var minCompatVer *version.Version
-	switch service {
-	case "client":
-		minCompatVer = minClientVersion
-	case "origin":
-		minCompatVer = minOriginVersion
-	}
-
-	if reqVer.LessThan(minCompatVer) {
-		return errors.Errorf("The director does not support your %s version (%s). Please update to %s or newer.", service, reqVer.String(), minCompatVer.String())
-	}
-
-	return nil
-}
-
 func RedirectToCache(ginCtx *gin.Context) {
-	err := versionCompatCheck(ginCtx)
-	if err != nil {
-		log.Debugf("A version incompatibility was encountered while redirecting to a cache and no response was served: %v", err)
-		ginCtx.JSON(500, gin.H{"error": "Incompatible versions detected: " + fmt.Sprintf("%v", err)})
-		return
-	}
-
 	reqPath := path.Clean("/" + ginCtx.Request.URL.Path)
 	reqPath = strings.TrimPrefix(reqPath, "/api/v1.0/director/object")
 	ipAddr, err := getRealIP(ginCtx)
@@ -219,13 +157,6 @@ func RedirectToCache(ginCtx *gin.Context) {
 }
 
 func RedirectToOrigin(ginCtx *gin.Context) {
-	err := versionCompatCheck(ginCtx)
-	if err != nil {
-		log.Debugf("A version incompatibility was encountered while redirecting to an origin and no response was served: %v", err)
-		ginCtx.JSON(500, gin.H{"error": "Incompatible versions detected: " + fmt.Sprintf("%v", err)})
-		return
-	}
-
 	reqPath := path.Clean("/" + ginCtx.Request.URL.Path)
 	reqPath = strings.TrimPrefix(reqPath, "/api/v1.0/director/origin")
 
@@ -291,14 +222,6 @@ func RegisterOrigin(ctx *gin.Context) {
 		ctx.JSON(401, gin.H{"error": "Bearer token not present in the 'Authorization' header"})
 		return
 	}
-
-	err := versionCompatCheck(ctx)
-	if err != nil {
-		log.Debugf("A version incompatibility was encountered while registering an origin and no response was served: %v", err)
-		ctx.JSON(500, gin.H{"error": "Incompatible versions detected: " + fmt.Sprintf("%v", err)})
-		return
-	}
-
 	ad := OriginAdvertise{}
 	if ctx.ShouldBind(&ad) != nil {
 		ctx.JSON(400, gin.H{"error": "Invalid origin registration"})
