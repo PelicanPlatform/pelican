@@ -49,7 +49,7 @@ func init() {
 		panic(err)
 	}
 	stageCmd.Flags().StringP("mount", "m", "", "Prefix corresponding to the local mount point of the origin")
-	if err := viper.BindPFlag("StagePlugin.LocalMount", stageCmd.Flags().Lookup("mount")); err != nil {
+	if err := viper.BindPFlag("StagePlugin.MountPrefix", stageCmd.Flags().Lookup("mount")); err != nil {
 		panic(err)
 	}
 	stageCmd.Flags().StringP("origin-prefix", "o", "", "Prefix corresponding to the local origin")
@@ -57,7 +57,7 @@ func init() {
 		panic(err)
 	}
 	stageCmd.Flags().StringP("shadow-prefix", "s", "", "Prefix corresponding to the shadow origin")
-	if err := viper.BindPFlag("StagePlugin.ShadowPrefix", stageCmd.Flags().Lookup("shadow-prefix")); err != nil {
+	if err := viper.BindPFlag("StagePlugin.ShadowOriginPrefix", stageCmd.Flags().Lookup("shadow-prefix")); err != nil {
 		panic(err)
 	}
 
