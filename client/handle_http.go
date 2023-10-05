@@ -45,7 +45,7 @@ import (
 	"github.com/vbauerster/mpb/v8/decor"
 
 	"github.com/pelicanplatform/pelican/config"
-	namespaces "github.com/pelicanplatform/pelican/namespaces"
+	"github.com/pelicanplatform/pelican/namespaces"
 )
 
 var p = mpb.New()

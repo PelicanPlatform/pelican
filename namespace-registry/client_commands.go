@@ -255,10 +255,10 @@ func NamespaceDelete(endpoint string, prefix string) error {
 	// First we create a token for the registry to check that the deletion
 	// request is valid
 
-	// TODO: We might consider moving widely-useful functions like `GetIssuerURL`
+	// TODO: We might consider moving widely-useful functions like `GetRegistryIssuerURL`
 	//       to a more generic `pelican/utils` package so that they're easier to find
 	//       and more likely to be used.
-	issuerURL, err := director.GetIssuerURL(prefix)
+	issuerURL, err := director.GetRegistryIssuerURL(prefix)
 	if err != nil {
 		return errors.Wrap(err, "Failed to determine issuer URL for creating deletion token")
 	}
@@ -292,7 +292,7 @@ func NamespaceDelete(endpoint string, prefix string) error {
 		return errors.Wrap(err, "Failed to assign kid to the token")
 	}
 
-	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES512, *key))
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, *key))
 	if err != nil {
 		return errors.Wrap(err, "Failed to sign the deletion token")
 	}

@@ -20,6 +20,7 @@ package config
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	_ "embed"
 	"encoding/json"
 	"fmt"
@@ -269,7 +270,13 @@ func setupTransport() {
 	if param.TLSSkipVerify.GetBool() {
 		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 	}
-
+	if caCert, err := LoadCertficate(viper.GetString("TLSCACertFile")); err == nil {
+		systemPool, err := x509.SystemCertPool()
+		if err == nil {
+			systemPool.AddCert(caCert)
+			transport.TLSClientConfig = &tls.Config{RootCAs: systemPool}
+		}
+	}
 }
 
 // function to get/setup the transport (only once)
@@ -293,9 +300,11 @@ func InitServer() error {
 			}
 			configDir = configTmp
 		}
+		viper.SetDefault("ConfigDir", configDir)
 	}
 	viper.SetDefault("TLSCertificate", filepath.Join(configDir, "certificates", "tls.crt"))
 	viper.SetDefault("TLSKey", filepath.Join(configDir, "certificates", "tls.key"))
+	viper.SetDefault("TLSCAKey", filepath.Join(configDir, "certificates", "tlsca.key"))
 	viper.SetDefault("RobotsTxtFile", filepath.Join(configDir, "robots.txt"))
 	viper.SetDefault("ScitokensConfig", filepath.Join(configDir, "xrootd", "scitokens.cfg"))
 	viper.SetDefault("Authfile", filepath.Join(configDir, "xrootd", "authfile"))
@@ -332,9 +341,13 @@ func InitServer() error {
 		}
 		viper.SetDefault("XrootdMultiuser", false)
 	}
-	viper.SetDefault("TLSCertFile", "/etc/pki/tls/cert.pem")
+	// Any platform-specific paths should go here
+	err := InitServerOSDefaults()
+	if err != nil {
+		return errors.Wrapf(err, "Failure when setting up OS-specific configuration")
+	}
 
-	err := os.MkdirAll(viper.GetString("MonitoringData"), 0750)
+	err = os.MkdirAll(viper.GetString("MonitoringData"), 0750)
 	if err != nil {
 		return errors.Wrapf(err, "Failure when creating a directory for the monitoring data")
 	}
@@ -349,6 +362,13 @@ func InitServer() error {
 	err = viper.MergeConfig(strings.NewReader(defaultsYaml))
 	if err != nil {
 		return err
+	}
+
+	port := viper.GetInt("Port")
+	if port != 443 {
+		viper.SetDefault("OriginUrl", fmt.Sprintf("https://%v:%v", viper.GetString("Hostname"), port))
+	} else {
+		viper.SetDefault("OriginUrl", fmt.Sprintf("https://%v", viper.GetString("Hostname")))
 	}
 
 	prefix := GetPreferredPrefix()

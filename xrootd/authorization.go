@@ -25,9 +25,11 @@
 package xrootd
 
 import (
+	"bufio"
+	"bytes"
 	_ "embed"
 	"encoding/json"
-	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -63,6 +65,11 @@ type (
 		Global  GlobalCfg
 		Issuers []Issuer
 	}
+
+	openIdConfig struct {
+		Issuer  string `json:"issuer"`
+		JWKSURI string `json:"jwks_uri"`
+	}
 )
 
 var (
@@ -93,11 +100,11 @@ func EmitScitokensConfiguration(cfg *ScitokensCfg) error {
 	if err != nil {
 		return errors.Wrapf(err, "Failed to create a temporary scitokens file %s", configPath)
 	}
+	defer file.Close()
 	if err = os.Chown(configPath, -1, gid); err != nil {
 		return errors.Wrapf(err, "Unable to change ownership of generated scitokens"+
 			" configuration file %v to desired daemon gid %v", configPath, gid)
 	}
-	defer file.Close()
 
 	err = templ.Execute(file, cfg)
 	if err != nil {
@@ -111,6 +118,55 @@ func EmitScitokensConfiguration(cfg *ScitokensCfg) error {
 	if err = os.Rename(configPath, finalConfigPath); err != nil {
 		return errors.Wrapf(err, "Failed to rename scitokens.cfg to final location")
 	}
+	return nil
+}
+
+// Parse the input xrootd authfile, add any default configurations, and then save it
+// into the xrootd runtime directory
+func EmitAuthfile() error {
+	authfile := viper.GetString("Authfile")
+	contents, err := os.ReadFile(authfile)
+	if err != nil {
+		return errors.Wrapf(err, "Failed to read xrootd authfile from %s", authfile)
+	}
+
+	sc := bufio.NewScanner(strings.NewReader(string(contents)))
+	output := new(bytes.Buffer)
+	foundPublicLine := false
+	for sc.Scan() {
+		lineContents := sc.Text()
+		words := strings.Fields(lineContents)
+		if len(words) >= 2 && words[0] == "u" && words[1] == "*" {
+			output.Write([]byte("u * /.well-known lr " + strings.Join(words[2:], " ") + "\n"))
+			foundPublicLine = true
+		} else {
+			output.Write([]byte(lineContents + "\n"))
+		}
+	}
+	if !foundPublicLine {
+		output.Write([]byte("u * /.well-known lr\n"))
+	}
+
+	gid, err := config.GetDaemonGID()
+	if err != nil {
+		return err
+	}
+
+	xrootdRun := viper.GetString("XrootdRun")
+	finalAuthPath := filepath.Join(xrootdRun, "authfile-generated")
+	file, err := os.OpenFile(finalAuthPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0640)
+	if err != nil {
+		return errors.Wrapf(err, "Failed to create a generated authfile %s", finalAuthPath)
+	}
+	defer file.Close()
+	if err = os.Chown(finalAuthPath, -1, gid); err != nil {
+		return errors.Wrapf(err, "Unable to change ownership of generated auth"+
+			"file %v to desired daemon gid %v", finalAuthPath, gid)
+	}
+	if _, err := output.WriteTo(file); err != nil {
+		return errors.Wrapf(err, "Failed to write to generated authfile %v", finalAuthPath)
+	}
+
 	return nil
 }
 
@@ -184,7 +240,7 @@ func GenerateMonitoringIssuer() (issuer Issuer, err error) {
 		return
 	}
 	issuer.Name = "Built-in Monitoring"
-	issuer.Issuer = "https://" + viper.GetString("Hostname") + ":" + fmt.Sprint(param.WebPort.GetInt())
+	issuer.Issuer = viper.GetString("OriginUrl")
 	issuer.BasePaths = []string{"/pelican/monitoring"}
 	issuer.DefaultUser = "xrootd"
 
@@ -227,4 +283,64 @@ func WriteOriginScitokensConfig() error {
 	}
 
 	return EmitScitokensConfiguration(&cfg)
+}
+
+func EmitIssuerMetadata(exportPath string) error {
+	gid, err := config.GetDaemonGID()
+	if err != nil {
+		return err
+	}
+
+	keys, err := config.GenerateIssuerJWKS()
+	if err != nil {
+		return err
+	}
+	wellKnownPath := filepath.Join(exportPath, ".well-known")
+	err = config.MkdirAll(wellKnownPath, 0755, -1, gid)
+	if err != nil {
+		return err
+	}
+	file, err := os.OpenFile(filepath.Join(wellKnownPath, "issuer.jwks"),
+		os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	buf, err := json.MarshalIndent(keys, "", " ")
+	if err != nil {
+		return errors.Wrap(err, "Failed to marshal public keys")
+	}
+	_, err = file.Write(buf)
+	if err != nil {
+		return errors.Wrap(err, "Failed to write public key set to export directory")
+	}
+
+	openidFile, err := os.OpenFile(filepath.Join(wellKnownPath, "openid-configuration"),
+		os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		return err
+	}
+	defer openidFile.Close()
+
+	originUrlStr := viper.GetString("OriginUrl")
+	jwksUrl, err := url.Parse(originUrlStr)
+	if err != nil {
+		return err
+	}
+	jwksUrl.Path = "/.well-known/issuer.jwks"
+
+	cfg := openIdConfig{
+		Issuer:  viper.GetString("OriginUrl"),
+		JWKSURI: jwksUrl.String(),
+	}
+	buf, err = json.MarshalIndent(cfg, "", " ")
+	if err != nil {
+		return errors.Wrap(err, "Failed to marshal OpenID configuration file contents")
+	}
+	_, err = openidFile.Write(buf)
+	if err != nil {
+		return errors.Wrap(err, "Failed to write OpenID configuration file")
+	}
+
+	return nil
 }

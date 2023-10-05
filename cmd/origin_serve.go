@@ -21,11 +21,11 @@
 package main
 
 import (
+	"bytes"
 	"crypto/elliptic"
 	"crypto/rand"
 	_ "embed"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
@@ -56,7 +56,11 @@ var (
 
 type (
 	OriginConfig struct {
-		Multiuser bool
+		Multiuser    bool
+		UseCmsd      bool
+		UseMacaroons bool
+		UseVoms      bool
+		SelfTest     bool
 	}
 
 	XrootdConfig struct {
@@ -66,7 +70,7 @@ type (
 		TLSCertificate         string
 		TLSKey                 string
 		TLSCertDir             string
-		TLSCertFile            string
+		TLSCACertFile          string
 		MacaroonsKeyFile       string
 		RobotsTxtFile          string
 		Sitename               string
@@ -75,8 +79,6 @@ type (
 		DetailedMonitoringHost string
 		DetailedMonitoringPort int
 		XrootdRun              string
-		Authfile               string
-		ScitokensConfig        string
 		Mount                  string
 		NamespacePrefix        string
 		LocalMonitoringPort    int
@@ -197,28 +199,14 @@ to export the directory /mnt/foo to the path /bar in the data federation`)
 	}
 	viper.Set("Mount", exportPath)
 
-	keys, err := config.GenerateIssuerJWKS()
-	if err != nil {
+	if viper.GetBool("Origin.SelfTest") {
+		if err := origin_ui.ConfigureXrootdMonitoringDir(); err != nil {
+			return err
+		}
+	}
+
+	if err = xrootd.EmitIssuerMetadata(exportPath); err != nil {
 		return err
-	}
-	wellKnownPath := filepath.Join(exportPath, ".well-known")
-	err = config.MkdirAll(wellKnownPath, 0755, -1, gid)
-	if err != nil {
-		return err
-	}
-	file, err := os.OpenFile(filepath.Join(wellKnownPath, "issuer.jwks"),
-		os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	buf, err := json.MarshalIndent(keys, "", " ")
-	if err != nil {
-		return errors.Wrap(err, "Failed to marshal public keys")
-	}
-	_, err = file.Write(buf)
-	if err != nil {
-		return errors.Wrap(err, "Failed to write public key set to export directory")
 	}
 
 	// If no robots.txt, create a ephemeral one for xrootd to use
@@ -294,20 +282,12 @@ to export the directory /mnt/foo to the path /bar in the data federation`)
 			" to desired daemon group %v", macaroonsSecret, groupname)
 	}
 
-	scitokensCfg := param.ScitokensConfig.GetString()
-	err = config.MkdirAll(path.Dir(scitokensCfg), 0755, -1, gid)
-	if err != nil {
-		return errors.Wrapf(err, "Unable to create directory %v",
-			path.Dir(scitokensCfg))
-	}
-	if file, err := os.OpenFile(scitokensCfg, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0640); err == nil {
-		file.Close()
-	} else if !errors.Is(err, os.ErrExist) {
+	if err := xrootd.EmitAuthfile(); err != nil {
 		return err
 	}
-	if err = os.Chown(scitokensCfg, -1, gid); err != nil {
-		return errors.Wrapf(err, "Unable to change ownership of scitokens config %v"+
-			" to desired daemon group %v", scitokensCfg, groupname)
+
+	if err := xrootd.WriteOriginScitokensConfig(); err != nil {
+		return errors.Wrap(err, "Failed to create scitokens configuration for the origin")
 	}
 
 	return nil
@@ -325,14 +305,21 @@ func checkConfigFileReadable(fileName string, errMsg string) error {
 }
 
 func checkDefaults() error {
-	requiredConfigs := []string{"ManagerHost", "SummaryMonitoringHost", "DetailedMonitoringHost",
-		"TLSCertificate", "TLSKey", "XrootdRun", "RobotsTxtFile"}
+	requiredConfigs := []string{"TLSCertificate", "TLSKey", "XrootdRun", "RobotsTxtFile"}
 	for _, configName := range requiredConfigs {
 		mgr := viper.GetString(configName) // TODO: Remove direct access once all parameters are generated
 		if mgr == "" {
 			return errors.New(fmt.Sprintf("Required value of '%v' is not set in config",
 				configName))
 		}
+	}
+
+	if managerHost := viper.GetString("ManagerHost"); managerHost == "" {
+		log.Debug("No manager host specified for the cmsd process in origin; assuming no xrootd protocol support")
+		viper.SetDefault("Origin.UseCmsd", false)
+		metrics.DeleteComponentHealthStatus("cmsd")
+	} else {
+		viper.SetDefault("Origin.UseCmsd", true)
 	}
 
 	// As necessary, generate a private key and corresponding cert
@@ -364,20 +351,9 @@ func checkDefaults() error {
 	if originUrlStr == "" {
 		return errors.New("OriginUrl must be configured to serve an origin")
 	}
-	originUrlParsed, err := url.Parse(originUrlStr)
-	if err != nil {
-		return errors.Wrap(err, "Could not parse the provided OriginUrl")
-	}
 
-	if originUrlParsed.Port() == "" {
-		// No port was specified, let's tack on whatever was passed in the
-		// command line argument
-		viper.Set("OriginUrl", originUrlParsed.String()+":"+fmt.Sprint(param.WebPort.GetInt()))
-	} else if originUrlParsed.Port() != fmt.Sprint(param.WebPort.GetInt()) {
-		// The web port configured via the config file and the webport configured
-		// via commandline don't match. Perhaps the user is confused?
-		return errors.New("Mismatched webports: from command line: " + fmt.Sprint(param.WebPort.GetInt()) +
-			", from config file: " + originUrlParsed.Port() + ". Please ensure these match")
+	if _, err := url.Parse(originUrlStr); err != nil {
+		return errors.Wrapf(err, "Could not parse the provided OriginUrl (%v)", originUrlStr)
 	}
 
 	return nil
@@ -423,6 +399,15 @@ func configXrootd() (string, error) {
 	err = templ.Execute(file, xrdConfig)
 	if err != nil {
 		return "", err
+	}
+
+	if log.IsLevelEnabled(log.DebugLevel) {
+		buffer := new(bytes.Buffer)
+		err = templ.Execute(buffer, xrdConfig)
+		if err != nil {
+			return "", err
+		}
+		log.Debugln("XRootD configuration file contents:\n", buffer.String())
 	}
 
 	return configPath, nil
@@ -476,6 +461,11 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	if err != nil {
 		return err
 	}
+
+	if viper.GetBool("Origin.SelfTest") {
+		go origin_ui.PeriodicSelfTest()
+	}
+
 	privileged := viper.GetBool("Origin.Multiuser")
 	err = xrootd.LaunchXrootd(privileged, configPath)
 	if err != nil {

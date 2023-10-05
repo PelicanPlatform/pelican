@@ -38,6 +38,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 )
 
@@ -87,7 +88,7 @@ func LoadPublicKey(existingJWKS string, issuerKeyFile string) (*jwk.Set, error) 
 		}
 	}
 
-	if err := GeneratePrivateKey(issuerKeyFile, elliptic.P521()); err != nil {
+	if err := GeneratePrivateKey(issuerKeyFile, elliptic.P256()); err != nil {
 		return nil, errors.Wrap(err, "Failed to generate new private key")
 	}
 	contents, err := os.ReadFile(issuerKeyFile)
@@ -100,7 +101,7 @@ func LoadPublicKey(existingJWKS string, issuerKeyFile string) (*jwk.Set, error) 
 	}
 
 	// Add the algorithm to the key, needed for verifying tokens elsewhere
-	err = key.Set(jwk.AlgorithmKey, jwa.ES512)
+	err = key.Set(jwk.AlgorithmKey, jwa.ES256)
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to add alg specification to key header")
 	}
@@ -117,6 +118,109 @@ func LoadPublicKey(existingJWKS string, issuerKeyFile string) (*jwk.Set, error) 
 		return nil, errors.Wrap(err, "Failed to add public key to new JWKS")
 	}
 	return &jwks, nil
+}
+
+func GenerateCACert() error {
+	gid, err := GetDaemonGID()
+	if err != nil {
+		return err
+	}
+	groupname, err := GetDaemonGroup()
+	if err != nil {
+		return err
+	}
+
+	tlsCert := viper.GetString("TLSCACertFile")
+	if file, err := os.Open(tlsCert); err == nil {
+		file.Close()
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	certDir := filepath.Dir(tlsCert)
+	if err := MkdirAll(certDir, 0755, -1, gid); err != nil {
+		return err
+	}
+
+	tlsKey := viper.GetString("TLSCAKey")
+	if err := GeneratePrivateKey(tlsKey, elliptic.P256()); err != nil {
+		return err
+	}
+	privateKey, err := LoadPrivateKey(tlsKey)
+	if err != nil {
+		return err
+	}
+
+	log.Debugln("Will generate a new CA certificate for the server")
+	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
+	serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
+	if err != nil {
+		return err
+	}
+	hostname, err := os.Hostname()
+	if err != nil {
+		return err
+	}
+	notBefore := time.Now()
+	template := x509.Certificate{
+		SerialNumber: serialNumber,
+		Subject: pkix.Name{
+			Organization: []string{"Pelican CA"},
+			CommonName:   hostname,
+		},
+		NotBefore:             notBefore,
+		NotAfter:              notBefore.AddDate(10, 0, 0),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+	template.DNSNames = []string{hostname}
+	derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, &(privateKey.PublicKey),
+		privateKey)
+	if err != nil {
+		return err
+	}
+	file, err := os.OpenFile(tlsCert, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0640)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	if err = os.Chown(tlsCert, -1, gid); err != nil {
+		return errors.Wrapf(err, "Failed to chown generated certificate %v to daemon group %v",
+			tlsCert, groupname)
+	}
+
+	if err = pem.Encode(file, &pem.Block{Type: "CERTIFICATE", Bytes: derBytes}); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func LoadCertficate(certFile string) (*x509.Certificate, error) {
+	rest, err := os.ReadFile(certFile)
+	if err != nil {
+		return nil, err
+	}
+
+	var cert *x509.Certificate
+	var block *pem.Block
+	for {
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			break
+		} else if block.Type == "CERTIFICATE" {
+			cert, err = x509.ParseCertificate(block.Bytes)
+			if err != nil {
+				return nil, err
+			}
+			break
+		}
+	}
+	if cert == nil {
+		return nil, fmt.Errorf("Certificate file, %v, contains no certificate", certFile)
+	}
+	return cert, nil
 }
 
 func GenerateCert() error {
@@ -136,6 +240,16 @@ func GenerateCert() error {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
+
+	// In this case, no host certificate exists - we should generate our own.
+	if err := GenerateCACert(); err != nil {
+		return err
+	}
+	caCert, err := LoadCertficate(viper.GetString("TLSCACertFile"))
+	if err != nil {
+		return err
+	}
+
 	certDir := filepath.Dir(tlsCert)
 	if err := MkdirAll(certDir, 0755, -1, gid); err != nil {
 		return err
@@ -147,6 +261,14 @@ func GenerateCert() error {
 		return err
 	}
 
+	// Note: LoadPrivateKey will return nil for the private key if the file
+	// doesn't exist.  In that case, we'll do a self-signed certificate
+	caPrivateKey, err := LoadPrivateKey(viper.GetString("TLSCAKey"))
+	if err != nil {
+		return err
+	}
+
+	log.Debugln("Will generate a new host certificate for the server")
 	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
 	serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
 	if err != nil {
@@ -170,8 +292,17 @@ func GenerateCert() error {
 		BasicConstraintsValid: true,
 	}
 	template.DNSNames = []string{hostname}
-	derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, &(privateKey.PublicKey),
-		privateKey)
+
+	// If there's pre-existing CA certificates, self-sign instead of using the generated CA
+	signingCert := caCert
+	signingKey := caPrivateKey
+	if signingKey == nil {
+		signingCert = &template
+		signingKey = privateKey
+	}
+
+	derBytes, err := x509.CreateCertificate(rand.Reader, &template, signingCert, &(privateKey.PublicKey),
+		signingKey)
 	if err != nil {
 		return err
 	}

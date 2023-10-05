@@ -73,7 +73,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 		Subject("origin").
 		Build()
 
-	signed, err := jwt.Sign(scopelessTok, jwt.WithKey(jwa.ES512, *key))
+	signed, err := jwt.Sign(scopelessTok, jwt.WithKey(jwa.ES256, *key))
 
 	ok, err = VerifyAdvertiseToken(string(signed), "test-namespace")
 	assert.Equal(t, false, ok)
@@ -87,7 +87,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 		Subject("origin").
 		Build()
 
-	signed, err = jwt.Sign(nonStrScopeTok, jwt.WithKey(jwa.ES512, *key))
+	signed, err = jwt.Sign(nonStrScopeTok, jwt.WithKey(jwa.ES256, *key))
 
 	ok, err = VerifyAdvertiseToken(string(signed), "test-namespace")
 	assert.Equal(t, false, ok)
@@ -101,7 +101,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 		Subject("origin").
 		Build()
 
-	signed, err = jwt.Sign(wrongScopeTok, jwt.WithKey(jwa.ES512, *key))
+	signed, err = jwt.Sign(wrongScopeTok, jwt.WithKey(jwa.ES256, *key))
 
 	ok, err = VerifyAdvertiseToken(string(signed), "test-namespace")
 	assert.Equal(t, false, ok, "Should fail due to incorrect scope name")
@@ -142,20 +142,20 @@ func TestCreateAdvertiseToken(t *testing.T) {
 	assert.NotEqual(t, "", tok)
 }
 
-func TestGetIssuerURL(t *testing.T) {
+func TestGetRegistryIssuerURL(t *testing.T) {
 	/*
-	* Runs unit tests on the GetIssuerURL function
+	* Runs unit tests on the GetRegistryIssuerURL function
 	 */
 	viper.Reset()
 
 	// No namespace url has been set, so an error is expected
-	url, err := GetIssuerURL("")
+	url, err := GetRegistryIssuerURL("")
 	assert.Equal(t, "", url)
 	assert.Equal(t, "Namespace URL is not set", err.Error())
 
 	// Test to make sure the path is as expected
 	viper.Set("NamespaceURL", "test-path")
-	url, err = GetIssuerURL("test-prefix")
+	url, err = GetRegistryIssuerURL("test-prefix")
 	assert.Equal(t, nil, err)
 	assert.Equal(t, "test-path/api/v1.0/registry/test-prefix/.well-known/issuer.jwks", url)
 

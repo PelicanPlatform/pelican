@@ -63,7 +63,7 @@ func CreateAdvertiseToken(namespace string) (string, error) {
 	// TODO: Need to come back and carefully consider a few naming practices.
 	//       Here, issuerUrl is actually the registry database url, and not
 	//       the token issuer url for this namespace
-	issuerUrl, err := GetIssuerURL(namespace)
+	issuerUrl, err := GetRegistryIssuerURL(namespace)
 	if err != nil {
 		return "", err
 	}
@@ -96,7 +96,7 @@ func CreateAdvertiseToken(namespace string) (string, error) {
 		return "", errors.Wrap(err, "Failed to assign kid to the token")
 	}
 
-	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES512, *key))
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, *key))
 	if err != nil {
 		return "", err
 	}
@@ -107,7 +107,7 @@ func CreateAdvertiseToken(namespace string) (string, error) {
 // see if the entity is authorized to advertise an origin for the
 // namespace
 func VerifyAdvertiseToken(token, namespace string) (bool, error) {
-	issuerUrl, err := GetIssuerURL(namespace)
+	issuerUrl, err := GetRegistryIssuerURL(namespace)
 	if err != nil {
 		return false, err
 	}
@@ -184,7 +184,7 @@ func VerifyAdvertiseToken(token, namespace string) (bool, error) {
 	return false, nil
 }
 
-func GetIssuerURL(prefix string) (string, error) {
+func GetRegistryIssuerURL(prefix string) (string, error) {
 	namespace_url_string := param.NamespaceUrl.GetString()
 	if namespace_url_string == "" {
 		return "", errors.New("Namespace URL is not set")
