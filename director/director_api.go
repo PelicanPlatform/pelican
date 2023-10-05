@@ -28,9 +28,7 @@ func ListNamespacesFromOrigins() []NamespaceAd {
 	namespaces := make([]NamespaceAd, 0, len(serverAdItems))
 	for _, item := range serverAdItems {
 		if item.Key().Type == OriginType {
-			for _, v := range item.Value() {
-				namespaces = append(namespaces, v)
-			}
+			namespaces = append(namespaces, item.Value()...)
 		}
 	}
 	return namespaces
