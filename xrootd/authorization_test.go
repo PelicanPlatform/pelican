@@ -125,7 +125,7 @@ func TestGenerateConfig(t *testing.T) {
 	issuer, err = GenerateMonitoringIssuer()
 	require.NoError(t, err)
 	assert.Equal(t, issuer.Name, "Built-in Monitoring")
-	assert.Equal(t, issuer.Issuer, "https://"+param.Server_Hostname.GetString()+":"+fmt.Sprint(param.Server_Port.GetInt()))
+	assert.Equal(t, issuer.Issuer, "https://"+param.Server_Hostname.GetString()+":"+fmt.Sprint(param.Xrootd_Port.GetInt()))
 	require.Equal(t, len(issuer.BasePaths), 1)
 	assert.Equal(t, issuer.BasePaths[0], "/pelican/monitoring")
 	assert.Equal(t, issuer.DefaultUser, "xrootd")

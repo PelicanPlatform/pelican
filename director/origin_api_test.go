@@ -155,7 +155,7 @@ func TestGetRegistryIssuerURL(t *testing.T) {
 
 	// Test to make sure the path is as expected
 	viper.Set("Federation.NamespaceURL", "test-path")
-	url, err = GetIssuerURL("test-prefix")
+	url, err = GetRegistryIssuerURL("test-prefix")
 	assert.Equal(t, nil, err)
 	assert.Equal(t, "test-path/api/v1.0/registry/test-prefix/.well-known/issuer.jwks", url)
 
