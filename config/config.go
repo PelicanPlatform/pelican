@@ -270,7 +270,7 @@ func setupTransport() {
 	if param.TLSSkipVerify.GetBool() {
 		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 	}
-	if caCert, err := LoadCertficate(viper.GetString("TLSCACertFile")); err == nil {
+	if caCert, err := LoadCertficate(param.Server_TLSCACertificateFile.GetString()); err == nil {
 		systemPool, err := x509.SystemCertPool()
 		if err == nil {
 			systemPool.AddCert(caCert)
@@ -302,13 +302,7 @@ func InitServer() error {
 		}
 		viper.SetDefault("ConfigDir", configDir)
 	}
-	viper.SetDefault("TLSCertificate", filepath.Join(configDir, "certificates", "tls.crt"))
-	viper.SetDefault("TLSKey", filepath.Join(configDir, "certificates", "tls.key"))
-	viper.SetDefault("TLSCAKey", filepath.Join(configDir, "certificates", "tlsca.key"))
-	viper.SetDefault("RobotsTxtFile", filepath.Join(configDir, "robots.txt"))
-	viper.SetDefault("ScitokensConfig", filepath.Join(configDir, "xrootd", "scitokens.cfg"))
-	viper.SetDefault("Authfile", filepath.Join(configDir, "xrootd", "authfile"))
-	viper.SetDefault("MacaroonsKeyFile", filepath.Join(configDir, "macaroons-secret"))
+
 	viper.SetDefault("Server.TLSCertificate", filepath.Join(configDir, "certificates", "tls.crt"))
 	viper.SetDefault("Server.TLSKey", filepath.Join(configDir, "certificates", "tls.key"))
 	viper.SetDefault("Server.TLSCAKey", filepath.Join(configDir, "certificates", "tlsca.key"))
@@ -354,7 +348,7 @@ func InitServer() error {
 		return errors.Wrapf(err, "Failure when setting up OS-specific configuration")
 	}
 
-	err = os.MkdirAll(viper.GetString("Monitoring.DataLocation"), 0750)
+	err = os.MkdirAll(param.Monitoring_DataLocation.GetString(), 0750)
 	if err != nil {
 		return errors.Wrapf(err, "Failure when creating a directory for the monitoring data")
 	}
@@ -371,11 +365,11 @@ func InitServer() error {
 		return err
 	}
 
-	port := viper.GetInt("Port")
+	port := param.Xrootd_Port.GetInt()
 	if port != 443 {
-		viper.SetDefault("OriginUrl", fmt.Sprintf("https://%v:%v", viper.GetString("Hostname"), port))
+		viper.SetDefault("Origin.Url", fmt.Sprintf("https://%v:%v", param.Server_Hostname.GetString(), port))
 	} else {
-		viper.SetDefault("OriginUrl", fmt.Sprintf("https://%v", viper.GetString("Hostname")))
+		viper.SetDefault("Origin.Url", fmt.Sprintf("https://%v", param.Server_Hostname.GetString()))
 	}
 
 	prefix := GetPreferredPrefix()

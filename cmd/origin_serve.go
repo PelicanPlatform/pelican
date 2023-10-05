@@ -56,12 +56,11 @@ var (
 
 type (
 	OriginConfig struct {
-		Multiuser    bool
-		UseCmsd      bool
-		UseMacaroons bool
-		UseVoms      bool
-		SelfTest     bool
 		Multiuser       bool
+		UseCmsd         bool
+		UseMacaroons    bool
+		UseVoms         bool
+		SelfTest        bool
 		NamespacePrefix string
 	}
 
@@ -86,8 +85,8 @@ type (
 	ServerConfig struct {
 		TLSCertificate          string
 		TLSKey                  string
-		TLSCertificateDirectory string
-		TLSCertificateFile      string
+		TLSCACertificateDirectory string
+		TLSCACertificateFile      string
 	}
 
 	XrootdConfig struct {
@@ -210,7 +209,7 @@ to export the directory /mnt/foo to the path /bar in the data federation`)
 	}
 	viper.Set("Xrootd.Mount", exportPath)
 
-	if viper.GetBool("Origin.SelfTest") {
+	if param.Origin_SelfTest.GetBool() {
 		if err := origin_ui.ConfigureXrootdMonitoringDir(); err != nil {
 			return err
 		}
@@ -325,7 +324,7 @@ func checkDefaults() error {
 		}
 	}
 
-	if managerHost := viper.GetString("ManagerHost"); managerHost == "" {
+	if managerHost := param.Xrootd_ManagerHost.GetString(); managerHost == "" {
 		log.Debug("No manager host specified for the cmsd process in origin; assuming no xrootd protocol support")
 		viper.SetDefault("Origin.UseCmsd", false)
 		metrics.DeleteComponentHealthStatus("cmsd")
@@ -358,7 +357,7 @@ func checkDefaults() error {
 	// Check that OriginUrl is defined in the config file. Make sure it parses.
 	// Fail if either condition isn't met, although note that url.Parse doesn't
 	// generate errors for many things that are not recognizable urls.
-	originUrlStr := viper.GetString("OriginUrl")
+	originUrlStr := param.Origin_Url.GetString()
 	if originUrlStr == "" {
 		return errors.New("OriginUrl must be configured to serve an origin")
 	}
@@ -473,11 +472,11 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		return err
 	}
 
-	if viper.GetBool("Origin.SelfTest") {
+	if param.Origin_SelfTest.GetBool() {
 		go origin_ui.PeriodicSelfTest()
 	}
 
-	privileged := viper.GetBool("Origin.Multiuser")
+	privileged := param.Origin_Multiuser.GetBool()
 	err = xrootd.LaunchXrootd(privileged, configPath)
 	if err != nil {
 		return err

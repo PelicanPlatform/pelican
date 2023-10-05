@@ -159,6 +159,13 @@ components: ["client"]
 ############################
 #   Origin-level Configs   #
 ############################
+name: Origin.Url
+description: >-
+  The origin's configured URL, as reported to XRootD.
+type: string
+default: Hostname
+components: ["origin"]
+---
 name: Origin.ExportVolume
 description: >-
   A path to the volume exported by an origin.
@@ -181,11 +188,25 @@ root_default: true
 default: false
 components: ["origin"]
 ---
+name: Origin.UseCmsd
+description: >-
+  A bool indicating whether the origin should use CMSD.
+type: bool
+default: true
+components: ["origin"]
+---
 name: Origin.UIPasswordFile
 description: >-
   A filepath specifying where the Origin UI password file should be stored.
 type: string
 default: $ConfigBase/origin-ui-passwd
+components: ["origin"]
+---
+name: Origin.SelfTest
+description: >-
+  A bool indicating whether the origin should perform self health checks.
+type: bool
+default: true
 components: ["origin"]
 ---
 
@@ -245,19 +266,28 @@ root_default: /etc/pelican/certificates/tls.crt
 default: "$ConfigBase/certificates/tls.crt"
 components: ["origin", "nsregistry", "director"]
 ---
-name: Server.TLSCertificateFile
+name: Server.TLSCACertificateFile
 description: >-
   A filepath for a TLS certificate to be used by XRootD.
 type: string
 default: /etc/pki/tls/cert.pem
 components: ["origin"]
 ---
-name: Server.TLSCertificateDirectory
+name: Server.TLSCACertificateDirectory
 description: >-
   A filepath to the directory used for storing TLS certificates
 type: string
 default: /etc/pki/tls/cert.pem
 components: ["origin"]
+---
+name: Server.TLSCAKey
+description: >-
+  The name of a file containing a private key corresponding to the TLSCACertificate.
+  Used when running server components of Pelican.
+type: filename
+root_default: /etc/pelican/certificates/tlsca.key
+default: "$ConfigBase/certificates/tlsca.key"
+components: ["origin", "nsregistry", "director"]
 ---
 name: Server.TLSKey
 description: >-
@@ -353,6 +383,13 @@ components: ["nsregistry"]
 ############################
 #   XRootD-level Configs   #
 ############################
+name: Xrootd.Port
+description: >-
+  The port over which XRootD should be made available.
+type: int
+default: 8443
+components: ["origin"]
+---
 name: Xrootd.RunLocation
 description: >-
   A directory where temporary configurations will be stored for the xrootd daemon

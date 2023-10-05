@@ -25,6 +25,6 @@ import (
 )
 
 func InitServerOSDefaults() error {
-	viper.SetDefault("TLSCACertFile", "/etc/pki/tls/cert.pem")
+	viper.SetDefault("Server.TLSCACertificateFile", "/etc/pki/tls/cert.pem")
 	return nil
 }

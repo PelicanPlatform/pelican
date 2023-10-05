@@ -31,7 +31,6 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 )
 
 func PeriodicAdvertiseOrigin() error {
@@ -62,7 +61,7 @@ func AdvertiseOrigin() error {
 	// TODO: waiting on a different branch to merge origin URL generation
 	// The checkdefaults func that runs before the origin is served checks for and
 	// parses the originUrl, so it should be safe to just grab it as a string here.
-	originUrl := viper.GetString("OriginUrl")
+	originUrl := param.Origin_Url.GetString()
 
 	// Here we instantiate the namespaceAd slice, but we still need to define the namespace
 	namespaceUrl, err := url.Parse(param.Federation_NamespaceUrl.GetString())

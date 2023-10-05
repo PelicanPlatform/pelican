@@ -37,7 +37,6 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 )
 
 type (
@@ -153,7 +152,7 @@ func LaunchXrootd(privileged bool, configPath string) (err error) {
 
 	cmsdCtx := context.Background()
 	cmsdPid := -1
-	if viper.GetBool("Origin.UseCmsd") {
+	if param.Origin_UseCmsd.GetBool() {
 		cmsdCtx, cmsdPid, err = launcher.Launch(ctx, "cmsd", configPath)
 		if err != nil {
 			return errors.Wrap(err, "Failed to launch cmsd daemon")
