@@ -164,6 +164,7 @@ func checkPromToken(av1 *route.Router) gin.HandlerFunc {
 			return
 		}
 
+		// Parsing the token (unverified) in order to get its issuer without having the jwks
 		token, err = jwt.Parse([]byte(strToken), jwt.WithVerify(false))
 
 		if err != nil {
@@ -189,10 +190,15 @@ func checkPromToken(av1 *route.Router) gin.HandlerFunc {
 				c.JSON(400, gin.H{"error": "Failed to read federation key file"})
 				return
 			}
-			key, err := jwk.ParseKey(contents, jwk.WithPEM(true))
+			keys, err := jwk.Parse(contents)
+			//key, err := jwk.ParseKey(contents, jwk.WithPEM(true))
 			if err != nil {
 				c.JSON(400, gin.H{"error": "Failed to parse Federation key file"})
 				return
+			}
+			key, ok := keys.Key(0)
+			if !ok {
+				c.JSON(400, gin.H{"error": "No key in keyset"})
 			}
 			bKey = &key
 		} else {
@@ -209,10 +215,38 @@ func checkPromToken(av1 *route.Router) gin.HandlerFunc {
 			return
 		}
 
-		_, err = jwt.Parse([]byte(strToken), jwt.WithKey(jwa.ES512, raw.PublicKey), jwt.WithValidate(true))
+		parsed, err := jwt.Parse([]byte(strToken), jwt.WithKey(jwa.ES256, raw.PublicKey))
 
 		if err != nil {
 			c.JSON(403, gin.H{"error": "Permission Denied: Invalid token"})
+			return
+		}
+
+		/*
+		* The signature is verified, now we need to make sure this token actually gives us
+		* permission to access prometheus metrics
+		* NOTE: The validate function also handles checking `iat` and `exp` to make sure the token
+		*       remains valid.
+		 */
+		scopeValidator := jwt.ValidatorFunc(func(_ context.Context, tok jwt.Token) jwt.ValidationError {
+			scope_any, present := tok.Get("scope")
+			if !present {
+				return jwt.NewValidationError(errors.New("No scope is present; required for authorization"))
+			}
+			scope, ok := scope_any.(string)
+			if !ok {
+				return jwt.NewValidationError(errors.New("scope claim in token is not string-valued"))
+			}
+
+			for _, scope := range strings.Split(scope, " ") {
+				if scope == "prometheus.read" {
+					return nil
+				}
+			}
+			return jwt.NewValidationError(errors.New("Token does not contain prometheus access authorization"))
+		})
+		if err = jwt.Validate(parsed, jwt.WithValidator(scopeValidator)); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "server could not validate the provided access token"})
 			return
 		}
 
