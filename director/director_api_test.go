@@ -9,61 +9,61 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-var mockOriginServerAd ServerAd = ServerAd{
-	Name: "test-origin-server",
-	AuthURL:   url.URL{},
-	URL:       url.URL{},
-	Type:      OriginType,
-	Latitude:  123.05,
-	Longitude: 456.78,
-}
-
-var mockCacheServerAd ServerAd = ServerAd{
-	Name: "test-cache-server",
-	AuthURL: 	 url.URL{},
-	URL:       url.URL{},
-	Type:      CacheType,
-	Latitude:  45.67,
-	Longitude: 123.05,
-}
-
-const pathPreix string = "/foo/bar/"
-
-func mockNamespaceAds(size int, serverPrefix string) []NamespaceAd {
-	namespaceAds := make([]NamespaceAd, size)
-	for i:=0; i<size; i++ {
-		namespaceAds[i] = NamespaceAd{
-			RequireToken: true,
-			Path: pathPreix + serverPrefix + "/" + fmt.Sprint(i),
-			Issuer: url.URL{},
-			MaxScopeDepth: 1,
-			Strategy: "",
-			BasePath: "",
-			VaultServer: "",
-		}
-	}
-	return namespaceAds
-}
-
-func namespaceAdContainsPath (ns []NamespaceAd, path string) bool {
-	for _, v := range(ns) {
-		if v.Path == path {
-			return true
-		}
-	}
-	return false
-}
-
-func setup() {
-	serverAds.DeleteAll()
-}
-
-
-func teardown() {
-	serverAds.DeleteAll()
-}
-
 func TestListNamespaces(t *testing.T) {
+	var mockOriginServerAd ServerAd = ServerAd{
+		Name: "test-origin-server",
+		AuthURL:   url.URL{},
+		URL:       url.URL{},
+		Type:      OriginType,
+		Latitude:  123.05,
+		Longitude: 456.78,
+	}
+	
+	var mockCacheServerAd ServerAd = ServerAd{
+		Name: "test-cache-server",
+		AuthURL: 	 url.URL{},
+		URL:       url.URL{},
+		Type:      CacheType,
+		Latitude:  45.67,
+		Longitude: 123.05,
+	}
+	
+	const pathPreix string = "/foo/bar/"
+	
+	mockNamespaceAds := func(size int, serverPrefix string) []NamespaceAd {
+		namespaceAds := make([]NamespaceAd, size)
+		for i:=0; i<size; i++ {
+			namespaceAds[i] = NamespaceAd{
+				RequireToken: true,
+				Path: pathPreix + serverPrefix + "/" + fmt.Sprint(i),
+				Issuer: url.URL{},
+				MaxScopeDepth: 1,
+				Strategy: "",
+				BasePath: "",
+				VaultServer: "",
+			}
+		}
+		return namespaceAds
+	}
+	
+	namespaceAdContainsPath := func(ns []NamespaceAd, path string) bool {
+		for _, v := range(ns) {
+			if v.Path == path {
+				return true
+			}
+		}
+		return false
+	}
+	
+	setup := func() {
+		serverAds.DeleteAll()
+	}
+	
+	
+	teardown := func() {
+		serverAds.DeleteAll()
+	}
+
 	t.Run("empty-entry", func(t *testing.T) {
 		setup() 
 		defer teardown()
