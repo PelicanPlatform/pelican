@@ -16,12 +16,10 @@
  *
  ***************************************************************/
 
-package pelican
+package client
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -48,15 +46,9 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/namespaces"
-	"github.com/pelicanplatform/pelican/param"
 )
 
 var p = mpb.New()
-
-var (
-	transport     *http.Transport
-	onceTransport sync.Once
-)
 
 type StoppedTransferError struct {
 	Err string
@@ -447,57 +439,12 @@ func parseTransferStatus(status string) (int, string) {
 	return statusCode, strings.TrimSpace(parts[1])
 }
 
-func setupTransport() *http.Transport {
-	//Getting timeouts and other information from defaults.yaml
-	maxIdleConns := viper.GetInt("Transport.MaxIdleIcons")
-	idleConnTimeout := viper.GetDuration("Transport.IdleConnTimeout")
-	transportTLSHandshakeTimeout := viper.GetDuration("Transport.TLSHandshakeTimeout")
-	expectContinueTimeout := viper.GetDuration("Transport.ExpectContinueTimeout")
-	responseHeaderTimeout := viper.GetDuration("Transport.ResponseHeaderTimeout")
-
-	transportDialerTimeout := viper.GetDuration("Transport.Dialer.Timeout")
-	transportKeepAlive := viper.GetDuration("Transport.Dialer.KeepAlive")
-
-	//Set up the transport
-	return &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-		DialContext: (&net.Dialer{
-			Timeout:   transportDialerTimeout,
-			KeepAlive: transportKeepAlive,
-		}).DialContext,
-		MaxIdleConns:          maxIdleConns,
-		IdleConnTimeout:       idleConnTimeout,
-		TLSHandshakeTimeout:   transportTLSHandshakeTimeout,
-		ExpectContinueTimeout: expectContinueTimeout,
-		ResponseHeaderTimeout: responseHeaderTimeout,
-	}
-}
-
-// function to get/setup the transport (only once)
-func GetTransport() *http.Transport {
-	onceTransport.Do(func() {
-		transport = setupTransport()
-	})
-	if param.TLSSkipVerify.GetBool() {
-		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
-	}
-	// If there's a custom CA file present, add it to the list of system trust roots
-	if caCert, err := config.LoadCertficate(viper.GetString("TLSCACertFile")); err == nil {
-		systemPool, err := x509.SystemCertPool()
-		if err == nil {
-			systemPool.AddCert(caCert)
-			transport.TLSClientConfig = &tls.Config{RootCAs: systemPool}
-		}
-	}
-	return transport
-}
-
 // DownloadHTTP - Perform the actual download of the file
 func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, error) {
 
 	// Create the client, request, and context
 	client := grab.NewClient()
-	transport := GetTransport()
+	transport := config.GetTransport()
 	if !transfer.Proxy {
 		transport.Proxy = nil
 	}
@@ -809,7 +756,7 @@ Loop:
 
 }
 
-var UploadClient = &http.Client{Transport: GetTransport()}
+var UploadClient = &http.Client{Transport: config.GetTransport()}
 
 // Actually perform the Put request to the server
 func doPut(request *http.Request, responseChan chan<- *http.Response, errorChan chan<- error) {
@@ -860,7 +807,7 @@ func walkDavDir(url *url.URL, namespace namespaces.Namespace) ([]string, error) 
 	c := gowebdav.NewClient(rootUrl.String(), "", "")
 
 	// XRootD does not like keep alives and kills things, so turn them off.
-	transport = GetTransport()
+	transport := config.GetTransport()
 	c.SetTransport(transport)
 
 	files, err := walkDir(url.Path, c)
@@ -912,7 +859,7 @@ func StatHttp(dest *url.URL, namespace namespaces.Namespace) (uint64, error) {
 
 	var resp *http.Response
 	for {
-		transport := GetTransport()
+		transport := config.GetTransport()
 		if disableProxy {
 			log.Debugln("Performing HEAD (without proxy)", dest.String())
 			transport.Proxy = nil

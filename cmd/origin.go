@@ -44,6 +44,36 @@ var (
 		RunE:         serveOrigin,
 		SilenceUsage: true,
 	}
+
+	// Expose the token manipulation CLI
+	originTokenCmd = &cobra.Command{
+		Use:   "token",
+		Short: "Manage Pelican origin tokens",
+	}
+
+	originTokenCreateCmd = &cobra.Command{
+		Use:   "create",
+		Short: "Create a Pelican origin token",
+		Long: `Create a JSON web token (JWT) using the origin's signing keys:
+Usage: pelican origin token create [FLAGS] claims
+E.g. pelican origin token create --profile scitokens2 aud=my-audience scope="read:/storage" scope="write:/storage"
+
+Pelican origins use JWTs as bearer tokens for authorizing specific requests,
+such as reading from or writing to the origin's underlying storage, advertising
+to a director, etc. For more information about the makeup of a JWT, see
+https://jwt.io/introduction.
+
+Additional profiles that expand on JWT are supported. They include scitokens2 and
+wlcg. For more information about these profiles, see https://scitokens.org/technical_docs/Claims
+and https://github.com/WLCG-AuthZ-WG/common-jwt-profile/blob/master/profile.md, respectively`,
+		RunE: cliTokenCreate,
+	}
+
+	originTokenVerifyCmd = &cobra.Command{
+		Use:   "verify",
+		Short: "Verify a Pelican origin token",
+		RunE:  verifyToken,
+	}
 )
 
 func configOrigin( /*cmd*/ *cobra.Command /*args*/, []string) {
@@ -59,4 +89,54 @@ func init() {
 		panic(err)
 	}
 	originServeCmd.Flags().AddFlag(portFlag)
+
+	originCmd.AddCommand(originTokenCmd)
+	originTokenCmd.AddCommand(originTokenCreateCmd)
+	originTokenCmd.PersistentFlags().String("profile", "wlcg", "Passing a profile ensures the token adheres to the profile's requirements. Accepted values are scitokens2 and wlcg")
+	originTokenCreateCmd.Flags().Int("lifetime", 1200, "The lifetime of the token, in seconds.")
+	originTokenCreateCmd.Flags().StringSlice("audience", []string{}, "The token's intended audience.")
+	originTokenCreateCmd.Flags().String("subject", "", "The token's subject.")
+	originTokenCreateCmd.Flags().StringSlice("scope", []string{}, "Scopes for granting fine-grained permissions to the token.")
+	originTokenCreateCmd.Flags().StringSlice("claim", []string{}, "Additional token claims. A claim must be of the form <claim name>=<value>")
+	originTokenCreateCmd.Flags().String("issuer", "", "The URL of the token's issuer. If not provided, the tool will attempt to find one in the configuration file.")
+	if err := viper.BindPFlag("IssuerUrl", originTokenCreateCmd.Flags().Lookup("issuer")); err != nil {
+		panic(err)
+	}
+	originTokenCreateCmd.Flags().String("private-key", viper.GetString("IssuerKey"), "Filepath designating the location of the private key in PEM format to be used for signing, if different from the origin's default.")
+	if err := viper.BindPFlag("IssuerKey", originTokenCreateCmd.Flags().Lookup("private-key")); err != nil {
+		panic(err)
+	}
+	originTokenCmd.AddCommand(originTokenVerifyCmd)
+
+	// A pre-run hook to enforce flags specific to each profile
+	originTokenCreateCmd.PreRun = func(cmd *cobra.Command, args []string) {
+		profile, _ := cmd.Flags().GetString("profile")
+		reqFlags := []string{}
+		reqSlices := []string{}
+		switch profile {
+		case "wlcg":
+			reqFlags = []string{"subject"}
+			reqSlices = []string{"audience"}
+		case "scitokens2":
+			reqSlices = []string{"audience", "scope"}
+		}
+
+		shouldCancel := false
+		for _, flag := range reqFlags {
+			if val, _ := cmd.Flags().GetString(flag); val == "" {
+				fmt.Printf("The --%s flag must be populated for the scitokens profile\n", flag)
+				shouldCancel = true
+			}
+		}
+		for _, flag := range reqSlices {
+			if slice, _ := cmd.Flags().GetStringSlice(flag); len(slice) == 0 {
+				fmt.Printf("The --%s flag must be populated for the scitokens profile\n", flag)
+				shouldCancel = true
+			}
+		}
+
+		if shouldCancel {
+			os.Exit(1)
+		}
+	}
 }

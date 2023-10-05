@@ -25,7 +25,7 @@ import (
 	"os"
 	"path"
 
-	"github.com/pelicanplatform/pelican"
+	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/namespaces"
 	log "github.com/sirupsen/logrus"
@@ -149,7 +149,7 @@ func addTokenSubcommands(tokenCmd *cobra.Command) {
 				os.Exit(1)
 			}
 
-			token, err := pelican.AcquireToken(&dest, namespace, isWrite)
+			token, err := client.AcquireToken(&dest, namespace, isWrite)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Failed to get a token:", err)
 				os.Exit(1)

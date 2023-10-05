@@ -26,8 +26,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pelicanplatform/pelican"
 	"github.com/pelicanplatform/pelican/classads"
+	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -75,9 +75,9 @@ func stashPluginMain(args []string) {
 	// Parse command line arguments
 	var upload bool = false
 	// Set the options
-	pelican.ObjectClientOptions.Recursive = false
-	pelican.ObjectClientOptions.ProgressBars = false
-	pelican.ObjectClientOptions.Version = version
+	client.ObjectClientOptions.Recursive = false
+	client.ObjectClientOptions.ProgressBars = false
+	client.ObjectClientOptions.Version = version
 	setLogging(log.PanicLevel)
 	methods := []string{"http"}
 	var infile, outfile, testCachePath string
@@ -134,12 +134,12 @@ func stashPluginMain(args []string) {
 	}
 
 	if getCaches {
-		urls, err := pelican.GetCacheHostnames(testCachePath)
+		urls, err := client.GetCacheHostnames(testCachePath)
 		if err != nil {
 			log.Panicln("Failed to get cache URLs:", err)
 		}
 
-		cachesToTry := pelican.CachesToTry
+		cachesToTry := client.CachesToTry
 		if cachesToTry > len(urls) {
 			cachesToTry = len(urls)
 		}
@@ -190,11 +190,11 @@ func stashPluginMain(args []string) {
 		if upload {
 			source = append(source, transfer.localFile)
 			log.Debugln("Uploading:", transfer.localFile, "to", transfer.url)
-			tmpDownloaded, result = pelican.DoStashCPSingle(transfer.localFile, transfer.url, methods, false)
+			tmpDownloaded, result = client.DoStashCPSingle(transfer.localFile, transfer.url, methods, false)
 		} else {
 			source = append(source, transfer.url)
 			log.Debugln("Downloading:", transfer.url, "to", transfer.localFile)
-			tmpDownloaded, result = pelican.DoStashCPSingle(transfer.url, transfer.localFile, methods, false)
+			tmpDownloaded, result = client.DoStashCPSingle(transfer.url, transfer.localFile, methods, false)
 		}
 		startTime := time.Now().Unix()
 		resultAd := classads.NewClassAd()
@@ -216,7 +216,7 @@ func stashPluginMain(args []string) {
 			resultAd.Set("TransferTotalBytes", tmpDownloaded)
 		} else {
 			resultAd.Set("TransferSuccess", false)
-			if pelican.GetErrors() == "" {
+			if client.GetErrors() == "" {
 				resultAd.Set("TransferError", result.Error())
 			} else {
 				errMsg := " Failure "
@@ -225,13 +225,13 @@ func stashPluginMain(args []string) {
 				} else {
 					errMsg += "downloading "
 				}
-				errMsg += transfer.url + ": " + pelican.GetErrors()
+				errMsg += transfer.url + ": " + client.GetErrors()
 				resultAd.Set("TransferError", errMsg)
-				pelican.ClearErrors()
+				client.ClearErrors()
 			}
 			resultAd.Set("TransferFileBytes", 0)
 			resultAd.Set("TransferTotalBytes", 0)
-			if pelican.ErrorsRetryable() {
+			if client.ErrorsRetryable() {
 				resultAd.Set("TransferRetryable", true)
 				retryable = true
 			} else {

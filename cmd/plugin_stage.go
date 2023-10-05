@@ -26,8 +26,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/pelicanplatform/pelican"
 	"github.com/pelicanplatform/pelican/classads"
+	"github.com/pelicanplatform/pelican/client"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -115,14 +115,14 @@ func stagePluginMain(cmd *cobra.Command, args []string) {
 	}
 
 	// Set the progress bars to the command line option
-	pelican.ObjectClientOptions.Token = viper.GetString("StagePlugin.Token")
+	client.ObjectClientOptions.Token = viper.GetString("StagePlugin.Token")
 
 	// Check if the program was executed from a terminal
 	// https://rosettacode.org/wiki/Check_output_device_is_a_terminal#Go
 	if fileInfo, _ := os.Stdout.Stat(); (fileInfo.Mode() & os.ModeCharDevice) != 0 {
-		pelican.ObjectClientOptions.ProgressBars = true
+		client.ObjectClientOptions.ProgressBars = true
 	} else {
-		pelican.ObjectClientOptions.ProgressBars = false
+		client.ObjectClientOptions.ProgressBars = false
 	}
 
 	var sources []string
@@ -185,7 +185,7 @@ func stagePluginMain(cmd *cobra.Command, args []string) {
 	var result error
 	var xformSources []string
 	for _, src := range sources {
-		_, newSource, result := pelican.DoShadowIngest(src, mountPrefixStr, shadowOriginPrefixStr)
+		_, newSource, result := client.DoShadowIngest(src, mountPrefixStr, shadowOriginPrefixStr)
 		if result != nil {
 			// What's the correct behavior on failure?  For now, we silently put the transfer
 			// back on the original list.  This is arguably the wrong approach as it might
@@ -202,8 +202,8 @@ func stagePluginMain(cmd *cobra.Command, args []string) {
 	// Exit with failure
 	if result != nil {
 		// Print the list of errors
-		log.Errorln(pelican.GetErrors())
-		if pelican.ErrorsRetryable() {
+		log.Errorln(client.GetErrors())
+		if client.ErrorsRetryable() {
 			log.Errorln("Errors are retryable")
 			os.Exit(11)
 		}
