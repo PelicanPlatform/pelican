@@ -137,23 +137,23 @@ func loadServerKeys() (*ecdsa.PrivateKey, error) {
 
 func loadOIDC() error {
 	// Load OIDC.ClientID
-	OIDCClientIDFile := param.Registry_OIDCClientIDFile.GetString()
+	OIDCClientIDFile := param.OIDC_ClientIDFile.GetString()
 	OIDCClientIDFromEnv := viper.GetString("OIDCCLIENTID")
 	if OIDCClientIDFile != "" {
 		contents, err := os.ReadFile(OIDCClientIDFile)
 		if err != nil {
-			return errors.Wrapf(err, "Failed reading provided Registry.OIDCClientIDFile %s", OIDCClientIDFile)
+			return errors.Wrapf(err, "Failed reading provided OIDC.ClientIDFile %s", OIDCClientIDFile)
 		}
 		OIDC.ClientID = strings.TrimSpace(string(contents))
 	} else if OIDCClientIDFromEnv != "" {
 		OIDC.ClientID = OIDCClientIDFromEnv
 	} else {
-		return errors.New("An OIDC Client Identity file must be specified in the config (Registry.OIDCClientIDFile)," +
+		return errors.New("An OIDC Client Identity file must be specified in the config (OIDC.ClientIDFile)," +
 			" or the identity must be provided via the environment variable PELICAN_OIDCCLIENTID")
 	}
 
 	// load OIDC.ClientSecret
-	OIDCClientSecretFile := param.Registry_OIDCClientSecretFile.GetString()
+	OIDCClientSecretFile := param.OIDC_ClientSecretFile.GetString()
 	OIDCClientSecretFromEnv := viper.GetString("OIDCCLIENTSECRET")
 	if OIDCClientSecretFile != "" {
 		contents, err := os.ReadFile(OIDCClientSecretFile)
@@ -164,40 +164,40 @@ func loadOIDC() error {
 	} else if OIDCClientSecretFromEnv != "" {
 		OIDC.ClientSecret = OIDCClientSecretFromEnv
 	} else {
-		return errors.New("An OIDC Client Secret file must be specified in the config (Registry.OIDCClientSecretFile)," +
+		return errors.New("An OIDC Client Secret file must be specified in the config (OIDC.ClientSecretFile)," +
 			" or the secret must be provided via the environment variable PELICAN_OIDCCLIENTSECRET")
 	}
 
 	// Load OIDC.DeviceAuthEndpoint
-	deviceAuthEndpoint := param.Registry_OIDCDeviceAuthEndpoint.GetString()
+	deviceAuthEndpoint := param.OIDC_DeviceAuthEndpoint.GetString()
 	if deviceAuthEndpoint == "" {
-		return errors.New("Nothing set for config parameter Registry.OIDCDeviceAuthEndpoint, so registration with identity not supported")
+		return errors.New("Nothing set for config parameter OIDC.DeviceAuthEndpoint, so registration with identity not supported")
 	}
 	deviceAuthEndpointURL, err := url.Parse(deviceAuthEndpoint)
 	if err != nil {
-		return errors.New("Failed to parse URL for parameter Registry.OIDCDeviceAuthEndpoint")
+		return errors.New("Failed to parse URL for parameter OIDC.DeviceAuthEndpoint")
 	}
 	OIDC.DeviceAuthEndpoint = deviceAuthEndpointURL.String()
 
 	// Load OIDC.TokenEndpoint
-	tokenEndpoint := param.Registry_OIDCTokenEndpoint.GetString()
+	tokenEndpoint := param.OIDC_TokenEndpoint.GetString()
 	if tokenEndpoint == "" {
-		return errors.New("Nothing set for config parameter Registry.OIDCTokenEndpoint, so registration with identity not supported")
+		return errors.New("Nothing set for config parameter OIDC.TokenEndpoint, so registration with identity not supported")
 	}
 	tokenAuthEndpointURL, err := url.Parse(tokenEndpoint)
 	if err != nil {
-		return errors.New("Failed to parse URL for parameter Registry.OIDCTokenEndpoint")
+		return errors.New("Failed to parse URL for parameter OIDC.TokenEndpoint")
 	}
 	OIDC.TokenEndpoint = tokenAuthEndpointURL.String()
 
 	// Load OIDC.UserInfoEndpoint
-	userInfoEndpoint := param.Registry_OIDCTokenEndpoint.GetString()
+	userInfoEndpoint := param.OIDC_TokenEndpoint.GetString()
 	if userInfoEndpoint == "" {
-		return errors.New("Nothing set for config parameter Registry.OIDCUserInfoEndpoint, so registration with identity not supported")
+		return errors.New("Nothing set for config parameter OIDC.UserInfoEndpoint, so registration with identity not supported")
 	}
 	userInfoEndpointURL, err := url.Parse(userInfoEndpoint)
 	if err != nil {
-		return errors.New("Failed to parse URL for parameter Registry.OIDCUserInfoEndpoint")
+		return errors.New("Failed to parse URL for parameter OIDC.UserInfoEndpoint")
 	}
 	OIDC.UserInfoEndpoint = userInfoEndpointURL.String()
 

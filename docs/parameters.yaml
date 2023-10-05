@@ -52,13 +52,6 @@ root_default: /etc/pelican/issuer.jwk
 default: $ConfigBase/issuer.jwk
 components: ["client", "nsregistry", "director"]
 ---
-name: WebAddress
-description: >-
-  A string-encoded IP address that the origin is configured to listen on.
-type: string
-default: 0.0.0.0
-components: ["origin"]
----
 
 ############################
 # Federation-Level Configs #
@@ -127,9 +120,23 @@ type: bool
 default: false
 components: ["client"]
 ---
+name: DisableHttpProxy
+description: >-
+  A legacy configuration for disabling the client's HTTP proxy. See Client.DisableHttpProxy for new config.
+type: bool
+default: false
+components: ["client"]
+---
 name: Client.DisableProxyFallback
 description: >-
   A bool indicating whether the a proxy fallback should be used by the client.
+type: bool
+default: false
+components: ["client"]
+---
+name: DisableProxyFallback
+description: >-
+  A legacy configuration for disabling the client's proxy fallback. See Client.DisableProxyFallback for new config.
 type: bool
 default: false
 components: ["client"]
@@ -141,10 +148,24 @@ type: int
 default: 102400
 components: ["client"]
 ---
+name: MinimumDownloadSpeed
+description: >-
+  A legacy configuration for setting the client's minimum download speed. See Client.MinimumDownloadSpeed for new config.
+type: int
+default: 102400
+components: ["client"]
+---
 
 ############################
 #   Origin-level Configs   #
 ############################
+name: Origin.Url
+description: >-
+  The origin's configured URL, as reported to XRootD.
+type: string
+default: Hostname
+components: ["origin"]
+---
 name: Origin.ExportVolume
 description: >-
   A path to the volume exported by an origin.
@@ -167,11 +188,25 @@ root_default: true
 default: false
 components: ["origin"]
 ---
+name: Origin.UseCmsd
+description: >-
+  A bool indicating whether the origin should use CMSD.
+type: bool
+default: true
+components: ["origin"]
+---
 name: Origin.UIPasswordFile
 description: >-
   A filepath specifying where the Origin UI password file should be stored.
 type: string
 default: $ConfigBase/origin-ui-passwd
+components: ["origin"]
+---
+name: Origin.SelfTest
+description: >-
+  A bool indicating whether the origin should perform self health checks.
+type: bool
+default: true
 components: ["origin"]
 ---
 
@@ -218,48 +253,6 @@ root_default: /var/lib/pelican/registry.sqlite
 default: $ConfigBase/ns-registry.sqlite
 components: ["nsregistry"]
 ---
-name: Registry.OIDCClientIDFile
-description: >-
-  A filepath to a file containing an OIDC Client ID. This is used by the namespace registry to establish OIDC information
-  for authenticated registration.
-type: filename
-root_default: /etc/pelican/oidc-client-id
-default: $ConfigBase/oidc-client-id
-components: ["nsregistry"]
----
-name: Registry.OIDCClientSecretFile
-description: >-
-  A filepath to a file containing an OIDC Client Secret. This is used by the namespace registry to establish OIDC information
-  for authenticated registration.
-type: filename
-root_default: /etc/pelican/oidc-client-secret
-default: $ConfigBase/oidc-client-secret
-components: ["nsregistry"]
----
-name: Registry.OIDCDeviceAuthEndpoint
-description: >-
-  A URL describing an OIDC Device Auth Endpoint. This is used by the namespace registry to establish OIDC information
-  for authenticated registration.
-type: url
-default: none
-components: ["nsregistry"]
----
-name: Registry.OIDCTokenEndpoint
-description: >-
-  A URL describing an OIDC Token Endpoint. This is used by the namespace registry to establish OIDC information
-  for authenticated registration.
-type: url
-default: none
-components: ["nsregistry"]
----
-name: Registry.OIDCUserInfoEndpoint
-description: >-
-  A URL describing an OIDC User Info Endpoint. This is used by the namespace registry to establish OIDC information
-  for authenticated registration.
-type: url
-default: none
-components: ["nsregistry"]
----
 
 ############################
 #   Server-level configs   #
@@ -273,6 +266,29 @@ root_default: /etc/pelican/certificates/tls.crt
 default: "$ConfigBase/certificates/tls.crt"
 components: ["origin", "nsregistry", "director"]
 ---
+name: Server.TLSCACertificateFile
+description: >-
+  A filepath for a TLS certificate to be used by XRootD.
+type: string
+default: /etc/pki/tls/cert.pem
+components: ["origin"]
+---
+name: Server.TLSCACertificateDirectory
+description: >-
+  A filepath to the directory used for storing TLS certificates
+type: string
+default: /etc/pki/tls/cert.pem
+components: ["origin"]
+---
+name: Server.TLSCAKey
+description: >-
+  The name of a file containing a private key corresponding to the TLSCACertificate.
+  Used when running server components of Pelican.
+type: filename
+root_default: /etc/pelican/certificates/tlsca.key
+default: "$ConfigBase/certificates/tlsca.key"
+components: ["origin", "nsregistry", "director"]
+---
 name: Server.TLSKey
 description: >-
   The name of a file containing a private key corresponding to the TLSCertificate.
@@ -282,12 +298,19 @@ root_default: /etc/pelican/certificates/tls.key
 default: "$ConfigBase/certificates/tls.key"
 components: ["origin", "nsregistry", "director"]
 ---
-name: Server.WebPort
+name: Server.Port
 description: >-
   The port number the Pelican web interface will be bound to.
 type: int
 default: 8444
 components: ["nsregistry", "director", "origin"]
+---
+name: Server.Address
+description: >-
+  A string-encoded IP address that the origin is configured to listen on.
+type: string
+default: 0.0.0.0
+components: ["origin"]
 ---
 name: Server.ExternalAddress
 description: >-
@@ -311,9 +334,62 @@ default: none
 components: ["origin", "director", "nsregistry"]
 ---
 
+
+
+
+name: OIDC.ClientIDFile
+description: >-
+  A filepath to a file containing an OIDC Client ID. This is used by the namespace registry to establish OIDC information
+  for authenticated registration.
+type: filename
+root_default: /etc/pelican/oidc-client-id
+default: $ConfigBase/oidc-client-id
+components: ["nsregistry"]
+---
+name: OIDC.ClientSecretFile
+description: >-
+  A filepath to a file containing an OIDC Client Secret. This is used by the namespace registry to establish OIDC information
+  for authenticated registration.
+type: filename
+root_default: /etc/pelican/oidc-client-secret
+default: $ConfigBase/oidc-client-secret
+components: ["nsregistry"]
+---
+name: OIDC.DeviceAuthEndpoint
+description: >-
+  A URL describing an OIDC Device Auth Endpoint. This is used by the namespace registry to establish OIDC information
+  for authenticated registration.
+type: url
+default: none
+components: ["nsregistry"]
+---
+name: OIDC.TokenEndpoint
+description: >-
+  A URL describing an OIDC Token Endpoint. This is used by the namespace registry to establish OIDC information
+  for authenticated registration.
+type: url
+default: none
+components: ["nsregistry"]
+---
+name: OIDC.UserInfoEndpoint
+description: >-
+  A URL describing an OIDC User Info Endpoint. This is used by the namespace registry to establish OIDC information
+  for authenticated registration.
+type: url
+default: none
+components: ["nsregistry"]
+---
+
 ############################
 #   XRootD-level Configs   #
 ############################
+name: Xrootd.Port
+description: >-
+  The port over which XRootD should be made available.
+type: int
+default: 8443
+components: ["origin"]
+---
 name: Xrootd.RunLocation
 description: >-
   A directory where temporary configurations will be stored for the xrootd daemon
@@ -397,13 +473,6 @@ type: url
 default: none
 components: ["origin"]
 ---
-name: Xrootd.TLSCertFile
-description: >-
-  A filepath for a TLS certificate to be used by XRootD.
-type: string
-default: /etc/pki/tls/cert.pem
-components: ["origin"]
----
 name: Xrootd.Sitename
 description: >-
   The sitename, as configured for XRootD.
@@ -413,9 +482,9 @@ components: ["origin"]
 ---
 
 ############################
-# Prometheus-level configs #
+# Monitoring-level configs #
 ############################
-name: Prometheus.MonitoringData
+name: Monitoring.DataLocation
 description: >-
   A filepath where Prometheus should host its monitoring data.
 type: string
@@ -423,14 +492,14 @@ root_default: /var/lib/pelican/monitoring/data
 default: $ConfigBase/monitoring/data
 components: ["origin"]
 ---
-name: Prometheus.MonitoringPortLower
+name: Monitoring.PortLower
 description: >-
   The lower end of a range of monitoring ports for Prometheus configuration.
 type: int
 default: 9930
 components: ["origin"]
 ---
-name: Prometheus.MonitoringPortHigher
+name: Monitoring.PortHigher
 description: >-
   The lower end of a range of monitoring ports for Prometheus configuration.
 type: int

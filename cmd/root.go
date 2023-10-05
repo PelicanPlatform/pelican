@@ -46,7 +46,7 @@ with data federations, enabling the sharing of objects and collections
 across multiple dataset providers.`,
 	}
 
-	// We want the value of this port flag to correspond to the WebPort viper key.
+	// We want the value of this port flag to correspond to the Port viper key.
 	// However, only one flag pointer can correspond to the key.  If we define this
 	// in `pelican registry serve` and `pelican director serve`, then whatever init()
 	// function is run second will be the only one that is set (the first definition
@@ -128,7 +128,7 @@ func initConfig() {
 	if err := viper.BindPFlag("Debug", rootCmd.PersistentFlags().Lookup("debug")); err != nil {
 		panic(err)
 	}
-	if err := viper.BindPFlag("Server.WebPort", portFlag); err != nil {
+	if err := viper.BindPFlag("Server.Port", portFlag); err != nil {
 		panic(err)
 	}
 

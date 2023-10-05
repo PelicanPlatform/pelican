@@ -154,8 +154,8 @@ var (
 )
 
 func ConfigureMonitoring() (int, error) {
-	lower := param.Prometheus_MonitoringPortLower.GetInt()
-	higher := param.Prometheus_MonitoringPortHigher.GetInt()
+	lower := param.Monitoring_PortLower.GetInt()
+	higher := param.Monitoring_PortHigher.GetInt()
 
 	addr := net.UDPAddr{IP: net.ParseIP("127.0.0.1")}
 	var conn *net.UDPConn

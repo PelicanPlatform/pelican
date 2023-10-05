@@ -56,12 +56,11 @@ var (
 
 type (
 	OriginConfig struct {
-		Multiuser    bool
-		UseCmsd      bool
-		UseMacaroons bool
-		UseVoms      bool
-		SelfTest     bool
 		Multiuser       bool
+		UseCmsd         bool
+		UseMacaroons    bool
+		UseVoms         bool
+		SelfTest        bool
 		NamespacePrefix string
 	}
 
@@ -69,10 +68,6 @@ type (
 		Port                   int
 		ManagerHost            string
 		ManagerPort            string
-		TLSCertificate         string
-		TLSKey                 string
-		TLSCertDir             string
-		TLSCACertFile          string
 		MacaroonsKeyFile       string
 		RobotsTxtFile          string
 		Sitename               string
@@ -88,8 +83,10 @@ type (
 	}
 
 	ServerConfig struct {
-		TLSCertificate string
-		TLSKey         string
+		TLSCertificate          string
+		TLSKey                  string
+		TLSCACertificateDirectory string
+		TLSCACertificateFile      string
 	}
 
 	XrootdConfig struct {
@@ -210,21 +207,15 @@ to export the directory /mnt/foo to the path /bar in the data federation`)
 			return errors.Wrapf(err, "Failed to create export symlink")
 		}
 	}
-<<<<<<< HEAD
-	viper.Set("Mount", exportPath)
+	viper.Set("Xrootd.Mount", exportPath)
 
-	if viper.GetBool("Origin.SelfTest") {
+	if param.Origin_SelfTest.GetBool() {
 		if err := origin_ui.ConfigureXrootdMonitoringDir(); err != nil {
 			return err
 		}
 	}
 
 	if err = xrootd.EmitIssuerMetadata(exportPath); err != nil {
-=======
-	viper.Set("Xrootd.Mount", exportPath)
-	keys, err := config.GenerateIssuerJWKS()
-	if err != nil {
->>>>>>> d74f632 (Overhaul config names)
 		return err
 	}
 
@@ -301,19 +292,7 @@ to export the directory /mnt/foo to the path /bar in the data federation`)
 			" to desired daemon group %v", macaroonsSecret, groupname)
 	}
 
-<<<<<<< HEAD
 	if err := xrootd.EmitAuthfile(); err != nil {
-=======
-	scitokensCfg := param.Xrootd_ScitokensConfig.GetString()
-	err = config.MkdirAll(path.Dir(scitokensCfg), 0755, -1, gid)
-	if err != nil {
-		return errors.Wrapf(err, "Unable to create directory %v",
-			path.Dir(scitokensCfg))
-	}
-	if file, err := os.OpenFile(scitokensCfg, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0640); err == nil {
-		file.Close()
-	} else if !errors.Is(err, os.ErrExist) {
->>>>>>> d74f632 (Overhaul config names)
 		return err
 	}
 
@@ -336,12 +315,7 @@ func checkConfigFileReadable(fileName string, errMsg string) error {
 }
 
 func checkDefaults() error {
-<<<<<<< HEAD
-	requiredConfigs := []string{"TLSCertificate", "TLSKey", "XrootdRun", "RobotsTxtFile"}
-=======
-	requiredConfigs := []string{"Xrootd.ManagerHost", "Xrootd.SummaryMonitoringHost", "Xrootd.DetailedMonitoringHost",
-		"Server.TLSCertificate", "Server.TLSKey", "Xrootd.RunLocation", "Xrootd.RobotsTxtFile"}
->>>>>>> d74f632 (Overhaul config names)
+	requiredConfigs := []string{"Server.TLSCertificate", "Server.TLSKey", "Xrootd.RunLocation", "Xrootd.RobotsTxtFile"}
 	for _, configName := range requiredConfigs {
 		mgr := viper.GetString(configName) // TODO: Remove direct access once all parameters are generated
 		if mgr == "" {
@@ -350,7 +324,7 @@ func checkDefaults() error {
 		}
 	}
 
-	if managerHost := viper.GetString("ManagerHost"); managerHost == "" {
+	if managerHost := param.Xrootd_ManagerHost.GetString(); managerHost == "" {
 		log.Debug("No manager host specified for the cmsd process in origin; assuming no xrootd protocol support")
 		viper.SetDefault("Origin.UseCmsd", false)
 		metrics.DeleteComponentHealthStatus("cmsd")
@@ -383,25 +357,13 @@ func checkDefaults() error {
 	// Check that OriginUrl is defined in the config file. Make sure it parses.
 	// Fail if either condition isn't met, although note that url.Parse doesn't
 	// generate errors for many things that are not recognizable urls.
-	originUrlStr := viper.GetString("OriginUrl")
+	originUrlStr := param.Origin_Url.GetString()
 	if originUrlStr == "" {
 		return errors.New("OriginUrl must be configured to serve an origin")
 	}
 
-<<<<<<< HEAD
 	if _, err := url.Parse(originUrlStr); err != nil {
 		return errors.Wrapf(err, "Could not parse the provided OriginUrl (%v)", originUrlStr)
-=======
-	if originUrlParsed.Port() == "" {
-		// No port was specified, let's tack on whatever was passed in the
-		// command line argument
-		viper.Set("OriginUrl", originUrlParsed.String()+":"+fmt.Sprint(param.Server_WebPort.GetInt()))
-	} else if originUrlParsed.Port() != fmt.Sprint(param.Server_WebPort.GetInt()) {
-		// The web port configured via the config file and the webport configured
-		// via commandline don't match. Perhaps the user is confused?
-		return errors.New("Mismatched webports: from command line: " + fmt.Sprint(param.Server_WebPort.GetInt()) +
-			", from config file: " + originUrlParsed.Port() + ". Please ensure these match")
->>>>>>> d74f632 (Overhaul config names)
 	}
 
 	return nil
@@ -510,11 +472,11 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		return err
 	}
 
-	if viper.GetBool("Origin.SelfTest") {
+	if param.Origin_SelfTest.GetBool() {
 		go origin_ui.PeriodicSelfTest()
 	}
 
-	privileged := viper.GetBool("Origin.Multiuser")
+	privileged := param.Origin_Multiuser.GetBool()
 	err = xrootd.LaunchXrootd(privileged, configPath)
 	if err != nil {
 		return err

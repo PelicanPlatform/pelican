@@ -233,7 +233,7 @@ func ComputeExternalAddress() string {
 	if config_url != "" {
 		return config_url
 	}
-	return fmt.Sprintf("%v:%v", param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
+	return fmt.Sprintf("%v:%v", param.Server_Hostname.GetString(), param.Server_Port.GetInt())
 }
 
 func getConfigBase() (string, error) {
@@ -272,7 +272,7 @@ func setupTransport() {
 	if param.TLSSkipVerify.GetBool() {
 		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 	}
-	if caCert, err := LoadCertficate(viper.GetString("TLSCACertFile")); err == nil {
+	if caCert, err := LoadCertficate(param.Server_TLSCACertificateFile.GetString()); err == nil {
 		systemPool, err := x509.SystemCertPool()
 		if err == nil {
 			systemPool.AddCert(caCert)
@@ -304,13 +304,7 @@ func InitServer() error {
 		}
 		viper.SetDefault("ConfigDir", configDir)
 	}
-	viper.SetDefault("TLSCertificate", filepath.Join(configDir, "certificates", "tls.crt"))
-	viper.SetDefault("TLSKey", filepath.Join(configDir, "certificates", "tls.key"))
-	viper.SetDefault("TLSCAKey", filepath.Join(configDir, "certificates", "tlsca.key"))
-	viper.SetDefault("RobotsTxtFile", filepath.Join(configDir, "robots.txt"))
-	viper.SetDefault("ScitokensConfig", filepath.Join(configDir, "xrootd", "scitokens.cfg"))
-	viper.SetDefault("Authfile", filepath.Join(configDir, "xrootd", "authfile"))
-	viper.SetDefault("MacaroonsKeyFile", filepath.Join(configDir, "macaroons-secret"))
+
 	viper.SetDefault("Server.TLSCertificate", filepath.Join(configDir, "certificates", "tls.crt"))
 	viper.SetDefault("Server.TLSKey", filepath.Join(configDir, "certificates", "tls.key"))
 	viper.SetDefault("Server.TLSCAKey", filepath.Join(configDir, "certificates", "tlsca.key"))
@@ -320,18 +314,18 @@ func InitServer() error {
 	viper.SetDefault("Xrootd.MacaroonsKeyFile", filepath.Join(configDir, "macaroons-secret"))
 	viper.SetDefault("IssuerKey", filepath.Join(configDir, "issuer.jwk"))
 	viper.SetDefault("Origin.UIPasswordFile", filepath.Join(configDir, "origin-ui-passwd"))
-	viper.SetDefault("Registry.OIDCClientIDFile", filepath.Join(configDir, "oidc-client-id"))
-	viper.SetDefault("Registry.OIDCClientSecretFile", filepath.Join(configDir, "oidc-client-secret"))
+	viper.SetDefault("OIDC.ClientIDFile", filepath.Join(configDir, "oidc-client-id"))
+	viper.SetDefault("OIDC.ClientSecretFile", filepath.Join(configDir, "oidc-client-secret"))
 	if IsRootExecution() {
 		viper.SetDefault("Xrootd.RunLocation", "/run/pelican/xrootd")
 		viper.SetDefault("Origin.Multiuser", true)
 		viper.SetDefault("Director.GeoIPLocation", "/var/cache/pelican/maxmind/GeoLite2-City.mmdb")
 		viper.SetDefault("Registry.DbLocation", "/var/lib/pelican/registry.sqlite")
-		viper.SetDefault("Prometheus.MonitoringData", "/var/lib/pelican/monitoring/data")
+		viper.SetDefault("Monitoring.DataLocation", "/var/lib/pelican/monitoring/data")
 	} else {
 		viper.SetDefault("Director.GeoIPLocation", filepath.Join(configDir, "maxmind", "GeoLite2-City.mmdb"))
 		viper.SetDefault("Registry.DbLocation", filepath.Join(configDir, "ns-registry.sqlite"))
-		viper.SetDefault("Prometheus.MonitoringData", filepath.Join(configDir, "monitoring/data"))
+		viper.SetDefault("Monitoring.DataLocation", filepath.Join(configDir, "monitoring/data"))
 
 		if userRuntimeDir := os.Getenv("XDG_RUNTIME_DIR"); userRuntimeDir != "" {
 			runtimeDir := filepath.Join(userRuntimeDir, "pelican")
@@ -356,7 +350,7 @@ func InitServer() error {
 		return errors.Wrapf(err, "Failure when setting up OS-specific configuration")
 	}
 
-	err = os.MkdirAll(viper.GetString("Monitoring.DataLocation"), 0750)
+	err = os.MkdirAll(param.Monitoring_DataLocation.GetString(), 0750)
 	if err != nil {
 		return errors.Wrapf(err, "Failure when creating a directory for the monitoring data")
 	}
@@ -373,11 +367,11 @@ func InitServer() error {
 		return err
 	}
 
-	port := viper.GetInt("Port")
+	port := param.Xrootd_Port.GetInt()
 	if port != 443 {
-		viper.SetDefault("OriginUrl", fmt.Sprintf("https://%v:%v", viper.GetString("Hostname"), port))
+		viper.SetDefault("Origin.Url", fmt.Sprintf("https://%v:%v", param.Server_Hostname.GetString(), port))
 	} else {
-		viper.SetDefault("OriginUrl", fmt.Sprintf("https://%v", viper.GetString("Hostname")))
+		viper.SetDefault("Origin.Url", fmt.Sprintf("https://%v", param.Server_Hostname.GetString()))
 	}
 
 	prefix := GetPreferredPrefix()
@@ -493,7 +487,19 @@ func InitClient() error {
 		}
 		break
 	}
-	viper.Set("Client.MinimumDownloadSpeed", downloadLimit)
+	if viper.IsSet("MinimumDownloadSpeed") {
+		viper.SetDefault("Client.MinimumDownloadSpeed", viper.GetString("MinimumDownloadSpeed"))
+	} else {
+		viper.Set("Client.MinimumDownloadSpeed", downloadLimit)
+	}
+
+	// Handle more legacy config options
+	if viper.IsSet("DisableProxyFallback") {
+		viper.SetDefault("Client.DisableProxyFallback", viper.GetString("DisableProxyFallback"))
+	}
+	if viper.IsSet("DisableHttpProxy") {
+		viper.SetDefault("Client.DisableHttpProxy", viper.GetString("DisableHttpProxy"))
+	}
 
 	setupTransport()
 

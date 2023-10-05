@@ -39,7 +39,6 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
-	"github.com/spf13/viper"
 )
 
 type (
@@ -124,7 +123,7 @@ func EmitScitokensConfiguration(cfg *ScitokensCfg) error {
 // Parse the input xrootd authfile, add any default configurations, and then save it
 // into the xrootd runtime directory
 func EmitAuthfile() error {
-	authfile := viper.GetString("Authfile")
+	authfile := param.Xrootd_Authfile.GetString()
 	contents, err := os.ReadFile(authfile)
 	if err != nil {
 		return errors.Wrapf(err, "Failed to read xrootd authfile from %s", authfile)
@@ -152,7 +151,7 @@ func EmitAuthfile() error {
 		return err
 	}
 
-	xrootdRun := viper.GetString("XrootdRun")
+	xrootdRun := param.Xrootd_RunLocation.GetString()
 	finalAuthPath := filepath.Join(xrootdRun, "authfile-generated")
 	file, err := os.OpenFile(finalAuthPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0640)
 	if err != nil {
@@ -236,11 +235,11 @@ func LoadScitokensConfig(fileName string) (cfg ScitokensCfg, err error) {
 
 // We have a special issuer just for self-monitoring the origin.
 func GenerateMonitoringIssuer() (issuer Issuer, err error) {
-	if val := viper.GetBool("Origin.SelfTest"); !val {
+	if val := param.Origin_SelfTest.GetBool(); !val {
 		return
 	}
 	issuer.Name = "Built-in Monitoring"
-	issuer.Issuer = viper.GetString("OriginUrl")
+	issuer.Issuer = param.Origin_Url.GetString()
 	issuer.BasePaths = []string{"/pelican/monitoring"}
 	issuer.DefaultUser = "xrootd"
 
@@ -322,7 +321,7 @@ func EmitIssuerMetadata(exportPath string) error {
 	}
 	defer openidFile.Close()
 
-	originUrlStr := viper.GetString("OriginUrl")
+	originUrlStr := param.Origin_Url.GetString()
 	jwksUrl, err := url.Parse(originUrlStr)
 	if err != nil {
 		return err
@@ -330,7 +329,7 @@ func EmitIssuerMetadata(exportPath string) error {
 	jwksUrl.Path = "/.well-known/issuer.jwks"
 
 	cfg := openIdConfig{
-		Issuer:  viper.GetString("OriginUrl"),
+		Issuer:  param.Origin_Url.GetString(),
 		JWKSURI: jwksUrl.String(),
 	}
 	buf, err = json.MarshalIndent(cfg, "", " ")
