@@ -54,12 +54,18 @@ func namespaceAdContainsPath (ns []NamespaceAd, path string) bool {
 	return false
 }
 
+func setup() {
+	serverAds.DeleteAll()
+}
+
+
 func teardown() {
 	serverAds.DeleteAll()
 }
 
 func TestListNamespaces(t *testing.T) {
 	t.Run("empty-entry", func(t *testing.T) {
+		setup() 
 		defer teardown()
 		ns := ListNamespacesFromOrigins()
 
@@ -67,6 +73,7 @@ func TestListNamespaces(t *testing.T) {
 		assert.Equal(t, 0, len(ns), "List is not empty for empty namespace cache.")
 	})
 	t.Run("one-origin-namespace-entry", func(t *testing.T) {
+		setup() 
 		defer teardown()
 		serverAds.Set(mockOriginServerAd, mockNamespaceAds(1,"origin1"), ttlcache.DefaultTTL)
 		ns := ListNamespacesFromOrigins()
@@ -76,6 +83,7 @@ func TestListNamespaces(t *testing.T) {
 		assert.True(t, namespaceAdContainsPath(ns, pathPreix + "origin1/" + fmt.Sprint(0)), "Returned namespace path does not match what's added")
 	})
 	t.Run("multiple-origin-namespace-entries-from-same-origin", func(t *testing.T) {
+		setup() 
 		defer teardown()
 		serverAds.Set(mockOriginServerAd, mockNamespaceAds(10, "origin1"), ttlcache.DefaultTTL)
 		ns := ListNamespacesFromOrigins()
@@ -84,6 +92,7 @@ func TestListNamespaces(t *testing.T) {
 		assert.True(t, namespaceAdContainsPath(ns, pathPreix + "origin1/" + fmt.Sprint(5)), "Returned namespace path does not match what's added")
 	})
 	t.Run("multiple-origin-namespace-entries-from-different-origins", func(t *testing.T) {
+		setup() 
 		defer teardown()
 
 		serverAds.Set(mockOriginServerAd, mockNamespaceAds(10, "origin1"), ttlcache.DefaultTTL)
@@ -101,6 +110,7 @@ func TestListNamespaces(t *testing.T) {
 		mockOriginServerAd.Name = oldServerName
 	})
 	t.Run("one-cache-namespace-entry", func(t *testing.T) {
+		setup() 
 		defer teardown()
 		serverAds.Set(mockCacheServerAd, mockNamespaceAds(1, "cache1"), ttlcache.DefaultTTL)
 		ns := ListNamespacesFromOrigins()
