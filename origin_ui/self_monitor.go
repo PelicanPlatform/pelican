@@ -32,7 +32,6 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
-	"github.com/pelicanplatform/pelican"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pkg/errors"
@@ -99,7 +98,7 @@ func DownloadTestfile(url string) error {
 	}
 	req.Header.Set("Authorization", "Bearer "+tkn)
 
-	tr := pelican.GetTransport()
+	tr := config.GetTransport()
 	client := http.Client{Transport: tr}
 
 	resp, err := client.Do(req)
@@ -142,7 +141,7 @@ func UploadTestfile() (string, error) {
 
 	req.Header.Set("Authorization", "Bearer "+tkn)
 
-	tr := pelican.GetTransport()
+	tr := config.GetTransport()
 	client := http.Client{Transport: tr}
 
 	resp, err := client.Do(req)
@@ -170,7 +169,7 @@ func DeleteTestfile(url string) error {
 	}
 	req.Header.Set("Authorization", "Bearer "+tkn)
 
-	tr := pelican.GetTransport()
+	tr := config.GetTransport()
 	client := http.Client{Transport: tr}
 
 	resp, err := client.Do(req)
