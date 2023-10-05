@@ -143,8 +143,11 @@ func TestDirectorRegistration(t *testing.T) {
 	r.POST("/", RegisterOrigin)
 	c.Request, _ = http.NewRequest(http.MethodPost, "/", bytes.NewBuffer([]byte(`{"Namespaces": [{"Path": "/foo/bar", "URL": "https://get-your-tokens.org"}]}`)))
 
-	c.Request.Header.Set("Authorization", string(signed))
+	c.Request.Header.Set("Authorization", "Bearer "+string(signed))
 	c.Request.Header.Set("Content-Type", "application/json")
+	// Hard code the current min version. When this test starts failing because of new stuff in the Director,
+	// we'll know that means it's time to update the min version in redirect.go
+	c.Request.Header.Set("User-Agent", "pelican-origin/7.0.0")
 
 	r.ServeHTTP(w, c.Request)
 
@@ -196,8 +199,11 @@ func TestDirectorRegistration(t *testing.T) {
 	rInv.POST("/", RegisterOrigin)
 	cInv.Request, _ = http.NewRequest(http.MethodPost, "/", bytes.NewBuffer([]byte(`{"Namespaces": [{"Path": "/foo/bar", "URL": "https://get-your-tokens.org"}]}`)))
 
-	cInv.Request.Header.Set("Authorization", string(signedInv))
+	cInv.Request.Header.Set("Authorization", "Bearer "+string(signedInv))
 	cInv.Request.Header.Set("Content-Type", "application/json")
+	// Hard code the current min version. When this test starts failing because of new stuff in the Director,
+	// we'll know that means it's time to update the min version in redirect.go
+	cInv.Request.Header.Set("User-Agent", "pelican-origin/7.0.0")
 
 	rInv.ServeHTTP(wInv, cInv.Request)
 	assert.Equal(t, 400, wInv.Result().StatusCode, "Expected failing status code of 400")
@@ -207,4 +213,35 @@ func TestDirectorRegistration(t *testing.T) {
 	namaspaceADs = ListNamespacesFromOrigins()
 	assert.False(t, NamespaceAdContainsPath(namaspaceADs, "/foo/bar"), "Found namespace in the director cache even if the token validation failed.")
 	serverAds.DeleteAll()
+
+	// Repeat again but with bad origin version
+	wInv = httptest.NewRecorder()
+	cInv, rInv = gin.CreateTestContext(wInv)
+	tsInv = httptest.NewServer(http.HandlerFunc(func(wInv http.ResponseWriter, req *http.Request) {
+		assert.Equal(t, "POST", req.Method, "Not POST Method")
+		_, err := wInv.Write([]byte(":)"))
+		assert.NoError(t, err)
+	}))
+	defer tsInv.Close()
+	cInv.Request = &http.Request{
+		URL: &url.URL{},
+	}
+
+	// Sign token with the good key
+	signedInv, err = jwt.Sign(tok, jwt.WithKey(jwa.ES512, pKey))
+	assert.NoError(t, err, "Error signing token")
+
+	// Create the request and set the headers
+	rInv.POST("/", RegisterOrigin)
+	cInv.Request, _ = http.NewRequest(http.MethodPost, "/", bytes.NewBuffer([]byte(`{"Namespaces": [{"Path": "/foo/bar", "URL": "https://get-your-tokens.org"}]}`)))
+
+	cInv.Request.Header.Set("Authorization", "Bearer "+string(signedInv))
+	cInv.Request.Header.Set("Content-Type", "application/json")
+	cInv.Request.Header.Set("User-Agent", "pelican-origin/6.0.0")
+
+	rInv.ServeHTTP(wInv, cInv.Request)
+	assert.Equal(t, 500, wInv.Result().StatusCode, "Expected failing status code of 500")
+	body, _ = io.ReadAll(wInv.Result().Body)
+	assert.Equal(t, `{"error":"Incompatible versions detected: The director does not support your origin version (6.0.0). Please update to 7.0.0 or newer."}`,
+		string(body), "Failure wasn't because of version incompatibility")
 }
