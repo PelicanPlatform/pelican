@@ -26,6 +26,7 @@ import (
 	"net/url"
 	"time"
 
+	client "github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/param"
