@@ -22,7 +22,6 @@ import (
 	"bytes"
 	"crypto/rand"
 	"encoding/base64"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -114,11 +113,11 @@ func DownloadTestfile(url string) error {
 		return errors.Wrap(err, "Failed to get response body from monitoring download")
 	}
 	if string(body) != selfTestBody {
-		return fmt.Errorf("Contents of self-test body do not match upload: %v", body)
+		return errors.Errorf("Contents of self-test body do not match upload: %v", body)
 	}
 
 	if resp.StatusCode > 299 {
-		return fmt.Errorf("Error response %v from monitoring download: %v", resp.StatusCode, resp.Status)
+		return errors.Errorf("Error response %v from monitoring download: %v", resp.StatusCode, resp.Status)
 	}
 
 	return nil
@@ -153,7 +152,7 @@ func UploadTestfile() (string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode > 299 {
-		return "", fmt.Errorf("Error response %v from monitoring upload: %v", resp.StatusCode, resp.Status)
+		return "", errors.Errorf("Error response %v from monitoring upload: %v", resp.StatusCode, resp.Status)
 	}
 
 	return uploadURL.String(), nil
@@ -181,7 +180,7 @@ func DeleteTestfile(url string) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode > 299 {
-		return fmt.Errorf("Error response %v from monitoring deletion: %v", resp.StatusCode, resp.Status)
+		return errors.Errorf("Error response %v from monitoring deletion: %v", resp.StatusCode, resp.Status)
 	}
 
 	return nil
