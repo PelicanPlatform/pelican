@@ -213,7 +213,7 @@ func TestDirectorRegistration(t *testing.T) {
 	namaspaceADs = ListNamespacesFromOrigins()
 	assert.False(t, NamespaceAdContainsPath(namaspaceADs, "/foo/bar"), "Found namespace in the director cache even if the token validation failed.")
 	serverAds.DeleteAll()
-	
+
 	// Repeat again but with bad origin version
 	wInv = httptest.NewRecorder()
 	cInv, rInv = gin.CreateTestContext(wInv)
