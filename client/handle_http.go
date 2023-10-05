@@ -39,13 +39,14 @@ import (
 
 	grab "github.com/cavaliercoder/grab"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"github.com/studio-b12/gowebdav"
 	"github.com/vbauerster/mpb/v8"
 	"github.com/vbauerster/mpb/v8/decor"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/namespaces"
+	"github.com/pelicanplatform/pelican/namespaces"
+	"github.com/pelicanplatform/pelican/param"
 )
 
 var p = mpb.New()
