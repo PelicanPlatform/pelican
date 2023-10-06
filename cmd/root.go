@@ -87,7 +87,6 @@ func Execute() {
 func init() {
 
 	cobra.OnInitialize(initConfig)
-
 	rootCmd.AddCommand(objectCmd)
 	objectCmd.CompletionOptions.DisableDefaultCmd = true
 	rootCmd.AddCommand(directorCmd)
@@ -107,6 +106,11 @@ func init() {
 	if err := viper.BindPFlag("FederationURL", rootCmd.PersistentFlags().Lookup("federation")); err != nil {
 		panic(err)
 	}
+
+	// Register the version flag here just so --help will show this flag
+	// Actual checking is executed at main.go
+	// Remove the shorthand -v since in "origin serve" flagset it's already used for "volume" flag
+	rootCmd.PersistentFlags().BoolP("version", "", false, "Print the version and exit")
 
 	rootCmd.PersistentFlags().BoolVarP(&outputJSON, "json", "", false, "output results in JSON format")
 	rootCmd.CompletionOptions.DisableDefaultCmd = true
