@@ -1,3 +1,20 @@
+/***************************************************************
+ *
+ * Copyright (C) 2023, Pelican Project, Morgridge Institute for Research
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you
+ * may not use this file except in compliance with the License.  You may
+ * obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ ***************************************************************/
 package web_ui
 
 import (
@@ -141,6 +158,8 @@ func TestPrometheusProtectionFederationURL(t *testing.T) {
 	c.Request.URL.RawQuery = new_query.Encode()
 
 	r.ServeHTTP(w, c.Request)
+
+	assert.Equal(t, 404, w.Result().StatusCode, "Expected status code of 404 representing failure due to minimal server setup, not token check")
 }
 
 func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
@@ -327,5 +346,54 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 
 	r.ServeHTTP(w, c.Request)
 
-	assert.Equal(t, 500, w.Result().StatusCode, "Expected status code of 500 representing failure to validate token scope")
+	assert.Equal(t, 403, w.Result().StatusCode, "Expected status code of 403 due to bad token scope")
+
+	key, err := config.GetOriginJWK()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a new Recorder and Context for the next HTTPtest call
+	w = httptest.NewRecorder()
+	c, r = gin.CreateTestContext(w)
+
+	now := time.Now()
+	tok, err = jwt.NewBuilder().
+		Issuer(issuerURL.String()).
+		Claim("scope", "prometheus.read").
+		Claim("wlcg.ver", "1.0").
+		IssuedAt(now).
+		Expiration(now.Add(30 * time.Minute)).
+		NotBefore(now).
+		Subject("user").
+		Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var raw ecdsa.PrivateKey
+	if err = (*key).Raw(&raw); err != nil {
+		t.Fatal(err)
+	}
+	signed, err = jwt.Sign(tok, jwt.WithKey(jwa.ES256, raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Set the request to go through the checkPromToken function
+	r.GET("/api/v1.0/prometheus/*any", checkPromToken(av1))
+
+	http.SetCookie(w, &http.Cookie{Name: "login", Value: string(signed)})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	//&http.Request{Header: http.Header{"Cookie": recorder.HeaderMap["Set-Cookie"]}}
+
+	c.Request, _ = http.NewRequest(http.MethodGet, "/api/v1.0/prometheus/test", bytes.NewBuffer([]byte(`{}`)))
+	c.Request.Header.Set("Cookie", w.Header().Get("Set-Cookie"))
+
+	r.ServeHTTP(w, c.Request)
+
+	assert.Equal(t, 404, w.Result().StatusCode, "Expected status code of 404 representing failure due to minimal server setup, not token check")
 }
