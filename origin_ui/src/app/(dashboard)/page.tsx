@@ -16,12 +16,13 @@
  *
  ***************************************************************/
 
+"use client"
+
 import RateGraph from "@/components/graphs/RateGraph";
 import LineGraph from "@/components/graphs/LineGraph";
+import StatusBox from "@/components/StatusBox";
 
 import {Box, Grid} from "@mui/material";
-import Image from 'next/image'
-import styles from './page.module.css'
 
 
 export default function Home() {
@@ -31,7 +32,10 @@ export default function Home() {
     return (
         <Box width={"100%"}>
             <Grid container spacing={2}>
-                <Grid item xs={12} lg={6}>
+                <Grid item xs={12} lg={4}>
+                    <StatusBox/>
+                </Grid>
+                <Grid item xs={12} lg={8}>
                     <Box sx={{backgroundColor: "#F6F6F6", borderRadius: "1rem"}} p={2}>
                         <Box minHeight={"200px"}>
                             <RateGraph
