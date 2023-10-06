@@ -14,24 +14,28 @@
 # limitations under the License.
 #
 
-Port: 8443
-WebPort: 8444
-WebAddress: "0.0.0.0"
-ManagerPort: 1213
-SummaryMonitoringPort: 9931
-DetailedMonitoringPort: 9930
-MonitoringPortLower: 9930
-MonitoringPortHigher: 9999
-Mount: ""
-NamespacePrefix: ""
 Debug: false
+
+Server:
+  Port: 8444
+  Address: "0.0.0.0"
 Director:
   DefaultResponse: cache
 Origin:
+  NamespacePrefix: ""
   Multiuser: false
   UseMacaroons: true
   UseVoms: true
   SelfTest: true
+Monitoring:
+  PortLower: 9930
+  PortHigher: 9999
+Xrootd:
+  Port: 8443
+  Mount: ""
+  ManagerPort: 1213
+  DetailedMonitoringPort: 9930
+  SummaryMonitoringPort: 9931
 Transport:
   Dialer:
     Timeout: 10s

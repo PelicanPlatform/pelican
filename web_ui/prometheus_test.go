@@ -20,6 +20,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/prometheus/common/route"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
@@ -49,7 +50,7 @@ func TestPrometheusProtectionFederationURL(t *testing.T) {
 	c, r := gin.CreateTestContext(w)
 	// Note, this handler function intercepts the "http.Get call to the federation uri
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		issuerKeyFile := viper.GetString("IssuerKey")
+		issuerKeyFile := param.IssuerKey.GetString()
 		contents, err := os.ReadFile(issuerKeyFile)
 		if err != nil {
 			t.Fatal(err)
@@ -101,7 +102,7 @@ func TestPrometheusProtectionFederationURL(t *testing.T) {
 	}
 	jti := base64.RawURLEncoding.EncodeToString(jti_bytes)
 
-	originUrl := viper.GetString("OriginURL")
+	originUrl := param.Origin_Url.GetString()
 	tok, err := jwt.NewBuilder().
 		Claim("scope", "prometheus.read").
 		Claim("wlcg.ver", "1.0").
@@ -193,7 +194,7 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 	}
 	jti := base64.RawURLEncoding.EncodeToString(jti_bytes)
 
-	originUrl := viper.GetString("OriginURL")
+	originUrl := param.Origin_Url.GetString()
 	tok, err := jwt.NewBuilder().
 		Claim("scope", "prometheus.read").
 		Claim("wlcg.ver", "1.0").

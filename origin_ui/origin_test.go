@@ -50,7 +50,7 @@ func TestMain(m *testing.M) {
 	}
 	tempPasswdFile = tempFile
 	//Override viper default for testing
-	viper.Set("OriginUI.PasswordFile", tempPasswdFile.Name())
+	viper.Set("Origin.UIPasswordFile", tempPasswdFile.Name())
 
 	//Make a testing issuer.jwk file to get a cookie
 	tempJWKDir, err := os.MkdirTemp("", "tempDir")

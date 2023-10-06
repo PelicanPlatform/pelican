@@ -140,14 +140,14 @@ func GetAllPrefixes() []string {
 }
 
 func DiscoverFederation() error {
-	federationStr := viper.GetString("FederationURL")
+	federationStr := param.Federation_DiscoveryUrl.GetString()
 	if len(federationStr) == 0 {
 		log.Debugln("Federation URL is unset; skipping discovery")
 		return nil
 	}
 	log.Debugln("Federation URL:", federationStr)
-	curDirectorURL := param.DirectorUrl.GetString()
-	curNamespaceURL := param.NamespaceUrl.GetString()
+	curDirectorURL := param.Federation_DirectorUrl.GetString()
+	curNamespaceURL := param.Federation_NamespaceUrl.GetString()
 	if len(curDirectorURL) != 0 && len(curNamespaceURL) != 0 {
 		return nil
 	}
@@ -196,12 +196,12 @@ func DiscoverFederation() error {
 	}
 	if curDirectorURL == "" {
 		log.Debugln("Federation service discovery resulted in director URL", metadata.DirectorEndpoint)
-		viper.Set("DirectorURL", metadata.DirectorEndpoint)
+		viper.Set("Federation.DirectorURL", metadata.DirectorEndpoint)
 	}
 	if curNamespaceURL == "" {
 		log.Debugln("Federation service discovery resulted in namespace registration URL",
 			metadata.NamespaceRegistrationEndpoint)
-		viper.Set("NamespaceURL", metadata.NamespaceRegistrationEndpoint)
+		viper.Set("Federation.NamespaceURL", metadata.NamespaceRegistrationEndpoint)
 	}
 
 	viper.Set("FederationURI", metadata.JwksUri)
@@ -229,11 +229,11 @@ func CleanupTempResources() {
 }
 
 func ComputeExternalAddress() string {
-	config_url := viper.GetString("ExternalAddress")
+	config_url := param.Server_ExternalAddress.GetString()
 	if config_url != "" {
 		return config_url
 	}
-	return fmt.Sprintf("%v:%v", viper.GetString("Hostname"), param.WebPort.GetInt())
+	return fmt.Sprintf("%v:%v", param.Server_Hostname.GetString(), param.Server_Port.GetInt())
 }
 
 func getConfigBase() (string, error) {
@@ -272,7 +272,7 @@ func setupTransport() {
 	if param.TLSSkipVerify.GetBool() {
 		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 	}
-	if caCert, err := LoadCertficate(viper.GetString("TLSCACertFile")); err == nil {
+	if caCert, err := LoadCertficate(param.Server_TLSCACertificateFile.GetString()); err == nil {
 		systemPool, err := x509.SystemCertPool()
 		if err == nil {
 			systemPool.AddCert(caCert)
@@ -304,27 +304,28 @@ func InitServer() error {
 		}
 		viper.SetDefault("ConfigDir", configDir)
 	}
-	viper.SetDefault("TLSCertificate", filepath.Join(configDir, "certificates", "tls.crt"))
-	viper.SetDefault("TLSKey", filepath.Join(configDir, "certificates", "tls.key"))
-	viper.SetDefault("TLSCAKey", filepath.Join(configDir, "certificates", "tlsca.key"))
-	viper.SetDefault("RobotsTxtFile", filepath.Join(configDir, "robots.txt"))
-	viper.SetDefault("ScitokensConfig", filepath.Join(configDir, "xrootd", "scitokens.cfg"))
-	viper.SetDefault("Authfile", filepath.Join(configDir, "xrootd", "authfile"))
-	viper.SetDefault("MacaroonsKeyFile", filepath.Join(configDir, "macaroons-secret"))
+
+	viper.SetDefault("Server.TLSCertificate", filepath.Join(configDir, "certificates", "tls.crt"))
+	viper.SetDefault("Server.TLSKey", filepath.Join(configDir, "certificates", "tls.key"))
+	viper.SetDefault("Server.TLSCAKey", filepath.Join(configDir, "certificates", "tlsca.key"))
+	viper.SetDefault("Xrootd.RobotsTxtFile", filepath.Join(configDir, "robots.txt"))
+	viper.SetDefault("Xrootd.ScitokensConfig", filepath.Join(configDir, "xrootd", "scitokens.cfg"))
+	viper.SetDefault("Xrootd.Authfile", filepath.Join(configDir, "xrootd", "authfile"))
+	viper.SetDefault("Xrootd.MacaroonsKeyFile", filepath.Join(configDir, "macaroons-secret"))
 	viper.SetDefault("IssuerKey", filepath.Join(configDir, "issuer.jwk"))
-	viper.SetDefault("OriginUI.PasswordFile", filepath.Join(configDir, "origin-ui-passwd"))
+	viper.SetDefault("Origin.UIPasswordFile", filepath.Join(configDir, "origin-ui-passwd"))
 	viper.SetDefault("OIDC.ClientIDFile", filepath.Join(configDir, "oidc-client-id"))
 	viper.SetDefault("OIDC.ClientSecretFile", filepath.Join(configDir, "oidc-client-secret"))
 	if IsRootExecution() {
-		viper.SetDefault("XrootdRun", "/run/pelican/xrootd")
-		viper.SetDefault("XrootdMultiuser", true)
-		viper.SetDefault("GeoIPLocation", "/var/cache/pelican/maxmind/GeoLite2-City.mmdb")
-		viper.SetDefault("NSRegistryLocation", "/var/lib/pelican/registry.sqlite")
-		viper.SetDefault("MonitoringData", "/var/lib/pelican/monitoring/data")
+		viper.SetDefault("Xrootd.RunLocation", "/run/pelican/xrootd")
+		viper.SetDefault("Origin.Multiuser", true)
+		viper.SetDefault("Director.GeoIPLocation", "/var/cache/pelican/maxmind/GeoLite2-City.mmdb")
+		viper.SetDefault("Registry.DbLocation", "/var/lib/pelican/registry.sqlite")
+		viper.SetDefault("Monitoring.DataLocation", "/var/lib/pelican/monitoring/data")
 	} else {
-		viper.SetDefault("GeoIPLocation", filepath.Join(configDir, "maxmind", "GeoLite2-City.mmdb"))
-		viper.SetDefault("NSRegistryLocation", filepath.Join(configDir, "ns-registry.sqlite"))
-		viper.SetDefault("MonitoringData", filepath.Join(configDir, "monitoring/data"))
+		viper.SetDefault("Director.GeoIPLocation", filepath.Join(configDir, "maxmind", "GeoLite2-City.mmdb"))
+		viper.SetDefault("Registry.DbLocation", filepath.Join(configDir, "ns-registry.sqlite"))
+		viper.SetDefault("Monitoring.DataLocation", filepath.Join(configDir, "monitoring/data"))
 
 		if userRuntimeDir := os.Getenv("XDG_RUNTIME_DIR"); userRuntimeDir != "" {
 			runtimeDir := filepath.Join(userRuntimeDir, "pelican")
@@ -332,16 +333,16 @@ func InitServer() error {
 			if err != nil {
 				return err
 			}
-			viper.SetDefault("XrootdRun", runtimeDir)
+			viper.SetDefault("Xrootd.RunLocation", runtimeDir)
 		} else {
 			dir, err := os.MkdirTemp("", "pelican-xrootd-*")
 			if err != nil {
 				return err
 			}
-			viper.SetDefault("XrootdRun", dir)
+			viper.SetDefault("Xrootd.RunLocation", dir)
 			cleanupDirOnShutdown(dir)
 		}
-		viper.SetDefault("XrootdMultiuser", false)
+		viper.SetDefault("Origin.Multiuser", false)
 	}
 	// Any platform-specific paths should go here
 	err := InitServerOSDefaults()
@@ -349,7 +350,7 @@ func InitServer() error {
 		return errors.Wrapf(err, "Failure when setting up OS-specific configuration")
 	}
 
-	err = os.MkdirAll(viper.GetString("MonitoringData"), 0750)
+	err = os.MkdirAll(param.Monitoring_DataLocation.GetString(), 0750)
 	if err != nil {
 		return errors.Wrapf(err, "Failure when creating a directory for the monitoring data")
 	}
@@ -358,19 +359,19 @@ func InitServer() error {
 	if err != nil {
 		return err
 	}
-	viper.SetDefault("Hostname", hostname)
-	viper.SetDefault("Sitename", hostname)
+	viper.SetDefault("Server.Hostname", hostname)
+	viper.SetDefault("Xrootd.Sitename", hostname)
 
 	err = viper.MergeConfig(strings.NewReader(defaultsYaml))
 	if err != nil {
 		return err
 	}
 
-	port := viper.GetInt("Port")
+	port := param.Xrootd_Port.GetInt()
 	if port != 443 {
-		viper.SetDefault("OriginUrl", fmt.Sprintf("https://%v:%v", viper.GetString("Hostname"), port))
+		viper.SetDefault("Origin.Url", fmt.Sprintf("https://%v:%v", param.Server_Hostname.GetString(), port))
 	} else {
-		viper.SetDefault("OriginUrl", fmt.Sprintf("https://%v", viper.GetString("Hostname")))
+		viper.SetDefault("Origin.Url", fmt.Sprintf("https://%v", param.Server_Hostname.GetString()))
 	}
 
 	prefix := GetPreferredPrefix()
@@ -400,12 +401,12 @@ func InitClient() error {
 	upper_prefix := GetPreferredPrefix()
 	lower_prefix := strings.ToLower(upper_prefix)
 
-	viper.SetDefault("StoppedTransferTimeout", 100)
-	viper.SetDefault("SlowTransferRampupTime", 100)
-	viper.SetDefault("SlowTransferWindow", 30)
+	viper.SetDefault("Client.StoppedTransferTimeout", 100)
+	viper.SetDefault("Client.SlowTransferRampupTime", 100)
+	viper.SetDefault("Client.SlowTransferWindow", 30)
 
 	if upper_prefix == "OSDF" || upper_prefix == "STASH" {
-		viper.SetDefault("TopologyNamespaceURL", "https://topology.opensciencegrid.org/osdf/namespaces")
+		viper.SetDefault("Federation.TopologyNamespaceURL", "https://topology.opensciencegrid.org/osdf/namespaces")
 	}
 
 	viper.SetEnvPrefix(upper_prefix)
@@ -438,31 +439,31 @@ func InitClient() error {
 	prefixes_with_osg := append(prefixes, "OSG")
 	for _, prefix := range prefixes_with_osg {
 		if _, isSet := os.LookupEnv(prefix + "_DISABLE_HTTP_PROXY"); isSet {
-			viper.Set("DisableHttpProxy", true)
+			viper.Set("Client.DisableHttpProxy", true)
 			break
 		}
 	}
 	for _, prefix := range prefixes_with_osg {
 		if _, isSet := os.LookupEnv(prefix + "_DISABLE_PROXY_FALLBACK"); isSet {
-			viper.Set("DisableProxyFallback", true)
+			viper.Set("Client.DisableProxyFallback", true)
 			break
 		}
 	}
 	for _, prefix := range prefixes {
 		if val, isSet := os.LookupEnv(prefix + "_DIRECTOR_URL"); isSet {
-			viper.Set("DirectorURL", val)
+			viper.Set("Federation.DirectorURL", val)
 			break
 		}
 	}
 	for _, prefix := range prefixes {
 		if val, isSet := os.LookupEnv(prefix + "_NAMESPACE_URL"); isSet {
-			viper.Set("NamespaceURL", val)
+			viper.Set("Federation.NamespaceURL", val)
 			break
 		}
 	}
 	for _, prefix := range prefixes {
 		if val, isSet := os.LookupEnv(prefix + "_TOPOLOGY_NAMESPACE_URL"); isSet {
-			viper.Set("TopologyNamespaceURL", val)
+			viper.Set("Federation.TopologyNamespaceURL", val)
 			break
 		}
 	}
@@ -486,7 +487,19 @@ func InitClient() error {
 		}
 		break
 	}
-	viper.Set("MinimumDownloadSpeed", downloadLimit)
+	if viper.IsSet("MinimumDownloadSpeed") {
+		viper.SetDefault("Client.MinimumDownloadSpeed", viper.GetString("MinimumDownloadSpeed"))
+	} else {
+		viper.Set("Client.MinimumDownloadSpeed", downloadLimit)
+	}
+
+	// Handle more legacy config options
+	if viper.IsSet("DisableProxyFallback") {
+		viper.SetDefault("Client.DisableProxyFallback", viper.GetString("DisableProxyFallback"))
+	}
+	if viper.IsSet("DisableHttpProxy") {
+		viper.SetDefault("Client.DisableHttpProxy", viper.GetString("DisableHttpProxy"))
+	}
 
 	setupTransport()
 

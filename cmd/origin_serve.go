@@ -56,21 +56,18 @@ var (
 
 type (
 	OriginConfig struct {
-		Multiuser    bool
-		UseCmsd      bool
-		UseMacaroons bool
-		UseVoms      bool
-		SelfTest     bool
+		Multiuser       bool
+		UseCmsd         bool
+		UseMacaroons    bool
+		UseVoms         bool
+		SelfTest        bool
+		NamespacePrefix string
 	}
 
-	XrootdConfig struct {
+	XrootdOptions struct {
 		Port                   int
 		ManagerHost            string
 		ManagerPort            string
-		TLSCertificate         string
-		TLSKey                 string
-		TLSCertDir             string
-		TLSCACertFile          string
 		MacaroonsKeyFile       string
 		RobotsTxtFile          string
 		Sitename               string
@@ -78,11 +75,24 @@ type (
 		SummaryMonitoringPort  int
 		DetailedMonitoringHost string
 		DetailedMonitoringPort int
-		XrootdRun              string
+		RunLocation            string
+		Authfile               string
+		ScitokensConfig        string
 		Mount                  string
-		NamespacePrefix        string
 		LocalMonitoringPort    int
-		Origin                 OriginConfig
+	}
+
+	ServerConfig struct {
+		TLSCertificate            string
+		TLSKey                    string
+		TLSCACertificateDirectory string
+		TLSCACertificateFile      string
+	}
+
+	XrootdConfig struct {
+		Server ServerConfig
+		Origin OriginConfig
+		Xrootd XrootdOptions
 	}
 )
 
@@ -114,7 +124,7 @@ func checkXrootdEnv() error {
 	}
 
 	// Ensure the runtime directory exists
-	runtimeDir := param.XrootdRun.GetString()
+	runtimeDir := param.Xrootd_RunLocation.GetString()
 	err = config.MkdirAll(runtimeDir, 0755, uid, gid)
 	if err != nil {
 		return errors.Wrapf(err, "Unable to create runtime directory %v", runtimeDir)
@@ -132,7 +142,7 @@ func checkXrootdEnv() error {
 	}
 
 	// If we use "volume mount" style options, configure the export directories.
-	volumeMount := viper.GetString("ExportVolume")
+	volumeMount := param.Origin_ExportVolume.GetString()
 	if volumeMount != "" {
 		volumeMount, err = filepath.Abs(volumeMount)
 		if err != nil {
@@ -163,10 +173,10 @@ func checkXrootdEnv() error {
 		if err != nil {
 			return errors.Wrapf(err, "Failed to create export symlink")
 		}
-		viper.Set("NamespacePrefix", volumeMountDst)
+		viper.Set("Origin.NamespacePrefix", volumeMountDst)
 	} else {
-		mountPath := viper.GetString("Mount")
-		namespacePrefix := viper.GetString("NamespacePrefix")
+		mountPath := param.Xrootd_Mount.GetString()
+		namespacePrefix := param.Origin_NamespacePrefix.GetString()
 		if mountPath == "" || namespacePrefix == "" {
 			return errors.New(`Export information was not provided.
 Add command line flag:
@@ -197,9 +207,9 @@ to export the directory /mnt/foo to the path /bar in the data federation`)
 			return errors.Wrapf(err, "Failed to create export symlink")
 		}
 	}
-	viper.Set("Mount", exportPath)
+	viper.Set("Xrootd.Mount", exportPath)
 
-	if viper.GetBool("Origin.SelfTest") {
+	if param.Origin_SelfTest.GetBool() {
 		if err := origin_ui.ConfigureXrootdMonitoringDir(); err != nil {
 			return err
 		}
@@ -210,7 +220,7 @@ to export the directory /mnt/foo to the path /bar in the data federation`)
 	}
 
 	// If no robots.txt, create a ephemeral one for xrootd to use
-	robotsTxtFile := param.RobotsTxtFile.GetString()
+	robotsTxtFile := param.Xrootd_RobotsTxtFile.GetString()
 	if _, err := os.Open(robotsTxtFile); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			newPath := filepath.Join(runtimeDir, "robots.txt")
@@ -227,14 +237,14 @@ to export the directory /mnt/foo to the path /bar in the data federation`)
 			if _, err := file.WriteString(robotsTxt); err != nil {
 				return errors.Wrap(err, "Failed to write out a default robots.txt file")
 			}
-			viper.Set("RobotsTxtFile", newPath)
+			viper.Set("Xrootd.RobotsTxtFile", newPath)
 		} else {
 			return err
 		}
 	}
 
 	// If macaroons secret does not exist, create one
-	macaroonsSecret := viper.GetString("MacaroonsKeyFile")
+	macaroonsSecret := param.Xrootd_MacaroonsKeyFile.GetString()
 	if _, err := os.Open(macaroonsSecret); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			err = config.MkdirAll(path.Dir(macaroonsSecret), 0755, -1, gid)
@@ -266,7 +276,7 @@ to export the directory /mnt/foo to the path /bar in the data federation`)
 	}
 
 	// If the authfile or scitokens.cfg does not exist, create one
-	authfile := viper.GetString("Authfile")
+	authfile := param.Xrootd_Authfile.GetString()
 	err = config.MkdirAll(path.Dir(authfile), 0755, -1, gid)
 	if err != nil {
 		return errors.Wrapf(err, "Unable to create directory %v",
@@ -305,7 +315,7 @@ func checkConfigFileReadable(fileName string, errMsg string) error {
 }
 
 func checkDefaults() error {
-	requiredConfigs := []string{"TLSCertificate", "TLSKey", "XrootdRun", "RobotsTxtFile"}
+	requiredConfigs := []string{"Server.TLSCertificate", "Server.TLSKey", "Xrootd.RunLocation", "Xrootd.RobotsTxtFile"}
 	for _, configName := range requiredConfigs {
 		mgr := viper.GetString(configName) // TODO: Remove direct access once all parameters are generated
 		if mgr == "" {
@@ -314,7 +324,7 @@ func checkDefaults() error {
 		}
 	}
 
-	if managerHost := viper.GetString("ManagerHost"); managerHost == "" {
+	if managerHost := param.Xrootd_ManagerHost.GetString(); managerHost == "" {
 		log.Debug("No manager host specified for the cmsd process in origin; assuming no xrootd protocol support")
 		viper.SetDefault("Origin.UseCmsd", false)
 		metrics.DeleteComponentHealthStatus("cmsd")
@@ -323,7 +333,7 @@ func checkDefaults() error {
 	}
 
 	// As necessary, generate a private key and corresponding cert
-	if err := config.GeneratePrivateKey(param.TLSKey.GetString(), elliptic.P256()); err != nil {
+	if err := config.GeneratePrivateKey(param.Server_TLSKey.GetString(), elliptic.P256()); err != nil {
 		return err
 	}
 	if err := config.GenerateCert(); err != nil {
@@ -331,11 +341,11 @@ func checkDefaults() error {
 	}
 
 	// TODO: Could upgrade this to a check for a cert in the file...
-	if err := checkConfigFileReadable(param.TLSCertificate.GetString(),
+	if err := checkConfigFileReadable(param.Server_TLSCertificate.GetString(),
 		"A TLS certificate is required to serve HTTPS"); err != nil {
 		return err
 	}
-	if err := checkConfigFileReadable(param.TLSKey.GetString(),
+	if err := checkConfigFileReadable(param.Server_TLSKey.GetString(),
 		"A TLS key is required to serve HTTPS"); err != nil {
 		return err
 	}
@@ -347,7 +357,7 @@ func checkDefaults() error {
 	// Check that OriginUrl is defined in the config file. Make sure it parses.
 	// Fail if either condition isn't met, although note that url.Parse doesn't
 	// generate errors for many things that are not recognizable urls.
-	originUrlStr := viper.GetString("OriginUrl")
+	originUrlStr := param.Origin_Url.GetString()
 	if originUrlStr == "" {
 		return errors.New("OriginUrl must be configured to serve an origin")
 	}
@@ -366,7 +376,7 @@ func configXrootd() (string, error) {
 	}
 
 	var xrdConfig XrootdConfig
-	xrdConfig.LocalMonitoringPort = -1
+	xrdConfig.Xrootd.LocalMonitoringPort = -1
 	if err := viper.Unmarshal(&xrdConfig); err != nil {
 		return "", err
 	}
@@ -383,7 +393,7 @@ func configXrootd() (string, error) {
 
 	templ := template.Must(template.New("xrootd.cfg").Parse(xrootdCfg))
 
-	xrootdRun := param.XrootdRun.GetString()
+	xrootdRun := param.Xrootd_RunLocation.GetString()
 	configPath := filepath.Join(xrootdRun, "xrootd.cfg")
 	file, err := os.OpenFile(configPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0640)
 	if err != nil {
@@ -425,7 +435,7 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	if err != nil {
 		return err
 	}
-	viper.Set("LocalMonitoringPort", monitorPort)
+	viper.Set("Xrootd.LocalMonitoringPort", monitorPort)
 
 	err = checkDefaults()
 	if err != nil {
@@ -462,11 +472,11 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		return err
 	}
 
-	if viper.GetBool("Origin.SelfTest") {
+	if param.Origin_SelfTest.GetBool() {
 		go origin_ui.PeriodicSelfTest()
 	}
 
-	privileged := viper.GetBool("Origin.Multiuser")
+	privileged := param.Origin_Multiuser.GetBool()
 	err = xrootd.LaunchXrootd(privileged, configPath)
 	if err != nil {
 		return err
