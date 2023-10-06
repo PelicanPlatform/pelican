@@ -83,8 +83,8 @@ type (
 	}
 
 	ServerConfig struct {
-		TLSCertificate          string
-		TLSKey                  string
+		TLSCertificate            string
+		TLSKey                    string
 		TLSCACertificateDirectory string
 		TLSCACertificateFile      string
 	}

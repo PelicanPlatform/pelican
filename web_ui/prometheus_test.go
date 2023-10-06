@@ -22,6 +22,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/prometheus/common/route"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -101,7 +102,7 @@ func TestPrometheusProtectionFederationURL(t *testing.T) {
 	}
 	jti := base64.RawURLEncoding.EncodeToString(jti_bytes)
 
-	originUrl := param.Origin_Url.GetString
+	originUrl := param.Origin_Url.GetString()
 	tok, err := jwt.NewBuilder().
 		Claim("scope", "prometheus.read").
 		Claim("wlcg.ver", "1.0").
@@ -193,7 +194,7 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 	}
 	jti := base64.RawURLEncoding.EncodeToString(jti_bytes)
 
-	originUrl := param.Origin_Url.GetString
+	originUrl := param.Origin_Url.GetString()
 	tok, err := jwt.NewBuilder().
 		Claim("scope", "prometheus.read").
 		Claim("wlcg.ver", "1.0").
