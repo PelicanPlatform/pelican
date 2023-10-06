@@ -39,7 +39,6 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 )
 
 var (
@@ -130,7 +129,7 @@ func GenerateCACert() error {
 		return err
 	}
 
-	tlsCert := viper.GetString("TLSCACertFile")
+	tlsCert := param.Server_TLSCACertificateFile.GetString()
 	if file, err := os.Open(tlsCert); err == nil {
 		file.Close()
 		return nil
@@ -142,7 +141,7 @@ func GenerateCACert() error {
 		return err
 	}
 
-	tlsKey := viper.GetString("TLSCAKey")
+	tlsKey := param.Server_TLSCAKey.GetString()
 	if err := GeneratePrivateKey(tlsKey, elliptic.P256()); err != nil {
 		return err
 	}
@@ -233,7 +232,7 @@ func GenerateCert() error {
 		return err
 	}
 
-	tlsCert := param.TLSCertificate.GetString()
+	tlsCert := param.Server_TLSCertificate.GetString()
 	if file, err := os.Open(tlsCert); err == nil {
 		file.Close()
 		return nil
@@ -245,7 +244,7 @@ func GenerateCert() error {
 	if err := GenerateCACert(); err != nil {
 		return err
 	}
-	caCert, err := LoadCertficate(viper.GetString("TLSCACertFile"))
+	caCert, err := LoadCertficate(param.Server_TLSCACertificateFile.GetString())
 	if err != nil {
 		return err
 	}
@@ -255,7 +254,7 @@ func GenerateCert() error {
 		return err
 	}
 
-	tlsKey := param.TLSKey.GetString()
+	tlsKey := param.Server_TLSKey.GetString()
 	privateKey, err := LoadPrivateKey(tlsKey)
 	if err != nil {
 		return err
@@ -263,7 +262,7 @@ func GenerateCert() error {
 
 	// Note: LoadPrivateKey will return nil for the private key if the file
 	// doesn't exist.  In that case, we'll do a self-signed certificate
-	caPrivateKey, err := LoadPrivateKey(viper.GetString("TLSCAKey"))
+	caPrivateKey, err := LoadPrivateKey(param.Server_TLSCAKey.GetString())
 	if err != nil {
 		return err
 	}
@@ -385,7 +384,7 @@ func GeneratePrivateKey(keyLocation string, curve elliptic.Curve) error {
 }
 
 func GenerateIssuerJWKS() (*jwk.Set, error) {
-	existingJWKS := viper.GetString("IssuerJWKS")
+	existingJWKS := param.Server_IssuerJwks.GetString()
 	issuerKeyFile := param.IssuerKey.GetString()
 	return LoadPublicKey(existingJWKS, issuerKeyFile)
 }

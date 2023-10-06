@@ -28,8 +28,8 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 	//Setup a private key and a token
 	viper.Set("IssuerKey", kfile)
 
-	viper.Set("NamespaceURL", "https://get-your-tokens.org")
-	viper.Set("DirectorURL", "https://director-url.org")
+	viper.Set("Federation.NamespaceURL", "https://get-your-tokens.org")
+	viper.Set("Federation.DirectorURL", "https://director-url.org")
 
 	kSet, err := config.LoadPublicKey("", kfile)
 	ar := MockCache{
@@ -128,13 +128,13 @@ func TestCreateAdvertiseToken(t *testing.T) {
 	tok, err := CreateAdvertiseToken("test-namespace")
 	assert.Equal(t, "", tok)
 	assert.Equal(t, "Namespace URL is not set", err.Error())
-	viper.Set("NamespaceURL", "https://get-your-tokens.org")
+	viper.Set("Federation.NamespaceURL", "https://get-your-tokens.org")
 
 	// Test without a DirectorURL set and check to see if it returns the expected error
 	tok, err = CreateAdvertiseToken("test-namespace")
 	assert.Equal(t, "", tok)
 	assert.Equal(t, "Director URL is not known; cannot create advertise token", err.Error())
-	viper.Set("DirectorURL", "https://director-url.org")
+	viper.Set("Federation.DirectorURL", "https://director-url.org")
 
 	// Test the CreateAdvertiseToken with good values and test that it returns a non-nil token value and no error
 	tok, err = CreateAdvertiseToken("test-namespace")
@@ -154,7 +154,7 @@ func TestGetRegistryIssuerURL(t *testing.T) {
 	assert.Equal(t, "Namespace URL is not set", err.Error())
 
 	// Test to make sure the path is as expected
-	viper.Set("NamespaceURL", "test-path")
+	viper.Set("Federation.NamespaceURL", "test-path")
 	url, err = GetRegistryIssuerURL("test-prefix")
 	assert.Equal(t, nil, err)
 	assert.Equal(t, "test-path/api/v1.0/registry/test-prefix/.well-known/issuer.jwks", url)

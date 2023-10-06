@@ -67,7 +67,7 @@ func CreateAdvertiseToken(namespace string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	director := param.DirectorUrl.GetString()
+	director := param.Federation_DirectorUrl.GetString()
 	if director == "" {
 		return "", errors.New("Director URL is not known; cannot create advertise token")
 	}
@@ -185,7 +185,7 @@ func VerifyAdvertiseToken(token, namespace string) (bool, error) {
 }
 
 func GetRegistryIssuerURL(prefix string) (string, error) {
-	namespace_url_string := param.NamespaceUrl.GetString()
+	namespace_url_string := param.Federation_NamespaceUrl.GetString()
 	if namespace_url_string == "" {
 		return "", errors.New("Namespace URL is not set")
 	}

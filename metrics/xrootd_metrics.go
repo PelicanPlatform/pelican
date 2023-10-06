@@ -30,11 +30,11 @@ import (
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 )
 
 type (
@@ -154,8 +154,8 @@ var (
 )
 
 func ConfigureMonitoring() (int, error) {
-	lower := viper.GetInt("MonitoringPortLower")
-	higher := viper.GetInt("MonitoringPortHigher")
+	lower := param.Monitoring_PortLower.GetInt()
+	higher := param.Monitoring_PortHigher.GetInt()
 
 	addr := net.UDPAddr{IP: net.ParseIP("127.0.0.1")}
 	var conn *net.UDPConn

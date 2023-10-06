@@ -81,7 +81,7 @@ func (PrivilegedXrootdLauncher) Launch(ctx context.Context, daemonName string, c
 		return ctx, -1, errors.Wrapf(err, "Unable to create stderr pipe for %s", daemonName)
 	}
 
-	xrootdRun := param.XrootdRun.GetString()
+	xrootdRun := param.Xrootd_RunLocation.GetString()
 	pidFile := filepath.Join(xrootdRun, "xrootd.pid")
 
 	executable, err := findDaemon(daemonName)
