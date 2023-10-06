@@ -170,7 +170,7 @@ func checkPromToken(av1 *route.Router) gin.HandlerFunc {
 			c.JSON(400, gin.H{"error": "Failed to parse token"})
 		}
 
-		fedURL := viper.GetString("FederationURL")
+		fedURL := param.Federation_DiscoveryUrl.GetString()
 
 		var bKey *jwk.Key
 		if fedURL == token.Issuer() {
@@ -178,7 +178,7 @@ func checkPromToken(av1 *route.Router) gin.HandlerFunc {
 			if err != nil {
 				c.JSON(400, gin.H{"error": "Failed to discover the federation information"})
 			}
-			fedURIFile := viper.GetString("FederationURI")
+			fedURIFile := param.Federation_DiscoveryUrl.GetString()
 			response, err := http.Get(fedURIFile)
 			if err != nil {
 				c.JSON(400, gin.H{"error": "Failed to get federation key file"})
