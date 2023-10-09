@@ -388,8 +388,6 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	//&http.Request{Header: http.Header{"Cookie": recorder.HeaderMap["Set-Cookie"]}}
-
 	c.Request, _ = http.NewRequest(http.MethodGet, "/api/v1.0/prometheus/test", bytes.NewBuffer([]byte(`{}`)))
 	c.Request.Header.Set("Cookie", w.Header().Get("Set-Cookie"))
 
