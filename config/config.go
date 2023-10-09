@@ -247,7 +247,7 @@ func getConfigBase() (string, error) {
 
 func setupTransport() {
 	//Getting timeouts and other information from defaults.yaml
-	maxIdleConns := viper.GetInt("Transport.MaxIdleIcons")
+	maxIdleConns := viper.GetInt("Transport.MaxIdleConns")
 	idleConnTimeout := viper.GetDuration("Transport.IdleConnTimeout")
 	transportTLSHandshakeTimeout := viper.GetDuration("Transport.TLSHandshakeTimeout")
 	expectContinueTimeout := viper.GetDuration("Transport.ExpectContinueTimeout")
