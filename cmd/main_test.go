@@ -18,6 +18,7 @@ func TestHandleCLIVersionFlag(t *testing.T) {
 	builtBy = "goreleaser"
 
 	// Reset os.Args to ensure Windows doesn't do weird things to the test
+	oldArgs := os.Args
 	os.Args = []string{os.Args[0]}
 
 	mockVersionOutput := fmt.Sprintf(
@@ -94,4 +95,7 @@ func TestHandleCLIVersionFlag(t *testing.T) {
 			batchTest(t, tc.args, tc.expected)
 		})
 	}
+
+	// Restore the args back when test finished
+	os.Args = oldArgs
 }
