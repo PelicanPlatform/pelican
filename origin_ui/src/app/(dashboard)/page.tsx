@@ -19,15 +19,13 @@
 "use client"
 
 import RateGraph from "@/components/graphs/RateGraph";
-import LineGraph from "@/components/graphs/LineGraph";
-import StatusBox from "@/components/StatusBox";
+
+import {TimeDuration} from "@/components/graphs/prometheus";
 
 import {Box, Grid} from "@mui/material";
 
 
 export default function Home() {
-
-
 
     return (
         <Box width={"100%"}>
@@ -39,35 +37,41 @@ export default function Home() {
                     <Box sx={{backgroundColor: "#F6F6F6", borderRadius: "1rem"}} p={2}>
                         <Box minHeight={"200px"}>
                             <RateGraph
-                                rate={"10m"}
-                                duration={"24h"}
-                                resolution={"10m"}
-                                metric={"xrootd_monitoring_packets_received"}
-                                datasetOptions={{label: "xrootd_monitoring_packets_received rate over 10m", borderColor: "#0071ff"}}
+                                rate={TimeDuration.fromString("3h")}
+                                duration={TimeDuration.fromString("7d")}
+                                resolution={TimeDuration.fromString("3h")}
+                                metric={['xrootd_server_bytes{direction="rx"}', 'xrootd_server_bytes{direction="rx"}']}
                                 boxProps={{
                                     maxHeight:"400px",
                                     flexGrow:1,
                                     justifyContent:"center",
                                     display:"flex"
                                 }}
-                            />
-                        </Box>
-                    </Box>
-                </Grid>
-                <Grid item xs={12} lg={6}>
-                    <Box sx={{backgroundColor: "#F6F6F6", borderRadius: "1rem"}} p={2}>
-                        <Box minHeight={"200px"}>
-                            <LineGraph
-                                metric={"xrootd_server_connection_count"}
-                                duration={"24h"}
-                                resolution={"10m"}
-                                datasetOptions={{label: "xrootd_server_connection_count", borderColor: "#0071ff"}}
-                                boxProps={{
-                                    maxHeight:"400px",
-                                    flexGrow:1,
-                                    justifyContent:"center",
-                                    display:"flex"
+                                options={{
+                                    scales: {
+                                        x: {
+                                            type: 'time',
+                                            time: {
+                                                round: 'second',
+                                            }
+                                        }
+                                    },
+                                    plugins: {
+                                        zoom: {
+                                            zoom: {
+                                                drag: {
+                                                    enabled: true,
+                                                },
+                                                mode: 'x',
+                                                // TODO - Implement smart update on zoom: onZoom: (chart) => console.log(chart)
+                                            },
+                                        },
+                                    },
                                 }}
+                                datasetOptions={[
+                                    {label: "xrootd_server_bytes{direction=\"rx\"}", borderColor: "#0071ff"},
+                                    {label: "xrootd_server_bytes{direction=\"tx\"}", borderColor: "#54ff80"}
+                                ]}
                             />
                         </Box>
                     </Box>

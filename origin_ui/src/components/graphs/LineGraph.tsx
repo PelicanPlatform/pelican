@@ -16,105 +16,47 @@
  *
  ***************************************************************/
 
-"use client"
-
-import {useEffect, useState} from "react";
+import {useState} from "react";
 import {
-    Chart as ChartJS,
-    CategoryScale,
-    LinearScale,
-    PointElement,
-    LineElement,
-    Title,
-    Tooltip,
-    Legend,
     ChartOptions,
     ChartDataset,
 } from 'chart.js';
 
-import {Line} from "react-chartjs-2";
-import {Skeleton, Box, BoxProps, Typography} from "@mui/material";
+import {BoxProps} from "@mui/material";
 
 
-import {query_basic, DataPoint} from "@/components/graphs/prometheus";
+import {query_basic, TimeDuration} from "@/components/graphs/prometheus";
 import {ChartData} from "chart.js";
+import Graph from "@/components/graphs/Graph";
 
-ChartJS.register(
-    CategoryScale,
-    LinearScale,
-    PointElement,
-    LineElement,
-    Title,
-    Tooltip,
-    Legend
-);
 
 interface LineGraphProps {
     boxProps?: BoxProps;
     metric: string;
-    duration?: string;
-    resolution?: string;
+    duration?: TimeDuration;
+    resolution?: TimeDuration;
     options?: ChartOptions<"line">
     datasetOptions?: Partial<ChartDataset<"line">>
 }
 
-export default function LineGraph({ boxProps, metric, duration, resolution, options, datasetOptions}: LineGraphProps) {
+export default function LineGraph({ boxProps, metric, duration=new TimeDuration(31, "d"), resolution=new TimeDuration(1, "h"), options, datasetOptions}: LineGraphProps) {
 
-    let [data, setData] = useState<DataPoint[]>([])
-    let [loading, setLoading] = useState<boolean>(true)
-    let [error, setError] = useState<string>("")
-    let [_duration, setDuration] = useState(duration ? duration : "24h")
-    let [_resolution, setResolution] = useState(resolution ? resolution : "1h")
+    let [_duration, setDuration] = useState(duration)
+    let [_resolution, setResolution] = useState(resolution)
 
-    let chartData: ChartData<"line", any, any> = {
-        datasets: [{
-            "data": data,
-            ...datasetOptions
-        }]
-    }
+    async function getData(){
+        let chartData: ChartData<"line", any, any> = {
+            datasets: [{
+                data: await query_basic({metric: metric, duration:_duration, resolution:_resolution}),
+                ...datasetOptions
+            }]
+        }
 
-    async function _setData(){
-        query_basic(metric, _duration, _resolution)
-            .then((response) => {
-                setData(response)
-                setLoading(false)
-                if(response.length === 0){
-                    let date = new Date(Date.now()).toLocaleTimeString()
-                    setError(`No data returned by database as of ${date}; plot will auto-refresh`)
-                } else {
-                    setError("")
-                }
-            })
-    }
-
-    useEffect(() => {
-
-        // Do the initial data fetch
-        _setData()
-
-        // Refetch the data every 1 minute
-        const interval = setInterval(() => _setData(), 60000);
-        return () => clearInterval(interval);
-
-    }, [])
-
-
-    if(loading){
-        return <Skeleton sx={{borderRadius: "1"}} variant={"rectangular"} width={"100%"} height={"100%"} />
+        return chartData
     }
 
     return (
-        <Box>
-            <Box  {...boxProps}>
-                <Line
-                    data={chartData}
-                    options={options}
-                />
-            </Box>
-            <Box display={"flex"}>
-                <Typography m={"auto"} color={"red"} variant={"body2"}>{error}</Typography>
-            </Box>
-        </Box>
+        <Graph getData={getData} options={options} boxProps={boxProps}/>
     )
 
 }
