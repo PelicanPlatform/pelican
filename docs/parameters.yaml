@@ -88,6 +88,14 @@ osdf_default: Default is determined dynamically through metadata at <federation 
 default: none
 components: ["client", "director", "origin"]
 ---
+name: Federation.JwkUrl
+description: >-
+  A URL indicating where the JWKS for the Federation is hosted.
+type: url
+osdf_default: Default is determined dynamically through metadata at <federtion URL>/.well-known/pelican-configuration
+default: none
+components: ["client", "origin"]
+---
 
 ############################
 #   Client-Level Configs   #
