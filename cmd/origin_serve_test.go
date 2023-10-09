@@ -21,7 +21,6 @@
 package main
 
 import (
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -29,8 +28,6 @@ import (
 )
 
 func TestCreateXrootdConfig(t *testing.T) {
-	err := os.MkdirAll("/run", os.ModePerm)
-	require.NoError(t, err)
 	configPath, err := configXrootd()
 	require.NoError(t, err)
 	assert.NotNil(t, configPath)
