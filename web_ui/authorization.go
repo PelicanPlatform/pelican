@@ -30,7 +30,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	pelican_config "github.com/pelicanplatform/pelican/config"
-	"github.com/spf13/viper"
+	"github.com/pelicanplatform/pelican/param"
 )
 
 // Creates a validator that checks if a token's scope matches the given scope: matchScope
@@ -58,7 +58,7 @@ func createScopeValidator(matchScope string) jwt.ValidatorFunc {
 func FederationCheck(c *gin.Context, strToken string, expectedScope string) {
 	var bKey *jwk.Key
 
-	fedURL := viper.GetString("FederationURL")
+	fedURL := param.Federation_DiscoveryUrl.GetString()
 	token, err := jwt.Parse([]byte(strToken), jwt.WithVerify(false))
 
 	if err != nil {
@@ -70,7 +70,7 @@ func FederationCheck(c *gin.Context, strToken string, expectedScope string) {
 		if err != nil {
 			return
 		}
-		fedURIFile := viper.GetString("FederationURI")
+		fedURIFile := param.Federation_JwkUrl.GetString()
 		response, err := http.Get(fedURIFile)
 		if err != nil {
 			return

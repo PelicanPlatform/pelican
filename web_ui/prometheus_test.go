@@ -143,10 +143,10 @@ func TestPrometheusProtectionFederationURL(t *testing.T) {
 	}
 
 	//Set the Federation information so as not to run through all of DiscoverFederation (that should be a tested elsewhere)
-	viper.Set("FederationURL", "https://test-http")
-	viper.Set("DirectorURL", "https://test-director")
-	viper.Set("NamespaceURL", "https://test-namesapce")
-	viper.Set("FederationURI", ts.URL)
+	viper.Set("Federation.DiscoveryUrl", "https://test-http")
+	viper.Set("Federation.DirectorUrl", "https://test-director")
+	viper.Set("Federation.NamespaceUrl", "https://test-namesapce")
+	viper.Set("Federation.JwkUrl", ts.URL)
 
 	// Set the request to run through the checkPromToken function
 	r.GET("/api/v1.0/prometheus/*any", checkPromToken(av1))
