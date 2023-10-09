@@ -246,7 +246,7 @@ export default function RateGraph({boxProps, metric, rate=new TimeDuration(3, "h
     let [_rate, setRate] = useState(rate)
     let [_duration, _setDuration] = useState(duration)
     let [_resolution, setResolution] = useState(resolution)
-    let [_time, _setTime] = useState<DateTime>(DateTime.now())
+    let [_time, _setTime] = useState<DateTime>(DateTime.now().plus({ days: 1 }).set({ hour: 0, minute: 0, second: 0, millisecond: 0 }))
 
     // Create some reasonable defaults for the graph
     let setDuration = (duration: TimeDuration) => {
