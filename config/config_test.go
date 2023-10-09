@@ -19,6 +19,7 @@
 package config
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -38,7 +39,11 @@ func TestMain(m *testing.M) {
 		// simuilate long server response
 		time.Sleep(5 * time.Second)
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("Success"))
+		code, err := w.Write([]byte("Success"))
+		if err != nil {
+			fmt.Printf("Error writing out reponse: %d, %v", code, err)
+			os.Exit(1)
+		}
 	}))
 	// Init server to get configs initiallized
 	viper.Set("Transport.MaxIdleConns", 30)
