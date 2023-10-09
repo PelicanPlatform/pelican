@@ -43,6 +43,7 @@ jobs:
         HEAD=$(git rev-parse HEAD)
         git reset --hard ${{ github.event.pull_request.base.sha }}
         make web-build
+        go generate ./...
         go test -coverpkg=./... -coverprofile=base_coverage.out -covermode=count ./...
         go tool cover -func=base_coverage.out > unit-base.txt
         git reset --hard $HEAD

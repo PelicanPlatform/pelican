@@ -37,7 +37,6 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 )
 
 type (
@@ -92,7 +91,7 @@ func forwardCommandToLogger(ctx context.Context, daemonName string, cmdStdout io
 }
 
 func (UnprivilegedXrootdLauncher) Launch(ctx context.Context, daemonName string, configPath string) (context.Context, int, error) {
-	xrootdRun := param.XrootdRun.GetString()
+	xrootdRun := param.Xrootd_RunLocation.GetString()
 	pidFile := filepath.Join(xrootdRun, "xrootd.pid")
 
 	cmd := exec.CommandContext(ctx, daemonName, "-f", "-s", pidFile, "-c", configPath)
@@ -153,7 +152,7 @@ func LaunchXrootd(privileged bool, configPath string) (err error) {
 
 	cmsdCtx := context.Background()
 	cmsdPid := -1
-	if viper.GetBool("Origin.UseCmsd") {
+	if param.Origin_UseCmsd.GetBool() {
 		cmsdCtx, cmsdPid, err = launcher.Launch(ctx, "cmsd", configPath)
 		if err != nil {
 			return errors.Wrap(err, "Failed to launch cmsd daemon")

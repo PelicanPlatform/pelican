@@ -17,10 +17,8 @@ package web_ui
 
 import (
 	"context"
-	"crypto/ecdsa"
 	"errors"
 	"fmt"
-	"io"
 	"math"
 	"net/http"
 	"net/url"
@@ -37,9 +35,6 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/grafana/regexp"
-	"github.com/lestrrat-go/jwx/v2/jwa"
-	"github.com/lestrrat-go/jwx/v2/jwk"
-	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/mwitkow/go-conntrack"
 	"github.com/oklog/run"
 	pelican_config "github.com/pelicanplatform/pelican/config"
@@ -48,7 +43,6 @@ import (
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/common/version"
 	"github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"go.uber.org/atomic"
 
 	common_config "github.com/prometheus/common/config"
@@ -153,113 +147,36 @@ func checkPromToken(av1 *route.Router) gin.HandlerFunc {
 		req := c.Request
 
 		var strToken string
-		var token jwt.Token
 		var err error
 		if authzQuery := req.URL.Query()["authz"]; len(authzQuery) > 0 {
 			strToken = authzQuery[0]
 		} else if authzHeader := req.Header["Authorization"]; len(authzHeader) > 0 {
 			strToken = strings.TrimPrefix(authzHeader[0], "Bearer ")
+		}
+
+		FederationCheck(c, strToken, "prometheus.read")
+		OriginCheck(c, strToken, "prometheus.read")
+
+		strToken, err = c.Cookie("login")
+		if err == nil {
+			OriginCheck(c, strToken, "prometheus.read")
+		}
+
+		_, exists := c.Get("User")
+		if exists {
+			av1.ServeHTTP(c.Writer, c.Request)
 		} else {
-			c.JSON(403, gin.H{"error": "Permission Denied: Missing token"})
-			return
+			c.JSON(http.StatusForbidden, gin.H{"error": "Correct authorization required to access metrics"})
 		}
-
-		// Parsing the token (unverified) in order to get its issuer without having the jwks
-		token, err = jwt.Parse([]byte(strToken), jwt.WithVerify(false))
-
-		if err != nil {
-			c.JSON(400, gin.H{"error": "Failed to parse token"})
-		}
-
-		fedURL := viper.GetString("FederationURL")
-
-		var bKey *jwk.Key
-		if fedURL == token.Issuer() {
-			err := pelican_config.DiscoverFederation()
-			if err != nil {
-				c.JSON(400, gin.H{"error": "Failed to discover the federation information"})
-			}
-			fedURIFile := viper.GetString("FederationURI")
-			response, err := http.Get(fedURIFile)
-			if err != nil {
-				c.JSON(400, gin.H{"error": "Failed to get federation key file"})
-			}
-			defer response.Body.Close()
-			contents, err := io.ReadAll(response.Body)
-			if err != nil {
-				c.JSON(400, gin.H{"error": "Failed to read federation key file"})
-				return
-			}
-			keys, err := jwk.Parse(contents)
-			//key, err := jwk.ParseKey(contents, jwk.WithPEM(true))
-			if err != nil {
-				c.JSON(400, gin.H{"error": "Failed to parse Federation key file"})
-				return
-			}
-			key, ok := keys.Key(0)
-			if !ok {
-				c.JSON(400, gin.H{"error": "No key in keyset"})
-			}
-			bKey = &key
-		} else {
-			bKey, err = pelican_config.GetOriginJWK()
-			if err != nil {
-				c.JSON(400, gin.H{"error": "Failed to retrieve private key"})
-				return
-			}
-		}
-
-		var raw ecdsa.PrivateKey
-		if err = (*bKey).Raw(&raw); err != nil {
-			c.JSON(400, gin.H{"error": "Failed to extract signing key"})
-			return
-		}
-
-		parsed, err := jwt.Parse([]byte(strToken), jwt.WithKey(jwa.ES256, raw.PublicKey))
-
-		if err != nil {
-			c.JSON(403, gin.H{"error": "Permission Denied: Invalid token"})
-			return
-		}
-
-		/*
-		* The signature is verified, now we need to make sure this token actually gives us
-		* permission to access prometheus metrics
-		* NOTE: The validate function also handles checking `iat` and `exp` to make sure the token
-		*       remains valid.
-		 */
-		scopeValidator := jwt.ValidatorFunc(func(_ context.Context, tok jwt.Token) jwt.ValidationError {
-			scope_any, present := tok.Get("scope")
-			if !present {
-				return jwt.NewValidationError(errors.New("No scope is present; required for authorization"))
-			}
-			scope, ok := scope_any.(string)
-			if !ok {
-				return jwt.NewValidationError(errors.New("scope claim in token is not string-valued"))
-			}
-
-			for _, scope := range strings.Split(scope, " ") {
-				if scope == "prometheus.read" {
-					return nil
-				}
-			}
-			return jwt.NewValidationError(errors.New("Token does not contain prometheus access authorization"))
-		})
-		if err = jwt.Validate(parsed, jwt.WithValidator(scopeValidator)); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "server could not validate the provided access token"})
-			return
-		}
-
-		av1.ServeHTTP(c.Writer, c.Request)
 	}
 }
 
 func ConfigureEmbeddedPrometheus(engine *gin.Engine) error {
 
 	cfg := flagConfig{}
-	ListenAddress := fmt.Sprintf("0.0.0.0:%v", param.WebPort.GetInt())
+	ListenAddress := fmt.Sprintf("0.0.0.0:%v", param.Server_Port.GetInt())
 	cfg.webTimeout = model.Duration(5 * time.Minute)
-	cfg.serverStoragePath = viper.GetString("MonitoringData")
+	cfg.serverStoragePath = param.Monitoring_DataLocation.GetString()
 	cfg.tsdb.MinBlockDuration = model.Duration(2 * time.Hour)
 	cfg.tsdb.NoLockfile = false
 	cfg.tsdb.WALCompression = true
