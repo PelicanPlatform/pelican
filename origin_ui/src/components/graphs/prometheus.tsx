@@ -81,8 +81,8 @@ export interface DataPoint {
 export async function query_raw(query: string, time?: Number): Promise<DataPoint[]> {
 
     //Check if the user is logged in
-    if(!(await isLoggedIn()) && process.env.NODE_ENV != "development"){
-        window.location.replace("/view/initialization/code/")
+    if(!(await isLoggedIn())){
+        window.location.replace("/view/login/")
     }
 
     const url = new URL(window.location.origin + "/api/v1.0/prometheus/query")
