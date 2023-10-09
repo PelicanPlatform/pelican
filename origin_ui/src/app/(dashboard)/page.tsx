@@ -19,6 +19,7 @@
 "use client"
 
 import RateGraph from "@/components/graphs/RateGraph";
+import StatusBox from "@/components/StatusBox";
 
 import {TimeDuration} from "@/components/graphs/prometheus";
 
