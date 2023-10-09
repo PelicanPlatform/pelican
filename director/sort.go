@@ -117,7 +117,7 @@ func DownloadDB(localFile string) error {
 	}
 
 	var licenseKey string
-	keyFile := param.MaxMindKeyFile.GetString()
+	keyFile := param.Director_MaxMindKeyFile.GetString()
 	keyFromEnv := viper.GetString("MAXMINDKEY")
 	if keyFile != "" {
 		contents, err := os.ReadFile(keyFile)
@@ -128,7 +128,7 @@ func DownloadDB(localFile string) error {
 	} else if keyFromEnv != "" {
 		licenseKey = keyFromEnv
 	} else {
-		return errors.New("A MaxMind key file must be specified in the config (MaxMindKeyFile), in the environment (PELICAN_MAXMINDKEYFILE), or the key must be provided via the environment variable PELICAN_MAXMINDKEY)")
+		return errors.New("A MaxMind key file must be specified in the config (Director.MaxMindKeyFile), in the environment (PELICAN_DIRECTOR_MAXMINDKEYFILE), or the key must be provided via the environment variable PELICAN_MAXMINDKEY)")
 	}
 
 	url := fmt.Sprintf(maxMindURL, licenseKey)
@@ -185,7 +185,7 @@ func PeriodicMaxMindReload() {
 	for {
 		// Update once every other day
 		time.Sleep(time.Hour * 48)
-		localFile := param.GeoIPLocation.GetString()
+		localFile := param.Director_GeoIPLocation.GetString()
 		if err := DownloadDB(localFile); err != nil {
 			log.Warningln("Failed to download GeoIP database:", err)
 		} else {
@@ -201,7 +201,7 @@ func PeriodicMaxMindReload() {
 
 func InitializeDB() {
 	go PeriodicMaxMindReload()
-	localFile := param.GeoIPLocation.GetString()
+	localFile := param.Director_GeoIPLocation.GetString()
 	localReader, err := geoip2.Open(localFile)
 	if err != nil {
 		log.Warningln("Local GeoIP database file not present; will attempt a download.", err)

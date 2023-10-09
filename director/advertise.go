@@ -67,12 +67,12 @@ type (
 
 // Populate internal cache with origin/cache ads
 func AdvertiseOSDF() error {
-	namespaceURL := param.TopologyNamespaceURL.GetString()
-	if namespaceURL == "" {
-		return errors.New("Topology namespaces.json configuration option (`TopologyNamespaceURL`) not set")
+	topoNamespaceUrl := param.Federation_TopologyNamespaceUrl.GetString()
+	if topoNamespaceUrl == "" {
+		return errors.New("Topology namespaces.json configuration option (`Federation.TopologyNamespaceURL`) not set")
 	}
 
-	req, err := http.NewRequest("GET", namespaceURL, nil)
+	req, err := http.NewRequest("GET", topoNamespaceUrl, nil)
 	if err != nil {
 		return errors.Wrap(err, "Failure when getting OSDF namespace data from topology")
 	}
@@ -97,7 +97,7 @@ func AdvertiseOSDF() error {
 
 	var namespaces NamespaceJSON
 	if err = json.Unmarshal(respBytes, &namespaces); err != nil {
-		return errors.Wrapf(err, "Failure when parsing JSON response from topology URL %v", namespaceURL)
+		return errors.Wrapf(err, "Failure when parsing JSON response from topology URL %v", topoNamespaceUrl)
 	}
 
 	cacheAdMap := make(map[ServerAd][]NamespaceAd)

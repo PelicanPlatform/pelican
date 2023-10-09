@@ -34,9 +34,9 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 )
 
 var (
@@ -44,7 +44,7 @@ var (
 )
 
 func generateMonitoringScitoken() (string, error) {
-	originUrl := viper.GetString("OriginUrl")
+	originUrl := param.Origin_Url.GetString()
 	if originUrl == "" {
 		return "", errors.New("Internal error: the Pelican origin does not know its own URL")
 	}
@@ -128,7 +128,7 @@ func UploadTestfile() (string, error) {
 		return "", errors.Wrap(err, "Failed to create a token for the internal monitoring upload")
 	}
 
-	uploadURL, err := url.Parse(viper.GetString("OriginUrl"))
+	uploadURL, err := url.Parse(param.Origin_Url.GetString())
 	if err != nil {
 		return "", errors.Wrap(err, "The origin URL is not parseable as a URL")
 	}
@@ -186,7 +186,7 @@ func DeleteTestfile(url string) error {
 }
 
 func ConfigureXrootdMonitoringDir() error {
-	pelicanMonitoringPath := filepath.Join(viper.GetString("XrootdRun"),
+	pelicanMonitoringPath := filepath.Join(param.Xrootd_RunLocation.GetString(),
 		"export", "pelican", "monitoring")
 
 	uid, err := config.GetDaemonUID()

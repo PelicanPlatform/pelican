@@ -1,4 +1,4 @@
-//go:build linux
+//go:build !windows
 
 /***************************************************************
  *
@@ -18,13 +18,17 @@
  *
  ***************************************************************/
 
-package config
+package main
 
 import (
-	"github.com/spf13/viper"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func InitServerOSDefaults() error {
-	viper.SetDefault("Server.TLSCACertificateFile", "/etc/pki/tls/cert.pem")
-	return nil
+func TestCreateXrootdConfig(t *testing.T) {
+	configPath, err := configXrootd()
+	require.NoError(t, err)
+	assert.NotNil(t, configPath)
 }

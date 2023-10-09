@@ -43,7 +43,6 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"github.com/tg123/go-htpasswd"
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/term"
@@ -103,8 +102,8 @@ func WaitUntilLogin() error {
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 
-	hostname := viper.GetString("Hostname")
-	webPort := param.WebPort.GetInt()
+	hostname := param.Server_Hostname.GetString()
+	port := param.Server_Port.GetInt()
 	isTTY := false
 	if term.IsTerminal(int(os.Stdout.Fd())) {
 		isTTY = true
@@ -120,10 +119,10 @@ func WaitUntilLogin() error {
 			fmt.Printf("\033[2K\n")
 			fmt.Printf("\033[2K\rPelican admin interface is not initialized\n\033[2KTo initialize, "+
 				"login at \033[1;34mhttps://%v:%v/view/initialization/code/\033[0m with the following code:\n",
-				hostname, webPort)
+				hostname, port)
 			fmt.Printf("\033[2K\r\033[1;34m%v\033[0m\n", *currentCode.Load())
 		} else {
-			fmt.Printf("Pelican admin interface is not initialized\n To initialize, login at https://%v:%v/view/initialization/code/ with the following code:\n", hostname, webPort)
+			fmt.Printf("Pelican admin interface is not initialized\n To initialize, login at https://%v:%v/view/initialization/code/ with the following code:\n", hostname, port)
 			fmt.Println(*currentCode.Load())
 		}
 		start := time.Now()
@@ -142,7 +141,7 @@ func WaitUntilLogin() error {
 }
 
 func writePasswordEntry(user, password string) error {
-	fileName := viper.GetString("OriginUI.PasswordFile")
+	fileName := param.Origin_UIPasswordFile.GetString()
 	passwordBytes := []byte(password)
 	if len(passwordBytes) > 72 {
 		return errors.New("Password too long")
@@ -177,7 +176,7 @@ func writePasswordEntry(user, password string) error {
 }
 
 func configureAuthDB() error {
-	fileName := viper.GetString("OriginUI.PasswordFile")
+	fileName := param.Origin_UIPasswordFile.GetString()
 	if fileName == "" {
 		return errors.New("Location of password file not set")
 	}
@@ -222,6 +221,7 @@ func setLoginCookie(ctx *gin.Context, user string) {
 	issuerURL.Host = ctx.Request.URL.Host
 	now := time.Now()
 	tok, err := jwt.NewBuilder().
+		Claim("scope", "prometheus.read").
 		Issuer(issuerURL.String()).
 		IssuedAt(now).
 		Expiration(now.Add(30 * time.Minute)).
@@ -245,7 +245,7 @@ func setLoginCookie(ctx *gin.Context, user string) {
 		return
 	}
 
-	ctx.SetCookie("login", string(signed), 30*60, "/api/v1.0/origin-ui",
+	ctx.SetCookie("login", string(signed), 30*60, "/api/v1.0",
 		ctx.Request.URL.Host, true, true)
 	ctx.SetSameSite(http.SameSiteStrictMode)
 }

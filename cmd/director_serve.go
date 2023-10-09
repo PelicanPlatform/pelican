@@ -36,7 +36,7 @@ import (
 func generateTLSCertIfNeeded() error {
 
 	// As necessary, generate a private key and corresponding cert
-	if err := config.GeneratePrivateKey(param.TLSKey.GetString(), elliptic.P256()); err != nil {
+	if err := config.GeneratePrivateKey(param.Server_TLSKey.GetString(), elliptic.P256()); err != nil {
 		return err
 	}
 	if err := config.GenerateCert(); err != nil {

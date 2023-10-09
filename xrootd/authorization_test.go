@@ -56,9 +56,8 @@ var (
 
 func TestEmitCfg(t *testing.T) {
 	dirname := t.TempDir()
-	os.Setenv("PELICAN_XROOTDRUN", dirname)
-	defer os.Unsetenv("PELICAN_XROOTDRUN")
 	viper.Reset()
+	viper.Set("Xrootd.RunLocation", dirname)
 	err := config.InitClient()
 	assert.Nil(t, err)
 
@@ -85,9 +84,8 @@ func TestEmitCfg(t *testing.T) {
 
 func TestLoadScitokensConfig(t *testing.T) {
 	dirname := t.TempDir()
-	os.Setenv("PELICAN_XROOTDRUN", dirname)
-	defer os.Unsetenv("PELICAN_XROOTDRUN")
 	viper.Reset()
+	viper.Set("Xrootd.RunLocation", dirname)
 	err := config.InitClient()
 	assert.Nil(t, err)
 
@@ -127,7 +125,7 @@ func TestGenerateConfig(t *testing.T) {
 	issuer, err = GenerateMonitoringIssuer()
 	require.NoError(t, err)
 	assert.Equal(t, issuer.Name, "Built-in Monitoring")
-	assert.Equal(t, issuer.Issuer, "https://"+viper.GetString("Hostname")+":"+fmt.Sprint(viper.GetInt("Port")))
+	assert.Equal(t, issuer.Issuer, "https://"+param.Server_Hostname.GetString()+":"+fmt.Sprint(param.Xrootd_Port.GetInt()))
 	require.Equal(t, len(issuer.BasePaths), 1)
 	assert.Equal(t, issuer.BasePaths[0], "/pelican/monitoring")
 	assert.Equal(t, issuer.DefaultUser, "xrootd")
@@ -135,18 +133,18 @@ func TestGenerateConfig(t *testing.T) {
 
 func TestWriteOriginScitokensConfig(t *testing.T) {
 	dirname := t.TempDir()
-	os.Setenv("PELICAN_XROOTDRUN", dirname)
-	defer os.Unsetenv("PELICAN_XROOTDRUN")
+	os.Setenv("PELICAN_XROOTD_RUNLOCATION", dirname)
+	defer os.Unsetenv("PELICAN_XROOTD_RUNLOCATION")
 	config_dirname := t.TempDir()
 	viper.Reset()
 	viper.Set("Origin.SelfTest", true)
 	viper.Set("ConfigDir", config_dirname)
-	viper.Set("XrootdRun", dirname)
-	viper.Set("Hostname", "origin.example.com")
+	viper.Set("Xrootd.RunLocation", dirname)
+	viper.Set("Server.Hostname", "origin.example.com")
 	err := config.InitServer()
 	require.Nil(t, err)
 
-	scitokensCfg := param.ScitokensConfig.GetString()
+	scitokensCfg := param.Xrootd_ScitokensConfig.GetString()
 	err = config.MkdirAll(filepath.Dir(scitokensCfg), 0755, -1, -1)
 	require.NoError(t, err)
 	err = os.WriteFile(scitokensCfg, []byte(toMergeOutput), 0640)

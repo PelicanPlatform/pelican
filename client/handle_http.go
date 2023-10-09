@@ -39,13 +39,13 @@ import (
 
 	grab "github.com/cavaliercoder/grab"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"github.com/studio-b12/gowebdav"
 	"github.com/vbauerster/mpb/v8"
 	"github.com/vbauerster/mpb/v8/decor"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/namespaces"
+	"github.com/pelicanplatform/pelican/param"
 )
 
 var p = mpb.New()
@@ -107,7 +107,7 @@ func IsProxyEnabled() bool {
 	if _, isSet := os.LookupEnv("http_proxy"); !isSet {
 		return false
 	}
-	if viper.IsSet("DisableHttpProxy") {
+	if param.Client_DisableHttpProxy.GetBool() {
 		return false
 	}
 	return true
@@ -115,7 +115,7 @@ func IsProxyEnabled() bool {
 
 // Determine whether we are allowed to skip the proxy as a fallback
 func CanDisableProxy() bool {
-	return !viper.IsSet("DisableProxyFallback")
+	return !param.Client_DisableProxyFallback.GetBool()
 }
 
 // ConnectionSetupError is an error that is returned when a connection to the remote server fails
@@ -469,7 +469,7 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 	// Progress ticker
 	progressTicker := time.NewTicker(500 * time.Millisecond)
 	defer progressTicker.Stop()
-	downloadLimit := viper.GetInt("MinimumDownloadSpeed")
+	downloadLimit := param.Client_MinimumDownloadSpeed.GetInt()
 
 	// If we are doing a recursive, decrease the download limit by the number of likely workers ~5
 	if ObjectClientOptions.Recursive {
@@ -506,9 +506,9 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 		)
 	}
 
-	stoppedTransferTimeout := viper.GetInt64("StoppedTransferTimeout")
-	slowTransferRampupTime := viper.GetInt64("SlowTransferRampupTime")
-	slowTransferWindow := viper.GetInt64("SlowTransferWindow")
+	stoppedTransferTimeout := int64(param.Client_StoppedTransferTimeout.GetInt())
+	slowTransferRampupTime := int64(param.Client_SlowTransferRampupTime.GetInt())
+	slowTransferWindow := int64(param.Client_SlowTransferWindow.GetInt())
 	var previousCompletedBytes int64 = 0
 	var startBelowLimit int64 = 0
 	var previousCompletedTime = time.Now()
