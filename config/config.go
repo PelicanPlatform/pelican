@@ -196,15 +196,15 @@ func DiscoverFederation() error {
 	}
 	if curDirectorURL == "" {
 		log.Debugln("Federation service discovery resulted in director URL", metadata.DirectorEndpoint)
-		viper.Set("Federation.DirectorURL", metadata.DirectorEndpoint)
+		viper.Set("Federation.DirectorUrl", metadata.DirectorEndpoint)
 	}
 	if curNamespaceURL == "" {
 		log.Debugln("Federation service discovery resulted in namespace registration URL",
 			metadata.NamespaceRegistrationEndpoint)
-		viper.Set("Federation.NamespaceURL", metadata.NamespaceRegistrationEndpoint)
+		viper.Set("Federation.NamespaceUrl", metadata.NamespaceRegistrationEndpoint)
 	}
 
-	viper.Set("FederationURI", metadata.JwksUri)
+	viper.Set("Federation.JwkUrl", metadata.JwksUri)
 
 	return nil
 }

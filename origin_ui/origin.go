@@ -221,6 +221,7 @@ func setLoginCookie(ctx *gin.Context, user string) {
 	issuerURL.Host = ctx.Request.URL.Host
 	now := time.Now()
 	tok, err := jwt.NewBuilder().
+		Claim("scope", "prometheus.read").
 		Issuer(issuerURL.String()).
 		IssuedAt(now).
 		Expiration(now.Add(30 * time.Minute)).
@@ -244,7 +245,7 @@ func setLoginCookie(ctx *gin.Context, user string) {
 		return
 	}
 
-	ctx.SetCookie("login", string(signed), 30*60, "/api/v1.0/origin-ui",
+	ctx.SetCookie("login", string(signed), 30*60, "/api/v1.0",
 		ctx.Request.URL.Host, true, true)
 	ctx.SetSameSite(http.SameSiteStrictMode)
 }
