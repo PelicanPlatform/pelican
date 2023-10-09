@@ -60,7 +60,7 @@ func TestGetIps(t *testing.T) {
 func TestGetToken(t *testing.T) {
 
 	// Need a namespace for token acquisition
-	defer os.Unsetenv("PELICAN_TOPOLOGYNAMESPACEURL")
+	defer os.Unsetenv("PELICAN_FEDERATION_TOPOLOGYNAMESPACEURL")
 	os.Setenv("PELICAN_TOPOLOGY_NAMESPACE_URL", "https://topology.opensciencegrid.org/osdf/namespaces")
 	viper.Reset()
 	err := config.InitClient()
@@ -179,6 +179,11 @@ func TestGetToken(t *testing.T) {
 	assert.Equal(t, token_contents, token)
 	err = os.Chdir(currentDir)
 	assert.NoError(t, err)
+
+	ObjectClientOptions.Plugin = true
+	_, err = getToken(url, namespace, true, "")
+	assert.EqualError(t, err, "Credential is required for osdf:///user/foo but is currently missing")
+	ObjectClientOptions.Plugin = false
 
 }
 

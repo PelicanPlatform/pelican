@@ -1,5 +1,3 @@
-//go:build linux
-
 /***************************************************************
  *
  * Copyright (C) 2023, Pelican Project, Morgridge Institute for Research
@@ -18,13 +16,26 @@
  *
  ***************************************************************/
 
-package config
+import {Box} from "@mui/material";
 
-import (
-	"github.com/spf13/viper"
-)
+import {Header} from "@/components/layout/Header";
 
-func InitServerOSDefaults() error {
-	viper.SetDefault("Server.TLSCACertificateFile", "/etc/pki/tls/cert.pem")
-	return nil
+export const metadata = {
+    title: 'Origin Initialization',
+    description: 'Software designed to make data distribution easy',
+}
+
+export default function RootLayout({
+                                       children,
+                                   }: {
+    children: React.ReactNode
+}) {
+    return (
+        <>
+            <Header/>
+            <Box component={"main"} pt={"75px"} display={"flex"} minHeight={"100vh"}>
+                {children}
+            </Box>
+        </>
+    )
 }

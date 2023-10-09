@@ -137,14 +137,17 @@ func TestDirectorRegistration(t *testing.T) {
 	}()
 
 	// Set the namespaceurl
-	viper.Set("NamespaceURL", "https://get-your-tokens.org")
+	viper.Set("Federation.NamespaceURL", "https://get-your-tokens.org")
 
 	// Create the  request and set the headers
 	r.POST("/", RegisterOrigin)
 	c.Request, _ = http.NewRequest(http.MethodPost, "/", bytes.NewBuffer([]byte(`{"Namespaces": [{"Path": "/foo/bar", "URL": "https://get-your-tokens.org"}]}`)))
 
-	c.Request.Header.Set("Authorization", string(signed))
+	c.Request.Header.Set("Authorization", "Bearer "+string(signed))
 	c.Request.Header.Set("Content-Type", "application/json")
+	// Hard code the current min version. When this test starts failing because of new stuff in the Director,
+	// we'll know that means it's time to update the min version in redirect.go
+	c.Request.Header.Set("User-Agent", "pelican-origin/7.0.0")
 
 	r.ServeHTTP(w, c.Request)
 
@@ -196,8 +199,11 @@ func TestDirectorRegistration(t *testing.T) {
 	rInv.POST("/", RegisterOrigin)
 	cInv.Request, _ = http.NewRequest(http.MethodPost, "/", bytes.NewBuffer([]byte(`{"Namespaces": [{"Path": "/foo/bar", "URL": "https://get-your-tokens.org"}]}`)))
 
-	cInv.Request.Header.Set("Authorization", string(signedInv))
+	cInv.Request.Header.Set("Authorization", "Bearer "+string(signedInv))
 	cInv.Request.Header.Set("Content-Type", "application/json")
+	// Hard code the current min version. When this test starts failing because of new stuff in the Director,
+	// we'll know that means it's time to update the min version in redirect.go
+	cInv.Request.Header.Set("User-Agent", "pelican-origin/7.0.0")
 
 	rInv.ServeHTTP(wInv, cInv.Request)
 	assert.Equal(t, 400, wInv.Result().StatusCode, "Expected failing status code of 400")

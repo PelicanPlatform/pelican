@@ -21,18 +21,22 @@ package origin_ui
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"time"
 
+	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 )
+
+type directorResponse struct {
+	Error string `json:"error"`
+}
 
 func PeriodicAdvertiseOrigin() error {
 	ticker := time.NewTicker(1 * time.Minute)
@@ -54,7 +58,7 @@ func PeriodicAdvertiseOrigin() error {
 }
 
 func AdvertiseOrigin() error {
-	name := viper.GetString("Sitename")
+	name := param.Xrootd_Sitename.GetString()
 	if name == "" {
 		return errors.New("Origin name isn't set")
 	}
@@ -62,10 +66,10 @@ func AdvertiseOrigin() error {
 	// TODO: waiting on a different branch to merge origin URL generation
 	// The checkdefaults func that runs before the origin is served checks for and
 	// parses the originUrl, so it should be safe to just grab it as a string here.
-	originUrl := viper.GetString("OriginUrl")
+	originUrl := param.Origin_Url.GetString()
 
 	// Here we instantiate the namespaceAd slice, but we still need to define the namespace
-	namespaceUrl, err := url.Parse(param.NamespaceUrl.GetString())
+	namespaceUrl, err := url.Parse(param.Federation_NamespaceUrl.GetString())
 	if err != nil {
 		return errors.Wrap(err, "Bad NamespaceUrl")
 	}
@@ -73,7 +77,7 @@ func AdvertiseOrigin() error {
 		return errors.New("No NamespaceUrl is set")
 	}
 
-	prefix := viper.GetString("NamespacePrefix")
+	prefix := param.Origin_NamespacePrefix.GetString()
 
 	// TODO: Need to figure out where to get some of these values
 	// 		 so that they aren't hardcoded...
@@ -96,13 +100,13 @@ func AdvertiseOrigin() error {
 		return errors.Wrap(err, "Failed to generate JSON description of origin")
 	}
 
-	directorUrlStr := param.DirectorUrl.GetString()
+	directorUrlStr := param.Federation_DirectorUrl.GetString()
 	if directorUrlStr == "" {
 		return errors.New("Director endpoint URL is not known")
 	}
 	directorUrl, err := url.Parse(directorUrlStr)
 	if err != nil {
-		return errors.Wrap(err, "Failed to parse DirectorURL")
+		return errors.Wrap(err, "Failed to parse Federation.DirectorURL")
 	}
 	directorUrl.Path = "/api/v1.0/director/registerOrigin"
 
@@ -118,6 +122,8 @@ func AdvertiseOrigin() error {
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
+	userAgent := "pelican-origin/" + client.ObjectClientOptions.Version
+	req.Header.Set("User-Agent", userAgent)
 
 	// We should switch this over to use the common transport, but for that to happen
 	// that function needs to be exported from pelican
@@ -130,8 +136,13 @@ func AdvertiseOrigin() error {
 	}
 	defer resp.Body.Close()
 
+	body, _ = io.ReadAll(resp.Body)
 	if resp.StatusCode > 299 {
-		return fmt.Errorf("Error response %v from director registration: %v", resp.StatusCode, resp.Status)
+		var respErr directorResponse
+		if unmarshalErr := json.Unmarshal(body, &respErr); unmarshalErr != nil { // Error creating json
+			return errors.Wrapf(unmarshalErr, "Could not unmarshall the director's response, which responded %v from director registration: %v", resp.StatusCode, resp.Status)
+		}
+		return errors.Errorf("Error during director registration: %v\n", respErr.Error)
 	}
 
 	return nil

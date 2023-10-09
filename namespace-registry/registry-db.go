@@ -166,7 +166,7 @@ func getAllNamespaces() ([]*Namespace, error) {
 }
 
 func InitializeDB() error {
-	dbPath := param.NSRegistryLocation.GetString()
+	dbPath := param.Registry_DbLocation.GetString()
 	if dbPath == "" {
 		err := errors.New("Could not get path for the namespace registry database.")
 		log.Fatal(err)

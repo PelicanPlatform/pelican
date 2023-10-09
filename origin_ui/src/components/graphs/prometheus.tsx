@@ -33,7 +33,7 @@ export async function query_raw(query: string): Promise<DataPoint[]> {
 
     //Check if the user is logged in
     if(!(await isLoggedIn())){
-        window.location.replace("/view/initialization/code/")
+        window.location.replace("/view/login/")
     }
 
     let response = await fetch(`/api/v1.0/prometheus/query?query=${query}`)

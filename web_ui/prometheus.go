@@ -43,7 +43,6 @@ import (
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/common/version"
 	"github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"go.uber.org/atomic"
 
 	common_config "github.com/prometheus/common/config"
@@ -138,12 +137,46 @@ func runtimeInfo() (api_v1.RuntimeInfo, error) {
 	return api_v1.RuntimeInfo{}, nil
 }
 
+func checkPromToken(av1 *route.Router) gin.HandlerFunc {
+	/* A function which wraps around the av1 router to force a jwk token check using
+	 * the origin's private key. It will check the request's URL and Header for a token
+	 * and if found it will then attempt to validate the token. If valid, it will continue
+	 * the routing as normal, otherwise it will return an error"
+	 */
+	return func(c *gin.Context) {
+		req := c.Request
+
+		var strToken string
+		var err error
+		if authzQuery := req.URL.Query()["authz"]; len(authzQuery) > 0 {
+			strToken = authzQuery[0]
+		} else if authzHeader := req.Header["Authorization"]; len(authzHeader) > 0 {
+			strToken = strings.TrimPrefix(authzHeader[0], "Bearer ")
+		}
+
+		FederationCheck(c, strToken, "prometheus.read")
+		OriginCheck(c, strToken, "prometheus.read")
+
+		strToken, err = c.Cookie("login")
+		if err == nil {
+			OriginCheck(c, strToken, "prometheus.read")
+		}
+
+		_, exists := c.Get("User")
+		if exists {
+			av1.ServeHTTP(c.Writer, c.Request)
+		} else {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Correct authorization required to access metrics"})
+		}
+	}
+}
+
 func ConfigureEmbeddedPrometheus(engine *gin.Engine) error {
 
 	cfg := flagConfig{}
-	ListenAddress := fmt.Sprintf("0.0.0.0:%v", param.WebPort.GetInt())
+	ListenAddress := fmt.Sprintf("0.0.0.0:%v", param.Server_Port.GetInt())
 	cfg.webTimeout = model.Duration(5 * time.Minute)
-	cfg.serverStoragePath = viper.GetString("MonitoringData")
+	cfg.serverStoragePath = param.Monitoring_DataLocation.GetString()
 	cfg.tsdb.MinBlockDuration = model.Duration(2 * time.Hour)
 	cfg.tsdb.NoLockfile = false
 	cfg.tsdb.WALCompression = true
@@ -341,7 +374,7 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine) error {
 	//WithInstrumentation(setPathWithPrefix("/api/v1"))
 	apiV1.Register(av1)
 
-	engine.GET("/api/v1.0/prometheus/*any", gin.WrapH(av1))
+	engine.GET("/api/v1.0/prometheus/*any", checkPromToken(av1))
 
 	reloaders := []reloader{
 		{

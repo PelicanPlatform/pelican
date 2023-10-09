@@ -116,6 +116,7 @@ func stagePluginMain(cmd *cobra.Command, args []string) {
 
 	// Set the progress bars to the command line option
 	client.ObjectClientOptions.Token = viper.GetString("StagePlugin.Token")
+	client.ObjectClientOptions.Plugin = true
 
 	// Check if the program was executed from a terminal
 	// https://rosettacode.org/wiki/Check_output_device_is_a_terminal#Go
