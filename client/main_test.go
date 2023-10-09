@@ -145,6 +145,59 @@ func TestGetToken(t *testing.T) {
 	assert.Equal(t, token_contents, token)
 	os.Unsetenv("_CONDOR_CREDS")
 
+	// _CONDOR_CREDS/renamed_handle1.use via renamed_handle1+osdf:///user/ligo/frames
+	token_contents = "bearer_token_file_contents renamed_handle1.use"
+	tmpFile = []byte(token_contents)
+	tmpDir = t.TempDir()
+	bearer_token_file = filepath.Join(tmpDir, "renamed_handle1.use")
+	err = os.WriteFile(bearer_token_file, tmpFile, 0644)
+	assert.NoError(t, err)
+	os.Setenv("_CONDOR_CREDS", tmpDir)
+	// Use a valid URL, then replace the scheme
+	renamedUrl, err = url.Parse("renamed.handle1+osdf:///user/ligo/frames")
+	renamedUrl.Scheme = "renamed_handle1+osdf"
+	assert.NoError(t, err)
+	renamedNamespace, err = namespaces.MatchNamespace("/user/ligo/frames")
+	assert.NoError(t, err)
+	token, err = getToken(renamedUrl, renamedNamespace, false, "")
+	assert.NoError(t, err)
+	assert.Equal(t, token_contents, token)
+	os.Unsetenv("_CONDOR_CREDS")
+
+	// _CONDOR_CREDS/renamed_handle2.use via renamed.handle2+osdf:///user/ligo/frames
+	token_contents = "bearer_token_file_contents renamed.handle2.use"
+	tmpFile = []byte(token_contents)
+	tmpDir = t.TempDir()
+	bearer_token_file = filepath.Join(tmpDir, "renamed_handle2.use")
+	err = os.WriteFile(bearer_token_file, tmpFile, 0644)
+	assert.NoError(t, err)
+	os.Setenv("_CONDOR_CREDS", tmpDir)
+	renamedUrl, err = url.Parse("renamed.handle2+osdf:///user/ligo/frames")
+	assert.NoError(t, err)
+	renamedNamespace, err = namespaces.MatchNamespace("/user/ligo/frames")
+	assert.NoError(t, err)
+	token, err = getToken(renamedUrl, renamedNamespace, false, "")
+	assert.NoError(t, err)
+	assert.Equal(t, token_contents, token)
+	os.Unsetenv("_CONDOR_CREDS")
+
+	// _CONDOR_CREDS/renamed.handle3.use via renamed.handle3+osdf:///user/ligo/frames
+	token_contents = "bearer_token_file_contents renamed.handle3.use"
+	tmpFile = []byte(token_contents)
+	tmpDir = t.TempDir()
+	bearer_token_file = filepath.Join(tmpDir, "renamed.handle3.use")
+	err = os.WriteFile(bearer_token_file, tmpFile, 0644)
+	assert.NoError(t, err)
+	os.Setenv("_CONDOR_CREDS", tmpDir)
+	renamedUrl, err = url.Parse("renamed.handle3+osdf:///user/ligo/frames")
+	assert.NoError(t, err)
+	renamedNamespace, err = namespaces.MatchNamespace("/user/ligo/frames")
+	assert.NoError(t, err)
+	token, err = getToken(renamedUrl, renamedNamespace, false, "")
+	assert.NoError(t, err)
+	assert.Equal(t, token_contents, token)
+	os.Unsetenv("_CONDOR_CREDS")
+
 	// _CONDOR_CREDS/renamed.use
 	token_contents = "bearer_token_file_contents renamed.use"
 	tmpFile = []byte(token_contents)
