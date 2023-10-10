@@ -47,11 +47,15 @@ type (
 )
 
 var (
-	healthStatus               = sync.Map{}
-	PromHealthStatusLastUpdate = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "last_update_component_health_status",
-		Help: "Last update of components health status",
-	}, []string{"component", "status", "message"})
+	healthStatus     = sync.Map{}
+	PromHealthStatus = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "component_health_status",
+		Help: "The health status of various components",
+	}, []string{"component"})
+	PromHealthLastUpdate = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "component_health_status_last_update",
+		Help: "Last update timestamp of components health status",
+	}, []string{"component"})
 )
 
 func statusToInt(status string) (int, error) {
@@ -86,9 +90,12 @@ func SetComponentHealthStatus(name, state, msg string) error {
 	now := time.Now()
 	healthStatus.Store(name, componentStatusInternal{statusInt, msg, now})
 
-	PromHealthStatusLastUpdate.With(
-		prometheus.Labels{"component": name, "status": state, "message": msg}).
-		Set(float64(now.UnixMicro()))
+	PromHealthStatus.With(
+		prometheus.Labels{"component": name}).
+		Set(float64(statusInt))
+
+	PromHealthLastUpdate.With(prometheus.Labels{"component": name}).
+		SetToCurrentTime()
 	return nil
 }
 
