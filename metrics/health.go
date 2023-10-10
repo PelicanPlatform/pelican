@@ -25,6 +25,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+	dto "github.com/prometheus/client_model/go"
 )
 
 type (
@@ -47,16 +48,27 @@ type (
 )
 
 var (
-	healthStatus     = sync.Map{}
-	PromHealthStatus = promauto.NewGaugeVec(prometheus.GaugeOpts{
+	healthStatus = sync.Map{}
+
+	PelicanHealthStatus = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "component_health_status",
 		Help: "The health status of various components",
 	}, []string{"component"})
-	PromHealthLastUpdate = promauto.NewGaugeVec(prometheus.GaugeOpts{
+
+	PelicanHealthLastUpdate = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "component_health_status_last_update",
 		Help: "Last update timestamp of components health status",
 	}, []string{"component"})
 )
+
+// Read the value of the last metric entry
+func getLastUpdateTime(component string) (float64, error) {
+	var m = &dto.Metric{}
+	if err := PelicanHealthLastUpdate.WithLabelValues(component).Write(m); err != nil {
+		return 0, err
+	}
+	return m.Counter.GetValue(), nil
+}
 
 func statusToInt(status string) (int, error) {
 	switch status {
@@ -90,12 +102,25 @@ func SetComponentHealthStatus(name, state, msg string) error {
 	now := time.Now()
 	healthStatus.Store(name, componentStatusInternal{statusInt, msg, now})
 
-	PromHealthStatus.With(
+	PelicanHealthStatus.With(
 		prometheus.Labels{"component": name}).
 		Set(float64(statusInt))
 
-	PromHealthLastUpdate.With(prometheus.Labels{"component": name}).
-		SetToCurrentTime()
+	currentUnixTime := float64(now.UnixMilli())
+	lastUpdateTime, err := getLastUpdateTime(name)
+
+	if err != nil {
+		return err
+	}
+
+	if currentUnixTime >= lastUpdateTime {
+		PelicanHealthLastUpdate.With(prometheus.Labels{"component": name}).
+			Add(currentUnixTime - lastUpdateTime)
+	} else {
+		return fmt.Errorf("Current time is less than the last update time. Current:%v Last:%v",
+			currentUnixTime, lastUpdateTime)
+	}
+
 	return nil
 }
 
