@@ -51,12 +51,12 @@ var (
 	healthStatus = sync.Map{}
 
 	PelicanHealthStatus = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "component_health_status",
+		Name: "pelican_component_health_status",
 		Help: "The health status of various components",
 	}, []string{"component"})
 
 	PelicanHealthLastUpdate = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "component_health_status_last_update",
+		Name: "pelican_component_health_status_last_update",
 		Help: "Last update timestamp of components health status",
 	}, []string{"component"})
 )
