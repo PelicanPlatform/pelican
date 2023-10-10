@@ -131,7 +131,7 @@ func TestGenerateConfig(t *testing.T) {
 	assert.Equal(t, issuer.DefaultUser, "xrootd")
 }
 
-func TestWriteOriginScitokensConfig(t *testing.T) {
+func TestWriteOriginScitokensConfigAndXrootdConfig(t *testing.T) {
 	dirname := t.TempDir()
 	os.Setenv("PELICAN_XROOTD_RUNLOCATION", dirname)
 	defer os.Unsetenv("PELICAN_XROOTD_RUNLOCATION")
@@ -157,4 +157,8 @@ func TestWriteOriginScitokensConfig(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, string(monitoringOutput), string(genCfg))
+
+	configPath, err := ConfigXrootd(true)
+	require.NoError(t, err)
+	assert.NotNil(t, configPath)
 }
