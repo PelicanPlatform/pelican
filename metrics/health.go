@@ -22,6 +22,9 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
 type (
@@ -44,7 +47,11 @@ type (
 )
 
 var (
-	healthStatus = sync.Map{}
+	healthStatus               = sync.Map{}
+	PromHealthStatusLastUpdate = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "last_update_component_health_status",
+		Help: "Last update of components health status",
+	}, []string{"component", "status"})
 )
 
 func statusToInt(status string) (int, error) {
@@ -77,6 +84,9 @@ func SetComponentHealthStatus(name, state, msg string) error {
 		return err
 	}
 	healthStatus.Store(name, componentStatusInternal{statusInt, msg, time.Now()})
+
+	now := time.Now().Unix()
+	PromHealthStatusLastUpdate.With(prometheus.Labels{"component": name, "status": state}).Set(float64(now))
 	return nil
 }
 
