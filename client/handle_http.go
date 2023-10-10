@@ -727,7 +727,6 @@ func UploadFile(src string, dest *url.URL, token string, namespace namespaces.Na
 		log.Errorln("Error creating request:", err)
 		return 0, err
 	}
-	request.ContentLength = fileInfo.Size()
 	// Set the authorization header
 	request.Header.Set("Authorization", "Bearer "+token)
 	var lastKnownWritten int64
