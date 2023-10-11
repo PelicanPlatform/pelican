@@ -81,8 +81,8 @@ func getAuthzEscaped(req *http.Request) (authzEscaped string) {
 		// even though it's coming via a URL
 		authzEscaped = strings.TrimPrefix(authzEscaped, "Bearer ")
 	} else if authzHeader := req.Header["Authorization"]; len(authzHeader) > 0 {
-		authzEscaped = url.QueryEscape(authzHeader[0])
-		authzEscaped = strings.TrimPrefix(authzEscaped, "Bearer ")
+		authzEscaped = strings.TrimPrefix(authzHeader[0], "Bearer ")
+		authzEscaped = url.QueryEscape(authzEscaped)
 	}
 	return
 }
