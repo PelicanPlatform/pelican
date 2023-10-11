@@ -57,13 +57,22 @@ jobs:
     - name: Add coverage information to action summary
       if: matrix.os == 'ubuntu-latest' && github.event_name == 'pull_request'
       run: echo 'Code coverage ' ${{steps.cc.outputs.cc_total}}'% Prev ' ${{steps.cc_b.outputs.cc_base_total}}'%' >> $GITHUB_STEP_SUMMARY
-    - name: Run GoReleaser
+    - name: Run GoReleaser for Non-Ubuntu
       uses: goreleaser/goreleaser-action@v4
+      if: runner.os != 'Linux'
       with:
         # either 'goreleaser' (default) or 'goreleaser-pro'
         distribution: goreleaser
         version: latest
-        args: build --rm-dist --snapshot
+        args: build --single-target --clean --snapshot
+    - name: Run GoReleaser for Ubuntu
+      uses: goreleaser/goreleaser-action@v4
+      if: runner.os == 'Linux'
+      with:
+        # either 'goreleaser' (default) or 'goreleaser-pro'
+        distribution: goreleaser
+        version: latest
+        args: --clean --snapshot
     - name: Copy files (Ubuntu)
       if: matrix.os == 'ubuntu-latest'
       run: |
