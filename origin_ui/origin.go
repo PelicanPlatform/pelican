@@ -32,6 +32,7 @@ import (
 	"os/signal"
 	"path"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -60,12 +61,26 @@ type (
 	PasswordReset struct {
 		Password string `form:"password"`
 	}
+
+	DirectorTest struct {
+		Status    string `json:"status"`
+		Message   string `json:"message"`
+		Timestamp string `json:"timestamp"`
+	}
 )
 
 var (
 	authDB       atomic.Pointer[htpasswd.File]
 	currentCode  atomic.Pointer[string]
 	previousCode atomic.Pointer[string]
+
+	// Mutex for safe concurrent access to the timer
+	timerMutex sync.Mutex
+	// Timer for tracking timeout
+	directorTimeoutTimer *time.Timer
+	// Duration to wait before timeout
+	// TODO: Do we want to make this a configurable value?
+	directorTimeoutDuration = 30 * time.Second
 
 	//go:embed src/out/*
 	webAssets embed.FS
