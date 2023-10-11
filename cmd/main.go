@@ -19,20 +19,42 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 )
 
 func main() {
-	exec_name := filepath.Base(os.Args[0])
+	err := handleCLI(os.Args)
+	if err != nil {
+		os.Exit(1)
+	}
+}
+
+func handleCLI(args []string) error {
+	exec_name := filepath.Base(args[0])
 	if exec_name == "stash_plugin" || exec_name == "osdf_plugin" || exec_name == "pelican_xfer_plugin" {
-		stashPluginMain(os.Args[1:])
+		stashPluginMain(args[1:])
 	} else if exec_name == "stashcp" {
 		err := copyCmd.Execute()
 		if err != nil {
-			os.Exit(1)
+			return err
 		}
 	} else {
+		// * We assume that os.Args should have minimum length of 1, so skipped empty check
+		// * Version flag is captured manually to ensure it's available to all the commands and subcommands
+		// 		This is becuase there's no gracefuly way to do it through Cobra
+		// * Note that append "--version" to CLI as the last argument will give the
+		// version info regardless of the commands and whether they are defined
+		// * Remove the -v shorthand since in "origin serve" flagset it's already used for "volume" flag
+		if args[len(args)-1] == "--version" {
+			fmt.Println("Version:", version)
+			fmt.Println("Build Date:", date)
+			fmt.Println("Build Commit:", commit)
+			fmt.Println("Built By:", builtBy)
+			return nil
+		}
 		Execute()
 	}
+	return nil
 }
