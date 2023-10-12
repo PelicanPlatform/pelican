@@ -214,3 +214,37 @@ func TestDirectorRegistration(t *testing.T) {
 	assert.False(t, NamespaceAdContainsPath(namaspaceADs, "/foo/bar"), "Found namespace in the director cache even if the token validation failed.")
 	serverAds.DeleteAll()
 }
+
+func TestGetAuthzEscaped(t *testing.T) {
+	// Test passing a token via header with no bearer prefix
+	req, err := http.NewRequest(http.MethodPost, "http://fake-server.com", bytes.NewBuffer([]byte("a body")))
+	assert.NoError(t, err)
+	req.Header.Set("Authorization", "tokenstring")
+	escapedToken := getAuthzEscaped(req)
+	assert.Equal(t, escapedToken, "tokenstring")
+
+	// Test passing a token via query with no bearer prefix
+	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com/foo?authz=tokenstring", bytes.NewBuffer([]byte("a body")))
+	assert.NoError(t, err)
+	escapedToken = getAuthzEscaped(req)
+	assert.Equal(t, escapedToken, "tokenstring")
+
+	// Test passing the token via header with Bearer prefix
+	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com", bytes.NewBuffer([]byte("a body")))
+	assert.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer tokenstring")
+	escapedToken = getAuthzEscaped(req)
+	assert.Equal(t, escapedToken, "tokenstring")
+
+	// Test passing the token via URL with Bearer prefix and + encoded space
+	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com/foo?authz=Bearer+tokenstring", bytes.NewBuffer([]byte("a body")))
+	assert.NoError(t, err)
+	escapedToken = getAuthzEscaped(req)
+	assert.Equal(t, escapedToken, "tokenstring")
+
+	// Finally, the same test as before, but test with %20 encoded space
+	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com/foo?authz=Bearer%20tokenstring", bytes.NewBuffer([]byte("a body")))
+	assert.NoError(t, err)
+	escapedToken = getAuthzEscaped(req)
+	assert.Equal(t, escapedToken, "tokenstring")
+}
