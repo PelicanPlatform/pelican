@@ -20,8 +20,10 @@ package director
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"crypto/tls"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/url"
 	"path"
@@ -179,6 +181,113 @@ func VerifyAdvertiseToken(token, namespace string) (bool, error) {
 
 	for _, scope := range scopes {
 		if scope == "pelican.advertise" {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func CreateDirectorTestReportToken(originUrl string) (string, error) {
+	fedUrl := param.Federation_DiscoveryUrl.GetString()
+	if fedUrl == "" {
+		return "", errors.New("Director URL is not known; cannot create director test report token")
+	}
+
+	tok, err := jwt.NewBuilder().
+		Claim("scope", "pelican.directorTestReport").
+		Issuer(fedUrl).
+		Audience([]string{originUrl}).
+		Subject("director").
+		Expiration(time.Now().Add(time.Minute)).
+		Build()
+	if err != nil {
+		return "", err
+	}
+
+	key, err := config.GetOriginJWK()
+	if err != nil {
+		return "", errors.Wrap(err, "failed to load the origin's JWK")
+	}
+
+	err = jwk.AssignKeyID(*key)
+	if err != nil {
+		return "", errors.Wrap(err, "Failed to assign kid to the token")
+	}
+
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, *key))
+	if err != nil {
+		return "", err
+	}
+	return string(signed), nil
+}
+
+func VerifyDirectorTestReportToken(strToken string) (bool, error) {
+	var bKey *jwk.Key
+
+	fedURL := param.Federation_DiscoveryUrl.GetString()
+	token, err := jwt.Parse([]byte(strToken), jwt.WithVerify(false))
+	if err != nil {
+		return false, err
+	}
+
+	if fedURL != token.Issuer() {
+		return false, errors.Errorf("Token issuer is not a federation")
+	}
+
+	err = config.DiscoverFederation()
+	if err != nil {
+		return false, err
+	}
+	fedURIFile := param.Federation_JwkUrl.GetString()
+	if fedURIFile == "" {
+		log.Warningf("Federation_JwkUrl is empty")
+		return false, errors.Errorf("Federation_JwkUrl is empty")
+	}
+	// Setup the Transport
+	client := &http.Client{}
+	tr := config.GetTransport()
+	client = &http.Client{Transport: tr}
+	response, err := client.Get(fedURIFile)
+	if err != nil {
+		return false, err
+	}
+	defer response.Body.Close()
+	contents, err := io.ReadAll(response.Body)
+	if err != nil {
+		return false, err
+	}
+	keys, err := jwk.Parse(contents)
+	if err != nil {
+		return false, err
+	}
+	key, ok := keys.Key(0)
+	if !ok {
+		return false, err
+	}
+	bKey = &key
+	var raw ecdsa.PrivateKey
+	if err = (*bKey).Raw(&raw); err != nil {
+		return false, err
+	}
+
+	tok, err := jwt.Parse([]byte(strToken), jwt.WithKey(jwa.ES256, raw.PublicKey), jwt.WithValidate(true))
+	if err != nil {
+		return false, err
+	}
+
+	scope_any, present := tok.Get("scope")
+	if !present {
+		return false, errors.New("No scope is present; required to advertise to director")
+	}
+	scope, ok := scope_any.(string)
+	if !ok {
+		return false, errors.New("scope claim in token is not string-valued")
+	}
+
+	scopes := strings.Split(scope, " ")
+
+	for _, scope := range scopes {
+		if scope == "pelican.directorTestReport" {
 			return true, nil
 		}
 	}

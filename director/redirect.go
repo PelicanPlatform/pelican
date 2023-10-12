@@ -391,6 +391,9 @@ func registerServeAd(ctx *gin.Context, sType ServerType) {
 
 	RecordAd(sAd, &ad.Namespaces)
 
+	// Start director periodic test of origin's health status
+	go PeriodicDirectorTest(ad.URL, ad.Name)
+
 	ctx.JSON(200, gin.H{"msg": "Successful registration"})
 }
 
