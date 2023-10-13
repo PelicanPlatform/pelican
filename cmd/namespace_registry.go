@@ -25,7 +25,7 @@ import (
 
 var (
 	namespaceRegistryCmd = &cobra.Command{
-		Use:   "registry",
+		Use: "registry",
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			err := config.InitServer()
 			return err

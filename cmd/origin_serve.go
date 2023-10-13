@@ -96,7 +96,6 @@ type (
 	}
 )
 
-
 func checkXrootdEnv() error {
 	uid, err := config.GetDaemonUID()
 	if err != nil {
