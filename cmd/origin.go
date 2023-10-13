@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -30,6 +32,10 @@ var (
 	originCmd = &cobra.Command{
 		Use:   "origin",
 		Short: "Operate a Pelican origin service",
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			err := initOrigin()
+			return err
+		},
 	}
 
 	originConfigCmd = &cobra.Command{
@@ -79,6 +85,17 @@ and https://github.com/WLCG-AuthZ-WG/common-jwt-profile/blob/master/profile.md, 
 func configOrigin( /*cmd*/ *cobra.Command /*args*/, []string) {
 	fmt.Println("'origin config' command is not yet implemented")
 	os.Exit(1)
+}
+
+func initOrigin() error {
+	err := config.InitServer()
+	cobra.CheckErr(err)
+	err = metrics.SetComponentHealthStatus("xrootd", "critical", "xrootd has not been started")
+	cobra.CheckErr(err)
+	err = metrics.SetComponentHealthStatus("cmsd", "critical", "cmsd has not been started")
+	cobra.CheckErr(err)
+
+	return err
 }
 
 func init() {

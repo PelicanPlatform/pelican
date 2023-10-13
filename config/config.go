@@ -392,7 +392,7 @@ func InitClient() error {
 	} else {
 		configBase, err := getConfigBase()
 		if err != nil {
-			return err
+			log.Warningln("No home directory found for user -- will check for configuration yaml in /etc/pelican/")
 		}
 		viper.SetDefault("IssuerKey", filepath.Join(configBase, "issuer.jwk"))
 	}

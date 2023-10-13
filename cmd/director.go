@@ -19,13 +19,18 @@
 package main
 
 import (
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
 var (
 	directorCmd = &cobra.Command{
-		Use:   "director",
+		Use: "director",
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			err := config.InitServer()
+			return err
+		},
 		Short: "Launch a Pelican Director",
 		Long: `Launch a Pelican Director service:
 
