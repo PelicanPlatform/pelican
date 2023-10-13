@@ -72,7 +72,6 @@ type OSDFConfig struct {
 type FederationDiscovery struct {
 	DirectorEndpoint              string `json:"director_endpoint"`
 	NamespaceRegistrationEndpoint string `json:"namespace_registration_endpoint"`
-	CollectorEndpoint             string `json:"collector_endpoint"`
 	JwksUri                       string `json:"jwks_uri"`
 }
 
