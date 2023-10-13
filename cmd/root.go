@@ -122,7 +122,9 @@ func initConfig() {
 		viper.SetConfigFile(cfgFile)
 	} else {
 		home, err := os.UserHomeDir()
-		cobra.CheckErr(err)
+		if err != nil {
+			log.Warningln("No home directory found for user -- will check for configuration yaml in /etc/pelican/")
+		}
 
 		viper.AddConfigPath(filepath.Join(home, ".config", "pelican"))
 		viper.AddConfigPath(filepath.Join("/etc", "pelican"))
