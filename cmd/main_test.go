@@ -105,7 +105,10 @@ func TestHandleCLIVersionFlag(t *testing.T) {
 func TestHandleCLIExecutableAlias(t *testing.T) {
 	// If we're in the process started by exec.Command, run the handleCLI function.
 	if os.Getenv("BE_CRASHER") == "1" {
-		handleCLI(os.Args[1:])
+		err := handleCLI(os.Args[1:])
+		if err != nil {
+			t.Fatalf("Function returns error")
+		}
 		return
 	}
 
