@@ -182,8 +182,6 @@ func TestHandleCLIExecutableAlias(t *testing.T) {
 			if !ok {
 				t.Fatal("Failed to cast error as *exec.ExitError")
 			}
-			// Here you might want to check the exit code if it's relevant to your test.
-			// exitCode := exitError.ExitCode()
 		}
 		// Apparently both stashcp and *_plug will trigger Exit(1) with error if
 		// the arguments are not enough/solid
