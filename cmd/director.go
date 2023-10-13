@@ -26,7 +26,7 @@ import (
 
 var (
 	directorCmd = &cobra.Command{
-		Use:   "director",
+		Use: "director",
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			err := config.InitServer()
 			return err
