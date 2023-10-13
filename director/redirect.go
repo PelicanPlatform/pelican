@@ -265,6 +265,11 @@ func RedirectToOrigin(ginCtx *gin.Context) {
 // original request had been made to /api/v1.0/director/object/foo/bar
 func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// If this is a request for getting public key, don't modify the path
+		if strings.HasPrefix(c.Request.URL.Path, "/.well-known") {
+			c.Next()
+			return
+		}
 		// If we're configured for cache mode or we haven't set the flag,
 		// we should use cache middleware
 		if defaultResponse == "cache" {
