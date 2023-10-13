@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 
 	"testing"
@@ -193,20 +194,30 @@ func TestHandleCLIExecutableAlias(t *testing.T) {
 		}
 	}
 	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			batchTest(t, tc.args, tc.expected)
-		})
-		t.Run(tc.name+"-windows", func(t *testing.T) {
-			preserve := tc.args[0]
-			tc.args[0] = preserve + ".exe"
-			batchTest(t, tc.args, tc.expected)
-			tc.args[0] = preserve
-		})
-		t.Run(tc.name+"-mixedCase", func(t *testing.T) {
-			preserve := tc.args[0]
-			tc.args[0] = strings.ToUpper(preserve)
-			batchTest(t, tc.args, tc.expected)
-			tc.args[0] = preserve
-		})
+		if os := runtime.GOOS; os == "windows" {
+			// On Windows, you can only do *.exe
+			t.Run(tc.name+"-windows", func(t *testing.T) {
+				preserve := tc.args[0]
+				tc.args[0] = preserve + ".exe"
+				batchTest(t, tc.args, tc.expected)
+				tc.args[0] = preserve
+			})
+		} else {
+			t.Run(tc.name, func(t *testing.T) {
+				batchTest(t, tc.args, tc.expected)
+			})
+			t.Run(tc.name+"-windows", func(t *testing.T) {
+				preserve := tc.args[0]
+				tc.args[0] = preserve + ".exe"
+				batchTest(t, tc.args, tc.expected)
+				tc.args[0] = preserve
+			})
+			t.Run(tc.name+"-mixedCase", func(t *testing.T) {
+				preserve := tc.args[0]
+				tc.args[0] = strings.ToUpper(preserve)
+				batchTest(t, tc.args, tc.expected)
+				tc.args[0] = preserve
+			})
+		}
 	}
 }
