@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 func main() {
@@ -33,6 +34,11 @@ func main() {
 
 func handleCLI(args []string) error {
 	exec_name := filepath.Base(args[0])
+	// Take care of our Windows users
+	exec_name = strings.TrimSuffix(exec_name, ".exe")
+	// Being case-insensitive
+	exec_name = strings.ToLower(exec_name)
+
 	if exec_name == "stash_plugin" || exec_name == "osdf_plugin" || exec_name == "pelican_xfer_plugin" {
 		stashPluginMain(args[1:])
 	} else if exec_name == "stashcp" {

@@ -41,6 +41,10 @@ var (
 
 func init() {
 	exec_name := filepath.Base(os.Args[0])
+	// Take care of our Windows users
+	exec_name = strings.TrimSuffix(exec_name, ".exe")
+	// Being case-insensitive
+	exec_name = strings.ToLower(exec_name)
 	flagSet := copyCmd.Flags()
 	flagSet.StringP("cache", "c", "", "Cache to use")
 	flagSet.StringP("token", "t", "", "Token file to use for transfer")
