@@ -19,12 +19,17 @@
 package main
 
 import (
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/spf13/cobra"
 )
 
 var (
 	namespaceRegistryCmd = &cobra.Command{
-		Use:   "registry",
+		Use: "registry",
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			err := config.InitServer()
+			return err
+		},
 		Short: "Interact with a Pelican namespace registry service",
 		Long: `Interact with a Pelican namespace registry service:
 
