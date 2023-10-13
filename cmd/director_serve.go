@@ -68,6 +68,10 @@ func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		return err
 	}
 
+	if err != nil {
+		return errors.Wrap(err, "Failed to generate director private key")
+	}
+
 	engine, err := web_ui.GetEngine()
 	if err != nil {
 		return err

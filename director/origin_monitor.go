@@ -51,6 +51,8 @@ var (
 	directorTestBody string = "This object was created by the Pelican director-test functionality"
 )
 
+// Generate a SciToken for test transfer to the origin. which will be
+// validated by xrootd
 func generateMonitoringScitoken(originUrl string) (string, error) {
 	jti_bytes := make([]byte, 16)
 	if _, err := rand.Read(jti_bytes); err != nil {
@@ -58,8 +60,8 @@ func generateMonitoringScitoken(originUrl string) (string, error) {
 	}
 	jti := base64.RawURLEncoding.EncodeToString(jti_bytes)
 
-	fedUrl := param.Federation_DiscoveryUrl.GetString()
-	if fedUrl == "" {
+	directorURL := param.Federation_DirectorUrl.GetString()
+	if directorURL == "" {
 		return "", errors.New("Director endpoint URL is not known")
 	}
 
@@ -67,7 +69,7 @@ func generateMonitoringScitoken(originUrl string) (string, error) {
 		Claim("scope", "storage.read:/ storage.modify:/").
 		Claim("wlcg.ver", "1.0").
 		JwtID(jti).
-		Issuer(fedUrl).
+		Issuer(directorURL).
 		Audience([]string{originUrl}).
 		Subject("director"). // person sending the token
 		Expiration(time.Now().Add(time.Minute)).
@@ -195,6 +197,7 @@ func DeleteTestfile(url string, originUrl string) error {
 	return nil
 }
 
+// Report the health status of test file transfer to origin
 func reportStatusToOrigin(originUrl string, status string, message string) error {
 	tkn, err := CreateDirectorTestReportToken(originUrl)
 	if err != nil {
@@ -218,14 +221,12 @@ func reportStatusToOrigin(originUrl string, status string, message string) error
 		Timestamp: strconv.FormatInt(time.Now().Unix(), 10),
 	}
 
-	// Marshal the struct into a JSON byte slice
 	jsonData, err := json.Marshal(dt)
 	if err != nil {
 		// handle error
 		return errors.Wrap(err, "Failed to parse request body for reporting director test")
 	}
 
-	// Create a new buffer using the JSON byte slice
 	reqBody := bytes.NewBuffer(jsonData)
 
 	req, err := http.NewRequest("POST", reportUrl.String(), reqBody)
@@ -234,10 +235,10 @@ func reportStatusToOrigin(originUrl string, status string, message string) error
 	}
 
 	req.Header.Set("Authorization", "Bearer "+tkn)
+	req.Header.Set("Content-Type", "application/json")
 
 	tr := config.GetTransport()
 	client := http.Client{Transport: tr}
-
 	resp, err := client.Do(req)
 	if err != nil {
 		return errors.Wrap(err, "Failed to start request for reporting director test")
@@ -256,6 +257,8 @@ func reportStatusToOrigin(originUrl string, status string, message string) error
 	return nil
 }
 
+// Run a periodic test file transfer against an origin to ensure
+// it's talking to the director
 func PeriodicDirectorTest(originUrl string, originName string) {
 	firstRound := true
 	for {
@@ -270,7 +273,7 @@ func PeriodicDirectorTest(originUrl string, originName string) {
 		if err != nil {
 			log.Warningln("Director test cycle failed during test upload:", err)
 			if err := reportStatusToOrigin(originUrl, "error", "Director test cycle failed during test upload: "+err.Error()); err != nil {
-				log.Errorln("Failed to report director test result to origin:", err)
+				log.Warningln("Failed to report director test result to origin:", err)
 			}
 			return
 		}
@@ -279,7 +282,7 @@ func PeriodicDirectorTest(originUrl string, originName string) {
 		if err = DownloadTestfile(url, originUrl); err != nil {
 			log.Warningln("Director test cycle failed during test download:", err)
 			if err := reportStatusToOrigin(originUrl, "error", "Director test cycle failed during test download: "+err.Error()); err != nil {
-				log.Errorln("Failed to report director test result to origin:", err)
+				log.Warningln("Failed to report director test result to origin:", err)
 			}
 			downloadFailed = true
 		}
@@ -291,14 +294,14 @@ func PeriodicDirectorTest(originUrl string, originName string) {
 			}
 			log.Warningln("Director test cycle failed during test deletion:", err)
 			if err := reportStatusToOrigin(originUrl, "error", "Director test cycle failed during test deletion: "+err.Error()); err != nil {
-				log.Errorln("Failed to report director test result to origin:", err)
+				log.Warningln("Failed to report director test result to origin:", err)
 			}
 			return
 		}
 
 		log.Debugln("Director test cycle succeeded at", time.Now().Format(time.UnixDate))
 		if err := reportStatusToOrigin(originUrl, "ok", "Director test cycle succeeded at "+time.Now().Format(time.RFC3339)); err != nil {
-			log.Errorln("Failed to report director test result to origin:", err)
+			log.Warningln("Failed to report director test result to origin:", err)
 		}
 	}
 }

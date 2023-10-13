@@ -322,9 +322,6 @@ func cliRegisterNamespace(ctx *gin.Context) {
 		return
 	}
 
-	tr := config.GetTransport()
-	client := &http.Client{Transport: tr}
-
 	if reqData.AccessToken != "" {
 		payload := url.Values{}
 		payload.Set("access_token", reqData.AccessToken)

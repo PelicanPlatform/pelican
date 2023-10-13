@@ -70,11 +70,13 @@ func apiAuthHandler(ctx *gin.Context) {
 	valid, err := director.VerifyDirectorTestReportToken(token)
 
 	if err != nil {
+		log.Warningln(fmt.Sprintf("Error when verifying Bearer token: %s", err))
 		ctx.AbortWithStatusJSON(401, gin.H{"error": fmt.Sprintf("Error when verifying Bearer token: %s", err)})
 		return
 	}
 
 	if !valid {
+		log.Warningln("Can't validate Bearer token")
 		ctx.AbortWithStatusJSON(401, gin.H{"error": "Can't validate Bearer token"})
 		return
 	}
@@ -119,7 +121,7 @@ func directorTestResponse(ctx *gin.Context) {
 	dt := DirectorTest{}
 	if err := ctx.ShouldBind(&dt); err != nil {
 		log.Errorf("Invalid director test response")
-		ctx.JSON(400, gin.H{"error": fmt.Sprintf("Invalid director test response")})
+		ctx.JSON(400, gin.H{"error": "Invalid director test response"})
 		return
 	}
 	// We will let the timer go timeout if director didn't send a valid json request
