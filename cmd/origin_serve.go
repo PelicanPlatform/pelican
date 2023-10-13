@@ -96,14 +96,6 @@ type (
 	}
 )
 
-func init() {
-	err := config.InitServer()
-	cobra.CheckErr(err)
-	err = metrics.SetComponentHealthStatus("xrootd", "critical", "xrootd has not been started")
-	cobra.CheckErr(err)
-	err = metrics.SetComponentHealthStatus("cmsd", "critical", "cmsd has not been started")
-	cobra.CheckErr(err)
-}
 
 func checkXrootdEnv() error {
 	uid, err := config.GetDaemonUID()
