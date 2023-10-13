@@ -77,8 +77,12 @@ func getRealIP(ginCtx *gin.Context) (ipAddr netip.Addr, err error) {
 func getAuthzEscaped(req *http.Request) (authzEscaped string) {
 	if authzQuery := req.URL.Query()["authz"]; len(authzQuery) > 0 {
 		authzEscaped = authzQuery[0]
+		// if the authz URL query is coming from XRootD, it probably has a "Bearer " tacked in front
+		// even though it's coming via a URL
+		authzEscaped = strings.TrimPrefix(authzEscaped, "Bearer ")
 	} else if authzHeader := req.Header["Authorization"]; len(authzHeader) > 0 {
-		authzEscaped = url.QueryEscape(authzHeader[0])
+		authzEscaped = strings.TrimPrefix(authzHeader[0], "Bearer ")
+		authzEscaped = url.QueryEscape(authzEscaped)
 	}
 	return
 }
