@@ -22,6 +22,9 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
 type (
@@ -45,6 +48,16 @@ type (
 
 var (
 	healthStatus = sync.Map{}
+
+	PelicanHealthStatus = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "pelican_component_health_status",
+		Help: "The health status of various components",
+	}, []string{"component"})
+
+	PelicanHealthLastUpdate = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "pelican_component_health_status_last_update",
+		Help: "Last update timestamp of components health status",
+	}, []string{"component"})
 )
 
 func statusToInt(status string) (int, error) {
@@ -76,7 +89,16 @@ func SetComponentHealthStatus(name, state, msg string) error {
 	if err != nil {
 		return err
 	}
-	healthStatus.Store(name, componentStatusInternal{statusInt, msg, time.Now()})
+	now := time.Now()
+	healthStatus.Store(name, componentStatusInternal{statusInt, msg, now})
+
+	PelicanHealthStatus.With(
+		prometheus.Labels{"component": name}).
+		Set(float64(statusInt))
+
+	PelicanHealthLastUpdate.With(prometheus.Labels{"component": name}).
+		SetToCurrentTime()
+
 	return nil
 }
 
