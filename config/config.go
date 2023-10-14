@@ -275,7 +275,12 @@ func setupTransport() {
 		systemPool, err := x509.SystemCertPool()
 		if err == nil {
 			systemPool.AddCert(caCert)
-			transport.TLSClientConfig = &tls.Config{RootCAs: systemPool}
+			// Ensure that we don't override the InsecureSkipVerify if it's present
+			if transport.TLSClientConfig == nil {
+				transport.TLSClientConfig = &tls.Config{RootCAs: systemPool}
+			} else {
+				transport.TLSClientConfig.RootCAs = systemPool
+			}
 		}
 	}
 }
