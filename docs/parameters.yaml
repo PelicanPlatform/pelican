@@ -217,6 +217,14 @@ type: bool
 default: true
 components: ["origin"]
 ---
+name: Origin.EnableIssuer
+description: >-
+  Enable the built-in issuer daemon for the origin.
+type: bool
+default: true
+components: ["origin"]
+---
+
 
 ############################
 #  Director-level configs  #
@@ -343,8 +351,28 @@ components: ["origin", "director", "nsregistry"]
 ---
 
 
+################################
+#   Issuer's Configurations    #
+################################
+name: Issuer.TomcatLocation
+description: >-
+  Location of the system tomcat installation
+type: string
+default: /opt/tomcat
+components: ["origin"]
+---
+name: Issuer.ScitokensServerLocation
+description: >-
+  Location of the scitoken server installation
+type: string
+default: /opt/scitokens-server
+components: ["origin"]
+---
 
 
+###################################
+#   Server's OIDC Configuration   #
+###################################
 name: OIDC.ClientIDFile
 description: >-
   A filepath to a file containing an OIDC Client ID. This is used by the namespace registry to establish OIDC information
@@ -387,6 +415,7 @@ type: url
 default: none
 components: ["nsregistry"]
 ---
+
 
 ############################
 #   XRootD-level Configs   #

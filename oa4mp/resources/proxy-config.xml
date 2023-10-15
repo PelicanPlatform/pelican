@@ -1,0 +1,24 @@
+<config>
+    <client name="proxy-client">
+        <logging
+                logFileName="/dev/stdout"
+                logName="oa4mp"
+                logFileCount="1"
+                debug="trace"/>
+        <id>{{- .ClientID -}}</id>
+        <secret>{{- .ClientSecret -}}</secret>
+        <callbackUri>{{- .IssuerURL -}}/ready</callbackUri>
+        <serviceUri>https://cilogon.org/oauth2</serviceUri>
+        <authorizeUri>https://cilogon.org/authorize</authorizeUri>
+        <wellKnownUri>https://cilogon.org/oauth2/.well-known/openid-configuration</wellKnownUri>
+        <scopes>
+            <scope enabled="false">email</scope>
+            <scope>openid</scope>
+            <scope enabled="false">profile</scope>
+            <scope>org.cilogon.userinfo</scope>
+            <scope enabled="false">edu.uiuc.ncsa.myproxy.getcert</scope>
+        </scopes>
+        <memoryStore><assetStore/></memoryStore>
+    </client>
+
+</config>

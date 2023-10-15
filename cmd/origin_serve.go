@@ -37,6 +37,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/daemon"
 	"github.com/pelicanplatform/pelican/metrics"
+	"github.com/pelicanplatform/pelican/oa4mp"
 	"github.com/pelicanplatform/pelican/origin_ui"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/web_ui"
@@ -472,6 +473,14 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	launchers, err := xrootd.ConfigureLaunchers(privileged, configPath)
 	if err != nil {
 		return err
+	}
+
+	if param.Origin_EnableIssuer.GetBool() {
+		oa4mp_launcher, err := oa4mp.ConfigureOA4MP()
+		if err != nil {
+			return err
+		}
+		launchers = append(launchers, oa4mp_launcher)
 	}
 
 	if err = daemon.LaunchDaemons(launchers); err != nil {
