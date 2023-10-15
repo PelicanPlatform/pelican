@@ -35,6 +35,7 @@ import (
 	"text/template"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/daemon"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/origin_ui"
 	"github.com/pelicanplatform/pelican/param"
@@ -468,8 +469,12 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	}
 
 	privileged := param.Origin_Multiuser.GetBool()
-	err = xrootd.LaunchXrootd(privileged, configPath)
+	launchers, err := xrootd.ConfigureLaunchers(privileged, configPath)
 	if err != nil {
+		return err
+	}
+
+	if err = daemon.LaunchDaemons(launchers); err != nil {
 		return err
 	}
 	log.Info("Clean shutdown of the origin")

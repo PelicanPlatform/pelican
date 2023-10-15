@@ -1,4 +1,4 @@
-//go:build !linux
+//go:build windows
 
 /***************************************************************
  *
@@ -18,14 +18,12 @@
  *
  ***************************************************************/
 
-package xrootd
+package daemon
 
 import (
-	"context"
-
 	"github.com/pkg/errors"
 )
 
-func (PrivilegedXrootdLauncher) Launch(ctx context.Context) (context.Context, int, error) {
-	return ctx, -1, errors.New("Privileged process launching not supported on this platform")
+func LaunchOrigin() error {
+	return errors.New("'origin serve' command is not supported on Windows")
 }
