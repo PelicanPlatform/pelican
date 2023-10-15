@@ -196,9 +196,9 @@ root_default: true
 default: false
 components: ["origin"]
 ---
-name: Origin.UseCmsd
+name: Origin.EnableCmsd
 description: >-
-  A bool indicating whether the origin should use CMSD.
+  A bool indicating whether the origin should enable the `cmsd` daemon.
 type: bool
 default: true
 components: ["origin"]

@@ -24,8 +24,8 @@ Director:
 Origin:
   NamespacePrefix: ""
   Multiuser: false
-  UseMacaroons: true
-  UseVoms: true
+  EnableMacaroons: true
+  EnableVoms: true
   SelfTest: true
 Monitoring:
   PortLower: 9930

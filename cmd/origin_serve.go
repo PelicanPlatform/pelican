@@ -57,9 +57,9 @@ var (
 type (
 	OriginConfig struct {
 		Multiuser       bool
-		UseCmsd         bool
-		UseMacaroons    bool
-		UseVoms         bool
+		EnableCmsd      bool
+		EnableMacaroons bool
+		EnableVoms      bool
 		SelfTest        bool
 		NamespacePrefix string
 	}
@@ -317,10 +317,10 @@ func checkDefaults() error {
 
 	if managerHost := param.Xrootd_ManagerHost.GetString(); managerHost == "" {
 		log.Debug("No manager host specified for the cmsd process in origin; assuming no xrootd protocol support")
-		viper.SetDefault("Origin.UseCmsd", false)
+		viper.SetDefault("Origin.EnableCmsd", false)
 		metrics.DeleteComponentHealthStatus("cmsd")
 	} else {
-		viper.SetDefault("Origin.UseCmsd", true)
+		viper.SetDefault("Origin.EnableCmsd", true)
 	}
 
 	// As necessary, generate a private key and corresponding cert
