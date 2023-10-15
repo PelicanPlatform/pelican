@@ -49,7 +49,7 @@ RUN useradd -o -u 10940 -g 10940 -s /bin/sh xrootd
 RUN yum -y update \
     && yum -y install xrootd xrootd-client xrootd-server \
     && yum clean all \
-    && yum install -y curl java-11-openjdk-headless java-11-openjdk-devel \
+    && yum install -y curl java-17-openjdk-headless \
     && rm -rf /var/cache/yum/
 
 WORKDIR /pelican
@@ -102,11 +102,14 @@ COPY --from=scitokens-oauth2-server /usr/local/bin/generate_jwk.sh /usr/local/bi
 COPY --from=scitokens-oauth2-server /opt/qdl /opt/qdl
 
 # Add in the tomcat server configuration
-COPY --from=scitokens-oauth2-server --chown=root:tomcat /opt/tomcat/conf/server.xml /opt/tomcat/conf/server.xml
+COPY --chown=root:tomcat oa4mp/resources/server.xml /opt/tomcat/conf/server.xml
 
 # Copy over the OA4MP webapp.
-COPY --from=scitokens-oauth2-server --chown=tomcat:tomcat /opt/tomcat/webapps/scitokens-server/WEB-INF/web.xml /opt/tomcat/webapps/scitokens-server/WEB-INF/web.xml
+COPY --from=scitokens-oauth2-server --chown=tomcat:tomcat /opt/tomcat/webapps/scitokens-server/ /opt/tomcat/webapps/scitokens-server/
 COPY --from=scitokens-oauth2-server --chown=tomcat:tomcat /opt/scitokens-server/ /opt/scitokens-server/
+
+# The security constraint line forces a redirect to HTTPS (which we aren't using)
+RUN sed 's/<security-constraint>/<!--&/; s/\/security-constraint>/&-->/;' /opt/scitokens-server/web.xml > /opt/tomcat/webapps/scitokens-server/WEB-INF/web.xml
 
 ENV JAVA_HOME=/usr/lib/jvm/jre \
     CATALINA_PID=/opt/tomcat/temp/tomcat.pid \
