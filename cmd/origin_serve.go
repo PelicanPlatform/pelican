@@ -445,6 +445,11 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	if err = origin_ui.PeriodicAdvertiseOrigin(); err != nil {
 		return err
 	}
+	if param.Origin_EnableIssuer.GetBool() {
+		if err = oa4mp.ConfigureOA4MPProxy(engine); err != nil {
+			return err
+		}
+	}
 
 	go web_ui.RunEngine(engine)
 	if err = metrics.SetComponentHealthStatus("web-ui", "warning", "Authentication not initialized"); err != nil {
