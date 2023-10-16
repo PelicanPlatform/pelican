@@ -17,11 +17,6 @@
  * limitations under the License.
  *
  ***************************************************************/
-
 package xrootd
-
-import (
-	"github.com/pkg/errors"
-)
 
 type PrivilegedXrootdLauncher struct{}
