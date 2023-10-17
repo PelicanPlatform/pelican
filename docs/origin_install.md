@@ -1,0 +1,154 @@
+title: Install Pelican Origin
+DateReviewed: 2023-10-16
+
+Install Pelican Origin
+======================
+
+The [Pelican](http://pelicanplatform.org/) origin is a data storage location attached to a federation managed locally by the admin. This will give you the steps to install XRootD as well as how to install Pelican and start up an origin.
+
+Before Starting
+---------------
+
+Before starting the installation process, consider the following points:
+
+-   **User IDs:** If it does not exist already, the installation will create the Linux user ID `xrootd`
+-   **Service certificate:** The XRootD service uses a host certificate and key pair at
+    `/etc/grid-security/xrd/xrdcert.pem` and `/etc/grid-security/xrd/xrdkey.pem` that must be owned by the `xrootd` user
+-   **Networking:** The XRootD service uses port 1094 by default
+
+As with all OSG software installations, there are some one-time (per host) steps to prepare in advance:
+
+-   Ensure the host has [a supported operating system](https://osg-htc.org/docs/release/supported_platforms/)
+-   Obtain root access to the host
+-   Prepare [the required Yum repositories](https://osg-htc.org/docs/common/yum/)
+-   Install [CA certificates](https://osg-htc.org/docs/common/ca/)
+-   Install XRootD (Instructions to follow)
+
+Installing XrootD
+-----------------
+
+!!! warning "Requirements for XRootD-Multiuser with VOMS FQANs"
+    Using XRootD-Multiuser with a VOMS FQAN requires mapping the FQAN to a username, which requires a `voms-mapfile`.
+    Support is available in `xrootd-voms 5.4.2-1.1`, in the OSG 3.6 repos, though it is expected in XRootD 5.5.0.
+    If you want to use multiuser, ensure you are getting `xrootd-voms` from the OSG repos.
+
+To install an XRootD Standalone server, run the following command:
+
+```console
+root@xrootd-standalone # yum install osg-xrootd-standalone
+```
+
+Configuring XRootD
+------------------
+
+To configure XRootD as a standalone server, you will modify `/etc/xrootd/xrootd-standalone.cfg` and the config files
+under `/etc/xrootd/config.d/` as follows:
+
+1.  Configure a `rootdir` in `/etc/xrootd/config.d/10-common-site-local.cfg`, to point to the top of the directory
+    hierarchy which you wish to serve via XRootD.
+
+        set rootdir = <DIRECTORY>
+
+    !!! danger "Carefully consider your `rootdir`"
+        Do not set `rootdir` to `/`.
+        This might result in serving private information.
+
+1.  If you want to limit the sub-directories to serve under your configured `rootdir`,
+    comment out the `all.export /` directive in
+    `/etc/xrootd/config.d/90-osg-standalone-paths.cfg`,
+    and add an `all.export` directive for each directory under `rootdir` that you wish to serve via XRootD.
+
+    This is useful if you have a mixture of files under your `rootdir`, for example from multiple users,
+    but only want to expose a subset of them to the world.
+
+    For example, to serve the contents of `/data/store` and `/data/public` (with `rootdir` configured to `/data`):
+
+        all.export /store/
+        all.export /public/
+
+    If you want to serve everything under your configured `rootdir`, you don't have to change anything.
+
+    !!! danger
+        The directories specified this way are writable by default.
+        Access controls should be managed via [authorization configuration](#configuring-authentication-and-authorization).
+
+1. In `/etc/xrootd/config.d/10-common-site-local.cfg`, add a line to set the `resourcename` variable.
+   Unless your supported VOs' policies state otherwise,
+   this should match the [resource name](../../common/registration.md#registering-resources) of your XRootD service.
+   For example, the XRootD service registered at the
+   [University of Florida site](https://github.com/opensciencegrid/topology/blob/b14218d6e9d9df013a42e4d8538b2eeea615514c/topology/University%20of%20Florida/UF%20HPC/UFlorida-HPC.yaml#L250)
+   should set the following configuration:
+
+        set resourcename = UFlorida-XRD
+
+   For example, the XRootD service registered at the
+   [University of Florida site](https://github.com/opensciencegrid/topology/blob/b14218d6e9d9df013a42e4d8538b2eeea615514c/topology/University%20of%20Florida/UF%20HPC/UFlorida-HPC.yaml#L250)
+   should set the following configuration:
+
+        set resourcename = UFlorida-XRD
+
+### Configuring authentication and authorization
+
+XRootD offers several authentication options using security plugins to validate incoming credentials, such as bearer tokens, X.509 proxies, and VOMS proxies.
+Please follow the [XRootD authorization documentation](xrootd-authorization.md) for instructions on how to configure authentication and authorization,
+including validating credentials and mapping them to users if desired.
+
+### Optional configuration
+
+The following configuration steps are optional and will likely not be required for setting up a small site.
+If you do not need any of the following special configurations, skip to
+[the section on using XRootD](#using-xrootd).
+
+
+#### Enabling multi-user support
+
+!!! warning "Requirements for XRootD-Multiuser with VOMS FQANs"
+    Using XRootD-Multiuser with a VOMS FQAN requires mapping the FQAN to a username, which requires a `voms-mapfile`.
+    Support is available in `xrootd-voms 5.4.2-1.1`, in the OSG 3.6 repos, though it is expected in XRootD 5.5.0.
+    If you want to use multiuser, ensure you are getting `xrootd-voms` from the OSG repos.
+
+The `xrootd-multiuser` plugin allows XRootD to write files on the storage system as the
+[authenticated](xrootd-authorization.md) user instead of the `xrootd` user.
+If your XRootD service only allows read-only access, you should skip installation of this plugin.
+
+To set up XRootD in multi-user mode, install the `xrootd-multiuser` package:
+
+``` console
+root@xrootd-standalone # yum install xrootd-multiuser
+```
+
+Installing Pelican
+------------------
+
+Grab the appropriate binary for your system from the [pelican repository](https://github.com/PelicanPlatform/pelican/releases)
+
+Launching an Origin
+-------------------
+
+To launch a pelican origin, run:
+
+```./pelican origin -f <federation> -v <volume>```
+
+Where `<federation>` is the address of the federation the origin will be a part of and `<volume>` is the location where the data hosted on the origin will be mounted.
+
+The first time the origin is started, you will see something that looks like the following:
+
+[insert picture here]
+
+To initialize the admin interface (to see the metrics), go to the website specified (replace <> with `localhost`).
+
+You will see a warning that looks like the following (with some differences with respect to the browser):
+
+[insert picture here]
+
+Proceed despite the warning to get to the code entry page. Enter the code specified in the terminal and create a root metrics password:
+
+[insert picture here] Code
+
+[intert picture here] password
+
+You should now see a webpage that looks like so:
+
+[insert picture here]
+
+This will refresh every 10 minutes with the xrootd health metrics so that, as an admin, you can check the status of your origin.
