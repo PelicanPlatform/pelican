@@ -29,7 +29,9 @@ import (
 )
 
 func TestXrootDConfig(t *testing.T) {
+	dirname := t.TempDir()
 	viper.Reset()
+	viper.Set("Xrootd.RunLocation", dirname)
 	configPath, err := ConfigXrootd(true)
 	require.NoError(t, err)
 	assert.NotNil(t, configPath)

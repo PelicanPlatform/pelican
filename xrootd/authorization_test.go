@@ -114,6 +114,7 @@ func TestLoadScitokensConfig(t *testing.T) {
 }
 
 func TestGenerateConfig(t *testing.T) {
+	viper.Reset()
 	viper.Set("Origin.SelfTest", false)
 	issuer, err := GenerateMonitoringIssuer()
 	require.NoError(t, err)
@@ -131,7 +132,8 @@ func TestGenerateConfig(t *testing.T) {
 	assert.Equal(t, issuer.DefaultUser, "xrootd")
 }
 
-func TestWriteOriginScitokensConfigAndXrootdConfig(t *testing.T) {
+func TestWriteOriginScitokensConfig(t *testing.T) {
+	viper.Reset()
 	dirname := t.TempDir()
 	os.Setenv("PELICAN_XROOTD_RUNLOCATION", dirname)
 	defer os.Unsetenv("PELICAN_XROOTD_RUNLOCATION")
@@ -157,8 +159,4 @@ func TestWriteOriginScitokensConfigAndXrootdConfig(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, string(monitoringOutput), string(genCfg))
-
-	configPath, err := ConfigXrootd(true)
-	require.NoError(t, err)
-	assert.NotNil(t, configPath)
 }
