@@ -21,6 +21,9 @@
 package daemon
 
 import (
+	"context"
+	"io"
+
 	"github.com/pkg/errors"
 )
 
