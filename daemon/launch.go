@@ -34,3 +34,7 @@ type (
 		Gid        int
 	}
 )
+
+func (launcher DaemonLauncher) Name() string {
+	return launcher.DaemonName
+}

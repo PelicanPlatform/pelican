@@ -24,6 +24,14 @@ import (
 	"github.com/pkg/errors"
 )
 
-func LaunchOrigin() error {
-	return errors.New("'origin serve' command is not supported on Windows")
+func LaunchDaemons(launchers []Launcher) (err error) {
+	return errors.New("launching daemons is not supported on Windows")
+}
+
+func (launcher DaemonLauncher) Launch(ctx context.Context) (context.Context, int, error) {
+	return nil, errors.New("launching daemons is not supported on Windows")
+}
+
+func ForwardCommandToLogger(ctx context.Context, daemonName string, cmdStdout io.ReadCloser, cmdStderr io.ReadCloser) {
+	return
 }

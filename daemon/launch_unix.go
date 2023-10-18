@@ -86,10 +86,6 @@ func ForwardCommandToLogger(ctx context.Context, daemonName string, cmdStdout io
 	<-ctx.Done()
 }
 
-func (launcher DaemonLauncher) Name() string {
-	return launcher.DaemonName
-}
-
 func (launcher DaemonLauncher) Launch(ctx context.Context) (context.Context, int, error) {
 
 	cmd := exec.CommandContext(ctx, launcher.Args[0], launcher.Args[1:]...)
