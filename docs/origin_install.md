@@ -133,22 +133,22 @@ Where `<federation>` is the address of the federation the origin will be a part 
 
 The first time the origin is started, you will see something that looks like the following:
 
-[insert picture here]
+[picture of an origin startup terminal prompt with the initializaiton code](origin_start.png)
 
 To initialize the admin interface (to see the metrics), go to the website specified (replace <> with `localhost`).
 
 You will see a warning that looks like the following (with some differences with respect to the browser):
 
-[insert picture here]
+[invalid certificate warning image](invalid_certificate.png)
 
 Proceed despite the warning to get to the code entry page. Enter the code specified in the terminal and create a root metrics password:
 
-[insert picture here] Code
+[code entry page](code_entry.png)
 
-[intert picture here] password
+[password entry page](password_entry.png)
 
 You should now see a webpage that looks like so:
 
-[insert picture here]
+[metrics page](metrics_view.png)
 
 This will refresh every 10 minutes with the xrootd health metrics so that, as an admin, you can check the status of your origin.
