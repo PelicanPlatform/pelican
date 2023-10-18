@@ -18,17 +18,21 @@
  *
  ***************************************************************/
 
-package main
+package xrootd
 
 import (
 	"testing"
 
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestCreateXrootdConfig(t *testing.T) {
-	configPath, err := configXrootd()
+func TestXrootDConfig(t *testing.T) {
+	dirname := t.TempDir()
+	viper.Reset()
+	viper.Set("Xrootd.RunLocation", dirname)
+	configPath, err := ConfigXrootd(true)
 	require.NoError(t, err)
 	assert.NotNil(t, configPath)
 }

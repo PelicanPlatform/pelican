@@ -114,6 +114,7 @@ func TestLoadScitokensConfig(t *testing.T) {
 }
 
 func TestGenerateConfig(t *testing.T) {
+	viper.Reset()
 	viper.Set("Origin.SelfTest", false)
 	issuer, err := GenerateMonitoringIssuer()
 	require.NoError(t, err)
@@ -132,6 +133,7 @@ func TestGenerateConfig(t *testing.T) {
 }
 
 func TestWriteOriginScitokensConfig(t *testing.T) {
+	viper.Reset()
 	dirname := t.TempDir()
 	os.Setenv("PELICAN_XROOTD_RUNLOCATION", dirname)
 	defer os.Unsetenv("PELICAN_XROOTD_RUNLOCATION")
