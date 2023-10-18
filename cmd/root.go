@@ -20,13 +20,10 @@ package main
 
 import (
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/param"
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
@@ -87,7 +84,7 @@ func Execute() {
 
 func init() {
 
-	cobra.OnInitialize(initConfig)
+	cobra.OnInitialize(config.InitConfig)
 	rootCmd.AddCommand(objectCmd)
 	objectCmd.CompletionOptions.DisableDefaultCmd = true
 	rootCmd.AddCommand(directorCmd)
@@ -115,41 +112,14 @@ func init() {
 
 	rootCmd.PersistentFlags().BoolVarP(&outputJSON, "json", "", false, "output results in JSON format")
 	rootCmd.CompletionOptions.DisableDefaultCmd = true
-}
 
-func initConfig() {
-	if cfgFile != "" {
-		viper.SetConfigFile(cfgFile)
-	} else {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			log.Warningln("No home directory found for user -- will check for configuration yaml in /etc/pelican/")
-		}
-
-		viper.AddConfigPath(filepath.Join(home, ".config", "pelican"))
-		viper.AddConfigPath(filepath.Join("/etc", "pelican"))
-		viper.SetConfigType("yaml")
-		viper.SetConfigName("pelican")
+	if err := viper.BindPFlag("config", rootCmd.PersistentFlags().Lookup("config")); err != nil {
+		panic(err)
 	}
 	if err := viper.BindPFlag("Debug", rootCmd.PersistentFlags().Lookup("debug")); err != nil {
 		panic(err)
 	}
 	if err := viper.BindPFlag("Server.Port", portFlag); err != nil {
 		panic(err)
-	}
-
-	viper.SetEnvPrefix(config.GetPreferredPrefix())
-	viper.AutomaticEnv()
-	// This line allows viper to use an env var like ORIGIN_VALUE to override the viper string "Origin.Value"
-	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
-	if err := viper.MergeInConfig(); err != nil {
-		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
-			cobra.CheckErr(err)
-		}
-	}
-
-	setLogging(log.ErrorLevel)
-	if param.Debug.GetBool() {
-		setLogging(log.DebugLevel)
 	}
 }

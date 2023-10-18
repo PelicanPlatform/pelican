@@ -79,7 +79,7 @@ func stashPluginMain(args []string) {
 	client.ObjectClientOptions.ProgressBars = false
 	client.ObjectClientOptions.Version = version
 	client.ObjectClientOptions.Plugin = true
-	setLogging(log.PanicLevel)
+	config.SetLogging(log.PanicLevel)
 	methods := []string{"http"}
 	var infile, outfile, testCachePath string
 	var useOutFile bool = false
@@ -114,7 +114,7 @@ func stashPluginMain(args []string) {
 			useOutFile = true
 			log.Debugln("Outfile:", outfile)
 		} else if args[0] == "-d" {
-			setLogging(log.DebugLevel)
+			config.SetLogging(log.DebugLevel)
 		} else if args[0] == "-get-caches" {
 			if len(args) < 2 {
 				log.Errorln("-get-caches requires an argument")

@@ -27,6 +27,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 )
@@ -110,4 +111,24 @@ func TestDialerTimeout(t *testing.T) {
 	}
 
 	viper.Set("Transport.Dialer.Timeout", time.Second*10)
+}
+
+func TestDefaultsYaml(t *testing.T) {
+	InitConfig() // should set up pelican.yaml and defaults.yaml
+	// create a temp config file to use
+	tempCfgFile, err := os.CreateTemp("", "pelican-*.yaml")
+	if err != nil {
+		t.Fatalf("Failed to make temp file: %v", err)
+	}
+	// Check if debug is false
+	assert.False(t, param.Debug.GetBool())
+	assert.False(t, viper.GetBool("Debug"))
+	viper.Set("Debug", true) // should write to temp config file (should have higher priority like how pelican.yaml behaves)
+	if err := viper.WriteConfigAs(tempCfgFile.Name()); err != nil {
+		t.Fatalf("Failed to write to config file: %v", err)
+	}
+	// Check if debug was set and is now true
+	assert.True(t, param.Debug.GetBool())
+	assert.True(t, viper.GetBool("Debug"))
+	viper.Reset()
 }

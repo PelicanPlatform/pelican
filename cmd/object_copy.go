@@ -32,6 +32,8 @@ import (
 )
 
 var (
+	execName string
+
 	copyCmd = &cobra.Command{
 		Use:   "copy {source ...} {destination}",
 		Short: "Copy a file to/from a Pelican federation",
@@ -40,11 +42,11 @@ var (
 )
 
 func init() {
-	exec_name := filepath.Base(os.Args[0])
+	execName = filepath.Base(os.Args[0])
 	// Take care of our Windows users
-	exec_name = strings.TrimSuffix(exec_name, ".exe")
+	execName = strings.TrimSuffix(execName, ".exe")
 	// Being case-insensitive
-	exec_name = strings.ToLower(exec_name)
+	execName = strings.ToLower(execName)
 	flagSet := copyCmd.Flags()
 	flagSet.StringP("cache", "c", "", "Cache to use")
 	flagSet.StringP("token", "t", "", "Token file to use for transfer")
@@ -52,7 +54,7 @@ func init() {
 	flagSet.StringP("cache-list-name", "n", "xroot", "(Deprecated) Cache list to use, currently either xroot or xroots; may be ignored")
 	flagSet.Lookup("cache-list-name").Hidden = true
 	// All the deprecated or hidden flags that are only relevant if we are in historical "stashcp mode"
-	if exec_name == "stashcp" {
+	if execName == "stashcp" {
 		copyCmd.Use = "stashcp {source ...} {destination}"
 		copyCmd.Short = "Copy a file to/from the OSDF"
 		flagSet.Lookup("cache-list-name").Hidden = false // Expose the help for this option
@@ -78,10 +80,13 @@ func copyMain(cmd *cobra.Command, args []string) {
 
 	client.ObjectClientOptions.Version = version
 
-	if val, err := cmd.Flags().GetBool("debug"); err == nil && val {
-		setLogging(log.DebugLevel)
-	} else {
-		setLogging(log.ErrorLevel)
+	// Need to check just stashcp since it does not go through root, the other modes get checked there
+	if execName == "stashcp" {
+		if val, err := cmd.Flags().GetBool("debug"); err == nil && val {
+			config.SetLogging(log.DebugLevel)
+		} else {
+			config.SetLogging(log.ErrorLevel)
+		}
 	}
 
 	err := config.InitClient()
