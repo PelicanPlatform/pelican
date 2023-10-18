@@ -32,7 +32,7 @@ func LaunchDaemons(launchers []Launcher) (err error) {
 }
 
 func (launcher DaemonLauncher) Launch(ctx context.Context) (context.Context, int, error) {
-	return nil, errors.New("launching daemons is not supported on Windows")
+	return context.Background(), -1, errors.New("launching daemons is not supported on Windows")
 }
 
 func ForwardCommandToLogger(ctx context.Context, daemonName string, cmdStdout io.ReadCloser, cmdStderr io.ReadCloser) {
