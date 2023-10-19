@@ -1,3 +1,5 @@
+//go:build !windows
+
 /***************************************************************
  *
  * Copyright (C) 2023, Pelican Project, Morgridge Institute for Research
@@ -206,7 +208,7 @@ func TestPasswordResetAPI(t *testing.T) {
 	assert.NoError(t, err)
 
 	//Create a user for testing
-	err = writePasswordEntry("user", "password")
+	err = WritePasswordEntry("user", "password")
 	assert.NoError(t, err, "error writing a user")
 	password := "password"
 	user := "user"
@@ -224,7 +226,7 @@ func TestPasswordResetAPI(t *testing.T) {
 	//Check ok http reponse
 	assert.Equal(t, http.StatusOK, recorder.Code)
 	//Check that success message returned
-	assert.JSONEq(t, `{"msg":"Success"}`, recorder.Body.String())
+	require.JSONEq(t, `{"msg":"Success"}`, recorder.Body.String())
 	//Get the cookie to pass to password reset
 	loginCookie := recorder.Result().Cookies()
 	cookieValue := loginCookie[0].Value
@@ -300,7 +302,7 @@ func TestPasswordBasedLoginAPI(t *testing.T) {
 	assert.NoError(t, err)
 
 	//Create a user for testing
-	err = writePasswordEntry("user", "password")
+	err = WritePasswordEntry("user", "password")
 	assert.NoError(t, err, "error writing a user")
 	password := "password"
 	user := "user"
@@ -395,10 +397,19 @@ func TestPasswordBasedLoginAPI(t *testing.T) {
 }
 
 func TestWhoamiAPI(t *testing.T) {
+	dirName := t.TempDir()
+	viper.Reset()
+	viper.Set("ConfigDir", dirName)
+	err := config.InitServer()
+	require.NoError(t, err)
+	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256())
+	require.NoError(t, err)
+	viper.Set("Origin.UIPasswordFile", tempPasswdFile.Name())
+
 	///////////////////////////SETUP///////////////////////////////////
 	//Add an admin user to file to configure
 	content := "admin:password\n"
-	_, err := tempPasswdFile.WriteString(content)
+	_, err = tempPasswdFile.WriteString(content)
 	assert.NoError(t, err, "Error writing to temp password file")
 
 	//Configure UI
@@ -406,7 +417,7 @@ func TestWhoamiAPI(t *testing.T) {
 	assert.NoError(t, err)
 
 	//Create a user for testing
-	err = writePasswordEntry("user", "password")
+	err = WritePasswordEntry("user", "password")
 	assert.NoError(t, err, "error writing a user")
 	password := "password"
 	user := "user"

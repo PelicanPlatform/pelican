@@ -51,6 +51,17 @@ var (
 		SilenceUsage: true,
 	}
 
+	originUiCmd = &cobra.Command{
+		Use:   "web-ui",
+		Short: "Manage the Pelican origin web UI",
+	}
+
+	originUiResetCmd = &cobra.Command{
+		Use:   "reset-password",
+		Short: "Reset the admin password for the web UI",
+		RunE:  uiPasswordReset,
+	}
+
 	// Expose the token manipulation CLI
 	originTokenCmd = &cobra.Command{
 		Use:   "token",
@@ -156,4 +167,9 @@ func init() {
 			os.Exit(1)
 		}
 	}
+
+	originCmd.AddCommand(originUiCmd)
+	originUiCmd.AddCommand(originUiResetCmd)
+	originUiResetCmd.Flags().String("user", "admin", "The user whose password should be reset.")
+	originUiResetCmd.Flags().Bool("stdin", false, "Read the password in from stdin.")
 }

@@ -31,7 +31,6 @@ import (
 	"os"
 	"os/signal"
 	"path"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -45,7 +44,6 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/tg123/go-htpasswd"
-	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/term"
 )
 
@@ -72,21 +70,6 @@ var (
 	//go:embed src/out/*
 	webAssets embed.FS
 )
-
-func doReload() error {
-	db := authDB.Load()
-	if db == nil {
-		log.Debug("Cannot reload auth database - not configured")
-		return nil
-	}
-	err := db.Reload(nil)
-	if err != nil {
-		log.Warningln("Failed to reload auth database:", err)
-		return err
-	}
-	log.Debug("Successfully reloaded the auth database")
-	return nil
-}
 
 func periodicReload() {
 	for {
@@ -152,41 +135,6 @@ func WaitUntilLogin(ctx context.Context) error {
 			}
 		}
 	}
-}
-
-func writePasswordEntry(user, password string) error {
-	fileName := param.Origin_UIPasswordFile.GetString()
-	passwordBytes := []byte(password)
-	if len(passwordBytes) > 72 {
-		return errors.New("Password too long")
-	}
-	hashed, err := bcrypt.GenerateFromPassword(passwordBytes, bcrypt.DefaultCost)
-	if err != nil {
-		return err
-	}
-	entry := user + ":" + string(hashed) + "\n"
-
-	directory := filepath.Dir(fileName)
-	err = os.MkdirAll(directory, 0750)
-	if err != nil {
-		return err
-	}
-	fp, err := os.OpenFile(fileName, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0600)
-	if err != nil {
-		return err
-	}
-	defer fp.Close()
-	if _, err = fp.Write([]byte(entry)); err != nil {
-		return err
-	}
-
-	db := authDB.Load()
-	if db != nil {
-		if db.Reload(nil) != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func configureAuthDB() error {
@@ -361,7 +309,7 @@ func resetLoginHandler(ctx *gin.Context) {
 		return
 	}
 
-	if err := writePasswordEntry(user, passwordReset.Password); err != nil {
+	if err := WritePasswordEntry(user, passwordReset.Password); err != nil {
 		log.Errorf("Password reset for user %s failed: %s", user, err)
 		ctx.JSON(500, gin.H{"error": "Failed to reset password"})
 	} else {
