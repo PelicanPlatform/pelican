@@ -52,6 +52,56 @@ root_default: /etc/pelican/issuer.jwk
 default: $ConfigBase/issuer.jwk
 components: ["client", "nsregistry", "director"]
 ---
+name: Transport.Dialer.Timeout
+description: >-
+  Maximum time allowed for establishing a connection to target host.
+type: duration
+default: 10s
+components: ["client", "nsregistry", "origin"]
+---
+name: Transport.Dialer.KeepAlive
+description: >-
+  Maximum time a TCP connection should be kept alive without any activity.
+type: duration
+default: 30s
+components: ["client", "nsregistry", "origin"]
+---
+name: Transport.MaxIdleConns
+description: >-
+  Maximum number of idle connections that the HTTP client should maintain in its connection pool.
+type: int
+default: 30
+components: ["client", "nsregistry", "origin"]
+---
+name: Transport.IdleConnTimeout
+description: >-
+  Maximum duration an idle connection should remain open in the connection pool.
+type: duration
+default: 90s
+components: ["client", "nsregistry", "origin"]
+---
+name: Transport.TLSHandshakeTimeout
+description: >-
+  Maximum time allowed for the TLS handshake to complete when making an HTTPS connection
+type: duration
+default: 15s
+components: ["client", "nsregistry", "origin"]
+---
+name: Transport.ExpectContinueTimeout
+description: >-
+  Timeout to control how long the client should wait for the "Expect: 100-continue" response from the server before sending the request
+  body.
+type: duration
+default: 1s
+components: ["client", "nsregistry", "origin"]
+---
+name: Transport.ResponseHeaderTimeout
+description: >-
+  Maximum time the client should wait for the response headers to be received from the server
+type: duration
+default: 10s
+components: ["client", "nsregistry", "origin"]
+---
 
 ############################
 # Federation-Level Configs #
