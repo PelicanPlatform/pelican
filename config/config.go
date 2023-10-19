@@ -311,10 +311,10 @@ func InitConfig() {
 	if viper.GetString("config") != "" {
 		viper.SetConfigFile(viper.GetString("config"))
 	} else {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		log.Warningln("No home directory found for user -- will check for configuration yaml in /etc/pelican/")
-	}
+		home, err := os.UserHomeDir()
+		if err != nil {
+			log.Warningln("No home directory found for user -- will check for configuration yaml in /etc/pelican/")
+		}
 
 		// 3) Set up pelican.yaml (has higher precedence)
 		viper.AddConfigPath(filepath.Join(home, ".config", "pelican"))
@@ -418,7 +418,6 @@ func InitServer() error {
 	} else {
 		viper.SetDefault("Origin.Url", fmt.Sprintf("https://%v", param.Server_Hostname.GetString()))
 	}
-
 
 	setupTransport()
 
