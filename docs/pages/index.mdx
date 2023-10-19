@@ -1,0 +1,40 @@
+import ImageRow from "@/components/ImageRow";
+
+# What Is the Pelican Platform?
+
+Pelican provides an open-source software platform for federating dataset repositories together and delivering the
+objects to computing capacity such as the [OSPool](https://osg-htc.org/services/open_science_pool.html).
+
+**Pelican Enables**:
+- Researchers to access their datasets at scales from a notebook to a campus cluster to the national computing fabric
+- Repositories and storage providers to export datasets in a scalable manner and helps implement FAIR principles
+- Compute providers to cache datasets on-site
+- Cyberinfrastructures to build gateways and portals to large-scale datasets
+
+Objects in a federation are accessible through a common namespace; given an object name,
+the Pelican client can discover the object’s location and download it through the access layer.
+The access layer consists of distributed caches which reduce the load on the origin for repeated accesses.
+
+<ImageRow alt={"Pelican and OSDF"} src={"/pelican/pelican-and-osdf.png"}>
+	A Pelican data federation provides an access layer that helps the origin
+	distribute datasets in the repositories.  A client wanting an object contacts
+	the manager to find the closest cache which either serves the objects from
+	local storage or streams it through the origin.
+</ImageRow>
+
+
+The flagship Pelican federation is the Open Science Data Federation (OSDF).
+The OSDF has approximately two dozen caches located throughout the world, often at
+points of presence within the global Research and Education networks such as ESNet and
+Internet2.
+
+<ImageRow alt={"Pelican and OSDF"} src={"/pelican/pelican-bus.png"}>
+	The OSDF serves as a transport bus, connecting a variety of backend storage types
+</ImageRow>
+
+
+
+
+Central to Pelican is the concept of the origin service.  The origin is the intermediary between
+the existing storage and the federation.  The origin is responsible for serving data as well
+as issuing tokens (credentials) authorizing access to datasets based on the local policy.
