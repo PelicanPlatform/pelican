@@ -295,27 +295,28 @@ func GetTransport() *http.Transport {
 }
 
 func InitConfig() {
+	// 1) Set up defaults.yaml
+	err := viper.MergeConfig(strings.NewReader(defaultsYaml))
+	if err != nil {
+		cobra.CheckErr(err)
+	}
+	// 2) Set up osdf.yaml (if needed)
+	prefix := GetPreferredPrefix()
+	if prefix == "OSDF" {
+		err := viper.MergeConfig(strings.NewReader(osdfDefaultsYaml))
+		if err != nil {
+			cobra.CheckErr(err)
+		}
+	}
 	if viper.GetString("config") != "" {
-		viper.SetConfigFile(viper.GetString("config")) // TODO: bind this to a viper flag/varible in root.go and access here
+		viper.SetConfigFile(viper.GetString("config"))
 	} else {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		log.Warningln("No home directory found for user -- will check for configuration yaml in /etc/pelican/")
 	}
-		// 1) Set up defaults.yaml
-		err = viper.MergeConfig(strings.NewReader(defaultsYaml))
-		if err != nil {
-			cobra.CheckErr(err)
-		}
-		// 2) Set up osdf.yaml (if needed)
-		prefix := GetPreferredPrefix()
-		if prefix == "OSDF" {
-			err := viper.MergeConfig(strings.NewReader(osdfDefaultsYaml))
-			if err != nil {
-				cobra.CheckErr(err)
-			}
-		}
-		// 3) Set up pelican.yaml
+
+		// 3) Set up pelican.yaml (has higher precedence)
 		viper.AddConfigPath(filepath.Join(home, ".config", "pelican"))
 		viper.AddConfigPath(filepath.Join("/etc", "pelican"))
 		viper.SetConfigType("yaml")
@@ -417,6 +418,7 @@ func InitServer() error {
 	} else {
 		viper.SetDefault("Origin.Url", fmt.Sprintf("https://%v", param.Server_Hostname.GetString()))
 	}
+
 
 	setupTransport()
 
