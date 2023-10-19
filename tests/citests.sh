@@ -56,4 +56,36 @@ EOF
 
 ./stash_plugin -infile $PWD/infile -outfile $PWD/outfile
 
+# Test we return 0 when HOME is not set
+OLDHOME=$HOME
+unset HOME
+./stash_plugin -classad
+exit_status=$?
+
+if ! [[ "$exit_status" = 0 ]]; then
+  echo "Plugin did not return 0 when HOME is not set"
+  to_exit=1
+fi
+
+export HOME=$OLDHOME
+
+# Test we return 0 when HOME points to a nonwritable directory
+OLDHOME=$HOME
+unset HOME
+mkdir unwritable_dir
+chmod u-w,a-w unwritable_dir
+export HOME=unwriteable_dir
+
+./stash_plugin -classad
+exit_status=$?
+
+if ! [[ "$exit_status" = 0 ]]; then
+  echo "Plugin did not return 0 when HOME is set to an unwritable dir"
+  to_exit=1
+fi
+
+unset HOME
+export HOME=$OLDHOME
+rm -r unwritable_dir
+
 exit $to_exit
