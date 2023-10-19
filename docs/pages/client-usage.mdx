@@ -1,12 +1,10 @@
-Using The Pelican Client
-========================
+# Using The Pelican Client
 
 The Pelican client currently only supports *fetching* objects from Pelican federations, although a much richer feature set that will allow users to interact with federation objects in more advanced ways is forthcoming.
 
 One thing to note is that Pelican should be thought of as a tool that works with federated *objects* as opposed to *files*. The reason for this is that calling something a file carries with it the connotation that the file is mutable, ie its contents can change without requiring a new name. Objects in a Pelican federation, however, should be treated as immutable, especially in any case where objects are pulled through a cache (which will be the case for almost all files in the OSDF). This is because the underlying cache mechanism, powered by XRootD, will deliver whatever object it already has access to; if an object name changes at the origin, the cache will remain unaware and continue to deliver the old object. In the worst case, when the cache only has a partial object, it may attempt to combine its stale version with whatever exists at the origin. Use object names wisely!
 
-Before Starting
----------------
+##Before Starting
 
 ### Assumptions
 
@@ -41,8 +39,7 @@ Each origin supports one or more *namespace prefixes*, which are analogous to th
 Some namespace prefixes are public, like `/osgconnect/public/`, while others are protected (ie they require authentication). Objects in public namespaces can be downloaded by anybody, but downloading objects from protected namespaces requires you prove to the origin supporting that namespace that you are allowed to access the object. In Pelican, this is done using signed JSON Web Tokens, or *JWT*s for short. In many cases, these tokens can be generated automatically.
 
 
-Get A Public Object From Your Federation
-----------------------------------------
+## Get A Public Object From Your Federation
 
 To use the Pelican client to pull objects from a federation, use Pelican's `object copy` sub-command:
 
@@ -59,8 +56,7 @@ pelican object copy -f https://osg-htc.org /osgconnect/public/osg/testfile.txt d
 This command will download the object `/osg/testfile.txt` from the OSDF's `/osgconnect/public` namespace and save it in your local directory with the name `downloaded-testfile.txt`.
 
 
-Get A Protected Object From Your Federation
--------------------------------------------
+## Get A Protected Object From Your Federation
 
 Protected namespaces require that a Pelican client prove it is allowed to access objects from the namespace before the object can be downloaded. In many cases, Pelican clients can do this automatically by initiating an OpenID-Connect (OIDC) flow that uses an external log-in service through your browser. In other cases, a token must be provided to Pelican manually.
 
@@ -118,8 +114,7 @@ Pelican clients support a variety of command line flags that modify the client's
 - **-r or --recursive:** Takes no argument and indicates to Pelican that all sub paths at the level of the provided namespace should be copied recursively. This option is only supported if the origin supports the WebDav protocol.
 - **-t or --token:** Takes a path to a file containing a signed JWT, and is used to download protected objects.
 
-Effects Of Renaming The Pelican Binary
---------------------------------------
+## Effects Of Renaming The Pelican Binary
 
 The Pelican binary can change its behavior depending on what it is named. This feature serves two purposes; it allows Pelican to use a few convenient default settings in the case that the federation being interacted with is the OSDF, and it allows Pelican to run in legacy `stashcp` and `stash_plugin` modes.
 
