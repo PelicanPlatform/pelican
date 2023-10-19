@@ -1,10 +1,9 @@
-Installing the Pelican Platform
-===============================
+# Installing the Pelican Platform
 
 This document explains how a user can download and install the Pelican client. 
 
-Installation Steps:
---------------------
+## Installation Steps:
+
 
 ### 1. Install the Pelican Platform Binary
 Navigate to the [Pelican release page](https://github.com/PelicanPlatform/pelican/releases/). Download the proper binary for the system you are running on and select which version you would like to install. If you do not know which binary to install, below is a chart that may help:
