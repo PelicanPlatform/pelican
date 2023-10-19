@@ -27,6 +27,7 @@ Origin:
   UseMacaroons: true
   UseVoms: true
   SelfTest: true
+  EnableUI: true
 Monitoring:
   PortLower: 9930
   PortHigher: 9999

@@ -326,6 +326,11 @@ func ConfigureOriginUI(router *gin.Engine) error {
 		return errors.New("Origin configuration passed a nil pointer")
 	}
 
+	if !param.Origin_EnableUI.GetBool() {
+		log.Infoln("Origin web UI is not enabled; skipping setup")
+		return nil
+	}
+
 	if err := configureAuthDB(); err != nil {
 		log.Infoln("Authorization not configured (non-fatal):", err)
 	}

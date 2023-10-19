@@ -225,6 +225,13 @@ type: bool
 default: true
 components: ["origin"]
 ---
+name: Origin.EnableUI
+description: >-
+  Indicate whether the origin should enable its web UI.
+type: bool
+default: true
+components: ["origin"]
+---
 
 ############################
 #  Director-level configs  #
