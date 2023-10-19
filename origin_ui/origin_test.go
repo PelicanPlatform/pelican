@@ -19,6 +19,8 @@
 package origin_ui
 
 import (
+	"context"
+	"crypto/elliptic"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -27,11 +29,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 var (
@@ -84,7 +89,61 @@ func TestMain(m *testing.M) {
 	os.Exit(exitCode)
 }
 
+func TestWaitUntilLogin(t *testing.T) {
+	dirName := t.TempDir()
+	viper.Reset()
+	viper.Set("ConfigDir", dirName)
+	err := config.InitServer()
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		err := WaitUntilLogin(ctx)
+		require.NoError(t, err)
+	}()
+	activationCodeFile := param.Origin_UIActivationCodeFile.GetString()
+	start := time.Now()
+	for {
+		time.Sleep(10 * time.Millisecond)
+		contents, err := os.ReadFile(activationCodeFile)
+		if os.IsNotExist(err) {
+			if time.Since(start) > 10*time.Second {
+				require.Fail(t, "The UI activation code file did not appear within 10 seconds")
+			}
+			continue
+		} else {
+			require.NoError(t, err)
+		}
+		contentsStr := string(contents[:len(contents)-1])
+		require.Equal(t, *currentCode.Load(), contentsStr)
+		break
+	}
+	cancel()
+	start = time.Now()
+	for {
+		time.Sleep(10 * time.Millisecond)
+		if _, err := os.Stat(activationCodeFile); err == nil {
+			if time.Since(start) > 10*time.Second {
+				require.Fail(t, "The UI activation code file was not cleaned up")
+				return
+			}
+			continue
+		} else if !os.IsNotExist(err) {
+			require.NoError(t, err)
+		}
+		break
+	}
+}
+
 func TestCodeBasedLogin(t *testing.T) {
+	dirName := t.TempDir()
+	viper.Reset()
+	viper.Set("ConfigDir", dirName)
+	err := config.InitServer()
+	require.NoError(t, err)
+	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256())
+	require.NoError(t, err)
+
 	//Invoke the code login API with the correct code, ensure we get a valid code back
 	t.Run("With valid code", func(t *testing.T) {
 		newCode := fmt.Sprintf("%06v", rand.Intn(1000000))
@@ -127,10 +186,19 @@ func TestCodeBasedLogin(t *testing.T) {
 }
 
 func TestPasswordResetAPI(t *testing.T) {
+	dirName := t.TempDir()
+	viper.Reset()
+	viper.Set("ConfigDir", dirName)
+	err := config.InitServer()
+	require.NoError(t, err)
+	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256())
+	require.NoError(t, err)
+	viper.Set("Origin.UIPasswordFile", tempPasswdFile.Name())
+
 	//////////////////////////////SETUP////////////////////////////////
 	//Add an admin user to file to configure
 	content := "admin:password\n"
-	_, err := tempPasswdFile.WriteString(content)
+	_, err = tempPasswdFile.WriteString(content)
 	assert.NoError(t, err, "Error writing to temp password file")
 
 	//Configure UI

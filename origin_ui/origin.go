@@ -20,6 +20,7 @@ package origin_ui
 
 import (
 	"bufio"
+	"context"
 	"crypto/ecdsa"
 	"embed"
 	"fmt"
@@ -95,7 +96,7 @@ func periodicReload() {
 	}
 }
 
-func WaitUntilLogin() error {
+func WaitUntilLogin(ctx context.Context) error {
 	if authDB.Load() != nil {
 		return nil
 	}
@@ -111,6 +112,11 @@ func WaitUntilLogin() error {
 	}
 	activationFile := param.Origin_UIActivationCodeFile.GetString()
 
+	defer func() {
+		if err := os.Remove(activationFile); err != nil {
+			log.Warningf("Failed to remove activation code file (%v): %v\n", activationFile, err)
+		}
+	}()
 	for {
 		previousCode.Store(currentCode.Load())
 		newCode := fmt.Sprintf("%06v", rand.Intn(1000000))
@@ -136,13 +142,12 @@ func WaitUntilLogin() error {
 			select {
 			case <-sigs:
 				return errors.New("Process terminated...")
+			case <-ctx.Done():
+				return nil
 			default:
 				time.Sleep(100 * time.Millisecond)
 			}
 			if authDB.Load() != nil {
-				if err := os.Remove(activationFile); err != nil {
-					log.Warningf("Failed to remove activation code file (%v): %v\n", activationFile, err)
-				}
 				return nil
 			}
 		}

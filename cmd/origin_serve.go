@@ -21,6 +21,7 @@
 package main
 
 import (
+	"context"
 	"crypto/elliptic"
 	_ "embed"
 	"fmt"
@@ -113,7 +114,7 @@ func webUiInitialize() {
 
 	// Ensure we wait until the origin has been initialized
 	// before launching XRootD.
-	if err := origin_ui.WaitUntilLogin(); err != nil {
+	if err := origin_ui.WaitUntilLogin(context.Background()); err != nil {
 		log.Errorln("Failure when waiting for web UI to be initialized:", err)
 		return
 	}
