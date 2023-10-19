@@ -109,11 +109,17 @@ func WaitUntilLogin() error {
 		isTTY = true
 		fmt.Printf("\n\n\n\n")
 	}
+	activationFile := param.Origin_UIActivationCodeFile.GetString()
 
 	for {
 		previousCode.Store(currentCode.Load())
 		newCode := fmt.Sprintf("%06v", rand.Intn(1000000))
 		currentCode.Store(&newCode)
+		newCodeWithNewline := fmt.Sprintf("%v\n", newCode)
+		if err := os.WriteFile(activationFile, []byte(newCodeWithNewline), 0600); err != nil {
+			log.Errorf("Failed to write activation code to file (%v): %v\n", activationFile, err)
+		}
+
 		if isTTY {
 			fmt.Printf("\033[A\033[A\033[A\033[A")
 			fmt.Printf("\033[2K\n")
@@ -134,6 +140,9 @@ func WaitUntilLogin() error {
 				time.Sleep(100 * time.Millisecond)
 			}
 			if authDB.Load() != nil {
+				if err := os.Remove(activationFile); err != nil {
+					log.Warningf("Failed to remove activation code file (%v): %v\n", activationFile, err)
+				}
 				return nil
 			}
 		}
