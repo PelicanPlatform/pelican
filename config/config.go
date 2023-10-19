@@ -246,14 +246,14 @@ func getConfigBase() (string, error) {
 
 func setupTransport() {
 	//Getting timeouts and other information from defaults.yaml
-	maxIdleConns := viper.GetInt("Transport.MaxIdleConns")
-	idleConnTimeout := viper.GetDuration("Transport.IdleConnTimeout")
-	transportTLSHandshakeTimeout := viper.GetDuration("Transport.TLSHandshakeTimeout")
-	expectContinueTimeout := viper.GetDuration("Transport.ExpectContinueTimeout")
-	responseHeaderTimeout := viper.GetDuration("Transport.ResponseHeaderTimeout")
+	maxIdleConns := param.Transport_MaxIdleConns.GetInt()
+	idleConnTimeout := param.Transport_IdleConnTimeout.GetDuration()
+	transportTLSHandshakeTimeout := param.Transport_TLSHandshakeTimeout.GetDuration()
+	expectContinueTimeout := param.Transport_ExpectContinueTimeout.GetDuration()
+	responseHeaderTimeout := param.Transport_ResponseHeaderTimeout.GetDuration()
 
-	transportDialerTimeout := viper.GetDuration("Transport.Dialer.Timeout")
-	transportKeepAlive := viper.GetDuration("Transport.Dialer.KeepAlive")
+	transportDialerTimeout := param.Transport_DialerTimeout.GetDuration()
+	transportKeepAlive := param.Transport_DialerKeepAlive.GetDuration()
 
 	//Set up the transport
 	transport = &http.Transport{
