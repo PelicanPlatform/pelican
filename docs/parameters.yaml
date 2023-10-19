@@ -52,14 +52,14 @@ root_default: /etc/pelican/issuer.jwk
 default: $ConfigBase/issuer.jwk
 components: ["client", "nsregistry", "director"]
 ---
-name: Transport.Dialer.Timeout
+name: Transport.DialerTimeout
 description: >-
   Maximum time allowed for establishing a connection to target host.
 type: duration
 default: 10s
 components: ["client", "nsregistry", "origin"]
 ---
-name: Transport.Dialer.KeepAlive
+name: Transport.DialerKeepAlive
 description: >-
   Maximum time a TCP connection should be kept alive without any activity.
 type: duration

@@ -37,9 +37,8 @@ Xrootd:
   DetailedMonitoringPort: 9930
   SummaryMonitoringPort: 9931
 Transport:
-  Dialer:
-    Timeout: 10s
-    KeepAlive: 30s
+  DialerTimeout: 10s
+  DialerKeepAlive: 30s
   MaxIdleConns: 30
   IdleConnTimeout: 90s
   TLSHandshakeTimeout: 15s
