@@ -105,6 +105,24 @@ func checkDefaults() error {
 	return nil
 }
 
+func webUiInitialize() {
+	if err := metrics.SetComponentHealthStatus("web-ui", "warning", "Authentication not initialized"); err != nil {
+		log.Errorln("Failed to set web UI's component health status:", err)
+		return
+	}
+
+	// Ensure we wait until the origin has been initialized
+	// before launching XRootD.
+	if err := origin_ui.WaitUntilLogin(); err != nil {
+		log.Errorln("Failure when waiting for web UI to be initialized:", err)
+		return
+	}
+	if err := metrics.SetComponentHealthStatus("web-ui", "ok", ""); err != nil {
+		log.Errorln("Failed to set web UI's component health status:", err)
+		return
+	}
+}
+
 func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	defer config.CleanupTempResources()
 
@@ -135,18 +153,7 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	}
 
 	go web_ui.RunEngine(engine)
-	if err = metrics.SetComponentHealthStatus("web-ui", "warning", "Authentication not initialized"); err != nil {
-		return err
-	}
-
-	// Ensure we wait until the origin has been initialized
-	// before launching XRootD.
-	if err = origin_ui.WaitUntilLogin(); err != nil {
-		return err
-	}
-	if err = metrics.SetComponentHealthStatus("web-ui", "ok", ""); err != nil {
-		return err
-	}
+	go webUiInitialize()
 
 	configPath, err := xrootd.ConfigXrootd(true)
 	if err != nil {
