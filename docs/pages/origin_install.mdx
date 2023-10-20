@@ -1,3 +1,5 @@
+import ExportedImage from "next-image-export-optimizer";
+
 # Install Pelican Origin
 
 The [Pelican](http://pelicanplatform.org/) origin exposes a storage backend like POSIX or S3 to other members of the federation. This will give you the steps to install XRootD as well as how to install Pelican and start up an origin.
@@ -37,30 +39,31 @@ root@xrootd-standalone # yum install osg-xrootd-standalone
 ## Installing Pelican
 
 
-Grab the appropriate binary for your system from the [pelican repository](https://github.com/PelicanPlatform/pelican/releases). For more details, see (the client installation instructions)[/pelican/install.mdx]
+Grab the appropriate binary for your system from the [pelican repository](https://github.com/PelicanPlatform/pelican/releases). For more details, see [the client installation instructions](/install.mdx)
 
 ## Serving an Origin
 
 
 To launch a pelican origin, run:
 
-```./pelican origin serve -f <federation> -v <local director>:<namespace prefix>```
+```./pelican origin serve -f <federation> -v <local_directory>:<namespace_prefix>```
 
-Where `<federation>` is the address of the federation the origin will be a part of, `<local directory>` is the directory containing objects to be exported to the federation, and `<namespace prefix>` is the namespace at which files from <local directory> will be made available in the federation.
+Where `<federation>` is the address of the federation the origin will be a part of, `<local directory>` is the directory containing objects to be exported to the federation, and `<namespace prefix>` is the namespace at which files from `<local directory>` will be made available in the federation.
 
 The first time the origin is started, you will see something that looks like the following:
 
-![picture of an origin startup terminal prompt with the initializaiton code](/pelican/origin_start.png)
 
-To initialize the admin interface (to see the metrics), go to the website specified (replace <> with `localhost`).
+<ExportedImage width={1000} height={1000} src={"/pelican/origin_start.png"} alt={"Image of an origin startup terminal prompt with the initializaiton code"} />
+
+To initialize the admin interface (to see the metrics), go to the website specified (in this example replace `977d77de9b9d` with `localhost`).
 
 You will see a warning that looks like the following (with some differences with respect to the browser):
 
-![invalid certificate warning image](/pelican/invalid_certificate.png)
+<ExportedImage width={1000} height={1000} src={"/pelican/invalid_certificate.png"} alt={"Image of a safari browser invalid certificate warning"} />
 
 Proceed despite the warning to get to the code entry page. Enter the code specified in the terminal and create a root metrics password. You should now see a webpage that looks like so:
 
-![metrics page](/pelican/metrics_view.png)
+<ExportedImage width={1000} height={1000} src={"/pelican/metrics_view.png"} alt={"Image of prometheus metrics graphs for a Pelican origin"} />
 
 This will refresh every 10 minutes with the xrootd health metrics so that, as an admin, you can check the status of your origin.
 
