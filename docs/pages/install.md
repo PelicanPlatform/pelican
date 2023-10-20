@@ -42,7 +42,7 @@ If you want a more manual setup, you can download the `.tar.gz` or `.zip` files 
 ##### What version should I download?
 Our versions are built like so:
 For example: 7.1.2
-- 7 represents the latest major version release
+- 7 represents the major version release
 - 1 represents feature releases
 - 2 represents a bug fix/patch release
 
@@ -75,14 +75,17 @@ To install APK packages on Alpine Linux, you can use the apk package manager:
 apk add pelican_amd64.apk
 ```
 
-##### Tarballs:
+##### Tarballs*:
 To install `.tar.gz` packages, you can extract with tar:
 ```console
 tar -xzf pelican_Darwin_x86_64.tar.gz
 ```
 
-##### Zip:
+##### Zip*:
 To install `.zip` packages, you can use [7zip](https://www.7-zip.org/) or other programs to unzip your file. Simply right click on the `.zip` file and extract all contents to a directory of your choice 
+
+
+>**\*Note:** If you install a tarball or zipfile, you don't actually *install* Pelican, you just extract the binary. It's covered below how you can still use Pelican with the binary, but if you would like to have similar functionality as the other packages, you need to add Pelican to your PATH manually.
 
 ### 3. Test Functionality of the Pelican Platform
 ##### For rpm, deb, and apk
@@ -90,7 +93,7 @@ If you downloaded this way, Pelican should automatically be added to the path. Y
 ```console
 which pelican
 ```
-and make sure you get an output. You can then check functionality by running:
+and make sure you get an output. You can then check functionality by running a simple **object copy** command:
 ```console
 pelican -f osg-htc.org object copy /osgconnect/public/osg/testfile.txt .
 testfile.txt 36.00 b / 36.00 b [=============================================================================================] Done!
@@ -103,8 +106,5 @@ Once extracted, make sure you are in the same directory as the **Pelican** execu
 ./pelican -f osg-htc.org object copy /osgconnect/public/osg/testfile.txt .
 testfile.txt 36.00 b / 36.00 b [=============================================================================================] Done!
 ```
-**Note:** If you are running on windows, you will need to add '.exe' to './pelican' to be './pelican.exe ...'
 
-You should now notice a file **testfile.txt** now in your directory.
-
-Congrats on making your first Pelican Object Copy!
+You should now notice a file **testfile.txt** now in your directory. Congrats on making your first Pelican Object Copy!
