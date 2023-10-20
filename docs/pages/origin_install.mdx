@@ -1,13 +1,9 @@
-title: Install Pelican Origin
-DateReviewed: 2023-10-16
-
-Install Pelican Origin
-======================
+# Install Pelican Origin
 
 The [Pelican](http://pelicanplatform.org/) origin is a data storage location attached to a federation managed locally by the admin. This will give you the steps to install XRootD as well as how to install Pelican and start up an origin.
 
-Before Starting
----------------
+## Before Starting
+
 
 Before starting the installation process, consider the following points:
 
@@ -24,8 +20,8 @@ As with all OSG software installations, there are some one-time (per host) steps
 -   Install [CA certificates](https://osg-htc.org/docs/common/ca/)
 -   Install XRootD (Instructions to follow)
 
-Installing XrootD
------------------
+## Installing XrootD
+
 
 !!! warning "Requirements for XRootD-Multiuser with VOMS FQANs"
     Using XRootD-Multiuser with a VOMS FQAN requires mapping the FQAN to a username, which requires a `voms-mapfile`.
@@ -38,8 +34,8 @@ To install an XRootD Standalone server, run the following command:
 root@xrootd-standalone # yum install osg-xrootd-standalone
 ```
 
-Configuring XRootD
-------------------
+## Configuring XRootD
+
 
 To configure XRootD as a standalone server, you will modify `/etc/xrootd/xrootd-standalone.cfg` and the config files
 under `/etc/xrootd/config.d/` as follows:
@@ -117,13 +113,13 @@ To set up XRootD in multi-user mode, install the `xrootd-multiuser` package:
 root@xrootd-standalone # yum install xrootd-multiuser
 ```
 
-Installing Pelican
-------------------
+## Installing Pelican
+
 
 Grab the appropriate binary for your system from the [pelican repository](https://github.com/PelicanPlatform/pelican/releases)
 
-Launching an Origin
--------------------
+## Launching an Origin
+
 
 To launch a pelican origin, run:
 
