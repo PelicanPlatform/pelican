@@ -293,9 +293,8 @@ func GetTransport() *http.Transport {
 	return transport
 }
 
-func InitServer() error {
+func initConfigDir() error {
 	configDir := viper.GetString("ConfigDir")
-	viper.SetConfigType("yaml")
 	if configDir == "" {
 		if IsRootExecution() {
 			configDir = "/etc/pelican"
@@ -308,7 +307,15 @@ func InitServer() error {
 		}
 		viper.SetDefault("ConfigDir", configDir)
 	}
+	return nil
+}
 
+func InitServer() error {
+	if err := initConfigDir(); err != nil {
+		return errors.Wrap(err, "Failed to initialize the server configuration")
+	}
+	configDir := viper.GetString("ConfigDir")
+	viper.SetConfigType("yaml")
 	viper.SetDefault("Server.TLSCertificate", filepath.Join(configDir, "certificates", "tls.crt"))
 	viper.SetDefault("Server.TLSKey", filepath.Join(configDir, "certificates", "tls.key"))
 	viper.SetDefault("Server.TLSCAKey", filepath.Join(configDir, "certificates", "tlsca.key"))
@@ -392,18 +399,15 @@ func InitServer() error {
 }
 
 func InitClient() error {
-	if IsRootExecution() {
-		viper.SetDefault("IssuerKey", "/etc/pelican/issuer.jwk")
-	} else {
-		configBase, err := getConfigBase()
-		if err != nil {
-			log.Warningln("No home directory found for user -- will check for configuration yaml in /etc/pelican/")
-		}
-		viper.SetDefault("IssuerKey", filepath.Join(configBase, "issuer.jwk"))
+	if err := initConfigDir(); err != nil {
+		log.Warningln("No home directory found for user -- will check for configuration yaml in /etc/pelican/")
+		viper.Set("ConfigDir", "/etc/pelican")
 	}
 
+	configDir := viper.GetString("ConfigDir")
+	viper.SetDefault("IssuerKey", filepath.Join(configDir, "issuer.jwk"))
+
 	upper_prefix := GetPreferredPrefix()
-	lower_prefix := strings.ToLower(upper_prefix)
 
 	viper.SetDefault("Client.StoppedTransferTimeout", 100)
 	viper.SetDefault("Client.SlowTransferRampupTime", 100)
@@ -418,7 +422,6 @@ func InitClient() error {
 
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
-	viper.AddConfigPath("$HOME/." + lower_prefix)
 	err := viper.ReadInConfig()
 	if err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
