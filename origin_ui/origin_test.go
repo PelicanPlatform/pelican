@@ -68,6 +68,13 @@ func TestMain(m *testing.M) {
 
 	//Override viper default for testing
 	viper.Set("IssuerKey", filepath.Join(tempJWKDir, "issuer.jwk"))
+
+	// Ensure we load up the default configs.
+	if err := config.InitServer(); err != nil {
+		fmt.Println("Failed to configure the test module")
+		os.Exit(1)
+	}
+
 	//Get keys
 	_, err = config.GenerateIssuerJWKS()
 	if err != nil {
