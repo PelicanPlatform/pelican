@@ -505,7 +505,7 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 			AddError(err)
 			return 0, err
 		}
-		err = CreateNsFromDirectorResp(dirResp, &ns)
+		ns, err = CreateNsFromDirectorResp(dirResp)
 		if err != nil {
 			AddError(err)
 			return 0, err
