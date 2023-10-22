@@ -180,7 +180,8 @@ func DiscoverFederation() error {
 	discoveryUrl.Path = path.Join(".well-known/pelican-configuration", federationUrl.Path)
 
 	httpClient := http.Client{
-		Timeout: time.Second * 5,
+		Transport: GetTransport(),
+		Timeout:   time.Second * 5,
 	}
 	req, err := http.NewRequest(http.MethodGet, discoveryUrl.String(), nil)
 	if err != nil {
