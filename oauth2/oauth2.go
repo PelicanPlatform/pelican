@@ -66,7 +66,7 @@ func trimPath(pathName string, maxDepth int) string {
 
 func AcquireToken(issuerUrl string, entry *config.PrefixEntry, credentialGen *namespaces.CredentialGeneration, osdfPath string, opts config.TokenGenerationOpts) (*config.TokenEntry, error) {
 
-	if fileInfo, _ := os.Stdout.Stat(); (fileInfo.Mode() & os.ModeCharDevice) == 0 {
+	if fileInfo, _ := os.Stdout.Stat(); (len(os.Getenv(config.GetPreferredPrefix()+"_SKIP_TERMINAL_CHECK")) == 0) && ((fileInfo.Mode() & os.ModeCharDevice) == 0) {
 		return nil, errors.New("This program must be run in a terminal to acquire a new token")
 	}
 
