@@ -45,35 +45,49 @@ import (
 )
 
 // Structs holding the OAuth2 state (and any other OSDF config needed)
+type (
+	TokenEntry struct {
+		Expiration   int64  `yaml:"expiration"`
+		AccessToken  string `yaml:"access_token"`
+		RefreshToken string `yaml:"refresh_token,omitempty"`
+	}
 
-type TokenEntry struct {
-	Expiration   int64  `yaml:"expiration"`
-	AccessToken  string `yaml:"access_token"`
-	RefreshToken string `yaml:"refresh_token,omitempty"`
-}
+	PrefixEntry struct {
+		// OSDF namespace prefix
+		Prefix       string       `yaml:"prefix"`
+		ClientID     string       `yaml:"client_id"`
+		ClientSecret string       `yaml:"client_secret"`
+		Tokens       []TokenEntry `yaml:"tokens,omitempty"`
+	}
 
-type PrefixEntry struct {
-	// OSDF namespace prefix
-	Prefix       string       `yaml:"prefix"`
-	ClientID     string       `yaml:"client_id"`
-	ClientSecret string       `yaml:"client_secret"`
-	Tokens       []TokenEntry `yaml:"tokens,omitempty"`
-}
+	OSDFConfig struct {
 
-type OSDFConfig struct {
+		// Top-level OSDF object
+		OSDF struct {
+			// List of OAuth2 client configurations
+			OauthClient []PrefixEntry `yaml:"oauth_client,omitempty"`
+		} `yaml:"OSDF"`
+	}
 
-	// Top-level OSDF object
-	OSDF struct {
-		// List of OAuth2 client configurations
-		OauthClient []PrefixEntry `yaml:"oauth_client,omitempty"`
-	} `yaml:"OSDF"`
-}
+	FederationDiscovery struct {
+		DirectorEndpoint              string `json:"director_endpoint"`
+		NamespaceRegistrationEndpoint string `json:"namespace_registration_endpoint"`
+		JwksUri                       string `json:"jwks_uri"`
+	}
 
-type FederationDiscovery struct {
-	DirectorEndpoint              string `json:"director_endpoint"`
-	NamespaceRegistrationEndpoint string `json:"namespace_registration_endpoint"`
-	JwksUri                       string `json:"jwks_uri"`
-}
+	TokenOperation int
+
+	TokenGenerationOpts struct {
+		Operation TokenOperation
+	}
+)
+
+const (
+	TokenWrite TokenOperation = iota
+	TokenRead
+	TokenSharedWrite
+	TokenSharedRead
+)
 
 var (
 	// Some of the unit tests probe behavior specific to OSDF vs Pelican.  Hence,

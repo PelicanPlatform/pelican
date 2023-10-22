@@ -149,7 +149,11 @@ func addTokenSubcommands(tokenCmd *cobra.Command) {
 				os.Exit(1)
 			}
 
-			token, err := client.AcquireToken(&dest, namespace, isWrite)
+			opts := config.TokenGenerationOpts{Operation: config.TokenRead}
+			if isWrite {
+				opts.Operation = config.TokenWrite
+			}
+			token, err := client.AcquireToken(&dest, namespace, opts)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Failed to get a token:", err)
 				os.Exit(1)
