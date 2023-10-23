@@ -29,6 +29,7 @@ import (
 
 type (
 	ComponentStatus struct {
+		Name       string `json:"name"`
 		Status     string `json:"status"`
 		Message    string `json:"message,omitempty"`
 		LastUpdate int64  `json:"last_update"`
@@ -41,8 +42,8 @@ type (
 	}
 
 	HealthStatus struct {
-		OverallStatus   string                     `json:"status"`
-		ComponentStatus map[string]ComponentStatus `json:"components"`
+		OverallStatus   string            `json:"status"`
+		ComponentStatus []ComponentStatus `json:"components"`
 	}
 )
 
@@ -120,13 +121,15 @@ func GetHealthStatus() HealthStatus {
 			return true
 		}
 		if status.ComponentStatus == nil {
-			status.ComponentStatus = make(map[string]ComponentStatus)
+			status.ComponentStatus = make([]ComponentStatus, 0)
 		}
-		status.ComponentStatus[componentString] = ComponentStatus{
-			intToStatus(componentStatus.Status),
-			componentStatus.Message,
-			componentStatus.LastUpdate.Unix(),
-		}
+		status.ComponentStatus = append(status.ComponentStatus,
+			ComponentStatus{
+				componentString,
+				intToStatus(componentStatus.Status),
+				componentStatus.Message,
+				componentStatus.LastUpdate.Unix(),
+			})
 		if componentStatus.Status < overallStatus {
 			overallStatus = componentStatus.Status
 		}
