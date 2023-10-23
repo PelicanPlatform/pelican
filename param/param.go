@@ -1,3 +1,3 @@
 package param
 
-//go:generate go run ../generate/param_generator.go
+//go:generate go run ../generate
