@@ -295,6 +295,7 @@ func GetTransport() *http.Transport {
 }
 
 func InitConfig() {
+	viper.SetConfigType("yaml")
 	// 1) Set up defaults.yaml
 	err := viper.MergeConfig(strings.NewReader(defaultsYaml))
 	if err != nil {
@@ -308,8 +309,8 @@ func InitConfig() {
 			cobra.CheckErr(err)
 		}
 	}
-	if viper.GetString("config") != "" {
-		viper.SetConfigFile(viper.GetString("config"))
+	if configFile := viper.GetString("config"); configFile != "" {
+		viper.SetConfigFile(configFile)
 	} else {
 		home, err := os.UserHomeDir()
 		if err != nil {
@@ -323,7 +324,7 @@ func InitConfig() {
 		viper.SetConfigName("pelican")
 	}
 
-	viper.SetEnvPrefix(GetPreferredPrefix())
+	viper.SetEnvPrefix(prefix)
 	viper.AutomaticEnv()
 	// This line allows viper to use an env var like ORIGIN_VALUE to override the viper string "Origin.Value"
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
