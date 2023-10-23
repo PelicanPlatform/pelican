@@ -3,6 +3,8 @@ package main
 // This should not be included in any release of pelican, instead only the generated "parameters.go" should packaged
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -22,10 +24,11 @@ var requiredKeys = [4]string{"name", "description", "default", "type"}
 func GenParamEnum() {
 	/*
 	* This generated a file "config/parameters.go" that is based off of docs/parameters.yaml to be used
-	* instead of explicit calls to viper.Get*
+	* instead of explicit calls to viper.Get* It also generates a parameters.json file for website use
 	 */
 	filename, _ := filepath.Abs("../docs/parameters.yaml")
 	yamlFile, err := os.Open(filename)
+	fullJsonInt := []interface{}{}
 
 	if err != nil {
 		panic(err)
@@ -66,6 +69,17 @@ func GenParamEnum() {
 			}
 		}
 
+		// Each document must be converted to json on it's own and then the name
+		// must be used as a key
+		jsonBytes, _ := json.Marshal(entry)
+		var j map[string]interface{}
+		err = json.Unmarshal(jsonBytes, &j)
+		if err != nil {
+			panic(err)
+		}
+		j2 := map[string]interface{}{entry["name"].(string): j}
+		fullJsonInt = append(fullJsonInt, j2)
+
 		rawName := entry["name"].(string)
 		name := strings.ReplaceAll(rawName, ".", "_")
 		pType := entry["type"].(string)
@@ -103,6 +117,26 @@ func GenParamEnum() {
 		DurationMap map[string]string
 	}{StringMap: stringParamMap, IntMap: intParamMap, BoolMap: boolParamMap, DurationMap: durationParamMap})
 
+	if err != nil {
+		panic(err)
+	}
+
+	// Write the json version of the yaml document to the file
+	fullJsonBytes, err := json.Marshal(fullJsonInt)
+	if err != nil {
+		panic(err)
+	}
+	var prettyJSON bytes.Buffer
+	err = json.Indent(&prettyJSON, fullJsonBytes, "", "\t")
+	if err != nil {
+		panic(err)
+	}
+	// Create the json file to be generated (for the web ui)
+	fJSON, err := os.Create("../docs/parameters.json")
+	if err != nil {
+		panic(err)
+	}
+	_, err = fJSON.Write(prettyJSON.Bytes())
 	if err != nil {
 		panic(err)
 	}
