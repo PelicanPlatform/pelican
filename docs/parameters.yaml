@@ -563,3 +563,42 @@ description: >-
 type: int
 default: 9999
 components: ["origin"]
+---
+
+############################
+#   Plugin-level configs   #
+############################
+name: Plugin.Token
+description: >-
+  The specified token for pelican plugin staging
+type: string
+default: none
+components: ["plugin"]
+---
+name: StagePlugin.Hook
+description: >-
+  Flag to specify HTCondor hook behavior
+type: bool
+default: false
+components: ["plugin"]
+---
+name: StagePlugin.MountPrefix
+description: >-
+  Prefix corresponding to the local mount point of the origin
+type: string
+default: none
+components: ["plugin"]
+---
+name: StagePlugin.OriginPrefix
+description: >-
+  Prefix corresponding to the local origin
+type: string
+default: none
+components: ["plugin"]
+---
+name: StagePlugin.ShadowOriginPrefix
+description: >-
+  Prefix corresponding to the shadow origin
+type: string
+default: none
+components: ["plugin"]
