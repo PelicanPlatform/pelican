@@ -174,11 +174,10 @@ func GenParamStruct() {
 	// Same file-reading logic as GenParamEnum
 	filename, _ := filepath.Abs("../docs/parameters.yaml")
 	yamlFile, err := os.Open(filename)
-	defer yamlFile.Close()
-
 	if err != nil {
 		panic(err)
 	}
+	defer yamlFile.Close()
 
 	decoder := yaml.NewDecoder(yamlFile)
 

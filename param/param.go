@@ -9,12 +9,13 @@ import (
 //go:generate go run ../generate/param_generator.go
 
 var (
-	viperConfig config
+	viperConfig *config
 )
 
 // Unmarshal Viper config into a struct viperConfig
 func UnmarshalConfig() error {
-	err := viper.Unmarshal(&viperConfig)
+	viperConfig = new(config)
+	err := viper.Unmarshal(viperConfig)
 	if err != nil {
 		return err
 	}
@@ -24,8 +25,8 @@ func UnmarshalConfig() error {
 
 // Return the unmarshaled viper config struct as a pointer
 func GetUnmarshaledConfig() (*config, error) {
-	if &viperConfig == nil {
+	if viperConfig == nil {
 		return nil, errors.New("Config hasn't been unmarshaled yet.")
 	}
-	return &viperConfig, nil
+	return viperConfig, nil
 }
