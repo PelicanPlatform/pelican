@@ -2,3 +2,4 @@ dist/
 README.dev.md
 param/parameters.go
 docs/parameters.json
+param/parameters_struct.go
