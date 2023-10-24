@@ -526,17 +526,17 @@ func InitClient() error {
 		break
 	}
 	if viper.IsSet("MinimumDownloadSpeed") {
-		viper.SetDefault("Client.MinimumDownloadSpeed", viper.GetString("MinimumDownloadSpeed"))
+		viper.SetDefault("Client.MinimumDownloadSpeed", param.MinimumDownloadSpeed.GetInt())
 	} else {
 		viper.Set("Client.MinimumDownloadSpeed", downloadLimit)
 	}
 
 	// Handle more legacy config options
 	if viper.IsSet("DisableProxyFallback") {
-		viper.SetDefault("Client.DisableProxyFallback", viper.GetString("DisableProxyFallback"))
+		viper.SetDefault("Client.DisableProxyFallback", param.DisableProxyFallback.GetBool())
 	}
 	if viper.IsSet("DisableHttpProxy") {
-		viper.SetDefault("Client.DisableHttpProxy", viper.GetString("DisableHttpProxy"))
+		viper.SetDefault("Client.DisableHttpProxy", param.DisableHttpProxy.GetBool())
 	}
 
 	setupTransport()

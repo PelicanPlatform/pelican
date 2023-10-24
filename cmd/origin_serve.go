@@ -51,9 +51,9 @@ func checkConfigFileReadable(fileName string, errMsg string) error {
 }
 
 func checkDefaults() error {
-	requiredConfigs := []string{"Server.TLSCertificate", "Server.TLSKey", "Xrootd.RunLocation", "Xrootd.RobotsTxtFile"}
+	requiredConfigs := []param.StringParam{param.Server_TLSCertificate, param.Server_TLSKey, param.Xrootd_RunLocation, param.Xrootd_RobotsTxtFile}
 	for _, configName := range requiredConfigs {
-		mgr := viper.GetString(configName) // TODO: Remove direct access once all parameters are generated
+		mgr := configName.GetString()
 		if mgr == "" {
 			return errors.New(fmt.Sprintf("Required value of '%v' is not set in config",
 				configName))
