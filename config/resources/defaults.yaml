@@ -16,7 +16,7 @@
 
 Debug: false
 Logging:
-  LogLevel: "Error"
+  Level: "Error"
 Server:
   Port: 8444
   Address: "0.0.0.0"
