@@ -33,6 +33,11 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+type PromDiscoveryItem struct {
+	Targets []string          `json:"targets"`
+	Labels  map[string]string `json:"labels"`
+}
+
 var (
 	minClientVersion, _ = version.NewVersion("7.0.0")
 	minOriginVersion, _ = version.NewVersion("7.0.0")
@@ -356,9 +361,28 @@ func RegisterOrigin(ctx *gin.Context) {
 	ctx.JSON(200, gin.H{"msg": "Successful registration"})
 }
 
+// Return a list of available origins URL in Prometheus HTTP SD format
+// for director's Prometheus service discovery
+func DiscoverOrigins(ctx *gin.Context) {
+	serverAdMutex.RLock()
+	defer serverAdMutex.RUnlock()
+	serverAds := serverAds.Keys()
+	promDiscoveryRes := make([]PromDiscoveryItem, 0)
+	for _, ad := range serverAds {
+		promDiscoveryRes = append(promDiscoveryRes, PromDiscoveryItem{
+			Targets: []string{ad.URL.Hostname() + ":" + ad.URL.Port()},
+			Labels: map[string]string{
+				"job": ad.Name,
+			},
+		})
+	}
+	ctx.JSON(200, promDiscoveryRes)
+}
+
 func RegisterDirector(router *gin.RouterGroup) {
 	// Establish the routes used for cache/origin redirection
 	router.GET("/api/v1.0/director/object/*any", RedirectToCache)
 	router.GET("/api/v1.0/director/origin/*any", RedirectToOrigin)
 	router.POST("/api/v1.0/director/registerOrigin", RegisterOrigin)
+	router.GET("/api/v1.0/director/discoverOrigins", DiscoverOrigins)
 }
