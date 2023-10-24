@@ -18,6 +18,20 @@
 
 package director
 
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+
+	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
+	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
+)
+
 // List all namespaces from origins registered at the director
 func ListNamespacesFromOrigins() []NamespaceAd {
 
@@ -32,4 +46,69 @@ func ListNamespacesFromOrigins() []NamespaceAd {
 		}
 	}
 	return namespaces
+}
+
+func LoadDirectorPublicKey() (*jwk.Key, error) {
+	directorDiscoveryUrlStr := param.Federation_DirectorUrl.GetString()
+	if len(directorDiscoveryUrlStr) == 0 {
+		return nil, errors.Errorf("Director URL is unset; Can't load director's public key")
+	}
+	log.Debugln("Director's discovery URL:", directorDiscoveryUrlStr)
+	directorDiscoveryUrl, err := url.Parse(directorDiscoveryUrlStr)
+	if err != nil {
+		return nil, errors.Wrap(err, fmt.Sprintln("Invalid director URL:", directorDiscoveryUrlStr))
+	}
+	directorDiscoveryUrl.Scheme = "https"
+	directorDiscoveryUrl.Path = directorDiscoveryUrl.Path + "/.well-known/pelican-configuration"
+
+	tr := config.GetTransport()
+	client := &http.Client{Transport: tr}
+
+	req, err := http.NewRequest(http.MethodGet, directorDiscoveryUrl.String(), nil)
+	if err != nil {
+		return nil, errors.Wrap(err, fmt.Sprintln("Failure when doing director metadata request creation for: ", directorDiscoveryUrl))
+	}
+
+	result, err := client.Do(req)
+	if err != nil {
+		return nil, errors.Wrap(err, fmt.Sprintln("Failure when doing director metadata lookup to: ", directorDiscoveryUrl))
+	}
+
+	if result.Body != nil {
+		defer result.Body.Close()
+	}
+
+	body, err := io.ReadAll(result.Body)
+	if err != nil {
+		return nil, errors.Wrap(err, fmt.Sprintln("Failure when doing director metadata read to: ", directorDiscoveryUrl))
+	}
+
+	metadata := DiscoveryResponse{}
+
+	err = json.Unmarshal(body, &metadata)
+	if err != nil {
+		return nil, errors.Wrap(err, fmt.Sprintln("Failure when parsing director metadata at: ", directorDiscoveryUrl))
+	}
+
+	jwksUri := metadata.JwksUri
+
+	response, err := client.Get(jwksUri)
+	if err != nil {
+		return nil, errors.Wrap(err, fmt.Sprintln("Failure when requesting director Jwks URI: ", jwksUri))
+	}
+	defer response.Body.Close()
+	contents, err := io.ReadAll(response.Body)
+	if err != nil {
+		return nil, errors.Wrap(err, fmt.Sprintln("Failure when requesting director Jwks URI: ", jwksUri))
+	}
+	keys, err := jwk.Parse(contents)
+	if err != nil {
+		return nil, errors.Wrap(err, fmt.Sprintln("Failure when parsing director's jwks: ", jwksUri))
+	}
+	key, ok := keys.Key(0)
+	if !ok {
+		return nil, errors.Wrap(err, fmt.Sprintln("Failure when getting director's first public key: ", jwksUri))
+	}
+
+	return &key, nil
 }

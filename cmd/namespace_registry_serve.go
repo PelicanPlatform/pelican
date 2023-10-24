@@ -34,6 +34,17 @@ import (
 	"github.com/spf13/cobra"
 )
 
+func generateTLSCertIfNeeded() error {
+	// As necessary, generate a private key and corresponding cert
+	if err := config.GeneratePrivateKey(param.Server_TLSKey.GetString(), elliptic.P256()); err != nil {
+		return err
+	}
+	if err := config.GenerateCert(); err != nil {
+		return err
+	}
+	return nil
+}
+
 func serveNamespaceRegistry( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	log.Info("Initializing the namespace registry's database...")
 
@@ -43,7 +54,6 @@ func serveNamespaceRegistry( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		return errors.Wrap(err, "Unable to initialize the namespace registry database")
 	}
 
-	// function defined in director_serve
 	err = generateTLSCertIfNeeded()
 	if err != nil {
 		return errors.Wrap(err, "Failed to generate TLS certificate")

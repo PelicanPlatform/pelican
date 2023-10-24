@@ -29,22 +29,10 @@ import (
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/web_ui"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
-
-func generateTLSCertIfNeeded() error {
-
-	// As necessary, generate a private key and corresponding cert
-	if err := config.GeneratePrivateKey(param.Server_TLSKey.GetString(), elliptic.P256()); err != nil {
-		return err
-	}
-	if err := config.GenerateCert(); err != nil {
-		return err
-	}
-
-	return nil
-}
 
 func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	log.Info("Initializing Director GeoIP database...")
@@ -61,8 +49,15 @@ func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	}
 	go director.PeriodicCacheReload()
 
-	err := generateTLSCertIfNeeded()
+	// The director needs its own private key. If one doesn't exist, this will generate it
+	issuerKeyFile := param.IssuerKey.GetString()
+	err := config.GeneratePrivateKey(issuerKeyFile, elliptic.P256())
 	if err != nil {
+		return errors.Wrap(err, "Failed to generate director private key")
+	}
+
+	// Generate a TLS certificate if needed
+	if err := config.GenerateCert(); err != nil {
 		return err
 	}
 
@@ -80,7 +75,9 @@ func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	}
 	log.Debugf("The director will redirect to %ss by default", defaultResponse)
 	engine.Use(director.ShortcutMiddleware(defaultResponse))
-	director.RegisterDirector(engine.Group("/"))
+	rootGroup := engine.Group("/")
+	director.RegisterDirector(rootGroup)
+	director.RegisterDirectorAuth(rootGroup)
 
 	log.Info("Starting web engine...")
 	go web_ui.RunEngine(engine)
