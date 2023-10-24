@@ -1,4 +1,4 @@
 dist/
 README.dev.md
 param/parameters.go
-docs/parameter.json
+docs/parameters.json
