@@ -142,6 +142,7 @@ func TestWriteOriginScitokensConfig(t *testing.T) {
 	viper.Set("Origin.SelfTest", true)
 	viper.Set("ConfigDir", config_dirname)
 	viper.Set("Xrootd.RunLocation", dirname)
+	viper.Set("Xrootd.Port", 8443)
 	viper.Set("Server.Hostname", "origin.example.com")
 	err := config.InitServer()
 	require.Nil(t, err)
