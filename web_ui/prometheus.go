@@ -171,6 +171,24 @@ func checkPromToken(av1 *route.Router) gin.HandlerFunc {
 	}
 }
 
+// Configure director's Prometheus scraper to use service discovery for origins
+func configDirectorPromScraper() (*config.ScrapeConfig, error) {
+	scrapeConfig := config.DefaultScrapeConfig
+	scrapeConfig.JobName = "origins"
+	scrapeConfig.Scheme = "https"
+	scrapeConfig.ServiceDiscoveryConfigs = make([]discovery.Config, 1)
+	// scrapeConfig.ServiceDiscoveryConfigs[0] = discovery.StaticConfig{
+	// 	&targetgroup.Group{
+	// 		Targets: []model.LabelSet{{
+	// 			model.AddressLabel: model.LabelValue(pelican_config.ComputeExternalAddress()),
+	// 		}},
+	// 	},
+	// }
+	scrapeConfig.HTTPClientConfig = common_config.DefaultHTTPClientConfig
+	scrapeConfig.HTTPClientConfig.TLSConfig.InsecureSkipVerify = true
+	return &scrapeConfig, nil
+}
+
 func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 	cfg := flagConfig{}
 	ListenAddress := fmt.Sprintf("0.0.0.0:%v", param.Server_Port.GetInt())
@@ -217,20 +235,28 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 		GlobalConfig:  config.DefaultGlobalConfig,
 		ScrapeConfigs: make([]*config.ScrapeConfig, 1),
 	}
-	scrapeConfig := config.DefaultScrapeConfig
-	scrapeConfig.JobName = "prometheus"
-	scrapeConfig.Scheme = "https"
-	scrapeConfig.ServiceDiscoveryConfigs = make([]discovery.Config, 1)
-	scrapeConfig.ServiceDiscoveryConfigs[0] = discovery.StaticConfig{
-		&targetgroup.Group{
-			Targets: []model.LabelSet{{
-				model.AddressLabel: model.LabelValue(pelican_config.ComputeExternalAddress()),
-			}},
-		},
+	if isDirector {
+		promCfg.ScrapeConfigs[0], err = configDirectorPromScraper()
+		if err != nil {
+			return err
+		}
+	} else {
+		scrapeConfig := config.DefaultScrapeConfig
+		scrapeConfig.JobName = "prometheus"
+		scrapeConfig.Scheme = "https"
+		scrapeConfig.ServiceDiscoveryConfigs = make([]discovery.Config, 1)
+		scrapeConfig.ServiceDiscoveryConfigs[0] = discovery.StaticConfig{
+			&targetgroup.Group{
+				Targets: []model.LabelSet{{
+					model.AddressLabel: model.LabelValue(pelican_config.ComputeExternalAddress()),
+				}},
+			},
+		}
+		scrapeConfig.HTTPClientConfig = common_config.DefaultHTTPClientConfig
+		scrapeConfig.HTTPClientConfig.TLSConfig.InsecureSkipVerify = true
+		promCfg.ScrapeConfigs[0] = &scrapeConfig
 	}
-	scrapeConfig.HTTPClientConfig = common_config.DefaultHTTPClientConfig
-	scrapeConfig.HTTPClientConfig.TLSConfig.InsecureSkipVerify = true
-	promCfg.ScrapeConfigs[0] = &scrapeConfig
+
 	promCfg.GlobalConfig.ScrapeInterval = model.Duration(15 * time.Second)
 
 	if promCfg.StorageConfig.TSDBConfig != nil {
