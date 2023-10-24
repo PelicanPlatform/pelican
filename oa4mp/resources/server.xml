@@ -45,13 +45,7 @@
       </Realm>
 
       <Host name="localhost"  appBase="webapps"
-            unpackWARs="true" autoDeploy="true">
-
-        <Valve className="org.apache.catalina.valves.AccessLogValve" directory="/dev/stdout"
-               prefix="" suffix="" rotatable="false"
-               pattern="%h %l %u %t &quot;%r&quot; %s %b" />
-
-      </Host>
+            unpackWARs="true" autoDeploy="true"/>
     </Engine>
   </Service>
 </Server>
