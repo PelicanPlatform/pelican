@@ -77,10 +77,12 @@ nfpms:
             dst: "usr/share/doc/{{ .PackageName }}-{{ .Version }}/LICENSE.txt"
             file_info:
               mode: 0644
+            type: doc
           - src: README.md
             dst: "usr/share/doc/{{ .PackageName }}-{{ .Version }}/README.md"
             file_info:
               mode: 0644
+            type: doc
         file_name_template: >-
           {{ .PackageName }}-{{ .Version }}-{{ .Release }}.{{ if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
       deb:
@@ -90,7 +92,9 @@ nfpms:
             dst: "usr/share/doc/{{ .PackageName }}/LICENSE.txt"
             file_info:
               mode: 0644
+            type: doc
           - src: README.md
             dst: "usr/share/doc/{{ .PackageName }}/README.md"
             file_info:
               mode: 0644
+            type: doc
