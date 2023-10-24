@@ -39,7 +39,6 @@ var (
 		Short: "Copy a file to/from a Pelican federation",
 		Run:   copyMain,
 	}
-	execName string
 )
 
 func init() {

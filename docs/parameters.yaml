@@ -110,7 +110,7 @@ name: Logging.LogLevel
 description: >-
   A string defining the log level of the client. Options include (going from most info to least): Trace, Debug, Info, Warn, Error, Fatal, Panic.
 type: string
-default: ErrorLevel
+default: Error
 components: ["*"]
 ---
 
