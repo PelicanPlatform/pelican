@@ -171,8 +171,7 @@ func checkPromToken(av1 *route.Router) gin.HandlerFunc {
 	}
 }
 
-func ConfigureEmbeddedPrometheus(engine *gin.Engine) error {
-
+func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 	cfg := flagConfig{}
 	ListenAddress := fmt.Sprintf("0.0.0.0:%v", param.Server_Port.GetInt())
 	cfg.webTimeout = model.Duration(5 * time.Minute)

@@ -19,8 +19,11 @@
 package web_ui
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
+	"runtime"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -30,8 +33,8 @@ import (
 	ginprometheus "github.com/zsais/go-gin-prometheus"
 )
 
-func ConfigureMetrics(engine *gin.Engine) error {
-	err := ConfigureEmbeddedPrometheus(engine)
+func ConfigureMetrics(engine *gin.Engine, isDirector bool) error {
+	err := ConfigureEmbeddedPrometheus(engine, isDirector)
 	if err != nil {
 		return err
 	}
@@ -47,6 +50,15 @@ func ConfigureMetrics(engine *gin.Engine) error {
 }
 
 func GetEngine() (*gin.Engine, error) {
+	pc, _, _, ok := runtime.Caller(1)
+	if !ok {
+		return nil, errors.New(fmt.Sprintln("Failed to retrieve caller information"))
+	}
+
+	callerChain := strings.Split(runtime.FuncForPC(pc).Name(), ".") // get the function name
+	// We only care about one level up caller
+	callerName := callerChain[len(callerChain)-1]
+
 	gin.SetMode(gin.ReleaseMode)
 	engine := gin.New()
 	engine.Use(gin.Recovery())
@@ -64,7 +76,10 @@ func GetEngine() (*gin.Engine, error) {
 			"resource": ctx.Request.URL.Path},
 		).Info("Served Request")
 	})
-	if err := ConfigureMetrics(engine); err != nil {
+	// We configure Prometheus differently for director than for the rest servers,
+	// although in the future we probably want to pass the server type to the
+	// metric config function just because each server may have different config
+	if err := ConfigureMetrics(engine, callerName == "serveDirector"); err != nil {
 		return nil, err
 	}
 	return engine, nil
