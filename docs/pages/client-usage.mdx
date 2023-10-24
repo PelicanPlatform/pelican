@@ -87,10 +87,10 @@ For example, if we assume the following token grants read access to the `/ospool
 eyJhbGciOiJSUzI1NiIsImtpZCI6ImtleS1yczI1NiIsInR5cCI6IkpXVCJ9.eyJ2ZXIiOiJzY2l0b2tlbjoyLjAiLCJhdWQiOiJodHRwczovL2RlbW8uc2NpdG9rZW5zLm9yZyIsImlzcyI6Imh0dHBzOi8vZGVtby5zY2l0b2tlbnMub3JnIiwiZXhwIjoxNjk3NDgzNTU5LCJpYXQiOjE2OTc0ODI5NTksIm5iZiI6MTY5NzQ4Mjk1OSwianRpIjoiOGIzNjQ5MTUtMjM4MC00MzM2LWI1OTktN2NmYzhiNGJmNTk3In0.hCf8oi3BRoWnUrBxSKST8p8czSChetMFID4FRXiQQ6RnwhWFZD3grZ2dvdYIYYDuW-1iATN9OujHBbO8TOxTnjJd7acE7la5rZscQwY_DAr_6rLKRTSU_Tpgg8uBMQB-U45nGWJVuYS6RZ3JZ2vE5lTtvPjZjExkJOkfvVp9Kzq445UGlK4dNkvTS3SYd9QYiZPkjA_Z-u57DesOOhsgrLSXyrRCtxBD8mRe5MiRtVAFHxIXS_ZQ7B2XlmNPiR6PBb9r38qHUlYe9y824hmBW-VzR2xiJd5wLWFZOv2Ec-q2NCAqDQfGYl4UsWKinW-35OGEULQWAQgHwxKJMSEH8A
 ```
 
-Then the token can be used to get the object `/ospool/PROTECTED/justin.hiemstra/auth-test.txt` by saving the token in a file called `my-token` and running
+Then the token can be used to get the object `/ospool/PROTECTED/auth-test.txt` by saving the token in a file called `my-token` and running
 
 ```console
-pelican object copy -f https://osg-htc.org /ospool/PROTECTED/justin.hiemstra/auth-test.txt downloaded-auth-test.txt -t my-token
+pelican object copy -f https://osg-htc.org /ospool/PROTECTED/auth-test.txt downloaded-auth-test.txt -t my-token
 ```
 
 (Note that this token is for demonstration purposes only, and would not actually grant access to any files in the `/ospool/PROTECTED` namespace.)
