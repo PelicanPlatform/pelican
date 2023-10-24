@@ -271,7 +271,9 @@ func RedirectToOrigin(ginCtx *gin.Context) {
 func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// If this is a request for getting public key, don't modify the path
-		if strings.HasPrefix(c.Request.URL.Path, "/.well-known") {
+		// If this is a request to the Prometheus API, don't modify the path
+		if strings.HasPrefix(c.Request.URL.Path, "/.well-known") ||
+			strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/prometheus") {
 			c.Next()
 			return
 		}

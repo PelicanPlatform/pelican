@@ -49,6 +49,7 @@ import (
 	"github.com/prometheus/common/route"
 	"github.com/prometheus/prometheus/config"
 	"github.com/prometheus/prometheus/discovery"
+	prom_http "github.com/prometheus/prometheus/discovery/http"
 	"github.com/prometheus/prometheus/discovery/targetgroup"
 	"github.com/prometheus/prometheus/model/exemplar"
 	"github.com/prometheus/prometheus/model/histogram"
@@ -171,19 +172,27 @@ func checkPromToken(av1 *route.Router) gin.HandlerFunc {
 	}
 }
 
-// Configure director's Prometheus scraper to use service discovery for origins
+// Configure director's Prometheus scraper to use HTTP service discovery for origins
 func configDirectorPromScraper() (*config.ScrapeConfig, error) {
+	originDiscoveryUrl, err := url.Parse("https://" + pelican_config.ComputeExternalAddress())
+	if err != nil {
+		return nil, fmt.Errorf("parse external URL https://%v: %w", pelican_config.ComputeExternalAddress(), err)
+	}
+	originDiscoveryUrl.Path = "/api/v1.0/director/discoverOrigins"
 	scrapeConfig := config.DefaultScrapeConfig
 	scrapeConfig.JobName = "origins"
 	scrapeConfig.Scheme = "https"
 	scrapeConfig.ServiceDiscoveryConfigs = make([]discovery.Config, 1)
-	// scrapeConfig.ServiceDiscoveryConfigs[0] = discovery.StaticConfig{
-	// 	&targetgroup.Group{
-	// 		Targets: []model.LabelSet{{
-	// 			model.AddressLabel: model.LabelValue(pelican_config.ComputeExternalAddress()),
-	// 		}},
-	// 	},
-	// }
+	sdHttpClientConfig := common_config.HTTPClientConfig{
+		TLSConfig: common_config.TLSConfig{
+			InsecureSkipVerify: true,
+		},
+	}
+	scrapeConfig.ServiceDiscoveryConfigs[0] = &prom_http.SDConfig{
+		URL:              originDiscoveryUrl.String(),
+		RefreshInterval:  model.Duration(15 * time.Second),
+		HTTPClientConfig: sdHttpClientConfig,
+	}
 	scrapeConfig.HTTPClientConfig = common_config.DefaultHTTPClientConfig
 	scrapeConfig.HTTPClientConfig.TLSConfig.InsecureSkipVerify = true
 	return &scrapeConfig, nil
@@ -399,7 +408,16 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 	//WithInstrumentation(setPathWithPrefix("/api/v1"))
 	apiV1.Register(av1)
 
-	engine.GET("/api/v1.0/prometheus/*any", checkPromToken(av1))
+	// TODO: Add authorization to director's prometheus endpoint once there's a
+	// way that user can obtain a token from director or we have a web UI for
+	// director
+	if !isDirector {
+		engine.GET("/api/v1.0/prometheus/*any", checkPromToken(av1))
+	} else {
+		engine.GET("/api/v1.0/prometheus/*any", func(ctx *gin.Context) {
+			av1.ServeHTTP(ctx.Writer, ctx.Request)
+		})
+	}
 
 	reloaders := []reloader{
 		{
