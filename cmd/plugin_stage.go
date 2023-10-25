@@ -28,6 +28,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/classads"
 	"github.com/pelicanplatform/pelican/client"
+	"github.com/pelicanplatform/pelican/param"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -41,7 +42,7 @@ func init() {
 		Run:   stagePluginMain,
 	}
 	stageCmd.Flags().StringP("token", "t", "", "Token file to use for reading and/or writing")
-	if err := viper.BindPFlag("StagePlugin.Token", stageCmd.Flags().Lookup("token")); err != nil {
+	if err := viper.BindPFlag("Plugin.Token", stageCmd.Flags().Lookup("token")); err != nil {
 		panic(err)
 	}
 	stageCmd.Flags().Bool("hook", false, "Implement the HTCondor hook behavior")
@@ -85,7 +86,7 @@ Terminology:
 
 func stagePluginMain(cmd *cobra.Command, args []string) {
 
-	originPrefixStr := viper.GetString("StagePlugin.OriginPrefix")
+	originPrefixStr := param.StagePlugin_OriginPrefix.GetString()
 	if len(originPrefixStr) == 0 {
 		log.Errorln("Origin prefix not specified; must be a URL (osdf://...)")
 		os.Exit(1)
@@ -102,20 +103,20 @@ func stagePluginMain(cmd *cobra.Command, args []string) {
 	originPrefixPath := path.Clean("/" + originPrefixUri.Host + "/" + originPrefixUri.Path)
 	log.Debugln("Local origin prefix:", originPrefixPath)
 
-	mountPrefixStr := viper.GetString("StagePlugin.MountPrefix")
+	mountPrefixStr := param.StagePlugin_MountPrefix.GetString()
 	if len(mountPrefixStr) == 0 {
 		log.Errorln("Mount prefix is required; must be a local path (/mnt/foo/...)")
 		os.Exit(1)
 	}
 
-	shadowOriginPrefixStr := viper.GetString("StagePlugin.ShadowOriginPrefix")
+	shadowOriginPrefixStr := param.StagePlugin_ShadowOriginPrefix.GetString()
 	if len(shadowOriginPrefixStr) == 0 {
 		log.Errorln("Shadow origin prefix is required; must be a URL (osdf://....)")
 		os.Exit(1)
 	}
 
 	// Set the progress bars to the command line option
-	client.ObjectClientOptions.Token = viper.GetString("StagePlugin.Token")
+	client.ObjectClientOptions.Token = param.Plugin_Token.GetString()
 	client.ObjectClientOptions.Plugin = true
 
 	// Check if the program was executed from a terminal
@@ -128,7 +129,7 @@ func stagePluginMain(cmd *cobra.Command, args []string) {
 
 	var sources []string
 	var extraSources []string
-	isHook := viper.GetBool("StagePlugin.Hook")
+	isHook := param.StagePlugin_Hook.GetBool()
 	if isHook {
 		buffer := make([]byte, 100*1024)
 		bytesread, err := os.Stdin.Read(buffer)
