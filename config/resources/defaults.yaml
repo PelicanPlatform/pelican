@@ -25,8 +25,8 @@ Director:
 Origin:
   NamespacePrefix: ""
   Multiuser: false
-  UseMacaroons: true
-  UseVoms: true
+  EnableMacaroons: true
+  EnableVoms: true
   SelfTest: true
 Monitoring:
   PortLower: 9930
@@ -45,3 +45,10 @@ Transport:
   TLSHandshakeTimeout: 15s
   ExpectContinueTimeout: 1s
   ResponseHeaderTimeout: 10s
+OIDC:
+  DeviceAuthEndpoint: "https://cilogon.org/oauth2/device_authorization"
+  TokenEndpoint: "https://cilogon.org/oauth2/token"
+  UserInfoEndpoint: "https://cilogon.org/oauth2/userinfo"
+Issuer:
+  TomcatLocation: /opt/tomcat
+  ScitokensServerLocation: /opt/scitokens-server

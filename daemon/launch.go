@@ -1,5 +1,3 @@
-//go:build !linux
-
 /***************************************************************
  *
  * Copyright (C) 2023, Pelican Project, Morgridge Institute for Research
@@ -17,15 +15,26 @@
  * limitations under the License.
  *
  ***************************************************************/
-
-package xrootd
+package daemon
 
 import (
 	"context"
-
-	"github.com/pkg/errors"
 )
 
-func (PrivilegedXrootdLauncher) Launch(ctx context.Context) (context.Context, int, error) {
-	return ctx, -1, errors.New("Privileged process launching not supported on this platform")
+type (
+	Launcher interface {
+		Name() string
+		Launch(ctx context.Context) (context.Context, int, error)
+	}
+
+	DaemonLauncher struct {
+		DaemonName string
+		Args       []string
+		Uid        int
+		Gid        int
+	}
+)
+
+func (launcher DaemonLauncher) Name() string {
+	return launcher.DaemonName
 }

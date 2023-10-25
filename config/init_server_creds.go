@@ -323,6 +323,11 @@ func GenerateCert() error {
 }
 
 func GeneratePrivateKey(keyLocation string, curve elliptic.Curve) error {
+	uid, err := GetDaemonUID()
+	if err != nil {
+		return err
+	}
+
 	gid, err := GetDaemonGID()
 	if err != nil {
 		return err
