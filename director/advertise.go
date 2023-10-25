@@ -94,6 +94,10 @@ func parseServerAd(server Server, serverType ServerType) ServerAd {
 	}
 	serverAd.URL = *serverUrl
 
+	// We assume that the WebURL we get from topology is the same as the origin XRootD URL for now
+	// Would like to have a separate field for WebURL in the future
+	serverAd.WebURL = *serverUrl
+
 	return serverAd
 }
 

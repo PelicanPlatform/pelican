@@ -338,10 +338,18 @@ func RegisterOrigin(ctx *gin.Context) {
 		return
 	}
 
+	adWebUrl, err := url.Parse(ad.WebURL)
+	if err != nil {
+		log.Warningf("Failed to parse origin Web URL %v: %v\n", ad.WebURL, err)
+		ctx.JSON(400, gin.H{"error": "Invalid origin Web URL"})
+		return
+	}
+
 	originAd := ServerAd{
 		Name:    ad.Name,
 		AuthURL: *ad_url,
 		URL:     *ad_url,
+		WebURL:  *adWebUrl,
 		Type:    OriginType,
 	}
 	RecordAd(originAd, &ad.Namespaces)

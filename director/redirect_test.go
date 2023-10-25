@@ -213,6 +213,24 @@ func TestDirectorRegistration(t *testing.T) {
 	namaspaceADs = ListNamespacesFromOrigins()
 	assert.False(t, NamespaceAdContainsPath(namaspaceADs, "/foo/bar"), "Found namespace in the director cache even if the token validation failed.")
 	serverAds.DeleteAll()
+
+	// Now test it with WebUrl provided and it should appear in the cache
+	webUrl := "https://localhost:8844"
+	cUrl, _ := gin.CreateTestContext(w)
+
+	cUrl.Request, _ = http.NewRequest(http.MethodPost, "/", bytes.NewBuffer([]byte(`{"web_url": "https://localhost:8844","Namespaces": [{"Path": "/foo/bar", "URL": "https://get-your-tokens.org"}]}`)))
+
+	cUrl.Request.Header.Set("Authorization", "Bearer "+string(signed))
+	cUrl.Request.Header.Set("Content-Type", "application/json")
+	// Hard code the current min version. When this test starts failing because of new stuff in the Director,
+	// we'll know that means it's time to update the min version in redirect.go
+	cUrl.Request.Header.Set("User-Agent", "pelican-origin/7.0.0")
+
+	r.ServeHTTP(w, cUrl.Request)
+	assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
+	assert.Equal(t, 1, len(serverAds.Keys()), "Origin fail to register at serverAds")
+	assert.Equal(t, webUrl, serverAds.Keys()[0].WebURL.String(), "WebURL in serverAds does not match data in origin registration request")
+	serverAds.DeleteAll()
 }
 
 func TestGetAuthzEscaped(t *testing.T) {
