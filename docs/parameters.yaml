@@ -104,6 +104,17 @@ components: ["client", "nsregistry", "origin"]
 ---
 
 ############################
+#     Log-Level Configs    #
+############################
+name: Logging.Level
+description: >-
+  A string defining the log level of the client. Options include (going from most info to least): Trace, Debug, Info, Warn, Error, Fatal, Panic.
+type: string
+default: Error
+components: ["*"]
+---
+
+############################
 # Federation-Level Configs #
 ############################
 name: Federation.DiscoveryUrl
