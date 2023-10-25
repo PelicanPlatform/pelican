@@ -221,7 +221,7 @@ name: Origin.EnableIssuer
 description: >-
   Enable the built-in issuer daemon for the origin.
 type: bool
-default: true
+default: false
 components: ["origin"]
 ---
 
