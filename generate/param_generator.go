@@ -198,8 +198,10 @@ func GenParamStruct() {
 		NestedFields: make(map[string]*GoField),
 	}
 
-	// Convert YAML entries to a nested Go struct
-	for i := 0; i < len(values); i++ {
+	// Convert YAML entries to a nested Go struct. We intentionally skip
+	// the first entry, i.e. ConfigBase as it's only a verbose parameter
+	// for user to read but not being set in the code
+	for i := 1; i < len(values); i++ {
 		entry := values[i].(map[string]interface{})
 
 		// Skip required YAML field check as has been done in GenParamEnum
@@ -238,6 +240,15 @@ func GenParamStruct() {
 			current = current.NestedFields[part]
 		}
 		current.Type = goType
+	}
+
+	// Manually added this config to reflect what ConfigBase was meant to be
+	// Refer to where getConfigBase() is used in InitServer() in config/config.go
+	// for details
+	root.NestedFields["ConfigDir"] = &GoField{
+		Name:         "ConfigDir",
+		NestedFields: make(map[string]*GoField),
+		Type:         "string",
 	}
 
 	data := TemplateData{
