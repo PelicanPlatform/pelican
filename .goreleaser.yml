@@ -74,12 +74,12 @@ nfpms:
       rpm:
         contents:
           - src: LICENSE
-            dst: "usr/share/doc/{{ .PackageName }}-{{ .Version }}/LICENSE.txt"
+            dst: "/usr/share/doc/{{ .PackageName }}-{{ .Version }}/LICENSE.txt"
             file_info:
               mode: 0644
             type: doc
           - src: README.md
-            dst: "usr/share/doc/{{ .PackageName }}-{{ .Version }}/README.md"
+            dst: "/usr/share/doc/{{ .PackageName }}-{{ .Version }}/README.md"
             file_info:
               mode: 0644
             type: doc
@@ -89,12 +89,12 @@ nfpms:
         file_name_template: "{{ .PackageName }}-{{ .Version }}-{{ .Release }}_{{ .Arch }}"
         contents:
           - src: LICENSE
-            dst: "usr/share/doc/{{ .PackageName }}/LICENSE.txt"
+            dst: "/usr/share/doc/{{ .PackageName }}/LICENSE.txt"
             file_info:
               mode: 0644
             type: doc
           - src: README.md
-            dst: "usr/share/doc/{{ .PackageName }}/README.md"
+            dst: "/usr/share/doc/{{ .PackageName }}/README.md"
             file_info:
               mode: 0644
             type: doc
