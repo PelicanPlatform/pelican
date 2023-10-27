@@ -56,6 +56,13 @@ func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		return errors.Wrap(err, "Failed to generate director private key")
 	}
 
+	// Since director will provide a public JWK for token authentication
+	// We need to initialize public JWK and private JWK at the start
+	_, err = config.GenerateIssuerJWKS()
+	if err != nil {
+		return errors.Wrap(err, "Failed to load director's public and private jwk")
+	}
+
 	// Generate a TLS certificate if needed
 	if err := config.GenerateCert(); err != nil {
 		return err

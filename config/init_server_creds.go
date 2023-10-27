@@ -104,6 +104,9 @@ func LoadPublicKey(existingJWKS string, issuerKeyFile string) (*jwk.Set, error) 
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to add alg specification to key header")
 	}
+	// Store the private key to global var for access
+	// The key has kid attached
+	privateKey.Store(&key)
 
 	err = jwk.AssignKeyID(key)
 	if err != nil {
