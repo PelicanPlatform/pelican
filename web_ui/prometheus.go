@@ -38,6 +38,7 @@ import (
 	"github.com/mwitkow/go-conntrack"
 	"github.com/oklog/run"
 	pelican_config "github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
@@ -178,6 +179,10 @@ func configDirectorPromScraper() (*config.ScrapeConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse external URL https://%v: %w", pelican_config.ComputeExternalAddress(), err)
 	}
+	token, err := director.CreateDirectorSDToken()
+	if err != nil {
+		return nil, fmt.Errorf("Failed to generate token for Prometheus service discovery at start: %v", err)
+	}
 	originDiscoveryUrl.Path = "/api/v1.0/director/discoverOrigins"
 	scrapeConfig := config.DefaultScrapeConfig
 	scrapeConfig.JobName = "origins"
@@ -186,6 +191,10 @@ func configDirectorPromScraper() (*config.ScrapeConfig, error) {
 	sdHttpClientConfig := common_config.HTTPClientConfig{
 		TLSConfig: common_config.TLSConfig{
 			InsecureSkipVerify: true,
+		},
+		Authorization: &common_config.Authorization{
+			Type:        "Bearer",
+			Credentials: common_config.Secret(token),
 		},
 	}
 	scrapeConfig.ServiceDiscoveryConfigs[0] = &prom_http.SDConfig{
@@ -203,6 +212,19 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 	ListenAddress := fmt.Sprintf("0.0.0.0:%v", param.Server_Port.GetInt())
 	cfg.webTimeout = model.Duration(5 * time.Minute)
 	cfg.serverStoragePath = param.Monitoring_DataLocation.GetString()
+
+	// The code below is for testing director Prometheus scraping locally
+	// Uncomment only if you know what you are doing
+
+	// if isDirector {
+	// 	err := os.MkdirAll("/var/lib/pelican/director-monitoring/data", 0750)
+	// 	if err != nil {
+	// 		return errors.New("Failure when creating a directory for the monitoring data")
+	// 	}
+	// 	cfg.serverStoragePath = "/var/lib/pelican/director-monitoring/data"
+	// } else {
+	// 	cfg.serverStoragePath = param.Monitoring_DataLocation.GetString()
+	// }
 	cfg.tsdb.MinBlockDuration = model.Duration(2 * time.Hour)
 	cfg.tsdb.NoLockfile = false
 	cfg.tsdb.WALCompression = true
@@ -511,6 +533,60 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 				err2 := level.Info(logger).Log("msg", "Stopping scrape discovery manager...")
 				_ = err2
 				cancelScrape()
+			},
+		)
+	}
+	{
+		// Periodic srcaper config reload to refresh service discovery token
+		// Only effective when the server instance is a director
+		cancel := make(chan struct{})
+		g.Add(
+			func() error {
+				// Coordinate exact refresh time with the token life time at
+				// director/director_api.go CreateDirectorSDToken()
+				ticker := time.NewTicker(50 * time.Minute)
+				for {
+					select {
+					case <-cancel:
+						ticker.Stop()
+						err1 := level.Info(logger).Log("msg", "Stopping scraper config periodic reload...")
+						_ = err1
+						return nil
+					case <-ticker.C:
+						if !isDirector {
+							// Don't reload scraper config if the instance is not a director
+							continue
+						}
+						globalConfigMtx.Lock()
+						// Refresh token by manually re-configure scraper
+						promCfg.ScrapeConfigs[0], err = configDirectorPromScraper()
+						if err != nil {
+							return err
+						}
+						globalConfigMtx.Unlock()
+						c := make(map[string]discovery.Configs)
+						scfgs, err := promCfg.GetScrapeConfigs()
+						if err != nil {
+							return err
+						}
+						for _, v := range scfgs {
+							c[v.JobName] = v.ServiceDiscoveryConfigs
+						}
+						if err := discoveryManagerScrape.ApplyConfig(c); err != nil {
+							err2 := level.Error(logger).Log("msg", fmt.Sprint("Scraper config periodic reload failed: ", err))
+							_ = err2
+							return err
+						}
+						err = level.Info(logger).Log("msg", "Successfully reloaded scraper config")
+						_ = err
+					}
+				}
+			},
+			func(err error) {
+				err2 := level.Info(logger).Log("msg", "Stopping scraper config periodic reload...")
+				_ = err2
+				// terminate reload
+				close(cancel)
 			},
 		)
 	}

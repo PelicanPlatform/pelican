@@ -366,15 +366,43 @@ func RegisterOrigin(ctx *gin.Context) {
 // Return a list of available origins URL in Prometheus HTTP SD format
 // for director's Prometheus service discovery
 func DiscoverOrigins(ctx *gin.Context) {
+	// Check token for authorization
+	tokens, present := ctx.Request.Header["Authorization"]
+	if !present || len(tokens) == 0 {
+		ctx.JSON(401, gin.H{"error": "Bearer token not present in the 'Authorization' header"})
+		return
+	}
+	token := strings.TrimPrefix(tokens[0], "Bearer ")
+	ok, err := VerifyDirectorSDToken(token)
+	if err != nil {
+		log.Warningln("Failed to verify director service discovery token:", err)
+		ctx.JSON(401, gin.H{"error": fmt.Sprintf("Authorization token verification failed: %v\n", err)})
+		return
+	}
+	if !ok {
+		log.Warningf("Invalid token for accessing director's sevice discovery")
+		ctx.JSON(401, gin.H{"error": "Invalid token for accessing director's sevice discovery"})
+		return
+	}
+
 	serverAdMutex.RLock()
 	defer serverAdMutex.RUnlock()
 	serverAds := serverAds.Keys()
 	promDiscoveryRes := make([]PromDiscoveryItem, 0)
 	for _, ad := range serverAds {
+		// We don't include caches in this discovery for right now
+		if ad.Type != OriginType {
+			continue
+		}
 		promDiscoveryRes = append(promDiscoveryRes, PromDiscoveryItem{
+			// TODO: change to ad.WebURL when #285 is ready
 			Targets: []string{ad.URL.Hostname() + ":" + ad.URL.Port()},
 			Labels: map[string]string{
-				"job": ad.Name,
+				"origin_name":     ad.Name,
+				"origin_auth_url": ad.AuthURL.String(),
+				"origin_url":      ad.URL.String(),
+				"origin_lat":      fmt.Sprintf("%.4f", ad.Latitude),
+				"origin_long":     fmt.Sprintf("%.4f", ad.Longitude),
 			},
 		})
 	}
