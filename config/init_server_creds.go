@@ -105,14 +105,16 @@ func LoadPublicKey(existingJWKS string, issuerKeyFile string) (*jwk.Set, error) 
 		return nil, errors.Wrap(err, "Failed to add alg specification to key header")
 	}
 
+	err = jwk.AssignKeyID(key)
+	if err != nil {
+		return nil, errors.Wrap(err, "Failed to assign key ID to private key")
+	}
+
 	pkey, err := jwk.PublicKeyOf(key)
 	if err != nil {
 		return nil, errors.Wrapf(err, "Failed to generate public key from file %v", issuerKeyFile)
 	}
-	err = jwk.AssignKeyID(pkey)
-	if err != nil {
-		return nil, errors.Wrap(err, "Failed to assign key ID to public key")
-	}
+
 	if err = jwks.AddKey(pkey); err != nil {
 		return nil, errors.Wrap(err, "Failed to add public key to new JWKS")
 	}
