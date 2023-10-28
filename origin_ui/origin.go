@@ -80,6 +80,10 @@ func periodicReload() {
 }
 
 func WaitUntilLogin(ctx context.Context) error {
+	if !param.Origin_EnableUI.GetBool() {
+		return nil
+	}
+
 	if authDB.Load() != nil {
 		return nil
 	}
