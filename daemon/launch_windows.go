@@ -1,4 +1,4 @@
-//go:build !linux
+//go:build windows
 
 /***************************************************************
  *
@@ -18,14 +18,23 @@
  *
  ***************************************************************/
 
-package xrootd
+package daemon
 
 import (
 	"context"
+	"io"
 
 	"github.com/pkg/errors"
 )
 
-func (PrivilegedXrootdLauncher) Launch(ctx context.Context) (context.Context, int, error) {
-	return ctx, -1, errors.New("Privileged process launching not supported on this platform")
+func LaunchDaemons(launchers []Launcher) (err error) {
+	return errors.New("launching daemons is not supported on Windows")
+}
+
+func (launcher DaemonLauncher) Launch(ctx context.Context) (context.Context, int, error) {
+	return context.Background(), -1, errors.New("launching daemons is not supported on Windows")
+}
+
+func ForwardCommandToLogger(ctx context.Context, daemonName string, cmdStdout io.ReadCloser, cmdStderr io.ReadCloser) {
+	return
 }

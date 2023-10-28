@@ -28,6 +28,7 @@ type TemplateData struct {
 func main() {
 	GenParamEnum()
 	GenParamStruct()
+	GenPlaceholderPathForNext()
 }
 
 var requiredKeys = [4]string{"name", "description", "default", "type"}

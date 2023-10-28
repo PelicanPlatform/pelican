@@ -33,15 +33,15 @@ func main() {
 }
 
 func handleCLI(args []string) error {
-	exec_name := filepath.Base(args[0])
+	execName := filepath.Base(args[0])
 	// Take care of our Windows users
-	exec_name = strings.TrimSuffix(exec_name, ".exe")
+	execName = strings.TrimSuffix(execName, ".exe")
 	// Being case-insensitive
-	exec_name = strings.ToLower(exec_name)
+	execName = strings.ToLower(execName)
 
-	if exec_name == "stash_plugin" || exec_name == "osdf_plugin" || exec_name == "pelican_xfer_plugin" {
+	if execName == "stash_plugin" || execName == "osdf_plugin" || execName == "pelican_xfer_plugin" {
 		stashPluginMain(args[1:])
-	} else if exec_name == "stashcp" {
+	} else if execName == "stashcp" {
 		err := copyCmd.Execute()
 		if err != nil {
 			return err

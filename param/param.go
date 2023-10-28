@@ -6,7 +6,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-//go:generate go run ../generate/param_generator.go
+//go:generate go run ../generate
 
 var (
 	viperConfig *config

@@ -336,7 +336,12 @@ func InitConfig() {
 	if param.Debug.GetBool() {
 		SetLogging(log.DebugLevel)
 	} else {
-		SetLogging(log.ErrorLevel)
+		logLevel := param.Logging_Level.GetString()
+		level, err := log.ParseLevel(logLevel)
+		if err != nil {
+			cobra.CheckErr(err)
+		}
+		SetLogging(level)
 	}
 }
 
