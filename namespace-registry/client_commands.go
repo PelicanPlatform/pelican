@@ -23,6 +23,7 @@ import (
 
 	"bufio"
 	"bytes"
+	"crypto/ecdsa"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -79,7 +80,7 @@ func makeRequest(url string, method string, data map[string]interface{}, headers
 	return body, nil
 }
 
-func NamespaceRegisterWithIdentity(privateKeyPath string, namespaceRegistryEndpoint string, prefix string) error {
+func NamespaceRegisterWithIdentity(privateKey jwk.Key, namespaceRegistryEndpoint string, prefix string) error {
 	identifiedPayload := map[string]interface{}{
 		"identity_required": "true",
 		"prefix":            prefix,
@@ -127,38 +128,30 @@ func NamespaceRegisterWithIdentity(privateKeyPath string, namespaceRegistryEndpo
 			_, _ = reader.ReadString('\n')
 		}
 	}
-	return NamespaceRegister(privateKeyPath, namespaceRegistryEndpoint, respData.AccessToken, prefix)
+	return NamespaceRegister(privateKey, namespaceRegistryEndpoint, respData.AccessToken, prefix)
 }
 
-func NamespaceRegister(privateKeyPath string, namespaceRegistryEndpoint string, accessToken string, prefix string) error {
-	publicKey, err := config.LoadPublicKey("", privateKeyPath)
+func NamespaceRegister(privateKey jwk.Key, namespaceRegistryEndpoint string, accessToken string, prefix string) error {
+	publicKey, err := privateKey.PublicKey()
 	if err != nil {
-		return errors.Wrap(err, "Failed to retrieve public key")
+		return errors.Wrapf(err, "Failed to generate public key for namespace registration")
 	}
-
-	/*
-	 * TODO: For now, we only allow namespace registration to occur with a single key, but
-	 *       at some point we should expose an API for adding additional pubkeys to each
-	 *       namespace. There is a similar TODO listed in registry.go, as the choices made
-	 *       there mirror the choices made here.
-	 * To enforce that we're only trying to register one key, we check the length here
-	 */
-	if publicKey.Len() > 1 {
-		return errors.Errorf("Only one public key can be registered in this step, but %d were provided\n", publicKey.Len())
+	err = jwk.AssignKeyID(publicKey)
+	if err != nil {
+		return errors.Wrap(err, "Failed to assign key ID to public key")
+	}
+	keySet := jwk.NewSet()
+	if err = keySet.AddKey(publicKey); err != nil {
+		return errors.Wrap(err, "Failed to add public key to new JWKS")
 	}
 
 	if log.IsLevelEnabled(log.DebugLevel) {
 		// Let's check that we can convert to JSON and get the right thing...
-		jsonbuf, err := json.Marshal(publicKey)
+		jsonbuf, err := json.Marshal(keySet)
 		if err != nil {
 			return errors.Wrap(err, "failed to marshal the public key into JWKS JSON")
 		}
 		log.Debugln("Constructed JWKS from loading public key:", string(jsonbuf))
-	}
-
-	privateKey, err := config.LoadPrivateKey(privateKeyPath)
-	if err != nil {
-		return errors.Wrap(err, "Failed to load private key")
 	}
 
 	clientNonce, err := generateNonce()
@@ -168,7 +161,7 @@ func NamespaceRegister(privateKeyPath string, namespaceRegistryEndpoint string, 
 
 	data := map[string]interface{}{
 		"client_nonce": clientNonce,
-		"pubkey":       publicKey,
+		"pubkey":       keySet,
 	}
 
 	resp, err := makeRequest(namespaceRegistryEndpoint, "POST", data, nil)
@@ -191,7 +184,11 @@ func NamespaceRegister(privateKeyPath string, namespaceRegistryEndpoint string, 
 	clientPayload := clientNonce + respData.ServerNonce
 
 	// Sign the payload
-	signature, err := signPayload([]byte(clientPayload), privateKey)
+	var privateKeyRaw *ecdsa.PrivateKey
+	if err = privateKey.Raw(privateKeyRaw); err != nil {
+		return errors.Wrap(err, "Failed to get an ECDSA private key")
+	}
+	signature, err := signPayload([]byte(clientPayload), privateKeyRaw)
 	if err != nil {
 		return errors.Wrap(err, "Failed to sign payload")
 	}
@@ -200,7 +197,7 @@ func NamespaceRegister(privateKeyPath string, namespaceRegistryEndpoint string, 
 	unidentifiedPayload := map[string]interface{}{
 		"client_nonce":      clientNonce,
 		"server_nonce":      respData.ServerNonce,
-		"pubkey":            publicKey,
+		"pubkey":            keySet,
 		"client_payload":    clientPayload,
 		"client_signature":  hex.EncodeToString(signature),
 		"server_payload":    respData.ServerPayload,
