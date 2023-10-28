@@ -77,7 +77,7 @@ func LoadPrivateKey(tlsKey string) (*ecdsa.PrivateKey, error) {
 	return privateKey, nil
 }
 
-func LoadPublicKey(existingJWKS string, issuerKeyFile string) (*jwk.Set, error) {
+func LoadPublicKey(existingJWKS string, issuerKeyFile string) (jwk.Set, error) {
 	jwks := jwk.NewSet()
 	if existingJWKS != "" {
 		var err error
@@ -116,7 +116,7 @@ func LoadPublicKey(existingJWKS string, issuerKeyFile string) (*jwk.Set, error) 
 	if err = jwks.AddKey(pkey); err != nil {
 		return nil, errors.Wrap(err, "Failed to add public key to new JWKS")
 	}
-	return &jwks, nil
+	return jwks, nil
 }
 
 func GenerateCACert() error {
@@ -388,13 +388,13 @@ func GeneratePrivateKey(keyLocation string, curve elliptic.Curve) error {
 	return nil
 }
 
-func GenerateIssuerJWKS() (*jwk.Set, error) {
+func GenerateIssuerJWKS() (jwk.Set, error) {
 	existingJWKS := param.Server_IssuerJwks.GetString()
 	issuerKeyFile := param.IssuerKey.GetString()
 	return LoadPublicKey(existingJWKS, issuerKeyFile)
 }
 
-func GetOriginJWK() (*jwk.Key, error) {
+func GetOriginJWK() (jwk.Key, error) {
 	key := privateKey.Load()
 	if key == nil {
 		issuerKeyFile := param.IssuerKey.GetString()
@@ -409,5 +409,5 @@ func GetOriginJWK() (*jwk.Key, error) {
 		privateKey.Store(&newKey)
 		key = &newKey
 	}
-	return key, nil
+	return *key, nil
 }

@@ -91,12 +91,12 @@ func CreateAdvertiseToken(namespace string) (string, error) {
 	// Get/assign the kid, needed for verification of the token by the director
 	// TODO: Create more generic "tokenCreate" functions so we don't have to do
 	//       this by hand all the time
-	err = jwk.AssignKeyID(*key)
+	err = jwk.AssignKeyID(key)
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to assign kid to the token")
 	}
 
-	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, *key))
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, key))
 	if err != nil {
 		return "", err
 	}

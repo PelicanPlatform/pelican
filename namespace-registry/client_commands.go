@@ -143,8 +143,8 @@ func NamespaceRegister(privateKeyPath string, namespaceRegistryEndpoint string, 
 	 *       there mirror the choices made here.
 	 * To enforce that we're only trying to register one key, we check the length here
 	 */
-	if (*publicKey).Len() > 1 {
-		return errors.Errorf("Only one public key can be registered in this step, but %d were provided\n", (*publicKey).Len())
+	if publicKey.Len() > 1 {
+		return errors.Errorf("Only one public key can be registered in this step, but %d were provided\n", publicKey.Len())
 	}
 
 	if log.IsLevelEnabled(log.DebugLevel) {
@@ -287,12 +287,12 @@ func NamespaceDelete(endpoint string, prefix string) error {
 	}
 
 	// Get/assign the kid, needed for verification by the client
-	err = jwk.AssignKeyID(*key)
+	err = jwk.AssignKeyID(key)
 	if err != nil {
 		return errors.Wrap(err, "Failed to assign kid to the token")
 	}
 
-	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, *key))
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, key))
 	if err != nil {
 		return errors.Wrap(err, "Failed to sign the deletion token")
 	}
