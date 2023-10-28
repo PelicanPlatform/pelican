@@ -28,6 +28,7 @@ import (
 	"syscall"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/daemon"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -71,24 +72,24 @@ func findDaemon(daemonName string) (string, error) {
 	return "", errors.Errorf("No executable by name of %s found", daemonName)
 }
 
-func (PrivilegedXrootdLauncher) Launch(ctx context.Context, daemonName string, configPath string) (context.Context, int, error) {
+func (plauncher PrivilegedXrootdLauncher) Launch(ctx context.Context) (context.Context, int, error) {
 	readStdout, writeStdout, err := os.Pipe()
 	if err != nil {
-		return ctx, -1, errors.Wrapf(err, "Unable to create stdout pipe for %s", daemonName)
+		return ctx, -1, errors.Wrapf(err, "Unable to create stdout pipe for %s", plauncher.Name())
 	}
 	readStderr, writeStderr, err := os.Pipe()
 	if err != nil {
-		return ctx, -1, errors.Wrapf(err, "Unable to create stderr pipe for %s", daemonName)
+		return ctx, -1, errors.Wrapf(err, "Unable to create stderr pipe for %s", plauncher.Name())
 	}
 
 	xrootdRun := param.Xrootd_RunLocation.GetString()
 	pidFile := filepath.Join(xrootdRun, "xrootd.pid")
 
-	executable, err := findDaemon(daemonName)
+	executable, err := findDaemon(plauncher.Name())
 	if err != nil {
 		return ctx, -1, err
 	}
-	launcher := cap.NewLauncher(executable, []string{daemonName, "-f", "-s", pidFile, "-c", configPath}, nil)
+	launcher := cap.NewLauncher(executable, []string{plauncher.Name(), "-f", "-s", pidFile, "-c", plauncher.configPath}, nil)
 	launcher.Callback(func(attrs *syscall.ProcAttr, _ interface{}) error {
 		attrs.Files[1] = writeStdout.Fd()
 		attrs.Files[2] = writeStderr.Fd()
@@ -139,7 +140,7 @@ func (PrivilegedXrootdLauncher) Launch(ctx context.Context, daemonName string, c
 
 	writeStdout.Close()
 	writeStderr.Close()
-	go forwardCommandToLogger(ctx, daemonName, readStdout, readStderr)
+	go daemon.ForwardCommandToLogger(ctx, plauncher.Name(), readStdout, readStderr)
 
 	ctx_result, cancel := context.WithCancelCause(ctx)
 	go func() {

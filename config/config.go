@@ -41,6 +41,7 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
@@ -246,14 +247,14 @@ func getConfigBase() (string, error) {
 
 func setupTransport() {
 	//Getting timeouts and other information from defaults.yaml
-	maxIdleConns := viper.GetInt("Transport.MaxIdleConns")
-	idleConnTimeout := viper.GetDuration("Transport.IdleConnTimeout")
-	transportTLSHandshakeTimeout := viper.GetDuration("Transport.TLSHandshakeTimeout")
-	expectContinueTimeout := viper.GetDuration("Transport.ExpectContinueTimeout")
-	responseHeaderTimeout := viper.GetDuration("Transport.ResponseHeaderTimeout")
+	maxIdleConns := param.Transport_MaxIdleConns.GetInt()
+	idleConnTimeout := param.Transport_IdleConnTimeout.GetDuration()
+	transportTLSHandshakeTimeout := param.Transport_TLSHandshakeTimeout.GetDuration()
+	expectContinueTimeout := param.Transport_ExpectContinueTimeout.GetDuration()
+	responseHeaderTimeout := param.Transport_ResponseHeaderTimeout.GetDuration()
 
-	transportDialerTimeout := viper.GetDuration("Transport.Dialer.Timeout")
-	transportKeepAlive := viper.GetDuration("Transport.Dialer.KeepAlive")
+	transportDialerTimeout := param.Transport_DialerTimeout.GetDuration()
+	transportKeepAlive := param.Transport_DialerKeepAlive.GetDuration()
 
 	//Set up the transport
 	transport = &http.Transport{
@@ -291,6 +292,57 @@ func GetTransport() *http.Transport {
 		setupTransport()
 	})
 	return transport
+}
+
+func InitConfig() {
+	viper.SetConfigType("yaml")
+	// 1) Set up defaults.yaml
+	err := viper.MergeConfig(strings.NewReader(defaultsYaml))
+	if err != nil {
+		cobra.CheckErr(err)
+	}
+	// 2) Set up osdf.yaml (if needed)
+	prefix := GetPreferredPrefix()
+	if prefix == "OSDF" {
+		err := viper.MergeConfig(strings.NewReader(osdfDefaultsYaml))
+		if err != nil {
+			cobra.CheckErr(err)
+		}
+	}
+	if configFile := viper.GetString("config"); configFile != "" {
+		viper.SetConfigFile(configFile)
+	} else {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			log.Warningln("No home directory found for user -- will check for configuration yaml in /etc/pelican/")
+		}
+
+		// 3) Set up pelican.yaml (has higher precedence)
+		viper.AddConfigPath(filepath.Join(home, ".config", "pelican"))
+		viper.AddConfigPath(filepath.Join("/etc", "pelican"))
+		viper.SetConfigType("yaml")
+		viper.SetConfigName("pelican")
+	}
+
+	viper.SetEnvPrefix(prefix)
+	viper.AutomaticEnv()
+	// This line allows viper to use an env var like ORIGIN_VALUE to override the viper string "Origin.Value"
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	if err := viper.MergeInConfig(); err != nil {
+		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+			cobra.CheckErr(err)
+		}
+	}
+	if param.Debug.GetBool() {
+		SetLogging(log.DebugLevel)
+	} else {
+		logLevel := param.Logging_Level.GetString()
+		level, err := log.ParseLevel(logLevel)
+		if err != nil {
+			cobra.CheckErr(err)
+		}
+		SetLogging(level)
+	}
 }
 
 func InitServer() error {
@@ -367,24 +419,11 @@ func InitServer() error {
 	viper.SetDefault("Server.Hostname", hostname)
 	viper.SetDefault("Xrootd.Sitename", hostname)
 
-	err = viper.MergeConfig(strings.NewReader(defaultsYaml))
-	if err != nil {
-		return err
-	}
-
 	port := param.Xrootd_Port.GetInt()
 	if port != 443 {
 		viper.SetDefault("Origin.Url", fmt.Sprintf("https://%v:%v", param.Server_Hostname.GetString(), port))
 	} else {
 		viper.SetDefault("Origin.Url", fmt.Sprintf("https://%v", param.Server_Hostname.GetString()))
-	}
-
-	prefix := GetPreferredPrefix()
-	if prefix == "OSDF" {
-		err := viper.MergeConfig(strings.NewReader(osdfDefaultsYaml))
-		if err != nil {
-			return err
-		}
 	}
 
 	setupTransport()
@@ -493,20 +532,28 @@ func InitClient() error {
 		break
 	}
 	if viper.IsSet("MinimumDownloadSpeed") {
-		viper.SetDefault("Client.MinimumDownloadSpeed", viper.GetString("MinimumDownloadSpeed"))
+		viper.SetDefault("Client.MinimumDownloadSpeed", param.MinimumDownloadSpeed.GetInt())
 	} else {
 		viper.Set("Client.MinimumDownloadSpeed", downloadLimit)
 	}
 
 	// Handle more legacy config options
 	if viper.IsSet("DisableProxyFallback") {
-		viper.SetDefault("Client.DisableProxyFallback", viper.GetString("DisableProxyFallback"))
+		viper.SetDefault("Client.DisableProxyFallback", param.DisableProxyFallback.GetBool())
 	}
 	if viper.IsSet("DisableHttpProxy") {
-		viper.SetDefault("Client.DisableHttpProxy", viper.GetString("DisableHttpProxy"))
+		viper.SetDefault("Client.DisableHttpProxy", param.DisableHttpProxy.GetBool())
 	}
 
 	setupTransport()
 
 	return DiscoverFederation()
+}
+
+func SetLogging(logLevel log.Level) {
+	textFormatter := log.TextFormatter{}
+	textFormatter.DisableLevelTruncation = true
+	textFormatter.FullTimestamp = true
+	log.SetFormatter(&textFormatter)
+	log.SetLevel(logLevel)
 }

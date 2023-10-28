@@ -65,6 +65,38 @@ type (
 	}
 )
 
+func parseServerAd(server Server, serverType ServerType) ServerAd {
+	serverAd := ServerAd{}
+	serverAd.Type = serverType
+	serverAd.Name = server.Resource
+
+	// url.Parse requires that the scheme be present before the hostname,
+	// but endpoints do not have a scheme. As such, we need to add one for the.
+	// correct parsing. Luckily, we don't use this anywhere else (it's just to
+	// make the url.Parse function behave as expected)
+	if !strings.HasPrefix(server.AuthEndpoint, "http") { // just in case there's already an http(s) tacked in front
+		server.AuthEndpoint = "https://" + server.AuthEndpoint
+	}
+	if !strings.HasPrefix(server.Endpoint, "http") { // just in case there's already an http(s) tacked in front
+		server.Endpoint = "http://" + server.Endpoint
+	}
+	serverAuthUrl, err := url.Parse(server.AuthEndpoint)
+	if err != nil {
+		log.Warningf("Namespace JSON returned server %s with invalid authenticated URL %s",
+			server.Resource, server.AuthEndpoint)
+	}
+	serverAd.AuthURL = *serverAuthUrl
+
+	serverUrl, err := url.Parse(server.Endpoint)
+	if err != nil {
+		log.Warningf("Namespace JSON returned server %s with invalid unauthenticated URL %s",
+			server.Resource, server.Endpoint)
+	}
+	serverAd.URL = *serverUrl
+
+	return serverAd
+}
+
 // Populate internal cache with origin/cache ads
 func AdvertiseOSDF() error {
 	topoNamespaceUrl := param.Federation_TopologyNamespaceUrl.GetString()
@@ -122,65 +154,13 @@ func AdvertiseOSDF() error {
 		// they're listed as inactive by topology). These namespaces will all be mapped to the
 		// same useless origin ad, resulting in a 404 for queries to those namespaces
 		for _, origin := range ns.Origins {
-			originAd := ServerAd{}
-			originAd.Type = OriginType
-			originAd.Name = origin.Resource
-			// url.Parse requires that the scheme be present before the hostname,
-			// but endpoints do not have a scheme. As such, we need to add one for the.
-			// correct parsing. Luckily, we don't use this anywhere else (it's just to
-			// make the url.Parse function behave as expected)
-			if !strings.HasPrefix(origin.AuthEndpoint, "http") { // just in case there's already an http(s) tacked in front
-				origin.AuthEndpoint = "https://" + origin.AuthEndpoint
-			}
-			if !strings.HasPrefix(origin.Endpoint, "http") { // just in case there's already an http(s) tacked in front
-				origin.Endpoint = "http://" + origin.Endpoint
-			}
-			originAuthURL, err := url.Parse(origin.AuthEndpoint)
-			if err != nil {
-				log.Warningf("Namespace JSON returned origin %s with invalid authenticated URL %s",
-					origin.Resource, origin.AuthEndpoint)
-			}
-			originAd.AuthURL = *originAuthURL
-			originURL, err := url.Parse(origin.Endpoint)
-			if err != nil {
-				log.Warningf("Namespace JSON returned origin %s with invalid unauthenticated URL %s",
-					origin.Resource, origin.Endpoint)
-			}
-			originAd.URL = *originURL
-
+			originAd := parseServerAd(origin, OriginType)
 			originAdMap[originAd] = append(originAdMap[originAd], nsAd)
 		}
 
 		for _, cache := range ns.Caches {
-			cacheAd := ServerAd{}
-			cacheAd.Type = CacheType
-			cacheAd.Name = cache.Resource
-
-			if !strings.HasPrefix(cache.AuthEndpoint, "http") { // just in case there's already an http(s) tacked in front
-				cache.AuthEndpoint = "https://" + cache.AuthEndpoint
-			}
-			if !strings.HasPrefix(cache.Endpoint, "http") { // just in case there's already an http(s) tacked in front
-				cache.Endpoint = "http://" + cache.Endpoint
-			}
-			cacheAuthURL, err := url.Parse(cache.AuthEndpoint)
-			if err != nil {
-				log.Warningf("Namespace JSON returned cache %s with invalid authenticated URL %s",
-					cache.Resource, cache.AuthEndpoint)
-			}
-			cacheAd.AuthURL = *cacheAuthURL
-
-			cacheURL, err := url.Parse(cache.Endpoint)
-			if err != nil {
-				log.Warningf("Namespace JSON returned cache %s with invalid unauthenticated URL %s",
-					cache.Resource, cache.Endpoint)
-			}
-			cacheAd.URL = *cacheURL
-
-			cacheNS := NamespaceAd{}
-			cacheNS.Path = ns.Path
-			cacheNS.RequireToken = ns.UseTokenOnRead
-			cacheAdMap[cacheAd] = append(cacheAdMap[cacheAd], cacheNS)
-
+			cacheAd := parseServerAd(cache, CacheType)
+			cacheAdMap[cacheAd] = append(cacheAdMap[cacheAd], nsAd)
 		}
 	}
 

@@ -52,6 +52,67 @@ root_default: /etc/pelican/issuer.jwk
 default: $ConfigBase/issuer.jwk
 components: ["client", "nsregistry", "director"]
 ---
+name: Transport.DialerTimeout
+description: >-
+  Maximum time allowed for establishing a connection to target host.
+type: duration
+default: 10s
+components: ["client", "nsregistry", "origin"]
+---
+name: Transport.DialerKeepAlive
+description: >-
+  Maximum time a TCP connection should be kept alive without any activity.
+type: duration
+default: 30s
+components: ["client", "nsregistry", "origin"]
+---
+name: Transport.MaxIdleConns
+description: >-
+  Maximum number of idle connections that the HTTP client should maintain in its connection pool.
+type: int
+default: 30
+components: ["client", "nsregistry", "origin"]
+---
+name: Transport.IdleConnTimeout
+description: >-
+  Maximum duration an idle connection should remain open in the connection pool.
+type: duration
+default: 90s
+components: ["client", "nsregistry", "origin"]
+---
+name: Transport.TLSHandshakeTimeout
+description: >-
+  Maximum time allowed for the TLS handshake to complete when making an HTTPS connection
+type: duration
+default: 15s
+components: ["client", "nsregistry", "origin"]
+---
+name: Transport.ExpectContinueTimeout
+description: >-
+  Timeout to control how long the client should wait for the "Expect: 100-continue" response from the server before sending the request
+  body.
+type: duration
+default: 1s
+components: ["client", "nsregistry", "origin"]
+---
+name: Transport.ResponseHeaderTimeout
+description: >-
+  Maximum time the client should wait for the response headers to be received from the server
+type: duration
+default: 10s
+components: ["client", "nsregistry", "origin"]
+---
+
+############################
+#     Log-Level Configs    #
+############################
+name: Logging.Level
+description: >-
+  A string defining the log level of the client. Options include (going from most info to least): Trace, Debug, Info, Warn, Error, Fatal, Panic.
+type: string
+default: Error
+components: ["*"]
+---
 
 ############################
 # Federation-Level Configs #
@@ -196,9 +257,9 @@ root_default: true
 default: false
 components: ["origin"]
 ---
-name: Origin.UseCmsd
+name: Origin.EnableCmsd
 description: >-
-  A bool indicating whether the origin should use CMSD.
+  A bool indicating whether the origin should enable the `cmsd` daemon.
 type: bool
 default: true
 components: ["origin"]
@@ -232,6 +293,14 @@ type: bool
 default: true
 components: ["origin"]
 ---
+name: Origin.EnableIssuer
+description: >-
+  Enable the built-in issuer daemon for the origin.
+type: bool
+default: false
+components: ["origin"]
+---
+
 
 ############################
 #  Director-level configs  #
@@ -358,8 +427,28 @@ components: ["origin", "director", "nsregistry"]
 ---
 
 
+################################
+#   Issuer's Configurations    #
+################################
+name: Issuer.TomcatLocation
+description: >-
+  Location of the system tomcat installation
+type: string
+default: /opt/tomcat
+components: ["origin"]
+---
+name: Issuer.ScitokensServerLocation
+description: >-
+  Location of the scitoken server installation
+type: string
+default: /opt/scitokens-server
+components: ["origin"]
+---
 
 
+###################################
+#   Server's OIDC Configuration   #
+###################################
 name: OIDC.ClientIDFile
 description: >-
   A filepath to a file containing an OIDC Client ID. This is used by the namespace registry to establish OIDC information
@@ -402,6 +491,7 @@ type: url
 default: none
 components: ["nsregistry"]
 ---
+
 
 ############################
 #   XRootD-level Configs   #
@@ -528,3 +618,42 @@ description: >-
 type: int
 default: 9999
 components: ["origin"]
+---
+
+############################
+#   Plugin-level configs   #
+############################
+name: Plugin.Token
+description: >-
+  The specified token for pelican plugin staging
+type: string
+default: none
+components: ["plugin"]
+---
+name: StagePlugin.Hook
+description: >-
+  Flag to specify HTCondor hook behavior
+type: bool
+default: false
+components: ["plugin"]
+---
+name: StagePlugin.MountPrefix
+description: >-
+  Prefix corresponding to the local mount point of the origin
+type: string
+default: none
+components: ["plugin"]
+---
+name: StagePlugin.OriginPrefix
+description: >-
+  Prefix corresponding to the local origin
+type: string
+default: none
+components: ["plugin"]
+---
+name: StagePlugin.ShadowOriginPrefix
+description: >-
+  Prefix corresponding to the shadow origin
+type: string
+default: none
+components: ["plugin"]

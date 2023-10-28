@@ -29,6 +29,7 @@ import (
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
+	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -44,12 +45,23 @@ func PeriodicAdvertiseOrigin() error {
 		err := AdvertiseOrigin()
 		if err != nil {
 			log.Warningln("Origin advertise failed:", err)
+			if err = metrics.SetComponentHealthStatus("federation", "critical", "Error advertising origin to federation"); err != nil {
+				log.Warningln("Failed to update internal component health status:", err)
+			}
+		} else if err = metrics.SetComponentHealthStatus("federation", "ok", ""); err != nil {
+			log.Warningln("Failed to update internal component health status:", err)
 		}
+
 		for {
 			<-ticker.C
 			err := AdvertiseOrigin()
 			if err != nil {
 				log.Warningln("Origin advertise failed:", err)
+				if err = metrics.SetComponentHealthStatus("federation", "critical", "Error advertising origin to federation"); err != nil {
+					log.Warningln("Failed to update internal component health status:", err)
+				}
+			} else if err = metrics.SetComponentHealthStatus("federation", "ok", ""); err != nil {
+				log.Warningln("Failed to update internal component health status:", err)
 			}
 		}
 	}()

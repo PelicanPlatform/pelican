@@ -29,7 +29,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -38,10 +37,10 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/oauth2"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 
 	// use this sqlite driver instead of the one from
 	// github.com/mattn/go-sqlite3, because this one
@@ -133,80 +132,6 @@ func loadServerKeys() (*ecdsa.PrivateKey, error) {
 		serverCredsPrivKey, serverCredsErr = config.LoadPrivateKey(issuerFileName)
 	})
 	return serverCredsPrivKey, serverCredsErr
-}
-
-func loadOIDC() error {
-	// Load OIDC.ClientID
-	OIDCClientIDFile := param.OIDC_ClientIDFile.GetString()
-	OIDCClientIDFromEnv := viper.GetString("OIDCCLIENTID")
-	if OIDCClientIDFile != "" {
-		contents, err := os.ReadFile(OIDCClientIDFile)
-		if err != nil {
-			return errors.Wrapf(err, "Failed reading provided OIDC.ClientIDFile %s", OIDCClientIDFile)
-		}
-		OIDC.ClientID = strings.TrimSpace(string(contents))
-	} else if OIDCClientIDFromEnv != "" {
-		OIDC.ClientID = OIDCClientIDFromEnv
-	} else {
-		return errors.New("An OIDC Client Identity file must be specified in the config (OIDC.ClientIDFile)," +
-			" or the identity must be provided via the environment variable PELICAN_OIDCCLIENTID")
-	}
-
-	// load OIDC.ClientSecret
-	OIDCClientSecretFile := param.OIDC_ClientSecretFile.GetString()
-	OIDCClientSecretFromEnv := viper.GetString("OIDCCLIENTSECRET")
-	if OIDCClientSecretFile != "" {
-		contents, err := os.ReadFile(OIDCClientSecretFile)
-		if err != nil {
-			return errors.Wrapf(err, "Failed reading provided OIDCClientSecretFile %s", OIDCClientSecretFile)
-		}
-		OIDC.ClientSecret = strings.TrimSpace(string(contents))
-	} else if OIDCClientSecretFromEnv != "" {
-		OIDC.ClientSecret = OIDCClientSecretFromEnv
-	} else {
-		return errors.New("An OIDC Client Secret file must be specified in the config (OIDC.ClientSecretFile)," +
-			" or the secret must be provided via the environment variable PELICAN_OIDCCLIENTSECRET")
-	}
-
-	// Load OIDC.DeviceAuthEndpoint
-	deviceAuthEndpoint := param.OIDC_DeviceAuthEndpoint.GetString()
-	if deviceAuthEndpoint == "" {
-		return errors.New("Nothing set for config parameter OIDC.DeviceAuthEndpoint, so registration with identity not supported")
-	}
-	deviceAuthEndpointURL, err := url.Parse(deviceAuthEndpoint)
-	if err != nil {
-		return errors.New("Failed to parse URL for parameter OIDC.DeviceAuthEndpoint")
-	}
-	OIDC.DeviceAuthEndpoint = deviceAuthEndpointURL.String()
-
-	// Load OIDC.TokenEndpoint
-	tokenEndpoint := param.OIDC_TokenEndpoint.GetString()
-	if tokenEndpoint == "" {
-		return errors.New("Nothing set for config parameter OIDC.TokenEndpoint, so registration with identity not supported")
-	}
-	tokenAuthEndpointURL, err := url.Parse(tokenEndpoint)
-	if err != nil {
-		return errors.New("Failed to parse URL for parameter OIDC.TokenEndpoint")
-	}
-	OIDC.TokenEndpoint = tokenAuthEndpointURL.String()
-
-	// Load OIDC.UserInfoEndpoint
-	userInfoEndpoint := param.OIDC_TokenEndpoint.GetString()
-	if userInfoEndpoint == "" {
-		return errors.New("Nothing set for config parameter OIDC.UserInfoEndpoint, so registration with identity not supported")
-	}
-	userInfoEndpointURL, err := url.Parse(userInfoEndpoint)
-	if err != nil {
-		return errors.New("Failed to parse URL for parameter OIDC.UserInfoEndpoint")
-	}
-	OIDC.UserInfoEndpoint = userInfoEndpointURL.String()
-
-	// Set the scope
-	OIDC.Scope = "openid profile email org.cilogon.userinfo"
-
-	// Set the grant type
-	OIDC.GrantType = "urn:ietf:params:oauth:grant-type:device_code"
-	return nil
 }
 
 func signPayload(payload []byte, privateKey *ecdsa.PrivateKey) ([]byte, error) {
@@ -406,17 +331,17 @@ func cliRegisterNamespace(ctx *gin.Context) {
 		payload := url.Values{}
 		payload.Set("access_token", reqData.AccessToken)
 
-		err := loadOIDC()
+		oidcConfig, err := oauth2.ServerOIDCClient()
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server has malformed OIDC configuration"})
 			log.Errorf("Failed to load OIDC information for registration with identity: %v", err)
 			return
 		}
 
-		resp, err := http.PostForm(OIDC.UserInfoEndpoint, payload)
+		resp, err := http.PostForm(oidcConfig.Endpoint.UserInfoURL, payload)
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error making request to user info endpoint"})
-			log.Errorf("Failed to execute post form to user info endpoint %s: %v", OIDC.UserInfoEndpoint, err)
+			log.Errorf("Failed to execute post form to user info endpoint %s: %v", oidcConfig.Endpoint.UserInfoURL, err)
 			return
 		}
 		defer resp.Body.Close()
@@ -424,14 +349,14 @@ func cliRegisterNamespace(ctx *gin.Context) {
 		// Check the status code
 		if resp.StatusCode != 200 {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server received non-200 status from user info endpoint"})
-			log.Errorf("The user info endpoint %s responded with status code %d", OIDC.UserInfoEndpoint, resp.StatusCode)
+			log.Errorf("The user info endpoint %s responded with status code %d", oidcConfig.Endpoint.UserInfoURL, resp.StatusCode)
 			return
 		}
 
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Server encountered an error reading response from user info endpoint"})
-			log.Errorf("Failed to read body from user info endpoint %s: %v", OIDC.UserInfoEndpoint, err)
+			log.Errorf("Failed to read body from user info endpoint %s: %v", oidcConfig.Endpoint.UserInfoURL, err)
 			return
 		}
 
@@ -453,7 +378,7 @@ func cliRegisterNamespace(ctx *gin.Context) {
 		return
 	}
 
-	err := loadOIDC()
+	oidcConfig, err := oauth2.ServerOIDCClient()
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server has malformed OIDC configuration"})
 		log.Errorf("Failed to load OIDC information for registration with identity: %v", err)
@@ -463,14 +388,14 @@ func cliRegisterNamespace(ctx *gin.Context) {
 	if reqData.DeviceCode == "" {
 		log.Debug("Getting Device Code")
 		payload := url.Values{}
-		payload.Set("client_id", OIDC.ClientID)
-		payload.Set("client_secret", OIDC.ClientSecret)
-		payload.Set("scope", OIDC.Scope)
+		payload.Set("client_id", oidcConfig.ClientID)
+		payload.Set("client_secret", oidcConfig.ClientSecret)
+		payload.Set("scope", strings.Join(oidcConfig.Scopes, " "))
 
-		response, err := http.PostForm(OIDC.DeviceAuthEndpoint, payload)
+		response, err := http.PostForm(oidcConfig.Endpoint.DeviceAuthURL, payload)
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered error requesting device code"})
-			log.Errorf("Failed to execute post form to device auth endpoint %s: %v", OIDC.DeviceAuthEndpoint, err)
+			log.Errorf("Failed to execute post form to device auth endpoint %s: %v", oidcConfig.Endpoint.DeviceAuthURL, err)
 			return
 		}
 		defer response.Body.Close()
@@ -478,20 +403,20 @@ func cliRegisterNamespace(ctx *gin.Context) {
 		// Check the response code
 		if response.StatusCode != 200 {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server received non-200 status code from OIDC device auth endpoint"})
-			log.Errorf("The device auth endpoint %s responded with status code %d", OIDC.DeviceAuthEndpoint, response.StatusCode)
+			log.Errorf("The device auth endpoint %s responded with status code %d", oidcConfig.Endpoint.DeviceAuthURL, response.StatusCode)
 			return
 		}
 		body, err := io.ReadAll(response.Body)
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered error reading response from device auth endpoint"})
-			log.Errorf("Failed to read body from device auth endpoint %s: %v", OIDC.DeviceAuthEndpoint, err)
+			log.Errorf("Failed to read body from device auth endpoint %s: %v", oidcConfig.Endpoint.DeviceAuthURL, err)
 			return
 		}
 		var res Response
 		err = json.Unmarshal(body, &res)
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server could not parse response from device auth endpoint"})
-			log.Errorf("Failed to unmarshal body from device auth endpoint %s: %v", OIDC.DeviceAuthEndpoint, err)
+			log.Errorf("Failed to unmarshal body from device auth endpoint %s: %v", oidcConfig.Endpoint.DeviceAuthURL, err)
 			return
 		}
 		verificationURL := res.VerificationURLComplete
@@ -504,15 +429,15 @@ func cliRegisterNamespace(ctx *gin.Context) {
 	} else {
 		log.Debug("Verifying Device Code")
 		payload := url.Values{}
-		payload.Set("client_id", OIDC.ClientID)
-		payload.Set("client_secret", OIDC.ClientSecret)
+		payload.Set("client_id", oidcConfig.ClientID)
+		payload.Set("client_secret", oidcConfig.ClientSecret)
 		payload.Set("device_code", reqData.DeviceCode)
-		payload.Set("grant_type", OIDC.GrantType)
+		payload.Set("grant_type", "urn:ietf:params:oauth:grant-type:device_code")
 
-		response, err := http.PostForm(OIDC.TokenEndpoint, payload)
+		response, err := http.PostForm(oidcConfig.Endpoint.TokenURL, payload)
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error while making request to token endpoint"})
-			log.Errorf("Failed to execute post form to token endpoint %s: %v", OIDC.TokenEndpoint, err)
+			log.Errorf("Failed to execute post form to token endpoint %s: %v", oidcConfig.Endpoint.TokenURL, err)
 			return
 		}
 		defer response.Body.Close()
@@ -521,14 +446,14 @@ func cliRegisterNamespace(ctx *gin.Context) {
 		// We accept either a 200, or a 400.
 		if response.StatusCode != 200 && response.StatusCode != 400 {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server received bad status code from token endpoint"})
-			log.Errorf("The token endpoint %s responded with status code %d", OIDC.TokenEndpoint, response.StatusCode)
+			log.Errorf("The token endpoint %s responded with status code %d", oidcConfig.Endpoint.TokenURL, response.StatusCode)
 			return
 		}
 
 		body, err := io.ReadAll(response.Body)
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error reading response from token endpoint"})
-			log.Errorf("Failed to read body from token endpoint %s: %v", OIDC.TokenEndpoint, err)
+			log.Errorf("Failed to read body from token endpoint %s: %v", oidcConfig.Endpoint.TokenURL, err)
 			return
 		}
 
@@ -536,7 +461,7 @@ func cliRegisterNamespace(ctx *gin.Context) {
 		err = json.Unmarshal(body, &tokenResponse)
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server could not parse error from token endpoint"})
-			log.Errorf("Failed to unmarshal body from token endpoint %s: %v", OIDC.TokenEndpoint, err)
+			log.Errorf("Failed to unmarshal body from token endpoint %s: %v", oidcConfig.Endpoint.TokenURL, err)
 			return
 		}
 

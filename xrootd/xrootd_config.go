@@ -31,9 +31,9 @@ var (
 type (
 	OriginConfig struct {
 		Multiuser       bool
-		UseCmsd         bool
-		UseMacaroons    bool
-		UseVoms         bool
+		EnableCmsd      bool
+		EnableMacaroons bool
+		EnableVoms      bool
 		SelfTest        bool
 		NamespacePrefix string
 	}

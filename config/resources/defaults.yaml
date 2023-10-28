@@ -15,7 +15,8 @@
 #
 
 Debug: false
-
+Logging:
+  Level: "Error"
 Server:
   Port: 8444
   Address: "0.0.0.0"
@@ -24,8 +25,8 @@ Director:
 Origin:
   NamespacePrefix: ""
   Multiuser: false
-  UseMacaroons: true
-  UseVoms: true
+  EnableMacaroons: true
+  EnableVoms: true
   SelfTest: true
   EnableUI: true
 Monitoring:
@@ -38,11 +39,17 @@ Xrootd:
   DetailedMonitoringPort: 9930
   SummaryMonitoringPort: 9931
 Transport:
-  Dialer:
-    Timeout: 10s
-    KeepAlive: 30s
+  DialerTimeout: 10s
+  DialerKeepAlive: 30s
   MaxIdleConns: 30
   IdleConnTimeout: 90s
   TLSHandshakeTimeout: 15s
   ExpectContinueTimeout: 1s
   ResponseHeaderTimeout: 10s
+OIDC:
+  DeviceAuthEndpoint: "https://cilogon.org/oauth2/device_authorization"
+  TokenEndpoint: "https://cilogon.org/oauth2/token"
+  UserInfoEndpoint: "https://cilogon.org/oauth2/userinfo"
+Issuer:
+  TomcatLocation: /opt/tomcat
+  ScitokensServerLocation: /opt/scitokens-server

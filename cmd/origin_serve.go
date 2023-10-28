@@ -29,7 +29,9 @@ import (
 	"os"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/daemon"
 	"github.com/pelicanplatform/pelican/metrics"
+	"github.com/pelicanplatform/pelican/oa4mp"
 	"github.com/pelicanplatform/pelican/origin_ui"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/web_ui"
@@ -52,9 +54,9 @@ func checkConfigFileReadable(fileName string, errMsg string) error {
 }
 
 func checkDefaults() error {
-	requiredConfigs := []string{"Server.TLSCertificate", "Server.TLSKey", "Xrootd.RunLocation", "Xrootd.RobotsTxtFile"}
+	requiredConfigs := []param.StringParam{param.Server_TLSCertificate, param.Server_TLSKey, param.Xrootd_RunLocation, param.Xrootd_RobotsTxtFile}
 	for _, configName := range requiredConfigs {
-		mgr := viper.GetString(configName) // TODO: Remove direct access once all parameters are generated
+		mgr := configName.GetString()
 		if mgr == "" {
 			return errors.New(fmt.Sprintf("Required value of '%v' is not set in config",
 				configName))
@@ -63,10 +65,10 @@ func checkDefaults() error {
 
 	if managerHost := param.Xrootd_ManagerHost.GetString(); managerHost == "" {
 		log.Debug("No manager host specified for the cmsd process in origin; assuming no xrootd protocol support")
-		viper.SetDefault("Origin.UseCmsd", false)
+		viper.SetDefault("Origin.EnableCmsd", false)
 		metrics.DeleteComponentHealthStatus("cmsd")
 	} else {
-		viper.SetDefault("Origin.UseCmsd", true)
+		viper.SetDefault("Origin.EnableCmsd", true)
 	}
 
 	// As necessary, generate a private key and corresponding cert
@@ -152,6 +154,11 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	if err = origin_ui.PeriodicAdvertiseOrigin(); err != nil {
 		return err
 	}
+	if param.Origin_EnableIssuer.GetBool() {
+		if err = oa4mp.ConfigureOA4MPProxy(engine); err != nil {
+			return err
+		}
+	}
 
 	go web_ui.RunEngine(engine)
 	go webUiInitialize()
@@ -166,8 +173,20 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	}
 
 	privileged := param.Origin_Multiuser.GetBool()
-	err = xrootd.LaunchXrootd(privileged, configPath)
+	launchers, err := xrootd.ConfigureLaunchers(privileged, configPath)
 	if err != nil {
+		return err
+	}
+
+	if param.Origin_EnableIssuer.GetBool() {
+		oa4mp_launcher, err := oa4mp.ConfigureOA4MP()
+		if err != nil {
+			return err
+		}
+		launchers = append(launchers, oa4mp_launcher)
+	}
+
+	if err = daemon.LaunchDaemons(launchers); err != nil {
 		return err
 	}
 	log.Info("Clean shutdown of the origin")

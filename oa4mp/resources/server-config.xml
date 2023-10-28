@@ -1,0 +1,90 @@
+<config>
+    <service name="scitokens-server"
+             disableDefaultStores="true"
+             authorizationGrantLifetime="750 sec"
+             defaultAccessTokenLifetime="1009 sec."
+             maxAccessTokenLifetime="1800 sec"
+             maxRefreshTokenLifetime="2592000 sec"
+             maxClientRefreshTokenLifetime="1296000 sec."
+             refreshTokenEnabled="true"
+             enableTokenExchange="true"
+             clientSecretLength="24"
+             scheme="oa4mp"
+             schemeSpecificPart=""
+             debug="trace"
+             OIDCEnabled = "false"
+             serverDN="CN=localhost"
+             issuer="{{- .IssuerURL -}}"
+             address="{{- .IssuerURL -}}">
+
+        <logging
+                logFileName="/dev/stdout"
+                logName="scitokens-server"
+                logFileCount="1"
+                debug="trace"/>
+        <JSONWebKey>
+            <path>{{- .JwksLocation -}}</path>
+        </JSONWebKey>
+        <!-- Remove the next authorizationServlet if using a proxy -->
+        <!--<authorizationServlet authorizationURI="https://{HOSTNAME}/scitokens-server/authorize"/>-->
+       <authorizationServlet
+                useProxy="true"
+                cfgFile="{{- .ScitokensServerLocation -}}/etc/proxy-config.xml"
+                cfgName="proxy-client"
+        />
+        <deviceFlowServlet
+                verificationURI="{{- .IssuerURL -}}/device"
+                interval="5"
+                codeChars="0123456789ABCDEFX"
+                codeLength="9"
+                codeSeparator="_"
+                codePeriodLength="3"
+        />
+
+        <clientManagement>
+           <api protocol="rfc7591"
+                enabled="true"
+                endpoint="oidc-cm"
+                anonymousOK="true"
+                autoApprove="true"
+                autoApproverName="anonymous"
+                template="localhost:template"
+           />
+           <api protocol="rfc7592" enabled="true" endpoint="oidc-cm"/>
+           <api protocol="oa4mp" enabled="false" />
+        </clientManagement>
+
+        <fileStore path="{{- .ScitokensServerLocation -}}/var/storage/file_store">
+            <clients/>
+            <clientApprovals/>
+            <transactions/>
+            <permissions/>
+            <adminClients/>
+            <txStore/>
+            <voStore/>
+        </fileStore>
+
+        <qdl name="qdl-default"
+             enabled="true"
+             debug="info"
+             strict_acls="false"
+             script_path="vfs#/scripts/">
+            <virtual_file_systems>
+                <vfs type="pass_through"
+                     access="rw">
+                    <root_dir>{{- .ScitokensServerLocation -}}/var/qdl</root_dir>
+                    <scheme><![CDATA[vfs]]></scheme>
+                    <mount_point>/scripts</mount_point>
+                </vfs>
+            </virtual_file_systems>
+            <modules>
+                <module type="java"
+                        import_on_start="true">
+                    <class_name>edu.uiuc.ncsa.myproxy.oa4mp.qdl.OA2QDLLoader</class_name>
+                </module>
+            </modules>
+        </qdl>
+
+        <mail enabled="false"/>
+    </service>
+</config>
