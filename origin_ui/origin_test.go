@@ -202,6 +202,7 @@ func TestPasswordResetAPI(t *testing.T) {
 	dirName := t.TempDir()
 	viper.Reset()
 	viper.Set("ConfigDir", dirName)
+	viper.Set("Origin.UIPasswordFile", tempPasswdFile.Name())
 	err := config.InitServer()
 	require.NoError(t, err)
 	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256())
@@ -304,6 +305,7 @@ func TestPasswordResetAPI(t *testing.T) {
 func TestPasswordBasedLoginAPI(t *testing.T) {
 	viper.Reset()
 	config.InitConfig()
+	viper.Set("Origin.UIPasswordFile", tempPasswdFile.Name())
 	err := config.InitServer()
 	require.NoError(t, err)
 
@@ -417,6 +419,7 @@ func TestWhoamiAPI(t *testing.T) {
 	viper.Reset()
 	config.InitConfig()
 	viper.Set("ConfigDir", dirName)
+	viper.Set("Origin.UIPasswordFile", tempPasswdFile.Name())
 	err := config.InitServer()
 	require.NoError(t, err)
 	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256())
