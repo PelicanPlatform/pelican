@@ -70,6 +70,7 @@ func TestMain(m *testing.M) {
 	viper.Set("IssuerKey", filepath.Join(tempJWKDir, "issuer.jwk"))
 
 	// Ensure we load up the default configs.
+	config.InitConfig()
 	if err := config.InitServer(); err != nil {
 		fmt.Println("Failed to configure the test module")
 		os.Exit(1)
@@ -102,6 +103,7 @@ func TestWaitUntilLogin(t *testing.T) {
 	dirName := t.TempDir()
 	viper.Reset()
 	viper.Set("ConfigDir", dirName)
+	config.InitConfig()
 	err := config.InitServer()
 	require.NoError(t, err)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -148,6 +150,7 @@ func TestCodeBasedLogin(t *testing.T) {
 	dirName := t.TempDir()
 	viper.Reset()
 	viper.Set("ConfigDir", dirName)
+	config.InitConfig()
 	err := config.InitServer()
 	require.NoError(t, err)
 	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256())
@@ -180,6 +183,7 @@ func TestCodeBasedLogin(t *testing.T) {
 
 	//Invoke the code login with the wrong code, ensure we get a 401
 	t.Run("With invalid code", func(t *testing.T) {
+		require.True(t, param.Origin_EnableUI.GetBool())
 		req, err := http.NewRequest("POST", "/api/v1.0/origin-ui/initLogin", strings.NewReader(`{"code": "20"}`))
 		assert.NoError(t, err)
 
@@ -298,10 +302,15 @@ func TestPasswordResetAPI(t *testing.T) {
 }
 
 func TestPasswordBasedLoginAPI(t *testing.T) {
+	viper.Reset()
+	config.InitConfig()
+	err := config.InitServer()
+	require.NoError(t, err)
+
 	///////////////////////////SETUP///////////////////////////////////
 	//Add an admin user to file to configure
 	content := "admin:password\n"
-	_, err := tempPasswdFile.WriteString(content)
+	_, err = tempPasswdFile.WriteString(content)
 	assert.NoError(t, err, "Error writing to temp password file")
 
 	//Configure UI
@@ -406,6 +415,7 @@ func TestPasswordBasedLoginAPI(t *testing.T) {
 func TestWhoamiAPI(t *testing.T) {
 	dirName := t.TempDir()
 	viper.Reset()
+	config.InitConfig()
 	viper.Set("ConfigDir", dirName)
 	err := config.InitServer()
 	require.NoError(t, err)
