@@ -17,6 +17,7 @@ import (
 
 func main() {
 	GenParamEnum()
+	GenPlaceholderPathForNext()
 }
 
 var requiredKeys = [4]string{"name", "description", "default", "type"}
