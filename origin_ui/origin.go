@@ -359,6 +359,16 @@ func resetLoginHandler(ctx *gin.Context) {
 	}
 }
 
+func getConfig(ctx *gin.Context) {
+	config, err := param.GetUnmarshaledConfig()
+	if err != nil {
+		ctx.JSON(500, gin.H{"error": "Failed to get the unmarshaled config"})
+		return
+	}
+
+	ctx.JSON(200, config)
+}
+
 func ConfigureOriginUI(router *gin.Engine) error {
 	if router == nil {
 		return errors.New("Origin configuration passed a nil pointer")
@@ -388,6 +398,10 @@ func ConfigureOriginUI(router *gin.Engine) error {
 			ctx.JSON(200, gin.H{"initialized": true})
 		}
 	})
+
+	// Register using router now. Can be converted to a group when more routes
+	// are added
+	router.GET("/api/v1.0/config", authHandler, getConfig)
 
 	router.GET("/view/*path", func(ctx *gin.Context) {
 		path := ctx.Param("path")

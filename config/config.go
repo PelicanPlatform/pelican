@@ -427,6 +427,12 @@ func InitServer() error {
 
 	setupTransport()
 
+	// Unmarshal Viper config into a Go struct
+	err = param.UnmarshalConfig()
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -545,6 +551,12 @@ func InitClient() error {
 	}
 
 	setupTransport()
+
+	// Unmarshal Viper config into a Go struct
+	err = param.UnmarshalConfig()
+	if err != nil {
+		return err
+	}
 
 	return DiscoverFederation()
 }
