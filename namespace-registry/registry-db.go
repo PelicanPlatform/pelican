@@ -20,13 +20,13 @@ package nsregistry
 
 import (
 	"database/sql"
-	"log"
 	"os"
 	"path/filepath"
 
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 
 	// commented sqlite driver requires CGO
 	// _ "github.com/mattn/go-sqlite3" // SQLite driver
