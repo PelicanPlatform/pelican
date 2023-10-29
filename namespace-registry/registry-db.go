@@ -192,3 +192,10 @@ func InitializeDB() error {
 	createNamespaceTable()
 	return db.Ping()
 }
+
+func ShutdownDB() {
+	err := db.Close()
+	if err != nil {
+		log.Errorln("Failure when shutting down the database:", err)
+	}
+}
