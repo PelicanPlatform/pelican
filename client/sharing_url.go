@@ -70,7 +70,7 @@ func getDirectorFromUrl(objectUrl *url.URL) (string, error) {
 		} else {
 			directorUrl = configDirectorUrl
 		}
-	} else if objectUrl.Scheme != "" {
+	} else if objectUrl.Scheme != "osdf" {
 		return "", errors.Errorf("Unsupported scheme for pelican: %s://", objectUrl.Scheme)
 	}
 	return directorUrl, nil
