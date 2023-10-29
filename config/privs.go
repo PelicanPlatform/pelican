@@ -27,79 +27,83 @@ import (
 	"github.com/pkg/errors"
 )
 
+type User struct {
+	Uid       int
+	Gid       int
+	Sid       string
+	Username  string
+	Groupname string
+	err       error
+}
+
 var (
 	isRootExec bool
 
-	uidErr      error
-	gidErr      error
-	sidErr      error
-	usernameErr error
-	groupErr    error
-
-	uid      int
-	gid      int
-	sid      string
-	username string
-	group    string
+	xrootdUser User
+	oa4mpUser  User
 )
 
 func init() {
 	userObj, err := user.Current()
 	isRootExec = err == nil && userObj.Username == "root"
 
-	uid = -1
-	gid = -1
-	sid = ""
-	if err != nil {
-		uidErr = err
-		gidErr = err
-		sidErr = err
-		usernameErr = err
-		groupErr = err
-		return
-	}
-	desiredUsername := userObj.Username
+	xrootdUser = newUser()
+	oa4mpUser = newUser()
+
 	if isRootExec {
-		desiredUsername = "xrootd"
-		userObj, err = user.Lookup(desiredUsername)
-		if err != nil {
-			err = errors.Wrap(err, "Unable to lookup the xrootd runtime user"+
-				" information; does the xrootd user exist?")
-			uidErr = err
-			gidErr = err
-			usernameErr = err
-			groupErr = err
-			return
-		}
+		xrootdUser = initUserObject("xrootd", nil)
+		oa4mpUser = initUserObject("tomcat", nil)
+	} else if err != nil {
+		xrootdUser.err = err
+		oa4mpUser.err = err
+	} else {
+		xrootdUser = initUserObject(userObj.Username, userObj)
+		oa4mpUser = initUserObject(userObj.Username, userObj)
 	}
+}
+
+func initUserObject(desiredUsername string, userObj *user.User) User {
+	result := newUser()
+	result.Username = desiredUsername
+	if userObj == nil {
+		userObjNew, err := user.Lookup(desiredUsername)
+		if err != nil {
+			err = errors.Wrapf(err, "Unable to lookup the runtime user"+
+				" information; does the %s user exist?", desiredUsername)
+			result.err = err
+			return result
+		}
+		userObj = userObjNew
+	}
+
 	//Windows has userId's different from mac and linux, need to parse to get it
 	currentOS := runtime.GOOS
 	if currentOS == "windows" {
 		//Get the user ID from the SID
 		sidParts := strings.Split(userObj.Uid, "-")
 		uidString := sidParts[len(sidParts)-1]
-		uid, err = strconv.Atoi(uidString)
-		if err != nil {
-			uid = -1
-			uidErr = err
+		result.Uid, result.err = strconv.Atoi(uidString)
+		if result.err != nil {
+			result.Uid = -1
+			return result
 		}
-		sid = userObj.Gid
+		result.Sid = userObj.Gid
 		//group is just the whole SID
-		group = userObj.Gid
+		result.Groupname = userObj.Gid
 	} else { //Mac and linux have similar enough uid's so can group them here
-		uid, err = strconv.Atoi(userObj.Uid)
-		if err != nil {
-			uid = -1
-			uidErr = err
+		result.Uid, result.err = strconv.Atoi(userObj.Uid)
+		if result.err != nil {
+			result.Uid = -1
+			return result
 		}
-		gid, err = strconv.Atoi(userObj.Gid)
-		if err != nil {
-			gid = -1
-			gidErr = err
+		result.Gid, result.err = strconv.Atoi(userObj.Gid)
+		if result.err != nil {
+			result.Gid = -1
+			return result
 		}
 		groupObj, err := user.LookupGroupId(userObj.Gid)
 		if err == nil {
-			group = groupObj.Name
+			result.Groupname = groupObj.Name
 		} else {
 			// Fall back to using the GID as the group name.  This is done because,
 			// currently, the group name is just for logging strings.  The group name
@@ -107,11 +111,16 @@ func init() {
 			// full glibc stack to resolve information via SSSD.
 			//
 			// This decision should be revisited if we ever enable CGO.
-			group = userObj.Gid
+			result.Groupname = userObj.Gid
 		}
 	}
-	// username same for both windows, linux, and mac
-	username = desiredUsername
+	return result
+}
+
+func newUser() (userObj User) {
+	userObj.Uid = -1
+	userObj.Gid = -1
+	return
 }
 
 func IsRootExecution() bool {
@@ -119,21 +128,25 @@ func IsRootExecution() bool {
 }
 
 func GetDaemonUID() (int, error) {
-	return uid, uidErr
+	return xrootdUser.Uid, xrootdUser.err
 }
 
 func GetDaemonUser() (string, error) {
-	return username, usernameErr
+	return xrootdUser.Username, xrootdUser.err
 }
 
 func GetDaemonGID() (int, error) {
-	return gid, gidErr
+	return xrootdUser.Gid, xrootdUser.err
 }
 
 func GetDaemonSID() (string, error) {
-	return sid, sidErr
+	return xrootdUser.Sid, xrootdUser.err
 }
 
 func GetDaemonGroup() (string, error) {
-	return group, groupErr
+	return xrootdUser.Groupname, xrootdUser.err
+}
+
+func GetOA4MPUser() (User, error) {
+	return oa4mpUser, oa4mpUser.err
 }

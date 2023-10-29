@@ -1,0 +1,131 @@
+# Using The Pelican Client
+
+The Pelican client currently only supports *fetching* objects from Pelican federations, although a much richer feature set that will allow users to interact with federation objects in more advanced ways is forthcoming.
+
+One thing to note is that Pelican should be thought of as a tool that works with federated *objects* as opposed to *files*. The reason for this is that calling something a file carries with it the connotation that the file is mutable, ie its contents can change without requiring a new name. Objects in a Pelican federation, however, should be treated as immutable, especially in any case where objects are pulled through a cache (which will be the case for almost all files in the OSDF). This is because the underlying cache mechanism, powered by XRootD, will deliver whatever object it already has access to; if an object name changes at the origin, the cache will remain unaware and continue to deliver the old object. In the worst case, when the cache only has a partial object, it may attempt to combine its stale version with whatever exists at the origin. Use object names wisely!
+
+##Before Starting
+
+### Assumptions
+
+Before using the Pelican client to interact with objects from your federation, this guide makes several assumptions:
+
+- You are on a computer where you have access to a terminal. The Pelican client is a command line tool.
+- You've already installed the version of Pelican appropriate for your system, and Pelican is accessible via your path. To test this on Linux, you can run
+```console
+which pelican
+```
+which should output a path to the executable. If there is no output to this command, refer to the Pelican installation docs to acquire a working installation.
+
+
+### Useful Terminology
+
+**Federations:**
+Objects in Pelican belong to *federations*, which are aggregations of data that are exposed to other individuals in the federation. Each Pelican federation constitutes its own global namespace of objects and each object within a federation has its own path, much like files on a computer. Fetching any object from a federation requires at minimum two pieces of information; a URL indicating the object's federation and the path to the object within that federation (there is the potential that some objects require access tokens as well, but more on that later). For example, the Open Science Data Federation's (OSDF) central URL is https://osg-htc.org and an example object from the federation can be found at
+
+```console
+/osgconnect/public/osg/testfile.txt
+```
+
+**Note:** All object paths in a federation begin with a preceding `/`, and no relative paths are allowed.
+
+**Origins:**
+All objects in a federation live in some *origin*. Origins act like a flexible plug mechanism that exposes different type of storage backends to the federation. For example, the POSIX filesystem on most Linux computers is one type of storage backend an origin can expose to the federation. Other types of backends include S3 or HTTP servers, and Pelican plans to add many more. In most cases, a user does not need to know the particular backend used to store the object to download it from the federation.
+
+**Namespace Prefixes:**
+Each origin supports one or more *namespace prefixes*, which are analogous to the folders or directories from your computer that you use to organize files. In the example object from the OSDF mentioned earlier, the namespace prefix is `/osgconnect/public/`, and the actual object is named `osg/testfile.txt`.
+
+**Tokens and JWT:**
+Some namespace prefixes are public, like `/osgconnect/public/`, while others are protected (ie they require authentication). Objects in public namespaces can be downloaded by anybody, but downloading objects from protected namespaces requires you prove to the origin supporting that namespace that you are allowed to access the object. In Pelican, this is done using signed JSON Web Tokens, or *JWT*s for short. In many cases, these tokens can be generated automatically.
+
+
+## Get A Public Object From Your Federation
+
+To use the Pelican client to pull objects from a federation, use Pelican's `object copy` sub-command:
+
+```console
+pelican object copy -f <federation url> </federation/path/to/file> </local/path/to/file>
+```
+
+You can try this yourself by getting the public file that was mentioned earlier from the OSDF. Using the `object copy` sub command, and indicating to pelican that you're pulling from the OSDF by passing the federation URL with the `-f` flag, run:
+
+```console
+pelican object copy -f https://osg-htc.org /osgconnect/public/osg/testfile.txt downloaded-testfile.txt
+```
+
+This command will download the object `/osg/testfile.txt` from the OSDF's `/osgconnect/public` namespace and save it in your local directory with the name `downloaded-testfile.txt`.
+
+
+## Get A Protected Object From Your Federation
+
+Protected namespaces require that a Pelican client prove it is allowed to access objects from the namespace before the object can be downloaded. In many cases, Pelican clients can do this automatically by initiating an OpenID-Connect (OIDC) flow that uses an external log-in service through your browser. In other cases, a token must be provided to Pelican manually.
+
+### For Issuers That Support CILogon Code Flow
+
+Some origins are protected by token issuers that are already integrated with CILogon's Open ID Connect (OIDC) client. In these cases, the Pelican client is capable of creating the token needed to authenticate with the origin and download the file. To download protected objects from origins that are connected to CILogon, run the same command as for downloading public objects:
+
+```console
+pelican object copy -f <federation url> </federation/path/to/file> </local/path/to/file>
+```
+
+If you're doing this for the very first time, Pelican will create an encrypted token wallet on your system and you will be required to provide Pelican with a password for the wallet. If this isn't your first time, you will be asked to provide your already-configured password to unlock the token wallet.
+
+Next, Pelican will display a URL in your terminal and indicate that you should visit the URL in your browser. After copying/pasting the URL to your browser, follow all the instructions there for logging in with CILogon.
+
+Finally, if the login is successful, Pelican will automatically fetch the token from the CILogon service and continue with the download.
+
+### For Issuers With No CILogon Support
+
+There are some cases where Pelican is unable to generate the tokens it needs to prove to the origin that a user should have legitimate access to an object. When this happens, users must supply their own JWT that's signed by the origin's issuer. Instructions on how to get such a token are outside the scope of this writeup, as it may require institutional knowledge. However, once a valid token is available, Pelican can use the token to get the object by pointing the client to a file containing the token with the `-t` flag:
+
+```console
+pelican object copy -f <Federation URL> </federation/path/to/file> </local/path/to/file> -t </path/to/token/file>
+```
+
+For example, if we assume the following token grants read access to the `/ospool/PROTECTED` namespace:
+```console
+eyJhbGciOiJSUzI1NiIsImtpZCI6ImtleS1yczI1NiIsInR5cCI6IkpXVCJ9.eyJ2ZXIiOiJzY2l0b2tlbjoyLjAiLCJhdWQiOiJodHRwczovL2RlbW8uc2NpdG9rZW5zLm9yZyIsImlzcyI6Imh0dHBzOi8vZGVtby5zY2l0b2tlbnMub3JnIiwiZXhwIjoxNjk3NDgzNTU5LCJpYXQiOjE2OTc0ODI5NTksIm5iZiI6MTY5NzQ4Mjk1OSwianRpIjoiOGIzNjQ5MTUtMjM4MC00MzM2LWI1OTktN2NmYzhiNGJmNTk3In0.hCf8oi3BRoWnUrBxSKST8p8czSChetMFID4FRXiQQ6RnwhWFZD3grZ2dvdYIYYDuW-1iATN9OujHBbO8TOxTnjJd7acE7la5rZscQwY_DAr_6rLKRTSU_Tpgg8uBMQB-U45nGWJVuYS6RZ3JZ2vE5lTtvPjZjExkJOkfvVp9Kzq445UGlK4dNkvTS3SYd9QYiZPkjA_Z-u57DesOOhsgrLSXyrRCtxBD8mRe5MiRtVAFHxIXS_ZQ7B2XlmNPiR6PBb9r38qHUlYe9y824hmBW-VzR2xiJd5wLWFZOv2Ec-q2NCAqDQfGYl4UsWKinW-35OGEULQWAQgHwxKJMSEH8A
+```
+
+Then the token can be used to get the object `/ospool/PROTECTED/auth-test.txt` by saving the token in a file called `my-token` and running
+
+```console
+pelican object copy -f https://osg-htc.org /ospool/PROTECTED/auth-test.txt downloaded-auth-test.txt -t my-token
+```
+
+(Note that this token is for demonstration purposes only, and would not actually grant access to any files in the `/ospool/PROTECTED` namespace.)
+
+## Additional Pelican Flags And Their Effects
+
+Pelican clients support a variety of command line flags that modify the client's behavior:
+
+### Global Flags:
+
+- **-h or --help:** Takes no argument and can be used with any Pelican sub command for more information about the sub command and additional supported flags.
+- **-f or --federation:** Takes a URL that indicates to Pelican which federation the request should be made to.
+- **-d or --debug:** Takes no argument, but runs Pelican in debug mode, which, when enabled, provides verbose output.
+- **--config:** Takes a filepath and indicates to Pelican the location of a configuration file Pelican should use.
+- **--json:** Takes no argument and outputs results in JSON format.
+
+### Flags For `object copy`:
+
+- **-c or --cache:** Takes a cache URL and indicates to Pelican that only the specified cache should be used. When used, Pelican will not attempt to use other caches if the provided cache cannot provide the file.
+- **--caches:** Takes the path to a JSON file containing a list of caches. Similar to the `-c` flag, Pelican will attempt to use only these caches in the order they are listed.
+- **-r or --recursive:** Takes no argument and indicates to Pelican that all sub paths at the level of the provided namespace should be copied recursively. This option is only supported if the origin supports the WebDav protocol.
+- **-t or --token:** Takes a path to a file containing a signed JWT, and is used to download protected objects.
+
+## Effects Of Renaming The Pelican Binary
+
+The Pelican binary can change its behavior depending on what it is named. This feature serves two purposes; it allows Pelican to use a few convenient default settings in the case that the federation being interacted with is the OSDF, and it allows Pelican to run in legacy `stashcp` and `stash_plugin` modes.
+
+### Prefixing The Binary With OSDF
+
+When the name of the Pelican binary begins with `osdf`, Pelican will assume that all objects are coming from the OSDF which allows it to make several assumptions. The most immediate effect for users is that the `-f` flag no longer needs to be populated. The command to download a public file from above can then be simplified to:
+
+```console
+./osdf object copy /osgconnect/public/osg/testfile.txt downloaded-testfile.txt
+```
+
+### Naming The Binary `stashcp` Or `stash_plugin`
+
+The Pelican Project grew out of a command line tool called `stashcp` with an associated HTCondor plugin called `stash_plugin`, which were also used for interacting with objects in the OSDF. To support these legacy tools, Pelican has been built to behave similarly as `stashcp` and `stash_plugin` did whenever the Pelican binary is renamed to match the names of these tools.

@@ -21,208 +21,70 @@
 package xrootd
 
 import (
-	"bufio"
-	"context"
 	_ "embed"
-	"io"
-	"os"
-	"os/exec"
-	"os/signal"
 	"path/filepath"
-	"syscall"
-	"time"
 
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/metrics"
+	"github.com/pelicanplatform/pelican/daemon"
 	"github.com/pelicanplatform/pelican/param"
-	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 )
 
 type (
-	XrootdLauncher interface {
-		Launch(ctx context.Context, daemonName string, configPath string) (context.Context, int, error)
+	PrivilegedXrootdLauncher struct {
+		daemonName string
+		configPath string
 	}
 
-	PrivilegedXrootdLauncher struct{}
-
-	UnprivilegedXrootdLauncher struct{}
+	UnprivilegedXrootdLauncher struct {
+		daemon.DaemonLauncher
+	}
 )
 
-func forwardCommandToLogger(ctx context.Context, daemonName string, cmdStdout io.ReadCloser, cmdStderr io.ReadCloser) {
-	cmd_logger := log.WithFields(log.Fields{"daemon": daemonName})
-	stdout_scanner := bufio.NewScanner(cmdStdout)
-	stdout_lines := make(chan string, 10)
-
-	stderr_scanner := bufio.NewScanner(cmdStderr)
-	stderr_lines := make(chan string, 10)
-	go func() {
-		defer close(stdout_lines)
-		for stdout_scanner.Scan() {
-			stdout_lines <- stdout_scanner.Text()
-		}
-	}()
-	go func() {
-		defer close(stderr_lines)
-		for stderr_scanner.Scan() {
-			stderr_lines <- stderr_scanner.Text()
-		}
-	}()
-	for {
-		select {
-		case stdout_line, ok := <-stdout_lines:
-			if ok {
-				cmd_logger.Info(stdout_line)
-			} else {
-				stdout_lines = nil
-			}
-		case stderr_line, ok := <-stderr_lines:
-			if ok {
-				cmd_logger.Info(stderr_line)
-			} else {
-				stderr_lines = nil
-			}
-		}
-		if stdout_lines == nil && stderr_lines == nil {
-			break
-		}
-	}
-	<-ctx.Done()
+func (launcher PrivilegedXrootdLauncher) Name() string {
+	return launcher.daemonName
 }
 
-func (UnprivilegedXrootdLauncher) Launch(ctx context.Context, daemonName string, configPath string) (context.Context, int, error) {
+func makeUnprivilegedXrootdLauncher(daemonName string, configPath string) (result UnprivilegedXrootdLauncher, err error) {
+	result.DaemonName = daemonName
+	result.Uid = -1
+	result.Gid = -1
 	xrootdRun := param.Xrootd_RunLocation.GetString()
 	pidFile := filepath.Join(xrootdRun, "xrootd.pid")
-
-	cmd := exec.CommandContext(ctx, daemonName, "-f", "-s", pidFile, "-c", configPath)
-	if cmd.Err != nil {
-		return ctx, -1, cmd.Err
-	}
-	cmdStdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return ctx, -1, err
-	}
-	cmdStderr, err := cmd.StderrPipe()
-	if err != nil {
-		return ctx, -1, err
-	}
+	result.Args = []string{daemonName, "-f", "-s", pidFile, "-c", configPath}
 
 	if config.IsRootExecution() {
-		cmd.SysProcAttr = &syscall.SysProcAttr{}
-		uid, err := config.GetDaemonUID()
+		result.Uid, err = config.GetDaemonUID()
 		if err != nil {
-			return ctx, -1, err
+			return
 		}
-		gid, err := config.GetDaemonGID()
+		result.Gid, err = config.GetDaemonGID()
 		if err != nil {
-			return ctx, -1, err
+			return
 		}
-		cmd.SysProcAttr.Credential = &syscall.Credential{Uid: uint32(uid), Gid: uint32(gid)}
 	}
-
-	if err := cmd.Start(); err != nil {
-		return ctx, -1, err
-	}
-	go forwardCommandToLogger(ctx, daemonName, cmdStdout, cmdStderr)
-
-	ctx_result, cancel := context.WithCancelCause(ctx)
-	go func() {
-		cancel(cmd.Wait())
-	}()
-	return ctx_result, cmd.Process.Pid, nil
+	return
 }
 
-func LaunchXrootd(privileged bool, configPath string) (err error) {
-	var launcher XrootdLauncher
+func ConfigureLaunchers(privileged bool, configPath string) (launchers []daemon.Launcher, err error) {
 	if privileged {
-		launcher = PrivilegedXrootdLauncher{}
+		launchers = append(launchers, PrivilegedXrootdLauncher{"xrootd", configPath})
+		if param.Origin_EnableCmsd.GetBool() {
+			launchers = append(launchers, PrivilegedXrootdLauncher{"cmsd", configPath})
+		}
 	} else {
-		launcher = UnprivilegedXrootdLauncher{}
-	}
-	ctx := context.Background()
-
-	xrootdCtx, xrootdPid, err := launcher.Launch(ctx, "xrootd", configPath)
-	if err != nil {
-		return errors.Wrap(err, "Failed to launch xrootd daemon")
-	}
-	log.Info("Successfully launched xrootd")
-	if err := metrics.SetComponentHealthStatus("xrootd", "ok", ""); err != nil {
-		return err
-	}
-
-	cmsdCtx := context.Background()
-	cmsdPid := -1
-	if param.Origin_UseCmsd.GetBool() {
-		cmsdCtx, cmsdPid, err = launcher.Launch(ctx, "cmsd", configPath)
+		var result UnprivilegedXrootdLauncher
+		result, err = makeUnprivilegedXrootdLauncher("xrootd", configPath)
 		if err != nil {
-			return errors.Wrap(err, "Failed to launch cmsd daemon")
+			return
 		}
-		log.Info("Successfully launched cmsd")
-		if err := metrics.SetComponentHealthStatus("cmsd", "ok", ""); err != nil {
-			return err
-		}
-	}
-
-	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
-	var xrootdExpiry time.Time
-	var cmsdExpiry time.Time
-	for {
-		timer := time.NewTimer(time.Second)
-		select {
-		case sig := <-sigs:
-			if sys_sig, ok := sig.(syscall.Signal); ok {
-				log.Warnf("Forwarding signal %v to xrootd daemons\n", sys_sig)
-				if err = syscall.Kill(xrootdPid, sys_sig); err != nil {
-					return errors.Wrap(err, "Failed to forward signal to xrootd process")
-				}
-				if cmsdPid != -1 {
-					if err = syscall.Kill(cmsdPid, sys_sig); err != nil {
-						return errors.Wrap(err, "Failed to forward signal to cmsd process")
-					}
-				}
-			} else {
-				panic(errors.New("Unable to convert signal to syscall.Signal"))
+		launchers = append(launchers, result)
+		if param.Origin_EnableCmsd.GetBool() {
+			result, err = makeUnprivilegedXrootdLauncher("cmsd", configPath)
+			if err != nil {
+				return
 			}
-			xrootdExpiry = time.Now().Add(10 * time.Second)
-			cmsdExpiry = time.Now().Add(10 * time.Second)
-		case <-xrootdCtx.Done():
-			if waitResult := context.Cause(xrootdCtx); waitResult != nil {
-				if !xrootdExpiry.IsZero() {
-					return nil
-				}
-				if err = metrics.SetComponentHealthStatus("xrootd", "critical",
-					"xrootd process failed unexpectedly"); err != nil {
-					return err
-				}
-				return errors.Wrap(waitResult, "xrootd process failed unexpectedly")
-			}
-			log.Debugln("Xrootd daemon has shut down successfully")
-			return nil
-		case <-cmsdCtx.Done():
-			if waitResult := context.Cause(cmsdCtx); waitResult != context.Canceled {
-				if !cmsdExpiry.IsZero() {
-					return nil
-				}
-				if err = metrics.SetComponentHealthStatus("cmsd", "critical",
-					"cmsd process failed unexpectedly"); err != nil {
-					return nil
-				}
-				return errors.Wrap(waitResult, "cmsd process failed unexpectedly")
-			}
-			log.Debugln("Cmsd daemon has shut down successfully")
-			return nil
-		case <-timer.C:
-			if !xrootdExpiry.IsZero() && time.Now().After(xrootdExpiry) {
-				if err = syscall.Kill(xrootdPid, syscall.SIGKILL); err != nil {
-					return errors.Wrap(err, "Failed to SIGKILL the xrootd process")
-				}
-			}
-			if cmsdPid != -1 && !cmsdExpiry.IsZero() && time.Now().After(cmsdExpiry) {
-				if err = syscall.Kill(cmsdPid, syscall.SIGKILL); err != nil {
-					return errors.Wrap(err, "Failed to SIGKILL the cmsd process")
-				}
-			}
+			launchers = append(launchers, result)
 		}
 	}
+	return
 }

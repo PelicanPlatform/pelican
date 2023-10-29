@@ -27,6 +27,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 )
@@ -110,4 +111,40 @@ func TestDialerTimeout(t *testing.T) {
 	}
 
 	viper.Set("Transport.Dialer.Timeout", time.Second*10)
+}
+
+func TestInitConfig(t *testing.T) {
+	// Set prefix to OSDF to ensure that config is being set
+	testingPreferredPrefix = "OSDF"
+
+	InitConfig() // Should set up pelican.yaml, osdf.yaml and defaults.yaml
+
+	// Create a temp config file to use
+	tempCfgFile, err := os.CreateTemp("", "pelican-*.yaml")
+	viper.Set("config", tempCfgFile.Name())
+	if err != nil {
+		t.Fatalf("Failed to make temp file: %v", err)
+	}
+
+	// Check if server address is correct by defaults.yaml
+	assert.True(t, param.Server_Address.GetString() == "0.0.0.0")
+	// Check that Federation Discovery url is correct by osdf.yaml
+	assert.True(t, param.Federation_DiscoveryUrl.GetString() == "osg-htc.org")
+
+	viper.Set("Server.Address", "1.1.1.1") // should write to temp config file
+	if err := viper.WriteConfigAs(tempCfgFile.Name()); err != nil {
+		t.Fatalf("Failed to write to config file: %v", err)
+	}
+	viper.Reset()
+	viper.Set("config", tempCfgFile.Name()) // Set the temp file as the new 'pelican.yaml'
+	InitConfig()
+
+	// Check if server address overrides the default
+	assert.True(t, param.Server_Address.GetString() == "1.1.1.1")
+	viper.Reset()
+
+	//Test if prefix is not set, should not be able to find osdfYaml configuration
+	testingPreferredPrefix = ""
+	InitConfig()
+	assert.True(t, param.Federation_DiscoveryUrl.GetString() == "")
 }

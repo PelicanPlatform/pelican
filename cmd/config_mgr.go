@@ -28,7 +28,6 @@ import (
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/namespaces"
-	log "github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
 )
 
@@ -307,12 +306,4 @@ func init() {
 	rootConfigCmd.CompletionOptions.DisableDefaultCmd = true
 	rootConfigCmd.AddCommand(prefixCmd)
 	rootConfigCmd.AddCommand(tokenCmd)
-}
-
-func setLogging(logLevel log.Level) {
-	textFormatter := log.TextFormatter{}
-	textFormatter.DisableLevelTruncation = true
-	textFormatter.FullTimestamp = true
-	log.SetFormatter(&textFormatter)
-	log.SetLevel(logLevel)
 }

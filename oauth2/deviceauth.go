@@ -98,6 +98,7 @@ type Endpoint struct {
 	AuthURL       string
 	DeviceAuthURL string
 	TokenURL      string
+	UserInfoURL   string
 }
 
 func retrieveDeviceAuth(ctx context.Context, c *Config, v url.Values) (*DeviceAuth, error) {

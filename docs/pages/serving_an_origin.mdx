@@ -1,0 +1,81 @@
+import ExportedImage from "next-image-export-optimizer";
+
+# Install Pelican Origin
+
+The [Pelican](http://pelicanplatform.org/) origin exposes a storage backend like POSIX or S3 to other members of the federation. This will give you the steps to install XRootD as well as how to install Pelican and start up an origin.
+
+## Before Starting
+
+
+Before starting the installation process, consider the following points:
+
+-   **User IDs:** If it does not exist already, the installation will create the Linux user ID `xrootd`
+-   **Service certificate:** The XRootD service uses a host certificate and key pair at
+    `/etc/grid-security/xrd/xrdcert.pem` and `/etc/grid-security/xrd/xrdkey.pem` that must be owned by the `xrootd` user
+-   **Networking:** The XRootD service uses port 1094 by default
+
+As with all OSG software installations, there are some one-time (per host) steps to prepare in advance:
+
+-   Ensure the host has [a supported operating system](https://osg-htc.org/docs/release/supported_platforms/)
+-   Obtain root access to the host
+-   Prepare [the required Yum repositories](https://osg-htc.org/docs/common/yum/)
+-   Install [CA certificates](https://osg-htc.org/docs/common/ca/)
+-   Install XRootD (Instructions to follow)
+
+## XRootD
+
+#### Requirements for XRootD-Multiuser with VOMS FQANs
+
+    Using XRootD-Multiuser with a VOMS FQAN requires mapping the FQAN to a username, which requires a `voms-mapfile`.
+    Support is available in `xrootd-voms 5.4.2-1.1`, in the OSG 3.6 repos, though it is expected in XRootD 5.5.0.
+    If you want to use multiuser, ensure you are getting `xrootd-voms` from the OSG repos.
+
+
+### Installing XRootD
+
+To install an XRootD Standalone server, run the following command:
+
+```console
+root@xrootd-standalone # yum install osg-xrootd-standalone
+```
+
+## Installing Pelican
+
+
+Grab the appropriate binary for your system from the [pelican repository](https://github.com/PelicanPlatform/pelican/releases). For more details, see [the client installation instructions](/install.mdx)
+
+## Serving an Origin
+
+### Register the origin with the namespace-registry
+
+Before serving an origin, you need to register the origin with the namespace-registry. This can be done by running
+
+```pelican namespace register --prefix <namespace prefix> --namespace-url <registry url>```
+
+Where `<namespace_prefix>` is a namespace prefix associated with the origin and `<registry url>` is the url of the namespace registry. This gives the registry the public key for the origin, and makes that public key available to all of the other services in the federation for verifying tokens
+
+
+### Running Origin Serve
+
+To launch a pelican origin, run:
+
+```./pelican origin serve -f <federation> -v <local_directory>:<namespace_prefix>```
+
+Where `<federation>` is the address of the federation the origin will be a part of, `<local directory>` is the directory containing objects to be exported to the federation, and `<namespace prefix>` is the namespace at which files from `<local directory>` will be made available in the federation.
+
+The first time the origin is started, you will see something that looks like the following:
+
+
+<ExportedImage width={1000} height={1000} src={"/pelican/origin_start.png"} alt={"Image of an origin startup terminal prompt with the initializaiton code"} />
+
+To initialize the admin interface (to see the metrics), go to the website specified (in this example replace `977d77de9b9d` with `localhost`).
+
+You will see a warning that looks like the following (with some differences with respect to the browser):
+
+<ExportedImage width={1000} height={1000} src={"/pelican/invalid_certificate.png"} alt={"Image of a safari browser invalid certificate warning"} />
+
+Proceed despite the warning to get to the code entry page. Enter the code specified in the terminal and create a root metrics password. You should now see a webpage that looks like so:
+
+<ExportedImage width={1000} height={1000} src={"/pelican/metrics_view.png"} alt={"Image of prometheus metrics graphs for a Pelican origin"} />
+
+This will refresh every 10 minutes with the xrootd health metrics so that, as an admin, you can check the status of your origin.
