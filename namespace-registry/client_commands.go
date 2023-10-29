@@ -170,7 +170,7 @@ func NamespaceRegister(privateKey jwk.Key, namespaceRegistryEndpoint string, acc
 	// Handle case where there was an error encoded in the body
 	if err != nil {
 		if unmarshalErr := json.Unmarshal(resp, &respData); unmarshalErr == nil { // Error creating json
-			return errors.Wrapf(err, "Failed to make request: %v", respData.Error)
+			return errors.Wrapf(err, "Failed to make request (server message is '%v')", respData.Error)
 		}
 		return errors.Wrap(err, "Failed to make request")
 	}
@@ -184,7 +184,7 @@ func NamespaceRegister(privateKey jwk.Key, namespaceRegistryEndpoint string, acc
 	clientPayload := clientNonce + respData.ServerNonce
 
 	// Sign the payload
-	var privateKeyRaw *ecdsa.PrivateKey
+	privateKeyRaw := &ecdsa.PrivateKey{}
 	if err = privateKey.Raw(privateKeyRaw); err != nil {
 		return errors.Wrap(err, "Failed to get an ECDSA private key")
 	}

@@ -99,7 +99,7 @@ func registerANamespace(cmd *cobra.Command, args []string) {
 	 *       namespace. There is a similar TODO listed in registry.go, as the choices made
 	 *       there mirror the choices made here.
 	 * To enforce that we're only trying to register one key, we check the length here
-	*/
+	 */
 	if publicKey.Len() > 1 {
 		log.Errorf("Only one public key can be registered in this step, but %d were provided\n", publicKey.Len())
 		os.Exit(1)
