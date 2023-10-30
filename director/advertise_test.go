@@ -22,6 +22,7 @@ func TestParseServerAd(t *testing.T) {
 	ad := parseServerAd(server, OriginType)
 	assert.Equal(t, ad.AuthURL.String(), "https://my-auth-endpoint.com")
 	assert.Equal(t, ad.URL.String(), "http://my-endpoint.com")
+	assert.Equal(t, ad.WebURL.String(), "")
 	assert.Equal(t, ad.Name, "MY_SERVER")
 	assert.True(t, ad.Type == OriginType)
 
