@@ -34,7 +34,7 @@ import (
 	oauth2_upstream "golang.org/x/oauth2"
 )
 
-func TokenIsAcceptable(jwtSerialized string, osdfPath string, namespace namespaces.Namespace, isWrite bool) bool {
+func TokenIsAcceptable(jwtSerialized string, osdfPath string, namespace namespaces.Namespace, opts config.TokenGenerationOpts) bool {
 	parser := jwt.Parser{SkipClaimsValidation: true}
 	token, _, err := parser.ParseUnverified(jwtSerialized, &jwt.MapClaims{})
 	if err != nil {
@@ -71,7 +71,7 @@ func TokenIsAcceptable(jwtSerialized string, osdfPath string, namespace namespac
 		for _, scope := range strings.Split(scopes, " ") {
 			scope_info := strings.Split(scope, ":")
 			scopeOK := false
-			if isWrite && (scope_info[0] == "storage.modify" || scope_info[0] == "storage.create") {
+			if (opts.Operation == config.TokenWrite || opts.Operation == config.TokenSharedWrite) && (scope_info[0] == "storage.modify" || scope_info[0] == "storage.create") {
 				scopeOK = true
 			} else if scope_info[0] == "storage.read" {
 				scopeOK = true
@@ -84,7 +84,9 @@ func TokenIsAcceptable(jwtSerialized string, osdfPath string, namespace namespac
 				acceptableScope = true
 				break
 			}
-			if strings.HasPrefix(targetResource, scope_info[1]) {
+			// Shared URLs must have exact matches; otherwise, prefix matching is acceptable.
+			if ((opts.Operation == config.TokenSharedWrite || opts.Operation == config.TokenSharedRead) && (targetResource == scope_info[1])) ||
+				strings.HasPrefix(targetResource, scope_info[1]) {
 				acceptableScope = true
 				break
 			}
@@ -142,7 +144,7 @@ func RegisterClient(namespace namespaces.Namespace) (*config.PrefixEntry, error)
 
 // Given a URL and a piece of the namespace, attempt to acquire a valid
 // token for that URL.
-func AcquireToken(destination *url.URL, namespace namespaces.Namespace, isWrite bool) (string, error) {
+func AcquireToken(destination *url.URL, namespace namespaces.Namespace, opts config.TokenGenerationOpts) (string, error) {
 	log.Debugln("Acquiring a token from configuration and OAuth2")
 
 	if namespace.CredentialGen == nil || namespace.CredentialGen.Strategy == nil {
@@ -208,7 +210,7 @@ func AcquireToken(destination *url.URL, namespace namespaces.Namespace, isWrite 
 	var acceptableToken *config.TokenEntry = nil
 	acceptableUnexpiredToken := ""
 	for idx, token := range prefixEntry.Tokens {
-		if !TokenIsAcceptable(token.AccessToken, destination.Path, namespace, isWrite) {
+		if !TokenIsAcceptable(token.AccessToken, destination.Path, namespace, opts) {
 			continue
 		}
 		if acceptableToken == nil {
@@ -262,7 +264,7 @@ func AcquireToken(destination *url.URL, namespace namespaces.Namespace, isWrite 
 		}
 	}
 
-	token, err := oauth2.AcquireToken(issuer, prefixEntry, namespace.CredentialGen, destination.Path, isWrite)
+	token, err := oauth2.AcquireToken(issuer, prefixEntry, namespace.CredentialGen, destination.Path, opts)
 	if err != nil {
 		return "", err
 	}

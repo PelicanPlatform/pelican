@@ -46,35 +46,49 @@ import (
 )
 
 // Structs holding the OAuth2 state (and any other OSDF config needed)
+type (
+	TokenEntry struct {
+		Expiration   int64  `yaml:"expiration"`
+		AccessToken  string `yaml:"access_token"`
+		RefreshToken string `yaml:"refresh_token,omitempty"`
+	}
 
-type TokenEntry struct {
-	Expiration   int64  `yaml:"expiration"`
-	AccessToken  string `yaml:"access_token"`
-	RefreshToken string `yaml:"refresh_token,omitempty"`
-}
+	PrefixEntry struct {
+		// OSDF namespace prefix
+		Prefix       string       `yaml:"prefix"`
+		ClientID     string       `yaml:"client_id"`
+		ClientSecret string       `yaml:"client_secret"`
+		Tokens       []TokenEntry `yaml:"tokens,omitempty"`
+	}
 
-type PrefixEntry struct {
-	// OSDF namespace prefix
-	Prefix       string       `yaml:"prefix"`
-	ClientID     string       `yaml:"client_id"`
-	ClientSecret string       `yaml:"client_secret"`
-	Tokens       []TokenEntry `yaml:"tokens,omitempty"`
-}
+	OSDFConfig struct {
 
-type OSDFConfig struct {
+		// Top-level OSDF object
+		OSDF struct {
+			// List of OAuth2 client configurations
+			OauthClient []PrefixEntry `yaml:"oauth_client,omitempty"`
+		} `yaml:"OSDF"`
+	}
 
-	// Top-level OSDF object
-	OSDF struct {
-		// List of OAuth2 client configurations
-		OauthClient []PrefixEntry `yaml:"oauth_client,omitempty"`
-	} `yaml:"OSDF"`
-}
+	FederationDiscovery struct {
+		DirectorEndpoint              string `json:"director_endpoint"`
+		NamespaceRegistrationEndpoint string `json:"namespace_registration_endpoint"`
+		JwksUri                       string `json:"jwks_uri"`
+	}
 
-type FederationDiscovery struct {
-	DirectorEndpoint              string `json:"director_endpoint"`
-	NamespaceRegistrationEndpoint string `json:"namespace_registration_endpoint"`
-	JwksUri                       string `json:"jwks_uri"`
-}
+	TokenOperation int
+
+	TokenGenerationOpts struct {
+		Operation TokenOperation
+	}
+)
+
+const (
+	TokenWrite TokenOperation = iota
+	TokenRead
+	TokenSharedWrite
+	TokenSharedRead
+)
 
 var (
 	// Some of the unit tests probe behavior specific to OSDF vs Pelican.  Hence,
@@ -167,7 +181,8 @@ func DiscoverFederation() error {
 	discoveryUrl.Path = path.Join(".well-known/pelican-configuration", federationUrl.Path)
 
 	httpClient := http.Client{
-		Timeout: time.Second * 5,
+		Transport: GetTransport(),
+		Timeout:   time.Second * 5,
 	}
 	req, err := http.NewRequest(http.MethodGet, discoveryUrl.String(), nil)
 	if err != nil {
@@ -345,9 +360,8 @@ func InitConfig() {
 	}
 }
 
-func InitServer() error {
+func initConfigDir() error {
 	configDir := viper.GetString("ConfigDir")
-	viper.SetConfigType("yaml")
 	if configDir == "" {
 		if IsRootExecution() {
 			configDir = "/etc/pelican"
@@ -360,7 +374,15 @@ func InitServer() error {
 		}
 		viper.SetDefault("ConfigDir", configDir)
 	}
+	return nil
+}
 
+func InitServer() error {
+	if err := initConfigDir(); err != nil {
+		return errors.Wrap(err, "Failed to initialize the server configuration")
+	}
+	configDir := viper.GetString("ConfigDir")
+	viper.SetConfigType("yaml")
 	viper.SetDefault("Server.TLSCertificate", filepath.Join(configDir, "certificates", "tls.crt"))
 	viper.SetDefault("Server.TLSKey", filepath.Join(configDir, "certificates", "tls.key"))
 	viper.SetDefault("Server.TLSCAKey", filepath.Join(configDir, "certificates", "tlsca.key"))
@@ -437,18 +459,15 @@ func InitServer() error {
 }
 
 func InitClient() error {
-	if IsRootExecution() {
-		viper.SetDefault("IssuerKey", "/etc/pelican/issuer.jwk")
-	} else {
-		configBase, err := getConfigBase()
-		if err != nil {
-			log.Warningln("No home directory found for user -- will check for configuration yaml in /etc/pelican/")
-		}
-		viper.SetDefault("IssuerKey", filepath.Join(configBase, "issuer.jwk"))
+	if err := initConfigDir(); err != nil {
+		log.Warningln("No home directory found for user -- will check for configuration yaml in /etc/pelican/")
+		viper.Set("ConfigDir", "/etc/pelican")
 	}
 
+	configDir := viper.GetString("ConfigDir")
+	viper.SetDefault("IssuerKey", filepath.Join(configDir, "issuer.jwk"))
+
 	upper_prefix := GetPreferredPrefix()
-	lower_prefix := strings.ToLower(upper_prefix)
 
 	viper.SetDefault("Client.StoppedTransferTimeout", 100)
 	viper.SetDefault("Client.SlowTransferRampupTime", 100)
@@ -463,7 +482,6 @@ func InitClient() error {
 
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
-	viper.AddConfigPath("$HOME/." + lower_prefix)
 	err := viper.ReadInConfig()
 	if err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {

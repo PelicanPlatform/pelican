@@ -20,7 +20,6 @@ package oauth2
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -28,6 +27,7 @@ import (
 
 	config "github.com/pelicanplatform/pelican/config"
 	namespaces "github.com/pelicanplatform/pelican/namespaces"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -64,9 +64,9 @@ func trimPath(pathName string, maxDepth int) string {
 	return "/" + path.Join(pathComponents[0:maxLength]...)
 }
 
-func AcquireToken(issuerUrl string, entry *config.PrefixEntry, credentialGen *namespaces.CredentialGeneration, osdfPath string, isWrite bool) (*config.TokenEntry, error) {
+func AcquireToken(issuerUrl string, entry *config.PrefixEntry, credentialGen *namespaces.CredentialGeneration, osdfPath string, opts config.TokenGenerationOpts) (*config.TokenEntry, error) {
 
-	if fileInfo, _ := os.Stdout.Stat(); (fileInfo.Mode() & os.ModeCharDevice) == 0 {
+	if fileInfo, _ := os.Stdout.Stat(); (len(os.Getenv(config.GetPreferredPrefix()+"_SKIP_TERMINAL_CHECK")) == 0) && ((fileInfo.Mode() & os.ModeCharDevice) == 0) {
 		return nil, errors.New("This program must be run in a terminal to acquire a new token")
 	}
 
@@ -92,13 +92,13 @@ func AcquireToken(issuerUrl string, entry *config.PrefixEntry, credentialGen *na
 		}
 
 		// Potentially increase the coarseness of the token
-		if credentialGen.MaxScopeDepth != nil && *credentialGen.MaxScopeDepth >= 0 {
+		if opts.Operation != config.TokenSharedWrite && opts.Operation != config.TokenSharedRead && credentialGen.MaxScopeDepth != nil && *credentialGen.MaxScopeDepth >= 0 {
 			pathCleaned = trimPath(pathCleaned, *credentialGen.MaxScopeDepth)
 		}
 	}
 
 	var storageScope string
-	if isWrite {
+	if opts.Operation == config.TokenSharedWrite || opts.Operation == config.TokenWrite {
 		storageScope = "storage.create:"
 	} else {
 		storageScope = "storage.read:"
@@ -118,7 +118,7 @@ func AcquireToken(issuerUrl string, entry *config.PrefixEntry, credentialGen *na
 	ctx := context.Background()
 	deviceAuth, err := oauth2Config.AuthDevice(ctx)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrapf(err, "Failed to perform device code flow with URL %s", issuerInfo.DeviceAuthURL)
 	}
 
 	if len(deviceAuth.VerificationURIComplete) > 0 {

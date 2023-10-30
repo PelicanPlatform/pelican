@@ -182,7 +182,11 @@ func getToken(destination *url.URL, namespace namespaces.Namespace, isWrite bool
 
 		if token_location == "" {
 			if !ObjectClientOptions.Plugin {
-				value, err := AcquireToken(destination, namespace, isWrite)
+				opts := config.TokenGenerationOpts{Operation: config.TokenSharedRead}
+				if isWrite {
+					opts.Operation = config.TokenSharedWrite
+				}
+				value, err := AcquireToken(destination, namespace, opts)
 				if err == nil {
 					return value, nil
 				}
@@ -505,7 +509,7 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 			AddError(err)
 			return 0, err
 		}
-		err = CreateNsFromDirectorResp(dirResp, &ns)
+		ns, err = CreateNsFromDirectorResp(dirResp)
 		if err != nil {
 			AddError(err)
 			return 0, err
