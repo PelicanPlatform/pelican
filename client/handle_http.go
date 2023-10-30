@@ -491,6 +491,24 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 		}
 	}
 
+	// Size of the download
+	contentLength := resp.Size
+	// Do a head request for content length if resp.Size is unknown
+	if contentLength <= 0 {
+		headClient := &http.Client{Transport: config.GetTransport()}
+		headRequest, _ := http.NewRequest("HEAD", transfer.Url.String(), nil)
+		headResponse, err := headClient.Do(headRequest)
+		if err != nil {
+			log.Errorln("Could not successfully get response for HEAD request")
+		}
+		defer headResponse.Body.Close()
+		contentLengthStr := headResponse.Header.Get("Content-Length")
+		contentLength, err = strconv.ParseInt(contentLengthStr, 10, 64)
+		if err != nil {
+			log.Errorln("problem converting content-length to an int", err)
+		}
+	}
+
 	var progressBar *mpb.Bar
 	if ObjectClientOptions.ProgressBars {
 		progressBar = p.AddBar(0,
@@ -520,12 +538,13 @@ Loop:
 		select {
 		case <-progressTicker.C:
 			if ObjectClientOptions.ProgressBars {
-				progressBar.SetTotal(resp.Size, false)
+				progressBar.SetTotal(contentLength, false)
 				currentCompletedBytes := resp.BytesComplete()
 				bytesDelta := currentCompletedBytes - previousCompletedBytes
 				previousCompletedBytes = currentCompletedBytes
 				currentCompletedTime := time.Now()
-				progressBar.EwmaIncrInt64(bytesDelta, currentCompletedTime.Sub(previousCompletedTime))
+				timeElapsed := currentCompletedTime.Sub(previousCompletedTime)
+				progressBar.EwmaIncrInt64(bytesDelta, timeElapsed)
 				previousCompletedTime = currentCompletedTime
 			}
 
@@ -592,7 +611,7 @@ Loop:
 				if downloadError != nil {
 					log.Errorln(downloadError.Error())
 				}
-				progressBar.SetTotal(resp.Size, true)
+				progressBar.SetTotal(contentLength, true)
 				// call wait here for the bar to complete and flush
 				p.Wait()
 			}
