@@ -1,3 +1,5 @@
+//go:build !windows
+
 /***************************************************************
  *
  * Copyright (C) 2023, Pelican Project, Morgridge Institute for Research
@@ -19,6 +21,8 @@
 package origin_ui
 
 import (
+	"context"
+	"crypto/elliptic"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -27,11 +31,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 var (
@@ -61,6 +68,14 @@ func TestMain(m *testing.M) {
 
 	//Override viper default for testing
 	viper.Set("IssuerKey", filepath.Join(tempJWKDir, "issuer.jwk"))
+
+	// Ensure we load up the default configs.
+	config.InitConfig()
+	if err := config.InitServer(); err != nil {
+		fmt.Println("Failed to configure the test module")
+		os.Exit(1)
+	}
+
 	//Get keys
 	_, err = config.GenerateIssuerJWKS()
 	if err != nil {
@@ -84,7 +99,63 @@ func TestMain(m *testing.M) {
 	os.Exit(exitCode)
 }
 
+func TestWaitUntilLogin(t *testing.T) {
+	dirName := t.TempDir()
+	viper.Reset()
+	viper.Set("ConfigDir", dirName)
+	config.InitConfig()
+	err := config.InitServer()
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		err := WaitUntilLogin(ctx)
+		require.NoError(t, err)
+	}()
+	activationCodeFile := param.Origin_UIActivationCodeFile.GetString()
+	start := time.Now()
+	for {
+		time.Sleep(10 * time.Millisecond)
+		contents, err := os.ReadFile(activationCodeFile)
+		if os.IsNotExist(err) {
+			if time.Since(start) > 10*time.Second {
+				require.Fail(t, "The UI activation code file did not appear within 10 seconds")
+			}
+			continue
+		} else {
+			require.NoError(t, err)
+		}
+		contentsStr := string(contents[:len(contents)-1])
+		require.Equal(t, *currentCode.Load(), contentsStr)
+		break
+	}
+	cancel()
+	start = time.Now()
+	for {
+		time.Sleep(10 * time.Millisecond)
+		if _, err := os.Stat(activationCodeFile); err == nil {
+			if time.Since(start) > 10*time.Second {
+				require.Fail(t, "The UI activation code file was not cleaned up")
+				return
+			}
+			continue
+		} else if !os.IsNotExist(err) {
+			require.NoError(t, err)
+		}
+		break
+	}
+}
+
 func TestCodeBasedLogin(t *testing.T) {
+	dirName := t.TempDir()
+	viper.Reset()
+	viper.Set("ConfigDir", dirName)
+	config.InitConfig()
+	err := config.InitServer()
+	require.NoError(t, err)
+	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256())
+	require.NoError(t, err)
+
 	//Invoke the code login API with the correct code, ensure we get a valid code back
 	t.Run("With valid code", func(t *testing.T) {
 		newCode := fmt.Sprintf("%06v", rand.Intn(1000000))
@@ -112,6 +183,7 @@ func TestCodeBasedLogin(t *testing.T) {
 
 	//Invoke the code login with the wrong code, ensure we get a 401
 	t.Run("With invalid code", func(t *testing.T) {
+		require.True(t, param.Origin_EnableUI.GetBool())
 		req, err := http.NewRequest("POST", "/api/v1.0/origin-ui/initLogin", strings.NewReader(`{"code": "20"}`))
 		assert.NoError(t, err)
 
@@ -127,10 +199,20 @@ func TestCodeBasedLogin(t *testing.T) {
 }
 
 func TestPasswordResetAPI(t *testing.T) {
+	dirName := t.TempDir()
+	viper.Reset()
+	viper.Set("ConfigDir", dirName)
+	viper.Set("Origin.UIPasswordFile", tempPasswdFile.Name())
+	err := config.InitServer()
+	require.NoError(t, err)
+	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256())
+	require.NoError(t, err)
+	viper.Set("Origin.UIPasswordFile", tempPasswdFile.Name())
+
 	//////////////////////////////SETUP////////////////////////////////
 	//Add an admin user to file to configure
 	content := "admin:password\n"
-	_, err := tempPasswdFile.WriteString(content)
+	_, err = tempPasswdFile.WriteString(content)
 	assert.NoError(t, err, "Error writing to temp password file")
 
 	//Configure UI
@@ -138,7 +220,7 @@ func TestPasswordResetAPI(t *testing.T) {
 	assert.NoError(t, err)
 
 	//Create a user for testing
-	err = writePasswordEntry("user", "password")
+	err = WritePasswordEntry("user", "password")
 	assert.NoError(t, err, "error writing a user")
 	password := "password"
 	user := "user"
@@ -156,7 +238,7 @@ func TestPasswordResetAPI(t *testing.T) {
 	//Check ok http reponse
 	assert.Equal(t, http.StatusOK, recorder.Code)
 	//Check that success message returned
-	assert.JSONEq(t, `{"msg":"Success"}`, recorder.Body.String())
+	require.JSONEq(t, `{"msg":"Success"}`, recorder.Body.String())
 	//Get the cookie to pass to password reset
 	loginCookie := recorder.Result().Cookies()
 	cookieValue := loginCookie[0].Value
@@ -221,10 +303,16 @@ func TestPasswordResetAPI(t *testing.T) {
 }
 
 func TestPasswordBasedLoginAPI(t *testing.T) {
+	viper.Reset()
+	config.InitConfig()
+	viper.Set("Origin.UIPasswordFile", tempPasswdFile.Name())
+	err := config.InitServer()
+	require.NoError(t, err)
+
 	///////////////////////////SETUP///////////////////////////////////
 	//Add an admin user to file to configure
 	content := "admin:password\n"
-	_, err := tempPasswdFile.WriteString(content)
+	_, err = tempPasswdFile.WriteString(content)
 	assert.NoError(t, err, "Error writing to temp password file")
 
 	//Configure UI
@@ -232,7 +320,7 @@ func TestPasswordBasedLoginAPI(t *testing.T) {
 	assert.NoError(t, err)
 
 	//Create a user for testing
-	err = writePasswordEntry("user", "password")
+	err = WritePasswordEntry("user", "password")
 	assert.NoError(t, err, "error writing a user")
 	password := "password"
 	user := "user"
@@ -327,10 +415,21 @@ func TestPasswordBasedLoginAPI(t *testing.T) {
 }
 
 func TestWhoamiAPI(t *testing.T) {
+	dirName := t.TempDir()
+	viper.Reset()
+	config.InitConfig()
+	viper.Set("ConfigDir", dirName)
+	viper.Set("Origin.UIPasswordFile", tempPasswdFile.Name())
+	err := config.InitServer()
+	require.NoError(t, err)
+	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256())
+	require.NoError(t, err)
+	viper.Set("Origin.UIPasswordFile", tempPasswdFile.Name())
+
 	///////////////////////////SETUP///////////////////////////////////
 	//Add an admin user to file to configure
 	content := "admin:password\n"
-	_, err := tempPasswdFile.WriteString(content)
+	_, err = tempPasswdFile.WriteString(content)
 	assert.NoError(t, err, "Error writing to temp password file")
 
 	//Configure UI
@@ -338,7 +437,7 @@ func TestWhoamiAPI(t *testing.T) {
 	assert.NoError(t, err)
 
 	//Create a user for testing
-	err = writePasswordEntry("user", "password")
+	err = WritePasswordEntry("user", "password")
 	assert.NoError(t, err, "error writing a user")
 	password := "password"
 	user := "user"

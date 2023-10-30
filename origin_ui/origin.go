@@ -20,6 +20,7 @@ package origin_ui
 
 import (
 	"bufio"
+	"context"
 	"crypto/ecdsa"
 	"embed"
 	"fmt"
@@ -30,7 +31,6 @@ import (
 	"os"
 	"os/signal"
 	"path"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -44,7 +44,6 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/tg123/go-htpasswd"
-	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/term"
 )
 
@@ -72,21 +71,6 @@ var (
 	webAssets embed.FS
 )
 
-func doReload() error {
-	db := authDB.Load()
-	if db == nil {
-		log.Debug("Cannot reload auth database - not configured")
-		return nil
-	}
-	err := db.Reload(nil)
-	if err != nil {
-		log.Warningln("Failed to reload auth database:", err)
-		return err
-	}
-	log.Debug("Successfully reloaded the auth database")
-	return nil
-}
-
 func periodicReload() {
 	for {
 		time.Sleep(30 * time.Second)
@@ -95,7 +79,11 @@ func periodicReload() {
 	}
 }
 
-func WaitUntilLogin() error {
+func WaitUntilLogin(ctx context.Context) error {
+	if !param.Origin_EnableUI.GetBool() {
+		return nil
+	}
+
 	if authDB.Load() != nil {
 		return nil
 	}
@@ -109,11 +97,22 @@ func WaitUntilLogin() error {
 		isTTY = true
 		fmt.Printf("\n\n\n\n")
 	}
+	activationFile := param.Origin_UIActivationCodeFile.GetString()
 
+	defer func() {
+		if err := os.Remove(activationFile); err != nil {
+			log.Warningf("Failed to remove activation code file (%v): %v\n", activationFile, err)
+		}
+	}()
 	for {
 		previousCode.Store(currentCode.Load())
 		newCode := fmt.Sprintf("%06v", rand.Intn(1000000))
 		currentCode.Store(&newCode)
+		newCodeWithNewline := fmt.Sprintf("%v\n", newCode)
+		if err := os.WriteFile(activationFile, []byte(newCodeWithNewline), 0600); err != nil {
+			log.Errorf("Failed to write activation code to file (%v): %v\n", activationFile, err)
+		}
+
 		if isTTY {
 			fmt.Printf("\033[A\033[A\033[A\033[A")
 			fmt.Printf("\033[2K\n")
@@ -130,6 +129,8 @@ func WaitUntilLogin() error {
 			select {
 			case <-sigs:
 				return errors.New("Process terminated...")
+			case <-ctx.Done():
+				return nil
 			default:
 				time.Sleep(100 * time.Millisecond)
 			}
@@ -138,41 +139,6 @@ func WaitUntilLogin() error {
 			}
 		}
 	}
-}
-
-func writePasswordEntry(user, password string) error {
-	fileName := param.Origin_UIPasswordFile.GetString()
-	passwordBytes := []byte(password)
-	if len(passwordBytes) > 72 {
-		return errors.New("Password too long")
-	}
-	hashed, err := bcrypt.GenerateFromPassword(passwordBytes, bcrypt.DefaultCost)
-	if err != nil {
-		return err
-	}
-	entry := user + ":" + string(hashed) + "\n"
-
-	directory := filepath.Dir(fileName)
-	err = os.MkdirAll(directory, 0750)
-	if err != nil {
-		return err
-	}
-	fp, err := os.OpenFile(fileName, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0600)
-	if err != nil {
-		return err
-	}
-	defer fp.Close()
-	if _, err = fp.Write([]byte(entry)); err != nil {
-		return err
-	}
-
-	db := authDB.Load()
-	if db != nil {
-		if db.Reload(nil) != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func configureAuthDB() error {
@@ -347,7 +313,7 @@ func resetLoginHandler(ctx *gin.Context) {
 		return
 	}
 
-	if err := writePasswordEntry(user, passwordReset.Password); err != nil {
+	if err := WritePasswordEntry(user, passwordReset.Password); err != nil {
 		log.Errorf("Password reset for user %s failed: %s", user, err)
 		ctx.JSON(500, gin.H{"error": "Failed to reset password"})
 	} else {
@@ -372,6 +338,11 @@ func getConfig(ctx *gin.Context) {
 func ConfigureOriginUI(router *gin.Engine) error {
 	if router == nil {
 		return errors.New("Origin configuration passed a nil pointer")
+	}
+
+	if !param.Origin_EnableUI.GetBool() {
+		log.Infoln("Origin web UI is not enabled; skipping setup")
+		return nil
 	}
 
 	if err := configureAuthDB(); err != nil {

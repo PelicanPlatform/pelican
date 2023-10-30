@@ -271,9 +271,24 @@ type: string
 default: $ConfigBase/origin-ui-passwd
 components: ["origin"]
 ---
+name: Origin.UIActivationCodeFile
+description: >-
+  If the origin's web user interface has not yet been configured, this file will
+  contain the activation code necessary to turn it on.
+type: string
+default: $ConfigBase/origin-activation-code
+components: ["origin"]
+---
 name: Origin.SelfTest
 description: >-
   A bool indicating whether the origin should perform self health checks.
+type: bool
+default: true
+components: ["origin"]
+---
+name: Origin.EnableUI
+description: >-
+  Indicate whether the origin should enable its web UI.
 type: bool
 default: true
 components: ["origin"]
