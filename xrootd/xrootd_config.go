@@ -22,8 +22,10 @@ import (
 )
 
 var (
-	//go:embed resources/xrootd.cfg
-	xrootdCfg string
+	//go:embed resources/xrootd-origin.cfg
+	xrootdOriginCfg string
+	//go:embed resources/xrootd-cache.cfg
+	xrootdCacheCfg string
 	//go:embed resources/robots.txt
 	robotsTxt string
 )
@@ -36,6 +38,13 @@ type (
 		EnableVoms      bool
 		SelfTest        bool
 		NamespacePrefix string
+	}
+
+	CacheConfig struct {
+		UseCmsd          bool
+		ExportLocation   string
+		DataFileLocation string
+		DirectorUrl      string
 	}
 
 	XrootdOptions struct {
@@ -67,6 +76,7 @@ type (
 		Server ServerConfig
 		Origin OriginConfig
 		Xrootd XrootdOptions
+		Cache  CacheConfig
 	}
 )
 
@@ -294,6 +304,13 @@ func ConfigXrootd(origin bool) (string, error) {
 				return "", errors.New("Origin.Multiuser is set to `true` but the command was run without sufficient privilege; was it launched as root?")
 			}
 		}
+	}
+
+	var xrootdCfg string
+	if origin {
+		xrootdCfg = xrootdOriginCfg
+	} else {
+		xrootdCfg = xrootdCacheCfg
 	}
 
 	templ := template.Must(template.New("xrootd.cfg").Parse(xrootdCfg))
