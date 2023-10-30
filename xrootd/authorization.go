@@ -252,7 +252,7 @@ func GenerateOriginIssuer(exportedPaths []string) (issuer Issuer, err error) {
 	issuer.Name = "Origin"
 	issuer.Issuer = param.Origin_Url.GetString()
 	issuer.BasePaths = exportedPaths
-	issuer.RestrictedPaths = []string{param.Origin_ScitokensRestrictedPaths.GetString()}
+	issuer.RestrictedPaths = param.Origin_ScitokensRestrictedPaths.GetStringSlice()
 	issuer.MapSubject = param.Origin_ScitokensMapSubject.GetBool()
 	issuer.DefaultUser = param.Origin_ScitokensDefaultUser.GetString()
 	issuer.UsernameClaim = param.Origin_ScitokensUsernameClaim.GetString()

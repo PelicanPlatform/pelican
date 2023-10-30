@@ -63,6 +63,7 @@ func GenParamEnum() {
 	}
 
 	stringParamMap := make(map[string]string)
+	stringSliceParamMap := make(map[string]string)
 	intParamMap := make(map[string]string)
 	boolParamMap := make(map[string]string)
 	durationParamMap := make(map[string]string)
@@ -102,6 +103,8 @@ func GenParamEnum() {
 			fallthrough
 		case "string":
 			stringParamMap[name] = rawName
+		case "stringSlice":
+			stringSliceParamMap[name] = rawName
 		case "int":
 			intParamMap[name] = rawName
 		case "bool":
@@ -123,11 +126,12 @@ func GenParamEnum() {
 
 	// Generate the code based on the template
 	err = packageTemplate.Execute(f, struct {
-		StringMap   map[string]string
-		IntMap      map[string]string
-		BoolMap     map[string]string
-		DurationMap map[string]string
-	}{StringMap: stringParamMap, IntMap: intParamMap, BoolMap: boolParamMap, DurationMap: durationParamMap})
+		StringMap      map[string]string
+		StringSliceMap map[string]string
+		IntMap         map[string]string
+		BoolMap        map[string]string
+		DurationMap    map[string]string
+	}{StringMap: stringParamMap, StringSliceMap: stringSliceParamMap, IntMap: intParamMap, BoolMap: boolParamMap, DurationMap: durationParamMap})
 
 	if err != nil {
 		panic(err)
@@ -286,6 +290,10 @@ type StringParam struct {
 	name string
 }
 
+type StringSliceParam struct {
+	name string
+}
+
 type BoolParam struct {
 	name string
 }
@@ -302,6 +310,10 @@ func (sP StringParam) GetString() string {
 	return viper.GetString(sP.name)
 }
 
+func (slP StringSliceParam) GetStringSlice() []string {
+	return viper.GetStringSlice(slP.name)
+}
+
 func (iP IntParam) GetInt() int {
 	return viper.GetInt(iP.name)
 }
@@ -316,6 +328,11 @@ func (bP DurationParam) GetDuration() time.Duration {
 
 var ({{range $key, $value := .StringMap}}
 	{{$key}} = StringParam{{"{"}}{{printf "%q" $value}}{{"}"}}
+	{{- end}}
+)
+
+var ({{range $key, $value := .StringSliceMap}}
+	{{$key}} = StringSliceParam{{"{"}}{{printf "%q" $value}}{{"}"}}
 	{{- end}}
 )
 

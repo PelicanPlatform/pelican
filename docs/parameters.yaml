@@ -303,7 +303,7 @@ components: ["origin"]
 name: Origin.ScitokensRestrictedPaths
 description: >-
   Enable the built-in issuer daemon for the origin.
-type: string
+type: stringSlice
 default: none
 components: ["origin"]
 ---
