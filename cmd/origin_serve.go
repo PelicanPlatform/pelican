@@ -148,6 +148,11 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	if err != nil {
 		return err
 	}
+
+	if err := web_ui.ConfigureMetrics(engine, false); err != nil {
+		return err
+	}
+
 	if err = origin_ui.ConfigureOriginUI(engine); err != nil {
 		return err
 	}
