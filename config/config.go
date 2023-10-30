@@ -395,8 +395,10 @@ func InitServer() error {
 	viper.SetDefault("Origin.UIActivationCodeFile", filepath.Join(configDir, "origin-ui-activation-code"))
 	viper.SetDefault("OIDC.ClientIDFile", filepath.Join(configDir, "oidc-client-id"))
 	viper.SetDefault("OIDC.ClientSecretFile", filepath.Join(configDir, "oidc-client-secret"))
+	viper.SetDefault("Cache.ExportLocation", "/")
 	if IsRootExecution() {
 		viper.SetDefault("Xrootd.RunLocation", "/run/pelican/xrootd")
+		viper.SetDefault("Cache.DataFileLocation", "/run/pelican/xcache")
 		viper.SetDefault("Origin.Multiuser", true)
 		viper.SetDefault("Director.GeoIPLocation", "/var/cache/pelican/maxmind/GeoLite2-City.mmdb")
 		viper.SetDefault("Registry.DbLocation", "/var/lib/pelican/registry.sqlite")
@@ -413,12 +415,14 @@ func InitServer() error {
 				return err
 			}
 			viper.SetDefault("Xrootd.RunLocation", runtimeDir)
+			viper.SetDefault("Cache.DataFileLocation", path.Join(runtimeDir, "xcache"))
 		} else {
 			dir, err := os.MkdirTemp("", "pelican-xrootd-*")
 			if err != nil {
 				return err
 			}
 			viper.SetDefault("Xrootd.RunLocation", dir)
+			viper.SetDefault("Cache.DataFileLocation", path.Join(dir, "xcache"))
 			cleanupDirOnShutdown(dir)
 		}
 		viper.SetDefault("Origin.Multiuser", false)

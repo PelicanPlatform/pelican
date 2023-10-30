@@ -22,12 +22,40 @@ package main
 
 import (
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/daemon"
+	"github.com/pelicanplatform/pelican/xrootd"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
 
-// /TODO Placeholder for now
 func serveCache( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	defer config.CleanupTempResources()
 
+	err := xrootd.SetUpMonitoring()
+	if err != nil {
+		return err
+	}
+
+	err = checkDefaults(false)
+	if err != nil {
+		return err
+	}
+
+	configPath, err := xrootd.ConfigXrootd(false)
+	if err != nil {
+		return err
+	}
+
+	log.Info("Launching cache")
+	launchers, err := xrootd.ConfigureLaunchers(false, configPath, false)
+	if err != nil {
+		return err
+	}
+
+	if err = daemon.LaunchDaemons(launchers); err != nil {
+		return err
+	}
+
+	log.Info("Clean shutdown of the cache")
 	return nil
 }

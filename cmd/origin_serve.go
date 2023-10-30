@@ -53,7 +53,7 @@ func checkConfigFileReadable(fileName string, errMsg string) error {
 	return nil
 }
 
-func checkDefaults() error {
+func checkDefaults(origin bool) error {
 	requiredConfigs := []param.StringParam{param.Server_TLSCertificate, param.Server_TLSKey, param.Xrootd_RunLocation, param.Xrootd_RobotsTxtFile}
 	for _, configName := range requiredConfigs {
 		mgr := configName.GetString()
@@ -89,7 +89,7 @@ func checkDefaults() error {
 		return err
 	}
 
-	if err := xrootd.CheckXrootdEnv(true); err != nil {
+	if err := xrootd.CheckXrootdEnv(origin); err != nil {
 		return err
 	}
 
@@ -139,7 +139,7 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		return err
 	}
 
-	err = checkDefaults()
+	err = checkDefaults(true)
 	if err != nil {
 		return err
 	}
@@ -178,7 +178,7 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	}
 
 	privileged := param.Origin_Multiuser.GetBool()
-	launchers, err := xrootd.ConfigureLaunchers(privileged, configPath)
+	launchers, err := xrootd.ConfigureLaunchers(privileged, configPath, param.Origin_EnableCmsd.GetBool())
 	if err != nil {
 		return err
 	}
