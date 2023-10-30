@@ -494,7 +494,7 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 	// Size of the download
 	contentLength := resp.Size
 	// Do a head request for content length if resp.Size is unknown
-	if contentLength <= 0 {
+	if contentLength <= 0 && ObjectClientOptions.ProgressBars {
 		headClient := &http.Client{Transport: config.GetTransport()}
 		headRequest, _ := http.NewRequest("HEAD", transfer.Url.String(), nil)
 		headResponse, err := headClient.Do(headRequest)
@@ -506,6 +506,7 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 		contentLength, err = strconv.ParseInt(contentLengthStr, 10, 64)
 		if err != nil {
 			log.Errorln("problem converting content-length to an int", err)
+			contentLength = resp.Size
 		}
 	}
 
@@ -596,7 +597,7 @@ Loop:
 					BytesTransferred: resp.BytesComplete(),
 					BytesPerSecond:   int64(resp.BytesPerSecond()),
 					Duration:         resp.Duration(),
-					BytesTotal:       resp.Size,
+					BytesTotal:       contentLength,
 				}
 
 			} else {
