@@ -300,7 +300,41 @@ type: bool
 default: false
 components: ["origin"]
 ---
-
+name: Origin.ScitokensRestrictedPaths
+description: >-
+  Enable the built-in issuer daemon for the origin.
+type: string
+default: none
+components: ["origin"]
+---
+name: Origin.ScitokensMapSubject
+description: >-
+  Enable the built-in issuer daemon for the origin.
+type: bool
+default: false
+components: ["origin"]
+---
+name: Origin.ScitokensDefaultUser
+description: >-
+  Enable the built-in issuer daemon for the origin.
+type: string
+default: none
+components: ["origin"]
+---
+name: Origin.ScitokensUsernameClaim
+description: >-
+  Enable the built-in issuer daemon for the origin.
+type: string
+default: none
+components: ["origin"]
+---
+name: Origin.ScitokensNameMapFile
+description: >-
+  Enable the built-in issuer daemon for the origin.
+type: string
+default: none
+components: ["origin"]
+---
 
 ############################
 #  Director-level configs  #
