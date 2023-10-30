@@ -537,7 +537,7 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 		)
 	}
 	{
-		// Periodic srcaper config reload to refresh service discovery token
+		// Periodic scraper config reload to refresh service discovery token
 		// Only effective when the server instance is a director
 		cancel := make(chan struct{})
 		g.Add(
