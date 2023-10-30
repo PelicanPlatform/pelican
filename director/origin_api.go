@@ -42,8 +42,8 @@ import (
 type (
 	OriginAdvertise struct {
 		Name       string        `json:"name"`
-		URL        string        `json:"url"`     // This is the url for origin's XRootD service and file transfer
-		WebURL     string        `json:"web_url"` // This is the url for origin's web engine and APIs
+		URL        string        `json:"url"`               // This is the url for origin's XRootD service and file transfer
+		WebURL     string        `json:"web_url,omitempty"` // This is the url for origin's web engine and APIs
 		Namespaces []NamespaceAd `json:"namespaces"`
 	}
 )

@@ -339,7 +339,7 @@ func RegisterOrigin(ctx *gin.Context) {
 	}
 
 	adWebUrl, err := url.Parse(ad.WebURL)
-	if err != nil {
+	if err != nil && ad.WebURL != "" { // We allow empty WebURL string for backward compatibility
 		log.Warningf("Failed to parse origin Web URL %v: %v\n", ad.WebURL, err)
 		ctx.JSON(400, gin.H{"error": "Invalid origin Web URL"})
 		return
