@@ -266,26 +266,29 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 		GlobalConfig:  config.DefaultGlobalConfig,
 		ScrapeConfigs: make([]*config.ScrapeConfig, 1),
 	}
+
+	scrapeConfig := config.DefaultScrapeConfig
+	scrapeConfig.JobName = "prometheus"
+	scrapeConfig.Scheme = "https"
+	scrapeConfig.ServiceDiscoveryConfigs = make([]discovery.Config, 1)
+	scrapeConfig.ServiceDiscoveryConfigs[0] = discovery.StaticConfig{
+		&targetgroup.Group{
+			Targets: []model.LabelSet{{
+				model.AddressLabel: model.LabelValue(pelican_config.ComputeExternalAddress()),
+			}},
+		},
+	}
+	scrapeConfig.HTTPClientConfig = common_config.DefaultHTTPClientConfig
+	scrapeConfig.HTTPClientConfig.TLSConfig.InsecureSkipVerify = true
+	promCfg.ScrapeConfigs[0] = &scrapeConfig
+
+	// Add origins monitoring to director's prometheus instance
 	if isDirector {
-		promCfg.ScrapeConfigs[0], err = configDirectorPromScraper()
+		dirPromScraperConfig, err := configDirectorPromScraper()
 		if err != nil {
 			return err
 		}
-	} else {
-		scrapeConfig := config.DefaultScrapeConfig
-		scrapeConfig.JobName = "prometheus"
-		scrapeConfig.Scheme = "https"
-		scrapeConfig.ServiceDiscoveryConfigs = make([]discovery.Config, 1)
-		scrapeConfig.ServiceDiscoveryConfigs[0] = discovery.StaticConfig{
-			&targetgroup.Group{
-				Targets: []model.LabelSet{{
-					model.AddressLabel: model.LabelValue(pelican_config.ComputeExternalAddress()),
-				}},
-			},
-		}
-		scrapeConfig.HTTPClientConfig = common_config.DefaultHTTPClientConfig
-		scrapeConfig.HTTPClientConfig.TLSConfig.InsecureSkipVerify = true
-		promCfg.ScrapeConfigs[0] = &scrapeConfig
+		promCfg.ScrapeConfigs = append(promCfg.ScrapeConfigs, dirPromScraperConfig)
 	}
 
 	promCfg.GlobalConfig.ScrapeInterval = model.Duration(15 * time.Second)
@@ -559,7 +562,11 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 						}
 						globalConfigMtx.Lock()
 						// Refresh token by manually re-configure scraper
-						promCfg.ScrapeConfigs[0], err = configDirectorPromScraper()
+						if len(promCfg.ScrapeConfigs) < 2 {
+							return errors.New("Prometheus scraper config didn't include origins HTTP SD config. Length of configs less than 2.")
+						}
+						// Index 0 is the default config for servers
+						promCfg.ScrapeConfigs[1], err = configDirectorPromScraper()
 						if err != nil {
 							return err
 						}
