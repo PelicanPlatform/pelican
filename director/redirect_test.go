@@ -117,9 +117,9 @@ func TestDirectorRegistration(t *testing.T) {
 		return pKey, string(signed), issuerURL
 	}
 
-	setupRequest := func(c *gin.Context, r *gin.Engine, bodyStr, token string) {
+	setupRequest := func(c *gin.Context, r *gin.Engine, bodyByt []byte, token string) {
 		r.POST("/", RegisterOrigin)
-		c.Request, _ = http.NewRequest(http.MethodPost, "/", bytes.NewBuffer([]byte(bodyStr)))
+		c.Request, _ = http.NewRequest(http.MethodPost, "/", bytes.NewBuffer(bodyByt))
 		c.Request.Header.Set("Authorization", "Bearer "+token)
 		c.Request.Header.Set("Content-Type", "application/json")
 		// Hard code the current min version. When this test starts failing because of new stuff in the Director,
@@ -166,7 +166,15 @@ func TestDirectorRegistration(t *testing.T) {
 		ar := setupMockCache(t, publicKey)
 		useMockCache(ar, issuerURL)
 
-		setupRequest(c, r, `{"Namespaces": [{"Path": "/foo/bar", "URL": "https://get-your-tokens.org"}]}`, token)
+		isurl := url.URL{}
+		isurl.Path = "https://get-your-tokens.org"
+
+		ad := OriginAdvertise{Name: "test", URL: "https://or-url.org", Namespaces: []NamespaceAd{{Path: "/foo/bar", Issuer: isurl}}}
+
+		jsonad, err := json.Marshal(ad)
+		assert.NoError(t, err, "Error marshalling OriginAdvertise")
+
+		setupRequest(c, r, jsonad, token)
 
 		r.ServeHTTP(w, c.Request)
 
@@ -191,7 +199,15 @@ func TestDirectorRegistration(t *testing.T) {
 		ar := setupMockCache(t, wrongPublicKey)
 		useMockCache(ar, issuerURL)
 
-		setupRequest(c, r, `{"Namespaces": [{"Path": "/foo/bar", "URL": "https://get-your-tokens.org"}]}`, token)
+		isurl := url.URL{}
+		isurl.Path = "https://get-your-tokens.org"
+
+		ad := OriginAdvertise{Name: "test", URL: "https://or-url.org", Namespaces: []NamespaceAd{{Path: "/foo/bar", Issuer: isurl}}}
+
+		jsonad, err := json.Marshal(ad)
+		assert.NoError(t, err, "Error marshalling OriginAdvertise")
+
+		setupRequest(c, r, jsonad, token)
 
 		r.ServeHTTP(w, c.Request)
 
@@ -212,7 +228,15 @@ func TestDirectorRegistration(t *testing.T) {
 		ar := setupMockCache(t, publicKey)
 		useMockCache(ar, issuerURL)
 
-		setupRequest(c, r, `{"web_url": "https://localhost:8844","Namespaces": [{"Path": "/foo/bar", "URL": "https://get-your-tokens.org"}]}`, token)
+		isurl := url.URL{}
+		isurl.Path = "https://get-your-tokens.org"
+
+		ad := OriginAdvertise{WebURL: "https://localhost:8844", Namespaces: []NamespaceAd{{Path: "/foo/bar", Issuer: isurl}}}
+
+		jsonad, err := json.Marshal(ad)
+		assert.NoError(t, err, "Error marshalling OriginAdvertise")
+
+		setupRequest(c, r, jsonad, token)
 
 		r.ServeHTTP(w, c.Request)
 
@@ -231,7 +255,15 @@ func TestDirectorRegistration(t *testing.T) {
 		ar := setupMockCache(t, publicKey)
 		useMockCache(ar, issuerURL)
 
-		setupRequest(c, r, `{"Namespaces": [{"Path": "/foo/bar", "URL": "https://get-your-tokens.org"}]}`, token)
+		isurl := url.URL{}
+		isurl.Path = "https://get-your-tokens.org"
+
+		ad := OriginAdvertise{Namespaces: []NamespaceAd{{Path: "/foo/bar", Issuer: isurl}}}
+
+		jsonad, err := json.Marshal(ad)
+		assert.NoError(t, err, "Error marshalling OriginAdvertise")
+
+		setupRequest(c, r, jsonad, token)
 
 		r.ServeHTTP(w, c.Request)
 
