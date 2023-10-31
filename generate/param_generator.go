@@ -112,7 +112,8 @@ func GenParamEnum() {
 		case "duration":
 			durationParamMap[name] = rawName
 		default:
-			errMsg := fmt.Sprintf("UnknownType '%s', add a new struct and return method to the generator or add it to one of the already handles types", pType)
+			errMsg := fmt.Sprintf("UnknownType '%s': add a new struct and return method to the generator, or "+
+				"change the type in parameters.yaml to be an already-handled type", pType)
 			panic(errMsg)
 		}
 	}
@@ -231,7 +232,8 @@ func GenParamStruct() {
 		case "duration":
 			goType = "time.Duration"
 		default:
-			errMsg := fmt.Sprintf("UnknownType '%s', add a new struct and return method to the generator or add it to one of the already handles types", pType)
+			errMsg := fmt.Sprintf("UnknownType '%s': add a new struct and return method to the generator, or "+
+				"change the type in parameters.yaml to be an already-handled type", pType)
 			panic(errMsg)
 		}
 

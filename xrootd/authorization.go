@@ -249,6 +249,9 @@ func GenerateMonitoringIssuer() (issuer Issuer, err error) {
 
 func GenerateOriginIssuer(exportedPaths []string) (issuer Issuer, err error) {
 	// TODO: Return to this and figure out how to get a proper unmarshal to work
+	if len(exportedPaths) == 0 {
+		return
+	}
 	issuer.Name = "Origin"
 	issuer.Issuer = param.Origin_Url.GetString()
 	issuer.BasePaths = exportedPaths
