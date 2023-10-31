@@ -94,6 +94,8 @@ func parseServerAd(server Server, serverType ServerType) ServerAd {
 	}
 	serverAd.URL = *serverUrl
 
+	// We will leave serverAd.WebURL as empty when fetched from topology
+
 	return serverAd
 }
 

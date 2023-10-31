@@ -56,163 +56,186 @@ func TestDirectorRegistration(t *testing.T) {
 
 	viper.Reset()
 
-	// Setup httptest recorder and context for the the unit test
-	w := httptest.NewRecorder()
-	c, r := gin.CreateTestContext(w)
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		assert.Equal(t, "POST", req.Method, "Not POST Method")
-		_, err := w.Write([]byte(":)"))
-		assert.NoError(t, err)
-	}))
-	defer ts.Close()
-	c.Request = &http.Request{
-		URL: &url.URL{},
+	viper.Set("Federation.NamespaceURL", "https://get-your-tokens.org")
+
+	setupContext := func() (*gin.Context, *gin.Engine, *httptest.ResponseRecorder) {
+		// Setup httptest recorder and context for the the unit test
+		w := httptest.NewRecorder()
+		c, r := gin.CreateTestContext(w)
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			assert.Equal(t, "POST", req.Method, "Not POST Method")
+			_, err := w.Write([]byte(":)"))
+			assert.NoError(t, err)
+		}))
+		defer ts.Close()
+
+		c.Request = &http.Request{
+			URL: &url.URL{},
+		}
+		return c, r, w
 	}
 
-	// Create a private key to use for the test
-	privateKey, err := ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
-	assert.NoError(t, err, "Error generating private key")
+	generateToken := func(c *gin.Context) (jwk.Key, string, url.URL) {
+		// Create a private key to use for the test
+		privateKey, err := ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
+		assert.NoError(t, err, "Error generating private key")
 
-	// Convert from raw ecdsa to jwk.Key
-	pKey, err := jwk.FromRaw(privateKey)
-	assert.NoError(t, err, "Unable to convert ecdsa.PrivateKey to jwk.Key")
+		// Convert from raw ecdsa to jwk.Key
+		pKey, err := jwk.FromRaw(privateKey)
+		assert.NoError(t, err, "Unable to convert ecdsa.PrivateKey to jwk.Key")
 
-	//Assign Key id to the private key
-	err = jwk.AssignKeyID(pKey)
-	assert.NoError(t, err, "Error assigning kid to private key")
+		//Assign Key id to the private key
+		err = jwk.AssignKeyID(pKey)
+		assert.NoError(t, err, "Error assigning kid to private key")
 
-	//Set an algorithm for the key
-	err = pKey.Set(jwk.AlgorithmKey, jwa.ES256)
-	assert.NoError(t, err, "Unable to set algorithm for pKey")
+		//Set an algorithm for the key
+		err = pKey.Set(jwk.AlgorithmKey, jwa.ES256)
+		assert.NoError(t, err, "Unable to set algorithm for pKey")
 
-	// Create a public key from the private key
-	publicKey, err := jwk.PublicKeyOf(pKey)
-	assert.NoError(t, err, "Error creating public key from private key")
+		issuerURL := url.URL{
+			Scheme: "https",
+			Path:   "get-your-tokens.org/namespaces/foo/bar",
+			Host:   c.Request.URL.Host,
+		}
 
-	// Create a token to be inserted
-	issuerURL := url.URL{}
-	issuerURL.Scheme = "https"
-	issuerURL.Path = "get-your-tokens.org/namespaces/foo/bar"
-	issuerURL.Host = c.Request.URL.Host
+		// Create a token to be inserted
+		tok, err := jwt.NewBuilder().
+			Issuer(issuerURL.String()).
+			Claim("scope", "pelican.advertise").
+			Audience([]string{"director.test"}).
+			Subject("origin").
+			Build()
+		assert.NoError(t, err, "Error creating token")
 
-	tok, err := jwt.NewBuilder().
-		Issuer(issuerURL.String()).
-		Claim("scope", "pelican.advertise").
-		Audience([]string{"director.test"}).
-		Subject("origin").
-		Build()
+		signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, pKey))
+		assert.NoError(t, err, "Error signing token")
 
-	assert.NoError(t, err, "Error creating token")
+		return pKey, string(signed), issuerURL
+	}
 
-	// Sign token with previously created private key
-	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, pKey))
-	assert.NoError(t, err, "Error signing token")
+	setupRequest := func(c *gin.Context, r *gin.Engine, bodyStr, token string) {
+		r.POST("/", RegisterOrigin)
+		c.Request, _ = http.NewRequest(http.MethodPost, "/", bytes.NewBuffer([]byte(bodyStr)))
+		c.Request.Header.Set("Authorization", "Bearer "+token)
+		c.Request.Header.Set("Content-Type", "application/json")
+		// Hard code the current min version. When this test starts failing because of new stuff in the Director,
+		// we'll know that means it's time to update the min version in redirect.go
+		c.Request.Header.Set("User-Agent", "pelican-origin/7.0.0")
+	}
 
 	// Inject into the cache, using a mock cache to avoid dealing with
 	// real namespaces
-	ar := MockCache{
-		GetFn: func(key string, keyset *jwk.Set) (jwk.Set, error) {
-			if key != "https://get-your-tokens.org/api/v1.0/registry/foo/bar/.well-known/issuer.jwks" {
-				t.Errorf("expecting: https://get-your-tokens.org/api/v1.0/registry/foo/bar/.well-known/issuer.jwks, got %q", key)
-			}
-			return *keyset, nil
-		},
-		RegisterFn: func(m *MockCache) error {
-			err := jwk.Set.AddKey(m.keyset, publicKey)
-			if err != nil {
-				t.Error(err)
-			}
-			return nil
-		},
+	setupMockCache := func(t *testing.T, publicKey jwk.Key) MockCache {
+		return MockCache{
+			GetFn: func(key string, keyset *jwk.Set) (jwk.Set, error) {
+				if key != "https://get-your-tokens.org/api/v1.0/registry/foo/bar/.well-known/issuer.jwks" {
+					t.Errorf("expecting: https://get-your-tokens.org/api/v1.0/registry/foo/bar/.well-known/issuer.jwks, got %q", key)
+				}
+				return *keyset, nil
+			},
+			RegisterFn: func(m *MockCache) error {
+				err := jwk.Set.AddKey(m.keyset, publicKey)
+				if err != nil {
+					t.Error(err)
+				}
+				return nil
+			},
+		}
 	}
 
 	// Perform injections (ar.Register will create a jwk.keyset with the publickey in it)
-	func() {
-		if err = ar.Register(issuerURL.String(), jwk.WithMinRefreshInterval(15*time.Minute)); err != nil {
+	useMockCache := func(ar MockCache, issuerURL url.URL) {
+		if err := ar.Register(issuerURL.String(), jwk.WithMinRefreshInterval(15*time.Minute)); err != nil {
 			t.Errorf("this should never happen, should actually be impossible, including check for the linter")
 		}
 		namespaceKeysMutex.Lock()
 		defer namespaceKeysMutex.Unlock()
 		namespaceKeys.Set("/foo/bar", &ar, ttlcache.DefaultTTL)
-	}()
-
-	// Set the namespaceurl
-	viper.Set("Federation.NamespaceURL", "https://get-your-tokens.org")
-
-	// Create the  request and set the headers
-	r.POST("/", RegisterOrigin)
-	c.Request, _ = http.NewRequest(http.MethodPost, "/", bytes.NewBuffer([]byte(`{"Namespaces": [{"Path": "/foo/bar", "URL": "https://get-your-tokens.org"}]}`)))
-
-	c.Request.Header.Set("Authorization", "Bearer "+string(signed))
-	c.Request.Header.Set("Content-Type", "application/json")
-	// Hard code the current min version. When this test starts failing because of new stuff in the Director,
-	// we'll know that means it's time to update the min version in redirect.go
-	c.Request.Header.Set("User-Agent", "pelican-origin/7.0.0")
-
-	r.ServeHTTP(w, c.Request)
-
-	// Check to see that the code exits with status code 200 after given it a good token
-	assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
-
-	namaspaceADs := ListNamespacesFromOrigins()
-	assert.True(t, NamespaceAdContainsPath(namaspaceADs, "/foo/bar"), "Coudln't find namespace in the director cache.")
-	serverAds.DeleteAll()
-
-	// Now repeat the above test, but with an invalid token
-	// Setup httptest recorder and context for the the unit test
-	wInv := httptest.NewRecorder()
-	cInv, rInv := gin.CreateTestContext(wInv)
-	tsInv := httptest.NewServer(http.HandlerFunc(func(wInv http.ResponseWriter, req *http.Request) {
-		assert.Equal(t, "POST", req.Method, "Not POST Method")
-		_, err := wInv.Write([]byte(":)"))
-		assert.NoError(t, err)
-	}))
-	defer tsInv.Close()
-	cInv.Request = &http.Request{
-		URL: &url.URL{},
 	}
 
-	// Create a private key to use for the test
-	privateKeyInv, err := ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
-	assert.NoError(t, err, "Error generating private key")
+	t.Run("valid-token", func(t *testing.T) {
+		c, r, w := setupContext()
+		pKey, token, issuerURL := generateToken(c)
+		publicKey, err := jwk.PublicKeyOf(pKey)
+		assert.NoError(t, err, "Error creating public key from private key")
 
-	// Convert from raw ecdsa to jwk.Key
-	pKeyInv, err := jwk.FromRaw(privateKeyInv)
-	assert.NoError(t, err, "Unable to convert ecdsa.PrivateKey to jwk.Key")
+		ar := setupMockCache(t, publicKey)
+		useMockCache(ar, issuerURL)
 
-	//Assign Key id to the private key
-	err = jwk.AssignKeyID(pKeyInv)
-	assert.NoError(t, err, "Error assigning kid to private key")
+		setupRequest(c, r, `{"Namespaces": [{"Path": "/foo/bar", "URL": "https://get-your-tokens.org"}]}`, token)
 
-	//Set an algorithm for the key
-	err = pKeyInv.Set(jwk.AlgorithmKey, jwa.ES256)
-	assert.NoError(t, err, "Unable to set algorithm for pKey")
+		r.ServeHTTP(w, c.Request)
 
-	// Create a token to be inserted
-	issuerURL.Host = cInv.Request.URL.Host
+		// Check to see that the code exits with status code 200 after given it a good token
+		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
 
-	// Sign token with previously created private key (mismatch to what's in the keyset)
-	signedInv, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, pKeyInv))
-	assert.NoError(t, err, "Error signing token")
+		namaspaceADs := ListNamespacesFromOrigins()
+		// If the origin was successfully registed at director, we should be able to find it in director's originAds
+		assert.True(t, NamespaceAdContainsPath(namaspaceADs, "/foo/bar"), "Coudln't find namespace in the director cache.")
+		serverAds.DeleteAll()
+	})
 
-	// Create the  request and set the headers
-	rInv.POST("/", RegisterOrigin)
-	cInv.Request, _ = http.NewRequest(http.MethodPost, "/", bytes.NewBuffer([]byte(`{"Namespaces": [{"Path": "/foo/bar", "URL": "https://get-your-tokens.org"}]}`)))
+	// Now repeat the above test, but with an invalid token
+	t.Run("invalid-token", func(t *testing.T) {
+		c, r, w := setupContext()
+		wrongPrivateKey, err := ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
+		assert.NoError(t, err, "Error creating another private key")
+		_, token, issuerURL := generateToken(c)
 
-	cInv.Request.Header.Set("Authorization", "Bearer "+string(signedInv))
-	cInv.Request.Header.Set("Content-Type", "application/json")
-	// Hard code the current min version. When this test starts failing because of new stuff in the Director,
-	// we'll know that means it's time to update the min version in redirect.go
-	cInv.Request.Header.Set("User-Agent", "pelican-origin/7.0.0")
+		wrongPublicKey, err := jwk.PublicKeyOf(wrongPrivateKey)
+		assert.NoError(t, err, "Error creating public key from private key")
+		ar := setupMockCache(t, wrongPublicKey)
+		useMockCache(ar, issuerURL)
 
-	rInv.ServeHTTP(wInv, cInv.Request)
-	assert.Equal(t, 400, wInv.Result().StatusCode, "Expected failing status code of 400")
-	body, _ := io.ReadAll(wInv.Result().Body)
-	assert.Equal(t, `{"error":"Authorization token verification failed"}`, string(body), "Failure wasn't because token verification failed")
+		setupRequest(c, r, `{"Namespaces": [{"Path": "/foo/bar", "URL": "https://get-your-tokens.org"}]}`, token)
 
-	namaspaceADs = ListNamespacesFromOrigins()
-	assert.False(t, NamespaceAdContainsPath(namaspaceADs, "/foo/bar"), "Found namespace in the director cache even if the token validation failed.")
-	serverAds.DeleteAll()
+		r.ServeHTTP(w, c.Request)
+
+		assert.Equal(t, 400, w.Result().StatusCode, "Expected failing status code of 400")
+		body, _ := io.ReadAll(w.Result().Body)
+		assert.Equal(t, `{"error":"Authorization token verification failed"}`, string(body), "Failure wasn't because token verification failed")
+
+		namaspaceADs := ListNamespacesFromOrigins()
+		assert.False(t, NamespaceAdContainsPath(namaspaceADs, "/foo/bar"), "Found namespace in the director cache even if the token validation failed.")
+		serverAds.DeleteAll()
+	})
+
+	t.Run("valid-token-with-web-url", func(t *testing.T) {
+		c, r, w := setupContext()
+		pKey, token, issuerURL := generateToken(c)
+		publicKey, err := jwk.PublicKeyOf(pKey)
+		assert.NoError(t, err, "Error creating public key from private key")
+		ar := setupMockCache(t, publicKey)
+		useMockCache(ar, issuerURL)
+
+		setupRequest(c, r, `{"web_url": "https://localhost:8844","Namespaces": [{"Path": "/foo/bar", "URL": "https://get-your-tokens.org"}]}`, token)
+
+		r.ServeHTTP(w, c.Request)
+
+		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
+		assert.Equal(t, 1, len(serverAds.Keys()), "Origin fail to register at serverAds")
+		assert.Equal(t, "https://localhost:8844", serverAds.Keys()[0].WebURL.String(), "WebURL in serverAds does not match data in origin registration request")
+		serverAds.DeleteAll()
+	})
+
+	// We want to ensure backwards compatibility for WebURL
+	t.Run("valid-token-without-web-url", func(t *testing.T) {
+		c, r, w := setupContext()
+		pKey, token, issuerURL := generateToken(c)
+		publicKey, err := jwk.PublicKeyOf(pKey)
+		assert.NoError(t, err, "Error creating public key from private key")
+		ar := setupMockCache(t, publicKey)
+		useMockCache(ar, issuerURL)
+
+		setupRequest(c, r, `{"Namespaces": [{"Path": "/foo/bar", "URL": "https://get-your-tokens.org"}]}`, token)
+
+		r.ServeHTTP(w, c.Request)
+
+		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
+		assert.Equal(t, 1, len(serverAds.Keys()), "Origin fail to register at serverAds")
+		assert.Equal(t, "", serverAds.Keys()[0].WebURL.String(), "WebURL in serverAds isn't empty with no WebURL provided in registration")
+		serverAds.DeleteAll()
+	})
 }
 
 func TestGetAuthzEscaped(t *testing.T) {
