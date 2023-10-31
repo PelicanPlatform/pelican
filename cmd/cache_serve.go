@@ -256,7 +256,7 @@ func serveCache( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		os.Exit(1)
 	}
 
-	err = checkDefaults(false)
+	err = checkDefaults(false, respNS)
 	if err != nil {
 		return err
 	}

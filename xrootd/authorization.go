@@ -37,6 +37,7 @@ import (
 
 	"github.com/go-ini/ini"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 )
@@ -123,7 +124,7 @@ func EmitScitokensConfiguration(cfg *ScitokensCfg) error {
 
 // Parse the input xrootd authfile, add any default configurations, and then save it
 // into the xrootd runtime directory
-func EmitAuthfile() error {
+func EmitAuthfile(nsAds []director.NamespaceAd) error {
 	authfile := param.Xrootd_Authfile.GetString()
 	contents, err := os.ReadFile(authfile)
 	if err != nil {
@@ -145,6 +146,13 @@ func EmitAuthfile() error {
 	}
 	if !foundPublicLine {
 		output.Write([]byte("u * /.well-known lr\n"))
+	}
+
+	if len(nsAds) != 0 {
+		for _, ad := range nsAds {
+			outStr := "u * " + ad.Path + " lr\n"
+			output.Write([]byte(outStr))
+		}
 	}
 
 	gid, err := config.GetDaemonGID()

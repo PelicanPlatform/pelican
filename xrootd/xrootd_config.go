@@ -13,6 +13,7 @@ import (
 	"text/template"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/origin_ui"
 	"github.com/pelicanplatform/pelican/param"
@@ -80,7 +81,7 @@ type (
 	}
 )
 
-func CheckXrootdEnv(origin bool) error {
+func CheckXrootdEnv(origin bool, nsAds []director.NamespaceAd) error {
 	uid, err := config.GetDaemonUID()
 	if err != nil {
 		return err
@@ -310,7 +311,7 @@ to export the directory /mnt/foo to the path /bar in the data federation`)
 			" to desired daemon group %v", authfile, groupname)
 	}
 
-	if err := EmitAuthfile(); err != nil {
+	if err := EmitAuthfile(nsAds); err != nil {
 		return err
 	}
 
