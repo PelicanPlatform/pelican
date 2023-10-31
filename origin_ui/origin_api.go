@@ -20,8 +20,11 @@ package origin_ui
 
 import (
 	"fmt"
+	"os"
+	"os/signal"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -47,6 +50,8 @@ var (
 	// Duration to wait before timeout
 	// TODO: Do we want to make this a configurable value?
 	directorTimeoutDuration = 30 * time.Second
+	exitSignals             = make(chan os.Signal, 1)
+	exitLoop                = make(chan struct{})
 )
 
 func apiAuthHandler(ctx *gin.Context) {
@@ -89,24 +94,28 @@ func resetDirectorTimeoutTimer() {
 	defer timerMutex.Unlock()
 
 	if directorTimeoutTimer == nil {
-		// If the timer doesn't exist, create it with a function to execute on timeout.
 		directorTimeoutTimer = time.NewTimer(directorTimeoutDuration)
-
 		go func() {
-			<-directorTimeoutTimer.C
-			log.Warningln("No director test report received within the time limit")
-			if err := metrics.SetComponentHealthStatus("director", "critical", "No director test report received within the time limit"); err != nil {
-				log.Errorln("Failed to update director component health status:", err)
+			for {
+				select {
+				case <-directorTimeoutTimer.C:
+					// Timer fired because no message was received in time.
+					log.Warningln("No director test report received within the time limit")
+					if err := metrics.SetComponentHealthStatus("director", "critical", "No director test report received within the time limit"); err != nil {
+						log.Errorln("Failed to update director component health status:", err)
+					}
+					// Reset the timer for the next period.
+					timerMutex.Lock()
+					directorTimeoutTimer.Reset(directorTimeoutDuration)
+					timerMutex.Unlock()
+				case <-exitLoop:
+					log.Infoln("Gracefully terminating the director-health test timeout loop...")
+					return
+				}
 			}
-			// Set timer to nil after it fires
-			timerMutex.Lock()
-			directorTimeoutTimer = nil
-			timerMutex.Unlock()
 		}()
 	} else {
-		// If the timer already exists, simply reset it.
 		if !directorTimeoutTimer.Stop() {
-			// Drain the channel if Stop returns false (timer already fired)
 			<-directorTimeoutTimer.C
 		}
 		directorTimeoutTimer.Reset(directorTimeoutDuration)
@@ -153,6 +162,23 @@ func ConfigureOriginAPI(router *gin.Engine) error {
 	}
 	// start the timer for the director test report timeout
 	resetDirectorTimeoutTimer()
+
+	// When program exits
+	signal.Notify(exitSignals, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+
+	go func() {
+		// Gracefully stop the timer at the exit of the program
+		<-exitSignals
+		timerMutex.Lock()
+		defer timerMutex.Unlock()
+		log.Infoln("Gracefully stopping the director-health test timeout timer...")
+		// Terminate the infinite loop to reset the timer
+		close(exitLoop)
+		if directorTimeoutTimer != nil {
+			directorTimeoutTimer.Stop()
+			directorTimeoutTimer = nil
+		}
+	}()
 
 	group := router.Group("/api/v1.0/origin-api")
 	group.Use(apiAuthHandler)
