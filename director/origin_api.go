@@ -187,7 +187,7 @@ func VerifyAdvertiseToken(token, namespace string) (bool, error) {
 
 // Create a token for director to report the health status to the
 // origin
-func CreateDirectorTestReportToken(originUrl string) (string, error) {
+func CreateDirectorTestReportToken(originWebUrl string) (string, error) {
 	directorURL := param.Federation_DirectorUrl.GetString()
 	if directorURL == "" {
 		return "", errors.New("Director URL is not known; cannot create director test report token")
@@ -196,7 +196,7 @@ func CreateDirectorTestReportToken(originUrl string) (string, error) {
 	tok, err := jwt.NewBuilder().
 		Claim("scope", "pelican.directorTestReport").
 		Issuer(directorURL).
-		Audience([]string{originUrl}).
+		Audience([]string{originWebUrl}).
 		Subject("director").
 		Expiration(time.Now().Add(time.Minute)).
 		Build()

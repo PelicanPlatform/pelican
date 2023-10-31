@@ -198,13 +198,13 @@ func DeleteTestfile(url string, originUrl string) error {
 }
 
 // Report the health status of test file transfer to origin
-func reportStatusToOrigin(originUrl string, status string, message string) error {
-	tkn, err := CreateDirectorTestReportToken(originUrl)
+func reportStatusToOrigin(originWebUrl string, status string, message string) error {
+	tkn, err := CreateDirectorTestReportToken(originWebUrl)
 	if err != nil {
 		return errors.Wrap(err, "Failed to create a token for the diretor test upload")
 	}
 
-	reportUrl, err := url.Parse(originUrl)
+	reportUrl, err := url.Parse(originWebUrl)
 	if err != nil {
 		return errors.Wrap(err, "The origin URL is not parseable as a URL")
 	}
@@ -259,7 +259,7 @@ func reportStatusToOrigin(originUrl string, status string, message string) error
 
 // Run a periodic test file transfer against an origin to ensure
 // it's talking to the director
-func PeriodicDirectorTest(originUrl string, originName string) {
+func PeriodicDirectorTest(originUrl, originWebUrl, originName string) {
 	firstRound := true
 	for {
 		if firstRound {
@@ -272,35 +272,31 @@ func PeriodicDirectorTest(originUrl string, originName string) {
 		url, err := UploadTestfile(originUrl)
 		if err != nil {
 			log.Warningln("Director test cycle failed during test upload:", err)
-			if err := reportStatusToOrigin(originUrl, "error", "Director test cycle failed during test upload: "+err.Error()); err != nil {
+			if err := reportStatusToOrigin(originWebUrl, "error", "Director test cycle failed during test upload: "+err.Error()); err != nil {
 				log.Warningln("Failed to report director test result to origin:", err)
 			}
-			return
+			continue
 		}
 
-		downloadFailed := false
 		if err = DownloadTestfile(url, originUrl); err != nil {
 			log.Warningln("Director test cycle failed during test download:", err)
-			if err := reportStatusToOrigin(originUrl, "error", "Director test cycle failed during test download: "+err.Error()); err != nil {
+			if err := reportStatusToOrigin(originWebUrl, "error", "Director test cycle failed during test download: "+err.Error()); err != nil {
 				log.Warningln("Failed to report director test result to origin:", err)
 			}
-			downloadFailed = true
+			log.Warningln("Unable to cleanup after failed self-test download:", err)
+			continue
 		}
 
 		if err = DeleteTestfile(url, originUrl); err != nil {
-			if downloadFailed {
-				log.Warningln("Unable to cleanup after failed self-test download:", err)
-				return
-			}
 			log.Warningln("Director test cycle failed during test deletion:", err)
-			if err := reportStatusToOrigin(originUrl, "error", "Director test cycle failed during test deletion: "+err.Error()); err != nil {
+			if err := reportStatusToOrigin(originWebUrl, "error", "Director test cycle failed during test deletion: "+err.Error()); err != nil {
 				log.Warningln("Failed to report director test result to origin:", err)
 			}
-			return
+			continue
 		}
 
 		log.Debugln("Director test cycle succeeded at", time.Now().Format(time.UnixDate))
-		if err := reportStatusToOrigin(originUrl, "ok", "Director test cycle succeeded at "+time.Now().Format(time.RFC3339)); err != nil {
+		if err := reportStatusToOrigin(originWebUrl, "ok", "Director test cycle succeeded at "+time.Now().Format(time.RFC3339)); err != nil {
 			log.Warningln("Failed to report director test result to origin:", err)
 		}
 	}
