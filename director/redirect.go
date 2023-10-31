@@ -289,24 +289,50 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 			c.Next()
 			return
 		}
+
+		// We grab the host and x-forwarded-host headers, as the request may be forwarded via CNAME record
+		// with the intent of changing the Director's default behavior (eg the director normally forwards to
+		// caches, but if it receives a request with the word "origin" in its x-forwarded-host header, that
+		// indicates we should actually serve origins by default.)
+		host, hostPresent := c.Request.Header["Host"]
+		xForwardedHost, xForwardedHostPresent := c.Request.Header["X-Forwarded-Host"]
+
 		// If we're configured for cache mode or we haven't set the flag,
 		// we should use cache middleware
 		if defaultResponse == "cache" {
 			if !strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/director") {
-				c.Request.URL.Path = "/api/v1.0/director/object" + c.Request.URL.Path
-				RedirectToCache(c)
-				c.Abort()
-				return
+				// In some cases we actually want to redirect to an origin if the original Host header indicates as much
+				// NOTE: This assumes there's only one host in the slice, as we index at 0
+				if (hostPresent && (strings.Contains(host[0], "origin"))) || (xForwardedHostPresent && strings.Contains(xForwardedHost[0], "origin")) {
+					c.Request.URL.Path = "/api/v1.0/director/origin" + c.Request.URL.Path
+					RedirectToOrigin(c)
+					c.Abort()
+					log.Debugln("Director is configured to serve caches, but is serving an origin based on incoming Host header")
+					return
+				} else {
+					c.Request.URL.Path = "/api/v1.0/director/object" + c.Request.URL.Path
+					RedirectToCache(c)
+					c.Abort()
+					return
+				}
 			}
 
 			// If the path starts with the correct prefix, continue with the next handler
 			c.Next()
 		} else if defaultResponse == "origin" {
 			if !strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/director") {
-				c.Request.URL.Path = "/api/v1.0/director/origin" + c.Request.URL.Path
-				RedirectToOrigin(c)
-				c.Abort()
-				return
+				if (hostPresent && (strings.Contains(host[0], "cache"))) || (xForwardedHostPresent && strings.Contains(xForwardedHost[0], "cache")) {
+					c.Request.URL.Path = "/api/v1.0/director/object" + c.Request.URL.Path
+					RedirectToCache(c)
+					c.Abort()
+					log.Debugln("Director is configured to serve origins, but is serving a cache based on incoming Host header")
+					return
+				} else {
+					c.Request.URL.Path = "/api/v1.0/director/origin" + c.Request.URL.Path
+					RedirectToOrigin(c)
+					c.Abort()
+					return
+				}
 			}
 			c.Next()
 		}
