@@ -277,12 +277,28 @@ func TestGetAuthzEscaped(t *testing.T) {
 }
 
 func TestDiscoverOrigins(t *testing.T) {
-	mockOriginServerAd := ServerAd{
+	mockPelicanOriginServerAd := ServerAd{
 		Name:    "test-origin-server",
 		AuthURL: url.URL{},
 		URL: url.URL{
 			Scheme: "https",
+			Host:   "fake-origin.org:8443",
+		},
+		WebURL: url.URL{
+			Scheme: "https",
 			Host:   "fake-origin.org:8444",
+		},
+		Type:      OriginType,
+		Latitude:  123.05,
+		Longitude: 456.78,
+	}
+
+	mockTopoOriginServerAd := ServerAd{
+		Name:    "test-origin-server",
+		AuthURL: url.URL{},
+		URL: url.URL{
+			Scheme: "https",
+			Host:   "fake-origin.org:8443",
 		},
 		Type:      OriginType,
 		Latitude:  123.05,
@@ -405,18 +421,21 @@ func TestDiscoverOrigins(t *testing.T) {
 		}
 
 		serverAdMutex.Lock()
-		serverAds.Set(mockOriginServerAd, []NamespaceAd{mockNamespaceAd}, time.Duration(10))
+		serverAds.Set(mockPelicanOriginServerAd, []NamespaceAd{mockNamespaceAd}, time.Duration(10))
+		// Server fetched from topology should not be present in SD response
+		serverAds.Set(mockTopoOriginServerAd, []NamespaceAd{mockNamespaceAd}, time.Duration(10))
 		serverAds.Set(mockCacheServerAd, []NamespaceAd{mockNamespaceAd}, time.Duration(10))
 		serverAdMutex.Unlock()
 
 		expectedRes := []PromDiscoveryItem{{
-			Targets: []string{mockOriginServerAd.URL.Hostname() + ":" + mockOriginServerAd.URL.Port()},
+			Targets: []string{mockPelicanOriginServerAd.WebURL.Hostname() + ":" + mockPelicanOriginServerAd.WebURL.Port()},
 			Labels: map[string]string{
-				"origin_name":     mockOriginServerAd.Name,
-				"origin_auth_url": mockOriginServerAd.AuthURL.String(),
-				"origin_url":      mockOriginServerAd.URL.String(),
-				"origin_lat":      fmt.Sprintf("%.4f", mockOriginServerAd.Latitude),
-				"origin_long":     fmt.Sprintf("%.4f", mockOriginServerAd.Longitude),
+				"origin_name":     mockPelicanOriginServerAd.Name,
+				"origin_auth_url": mockPelicanOriginServerAd.AuthURL.String(),
+				"origin_url":      mockPelicanOriginServerAd.URL.String(),
+				"origin_web_url":  mockPelicanOriginServerAd.WebURL.String(),
+				"origin_lat":      fmt.Sprintf("%.4f", mockPelicanOriginServerAd.Latitude),
+				"origin_long":     fmt.Sprintf("%.4f", mockPelicanOriginServerAd.Longitude),
 			},
 		}}
 
@@ -429,6 +448,6 @@ func TestDiscoverOrigins(t *testing.T) {
 		r.ServeHTTP(w, req)
 
 		assert.Equal(t, 200, w.Code)
-		assert.Equal(t, string(resStr), w.Body.String())
+		assert.Equal(t, string(resStr), w.Body.String(), "Reponse doesn't match expected")
 	})
 }

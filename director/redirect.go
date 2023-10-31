@@ -394,13 +394,18 @@ func DiscoverOrigins(ctx *gin.Context) {
 		if ad.Type != OriginType {
 			continue
 		}
+		if ad.WebURL.String() == "" {
+			// Oririgns fetched from topology can't be scraped as they
+			// don't have a WebURL
+			continue
+		}
 		promDiscoveryRes = append(promDiscoveryRes, PromDiscoveryItem{
-			// TODO: change to ad.WebURL when #285 is ready
-			Targets: []string{ad.URL.Hostname() + ":" + ad.URL.Port()},
+			Targets: []string{ad.WebURL.Hostname() + ":" + ad.WebURL.Port()},
 			Labels: map[string]string{
 				"origin_name":     ad.Name,
 				"origin_auth_url": ad.AuthURL.String(),
 				"origin_url":      ad.URL.String(),
+				"origin_web_url":  ad.WebURL.String(),
 				"origin_lat":      fmt.Sprintf("%.4f", ad.Latitude),
 				"origin_long":     fmt.Sprintf("%.4f", ad.Longitude),
 			},
