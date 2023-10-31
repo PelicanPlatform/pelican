@@ -68,7 +68,7 @@ func makeUnprivilegedXrootdLauncher(daemonName string, configPath string) (resul
 func ConfigureLaunchers(privileged bool, configPath string, useCMSD bool) (launchers []daemon.Launcher, err error) {
 	if privileged {
 		launchers = append(launchers, PrivilegedXrootdLauncher{"xrootd", configPath})
-		if param.Origin_EnableCmsd.GetBool() {
+		if useCMSD {
 			launchers = append(launchers, PrivilegedXrootdLauncher{"cmsd", configPath})
 		}
 	} else {
