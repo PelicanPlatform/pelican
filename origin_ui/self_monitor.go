@@ -25,8 +25,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/lestrrat-go/jwx/v2/jwa"
@@ -180,36 +178,6 @@ func DeleteTestfile(url string) error {
 
 	if resp.StatusCode > 299 {
 		return errors.Errorf("Error response %v from monitoring deletion: %v", resp.StatusCode, resp.Status)
-	}
-
-	return nil
-}
-
-func ConfigureXrootdMonitoringDir() error {
-	pelicanMonitoringPath := filepath.Join(param.Xrootd_RunLocation.GetString(),
-		"export", "pelican", "monitoring")
-
-	uid, err := config.GetDaemonUID()
-	if err != nil {
-		return err
-	}
-	gid, err := config.GetDaemonGID()
-	if err != nil {
-		return err
-	}
-	username, err := config.GetDaemonUser()
-	if err != nil {
-		return err
-	}
-
-	err = config.MkdirAll(pelicanMonitoringPath, 0755, uid, gid)
-	if err != nil {
-		return errors.Wrapf(err, "Unable to create pelican self-monitoring directory %v",
-			pelicanMonitoringPath)
-	}
-	if err = os.Chown(pelicanMonitoringPath, uid, -1); err != nil {
-		return errors.Wrapf(err, "Unable to change ownership of pelican self-monitoring directory %v"+
-			" to desired daemon user %v", pelicanMonitoringPath, username)
 	}
 
 	return nil
