@@ -22,7 +22,7 @@ import {Header} from "@/components/layout/Header";
 import {Sidebar} from "@/app/(dashboard)/Sidebar";
 
 export const metadata = {
-    title: 'Origin Initialization',
+    title: 'Origin Dashboard',
     description: 'Software designed to make data distribution easy',
 }
 
@@ -34,7 +34,7 @@ export default function RootLayout({
     return (
         <Box display={"flex"} flexDirection={"row"}>
             <Sidebar/>
-            <Box component={"main"} p={2} display={"flex"} minHeight={"100vh"} flexGrow={1}>
+            <Box component={"main"} p={2} pl={"90px"} display={"flex"} minHeight={"100vh"} flexGrow={1}>
                 {children}
             </Box>
         </Box>
