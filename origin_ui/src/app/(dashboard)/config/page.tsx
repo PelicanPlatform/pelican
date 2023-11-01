@@ -29,6 +29,7 @@ import {OverridableStringUnion} from "@mui/types";
 import {Variant} from "@mui/material/styles/createTypography";
 import {TypographyPropsVariantOverrides} from "@mui/material/Typography";
 import TextField from "@mui/material/TextField";
+import {ArrowDropDown, ArrowDropUp} from '@mui/icons-material';
 import {fontSize} from "@mui/system";
 
 interface Config {
@@ -279,6 +280,12 @@ function TableOfContents({id, name, value, level = 1}: TableOfContentsProps) {
                     cursor: "pointer",
                     textDecoration: "none",
                     color: "black",
+                    display: "flex",
+                    flexDirection: "row",
+                    justifyContent: "space-between",
+                }}
+                onClick={() => {
+                    setOpen(!open)
                 }}
             >
                 <Typography
@@ -286,12 +293,14 @@ function TableOfContents({id, name, value, level = 1}: TableOfContentsProps) {
                         fontSize: 20 - 2*level + "px",
                         fontWeight: subContents ? "600" : "normal",
                     }}
-                    onClick={() => {
-                        setOpen(!open)
-                    }}
                 >
                     {name}
                 </Typography>
+                {
+                    subContents ?
+                        open ? <ArrowDropUp/> : <ArrowDropDown/> :
+                        undefined
+                }
             </Link>
         </Box>
     )
