@@ -48,7 +48,7 @@ const defaultOptions: Partial<ChartOptions<"line">> = {
     scales: {
         x: {
             type: 'time',
-                time: {
+            time: {
                 round: 'second',
             }
         }
@@ -70,14 +70,19 @@ export default function Graph({getData, options, boxProps, drawer}: GraphProps) 
 
 
     async function setData() {
-        let response = await getData()
-        _setData(response)
-        setLoading(false)
-        if(response.datasets[0].data.length == 0){
-            let date = new Date(Date.now()).toLocaleTimeString()
-            setError(`No data returned by database as of ${date}; plot will auto-refresh`)
-        } else {
-            setError("")
+        try {
+            let response = await getData()
+            _setData(response)
+            setLoading(false)
+            if(response.datasets[0].data.length == 0){
+                let date = new Date(Date.now()).toLocaleTimeString()
+                setError(`No data returned by database as of ${date}; plot will auto-refresh`)
+            } else {
+                setError("")
+            }
+        } catch (e: any) {
+            let date = new Date(Date.now()).toLocaleString()
+            setError(date + " : " + e.message)
         }
     }
 
@@ -106,26 +111,26 @@ export default function Graph({getData, options, boxProps, drawer}: GraphProps) 
 
     }, [getData])
 
-
-    if(loading || !data){
-        return <Skeleton sx={{borderRadius: "1"}} variant={"rectangular"} width={"100%"} height={"100%"} />
-    }
-
     return (
         <Box>
-            <Box m={"auto"} {...boxProps}>
-                <Line
-                    data={data}
-                    options={{
-                        ...defaultOptions,
-                        ...options
-                    }}
-                />
-            </Box>
-            <Box display={"flex"}>
-                {drawer ? drawer : <></>}
-            </Box>
-            <Box display={"flex"}>
+            { loading || !data ?
+                <Box borderRadius={2} overflow={"hidden"}><Skeleton variant={"rectangular"} width={"100%"} height={"300px"} /></Box> :
+                <>
+                    <Box m={"auto"} {...boxProps}>
+                        <Line
+                            data={data}
+                            options={{
+                                ...defaultOptions,
+                                ...options
+                            }}
+                        />
+                    </Box>
+                    <Box display={"flex"}>
+                        { drawer ? drawer : undefined }
+                    </Box>
+                </>
+            }
+            <Box display={"flex"} pt={1}>
                 <Typography m={"auto"} color={"red"} variant={"body2"}>{error}</Typography>
             </Box>
         </Box>
