@@ -54,7 +54,9 @@ var (
 	exitLoop                = make(chan struct{})
 )
 
-func apiAuthHandler(ctx *gin.Context) {
+// Check the Bearer token from requests sent from the director to ensure
+// it's has correct authorization
+func directorRequestAuthHandler(ctx *gin.Context) {
 	authHeader := ctx.Request.Header.Get("Authorization")
 
 	// Check if the Authorization header was provided
@@ -181,8 +183,7 @@ func ConfigureOriginAPI(router *gin.Engine) error {
 	}()
 
 	group := router.Group("/api/v1.0/origin-api")
-	group.Use(apiAuthHandler)
-	group.POST("/directorTest", directorTestResponse)
+	group.POST("/directorTest", directorRequestAuthHandler, directorTestResponse)
 
 	return nil
 }
