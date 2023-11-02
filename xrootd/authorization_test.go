@@ -169,7 +169,7 @@ func TestWriteOriginScitokensConfig(t *testing.T) {
 	err = os.WriteFile(scitokensCfg, []byte(toMergeOutput), 0640)
 	require.NoError(t, err)
 
-	err = WriteOriginScitokensConfig([]string{})
+	err = WriteOriginScitokensConfig([]string{"/foo/bar"})
 	require.NoError(t, err)
 
 	genCfg, err := os.ReadFile(filepath.Join(dirname, "scitokens-generated.cfg"))
