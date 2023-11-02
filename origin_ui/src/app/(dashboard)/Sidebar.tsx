@@ -33,7 +33,7 @@ export const Sidebar = () => {
         <Box>
             <div className={styles.header} style={{display: "flex", flexDirection: "column", justifyContent:"space-between", padding:"1rem", top:0, position:"fixed", zIndex:"1", overflow: "hidden", height: "100vh"}}>
                 <div style={{display:"flex", flexDirection: "column"}}>
-                    <Link href={"/"}>
+                    <Link href={"/index.html"}>
                         <Image
                             src={PelicanLogo}
                             alt={"Pelican Logo"}
@@ -49,7 +49,7 @@ export const Sidebar = () => {
                         </Link>
                     </Box>
                     <Box pt={1}>
-                        <Link href={"/config/"}>
+                        <Link href={"/config/index.html"}>
                             <IconButton>
                                 <BuildIcon/>
                             </IconButton>
