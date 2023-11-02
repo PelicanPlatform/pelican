@@ -47,7 +47,7 @@ RUN useradd -o -u 10940 -g 10940 -s /bin/sh xrootd
 
 # Install dependencies
 RUN yum -y update \
-    && yum -y install xrootd xrootd-client xrootd-server \
+    && yum -y install xrootd xrootd-client xrdcl-http xrootd-server \
     && yum clean all \
     && yum install -y curl java-17-openjdk-headless \
     && rm -rf /var/cache/yum/
