@@ -263,7 +263,9 @@ to export the directory /mnt/foo to the path /bar in the data federation`)
 		return err
 	}
 
-	if err := WriteOriginScitokensConfig(); err != nil {
+	// Set up exportedPaths, which we later use to grant access to the origin's issuer.
+	exportedPaths := viper.GetStringSlice("Origin.NamespacePrefix")
+	if err := WriteOriginScitokensConfig(exportedPaths); err != nil {
 		return errors.Wrap(err, "Failed to create scitokens configuration for the origin")
 	}
 
