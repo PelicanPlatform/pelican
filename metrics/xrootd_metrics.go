@@ -73,7 +73,13 @@ type (
 		Code byte
 		Pseq byte
 		Plen uint16
-		Stod uint32
+		Stod int32
+	}
+
+	XrdXrootdMonMap struct {
+		Hdr    XrdXrootdMonHeader
+		Dictid uint32
+		Info   []byte
 	}
 
 	XrdXrootdMonFileHdr struct {
@@ -91,6 +97,53 @@ type (
 		Beg int32
 		End int32
 		SID int64
+	}
+
+	XrdXrootdMonFileLFN struct {
+		User uint32
+		Lfn  [1032]byte
+	}
+
+	XrdXrootdMonFileOPN struct {
+		Hdr XrdXrootdMonFileHdr
+		fsz int64
+		Ufn XrdXrootdMonFileLFN
+	}
+
+	XrdXrootdMonStatOPS struct {
+		Read  int   // Number of read() calls
+		Readv int   // Number of readv() calls
+		Write int   // Number of write() calls
+		RsMin int16 // Smallest readv() segment count
+		RsMax int16 // Largest readv() segment count
+		Rsegs int64 // Number of readv() segments
+		RdMin int   // Smallest read() request size
+		RdMax int   // Largest read() request size
+		RvMin int   // Smallest readv() request size
+		RvMax int   // Largest readv() request size
+		WrMin int   // Smallest write() request size
+		WrMax int   // Largest write() request size
+	}
+
+	XrdXrootdMonDouble struct {
+		Dlong int64   // Represents a long long
+		Dreal float64 // Represents a double
+	}
+
+	XrdXrootdMonStatXFR struct {
+		Read  int64 // Bytes read from file using read()
+		Readv int64 // Bytes read from file using readv()
+		Write int64 // Bytes written to file
+	}
+
+	// XrdXrootdMonFileCLS represents a variable length structure and
+	// includes other structures that are "Always present" or "OPTIONAL".
+	// The OPTIONAL parts are not included here as they require more context.
+	XrdXrootdMonFileCLS struct {
+		Hdr XrdXrootdMonFileHdr // Always present
+		Xfr XrdXrootdMonStatXFR // Always present
+		Ops XrdXrootdMonStatOPS // OPTIONAL
+		// Ssq XrdXrootdMonStatSSQ // OPTIONAL
 	}
 
 	SummaryStat struct {
@@ -294,7 +347,7 @@ func HandlePacket(packet []byte) error {
 	header.Code = packet[0]
 	header.Pseq = packet[1]
 	header.Plen = binary.BigEndian.Uint16(packet[2:4])
-	header.Stod = binary.BigEndian.Uint32(packet[4:8])
+	header.Stod = int32(binary.BigEndian.Uint32(packet[4:8]))
 
 	switch header.Code {
 	case 'd':
