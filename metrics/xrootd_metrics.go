@@ -254,7 +254,7 @@ func GetSIDRest(info []byte) (UserId, string, error) {
 	if err != nil {
 		return UserId{}, "", err
 	}
-	return UserId{Id: uint32(sid)}, string(info[1]), nil
+	return UserId{Id: uint32(sid)}, string(infoSplit[1]), nil
 }
 
 func ParseFileHeader(packet []byte) (XrdXrootdMonFileHdr, error) {
