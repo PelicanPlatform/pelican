@@ -98,3 +98,97 @@ nfpms:
             file_info:
               mode: 0644
             type: doc
+  # end package pelican
+
+  - package_name: pelican-osdf-compat
+    builds: []
+    # file_name_template: '{{ .PackageName }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}'
+    file_name_template: "{{ .ConventionalFileName }}"
+    id: pelican-osdf-compat
+    vendor: OSG Consortium
+    homepage: https://github.com/PelicanPlatform/pelican
+    maintainer: Brian Bockelman <bbockelman@morgridge.org>
+    description: OSDF compatibility files for Pelican
+    license: ASL 2.0
+    meta: true
+    formats:
+      - apk
+      - deb
+      - rpm
+    # bindir: /usr/bin
+    release: 1
+    section: default
+    priority: extra
+    dependencies:
+      - pelican
+    provides:
+      ## does not work: {{ .Version }} doesn't get substituted in this list
+      # - osdf-client = {{ .Version }}
+      # - stashcp = {{ .Version }}
+      # - condor-stash-plugin = {{ .Version }}
+      - "osdf-client = 7"
+      - "stashcp = 7"
+      - "condor-stash-plugin = 7"
+    overrides:
+      apk:
+        contents:
+          - src: "./pelican"
+            dst: "/usr/bin/osdf"
+            type: symlink
+          - src: "./pelican"
+            dst: "/usr/bin/stashcp"
+            type: symlink
+      rpm:
+        contents:
+          - src: "./pelican"
+            dst: "/usr/bin/osdf"
+            type: symlink
+          - src: "./pelican"
+            dst: "/usr/bin/stashcp"
+            type: symlink
+          - src: "../../bin/pelican"
+            dst: "/usr/libexec/condor/stash_plugin"
+            type: symlink
+          - src: "client/resources/10-stash-plugin.conf"
+            dst: "/etc/condor/config.d/10-stash-plugin.conf"
+            type: config|noreplace
+        replaces:
+          - "osdf-client < 7"
+          - "stashcp < 7"
+          - "condor-stash-plugin < 7"
+        ## rpm specific syntax:
+        ## also does not work: %{version} doesn't get expanded
+        # provides:
+        #   - "osdf-client = %{version}"
+        #   - "stashcp = %{version}"
+        #   - "condor-stash-plugin = %{version}"
+        # file_name_template: >-
+        #   {{ .PackageName }}-{{ .Version }}-{{ .Release }}.{{ if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
+      deb:
+        # file_name_template: "{{ .PackageName }}-{{ .Version }}-{{ .Release }}_{{ .Arch }}"
+        contents:
+          - src: "./pelican"
+            dst: "/usr/bin/osdf"
+            type: symlink
+          - src: "./pelican"
+            dst: "/usr/bin/stashcp"
+            type: symlink
+          - src: "../../bin/pelican"
+            dst: "/usr/libexec/condor/stash_plugin"
+            type: symlink
+          - src: "../../../libexec/condor/stash_plugin"
+            dst: "/usr/lib/condor/libexec/stash_plugin"
+            type: symlink
+          - src: "client/resources/10-stash-plugin.conf"
+            dst: "/etc/condor/config.d/10-stash-plugin.conf"
+            type: config|noreplace
+        # deb has different syntax
+        provides:
+          - "osdf-client (= 7)"
+          - "stashcp (= 7)"
+          - "condor-stash-plugin (= 7)"
+        replaces:
+          - "osdf-client (<< 7)"
+          - "stashcp (<< 7)"
+          - "condor-stash-plugin (<< 7)"
+  # end package pelican-osdf-compet
