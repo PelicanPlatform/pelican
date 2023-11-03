@@ -96,6 +96,7 @@ type (
 	SummaryStat struct {
 		Id string `xml:"id,attr"`
 		// Relevant for id="link"
+		// "tot" is the total connections since the start of the server
 		LinkConnections int `xml:"tot"`
 		LinkInBytes     int `xml:"in"`
 		LinkOutBytes    int `xml:"out"`
@@ -106,6 +107,7 @@ type (
 
 	SummaryStatistics struct {
 		Version string        `xml:"ver,attr"`
+		Program string        `xml:"pgm,attr"`
 		Stats   []SummaryStat `xml:"stats"`
 	}
 )
@@ -616,10 +618,16 @@ func HandleSummaryPacket(packet []byte) error {
 		return err
 	}
 	log.Debug("Received a summary statistics packet")
+	if summaryStats.Program != "xrootd" {
+		// We only care about the xrootd summary packets
+		return nil
+	}
 	for _, stat := range summaryStats.Stats {
 		switch stat.Id {
 
 		case "link":
+			// LinkConnections is the total connections since the start-up of the servcie
+			// So we just want to make sure here that no negative value is present
 			incBy := float64(stat.LinkConnections - lastStats.LinkConnections)
 			if stat.LinkConnections < lastStats.LinkConnections {
 				incBy = float64(stat.LinkConnections)
