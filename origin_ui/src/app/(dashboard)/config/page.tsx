@@ -30,7 +30,9 @@ import {Variant} from "@mui/material/styles/createTypography";
 import {TypographyPropsVariantOverrides} from "@mui/material/Typography";
 import TextField from "@mui/material/TextField";
 import {ArrowDropDown, ArrowDropUp} from '@mui/icons-material';
-import {fontSize} from "@mui/system";
+import {fontSize} from "@mui/system"
+
+type duration = number | `${number}${"ns" | "us" | "µs" | "ms" |"s" | "m" | "h"}`;
 
 interface Config {
     ConfigDir: string;
@@ -38,13 +40,13 @@ interface Config {
     TLSSkipVerify: boolean;
     IssuerKey: string;
     Transport: {
-        DialerTimeout: string;
-        DialerKeepAlive: string;
+        DialerTimeout: duration;
+        DialerKeepAlive: duration;
         MaxIdleConns: number;
-        IdleConnTimeout: string;
-        TLSHandshakeTimeout: string;
-        ExpectContinueTimeout: string;
-        ResponseHeaderTimeout: string;
+        IdleConnTimeout: duration;
+        TLSHandshakeTimeout: duration;
+        ExpectContinueTimeout: duration;
+        ResponseHeaderTimeout: duration;
     }
     Federation: {
         DiscoveryUrl: string;
@@ -133,7 +135,7 @@ function sortConfig (a: any, b: any) {
 
 
 interface ConfigDisplayProps {
-    id: string
+    id: string[]
     name: string
     value: Partial<Config> | string | number | boolean | any
     level: number
@@ -141,10 +143,16 @@ interface ConfigDisplayProps {
 
 function ConfigDisplay({id, name, value, level = 1}: ConfigDisplayProps) {
 
-    id = `${id}-${name}`
+    if(name != "") {
+        id = [...id, name]
+    }
+
     let formElement = undefined
 
-    if(typeof value === 'string' || value instanceof String){
+    if(
+        typeof value === 'string' || value instanceof String ||
+        typeof value === 'number' || value instanceof Number
+    ){
 
         // For visual consistency convert empty strings to a blank space
         value = value === "" ? " " : value
@@ -153,38 +161,22 @@ function ConfigDisplay({id, name, value, level = 1}: ConfigDisplayProps) {
             fullWidth
             disabled
             size="small"
-            id={`${id}-text-input`}
+            id={`${id.join("-")}-text-input`}
             label={name}
             variant={"outlined"}
             value={value}
-        />
-    }
-
-    if(typeof value === 'number' || value instanceof Number){
-        formElement = <TextField
-            fullWidth
-            disabled
-            size="small"
-            id={`${id}-number-input`}
-            label={name}
-            variant={"outlined"}
-            value={value}
-            inputProps={{
-                inputMode: 'numeric',
-                pattern: '[0-9]*'
-            }}
         />
     }
 
     if(typeof value === 'boolean' || value instanceof Boolean){
         formElement = (
             <FormControl fullWidth>
-                <InputLabel id={`${id}-number-input`}>{name}</InputLabel>
+                <InputLabel id={`${id.join("-")}-number-input`}>{name}</InputLabel>
                 <Select
                     disabled
                     size="small"
-                    labelId={`${name}-number-input-label`}
-                    id={`${name}-number-input`}
+                    labelId={`${id.join("-")}-number-input-label`}
+                    id={`${id.join("-")}-number-input`}
                     label={name}
                     value={value ? 1 : 0}
                 >
@@ -197,7 +189,7 @@ function ConfigDisplay({id, name, value, level = 1}: ConfigDisplayProps) {
 
     if(formElement !== undefined){
         return (
-            <Box pt={2} id={id}>
+            <Box pt={2} id={id.join("-")}>
                 {formElement}
             </Box>
         )
@@ -235,7 +227,7 @@ function ConfigDisplay({id, name, value, level = 1}: ConfigDisplayProps) {
 
     return (
         <>
-            { name ? <Typography id={id} variant={variant} component={variant} mt={2}>{name}</Typography> : undefined}
+            { name ? <Typography id={id.join("-")} variant={variant} component={variant} mt={2}>{name}</Typography> : undefined}
             {configDisplays}
         </>
     )
@@ -243,7 +235,7 @@ function ConfigDisplay({id, name, value, level = 1}: ConfigDisplayProps) {
 }
 
 interface TableOfContentsProps {
-    id: string
+    id: string[]
     name: string
     value: Partial<Config> | string | number | boolean | any
     level: number
@@ -253,7 +245,10 @@ function TableOfContents({id, name, value, level = 1}: TableOfContentsProps) {
 
     const [open, setOpen] = useState(false)
 
-    id = `${id}-${name}`
+    if(name != "") {
+        id = [...id, name]
+    }
+
     let subContents = undefined
     if(typeof value == 'object'){
         let subValues = Object.entries(value)
@@ -275,7 +270,7 @@ function TableOfContents({id, name, value, level = 1}: TableOfContentsProps) {
             }}
         >
             <Link
-                href={subContents ? undefined : `#${id}`}
+                href={subContents ? undefined : `#${id.join("-")}`}
                 sx={{
                     cursor: "pointer",
                     textDecoration: "none",
@@ -362,7 +357,7 @@ export default function Config() {
                         {
                             config === undefined ?
                                 <Skeleton  variant="rectangular" animation="wave" height={"1000px"}/> :
-                                <ConfigDisplay id={""} name={""} value={config} level={4}/>
+                                <ConfigDisplay id={[]} name={""} value={config} level={4}/>
                         }
                     </form>
                 </Grid>
@@ -370,7 +365,7 @@ export default function Config() {
                     {
                         config === undefined ?
                             <Skeleton  variant="rectangular" animation="wave" height={"1000px"}/> :
-                            <Box pt={2}><TableOfContents id={""} name={""} value={config} level={1}/></Box>
+                            <Box pt={2}><TableOfContents id={[]} name={""} value={config} level={1}/></Box>
                     }
                 </Grid>
             </Grid>
