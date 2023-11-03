@@ -142,6 +142,9 @@ func NamespaceRegister(privateKey jwk.Key, namespaceRegistryEndpoint string, acc
 	if err != nil {
 		return errors.Wrap(err, "Failed to assign key ID to public key")
 	}
+	if err = publicKey.Set("alg", "ES256"); err != nil {
+		return errors.Wrap(err, "Failed to assign signature algorithm to public key")
+	}
 	keySet := jwk.NewSet()
 	if err = keySet.AddKey(publicKey); err != nil {
 		return errors.Wrap(err, "Failed to add public key to new JWKS")
