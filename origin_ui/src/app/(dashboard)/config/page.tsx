@@ -31,6 +31,7 @@ import {TypographyPropsVariantOverrides} from "@mui/material/Typography";
 import TextField from "@mui/material/TextField";
 import {ArrowDropDown, ArrowDropUp} from '@mui/icons-material';
 import {fontSize} from "@mui/system"
+import {isLoggedIn} from "@/helpers/login";
 
 type duration = number | `${number}${"ns" | "us" | "µs" | "ms" |"s" | "m" | "h"}`;
 
@@ -325,8 +326,14 @@ export default function Config() {
     const [error, setError] = useState<string|undefined>(undefined)
 
     let getConfig = async () => {
+
+        //Check if the user is logged in
+        if(!(await isLoggedIn())){
+            window.location.replace("/view/login/")
+        }
+
         let response = await fetch("/api/v1.0/config")
-        if(response.ok){
+        if(response.ok) {
             setConfig(await response.json())
         } else {
             setError("Failed to fetch config, response status: " + response.status)
@@ -346,7 +353,6 @@ export default function Config() {
             </Box>
         )
     }
-
 
     return (
         <Box width={"100%"}>
