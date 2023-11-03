@@ -76,13 +76,13 @@ export default function Graph({getData, options, boxProps, drawer}: GraphProps) 
             setLoading(false)
             if(response.datasets[0].data.length == 0){
                 let date = new Date(Date.now()).toLocaleTimeString()
-                setError(`No data returned by database as of ${date}; plot will auto-refresh`)
+                setError(`No data returned by database as of ${date}; Plot will auto-refresh`)
             } else {
                 setError("")
             }
         } catch (e: any) {
             let date = new Date(Date.now()).toLocaleString()
-            setError(date + " : " + e.message + "; plot will auto-refresh")
+            setError(date + " : " + e.message + "; Plot will auto-refresh")
         }
     }
 
