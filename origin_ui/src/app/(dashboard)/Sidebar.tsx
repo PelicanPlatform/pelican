@@ -56,7 +56,7 @@ export const Sidebar = () => {
                         </Link>
                     </Box>
                 </div>
-                <div>
+                <Box display={"flex"} justifyContent={"center"}>
                     <a href={"https://github.com/PelicanPlatform"}>
                         <Image
                             src={GithubIcon}
@@ -65,7 +65,7 @@ export const Sidebar = () => {
                             height={32}
                         />
                     </a>
-                </div>
+                </Box>
             </div>
         </Box>
 
