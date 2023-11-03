@@ -259,12 +259,6 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData, action str
 			}
 			data.Prefix = reqPrefix
 
-			// Verify the requested path is a valid prefix
-			if err != nil {
-				ctx.JSON(http.StatusForbidden, gin.H{"error": "Namespace prefix cannot be registered as it is invalid"})
-				return errors.Wrapf(err, "Namespace prefix %s cannot be registered as it is invalid", data.Prefix)
-			}
-
 			err = dbAddNamespace(ctx, data)
 			if err != nil {
 				ctx.JSON(500, gin.H{"error": "The server encountered an error while attempting to add the prefix to its database"})
@@ -505,7 +499,7 @@ func dbAddNamespace(ctx *gin.Context, data *registrationData) error {
 		return errors.Wrapf(err, "Failed to add prefix %s", ns.Prefix)
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"status": "success"})
+	ctx.JSON(http.StatusCreated, gin.H{"status": "success"})
 	return nil
 }
 
