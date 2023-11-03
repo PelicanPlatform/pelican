@@ -82,7 +82,7 @@ export default function Graph({getData, options, boxProps, drawer}: GraphProps) 
             }
         } catch (e: any) {
             let date = new Date(Date.now()).toLocaleString()
-            setError(date + " : " + e.message)
+            setError(date + " : " + e.message + "; plot will auto-refresh")
         }
     }
 
