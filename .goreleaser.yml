@@ -55,10 +55,10 @@ nfpms:
   - package_name: pelican
     builds:
       - pelican
-    file_name_template: '{{ .PackageName }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}'
+    file_name_template: "{{ .ConventionalFileName }}"
     id: pelican
     vendor: OSG Consortium
-    homepage: https://github.com/PelicanProject/pelican
+    homepage: https://github.com/PelicanPlatform/pelican
     maintainer: Brian Bockelman <bbockelman@morgridge.org>
     description: Command-line copy tool for the Open Science Data Federation
     license: Apache 2.0
@@ -77,10 +77,10 @@ nfpms:
             dst: "/usr/share/doc/{{ .PackageName }}-{{ .Version }}/LICENSE.txt"
           - src: README.md
             dst: "/usr/share/doc/{{ .PackageName }}-{{ .Version }}/README.md"
-        file_name_template: >-
-          {{ .PackageName }}-{{ .Version }}-{{ .Release }}.{{ if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
+            file_info:
+              mode: 0644
+            type: doc
       deb:
-        file_name_template: "{{ .PackageName }}-{{ .Version }}-{{ .Release }}_{{ .Arch }}"
         contents:
           - src: LICENSE
             dst: "/usr/share/doc/{{ .PackageName }}/LICENSE.txt"
@@ -93,7 +93,6 @@ nfpms:
 
   - package_name: pelican-osdf-compat
     builds: []
-    # file_name_template: '{{ .PackageName }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}'
     file_name_template: "{{ .ConventionalFileName }}"
     id: pelican-osdf-compat
     vendor: OSG Consortium
@@ -153,10 +152,7 @@ nfpms:
         #   - "osdf-client = %{version}"
         #   - "stashcp = %{version}"
         #   - "condor-stash-plugin = %{version}"
-        # file_name_template: >-
-        #   {{ .PackageName }}-{{ .Version }}-{{ .Release }}.{{ if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
       deb:
-        # file_name_template: "{{ .PackageName }}-{{ .Version }}-{{ .Release }}_{{ .Arch }}"
         contents:
           - src: "./pelican"
             dst: "/usr/bin/osdf"
