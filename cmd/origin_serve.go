@@ -132,10 +132,10 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	if err = origin_ui.ConfigureOriginUI(engine); err != nil {
 		return err
 	}
-	if err = origin_ui.PeriodicAdvertiseOrigin(); err != nil {
+	if err = origin_ui.RegisterNamespaceWithRetry(); err != nil {
 		return err
 	}
-	if err = origin_ui.RegisterNamespaceWithRetry(); err != nil {
+	if err = origin_ui.PeriodicAdvertiseOrigin(); err != nil {
 		return err
 	}
 	if param.Origin_EnableIssuer.GetBool() {
