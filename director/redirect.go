@@ -163,12 +163,16 @@ func RedirectToCache(ginCtx *gin.Context) {
 	authzBearerEscaped := getAuthzEscaped(ginCtx.Request)
 
 	namespaceAd, _, cacheAds := GetAdsForPath(reqPath)
-	if len(cacheAds) == 0 {
-		ginCtx.String(404, "No cache found for path\n")
-		return
-	}
+	// if GetAdsForPath doesn't find any ads because the prefix doesn't exist, we should
+	// report the lack of path first -- this is most important for the user because it tells them
+	// they're trying to get an object that simply doesn't exist
 	if namespaceAd.Path == "" {
 		ginCtx.String(404, "No namespace found for path. Either it doesn't exist, or the Director is experiencing problems\n")
+		return
+	}
+	// If the namespace prefix DOES exist, then it makes sense to say we couldn't find a valid cache.
+	if len(cacheAds) == 0 {
+		ginCtx.String(404, "No cache found for path\n")
 		return
 	}
 	cacheAds, err = SortServers(ipAddr, cacheAds)
@@ -243,8 +247,16 @@ func RedirectToOrigin(ginCtx *gin.Context) {
 	authzBearerEscaped := getAuthzEscaped(ginCtx.Request)
 
 	namespaceAd, originAds, _ := GetAdsForPath(reqPath)
+	// if GetAdsForPath doesn't find any ads because the prefix doesn't exist, we should
+	// report the lack of path first -- this is most important for the user because it tells them
+	// they're trying to get an object that simply doesn't exist
 	if namespaceAd.Path == "" {
-		ginCtx.String(404, "No origin found for path\n")
+		ginCtx.String(404, "No namespace found for path. Either it doesn't exist, or the Director is experiencing problems\n")
+		return
+	}
+	// If the namespace prefix DOES exist, then it makes sense to say we couldn't find the origin.
+	if len(originAds) == 0 {
+		ginCtx.String(404, "There are currently no origins exporting the provided namespace prefix\n")
 		return
 	}
 
