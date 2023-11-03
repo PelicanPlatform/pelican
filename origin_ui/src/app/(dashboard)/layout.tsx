@@ -22,7 +22,7 @@ import {Header} from "@/components/layout/Header";
 import {Sidebar} from "@/app/(dashboard)/Sidebar";
 
 export const metadata = {
-    title: 'Origin Initialization',
+    title: 'Pelican Origin',
     description: 'Software designed to make data distribution easy',
 }
 
