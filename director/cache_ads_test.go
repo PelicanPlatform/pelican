@@ -168,4 +168,11 @@ func TestGetAdsForPath(t *testing.T) {
 	assert.Equal(t, len(oAds), 1)
 	assert.Equal(t, len(cAds), 0)
 	assert.True(t, hasServerAdWithName(oAds, "origin2"))
+
+	// Finally, let's throw in a test for a path we know shouldn't exist
+	// in the ttlcache
+	nsAd, oAds, cAds = GetAdsForPath("/does/not/exist")
+	assert.Equal(t, nsAd.Path, "")
+	assert.Equal(t, len(oAds), 0)
+	assert.Equal(t, len(cAds), 0)
 }
