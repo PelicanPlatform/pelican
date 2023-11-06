@@ -10,8 +10,14 @@ import (
 )
 
 type DiscoveryResponse struct {
+	Issuer  string `json:"issuer"`
 	JwksUri string `json:"jwks_uri"`
 }
+
+var (
+	directorDiscoveryPath string = "/.well-known/openid-configuration"
+	directorJWKSPath      string = "/.well-known/issuer.jwks"
+)
 
 // Returns links related to director's authentication, including the link
 // to get the public key from the director
@@ -22,7 +28,8 @@ func discoveryHandler(ctx *gin.Context) {
 		return
 	}
 	rs := DiscoveryResponse{
-		JwksUri: directorUrl + "/.well-known/public-signing-key.jwks",
+		Issuer:  directorUrl,
+		JwksUri: directorUrl + directorJWKSPath,
 	}
 	jsonData, err := json.MarshalIndent(rs, "", "  ")
 	if err != nil {
@@ -56,6 +63,6 @@ func jwksHandler(ctx *gin.Context) {
 }
 
 func RegisterDirectorAuth(router *gin.RouterGroup) {
-	router.GET("/.well-known/pelican-configuration", discoveryHandler)
-	router.GET("/.well-known/public-signing-key.jwks", jwksHandler)
+	router.GET(directorDiscoveryPath, discoveryHandler)
+	router.GET(directorJWKSPath, jwksHandler)
 }
