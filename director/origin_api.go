@@ -238,7 +238,7 @@ func VerifyDirectorTestReportToken(strToken string) (bool, error) {
 		return false, err
 	}
 
-	tok, err := jwt.Parse([]byte(strToken), jwt.WithKey(jwa.ES256, *key), jwt.WithValidate(true))
+	tok, err := jwt.Parse([]byte(strToken), jwt.WithKey(jwa.ES256, key), jwt.WithValidate(true))
 	if err != nil {
 		return false, err
 	}

@@ -52,7 +52,9 @@ func ListNamespacesFromOrigins() []NamespaceAd {
 	return namespaces
 }
 
-func LoadDirectorPublicKey() (*jwk.Key, error) {
+// Return the public JWK of the director by querying director's discovery endpoint
+// Through Federation.Directory URL
+func LoadDirectorPublicKey() (jwk.Key, error) {
 	directorDiscoveryUrlStr := param.Federation_DirectorUrl.GetString()
 	if len(directorDiscoveryUrlStr) == 0 {
 		return nil, errors.Errorf("Director URL is unset; Can't load director's public key")
@@ -114,7 +116,7 @@ func LoadDirectorPublicKey() (*jwk.Key, error) {
 		return nil, errors.Wrap(err, fmt.Sprintln("Failure when getting director's first public key: ", jwksUri))
 	}
 
-	return &key, nil
+	return key, nil
 }
 
 // Create a token for director's Prometheus instance to access
