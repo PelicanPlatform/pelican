@@ -209,12 +209,12 @@ func CreateDirectorTestReportToken(originWebUrl string) (string, error) {
 		return "", errors.Wrap(err, "failed to load the origin's JWK")
 	}
 
-	err = jwk.AssignKeyID(*key)
+	err = jwk.AssignKeyID(key)
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to assign kid to the token")
 	}
 
-	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, *key))
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, key))
 	if err != nil {
 		return "", err
 	}
