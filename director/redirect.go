@@ -390,12 +390,15 @@ func registerServeAd(ctx *gin.Context, sType ServerType) {
 	}
 
 	RecordAd(sAd, &ad.Namespaces)
+	hasOriginAdInCache := serverAds.Has(sAd)
 
-	if ad.WebURL != "" {
-		// Start director periodic test of origin's health status if origin AD
-		// has WebURL field
-		go PeriodicDirectorTest(ad.URL, ad.WebURL, ad.Name)
+	// Start director periodic test of origin's health status if origin AD
+	// has WebURL field AND it's not already been registered
+	serverAdMutex.RLock()
+	if ad.WebURL != "" && !hasOriginAdInCache {
+		go PeriodicDirectorTest(sAd)
 	}
+	serverAdMutex.RUnlock()
 
 	ctx.JSON(200, gin.H{"msg": "Successful registration"})
 }

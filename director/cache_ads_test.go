@@ -22,6 +22,7 @@ import (
 	"net/url"
 	"testing"
 
+	"github.com/jellydator/ttlcache/v3"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -175,4 +176,28 @@ func TestGetAdsForPath(t *testing.T) {
 	assert.Equal(t, nsAd.Path, "")
 	assert.Equal(t, len(oAds), 0)
 	assert.Equal(t, len(cAds), 0)
+}
+
+func TestRecordAD(t *testing.T) {
+	mockOriginServerAd := ServerAd{
+		Name:      "test-origin-server",
+		AuthURL:   url.URL{Scheme: "https", Host: "fake-url.org", Path: "/user", RawQuery: "foo=1&bar=2"},
+		URL:       url.URL{},
+		Type:      OriginType,
+		Latitude:  123.05,
+		Longitude: 456.78,
+	}
+
+	t.Run("make-sure-cache-set-can-compare-struct", func(t *testing.T) {
+		serverAds.DeleteAll()
+		serverAds.Set(mockOriginServerAd, []NamespaceAd{}, ttlcache.DefaultTTL)
+		serverAds.Set(mockOriginServerAd, []NamespaceAd{{Path: "", Issuer: url.URL{}}}, ttlcache.DefaultTTL)
+		assert.Equal(t, 1, len(serverAds.Items()), "Set duplicate cache entry when key is the same")
+	})
+
+	t.Run("make-sure-cache-has-can-compare-struct", func(t *testing.T) {
+		serverAds.DeleteAll()
+		serverAds.Set(mockOriginServerAd, []NamespaceAd{}, ttlcache.DefaultTTL)
+		assert.True(t, serverAds.Has(mockOriginServerAd), "Return false with key in the cache")
+	})
 }

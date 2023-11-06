@@ -259,15 +259,30 @@ func reportStatusToOrigin(originWebUrl string, status string, message string) er
 
 // Run a periodic test file transfer against an origin to ensure
 // it's talking to the director
-func PeriodicDirectorTest(originUrl, originWebUrl, originName string) {
+func PeriodicDirectorTest(originAd ServerAd) {
+	originName := originAd.Name
+	originUrl := originAd.URL.String()
+	originWebUrl := originAd.WebURL.String()
+
 	firstRound := true
 	for {
 		if firstRound {
 			time.Sleep(5 * time.Second)
+			log.Debug(fmt.Sprintf("Starting Director test for origin %s at %s", originName, originUrl))
 			firstRound = false
 		} else {
 			time.Sleep(15 * time.Second)
 		}
+		// End the periodic test if the ttlcache doesn't have the origin ad
+		// meaning the origin is offline and the cache is expired
+		serverAdMutex.RLock()
+		if !serverAds.Has(originAd) {
+			log.Debug(fmt.Sprintf("End of director test cycle for origin: %s at %s", originName, originUrl))
+			serverAdMutex.RUnlock()
+			return
+		}
+		serverAdMutex.RUnlock()
+
 		log.Debug(fmt.Sprintf("Starting a new Director test cycle for origin: %s at %s", originName, originUrl))
 		url, err := UploadTestfile(originUrl)
 		if err != nil {
