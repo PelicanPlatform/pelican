@@ -239,6 +239,9 @@ func getUser(ctx *gin.Context) (string, error) {
 	return parsed.Subject(), nil
 }
 
+// Authenticate user by checking if the auth cookie is present and set the user identity to ctx
+// However, this won't stop the handler chain and return with 401 if the auth cookie
+// is missing. It's the next handler's job to check if ctx has a non-empty "User" field
 func authHandler(ctx *gin.Context) {
 	user, err := getUser(ctx)
 	if err != nil {
@@ -326,6 +329,11 @@ func resetLoginHandler(ctx *gin.Context) {
 }
 
 func getConfig(ctx *gin.Context) {
+	user := ctx.GetString("User")
+	if user == "" {
+		ctx.JSON(401, gin.H{"error": "Authentication required to visit this API"})
+		return
+	}
 	config, err := param.GetUnmarshaledConfig()
 	if err != nil {
 		ctx.JSON(500, gin.H{"error": "Failed to get the unmarshaled config"})

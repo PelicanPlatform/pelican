@@ -190,6 +190,8 @@ func GetAdsForPath(reqPath string) (originNamespace NamespaceAd, originAds []Ser
 		}
 	}
 
-	originNamespace = *best
+	if best != nil {
+		originNamespace = *best
+	}
 	return
 }
