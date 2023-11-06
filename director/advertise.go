@@ -30,6 +30,7 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
 )
 
 type (
@@ -172,6 +173,17 @@ func AdvertiseOSDF() error {
 
 	for cacheAd, namespacesSlice := range cacheAdMap {
 		RecordAd(cacheAd, &namespacesSlice)
+
+		// In addition to recording the ads, we can add these to the string slice the Director uses
+		// when checking if specific hosts should receive a cache or an origin redirect. For now, when
+		// a cache uses the director as its redirector, it only makes sense to redirect the cache to an
+		// origin, regardless of what the director is configured to serve by default.
+		if param.Director_HostAwareRedirects.GetBool() {
+			oRedirectHosts := param.Director_OriginResponseHostnames.GetStringSlice()
+			oRedirectHosts = append(oRedirectHosts, cacheAd.URL.Host)
+			oRedirectHosts = append(oRedirectHosts, cacheAd.AuthURL.Host)
+			viper.Set("Director.OriginResponseHostnames", oRedirectHosts)
+		}
 	}
 
 	return nil
