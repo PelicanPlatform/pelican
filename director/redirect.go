@@ -33,6 +33,11 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+type PromDiscoveryItem struct {
+	Targets []string          `json:"targets"`
+	Labels  map[string]string `json:"labels"`
+}
+
 var (
 	minClientVersion, _ = version.NewVersion("7.0.0")
 	minOriginVersion, _ = version.NewVersion("7.0.0")
@@ -278,7 +283,9 @@ func RedirectToOrigin(ginCtx *gin.Context) {
 func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// If this is a request for getting public key, don't modify the path
-		if strings.HasPrefix(c.Request.URL.Path, "/.well-known") {
+		// If this is a request to the Prometheus API, don't modify the path
+		if strings.HasPrefix(c.Request.URL.Path, "/.well-known") ||
+			strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/prometheus") {
 			c.Next()
 			return
 		}
@@ -368,9 +375,61 @@ func RegisterOrigin(ctx *gin.Context) {
 	ctx.JSON(200, gin.H{"msg": "Successful registration"})
 }
 
+// Return a list of available origins URL in Prometheus HTTP SD format
+// for director's Prometheus service discovery
+func DiscoverOrigins(ctx *gin.Context) {
+	// Check token for authorization
+	tokens, present := ctx.Request.Header["Authorization"]
+	if !present || len(tokens) == 0 {
+		ctx.JSON(401, gin.H{"error": "Bearer token not present in the 'Authorization' header"})
+		return
+	}
+	token := strings.TrimPrefix(tokens[0], "Bearer ")
+	ok, err := VerifyDirectorSDToken(token)
+	if err != nil {
+		log.Warningln("Failed to verify director service discovery token:", err)
+		ctx.JSON(401, gin.H{"error": fmt.Sprintf("Authorization token verification failed: %v\n", err)})
+		return
+	}
+	if !ok {
+		log.Warningf("Invalid token for accessing director's sevice discovery")
+		ctx.JSON(401, gin.H{"error": "Invalid token for accessing director's sevice discovery"})
+		return
+	}
+
+	serverAdMutex.RLock()
+	defer serverAdMutex.RUnlock()
+	serverAds := serverAds.Keys()
+	promDiscoveryRes := make([]PromDiscoveryItem, 0)
+	for _, ad := range serverAds {
+		// We don't include caches in this discovery for right now
+		if ad.Type != OriginType {
+			continue
+		}
+		if ad.WebURL.String() == "" {
+			// Oririgns fetched from topology can't be scraped as they
+			// don't have a WebURL
+			continue
+		}
+		promDiscoveryRes = append(promDiscoveryRes, PromDiscoveryItem{
+			Targets: []string{ad.WebURL.Hostname() + ":" + ad.WebURL.Port()},
+			Labels: map[string]string{
+				"origin_name":     ad.Name,
+				"origin_auth_url": ad.AuthURL.String(),
+				"origin_url":      ad.URL.String(),
+				"origin_web_url":  ad.WebURL.String(),
+				"origin_lat":      fmt.Sprintf("%.4f", ad.Latitude),
+				"origin_long":     fmt.Sprintf("%.4f", ad.Longitude),
+			},
+		})
+	}
+	ctx.JSON(200, promDiscoveryRes)
+}
+
 func RegisterDirector(router *gin.RouterGroup) {
 	// Establish the routes used for cache/origin redirection
 	router.GET("/api/v1.0/director/object/*any", RedirectToCache)
 	router.GET("/api/v1.0/director/origin/*any", RedirectToOrigin)
 	router.POST("/api/v1.0/director/registerOrigin", RegisterOrigin)
+	router.GET("/api/v1.0/director/discoverOrigins", DiscoverOrigins)
 }

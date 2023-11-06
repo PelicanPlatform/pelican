@@ -56,6 +56,13 @@ func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		return errors.Wrap(err, "Failed to generate director private key")
 	}
 
+	// Since director will provide a public JWK for token authentication
+	// We need to initialize public JWK and private JWK at the start
+	_, err = config.GenerateIssuerJWKS()
+	if err != nil {
+		return errors.Wrap(err, "Failed to load director's public and private jwk")
+	}
+
 	// Generate a TLS certificate if needed
 	if err := config.GenerateCert(); err != nil {
 		return err
@@ -63,6 +70,13 @@ func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
 
 	engine, err := web_ui.GetEngine()
 	if err != nil {
+		return err
+	}
+
+	// We configure Prometheus differently for director than for the rest servers,
+	// although in the future we probably want to pass the server type to the
+	// metric config function just because each server may have different config
+	if err := web_ui.ConfigureMetrics(engine, true); err != nil {
 		return err
 	}
 

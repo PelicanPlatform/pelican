@@ -24,8 +24,12 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
+	"time"
 
+	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
@@ -111,4 +115,81 @@ func LoadDirectorPublicKey() (*jwk.Key, error) {
 	}
 
 	return &key, nil
+}
+
+// Create a token for director's Prometheus instance to access
+// director's origins service discovery endpoint. This function is intended
+// to be called on a director server
+func CreateDirectorSDToken() (string, error) {
+	directorURL := param.Federation_DirectorUrl.GetString()
+	if directorURL == "" {
+		return "", errors.New("Director URL is not known; cannot create director service discovery token")
+	}
+
+	tok, err := jwt.NewBuilder().
+		Claim("scope", "pelican.directorSD").
+		Issuer(directorURL).
+		Audience([]string{directorURL}).
+		Subject("director").
+		Expiration(time.Now().Add(time.Hour)).
+		Build()
+	if err != nil {
+		return "", err
+	}
+
+	key, err := config.GetOriginJWK()
+	if err != nil {
+		return "", errors.Wrap(err, "failed to load the director's JWK")
+	}
+
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, *key))
+	if err != nil {
+		return "", err
+	}
+	return string(signed), nil
+}
+
+// Verify that a token received is a valid token from director and has
+// correct scope for accessing the service discovery endpoint. This function
+// is intended to be called on the same director server that issues the token.
+func VerifyDirectorSDToken(strToken string) (bool, error) {
+	directorURL := param.Federation_DirectorUrl.GetString()
+	token, err := jwt.Parse([]byte(strToken), jwt.WithVerify(false))
+	if err != nil {
+		return false, err
+	}
+
+	if directorURL != token.Issuer() {
+		return false, errors.Errorf("Token issuer is not a director")
+	}
+	// Given that this function is intended to be called on the same director server
+	// that issues the token. so it's safe to skip getting the public key
+	// from director's discovery URL.
+	issuerKeyfile := param.IssuerKey.GetString()
+	key, err := config.LoadPublicKey("", issuerKeyfile)
+	if err != nil {
+		return false, err
+	}
+	tok, err := jwt.Parse([]byte(strToken), jwt.WithKeySet(*key), jwt.WithValidate(true))
+	if err != nil {
+		return false, err
+	}
+
+	scope_any, present := tok.Get("scope")
+	if !present {
+		return false, errors.New("No scope is present; required to advertise to director")
+	}
+	scope, ok := scope_any.(string)
+	if !ok {
+		return false, errors.New("scope claim in token is not string-valued")
+	}
+
+	scopes := strings.Split(scope, " ")
+
+	for _, scope := range scopes {
+		if scope == "pelican.directorSD" {
+			return true, nil
+		}
+	}
+	return false, nil
 }
