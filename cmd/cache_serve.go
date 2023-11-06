@@ -37,6 +37,7 @@ import (
 	"github.com/pelicanplatform/pelican/metrics"
 	nsregistry "github.com/pelicanplatform/pelican/namespace-registry"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pelicanplatform/pelican/xrootd"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -45,36 +46,6 @@ import (
 
 type directorResponse struct {
 	Error string `json:"error"`
-}
-
-func makeRequest(url string, method string, data map[string]interface{}, headers map[string]string) ([]byte, error) {
-	payload, _ := json.Marshal(data)
-	req, err := http.NewRequest(method, url, bytes.NewBuffer(payload))
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	for key, val := range headers {
-		req.Header.Set(key, val)
-	}
-
-	tr := config.GetTransport()
-	client := &http.Client{Transport: tr}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	// Check HTTP response -- should be 200, else something went wrong
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != 200 {
-		return body, errors.Errorf("The URL %s replied with status code %d", url, resp.StatusCode)
-	}
-
-	return body, nil
 }
 
 func periodicAdvertiseCache(prefix string, nsAds []director.NamespaceAd) error {
@@ -240,7 +211,7 @@ func serveCache( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		return err
 	}
 
-	respData, err := makeRequest(directorNSListEndpointURL, "GET", nil, nil)
+	respData, err := utils.MakeRequest(directorNSListEndpointURL, "GET", nil, nil)
 	var respNS []director.NamespaceAd
 	if err != nil {
 		if jsonErr := json.Unmarshal(respData, &respNS); jsonErr == nil { // Error creating json
