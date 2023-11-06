@@ -19,9 +19,6 @@
 package main
 
 import (
-	"fmt"
-	"os"
-
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/spf13/cobra"
@@ -37,12 +34,6 @@ var (
 		},
 	}
 
-	cacheConfigCmd = &cobra.Command{
-		Use:   "config",
-		Short: "Launch the Pelican web service in configuration mode",
-		Run:   configCache,
-	}
-
 	cacheServeCmd = &cobra.Command{
 		Use:          "serve",
 		Short:        "Start the cache service",
@@ -50,11 +41,6 @@ var (
 		SilenceUsage: true,
 	}
 )
-
-func configCache( /*cmd*/ *cobra.Command /*args*/, []string) {
-	fmt.Println("'cache config' command is not yet implemented")
-	os.Exit(1)
-}
 
 func initCache() error {
 	err := config.InitServer()
@@ -68,7 +54,6 @@ func initCache() error {
 }
 
 func init() {
-	cacheCmd.AddCommand(cacheConfigCmd)
 	cacheCmd.AddCommand(cacheServeCmd)
 	cacheServeCmd.Flags().AddFlag(portFlag)
 }

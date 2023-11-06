@@ -42,10 +42,10 @@ type (
 	}
 
 	CacheConfig struct {
-		UseCmsd          bool
-		ExportLocation   string
-		DataFileLocation string
-		DirectorUrl      string
+		UseCmsd        bool
+		ExportLocation string
+		DataLocation   string
+		DirectorUrl    string
 	}
 
 	XrootdOptions struct {
@@ -194,14 +194,14 @@ to export the directory /mnt/foo to the path /bar in the data federation`)
 			return errors.Wrapf(err, "Unable to create export directory %v",
 				filepath.Dir(exportPath))
 		}
-		dataPath := filepath.Join(param.Cache_DataFileLocation.GetString(), "data/")
+		dataPath := filepath.Join(param.Cache_DataLocation.GetString(), "data/")
 		dataPath = filepath.Clean(dataPath)
 		err = config.MkdirAll(dataPath, 0775, uid, gid)
 		if err != nil {
 			return errors.Wrapf(err, "Unable to create data directory %v",
 				filepath.Dir(dataPath))
 		}
-		metaPath := filepath.Join(param.Cache_DataFileLocation.GetString(), "meta/")
+		metaPath := filepath.Join(param.Cache_DataLocation.GetString(), "meta/")
 		metaPath = filepath.Clean(metaPath)
 		err = config.MkdirAll(metaPath, 0775, uid, gid)
 		if err != nil {

@@ -82,7 +82,7 @@ func periodicAdvertiseCache(prefix string, nsAds []director.NamespaceAd) error {
 	go func() {
 		err := advertiseCache(prefix, nsAds)
 		if err != nil {
-			log.Warningln("Vsvhr advertise failed:", err)
+			log.Warningln("Cache advertise failed:", err)
 			if err = metrics.SetComponentHealthStatus("federation", "critical", "Error advertising cache to federation"); err != nil {
 				log.Warningln("Failed to update internal component health status:", err)
 			}
@@ -161,11 +161,9 @@ func advertiseCache(prefix string, nsAds []director.NamespaceAd) error {
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
-	userAgent := "pelican-origin/" + client.ObjectClientOptions.Version
+	userAgent := "pelican-cache/" + client.ObjectClientOptions.Version
 	req.Header.Set("User-Agent", userAgent)
 
-	// We should switch this over to use the common transport, but for that to happen
-	// that function needs to be exported from pelican
 	tr := config.GetTransport()
 	client := http.Client{Transport: tr}
 

@@ -398,7 +398,7 @@ func InitServer() error {
 	viper.SetDefault("Cache.ExportLocation", "/")
 	if IsRootExecution() {
 		viper.SetDefault("Xrootd.RunLocation", "/run/pelican/xrootd")
-		viper.SetDefault("Cache.DataFileLocation", "/run/pelican/xcache")
+		viper.SetDefault("Cache.DataLocation", "/run/pelican/xcache")
 		viper.SetDefault("Origin.Multiuser", true)
 		viper.SetDefault("Director.GeoIPLocation", "/var/cache/pelican/maxmind/GeoLite2-City.mmdb")
 		viper.SetDefault("Registry.DbLocation", "/var/lib/pelican/registry.sqlite")
@@ -415,14 +415,14 @@ func InitServer() error {
 				return err
 			}
 			viper.SetDefault("Xrootd.RunLocation", runtimeDir)
-			viper.SetDefault("Cache.DataFileLocation", path.Join(runtimeDir, "xcache"))
+			viper.SetDefault("Cache.DataLocation", path.Join(runtimeDir, "xcache"))
 		} else {
 			dir, err := os.MkdirTemp("", "pelican-xrootd-*")
 			if err != nil {
 				return err
 			}
 			viper.SetDefault("Xrootd.RunLocation", dir)
-			viper.SetDefault("Cache.DataFileLocation", path.Join(dir, "xcache"))
+			viper.SetDefault("Cache.DataLocation", path.Join(dir, "xcache"))
 			cleanupDirOnShutdown(dir)
 		}
 		viper.SetDefault("Origin.Multiuser", false)
