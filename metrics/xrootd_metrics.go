@@ -42,6 +42,15 @@ type (
 		Id uint32
 	}
 
+	// userid as in XRootD message info field
+	XrdUserId struct {
+		Prot string
+		User string
+		Pid  string
+		Sid  string
+		Host string
+	}
+
 	UserRecord struct {
 		AuthenticationProtocol string
 		DN                     string

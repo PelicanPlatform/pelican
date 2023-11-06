@@ -1,13 +1,62 @@
 package metrics
 
 import (
+	"bytes"
+	"encoding/binary"
 	"encoding/xml"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 )
+
+func getAuthInfoString(user UserRecord) string {
+	return fmt.Sprintf("&p=%s&n=%s&h=[::ffff:172.17.0.2]&o=%s&r=%s&g=&m=&I=4", user.AuthenticationProtocol, user.DN, user.Org, user.Role)
+}
+
+func getUserIdString(userId XrdUserId) string {
+	return fmt.Sprintf("%s/%s.%s:%s@%s", userId.Prot, userId.User, userId.Pid, userId.Sid, userId.Host)
+}
+
+func serializeXrdXrootdMonMap(monMap XrdXrootdMonMap) ([]byte, error) {
+	var buf bytes.Buffer
+
+	// Writing the Header
+	err := binary.Write(&buf, binary.BigEndian, monMap.Hdr.Code)
+	if err != nil {
+		return nil, errors.Wrap(err, fmt.Sprint("binary.Write failed for Code:", err))
+	}
+	err = binary.Write(&buf, binary.BigEndian, monMap.Hdr.Pseq)
+	if err != nil {
+		return nil, errors.Wrap(err, fmt.Sprint("binary.Write failed for Pseq:", err))
+	}
+	err = binary.Write(&buf, binary.BigEndian, monMap.Hdr.Plen)
+	if err != nil {
+		return nil, errors.Wrap(err, fmt.Sprint("binary.Write failed for Plen:", err))
+	}
+	err = binary.Write(&buf, binary.BigEndian, monMap.Hdr.Stod)
+	if err != nil {
+		return nil, errors.Wrap(err, fmt.Sprint("binary.Write failed for Stod:", err))
+	}
+
+	// Writing the Dictid
+	err = binary.Write(&buf, binary.BigEndian, monMap.Dictid)
+	if err != nil {
+		return nil, errors.Wrap(err, fmt.Sprint("binary.Write failed for Dictid:", err))
+	}
+
+	// Writing the Info slice directly
+	err = binary.Write(&buf, binary.BigEndian, monMap.Info)
+	if err != nil {
+		return nil, errors.Wrap(err, fmt.Sprint("binary.Write failed for Info:", err))
+	}
+
+	return buf.Bytes(), nil
+}
 
 func TestHandlePacket(t *testing.T) {
 	t.Run("an-empty-detail-packet-should-return-error", func(t *testing.T) {
@@ -162,5 +211,43 @@ func TestHandlePacket(t *testing.T) {
 		if err := testutil.CollectAndCompare(BytesXfer, expectedLinkByteXferIncDup, "xrootd_server_bytes"); err != nil {
 			assert.NoError(t, err, "Collected metric is different from expected")
 		}
+	})
+
+	t.Run("auth-packet-should-register-correct-info", func(t *testing.T) {
+		mockUserRecord := UserRecord{
+			AuthenticationProtocol: "https",
+			DN:                     "clientName",
+			Role:                   "clientRole",
+			Org:                    "clientOrg",
+		}
+		mockXrdUserId := XrdUserId{
+			Prot: "https",
+			User: "unknown",
+			Pid:  "0",
+			Sid:  "143152967831384",
+			Host: "fae8c2865de4",
+		}
+		mockInfo := []byte(getUserIdString(mockXrdUserId) + "\n" + getAuthInfoString(mockUserRecord))
+		mockMonMap := XrdXrootdMonMap{
+			Hdr: XrdXrootdMonHeader{ // 8B
+				Code: 'g',
+				Pseq: 1,
+				Plen: uint16(12 + len(mockInfo)),
+				Stod: int32(time.Now().Unix()),
+			},
+			Dictid: uint32(0), // 4B
+			Info:   mockInfo,
+		}
+
+		sessions.DeleteAll()
+
+		buf, err := serializeXrdXrootdMonMap(mockMonMap)
+		assert.NoError(t, err, "Error serializing monitor packet")
+		HandlePacket(buf)
+
+		assert.Equal(t, 1, len(sessions.Keys()), "Session cache didn't update")
+		// The ID seems to be wrong. The length of sid is kXR_int64 while the user id in file hdr is kXR_unt32
+		// Aren't the user id supposed to be dictid instead of sid?
+		assert.Equal(t, "143152967831384", sessions.Keys()[0].Id, "Session cache didn't update")
 	})
 }
