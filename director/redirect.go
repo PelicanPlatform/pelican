@@ -333,12 +333,7 @@ func registerServeAd(ctx *gin.Context, sType ServerType) {
 		return
 	}
 
-	var originAds []NamespaceAd
-
 	for _, namespace := range ad.Namespaces {
-		if !strings.Contains(namespace.Path, "caches/") {
-			originAds = append(originAds, namespace)
-		}
 		// We're assuming there's only one token in the slice
 		token := strings.TrimPrefix(tokens[0], "Bearer ")
 		ok, err := VerifyAdvertiseToken(token, namespace.Path)
@@ -377,11 +372,7 @@ func registerServeAd(ctx *gin.Context, sType ServerType) {
 		Type:    sType,
 	}
 
-	if sType == OriginType {
-		RecordAd(sAd, &ad.Namespaces)
-	} else {
-		RecordAd(sAd, &originAds)
-	}
+	RecordAd(sAd, &ad.Namespaces)
 
 	ctx.JSON(200, gin.H{"msg": "Successful registration"})
 }

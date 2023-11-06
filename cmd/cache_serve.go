@@ -89,20 +89,10 @@ func advertiseCache(prefix string, nsAds []director.NamespaceAd) error {
 	// parses the originUrl, so it should be safe to just grab it as a string here.
 	originUrl := param.Origin_Url.GetString()
 
-	// TODO: Need to figure out where to get some of these values
-	//               so that they aren't hardcoded...
-	cAd := director.NamespaceAd{
-		RequireToken:  true,
-		Path:          prefix,
-		Issuer:        url.URL{},
-		MaxScopeDepth: 3,
-		Strategy:      "OAuth2",
-		BasePath:      "/",
-	}
 	ad := director.OriginAdvertise{
 		Name:       name,
 		URL:        originUrl,
-		Namespaces: append(nsAds, cAd),
+		Namespaces: nsAds,
 	}
 
 	body, err := json.Marshal(ad)
