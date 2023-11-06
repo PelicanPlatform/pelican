@@ -333,10 +333,27 @@ func registerServeAd(ctx *gin.Context, sType ServerType) {
 		return
 	}
 
-	for _, namespace := range ad.Namespaces {
-		// We're assuming there's only one token in the slice
+	if sType == OriginType {
+		for _, namespace := range ad.Namespaces {
+			// We're assuming there's only one token in the slice
+			token := strings.TrimPrefix(tokens[0], "Bearer ")
+			ok, err := VerifyAdvertiseToken(token, namespace.Path)
+			if err != nil {
+				log.Warningln("Failed to verify token:", err)
+				ctx.JSON(400, gin.H{"error": "Authorization token verification failed"})
+				return
+			}
+			if !ok {
+				log.Warningf("%s %v advertised to namespace %v without valid registration\n",
+					sType, ad.Name, namespace.Path)
+				ctx.JSON(400, gin.H{"error": sType + " not authorized to advertise to this namespace"})
+				return
+			}
+		}
+	} else {
 		token := strings.TrimPrefix(tokens[0], "Bearer ")
-		ok, err := VerifyAdvertiseToken(token, namespace.Path)
+		prefix := path.Join("caches", ad.Name)
+		ok, err := VerifyAdvertiseToken(token, prefix)
 		if err != nil {
 			log.Warningln("Failed to verify token:", err)
 			ctx.JSON(400, gin.H{"error": "Authorization token verification failed"})
@@ -344,7 +361,7 @@ func registerServeAd(ctx *gin.Context, sType ServerType) {
 		}
 		if !ok {
 			log.Warningf("%s %v advertised to namespace %v without valid registration\n",
-				sType, ad.Name, namespace.Path)
+				sType, ad.Name, prefix)
 			ctx.JSON(400, gin.H{"error": sType + " not authorized to advertise to this namespace"})
 			return
 		}
