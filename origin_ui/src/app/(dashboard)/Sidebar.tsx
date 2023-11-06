@@ -17,27 +17,46 @@
  ***************************************************************/
 
 import Image from 'next/image'
-import styles from "../../app/page.module.css"
-import {Poppins} from "next/font/google";
+import Link from 'next/link'
+import {Typography, Box} from "@mui/material";
+import IconButton from "@mui/material/IconButton";
+import HomeIcon from '@mui/icons-material/Home';
+import BuildIcon from '@mui/icons-material/Build';
 
+import styles from "../../app/page.module.css"
 import PelicanLogo from "../../public/static/images/PelicanPlatformLogo_Icon.png"
 import GithubIcon from "../../public/static/images/github-mark.png"
-import {Typography, Box} from "@mui/material";
 
 export const Sidebar = () => {
 
     return (
         <Box>
-            <div className={styles.header} style={{display: "flex", flexDirection: "column", justifyContent:"space-between", padding:"1rem", top:0, position:"relative", zIndex:"1", overflow: "hidden", height: "100vh"}}>
-                <div style={{display:"flex"}}>
-                    <Image
-                        src={PelicanLogo}
-                        alt={"Pelican Logo"}
-                        width={32}
-                        height={32}
-                    />
+            <div className={styles.header} style={{display: "flex", flexDirection: "column", justifyContent:"space-between", padding:"1rem", top:0, position:"fixed", zIndex:"1", overflow: "hidden", height: "100vh"}}>
+                <div style={{display:"flex", flexDirection: "column"}}>
+                    <Link href={"/index.html"}>
+                        <Image
+                            src={PelicanLogo}
+                            alt={"Pelican Logo"}
+                            width={36}
+                            height={36}
+                        />
+                    </Link>
+                    <Box pt={3}>
+                        <Link href={"/"}>
+                            <IconButton>
+                                <HomeIcon/>
+                            </IconButton>
+                        </Link>
+                    </Box>
+                    <Box pt={1}>
+                        <Link href={"/config/index.html"}>
+                            <IconButton>
+                                <BuildIcon/>
+                            </IconButton>
+                        </Link>
+                    </Box>
                 </div>
-                <div>
+                <Box display={"flex"} justifyContent={"center"}>
                     <a href={"https://github.com/PelicanPlatform"}>
                         <Image
                             src={GithubIcon}
@@ -46,7 +65,7 @@ export const Sidebar = () => {
                             height={32}
                         />
                     </a>
-                </div>
+                </Box>
             </div>
         </Box>
 
