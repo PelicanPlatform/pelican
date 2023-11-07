@@ -157,11 +157,11 @@ func checkPromToken(av1 *route.Router) gin.HandlerFunc {
 		}
 
 		FederationCheck(c, strToken, "prometheus.read")
-		OriginCheck(c, strToken, "prometheus.read")
+		IssuerCheck(c, strToken, "prometheus.read")
 
 		strToken, err = c.Cookie("login")
 		if err == nil {
-			OriginCheck(c, strToken, "prometheus.read")
+			IssuerCheck(c, strToken, "prometheus.read")
 		}
 
 		_, exists := c.Get("User")

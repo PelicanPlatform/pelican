@@ -137,7 +137,7 @@ func CreateDirectorSDToken() (string, error) {
 		return "", err
 	}
 
-	key, err := config.GetOriginJWK()
+	key, err := config.GetIssuerPrivateJWK()
 	if err != nil {
 		return "", errors.Wrap(err, "failed to load the director's JWK")
 	}
