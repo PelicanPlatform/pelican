@@ -353,9 +353,7 @@ func InitConfig() {
 	} else {
 		logLevel := param.Logging_Level.GetString()
 		level, err := log.ParseLevel(logLevel)
-		if err != nil {
-			cobra.CheckErr(err)
-		}
+		cobra.CheckErr(err)
 		SetLogging(level)
 	}
 
