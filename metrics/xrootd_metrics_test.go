@@ -1,15 +1,13 @@
 package metrics
 
 import (
-	"bytes"
-	"encoding/binary"
 	"encoding/xml"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 )
@@ -20,42 +18,6 @@ func getAuthInfoString(user UserRecord) string {
 
 func getUserIdString(userId XrdUserId) string {
 	return fmt.Sprintf("%s/%s.%s:%s@%s", userId.Prot, userId.User, userId.Pid, userId.Sid, userId.Host)
-}
-
-func serializeXrdXrootdMonMap(monMap XrdXrootdMonMap) ([]byte, error) {
-	var buf bytes.Buffer
-
-	// Writing the Header
-	err := binary.Write(&buf, binary.BigEndian, monMap.Hdr.Code)
-	if err != nil {
-		return nil, errors.Wrap(err, fmt.Sprint("binary.Write failed for Code:", err))
-	}
-	err = binary.Write(&buf, binary.BigEndian, monMap.Hdr.Pseq)
-	if err != nil {
-		return nil, errors.Wrap(err, fmt.Sprint("binary.Write failed for Pseq:", err))
-	}
-	err = binary.Write(&buf, binary.BigEndian, monMap.Hdr.Plen)
-	if err != nil {
-		return nil, errors.Wrap(err, fmt.Sprint("binary.Write failed for Plen:", err))
-	}
-	err = binary.Write(&buf, binary.BigEndian, monMap.Hdr.Stod)
-	if err != nil {
-		return nil, errors.Wrap(err, fmt.Sprint("binary.Write failed for Stod:", err))
-	}
-
-	// Writing the Dictid
-	err = binary.Write(&buf, binary.BigEndian, monMap.Dictid)
-	if err != nil {
-		return nil, errors.Wrap(err, fmt.Sprint("binary.Write failed for Dictid:", err))
-	}
-
-	// Writing the Info slice directly
-	err = binary.Write(&buf, binary.BigEndian, monMap.Info)
-	if err != nil {
-		return nil, errors.Wrap(err, fmt.Sprint("binary.Write failed for Info:", err))
-	}
-
-	return buf.Bytes(), nil
 }
 
 func TestHandlePacket(t *testing.T) {
@@ -213,7 +175,7 @@ func TestHandlePacket(t *testing.T) {
 		}
 	})
 
-	t.Run("auth-packet-should-register-correct-info", func(t *testing.T) {
+	t.Run("auth-packet-u-should-register-correct-info", func(t *testing.T) {
 		mockUserRecord := UserRecord{
 			AuthenticationProtocol: "https",
 			DN:                     "clientName",
@@ -230,7 +192,8 @@ func TestHandlePacket(t *testing.T) {
 		mockInfo := []byte(getUserIdString(mockXrdUserId) + "\n" + getAuthInfoString(mockUserRecord))
 		mockMonMap := XrdXrootdMonMap{
 			Hdr: XrdXrootdMonHeader{ // 8B
-				Code: 'g',
+				// u-stream provides client login information; enabled by the auth and use
+				Code: 'u',
 				Pseq: 1,
 				Plen: uint16(12 + len(mockInfo)),
 				Stod: int32(time.Now().Unix()),
@@ -241,13 +204,109 @@ func TestHandlePacket(t *testing.T) {
 
 		sessions.DeleteAll()
 
-		buf, err := serializeXrdXrootdMonMap(mockMonMap)
+		buf, err := mockMonMap.Serialize()
 		assert.NoError(t, err, "Error serializing monitor packet")
-		HandlePacket(buf)
+		err = HandlePacket(buf)
+		assert.NoError(t, err, "Error handling packet")
 
 		assert.Equal(t, 1, len(sessions.Keys()), "Session cache didn't update")
+
+		sidInt, err := strconv.Atoi(mockXrdUserId.Sid)
+		assert.NoError(t, err, "Error parsing SID to int64")
 		// The ID seems to be wrong. The length of sid is kXR_int64 while the user id in file hdr is kXR_unt32
 		// Aren't the user id supposed to be dictid instead of sid?
-		assert.Equal(t, "143152967831384", sessions.Keys()[0].Id, "Session cache didn't update")
+		assert.Equal(t, uint32(sidInt), sessions.Keys()[0].Id, "Id in session cache entry doesn't match expected")
+		sessionEntry := sessions.Get(sessions.Keys()[0]).Value()
+		assert.Equal(t, mockUserRecord.AuthenticationProtocol, sessionEntry.AuthenticationProtocol)
+		assert.Equal(t, mockUserRecord.DN, sessionEntry.DN)
+		assert.Equal(t, mockUserRecord.Role, sessionEntry.Role)
+		assert.Equal(t, mockUserRecord.Org, sessionEntry.Org)
+
+		sessions.DeleteAll()
+	})
+
+	t.Run("file-path-packet-d-should-register-correct-info", func(t *testing.T) {
+		mockXrdUserId := XrdUserId{
+			Prot: "https",
+			User: "unknown",
+			Pid:  "0",
+			Sid:  "143152967831384",
+			Host: "fae8c2865de4",
+		}
+
+		mockInfo := []byte(getUserIdString(mockXrdUserId) + "\n" + "/full/path/to/file.txt")
+
+		mockMonMap := XrdXrootdMonMap{
+			Hdr: XrdXrootdMonHeader{ // 8B
+				// d-stream provides the identifier assigned to a user and file path; enabled
+				Code: 'd',
+				Pseq: 1,
+				Plen: uint16(12 + len(mockInfo)),
+				Stod: int32(time.Now().Unix()),
+			},
+			Dictid: uint32(10), // 4B
+			Info:   mockInfo,
+		}
+
+		buf, err := mockMonMap.Serialize()
+		assert.NoError(t, err, "Error serializing monitor packet")
+
+		transfers.DeleteAll()
+
+		err = HandlePacket(buf)
+		assert.NoError(t, err, "Error handling packet")
+		assert.Equal(t, 1, len(transfers.Keys()), "Transfer cache didn't update")
+		assert.Equal(t, uint32(10), transfers.Keys()[0].Id, "Id in session cache entry doesn't match expected")
+		transferEntry := transfers.Get(transfers.Keys()[0]).Value()
+		// I'm not sure the intent of the Path attribute and looking at ComputePrefix,
+		// it seems to return "/" all the time as the length of monitorPaths is
+		// never changed
+		assert.Equal(t, "/", transferEntry.Path, "Path in transfer cache entry doesn't match expected")
+
+		sidInt, err := strconv.Atoi(mockXrdUserId.Sid)
+		assert.NoError(t, err, "Error parsing SID to int64")
+		assert.Equal(t, uint32(sidInt), transferEntry.UserId.Id, "UserID in transfer cache entry doesn't match expected")
+	})
+
+	t.Run("f-stream-file-open-event-should-register-correctly", func(t *testing.T) {
+		// f-stream file open event
+		mockMonHeader := XrdXrootdMonHeader{ // 8B
+			Code: 'f',
+			Pseq: 1,
+			Plen: uint16(12 + 1), // to change
+			Stod: int32(time.Now().Unix()),
+		}
+		mockMonFileTOD := XrdXrootdMonFileTOD{
+			Hdr: XrdXrootdMonFileHdr{ // 8B
+				RecType: 3, // isTime
+				RecFlag: 1, // hasSID
+				RecSize: int16(24),
+				NRecs0:  0, // isTime: nRecs[0] == isXfr recs
+				NRecs1:  1, // nRecs[1] == total recs
+			},
+			TBeg: int32(time.Now().Unix()),                  // 4B
+			TEnd: int32(time.Now().Add(time.Second).Unix()), // 4B
+			SID:  143152967831384,                           // 8B
+		}
+		lfnStr := "/full/path/to/file.txt"
+		lfnByteSlice := []byte(lfnStr)
+		lfnByteSlice = append(lfnByteSlice, '\x00') // Add null byte to end the string
+
+		mockMonFileOpn := XrdXrootdMonFileOPN{
+			Hdr: XrdXrootdMonFileHdr{ // 8B
+				RecType: 2, // isOpen
+				RecFlag: 3, // hasLFN hasRW
+				RecSize: 0, // to change
+				FileId:  1,
+			},
+			Fsz: 10000, // 8B
+			Ufn: XrdXrootdMonFileLFN{ // 4B + len(lfn)
+				User: 2,
+			},
+		}
+		copy(mockMonFileOpn.Ufn.Lfn[:], lfnByteSlice)
+		mockMonFileOpn.Hdr.RecSize = int16(16 + 4 + len(lfnByteSlice))
+		mockMonHeader.Plen = uint16(8 + mockMonFileTOD.Hdr.RecSize + mockMonFileOpn.Hdr.RecSize)
+
 	})
 }

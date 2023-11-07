@@ -37,6 +37,15 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// RecType
+const (
+	isClose byte = iota // Assuming these constants match the C++ enum values
+	isDisc
+	isOpen
+	isTime
+	isXFR
+)
+
 type (
 	UserId struct {
 		Id uint32
@@ -102,10 +111,10 @@ type (
 	}
 
 	XrdXrootdMonFileTOD struct {
-		Hdr XrdXrootdMonFileHdr
-		Beg int32
-		End int32
-		SID int64
+		Hdr  XrdXrootdMonFileHdr
+		TBeg int32
+		TEnd int32
+		SID  int64
 	}
 
 	XrdXrootdMonFileLFN struct {
@@ -115,7 +124,7 @@ type (
 
 	XrdXrootdMonFileOPN struct {
 		Hdr XrdXrootdMonFileHdr
-		fsz int64
+		Fsz int64
 		Ufn XrdXrootdMonFileLFN
 	}
 
@@ -216,6 +225,120 @@ var (
 	transfers    = ttlcache.New[FileId, FileRecord](ttlcache.WithTTL[FileId, FileRecord](24 * time.Hour))
 	monitorPaths []PathList
 )
+
+func (monHeader *XrdXrootdMonHeader) Serialize() ([]byte, error) {
+	var buf bytes.Buffer
+	// Writing the Header
+	err := binary.Write(&buf, binary.BigEndian, monHeader.Code)
+	if err != nil {
+		return nil, errors.Wrap(err, fmt.Sprint("binary.Write failed for Code:", err))
+	}
+	err = binary.Write(&buf, binary.BigEndian, monHeader.Pseq)
+	if err != nil {
+		return nil, errors.Wrap(err, fmt.Sprint("binary.Write failed for Pseq:", err))
+	}
+	err = binary.Write(&buf, binary.BigEndian, monHeader.Plen)
+	if err != nil {
+		return nil, errors.Wrap(err, fmt.Sprint("binary.Write failed for Plen:", err))
+	}
+	err = binary.Write(&buf, binary.BigEndian, monHeader.Stod)
+	if err != nil {
+		return nil, errors.Wrap(err, fmt.Sprint("binary.Write failed for Stod:", err))
+	}
+
+	return buf.Bytes(), nil
+}
+
+func (monMap XrdXrootdMonMap) Serialize() ([]byte, error) {
+	var buf bytes.Buffer
+
+	// Writing the Header
+	headerBytes, err := monMap.Hdr.Serialize()
+	if err != nil {
+		return nil, errors.Wrap(err, fmt.Sprint("Failed to serialize monitor header:", err))
+	}
+	err = binary.Write(&buf, binary.BigEndian, headerBytes)
+	if err != nil {
+		return nil, errors.Wrap(err, fmt.Sprint("binary.Write failed for Header:", err))
+	}
+
+	// Writing the Dictid
+	err = binary.Write(&buf, binary.BigEndian, monMap.Dictid)
+	if err != nil {
+		return nil, errors.Wrap(err, fmt.Sprint("binary.Write failed for Dictid:", err))
+	}
+
+	// Writing the Info slice directly
+	err = binary.Write(&buf, binary.BigEndian, monMap.Info)
+	if err != nil {
+		return nil, errors.Wrap(err, fmt.Sprint("binary.Write failed for Info:", err))
+	}
+
+	return buf.Bytes(), nil
+}
+
+func (hdr *XrdXrootdMonFileHdr) Serialize() ([]byte, error) {
+	buf := new(bytes.Buffer)
+
+	// Serialize RecType
+	buf.WriteByte(hdr.RecType)
+	// Serialize RecFlag
+	buf.WriteByte(hdr.RecFlag)
+	// Serialize RecSize
+	if err := binary.Write(buf, binary.BigEndian, hdr.RecSize); err != nil {
+		return nil, err
+	}
+
+	// Serialize the union field based on RecType
+	switch hdr.RecType {
+	case isTime:
+		// Serialize NRecs0 and NRecs1
+		if err := binary.Write(buf, binary.BigEndian, hdr.NRecs0); err != nil {
+			return nil, err
+		}
+		if err := binary.Write(buf, binary.BigEndian, hdr.NRecs1); err != nil {
+			return nil, err
+		}
+	case isDisc:
+		// Serialize UserID
+		if err := binary.Write(buf, binary.BigEndian, hdr.UserId); err != nil {
+			return nil, err
+		}
+	default:
+		// Serialize FileID for all other cases (isClose, isOpen, isXFR)
+		if err := binary.Write(buf, binary.BigEndian, hdr.FileId); err != nil {
+			return nil, err
+		}
+	}
+
+	return buf.Bytes(), nil
+}
+
+func (ftod *XrdXrootdMonFileTOD) Serialize() ([]byte, error) {
+	buf := new(bytes.Buffer)
+
+	// First serialize the header
+	headerBytes, err := ftod.Hdr.Serialize()
+	if err != nil {
+		return nil, err
+	}
+	buf.Write(headerBytes)
+
+	// Serialize TBeg
+	if err := binary.Write(buf, binary.BigEndian, ftod.TBeg); err != nil {
+		return nil, err
+	}
+	// Serialize TEnd
+	if err := binary.Write(buf, binary.BigEndian, ftod.TEnd); err != nil {
+		return nil, err
+	}
+	// Serialize SID
+	if err := binary.Write(buf, binary.BigEndian, ftod.SID); err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
+}
 
 func ConfigureMonitoring() (int, error) {
 	lower := param.Monitoring_PortLower.GetInt()
