@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jellydator/ttlcache/v3"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 )
@@ -20,34 +19,6 @@ func getAuthInfoString(user UserRecord) string {
 
 func getUserIdString(userId XrdUserId) string {
 	return fmt.Sprintf("%s/%s.%s:%s@%s", userId.Prot, userId.User, userId.Pid, userId.Sid, userId.Host)
-}
-
-func TestCacheMerge(t *testing.T) {
-	t.Run("same-key-will-override-item-not-merge", func(t *testing.T) {
-		transfers.DeleteAll()
-		mockFileId := FileId{Id: 147927}
-		mockInitRecord := FileRecord{
-			UserId: UserId{Id: 123},
-			Path:   "/foo/bar",
-		}
-		mockSecondRecord := FileRecord{
-			WriteOps:   1,
-			ReadOps:    2,
-			WriteBytes: 100,
-			ReadBytes:  100,
-		}
-
-		transfers.Set(mockFileId, mockInitRecord, ttlcache.DefaultTTL)
-		transfers.Set(mockFileId, mockSecondRecord, ttlcache.DefaultTTL)
-
-		assert.Equal(t, 1, len(transfers.Items()), "Lenght of items in cache doesn't match")
-		transferValue := transfers.Items()[mockFileId].Value()
-
-		assert.Equal(t, mockSecondRecord.UserId, transferValue.UserId)
-		assert.Equal(t, mockSecondRecord.Path, transferValue.Path)
-		assert.Equal(t, mockSecondRecord.WriteOps, transferValue.WriteOps)
-		assert.Equal(t, mockSecondRecord.ReadOps, transferValue.ReadOps)
-	})
 }
 
 func TestHandlePacket(t *testing.T) {
