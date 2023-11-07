@@ -35,13 +35,13 @@ import (
 
 type (
 	NamespaceAd struct {
-		RequireToken  bool
-		Path          string
-		Issuer        url.URL
-		MaxScopeDepth uint
-		Strategy      StrategyType
-		BasePath      string
-		VaultServer   string
+		RequireToken  bool         `json:"requireToken"`
+		Path          string       `json:"path"`
+		Issuer        url.URL      `json:"url"`
+		MaxScopeDepth uint         `json:"maxScopeDepth"`
+		Strategy      StrategyType `json:"strategy"`
+		BasePath      string       `json:"basePath"`
+		VaultServer   string       `json:"vaultServer"`
 	}
 
 	ServerAd struct {

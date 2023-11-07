@@ -337,6 +337,27 @@ components: ["origin"]
 ---
 
 ############################
+#   Cache-level configs    #
+############################
+name: Cache.DataLocation
+description: >-
+  The directory for the location of the cache data files - this is where the actual data in the cache is stored.
+  This should *not* be in the same path as XRootD.Mount or else it will expose the data files as part of the files within the cache.
+type: string
+root_default: /run/pelican/xcache
+default: $XDG_RUNTIME_DIR/pelican/xcache
+components: ["cache"]
+---
+name: Cache.ExportLocation
+description: >-
+  The location of the export directory. Everything under this directory will be exposed as part of the cache. This is
+  relative to the mount location.
+type: string
+default: /
+components: ["cache"]
+---
+
+############################
 #  Director-level configs  #
 ############################
 name: Director.DefaultResponse

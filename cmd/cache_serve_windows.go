@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build windows
 
 /***************************************************************
  *
@@ -18,30 +18,13 @@
  *
  ***************************************************************/
 
-package xrootd
+package main
 
 import (
-	"testing"
-
-	"github.com/spf13/viper"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+	"github.com/pkg/errors"
+	"github.com/spf13/cobra"
 )
 
-func TestXrootDOriginConfig(t *testing.T) {
-	dirname := t.TempDir()
-	viper.Reset()
-	viper.Set("Xrootd.RunLocation", dirname)
-	configPath, err := ConfigXrootd(true)
-	require.NoError(t, err)
-	assert.NotNil(t, configPath)
-}
-
-func TestXrootDCacheConfig(t *testing.T) {
-	dirname := t.TempDir()
-	viper.Reset()
-	viper.Set("Xrootd.RunLocation", dirname)
-	configPath, err := ConfigXrootd(false)
-	require.NoError(t, err)
-	assert.NotNil(t, configPath)
+func serveCache( /*cmd*/ *cobra.Command /*args*/, []string) error {
+	return errors.New("'cache serve' command is not supported on Windows")
 }

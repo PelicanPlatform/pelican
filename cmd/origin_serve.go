@@ -30,6 +30,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/daemon"
+	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/oa4mp"
 	"github.com/pelicanplatform/pelican/origin_ui"
@@ -53,7 +54,7 @@ func checkConfigFileReadable(fileName string, errMsg string) error {
 	return nil
 }
 
-func checkDefaults() error {
+func checkDefaults(origin bool, nsAds []director.NamespaceAd) error {
 	requiredConfigs := []param.StringParam{param.Server_TLSCertificate, param.Server_TLSKey, param.Xrootd_RunLocation, param.Xrootd_RobotsTxtFile}
 	for _, configName := range requiredConfigs {
 		mgr := configName.GetString()
@@ -89,7 +90,7 @@ func checkDefaults() error {
 		return err
 	}
 
-	if err := xrootd.CheckXrootdEnv(true); err != nil {
+	if err := xrootd.CheckXrootdEnv(origin, nsAds); err != nil {
 		return err
 	}
 
@@ -139,7 +140,7 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		return err
 	}
 
-	err = checkDefaults()
+	err = checkDefaults(true, nil)
 	if err != nil {
 		return err
 	}
@@ -178,7 +179,7 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	}
 
 	privileged := param.Origin_Multiuser.GetBool()
-	launchers, err := xrootd.ConfigureLaunchers(privileged, configPath)
+	launchers, err := xrootd.ConfigureLaunchers(privileged, configPath, param.Origin_EnableCmsd.GetBool())
 	if err != nil {
 		return err
 	}

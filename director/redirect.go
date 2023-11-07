@@ -313,7 +313,7 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 	}
 }
 
-func RegisterOrigin(ctx *gin.Context) {
+func registerServeAd(ctx *gin.Context, sType ServerType) {
 	tokens, present := ctx.Request.Header["Authorization"]
 	if !present || len(tokens) == 0 {
 		ctx.JSON(401, gin.H{"error": "Bearer token not present in the 'Authorization' header"})
@@ -322,38 +322,55 @@ func RegisterOrigin(ctx *gin.Context) {
 
 	err := versionCompatCheck(ctx)
 	if err != nil {
-		log.Debugf("A version incompatibility was encountered while registering an origin and no response was served: %v", err)
+		log.Debugf("A version incompatibility was encountered while registering %s and no response was served: %v", sType, err)
 		ctx.JSON(500, gin.H{"error": "Incompatible versions detected: " + fmt.Sprintf("%v", err)})
 		return
 	}
 
 	ad := OriginAdvertise{}
 	if ctx.ShouldBind(&ad) != nil {
-		ctx.JSON(400, gin.H{"error": "Invalid origin registration"})
+		ctx.JSON(400, gin.H{"error": "Invalid " + sType + " registration"})
 		return
 	}
 
-	for _, namespace := range ad.Namespaces {
-		// We're assuming there's only one token in the slice
+	if sType == OriginType {
+		for _, namespace := range ad.Namespaces {
+			// We're assuming there's only one token in the slice
+			token := strings.TrimPrefix(tokens[0], "Bearer ")
+			ok, err := VerifyAdvertiseToken(token, namespace.Path)
+			if err != nil {
+				log.Warningln("Failed to verify token:", err)
+				ctx.JSON(400, gin.H{"error": "Authorization token verification failed"})
+				return
+			}
+			if !ok {
+				log.Warningf("%s %v advertised to namespace %v without valid registration\n",
+					sType, ad.Name, namespace.Path)
+				ctx.JSON(400, gin.H{"error": sType + " not authorized to advertise to this namespace"})
+				return
+			}
+		}
+	} else {
 		token := strings.TrimPrefix(tokens[0], "Bearer ")
-		ok, err := VerifyAdvertiseToken(token, namespace.Path)
+		prefix := path.Join("caches", ad.Name)
+		ok, err := VerifyAdvertiseToken(token, prefix)
 		if err != nil {
 			log.Warningln("Failed to verify token:", err)
 			ctx.JSON(400, gin.H{"error": "Authorization token verification failed"})
 			return
 		}
 		if !ok {
-			log.Warningf("Origin %v advertised to namespace %v without valid registration\n",
-				ad.Name, namespace.Path)
-			ctx.JSON(400, gin.H{"error": "Origin not authorized to advertise to this namespace"})
+			log.Warningf("%s %v advertised to namespace %v without valid registration\n",
+				sType, ad.Name, prefix)
+			ctx.JSON(400, gin.H{"error": sType + " not authorized to advertise to this namespace"})
 			return
 		}
 	}
 
 	ad_url, err := url.Parse(ad.URL)
 	if err != nil {
-		log.Warningf("Failed to parse origin URL %v: %v\n", ad.URL, err)
-		ctx.JSON(400, gin.H{"error": "Invalid origin URL"})
+		log.Warningf("Failed to parse %s URL %v: %v\n", sType, ad.URL, err)
+		ctx.JSON(400, gin.H{"error": "Invalid " + sType + " URL"})
 		return
 	}
 
@@ -364,14 +381,16 @@ func RegisterOrigin(ctx *gin.Context) {
 		return
 	}
 
-	originAd := ServerAd{
+	sAd := ServerAd{
 		Name:    ad.Name,
 		AuthURL: *ad_url,
 		URL:     *ad_url,
 		WebURL:  *adWebUrl,
-		Type:    OriginType,
+		Type:    sType,
 	}
-	RecordAd(originAd, &ad.Namespaces)
+
+	RecordAd(sAd, &ad.Namespaces)
+
 	ctx.JSON(200, gin.H{"msg": "Successful registration"})
 }
 
@@ -426,10 +445,26 @@ func DiscoverOrigins(ctx *gin.Context) {
 	ctx.JSON(200, promDiscoveryRes)
 }
 
+func RegisterOrigin(ctx *gin.Context) {
+	registerServeAd(ctx, OriginType)
+}
+
+func RegisterCache(ctx *gin.Context) {
+	registerServeAd(ctx, CacheType)
+}
+
+func ListNamespaces(ctx *gin.Context) {
+	namespaceAds := ListNamespacesFromOrigins()
+
+	ctx.JSON(http.StatusOK, namespaceAds)
+}
+
 func RegisterDirector(router *gin.RouterGroup) {
 	// Establish the routes used for cache/origin redirection
 	router.GET("/api/v1.0/director/object/*any", RedirectToCache)
 	router.GET("/api/v1.0/director/origin/*any", RedirectToOrigin)
 	router.POST("/api/v1.0/director/registerOrigin", RegisterOrigin)
 	router.GET("/api/v1.0/director/discoverOrigins", DiscoverOrigins)
+	router.POST("/api/v1.0/director/registerCache", RegisterCache)
+	router.GET("/api/v1.0/director/listNamespaces", ListNamespaces)
 }

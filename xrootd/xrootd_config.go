@@ -13,6 +13,7 @@ import (
 	"text/template"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/origin_ui"
 	"github.com/pelicanplatform/pelican/param"
@@ -22,8 +23,10 @@ import (
 )
 
 var (
-	//go:embed resources/xrootd.cfg
-	xrootdCfg string
+	//go:embed resources/xrootd-origin.cfg
+	xrootdOriginCfg string
+	//go:embed resources/xrootd-cache.cfg
+	xrootdCacheCfg string
 	//go:embed resources/robots.txt
 	robotsTxt string
 )
@@ -36,6 +39,13 @@ type (
 		EnableVoms      bool
 		SelfTest        bool
 		NamespacePrefix string
+	}
+
+	CacheConfig struct {
+		UseCmsd        bool
+		ExportLocation string
+		DataLocation   string
+		DirectorUrl    string
 	}
 
 	XrootdOptions struct {
@@ -67,10 +77,11 @@ type (
 		Server ServerConfig
 		Origin OriginConfig
 		Xrootd XrootdOptions
+		Cache  CacheConfig
 	}
 )
 
-func CheckXrootdEnv(origin bool) error {
+func CheckXrootdEnv(origin bool, nsAds []director.NamespaceAd) error {
 	uid, err := config.GetDaemonUID()
 	if err != nil {
 		return err
@@ -173,12 +184,44 @@ to export the directory /mnt/foo to the path /bar in the data federation`)
 				return errors.Wrapf(err, "Failed to create export symlink")
 			}
 		}
-	}
-	viper.Set("Xrootd.Mount", exportPath)
+		viper.Set("Xrootd.Mount", exportPath)
+	} else {
+		viper.Set("Xrootd.Mount", exportPath)
+		filepath.Join(exportPath, "/")
+		//exportPath = filepath.Clean(exportPath)
+		err = config.MkdirAll(exportPath, 0775, uid, gid)
+		if err != nil {
+			return errors.Wrapf(err, "Unable to create export directory %v",
+				filepath.Dir(exportPath))
+		}
+		dataPath := filepath.Join(param.Cache_DataLocation.GetString(), "data/")
+		dataPath = filepath.Clean(dataPath)
+		err = config.MkdirAll(dataPath, 0775, uid, gid)
+		if err != nil {
+			return errors.Wrapf(err, "Unable to create data directory %v",
+				filepath.Dir(dataPath))
+		}
+		metaPath := filepath.Join(param.Cache_DataLocation.GetString(), "meta/")
+		metaPath = filepath.Clean(metaPath)
+		err = config.MkdirAll(metaPath, 0775, uid, gid)
+		if err != nil {
+			return errors.Wrapf(err, "Unable to create meta directory %v",
+				filepath.Dir(metaPath))
+		}
 
-	if param.Origin_SelfTest.GetBool() {
-		if err := origin_ui.ConfigureXrootdMonitoringDir(); err != nil {
-			return err
+		err := config.DiscoverFederation()
+		if err != nil {
+			return errors.Wrap(err, "Failed to pull information from the federation")
+		}
+		viper.Set("Cache.DirectorUrl", param.Federation_DirectorUrl.GetString())
+
+	}
+
+	if origin {
+		if param.Origin_SelfTest.GetBool() {
+			if err := origin_ui.ConfigureXrootdMonitoringDir(); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -210,39 +253,48 @@ to export the directory /mnt/foo to the path /bar in the data federation`)
 		}
 	}
 
-	// If macaroons secret does not exist, create one
-	macaroonsSecret := param.Xrootd_MacaroonsKeyFile.GetString()
-	if _, err := os.Open(macaroonsSecret); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			err = config.MkdirAll(path.Dir(macaroonsSecret), 0755, -1, gid)
-			if err != nil {
-				return errors.Wrapf(err, "Unable to create directory %v",
-					path.Dir(macaroonsSecret))
-			}
-			file, err := os.OpenFile(macaroonsSecret, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0640)
-			if err != nil {
-				return errors.Wrap(err, "Failed to create a new macaroons key")
-			}
-			defer file.Close()
-			buf := make([]byte, 64)
-			_, err = rand.Read(buf)
-			if err != nil {
+	if origin {
+		// If macaroons secret does not exist, create one
+		macaroonsSecret := param.Xrootd_MacaroonsKeyFile.GetString()
+		if _, err := os.Open(macaroonsSecret); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				err = config.MkdirAll(path.Dir(macaroonsSecret), 0755, -1, gid)
+				if err != nil {
+					return errors.Wrapf(err, "Unable to create directory %v",
+						path.Dir(macaroonsSecret))
+				}
+				file, err := os.OpenFile(macaroonsSecret, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0640)
+				if err != nil {
+					return errors.Wrap(err, "Failed to create a new macaroons key")
+				}
+				defer file.Close()
+				buf := make([]byte, 64)
+				_, err = rand.Read(buf)
+				if err != nil {
+					return err
+				}
+				encoded := base64.StdEncoding.EncodeToString(buf) + "\n"
+				if _, err = file.WriteString(encoded); err != nil {
+					return errors.Wrap(err, "Failed to write out a macaroons key")
+				}
+			} else {
 				return err
 			}
-			encoded := base64.StdEncoding.EncodeToString(buf) + "\n"
-			if _, err = file.WriteString(encoded); err != nil {
-				return errors.Wrap(err, "Failed to write out a macaroons key")
-			}
-		} else {
-			return err
+		}
+		if err = os.Chown(macaroonsSecret, -1, gid); err != nil {
+			return errors.Wrapf(err, "Unable to change ownership of macaroons secret %v"+
+				" to desired daemon group %v", macaroonsSecret, groupname)
+		}
+
+		// If the scitokens.cfg does not exist, create one
+		// Set up exportedPaths, which we later use to grant access to the origin's issuer.
+		exportedPaths := viper.GetStringSlice("Origin.NamespacePrefix")
+		if err := WriteOriginScitokensConfig(exportedPaths); err != nil {
+			return errors.Wrap(err, "Failed to create scitokens configuration for the origin")
 		}
 	}
-	if err = os.Chown(macaroonsSecret, -1, gid); err != nil {
-		return errors.Wrapf(err, "Unable to change ownership of macaroons secret %v"+
-			" to desired daemon group %v", macaroonsSecret, groupname)
-	}
 
-	// If the authfile or scitokens.cfg does not exist, create one
+	// If the authfile does not exist, create one
 	authfile := param.Xrootd_Authfile.GetString()
 	err = config.MkdirAll(path.Dir(authfile), 0755, -1, gid)
 	if err != nil {
@@ -256,17 +308,11 @@ to export the directory /mnt/foo to the path /bar in the data federation`)
 	}
 	if err = os.Chown(authfile, -1, gid); err != nil {
 		return errors.Wrapf(err, "Unable to change ownership of authfile %v"+
-			" to desired daemon group %v", macaroonsSecret, groupname)
+			" to desired daemon group %v", authfile, groupname)
 	}
 
-	if err := EmitAuthfile(); err != nil {
+	if err := EmitAuthfile(nsAds); err != nil {
 		return err
-	}
-
-	// Set up exportedPaths, which we later use to grant access to the origin's issuer.
-	exportedPaths := viper.GetStringSlice("Origin.NamespacePrefix")
-	if err := WriteOriginScitokensConfig(exportedPaths); err != nil {
-		return errors.Wrap(err, "Failed to create scitokens configuration for the origin")
 	}
 
 	return nil
@@ -294,6 +340,13 @@ func ConfigXrootd(origin bool) (string, error) {
 				return "", errors.New("Origin.Multiuser is set to `true` but the command was run without sufficient privilege; was it launched as root?")
 			}
 		}
+	}
+
+	var xrootdCfg string
+	if origin {
+		xrootdCfg = xrootdOriginCfg
+	} else {
+		xrootdCfg = xrootdCacheCfg
 	}
 
 	templ := template.Must(template.New("xrootd.cfg").Parse(xrootdCfg))

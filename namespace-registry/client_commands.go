@@ -22,12 +22,9 @@ import (
 	"github.com/pkg/errors"
 
 	"bufio"
-	"bytes"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"time"
 
@@ -36,6 +33,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
+	"github.com/pelicanplatform/pelican/utils"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -50,35 +48,6 @@ type clientResponseData struct {
 	Error           string `json:"error"`
 }
 
-func makeRequest(url string, method string, data map[string]interface{}, headers map[string]string) ([]byte, error) {
-	payload, _ := json.Marshal(data)
-	req, err := http.NewRequest(method, url, bytes.NewBuffer(payload))
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	for key, val := range headers {
-		req.Header.Set(key, val)
-	}
-	tr := config.GetTransport()
-	client := &http.Client{Transport: tr}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	// Check HTTP response -- should be 200, else something went wrong
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != 200 {
-		return body, errors.Errorf("The URL %s replied with status code %d", url, resp.StatusCode)
-	}
-
-	return body, nil
-}
-
 func NamespaceRegisterWithIdentity(privateKeyPath string, namespaceRegistryEndpoint string, prefix string) error {
 	identifiedPayload := map[string]interface{}{
 		"identity_required": "true",
@@ -87,7 +56,7 @@ func NamespaceRegisterWithIdentity(privateKeyPath string, namespaceRegistryEndpo
 		// it's also registered already
 
 	}
-	resp, err := makeRequest(namespaceRegistryEndpoint, "POST", identifiedPayload, nil)
+	resp, err := utils.MakeRequest(namespaceRegistryEndpoint, "POST", identifiedPayload, nil)
 
 	var respData clientResponseData
 	// Handle case where there was an error encoded in the body
@@ -110,7 +79,7 @@ func NamespaceRegisterWithIdentity(privateKeyPath string, namespaceRegistryEndpo
 			"identity_required": "true",
 			"device_code":       respData.DeviceCode,
 		}
-		resp, err = makeRequest(namespaceRegistryEndpoint, "POST", identifiedPayload, nil)
+		resp, err = utils.MakeRequest(namespaceRegistryEndpoint, "POST", identifiedPayload, nil)
 		if err != nil {
 			return errors.Wrap(err, "Failed to make request")
 		}
@@ -171,7 +140,7 @@ func NamespaceRegister(privateKeyPath string, namespaceRegistryEndpoint string, 
 		"pubkey":       publicKey,
 	}
 
-	resp, err := makeRequest(namespaceRegistryEndpoint, "POST", data, nil)
+	resp, err := utils.MakeRequest(namespaceRegistryEndpoint, "POST", data, nil)
 
 	var respData clientResponseData
 	// Handle case where there was an error encoded in the body
@@ -211,7 +180,7 @@ func NamespaceRegister(privateKeyPath string, namespaceRegistryEndpoint string, 
 	}
 
 	// Send the second POST request
-	resp, err = makeRequest(namespaceRegistryEndpoint, "POST", unidentifiedPayload, nil)
+	resp, err = utils.MakeRequest(namespaceRegistryEndpoint, "POST", unidentifiedPayload, nil)
 
 	var respData2 clientResponseData
 	// Handle case where there was an error encoded in the body
@@ -226,7 +195,7 @@ func NamespaceRegister(privateKeyPath string, namespaceRegistryEndpoint string, 
 }
 
 func NamespaceList(endpoint string) error {
-	respData, err := makeRequest(endpoint, "GET", nil, nil)
+	respData, err := utils.MakeRequest(endpoint, "GET", nil, nil)
 	var respErr clientResponseData
 	if err != nil {
 		if jsonErr := json.Unmarshal(respData, &respErr); jsonErr == nil { // Error creating json
@@ -239,7 +208,7 @@ func NamespaceList(endpoint string) error {
 }
 
 func NamespaceGet(endpoint string) error {
-	respData, err := makeRequest(endpoint, "GET", nil, nil)
+	respData, err := utils.MakeRequest(endpoint, "GET", nil, nil)
 	var respErr clientResponseData
 	if err != nil {
 		if jsonErr := json.Unmarshal(respData, &respErr); jsonErr == nil { // Error creating json
@@ -307,7 +276,7 @@ func NamespaceDelete(endpoint string, prefix string) error {
 		"Authorization": "Bearer " + string(signed),
 	}
 
-	respData, err := makeRequest(endpoint, "DELETE", nil, authHeader)
+	respData, err := utils.MakeRequest(endpoint, "DELETE", nil, authHeader)
 	var respErr clientResponseData
 	if err != nil {
 		if unmarshalErr := json.Unmarshal(respData, &respErr); unmarshalErr == nil { // Error creating json
