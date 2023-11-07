@@ -349,25 +349,22 @@ type: string
 default: cache
 components: ["director"]
 ---
-name: Director.HostAwareRedirects
-description: >-
-  When enabled, the director can be configured to redirect specified host names to either a cache or an origin, bypassing
-  the default response. This allows to a client to get either a cache or an origin from a director at its default path
-  by setting the `Host` or `X-Forwarded-Host` header.
-type: bool
-default: false
-components: ["director"]
----
 name: Director.CacheResponseHostnames
 description: >-
-  A list of hostnames to be pinned to cache redirects at the director's default path when `Director.HostAwareRedirects` is enabled.
+  A list of virtual hostnames for the director. If a request is sent by the client to one of these hostnames,
+  the director assumes it should respond with a redirect to a cache.
+
+  If present, the hostname is taken from the X-Forwarded-Host header in the request. Otherwise, Host is used.
 type: stringSlice
 default: none
 components: ["director"]
 ---
 name: Director.OriginResponseHostnames
 description: >-
-  A list of hostnames to be pinned to origin redirects at the director's default path when `Director.HostAwareRedirects` is enabled.
+  A list of virtual hostnames for the director. If a request is sent by the client to one of these hostnames,
+  the director assumes it should respond with a redirect to an origin.
+
+  If present, the hostname is taken from the X-Forwarded-Host header in the request. Otherwise, Host is used.
 type: stringSlice
 default: none
 components: ["director"]

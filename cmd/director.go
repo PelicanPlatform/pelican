@@ -63,10 +63,4 @@ func init() {
 	if err != nil {
 		panic(err)
 	}
-
-	directorServeCmd.Flags().BoolP("enable-hostname-redirects", "", false, "Enabling host-aware redirects allows the director to bypass its default response for hosts specified via the Pelican configuration file")
-	err = viper.BindPFlag("Director.HostAwareRedirects", directorServeCmd.Flags().Lookup("enable-hostname-redirects"))
-	if err != nil {
-		panic(err)
-	}
 }

@@ -320,18 +320,16 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 			return
 		}
 
-		if param.Director_HostAwareRedirects.GetBool() {
-			// We grab the host and x-forwarded-host headers, which can be set by a client with the intent of changing the
-			// Director's default behavior (eg the director normally forwards to caches, but if it receives a request with
-			// a pre-configured hostname in its x-forwarded-host header, that indicates we should actually serve an origin.)
-			host, hostPresent := c.Request.Header["Host"]
-			xForwardedHost, xForwardedHostPresent := c.Request.Header["X-Forwarded-Host"]
+		// We grab the host and x-forwarded-host headers, which can be set by a client with the intent of changing the
+		// Director's default behavior (eg the director normally forwards to caches, but if it receives a request with
+		// a pre-configured hostname in its x-forwarded-host header, that indicates we should actually serve an origin.)
+		host, hostPresent := c.Request.Header["Host"]
+		xForwardedHost, xForwardedHostPresent := c.Request.Header["X-Forwarded-Host"]
 
-			if hostPresent {
-				checkHostnameRedirects(c, host[0])
-			} else if xForwardedHostPresent {
-				checkHostnameRedirects(c, xForwardedHost[0])
-			}
+		if hostPresent {
+			checkHostnameRedirects(c, host[0])
+		} else if xForwardedHostPresent {
+			checkHostnameRedirects(c, xForwardedHost[0])
 		}
 
 		// If we're configured for cache mode or we haven't set the flag,
