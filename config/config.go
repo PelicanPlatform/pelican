@@ -358,6 +358,16 @@ func InitConfig() {
 		}
 		SetLogging(level)
 	}
+
+	logLocation := param.Logging_File.GetString()
+	if logLocation != "" {
+		// Note: do not need to close the file, logrus does it for us
+		f, err := os.OpenFile(logLocation, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
+		if err != nil {
+			cobra.CheckErr(err)
+		}
+		log.SetOutput(f)
+	}
 }
 
 func initConfigDir() error {

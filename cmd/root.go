@@ -106,6 +106,11 @@ func init() {
 		panic(err)
 	}
 
+	rootCmd.PersistentFlags().StringP("log", "l", "", "Specified log output file")
+	if err := viper.BindPFlag("Logging.File", rootCmd.PersistentFlags().Lookup("log")); err != nil {
+		panic(err)
+	}
+
 	// Register the version flag here just so --help will show this flag
 	// Actual checking is executed at main.go
 	// Remove the shorthand -v since in "origin serve" flagset it's already used for "volume" flag
