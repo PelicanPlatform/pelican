@@ -43,11 +43,18 @@ func TestServeNamespaceRegistry(t *testing.T) {
 	viper.Set("Registry.DbLocation", filepath.Join(issuerTempDir, "test.sql"))
 	err := config.InitServer()
 	require.NoError(t, err)
+
 	err = nsregistry.InitializeDB()
 	require.NoError(t, err)
+	defer nsregistry.ShutdownDB()
 
 	gin.SetMode(gin.TestMode)
 	engine := gin.Default()
+
+	_, err = config.LoadPublicKey("", ikey)
+	require.NoError(t, err)
+	privKey, err := config.GetOriginJWK()
+	require.NoError(t, err)
 
 	//Configure registry
 	nsregistry.RegisterNamespaceRegistry(engine.Group("/"))
@@ -61,7 +68,7 @@ func TestServeNamespaceRegistry(t *testing.T) {
 	viper.Set("Origin.NamespacePrefix", "/test")
 
 	//Test functionality of registering a namespace (without identity)
-	err = nsregistry.NamespaceRegister(ikey, svr.URL+"/api/v1.0/registry", "", "/test")
+	err = nsregistry.NamespaceRegister(privKey, svr.URL+"/api/v1.0/registry", "", "/test")
 	require.NoError(t, err)
 
 	//Test we can list the namespace without an error
