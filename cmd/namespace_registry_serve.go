@@ -51,9 +51,6 @@ func serveNamespaceRegistry( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	}
 
 	if err := config.GenerateCert(); err != nil {
-		return err
-	}
-	if err != nil {
 		return errors.Wrap(err, "Failed to generate TLS certificate")
 	}
 
