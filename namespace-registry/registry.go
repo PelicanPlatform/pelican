@@ -357,7 +357,7 @@ func cliRegisterNamespace(ctx *gin.Context) {
 		reqData.Identity = string(body)
 		err = keySignChallenge(ctx, &reqData, "register")
 		if err != nil {
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error during key-sign challenge"})
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error during key-sign challenge" + err.Error()})
 			log.Errorf("Failed to complete key sign challenge with identity requirement: %v", err)
 		}
 		return
@@ -366,7 +366,7 @@ func cliRegisterNamespace(ctx *gin.Context) {
 	if reqData.IdentityRequired == "false" || reqData.IdentityRequired == "" {
 		err := keySignChallenge(ctx, &reqData, "register")
 		if err != nil {
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error during key-sign challenge"})
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error during key-sign challenge " + err.Error()})
 			log.Errorf("Failed to complete key sign challenge without identity requirement: %v", err)
 		}
 		return

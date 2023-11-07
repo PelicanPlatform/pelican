@@ -19,7 +19,11 @@
 package main
 
 import (
+	"net/url"
+
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
+	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -50,6 +54,21 @@ var (
 		SilenceUsage: true,
 	}
 )
+
+func getDirectorEndpoint() (string, error) {
+	directorEndpoint := param.Federation_DirectorUrl.GetString()
+	if directorEndpoint == "" {
+		return "", errors.New("No director specified; give the federation name (-f)")
+	}
+
+	directorEndpointURL, err := url.Parse(directorEndpoint)
+	if err != nil {
+		return "", errors.Wrap(err, "Unable to parse director url")
+	}
+
+	// Return the string, as opposed to a pointer to the URL object
+	return directorEndpointURL.String(), nil
+}
 
 func init() {
 	// Tie the directorServe command to the root CLI command

@@ -35,19 +35,20 @@ import (
 
 type (
 	NamespaceAd struct {
-		RequireToken  bool
-		Path          string
-		Issuer        url.URL
-		MaxScopeDepth uint
-		Strategy      StrategyType
-		BasePath      string
-		VaultServer   string
+		RequireToken  bool         `json:"requireToken"`
+		Path          string       `json:"path"`
+		Issuer        url.URL      `json:"url"`
+		MaxScopeDepth uint         `json:"maxScopeDepth"`
+		Strategy      StrategyType `json:"strategy"`
+		BasePath      string       `json:"basePath"`
+		VaultServer   string       `json:"vaultServer"`
 	}
 
 	ServerAd struct {
 		Name      string
 		AuthURL   url.URL
-		URL       url.URL
+		URL       url.URL // This is server's XRootD URL for file transfer
+		WebURL    url.URL // This is server's Web interface and API
 		Type      ServerType
 		Latitude  float64
 		Longitude float64
@@ -189,6 +190,8 @@ func GetAdsForPath(reqPath string) (originNamespace NamespaceAd, originAds []Ser
 		}
 	}
 
-	originNamespace = *best
+	if best != nil {
+		originNamespace = *best
+	}
 	return
 }

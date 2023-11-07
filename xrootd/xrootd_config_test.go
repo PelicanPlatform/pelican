@@ -28,11 +28,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestXrootDConfig(t *testing.T) {
+func TestXrootDOriginConfig(t *testing.T) {
 	dirname := t.TempDir()
 	viper.Reset()
 	viper.Set("Xrootd.RunLocation", dirname)
 	configPath, err := ConfigXrootd(true)
+	require.NoError(t, err)
+	assert.NotNil(t, configPath)
+}
+
+func TestXrootDCacheConfig(t *testing.T) {
+	dirname := t.TempDir()
+	viper.Reset()
+	viper.Set("Xrootd.RunLocation", dirname)
+	configPath, err := ConfigXrootd(false)
 	require.NoError(t, err)
 	assert.NotNil(t, configPath)
 }

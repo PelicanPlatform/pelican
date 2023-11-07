@@ -24,18 +24,61 @@ import { alpha, useTheme } from "@mui/material";
 interface StatusDisplayProps {
     component: string;
     status: string;
+    message?: string;
 }
 
-function StatusDisplay({component, status}: StatusDisplayProps) {
+function StatusDisplay({component, status, message}: StatusDisplayProps) {
 
     const theme = useTheme()
 
-    let backgroundColor = status === "ok" ? theme.palette.success.light : theme.palette.error.light
+    let backgroundColor: string
+    switch (status) {
+        case "ok":
+            backgroundColor = theme.palette.success.light
+            break
+        case "warning":
+            backgroundColor = theme.palette.warning.light
+            break
+        case "critical":
+            backgroundColor = theme.palette.error.light
+            break
+        default:
+            backgroundColor = theme.palette.warning.light
+    }
+
     let backgroundColorFinal = alpha(backgroundColor, 0.5)
 
+    switch (component) {
+        case "xrootd":
+            component = "XRootD"
+            break
+        case "web-ui":
+            component = "Web UI"
+            break
+        case "cmsd":
+            component = "CMSD"
+            break
+        case "federation":
+            component = "Federation"
+            break
+        default:
+    }
+
     return (
-        <Box p={2} bgcolor={backgroundColorFinal} borderRadius={2} mb={1}>
-            <Typography>{`${component}: ${status}`}</Typography>
+        <Box p={1} px={2} display={"flex"} flexDirection={"column"} bgcolor={backgroundColorFinal} borderRadius={2} mb={1}>
+            <Box>
+                <Typography>
+                    {component}
+                </Typography>
+            </Box>
+            { message ?
+                <Box>
+                    <Typography variant={"body2"}>
+                        {message}
+                    </Typography>
+                </Box> :
+                undefined
+            }
         </Box>
     )
 }
@@ -45,12 +88,19 @@ export default function StatusBox() {
 
     const [status, setStatus] = useState<any>(undefined)
     const [updated, setUpdated] = useState<DateTime>(DateTime.now())
+    const [error, setError] = useState<string | undefined>(undefined)
 
     let getStatus = async () => {
         let response = await fetch("/api/v1.0/health")
-        let data = await response.json()
-        setUpdated(DateTime.now())
-        setStatus(data)
+
+        if(response.ok) {
+            let data = await response.json()
+            setUpdated(DateTime.now())
+            setStatus(data)
+        } else {
+            setError("Error fetching status json: " + response.status)
+        }
+
     }
 
     useEffect(() => {
@@ -60,16 +110,34 @@ export default function StatusBox() {
         return () => clearInterval(interval)
     }, [])
 
-    if(status === undefined){
+    if(status === undefined || error !== undefined) {
         return (
             <Box>
                 <Typography variant="h4">Status</Typography>
                 <Box minHeight={"300px"}>
-                    <Skeleton variant="rectangular" height={250} />
+                    {
+                        error ?
+                            <Typography sx={{color: "red"}} variant={"subtitle2"}>{error}</Typography> :
+                            <Skeleton variant="rectangular" height={250} />
+                    }
                 </Box>
             </Box>
         )
     }
+
+    let statusComponents: any[] = []
+    try {
+        statusComponents = Object.entries(status['components']).map(([component, status]: [string, any]) => {
+            return (
+                <StatusDisplay key={component} component={component} status={status['status']} message={status['message']}/>
+            )
+        })
+    } catch (e) {
+        setError("Error parsing status json: " + e)
+    }
+
+
+
 
     return (
         <Box>
@@ -77,9 +145,7 @@ export default function StatusBox() {
                 <Typography variant="h4">Status</Typography>
             </Box>
             <Box>
-                <StatusDisplay component={"CMSD"} status={status["components"]["cmsd"]['status']} />
-                <StatusDisplay component={"Web UI"} status={status["components"]["web-ui"]['status']} />
-                <StatusDisplay component={"XROOTD"} status={status["components"]["xrootd"]['status']} />
+                {statusComponents}
             </Box>
             <Box>
                 <Typography sx={{color: "grey"}} variant={"subtitle2"}>Last Updated: {updated.toLocaleString(DateTime.DATETIME_MED)}</Typography>

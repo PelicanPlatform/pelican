@@ -60,6 +60,7 @@ let theme = createTheme({
             fontSize: "1.2rem",
         },
         fontFamily: [
+            "Poppins",
             "Helvetica Neue",
             "Helvetica",
             "Arial",

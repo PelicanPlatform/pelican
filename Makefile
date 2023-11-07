@@ -69,10 +69,21 @@ web-clean:
 	@echo CLEAN $(WEBSITE_CLEAN_LIST)
 	@rm -rf $(WEBSITE_CLEAN_LIST)
 
+docs/parameters.json:
+	@echo Creating docs/parameters.json...
+	@touch docs/parameters.json
+
+.PHONY: generate
+generate: docs/parameters.json
+ifeq ($(USE_DOCKER),0)
+	@go generate ./...
+else
+	@$(CONTAINER_TOOL) run --rm -v $(PWD):/code -w /code golang:1.21 go generate ./...
+endif
+
 .PHONY: web-build
-web-build: origin_ui/src/out/index.html
+web-build: generate origin_ui/src/out/index.html
 origin_ui/src/out/index.html : $(WEBSITE_SRC_FILES)
-	go generate ./...
 ifeq ($(USE_DOCKER),0)
 	@cd $(WEBSITE_SRC_PATH) && npm install && npm run build
 else

@@ -1,3 +1,4 @@
+//go:build windows
 /***************************************************************
  *
  * Copyright (C) 2023, Pelican Project, Morgridge Institute for Research
@@ -16,26 +17,28 @@
  *
  ***************************************************************/
 
-import {Box} from "@mui/material";
+package origin_ui
 
-import {Header} from "@/components/layout/Header";
+import (
+	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
+)
 
-export const metadata = {
-    title: 'Origin Login',
-    description: 'Software designed to make data distribution easy',
+func doReload() error {
+	db := authDB.Load()
+	if db == nil {
+		log.Debug("Cannot reload auth database - not configured")
+		return nil
+	}
+	err := db.Reload(nil)
+	if err != nil {
+		log.Warningln("Failed to reload auth database:", err)
+		return err
+	}
+	log.Debug("Successfully reloaded the auth database")
+	return nil
 }
 
-export default function RootLayout({
-                                       children,
-                                   }: {
-    children: React.ReactNode
-}) {
-    return (
-        <>
-            <Header/>
-            <Box component={"main"} pt={"75px"} display={"flex"} minHeight={"100vh"}>
-                {children}
-            </Box>
-        </>
-    )
+func WritePasswordEntry(_, _ string) error {
+	return errors.New("WritePasswordEntry not implemented on Windows")
 }

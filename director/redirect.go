@@ -33,6 +33,11 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+type PromDiscoveryItem struct {
+	Targets []string          `json:"targets"`
+	Labels  map[string]string `json:"labels"`
+}
+
 var (
 	minClientVersion, _ = version.NewVersion("7.0.0")
 	minOriginVersion, _ = version.NewVersion("7.0.0")
@@ -163,12 +168,16 @@ func RedirectToCache(ginCtx *gin.Context) {
 	authzBearerEscaped := getAuthzEscaped(ginCtx.Request)
 
 	namespaceAd, _, cacheAds := GetAdsForPath(reqPath)
-	if len(cacheAds) == 0 {
-		ginCtx.String(404, "No cache found for path\n")
-		return
-	}
+	// if GetAdsForPath doesn't find any ads because the prefix doesn't exist, we should
+	// report the lack of path first -- this is most important for the user because it tells them
+	// they're trying to get an object that simply doesn't exist
 	if namespaceAd.Path == "" {
 		ginCtx.String(404, "No namespace found for path. Either it doesn't exist, or the Director is experiencing problems\n")
+		return
+	}
+	// If the namespace prefix DOES exist, then it makes sense to say we couldn't find a valid cache.
+	if len(cacheAds) == 0 {
+		ginCtx.String(404, "No cache found for path\n")
 		return
 	}
 	cacheAds, err = SortServers(ipAddr, cacheAds)
@@ -243,8 +252,16 @@ func RedirectToOrigin(ginCtx *gin.Context) {
 	authzBearerEscaped := getAuthzEscaped(ginCtx.Request)
 
 	namespaceAd, originAds, _ := GetAdsForPath(reqPath)
+	// if GetAdsForPath doesn't find any ads because the prefix doesn't exist, we should
+	// report the lack of path first -- this is most important for the user because it tells them
+	// they're trying to get an object that simply doesn't exist
 	if namespaceAd.Path == "" {
-		ginCtx.String(404, "No origin found for path\n")
+		ginCtx.String(404, "No namespace found for path. Either it doesn't exist, or the Director is experiencing problems\n")
+		return
+	}
+	// If the namespace prefix DOES exist, then it makes sense to say we couldn't find the origin.
+	if len(originAds) == 0 {
+		ginCtx.String(404, "There are currently no origins exporting the provided namespace prefix\n")
 		return
 	}
 
@@ -266,7 +283,9 @@ func RedirectToOrigin(ginCtx *gin.Context) {
 func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// If this is a request for getting public key, don't modify the path
-		if strings.HasPrefix(c.Request.URL.Path, "/.well-known") {
+		// If this is a request to the Prometheus API, don't modify the path
+		if strings.HasPrefix(c.Request.URL.Path, "/.well-known") ||
+			strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/prometheus") {
 			c.Next()
 			return
 		}
@@ -294,7 +313,7 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 	}
 }
 
-func RegisterOrigin(ctx *gin.Context) {
+func registerServeAd(ctx *gin.Context, sType ServerType) {
 	tokens, present := ctx.Request.Header["Authorization"]
 	if !present || len(tokens) == 0 {
 		ctx.JSON(401, gin.H{"error": "Bearer token not present in the 'Authorization' header"})
@@ -303,49 +322,141 @@ func RegisterOrigin(ctx *gin.Context) {
 
 	err := versionCompatCheck(ctx)
 	if err != nil {
-		log.Debugf("A version incompatibility was encountered while registering an origin and no response was served: %v", err)
+		log.Debugf("A version incompatibility was encountered while registering %s and no response was served: %v", sType, err)
 		ctx.JSON(500, gin.H{"error": "Incompatible versions detected: " + fmt.Sprintf("%v", err)})
 		return
 	}
 
 	ad := OriginAdvertise{}
 	if ctx.ShouldBind(&ad) != nil {
-		ctx.JSON(400, gin.H{"error": "Invalid origin registration"})
+		ctx.JSON(400, gin.H{"error": "Invalid " + sType + " registration"})
 		return
 	}
 
-	for _, namespace := range ad.Namespaces {
-		// We're assuming there's only one token in the slice
+	if sType == OriginType {
+		for _, namespace := range ad.Namespaces {
+			// We're assuming there's only one token in the slice
+			token := strings.TrimPrefix(tokens[0], "Bearer ")
+			ok, err := VerifyAdvertiseToken(token, namespace.Path)
+			if err != nil {
+				log.Warningln("Failed to verify token:", err)
+				ctx.JSON(400, gin.H{"error": "Authorization token verification failed"})
+				return
+			}
+			if !ok {
+				log.Warningf("%s %v advertised to namespace %v without valid registration\n",
+					sType, ad.Name, namespace.Path)
+				ctx.JSON(400, gin.H{"error": sType + " not authorized to advertise to this namespace"})
+				return
+			}
+		}
+	} else {
 		token := strings.TrimPrefix(tokens[0], "Bearer ")
-		ok, err := VerifyAdvertiseToken(token, namespace.Path)
+		prefix := path.Join("caches", ad.Name)
+		ok, err := VerifyAdvertiseToken(token, prefix)
 		if err != nil {
 			log.Warningln("Failed to verify token:", err)
 			ctx.JSON(400, gin.H{"error": "Authorization token verification failed"})
 			return
 		}
 		if !ok {
-			log.Warningf("Origin %v advertised to namespace %v without valid registration\n",
-				ad.Name, namespace.Path)
-			ctx.JSON(400, gin.H{"error": "Origin not authorized to advertise to this namespace"})
+			log.Warningf("%s %v advertised to namespace %v without valid registration\n",
+				sType, ad.Name, prefix)
+			ctx.JSON(400, gin.H{"error": sType + " not authorized to advertise to this namespace"})
 			return
 		}
 	}
 
 	ad_url, err := url.Parse(ad.URL)
 	if err != nil {
-		log.Warningf("Failed to parse origin URL %v: %v\n", ad.URL, err)
-		ctx.JSON(400, gin.H{"error": "Invalid origin URL"})
+		log.Warningf("Failed to parse %s URL %v: %v\n", sType, ad.URL, err)
+		ctx.JSON(400, gin.H{"error": "Invalid " + sType + " URL"})
 		return
 	}
 
-	originAd := ServerAd{
+	adWebUrl, err := url.Parse(ad.WebURL)
+	if err != nil && ad.WebURL != "" { // We allow empty WebURL string for backward compatibility
+		log.Warningf("Failed to parse origin Web URL %v: %v\n", ad.WebURL, err)
+		ctx.JSON(400, gin.H{"error": "Invalid origin Web URL"})
+		return
+	}
+
+	sAd := ServerAd{
 		Name:    ad.Name,
 		AuthURL: *ad_url,
 		URL:     *ad_url,
-		Type:    OriginType,
+		WebURL:  *adWebUrl,
+		Type:    sType,
 	}
-	RecordAd(originAd, &ad.Namespaces)
+
+	RecordAd(sAd, &ad.Namespaces)
+
 	ctx.JSON(200, gin.H{"msg": "Successful registration"})
+}
+
+// Return a list of available origins URL in Prometheus HTTP SD format
+// for director's Prometheus service discovery
+func DiscoverOrigins(ctx *gin.Context) {
+	// Check token for authorization
+	tokens, present := ctx.Request.Header["Authorization"]
+	if !present || len(tokens) == 0 {
+		ctx.JSON(401, gin.H{"error": "Bearer token not present in the 'Authorization' header"})
+		return
+	}
+	token := strings.TrimPrefix(tokens[0], "Bearer ")
+	ok, err := VerifyDirectorSDToken(token)
+	if err != nil {
+		log.Warningln("Failed to verify director service discovery token:", err)
+		ctx.JSON(401, gin.H{"error": fmt.Sprintf("Authorization token verification failed: %v\n", err)})
+		return
+	}
+	if !ok {
+		log.Warningf("Invalid token for accessing director's sevice discovery")
+		ctx.JSON(401, gin.H{"error": "Invalid token for accessing director's sevice discovery"})
+		return
+	}
+
+	serverAdMutex.RLock()
+	defer serverAdMutex.RUnlock()
+	serverAds := serverAds.Keys()
+	promDiscoveryRes := make([]PromDiscoveryItem, 0)
+	for _, ad := range serverAds {
+		// We don't include caches in this discovery for right now
+		if ad.Type != OriginType {
+			continue
+		}
+		if ad.WebURL.String() == "" {
+			// Oririgns fetched from topology can't be scraped as they
+			// don't have a WebURL
+			continue
+		}
+		promDiscoveryRes = append(promDiscoveryRes, PromDiscoveryItem{
+			Targets: []string{ad.WebURL.Hostname() + ":" + ad.WebURL.Port()},
+			Labels: map[string]string{
+				"origin_name":     ad.Name,
+				"origin_auth_url": ad.AuthURL.String(),
+				"origin_url":      ad.URL.String(),
+				"origin_web_url":  ad.WebURL.String(),
+				"origin_lat":      fmt.Sprintf("%.4f", ad.Latitude),
+				"origin_long":     fmt.Sprintf("%.4f", ad.Longitude),
+			},
+		})
+	}
+	ctx.JSON(200, promDiscoveryRes)
+}
+
+func RegisterOrigin(ctx *gin.Context) {
+	registerServeAd(ctx, OriginType)
+}
+
+func RegisterCache(ctx *gin.Context) {
+	registerServeAd(ctx, CacheType)
+}
+
+func ListNamespaces(ctx *gin.Context) {
+	namespaceAds := ListNamespacesFromOrigins()
+
+	ctx.JSON(http.StatusOK, namespaceAds)
 }
 
 func RegisterDirector(router *gin.RouterGroup) {
@@ -353,4 +464,7 @@ func RegisterDirector(router *gin.RouterGroup) {
 	router.GET("/api/v1.0/director/object/*any", RedirectToCache)
 	router.GET("/api/v1.0/director/origin/*any", RedirectToOrigin)
 	router.POST("/api/v1.0/director/registerOrigin", RegisterOrigin)
+	router.GET("/api/v1.0/director/discoverOrigins", DiscoverOrigins)
+	router.POST("/api/v1.0/director/registerCache", RegisterCache)
+	router.GET("/api/v1.0/director/listNamespaces", ListNamespaces)
 }

@@ -21,6 +21,7 @@
 package main
 
 import (
+	"context"
 	"crypto/elliptic"
 	_ "embed"
 	"fmt"
@@ -29,6 +30,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/daemon"
+	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/oa4mp"
 	"github.com/pelicanplatform/pelican/origin_ui"
@@ -52,7 +54,7 @@ func checkConfigFileReadable(fileName string, errMsg string) error {
 	return nil
 }
 
-func checkDefaults() error {
+func checkDefaults(origin bool, nsAds []director.NamespaceAd) error {
 	requiredConfigs := []param.StringParam{param.Server_TLSCertificate, param.Server_TLSKey, param.Xrootd_RunLocation, param.Xrootd_RobotsTxtFile}
 	for _, configName := range requiredConfigs {
 		mgr := configName.GetString()
@@ -88,7 +90,7 @@ func checkDefaults() error {
 		return err
 	}
 
-	if err := xrootd.CheckXrootdEnv(true); err != nil {
+	if err := xrootd.CheckXrootdEnv(origin, nsAds); err != nil {
 		return err
 	}
 
@@ -107,6 +109,24 @@ func checkDefaults() error {
 	return nil
 }
 
+func webUiInitialize() {
+	if err := metrics.SetComponentHealthStatus("web-ui", "warning", "Authentication not initialized"); err != nil {
+		log.Errorln("Failed to set web UI's component health status:", err)
+		return
+	}
+
+	// Ensure we wait until the origin has been initialized
+	// before launching XRootD.
+	if err := origin_ui.WaitUntilLogin(context.Background()); err != nil {
+		log.Errorln("Failure when waiting for web UI to be initialized:", err)
+		return
+	}
+	if err := metrics.SetComponentHealthStatus("web-ui", "ok", ""); err != nil {
+		log.Errorln("Failed to set web UI's component health status:", err)
+		return
+	}
+}
+
 func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	defer config.CleanupTempResources()
 
@@ -120,7 +140,7 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		return err
 	}
 
-	err = checkDefaults()
+	err = checkDefaults(true, nil)
 	if err != nil {
 		return err
 	}
@@ -129,6 +149,11 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	if err != nil {
 		return err
 	}
+
+	if err := web_ui.ConfigureMetrics(engine, false); err != nil {
+		return err
+	}
+
 	if err = origin_ui.ConfigureOriginUI(engine); err != nil {
 		return err
 	}
@@ -145,18 +170,7 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	}
 
 	go web_ui.RunEngine(engine)
-	if err = metrics.SetComponentHealthStatus("web-ui", "warning", "Authentication not initialized"); err != nil {
-		return err
-	}
-
-	// Ensure we wait until the origin has been initialized
-	// before launching XRootD.
-	if err = origin_ui.WaitUntilLogin(); err != nil {
-		return err
-	}
-	if err = metrics.SetComponentHealthStatus("web-ui", "ok", ""); err != nil {
-		return err
-	}
+	go webUiInitialize()
 
 	configPath, err := xrootd.ConfigXrootd(true)
 	if err != nil {
@@ -168,7 +182,7 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	}
 
 	privileged := param.Origin_Multiuser.GetBool()
-	launchers, err := xrootd.ConfigureLaunchers(privileged, configPath)
+	launchers, err := xrootd.ConfigureLaunchers(privileged, configPath, param.Origin_EnableCmsd.GetBool())
 	if err != nil {
 		return err
 	}

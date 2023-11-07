@@ -271,9 +271,24 @@ type: string
 default: $ConfigBase/origin-ui-passwd
 components: ["origin"]
 ---
+name: Origin.UIActivationCodeFile
+description: >-
+  If the origin's web user interface has not yet been configured, this file will
+  contain the activation code necessary to turn it on.
+type: string
+default: $ConfigBase/origin-activation-code
+components: ["origin"]
+---
 name: Origin.SelfTest
 description: >-
   A bool indicating whether the origin should perform self health checks.
+type: bool
+default: true
+components: ["origin"]
+---
+name: Origin.EnableUI
+description: >-
+  Indicate whether the origin should enable its web UI.
 type: bool
 default: true
 components: ["origin"]
@@ -285,7 +300,62 @@ type: bool
 default: false
 components: ["origin"]
 ---
+name: Origin.ScitokensRestrictedPaths
+description: >-
+  Enable the built-in issuer daemon for the origin.
+type: stringSlice
+default: none
+components: ["origin"]
+---
+name: Origin.ScitokensMapSubject
+description: >-
+  Enable the built-in issuer daemon for the origin.
+type: bool
+default: false
+components: ["origin"]
+---
+name: Origin.ScitokensDefaultUser
+description: >-
+  Enable the built-in issuer daemon for the origin.
+type: string
+default: none
+components: ["origin"]
+---
+name: Origin.ScitokensUsernameClaim
+description: >-
+  Enable the built-in issuer daemon for the origin.
+type: string
+default: none
+components: ["origin"]
+---
+name: Origin.ScitokensNameMapFile
+description: >-
+  Enable the built-in issuer daemon for the origin.
+type: string
+default: none
+components: ["origin"]
+---
 
+############################
+#   Cache-level configs    #
+############################
+name: Cache.DataLocation
+description: >-
+  The directory for the location of the cache data files - this is where the actual data in the cache is stored.
+  This should *not* be in the same path as XRootD.Mount or else it will expose the data files as part of the files within the cache.
+type: string
+root_default: /run/pelican/xcache
+default: $XDG_RUNTIME_DIR/pelican/xcache
+components: ["cache"]
+---
+name: Cache.ExportLocation
+description: >-
+  The location of the export directory. Everything under this directory will be exposed as part of the cache. This is
+  relative to the mount location.
+type: string
+default: /
+components: ["cache"]
+---
 
 ############################
 #  Director-level configs  #

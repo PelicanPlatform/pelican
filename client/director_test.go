@@ -109,8 +109,7 @@ func TestCreateNsFromDirectorResp(t *testing.T) {
 	}
 
 	// Call the function in question
-	var ns namespaces.Namespace
-	err := CreateNsFromDirectorResp(directorResponse, &ns)
+	ns, err := CreateNsFromDirectorResp(directorResponse)
 
 	// Test for expected outputs
 	assert.NoError(t, err, "Error creating Namespace from Director response")

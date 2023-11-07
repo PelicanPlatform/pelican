@@ -1,3 +1,5 @@
+//go:build windows
+
 /***************************************************************
  *
  * Copyright (C) 2023, Pelican Project, Morgridge Institute for Research
@@ -16,26 +18,13 @@
  *
  ***************************************************************/
 
-import {Box} from "@mui/material";
+package main
 
-import {Header} from "@/components/layout/Header";
+import (
+	"github.com/pkg/errors"
+	"github.com/spf13/cobra"
+)
 
-export const metadata = {
-    title: 'Origin Login',
-    description: 'Software designed to make data distribution easy',
-}
-
-export default function RootLayout({
-                                       children,
-                                   }: {
-    children: React.ReactNode
-}) {
-    return (
-        <>
-            <Header/>
-            <Box component={"main"} pt={"75px"} display={"flex"} minHeight={"100vh"}>
-                {children}
-            </Box>
-        </>
-    )
+func serveCache( /*cmd*/ *cobra.Command /*args*/, []string) error {
+	return errors.New("'cache serve' command is not supported on Windows")
 }

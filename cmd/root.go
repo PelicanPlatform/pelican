@@ -90,6 +90,7 @@ func init() {
 	rootCmd.AddCommand(directorCmd)
 	rootCmd.AddCommand(namespaceRegistryCmd)
 	rootCmd.AddCommand(originCmd)
+	rootCmd.AddCommand(cacheCmd)
 	rootCmd.AddCommand(namespaceCmd)
 	rootCmd.AddCommand(rootConfigCmd)
 	rootCmd.AddCommand(rootPluginCmd)

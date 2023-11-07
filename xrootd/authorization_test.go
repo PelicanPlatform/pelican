@@ -130,6 +130,22 @@ func TestGenerateConfig(t *testing.T) {
 	require.Equal(t, len(issuer.BasePaths), 1)
 	assert.Equal(t, issuer.BasePaths[0], "/pelican/monitoring")
 	assert.Equal(t, issuer.DefaultUser, "xrootd")
+
+	viper.Reset()
+	viper.Set("Origin.SelfTest", false)
+	viper.Set("Origin.ScitokensDefaultUser", "user1")
+	viper.Set("Origin.ScitokensMapSubject", true)
+	err = config.InitServer()
+	require.NoError(t, err)
+	issuer, err = GenerateOriginIssuer([]string{"/foo/bar/baz", "/another/exported/path"})
+	require.NoError(t, err)
+	assert.Equal(t, issuer.Name, "Origin")
+	assert.Equal(t, issuer.Issuer, "https://"+param.Server_Hostname.GetString()+":"+fmt.Sprint(param.Xrootd_Port.GetInt()))
+	require.Equal(t, len(issuer.BasePaths), 2)
+	assert.Equal(t, issuer.BasePaths[0], "/foo/bar/baz")
+	assert.Equal(t, issuer.BasePaths[1], "/another/exported/path")
+	assert.Equal(t, issuer.DefaultUser, "user1")
+	assert.Equal(t, issuer.MapSubject, true)
 }
 
 func TestWriteOriginScitokensConfig(t *testing.T) {
@@ -153,7 +169,7 @@ func TestWriteOriginScitokensConfig(t *testing.T) {
 	err = os.WriteFile(scitokensCfg, []byte(toMergeOutput), 0640)
 	require.NoError(t, err)
 
-	err = WriteOriginScitokensConfig()
+	err = WriteOriginScitokensConfig([]string{"/foo/bar"})
 	require.NoError(t, err)
 
 	genCfg, err := os.ReadFile(filepath.Join(dirname, "scitokens-generated.cfg"))

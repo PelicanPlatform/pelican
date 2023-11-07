@@ -63,10 +63,11 @@ func HeaderParser(values string) (retMap map[string]string) {
 
 // Given the Director response, create the ordered list of caches
 // and store it as namespace.SortedDirectorCaches
-func CreateNsFromDirectorResp(dirResp *http.Response, namespace *namespaces.Namespace) (err error) {
+func CreateNsFromDirectorResp(dirResp *http.Response) (namespace namespaces.Namespace, err error) {
 	pelicanNamespaceHdr := dirResp.Header.Values("X-Pelican-Namespace")
 	if len(pelicanNamespaceHdr) == 0 {
-		return errors.New("Pelican director did not include mandatory X-Pelican-Namespace header in response")
+		err = errors.New("Pelican director did not include mandatory X-Pelican-Namespace header in response")
+		return
 	}
 	xPelicanNamespace := HeaderParser(pelicanNamespaceHdr[0])
 	namespace.Path = xPelicanNamespace["namespace"]
@@ -175,6 +176,9 @@ func QueryDirector(source string, directorUrl string) (resp *http.Response, err 
 func GetCachesFromDirectorResponse(resp *http.Response, needsToken bool) (caches []namespaces.DirectorCache, err error) {
 	// Get the Link header
 	linkHeader := resp.Header.Values("Link")
+	if len(linkHeader) == 0 {
+		return []namespaces.DirectorCache{}, nil
+	}
 
 	for _, linksStr := range strings.Split(linkHeader[0], ",") {
 		links := strings.Split(strings.ReplaceAll(linksStr, " ", ""), ";")

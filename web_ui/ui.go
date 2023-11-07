@@ -30,8 +30,8 @@ import (
 	ginprometheus "github.com/zsais/go-gin-prometheus"
 )
 
-func ConfigureMetrics(engine *gin.Engine) error {
-	err := ConfigureEmbeddedPrometheus(engine)
+func ConfigureMetrics(engine *gin.Engine, isDirector bool) error {
+	err := ConfigureEmbeddedPrometheus(engine, isDirector)
 	if err != nil {
 		return err
 	}
@@ -64,9 +64,6 @@ func GetEngine() (*gin.Engine, error) {
 			"resource": ctx.Request.URL.Path},
 		).Info("Served Request")
 	})
-	if err := ConfigureMetrics(engine); err != nil {
-		return nil, err
-	}
 	return engine, nil
 }
 

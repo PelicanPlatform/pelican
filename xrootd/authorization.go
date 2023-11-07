@@ -37,6 +37,7 @@ import (
 
 	"github.com/go-ini/ini"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 )
@@ -50,13 +51,14 @@ type (
 
 	// Per-issuer configuration
 	Issuer struct {
-		Name          string
-		Issuer        string
-		BasePaths     []string
-		MapSubject    bool
-		DefaultUser   string
-		UsernameClaim string
-		NameMapfile   string
+		Name            string
+		Issuer          string
+		BasePaths       []string
+		RestrictedPaths []string
+		MapSubject      bool
+		DefaultUser     string
+		UsernameClaim   string
+		NameMapfile     string
 	}
 
 	// Top-level configuration object for the template
@@ -122,7 +124,7 @@ func EmitScitokensConfiguration(cfg *ScitokensCfg) error {
 
 // Parse the input xrootd authfile, add any default configurations, and then save it
 // into the xrootd runtime directory
-func EmitAuthfile() error {
+func EmitAuthfile(nsAds []director.NamespaceAd) error {
 	authfile := param.Xrootd_Authfile.GetString()
 	contents, err := os.ReadFile(authfile)
 	if err != nil {
@@ -144,6 +146,13 @@ func EmitAuthfile() error {
 	}
 	if !foundPublicLine {
 		output.Write([]byte("u * /.well-known lr\n"))
+	}
+
+	if len(nsAds) != 0 {
+		for _, ad := range nsAds {
+			outStr := "u * " + ad.Path + " lr\n"
+			output.Write([]byte(outStr))
+		}
 	}
 
 	gid, err := config.GetDaemonGID()
@@ -246,8 +255,24 @@ func GenerateMonitoringIssuer() (issuer Issuer, err error) {
 	return
 }
 
+func GenerateOriginIssuer(exportedPaths []string) (issuer Issuer, err error) {
+	// TODO: Return to this and figure out how to get a proper unmarshal to work
+	if len(exportedPaths) == 0 {
+		return
+	}
+	issuer.Name = "Origin"
+	issuer.Issuer = param.Origin_Url.GetString()
+	issuer.BasePaths = exportedPaths
+	issuer.RestrictedPaths = param.Origin_ScitokensRestrictedPaths.GetStringSlice()
+	issuer.MapSubject = param.Origin_ScitokensMapSubject.GetBool()
+	issuer.DefaultUser = param.Origin_ScitokensDefaultUser.GetString()
+	issuer.UsernameClaim = param.Origin_ScitokensUsernameClaim.GetString()
+
+	return
+}
+
 // Writes out the origin's scitokens.cfg configuration
-func WriteOriginScitokensConfig() error {
+func WriteOriginScitokensConfig(exportedPaths []string) error {
 
 	gid, err := config.GetDaemonGID()
 	if err != nil {
@@ -277,6 +302,11 @@ func WriteOriginScitokensConfig() error {
 	}
 
 	if issuer, err := GenerateMonitoringIssuer(); err == nil && len(issuer.Name) > 0 {
+		cfg.Issuers = append(cfg.Issuers, issuer)
+		cfg.Global.Audience = append(cfg.Global.Audience, issuer.Issuer)
+	}
+
+	if issuer, err := GenerateOriginIssuer(exportedPaths); err == nil && len(issuer.Name) > 0 {
 		cfg.Issuers = append(cfg.Issuers, issuer)
 		cfg.Global.Audience = append(cfg.Global.Audience, issuer.Issuer)
 	}

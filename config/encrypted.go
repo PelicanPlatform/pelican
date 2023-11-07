@@ -29,6 +29,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/spf13/viper"
 	"github.com/youmark/pkcs8"
 	"golang.org/x/crypto/curve25519"
 	"golang.org/x/crypto/nacl/box"
@@ -42,22 +43,20 @@ import (
 var setEmptyPassword = false
 
 func GetEncryptedConfigName() (string, error) {
-	if IsRootExecution() {
-		return "/etc/pelican/credentials/client-credentials.pem", nil
+	configDir := viper.GetString("ConfigDir")
+	if GetPreferredPrefix() == "PELICAN" || IsRootExecution() {
+		return filepath.Join(configDir, "credentials", "client-credentials.pem"), nil
 	}
-	config_location := filepath.Join("pelican", "client-credentials.pem")
-	if GetPreferredPrefix() != "PELICAN" {
-		config_location = filepath.Join("osdf-client", "oauth2-client.pem")
-	}
-	config_root := os.Getenv("XDG_CONFIG_HOME")
-	if len(config_root) == 0 {
+	configLocation := filepath.Join("osdf-client", "oauth2-client.pem")
+	configRoot := os.Getenv("XDG_CONFIG_HOME")
+	if len(configRoot) == 0 {
 		dirname, err := os.UserHomeDir()
 		if err != nil {
 			return "", err
 		}
-		config_root = filepath.Join(dirname, ".config")
+		configRoot = filepath.Join(dirname, ".config")
 	}
-	return filepath.Join(config_root, config_location), nil
+	return filepath.Join(configRoot, configLocation), nil
 }
 
 func EncryptedConfigExists() (bool, error) {
