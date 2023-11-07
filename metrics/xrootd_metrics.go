@@ -121,30 +121,30 @@ type (
 		Ufn XrdXrootdMonFileLFN
 	}
 
-	XrdXrootdMonStatOPS struct {
-		Read  int   // Number of read() calls
-		Readv int   // Number of readv() calls
-		Write int   // Number of write() calls
-		RsMin int16 // Smallest readv() segment count
-		RsMax int16 // Largest readv() segment count
-		Rsegs int64 // Number of readv() segments
-		RdMin int   // Smallest read() request size
-		RdMax int   // Largest read() request size
-		RvMin int   // Smallest readv() request size
-		RvMax int   // Largest readv() request size
-		WrMin int   // Smallest write() request size
-		WrMax int   // Largest write() request size
-	}
-
-	XrdXrootdMonDouble struct {
-		Dlong int64   // Represents a long long
-		Dreal float64 // Represents a double
-	}
-
 	XrdXrootdMonStatXFR struct {
 		Read  int64 // Bytes read from file using read()
 		Readv int64 // Bytes read from file using readv()
 		Write int64 // Bytes written to file
+	}
+
+	XrdXrootdMonFileXFR struct {
+		Hdr XrdXrootdMonFileHdr // Header with recType == isXfr
+		Xfr XrdXrootdMonStatXFR
+	}
+
+	XrdXrootdMonStatOPS struct { // 48B
+		Read  int32 // Number of read() calls
+		Readv int32 // Number of readv() calls
+		Write int32 // Number of write() calls
+		RsMin int16 // Smallest readv() segment count
+		RsMax int16 // Largest readv() segment count
+		Rsegs int64 // Number of readv() segments
+		RdMin int32 // Smallest read() request size
+		RdMax int32 // Largest read() request size
+		RvMin int32 // Smallest readv() request size
+		RvMax int32 // Largest readv() request size
+		WrMin int32 // Smallest write() request size
+		WrMax int32 // Largest write() request size
 	}
 
 	// XrdXrootdMonFileCLS represents a variable length structure and
@@ -154,7 +154,7 @@ type (
 		Hdr XrdXrootdMonFileHdr // Always present
 		Xfr XrdXrootdMonStatXFR // Always present
 		Ops XrdXrootdMonStatOPS // OPTIONAL
-		// Ssq XrdXrootdMonStatSSQ // OPTIONAL
+		// Ssq XrdXrootdMonStatSSQ // OPTIONAL, not implemented here yet
 	}
 
 	SummaryStat struct {
@@ -228,159 +228,6 @@ var (
 	transfers    = ttlcache.New[FileId, FileRecord](ttlcache.WithTTL[FileId, FileRecord](24 * time.Hour))
 	monitorPaths []PathList
 )
-
-func (monHeader *XrdXrootdMonHeader) Serialize() ([]byte, error) {
-	var buf bytes.Buffer
-	// Writing the Header
-	err := binary.Write(&buf, binary.BigEndian, monHeader.Code)
-	if err != nil {
-		return nil, errors.Wrap(err, fmt.Sprint("binary.Write failed for Code:", err))
-	}
-	err = binary.Write(&buf, binary.BigEndian, monHeader.Pseq)
-	if err != nil {
-		return nil, errors.Wrap(err, fmt.Sprint("binary.Write failed for Pseq:", err))
-	}
-	err = binary.Write(&buf, binary.BigEndian, monHeader.Plen)
-	if err != nil {
-		return nil, errors.Wrap(err, fmt.Sprint("binary.Write failed for Plen:", err))
-	}
-	err = binary.Write(&buf, binary.BigEndian, monHeader.Stod)
-	if err != nil {
-		return nil, errors.Wrap(err, fmt.Sprint("binary.Write failed for Stod:", err))
-	}
-
-	return buf.Bytes(), nil
-}
-
-func (monMap XrdXrootdMonMap) Serialize() ([]byte, error) {
-	var buf bytes.Buffer
-
-	// Writing the Header
-	headerBytes, err := monMap.Hdr.Serialize()
-	if err != nil {
-		return nil, errors.Wrap(err, fmt.Sprint("Failed to serialize monitor header:", err))
-	}
-	err = binary.Write(&buf, binary.BigEndian, headerBytes)
-	if err != nil {
-		return nil, errors.Wrap(err, fmt.Sprint("binary.Write failed for Header:", err))
-	}
-
-	// Writing the Dictid
-	err = binary.Write(&buf, binary.BigEndian, monMap.Dictid)
-	if err != nil {
-		return nil, errors.Wrap(err, fmt.Sprint("binary.Write failed for Dictid:", err))
-	}
-
-	// Writing the Info slice directly
-	err = binary.Write(&buf, binary.BigEndian, monMap.Info)
-	if err != nil {
-		return nil, errors.Wrap(err, fmt.Sprint("binary.Write failed for Info:", err))
-	}
-
-	return buf.Bytes(), nil
-}
-
-func (hdr *XrdXrootdMonFileHdr) Serialize() ([]byte, error) {
-	buf := new(bytes.Buffer)
-
-	// Serialize RecType
-	buf.WriteByte(byte(hdr.RecType))
-	// Serialize RecFlag
-	buf.WriteByte(hdr.RecFlag)
-	// Serialize RecSize
-	if err := binary.Write(buf, binary.BigEndian, hdr.RecSize); err != nil {
-		return nil, err
-	}
-
-	// Serialize the union field based on RecType
-	switch hdr.RecType {
-	case isTime:
-		// Serialize NRecs0 and NRecs1
-		if err := binary.Write(buf, binary.BigEndian, hdr.NRecs0); err != nil {
-			return nil, err
-		}
-		if err := binary.Write(buf, binary.BigEndian, hdr.NRecs1); err != nil {
-			return nil, err
-		}
-	case isDisc:
-		// Serialize UserID
-		if err := binary.Write(buf, binary.BigEndian, hdr.UserId); err != nil {
-			return nil, err
-		}
-	default:
-		// Serialize FileID for all other cases (isClose, isOpen, isXFR)
-		if err := binary.Write(buf, binary.BigEndian, hdr.FileId); err != nil {
-			return nil, err
-		}
-	}
-
-	return buf.Bytes(), nil
-}
-
-func (ftod *XrdXrootdMonFileTOD) Serialize() ([]byte, error) {
-	buf := new(bytes.Buffer)
-
-	// First serialize the header
-	headerBytes, err := ftod.Hdr.Serialize()
-	if err != nil {
-		return nil, err
-	}
-	buf.Write(headerBytes)
-
-	// Serialize TBeg
-	if err := binary.Write(buf, binary.BigEndian, ftod.TBeg); err != nil {
-		return nil, err
-	}
-	// Serialize TEnd
-	if err := binary.Write(buf, binary.BigEndian, ftod.TEnd); err != nil {
-		return nil, err
-	}
-	// Serialize SID
-	if err := binary.Write(buf, binary.BigEndian, ftod.SID); err != nil {
-		return nil, err
-	}
-
-	return buf.Bytes(), nil
-}
-
-func (lfn *XrdXrootdMonFileLFN) Serialize() ([]byte, error) {
-	buf := new(bytes.Buffer)
-
-	// Serialize User
-	if err := binary.Write(buf, binary.BigEndian, lfn.User); err != nil {
-		return nil, err
-	}
-	// Serialize Lfn
-	// Here we don't need to handle endianness since it's a byte array
-	buf.Write(lfn.Lfn[:])
-
-	return buf.Bytes(), nil
-}
-
-func (opn *XrdXrootdMonFileOPN) Serialize() ([]byte, error) {
-	buf := new(bytes.Buffer)
-
-	// Serialize the header
-	headerBytes, err := opn.Hdr.Serialize()
-	if err != nil {
-		return nil, err
-	}
-	buf.Write(headerBytes)
-
-	// Serialize Fsz
-	if err := binary.Write(buf, binary.BigEndian, opn.Fsz); err != nil {
-		return nil, err
-	}
-
-	// Serialize Ufn
-	lfnBytes, err := opn.Ufn.Serialize()
-	if err != nil {
-		return nil, err
-	}
-	buf.Write(lfnBytes)
-
-	return buf.Bytes(), nil
-}
 
 func ConfigureMonitoring() (int, error) {
 	lower := param.Monitoring_PortLower.GetInt()
@@ -662,8 +509,53 @@ func HandlePacket(packet []byte) error {
 				readBytes := binary.BigEndian.Uint64(packet[offset+8 : offset+16])
 				readvBytes := binary.BigEndian.Uint64(packet[offset+16 : offset+24])
 				writeBytes := binary.BigEndian.Uint64(packet[offset+24 : offset+32])
+
+				labels := prometheus.Labels{
+					"path": "/",
+					"ap":   "",
+					"dn":   "",
+					"role": "",
+					"org":  "",
+				}
+
 				if item != nil {
 					record = item.Value()
+					userRecord := sessions.Get(record.UserId)
+					labels["path"] = record.Path
+					if userRecord != nil {
+						labels["ap"] = userRecord.Value().AuthenticationProtocol
+						labels["dn"] = userRecord.Value().DN
+						labels["role"] = userRecord.Value().Role
+						labels["org"] = userRecord.Value().Org
+					}
+				}
+
+				// We record those metrics to make sure they are properly populated with initial
+				// values, or the file close hanlder will only populate them by the difference, not
+				// the total
+				labels["type"] = "read"
+				counter := TransferBytes.With(labels)
+				incBy := int64(readBytes - record.ReadBytes)
+				if incBy >= 0 {
+					counter.Add(float64(incBy))
+				} else {
+					log.Debug("File-transfer ReadBytes is less than previous value")
+				}
+				labels["type"] = "readv"
+				counter = TransferBytes.With(labels)
+				incBy = int64(readvBytes - record.ReadvBytes)
+				if incBy >= 0 {
+					counter.Add(float64(incBy))
+				} else {
+					log.Debug("File-transfer ReadVBytes is less than previous value")
+				}
+				labels["type"] = "write"
+				counter = TransferBytes.With(labels)
+				incBy = int64(writeBytes - record.WriteBytes)
+				if incBy >= 0 {
+					counter.Add(float64(incBy))
+				} else {
+					log.Debug("File-transfer WriteByte is less than previous value")
 				}
 				record.ReadBytes = readBytes
 				record.ReadvBytes = readvBytes
@@ -673,7 +565,9 @@ func HandlePacket(packet []byte) error {
 			case 4: // XrdXrootdMonFileHdr::isDisc
 				log.Debug("MonPacket: Received a f-stream disconnect packet")
 				userId := UserId{Id: fileHdr.UserId}
-				sessions.Delete(userId)
+				if session := sessions.Get(userId); session != nil {
+					sessions.Delete(userId)
+				}
 			default:
 				log.Debug("MonPacket: Received an unhandled file monitoring packet "+
 					"of type ", fileHdr.RecType)
