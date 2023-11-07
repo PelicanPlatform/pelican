@@ -389,8 +389,8 @@ func registerServeAd(ctx *gin.Context, sType ServerType) {
 		Type:    sType,
 	}
 
-	RecordAd(sAd, &ad.Namespaces)
 	hasOriginAdInCache := serverAds.Has(sAd)
+	RecordAd(sAd, &ad.Namespaces)
 
 	// Start director periodic test of origin's health status if origin AD
 	// has WebURL field AND it's not already been registered

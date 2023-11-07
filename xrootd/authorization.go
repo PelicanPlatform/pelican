@@ -318,7 +318,6 @@ func WriteOriginScitokensConfig(exportedPaths []string) error {
 		cfg.Issuers = append(cfg.Issuers, issuer)
 		cfg.Global.Audience = append(cfg.Global.Audience, issuer.Issuer)
 	}
-
 	if issuer, err := GenerateOriginIssuer(exportedPaths); err == nil && len(issuer.Name) > 0 {
 		cfg.Issuers = append(cfg.Issuers, issuer)
 		cfg.Global.Audience = append(cfg.Global.Audience, issuer.Issuer)
