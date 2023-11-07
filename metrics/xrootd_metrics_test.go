@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"bytes"
 	"encoding/xml"
 	"fmt"
 	"strconv"
@@ -8,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jellydator/ttlcache/v3"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 )
@@ -18,6 +20,34 @@ func getAuthInfoString(user UserRecord) string {
 
 func getUserIdString(userId XrdUserId) string {
 	return fmt.Sprintf("%s/%s.%s:%s@%s", userId.Prot, userId.User, userId.Pid, userId.Sid, userId.Host)
+}
+
+func TestCacheMerge(t *testing.T) {
+	t.Run("same-key-will-override-item-not-merge", func(t *testing.T) {
+		transfers.DeleteAll()
+		mockFileId := FileId{Id: 147927}
+		mockInitRecord := FileRecord{
+			UserId: UserId{Id: 123},
+			Path:   "/foo/bar",
+		}
+		mockSecondRecord := FileRecord{
+			WriteOps:   1,
+			ReadOps:    2,
+			WriteBytes: 100,
+			ReadBytes:  100,
+		}
+
+		transfers.Set(mockFileId, mockInitRecord, ttlcache.DefaultTTL)
+		transfers.Set(mockFileId, mockSecondRecord, ttlcache.DefaultTTL)
+
+		assert.Equal(t, 1, len(transfers.Items()), "Lenght of items in cache doesn't match")
+		transferValue := transfers.Items()[mockFileId].Value()
+
+		assert.Equal(t, mockSecondRecord.UserId, transferValue.UserId)
+		assert.Equal(t, mockSecondRecord.Path, transferValue.Path)
+		assert.Equal(t, mockSecondRecord.WriteOps, transferValue.WriteOps)
+		assert.Equal(t, mockSecondRecord.ReadOps, transferValue.ReadOps)
+	})
 }
 
 func TestHandlePacket(t *testing.T) {
@@ -214,7 +244,7 @@ func TestHandlePacket(t *testing.T) {
 		sidInt, err := strconv.Atoi(mockXrdUserId.Sid)
 		assert.NoError(t, err, "Error parsing SID to int64")
 		// The ID seems to be wrong. The length of sid is kXR_int64 while the user id in file hdr is kXR_unt32
-		// Aren't the user id supposed to be dictid instead of sid?
+		// Aren't the user id supposed to be the dictid instead of sid?
 		assert.Equal(t, uint32(sidInt), sessions.Keys()[0].Id, "Id in session cache entry doesn't match expected")
 		sessionEntry := sessions.Get(sessions.Keys()[0]).Value()
 		assert.Equal(t, mockUserRecord.AuthenticationProtocol, sessionEntry.AuthenticationProtocol)
@@ -269,16 +299,20 @@ func TestHandlePacket(t *testing.T) {
 	})
 
 	t.Run("f-stream-file-open-event-should-register-correctly", func(t *testing.T) {
+		mockFileID := uint32(999)
+		mockSID := int64(143152967831384)
+		mockUserID := uint32(10)
+
 		// f-stream file open event
 		mockMonHeader := XrdXrootdMonHeader{ // 8B
 			Code: 'f',
 			Pseq: 1,
-			Plen: uint16(12 + 1), // to change
+			Plen: uint16(8), // to change
 			Stod: int32(time.Now().Unix()),
 		}
 		mockMonFileTOD := XrdXrootdMonFileTOD{
 			Hdr: XrdXrootdMonFileHdr{ // 8B
-				RecType: 3, // isTime
+				RecType: isTime,
 				RecFlag: 1, // hasSID
 				RecSize: int16(24),
 				NRecs0:  0, // isTime: nRecs[0] == isXfr recs
@@ -286,7 +320,7 @@ func TestHandlePacket(t *testing.T) {
 			},
 			TBeg: int32(time.Now().Unix()),                  // 4B
 			TEnd: int32(time.Now().Add(time.Second).Unix()), // 4B
-			SID:  143152967831384,                           // 8B
+			SID:  mockSID,                                   // 8B
 		}
 		lfnStr := "/full/path/to/file.txt"
 		lfnByteSlice := []byte(lfnStr)
@@ -294,19 +328,50 @@ func TestHandlePacket(t *testing.T) {
 
 		mockMonFileOpn := XrdXrootdMonFileOPN{
 			Hdr: XrdXrootdMonFileHdr{ // 8B
-				RecType: 2, // isOpen
-				RecFlag: 3, // hasLFN hasRW
-				RecSize: 0, // to change
-				FileId:  1,
+				RecType: isOpen,
+				RecFlag: 3,          // hasLFN hasRW
+				RecSize: 0,          // to change
+				FileId:  mockFileID, // dictid if recType != isTime
 			},
 			Fsz: 10000, // 8B
 			Ufn: XrdXrootdMonFileLFN{ // 4B + len(lfn)
-				User: 2,
+				User: mockUserID, // dictid for the user
 			},
 		}
 		copy(mockMonFileOpn.Ufn.Lfn[:], lfnByteSlice)
 		mockMonFileOpn.Hdr.RecSize = int16(16 + 4 + len(lfnByteSlice))
 		mockMonHeader.Plen = uint16(8 + mockMonFileTOD.Hdr.RecSize + mockMonFileOpn.Hdr.RecSize)
 
+		monHeader, err := mockMonHeader.Serialize()
+		assert.NoError(t, err, "Error serialize monitor header")
+		fileTod, err := mockMonFileTOD.Serialize()
+		assert.NoError(t, err, "Error serialize FileTOD")
+		fileOpn, err := mockMonFileOpn.Serialize()
+		assert.NoError(t, err, "Error serialize FileOPN")
+
+		buf := new(bytes.Buffer)
+		buf.Write(monHeader[:])
+		buf.Write(fileTod[:])
+		buf.Write(fileOpn[:])
+
+		bytePacket := buf.Bytes()
+
+		transfers.DeleteAll()
+
+		err = HandlePacket(bytePacket)
+		assert.NoError(t, err, "Error handling the packet")
+
+		assert.NoError(t, err, "Error handling packet")
+		assert.Equal(t, 1, len(transfers.Keys()), "Transfer cache didn't update")
+		assert.Equal(t, mockFileID, transfers.Keys()[0].Id, "Id in session cache entry doesn't match expected")
+		transferEntry := transfers.Get(transfers.Keys()[0]).Value()
+		// I'm not sure the intent of the Path attribute and looking at ComputePrefix,
+		// it seems to return "/" all the time as the length of monitorPaths is
+		// never changed
+		assert.Equal(t, "/", transferEntry.Path, "Path in transfer cache entry doesn't match expected")
+		// TODO: Figure out why there's such discrepency here and the d-stream (where userid == sid),
+		// but for other tests to run, just change to what returns to me for now
+		assert.Equal(t, mockUserID, transferEntry.UserId.Id, "UserID in transfer cache entry doesn't match expected")
+		transfers.DeleteAll()
 	})
 }

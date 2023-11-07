@@ -37,15 +37,6 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// RecType
-const (
-	isClose byte = iota // Assuming these constants match the C++ enum values
-	isDisc
-	isOpen
-	isTime
-	isXFR
-)
-
 type (
 	UserId struct {
 		Id uint32
@@ -100,8 +91,10 @@ type (
 		Info   []byte
 	}
 
+	recTval byte
+
 	XrdXrootdMonFileHdr struct {
-		RecType byte
+		RecType recTval
 		RecFlag byte
 		RecSize int16
 		FileId  uint32
@@ -181,6 +174,16 @@ type (
 		Program string        `xml:"pgm,attr"`
 		Stats   []SummaryStat `xml:"stats"`
 	}
+)
+
+// XrdXrootdMonFileHdr
+// Ref: https://github.com/xrootd/xrootd/blob/f3b2e86b9b80bb35f97dd4ad30c4cd5904902a4c/src/XrdXrootd/XrdXrootdMonData.hh#L173
+const (
+	isClose recTval = iota
+	isOpen
+	isTime
+	isXfr
+	isDisc
 )
 
 var (
@@ -281,7 +284,7 @@ func (hdr *XrdXrootdMonFileHdr) Serialize() ([]byte, error) {
 	buf := new(bytes.Buffer)
 
 	// Serialize RecType
-	buf.WriteByte(hdr.RecType)
+	buf.WriteByte(byte(hdr.RecType))
 	// Serialize RecFlag
 	buf.WriteByte(hdr.RecFlag)
 	// Serialize RecSize
@@ -336,6 +339,45 @@ func (ftod *XrdXrootdMonFileTOD) Serialize() ([]byte, error) {
 	if err := binary.Write(buf, binary.BigEndian, ftod.SID); err != nil {
 		return nil, err
 	}
+
+	return buf.Bytes(), nil
+}
+
+func (lfn *XrdXrootdMonFileLFN) Serialize() ([]byte, error) {
+	buf := new(bytes.Buffer)
+
+	// Serialize User
+	if err := binary.Write(buf, binary.BigEndian, lfn.User); err != nil {
+		return nil, err
+	}
+	// Serialize Lfn
+	// Here we don't need to handle endianness since it's a byte array
+	buf.Write(lfn.Lfn[:])
+
+	return buf.Bytes(), nil
+}
+
+func (opn *XrdXrootdMonFileOPN) Serialize() ([]byte, error) {
+	buf := new(bytes.Buffer)
+
+	// Serialize the header
+	headerBytes, err := opn.Hdr.Serialize()
+	if err != nil {
+		return nil, err
+	}
+	buf.Write(headerBytes)
+
+	// Serialize Fsz
+	if err := binary.Write(buf, binary.BigEndian, opn.Fsz); err != nil {
+		return nil, err
+	}
+
+	// Serialize Ufn
+	lfnBytes, err := opn.Ufn.Serialize()
+	if err != nil {
+		return nil, err
+	}
+	buf.Write(lfnBytes)
 
 	return buf.Bytes(), nil
 }
@@ -447,7 +489,7 @@ func ParseFileHeader(packet []byte) (XrdXrootdMonFileHdr, error) {
 		return XrdXrootdMonFileHdr{}, fmt.Errorf("Passed header of size %v which is below the minimum header size of 8 bytes", len(packet))
 	}
 	fileHdr := XrdXrootdMonFileHdr{
-		RecType: packet[0],
+		RecType: recTval(packet[0]),
 		RecFlag: packet[1],
 		RecSize: int16(binary.BigEndian.Uint16(packet[2:4])),
 		FileId:  binary.BigEndian.Uint32(packet[4:8]),
@@ -594,15 +636,18 @@ func HandlePacket(packet []byte) error {
 				log.Debug("MonPacket: Received a f-stream file-open packet")
 				fileid := FileId{Id: fileHdr.FileId}
 				path := ""
+				userId := UserId{}
 				if fileHdr.RecFlag&0x01 == 0x01 { // hasLFN
 					lfnSize := uint32(fileHdr.RecSize - 20)
 					lfn := NullTermToString(packet[offset+20 : offset+lfnSize+20])
-					path := ComputePrefix(lfn)
+					// path has been difined
+					path = ComputePrefix(lfn)
 					log.Debugf("MonPacket: User LFN %v matches prefix %v",
 						lfn, path)
+					// UserId is part of LFN
+					userId = UserId{Id: binary.BigEndian.Uint32(packet[offset+16 : offset+20])}
 				}
-				userid := UserId{Id: binary.BigEndian.Uint32(packet[offset+16 : offset+20])}
-				transfers.Set(fileid, FileRecord{UserId: userid, Path: path},
+				transfers.Set(fileid, FileRecord{UserId: userId, Path: path},
 					ttlcache.DefaultTTL)
 			case 2: // XrdXrootdMonFileHdr::isTime
 				log.Debug("MonPacket: Received a f-stream time packet")
