@@ -200,7 +200,7 @@ func setLoginCookie(ctx *gin.Context, user string) {
 	}
 	log.Debugf("Type of *key: %T\n", key)
 	var raw ecdsa.PrivateKey
-	if err = (*key).Raw(&raw); err != nil {
+	if err = key.Raw(&raw); err != nil {
 		ctx.JSON(500, gin.H{"error": "Unable to sign login cookie"})
 		return
 	}
@@ -226,7 +226,7 @@ func getUser(ctx *gin.Context) (string, error) {
 		return "", err
 	}
 	var raw ecdsa.PrivateKey
-	if err = (*key).Raw(&raw); err != nil {
+	if err = key.Raw(&raw); err != nil {
 		return "", errors.New("Failed to extract cookie signing key")
 	}
 	parsed, err := jwt.Parse([]byte(token), jwt.WithKey(jwa.ES256, raw.PublicKey))

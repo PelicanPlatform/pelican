@@ -30,6 +30,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/daemon"
@@ -178,7 +179,17 @@ func serveCache( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	}
 
 	// Register the cache prefix in the registry
-	err = nsregistry.NamespaceRegister(privKeyPath, registrationEndpointURL, "", cachePrefix)
+	privateKeyRaw, err := config.LoadPrivateKey(privKeyPath)
+	if err != nil {
+		log.Error("Failed to load private key", err)
+		os.Exit(1)
+	}
+	privKey, err := jwk.FromRaw(privateKeyRaw)
+	if err != nil {
+		log.Error("Failed to create JWK private key", err)
+		os.Exit(1)
+	}
+	err = nsregistry.NamespaceRegister(privKey, registrationEndpointURL, "", cachePrefix)
 
 	// Check that the error isn't because the prefix is already registered
 	if err != nil {

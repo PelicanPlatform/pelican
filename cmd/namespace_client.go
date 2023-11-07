@@ -22,6 +22,7 @@ import (
 	"net/url"
 	"os"
 
+	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pelicanplatform/pelican/config"
 	nsregistry "github.com/pelicanplatform/pelican/namespace-registry"
 	"github.com/pelicanplatform/pelican/param"
@@ -86,14 +87,43 @@ func registerANamespace(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
+	publicKey, err := config.LoadPublicKey("", privkey)
+	if err != nil {
+		log.Error("Error: Failed to retrieve public key: ", err)
+		os.Exit(1)
+	}
+
+	/*
+	 * TODO: For now, we only allow namespace registration to occur with a single key, but
+	 *       at some point we should expose an API for adding additional pubkeys to each
+	 *       namespace. There is a similar TODO listed in registry.go, as the choices made
+	 *       there mirror the choices made here.
+	 * To enforce that we're only trying to register one key, we check the length here
+	 */
+	if publicKey.Len() > 1 {
+		log.Errorf("Only one public key can be registered in this step, but %d were provided\n", publicKey.Len())
+		os.Exit(1)
+	}
+
+	privateKeyRaw, err := config.LoadPrivateKey(privkey)
+	if err != nil {
+		log.Error("Failed to load private key", err)
+		os.Exit(1)
+	}
+	privateKey, err := jwk.FromRaw(privateKeyRaw)
+	if err != nil {
+		log.Error("Failed to create JWK private key", err)
+		os.Exit(1)
+	}
+
 	if withIdentity {
-		err := nsregistry.NamespaceRegisterWithIdentity(privkey, registrationEndpointURL, prefix)
+		err := nsregistry.NamespaceRegisterWithIdentity(privateKey, registrationEndpointURL, prefix)
 		if err != nil {
 			log.Errorf("Failed to register prefix %s with identity: %v", prefix, err)
 			os.Exit(1)
 		}
 	} else {
-		err := nsregistry.NamespaceRegister(privkey, registrationEndpointURL, "", prefix)
+		err := nsregistry.NamespaceRegister(privateKey, registrationEndpointURL, "", prefix)
 		if err != nil {
 			log.Errorf("Failed to register prefix %s: %v", prefix, err)
 			os.Exit(1)

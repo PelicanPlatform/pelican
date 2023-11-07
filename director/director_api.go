@@ -142,7 +142,7 @@ func CreateDirectorSDToken() (string, error) {
 		return "", errors.Wrap(err, "failed to load the director's JWK")
 	}
 
-	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, *key))
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, key))
 	if err != nil {
 		return "", err
 	}
@@ -170,7 +170,7 @@ func VerifyDirectorSDToken(strToken string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	tok, err := jwt.Parse([]byte(strToken), jwt.WithKeySet(*key), jwt.WithValidate(true))
+	tok, err := jwt.Parse([]byte(strToken), jwt.WithKeySet(key), jwt.WithValidate(true))
 	if err != nil {
 		return false, err
 	}

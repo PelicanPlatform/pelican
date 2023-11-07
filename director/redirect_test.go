@@ -394,11 +394,11 @@ func TestDiscoverOrigins(t *testing.T) {
 			Build()
 		assert.NoError(t, err, "Error creating token")
 
-		err = jwk.AssignKeyID(*privateKey)
+		err = jwk.AssignKeyID(privateKey)
 		assert.NoError(t, err, "Error assigning key id")
 
 		// Sign token with previously created private key
-		signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, *privateKey))
+		signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, privateKey))
 		assert.NoError(t, err, "Error signing token")
 		return signed
 	}

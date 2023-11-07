@@ -20,13 +20,13 @@ package nsregistry
 
 import (
 	"database/sql"
-	"log"
 	"os"
 	"path/filepath"
 
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 
 	// commented sqlite driver requires CGO
 	// _ "github.com/mattn/go-sqlite3" // SQLite driver
@@ -109,8 +109,18 @@ functions) used by the client.
 */
 func addNamespace(ns *Namespace) error {
 	query := `INSERT INTO namespace (prefix, pubkey, identity, admin_metadata) VALUES (?, ?, ?, ?)`
-	_, err := db.Exec(query, ns.Prefix, ns.Pubkey, ns.Identity, ns.AdminMetadata)
-	return err
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(query, ns.Prefix, ns.Pubkey, ns.Identity, ns.AdminMetadata)
+	if err != nil {
+		if errRoll := tx.Rollback(); errRoll != nil {
+			log.Errorln("Failed to rollback transaction:", errRoll)
+		}
+		return err
+	}
+	return tx.Commit()
 }
 
 /**
@@ -124,12 +134,18 @@ func updateNamespace(ns *Namespace) error {
 
 func deleteNamespace(prefix string) error {
 	deleteQuery := `DELETE FROM namespace WHERE prefix = ?`
-	_, err := db.Exec(deleteQuery, prefix)
+	tx, err := db.Begin()
 	if err != nil {
+		return err
+	}
+	_, err = db.Exec(deleteQuery, prefix)
+	if err != nil {
+		if errRoll := tx.Rollback(); errRoll != nil {
+			log.Errorln("Failed to rollback transaction:", errRoll)
+		}
 		return errors.Wrap(err, "Failed to execute deletion query")
 	}
-
-	return nil
+	return tx.Commit()
 }
 
 /**
@@ -184,11 +200,20 @@ func InitializeDB() error {
 		dbPath += ".sqlite"
 	}
 
-	db, err = sql.Open("sqlite", dbPath)
+	dbName := "file:" + dbPath + "?_busy_timeout=5000&_journal_mode=WAL"
+	log.Debugln("Opening connection to sqlite DB", dbName)
+	db, err = sql.Open("sqlite", dbName)
 	if err != nil {
 		return errors.Wrapf(err, "Failed to open the database with path: %s", dbPath)
 	}
 
 	createNamespaceTable()
 	return db.Ping()
+}
+
+func ShutdownDB() {
+	err := db.Close()
+	if err != nil {
+		log.Errorln("Failure when shutting down the database:", err)
+	}
 }

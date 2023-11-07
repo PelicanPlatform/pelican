@@ -40,7 +40,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 			return *keyset, nil
 		},
 		RegisterFn: func(m *MockCache) error {
-			m.keyset = *kSet
+			m.keyset = kSet
 			return nil
 		},
 	}
@@ -64,7 +64,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 
 	//Create token without a scope - should return an error
 	key, err := config.GetOriginJWK()
-	err = jwk.AssignKeyID(*key)
+	err = jwk.AssignKeyID(key)
 	assert.NoError(t, err)
 
 	scopelessTok, err := jwt.NewBuilder().
@@ -73,7 +73,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 		Subject("origin").
 		Build()
 
-	signed, err := jwt.Sign(scopelessTok, jwt.WithKey(jwa.ES256, *key))
+	signed, err := jwt.Sign(scopelessTok, jwt.WithKey(jwa.ES256, key))
 
 	ok, err = VerifyAdvertiseToken(string(signed), "test-namespace")
 	assert.Equal(t, false, ok)
@@ -87,7 +87,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 		Subject("origin").
 		Build()
 
-	signed, err = jwt.Sign(nonStrScopeTok, jwt.WithKey(jwa.ES256, *key))
+	signed, err = jwt.Sign(nonStrScopeTok, jwt.WithKey(jwa.ES256, key))
 
 	ok, err = VerifyAdvertiseToken(string(signed), "test-namespace")
 	assert.Equal(t, false, ok)
@@ -101,7 +101,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 		Subject("origin").
 		Build()
 
-	signed, err = jwt.Sign(wrongScopeTok, jwt.WithKey(jwa.ES256, *key))
+	signed, err = jwt.Sign(wrongScopeTok, jwt.WithKey(jwa.ES256, key))
 
 	ok, err = VerifyAdvertiseToken(string(signed), "test-namespace")
 	assert.Equal(t, false, ok, "Should fail due to incorrect scope name")

@@ -372,7 +372,7 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 	}
 
 	var raw ecdsa.PrivateKey
-	if err = (*key).Raw(&raw); err != nil {
+	if err = key.Raw(&raw); err != nil {
 		t.Fatal(err)
 	}
 	signed, err = jwt.Sign(tok, jwt.WithKey(jwa.ES256, raw))

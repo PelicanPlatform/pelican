@@ -117,7 +117,7 @@ func OriginCheck(c *gin.Context, strToken string, expectedScope string) {
 	}
 
 	var raw ecdsa.PrivateKey
-	if err = (*bKey).Raw(&raw); err != nil {
+	if err = bKey.Raw(&raw); err != nil {
 		return
 	}
 

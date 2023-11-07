@@ -50,8 +50,10 @@ func MakeRequest(url string, method string, data map[string]interface{}, headers
 
 	// Check HTTP response -- should be 200, else something went wrong
 	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != 200 {
-		return body, errors.Errorf("The URL %s replied with status code %d", url, resp.StatusCode)
+	if method == "POST" && resp.StatusCode != 201 && resp.StatusCode != 200 {
+		return body, errors.Errorf("The POST attempt to %s resulted in status code %d", url, resp.StatusCode)
+	} else if method != "POST" && resp.StatusCode != 200 {
+		return body, errors.Errorf("The %s attempt to %s replied with status code %d", method, url, resp.StatusCode)
 	}
 
 	return body, nil
