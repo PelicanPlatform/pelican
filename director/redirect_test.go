@@ -483,3 +483,120 @@ func TestDiscoverOrigins(t *testing.T) {
 		assert.Equal(t, string(resStr), w.Body.String(), "Reponse doesn't match expected")
 	})
 }
+
+func TestRedirects(t *testing.T) {
+	// Check that the checkkHostnameRedirects uses the pre-configured hostnames to redirect
+	// requests that come in at the default paths, but not if the request is made
+	// specifically for an object or a cache via the API.
+	t.Run("redirect-check-hostnames", func(t *testing.T) {
+		// Note that we don't test here for the case when hostname redirects is turned off
+		// because the checkHostnameRedirects function should be unreachable via ShortcutMiddleware
+		// in that case, ie if we call this function and the incoming hostname matches, we should do
+		// the redirect specified
+		viper.Set("Director.OriginResponseHostnames", []string{"origin-hostname.com"})
+		viper.Set("Director.CacheResponseHostnames", []string{"cache-hostname.com"})
+
+		// base path with origin-redirect hostname, should redirect to origin
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		req := httptest.NewRequest("GET", "/foo/bar", nil)
+		c.Request = req
+		checkHostnameRedirects(c, "origin-hostname.com")
+		expectedPath := "/api/v1.0/director/origin/foo/bar"
+		assert.Equal(t, expectedPath, c.Request.URL.Path)
+
+		// base path with cache-redirect hostname, should redirect to cache
+		req = httptest.NewRequest("GET", "/foo/bar", nil)
+		c.Request = req
+		checkHostnameRedirects(c, "cache-hostname.com")
+		expectedPath = "/api/v1.0/director/object/foo/bar"
+		assert.Equal(t, expectedPath, c.Request.URL.Path)
+
+		// API path that should ALWAYS redirect to an origin
+		req = httptest.NewRequest("GET", "/api/v1.0/director/origin/foo/bar", nil)
+		c.Request = req
+		// Tell it cache, but it shouldn't switch what it redirects to
+		checkHostnameRedirects(c, "cache-hostname.com")
+		expectedPath = "/api/v1.0/director/origin/foo/bar"
+		assert.Equal(t, expectedPath, c.Request.URL.Path)
+
+		// API path that should ALWAYS redirect to a cache
+		req = httptest.NewRequest("GET", "/api/v1.0/director/object/foo/bar", nil)
+		c.Request = req
+		// Tell it origin, but it shouldn't switch what it redirects to
+		checkHostnameRedirects(c, "origin-hostname.com")
+		expectedPath = "/api/v1.0/director/object/foo/bar"
+		assert.Equal(t, expectedPath, c.Request.URL.Path)
+
+		viper.Reset()
+	})
+
+	t.Run("redirect-middleware", func(t *testing.T) {
+		// First test that two API endpoints are functioning properly
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		req := httptest.NewRequest("GET", "/api/v1.0/director/origin/foo/bar", nil)
+		c.Request = req
+
+		// test both APIs when in cache mode
+		ShortcutMiddleware("cache")(c)
+		expectedPath := "/api/v1.0/director/origin/foo/bar"
+		assert.Equal(t, expectedPath, c.Request.URL.Path)
+
+		req = httptest.NewRequest("GET", "/api/v1.0/director/object/foo/bar", nil)
+		c.Request = req
+		ShortcutMiddleware("cache")(c)
+		expectedPath = "/api/v1.0/director/object/foo/bar"
+		assert.Equal(t, expectedPath, c.Request.URL.Path)
+
+		// test both APIs when in origin mode
+		req = httptest.NewRequest("GET", "/api/v1.0/director/origin/foo/bar", nil)
+		c.Request = req
+		ShortcutMiddleware("origin")(c)
+		expectedPath = "/api/v1.0/director/origin/foo/bar"
+		assert.Equal(t, expectedPath, c.Request.URL.Path)
+
+		req = httptest.NewRequest("GET", "/api/v1.0/director/object/foo/bar", nil)
+		c.Request = req
+		ShortcutMiddleware("origin")(c)
+		expectedPath = "/api/v1.0/director/object/foo/bar"
+		assert.Equal(t, expectedPath, c.Request.URL.Path)
+
+		// Test the base paths
+		// test that we get an origin at the base path when in origin mode
+		req = httptest.NewRequest("GET", "/foo/bar", nil)
+		c.Request = req
+		ShortcutMiddleware("origin")(c)
+		expectedPath = "/api/v1.0/director/origin/foo/bar"
+		assert.Equal(t, expectedPath, c.Request.URL.Path)
+
+		// test that we get a cache at the base path when in cache mode
+		req = httptest.NewRequest("GET", "/api/v1.0/director/object/foo/bar", nil)
+		c.Request = req
+		ShortcutMiddleware("cache")(c)
+		expectedPath = "/api/v1.0/director/object/foo/bar"
+		assert.Equal(t, expectedPath, c.Request.URL.Path)
+
+		// Host-aware tests
+		// Test that we can turn on host-aware redirects and get one appropriate redirect from each
+		// type of header (as we've already tested that hostname redirects function)
+
+		// Host header
+		viper.Set("Director.OriginResponseHostnames", []string{"origin-hostname.com"})
+		viper.Set("Director.HostAwareRedirects", true)
+		req = httptest.NewRequest("GET", "/foo/bar", nil)
+		c.Request = req
+		c.Request.Header.Set("Host", "origin-hostname.com")
+		ShortcutMiddleware("cache")(c)
+		expectedPath = "/api/v1.0/director/origin/foo/bar"
+		assert.Equal(t, expectedPath, c.Request.URL.Path)
+
+		// X-Forwarded-Host header
+		req = httptest.NewRequest("GET", "/foo/bar", nil)
+		c.Request = req
+		c.Request.Header.Set("X-Forwarded-Host", "origin-hostname.com")
+		ShortcutMiddleware("cache")(c)
+		expectedPath = "/api/v1.0/director/origin/foo/bar"
+		assert.Equal(t, expectedPath, c.Request.URL.Path)
+
+		viper.Reset()
+	})
+}

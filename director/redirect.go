@@ -27,6 +27,8 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/pelicanplatform/pelican/param"
+
 	"github.com/gin-gonic/gin"
 	"github.com/hashicorp/go-version"
 	"github.com/pkg/errors"
@@ -278,21 +280,62 @@ func RedirectToOrigin(ginCtx *gin.Context) {
 
 }
 
+func checkHostnameRedirects(c *gin.Context, incomingHost string) {
+	oRedirectHosts := param.Director_OriginResponseHostnames.GetStringSlice()
+	cRedirectHosts := param.Director_CacheResponseHostnames.GetStringSlice()
+
+	for _, hostname := range oRedirectHosts {
+		if hostname == incomingHost {
+			if !strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/director/") {
+				c.Request.URL.Path = "/api/v1.0/director/origin" + c.Request.URL.Path
+				RedirectToOrigin(c)
+				c.Abort()
+				log.Debugln("Director is serving an origin based on incoming 'Host' header value of '" + hostname + "'")
+				return
+			}
+		}
+	}
+	for _, hostname := range cRedirectHosts {
+		if hostname == incomingHost {
+			if !strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/director/") {
+				c.Request.URL.Path = "/api/v1.0/director/object" + c.Request.URL.Path
+				RedirectToCache(c)
+				c.Abort()
+				log.Debugln("Director is serving a cache based on incoming 'Host' header value of '" + hostname + "'")
+				return
+			}
+		}
+	}
+}
+
 // Middleware sends GET /foo/bar to the RedirectToCache function, as if the
 // original request had been made to /api/v1.0/director/object/foo/bar
 func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// If this is a request for getting public key, don't modify the path
 		// If this is a request to the Prometheus API, don't modify the path
-		if strings.HasPrefix(c.Request.URL.Path, "/.well-known") ||
-			strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/prometheus") {
+		if strings.HasPrefix(c.Request.URL.Path, "/.well-known/") ||
+			(strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/") && !strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/director/")) {
 			c.Next()
 			return
 		}
+
+		// We grab the host and x-forwarded-host headers, which can be set by a client with the intent of changing the
+		// Director's default behavior (eg the director normally forwards to caches, but if it receives a request with
+		// a pre-configured hostname in its x-forwarded-host header, that indicates we should actually serve an origin.)
+		host, hostPresent := c.Request.Header["Host"]
+		xForwardedHost, xForwardedHostPresent := c.Request.Header["X-Forwarded-Host"]
+
+		if hostPresent {
+			checkHostnameRedirects(c, host[0])
+		} else if xForwardedHostPresent {
+			checkHostnameRedirects(c, xForwardedHost[0])
+		}
+
 		// If we're configured for cache mode or we haven't set the flag,
 		// we should use cache middleware
 		if defaultResponse == "cache" {
-			if !strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/director") {
+			if !strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/director/") {
 				c.Request.URL.Path = "/api/v1.0/director/object" + c.Request.URL.Path
 				RedirectToCache(c)
 				c.Abort()
@@ -302,7 +345,7 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 			// If the path starts with the correct prefix, continue with the next handler
 			c.Next()
 		} else if defaultResponse == "origin" {
-			if !strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/director") {
+			if !strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/director/") {
 				c.Request.URL.Path = "/api/v1.0/director/origin" + c.Request.URL.Path
 				RedirectToOrigin(c)
 				c.Abort()

@@ -35,6 +35,11 @@ import (
 )
 
 func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
+	err := config.DiscoverFederation()
+	if err != nil {
+		log.Warningln("Failed to do service auto-discovery:", err)
+	}
+
 	log.Info("Initializing Director GeoIP database...")
 	director.InitializeDB()
 
@@ -51,7 +56,7 @@ func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
 
 	// The director needs its own private key. If one doesn't exist, this will generate it
 	issuerKeyFile := param.IssuerKey.GetString()
-	err := config.GeneratePrivateKey(issuerKeyFile, elliptic.P256())
+	err = config.GeneratePrivateKey(issuerKeyFile, elliptic.P256())
 	if err != nil {
 		return errors.Wrap(err, "Failed to generate director private key")
 	}
