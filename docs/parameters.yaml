@@ -113,6 +113,13 @@ type: string
 default: Error
 components: ["*"]
 ---
+name: Logging.LogLocation
+description: >-
+  A filename defining a file to write log outputs to, if the user desires.
+type: filename
+default: none
+components: ["*"]
+---
 
 ############################
 # Federation-Level Configs #
