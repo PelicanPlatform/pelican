@@ -34,14 +34,6 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-type (
-	DirectorTest struct {
-		Status    string `json:"status"`
-		Message   string `json:"message"`
-		Timestamp string `json:"timestamp"`
-	}
-)
-
 var (
 	// Mutex for safe concurrent access to the timer
 	timerMutex sync.Mutex
@@ -129,7 +121,7 @@ func resetDirectorTimeoutTimer() {
 // reporting such status to this endpoint, and we will update origin internal
 // health status metric to reflect the director connection status.
 func directorTestResponse(ctx *gin.Context) {
-	dt := DirectorTest{}
+	dt := director.DirectorTest{}
 	if err := ctx.ShouldBind(&dt); err != nil {
 		log.Errorf("Invalid director test response")
 		ctx.JSON(400, gin.H{"error": "Invalid director test response"})
@@ -138,7 +130,7 @@ func directorTestResponse(ctx *gin.Context) {
 	// We will let the timer go timeout if director didn't send a valid json request
 	resetDirectorTimeoutTimer()
 	if dt.Status == "ok" {
-		if err := metrics.SetComponentHealthStatus("director", "ok", fmt.Sprintf("Director timestamp: %s", dt.Timestamp)); err != nil {
+		if err := metrics.SetComponentHealthStatus("director", "ok", fmt.Sprintf("Director timestamp: %v", dt.Timestamp)); err != nil {
 			log.Errorln("Failed to update director component health status:", err)
 			ctx.JSON(500, gin.H{"error": fmt.Sprintf("Failed to update director component health status: %s", err)})
 			return

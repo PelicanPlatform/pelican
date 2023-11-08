@@ -19,11 +19,14 @@
 package director
 
 import (
+	"context"
 	"net/url"
 	"testing"
+	"time"
 
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func hasServerAdWithName(serverAds []ServerAd, name string) bool {
@@ -178,26 +181,61 @@ func TestGetAdsForPath(t *testing.T) {
 	assert.Equal(t, len(cAds), 0)
 }
 
-func TestRecordAD(t *testing.T) {
-	mockOriginServerAd := ServerAd{
-		Name:      "test-origin-server",
-		AuthURL:   url.URL{Scheme: "https", Host: "fake-url.org", Path: "/user", RawQuery: "foo=1&bar=2"},
-		URL:       url.URL{},
+func TestConfigCacheEviction(t *testing.T) {
+	mockPelicanOriginServerAd := ServerAd{
+		Name:    "test-origin-server",
+		AuthURL: url.URL{},
+		URL: url.URL{
+			Scheme: "https",
+			Host:   "fake-origin.org:8443",
+		},
+		WebURL: url.URL{
+			Scheme: "https",
+			Host:   "fake-origin.org:8444",
+		},
 		Type:      OriginType,
 		Latitude:  123.05,
 		Longitude: 456.78,
 	}
+	mockNamespaceAd := NamespaceAd{
+		RequireToken:  true,
+		Path:          "/foo/bar/",
+		Issuer:        url.URL{},
+		MaxScopeDepth: 1,
+		Strategy:      "",
+		BasePath:      "",
+		VaultServer:   "",
+	}
 
-	t.Run("make-sure-cache-set-can-compare-struct", func(t *testing.T) {
+	t.Run("evicted-origin-can-cancel-health-test", func(t *testing.T) {
 		serverAds.DeleteAll()
-		serverAds.Set(mockOriginServerAd, []NamespaceAd{}, ttlcache.DefaultTTL)
-		serverAds.Set(mockOriginServerAd, []NamespaceAd{{Path: "", Issuer: url.URL{}}}, ttlcache.DefaultTTL)
-		assert.Equal(t, 1, len(serverAds.Items()), "Set duplicate cache entry when key is the same")
-	})
+		// Clear the map for the new test
+		healthTestCancelFuncs = make(map[ServerAd]context.CancelFunc)
+		ConfigCacheEviction()
 
-	t.Run("make-sure-cache-has-can-compare-struct", func(t *testing.T) {
-		serverAds.DeleteAll()
-		serverAds.Set(mockOriginServerAd, []NamespaceAd{}, ttlcache.DefaultTTL)
-		assert.True(t, serverAds.Has(mockOriginServerAd), "Return false with key in the cache")
+		serverAds.Set(mockPelicanOriginServerAd, []NamespaceAd{mockNamespaceAd}, ttlcache.DefaultTTL)
+		ctx, cancelFunc := context.WithDeadline(context.Background(), time.Now().Add(time.Second*5))
+		healthTestCancelFuncs[mockPelicanOriginServerAd] = cancelFunc
+
+		require.True(t, serverAds.Has(mockPelicanOriginServerAd), "serverAds failed to register the originAd")
+
+		cancelReceived := false
+		go func() {
+			<-ctx.Done()
+			if ctx.Err() == context.Canceled {
+				cancelReceived = true
+			}
+		}()
+
+		serverAds.Delete(mockPelicanOriginServerAd) // This should call onEviction handler and close the context
+
+		require.False(t, serverAds.Has(mockPelicanOriginServerAd), "serverAds didn't delete originAd")
+
+		// OnEviction is handled on a different goroutine than the cache management
+		// So we want to wait for a bit so that OnEviction can have time to be
+		// executed
+		time.Sleep(2 * time.Second) // This is a bit flaky and can delay the test run, so any thoughts on improvement is very welcome
+		assert.True(t, cancelReceived, "Didn't receive cancel singal")
+		assert.True(t, healthTestCancelFuncs[mockPelicanOriginServerAd] == nil, "Evicted origin didn't clear cancelFunc in the map")
 	})
 }

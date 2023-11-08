@@ -20,6 +20,7 @@ package director
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -27,7 +28,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strconv"
 	"time"
 
 	"github.com/lestrrat-go/jwx/v2/jwa"
@@ -43,7 +43,7 @@ type (
 	DirectorTest struct {
 		Status    string `json:"status"`
 		Message   string `json:"message"`
-		Timestamp string `json:"timestamp"`
+		Timestamp int64  `json:"timestamp"`
 	}
 )
 
@@ -220,7 +220,7 @@ func reportStatusToOrigin(originWebUrl string, status string, message string) er
 	dt := DirectorTest{
 		Status:    status,
 		Message:   message,
-		Timestamp: strconv.FormatInt(time.Now().Unix(), 10),
+		Timestamp: time.Now().Unix(),
 	}
 
 	jsonData, err := json.Marshal(dt)
@@ -261,60 +261,52 @@ func reportStatusToOrigin(originWebUrl string, status string, message string) er
 
 // Run a periodic test file transfer against an origin to ensure
 // it's talking to the director
-func PeriodicDirectorTest(originAd ServerAd) {
+func PeriodicDirectorTest(ctx context.Context, originAd ServerAd) {
 	originName := originAd.Name
 	originUrl := originAd.URL.String()
 	originWebUrl := originAd.WebURL.String()
 
-	firstRound := true
+	log.Debug(fmt.Sprintf("Starting Director test for origin %s at %s", originName, originUrl))
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+
 	for {
-		if firstRound {
-			time.Sleep(5 * time.Second)
-			log.Debug(fmt.Sprintf("Starting Director test for origin %s at %s", originName, originUrl))
-			firstRound = false
-		} else {
-			time.Sleep(15 * time.Second)
-		}
-		// End the periodic test if the ttlcache doesn't have the origin ad
-		// meaning the origin is offline and the cache is expired
-		serverAdMutex.RLock()
-		if !serverAds.Has(originAd) {
-			log.Debug(fmt.Sprintf("End of director test cycle for origin: %s at %s", originName, originUrl))
-			serverAdMutex.RUnlock()
+		select {
+		case <-ctx.Done():
+			log.Debug(fmt.Sprintf("End director test cycle for origin: %s at %s", originName, originUrl))
 			return
-		}
-		serverAdMutex.RUnlock()
+		case <-ticker.C:
+			log.Debug(fmt.Sprintf("Starting a new Director test cycle for origin: %s at %s", originName, originUrl))
+			url, err := UploadTestfile(originUrl)
+			if err != nil {
+				log.Warningln("Director test cycle failed during test upload:", err)
+				if err := reportStatusToOrigin(originWebUrl, "error", "Director test cycle failed during test upload: "+err.Error()); err != nil {
+					log.Warningln("Failed to report director test result to origin:", err)
+				}
+				continue
+			}
 
-		log.Debug(fmt.Sprintf("Starting a new Director test cycle for origin: %s at %s", originName, originUrl))
-		url, err := UploadTestfile(originUrl)
-		if err != nil {
-			log.Warningln("Director test cycle failed during test upload:", err)
-			if err := reportStatusToOrigin(originWebUrl, "error", "Director test cycle failed during test upload: "+err.Error()); err != nil {
+			if err = DownloadTestfile(url, originUrl); err != nil {
+				log.Warningln("Director test cycle failed during test download:", err)
+				if err := reportStatusToOrigin(originWebUrl, "error", "Director test cycle failed during test download: "+err.Error()); err != nil {
+					log.Warningln("Failed to report director test result to origin:", err)
+				}
+				log.Warningln("Unable to cleanup after failed self-test download:", err)
+				continue
+			}
+
+			if err = DeleteTestfile(url, originUrl); err != nil {
+				log.Warningln("Director test cycle failed during test deletion:", err)
+				if err := reportStatusToOrigin(originWebUrl, "error", "Director test cycle failed during test deletion: "+err.Error()); err != nil {
+					log.Warningln("Failed to report director test result to origin:", err)
+				}
+				continue
+			}
+
+			log.Debugln("Director test cycle succeeded at", time.Now().Format(time.UnixDate))
+			if err := reportStatusToOrigin(originWebUrl, "ok", "Director test cycle succeeded at "+time.Now().Format(time.RFC3339)); err != nil {
 				log.Warningln("Failed to report director test result to origin:", err)
 			}
-			continue
-		}
-
-		if err = DownloadTestfile(url, originUrl); err != nil {
-			log.Warningln("Director test cycle failed during test download:", err)
-			if err := reportStatusToOrigin(originWebUrl, "error", "Director test cycle failed during test download: "+err.Error()); err != nil {
-				log.Warningln("Failed to report director test result to origin:", err)
-			}
-			log.Warningln("Unable to cleanup after failed self-test download:", err)
-			continue
-		}
-
-		if err = DeleteTestfile(url, originUrl); err != nil {
-			log.Warningln("Director test cycle failed during test deletion:", err)
-			if err := reportStatusToOrigin(originWebUrl, "error", "Director test cycle failed during test deletion: "+err.Error()); err != nil {
-				log.Warningln("Failed to report director test result to origin:", err)
-			}
-			continue
-		}
-
-		log.Debugln("Director test cycle succeeded at", time.Now().Format(time.UnixDate))
-		if err := reportStatusToOrigin(originWebUrl, "ok", "Director test cycle succeeded at "+time.Now().Format(time.RFC3339)); err != nil {
-			log.Warningln("Failed to report director test result to origin:", err)
 		}
 	}
 }

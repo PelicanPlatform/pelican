@@ -80,6 +80,10 @@ func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		return err
 	}
 
+	// Configure Cache eviction policies. In the future, this function can also be
+	// promoted to run the actual eviction logic (cache.start())
+	director.ConfigCacheEviction()
+
 	// Configure the shortcut middleware to either redirect to a cache
 	// or to an origin
 	defaultResponse := param.Director_DefaultResponse.GetString()
