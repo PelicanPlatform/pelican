@@ -117,14 +117,14 @@ func TestInitConfig(t *testing.T) {
 	// Set prefix to OSDF to ensure that config is being set
 	testingPreferredPrefix = "OSDF"
 
-	InitConfig() // Should set up pelican.yaml, osdf.yaml and defaults.yaml
-
 	// Create a temp config file to use
 	tempCfgFile, err := os.CreateTemp("", "pelican-*.yaml")
 	viper.Set("config", tempCfgFile.Name())
 	if err != nil {
 		t.Fatalf("Failed to make temp file: %v", err)
 	}
+
+	InitConfig() // Should set up pelican.yaml, osdf.yaml and defaults.yaml
 
 	// Check if server address is correct by defaults.yaml
 	assert.True(t, param.Server_Address.GetString() == "0.0.0.0")
@@ -145,6 +145,11 @@ func TestInitConfig(t *testing.T) {
 
 	//Test if prefix is not set, should not be able to find osdfYaml configuration
 	testingPreferredPrefix = ""
+	tempCfgFile, err = os.CreateTemp("", "pelican-*.yaml")
+	viper.Set("config", tempCfgFile.Name())
+	if err != nil {
+		t.Fatalf("Failed to make temp file: %v", err)
+	}
 	InitConfig()
 	assert.True(t, param.Federation_DiscoveryUrl.GetString() == "")
 }
