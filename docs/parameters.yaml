@@ -113,7 +113,7 @@ type: string
 default: Error
 components: ["*"]
 ---
-name: Logging.File
+name: Logging.LogLocation
 description: >-
   A string defining a file to write log outputs to, if the user desires.
 type: string
