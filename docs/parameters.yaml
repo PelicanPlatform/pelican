@@ -450,8 +450,8 @@ components: ["origin"]
 name: Server.TLSCACertificateDirectory
 description: >-
   A filepath to the directory used for storing TLS certificates
-type: string
-default: /etc/pki/tls/cert.pem
+type: filename
+default: /etc/pki/tls/
 components: ["origin"]
 ---
 name: Server.TLSCAKey

@@ -19,7 +19,6 @@
 package main
 
 import (
-	"crypto/elliptic"
 	"fmt"
 	"os"
 	"os/signal"
@@ -29,17 +28,11 @@ import (
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/web_ui"
-	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
 
 func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
-	err := config.DiscoverFederation()
-	if err != nil {
-		log.Warningln("Failed to do service auto-discovery:", err)
-	}
-
 	log.Info("Initializing Director GeoIP database...")
 	director.InitializeDB()
 
@@ -53,25 +46,6 @@ func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		}
 	}
 	go director.PeriodicCacheReload()
-
-	// The director needs its own private key. If one doesn't exist, this will generate it
-	issuerKeyFile := param.IssuerKey.GetString()
-	err = config.GeneratePrivateKey(issuerKeyFile, elliptic.P256())
-	if err != nil {
-		return errors.Wrap(err, "Failed to generate director private key")
-	}
-
-	// Since director will provide a public JWK for token authentication
-	// We need to initialize public JWK and private JWK at the start
-	_, err = config.GenerateIssuerJWKS()
-	if err != nil {
-		return errors.Wrap(err, "Failed to load director's public and private jwk")
-	}
-
-	// Generate a TLS certificate if needed
-	if err := config.GenerateCert(); err != nil {
-		return err
-	}
 
 	engine, err := web_ui.GetEngine()
 	if err != nil {

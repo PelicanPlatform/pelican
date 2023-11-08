@@ -19,6 +19,7 @@
 package config
 
 import (
+	"crypto/elliptic"
 	"crypto/tls"
 	"crypto/x509"
 	_ "embed"
@@ -476,7 +477,21 @@ func InitServer() error {
 		return err
 	}
 
-	return nil
+	// As necessary, generate a private keys and corresponding certs
+	err = GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256())
+	if err != nil {
+		return err
+	}
+	err = GeneratePrivateKey(param.Server_TLSKey.GetString(), elliptic.P256())
+	if err != nil {
+		return err
+	}
+	err = GenerateCert()
+	if err != nil {
+		return err
+	}
+
+	return DiscoverFederation()
 }
 
 func InitClient() error {

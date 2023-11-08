@@ -36,7 +36,7 @@ func InitServerOSDefaults() error {
 	viper.SetDefault("Server.TLSCACertificateFile", tlscaFile)
 
 	tlscaKeyFile := filepath.Join(viper.GetString("ConfigDir"), "certificates", "tlscakey.pem")
-	viper.SetDefault("Server.TLSCACertificateFile", tlscaKeyFile)
+	viper.SetDefault("Server.TLSCAKey", tlscaKeyFile)
 
 	if err := os.MkdirAll(filepath.Dir(tlscaFile), 0755); err != nil {
 		return err
