@@ -115,8 +115,8 @@ components: ["*"]
 ---
 name: Logging.LogLocation
 description: >-
-  A string defining a file to write log outputs to, if the user desires.
-type: string
+  A filename defining a file to write log outputs to, if the user desires.
+type: filename
 default: none
 components: ["*"]
 ---
