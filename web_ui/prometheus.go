@@ -282,9 +282,25 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 		ScrapeConfigs: make([]*config.ScrapeConfig, 1),
 	}
 
+	selfScraperToken, err := CreatePromMetricToken()
+	if err != nil {
+		return fmt.Errorf("Failed to generate token for self-scraper at start: %v", err)
+	}
+
 	scrapeConfig := config.DefaultScrapeConfig
 	scrapeConfig.JobName = "prometheus"
 	scrapeConfig.Scheme = "https"
+	scraperHttpClientConfig := common_config.HTTPClientConfig{
+		TLSConfig: common_config.TLSConfig{
+			InsecureSkipVerify: true,
+		},
+		// We add token auth for scraping all origin/cache servers
+		Authorization: &common_config.Authorization{
+			Type:        "Bearer",
+			Credentials: common_config.Secret(selfScraperToken),
+		},
+	}
+	scrapeConfig.HTTPClientConfig = scraperHttpClientConfig
 	scrapeConfig.ServiceDiscoveryConfigs = make([]discovery.Config, 1)
 	scrapeConfig.ServiceDiscoveryConfigs[0] = discovery.StaticConfig{
 		&targetgroup.Group{

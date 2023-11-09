@@ -20,17 +20,19 @@ package web_ui
 import (
 	"context"
 	"crypto/ecdsa"
-	"errors"
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
+	"github.com/pelicanplatform/pelican/config"
 	pelican_config "github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pkg/errors"
 )
 
 // Creates a validator that checks if a token's scope matches the given scope: matchScope
@@ -133,4 +135,32 @@ func OriginCheck(c *gin.Context, strToken string, expectedScope string) {
 	}
 
 	c.Set("User", "Origin")
+}
+
+// Create a token for accessing Prometheus /metrics endpoint on
+// the server itself
+func CreatePromMetricToken() (string, error) {
+	serverURL := config.ComputeExternalAddress()
+
+	tok, err := jwt.NewBuilder().
+		Claim("scope", "pelican.promMetric").
+		Issuer(serverURL).
+		Audience([]string{serverURL}).
+		Subject(serverURL).
+		Expiration(time.Now().Add(time.Hour)).
+		Build()
+	if err != nil {
+		return "", err
+	}
+
+	key, err := config.GetOriginJWK()
+	if err != nil {
+		return "", errors.Wrap(err, "failed to load the director's private JWK")
+	}
+
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, key))
+	if err != nil {
+		return "", err
+	}
+	return string(signed), nil
 }
