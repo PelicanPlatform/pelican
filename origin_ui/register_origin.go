@@ -133,7 +133,7 @@ func registerNamespacePrep() (key jwk.Key, prefix string, registrationEndpointUR
 		return
 	}
 
-	key, err = config.GetOriginJWK()
+	key, err = config.GetIssuerPrivateJWK()
 	if err != nil {
 		err = errors.Wrap(err, "failed to load the origin's JWK")
 		return

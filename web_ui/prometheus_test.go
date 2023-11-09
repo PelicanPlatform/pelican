@@ -348,7 +348,7 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 
 	assert.Equal(t, 403, w.Result().StatusCode, "Expected status code of 403 due to bad token scope")
 
-	key, err := config.GetOriginJWK()
+	key, err := config.GetIssuerPrivateJWK()
 	if err != nil {
 		t.Fatal(err)
 	}

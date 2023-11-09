@@ -109,9 +109,9 @@ func FederationCheck(c *gin.Context, strToken string, expectedScope string) {
 	}
 }
 
-// Checks that the given token was signed by the origin jwk and also checks that the token has the expected scope
-func OriginCheck(c *gin.Context, strToken string, expectedScope string) {
-	bKey, err := pelican_config.GetOriginJWK()
+// Checks that the given token was signed by the issuer jwk and also checks that the token has the expected scope
+func IssuerCheck(c *gin.Context, strToken string, expectedScope string) {
+	bKey, err := pelican_config.GetIssuerPrivateJWK()
 	if err != nil {
 		return
 	}

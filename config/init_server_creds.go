@@ -399,7 +399,7 @@ func GenerateIssuerJWKS() (jwk.Set, error) {
 	return LoadPublicKey(existingJWKS, issuerKeyFile)
 }
 
-func GetOriginJWK() (jwk.Key, error) {
+func GetIssuerPrivateJWK() (jwk.Key, error) {
 	key := privateKey.Load()
 	if key == nil {
 		issuerKeyFile := param.IssuerKey.GetString()
