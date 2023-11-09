@@ -179,14 +179,29 @@ func configDirectorPromScraper() (*config.ScrapeConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse external URL https://%v: %w", pelican_config.ComputeExternalAddress(), err)
 	}
-	token, err := director.CreateDirectorSDToken()
+	sdToken, err := director.CreateDirectorSDToken()
 	if err != nil {
 		return nil, fmt.Errorf("Failed to generate token for Prometheus service discovery at start: %v", err)
+	}
+	scraperToken, err := director.CreateDirectorScrapeToken()
+	if err != nil {
+		return nil, fmt.Errorf("Failed to generate token for director scraper at start: %v", err)
 	}
 	originDiscoveryUrl.Path = "/api/v1.0/director/discoverOrigins"
 	scrapeConfig := config.DefaultScrapeConfig
 	scrapeConfig.JobName = "origins"
 	scrapeConfig.Scheme = "https"
+	scraperHttpClientConfig := common_config.HTTPClientConfig{
+		TLSConfig: common_config.TLSConfig{
+			InsecureSkipVerify: true,
+		},
+		// We add token auth for scraping all origin/cache servers
+		Authorization: &common_config.Authorization{
+			Type:        "Bearer",
+			Credentials: common_config.Secret(scraperToken),
+		},
+	}
+	scrapeConfig.HTTPClientConfig = scraperHttpClientConfig
 	scrapeConfig.ServiceDiscoveryConfigs = make([]discovery.Config, 1)
 	sdHttpClientConfig := common_config.HTTPClientConfig{
 		TLSConfig: common_config.TLSConfig{
@@ -194,7 +209,7 @@ func configDirectorPromScraper() (*config.ScrapeConfig, error) {
 		},
 		Authorization: &common_config.Authorization{
 			Type:        "Bearer",
-			Credentials: common_config.Secret(token),
+			Credentials: common_config.Secret(sdToken),
 		},
 	}
 	scrapeConfig.ServiceDiscoveryConfigs[0] = &prom_http.SDConfig{
@@ -202,11 +217,11 @@ func configDirectorPromScraper() (*config.ScrapeConfig, error) {
 		RefreshInterval:  model.Duration(15 * time.Second),
 		HTTPClientConfig: sdHttpClientConfig,
 	}
-	scrapeConfig.HTTPClientConfig = common_config.DefaultHTTPClientConfig
-	scrapeConfig.HTTPClientConfig.TLSConfig.InsecureSkipVerify = true
 	return &scrapeConfig, nil
 }
 
+// TODO: for all the HTTP clients in Prometheus, do we always want to
+// turn off TLS verify? Or do we want to read from config
 func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 	cfg := flagConfig{}
 	ListenAddress := fmt.Sprintf("0.0.0.0:%v", param.Server_Port.GetInt())

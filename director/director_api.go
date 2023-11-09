@@ -52,6 +52,23 @@ func ListNamespacesFromOrigins() []NamespaceAd {
 	return namespaces
 }
 
+// List all serverAds in the cache that matches the serverType array
+func ListServerAds(serverTypes []ServerType) []ServerAd {
+	serverAdMutex.RLock()
+	defer serverAdMutex.RUnlock()
+	ads := make([]ServerAd, 0)
+	for _, ad := range serverAds.Keys() {
+		for _, serverType := range serverTypes {
+			if ad.Type == serverType {
+				ads = append(ads, ad)
+			}
+		}
+	}
+	return ads
+}
+
+// Return director's public JWK for token verification. This function can be called
+// on any server (director/origin/registry) as long as the Federation_DirectorUrl is set
 func LoadDirectorPublicKey() (*jwk.Key, error) {
 	directorDiscoveryUrlStr := param.Federation_DirectorUrl.GetString()
 	if len(directorDiscoveryUrlStr) == 0 {
@@ -119,8 +136,11 @@ func LoadDirectorPublicKey() (*jwk.Key, error) {
 
 // Create a token for director's Prometheus instance to access
 // director's origins service discovery endpoint. This function is intended
-// to be called on a director server
+// to be called only on a director server
 func CreateDirectorSDToken() (string, error) {
+	// TODO: We might want to change this to ComputeExternalAddress() instead
+	// so that director admin don't need to specify Federation_DirectorUrl to get
+	// director working
 	directorURL := param.Federation_DirectorUrl.GetString()
 	if directorURL == "" {
 		return "", errors.New("Director URL is not known; cannot create director service discovery token")
@@ -153,6 +173,9 @@ func CreateDirectorSDToken() (string, error) {
 // correct scope for accessing the service discovery endpoint. This function
 // is intended to be called on the same director server that issues the token.
 func VerifyDirectorSDToken(strToken string) (bool, error) {
+	// TODO: We might want to change this to ComputeExternalAddress() instead
+	// so that director admin don't need to specify Federation_DirectorUrl to get
+	// director working
 	directorURL := param.Federation_DirectorUrl.GetString()
 	token, err := jwt.Parse([]byte(strToken), jwt.WithVerify(false))
 	if err != nil {
@@ -191,5 +214,117 @@ func VerifyDirectorSDToken(strToken string) (bool, error) {
 			return true, nil
 		}
 	}
+	return false, nil
+}
+
+// Create a token for director's Prometheus scraper to access discovered
+// origins /metrics endpoint. This function is intended to be called on
+// a director server
+func CreateDirectorScrapeToken() (string, error) {
+	// We assume this function is only called on a director server,
+	// the external address of which should be the director's URL
+	directorURL := config.ComputeExternalAddress()
+
+	ads := ListServerAds([]ServerType{OriginType, CacheType})
+	aud := make([]string, 0)
+	for _, ad := range ads {
+		if ad.WebURL.String() != "" {
+			aud = append(aud, ad.WebURL.String())
+		}
+	}
+
+	tok, err := jwt.NewBuilder().
+		Claim("scope", "pelican.directorScrape").
+		Issuer(directorURL).
+		// The audience of this token is all origins/caches that have WebURL set in their serverAds
+		Audience(aud).
+		Subject("director").
+		Expiration(time.Now().Add(time.Hour)).
+		Build()
+	if err != nil {
+		return "", err
+	}
+
+	key, err := config.GetOriginJWK()
+	if err != nil {
+		return "", errors.Wrap(err, "failed to load the director's private JWK")
+	}
+
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, key))
+	if err != nil {
+		return "", err
+	}
+	return string(signed), nil
+}
+
+// Verify a token from the director to access origin/caches' /metrics endpoint
+// is valid. This function is intended to be called on a origin/cache server
+func VerifyDirectorScrapeToken(strToken string, originWebUrl string) (bool, error) {
+	directorURL := param.Federation_DirectorUrl.GetString()
+	if directorURL == "" {
+		return false, errors.Errorf("Director URL is not set")
+	}
+	token, err := jwt.Parse([]byte(strToken), jwt.WithVerify(false))
+	if err != nil {
+		return false, err
+	}
+
+	if directorURL != token.Issuer() {
+		return false, errors.Errorf("Token issuer is not a director")
+	}
+
+	key, err := LoadDirectorPublicKey()
+	if err != nil {
+		return false, err
+	}
+	tok, err := jwt.Parse([]byte(strToken), jwt.WithKey(jwa.ES256, &key), jwt.WithValidate(true))
+	if err != nil {
+		return false, err
+	}
+
+	// Validate the token has correct scope
+	scope_any, present := tok.Get("scope")
+	if !present {
+		return false, errors.New("No scope is present; required to scrape the origin")
+	}
+	scope, ok := scope_any.(string)
+	if !ok {
+		return false, errors.New("scope claim in token is not string-valued")
+	}
+
+	scopes := strings.Split(scope, " ")
+
+	// hasCorrectScope := false
+
+	for _, scope := range scopes {
+		if scope == "pelican.directorScrape" {
+			return true, nil
+		}
+	}
+
+	// if !hasCorrectScope {
+	// 	return false, nil
+	// }
+
+	// // Validate this origin is one of the audience in the token
+	// audience_any, present := tok.Get(jwt.AudienceKey)
+	// if !present {
+	// 	return false, errors.New("No audience is present; required to scrape the origin")
+	// }
+	// audiences, ok := audience_any.([]string)
+	// if !ok {
+	// 	audStr, ok := audience_any.(string)
+	// 	if !ok {
+	// 		return false, errors.New("Audience claim in token is neither array of strings or a string")
+	// 	}
+	// 	audiences = []string{audStr}
+	// }
+
+	// for _, aud := range audiences {
+	// 	if aud == originWebUrl {
+	// 		return true, nil
+	// 	}
+	// }
+
 	return false, nil
 }
