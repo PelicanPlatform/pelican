@@ -470,6 +470,13 @@ func InitServer() error {
 
 	setupTransport()
 
+	tokenRefreshInterval := param.Monitoring_TokenRefreshInterval.GetDuration()
+	tokenExpiresIn := param.Monitoring_TokenExpiresIn.GetDuration()
+
+	if tokenExpiresIn == 0 || tokenRefreshInterval == 0 || tokenRefreshInterval > tokenExpiresIn {
+		return errors.New("Invalida Monitoring.TokenRefreshInterval or Monitoring.TokenExpiresIn. Must be non-zero value and valid time must be greater than the refresh interval")
+	}
+
 	// Unmarshal Viper config into a Go struct
 	err = param.UnmarshalConfig()
 	if err != nil {

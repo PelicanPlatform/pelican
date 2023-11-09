@@ -701,6 +701,27 @@ type: int
 default: 9999
 components: ["origin"]
 ---
+name: Monitoring.TokenExpiresIn
+description: >-
+  The duration of which the tokens for various Prometheus endpoints expire.
+
+  This includes tokens for director's Prometheus origin discovery endpoint, 
+  director's origin scraper, and server's self-scraper
+type: duration
+default: 1h
+components: ["origin", "director", "nsregistry"]
+---
+name: Monitoring.TokenRefreshInterval
+description: >-
+  The interval of which the token issuer for various Prometheus endpoints
+  refreshes the token for monitoring. 
+  
+  The tokens that are affected by this config are the same as the one in Monitoring.TokenExpiresIn.
+  This value must be less than Monitoring.TokenExpiresIn.
+type: duration
+default: 59m
+components: ["origin", "director", "nsregistry"]
+---
 
 ############################
 #   Plugin-level configs   #

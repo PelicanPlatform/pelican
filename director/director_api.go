@@ -145,13 +145,14 @@ func CreateDirectorSDToken() (string, error) {
 	if directorURL == "" {
 		return "", errors.New("Director URL is not known; cannot create director service discovery token")
 	}
+	tokenExpireTime := param.Monitoring_TokenExpiresIn.GetDuration()
 
 	tok, err := jwt.NewBuilder().
 		Claim("scope", "pelican.directorSD").
 		Issuer(directorURL).
 		Audience([]string{directorURL}).
 		Subject("director").
-		Expiration(time.Now().Add(time.Hour)).
+		Expiration(time.Now().Add(tokenExpireTime)).
 		Build()
 	if err != nil {
 		return "", err
@@ -224,6 +225,7 @@ func CreateDirectorScrapeToken() (string, error) {
 	// We assume this function is only called on a director server,
 	// the external address of which should be the director's URL
 	directorURL := config.ComputeExternalAddress()
+	tokenExpireTime := param.Monitoring_TokenExpiresIn.GetDuration()
 
 	ads := ListServerAds([]ServerType{OriginType, CacheType})
 	aud := make([]string, 0)
@@ -239,7 +241,7 @@ func CreateDirectorScrapeToken() (string, error) {
 		// The audience of this token is all origins/caches that have WebURL set in their serverAds
 		Audience(aud).
 		Subject("director").
-		Expiration(time.Now().Add(time.Hour)).
+		Expiration(time.Now().Add(tokenExpireTime)).
 		Build()
 	if err != nil {
 		return "", err

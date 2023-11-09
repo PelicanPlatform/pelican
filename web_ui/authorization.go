@@ -142,12 +142,14 @@ func OriginCheck(c *gin.Context, strToken string, expectedScope string) {
 func CreatePromMetricToken() (string, error) {
 	serverURL := config.ComputeExternalAddress()
 
+	tokenExpireTime := param.Monitoring_TokenExpiresIn.GetDuration()
+
 	tok, err := jwt.NewBuilder().
 		Claim("scope", "pelican.promMetric").
 		Issuer(serverURL).
 		Audience([]string{serverURL}).
 		Subject(serverURL).
-		Expiration(time.Now().Add(time.Hour)).
+		Expiration(time.Now().Add(tokenExpireTime)).
 		Build()
 	if err != nil {
 		return "", err

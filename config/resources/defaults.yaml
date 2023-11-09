@@ -32,6 +32,8 @@ Origin:
 Monitoring:
   PortLower: 9930
   PortHigher: 9999
+  TokenExpiresIn: 1h
+  TokenRefreshInterval: 59m
 Xrootd:
   Port: 8443
   Mount: ""

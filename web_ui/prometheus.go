@@ -576,9 +576,8 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 		cancel := make(chan struct{})
 		g.Add(
 			func() error {
-				// Coordinate exact refresh time with the token life time at
-				// director/director_api.go CreateDirectorSDToken()
-				ticker := time.NewTicker(50 * time.Minute)
+				refreshInterval := param.Monitoring_TokenRefreshInterval.GetDuration()
+				ticker := time.NewTicker(refreshInterval)
 				for {
 					select {
 					case <-cancel:
