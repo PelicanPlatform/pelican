@@ -557,6 +557,8 @@ Loop:
 				} else if time.Since(noProgressStartTime) > time.Duration(stoppedTransferTimeout)*time.Second {
 					errMsg := "No progress for more than " + time.Since(noProgressStartTime).Truncate(time.Millisecond).String()
 					log.Errorln(errMsg)
+					progressBar.Abort(true)
+					progressBar.Wait()
 					return 5, &StoppedTransferError{
 						Err: errMsg,
 					}
@@ -611,10 +613,13 @@ Loop:
 				downloadError := resp.Err()
 				if downloadError != nil {
 					log.Errorln(downloadError.Error())
+					progressBar.Abort(true)
+					progressBar.Wait()
+				} else {
+					progressBar.SetTotal(contentLength, true)
+					// call wait here for the bar to complete and flush
+					p.Wait()
 				}
-				progressBar.SetTotal(contentLength, true)
-				// call wait here for the bar to complete and flush
-				p.Wait()
 			}
 			break Loop
 		}
