@@ -161,10 +161,7 @@ func GenerateCACert() error {
 	if err != nil {
 		return err
 	}
-	hostname, err := os.Hostname()
-	if err != nil {
-		return err
-	}
+	hostname := param.Server_Hostname.GetString()
 	notBefore := time.Now()
 	template := x509.Certificate{
 		SerialNumber: serialNumber,
@@ -278,10 +275,7 @@ func GenerateCert() error {
 	if err != nil {
 		return err
 	}
-	hostname, err := os.Hostname()
-	if err != nil {
-		return err
-	}
+	hostname := param.Server_Hostname.GetString()
 	notBefore := time.Now()
 	template := x509.Certificate{
 		SerialNumber: serialNumber,
