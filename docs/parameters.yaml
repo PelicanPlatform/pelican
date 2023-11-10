@@ -451,7 +451,7 @@ name: Server.TLSCACertificateDirectory
 description: >-
   A filepath to the directory used for storing TLS certificates
 type: filename
-default: /etc/pki/tls/
+default: none
 components: ["origin"]
 ---
 name: Server.TLSCAKey
