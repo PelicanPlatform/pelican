@@ -469,16 +469,15 @@ func InitServer() error {
 		viper.SetDefault("Origin.Url", fmt.Sprintf("https://%v", param.Server_Hostname.GetString()))
 	}
 
-	setupTransport()
-
 	// Unmarshal Viper config into a Go struct
 	err = param.UnmarshalConfig()
 	if err != nil {
 		return err
 	}
 
-	// As necessary, generate a private keys and corresponding certs
-	err = GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256())
+	// As necessary, generate a private keys, JWKS and corresponding certs
+	// Note: GenerateIssuerJWKS will also generate a private key in the location stored by the viper var "IssuerKey"
+	_, err = GenerateIssuerJWKS()
 	if err != nil {
 		return err
 	}
@@ -491,6 +490,8 @@ func InitServer() error {
 		return err
 	}
 
+	// After we know we have the certs we need, call setupTransport (which uses those certs for its TLSConfig)
+	setupTransport()
 	return DiscoverFederation()
 }
 
