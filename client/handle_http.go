@@ -557,8 +557,10 @@ Loop:
 				} else if time.Since(noProgressStartTime) > time.Duration(stoppedTransferTimeout)*time.Second {
 					errMsg := "No progress for more than " + time.Since(noProgressStartTime).Truncate(time.Millisecond).String()
 					log.Errorln(errMsg)
-					progressBar.Abort(true)
-					progressBar.Wait()
+					if ObjectClientOptions.ProgressBars {
+						progressBar.Abort(true)
+						progressBar.Wait()
+					}
 					return 5, &StoppedTransferError{
 						Err: errMsg,
 					}
