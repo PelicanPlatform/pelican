@@ -133,6 +133,10 @@ func GenerateCACert() error {
 	if err != nil {
 		return err
 	}
+	user, err := GetDaemonUser()
+	if err != nil {
+		return err
+	}
 
 	tlsCert := param.Server_TLSCACertificateFile.GetString()
 	if file, err := os.Open(tlsCert); err == nil {
@@ -189,9 +193,21 @@ func GenerateCACert() error {
 		return err
 	}
 	defer file.Close()
-	if err = os.Chown(tlsCert, -1, gid); err != nil {
-		return errors.Wrapf(err, "Failed to chown generated certificate %v to daemon group %v",
+
+	// Windows does not have "chown", has to work differently
+	currentOS := runtime.GOOS
+	if currentOS == "windows" {
+		cmd := exec.Command("icacls", tlsCert, "/grant", user+":F")
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return errors.Wrapf(err, "Failed to chown generated key %v to daemon group %v: %s",
+				tlsCert, groupname, string(output))
+		}
+	} else { // Else we are running on linux/mac
+		if err = os.Chown(tlsCert, -1, gid); err != nil {
+			return errors.Wrapf(err, "Failed to chown generated key %v to daemon group %v",
 			tlsCert, groupname)
+		}
 	}
 
 	if err = pem.Encode(file, &pem.Block{Type: "CERTIFICATE", Bytes: derBytes}); err != nil {
@@ -233,6 +249,10 @@ func GenerateCert() error {
 		return err
 	}
 	groupname, err := GetDaemonGroup()
+	if err != nil {
+		return err
+	}
+	user, err := GetDaemonUser()
 	if err != nil {
 		return err
 	}
@@ -315,9 +335,21 @@ func GenerateCert() error {
 		return err
 	}
 	defer file.Close()
-	if err = os.Chown(tlsCert, -1, gid); err != nil {
-		return errors.Wrapf(err, "Failed to chown generated certificate %v to daemon group %v",
+
+	// Windows does not have "chown", has to work differently
+	currentOS := runtime.GOOS
+	if currentOS == "windows" {
+		cmd := exec.Command("icacls", tlsCert, "/grant", user+":F")
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return errors.Wrapf(err, "Failed to chown generated key %v to daemon group %v: %s",
+				tlsCert, groupname, string(output))
+		}
+	} else { // Else we are running on linux/mac
+		if err = os.Chown(tlsCert, -1, gid); err != nil {
+			return errors.Wrapf(err, "Failed to chown generated key %v to daemon group %v",
 			tlsCert, groupname)
+		}
 	}
 
 	if err = pem.Encode(file, &pem.Block{Type: "CERTIFICATE", Bytes: derBytes}); err != nil {
