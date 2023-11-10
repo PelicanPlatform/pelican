@@ -206,7 +206,7 @@ func GenerateCACert() error {
 	} else { // Else we are running on linux/mac
 		if err = os.Chown(tlsCert, -1, gid); err != nil {
 			return errors.Wrapf(err, "Failed to chown generated key %v to daemon group %v",
-			tlsCert, groupname)
+				tlsCert, groupname)
 		}
 	}
 
@@ -348,7 +348,7 @@ func GenerateCert() error {
 	} else { // Else we are running on linux/mac
 		if err = os.Chown(tlsCert, -1, gid); err != nil {
 			return errors.Wrapf(err, "Failed to chown generated key %v to daemon group %v",
-			tlsCert, groupname)
+				tlsCert, groupname)
 		}
 	}
 
