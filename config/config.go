@@ -19,6 +19,7 @@
 package config
 
 import (
+	"crypto/elliptic"
 	"crypto/tls"
 	"crypto/x509"
 	_ "embed"
@@ -468,15 +469,30 @@ func InitServer() error {
 		viper.SetDefault("Origin.Url", fmt.Sprintf("https://%v", param.Server_Hostname.GetString()))
 	}
 
-	setupTransport()
-
 	// Unmarshal Viper config into a Go struct
 	err = param.UnmarshalConfig()
 	if err != nil {
 		return err
 	}
 
-	return nil
+	// As necessary, generate a private keys, JWKS and corresponding certs
+	// Note: GenerateIssuerJWKS will also generate a private key in the location stored by the viper var "IssuerKey"
+	_, err = GenerateIssuerJWKS()
+	if err != nil {
+		return err
+	}
+	err = GeneratePrivateKey(param.Server_TLSKey.GetString(), elliptic.P256())
+	if err != nil {
+		return err
+	}
+	err = GenerateCert()
+	if err != nil {
+		return err
+	}
+
+	// After we know we have the certs we need, call setupTransport (which uses those certs for its TLSConfig)
+	setupTransport()
+	return DiscoverFederation()
 }
 
 func InitClient() error {

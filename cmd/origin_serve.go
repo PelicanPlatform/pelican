@@ -22,7 +22,6 @@ package main
 
 import (
 	"context"
-	"crypto/elliptic"
 	_ "embed"
 	"fmt"
 	"net/url"
@@ -70,14 +69,6 @@ func checkDefaults(origin bool, nsAds []director.NamespaceAd) error {
 		metrics.DeleteComponentHealthStatus("cmsd")
 	} else {
 		viper.SetDefault("Origin.EnableCmsd", true)
-	}
-
-	// As necessary, generate a private key and corresponding cert
-	if err := config.GeneratePrivateKey(param.Server_TLSKey.GetString(), elliptic.P256()); err != nil {
-		return err
-	}
-	if err := config.GenerateCert(); err != nil {
-		return err
 	}
 
 	// TODO: Could upgrade this to a check for a cert in the file...
@@ -130,12 +121,7 @@ func webUiInitialize() {
 func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	defer config.CleanupTempResources()
 
-	err := config.DiscoverFederation()
-	if err != nil {
-		log.Warningln("Failed to do service auto-discovery:", err)
-	}
-
-	err = xrootd.SetUpMonitoring()
+	err := xrootd.SetUpMonitoring()
 	if err != nil {
 		return err
 	}
