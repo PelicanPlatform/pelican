@@ -124,6 +124,9 @@ func LoadPublicKey(existingJWKS string, issuerKeyFile string) (jwk.Set, error) {
 	return jwks, nil
 }
 
+// Explicity generate a Certificate Authority (CA) certificate and its private key
+// for non-production environment so that we can use the private key of our CA
+// to sign the host certificate
 func GenerateCACert() error {
 	gid, err := GetDaemonGID()
 	if err != nil {
@@ -138,23 +141,25 @@ func GenerateCACert() error {
 		return err
 	}
 
-	tlsCert := param.Server_TLSCACertificateFile.GetString()
-	if file, err := os.Open(tlsCert); err == nil {
+	tlsCACert := param.Server_TLSCACertificateFile.GetString()
+	if file, err := os.Open(tlsCACert); err == nil {
 		file.Close()
 		return nil
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
+		return errors.Wrap(err, "Failed to load TLS CA certificate due to I/O error")
 	}
-	certDir := filepath.Dir(tlsCert)
-	if err := MkdirAll(certDir, 0755, -1, gid); err != nil {
+
+	// No existing CA cert present, generate a new CA root certificate and private key
+	tlsCertDir := filepath.Dir(tlsCACert)
+	if err := MkdirAll(tlsCertDir, 0755, -1, gid); err != nil {
 		return err
 	}
 
-	tlsKey := param.Server_TLSCAKey.GetString()
-	if err := GeneratePrivateKey(tlsKey, elliptic.P256()); err != nil {
+	tlsCAKey := param.Server_TLSCAKey.GetString()
+	if err := GeneratePrivateKey(tlsCAKey, elliptic.P256()); err != nil {
 		return err
 	}
-	privateKey, err := LoadPrivateKey(tlsKey)
+	privateKey, err := LoadPrivateKey(tlsCAKey)
 	if err != nil {
 		return err
 	}
@@ -185,7 +190,7 @@ func GenerateCACert() error {
 	if err != nil {
 		return err
 	}
-	file, err := os.OpenFile(tlsCert, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0640)
+	file, err := os.OpenFile(tlsCACert, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0640)
 	if err != nil {
 		return err
 	}
@@ -194,16 +199,16 @@ func GenerateCACert() error {
 	// Windows does not have "chown", has to work differently
 	currentOS := runtime.GOOS
 	if currentOS == "windows" {
-		cmd := exec.Command("icacls", tlsCert, "/grant", user+":F")
+		cmd := exec.Command("icacls", tlsCACert, "/grant", user+":F")
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			return errors.Wrapf(err, "Failed to chown generated key %v to daemon group %v: %s",
-				tlsCert, groupname, string(output))
+				tlsCACert, groupname, string(output))
 		}
 	} else { // Else we are running on linux/mac
-		if err = os.Chown(tlsCert, -1, gid); err != nil {
+		if err = os.Chown(tlsCACert, -1, gid); err != nil {
 			return errors.Wrapf(err, "Failed to chown generated key %v to daemon group %v",
-				tlsCert, groupname)
+				tlsCACert, groupname)
 		}
 	}
 
@@ -240,6 +245,8 @@ func LoadCertficate(certFile string) (*x509.Certificate, error) {
 	return cert, nil
 }
 
+// Generate TLS certificate (host certificate) for non-production environment
+// where Server_TLSCertificate is not explicity set
 func GenerateCert() error {
 	gid, err := GetDaemonGID()
 	if err != nil {
@@ -259,10 +266,11 @@ func GenerateCert() error {
 		file.Close()
 		return nil
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
+		return errors.Wrap(err, "Failed to load TLS certificate due to I/O error")
 	}
 
 	// In this case, no host certificate exists - we should generate our own.
+
 	if err := GenerateCACert(); err != nil {
 		return err
 	}
@@ -271,19 +279,23 @@ func GenerateCert() error {
 		return err
 	}
 
-	certDir := filepath.Dir(tlsCert)
-	if err := MkdirAll(certDir, 0755, -1, gid); err != nil {
+	tlsCertDir := filepath.Dir(tlsCert)
+	if err := MkdirAll(tlsCertDir, 0755, -1, gid); err != nil {
 		return err
 	}
 
 	tlsKey := param.Server_TLSKey.GetString()
+
+	// In case we didn't generate TLS private key
+	if err := GeneratePrivateKey(tlsKey, elliptic.P256()); err != nil {
+		return err
+	}
 	privateKey, err := LoadPrivateKey(tlsKey)
 	if err != nil {
 		return err
 	}
 
-	// Note: LoadPrivateKey will return nil for the private key if the file
-	// doesn't exist.  In that case, we'll do a self-signed certificate
+	// The private key of CA will always be present
 	caPrivateKey, err := LoadPrivateKey(param.Server_TLSCAKey.GetString())
 	if err != nil {
 		return err
@@ -314,10 +326,6 @@ func GenerateCert() error {
 	// If there's pre-existing CA certificates, self-sign instead of using the generated CA
 	signingCert := caCert
 	signingKey := caPrivateKey
-	if signingKey == nil {
-		signingCert = &template
-		signingKey = privateKey
-	}
 
 	derBytes, err := x509.CreateCertificate(rand.Reader, &template, signingCert, &(privateKey.PublicKey),
 		signingKey)
