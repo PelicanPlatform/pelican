@@ -433,7 +433,7 @@ components: ["nsregistry"]
 ############################
 name: Server.TLSCertificate
 description: >-
-  The name of a file containing an X.509 host certificate to use for TLS
+  A filepath to a file containing an X.509 host certificate to use for TLS
   authentication when running server components of Pelican.
 type: filename
 root_default: /etc/pelican/certificates/tls.crt
@@ -442,17 +442,23 @@ components: ["origin", "nsregistry", "director"]
 ---
 name: Server.TLSCACertificateFile
 description: >-
-  A filepath for a TLS certificate to be used by XRootD.
-type: string
-default: /etc/pki/tls/cert.pem
-components: ["origin"]
+  A filepath to the TLS Certificate Authority (CA) certificate file, to be used by XRootD 
+  and internal HTTP client requests.
+type: filename
+root_default: /etc/pelican/certificates/tlsca.pem
+default: "$ConfigBase/certificates/tlsca.pem"
+components: ["origin", "nsregistry", "director"]
 ---
 name: Server.TLSCACertificateDirectory
 description: >-
-  A filepath to the directory used for storing TLS certificates
-type: filename
+  A filepath to the directory used for storing TLS Certificate Authority (CA) certificate 
+  to be used by XRootD only.
+
+  This is exclusive with Server.TLSCACertificateFile for XRootD and this value takes priority
+  over Server.TLSCACertificateFile
+type: string
 default: none
-components: ["origin"]
+components: ["origin", "nsregistry", "director"]
 ---
 name: Server.TLSCAKey
 description: >-
