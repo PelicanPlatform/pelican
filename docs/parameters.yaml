@@ -450,8 +450,8 @@ components: ["origin"]
 name: Server.TLSCACertificateDirectory
 description: >-
   A filepath to the directory used for storing TLS certificates
-type: string
-default: /etc/pki/tls/cert.pem
+type: filename
+default: none
 components: ["origin"]
 ---
 name: Server.TLSCAKey
@@ -495,8 +495,8 @@ components: ["origin", "director", "nsregistry"]
 ---
 name: Server.Hostname
 description: >-
-  The server's hostname
-type: url
+  The server's hostname, by default it's os.Hostname().
+type: string
 default: none
 components: ["origin", "director", "nsregistry"]
 ---

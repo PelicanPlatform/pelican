@@ -69,7 +69,7 @@ func TestRegistration(t *testing.T) {
 	// Ensure we have a issuer key
 	_, err = config.LoadPublicKey("", ikey)
 	require.NoError(t, err)
-	privKey, err := config.GetOriginJWK()
+	privKey, err := config.GetIssuerPrivateJWK()
 	require.NoError(t, err)
 	key, err := privKey.PublicKey()
 	require.NoError(t, err)

@@ -371,7 +371,7 @@ func TestDiscoverOrigins(t *testing.T) {
 	_, err := config.LoadPublicKey("", kfile)
 	assert.NoError(t, err, "Error generating private key")
 	// Get private key
-	privateKey, err := config.GetOriginJWK()
+	privateKey, err := config.GetIssuerPrivateJWK()
 	assert.NoError(t, err, "Error loading private key")
 
 	// Batch set up different tokens

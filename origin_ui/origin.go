@@ -175,7 +175,7 @@ func configureAuthDB() error {
 }
 
 func setLoginCookie(ctx *gin.Context, user string) {
-	key, err := config.GetOriginJWK()
+	key, err := config.GetIssuerPrivateJWK()
 	if err != nil {
 		log.Errorln("Failure when loading the cookie signing key:", err)
 		ctx.JSON(500, gin.H{"error": "Unable to create login cookies"})
@@ -223,7 +223,7 @@ func getUser(ctx *gin.Context) (string, error) {
 	if err != nil {
 		return "", nil
 	}
-	key, err := config.GetOriginJWK()
+	key, err := config.GetIssuerPrivateJWK()
 	if err != nil {
 		return "", err
 	}

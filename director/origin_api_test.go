@@ -63,7 +63,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 	assert.Equal(t, true, ok, "Expected scope to be 'pelican.advertise'")
 
 	//Create token without a scope - should return an error
-	key, err := config.GetOriginJWK()
+	key, err := config.GetIssuerPrivateJWK()
 	err = jwk.AssignKeyID(key)
 	assert.NoError(t, err)
 

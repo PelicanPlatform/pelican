@@ -32,7 +32,7 @@ var (
 	directorCmd = &cobra.Command{
 		Use: "director",
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			err := config.InitServer()
+			err := initDirector()
 			return err
 		},
 		Short: "Launch a Pelican Director",
@@ -68,6 +68,13 @@ func getDirectorEndpoint() (string, error) {
 
 	// Return the string, as opposed to a pointer to the URL object
 	return directorEndpointURL.String(), nil
+}
+
+func initDirector() error {
+	err := config.InitServer()
+	cobra.CheckErr(err)
+
+	return err
 }
 
 func init() {

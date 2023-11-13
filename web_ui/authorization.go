@@ -136,8 +136,9 @@ func FederationCheck(c *gin.Context, strToken string, anyOfTheScopes []string) e
 	return nil
 }
 
-// Checks that the given token was signed by the origin jwk and also checks that the token has the expected scope
-func OriginCheck(c *gin.Context, strToken string, anyOfTheScopes []string) error {
+// Checks that the given token was signed by the issuer jwk (the one from the server itself) and also checks that
+// the token has the expected scope
+func IssuerCheck(c *gin.Context, strToken string, anyOfTheScopes []string) error {
 	token, err := jwt.Parse([]byte(strToken), jwt.WithVerify(false))
 	if err != nil {
 		return errors.Wrap(err, "Invalid JWT")
@@ -155,7 +156,7 @@ func OriginCheck(c *gin.Context, strToken string, anyOfTheScopes []string) error
 		}
 	}
 
-	bKey, err := pelican_config.GetOriginJWK()
+	bKey, err := pelican_config.GetIssuerPrivateJWK()
 	if err != nil {
 		return errors.Wrap(err, "Failed to load issuer server's private key")
 	}
@@ -231,7 +232,7 @@ func CreatePromMetricToken() (string, error) {
 		return "", err
 	}
 
-	key, err := config.GetOriginJWK()
+	key, err := config.GetIssuerPrivateJWK()
 	if err != nil {
 		return "", errors.Wrap(err, "failed to load the director's private JWK")
 	}
@@ -264,7 +265,7 @@ func checkAPIToken(ctx *gin.Context, anyScopes []string) bool {
 		log.Info("Federation Check succeed")
 		return exists
 	}
-	err = OriginCheck(ctx, strToken, anyScopes)
+	err = IssuerCheck(ctx, strToken, anyScopes)
 	if _, exists := ctx.Get("User"); err != nil || !exists {
 		log.Info("Issuer Check failed; continue to director check: ", err)
 	} else {
@@ -281,7 +282,7 @@ func checkAPIToken(ctx *gin.Context, anyScopes []string) bool {
 
 	strToken, err = ctx.Cookie("login")
 	if err == nil {
-		OriginCheck(ctx, strToken, anyScopes)
+		IssuerCheck(ctx, strToken, anyScopes)
 	} else {
 		log.Info("Cookie token issuer check failed: ", err)
 	}
