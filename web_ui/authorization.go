@@ -41,7 +41,7 @@ import (
 // Return if desiredScopes contains the tokenScope and it's case-insensitive
 func scopeContains(tokenScope string, desiredScopes []string) bool {
 	for _, sc := range desiredScopes {
-		if strings.ToLower(sc) == strings.ToLower(tokenScope) {
+		if strings.EqualFold(sc, tokenScope) {
 			return true
 		}
 	}
@@ -90,7 +90,7 @@ func FederationCheck(c *gin.Context, strToken string, anyOfTheScopes []string) e
 	}
 
 	if fedURL != token.Issuer() {
-		return errors.New("Issuer is not a federation")
+		return errors.New(fmt.Sprint("Issuer is not a federation: ", token.Issuer()))
 	}
 
 	err = pelican_config.DiscoverFederation()
@@ -152,7 +152,7 @@ func IssuerCheck(c *gin.Context, strToken string, anyOfTheScopes []string) error
 		if param.Origin_Url.GetString() == token.Issuer() {
 			return errors.New(fmt.Sprint("Wrong issuer; expect the issuer to be the server's web address but got Origin.URL, " + token.Issuer()))
 		} else {
-			return errors.New("Issuer is not server itself")
+			return errors.New(fmt.Sprint("Issuer is not server itself: ", token.Issuer()))
 		}
 	}
 
@@ -193,14 +193,14 @@ func DirectorCheck(c *gin.Context, strToken string, anyOfTheScopes []string) err
 	}
 
 	if directorURL != token.Issuer() {
-		return errors.New("Issuer is not a director")
+		return errors.New(fmt.Sprint("Issuer is not a director: ", token.Issuer()))
 	}
 
 	key, err := director.LoadDirectorPublicKey()
 	if err != nil {
 		return errors.Wrap(err, "Failed to load director's public JWK")
 	}
-	tok, err := jwt.Parse([]byte(strToken), jwt.WithKey(jwa.ES256, &key), jwt.WithValidate(true))
+	tok, err := jwt.Parse([]byte(strToken), jwt.WithKey(jwa.ES256, key), jwt.WithValidate(true))
 	if err != nil {
 		return errors.Wrap(err, "Failed to verify JWT by director's key")
 	}
@@ -276,7 +276,7 @@ func checkAPIToken(ctx *gin.Context, anyScopes []string) bool {
 	if _, exists := ctx.Get("User"); err != nil || !exists {
 		log.Info("Director Check failed; continue to see if token is for user login: ", err)
 	} else {
-		log.Info("Director Check failed")
+		log.Info("Director Check succeed")
 		return exists
 	}
 
