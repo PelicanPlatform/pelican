@@ -247,7 +247,7 @@ func CreateDirectorScrapeToken() (string, error) {
 		return "", err
 	}
 
-	key, err := config.GetOriginJWK()
+	key, err := config.GenerateIssuerJWKS()
 	if err != nil {
 		return "", errors.Wrap(err, "failed to load the director's private JWK")
 	}
