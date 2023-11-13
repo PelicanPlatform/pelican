@@ -282,9 +282,11 @@ func checkAPIToken(ctx *gin.Context, anyScopes []string) bool {
 
 	strToken, err = ctx.Cookie("login")
 	if err == nil {
-		IssuerCheck(ctx, strToken, anyScopes)
+		if err = IssuerCheck(ctx, strToken, anyScopes); err != nil {
+			log.Info("Issuer check from cookie's token failed: ", err)
+		}
 	} else {
-		log.Info("Cookie token issuer check failed: ", err)
+		log.Info("Issuer check from cookie's token failed: ", err)
 	}
 
 	// It will only check if the token is valid and set this context key-pair.
