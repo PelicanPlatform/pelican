@@ -315,16 +315,3 @@ func promMetricAuthHandler(ctx *gin.Context) {
 	// We don't care about other routes for this handler
 	ctx.Next()
 }
-
-// Handles generic authentication to the internal API endpoints as well as
-// Web APIs as a middleware that doesn't require any scope for the token
-func webAPIAuthHandler(ctx *gin.Context) {
-	// We don't check scopes for now for web APIs, which as of 11/2023 are only
-	// /api/v1.0/health and /api/v1.0/config
-	valid := checkAPIToken(ctx, []string{})
-	if !valid {
-		ctx.AbortWithStatusJSON(401, gin.H{"error": "Authentication required to access this endpoint."})
-	}
-	// Valid request, pass to the next handler
-	ctx.Next()
-}
