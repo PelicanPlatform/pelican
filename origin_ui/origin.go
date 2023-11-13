@@ -184,7 +184,7 @@ func setLoginCookie(ctx *gin.Context, user string) {
 
 	issuerURL := url.URL{}
 	issuerURL.Scheme = "https"
-	issuerURL.Host = ctx.Request.URL.Host
+	issuerURL.Host = config.ComputeExternalAddress()
 	now := time.Now()
 	tok, err := jwt.NewBuilder().
 		// TODO: We might want to come up with some names broader than this for a
@@ -214,6 +214,9 @@ func setLoginCookie(ctx *gin.Context, user string) {
 	}
 
 	ctx.SetCookie("login", string(signed), 30*60, "/api/v1.0",
+		ctx.Request.URL.Host, true, true)
+	// Explicitly set Cookie for /metrics endpoint as they are in different paths
+	ctx.SetCookie("login", string(signed), 30*60, "/metrics",
 		ctx.Request.URL.Host, true, true)
 	ctx.SetSameSite(http.SameSiteStrictMode)
 }

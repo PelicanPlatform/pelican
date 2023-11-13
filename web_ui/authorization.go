@@ -251,6 +251,7 @@ func CreatePromMetricToken() (string, error) {
 // For token scopes, it checks if the token has ANY of the scopes provided in anyScopes
 func checkAPIToken(ctx *gin.Context, anyScopes []string) bool {
 	strToken := ""
+	errMsg := ""
 
 	if authzQuery := ctx.Request.URL.Query()["authz"]; len(authzQuery) > 0 {
 		strToken = authzQuery[0]
@@ -260,40 +261,45 @@ func checkAPIToken(ctx *gin.Context, anyScopes []string) bool {
 
 	err := FederationCheck(ctx, strToken, anyScopes)
 	if _, exists := ctx.Get("User"); err != nil || !exists {
-		log.Info("Federation Check failed; continue to issuer check: ", err)
+		errMsg += fmt.Sprintln("Federation Check failed; continue to issuer check: ", err)
+		log.Debug("Federation Check failed; continue to issuer check: ", err)
 	} else {
-		log.Info("Federation Check succeed")
+		log.Debug("Federation Check succeed")
 		return exists
 	}
 	err = IssuerCheck(ctx, strToken, anyScopes)
 	if _, exists := ctx.Get("User"); err != nil || !exists {
-		log.Info("Issuer Check failed; continue to director check: ", err)
+		errMsg += fmt.Sprintln("Issuer Check failed; continue to director check: ", err)
+		log.Debug("Issuer Check failed; continue to director check: ", err)
 	} else {
-		log.Info("Issuer Check succeed")
+		log.Debug("Issuer Check succeed")
 		return exists
 	}
 	err = DirectorCheck(ctx, strToken, anyScopes)
 	if _, exists := ctx.Get("User"); err != nil || !exists {
-		log.Info("Director Check failed; continue to see if token is for user login: ", err)
+		errMsg += fmt.Sprintln("Director Check failed; continue to see if token is for user login: ", err)
+		log.Debug("Director Check failed; continue to see if token is for user login: ", err)
 	} else {
-		log.Info("Director Check succeed")
+		log.Debug("Director Check succeed")
 		return exists
 	}
 
 	strToken, err = ctx.Cookie("login")
 	if err == nil {
 		if err = IssuerCheck(ctx, strToken, anyScopes); err != nil {
-			log.Info("Issuer check from cookie's token failed: ", err)
+			errMsg += fmt.Sprintln("Issuer check from cookie's token failed: ", err)
+			log.Debug("Issuer check from cookie's token failed: ", err)
 		}
 	} else {
-		log.Info("Issuer check from cookie's token failed: ", err)
+		errMsg += fmt.Sprintln("No cookie present for token: ", err)
+		log.Debug("No cookie present for token: ", err)
 	}
 
 	// It will only check if the token is valid and set this context key-pair.
 	// Futher steps requried to finish the auth process (i.e. return 401)
 	_, exists := ctx.Get("User")
 	if !exists {
-		log.Info("Authentication failed. Didn't pass chain of checking.")
+		log.Info("Authentication failed. Didn't pass chain of checking:\n", errMsg)
 	}
 	return exists
 }
@@ -307,8 +313,9 @@ func promMetricAuthHandler(ctx *gin.Context) {
 			ctx.Next()
 			return
 		}
-		// For /metrics endpoint, auth is granted if the request is from either director or the server itself
-		valid := checkAPIToken(ctx, []string{"pelican.directorScrape", "pelican.promMetric"})
+		// For /metrics endpoint, auth is granted if the request is from either
+		// 1.director scraper 2.server scraper 3.authenticated user (through web)
+		valid := checkAPIToken(ctx, []string{"pelican.directorScrape", "pelican.promMetric", "prometheus.read"})
 		if !valid {
 			ctx.AbortWithStatusJSON(403, gin.H{"error": "Authentication required to access this endpoint."})
 		}
