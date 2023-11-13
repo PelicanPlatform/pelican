@@ -175,7 +175,9 @@ func configDirectorPromScraper() (*config.ScrapeConfig, error) {
 	scrapeConfig.Scheme = "https"
 	scraperHttpClientConfig := common_config.HTTPClientConfig{
 		TLSConfig: common_config.TLSConfig{
-			InsecureSkipVerify: true,
+			// For the scraper to origins' metrics, we get TLSSkipVerify from config
+			// As this request is to external address
+			InsecureSkipVerify: param.TLSSkipVerify.GetBool(),
 		},
 		// We add token auth for scraping all origin/cache servers
 		Authorization: &common_config.Authorization{
@@ -187,6 +189,8 @@ func configDirectorPromScraper() (*config.ScrapeConfig, error) {
 	scrapeConfig.ServiceDiscoveryConfigs = make([]discovery.Config, 1)
 	sdHttpClientConfig := common_config.HTTPClientConfig{
 		TLSConfig: common_config.TLSConfig{
+			// Service discovery is internal only to the director, so there's
+			// no need to enforce TLS check
 			InsecureSkipVerify: true,
 		},
 		Authorization: &common_config.Authorization{
@@ -274,6 +278,7 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 	scrapeConfig.Scheme = "https"
 	scraperHttpClientConfig := common_config.HTTPClientConfig{
 		TLSConfig: common_config.TLSConfig{
+			// This is the self-scrape, so no need to enforce the TLS check
 			InsecureSkipVerify: true,
 		},
 		// We add token auth for scraping all origin/cache servers
@@ -592,6 +597,7 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 							newScrapeConfig.Scheme = oldScrapeCfg.Scheme
 							scraperHttpClientConfig := common_config.HTTPClientConfig{
 								TLSConfig: common_config.TLSConfig{
+									// This is the self-scrape, so no need to enforce TLS check
 									InsecureSkipVerify: true,
 								},
 								Authorization: &common_config.Authorization{
