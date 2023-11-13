@@ -474,7 +474,7 @@ func InitServer() error {
 	tokenExpiresIn := param.Monitoring_TokenExpiresIn.GetDuration()
 
 	if tokenExpiresIn == 0 || tokenRefreshInterval == 0 || tokenRefreshInterval > tokenExpiresIn {
-		return errors.New("Invalida Monitoring.TokenRefreshInterval or Monitoring.TokenExpiresIn. Must be non-zero value and valid time must be greater than the refresh interval")
+		log.Warningln("Invalid Monitoring.TokenRefreshInterval or Monitoring.TokenExpiresIn. Value may be zero or valid time <= refresh interval. You may experience intermittent authorization failure for requests with these token")
 	}
 
 	// Unmarshal Viper config into a Go struct

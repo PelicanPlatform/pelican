@@ -187,6 +187,8 @@ func setLoginCookie(ctx *gin.Context, user string) {
 	issuerURL.Host = ctx.Request.URL.Host
 	now := time.Now()
 	tok, err := jwt.NewBuilder().
+		// TODO: We might want to come up with some names broader than this for a
+		// generic token for Web APIs, like web_ui.access
 		Claim("scope", "prometheus.read").
 		Issuer(issuerURL.String()).
 		IssuedAt(now).

@@ -722,6 +722,13 @@ type: duration
 default: 59m
 components: ["origin", "director", "nsregistry"]
 ---
+name: Monitoring.MetricAuthorization
+description: >-
+  If authorization (Bearer token) is required for accesing /metrics endpoint
+type: bool
+default: true
+components: ["origin", "director", "nsregistry"]
+---
 
 ############################
 #   Plugin-level configs   #
