@@ -19,7 +19,10 @@
 package nsregistry
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 )
@@ -57,10 +60,44 @@ func listNamespaces(ctx *gin.Context) {
 	}
 }
 
+func getNamespaceJWKS(ctx *gin.Context) {
+	idStr := ctx.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil || id <= 0 {
+		// Handle the error if id is not a valid integer
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID format. ID must a non-zero integer"})
+		return
+	}
+	found, err := namespaceExistsById(id)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprint("Error checking id:", err)})
+		return
+	}
+	if !found {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "Namespace not found"})
+		return
+	}
+	jwks, err := getPrefixJwksById(id)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprint("Error getting jwks by id:", err)})
+		return
+	}
+	jsonData, err := json.MarshalIndent(jwks, "", "  ")
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to marshal JWKS"})
+		return
+	}
+	// Append a new line to the JSON data
+	jsonData = append(jsonData, '\n')
+	ctx.Header("Content-Disposition", fmt.Sprintf("attachment; filename=public-key-server-%v.jwks", id))
+	ctx.Data(200, "application/json", jsonData)
+}
+
 func RegisterNamespacesRegistryWebAPI(router *gin.RouterGroup) {
 	registryWebAPI := router.Group("/api/v1.0/registry_ui")
 	// Follow RESTful schema
 	{
 		registryWebAPI.GET("/namespace", listNamespaces)
+		registryWebAPI.GET("/namespace/:id/pubkey", getNamespaceJWKS)
 	}
 }

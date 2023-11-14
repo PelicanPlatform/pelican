@@ -129,6 +129,41 @@ func namespaceSupSubChecks(prefix string) (superspaces []string, subspaces []str
 	return
 }
 
+func namespaceExistsById(id int) (bool, error) {
+	checkQuery := `SELECT id FROM namespace WHERE id = ?`
+	result, err := db.Query(checkQuery, id)
+	if err != nil {
+		return false, err
+	}
+	defer result.Close()
+
+	found := false
+	for result.Next() {
+		found = true
+		break
+	}
+	return found, nil
+}
+
+func getPrefixJwksById(id int) (jwk.Set, error) {
+	jwksQuery := `SELECT pubkey FROM namespace WHERE id = ?`
+	var pubkeyStr string
+	err := db.QueryRow(jwksQuery, id).Scan(&pubkeyStr)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, errors.New("prefix not found in database")
+		}
+		return nil, errors.Wrap(err, "error performing origin pubkey query")
+	}
+
+	set, err := jwk.ParseString(pubkeyStr)
+	if err != nil {
+		return nil, errors.Wrap(err, "Failed to parse pubkey as a jwks")
+	}
+
+	return set, nil
+}
+
 func dbGetPrefixJwks(prefix string) (*jwk.Set, error) {
 	jwksQuery := `SELECT pubkey FROM namespace WHERE prefix = ?`
 	var pubkeyStr string
