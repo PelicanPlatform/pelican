@@ -35,11 +35,11 @@ import (
 )
 
 type Namespace struct {
-	ID            int
-	Prefix        string
-	Pubkey        string
-	Identity      string
-	AdminMetadata string
+	ID            int    `json:"id"`
+	Prefix        string `json:"prefix"`
+	Pubkey        string `json:"pubkey"`
+	Identity      string `json:"identity"`
+	AdminMetadata string `json:"admin_metadata"`
 }
 
 type ServerType string
