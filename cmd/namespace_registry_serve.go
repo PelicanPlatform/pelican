@@ -48,9 +48,10 @@ func serveNamespaceRegistry( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	if err := web_ui.ConfigureServerWebAPI(engine, false); err != nil {
 		return err
 	}
-
+	rootRouterGroup := engine.Group("/")
 	// Call out to nsregistry to establish routes for the gin engine
-	nsregistry.RegisterNamespaceRegistry(engine.Group("/"))
+	nsregistry.RegisterNamespaceRegistry(rootRouterGroup)
+	nsregistry.RegisterNamespacesRegistryWebAPI(rootRouterGroup)
 	log.Info("Starting web engine...")
 
 	// Might need to play around with this setting more to handle

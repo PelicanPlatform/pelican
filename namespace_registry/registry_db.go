@@ -20,6 +20,7 @@ package nsregistry
 
 import (
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -40,6 +41,13 @@ type Namespace struct {
 	Identity      string
 	AdminMetadata string
 }
+
+type ServerType string
+
+const (
+	OriginType ServerType = "origin"
+	CacheType  ServerType = "cache"
+)
 
 /*
 Declare the DB handle as an unexported global so that all
@@ -201,6 +209,35 @@ func getNamespace(prefix string) (*Namespace, error) {
 
 func getAllNamespaces() ([]*Namespace, error) {
 	query := `SELECT * FROM namespace`
+	rows, err := db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	namespaces := make([]*Namespace, 0)
+	for rows.Next() {
+		ns := &Namespace{}
+		if err := rows.Scan(&ns.ID, &ns.Prefix, &ns.Pubkey, &ns.Identity, &ns.AdminMetadata); err != nil {
+			return nil, err
+		}
+		namespaces = append(namespaces, ns)
+	}
+
+	return namespaces, nil
+}
+
+func getNamespacesByServerType(serverType ServerType) ([]*Namespace, error) {
+	query := ""
+	if serverType == CacheType {
+		// Refer to the cache prefix name in cmd/cache_serve
+		query = `SELECT * FROM NAMESPACE WHERE PREFIX LIKE '/caches/%'`
+	} else if serverType == OriginType {
+		query = `SELECT * FROM NAMESPACE WHERE NOT PREFIX LIKE '/caches/%'`
+	} else {
+		return nil, errors.New(fmt.Sprint("Can't get namespace: unsupported server type: ", serverType))
+	}
+
 	rows, err := db.Query(query)
 	if err != nil {
 		return nil, err
