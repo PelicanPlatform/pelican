@@ -58,7 +58,7 @@ func TestOrigin(t *testing.T) {
 	err = config.GenerateCert()
 	require.NoError(t, err)
 
-	err = CheckXrootdEnv(true)
+	err = CheckXrootdEnv(true, nil)
 	require.NoError(t, err)
 
 	err = SetUpMonitoring()
@@ -67,7 +67,7 @@ func TestOrigin(t *testing.T) {
 	configPath, err := ConfigXrootd(true)
 	require.NoError(t, err)
 
-	launchers, err := ConfigureLaunchers(false, configPath)
+	launchers, err := ConfigureLaunchers(false, configPath, false)
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -78,7 +78,7 @@ func TestOrigin(t *testing.T) {
 
 	testExpiry := time.Now().Add(10 * time.Second)
 	testSuccess := false
-	for !testSuccess || time.Now().After(testExpiry) {
+	for !(testSuccess || time.Now().After(testExpiry)) {
 		time.Sleep(50 * time.Millisecond)
 		req, err := http.NewRequest("GET", param.Origin_Url.GetString(), nil)
 		require.NoError(t, err)
@@ -95,10 +95,14 @@ func TestOrigin(t *testing.T) {
 		}
 	}
 
-	url, err := origin_ui.UploadTestfile()
-	require.NoError(t, err)
-	err = origin_ui.DownloadTestfile(url)
-	require.NoError(t, err)
-	err = origin_ui.DeleteTestfile(url)
-	require.NoError(t, err)
+	if testSuccess {
+		url, err := origin_ui.UploadTestfile()
+		require.NoError(t, err)
+		err = origin_ui.DownloadTestfile(url)
+		require.NoError(t, err)
+		err = origin_ui.DeleteTestfile(url)
+		require.NoError(t, err)
+	} else {
+		t.Fatalf("Unsucessful test: timeout when trying to send request to xrootd")
+	}
 }
