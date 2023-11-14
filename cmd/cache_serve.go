@@ -243,7 +243,8 @@ func serveCache( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		return err
 	}
 
-	if err = daemon.LaunchDaemons(launchers); err != nil {
+	ctx := context.Background()
+	if err = daemon.LaunchDaemons(ctx, launchers); err != nil {
 		return err
 	}
 
