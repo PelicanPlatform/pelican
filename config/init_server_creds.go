@@ -124,8 +124,8 @@ func LoadPublicKey(existingJWKS string, issuerKeyFile string) (jwk.Set, error) {
 	return jwks, nil
 }
 
-// Explicity generate a Certificate Authority (CA) certificate and its private key
-// for non-production environment so that we can use the private key of our CA
+// Helper function to generate a Certificate Authority (CA) certificate and its private key
+// for non-production environment so that we can use the private key of the CA
 // to sign the host certificate
 func GenerateCACert() error {
 	gid, err := GetDaemonGID()
@@ -141,9 +141,19 @@ func GenerateCACert() error {
 		return err
 	}
 
+	// If you provide a CA, you must also provide its private key in order for
+	// GenerateCert to sign the  host certificate by that key, or we will generate
+	// a new CA
 	tlsCACert := param.Server_TLSCACertificateFile.GetString()
 	if file, err := os.Open(tlsCACert); err == nil {
 		file.Close()
+		tlsCAKey := param.Server_TLSCAKey.GetString()
+		if file, err := os.Open(tlsCAKey); err == nil {
+			file.Close()
+			return nil
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return errors.Wrap(err, "Failed to load TLS CA private key due to I/O error")
+		}
 		return nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return errors.Wrap(err, "Failed to load TLS CA certificate due to I/O error")
@@ -219,6 +229,9 @@ func GenerateCACert() error {
 	return nil
 }
 
+// Read a PEM-encoded TLS certficate file, parse and return the first
+// certificate appeared in the chain. Return error if there's no cert
+// present in the file
 func LoadCertficate(certFile string) (*x509.Certificate, error) {
 	rest, err := os.ReadFile(certFile)
 	if err != nil {
@@ -245,8 +258,8 @@ func LoadCertficate(certFile string) (*x509.Certificate, error) {
 	return cert, nil
 }
 
-// Generate TLS certificate (host certificate) for non-production environment
-// where Server_TLSCertificate is not explicity set
+// Generate a TLS certificate (host certificate) and its private key
+// for non-production environment if the requied TLS files are not present
 func GenerateCert() error {
 	gid, err := GetDaemonGID()
 	if err != nil {
@@ -264,9 +277,34 @@ func GenerateCert() error {
 	tlsCert := param.Server_TLSCertificate.GetString()
 	if file, err := os.Open(tlsCert); err == nil {
 		file.Close()
-		return nil
+		// Check that the matched-pair private key is present
+		tlsKey := param.Server_TLSKey.GetString()
+		if file, err := os.Open(tlsKey); err == nil {
+			file.Close()
+			// Check that CA is also present
+			caCert := param.Server_TLSCACertificateFile.GetString()
+			if _, err := os.Open(caCert); err == nil {
+				file.Close()
+				// Check that the CA is a valid CA
+				if _, err := LoadCertficate(caCert); err != nil {
+					return errors.Wrap(err, "Failed to load CA cert")
+				} else {
+					// TODO: Check that the private key is a pair of the server cert
+
+					// Here we return based on the check that
+					// 1. TLS cert is present
+					// 2. The private key of TLS cert if present
+					// 3. The CA is present
+					return nil
+				}
+			} else if !errors.Is(err, os.ErrNotExist) {
+				return errors.Wrap(err, "Failed to load TLS CA cert due to I/O error")
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return errors.Wrap(err, "Failed to load TLS host private key due to I/O error")
+		}
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return errors.Wrap(err, "Failed to load TLS certificate due to I/O error")
+		return errors.Wrap(err, "Failed to load TLS host certificate due to I/O error")
 	}
 
 	// In this case, no host certificate exists - we should generate our own.
