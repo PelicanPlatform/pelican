@@ -460,9 +460,9 @@ func InitServer() error {
 		viper.SetDefault("Origin.Url", fmt.Sprintf("https://%v", param.Server_Hostname.GetString()))
 	}
 
-	webPort := param.Server_Port.GetInt()
+	webPort := param.Server_WebPort.GetInt()
 	viper.SetDefault("Server.ExternalAddress", fmt.Sprint("https://", hostname, ":", webPort))
-	externalAddressStr := param.Server_ExternalAddress.GetString()
+	externalAddressStr := param.Server_ExternalWebUrl.GetString()
 	if _, err = url.Parse(externalAddressStr); err != nil {
 		return errors.Wrap(err, fmt.Sprint("Invalid Server.ExternalAddress: ", externalAddressStr))
 	}

@@ -483,25 +483,25 @@ root_default: /etc/pelican/certificates/tls.key
 default: "$ConfigBase/certificates/tls.key"
 components: ["origin", "nsregistry", "director"]
 ---
-name: Server.Port
+name: Server.WebPort
 description: >-
   The port number the Pelican web interface will be bound to.
 type: int
 default: 8444
 components: ["origin", "director", "nsregistry"]
 ---
-name: Server.Address
+name: Server.WebHost
 description: >-
   A string-encoded IP address that the Pelican web interface is configured to listen on.
 type: string
 default: "0.0.0.0"
 components: ["origin", "director", "nsregistry"]
 ---
-name: Server.ExternalAddress
+name: Server.ExternalWebUrl
 description: >-
   A URL indicating the Pelican web interface address as it appears externally.
 type: url
-default: https://${Server.Hostname}:${Server.Port}
+default: https://${Server.Hostname}:${Server.WebPort}
 components: ["origin", "director", "nsregistry"]
 ---
 name: Server.Hostname

@@ -76,7 +76,7 @@ func AdvertiseOrigin() error {
 	}
 
 	originUrl := param.Origin_Url.GetString()
-	originWebUrl := param.Server_ExternalAddress.GetString()
+	originWebUrl := param.Server_ExternalWebUrl.GetString()
 
 	// Here we instantiate the namespaceAd slice, but we still need to define the namespace
 	namespaceUrl, err := url.Parse(param.Federation_NamespaceUrl.GetString())

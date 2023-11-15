@@ -18,8 +18,8 @@ Debug: false
 Logging:
   Level: "Error"
 Server:
-  Port: 8444
-  Address: "0.0.0.0"
+  WebPort: 8444
+  WebHost: "0.0.0.0"
 Director:
   DefaultResponse: cache
 Origin:

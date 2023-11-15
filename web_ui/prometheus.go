@@ -174,9 +174,9 @@ func checkPromToken(av1 *route.Router) gin.HandlerFunc {
 
 // Configure director's Prometheus scraper to use HTTP service discovery for origins
 func configDirectorPromScraper() (*config.ScrapeConfig, error) {
-	originDiscoveryUrl, err := url.Parse(param.Server_ExternalAddress.GetString())
+	originDiscoveryUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
 	if err != nil {
-		return nil, fmt.Errorf("parse external URL %v: %w", param.Server_ExternalAddress.GetString(), err)
+		return nil, fmt.Errorf("parse external URL %v: %w", param.Server_ExternalWebUrl.GetString(), err)
 	}
 	token, err := director.CreateDirectorSDToken()
 	if err != nil {
@@ -208,7 +208,7 @@ func configDirectorPromScraper() (*config.ScrapeConfig, error) {
 
 func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 	cfg := flagConfig{}
-	ListenAddress := fmt.Sprintf("0.0.0.0:%v", param.Server_Port.GetInt())
+	ListenAddress := fmt.Sprintf("0.0.0.0:%v", param.Server_WebPort.GetInt())
 	cfg.webTimeout = model.Duration(5 * time.Minute)
 	cfg.serverStoragePath = param.Monitoring_DataLocation.GetString()
 
@@ -250,9 +250,9 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 
 	localStoragePath := cfg.serverStoragePath
 
-	external_url, err := url.Parse(param.Server_ExternalAddress.GetString())
+	external_url, err := url.Parse(param.Server_ExternalWebUrl.GetString())
 	if err != nil {
-		return fmt.Errorf("parse external URL %v: %w", param.Server_ExternalAddress.GetString(), err)
+		return fmt.Errorf("parse external URL %v: %w", param.Server_ExternalWebUrl.GetString(), err)
 	}
 
 	CORSOrigin, err := compileCORSRegexString(".*")
@@ -271,7 +271,7 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 	scrapeConfig.Scheme = "https"
 	scrapeConfig.ServiceDiscoveryConfigs = make([]discovery.Config, 1)
 	// model.AddressLabel needs a hostname (w/ port), so we cut the protocol here
-	externalAddressWoProtocol, _ := strings.CutPrefix(param.Server_ExternalAddress.GetString(), "https://")
+	externalAddressWoProtocol, _ := strings.CutPrefix(param.Server_ExternalWebUrl.GetString(), "https://")
 	scrapeConfig.ServiceDiscoveryConfigs[0] = discovery.StaticConfig{
 		&targetgroup.Group{
 			Targets: []model.LabelSet{{
