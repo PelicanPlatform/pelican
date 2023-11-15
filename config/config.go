@@ -19,7 +19,6 @@
 package config
 
 import (
-	"crypto/elliptic"
 	"crypto/tls"
 	"crypto/x509"
 	_ "embed"
@@ -481,10 +480,8 @@ func InitServer() error {
 	if err != nil {
 		return err
 	}
-	err = GeneratePrivateKey(param.Server_TLSKey.GetString(), elliptic.P256())
-	if err != nil {
-		return err
-	}
+
+	// Check if we have required files in place to set up TLS, or we will generate them
 	err = GenerateCert()
 	if err != nil {
 		return err
