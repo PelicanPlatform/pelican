@@ -461,10 +461,10 @@ func InitServer() error {
 	}
 
 	webPort := param.Server_WebPort.GetInt()
-	viper.SetDefault("Server.ExternalAddress", fmt.Sprint("https://", hostname, ":", webPort))
+	viper.SetDefault("Server.ExternalWebUrl", fmt.Sprint("https://", hostname, ":", webPort))
 	externalAddressStr := param.Server_ExternalWebUrl.GetString()
 	if _, err = url.Parse(externalAddressStr); err != nil {
-		return errors.Wrap(err, fmt.Sprint("Invalid Server.ExternalAddress: ", externalAddressStr))
+		return errors.Wrap(err, fmt.Sprint("Invalid Server.ExternalWebUrl: ", externalAddressStr))
 	}
 
 	// Unmarshal Viper config into a Go struct
