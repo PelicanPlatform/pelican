@@ -101,10 +101,7 @@ func checkDefaults(origin bool, nsAds []director.NamespaceAd) error {
 }
 
 func webUiInitialize() {
-	if err := metrics.SetComponentHealthStatus("web-ui", "warning", "Authentication not initialized"); err != nil {
-		log.Errorln("Failed to set web UI's component health status:", err)
-		return
-	}
+	metrics.SetComponentHealthStatus(metrics.Server_WebUI, metrics.StatusWarning, "Authentication not initialized")
 
 	// Ensure we wait until the origin has been initialized
 	// before launching XRootD.
@@ -112,10 +109,7 @@ func webUiInitialize() {
 		log.Errorln("Failure when waiting for web UI to be initialized:", err)
 		return
 	}
-	if err := metrics.SetComponentHealthStatus("web-ui", "ok", ""); err != nil {
-		log.Errorln("Failed to set web UI's component health status:", err)
-		return
-	}
+	metrics.SetComponentHealthStatus(metrics.Server_WebUI, metrics.StatusOK, "")
 }
 
 func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {

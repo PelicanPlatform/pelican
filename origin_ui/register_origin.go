@@ -170,9 +170,7 @@ func registerNamespaceImpl(key jwk.Key, prefix string, registrationEndpointURL s
 }
 
 func RegisterNamespaceWithRetry() error {
-	if err := metrics.SetComponentHealthStatus("federation", "critical", "Origin not registered with federation"); err != nil {
-		return err
-	}
+	metrics.SetComponentHealthStatus(metrics.OriginCache_Federation, metrics.StatusCritical, "Origin not registered with federation")
 
 	key, prefix, url, isRegistered, err := registerNamespacePrep()
 	if err != nil {
