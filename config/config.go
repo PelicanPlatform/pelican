@@ -243,14 +243,6 @@ func CleanupTempResources() {
 	})
 }
 
-func ComputeExternalAddress() string {
-	config_url := param.Server_ExternalAddress.GetString()
-	if config_url != "" {
-		return config_url
-	}
-	return fmt.Sprintf("%v:%v", param.Server_Hostname.GetString(), param.Server_Port.GetInt())
-}
-
 func getConfigBase() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -461,11 +453,18 @@ func InitServer() error {
 	viper.SetDefault("Server.Hostname", hostname)
 	viper.SetDefault("Xrootd.Sitename", hostname)
 
-	port := param.Xrootd_Port.GetInt()
-	if port != 443 {
-		viper.SetDefault("Origin.Url", fmt.Sprintf("https://%v:%v", param.Server_Hostname.GetString(), port))
+	xrootdPort := param.Xrootd_Port.GetInt()
+	if xrootdPort != 443 {
+		viper.SetDefault("Origin.Url", fmt.Sprintf("https://%v:%v", param.Server_Hostname.GetString(), xrootdPort))
 	} else {
 		viper.SetDefault("Origin.Url", fmt.Sprintf("https://%v", param.Server_Hostname.GetString()))
+	}
+
+	webPort := param.Server_Port.GetInt()
+	viper.SetDefault("Server.ExternalAddress", fmt.Sprint("https://", hostname, ":", webPort))
+	externalAddressStr := param.Server_ExternalAddress.GetString()
+	if _, err = url.Parse(externalAddressStr); err != nil {
+		return errors.Wrap(err, fmt.Sprint("Invalid Server.ExternalAddress: ", externalAddressStr))
 	}
 
 	// Unmarshal Viper config into a Go struct

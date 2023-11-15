@@ -21,7 +21,6 @@ package origin_ui
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -76,11 +75,8 @@ func AdvertiseOrigin() error {
 		return errors.New("Origin name isn't set")
 	}
 
-	// TODO: waiting on a different branch to merge origin URL generation
-	// The checkdefaults func that runs before the origin is served checks for and
-	// parses the originUrl, so it should be safe to just grab it as a string here.
 	originUrl := param.Origin_Url.GetString()
-	originWebUrl := fmt.Sprintf("https://%s", config.ComputeExternalAddress())
+	originWebUrl := param.Server_ExternalAddress.GetString()
 
 	// Here we instantiate the namespaceAd slice, but we still need to define the namespace
 	namespaceUrl, err := url.Parse(param.Federation_NamespaceUrl.GetString())

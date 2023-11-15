@@ -488,20 +488,20 @@ description: >-
   The port number the Pelican web interface will be bound to.
 type: int
 default: 8444
-components: ["nsregistry", "director", "origin"]
+components: ["origin", "director", "nsregistry"]
 ---
 name: Server.Address
 description: >-
-  A string-encoded IP address that the origin is configured to listen on.
+  A string-encoded IP address that the Pelican web interface is configured to listen on.
 type: string
-default: 0.0.0.0
-components: ["origin"]
+default: "0.0.0.0"
+components: ["origin", "director", "nsregistry"]
 ---
 name: Server.ExternalAddress
 description: >-
-  A URL indicating the server's address as it appears externally.
+  A URL indicating the Pelican web interface address as it appears externally.
 type: url
-default: none
+default: https://${Server.Hostname}:${Server.Port}
 components: ["origin", "director", "nsregistry"]
 ---
 name: Server.Hostname
