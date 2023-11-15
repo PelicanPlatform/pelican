@@ -468,6 +468,15 @@ func InitServer() error {
 		viper.SetDefault("Origin.Url", fmt.Sprintf("https://%v", param.Server_Hostname.GetString()))
 	}
 
+	setupTransport()
+
+	tokenRefreshInterval := param.Monitoring_TokenRefreshInterval.GetDuration()
+	tokenExpiresIn := param.Monitoring_TokenExpiresIn.GetDuration()
+
+	if tokenExpiresIn == 0 || tokenRefreshInterval == 0 || tokenRefreshInterval > tokenExpiresIn {
+		log.Warningln("Invalid Monitoring.TokenRefreshInterval or Monitoring.TokenExpiresIn. Value may be zero or valid time <= refresh interval. You may experience intermittent authorization failure for requests with these token")
+	}
+
 	// Unmarshal Viper config into a Go struct
 	err = param.UnmarshalConfig()
 	if err != nil {
