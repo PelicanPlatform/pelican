@@ -176,7 +176,7 @@ func checkPromToken(av1 *route.Router) gin.HandlerFunc {
 func configDirectorPromScraper() (*config.ScrapeConfig, error) {
 	originDiscoveryUrl, err := url.Parse(param.Server_ExternalAddress.GetString())
 	if err != nil {
-		return nil, fmt.Errorf("parse external URL https://%v: %w", param.Server_ExternalAddress.GetString(), err)
+		return nil, fmt.Errorf("parse external URL %v: %w", param.Server_ExternalAddress.GetString(), err)
 	}
 	token, err := director.CreateDirectorSDToken()
 	if err != nil {
@@ -252,7 +252,7 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 
 	external_url, err := url.Parse(param.Server_ExternalAddress.GetString())
 	if err != nil {
-		return fmt.Errorf("parse external URL https://%v: %w", param.Server_ExternalAddress.GetString(), err)
+		return fmt.Errorf("parse external URL %v: %w", param.Server_ExternalAddress.GetString(), err)
 	}
 
 	CORSOrigin, err := compileCORSRegexString(".*")
@@ -270,10 +270,12 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 	scrapeConfig.JobName = "prometheus"
 	scrapeConfig.Scheme = "https"
 	scrapeConfig.ServiceDiscoveryConfigs = make([]discovery.Config, 1)
+	// model.AddressLabel needs a hostname (w/ port), so we cut the protocol here
+	externalAddressWoProtocol, _ := strings.CutPrefix(param.Server_ExternalAddress.GetString(), "https://")
 	scrapeConfig.ServiceDiscoveryConfigs[0] = discovery.StaticConfig{
 		&targetgroup.Group{
 			Targets: []model.LabelSet{{
-				model.AddressLabel: model.LabelValue(param.Server_ExternalAddress.GetString()),
+				model.AddressLabel: model.LabelValue(externalAddressWoProtocol),
 			}},
 		},
 	}
