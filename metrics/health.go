@@ -57,6 +57,8 @@ const (
 	StatusUnknown // Do not abuse this enum. Use others when possible
 )
 
+const statusIndexErrorMessage = "Error: status string index out of range"
+
 // Naming convention for components:
 //
 //	ServiceName1Name2_ComponentName
@@ -86,8 +88,16 @@ var (
 	}, []string{"component"})
 )
 
+// Unfortunately we don't have a better way to ensure the enum constants always have
+// matched string representation, so we will return "Error: status string index out of range"
+// as an indicator
 func (status HealthStatusEnum) String() string {
-	return [...]string{"critical", "warning", "ok"}[status-1]
+	strings := [...]string{"critical", "warning", "ok", "unknown"}
+
+	if int(status) < 1 || int(status) > len(strings) {
+		return statusIndexErrorMessage
+	}
+	return strings[status-1]
 }
 
 func (component HealthStatusComponent) String() string {
