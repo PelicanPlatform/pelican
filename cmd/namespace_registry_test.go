@@ -53,7 +53,7 @@ func TestServeNamespaceRegistry(t *testing.T) {
 
 	_, err = config.LoadPublicKey("", ikey)
 	require.NoError(t, err)
-	privKey, err := config.GetOriginJWK()
+	privKey, err := config.GetIssuerPrivateJWK()
 	require.NoError(t, err)
 
 	//Configure registry
@@ -128,4 +128,5 @@ func TestServeNamespaceRegistry(t *testing.T) {
 		stdoutCapture = string(capturedOutput[:n])
 		assert.Equal(t, "[]\n", stdoutCapture)
 	})
+	viper.Reset()
 }
