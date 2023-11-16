@@ -172,7 +172,7 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 
 	viper.Reset()
 	viper.Set("Server.Hostname", "test-https")
-	viper.Set("Server.Port", "8444")
+	viper.Set("Server.WebPort", "8444")
 
 	av1 := route.New().WithPrefix("/api/v1.0/prometheus")
 
@@ -204,10 +204,6 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 	}
 
 	// Create a token
-	issuerURL := url.URL{}
-	issuerURL.Host = config.ComputeExternalAddress()
-	issuerURL.Scheme = "https"
-
 	jti_bytes := make([]byte, 16)
 	_, err = rand.Read(jti_bytes)
 	if err != nil {
@@ -220,7 +216,7 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 		Claim("scope", "prometheus.read").
 		Claim("wlcg.ver", "1.0").
 		JwtID(jti).
-		Issuer(issuerURL.String()).
+		Issuer(param.Server_ExternalWebUrl.GetString()).
 		Audience([]string{originUrl}).
 		Subject("sub").
 		Expiration(time.Now().Add(time.Minute)).
@@ -285,7 +281,7 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 		Claim("scope", "prometheus.read").
 		Claim("wlcg.ver", "1.0").
 		JwtID(jti).
-		Issuer(issuerURL.String()).
+		Issuer(param.Server_ExternalWebUrl.GetString()).
 		Audience([]string{originUrl}).
 		Subject("sub").
 		Expiration(time.Now().Add(time.Minute)).
@@ -321,7 +317,7 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 		Claim("scope", "not.prometheus").
 		Claim("wlcg.ver", "1.0").
 		JwtID(jti).
-		Issuer(issuerURL.String()).
+		Issuer(param.Server_ExternalWebUrl.GetString()).
 		Audience([]string{originUrl}).
 		Subject("sub").
 		Expiration(time.Now().Add(time.Minute)).
@@ -361,7 +357,7 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 
 	now := time.Now()
 	tok, err = jwt.NewBuilder().
-		Issuer(issuerURL.String()).
+		Issuer(param.Server_ExternalWebUrl.GetString()).
 		Claim("scope", "prometheus.read").
 		Claim("wlcg.ver", "1.0").
 		IssuedAt(now).
