@@ -31,7 +31,6 @@ import (
 
 	"github.com/alecthomas/units"
 	"github.com/gin-gonic/gin"
-	kit_log "github.com/go-kit/kit/log/logrus"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/grafana/regexp"
@@ -109,6 +108,11 @@ type flagConfig struct {
 
 type ReadyHandler struct {
 	ready atomic.Uint32
+}
+
+type LogrusAdapter struct {
+	*logrus.Logger
+	defaultFields logrus.Fields
 }
 
 func (h *ReadyHandler) SetReady(v bool) {
@@ -206,8 +210,69 @@ func configDirectorPromScraper() (*config.ScrapeConfig, error) {
 	return &scrapeConfig, nil
 }
 
-// TODO: for all the HTTP clients in Prometheus, do we always want to
-// turn off TLS verify? Or do we want to read from config
+// Log method which satisfies the kitlog.Logger interface.
+// It also propragates field level and field message to top level log
+func (a LogrusAdapter) Log(keyvals ...interface{}) error {
+	// Extract the log level and message from the keyvals.
+	logLevel := logrus.InfoLevel
+	msg := ""
+	fields := make(logrus.Fields)
+	for k, v := range a.defaultFields {
+		fields[k] = v
+	}
+
+	for i := 0; i < len(keyvals); i += 2 {
+		if key, ok := keyvals[i].(string); ok {
+			if val := keyvals[i+1]; key == "level" {
+				// Parse the log level.
+				var err error
+				logval, ok := val.(level.Value)
+				if !ok {
+					a.Logger.Error("log: can't log level value")
+					return err
+				}
+				logLevel, err = logrus.ParseLevel(logval.String())
+				if err != nil {
+					a.Logger.Error("log: invalid log level message")
+					return err
+				}
+			} else if key == "msg" {
+				msg, ok = val.(string)
+				if !ok {
+					a.Logger.Error("log: invalid log message")
+					return errors.New("log: invalid log message")
+				}
+			} else if key == "err" {
+				logErr, ok := val.(error)
+				if !ok {
+					a.Logger.Error("log: invalid error log message")
+					return errors.New("log: invalid error log message")
+				}
+				msg = logErr.Error()
+			} else {
+				fields[key] = val
+			}
+		}
+	}
+
+	// Set the log level and log the message with the fields.
+	entry := a.WithFields(fields)
+	switch logLevel {
+	case logrus.WarnLevel:
+		entry.Warn(msg)
+	case logrus.ErrorLevel:
+		entry.Error(msg)
+	case logrus.InfoLevel:
+		entry.Info(msg)
+	case logrus.DebugLevel:
+		entry.Debug(msg)
+	default:
+		entry.Info(msg) // Default to info level if not specified.
+	}
+
+	return nil
+}
+
 func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 	cfg := flagConfig{}
 	ListenAddress := fmt.Sprintf("0.0.0.0:%v", param.Server_Port.GetInt())
@@ -248,7 +313,10 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 	scrape.AlignScrapeTimestamps = true
 	scrape.ScrapeTimestampTolerance = 2 * time.Millisecond
 
-	logger := kit_log.NewLogger(logrus.WithFields(logrus.Fields{"component": "prometheus"}))
+	logrusLogger := logrus.WithFields(logrus.Fields{"component": "prometheus"})
+
+	// Create a Go kit logger that wraps the logrus logger.
+	logger := LogrusAdapter{Logger: logrusLogger.Logger, defaultFields: logrusLogger.Data}
 
 	localStoragePath := cfg.serverStoragePath
 
