@@ -46,7 +46,7 @@ components: ["origin", "nsregistry", "director"]
 ---
 name: IssuerKey
 description: >-
-  A filepath to the file containing a ecdsa-encrypted private key which later will be parsed
+  A filepath to the file containing a PEM-encoded ecdsa private key which later will be parsed
   into a JWK and serves as the private key to sign various JWTs issued by this server
 
   A public JWK will be derived from this private key and used as the key for token verification

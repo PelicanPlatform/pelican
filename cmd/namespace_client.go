@@ -237,10 +237,11 @@ func init() {
 	deleteCmd.Flags().StringVar(&prefix, "prefix", "", "prefix for delete namespace")
 
 	namespaceCmd.PersistentFlags().String("namespace-url", "", "Endpoint for the namespace registry")
-	// TODO: I don't think this flag is bound to any viper config name we have.
-	// Should instead be Federation.NamespaceURL
-	if err := viper.BindPFlag("NamespaceURL", namespaceCmd.PersistentFlags().Lookup("namespace-url")); err != nil {
-		panic(err)
+	// Don't override Federation.NamespaceURL if the flag value is empty
+	if namespaceCmd.PersistentFlags().Lookup("namespace-url").Value.String() != "" {
+		if err := viper.BindPFlag("Federation.NamespaceURL", namespaceCmd.PersistentFlags().Lookup("namespace-url")); err != nil {
+			panic(err)
+		}
 	}
 
 	namespaceCmd.PersistentFlags().StringVar(&pubkeyPath, "pubkey", "", "Path to the public key")

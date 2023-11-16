@@ -483,8 +483,10 @@ func InitServer() error {
 		return err
 	}
 
-	// As necessary, generate a private keys, JWKS and corresponding certs
-	// Note: GenerateIssuerJWKS will also generate a private key in the location stored by the viper var "IssuerKey"
+	// As necessary, generate private keys, JWKS and corresponding certs
+
+	// Note: This function will generate a private key in the location stored by the viper var "IssuerKey"
+	// iff there isn't any valid private key present in that location
 	_, err = GetIssuerPublicJWKS()
 	if err != nil {
 		return err
