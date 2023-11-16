@@ -231,18 +231,14 @@ func PeriodicSelfTest() {
 		url, err := UploadTestfile()
 		if err != nil {
 			log.Warningln("Self-test monitoring cycle failed during test upload:", err)
-			if err := metrics.SetComponentHealthStatus("xrootd", "critical", "Self-test monitoring cycle failed during test upload: "+err.Error()); err != nil {
-				log.Errorln("Failed to update internal component health status:", err)
-			}
+			metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusCritical, "Self-test monitoring cycle failed during test upload: "+err.Error())
 			continue
 		}
 
 		downloadFailed := false
 		if err = DownloadTestfile(url); err != nil {
 			log.Warningln("Self-test monitoring cycle failed during test download:", err)
-			if err := metrics.SetComponentHealthStatus("xrootd", "critical", "Self-test monitoring cycle failed during test download: "+err.Error()); err != nil {
-				log.Errorln("Failed to update internal component health status:", err)
-			}
+			metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusCritical, "Self-test monitoring cycle failed during test download: "+err.Error())
 			downloadFailed = true
 			// Note we don't `continue` here; we want to attempt to delete the file!
 		}
@@ -253,17 +249,12 @@ func PeriodicSelfTest() {
 				continue
 			}
 			log.Warningln("Self-test monitoring cycle failed during test deletion:", err)
-			if err := metrics.SetComponentHealthStatus("xrootd", "critical", "Self-test monitoring cycle failed during test deletion: "+err.Error()); err != nil {
-				log.Errorln("Failed to update internal component health status:", err)
-			}
+			metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusCritical, "Self-test monitoring cycle failed during test deletion: "+err.Error())
 			continue
 		}
 
 		// All is good - note it in the health status!
 		log.Debugln("Self-test monitoring cycle succeeded at", time.Now().Format(time.UnixDate))
-		if err := metrics.SetComponentHealthStatus("xrootd", "ok", "Self-test monitoring cycle succeeded at "+time.Now().Format(time.RFC3339)); err != nil {
-			log.Errorln("Failed to update internal component health status:", err)
-		}
-
+		metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusOK, "Self-test monitoring cycle succeeded at "+time.Now().Format(time.RFC3339))
 	}
 }

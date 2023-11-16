@@ -129,17 +129,14 @@ func LaunchDaemons(launchers []Launcher) (err error) {
 		ctx, pid, err := daemon.Launch(ctx)
 		if err != nil {
 			err = errors.Wrapf(err, "Failed to launch %s daemon", daemon.Name())
-			if err := metrics.SetComponentHealthStatus(daemon.Name(), "critical", err.Error()); err != nil {
-				return err
-			}
+			// This is secure as long as deamon.Name() is either "xrootd" or "cmsd"
+			metrics.SetComponentHealthStatus(metrics.HealthStatusComponent(daemon.Name()), metrics.StatusCritical, err.Error())
 			return err
 		}
 		daemons[idx].ctx = ctx
 		daemons[idx].pid = pid
 		log.Infoln("Successfully launched", daemon.Name())
-		if err := metrics.SetComponentHealthStatus(daemon.Name(), "ok", ""); err != nil {
-			return err
-		}
+		metrics.SetComponentHealthStatus(metrics.HealthStatusComponent(daemon.Name()), metrics.StatusOK, "")
 	}
 
 	sigs := make(chan os.Signal, 1)
@@ -179,10 +176,8 @@ func LaunchDaemons(launchers []Launcher) (err error) {
 				if !daemons[chosen].expiry.IsZero() {
 					return nil
 				}
-				if err = metrics.SetComponentHealthStatus(launchers[chosen].Name(), "critical",
-					"process failed unexpectedly"); err != nil {
-					return err
-				}
+				metrics.SetComponentHealthStatus(metrics.HealthStatusComponent(launchers[chosen].Name()), metrics.StatusCritical,
+					"process failed unexpectedly")
 				return errors.Wrapf(waitResult, "%s process failed unexpectedly", launchers[chosen].Name())
 			}
 			log.Debugln("Daemons have been shut down successfully")
