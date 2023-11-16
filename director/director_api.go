@@ -52,7 +52,24 @@ func ListNamespacesFromOrigins() []NamespaceAd {
 	return namespaces
 }
 
-func LoadDirectorPublicKey() (*jwk.Key, error) {
+// List all serverAds in the cache that matches the serverType array
+func ListServerAds(serverTypes []ServerType) []ServerAd {
+	serverAdMutex.RLock()
+	defer serverAdMutex.RUnlock()
+	ads := make([]ServerAd, 0)
+	for _, ad := range serverAds.Keys() {
+		for _, serverType := range serverTypes {
+			if ad.Type == serverType {
+				ads = append(ads, ad)
+			}
+		}
+	}
+	return ads
+}
+
+// Return director's public JWK for token verification. This function can be called
+// on any server (director/origin/registry) as long as the Federation_DirectorUrl is set
+func LoadDirectorPublicKey() (jwk.Key, error) {
 	directorDiscoveryUrlStr := param.Federation_DirectorUrl.GetString()
 	if len(directorDiscoveryUrlStr) == 0 {
 		return nil, errors.Errorf("Director URL is unset; Can't load director's public key")
@@ -114,30 +131,34 @@ func LoadDirectorPublicKey() (*jwk.Key, error) {
 		return nil, errors.Wrap(err, fmt.Sprintln("Failure when getting director's first public key: ", jwksUri))
 	}
 
-	return &key, nil
+	return key, nil
 }
 
 // Create a token for director's Prometheus instance to access
 // director's origins service discovery endpoint. This function is intended
-// to be called on a director server
+// to be called only on a director server
 func CreateDirectorSDToken() (string, error) {
+	// TODO: We might want to change this to ComputeExternalAddress() instead
+	// so that director admin don't need to specify Federation_DirectorUrl to get
+	// director working
 	directorURL := param.Federation_DirectorUrl.GetString()
 	if directorURL == "" {
 		return "", errors.New("Director URL is not known; cannot create director service discovery token")
 	}
+	tokenExpireTime := param.Monitoring_TokenExpiresIn.GetDuration()
 
 	tok, err := jwt.NewBuilder().
 		Claim("scope", "pelican.directorSD").
 		Issuer(directorURL).
 		Audience([]string{directorURL}).
 		Subject("director").
-		Expiration(time.Now().Add(time.Hour)).
+		Expiration(time.Now().Add(tokenExpireTime)).
 		Build()
 	if err != nil {
 		return "", err
 	}
 
-	key, err := config.GetOriginJWK()
+	key, err := config.GetIssuerPrivateJWK()
 	if err != nil {
 		return "", errors.Wrap(err, "failed to load the director's JWK")
 	}
@@ -153,6 +174,9 @@ func CreateDirectorSDToken() (string, error) {
 // correct scope for accessing the service discovery endpoint. This function
 // is intended to be called on the same director server that issues the token.
 func VerifyDirectorSDToken(strToken string) (bool, error) {
+	// TODO: We might want to change this to ComputeExternalAddress() instead
+	// so that director admin don't need to specify Federation_DirectorUrl to get
+	// director working
 	directorURL := param.Federation_DirectorUrl.GetString()
 	token, err := jwt.Parse([]byte(strToken), jwt.WithVerify(false))
 	if err != nil {
@@ -192,4 +216,46 @@ func VerifyDirectorSDToken(strToken string) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+// Create a token for director's Prometheus scraper to access discovered
+// origins /metrics endpoint. This function is intended to be called on
+// a director server
+func CreateDirectorScrapeToken() (string, error) {
+	// We assume this function is only called on a director server,
+	// the external address of which should be the director's URL
+	directorURL := "https://" + config.ComputeExternalAddress()
+	tokenExpireTime := param.Monitoring_TokenExpiresIn.GetDuration()
+
+	ads := ListServerAds([]ServerType{OriginType, CacheType})
+	aud := make([]string, 0)
+	for _, ad := range ads {
+		if ad.WebURL.String() != "" {
+			aud = append(aud, ad.WebURL.String())
+		}
+	}
+
+	tok, err := jwt.NewBuilder().
+		Claim("scope", "pelican.directorScrape").
+		Issuer(directorURL).
+		// The audience of this token is all origins/caches that have WebURL set in their serverAds
+		Audience(aud).
+		Subject("director").
+		Expiration(time.Now().Add(tokenExpireTime)).
+		Build()
+	if err != nil {
+		return "", err
+	}
+
+	key, err := config.GetIssuerPrivateJWK()
+
+	if err != nil {
+		return "", errors.Wrap(err, "failed to load the director's private JWK")
+	}
+
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, key))
+	if err != nil {
+		return "", err
+	}
+	return string(signed), nil
 }

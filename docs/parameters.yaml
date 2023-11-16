@@ -113,6 +113,13 @@ type: string
 default: Error
 components: ["*"]
 ---
+name: Logging.LogLocation
+description: >-
+  A filename defining a file to write log outputs to, if the user desires.
+type: filename
+default: none
+components: ["*"]
+---
 
 ############################
 # Federation-Level Configs #
@@ -426,8 +433,11 @@ components: ["nsregistry"]
 ############################
 name: Server.TLSCertificate
 description: >-
-  The name of a file containing an X.509 host certificate to use for TLS
+  A filepath to a file containing an X.509 host certificate to use for TLS
   authentication when running server components of Pelican.
+
+  If you override this filepath, you need to provide the matched-pair private key
+  via Server.TLSKey and a Certificate Authority (CA) certificate via Server.TLSCACertificateFile
 type: filename
 root_default: /etc/pelican/certificates/tls.crt
 default: "$ConfigBase/certificates/tls.crt"
@@ -435,17 +445,25 @@ components: ["origin", "nsregistry", "director"]
 ---
 name: Server.TLSCACertificateFile
 description: >-
-  A filepath for a TLS certificate to be used by XRootD.
-type: string
-default: /etc/pki/tls/cert.pem
-components: ["origin"]
+  A filepath to the TLS Certificate Authority (CA) certificate file, to be used by XRootD 
+  and internal HTTP client requests.
+
+  Do not override this filepath unless you want to provide your TLS host certifacte
+type: filename
+root_default: /etc/pelican/certificates/tlsca.pem
+default: "$ConfigBase/certificates/tlsca.pem"
+components: ["origin", "nsregistry", "director"]
 ---
 name: Server.TLSCACertificateDirectory
 description: >-
-  A filepath to the directory used for storing TLS certificates
+  A filepath to the directory used for storing TLS Certificate Authority (CA) certificate 
+  to be used by XRootD only.
+
+  This is exclusive with Server.TLSCACertificateFile for XRootD and this value takes priority
+  over Server.TLSCACertificateFile
 type: string
-default: /etc/pki/tls/cert.pem
-components: ["origin"]
+default: none
+components: ["origin", "nsregistry", "director"]
 ---
 name: Server.TLSCAKey
 description: >-
@@ -488,8 +506,8 @@ components: ["origin", "director", "nsregistry"]
 ---
 name: Server.Hostname
 description: >-
-  The server's hostname
-type: url
+  The server's hostname, by default it's os.Hostname().
+type: string
 default: none
 components: ["origin", "director", "nsregistry"]
 ---
@@ -693,6 +711,34 @@ description: >-
 type: int
 default: 9999
 components: ["origin"]
+---
+name: Monitoring.TokenExpiresIn
+description: >-
+  The duration of which the tokens for various Prometheus endpoints expire.
+
+  This includes tokens for director's Prometheus origin discovery endpoint, 
+  director's origin scraper, and server's self-scraper
+type: duration
+default: 1h
+components: ["origin", "director", "nsregistry"]
+---
+name: Monitoring.TokenRefreshInterval
+description: >-
+  The interval of which the token issuer for various Prometheus endpoints
+  refreshes the token for monitoring. 
+  
+  The tokens that are affected by this config are the same as the one in Monitoring.TokenExpiresIn.
+  This value must be less than Monitoring.TokenExpiresIn.
+type: duration
+default: 59m
+components: ["origin", "director", "nsregistry"]
+---
+name: Monitoring.MetricAuthorization
+description: >-
+  If authorization (Bearer token) is required for accesing /metrics endpoint
+type: bool
+default: true
+components: ["origin", "director", "nsregistry"]
 ---
 
 ############################

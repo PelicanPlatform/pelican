@@ -143,36 +143,18 @@ func runtimeInfo() (api_v1.RuntimeInfo, error) {
 	return api_v1.RuntimeInfo{}, nil
 }
 
-func checkPromToken(av1 *route.Router) gin.HandlerFunc {
+func promQueryEngineAuthHandler(av1 *route.Router) gin.HandlerFunc {
 	/* A function which wraps around the av1 router to force a jwk token check using
 	 * the origin's private key. It will check the request's URL and Header for a token
 	 * and if found it will then attempt to validate the token. If valid, it will continue
-	 * the routing as normal, otherwise it will return an error"
+	 * the routing as normal, otherwise it will return an error
 	 */
 	return func(c *gin.Context) {
-		req := c.Request
-
-		var strToken string
-		var err error
-		if authzQuery := req.URL.Query()["authz"]; len(authzQuery) > 0 {
-			strToken = authzQuery[0]
-		} else if authzHeader := req.Header["Authorization"]; len(authzHeader) > 0 {
-			strToken = strings.TrimPrefix(authzHeader[0], "Bearer ")
-		}
-
-		FederationCheck(c, strToken, "prometheus.read")
-		OriginCheck(c, strToken, "prometheus.read")
-
-		strToken, err = c.Cookie("login")
-		if err == nil {
-			OriginCheck(c, strToken, "prometheus.read")
-		}
-
-		_, exists := c.Get("User")
+		exists := checkAPIToken(c, []string{"prometheus.read"})
 		if exists {
 			av1.ServeHTTP(c.Writer, c.Request)
 		} else {
-			c.JSON(http.StatusForbidden, gin.H{"error": "Correct authorization required to access metrics"})
+			c.JSON(http.StatusForbidden, gin.H{"error": "Correct authorization required to access Prometheus query engine APIs"})
 		}
 	}
 }
@@ -183,22 +165,41 @@ func configDirectorPromScraper() (*config.ScrapeConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse external URL https://%v: %w", pelican_config.ComputeExternalAddress(), err)
 	}
-	token, err := director.CreateDirectorSDToken()
+	sdToken, err := director.CreateDirectorSDToken()
 	if err != nil {
 		return nil, fmt.Errorf("Failed to generate token for Prometheus service discovery at start: %v", err)
+	}
+	scraperToken, err := director.CreateDirectorScrapeToken()
+	if err != nil {
+		return nil, fmt.Errorf("Failed to generate token for director scraper at start: %v", err)
 	}
 	originDiscoveryUrl.Path = "/api/v1.0/director/discoverOrigins"
 	scrapeConfig := config.DefaultScrapeConfig
 	scrapeConfig.JobName = "origins"
 	scrapeConfig.Scheme = "https"
+	scraperHttpClientConfig := common_config.HTTPClientConfig{
+		TLSConfig: common_config.TLSConfig{
+			// For the scraper to origins' metrics, we get TLSSkipVerify from config
+			// As this request is to external address
+			InsecureSkipVerify: param.TLSSkipVerify.GetBool(),
+		},
+		// We add token auth for scraping all origin/cache servers
+		Authorization: &common_config.Authorization{
+			Type:        "Bearer",
+			Credentials: common_config.Secret(scraperToken),
+		},
+	}
+	scrapeConfig.HTTPClientConfig = scraperHttpClientConfig
 	scrapeConfig.ServiceDiscoveryConfigs = make([]discovery.Config, 1)
 	sdHttpClientConfig := common_config.HTTPClientConfig{
 		TLSConfig: common_config.TLSConfig{
+			// Service discovery is internal only to the director, so there's
+			// no need to enforce TLS check
 			InsecureSkipVerify: true,
 		},
 		Authorization: &common_config.Authorization{
 			Type:        "Bearer",
-			Credentials: common_config.Secret(token),
+			Credentials: common_config.Secret(sdToken),
 		},
 	}
 	scrapeConfig.ServiceDiscoveryConfigs[0] = &prom_http.SDConfig{
@@ -206,8 +207,6 @@ func configDirectorPromScraper() (*config.ScrapeConfig, error) {
 		RefreshInterval:  model.Duration(15 * time.Second),
 		HTTPClientConfig: sdHttpClientConfig,
 	}
-	scrapeConfig.HTTPClientConfig = common_config.DefaultHTTPClientConfig
-	scrapeConfig.HTTPClientConfig.TLSConfig.InsecureSkipVerify = true
 	return &scrapeConfig, nil
 }
 
@@ -337,9 +336,26 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 		ScrapeConfigs: make([]*config.ScrapeConfig, 1),
 	}
 
+	selfScraperToken, err := CreatePromMetricToken()
+	if err != nil {
+		return fmt.Errorf("Failed to generate token for self-scraper at start: %v", err)
+	}
+
 	scrapeConfig := config.DefaultScrapeConfig
 	scrapeConfig.JobName = "prometheus"
 	scrapeConfig.Scheme = "https"
+	scraperHttpClientConfig := common_config.HTTPClientConfig{
+		TLSConfig: common_config.TLSConfig{
+			// This is the self-scrape, so no need to enforce the TLS check
+			InsecureSkipVerify: true,
+		},
+		// We add token auth for scraping all origin/cache servers
+		Authorization: &common_config.Authorization{
+			Type:        "Bearer",
+			Credentials: common_config.Secret(selfScraperToken),
+		},
+	}
+	scrapeConfig.HTTPClientConfig = scraperHttpClientConfig
 	scrapeConfig.ServiceDiscoveryConfigs = make([]discovery.Config, 1)
 	scrapeConfig.ServiceDiscoveryConfigs[0] = discovery.StaticConfig{
 		&targetgroup.Group{
@@ -348,8 +364,6 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 			}},
 		},
 	}
-	scrapeConfig.HTTPClientConfig = common_config.DefaultHTTPClientConfig
-	scrapeConfig.HTTPClientConfig.TLSConfig.InsecureSkipVerify = true
 	promCfg.ScrapeConfigs[0] = &scrapeConfig
 
 	// Add origins monitoring to director's prometheus instance
@@ -503,11 +517,10 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 	//WithInstrumentation(setPathWithPrefix("/api/v1"))
 	apiV1.Register(av1)
 
-	// TODO: Add authorization to director's prometheus endpoint once there's a
-	// way that user can obtain a token from director or we have a web UI for
-	// director
+	// TODO: Add authorization to director's PromQL endpoint once there's a
+	// way that user can be authenticated or we have a web UI for director
 	if !isDirector {
-		engine.GET("/api/v1.0/prometheus/*any", checkPromToken(av1))
+		engine.GET("/api/v1.0/prometheus/*any", promQueryEngineAuthHandler(av1))
 	} else {
 		engine.GET("/api/v1.0/prometheus/*any", func(ctx *gin.Context) {
 			av1.ServeHTTP(ctx.Writer, ctx.Request)
@@ -611,13 +624,11 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 	}
 	{
 		// Periodic scraper config reload to refresh service discovery token
-		// Only effective when the server instance is a director
 		cancel := make(chan struct{})
 		g.Add(
 			func() error {
-				// Coordinate exact refresh time with the token life time at
-				// director/director_api.go CreateDirectorSDToken()
-				ticker := time.NewTicker(50 * time.Minute)
+				refreshInterval := param.Monitoring_TokenRefreshInterval.GetDuration()
+				ticker := time.NewTicker(refreshInterval)
 				for {
 					select {
 					case <-cancel:
@@ -626,36 +637,97 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 						_ = err1
 						return nil
 					case <-ticker.C:
-						if !isDirector {
-							// Don't reload scraper config if the instance is not a director
-							continue
-						}
-						globalConfigMtx.Lock()
-						// Refresh token by manually re-configure scraper
-						if len(promCfg.ScrapeConfigs) < 2 {
-							return errors.New("Prometheus scraper config didn't include origins HTTP SD config. Length of configs less than 2.")
-						}
-						// Index 0 is the default config for servers
-						promCfg.ScrapeConfigs[1], err = configDirectorPromScraper()
+						// Create an anonymous function to always use defer for locks
+						err := func() error {
+							globalConfigMtx.Lock()
+							defer globalConfigMtx.Unlock()
+							// Create a new self-scrape token
+							selfScraperToken, err := CreatePromMetricToken()
+							if err != nil {
+								return fmt.Errorf("Failed to generate token for self-scraper at start: %v", err)
+							}
+
+							// We need a fresh ScrapeConfigs copy so that deepEqual can give us green light
+							// before reload the scrape config
+							tempConfig := config.Config{
+								GlobalConfig:  promCfg.GlobalConfig,
+								ScrapeConfigs: make([]*config.ScrapeConfig, 1),
+							}
+
+							if len(promCfg.ScrapeConfigs) < 1 {
+								return errors.New("Length of ScrapeConfigs is less than 1, abort reloading")
+							}
+
+							oldScrapeCfg := promCfg.ScrapeConfigs[0]
+
+							newScrapeConfig := config.DefaultScrapeConfig
+							newScrapeConfig.JobName = oldScrapeCfg.JobName
+							newScrapeConfig.Scheme = oldScrapeCfg.Scheme
+							scraperHttpClientConfig := common_config.HTTPClientConfig{
+								TLSConfig: common_config.TLSConfig{
+									// This is the self-scrape, so no need to enforce TLS check
+									InsecureSkipVerify: true,
+								},
+								Authorization: &common_config.Authorization{
+									Type:        "Bearer",
+									Credentials: common_config.Secret(selfScraperToken),
+								},
+							}
+							newScrapeConfig.HTTPClientConfig = scraperHttpClientConfig
+							newScrapeConfig.ServiceDiscoveryConfigs = make([]discovery.Config, 1)
+							newScrapeConfig.ServiceDiscoveryConfigs[0] = oldScrapeCfg.ServiceDiscoveryConfigs[0]
+							tempConfig.ScrapeConfigs[0] = &newScrapeConfig
+
+							if len(promCfg.ScrapeConfigs) > 1 {
+								for idx, cfg := range promCfg.ScrapeConfigs {
+									if idx != 0 {
+										tempConfig.ScrapeConfigs = append(tempConfig.ScrapeConfigs, cfg)
+									}
+								}
+							}
+
+							// Refresh the scraper token by reloading the scraper config
+							err = scrapeManager.ApplyConfig(&tempConfig)
+
+							if err != nil {
+								return fmt.Errorf("Failed to reapply scrape configs: %v", err)
+							}
+
+							if isDirector {
+								// Refresh service discovery token by re-configure scraper
+								if len(promCfg.ScrapeConfigs) < 2 {
+									return errors.New("Prometheus scraper config didn't include origins HTTP SD config. Length of configs less than 2.")
+								}
+								// Index 0 is the default config for servers
+								// Create new director-scrap token & service discovery token
+								promCfg.ScrapeConfigs[1], err = configDirectorPromScraper()
+								if err != nil {
+									return fmt.Errorf("Failed to generate token for director scraper when refresh it: %v", err)
+								}
+							}
+
+							c := make(map[string]discovery.Configs)
+							scfgs, err := promCfg.GetScrapeConfigs()
+							if err != nil {
+								return err
+							}
+							for _, v := range scfgs {
+								c[v.JobName] = v.ServiceDiscoveryConfigs
+							}
+							// We refresh the service discovery config for all the scrapers
+							if err := discoveryManagerScrape.ApplyConfig(c); err != nil {
+								err2 := level.Error(logger).Log("msg", fmt.Sprint("Scraper service discovery config periodic reload failed: ", err))
+								_ = err2
+								return err
+							}
+
+							err = level.Info(logger).Log("msg", "Successfully reloaded scraper and service discovery config")
+							_ = err
+							return nil
+						}()
 						if err != nil {
 							return err
 						}
-						globalConfigMtx.Unlock()
-						c := make(map[string]discovery.Configs)
-						scfgs, err := promCfg.GetScrapeConfigs()
-						if err != nil {
-							return err
-						}
-						for _, v := range scfgs {
-							c[v.JobName] = v.ServiceDiscoveryConfigs
-						}
-						if err := discoveryManagerScrape.ApplyConfig(c); err != nil {
-							err2 := level.Error(logger).Log("msg", fmt.Sprint("Scraper config periodic reload failed: ", err))
-							_ = err2
-							return err
-						}
-						err = level.Info(logger).Log("msg", "Successfully reloaded scraper config")
-						_ = err
 					}
 				}
 			},

@@ -117,8 +117,6 @@ func TestInitConfig(t *testing.T) {
 	// Set prefix to OSDF to ensure that config is being set
 	testingPreferredPrefix = "OSDF"
 
-	InitConfig() // Should set up pelican.yaml, osdf.yaml and defaults.yaml
-
 	// Create a temp config file to use
 	tempCfgFile, err := os.CreateTemp("", "pelican-*.yaml")
 	viper.Set("config", tempCfgFile.Name())
@@ -126,10 +124,12 @@ func TestInitConfig(t *testing.T) {
 		t.Fatalf("Failed to make temp file: %v", err)
 	}
 
+	InitConfig() // Should set up pelican.yaml, osdf.yaml and defaults.yaml
+
 	// Check if server address is correct by defaults.yaml
-	assert.True(t, param.Server_Address.GetString() == "0.0.0.0")
+	assert.Equal(t, "0.0.0.0", param.Server_Address.GetString())
 	// Check that Federation Discovery url is correct by osdf.yaml
-	assert.True(t, param.Federation_DiscoveryUrl.GetString() == "osg-htc.org")
+	assert.Equal(t, "osg-htc.org", param.Federation_DiscoveryUrl.GetString())
 
 	viper.Set("Server.Address", "1.1.1.1") // should write to temp config file
 	if err := viper.WriteConfigAs(tempCfgFile.Name()); err != nil {
@@ -140,11 +140,16 @@ func TestInitConfig(t *testing.T) {
 	InitConfig()
 
 	// Check if server address overrides the default
-	assert.True(t, param.Server_Address.GetString() == "1.1.1.1")
+	assert.Equal(t, "1.1.1.1", param.Server_Address.GetString())
 	viper.Reset()
 
 	//Test if prefix is not set, should not be able to find osdfYaml configuration
 	testingPreferredPrefix = ""
+	tempCfgFile, err = os.CreateTemp("", "pelican-*.yaml")
+	viper.Set("config", tempCfgFile.Name())
+	if err != nil {
+		t.Fatalf("Failed to make temp file: %v", err)
+	}
 	InitConfig()
-	assert.True(t, param.Federation_DiscoveryUrl.GetString() == "")
+	assert.Equal(t, "", param.Federation_DiscoveryUrl.GetString())
 }

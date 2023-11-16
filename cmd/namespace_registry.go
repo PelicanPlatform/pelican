@@ -27,7 +27,7 @@ var (
 	namespaceRegistryCmd = &cobra.Command{
 		Use: "registry",
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			err := config.InitServer()
+			err := initRegistry()
 			return err
 		},
 		Short: "Interact with a Pelican namespace registry service",
@@ -54,6 +54,13 @@ var (
 		SilenceUsage: true,
 	}
 )
+
+func initRegistry() error {
+	err := config.InitServer()
+	cobra.CheckErr(err)
+
+	return err
+}
 
 func init() {
 	// Tie the registryServe command to the root CLI command
