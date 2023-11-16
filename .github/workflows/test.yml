@@ -40,6 +40,8 @@ jobs:
         args: build --single-target --clean --snapshot
   test-ubuntu:
     runs-on: ubuntu-latest
+    container:
+      image: hub.opensciencegrid.org/pelican_platform/pelican-dev:latest-itb
     steps:
     - name: Checkout code
       uses: actions/checkout@v3
@@ -56,7 +58,6 @@ jobs:
           ${{ runner.os }}-nextjs-${{ hashFiles('**/package-lock.json') }}-
     - name: Test
       run: |
-        sudo apt-get install -y xrootd scitokens-cpp
         make web-build
         go test -coverpkg=./... -coverprofile=coverage.out -covermode=count ./...
     - name: Get total code coverage

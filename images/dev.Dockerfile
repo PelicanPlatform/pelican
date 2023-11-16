@@ -25,6 +25,9 @@ baseurl=https://repo.goreleaser.com/yum/ \n\
 enabled=1 \n\
 gpgcheck=0' > /etc/yum.repos.d/goreleaser.repo
 
+# Install proper version of nodejs so that make web-build works
+RUN dnf module install -y nodejs:18
+
 # Install goreleaser and various other packages we need
 RUN yum install -y goreleaser npm xrootd xrootd-server xrootd-client nano xrootd-scitokens \
     xrootd-voms xrdcl-http jq procps docker make curl java-17-openjdk-headless \
