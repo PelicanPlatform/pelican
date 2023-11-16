@@ -460,7 +460,6 @@ func InitServer() error {
 		viper.SetDefault("Origin.Url", fmt.Sprintf("https://%v", param.Server_Hostname.GetString()))
 	}
 
-
 	webPort := param.Server_WebPort.GetInt()
 	viper.SetDefault("Server.ExternalWebUrl", fmt.Sprint("https://", hostname, ":", webPort))
 	externalAddressStr := param.Server_ExternalWebUrl.GetString()
