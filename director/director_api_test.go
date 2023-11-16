@@ -7,28 +7,30 @@ import (
 
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
+var mockOriginServerAd ServerAd = ServerAd{
+	Name:      "test-origin-server",
+	AuthURL:   url.URL{},
+	URL:       url.URL{},
+	Type:      OriginType,
+	Latitude:  123.05,
+	Longitude: 456.78,
+}
+
+var mockCacheServerAd ServerAd = ServerAd{
+	Name:      "test-cache-server",
+	AuthURL:   url.URL{},
+	URL:       url.URL{},
+	Type:      CacheType,
+	Latitude:  45.67,
+	Longitude: 123.05,
+}
+
+const pathPreix string = "/foo/bar/"
+
 func TestListNamespaces(t *testing.T) {
-	var mockOriginServerAd ServerAd = ServerAd{
-		Name:      "test-origin-server",
-		AuthURL:   url.URL{},
-		URL:       url.URL{},
-		Type:      OriginType,
-		Latitude:  123.05,
-		Longitude: 456.78,
-	}
-
-	var mockCacheServerAd ServerAd = ServerAd{
-		Name:      "test-cache-server",
-		AuthURL:   url.URL{},
-		URL:       url.URL{},
-		Type:      CacheType,
-		Latitude:  45.67,
-		Longitude: 123.05,
-	}
-
-	const pathPreix string = "/foo/bar/"
 
 	mockNamespaceAds := func(size int, serverPrefix string) []NamespaceAd {
 		namespaceAds := make([]NamespaceAd, size)
@@ -116,5 +118,30 @@ func TestListNamespaces(t *testing.T) {
 
 		// Should not show namespace from cache server
 		assert.Equal(t, 0, len(ns), "List is not empty for namespace cache with entry from cache server.")
+	})
+}
+
+func TestListServerAds(t *testing.T) {
+
+	t.Run("emtpy-cache", func(t *testing.T) {
+		serverAds.DeleteAll()
+		ads := ListServerAds([]ServerType{OriginType, CacheType})
+		assert.Equal(t, 0, len(ads))
+	})
+
+	t.Run("get-by-server-type", func(t *testing.T) {
+		serverAds.DeleteAll()
+		serverAds.Set(mockOriginServerAd, []NamespaceAd{}, ttlcache.DefaultTTL)
+		serverAds.Set(mockCacheServerAd, []NamespaceAd{}, ttlcache.DefaultTTL)
+		adsAll := ListServerAds([]ServerType{OriginType, CacheType})
+		assert.Equal(t, 2, len(adsAll))
+
+		adsOrigin := ListServerAds([]ServerType{OriginType})
+		require.Equal(t, 1, len(adsOrigin))
+		assert.True(t, adsOrigin[0] == mockOriginServerAd)
+
+		adsCache := ListServerAds([]ServerType{CacheType})
+		require.Equal(t, 1, len(adsCache))
+		assert.True(t, adsCache[0] == mockCacheServerAd)
 	})
 }

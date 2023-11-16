@@ -31,6 +31,9 @@ import (
 )
 
 func ConfigureMetrics(engine *gin.Engine, isDirector bool) error {
+	// Add authorization to /metric endpoint
+	engine.Use(promMetricAuthHandler)
+
 	err := ConfigureEmbeddedPrometheus(engine, isDirector)
 	if err != nil {
 		return err
