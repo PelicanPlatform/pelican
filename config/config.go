@@ -466,6 +466,7 @@ func InitServer() error {
 	externalAddressStr := param.Server_ExternalWebUrl.GetString()
 	if _, err = url.Parse(externalAddressStr); err != nil {
 		return errors.Wrap(err, fmt.Sprint("Invalid Server.ExternalWebUrl: ", externalAddressStr))
+	}
 
 	setupTransport()
 
