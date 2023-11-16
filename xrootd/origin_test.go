@@ -24,6 +24,8 @@ import (
 	"context"
 	"crypto/elliptic"
 	"net/http"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -46,11 +48,18 @@ func TestOrigin(t *testing.T) {
 	viper.Set("Origin.EnableVoms", false)
 	viper.Set("TLSSkipVerify", true)
 
-	viper.Set("ConfigDir", t.TempDir())
+	// Create our own temp directory (for some reason t.TempDir() does not play well with xrootd)
+	tmpPath := "/tmp/XRootD-Test_Origin"
+	viper.Set("ConfigDir", tmpPath)
+	viper.Set("Xrootd.RunLocation", filepath.Join(tmpPath, "xrootd"))
+	t.Cleanup(func() {
+		os.RemoveAll(tmpPath)
+	})
 	// Increase the log level; otherwise, its difficult to debug failures
 	viper.Set("Logging.Level", "Debug")
 	config.InitConfig()
 	err := config.InitServer()
+
 	require.NoError(t, err)
 
 	err = config.GeneratePrivateKey(param.Server_TLSKey.GetString(), elliptic.P256())
