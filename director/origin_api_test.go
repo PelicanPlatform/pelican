@@ -31,7 +31,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 	viper.Set("Federation.NamespaceURL", "https://get-your-tokens.org")
 	viper.Set("Federation.DirectorURL", "https://director-url.org")
 
-	kSet, err := config.LoadPublicKey("", kfile)
+	kSet, err := config.GetIssuerPublicJWKS()
 	ar := MockCache{
 		GetFn: func(key string, keyset *jwk.Set) (jwk.Set, error) {
 			if key != "https://get-your-tokens.org/api/v1.0/registry/test-namespace/.well-known/issuer.jwks" {

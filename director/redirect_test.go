@@ -368,7 +368,7 @@ func TestDiscoverOrigins(t *testing.T) {
 	viper.Set("IssuerKey", kfile)
 
 	// Generate a private key to use for the test
-	_, err := config.LoadPublicKey("", kfile)
+	_, err := config.GetIssuerPublicJWKS()
 	assert.NoError(t, err, "Error generating private key")
 	// Get private key
 	privateKey, err := config.GetIssuerPrivateJWK()

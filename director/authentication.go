@@ -37,8 +37,7 @@ func discoveryHandler(ctx *gin.Context) {
 
 // Returns director's public key
 func jwksHandler(ctx *gin.Context) {
-	issuerKeyfile := param.IssuerKey.GetString()
-	key, err := config.LoadPublicKey("", issuerKeyfile)
+	key, err := config.GetIssuerPublicJWKS()
 	if err != nil {
 		log.Errorf("Failed to load director's public key: %v", err)
 		ctx.JSON(500, gin.H{"error": "Failed to load director's public key"})

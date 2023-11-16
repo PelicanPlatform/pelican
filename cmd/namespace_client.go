@@ -37,7 +37,6 @@ import (
 var withIdentity bool
 var prefix string
 var pubkeyPath string
-var privkeyPath string
 
 func getNamespaceEndpoint() (string, error) {
 	namespaceEndpoint := param.Federation_NamespaceUrl.GetString()
@@ -61,15 +60,6 @@ func registerANamespace(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	privkey := privkeyPath
-	if privkey == "" {
-		privkey = param.IssuerKey.GetString()
-	}
-	if privkey == "" {
-		log.Error("Private key file is not set; specify its location with the --privkey option or by setting the IssuerKey configuration variable")
-		os.Exit(1)
-	}
-
 	namespaceEndpoint, err := getNamespaceEndpoint()
 	if err != nil {
 		log.Errorln("Failed to get NamespaceURL from config: ", err)
@@ -87,7 +77,7 @@ func registerANamespace(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	publicKey, err := config.LoadPublicKey("", privkey)
+	publicKey, err := config.GetIssuerPublicJWKS()
 	if err != nil {
 		log.Error("Error: Failed to retrieve public key: ", err)
 		os.Exit(1)
@@ -105,7 +95,7 @@ func registerANamespace(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	privateKeyRaw, err := config.LoadPrivateKey(privkey)
+	privateKeyRaw, err := config.LoadPrivateKey(param.IssuerKey.GetString())
 	if err != nil {
 		log.Error("Failed to load private key", err)
 		os.Exit(1)
@@ -247,13 +237,21 @@ func init() {
 	deleteCmd.Flags().StringVar(&prefix, "prefix", "", "prefix for delete namespace")
 
 	namespaceCmd.PersistentFlags().String("namespace-url", "", "Endpoint for the namespace registry")
-	err := viper.BindPFlag("NamespaceURL", namespaceCmd.PersistentFlags().Lookup("namespace-url"))
-	if err != nil {
+	// TODO: I don't think this flag is bound to any viper config name we have.
+	// Should instead be Federation.NamespaceURL
+	if err := viper.BindPFlag("NamespaceURL", namespaceCmd.PersistentFlags().Lookup("namespace-url")); err != nil {
 		panic(err)
 	}
 
 	namespaceCmd.PersistentFlags().StringVar(&pubkeyPath, "pubkey", "", "Path to the public key")
-	namespaceCmd.PersistentFlags().StringVar(&privkeyPath, "privkey", "", "Path to the private key")
+	namespaceCmd.PersistentFlags().String("privkey", "", "Path to the private key")
+	// Don't override IssuerKey if the flag value is empty
+	if namespaceCmd.PersistentFlags().Lookup("privkey").Value.String() != "" {
+		if err := viper.BindPFlag("IssuerKey", namespaceCmd.PersistentFlags().Lookup("privkey")); err != nil {
+			panic(err)
+		}
+	}
+
 	namespaceCmd.AddCommand(registerCmd)
 	namespaceCmd.AddCommand(deleteCmd)
 	namespaceCmd.AddCommand(listCmd)

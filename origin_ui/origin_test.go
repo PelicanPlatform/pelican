@@ -77,7 +77,7 @@ func TestMain(m *testing.M) {
 	}
 
 	//Get keys
-	_, err = config.GenerateIssuerJWKS()
+	_, err = config.GetIssuerPublicJWKS()
 	if err != nil {
 		fmt.Println("Error issuing jwks")
 		os.Exit(1)
