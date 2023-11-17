@@ -191,7 +191,7 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 	}
 
 	// Generate the origin private and public keys
-	_, err := config.LoadPublicKey("", kfile)
+	_, err := config.GetIssuerPublicJWKS()
 
 	if err != nil {
 		t.Fatal(err)

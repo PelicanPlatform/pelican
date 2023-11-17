@@ -126,7 +126,7 @@ func TestCreateEncodedToken(t *testing.T) {
 	viper.Set("IssuerKey", kfile)
 
 	// Generate a private key to use for the test
-	_, err := config.LoadPublicKey("", kfile)
+	_, err := config.GetIssuerPublicJWKS()
 	assert.NoError(t, err)
 
 	// Test that the wlcg profile works

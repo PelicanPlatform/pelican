@@ -51,7 +51,7 @@ func TestServeNamespaceRegistry(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	engine := gin.Default()
 
-	_, err = config.LoadPublicKey("", ikey)
+	_, err = config.GetIssuerPublicJWKS()
 	require.NoError(t, err)
 	privKey, err := config.GetIssuerPrivateJWK()
 	require.NoError(t, err)

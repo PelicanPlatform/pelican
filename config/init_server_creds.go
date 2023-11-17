@@ -42,11 +42,17 @@ import (
 )
 
 var (
-	privateKey atomic.Pointer[jwk.Key]
+	// This is the private JWK for the server to sign tokens. This key remains
+	// the same if the IssuerKey is unchanged
+	issuerPrivateJWK atomic.Pointer[jwk.Key]
 )
 
-func LoadPrivateKey(tlsKey string) (*ecdsa.PrivateKey, error) {
-	rest, err := os.ReadFile(tlsKey)
+// Return a pointer to an ECDSA private key read from keyLocation.
+//
+// This can be used to load any ECDSA private key we generated for
+// various purposes including IssuerKey, TLSKey, and TLSCAKey
+func LoadPrivateKey(keyLocation string) (*ecdsa.PrivateKey, error) {
+	rest, err := os.ReadFile(keyLocation)
 	if err != nil {
 		return nil, nil
 	}
@@ -72,56 +78,82 @@ func LoadPrivateKey(tlsKey string) (*ecdsa.PrivateKey, error) {
 		}
 	}
 	if privateKey == nil {
-		return nil, fmt.Errorf("Private key file, %v, contains no private key", tlsKey)
+		return nil, fmt.Errorf("Private key file, %v, contains no private key", keyLocation)
 	}
 	return privateKey, nil
 }
 
-func LoadPublicKey(existingJWKS string, issuerKeyFile string) (jwk.Set, error) {
-	jwks := jwk.NewSet()
-	if existingJWKS != "" {
-		var err error
-		jwks, err = jwk.ReadFile(existingJWKS)
+// Check if a file exists at keyLocation, return the file if so; otherwise, generate
+// and writes a PEM-encoded ECDSA-encrypted private key with elliptic curve assigned
+// by curve
+func GeneratePrivateKey(keyLocation string, curve elliptic.Curve) error {
+	uid, err := GetDaemonUID()
+	if err != nil {
+		return err
+	}
+
+	gid, err := GetDaemonGID()
+	if err != nil {
+		return err
+	}
+	user, err := GetDaemonUser()
+	if err != nil {
+		return err
+	}
+	groupname, err := GetDaemonGroup()
+	if err != nil {
+		return err
+	}
+
+	if file, err := os.Open(keyLocation); err == nil {
+		defer file.Close()
+		// Make sure key is valid if there is one
+		if _, err := LoadPrivateKey(keyLocation); err != nil {
+			return err
+		}
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return errors.Wrap(err, "Failed to load private key due to I/O error")
+	}
+	keyDir := filepath.Dir(keyLocation)
+	if err := MkdirAll(keyDir, 0750, -1, gid); err != nil {
+		return err
+	}
+	// In this case, the private key file doesn't exist.
+	file, err := os.OpenFile(keyLocation, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0400)
+	if err != nil {
+		return errors.Wrap(err, "Failed to create new private key file")
+	}
+	defer file.Close()
+	priv, err := ecdsa.GenerateKey(curve, rand.Reader)
+	if err != nil {
+		return err
+	}
+	// Windows does not have "chown", has to work differently
+	currentOS := runtime.GOOS
+	if currentOS == "windows" {
+		cmd := exec.Command("icacls", keyLocation, "/grant", user+":F")
+		output, err := cmd.CombinedOutput()
 		if err != nil {
-			return nil, errors.Wrap(err, "Failed to read issuer JWKS file")
+			return errors.Wrapf(err, "Failed to chown generated key %v to daemon group %v: %s",
+				keyLocation, groupname, string(output))
+		}
+	} else { // Else we are running on linux/mac
+		if err = os.Chown(keyLocation, uid, gid); err != nil {
+			return errors.Wrapf(err, "Failed to chown generated key %v to daemon group %v",
+				keyLocation, groupname)
 		}
 	}
 
-	if err := GeneratePrivateKey(issuerKeyFile, elliptic.P256()); err != nil {
-		return nil, errors.Wrap(err, "Failed to generate new private key")
-	}
-	contents, err := os.ReadFile(issuerKeyFile)
+	bytes, err := x509.MarshalPKCS8PrivateKey(priv)
 	if err != nil {
-		return nil, errors.Wrap(err, "Failed to read issuer key file")
+		return err
 	}
-	key, err := jwk.ParseKey(contents, jwk.WithPEM(true))
-	if err != nil {
-		return nil, errors.Wrapf(err, "Failed to parse issuer key file %v", issuerKeyFile)
+	priv_block := pem.Block{Type: "PRIVATE KEY", Bytes: bytes}
+	if err = pem.Encode(file, &priv_block); err != nil {
+		return err
 	}
-
-	// Add the algorithm to the key, needed for verifying tokens elsewhere
-	err = key.Set(jwk.AlgorithmKey, jwa.ES256)
-	if err != nil {
-		return nil, errors.Wrap(err, "Failed to add alg specification to key header")
-	}
-	// Store the private key to global var for access
-	// The key has kid attached
-	privateKey.Store(&key)
-
-	err = jwk.AssignKeyID(key)
-	if err != nil {
-		return nil, errors.Wrap(err, "Failed to assign key ID to private key")
-	}
-
-	pkey, err := jwk.PublicKeyOf(key)
-	if err != nil {
-		return nil, errors.Wrapf(err, "Failed to generate public key from file %v", issuerKeyFile)
-	}
-
-	if err = jwks.AddKey(pkey); err != nil {
-		return nil, errors.Wrap(err, "Failed to add public key to new JWKS")
-	}
-	return jwks, nil
+	return nil
 }
 
 // Helper function to generate a Certificate Authority (CA) certificate and its private key
@@ -399,92 +431,93 @@ func GenerateCert() error {
 	return nil
 }
 
-func GeneratePrivateKey(keyLocation string, curve elliptic.Curve) error {
-	uid, err := GetDaemonUID()
+// Helper function to load the issuer/server's private key to sign tokens it issues.
+// Only intended to be called internally
+func loadIssuerPrivateJWK(issuerKeyFile string) (jwk.Key, error) {
+	// Check to see if we already had an IssuerKey or generate one
+	if err := GeneratePrivateKey(issuerKeyFile, elliptic.P256()); err != nil {
+		return nil, errors.Wrap(err, "Failed to generate new private key")
+	}
+	contents, err := os.ReadFile(issuerKeyFile)
 	if err != nil {
-		return err
+		return nil, errors.Wrap(err, "Failed to read issuer key file")
+	}
+	key, err := jwk.ParseKey(contents, jwk.WithPEM(true))
+	if err != nil {
+		return nil, errors.Wrapf(err, "Failed to parse issuer key file %v", issuerKeyFile)
 	}
 
-	gid, err := GetDaemonGID()
+	// Add the algorithm to the key, needed for verifying tokens elsewhere
+	err = key.Set(jwk.AlgorithmKey, jwa.ES256)
 	if err != nil {
-		return err
-	}
-	user, err := GetDaemonUser()
-	if err != nil {
-		return err
-	}
-	groupname, err := GetDaemonGroup()
-	if err != nil {
-		return err
+		return nil, errors.Wrap(err, "Failed to add alg specification to key header")
 	}
 
-	if file, err := os.Open(keyLocation); err == nil {
-		file.Close()
-		return nil
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return errors.Wrap(err, "Failed to load private key due to I/O error")
-	}
-	keyDir := filepath.Dir(keyLocation)
-	if err := MkdirAll(keyDir, 0750, -1, gid); err != nil {
-		return err
-	}
-	// In this case, the private key file doesn't exist.
-	file, err := os.OpenFile(keyLocation, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0400)
+	// Assign key id to the private key so that the public key obtainer thereafter
+	// has the same kid
+	err = jwk.AssignKeyID(key)
 	if err != nil {
-		return errors.Wrap(err, "Failed to create new private key file")
+		return nil, errors.Wrap(err, "Failed to assign key ID to private key")
 	}
-	defer file.Close()
-	priv, err := ecdsa.GenerateKey(curve, rand.Reader)
-	if err != nil {
-		return err
-	}
-	// Windows does not have "chown", has to work differently
-	currentOS := runtime.GOOS
-	if currentOS == "windows" {
-		cmd := exec.Command("icacls", keyLocation, "/grant", user+":F")
-		output, err := cmd.CombinedOutput()
+
+	issuerPrivateJWK.Store(&key)
+
+	return key, nil
+}
+
+// Helper function to load the issuer/server's public key for other servers
+// to verify the token signed by this server. Only intended to be called internally
+func loadIssuerPublicJWKS(existingJWKS string, issuerKeyFile string) (jwk.Set, error) {
+	jwks := jwk.NewSet()
+	if existingJWKS != "" {
+		var err error
+		jwks, err = jwk.ReadFile(existingJWKS)
 		if err != nil {
-			return errors.Wrapf(err, "Failed to chown generated key %v to daemon group %v: %s",
-				keyLocation, groupname, string(output))
-		}
-	} else { // Else we are running on linux/mac
-		if err = os.Chown(keyLocation, uid, gid); err != nil {
-			return errors.Wrapf(err, "Failed to chown generated key %v to daemon group %v",
-				keyLocation, groupname)
+			return nil, errors.Wrap(err, "Failed to read issuer JWKS file")
 		}
 	}
-
-	bytes, err := x509.MarshalPKCS8PrivateKey(priv)
+	// This returns issuerPrivateJWK if it's non-nil, or find and parse private JWK
+	// located at IssuerKey if there is one, or generate a new private key
+	key, err := loadIssuerPrivateJWK(issuerKeyFile)
 	if err != nil {
-		return err
+		return nil, errors.Wrap(err, "Failed to load issuer private JWK")
 	}
-	priv_block := pem.Block{Type: "PRIVATE KEY", Bytes: bytes}
-	if err = pem.Encode(file, &priv_block); err != nil {
-		return err
+
+	pkey, err := jwk.PublicKeyOf(key)
+	if err != nil {
+		return nil, errors.Wrapf(err, "Failed to generate public key from file %v", issuerKeyFile)
 	}
-	return nil
+
+	if err = jwks.AddKey(pkey); err != nil {
+		return nil, errors.Wrap(err, "Failed to add public key to new JWKS")
+	}
+	return jwks, nil
 }
 
-func GenerateIssuerJWKS() (jwk.Set, error) {
-	existingJWKS := param.Server_IssuerJwks.GetString()
-	issuerKeyFile := param.IssuerKey.GetString()
-	return LoadPublicKey(existingJWKS, issuerKeyFile)
-}
-
+// Return the private JWK for the server to sign tokens
 func GetIssuerPrivateJWK() (jwk.Key, error) {
-	key := privateKey.Load()
+	key := issuerPrivateJWK.Load()
 	if key == nil {
 		issuerKeyFile := param.IssuerKey.GetString()
-		contents, err := os.ReadFile(issuerKeyFile)
+		newKey, err := loadIssuerPrivateJWK(issuerKeyFile)
 		if err != nil {
-			return nil, errors.Wrap(err, "Failed to read key file")
+			return nil, errors.Wrap(err, "Failed to load issuer private key")
 		}
-		newKey, err := jwk.ParseKey(contents, jwk.WithPEM(true))
-		if err != nil {
-			return nil, errors.Wrapf(err, "Failed to parse key file")
-		}
-		privateKey.Store(&newKey)
 		key = &newKey
 	}
 	return *key, nil
+}
+
+// Check if a valid JWKS file exists at Server_IssuerJwks, return that file if so;
+// otherwise, generate and store a private key at IssuerKey and return a public key of
+// that private key, encapsulated in the JWKS format
+//
+// The private key generated is loaded to issuerPrivateJWK variable which is used for
+// this server to sign JWTs it issues. The public key returned will be exposed publicly
+// for other servers to verify JWTs signed by this server, typically via a well-known URL
+// i.e. "/.well-known/issuer.jwks"
+func GetIssuerPublicJWKS() (jwk.Set, error) {
+	existingJWKS := param.Server_IssuerJwks.GetString()
+	issuerKeyFile := param.IssuerKey.GetString()
+	return loadIssuerPublicJWKS(existingJWKS, issuerKeyFile)
 }

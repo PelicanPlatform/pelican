@@ -189,8 +189,7 @@ func VerifyDirectorSDToken(strToken string) (bool, error) {
 	// Given that this function is intended to be called on the same director server
 	// that issues the token. so it's safe to skip getting the public key
 	// from director's discovery URL.
-	issuerKeyfile := param.IssuerKey.GetString()
-	key, err := config.LoadPublicKey("", issuerKeyfile)
+	key, err := config.GetIssuerPublicJWKS()
 	if err != nil {
 		return false, err
 	}
