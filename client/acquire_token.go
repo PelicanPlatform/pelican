@@ -113,7 +113,7 @@ func TokenIsExpired(jwtSerialized string) bool {
 }
 
 func RegisterClient(namespace namespaces.Namespace) (*config.PrefixEntry, error) {
-	issuer, err := oauth2.GetIssuerMetadata(*namespace.CredentialGen.Issuer)
+	issuer, err := config.GetIssuerMetadata(*namespace.CredentialGen.Issuer)
 	if err != nil {
 		return nil, err
 	}
@@ -236,7 +236,7 @@ func AcquireToken(destination *url.URL, namespace namespaces.Namespace, opts con
 			RefreshToken: acceptableToken.RefreshToken,
 			Expiry:       time.Unix(0, 0),
 		}
-		issuerInfo, err := oauth2.GetIssuerMetadata(issuer)
+		issuerInfo, err := config.GetIssuerMetadata(issuer)
 		if err == nil {
 			upstreamConfig := oauth2_upstream.Config{
 				ClientID:     prefixEntry.ClientID,

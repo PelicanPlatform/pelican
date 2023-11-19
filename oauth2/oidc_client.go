@@ -23,6 +23,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
@@ -70,7 +71,11 @@ func ServerOIDCClient() (result Config, err error) {
 	}
 
 	// Load OIDC.DeviceAuthEndpoint
-	deviceAuthEndpoint := param.OIDC_DeviceAuthEndpoint.GetString()
+	deviceAuthEndpoint, err := config.GetOIDCDeviceAuthEndpoint()
+	if err != nil {
+		err = errors.Wrap(err, "Unable to get device authentication endpoint for OIDC issuer")
+		return
+	}
 	if deviceAuthEndpoint == "" {
 		err = errors.New("Nothing set for config parameter OIDC.DeviceAuthEndpoint")
 		return
@@ -83,7 +88,11 @@ func ServerOIDCClient() (result Config, err error) {
 	result.Endpoint.DeviceAuthURL = deviceAuthEndpointURL.String()
 
 	// Load OIDC.TokenEndpoint
-	tokenEndpoint := param.OIDC_TokenEndpoint.GetString()
+	tokenEndpoint, err := config.GetOIDCTokenEndpoint()
+	if err != nil {
+		err = errors.Wrap(err, "Unable to get token endpoint for OIDC issuer")
+		return
+	}
 	if tokenEndpoint == "" {
 		err = errors.New("Nothing set for config parameter OIDC.TokenEndpoint")
 		return
@@ -96,10 +105,13 @@ func ServerOIDCClient() (result Config, err error) {
 	result.Endpoint.TokenURL = tokenAuthEndpointURL.String()
 
 	// Load OIDC.UserInfoEndpoint
-	userInfoEndpoint := param.OIDC_UserInfoEndpoint.GetString()
+	userInfoEndpoint, err := config.GetOIDCUserInfoEndpoint()
+	if err != nil {
+		err = errors.Wrap(err, "Unable to get user info endpoint for OIDC issuer")
+		return
+	}
 	if userInfoEndpoint == "" {
 		err = errors.New("Nothing set for config parameter OIDC.UserInfoEndpoint")
-		return
 	}
 	userInfoEndpointURL, err := url.Parse(userInfoEndpoint)
 	if err != nil {

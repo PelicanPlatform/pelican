@@ -16,7 +16,7 @@
  *
  ***************************************************************/
 
-package oauth2
+package config
 
 import (
 	"encoding/json"
@@ -32,7 +32,9 @@ type OauthIssuer struct {
 	DeviceAuthURL   string   `json:"device_authorization_endpoint"`
 	TokenURL        string   `json:"token_endpoint"`
 	RegistrationURL string   `json:"registration_endpoint"`
+	UserInfoURL     string   `json:"userinfo_endpoint"`
 	GrantTypes      []string `json:"grant_types_supported"`
+	ScopesSupported []string `json:"scopes_supported"`
 }
 
 func GetIssuerMetadata(issuer_url string) (*OauthIssuer, error) {
