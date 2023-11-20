@@ -237,9 +237,9 @@ components: ["client"]
 ############################
 name: Origin.Url
 description: >-
-  The origin's configured URL, as reported to XRootD.
-type: string
-default: Hostname
+  The origin's configured URL, as reported to XRootD. This is the file transfer endpoint for the origin.
+type: url
+default: https://${Server.Hostname}:${Xrootd.Port}
 components: ["origin"]
 ---
 name: Origin.ExportVolume
