@@ -138,7 +138,7 @@ func getClientSecret() {
 	}
 
 	clientFile := param.OIDC_ClientSecretFile.GetString()
-	if clientFile != "" {
+	if clientFile == "" {
 		clientError = errors.New("An OIDC Client Secret file must be specified in the config " +
 			"(OIDC.ClientSecretFile), or the secret must be provided via the environment " +
 			"variable PELICAN_OIDCCLIENTSECRET")

@@ -21,6 +21,7 @@ import (
 	_ "embed"
 	"os"
 	"path/filepath"
+	"strings"
 	"text/template"
 
 	"github.com/pelicanplatform/pelican/config"
@@ -37,6 +38,29 @@ type (
 		IssuerURL               string
 		JwksLocation            string
 		ScitokensServerLocation string
+		ScopesRequested         map[string]bool
+		OIDCIssuerURL           string
+		OIDCAuthorizationURL    string
+		OIDCTokenEndpointURL    string
+		OIDCDeviceAuthURL       string
+		OIDCUserInfoURL         string
+		OIDCAuthnReqs           []oidcAuthenticationRequirements
+		OIDCAuthnUserClaim      string
+		GroupSource             string
+		GroupFile               string
+		GroupRequirements       []string
+		GroupAuthzTemplates     []authzTemplate
+		UserAuthzTemplates      []authzTemplate
+	}
+
+	oidcAuthenticationRequirements struct {
+		Claim string `mapstructure:"claim"`
+		Value string `mapstructure:"value"`
+	}
+
+	authzTemplate struct {
+		Actions []string `mapstructure:"actions"`
+		Prefix  string   `mapstructure:"prefix"`
 	}
 )
 
@@ -46,6 +70,12 @@ var (
 
 	//go:embed resources/proxy-config.xml
 	proxyConfigTmpl string
+
+	//go:embed resources/policies.qdl
+	policiesQdlTmpl string
+
+	//go:embed resources/id_token_policies.qdl
+	idTokenPoliciesQdlTmpl string
 )
 
 func writeOA4MPConfig(oconf oa4mpConfig, fname, templateInput string) error {
@@ -56,17 +86,15 @@ func writeOA4MPConfig(oconf oa4mpConfig, fname, templateInput string) error {
 
 	templ := template.Must(template.New(fname).Parse(templateInput))
 
-	etcPath := filepath.Join(param.Issuer_ScitokensServerLocation.GetString(), "etc")
-	configPath := filepath.Join(etcPath, fname)
-	file, err := os.OpenFile(configPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0640)
+	file, err := os.OpenFile(fname, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0640)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
 
-	if err = os.Chown(configPath, -1, user.Gid); err != nil {
+	if err = os.Chown(fname, -1, user.Gid); err != nil {
 		return errors.Wrapf(err, "Unable to change ownership of configuration file %v"+
-			" to desired daemon gid %v", configPath, user.Gid)
+			" to desired daemon gid %v", fname, user.Gid)
 	}
 
 	return templ.Execute(file, oconf)
@@ -80,20 +108,134 @@ func ConfigureOA4MP() (launcher daemon.Launcher, err error) {
 		return
 	}
 
+	// For now, we only request the openid scope -- but OA4MP requires us to list all the ones we
+	// don't want as well.
+	scopesSupported, err := config.GetOIDCSupportedScopes()
+	if err != nil {
+		err = errors.Wrap(err, "Unable to launch token issuer due to OIDC configuration issue")
+		return
+	}
+	scopesRequested := make(map[string]bool, len(scopesSupported))
+	for _, scope := range scopesSupported {
+		switch scope {
+		case "openid":
+			scopesRequested[scope] = true
+		default:
+			scopesRequested[scope] = false
+		}
+	}
+
+	oidcIssuerURL := param.OIDC_Issuer.GetString()
+	if oidcIssuerURL == "" {
+		err = errors.New("OIDC.Issuer not set in the configuration")
+		return
+	}
+	oidcAuthzURL, err := config.GetOIDCAuthorizationEndpoint()
+	if err != nil {
+		err = errors.Wrap(err, "OIDC authorization endpoint not available")
+		return
+	}
+	oidcTokenURL, err := config.GetOIDCTokenEndpoint()
+	if err != nil {
+		err = errors.Wrap(err, "OIDC token endpoint not available")
+		return
+	}
+	oidcDeviceAuthURL, err := config.GetOIDCDeviceAuthEndpoint()
+	if err != nil {
+		err = errors.Wrap(err, "OIDC device auth endpoint not available")
+		return
+	}
+	oidcUserInfoURL, err := config.GetOIDCUserInfoEndpoint()
+	if err != nil {
+		err = errors.Wrap(err, "OIDC user info endpoint not available")
+		return
+	}
+
+	oidcAuthnReqs := []oidcAuthenticationRequirements{}
+	if err = param.Issuer_OIDCAuthenticationRequirements.Unmarshal(&oidcAuthnReqs); err != nil {
+		err = errors.Wrap(err, "Failed to parse the Issuer.OIDCAuthenticationRequirements config")
+		return
+	}
+
+	oidcAuthnUserClaim := param.Issuer_OIDCAuthenticationUserClaim.GetString()
+	groupSource := param.Issuer_GroupSource.GetString()
+	groupFile := param.Issuer_GroupFile.GetString()
+	if groupFile == "" && groupSource == "file" {
+		err = errors.New("Issuer.GroupFile must be set to use the 'file' group source")
+		return
+	}
+	groupReqs := param.Issuer_GroupRequirements.GetStringSlice()
+
+	authzTemplates := []authzTemplate{}
+	if err = param.Issuer_AuthorizationTemplates.Unmarshal(&authzTemplates); err != nil {
+		err = errors.Wrap(err, "Failed to parse the Issuer.AuthorizationTemplates config")
+		return
+	}
+	groupAuthzTemplates := []authzTemplate{}
+	userAuthzTemplates := []authzTemplate{}
+	for _, authz := range authzTemplates {
+		scope_actions := []string{}
+		for _, scope := range authz.Actions {
+			switch scope {
+			case "read":
+				scope_actions = append(scope_actions, "storage.read")
+			case "write":
+				scope_actions = append(scope_actions, "storage.modify")
+			case "create":
+				scope_actions = append(scope_actions, "storage.create")
+			case "modify":
+				scope_actions = append(scope_actions, "storage.modify")
+			default:
+				scope_actions = append(scope_actions, scope)
+			}
+		}
+		authz.Actions = scope_actions
+		if strings.Contains(authz.Prefix, "$GROUP") {
+			groupAuthzTemplates = append(groupAuthzTemplates, authz)
+		} else {
+			// If it's not a group template, we assume there's an entry per user
+			// (regardless of whether or not $USER is in the prefix template).
+			userAuthzTemplates = append(userAuthzTemplates, authz)
+		}
+	}
+
 	oconf := oa4mpConfig{
 		ClientID:                oauth2Client.ClientID,
 		ClientSecret:            oauth2Client.ClientSecret,
 		IssuerURL:               "https://" + config.ComputeExternalAddress() + "/api/v1.0/issuer",
 		JwksLocation:            param.Server_IssuerJwks.GetString(),
 		ScitokensServerLocation: param.Issuer_ScitokensServerLocation.GetString(),
+		ScopesRequested:         scopesRequested,
+		OIDCIssuerURL:           oidcIssuerURL,
+		OIDCAuthorizationURL:    oidcAuthzURL,
+		OIDCTokenEndpointURL:    oidcTokenURL,
+		OIDCDeviceAuthURL:       oidcDeviceAuthURL,
+		OIDCUserInfoURL:         oidcUserInfoURL,
+		OIDCAuthnReqs:           oidcAuthnReqs,
+		OIDCAuthnUserClaim:      oidcAuthnUserClaim,
+		GroupSource:             groupSource,
+		GroupFile:               groupFile,
+		GroupRequirements:       groupReqs,
+		GroupAuthzTemplates:     groupAuthzTemplates,
+		UserAuthzTemplates:      userAuthzTemplates,
 	}
 
-	err = writeOA4MPConfig(oconf, "server-config.xml", serverConfigTmpl)
+	etcPath := filepath.Join(param.Issuer_ScitokensServerLocation.GetString(), "etc")
+	varQdlScitokensPath := filepath.Join(param.Issuer_ScitokensServerLocation.GetString(), "var",
+		"qdl", "scitokens")
+
+	err = writeOA4MPConfig(oconf, filepath.Join(etcPath, "server-config.xml"), serverConfigTmpl)
 	if err != nil {
 		return
 	}
-	err = writeOA4MPConfig(oconf, "proxy-config.xml", proxyConfigTmpl)
+	err = writeOA4MPConfig(oconf, filepath.Join(etcPath, "proxy-config.xml"), proxyConfigTmpl)
 	if err != nil {
+		return
+	}
+	if err = writeOA4MPConfig(oconf, filepath.Join(varQdlScitokensPath, "policies.qdl"), policiesQdlTmpl); err != nil {
+		return
+	}
+	if err = writeOA4MPConfig(oconf, filepath.Join(varQdlScitokensPath, "id_token_policies.qdl"), idTokenPoliciesQdlTmpl); err != nil {
 		return
 	}
 
