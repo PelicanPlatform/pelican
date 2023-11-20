@@ -20,53 +20,21 @@ package oauth2
 
 import (
 	"net/url"
-	"os"
-	"strings"
 
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
-	"github.com/spf13/viper"
 )
 
 // ServerOIDCClient loads the OIDC client configuration for
 // the pelican server
 func ServerOIDCClient() (result Config, err error) {
 	// Load OIDC.ClientID
-	OIDCClientIDFile := param.OIDC_ClientIDFile.GetString()
-	OIDCClientIDFromEnv := viper.GetString("OIDCCLIENTID")
-	if OIDCClientIDFromEnv != "" {
-		result.ClientID = OIDCClientIDFromEnv
-	} else if OIDCClientIDFile != "" {
-		var contents []byte
-		contents, err = os.ReadFile(OIDCClientIDFile)
-		if err != nil {
-			err = errors.Wrapf(err, "Failed reading provided OIDC.ClientIDFile %s", OIDCClientIDFile)
-			return
-		}
-		result.ClientID = strings.TrimSpace(string(contents))
-	} else {
-		err = errors.New("An OIDC Client Identity file must be specified in the config (OIDC.ClientIDFile)," +
-			" or the identity must be provided via the environment variable PELICAN_OIDCCLIENTID")
+	if result.ClientID, err = config.GetOIDCClientID(); err != nil {
 		return
 	}
 
 	// load OIDC.ClientSecret
-	OIDCClientSecretFile := param.OIDC_ClientSecretFile.GetString()
-	OIDCClientSecretFromEnv := viper.GetString("OIDCCLIENTSECRET")
-	if OIDCClientSecretFromEnv != "" {
-		result.ClientSecret = OIDCClientSecretFromEnv
-	} else if OIDCClientSecretFile != "" {
-		var contents []byte
-		contents, err = os.ReadFile(OIDCClientSecretFile)
-		if err != nil {
-			err = errors.Wrapf(err, "Failed reading provided OIDC.ClientSecretFile %s", OIDCClientSecretFile)
-			return
-		}
-		result.ClientSecret = strings.TrimSpace(string(contents))
-	} else {
-		err = errors.New("An OIDC Client Secret file must be specified in the config (OIDC.ClientSecretFile)," +
-			" or the secret must be provided via the environment variable PELICAN_OIDCCLIENTSECRET")
+	if result.ClientSecret, err = config.GetOIDCClientSecret(); err != nil {
 		return
 	}
 
