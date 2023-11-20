@@ -71,17 +71,15 @@ func generateMonitoringScitoken(originUrl string) (string, error) {
 		JwtID(jti).
 		Issuer(directorURL).
 		Audience([]string{originUrl}).
-		Subject("director"). // person sending the token
+		Subject("director"). // entity sending the token
 		Expiration(time.Now().Add(time.Minute)).
 		IssuedAt(time.Now()).
 		Build()
 	if err != nil {
 		return "", err
 	}
-	// Although it says that it's getting origin JWK,
-	// the code seems to just retrive whichever private key in the path IssuerKey,
-	// so I assume this is the smae thing for the director as well
-	key, err := config.GetOriginJWK()
+
+	key, err := config.GetIssuerPrivateJWK()
 	if err != nil {
 		return "", errors.Wrap(err, "failed to load the origin's JWK")
 	}

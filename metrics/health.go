@@ -69,6 +69,7 @@ const (
 	OriginCache_XRootD     HealthStatusComponent = "xrootd"
 	OriginCache_CMSD       HealthStatusComponent = "cmsd"
 	OriginCache_Federation HealthStatusComponent = "federation" // Advertise to the director
+	OriginCache_Director   HealthStatusComponent = "director"   // file transfer with director
 	// TODO: WebUI health status is only set at origin_serve for now. We will soon
 	// move this logic to all server web-ui in issue #308
 	Server_WebUI HealthStatusComponent = "web-ui"

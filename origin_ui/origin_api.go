@@ -95,9 +95,7 @@ func resetDirectorTimeoutTimer() {
 				case <-directorTimeoutTimer.C:
 					// Timer fired because no message was received in time.
 					log.Warningln("No director test report received within the time limit")
-					if err := metrics.SetComponentHealthStatus("director", "critical", "No director test report received within the time limit"); err != nil {
-						log.Errorln("Failed to update director component health status:", err)
-					}
+					metrics.SetComponentHealthStatus(metrics.OriginCache_Director, metrics.StatusCritical, "No director test report received within the time limit")
 					// Reset the timer for the next period.
 					timerMutex.Lock()
 					directorTimeoutTimer.Reset(directorTimeoutDuration)
@@ -130,17 +128,11 @@ func directorTestResponse(ctx *gin.Context) {
 	// We will let the timer go timeout if director didn't send a valid json request
 	resetDirectorTimeoutTimer()
 	if dt.Status == "ok" {
-		if err := metrics.SetComponentHealthStatus("director", "ok", fmt.Sprintf("Director timestamp: %v", dt.Timestamp)); err != nil {
-			log.Errorln("Failed to update director component health status:", err)
-			ctx.JSON(500, gin.H{"error": fmt.Sprintf("Failed to update director component health status: %s", err)})
-			return
-		}
+		metrics.SetComponentHealthStatus(metrics.OriginCache_Director, metrics.StatusOK, fmt.Sprintf("Director timestamp: %v", dt.Timestamp))
+		ctx.JSON(200, gin.H{"msg": "Success"})
 	} else if dt.Status == "error" {
-		if err := metrics.SetComponentHealthStatus("director", "critical", dt.Message); err != nil {
-			log.Errorln("Failed to update director component health status:", err)
-			ctx.JSON(500, gin.H{"error": fmt.Sprintf("Failed to update director component health status: %s", err)})
-			return
-		}
+		metrics.SetComponentHealthStatus(metrics.OriginCache_Director, metrics.StatusCritical, dt.Message)
+		ctx.JSON(200, gin.H{"msg": "Success"})
 	} else {
 		log.Errorf("Invalid director test response, status: %s", dt.Status)
 		ctx.JSON(400, gin.H{"error": fmt.Sprintf("Invalid director test response status: %s", dt.Status)})
@@ -151,9 +143,8 @@ func ConfigureOriginAPI(router *gin.Engine) error {
 	if router == nil {
 		return errors.New("Origin configuration passed a nil pointer")
 	}
-	if err := metrics.SetComponentHealthStatus("director", "warning", "Initializing origin, unknown status for director"); err != nil {
-		return err
-	}
+
+	metrics.SetComponentHealthStatus(metrics.OriginCache_Director, metrics.StatusWarning, "Initializing origin, unknown status for director")
 	// start the timer for the director test report timeout
 	resetDirectorTimeoutTimer()
 
