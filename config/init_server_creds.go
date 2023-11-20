@@ -42,11 +42,17 @@ import (
 )
 
 var (
-	privateKey atomic.Pointer[jwk.Key]
+	// This is the private JWK for the server to sign tokens. This key remains
+	// the same if the IssuerKey is unchanged
+	issuerPrivateJWK atomic.Pointer[jwk.Key]
 )
 
-func LoadPrivateKey(tlsKey string) (*ecdsa.PrivateKey, error) {
-	rest, err := os.ReadFile(tlsKey)
+// Return a pointer to an ECDSA private key read from keyLocation.
+//
+// This can be used to load any ECDSA private key we generated for
+// various purposes including IssuerKey, TLSKey, and TLSCAKey
+func LoadPrivateKey(keyLocation string) (*ecdsa.PrivateKey, error) {
+	rest, err := os.ReadFile(keyLocation)
 	if err != nil {
 		return nil, nil
 	}
@@ -72,261 +78,14 @@ func LoadPrivateKey(tlsKey string) (*ecdsa.PrivateKey, error) {
 		}
 	}
 	if privateKey == nil {
-		return nil, fmt.Errorf("Private key file, %v, contains no private key", tlsKey)
+		return nil, fmt.Errorf("Private key file, %v, contains no private key", keyLocation)
 	}
 	return privateKey, nil
 }
 
-func LoadPublicKey(existingJWKS string, issuerKeyFile string) (jwk.Set, error) {
-	jwks := jwk.NewSet()
-	if existingJWKS != "" {
-		var err error
-		jwks, err = jwk.ReadFile(existingJWKS)
-		if err != nil {
-			return nil, errors.Wrap(err, "Failed to read issuer JWKS file")
-		}
-	}
-
-	if err := GeneratePrivateKey(issuerKeyFile, elliptic.P256()); err != nil {
-		return nil, errors.Wrap(err, "Failed to generate new private key")
-	}
-	contents, err := os.ReadFile(issuerKeyFile)
-	if err != nil {
-		return nil, errors.Wrap(err, "Failed to read issuer key file")
-	}
-	key, err := jwk.ParseKey(contents, jwk.WithPEM(true))
-	if err != nil {
-		return nil, errors.Wrapf(err, "Failed to parse issuer key file %v", issuerKeyFile)
-	}
-
-	// Add the algorithm to the key, needed for verifying tokens elsewhere
-	err = key.Set(jwk.AlgorithmKey, jwa.ES256)
-	if err != nil {
-		return nil, errors.Wrap(err, "Failed to add alg specification to key header")
-	}
-	// Store the private key to global var for access
-	// The key has kid attached
-	privateKey.Store(&key)
-
-	err = jwk.AssignKeyID(key)
-	if err != nil {
-		return nil, errors.Wrap(err, "Failed to assign key ID to private key")
-	}
-
-	pkey, err := jwk.PublicKeyOf(key)
-	if err != nil {
-		return nil, errors.Wrapf(err, "Failed to generate public key from file %v", issuerKeyFile)
-	}
-
-	if err = jwks.AddKey(pkey); err != nil {
-		return nil, errors.Wrap(err, "Failed to add public key to new JWKS")
-	}
-	return jwks, nil
-}
-
-func GenerateCACert() error {
-	gid, err := GetDaemonGID()
-	if err != nil {
-		return err
-	}
-	groupname, err := GetDaemonGroup()
-	if err != nil {
-		return err
-	}
-
-	tlsCert := param.Server_TLSCACertificateFile.GetString()
-	if file, err := os.Open(tlsCert); err == nil {
-		file.Close()
-		return nil
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	certDir := filepath.Dir(tlsCert)
-	if err := MkdirAll(certDir, 0755, -1, gid); err != nil {
-		return err
-	}
-
-	tlsKey := param.Server_TLSCAKey.GetString()
-	if err := GeneratePrivateKey(tlsKey, elliptic.P256()); err != nil {
-		return err
-	}
-	privateKey, err := LoadPrivateKey(tlsKey)
-	if err != nil {
-		return err
-	}
-
-	log.Debugln("Will generate a new CA certificate for the server")
-	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
-	serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
-	if err != nil {
-		return err
-	}
-	hostname, err := os.Hostname()
-	if err != nil {
-		return err
-	}
-	notBefore := time.Now()
-	template := x509.Certificate{
-		SerialNumber: serialNumber,
-		Subject: pkix.Name{
-			Organization: []string{"Pelican CA"},
-			CommonName:   hostname,
-		},
-		NotBefore:             notBefore,
-		NotAfter:              notBefore.AddDate(10, 0, 0),
-		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
-		BasicConstraintsValid: true,
-		IsCA:                  true,
-	}
-	template.DNSNames = []string{hostname}
-	derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, &(privateKey.PublicKey),
-		privateKey)
-	if err != nil {
-		return err
-	}
-	file, err := os.OpenFile(tlsCert, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0640)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	if err = os.Chown(tlsCert, -1, gid); err != nil {
-		return errors.Wrapf(err, "Failed to chown generated certificate %v to daemon group %v",
-			tlsCert, groupname)
-	}
-
-	if err = pem.Encode(file, &pem.Block{Type: "CERTIFICATE", Bytes: derBytes}); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func LoadCertficate(certFile string) (*x509.Certificate, error) {
-	rest, err := os.ReadFile(certFile)
-	if err != nil {
-		return nil, err
-	}
-
-	var cert *x509.Certificate
-	var block *pem.Block
-	for {
-		block, rest = pem.Decode(rest)
-		if block == nil {
-			break
-		} else if block.Type == "CERTIFICATE" {
-			cert, err = x509.ParseCertificate(block.Bytes)
-			if err != nil {
-				return nil, err
-			}
-			break
-		}
-	}
-	if cert == nil {
-		return nil, fmt.Errorf("Certificate file, %v, contains no certificate", certFile)
-	}
-	return cert, nil
-}
-
-func GenerateCert() error {
-	gid, err := GetDaemonGID()
-	if err != nil {
-		return err
-	}
-	groupname, err := GetDaemonGroup()
-	if err != nil {
-		return err
-	}
-
-	tlsCert := param.Server_TLSCertificate.GetString()
-	if file, err := os.Open(tlsCert); err == nil {
-		file.Close()
-		return nil
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-
-	// In this case, no host certificate exists - we should generate our own.
-	if err := GenerateCACert(); err != nil {
-		return err
-	}
-	caCert, err := LoadCertficate(param.Server_TLSCACertificateFile.GetString())
-	if err != nil {
-		return err
-	}
-
-	certDir := filepath.Dir(tlsCert)
-	if err := MkdirAll(certDir, 0755, -1, gid); err != nil {
-		return err
-	}
-
-	tlsKey := param.Server_TLSKey.GetString()
-	privateKey, err := LoadPrivateKey(tlsKey)
-	if err != nil {
-		return err
-	}
-
-	// Note: LoadPrivateKey will return nil for the private key if the file
-	// doesn't exist.  In that case, we'll do a self-signed certificate
-	caPrivateKey, err := LoadPrivateKey(param.Server_TLSCAKey.GetString())
-	if err != nil {
-		return err
-	}
-
-	log.Debugln("Will generate a new host certificate for the server")
-	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
-	serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
-	if err != nil {
-		return err
-	}
-	hostname, err := os.Hostname()
-	if err != nil {
-		return err
-	}
-	notBefore := time.Now()
-	template := x509.Certificate{
-		SerialNumber: serialNumber,
-		Subject: pkix.Name{
-			Organization: []string{"Pelican"},
-			CommonName:   hostname,
-		},
-		NotBefore:             notBefore,
-		NotAfter:              notBefore.Add(365 * 24 * time.Hour),
-		KeyUsage:              x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
-		BasicConstraintsValid: true,
-	}
-	template.DNSNames = []string{hostname}
-
-	// If there's pre-existing CA certificates, self-sign instead of using the generated CA
-	signingCert := caCert
-	signingKey := caPrivateKey
-	if signingKey == nil {
-		signingCert = &template
-		signingKey = privateKey
-	}
-
-	derBytes, err := x509.CreateCertificate(rand.Reader, &template, signingCert, &(privateKey.PublicKey),
-		signingKey)
-	if err != nil {
-		return err
-	}
-	file, err := os.OpenFile(tlsCert, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0640)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	if err = os.Chown(tlsCert, -1, gid); err != nil {
-		return errors.Wrapf(err, "Failed to chown generated certificate %v to daemon group %v",
-			tlsCert, groupname)
-	}
-
-	if err = pem.Encode(file, &pem.Block{Type: "CERTIFICATE", Bytes: derBytes}); err != nil {
-		return err
-	}
-
-	return nil
-}
-
+// Check if a file exists at keyLocation, return the file if so; otherwise, generate
+// and writes a PEM-encoded ECDSA-encrypted private key with elliptic curve assigned
+// by curve
 func GeneratePrivateKey(keyLocation string, curve elliptic.Curve) error {
 	uid, err := GetDaemonUID()
 	if err != nil {
@@ -347,7 +106,11 @@ func GeneratePrivateKey(keyLocation string, curve elliptic.Curve) error {
 	}
 
 	if file, err := os.Open(keyLocation); err == nil {
-		file.Close()
+		defer file.Close()
+		// Make sure key is valid if there is one
+		if _, err := LoadPrivateKey(keyLocation); err != nil {
+			return err
+		}
 		return nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return errors.Wrap(err, "Failed to load private key due to I/O error")
@@ -393,26 +156,368 @@ func GeneratePrivateKey(keyLocation string, curve elliptic.Curve) error {
 	return nil
 }
 
-func GenerateIssuerJWKS() (jwk.Set, error) {
-	existingJWKS := param.Server_IssuerJwks.GetString()
-	issuerKeyFile := param.IssuerKey.GetString()
-	return LoadPublicKey(existingJWKS, issuerKeyFile)
+// Helper function to generate a Certificate Authority (CA) certificate and its private key
+// for non-production environment so that we can use the private key of the CA
+// to sign the host certificate
+func GenerateCACert() error {
+	gid, err := GetDaemonGID()
+	if err != nil {
+		return err
+	}
+	groupname, err := GetDaemonGroup()
+	if err != nil {
+		return err
+	}
+	user, err := GetDaemonUser()
+	if err != nil {
+		return err
+	}
+
+	// If you provide a CA, you must also provide its private key in order for
+	// GenerateCert to sign the  host certificate by that key, or we will generate
+	// a new CA
+	tlsCACert := param.Server_TLSCACertificateFile.GetString()
+	if file, err := os.Open(tlsCACert); err == nil {
+		file.Close()
+		tlsCAKey := param.Server_TLSCAKey.GetString()
+		if file, err := os.Open(tlsCAKey); err == nil {
+			file.Close()
+			return nil
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return errors.Wrap(err, "Failed to load TLS CA private key due to I/O error")
+		}
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return errors.Wrap(err, "Failed to load TLS CA certificate due to I/O error")
+	}
+
+	// No existing CA cert present, generate a new CA root certificate and private key
+	tlsCertDir := filepath.Dir(tlsCACert)
+	if err := MkdirAll(tlsCertDir, 0755, -1, gid); err != nil {
+		return err
+	}
+
+	tlsCAKey := param.Server_TLSCAKey.GetString()
+	if err := GeneratePrivateKey(tlsCAKey, elliptic.P256()); err != nil {
+		return err
+	}
+	privateKey, err := LoadPrivateKey(tlsCAKey)
+	if err != nil {
+		return err
+	}
+
+	log.Debugln("Will generate a new CA certificate for the server")
+	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
+	serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
+	if err != nil {
+		return err
+	}
+	hostname := param.Server_Hostname.GetString()
+	notBefore := time.Now()
+	template := x509.Certificate{
+		SerialNumber: serialNumber,
+		Subject: pkix.Name{
+			Organization: []string{"Pelican CA"},
+			CommonName:   hostname,
+		},
+		NotBefore:             notBefore,
+		NotAfter:              notBefore.AddDate(10, 0, 0),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+	template.DNSNames = []string{hostname}
+	derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, &(privateKey.PublicKey),
+		privateKey)
+	if err != nil {
+		return err
+	}
+	file, err := os.OpenFile(tlsCACert, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0640)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	// Windows does not have "chown", has to work differently
+	currentOS := runtime.GOOS
+	if currentOS == "windows" {
+		cmd := exec.Command("icacls", tlsCACert, "/grant", user+":F")
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return errors.Wrapf(err, "Failed to chown generated key %v to daemon group %v: %s",
+				tlsCACert, groupname, string(output))
+		}
+	} else { // Else we are running on linux/mac
+		if err = os.Chown(tlsCACert, -1, gid); err != nil {
+			return errors.Wrapf(err, "Failed to chown generated key %v to daemon group %v",
+				tlsCACert, groupname)
+		}
+	}
+
+	if err = pem.Encode(file, &pem.Block{Type: "CERTIFICATE", Bytes: derBytes}); err != nil {
+		return err
+	}
+
+	return nil
 }
 
-func GetOriginJWK() (jwk.Key, error) {
-	key := privateKey.Load()
+// Read a PEM-encoded TLS certficate file, parse and return the first
+// certificate appeared in the chain. Return error if there's no cert
+// present in the file
+func LoadCertficate(certFile string) (*x509.Certificate, error) {
+	rest, err := os.ReadFile(certFile)
+	if err != nil {
+		return nil, err
+	}
+
+	var cert *x509.Certificate
+	var block *pem.Block
+	for {
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			break
+		} else if block.Type == "CERTIFICATE" {
+			cert, err = x509.ParseCertificate(block.Bytes)
+			if err != nil {
+				return nil, err
+			}
+			break
+		}
+	}
+	if cert == nil {
+		return nil, fmt.Errorf("Certificate file, %v, contains no certificate", certFile)
+	}
+	return cert, nil
+}
+
+// Generate a TLS certificate (host certificate) and its private key
+// for non-production environment if the requied TLS files are not present
+func GenerateCert() error {
+	gid, err := GetDaemonGID()
+	if err != nil {
+		return err
+	}
+	groupname, err := GetDaemonGroup()
+	if err != nil {
+		return err
+	}
+	user, err := GetDaemonUser()
+	if err != nil {
+		return err
+	}
+
+	tlsCert := param.Server_TLSCertificate.GetString()
+	if file, err := os.Open(tlsCert); err == nil {
+		file.Close()
+		// Check that the matched-pair private key is present
+		tlsKey := param.Server_TLSKey.GetString()
+		if file, err := os.Open(tlsKey); err == nil {
+			file.Close()
+			// Check that CA is also present
+			caCert := param.Server_TLSCACertificateFile.GetString()
+			if _, err := os.Open(caCert); err == nil {
+				file.Close()
+				// Check that the CA is a valid CA
+				if _, err := LoadCertficate(caCert); err != nil {
+					return errors.Wrap(err, "Failed to load CA cert")
+				} else {
+					// TODO: Check that the private key is a pair of the server cert
+
+					// Here we return based on the check that
+					// 1. TLS cert is present
+					// 2. The private key of TLS cert if present
+					// 3. The CA is present
+					return nil
+				}
+			} else if !errors.Is(err, os.ErrNotExist) {
+				return errors.Wrap(err, "Failed to load TLS CA cert due to I/O error")
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return errors.Wrap(err, "Failed to load TLS host private key due to I/O error")
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return errors.Wrap(err, "Failed to load TLS host certificate due to I/O error")
+	}
+
+	// In this case, no host certificate exists - we should generate our own.
+
+	if err := GenerateCACert(); err != nil {
+		return err
+	}
+	caCert, err := LoadCertficate(param.Server_TLSCACertificateFile.GetString())
+	if err != nil {
+		return err
+	}
+
+	tlsCertDir := filepath.Dir(tlsCert)
+	if err := MkdirAll(tlsCertDir, 0755, -1, gid); err != nil {
+		return err
+	}
+
+	tlsKey := param.Server_TLSKey.GetString()
+
+	// In case we didn't generate TLS private key
+	if err := GeneratePrivateKey(tlsKey, elliptic.P256()); err != nil {
+		return err
+	}
+	privateKey, err := LoadPrivateKey(tlsKey)
+	if err != nil {
+		return err
+	}
+
+	// The private key of CA will always be present
+	caPrivateKey, err := LoadPrivateKey(param.Server_TLSCAKey.GetString())
+	if err != nil {
+		return err
+	}
+
+	log.Debugln("Will generate a new host certificate for the server")
+	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
+	serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
+	if err != nil {
+		return err
+	}
+	hostname := param.Server_Hostname.GetString()
+	notBefore := time.Now()
+	template := x509.Certificate{
+		SerialNumber: serialNumber,
+		Subject: pkix.Name{
+			Organization: []string{"Pelican"},
+			CommonName:   hostname,
+		},
+		NotBefore:             notBefore,
+		NotAfter:              notBefore.Add(365 * 24 * time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+		BasicConstraintsValid: true,
+	}
+	template.DNSNames = []string{hostname}
+
+	// If there's pre-existing CA certificates, self-sign instead of using the generated CA
+	signingCert := caCert
+	signingKey := caPrivateKey
+
+	derBytes, err := x509.CreateCertificate(rand.Reader, &template, signingCert, &(privateKey.PublicKey),
+		signingKey)
+	if err != nil {
+		return err
+	}
+	file, err := os.OpenFile(tlsCert, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0640)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	// Windows does not have "chown", has to work differently
+	currentOS := runtime.GOOS
+	if currentOS == "windows" {
+		cmd := exec.Command("icacls", tlsCert, "/grant", user+":F")
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return errors.Wrapf(err, "Failed to chown generated key %v to daemon group %v: %s",
+				tlsCert, groupname, string(output))
+		}
+	} else { // Else we are running on linux/mac
+		if err = os.Chown(tlsCert, -1, gid); err != nil {
+			return errors.Wrapf(err, "Failed to chown generated key %v to daemon group %v",
+				tlsCert, groupname)
+		}
+	}
+
+	if err = pem.Encode(file, &pem.Block{Type: "CERTIFICATE", Bytes: derBytes}); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// Helper function to load the issuer/server's private key to sign tokens it issues.
+// Only intended to be called internally
+func loadIssuerPrivateJWK(issuerKeyFile string) (jwk.Key, error) {
+	// Check to see if we already had an IssuerKey or generate one
+	if err := GeneratePrivateKey(issuerKeyFile, elliptic.P256()); err != nil {
+		return nil, errors.Wrap(err, "Failed to generate new private key")
+	}
+	contents, err := os.ReadFile(issuerKeyFile)
+	if err != nil {
+		return nil, errors.Wrap(err, "Failed to read issuer key file")
+	}
+	key, err := jwk.ParseKey(contents, jwk.WithPEM(true))
+	if err != nil {
+		return nil, errors.Wrapf(err, "Failed to parse issuer key file %v", issuerKeyFile)
+	}
+
+	// Add the algorithm to the key, needed for verifying tokens elsewhere
+	err = key.Set(jwk.AlgorithmKey, jwa.ES256)
+	if err != nil {
+		return nil, errors.Wrap(err, "Failed to add alg specification to key header")
+	}
+
+	// Assign key id to the private key so that the public key obtainer thereafter
+	// has the same kid
+	err = jwk.AssignKeyID(key)
+	if err != nil {
+		return nil, errors.Wrap(err, "Failed to assign key ID to private key")
+	}
+
+	issuerPrivateJWK.Store(&key)
+
+	return key, nil
+}
+
+// Helper function to load the issuer/server's public key for other servers
+// to verify the token signed by this server. Only intended to be called internally
+func loadIssuerPublicJWKS(existingJWKS string, issuerKeyFile string) (jwk.Set, error) {
+	jwks := jwk.NewSet()
+	if existingJWKS != "" {
+		var err error
+		jwks, err = jwk.ReadFile(existingJWKS)
+		if err != nil {
+			return nil, errors.Wrap(err, "Failed to read issuer JWKS file")
+		}
+	}
+	// This returns issuerPrivateJWK if it's non-nil, or find and parse private JWK
+	// located at IssuerKey if there is one, or generate a new private key
+	key, err := loadIssuerPrivateJWK(issuerKeyFile)
+	if err != nil {
+		return nil, errors.Wrap(err, "Failed to load issuer private JWK")
+	}
+
+	pkey, err := jwk.PublicKeyOf(key)
+	if err != nil {
+		return nil, errors.Wrapf(err, "Failed to generate public key from file %v", issuerKeyFile)
+	}
+
+	if err = jwks.AddKey(pkey); err != nil {
+		return nil, errors.Wrap(err, "Failed to add public key to new JWKS")
+	}
+	return jwks, nil
+}
+
+// Return the private JWK for the server to sign tokens
+func GetIssuerPrivateJWK() (jwk.Key, error) {
+	key := issuerPrivateJWK.Load()
 	if key == nil {
 		issuerKeyFile := param.IssuerKey.GetString()
-		contents, err := os.ReadFile(issuerKeyFile)
+		newKey, err := loadIssuerPrivateJWK(issuerKeyFile)
 		if err != nil {
-			return nil, errors.Wrap(err, "Failed to read key file")
+			return nil, errors.Wrap(err, "Failed to load issuer private key")
 		}
-		newKey, err := jwk.ParseKey(contents, jwk.WithPEM(true))
-		if err != nil {
-			return nil, errors.Wrapf(err, "Failed to parse key file")
-		}
-		privateKey.Store(&newKey)
 		key = &newKey
 	}
 	return *key, nil
+}
+
+// Check if a valid JWKS file exists at Server_IssuerJwks, return that file if so;
+// otherwise, generate and store a private key at IssuerKey and return a public key of
+// that private key, encapsulated in the JWKS format
+//
+// The private key generated is loaded to issuerPrivateJWK variable which is used for
+// this server to sign JWTs it issues. The public key returned will be exposed publicly
+// for other servers to verify JWTs signed by this server, typically via a well-known URL
+// i.e. "/.well-known/issuer.jwks"
+func GetIssuerPublicJWKS() (jwk.Set, error) {
+	existingJWKS := param.Server_IssuerJwks.GetString()
+	issuerKeyFile := param.IssuerKey.GetString()
+	return loadIssuerPublicJWKS(existingJWKS, issuerKeyFile)
 }

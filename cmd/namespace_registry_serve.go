@@ -19,31 +19,17 @@
 package main
 
 import (
-	"crypto/elliptic"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/pkg/errors"
 
-	"github.com/pelicanplatform/pelican/config"
 	nsregistry "github.com/pelicanplatform/pelican/namespace-registry"
-	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/web_ui"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
-
-func generateTLSCertIfNeeded() error {
-	// As necessary, generate a private key and corresponding cert
-	if err := config.GeneratePrivateKey(param.Server_TLSKey.GetString(), elliptic.P256()); err != nil {
-		return err
-	}
-	if err := config.GenerateCert(); err != nil {
-		return err
-	}
-	return nil
-}
 
 func serveNamespaceRegistry( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	log.Info("Initializing the namespace registry's database...")
@@ -54,17 +40,6 @@ func serveNamespaceRegistry( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		return errors.Wrap(err, "Unable to initialize the namespace registry database")
 	}
 
-	err = generateTLSCertIfNeeded()
-	if err != nil {
-		return errors.Wrap(err, "Failed to generate TLS certificate")
-	}
-
-	// The registry needs its own private key. If one doesn't exist, this will generate it
-	issuerKeyFile := param.IssuerKey.GetString()
-	err = config.GeneratePrivateKey(issuerKeyFile, elliptic.P521())
-	if err != nil {
-		return errors.Wrap(err, "Failed to generate registry private key")
-	}
 	engine, err := web_ui.GetEngine()
 	if err != nil {
 		return err

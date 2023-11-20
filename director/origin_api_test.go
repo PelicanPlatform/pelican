@@ -31,7 +31,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 	viper.Set("Federation.NamespaceURL", "https://get-your-tokens.org")
 	viper.Set("Federation.DirectorURL", "https://director-url.org")
 
-	kSet, err := config.LoadPublicKey("", kfile)
+	kSet, err := config.GetIssuerPublicJWKS()
 	ar := MockCache{
 		GetFn: func(key string, keyset *jwk.Set) (jwk.Set, error) {
 			if key != "https://get-your-tokens.org/api/v1.0/registry/test-namespace/.well-known/issuer.jwks" {
@@ -63,7 +63,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 	assert.Equal(t, true, ok, "Expected scope to be 'pelican.advertise'")
 
 	//Create token without a scope - should return an error
-	key, err := config.GetOriginJWK()
+	key, err := config.GetIssuerPrivateJWK()
 	err = jwk.AssignKeyID(key)
 	assert.NoError(t, err)
 

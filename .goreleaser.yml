@@ -169,9 +169,6 @@ nfpms:
           - src: "../../bin/pelican"
             dst: "/usr/libexec/condor/stash_plugin"
             type: symlink
-          - src: "../../../libexec/condor/stash_plugin"
-            dst: "/usr/lib/condor/libexec/stash_plugin"
-            type: symlink
           - src: "client/resources/10-stash-plugin.conf"
             dst: "/etc/condor/config.d/10-stash-plugin.conf"
             type: config|noreplace

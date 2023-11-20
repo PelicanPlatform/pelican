@@ -19,7 +19,6 @@
 package metrics
 
 import (
-	"fmt"
 	"sync"
 	"time"
 
@@ -28,6 +27,7 @@ import (
 )
 
 type (
+	// This is for API response so we want to display string representation of status
 	ComponentStatus struct {
 		Status     string `json:"status"`
 		Message    string `json:"message,omitempty"`
@@ -35,7 +35,7 @@ type (
 	}
 
 	componentStatusInternal struct {
-		Status     int
+		Status     HealthStatusEnum
 		Message    string
 		LastUpdate time.Time
 	}
@@ -44,6 +44,34 @@ type (
 		OverallStatus   string                     `json:"status"`
 		ComponentStatus map[string]ComponentStatus `json:"components"`
 	}
+
+	HealthStatusEnum int
+
+	HealthStatusComponent string
+)
+
+const (
+	StatusCritical HealthStatusEnum = iota + 1
+	StatusWarning
+	StatusOK
+	StatusUnknown // Do not abuse this enum. Use others when possible
+)
+
+const statusIndexErrorMessage = "Error: status string index out of range"
+
+// Naming convention for components:
+//
+//	ServiceName1Name2_ComponentName
+//
+// i.e. For ""OriginCache_XRootD", it means this component is available at both
+// Origin and Cache. Please come up with the largest possible scope of the component
+const (
+	OriginCache_XRootD     HealthStatusComponent = "xrootd"
+	OriginCache_CMSD       HealthStatusComponent = "cmsd"
+	OriginCache_Federation HealthStatusComponent = "federation" // Advertise to the director
+	// TODO: WebUI health status is only set at origin_serve for now. We will soon
+	// move this logic to all server web-ui in issue #308
+	Server_WebUI HealthStatusComponent = "web-ui"
 )
 
 var (
@@ -60,56 +88,46 @@ var (
 	}, []string{"component"})
 )
 
-func statusToInt(status string) (int, error) {
-	switch status {
-	case "ok":
-		return 3, nil
-	case "warning":
-		return 2, nil
-	case "critical":
-		return 1, nil
+// Unfortunately we don't have a better way to ensure the enum constants always have
+// matched string representation, so we will return "Error: status string index out of range"
+// as an indicator
+func (status HealthStatusEnum) String() string {
+	strings := [...]string{"critical", "warning", "ok", "unknown"}
+
+	if int(status) < 1 || int(status) > len(strings) {
+		return statusIndexErrorMessage
 	}
-	return 0, fmt.Errorf("Unknown component status: %v", status)
+	return strings[status-1]
 }
 
-func intToStatus(statusInt int) string {
-	switch statusInt {
-	case 3:
-		return "ok"
-	case 2:
-		return "warning"
-	case 1:
-		return "critical"
-	}
-	return "unknown"
+func (component HealthStatusComponent) String() string {
+	return string(component)
 }
 
-func SetComponentHealthStatus(name, state, msg string) error {
-	statusInt, err := statusToInt(state)
-	if err != nil {
-		return err
-	}
+// Add/update the component health status. If you have a new component to record,
+// please go to metrics/health and register your component as a new constant of
+// type HealthStatusComponent. Also note that StatusUnknown is mostly for internal
+// use only, please try to avoid setting this as your component status
+func SetComponentHealthStatus(name HealthStatusComponent, state HealthStatusEnum, msg string) {
 	now := time.Now()
-	healthStatus.Store(name, componentStatusInternal{statusInt, msg, now})
+	healthStatus.Store(name.String(), componentStatusInternal{state, msg, now})
 
 	PelicanHealthStatus.With(
-		prometheus.Labels{"component": name}).
-		Set(float64(statusInt))
+		prometheus.Labels{"component": name.String()}).
+		Set(float64(state))
 
-	PelicanHealthLastUpdate.With(prometheus.Labels{"component": name}).
+	PelicanHealthLastUpdate.With(prometheus.Labels{"component": name.String()}).
 		SetToCurrentTime()
-
-	return nil
 }
 
-func DeleteComponentHealthStatus(name string) {
-	healthStatus.Delete(name)
+func DeleteComponentHealthStatus(name HealthStatusComponent) {
+	healthStatus.Delete(name.String())
 }
 
 func GetHealthStatus() HealthStatus {
 	status := HealthStatus{}
-	status.OverallStatus = "unknown"
-	overallStatus := 4
+	status.OverallStatus = StatusUnknown.String()
+	overallStatus := StatusUnknown
 	healthStatus.Range(func(component, compstat any) bool {
 		componentStatus, ok := compstat.(componentStatusInternal)
 		if !ok {
@@ -123,7 +141,7 @@ func GetHealthStatus() HealthStatus {
 			status.ComponentStatus = make(map[string]ComponentStatus)
 		}
 		status.ComponentStatus[componentString] = ComponentStatus{
-			intToStatus(componentStatus.Status),
+			componentStatus.Status.String(),
 			componentStatus.Message,
 			componentStatus.LastUpdate.Unix(),
 		}
@@ -132,6 +150,6 @@ func GetHealthStatus() HealthStatus {
 		}
 		return true
 	})
-	status.OverallStatus = intToStatus(overallStatus)
+	status.OverallStatus = overallStatus.String()
 	return status
 }

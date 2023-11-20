@@ -35,100 +35,21 @@ import {isLoggedIn} from "@/helpers/login";
 
 type duration = number | `${number}${"ns" | "us" | "µs" | "ms" |"s" | "m" | "h"}`;
 
-interface Config {
-    ConfigDir: string;
-    Debug: boolean;
-    TLSSkipVerify: boolean;
-    IssuerKey: string;
-    Transport: {
-        DialerTimeout: duration;
-        DialerKeepAlive: duration;
-        MaxIdleConns: number;
-        IdleConnTimeout: duration;
-        TLSHandshakeTimeout: duration;
-        ExpectContinueTimeout: duration;
-        ResponseHeaderTimeout: duration;
-    }
-    Federation: {
-        DiscoveryUrl: string;
-        TopologyNamespaceUrl: string;
-        DirectorUrl: string;
-        NamespaceUrl: string;
-        JwkUrl: string;
-    }
-    Client: {
-        StoppedTransferTimeout: number;
-        SlowTransferRampupTime: number;
-        SlowTransferWindow: number;
-        DisableHttpProxy: boolean;
-        DisableProxyFallback: boolean;
-        MinimumDownloadSpeed: number;
-    }
-    DisableHttpProxy: boolean
-    DisableProxyFallback: boolean;
-    MinimumDownloadSpeed: number;
-    Origin: {
-        Url: string;
-        ExportVolume: string;
-        NamespacePrefix: string;
-        Multiuser: boolean;
-        UseCmsd: boolean;
-        UIPasswordFile: string;
-        SelfTest: boolean;
-    };
-    Director: {
-        DefaultResponse: string;
-        MaxMindKeyFile: string;
-        GeoIPLocation: string;
-    };
-    Registry: {
-        DbLocation: string;
-    };
-    Server: {
-        TLSCertificate: string;
-        TLSCACertificateFile: string;
-        TLSCACertificateDirectory: string;
-        TLSCAKey: string;
-        TLSKey: string;
-        Port: number;
-        Address: string;
-        ExternalAddress: string;
-        Hostname: string;
-        IssuerJwks: string;
-    };
-    OIDC: {
-        ClientIDFile: string;
-        ClientSecretFile: string;
-        DeviceAuthEndpoint: string;
-        TokenEndpoint: string;
-        UserInfoEndpoint: string;
-    };
-    Xrootd: {
-        Port: number;
-        RunLocation: string;
-        RobotsTxtFile: string;
-        ScitokensConfig: string;
-        Mount: string;
-        MacaroonsKeyFile: string;
-        Authfile: string;
-        ManagerHost: string;
-        SummaryMonitoringHost: string;
-        DetailedMonitoringHost: string;
-        LocalMonitoringHost: string;
-        Sitename: string;
-    };
-    Monitoring: {
-        DataLocation: string;
-        PortLower: number;
-        PortHigher: number;
-    };
+type Config = {
+    [key: string]: ConfigValue
 }
 
-function sortConfig (a: any, b: any) {
-    if(typeof a[1] == 'object' && typeof b[1] != 'object'){
+type ConfigValue = Config | string | number | boolean | null | string[] | number[] | duration
+
+
+function sortConfig (a: [string, ConfigValue], b: [string, ConfigValue]) {
+
+    let isConfig = (value: ConfigValue) => { return typeof value == 'object' && value !== null && !Array.isArray(value)}
+
+    if(isConfig(a[1]) && !isConfig(b[1])){
         return 1
     }
-    if(typeof a[1] != 'object' && typeof b[1] == 'object'){
+    if(!isConfig(a[1]) && isConfig(b[1])){
         return -1
     }
     return a[0].localeCompare(b[0])
@@ -138,7 +59,7 @@ function sortConfig (a: any, b: any) {
 interface ConfigDisplayProps {
     id: string[]
     name: string
-    value: Partial<Config> | string | number | boolean | any
+    value: Config | ConfigValue
     level: number
 }
 
@@ -151,12 +72,17 @@ function ConfigDisplay({id, name, value, level = 1}: ConfigDisplayProps) {
     let formElement = undefined
 
     if(
-        typeof value === 'string' || value instanceof String ||
-        typeof value === 'number' || value instanceof Number
+        typeof value === 'string' || typeof value === 'number' || value === null
     ){
 
-        // For visual consistency convert empty strings to a blank space
-        value = value === "" ? " " : value
+        // Convert empty values to a space so that the text field is not collapsed
+        switch (value){
+            case "":
+                value = " "
+                break
+            case null:
+                value = "None"
+        }
 
         formElement = <TextField
             fullWidth
@@ -167,9 +93,17 @@ function ConfigDisplay({id, name, value, level = 1}: ConfigDisplayProps) {
             variant={"outlined"}
             value={value}
         />
-    }
-
-    if(typeof value === 'boolean' || value instanceof Boolean){
+    } else if(Array.isArray(value)){
+        formElement = <TextField
+            fullWidth
+            disabled
+            size="small"
+            id={`${id.join("-")}-text-input`}
+            label={name}
+            variant={"outlined"}
+            value={value.join(", ")}
+        />
+    } else if(typeof value === 'boolean'){
         formElement = (
             <FormControl fullWidth>
                 <InputLabel id={`${id.join("-")}-number-input`}>{name}</InputLabel>
@@ -238,7 +172,7 @@ function ConfigDisplay({id, name, value, level = 1}: ConfigDisplayProps) {
 interface TableOfContentsProps {
     id: string[]
     name: string
-    value: Partial<Config> | string | number | boolean | any
+    value: Config | ConfigValue
     level: number
 }
 
@@ -251,7 +185,7 @@ function TableOfContents({id, name, value, level = 1}: TableOfContentsProps) {
     }
 
     let subContents = undefined
-    if(typeof value == 'object'){
+    if(value !== null && !Array.isArray(value) && typeof value == 'object'){
         let subValues = Object.entries(value)
         subValues.sort(sortConfig)
         subContents = subValues.map(([key, value]) => {
@@ -267,7 +201,7 @@ function TableOfContents({id, name, value, level = 1}: TableOfContentsProps) {
                 },
                 borderRadius: 1,
                 paddingX: "5px",
-                paddingLeft: 0 + 5*level + "px"
+                paddingLeft: 0+5*level + "px"
             }}
         >
             <Link
@@ -306,10 +240,8 @@ function TableOfContents({id, name, value, level = 1}: TableOfContentsProps) {
             { name ? headerPointer : undefined}
             { subContents && level != 1  ?
                 <Box sx={{
-                    maxHeight: open ? Object.entries(value).length * 23 + "px" : 0,
-                    transition: "max-height 0.1s ease-in-out",
-                    cursor: "pointer",
-                    overflow: "hidden",
+                    display: open ? "block" : "none",
+                    cursor: "pointer"
                 }}
                 >
                     {subContents}

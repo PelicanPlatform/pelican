@@ -22,7 +22,6 @@ package main
 
 import (
 	"context"
-	"crypto/elliptic"
 	_ "embed"
 	"fmt"
 	"net/url"
@@ -72,14 +71,6 @@ func checkDefaults(origin bool, nsAds []director.NamespaceAd) error {
 		viper.SetDefault("Origin.EnableCmsd", true)
 	}
 
-	// As necessary, generate a private key and corresponding cert
-	if err := config.GeneratePrivateKey(param.Server_TLSKey.GetString(), elliptic.P256()); err != nil {
-		return err
-	}
-	if err := config.GenerateCert(); err != nil {
-		return err
-	}
-
 	// TODO: Could upgrade this to a check for a cert in the file...
 	if err := checkConfigFileReadable(param.Server_TLSCertificate.GetString(),
 		"A TLS certificate is required to serve HTTPS"); err != nil {
@@ -110,10 +101,7 @@ func checkDefaults(origin bool, nsAds []director.NamespaceAd) error {
 }
 
 func webUiInitialize() {
-	if err := metrics.SetComponentHealthStatus("web-ui", "warning", "Authentication not initialized"); err != nil {
-		log.Errorln("Failed to set web UI's component health status:", err)
-		return
-	}
+	metrics.SetComponentHealthStatus(metrics.Server_WebUI, metrics.StatusWarning, "Authentication not initialized")
 
 	// Ensure we wait until the origin has been initialized
 	// before launching XRootD.
@@ -121,21 +109,13 @@ func webUiInitialize() {
 		log.Errorln("Failure when waiting for web UI to be initialized:", err)
 		return
 	}
-	if err := metrics.SetComponentHealthStatus("web-ui", "ok", ""); err != nil {
-		log.Errorln("Failed to set web UI's component health status:", err)
-		return
-	}
+	metrics.SetComponentHealthStatus(metrics.Server_WebUI, metrics.StatusOK, "")
 }
 
 func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	defer config.CleanupTempResources()
 
-	err := config.DiscoverFederation()
-	if err != nil {
-		log.Warningln("Failed to do service auto-discovery:", err)
-	}
-
-	err = xrootd.SetUpMonitoring()
+	err := xrootd.SetUpMonitoring()
 	if err != nil {
 		return err
 	}

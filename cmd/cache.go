@@ -45,11 +45,8 @@ var (
 func initCache() error {
 	err := config.InitServer()
 	cobra.CheckErr(err)
-	err = metrics.SetComponentHealthStatus("xrootd", "critical", "xrootd has not been started")
-	cobra.CheckErr(err)
-	err = metrics.SetComponentHealthStatus("cmsd", "critical", "cmsd has not been started")
-	cobra.CheckErr(err)
-
+	metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusCritical, "xrootd has not been started")
+	metrics.SetComponentHealthStatus(metrics.OriginCache_CMSD, metrics.StatusCritical, "cmsd has not been started")
 	return err
 }
 

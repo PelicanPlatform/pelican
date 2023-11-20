@@ -203,10 +203,10 @@ func CreateEncodedToken(claimsMap map[string]string, profile string, lifetime in
 		return "", errors.Wrap(err, "Failed to generate token")
 	}
 
-	// Now that we have a token, it needs signing. Note that GetOriginJWK
+	// Now that we have a token, it needs signing. Note that GetIssuerPrivateJWK
 	// will get the private key passed via the command line because that
 	// file path has already been bound to IssuerKey
-	key, err := config.GetOriginJWK()
+	key, err := config.GetIssuerPrivateJWK()
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to load signing keys. Either generate one at the default "+
 			"location by serving an origin, or provide one via the --private-key flag")

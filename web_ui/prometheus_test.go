@@ -148,8 +148,8 @@ func TestPrometheusProtectionFederationURL(t *testing.T) {
 	viper.Set("Federation.NamespaceUrl", "https://test-namesapce")
 	viper.Set("Federation.JwkUrl", ts.URL)
 
-	// Set the request to run through the checkPromToken function
-	r.GET("/api/v1.0/prometheus/*any", checkPromToken(av1))
+	// Set the request to run through the promQueryEngineAuthHandler function
+	r.GET("/api/v1.0/prometheus/*any", promQueryEngineAuthHandler(av1))
 	c.Request, _ = http.NewRequest(http.MethodGet, "/api/v1.0/prometheus/test", bytes.NewBuffer([]byte(`{}`)))
 
 	// Puts the token within the URL
@@ -171,6 +171,8 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 	 */
 
 	viper.Reset()
+	viper.Set("Server.Hostname", "test-https")
+	viper.Set("Server.Port", "8444")
 
 	av1 := route.New().WithPrefix("/api/v1.0/prometheus")
 
@@ -189,7 +191,7 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 	}
 
 	// Generate the origin private and public keys
-	_, err := config.LoadPublicKey("", kfile)
+	_, err := config.GetIssuerPublicJWKS()
 
 	if err != nil {
 		t.Fatal(err)
@@ -203,8 +205,8 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 
 	// Create a token
 	issuerURL := url.URL{}
+	issuerURL.Host = config.ComputeExternalAddress()
 	issuerURL.Scheme = "https"
-	issuerURL.Host = "test-http"
 
 	jti_bytes := make([]byte, 16)
 	_, err = rand.Read(jti_bytes)
@@ -235,8 +237,8 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Set the request to go through the checkPromToken function
-	r.GET("/api/v1.0/prometheus/*any", checkPromToken(av1))
+	// Set the request to go through the promQueryEngineAuthHandler function
+	r.GET("/api/v1.0/prometheus/*any", promQueryEngineAuthHandler(av1))
 	c.Request, _ = http.NewRequest(http.MethodGet, "/api/v1.0/prometheus/test", bytes.NewBuffer([]byte(`{}`)))
 
 	// Put the signed token within the header
@@ -296,7 +298,7 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 	signed, err = jwt.Sign(tok, jwt.WithKey(jwa.ES256, pKey))
 	assert.NoError(t, err, "Error signing token")
 
-	r.GET("/api/v1.0/prometheus/*any", checkPromToken(av1))
+	r.GET("/api/v1.0/prometheus/*any", promQueryEngineAuthHandler(av1))
 	c.Request, _ = http.NewRequest(http.MethodGet, "/api/v1.0/prometheus/test", bytes.NewBuffer([]byte(`{}`)))
 
 	c.Request.Header.Set("Authorization", "Bearer "+string(signed))
@@ -336,8 +338,8 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Set the request to go through the checkPromToken function
-	r.GET("/api/v1.0/prometheus/*any", checkPromToken(av1))
+	// Set the request to go through the promQueryEngineAuthHandler function
+	r.GET("/api/v1.0/prometheus/*any", promQueryEngineAuthHandler(av1))
 	c.Request, _ = http.NewRequest(http.MethodGet, "/api/v1.0/prometheus/test", bytes.NewBuffer([]byte(`{}`)))
 
 	// Put the signed token within the header
@@ -348,7 +350,7 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 
 	assert.Equal(t, 403, w.Result().StatusCode, "Expected status code of 403 due to bad token scope")
 
-	key, err := config.GetOriginJWK()
+	key, err := config.GetIssuerPrivateJWK()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -380,8 +382,8 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Set the request to go through the checkPromToken function
-	r.GET("/api/v1.0/prometheus/*any", checkPromToken(av1))
+	// Set the request to go through the promQueryEngineAuthHandler function
+	r.GET("/api/v1.0/prometheus/*any", promQueryEngineAuthHandler(av1))
 
 	http.SetCookie(w, &http.Cookie{Name: "login", Value: string(signed)})
 	if err != nil {

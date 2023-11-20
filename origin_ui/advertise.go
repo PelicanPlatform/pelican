@@ -46,11 +46,9 @@ func PeriodicAdvertiseOrigin() error {
 		err := AdvertiseOrigin()
 		if err != nil {
 			log.Warningln("Origin advertise failed:", err)
-			if err = metrics.SetComponentHealthStatus("federation", "critical", "Error advertising origin to federation"); err != nil {
-				log.Warningln("Failed to update internal component health status:", err)
-			}
-		} else if err = metrics.SetComponentHealthStatus("federation", "ok", ""); err != nil {
-			log.Warningln("Failed to update internal component health status:", err)
+			metrics.SetComponentHealthStatus(metrics.OriginCache_Federation, metrics.StatusCritical, "Error advertising origin to federation")
+		} else {
+			metrics.SetComponentHealthStatus(metrics.OriginCache_Federation, metrics.StatusOK, "")
 		}
 
 		for {
@@ -58,11 +56,9 @@ func PeriodicAdvertiseOrigin() error {
 			err := AdvertiseOrigin()
 			if err != nil {
 				log.Warningln("Origin advertise failed:", err)
-				if err = metrics.SetComponentHealthStatus("federation", "critical", "Error advertising origin to federation"); err != nil {
-					log.Warningln("Failed to update internal component health status:", err)
-				}
-			} else if err = metrics.SetComponentHealthStatus("federation", "ok", ""); err != nil {
-				log.Warningln("Failed to update internal component health status:", err)
+				metrics.SetComponentHealthStatus(metrics.OriginCache_Federation, metrics.StatusCritical, "Error advertising origin to federation")
+			} else {
+				metrics.SetComponentHealthStatus(metrics.OriginCache_Federation, metrics.StatusOK, "")
 			}
 		}
 	}()

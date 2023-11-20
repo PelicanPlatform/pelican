@@ -336,7 +336,7 @@ func EmitIssuerMetadata(exportPath string) error {
 		return err
 	}
 
-	keys, err := config.GenerateIssuerJWKS()
+	keys, err := config.GetIssuerPublicJWKS()
 	if err != nil {
 		return err
 	}

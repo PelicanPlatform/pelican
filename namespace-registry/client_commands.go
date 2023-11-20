@@ -250,9 +250,9 @@ func NamespaceDelete(endpoint string, prefix string) error {
 	}
 
 	// Now that we have a token, it needs signing
-	key, err := config.GetOriginJWK()
+	key, err := config.GetIssuerPrivateJWK()
 	if err != nil {
-		return errors.Wrap(err, "failed to load the origin's JWK")
+		return errors.Wrap(err, "failed to load the registry's JWK")
 	}
 
 	// Get/assign the kid, needed for verification by the client

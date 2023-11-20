@@ -353,10 +353,26 @@ func InitConfig() {
 	} else {
 		logLevel := param.Logging_Level.GetString()
 		level, err := log.ParseLevel(logLevel)
-		if err != nil {
-			cobra.CheckErr(err)
-		}
+		cobra.CheckErr(err)
 		SetLogging(level)
+	}
+
+	logLocation := param.Logging_LogLocation.GetString()
+	if logLocation != "" {
+		dir := filepath.Dir(logLocation)
+		if dir != "" {
+			if err := os.MkdirAll(dir, 0644); err != nil {
+				log.Errorf("Failed to access/create specified directory. Error: %v", err)
+				os.Exit(1)
+			}
+		}
+		// Note: do not need to close the file, logrus does it for us
+		f, err := os.OpenFile(logLocation, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
+		if err != nil {
+			log.Errorf("Failed to access specified log file. Error: %v", err)
+			os.Exit(1)
+		}
+		log.SetOutput(f)
 	}
 }
 
@@ -454,13 +470,37 @@ func InitServer() error {
 
 	setupTransport()
 
+	tokenRefreshInterval := param.Monitoring_TokenRefreshInterval.GetDuration()
+	tokenExpiresIn := param.Monitoring_TokenExpiresIn.GetDuration()
+
+	if tokenExpiresIn == 0 || tokenRefreshInterval == 0 || tokenRefreshInterval > tokenExpiresIn {
+		log.Warningln("Invalid Monitoring.TokenRefreshInterval or Monitoring.TokenExpiresIn. Value may be zero or valid time <= refresh interval. You may experience intermittent authorization failure for requests with these token")
+	}
+
 	// Unmarshal Viper config into a Go struct
 	err = param.UnmarshalConfig()
 	if err != nil {
 		return err
 	}
 
-	return nil
+	// As necessary, generate private keys, JWKS and corresponding certs
+
+	// Note: This function will generate a private key in the location stored by the viper var "IssuerKey"
+	// iff there isn't any valid private key present in that location
+	_, err = GetIssuerPublicJWKS()
+	if err != nil {
+		return err
+	}
+
+	// Check if we have required files in place to set up TLS, or we will generate them
+	err = GenerateCert()
+	if err != nil {
+		return err
+	}
+
+	// After we know we have the certs we need, call setupTransport (which uses those certs for its TLSConfig)
+	setupTransport()
+	return DiscoverFederation()
 }
 
 func InitClient() error {

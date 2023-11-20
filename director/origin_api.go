@@ -84,7 +84,7 @@ func CreateAdvertiseToken(namespace string) (string, error) {
 		return "", err
 	}
 
-	key, err := config.GetOriginJWK()
+	key, err := config.GetIssuerPrivateJWK()
 	if err != nil {
 		return "", errors.Wrap(err, "failed to load the origin's JWK")
 	}
