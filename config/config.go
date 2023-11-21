@@ -178,7 +178,10 @@ func DiscoverFederation() error {
 	}
 
 	discoveryUrl, _ := url.Parse(federationUrl.String())
-	discoveryUrl.Path = path.Join(".well-known/pelican-configuration", federationUrl.Path)
+	discoveryUrl.Path, err = url.JoinPath(federationUrl.Path, ".well-known/pelican-configuration")
+	if err != nil {
+		return errors.Wrap(err, "Unable to parse federation url because of invalid path")
+	}
 
 	httpClient := http.Client{
 		Transport: GetTransport(),
