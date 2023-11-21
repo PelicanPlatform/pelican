@@ -540,6 +540,13 @@ type: string
 default: /opt/scitokens-server
 components: ["origin"]
 ---
+name: Issuer.QDLLocation
+description: >-
+  Location of the QDL language and scripts install on the system
+type: string
+default: /opt/qdl
+components: ["origin"]
+---
 name: Issuer.AuthenticationSource
 description: >-
   How users should authenticate with the issuer.  Currently-supported values are:

@@ -18,17 +18,23 @@
 package oa4mp
 
 import (
+	"bufio"
+	"bytes"
 	_ "embed"
+	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"text/template"
 
+	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/daemon"
 	"github.com/pelicanplatform/pelican/oauth2"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 )
 
 type (
@@ -77,6 +83,29 @@ var (
 	//go:embed resources/id_token_policies.qdl
 	idTokenPoliciesQdlTmpl string
 )
+
+func writeOA4MPFile(fname string, data []byte, perm os.FileMode) error {
+	user, err := config.GetOA4MPUser()
+	if err != nil {
+		return err
+	}
+
+	file, err := os.OpenFile(fname, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	if err = os.Chown(fname, -1, user.Gid); err != nil {
+		return errors.Wrapf(err, "Unable to change ownership of configuration file %v"+
+			" to desired daemon gid %v", fname, user.Gid)
+	}
+
+	if _, err = file.Write(data); err != nil {
+		err = errors.Wrapf(err, "Failed to write OA4MP configuration file at %v", fname)
+	}
+	return err
+}
 
 func writeOA4MPConfig(oconf oa4mpConfig, fname, templateInput string) error {
 	user, err := config.GetOA4MPUser()
@@ -199,11 +228,36 @@ func ConfigureOA4MP() (launcher daemon.Launcher, err error) {
 		}
 	}
 
+	key, err := config.GetIssuerPrivateJWK()
+	if err != nil {
+		err = errors.Wrap(err, "Failed to load the private issuer key for running issuer")
+		return
+	}
+	if err = key.Set("use", "sig"); err != nil {
+		err = errors.Wrap(err, "Failed to configure private issuer key")
+		return
+	}
+	jwks := jwk.NewSet()
+	if err = jwks.AddKey(key); err != nil {
+		return
+	}
+
+	buf, err := json.MarshalIndent(jwks, "", " ")
+	if err != nil {
+		err = errors.Wrap(err, "Failed to marshal issuer private key to JSON")
+		return
+	}
+	etcPath := filepath.Join(param.Issuer_ScitokensServerLocation.GetString(), "etc")
+	keyPath := filepath.Join(etcPath, "keys.jwk")
+	if err = writeOA4MPFile(keyPath, buf, 0640); err != nil {
+		return
+	}
+
 	oconf := oa4mpConfig{
 		ClientID:                oauth2Client.ClientID,
 		ClientSecret:            oauth2Client.ClientSecret,
 		IssuerURL:               "https://" + config.ComputeExternalAddress() + "/api/v1.0/issuer",
-		JwksLocation:            param.Server_IssuerJwks.GetString(),
+		JwksLocation:            keyPath,
 		ScitokensServerLocation: param.Issuer_ScitokensServerLocation.GetString(),
 		ScopesRequested:         scopesRequested,
 		OIDCIssuerURL:           oidcIssuerURL,
@@ -220,7 +274,6 @@ func ConfigureOA4MP() (launcher daemon.Launcher, err error) {
 		UserAuthzTemplates:      userAuthzTemplates,
 	}
 
-	etcPath := filepath.Join(param.Issuer_ScitokensServerLocation.GetString(), "etc")
 	varQdlScitokensPath := filepath.Join(param.Issuer_ScitokensServerLocation.GetString(), "var",
 		"qdl", "scitokens")
 
@@ -243,6 +296,31 @@ func ConfigureOA4MP() (launcher daemon.Launcher, err error) {
 	if err != nil {
 		return
 	}
+
+	qdlBoot := filepath.Join(param.Issuer_QDLLocation.GetString(), "var", "scripts", "boot.qdl")
+	cmd := exec.Command(qdlBoot)
+	cmd.Env = []string{
+		"PATH=/bin:/usr/bin/:" + filepath.Join(param.Issuer_QDLLocation.GetString(), "bin"),
+		"ST_HOME=" + param.Issuer_ScitokensServerLocation.GetString(),
+		"QDL_HOME=" + param.Issuer_QDLLocation.GetString()}
+
+	if err = customizeCmd(cmd); err != nil {
+		return
+	}
+
+	stdoutErr, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Errorln("Failed to bootstrap the issuer environment")
+		cmd_logger := log.WithFields(log.Fields{"daemon": "boot.qdl"})
+		stdoutErrScanner := bufio.NewScanner(bytes.NewReader(stdoutErr))
+		for stdoutErrScanner.Scan() {
+			cmd_logger.Errorln("QDL Failure:", stdoutErrScanner.Text())
+		}
+		err = errors.Wrap(err, "Failed to bootstrap the issuer environment")
+		return
+		//err = nil
+	}
+	log.Debugln("Output from issuer environment bootstrap script:", string(stdoutErr))
 
 	tomcatPath := filepath.Join(param.Issuer_TomcatLocation.GetString(), "bin", "catalina.sh")
 	launcher = daemon.DaemonLauncher{
