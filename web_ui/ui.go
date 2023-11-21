@@ -52,12 +52,14 @@ func getConfigValues(ctx *gin.Context) {
 	ctx.JSON(200, config)
 }
 
+// Configure common endpoint available to all server web UI which are located at /api/v1.0/*
 func configureCommonEndpoints(engine *gin.Engine) error {
 	engine.GET("/api/v1.0/config", authHandler, getConfigValues)
 
 	return nil
 }
 
+// Configure metrics related endpoints, including Prometheus and /health API
 func configureMetrics(engine *gin.Engine, isDirector bool) error {
 	// Add authorization to /metric endpoint
 	engine.Use(promMetricAuthHandler)
@@ -77,6 +79,8 @@ func configureMetrics(engine *gin.Engine, isDirector bool) error {
 	return nil
 }
 
+// Send the one-time code for initial web UI login to stdout and periodically
+// re-generate one-time code if user hasn't finished setup
 func waitUntilLogin(ctx context.Context) error {
 	if authDB.Load() != nil {
 		return nil
@@ -135,6 +139,10 @@ func waitUntilLogin(ctx context.Context) error {
 	}
 }
 
+// Configure endpoints for server web APIs. This function does not configure any UI
+// specific paths but just redirect root path to /view.
+//
+// You need to mount the static resources for UI in a separate function
 func ConfigureServerWebAPI(engine *gin.Engine, isDirector bool) error {
 	if err := configureAuthEndpoints(engine); err != nil {
 		return err
@@ -152,7 +160,9 @@ func ConfigureServerWebAPI(engine *gin.Engine, isDirector bool) error {
 	return nil
 }
 
-func InitServerWebUI() {
+// Setup the initial server web login by sending the one-time code to stdout
+// and record health status of the WebUI based on the success of the initialization
+func InitServerWebLogin() {
 	metrics.SetComponentHealthStatus(metrics.Server_WebUI, metrics.StatusWarning, "Authentication not initialized")
 
 	if err := waitUntilLogin(context.Background()); err != nil {

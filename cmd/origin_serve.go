@@ -117,11 +117,13 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		return err
 	}
 
-	if err := web_ui.ConfigureServerWebAPI(engine, false); err != nil {
-		return err
-	}
+	if param.Origin_EnableUI.GetBool() {
+		if err := web_ui.ConfigureServerWebAPI(engine, false); err != nil {
+			return err
+		}
 
-	origin_ui.ConfigOriginUI(engine)
+		origin_ui.ConfigOriginUI(engine)
+	}
 
 	if err = origin_ui.RegisterNamespaceWithRetry(); err != nil {
 		return err
@@ -138,7 +140,7 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	go web_ui.RunEngine(engine)
 
 	if param.Origin_EnableUI.GetBool() {
-		go web_ui.InitServerWebUI()
+		go web_ui.InitServerWebLogin()
 	}
 
 	configPath, err := xrootd.ConfigXrootd(true)

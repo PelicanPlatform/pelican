@@ -60,6 +60,7 @@ var (
 	previousCode atomic.Pointer[string]
 )
 
+// Periodically re-read the htpasswd file used for password-based authentication
 func periodicAuthDBReload() {
 	for {
 		time.Sleep(30 * time.Second)
@@ -101,6 +102,8 @@ func configureAuthDB() error {
 	return nil
 }
 
+// Get the "subjuect" claim from the JWT that "login" cookie stores,
+// where subject is set to be the username. Return empty string if no "login" cookie is present
 func getUser(ctx *gin.Context) (string, error) {
 	token, err := ctx.Cookie("login")
 	if err != nil {
@@ -127,6 +130,7 @@ func getUser(ctx *gin.Context) (string, error) {
 	return parsed.Subject(), nil
 }
 
+// Create a JWT and set the "login" cookie to store that JWT
 func setLoginCookie(ctx *gin.Context, user string) {
 	key, err := config.GetIssuerPrivateJWK()
 	if err != nil {
@@ -174,9 +178,7 @@ func setLoginCookie(ctx *gin.Context, user string) {
 	ctx.SetSameSite(http.SameSiteStrictMode)
 }
 
-// Authenticate user by checking if the auth cookie is present and set the user identity to ctx
-// However, this won't stop the handler chain and return with 401 if the auth cookie
-// is missing. It's the next handler's job to check if ctx has a non-empty "User" field
+// Check if user is authenticated by checking if the "login" cookie is present and set the user identity to ctx
 func authHandler(ctx *gin.Context) {
 	user, err := getUser(ctx)
 	if err != nil || user == "" {
@@ -188,6 +190,7 @@ func authHandler(ctx *gin.Context) {
 	}
 }
 
+// Handle regular username/password based login
 func loginHandler(ctx *gin.Context) {
 	db := authDB.Load()
 	if db == nil {
@@ -212,6 +215,7 @@ func loginHandler(ctx *gin.Context) {
 	ctx.JSON(200, gin.H{"msg": "Success"})
 }
 
+// Handle initial code-based login for admin
 func initLoginHandler(ctx *gin.Context) {
 	db := authDB.Load()
 	if db != nil {
@@ -239,6 +243,7 @@ func initLoginHandler(ctx *gin.Context) {
 	setLoginCookie(ctx, "admin")
 }
 
+// Handle reset password
 func resetLoginHandler(ctx *gin.Context) {
 	passwordReset := PasswordReset{}
 	if ctx.ShouldBind(&passwordReset) != nil {
@@ -260,6 +265,7 @@ func resetLoginHandler(ctx *gin.Context) {
 	}
 }
 
+// Configure the authentication endpoints for the server web UI
 func configureAuthEndpoints(router *gin.Engine) error {
 	if router == nil {
 		return errors.New("Web engine configuration passed a nil pointer")

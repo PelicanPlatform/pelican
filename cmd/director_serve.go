@@ -75,7 +75,7 @@ func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	log.Info("Starting web engine...")
 	go web_ui.RunEngine(engine)
 
-	go web_ui.InitServerWebUI()
+	go web_ui.InitServerWebLogin()
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
