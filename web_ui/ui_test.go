@@ -1,24 +1,4 @@
-//go:build !windows
-
-/***************************************************************
- *
- * Copyright (C) 2023, Pelican Project, Morgridge Institute for Research
- *
- * Licensed under the Apache License, Version 2.0 (the "License"); you
- * may not use this file except in compliance with the License.  You may
- * obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- ***************************************************************/
-
-package origin_ui
+package web_ui
 
 import (
 	"context"
@@ -50,14 +30,14 @@ func TestMain(m *testing.M) {
 	gin.SetMode(gin.TestMode)
 
 	//set a temporary password file:
-	tempFile, err := os.CreateTemp("", "origin-ui-passwd")
+	tempFile, err := os.CreateTemp("", "web-ui-passwd")
 	if err != nil {
-		fmt.Println("Failed to setup origin-ui-passwd file")
+		fmt.Println("Failed to setup web-ui-passwd file")
 		os.Exit(1)
 	}
 	tempPasswdFile = tempFile
 	//Override viper default for testing
-	viper.Set("Origin.UIPasswordFile", tempPasswdFile.Name())
+	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
 
 	//Make a testing issuer.jwk file to get a cookie
 	tempJWKDir, err := os.MkdirTemp("", "tempDir")
@@ -84,10 +64,10 @@ func TestMain(m *testing.M) {
 	}
 	router = gin.Default()
 
-	//Configure UI
-	err = ConfigureOriginUI(router)
+	//Configure Web API
+	err = ConfigureServerWebAPI(router, false)
 	if err != nil {
-		fmt.Println("Error configuring origin UI")
+		fmt.Println("Error configuring web UI")
 		os.Exit(1)
 	}
 	//Run the tests
@@ -109,10 +89,10 @@ func TestWaitUntilLogin(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() {
-		err := WaitUntilLogin(ctx)
+		err := waitUntilLogin(ctx)
 		require.NoError(t, err)
 	}()
-	activationCodeFile := param.Origin_UIActivationCodeFile.GetString()
+	activationCodeFile := param.Server_UIActivationCodeFile.GetString()
 	start := time.Now()
 	for {
 		time.Sleep(10 * time.Millisecond)
@@ -160,7 +140,7 @@ func TestCodeBasedLogin(t *testing.T) {
 	t.Run("With valid code", func(t *testing.T) {
 		newCode := fmt.Sprintf("%06v", rand.Intn(1000000))
 		currentCode.Store(&newCode)
-		req, err := http.NewRequest("POST", "/api/v1.0/origin-ui/initLogin", strings.NewReader(fmt.Sprintf(`{"code": "%s"}`, newCode)))
+		req, err := http.NewRequest("POST", "/api/v1.0/auth/initLogin", strings.NewReader(fmt.Sprintf(`{"code": "%s"}`, newCode)))
 		assert.NoError(t, err)
 
 		req.Header.Set("Content-Type", "application/json")
@@ -184,7 +164,7 @@ func TestCodeBasedLogin(t *testing.T) {
 	//Invoke the code login with the wrong code, ensure we get a 401
 	t.Run("With invalid code", func(t *testing.T) {
 		require.True(t, param.Origin_EnableUI.GetBool())
-		req, err := http.NewRequest("POST", "/api/v1.0/origin-ui/initLogin", strings.NewReader(`{"code": "20"}`))
+		req, err := http.NewRequest("POST", "/api/v1.0/auth/initLogin", strings.NewReader(`{"code": "20"}`))
 		assert.NoError(t, err)
 
 		req.Header.Set("Content-Type", "application/json")
@@ -202,12 +182,12 @@ func TestPasswordResetAPI(t *testing.T) {
 	dirName := t.TempDir()
 	viper.Reset()
 	viper.Set("ConfigDir", dirName)
-	viper.Set("Origin.UIPasswordFile", tempPasswdFile.Name())
+	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
 	err := config.InitServer()
 	require.NoError(t, err)
 	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256())
 	require.NoError(t, err)
-	viper.Set("Origin.UIPasswordFile", tempPasswdFile.Name())
+	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
 
 	//////////////////////////////SETUP////////////////////////////////
 	//Add an admin user to file to configure
@@ -227,7 +207,7 @@ func TestPasswordResetAPI(t *testing.T) {
 	payload := fmt.Sprintf(`{"user": "%s", "password": "%s"}`, user, password)
 
 	//Create a request
-	req, err := http.NewRequest("POST", "/api/v1.0/origin-ui/login", strings.NewReader(payload))
+	req, err := http.NewRequest("POST", "/api/v1.0/auth/login", strings.NewReader(payload))
 	assert.NoError(t, err)
 
 	req.Header.Set("Content-Type", "application/json")
@@ -247,7 +227,7 @@ func TestPasswordResetAPI(t *testing.T) {
 	//Test invoking reset with valid authorization
 	t.Run("With valid authorization", func(t *testing.T) {
 		resetPayload := `{"password": "newpassword"}`
-		reqReset, err := http.NewRequest("POST", "/api/v1.0/origin-ui/resetLogin", strings.NewReader(resetPayload))
+		reqReset, err := http.NewRequest("POST", "/api/v1.0/auth/resetLogin", strings.NewReader(resetPayload))
 		assert.NoError(t, err)
 
 		reqReset.Header.Set("Content-Type", "application/json")
@@ -268,7 +248,7 @@ func TestPasswordResetAPI(t *testing.T) {
 		//After password reset, test authorization with newly generated password
 		loginWithNewPasswordPayload := `{"user": "user", "password": "newpassword"}`
 
-		reqLoginWithNewPassword, err := http.NewRequest("POST", "/api/v1.0/origin-ui/login", strings.NewReader(loginWithNewPasswordPayload))
+		reqLoginWithNewPassword, err := http.NewRequest("POST", "/api/v1.0/auth/login", strings.NewReader(loginWithNewPasswordPayload))
 		assert.NoError(t, err)
 
 		reqLoginWithNewPassword.Header.Set("Content-Type", "application/json")
@@ -286,7 +266,7 @@ func TestPasswordResetAPI(t *testing.T) {
 	//Invoking password reset without a cookie should result in failure
 	t.Run("Without valid cookie", func(t *testing.T) {
 		resetPayload := `{"password": "newpassword"}`
-		reqReset, err := http.NewRequest("POST", "/api/v1.0/origin-ui/resetLogin", strings.NewReader(resetPayload))
+		reqReset, err := http.NewRequest("POST", "/api/v1.0/auth/resetLogin", strings.NewReader(resetPayload))
 		assert.NoError(t, err)
 
 		reqReset.Header.Set("Content-Type", "application/json")
@@ -295,9 +275,9 @@ func TestPasswordResetAPI(t *testing.T) {
 		router.ServeHTTP(recorderReset, reqReset)
 
 		//Check ok http reponse
-		assert.Equal(t, 403, recorderReset.Code)
+		assert.Equal(t, 401, recorderReset.Code)
 		//Check that success message returned
-		assert.JSONEq(t, `{"error":"Password reset only available to logged-in users"}`, recorderReset.Body.String())
+		assert.JSONEq(t, `{"error":"Authentication required to perform this operation"}`, recorderReset.Body.String())
 	})
 
 }
@@ -305,7 +285,7 @@ func TestPasswordResetAPI(t *testing.T) {
 func TestPasswordBasedLoginAPI(t *testing.T) {
 	viper.Reset()
 	config.InitConfig()
-	viper.Set("Origin.UIPasswordFile", tempPasswdFile.Name())
+	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
 	err := config.InitServer()
 	require.NoError(t, err)
 
@@ -331,7 +311,7 @@ func TestPasswordBasedLoginAPI(t *testing.T) {
 		payload := fmt.Sprintf(`{"user": "%s", "password": "%s"}`, user, password)
 
 		//Create a request
-		req, err := http.NewRequest("POST", "/api/v1.0/origin-ui/login", strings.NewReader(payload))
+		req, err := http.NewRequest("POST", "/api/v1.0/auth/login", strings.NewReader(payload))
 		assert.NoError(t, err)
 
 		req.Header.Set("Content-Type", "application/json")
@@ -357,7 +337,7 @@ func TestPasswordBasedLoginAPI(t *testing.T) {
 	t.Run("Without password", func(t *testing.T) {
 		payload := fmt.Sprintf(`{"user": "%s"}`, user)
 		//Create a request
-		req, err := http.NewRequest("POST", "/api/v1.0/origin-ui/login", strings.NewReader(payload))
+		req, err := http.NewRequest("POST", "/api/v1.0/auth/login", strings.NewReader(payload))
 		assert.NoError(t, err)
 		req.Header.Set("Content-Type", "application/json")
 
@@ -372,7 +352,7 @@ func TestPasswordBasedLoginAPI(t *testing.T) {
 	t.Run("With incorrect password", func(t *testing.T) {
 		payload := fmt.Sprintf(`{"user": "%s", "password": "%s"}`, user, "incorrectpassword")
 		//Create a request
-		req, err := http.NewRequest("POST", "/api/v1.0/origin-ui/login", strings.NewReader(payload))
+		req, err := http.NewRequest("POST", "/api/v1.0/auth/login", strings.NewReader(payload))
 		assert.NoError(t, err)
 		req.Header.Set("Content-Type", "application/json")
 
@@ -387,7 +367,7 @@ func TestPasswordBasedLoginAPI(t *testing.T) {
 	t.Run("With incorrect user", func(t *testing.T) {
 		payload := fmt.Sprintf(`{"user": "%s", "password": "%s"}`, "incorrectuser", password)
 		//Create a request
-		req, err := http.NewRequest("POST", "/api/v1.0/origin-ui/login", strings.NewReader(payload))
+		req, err := http.NewRequest("POST", "/api/v1.0/auth/login", strings.NewReader(payload))
 		assert.NoError(t, err)
 		req.Header.Set("Content-Type", "application/json")
 
@@ -402,7 +382,7 @@ func TestPasswordBasedLoginAPI(t *testing.T) {
 	t.Run("Without user", func(t *testing.T) {
 		payload := fmt.Sprintf(`{"password": "%s"}`, password)
 		//Create a request
-		req, err := http.NewRequest("POST", "/api/v1.0/origin-ui/login", strings.NewReader(payload))
+		req, err := http.NewRequest("POST", "/api/v1.0/auth/login", strings.NewReader(payload))
 		assert.NoError(t, err)
 		req.Header.Set("Content-Type", "application/json")
 
@@ -419,12 +399,12 @@ func TestWhoamiAPI(t *testing.T) {
 	viper.Reset()
 	config.InitConfig()
 	viper.Set("ConfigDir", dirName)
-	viper.Set("Origin.UIPasswordFile", tempPasswdFile.Name())
+	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
 	err := config.InitServer()
 	require.NoError(t, err)
 	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256())
 	require.NoError(t, err)
-	viper.Set("Origin.UIPasswordFile", tempPasswdFile.Name())
+	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
 
 	///////////////////////////SETUP///////////////////////////////////
 	//Add an admin user to file to configure
@@ -444,7 +424,7 @@ func TestWhoamiAPI(t *testing.T) {
 	payload := fmt.Sprintf(`{"user": "%s", "password": "%s"}`, user, password)
 
 	//Create a request
-	req, err := http.NewRequest("POST", "/api/v1.0/origin-ui/login", strings.NewReader(payload))
+	req, err := http.NewRequest("POST", "/api/v1.0/auth/login", strings.NewReader(payload))
 	assert.NoError(t, err)
 
 	req.Header.Set("Content-Type", "application/json")
@@ -463,7 +443,7 @@ func TestWhoamiAPI(t *testing.T) {
 
 	//Invoked with valid cookie, should return the username in the cookie
 	t.Run("With valid cookie", func(t *testing.T) {
-		req, err = http.NewRequest("GET", "/api/v1.0/origin-ui/whoami", nil)
+		req, err = http.NewRequest("GET", "/api/v1.0/auth/whoami", nil)
 		assert.NoError(t, err)
 
 		req.AddCookie(&http.Cookie{
@@ -480,7 +460,7 @@ func TestWhoamiAPI(t *testing.T) {
 	})
 	//Invoked without valid cookie, should return there is no logged-in user
 	t.Run("Without  valid cookie", func(t *testing.T) {
-		req, err = http.NewRequest("GET", "/api/v1.0/origin-ui/whoami", nil)
+		req, err = http.NewRequest("GET", "/api/v1.0/auth/whoami", nil)
 		assert.NoError(t, err)
 
 		recorder = httptest.NewRecorder()
