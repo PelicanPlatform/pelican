@@ -68,8 +68,16 @@ type (
 	}
 
 	openIdConfig struct {
-		Issuer  string `json:"issuer"`
-		JWKSURI string `json:"jwks_uri"`
+		Issuer               string   `json:"issuer"`
+		JWKSURI              string   `json:"jwks_uri"`
+		TokenEndpoint        string   `json:"token_endpoint,omitempty"`
+		UserInfoEndpoint     string   `json:"userinfo_endpoint,omitempty"`
+		RevocationEndpoint   string   `json:"revocation_endpoint,omitempty"`
+		GrantTypesSupported  []string `json:"grant_types_supported,omitempty"`
+		ScopesSupported      []string `json:"scopes_supported,omitempty"`
+		TokenAuthMethods     []string `json:"token_endpoint_auth_methods_supported,omitempty"`
+		RegistrationEndpoint string   `json:"registration_endpoint,omitempty"`
+		DeviceEndpoint       string   `json:"device_authorization_endpoint,omitempty"`
 	}
 )
 
@@ -362,6 +370,21 @@ func EmitIssuerMetadata(exportPath string) error {
 		Issuer:  param.Origin_Url.GetString(),
 		JWKSURI: jwksUrl.String(),
 	}
+
+	// If we have the built-in issuer enabled, fill in the URLs for OA4MP
+	if param.Origin_EnableIssuer.GetBool() {
+		serviceUri := "https://" + config.ComputeExternalAddress() + "/api/v1.0/issuer"
+		cfg.TokenEndpoint = serviceUri + "/token"
+		cfg.UserInfoEndpoint = serviceUri + "/userinfo"
+		cfg.RevocationEndpoint = serviceUri + "/revoke"
+		cfg.GrantTypesSupported = []string{"refresh_token", "urn:ietf:params:oauth:grant-type:device_code", "authorization_code"}
+		cfg.ScopesSupported = []string{"openid", "offline_access", "wlcg", "storage.read:/",
+			"storage.modify:/", "storage.create:/"}
+		cfg.TokenAuthMethods = []string{"client_secret_basic", "client_secret_post"}
+		cfg.RegistrationEndpoint = serviceUri + "/oidc-cm"
+		cfg.DeviceEndpoint = serviceUri + "/device_authorization"
+	}
+
 	buf, err = json.MarshalIndent(cfg, "", " ")
 	if err != nil {
 		return errors.Wrap(err, "Failed to marshal OpenID configuration file contents")

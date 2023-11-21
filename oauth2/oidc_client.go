@@ -80,6 +80,7 @@ func ServerOIDCClient() (result Config, err error) {
 	}
 	if userInfoEndpoint == "" {
 		err = errors.New("Nothing set for config parameter OIDC.UserInfoEndpoint")
+		return
 	}
 	userInfoEndpointURL, err := url.Parse(userInfoEndpoint)
 	if err != nil {
