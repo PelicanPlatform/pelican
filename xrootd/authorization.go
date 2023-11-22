@@ -337,8 +337,12 @@ func WriteOriginScitokensConfig(exportedPaths []string) error {
 		}
 	}
 	if issuer, err := GenerateDirectorMonitoringIssuer(); err == nil && len(issuer.Name) > 0 {
-		cfg.Issuers = append(cfg.Issuers, issuer)
-		cfg.Global.Audience = append(cfg.Global.Audience, issuer.Issuer)
+		if val, ok := cfg.IssuerMap[issuer.Issuer]; ok {
+			val.BasePaths = append(val.BasePaths, issuer.BasePaths...)
+			cfg.IssuerMap[issuer.Issuer] = val
+		} else {
+			cfg.IssuerMap[issuer.Issuer] = issuer
+		}
 	}
 
 	return EmitScitokensConfiguration(&cfg)
