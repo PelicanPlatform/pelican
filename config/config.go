@@ -178,7 +178,10 @@ func DiscoverFederation() error {
 	}
 
 	discoveryUrl, _ := url.Parse(federationUrl.String())
-	discoveryUrl.Path = path.Join(".well-known/pelican-configuration", federationUrl.Path)
+	discoveryUrl.Path, err = url.JoinPath(federationUrl.Path, ".well-known/pelican-configuration")
+	if err != nil {
+		return errors.Wrap(err, "Unable to parse federation url because of invalid path")
+	}
 
 	httpClient := http.Client{
 		Transport: GetTransport(),
@@ -241,14 +244,6 @@ func CleanupTempResources() {
 			tempRunDir = ""
 		}
 	})
-}
-
-func ComputeExternalAddress() string {
-	config_url := param.Server_ExternalAddress.GetString()
-	if config_url != "" {
-		return config_url
-	}
-	return fmt.Sprintf("%v:%v", param.Server_Hostname.GetString(), param.Server_Port.GetInt())
 }
 
 func getConfigBase() (string, error) {
@@ -461,11 +456,18 @@ func InitServer() error {
 	viper.SetDefault("Server.Hostname", hostname)
 	viper.SetDefault("Xrootd.Sitename", hostname)
 
-	port := param.Xrootd_Port.GetInt()
-	if port != 443 {
-		viper.SetDefault("Origin.Url", fmt.Sprintf("https://%v:%v", param.Server_Hostname.GetString(), port))
+	xrootdPort := param.Xrootd_Port.GetInt()
+	if xrootdPort != 443 {
+		viper.SetDefault("Origin.Url", fmt.Sprintf("https://%v:%v", param.Server_Hostname.GetString(), xrootdPort))
 	} else {
 		viper.SetDefault("Origin.Url", fmt.Sprintf("https://%v", param.Server_Hostname.GetString()))
+	}
+
+	webPort := param.Server_WebPort.GetInt()
+	viper.SetDefault("Server.ExternalWebUrl", fmt.Sprint("https://", hostname, ":", webPort))
+	externalAddressStr := param.Server_ExternalWebUrl.GetString()
+	if _, err = url.Parse(externalAddressStr); err != nil {
+		return errors.Wrap(err, fmt.Sprint("Invalid Server.ExternalWebUrl: ", externalAddressStr))
 	}
 
 	setupTransport()

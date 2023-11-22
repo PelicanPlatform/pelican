@@ -240,9 +240,11 @@ components: ["client"]
 ############################
 name: Origin.Url
 description: >-
-  The origin's configured URL, as reported to XRootD.
-type: string
-default: Hostname
+  The origin's configured URL, as reported to XRootD. This is the file transfer endpoint for the origin.
+
+  This Url must not have the same port number as the one in Server.ExternalWebUrl (if any) or Server.WebPort
+type: url
+default: https://${Server.Hostname}:${Xrootd.Port}
 components: ["origin"]
 ---
 name: Origin.ExportVolume
@@ -471,25 +473,27 @@ root_default: /etc/pelican/certificates/tls.key
 default: "$ConfigBase/certificates/tls.key"
 components: ["origin", "nsregistry", "director"]
 ---
-name: Server.Port
+name: Server.WebPort
 description: >-
-  The port number the Pelican web interface will be bound to.
+  The port number the Pelican web interface and internal web APIs will be bound to.
 type: int
 default: 8444
-components: ["nsregistry", "director", "origin"]
+components: ["origin", "director", "nsregistry"]
 ---
-name: Server.Address
+name: Server.WebHost
 description: >-
-  A string-encoded IP address that the origin is configured to listen on.
+  A string-encoded IP address that the Pelican web engine is configured to listen on.
 type: string
-default: 0.0.0.0
-components: ["origin"]
+default: "0.0.0.0"
+components: ["origin", "director", "nsregistry"]
 ---
-name: Server.ExternalAddress
+name: Server.ExternalWebUrl
 description: >-
-  A URL indicating the server's address as it appears externally.
+  A URL indicating the Pelican web interface and internal web APIs address as it appears externally.
+
+  This URL must not have the same port number as the one in Origin.Url (if any) or Xrootd.Port
 type: url
-default: none
+default: https://${Server.Hostname}:${Server.WebPort}
 components: ["origin", "director", "nsregistry"]
 ---
 name: Server.Hostname
