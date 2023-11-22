@@ -238,6 +238,8 @@ components: ["client"]
 name: Origin.Url
 description: >-
   The origin's configured URL, as reported to XRootD. This is the file transfer endpoint for the origin.
+
+  This Url must not have the same port number as the one in Server.ExternalWebUrl (if any) or Server.WebPort
 type: url
 default: https://${Server.Hostname}:${Xrootd.Port}
 components: ["origin"]
@@ -500,6 +502,8 @@ components: ["origin", "director", "nsregistry"]
 name: Server.ExternalWebUrl
 description: >-
   A URL indicating the Pelican web interface and internal web APIs address as it appears externally.
+
+  This URL must not have the same port number as the one in Origin.Url (if any) or Xrootd.Port
 type: url
 default: https://${Server.Hostname}:${Server.WebPort}
 components: ["origin", "director", "nsregistry"]
