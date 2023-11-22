@@ -153,16 +153,10 @@ func setLoginCookie(ctx *gin.Context, user string) {
 		ctx.JSON(500, gin.H{"error": "Failed to build token"})
 		return
 	}
-	log.Debugf("Type of *key: %T\n", key)
-	var raw ecdsa.PrivateKey
-	if err = key.Raw(&raw); err != nil {
-		ctx.JSON(500, gin.H{"error": "Unable to sign login cookie"})
-		return
-	}
-	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, raw))
+
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, key))
 	if err != nil {
-		log.Errorln("Failure when signing the login cookie:", err)
-		ctx.JSON(500, gin.H{"error": "Unable to sign login cookie"})
+		ctx.JSON(500, gin.H{"error": "Failed to sign login token"})
 		return
 	}
 
