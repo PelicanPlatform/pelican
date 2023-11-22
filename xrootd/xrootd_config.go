@@ -110,6 +110,23 @@ func CheckXrootdEnv(origin bool, nsAds []director.NamespaceAd) error {
 			" to desired daemon user %v", runtimeDir, username)
 	}
 
+	// The scitokens library will write its JWKS cache into the user's home direct by
+	// default.  By setting $XDG_CACHE_HOME, we move the JWKS cache into our runtime dir.
+	// This makes the Pelican instance more self-contained inside the runtime dir -- and two
+	// Pelican instances (such as parallel unit tests) don't end up sharing the JWKS caches,
+	// or sharing JWKS caches between test runs
+	cacheDir := filepath.Join(runtimeDir, "jwksCache")
+	if err = config.MkdirAll(cacheDir, 0700, uid, gid); err != nil {
+		return errors.Wrapf(err, "Unable to create cache directory %v", cacheDir)
+	}
+	if err = os.Chown(cacheDir, uid, -1); err != nil {
+		return errors.Wrapf(err, "Unable to change ownership of the cache directory %v"+
+			" to desired daemon user %v", cacheDir, username)
+	}
+	if err = os.Setenv("XDG_CACHE_HOME", cacheDir); err != nil {
+		return errors.Wrap(err, "Unable to set $XDG_CACHE_HOME for scitokens library")
+	}
+
 	exportPath := filepath.Join(runtimeDir, "export")
 	if _, err := os.Stat(exportPath); err == nil {
 		if err = os.RemoveAll(exportPath); err != nil {

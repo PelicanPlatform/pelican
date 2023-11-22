@@ -178,7 +178,8 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		launchers = append(launchers, oa4mp_launcher)
 	}
 
-	if err = daemon.LaunchDaemons(launchers); err != nil {
+	ctx := context.Background()
+	if err = daemon.LaunchDaemons(ctx, launchers); err != nil {
 		return err
 	}
 	log.Info("Clean shutdown of the origin")
