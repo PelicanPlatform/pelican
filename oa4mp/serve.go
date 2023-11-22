@@ -256,8 +256,8 @@ func ConfigureOA4MP() (launcher daemon.Launcher, err error) {
 	oconf := oa4mpConfig{
 		ClientID:                oauth2Client.ClientID,
 		ClientSecret:            oauth2Client.ClientSecret,
-		IssuerURL:               "https://" + config.ComputeExternalAddress() + "/api/v1.0/issuer",
-		JwksLocation:            keyPath,
+		IssuerURL:               param.Server_ExternalWebUrl.GetString() + "/api/v1.0/issuer",
+		JwksLocation:            param.Server_IssuerJwks.GetString(),
 		ScitokensServerLocation: param.Issuer_ScitokensServerLocation.GetString(),
 		ScopesRequested:         scopesRequested,
 		OIDCIssuerURL:           oidcIssuerURL,

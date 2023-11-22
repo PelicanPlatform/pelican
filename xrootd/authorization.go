@@ -63,8 +63,8 @@ type (
 
 	// Top-level configuration object for the template
 	ScitokensCfg struct {
-		Global  GlobalCfg
-		Issuers []Issuer
+		Global    GlobalCfg
+		IssuerMap map[string]Issuer
 	}
 
 	openIdConfig struct {
@@ -193,6 +193,8 @@ func LoadScitokensConfig(fileName string) (cfg ScitokensCfg, err error) {
 		return cfg, errors.Wrapf(err, "Unable to load the scitokens.cfg at %s", fileName)
 	}
 
+	cfg.IssuerMap = make(map[string]Issuer)
+
 	if section, err := configIni.GetSection("Global"); err == nil {
 		audienceKey := section.Key("audience")
 		if audienceKey != nil {
@@ -216,6 +218,7 @@ func LoadScitokensConfig(fileName string) (cfg ScitokensCfg, err error) {
 		if !strings.HasPrefix(sectionName.Name(), "Issuer ") {
 			continue
 		}
+
 		var newIssuer Issuer
 		newIssuer.Name = sectionName.Name()[len("Issuer "):]
 		if issuerKey := sectionName.Key("issuer"); issuerKey != nil {
@@ -244,7 +247,7 @@ func LoadScitokensConfig(fileName string) (cfg ScitokensCfg, err error) {
 			newIssuer.UsernameClaim = usernameClaimKey.String()
 		}
 
-		cfg.Issuers = append(cfg.Issuers, newIssuer)
+		cfg.IssuerMap[newIssuer.Issuer] = newIssuer
 	}
 
 	return cfg, nil
@@ -289,6 +292,7 @@ func WriteOriginScitokensConfig(exportedPaths []string) error {
 
 	// Create the scitokens.cfg file if it's not already present
 	scitokensCfg := param.Xrootd_ScitokensConfig.GetString()
+
 	err = config.MkdirAll(filepath.Dir(scitokensCfg), 0755, -1, gid)
 	if err != nil {
 		return errors.Wrapf(err, "Unable to create directory %v",
@@ -310,13 +314,23 @@ func WriteOriginScitokensConfig(exportedPaths []string) error {
 	}
 
 	if issuer, err := GenerateMonitoringIssuer(); err == nil && len(issuer.Name) > 0 {
-		cfg.Issuers = append(cfg.Issuers, issuer)
-		cfg.Global.Audience = append(cfg.Global.Audience, issuer.Issuer)
+		if val, ok := cfg.IssuerMap[issuer.Issuer]; ok {
+			val.BasePaths = append(val.BasePaths, issuer.BasePaths...)
+			cfg.IssuerMap[issuer.Issuer] = val
+		} else {
+			cfg.IssuerMap[issuer.Issuer] = issuer
+			cfg.Global.Audience = append(cfg.Global.Audience, issuer.Issuer)
+		}
 	}
 
 	if issuer, err := GenerateOriginIssuer(exportedPaths); err == nil && len(issuer.Name) > 0 {
-		cfg.Issuers = append(cfg.Issuers, issuer)
-		cfg.Global.Audience = append(cfg.Global.Audience, issuer.Issuer)
+		if val, ok := cfg.IssuerMap[issuer.Issuer]; ok {
+			val.BasePaths = append(val.BasePaths, issuer.BasePaths...)
+			cfg.IssuerMap[issuer.Issuer] = val
+		} else {
+			cfg.IssuerMap[issuer.Issuer] = issuer
+			cfg.Global.Audience = append(cfg.Global.Audience, issuer.Issuer)
+		}
 	}
 
 	return EmitScitokensConfiguration(&cfg)

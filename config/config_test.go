@@ -127,11 +127,11 @@ func TestInitConfig(t *testing.T) {
 	InitConfig() // Should set up pelican.yaml, osdf.yaml and defaults.yaml
 
 	// Check if server address is correct by defaults.yaml
-	assert.Equal(t, "0.0.0.0", param.Server_Address.GetString())
+	assert.Equal(t, "0.0.0.0", param.Server_WebHost.GetString())
 	// Check that Federation Discovery url is correct by osdf.yaml
 	assert.Equal(t, "osg-htc.org", param.Federation_DiscoveryUrl.GetString())
 
-	viper.Set("Server.Address", "1.1.1.1") // should write to temp config file
+	viper.Set("Server.WebHost", "1.1.1.1") // should write to temp config file
 	if err := viper.WriteConfigAs(tempCfgFile.Name()); err != nil {
 		t.Fatalf("Failed to write to config file: %v", err)
 	}
@@ -140,7 +140,7 @@ func TestInitConfig(t *testing.T) {
 	InitConfig()
 
 	// Check if server address overrides the default
-	assert.Equal(t, "1.1.1.1", param.Server_Address.GetString())
+	assert.Equal(t, "1.1.1.1", param.Server_WebHost.GetString())
 	viper.Reset()
 
 	//Test if prefix is not set, should not be able to find osdfYaml configuration

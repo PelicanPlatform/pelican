@@ -125,7 +125,7 @@ func init() {
 	if err := viper.BindPFlag("Debug", rootCmd.PersistentFlags().Lookup("debug")); err != nil {
 		panic(err)
 	}
-	if err := viper.BindPFlag("Server.Port", portFlag); err != nil {
+	if err := viper.BindPFlag("Server.WebPort", portFlag); err != nil {
 		panic(err)
 	}
 }

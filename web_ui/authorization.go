@@ -144,10 +144,7 @@ func IssuerCheck(c *gin.Context, strToken string, anyOfTheScopes []string) error
 		return errors.Wrap(err, "Invalid JWT")
 	}
 
-	// The server URL for tokens not used for xrootd access should be
-	// from ComputeExternalAddress() as this will give you the address (and port)
-	// of the web service on the server
-	serverURL := "https://" + config.ComputeExternalAddress()
+	serverURL := param.Server_ExternalWebUrl.GetString()
 	if serverURL != token.Issuer() {
 		if param.Origin_Url.GetString() == token.Issuer() {
 			return errors.New(fmt.Sprint("Wrong issuer; expect the issuer to be the server's web address but got Origin.URL, " + token.Issuer()))
@@ -217,8 +214,7 @@ func DirectorCheck(c *gin.Context, strToken string, anyOfTheScopes []string) err
 // Create a token for accessing Prometheus /metrics endpoint on
 // the server itself
 func CreatePromMetricToken() (string, error) {
-	serverURL := "https://" + config.ComputeExternalAddress()
-
+	serverURL := param.Server_ExternalWebUrl.GetString()
 	tokenExpireTime := param.Monitoring_TokenExpiresIn.GetDuration()
 
 	tok, err := jwt.NewBuilder().
