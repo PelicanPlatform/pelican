@@ -22,7 +22,6 @@ import (
 	"bufio"
 	"crypto/ecdsa"
 	"net/http"
-	"net/url"
 	"os"
 	"path"
 	"strings"
@@ -139,15 +138,12 @@ func setLoginCookie(ctx *gin.Context, user string) {
 		return
 	}
 
-	issuerURL := url.URL{}
-	issuerURL.Scheme = "https"
-	issuerURL.Host = config.ComputeExternalAddress()
 	now := time.Now()
 	tok, err := jwt.NewBuilder().
 		// TODO: We might want to come up with some names broader than this for a
 		// generic token for Web APIs, like web_ui.access
 		Claim("scope", "prometheus.read").
-		Issuer(issuerURL.String()).
+		Issuer(param.Server_ExternalWebUrl.GetString()).
 		IssuedAt(now).
 		Expiration(now.Add(30 * time.Minute)).
 		NotBefore(now).

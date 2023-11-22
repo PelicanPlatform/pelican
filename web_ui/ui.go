@@ -89,7 +89,7 @@ func waitUntilLogin(ctx context.Context) error {
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 
 	hostname := param.Server_Hostname.GetString()
-	port := param.Server_Port.GetInt()
+	port := param.Server_WebPort.GetInt()
 	isTTY := false
 	if term.IsTerminal(int(os.Stdout.Fd())) {
 		isTTY = true
