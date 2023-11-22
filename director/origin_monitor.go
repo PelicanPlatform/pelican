@@ -101,7 +101,7 @@ func generateMonitoringScitoken(originUrl string) (string, error) {
 func UploadTestfile(originUrl string) (string, error) {
 	tkn, err := generateMonitoringScitoken(originUrl)
 	if err != nil {
-		return "", errors.Wrap(err, "Failed to create a token for the diretor test upload")
+		return "", errors.Wrap(err, "Failed to create a token for the director test upload")
 	}
 
 	uploadURL, err := url.Parse(originUrl)
