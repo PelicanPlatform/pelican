@@ -219,11 +219,11 @@ func TestConfigCacheEviction(t *testing.T) {
 
 		require.True(t, serverAds.Has(mockPelicanOriginServerAd), "serverAds failed to register the originAd")
 
-		cancelReceived := false
+		cancelChan := make(chan int)
 		go func() {
 			<-ctx.Done()
 			if ctx.Err() == context.Canceled {
-				cancelReceived = true
+				cancelChan <- 1
 			}
 		}()
 
@@ -234,8 +234,12 @@ func TestConfigCacheEviction(t *testing.T) {
 		// OnEviction is handled on a different goroutine than the cache management
 		// So we want to wait for a bit so that OnEviction can have time to be
 		// executed
-		time.Sleep(2 * time.Second) // This is a bit flaky and can delay the test run, so any thoughts on improvement is very welcome
-		assert.True(t, cancelReceived, "Didn't receive cancel singal")
+		select {
+		case <-cancelChan:
+			require.True(t, true)
+		case <-time.After(3 * time.Second):
+			require.False(t, true)
+		}
 		assert.True(t, healthTestCancelFuncs[mockPelicanOriginServerAd] == nil, "Evicted origin didn't clear cancelFunc in the map")
 	})
 }
