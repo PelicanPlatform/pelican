@@ -541,6 +541,16 @@ type: string
 default: none
 components:  ["nsregistry", "director"]
 ---
+name: Server.OAuthClientRedirectHostname
+description: >-
+  The hostname for OAuth client redirect URL that the OAuth provider will direct to after user is authenticated
+
+  For development use only. Useful when developing in container and you want to expose localhost 
+  instead of container hostname to your OAuth provider 
+type: string
+default: none
+components:  ["nsregistry", "director"]
+---
 name: Server.SessionSecret
 description: >-
   The secret for encrypt/decrypt session data for Pelican web UI to initiate a session cookie

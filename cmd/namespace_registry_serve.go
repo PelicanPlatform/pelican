@@ -49,6 +49,10 @@ func serveNamespaceRegistry( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		return err
 	}
 
+	if err := web_ui.ConfigOAuthClientAPIs(engine); err != nil {
+		return err
+	}
+
 	// Call out to nsregistry to establish routes for the gin engine
 	nsregistry.RegisterNamespaceRegistry(engine.Group("/"))
 	log.Info("Starting web engine...")

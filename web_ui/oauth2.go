@@ -23,52 +23,45 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
+	"net/url"
+	"sync/atomic"
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
 	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/utils"
 	"golang.org/x/oauth2"
 )
 
-type oauthLoginRequest struct {
-	NextUrl string `form:"next_url,omitempty"`
-}
+type (
+	oauthLoginRequest struct {
+		NextUrl string `form:"next_url,omitempty"`
+	}
 
-type oauthCallbackRequest struct {
-	State   string `form:"state"`
-	Code    string `form:"code"`
-	NextUrl string `form:"next_url,omitempty"`
-}
+	oauthCallbackRequest struct {
+		State   string `form:"state"`
+		Code    string `form:"code"`
+		NextUrl string `form:"next_url,omitempty"`
+	}
 
-type cilogonUserInfo struct {
-	Email string `json:"email,omitempty"`
-	Sub   string `json:"sub"`
-	SubID string `json:"subject_id,omitempty"`
-}
+	cilogonUserInfo struct {
+		Email string `json:"email,omitempty"`
+		Sub   string `json:"sub"`
+		SubID string `json:"subject_id,omitempty"`
+	}
+)
 
 const (
-	oauthCallbackPath  = "/api/v1.0/auth/callback"
+	oauthCallbackPath  = "/api/v1.0/auth/cilogon/callback"
 	cilogonUserInfoUrl = "https://cilogon.org/oauth2/userinfo"
 )
 
-var (
-	callbackUrl     = param.Server_ExternalWebUrl.GetString() + oauthCallbackPath
-	ciLogonEndpoint = oauth2.Endpoint{
-		AuthURL:  "https://cilogon.org/authorize",
-		TokenURL: "https://cilogon.org/oauth2/token",
-	}
-	ciLogonOAuthConfig = &oauth2.Config{
-		RedirectURL:  callbackUrl,
-		ClientID:     param.Server_OAuthClientID.GetString(),
-		ClientSecret: param.Server_OAuthClientSecret.GetString(),
-		Endpoint:     ciLogonEndpoint,
-		Scopes:       []string{"email"},
-	}
-)
+var ciLogonOAuthConfig atomic.Pointer[oauth2.Config]
 
 func generateCSRFCookie(ctx *gin.Context) string {
 	session := sessions.Default(ctx)
@@ -93,13 +86,14 @@ func handleOAuthLogin(ctx *gin.Context) {
 
 	// Carry the Url that will redirect to when auth is successful
 	authOption := oauth2.SetAuthURLParam("next_url", req.NextUrl)
-	redirectUrl := ciLogonOAuthConfig.AuthCodeURL(csrfState, authOption)
+	redirectUrl := ciLogonOAuthConfig.Load().AuthCodeURL(csrfState, authOption)
 
 	ctx.Redirect(302, redirectUrl)
 }
 
 func handleOAuthCallback(ctx *gin.Context) {
 	session := sessions.Default(ctx)
+	c := context.Background()
 	csrfFromSession := session.Get("oauthstate")
 	if csrfFromSession == nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid OAuth callback: CSRF token from cookie is missing"})
@@ -113,32 +107,37 @@ func handleOAuthCallback(ctx *gin.Context) {
 	}
 
 	if req.State != csrfFromSession {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprint("Invalid OAuth callback: CSRF token doesn't match", ctx.Request.URL)})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprint("Invalid OAuth callback: CSRF token doesn't match: ", ctx.Request.URL)})
 		return
 	}
 
 	// We only need this token to grab user id from cilogon
 	// and we won't store it anywhere. We will later issue our own token
 	// for user access
-	token, err := ciLogonOAuthConfig.Exchange(context.Background(), req.Code)
+	token, err := ciLogonOAuthConfig.Load().Exchange(c, req.Code)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprint("Error in exchanging code for token", ctx.Request.URL)})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprint("Error in exchanging code for token: ", ctx.Request.URL)})
 		return
 	}
 
-	resp, err := utils.MakeRequest(cilogonUserInfoUrl, "POST", map[string]interface{}{
-		"access_token": token.AccessToken,
-	}, nil)
-
+	client := ciLogonOAuthConfig.Load().Client(c, token)
+	data := url.Values{}
+	data.Add("access_token", token.AccessToken)
+	resp, err := client.PostForm(cilogonUserInfoUrl, data)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprint("Error requesting user info from CILogon", ctx.Request.URL)})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprint("Error requesting user info from CILogon: ", err)})
+		return
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprint("Error parsing user info from CILogon: ", err)})
 		return
 	}
 
 	userInfo := cilogonUserInfo{}
 
-	if err := json.Unmarshal(resp, &userInfo); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprint("Error parsing user info from CILogon", ctx.Request.URL)})
+	if err := json.Unmarshal(body, &userInfo); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprint("Error parsing user info from CILogon: ", err)})
 		return
 	}
 
@@ -164,10 +163,49 @@ func handleOAuthCallback(ctx *gin.Context) {
 	ctx.Redirect(http.StatusTemporaryRedirect, redirectLocation)
 }
 
-func ConfigOAuthClientAPIs(engine *gin.Engine) {
+func ConfigOAuthClientAPIs(engine *gin.Engine) error {
+	if param.Server_OAuthClientID.GetString() == "" || param.Server_OAuthClientSecret.GetString() == "" {
+		return errors.New("Fail to configure OAuth client: OAuth client ID or client secret is empty")
+	}
+	if param.Server_SessionSecret.GetString() == "" {
+		return errors.New("Fail to configure OAuth client: Session secret is empty")
+	}
+	redirectUrlStr := param.Server_ExternalWebUrl.GetString()
+	redirectUrl, err := url.Parse(redirectUrlStr)
+	if err != nil {
+		return err
+	}
+	redirectUrl.Path = oauthCallbackPath
+	redirectHostname := param.Server_OAuthClientRedirectHostname.GetString()
+	if redirectHostname != "" {
+		_, _, err := net.SplitHostPort(redirectHostname)
+		if err != nil {
+			// Port not present
+			redirectUrl.Host = fmt.Sprint(redirectHostname, ":", param.Server_WebPort.GetInt())
+		} else {
+			// Port present
+			redirectUrl.Host = redirectHostname
+		}
+	}
+	config := &oauth2.Config{
+		RedirectURL:  redirectUrl.String(),
+		ClientID:     param.Server_OAuthClientID.GetString(),
+		ClientSecret: param.Server_OAuthClientSecret.GetString(),
+		Scopes:       []string{"openid", "email"}, //openid scope is required by CILogon
+		Endpoint: oauth2.Endpoint{
+			AuthURL:  "https://cilogon.org/authorize",
+			TokenURL: "https://cilogon.org/oauth2/token",
+		},
+	}
+	ciLogonOAuthConfig.Store(config)
+
 	store := cookie.NewStore([]byte(param.Server_SessionSecret.GetString()))
-	authGroup := gin.New().Group("/api/v1.0/auth")
 	sessionHandler := sessions.Sessions("pelican-session", store)
-	authGroup.GET("/cilogon/login", sessionHandler, handleOAuthLogin)
-	authGroup.GET("/cilogon/callback", sessionHandler, handleOAuthCallback)
+
+	ciLoginGroup := engine.Group("/api/v1.0/auth/cilogon", sessionHandler)
+	{
+		ciLoginGroup.GET("/login", handleOAuthLogin)
+		ciLoginGroup.GET("/callback", handleOAuthCallback)
+	}
+	return nil
 }
