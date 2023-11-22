@@ -25,12 +25,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/utils"
 	"golang.org/x/oauth2"
@@ -58,14 +56,13 @@ const (
 )
 
 var (
-	// TODO: change to ComputeExternalAddress to param.ExternalWebUrl when #378 is merged
-	callbackUrl     = url.URL{Host: config.ComputeExternalAddress(), Scheme: "https", Path: oauthCallbackPath}
+	callbackUrl     = param.Server_ExternalWebUrl.GetString() + oauthCallbackPath
 	ciLogonEndpoint = oauth2.Endpoint{
 		AuthURL:  "https://cilogon.org/authorize",
 		TokenURL: "https://cilogon.org/oauth2/token",
 	}
 	ciLogonOAuthConfig = &oauth2.Config{
-		RedirectURL:  callbackUrl.String(),
+		RedirectURL:  callbackUrl,
 		ClientID:     param.Server_OAuthClientID.GetString(),
 		ClientSecret: param.Server_OAuthClientSecret.GetString(),
 		Endpoint:     ciLogonEndpoint,
