@@ -36,7 +36,6 @@ import (
 	"github.com/grafana/regexp"
 	"github.com/mwitkow/go-conntrack"
 	"github.com/oklog/run"
-	pelican_config "github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/prometheus/client_golang/prometheus"
@@ -161,9 +160,9 @@ func promQueryEngineAuthHandler(av1 *route.Router) gin.HandlerFunc {
 
 // Configure director's Prometheus scraper to use HTTP service discovery for origins
 func configDirectorPromScraper() (*config.ScrapeConfig, error) {
-	originDiscoveryUrl, err := url.Parse("https://" + pelican_config.ComputeExternalAddress())
+	originDiscoveryUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
 	if err != nil {
-		return nil, fmt.Errorf("parse external URL https://%v: %w", pelican_config.ComputeExternalAddress(), err)
+		return nil, fmt.Errorf("parse external URL %v: %w", param.Server_ExternalWebUrl.GetString(), err)
 	}
 	sdToken, err := director.CreateDirectorSDToken()
 	if err != nil {
@@ -275,7 +274,7 @@ func (a LogrusAdapter) Log(keyvals ...interface{}) error {
 
 func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 	cfg := flagConfig{}
-	ListenAddress := fmt.Sprintf("0.0.0.0:%v", param.Server_Port.GetInt())
+	ListenAddress := fmt.Sprintf("0.0.0.0:%v", param.Server_WebPort.GetInt())
 	cfg.webTimeout = model.Duration(5 * time.Minute)
 	cfg.serverStoragePath = param.Monitoring_DataLocation.GetString()
 
@@ -320,9 +319,9 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 
 	localStoragePath := cfg.serverStoragePath
 
-	external_url, err := url.Parse("https://" + pelican_config.ComputeExternalAddress())
+	external_url, err := url.Parse(param.Server_ExternalWebUrl.GetString())
 	if err != nil {
-		return fmt.Errorf("parse external URL https://%v: %w", pelican_config.ComputeExternalAddress(), err)
+		return fmt.Errorf("parse external URL %v: %w", param.Server_ExternalWebUrl.GetString(), err)
 	}
 
 	CORSOrigin, err := compileCORSRegexString(".*")
@@ -357,10 +356,12 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 	}
 	scrapeConfig.HTTPClientConfig = scraperHttpClientConfig
 	scrapeConfig.ServiceDiscoveryConfigs = make([]discovery.Config, 1)
+	// model.AddressLabel needs a hostname (w/ port), so we cut the protocol here
+	externalAddressWoProtocol, _ := strings.CutPrefix(param.Server_ExternalWebUrl.GetString(), "https://")
 	scrapeConfig.ServiceDiscoveryConfigs[0] = discovery.StaticConfig{
 		&targetgroup.Group{
 			Targets: []model.LabelSet{{
-				model.AddressLabel: model.LabelValue(pelican_config.ComputeExternalAddress()),
+				model.AddressLabel: model.LabelValue(externalAddressWoProtocol),
 			}},
 		},
 	}

@@ -74,7 +74,7 @@ func RunEngine(engine *gin.Engine) {
 	certFile := param.Server_TLSCertificate.GetString()
 	keyFile := param.Server_TLSKey.GetString()
 
-	addr := fmt.Sprintf("%v:%v", param.Server_Address.GetString(), param.Server_Port.GetInt())
+	addr := fmt.Sprintf("%v:%v", param.Server_WebHost.GetString(), param.Server_WebPort.GetInt())
 
 	log.Debugln("Starting web engine at address", addr)
 	err := engine.RunTLS(addr, certFile, keyFile)

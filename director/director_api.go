@@ -223,7 +223,7 @@ func VerifyDirectorSDToken(strToken string) (bool, error) {
 func CreateDirectorScrapeToken() (string, error) {
 	// We assume this function is only called on a director server,
 	// the external address of which should be the director's URL
-	directorURL := "https://" + config.ComputeExternalAddress()
+	directorURL := param.Server_ExternalWebUrl.GetString()
 	tokenExpireTime := param.Monitoring_TokenExpiresIn.GetDuration()
 
 	ads := ListServerAds([]ServerType{OriginType, CacheType})
