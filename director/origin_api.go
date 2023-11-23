@@ -20,7 +20,6 @@ package director
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -130,14 +129,7 @@ func VerifyAdvertiseToken(token, namespace string) (bool, error) {
 	ctx := context.Background()
 	if ar == nil {
 		ar = jwk.NewCache(ctx)
-		// This should be switched to use the common transport, but that must first be exported
-		client := &http.Client{}
-		if param.TLSSkipVerify.GetBool() {
-			tr := &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-			}
-			client = &http.Client{Transport: tr}
-		}
+		client := &http.Client{Transport: config.GetTransport()}
 		if err = ar.Register(issuerUrl, jwk.WithMinRefreshInterval(15*time.Minute), jwk.WithHTTPClient(client)); err != nil {
 			return false, err
 		}
