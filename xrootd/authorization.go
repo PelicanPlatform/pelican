@@ -387,7 +387,7 @@ func EmitIssuerMetadata(exportPath string) error {
 
 	// If we have the built-in issuer enabled, fill in the URLs for OA4MP
 	if param.Origin_EnableIssuer.GetBool() {
-		serviceUri := "https://" + config.ComputeExternalAddress() + "/api/v1.0/issuer"
+		serviceUri := param.Server_ExternalWebUrl.GetString() + "/api/v1.0/issuer"
 		cfg.TokenEndpoint = serviceUri + "/token"
 		cfg.UserInfoEndpoint = serviceUri + "/userinfo"
 		cfg.RevocationEndpoint = serviceUri + "/revoke"
