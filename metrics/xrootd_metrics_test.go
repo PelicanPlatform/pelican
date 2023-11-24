@@ -18,6 +18,10 @@ func getAuthInfoString(user UserRecord) string {
 	return fmt.Sprintf("&p=%s&n=%s&h=[::ffff:172.17.0.2]&o=%s&r=%s&g=&m=&I=4", user.AuthenticationProtocol, user.DN, user.Org, user.Role)
 }
 
+func getTokenAuthString(id uint32, user UserRecord) string {
+	return fmt.Sprintf("&Uc=%d&s=%s&n=%s&o=%s&r=%s&g=%s", id, user.DN, user.User, user.Org, user.Role, strings.Join(user.Groups, " "))
+}
+
 func getUserIdString(userId XrdUserId) string {
 	return fmt.Sprintf("%s/%s.%d:%d@%s", userId.Prot, userId.User, userId.Pid, userId.Sid, userId.Host)
 }
@@ -612,5 +616,86 @@ func TestHandlePacket(t *testing.T) {
 		if err := testutil.CollectAndCompare(TransferBytes, expectedTransferBytesReader, "xrootd_transfer_bytes"); err != nil {
 			require.NoError(t, err, "Collected metric is different from expected")
 		}
+	})
+
+	// The token packet should update the user's session.
+	t.Run("token-packet-updates-session", func(t *testing.T) {
+		mockUserRecord := UserRecord{
+			AuthenticationProtocol: "https",
+			DN:                     "clientName",
+			Role:                   "clientRole",
+			Org:                    "clientOrg",
+		}
+		mockTokenRecord := UserRecord{
+			AuthenticationProtocol: "ztn",
+			DN:                     "token subject",
+			Role:                   "role1",
+			Org:                    "https://example.com",
+			Groups:                 []string{"group1", "group2"},
+		}
+		mockXrdUserId := XrdUserId{
+			Prot: "https",
+			User: "unknown",
+			Pid:  0,
+			Sid:  143152967831384,
+			Host: "fae8c2865de4",
+		}
+		mockUserInfo := []byte(getUserIdString(mockXrdUserId) + "\n" + getAuthInfoString(mockUserRecord))
+		mockTokenInfo := []byte(getUserIdString(mockXrdUserId) + "\n" + getTokenAuthString(0x12345678, mockTokenRecord))
+		unixtime := int32(time.Now().Unix())
+		mockMonMap1 := XrdXrootdMonMap{
+			Hdr: XrdXrootdMonHeader{
+				Code: 'u',
+				Pseq: 1,
+				Plen: uint16(12 + len(mockUserInfo)),
+				Stod: unixtime,
+			},
+			Dictid: uint32(0x12345678),
+			Info:   mockUserInfo,
+		}
+
+		mockMonMap2 := XrdXrootdMonMap{
+			Hdr: XrdXrootdMonHeader{ // 8B
+				// T provides used token information
+				Code: 'T',
+				Pseq: 1,
+				Plen: uint16(12 + len(mockTokenInfo)),
+				Stod: int32(time.Now().Unix()),
+			},
+			Dictid: uint32(0x12345679), // 4B
+			Info:   mockTokenInfo,
+		}
+
+		sessions.DeleteAll()
+
+		buf, err := mockMonMap1.Serialize()
+		require.NoError(t, err, "Error serializing monitor packet")
+		err = HandlePacket(buf)
+		require.NoError(t, err, "Error handling packet")
+
+		require.Equal(t, 1, len(sessions.Keys()), "Session cache didn't update")
+
+		assert.Equal(t, uint32(0x12345678), sessions.Keys()[0].Id, "Id in session cache entry doesn't match expected")
+		sessionEntry := sessions.Get(sessions.Keys()[0]).Value()
+		assert.Equal(t, mockUserRecord.AuthenticationProtocol, sessionEntry.AuthenticationProtocol)
+		assert.Equal(t, mockUserRecord.DN, sessionEntry.DN)
+		assert.Equal(t, mockUserRecord.Role, sessionEntry.Role)
+		assert.Equal(t, mockUserRecord.Org, sessionEntry.Org)
+
+		buf, err = mockMonMap2.Serialize()
+		require.NoError(t, err)
+		err = HandlePacket(buf)
+		require.NoError(t, err)
+
+		require.Equal(t, 1, len(sessions.Keys()))
+		sessionEntry = sessions.Get(sessions.Keys()[0]).Value()
+		assert.Equal(t, mockTokenRecord.AuthenticationProtocol, sessionEntry.AuthenticationProtocol)
+		assert.Equal(t, mockTokenRecord.DN, sessionEntry.DN)
+		assert.Equal(t, mockTokenRecord.User, sessionEntry.User)
+		assert.Equal(t, mockTokenRecord.Role, sessionEntry.Role)
+		assert.Equal(t, mockTokenRecord.Groups, sessionEntry.Groups)
+		assert.Equal(t, mockTokenRecord.Org, sessionEntry.Org)
+
+		sessions.DeleteAll()
 	})
 }

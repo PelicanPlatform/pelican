@@ -23,6 +23,7 @@ import (
 	"encoding/binary"
 	"encoding/xml"
 	"fmt"
+	"math"
 	"net"
 	"path"
 	"strconv"
@@ -53,9 +54,11 @@ type (
 
 	UserRecord struct {
 		AuthenticationProtocol string
+		User                   string
 		DN                     string
 		Role                   string
 		Org                    string
+		Groups                 []string
 	}
 
 	FileId struct {
@@ -378,6 +381,47 @@ func ParseXrdUserId(userid string) (xrdUserId XrdUserId, err error) {
 	return
 }
 
+func ParseTokenAuth(tokenauth string) (userId UserId, record UserRecord, err error) {
+	record.AuthenticationProtocol = "ztn"
+	foundUc := false
+	for _, pair := range strings.Split(tokenauth, "&") {
+		keyVal := strings.SplitN(pair, "=", 2)
+		if len(keyVal) != 2 {
+			continue
+		}
+		switch keyVal[0] {
+		case "Uc":
+			var id int
+			id, err = strconv.Atoi(keyVal[1])
+			if err != nil {
+				err = errors.Wrap(err, "Unable to parse user ID to integer")
+				return
+			}
+			if id < 0 || id > math.MaxUint32 {
+				err = errors.Errorf("Provided ID, %d, is not a valid uint32", id)
+				return
+			}
+			userId.Id = uint32(id)
+			foundUc = true
+		case "s":
+			record.DN = keyVal[1]
+		case "un":
+			record.User = keyVal[1]
+		case "o":
+			record.Org = keyVal[1]
+		case "r":
+			record.Role = keyVal[1]
+		case "g":
+			record.Groups = strings.Split(keyVal[1], " ")
+		}
+	}
+	if !foundUc {
+		err = errors.New("The user ID was not provided in the token record")
+		return
+	}
+	return
+}
+
 func ParseFileHeader(packet []byte) (XrdXrootdMonFileHdr, error) {
 	if len(packet) < 8 {
 		return XrdXrootdMonFileHdr{}, fmt.Errorf("Passed header of size %v which is below the minimum header size of 8 bytes", len(packet))
@@ -650,10 +694,27 @@ func HandlePacket(packet []byte) error {
 					record.Org = keyVal[1]
 				case "r":
 					record.Role = keyVal[1]
+				case "g":
+					record.Groups = strings.Split(keyVal[1], " ")
 				}
+			}
+			if len(record.AuthenticationProtocol) > 0 {
+				record.User = xrdUserId.User
 			}
 			sessions.Set(UserId{Id: dictid}, record, ttlcache.DefaultTTL)
 			userids.Set(xrdUserId, UserId{Id: dictid}, ttlcache.DefaultTTL)
+		} else {
+			return err
+		}
+	case 'T':
+		log.Debug("MonPacket: Received a token info packet")
+		infoSize := uint32(header.Plen - 12)
+		if _, tokenauth, err := GetSIDRest(packet[12 : 12+infoSize]); err == nil {
+			userId, userRecord, err := ParseTokenAuth(tokenauth)
+			if err != nil {
+				return err
+			}
+			sessions.Set(userId, userRecord, ttlcache.DefaultTTL)
 		} else {
 			return err
 		}
