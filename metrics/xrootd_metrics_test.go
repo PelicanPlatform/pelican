@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/xml"
 	"fmt"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -20,7 +19,7 @@ func getAuthInfoString(user UserRecord) string {
 }
 
 func getUserIdString(userId XrdUserId) string {
-	return fmt.Sprintf("%s/%s.%s:%s@%s", userId.Prot, userId.User, userId.Pid, userId.Sid, userId.Host)
+	return fmt.Sprintf("%s/%s.%d:%d@%s", userId.Prot, userId.User, userId.Pid, userId.Sid, userId.Host)
 }
 
 func mockFileOpenPacket(pseq int, fileId, userId uint32, SID int64, path string) ([]byte, error) {
@@ -389,8 +388,8 @@ func TestHandlePacket(t *testing.T) {
 		mockXrdUserId := XrdUserId{
 			Prot: "https",
 			User: "unknown",
-			Pid:  "0",
-			Sid:  "143152967831384",
+			Pid:  0,
+			Sid:  143152967831384,
 			Host: "fae8c2865de4",
 		}
 		mockInfo := []byte(getUserIdString(mockXrdUserId) + "\n" + getAuthInfoString(mockUserRecord))
@@ -402,7 +401,7 @@ func TestHandlePacket(t *testing.T) {
 				Plen: uint16(12 + len(mockInfo)),
 				Stod: int32(time.Now().Unix()),
 			},
-			Dictid: uint32(0), // 4B
+			Dictid: uint32(0x12345678), // 4B
 			Info:   mockInfo,
 		}
 
@@ -415,11 +414,7 @@ func TestHandlePacket(t *testing.T) {
 
 		require.Equal(t, 1, len(sessions.Keys()), "Session cache didn't update")
 
-		sidInt, err := strconv.Atoi(mockXrdUserId.Sid)
-		require.NoError(t, err, "Error parsing SID to int64")
-		// The ID seems to be wrong. The length of sid is kXR_int64 while the user id in file hdr is kXR_unt32
-		// Aren't the user id supposed to be the dictid instead of sid?
-		assert.Equal(t, uint32(sidInt), sessions.Keys()[0].Id, "Id in session cache entry doesn't match expected")
+		assert.Equal(t, uint32(0x12345678), sessions.Keys()[0].Id, "Id in session cache entry doesn't match expected")
 		sessionEntry := sessions.Get(sessions.Keys()[0]).Value()
 		assert.Equal(t, mockUserRecord.AuthenticationProtocol, sessionEntry.AuthenticationProtocol)
 		assert.Equal(t, mockUserRecord.DN, sessionEntry.DN)
@@ -433,8 +428,8 @@ func TestHandlePacket(t *testing.T) {
 		mockXrdUserId := XrdUserId{
 			Prot: "https",
 			User: "unknown",
-			Pid:  "0",
-			Sid:  "143152967831384",
+			Pid:  0,
+			Sid:  143152967831384,
 			Host: "fae8c2865de4",
 		}
 
@@ -467,9 +462,7 @@ func TestHandlePacket(t *testing.T) {
 		// never changed
 		assert.Equal(t, "/", transferEntry.Path, "Path in transfer cache entry doesn't match expected")
 
-		sidInt, err := strconv.Atoi(mockXrdUserId.Sid)
-		require.NoError(t, err, "Error parsing SID to int64")
-		assert.Equal(t, uint32(sidInt), transferEntry.UserId.Id, "UserID in transfer cache entry doesn't match expected")
+		assert.Equal(t, uint32(0x12345678), transferEntry.UserId.Id, "UserID in transfer cache entry doesn't match expected")
 		transfers.DeleteAll()
 	})
 

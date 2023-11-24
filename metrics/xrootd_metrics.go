@@ -46,8 +46,8 @@ type (
 	XrdUserId struct {
 		Prot string
 		User string
-		Pid  string
-		Sid  string
+		Pid  int
+		Sid  int
 		Host string
 	}
 
@@ -224,7 +224,12 @@ var (
 
 	lastStats SummaryStat
 
-	sessions     = ttlcache.New[UserId, UserRecord](ttlcache.WithTTL[UserId, UserRecord](24 * time.Hour))
+	// Maps the connection identifier with a user record
+	sessions = ttlcache.New[UserId, UserRecord](ttlcache.WithTTL[UserId, UserRecord](24 * time.Hour))
+	// Maps a userid to a connection identifier.  NOTE: due to https://github.com/xrootd/xrootd/issues/2133,
+	// this may not be a unique map.
+	userids = ttlcache.New[XrdUserId, UserId](ttlcache.WithTTL[XrdUserId, UserId](24 * time.Hour))
+	// Maps a file identifier with a file record
 	transfers    = ttlcache.New[FileId, FileRecord](ttlcache.WithTTL[FileId, FileRecord](24 * time.Hour))
 	monitorPaths []PathList
 )
@@ -310,25 +315,67 @@ func ComputePrefix(inputPath string) string {
 	return path.Clean(result)
 }
 
-func GetSIDRest(info []byte) (UserId, string, error) {
+func GetSIDRest(info []byte) (xrdUserId XrdUserId, rest string, err error) {
 	log.Debugln("GetSIDRest inputs:", string(info))
 	infoSplit := strings.SplitN(string(info), "\n", 2)
 	if len(infoSplit) == 1 {
-		return UserId{}, "", errors.New("Unable to parse SID")
+		err = errors.New("Unable to parse SID")
+		return
+	}
+	rest = infoSplit[1]
+
+	xrdUserId, err = ParseXrdUserId(infoSplit[0])
+	return
+}
+
+func ParseXrdUserId(userid string) (xrdUserId XrdUserId, err error) {
+	// Expected format: prot/user.id:sid@clientHost
+	sidInfo := strings.SplitN(userid, ":", 2)
+	if len(sidInfo) == 1 {
+		err = errors.New("Unable to parse valid user ID - missing ':' delimiter")
+		return
 	}
 
-	sidInfo := strings.Split(string(infoSplit[0]), ":")
-	if len(sidInfo) == 1 {
-		return UserId{}, "", errors.New("Unable to parse valid SID")
-	}
-	// form: 82215220691948@localhost
-	sidAtHostname := sidInfo[len(sidInfo)-1]
+	// Parse server ID and client hostname,
+	// Form: 82215220691948@localhost
+	sidAtHostname := sidInfo[1]
 	sidAtHostnameInfo := strings.SplitN(sidAtHostname, "@", 2)
+	if len(sidAtHostnameInfo) == 1 {
+		err = errors.New("Unable to parse valid server ID - missing '@' delimiter")
+		return
+	}
 	sid, err := strconv.Atoi(sidAtHostnameInfo[0])
 	if err != nil {
-		return UserId{}, "", err
+		err = errors.Wrap(err, "Unable to parse valid server ID")
+		return
 	}
-	return UserId{Id: uint32(sid)}, string(infoSplit[1]), nil
+
+	// Parse prot/user.id
+	protUserIdInfo := strings.SplitN(sidInfo[0], "/", 2)
+	if len(protUserIdInfo) == 1 {
+		err = errors.New("Unable to parse user ID - missing '/' delimiter")
+		return
+	}
+
+	// Parse user.id; assume user may contain multiple '.' characters
+	lastIdx := strings.LastIndex(protUserIdInfo[1], ".")
+	if lastIdx == -1 {
+		err = errors.New("Unable to parse user ID - missing '.' delimiter")
+		return
+	}
+	pid, err := strconv.Atoi(protUserIdInfo[1][lastIdx+1 : len(protUserIdInfo[1])])
+	if err != nil {
+		err = errors.Wrap(err, "Unsable to parse PID as integer")
+		return
+	}
+
+	// Finally, fill in our userid struct
+	xrdUserId.Prot = protUserIdInfo[0]
+	xrdUserId.User = protUserIdInfo[1][:lastIdx]
+	xrdUserId.Pid = pid
+	xrdUserId.Sid = sid
+	xrdUserId.Host = string(sidAtHostname[1])
+	return
 }
 
 func ParseFileHeader(packet []byte) (XrdXrootdMonFileHdr, error) {
@@ -370,20 +417,26 @@ func HandlePacket(packet []byte) error {
 	header.Plen = binary.BigEndian.Uint16(packet[2:4])
 	header.Stod = int32(binary.BigEndian.Uint32(packet[4:8]))
 
+	// For =, p, and x record-types, this is always 0
+	// For i, T, u, and U , this is a connection ID
+	// For d, this is a file ID.
+	dictid := binary.BigEndian.Uint32(packet[8:12])
+
 	switch header.Code {
 	case 'd':
 		log.Debug("HandlePacket: Received a file-open packet")
 		if len(packet) < 12 {
 			return errors.New("Packet is too small to be valid file-open packet")
 		}
-		dictid := binary.BigEndian.Uint32(packet[8:12])
 		fileid := FileId{Id: dictid}
-		userid, rest, err := GetSIDRest(packet[12:])
+		xrdUserId, rest, err := GetSIDRest(packet[12:])
 		if err != nil {
 			return errors.Wrapf(err, "Failed to parse XRootD monitoring packet")
 		}
 		path := ComputePrefix(rest)
-		transfers.Set(fileid, FileRecord{UserId: userid, Path: path}, ttlcache.DefaultTTL)
+		if useridItem := userids.Get(xrdUserId); useridItem != nil {
+			transfers.Set(fileid, FileRecord{UserId: useridItem.Value(), Path: path}, ttlcache.DefaultTTL)
+		}
 	case 'f':
 		log.Debug("HandlePacket: Received a f-stream packet")
 		// sizeof(XrdXrootdMonHeader) + sizeof(XrdXrootdMonFileTOD)
@@ -402,7 +455,7 @@ func HandlePacket(packet []byte) error {
 				return err
 			}
 			switch fileHdr.RecType {
-			case 0: // XrdXrootdMonFileHdr::isClose
+			case isClose: // XrdXrootdMonFileHdr::isClose
 				log.Debugln("Received a f-stream file-close packet of size ",
 					fileHdr.RecSize)
 				fileId := FileId{Id: fileHdr.FileId}
@@ -479,7 +532,7 @@ func HandlePacket(packet []byte) error {
 				counter.Add(float64(int64(binary.BigEndian.Uint64(
 					packet[offset+xfrOffset+16:offset+xfrOffset+24]) -
 					oldWriteBytes)))
-			case 1: // XrdXrootdMonFileHdr::isOpen
+			case isOpen: // XrdXrootdMonFileHdr::isOpen
 				log.Debug("MonPacket: Received a f-stream file-open packet")
 				fileid := FileId{Id: fileHdr.FileId}
 				path := ""
@@ -496,9 +549,9 @@ func HandlePacket(packet []byte) error {
 				}
 				transfers.Set(fileid, FileRecord{UserId: userId, Path: path},
 					ttlcache.DefaultTTL)
-			case 2: // XrdXrootdMonFileHdr::isTime
+			case isTime: // XrdXrootdMonFileHdr::isTime
 				log.Debug("MonPacket: Received a f-stream time packet")
-			case 3: // XrdXrootdMonFileHdr::isXfr
+			case isXfr: // XrdXrootdMonFileHdr::isXfr
 				log.Debug("MonPacket: Received a f-stream transfer packet")
 				// NOTE: There's a lot to do here.  These records would allow us to
 				// capture partial file transfers or emulate a close on timeout.
@@ -562,7 +615,7 @@ func HandlePacket(packet []byte) error {
 				record.WriteBytes = writeBytes
 				transfers.Set(fileid, record, ttlcache.DefaultTTL)
 
-			case 4: // XrdXrootdMonFileHdr::isDisc
+			case isDisc: // XrdXrootdMonFileHdr::isDisc
 				log.Debug("MonPacket: Received a f-stream disconnect packet")
 				userId := UserId{Id: fileHdr.UserId}
 				if session := sessions.Get(userId); session != nil {
@@ -581,7 +634,7 @@ func HandlePacket(packet []byte) error {
 	case 'u':
 		log.Debug("MonPacket: Received a user login packet")
 		infoSize := uint32(header.Plen - 12)
-		if userid, auth, err := GetSIDRest(packet[12 : 12+infoSize]); err == nil {
+		if xrdUserId, auth, err := GetSIDRest(packet[12 : 12+infoSize]); err == nil {
 			var record UserRecord
 			for _, pair := range strings.Split(auth, "&") {
 				keyVal := strings.SplitN(pair, "=", 2)
@@ -599,7 +652,8 @@ func HandlePacket(packet []byte) error {
 					record.Role = keyVal[1]
 				}
 			}
-			sessions.Set(userid, record, ttlcache.DefaultTTL)
+			sessions.Set(UserId{Id: dictid}, record, ttlcache.DefaultTTL)
+			userids.Set(xrdUserId, UserId{Id: dictid}, ttlcache.DefaultTTL)
 		} else {
 			return err
 		}
