@@ -20,7 +20,6 @@ package client
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -38,6 +37,7 @@ import (
 	"time"
 
 	grab "github.com/opensaucerer/grab/v3"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/studio-b12/gowebdav"
 	"github.com/vbauerster/mpb/v8"
@@ -158,13 +158,16 @@ type TransferDetails struct {
 
 	// Proxy specifies if a proxy should be used
 	Proxy bool
+
+	// Specifies the pack option in the transfer URL
+	PackOption string
 }
 
 // NewTransferDetails creates the TransferDetails struct with the given cache
-func NewTransferDetails(cache namespaces.Cache, https bool) []TransferDetails {
+func NewTransferDetails(cache namespaces.Cache, opts TransferDetailsOptions) []TransferDetails {
 	details := make([]TransferDetails, 0)
 	var cacheEndpoint string
-	if https {
+	if opts.NeedsToken {
 		cacheEndpoint = cache.AuthEndpoint
 	} else {
 		cacheEndpoint = cache.Endpoint
@@ -184,7 +187,7 @@ func NewTransferDetails(cache namespaces.Cache, https bool) []TransferDetails {
 		cacheURL.Opaque = ""
 	}
 	log.Debugf("Parsed Cache: %s\n", cacheURL.String())
-	if https {
+	if opts.NeedsToken {
 		cacheURL.Scheme = "https"
 		if !HasPort(cacheURL.Host) {
 			// Add port 8444 and 8443
@@ -192,6 +195,7 @@ func NewTransferDetails(cache namespaces.Cache, https bool) []TransferDetails {
 			details = append(details, TransferDetails{
 				Url:   *cacheURL,
 				Proxy: false,
+				PackOption: opts.PackOption,
 			})
 			// Strip the port off and add 8443
 			cacheURL.Host = cacheURL.Host[:len(cacheURL.Host)-5] + ":8443"
@@ -200,6 +204,7 @@ func NewTransferDetails(cache namespaces.Cache, https bool) []TransferDetails {
 		details = append(details, TransferDetails{
 			Url:   *cacheURL,
 			Proxy: false,
+			PackOption: opts.PackOption,
 		})
 	} else {
 		cacheURL.Scheme = "http"
@@ -210,11 +215,13 @@ func NewTransferDetails(cache namespaces.Cache, https bool) []TransferDetails {
 		details = append(details, TransferDetails{
 			Url:   *cacheURL,
 			Proxy: isProxyEnabled,
+			PackOption: opts.PackOption,
 		})
 		if isProxyEnabled && CanDisableProxy() {
 			details = append(details, TransferDetails{
 				Url:   *cacheURL,
 				Proxy: false,
+				PackOption: opts.PackOption,
 			})
 		}
 	}
@@ -227,18 +234,23 @@ type TransferResults struct {
 	Downloaded int64
 }
 
+type TransferDetailsOptions struct {
+	NeedsToken bool
+	PackOption string
+}
+
 type CacheInterface interface{}
 
-func GenerateTransferDetailsUsingCache(cache CacheInterface, needsToken bool) []TransferDetails {
+func GenerateTransferDetailsUsingCache(cache CacheInterface, opts TransferDetailsOptions) []TransferDetails {
 	if directorCache, ok := cache.(namespaces.DirectorCache); ok {
-		return NewTransferDetailsUsingDirector(directorCache, needsToken)
+		return NewTransferDetailsUsingDirector(directorCache, opts)
 	} else if cache, ok := cache.(namespaces.Cache); ok {
-		return NewTransferDetails(cache, needsToken)
+		return NewTransferDetails(cache, opts)
 	}
 	return nil
 }
 
-func download_http(source string, destination string, payload *payloadStruct, namespace namespaces.Namespace, recursive bool, tokenName string, OSDFDirectorUrl string) (bytesTransferred int64, err error) {
+func download_http(sourceUrl *url.URL, destination string, payload *payloadStruct, namespace namespaces.Namespace, recursive bool, tokenName string, OSDFDirectorUrl string) (bytesTransferred int64, err error) {
 
 	// First, create a handler for any panics that occur
 	defer func() {
@@ -253,12 +265,17 @@ func download_http(source string, destination string, payload *payloadStruct, na
 		}
 	}()
 
+	packOption := sourceUrl.Query().Get("pack")
+	if packOption != "" {
+		log.Debugln("Will use unpack option value", packOption)
+	}
+	sourceUrl = &url.URL{Path: sourceUrl.Path}
+
 	// Generate the downloadUrl
 	var token string
 	if namespace.UseTokenOnRead {
 		var err error
-		sourceUrl := url.URL{Path: source}
-		token, err = getToken(&sourceUrl, namespace, false, tokenName)
+		token, err = getToken(sourceUrl, namespace, false, tokenName)
 		if err != nil {
 			log.Errorln("Failed to get token though required to read from this namespace:", err)
 			return 0, err
@@ -294,23 +311,26 @@ func download_http(source string, destination string, payload *payloadStruct, na
 		cachesToTry = len(closestNamespaceCaches)
 	}
 	log.Debugln("Trying the caches:", closestNamespaceCaches[:cachesToTry])
-	downloadUrl := url.URL{Path: source}
 
 	if recursive {
 		var err error
-		files, err = walkDavDir(&downloadUrl, namespace)
+		files, err = walkDavDir(sourceUrl, namespace)
 		if err != nil {
 			log.Errorln("Error from walkDavDir", err)
 			return 0, err
 		}
 	} else {
-		files = append(files, source)
+		files = append(files, sourceUrl.Path)
 	}
 
 	for _, cache := range closestNamespaceCaches[:cachesToTry] {
 		// Parse the cache URL
 		log.Debugln("Cache:", cache)
-		transfers = append(transfers, GenerateTransferDetailsUsingCache(cache, namespace.ReadHTTPS || namespace.UseTokenOnRead)...)
+		td := TransferDetailsOptions{
+			NeedsToken: namespace.ReadHTTPS || namespace.UseTokenOnRead,
+			PackOption: packOption,
+		}
+		transfers = append(transfers, GenerateTransferDetailsUsingCache(cache, td)...)
 	}
 
 	if len(transfers) > 0 {
@@ -329,7 +349,7 @@ func download_http(source string, destination string, payload *payloadStruct, na
 	// Start the workers
 	for i := 1; i <= 5; i++ {
 		wg.Add(1)
-		go startDownloadWorker(source, destination, token, transfers, &wg, workChan, results)
+		go startDownloadWorker(sourceUrl.Path, destination, token, transfers, &wg, workChan, results)
 	}
 
 	// For each file, send it to the worker
@@ -457,7 +477,31 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	log.Debugln("Transfer URL String:", transfer.Url.String())
-	req, _ := grab.NewRequest(dest, transfer.Url.String())
+	var req *grab.Request
+	var err error
+	var unpacker *autoUnpacker
+	if transfer.PackOption != "" {
+		var behavior packerBehavior
+		switch transfer.PackOption {
+		case "auto":
+			behavior = autoBehavior
+		case "tar":
+			behavior = tarBehavior
+		case "tar.gz":
+			behavior = tarGZBehavior
+		case "tar.xz":
+			behavior = tarXZBehavior
+		case "zip":
+			behavior = zipBehavior
+		default:
+			return 0, errors.Errorf("Unknown value for 'pack' parameter: %v", transfer.PackOption)
+		}
+		unpacker = newAutoUnpacker(dest, behavior)
+		req, err = grab.NewRequestToWriter(unpacker, transfer.Url.String())
+	} else if req, err = grab.NewRequest(dest, transfer.Url.String()); err != nil {
+		return 0, errors.Wrap(err, "Failed to create new download request")
+	}
+
 	if token != "" {
 		req.HTTPRequest.Header.Set("Authorization", "Bearer "+token)
 	}
@@ -631,7 +675,7 @@ Loop:
 		}
 	}
 	//fmt.Printf("\nDownload saved to", resp.Filename)
-	err := resp.Err()
+	err = resp.Err()
 	if err != nil {
 		// Connection errors
 		if errors.Is(err, syscall.ECONNREFUSED) ||
@@ -659,6 +703,14 @@ Loop:
 		return 0, &HttpErrResp{resp.HTTPResponse.StatusCode, fmt.Sprintf("Request failed (HTTP status %d): %s",
 			resp.HTTPResponse.StatusCode, resp.Err().Error())}
 	}
+
+	if unpacker != nil {
+		unpacker.Close()
+		if err := unpacker.Error(); err != nil {
+			return 0, err
+		}
+	}
+
 	log.Debugln("HTTP Transfer was successful")
 	return resp.BytesComplete(), nil
 }
