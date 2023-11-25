@@ -37,7 +37,7 @@ import (
 	"syscall"
 	"time"
 
-	grab "github.com/cavaliercoder/grab"
+	grab "github.com/opensaucerer/grab/v3"
 	log "github.com/sirupsen/logrus"
 	"github.com/studio-b12/gowebdav"
 	"github.com/vbauerster/mpb/v8"
@@ -448,7 +448,11 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 	if !transfer.Proxy {
 		transport.Proxy = nil
 	}
-	client.HTTPClient.Transport = transport
+	httpClient, ok := client.HTTPClient.(*http.Client)
+	if !ok {
+		return 0, errors.New("Internal error: implementation is not a http.Client type")
+	}
+	httpClient.Transport = transport
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -492,7 +496,7 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 	}
 
 	// Size of the download
-	contentLength := resp.Size
+	contentLength := resp.Size()
 	// Do a head request for content length if resp.Size is unknown
 	if contentLength <= 0 && ObjectClientOptions.ProgressBars {
 		headClient := &http.Client{Transport: config.GetTransport()}
@@ -506,7 +510,7 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 		contentLength, err = strconv.ParseInt(contentLengthStr, 10, 64)
 		if err != nil {
 			log.Errorln("problem converting content-length to an int", err)
-			contentLength = resp.Size
+			contentLength = resp.Size()
 		}
 	}
 
