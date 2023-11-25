@@ -115,6 +115,7 @@ func (aup *autoUnpacker) unpack(tr *tar.Reader, preader *io.PipeReader) {
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
+			preader.CloseWithError(err)
 			break
 		}
 		if err != nil {
@@ -237,6 +238,10 @@ func (aup *autoUnpacker) Write(p []byte) (n int, err error) {
 	n, writerErr := aup.writer.Write(p)
 	if err = aup.Error(); err != nil {
 		return n, err
+	} else if writerErr != nil {
+		if writerErr == io.EOF {
+			return len(p), nil
+		}
 	}
 	return n, writerErr
 }
