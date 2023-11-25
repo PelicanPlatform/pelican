@@ -75,25 +75,28 @@ func (aup *autoUnpacker) StoreError(err error) {
 	aup.err.CompareAndSwap(packedError{}, packedError{Value: err})
 }
 
-func (aup *autoUnpacker) detect() packerBehavior {
+func (aup *autoUnpacker) detect() (packerBehavior, error) {
 	currentBytes := aup.buffer.Bytes()
 	// gzip streams start with 1F 8B
 	if len(currentBytes) >= 2 && bytes.Equal(currentBytes[0:2], []byte{0x1F, 0x8B}) {
-		return tarGZBehavior
+		return tarGZBehavior, nil
 	}
 	// xz streams start with FD 37 7A 58 5A 00
 	if len(currentBytes) >= 6 && bytes.Equal(currentBytes[0:6], []byte{0xFD, 0x37, 0x7A, 0x58, 0x5A, 0x00}) {
-		return tarXZBehavior
+		return tarXZBehavior, nil
 	}
 	// tar files, at offset 257, have bytes 75 73 74 61 72
 	if len(currentBytes) >= (257 + 5) && bytes.Equal(currentBytes[257:257 + 5], []byte{0x75, 0x73, 0x74, 0x61, 0x72}) {
-		return tarBehavior
+		return tarBehavior, nil
 	}
 	// zip files start with 50 4B 03 04
 	if len(currentBytes) >= 4 && bytes.Equal(currentBytes[0:4], []byte{0x50, 0x4B, 0x03, 0x04}) {
-		return zipBehavior
+		return zipBehavior, nil
 	}
-	return autoBehavior
+	if len(currentBytes) > (257 + 5) {
+		return autoBehavior, errors.New("Unable to detect pack type")
+	}
+	return autoBehavior, nil
 }
 
 func writeRegFile(path string, mode int64, reader io.Reader) error {
@@ -218,7 +221,7 @@ func (aup *autoUnpacker) Write(p []byte) (n int, err error) {
 		if n, err = aup.buffer.Write(p); err != nil {
 			return
 		}
-		if aup.detectedType = aup.detect(); aup.detectedType == autoBehavior {
+		if aup.detectedType, err = aup.detect(); aup.detectedType == autoBehavior {
 			n = len(p)
 			return
 		} else if err = aup.configure(); err != nil {
