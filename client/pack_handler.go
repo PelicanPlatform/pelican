@@ -20,7 +20,6 @@ package client
 
 import (
 	"archive/tar"
-	"sync/atomic"
 	"bytes"
 	"compress/gzip"
 	"io"
@@ -28,6 +27,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -35,7 +35,7 @@ import (
 
 type packerBehavior int
 
-type packedError struct{Value error}
+type packedError struct{ Value error }
 
 type atomicError struct {
 	err atomic.Value
@@ -52,9 +52,9 @@ type autoUnpacker struct {
 
 type autoPacker struct {
 	atomicError
-	Behavior     packerBehavior
-	srcDir       string
-	reader       io.ReadCloser
+	Behavior packerBehavior
+	srcDir   string
+	reader   io.ReadCloser
 }
 
 const (
@@ -70,16 +70,16 @@ const (
 func newAutoUnpacker(destdir string, behavior packerBehavior) *autoUnpacker {
 	aup := &autoUnpacker{
 		Behavior: behavior,
-		destDir: destdir,
+		destDir:  destdir,
 	}
 	aup.err.Store(packedError{})
 	return aup
 }
 
 func newAutoPacker(srcdir string, behavior packerBehavior) *autoPacker {
-	ap := &autoPacker {
+	ap := &autoPacker{
 		Behavior: behavior,
-		srcDir: srcdir,
+		srcDir:   srcdir,
 	}
 	ap.err.Store(packedError{})
 	return ap
@@ -124,7 +124,7 @@ func (aup *autoUnpacker) detect() (packerBehavior, error) {
 		return tarXZBehavior, nil
 	}
 	// tar files, at offset 257, have bytes 75 73 74 61 72
-	if len(currentBytes) >= (257 + 5) && bytes.Equal(currentBytes[257:257 + 5], []byte{0x75, 0x73, 0x74, 0x61, 0x72}) {
+	if len(currentBytes) >= (257+5) && bytes.Equal(currentBytes[257:257+5], []byte{0x75, 0x73, 0x74, 0x61, 0x72}) {
 		return tarBehavior, nil
 	}
 	// zip files start with 50 4B 03 04
@@ -258,10 +258,8 @@ func (aup *autoUnpacker) unpack(tr *tar.Reader, preader *io.PipeReader) {
 				return
 			}
 		case tar.TypeChar:
-			continue
 			log.Debugln("Ignoring tar entry of type character device at", destPath)
 		case tar.TypeBlock:
-			continue
 			log.Debugln("Ignoring tar entry of type block device at", destPath)
 		case tar.TypeDir:
 			if err = os.MkdirAll(destPath, fs.FileMode(hdr.Mode)); err != nil {
@@ -269,10 +267,8 @@ func (aup *autoUnpacker) unpack(tr *tar.Reader, preader *io.PipeReader) {
 				return
 			}
 		case tar.TypeFifo:
-			continue
 			log.Debugln("Ignoring tar entry of type FIFO at", destPath)
 		case 103: // pax_global_header, written by git archive.  OK to ignore
-			continue
 		default:
 			log.Debugln("Ignoring unknown tar entry of type", hdr.Typeflag)
 		}
@@ -281,13 +277,13 @@ func (aup *autoUnpacker) unpack(tr *tar.Reader, preader *io.PipeReader) {
 
 func (aup *autoUnpacker) configure() (err error) {
 	preader, pwriter := io.Pipe()
-	bufDrained := make(chan int)
+	bufDrained := make(chan error)
 	// gzip.NewReader function will block reading from the pipe.
 	// Asynchronously write the contents of the buffer from a separate goroutine;
 	// Note we don't return from configure() until the buffer is consumed.
 	go func() {
-		aup.buffer.WriteTo(pwriter)
-		bufDrained<-1
+		_, err := aup.buffer.WriteTo(pwriter)
+		bufDrained <- err
 	}()
 	var tarUnpacker *tar.Reader
 	switch aup.detectedType {
@@ -307,7 +303,9 @@ func (aup *autoUnpacker) configure() (err error) {
 		return errors.New("zip file support has not yet been implemented")
 	}
 	go aup.unpack(tarUnpacker, preader)
-	<-bufDrained
+	if err = <-bufDrained; err != nil {
+		return errors.Wrap(err, "Failed to copy byte buffer to unpacker")
+	}
 	aup.writer = pwriter
 	return nil
 }
@@ -354,11 +352,11 @@ func (ap *autoPacker) Read(p []byte) (n int, err error) {
 		}
 	}
 
-        n, readerErr := ap.reader.Read(p)
-        if err = ap.Error(); err != nil {
-                return
-        }
-        return n, readerErr
+	n, readerErr := ap.reader.Read(p)
+	if err = ap.Error(); err != nil {
+		return
+	}
+	return n, readerErr
 }
 
 func (aup *autoUnpacker) Write(p []byte) (n int, err error) {

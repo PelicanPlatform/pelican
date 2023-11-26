@@ -246,8 +246,8 @@ func NewTransferDetailsUsingDirector(cache namespaces.DirectorCache, opts Transf
 			// Add port 8444 and 8443
 			cacheURL.Host += ":8444"
 			details = append(details, TransferDetails{
-				Url:   *cacheURL,
-				Proxy: false,
+				Url:        *cacheURL,
+				Proxy:      false,
 				PackOption: opts.PackOption,
 			})
 			// Strip the port off and add 8443
@@ -255,8 +255,8 @@ func NewTransferDetailsUsingDirector(cache namespaces.DirectorCache, opts Transf
 		}
 		// Whether port is specified or not, add a transfer without proxy
 		details = append(details, TransferDetails{
-			Url:   *cacheURL,
-			Proxy: false,
+			Url:        *cacheURL,
+			Proxy:      false,
 			PackOption: opts.PackOption,
 		})
 	} else {
@@ -266,14 +266,14 @@ func NewTransferDetailsUsingDirector(cache namespaces.DirectorCache, opts Transf
 		}
 		isProxyEnabled := IsProxyEnabled()
 		details = append(details, TransferDetails{
-			Url:   *cacheURL,
-			Proxy: isProxyEnabled,
+			Url:        *cacheURL,
+			Proxy:      isProxyEnabled,
 			PackOption: opts.PackOption,
 		})
 		if isProxyEnabled && CanDisableProxy() {
 			details = append(details, TransferDetails{
-				Url:   *cacheURL,
-				Proxy: false,
+				Url:        *cacheURL,
+				Proxy:      false,
 				PackOption: opts.PackOption,
 			})
 		}

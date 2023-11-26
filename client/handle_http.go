@@ -193,8 +193,8 @@ func NewTransferDetails(cache namespaces.Cache, opts TransferDetailsOptions) []T
 			// Add port 8444 and 8443
 			cacheURL.Host += ":8444"
 			details = append(details, TransferDetails{
-				Url:   *cacheURL,
-				Proxy: false,
+				Url:        *cacheURL,
+				Proxy:      false,
 				PackOption: opts.PackOption,
 			})
 			// Strip the port off and add 8443
@@ -202,8 +202,8 @@ func NewTransferDetails(cache namespaces.Cache, opts TransferDetailsOptions) []T
 		}
 		// Whether port is specified or not, add a transfer without proxy
 		details = append(details, TransferDetails{
-			Url:   *cacheURL,
-			Proxy: false,
+			Url:        *cacheURL,
+			Proxy:      false,
 			PackOption: opts.PackOption,
 		})
 	} else {
@@ -213,14 +213,14 @@ func NewTransferDetails(cache namespaces.Cache, opts TransferDetailsOptions) []T
 		}
 		isProxyEnabled := IsProxyEnabled()
 		details = append(details, TransferDetails{
-			Url:   *cacheURL,
-			Proxy: isProxyEnabled,
+			Url:        *cacheURL,
+			Proxy:      isProxyEnabled,
 			PackOption: opts.PackOption,
 		})
 		if isProxyEnabled && CanDisableProxy() {
 			details = append(details, TransferDetails{
-				Url:   *cacheURL,
-				Proxy: false,
+				Url:        *cacheURL,
+				Proxy:      false,
 				PackOption: opts.PackOption,
 			})
 		}
@@ -486,7 +486,9 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 			return 0, err
 		}
 		unpacker = newAutoUnpacker(dest, behavior)
-		req, err = grab.NewRequestToWriter(unpacker, transfer.Url.String())
+		if req, err = grab.NewRequestToWriter(unpacker, transfer.Url.String()); err != nil {
+			return 0, errors.Wrap(err, "Failed to create new download request")
+		}
 	} else if req, err = grab.NewRequest(dest, transfer.Url.String()); err != nil {
 		return 0, errors.Wrap(err, "Failed to create new download request")
 	}
@@ -769,9 +771,9 @@ func UploadFile(src string, origDest *url.URL, token string, namespace namespace
 	}
 
 	dest := &url.URL{
-		Host: writebackhostUrl.Host,
+		Host:   writebackhostUrl.Host,
 		Scheme: "https",
-		Path: origDest.Path,
+		Path:   origDest.Path,
 	}
 
 	// Create the wrapped reader and send it to the request
