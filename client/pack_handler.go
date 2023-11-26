@@ -37,13 +37,24 @@ type packerBehavior int
 
 type packedError struct{Value error}
 
+type atomicError struct {
+	err atomic.Value
+}
+
 type autoUnpacker struct {
+	atomicError
 	Behavior     packerBehavior
 	detectedType packerBehavior
 	destDir      string
 	buffer       bytes.Buffer
 	writer       io.WriteCloser
-	err          atomic.Value
+}
+
+type autoPacker struct {
+	atomicError
+	Behavior     packerBehavior
+	srcDir       string
+	reader       io.ReadCloser
 }
 
 const (
@@ -52,6 +63,8 @@ const (
 	tarGZBehavior
 	tarXZBehavior
 	zipBehavior
+
+	defaultBehavior packerBehavior = tarGZBehavior
 )
 
 func newAutoUnpacker(destdir string, behavior packerBehavior) *autoUnpacker {
@@ -63,7 +76,32 @@ func newAutoUnpacker(destdir string, behavior packerBehavior) *autoUnpacker {
 	return aup
 }
 
-func (aup *autoUnpacker) Error() error {
+func newAutoPacker(srcdir string, behavior packerBehavior) *autoPacker {
+	ap := &autoPacker {
+		Behavior: behavior,
+		srcDir: srcdir,
+	}
+	ap.err.Store(packedError{})
+	return ap
+}
+
+func GetBehavior(behaviorName string) (packerBehavior, error) {
+	switch behaviorName {
+	case "auto":
+		return autoBehavior, nil
+	case "tar":
+		return tarBehavior, nil
+	case "tar.gz":
+		return tarGZBehavior, nil
+	case "tar.xz":
+		return tarXZBehavior, nil
+	case "zip":
+		return zipBehavior, nil
+	}
+	return autoBehavior, errors.Errorf("Unknown value for 'pack' parameter: %v", behaviorName)
+}
+
+func (aup *atomicError) Error() error {
 	value := aup.err.Load()
 	if err, ok := value.(packedError); ok {
 		return err.Value
@@ -71,7 +109,7 @@ func (aup *autoUnpacker) Error() error {
 	return nil
 }
 
-func (aup *autoUnpacker) StoreError(err error) {
+func (aup *atomicError) StoreError(err error) {
 	aup.err.CompareAndSwap(packedError{}, packedError{Value: err})
 }
 
@@ -107,6 +145,75 @@ func writeRegFile(path string, mode int64, reader io.Reader) error {
 	defer fp.Close()
 	_, err = io.Copy(fp, reader)
 	return err
+}
+
+func readRegFile(path string, writer io.Writer) error {
+	fp, err := os.OpenFile(path, os.O_RDONLY, 0)
+	if err != nil {
+		return err
+	}
+	defer fp.Close()
+	_, err = io.Copy(writer, fp)
+	return err
+}
+
+func (ap *autoPacker) pack(tw *tar.Writer, gz *gzip.Writer, pwriter *io.PipeWriter) {
+	srcPrefix := filepath.Clean(ap.srcDir) + "/"
+	defer pwriter.Close()
+	err := filepath.WalkDir(ap.srcDir, func(path string, dent fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		path = filepath.Clean(path)
+		if !strings.HasPrefix(path, srcPrefix) {
+			return nil
+		}
+		tarName := path[len(srcPrefix):]
+		if tarName == "" || tarName[0] == '/' {
+			return errors.New("Invalid path provided by filepath.Walk")
+		}
+
+		fi, err := dent.Info()
+		if err != nil {
+			return err
+		}
+		link := ""
+		if (fi.Mode() & fs.ModeSymlink) == fs.ModeSymlink {
+			link, err = os.Readlink(path)
+			if err != nil {
+				return err
+			}
+		}
+		hdr, err := tar.FileInfoHeader(fi, link)
+		if err != nil {
+			return err
+		}
+		hdr.Name = tarName
+		if err = tw.WriteHeader(hdr); err != nil {
+			return err
+		}
+		if fi.Mode().IsRegular() {
+			if err = readRegFile(path, tw); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		ap.StoreError(err)
+		return
+	}
+	if err = tw.Close(); err != nil {
+		ap.StoreError(err)
+		return
+	}
+	if gz != nil {
+		if err = gz.Close(); err != nil {
+			ap.StoreError(err)
+			return
+		}
+	}
+	pwriter.CloseWithError(io.EOF)
 }
 
 func (aup *autoUnpacker) unpack(tr *tar.Reader, preader *io.PipeReader) {
@@ -205,6 +312,55 @@ func (aup *autoUnpacker) configure() (err error) {
 	return nil
 }
 
+func (ap *autoPacker) configure() (err error) {
+	preader, pwriter := io.Pipe()
+	if ap.Behavior == autoBehavior {
+		ap.Behavior = defaultBehavior
+	}
+	var tarPacker *tar.Writer
+	var streamer *gzip.Writer
+	switch ap.Behavior {
+	case tarBehavior:
+		tarPacker = tar.NewWriter(pwriter)
+	case tarGZBehavior:
+		streamer = gzip.NewWriter(pwriter)
+		tarPacker = tar.NewWriter(streamer)
+	case tarXZBehavior:
+		return errors.New("tar.xz has not yet been implemented")
+	case zipBehavior:
+		return errors.New("zip file support has not yet been implemented")
+	}
+	go ap.pack(tarPacker, streamer, pwriter)
+	ap.reader = preader
+	return nil
+}
+
+func (ap *autoPacker) Read(p []byte) (n int, err error) {
+	if ap.srcDir == "" {
+		err = errors.New("AutoPacker object must be initialized via NewPacker")
+		return
+	}
+
+	if err = ap.Error(); err != nil {
+		if ap.reader != nil {
+			ap.reader.Close()
+		}
+		return
+	}
+
+	if ap.reader == nil {
+		if err = ap.configure(); err != nil {
+			return
+		}
+	}
+
+        n, readerErr := ap.reader.Read(p)
+        if err = ap.Error(); err != nil {
+                return
+        }
+        return n, readerErr
+}
+
 func (aup *autoUnpacker) Write(p []byte) (n int, err error) {
 	if aup.destDir == "" {
 		err = errors.New("AutoUnpacker object must be initialized via NewAutoUnpacker")
@@ -246,11 +402,19 @@ func (aup *autoUnpacker) Write(p []byte) (n int, err error) {
 	return n, writerErr
 }
 
-func (aup autoUnpacker) Close() {
+func (aup autoUnpacker) Close() error {
 	if aup.buffer.Len() > 0 {
 		aup.StoreError(errors.New("AutoUnpacker was closed prior to detecting any file type; no bytes were written"))
 	}
 	if aup.Behavior == autoBehavior {
 		aup.StoreError(errors.New("AutoUnpacker was closed prior to any bytes written"))
 	}
+	return aup.Error()
+}
+
+func (ap *autoPacker) Close() error {
+	if ap.reader != nil {
+		return ap.reader.Close()
+	}
+	return nil
 }

@@ -481,20 +481,9 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 	var err error
 	var unpacker *autoUnpacker
 	if transfer.PackOption != "" {
-		var behavior packerBehavior
-		switch transfer.PackOption {
-		case "auto":
-			behavior = autoBehavior
-		case "tar":
-			behavior = tarBehavior
-		case "tar.gz":
-			behavior = tarGZBehavior
-		case "tar.xz":
-			behavior = tarXZBehavior
-		case "zip":
-			behavior = zipBehavior
-		default:
-			return 0, errors.Errorf("Unknown value for 'pack' parameter: %v", transfer.PackOption)
+		behavior, err := GetBehavior(transfer.PackOption)
+		if err != nil {
+			return 0, err
 		}
 		unpacker = newAutoUnpacker(dest, behavior)
 		req, err = grab.NewRequestToWriter(unpacker, transfer.Url.String())
@@ -718,7 +707,7 @@ Loop:
 // ProgressReader wraps the io.Reader to get progress
 // Adapted from https://stackoverflow.com/questions/26050380/go-tracking-post-request-progress
 type ProgressReader struct {
-	file   *os.File
+	reader io.ReadCloser
 	read   int64
 	size   int64
 	closed chan bool
@@ -726,49 +715,70 @@ type ProgressReader struct {
 
 // Read implements the common read function for io.Reader
 func (pr *ProgressReader) Read(p []byte) (n int, err error) {
-	n, err = pr.file.Read(p)
+	n, err = pr.reader.Read(p)
 	atomic.AddInt64(&pr.read, int64(n))
 	return n, err
 }
 
 // Close implments the close function of io.Closer
 func (pr *ProgressReader) Close() error {
-	err := pr.file.Close()
+	err := pr.reader.Close()
 	// Also, send the closed channel a message
 	pr.closed <- true
 	return err
 }
 
 // UploadFile Uploads a file using HTTP
-func UploadFile(src string, dest *url.URL, token string, namespace namespaces.Namespace) (int64, error) {
+func UploadFile(src string, origDest *url.URL, token string, namespace namespaces.Namespace) (int64, error) {
 
 	log.Debugln("In UploadFile")
-	log.Debugln("Dest", dest.String())
-	// Try opening the file to send
-	file, err := os.Open(src)
-	if err != nil {
-		log.Errorln("Error opening local file:", err)
-		return 0, err
-	}
+	log.Debugln("Dest", origDest.String())
+
 	// Stat the file to get the size (for progress bar)
-	fileInfo, err := file.Stat()
+	fileInfo, err := os.Stat(src)
 	if err != nil {
-		log.Errorln("Error stating local file ", src, ":", err)
+		log.Errorln("Error checking local file ", src, ":", err)
 		return 0, err
 	}
+
+	var ioreader io.ReadCloser
+	pack := origDest.Query().Get("pack")
+	if pack != "" {
+		behavior, err := GetBehavior(pack)
+		if err != nil {
+			return 0, err
+		}
+		if behavior == autoBehavior {
+			behavior = defaultBehavior
+		}
+		ioreader = newAutoPacker(src, behavior)
+	} else {
+		// Try opening the file to send
+		file, err := os.Open(src)
+		if err != nil {
+			log.Errorln("Error opening local file:", err)
+			return 0, err
+		}
+		ioreader = file
+	}
+
 	// Parse the writeback host as a URL
 	writebackhostUrl, err := url.Parse(namespace.WriteBackHost)
 	if err != nil {
 		return 0, err
 	}
-	dest.Host = writebackhostUrl.Host
-	dest.Scheme = "https"
+
+	dest := &url.URL{
+		Host: writebackhostUrl.Host,
+		Scheme: "https",
+		Path: origDest.Path,
+	}
 
 	// Create the wrapped reader and send it to the request
 	closed := make(chan bool, 1)
 	errorChan := make(chan error, 1)
 	responseChan := make(chan *http.Response)
-	reader := &ProgressReader{file, 0, fileInfo.Size(), closed}
+	reader := &ProgressReader{ioreader, 0, fileInfo.Size(), closed}
 	putContext, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	log.Debugln("Full destination URL:", dest.String())
@@ -783,7 +793,9 @@ func UploadFile(src string, dest *url.URL, token string, namespace namespaces.Na
 		log.Errorln("Error creating request:", err)
 		return 0, err
 	}
-	request.ContentLength = fileInfo.Size()
+	if fileInfo.Mode().IsRegular() {
+		request.ContentLength = fileInfo.Size()
+	}
 	// Set the authorization header
 	request.Header.Set("Authorization", "Bearer "+token)
 	var lastKnownWritten int64
