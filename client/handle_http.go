@@ -48,7 +48,7 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 )
 
-var p = mpb.New()
+var progressContainer = mpb.New()
 
 type StoppedTransferError struct {
 	Err string
@@ -551,7 +551,7 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 
 	var progressBar *mpb.Bar
 	if ObjectClientOptions.ProgressBars {
-		progressBar = p.AddBar(0,
+		progressBar = progressContainer.AddBar(0,
 			mpb.PrependDecorators(
 				decor.Name(filename, decor.WCSyncSpaceR),
 				decor.CountersKibiByte("% .2f / % .2f"),
@@ -616,7 +616,7 @@ Loop:
 					continue
 				} else if startBelowLimit == 0 {
 					warning := []byte("Warning! Downloading too slow...\n")
-					status, err := p.Write(warning)
+					status, err := progressContainer.Write(warning)
 					if err != nil {
 						log.Errorln("Problem displaying slow message", err, status)
 						continue
@@ -659,7 +659,7 @@ Loop:
 				} else {
 					progressBar.SetTotal(contentLength, true)
 					// call wait here for the bar to complete and flush
-					p.Wait()
+					progressContainer.Wait()
 				}
 			}
 			break Loop
@@ -706,19 +706,38 @@ Loop:
 	return resp.BytesComplete(), nil
 }
 
+type Sizer interface {
+	Size() int64
+	BytesComplete() int64
+}
+
+type ConstantSizer struct {
+	size int64
+	read atomic.Int64
+}
+
+func (cs *ConstantSizer) Size() int64 {
+	return cs.size
+}
+
+func (cs *ConstantSizer) BytesComplete() int64 {
+	return cs.read.Load()
+}
+
 // ProgressReader wraps the io.Reader to get progress
 // Adapted from https://stackoverflow.com/questions/26050380/go-tracking-post-request-progress
 type ProgressReader struct {
 	reader io.ReadCloser
-	read   int64
-	size   int64
+	sizer  Sizer
 	closed chan bool
 }
 
 // Read implements the common read function for io.Reader
 func (pr *ProgressReader) Read(p []byte) (n int, err error) {
 	n, err = pr.reader.Read(p)
-	atomic.AddInt64(&pr.read, int64(n))
+	if cs, ok := pr.sizer.(*ConstantSizer); ok {
+		cs.read.Add(int64(n))
+	}
 	return n, err
 }
 
@@ -728,6 +747,14 @@ func (pr *ProgressReader) Close() error {
 	// Also, send the closed channel a message
 	pr.closed <- true
 	return err
+}
+
+func (pr *ProgressReader) BytesComplete() int64 {
+	return pr.sizer.BytesComplete()
+}
+
+func (pr *ProgressReader) Size() int64 {
+	return pr.sizer.Size()
 }
 
 // UploadFile Uploads a file using HTTP
@@ -744,7 +771,9 @@ func UploadFile(src string, origDest *url.URL, token string, namespace namespace
 	}
 
 	var ioreader io.ReadCloser
+	var sizer Sizer
 	pack := origDest.Query().Get("pack")
+	nonZeroSize := true
 	if pack != "" {
 		behavior, err := GetBehavior(pack)
 		if err != nil {
@@ -753,7 +782,9 @@ func UploadFile(src string, origDest *url.URL, token string, namespace namespace
 		if behavior == autoBehavior {
 			behavior = defaultBehavior
 		}
-		ioreader = newAutoPacker(src, behavior)
+		ap := newAutoPacker(src, behavior)
+		ioreader = ap
+		sizer = ap
 	} else {
 		// Try opening the file to send
 		file, err := os.Open(src)
@@ -762,6 +793,8 @@ func UploadFile(src string, origDest *url.URL, token string, namespace namespace
 			return 0, err
 		}
 		ioreader = file
+		sizer = &ConstantSizer{size: fileInfo.Size()}
+		nonZeroSize = fileInfo.Size() > 0
 	}
 
 	// Parse the writeback host as a URL
@@ -780,13 +813,13 @@ func UploadFile(src string, origDest *url.URL, token string, namespace namespace
 	closed := make(chan bool, 1)
 	errorChan := make(chan error, 1)
 	responseChan := make(chan *http.Response)
-	reader := &ProgressReader{ioreader, 0, fileInfo.Size(), closed}
+	reader := &ProgressReader{ioreader, sizer, closed}
 	putContext, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	log.Debugln("Full destination URL:", dest.String())
 	var request *http.Request
 	// For files that are 0 length, we need to send a PUT request with an nil body
-	if fileInfo.Size() > 0 {
+	if nonZeroSize {
 		request, err = http.NewRequestWithContext(putContext, "PUT", dest.String(), reader)
 	} else {
 		request, err = http.NewRequestWithContext(putContext, "PUT", dest.String(), http.NoBody)
@@ -806,13 +839,46 @@ func UploadFile(src string, origDest *url.URL, token string, namespace namespace
 	go doPut(request, responseChan, errorChan)
 	var lastError error = nil
 
+	var progressBar *mpb.Bar
+	if ObjectClientOptions.ProgressBars {
+		progressBar = progressContainer.AddBar(0,
+			mpb.PrependDecorators(
+				decor.Name(src, decor.WCSyncSpaceR),
+				decor.CountersKibiByte("% .2f / % .2f"),
+			),
+			mpb.AppendDecorators(
+				decor.OnComplete(decor.EwmaETA(decor.ET_STYLE_GO, 90), ""),
+				decor.OnComplete(decor.Name(" ] "), ""),
+				decor.OnComplete(decor.EwmaSpeed(decor.SizeB1024(0), "% .2f", 5), "Done!"),
+			),
+		)
+		// Shutdown progress bar at the end of the function
+		defer func() {
+			if lastError == nil {
+				progressBar.SetTotal(reader.Size(), true)
+			} else {
+				progressBar.Abort(true)
+			}
+			progressContainer.Wait()
+		}()
+	}
+	tickerDuration := 500 * time.Millisecond
+	progressTicker := time.NewTicker(tickerDuration)
+	defer progressTicker.Stop()
+
 	// Do the select on a ticker, and the writeChan
 Loop:
 	for {
 		select {
+		case <-progressTicker.C:
+			if progressBar != nil {
+				progressBar.SetTotal(reader.Size(), false)
+				progressBar.EwmaSetCurrent(reader.BytesComplete(), tickerDuration)
+			}
+
 		case <-t.C:
 			// If we are not making any progress, if we haven't written 1MB in the last 5 seconds
-			currentRead := atomic.LoadInt64(&reader.read)
+			currentRead := reader.BytesComplete()
 			log.Debugln("Current read:", currentRead)
 			log.Debugln("Last known written:", lastKnownWritten)
 			if lastKnownWritten < currentRead {
@@ -848,7 +914,7 @@ Loop:
 	if fileInfo.Size() == 0 {
 		return 0, lastError
 	} else {
-		return atomic.LoadInt64(&reader.read), lastError
+		return reader.BytesComplete(), lastError
 	}
 
 }

@@ -52,9 +52,11 @@ type autoUnpacker struct {
 
 type autoPacker struct {
 	atomicError
-	Behavior packerBehavior
-	srcDir   string
-	reader   io.ReadCloser
+	Behavior   packerBehavior
+	srcDir     string
+	reader     io.ReadCloser
+	srcDirSize atomic.Int64
+	srcDirDone atomic.Int64
 }
 
 const (
@@ -82,6 +84,7 @@ func newAutoPacker(srcdir string, behavior packerBehavior) *autoPacker {
 		srcDir:   srcdir,
 	}
 	ap.err.Store(packedError{})
+	go ap.calcDirectorySize()
 	return ap
 }
 
@@ -147,14 +150,55 @@ func writeRegFile(path string, mode int64, reader io.Reader) error {
 	return err
 }
 
-func readRegFile(path string, writer io.Writer) error {
+type autoPackerHelper struct {
+	curFp io.Reader
+	ap    *autoPacker
+}
+
+func (aph *autoPackerHelper) Read(p []byte) (n int, err error) {
+	n, err = aph.curFp.Read(p)
+	aph.ap.srcDirDone.Add(int64(n))
+	return
+}
+
+func (ap *autoPacker) readRegFile(path string, writer io.Writer) error {
 	fp, err := os.OpenFile(path, os.O_RDONLY, 0)
 	if err != nil {
 		return err
 	}
+	aph := &autoPackerHelper{fp, ap}
 	defer fp.Close()
-	_, err = io.Copy(writer, fp)
+	_, err = io.Copy(writer, aph)
 	return err
+}
+
+func (ap *autoPacker) calcDirectorySize() {
+	err := filepath.WalkDir(ap.srcDir, func(path string, dent fs.DirEntry, err error) error {
+		if err != nil {
+			log.Warningln("Error when walking source directory to calculate size:", err.Error())
+			return filepath.SkipDir
+		}
+		if dent.Type().IsRegular() {
+			fi, err := dent.Info()
+			if err != nil {
+				log.Warningln("Error when stat'ing file:", err.Error())
+				return nil
+			}
+			ap.srcDirSize.Add(fi.Size())
+		}
+		return nil
+	})
+	if err != nil {
+		log.Warningln("Failure when calculating the source directory size:", err.Error())
+	}
+}
+
+func (ap *autoPacker) Size() int64 {
+	return ap.srcDirSize.Load()
+}
+
+func (ap *autoPacker) BytesComplete() int64 {
+	return ap.srcDirDone.Load()
 }
 
 func (ap *autoPacker) pack(tw *tar.Writer, gz *gzip.Writer, pwriter *io.PipeWriter) {
@@ -193,7 +237,7 @@ func (ap *autoPacker) pack(tw *tar.Writer, gz *gzip.Writer, pwriter *io.PipeWrit
 			return err
 		}
 		if fi.Mode().IsRegular() {
-			if err = readRegFile(path, tw); err != nil {
+			if err = ap.readRegFile(path, tw); err != nil {
 				return err
 			}
 		}
