@@ -121,8 +121,7 @@ func (launcher DaemonLauncher) Launch(ctx context.Context) (context.Context, int
 	return ctx_result, cmd.Process.Pid, nil
 }
 
-func LaunchDaemons(launchers []Launcher) (err error) {
-	ctx := context.Background()
+func LaunchDaemons(ctx context.Context, launchers []Launcher) (err error) {
 
 	daemons := make([]launchInfo, len(launchers))
 	for idx, daemon := range launchers {
