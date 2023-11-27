@@ -22,6 +22,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
@@ -520,4 +521,27 @@ func GetIssuerPublicJWKS() (jwk.Set, error) {
 	existingJWKS := param.Server_IssuerJwks.GetString()
 	issuerKeyFile := param.IssuerKey.GetString()
 	return loadIssuerPublicJWKS(existingJWKS, issuerKeyFile)
+}
+
+// Generate the secret to encrypt/decrypt session cookie
+func GenerateSessionSecret() (string, error) {
+	// Use issuer private key as the source to generate the secret
+	issuerKeyFile := param.IssuerKey.GetString()
+	privateKey, err := LoadPrivateKey(issuerKeyFile)
+	if err != nil {
+		return "", err
+	}
+
+	derPrivateKey, err := x509.MarshalPKCS8PrivateKey(privateKey)
+
+	if err != nil {
+		return "", err
+	}
+	byteArray := []byte("pelican")
+
+	concatenated := append(byteArray, derPrivateKey...)
+
+	hash := sha256.Sum256(concatenated)
+
+	return string(hash[:]), nil
 }

@@ -84,9 +84,7 @@ func handleOAuthLogin(ctx *gin.Context) {
 	// CSRF token is required
 	csrfState := generateCSRFCookie(ctx)
 
-	// Carry the Url that will redirect to when auth is successful
-	authOption := oauth2.SetAuthURLParam("next_url", req.NextUrl)
-	redirectUrl := ciLogonOAuthConfig.Load().AuthCodeURL(csrfState, authOption)
+	redirectUrl := ciLogonOAuthConfig.Load().AuthCodeURL(csrfState)
 
 	ctx.Redirect(302, redirectUrl)
 }
@@ -155,9 +153,6 @@ func handleOAuthCallback(ctx *gin.Context) {
 	}
 
 	redirectLocation := "/"
-	if req.NextUrl != "" {
-		redirectLocation = req.NextUrl
-	}
 
 	setLoginCookie(ctx, userIdentifier)
 	ctx.Redirect(http.StatusTemporaryRedirect, redirectLocation)

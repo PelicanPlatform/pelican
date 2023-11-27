@@ -502,6 +502,14 @@ func InitServer() error {
 		return err
 	}
 
+	// Generate the session cookie secret and save it as the default value
+	secret, err := GenerateSessionSecret()
+	if err != nil {
+		return err
+	}
+
+	viper.SetDefault("Server.SessionSecret", secret)
+
 	// After we know we have the certs we need, call setupTransport (which uses those certs for its TLSConfig)
 	setupTransport()
 	return DiscoverFederation()
