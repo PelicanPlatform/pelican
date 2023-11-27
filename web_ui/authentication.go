@@ -140,9 +140,7 @@ func setLoginCookie(ctx *gin.Context, user string) {
 
 	now := time.Now()
 	tok, err := jwt.NewBuilder().
-		// TODO: We might want to come up with some names broader than this for a
-		// generic token for Web APIs, like web_ui.access
-		Claim("scope", "prometheus.read").
+		Claim("scope", []string{"web_ui.access", "prometheus.read"}).
 		Issuer(param.Server_ExternalWebUrl.GetString()).
 		IssuedAt(now).
 		Expiration(now.Add(30 * time.Minute)).
@@ -164,8 +162,6 @@ func setLoginCookie(ctx *gin.Context, user string) {
 		ctx.Request.URL.Host, true, true)
 	// Explicitly set Cookie for /metrics endpoint as they are in different paths
 	ctx.SetCookie("login", string(signed), 30*60, "/metrics",
-		ctx.Request.URL.Host, true, true)
-	ctx.SetCookie("login", string(signed), 30*60, "/view",
 		ctx.Request.URL.Host, true, true)
 	ctx.SetSameSite(http.SameSiteStrictMode)
 }
