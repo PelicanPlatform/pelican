@@ -512,7 +512,7 @@ components: ["origin", "director", "nsregistry"]
 ---
 name: Server.UIActivationCodeFile
 description: >-
-  If the origin's web user interface has not yet been configured, this file will
+  If the server's web UI has not yet been configured, this file will
   contain the activation code necessary to turn it on.
 type: string
 default: $ConfigBase/server-web-activation-code
@@ -520,7 +520,7 @@ components: ["origin", "cache", "nsregistry", "director"]
 ---
 name: Server.UIPasswordFile
 description: >-
-  A filepath specifying where the Origin UI password file should be stored.
+  A filepath specifying where the server's web UI password file should be stored.
 type: string
 default: $ConfigBase/server-web-passwd
 components:  ["origin", "cache", "nsregistry", "director"]
