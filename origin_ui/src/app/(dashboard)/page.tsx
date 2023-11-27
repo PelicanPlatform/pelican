@@ -18,12 +18,12 @@
 
 "use client"
 
+import {Box, Grid, Typography} from "@mui/material";
+
 import RateGraph from "@/components/graphs/RateGraph";
 import StatusBox from "@/components/StatusBox";
-
+import {DataExportTable} from "@/components/DataExportTable";
 import {TimeDuration} from "@/components/graphs/prometheus";
-
-import {Box, Grid} from "@mui/material";
 
 
 export default function Home() {
@@ -32,6 +32,7 @@ export default function Home() {
         <Box width={"100%"}>
             <Grid container spacing={2}>
                 <Grid item xs={12} lg={4}>
+                    <Typography variant="h4">Status</Typography>
                     <StatusBox/>
                 </Grid>
                 <Grid item xs={12} lg={8}>
@@ -75,6 +76,12 @@ export default function Home() {
                                 ]}
                             />
                         </Box>
+                    </Box>
+                </Grid>
+                <Grid item xs={12} lg={4}>
+                    <Typography variant={"h4"} component={"h2"} mb={1}>Data Exports</Typography>
+                    <Box sx={{backgroundColor: "#F6F6F6", borderRadius: "1rem", overflow: "hidden"}}>
+                        <DataExportTable/>
                     </Box>
                 </Grid>
             </Grid>
