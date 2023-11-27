@@ -66,8 +66,17 @@ func JSONHandler(w http.ResponseWriter, r *http.Request) {
 						"resource": "MY_ORIGIN1"
 					}
 				],
-				"path": "/my/server",
+				"path": "/server",
 				"readhttps": true,
+				"scitokens": [
+					{
+						"base_path": [
+							"/server"
+						],
+						"issuer": "https://my-issuer.com",
+						"restricted_path": []
+					}
+				],
 				"usetokenonread": true,
 				"writebackhost": "https://writeback.my-server.com"
 			},
@@ -92,6 +101,47 @@ func JSONHandler(w http.ResponseWriter, r *http.Request) {
 				"readhttps": true,
 				"usetokenonread": false,
 				"writebackhost": null
+			},
+			{
+				"caches": [
+					{
+						"auth_endpoint": "https://cache-auth-endpoint.com",
+						"endpoint": "http://cache-endpoint.com",
+						"resource": "MY_CACHE"
+					}
+				],
+				"credential_generation": null,
+				"dirlisthost": null,
+				"origins": [
+					{
+						"auth_endpoint": "https://origin3-auth-endpoint.com",
+						"endpoint": "http://origin3-endpoint.com",
+						"resource": "MY_ORIGIN3"
+					},
+					{
+						"auth_endpoint": "https://origin4-auth-endpoint.com",
+						"endpoint": "http://origin4-endpoint.com",
+						"resource": "MY_ORIGIN4"
+					}
+				],
+				"path": "/orig",
+				"scitokens": [
+					{
+						"base_path": [
+							"/p1/path", "/p2"
+						],
+						"issuer": "https://issuer-sci",
+						"restricted_path": ["/p2/open"]
+					},
+					{
+						"base_path": [
+							"/p3"
+						],
+						"issuer": "https://issuer-2-sci",
+						"restricted_path": []
+					}
+				],
+				"usetokenonread": true
 			}
 		]
 	}
@@ -116,15 +166,26 @@ func TestAdvertiseOSDF(t *testing.T) {
 	}
 
 	// Test a few values. If they're correct, it indicates the whole process likely succeeded
-	nsAd, oAds, cAds := GetAdsForPath("/my/server/path/to/file")
-	assert.Equal(t, nsAd.Path, "/my/server")
-	assert.Equal(t, nsAd.MaxScopeDepth, uint(3))
-	assert.Equal(t, oAds[0].AuthURL.String(), "https://origin1-auth-endpoint.com")
-	assert.Equal(t, cAds[0].URL.String(), "http://cache-endpoint.com")
+	nsAd, oAds, cAds := GetAdsForPath("/server/path/to/file")
+	assert.Equal(t, "/server", nsAd.Path)
+	assert.Equal(t, uint(3), nsAd.MaxScopeDepth)
+	assert.Equal(t, "https://origin1-auth-endpoint.com", oAds[0].AuthURL.String())
+	assert.Equal(t, "http://cache-endpoint.com", cAds[0].URL.String())
 
 	nsAd, oAds, cAds = GetAdsForPath("/my/server/2/path/to/file")
-	assert.Equal(t, nsAd.Path, "/my/server/2")
-	assert.Equal(t, nsAd.RequireToken, false)
-	assert.Equal(t, oAds[0].AuthURL.String(), "https://origin2-auth-endpoint.com")
-	assert.Equal(t, cAds[0].URL.String(), "http://cache-endpoint.com")
+	assert.Equal(t, "/my/server/2", nsAd.Path)
+	assert.Equal(t, false, nsAd.RequireToken)
+	assert.Equal(t, "https://origin2-auth-endpoint.com", oAds[0].AuthURL.String())
+	assert.Equal(t, "http://cache-endpoint.com", cAds[0].URL.String())
+
+	nsAd, oAds, cAds = GetAdsForPath("/p2")
+	assert.Equal(t, "/p2", nsAd.Path)
+	assert.Equal(t, []string{"/p2/open"}, nsAd.RestrictedPath)
+	assert.Equal(t, "https://origin3-auth-endpoint.com", oAds[0].AuthURL.String())
+	assert.Equal(t, "http://cache-endpoint.com", cAds[0].URL.String())
+	assert.Equal(t, true, nsAd.RequireToken)
+
+	nsAd, _, _ = GetAdsForPath("/p3")
+	assert.Equal(t, "/p3", nsAd.Path)
+	assert.Equal(t, []string{}, nsAd.RestrictedPath)
 }

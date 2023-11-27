@@ -35,14 +35,15 @@ import (
 
 type (
 	NamespaceAd struct {
-		RequireToken  bool         `json:"requireToken"`
-		Path          string       `json:"path"`
-		Issuer        url.URL      `json:"url"`
-		MaxScopeDepth uint         `json:"maxScopeDepth"`
-		Strategy      StrategyType `json:"strategy"`
-		BasePath      string       `json:"basePath"`
-		VaultServer   string       `json:"vaultServer"`
-		DirlistHost   string       `json:"dirlisthost"`
+		RequireToken   bool         `json:"requireToken"`
+		Path           string       `json:"path"`
+		Issuer         url.URL      `json:"url"`
+		MaxScopeDepth  uint         `json:"maxScopeDepth"`
+		Strategy       StrategyType `json:"strategy"`
+		BasePath       string       `json:"basePath"`
+		VaultServer    string       `json:"vaultServer"`
+		DirlistHost    string       `json:"dirlisthost"`
+		RestrictedPath []string     `json:"restrictedPath"`
 	}
 
 	ServerAd struct {
