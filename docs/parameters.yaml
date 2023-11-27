@@ -450,7 +450,7 @@ components: ["origin", "nsregistry", "director"]
 ---
 name: Server.TLSCACertificateFile
 description: >-
-  A filepath to the TLS Certificate Authority (CA) certificate file, to be used by XRootD 
+  A filepath to the TLS Certificate Authority (CA) certificate file, to be used by XRootD
   and internal HTTP client requests.
 
   Do not override this filepath unless you want to provide your TLS host certifacte
@@ -461,7 +461,7 @@ components: ["origin", "nsregistry", "director"]
 ---
 name: Server.TLSCACertificateDirectory
 description: >-
-  A filepath to the directory used for storing TLS Certificate Authority (CA) certificate 
+  A filepath to the directory used for storing TLS Certificate Authority (CA) certificate
   to be used by XRootD only.
 
   This is exclusive with Server.TLSCACertificateFile for XRootD and this value takes priority
@@ -719,11 +719,21 @@ type: int
 default: 9999
 components: ["origin"]
 ---
+name: Monitoring.AggregatePrefixes
+description: >-
+  A list of path-like prefixes, potentially containing a glob (wildcard character), indicating
+  how the Prometheus-based monitoring should aggregate records when reporting.  For example,
+  if `/foo/*` is on the aggregate path list, then the monitoring data for a download of
+  objects `/foo/bar` and `/foo/baz` will be aggregated into a single series, `/foo`.
+type: stringSlice
+default: ["/*"]
+components: ["origin"]
+---
 name: Monitoring.TokenExpiresIn
 description: >-
   The duration of which the tokens for various Prometheus endpoints expire.
 
-  This includes tokens for director's Prometheus origin discovery endpoint, 
+  This includes tokens for director's Prometheus origin discovery endpoint,
   director's origin scraper, and server's self-scraper
 type: duration
 default: 1h
@@ -732,8 +742,8 @@ components: ["origin", "director", "nsregistry"]
 name: Monitoring.TokenRefreshInterval
 description: >-
   The interval of which the token issuer for various Prometheus endpoints
-  refreshes the token for monitoring. 
-  
+  refreshes the token for monitoring.
+
   The tokens that are affected by this config are the same as the one in Monitoring.TokenExpiresIn.
   This value must be less than Monitoring.TokenExpiresIn.
 type: duration

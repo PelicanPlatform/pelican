@@ -699,3 +699,13 @@ func TestHandlePacket(t *testing.T) {
 		sessions.DeleteAll()
 	})
 }
+
+func TestComputePaths(t *testing.T) {
+	assert.Equal(t, "/foo", computePrefix("/foo", []PathList{{Paths: []string{"", "*"}}}))
+	assert.Equal(t, "/", computePrefix("/foo", []PathList{{Paths: []string{"", "baz"}}}))
+	assert.Equal(t, "/", computePrefix("/foo", []PathList{{Paths: []string{"", ""}}}))
+	assert.Equal(t, "/foo", computePrefix("/foo", []PathList{{Paths: []string{"", "foo"}}}))
+	assert.Equal(t, "/foo/bar/baz", computePrefix("/foo/bar/baz", []PathList{{Paths: []string{"", "foo", "*", "baz"}}}))
+	assert.Equal(t, "/foo/bar/baz", computePrefix("/foo/bar/baz", []PathList{{Paths: []string{"", "1"}}, {Paths: []string{"", "foo", "*", "baz"}}}))
+	assert.Equal(t, "/foo/bar/baz", computePrefix("/foo/bar/baz", []PathList{{Paths: []string{"", "foo", "*", "*"}}}))
+}
