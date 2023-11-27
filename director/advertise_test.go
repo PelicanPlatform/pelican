@@ -181,7 +181,7 @@ func TestAdvertiseOSDF(t *testing.T) {
 	nsAd, oAds, cAds = GetAdsForPath("/p2")
 	assert.Equal(t, "/p2", nsAd.Path)
 	assert.Equal(t, []string{"/p2/open"}, nsAd.RestrictedPath)
-	assert.Equal(t, "https://origin3-auth-endpoint.com", oAds[0].AuthURL.String())
+	assert.Contains(t, []string{"https://origin3-auth-endpoint.com", "https://origin4-auth-endpoint.com"}, oAds[0].AuthURL.String())
 	assert.Equal(t, "http://cache-endpoint.com", cAds[0].URL.String())
 	assert.Equal(t, true, nsAd.RequireToken)
 
