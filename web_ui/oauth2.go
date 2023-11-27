@@ -66,17 +66,23 @@ var ciLogonOAuthConfig atomic.Pointer[oauth2.Config]
 
 // Generate a 16B random string and set ctx session key oauthstate as the random string
 // return the random string with URL encoded nextUrl for CSRF token validation
-func generateCSRFCookie(ctx *gin.Context, nextUrl string) string {
+func generateCSRFCookie(ctx *gin.Context, nextUrl string) (string, error) {
 	session := sessions.Default(ctx)
 
 	b := make([]byte, 16)
-	rand.Read(b)
+	_, err := rand.Read(b)
+	if err != nil {
+		return "", err
+	}
 
 	state := base64.URLEncoding.EncodeToString(b)
 	session.Set("oauthstate", state)
-	session.Save()
+	err = session.Save()
+	if err != nil {
+		return "", err
+	}
 
-	return fmt.Sprintf("%s:%s", state, url.QueryEscape(nextUrl))
+	return fmt.Sprintf("%s:%s", state, url.QueryEscape(nextUrl)), nil
 }
 
 // Handler to redirect user to the login page of OAuth2 provider (CILogon)
@@ -90,7 +96,12 @@ func handleOAuthLogin(ctx *gin.Context) {
 	}
 
 	// CSRF token is required, embed next URL to the state
-	csrfState := generateCSRFCookie(ctx, req.NextUrl)
+	csrfState, err := generateCSRFCookie(ctx, req.NextUrl)
+
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate CSRF token"})
+		return
+	}
 
 	redirectUrl := ciLogonOAuthConfig.Load().AuthCodeURL(csrfState)
 
@@ -187,7 +198,7 @@ func handleOAuthCallback(ctx *gin.Context) {
 	ctx.Redirect(http.StatusTemporaryRedirect, redirectLocation)
 }
 
-// Configure OAuth2 client and register endpoints for third-party login (CILogin)
+// Configure OAuth2 client and register endpoints
 func ConfigOAuthClientAPIs(engine *gin.Engine) error {
 	if param.Server_OAuthClientID.GetString() == "" || param.Server_OAuthClientSecret.GetString() == "" {
 		return errors.New("Fail to configure OAuth client: OAuth client ID or client secret is empty")
@@ -227,10 +238,10 @@ func ConfigOAuthClientAPIs(engine *gin.Engine) error {
 	store := cookie.NewStore([]byte(param.Server_SessionSecret.GetString()))
 	sessionHandler := sessions.Sessions("pelican-session", store)
 
-	ciLoginGroup := engine.Group("/api/v1.0/auth/cilogon", sessionHandler)
+	ciLogonGroup := engine.Group("/api/v1.0/auth/cilogon", sessionHandler)
 	{
-		ciLoginGroup.GET("/login", handleOAuthLogin)
-		ciLoginGroup.GET("/callback", handleOAuthCallback)
+		ciLogonGroup.GET("/login", handleOAuthLogin)
+		ciLogonGroup.GET("/callback", handleOAuthCallback)
 	}
 	return nil
 }
