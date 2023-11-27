@@ -24,6 +24,7 @@ import StatusBox from "@/components/StatusBox";
 import {TimeDuration} from "@/components/graphs/prometheus";
 
 import {Box, Grid} from "@mui/material";
+import FederationOverview from "@/components/FederationOverview";
 
 
 export default function Home() {
@@ -76,6 +77,9 @@ export default function Home() {
                             />
                         </Box>
                     </Box>
+                </Grid>
+                <Grid item xs={12} lg={4}>
+                    <FederationOverview/>
                 </Grid>
             </Grid>
 
