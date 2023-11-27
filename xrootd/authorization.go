@@ -40,6 +40,7 @@ import (
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
 )
 
@@ -277,7 +278,11 @@ func GenerateMonitoringIssuer() (issuer Issuer, err error) {
 		return
 	}
 	issuer.Name = "Built-in Monitoring"
-	issuer.Issuer = param.Origin_Url.GetString()
+	issuerUrl, err := utils.GetIssuerURL()
+	if err != nil {
+		return
+	}
+	issuer.Issuer = issuerUrl.String()
 	issuer.BasePaths = []string{"/pelican/monitoring"}
 	issuer.DefaultUser = "xrootd"
 
@@ -290,7 +295,11 @@ func GenerateOriginIssuer(exportedPaths []string) (issuer Issuer, err error) {
 		return
 	}
 	issuer.Name = "Origin"
-	issuer.Issuer = param.Origin_Url.GetString()
+	issuerUrl, err := utils.GetIssuerURL()
+	if err != nil {
+		return
+	}
+	issuer.Issuer = issuerUrl.String()
 	issuer.BasePaths = exportedPaths
 	issuer.RestrictedPaths = param.Origin_ScitokensRestrictedPaths.GetStringSlice()
 	issuer.MapSubject = param.Origin_ScitokensMapSubject.GetBool()

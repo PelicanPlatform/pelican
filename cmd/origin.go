@@ -109,12 +109,77 @@ func initOrigin() error {
 func init() {
 	originCmd.AddCommand(originConfigCmd)
 	originCmd.AddCommand(originServeCmd)
-	originServeCmd.Flags().StringP("volume", "v", "", "Setting the volue to /SRC:/DEST will export the contents of /SRC as /DEST in the Pelican federation")
+
+	// The -m flag is used to specify what kind of backend we plan to use for the origin.
+	originServeCmd.Flags().StringP("mode", "m", "posix", "Set the mode for the origin service (default is 'posix')")
+	if err := viper.BindPFlag("Origin.Mode", originServeCmd.Flags().Lookup("mode")); err != nil {
+		panic(err)
+	}
+
+	// The -v flag is used when an origin is served in POSIX mode
+	originServeCmd.Flags().StringP("volume", "v", "", "Setting the volume to /SRC:/DEST will export the contents of /SRC as /DEST in the Pelican federation")
 	if err := viper.BindPFlag("Origin.ExportVolume", originServeCmd.Flags().Lookup("volume")); err != nil {
 		panic(err)
 	}
+
+	// A variety of flags we add for S3 mode. These are ultimately required for configuring the S3 xrootd plugin
+	originServeCmd.Flags().String("service-name", "", "Specify the S3 service-name. Only used when an origin is launched in S3 mode.")
+	originServeCmd.Flags().String("region", "", "Specify the S3 region. Only used when an origin is launched in S3 mode.")
+	originServeCmd.Flags().String("bucket", "", "Specify the S3 bucket. Only used when an origin is launched in S3 mode.")
+	originServeCmd.Flags().String("service-url", "", "Specify the S3 service-url. Only used when an origin is launched in S3 mode.")
+	if err := viper.BindPFlag("Origin.S3ServiceName", originServeCmd.Flags().Lookup("service-name")); err != nil {
+		panic(err)
+	}
+	if err := viper.BindPFlag("Origin.S3Region", originServeCmd.Flags().Lookup("region")); err != nil {
+		panic(err)
+	}
+	if err := viper.BindPFlag("Origin.S3Bucket", originServeCmd.Flags().Lookup("bucket")); err != nil {
+		panic(err)
+	}
+	if err := viper.BindPFlag("Origin.S3ServiceUrl", originServeCmd.Flags().Lookup("service-url")); err != nil {
+		panic(err)
+	}
+
+	// Would be nice to make these mutually exclusive to mode=posix instead of to --volume, but cobra
+	// doesn't seem to have something that can make the value of a flag exclusive to other flags
+	// Anyway, we never want to run the S3 flags with the -v flag.
+	originServeCmd.MarkFlagsMutuallyExclusive("volume", "service-name")
+	originServeCmd.MarkFlagsMutuallyExclusive("volume", "region")
+	originServeCmd.MarkFlagsMutuallyExclusive("volume", "bucket")
+	originServeCmd.MarkFlagsMutuallyExclusive("volume", "service-url")
+	originServeCmd.MarkFlagsRequiredTogether("service-name", "region", "bucket", "service-url")
+
+	// Use PreRunE to mark certain flags as required based on the mode we're running in
+	originServeCmd.PreRunE = func(cmd *cobra.Command, args []string) error {
+		mode, _ := cmd.Flags().GetString("mode")
+
+		switch mode {
+		case "posix":
+			err := cmd.MarkFlagRequired("volume")
+			cobra.CheckErr(err)
+
+		case "s3":
+			err := cmd.MarkFlagRequired("service-name")
+			cobra.CheckErr(err)
+			err = cmd.MarkFlagRequired("region")
+			cobra.CheckErr(err)
+			err = cmd.MarkFlagRequired("bucket")
+			cobra.CheckErr(err)
+			err = cmd.MarkFlagRequired("service-url")
+			cobra.CheckErr(err)
+
+		default:
+			return fmt.Errorf("unsupported mode: %s. Supported modes are 'posix' and 's3'.", mode)
+		}
+
+		return nil
+	}
+
+	// The port any web UI stuff will be served on
 	originServeCmd.Flags().AddFlag(portFlag)
 
+	// origin token, used for creating and verifying tokens with
+	// the origin's signing jwk.
 	originCmd.AddCommand(originTokenCmd)
 	originTokenCmd.AddCommand(originTokenCreateCmd)
 	originTokenCmd.PersistentFlags().String("profile", "wlcg", "Passing a profile ensures the token adheres to the profile's requirements. Accepted values are scitokens2 and wlcg")

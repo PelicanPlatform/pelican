@@ -19,6 +19,16 @@
 package origin_ui
 
 import (
+	"embed"
+	"encoding/json"
+	"mime"
+	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/gin-gonic/gin"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
@@ -55,4 +65,35 @@ func ConfigureXrootdMonitoringDir() error {
 	}
 
 	return nil
+}
+
+func ConfigIssJWKS(router *gin.RouterGroup) error {
+	if router == nil {
+		return errors.New("Origin configuration passed a nil pointer")
+	}
+
+	router.GET("/openid-configuration", ExportOpenIDConfig)
+	router.GET("/issuer.jwks", ExportIssuerJWKS)
+	return nil
+}
+
+func ExportOpenIDConfig(c *gin.Context) {
+	issuerURL := url.URL{}
+	issuerURL.Scheme = "https"
+	issuerURL.Host = param.Server_ExternalWebUrl.GetString()
+
+	jwksUri, _ := url.JoinPath(issuerURL.String(), "/.well-known/issuer.jwks")
+	jsonData := gin.H{
+		"issuer":   issuerURL.String(),
+		"jwks_uri": jwksUri,
+	}
+
+	c.JSON(http.StatusOK, jsonData)
+}
+
+func ExportIssuerJWKS(c *gin.Context) {
+	keys, _ := config.GetIssuerPublicJWKS()
+	buf, _ := json.MarshalIndent(keys, "", " ")
+
+	c.Data(http.StatusOK, "application/json; charset=utf-8", buf)
 }
