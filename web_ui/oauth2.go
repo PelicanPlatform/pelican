@@ -29,6 +29,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync/atomic"
 
 	"github.com/gin-contrib/sessions"
@@ -63,16 +64,17 @@ const (
 
 var ciLogonOAuthConfig atomic.Pointer[oauth2.Config]
 
-func generateCSRFCookie(ctx *gin.Context) string {
+func generateCSRFCookie(ctx *gin.Context, nextUrl string) string {
 	session := sessions.Default(ctx)
 
 	b := make([]byte, 16)
 	rand.Read(b)
+
 	state := base64.URLEncoding.EncodeToString(b)
 	session.Set("oauthstate", state)
 	session.Save()
 
-	return state
+	return fmt.Sprintf("%s:%s", state, url.QueryEscape(nextUrl))
 }
 
 func handleOAuthLogin(ctx *gin.Context) {
@@ -82,7 +84,7 @@ func handleOAuthLogin(ctx *gin.Context) {
 	}
 
 	// CSRF token is required
-	csrfState := generateCSRFCookie(ctx)
+	csrfState := generateCSRFCookie(ctx, req.NextUrl)
 
 	redirectUrl := ciLogonOAuthConfig.Load().AuthCodeURL(csrfState)
 
@@ -104,7 +106,18 @@ func handleOAuthCallback(ctx *gin.Context) {
 		return
 	}
 
-	if req.State != csrfFromSession {
+	// format of state: <[16]byte>:<nextURL>
+	parts := strings.SplitN(req.State, ":", 2)
+	if len(parts) != 2 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprint("Invalid OAuth callback: fail to split state param: ", ctx.Request.URL)})
+		return
+	}
+	nextURL, err := url.QueryUnescape(parts[1])
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprint("Invalid OAuth callback: fail to parse next_url: ", ctx.Request.URL)})
+	}
+
+	if parts[0] != csrfFromSession {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprint("Invalid OAuth callback: CSRF token doesn't match: ", ctx.Request.URL)})
 		return
 	}
@@ -153,6 +166,9 @@ func handleOAuthCallback(ctx *gin.Context) {
 	}
 
 	redirectLocation := "/"
+	if nextURL != "" {
+		redirectLocation = nextURL
+	}
 
 	setLoginCookie(ctx, userIdentifier)
 	ctx.Redirect(http.StatusTemporaryRedirect, redirectLocation)
