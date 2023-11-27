@@ -36,7 +36,7 @@ export default function Home() {
 
         setLoading(true)
 
-        let response = await fetch("/api/v1.0/origin-ui/login", {
+        let response = await fetch("/api/v1.0/auth/login", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json"

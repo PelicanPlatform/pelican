@@ -22,7 +22,7 @@ import (
 	"io"
 	"syscall"
 
-	"github.com/pelicanplatform/pelican/origin_ui"
+	"github.com/pelicanplatform/pelican/web_ui"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -56,7 +56,7 @@ func uiPasswordReset(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if err = origin_ui.WritePasswordEntry(username, string(bytePassword)); err != nil {
+	if err = web_ui.WritePasswordEntry(username, string(bytePassword)); err != nil {
 		return errors.Wrapf(err, "Failed to update the password entry for user %s", username)
 	}
 

@@ -629,6 +629,11 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 		g.Add(
 			func() error {
 				refreshInterval := param.Monitoring_TokenRefreshInterval.GetDuration()
+				if refreshInterval <= 0 {
+					err := level.Warn(logger).Log("msg", "Refresh interval is non-positive value. Stop reloading.")
+					_ = err
+					return errors.New("Refresh interval is non-positive value. Stop reloading.")
+				}
 				ticker := time.NewTicker(refreshInterval)
 				for {
 					select {

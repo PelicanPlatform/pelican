@@ -45,7 +45,7 @@ func serveNamespaceRegistry( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		return err
 	}
 
-	if err := web_ui.ConfigureMetrics(engine, false); err != nil {
+	if err := web_ui.ConfigureServerWebAPI(engine, false); err != nil {
 		return err
 	}
 
@@ -58,6 +58,8 @@ func serveNamespaceRegistry( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	// a wildcard. It removes duplicate / from the resource.
 	//engine.RemoveExtraSlash = true
 	go web_ui.RunEngine(engine)
+
+	go web_ui.InitServerWebLogin()
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)

@@ -18,7 +18,7 @@
  *
  ***************************************************************/
 
-package origin_ui
+package web_ui
 
 import (
 	"bufio"
@@ -40,7 +40,7 @@ func doReload() error {
 		log.Debug("Cannot reload auth database - not configured")
 		return nil
 	}
-	fileName := param.Origin_UIPasswordFile.GetString()
+	fileName := param.Server_UIPasswordFile.GetString()
 	fp, err := os.OpenFile(fileName, os.O_WRONLY|os.O_CREATE, 0600)
 	if err != nil {
 		log.Warning("Failed to open auth database for reload:", err)
@@ -67,7 +67,7 @@ func doReload() error {
 }
 
 func writePasswordEntryImpl(user, password string) error {
-	fileName := param.Origin_UIPasswordFile.GetString()
+	fileName := param.Server_UIPasswordFile.GetString()
 	passwordBytes := []byte(password)
 	if len(passwordBytes) > 72 {
 		return errors.New("Password too long")
