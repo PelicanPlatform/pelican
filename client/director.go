@@ -73,7 +73,7 @@ func CreateNsFromDirectorResp(dirResp *http.Response) (namespace namespaces.Name
 	namespace.Path = xPelicanNamespace["namespace"]
 	namespace.UseTokenOnRead, _ = strconv.ParseBool(xPelicanNamespace["require-token"])
 	namespace.ReadHTTPS, _ = strconv.ParseBool(xPelicanNamespace["readhttps"])
-	namespace.DirListHost = xPelicanNamespace["dirlisthost"]
+	namespace.DirListHost = xPelicanNamespace["collections-url"]
 
 	var xPelicanAuthorization map[string]string
 	if len(dirResp.Header.Values("X-Pelican-Authorization")) > 0 {

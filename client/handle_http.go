@@ -832,7 +832,7 @@ func walkDavDir(url *url.URL, namespace namespaces.Namespace, token string) ([]s
 	}
 	log.Debugln("Dir list host: ", rootUrl.String())
 
-	auth := &BearerAuth{token: token}
+	auth := &bearerAuth{token: token}
 	c := gowebdav.NewAuthClient(rootUrl.String(), auth)
 
 	// XRootD does not like keep alives and kills things, so turn them off.

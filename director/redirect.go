@@ -223,7 +223,7 @@ func RedirectToCache(ginCtx *gin.Context) {
 			ginCtx.Writer.Header()["X-Pelican-Token-Generation"] = []string{tokenGen}
 		}
 	}
-	ginCtx.Writer.Header()["X-Pelican-Namespace"] = []string{fmt.Sprintf("namespace=%s, require-token=%v, dirlisthost=%s",
+	ginCtx.Writer.Header()["X-Pelican-Namespace"] = []string{fmt.Sprintf("namespace=%s, require-token=%v, collections-url=%s",
 		namespaceAd.Path, namespaceAd.RequireToken, namespaceAd.DirlistHost)}
 
 	// Note we only append the `authz` query parameter in the case of the redirect response and not the
