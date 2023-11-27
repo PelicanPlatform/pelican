@@ -64,6 +64,8 @@ const (
 
 var ciLogonOAuthConfig atomic.Pointer[oauth2.Config]
 
+// Generate a 16B random string and set ctx session key oauthstate as the random string
+// return the random string with URL encoded nextUrl for CSRF token validation
 func generateCSRFCookie(ctx *gin.Context, nextUrl string) string {
 	session := sessions.Default(ctx)
 
@@ -77,13 +79,17 @@ func generateCSRFCookie(ctx *gin.Context, nextUrl string) string {
 	return fmt.Sprintf("%s:%s", state, url.QueryEscape(nextUrl))
 }
 
+// Handler to redirect user to the login page of OAuth2 provider (CILogon)
+// You can pass an optional next_url as query param if you want the user
+// to be redirected back to where they were before hitting the login when
+// the user is successfully authenticated against CILogon
 func handleOAuthLogin(ctx *gin.Context) {
 	req := oauthLoginRequest{}
 	if ctx.ShouldBindQuery(&req) != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Failed to bind next url"})
 	}
 
-	// CSRF token is required
+	// CSRF token is required, embed next URL to the state
 	csrfState := generateCSRFCookie(ctx, req.NextUrl)
 
 	redirectUrl := ciLogonOAuthConfig.Load().AuthCodeURL(csrfState)
@@ -91,6 +97,8 @@ func handleOAuthLogin(ctx *gin.Context) {
 	ctx.Redirect(302, redirectUrl)
 }
 
+// Handle the callback request from CILogon when user is successfully authenticated
+// Get user info from CILogon and issue our token for user to access web UI
 func handleOAuthCallback(ctx *gin.Context) {
 	session := sessions.Default(ctx)
 	c := context.Background()
@@ -106,7 +114,7 @@ func handleOAuthCallback(ctx *gin.Context) {
 		return
 	}
 
-	// format of state: <[16]byte>:<nextURL>
+	// Format of state: <[16]byte>:<nextURL>
 	parts := strings.SplitN(req.State, ":", 2)
 	if len(parts) != 2 {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprint("Invalid OAuth callback: fail to split state param: ", ctx.Request.URL)})
@@ -134,6 +142,8 @@ func handleOAuthCallback(ctx *gin.Context) {
 	client := ciLogonOAuthConfig.Load().Client(c, token)
 	data := url.Values{}
 	data.Add("access_token", token.AccessToken)
+
+	// Use access_token to get user info from CILogon
 	resp, err := client.PostForm(cilogonUserInfoUrl, data)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprint("Error requesting user info from CILogon: ", err)})
@@ -170,10 +180,14 @@ func handleOAuthCallback(ctx *gin.Context) {
 		redirectLocation = nextURL
 	}
 
+	// Issue our own JWT for web UI access
 	setLoginCookie(ctx, userIdentifier)
+
+	// Redirect user to where they were or root path
 	ctx.Redirect(http.StatusTemporaryRedirect, redirectLocation)
 }
 
+// Configure OAuth2 client and register endpoints for third-party login (CILogin)
 func ConfigOAuthClientAPIs(engine *gin.Engine) error {
 	if param.Server_OAuthClientID.GetString() == "" || param.Server_OAuthClientSecret.GetString() == "" {
 		return errors.New("Fail to configure OAuth client: OAuth client ID or client secret is empty")
