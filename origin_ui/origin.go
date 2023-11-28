@@ -78,10 +78,7 @@ func ConfigIssJWKS(router *gin.RouterGroup) error {
 }
 
 func ExportOpenIDConfig(c *gin.Context) {
-	issuerURL := url.URL{}
-	issuerURL.Scheme = "https"
-	issuerURL.Host = param.Server_ExternalWebUrl.GetString()
-
+	issuerURL, _ := url.Parse(param.Server_ExternalWebUrl.GetString())
 	jwksUri, _ := url.JoinPath(issuerURL.String(), "/.well-known/issuer.jwks")
 	jsonData := gin.H{
 		"issuer":   issuerURL.String(),

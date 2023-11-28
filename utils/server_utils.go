@@ -75,7 +75,7 @@ func GetIssuerURL() (*url.URL, error) {
 		return issuerUrl, nil
 	} else {
 		// to parse the URL, we first must prepend it with a scheme
-		issuerUrlStr := "https://" + param.Server_ExternalWebUrl.GetString()
+		issuerUrlStr := param.Server_ExternalWebUrl.GetString()
 
 		issuerUrl, err := url.Parse(issuerUrlStr)
 		if err != nil {
