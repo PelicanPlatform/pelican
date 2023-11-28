@@ -19,12 +19,14 @@
 package director
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/lestrrat-go/jwx/v2/jwa"
@@ -257,4 +259,23 @@ func CreateDirectorScrapeToken() (string, error) {
 		return "", err
 	}
 	return string(signed), nil
+}
+
+// Configure serverAds cache to enable cache eviction and other additional logic
+//
+// TODO: Depending on which PR gets merged first, we want to merge ConfigCacheEviction from
+// #305 with this
+func ConfigTTLCache(ctx context.Context, wg *sync.WaitGroup) {
+	// Start automatic expired item deletion
+	go serverAds.Start()
+	go namespaceKeys.Start()
+
+	// Put stop logic in a separate goroutine so that parent function is not blocking
+	go func() {
+		defer wg.Done()
+		<-ctx.Done()
+		log.Info("Gracefully stoppping TTL cache eviction...")
+		serverAds.Stop()
+		namespaceKeys.Stop()
+	}()
 }

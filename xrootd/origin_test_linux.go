@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -68,7 +69,11 @@ func TestOrigin(t *testing.T) {
 	err = CheckXrootdEnv(true, nil)
 	require.NoError(t, err)
 
-	err = SetUpMonitoring()
+	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
+	defer shutdownCancel()
+	var wg sync.WaitGroup
+	wg.Add(1)
+	err = SetUpMonitoring(shutdownCtx, &wg)
 	require.NoError(t, err)
 
 	configPath, err := ConfigXrootd(true)

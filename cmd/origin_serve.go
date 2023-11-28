@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"sync"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/daemon"
@@ -101,9 +102,14 @@ func checkDefaults(origin bool, nsAds []director.NamespaceAd) error {
 }
 
 func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
-	defer config.CleanupTempResources()
+	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
 
-	err := xrootd.SetUpMonitoring()
+	defer config.CleanupTempResources()
+	defer shutdownCancel()
+
+	wg.Add(1)
+	err := xrootd.SetUpMonitoring(shutdownCtx, &wg)
 	if err != nil {
 		return err
 	}

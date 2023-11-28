@@ -29,6 +29,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/lestrrat-go/jwx/v2/jwk"
@@ -145,14 +146,19 @@ func advertiseCache(prefix string, nsAds []director.NamespaceAd) error {
 }
 
 func serveCache( /*cmd*/ *cobra.Command /*args*/, []string) error {
+	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+
 	defer config.CleanupTempResources()
+	defer shutdownCancel()
 
 	err := config.DiscoverFederation()
 	if err != nil {
 		log.Warningln("Failed to do service auto-discovery:", err)
 	}
 
-	err = xrootd.SetUpMonitoring()
+	wg.Add(1)
+	err = xrootd.SetUpMonitoring(shutdownCtx, &wg)
 	if err != nil {
 		return err
 	}

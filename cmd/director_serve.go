@@ -19,9 +19,11 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 
 	"github.com/pelicanplatform/pelican/config"
@@ -33,6 +35,14 @@ import (
 )
 
 func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
+	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+
+	defer func() {
+		shutdownCancel()
+		wg.Wait()
+	}()
+
 	log.Info("Initializing Director GeoIP database...")
 	director.InitializeDB()
 
@@ -46,6 +56,9 @@ func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		}
 	}
 	go director.PeriodicCacheReload()
+
+	wg.Add(1)
+	director.ConfigTTLCache(shutdownCtx, &wg)
 
 	engine, err := web_ui.GetEngine()
 	if err != nil {
