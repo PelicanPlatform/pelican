@@ -22,6 +22,8 @@ Server:
   WebHost: "0.0.0.0"
 Director:
   DefaultResponse: cache
+Cache:
+  Port: 8447
 Origin:
   NamespacePrefix: ""
   Multiuser: false

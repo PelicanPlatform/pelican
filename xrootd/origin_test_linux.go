@@ -57,7 +57,7 @@ func TestOrigin(t *testing.T) {
 	// Increase the log level; otherwise, its difficult to debug failures
 	viper.Set("Logging.Level", "Debug")
 	config.InitConfig()
-	err := config.InitServer()
+	err := config.InitServer(config.OriginType)
 
 	require.NoError(t, err)
 

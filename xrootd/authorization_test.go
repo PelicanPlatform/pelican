@@ -121,7 +121,7 @@ func TestGenerateConfig(t *testing.T) {
 	assert.Equal(t, issuer.Name, "")
 
 	viper.Set("Origin.SelfTest", true)
-	err = config.InitServer()
+	err = config.InitServer(config.OriginType)
 	require.NoError(t, err)
 	issuer, err = GenerateMonitoringIssuer()
 	require.NoError(t, err)
@@ -135,7 +135,7 @@ func TestGenerateConfig(t *testing.T) {
 	viper.Set("Origin.SelfTest", false)
 	viper.Set("Origin.ScitokensDefaultUser", "user1")
 	viper.Set("Origin.ScitokensMapSubject", true)
-	err = config.InitServer()
+	err = config.InitServer(config.OriginType)
 	require.NoError(t, err)
 	issuer, err = GenerateOriginIssuer([]string{"/foo/bar/baz", "/another/exported/path"})
 	require.NoError(t, err)
@@ -160,7 +160,7 @@ func TestWriteOriginScitokensConfig(t *testing.T) {
 	viper.Set("Xrootd.RunLocation", dirname)
 	viper.Set("Xrootd.Port", 8443)
 	viper.Set("Server.Hostname", "origin.example.com")
-	err := config.InitServer()
+	err := config.InitServer(config.OriginType)
 	require.Nil(t, err)
 
 	scitokensCfg := param.Xrootd_ScitokensConfig.GetString()
