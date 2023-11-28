@@ -543,9 +543,9 @@ components:  ["nsregistry", "director"]
 ---
 name: Server.OAuthClientRedirectHostname
 description: >-
-  The hostname for OAuth client redirect URL that the OAuth provider will direct to after user is authenticated
+  The hostname for the OAuth client redirect URL that the OAuth provider will redirect to after the user is authenticated
 
-  For development use only. Useful when developing in container and you want to expose localhost 
+  For development use only. Useful when developing in a container and you want to expose localhost 
   instead of container hostname to your OAuth provider 
 type: string
 default: none
@@ -557,7 +557,7 @@ description: >-
 
   This is only used for sending redirect request for OAuth2 authentication flow as of 11/22/2023
 type: string
-default: none
+default: The hash of the concatenation of "pelican" and the DER form of ${IssuerKey}
 components:  ["nsregistry", "director"]
 ---
 
