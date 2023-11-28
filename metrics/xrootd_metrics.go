@@ -23,6 +23,7 @@ import (
 	"encoding/binary"
 	"encoding/xml"
 	"fmt"
+	"math"
 	"net"
 	"path"
 	"strconv"
@@ -42,11 +43,22 @@ type (
 		Id uint32
 	}
 
+	// userid as in XRootD message info field
+	XrdUserId struct {
+		Prot string
+		User string
+		Pid  int
+		Sid  int
+		Host string
+	}
+
 	UserRecord struct {
 		AuthenticationProtocol string
+		User                   string
 		DN                     string
 		Role                   string
 		Org                    string
+		Groups                 []string
 	}
 
 	FileId struct {
@@ -73,11 +85,19 @@ type (
 		Code byte
 		Pseq byte
 		Plen uint16
-		Stod uint32
+		Stod int32
 	}
 
+	XrdXrootdMonMap struct {
+		Hdr    XrdXrootdMonHeader
+		Dictid uint32
+		Info   []byte
+	}
+
+	recTval byte
+
 	XrdXrootdMonFileHdr struct {
-		RecType byte
+		RecType recTval
 		RecFlag byte
 		RecSize int16
 		FileId  uint32
@@ -87,15 +107,63 @@ type (
 	}
 
 	XrdXrootdMonFileTOD struct {
+		Hdr  XrdXrootdMonFileHdr
+		TBeg int32
+		TEnd int32
+		SID  int64
+	}
+
+	XrdXrootdMonFileLFN struct {
+		User uint32
+		Lfn  [1032]byte
+	}
+
+	XrdXrootdMonFileOPN struct {
 		Hdr XrdXrootdMonFileHdr
-		Beg int32
-		End int32
-		SID int64
+		Fsz int64
+		Ufn XrdXrootdMonFileLFN
+	}
+
+	XrdXrootdMonStatXFR struct {
+		Read  int64 // Bytes read from file using read()
+		Readv int64 // Bytes read from file using readv()
+		Write int64 // Bytes written to file
+	}
+
+	XrdXrootdMonFileXFR struct {
+		Hdr XrdXrootdMonFileHdr // Header with recType == isXfr
+		Xfr XrdXrootdMonStatXFR
+	}
+
+	XrdXrootdMonStatOPS struct { // 48B
+		Read  int32 // Number of read() calls
+		Readv int32 // Number of readv() calls
+		Write int32 // Number of write() calls
+		RsMin int16 // Smallest readv() segment count
+		RsMax int16 // Largest readv() segment count
+		Rsegs int64 // Number of readv() segments
+		RdMin int32 // Smallest read() request size
+		RdMax int32 // Largest read() request size
+		RvMin int32 // Smallest readv() request size
+		RvMax int32 // Largest readv() request size
+		WrMin int32 // Smallest write() request size
+		WrMax int32 // Largest write() request size
+	}
+
+	// XrdXrootdMonFileCLS represents a variable length structure and
+	// includes other structures that are "Always present" or "OPTIONAL".
+	// The OPTIONAL parts are not included here as they require more context.
+	XrdXrootdMonFileCLS struct {
+		Hdr XrdXrootdMonFileHdr // Always present
+		Xfr XrdXrootdMonStatXFR // Always present
+		Ops XrdXrootdMonStatOPS // OPTIONAL
+		// Ssq XrdXrootdMonStatSSQ // OPTIONAL, not implemented here yet
 	}
 
 	SummaryStat struct {
 		Id string `xml:"id,attr"`
 		// Relevant for id="link"
+		// "tot" is the total connections since the start of the server
 		LinkConnections int `xml:"tot"`
 		LinkInBytes     int `xml:"in"`
 		LinkOutBytes    int `xml:"out"`
@@ -106,8 +174,19 @@ type (
 
 	SummaryStatistics struct {
 		Version string        `xml:"ver,attr"`
+		Program string        `xml:"pgm,attr"`
 		Stats   []SummaryStat `xml:"stats"`
 	}
+)
+
+// XrdXrootdMonFileHdr
+// Ref: https://github.com/xrootd/xrootd/blob/f3b2e86b9b80bb35f97dd4ad30c4cd5904902a4c/src/XrdXrootd/XrdXrootdMonData.hh#L173
+const (
+	isClose recTval = iota
+	isOpen
+	isTime
+	isXfr
+	isDisc
 )
 
 var (
@@ -148,12 +227,22 @@ var (
 
 	lastStats SummaryStat
 
-	sessions     = ttlcache.New[UserId, UserRecord](ttlcache.WithTTL[UserId, UserRecord](24 * time.Hour))
+	// Maps the connection identifier with a user record
+	sessions = ttlcache.New[UserId, UserRecord](ttlcache.WithTTL[UserId, UserRecord](24 * time.Hour))
+	// Maps a userid to a connection identifier.  NOTE: due to https://github.com/xrootd/xrootd/issues/2133,
+	// this may not be a unique map.
+	userids = ttlcache.New[XrdUserId, UserId](ttlcache.WithTTL[XrdUserId, UserId](24 * time.Hour))
+	// Maps a file identifier with a file record
 	transfers    = ttlcache.New[FileId, FileRecord](ttlcache.WithTTL[FileId, FileRecord](24 * time.Hour))
 	monitorPaths []PathList
 )
 
 func ConfigureMonitoring() (int, error) {
+	monitorPaths = make([]PathList, 0)
+	for _, monpath := range param.Monitoring_AggregatePrefixes.GetStringSlice() {
+		monitorPaths = append(monitorPaths, PathList{Paths: strings.Split(path.Clean(monpath), "/")})
+	}
+
 	lower := param.Monitoring_PortLower.GetInt()
 	higher := param.Monitoring_PortHigher.GetInt()
 
@@ -199,7 +288,7 @@ func ConfigureMonitoring() (int, error) {
 	return addr.Port, nil
 }
 
-func ComputePrefix(inputPath string) string {
+func computePrefix(inputPath string, monitorPaths []PathList) string {
 	if len(monitorPaths) == 0 {
 		return "/"
 	}
@@ -234,25 +323,108 @@ func ComputePrefix(inputPath string) string {
 	return path.Clean(result)
 }
 
-func GetSIDRest(info []byte) (UserId, string, error) {
+func GetSIDRest(info []byte) (xrdUserId XrdUserId, rest string, err error) {
 	log.Debugln("GetSIDRest inputs:", string(info))
 	infoSplit := strings.SplitN(string(info), "\n", 2)
 	if len(infoSplit) == 1 {
-		return UserId{}, "", errors.New("Unable to parse SID")
+		err = errors.New("Unable to parse SID")
+		return
+	}
+	rest = infoSplit[1]
+
+	xrdUserId, err = ParseXrdUserId(infoSplit[0])
+	return
+}
+
+func ParseXrdUserId(userid string) (xrdUserId XrdUserId, err error) {
+	// Expected format: prot/user.id:sid@clientHost
+	sidInfo := strings.SplitN(userid, ":", 2)
+	if len(sidInfo) == 1 {
+		err = errors.New("Unable to parse valid user ID - missing ':' delimiter")
+		return
 	}
 
-	sidInfo := strings.Split(string(infoSplit[0]), ":")
-	if len(sidInfo) == 1 {
-		return UserId{}, "", errors.New("Unable to parse valid SID")
-	}
-	// form: 82215220691948@localhost
-	sidAtHostname := sidInfo[len(sidInfo)-1]
+	// Parse server ID and client hostname,
+	// Form: 82215220691948@localhost
+	sidAtHostname := sidInfo[1]
 	sidAtHostnameInfo := strings.SplitN(sidAtHostname, "@", 2)
+	if len(sidAtHostnameInfo) == 1 {
+		err = errors.New("Unable to parse valid server ID - missing '@' delimiter")
+		return
+	}
 	sid, err := strconv.Atoi(sidAtHostnameInfo[0])
 	if err != nil {
-		return UserId{}, "", err
+		err = errors.Wrap(err, "Unable to parse valid server ID")
+		return
 	}
-	return UserId{Id: uint32(sid)}, string(info[1]), nil
+
+	// Parse prot/user.id
+	protUserIdInfo := strings.SplitN(sidInfo[0], "/", 2)
+	if len(protUserIdInfo) == 1 {
+		err = errors.New("Unable to parse user ID - missing '/' delimiter")
+		return
+	}
+
+	// Parse user.id; assume user may contain multiple '.' characters
+	lastIdx := strings.LastIndex(protUserIdInfo[1], ".")
+	if lastIdx == -1 {
+		err = errors.New("Unable to parse user ID - missing '.' delimiter")
+		return
+	}
+	pid, err := strconv.Atoi(protUserIdInfo[1][lastIdx+1 : len(protUserIdInfo[1])])
+	if err != nil {
+		err = errors.Wrap(err, "Unsable to parse PID as integer")
+		return
+	}
+
+	// Finally, fill in our userid struct
+	xrdUserId.Prot = protUserIdInfo[0]
+	xrdUserId.User = protUserIdInfo[1][:lastIdx]
+	xrdUserId.Pid = pid
+	xrdUserId.Sid = sid
+	xrdUserId.Host = string(sidAtHostname[1])
+	return
+}
+
+func ParseTokenAuth(tokenauth string) (userId UserId, record UserRecord, err error) {
+	record.AuthenticationProtocol = "ztn"
+	foundUc := false
+	for _, pair := range strings.Split(tokenauth, "&") {
+		keyVal := strings.SplitN(pair, "=", 2)
+		if len(keyVal) != 2 {
+			continue
+		}
+		switch keyVal[0] {
+		case "Uc":
+			var id int
+			id, err = strconv.Atoi(keyVal[1])
+			if err != nil {
+				err = errors.Wrap(err, "Unable to parse user ID to integer")
+				return
+			}
+			if id < 0 || id > math.MaxUint32 {
+				err = errors.Errorf("Provided ID, %d, is not a valid uint32", id)
+				return
+			}
+			userId.Id = uint32(id)
+			foundUc = true
+		case "s":
+			record.DN = keyVal[1]
+		case "un":
+			record.User = keyVal[1]
+		case "o":
+			record.Org = keyVal[1]
+		case "r":
+			record.Role = keyVal[1]
+		case "g":
+			record.Groups = strings.Split(keyVal[1], " ")
+		}
+	}
+	if !foundUc {
+		err = errors.New("The user ID was not provided in the token record")
+		return
+	}
+	return
 }
 
 func ParseFileHeader(packet []byte) (XrdXrootdMonFileHdr, error) {
@@ -260,7 +432,7 @@ func ParseFileHeader(packet []byte) (XrdXrootdMonFileHdr, error) {
 		return XrdXrootdMonFileHdr{}, fmt.Errorf("Passed header of size %v which is below the minimum header size of 8 bytes", len(packet))
 	}
 	fileHdr := XrdXrootdMonFileHdr{
-		RecType: packet[0],
+		RecType: recTval(packet[0]),
 		RecFlag: packet[1],
 		RecSize: int16(binary.BigEndian.Uint16(packet[2:4])),
 		FileId:  binary.BigEndian.Uint32(packet[4:8]),
@@ -292,7 +464,12 @@ func HandlePacket(packet []byte) error {
 	header.Code = packet[0]
 	header.Pseq = packet[1]
 	header.Plen = binary.BigEndian.Uint16(packet[2:4])
-	header.Stod = binary.BigEndian.Uint32(packet[4:8])
+	header.Stod = int32(binary.BigEndian.Uint32(packet[4:8]))
+
+	// For =, p, and x record-types, this is always 0
+	// For i, T, u, and U , this is a connection ID
+	// For d, this is a file ID.
+	dictid := binary.BigEndian.Uint32(packet[8:12])
 
 	switch header.Code {
 	case 'd':
@@ -300,14 +477,15 @@ func HandlePacket(packet []byte) error {
 		if len(packet) < 12 {
 			return errors.New("Packet is too small to be valid file-open packet")
 		}
-		dictid := binary.BigEndian.Uint32(packet[8:12])
 		fileid := FileId{Id: dictid}
-		userid, rest, err := GetSIDRest(packet[12:])
+		xrdUserId, rest, err := GetSIDRest(packet[12:])
 		if err != nil {
 			return errors.Wrapf(err, "Failed to parse XRootD monitoring packet")
 		}
-		path := ComputePrefix(rest)
-		transfers.Set(fileid, FileRecord{UserId: userid, Path: path}, ttlcache.DefaultTTL)
+		path := computePrefix(rest, monitorPaths)
+		if useridItem := userids.Get(xrdUserId); useridItem != nil {
+			transfers.Set(fileid, FileRecord{UserId: useridItem.Value(), Path: path}, ttlcache.DefaultTTL)
+		}
 	case 'f':
 		log.Debug("HandlePacket: Received a f-stream packet")
 		// sizeof(XrdXrootdMonHeader) + sizeof(XrdXrootdMonFileTOD)
@@ -326,7 +504,7 @@ func HandlePacket(packet []byte) error {
 				return err
 			}
 			switch fileHdr.RecType {
-			case 0: // XrdXrootdMonFileHdr::isClose
+			case isClose: // XrdXrootdMonFileHdr::isClose
 				log.Debugln("Received a f-stream file-close packet of size ",
 					fileHdr.RecSize)
 				fileId := FileId{Id: fileHdr.FileId}
@@ -403,23 +581,26 @@ func HandlePacket(packet []byte) error {
 				counter.Add(float64(int64(binary.BigEndian.Uint64(
 					packet[offset+xfrOffset+16:offset+xfrOffset+24]) -
 					oldWriteBytes)))
-			case 1: // XrdXrootdMonFileHdr::isOpen
+			case isOpen: // XrdXrootdMonFileHdr::isOpen
 				log.Debug("MonPacket: Received a f-stream file-open packet")
 				fileid := FileId{Id: fileHdr.FileId}
 				path := ""
+				userId := UserId{}
 				if fileHdr.RecFlag&0x01 == 0x01 { // hasLFN
 					lfnSize := uint32(fileHdr.RecSize - 20)
 					lfn := NullTermToString(packet[offset+20 : offset+lfnSize+20])
-					path := ComputePrefix(lfn)
+					// path has been difined
+					path = computePrefix(lfn, monitorPaths)
 					log.Debugf("MonPacket: User LFN %v matches prefix %v",
 						lfn, path)
+					// UserId is part of LFN
+					userId = UserId{Id: binary.BigEndian.Uint32(packet[offset+16 : offset+20])}
 				}
-				userid := UserId{Id: binary.BigEndian.Uint32(packet[offset+16 : offset+20])}
-				transfers.Set(fileid, FileRecord{UserId: userid, Path: path},
+				transfers.Set(fileid, FileRecord{UserId: userId, Path: path},
 					ttlcache.DefaultTTL)
-			case 2: // XrdXrootdMonFileHdr::isTime
+			case isTime: // XrdXrootdMonFileHdr::isTime
 				log.Debug("MonPacket: Received a f-stream time packet")
-			case 3: // XrdXrootdMonFileHdr::isXfr
+			case isXfr: // XrdXrootdMonFileHdr::isXfr
 				log.Debug("MonPacket: Received a f-stream transfer packet")
 				// NOTE: There's a lot to do here.  These records would allow us to
 				// capture partial file transfers or emulate a close on timeout.
@@ -430,18 +611,65 @@ func HandlePacket(packet []byte) error {
 				readBytes := binary.BigEndian.Uint64(packet[offset+8 : offset+16])
 				readvBytes := binary.BigEndian.Uint64(packet[offset+16 : offset+24])
 				writeBytes := binary.BigEndian.Uint64(packet[offset+24 : offset+32])
+
+				labels := prometheus.Labels{
+					"path": "/",
+					"ap":   "",
+					"dn":   "",
+					"role": "",
+					"org":  "",
+				}
+
 				if item != nil {
 					record = item.Value()
+					userRecord := sessions.Get(record.UserId)
+					labels["path"] = record.Path
+					if userRecord != nil {
+						labels["ap"] = userRecord.Value().AuthenticationProtocol
+						labels["dn"] = userRecord.Value().DN
+						labels["role"] = userRecord.Value().Role
+						labels["org"] = userRecord.Value().Org
+					}
+				}
+
+				// We record those metrics to make sure they are properly populated with initial
+				// values, or the file close hanlder will only populate them by the difference, not
+				// the total
+				labels["type"] = "read"
+				counter := TransferBytes.With(labels)
+				incBy := int64(readBytes - record.ReadBytes)
+				if incBy >= 0 {
+					counter.Add(float64(incBy))
+				} else {
+					log.Debug("File-transfer ReadBytes is less than previous value")
+				}
+				labels["type"] = "readv"
+				counter = TransferBytes.With(labels)
+				incBy = int64(readvBytes - record.ReadvBytes)
+				if incBy >= 0 {
+					counter.Add(float64(incBy))
+				} else {
+					log.Debug("File-transfer ReadVBytes is less than previous value")
+				}
+				labels["type"] = "write"
+				counter = TransferBytes.With(labels)
+				incBy = int64(writeBytes - record.WriteBytes)
+				if incBy >= 0 {
+					counter.Add(float64(incBy))
+				} else {
+					log.Debug("File-transfer WriteByte is less than previous value")
 				}
 				record.ReadBytes = readBytes
 				record.ReadvBytes = readvBytes
 				record.WriteBytes = writeBytes
 				transfers.Set(fileid, record, ttlcache.DefaultTTL)
 
-			case 4: // XrdXrootdMonFileHdr::isDisc
+			case isDisc: // XrdXrootdMonFileHdr::isDisc
 				log.Debug("MonPacket: Received a f-stream disconnect packet")
 				userId := UserId{Id: fileHdr.UserId}
-				sessions.Delete(userId)
+				if session := sessions.Get(userId); session != nil {
+					sessions.Delete(userId)
+				}
 			default:
 				log.Debug("MonPacket: Received an unhandled file monitoring packet "+
 					"of type ", fileHdr.RecType)
@@ -455,7 +683,7 @@ func HandlePacket(packet []byte) error {
 	case 'u':
 		log.Debug("MonPacket: Received a user login packet")
 		infoSize := uint32(header.Plen - 12)
-		if userid, auth, err := GetSIDRest(packet[12 : 12+infoSize]); err == nil {
+		if xrdUserId, auth, err := GetSIDRest(packet[12 : 12+infoSize]); err == nil {
 			var record UserRecord
 			for _, pair := range strings.Split(auth, "&") {
 				keyVal := strings.SplitN(pair, "=", 2)
@@ -471,9 +699,27 @@ func HandlePacket(packet []byte) error {
 					record.Org = keyVal[1]
 				case "r":
 					record.Role = keyVal[1]
+				case "g":
+					record.Groups = strings.Split(keyVal[1], " ")
 				}
 			}
-			sessions.Set(userid, record, ttlcache.DefaultTTL)
+			if len(record.AuthenticationProtocol) > 0 {
+				record.User = xrdUserId.User
+			}
+			sessions.Set(UserId{Id: dictid}, record, ttlcache.DefaultTTL)
+			userids.Set(xrdUserId, UserId{Id: dictid}, ttlcache.DefaultTTL)
+		} else {
+			return err
+		}
+	case 'T':
+		log.Debug("MonPacket: Received a token info packet")
+		infoSize := uint32(header.Plen - 12)
+		if _, tokenauth, err := GetSIDRest(packet[12 : 12+infoSize]); err == nil {
+			userId, userRecord, err := ParseTokenAuth(tokenauth)
+			if err != nil {
+				return err
+			}
+			sessions.Set(userId, userRecord, ttlcache.DefaultTTL)
 		} else {
 			return err
 		}
@@ -616,10 +862,16 @@ func HandleSummaryPacket(packet []byte) error {
 		return err
 	}
 	log.Debug("Received a summary statistics packet")
+	if summaryStats.Program != "xrootd" {
+		// We only care about the xrootd summary packets
+		return nil
+	}
 	for _, stat := range summaryStats.Stats {
 		switch stat.Id {
 
 		case "link":
+			// LinkConnections is the total connections since the start-up of the servcie
+			// So we just want to make sure here that no negative value is present
 			incBy := float64(stat.LinkConnections - lastStats.LinkConnections)
 			if stat.LinkConnections < lastStats.LinkConnections {
 				incBy = float64(stat.LinkConnections)

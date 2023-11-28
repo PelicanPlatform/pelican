@@ -35,6 +35,7 @@ Monitoring:
   TokenExpiresIn: 1h
   TokenRefreshInterval: 59m
   MetricAuthorization: true
+  AggregatePrefixes: ["/*"]
 Xrootd:
   Port: 8443
   Mount: ""

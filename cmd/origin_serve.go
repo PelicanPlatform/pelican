@@ -100,18 +100,6 @@ func checkDefaults(origin bool, nsAds []director.NamespaceAd) error {
 	return nil
 }
 
-func webUiInitialize() {
-	metrics.SetComponentHealthStatus(metrics.Server_WebUI, metrics.StatusWarning, "Authentication not initialized")
-
-	// Ensure we wait until the origin has been initialized
-	// before launching XRootD.
-	if err := origin_ui.WaitUntilLogin(context.Background()); err != nil {
-		log.Errorln("Failure when waiting for web UI to be initialized:", err)
-		return
-	}
-	metrics.SetComponentHealthStatus(metrics.Server_WebUI, metrics.StatusOK, "")
-}
-
 func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	defer config.CleanupTempResources()
 
@@ -130,13 +118,14 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		return err
 	}
 
-	if err := web_ui.ConfigureMetrics(engine, false); err != nil {
-		return err
+	if param.Origin_EnableUI.GetBool() {
+		if err := web_ui.ConfigureServerWebAPI(engine, false); err != nil {
+			return err
+		}
+
+		origin_ui.ConfigOriginUI(engine)
 	}
 
-	if err = origin_ui.ConfigureOriginUI(engine); err != nil {
-		return err
-	}
 	if err = origin_ui.ConfigureOriginAPI(engine); err != nil {
 		return err
 	}
@@ -153,7 +142,10 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	}
 
 	go web_ui.RunEngine(engine)
-	go webUiInitialize()
+
+	if param.Origin_EnableUI.GetBool() {
+		go web_ui.InitServerWebLogin()
+	}
 
 	configPath, err := xrootd.ConfigXrootd(true)
 	if err != nil {

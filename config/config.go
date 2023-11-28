@@ -402,8 +402,8 @@ func InitServer() error {
 	viper.SetDefault("Xrootd.Authfile", filepath.Join(configDir, "xrootd", "authfile"))
 	viper.SetDefault("Xrootd.MacaroonsKeyFile", filepath.Join(configDir, "macaroons-secret"))
 	viper.SetDefault("IssuerKey", filepath.Join(configDir, "issuer.jwk"))
-	viper.SetDefault("Origin.UIPasswordFile", filepath.Join(configDir, "origin-ui-passwd"))
-	viper.SetDefault("Origin.UIActivationCodeFile", filepath.Join(configDir, "origin-ui-activation-code"))
+	viper.SetDefault("Server.UIPasswordFile", filepath.Join(configDir, "server-web-passwd"))
+	viper.SetDefault("Server.UIActivationCodeFile", filepath.Join(configDir, "server-web-activation-code"))
 	viper.SetDefault("OIDC.ClientIDFile", filepath.Join(configDir, "oidc-client-id"))
 	viper.SetDefault("OIDC.ClientSecretFile", filepath.Join(configDir, "oidc-client-secret"))
 	viper.SetDefault("Cache.ExportLocation", "/")
@@ -479,7 +479,9 @@ func InitServer() error {
 	tokenExpiresIn := param.Monitoring_TokenExpiresIn.GetDuration()
 
 	if tokenExpiresIn == 0 || tokenRefreshInterval == 0 || tokenRefreshInterval > tokenExpiresIn {
-		log.Warningln("Invalid Monitoring.TokenRefreshInterval or Monitoring.TokenExpiresIn. Value may be zero or valid time <= refresh interval. You may experience intermittent authorization failure for requests with these token")
+		viper.Set("Monitoring.TokenRefreshInterval", time.Minute*59)
+		viper.Set("Monitoring.TokenExpiresIn", time.Hour*1)
+		log.Warningln("Invalid Monitoring.TokenRefreshInterval or Monitoring.TokenExpiresIn. Fallback to 59m for refresh interval and 1h for valid interval")
 	}
 
 	// Unmarshal Viper config into a Go struct

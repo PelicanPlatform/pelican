@@ -67,8 +67,8 @@ definitions:
         description: The detail success message
         example: Success
 tags:
-  - name: origin
-    description: APIs for the origin server
+  - name: auth
+    description: Authentication APIs for all servers
   - name: common
     description: Common APIs for all servers
 paths:
@@ -79,6 +79,8 @@ paths:
       summary: Returns the health status of server components
       produces:
         - application/json
+      security:
+        - Bearer: []
       responses:
         '200':
           description: OK
@@ -117,11 +119,10 @@ paths:
             description: The JSON object output from viper with all config values in the current server
         '401':
           description: Unauthorized
-  # To be changed to /auth/login when #398 is merged
-  /origin_ui/login:
+  /auth/login:
     post:
       tags:
-        - origin    
+        - auth    
       summary: Login with username and password to Pelican web UI
       consumes:
       - application/json
@@ -157,10 +158,10 @@ paths:
           schema:
             type: object
             $ref: "#/definitions/ErrorModel"
-  /origin_ui/initLogin:
+  /auth/initLogin:
     post:
       tags:
-        - origin        
+        - auth        
       summary: Login with one-time activation code to initialize web UI
       consumes:
       - application/json
@@ -195,10 +196,10 @@ paths:
           schema:
             type: object
             $ref: "#/definitions/ErrorModel"
-  /origin_ui/resetLogin:
+  /auth/resetLogin:
     post:
       tags:
-        - origin        
+        - auth        
       summary: Reset the password for the user
       consumes:
       - application/json
@@ -240,10 +241,10 @@ paths:
           schema:
             type: object
             $ref: "#/definitions/ErrorModel"
-  /origin_ui/whoami:
+  /auth/whoami:
     get:
       tags:
-        - origin    
+        - auth    
       summary: Return the authentication status of the web ui
       produces:
       - application/json
@@ -261,10 +262,10 @@ paths:
               user:
                 type: string
                 example: "admin"
-  /origin_ui/loginInitialized:
+  /auth/loginInitialized:
     get:
       tags:
-        - origin    
+        - auth    
       summary: Return the status of web UI initialization
       description: The initialization depends on if the user has used the one-time activation
         code to set up the password for the admin user

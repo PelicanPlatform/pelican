@@ -55,7 +55,7 @@ func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	// We configure Prometheus differently for director than for the rest servers,
 	// although in the future we probably want to pass the server type to the
 	// metric config function just because each server may have different config
-	if err := web_ui.ConfigureMetrics(engine, true); err != nil {
+	if err := web_ui.ConfigureServerWebAPI(engine, true); err != nil {
 		return err
 	}
 
@@ -78,6 +78,8 @@ func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
 
 	log.Info("Starting web engine...")
 	go web_ui.RunEngine(engine)
+
+	go web_ui.InitServerWebLogin()
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
