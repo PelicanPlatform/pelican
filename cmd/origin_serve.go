@@ -105,8 +105,11 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
 
-	defer config.CleanupTempResources()
-	defer shutdownCancel()
+	defer func() {
+		shutdownCancel()
+		wg.Wait()
+		config.CleanupTempResources()
+	}()
 
 	wg.Add(1)
 	err := xrootd.SetUpMonitoring(shutdownCtx, &wg)

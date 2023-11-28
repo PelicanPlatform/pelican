@@ -149,8 +149,11 @@ func serveCache( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
 
-	defer config.CleanupTempResources()
-	defer shutdownCancel()
+	defer func() {
+		shutdownCancel()
+		wg.Wait()
+		config.CleanupTempResources()
+	}()
 
 	err := config.DiscoverFederation()
 	if err != nil {

@@ -254,7 +254,10 @@ func TestServerAdsCacheEviction(t *testing.T) {
 		var wg sync.WaitGroup
 		wg.Add(1)
 		ConfigTTLCache(shutdownCtx, &wg)
-		defer shutdownCancel()
+		defer func() {
+			shutdownCancel()
+			wg.Wait()
+		}()
 
 		deletedChan := make(chan int)
 		cancelChan := make(chan int)

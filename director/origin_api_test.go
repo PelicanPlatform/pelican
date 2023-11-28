@@ -171,7 +171,12 @@ func TestNamespaceKeysCacheEviction(t *testing.T) {
 		var wg sync.WaitGroup
 		wg.Add(1)
 		ConfigTTLCache(shutdownCtx, &wg)
-		defer shutdownCancel()
+
+		defer func() {
+			shutdownCancel()
+			wg.Wait()
+		}()
+
 		mockNamespaceKey := "foo"
 		mockCtx := context.Background()
 		mockAr := jwk.NewCache(mockCtx)
