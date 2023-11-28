@@ -16,7 +16,7 @@
  *
  ***************************************************************/
 
-package origin_ui
+package server_ui
 
 import (
 	"encoding/json"

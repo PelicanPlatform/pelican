@@ -24,16 +24,12 @@ import (
 	"context"
 	"encoding/json"
 	"net/url"
-	"os"
-	"strings"
 	"sync"
 
-	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pelicanplatform/pelican/cache_ui"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/daemon"
 	"github.com/pelicanplatform/pelican/director"
-	nsregistry "github.com/pelicanplatform/pelican/namespace_registry"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_ui"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -42,6 +38,7 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 var (
@@ -107,52 +104,26 @@ func serveCache( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		return err
 	}
 
-	cachePrefix := "/caches/" + param.Xrootd_Sitename.GetString()
-
-	//Should this be the Server.IssuerKey? That doesn't seem to be set anywhere, though.
-	privKeyPath := param.IssuerKey.GetString()
-
-	// Get the namespace endpoint
-	namespaceEndpoint, err := getNamespaceEndpoint()
-	if err != nil {
-		log.Errorln("Failed to get NamespaceURL from config: ", err)
-		os.Exit(1)
-	}
-
-	// Parse the namespace URL to make sure it's okay
-	registrationEndpointURL, err := url.JoinPath(namespaceEndpoint, "api", "v1.0", "registry")
-	if err != nil {
-		return err
-	}
-
-	// Register the cache prefix in the registry
-	privateKeyRaw, err := config.LoadPrivateKey(privKeyPath)
-	if err != nil {
-		log.Error("Failed to load private key", err)
-		os.Exit(1)
-	}
-	privKey, err := jwk.FromRaw(privateKeyRaw)
-	if err != nil {
-		log.Error("Failed to create JWK private key", err)
-		os.Exit(1)
-	}
-	err = nsregistry.NamespaceRegister(privKey, registrationEndpointURL, "", cachePrefix)
-
-	// Check that the error isn't because the prefix is already registered
-	if err != nil {
-		if !strings.Contains(err.Error(), "The prefix already is registered") {
-			log.Errorln("Failed to register cache: ", err)
-			os.Exit(1)
-		}
-	}
-
 	nsAds, err := getNSAdsFromDirector()
 	if err != nil {
 		return err
 	}
 
+	CacheServer.NameSpaceAds = nsAds
 	err = checkDefaults(false, nsAds)
 	if err != nil {
+		return err
+	}
+
+	cachePrefix := "/caches/" + param.Xrootd_Sitename.GetString()
+
+	viper.Set("Origin.NamespacePrefix", cachePrefix)
+
+	if err = server_ui.RegisterNamespaceWithRetry(); err != nil {
+		return err
+	}
+
+	if err = server_ui.PeriodicAdvertise(CacheServer); err != nil {
 		return err
 	}
 
@@ -163,11 +134,6 @@ func serveCache( /*cmd*/ *cobra.Command /*args*/, []string) error {
 
 	log.Info("Launching cache")
 	launchers, err := xrootd.ConfigureLaunchers(false, configPath, false)
-	if err != nil {
-		return err
-	}
-	err = server_ui.PeriodicAdvertise(CacheServer)
-
 	if err != nil {
 		return err
 	}

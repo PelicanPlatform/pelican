@@ -155,7 +155,7 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	if err = origin_ui.ConfigureOriginAPI(engine); err != nil {
 		return err
 	}
-	if err = origin_ui.RegisterNamespaceWithRetry(); err != nil {
+	if err = server_ui.RegisterNamespaceWithRetry(); err != nil {
 		return err
 	}
 	if err = server_ui.PeriodicAdvertise(OriginServer); err != nil {
