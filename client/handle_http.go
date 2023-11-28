@@ -22,12 +22,14 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -742,6 +744,36 @@ func (pr *ProgressReader) BytesComplete() int64 {
 
 func (pr *ProgressReader) Size() int64 {
 	return pr.sizer.Size()
+}
+
+func UploadDirectory(src string, dest *url.URL, token string, namespace namespaces.Namespace) (int64, error) {
+	var amountUploaded int64
+	err := filepath.WalkDir(src, func(path string, info fs.DirEntry, err error) error {
+		// For now, ignore directories since you cannot PUT a dir
+		if !(info.IsDir()) {
+			// Do all this work to update the destination to include the current file at the end
+			currentDest, err := url.Parse(dest.Path)
+			if err != nil {
+				return err
+			}
+			baseDir, _ := filepath.Split(currentDest.Path)
+			newFilename := info.Name()
+			updatedPath := filepath.Join(baseDir, newFilename)
+			currentDest.Path = updatedPath
+			// Upload the file with the updated destination
+			var uploaded int64
+			uploaded, err = UploadFile(path, currentDest, token, namespace)
+			if err != nil {
+				return err
+			}
+			amountUploaded += uploaded
+		}
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return amountUploaded, err
 }
 
 // UploadFile Uploads a file using HTTP

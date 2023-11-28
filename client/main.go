@@ -103,14 +103,17 @@ func getTokenName(destination *url.URL) (scheme, tokenName string) {
 }
 
 // Do writeback to stash using SciTokens
-func doWriteBack(source string, destination *url.URL, namespace namespaces.Namespace) (int64, error) {
+func doWriteBack(source string, destination *url.URL, namespace namespaces.Namespace, recursive bool) (int64, error) {
 
 	scitoken_contents, err := getToken(destination, namespace, true, "")
 	if err != nil {
 		return 0, err
 	}
-	return UploadFile(source, destination, scitoken_contents, namespace)
-
+	if recursive {
+		return UploadDirectory(source, destination, scitoken_contents, namespace)
+	} else {
+		return UploadFile(source, destination, scitoken_contents, namespace)
+	}
 }
 
 // getToken returns the token to use for the given destination
@@ -503,7 +506,7 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 			AddError(err)
 			return 0, err
 		}
-		_, err = doWriteBack(source_url.Path, dest_url, ns)
+		_, err = doWriteBack(source_url.Path, dest_url, ns, recursive)
 		AddError(err)
 		return 0, err
 	}
