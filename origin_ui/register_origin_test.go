@@ -56,7 +56,7 @@ func TestRegistration(t *testing.T) {
 	ikey := filepath.Join(issuerTempDir, "issuer.jwk")
 	viper.Set("IssuerKey", ikey)
 	viper.Set("Registry.DbLocation", filepath.Join(issuerTempDir, "test.sql"))
-	err := config.InitServer()
+	err := config.InitServer(config.OriginType)
 	require.NoError(t, err)
 
 	err = nsregistry.InitializeDB()
