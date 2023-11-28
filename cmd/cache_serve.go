@@ -21,25 +21,22 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"io"
-	"net/http"
 	"net/url"
 	"os"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/lestrrat-go/jwx/v2/jwk"
-	"github.com/pelicanplatform/pelican/client"
+	"github.com/pelicanplatform/pelican/cache_ui"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/daemon"
 	"github.com/pelicanplatform/pelican/director"
-	"github.com/pelicanplatform/pelican/metrics"
 	nsregistry "github.com/pelicanplatform/pelican/namespace_registry"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_ui"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pelicanplatform/pelican/xrootd"
 	"github.com/pkg/errors"
@@ -47,102 +44,42 @@ import (
 	"github.com/spf13/cobra"
 )
 
-type directorResponse struct {
-	Error string `json:"error"`
-}
+var (
+	CacheServer = server_utils.XRootDServer{
+		ServerType:          string(server_utils.CacheType),
+		NameSpaceAds:        []director.NamespaceAd{},
+		CreateAdvertisement: cache_ui.CreateCacheAdvertisement,
+	}
+)
 
-func periodicAdvertiseCache(prefix string, nsAds []director.NamespaceAd) error {
-	ticker := time.NewTicker(1 * time.Minute)
-	go func() {
-		err := advertiseCache(prefix, nsAds)
-		if err != nil {
-			log.Warningln("Cache advertise failed:", err)
-			metrics.SetComponentHealthStatus(metrics.OriginCache_Federation, metrics.StatusCritical, "Error advertising cache to federation")
-		} else {
-			metrics.SetComponentHealthStatus(metrics.OriginCache_Federation, metrics.StatusOK, "")
+func getNSAdsFromDirector() ([]director.NamespaceAd, error) {
+	// Get the endpoint of the director
+	var respNS []director.NamespaceAd
+	directorEndpoint, err := getDirectorEndpoint()
+	if err != nil {
+		return respNS, errors.Wrapf(err, "Failed to get DirectorURL from config: %v", err)
+	}
+
+	// Create the listNamespaces url
+	directorNSListEndpointURL, err := url.JoinPath(directorEndpoint, "api", "v1.0", "director", "listNamespaces")
+	if err != nil {
+		return respNS, err
+	}
+
+	respData, err := utils.MakeRequest(directorNSListEndpointURL, "GET", nil, nil)
+	if err != nil {
+		if jsonErr := json.Unmarshal(respData, &respNS); jsonErr == nil { // Error creating json
+			return respNS, errors.Wrapf(err, "Failed to make request: %v", err)
 		}
-
-		for {
-			<-ticker.C
-			err := advertiseCache(prefix, nsAds)
-			if err != nil {
-				log.Warningln("Cache advertise failed:", err)
-				metrics.SetComponentHealthStatus(metrics.OriginCache_Federation, metrics.StatusCritical, "Error advertising origin to federation")
-			} else {
-				metrics.SetComponentHealthStatus(metrics.OriginCache_Federation, metrics.StatusOK, "")
-			}
-		}
-	}()
-
-	return nil
-}
-
-func advertiseCache(prefix string, nsAds []director.NamespaceAd) error {
-	name := param.Xrootd_Sitename.GetString()
-	if name == "" {
-		return errors.New("Cache name isn't set")
+		return respNS, errors.Wrap(err, "Failed to make request")
 	}
 
-	// TODO: waiting on a different branch to merge origin URL generation
-	// The checkdefaults func that runs before the origin is served checks for and
-	// parses the originUrl, so it should be safe to just grab it as a string here.
-	originUrl := param.Origin_Url.GetString()
-
-	ad := director.OriginAdvertise{
-		Name:       name,
-		URL:        originUrl,
-		Namespaces: nsAds,
-	}
-
-	body, err := json.Marshal(ad)
+	err = json.Unmarshal(respData, &respNS)
 	if err != nil {
-		return errors.Wrap(err, "Failed to generate JSON description of origin")
+		return respNS, errors.Wrapf(err, "Failed to marshal response in to JSON: %v", err)
 	}
 
-	directorUrlStr := param.Federation_DirectorUrl.GetString()
-	if directorUrlStr == "" {
-		return errors.New("Director endpoint URL is not known")
-	}
-	directorUrl, err := url.Parse(directorUrlStr)
-	if err != nil {
-		return errors.Wrap(err, "Failed to parse Federation.DirectorURL")
-	}
-	directorUrl.Path = "/api/v1.0/director/registerCache"
-
-	token, err := director.CreateAdvertiseToken(prefix)
-	if err != nil {
-		return errors.Wrap(err, "Failed to generate advertise token")
-	}
-
-	req, err := http.NewRequest("POST", directorUrl.String(), bytes.NewBuffer(body))
-	if err != nil {
-		return errors.Wrap(err, "Failed to create POST request for director registration")
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
-	userAgent := "pelican-cache/" + client.ObjectClientOptions.Version
-	req.Header.Set("User-Agent", userAgent)
-
-	tr := config.GetTransport()
-	client := http.Client{Transport: tr}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return errors.Wrap(err, "Failed to start request for director registration")
-	}
-	defer resp.Body.Close()
-
-	body, _ = io.ReadAll(resp.Body)
-	if resp.StatusCode > 299 {
-		var respErr directorResponse
-		if unmarshalErr := json.Unmarshal(body, &respErr); unmarshalErr != nil { // Error creating json
-			return errors.Wrapf(unmarshalErr, "Could not unmarshall the director's response, which responded %v from director registration: %v", resp.StatusCode, resp.Status)
-		}
-		return errors.Errorf("Error during director registration: %v\n", respErr.Error)
-	}
-
-	return nil
+	return respNS, nil
 }
 
 func serveCache( /*cmd*/ *cobra.Command /*args*/, []string) error {
@@ -209,34 +146,12 @@ func serveCache( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		}
 	}
 
-	// Get the endpoint of the director
-	directorEndpoint, err := getDirectorEndpoint()
-	if err != nil {
-		log.Errorln("Failed to get DirectorURL from config: ", err)
-		os.Exit(1)
-	}
-
-	// Create the listNamespaces url
-	directorNSListEndpointURL, err := url.JoinPath(directorEndpoint, "api", "v1.0", "director", "listNamespaces")
+	nsAds, err := getNSAdsFromDirector()
 	if err != nil {
 		return err
 	}
 
-	respData, err := utils.MakeRequest(directorNSListEndpointURL, "GET", nil, nil)
-	var respNS []director.NamespaceAd
-	if err != nil {
-		if jsonErr := json.Unmarshal(respData, &respNS); jsonErr == nil { // Error creating json
-			return errors.Wrapf(err, "Failed to make request: %v", err)
-		}
-		return errors.Wrap(err, "Failed to make request")
-	}
-	err = json.Unmarshal(respData, &respNS)
-	if err != nil {
-		log.Errorln("Failed to marshal response in to JSON: ", err)
-		os.Exit(1)
-	}
-
-	err = checkDefaults(false, respNS)
+	err = checkDefaults(false, nsAds)
 	if err != nil {
 		return err
 	}
@@ -251,7 +166,7 @@ func serveCache( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	if err != nil {
 		return err
 	}
-	err = periodicAdvertiseCache(cachePrefix, respNS)
+	err = server_ui.PeriodicAdvertise(CacheServer)
 
 	if err != nil {
 		return err

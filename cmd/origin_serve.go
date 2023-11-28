@@ -35,12 +35,22 @@ import (
 	"github.com/pelicanplatform/pelican/oa4mp"
 	"github.com/pelicanplatform/pelican/origin_ui"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_ui"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/web_ui"
 	"github.com/pelicanplatform/pelican/xrootd"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+)
+
+var (
+	OriginServer = server_utils.XRootDServer{
+		ServerType:          string(server_utils.OriginType),
+		NameSpaceAds:        nil,
+		CreateAdvertisement: origin_ui.CreateOriginAdvertisement,
+	}
 )
 
 func checkConfigFileReadable(fileName string, errMsg string) error {
@@ -148,7 +158,7 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	if err = origin_ui.RegisterNamespaceWithRetry(); err != nil {
 		return err
 	}
-	if err = origin_ui.PeriodicAdvertiseOrigin(); err != nil {
+	if err = server_ui.PeriodicAdvertise(OriginServer); err != nil {
 		return err
 	}
 	if param.Origin_EnableIssuer.GetBool() {
