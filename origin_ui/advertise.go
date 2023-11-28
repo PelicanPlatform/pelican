@@ -21,6 +21,7 @@ package origin_ui
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -75,12 +76,12 @@ func AdvertiseOrigin() error {
 	originWebUrl := param.Server_ExternalWebUrl.GetString()
 
 	// Here we instantiate the namespaceAd slice, but we still need to define the namespace
-	namespaceUrl, err := url.Parse(param.Federation_NamespaceUrl.GetString())
-	if err != nil {
-		return errors.Wrap(err, "Bad NamespaceUrl")
-	}
-	if namespaceUrl.String() == "" {
-		return errors.New("No NamespaceUrl is set")
+	issuerUrl := url.URL{}
+	issuerUrl.Scheme = "https"
+	issuerUrl.Host = fmt.Sprintf("%v:%v", param.Server_Hostname.GetString(), param.Xrootd_Port.GetInt())
+
+	if issuerUrl.String() == "" {
+		return errors.New("No IssuerUrl is set")
 	}
 
 	prefix := param.Origin_NamespacePrefix.GetString()
@@ -90,10 +91,10 @@ func AdvertiseOrigin() error {
 	nsAd := director.NamespaceAd{
 		RequireToken:  true,
 		Path:          prefix,
-		Issuer:        *namespaceUrl,
+		Issuer:        issuerUrl,
 		MaxScopeDepth: 3,
 		Strategy:      "OAuth2",
-		BasePath:      "/",
+		BasePath:      prefix,
 	}
 	ad := director.OriginAdvertise{
 		Name:       name,
