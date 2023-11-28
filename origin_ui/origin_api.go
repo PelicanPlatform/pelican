@@ -139,6 +139,7 @@ func directorTestResponse(ctx *gin.Context) {
 	}
 }
 
+// Configure API endpoints for origin that are not tied to UI
 func ConfigureOriginAPI(router *gin.Engine) error {
 	if router == nil {
 		return errors.New("Origin configuration passed a nil pointer")
