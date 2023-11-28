@@ -134,23 +134,30 @@ func EmitAuthfile(nsAds []director.NamespaceAd) error {
 	sc := bufio.NewScanner(strings.NewReader(string(contents)))
 	output := new(bytes.Buffer)
 	foundPublicLine := false
-	for sc.Scan() {
-		lineContents := sc.Text()
-		words := strings.Fields(lineContents)
-		if len(words) >= 2 && words[0] == "u" && words[1] == "*" {
-			output.Write([]byte("u * /.well-known lr " + strings.Join(words[2:], " ") + "\n"))
-			foundPublicLine = true
-		} else {
-			output.Write([]byte(lineContents + "\n"))
+	if nsAds == nil {
+		for sc.Scan() {
+			lineContents := sc.Text()
+			words := strings.Fields(lineContents)
+			if len(words) >= 2 && words[0] == "u" && words[1] == "*" {
+				output.Write([]byte("u * /.well-known lr " + strings.Join(words[2:], " ") + "\n"))
+				foundPublicLine = true
+			} else {
+				output.Write([]byte(lineContents + "\n"))
+			}
 		}
-	}
-	if !foundPublicLine {
-		output.Write([]byte("u * /.well-known lr\n"))
+		if !foundPublicLine {
+			output.Write([]byte("u * /.well-known lr\n"))
+		}
 	}
 
 	if len(nsAds) != 0 {
+		outStr := "u * "
 		for _, ad := range nsAds {
-			outStr := "u * " + ad.Path + " lr\n"
+			if !ad.RequireToken && ad.BasePath != "" {
+				outStr += ad.BasePath + " lr "
+			}
+		}
+		if len(outStr) > 4 {
 			output.Write([]byte(outStr))
 		}
 	}
@@ -342,6 +349,52 @@ func WriteOriginScitokensConfig(exportedPaths []string) error {
 			cfg.IssuerMap[issuer.Issuer] = val
 		} else {
 			cfg.IssuerMap[issuer.Issuer] = issuer
+		}
+	}
+
+	return EmitScitokensConfiguration(&cfg)
+}
+
+// Writes out the cache's scitokens.cfg configuration
+func WriteCacheScitokensConfig(nsAds []director.NamespaceAd) error {
+	gid, err := config.GetDaemonGID()
+	if err != nil {
+		return err
+	}
+
+	scitokensCfg := param.Xrootd_ScitokensConfig.GetString()
+	err = config.MkdirAll(filepath.Dir(scitokensCfg), 0755, -1, gid)
+	if err != nil {
+		return errors.Wrapf(err, "Unable to create directory %v",
+			filepath.Dir(scitokensCfg))
+	}
+
+	if file, err := os.OpenFile(scitokensCfg, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0640); err == nil {
+		file.Close()
+	} else if !errors.Is(err, os.ErrExist) {
+		return err
+	}
+	if err = os.Chown(scitokensCfg, -1, gid); err != nil {
+		return errors.Wrapf(err, "Unable to change ownership of scitokens config %v"+
+			" to desired daemon group %v", scitokensCfg, gid)
+	}
+
+	cfg, err := LoadScitokensConfig(scitokensCfg)
+	if err != nil {
+		return errors.Wrapf(err, "Failed to load scitokens configuration at %s", scitokensCfg)
+	}
+
+	for _, ad := range nsAds {
+		if ad.RequireToken {
+			if ad.Issuer.String() != "" && ad.BasePath != "" {
+				if val, ok := cfg.IssuerMap[ad.Issuer.String()]; ok {
+					val.BasePaths = append(val.BasePaths, ad.BasePath)
+					cfg.IssuerMap[ad.Issuer.String()] = val
+				} else {
+					cfg.IssuerMap[ad.Issuer.String()] = Issuer{Issuer: ad.Issuer.String(), BasePaths: []string{ad.BasePath}, Name: ad.Issuer.String()}
+					cfg.Global.Audience = append(cfg.Global.Audience, ad.Issuer.String())
+				}
+			}
 		}
 	}
 

@@ -23,11 +23,13 @@ package xrootd
 import (
 	_ "embed"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
@@ -52,6 +54,12 @@ var (
 
 	//go:embed resources/test-scitokens-monitoring.cfg
 	monitoringOutput string
+
+	//go:embed resources/test-scitokens-cache-issuer.cfg
+	cacheSciOutput string
+
+	//go:embed resources/test-scitokens-cache-empty.cfg
+	cacheEmptyOutput string
 )
 
 func TestEmitCfg(t *testing.T) {
@@ -148,13 +156,76 @@ func TestGenerateConfig(t *testing.T) {
 	assert.Equal(t, issuer.MapSubject, true)
 }
 
+func TestWriteCacheAuthFiles(t *testing.T) {
+
+	cacheAuthTester := func(nsAds []director.NamespaceAd, sciTokenResult string, authResult string) func(t *testing.T) {
+		return func(t *testing.T) {
+
+			dirname := t.TempDir()
+			viper.Reset()
+			viper.Set("Xrootd.RunLocation", dirname)
+			viper.Set("Xrootd.ScitokensConfig", filepath.Join(dirname, "scitokens-generated.cfg"))
+			viper.Set("Xrootd.Authfile", filepath.Join(dirname, "authfile-generated"))
+			authFile := param.Xrootd_Authfile.GetString()
+			err := os.WriteFile(authFile, []byte(""), 0600)
+			assert.NoError(t, err)
+
+			err = WriteCacheScitokensConfig(nsAds)
+			assert.NoError(t, err)
+
+			sciFile := param.Xrootd_ScitokensConfig.GetString()
+			genSciToken, err := os.ReadFile(sciFile)
+			assert.NoError(t, err)
+
+			assert.Equal(t, string(genSciToken), sciTokenResult)
+
+			err = EmitAuthfile(nsAds)
+			assert.NoError(t, err)
+
+			authGen, err := os.ReadFile(authFile)
+			assert.NoError(t, err)
+			assert.Equal(t, string(authGen), authResult)
+		}
+	}
+
+	issuer1URL := url.URL{}
+	issuer1URL.Scheme = "https"
+	issuer1URL.Host = "issuer1.com"
+
+	issuer2URL := url.URL{}
+	issuer2URL.Scheme = "https"
+	issuer2URL.Host = "issuer2.com"
+
+	issuer3URL := url.URL{}
+	issuer3URL.Scheme = "https"
+	issuer3URL.Host = "issuer3.com"
+
+	issuer4URL := url.URL{}
+	issuer4URL.Scheme = "https"
+	issuer4URL.Host = "issuer4.com"
+
+	nsAds := []director.NamespaceAd{
+		{RequireToken: true, Issuer: issuer1URL, BasePath: "/p1"},
+		{RequireToken: true, Issuer: issuer2URL, BasePath: "/p2/path"},
+		{RequireToken: false, Issuer: issuer3URL, BasePath: "/p3"},
+		{RequireToken: true, Issuer: issuer1URL, BasePath: "/p1_again"},
+		{RequireToken: false, Issuer: issuer4URL, BasePath: "/p4/depth"},
+		{RequireToken: false, Issuer: issuer2URL, BasePath: "/p2_noauth"},
+	}
+
+	t.Run("MultiIssuer", cacheAuthTester(nsAds, cacheSciOutput, "u * /p3 lr /p4/depth lr /p2_noauth lr "))
+
+	nsAds = []director.NamespaceAd{}
+
+	t.Run("EmptyNS", cacheAuthTester(nsAds, cacheEmptyOutput, ""))
+}
+
 func TestWriteOriginScitokensConfig(t *testing.T) {
 	viper.Reset()
 	dirname := t.TempDir()
 	os.Setenv("PELICAN_XROOTD_RUNLOCATION", dirname)
 	defer os.Unsetenv("PELICAN_XROOTD_RUNLOCATION")
 	config_dirname := t.TempDir()
-	viper.Reset()
 	viper.Set("Origin.SelfTest", true)
 	viper.Set("ConfigDir", config_dirname)
 	viper.Set("Xrootd.RunLocation", dirname)
