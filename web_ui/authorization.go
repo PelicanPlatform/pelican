@@ -21,8 +21,6 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"fmt"
-	"io"
-	"net/http"
 	"strings"
 	"time"
 
@@ -34,6 +32,7 @@ import (
 	pelican_config "github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
@@ -93,19 +92,10 @@ func FederationCheck(c *gin.Context, strToken string, anyOfTheScopes []string) e
 		return errors.New(fmt.Sprint("Issuer is not a federation: ", token.Issuer()))
 	}
 
-	err = pelican_config.DiscoverFederation()
-	if err != nil {
-		return errors.Wrap(err, "Failed to discover federation")
-	}
 	fedURIFile := param.Federation_JwkUrl.GetString()
-	response, err := http.Get(fedURIFile)
+	contents, err := utils.MakeRequest(fedURIFile, "GET", nil, nil)
 	if err != nil {
-		return errors.Wrap(err, "Error requesting federation JWKS discovery URL")
-	}
-	defer response.Body.Close()
-	contents, err := io.ReadAll(response.Body)
-	if err != nil {
-		return errors.Wrap(err, "Error reading content of federation JWKS discovery response")
+		return errors.Wrap(err, "Failed to get federation's public JWKS")
 	}
 	keys, err := jwk.Parse(contents)
 	if err != nil {

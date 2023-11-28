@@ -22,7 +22,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -35,6 +34,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
@@ -85,28 +85,10 @@ func LoadDirectorPublicKey() (jwk.Key, error) {
 	directorDiscoveryUrl.Scheme = "https"
 	directorDiscoveryUrl.Path = directorDiscoveryUrl.Path + directorDiscoveryPath
 
-	tr := config.GetTransport()
-	client := &http.Client{Transport: tr}
-
-	req, err := http.NewRequest(http.MethodGet, directorDiscoveryUrl.String(), nil)
+	body, err := utils.MakeRequest(directorDiscoveryUrl.String(), http.MethodGet, nil, nil)
 	if err != nil {
-		return nil, errors.Wrap(err, fmt.Sprintln("Failure when doing director metadata request creation for: ", directorDiscoveryUrl))
+		return nil, errors.Wrap(err, fmt.Sprintln("Failure when requesting director's metadata discovery URL at: ", directorDiscoveryUrl))
 	}
-
-	result, err := client.Do(req)
-	if err != nil {
-		return nil, errors.Wrap(err, fmt.Sprintln("Failure when doing director metadata lookup to: ", directorDiscoveryUrl))
-	}
-
-	if result.Body != nil {
-		defer result.Body.Close()
-	}
-
-	body, err := io.ReadAll(result.Body)
-	if err != nil {
-		return nil, errors.Wrap(err, fmt.Sprintln("Failure when doing director metadata read to: ", directorDiscoveryUrl))
-	}
-
 	metadata := DiscoveryResponse{}
 
 	err = json.Unmarshal(body, &metadata)
@@ -116,12 +98,7 @@ func LoadDirectorPublicKey() (jwk.Key, error) {
 
 	jwksUri := metadata.JwksUri
 
-	response, err := client.Get(jwksUri)
-	if err != nil {
-		return nil, errors.Wrap(err, fmt.Sprintln("Failure when requesting director Jwks URI: ", jwksUri))
-	}
-	defer response.Body.Close()
-	contents, err := io.ReadAll(response.Body)
+	contents, err := utils.MakeRequest(jwksUri, "GET", nil, nil)
 	if err != nil {
 		return nil, errors.Wrap(err, fmt.Sprintln("Failure when requesting director Jwks URI: ", jwksUri))
 	}
