@@ -27,7 +27,7 @@ Cache:
 Origin:
   NamespacePrefix: ""
   Multiuser: false
-  EnableMacaroons: true
+  EnableMacaroons: false
   EnableVoms: true
   SelfTest: true
   EnableUI: true
