@@ -130,9 +130,11 @@ RUN \
     mkdir build && cd build && \
     cmake .. && \
     make install && \
+    # For now, until the RPM is set up, we install the libraries here, but
+    # we need to add to LD_LIBRARY_PATH so XRootD knows where to look
     echo "/usr/local/lib" > /etc/ld.so.conf.d/xrdplugins.conf && ldconfig
 
 RUN chmod +x /pelican/osdf-client \
     && chmod +x /entrypoint.sh
 
-ENTRYPOINT ["/entrypoint.sh"]
+#ENTRYPOINT ["/entrypoint.sh"]
