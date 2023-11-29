@@ -485,8 +485,8 @@ func InitServer() error {
 	}
 
 	// Unmarshal Viper config into a Go struct
-	err = param.UnmarshalConfig()
-	if err != nil {
+	unmarshalledConfig, err := param.UnmarshalConfig()
+	if err != nil || unmarshalledConfig == nil {
 		return err
 	}
 
@@ -623,8 +623,8 @@ func InitClient() error {
 	setupTransport()
 
 	// Unmarshal Viper config into a Go struct
-	err = param.UnmarshalConfig()
-	if err != nil {
+	unmarshalledConfig, err := param.UnmarshalConfig()
+	if err != nil || unmarshalledConfig == nil {
 		return err
 	}
 
