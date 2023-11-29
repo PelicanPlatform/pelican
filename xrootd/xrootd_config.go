@@ -401,6 +401,10 @@ func ConfigXrootd(origin bool) (string, error) {
 	return configPath, nil
 }
 
+// Set up xrootd monitoring
+//
+// The `ctx` is the context for listening to server shutdown event in order to cleanup internal cache eviction
+// goroutine and `wg` is the wait group to notify when the clean up goroutine finishes
 func SetUpMonitoring(ctx context.Context, wg *sync.WaitGroup) error {
 	monitorPort, err := metrics.ConfigureMonitoring(ctx, wg)
 	if err != nil {

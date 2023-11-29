@@ -262,10 +262,10 @@ func CreateDirectorScrapeToken() (string, error) {
 	return string(signed), nil
 }
 
-// Configure serverAds cache to enable cache eviction and other additional logic
+// Configure TTL caches to enable cache eviction and other additional cache events handling logic
 //
-// TODO: Depending on which PR gets merged first, we want to merge ConfigCacheEviction from
-// #305 with this
+// The `ctx` is the context for listening to server shutdown event in order to cleanup internal cache eviction
+// goroutine and `wg` is the wait group to notify when the clean up goroutine finishes
 func ConfigTTLCache(ctx context.Context, wg *sync.WaitGroup) {
 	// Start automatic expired item deletion
 	go serverAds.Start()

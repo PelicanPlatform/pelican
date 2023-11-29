@@ -239,6 +239,10 @@ var (
 	monitorPaths []PathList
 )
 
+// Set up listening and parsing xrootd monitoring UDP packets into prometheus
+//
+// The `ctx` is the context for listening to server shutdown event in order to cleanup internal cache eviction
+// goroutine and `wg` is the wait group to notify when the clean up goroutine finishes
 func ConfigureMonitoring(ctx context.Context, wg *sync.WaitGroup) (int, error) {
 	monitorPaths = make([]PathList, 0)
 	for _, monpath := range param.Monitoring_AggregatePrefixes.GetStringSlice() {

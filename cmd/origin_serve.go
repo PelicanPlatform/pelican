@@ -102,9 +102,13 @@ func checkDefaults(origin bool, nsAds []director.NamespaceAd) error {
 }
 
 func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
+	// Use this context for any goroutines that needs to react to server shutdown
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
+	// Use this wait group to ensure the goroutines can finish before the server exits/shutdown
 	var wg sync.WaitGroup
 
+	// This anonymous function ensures we cancel any context and wait for those goroutines to
+	// finish their cleanup work before the server exits
 	defer func() {
 		shutdownCancel()
 		wg.Wait()
