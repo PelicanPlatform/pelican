@@ -61,7 +61,7 @@ func MakeRequest(url string, method string, data map[string]interface{}, headers
 	return body, nil
 }
 
-func GetIssuerURL() (*url.URL, error) {
+func GetLocalIssuerURL() (*url.URL, error) {
 	// If Origin.Mode is set to anything that isn't "posix" or "", assume we're running a plugin and
 	// that the origin's issuer URL actually uses the same port as OriginUI instead of XRootD. This is
 	// because under that condition, keys are being served by the Pelican process instead of by XRootD
@@ -74,9 +74,7 @@ func GetIssuerURL() (*url.URL, error) {
 		}
 		return issuerUrl, nil
 	} else {
-		// to parse the URL, we first must prepend it with a scheme
 		issuerUrlStr := param.Server_ExternalWebUrl.GetString()
-
 		issuerUrl, err := url.Parse(issuerUrlStr)
 		if err != nil {
 			return nil, errors.Wrap(err, "Failed to parse the issuer URL generated using ComputeExternalAddress")

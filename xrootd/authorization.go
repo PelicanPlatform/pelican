@@ -278,7 +278,7 @@ func GenerateMonitoringIssuer() (issuer Issuer, err error) {
 		return
 	}
 	issuer.Name = "Built-in Monitoring"
-	issuerUrl, err := utils.GetIssuerURL()
+	issuerUrl, err := utils.GetLocalIssuerURL()
 	if err != nil {
 		return
 	}
@@ -295,7 +295,7 @@ func GenerateOriginIssuer(exportedPaths []string) (issuer Issuer, err error) {
 		return
 	}
 	issuer.Name = "Origin"
-	issuerUrl, err := utils.GetIssuerURL()
+	issuerUrl, err := utils.GetLocalIssuerURL()
 	if err != nil {
 		return
 	}
