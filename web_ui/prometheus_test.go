@@ -121,7 +121,7 @@ func TestPrometheusProtectionFederationURL(t *testing.T) {
 
 	originUrl := param.Origin_Url.GetString()
 	tok, err := jwt.NewBuilder().
-		Claim("scope", "prometheus.read").
+		Claim("scope", "monitoring.query").
 		Claim("wlcg.ver", "1.0").
 		JwtID(jti).
 		Issuer(issuerURL.String()).
@@ -213,7 +213,7 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 
 	originUrl := param.Origin_Url.GetString()
 	tok, err := jwt.NewBuilder().
-		Claim("scope", "prometheus.read").
+		Claim("scope", "monitoring.query").
 		Claim("wlcg.ver", "1.0").
 		JwtID(jti).
 		Issuer(param.Server_ExternalWebUrl.GetString()).
@@ -278,7 +278,7 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 
 	// Create a new token to be used
 	tok, err = jwt.NewBuilder().
-		Claim("scope", "prometheus.read").
+		Claim("scope", "monitoring.query").
 		Claim("wlcg.ver", "1.0").
 		JwtID(jti).
 		Issuer(param.Server_ExternalWebUrl.GetString()).
@@ -358,7 +358,7 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 	now := time.Now()
 	tok, err = jwt.NewBuilder().
 		Issuer(param.Server_ExternalWebUrl.GetString()).
-		Claim("scope", "prometheus.read").
+		Claim("scope", "monitoring.query").
 		Claim("wlcg.ver", "1.0").
 		IssuedAt(now).
 		Expiration(now.Add(30 * time.Minute)).

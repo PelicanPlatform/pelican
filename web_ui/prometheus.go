@@ -151,7 +151,7 @@ func promQueryEngineAuthHandler(av1 *route.Router) gin.HandlerFunc {
 	 * the routing as normal, otherwise it will return an error
 	 */
 	return func(c *gin.Context) {
-		exists := checkAPIToken(c, []string{"prometheus.read"})
+		exists := checkAPIToken(c, []string{"monitoring.query"})
 		if exists {
 			av1.ServeHTTP(c.Writer, c.Request)
 		} else {

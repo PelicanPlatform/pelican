@@ -215,7 +215,7 @@ func CreatePromMetricToken() (string, error) {
 	tokenExpireTime := param.Monitoring_TokenExpiresIn.GetDuration()
 
 	tok, err := jwt.NewBuilder().
-		Claim("scope", "pelican.promMetric").
+		Claim("scope", "monitoring.scrape").
 		Issuer(serverURL).
 		Audience([]string{serverURL}).
 		Subject(serverURL).
@@ -312,7 +312,7 @@ func promMetricAuthHandler(ctx *gin.Context) {
 		}
 		// For /metrics endpoint, auth is granted if the request is from either
 		// 1.director scraper 2.server scraper 3.authenticated user (through web)
-		valid := checkAPIToken(ctx, []string{"pelican.directorScrape", "pelican.promMetric", "prometheus.read"})
+		valid := checkAPIToken(ctx, []string{"monitoring.scrape"})
 		if !valid {
 			ctx.AbortWithStatusJSON(403, gin.H{"error": "Authentication required to access this endpoint."})
 		}

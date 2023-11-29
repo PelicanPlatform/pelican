@@ -237,7 +237,7 @@ func CreateDirectorScrapeToken() (string, error) {
 	}
 
 	tok, err := jwt.NewBuilder().
-		Claim("scope", "pelican.directorScrape").
+		Claim("scope", "monitoring.scrape").
 		Issuer(directorURL).
 		// The audience of this token is all origins/caches that have WebURL set in their serverAds
 		Audience(aud).
