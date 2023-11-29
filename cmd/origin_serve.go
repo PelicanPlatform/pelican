@@ -119,13 +119,19 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	}
 
 	if param.Origin_EnableUI.GetBool() {
+		// Set up necessary APIs to support Web UI, including auth and metrics
 		if err := web_ui.ConfigureServerWebAPI(engine, false); err != nil {
 			return err
 		}
 
+		// Mount the UI resources
 		origin_ui.ConfigOriginUI(engine)
 	}
 
+	// Set up the APIs unrelated to UI, which only contains director-based health test reporting endpoint for now
+	if err = origin_ui.ConfigureOriginAPI(engine); err != nil {
+		return err
+	}
 	if err = origin_ui.RegisterNamespaceWithRetry(); err != nil {
 		return err
 	}

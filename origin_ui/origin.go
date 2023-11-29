@@ -22,9 +22,14 @@ import (
 	"embed"
 	"mime"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
+	"github.com/pkg/errors"
 )
 
 var (
@@ -49,4 +54,35 @@ func ConfigOriginUI(engine *gin.Engine) {
 			file,
 		)
 	})
+}
+
+// Configure XrootD directory for both self-based and director-based file transfer tests
+func ConfigureXrootdMonitoringDir() error {
+	pelicanMonitoringPath := filepath.Join(param.Xrootd_RunLocation.GetString(),
+		"export", "pelican", "monitoring")
+
+	uid, err := config.GetDaemonUID()
+	if err != nil {
+		return err
+	}
+	gid, err := config.GetDaemonGID()
+	if err != nil {
+		return err
+	}
+	username, err := config.GetDaemonUser()
+	if err != nil {
+		return err
+	}
+
+	err = config.MkdirAll(pelicanMonitoringPath, 0755, uid, gid)
+	if err != nil {
+		return errors.Wrapf(err, "Unable to create pelican file trasnfer monitoring directory %v",
+			pelicanMonitoringPath)
+	}
+	if err = os.Chown(pelicanMonitoringPath, uid, -1); err != nil {
+		return errors.Wrapf(err, "Unable to change ownership of pelican file trasnfer monitoring directory %v"+
+			" to desired daemon user %v", pelicanMonitoringPath, username)
+	}
+
+	return nil
 }

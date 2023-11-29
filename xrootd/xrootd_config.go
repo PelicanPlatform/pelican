@@ -235,10 +235,11 @@ to export the directory /mnt/foo to the path /bar in the data federation`)
 	}
 
 	if origin {
-		if param.Origin_SelfTest.GetBool() {
-			if err := origin_ui.ConfigureXrootdMonitoringDir(); err != nil {
-				return err
-			}
+		// We create this monitor directory regardless of Origin.SelfTest flag
+		// because we want to ensure director-based tests always have
+		// access to the monitoring directory, for now
+		if err := origin_ui.ConfigureXrootdMonitoringDir(); err != nil {
+			return err
 		}
 	}
 

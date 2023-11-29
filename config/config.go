@@ -455,6 +455,9 @@ func InitServer() error {
 	}
 	viper.SetDefault("Server.Hostname", hostname)
 	viper.SetDefault("Xrootd.Sitename", hostname)
+	// For the rest of the function, use the hostname provided by the admin if
+	// they have overridden the defaults.
+	hostname = viper.GetString("Server.Hostname")
 
 	xrootdPort := param.Xrootd_Port.GetInt()
 	if xrootdPort != 443 {

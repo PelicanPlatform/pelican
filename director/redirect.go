@@ -19,6 +19,7 @@
 package director
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/netip"
@@ -41,8 +42,9 @@ type PromDiscoveryItem struct {
 }
 
 var (
-	minClientVersion, _ = version.NewVersion("7.0.0")
-	minOriginVersion, _ = version.NewVersion("7.0.0")
+	minClientVersion, _   = version.NewVersion("7.0.0")
+	minOriginVersion, _   = version.NewVersion("7.0.0")
+	healthTestCancelFuncs = make(map[ServerAd]context.CancelFunc)
 )
 
 func getRedirectURL(reqPath string, ad ServerAd, requiresAuth bool) (redirectURL url.URL) {
@@ -432,7 +434,18 @@ func registerServeAd(ctx *gin.Context, sType ServerType) {
 		Type:    sType,
 	}
 
+	hasOriginAdInCache := serverAds.Has(sAd)
 	RecordAd(sAd, &ad.Namespaces)
+
+	// Start director periodic test of origin's health status if origin AD
+	// has WebURL field AND it's not already been registered
+	serverAdMutex.RLock()
+	defer serverAdMutex.RUnlock()
+	if ad.WebURL != "" && !hasOriginAdInCache {
+		ctx, cancel := context.WithCancel(context.Background())
+		healthTestCancelFuncs[sAd] = cancel
+		go PeriodicDirectorTest(ctx, sAd)
+	}
 
 	ctx.JSON(200, gin.H{"msg": "Successful registration"})
 }

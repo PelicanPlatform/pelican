@@ -19,6 +19,7 @@
 package director
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -194,4 +195,16 @@ func GetAdsForPath(reqPath string) (originNamespace NamespaceAd, originAds []Ser
 		originNamespace = *best
 	}
 	return
+}
+
+func ConfigCacheEviction() {
+	serverAds.OnEviction(func(ctx context.Context, er ttlcache.EvictionReason, i *ttlcache.Item[ServerAd, []NamespaceAd]) {
+		if cancelFunc, exists := healthTestCancelFuncs[i.Key()]; exists {
+			// Call the cancel function for the evicted originAd to end its health test
+			cancelFunc()
+
+			// Remove the cancel function from the map as it's no longer needed
+			delete(healthTestCancelFuncs, i.Key())
+		}
+	})
 }

@@ -274,6 +274,19 @@ func GenerateOriginIssuer(exportedPaths []string) (issuer Issuer, err error) {
 	return
 }
 
+// We have a special issuer just for self-monitoring the origin.
+func GenerateDirectorMonitoringIssuer() (issuer Issuer, err error) {
+	if val := param.Federation_DirectorUrl.GetString(); val == "" {
+		return
+	}
+	issuer.Name = "Director-based Monitoring"
+	issuer.Issuer = param.Federation_DirectorUrl.GetString()
+	issuer.BasePaths = []string{"/pelican/monitoring"}
+	issuer.DefaultUser = "xrootd"
+
+	return
+}
+
 // Writes out the origin's scitokens.cfg configuration
 func WriteOriginScitokensConfig(exportedPaths []string) error {
 
@@ -314,7 +327,6 @@ func WriteOriginScitokensConfig(exportedPaths []string) error {
 			cfg.Global.Audience = append(cfg.Global.Audience, issuer.Issuer)
 		}
 	}
-
 	if issuer, err := GenerateOriginIssuer(exportedPaths); err == nil && len(issuer.Name) > 0 {
 		if val, ok := cfg.IssuerMap[issuer.Issuer]; ok {
 			val.BasePaths = append(val.BasePaths, issuer.BasePaths...)
@@ -322,6 +334,14 @@ func WriteOriginScitokensConfig(exportedPaths []string) error {
 		} else {
 			cfg.IssuerMap[issuer.Issuer] = issuer
 			cfg.Global.Audience = append(cfg.Global.Audience, issuer.Issuer)
+		}
+	}
+	if issuer, err := GenerateDirectorMonitoringIssuer(); err == nil && len(issuer.Name) > 0 {
+		if val, ok := cfg.IssuerMap[issuer.Issuer]; ok {
+			val.BasePaths = append(val.BasePaths, issuer.BasePaths...)
+			cfg.IssuerMap[issuer.Issuer] = val
+		} else {
+			cfg.IssuerMap[issuer.Issuer] = issuer
 		}
 	}
 

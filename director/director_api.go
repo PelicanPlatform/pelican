@@ -80,7 +80,7 @@ func LoadDirectorPublicKey() (jwk.Key, error) {
 		return nil, errors.Wrap(err, fmt.Sprintln("Invalid director URL:", directorDiscoveryUrlStr))
 	}
 	directorDiscoveryUrl.Scheme = "https"
-	directorDiscoveryUrl.Path = directorDiscoveryUrl.Path + "/.well-known/pelican-configuration"
+	directorDiscoveryUrl.Path = directorDiscoveryUrl.Path + directorDiscoveryPath
 
 	tr := config.GetTransport()
 	client := &http.Client{Transport: tr}
