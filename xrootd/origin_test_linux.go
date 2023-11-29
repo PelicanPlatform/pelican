@@ -30,8 +30,10 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/daemon"
+	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/origin_ui"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_utils"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/require"
@@ -39,6 +41,12 @@ import (
 
 func TestOrigin(t *testing.T) {
 	viper.Reset()
+
+	OriginServer := server_utils.XRootDServer{
+		ServerType:          string(server_utils.OriginType),
+		NameSpaceAds:        []director.NamespaceAd{},
+		CreateAdvertisement: origin_ui.CreateOriginAdvertisement,
+	}
 
 	viper.Set("Origin.ExportVolume", t.TempDir()+":/test")
 	// Disable functionality we're not using (and is difficult to make work on Mac)
@@ -66,7 +74,7 @@ func TestOrigin(t *testing.T) {
 	err = config.GenerateCert()
 	require.NoError(t, err)
 
-	err = CheckXrootdEnv(true, nil)
+	err = CheckXrootdEnv(OriginServer)
 	require.NoError(t, err)
 
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())

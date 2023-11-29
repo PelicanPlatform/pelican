@@ -93,13 +93,8 @@ func serveCache( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		config.CleanupTempResources()
 	}()
 
-	err := config.DiscoverFederation()
-	if err != nil {
-		log.Warningln("Failed to do service auto-discovery:", err)
-	}
-
 	wg.Add(1)
-	err = xrootd.SetUpMonitoring(shutdownCtx, &wg)
+	err := xrootd.SetUpMonitoring(shutdownCtx, &wg)
 	if err != nil {
 		return err
 	}
@@ -110,7 +105,7 @@ func serveCache( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	}
 
 	CacheServer.NameSpaceAds = nsAds
-	err = checkDefaults(false, nsAds)
+	err = server_ui.CheckDefaults(CacheServer)
 	if err != nil {
 		return err
 	}
