@@ -21,6 +21,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -32,10 +33,11 @@ import (
 	pelican_config "github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
+
+var federationJWK *jwk.Cache
 
 // Return if desiredScopes contains the tokenScope and it's case-insensitive
 func scopeContains(tokenScope string, desiredScopes []string) bool {
@@ -93,15 +95,20 @@ func FederationCheck(c *gin.Context, strToken string, anyOfTheScopes []string) e
 	}
 
 	fedURIFile := param.Federation_JwkUrl.GetString()
-	contents, err := utils.MakeRequest(fedURIFile, "GET", nil, nil)
+	ctx := context.Background()
+	if federationJWK == nil {
+		client := &http.Client{Transport: config.GetTransport()}
+		federationJWK = jwk.NewCache(ctx)
+		if err := federationJWK.Register(fedURIFile, jwk.WithRefreshInterval(15*time.Minute), jwk.WithHTTPClient(client)); err != nil {
+			return errors.Wrap(err, "Failed to register cache for federation's public JWKS")
+		}
+	}
+
+	jwks, err := federationJWK.Get(ctx, fedURIFile)
 	if err != nil {
 		return errors.Wrap(err, "Failed to get federation's public JWKS")
 	}
-	keys, err := jwk.Parse(contents)
-	if err != nil {
-		return errors.Wrap(err, "Failed to parse federation's public JWKS")
-	}
-	key, ok := keys.Key(0)
+	key, ok := jwks.Key(0)
 	if !ok {
 		return errors.Wrap(err, "Failed to get the first key of federation's public JWKS")
 	}
