@@ -25,7 +25,7 @@ import (
 
 	"github.com/pkg/errors"
 
-	nsregistry "github.com/pelicanplatform/pelican/namespace-registry"
+	nsregistry "github.com/pelicanplatform/pelican/namespace_registry"
 	"github.com/pelicanplatform/pelican/web_ui"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"

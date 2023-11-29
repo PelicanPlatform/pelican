@@ -16,7 +16,7 @@
  *
  ***************************************************************/
 
-package main
+package nsregistry
 
 import (
 	"net/http/httptest"
@@ -26,7 +26,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/pelicanplatform/pelican/config"
-	nsregistry "github.com/pelicanplatform/pelican/namespace-registry"
 	"github.com/spf13/viper"
 
 	"github.com/stretchr/testify/assert"
@@ -44,9 +43,9 @@ func TestServeNamespaceRegistry(t *testing.T) {
 	err := config.InitServer()
 	require.NoError(t, err)
 
-	err = nsregistry.InitializeDB()
+	err = InitializeDB()
 	require.NoError(t, err)
-	defer nsregistry.ShutdownDB()
+	defer ShutdownDB()
 
 	gin.SetMode(gin.TestMode)
 	engine := gin.Default()
@@ -57,7 +56,7 @@ func TestServeNamespaceRegistry(t *testing.T) {
 	require.NoError(t, err)
 
 	//Configure registry
-	nsregistry.RegisterNamespaceRegistry(engine.Group("/"))
+	RegisterNamespaceRegistry(engine.Group("/"))
 
 	//Set up a server to use for testing
 	svr := httptest.NewServer(engine)
@@ -68,7 +67,7 @@ func TestServeNamespaceRegistry(t *testing.T) {
 	viper.Set("Origin.NamespacePrefix", "/test")
 
 	//Test functionality of registering a namespace (without identity)
-	err = nsregistry.NamespaceRegister(privKey, svr.URL+"/api/v1.0/registry", "", "/test")
+	err = NamespaceRegister(privKey, svr.URL+"/api/v1.0/registry", "", "/test")
 	require.NoError(t, err)
 
 	//Test we can list the namespace without an error
@@ -80,7 +79,7 @@ func TestServeNamespaceRegistry(t *testing.T) {
 		os.Stdout = w
 
 		//List the namespaces
-		err = nsregistry.NamespaceList(svr.URL + "/api/v1.0/registry")
+		err = NamespaceList(svr.URL + "/api/v1.0/registry")
 		require.NoError(t, err)
 		w.Close()
 		os.Stdout = oldStdout
@@ -99,7 +98,7 @@ func TestServeNamespaceRegistry(t *testing.T) {
 		r, w, _ := os.Pipe()
 		os.Stdout = w
 
-		err = nsregistry.NamespaceGet(svr.URL + "/api/v1.0/registry")
+		err = NamespaceGet(svr.URL + "/api/v1.0/registry")
 		require.NoError(t, err)
 		w.Close()
 		os.Stdout = oldStdout
@@ -112,13 +111,13 @@ func TestServeNamespaceRegistry(t *testing.T) {
 
 	t.Run("Test namespace delete", func(t *testing.T) {
 		//Test functionality of namespace delete
-		err = nsregistry.NamespaceDelete(svr.URL+"/api/v1.0/registry/test", "/test")
+		err = NamespaceDelete(svr.URL+"/api/v1.0/registry/test", "/test")
 		require.NoError(t, err)
 		var stdoutCapture string
 		oldStdout := os.Stdout
 		r, w, _ := os.Pipe()
 		os.Stdout = w
-		err = nsregistry.NamespaceGet(svr.URL + "/api/v1.0/registry")
+		err = NamespaceGet(svr.URL + "/api/v1.0/registry")
 		require.NoError(t, err)
 		w.Close()
 		os.Stdout = oldStdout
