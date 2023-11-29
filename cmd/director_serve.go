@@ -19,9 +19,11 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 
 	"github.com/pelicanplatform/pelican/config"
@@ -33,6 +35,18 @@ import (
 )
 
 func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
+	// Use this context for any goroutines that needs to react to server shutdown
+	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
+	// Use this wait group to ensure the goroutines can finish before the server exits/shutdown
+	var wg sync.WaitGroup
+
+	// This anonymous function ensures we cancel any context and wait for those goroutines to
+	// finish their cleanup work before the server exits
+	defer func() {
+		shutdownCancel()
+		wg.Wait()
+	}()
+
 	log.Info("Initializing Director GeoIP database...")
 	director.InitializeDB()
 
@@ -47,6 +61,9 @@ func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	}
 	go director.PeriodicCacheReload()
 
+	wg.Add(1)
+	director.ConfigTTLCache(shutdownCtx, &wg)
+
 	engine, err := web_ui.GetEngine()
 	if err != nil {
 		return err
@@ -58,10 +75,6 @@ func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	if err := web_ui.ConfigureServerWebAPI(engine, true); err != nil {
 		return err
 	}
-
-	// Configure Cache eviction policies. In the future, this function can also be
-	// promoted to run the actual eviction logic (cache.start())
-	director.ConfigCacheEviction()
 
 	// Configure the shortcut middleware to either redirect to a cache
 	// or to an origin

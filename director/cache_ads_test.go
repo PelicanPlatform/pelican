@@ -21,6 +21,7 @@ package director
 import (
 	"context"
 	"net/url"
+	"sync"
 	"testing"
 	"time"
 
@@ -211,7 +212,16 @@ func TestConfigCacheEviction(t *testing.T) {
 		serverAds.DeleteAll()
 		// Clear the map for the new test
 		healthTestCancelFuncs = make(map[ServerAd]context.CancelFunc)
-		ConfigCacheEviction()
+
+		// Start cache eviction
+		shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
+		var wg sync.WaitGroup
+		wg.Add(1)
+		ConfigTTLCache(shutdownCtx, &wg)
+		defer func() {
+			shutdownCancel()
+			wg.Wait()
+		}()
 
 		serverAds.Set(mockPelicanOriginServerAd, []NamespaceAd{mockNamespaceAd}, ttlcache.DefaultTTL)
 		ctx, cancelFunc := context.WithDeadline(context.Background(), time.Now().Add(time.Second*5))
@@ -241,5 +251,57 @@ func TestConfigCacheEviction(t *testing.T) {
 			require.False(t, true)
 		}
 		assert.True(t, healthTestCancelFuncs[mockPelicanOriginServerAd] == nil, "Evicted origin didn't clear cancelFunc in the map")
+	})
+}
+
+func TestServerAdsCacheEviction(t *testing.T) {
+	mockServerAd := ServerAd{Name: "foo", Type: OriginType, URL: url.URL{}}
+
+	t.Run("evict-after-expire-time", func(t *testing.T) {
+		// Start cache eviction
+		shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
+		var wg sync.WaitGroup
+		wg.Add(1)
+		ConfigTTLCache(shutdownCtx, &wg)
+		defer func() {
+			shutdownCancel()
+			wg.Wait()
+		}()
+
+		deletedChan := make(chan int)
+		cancelChan := make(chan int)
+
+		go func() {
+			serverAdMutex.Lock()
+			defer serverAdMutex.Unlock()
+			serverAds.DeleteAll()
+
+			serverAds.Set(mockServerAd, []NamespaceAd{}, time.Second*2)
+			require.True(t, serverAds.Has(mockServerAd), "Failed to register server Ad")
+		}()
+
+		// Keep checking if the cache item is present until absent or cancelled
+		go func() {
+			for {
+				select {
+				case <-cancelChan:
+					return
+				default:
+					if !serverAds.Has(mockServerAd) {
+						deletedChan <- 1
+						return
+					}
+				}
+			}
+		}()
+
+		// Wait for 3s to check if the expired cache item is evicted
+		select {
+		case <-deletedChan:
+			require.True(t, true)
+		case <-time.After(3 * time.Second):
+			cancelChan <- 1
+			require.False(t, true, "Cache didn't evict expired item")
+		}
 	})
 }
