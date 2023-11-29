@@ -19,7 +19,7 @@ cp pelican stashcp
 cp pelican stash_plugin
 
 to_exit=0
-./stashcp -d /osgconnect/public/dweitzel/blast/queries/query1 ./
+./stashcp -d osdf:///ospool/uc-shared/public/OSG-Staff/validation/test.txt ./query1
 rm query1
 
 # Test the plugin interface
