@@ -32,7 +32,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pelicanplatform/pelican/config"
-	nsregistry "github.com/pelicanplatform/pelican/namespace-registry"
+	nsregistry "github.com/pelicanplatform/pelican/namespace_registry"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
