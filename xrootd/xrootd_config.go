@@ -51,6 +51,8 @@ type (
 		S3Region        string
 		S3ServiceName   string
 		S3ServiceUrl    string
+		S3AccessKeyfile string
+		S3SecretKeyfile string
 	}
 
 	CacheConfig struct {

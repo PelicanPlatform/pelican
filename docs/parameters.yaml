@@ -392,6 +392,21 @@ type: string
 default: none
 components: ["origin"]
 ---
+name: Origin.S3AccessKeyfile
+description: >-
+  A path to a file containing an S3 access keyfile for authenticated buckets when an origin is run in S3 mode.
+type: filename
+default: none
+components: ["origin"]
+---
+name: Origin.S3SecretKeyfile
+description: >-
+  A path to a file containing an S3 secret keyfile for authenticated buckets when an origin is run in S3 mode.
+type: filename
+default: none
+components: ["origin"]
+---
+
 
 ############################
 #   Cache-level configs    #
