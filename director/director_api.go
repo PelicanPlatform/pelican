@@ -29,6 +29,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jellydator/ttlcache/v3"
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
@@ -269,6 +270,16 @@ func ConfigTTLCache(ctx context.Context, wg *sync.WaitGroup) {
 	// Start automatic expired item deletion
 	go serverAds.Start()
 	go namespaceKeys.Start()
+
+	serverAds.OnEviction(func(ctx context.Context, er ttlcache.EvictionReason, i *ttlcache.Item[ServerAd, []NamespaceAd]) {
+		if cancelFunc, exists := healthTestCancelFuncs[i.Key()]; exists {
+			// Call the cancel function for the evicted originAd to end its health test
+			cancelFunc()
+
+			// Remove the cancel function from the map as it's no longer needed
+			delete(healthTestCancelFuncs, i.Key())
+		}
+	})
 
 	// Put stop logic in a separate goroutine so that parent function is not blocking
 	go func() {

@@ -212,7 +212,16 @@ func TestConfigCacheEviction(t *testing.T) {
 		serverAds.DeleteAll()
 		// Clear the map for the new test
 		healthTestCancelFuncs = make(map[ServerAd]context.CancelFunc)
-		ConfigCacheEviction()
+
+		// Start cache eviction
+		shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
+		var wg sync.WaitGroup
+		wg.Add(1)
+		ConfigTTLCache(shutdownCtx, &wg)
+		defer func() {
+			shutdownCancel()
+			wg.Wait()
+		}()
 
 		serverAds.Set(mockPelicanOriginServerAd, []NamespaceAd{mockNamespaceAd}, ttlcache.DefaultTTL)
 		ctx, cancelFunc := context.WithDeadline(context.Background(), time.Now().Add(time.Second*5))
