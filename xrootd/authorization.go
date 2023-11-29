@@ -294,12 +294,11 @@ func GenerateDirectorMonitoringIssuer() (issuer Issuer, err error) {
 	return
 }
 
-// Writes out the origin's scitokens.cfg configuration
-func WriteOriginScitokensConfig(exportedPaths []string) error {
-
+// Makes the general scitokens config to be used by both the origin and the cache
+func makeSciTokensCfg() (cfg ScitokensCfg, err error) {
 	gid, err := config.GetDaemonGID()
 	if err != nil {
-		return err
+		return cfg, err
 	}
 
 	// Create the scitokens.cfg file if it's not already present
@@ -307,24 +306,36 @@ func WriteOriginScitokensConfig(exportedPaths []string) error {
 
 	err = config.MkdirAll(filepath.Dir(scitokensCfg), 0755, -1, gid)
 	if err != nil {
-		return errors.Wrapf(err, "Unable to create directory %v",
+		return cfg, errors.Wrapf(err, "Unable to create directory %v",
 			filepath.Dir(scitokensCfg))
 	}
+
 	if file, err := os.OpenFile(scitokensCfg, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0640); err == nil {
 		file.Close()
 	} else if !errors.Is(err, os.ErrExist) {
-		return err
+		return cfg, err
 	}
+
 	if err = os.Chown(scitokensCfg, -1, gid); err != nil {
-		return errors.Wrapf(err, "Unable to change ownership of scitokens config %v"+
+		return cfg, errors.Wrapf(err, "Unable to change ownership of scitokens config %v"+
 			" to desired daemon group %v", scitokensCfg, gid)
 	}
 
-	cfg, err := LoadScitokensConfig(scitokensCfg)
+	cfg, err = LoadScitokensConfig(scitokensCfg)
 	if err != nil {
-		return errors.Wrapf(err, "Failed to load scitokens configuration at %s", scitokensCfg)
+		return cfg, errors.Wrapf(err, "Failed to load scitokens configuration at %s", scitokensCfg)
 	}
 
+	return cfg, nil
+}
+
+// Writes out the origin's scitokens.cfg configuration
+func WriteOriginScitokensConfig(exportedPaths []string) error {
+
+	cfg, err := makeSciTokensCfg()
+	if err != nil {
+		return err
+	}
 	if issuer, err := GenerateMonitoringIssuer(); err == nil && len(issuer.Name) > 0 {
 		if val, ok := cfg.IssuerMap[issuer.Issuer]; ok {
 			val.BasePaths = append(val.BasePaths, issuer.BasePaths...)
@@ -357,33 +368,11 @@ func WriteOriginScitokensConfig(exportedPaths []string) error {
 
 // Writes out the cache's scitokens.cfg configuration
 func WriteCacheScitokensConfig(nsAds []director.NamespaceAd) error {
-	gid, err := config.GetDaemonGID()
+
+	cfg, err := makeSciTokensCfg()
 	if err != nil {
 		return err
 	}
-
-	scitokensCfg := param.Xrootd_ScitokensConfig.GetString()
-	err = config.MkdirAll(filepath.Dir(scitokensCfg), 0755, -1, gid)
-	if err != nil {
-		return errors.Wrapf(err, "Unable to create directory %v",
-			filepath.Dir(scitokensCfg))
-	}
-
-	if file, err := os.OpenFile(scitokensCfg, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0640); err == nil {
-		file.Close()
-	} else if !errors.Is(err, os.ErrExist) {
-		return err
-	}
-	if err = os.Chown(scitokensCfg, -1, gid); err != nil {
-		return errors.Wrapf(err, "Unable to change ownership of scitokens config %v"+
-			" to desired daemon group %v", scitokensCfg, gid)
-	}
-
-	cfg, err := LoadScitokensConfig(scitokensCfg)
-	if err != nil {
-		return errors.Wrapf(err, "Failed to load scitokens configuration at %s", scitokensCfg)
-	}
-
 	for _, ad := range nsAds {
 		if ad.RequireToken {
 			if ad.Issuer.String() != "" && ad.BasePath != "" {
