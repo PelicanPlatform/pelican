@@ -35,10 +35,10 @@ if ! [[ $classad_output =~ "SupportedMethods = \"stash, osdf\"" ]]; then
   to_exit=1
 fi
 
-plugin_output=$(./stash_plugin stash:///osgconnect/public/dweitzel/blast/queries/query1 query1)
+plugin_output=$(./stash_plugin osdf:///ospool/uc-shared/public/OSG-Staff/validation/test.txt query1)
 rm query1
 
-if ! [[ $plugin_output =~ "TransferUrl = \"stash:///osgconnect/public/dweitzel/blast/queries/query1\"" ]]; then
+if ! [[ $plugin_output =~ "TransferUrl = \"osdf:///ospool/uc-shared/public/OSG-Staff/validation/test.txt\"" ]]; then
   echo "TransferUrl not in plugin output"
   to_exit=1
 fi
@@ -49,9 +49,7 @@ if ! [[ $plugin_output =~ "TransferSuccess = true" ]]; then
 fi
 
 cat > infile <<EOF
-[ LocalFileName = "$PWD/query1"; Url = "stash:///osgconnect/public/dweitzel/blast/queries//query1" ]
-[ LocalFileName = "$PWD/query2"; Url = "stash:///osgconnect/public/dweitzel/blast/queries//query2" ]
-[ LocalFileName = "$PWD/query3"; Url = "stash:///osgconnect/public/dweitzel/blast/queries//query3" ]
+[ LocalFileName = "$PWD/query1"; Url = "osdf:///ospool/uc-shared/public/OSG-Staff/validation/test.txt" ]
 EOF
 
 ./stash_plugin -infile $PWD/infile -outfile $PWD/outfile
