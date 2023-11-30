@@ -134,7 +134,7 @@ func setLoginCookie(ctx *gin.Context, user string) {
 	key, err := config.GetIssuerPrivateJWK()
 	if err != nil {
 		log.Errorln("Failure when loading the cookie signing key:", err)
-		ctx.JSON(500, gin.H{"error": "Unable to create login cookies"})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Unable to create login cookies"})
 		return
 	}
 
@@ -148,13 +148,13 @@ func setLoginCookie(ctx *gin.Context, user string) {
 		Subject(user).
 		Build()
 	if err != nil {
-		ctx.JSON(500, gin.H{"error": "Failed to build token"})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to build token"})
 		return
 	}
 
 	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, key))
 	if err != nil {
-		ctx.JSON(500, gin.H{"error": "Failed to sign login token"})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to sign login token"})
 		return
 	}
 

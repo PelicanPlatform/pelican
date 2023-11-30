@@ -35,6 +35,7 @@ import (
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"golang.org/x/oauth2"
 )
@@ -105,7 +106,7 @@ func handleOAuthLogin(ctx *gin.Context) {
 
 	redirectUrl := ciLogonOAuthConfig.Load().AuthCodeURL(csrfState)
 
-	ctx.Redirect(302, redirectUrl)
+	ctx.Redirect(http.StatusTemporaryRedirect, redirectUrl)
 }
 
 // Handle the callback request from CILogon when user is successfully authenticated
@@ -151,6 +152,7 @@ func handleOAuthCallback(ctx *gin.Context) {
 	}
 
 	client := ciLogonOAuthConfig.Load().Client(c, token)
+	client.Transport = config.GetTransport()
 	data := url.Values{}
 	data.Add("access_token", token.AccessToken)
 
