@@ -34,7 +34,7 @@ import (
 
 // Create a token for accessing Prometheus /metrics endpoint on
 // the server itself
-func CreatePromMetricToken() (string, error) {
+func createPromMetricToken() (string, error) {
 	serverURL := param.Server_ExternalWebUrl.GetString()
 	tokenExpireTime := param.Monitoring_TokenExpiresIn.GetDuration()
 

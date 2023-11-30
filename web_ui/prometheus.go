@@ -334,7 +334,7 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 		ScrapeConfigs: make([]*config.ScrapeConfig, 1),
 	}
 
-	selfScraperToken, err := CreatePromMetricToken()
+	selfScraperToken, err := createPromMetricToken()
 	if err != nil {
 		return fmt.Errorf("Failed to generate token for self-scraper at start: %v", err)
 	}
@@ -647,7 +647,7 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 							globalConfigMtx.Lock()
 							defer globalConfigMtx.Unlock()
 							// Create a new self-scrape token
-							selfScraperToken, err := CreatePromMetricToken()
+							selfScraperToken, err := createPromMetricToken()
 							if err != nil {
 								return fmt.Errorf("Failed to generate token for self-scraper at start: %v", err)
 							}
