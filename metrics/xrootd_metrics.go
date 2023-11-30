@@ -287,6 +287,7 @@ func ConfigureMonitoring(ctx context.Context, wg *sync.WaitGroup) (int, error) {
 		sessions.Stop()
 		userids.Stop()
 		transfers.Stop()
+		log.Infoln("Gracefully stopping metrics cache auto eviction...")
 	}()
 
 	go func() {
