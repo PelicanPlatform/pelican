@@ -177,10 +177,10 @@ func CreateDirectorSDToken() (string, error) {
 // correct scope for accessing the service discovery endpoint. This function
 // is intended to be called on the same director server that issues the token.
 func VerifyDirectorSDToken(strToken string) (bool, error) {
-	// TODO: We might want to change this to ComputeExternalAddress() instead
-	// so that director admin don't need to specify Federation_DirectorUrl to get
-	// director working
-	directorURL := param.Federation_DirectorUrl.GetString()
+	// This token is essentialled an "issuer"/server itself issued token and
+	// the server happended to be a director. This allows us to just follow
+	// IssuerCheck logic for this token
+	directorURL := param.Server_ExternalWebUrl.GetString()
 	token, err := jwt.Parse([]byte(strToken), jwt.WithVerify(false))
 	if err != nil {
 		return false, err

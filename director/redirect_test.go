@@ -361,7 +361,10 @@ func TestDiscoverOrigins(t *testing.T) {
 
 	mockDirectorUrl := "https://fake-director.org:8888"
 	viper.Reset()
-	viper.Set("Federation.DirectorUrl", mockDirectorUrl)
+	// Direcor SD will only be used for director's Prometheus scraper to get available origins,
+	// so the token issuer is issentially the director server itself
+	// There's no need to rely on Federation.DirectorUrl as token issuer in this case
+	viper.Set("Server.ExternalWebUrl", mockDirectorUrl)
 
 	tDir := t.TempDir()
 	kfile := filepath.Join(tDir, "testKey")
@@ -453,10 +456,50 @@ func TestDiscoverOrigins(t *testing.T) {
 		}
 
 		serverAdMutex.Lock()
-		serverAds.Set(mockPelicanOriginServerAd, []NamespaceAd{mockNamespaceAd}, time.Duration(10))
+		serverAds.Set(mockPelicanOriginServerAd, []NamespaceAd{mockNamespaceAd}, ttlcache.DefaultTTL)
 		// Server fetched from topology should not be present in SD response
-		serverAds.Set(mockTopoOriginServerAd, []NamespaceAd{mockNamespaceAd}, time.Duration(10))
-		serverAds.Set(mockCacheServerAd, []NamespaceAd{mockNamespaceAd}, time.Duration(10))
+		serverAds.Set(mockTopoOriginServerAd, []NamespaceAd{mockNamespaceAd}, ttlcache.DefaultTTL)
+		serverAds.Set(mockCacheServerAd, []NamespaceAd{mockNamespaceAd}, ttlcache.DefaultTTL)
+		serverAdMutex.Unlock()
+
+		expectedRes := []PromDiscoveryItem{{
+			Targets: []string{mockPelicanOriginServerAd.WebURL.Hostname() + ":" + mockPelicanOriginServerAd.WebURL.Port()},
+			Labels: map[string]string{
+				"origin_name":     mockPelicanOriginServerAd.Name,
+				"origin_auth_url": mockPelicanOriginServerAd.AuthURL.String(),
+				"origin_url":      mockPelicanOriginServerAd.URL.String(),
+				"origin_web_url":  mockPelicanOriginServerAd.WebURL.String(),
+				"origin_lat":      fmt.Sprintf("%.4f", mockPelicanOriginServerAd.Latitude),
+				"origin_long":     fmt.Sprintf("%.4f", mockPelicanOriginServerAd.Longitude),
+			},
+		}}
+
+		resStr, err := json.Marshal(expectedRes)
+		assert.NoError(t, err, "Could not marshal json response")
+
+		req.Header.Set("Authorization", "Bearer "+string(setupToken("")))
+
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, 200, w.Code)
+		assert.Equal(t, string(resStr), w.Body.String(), "Reponse doesn't match expected")
+	})
+
+	t.Run("no-duplicated-origins", func(t *testing.T) {
+		req, err := http.NewRequest(http.MethodGet, "/test", nil)
+		if err != nil {
+			t.Fatalf("Could not make a GET request: %v", err)
+		}
+
+		serverAdMutex.Lock()
+		// Add multiple same serverAds
+		serverAds.Set(mockPelicanOriginServerAd, []NamespaceAd{mockNamespaceAd}, ttlcache.DefaultTTL)
+		serverAds.Set(mockPelicanOriginServerAd, []NamespaceAd{mockNamespaceAd}, ttlcache.DefaultTTL)
+		serverAds.Set(mockPelicanOriginServerAd, []NamespaceAd{mockNamespaceAd}, ttlcache.DefaultTTL)
+		// Server fetched from topology should not be present in SD response
+		serverAds.Set(mockTopoOriginServerAd, []NamespaceAd{mockNamespaceAd}, ttlcache.DefaultTTL)
+		serverAds.Set(mockCacheServerAd, []NamespaceAd{mockNamespaceAd}, ttlcache.DefaultTTL)
 		serverAdMutex.Unlock()
 
 		expectedRes := []PromDiscoveryItem{{
