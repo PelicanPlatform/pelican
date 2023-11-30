@@ -88,14 +88,12 @@ func promMetricAuthHandler(ctx *gin.Context) {
 	ctx.Next()
 }
 
-// Handle the authorization of Prometheus query engine endpoint at `/api/v1.0/prometheus`.
-// For now we only allow web user to access the engine
+// Handle the authorization of Prometheus query engine endpoint at `/api/v1.0/prometheus`
 func promQueryEngineAuthHandler(av1 *route.Router) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authOption := utils.AuthOption{
-			// Only allow web user to access for now, can add "Header" later if we
-			// want grafana to access it
-			Sources: []utils.TokenSource{utils.Cookie},
+			// Cookie for web user access and header for external service like Grafana to access
+			Sources: []utils.TokenSource{utils.Cookie, utils.Header},
 			Issuers: []utils.TokenIssuer{utils.Issuer},
 			Scopes:  []string{"monitoring.query"}}
 

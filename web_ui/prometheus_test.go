@@ -41,6 +41,7 @@ import (
 	"github.com/prometheus/common/route"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPrometheusProtectionFederationURL(t *testing.T) {
@@ -62,6 +63,8 @@ func TestPrometheusProtectionFederationURL(t *testing.T) {
 
 	//Setup a private key and a token
 	viper.Set("IssuerKey", kfile)
+	config.InitConfig()
+	require.NoError(t, config.InitServer(), "Error calling InitServer")
 
 	w := httptest.NewRecorder()
 	c, r := gin.CreateTestContext(w)
@@ -152,10 +155,8 @@ func TestPrometheusProtectionFederationURL(t *testing.T) {
 	r.GET("/api/v1.0/prometheus/*any", promQueryEngineAuthHandler(av1))
 	c.Request, _ = http.NewRequest(http.MethodGet, "/api/v1.0/prometheus/test", bytes.NewBuffer([]byte(`{}`)))
 
-	// Puts the token within the URL
-	new_query := c.Request.URL.Query()
-	new_query.Add("authz", string(signed))
-	c.Request.URL.RawQuery = new_query.Encode()
+	// Puts the token in cookie
+	c.Request.AddCookie(&http.Cookie{Name: "login", Value: string(signed)})
 
 	r.ServeHTTP(w, c.Request)
 
