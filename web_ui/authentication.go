@@ -140,7 +140,7 @@ func setLoginCookie(ctx *gin.Context, user string) {
 
 	now := time.Now()
 	tok, err := jwt.NewBuilder().
-		Claim("scope", []string{"web_ui.access", "prometheus.read"}).
+		Claim("scope", "web_ui.access prometheus.read").
 		Issuer(param.Server_ExternalWebUrl.GetString()).
 		IssuedAt(now).
 		Expiration(now.Add(30 * time.Minute)).
