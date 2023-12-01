@@ -713,10 +713,6 @@ components: ["nsregistry", "origin"]
 ---
 
 ############################
-#   Issuer configuration   #
-############################
-
-############################
 #   XRootD-level Configs   #
 ############################
 name: Xrootd.Port
