@@ -1,3 +1,5 @@
+//go:build !windows
+
 /***************************************************************
  *
  * Copyright (C) 2023, Morgridge Institute for Research

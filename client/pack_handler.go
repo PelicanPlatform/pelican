@@ -26,6 +26,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 
@@ -75,6 +76,9 @@ func newAutoUnpacker(destdir string, behavior packerBehavior) *autoUnpacker {
 		destDir:  destdir,
 	}
 	aup.err.Store(packedError{})
+	if os := runtime.GOOS; os == "windows" {
+		aup.StoreError(errors.New("Auto-unpacking functionality not supported on Windows"))
+	}
 	return aup
 }
 
@@ -84,7 +88,11 @@ func newAutoPacker(srcdir string, behavior packerBehavior) *autoPacker {
 		srcDir:   srcdir,
 	}
 	ap.err.Store(packedError{})
-	go ap.calcDirectorySize()
+	if os := runtime.GOOS; os == "windows" {
+		ap.StoreError(errors.New("Auto-unpacking functionality not supported on Windows"))
+	} else {
+		go ap.calcDirectorySize()
+	}
 	return ap
 }
 
