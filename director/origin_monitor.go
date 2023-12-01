@@ -121,7 +121,7 @@ func PeriodicDirectorTest(ctx context.Context, originAd ServerAd) {
 		case <-ticker.C:
 			log.Debug(fmt.Sprintf("Starting a new Director test cycle for origin: %s at %s", originName, originUrl))
 			fileTests := utils.TestFileTransferImpl{}
-			ok, err := fileTests.RunTests(originUrl, utils.DirectorFileTest)
+			ok, err := fileTests.RunTests(originUrl, "", utils.DirectorFileTest)
 			if ok && err == nil {
 				log.Debugln("Director file transfer test cycle succeeded at", time.Now().Format(time.UnixDate), " for origin: ", originUrl)
 				if err := reportStatusToOrigin(originWebUrl, "ok", "Director test cycle succeeded at "+time.Now().Format(time.RFC3339)); err != nil {

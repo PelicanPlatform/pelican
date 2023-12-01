@@ -46,6 +46,8 @@ type (
 	}
 	TestFileTransferImpl struct {
 		audienceUrl string
+		issuerUrl   string
+		testBody    string
 	}
 )
 
@@ -67,7 +69,10 @@ func (t TestType) String() string {
 func (t TestFileTransferImpl) generateFileTestScitoken() (string, error) {
 	// Issuer is whichever server that initiates the test, so it's the server itself
 	issuerUrl := param.Server_ExternalWebUrl.GetString()
-	if issuerUrl == "" {
+	if t.issuerUrl != "" { // Get from param if it's not empty
+		issuerUrl = t.issuerUrl
+	}
+	if issuerUrl == "" { // if both are empty, then error
 		return "", errors.New("Failed to create token: Invalid iss, Server_ExternalWebUrl is empty")
 	}
 	jti_bytes := make([]byte, 16)
@@ -119,15 +124,7 @@ func (t TestFileTransferImpl) UploadTestfile(baseUrl string, testType TestType) 
 	}
 	uploadURL.Path = "/pelican/monitoring/" + testType.String() + "-" + time.Now().Format(time.RFC3339) + ".txt"
 
-	testBody := ""
-	if testType == OriginSelfFileTest {
-		testBody = selfTestBody
-	} else if testType == DirectorFileTest {
-		testBody = directorTestBody
-	} else {
-		return "", errors.New("Unsupported testType: " + testType.String())
-	}
-	req, err := http.NewRequest("PUT", uploadURL.String(), bytes.NewBuffer([]byte(testBody)))
+	req, err := http.NewRequest("PUT", uploadURL.String(), bytes.NewBuffer([]byte(t.testBody)))
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to create POST request for monitoring upload")
 	}
@@ -173,7 +170,7 @@ func (t TestFileTransferImpl) DownloadTestfile(downloadUrl string) error {
 	if err != nil {
 		return errors.Wrap(err, "Failed to get response body from test file transfer download")
 	}
-	if string(body) != directorTestBody {
+	if string(body) != t.testBody {
 		return errors.Errorf("Contents of test file transfer body do not match upload: %v", body)
 	}
 
@@ -211,8 +208,17 @@ func (t TestFileTransferImpl) DeleteTestfile(fileUrl string) error {
 	return nil
 }
 
-func (t TestFileTransferImpl) RunTests(baseUrl string, testType TestType) (bool, error) {
+func (t TestFileTransferImpl) RunTests(baseUrl, issuerUrl string, testType TestType) (bool, error) {
 	t.audienceUrl = baseUrl
+	t.issuerUrl = issuerUrl
+	if testType == OriginSelfFileTest {
+		t.testBody = selfTestBody
+	} else if testType == DirectorFileTest {
+		t.testBody = directorTestBody
+	} else {
+		return false, errors.New("Unsupported testType: " + testType.String())
+	}
+
 	downloadUrl, err := t.UploadTestfile(baseUrl, testType)
 	if err != nil {
 		return false, errors.Wrap(err, "Test file transfer failed during upload")
