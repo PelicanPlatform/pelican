@@ -20,6 +20,7 @@ package metrics
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"encoding/xml"
 	"fmt"
@@ -28,6 +29,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
@@ -237,7 +239,16 @@ var (
 	monitorPaths []PathList
 )
 
-func ConfigureMonitoring() (int, error) {
+// Set up listening and parsing xrootd monitoring UDP packets into prometheus
+//
+// The `ctx` is the context for listening to server shutdown event in order to cleanup internal cache eviction
+// goroutine and `wg` is the wait group to notify when the clean up goroutine finishes
+func ConfigureMonitoring(ctx context.Context, wg *sync.WaitGroup) (int, error) {
+	monitorPaths = make([]PathList, 0)
+	for _, monpath := range param.Monitoring_AggregatePrefixes.GetStringSlice() {
+		monitorPaths = append(monitorPaths, PathList{Paths: strings.Split(path.Clean(monpath), "/")})
+	}
+
 	lower := param.Monitoring_PortLower.GetInt()
 	higher := param.Monitoring_PortHigher.GetInt()
 
@@ -264,6 +275,20 @@ func ConfigureMonitoring() (int, error) {
 		return -1, err
 	}
 
+	// Start ttl cache automatic eviction of expired items
+	go sessions.Start()
+	go userids.Start()
+	go transfers.Start()
+
+	// Stop automatic eviction at shutdown
+	go func() {
+		defer wg.Done()
+		<-ctx.Done()
+		sessions.Stop()
+		userids.Stop()
+		transfers.Stop()
+	}()
+
 	go func() {
 		var buf [65536]byte
 		for {
@@ -283,7 +308,7 @@ func ConfigureMonitoring() (int, error) {
 	return addr.Port, nil
 }
 
-func ComputePrefix(inputPath string) string {
+func computePrefix(inputPath string, monitorPaths []PathList) string {
 	if len(monitorPaths) == 0 {
 		return "/"
 	}
@@ -477,7 +502,7 @@ func HandlePacket(packet []byte) error {
 		if err != nil {
 			return errors.Wrapf(err, "Failed to parse XRootD monitoring packet")
 		}
-		path := ComputePrefix(rest)
+		path := computePrefix(rest, monitorPaths)
 		if useridItem := userids.Get(xrdUserId); useridItem != nil {
 			transfers.Set(fileid, FileRecord{UserId: useridItem.Value(), Path: path}, ttlcache.DefaultTTL)
 		}
@@ -585,7 +610,7 @@ func HandlePacket(packet []byte) error {
 					lfnSize := uint32(fileHdr.RecSize - 20)
 					lfn := NullTermToString(packet[offset+20 : offset+lfnSize+20])
 					// path has been difined
-					path = ComputePrefix(lfn)
+					path = computePrefix(lfn, monitorPaths)
 					log.Debugf("MonPacket: User LFN %v matches prefix %v",
 						lfn, path)
 					// UserId is part of LFN

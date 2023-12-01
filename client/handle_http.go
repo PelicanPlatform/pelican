@@ -314,7 +314,7 @@ func download_http(sourceUrl *url.URL, destination string, payload *payloadStruc
 
 	if recursive {
 		var err error
-		files, err = walkDavDir(sourceUrl, namespace)
+		files, err = walkDavDir(&downloadUrl, namespace, token)
 		if err != nil {
 			log.Errorln("Error from walkDavDir", err)
 			return 0, err
@@ -828,9 +828,6 @@ func UploadFile(src string, origDest *url.URL, token string, namespace namespace
 		log.Errorln("Error creating request:", err)
 		return 0, err
 	}
-	if fileInfo.Mode().IsRegular() {
-		request.ContentLength = fileInfo.Size()
-	}
 	// Set the authorization header
 	request.Header.Set("Authorization", "Bearer "+token)
 	var lastKnownWritten int64
@@ -949,7 +946,7 @@ func doPut(request *http.Request, responseChan chan<- *http.Response, errorChan 
 
 }
 
-func walkDavDir(url *url.URL, namespace namespaces.Namespace) ([]string, error) {
+func walkDavDir(url *url.URL, namespace namespaces.Namespace, token string) ([]string, error) {
 
 	// Create the client to walk the filesystem
 	rootUrl := *url
@@ -967,7 +964,9 @@ func walkDavDir(url *url.URL, namespace namespaces.Namespace) ([]string, error) 
 		return nil, errors.New("Host for directory listings is unknown")
 	}
 	log.Debugln("Dir list host: ", rootUrl.String())
-	c := gowebdav.NewClient(rootUrl.String(), "", "")
+
+	auth := &bearerAuth{token: token}
+	c := gowebdav.NewAuthClient(rootUrl.String(), auth)
 
 	// XRootD does not like keep alives and kills things, so turn them off.
 	transport := config.GetTransport()

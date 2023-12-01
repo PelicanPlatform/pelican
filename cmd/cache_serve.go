@@ -29,6 +29,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/lestrrat-go/jwx/v2/jwk"
@@ -37,7 +38,7 @@ import (
 	"github.com/pelicanplatform/pelican/daemon"
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/metrics"
-	nsregistry "github.com/pelicanplatform/pelican/namespace-registry"
+	nsregistry "github.com/pelicanplatform/pelican/namespace_registry"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pelicanplatform/pelican/xrootd"
@@ -145,14 +146,26 @@ func advertiseCache(prefix string, nsAds []director.NamespaceAd) error {
 }
 
 func serveCache( /*cmd*/ *cobra.Command /*args*/, []string) error {
-	defer config.CleanupTempResources()
+	// Use this context for any goroutines that needs to react to server shutdown
+	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
+	// Use this wait group to ensure the goroutines can finish before the server exits/shutdown
+	var wg sync.WaitGroup
+
+	// This anonymous function ensures we cancel any context and wait for those goroutines to
+	// finish their cleanup work before the server exits
+	defer func() {
+		shutdownCancel()
+		wg.Wait()
+		config.CleanupTempResources()
+	}()
 
 	err := config.DiscoverFederation()
 	if err != nil {
 		log.Warningln("Failed to do service auto-discovery:", err)
 	}
 
-	err = xrootd.SetUpMonitoring()
+	wg.Add(1)
+	err = xrootd.SetUpMonitoring(shutdownCtx, &wg)
 	if err != nil {
 		return err
 	}

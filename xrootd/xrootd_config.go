@@ -2,6 +2,7 @@ package xrootd
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	_ "embed"
 	"encoding/base64"
@@ -10,6 +11,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 	"text/template"
 
 	"github.com/pelicanplatform/pelican/config"
@@ -235,10 +237,11 @@ to export the directory /mnt/foo to the path /bar in the data federation`)
 	}
 
 	if origin {
-		if param.Origin_SelfTest.GetBool() {
-			if err := origin_ui.ConfigureXrootdMonitoringDir(); err != nil {
-				return err
-			}
+		// We create this monitor directory regardless of Origin.SelfTest flag
+		// because we want to ensure director-based tests always have
+		// access to the monitoring directory, for now
+		if err := origin_ui.ConfigureXrootdMonitoringDir(); err != nil {
+			return err
 		}
 	}
 
@@ -398,8 +401,12 @@ func ConfigXrootd(origin bool) (string, error) {
 	return configPath, nil
 }
 
-func SetUpMonitoring() error {
-	monitorPort, err := metrics.ConfigureMonitoring()
+// Set up xrootd monitoring
+//
+// The `ctx` is the context for listening to server shutdown event in order to cleanup internal cache eviction
+// goroutine and `wg` is the wait group to notify when the clean up goroutine finishes
+func SetUpMonitoring(ctx context.Context, wg *sync.WaitGroup) error {
+	monitorPort, err := metrics.ConfigureMonitoring(ctx, wg)
 	if err != nil {
 		return err
 	}

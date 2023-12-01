@@ -1,3 +1,5 @@
+//go:build linux
+
 /***************************************************************
  *
  * Copyright (C) 2023, Pelican Project, Morgridge Institute for Research
@@ -24,6 +26,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -68,7 +71,16 @@ func TestOrigin(t *testing.T) {
 	err = CheckXrootdEnv(true, nil)
 	require.NoError(t, err)
 
-	err = SetUpMonitoring()
+	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	defer func() {
+		shutdownCancel()
+		wg.Wait()
+	}()
+
+	err = SetUpMonitoring(shutdownCtx, &wg)
 	require.NoError(t, err)
 
 	configPath, err := ConfigXrootd(true)

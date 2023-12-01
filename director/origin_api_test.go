@@ -1,8 +1,10 @@
 package director
 
 import (
+	"context"
 	"crypto/elliptic"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,6 +15,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestVerifyAdvertiseToken(t *testing.T) {
@@ -159,4 +162,59 @@ func TestGetRegistryIssuerURL(t *testing.T) {
 	assert.Equal(t, nil, err)
 	assert.Equal(t, "test-path/api/v1.0/registry/test-prefix/.well-known/issuer.jwks", url)
 
+}
+
+func TestNamespaceKeysCacheEviction(t *testing.T) {
+	t.Run("evict-after-expire-time", func(t *testing.T) {
+		// Start cache eviction
+		shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
+		var wg sync.WaitGroup
+		wg.Add(1)
+		ConfigTTLCache(shutdownCtx, &wg)
+
+		defer func() {
+			shutdownCancel()
+			wg.Wait()
+		}()
+
+		mockNamespaceKey := "foo"
+		mockCtx := context.Background()
+		mockAr := jwk.NewCache(mockCtx)
+
+		deletedChan := make(chan int)
+		cancelChan := make(chan int)
+
+		go func() {
+			namespaceKeysMutex.Lock()
+			defer namespaceKeysMutex.Unlock()
+			namespaceKeys.DeleteAll()
+
+			namespaceKeys.Set(mockNamespaceKey, mockAr, time.Second*2)
+			require.True(t, namespaceKeys.Has(mockNamespaceKey), "Failed to register namespace key")
+		}()
+
+		// Keep checking if the cache item is absent or cancelled
+		go func() {
+			for {
+				select {
+				case <-cancelChan:
+					return
+				default:
+					if !namespaceKeys.Has(mockNamespaceKey) {
+						deletedChan <- 1
+						return
+					}
+				}
+			}
+		}()
+
+		// Wait for 3s to check if the expired cache item is evicted
+		select {
+		case <-deletedChan:
+			require.True(t, true)
+		case <-time.After(3 * time.Second):
+			cancelChan <- 1
+			require.False(t, true, "Cache didn't evict expired item")
+		}
+	})
 }

@@ -18,7 +18,7 @@
  *
  ***************************************************************/
 
-package origin_ui
+package web_ui
 
 import (
 	"github.com/pkg/errors"

@@ -19,14 +19,17 @@
 package director
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/jellydator/ttlcache/v3"
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
@@ -80,7 +83,7 @@ func LoadDirectorPublicKey() (jwk.Key, error) {
 		return nil, errors.Wrap(err, fmt.Sprintln("Invalid director URL:", directorDiscoveryUrlStr))
 	}
 	directorDiscoveryUrl.Scheme = "https"
-	directorDiscoveryUrl.Path = directorDiscoveryUrl.Path + "/.well-known/pelican-configuration"
+	directorDiscoveryUrl.Path = directorDiscoveryUrl.Path + directorDiscoveryPath
 
 	tr := config.GetTransport()
 	client := &http.Client{Transport: tr}
@@ -257,4 +260,33 @@ func CreateDirectorScrapeToken() (string, error) {
 		return "", err
 	}
 	return string(signed), nil
+}
+
+// Configure TTL caches to enable cache eviction and other additional cache events handling logic
+//
+// The `ctx` is the context for listening to server shutdown event in order to cleanup internal cache eviction
+// goroutine and `wg` is the wait group to notify when the clean up goroutine finishes
+func ConfigTTLCache(ctx context.Context, wg *sync.WaitGroup) {
+	// Start automatic expired item deletion
+	go serverAds.Start()
+	go namespaceKeys.Start()
+
+	serverAds.OnEviction(func(ctx context.Context, er ttlcache.EvictionReason, i *ttlcache.Item[ServerAd, []NamespaceAd]) {
+		if cancelFunc, exists := healthTestCancelFuncs[i.Key()]; exists {
+			// Call the cancel function for the evicted originAd to end its health test
+			cancelFunc()
+
+			// Remove the cancel function from the map as it's no longer needed
+			delete(healthTestCancelFuncs, i.Key())
+		}
+	})
+
+	// Put stop logic in a separate goroutine so that parent function is not blocking
+	go func() {
+		defer wg.Done()
+		<-ctx.Done()
+		log.Info("Gracefully stoppping TTL cache eviction...")
+		serverAds.Stop()
+		namespaceKeys.Stop()
+	}()
 }
