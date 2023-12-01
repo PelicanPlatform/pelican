@@ -38,13 +38,15 @@ import (
 type (
 	TestType         string
 	TestFileTransfer interface {
-		generateFileTestScitoken() (string, error)
+		generateFileTestScitoken(audienceUrl string) (string, error)
 		UploadTestfile(baseUrl string, testType TestType) (string, error)
 		DownloadTestfile(downloadUrl string) error
 		DeleteTestfile(fileUrl string) error
 		RunTests(baseUrl string, testType TestType) (bool, error)
 	}
-	TestFileTransferImpl struct{}
+	TestFileTransferImpl struct {
+		audienceUrl string
+	}
 )
 
 const (
@@ -62,7 +64,7 @@ func (t TestType) String() string {
 }
 
 // TODO: Replace by CreateEncodedToken once it's free from main package #320
-func generateFileTestScitoken() (string, error) {
+func (t TestFileTransferImpl) generateFileTestScitoken() (string, error) {
 	// Issuer is whichever server that initiates the test, so it's the server itself
 	issuerUrl := param.Server_ExternalWebUrl.GetString()
 	if issuerUrl == "" {
@@ -79,7 +81,7 @@ func generateFileTestScitoken() (string, error) {
 		Claim("wlcg.ver", "1.0").
 		JwtID(jti).
 		Issuer(issuerUrl).
-		Audience([]string{issuerUrl}).
+		Audience([]string{t.audienceUrl}).
 		Subject("origin").
 		Expiration(time.Now().Add(time.Minute)).
 		IssuedAt(time.Now()).
@@ -106,7 +108,7 @@ func generateFileTestScitoken() (string, error) {
 }
 
 func (t TestFileTransferImpl) UploadTestfile(baseUrl string, testType TestType) (string, error) {
-	tkn, err := generateFileTestScitoken()
+	tkn, err := t.generateFileTestScitoken()
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to create a token for test file transfer")
 	}
@@ -148,7 +150,7 @@ func (t TestFileTransferImpl) UploadTestfile(baseUrl string, testType TestType) 
 }
 
 func (t TestFileTransferImpl) DownloadTestfile(downloadUrl string) error {
-	tkn, err := generateFileTestScitoken()
+	tkn, err := t.generateFileTestScitoken()
 	if err != nil {
 		return errors.Wrap(err, "Failed to create a token for test file transfer download")
 	}
@@ -183,7 +185,7 @@ func (t TestFileTransferImpl) DownloadTestfile(downloadUrl string) error {
 }
 
 func (t TestFileTransferImpl) DeleteTestfile(fileUrl string) error {
-	tkn, err := generateFileTestScitoken()
+	tkn, err := t.generateFileTestScitoken()
 	if err != nil {
 		return errors.Wrap(err, "Failed to create a token for the test file transfer deletion")
 	}
@@ -210,6 +212,7 @@ func (t TestFileTransferImpl) DeleteTestfile(fileUrl string) error {
 }
 
 func (t TestFileTransferImpl) RunTests(baseUrl string, testType TestType) (bool, error) {
+	t.audienceUrl = baseUrl
 	downloadUrl, err := t.UploadTestfile(baseUrl, testType)
 	if err != nil {
 		return false, errors.Wrap(err, "Test file transfer failed during upload")
