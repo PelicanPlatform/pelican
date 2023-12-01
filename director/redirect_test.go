@@ -157,6 +157,12 @@ func TestDirectorRegistration(t *testing.T) {
 		namespaceKeys.Set("/foo/bar", &ar, ttlcache.DefaultTTL)
 	}
 
+	teardown := func() {
+		serverAdMutex.Lock()
+		defer serverAdMutex.Unlock()
+		serverAds.DeleteAll()
+	}
+
 	t.Run("valid-token", func(t *testing.T) {
 		c, r, w := setupContext()
 		pKey, token, issuerURL := generateToken(c)
@@ -184,7 +190,7 @@ func TestDirectorRegistration(t *testing.T) {
 		namaspaceADs := ListNamespacesFromOrigins()
 		// If the origin was successfully registed at director, we should be able to find it in director's originAds
 		assert.True(t, NamespaceAdContainsPath(namaspaceADs, "/foo/bar"), "Coudln't find namespace in the director cache.")
-		serverAds.DeleteAll()
+		teardown()
 	})
 
 	// Now repeat the above test, but with an invalid token
@@ -217,7 +223,7 @@ func TestDirectorRegistration(t *testing.T) {
 
 		namaspaceADs := ListNamespacesFromOrigins()
 		assert.False(t, NamespaceAdContainsPath(namaspaceADs, "/foo/bar"), "Found namespace in the director cache even if the token validation failed.")
-		serverAds.DeleteAll()
+		teardown()
 	})
 
 	t.Run("valid-token-with-web-url", func(t *testing.T) {
@@ -243,7 +249,7 @@ func TestDirectorRegistration(t *testing.T) {
 		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
 		assert.Equal(t, 1, len(serverAds.Keys()), "Origin fail to register at serverAds")
 		assert.Equal(t, "https://localhost:8844", serverAds.Keys()[0].WebURL.String(), "WebURL in serverAds does not match data in origin registration request")
-		serverAds.DeleteAll()
+		teardown()
 	})
 
 	// We want to ensure backwards compatibility for WebURL
@@ -270,7 +276,7 @@ func TestDirectorRegistration(t *testing.T) {
 		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
 		assert.Equal(t, 1, len(serverAds.Keys()), "Origin fail to register at serverAds")
 		assert.Equal(t, "", serverAds.Keys()[0].WebURL.String(), "WebURL in serverAds isn't empty with no WebURL provided in registration")
-		serverAds.DeleteAll()
+		teardown()
 	})
 }
 

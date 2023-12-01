@@ -209,7 +209,6 @@ func TestConfigCacheEviction(t *testing.T) {
 	}
 
 	t.Run("evicted-origin-can-cancel-health-test", func(t *testing.T) {
-		serverAds.DeleteAll()
 		// Clear the map for the new test
 		healthTestCancelFuncs = make(map[ServerAd]context.CancelFunc)
 
@@ -223,11 +222,17 @@ func TestConfigCacheEviction(t *testing.T) {
 			wg.Wait()
 		}()
 
-		serverAds.Set(mockPelicanOriginServerAd, []NamespaceAd{mockNamespaceAd}, ttlcache.DefaultTTL)
 		ctx, cancelFunc := context.WithDeadline(context.Background(), time.Now().Add(time.Second*5))
-		healthTestCancelFuncs[mockPelicanOriginServerAd] = cancelFunc
 
-		require.True(t, serverAds.Has(mockPelicanOriginServerAd), "serverAds failed to register the originAd")
+		func() {
+			serverAdMutex.Lock()
+			defer serverAdMutex.Unlock()
+			serverAds.DeleteAll()
+			serverAds.Set(mockPelicanOriginServerAd, []NamespaceAd{mockNamespaceAd}, ttlcache.DefaultTTL)
+			healthTestCancelFuncs[mockPelicanOriginServerAd] = cancelFunc
+
+			require.True(t, serverAds.Has(mockPelicanOriginServerAd), "serverAds failed to register the originAd")
+		}()
 
 		cancelChan := make(chan int)
 		go func() {
@@ -237,9 +242,13 @@ func TestConfigCacheEviction(t *testing.T) {
 			}
 		}()
 
-		serverAds.Delete(mockPelicanOriginServerAd) // This should call onEviction handler and close the context
+		func() {
+			serverAdMutex.Lock()
+			defer serverAdMutex.Unlock()
+			serverAds.Delete(mockPelicanOriginServerAd) // This should call onEviction handler and close the context
 
-		require.False(t, serverAds.Has(mockPelicanOriginServerAd), "serverAds didn't delete originAd")
+			require.False(t, serverAds.Has(mockPelicanOriginServerAd), "serverAds didn't delete originAd")
+		}()
 
 		// OnEviction is handled on a different goroutine than the cache management
 		// So we want to wait for a bit so that OnEviction can have time to be
@@ -271,7 +280,7 @@ func TestServerAdsCacheEviction(t *testing.T) {
 		deletedChan := make(chan int)
 		cancelChan := make(chan int)
 
-		go func() {
+		func() {
 			serverAdMutex.Lock()
 			defer serverAdMutex.Unlock()
 			serverAds.DeleteAll()
