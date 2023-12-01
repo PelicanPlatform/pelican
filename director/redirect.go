@@ -27,6 +27,7 @@ import (
 	"path"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/pelicanplatform/pelican/param"
 
@@ -42,9 +43,10 @@ type PromDiscoveryItem struct {
 }
 
 var (
-	minClientVersion, _   = version.NewVersion("7.0.0")
-	minOriginVersion, _   = version.NewVersion("7.0.0")
-	healthTestCancelFuncs = make(map[ServerAd]context.CancelFunc)
+	minClientVersion, _        = version.NewVersion("7.0.0")
+	minOriginVersion, _        = version.NewVersion("7.0.0")
+	healthTestCancelFuncs      = make(map[ServerAd]context.CancelFunc)
+	healthTestCancelFuncsMutex = sync.RWMutex{}
 )
 
 func getRedirectURL(reqPath string, ad ServerAd, requiresAuth bool) (redirectURL url.URL) {
@@ -439,8 +441,8 @@ func registerServeAd(ctx *gin.Context, sType ServerType) {
 
 	// Start director periodic test of origin's health status if origin AD
 	// has WebURL field AND it's not already been registered
-	serverAdMutex.RLock()
-	defer serverAdMutex.RUnlock()
+	healthTestCancelFuncsMutex.Lock()
+	defer healthTestCancelFuncsMutex.Unlock()
 	if ad.WebURL != "" && !hasOriginAdInCache {
 		ctx, cancel := context.WithCancel(context.Background())
 		healthTestCancelFuncs[sAd] = cancel
