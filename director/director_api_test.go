@@ -58,16 +58,13 @@ func TestListNamespaces(t *testing.T) {
 	}
 
 	setup := func() {
-		serverAds.DeleteAll()
-	}
-
-	teardown := func() {
+		serverAdMutex.Lock()
+		defer serverAdMutex.Unlock()
 		serverAds.DeleteAll()
 	}
 
 	t.Run("empty-entry", func(t *testing.T) {
 		setup()
-		defer teardown()
 		ns := ListNamespacesFromOrigins()
 
 		// Initially there should be 0 namespaces registered
@@ -75,7 +72,6 @@ func TestListNamespaces(t *testing.T) {
 	})
 	t.Run("one-origin-namespace-entry", func(t *testing.T) {
 		setup()
-		defer teardown()
 		serverAds.Set(mockOriginServerAd, mockNamespaceAds(1, "origin1"), ttlcache.DefaultTTL)
 		ns := ListNamespacesFromOrigins()
 
@@ -85,7 +81,6 @@ func TestListNamespaces(t *testing.T) {
 	})
 	t.Run("multiple-origin-namespace-entries-from-same-origin", func(t *testing.T) {
 		setup()
-		defer teardown()
 		serverAds.Set(mockOriginServerAd, mockNamespaceAds(10, "origin1"), ttlcache.DefaultTTL)
 		ns := ListNamespacesFromOrigins()
 
@@ -94,7 +89,6 @@ func TestListNamespaces(t *testing.T) {
 	})
 	t.Run("multiple-origin-namespace-entries-from-different-origins", func(t *testing.T) {
 		setup()
-		defer teardown()
 
 		serverAds.Set(mockOriginServerAd, mockNamespaceAds(10, "origin1"), ttlcache.DefaultTTL)
 
@@ -112,7 +106,6 @@ func TestListNamespaces(t *testing.T) {
 	})
 	t.Run("one-cache-namespace-entry", func(t *testing.T) {
 		setup()
-		defer teardown()
 		serverAds.Set(mockCacheServerAd, mockNamespaceAds(1, "cache1"), ttlcache.DefaultTTL)
 		ns := ListNamespacesFromOrigins()
 
@@ -124,13 +117,21 @@ func TestListNamespaces(t *testing.T) {
 func TestListServerAds(t *testing.T) {
 
 	t.Run("emtpy-cache", func(t *testing.T) {
-		serverAds.DeleteAll()
+		func() {
+			serverAdMutex.Lock()
+			defer serverAdMutex.Unlock()
+			serverAds.DeleteAll()
+		}()
 		ads := ListServerAds([]ServerType{OriginType, CacheType})
 		assert.Equal(t, 0, len(ads))
 	})
 
 	t.Run("get-by-server-type", func(t *testing.T) {
-		serverAds.DeleteAll()
+		func() {
+			serverAdMutex.Lock()
+			defer serverAdMutex.Unlock()
+			serverAds.DeleteAll()
+		}()
 		serverAds.Set(mockOriginServerAd, []NamespaceAd{}, ttlcache.DefaultTTL)
 		serverAds.Set(mockCacheServerAd, []NamespaceAd{}, ttlcache.DefaultTTL)
 		adsAll := ListServerAds([]ServerType{OriginType, CacheType})
