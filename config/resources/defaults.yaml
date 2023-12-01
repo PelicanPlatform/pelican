@@ -57,3 +57,6 @@ OIDC:
 Issuer:
   TomcatLocation: /opt/tomcat
   ScitokensServerLocation: /opt/scitokens-server
+  QDLLocation: /opt/qdl
+  OIDCAuthenticationUserClaim: sub
+  AuthenticationSource: OIDC

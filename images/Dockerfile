@@ -37,7 +37,7 @@ COPY --from=website-build /webapp/out ./origin_ui/src/out
 
 RUN goreleaser --clean --snapshot
 
-FROM hub.opensciencegrid.org/sciauth/scitokens-oauth2-server:release AS scitokens-oauth2-server
+FROM hub.opensciencegrid.org/sciauth/scitokens-oauth2-server:release-20231118-1823 AS scitokens-oauth2-server
 
 FROM --platform=linux/amd64 opensciencegrid/software-base:$BASE_OSG_SERIES-el8-$BASE_YUM_REPO
 
