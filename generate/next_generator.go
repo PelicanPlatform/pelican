@@ -1,5 +1,7 @@
 package main
 
+// This should not be included in any release of pelican
+
 import (
 	"log"
 	"os"

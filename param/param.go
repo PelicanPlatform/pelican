@@ -7,8 +7,6 @@ import (
 	"github.com/spf13/viper"
 )
 
-//go:generate go run ../generate
-
 var (
 	viperConfig *config
 	configMutex sync.RWMutex
