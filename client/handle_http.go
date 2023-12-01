@@ -271,7 +271,6 @@ func download_http(sourceUrl *url.URL, destination string, payload *payloadStruc
 	}
 	sourceUrl = &url.URL{Path: sourceUrl.Path}
 
-	// Generate the downloadUrl
 	var token string
 	if namespace.UseTokenOnRead {
 		var err error
@@ -314,7 +313,7 @@ func download_http(sourceUrl *url.URL, destination string, payload *payloadStruc
 
 	if recursive {
 		var err error
-		files, err = walkDavDir(&downloadUrl, namespace, token)
+		files, err = walkDavDir(sourceUrl, namespace, token)
 		if err != nil {
 			log.Errorln("Error from walkDavDir", err)
 			return 0, err
