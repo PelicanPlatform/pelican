@@ -50,7 +50,9 @@ func TestOrigin(t *testing.T) {
 	viper.Set("TLSSkipVerify", true)
 
 	// Create our own temp directory (for some reason t.TempDir() does not play well with xrootd)
-	tmpPath := "/tmp/XRootD-Test_Origin"
+	tmpPathPattern := "XRootD-Test_Origin*"
+	tmpPath, err := os.MkdirTemp("", tmpPathPattern)
+	require.NoError(t, err)
 	viper.Set("ConfigDir", tmpPath)
 	viper.Set("Xrootd.RunLocation", filepath.Join(tmpPath, "xrootd"))
 	t.Cleanup(func() {
@@ -59,7 +61,14 @@ func TestOrigin(t *testing.T) {
 	// Increase the log level; otherwise, its difficult to debug failures
 	viper.Set("Logging.Level", "Debug")
 	config.InitConfig()
-	err := config.InitServer(config.OriginType)
+	err = config.InitServer(config.OriginType)
+	require.NoError(err)
+
+	// Ensure the xrootd user can access the directory
+	userInfo, err := config.GetDaemonUserInfo()
+	require.NoError(t, err)
+	err = os.Chown(tmpPathPattern, userInfo.Uid, userInfo.Gid)
+	require.NoError(t, err)
 
 	require.NoError(t, err)
 
