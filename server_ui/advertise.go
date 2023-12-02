@@ -47,8 +47,8 @@ func PeriodicAdvertise(server server_utils.XRootDServer) error {
 	go func() {
 		err := Advertise(server)
 		if err != nil {
-			log.Warningln(fmt.Sprintf("%s advertise failed:", server.ServerType), err)
-			metrics.SetComponentHealthStatus(metrics.OriginCache_Federation, metrics.StatusCritical, fmt.Sprintf("Error advertising %s to federation", server.ServerType))
+			log.Warningln(fmt.Sprintf("%s advertise failed:", server.GetServerType()), err)
+			metrics.SetComponentHealthStatus(metrics.OriginCache_Federation, metrics.StatusCritical, fmt.Sprintf("Error advertising %s to federation", server.GetServerType()))
 		} else {
 			metrics.SetComponentHealthStatus(metrics.OriginCache_Federation, metrics.StatusOK, "")
 		}
@@ -57,8 +57,8 @@ func PeriodicAdvertise(server server_utils.XRootDServer) error {
 			<-ticker.C
 			err := Advertise(server)
 			if err != nil {
-				log.Warningln(fmt.Sprintf("%s advertise failed:", server.ServerType), err)
-				metrics.SetComponentHealthStatus(metrics.OriginCache_Federation, metrics.StatusCritical, fmt.Sprintf("Error advertising %s to federation", server.ServerType))
+				log.Warningln(fmt.Sprintf("%s advertise failed:", server.GetServerType()), err)
+				metrics.SetComponentHealthStatus(metrics.OriginCache_Federation, metrics.StatusCritical, fmt.Sprintf("Error advertising %s to federation", server.GetServerType()))
 			} else {
 				metrics.SetComponentHealthStatus(metrics.OriginCache_Federation, metrics.StatusOK, "")
 			}
@@ -71,20 +71,20 @@ func PeriodicAdvertise(server server_utils.XRootDServer) error {
 func Advertise(server server_utils.XRootDServer) error {
 	name := param.Xrootd_Sitename.GetString()
 	if name == "" {
-		return errors.New(fmt.Sprintf("%s name isn't set", server.ServerType))
+		return errors.New(fmt.Sprintf("%s name isn't set", server.GetServerType()))
 	}
 
 	originUrl := param.Origin_Url.GetString()
 	originWebUrl := param.Server_ExternalWebUrl.GetString()
 
-	ad, err := server.CreateAdvertisement(name, originUrl, originWebUrl, server)
+	ad, err := server.CreateAdvertisement(name, originUrl, originWebUrl)
 	if err != nil {
 		return err
 	}
 
 	body, err := json.Marshal(ad)
 	if err != nil {
-		return errors.Wrap(err, fmt.Sprintf("Failed to generate JSON description of %s", server.ServerType))
+		return errors.Wrap(err, fmt.Sprintf("Failed to generate JSON description of %s", server.GetServerType()))
 	}
 
 	directorUrlStr := param.Federation_DirectorUrl.GetString()
@@ -96,7 +96,7 @@ func Advertise(server server_utils.XRootDServer) error {
 		return errors.Wrap(err, "Failed to parse Federation.DirectorURL")
 	}
 
-	directorUrl.Path = "/api/v1.0/director/register" + server.ServerType
+	directorUrl.Path = "/api/v1.0/director/register" + server.GetServerType().String()
 
 	prefix := param.Origin_NamespacePrefix.GetString()
 
@@ -112,7 +112,7 @@ func Advertise(server server_utils.XRootDServer) error {
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
-	userAgent := "pelican-" + strings.ToLower(server.ServerType) + "/" + client.ObjectClientOptions.Version
+	userAgent := "pelican-" + strings.ToLower(server.GetServerType().String()) + "/" + client.ObjectClientOptions.Version
 	req.Header.Set("User-Agent", userAgent)
 
 	// We should switch this over to use the common transport, but for that to happen

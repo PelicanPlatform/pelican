@@ -19,17 +19,28 @@
 package cache_ui
 
 import (
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
-	server_struct "github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/server_utils"
 )
 
-func CreateCacheAdvertisement(name string, originUrl string, originWebUrl string, server server_struct.XRootDServer) (director.OriginAdvertise, error) {
+type (
+	CacheServer struct {
+		server_utils.NamespaceHolder
+	}
+)
+
+func (server *CacheServer) CreateAdvertisement(name string, originUrl string, originWebUrl string) (director.OriginAdvertise, error) {
 	ad := director.OriginAdvertise{
 		Name:       name,
 		URL:        originUrl,
 		WebURL:     originWebUrl,
-		Namespaces: server.NameSpaceAds,
+		Namespaces: server.GetNamespaceAds(),
 	}
 
 	return ad, nil
+}
+
+func (server *CacheServer) GetServerType() config.ServerType {
+	return config.CacheType
 }

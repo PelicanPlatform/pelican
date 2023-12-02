@@ -292,10 +292,10 @@ func CheckXrootdEnv(server server_utils.XRootDServer) error {
 		}
 	}
 
-	if server.ServerType == string(server_utils.OriginType) {
+	if server.GetServerType().IsSet(config.OriginType) {
 		exportPath, err = CheckOriginXrootdEnv(exportPath, uid, gid, groupname)
 	} else {
-		exportPath, err = CheckCacheXrootdEnv(exportPath, uid, gid, server.NameSpaceAds)
+		exportPath, err = CheckCacheXrootdEnv(exportPath, uid, gid, server.GetNamespaceAds())
 	}
 	if err != nil {
 		return err
@@ -346,7 +346,7 @@ func CheckXrootdEnv(server server_utils.XRootDServer) error {
 			" to desired daemon group %v", authfile, groupname)
 	}
 
-	if err := EmitAuthfile(server.NameSpaceAds); err != nil {
+	if err := EmitAuthfile(server.GetNamespaceAds()); err != nil {
 		return err
 	}
 

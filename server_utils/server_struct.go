@@ -18,19 +18,26 @@
 
 package server_utils
 
+import "github.com/pelicanplatform/pelican/config"
 import "github.com/pelicanplatform/pelican/director"
 
 type (
-	XRootDServer struct {
-		ServerType          string
-		NameSpaceAds        []director.NamespaceAd
-		CreateAdvertisement func(string, string, string, XRootDServer) (director.OriginAdvertise, error)
+	XRootDServer interface {
+		GetServerType() config.ServerType
+		SetNamespaceAds([]director.NamespaceAd)
+		GetNamespaceAds() []director.NamespaceAd
+		CreateAdvertisement(name string, serverUrl string, serverWebUrl string) (director.OriginAdvertise, error)
 	}
 
-	ServerType string
+	NamespaceHolder struct {
+		namespaceAds []director.NamespaceAd
+	}
 )
 
-const (
-	CacheType  ServerType = "Cache"
-	OriginType ServerType = "Origin"
-)
+func (ns *NamespaceHolder) SetNamespaceAds(ads []director.NamespaceAd) {
+	ns.namespaceAds = ads
+}
+
+func (ns *NamespaceHolder) GetNamespaceAds() []director.NamespaceAd {
+	return ns.namespaceAds
+}

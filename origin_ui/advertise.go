@@ -22,13 +22,24 @@ import (
 	"fmt"
 	"net/url"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pkg/errors"
 )
 
-func CreateOriginAdvertisement(name string, originUrl string, originWebUrl string, server server_utils.XRootDServer) (director.OriginAdvertise, error) {
+type (
+	OriginServer struct {
+		server_utils.NamespaceHolder
+	}
+)
+
+func (server *OriginServer) GetServerType() config.ServerType {
+	return config.OriginType
+}
+
+func (server *OriginServer) CreateAdvertisement(name string, originUrl string, originWebUrl string) (director.OriginAdvertise, error) {
 	ad := director.OriginAdvertise{}
 
 	// Here we instantiate the namespaceAd slice, but we still need to define the namespace

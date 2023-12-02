@@ -32,21 +32,12 @@ import (
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_ui"
-	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pelicanplatform/pelican/xrootd"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-)
-
-var (
-	CacheServer = server_utils.XRootDServer{
-		ServerType:          string(server_utils.CacheType),
-		NameSpaceAds:        []director.NamespaceAd{},
-		CreateAdvertisement: cache_ui.CreateCacheAdvertisement,
-	}
 )
 
 func getNSAdsFromDirector() ([]director.NamespaceAd, error) {
@@ -104,8 +95,9 @@ func serveCache( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		return err
 	}
 
-	CacheServer.NameSpaceAds = nsAds
-	err = server_ui.CheckDefaults(CacheServer)
+	cacheServer := &cache_ui.CacheServer{}
+	cacheServer.SetNamespaceAds(nsAds)
+	err = server_ui.CheckDefaults(cacheServer)
 	if err != nil {
 		return err
 	}
@@ -118,7 +110,7 @@ func serveCache( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		return err
 	}
 
-	if err = server_ui.PeriodicAdvertise(CacheServer); err != nil {
+	if err = server_ui.PeriodicAdvertise(cacheServer); err != nil {
 		return err
 	}
 

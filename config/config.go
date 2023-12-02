@@ -76,7 +76,7 @@ type (
 		JwksUri                       string `json:"jwks_uri"`
 	}
 
-	ServerType string
+	ServerType int
 
 	TokenOperation int
 
@@ -86,10 +86,10 @@ type (
 )
 
 const (
-	CacheType    ServerType = "Cache"
-	OriginType   ServerType = "Origin"
-	DirectorType ServerType = "Director"
-	RegistryType ServerType = "Registry"
+	CacheType ServerType = 1 << iota
+	OriginType
+	DirectorType
+	RegistryType
 )
 
 const (
@@ -117,6 +117,24 @@ var (
 	transport     *http.Transport
 	onceTransport sync.Once
 )
+
+func (sType ServerType) IsSet(otherVal ServerType) bool {
+	return sType&otherVal == otherVal
+}
+
+func (sType ServerType) String() string {
+	switch sType {
+	case CacheType:
+		return "Cache"
+	case OriginType:
+		return "Origin"
+	case DirectorType:
+		return "Director"
+	case RegistryType:
+		return "Registry"
+	}
+	return "Unknown"
+}
 
 // Based on the name of the current binary, determine the preferred "style"
 // of behavior.  For example, a binary with the "osdf_" prefix should utilize
@@ -402,9 +420,9 @@ func InitServer(sType ServerType) error {
 		return errors.Wrap(err, "Failed to initialize the server configuration")
 	}
 	xrootdPrefix := ""
-	if sType == OriginType {
+	if sType.IsSet(OriginType) {
 		xrootdPrefix = "origin"
-	} else if sType == CacheType {
+	} else if sType.IsSet(CacheType) {
 		xrootdPrefix = "cache"
 	}
 	configDir := viper.GetString("ConfigDir")
@@ -474,7 +492,7 @@ func InitServer(sType ServerType) error {
 	// they have overridden the defaults.
 	hostname = viper.GetString("Server.Hostname")
 
-	if sType == CacheType {
+	if sType.IsSet(CacheType) {
 		viper.Set("Xrootd.Port", param.Cache_Port.GetInt())
 	}
 	xrootdPort := param.Xrootd_Port.GetInt()

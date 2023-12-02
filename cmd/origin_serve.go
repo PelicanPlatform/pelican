@@ -31,19 +31,10 @@ import (
 	"github.com/pelicanplatform/pelican/origin_ui"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_ui"
-	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/web_ui"
 	"github.com/pelicanplatform/pelican/xrootd"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-)
-
-var (
-	OriginServer = server_utils.XRootDServer{
-		ServerType:          string(server_utils.OriginType),
-		NameSpaceAds:        nil,
-		CreateAdvertisement: origin_ui.CreateOriginAdvertisement,
-	}
 )
 
 func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
@@ -66,7 +57,8 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		return err
 	}
 
-	err = server_ui.CheckDefaults(OriginServer)
+	originServer := &origin_ui.OriginServer{}
+	err = server_ui.CheckDefaults(originServer)
 	if err != nil {
 		return err
 	}
@@ -93,7 +85,7 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	if err = server_ui.RegisterNamespaceWithRetry(); err != nil {
 		return err
 	}
-	if err = server_ui.PeriodicAdvertise(OriginServer); err != nil {
+	if err = server_ui.PeriodicAdvertise(originServer); err != nil {
 		return err
 	}
 	if param.Origin_EnableIssuer.GetBool() {
