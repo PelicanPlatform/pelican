@@ -339,6 +339,16 @@ type: string
 default: origin
 components: ["origin"]
 ---
+name: Origin.EnableVoms
+description: >-
+  Enable X.509 / VOMS-based authentication.  This allows HTTP clients to
+  present X.509 client credentials in order to authenticate.  The configuration
+  of the authorization for these clients must be done by the admin; Pelican
+  does not support automatic VOMS authorization configuration.
+type: bool
+default: true
+components: ["origin"]
+---
 
 ############################
 #   Cache-level configs    #
@@ -372,6 +382,16 @@ description: >-
   The port over which the xrootd cache should be made available (this will overwrite Xrootd.Port)
 type: int
 default: 8447
+components: ["cache"]
+---
+name: Cache.EnableVoms
+description: >-
+  Enable X.509 / VOMS-based authentication for the cache.  This allows HTTP clients
+  to present X.509 client credentials in order to authenticate.  The configuration
+  of the authorization for these clients must be done by the admin; Pelican
+  does not support automatic VOMS authorization configuration.
+type: bool
+default: false
 components: ["cache"]
 ---
 

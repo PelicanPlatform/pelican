@@ -46,6 +46,7 @@ type (
 
 	CacheConfig struct {
 		UseCmsd        bool
+		EnableVoms     bool
 		ExportLocation string
 		DataLocation   string
 		DirectorUrl    string
