@@ -350,7 +350,7 @@ func CheckXrootdEnv(server server_utils.XRootDServer) error {
 			" to desired daemon group %v", authfile, groupname)
 	}
 
-	if err := EmitAuthfile(server.GetNamespaceAds()); err != nil {
+	if err := EmitAuthfile(server); err != nil {
 		return err
 	}
 

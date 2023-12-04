@@ -39,6 +39,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pkg/errors"
 )
 
@@ -132,7 +133,7 @@ func EmitScitokensConfiguration(cfg *ScitokensCfg) error {
 
 // Parse the input xrootd authfile, add any default configurations, and then save it
 // into the xrootd runtime directory
-func EmitAuthfile(nsAds []director.NamespaceAd) error {
+func EmitAuthfile(server server_utils.XRootDServer) error {
 	authfile := param.Xrootd_Authfile.GetString()
 	contents, err := os.ReadFile(authfile)
 	if err != nil {
@@ -142,29 +143,39 @@ func EmitAuthfile(nsAds []director.NamespaceAd) error {
 	sc := bufio.NewScanner(strings.NewReader(string(contents)))
 	output := new(bytes.Buffer)
 	foundPublicLine := false
-	if nsAds == nil {
-		for sc.Scan() {
-			lineContents := sc.Text()
-			words := strings.Fields(lineContents)
-			if len(words) >= 2 && words[0] == "u" && words[1] == "*" {
+	for sc.Scan() {
+		lineContents := sc.Text()
+		words := strings.Fields(lineContents)
+		// There exists a public access already in the authfile
+		if len(words) >= 2 && words[0] == "u" && words[1] == "*" {
+			if server.GetServerType().IsSet(config.OriginType) {
+				// If Origin, add the ./well-known to the authfile
 				output.Write([]byte("u * /.well-known lr " + strings.Join(words[2:], " ") + "\n"))
-				foundPublicLine = true
 			} else {
-				output.Write([]byte(lineContents + "\n"))
+				output.Write([]byte(lineContents + " "))
 			}
-		}
-		if !foundPublicLine {
-			output.Write([]byte("u * /.well-known lr\n"))
+			foundPublicLine = true
 		}
 	}
+	// If Origin and no authfile already exists, add the ./well-know to the authfile
+	if !foundPublicLine && server.GetServerType().IsSet(config.OriginType) {
 
-	if len(nsAds) != 0 {
-		outStr := "u * "
-		for _, ad := range nsAds {
+		output.Write([]byte("u * /.well-known lr\n"))
+	}
+
+	// For the cache, add the public namespaces
+	if server.GetServerType().IsSet(config.CacheType) {
+		// If nothing has been written to the output yet
+		var outStr string
+		if !foundPublicLine {
+			outStr = "u * "
+		}
+		for _, ad := range server.GetNamespaceAds() {
 			if !ad.RequireToken && ad.BasePath != "" {
 				outStr += ad.BasePath + " lr "
 			}
 		}
+		// A public namespace exists, so a line needs to be printed
 		if len(outStr) > 4 {
 			output.Write([]byte(outStr))
 		}

@@ -28,9 +28,11 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/pelicanplatform/pelican/cache_ui"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -158,7 +160,7 @@ func TestGenerateConfig(t *testing.T) {
 
 func TestWriteCacheAuthFiles(t *testing.T) {
 
-	cacheAuthTester := func(nsAds []director.NamespaceAd, sciTokenResult string, authResult string) func(t *testing.T) {
+	cacheAuthTester := func(server server_utils.XRootDServer, sciTokenResult string, authResult string) func(t *testing.T) {
 		return func(t *testing.T) {
 
 			dirname := t.TempDir()
@@ -170,7 +172,7 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 			err := os.WriteFile(authFile, []byte(""), 0600)
 			assert.NoError(t, err)
 
-			err = WriteCacheScitokensConfig(nsAds)
+			err = WriteCacheScitokensConfig(server.GetNamespaceAds())
 			assert.NoError(t, err)
 
 			sciFile := param.Xrootd_ScitokensConfig.GetString()
@@ -179,7 +181,7 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 
 			assert.Equal(t, string(genSciToken), sciTokenResult)
 
-			err = EmitAuthfile(nsAds)
+			err = EmitAuthfile(server)
 			assert.NoError(t, err)
 
 			authGen, err := os.ReadFile(authFile)
@@ -213,11 +215,15 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 		{RequireToken: false, Issuer: issuer2URL, BasePath: "/p2_noauth"},
 	}
 
-	t.Run("MultiIssuer", cacheAuthTester(nsAds, cacheSciOutput, "u * /p3 lr /p4/depth lr /p2_noauth lr "))
+	cacheServer := &cache_ui.CacheServer{}
+	cacheServer.SetNamespaceAds(nsAds)
+
+	t.Run("MultiIssuer", cacheAuthTester(cacheServer, cacheSciOutput, "u * /p3 lr /p4/depth lr /p2_noauth lr "))
 
 	nsAds = []director.NamespaceAd{}
+	cacheServer.SetNamespaceAds(nsAds)
 
-	t.Run("EmptyNS", cacheAuthTester(nsAds, cacheEmptyOutput, ""))
+	t.Run("EmptyNS", cacheAuthTester(cacheServer, cacheEmptyOutput, ""))
 }
 
 func TestWriteOriginScitokensConfig(t *testing.T) {
