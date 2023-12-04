@@ -23,7 +23,7 @@ Server:
 Director:
   DefaultResponse: cache
 Cache:
-  Port: 8447
+  Port: 8443
 Origin:
   NamespacePrefix: ""
   Multiuser: false
