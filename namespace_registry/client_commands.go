@@ -34,6 +34,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
+	"github.com/pelicanplatform/pelican/token_utils"
 	"github.com/pelicanplatform/pelican/utils"
 	log "github.com/sirupsen/logrus"
 )
@@ -239,7 +240,7 @@ func NamespaceDelete(endpoint string, prefix string) error {
 	now := time.Now()
 	tok, err := jwt.NewBuilder().
 		Issuer(issuerURL).
-		Claim("scope", "pelican.namespace_delete").
+		Claim("scope", token_utils.Pelican_NamespaceDelete.String()).
 		IssuedAt(now).
 		Expiration(now.Add(1 * time.Minute)).
 		NotBefore(now).
