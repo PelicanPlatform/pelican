@@ -36,7 +36,7 @@ func TestResetPassword(t *testing.T) {
 	dirName := t.TempDir()
 	viper.Reset()
 	viper.Set("ConfigDir", dirName)
-	err := config.InitServer()
+	err := config.InitServer(config.OriginType)
 	require.NoError(t, err)
 
 	rootCmd.SetArgs([]string{"origin", "web-ui", "reset-password", "--stdin"})

@@ -76,11 +76,20 @@ type (
 		JwksUri                       string `json:"jwks_uri"`
 	}
 
+	ServerType int
+
 	TokenOperation int
 
 	TokenGenerationOpts struct {
 		Operation TokenOperation
 	}
+)
+
+const (
+	CacheType ServerType = 1 << iota
+	OriginType
+	DirectorType
+	RegistryType
 )
 
 const (
@@ -108,6 +117,24 @@ var (
 	transport     *http.Transport
 	onceTransport sync.Once
 )
+
+func (sType ServerType) IsSet(otherVal ServerType) bool {
+	return sType&otherVal == otherVal
+}
+
+func (sType ServerType) String() string {
+	switch sType {
+	case CacheType:
+		return "Cache"
+	case OriginType:
+		return "Origin"
+	case DirectorType:
+		return "Director"
+	case RegistryType:
+		return "Registry"
+	}
+	return "Unknown"
+}
 
 // Based on the name of the current binary, determine the preferred "style"
 // of behavior.  For example, a binary with the "osdf_" prefix should utilize
@@ -388,9 +415,15 @@ func initConfigDir() error {
 	return nil
 }
 
-func InitServer() error {
+func InitServer(sType ServerType) error {
 	if err := initConfigDir(); err != nil {
 		return errors.Wrap(err, "Failed to initialize the server configuration")
+	}
+	xrootdPrefix := ""
+	if sType.IsSet(OriginType) {
+		xrootdPrefix = "origin"
+	} else if sType.IsSet(CacheType) {
+		xrootdPrefix = "cache"
 	}
 	configDir := viper.GetString("ConfigDir")
 	viper.SetConfigType("yaml")
@@ -408,7 +441,7 @@ func InitServer() error {
 	viper.SetDefault("OIDC.ClientSecretFile", filepath.Join(configDir, "oidc-client-secret"))
 	viper.SetDefault("Cache.ExportLocation", "/")
 	if IsRootExecution() {
-		viper.SetDefault("Xrootd.RunLocation", "/run/pelican/xrootd")
+		viper.SetDefault("Xrootd.RunLocation", filepath.Join("/run", "pelican", "xrootd", xrootdPrefix))
 		viper.SetDefault("Cache.DataLocation", "/run/pelican/xcache")
 		viper.SetDefault("Origin.Multiuser", true)
 		viper.SetDefault("Director.GeoIPLocation", "/var/cache/pelican/maxmind/GeoLite2-City.mmdb")
@@ -420,7 +453,7 @@ func InitServer() error {
 		viper.SetDefault("Monitoring.DataLocation", filepath.Join(configDir, "monitoring/data"))
 
 		if userRuntimeDir := os.Getenv("XDG_RUNTIME_DIR"); userRuntimeDir != "" {
-			runtimeDir := filepath.Join(userRuntimeDir, "pelican")
+			runtimeDir := filepath.Join(userRuntimeDir, "pelican", xrootdPrefix)
 			err := os.MkdirAll(runtimeDir, 0750)
 			if err != nil {
 				return err
@@ -432,7 +465,7 @@ func InitServer() error {
 			if err != nil {
 				return err
 			}
-			viper.SetDefault("Xrootd.RunLocation", dir)
+			viper.SetDefault("Xrootd.RunLocation", filepath.Join(dir, xrootdPrefix))
 			viper.SetDefault("Cache.DataLocation", path.Join(dir, "xcache"))
 			cleanupDirOnShutdown(dir)
 		}
@@ -459,6 +492,9 @@ func InitServer() error {
 	// they have overridden the defaults.
 	hostname = viper.GetString("Server.Hostname")
 
+	if sType.IsSet(CacheType) {
+		viper.Set("Xrootd.Port", param.Cache_Port.GetInt())
+	}
 	xrootdPort := param.Xrootd_Port.GetInt()
 	if xrootdPort != 443 {
 		viper.SetDefault("Origin.Url", fmt.Sprintf("https://%v:%v", param.Server_Hostname.GetString(), xrootdPort))

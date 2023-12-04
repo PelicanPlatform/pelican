@@ -158,6 +158,10 @@ func GetDaemonUser() (string, error) {
 	return xrootdUser.Username, xrootdUser.err
 }
 
+func GetDaemonUserInfo() (User, error) {
+	return xrootdUser, xrootdUser.err
+}
+
 func GetDaemonGID() (int, error) {
 	return xrootdUser.Gid, xrootdUser.err
 }
