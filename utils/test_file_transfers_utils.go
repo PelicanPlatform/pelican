@@ -47,6 +47,7 @@ type (
 	TestFileTransferImpl struct {
 		audienceUrl string
 		issuerUrl   string
+		testType    TestType
 		testBody    string
 	}
 )
@@ -112,7 +113,9 @@ func (t TestFileTransferImpl) generateFileTestScitoken() (string, error) {
 	return string(signed), nil
 }
 
-func (t TestFileTransferImpl) UploadTestfile(baseUrl string, testType TestType) (string, error) {
+// Private function to upload a test file to the `baseUrl` of an exported xrootd file direcotry
+// the test file content is based on the `testType` attribute
+func (t TestFileTransferImpl) uploadTestfile(baseUrl string) (string, error) {
 	tkn, err := t.generateFileTestScitoken()
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to create a token for test file transfer")
@@ -122,7 +125,7 @@ func (t TestFileTransferImpl) UploadTestfile(baseUrl string, testType TestType) 
 	if err != nil {
 		return "", errors.Wrap(err, "The baseUrl is not parseable as a URL")
 	}
-	uploadURL.Path = "/pelican/monitoring/" + testType.String() + "-" + time.Now().Format(time.RFC3339) + ".txt"
+	uploadURL.Path = "/pelican/monitoring/" + t.testType.String() + "-" + time.Now().Format(time.RFC3339) + ".txt"
 
 	req, err := http.NewRequest("PUT", uploadURL.String(), bytes.NewBuffer([]byte(t.testBody)))
 	if err != nil {
@@ -146,7 +149,9 @@ func (t TestFileTransferImpl) UploadTestfile(baseUrl string, testType TestType) 
 	return uploadURL.String(), nil
 }
 
-func (t TestFileTransferImpl) DownloadTestfile(downloadUrl string) error {
+// Private function to download a file from downloadUrl and make sure it matches the test file
+// content based on the `testBody` attribute
+func (t TestFileTransferImpl) downloadTestfile(downloadUrl string) error {
 	tkn, err := t.generateFileTestScitoken()
 	if err != nil {
 		return errors.Wrap(err, "Failed to create a token for test file transfer download")
@@ -181,7 +186,8 @@ func (t TestFileTransferImpl) DownloadTestfile(downloadUrl string) error {
 	return nil
 }
 
-func (t TestFileTransferImpl) DeleteTestfile(fileUrl string) error {
+// Private function to delete a test file from `fileUrl`
+func (t TestFileTransferImpl) deleteTestfile(fileUrl string) error {
 	tkn, err := t.generateFileTestScitoken()
 	if err != nil {
 		return errors.Wrap(err, "Failed to create a token for the test file transfer deletion")
@@ -208,9 +214,20 @@ func (t TestFileTransferImpl) DeleteTestfile(fileUrl string) error {
 	return nil
 }
 
+// Run a file transfer test suite with upload/download/delete a test file from
+// the server and a xrootd service. It expects `baseUrl` to be the url to the xrootd
+// endpoint, `issuerUrl` be the url to issue scitoken for file transfer, and the
+// test file content/name be based on `testType`
+//
+// Note that for this test to work, you need to have the `issuerUrl` registered in
+// your xrootd as a list of trusted token issuers and the issuer is expected to follow
+// WLCG rules for issuer metadata discovery and public key access
+//
+// Read more: https://github.com/WLCG-AuthZ-WG/common-jwt-profile/blob/master/profile.md#token-verification
 func (t TestFileTransferImpl) RunTests(baseUrl, issuerUrl string, testType TestType) (bool, error) {
 	t.audienceUrl = baseUrl
 	t.issuerUrl = issuerUrl
+	t.testType = testType
 	if testType == OriginSelfFileTest {
 		t.testBody = selfTestBody
 	} else if testType == DirectorFileTest {
@@ -219,15 +236,15 @@ func (t TestFileTransferImpl) RunTests(baseUrl, issuerUrl string, testType TestT
 		return false, errors.New("Unsupported testType: " + testType.String())
 	}
 
-	downloadUrl, err := t.UploadTestfile(baseUrl, testType)
+	downloadUrl, err := t.uploadTestfile(baseUrl)
 	if err != nil {
 		return false, errors.Wrap(err, "Test file transfer failed during upload")
 	}
-	err = t.DownloadTestfile(downloadUrl)
+	err = t.downloadTestfile(downloadUrl)
 	if err != nil {
 		return false, errors.Wrap(err, "Test file transfer failed during download")
 	}
-	err = t.DeleteTestfile(downloadUrl)
+	err = t.deleteTestfile(downloadUrl)
 	if err != nil {
 		return false, errors.Wrap(err, "Test file transfer failed during delete")
 	}
