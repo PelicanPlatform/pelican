@@ -268,24 +268,11 @@ func download_http(source string, destination string, payload *payloadStruct, na
 	// Check the env var "USE_OSDF_DIRECTOR" and decide if ordered caches should come from director
 	var transfers []TransferDetails
 	var files []string
-	var closestNamespaceCaches []CacheInterface
-	if OSDFDirectorUrl != "" {
-		log.Debugln("Using OSDF Director at ", OSDFDirectorUrl)
-		closestNamespaceCaches = make([]CacheInterface, len(namespace.SortedDirectorCaches))
-		for i, v := range namespace.SortedDirectorCaches {
-			closestNamespaceCaches[i] = v
-		}
-	} else {
-		tmpCaches, err := GetCachesFromNamespace(namespace)
-		if err != nil {
-			log.Errorln("Failed to get namespaced caches (treated as non-fatal):", err)
-		}
-
-		closestNamespaceCaches = make([]CacheInterface, len(tmpCaches))
-		for i, v := range tmpCaches {
-			closestNamespaceCaches[i] = v
-		}
+	closestNamespaceCaches, err := GetCachesFromNamespace(namespace, OSDFDirectorUrl != "")
+	if err != nil {
+		log.Errorln("Failed to get namespaced caches (treated as non-fatal):", err)
 	}
+
 	log.Debugln("Matched caches:", closestNamespaceCaches)
 
 	// Make sure we only try as many caches as we have
