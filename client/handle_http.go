@@ -20,7 +20,6 @@ package client
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -38,6 +37,7 @@ import (
 	"time"
 
 	grab "github.com/cavaliercoder/grab"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/studio-b12/gowebdav"
 	"github.com/vbauerster/mpb/v8"
@@ -487,6 +487,7 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 		headResponse, err := headClient.Do(headRequest)
 		if err != nil {
 			log.Errorln("Could not successfully get response for HEAD request")
+			return 0, errors.Wrap(err, "Could not determine the size of the remote object")
 		}
 		defer headResponse.Body.Close()
 		contentLengthStr := headResponse.Header.Get("Content-Length")
