@@ -25,19 +25,20 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
-
-	"github.com/minio/minio-go/v7"
-	"github.com/minio/minio-go/v7/pkg/credentials"
-	"os/exec"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/daemon"
 	"github.com/pelicanplatform/pelican/origin_ui"
 	"github.com/pelicanplatform/pelican/param"
+
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
@@ -67,7 +68,16 @@ func originMockup(t *testing.T) context.CancelFunc {
 	err = CheckXrootdEnv(true, nil)
 	require.NoError(t, err)
 
-	err = SetUpMonitoring()
+	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	defer func() {
+		shutdownCancel()
+		wg.Wait()
+	}()
+
+	err = SetUpMonitoring(shutdownCtx, &wg)
 	require.NoError(t, err)
 
 	configPath, err := ConfigXrootd(true)
