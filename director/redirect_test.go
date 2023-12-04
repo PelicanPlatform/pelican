@@ -394,7 +394,7 @@ func TestDiscoverOrigins(t *testing.T) {
 
 		tok, err := jwt.NewBuilder().
 			Issuer(tokenIssuerString).
-			Claim("scope", "pelican.directorSD").
+			Claim("scope", token_utils.Pelican_DirectorServiceDiscovery).
 			Audience([]string{"director.test"}).
 			Subject("director").
 			Expiration(time.Now().Add(time.Hour)).
