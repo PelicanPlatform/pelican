@@ -61,7 +61,7 @@ func getConfigValues(ctx *gin.Context) {
 	ctx.JSON(200, config)
 }
 
-func configureWebUI(engine *gin.Engine) error {
+func configureWebResource(engine *gin.Engine) error {
 	engine.GET("/view/*path", func(ctx *gin.Context) {
 		path := ctx.Param("path")
 
@@ -179,7 +179,7 @@ func ConfigureServerWebAPI(engine *gin.Engine, isDirector bool) error {
 	if err := configureCommonEndpoints(engine); err != nil {
 		return err
 	}
-	if err := configureWebUI(engine); err != nil {
+	if err := configureWebResource(engine); err != nil {
 		return err
 	}
 	if err := configureMetrics(engine, isDirector); err != nil {
