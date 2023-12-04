@@ -61,7 +61,7 @@ const FederationOverview = () => {
     return (
 
         <Box>
-            {!Object.values(config).every(x => x == undefined) ? <Typography variant="h4">Federation Overview</Typography> : null}
+            {!Object.values(config).every(x => x == undefined) ? <Typography variant={"h4"} component={"h2"}  mb={2}>Federation Overview</Typography> : null}
             {config?.NamespaceUrl ?
                 <LinkBox href={config?.NamespaceUrl} text={"Namespace Registry"}/> : null
             }

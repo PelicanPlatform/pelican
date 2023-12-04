@@ -79,7 +79,7 @@ export default function Home() {
                     </Box>
                 </Grid>
                 <Grid item xs={12} lg={4}>
-                    <Typography variant={"h4"} component={"h2"} mb={1}>Data Exports</Typography>
+                    <Typography variant={"h4"} component={"h2"} mb={2}>Data Exports</Typography>
                     <Box sx={{backgroundColor: "#F6F6F6", borderRadius: "1rem", overflow: "hidden"}}>
                         <DataExportTable/>
                     </Box>

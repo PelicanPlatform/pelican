@@ -11,7 +11,7 @@ interface Record {
 interface ExportData extends Record {
     "Type": string
     "Local Path": string
-    "Routing Key": string
+    "Namespace Prefix": string
 }
 
 export const TableCellOverflow: FunctionComponent<any> = ({ children, ...props }) => {
@@ -79,7 +79,7 @@ export const DataExportTable = () => {
             setData([{
                 "Type": "POSIX",
                 "Local Path": ["", undefined].includes(responseData?.Xrootd?.Mount) ? "NULL" : responseData?.Xrootd?.Mount,
-                "Routing Key": ["", undefined].includes(responseData?.Origin?.NamespacePrefix) ? "NULL" : responseData?.Origin?.NamespacePrefix
+                "Namespace Prefix": ["", undefined].includes(responseData?.Origin?.NamespacePrefix) ? "NULL" : responseData?.Origin?.NamespacePrefix
             }])
 
         } else {
