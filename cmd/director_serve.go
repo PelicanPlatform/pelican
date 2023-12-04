@@ -19,9 +19,11 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 
 	"github.com/pelicanplatform/pelican/config"
@@ -33,6 +35,18 @@ import (
 )
 
 func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
+	// Use this context for any goroutines that needs to react to server shutdown
+	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
+	// Use this wait group to ensure the goroutines can finish before the server exits/shutdown
+	var wg sync.WaitGroup
+
+	// This anonymous function ensures we cancel any context and wait for those goroutines to
+	// finish their cleanup work before the server exits
+	defer func() {
+		shutdownCancel()
+		wg.Wait()
+	}()
+
 	log.Info("Initializing Director GeoIP database...")
 	director.InitializeDB()
 
@@ -47,6 +61,9 @@ func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	}
 	go director.PeriodicCacheReload()
 
+	wg.Add(1)
+	director.ConfigTTLCache(shutdownCtx, &wg)
+
 	engine, err := web_ui.GetEngine()
 	if err != nil {
 		return err
@@ -55,7 +72,7 @@ func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	// We configure Prometheus differently for director than for the rest servers,
 	// although in the future we probably want to pass the server type to the
 	// metric config function just because each server may have different config
-	if err := web_ui.ConfigureMetrics(engine, true); err != nil {
+	if err := web_ui.ConfigureServerWebAPI(engine, true); err != nil {
 		return err
 	}
 
@@ -74,6 +91,8 @@ func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
 
 	log.Info("Starting web engine...")
 	go web_ui.RunEngine(engine)
+
+	go web_ui.InitServerWebLogin()
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)

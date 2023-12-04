@@ -17,13 +17,13 @@ package web_ui
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -36,9 +36,10 @@ import (
 	"github.com/grafana/regexp"
 	"github.com/mwitkow/go-conntrack"
 	"github.com/oklog/run"
-	pelican_config "github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/utils"
+	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/common/version"
@@ -161,9 +162,9 @@ func promQueryEngineAuthHandler(av1 *route.Router) gin.HandlerFunc {
 
 // Configure director's Prometheus scraper to use HTTP service discovery for origins
 func configDirectorPromScraper() (*config.ScrapeConfig, error) {
-	originDiscoveryUrl, err := url.Parse("https://" + pelican_config.ComputeExternalAddress())
+	originDiscoveryUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
 	if err != nil {
-		return nil, fmt.Errorf("parse external URL https://%v: %w", pelican_config.ComputeExternalAddress(), err)
+		return nil, fmt.Errorf("parse external URL %v: %w", param.Server_ExternalWebUrl.GetString(), err)
 	}
 	sdToken, err := director.CreateDirectorSDToken()
 	if err != nil {
@@ -177,6 +178,15 @@ func configDirectorPromScraper() (*config.ScrapeConfig, error) {
 	scrapeConfig := config.DefaultScrapeConfig
 	scrapeConfig.JobName = "origins"
 	scrapeConfig.Scheme = "https"
+
+	// This will cause the director to maintain a CA bundle, including the custom CA, at
+	// the given location.  Makes up for the fact we can't provide Prometheus with a transport
+	caBundle := filepath.Join(param.Monitoring_DataLocation.GetString(), "ca-bundle.crt")
+	caCount, err := utils.PeriodicWriteCABundle(caBundle, 2*time.Minute)
+	if err != nil {
+		return nil, errors.Wrap(err, "Unable to generate CA bundle for prometheus")
+	}
+
 	scraperHttpClientConfig := common_config.HTTPClientConfig{
 		TLSConfig: common_config.TLSConfig{
 			// For the scraper to origins' metrics, we get TLSSkipVerify from config
@@ -189,6 +199,10 @@ func configDirectorPromScraper() (*config.ScrapeConfig, error) {
 			Credentials: common_config.Secret(scraperToken),
 		},
 	}
+	if caCount > 0 {
+		scraperHttpClientConfig.TLSConfig.CAFile = caBundle
+	}
+
 	scrapeConfig.HTTPClientConfig = scraperHttpClientConfig
 	scrapeConfig.ServiceDiscoveryConfigs = make([]discovery.Config, 1)
 	sdHttpClientConfig := common_config.HTTPClientConfig{
@@ -275,7 +289,7 @@ func (a LogrusAdapter) Log(keyvals ...interface{}) error {
 
 func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 	cfg := flagConfig{}
-	ListenAddress := fmt.Sprintf("0.0.0.0:%v", param.Server_Port.GetInt())
+	ListenAddress := fmt.Sprintf("0.0.0.0:%v", param.Server_WebPort.GetInt())
 	cfg.webTimeout = model.Duration(5 * time.Minute)
 	cfg.serverStoragePath = param.Monitoring_DataLocation.GetString()
 
@@ -320,9 +334,9 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 
 	localStoragePath := cfg.serverStoragePath
 
-	external_url, err := url.Parse("https://" + pelican_config.ComputeExternalAddress())
+	external_url, err := url.Parse(param.Server_ExternalWebUrl.GetString())
 	if err != nil {
-		return fmt.Errorf("parse external URL https://%v: %w", pelican_config.ComputeExternalAddress(), err)
+		return fmt.Errorf("parse external URL %v: %w", param.Server_ExternalWebUrl.GetString(), err)
 	}
 
 	CORSOrigin, err := compileCORSRegexString(".*")
@@ -357,10 +371,12 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 	}
 	scrapeConfig.HTTPClientConfig = scraperHttpClientConfig
 	scrapeConfig.ServiceDiscoveryConfigs = make([]discovery.Config, 1)
+	// model.AddressLabel needs a hostname (w/ port), so we cut the protocol here
+	externalAddressWoProtocol, _ := strings.CutPrefix(param.Server_ExternalWebUrl.GetString(), "https://")
 	scrapeConfig.ServiceDiscoveryConfigs[0] = discovery.StaticConfig{
 		&targetgroup.Group{
 			Targets: []model.LabelSet{{
-				model.AddressLabel: model.LabelValue(pelican_config.ComputeExternalAddress()),
+				model.AddressLabel: model.LabelValue(externalAddressWoProtocol),
 			}},
 		},
 	}
@@ -628,6 +644,11 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 		g.Add(
 			func() error {
 				refreshInterval := param.Monitoring_TokenRefreshInterval.GetDuration()
+				if refreshInterval <= 0 {
+					err := level.Warn(logger).Log("msg", "Refresh interval is non-positive value. Stop reloading.")
+					_ = err
+					return errors.New("Refresh interval is non-positive value. Stop reloading.")
+				}
 				ticker := time.NewTicker(refreshInterval)
 				for {
 					select {

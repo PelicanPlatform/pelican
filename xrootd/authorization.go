@@ -63,13 +63,21 @@ type (
 
 	// Top-level configuration object for the template
 	ScitokensCfg struct {
-		Global  GlobalCfg
-		Issuers []Issuer
+		Global    GlobalCfg
+		IssuerMap map[string]Issuer
 	}
 
 	openIdConfig struct {
-		Issuer  string `json:"issuer"`
-		JWKSURI string `json:"jwks_uri"`
+		Issuer               string   `json:"issuer"`
+		JWKSURI              string   `json:"jwks_uri"`
+		TokenEndpoint        string   `json:"token_endpoint,omitempty"`
+		UserInfoEndpoint     string   `json:"userinfo_endpoint,omitempty"`
+		RevocationEndpoint   string   `json:"revocation_endpoint,omitempty"`
+		GrantTypesSupported  []string `json:"grant_types_supported,omitempty"`
+		ScopesSupported      []string `json:"scopes_supported,omitempty"`
+		TokenAuthMethods     []string `json:"token_endpoint_auth_methods_supported,omitempty"`
+		RegistrationEndpoint string   `json:"registration_endpoint,omitempty"`
+		DeviceEndpoint       string   `json:"device_authorization_endpoint,omitempty"`
 	}
 )
 
@@ -185,6 +193,8 @@ func LoadScitokensConfig(fileName string) (cfg ScitokensCfg, err error) {
 		return cfg, errors.Wrapf(err, "Unable to load the scitokens.cfg at %s", fileName)
 	}
 
+	cfg.IssuerMap = make(map[string]Issuer)
+
 	if section, err := configIni.GetSection("Global"); err == nil {
 		audienceKey := section.Key("audience")
 		if audienceKey != nil {
@@ -208,6 +218,7 @@ func LoadScitokensConfig(fileName string) (cfg ScitokensCfg, err error) {
 		if !strings.HasPrefix(sectionName.Name(), "Issuer ") {
 			continue
 		}
+
 		var newIssuer Issuer
 		newIssuer.Name = sectionName.Name()[len("Issuer "):]
 		if issuerKey := sectionName.Key("issuer"); issuerKey != nil {
@@ -236,7 +247,7 @@ func LoadScitokensConfig(fileName string) (cfg ScitokensCfg, err error) {
 			newIssuer.UsernameClaim = usernameClaimKey.String()
 		}
 
-		cfg.Issuers = append(cfg.Issuers, newIssuer)
+		cfg.IssuerMap[newIssuer.Issuer] = newIssuer
 	}
 
 	return cfg, nil
@@ -271,6 +282,19 @@ func GenerateOriginIssuer(exportedPaths []string) (issuer Issuer, err error) {
 	return
 }
 
+// We have a special issuer just for self-monitoring the origin.
+func GenerateDirectorMonitoringIssuer() (issuer Issuer, err error) {
+	if val := param.Federation_DirectorUrl.GetString(); val == "" {
+		return
+	}
+	issuer.Name = "Director-based Monitoring"
+	issuer.Issuer = param.Federation_DirectorUrl.GetString()
+	issuer.BasePaths = []string{"/pelican/monitoring"}
+	issuer.DefaultUser = "xrootd"
+
+	return
+}
+
 // Writes out the origin's scitokens.cfg configuration
 func WriteOriginScitokensConfig(exportedPaths []string) error {
 
@@ -281,6 +305,7 @@ func WriteOriginScitokensConfig(exportedPaths []string) error {
 
 	// Create the scitokens.cfg file if it's not already present
 	scitokensCfg := param.Xrootd_ScitokensConfig.GetString()
+
 	err = config.MkdirAll(filepath.Dir(scitokensCfg), 0755, -1, gid)
 	if err != nil {
 		return errors.Wrapf(err, "Unable to create directory %v",
@@ -302,13 +327,30 @@ func WriteOriginScitokensConfig(exportedPaths []string) error {
 	}
 
 	if issuer, err := GenerateMonitoringIssuer(); err == nil && len(issuer.Name) > 0 {
-		cfg.Issuers = append(cfg.Issuers, issuer)
-		cfg.Global.Audience = append(cfg.Global.Audience, issuer.Issuer)
+		if val, ok := cfg.IssuerMap[issuer.Issuer]; ok {
+			val.BasePaths = append(val.BasePaths, issuer.BasePaths...)
+			cfg.IssuerMap[issuer.Issuer] = val
+		} else {
+			cfg.IssuerMap[issuer.Issuer] = issuer
+			cfg.Global.Audience = append(cfg.Global.Audience, issuer.Issuer)
+		}
 	}
-
 	if issuer, err := GenerateOriginIssuer(exportedPaths); err == nil && len(issuer.Name) > 0 {
-		cfg.Issuers = append(cfg.Issuers, issuer)
-		cfg.Global.Audience = append(cfg.Global.Audience, issuer.Issuer)
+		if val, ok := cfg.IssuerMap[issuer.Issuer]; ok {
+			val.BasePaths = append(val.BasePaths, issuer.BasePaths...)
+			cfg.IssuerMap[issuer.Issuer] = val
+		} else {
+			cfg.IssuerMap[issuer.Issuer] = issuer
+			cfg.Global.Audience = append(cfg.Global.Audience, issuer.Issuer)
+		}
+	}
+	if issuer, err := GenerateDirectorMonitoringIssuer(); err == nil && len(issuer.Name) > 0 {
+		if val, ok := cfg.IssuerMap[issuer.Issuer]; ok {
+			val.BasePaths = append(val.BasePaths, issuer.BasePaths...)
+			cfg.IssuerMap[issuer.Issuer] = val
+		} else {
+			cfg.IssuerMap[issuer.Issuer] = issuer
+		}
 	}
 
 	return EmitScitokensConfiguration(&cfg)
@@ -362,6 +404,21 @@ func EmitIssuerMetadata(exportPath string) error {
 		Issuer:  param.Origin_Url.GetString(),
 		JWKSURI: jwksUrl.String(),
 	}
+
+	// If we have the built-in issuer enabled, fill in the URLs for OA4MP
+	if param.Origin_EnableIssuer.GetBool() {
+		serviceUri := param.Server_ExternalWebUrl.GetString() + "/api/v1.0/issuer"
+		cfg.TokenEndpoint = serviceUri + "/token"
+		cfg.UserInfoEndpoint = serviceUri + "/userinfo"
+		cfg.RevocationEndpoint = serviceUri + "/revoke"
+		cfg.GrantTypesSupported = []string{"refresh_token", "urn:ietf:params:oauth:grant-type:device_code", "authorization_code"}
+		cfg.ScopesSupported = []string{"openid", "offline_access", "wlcg", "storage.read:/",
+			"storage.modify:/", "storage.create:/"}
+		cfg.TokenAuthMethods = []string{"client_secret_basic", "client_secret_post"}
+		cfg.RegistrationEndpoint = serviceUri + "/oidc-cm"
+		cfg.DeviceEndpoint = serviceUri + "/device_authorization"
+	}
+
 	buf, err = json.MarshalIndent(cfg, "", " ")
 	if err != nil {
 		return errors.Wrap(err, "Failed to marshal OpenID configuration file contents")

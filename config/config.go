@@ -246,14 +246,6 @@ func CleanupTempResources() {
 	})
 }
 
-func ComputeExternalAddress() string {
-	config_url := param.Server_ExternalAddress.GetString()
-	if config_url != "" {
-		return config_url
-	}
-	return fmt.Sprintf("%v:%v", param.Server_Hostname.GetString(), param.Server_Port.GetInt())
-}
-
 func getConfigBase() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -410,8 +402,8 @@ func InitServer() error {
 	viper.SetDefault("Xrootd.Authfile", filepath.Join(configDir, "xrootd", "authfile"))
 	viper.SetDefault("Xrootd.MacaroonsKeyFile", filepath.Join(configDir, "macaroons-secret"))
 	viper.SetDefault("IssuerKey", filepath.Join(configDir, "issuer.jwk"))
-	viper.SetDefault("Origin.UIPasswordFile", filepath.Join(configDir, "origin-ui-passwd"))
-	viper.SetDefault("Origin.UIActivationCodeFile", filepath.Join(configDir, "origin-ui-activation-code"))
+	viper.SetDefault("Server.UIPasswordFile", filepath.Join(configDir, "server-web-passwd"))
+	viper.SetDefault("Server.UIActivationCodeFile", filepath.Join(configDir, "server-web-activation-code"))
 	viper.SetDefault("OIDC.ClientIDFile", filepath.Join(configDir, "oidc-client-id"))
 	viper.SetDefault("OIDC.ClientSecretFile", filepath.Join(configDir, "oidc-client-secret"))
 	viper.SetDefault("Cache.ExportLocation", "/")
@@ -463,12 +455,22 @@ func InitServer() error {
 	}
 	viper.SetDefault("Server.Hostname", hostname)
 	viper.SetDefault("Xrootd.Sitename", hostname)
+	// For the rest of the function, use the hostname provided by the admin if
+	// they have overridden the defaults.
+	hostname = viper.GetString("Server.Hostname")
 
-	port := param.Xrootd_Port.GetInt()
-	if port != 443 {
-		viper.SetDefault("Origin.Url", fmt.Sprintf("https://%v:%v", param.Server_Hostname.GetString(), port))
+	xrootdPort := param.Xrootd_Port.GetInt()
+	if xrootdPort != 443 {
+		viper.SetDefault("Origin.Url", fmt.Sprintf("https://%v:%v", param.Server_Hostname.GetString(), xrootdPort))
 	} else {
 		viper.SetDefault("Origin.Url", fmt.Sprintf("https://%v", param.Server_Hostname.GetString()))
+	}
+
+	webPort := param.Server_WebPort.GetInt()
+	viper.SetDefault("Server.ExternalWebUrl", fmt.Sprint("https://", hostname, ":", webPort))
+	externalAddressStr := param.Server_ExternalWebUrl.GetString()
+	if _, err = url.Parse(externalAddressStr); err != nil {
+		return errors.Wrap(err, fmt.Sprint("Invalid Server.ExternalWebUrl: ", externalAddressStr))
 	}
 
 	setupTransport()
@@ -477,12 +479,14 @@ func InitServer() error {
 	tokenExpiresIn := param.Monitoring_TokenExpiresIn.GetDuration()
 
 	if tokenExpiresIn == 0 || tokenRefreshInterval == 0 || tokenRefreshInterval > tokenExpiresIn {
-		log.Warningln("Invalid Monitoring.TokenRefreshInterval or Monitoring.TokenExpiresIn. Value may be zero or valid time <= refresh interval. You may experience intermittent authorization failure for requests with these token")
+		viper.Set("Monitoring.TokenRefreshInterval", time.Minute*59)
+		viper.Set("Monitoring.TokenExpiresIn", time.Hour*1)
+		log.Warningln("Invalid Monitoring.TokenRefreshInterval or Monitoring.TokenExpiresIn. Fallback to 59m for refresh interval and 1h for valid interval")
 	}
 
 	// Unmarshal Viper config into a Go struct
-	err = param.UnmarshalConfig()
-	if err != nil {
+	unmarshalledConfig, err := param.UnmarshalConfig()
+	if err != nil || unmarshalledConfig == nil {
 		return err
 	}
 
@@ -619,8 +623,8 @@ func InitClient() error {
 	setupTransport()
 
 	// Unmarshal Viper config into a Go struct
-	err = param.UnmarshalConfig()
-	if err != nil {
+	unmarshalledConfig, err := param.UnmarshalConfig()
+	if err != nil || unmarshalledConfig == nil {
 		return err
 	}
 

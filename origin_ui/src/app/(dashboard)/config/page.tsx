@@ -35,7 +35,7 @@ import {isLoggedIn} from "@/helpers/login";
 
 type duration = number | `${number}${"ns" | "us" | "µs" | "ms" |"s" | "m" | "h"}`;
 
-type Config = {
+export type Config = {
     [key: string]: ConfigValue
 }
 

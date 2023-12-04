@@ -24,7 +24,7 @@ import RateGraph from "@/components/graphs/RateGraph";
 import StatusBox from "@/components/StatusBox";
 import {DataExportTable} from "@/components/DataExportTable";
 import {TimeDuration} from "@/components/graphs/prometheus";
-
+import FederationOverview from "@/components/FederationOverview";
 
 export default function Home() {
 
@@ -83,6 +83,9 @@ export default function Home() {
                     <Box sx={{backgroundColor: "#F6F6F6", borderRadius: "1rem", overflow: "hidden"}}>
                         <DataExportTable/>
                     </Box>
+                </Grid>
+                <Grid item xs={12} lg={4}>
+                    <FederationOverview/>
                 </Grid>
             </Grid>
 

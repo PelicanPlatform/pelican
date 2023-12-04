@@ -61,6 +61,9 @@ function StatusDisplay({component, status, message}: StatusDisplayProps) {
         case "federation":
             component = "Federation"
             break
+        case "director":
+            component = "Director"
+            break
         default:
     }
 

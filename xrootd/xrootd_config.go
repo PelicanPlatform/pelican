@@ -2,6 +2,7 @@ package xrootd
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	_ "embed"
 	"encoding/base64"
@@ -10,13 +11,16 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 	"text/template"
+	"time"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/origin_ui"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
@@ -108,6 +112,23 @@ func CheckXrootdEnv(origin bool, nsAds []director.NamespaceAd) error {
 	if err = os.Chown(runtimeDir, uid, -1); err != nil {
 		return errors.Wrapf(err, "Unable to change ownership of runtime directory %v"+
 			" to desired daemon user %v", runtimeDir, username)
+	}
+
+	// The scitokens library will write its JWKS cache into the user's home direct by
+	// default.  By setting $XDG_CACHE_HOME, we move the JWKS cache into our runtime dir.
+	// This makes the Pelican instance more self-contained inside the runtime dir -- and two
+	// Pelican instances (such as parallel unit tests) don't end up sharing the JWKS caches,
+	// or sharing JWKS caches between test runs
+	cacheDir := filepath.Join(runtimeDir, "jwksCache")
+	if err = config.MkdirAll(cacheDir, 0700, uid, gid); err != nil {
+		return errors.Wrapf(err, "Unable to create cache directory %v", cacheDir)
+	}
+	if err = os.Chown(cacheDir, uid, -1); err != nil {
+		return errors.Wrapf(err, "Unable to change ownership of the cache directory %v"+
+			" to desired daemon user %v", cacheDir, username)
+	}
+	if err = os.Setenv("XDG_CACHE_HOME", cacheDir); err != nil {
+		return errors.Wrap(err, "Unable to set $XDG_CACHE_HOME for scitokens library")
 	}
 
 	exportPath := filepath.Join(runtimeDir, "export")
@@ -218,10 +239,11 @@ to export the directory /mnt/foo to the path /bar in the data federation`)
 	}
 
 	if origin {
-		if param.Origin_SelfTest.GetBool() {
-			if err := origin_ui.ConfigureXrootdMonitoringDir(); err != nil {
-				return err
-			}
+		// We create this monitor directory regardless of Origin.SelfTest flag
+		// because we want to ensure director-based tests always have
+		// access to the monitoring directory, for now
+		if err := origin_ui.ConfigureXrootdMonitoringDir(); err != nil {
+			return err
 		}
 	}
 
@@ -330,6 +352,15 @@ func ConfigXrootd(origin bool) (string, error) {
 		return "", err
 	}
 
+	runtimeCAs := filepath.Join(param.Xrootd_RunLocation.GetString(), "ca-bundle.crt")
+	caCount, err := utils.PeriodicWriteCABundle(runtimeCAs, 2*time.Minute)
+	if err != nil {
+		return "", errors.Wrap(err, "Failed to setup the runtime CA bundle")
+	}
+	if caCount > 0 {
+		xrdConfig.Server.TLSCACertificateFile = runtimeCAs
+	}
+
 	if origin {
 		if xrdConfig.Origin.Multiuser {
 			ok, err := config.HasMultiuserCaps()
@@ -381,8 +412,12 @@ func ConfigXrootd(origin bool) (string, error) {
 	return configPath, nil
 }
 
-func SetUpMonitoring() error {
-	monitorPort, err := metrics.ConfigureMonitoring()
+// Set up xrootd monitoring
+//
+// The `ctx` is the context for listening to server shutdown event in order to cleanup internal cache eviction
+// goroutine and `wg` is the wait group to notify when the clean up goroutine finishes
+func SetUpMonitoring(ctx context.Context, wg *sync.WaitGroup) error {
+	monitorPort, err := metrics.ConfigureMonitoring(ctx, wg)
 	if err != nil {
 		return err
 	}

@@ -45,7 +45,7 @@ func TestResetPassword(t *testing.T) {
 	err = rootCmd.Execute()
 	require.NoError(t, err)
 
-	fileName := param.Origin_UIPasswordFile.GetString()
+	fileName := param.Server_UIPasswordFile.GetString()
 	auth, err := htpasswd.New(fileName, []htpasswd.PasswdParser{htpasswd.AcceptBcrypt}, nil)
 	require.NoError(t, err)
 

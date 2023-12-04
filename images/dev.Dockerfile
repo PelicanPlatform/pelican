@@ -1,7 +1,7 @@
 
 # We specify the platform as scitokens-oauth2-server didn't publish arm version and we don't want to
 # fail on building this container on arm machine
-FROM --platform=linux/amd64 hub.opensciencegrid.org/sciauth/scitokens-oauth2-server:release AS scitokens-oauth2-server
+FROM --platform=linux/amd64 hub.opensciencegrid.org/sciauth/scitokens-oauth2-server:release-20231118-1823 AS scitokens-oauth2-server
 
 FROM almalinux:8
 

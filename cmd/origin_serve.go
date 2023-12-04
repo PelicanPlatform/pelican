@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"sync"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/daemon"
@@ -100,22 +101,22 @@ func checkDefaults(origin bool, nsAds []director.NamespaceAd) error {
 	return nil
 }
 
-func webUiInitialize() {
-	metrics.SetComponentHealthStatus(metrics.Server_WebUI, metrics.StatusWarning, "Authentication not initialized")
-
-	// Ensure we wait until the origin has been initialized
-	// before launching XRootD.
-	if err := origin_ui.WaitUntilLogin(context.Background()); err != nil {
-		log.Errorln("Failure when waiting for web UI to be initialized:", err)
-		return
-	}
-	metrics.SetComponentHealthStatus(metrics.Server_WebUI, metrics.StatusOK, "")
-}
-
 func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
-	defer config.CleanupTempResources()
+	// Use this context for any goroutines that needs to react to server shutdown
+	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
+	// Use this wait group to ensure the goroutines can finish before the server exits/shutdown
+	var wg sync.WaitGroup
 
-	err := xrootd.SetUpMonitoring()
+	// This anonymous function ensures we cancel any context and wait for those goroutines to
+	// finish their cleanup work before the server exits
+	defer func() {
+		shutdownCancel()
+		wg.Wait()
+		config.CleanupTempResources()
+	}()
+
+	wg.Add(1)
+	err := xrootd.SetUpMonitoring(shutdownCtx, &wg)
 	if err != nil {
 		return err
 	}
@@ -130,11 +131,18 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		return err
 	}
 
-	if err := web_ui.ConfigureMetrics(engine, false); err != nil {
-		return err
+	if param.Origin_EnableUI.GetBool() {
+		// Set up necessary APIs to support Web UI, including auth and metrics
+		if err := web_ui.ConfigureServerWebAPI(engine, false); err != nil {
+			return err
+		}
+
+		// Mount the UI resources
+		origin_ui.ConfigOriginUI(engine)
 	}
 
-	if err = origin_ui.ConfigureOriginUI(engine); err != nil {
+	// Set up the APIs unrelated to UI, which only contains director-based health test reporting endpoint for now
+	if err = origin_ui.ConfigureOriginAPI(engine); err != nil {
 		return err
 	}
 	if err = origin_ui.RegisterNamespaceWithRetry(); err != nil {
@@ -150,7 +158,10 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	}
 
 	go web_ui.RunEngine(engine)
-	go webUiInitialize()
+
+	if param.Origin_EnableUI.GetBool() {
+		go web_ui.InitServerWebLogin()
+	}
 
 	configPath, err := xrootd.ConfigXrootd(true)
 	if err != nil {
@@ -175,7 +186,8 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		launchers = append(launchers, oa4mp_launcher)
 	}
 
-	if err = daemon.LaunchDaemons(launchers); err != nil {
+	ctx := context.Background()
+	if err = daemon.LaunchDaemons(ctx, launchers); err != nil {
 		return err
 	}
 	log.Info("Clean shutdown of the origin")

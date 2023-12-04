@@ -46,7 +46,7 @@ export default function Home() {
 
         console.log(`Submitting code ${code}`)
 
-        let response = await fetch("/api/v1.0/origin-ui/initLogin", {
+        let response = await fetch("/api/v1.0/auth/initLogin", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json"

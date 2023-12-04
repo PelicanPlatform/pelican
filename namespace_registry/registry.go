@@ -314,12 +314,15 @@ func validateNSPath(nspath string) (string, error) {
 Handler functions called upon by the gin router
 */
 func cliRegisterNamespace(ctx *gin.Context) {
+
 	var reqData registrationData
 	if err := ctx.BindJSON(&reqData); err != nil {
 		log.Errorln("Bad request: ", err)
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Bad Request"})
 		return
 	}
+
+	client := http.Client{Transport: config.GetTransport()}
 
 	if reqData.AccessToken != "" {
 		payload := url.Values{}
@@ -332,7 +335,7 @@ func cliRegisterNamespace(ctx *gin.Context) {
 			return
 		}
 
-		resp, err := http.PostForm(oidcConfig.Endpoint.UserInfoURL, payload)
+		resp, err := client.PostForm(OIDC.UserInfoEndpoint, payload)
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error making request to user info endpoint"})
 			log.Errorf("Failed to execute post form to user info endpoint %s: %v", oidcConfig.Endpoint.UserInfoURL, err)
@@ -386,7 +389,7 @@ func cliRegisterNamespace(ctx *gin.Context) {
 		payload.Set("client_secret", oidcConfig.ClientSecret)
 		payload.Set("scope", strings.Join(oidcConfig.Scopes, " "))
 
-		response, err := http.PostForm(oidcConfig.Endpoint.DeviceAuthURL, payload)
+		response, err := client.PostForm(OIDC.DeviceAuthEndpoint, payload)
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered error requesting device code"})
 			log.Errorf("Failed to execute post form to device auth endpoint %s: %v", oidcConfig.Endpoint.DeviceAuthURL, err)
@@ -428,7 +431,7 @@ func cliRegisterNamespace(ctx *gin.Context) {
 		payload.Set("device_code", reqData.DeviceCode)
 		payload.Set("grant_type", "urn:ietf:params:oauth:grant-type:device_code")
 
-		response, err := http.PostForm(oidcConfig.Endpoint.TokenURL, payload)
+		response, err := client.PostForm(OIDC.TokenEndpoint, payload)
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error while making request to token endpoint"})
 			log.Errorf("Failed to execute post form to token endpoint %s: %v", oidcConfig.Endpoint.TokenURL, err)
