@@ -7,6 +7,7 @@ import (
 	_ "embed"
 	"encoding/base64"
 	"fmt"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -386,6 +387,24 @@ func ConfigXrootd(origin bool) (string, error) {
 			if !ok {
 				return "", errors.New("Origin.Multiuser is set to `true` but the command was run without sufficient privilege; was it launched as root?")
 			}
+		}
+	} else if xrdConfig.Cache.DirectorUrl != "" {
+		// Workaround for a bug in XRootD 5.6.3: if the director URL is missing a port number, then
+		// XRootD crashes.
+		urlParsed, err := url.Parse(xrdConfig.Cache.DirectorUrl)
+		if err != nil {
+			return "", errors.Errorf("Director URL (%s) does not parse as a URL", xrdConfig.Cache.DirectorUrl)
+		}
+		if !strings.Contains(urlParsed.Host, ":") {
+			switch urlParsed.Scheme {
+			case "http":
+				urlParsed.Host += ":80"
+			case "https":
+				urlParsed.Host += ":443"
+			default:
+				log.Warningf("The Director URL (%s) does not contain an explicit port number; XRootD 5.6.3 and earlier are known to segfault in thie case", xrdConfig.Cache.DirectorUrl)
+			}
+			xrdConfig.Cache.DirectorUrl = urlParsed.String()
 		}
 	}
 
