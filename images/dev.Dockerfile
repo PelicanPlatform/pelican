@@ -29,8 +29,8 @@ gpgcheck=0' > /etc/yum.repos.d/goreleaser.repo
 RUN dnf module install -y nodejs:18
 
 # Install goreleaser and various other packages we need
-RUN yum install -y goreleaser npm xrootd xrootd-server xrootd-client nano xrootd-scitokens \
-    xrootd-voms xrdcl-http jq procps docker make curl java-17-openjdk-headless \
+RUN yum install -y goreleaser npm xrootd-devel xrootd-server-devel xrootd-client-devel nano xrootd-scitokens \
+    xrootd-voms xrdcl-http jq procps docker make curl-devel java-17-openjdk-headless git cmake3 gcc-c++ openssl-devel \
     && yum clean all
 
 # Installing the right version of go
