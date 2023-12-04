@@ -1,4 +1,4 @@
-package token
+package token_utils
 
 import "testing"
 
