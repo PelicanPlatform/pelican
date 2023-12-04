@@ -585,7 +585,105 @@ type: string
 default: /opt/scitokens-server
 components: ["origin"]
 ---
+name: Issuer.QDLLocation
+description: >-
+  Location of the QDL language and scripts install on the system
+type: string
+default: /opt/qdl
+components: ["origin"]
+---
+name: Issuer.AuthenticationSource
+description: >-
+  How users should authenticate with the issuer.  Currently-supported values are:
+  - `none` (default): No authentication is performed.  All requests are successful and assumed to
+    be a user named `nobody`.
+  - `OIDC`: Use the server's OIDC configuration to authenticate with an external identity provider.
+type: string
+default: OIDC
+components: ["origin"]
+---
+name: Issuer.OIDCAuthenticationRequirements
+description: >-
+  A list of claim-value pairs that indicate required values from the OIDC ID token to authenticate.
+  For example, the following setting:
 
+  ```
+  - claim: idp_name
+    value: University of Wisconsin-Madison
+  ```
+
+  would only allow tokens with `"idp_name": "University of Wisconsin-Madison"` set to authenticate.
+type: object
+default: []
+components: ["origin"]
+---
+name: Issuer.OIDCAuthenticationUserClaim
+description: >-
+  The claim in the OIDC ID token to be used as the "username" for the issuer
+type: string
+default: sub
+components: ["origin"]
+---
+name: Issuer.GroupSource
+description: >-
+  How the issuer should determine group information based on the authenticated identity.  Valid values are:
+  - `none` (default): No group information should be used.
+  - `file`: Read groups from an external, JSON-formatted file.  The file should contain a single JSON object
+    with keys corresponding to the "user" name and the value a list of strings that are interpretted as the
+    user's groups.
+type: string
+default: none
+components: ["origin"]
+---
+name: Issuer.GroupFile
+description: >-
+  The location of a file containing group information.  The file should contain a single JSON object with
+  keys corresponding to the "user" name and the value a list of strings that are interpretted as the user's
+  groups.
+type: string
+default: none
+components: ["origin"]
+---
+name: Issuer.GroupRequirements
+description: >-
+  Group membership requirements.  A request must be mapped to one of the groups in this list to successfully
+  authenticate.
+type: stringSlice
+default: []
+components: ["origin"]
+---
+name: Issuer.AuthorizationTemplates
+description: >-
+  The authorizations that should be generated for an authenticated request.  Value should be a list of
+  authorized actions.
+
+  Each action is a key-value pair with the following keys defined:
+  - `actions`: A list of authorized actions.  Valid string values are `read`, `modify`, and `create`.
+  - `prefix`: A prefix where the actions are authorized.  If the prefix contains the substring `$USER`, the
+    string is replaced with the authenticated username.  If the prefix contains the substring `$GROUP`, then
+    an authorization is emitted for _each group_ authenticated.
+
+  For example, if the request is authenticated as user `bbockelm` with groups `dept_a` and `dept_b`, then
+  the following configuration:
+
+  ```
+  - actions: ["read", "create"]
+    prefix: /projects/$GROUP
+  - actions: ["read", "modify"]
+    prefix: /home/$USER
+  ```
+
+  will result in the following authorizations:
+  - read /projects/dept_a
+  - create /projects/dept_a
+  - read /projects/dept_b
+  - create /projects/dept_b
+  - read /home/bbockelm
+  - modify /home/bbockelm
+type: object
+default: []
+components: ["origin"]
+---
 
 ###################################
 #   Server's OIDC Configuration   #
@@ -597,7 +695,14 @@ description: >-
 type: filename
 root_default: /etc/pelican/oidc-client-id
 default: $ConfigBase/oidc-client-id
-components: ["nsregistry"]
+components: ["nsregistry", "origin"]
+---
+name: OIDC.ClientID
+description: >-
+  The OIDC ClientID to use for the server.
+type: string
+default: none
+components: ["nsregistry", "origin"]
 ---
 name: OIDC.ClientSecretFile
 description: >-
@@ -606,7 +711,7 @@ description: >-
 type: filename
 root_default: /etc/pelican/oidc-client-secret
 default: $ConfigBase/oidc-client-secret
-components: ["nsregistry"]
+components: ["nsregistry", "origin"]
 ---
 name: OIDC.DeviceAuthEndpoint
 description: >-
@@ -614,7 +719,7 @@ description: >-
   for authenticated registration.
 type: url
 default: none
-components: ["nsregistry"]
+components: ["nsregistry", "origin"]
 ---
 name: OIDC.TokenEndpoint
 description: >-
@@ -622,7 +727,7 @@ description: >-
   for authenticated registration.
 type: url
 default: none
-components: ["nsregistry"]
+components: ["nsregistry", "origin"]
 ---
 name: OIDC.UserInfoEndpoint
 description: >-
@@ -630,9 +735,23 @@ description: >-
   for authenticated registration.
 type: url
 default: none
-components: ["nsregistry"]
+components: ["nsregistry", "origin"]
 ---
-
+name: OIDC.AuthorizationEndpoint
+description: >-
+  A URL containing the OIDC authorization endpoint.
+type: url
+default: none
+components: ["origin"]
+---
+name: OIDC.Issuer
+description: >-
+  The URL of the OIDC issuer.  If set, OIDC auto-discovery may be used to find other endpoints (token, user info,
+  device auth).
+type: url
+default: none
+components: ["nsregistry", "origin"]
+---
 
 ############################
 #   XRootD-level Configs   #

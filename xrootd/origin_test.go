@@ -1,3 +1,5 @@
+//go:build linux
+
 /***************************************************************
  *
  * Copyright (C) 2023, Pelican Project, Morgridge Institute for Research
@@ -62,12 +64,12 @@ func TestOrigin(t *testing.T) {
 	viper.Set("Logging.Level", "Debug")
 	config.InitConfig()
 	err = config.InitServer(config.OriginType)
-	require.NoError(err)
+	require.NoError(t, err)
 
 	// Ensure the xrootd user can access the directory
 	userInfo, err := config.GetDaemonUserInfo()
 	require.NoError(t, err)
-	err = os.Chown(tmpPathPattern, userInfo.Uid, userInfo.Gid)
+	err = os.Chown(tmpPath, userInfo.Uid, userInfo.Gid)
 	require.NoError(t, err)
 
 	require.NoError(t, err)

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"text/template"
+	"time"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
@@ -20,6 +21,7 @@ import (
 	"github.com/pelicanplatform/pelican/origin_ui"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
@@ -364,6 +366,15 @@ func ConfigXrootd(origin bool) (string, error) {
 	xrdConfig.Xrootd.LocalMonitoringPort = -1
 	if err := viper.Unmarshal(&xrdConfig); err != nil {
 		return "", err
+	}
+
+	runtimeCAs := filepath.Join(param.Xrootd_RunLocation.GetString(), "ca-bundle.crt")
+	caCount, err := utils.PeriodicWriteCABundle(runtimeCAs, 2*time.Minute)
+	if err != nil {
+		return "", errors.Wrap(err, "Failed to setup the runtime CA bundle")
+	}
+	if caCount > 0 {
+		xrdConfig.Server.TLSCACertificateFile = runtimeCAs
 	}
 
 	if origin {

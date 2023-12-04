@@ -272,6 +272,8 @@ func ConfigTTLCache(ctx context.Context, wg *sync.WaitGroup) {
 	go namespaceKeys.Start()
 
 	serverAds.OnEviction(func(ctx context.Context, er ttlcache.EvictionReason, i *ttlcache.Item[ServerAd, []NamespaceAd]) {
+		healthTestCancelFuncsMutex.Lock()
+		defer healthTestCancelFuncsMutex.Unlock()
 		if cancelFunc, exists := healthTestCancelFuncs[i.Key()]; exists {
 			// Call the cancel function for the evicted originAd to end its health test
 			cancelFunc()

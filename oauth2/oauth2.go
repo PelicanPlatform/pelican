@@ -70,7 +70,7 @@ func AcquireToken(issuerUrl string, entry *config.PrefixEntry, credentialGen *na
 		return nil, errors.New("This program must be run in a terminal to acquire a new token")
 	}
 
-	issuerInfo, err := GetIssuerMetadata(issuerUrl)
+	issuerInfo, err := config.GetIssuerMetadata(issuerUrl)
 	if err != nil {
 		return nil, err
 	}

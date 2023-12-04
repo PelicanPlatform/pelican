@@ -1,0 +1,50 @@
+/***************************************************************
+ *
+ * Copyright (C) 2023, Pelican Project, Morgridge Institute for Research
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you
+ * may not use this file except in compliance with the License.  You may
+ * obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ ***************************************************************/
+
+access_token.'sub' := claims.'sub';
+
+{{ if eq .GroupSource "file" -}}
+cfg. := new_template('file');
+cfg.'file_path' := '{{- .GroupFile -}}';
+group_list. := get_claims(create_source(cfg.), access_token.'sub');
+{{- end }}
+
+{{ if .GroupRequirements }}
+if [0 == size(|^group_list. \/ { {{- range $idx, $grp := .GroupRequirements -}}{{- if eq $idx 0 -}}'{{- $grp -}}'{{else}}, '{{- $grp -}}'{{- end -}}{{- end -}} })] then
+[
+    sys_err.ok := false;
+    sys_err.message := 'Authenticated user is not in any of the following groups: {{ range $idx, $grp := .GroupRequirements -}}{{- if eq $idx 0 -}}"{{- $grp -}}"{{else}}, "{{- $grp -}}"{{- end -}}{{- end -}}';
+    return();
+];
+{{- end }}
+
+scopes := {};
+{{ range .GroupAuthzTemplates }}
+while [has_value(key, group_list.)]
+[
+    group_scopes := { {{- range $idx, $action := .Actions }}{{- if eq $idx 0 -}}'{{- $action -}}'{{else}}, '{{- $action -}}'{{- end -}}{{ end -}} } + '{{- .Prefix -}}';
+    scopes := scopes \/ |^replace(~group_scopes, '$GROUP', key);
+];
+{{- end }}
+{{ range .UserAuthzTemplates }}
+user_scopes := { {{- range $idx, $action := .Actions }}{{- if eq $idx 0 -}}'{{- $action -}}'{{else}}, '{{- $action -}}'{{- end -}}{{ end -}} } + '{{- .Prefix -}}';
+scopes := scopes \/ |^replace(~user_scopes, '$USER', claims.'sub');
+{{ end }}
+access_token.'scope' := detokenize(scopes, ' ', 2);
+
+access_token.iss := '{{- .OIDCIssuerURL -}}';
