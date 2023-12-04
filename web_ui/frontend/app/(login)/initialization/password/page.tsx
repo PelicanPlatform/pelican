@@ -22,42 +22,33 @@ import {Box, Typography} from "@mui/material";
 import { useRouter } from 'next/navigation'
 import { useState } from "react";
 
-import CodeInput from "@/app/initialization/code/CodeInput";
-import LoadingButton from "@/app/initialization/code/LoadingButton";
+import LoadingButton from "../../components/LoadingButton";
+
+import PasswordInput from "../../components/PasswordInput";
 
 export default function Home() {
 
     const router = useRouter()
-    let [code, _setCode] = useState <number>(0)
+    let [password, _setPassword] = useState <string>("")
+    let [confirmPassword, _setConfirmPassword] = useState <string>("")
     let [loading, setLoading] = useState(false);
 
-    const setCode = (code: number) => {
-
-        _setCode(code)
-
-        if(code.toString().length == 6) {
-            submit(code)
-        }
-    }
-
-    async function submit(code: number) {
+    async function submit(password: string) {
 
         setLoading(true)
 
-        console.log(`Submitting code ${code}`)
-
-        let response = await fetch("/api/v1.0/auth/initLogin", {
+        let response = await fetch("/api/v1.0/auth/resetLogin", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json"
             },
             body: JSON.stringify({
-                "code": code.toString()
+                "password": password
             })
         })
 
         if(response.ok){
-            router.push("../password/index.html")
+            router.push("/")
         } else {
             setLoading(false)
         }
@@ -66,8 +57,8 @@ export default function Home() {
     function onSubmit(e: React.FormEvent<HTMLFormElement>) {
         e.preventDefault()
 
-        if(code.toString().length == 6) {
-            submit(code)
+        if(password == confirmPassword){
+            submit(password)
         }
     }
 
@@ -76,15 +67,35 @@ export default function Home() {
             <Box m={"auto"} mt={12}  display={"flex"} flexDirection={"column"}>
                 <Box>
                     <Typography textAlign={"center"} variant={"h3"} component={"h3"}>
-                        Activate Origin Website
+                        Set Password
                     </Typography>
                     <Typography textAlign={"center"} variant={"h6"} component={"p"}>
-                        Enter the activation code displayed on the command line
+                        Set root metrics password
                     </Typography>
                 </Box>
-                <Box pt={3} mx={"auto"}>
+                <Box pt={2} mx={"auto"}>
                     <form onSubmit={onSubmit} action="#">
-                        <CodeInput setCode={setCode} length={6}/>
+                        <Box>
+                            <PasswordInput TextFieldProps={{
+                                InputProps: {
+                                    onChange: (e) => {
+                                        _setPassword(e.target.value)
+                                    }
+                                }
+                            }}/>
+                        </Box>
+                        <Box>
+                            <PasswordInput TextFieldProps={{
+                                label: "Confirm Password",
+                                InputProps: {
+                                    onChange: (e) => {
+                                        _setConfirmPassword(e.target.value)
+                                    }
+                                },
+                                error: password != confirmPassword,
+                                helperText: password != confirmPassword ? "Passwords do not match" : ""
+                            }}/>
+                        </Box>
                         <Box mt={3} display={"flex"}>
                             <LoadingButton
                                 variant="outlined"
@@ -93,7 +104,7 @@ export default function Home() {
                                 type={"submit"}
                                 loading={loading}
                             >
-                                <span>Activate</span>
+                                <span>Confirm</span>
                             </LoadingButton>
                         </Box>
                     </form>

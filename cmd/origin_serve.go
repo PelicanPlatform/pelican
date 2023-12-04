@@ -136,9 +136,6 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		if err := web_ui.ConfigureServerWebAPI(engine, false); err != nil {
 			return err
 		}
-
-		// Mount the UI resources
-		origin_ui.ConfigOriginUI(engine)
 	}
 
 	// Set up the APIs unrelated to UI, which only contains director-based health test reporting endpoint for now

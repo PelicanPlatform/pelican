@@ -2,7 +2,7 @@
 
 import LaunchIcon from '@mui/icons-material/Launch';
 import {useEffect, useState} from "react";
-import {Config} from "@/app/(dashboard)/config/page";
+import {Config} from "@/app/origin/config/page";
 import {Box, Typography} from "@mui/material";
 import {isLoggedIn} from "@/helpers/login";
 import Link from "next/link";
