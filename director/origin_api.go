@@ -186,7 +186,7 @@ func CreateDirectorTestReportToken(originWebUrl string) (string, error) {
 	}
 
 	tok, err := jwt.NewBuilder().
-		Claim("scope", "pelican.directorTestReport").
+		Claim("scope", "pelican.director_test_report").
 		Issuer(directorURL).
 		Audience([]string{originWebUrl}).
 		Subject("director").
@@ -247,7 +247,7 @@ func VerifyDirectorTestReportToken(strToken string) (bool, error) {
 	scopes := strings.Split(scope, " ")
 
 	for _, scope := range scopes {
-		if scope == "pelican.directorTestReport" {
+		if scope == "pelican.director_test_report" {
 			return true, nil
 		}
 	}
