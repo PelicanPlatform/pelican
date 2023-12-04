@@ -161,32 +161,6 @@ func init() {
 	originServeCmd.MarkFlagsRequiredTogether("service-name", "region", "bucket", "service-url")
 	originServeCmd.MarkFlagsRequiredTogether("bucket-access-keyfile", "bucket-secret-keyfile")
 
-	// Use PreRunE to mark certain flags as required based on the mode we're running in
-	originServeCmd.PreRunE = func(cmd *cobra.Command, args []string) error {
-		mode, _ := cmd.Flags().GetString("mode")
-
-		switch mode {
-		case "posix":
-			err := cmd.MarkFlagRequired("volume")
-			cobra.CheckErr(err)
-
-		case "s3":
-			err := cmd.MarkFlagRequired("service-name")
-			cobra.CheckErr(err)
-			err = cmd.MarkFlagRequired("region")
-			cobra.CheckErr(err)
-			err = cmd.MarkFlagRequired("bucket")
-			cobra.CheckErr(err)
-			err = cmd.MarkFlagRequired("service-url")
-			cobra.CheckErr(err)
-
-		default:
-			return fmt.Errorf("unsupported mode: %s. Supported modes are 'posix' and 's3'.", mode)
-		}
-
-		return nil
-	}
-
 	// The port any web UI stuff will be served on
 	originServeCmd.Flags().AddFlag(portFlag)
 

@@ -137,4 +137,4 @@ RUN \
 RUN chmod +x /pelican/osdf-client \
     && chmod +x /entrypoint.sh
 
-#ENTRYPOINT ["/entrypoint.sh"]
+ENTRYPOINT ["/entrypoint.sh"]
