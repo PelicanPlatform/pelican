@@ -24,6 +24,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
+	"github.com/pelicanplatform/pelican/utils"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -83,13 +84,13 @@ https://jwt.io/introduction.
 Additional profiles that expand on JWT are supported. They include scitokens2 and
 wlcg. For more information about these profiles, see https://scitokens.org/technical_docs/Claims
 and https://github.com/WLCG-AuthZ-WG/common-jwt-profile/blob/master/profile.md, respectively`,
-		RunE: cliTokenCreate,
+		RunE: utils.CliTokenCreate,
 	}
 
 	originTokenVerifyCmd = &cobra.Command{
 		Use:   "verify",
 		Short: "Verify a Pelican origin token",
-		RunE:  verifyToken,
+		RunE:  utils.VerifyToken,
 	}
 )
 

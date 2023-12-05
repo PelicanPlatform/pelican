@@ -16,7 +16,7 @@
  *
  ***************************************************************/
 
-package main
+package utils
 
 import (
 	"path/filepath"
