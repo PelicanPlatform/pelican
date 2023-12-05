@@ -20,9 +20,11 @@ package registry
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/lestrrat-go/jwx/v2/jwk"
@@ -228,14 +230,35 @@ func getPrefixJwksById(id int) (jwk.Set, error) {
 }
 
 func dbGetPrefixJwks(prefix string) (*jwk.Set, error) {
-	jwksQuery := `SELECT pubkey FROM namespace WHERE prefix = ?`
+	before, _, _ := strings.Cut(prefix, "/")
+	var jwksQuery string
 	var pubkeyStr string
-	err := db.QueryRow(jwksQuery, prefix).Scan(&pubkeyStr)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, errors.New("prefix not found in database")
+	if before == "caches" {
+		var admin_metadata string
+		jwksQuery = `SELECT pubkey, admin_metadata FROM namespace WHERE prefix = ?`
+		err := db.QueryRow(jwksQuery, prefix).Scan(&pubkeyStr, &admin_metadata)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				return nil, errors.New("prefix not found in database")
+			}
+			return nil, errors.Wrap(err, "error performing origin pubkey query")
 		}
-		return nil, errors.Wrap(err, "error performing origin pubkey query")
+
+		var adminData AdminJSON
+		err = json.Unmarshal([]byte(admin_metadata), &adminData)
+
+		if !adminData.AdminApproved || err != nil {
+			return nil, serverCredsErr
+		}
+	} else {
+		jwksQuery := `SELECT pubkey FROM namespace WHERE prefix = ?`
+		err := db.QueryRow(jwksQuery, prefix).Scan(&pubkeyStr)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				return nil, errors.New("prefix not found in database")
+			}
+			return nil, errors.Wrap(err, "error performing origin pubkey query")
+		}
 	}
 
 	set, err := jwk.ParseString(pubkeyStr)

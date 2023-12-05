@@ -80,6 +80,10 @@ type Response struct {
 	DeviceCode              string `json:"device_code"`
 }
 
+type AdminJSON struct {
+	AdminApproved bool `json:"admin_approved"`
+}
+
 type TokenResponse struct {
 	AccessToken string `json:"access_token"`
 	Error       string `json:"error"`
@@ -599,6 +603,16 @@ func dbAddNamespace(ctx *gin.Context, data *registrationData) error {
 		ns.Identity = data.Identity
 	}
 
+	//All caches added will not be approved (also false for origins, but that's fine as it doesn't check for origins)
+	jResult, err := json.Marshal(AdminJSON{
+		AdminApproved: false,
+	})
+
+	if err != nil {
+		return errors.Wrapf(err, "Failure to unmarshal json struct")
+	}
+	ns.AdminMetadata = string(jResult)
+
 	err = addNamespace(&ns)
 	if err != nil {
 		return errors.Wrapf(err, "Failed to add prefix %s", ns.Prefix)
@@ -733,6 +747,10 @@ func metadataHandler(ctx *gin.Context) {
 		prefix := strings.TrimSuffix(path, "/.well-known/issuer.jwks")
 		jwks, err := dbGetPrefixJwks(prefix)
 		if err != nil {
+			if err == serverCredsErr {
+				ctx.JSON(404, gin.H{"error": "cache has not been approved by federation administrator"})
+				return
+			}
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error trying to get jwks for prefix"})
 			log.Errorf("Failed to load jwks for prefix %s: %v", prefix, err)
 			return
