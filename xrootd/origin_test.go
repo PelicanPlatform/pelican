@@ -41,23 +41,32 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func originMockup(t *testing.T) context.CancelFunc {
+	originServer := &origin_ui.OriginServer{}
+
 	// Create our own temp directory (for some reason t.TempDir() does not play well with xrootd)
-	tmpPath := "/tmp/XRootD-Test_Origin"
+	tmpPathPattern := "XRootD-Test_Origin*"
+	tmpPath, err := os.MkdirTemp("", tmpPathPattern)
+	require.NoError(t, err)
+
+	// Need to set permissions or the xrootd process we spawn won't be able to write PID/UID files
+	permissions := os.FileMode(0777)
+	err = os.Chmod(tmpPath, permissions)
+	require.NoError(t, err)
+
 	viper.Set("ConfigDir", tmpPath)
 	viper.Set("Xrootd.RunLocation", filepath.Join(tmpPath, "xrootd"))
 	t.Cleanup(func() {
 		os.RemoveAll(tmpPath)
 	})
+
 	// Increase the log level; otherwise, its difficult to debug failures
 	viper.Set("Logging.Level", "Debug")
 	config.InitConfig()
-	err := config.InitServer()
-
+	err = config.InitServer(config.OriginType)
 	require.NoError(t, err)
 
 	err = config.GeneratePrivateKey(param.Server_TLSKey.GetString(), elliptic.P256())
@@ -65,7 +74,7 @@ func originMockup(t *testing.T) context.CancelFunc {
 	err = config.GenerateCert()
 	require.NoError(t, err)
 
-	err = CheckXrootdEnv(true, nil)
+	err = CheckXrootdEnv(originServer)
 	require.NoError(t, err)
 
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
@@ -144,7 +153,7 @@ func TestS3OriginConfig(t *testing.T) {
 	viper.Reset()
 	tmpDir := t.TempDir()
 
-	// We need to start up a minio server. Open to better ways to do this!
+	// We need to start up a minio server, which is how we emulate S3. Open to better ways to do this!
 	minIOServerCmd := exec.Command("minio", "server", "--quiet", tmpDir)
 	minIOServerCmd.Env = []string{fmt.Sprintf("HOME=%s", tmpDir)}
 
@@ -164,10 +173,10 @@ func TestS3OriginConfig(t *testing.T) {
 		t.Fatalf("Could not start the MinIO server: %s", errb.String())
 	}
 	// Check for other types of errors that might have been passed back through the process
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	defer func() {
 		err = minIOServerCmd.Process.Kill()
-		assert.NoError(t, err)
+		require.NoError(t, err)
 	}()
 
 	// MinIO is running (by default at localhost:9000), let's create an unauthenticated bucket
@@ -183,7 +192,7 @@ func TestS3OriginConfig(t *testing.T) {
 		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""),
 		Secure: useSSL,
 	})
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Create a new unauthenticated bucket. Under the hood, this will access the minio server endpoint
 	// and do a PUT
@@ -191,23 +200,23 @@ func TestS3OriginConfig(t *testing.T) {
 	regionName := "test-region"
 	serviceName := "test-name"
 	err = minioClient.MakeBucket(context.Background(), bucketName, minio.MakeBucketOptions{})
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Set bucket policy for public read access
 	policy := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":["s3:GetObject"],"Resource":["arn:aws:s3:::` + bucketName + `/*"]}]}`
 	err = minioClient.SetBucketPolicy(context.Background(), bucketName, policy)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Upload a test file to the bucket
 	testFilePath := filepath.Join(tmpDir, "test-file.txt")
 	content := []byte("This is the content of the test file.")
 	err = os.WriteFile(testFilePath, content, 0644)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	objectName := "test-file.txt"
 	contentType := "application/octet-stream"
 	_, err = minioClient.FPutObject(context.Background(), bucketName, objectName, testFilePath, minio.PutObjectOptions{ContentType: contentType})
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// All the setup to create the S3 server, add a bucket with a publicly-readable object is done. Now onto Pelican stuff
 	// Set up the origin and try to pull a file
@@ -241,13 +250,13 @@ func TestS3OriginConfig(t *testing.T) {
 		Transport: config.GetTransport(),
 	}
 	resp, err := httpClient.Do(req)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Until we sort out the things we mentioned above, we should expect a 403 because we don't try to pass tokens
 	// and we don't actually export any keys for token validation.
-	assert.Equal(t, 403, resp.StatusCode)
+	require.Equal(t, 403, resp.StatusCode)
 
 	// One other quick check to do is that the namespace was correctly parsed:
-	assert.Equal(t, fmt.Sprintf("/%s/%s/%s", serviceName, regionName, bucketName), param.Origin_NamespacePrefix.GetString())
+	require.Equal(t, fmt.Sprintf("/%s/%s/%s", serviceName, regionName, bucketName), param.Origin_NamespacePrefix.GetString())
 	viper.Reset()
 }

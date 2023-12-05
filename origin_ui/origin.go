@@ -19,21 +19,17 @@
 package origin_ui
 
 import (
-	"embed"
 	"encoding/json"
-	"mime"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
 
-	"github.com/gin-gonic/gin"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+
+	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
-	"os"
-	"path/filepath"
 )
 
 // Configure XrootD directory for both self-based and director-based file transfer tests

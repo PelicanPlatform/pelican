@@ -166,7 +166,6 @@ func CheckOriginXrootdEnv(exportPath string, uid int, gid int, groupname string)
 			}
 		}
 		viper.Set("Xrootd.Mount", exportPath)
-
 	} else if originMode == "s3" {
 		// Our "namespace prefix" is actually just
 		// /<Origin.S3ServiceName>/<Origin.S3Region>/<Origin.S3Bucket>
@@ -174,14 +173,6 @@ func CheckOriginXrootdEnv(exportPath string, uid int, gid int, groupname string)
 			param.Origin_S3Region.GetString(), param.Origin_S3Bucket.GetString())
 		viper.Set("Origin.NamespacePrefix", nsPrefix)
 	}
-
-
-
-
-
-
-
-
 
 	if param.Origin_SelfTest.GetBool() {
 		if err := origin_ui.ConfigureXrootdMonitoringDir(); err != nil {
