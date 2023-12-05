@@ -762,6 +762,9 @@ func UploadFile(src string, origDest *url.URL, token string, namespace namespace
 	pack := origDest.Query().Get("pack")
 	nonZeroSize := true
 	if pack != "" {
+		if !fileInfo.IsDir() {
+			return 0, errors.Errorf("Upload with pack=%v only works when input (%v) is a directory", pack, src)
+		}
 		behavior, err := GetBehavior(pack)
 		if err != nil {
 			return 0, err
