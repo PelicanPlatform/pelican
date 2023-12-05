@@ -26,6 +26,25 @@ func TestListServers(t *testing.T) {
 		require.True(t, serverAds.Has(mockCacheServerAd))
 	}()
 
+	mocklistOriginRes := listServerResponse{
+		Name:      mockOriginServerAd.Name,
+		AuthURL:   mockOriginServerAd.AuthURL.String(),
+		URL:       mockOriginServerAd.URL.String(),
+		WebURL:    mockOriginServerAd.WebURL.String(),
+		Type:      mockOriginServerAd.Type,
+		Latitude:  mockOriginServerAd.Latitude,
+		Longitude: mockOriginServerAd.Longitude,
+	}
+	mocklistCacheRes := listServerResponse{
+		Name:      mockCacheServerAd.Name,
+		AuthURL:   mockCacheServerAd.AuthURL.String(),
+		URL:       mockCacheServerAd.URL.String(),
+		WebURL:    mockCacheServerAd.WebURL.String(),
+		Type:      mockCacheServerAd.Type,
+		Latitude:  mockCacheServerAd.Latitude,
+		Longitude: mockCacheServerAd.Longitude,
+	}
+
 	t.Run("query-origin", func(t *testing.T) {
 		// Create a request to the endpoint
 		w := httptest.NewRecorder()
@@ -35,13 +54,13 @@ func TestListServers(t *testing.T) {
 		// Check the response
 		require.Equal(t, 200, w.Code)
 
-		var got []ServerAd
+		var got []listServerResponse
 		err := json.Unmarshal(w.Body.Bytes(), &got)
 		if err != nil {
 			t.Fatalf("Failed to unmarshal response body: %v", err)
 		}
 		require.Equal(t, 1, len(got))
-		assert.Equal(t, mockOriginServerAd, got[0], "Response data does not match expected")
+		assert.Equal(t, mocklistOriginRes, got[0], "Response data does not match expected")
 	})
 
 	t.Run("query-cache", func(t *testing.T) {
@@ -53,13 +72,13 @@ func TestListServers(t *testing.T) {
 		// Check the response
 		require.Equal(t, 200, w.Code)
 
-		var got []ServerAd
+		var got []listServerResponse
 		err := json.Unmarshal(w.Body.Bytes(), &got)
 		if err != nil {
 			t.Fatalf("Failed to unmarshal response body: %v", err)
 		}
 		require.Equal(t, 1, len(got))
-		assert.Equal(t, mockCacheServerAd, got[0], "Response data does not match expected")
+		assert.Equal(t, mocklistCacheRes, got[0], "Response data does not match expected")
 	})
 
 	t.Run("query-all-with-empty-server-type", func(t *testing.T) {
@@ -71,7 +90,7 @@ func TestListServers(t *testing.T) {
 		// Check the response
 		require.Equal(t, 200, w.Code)
 
-		var got []ServerAd
+		var got []listServerResponse
 		err := json.Unmarshal(w.Body.Bytes(), &got)
 		if err != nil {
 			t.Fatalf("Failed to unmarshal response body: %v", err)
@@ -88,7 +107,7 @@ func TestListServers(t *testing.T) {
 		// Check the response
 		require.Equal(t, 200, w.Code)
 
-		var got []ServerAd
+		var got []listServerResponse
 		err := json.Unmarshal(w.Body.Bytes(), &got)
 		if err != nil {
 			t.Fatalf("Failed to unmarshal response body: %v", err)
