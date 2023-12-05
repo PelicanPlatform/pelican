@@ -42,6 +42,8 @@ import (
 func TestOrigin(t *testing.T) {
 	viper.Reset()
 
+	originServer := &origin_ui.OriginServer{}
+
 	viper.Set("Origin.ExportVolume", t.TempDir()+":/test")
 	// Disable functionality we're not using (and is difficult to make work on Mac)
 	viper.Set("Origin.EnableCmsd", false)
@@ -50,7 +52,9 @@ func TestOrigin(t *testing.T) {
 	viper.Set("TLSSkipVerify", true)
 
 	// Create our own temp directory (for some reason t.TempDir() does not play well with xrootd)
-	tmpPath := "/tmp/XRootD-Test_Origin"
+	tmpPathPattern := "XRootD-Test_Origin*"
+	tmpPath, err := os.MkdirTemp("", tmpPathPattern)
+	require.NoError(t, err)
 	viper.Set("ConfigDir", tmpPath)
 	viper.Set("Xrootd.RunLocation", filepath.Join(tmpPath, "xrootd"))
 	t.Cleanup(func() {
@@ -59,7 +63,14 @@ func TestOrigin(t *testing.T) {
 	// Increase the log level; otherwise, its difficult to debug failures
 	viper.Set("Logging.Level", "Debug")
 	config.InitConfig()
-	err := config.InitServer()
+	err = config.InitServer(config.OriginType)
+	require.NoError(t, err)
+
+	// Ensure the xrootd user can access the directory
+	userInfo, err := config.GetDaemonUserInfo()
+	require.NoError(t, err)
+	err = os.Chown(tmpPath, userInfo.Uid, userInfo.Gid)
+	require.NoError(t, err)
 
 	require.NoError(t, err)
 
@@ -68,7 +79,7 @@ func TestOrigin(t *testing.T) {
 	err = config.GenerateCert()
 	require.NoError(t, err)
 
-	err = CheckXrootdEnv(true, nil)
+	err = CheckXrootdEnv(originServer)
 	require.NoError(t, err)
 
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())

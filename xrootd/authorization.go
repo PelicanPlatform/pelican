@@ -39,6 +39,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pkg/errors"
 )
 
@@ -68,8 +69,16 @@ type (
 	}
 
 	openIdConfig struct {
-		Issuer  string `json:"issuer"`
-		JWKSURI string `json:"jwks_uri"`
+		Issuer               string   `json:"issuer"`
+		JWKSURI              string   `json:"jwks_uri"`
+		TokenEndpoint        string   `json:"token_endpoint,omitempty"`
+		UserInfoEndpoint     string   `json:"userinfo_endpoint,omitempty"`
+		RevocationEndpoint   string   `json:"revocation_endpoint,omitempty"`
+		GrantTypesSupported  []string `json:"grant_types_supported,omitempty"`
+		ScopesSupported      []string `json:"scopes_supported,omitempty"`
+		TokenAuthMethods     []string `json:"token_endpoint_auth_methods_supported,omitempty"`
+		RegistrationEndpoint string   `json:"registration_endpoint,omitempty"`
+		DeviceEndpoint       string   `json:"device_authorization_endpoint,omitempty"`
 	}
 )
 
@@ -124,7 +133,7 @@ func EmitScitokensConfiguration(cfg *ScitokensCfg) error {
 
 // Parse the input xrootd authfile, add any default configurations, and then save it
 // into the xrootd runtime directory
-func EmitAuthfile(nsAds []director.NamespaceAd) error {
+func EmitAuthfile(server server_utils.XRootDServer) error {
 	authfile := param.Xrootd_Authfile.GetString()
 	contents, err := os.ReadFile(authfile)
 	if err != nil {
@@ -137,20 +146,37 @@ func EmitAuthfile(nsAds []director.NamespaceAd) error {
 	for sc.Scan() {
 		lineContents := sc.Text()
 		words := strings.Fields(lineContents)
+		// There exists a public access already in the authfile
 		if len(words) >= 2 && words[0] == "u" && words[1] == "*" {
-			output.Write([]byte("u * /.well-known lr " + strings.Join(words[2:], " ") + "\n"))
+			if server.GetServerType().IsSet(config.OriginType) {
+				// If Origin, add the ./well-known to the authfile
+				output.Write([]byte("u * /.well-known lr " + strings.Join(words[2:], " ") + "\n"))
+			} else {
+				output.Write([]byte(lineContents + " "))
+			}
 			foundPublicLine = true
-		} else {
-			output.Write([]byte(lineContents + "\n"))
 		}
 	}
-	if !foundPublicLine {
+	// If Origin and no authfile already exists, add the ./well-know to the authfile
+	if !foundPublicLine && server.GetServerType().IsSet(config.OriginType) {
+
 		output.Write([]byte("u * /.well-known lr\n"))
 	}
 
-	if len(nsAds) != 0 {
-		for _, ad := range nsAds {
-			outStr := "u * " + ad.Path + " lr\n"
+	// For the cache, add the public namespaces
+	if server.GetServerType().IsSet(config.CacheType) {
+		// If nothing has been written to the output yet
+		var outStr string
+		if !foundPublicLine {
+			outStr = "u * "
+		}
+		for _, ad := range server.GetNamespaceAds() {
+			if !ad.RequireToken && ad.BasePath != "" {
+				outStr += ad.BasePath + " lr "
+			}
+		}
+		// A public namespace exists, so a line needs to be printed
+		if len(outStr) > 4 {
 			output.Write([]byte(outStr))
 		}
 	}
@@ -287,12 +313,11 @@ func GenerateDirectorMonitoringIssuer() (issuer Issuer, err error) {
 	return
 }
 
-// Writes out the origin's scitokens.cfg configuration
-func WriteOriginScitokensConfig(exportedPaths []string) error {
-
+// Makes the general scitokens config to be used by both the origin and the cache
+func makeSciTokensCfg() (cfg ScitokensCfg, err error) {
 	gid, err := config.GetDaemonGID()
 	if err != nil {
-		return err
+		return cfg, err
 	}
 
 	// Create the scitokens.cfg file if it's not already present
@@ -300,24 +325,36 @@ func WriteOriginScitokensConfig(exportedPaths []string) error {
 
 	err = config.MkdirAll(filepath.Dir(scitokensCfg), 0755, -1, gid)
 	if err != nil {
-		return errors.Wrapf(err, "Unable to create directory %v",
+		return cfg, errors.Wrapf(err, "Unable to create directory %v",
 			filepath.Dir(scitokensCfg))
 	}
+
 	if file, err := os.OpenFile(scitokensCfg, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0640); err == nil {
 		file.Close()
 	} else if !errors.Is(err, os.ErrExist) {
-		return err
+		return cfg, err
 	}
+
 	if err = os.Chown(scitokensCfg, -1, gid); err != nil {
-		return errors.Wrapf(err, "Unable to change ownership of scitokens config %v"+
+		return cfg, errors.Wrapf(err, "Unable to change ownership of scitokens config %v"+
 			" to desired daemon group %v", scitokensCfg, gid)
 	}
 
-	cfg, err := LoadScitokensConfig(scitokensCfg)
+	cfg, err = LoadScitokensConfig(scitokensCfg)
 	if err != nil {
-		return errors.Wrapf(err, "Failed to load scitokens configuration at %s", scitokensCfg)
+		return cfg, errors.Wrapf(err, "Failed to load scitokens configuration at %s", scitokensCfg)
 	}
 
+	return cfg, nil
+}
+
+// Writes out the origin's scitokens.cfg configuration
+func WriteOriginScitokensConfig(exportedPaths []string) error {
+
+	cfg, err := makeSciTokensCfg()
+	if err != nil {
+		return err
+	}
 	if issuer, err := GenerateMonitoringIssuer(); err == nil && len(issuer.Name) > 0 {
 		if val, ok := cfg.IssuerMap[issuer.Issuer]; ok {
 			val.BasePaths = append(val.BasePaths, issuer.BasePaths...)
@@ -342,6 +379,30 @@ func WriteOriginScitokensConfig(exportedPaths []string) error {
 			cfg.IssuerMap[issuer.Issuer] = val
 		} else {
 			cfg.IssuerMap[issuer.Issuer] = issuer
+		}
+	}
+
+	return EmitScitokensConfiguration(&cfg)
+}
+
+// Writes out the cache's scitokens.cfg configuration
+func WriteCacheScitokensConfig(nsAds []director.NamespaceAd) error {
+
+	cfg, err := makeSciTokensCfg()
+	if err != nil {
+		return err
+	}
+	for _, ad := range nsAds {
+		if ad.RequireToken {
+			if ad.Issuer.String() != "" && ad.BasePath != "" {
+				if val, ok := cfg.IssuerMap[ad.Issuer.String()]; ok {
+					val.BasePaths = append(val.BasePaths, ad.BasePath)
+					cfg.IssuerMap[ad.Issuer.String()] = val
+				} else {
+					cfg.IssuerMap[ad.Issuer.String()] = Issuer{Issuer: ad.Issuer.String(), BasePaths: []string{ad.BasePath}, Name: ad.Issuer.String()}
+					cfg.Global.Audience = append(cfg.Global.Audience, ad.Issuer.String())
+				}
+			}
 		}
 	}
 
@@ -396,6 +457,21 @@ func EmitIssuerMetadata(exportPath string) error {
 		Issuer:  param.Origin_Url.GetString(),
 		JWKSURI: jwksUrl.String(),
 	}
+
+	// If we have the built-in issuer enabled, fill in the URLs for OA4MP
+	if param.Origin_EnableIssuer.GetBool() {
+		serviceUri := param.Server_ExternalWebUrl.GetString() + "/api/v1.0/issuer"
+		cfg.TokenEndpoint = serviceUri + "/token"
+		cfg.UserInfoEndpoint = serviceUri + "/userinfo"
+		cfg.RevocationEndpoint = serviceUri + "/revoke"
+		cfg.GrantTypesSupported = []string{"refresh_token", "urn:ietf:params:oauth:grant-type:device_code", "authorization_code"}
+		cfg.ScopesSupported = []string{"openid", "offline_access", "wlcg", "storage.read:/",
+			"storage.modify:/", "storage.create:/"}
+		cfg.TokenAuthMethods = []string{"client_secret_basic", "client_secret_post"}
+		cfg.RegistrationEndpoint = serviceUri + "/oidc-cm"
+		cfg.DeviceEndpoint = serviceUri + "/device_authorization"
+	}
+
 	buf, err = json.MarshalIndent(cfg, "", " ")
 	if err != nil {
 		return errors.Wrap(err, "Failed to marshal OpenID configuration file contents")

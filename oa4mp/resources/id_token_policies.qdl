@@ -1,0 +1,66 @@
+/***************************************************************
+ *
+ * Copyright (C) 2023, Pelican Project, Morgridge Institute for Research
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you
+ * may not use this file except in compliance with the License.  You may
+ * obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ ***************************************************************/
+
+if [0 == size(proxy_claims.)] then
+[
+     /* Fallback: OA4MP 5.4.1 doesn't set proxy_claims at all.
+        Copy from the claims token as a workaround
+      */
+{{ range $req := .OIDCAuthnReqs }}
+     if [is_defined(claims.'{{- $req.Claim -}}')] then
+     [
+         proxy_claims.'{{- $req.Claim -}}' := claims.'{{- $req.Claim -}}';
+     ];
+{{ end -}}
+     if [is_defined(claims.'{{- .OIDCAuthnUserClaim }}')] then
+     [
+         proxy_claims.'{{- .OIDCAuthnUserClaim }}' := claims.'{{- .OIDCAuthnUserClaim }}';
+     ];
+     if [0 == size(proxy_claims.)] then
+     [
+         return();
+     ];
+];
+
+say(proxy_claims.);
+
+{{ range $req := .OIDCAuthnReqs -}}
+if [!is_defined(proxy_claims.'{{- $req.Claim -}}')] then
+[
+     sys_err.ok := false;
+     sys_err.message := 'Authentication is missing claim {{- $req.Claim -}}.';
+     return();
+];
+
+if [proxy_claims.'{{- $req.Claim -}}'  != '{{- $req.Value -}}'] then
+[
+     sys_err.ok := false;
+     sys_err.message := 'Claim "{{- $req.Claim -}}" must be set to "{{- $req.Value -}}" for authentication';
+     return();
+];
+{{ end -}}
+
+if [!is_defined(proxy_claims.'{{- .OIDCAuthnUserClaim -}}')] then
+[
+     sys_err.ok := false;
+     sys_err.message := 'Authentication is missing claim "{{- .OIDCAuthnUserClaim -}}".';
+     return();
+];
+claims.'sub' := proxy_claims.'{{- .OIDCAuthnUserClaim -}}';
+
+claims.iss := '{{- .OIDCIssuerURL -}}';

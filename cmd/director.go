@@ -71,7 +71,7 @@ func getDirectorEndpoint() (string, error) {
 }
 
 func initDirector() error {
-	err := config.InitServer()
+	err := config.InitServer(config.DirectorType)
 	cobra.CheckErr(err)
 
 	return err

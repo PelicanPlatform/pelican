@@ -62,6 +62,7 @@ func generateMonitoringScitoken() (string, error) {
 		Subject("origin").
 		Expiration(time.Now().Add(time.Minute)).
 		IssuedAt(time.Now()).
+		NotBefore(time.Now()).
 		Build()
 	if err != nil {
 		return "", err
