@@ -35,15 +35,62 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 )
 
-type TokenProfile string
+type (
+	TokenProfile string
+	TokenConfig  struct {
+		TokenProfile TokenProfile
+		Lifetime     time.Duration
+		Issuer       string
+		Audience     []string
+		Scope        string
+		Version      string // 'wlcg.ver' for WLCG profile and 'ver' for scitokens2
+		Subject      string
+		Claims       *map[string]string // Additional claims
+	}
+)
 
 const (
 	WLCG       TokenProfile = "wlcg"
 	Scitokens2 TokenProfile = "scitokens2"
+	None       TokenProfile = "none"
 )
 
 func (p TokenProfile) String() string {
 	return string(p)
+}
+
+func (config TokenConfig) Validate() (bool, error) {
+	// profile-specific claims
+	// exp time > 0
+	//
+	return true, nil
+}
+
+func (config *TokenConfig) verifyCreateSciTokens2() error {
+	// required fields: aud, ver, scope
+	if len(config.Audience) == 0 {
+		errMsg := "The claim 'aud' is required for the scitokens2 profile, but it could not be found."
+		return errors.New(errMsg)
+	}
+
+	if config.Scope == "" {
+		errMsg := "The claim 'scope' is required for the scitokens2 profile, but it could not be found."
+		return errors.New(errMsg)
+	}
+
+	if config.Version == "" {
+		config.Version = "scitokens:2.0"
+	} else {
+		verPattern := `^scitokens:2\.[0-9]+$`
+		re := regexp.MustCompile(verPattern)
+
+		if !re.MatchString(config.Version) {
+			errMsg := "The provided version '" + config.Version +
+				"' is not valid. It must match 'scitokens:<version>', where version is of the form 2.x"
+			return errors.New(errMsg)
+		}
+	}
+	return nil
 }
 
 // The verifyCreate* funcs only act on the provided claims maps, because they attempt
@@ -202,6 +249,82 @@ func CreateEncodedToken(claimsMap map[string]string, profile TokenProfile, lifet
 
 	if !issuerFound {
 		return "", errors.New("No issuer was found in the configuration file, and none was provided as a claim")
+	}
+
+	tok, err := builder.Build()
+	if err != nil {
+		return "", errors.Wrap(err, "Failed to generate token")
+	}
+
+	// Now that we have a token, it needs signing. Note that GetIssuerPrivateJWK
+	// will get the private key passed via the command line because that
+	// file path has already been bound to IssuerKey
+	key, err := config.GetIssuerPrivateJWK()
+	if err != nil {
+		return "", errors.Wrap(err, "Failed to load signing keys. Either generate one at the default "+
+			"location by serving an origin, or provide one via the --private-key flag")
+	}
+
+	// Get/assign the kid, needed for verification by the client
+	err = jwk.AssignKeyID(key)
+	if err != nil {
+		return "", errors.Wrap(err, "Failed to assign kid to the token")
+	}
+
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, key))
+	if err != nil {
+		return "", errors.Wrap(err, "Failed to sign the deletion token")
+	}
+
+	return string(signed), nil
+}
+
+func (tokenConfig TokenConfig) CreateToken() (string, error) {
+	if ok, err := tokenConfig.Validate(); !ok || err != nil {
+		return "", errors.Wrap(err, "Invalid tokenConfig")
+	}
+
+	jti_bytes := make([]byte, 16)
+	if _, err := rand.Read(jti_bytes); err != nil {
+		return "", err
+	}
+	jti := base64.RawURLEncoding.EncodeToString(jti_bytes)
+
+	issuerUrl := ""
+	if tokenConfig.Issuer != "" {
+		url, err := url.Parse(tokenConfig.Issuer)
+		if err != nil {
+			return "", errors.Wrap(err, "Failed to parse the configured IssuerUrl")
+		}
+		issuerUrl = url.String()
+	} else {
+		issuerUrlStr := viper.GetString("IssuerUrl")
+		url, err := url.Parse(issuerUrlStr)
+		if err != nil {
+			return "", errors.Wrap(err, "Failed to parse the configured IssuerUrl")
+		}
+		issuerUrl = url.String()
+	}
+
+	if issuerUrl == "" {
+		return "", errors.New("No issuer was found in the configuration file, and none was provided as a claim")
+	}
+
+	now := time.Now()
+	builder := jwt.NewBuilder()
+	builder.Issuer(issuerUrl).
+		IssuedAt(now).
+		Expiration(now.Add(tokenConfig.Lifetime)).
+		NotBefore(now).
+		Audience(tokenConfig.Audience).
+		Subject(tokenConfig.Subject).
+		Claim("scope", tokenConfig.Scope).
+		JwtID(jti)
+
+	if tokenConfig.Claims != nil {
+		for key, val := range *tokenConfig.Claims {
+			builder.Claim(key, val)
+		}
 	}
 
 	tok, err := builder.Build()
