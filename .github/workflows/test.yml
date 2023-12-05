@@ -12,6 +12,9 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v3
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 20
     - name: Cache Next.js
       uses: actions/cache@v3
       with:
@@ -45,6 +48,9 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v3
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 20
     - name: Cache Next.js
       uses: actions/cache@v3
       with:
