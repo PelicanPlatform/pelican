@@ -102,7 +102,6 @@ func originMockup(t *testing.T) context.CancelFunc {
 		_ = daemon.LaunchDaemons(ctx, launchers)
 	}()
 	return cancel
-
 }
 
 func TestOrigin(t *testing.T) {
