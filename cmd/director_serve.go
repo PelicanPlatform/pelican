@@ -88,6 +88,7 @@ func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	rootGroup := engine.Group("/")
 	director.RegisterDirector(rootGroup)
 	director.RegisterDirectorAuth(rootGroup)
+	director.RegisterDirectorWebAPI(rootGroup)
 
 	log.Info("Starting web engine...")
 	go web_ui.RunEngine(engine)
