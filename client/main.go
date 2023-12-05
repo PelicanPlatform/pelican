@@ -550,8 +550,9 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 	//Check if path exists or if its in a folder
 	if destStat, err := os.Stat(destPath); os.IsNotExist(err) {
 		destination = destPath
-	} else if destStat.IsDir() {
-		// Get the file name of the source
+	} else if destStat.IsDir() && source_url.Query().Get("pack") == "" {
+		// If we have an auto-pack request, it's OK for the destination to be a directory
+		// Otherwise, get the base name of the source and append it to the destination dir.
 		sourceFilename := path.Base(sourceFile)
 		destination = path.Join(destPath, sourceFilename)
 	}
@@ -586,7 +587,7 @@ Loop:
 		switch method {
 		case "http":
 			log.Info("Trying HTTP...")
-			if downloaded, err = download_http(sourceFile, destination, &payload, ns, recursive, token_name, OSDFDirectorUrl); err == nil {
+			if downloaded, err = download_http(source_url, destination, &payload, ns, recursive, token_name, OSDFDirectorUrl); err == nil {
 				success = true
 				break Loop
 			}
