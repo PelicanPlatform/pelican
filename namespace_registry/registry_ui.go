@@ -28,7 +28,7 @@ import (
 )
 
 type listNamespaceRequest struct {
-	ServerType string `form:"server_type,omitempty"`
+	ServerType string `form:"server_type"`
 }
 
 func listNamespaces(ctx *gin.Context) {
@@ -97,7 +97,7 @@ func RegisterNamespacesRegistryWebAPI(router *gin.RouterGroup) {
 	registryWebAPI := router.Group("/api/v1.0/registry_ui")
 	// Follow RESTful schema
 	{
-		registryWebAPI.GET("/namespace", listNamespaces)
-		registryWebAPI.GET("/namespace/:id/pubkey", getNamespaceJWKS)
+		registryWebAPI.GET("/namespaces", listNamespaces)
+		registryWebAPI.GET("/namespaces/:id/pubkey", getNamespaceJWKS)
 	}
 }
