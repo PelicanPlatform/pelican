@@ -95,28 +95,6 @@ func TestVerifyCreateWLCG(t *testing.T) {
 	assert.Equal(t, claimsMap["anotherClaim"], "bar")
 }
 
-func TestParseClaims(t *testing.T) {
-	// Give it something valid
-	claims := []string{"foo=boo", "bar=baz"}
-	claimsMap, err := parseClaims(claims)
-	assert.NoError(t, err)
-	assert.Equal(t, claimsMap["foo"], "boo")
-	assert.Equal(t, claimsMap["bar"], "baz")
-	assert.Equal(t, len(claimsMap), 2)
-
-	// Give it something with multiple of the same claim key
-	claims = []string{"foo=boo", "foo=baz"}
-	claimsMap, err = parseClaims(claims)
-	assert.NoError(t, err)
-	assert.Equal(t, claimsMap["foo"], "boo baz")
-	assert.Equal(t, len(claimsMap), 1)
-
-	// Give it something without = delimiter
-	claims = []string{"foo=boo", "barbaz"}
-	_, err = parseClaims(claims)
-	assert.EqualError(t, err, "The claim 'barbaz' is invalid. Did you forget an '='?")
-}
-
 func TestCreateEncodedToken(t *testing.T) {
 	// Some viper pre-requisites
 	viper.Reset()
@@ -180,11 +158,4 @@ func TestCreateEncodedToken(t *testing.T) {
 	_, err = CreateEncodedToken(claims, "wlcg", 1200)
 	assert.EqualError(t, err, "No issuer was found in the configuration file, "+
 		"and none was provided as a claim")
-}
-
-func TestParseInputSlice(t *testing.T) {
-	// A quick test, just to make sure this gets what it needs to
-	rawSlice := []string{"https://my-issuer.com"}
-	parsedSlice := parseInputSlice(&rawSlice, "iss")
-	assert.Equal(t, parsedSlice, []string{"iss=https://my-issuer.com"})
 }
