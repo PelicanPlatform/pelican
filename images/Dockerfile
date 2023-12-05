@@ -21,10 +21,10 @@ FROM node:18 AS website-build
 
 WORKDIR /webapp
 
-COPY origin_ui/src/package.json package.json
+COPY web_ui/frontend/package.json package.json
 
 RUN npm install
-COPY origin_ui/src ./
+COPY web_ui/frontend ./
 
 RUN npm run build
 
