@@ -84,7 +84,6 @@ func TestOrigin(t *testing.T) {
 
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
-	wg.Add(1)
 
 	defer func() {
 		shutdownCancel()
@@ -93,6 +92,7 @@ func TestOrigin(t *testing.T) {
 
 	err = SetUpMonitoring(shutdownCtx, &wg)
 	require.NoError(t, err)
+	wg.Add(1)
 
 	configPath, err := ConfigXrootd(true)
 	require.NoError(t, err)

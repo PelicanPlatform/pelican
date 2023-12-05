@@ -84,11 +84,11 @@ func serveCache( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		config.CleanupTempResources()
 	}()
 
-	wg.Add(1)
 	err := xrootd.SetUpMonitoring(shutdownCtx, &wg)
 	if err != nil {
 		return err
 	}
+	wg.Add(1) // Add to wait group after SetUpMonitoring finishes to avoid deadlock
 
 	nsAds, err := getNSAdsFromDirector()
 	if err != nil {
