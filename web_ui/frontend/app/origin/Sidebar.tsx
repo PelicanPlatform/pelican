@@ -42,14 +42,14 @@ export const Sidebar = () => {
                         />
                     </Link>
                     <Box pt={3}>
-                        <Link href={"/"}>
+                        <Link href={"/origin/index.html"}>
                             <IconButton>
                                 <HomeIcon/>
                             </IconButton>
                         </Link>
                     </Box>
                     <Box pt={1}>
-                        <Link href={"/config/index.html"}>
+                        <Link href={"/origin/config/index.html"}>
                             <IconButton>
                                 <BuildIcon/>
                             </IconButton>

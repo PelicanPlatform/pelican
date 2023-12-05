@@ -33,7 +33,7 @@ FROM goreleaser/goreleaser:v1.20.0 AS pelican-build
 WORKDIR /pelican
 
 COPY . .
-COPY --from=website-build /webapp/out ./origin_ui/src/out
+COPY --from=website-build /webapp/out ./web_ui/frontend/out
 
 RUN goreleaser --clean --snapshot
 

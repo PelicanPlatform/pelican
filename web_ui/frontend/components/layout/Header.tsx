@@ -27,7 +27,7 @@ import PelicanLogo from "../../public/static/images/PelicanPlatformLogo_Icon.png
 import GithubIcon from "../../public/static/images/github-mark.png"
 import {Typography} from "@mui/material";
 
-export const Header = () => {
+export const Header = ({text}: {text: string}) => {
 
     let [scrolledTop, setScrolledTop] = useState(true);
 
@@ -47,7 +47,7 @@ export const Header = () => {
                     width={32}
                     height={32}
                 />
-                <Typography variant={"h5"} my={"auto"} ml={".5rem"}>Pelican Origin</Typography>
+                <Typography variant={"h5"} my={"auto"} ml={".5rem"}>{text}</Typography>
             </div>
             <div>
                 <a href={"https://github.com/PelicanPlatform"}>

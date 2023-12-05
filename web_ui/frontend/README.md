@@ -18,7 +18,7 @@ as they would in production.
 # From repo root
 make web-build
 goreleaser --clean --snapshot
-docker run --rm -it -p 8444:8444 -w /app -v $PWD/dist/pelican_linux_arm64/:/app pelican-dev /bin/bash
+docker run --rm -it -p 8444:8443 -w /app -v $PWD/dist/pelican_linux_arm64/:/app pelican-dev /bin/bash
 ```
 
 ```shell

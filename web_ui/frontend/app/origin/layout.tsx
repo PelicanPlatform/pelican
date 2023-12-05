@@ -19,7 +19,7 @@
 import {Box} from "@mui/material";
 
 import {Header} from "@/components/layout/Header";
-import {Sidebar} from "@/app/(dashboard)/Sidebar";
+import {Sidebar} from "@/app/origin/Sidebar";
 
 export const metadata = {
     title: 'Pelican Origin',

@@ -22,33 +22,42 @@ import {Box, Typography} from "@mui/material";
 import { useRouter } from 'next/navigation'
 import { useState } from "react";
 
-import LoadingButton from "@/app/initialization/code/LoadingButton";
-
-import PasswordInput from "@/app/initialization/password/PasswordInput";
+import CodeInput from "../../components/CodeInput";
+import LoadingButton from "../../components/LoadingButton";
 
 export default function Home() {
 
     const router = useRouter()
-    let [password, setPassword] = useState <string>("")
+    let [code, _setCode] = useState <number>(0)
     let [loading, setLoading] = useState(false);
 
-    async function submit(password: string) {
+    const setCode = (code: number) => {
+
+        _setCode(code)
+
+        if(code.toString().length == 6) {
+            submit(code)
+        }
+    }
+
+    async function submit(code: number) {
 
         setLoading(true)
 
-        let response = await fetch("/api/v1.0/auth/login", {
+        console.log(`Submitting code ${code}`)
+
+        let response = await fetch("/api/v1.0/auth/initLogin", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json"
             },
             body: JSON.stringify({
-                "user": "admin",
-                "password": password
+                "code": code.toString()
             })
         })
 
         if(response.ok){
-            router.push("../../")
+            router.push("../password/index.html")
         } else {
             setLoading(false)
         }
@@ -57,7 +66,9 @@ export default function Home() {
     function onSubmit(e: React.FormEvent<HTMLFormElement>) {
         e.preventDefault()
 
-        submit(password)
+        if(code.toString().length == 6) {
+            submit(code)
+        }
     }
 
     return (
@@ -65,20 +76,15 @@ export default function Home() {
             <Box m={"auto"} mt={12}  display={"flex"} flexDirection={"column"}>
                 <Box>
                     <Typography textAlign={"center"} variant={"h3"} component={"h3"}>
-                        Login
+                        Activate Origin Website
+                    </Typography>
+                    <Typography textAlign={"center"} variant={"h6"} component={"p"}>
+                        Enter the activation code displayed on the command line
                     </Typography>
                 </Box>
-                <Box pt={2} mx={"auto"}>
+                <Box pt={3} mx={"auto"}>
                     <form onSubmit={onSubmit} action="#">
-                        <Box>
-                            <PasswordInput TextFieldProps={{
-                                InputProps: {
-                                    onChange: (e) => {
-                                        setPassword(e.target.value)
-                                    }
-                                }
-                            }}/>
-                        </Box>
+                        <CodeInput setCode={setCode} length={6}/>
                         <Box mt={3} display={"flex"}>
                             <LoadingButton
                                 variant="outlined"
@@ -87,7 +93,7 @@ export default function Home() {
                                 type={"submit"}
                                 loading={loading}
                             >
-                                <span>Confirm</span>
+                                <span>Activate</span>
                             </LoadingButton>
                         </Box>
                     </form>
