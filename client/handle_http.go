@@ -768,6 +768,10 @@ func UploadDirectory(src string, dest *url.URL, token string, namespace namespac
 		}
 		amountDownloaded += downloaded
 	}
+	// Close progress bar container
+	if ObjectClientOptions.ProgressBars {
+		progressContainer.Wait()
+	}
 	return amountDownloaded, err
 }
 
@@ -873,7 +877,12 @@ func UploadFile(src string, origDest *url.URL, token string, namespace namespace
 			} else {
 				progressBar.Abort(true)
 			}
-			progressContainer.Wait()
+			// If it is recursive, we need to reuse the mpb instance. Closed later
+			if ObjectClientOptions.Recursive {
+				progressBar.Wait()
+			} else { // If not recursive, go ahead and close it
+				progressContainer.Wait()
+			}
 		}()
 	}
 	tickerDuration := 500 * time.Millisecond

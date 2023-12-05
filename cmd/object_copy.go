@@ -202,6 +202,7 @@ func copyMain(cmd *cobra.Command, args []string) {
 	for _, src := range source {
 		var tmpDownloaded int64
 		isRecursive, _ := cmd.Flags().GetBool("recursive")
+		client.ObjectClientOptions.Recursive = isRecursive
 		tmpDownloaded, result = client.DoStashCPSingle(src, dest, splitMethods, isRecursive)
 		downloaded += tmpDownloaded
 		if result != nil {
