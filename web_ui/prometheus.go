@@ -17,13 +17,13 @@ package web_ui
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -38,6 +38,8 @@ import (
 	"github.com/oklog/run"
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/utils"
+	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/common/version"
@@ -176,6 +178,15 @@ func configDirectorPromScraper() (*config.ScrapeConfig, error) {
 	scrapeConfig := config.DefaultScrapeConfig
 	scrapeConfig.JobName = "origins"
 	scrapeConfig.Scheme = "https"
+
+	// This will cause the director to maintain a CA bundle, including the custom CA, at
+	// the given location.  Makes up for the fact we can't provide Prometheus with a transport
+	caBundle := filepath.Join(param.Monitoring_DataLocation.GetString(), "ca-bundle.crt")
+	caCount, err := utils.PeriodicWriteCABundle(caBundle, 2*time.Minute)
+	if err != nil {
+		return nil, errors.Wrap(err, "Unable to generate CA bundle for prometheus")
+	}
+
 	scraperHttpClientConfig := common_config.HTTPClientConfig{
 		TLSConfig: common_config.TLSConfig{
 			// For the scraper to origins' metrics, we get TLSSkipVerify from config
@@ -188,6 +199,10 @@ func configDirectorPromScraper() (*config.ScrapeConfig, error) {
 			Credentials: common_config.Secret(scraperToken),
 		},
 	}
+	if caCount > 0 {
+		scraperHttpClientConfig.TLSConfig.CAFile = caBundle
+	}
+
 	scrapeConfig.HTTPClientConfig = scraperHttpClientConfig
 	scrapeConfig.ServiceDiscoveryConfigs = make([]discovery.Config, 1)
 	sdHttpClientConfig := common_config.HTTPClientConfig{

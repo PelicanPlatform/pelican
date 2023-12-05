@@ -20,11 +20,14 @@ package web_ui
 
 import (
 	"context"
+	"embed"
 	"fmt"
 	"math/rand"
+	"mime"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -35,6 +38,12 @@ import (
 	log "github.com/sirupsen/logrus"
 	ginprometheus "github.com/zsais/go-gin-prometheus"
 	"golang.org/x/term"
+)
+
+var (
+
+	//go:embed frontend/out/*
+	webAssets embed.FS
 )
 
 func getConfigValues(ctx *gin.Context) {
@@ -50,6 +59,26 @@ func getConfigValues(ctx *gin.Context) {
 	}
 
 	ctx.JSON(200, config)
+}
+
+func configureWebResource(engine *gin.Engine) error {
+	engine.GET("/view/*path", func(ctx *gin.Context) {
+		path := ctx.Param("path")
+
+		if strings.HasSuffix(path, "/") {
+			path += "index.html"
+		}
+
+		filePath := "frontend/out" + path
+		file, _ := webAssets.ReadFile(filePath)
+		ctx.Data(
+			http.StatusOK,
+			mime.TypeByExtension(filePath),
+			file,
+		)
+	})
+
+	return nil
 }
 
 // Configure common endpoint available to all server web UI which are located at /api/v1.0/*
@@ -148,6 +177,9 @@ func ConfigureServerWebAPI(engine *gin.Engine, isDirector bool) error {
 		return err
 	}
 	if err := configureCommonEndpoints(engine); err != nil {
+		return err
+	}
+	if err := configureWebResource(engine); err != nil {
 		return err
 	}
 	if err := configureMetrics(engine, isDirector); err != nil {

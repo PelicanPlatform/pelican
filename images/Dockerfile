@@ -21,10 +21,10 @@ FROM node:18 AS website-build
 
 WORKDIR /webapp
 
-COPY origin_ui/src/package.json package.json
+COPY web_ui/frontend/package.json package.json
 
 RUN npm install
-COPY origin_ui/src ./
+COPY web_ui/frontend ./
 
 RUN npm run build
 
@@ -33,11 +33,11 @@ FROM goreleaser/goreleaser:v1.20.0 AS pelican-build
 WORKDIR /pelican
 
 COPY . .
-COPY --from=website-build /webapp/out ./origin_ui/src/out
+COPY --from=website-build /webapp/out ./web_ui/frontend/out
 
 RUN goreleaser --clean --snapshot
 
-FROM hub.opensciencegrid.org/sciauth/scitokens-oauth2-server:release AS scitokens-oauth2-server
+FROM hub.opensciencegrid.org/sciauth/scitokens-oauth2-server:release-20231118-1823 AS scitokens-oauth2-server
 
 FROM --platform=linux/amd64 opensciencegrid/software-base:$BASE_OSG_SERIES-el8-$BASE_YUM_REPO
 
@@ -47,9 +47,10 @@ RUN useradd -o -u 10940 -g 10940 -s /bin/sh xrootd
 
 # Install dependencies
 RUN yum -y update \
-    && yum -y install xrootd xrootd-client xrdcl-http xrootd-server \
+    && yum -y install xrootd xrootd-client xrdcl-http xrootd-server xrootd-scitokens xrootd-voms \
+    xrootd-devel xrootd-client-devel xrootd-server-devel \
+    curl-devel git cmake3 gcc-c++ openssl-devel java-17-openjdk-headless \
     && yum clean all \
-    && yum install -y curl java-17-openjdk-headless \
     && rm -rf /var/cache/yum/
 
 WORKDIR /pelican

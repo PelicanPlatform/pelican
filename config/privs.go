@@ -19,6 +19,7 @@
 package config
 
 import (
+	"math"
 	"os/user"
 	"runtime"
 	"strconv"
@@ -82,25 +83,47 @@ func initUserObject(desiredUsername string, userObj *user.User) User {
 		//Get the user ID from the SID
 		sidParts := strings.Split(userObj.Uid, "-")
 		uidString := sidParts[len(sidParts)-1]
-		result.Uid, result.err = strconv.Atoi(uidString)
+		var uid uint64
+		uid, result.err = strconv.ParseUint(uidString, 10, 32)
 		if result.err != nil {
 			result.Uid = -1
 			return result
 		}
+		// On 32-bit systems, converting from uint32 to int may overflow
+		if uid > math.MaxInt {
+			result.Uid = -1
+			result.err = errors.New("UID value overflows on 32-bit system")
+			return result
+		}
+		result.Uid = int(uid)
 		result.Sid = userObj.Gid
 		//group is just the whole SID
 		result.Groupname = userObj.Gid
 	} else { //Mac and linux have similar enough uid's so can group them here
-		result.Uid, result.err = strconv.Atoi(userObj.Uid)
+		var uid uint64
+		uid, result.err = strconv.ParseUint(userObj.Uid, 10, 32)
 		if result.err != nil {
 			result.Uid = -1
 			return result
 		}
-		result.Gid, result.err = strconv.Atoi(userObj.Gid)
+		if uid > math.MaxInt {
+			result.Uid = -1
+			result.err = errors.New("UID value overflows on 32-bit system")
+			return result
+		}
+		result.Uid = int(uid)
+		var gid uint64
+		gid, result.err = strconv.ParseUint(userObj.Gid, 10, 32)
 		if result.err != nil {
 			result.Gid = -1
 			return result
 		}
+		if gid > math.MaxInt {
+			result.Uid = -1
+			result.err = errors.New("GID value overflows on 32-bit system")
+			return result
+		}
+		result.Gid = int(gid)
 		groupObj, err := user.LookupGroupId(userObj.Gid)
 		if err == nil {
 			result.Groupname = groupObj.Name
@@ -133,6 +156,10 @@ func GetDaemonUID() (int, error) {
 
 func GetDaemonUser() (string, error) {
 	return xrootdUser.Username, xrootdUser.err
+}
+
+func GetDaemonUserInfo() (User, error) {
+	return xrootdUser, xrootdUser.err
 }
 
 func GetDaemonGID() (int, error) {

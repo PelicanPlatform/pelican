@@ -72,7 +72,7 @@ func TestNewTransferDetails(t *testing.T) {
 		Endpoint:     "cache.edu:8000",
 		Resource:     "Cache",
 	}
-	transfers := NewTransferDetails(testCache, false)
+	transfers := NewTransferDetails(testCache, TransferDetailsOptions{false, ""})
 	assert.Equal(t, 2, len(transfers))
 	assert.Equal(t, "cache.edu:8000", transfers[0].Url.Host)
 	assert.Equal(t, "http", transfers[0].Url.Scheme)
@@ -82,7 +82,7 @@ func TestNewTransferDetails(t *testing.T) {
 	assert.Equal(t, false, transfers[1].Proxy)
 
 	// Case 2: cache with https
-	transfers = NewTransferDetails(testCache, true)
+	transfers = NewTransferDetails(testCache, TransferDetailsOptions{true, ""})
 	assert.Equal(t, 1, len(transfers))
 	assert.Equal(t, "cache.edu:8443", transfers[0].Url.Host)
 	assert.Equal(t, "https", transfers[0].Url.Scheme)
@@ -90,7 +90,7 @@ func TestNewTransferDetails(t *testing.T) {
 
 	testCache.Endpoint = "cache.edu"
 	// Case 3: cache without port with http
-	transfers = NewTransferDetails(testCache, false)
+	transfers = NewTransferDetails(testCache, TransferDetailsOptions{false, ""})
 	assert.Equal(t, 2, len(transfers))
 	assert.Equal(t, "cache.edu:8000", transfers[0].Url.Host)
 	assert.Equal(t, "http", transfers[0].Url.Scheme)
@@ -101,7 +101,7 @@ func TestNewTransferDetails(t *testing.T) {
 
 	// Case 4. cache without port with https
 	testCache.AuthEndpoint = "cache.edu"
-	transfers = NewTransferDetails(testCache, true)
+	transfers = NewTransferDetails(testCache, TransferDetailsOptions{true, ""})
 	assert.Equal(t, 2, len(transfers))
 	assert.Equal(t, "cache.edu:8444", transfers[0].Url.Host)
 	assert.Equal(t, "https", transfers[0].Url.Scheme)
@@ -122,11 +122,11 @@ func TestNewTransferDetailsEnv(t *testing.T) {
 	os.Setenv("OSG_DISABLE_PROXY_FALLBACK", "")
 	err := config.InitClient()
 	assert.Nil(t, err)
-	transfers := NewTransferDetails(testCache, false)
+	transfers := NewTransferDetails(testCache, TransferDetailsOptions{false, ""})
 	assert.Equal(t, 1, len(transfers))
 	assert.Equal(t, true, transfers[0].Proxy)
 
-	transfers = NewTransferDetails(testCache, true)
+	transfers = NewTransferDetails(testCache, TransferDetailsOptions{true, ""})
 	assert.Equal(t, 1, len(transfers))
 	assert.Equal(t, "https", transfers[0].Url.Scheme)
 	assert.Equal(t, false, transfers[0].Proxy)
@@ -168,7 +168,7 @@ func TestSlowTransfers(t *testing.T) {
 		Endpoint:     svr.URL,
 		Resource:     "Cache",
 	}
-	transfers := NewTransferDetails(testCache, false)
+	transfers := NewTransferDetails(testCache, TransferDetailsOptions{false, ""})
 	assert.Equal(t, 2, len(transfers))
 	assert.Equal(t, svr.URL, transfers[0].Url.String())
 
@@ -231,7 +231,7 @@ func TestStoppedTransfer(t *testing.T) {
 		Endpoint:     svr.URL,
 		Resource:     "Cache",
 	}
-	transfers := NewTransferDetails(testCache, false)
+	transfers := NewTransferDetails(testCache, TransferDetailsOptions{false, ""})
 	assert.Equal(t, 2, len(transfers))
 	assert.Equal(t, svr.URL, transfers[0].Url.String())
 
@@ -297,7 +297,7 @@ func TestTrailerError(t *testing.T) {
 		Endpoint:     svr.URL,
 		Resource:     "Cache",
 	}
-	transfers := NewTransferDetails(testCache, false)
+	transfers := NewTransferDetails(testCache, TransferDetailsOptions{false, ""})
 	assert.Equal(t, 2, len(transfers))
 	assert.Equal(t, svr.URL, transfers[0].Url.String())
 

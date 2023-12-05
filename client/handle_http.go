@@ -20,7 +20,6 @@ package client
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -37,7 +36,8 @@ import (
 	"syscall"
 	"time"
 
-	grab "github.com/cavaliercoder/grab"
+	grab "github.com/opensaucerer/grab/v3"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/studio-b12/gowebdav"
 	"github.com/vbauerster/mpb/v8"
@@ -48,7 +48,7 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 )
 
-var p = mpb.New()
+var progressContainer = mpb.New()
 
 type StoppedTransferError struct {
 	Err string
@@ -158,13 +158,16 @@ type TransferDetails struct {
 
 	// Proxy specifies if a proxy should be used
 	Proxy bool
+
+	// Specifies the pack option in the transfer URL
+	PackOption string
 }
 
 // NewTransferDetails creates the TransferDetails struct with the given cache
-func NewTransferDetails(cache namespaces.Cache, https bool) []TransferDetails {
+func NewTransferDetails(cache namespaces.Cache, opts TransferDetailsOptions) []TransferDetails {
 	details := make([]TransferDetails, 0)
 	var cacheEndpoint string
-	if https {
+	if opts.NeedsToken {
 		cacheEndpoint = cache.AuthEndpoint
 	} else {
 		cacheEndpoint = cache.Endpoint
@@ -184,22 +187,24 @@ func NewTransferDetails(cache namespaces.Cache, https bool) []TransferDetails {
 		cacheURL.Opaque = ""
 	}
 	log.Debugf("Parsed Cache: %s\n", cacheURL.String())
-	if https {
+	if opts.NeedsToken {
 		cacheURL.Scheme = "https"
 		if !HasPort(cacheURL.Host) {
 			// Add port 8444 and 8443
 			cacheURL.Host += ":8444"
 			details = append(details, TransferDetails{
-				Url:   *cacheURL,
-				Proxy: false,
+				Url:        *cacheURL,
+				Proxy:      false,
+				PackOption: opts.PackOption,
 			})
 			// Strip the port off and add 8443
 			cacheURL.Host = cacheURL.Host[:len(cacheURL.Host)-5] + ":8443"
 		}
 		// Whether port is specified or not, add a transfer without proxy
 		details = append(details, TransferDetails{
-			Url:   *cacheURL,
-			Proxy: false,
+			Url:        *cacheURL,
+			Proxy:      false,
+			PackOption: opts.PackOption,
 		})
 	} else {
 		cacheURL.Scheme = "http"
@@ -208,13 +213,15 @@ func NewTransferDetails(cache namespaces.Cache, https bool) []TransferDetails {
 		}
 		isProxyEnabled := IsProxyEnabled()
 		details = append(details, TransferDetails{
-			Url:   *cacheURL,
-			Proxy: isProxyEnabled,
+			Url:        *cacheURL,
+			Proxy:      isProxyEnabled,
+			PackOption: opts.PackOption,
 		})
 		if isProxyEnabled && CanDisableProxy() {
 			details = append(details, TransferDetails{
-				Url:   *cacheURL,
-				Proxy: false,
+				Url:        *cacheURL,
+				Proxy:      false,
+				PackOption: opts.PackOption,
 			})
 		}
 	}
@@ -227,18 +234,23 @@ type TransferResults struct {
 	Downloaded int64
 }
 
+type TransferDetailsOptions struct {
+	NeedsToken bool
+	PackOption string
+}
+
 type CacheInterface interface{}
 
-func GenerateTransferDetailsUsingCache(cache CacheInterface, needsToken bool) []TransferDetails {
+func GenerateTransferDetailsUsingCache(cache CacheInterface, opts TransferDetailsOptions) []TransferDetails {
 	if directorCache, ok := cache.(namespaces.DirectorCache); ok {
-		return NewTransferDetailsUsingDirector(directorCache, needsToken)
+		return NewTransferDetailsUsingDirector(directorCache, opts)
 	} else if cache, ok := cache.(namespaces.Cache); ok {
-		return NewTransferDetails(cache, needsToken)
+		return NewTransferDetails(cache, opts)
 	}
 	return nil
 }
 
-func download_http(source string, destination string, payload *payloadStruct, namespace namespaces.Namespace, recursive bool, tokenName string, OSDFDirectorUrl string) (bytesTransferred int64, err error) {
+func download_http(sourceUrl *url.URL, destination string, payload *payloadStruct, namespace namespaces.Namespace, recursive bool, tokenName string, OSDFDirectorUrl string) (bytesTransferred int64, err error) {
 
 	// First, create a handler for any panics that occur
 	defer func() {
@@ -253,12 +265,16 @@ func download_http(source string, destination string, payload *payloadStruct, na
 		}
 	}()
 
-	// Generate the downloadUrl
+	packOption := sourceUrl.Query().Get("pack")
+	if packOption != "" {
+		log.Debugln("Will use unpack option value", packOption)
+	}
+	sourceUrl = &url.URL{Path: sourceUrl.Path}
+
 	var token string
 	if namespace.UseTokenOnRead {
 		var err error
-		sourceUrl := url.URL{Path: source}
-		token, err = getToken(&sourceUrl, namespace, false, tokenName)
+		token, err = getToken(sourceUrl, namespace, false, tokenName)
 		if err != nil {
 			log.Errorln("Failed to get token though required to read from this namespace:", err)
 			return 0, err
@@ -268,24 +284,11 @@ func download_http(source string, destination string, payload *payloadStruct, na
 	// Check the env var "USE_OSDF_DIRECTOR" and decide if ordered caches should come from director
 	var transfers []TransferDetails
 	var files []string
-	var closestNamespaceCaches []CacheInterface
-	if OSDFDirectorUrl != "" {
-		log.Debugln("Using OSDF Director at ", OSDFDirectorUrl)
-		closestNamespaceCaches = make([]CacheInterface, len(namespace.SortedDirectorCaches))
-		for i, v := range namespace.SortedDirectorCaches {
-			closestNamespaceCaches[i] = v
-		}
-	} else {
-		tmpCaches, err := GetCachesFromNamespace(namespace)
-		if err != nil {
-			log.Errorln("Failed to get namespaced caches (treated as non-fatal):", err)
-		}
-
-		closestNamespaceCaches = make([]CacheInterface, len(tmpCaches))
-		for i, v := range tmpCaches {
-			closestNamespaceCaches[i] = v
-		}
+	closestNamespaceCaches, err := GetCachesFromNamespace(namespace, OSDFDirectorUrl != "")
+	if err != nil {
+		log.Errorln("Failed to get namespaced caches (treated as non-fatal):", err)
 	}
+
 	log.Debugln("Matched caches:", closestNamespaceCaches)
 
 	// Make sure we only try as many caches as we have
@@ -294,23 +297,26 @@ func download_http(source string, destination string, payload *payloadStruct, na
 		cachesToTry = len(closestNamespaceCaches)
 	}
 	log.Debugln("Trying the caches:", closestNamespaceCaches[:cachesToTry])
-	downloadUrl := url.URL{Path: source}
 
 	if recursive {
 		var err error
-		files, err = walkDavDir(&downloadUrl, namespace)
+		files, err = walkDavDir(sourceUrl, namespace, token)
 		if err != nil {
 			log.Errorln("Error from walkDavDir", err)
 			return 0, err
 		}
 	} else {
-		files = append(files, source)
+		files = append(files, sourceUrl.Path)
 	}
 
 	for _, cache := range closestNamespaceCaches[:cachesToTry] {
 		// Parse the cache URL
 		log.Debugln("Cache:", cache)
-		transfers = append(transfers, GenerateTransferDetailsUsingCache(cache, namespace.ReadHTTPS || namespace.UseTokenOnRead)...)
+		td := TransferDetailsOptions{
+			NeedsToken: namespace.ReadHTTPS || namespace.UseTokenOnRead,
+			PackOption: packOption,
+		}
+		transfers = append(transfers, GenerateTransferDetailsUsingCache(cache, td)...)
 	}
 
 	if len(transfers) > 0 {
@@ -329,7 +335,7 @@ func download_http(source string, destination string, payload *payloadStruct, na
 	// Start the workers
 	for i := 1; i <= 5; i++ {
 		wg.Add(1)
-		go startDownloadWorker(source, destination, token, transfers, &wg, workChan, results)
+		go startDownloadWorker(sourceUrl.Path, destination, token, transfers, &wg, workChan, results)
 	}
 
 	// For each file, send it to the worker
@@ -448,12 +454,31 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 	if !transfer.Proxy {
 		transport.Proxy = nil
 	}
-	client.HTTPClient.Transport = transport
+	httpClient, ok := client.HTTPClient.(*http.Client)
+	if !ok {
+		return 0, errors.New("Internal error: implementation is not a http.Client type")
+	}
+	httpClient.Transport = transport
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	log.Debugln("Transfer URL String:", transfer.Url.String())
-	req, _ := grab.NewRequest(dest, transfer.Url.String())
+	var req *grab.Request
+	var err error
+	var unpacker *autoUnpacker
+	if transfer.PackOption != "" {
+		behavior, err := GetBehavior(transfer.PackOption)
+		if err != nil {
+			return 0, err
+		}
+		unpacker = newAutoUnpacker(dest, behavior)
+		if req, err = grab.NewRequestToWriter(unpacker, transfer.Url.String()); err != nil {
+			return 0, errors.Wrap(err, "Failed to create new download request")
+		}
+	} else if req, err = grab.NewRequest(dest, transfer.Url.String()); err != nil {
+		return 0, errors.Wrap(err, "Failed to create new download request")
+	}
+
 	if token != "" {
 		req.HTTPRequest.Header.Set("Authorization", "Bearer "+token)
 	}
@@ -492,7 +517,7 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 	}
 
 	// Size of the download
-	contentLength := resp.Size
+	contentLength := resp.Size()
 	// Do a head request for content length if resp.Size is unknown
 	if contentLength <= 0 && ObjectClientOptions.ProgressBars {
 		headClient := &http.Client{Transport: config.GetTransport()}
@@ -500,19 +525,20 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 		headResponse, err := headClient.Do(headRequest)
 		if err != nil {
 			log.Errorln("Could not successfully get response for HEAD request")
+			return 0, errors.Wrap(err, "Could not determine the size of the remote object")
 		}
 		defer headResponse.Body.Close()
 		contentLengthStr := headResponse.Header.Get("Content-Length")
 		contentLength, err = strconv.ParseInt(contentLengthStr, 10, 64)
 		if err != nil {
 			log.Errorln("problem converting content-length to an int", err)
-			contentLength = resp.Size
+			contentLength = resp.Size()
 		}
 	}
 
 	var progressBar *mpb.Bar
 	if ObjectClientOptions.ProgressBars {
-		progressBar = p.AddBar(0,
+		progressBar = progressContainer.AddBar(0,
 			mpb.PrependDecorators(
 				decor.Name(filename, decor.WCSyncSpaceR),
 				decor.CountersKibiByte("% .2f / % .2f"),
@@ -577,7 +603,7 @@ Loop:
 					continue
 				} else if startBelowLimit == 0 {
 					warning := []byte("Warning! Downloading too slow...\n")
-					status, err := p.Write(warning)
+					status, err := progressContainer.Write(warning)
 					if err != nil {
 						log.Errorln("Problem displaying slow message", err, status)
 						continue
@@ -620,14 +646,14 @@ Loop:
 				} else {
 					progressBar.SetTotal(contentLength, true)
 					// call wait here for the bar to complete and flush
-					p.Wait()
+					progressContainer.Wait()
 				}
 			}
 			break Loop
 		}
 	}
 	//fmt.Printf("\nDownload saved to", resp.Filename)
-	err := resp.Err()
+	err = resp.Err()
 	if err != nil {
 		// Connection errors
 		if errors.Is(err, syscall.ECONNREFUSED) ||
@@ -655,70 +681,135 @@ Loop:
 		return 0, &HttpErrResp{resp.HTTPResponse.StatusCode, fmt.Sprintf("Request failed (HTTP status %d): %s",
 			resp.HTTPResponse.StatusCode, resp.Err().Error())}
 	}
+
+	if unpacker != nil {
+		unpacker.Close()
+		if err := unpacker.Error(); err != nil {
+			return 0, err
+		}
+	}
+
 	log.Debugln("HTTP Transfer was successful")
 	return resp.BytesComplete(), nil
+}
+
+type Sizer interface {
+	Size() int64
+	BytesComplete() int64
+}
+
+type ConstantSizer struct {
+	size int64
+	read atomic.Int64
+}
+
+func (cs *ConstantSizer) Size() int64 {
+	return cs.size
+}
+
+func (cs *ConstantSizer) BytesComplete() int64 {
+	return cs.read.Load()
 }
 
 // ProgressReader wraps the io.Reader to get progress
 // Adapted from https://stackoverflow.com/questions/26050380/go-tracking-post-request-progress
 type ProgressReader struct {
-	file   *os.File
-	read   int64
-	size   int64
+	reader io.ReadCloser
+	sizer  Sizer
 	closed chan bool
 }
 
 // Read implements the common read function for io.Reader
 func (pr *ProgressReader) Read(p []byte) (n int, err error) {
-	n, err = pr.file.Read(p)
-	atomic.AddInt64(&pr.read, int64(n))
+	n, err = pr.reader.Read(p)
+	if cs, ok := pr.sizer.(*ConstantSizer); ok {
+		cs.read.Add(int64(n))
+	}
 	return n, err
 }
 
 // Close implments the close function of io.Closer
 func (pr *ProgressReader) Close() error {
-	err := pr.file.Close()
+	err := pr.reader.Close()
 	// Also, send the closed channel a message
 	pr.closed <- true
 	return err
 }
 
+func (pr *ProgressReader) BytesComplete() int64 {
+	return pr.sizer.BytesComplete()
+}
+
+func (pr *ProgressReader) Size() int64 {
+	return pr.sizer.Size()
+}
+
 // UploadFile Uploads a file using HTTP
-func UploadFile(src string, dest *url.URL, token string, namespace namespaces.Namespace) (int64, error) {
+func UploadFile(src string, origDest *url.URL, token string, namespace namespaces.Namespace) (int64, error) {
 
 	log.Debugln("In UploadFile")
-	log.Debugln("Dest", dest.String())
-	// Try opening the file to send
-	file, err := os.Open(src)
-	if err != nil {
-		log.Errorln("Error opening local file:", err)
-		return 0, err
-	}
+	log.Debugln("Dest", origDest.String())
+
 	// Stat the file to get the size (for progress bar)
-	fileInfo, err := file.Stat()
+	fileInfo, err := os.Stat(src)
 	if err != nil {
-		log.Errorln("Error stating local file ", src, ":", err)
+		log.Errorln("Error checking local file ", src, ":", err)
 		return 0, err
 	}
+
+	var ioreader io.ReadCloser
+	var sizer Sizer
+	pack := origDest.Query().Get("pack")
+	nonZeroSize := true
+	if pack != "" {
+		if !fileInfo.IsDir() {
+			return 0, errors.Errorf("Upload with pack=%v only works when input (%v) is a directory", pack, src)
+		}
+		behavior, err := GetBehavior(pack)
+		if err != nil {
+			return 0, err
+		}
+		if behavior == autoBehavior {
+			behavior = defaultBehavior
+		}
+		ap := newAutoPacker(src, behavior)
+		ioreader = ap
+		sizer = ap
+	} else {
+		// Try opening the file to send
+		file, err := os.Open(src)
+		if err != nil {
+			log.Errorln("Error opening local file:", err)
+			return 0, err
+		}
+		ioreader = file
+		sizer = &ConstantSizer{size: fileInfo.Size()}
+		nonZeroSize = fileInfo.Size() > 0
+	}
+
 	// Parse the writeback host as a URL
 	writebackhostUrl, err := url.Parse(namespace.WriteBackHost)
 	if err != nil {
 		return 0, err
 	}
-	dest.Host = writebackhostUrl.Host
-	dest.Scheme = "https"
+
+	dest := &url.URL{
+		Host:   writebackhostUrl.Host,
+		Scheme: "https",
+		Path:   origDest.Path,
+	}
 
 	// Create the wrapped reader and send it to the request
 	closed := make(chan bool, 1)
 	errorChan := make(chan error, 1)
 	responseChan := make(chan *http.Response)
-	reader := &ProgressReader{file, 0, fileInfo.Size(), closed}
+	reader := &ProgressReader{ioreader, sizer, closed}
 	putContext, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	log.Debugln("Full destination URL:", dest.String())
 	var request *http.Request
 	// For files that are 0 length, we need to send a PUT request with an nil body
-	if fileInfo.Size() > 0 {
+	if nonZeroSize {
 		request, err = http.NewRequestWithContext(putContext, "PUT", dest.String(), reader)
 	} else {
 		request, err = http.NewRequestWithContext(putContext, "PUT", dest.String(), http.NoBody)
@@ -727,7 +818,6 @@ func UploadFile(src string, dest *url.URL, token string, namespace namespaces.Na
 		log.Errorln("Error creating request:", err)
 		return 0, err
 	}
-	request.ContentLength = fileInfo.Size()
 	// Set the authorization header
 	request.Header.Set("Authorization", "Bearer "+token)
 	var lastKnownWritten int64
@@ -736,13 +826,46 @@ func UploadFile(src string, dest *url.URL, token string, namespace namespaces.Na
 	go doPut(request, responseChan, errorChan)
 	var lastError error = nil
 
+	var progressBar *mpb.Bar
+	if ObjectClientOptions.ProgressBars {
+		progressBar = progressContainer.AddBar(0,
+			mpb.PrependDecorators(
+				decor.Name(src, decor.WCSyncSpaceR),
+				decor.CountersKibiByte("% .2f / % .2f"),
+			),
+			mpb.AppendDecorators(
+				decor.OnComplete(decor.EwmaETA(decor.ET_STYLE_GO, 90), ""),
+				decor.OnComplete(decor.Name(" ] "), ""),
+				decor.OnComplete(decor.EwmaSpeed(decor.SizeB1024(0), "% .2f", 5), "Done!"),
+			),
+		)
+		// Shutdown progress bar at the end of the function
+		defer func() {
+			if lastError == nil {
+				progressBar.SetTotal(reader.Size(), true)
+			} else {
+				progressBar.Abort(true)
+			}
+			progressContainer.Wait()
+		}()
+	}
+	tickerDuration := 500 * time.Millisecond
+	progressTicker := time.NewTicker(tickerDuration)
+	defer progressTicker.Stop()
+
 	// Do the select on a ticker, and the writeChan
 Loop:
 	for {
 		select {
+		case <-progressTicker.C:
+			if progressBar != nil {
+				progressBar.SetTotal(reader.Size(), false)
+				progressBar.EwmaSetCurrent(reader.BytesComplete(), tickerDuration)
+			}
+
 		case <-t.C:
 			// If we are not making any progress, if we haven't written 1MB in the last 5 seconds
-			currentRead := atomic.LoadInt64(&reader.read)
+			currentRead := reader.BytesComplete()
 			log.Debugln("Current read:", currentRead)
 			log.Debugln("Last known written:", lastKnownWritten)
 			if lastKnownWritten < currentRead {
@@ -778,7 +901,7 @@ Loop:
 	if fileInfo.Size() == 0 {
 		return 0, lastError
 	} else {
-		return atomic.LoadInt64(&reader.read), lastError
+		return reader.BytesComplete(), lastError
 	}
 
 }
@@ -813,7 +936,7 @@ func doPut(request *http.Request, responseChan chan<- *http.Response, errorChan 
 
 }
 
-func walkDavDir(url *url.URL, namespace namespaces.Namespace) ([]string, error) {
+func walkDavDir(url *url.URL, namespace namespaces.Namespace, token string) ([]string, error) {
 
 	// Create the client to walk the filesystem
 	rootUrl := *url
@@ -831,7 +954,9 @@ func walkDavDir(url *url.URL, namespace namespaces.Namespace) ([]string, error) 
 		return nil, errors.New("Host for directory listings is unknown")
 	}
 	log.Debugln("Dir list host: ", rootUrl.String())
-	c := gowebdav.NewClient(rootUrl.String(), "", "")
+
+	auth := &bearerAuth{token: token}
+	c := gowebdav.NewAuthClient(rootUrl.String(), auth)
 
 	// XRootD does not like keep alives and kills things, so turn them off.
 	transport := config.GetTransport()

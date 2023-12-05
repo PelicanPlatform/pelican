@@ -73,6 +73,7 @@ func CreateNsFromDirectorResp(dirResp *http.Response) (namespace namespaces.Name
 	namespace.Path = xPelicanNamespace["namespace"]
 	namespace.UseTokenOnRead, _ = strconv.ParseBool(xPelicanNamespace["require-token"])
 	namespace.ReadHTTPS, _ = strconv.ParseBool(xPelicanNamespace["readhttps"])
+	namespace.DirListHost = xPelicanNamespace["collections-url"]
 
 	var xPelicanAuthorization map[string]string
 	if len(dirResp.Header.Values("X-Pelican-Authorization")) > 0 {
@@ -162,7 +163,11 @@ func QueryDirector(source string, directorUrl string) (resp *http.Response, err 
 
 	// Check HTTP response -- should be 307 (redirect), else something went wrong
 	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != 307 {
+
+	// If we get a 404, the director will hopefully tell us why. It might be that the namespace doesn't exist
+	if resp.StatusCode == 404 {
+		return nil, errors.New("404: " + string(body))
+	} else if resp.StatusCode != 307 {
 		var respErr directorResponse
 		if unmarshalErr := json.Unmarshal(body, &respErr); unmarshalErr != nil { // Error creating json
 			return nil, errors.Wrap(unmarshalErr, "Could not unmarshall the director's response")
@@ -222,7 +227,7 @@ func GetCachesFromDirectorResponse(resp *http.Response, needsToken bool) (caches
 }
 
 // NewTransferDetails creates the TransferDetails struct with the given cache
-func NewTransferDetailsUsingDirector(cache namespaces.DirectorCache, https bool) []TransferDetails {
+func NewTransferDetailsUsingDirector(cache namespaces.DirectorCache, opts TransferDetailsOptions) []TransferDetails {
 	details := make([]TransferDetails, 0)
 	cacheEndpoint := cache.EndpointUrl
 
@@ -240,22 +245,24 @@ func NewTransferDetailsUsingDirector(cache namespaces.DirectorCache, https bool)
 		cacheURL.Opaque = ""
 	}
 	log.Debugf("Parsed Cache: %s\n", cacheURL.String())
-	if https {
+	if opts.NeedsToken {
 		cacheURL.Scheme = "https"
 		if !HasPort(cacheURL.Host) {
 			// Add port 8444 and 8443
 			cacheURL.Host += ":8444"
 			details = append(details, TransferDetails{
-				Url:   *cacheURL,
-				Proxy: false,
+				Url:        *cacheURL,
+				Proxy:      false,
+				PackOption: opts.PackOption,
 			})
 			// Strip the port off and add 8443
 			cacheURL.Host = cacheURL.Host[:len(cacheURL.Host)-5] + ":8443"
 		}
 		// Whether port is specified or not, add a transfer without proxy
 		details = append(details, TransferDetails{
-			Url:   *cacheURL,
-			Proxy: false,
+			Url:        *cacheURL,
+			Proxy:      false,
+			PackOption: opts.PackOption,
 		})
 	} else {
 		cacheURL.Scheme = "http"
@@ -264,13 +271,15 @@ func NewTransferDetailsUsingDirector(cache namespaces.DirectorCache, https bool)
 		}
 		isProxyEnabled := IsProxyEnabled()
 		details = append(details, TransferDetails{
-			Url:   *cacheURL,
-			Proxy: isProxyEnabled,
+			Url:        *cacheURL,
+			Proxy:      isProxyEnabled,
+			PackOption: opts.PackOption,
 		})
 		if isProxyEnabled && CanDisableProxy() {
 			details = append(details, TransferDetails{
-				Url:   *cacheURL,
-				Proxy: false,
+				Url:        *cacheURL,
+				Proxy:      false,
+				PackOption: opts.PackOption,
 			})
 		}
 	}

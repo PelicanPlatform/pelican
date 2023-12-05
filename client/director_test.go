@@ -142,7 +142,8 @@ func TestNewTransferDetailsUsingDirector(t *testing.T) {
 	}
 
 	// Case 1: cache with http
-	transfers := NewTransferDetailsUsingDirector(nonAuthCache, nonAuthCache.AuthedReq)
+
+	transfers := NewTransferDetailsUsingDirector(nonAuthCache, TransferDetailsOptions{nonAuthCache.AuthedReq, ""})
 	assert.Equal(t, 2, len(transfers))
 	assert.Equal(t, "my-cache-url:8000", transfers[0].Url.Host)
 	assert.Equal(t, "http", transfers[0].Url.Scheme)
@@ -153,7 +154,7 @@ func TestNewTransferDetailsUsingDirector(t *testing.T) {
 	assert.Equal(t, false, transfers[1].Proxy)
 
 	// Case 2: cache with https
-	transfers = NewTransferDetailsUsingDirector(authCache, authCache.AuthedReq)
+	transfers = NewTransferDetailsUsingDirector(authCache, TransferDetailsOptions{authCache.AuthedReq, ""})
 	assert.Equal(t, 1, len(transfers))
 	assert.Equal(t, "my-cache-url:8443", transfers[0].Url.Host)
 	assert.Equal(t, "https", transfers[0].Url.Scheme)
@@ -161,7 +162,7 @@ func TestNewTransferDetailsUsingDirector(t *testing.T) {
 
 	// Case 3: cache without port with http
 	nonAuthCache.EndpointUrl = "my-cache-url"
-	transfers = NewTransferDetailsUsingDirector(nonAuthCache, nonAuthCache.AuthedReq)
+	transfers = NewTransferDetailsUsingDirector(nonAuthCache, TransferDetailsOptions{nonAuthCache.AuthedReq, ""})
 	assert.Equal(t, 2, len(transfers))
 	assert.Equal(t, "my-cache-url:8000", transfers[0].Url.Host)
 	assert.Equal(t, "http", transfers[0].Url.Scheme)
@@ -172,7 +173,7 @@ func TestNewTransferDetailsUsingDirector(t *testing.T) {
 
 	// Case 4. cache without port with https
 	authCache.EndpointUrl = "my-cache-url"
-	transfers = NewTransferDetailsUsingDirector(authCache, authCache.AuthedReq)
+	transfers = NewTransferDetailsUsingDirector(authCache, TransferDetailsOptions{authCache.AuthedReq, ""})
 	assert.Equal(t, 2, len(transfers))
 	assert.Equal(t, "my-cache-url:8444", transfers[0].Url.Host)
 	assert.Equal(t, "https", transfers[0].Url.Scheme)

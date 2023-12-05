@@ -27,6 +27,7 @@ import (
 	"path"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/pelicanplatform/pelican/param"
 
@@ -42,9 +43,10 @@ type PromDiscoveryItem struct {
 }
 
 var (
-	minClientVersion, _   = version.NewVersion("7.0.0")
-	minOriginVersion, _   = version.NewVersion("7.0.0")
-	healthTestCancelFuncs = make(map[ServerAd]context.CancelFunc)
+	minClientVersion, _        = version.NewVersion("7.0.0")
+	minOriginVersion, _        = version.NewVersion("7.0.0")
+	healthTestCancelFuncs      = make(map[ServerAd]context.CancelFunc)
+	healthTestCancelFuncsMutex = sync.RWMutex{}
 )
 
 func getRedirectURL(reqPath string, ad ServerAd, requiresAuth bool) (redirectURL url.URL) {
@@ -225,8 +227,8 @@ func RedirectToCache(ginCtx *gin.Context) {
 			ginCtx.Writer.Header()["X-Pelican-Token-Generation"] = []string{tokenGen}
 		}
 	}
-	ginCtx.Writer.Header()["X-Pelican-Namespace"] = []string{fmt.Sprintf("namespace=%s, require-token=%v",
-		namespaceAd.Path, namespaceAd.RequireToken)}
+	ginCtx.Writer.Header()["X-Pelican-Namespace"] = []string{fmt.Sprintf("namespace=%s, require-token=%v, collections-url=%s",
+		namespaceAd.Path, namespaceAd.RequireToken, namespaceAd.DirlistHost)}
 
 	// Note we only append the `authz` query parameter in the case of the redirect response and not the
 	// duplicate link metadata above.  This is purposeful: the Link header might get too long if we repeat
@@ -439,8 +441,8 @@ func registerServeAd(ctx *gin.Context, sType ServerType) {
 
 	// Start director periodic test of origin's health status if origin AD
 	// has WebURL field AND it's not already been registered
-	serverAdMutex.RLock()
-	defer serverAdMutex.RUnlock()
+	healthTestCancelFuncsMutex.Lock()
+	defer healthTestCancelFuncsMutex.Unlock()
 	if ad.WebURL != "" && !hasOriginAdInCache {
 		ctx, cancel := context.WithCancel(context.Background())
 		healthTestCancelFuncs[sAd] = cancel
