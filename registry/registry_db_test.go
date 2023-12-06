@@ -364,6 +364,7 @@ func TestCacheAdminNoApproval(t *testing.T) {
 
 	assert.ErrorIs(t, err, serverCredsErr)
 
+	ShutdownDB()
 }
 
 func TestCacheAdminEmptyApproval(t *testing.T) {
@@ -389,6 +390,8 @@ func TestCacheAdminEmptyApproval(t *testing.T) {
 	_, err = dbGetPrefixJwks("/caches/test")
 
 	assert.ErrorIs(t, err, serverCredsErr)
+
+	ShutdownDB()
 
 }
 
@@ -421,6 +424,8 @@ func TestCacheAdminWithApproval(t *testing.T) {
 	assert.NotErrorIsf(t, err, serverCredsErr, "error chain contains serverCredErr")
 
 	assert.ErrorContainsf(t, err, "Failed to parse pubkey as a jwks: failed to unmarshal JWK set: invalid character 'k' in literal true (expecting 'r')", "error doesn't contain jwks parsing error")
+
+	ShutdownDB()
 }
 
 func TestOriginAdminNoApproval(t *testing.T) {
@@ -452,6 +457,8 @@ func TestOriginAdminNoApproval(t *testing.T) {
 	assert.NotErrorIsf(t, err, serverCredsErr, "error chain contains serverCredErr")
 
 	assert.ErrorContainsf(t, err, "Failed to parse pubkey as a jwks: failed to unmarshal JWK set: invalid character 'k' in literal true (expecting 'r')", "error doesn't contain jwks parsing error")
+
+	ShutdownDB()
 }
 
 func TestOriginAdminEmptyApproval(t *testing.T) {
@@ -479,4 +486,6 @@ func TestOriginAdminEmptyApproval(t *testing.T) {
 	assert.NotErrorIsf(t, err, serverCredsErr, "error chain contains serverCredErr")
 
 	assert.ErrorContainsf(t, err, "Failed to parse pubkey as a jwks: failed to unmarshal JWK set: invalid character 'k' in literal true (expecting 'r')", "error doesn't contain jwks parsing error")
+
+	ShutdownDB()
 }
