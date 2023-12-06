@@ -21,7 +21,7 @@ import {Box} from "@mui/material";
 import {Header} from "@/components/layout/Header";
 
 export const metadata = {
-    title: 'Origin Initialization',
+    title: 'Pelican Login',
     description: 'Software designed to make data distribution easy',
 }
 

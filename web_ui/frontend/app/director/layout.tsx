@@ -16,15 +16,13 @@
  *
  ***************************************************************/
 
-import {Box} from "@mui/material";
+import {Box, Tooltip} from "@mui/material";
 
-import {Header} from "@/components/layout/Header";
 import {Sidebar} from "@/components/layout/Sidebar";
 import Link from "next/link";
 import Image from "next/image";
 import PelicanLogo from "@/public/static/images/PelicanPlatformLogo_Icon.png";
 import IconButton from "@mui/material/IconButton";
-import HomeIcon from "@mui/icons-material/Home";
 import BuildIcon from "@mui/icons-material/Build";
 
 export const metadata = {
@@ -48,6 +46,15 @@ export default function RootLayout({
                         height={36}
                     />
                 </Link>
+                <Box pt={1}>
+                    <Tooltip title={"Config"} placement={"right"}>
+                        <Link href={"/config/index.html"}>
+                            <IconButton>
+                                <BuildIcon/>
+                            </IconButton>
+                        </Link>
+                    </Tooltip>
+                </Box>
             </Sidebar>
             <Box component={"main"} p={2} pl={"90px"} display={"flex"} minHeight={"100vh"} flexGrow={1}>
                 {children}

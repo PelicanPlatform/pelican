@@ -23,10 +23,10 @@ import Link from "next/link";
 import Image from "next/image";
 import PelicanLogo from "@/public/static/images/PelicanPlatformLogo_Icon.png";
 import IconButton from "@mui/material/IconButton";
-import BuildIcon from "@mui/icons-material/Build";
+import {TripOrigin, AssistantDirection} from "@mui/icons-material";
 
 export const metadata = {
-    title: 'Pelican Origin',
+    title: 'Pelican Configuration',
     description: 'Software designed to make data distribution easy',
 }
 
@@ -46,17 +46,26 @@ export default function RootLayout({
                         height={36}
                     />
                 </Link>
-                <Box pt={1}>
-                    <Tooltip title={"Config"} placement={"right"}>
-                        <Link href={"/config/index.html"}>
+                <Box pt={3}>
+                    <Link href={"/origin/index.html"}>
+                        <Tooltip title={"Origin"} placement={"right"}>
                             <IconButton>
-                                <BuildIcon/>
+                                <TripOrigin/>
                             </IconButton>
-                        </Link>
-                    </Tooltip>
+                        </Tooltip>
+                    </Link>
+                </Box>
+                <Box pt={1}>
+                    <Link href={"/director/index.html"}>
+                        <Tooltip title={"Director"} placement={"right"}>
+                            <IconButton>
+                                <AssistantDirection/>
+                            </IconButton>
+                        </Tooltip>
+                    </Link>
                 </Box>
             </Sidebar>
-            <Box component={"main"} p={2} pl={"90px"} display={"flex"} minHeight={"100vh"} flexGrow={1}>
+            <Box component={"main"} pl={"72px"} pb={2} display={"flex"} minHeight={"100vh"} flexGrow={1}>
                 {children}
             </Box>
         </Box>
