@@ -230,7 +230,8 @@ func getPrefixJwksById(id int) (jwk.Set, error) {
 }
 
 func dbGetPrefixJwks(prefix string) (*jwk.Set, error) {
-	before, _, _ := strings.Cut(prefix, "/")
+	_, after, _ := strings.Cut(prefix, "/")
+	before, _, _ := strings.Cut(after, "/")
 	var jwksQuery string
 	var pubkeyStr string
 	if before == "caches" {

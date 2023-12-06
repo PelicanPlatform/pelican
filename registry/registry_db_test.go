@@ -335,3 +335,148 @@ func TestRegistryTopology(t *testing.T) {
 
 	viper.Reset()
 }
+
+func TestCacheAdminNoApproval(t *testing.T) {
+	viper.Reset()
+	registry_db_dir := t.TempDir()
+
+	viper.Set("Registry.DbLocation", registry_db_dir)
+
+	err := InitializeDB()
+	assert.NoError(t, err, "error initializing registry database")
+
+	jResult, err := json.Marshal(AdminJSON{
+		AdminApproved: false,
+	})
+	assert.NoError(t, err, "error marshalling json admin data")
+
+	var ns Namespace
+	ns.Prefix = "/caches/test"
+	ns.Identity = "testident"
+	ns.Pubkey = "tkey"
+	ns.AdminMetadata = string(jResult)
+
+	err = addNamespace(&ns)
+
+	assert.NoError(t, err, "error adding test cache to registry database")
+
+	_, err = dbGetPrefixJwks("/caches/test")
+
+	assert.ErrorIs(t, err, serverCredsErr)
+
+}
+
+func TestCacheAdminEmptyApproval(t *testing.T) {
+	viper.Reset()
+	registry_db_dir := t.TempDir()
+
+	viper.Set("Registry.DbLocation", registry_db_dir)
+
+	err := InitializeDB()
+	assert.NoError(t, err, "error initializing registry database")
+
+	assert.NoError(t, err, "error marshalling json admin data")
+
+	var ns Namespace
+	ns.Prefix = "/caches/test"
+	ns.Identity = "testident"
+	ns.Pubkey = "tkey"
+
+	err = addNamespace(&ns)
+
+	assert.NoError(t, err, "error adding test cache to registry database")
+
+	_, err = dbGetPrefixJwks("/caches/test")
+
+	assert.ErrorIs(t, err, serverCredsErr)
+
+}
+
+func TestCacheAdminWithApproval(t *testing.T) {
+	viper.Reset()
+	registry_db_dir := t.TempDir()
+
+	viper.Set("Registry.DbLocation", registry_db_dir)
+
+	err := InitializeDB()
+	assert.NoError(t, err, "error initializing registry database")
+
+	jResult, err := json.Marshal(AdminJSON{
+		AdminApproved: true,
+	})
+	assert.NoError(t, err, "error marshalling json admin data")
+
+	var ns Namespace
+	ns.Prefix = "/caches/test"
+	ns.Identity = "testident"
+	ns.Pubkey = "tkey"
+	ns.AdminMetadata = string(jResult)
+
+	err = addNamespace(&ns)
+
+	assert.NoError(t, err, "error adding test cache to registry database")
+
+	_, err = dbGetPrefixJwks("/caches/test")
+
+	assert.NotErrorIsf(t, err, serverCredsErr, "error chain contains serverCredErr")
+
+	assert.ErrorContainsf(t, err, "Failed to parse pubkey as a jwks: failed to unmarshal JWK set: invalid character 'k' in literal true (expecting 'r')", "error doesn't contain jwks parsing error")
+}
+
+func TestOriginAdminNoApproval(t *testing.T) {
+	viper.Reset()
+	registry_db_dir := t.TempDir()
+
+	viper.Set("Registry.DbLocation", registry_db_dir)
+
+	err := InitializeDB()
+	assert.NoError(t, err, "error initializing registry database")
+
+	jResult, err := json.Marshal(AdminJSON{
+		AdminApproved: false,
+	})
+	assert.NoError(t, err, "error marshalling json admin data")
+
+	var ns Namespace
+	ns.Prefix = "/orig/test"
+	ns.Identity = "testident"
+	ns.Pubkey = "tkey"
+	ns.AdminMetadata = string(jResult)
+
+	err = addNamespace(&ns)
+
+	assert.NoError(t, err, "error adding test cache to registry database")
+
+	_, err = dbGetPrefixJwks("/orig/test")
+
+	assert.NotErrorIsf(t, err, serverCredsErr, "error chain contains serverCredErr")
+
+	assert.ErrorContainsf(t, err, "Failed to parse pubkey as a jwks: failed to unmarshal JWK set: invalid character 'k' in literal true (expecting 'r')", "error doesn't contain jwks parsing error")
+}
+
+func TestOriginAdminEmptyApproval(t *testing.T) {
+	viper.Reset()
+	registry_db_dir := t.TempDir()
+
+	viper.Set("Registry.DbLocation", registry_db_dir)
+
+	err := InitializeDB()
+	assert.NoError(t, err, "error initializing registry database")
+
+	assert.NoError(t, err, "error marshalling json admin data")
+
+	var ns Namespace
+	ns.Prefix = "/orig/test"
+	ns.Identity = "testident"
+	ns.Pubkey = "tkey"
+
+	err = addNamespace(&ns)
+
+	assert.NoError(t, err, "error adding test cache to registry database")
+
+	_, err = dbGetPrefixJwks("/orig/test")
+
+	assert.NotErrorIsf(t, err, serverCredsErr, "error chain contains serverCredErr")
+
+	assert.ErrorContainsf(t, err, "Failed to parse pubkey as a jwks: failed to unmarshal JWK set: invalid character 'k' in literal true (expecting 'r')", "error doesn't contain jwks parsing error")
+}
