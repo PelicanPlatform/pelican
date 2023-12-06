@@ -34,6 +34,7 @@ import (
 	"github.com/pelicanplatform/pelican/daemon"
 	"github.com/pelicanplatform/pelican/origin_ui"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/utils"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/require"
@@ -126,12 +127,10 @@ func TestOrigin(t *testing.T) {
 	}
 
 	if testSuccess {
-		url, err := origin_ui.UploadTestfile()
+		fileTests := utils.TestFileTransferImpl{}
+		ok, err := fileTests.RunTests(param.Origin_Url.GetString(), param.Origin_Url.GetString(), utils.OriginSelfFileTest)
 		require.NoError(t, err)
-		err = origin_ui.DownloadTestfile(url)
-		require.NoError(t, err)
-		err = origin_ui.DeleteTestfile(url)
-		require.NoError(t, err)
+		require.True(t, ok)
 	} else {
 		t.Fatalf("Unsucessful test: timeout when trying to send request to xrootd")
 	}
