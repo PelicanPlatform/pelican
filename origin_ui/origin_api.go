@@ -19,12 +19,10 @@
 package origin_ui
 
 import (
+	"context"
 	"fmt"
-	"os"
-	"os/signal"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -42,7 +40,6 @@ var (
 	// Duration to wait before timeout
 	// TODO: Do we want to make this a configurable value?
 	directorTimeoutDuration = 30 * time.Second
-	exitSignals             = make(chan os.Signal, 1)
 	exitLoop                = make(chan struct{})
 )
 
@@ -140,7 +137,7 @@ func directorTestResponse(ctx *gin.Context) {
 }
 
 // Configure API endpoints for origin that are not tied to UI
-func ConfigureOriginAPI(router *gin.Engine) error {
+func ConfigureOriginAPI(router *gin.Engine, ctx context.Context, wg *sync.WaitGroup) error {
 	if router == nil {
 		return errors.New("Origin configuration passed a nil pointer")
 	}
@@ -149,21 +146,19 @@ func ConfigureOriginAPI(router *gin.Engine) error {
 	// start the timer for the director test report timeout
 	resetDirectorTimeoutTimer()
 
-	// When program exits
-	signal.Notify(exitSignals, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
-
 	go func() {
 		// Gracefully stop the timer at the exit of the program
-		<-exitSignals
+		defer wg.Done()
+		<-ctx.Done()
 		timerMutex.Lock()
 		defer timerMutex.Unlock()
-		log.Infoln("Gracefully stopping the director-health test timeout timer...")
 		// Terminate the infinite loop to reset the timer
 		close(exitLoop)
 		if directorTimeoutTimer != nil {
 			directorTimeoutTimer.Stop()
 			directorTimeoutTimer = nil
 		}
+		log.Infoln("Gracefully stopping the director-health test timeout timer...")
 	}()
 
 	group := router.Group("/api/v1.0/origin-api")

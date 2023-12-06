@@ -29,8 +29,8 @@ gpgcheck=0' > /etc/yum.repos.d/goreleaser.repo
 RUN dnf module install -y nodejs:18
 
 # Install goreleaser and various other packages we need
-RUN yum install -y goreleaser npm xrootd xrootd-server xrootd-client nano xrootd-scitokens \
-    xrootd-voms xrdcl-http jq procps docker make curl java-17-openjdk-headless \
+RUN yum install -y goreleaser npm xrootd-devel xrootd-server-devel xrootd-client-devel nano xrootd-scitokens \
+    xrootd-voms xrdcl-http jq procps docker make curl-devel java-17-openjdk-headless git cmake3 gcc-c++ openssl-devel \
     && yum clean all
 
 # Installing the right version of go
@@ -105,6 +105,25 @@ ENV JAVA_HOME=/usr/lib/jvm/jre \
     PATH="${ST_HOME}/bin:${QDL_HOME}/bin:${PATH}"
 
 COPY images/dev-config.yaml /etc/pelican/pelican.yaml
+
+# Install the S3 and HTTP server plugins for XRootD. For now we do this from source
+# until we can sort out the RPMs.
+RUN \
+    git clone https://github.com/PelicanPlatform/xrootd-s3-http.git && \
+    cd xrootd-s3-http && \
+    mkdir build && cd build && \
+    cmake .. && \
+    make install && \
+    # For now, until the RPM is set up, we install the libraries here, but
+    # we need to add to LD_LIBRARY_PATH so XRootD knows where to look
+    echo "/usr/local/lib" > /etc/ld.so.conf.d/xrdplugins.conf && ldconfig
+
+# For S3 tests, we need the minIO server client, so we install based on detected arch
+RUN if [ "$TARGETARCH" = "amd64" ]; then \
+        dnf install -y https://dl.min.io/server/minio/release/linux-amd64/minio-20231202105133.0.0.x86_64.rpm; \
+    elif [ "$TARGETARCH" = "arm64" ]; then \
+        dnf install -y https://dl.min.io/server/minio/release/linux-arm64/minio-20231202105133.0.0.aarch64.rpm; \
+    fi
 
 WORKDIR /app
 

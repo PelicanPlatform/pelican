@@ -227,7 +227,7 @@ func GetCachesFromDirectorResponse(resp *http.Response, needsToken bool) (caches
 }
 
 // NewTransferDetails creates the TransferDetails struct with the given cache
-func NewTransferDetailsUsingDirector(cache namespaces.DirectorCache, https bool) []TransferDetails {
+func NewTransferDetailsUsingDirector(cache namespaces.DirectorCache, opts TransferDetailsOptions) []TransferDetails {
 	details := make([]TransferDetails, 0)
 	cacheEndpoint := cache.EndpointUrl
 
@@ -245,22 +245,24 @@ func NewTransferDetailsUsingDirector(cache namespaces.DirectorCache, https bool)
 		cacheURL.Opaque = ""
 	}
 	log.Debugf("Parsed Cache: %s\n", cacheURL.String())
-	if https {
+	if opts.NeedsToken {
 		cacheURL.Scheme = "https"
 		if !HasPort(cacheURL.Host) {
 			// Add port 8444 and 8443
 			cacheURL.Host += ":8444"
 			details = append(details, TransferDetails{
-				Url:   *cacheURL,
-				Proxy: false,
+				Url:        *cacheURL,
+				Proxy:      false,
+				PackOption: opts.PackOption,
 			})
 			// Strip the port off and add 8443
 			cacheURL.Host = cacheURL.Host[:len(cacheURL.Host)-5] + ":8443"
 		}
 		// Whether port is specified or not, add a transfer without proxy
 		details = append(details, TransferDetails{
-			Url:   *cacheURL,
-			Proxy: false,
+			Url:        *cacheURL,
+			Proxy:      false,
+			PackOption: opts.PackOption,
 		})
 	} else {
 		cacheURL.Scheme = "http"
@@ -269,13 +271,15 @@ func NewTransferDetailsUsingDirector(cache namespaces.DirectorCache, https bool)
 		}
 		isProxyEnabled := IsProxyEnabled()
 		details = append(details, TransferDetails{
-			Url:   *cacheURL,
-			Proxy: isProxyEnabled,
+			Url:        *cacheURL,
+			Proxy:      isProxyEnabled,
+			PackOption: opts.PackOption,
 		})
 		if isProxyEnabled && CanDisableProxy() {
 			details = append(details, TransferDetails{
-				Url:   *cacheURL,
-				Proxy: false,
+				Url:        *cacheURL,
+				Proxy:      false,
+				PackOption: opts.PackOption,
 			})
 		}
 	}

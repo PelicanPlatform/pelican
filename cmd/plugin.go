@@ -20,15 +20,17 @@ package main
 
 import (
 	"bufio"
-	"errors"
 	"fmt"
+	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/pelicanplatform/pelican/classads"
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -195,7 +197,19 @@ func stashPluginMain(args []string) {
 		} else {
 			source = append(source, transfer.url)
 			log.Debugln("Downloading:", transfer.url, "to", transfer.localFile)
-			tmpDownloaded, result = client.DoStashCPSingle(transfer.url, transfer.localFile, methods, false)
+
+			// When we want to auto-unpack files, we should do this to the containing directory, not the destination
+			// file which HTCondor prepares
+			url, err := url.Parse(transfer.url)
+			if err != nil {
+				result = errors.Wrap(err, "Unable to parse transfer source as a URL")
+			} else {
+				localFile := transfer.localFile
+				if url.Query().Get("pack") != "" {
+					localFile = filepath.Dir(localFile)
+				}
+				tmpDownloaded, result = client.DoStashCPSingle(transfer.url, localFile, methods, false)
+			}
 		}
 		startTime := time.Now().Unix()
 		resultAd := classads.NewClassAd()

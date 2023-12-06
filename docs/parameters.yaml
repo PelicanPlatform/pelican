@@ -332,6 +332,23 @@ type: string
 default: none
 components: ["origin"]
 ---
+name: Origin.XRootDPrefix
+description: >-
+  The directory prefix for the xrootd origin configuration files.
+type: string
+default: origin
+components: ["origin"]
+---
+name: Origin.EnableVoms
+description: >-
+  Enable X.509 / VOMS-based authentication.  This allows HTTP clients to
+  present X.509 client credentials in order to authenticate.  The configuration
+  of the authorization for these clients must be done by the admin; Pelican
+  does not support automatic VOMS authorization configuration.
+type: bool
+default: true
+components: ["origin"]
+---
 
 ############################
 #   Cache-level configs    #
@@ -351,6 +368,30 @@ description: >-
   relative to the mount location.
 type: string
 default: /
+components: ["cache"]
+---
+name: Cache.XRootDPrefix
+description: >-
+  The directory prefix for the xrootd cache configuration files.
+type: string
+default: cache
+components: ["cache"]
+---
+name: Cache.Port
+description: >-
+  The port over which the xrootd cache should be made available (this will overwrite Xrootd.Port)
+type: int
+default: 8447
+components: ["cache"]
+---
+name: Cache.EnableVoms
+description: >-
+  Enable X.509 / VOMS-based authentication for the cache.  This allows HTTP clients
+  to present X.509 client credentials in order to authenticate.  The configuration
+  of the authorization for these clients must be done by the admin; Pelican
+  does not support automatic VOMS authorization configuration.
+type: bool
+default: false
 components: ["cache"]
 ---
 
@@ -720,19 +761,19 @@ description: >-
   The port over which XRootD should be made available.
 type: int
 default: 8443
-components: ["origin"]
+components: ["origin", "cache"]
 ---
 name: Xrootd.RunLocation
 description: >-
   A directory where temporary configurations will be stored for the xrootd daemon
-  started by the origin.
+  started by the origin or cache.
 
   For non-root servers, if $XDG_RUNTIME_DIR is not set, a temporary directory will
   be created (and removed on shutdown)
 type: filename
 root_default: /run/pelican/xrootd
 default: $XDG_RUNTIME_DIR/pelican
-components: ["origin"]
+components: ["origin", "cache"]
 ---
 name: Xrootd.RobotsTxtFile
 description: >-

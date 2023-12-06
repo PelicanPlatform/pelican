@@ -1,0 +1,40 @@
+{
+  "name": "src",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "export NODE_ENV=development && next dev",
+    "build": "next build",
+    "start": "next start",
+    "export": "next export",
+    "lint": "next lint",
+    "clean": "rm -rf .next & rm -rf out"
+  },
+  "dependencies": {
+    "@emotion/react": "^11.11.1",
+    "@emotion/styled": "^11.11.0",
+    "@mui/icons-material": "^5.14.3",
+    "@mui/material": "^5.14.5",
+    "@mui/x-date-pickers": "^6.16.0",
+    "@types/node": "20.4.5",
+    "@types/react": "18.2.16",
+    "@types/react-dom": "18.2.7",
+    "chart.js": "^4.4.0",
+    "chartjs-adapter-luxon": "^1.3.1",
+    "chartjs-plugin-zoom": "^2.0.1",
+    "eslint": "8.45.0",
+    "eslint-config-next": "13.4.12",
+    "luxon": "^3.4.3",
+    "next": "^14.0.1",
+    "react": "18.2.0",
+    "react-chartjs-2": "^5.2.0",
+    "react-dom": "18.2.0",
+    "typescript": "5.1.6"
+  },
+  "devDependencies": {
+    "@types/luxon": "^3.3.2"
+  },
+    "engines": {
+        "node" : "18"
+    }
+}

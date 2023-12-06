@@ -19,68 +19,36 @@
 package origin_ui
 
 import (
-	"bytes"
-	"encoding/json"
-	"io"
-	"net/http"
+	"fmt"
 	"net/url"
-	"time"
 
-	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
-	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 )
 
-type directorResponse struct {
-	Error string `json:"error"`
-}
-
-func PeriodicAdvertiseOrigin() error {
-	ticker := time.NewTicker(1 * time.Minute)
-	go func() {
-		err := AdvertiseOrigin()
-		if err != nil {
-			log.Warningln("Origin advertise failed:", err)
-			metrics.SetComponentHealthStatus(metrics.OriginCache_Federation, metrics.StatusCritical, "Error advertising origin to federation")
-		} else {
-			metrics.SetComponentHealthStatus(metrics.OriginCache_Federation, metrics.StatusOK, "")
-		}
-
-		for {
-			<-ticker.C
-			err := AdvertiseOrigin()
-			if err != nil {
-				log.Warningln("Origin advertise failed:", err)
-				metrics.SetComponentHealthStatus(metrics.OriginCache_Federation, metrics.StatusCritical, "Error advertising origin to federation")
-			} else {
-				metrics.SetComponentHealthStatus(metrics.OriginCache_Federation, metrics.StatusOK, "")
-			}
-		}
-	}()
-
-	return nil
-}
-
-func AdvertiseOrigin() error {
-	name := param.Xrootd_Sitename.GetString()
-	if name == "" {
-		return errors.New("Origin name isn't set")
+type (
+	OriginServer struct {
+		server_utils.NamespaceHolder
 	}
+)
 
-	originUrl := param.Origin_Url.GetString()
-	originWebUrl := param.Server_ExternalWebUrl.GetString()
+func (server *OriginServer) GetServerType() config.ServerType {
+	return config.OriginType
+}
+
+func (server *OriginServer) CreateAdvertisement(name string, originUrl string, originWebUrl string) (director.OriginAdvertise, error) {
+	ad := director.OriginAdvertise{}
 
 	// Here we instantiate the namespaceAd slice, but we still need to define the namespace
-	namespaceUrl, err := url.Parse(param.Federation_NamespaceUrl.GetString())
-	if err != nil {
-		return errors.Wrap(err, "Bad NamespaceUrl")
-	}
-	if namespaceUrl.String() == "" {
-		return errors.New("No NamespaceUrl is set")
+	issuerUrl := url.URL{}
+	issuerUrl.Scheme = "https"
+	issuerUrl.Host = fmt.Sprintf("%v:%v", param.Server_Hostname.GetString(), param.Xrootd_Port.GetInt())
+
+	if issuerUrl.String() == "" {
+		return ad, errors.New("No IssuerUrl is set")
 	}
 
 	prefix := param.Origin_NamespacePrefix.GetString()
@@ -90,67 +58,17 @@ func AdvertiseOrigin() error {
 	nsAd := director.NamespaceAd{
 		RequireToken:  true,
 		Path:          prefix,
-		Issuer:        *namespaceUrl,
+		Issuer:        issuerUrl,
 		MaxScopeDepth: 3,
 		Strategy:      "OAuth2",
-		BasePath:      "/",
+		BasePath:      prefix,
 	}
-	ad := director.OriginAdvertise{
+	ad = director.OriginAdvertise{
 		Name:       name,
 		URL:        originUrl,
 		WebURL:     originWebUrl,
 		Namespaces: []director.NamespaceAd{nsAd},
 	}
 
-	body, err := json.Marshal(ad)
-	if err != nil {
-		return errors.Wrap(err, "Failed to generate JSON description of origin")
-	}
-
-	directorUrlStr := param.Federation_DirectorUrl.GetString()
-	if directorUrlStr == "" {
-		return errors.New("Director endpoint URL is not known")
-	}
-	directorUrl, err := url.Parse(directorUrlStr)
-	if err != nil {
-		return errors.Wrap(err, "Failed to parse Federation.DirectorURL")
-	}
-	directorUrl.Path = "/api/v1.0/director/registerOrigin"
-
-	token, err := director.CreateAdvertiseToken(prefix)
-	if err != nil {
-		return errors.Wrap(err, "Failed to generate advertise token")
-	}
-
-	req, err := http.NewRequest("POST", directorUrl.String(), bytes.NewBuffer(body))
-	if err != nil {
-		return errors.Wrap(err, "Failed to create POST request for director registration")
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
-	userAgent := "pelican-origin/" + client.ObjectClientOptions.Version
-	req.Header.Set("User-Agent", userAgent)
-
-	// We should switch this over to use the common transport, but for that to happen
-	// that function needs to be exported from pelican
-	tr := config.GetTransport()
-	client := http.Client{Transport: tr}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return errors.Wrap(err, "Failed to start request for director registration")
-	}
-	defer resp.Body.Close()
-
-	body, _ = io.ReadAll(resp.Body)
-	if resp.StatusCode > 299 {
-		var respErr directorResponse
-		if unmarshalErr := json.Unmarshal(body, &respErr); unmarshalErr != nil { // Error creating json
-			return errors.Wrapf(unmarshalErr, "Could not unmarshall the director's response, which responded %v from director registration: %v", resp.StatusCode, resp.Status)
-		}
-		return errors.Errorf("Error during director registration: %v\n", respErr.Error)
-	}
-
-	return nil
+	return ad, nil
 }

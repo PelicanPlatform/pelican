@@ -21,10 +21,10 @@ FROM node:18 AS website-build
 
 WORKDIR /webapp
 
-COPY origin_ui/src/package.json package.json
+COPY web_ui/frontend/package.json package.json
 
 RUN npm install
-COPY origin_ui/src ./
+COPY web_ui/frontend ./
 
 RUN npm run build
 
@@ -33,7 +33,7 @@ FROM goreleaser/goreleaser:v1.20.0 AS pelican-build
 WORKDIR /pelican
 
 COPY . .
-COPY --from=website-build /webapp/out ./origin_ui/src/out
+COPY --from=website-build /webapp/out ./web_ui/frontend/out
 
 RUN goreleaser --clean --snapshot
 
