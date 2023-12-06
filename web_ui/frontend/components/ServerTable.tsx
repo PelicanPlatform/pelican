@@ -33,6 +33,11 @@ interface ExportData extends Record {
 }
 
 const TableCellOverflowLink: React.JSX.ElementType = ({ children, ...props }) => {
+
+    if (children === null){
+        children = ""
+    }
+
     return (
         <TableCellOverflow sx={{color: "blue", cursor: "pointer"}} {...props}>
             <Link href={children as string}>
@@ -59,7 +64,7 @@ export const DataTable = ({ columnMap, data }: { columnMap: ColumnMap, data: Rec
                         <TableRow key={index}>
                             {Object.entries(columnMap).map(([key, column], index) => {
                                 const CellNode = column.cellNode
-                                return <CellNode key={index}>{record[key] == null ? "NULL" : record[key]}</CellNode>
+                                return <CellNode key={index}>{record[key]}</CellNode>
                             })}
                         </TableRow>
                     ))}
@@ -101,8 +106,11 @@ export const ServerTable = ({type} : ServerTableProps) => {
         "url": {
             name: "URL",
             cellNode: TableCellOverflowLink
+        },
+        "webUrl": {
+            name: "Web URL",
+            cellNode: TableCellOverflowLink
         }
-        // webUrl: "Web URL"  TODO: Uncomment when the Web URL is populated someday - Cannon Lock 2023/12/06
     }
 
     const getData = useCallback(async () => {
