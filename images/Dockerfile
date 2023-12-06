@@ -17,7 +17,7 @@
 ARG BASE_YUM_REPO=release
 ARG BASE_OSG_SERIES=3.6
 
-FROM node:18 AS website-build
+FROM node:20 AS website-build
 
 WORKDIR /webapp
 

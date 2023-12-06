@@ -26,6 +26,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -36,16 +37,16 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
-	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/oauth2"
-	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-
 	// use this sqlite driver instead of the one from
 	// github.com/mattn/go-sqlite3, because this one
 	// doesn't require compilation with CGO_ENABLED
 	_ "modernc.org/sqlite"
+
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/oauth2"
+	"github.com/pelicanplatform/pelican/param"
 )
 
 var OIDC struct {
@@ -249,8 +250,14 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData, action str
 				return errors.Wrap(err, "Server encountered an error checking if namespace already exists")
 			}
 			if exists {
-				return errors.New("The prefix already is registered")
+				returnMsg := map[string]interface{}{
+					"message": fmt.Sprintf("The prefix %s is already registered -- nothing else to do!", data.Prefix),
+				}
+				ctx.AbortWithStatusJSON(200, returnMsg)
+				log.Infof("Skipping registration of prefix %s because it's already registered.", data.Prefix)
+				return nil
 			}
+
 			reqPrefix, err := validateNSPath(data.Prefix)
 			if err != nil {
 				err = errors.Wrapf(err, "Requested namespace %s failed validation", reqPrefix)

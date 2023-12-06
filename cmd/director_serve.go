@@ -61,8 +61,8 @@ func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	}
 	go director.PeriodicCacheReload()
 
-	wg.Add(1)
 	director.ConfigTTLCache(shutdownCtx, &wg)
+	wg.Add(1) // Add to wait group after ConfigTTLCache finishes to avoid deadlock
 
 	engine, err := web_ui.GetEngine()
 	if err != nil {
@@ -88,6 +88,7 @@ func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	rootGroup := engine.Group("/")
 	director.RegisterDirector(rootGroup)
 	director.RegisterDirectorAuth(rootGroup)
+	director.RegisterDirectorWebAPI(rootGroup)
 
 	log.Info("Starting web engine...")
 	go web_ui.RunEngine(engine)

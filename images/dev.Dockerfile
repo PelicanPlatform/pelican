@@ -26,7 +26,7 @@ enabled=1 \n\
 gpgcheck=0' > /etc/yum.repos.d/goreleaser.repo
 
 # Install proper version of nodejs so that make web-build works
-RUN dnf module install -y nodejs:18
+RUN dnf module install -y nodejs:20
 
 # Install goreleaser and various other packages we need
 RUN yum install -y goreleaser npm xrootd-devel xrootd-server-devel xrootd-client-devel nano xrootd-scitokens \

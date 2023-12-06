@@ -78,6 +78,17 @@ func configureWebResource(engine *gin.Engine) error {
 		)
 	})
 
+	engine.GET("/api/v1.0/docs", func(ctx *gin.Context) {
+
+		filePath := "frontend/out/api/docs/index.html"
+		file, _ := webAssets.ReadFile(filePath)
+		ctx.Data(
+			http.StatusOK,
+			mime.TypeByExtension(filePath),
+			file,
+		)
+	})
+
 	return nil
 }
 

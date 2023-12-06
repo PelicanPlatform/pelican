@@ -51,11 +51,11 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		config.CleanupTempResources()
 	}()
 
-	wg.Add(1)
 	err := xrootd.SetUpMonitoring(shutdownCtx, &wg)
 	if err != nil {
 		return err
 	}
+	wg.Add(1) // Add to wg afterward to ensure no error causes deadlock
 
 	originServer := &origin_ui.OriginServer{}
 	err = server_ui.CheckDefaults(originServer)
@@ -76,9 +76,10 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	}
 
 	// Set up the APIs unrelated to UI, which only contains director-based health test reporting endpoint for now
-	if err = origin_ui.ConfigureOriginAPI(engine); err != nil {
+	if err = origin_ui.ConfigureOriginAPI(engine, shutdownCtx, &wg); err != nil {
 		return err
 	}
+	wg.Add(1)
 	if err = server_ui.RegisterNamespaceWithRetry(); err != nil {
 		return err
 	}

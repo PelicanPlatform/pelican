@@ -34,6 +34,7 @@ import (
 	"github.com/pelicanplatform/pelican/daemon"
 	"github.com/pelicanplatform/pelican/origin_ui"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/utils"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/require"
@@ -84,7 +85,6 @@ func TestOrigin(t *testing.T) {
 
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
-	wg.Add(1)
 
 	defer func() {
 		shutdownCancel()
@@ -93,6 +93,7 @@ func TestOrigin(t *testing.T) {
 
 	err = SetUpMonitoring(shutdownCtx, &wg)
 	require.NoError(t, err)
+	wg.Add(1)
 
 	configPath, err := ConfigXrootd(true)
 	require.NoError(t, err)
@@ -126,12 +127,10 @@ func TestOrigin(t *testing.T) {
 	}
 
 	if testSuccess {
-		url, err := origin_ui.UploadTestfile()
+		fileTests := utils.TestFileTransferImpl{}
+		ok, err := fileTests.RunTests(param.Origin_Url.GetString(), param.Origin_Url.GetString(), utils.OriginSelfFileTest)
 		require.NoError(t, err)
-		err = origin_ui.DownloadTestfile(url)
-		require.NoError(t, err)
-		err = origin_ui.DeleteTestfile(url)
-		require.NoError(t, err)
+		require.True(t, ok)
 	} else {
 		t.Fatalf("Unsucessful test: timeout when trying to send request to xrootd")
 	}
