@@ -349,6 +349,14 @@ type: bool
 default: true
 components: ["origin"]
 ---
+name: Origin.EnableDirListing
+description: >-
+  Allows the origin to enable directory listings. Needs to be enabled for recursive
+  downloads to work properly and for directories to be visable.
+type: bool
+default: false
+components: ["origin"]
+---
 
 ############################
 #   Cache-level configs    #
