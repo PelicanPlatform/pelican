@@ -80,7 +80,7 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		return err
 	}
 	wg.Add(1)
-	
+
 	// In posix mode, we rely on xrootd to export keys. When we run the origin with
 	// different backends, we instead export the keys via the Pelican process
 	if param.Origin_Mode.GetString() != "posix" {
