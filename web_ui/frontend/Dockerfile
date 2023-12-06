@@ -14,7 +14,7 @@
 # limitations under the License.
 #
 
-FROM node:18-alpine
+FROM node:20-alpine
 
 COPY package.json package.json
 RUN npm install && npm i -g next
