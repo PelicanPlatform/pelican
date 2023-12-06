@@ -440,6 +440,7 @@ func InitServer(sType ServerType) error {
 	viper.SetDefault("OIDC.ClientIDFile", filepath.Join(configDir, "oidc-client-id"))
 	viper.SetDefault("OIDC.ClientSecretFile", filepath.Join(configDir, "oidc-client-secret"))
 	viper.SetDefault("Cache.ExportLocation", "/")
+	viper.SetDefault("Registry.RequireKeyChaining", true)
 	if IsRootExecution() {
 		viper.SetDefault("Xrootd.RunLocation", filepath.Join("/run", "pelican", "xrootd", xrootdPrefix))
 		viper.SetDefault("Cache.DataLocation", "/run/pelican/xcache")

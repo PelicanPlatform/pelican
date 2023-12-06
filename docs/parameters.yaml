@@ -466,6 +466,15 @@ root_default: /var/lib/pelican/registry.sqlite
 default: $ConfigBase/ns-registry.sqlite
 components: ["nsregistry"]
 ---
+name: Registry.RequireKeyChaining
+description: >-
+  Specifies whether namespaces requesting registration must possess a key matching any already-registered super/sub namespaces. For
+  example, if true and a namespace `/foo/bar` is already registered, then registration of `/foo` or `/foo/bar/baz` can only be done
+  using keys registered to `/foo/bar`.
+type: bool
+default: true
+components: ["nsregistry"]
+---
 
 ############################
 #   Server-level configs   #

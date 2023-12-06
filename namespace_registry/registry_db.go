@@ -83,6 +83,44 @@ func namespaceExists(prefix string) (bool, error) {
 	return found, nil
 }
 
+func namespaceSupSubChecks(prefix string) (superspaces []string, subspaces []string, err error) {
+	// Check if any registered namespaces already superspace the incoming namespace,
+	// eg if /foo is already registered, this will be true for an incoming /foo/bar because
+	// /foo is logically above /foo/bar (according to my logic, anyway)
+	superspaceQuery := `SELECT prefix FROM namespace WHERE (? || '/') LIKE (prefix || '/%')`
+	superspaceResults, err := db.Query(superspaceQuery, prefix)
+	if err != nil {
+		return
+	}
+	defer superspaceResults.Close()
+
+	for superspaceResults.Next() {
+		var foundSuperspace string
+		if err := superspaceResults.Scan(&foundSuperspace); err == nil {
+			superspaces = append(superspaces, foundSuperspace)
+		}
+	}
+
+	// Check if any registered namespaces already subspace the incoming namespace,
+	// eg if /foo/bar is already registered, this will be true for an incoming /foo because
+	// /foo/bar is logically below /foo
+	subspaceQuery := `SELECT prefix FROM namespace WHERE (prefix || '/') LIKE (? || '/%')`
+	subspaceResults, err := db.Query(subspaceQuery, prefix)
+	if err != nil {
+		return
+	}
+	defer subspaceResults.Close()
+
+	for subspaceResults.Next() {
+		var foundSubspace string
+		if err := subspaceResults.Scan(&foundSubspace); err == nil {
+			subspaces = append(subspaces, foundSubspace)
+		}
+	}
+
+	return
+}
+
 func dbGetPrefixJwks(prefix string) (*jwk.Set, error) {
 	jwksQuery := `SELECT pubkey FROM namespace WHERE prefix = ?`
 	var pubkeyStr string
