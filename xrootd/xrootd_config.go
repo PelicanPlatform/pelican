@@ -39,20 +39,20 @@ var (
 
 type (
 	OriginConfig struct {
-		Multiuser       bool
-		EnableCmsd      bool
-		EnableMacaroons bool
-		EnableVoms      bool
+		Multiuser        bool
+		EnableCmsd       bool
+		EnableMacaroons  bool
+		EnableVoms       bool
 		EnableDirListing bool
-		SelfTest        bool
-		NamespacePrefix string
-		Mode            string
-		S3Bucket        string
-		S3Region        string
-		S3ServiceName   string
-		S3ServiceUrl    string
-		S3AccessKeyfile string
-		S3SecretKeyfile string
+		SelfTest         bool
+		NamespacePrefix  string
+		Mode             string
+		S3Bucket         string
+		S3Region         string
+		S3ServiceName    string
+		S3ServiceUrl     string
+		S3AccessKeyfile  string
+		S3SecretKeyfile  string
 	}
 
 	CacheConfig struct {
