@@ -28,7 +28,7 @@ import HomeIcon from "@mui/icons-material/Home";
 import BuildIcon from "@mui/icons-material/Build";
 
 export const metadata = {
-    title: 'Pelican Origin',
+    title: 'Pelican Director',
     description: 'Software designed to make data distribution easy',
 }
 
@@ -48,20 +48,6 @@ export default function RootLayout({
                         height={36}
                     />
                 </Link>
-                <Box pt={3}>
-                    <Link href={"/origin/index.html"}>
-                        <IconButton>
-                            <HomeIcon/>
-                        </IconButton>
-                    </Link>
-                </Box>
-                <Box pt={1}>
-                    <Link href={"/origin/config/index.html"}>
-                        <IconButton>
-                            <BuildIcon/>
-                        </IconButton>
-                    </Link>
-                </Box>
             </Sidebar>
             <Box component={"main"} p={2} pl={"90px"} display={"flex"} minHeight={"100vh"} flexGrow={1}>
                 {children}

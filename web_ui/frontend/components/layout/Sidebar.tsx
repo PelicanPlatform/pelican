@@ -26,35 +26,15 @@ import BuildIcon from '@mui/icons-material/Build';
 import styles from "../../app/page.module.css"
 import PelicanLogo from "../../public/static/images/PelicanPlatformLogo_Icon.png"
 import GithubIcon from "../../public/static/images/github-mark.png"
+import {ReactNode} from "react";
 
-export const Sidebar = () => {
+export const Sidebar = ({children}: {children: ReactNode}) => {
 
     return (
         <Box>
             <div className={styles.header} style={{display: "flex", flexDirection: "column", justifyContent:"space-between", padding:"1rem", top:0, position:"fixed", zIndex:"1", overflow: "hidden", height: "100vh"}}>
                 <div style={{display:"flex", flexDirection: "column"}}>
-                    <Link href={"/index.html"}>
-                        <Image
-                            src={PelicanLogo}
-                            alt={"Pelican Logo"}
-                            width={36}
-                            height={36}
-                        />
-                    </Link>
-                    <Box pt={3}>
-                        <Link href={"/origin/index.html"}>
-                            <IconButton>
-                                <HomeIcon/>
-                            </IconButton>
-                        </Link>
-                    </Box>
-                    <Box pt={1}>
-                        <Link href={"/origin/config/index.html"}>
-                            <IconButton>
-                                <BuildIcon/>
-                            </IconButton>
-                        </Link>
-                    </Box>
+                    {children}
                 </div>
                 <Box display={"flex"} justifyContent={"center"}>
                     <a href={"https://github.com/PelicanPlatform"}>
