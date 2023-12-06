@@ -39,12 +39,13 @@ var (
 
 type (
 	OriginConfig struct {
-		Multiuser       bool
-		EnableCmsd      bool
-		EnableMacaroons bool
-		EnableVoms      bool
-		SelfTest        bool
-		NamespacePrefix string
+		Multiuser        bool
+		EnableCmsd       bool
+		EnableMacaroons  bool
+		EnableVoms       bool
+		EnableDirListing bool
+		SelfTest         bool
+		NamespacePrefix  string
 	}
 
 	CacheConfig struct {
