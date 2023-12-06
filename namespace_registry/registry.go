@@ -295,12 +295,17 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData, action str
 			}
 
 			if param.Registry_RequireKeyChaining.GetBool() {
-				superspaces, subspaces, err := namespaceSupSubChecks(data.Prefix)
+				superspaces, subspaces, inTopo, err := namespaceSupSubChecks(data.Prefix)
 				if err != nil {
 					log.Errorf("Failed to check if namespace suffixes or prefixes another registered namespace: %v", err)
 					return errors.Wrap(err, "Server encountered an error checking if namespace already exists")
 				}
 
+				// if not in OSDF mode, this will be false
+				if inTopo {
+					_ = ctx.AbortWithError(403, errors.New("Cannot register a super or subspace of a namespace already registered in topology"))
+					return errors.New("Cannot register a super or subspace of a namespace already registered in topology")
+				}
 				// If we make the assumption that namespace prefixes are heirarchical, eg that the owner of /foo should own
 				// everything under /foo (/foo/bar, /foo/baz, etc), then it makes sense to check for superspaces first. If any
 				// superspace is found, they logically "own" the incoming namespace.

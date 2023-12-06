@@ -112,11 +112,38 @@ func namespaceExists(prefix string) (bool, error) {
 	return found, nil
 }
 
-func namespaceSupSubChecks(prefix string) (superspaces []string, subspaces []string, err error) {
+func namespaceSupSubChecks(prefix string) (superspaces []string, subspaces []string, inTopo bool, err error) {
+	// The very first thing we do is check if there's a match in topo -- if there is, for now
+	// we simply refuse to allow registration of a superspace or a subspace, assuming the registrant
+	// has to go through topology
+	if config.GetPreferredPrefix() == "OSDF" {
+		topoSuperSubQuery := `
+		SELECT prefix FROM topology WHERE (? || '/') LIKE (prefix || '/%')
+		UNION
+		SELECT prefix FROM topology WHERE (prefix || '/') LIKE (? || '/%')
+		`
+		args := []interface{}{prefix, prefix}
+		topoSuperSubResults, tmpErr := db.Query(topoSuperSubQuery, args...)
+		if tmpErr != nil {
+			err = tmpErr
+			return
+		}
+		defer topoSuperSubResults.Close()
+
+		for topoSuperSubResults.Next() {
+			// if we make it here, there was a match -- it's a trap!
+			inTopo = true
+			return
+		}
+		topoSuperSubResults.Close()
+	}
+
 	// Check if any registered namespaces already superspace the incoming namespace,
 	// eg if /foo is already registered, this will be true for an incoming /foo/bar because
 	// /foo is logically above /foo/bar (according to my logic, anyway)
 	superspaceQuery := `SELECT prefix FROM namespace WHERE (? || '/') LIKE (prefix || '/%')`
+	subspaceQuery := `SELECT prefix FROM namespace WHERE (prefix || '/') LIKE (? || '/%')`
+
 	superspaceResults, err := db.Query(superspaceQuery, prefix)
 	if err != nil {
 		return
@@ -133,7 +160,6 @@ func namespaceSupSubChecks(prefix string) (superspaces []string, subspaces []str
 	// Check if any registered namespaces already subspace the incoming namespace,
 	// eg if /foo/bar is already registered, this will be true for an incoming /foo because
 	// /foo/bar is logically below /foo
-	subspaceQuery := `SELECT prefix FROM namespace WHERE (prefix || '/') LIKE (? || '/%')`
 	subspaceResults, err := db.Query(subspaceQuery, prefix)
 	if err != nil {
 		return
