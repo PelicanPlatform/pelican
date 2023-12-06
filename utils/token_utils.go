@@ -21,6 +21,7 @@ package utils
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"fmt"
 	"net/url"
 	"regexp"
 	"strings"
@@ -59,22 +60,39 @@ func (p TokenProfile) String() string {
 	return string(p)
 }
 
-func (config TokenConfig) Validate() (bool, error) {
-	// profile-specific claims
-	// exp time > 0
-	//
+func (config *TokenConfig) Validate() (bool, error) {
+	if config.Lifetime.Seconds() <= 0 {
+		return false, errors.New(fmt.Sprint("Invalid lifetime, lifetime must be positive number: ", config.Lifetime))
+	}
+	if _, err := url.Parse(config.Issuer); err != nil {
+		return false, errors.Wrap(err, "Invalid issuer, issuer is not a valid Url")
+	}
+	switch config.TokenProfile {
+	case Scitokens2:
+		if err := config.verifyCreateSciTokens2(); err != nil {
+			return false, err
+		}
+	case WLCG:
+		if err := config.verifyCreateWLCG(); err != nil {
+			return false, err
+		}
+	case None:
+		return true, nil // we don't have profile specific check for None type
+	default:
+		return false, errors.New(fmt.Sprint("Unsupported token profile: ", config.TokenProfile.String()))
+	}
 	return true, nil
 }
 
 func (config *TokenConfig) verifyCreateSciTokens2() error {
 	// required fields: aud, ver, scope
 	if len(config.Audience) == 0 {
-		errMsg := "The claim 'aud' is required for the scitokens2 profile, but it could not be found."
+		errMsg := "The 'audience' claim is required for the scitokens2 profile, but it could not be found."
 		return errors.New(errMsg)
 	}
 
 	if config.Scope == "" {
-		errMsg := "The claim 'scope' is required for the scitokens2 profile, but it could not be found."
+		errMsg := "The 'subject' claim is required for the scitokens2 profile, but it could not be found."
 		return errors.New(errMsg)
 	}
 
@@ -136,6 +154,31 @@ func verifyCreateSciTokens2(claimsMap *map[string]string) error {
 		}
 	}
 
+	return nil
+}
+
+func (config *TokenConfig) verifyCreateWLCG() error {
+	// required fields: sub, wlcg.ver, aud
+	if len(config.Audience) == 0 {
+		errMsg := "The 'audience' claim is required for the scitokens2 profile, but it could not be found."
+		return errors.New(errMsg)
+	}
+
+	if config.Subject == "" {
+		errMsg := "The 'subject' claim is required for the scitokens2 profile, but it could not be found."
+		return errors.New(errMsg)
+	}
+
+	if config.Version == "" {
+		config.Version = "1.0"
+	} else {
+		verPattern := `^1\.[0-9]+$`
+		re := regexp.MustCompile(verPattern)
+		if !re.MatchString(config.Version) {
+			errMsg := "The provided version '" + config.Version + "' is not valid. It must be of the form '1.x'"
+			return errors.New(errMsg)
+		}
+	}
 	return nil
 }
 
@@ -279,7 +322,7 @@ func CreateEncodedToken(claimsMap map[string]string, profile TokenProfile, lifet
 	return string(signed), nil
 }
 
-func (tokenConfig TokenConfig) CreateToken() (string, error) {
+func (tokenConfig *TokenConfig) CreateToken() (string, error) {
 	if ok, err := tokenConfig.Validate(); !ok || err != nil {
 		return "", errors.Wrap(err, "Invalid tokenConfig")
 	}
@@ -320,6 +363,12 @@ func (tokenConfig TokenConfig) CreateToken() (string, error) {
 		Subject(tokenConfig.Subject).
 		Claim("scope", tokenConfig.Scope).
 		JwtID(jti)
+
+	if tokenConfig.TokenProfile == Scitokens2 {
+		builder.Claim("ver", tokenConfig.Version)
+	} else if tokenConfig.TokenProfile == WLCG {
+		builder.Claim("wlcg.ver", tokenConfig.Version)
+	}
 
 	if tokenConfig.Claims != nil {
 		for key, val := range *tokenConfig.Claims {
