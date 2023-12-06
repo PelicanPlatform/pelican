@@ -35,8 +35,6 @@ import (
 func registryMockup(t *testing.T) *httptest.Server {
 	issuerTempDir := t.TempDir()
 
-	viper.Reset()
-	config.InitConfig()
 	ikey := filepath.Join(issuerTempDir, "issuer.jwk")
 	viper.Set("IssuerKey", ikey)
 	viper.Set("Registry.DbLocation", filepath.Join(issuerTempDir, "test.sql"))
