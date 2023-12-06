@@ -9,7 +9,7 @@ import (
 
 type (
 	listServerRequest struct {
-		ServerType string `form:"server_type,omitempty"` // "cache" or "origin"
+		ServerType string `form:"server_type"` // "cache" or "origin"
 	}
 
 	listServerResponse struct {
