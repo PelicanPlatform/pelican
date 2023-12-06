@@ -171,6 +171,9 @@ func setLoginCookie(ctx *gin.Context, user string) {
 	// Explicitly set Cookie for /metrics endpoint as they are in different paths
 	ctx.SetCookie("login", string(signed), 30*60, "/metrics",
 		ctx.Request.URL.Host, true, true)
+	// Explicitly set Cookie for /view endpoint as they are in different paths
+	ctx.SetCookie("login", string(signed), 30*60, "/view",
+		ctx.Request.URL.Host, true, true)
 	ctx.SetSameSite(http.SameSiteStrictMode)
 }
 
