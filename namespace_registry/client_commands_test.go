@@ -157,6 +157,10 @@ func TestRegistryKeyChaining(t *testing.T) {
 	err = NamespaceRegister(privKey, svr.URL+"/api/v1.0/registry", "", "/foo/bar")
 	require.NoError(t, err)
 
+	// Perform one test with a subspace and the same key -- should succeed
+	err = NamespaceRegister(privKey, svr.URL+"/api/v1.0/registry", "", "/foo/bar/test")
+	require.NoError(t, err)
+
 	// Now we create a new key and try to use it to register a super/sub space. These shouldn't succeed
 	viper.Set("IssuerKey", t.TempDir()+"/keychaining")
 	_, err = config.GetIssuerPublicJWKS()
@@ -169,6 +173,12 @@ func TestRegistryKeyChaining(t *testing.T) {
 
 	err = NamespaceRegister(privKey, svr.URL+"/api/v1.0/registry", "", "/foo")
 	require.ErrorContains(t, err, "Cannot register a namespace that is suffixed or prefixed")
+
+	// Make sure we can register things similar but distinct in prefix and suffix
+	err = NamespaceRegister(privKey, svr.URL+"/api/v1.0/registry", "", "/fo")
+	require.NoError(t, err)
+	err = NamespaceRegister(privKey, svr.URL+"/api/v1.0/registry", "", "/foo/barz")
+	require.NoError(t, err)
 
 	// Now turn off token chaining and retry -- no errors should occur
 	viper.Set("Registry.RequireKeyChaining", false)
