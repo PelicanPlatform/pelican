@@ -26,6 +26,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -249,8 +250,14 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData, action str
 				return errors.Wrap(err, "Server encountered an error checking if namespace already exists")
 			}
 			if exists {
-				return errors.New("The prefix already is registered")
+				returnMsg := map[string]interface{}{
+					"message": fmt.Sprintf("The prefix %s is already registered -- nothing else to do!", data.Prefix),
+				}
+				ctx.AbortWithStatusJSON(200, returnMsg)
+				log.Infof("Skipping registration of prefix %s because it's already registered.", data.Prefix)
+				return nil
 			}
+
 			reqPrefix, err := validateNSPath(data.Prefix)
 			if err != nil {
 				err = errors.Wrapf(err, "Requested namespace %s failed validation", reqPrefix)

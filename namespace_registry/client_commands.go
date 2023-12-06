@@ -46,6 +46,7 @@ type clientResponseData struct {
 	ServerNonce     string `json:"server_nonce"`
 	ServerPayload   string `json:"server_payload"`
 	ServerSignature string `json:"server_signature"`
+	Message         string `json:"message"`
 	Error           string `json:"error"`
 }
 
@@ -182,13 +183,12 @@ func NamespaceRegister(privateKey jwk.Key, namespaceRegistryEndpoint string, acc
 	// Send the second POST request
 	resp, err = utils.MakeRequest(namespaceRegistryEndpoint, "POST", unidentifiedPayload, nil)
 
-	var respData2 clientResponseData
 	// Handle case where there was an error encoded in the body
-	if err != nil {
-		if unmarshalErr := json.Unmarshal(resp, &respData2); unmarshalErr == nil {
-			return errors.Wrapf(err, "Failed to make request: %v", respData2.Error)
+	if unmarshalErr := json.Unmarshal(resp, &respData); unmarshalErr == nil {
+		if err != nil {
+			return errors.Wrapf(err, "Failed to make request: %v", respData.Error)
 		}
-		return errors.Wrap(err, "Failed to make request")
+		fmt.Println(respData.Message)
 	}
 
 	return nil
