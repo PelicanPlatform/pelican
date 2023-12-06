@@ -19,8 +19,6 @@
 package nsregistry
 
 import (
-	"github.com/pkg/errors"
-
 	"bufio"
 	"crypto/ecdsa"
 	"encoding/hex"
@@ -32,10 +30,12 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
+	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
+
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/utils"
-	log "github.com/sirupsen/logrus"
 )
 
 type clientResponseData struct {
