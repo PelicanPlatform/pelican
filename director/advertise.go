@@ -19,53 +19,19 @@
 package director
 
 import (
-	"encoding/json"
-	"fmt"
-	"io"
-	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
-	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
-type (
-	Server struct {
-		AuthEndpoint string `json:"auth_endpoint"`
-		Endpoint     string `json:"endpoint"`
-		Resource     string `json:"resource"`
-	}
 
-	CredentialGeneration struct {
-		BasePath      string `json:"base_path"`
-		Issuer        string `json:"issuer"`
-		MaxScopeDepth int    `json:"max_scope_depth"`
-		Strategy      string `json:"strategy"`
-		VaultIssuer   string `json:"vault_issuer"`
-		VaultServer   string `json:"vault_server"`
-	}
-
-	Namespace struct {
-		Caches               []Server             `json:"caches"`
-		Origins              []Server             `json:"origins"`
-		CredentialGeneration CredentialGeneration `json:"credential_generation"`
-		DirlistHost          string               `json:"dirlisthost"`
-		Path                 string               `json:"path"`
-		ReadHTTPS            bool                 `json:"readhttps"`
-		UseTokenOnRead       bool                 `json:"usetokenonread"`
-		WritebackHost        string               `json:"writebackhost"`
-	}
-
-	NamespaceJSON struct {
-		Caches     []Server    `json:"caches"`
-		Namespaces []Namespace `json:"namespaces"`
-	}
-)
-
-func parseServerAd(server Server, serverType ServerType) ServerAd {
+func parseServerAd(server utils.Server, serverType ServerType) ServerAd {
 	serverAd := ServerAd{}
 	serverAd.Type = serverType
 	serverAd.Name = server.Resource
@@ -101,37 +67,9 @@ func parseServerAd(server Server, serverType ServerType) ServerAd {
 
 // Populate internal cache with origin/cache ads
 func AdvertiseOSDF() error {
-	topoNamespaceUrl := param.Federation_TopologyNamespaceUrl.GetString()
-	if topoNamespaceUrl == "" {
-		return errors.New("Topology namespaces.json configuration option (`Federation.TopologyNamespaceURL`) not set")
-	}
-
-	req, err := http.NewRequest("GET", topoNamespaceUrl, nil)
+	namespaces, err := utils.GetTopologyJSON()
 	if err != nil {
-		return errors.Wrap(err, "Failure when getting OSDF namespace data from topology")
-	}
-
-	req.Header.Set("Accept", "application/json")
-
-	client := http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return errors.Wrap(err, "Failure when getting response for OSDF namespace data")
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode > 299 {
-		return fmt.Errorf("Error response %v from OSDF namespace endpoint: %v", resp.StatusCode, resp.Status)
-	}
-
-	respBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return errors.Wrap(err, "Failure when reading OSDF namespace response")
-	}
-
-	var namespaces NamespaceJSON
-	if err = json.Unmarshal(respBytes, &namespaces); err != nil {
-		return errors.Wrapf(err, "Failure when parsing JSON response from topology URL %v", topoNamespaceUrl)
+		return errors.Wrapf(err, "Failed to get topology JSON")
 	}
 
 	cacheAdMap := make(map[ServerAd][]NamespaceAd)
@@ -183,7 +121,7 @@ func PeriodicCacheReload() {
 		// The ad cache times out every 15 minutes, so update it every
 		// 10. If a key isn't updated, it will survive for 5 minutes
 		// and then disappear
-		time.Sleep(time.Minute * 10)
+		time.Sleep(time.Minute * param.Federation_TopologyReloadInterval.GetDuration())
 		err := AdvertiseOSDF()
 		if err != nil {
 			log.Warningf("Failed to re-advertise: %s. Will try again later",

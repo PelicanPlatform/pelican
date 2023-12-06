@@ -141,7 +141,15 @@ description: >-
 type: url
 osdf_default: https://topology.opensciencegrid.org/stashcache/namespaces.json
 default: none
-components: ["director"]
+components: ["director", "nsregistry"]
+---
+name: Federation.TopologyReloadInterval
+description: >-
+  The frequency, in minutes, that topology should be reloaded.
+type: duration
+osdf_default: 10
+default: none
+components: ["director", "nsregistry"]
 ---
 name: Federation.DirectorUrl
 description: >-

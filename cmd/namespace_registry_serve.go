@@ -24,11 +24,12 @@ import (
 	"syscall"
 
 	"github.com/pkg/errors"
-
-	nsregistry "github.com/pelicanplatform/pelican/namespace_registry"
-	"github.com/pelicanplatform/pelican/web_ui"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/namespace_registry"
+	"github.com/pelicanplatform/pelican/web_ui"
 )
 
 func serveNamespaceRegistry( /*cmd*/ *cobra.Command /*args*/, []string) error {
@@ -38,6 +39,16 @@ func serveNamespaceRegistry( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	err := nsregistry.InitializeDB()
 	if err != nil {
 		return errors.Wrap(err, "Unable to initialize the namespace registry database")
+	}
+
+	if config.GetPreferredPrefix() == "OSDF" {
+		log.Info("Populating registry with namespaces from OSG topology service...")
+		if err := nsregistry.PopulateTopology(); err != nil {
+			panic(errors.Wrap(err, "Unable to populate topology table"))
+		}
+
+		// Checks topology for updates every 10 minutes
+		go nsregistry.PeriodicTopologyReload()
 	}
 
 	engine, err := web_ui.GetEngine()
