@@ -16,6 +16,9 @@
  *
  ***************************************************************/
 
+// This is a utility file that provides a TestFileTransferImpl struct with a `RunTests` function
+// to allow any Pelican server to issue a file transfer test to a XRootD server
+
 package utils
 
 import (
