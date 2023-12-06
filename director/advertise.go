@@ -30,7 +30,6 @@ import (
 	"github.com/pelicanplatform/pelican/utils"
 )
 
-
 func parseServerAd(server utils.Server, serverType ServerType) ServerAd {
 	serverAd := ServerAd{}
 	serverAd.Type = serverType
