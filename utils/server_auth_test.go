@@ -13,21 +13,21 @@ import (
 
 // MockAuthChecker is the mock implementation of AuthChecker.
 type MockAuthChecker struct {
-	FederationCheckFunc func(ctx *gin.Context, token string, scopes []string) error
-	DirectorCheckFunc   func(ctx *gin.Context, token string, scopes []string) error
-	IssuerCheckFunc     func(ctx *gin.Context, token string, scopes []string) error
+	FederationCheckFunc func(ctx *gin.Context, token string, expectedScopes []string, allScope bool) error
+	DirectorCheckFunc   func(ctx *gin.Context, token string, expectedScopes []string, allScope bool) error
+	IssuerCheckFunc     func(ctx *gin.Context, token string, expectedScopes []string, allScope bool) error
 }
 
-func (m *MockAuthChecker) FederationCheck(ctx *gin.Context, token string, scopes []string) error {
-	return m.FederationCheckFunc(ctx, token, scopes)
+func (m *MockAuthChecker) FederationCheck(ctx *gin.Context, token string, expectedScopes []string, allScope bool) error {
+	return m.FederationCheckFunc(ctx, token, expectedScopes, allScope)
 }
 
-func (m *MockAuthChecker) DirectorCheck(ctx *gin.Context, token string, scopes []string) error {
-	return m.DirectorCheckFunc(ctx, token, scopes)
+func (m *MockAuthChecker) DirectorCheck(ctx *gin.Context, token string, expectedScopes []string, allScope bool) error {
+	return m.DirectorCheckFunc(ctx, token, expectedScopes, allScope)
 }
 
-func (m *MockAuthChecker) IssuerCheck(ctx *gin.Context, token string, scopes []string) error {
-	return m.IssuerCheckFunc(ctx, token, scopes)
+func (m *MockAuthChecker) IssuerCheck(ctx *gin.Context, token string, expectedScopes []string, allScope bool) error {
+	return m.IssuerCheckFunc(ctx, token, expectedScopes, allScope)
 }
 
 // Helper function to create a gin context with different token sources
@@ -53,6 +53,10 @@ func createContextWithToken(cookieToken, headerToken, queryToken string) *gin.Co
 	return ctx
 }
 
+func TestScopeContains(t *testing.T) {
+
+}
+
 func TestCheckAnyAuth(t *testing.T) {
 	// Use a mock instance of authChecker to simplify testing
 	originalAuthChecker := authChecker
@@ -60,7 +64,7 @@ func TestCheckAnyAuth(t *testing.T) {
 
 	// Create the mock for varioud checkers
 	mock := &MockAuthChecker{
-		FederationCheckFunc: func(ctx *gin.Context, token string, scopes []string) error {
+		FederationCheckFunc: func(ctx *gin.Context, token string, expectedScopes []string, allScope bool) error {
 			if token != "" {
 				ctx.Set("User", "Federation")
 				return nil
@@ -68,7 +72,7 @@ func TestCheckAnyAuth(t *testing.T) {
 				return errors.New("No token is present")
 			}
 		},
-		DirectorCheckFunc: func(ctx *gin.Context, token string, scopes []string) error {
+		DirectorCheckFunc: func(ctx *gin.Context, token string, expectedScopes []string, allScope bool) error {
 			if token != "" {
 				ctx.Set("User", "Director")
 				return nil
@@ -76,7 +80,7 @@ func TestCheckAnyAuth(t *testing.T) {
 				return errors.New("No token is present")
 			}
 		},
-		IssuerCheckFunc: func(ctx *gin.Context, token string, scopes []string) error {
+		IssuerCheckFunc: func(ctx *gin.Context, token string, expectedScopes []string, allScope bool) error {
 			if token != "" {
 				ctx.Set("User", "Issuer")
 				return nil
@@ -147,7 +151,7 @@ func TestCheckAnyAuth(t *testing.T) {
 				Issuers: []TokenIssuer{Federation},
 			},
 			setupMock: func() {
-				mock.FederationCheckFunc = func(ctx *gin.Context, token string, scopes []string) error {
+				mock.FederationCheckFunc = func(ctx *gin.Context, token string, expectedScopes []string, allScope bool) error {
 					if token == "valid-cookie" {
 						ctx.Set("User", "Federation")
 						return nil
@@ -168,7 +172,7 @@ func TestCheckAnyAuth(t *testing.T) {
 				Issuers: []TokenIssuer{Federation},
 			},
 			setupMock: func() {
-				mock.FederationCheckFunc = func(ctx *gin.Context, token string, scopes []string) error {
+				mock.FederationCheckFunc = func(ctx *gin.Context, token string, expectedScopes []string, allScope bool) error {
 					if token == "valid-cookie" {
 						ctx.Set("User", "Federation")
 						return nil
@@ -189,7 +193,7 @@ func TestCheckAnyAuth(t *testing.T) {
 				Issuers: []TokenIssuer{Federation},
 			},
 			setupMock: func() {
-				mock.FederationCheckFunc = func(ctx *gin.Context, token string, scopes []string) error {
+				mock.FederationCheckFunc = func(ctx *gin.Context, token string, expectedScopes []string, allScope bool) error {
 					if token == "valid-cookie" {
 						ctx.Set("User", "Federation")
 						return nil
@@ -210,21 +214,21 @@ func TestCheckAnyAuth(t *testing.T) {
 				Issuers: []TokenIssuer{Federation, Director, Issuer},
 			},
 			setupMock: func() {
-				mock.FederationCheckFunc = func(ctx *gin.Context, token string, scopes []string) error {
+				mock.FederationCheckFunc = func(ctx *gin.Context, token string, expectedScopes []string, allScope bool) error {
 					if token == "for-federation" {
 						ctx.Set("User", "Federation")
 						return nil
 					}
 					return errors.New(fmt.Sprint("Invalid Token: ", token))
 				}
-				mock.DirectorCheckFunc = func(ctx *gin.Context, token string, scopes []string) error {
+				mock.DirectorCheckFunc = func(ctx *gin.Context, token string, expectedScopes []string, allScope bool) error {
 					if token == "for-director" {
 						ctx.Set("User", "Director")
 						return nil
 					}
 					return errors.New(fmt.Sprint("Invalid Token: ", token))
 				}
-				mock.IssuerCheckFunc = func(ctx *gin.Context, token string, scopes []string) error {
+				mock.IssuerCheckFunc = func(ctx *gin.Context, token string, expectedScopes []string, allScope bool) error {
 					if token == "for-issuer" {
 						ctx.Set("User", "Issuer")
 						return nil
@@ -245,21 +249,21 @@ func TestCheckAnyAuth(t *testing.T) {
 				Issuers: []TokenIssuer{Federation, Director, Issuer},
 			},
 			setupMock: func() {
-				mock.FederationCheckFunc = func(ctx *gin.Context, token string, scopes []string) error {
+				mock.FederationCheckFunc = func(ctx *gin.Context, token string, expectedScopes []string, allScope bool) error {
 					if token == "for-federation" {
 						ctx.Set("User", "Federation")
 						return nil
 					}
 					return errors.New(fmt.Sprint("Invalid Token: ", token))
 				}
-				mock.DirectorCheckFunc = func(ctx *gin.Context, token string, scopes []string) error {
+				mock.DirectorCheckFunc = func(ctx *gin.Context, token string, expectedScopes []string, allScope bool) error {
 					if token == "for-director" {
 						ctx.Set("User", "Director")
 						return nil
 					}
 					return errors.New(fmt.Sprint("Invalid Token: ", token))
 				}
-				mock.IssuerCheckFunc = func(ctx *gin.Context, token string, scopes []string) error {
+				mock.IssuerCheckFunc = func(ctx *gin.Context, token string, expectedScopes []string, allScope bool) error {
 					if token == "for-issuer" {
 						ctx.Set("User", "Issuer")
 						return nil

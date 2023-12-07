@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -42,14 +43,15 @@ type (
 	TokenSource int
 	TokenIssuer int
 	AuthOption  struct {
-		Sources []TokenSource
-		Issuers []TokenIssuer
-		Scopes  []string
+		Sources   []TokenSource
+		Issuers   []TokenIssuer
+		Scopes    []string
+		AllScopes bool
 	}
 	AuthChecker interface {
-		FederationCheck(ctx *gin.Context, token string, scopes []string) error
-		DirectorCheck(ctx *gin.Context, token string, scopes []string) error
-		IssuerCheck(ctx *gin.Context, token string, scopes []string) error
+		FederationCheck(ctx *gin.Context, token string, expectedScopes []string, allScopes bool) error
+		DirectorCheck(ctx *gin.Context, token string, expectedScopes []string, allScopes bool) error
+		IssuerCheck(ctx *gin.Context, token string, expectedScopes []string, allScopes bool) error
 	}
 	AuthCheckImpl     struct{}
 	DiscoveryResponse struct { // This is a duplicate from director/authentication to ensure we don't have cyclic import
@@ -81,24 +83,41 @@ func init() {
 	authChecker = &AuthCheckImpl{}
 }
 
-// Return if desiredScopes contains the tokenScope and it's case-insensitive
-func scopeContains(tokenScope string, desiredScopes []string) bool {
-	for _, sc := range desiredScopes {
-		if strings.EqualFold(sc, tokenScope) {
-			return true
+// Return if expectedScopes contains the tokenScope and it's case-insensitive.
+// If all=false, it checks if the tokenScopes have any one scope in expectedScopes;
+// If all=true, it checks if tokenScopes is the same set as expectedScopes
+func scopeContains(tokenScopes []string, expectedScopes []string, all bool) bool {
+	if !all { // Any tokenScope in desiredScopes is OK
+		for _, tokenScope := range tokenScopes {
+			for _, sc := range expectedScopes {
+				if strings.EqualFold(sc, tokenScope) {
+					return true
+				}
+			}
 		}
+		return false
+	} else { // All tokenScope must be in desiredScopes
+		if len(tokenScopes) != len(expectedScopes) {
+			return false
+		}
+		sort.Strings(tokenScopes)
+		sort.Strings(expectedScopes)
+		for i := 0; i < len(tokenScopes); i++ {
+			if tokenScopes[i] != expectedScopes[i] {
+				return false
+			}
+		}
+		return true
 	}
-	return false
 }
 
-// Creates a validator that checks if a token's scope matches the given scope: matchScope.
-// Will pass the check if no "anyScopes".
-// Will pass the check if one token scope matches ANY item in "anyScopes"
-func createScopeValidator(anyScopes []string) jwt.ValidatorFunc {
+// Creates a validator that checks if a token's scope matches the given scope: expectedScopes.
+// See `scopeContains` for detailed checking mechanism
+func createScopeValidator(expectedScopes []string, all bool) jwt.ValidatorFunc {
 
 	return jwt.ValidatorFunc(func(_ context.Context, tok jwt.Token) jwt.ValidationError {
 		// If no scope is present, always return true
-		if len(anyScopes) == 0 {
+		if len(expectedScopes) == 0 {
 			return nil
 		}
 		scope_any, present := tok.Get("scope")
@@ -109,15 +128,10 @@ func createScopeValidator(anyScopes []string) jwt.ValidatorFunc {
 		if !ok {
 			return jwt.NewValidationError(errors.New("scope claim in token is not string-valued"))
 		}
-
-		for _, tokenScope := range strings.Split(scope, " ") {
-			// As long as there's one scope in the token that matches the pool of desriedScopes
-			// we say it's valid
-			if scopeContains(tokenScope, anyScopes) {
-				return nil
-			}
+		if scopeContains(strings.Split(scope, " "), expectedScopes, all) {
+			return nil
 		}
-		return jwt.NewValidationError(errors.New(fmt.Sprint("Token does not contain any of the scopes: ", anyScopes)))
+		return jwt.NewValidationError(errors.New(fmt.Sprint("Token does not contain any of the scopes: ", expectedScopes)))
 	})
 }
 
@@ -183,7 +197,7 @@ func LoadDirectorPublicKey() (jwk.Key, error) {
 }
 
 // Checks that the given token was signed by the federation jwk and also checks that the token has the expected scope
-func (a AuthCheckImpl) FederationCheck(c *gin.Context, strToken string, anyOfTheScopes []string) error {
+func (a AuthCheckImpl) FederationCheck(c *gin.Context, strToken string, expectedScopes []string, allScopes bool) error {
 	var bKey *jwk.Key
 
 	fedURL := param.Federation_DiscoveryUrl.GetString()
@@ -227,7 +241,7 @@ func (a AuthCheckImpl) FederationCheck(c *gin.Context, strToken string, anyOfThe
 		return errors.Wrap(err, "Failed to verify JWT by federation's key")
 	}
 
-	scopeValidator := createScopeValidator(anyOfTheScopes)
+	scopeValidator := createScopeValidator(expectedScopes, allScopes)
 	if err = jwt.Validate(parsed, jwt.WithValidator(scopeValidator)); err != nil {
 		return errors.Wrap(err, "Failed to verify the scope of the token")
 	}
@@ -241,7 +255,7 @@ func (a AuthCheckImpl) FederationCheck(c *gin.Context, strToken string, anyOfThe
 //
 // Note that this means the issuer jwk MUST be the one server created. It can't be provided by
 // the user if they want to use a different issuer than the server. This can be changed in the future.
-func (a AuthCheckImpl) IssuerCheck(c *gin.Context, strToken string, anyOfTheScopes []string) error {
+func (a AuthCheckImpl) IssuerCheck(c *gin.Context, strToken string, expectedScopes []string, allScopes bool) error {
 	token, err := jwt.Parse([]byte(strToken), jwt.WithVerify(false))
 	if err != nil {
 		return errors.Wrap(err, "Invalid JWT")
@@ -261,13 +275,18 @@ func (a AuthCheckImpl) IssuerCheck(c *gin.Context, strToken string, anyOfTheScop
 		return errors.Wrap(err, "Failed to get the public jwks from the server")
 	}
 
-	parsed, err := jwt.Parse([]byte(strToken), jwt.WithKeySet(publicJWKS))
+	key, exists := publicJWKS.Key(0)
+	if !exists {
+		return errors.Wrap(err, "Failed to get the public key from the server")
+	}
+
+	parsed, err := jwt.Parse([]byte(strToken), jwt.WithKey(jwa.ES256, key))
 
 	if err != nil {
 		return errors.Wrap(err, "Failed to verify JWT by issuer's key")
 	}
 
-	scopeValidator := createScopeValidator(anyOfTheScopes)
+	scopeValidator := createScopeValidator(expectedScopes, allScopes)
 	if err = jwt.Validate(parsed, jwt.WithValidator(scopeValidator)); err != nil {
 		return errors.Wrap(err, "Failed to verify the scope of the token")
 	}
@@ -277,7 +296,7 @@ func (a AuthCheckImpl) IssuerCheck(c *gin.Context, strToken string, anyOfTheScop
 }
 
 // Check if a JWT string was issued by the director and has the correct scope
-func (a AuthCheckImpl) DirectorCheck(c *gin.Context, strToken string, anyOfTheScopes []string) error {
+func (a AuthCheckImpl) DirectorCheck(c *gin.Context, strToken string, expectedScopes []string, allScopes bool) error {
 	directorURL := param.Federation_DirectorUrl.GetString()
 	if directorURL == "" {
 		return errors.New("Failed to check director; director URL is empty")
@@ -300,7 +319,7 @@ func (a AuthCheckImpl) DirectorCheck(c *gin.Context, strToken string, anyOfTheSc
 		return errors.Wrap(err, "Failed to verify JWT by director's key")
 	}
 
-	scopeValidator := createScopeValidator(anyOfTheScopes)
+	scopeValidator := createScopeValidator(expectedScopes, allScopes)
 	if err = jwt.Validate(tok, jwt.WithValidator(scopeValidator)); err != nil {
 		return errors.Wrap(err, "Failed to verify the scope of the token")
 	}
@@ -368,7 +387,7 @@ func CheckAnyAuth(ctx *gin.Context, authOption AuthOption) bool {
 	for _, iss := range authOption.Issuers {
 		switch iss {
 		case Federation:
-			err := authChecker.FederationCheck(ctx, token, authOption.Scopes)
+			err := authChecker.FederationCheck(ctx, token, authOption.Scopes, authOption.AllScopes)
 			if _, exists := ctx.Get("User"); err != nil || !exists {
 				errMsg += fmt.Sprintln("Token validation failed with federation issuer: ", err)
 				log.Debug("Token validation failed with federation issuer: ", err)
@@ -378,7 +397,7 @@ func CheckAnyAuth(ctx *gin.Context, authOption AuthOption) bool {
 				return exists
 			}
 		case Director:
-			err := authChecker.DirectorCheck(ctx, token, authOption.Scopes)
+			err := authChecker.DirectorCheck(ctx, token, authOption.Scopes, authOption.AllScopes)
 			if _, exists := ctx.Get("User"); err != nil || !exists {
 				errMsg += fmt.Sprintln("Token validation failed with director issuer: ", err)
 				log.Debug("Token validation failed with director issuer: ", err)
@@ -388,7 +407,7 @@ func CheckAnyAuth(ctx *gin.Context, authOption AuthOption) bool {
 				return exists
 			}
 		case Issuer:
-			err := authChecker.IssuerCheck(ctx, token, authOption.Scopes)
+			err := authChecker.IssuerCheck(ctx, token, authOption.Scopes, authOption.AllScopes)
 			if _, exists := ctx.Get("User"); err != nil || !exists {
 				errMsg += fmt.Sprintln("Token validation failed with server issuer: ", err)
 				log.Debug("Token validation failed with server issuer: ", err)
