@@ -69,6 +69,49 @@ func configureWebResource(engine *gin.Engine) error {
 			path += "index.html"
 		}
 
+		db := authDB.Load()
+		user, err := getUser(ctx)
+
+		// Redirect initialized users from initialization pages
+		if strings.HasPrefix(path, "/initialization") && strings.HasSuffix(path, "index.html") {
+
+			// If the user has been initialized previously
+			if db != nil {
+				ctx.Redirect(http.StatusFound, "/view/")
+				return
+			}
+		}
+
+		// Redirect authenticated users from login pages
+		if strings.HasPrefix(path, "/login") && strings.HasSuffix(path, "index.html") {
+
+			// If the user has been authenticated previously
+			if err == nil && user != "" {
+				ctx.Redirect(http.StatusFound, "/view/")
+				return
+			}
+		}
+
+		// Direct uninitialized users to initialization pages
+		if !strings.HasPrefix(path, "/initialization") && strings.HasSuffix(path, "index.html") {
+
+			// If the user has not been initialized previously
+			if db == nil {
+				ctx.Redirect(http.StatusFound, "/view/initialization/code/")
+				return
+			}
+		}
+
+		// Direct unauthenticated initialized users to login pages
+		if !strings.HasPrefix(path, "/login") && strings.HasSuffix(path, "index.html") {
+
+			// If the user is not authenticated but initialized
+			if (err != nil || user == "") && db != nil {
+				ctx.Redirect(http.StatusFound, "/view/login/")
+				return
+			}
+		}
+
 		filePath := "frontend/out" + path
 		file, _ := webAssets.ReadFile(filePath)
 		ctx.Data(
