@@ -20,17 +20,19 @@ package utils
 import (
 	"context"
 	"crypto/ecdsa"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/lestrrat-go/httprc"
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -49,7 +51,11 @@ type (
 		DirectorCheck(ctx *gin.Context, token string, scopes []string) error
 		IssuerCheck(ctx *gin.Context, token string, scopes []string) error
 	}
-	AuthCheckImpl struct{}
+	AuthCheckImpl     struct{}
+	DiscoveryResponse struct { // This is a duplicate from director/authentication to ensure we don't have cyclic import
+		Issuer  string `json:"issuer"`
+		JwksUri string `json:"jwks_uri"`
+	}
 )
 
 const (
@@ -65,8 +71,10 @@ const (
 )
 
 var (
-	federationJWK *jwk.Cache
-	authChecker   AuthChecker
+	federationJWK    *jwk.Cache
+	directorJWK      *jwk.Cache
+	directorMetadata *httprc.Cache
+	authChecker      AuthChecker
 )
 
 func init() {
@@ -111,6 +119,67 @@ func createScopeValidator(anyScopes []string) jwt.ValidatorFunc {
 		}
 		return jwt.NewValidationError(errors.New(fmt.Sprint("Token does not contain any of the scopes: ", anyScopes)))
 	})
+}
+
+// Return director's public JWK for token verification. This function can be called
+// on any server (director/origin/registry) as long as the Federation_DirectorUrl is set
+//
+// The director's metadata discovery endpoint and JWKS endpoint are cached
+func LoadDirectorPublicKey() (jwk.Key, error) {
+	directorDiscoveryUrlStr := param.Federation_DirectorUrl.GetString()
+	if len(directorDiscoveryUrlStr) == 0 {
+		return nil, errors.Errorf("Director URL is unset; Can't load director's public key")
+	}
+	log.Debugln("Director's discovery URL:", directorDiscoveryUrlStr)
+	directorDiscoveryUrl, err := url.Parse(directorDiscoveryUrlStr)
+	if err != nil {
+		return nil, errors.Wrap(err, fmt.Sprintln("Invalid director URL:", directorDiscoveryUrlStr))
+	}
+	directorDiscoveryUrl.Scheme = "https"
+	directorDiscoveryUrl.Path = directorDiscoveryUrl.Path + "/.well-known/openid-configuration"
+
+	directorMetadataCtx := context.Background()
+	if directorMetadata == nil {
+		client := &http.Client{Transport: config.GetTransport()}
+		directorMetadata = httprc.NewCache(directorMetadataCtx)
+		if err := directorMetadata.Register(directorDiscoveryUrl.String(), httprc.WithMinRefreshInterval(15*time.Minute), httprc.WithHTTPClient(client)); err != nil {
+			return nil, errors.Wrap(err, "Failed to register cache for director's metadata")
+		}
+	}
+
+	payload, err := directorMetadata.Get(directorMetadataCtx, directorDiscoveryUrl.String())
+	if err != nil {
+		return nil, errors.Wrap(err, "Failed to get director's metadata")
+	}
+
+	metadata := DiscoveryResponse{}
+
+	err = json.Unmarshal(payload.([]byte), &metadata)
+	if err != nil {
+		return nil, errors.Wrap(err, fmt.Sprintln("Failure when parsing director metadata at: ", directorDiscoveryUrl))
+	}
+
+	jwksUri := metadata.JwksUri
+
+	directorJwkCtx := context.Background()
+	if directorJWK == nil {
+		client := &http.Client{Transport: config.GetTransport()}
+		directorJWK = jwk.NewCache(directorJwkCtx)
+		if err := directorJWK.Register(jwksUri, jwk.WithRefreshInterval(15*time.Minute), jwk.WithHTTPClient(client)); err != nil {
+			return nil, errors.Wrap(err, "Failed to register cache for director's public JWKS")
+		}
+	}
+
+	jwks, err := directorJWK.Get(directorJwkCtx, jwksUri)
+	if err != nil {
+		return nil, errors.Wrap(err, "Failed to get director's public JWKS")
+	}
+	key, ok := jwks.Key(0)
+	if !ok {
+		return nil, errors.Wrap(err, fmt.Sprintln("Failure when getting director's first public key: ", jwksUri))
+	}
+
+	return key, nil
 }
 
 // Checks that the given token was signed by the federation jwk and also checks that the token has the expected scope
@@ -224,7 +293,7 @@ func (a AuthCheckImpl) DirectorCheck(c *gin.Context, strToken string, anyOfTheSc
 		return errors.New(fmt.Sprint("Issuer is not a director: ", token.Issuer()))
 	}
 
-	key, err := director.LoadDirectorPublicKey()
+	key, err := LoadDirectorPublicKey()
 	if err != nil {
 		return errors.Wrap(err, "Failed to load director's public JWK")
 	}

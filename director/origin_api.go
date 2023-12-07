@@ -34,6 +34,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
@@ -225,7 +226,7 @@ func VerifyDirectorTestReportToken(strToken string) (bool, error) {
 		return false, errors.Errorf("Token issuer is not a director")
 	}
 
-	key, err := LoadDirectorPublicKey()
+	key, err := utils.LoadDirectorPublicKey()
 	if err != nil {
 		return false, err
 	}
