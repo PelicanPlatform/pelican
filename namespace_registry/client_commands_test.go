@@ -33,7 +33,7 @@ import (
 )
 
 func registryMockup(t *testing.T, testName string) *httptest.Server {
-	issuerTempDir := t.TempDir() + testName
+	issuerTempDir := filepath.Join(t.TempDir(), testName)
 
 	ikey := filepath.Join(issuerTempDir, "issuer.jwk")
 	viper.Set("IssuerKey", ikey)
