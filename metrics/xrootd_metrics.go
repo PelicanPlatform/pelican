@@ -20,6 +20,7 @@ package metrics
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"encoding/xml"
 	"fmt"
@@ -28,6 +29,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
@@ -237,7 +239,11 @@ var (
 	monitorPaths []PathList
 )
 
-func ConfigureMonitoring() (int, error) {
+// Set up listening and parsing xrootd monitoring UDP packets into prometheus
+//
+// The `ctx` is the context for listening to server shutdown event in order to cleanup internal cache eviction
+// goroutine and `wg` is the wait group to notify when the clean up goroutine finishes
+func ConfigureMonitoring(ctx context.Context, wg *sync.WaitGroup) (int, error) {
 	monitorPaths = make([]PathList, 0)
 	for _, monpath := range param.Monitoring_AggregatePrefixes.GetStringSlice() {
 		monitorPaths = append(monitorPaths, PathList{Paths: strings.Split(path.Clean(monpath), "/")})
@@ -268,6 +274,21 @@ func ConfigureMonitoring() (int, error) {
 	if err != nil {
 		return -1, err
 	}
+
+	// Start ttl cache automatic eviction of expired items
+	go sessions.Start()
+	go userids.Start()
+	go transfers.Start()
+
+	// Stop automatic eviction at shutdown
+	go func() {
+		defer wg.Done()
+		<-ctx.Done()
+		sessions.Stop()
+		userids.Stop()
+		transfers.Stop()
+		log.Infoln("Gracefully stopping metrics cache auto eviction...")
+	}()
 
 	go func() {
 		var buf [65536]byte

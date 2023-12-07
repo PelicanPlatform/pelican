@@ -255,46 +255,50 @@ func checkAPIToken(ctx *gin.Context, anyScopes []string) bool {
 		strToken = strings.TrimPrefix(authzHeader[0], "Bearer ")
 	}
 
-	err := FederationCheck(ctx, strToken, anyScopes)
-	if _, exists := ctx.Get("User"); err != nil || !exists {
-		errMsg += fmt.Sprintln("Federation Check failed; continue to issuer check: ", err)
-		log.Debug("Federation Check failed; continue to issuer check: ", err)
-	} else {
-		log.Debug("Federation Check succeed")
-		return exists
-	}
-	err = IssuerCheck(ctx, strToken, anyScopes)
-	if _, exists := ctx.Get("User"); err != nil || !exists {
-		errMsg += fmt.Sprintln("Issuer Check failed; continue to director check: ", err)
-		log.Debug("Issuer Check failed; continue to director check: ", err)
-	} else {
-		log.Debug("Issuer Check succeed")
-		return exists
-	}
-	err = DirectorCheck(ctx, strToken, anyScopes)
-	if _, exists := ctx.Get("User"); err != nil || !exists {
-		errMsg += fmt.Sprintln("Director Check failed; continue to see if token is for user login: ", err)
-		log.Debug("Director Check failed; continue to see if token is for user login: ", err)
-	} else {
-		log.Debug("Director Check succeed")
-		return exists
+	hasCredential := false
+	if strToken != "" {
+		hasCredential = true
+		err := FederationCheck(ctx, strToken, anyScopes)
+		if _, exists := ctx.Get("User"); err != nil || !exists {
+			errMsg += fmt.Sprintln("Federation Check failed; continue to issuer check: ", err)
+			log.Debug("Federation Check failed; continue to issuer check: ", err)
+		} else {
+			log.Debug("Federation Check succeed")
+			return exists
+		}
+		err = IssuerCheck(ctx, strToken, anyScopes)
+		if _, exists := ctx.Get("User"); err != nil || !exists {
+			errMsg += fmt.Sprintln("Issuer Check failed; continue to director check: ", err)
+			log.Debug("Issuer Check failed; continue to director check: ", err)
+		} else {
+			log.Debug("Issuer Check succeed")
+			return exists
+		}
+		err = DirectorCheck(ctx, strToken, anyScopes)
+		if _, exists := ctx.Get("User"); err != nil || !exists {
+			errMsg += fmt.Sprintln("Director Check failed; continue to see if token is for user login: ", err)
+			log.Debug("Director Check failed; continue to see if token is for user login: ", err)
+		} else {
+			log.Debug("Director Check succeed")
+			return exists
+		}
 	}
 
-	strToken, err = ctx.Cookie("login")
-	if err == nil {
+	strToken, err := ctx.Cookie("login")
+	if err == nil && strToken != "" {
+		hasCredential = true
 		if err = IssuerCheck(ctx, strToken, anyScopes); err != nil {
 			errMsg += fmt.Sprintln("Issuer check from cookie's token failed: ", err)
 			log.Debug("Issuer check from cookie's token failed: ", err)
 		}
 	} else {
 		errMsg += fmt.Sprintln("No cookie present for token: ", err)
-		log.Debug("No cookie present for token: ", err)
 	}
 
 	// It will only check if the token is valid and set this context key-pair.
 	// Futher steps requried to finish the auth process (i.e. return 401)
 	_, exists := ctx.Get("User")
-	if !exists {
+	if !exists && hasCredential {
 		log.Info("Authentication failed. Didn't pass chain of checking:\n", errMsg)
 	}
 	return exists

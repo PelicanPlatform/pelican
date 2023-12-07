@@ -19,10 +19,15 @@
 package director
 
 import (
+	"context"
 	"net/url"
+	"sync"
 	"testing"
+	"time"
 
+	"github.com/jellydator/ttlcache/v3"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func hasServerAdWithName(serverAds []ServerAd, name string) bool {
@@ -175,4 +180,142 @@ func TestGetAdsForPath(t *testing.T) {
 	assert.Equal(t, nsAd.Path, "")
 	assert.Equal(t, len(oAds), 0)
 	assert.Equal(t, len(cAds), 0)
+}
+
+func TestConfigCacheEviction(t *testing.T) {
+	mockPelicanOriginServerAd := ServerAd{
+		Name:    "test-origin-server",
+		AuthURL: url.URL{},
+		URL: url.URL{
+			Scheme: "https",
+			Host:   "fake-origin.org:8443",
+		},
+		WebURL: url.URL{
+			Scheme: "https",
+			Host:   "fake-origin.org:8444",
+		},
+		Type:      OriginType,
+		Latitude:  123.05,
+		Longitude: 456.78,
+	}
+	mockNamespaceAd := NamespaceAd{
+		RequireToken:  true,
+		Path:          "/foo/bar/",
+		Issuer:        url.URL{},
+		MaxScopeDepth: 1,
+		Strategy:      "",
+		BasePath:      "",
+		VaultServer:   "",
+	}
+
+	t.Run("evicted-origin-can-cancel-health-test", func(t *testing.T) {
+		// Start cache eviction
+		shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
+		var wg sync.WaitGroup
+		ConfigTTLCache(shutdownCtx, &wg)
+		wg.Add(1)
+		defer func() {
+			shutdownCancel()
+			wg.Wait()
+		}()
+
+		ctx, cancelFunc := context.WithDeadline(context.Background(), time.Now().Add(time.Second*5))
+
+		func() {
+			serverAdMutex.Lock()
+			defer serverAdMutex.Unlock()
+			serverAds.DeleteAll()
+			serverAds.Set(mockPelicanOriginServerAd, []NamespaceAd{mockNamespaceAd}, ttlcache.DefaultTTL)
+			healthTestCancelFuncsMutex.Lock()
+			defer healthTestCancelFuncsMutex.Unlock()
+			// Clear the map for the new test
+			healthTestCancelFuncs = make(map[ServerAd]context.CancelFunc)
+			healthTestCancelFuncs[mockPelicanOriginServerAd] = cancelFunc
+
+			require.True(t, serverAds.Has(mockPelicanOriginServerAd), "serverAds failed to register the originAd")
+		}()
+
+		cancelChan := make(chan int)
+		go func() {
+			<-ctx.Done()
+			if ctx.Err() == context.Canceled {
+				cancelChan <- 1
+			}
+		}()
+
+		func() {
+			serverAdMutex.Lock()
+			defer serverAdMutex.Unlock()
+			serverAds.Delete(mockPelicanOriginServerAd) // This should call onEviction handler and close the context
+
+			require.False(t, serverAds.Has(mockPelicanOriginServerAd), "serverAds didn't delete originAd")
+		}()
+
+		// OnEviction is handled on a different goroutine than the cache management
+		// So we want to wait for a bit so that OnEviction can have time to be
+		// executed
+		select {
+		case <-cancelChan:
+			require.True(t, true)
+		case <-time.After(3 * time.Second):
+			require.False(t, true)
+		}
+		func() {
+			healthTestCancelFuncsMutex.RLock()
+			defer healthTestCancelFuncsMutex.RUnlock()
+			assert.True(t, healthTestCancelFuncs[mockPelicanOriginServerAd] == nil, "Evicted origin didn't clear cancelFunc in the map")
+		}()
+	})
+}
+
+func TestServerAdsCacheEviction(t *testing.T) {
+	mockServerAd := ServerAd{Name: "foo", Type: OriginType, URL: url.URL{}}
+
+	t.Run("evict-after-expire-time", func(t *testing.T) {
+		// Start cache eviction
+		shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
+		var wg sync.WaitGroup
+		ConfigTTLCache(shutdownCtx, &wg)
+		wg.Add(1)
+		defer func() {
+			shutdownCancel()
+			wg.Wait()
+		}()
+
+		deletedChan := make(chan int)
+		cancelChan := make(chan int)
+
+		func() {
+			serverAdMutex.Lock()
+			defer serverAdMutex.Unlock()
+			serverAds.DeleteAll()
+
+			serverAds.Set(mockServerAd, []NamespaceAd{}, time.Second*2)
+			require.True(t, serverAds.Has(mockServerAd), "Failed to register server Ad")
+		}()
+
+		// Keep checking if the cache item is present until absent or cancelled
+		go func() {
+			for {
+				select {
+				case <-cancelChan:
+					return
+				default:
+					if !serverAds.Has(mockServerAd) {
+						deletedChan <- 1
+						return
+					}
+				}
+			}
+		}()
+
+		// Wait for 3s to check if the expired cache item is evicted
+		select {
+		case <-deletedChan:
+			require.True(t, true)
+		case <-time.After(3 * time.Second):
+			cancelChan <- 1
+			require.False(t, true, "Cache didn't evict expired item")
+		}
+	})
 }

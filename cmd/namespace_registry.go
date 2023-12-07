@@ -56,7 +56,7 @@ var (
 )
 
 func initRegistry() error {
-	err := config.InitServer()
+	err := config.InitServer(config.RegistryType)
 	cobra.CheckErr(err)
 
 	return err

@@ -25,7 +25,7 @@ import (
 	"sync"
 	"time"
 
-	grab "github.com/cavaliercoder/grab"
+	grab "github.com/opensaucerer/grab/v3"
 )
 
 type TimestampedError struct {

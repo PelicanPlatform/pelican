@@ -2,21 +2,27 @@ package xrootd
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	_ "embed"
 	"encoding/base64"
 	"fmt"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 	"text/template"
+	"time"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/origin_ui"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
@@ -33,16 +39,18 @@ var (
 
 type (
 	OriginConfig struct {
-		Multiuser       bool
-		EnableCmsd      bool
-		EnableMacaroons bool
-		EnableVoms      bool
-		SelfTest        bool
-		NamespacePrefix string
+		Multiuser        bool
+		EnableCmsd       bool
+		EnableMacaroons  bool
+		EnableVoms       bool
+		EnableDirListing bool
+		SelfTest         bool
+		NamespacePrefix  string
 	}
 
 	CacheConfig struct {
 		UseCmsd        bool
+		EnableVoms     bool
 		ExportLocation string
 		DataLocation   string
 		DirectorUrl    string
@@ -81,7 +89,162 @@ type (
 	}
 )
 
-func CheckXrootdEnv(origin bool, nsAds []director.NamespaceAd) error {
+func CheckOriginXrootdEnv(exportPath string, uid int, gid int, groupname string) (string, error) {
+	// If we use "volume mount" style options, configure the export directories.
+	volumeMount := param.Origin_ExportVolume.GetString()
+	if volumeMount != "" {
+		volumeMount, err := filepath.Abs(volumeMount)
+		if err != nil {
+			return exportPath, err
+		}
+		volumeMountSrc := volumeMount
+		volumeMountDst := volumeMount
+		volumeMountInfo := strings.SplitN(volumeMount, ":", 2)
+		if len(volumeMountInfo) == 2 {
+			volumeMountSrc = volumeMountInfo[0]
+			volumeMountDst = volumeMountInfo[1]
+		}
+		volumeMountDst = filepath.Clean(volumeMountDst)
+		if volumeMountDst == "" {
+			return exportPath, fmt.Errorf("Export volume %v has empty destination path", volumeMount)
+		}
+		if volumeMountDst[0:1] != "/" {
+			return "", fmt.Errorf("Export volume %v has a relative destination path",
+				volumeMountDst)
+		}
+		destPath := path.Clean(filepath.Join(exportPath, volumeMountDst[1:]))
+		err = config.MkdirAll(filepath.Dir(destPath), 0755, uid, gid)
+		if err != nil {
+			return exportPath, errors.Wrapf(err, "Unable to create export directory %v",
+				filepath.Dir(destPath))
+		}
+		err = os.Symlink(volumeMountSrc, destPath)
+		if err != nil {
+			return exportPath, errors.Wrapf(err, "Failed to create export symlink")
+		}
+		viper.Set("Origin.NamespacePrefix", volumeMountDst)
+	} else {
+		mountPath := param.Xrootd_Mount.GetString()
+		namespacePrefix := param.Origin_NamespacePrefix.GetString()
+		if mountPath == "" || namespacePrefix == "" {
+			return exportPath, errors.New(`Export information was not provided.
+	Add command line flag:
+
+	    -v /mnt/foo:/bar
+
+	to export the directory /mnt/foo to the path /bar in the data federation`)
+		}
+		mountPath, err := filepath.Abs(mountPath)
+		if err != nil {
+			return exportPath, err
+		}
+		mountPath = filepath.Clean(mountPath)
+		namespacePrefix = filepath.Clean(namespacePrefix)
+		if namespacePrefix[0:1] != "/" {
+			return exportPath, fmt.Errorf("Namespace prefix %v must have an absolute path",
+				namespacePrefix)
+		}
+		destPath := path.Clean(filepath.Join(exportPath, namespacePrefix[1:]))
+		err = config.MkdirAll(filepath.Dir(destPath), 0755, uid, gid)
+		if err != nil {
+			return exportPath, errors.Wrapf(err, "Unable to create export directory %v",
+				filepath.Dir(destPath))
+		}
+		srcPath := filepath.Join(mountPath, namespacePrefix[1:])
+		err = os.Symlink(srcPath, destPath)
+		if err != nil {
+			return exportPath, errors.Wrapf(err, "Failed to create export symlink")
+		}
+	}
+	viper.Set("Xrootd.Mount", exportPath)
+
+	if param.Origin_SelfTest.GetBool() {
+		if err := origin_ui.ConfigureXrootdMonitoringDir(); err != nil {
+			return exportPath, err
+		}
+	}
+	// If macaroons secret does not exist, create one
+	macaroonsSecret := param.Xrootd_MacaroonsKeyFile.GetString()
+	if _, err := os.Open(macaroonsSecret); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			err = config.MkdirAll(path.Dir(macaroonsSecret), 0755, -1, gid)
+			if err != nil {
+				return exportPath, errors.Wrapf(err, "Unable to create directory %v",
+					path.Dir(macaroonsSecret))
+			}
+			file, err := os.OpenFile(macaroonsSecret, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0640)
+			if err != nil {
+				return exportPath, errors.Wrap(err, "Failed to create a new macaroons key")
+			}
+			defer file.Close()
+			buf := make([]byte, 64)
+			_, err = rand.Read(buf)
+			if err != nil {
+				return exportPath, err
+			}
+			encoded := base64.StdEncoding.EncodeToString(buf) + "\n"
+			if _, err = file.WriteString(encoded); err != nil {
+				return exportPath, errors.Wrap(err, "Failed to write out a macaroons key")
+			}
+		} else {
+			return exportPath, err
+		}
+	}
+	if err := os.Chown(macaroonsSecret, -1, gid); err != nil {
+		return exportPath, errors.Wrapf(err, "Unable to change ownership of macaroons secret %v"+
+			" to desired daemon group %v", macaroonsSecret, groupname)
+	}
+	// If the scitokens.cfg does not exist, create one
+	// Set up exportedPaths, which we later use to grant access to the origin's issuer.
+	exportedPaths := viper.GetStringSlice("Origin.NamespacePrefix")
+	if err := WriteOriginScitokensConfig(exportedPaths); err != nil {
+		return exportPath, errors.Wrap(err, "Failed to create scitokens configuration for the origin")
+	}
+
+	if err := origin_ui.ConfigureXrootdMonitoringDir(); err != nil {
+		return exportPath, err
+	}
+
+	return exportPath, nil
+}
+
+func CheckCacheXrootdEnv(exportPath string, uid int, gid int, nsAds []director.NamespaceAd) (string, error) {
+	viper.Set("Xrootd.Mount", exportPath)
+	filepath.Join(exportPath, "/")
+	err := config.MkdirAll(exportPath, 0775, uid, gid)
+	if err != nil {
+		return "", errors.Wrapf(err, "Unable to create export directory %v",
+			filepath.Dir(exportPath))
+	}
+	dataPath := filepath.Join(param.Cache_DataLocation.GetString(), "data/")
+	dataPath = filepath.Clean(dataPath)
+	err = config.MkdirAll(dataPath, 0775, uid, gid)
+	if err != nil {
+		return "", errors.Wrapf(err, "Unable to create data directory %v",
+			filepath.Dir(dataPath))
+	}
+	metaPath := filepath.Join(param.Cache_DataLocation.GetString(), "meta/")
+	metaPath = filepath.Clean(metaPath)
+	err = config.MkdirAll(metaPath, 0775, uid, gid)
+	if err != nil {
+		return "", errors.Wrapf(err, "Unable to create meta directory %v",
+			filepath.Dir(metaPath))
+	}
+
+	err = config.DiscoverFederation()
+	if err != nil {
+		return "", errors.Wrap(err, "Failed to pull information from the federation")
+	}
+	viper.Set("Cache.DirectorUrl", param.Federation_DirectorUrl.GetString())
+
+	if err := WriteCacheScitokensConfig(nsAds); err != nil {
+		return "", errors.Wrap(err, "Failed to create scitokens configuration for the cache")
+	}
+
+	return exportPath, nil
+}
+
+func CheckXrootdEnv(server server_utils.XRootDServer) error {
 	uid, err := config.GetDaemonUID()
 	if err != nil {
 		return err
@@ -134,112 +297,13 @@ func CheckXrootdEnv(origin bool, nsAds []director.NamespaceAd) error {
 		}
 	}
 
-	// If we use "volume mount" style options, configure the export directories.
-	if origin {
-		volumeMount := param.Origin_ExportVolume.GetString()
-		if volumeMount != "" {
-			volumeMount, err = filepath.Abs(volumeMount)
-			if err != nil {
-				return err
-			}
-			volumeMountSrc := volumeMount
-			volumeMountDst := volumeMount
-			volumeMountInfo := strings.SplitN(volumeMount, ":", 2)
-			if len(volumeMountInfo) == 2 {
-				volumeMountSrc = volumeMountInfo[0]
-				volumeMountDst = volumeMountInfo[1]
-			}
-			volumeMountDst = filepath.Clean(volumeMountDst)
-			if volumeMountDst == "" {
-				return fmt.Errorf("Export volume %v has empty destination path", volumeMount)
-			}
-			if volumeMountDst[0:1] != "/" {
-				return fmt.Errorf("Export volume %v has a relative destination path",
-					volumeMountDst)
-			}
-			destPath := path.Clean(filepath.Join(exportPath, volumeMountDst[1:]))
-			err = config.MkdirAll(filepath.Dir(destPath), 0755, uid, gid)
-			if err != nil {
-				return errors.Wrapf(err, "Unable to create export directory %v",
-					filepath.Dir(destPath))
-			}
-			err = os.Symlink(volumeMountSrc, destPath)
-			if err != nil {
-				return errors.Wrapf(err, "Failed to create export symlink")
-			}
-			viper.Set("Origin.NamespacePrefix", volumeMountDst)
-		} else {
-			mountPath := param.Xrootd_Mount.GetString()
-			namespacePrefix := param.Origin_NamespacePrefix.GetString()
-			if mountPath == "" || namespacePrefix == "" {
-				return errors.New(`Export information was not provided.
-Add command line flag:
-
-    -v /mnt/foo:/bar
-
-to export the directory /mnt/foo to the path /bar in the data federation`)
-			}
-			mountPath, err := filepath.Abs(mountPath)
-			if err != nil {
-				return err
-			}
-			mountPath = filepath.Clean(mountPath)
-			namespacePrefix = filepath.Clean(namespacePrefix)
-			if namespacePrefix[0:1] != "/" {
-				return fmt.Errorf("Namespace prefix %v must have an absolute path",
-					namespacePrefix)
-			}
-			destPath := path.Clean(filepath.Join(exportPath, namespacePrefix[1:]))
-			err = config.MkdirAll(filepath.Dir(destPath), 0755, uid, gid)
-			if err != nil {
-				return errors.Wrapf(err, "Unable to create export directory %v",
-					filepath.Dir(destPath))
-			}
-			srcPath := filepath.Join(mountPath, namespacePrefix[1:])
-			err = os.Symlink(srcPath, destPath)
-			if err != nil {
-				return errors.Wrapf(err, "Failed to create export symlink")
-			}
-		}
-		viper.Set("Xrootd.Mount", exportPath)
+	if server.GetServerType().IsSet(config.OriginType) {
+		exportPath, err = CheckOriginXrootdEnv(exportPath, uid, gid, groupname)
 	} else {
-		viper.Set("Xrootd.Mount", exportPath)
-		filepath.Join(exportPath, "/")
-		//exportPath = filepath.Clean(exportPath)
-		err = config.MkdirAll(exportPath, 0775, uid, gid)
-		if err != nil {
-			return errors.Wrapf(err, "Unable to create export directory %v",
-				filepath.Dir(exportPath))
-		}
-		dataPath := filepath.Join(param.Cache_DataLocation.GetString(), "data/")
-		dataPath = filepath.Clean(dataPath)
-		err = config.MkdirAll(dataPath, 0775, uid, gid)
-		if err != nil {
-			return errors.Wrapf(err, "Unable to create data directory %v",
-				filepath.Dir(dataPath))
-		}
-		metaPath := filepath.Join(param.Cache_DataLocation.GetString(), "meta/")
-		metaPath = filepath.Clean(metaPath)
-		err = config.MkdirAll(metaPath, 0775, uid, gid)
-		if err != nil {
-			return errors.Wrapf(err, "Unable to create meta directory %v",
-				filepath.Dir(metaPath))
-		}
-
-		err := config.DiscoverFederation()
-		if err != nil {
-			return errors.Wrap(err, "Failed to pull information from the federation")
-		}
-		viper.Set("Cache.DirectorUrl", param.Federation_DirectorUrl.GetString())
-
+		exportPath, err = CheckCacheXrootdEnv(exportPath, uid, gid, server.GetNamespaceAds())
 	}
-
-	if origin {
-		if param.Origin_SelfTest.GetBool() {
-			if err := origin_ui.ConfigureXrootdMonitoringDir(); err != nil {
-				return err
-			}
-		}
+	if err != nil {
+		return err
 	}
 
 	if err = EmitIssuerMetadata(exportPath); err != nil {
@@ -270,47 +334,6 @@ to export the directory /mnt/foo to the path /bar in the data federation`)
 		}
 	}
 
-	if origin {
-		// If macaroons secret does not exist, create one
-		macaroonsSecret := param.Xrootd_MacaroonsKeyFile.GetString()
-		if _, err := os.Open(macaroonsSecret); err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				err = config.MkdirAll(path.Dir(macaroonsSecret), 0755, -1, gid)
-				if err != nil {
-					return errors.Wrapf(err, "Unable to create directory %v",
-						path.Dir(macaroonsSecret))
-				}
-				file, err := os.OpenFile(macaroonsSecret, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0640)
-				if err != nil {
-					return errors.Wrap(err, "Failed to create a new macaroons key")
-				}
-				defer file.Close()
-				buf := make([]byte, 64)
-				_, err = rand.Read(buf)
-				if err != nil {
-					return err
-				}
-				encoded := base64.StdEncoding.EncodeToString(buf) + "\n"
-				if _, err = file.WriteString(encoded); err != nil {
-					return errors.Wrap(err, "Failed to write out a macaroons key")
-				}
-			} else {
-				return err
-			}
-		}
-		if err = os.Chown(macaroonsSecret, -1, gid); err != nil {
-			return errors.Wrapf(err, "Unable to change ownership of macaroons secret %v"+
-				" to desired daemon group %v", macaroonsSecret, groupname)
-		}
-
-		// If the scitokens.cfg does not exist, create one
-		// Set up exportedPaths, which we later use to grant access to the origin's issuer.
-		exportedPaths := viper.GetStringSlice("Origin.NamespacePrefix")
-		if err := WriteOriginScitokensConfig(exportedPaths); err != nil {
-			return errors.Wrap(err, "Failed to create scitokens configuration for the origin")
-		}
-	}
-
 	// If the authfile does not exist, create one
 	authfile := param.Xrootd_Authfile.GetString()
 	err = config.MkdirAll(path.Dir(authfile), 0755, -1, gid)
@@ -328,7 +351,7 @@ to export the directory /mnt/foo to the path /bar in the data federation`)
 			" to desired daemon group %v", authfile, groupname)
 	}
 
-	if err := EmitAuthfile(nsAds); err != nil {
+	if err := EmitAuthfile(server); err != nil {
 		return err
 	}
 
@@ -347,6 +370,15 @@ func ConfigXrootd(origin bool) (string, error) {
 		return "", err
 	}
 
+	runtimeCAs := filepath.Join(param.Xrootd_RunLocation.GetString(), "ca-bundle.crt")
+	caCount, err := utils.PeriodicWriteCABundle(runtimeCAs, 2*time.Minute)
+	if err != nil {
+		return "", errors.Wrap(err, "Failed to setup the runtime CA bundle")
+	}
+	if caCount > 0 {
+		xrdConfig.Server.TLSCACertificateFile = runtimeCAs
+	}
+
 	if origin {
 		if xrdConfig.Origin.Multiuser {
 			ok, err := config.HasMultiuserCaps()
@@ -356,6 +388,24 @@ func ConfigXrootd(origin bool) (string, error) {
 			if !ok {
 				return "", errors.New("Origin.Multiuser is set to `true` but the command was run without sufficient privilege; was it launched as root?")
 			}
+		}
+	} else if xrdConfig.Cache.DirectorUrl != "" {
+		// Workaround for a bug in XRootD 5.6.3: if the director URL is missing a port number, then
+		// XRootD crashes.
+		urlParsed, err := url.Parse(xrdConfig.Cache.DirectorUrl)
+		if err != nil {
+			return "", errors.Errorf("Director URL (%s) does not parse as a URL", xrdConfig.Cache.DirectorUrl)
+		}
+		if !strings.Contains(urlParsed.Host, ":") {
+			switch urlParsed.Scheme {
+			case "http":
+				urlParsed.Host += ":80"
+			case "https":
+				urlParsed.Host += ":443"
+			default:
+				log.Warningf("The Director URL (%s) does not contain an explicit port number; XRootD 5.6.3 and earlier are known to segfault in thie case", xrdConfig.Cache.DirectorUrl)
+			}
+			xrdConfig.Cache.DirectorUrl = urlParsed.String()
 		}
 	}
 
@@ -398,8 +448,12 @@ func ConfigXrootd(origin bool) (string, error) {
 	return configPath, nil
 }
 
-func SetUpMonitoring() error {
-	monitorPort, err := metrics.ConfigureMonitoring()
+// Set up xrootd monitoring
+//
+// The `ctx` is the context for listening to server shutdown event in order to cleanup internal cache eviction
+// goroutine and `wg` is the wait group to notify when the clean up goroutine finishes
+func SetUpMonitoring(ctx context.Context, wg *sync.WaitGroup) error {
+	monitorPort, err := metrics.ConfigureMonitoring(ctx, wg)
 	if err != nil {
 		return err
 	}

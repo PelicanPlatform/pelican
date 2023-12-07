@@ -42,18 +42,18 @@ else
 	endif
 endif
 
-WEBSITE_SRC_PATH := origin_ui/src
-WEBSITE_OUT_PATH := origin_ui/src/out
-WEBSITE_CACHE_PATH := origin_ui/src/.next
+WEBSITE_SRC_PATH := web_ui/frontend
+WEBSITE_OUT_PATH := web_ui/frontend/out
+WEBSITE_CACHE_PATH := web_ui/frontend/.next
 WEBSITE_SRC_FILES := $(shell find $(WEBSITE_SRC_PATH)/app -type f) \
 						$(shell find $(WEBSITE_SRC_PATH)/components -type f) \
 						$(shell find $(WEBSITE_SRC_PATH)/helpers -type f) \
 						$(shell find $(WEBSITE_SRC_PATH)/public -type f) \
-						origin_ui/src/tsconfig.json \
-						origin_ui/src/next.config.js \
-						origin_ui/src/package.json \
-						origin_ui/src/package-lock.json \
-						origin_ui/src/Dockerfile
+						web_ui/frontend/tsconfig.json \
+						web_ui/frontend/next.config.js \
+						web_ui/frontend/package.json \
+						web_ui/frontend/package-lock.json \
+						web_ui/frontend/Dockerfile
 
 WEBSITE_OUT_FILE := $(WEBSITE_OUT_FILES)/index.html
 
@@ -82,8 +82,8 @@ else
 endif
 
 .PHONY: web-build
-web-build: generate origin_ui/src/out/index.html
-origin_ui/src/out/index.html : $(WEBSITE_SRC_FILES)
+web-build: generate web_ui/frontend/out/index.html
+web_ui/frontend/out/index.html : $(WEBSITE_SRC_FILES)
 ifeq ($(USE_DOCKER),0)
 	@cd $(WEBSITE_SRC_PATH) && npm install && npm run build
 else
@@ -107,7 +107,7 @@ pelican-clean:
 	@rm -rf $(PELICAN_DIST_PATH)
 
 .PHONY: pelican-build
-pelican-build: origin_ui/src/out/index.html
+pelican-build: web_ui/frontend/out/index.html
 	@echo PELICAN BUILD
 ifeq ($(USE_DOCKER),0)
 	@goreleaser --clean --snapshot

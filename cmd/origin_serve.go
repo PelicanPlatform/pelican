@@ -23,92 +23,42 @@ package main
 import (
 	"context"
 	_ "embed"
-	"fmt"
-	"net/url"
-	"os"
+	"sync"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/daemon"
-	"github.com/pelicanplatform/pelican/director"
-	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/oa4mp"
 	"github.com/pelicanplatform/pelican/origin_ui"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_ui"
 	"github.com/pelicanplatform/pelican/web_ui"
 	"github.com/pelicanplatform/pelican/xrootd"
-	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
-func checkConfigFileReadable(fileName string, errMsg string) error {
-	if _, err := os.Open(fileName); errors.Is(err, os.ErrNotExist) {
-		return errors.New(fmt.Sprintf("%v: the specified path in the configuration (%v) "+
-			"does not exist", errMsg, fileName))
-	} else if err != nil {
-		return errors.New(fmt.Sprintf("%v; an error occurred when reading %v: %v", errMsg,
-			fileName, err.Error()))
-	}
-	return nil
-}
-
-func checkDefaults(origin bool, nsAds []director.NamespaceAd) error {
-	requiredConfigs := []param.StringParam{param.Server_TLSCertificate, param.Server_TLSKey, param.Xrootd_RunLocation, param.Xrootd_RobotsTxtFile}
-	for _, configName := range requiredConfigs {
-		mgr := configName.GetString()
-		if mgr == "" {
-			return errors.New(fmt.Sprintf("Required value of '%v' is not set in config",
-				configName))
-		}
-	}
-
-	if managerHost := param.Xrootd_ManagerHost.GetString(); managerHost == "" {
-		log.Debug("No manager host specified for the cmsd process in origin; assuming no xrootd protocol support")
-		viper.SetDefault("Origin.EnableCmsd", false)
-		metrics.DeleteComponentHealthStatus("cmsd")
-	} else {
-		viper.SetDefault("Origin.EnableCmsd", true)
-	}
-
-	// TODO: Could upgrade this to a check for a cert in the file...
-	if err := checkConfigFileReadable(param.Server_TLSCertificate.GetString(),
-		"A TLS certificate is required to serve HTTPS"); err != nil {
-		return err
-	}
-	if err := checkConfigFileReadable(param.Server_TLSKey.GetString(),
-		"A TLS key is required to serve HTTPS"); err != nil {
-		return err
-	}
-
-	if err := xrootd.CheckXrootdEnv(origin, nsAds); err != nil {
-		return err
-	}
-
-	// Check that OriginUrl is defined in the config file. Make sure it parses.
-	// Fail if either condition isn't met, although note that url.Parse doesn't
-	// generate errors for many things that are not recognizable urls.
-	originUrlStr := param.Origin_Url.GetString()
-	if originUrlStr == "" {
-		return errors.New("OriginUrl must be configured to serve an origin")
-	}
-
-	if _, err := url.Parse(originUrlStr); err != nil {
-		return errors.Wrapf(err, "Could not parse the provided OriginUrl (%v)", originUrlStr)
-	}
-
-	return nil
-}
-
 func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
-	defer config.CleanupTempResources()
+	// Use this context for any goroutines that needs to react to server shutdown
+	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
+	// Use this wait group to ensure the goroutines can finish before the server exits/shutdown
+	var wg sync.WaitGroup
 
-	err := xrootd.SetUpMonitoring()
+	// This anonymous function ensures we cancel any context and wait for those goroutines to
+	// finish their cleanup work before the server exits
+	defer func() {
+		shutdownCancel()
+		wg.Wait()
+		config.CleanupTempResources()
+	}()
+
+	err := xrootd.SetUpMonitoring(shutdownCtx, &wg)
 	if err != nil {
 		return err
 	}
+	wg.Add(1) // Add to wg afterward to ensure no error causes deadlock
 
-	err = checkDefaults(true, nil)
+	originServer := &origin_ui.OriginServer{}
+	err = server_ui.CheckDefaults(originServer)
 	if err != nil {
 		return err
 	}
@@ -119,17 +69,21 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	}
 
 	if param.Origin_EnableUI.GetBool() {
+		// Set up necessary APIs to support Web UI, including auth and metrics
 		if err := web_ui.ConfigureServerWebAPI(engine, false); err != nil {
 			return err
 		}
-
-		origin_ui.ConfigOriginUI(engine)
 	}
 
-	if err = origin_ui.RegisterNamespaceWithRetry(); err != nil {
+	// Set up the APIs unrelated to UI, which only contains director-based health test reporting endpoint for now
+	if err = origin_ui.ConfigureOriginAPI(engine, shutdownCtx, &wg); err != nil {
 		return err
 	}
-	if err = origin_ui.PeriodicAdvertiseOrigin(); err != nil {
+	wg.Add(1)
+	if err = server_ui.RegisterNamespaceWithRetry(); err != nil {
+		return err
+	}
+	if err = server_ui.PeriodicAdvertise(originServer); err != nil {
 		return err
 	}
 	if param.Origin_EnableIssuer.GetBool() {
