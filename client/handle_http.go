@@ -362,7 +362,10 @@ func download_http(sourceUrl *url.URL, destination string, payload *payloadStruc
 			downloadError = errors.New("failed to get outputs from one of the transfers")
 		}
 	}
-
+	// Make sure to close the progressContainer after all download complete
+	if ObjectClientOptions.Recursive {
+		progressContainer.Wait()
+	}
 	return downloaded, downloadError
 
 }
@@ -646,7 +649,12 @@ Loop:
 				} else {
 					progressBar.SetTotal(contentLength, true)
 					// call wait here for the bar to complete and flush
-					progressContainer.Wait()
+					// If recursive, we still want to use container so keep it open
+					if ObjectClientOptions.Recursive {
+						progressBar.Wait()
+					} else { // Otherwise just close it
+						progressContainer.Wait()
+					}
 				}
 			}
 			break Loop
