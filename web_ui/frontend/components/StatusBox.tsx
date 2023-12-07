@@ -116,7 +116,6 @@ export default function StatusBox() {
     if(status === undefined || error !== undefined) {
         return (
             <Box>
-                <Typography variant="h4">Status</Typography>
                 <Box minHeight={"300px"}>
                     {
                         error ?
@@ -144,9 +143,6 @@ export default function StatusBox() {
 
     return (
         <Box>
-            <Box>
-                <Typography variant="h4">Status</Typography>
-            </Box>
             <Box>
                 {statusComponents}
             </Box>
