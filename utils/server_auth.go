@@ -126,28 +126,28 @@ func createScopeValidator(anyScopes []string) jwt.ValidatorFunc {
 //
 // The director's metadata discovery endpoint and JWKS endpoint are cached
 func LoadDirectorPublicKey() (jwk.Key, error) {
-	directorDiscoveryUrlStr := param.Federation_DirectorUrl.GetString()
-	if len(directorDiscoveryUrlStr) == 0 {
+	directorUrlStr := param.Federation_DirectorUrl.GetString()
+	if len(directorUrlStr) == 0 {
 		return nil, errors.Errorf("Director URL is unset; Can't load director's public key")
 	}
-	log.Debugln("Director's discovery URL:", directorDiscoveryUrlStr)
-	directorDiscoveryUrl, err := url.Parse(directorDiscoveryUrlStr)
+	log.Debugln("Director's discovery URL:", directorUrlStr)
+	directorUrl, err := url.Parse(directorUrlStr)
 	if err != nil {
-		return nil, errors.Wrap(err, fmt.Sprintln("Invalid director URL:", directorDiscoveryUrlStr))
+		return nil, errors.Wrap(err, fmt.Sprintln("Invalid director URL:", directorUrlStr))
 	}
-	directorDiscoveryUrl.Scheme = "https"
-	directorDiscoveryUrl.Path = directorDiscoveryUrl.Path + "/.well-known/openid-configuration"
+	directorUrl.Scheme = "https"
+	directorUrl.Path = directorUrl.Path + "/.well-known/openid-configuration"
 
 	directorMetadataCtx := context.Background()
 	if directorMetadata == nil {
 		client := &http.Client{Transport: config.GetTransport()}
 		directorMetadata = httprc.NewCache(directorMetadataCtx)
-		if err := directorMetadata.Register(directorDiscoveryUrl.String(), httprc.WithMinRefreshInterval(15*time.Minute), httprc.WithHTTPClient(client)); err != nil {
-			return nil, errors.Wrap(err, "Failed to register cache for director's metadata")
+		if err := directorMetadata.Register(directorUrl.String(), httprc.WithMinRefreshInterval(15*time.Minute), httprc.WithHTTPClient(client)); err != nil {
+			return nil, errors.Wrap(err, "Failed to register httprc cache for director's metadata")
 		}
 	}
 
-	payload, err := directorMetadata.Get(directorMetadataCtx, directorDiscoveryUrl.String())
+	payload, err := directorMetadata.Get(directorMetadataCtx, directorUrl.String())
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to get director's metadata")
 	}
@@ -156,7 +156,7 @@ func LoadDirectorPublicKey() (jwk.Key, error) {
 
 	err = json.Unmarshal(payload.([]byte), &metadata)
 	if err != nil {
-		return nil, errors.Wrap(err, fmt.Sprintln("Failure when parsing director metadata at: ", directorDiscoveryUrl))
+		return nil, errors.Wrap(err, fmt.Sprintln("Failure when parsing director metadata at: ", directorUrl))
 	}
 
 	jwksUri := metadata.JwksUri
@@ -166,7 +166,7 @@ func LoadDirectorPublicKey() (jwk.Key, error) {
 		client := &http.Client{Transport: config.GetTransport()}
 		directorJWK = jwk.NewCache(directorJwkCtx)
 		if err := directorJWK.Register(jwksUri, jwk.WithRefreshInterval(15*time.Minute), jwk.WithHTTPClient(client)); err != nil {
-			return nil, errors.Wrap(err, "Failed to register cache for director's public JWKS")
+			return nil, errors.Wrap(err, "Failed to register internal JWKS cache for director's public JWKS")
 		}
 	}
 
@@ -238,6 +238,9 @@ func (a AuthCheckImpl) FederationCheck(c *gin.Context, strToken string, anyOfThe
 
 // Checks that the given token was signed by the issuer jwk (the one from the server itself) and also checks that
 // the token has the expected scope
+//
+// Note that this means the issuer jwk MUST be the one server created. It can't be provided by
+// the user if they want to use a different issuer than the server. This can be changed in the future.
 func (a AuthCheckImpl) IssuerCheck(c *gin.Context, strToken string, anyOfTheScopes []string) error {
 	token, err := jwt.Parse([]byte(strToken), jwt.WithVerify(false))
 	if err != nil {
@@ -253,17 +256,12 @@ func (a AuthCheckImpl) IssuerCheck(c *gin.Context, strToken string, anyOfTheScop
 		}
 	}
 
-	bKey, err := config.GetIssuerPrivateJWK()
+	publicJWKS, err := config.GetIssuerPublicJWKS()
 	if err != nil {
-		return errors.Wrap(err, "Failed to load issuer server's private key")
+		return errors.Wrap(err, "Failed to get the public jwks from the server")
 	}
 
-	var raw ecdsa.PrivateKey
-	if err = bKey.Raw(&raw); err != nil {
-		return errors.Wrap(err, "Failed to get raw key of the issuer's JWK")
-	}
-
-	parsed, err := jwt.Parse([]byte(strToken), jwt.WithKey(jwa.ES256, raw.PublicKey))
+	parsed, err := jwt.Parse([]byte(strToken), jwt.WithKeySet(publicJWKS))
 
 	if err != nil {
 		return errors.Wrap(err, "Failed to verify JWT by issuer's key")
@@ -372,31 +370,31 @@ func CheckAnyAuth(ctx *gin.Context, authOption AuthOption) bool {
 		case Federation:
 			err := authChecker.FederationCheck(ctx, token, authOption.Scopes)
 			if _, exists := ctx.Get("User"); err != nil || !exists {
-				errMsg += fmt.Sprintln("Federation Check failed: ", err)
-				log.Debug("Federation Check failed: ", err)
+				errMsg += fmt.Sprintln("Token validation failed with federation issuer: ", err)
+				log.Debug("Token validation failed with federation issuer: ", err)
 				break
 			} else {
-				log.Debug("Federation Check succeed")
+				log.Debug("Token validation succeeded with federation issuer")
 				return exists
 			}
 		case Director:
 			err := authChecker.DirectorCheck(ctx, token, authOption.Scopes)
 			if _, exists := ctx.Get("User"); err != nil || !exists {
-				errMsg += fmt.Sprintln("Director Check failed: ", err)
-				log.Debug("Director Check failed: ", err)
+				errMsg += fmt.Sprintln("Token validation failed with director issuer: ", err)
+				log.Debug("Token validation failed with director issuer: ", err)
 				break
 			} else {
-				log.Debug("Director Check succeed")
+				log.Debug("Token validation succeeded with federation issuer")
 				return exists
 			}
 		case Issuer:
 			err := authChecker.IssuerCheck(ctx, token, authOption.Scopes)
 			if _, exists := ctx.Get("User"); err != nil || !exists {
-				errMsg += fmt.Sprintln("Issuer Check failed: ", err)
-				log.Debug("Issuer Check failed: ", err)
+				errMsg += fmt.Sprintln("Token validation failed with server issuer: ", err)
+				log.Debug("Token validation failed with server issuer: ", err)
 				break
 			} else {
-				log.Debug("Issuer Check succeed")
+				log.Debug("Token validation succeeded with server issuer")
 				return exists
 			}
 		default:

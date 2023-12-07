@@ -54,9 +54,11 @@ func createContextWithToken(cookieToken, headerToken, queryToken string) *gin.Co
 }
 
 func TestCheckAnyAuth(t *testing.T) {
+	// Use a mock instance of authChecker to simplify testing
 	originalAuthChecker := authChecker
 	defer func() { authChecker = originalAuthChecker }()
 
+	// Create the mock for varioud checkers
 	mock := &MockAuthChecker{
 		FederationCheckFunc: func(ctx *gin.Context, token string, scopes []string) error {
 			if token != "" {
@@ -86,6 +88,7 @@ func TestCheckAnyAuth(t *testing.T) {
 
 	authChecker = mock
 
+	// Batch-create test cases, see "name" section for the purpose of each test case
 	tests := []struct {
 		name       string
 		setupMock  func()
@@ -272,9 +275,12 @@ func TestCheckAnyAuth(t *testing.T) {
 		},
 	}
 
+	// Batch-run the test cases
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.setupMock != nil {
+				// We might have different mocks to the checker function,
+				// so we have this flexibility by calling setupmock if there is such function
 				tc.setupMock()
 			}
 			require.NotNil(t, tc.tokenSetup, "tokenSetup function can't be nil")
