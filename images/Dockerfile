@@ -17,7 +17,7 @@
 ARG BASE_YUM_REPO=release
 ARG BASE_OSG_SERIES=3.6
 
-FROM node:18 AS website-build
+FROM node:20 AS website-build
 
 WORKDIR /webapp
 
@@ -37,7 +37,7 @@ COPY --from=website-build /webapp/out ./web_ui/frontend/out
 
 RUN goreleaser --clean --snapshot
 
-FROM hub.opensciencegrid.org/sciauth/scitokens-oauth2-server:release-20231118-1823 AS scitokens-oauth2-server
+FROM --platform=linux/amd64 hub.opensciencegrid.org/sciauth/scitokens-oauth2-server:release-20231118-1823 AS scitokens-oauth2-server
 
 FROM --platform=linux/amd64 opensciencegrid/software-base:$BASE_OSG_SERIES-el8-$BASE_YUM_REPO
 

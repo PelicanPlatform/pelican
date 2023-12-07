@@ -26,6 +26,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -36,16 +37,16 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
-	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/oauth2"
-	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-
 	// use this sqlite driver instead of the one from
 	// github.com/mattn/go-sqlite3, because this one
 	// doesn't require compilation with CGO_ENABLED
 	_ "modernc.org/sqlite"
+
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/oauth2"
+	"github.com/pelicanplatform/pelican/param"
 )
 
 var OIDC struct {
@@ -93,6 +94,42 @@ type registrationData struct {
 	IdentityRequired string          `json:"identity_required"`
 	DeviceCode       string          `json:"device_code"`
 	Prefix           string          `json:"prefix"`
+}
+
+func matchKeys(incomingKey jwk.Key, registeredNamespaces []string) (bool, error) {
+	// If this is the case, we want to make sure that at least one of the superspaces has the
+	// same registration key as the incoming. This guarantees the owner of the superspace is
+	// permitting the action (assuming their keys haven't been stolen!)
+	foundMatch := false
+	for _, ns := range registeredNamespaces {
+		keyset, err := dbGetPrefixJwks(ns)
+		if err != nil {
+			return false, errors.Wrapf(err, "Cannot get keyset for %s from the database", ns)
+		}
+
+		// A super inelegant way to compare keys, but for whatever reason the keyset.Index(key) method
+		// doesn't seem to actually recognize when a key is in the keyset, even if that key decodes to
+		// the exact same JSON as a key in the set...
+		for it := (*keyset).Keys(context.Background()); it.Next(context.Background()); {
+			pair := it.Pair()
+			registeredKey := pair.Value.(jwk.Key)
+			registeredKeyBuf, err := json.Marshal(registeredKey)
+			if err != nil {
+				return false, errors.Wrapf(err, "failed to marshal a key registered to %s into JSON", ns)
+			}
+			incomingKeyBuf, err := json.Marshal(incomingKey)
+			if err != nil {
+				return false, errors.Wrap(err, "failed to marshal the incoming key into JSON")
+			}
+
+			if string(registeredKeyBuf) == string(incomingKeyBuf) {
+				foundMatch = true
+				break
+			}
+		}
+	}
+
+	return foundMatch, nil
 }
 
 func keySignChallenge(ctx *gin.Context, data *registrationData, action string) error {
@@ -249,7 +286,58 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData, action str
 				return errors.Wrap(err, "Server encountered an error checking if namespace already exists")
 			}
 			if exists {
-				return errors.New("The prefix already is registered")
+				returnMsg := map[string]interface{}{
+					"message": fmt.Sprintf("The prefix %s is already registered -- nothing else to do!", data.Prefix),
+				}
+				ctx.AbortWithStatusJSON(200, returnMsg)
+				log.Infof("Skipping registration of prefix %s because it's already registered.", data.Prefix)
+				return nil
+			}
+
+			if param.Registry_RequireKeyChaining.GetBool() {
+				superspaces, subspaces, err := namespaceSupSubChecks(data.Prefix)
+				if err != nil {
+					log.Errorf("Failed to check if namespace suffixes or prefixes another registered namespace: %v", err)
+					return errors.Wrap(err, "Server encountered an error checking if namespace already exists")
+				}
+
+				// If we make the assumption that namespace prefixes are heirarchical, eg that the owner of /foo should own
+				// everything under /foo (/foo/bar, /foo/baz, etc), then it makes sense to check for superspaces first. If any
+				// superspace is found, they logically "own" the incoming namespace.
+				if len(superspaces) > 0 {
+					// If this is the case, we want to make sure that at least one of the superspaces has the
+					// same registration key as the incoming. This guarantees the owner of the superspace is
+					// permitting the action (assuming their keys haven't been stolen!)
+					matched, err := matchKeys(key, superspaces)
+					if err != nil {
+						ctx.JSON(500, gin.H{"error": "Server encountered an error checking for key matches in the database"})
+						return errors.Errorf("%v: Unable to check if the incoming key for %s matched any public keys for %s", err, data.Prefix, subspaces)
+					}
+					if !matched {
+						_ = ctx.AbortWithError(403, errors.New("Cannot register a namespace that is suffixed or prefixed by an already-registered namespace unless the incoming public key matches a registered key"))
+						return errors.New("Cannot register a namespace that is suffixed or prefixed by an already-registered namespace unless the incoming public key matches a registered key")
+					}
+
+				} else if len(subspaces) > 0 {
+					// If there are no superspaces, we can check the subspaces.
+
+					// TODO: Eventually we might want to check only the highest level subspaces and use those keys for matching. For example,
+					// if /foo/bar and /foo/bar/baz are registered with two keysets such that the complement of their intersections is not null,
+					// it may be the case that the only key we match against belongs to /foo/bar/baz. If we go ahead with registration at that
+					// point, we're essentially saying /foo/bar/baz, the logical subspace of /foo/bar, has authorized a superspace for both.
+					// More interestingly, if /foo/bar and /foo/baz are both registered, should they both be consulted before adding /foo?
+
+					// For now, we'll just check for any key match.
+					matched, err := matchKeys(key, subspaces)
+					if err != nil {
+						ctx.JSON(500, gin.H{"error": "Server encountered an error checking for key matches in the database"})
+						return errors.Errorf("%v: Unable to check if the incoming key for %s matched any public keys for %s", err, data.Prefix, subspaces)
+					}
+					if !matched {
+						_ = ctx.AbortWithError(403, errors.New("Cannot register a namespace that is suffixed or prefixed by an already-registered namespace unless the incoming public key matches a registered key"))
+						return errors.New("Cannot register a namespace that is suffixed or prefixed by an already-registered namespace unless the incoming public key matches a registered key")
+					}
+				}
 			}
 			reqPrefix, err := validateNSPath(data.Prefix)
 			if err != nil {
@@ -360,8 +448,8 @@ func cliRegisterNamespace(ctx *gin.Context) {
 		reqData.Identity = string(body)
 		err = keySignChallenge(ctx, &reqData, "register")
 		if err != nil {
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error during key-sign challenge" + err.Error()})
-			log.Errorf("Failed to complete key sign challenge with identity requirement: %v", err)
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error during key-sign challenge: " + err.Error()})
+			log.Warningf("Failed to complete key sign challenge with identity requirement: %v", err)
 		}
 		return
 	}
@@ -369,8 +457,8 @@ func cliRegisterNamespace(ctx *gin.Context) {
 	if reqData.IdentityRequired == "false" || reqData.IdentityRequired == "" {
 		err := keySignChallenge(ctx, &reqData, "register")
 		if err != nil {
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error during key-sign challenge " + err.Error()})
-			log.Errorf("Failed to complete key sign challenge without identity requirement: %v", err)
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error during key-sign challenge: " + err.Error()})
+			log.Warningf("Failed to complete key sign challenge without identity requirement: %v", err)
 		}
 		return
 	}

@@ -26,7 +26,7 @@ enabled=1 \n\
 gpgcheck=0' > /etc/yum.repos.d/goreleaser.repo
 
 # Install proper version of nodejs so that make web-build works
-RUN dnf module install -y nodejs:18
+RUN dnf module install -y nodejs:20
 
 # Install goreleaser and various other packages we need
 RUN yum install -y goreleaser npm xrootd-devel xrootd-server-devel xrootd-client-devel nano xrootd-scitokens \
@@ -120,9 +120,13 @@ RUN \
 
 # For S3 tests, we need the minIO server client, so we install based on detected arch
 RUN if [ "$TARGETARCH" = "amd64" ]; then \
-        dnf install -y https://dl.min.io/server/minio/release/linux-amd64/minio-20231202105133.0.0.x86_64.rpm; \
+        curl -o minio.rpm https://dl.min.io/server/minio/release/linux-amd64/archive/minio-20231202105133.0.0.x86_64.rpm &&\
+        dnf install -y minio.rpm &&\
+        rm -f minio.rpm; \
     elif [ "$TARGETARCH" = "arm64" ]; then \
-        dnf install -y https://dl.min.io/server/minio/release/linux-arm64/minio-20231202105133.0.0.aarch64.rpm; \
+        curl -o minio.rpm https://dl.min.io/server/minio/release/linux-arm64/archive/minio-20231202105133.0.0.aarch64.rpm &&\
+        dnf install -y minio.rpm &&\
+        rm -f minio.rpm; \
     fi
 
 WORKDIR /app
