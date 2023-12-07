@@ -270,17 +270,17 @@ func (a AuthCheckImpl) IssuerCheck(c *gin.Context, strToken string, expectedScop
 		}
 	}
 
-	publicJWKS, err := config.GetIssuerPublicJWKS()
+	bKey, err := config.GetIssuerPrivateJWK()
 	if err != nil {
-		return errors.Wrap(err, "Failed to get the public jwks from the server")
+		return errors.Wrap(err, "Failed to load issuer server's private key")
 	}
 
-	key, exists := publicJWKS.Key(0)
-	if !exists {
-		return errors.Wrap(err, "Failed to get the public key from the server")
+	var raw ecdsa.PrivateKey
+	if err = bKey.Raw(&raw); err != nil {
+		return errors.Wrap(err, "Failed to get raw key of the issuer's JWK")
 	}
 
-	parsed, err := jwt.Parse([]byte(strToken), jwt.WithKey(jwa.ES256, key))
+	parsed, err := jwt.Parse([]byte(strToken), jwt.WithKey(jwa.ES256, raw.PublicKey))
 
 	if err != nil {
 		return errors.Wrap(err, "Failed to verify JWT by issuer's key")
