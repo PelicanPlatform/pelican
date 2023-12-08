@@ -11,10 +11,9 @@ We currently offer support for the following versions of Pelican:
 
 ## Reporting a Vulnerability or Security Issue
 
-If you think you've discovered a security concern in Pelican or any of the services
-we host as a part of the Open Science Data Federation (OSDF), or if you become aware of any
-ongoing malicious activity, **please let us know immediately** by emailing
-[security@osg-htc.org](mailto:security@osg-htc.org) with:
+If you think you've discovered a security concern in Pelican, or if you become aware of any
+ongoing malicious activity regarding our software, **please let us know immediately** by emailing
+[security@pelicanplatform.org](mailto:security@pelicanplatform.org) with:
 - A description of the concern
 - Any useful information we may need for reproduction/verification
 - Affected systems/software versions
