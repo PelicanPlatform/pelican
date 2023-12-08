@@ -33,6 +33,10 @@ const NamespaceTable = ({type} : ServerTableProps) => {
             name: "Prefix",
             cellNode: TableCellOverflow
         },
+        "identity": {
+            name: "Identity",
+            cellNode: TableCellOverflow
+        },
         "admin_metadata": {
             name: "Admin Metadata",
             cellNode: TableCellOverflow
