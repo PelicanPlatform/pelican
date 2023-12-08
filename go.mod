@@ -12,6 +12,7 @@ require (
 	github.com/hashicorp/go-version v1.6.0
 	github.com/jellydator/ttlcache/v3 v3.1.0
 	github.com/jsipprell/keyctl v1.0.4-0.20211208153515-36ca02672b6c
+	github.com/lestrrat-go/httprc v1.0.4
 	github.com/lestrrat-go/jwx/v2 v2.0.16
 	github.com/minio/minio-go/v7 v7.0.65
 	github.com/mwitkow/go-conntrack v0.0.0-20190716064945-2f068394615f
@@ -101,7 +102,6 @@ require (
 	github.com/leodido/go-urn v1.2.4 // indirect
 	github.com/lestrrat-go/blackmagic v1.0.2 // indirect
 	github.com/lestrrat-go/httpcc v1.0.1 // indirect
-	github.com/lestrrat-go/httprc v1.0.4 // indirect
 	github.com/lestrrat-go/iter v1.0.2 // indirect
 	github.com/lestrrat-go/option v1.0.1 // indirect
 	github.com/magiconair/properties v1.8.7 // indirect

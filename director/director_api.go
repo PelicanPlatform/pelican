@@ -20,18 +20,12 @@ package director
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
-	"io"
-	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/lestrrat-go/jwx/v2/jwa"
-	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
@@ -68,73 +62,6 @@ func ListServerAds(serverTypes []ServerType) []ServerAd {
 		}
 	}
 	return ads
-}
-
-// Return director's public JWK for token verification. This function can be called
-// on any server (director/origin/registry) as long as the Federation_DirectorUrl is set
-func LoadDirectorPublicKey() (jwk.Key, error) {
-	directorDiscoveryUrlStr := param.Federation_DirectorUrl.GetString()
-	if len(directorDiscoveryUrlStr) == 0 {
-		return nil, errors.Errorf("Director URL is unset; Can't load director's public key")
-	}
-	log.Debugln("Director's discovery URL:", directorDiscoveryUrlStr)
-	directorDiscoveryUrl, err := url.Parse(directorDiscoveryUrlStr)
-	if err != nil {
-		return nil, errors.Wrap(err, fmt.Sprintln("Invalid director URL:", directorDiscoveryUrlStr))
-	}
-	directorDiscoveryUrl.Scheme = "https"
-	directorDiscoveryUrl.Path = directorDiscoveryUrl.Path + directorDiscoveryPath
-
-	tr := config.GetTransport()
-	client := &http.Client{Transport: tr}
-
-	req, err := http.NewRequest(http.MethodGet, directorDiscoveryUrl.String(), nil)
-	if err != nil {
-		return nil, errors.Wrap(err, fmt.Sprintln("Failure when doing director metadata request creation for: ", directorDiscoveryUrl))
-	}
-
-	result, err := client.Do(req)
-	if err != nil {
-		return nil, errors.Wrap(err, fmt.Sprintln("Failure when doing director metadata lookup to: ", directorDiscoveryUrl))
-	}
-
-	if result.Body != nil {
-		defer result.Body.Close()
-	}
-
-	body, err := io.ReadAll(result.Body)
-	if err != nil {
-		return nil, errors.Wrap(err, fmt.Sprintln("Failure when doing director metadata read to: ", directorDiscoveryUrl))
-	}
-
-	metadata := DiscoveryResponse{}
-
-	err = json.Unmarshal(body, &metadata)
-	if err != nil {
-		return nil, errors.Wrap(err, fmt.Sprintln("Failure when parsing director metadata at: ", directorDiscoveryUrl))
-	}
-
-	jwksUri := metadata.JwksUri
-
-	response, err := client.Get(jwksUri)
-	if err != nil {
-		return nil, errors.Wrap(err, fmt.Sprintln("Failure when requesting director Jwks URI: ", jwksUri))
-	}
-	defer response.Body.Close()
-	contents, err := io.ReadAll(response.Body)
-	if err != nil {
-		return nil, errors.Wrap(err, fmt.Sprintln("Failure when requesting director Jwks URI: ", jwksUri))
-	}
-	keys, err := jwk.Parse(contents)
-	if err != nil {
-		return nil, errors.Wrap(err, fmt.Sprintln("Failure when parsing director's jwks: ", jwksUri))
-	}
-	key, ok := keys.Key(0)
-	if !ok {
-		return nil, errors.Wrap(err, fmt.Sprintln("Failure when getting director's first public key: ", jwksUri))
-	}
-
-	return key, nil
 }
 
 // Create a token for director's Prometheus instance to access
@@ -238,7 +165,7 @@ func CreateDirectorScrapeToken() (string, error) {
 	}
 
 	tok, err := jwt.NewBuilder().
-		Claim("scope", "pelican.directorScrape").
+		Claim("scope", "monitoring.scrape").
 		Issuer(directorURL).
 		// The audience of this token is all origins/caches that have WebURL set in their serverAds
 		Audience(aud).
