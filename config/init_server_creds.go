@@ -523,19 +523,90 @@ func GetIssuerPublicJWKS() (jwk.Set, error) {
 	return loadIssuerPublicJWKS(existingJWKS, issuerKeyFile)
 }
 
-// Generate the secret to encrypt/decrypt session cookie
-func GenerateSessionSecret() (string, error) {
+// Check if there is a session secret exists at param.Server_SessionSecretFile and is not empty if there is one.
+// If not, generate the secret to encrypt/decrypt session cookie
+func GenerateSessionSecret() error {
+	secretLocation := param.Server_SessionSecretFile.GetString()
+
+	if secretLocation == "" {
+		return errors.New("Empty filename for Server_SessionSecretFile")
+	}
+
+	uid, err := GetDaemonUID()
+	if err != nil {
+		return err
+	}
+
+	gid, err := GetDaemonGID()
+	if err != nil {
+		return err
+	}
+	user, err := GetDaemonUser()
+	if err != nil {
+		return err
+	}
+	groupname, err := GetDaemonGroup()
+	if err != nil {
+		return err
+	}
+
+	// First open the file and see if there is a secret in it already
+	if file, err := os.Open(secretLocation); err == nil {
+		defer file.Close()
+		existingSecretBytes := make([]byte, 1024)
+		_, err := file.Read(existingSecretBytes)
+		if err != nil {
+			return errors.Wrap(err, "Failed to read existing session secret file")
+		}
+		if len(string(existingSecretBytes)) == 0 {
+			return errors.Wrap(err, "Empty session secret file")
+		}
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return errors.Wrap(err, "Failed to load session secret due to I/O error")
+	}
+	keyDir := filepath.Dir(secretLocation)
+	if err := MkdirAll(keyDir, 0750, -1, gid); err != nil {
+		return err
+	}
+
+	// In this case, the session secret file doesn't exist.
+	file, err := os.OpenFile(secretLocation, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0400)
+	if err != nil {
+		return errors.Wrap(err, fmt.Sprint("Failed to create new session secret file at ", secretLocation))
+	}
+	defer file.Close()
+	// Windows does not have "chown", has to work differently
+	currentOS := runtime.GOOS
+	if currentOS == "windows" {
+		cmd := exec.Command("icacls", secretLocation, "/grant", user+":F")
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return errors.Wrapf(err, "Failed to chown generated session secret %v to daemon group %v: %s",
+				secretLocation, groupname, string(output))
+		}
+	} else { // Else we are running on linux/mac
+		if err = os.Chown(secretLocation, uid, gid); err != nil {
+			return errors.Wrapf(err, "Failed to chown generated session secret %v to daemon group %v",
+				secretLocation, groupname)
+		}
+	}
+
+	// How we generate the secret:
+	// Concatenate the byte array pelican with the DER form of the service's private key,
+	// Take a hash, and use the hash's bytes as the secret.
+
 	// Use issuer private key as the source to generate the secret
 	issuerKeyFile := param.IssuerKey.GetString()
 	privateKey, err := LoadPrivateKey(issuerKeyFile)
 	if err != nil {
-		return "", err
+		return err
 	}
 
 	derPrivateKey, err := x509.MarshalPKCS8PrivateKey(privateKey)
 
 	if err != nil {
-		return "", err
+		return err
 	}
 	byteArray := []byte("pelican")
 
@@ -543,5 +614,25 @@ func GenerateSessionSecret() (string, error) {
 
 	hash := sha256.Sum256(concatenated)
 
-	return string(hash[:]), nil
+	secret := string(hash[:])
+
+	_, err = file.WriteString(secret)
+
+	if err != nil {
+		return errors.Wrap(err, "")
+	}
+	return nil
+}
+
+func LoadSessionSecret() ([]byte, error) {
+	secretLocation := param.Server_SessionSecretFile.GetString()
+
+	if secretLocation == "" {
+		return []byte{}, errors.New("Empty filename for Server_SessionSecretFile")
+	}
+	rest, err := os.ReadFile(secretLocation)
+	if err != nil {
+		return []byte{}, errors.Wrap(err, "Error reading secret file")
+	}
+	return rest, nil
 }

@@ -203,10 +203,11 @@ func handleOAuthCallback(ctx *gin.Context) {
 	ctx.Redirect(http.StatusTemporaryRedirect, redirectLocation)
 }
 
-// Configure OAuth2 client and register endpoints
+// Configure OAuth2 client and register related authentication endpoints for Web UI
 func ConfigOAuthClientAPIs(engine *gin.Engine) error {
-	if param.Server_SessionSecret.GetString() == "" {
-		return errors.New("Fail to configure OAuth client: Session secret is empty")
+	sessionSecretByte, err := config.LoadSessionSecret()
+	if err != nil {
+		return errors.Wrap(err, "Failed to configure OAuth client")
 	}
 	oauthCommonConfig, err := pelican_oauth2.ServerOIDCClient()
 	if err != nil {
@@ -221,7 +222,7 @@ func ConfigOAuthClientAPIs(engine *gin.Engine) error {
 		return err
 	}
 	redirectUrl.Path = oauthCallbackPath
-	redirectHostname := param.Server_OAuthClientRedirectHostname.GetString()
+	redirectHostname := param.OIDC_ClientRedirectHostname.GetString()
 	if redirectHostname != "" {
 		_, _, err := net.SplitHostPort(redirectHostname)
 		if err != nil {
@@ -244,7 +245,7 @@ func ConfigOAuthClientAPIs(engine *gin.Engine) error {
 	}
 	ciLogonOAuthConfig.Store(config)
 
-	store := cookie.NewStore([]byte(param.Server_SessionSecret.GetString()))
+	store := cookie.NewStore(sessionSecretByte)
 	sessionHandler := sessions.Sessions("pelican-session", store)
 
 	ciLogonGroup := engine.Group("/api/v1.0/auth/cilogon", sessionHandler)
