@@ -602,6 +602,30 @@ type: string
 default: none
 components: ["origin", "director", "nsregistry"]
 ---
+name: Server.IssuerUrl
+description: >-
+  The URL and port at which the server's issuer can be accessed.
+type: string
+# Setting default to none for now because it changes based on server type and server mode.
+default: none
+components: ["origin", "director", "nsregistry"]
+---
+name: Server.IssuerHostname
+description: >-
+  The hostname at which the server's issuer can be accessed.
+type: string
+# Setting default to none for now because it changes based on server type and server mode.
+default: none
+components: ["origin", "director", "nsregistry"]
+---
+name: Server.IssuerPort
+description: >-
+  The port at which the server's issuer can be accessed.
+type: int
+# Setting default to none for now because it changes based on server type and server mode.
+default: none
+components: ["origin", "director", "nsregistry"]
+---
 name: Server.IssuerJwks
 description: >-
   A filepath indicating where the server's public JSON web keyset can be found.

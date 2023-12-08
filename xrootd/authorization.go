@@ -40,7 +40,6 @@ import (
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
-	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
 )
 
@@ -278,7 +277,7 @@ func GenerateMonitoringIssuer() (issuer Issuer, err error) {
 		return
 	}
 	issuer.Name = "Built-in Monitoring"
-	issuerUrl, err := utils.GetLocalIssuerURL()
+	issuerUrl, err := server_utils.GetServerIssuerURL()
 	if err != nil {
 		return
 	}
@@ -295,7 +294,7 @@ func GenerateOriginIssuer(exportedPaths []string) (issuer Issuer, err error) {
 		return
 	}
 	issuer.Name = "Origin"
-	issuerUrl, err := utils.GetLocalIssuerURL()
+	issuerUrl, err := server_utils.GetServerIssuerURL()
 	if err != nil {
 		return
 	}
@@ -359,7 +358,6 @@ func makeSciTokensCfg() (cfg ScitokensCfg, err error) {
 
 // Writes out the origin's scitokens.cfg configuration
 func WriteOriginScitokensConfig(exportedPaths []string) error {
-
 	cfg, err := makeSciTokensCfg()
 	if err != nil {
 		return err

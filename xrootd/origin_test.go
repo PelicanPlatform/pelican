@@ -42,6 +42,7 @@ import (
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/require"
@@ -105,6 +106,40 @@ func originMockup(t *testing.T) context.CancelFunc {
 	return cancel
 }
 
+// Provide the method (eg GET) and endpoint to ping while waiting for
+// server pieces to spin up. Returns true when
+func serverRunning(t *testing.T, method string, endpoint string, successStatus int) (bool, error) {
+	testExpiry := time.Now().Add(10 * time.Second)
+	testSuccess := false
+	logged := false
+	for !(time.Now().After(testExpiry)) {
+		time.Sleep(50 * time.Millisecond)
+		req, err := http.NewRequest(method, endpoint, nil)
+		if err != nil {
+			return false, errors.Errorf("Failed to make request to endpoint %s: %v", endpoint, err)
+		}
+		httpClient := http.Client{
+			Transport: config.GetTransport(),
+			Timeout:   50 * time.Millisecond,
+		}
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			if !logged {
+				log.Infof("Failed to send request to %s; likely, server is not up. Will continue to retry: %v", endpoint, err)
+				logged = true
+			}
+		} else {
+			if resp.StatusCode == successStatus {
+				testSuccess = true
+				break
+			}
+			// We didn't get a success status
+			return false, errors.Errorf("Received bad status code in reply to server ping: %d. Expected %d,", resp.StatusCode, successStatus)
+		}
+	}
+	return testSuccess, nil
+}
+
 func TestOrigin(t *testing.T) {
 	viper.Reset()
 
@@ -119,33 +154,18 @@ func TestOrigin(t *testing.T) {
 	cancel := originMockup(t)
 	defer cancel()
 
-	testExpiry := time.Now().Add(10 * time.Second)
-	testSuccess := false
-	for !(testSuccess || time.Now().After(testExpiry)) {
-		time.Sleep(50 * time.Millisecond)
-		req, err := http.NewRequest("GET", param.Origin_Url.GetString(), nil)
-		require.NoError(t, err)
-		httpClient := http.Client{
-			Transport: config.GetTransport(),
-			Timeout:   50 * time.Millisecond,
-		}
-		_, err = httpClient.Do(req)
-		if err != nil {
-			log.Infoln("Failed to send request to XRootD; likely, server is not up (will retry in 50ms):", err)
-		} else {
-			testSuccess = true
-			log.Debugln("XRootD server appears to be functioning; will proceed with test")
-		}
+	// In this case a 403 means its running
+	running, err := serverRunning(t, "GET", param.Origin_Url.GetString(), 403)
+	if err != nil {
+		t.Fatalf("Unsucessful test: Server encountered an error: %v", err)
+	} else if !running {
+		t.Fatalf("Unsucessful test: timeout while waiting for xrootd")
 	}
+	fileTests := utils.TestFileTransferImpl{}
+	ok, err := fileTests.RunTests(param.Origin_Url.GetString(), param.Origin_Url.GetString(), utils.OriginSelfFileTest)
+	require.NoError(t, err)
+	require.True(t, ok)
 
-	if testSuccess {
-		fileTests := utils.TestFileTransferImpl{}
-		ok, err := fileTests.RunTests(param.Origin_Url.GetString(), param.Origin_Url.GetString(), utils.OriginSelfFileTest)
-		require.NoError(t, err)
-		require.True(t, ok)
-	} else {
-		t.Fatalf("Unsucessful test: timeout when trying to send request to xrootd")
-	}
 	viper.Reset()
 }
 
@@ -163,25 +183,30 @@ func TestS3OriginConfig(t *testing.T) {
 	minIOServerCmd.Stderr = &errb
 
 	err := minIOServerCmd.Start()
-	// Wait for the server to initialize. Hopefully this always happens in under 2 seconds!
-	time.Sleep(time.Second * 2)
-
-	// Check for any errors in the outputs
+	require.NoError(t, err)
+	// Check for any other errors in the outputs
 	if strings.Contains(strings.ToLower(outb.String()), "error") {
 		t.Fatalf("Could not start the MinIO server: %s", outb.String())
 	} else if errb.String() != "" {
 		t.Fatalf("Could not start the MinIO server: %s", errb.String())
 	}
-	// Check for other types of errors that might have been passed back through the process
-	require.NoError(t, err)
+
+	// Check if MinIO is running (by default at localhost:9000)
+	endpoint := "localhost:9000"
+	// Expect a 403 from this endpoint -- that means it's running
+	running, err := serverRunning(t, "GET", fmt.Sprintf("http://%s", endpoint), 403)
+	if err != nil {
+		t.Fatalf("Unsucessful test: Server encountered an error: %v", err)
+	} else if !running {
+		t.Fatalf("Unsucessful test: timeout while waiting for xrootd")
+	}
+
 	defer func() {
 		err = minIOServerCmd.Process.Kill()
 		require.NoError(t, err)
 	}()
 
-	// MinIO is running (by default at localhost:9000), let's create an unauthenticated bucket
-	// First we set up a client instance
-	endpoint := "localhost:9000"
+	// Let's create an unauthenticated bucket. First we set up a client instance
 	// By default, the endpoint will require access/secret key with these values. Note that this doesn't
 	// necessarily mean the bucket we create needs those keys, as the bucket will have its own IAM
 	accessKey := "minioadmin"
@@ -241,20 +266,15 @@ func TestS3OriginConfig(t *testing.T) {
 	// of the web_ui stuff initialized to export the public signing keys (as we can't export via XRootD) and we
 	// need a real token. These become much easier when we have an internally workable set of commands to do so.
 
-	// Wait for xrootd to initialize -- hopefully this always happens in 2 seconds!
-	time.Sleep(2 * time.Second)
-	// The file is accessed at ${OriginURL}/<service name>/<region>/<bucket>/<file>
-	req, err := http.NewRequest("GET", fmt.Sprintf("%s/%s/%s/%s/%s", param.Origin_Url.GetString(), serviceName, regionName, bucketName, objectName), nil)
-	require.NoError(t, err)
-	httpClient := http.Client{
-		Transport: config.GetTransport(),
-	}
-	resp, err := httpClient.Do(req)
-	require.NoError(t, err)
-
+	originEndpoint := fmt.Sprintf("%s/%s/%s/%s/%s", param.Origin_Url.GetString(), serviceName, regionName, bucketName, objectName)
 	// Until we sort out the things we mentioned above, we should expect a 403 because we don't try to pass tokens
 	// and we don't actually export any keys for token validation.
-	require.Equal(t, 403, resp.StatusCode)
+	running, err = serverRunning(t, "GET", originEndpoint, 403)
+	if err != nil {
+		t.Fatalf("Unsucessful test: Server encountered an error: %v", err)
+	} else if !running {
+		t.Fatalf("Unsucessful test: timeout while waiting for xrootd")
+	}
 
 	// One other quick check to do is that the namespace was correctly parsed:
 	require.Equal(t, fmt.Sprintf("/%s/%s/%s", serviceName, regionName, bucketName), param.Origin_NamespacePrefix.GetString())
