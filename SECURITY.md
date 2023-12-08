@@ -11,6 +11,11 @@ We currently offer support for the following versions of Pelican:
 
 ## Reporting a Vulnerability or Security Issue
 
+We recognize that trust is hard to earn and easy to lose. That's why we take security incidents
+very seriously and strive to answer all concerns in as timely a manner as we are able. When you
+send us a report, we will acknowledge receipt and aim to provide an initial assessment as soon as
+possible. Our team is committed to resolving issues promptly.
+
 If you think you've discovered a security concern in Pelican, or if you become aware of any
 ongoing malicious activity regarding our software, **please let us know immediately** by emailing
 [security@pelicanplatform.org](mailto:security@pelicanplatform.org) with:
@@ -19,7 +24,5 @@ ongoing malicious activity regarding our software, **please let us know immediat
 - Affected systems/software versions
 - Your contact information and whether you're willing to participate in follow-up conversations
 
-We take security incidents very seriously and strive to answer all concerns in as timely a
-manner as we are able. When you send us a report, we will acknowledge receipt and aim to
-provide an initial assessment as soon as possible. Our team is committed to resolving issues
-promptly.
+Pelican is an open source platform, and we also welcome community bugfixes. If you would like to
+contribute to Pelican, please open a pull request!
