@@ -583,22 +583,6 @@ type: string
 default: $ConfigBase/server-web-passwd
 components:  ["origin", "cache", "nsregistry", "director"]
 ---
-name: Server.OAuthClientID
-description: >-
-  The OAuth client id obtained from your OAuth2 provider for Pelican to interact
-  
-  The recommended OAuth2 provider is CILogon: https://www.cilogon.org/home
-type: string
-default: none
-components:  ["nsregistry", "director"]
----
-name: Server.OAuthClientSecret
-description: >-
-  The OAuth client secret obtained from your OAuth2 provider for Pelican to verify its identity
-type: string
-default: none
-components:  ["nsregistry", "director"]
----
 name: Server.OAuthClientRedirectHostname
 description: >-
   The hostname for the OAuth client redirect URL that the OAuth provider will redirect to after the user is authenticated

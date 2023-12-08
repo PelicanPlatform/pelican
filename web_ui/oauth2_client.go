@@ -23,7 +23,6 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -36,7 +35,9 @@ import (
 	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
 	"github.com/pelicanplatform/pelican/config"
+	pelican_oauth2 "github.com/pelicanplatform/pelican/oauth2"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pkg/errors"
 	"golang.org/x/oauth2"
 )
 
@@ -59,11 +60,13 @@ type (
 )
 
 const (
-	oauthCallbackPath  = "/api/v1.0/auth/cilogon/callback"
-	cilogonUserInfoUrl = "https://cilogon.org/oauth2/userinfo"
+	oauthCallbackPath = "/api/v1.0/auth/cilogon/callback"
 )
 
-var ciLogonOAuthConfig atomic.Pointer[oauth2.Config]
+var (
+	ciLogonOAuthConfig atomic.Pointer[oauth2.Config]
+	cilogonUserInfoUrl = "" // Value will be set at ConfigOAuthClientAPIs
+)
 
 // Generate a 16B random string and set ctx session key oauthstate as the random string
 // return the random string with URL encoded nextUrl for CSRF token validation
@@ -202,12 +205,16 @@ func handleOAuthCallback(ctx *gin.Context) {
 
 // Configure OAuth2 client and register endpoints
 func ConfigOAuthClientAPIs(engine *gin.Engine) error {
-	if param.Server_OAuthClientID.GetString() == "" || param.Server_OAuthClientSecret.GetString() == "" {
-		return errors.New("Fail to configure OAuth client: OAuth client ID or client secret is empty")
-	}
 	if param.Server_SessionSecret.GetString() == "" {
 		return errors.New("Fail to configure OAuth client: Session secret is empty")
 	}
+	oauthCommonConfig, err := pelican_oauth2.ServerOIDCClient()
+	if err != nil {
+		return errors.Wrap(err, "Failed to load server OIDC client config")
+	}
+
+	cilogonUserInfoUrl = oauthCommonConfig.Endpoint.UserInfoURL
+
 	redirectUrlStr := param.Server_ExternalWebUrl.GetString()
 	redirectUrl, err := url.Parse(redirectUrlStr)
 	if err != nil {
@@ -227,12 +234,12 @@ func ConfigOAuthClientAPIs(engine *gin.Engine) error {
 	}
 	config := &oauth2.Config{
 		RedirectURL:  redirectUrl.String(),
-		ClientID:     param.Server_OAuthClientID.GetString(),
-		ClientSecret: param.Server_OAuthClientSecret.GetString(),
-		Scopes:       []string{"openid", "email"}, //openid scope is required by CILogon
+		ClientID:     oauthCommonConfig.ClientID,
+		ClientSecret: oauthCommonConfig.ClientSecret,
+		Scopes:       oauthCommonConfig.Scopes,
 		Endpoint: oauth2.Endpoint{
-			AuthURL:  "https://cilogon.org/authorize",
-			TokenURL: "https://cilogon.org/oauth2/token",
+			AuthURL:  oauthCommonConfig.Endpoint.AuthURL,
+			TokenURL: oauthCommonConfig.Endpoint.TokenURL,
 		},
 	}
 	ciLogonOAuthConfig.Store(config)
