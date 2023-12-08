@@ -332,6 +332,9 @@ func download_http(sourceUrl *url.URL, destination string, payload *payloadStruc
 	results := make(chan TransferResults, len(files))
 	//tf := TransferFiles{files: files}
 
+	if ObjectClientOptions.Recursive && ObjectClientOptions.ProgressBars {
+		log.SetOutput(progressContainer)
+	}
 	// Start the workers
 	for i := 1; i <= 5; i++ {
 		wg.Add(1)
@@ -363,8 +366,9 @@ func download_http(sourceUrl *url.URL, destination string, payload *payloadStruc
 		}
 	}
 	// Make sure to close the progressContainer after all download complete
-	if ObjectClientOptions.Recursive {
+	if ObjectClientOptions.Recursive && ObjectClientOptions.ProgressBars {
 		progressContainer.Wait()
+		log.SetOutput(os.Stdout)
 	}
 	return downloaded, downloadError
 
@@ -763,6 +767,9 @@ func UploadDirectory(src string, dest *url.URL, token string, namespace namespac
 		return 0, err
 	}
 
+	if ObjectClientOptions.ProgressBars {
+		log.SetOutput(progressContainer)
+	}
 	// Upload all of our files within the proper directories
 	for _, file := range files {
 		tempDest := url.URL{}
@@ -779,6 +786,7 @@ func UploadDirectory(src string, dest *url.URL, token string, namespace namespac
 	// Close progress bar container
 	if ObjectClientOptions.ProgressBars {
 		progressContainer.Wait()
+		log.SetOutput(os.Stdout)
 	}
 	return amountDownloaded, err
 }
@@ -1026,6 +1034,7 @@ func walkDirUpload(path string, client *gowebdav.Client, destPath string) ([]str
 	if err != nil {
 		return nil, err
 	}
+	log.Debugf("Creating directory: %s", destPath+path)
 
 	// Get our list of files
 	infos, err := os.ReadDir(path)
