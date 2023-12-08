@@ -48,6 +48,12 @@ type (
 		VaultServer   string `json:"vault_server"`
 	}
 
+	Scitokens struct {
+		BasePath   []string `json:"base_path"`
+		Issuer     string   `json:"issuer"`
+		Restricted []string `json:"restricted_path"`
+	}
+
 	Namespace struct {
 		Caches               []Server             `json:"caches"`
 		Origins              []Server             `json:"origins"`
@@ -55,6 +61,7 @@ type (
 		DirlistHost          string               `json:"dirlisthost"`
 		Path                 string               `json:"path"`
 		ReadHTTPS            bool                 `json:"readhttps"`
+		Scitokens            []Scitokens          `json:"scitokens"`
 		UseTokenOnRead       bool                 `json:"usetokenonread"`
 		WritebackHost        string               `json:"writebackhost"`
 	}
@@ -136,21 +143,52 @@ func AdvertiseOSDF() error {
 
 	cacheAdMap := make(map[ServerAd][]NamespaceAd)
 	originAdMap := make(map[ServerAd][]NamespaceAd)
+
 	for _, ns := range namespaces.Namespaces {
-		nsAd := NamespaceAd{}
-		nsAd.RequireToken = ns.UseTokenOnRead
-		nsAd.Path = ns.Path
-		nsAd.DirlistHost = ns.DirlistHost
-		issuerURL, err := url.Parse(ns.CredentialGeneration.Issuer)
-		if err != nil {
-			log.Warningf("Invalid URL %v when parsing topology response: %v\n", ns.CredentialGeneration.Issuer, err)
-			continue
+		nsAds := []NamespaceAd{}
+		requireToken := ns.UseTokenOnRead
+		path := ns.Path
+		dirlistHost := ns.DirlistHost
+
+		// A token is required on read, so scitokens will be populated
+		if requireToken {
+			maxScopeDepth := uint(ns.CredentialGeneration.MaxScopeDepth)
+			strategy := StrategyType(ns.CredentialGeneration.Strategy)
+			vaultServer := ns.CredentialGeneration.VaultServer
+
+			// Each namespace can have multiple entries into the scitoken
+			// and each scitoken entry can have multiple basepaths.
+			// Each basepath/issuer combo must be a seperate NamespaceAd
+
+			for _, scitok := range ns.Scitokens {
+				issuerURL, err := url.Parse(scitok.Issuer)
+				if err != nil {
+					log.Warningf("Invalid URL %v when parsing topology response: %v\n", ns.CredentialGeneration.Issuer, err)
+					continue
+				}
+				issuer := *issuerURL
+				for _, bp := range scitok.BasePath {
+					nAd := NamespaceAd{
+						RequireToken:   requireToken,
+						Path:           bp,
+						Issuer:         issuer,
+						MaxScopeDepth:  maxScopeDepth,
+						Strategy:       strategy,
+						BasePath:       bp,
+						VaultServer:    vaultServer,
+						DirlistHost:    dirlistHost,
+						RestrictedPath: scitok.Restricted,
+					}
+					nsAds = append(nsAds, nAd)
+				}
+			}
+		} else {
+			nAd := NamespaceAd{
+				RequireToken: false,
+				Path:         path,
+			}
+			nsAds = append(nsAds, nAd)
 		}
-		nsAd.Issuer = *issuerURL
-		nsAd.MaxScopeDepth = uint(ns.CredentialGeneration.MaxScopeDepth)
-		nsAd.Strategy = StrategyType(ns.CredentialGeneration.Strategy)
-		nsAd.BasePath = ns.CredentialGeneration.BasePath
-		nsAd.VaultServer = ns.CredentialGeneration.VaultServer
 
 		// We assume each namespace may have multiple origins, although most likely will not
 		// Some namespaces show up in topology but don't have an origin (perhaps because
@@ -158,12 +196,12 @@ func AdvertiseOSDF() error {
 		// same useless origin ad, resulting in a 404 for queries to those namespaces
 		for _, origin := range ns.Origins {
 			originAd := parseServerAd(origin, OriginType)
-			originAdMap[originAd] = append(originAdMap[originAd], nsAd)
+			originAdMap[originAd] = append(originAdMap[originAd], nsAds...)
 		}
 
 		for _, cache := range ns.Caches {
 			cacheAd := parseServerAd(cache, CacheType)
-			cacheAdMap[cacheAd] = append(cacheAdMap[cacheAd], nsAd)
+			cacheAdMap[cacheAd] = append(cacheAdMap[cacheAd], nsAds...)
 		}
 	}
 
