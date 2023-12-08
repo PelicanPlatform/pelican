@@ -355,8 +355,58 @@ description: >-
   downloads to work properly and for directories to be visable.
 type: bool
 default: false
+---
+name: Origin.Mode
+description: >-
+  The backend mode to be used by an origin. Current values that can be selected from
+  are either "posix" or "s3".
+type: string
+default: posix
 components: ["origin"]
 ---
+name: Origin.S3ServiceName
+description: >-
+  The S3 Service Name to be used by the XRootD plugin.
+type: string
+default: none
+components: ["origin"]
+---
+name: Origin.S3Region
+description: >-
+  The S3 region to be used by the XRootD plugin.
+type: string
+default: none
+components: ["origin"]
+---
+name: Origin.S3Bucket
+description: >-
+  The S3 bucket to be used by the XRootD plugin.
+type: string
+default: none
+components: ["origin"]
+---
+name: Origin.S3ServiceUrl
+description: >-
+  The S3 service URL to be used by the XRootD plugin.
+type: string
+default: none
+components: ["origin"]
+---
+name: Origin.S3AccessKeyfile
+description: >-
+  A path to a file containing an S3 access keyfile for authenticated buckets when an origin is run in S3 mode.
+type: filename
+default: none
+components: ["origin"]
+---
+name: Origin.S3SecretKeyfile
+description: >-
+  A path to a file containing an S3 secret keyfile for authenticated buckets when an origin is run in S3 mode.
+type: filename
+default: none
+components: ["origin"]
+---
+
 
 ############################
 #   Cache-level configs    #
@@ -558,6 +608,30 @@ name: Server.Hostname
 description: >-
   The server's hostname, by default it's os.Hostname().
 type: string
+default: none
+components: ["origin", "director", "nsregistry"]
+---
+name: Server.IssuerUrl
+description: >-
+  The URL and port at which the server's issuer can be accessed.
+type: string
+# Setting default to none for now because it changes based on server type and server mode.
+default: none
+components: ["origin", "director", "nsregistry"]
+---
+name: Server.IssuerHostname
+description: >-
+  The hostname at which the server's issuer can be accessed.
+type: string
+# Setting default to none for now because it changes based on server type and server mode.
+default: none
+components: ["origin", "director", "nsregistry"]
+---
+name: Server.IssuerPort
+description: >-
+  The port at which the server's issuer can be accessed.
+type: int
+# Setting default to none for now because it changes based on server type and server mode.
 default: none
 components: ["origin", "director", "nsregistry"]
 ---

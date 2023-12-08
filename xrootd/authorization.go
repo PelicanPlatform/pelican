@@ -277,7 +277,11 @@ func GenerateMonitoringIssuer() (issuer Issuer, err error) {
 		return
 	}
 	issuer.Name = "Built-in Monitoring"
-	issuer.Issuer = param.Origin_Url.GetString()
+	issuerUrl, err := server_utils.GetServerIssuerURL()
+	if err != nil {
+		return
+	}
+	issuer.Issuer = issuerUrl.String()
 	issuer.BasePaths = []string{"/pelican/monitoring"}
 	issuer.DefaultUser = "xrootd"
 
@@ -290,7 +294,11 @@ func GenerateOriginIssuer(exportedPaths []string) (issuer Issuer, err error) {
 		return
 	}
 	issuer.Name = "Origin"
-	issuer.Issuer = param.Origin_Url.GetString()
+	issuerUrl, err := server_utils.GetServerIssuerURL()
+	if err != nil {
+		return
+	}
+	issuer.Issuer = issuerUrl.String()
 	issuer.BasePaths = exportedPaths
 	issuer.RestrictedPaths = param.Origin_ScitokensRestrictedPaths.GetStringSlice()
 	issuer.MapSubject = param.Origin_ScitokensMapSubject.GetBool()
@@ -350,7 +358,6 @@ func makeSciTokensCfg() (cfg ScitokensCfg, err error) {
 
 // Writes out the origin's scitokens.cfg configuration
 func WriteOriginScitokensConfig(exportedPaths []string) error {
-
 	cfg, err := makeSciTokensCfg()
 	if err != nil {
 		return err

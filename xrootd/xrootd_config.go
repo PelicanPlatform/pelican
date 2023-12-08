@@ -46,6 +46,13 @@ type (
 		EnableDirListing bool
 		SelfTest         bool
 		NamespacePrefix  string
+		Mode             string
+		S3Bucket         string
+		S3Region         string
+		S3ServiceName    string
+		S3ServiceUrl     string
+		S3AccessKeyfile  string
+		S3SecretKeyfile  string
 	}
 
 	CacheConfig struct {
@@ -90,73 +97,82 @@ type (
 )
 
 func CheckOriginXrootdEnv(exportPath string, uid int, gid int, groupname string) (string, error) {
-	// If we use "volume mount" style options, configure the export directories.
-	volumeMount := param.Origin_ExportVolume.GetString()
-	if volumeMount != "" {
-		volumeMount, err := filepath.Abs(volumeMount)
-		if err != nil {
-			return exportPath, err
-		}
-		volumeMountSrc := volumeMount
-		volumeMountDst := volumeMount
-		volumeMountInfo := strings.SplitN(volumeMount, ":", 2)
-		if len(volumeMountInfo) == 2 {
-			volumeMountSrc = volumeMountInfo[0]
-			volumeMountDst = volumeMountInfo[1]
-		}
-		volumeMountDst = filepath.Clean(volumeMountDst)
-		if volumeMountDst == "" {
-			return exportPath, fmt.Errorf("Export volume %v has empty destination path", volumeMount)
-		}
-		if volumeMountDst[0:1] != "/" {
-			return "", fmt.Errorf("Export volume %v has a relative destination path",
-				volumeMountDst)
-		}
-		destPath := path.Clean(filepath.Join(exportPath, volumeMountDst[1:]))
-		err = config.MkdirAll(filepath.Dir(destPath), 0755, uid, gid)
-		if err != nil {
-			return exportPath, errors.Wrapf(err, "Unable to create export directory %v",
-				filepath.Dir(destPath))
-		}
-		err = os.Symlink(volumeMountSrc, destPath)
-		if err != nil {
-			return exportPath, errors.Wrapf(err, "Failed to create export symlink")
-		}
-		viper.Set("Origin.NamespacePrefix", volumeMountDst)
-	} else {
-		mountPath := param.Xrootd_Mount.GetString()
-		namespacePrefix := param.Origin_NamespacePrefix.GetString()
-		if mountPath == "" || namespacePrefix == "" {
-			return exportPath, errors.New(`Export information was not provided.
-	Add command line flag:
+	originMode := param.Origin_Mode.GetString()
+	if originMode == "posix" {
+		// If we use "volume mount" style options, configure the export directories.
+		volumeMount := param.Origin_ExportVolume.GetString()
+		if volumeMount != "" {
+			volumeMount, err := filepath.Abs(volumeMount)
+			if err != nil {
+				return exportPath, err
+			}
+			volumeMountSrc := volumeMount
+			volumeMountDst := volumeMount
+			volumeMountInfo := strings.SplitN(volumeMount, ":", 2)
+			if len(volumeMountInfo) == 2 {
+				volumeMountSrc = volumeMountInfo[0]
+				volumeMountDst = volumeMountInfo[1]
+			}
+			volumeMountDst = filepath.Clean(volumeMountDst)
+			if volumeMountDst == "" {
+				return exportPath, fmt.Errorf("Export volume %v has empty destination path", volumeMount)
+			}
+			if volumeMountDst[0:1] != "/" {
+				return "", fmt.Errorf("Export volume %v has a relative destination path",
+					volumeMountDst)
+			}
+			destPath := path.Clean(filepath.Join(exportPath, volumeMountDst[1:]))
+			err = config.MkdirAll(filepath.Dir(destPath), 0755, uid, gid)
+			if err != nil {
+				return exportPath, errors.Wrapf(err, "Unable to create export directory %v",
+					filepath.Dir(destPath))
+			}
+			err = os.Symlink(volumeMountSrc, destPath)
+			if err != nil {
+				return exportPath, errors.Wrapf(err, "Failed to create export symlink")
+			}
+			viper.Set("Origin.NamespacePrefix", volumeMountDst)
+		} else {
+			mountPath := param.Xrootd_Mount.GetString()
+			namespacePrefix := param.Origin_NamespacePrefix.GetString()
+			if mountPath == "" || namespacePrefix == "" {
+				return exportPath, errors.New(`Export information was not provided.
+		Add command line flag:
 
-	    -v /mnt/foo:/bar
+			-v /mnt/foo:/bar
 
-	to export the directory /mnt/foo to the path /bar in the data federation`)
+		to export the directory /mnt/foo to the path /bar in the data federation`)
+			}
+			mountPath, err := filepath.Abs(mountPath)
+			if err != nil {
+				return exportPath, err
+			}
+			mountPath = filepath.Clean(mountPath)
+			namespacePrefix = filepath.Clean(namespacePrefix)
+			if namespacePrefix[0:1] != "/" {
+				return exportPath, fmt.Errorf("Namespace prefix %v must have an absolute path",
+					namespacePrefix)
+			}
+			destPath := path.Clean(filepath.Join(exportPath, namespacePrefix[1:]))
+			err = config.MkdirAll(filepath.Dir(destPath), 0755, uid, gid)
+			if err != nil {
+				return exportPath, errors.Wrapf(err, "Unable to create export directory %v",
+					filepath.Dir(destPath))
+			}
+			srcPath := filepath.Join(mountPath, namespacePrefix[1:])
+			err = os.Symlink(srcPath, destPath)
+			if err != nil {
+				return exportPath, errors.Wrapf(err, "Failed to create export symlink")
+			}
 		}
-		mountPath, err := filepath.Abs(mountPath)
-		if err != nil {
-			return exportPath, err
-		}
-		mountPath = filepath.Clean(mountPath)
-		namespacePrefix = filepath.Clean(namespacePrefix)
-		if namespacePrefix[0:1] != "/" {
-			return exportPath, fmt.Errorf("Namespace prefix %v must have an absolute path",
-				namespacePrefix)
-		}
-		destPath := path.Clean(filepath.Join(exportPath, namespacePrefix[1:]))
-		err = config.MkdirAll(filepath.Dir(destPath), 0755, uid, gid)
-		if err != nil {
-			return exportPath, errors.Wrapf(err, "Unable to create export directory %v",
-				filepath.Dir(destPath))
-		}
-		srcPath := filepath.Join(mountPath, namespacePrefix[1:])
-		err = os.Symlink(srcPath, destPath)
-		if err != nil {
-			return exportPath, errors.Wrapf(err, "Failed to create export symlink")
-		}
+		viper.Set("Xrootd.Mount", exportPath)
+	} else if originMode == "s3" {
+		// Our "namespace prefix" is actually just
+		// /<Origin.S3ServiceName>/<Origin.S3Region>/<Origin.S3Bucket>
+		nsPrefix := filepath.Join("/", param.Origin_S3ServiceName.GetString(),
+			param.Origin_S3Region.GetString(), param.Origin_S3Bucket.GetString())
+		viper.Set("Origin.NamespacePrefix", nsPrefix)
 	}
-	viper.Set("Xrootd.Mount", exportPath)
 
 	if param.Origin_SelfTest.GetBool() {
 		if err := origin_ui.ConfigureXrootdMonitoringDir(); err != nil {

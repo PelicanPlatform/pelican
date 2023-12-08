@@ -323,6 +323,60 @@ func setupTransport() {
 	}
 }
 
+func parseServerIssuerURL(sType ServerType) error {
+	if param.Server_IssuerUrl.GetString() != "" {
+		_, err := url.Parse(param.Server_IssuerUrl.GetString())
+		if err != nil {
+			return errors.Wrapf(err, "Failed to parse the Server.IssuerUrl %s loaded from config", param.Server_IssuerUrl.GetString())
+		}
+		return nil
+	}
+
+	if param.Server_IssuerHostname.GetString() != "" {
+		if param.Server_IssuerPort.GetInt() != 0 { // Will be the default if not set
+			// We assume any issuer is running https, otherwise we're crazy
+			issuerUrl := url.URL{
+				Scheme: "https",
+				Host:   fmt.Sprintf("%s:%d", param.Server_IssuerHostname.GetString(), param.Server_IssuerPort.GetInt()),
+			}
+			viper.Set("Server.IssuerUrl", issuerUrl.String())
+			return nil
+		}
+		return errors.New("If Server.IssuerHostname is configured, you must provide a valid port")
+	}
+
+	if sType == OriginType {
+		// If Origin.Mode is set to anything that isn't "posix" or "", assume we're running a plugin and
+		// that the origin's issuer URL actually uses the same port as OriginUI instead of XRootD. This is
+		// because under that condition, keys are being served by the Pelican process instead of by XRootD
+		originMode := param.Origin_Mode.GetString()
+		if originMode == "" || originMode == "posix" {
+			// In this case, we use the default set up by config.go, which uses the xrootd port
+			issuerUrl, err := url.Parse(param.Origin_Url.GetString())
+			if err != nil {
+				return errors.Wrap(err, "Failed to parse the issuer URL from the default origin URL")
+			}
+			viper.Set("Server.IssuerUrl", issuerUrl.String())
+			return nil
+		} else {
+			issuerUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
+			if err != nil {
+				return errors.Wrap(err, "Failed to parse the issuer URL generated from Server.ExternalWebUrl")
+			}
+			viper.Set("Server.IssuerUrl", issuerUrl.String())
+			return nil
+		}
+	} else {
+		issuerUrlStr := param.Server_ExternalWebUrl.GetString()
+		issuerUrl, err := url.Parse(issuerUrlStr)
+		if err != nil {
+			return errors.Wrap(err, "Failed to parse the issuer URL generated using the parsed Server.ExternalWebUrl")
+		}
+		viper.Set("Server.IssuerUrl", issuerUrl.String())
+		return nil
+	}
+}
+
 // function to get/setup the transport (only once)
 func GetTransport() *http.Transport {
 	onceTransport.Do(func() {
@@ -544,6 +598,14 @@ func InitServer(sType ServerType) error {
 
 	// After we know we have the certs we need, call setupTransport (which uses those certs for its TLSConfig)
 	setupTransport()
+
+	// Set up the server's issuer URL so we can access that data wherever we need to find keys and whatnot
+	// This populates Server.IssuerUrl, and can be safely fetched using server_utils.GetServerIssuerURL()
+	err = parseServerIssuerURL(sType)
+	if err != nil {
+		return err
+	}
+
 	return DiscoverFederation()
 }
 
