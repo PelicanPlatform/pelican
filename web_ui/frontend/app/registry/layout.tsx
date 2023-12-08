@@ -23,10 +23,10 @@ import Link from "next/link";
 import Image from "next/image";
 import PelicanLogo from "@/public/static/images/PelicanPlatformLogo_Icon.png";
 import IconButton from "@mui/material/IconButton";
-import {TripOrigin, AssistantDirection, AppRegistration} from "@mui/icons-material";
+import BuildIcon from "@mui/icons-material/Build";
 
 export const metadata = {
-    title: 'Pelican Configuration',
+    title: 'Pelican Director',
     description: 'Software designed to make data distribution easy',
 }
 
@@ -46,35 +46,17 @@ export default function RootLayout({
                         height={36}
                     />
                 </Link>
-                <Box pt={3}>
-                    <Link href={"/origin/index.html"}>
-                        <Tooltip title={"Origin"} placement={"right"}>
-                            <IconButton>
-                                <TripOrigin/>
-                            </IconButton>
-                        </Tooltip>
-                    </Link>
-                </Box>
                 <Box pt={1}>
-                    <Link href={"/director/index.html"}>
-                        <Tooltip title={"Director"} placement={"right"}>
+                    <Tooltip title={"Config"} placement={"right"}>
+                        <Link href={"/config/index.html"}>
                             <IconButton>
-                                <AssistantDirection/>
+                                <BuildIcon/>
                             </IconButton>
-                        </Tooltip>
-                    </Link>
-                </Box>
-                <Box pt={1}>
-                    <Link href={"/registry/index.html"}>
-                        <Tooltip title={"Registry"} placement={"right"}>
-                            <IconButton>
-                                <AppRegistration/>
-                            </IconButton>
-                        </Tooltip>
-                    </Link>
+                        </Link>
+                    </Tooltip>
                 </Box>
             </Sidebar>
-            <Box component={"main"} pl={"72px"} pb={2} display={"flex"} minHeight={"100vh"} flexGrow={1}>
+            <Box component={"main"} p={2} pl={"90px"} display={"flex"} minHeight={"100vh"} flexGrow={1}>
                 {children}
             </Box>
         </Box>
