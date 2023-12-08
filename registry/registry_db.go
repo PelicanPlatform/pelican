@@ -229,12 +229,10 @@ func getPrefixJwksById(id int) (jwk.Set, error) {
 	return set, nil
 }
 
-func dbGetPrefixJwks(prefix string) (*jwk.Set, error) {
-	_, after, _ := strings.Cut(prefix, "/")
-	before, _, _ := strings.Cut(after, "/")
+func dbGetPrefixJwks(prefix string, adminApproval bool) (*jwk.Set, error) {
 	var jwksQuery string
 	var pubkeyStr string
-	if before == "caches" {
+	if strings.HasPrefix(prefix, "/caches/") && adminApproval {
 		var admin_metadata string
 		jwksQuery = `SELECT pubkey, admin_metadata FROM namespace WHERE prefix = ?`
 		err := db.QueryRow(jwksQuery, prefix).Scan(&pubkeyStr, &admin_metadata)
@@ -242,7 +240,7 @@ func dbGetPrefixJwks(prefix string) (*jwk.Set, error) {
 			if err == sql.ErrNoRows {
 				return nil, errors.New("prefix not found in database")
 			}
-			return nil, errors.Wrap(err, "error performing origin pubkey query")
+			return nil, errors.Wrap(err, "error performing cache pubkey query")
 		}
 
 		var adminData AdminJSON

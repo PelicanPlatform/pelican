@@ -336,156 +336,102 @@ func TestRegistryTopology(t *testing.T) {
 	viper.Reset()
 }
 
-func TestCacheAdminNoApproval(t *testing.T) {
-	viper.Reset()
-	registry_db_dir := t.TempDir()
+func TestCacheAdminTrue(t *testing.T) {
 
-	viper.Set("Registry.DbLocation", registry_db_dir)
-
-	err := InitializeDB()
-	assert.NoError(t, err, "error initializing registry database")
-
-	jResult, err := json.Marshal(AdminJSON{
-		AdminApproved: false,
-	})
-	assert.NoError(t, err, "error marshalling json admin data")
-
-	var ns Namespace
-	ns.Prefix = "/caches/test"
-	ns.Identity = "testident"
-	ns.Pubkey = "tkey"
-	ns.AdminMetadata = string(jResult)
-
-	err = addNamespace(&ns)
-
-	assert.NoError(t, err, "error adding test cache to registry database")
-
-	_, err = dbGetPrefixJwks("/caches/test")
-
-	assert.ErrorIs(t, err, serverCredsErr)
-
-	ShutdownDB()
-}
-
-func TestCacheAdminEmptyApproval(t *testing.T) {
-	viper.Reset()
-	registry_db_dir := t.TempDir()
-
-	viper.Set("Registry.DbLocation", registry_db_dir)
+	registryDBDir := t.TempDir()
+	viper.Set("Registry.DbLocation", registryDBDir)
 
 	err := InitializeDB()
-	assert.NoError(t, err, "error initializing registry database")
+	defer ShutdownDB()
 
-	assert.NoError(t, err, "error marshalling json admin data")
-
-	var ns Namespace
-	ns.Prefix = "/caches/test"
-	ns.Identity = "testident"
-	ns.Pubkey = "tkey"
-
-	err = addNamespace(&ns)
-
-	assert.NoError(t, err, "error adding test cache to registry database")
-
-	_, err = dbGetPrefixJwks("/caches/test")
-
-	assert.ErrorIs(t, err, serverCredsErr)
-
-	ShutdownDB()
-
-}
-
-func TestCacheAdminWithApproval(t *testing.T) {
-	viper.Reset()
-	registry_db_dir := t.TempDir()
-
-	viper.Set("Registry.DbLocation", registry_db_dir)
-
-	err := InitializeDB()
-	assert.NoError(t, err, "error initializing registry database")
-
+	require.NoError(t, err, "error initializing registry database")
 	jResult, err := json.Marshal(AdminJSON{
 		AdminApproved: true,
 	})
-	assert.NoError(t, err, "error marshalling json admin data")
+
+	require.NoError(t, err, "error marshalling json admin data")
+
+	adminTester := func(ns Namespace) func(t *testing.T) {
+		return func(t *testing.T) {
+			err = addNamespace(&ns)
+
+			require.NoError(t, err, "error adding test cache to registry database")
+
+			// This will return a serverCredsError if the admin_approval == false check is triggered, which we don't want to happen
+			// For these tests, otherwise it will get a key parsing error as ns.Pubkey isn't a real jwk
+			_, err = dbGetPrefixJwks(ns.Prefix, true)
+			require.NotErrorIsf(t, err, serverCredsErr, "error chain contains serverCredErr")
+
+			require.ErrorContainsf(t, err, "Failed to parse pubkey as a jwks: failed to unmarshal JWK set: invalid character 'k' in literal true (expecting 'r')", "error doesn't contain jwks parsing error")
+		}
+	}
 
 	var ns Namespace
-	ns.Prefix = "/caches/test"
-	ns.Identity = "testident"
+	ns.Prefix = "/caches/test3"
+	ns.Identity = "testident3"
 	ns.Pubkey = "tkey"
 	ns.AdminMetadata = string(jResult)
 
-	err = addNamespace(&ns)
+	t.Run("WithApproval", adminTester(ns))
 
-	assert.NoError(t, err, "error adding test cache to registry database")
+	jResult, err = json.Marshal(AdminJSON{
+		AdminApproved: false,
+	})
 
-	_, err = dbGetPrefixJwks("/caches/test")
+	ns.Prefix = "/orig/test1"
+	ns.Identity = "testident4"
+	ns.Pubkey = "tkey"
+	ns.AdminMetadata = string(jResult)
 
-	assert.NotErrorIsf(t, err, serverCredsErr, "error chain contains serverCredErr")
+	t.Run("OriginNoApproval", adminTester(ns))
 
-	assert.ErrorContainsf(t, err, "Failed to parse pubkey as a jwks: failed to unmarshal JWK set: invalid character 'k' in literal true (expecting 'r')", "error doesn't contain jwks parsing error")
+	ns.Prefix = "/orig/test2"
+	ns.Identity = "testident5"
+	ns.Pubkey = "tkey"
+	ns.AdminMetadata = ""
 
-	ShutdownDB()
+	t.Run("OriginEmptyApproval", adminTester(ns))
+
+	viper.Reset()
 }
 
-func TestOriginAdminNoApproval(t *testing.T) {
-	viper.Reset()
-	registry_db_dir := t.TempDir()
-
-	viper.Set("Registry.DbLocation", registry_db_dir)
+func TestCacheAdminFalse(t *testing.T) {
+	registryDBDir := t.TempDir()
+	viper.Set("Registry.DbLocation", registryDBDir)
 
 	err := InitializeDB()
-	assert.NoError(t, err, "error initializing registry database")
+	defer ShutdownDB()
 
+	require.NoError(t, err, "error initializing registry database")
 	jResult, err := json.Marshal(AdminJSON{
 		AdminApproved: false,
 	})
-	assert.NoError(t, err, "error marshalling json admin data")
+
+	adminTester := func(ns Namespace) func(t *testing.T) {
+		return func(t *testing.T) {
+			err = addNamespace(&ns)
+			require.NoError(t, err, "error adding test cache to registry database")
+
+			// This will return a serverCredsError if the admin_approval == false check is triggered, which we want to happen
+			_, err = dbGetPrefixJwks(ns.Prefix, true)
+
+			require.ErrorIs(t, err, serverCredsErr)
+		}
+	}
 
 	var ns Namespace
-	ns.Prefix = "/orig/test"
-	ns.Identity = "testident"
+	ns.Prefix = "/caches/test1"
+	ns.Identity = "testident1"
 	ns.Pubkey = "tkey"
 	ns.AdminMetadata = string(jResult)
 
-	err = addNamespace(&ns)
+	t.Run("NoAdmin", adminTester(ns))
 
-	assert.NoError(t, err, "error adding test cache to registry database")
+	ns.Prefix = "/caches/test2"
+	ns.Identity = "testident2"
+	ns.AdminMetadata = ""
 
-	_, err = dbGetPrefixJwks("/orig/test")
+	t.Run("EmptyAdmin", adminTester(ns))
 
-	assert.NotErrorIsf(t, err, serverCredsErr, "error chain contains serverCredErr")
-
-	assert.ErrorContainsf(t, err, "Failed to parse pubkey as a jwks: failed to unmarshal JWK set: invalid character 'k' in literal true (expecting 'r')", "error doesn't contain jwks parsing error")
-
-	ShutdownDB()
-}
-
-func TestOriginAdminEmptyApproval(t *testing.T) {
 	viper.Reset()
-	registry_db_dir := t.TempDir()
-
-	viper.Set("Registry.DbLocation", registry_db_dir)
-
-	err := InitializeDB()
-	assert.NoError(t, err, "error initializing registry database")
-
-	assert.NoError(t, err, "error marshalling json admin data")
-
-	var ns Namespace
-	ns.Prefix = "/orig/test"
-	ns.Identity = "testident"
-	ns.Pubkey = "tkey"
-
-	err = addNamespace(&ns)
-
-	assert.NoError(t, err, "error adding test cache to registry database")
-
-	_, err = dbGetPrefixJwks("/orig/test")
-
-	assert.NotErrorIsf(t, err, serverCredsErr, "error chain contains serverCredErr")
-
-	assert.ErrorContainsf(t, err, "Failed to parse pubkey as a jwks: failed to unmarshal JWK set: invalid character 'k' in literal true (expecting 'r')", "error doesn't contain jwks parsing error")
-
-	ShutdownDB()
 }

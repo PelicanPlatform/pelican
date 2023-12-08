@@ -402,8 +402,13 @@ func registerServeAd(ctx *gin.Context, sType ServerType) {
 		prefix := path.Join("caches", ad.Name)
 		ok, err := VerifyAdvertiseToken(token, prefix)
 		if err != nil {
-			log.Warningln("Failed to verify token:", err)
-			ctx.JSON(400, gin.H{"error": "Authorization token verification failed"})
+			if !ok {
+				log.Warningln("Failed to verify token:", err)
+				ctx.JSON(404, gin.H{"error": "Cache is not admin approved"})
+			} else {
+				log.Warningln("Failed to verify token:", err)
+				ctx.JSON(400, gin.H{"error": "Authorization token verification failed"})
+			}
 			return
 		}
 		if !ok {

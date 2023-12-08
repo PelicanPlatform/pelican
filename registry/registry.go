@@ -115,7 +115,7 @@ func matchKeys(incomingKey jwk.Key, registeredNamespaces []string) (bool, error)
 	// permitting the action (assuming their keys haven't been stolen!)
 	foundMatch := false
 	for _, ns := range registeredNamespaces {
-		keyset, err := dbGetPrefixJwks(ns)
+		keyset, err := dbGetPrefixJwks(ns, false)
 		if err != nil {
 			return false, errors.Wrapf(err, "Cannot get keyset for %s from the database", ns)
 		}
@@ -654,7 +654,7 @@ func dbDeleteNamespace(ctx *gin.Context) {
 	delTokenStr := strings.TrimPrefix(authHeader, "Bearer ")
 
 	// Have the token, now we need to load the JWKS for the prefix
-	originJwks, err := dbGetPrefixJwks(prefix)
+	originJwks, err := dbGetPrefixJwks(prefix, false)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error loading the prefix's stored jwks"})
 		log.Errorf("Failed to get prefix's stored jwks: %v", err)
@@ -745,7 +745,16 @@ func metadataHandler(ctx *gin.Context) {
 	if filepath.Base(path) == "issuer.jwks" {
 		// do something
 		prefix := strings.TrimSuffix(path, "/.well-known/issuer.jwks")
-		jwks, err := dbGetPrefixJwks(prefix)
+		var checkAdmin bool
+		if filepath.Base(prefix) == "getNamespaceKey" {
+			prefix = strings.TrimSuffix(prefix, "/getNamespaceKey")
+			checkAdmin = false
+		} else {
+			checkAdmin = true
+		}
+
+		jwks, err := dbGetPrefixJwks(prefix, checkAdmin)
+
 		if err != nil {
 			if err == serverCredsErr {
 				ctx.JSON(404, gin.H{"error": "cache has not been approved by federation administrator"})
@@ -796,7 +805,6 @@ func RegisterRegistryRoutes(router *gin.RouterGroup) {
 		registry.GET("", dbGetAllNamespaces)
 		// Will handle getting jwks, openid config, and listing namespaces
 		registry.GET("/*wildcard", metadataHandler)
-
 		registry.DELETE("/*wildcard", dbDeleteNamespace)
 	}
 }

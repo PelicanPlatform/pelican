@@ -148,6 +148,9 @@ func VerifyAdvertiseToken(token, namespace string) (bool, error) {
 			return false, errors.Wrap(err, "failed to marshal the public keyset into JWKS JSON")
 		}
 		log.Debugln("Constructed JWKS from fetching jwks:", string(jsonbuf))
+		if jsonbuf == nil {
+			return false, errors.Wrap(err, "Cache does not have admin approval")
+		}
 	}
 
 	if err != nil {

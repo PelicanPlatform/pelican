@@ -58,7 +58,8 @@ func keyIsRegistered(privkey jwk.Key, url string) (keyStatus, error) {
 		return noKeyPresent, err
 	}
 
-	req, err := http.NewRequest("GET", url+"/.well-known/issuer.jwks", nil)
+	req, err := http.NewRequest("GET", url+"/getNamespaceKey/.well-known/issuer.jwks", nil)
+
 	if err != nil {
 		return noKeyPresent, err
 	}
