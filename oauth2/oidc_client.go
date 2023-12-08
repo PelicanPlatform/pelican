@@ -33,8 +33,18 @@ func ServerOIDCClient() (result Config, err error) {
 		return
 	}
 
+	if result.ClientID == "" {
+		err = errors.New("OIDC.ClientID is empty")
+		return
+	}
+
 	// load OIDC.ClientSecret
 	if result.ClientSecret, err = config.GetOIDCClientSecret(); err != nil {
+		return
+	}
+
+	if result.ClientSecret == "" {
+		err = errors.New("OIDC.ClientSecret is empty")
 		return
 	}
 
