@@ -107,13 +107,8 @@ var (
 		mockNamespace("/caches/random2", "pubkey2", "", ""),
 	}
 	mockNssWithMixed []Namespace = func() (mixed []Namespace) {
-		for _, origins := range mockNssWithOrigins {
-			mixed = append(mixed, origins)
-		}
-
-		for _, caches := range mockNssWithCaches {
-			mixed = append(mixed, caches)
-		}
+		mixed = append(mixed, mockNssWithOrigins...)
+		mixed = append(mixed, mockNssWithCaches...)
 		return
 	}()
 )
@@ -121,7 +116,8 @@ var (
 // teardown must be called at the end of the test to close the in-memory SQLite db
 func TestGetNamespacesByServerType(t *testing.T) {
 
-	setupMockNamespaceDB()
+	err := setupMockNamespaceDB()
+	require.NoError(t, err, "Error setting up the mock namespace DB")
 	defer teardownMockNamespaceDB()
 
 	t.Run("wrong-server-type-gives-error", func(t *testing.T) {

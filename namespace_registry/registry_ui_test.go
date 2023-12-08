@@ -49,7 +49,10 @@ func GenerateMockJWKS() (string, error) {
 	}
 
 	jwks := jwk.NewSet()
-	jwks.AddKey(publicKey)
+	err = jwks.AddKey(publicKey)
+	if err != nil {
+		return "", errors.Wrap(err, "Unable to add public key to the jwks")
+	}
 
 	jsonData, err := json.MarshalIndent(jwks, "", "  ")
 	if err != nil {
@@ -120,9 +123,13 @@ func TestListNamespaces(t *testing.T) {
 				if err != nil {
 					t.Fatalf("Failed to set up mock data: %v", err)
 				}
-
 			}
-			defer resetNamespaceDB()
+			defer func() {
+				err := resetNamespaceDB()
+				if err != nil {
+					t.Fatalf("Failed to reset mock namespace DB: %v", err)
+				}
+			}()
 
 			// Create a request to the endpoint
 			w := httptest.NewRecorder()
@@ -222,7 +229,12 @@ func TestGetNamespaceJWKS(t *testing.T) {
 				}
 
 			}
-			defer resetNamespaceDB()
+			defer func() {
+				err := resetNamespaceDB()
+				if err != nil {
+					t.Fatalf("Failed to reset mock namespace DB: %v", err)
+				}
+			}()
 
 			// Create a request to the endpoint
 			w := httptest.NewRecorder()
@@ -234,7 +246,7 @@ func TestGetNamespaceJWKS(t *testing.T) {
 			require.Equal(t, tc.expectedCode, w.Code)
 
 			if tc.expectedCode == http.StatusOK {
-				assert.Equal(t, tc.expectedData, string(w.Body.Bytes()))
+				assert.Equal(t, tc.expectedData, w.Body.String())
 			}
 		})
 	}
