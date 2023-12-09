@@ -21,11 +21,47 @@ package utils
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/pkg/errors"
+
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
+)
+
+type (
+	Server struct {
+		AuthEndpoint string `json:"auth_endpoint"`
+		Endpoint     string `json:"endpoint"`
+		Resource     string `json:"resource"`
+	}
+
+	CredentialGeneration struct {
+		BasePath      string `json:"base_path"`
+		Issuer        string `json:"issuer"`
+		MaxScopeDepth int    `json:"max_scope_depth"`
+		Strategy      string `json:"strategy"`
+		VaultIssuer   string `json:"vault_issuer"`
+		VaultServer   string `json:"vault_server"`
+	}
+
+	Namespace struct {
+		Caches               []Server             `json:"caches"`
+		Origins              []Server             `json:"origins"`
+		CredentialGeneration CredentialGeneration `json:"credential_generation"`
+		DirlistHost          string               `json:"dirlisthost"`
+		Path                 string               `json:"path"`
+		ReadHTTPS            bool                 `json:"readhttps"`
+		UseTokenOnRead       bool                 `json:"usetokenonread"`
+		WritebackHost        string               `json:"writebackhost"`
+	}
+
+	TopologyNamespacesJSON struct {
+		Caches     []Server    `json:"caches"`
+		Namespaces []Namespace `json:"namespaces"`
+	}
 )
 
 func MakeRequest(url string, method string, data map[string]interface{}, headers map[string]string) ([]byte, error) {
@@ -57,4 +93,41 @@ func MakeRequest(url string, method string, data map[string]interface{}, headers
 	}
 
 	return body, nil
+}
+
+func GetTopologyJSON() (*TopologyNamespacesJSON, error) {
+	topoNamespaceUrl := param.Federation_TopologyNamespaceUrl.GetString()
+	if topoNamespaceUrl == "" {
+		return nil, errors.New("Topology namespaces.json configuration option (`Federation.TopologyNamespaceURL`) not set")
+	}
+
+	req, err := http.NewRequest("GET", topoNamespaceUrl, nil)
+	if err != nil {
+		return nil, errors.Wrap(err, "Failure when getting OSDF namespace data from topology")
+	}
+
+	req.Header.Set("Accept", "application/json")
+
+	client := http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, errors.Wrap(err, "Failure when getting response for OSDF namespace data")
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode > 299 {
+		return nil, fmt.Errorf("Error response %v from OSDF namespace endpoint: %v", resp.StatusCode, resp.Status)
+	}
+
+	respBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, errors.Wrap(err, "Failure when reading OSDF namespace response")
+	}
+
+	var namespaces TopologyNamespacesJSON
+	if err = json.Unmarshal(respBytes, &namespaces); err != nil {
+		return nil, errors.Wrapf(err, "Failure when parsing JSON response from topology URL %v", topoNamespaceUrl)
+	}
+
+	return &namespaces, nil
 }
