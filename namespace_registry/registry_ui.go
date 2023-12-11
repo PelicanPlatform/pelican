@@ -31,6 +31,23 @@ type listNamespaceRequest struct {
 	ServerType string `form:"server_type"`
 }
 
+// Exclude pubkey field from marshalling into json
+func excludePubKey(nss []*Namespace) (nssNew []NamespaceWOPubkey) {
+	nssNew = make([]NamespaceWOPubkey, 0)
+	for _, ns := range nss {
+		nsNew := NamespaceWOPubkey{
+			ID:            ns.ID,
+			Prefix:        ns.Prefix,
+			Pubkey:        ns.Pubkey,
+			AdminMetadata: ns.AdminMetadata,
+			Identity:      ns.Identity,
+		}
+		nssNew = append(nssNew, nsNew)
+	}
+
+	return
+}
+
 func listNamespaces(ctx *gin.Context) {
 	queryParams := listNamespaceRequest{}
 	if ctx.ShouldBindQuery(&queryParams) != nil {
@@ -48,7 +65,8 @@ func listNamespaces(ctx *gin.Context) {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Server encountered an error trying to list namespaces"})
 			return
 		}
-		ctx.JSON(http.StatusOK, namespaces)
+		nssWOPubkey := excludePubKey(namespaces)
+		ctx.JSON(http.StatusOK, nssWOPubkey)
 
 	} else {
 		namespaces, err := getAllNamespaces()
@@ -56,7 +74,8 @@ func listNamespaces(ctx *gin.Context) {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Server encountered an error trying to list namespaces"})
 			return
 		}
-		ctx.JSON(http.StatusOK, namespaces)
+		nssWOPubkey := excludePubKey(namespaces)
+		ctx.JSON(http.StatusOK, nssWOPubkey)
 	}
 }
 

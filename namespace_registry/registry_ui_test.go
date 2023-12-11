@@ -151,7 +151,7 @@ func TestListNamespaces(t *testing.T) {
 				if err != nil {
 					t.Fatalf("Failed to unmarshal response body: %v", err)
 				}
-				assert.True(t, compareNamespaces(tc.expectedData, got), "Response data does not match expected")
+				assert.True(t, compareNamespaces(tc.expectedData, got, true), "Response data does not match expected")
 			}
 		})
 	}

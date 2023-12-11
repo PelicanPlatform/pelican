@@ -78,7 +78,7 @@ func insertMockDBData(nss []Namespace) error {
 }
 
 // Compares expected Namespace slice against either a slice of Namespace ptr or just Namespace
-func compareNamespaces(execpted []Namespace, returned interface{}) bool {
+func compareNamespaces(execpted []Namespace, returned interface{}, woPubkey bool) bool {
 	var normalizedReturned []Namespace
 
 	switch v := returned.(type) {
@@ -103,7 +103,7 @@ func compareNamespaces(execpted []Namespace, returned interface{}) bool {
 	for idx, nssEx := range execpted {
 		nssRt := normalizedReturned[idx]
 		if nssEx.Prefix != nssRt.Prefix ||
-			nssEx.Pubkey != nssRt.Pubkey ||
+			(!woPubkey && nssEx.Pubkey != nssRt.Pubkey) ||
 			nssEx.Identity != nssRt.Identity ||
 			nssEx.AdminMetadata != nssRt.AdminMetadata {
 			return false
@@ -182,7 +182,7 @@ func TestGetNamespacesByServerType(t *testing.T) {
 		origins, err := getNamespacesByServerType(OriginType)
 		require.NoError(t, err)
 		assert.Equal(t, len(mockNssWithOrigins), len(origins), "Returned namespace has wrong length")
-		assert.True(t, compareNamespaces(mockNssWithOrigins, origins), "Returned namespaces does not match expected")
+		assert.True(t, compareNamespaces(mockNssWithOrigins, origins, false), "Returned namespaces does not match expected")
 
 		caches, err := getNamespacesByServerType(CacheType)
 		require.NoError(t, err)
@@ -199,7 +199,7 @@ func TestGetNamespacesByServerType(t *testing.T) {
 		caches, err := getNamespacesByServerType(CacheType)
 		require.NoError(t, err)
 		assert.Equal(t, len(mockNssWithCaches), len(caches), "Returned namespace has wrong length")
-		assert.True(t, compareNamespaces(mockNssWithCaches, caches), "Returned namespaces does not match expected")
+		assert.True(t, compareNamespaces(mockNssWithCaches, caches, false), "Returned namespaces does not match expected")
 
 		origins, err := getNamespacesByServerType(OriginType)
 		require.NoError(t, err)
@@ -216,12 +216,12 @@ func TestGetNamespacesByServerType(t *testing.T) {
 		caches, err := getNamespacesByServerType(CacheType)
 		require.NoError(t, err)
 		assert.Equal(t, len(mockNssWithCaches), len(caches), "Returned caches namespace has wrong length")
-		assert.True(t, compareNamespaces(mockNssWithCaches, caches), "Returned caches namespaces does not match expected")
+		assert.True(t, compareNamespaces(mockNssWithCaches, caches, false), "Returned caches namespaces does not match expected")
 
 		origins, err := getNamespacesByServerType(OriginType)
 		require.NoError(t, err)
 		assert.Equal(t, len(mockNssWithOrigins), len(origins), "Returned origins namespace has wrong length")
-		assert.True(t, compareNamespaces(mockNssWithOrigins, origins), "Returned origins namespaces does not match expected")
+		assert.True(t, compareNamespaces(mockNssWithOrigins, origins, false), "Returned origins namespaces does not match expected")
 	})
 }
 

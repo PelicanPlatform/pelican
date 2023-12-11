@@ -28,6 +28,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+
 	// commented sqlite driver requires CGO
 	// _ "github.com/mattn/go-sqlite3" // SQLite driver
 	_ "modernc.org/sqlite"
@@ -41,6 +42,14 @@ type Namespace struct {
 	ID            int    `json:"id"`
 	Prefix        string `json:"prefix"`
 	Pubkey        string `json:"pubkey"`
+	Identity      string `json:"identity"`
+	AdminMetadata string `json:"admin_metadata"`
+}
+
+type NamespaceWOPubkey struct {
+	ID            int    `json:"id"`
+	Prefix        string `json:"prefix"`
+	Pubkey        string `json:"-"` // Don't include pubkey in this case
 	Identity      string `json:"identity"`
 	AdminMetadata string `json:"admin_metadata"`
 }
