@@ -469,6 +469,23 @@ func initConfigDir() error {
 	return nil
 }
 
+// Compute the string representation of the type of the server running
+func computeServerTypeString(sType ServerType) (string, error) {
+	if sType.IsSet(OriginType) {
+		return "origin", nil
+	}
+	if sType.IsSet(CacheType) {
+		return "cache", nil
+	}
+	if sType.IsSet(DirectorType) {
+		return "director", nil
+	}
+	if sType.IsSet(RegistryType) {
+		return "registry", nil
+	}
+	return "", errors.New("Unsupported server type: " + sType.String())
+}
+
 func InitServer(sType ServerType) error {
 	if err := initConfigDir(); err != nil {
 		return errors.Wrap(err, "Failed to initialize the server configuration")
@@ -478,6 +495,10 @@ func InitServer(sType ServerType) error {
 		xrootdPrefix = "origin"
 	} else if sType.IsSet(CacheType) {
 		xrootdPrefix = "cache"
+	}
+	monitoringDataLocationPrefix, err := computeServerTypeString(sType)
+	if err != nil {
+		return err
 	}
 	configDir := viper.GetString("ConfigDir")
 	viper.SetConfigType("yaml")
@@ -501,11 +522,11 @@ func InitServer(sType ServerType) error {
 		viper.SetDefault("Origin.Multiuser", true)
 		viper.SetDefault("Director.GeoIPLocation", "/var/cache/pelican/maxmind/GeoLite2-City.mmdb")
 		viper.SetDefault("Registry.DbLocation", "/var/lib/pelican/registry.sqlite")
-		viper.SetDefault("Monitoring.DataLocation", "/var/lib/pelican/monitoring/data")
+		viper.SetDefault("Monitoring.DataLocation", "/var/lib/pelican/monitoring/"+monitoringDataLocationPrefix+"/data")
 	} else {
 		viper.SetDefault("Director.GeoIPLocation", filepath.Join(configDir, "maxmind", "GeoLite2-City.mmdb"))
 		viper.SetDefault("Registry.DbLocation", filepath.Join(configDir, "ns-registry.sqlite"))
-		viper.SetDefault("Monitoring.DataLocation", filepath.Join(configDir, "monitoring/data"))
+		viper.SetDefault("Monitoring.DataLocation", filepath.Join(configDir, "monitoring", monitoringDataLocationPrefix, "data"))
 
 		if userRuntimeDir := os.Getenv("XDG_RUNTIME_DIR"); userRuntimeDir != "" {
 			runtimeDir := filepath.Join(userRuntimeDir, "pelican", xrootdPrefix)
@@ -527,7 +548,7 @@ func InitServer(sType ServerType) error {
 		viper.SetDefault("Origin.Multiuser", false)
 	}
 	// Any platform-specific paths should go here
-	err := InitServerOSDefaults()
+	err = InitServerOSDefaults()
 	if err != nil {
 		return errors.Wrapf(err, "Failure when setting up OS-specific configuration")
 	}

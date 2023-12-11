@@ -277,18 +277,6 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 	cfg.webTimeout = model.Duration(5 * time.Minute)
 	cfg.serverStoragePath = param.Monitoring_DataLocation.GetString()
 
-	// The code below is for testing director Prometheus scraping locally
-	// Uncomment only if you know what you are doing
-
-	// if isDirector {
-	// 	err := os.MkdirAll("/var/lib/pelican/director-monitoring/data", 0750)
-	// 	if err != nil {
-	// 		return errors.New("Failure when creating a directory for the monitoring data")
-	// 	}
-	// 	cfg.serverStoragePath = "/var/lib/pelican/director-monitoring/data"
-	// } else {
-	// 	cfg.serverStoragePath = param.Monitoring_DataLocation.GetString()
-	// }
 	cfg.tsdb.MinBlockDuration = model.Duration(2 * time.Hour)
 	cfg.tsdb.NoLockfile = false
 	cfg.tsdb.WALCompression = true
