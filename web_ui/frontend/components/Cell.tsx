@@ -1,5 +1,5 @@
 import React, {FunctionComponent, useEffect, useRef, useState} from "react";
-import {TableCell} from "@mui/material";
+import {Button, ButtonProps, TableCell} from "@mui/material";
 
 export const TableCellOverflow: FunctionComponent<any> = ({ children, ...props }) => {
 
@@ -25,4 +25,21 @@ export const TableCellOverflow: FunctionComponent<any> = ({ children, ...props }
             {children}
         </TableCell>
     )
+}
+
+export const TableCellButton: FunctionComponent<any> = ({ children, ...props } : ButtonProps) => {
+
+        return (
+            <TableCell
+                sx={{
+                    textAlign: "center",
+                    border: "solid #ececec 1px",
+                    padding: "0px",
+                    ...props?.sx
+                }}>
+                <Button {...props}>
+                    {children}
+                </Button>
+            </TableCell>
+        )
 }

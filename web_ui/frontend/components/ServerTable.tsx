@@ -10,21 +10,11 @@ import React, {
     useState
 } from "react";
 import {Skeleton} from "@mui/material";
-import {TableCellOverflow} from "@/components/Cell";
 import Link from "next/link";
 
-interface ColumnMap {
-    [key: string]: Column
-}
+import DataTable, {Record} from "@/components/DataTable";
+import {TableCellOverflow} from "@/components/Cell";
 
-interface Column {
-    name: string
-    cellNode: React.JSX.ElementType
-}
-
-interface Record {
-    [key: string]: string | number | boolean | null
-}
 
 interface ExportData extends Record {
     "Type": string
@@ -47,32 +37,7 @@ const TableCellOverflowLink: React.JSX.ElementType = ({ children, ...props }) =>
     )
 }
 
-export const DataTable = ({ columnMap, data }: { columnMap: ColumnMap, data: Record[] }): ReactElement  => {
 
-    return (
-        <TableContainer sx={{maxHeight: "500px"}}>
-            <Table stickyHeader={true} sx={{tableLayout: "fixed"}}>
-                <TableHead>
-                    <TableRow>
-                        {Object.values(columnMap).map((column, index) => (
-                            <TableCell key={index}>{column.name}</TableCell>
-                        ))}
-                    </TableRow>
-                </TableHead>
-                <TableBody>
-                    {data.map((record, index) => (
-                        <TableRow key={index}>
-                            {Object.entries(columnMap).map(([key, column], index) => {
-                                const CellNode = column.cellNode
-                                return <CellNode key={index}>{record[key]}</CellNode>
-                            })}
-                        </TableRow>
-                    ))}
-                </TableBody>
-            </Table>
-        </TableContainer>
-    )
-}
 
 interface Server extends Record {
     name: string
