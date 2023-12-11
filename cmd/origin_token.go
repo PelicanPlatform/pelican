@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
@@ -22,8 +23,10 @@ func parseInputSlice(rawSlice *[]string, claimPrefix string) []string {
 	return slice
 }
 
-func parseClaims(claims []string) (map[string]string, error) {
-	claimsMap := make(map[string]string)
+// Parse claims to tokenConfig, excluding "sub". `claims` should be in the form of
+// <claim_key>=<claim=value>
+func parseClaimsToTokenConfig(claims []string) (*utils.TokenConfig, error) {
+	tokenConfig := utils.TokenConfig{}
 	for _, claim := range claims {
 		// Split by the first "=" delimiter
 		parts := strings.SplitN(claim, "=", 2)
@@ -34,13 +37,34 @@ func parseClaims(claims []string) (map[string]string, error) {
 		key := parts[0]
 		val := parts[1]
 
-		if existingVal, exists := claimsMap[key]; exists {
-			claimsMap[key] = existingVal + " " + val
-		} else {
-			claimsMap[key] = val
+		switch key {
+		case "aud":
+			tokenConfig.Audience = append(tokenConfig.Audience, val)
+		case "scope":
+			if tokenConfig.Scope == "" {
+				tokenConfig.Scope = val
+			} else {
+				tokenConfig.Scope = tokenConfig.Scope + " " + val
+			}
+		case "ver":
+			tokenConfig.Version = val
+		case "wlcg.ver":
+			tokenConfig.Version = val
+		case "iss":
+			tokenConfig.Issuer = val
+		default:
+			if tokenConfig.Claims == nil {
+				tokenConfig.Claims = map[string]string{}
+			}
+			if existingVal, exists := tokenConfig.Claims[key]; exists {
+				tokenConfig.Claims[key] = existingVal + " " + val
+			} else {
+				tokenConfig.Claims[key] = val
+			}
 		}
 	}
-	return claimsMap, nil
+
+	return &tokenConfig, nil
 }
 
 func cliTokenCreate(cmd *cobra.Command, args []string) error {
@@ -75,7 +99,7 @@ func cliTokenCreate(cmd *cobra.Command, args []string) error {
 		args = append(args, audSlice...)
 	}
 
-	claimsMap, err := parseClaims(args)
+	tokenConfig, err := parseClaimsToTokenConfig(args)
 	if err != nil {
 		return errors.Wrap(err, "Failed to parse token claims")
 	}
@@ -85,11 +109,13 @@ func cliTokenCreate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return errors.Wrapf(err, "Failed to get profile '%s' from input", profile)
 	}
+	tokenConfig.TokenProfile = utils.TokenProfile(profile)
 
 	lifetime, err := cmd.Flags().GetInt("lifetime")
 	if err != nil {
 		return errors.Wrapf(err, "Failed to get lifetime '%d' from input", lifetime)
 	}
+	tokenConfig.Lifetime = time.Duration(lifetime) * time.Second
 
 	// Flags to populate claimsMap
 	// Note that we don't get the issuer here, because that's bound to viper
@@ -97,12 +123,10 @@ func cliTokenCreate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return errors.Wrapf(err, "Failed to get subject '%s' from input", subject)
 	}
-	if subject != "" {
-		claimsMap["sub"] = subject
-	}
+	tokenConfig.Subject = subject
 
 	// Finally, create the token
-	token, err := utils.CreateEncodedToken(claimsMap, utils.TokenProfile(profile), lifetime)
+	token, err := tokenConfig.CreateToken()
 	if err != nil {
 		return errors.Wrap(err, "Failed to create the token")
 	}

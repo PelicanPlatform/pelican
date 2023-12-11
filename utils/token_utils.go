@@ -40,13 +40,13 @@ type (
 	TokenProfile string
 	TokenConfig  struct {
 		TokenProfile TokenProfile
-		Lifetime     time.Duration      // Lifetime is used to set 'exp' claim from now
-		Issuer       string             // Issuer is 'iss' claim
-		Audience     []string           // Audience is 'aud' claim
-		Scope        string             // Scope is a space separated list of scopes
-		Version      string             // Version is the version for different profiles. 'wlcg.ver' for WLCG profile and 'ver' for scitokens2
-		Subject      string             // Subject is 'sub' claim
-		Claims       *map[string]string // Additional claims
+		Lifetime     time.Duration     // Lifetime is used to set 'exp' claim from now
+		Issuer       string            // Issuer is 'iss' claim
+		Audience     []string          // Audience is 'aud' claim
+		Scope        string            // Scope is a space separated list of scopes
+		Version      string            // Version is the version for different profiles. 'wlcg.ver' for WLCG profile and 'ver' for scitokens2
+		Subject      string            // Subject is 'sub' claim
+		Claims       map[string]string // Additional claims
 	}
 )
 
@@ -374,7 +374,7 @@ func (tokenConfig *TokenConfig) CreateToken() (string, error) {
 	}
 
 	if tokenConfig.Claims != nil {
-		for key, val := range *tokenConfig.Claims {
+		for key, val := range tokenConfig.Claims {
 			builder.Claim(key, val)
 		}
 	}

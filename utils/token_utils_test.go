@@ -125,7 +125,7 @@ func TestCreateToken(t *testing.T) {
 	assert.EqualError(t, err, "Invalid tokenConfig: Unsupported token profile: unknown")
 
 	// Test that additional claims can be passed into the token
-	tokenConfig = TokenConfig{TokenProfile: WLCG, Audience: []string{"foo"}, Subject: "bar", Lifetime: time.Minute * 10, Claims: &map[string]string{"foo": "bar"}}
+	tokenConfig = TokenConfig{TokenProfile: WLCG, Audience: []string{"foo"}, Subject: "bar", Lifetime: time.Minute * 10, Claims: map[string]string{"foo": "bar"}}
 	token, err := tokenConfig.CreateToken()
 	require.NoError(t, err)
 	jwt, err := jwt.ParseString(token, jwt.WithVerify(false))

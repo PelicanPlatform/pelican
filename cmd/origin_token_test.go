@@ -24,25 +24,34 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestParseClaims(t *testing.T) {
-	// Give it something valid
-	claims := []string{"foo=boo", "bar=baz"}
-	claimsMap, err := parseClaims(claims)
+func TestParseClaimsToTokenConfig(t *testing.T) {
+	// Should parse basic fields correctly
+	claims := []string{"aud=foo", "scope=baz", "ver=1.0", "iss=http://random.org"}
+	tokenConfig, err := parseClaimsToTokenConfig(claims)
 	assert.NoError(t, err)
-	assert.Equal(t, claimsMap["foo"], "boo")
-	assert.Equal(t, claimsMap["bar"], "baz")
-	assert.Equal(t, len(claimsMap), 2)
+	assert.Equal(t, "http://random.org", tokenConfig.Issuer)
+	assert.Equal(t, []string{"foo"}, tokenConfig.Audience)
+	assert.Equal(t, "baz", tokenConfig.Scope)
+	assert.Equal(t, "1.0", tokenConfig.Version)
+
+	// Give it something valid
+	claims = []string{"foo=boo", "bar=baz"}
+	tokenConfig, err = parseClaimsToTokenConfig(claims)
+	assert.NoError(t, err)
+	assert.Equal(t, "boo", tokenConfig.Claims["foo"])
+	assert.Equal(t, "baz", tokenConfig.Claims["bar"])
+	assert.Equal(t, len(tokenConfig.Claims), 2)
 
 	// Give it something with multiple of the same claim key
 	claims = []string{"foo=boo", "foo=baz"}
-	claimsMap, err = parseClaims(claims)
+	tokenConfig, err = parseClaimsToTokenConfig(claims)
 	assert.NoError(t, err)
-	assert.Equal(t, claimsMap["foo"], "boo baz")
-	assert.Equal(t, len(claimsMap), 1)
+	assert.Equal(t, "boo baz", tokenConfig.Claims["foo"])
+	assert.Equal(t, 1, len(tokenConfig.Claims))
 
 	// Give it something without = delimiter
 	claims = []string{"foo=boo", "barbaz"}
-	_, err = parseClaims(claims)
+	_, err = parseClaimsToTokenConfig(claims)
 	assert.EqualError(t, err, "The claim 'barbaz' is invalid. Did you forget an '='?")
 }
 
@@ -50,5 +59,5 @@ func TestParseInputSlice(t *testing.T) {
 	// A quick test, just to make sure this gets what it needs to
 	rawSlice := []string{"https://my-issuer.com"}
 	parsedSlice := parseInputSlice(&rawSlice, "iss")
-	assert.Equal(t, parsedSlice, []string{"iss=https://my-issuer.com"})
+	assert.Equal(t, []string{"iss=https://my-issuer.com"}, parsedSlice)
 }
