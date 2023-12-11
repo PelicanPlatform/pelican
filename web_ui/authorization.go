@@ -19,207 +19,28 @@
 package web_ui
 
 import (
-	"context"
-	"crypto/ecdsa"
-	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/lestrrat-go/jwx/v2/jwa"
-	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
-	pelican_config "github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
+	"github.com/prometheus/common/route"
 )
-
-// Return if desiredScopes contains the tokenScope and it's case-insensitive
-func scopeContains(tokenScope string, desiredScopes []string) bool {
-	for _, sc := range desiredScopes {
-		if strings.EqualFold(sc, tokenScope) {
-			return true
-		}
-	}
-	return false
-}
-
-// Creates a validator that checks if a token's scope matches the given scope: matchScope.
-// Will pass the check if no "anyScopes".
-// Will pass the check if one token scope matches ANY item in "anyScopes"
-func createScopeValidator(anyScopes []string) jwt.ValidatorFunc {
-
-	return jwt.ValidatorFunc(func(_ context.Context, tok jwt.Token) jwt.ValidationError {
-		// If no scope is present, always return true
-		if len(anyScopes) == 0 {
-			return nil
-		}
-		scope_any, present := tok.Get("scope")
-		if !present {
-			return jwt.NewValidationError(errors.New("No scope is present; required for authorization"))
-		}
-		scope, ok := scope_any.(string)
-		if !ok {
-			return jwt.NewValidationError(errors.New("scope claim in token is not string-valued"))
-		}
-
-		for _, tokenScope := range strings.Split(scope, " ") {
-			// As long as there's one scope in the token that matches the pool of desriedScopes
-			// we say it's valid
-			if scopeContains(tokenScope, anyScopes) {
-				return nil
-			}
-		}
-		return jwt.NewValidationError(errors.New(fmt.Sprint("Token does not contain any of the scopes: ", anyScopes)))
-	})
-}
-
-// Checks that the given token was signed by the federation jwk and also checks that the token has the expected scope
-func FederationCheck(c *gin.Context, strToken string, anyOfTheScopes []string) error {
-	var bKey *jwk.Key
-
-	fedURL := param.Federation_DiscoveryUrl.GetString()
-	token, err := jwt.Parse([]byte(strToken), jwt.WithVerify(false))
-
-	if err != nil {
-		return err
-	}
-
-	if fedURL != token.Issuer() {
-		return errors.New(fmt.Sprint("Issuer is not a federation: ", token.Issuer()))
-	}
-
-	err = pelican_config.DiscoverFederation()
-	if err != nil {
-		return errors.Wrap(err, "Failed to discover federation")
-	}
-	fedURIFile := param.Federation_JwkUrl.GetString()
-	response, err := http.Get(fedURIFile)
-	if err != nil {
-		return errors.Wrap(err, "Error requesting federation JWKS discovery URL")
-	}
-	defer response.Body.Close()
-	contents, err := io.ReadAll(response.Body)
-	if err != nil {
-		return errors.Wrap(err, "Error reading content of federation JWKS discovery response")
-	}
-	keys, err := jwk.Parse(contents)
-	if err != nil {
-		return errors.Wrap(err, "Failed to parse federation's public JWKS")
-	}
-	key, ok := keys.Key(0)
-	if !ok {
-		return errors.Wrap(err, "Failed to get the first key of federation's public JWKS")
-	}
-	bKey = &key
-	var raw ecdsa.PrivateKey
-	if err = (*bKey).Raw(&raw); err != nil {
-		return errors.Wrap(err, "Failed to get raw key of the federation JWK")
-	}
-
-	parsed, err := jwt.Parse([]byte(strToken), jwt.WithKey(jwa.ES256, raw.PublicKey))
-
-	if err != nil {
-		return errors.Wrap(err, "Failed to verify JWT by federation's key")
-	}
-
-	scopeValidator := createScopeValidator(anyOfTheScopes)
-	if err = jwt.Validate(parsed, jwt.WithValidator(scopeValidator)); err != nil {
-		return errors.Wrap(err, "Failed to verify the scope of the token")
-	}
-
-	c.Set("User", "Federation")
-	return nil
-}
-
-// Checks that the given token was signed by the issuer jwk (the one from the server itself) and also checks that
-// the token has the expected scope
-func IssuerCheck(c *gin.Context, strToken string, anyOfTheScopes []string) error {
-	token, err := jwt.Parse([]byte(strToken), jwt.WithVerify(false))
-	if err != nil {
-		return errors.Wrap(err, "Invalid JWT")
-	}
-
-	serverURL := param.Server_ExternalWebUrl.GetString()
-	if serverURL != token.Issuer() {
-		if param.Origin_Url.GetString() == token.Issuer() {
-			return errors.New(fmt.Sprint("Wrong issuer; expect the issuer to be the server's web address but got Origin.URL, " + token.Issuer()))
-		} else {
-			return errors.New(fmt.Sprint("Issuer is not server itself: ", token.Issuer()))
-		}
-	}
-
-	bKey, err := pelican_config.GetIssuerPrivateJWK()
-	if err != nil {
-		return errors.Wrap(err, "Failed to load issuer server's private key")
-	}
-
-	var raw ecdsa.PrivateKey
-	if err = bKey.Raw(&raw); err != nil {
-		return errors.Wrap(err, "Failed to get raw key of the issuer's JWK")
-	}
-
-	parsed, err := jwt.Parse([]byte(strToken), jwt.WithKey(jwa.ES256, raw.PublicKey))
-
-	if err != nil {
-		return errors.Wrap(err, "Failed to verify JWT by issuer's key")
-	}
-
-	scopeValidator := createScopeValidator(anyOfTheScopes)
-	if err = jwt.Validate(parsed, jwt.WithValidator(scopeValidator)); err != nil {
-		return errors.Wrap(err, "Failed to verify the scope of the token")
-	}
-
-	c.Set("User", "Origin")
-	return nil
-}
-
-// Check if a JWT string was issued by the director and has the correct scope
-func DirectorCheck(c *gin.Context, strToken string, anyOfTheScopes []string) error {
-	directorURL := param.Federation_DirectorUrl.GetString()
-	if directorURL == "" {
-		return errors.New("Failed to check director; director URL is empty")
-	}
-	token, err := jwt.Parse([]byte(strToken), jwt.WithVerify(false))
-	if err != nil {
-		return errors.Wrap(err, "Invalid JWT")
-	}
-
-	if directorURL != token.Issuer() {
-		return errors.New(fmt.Sprint("Issuer is not a director: ", token.Issuer()))
-	}
-
-	key, err := director.LoadDirectorPublicKey()
-	if err != nil {
-		return errors.Wrap(err, "Failed to load director's public JWK")
-	}
-	tok, err := jwt.Parse([]byte(strToken), jwt.WithKey(jwa.ES256, key), jwt.WithValidate(true))
-	if err != nil {
-		return errors.Wrap(err, "Failed to verify JWT by director's key")
-	}
-
-	scopeValidator := createScopeValidator(anyOfTheScopes)
-	if err = jwt.Validate(tok, jwt.WithValidator(scopeValidator)); err != nil {
-		return errors.Wrap(err, "Failed to verify the scope of the token")
-	}
-
-	c.Set("User", "Director")
-	return nil
-}
 
 // Create a token for accessing Prometheus /metrics endpoint on
 // the server itself
-func CreatePromMetricToken() (string, error) {
+func createPromMetricToken() (string, error) {
 	serverURL := param.Server_ExternalWebUrl.GetString()
 	tokenExpireTime := param.Monitoring_TokenExpiresIn.GetDuration()
 
 	tok, err := jwt.NewBuilder().
-		Claim("scope", "pelican.promMetric").
+		Claim("scope", "monitoring.scrape").
 		Issuer(serverURL).
 		Audience([]string{serverURL}).
 		Subject(serverURL).
@@ -241,70 +62,6 @@ func CreatePromMetricToken() (string, error) {
 	return string(signed), nil
 }
 
-// Check if a valid token is present for most of the server's internal
-// API endpoints and Web API endpoints. It checkes if a JWT is present in
-// either authz query param, Authorization header (Bearer), and cookie's "login" key
-// and was issued by either the federation/director/or a server itself
-// For token scopes, it checks if the token has ANY of the scopes provided in anyScopes
-func checkAPIToken(ctx *gin.Context, anyScopes []string) bool {
-	strToken := ""
-	errMsg := ""
-
-	if authzQuery := ctx.Request.URL.Query()["authz"]; len(authzQuery) > 0 {
-		strToken = authzQuery[0]
-	} else if authzHeader := ctx.Request.Header["Authorization"]; len(authzHeader) > 0 {
-		strToken = strings.TrimPrefix(authzHeader[0], "Bearer ")
-	}
-
-	hasCredential := false
-	if strToken != "" {
-		hasCredential = true
-		err := FederationCheck(ctx, strToken, anyScopes)
-		if _, exists := ctx.Get("User"); err != nil || !exists {
-			errMsg += fmt.Sprintln("Federation Check failed; continue to issuer check: ", err)
-			log.Debug("Federation Check failed; continue to issuer check: ", err)
-		} else {
-			log.Debug("Federation Check succeed")
-			return exists
-		}
-		err = IssuerCheck(ctx, strToken, anyScopes)
-		if _, exists := ctx.Get("User"); err != nil || !exists {
-			errMsg += fmt.Sprintln("Issuer Check failed; continue to director check: ", err)
-			log.Debug("Issuer Check failed; continue to director check: ", err)
-		} else {
-			log.Debug("Issuer Check succeed")
-			return exists
-		}
-		err = DirectorCheck(ctx, strToken, anyScopes)
-		if _, exists := ctx.Get("User"); err != nil || !exists {
-			errMsg += fmt.Sprintln("Director Check failed; continue to see if token is for user login: ", err)
-			log.Debug("Director Check failed; continue to see if token is for user login: ", err)
-		} else {
-			log.Debug("Director Check succeed")
-			return exists
-		}
-	}
-
-	strToken, err := ctx.Cookie("login")
-	if err == nil && strToken != "" {
-		hasCredential = true
-		if err = IssuerCheck(ctx, strToken, anyScopes); err != nil {
-			errMsg += fmt.Sprintln("Issuer check from cookie's token failed: ", err)
-			log.Debug("Issuer check from cookie's token failed: ", err)
-		}
-	} else {
-		errMsg += fmt.Sprintln("No cookie present for token: ", err)
-	}
-
-	// It will only check if the token is valid and set this context key-pair.
-	// Futher steps requried to finish the auth process (i.e. return 401)
-	_, exists := ctx.Get("User")
-	if !exists && hasCredential {
-		log.Info("Authentication failed. Didn't pass chain of checking:\n", errMsg)
-	}
-	return exists
-}
-
 // Handle the authorization of Prometheus /metrics endpoint by checking
 // if a valid token is present with correct scope
 func promMetricAuthHandler(ctx *gin.Context) {
@@ -314,9 +71,14 @@ func promMetricAuthHandler(ctx *gin.Context) {
 			ctx.Next()
 			return
 		}
-		// For /metrics endpoint, auth is granted if the request is from either
-		// 1.director scraper 2.server scraper 3.authenticated user (through web)
-		valid := checkAPIToken(ctx, []string{"pelican.directorScrape", "pelican.promMetric", "prometheus.read"})
+		// Auth is granted if the request is from either
+		// 1.director scraper 2.server (self) scraper 3.authenticated web user (via cookie)
+		authOption := utils.AuthOption{
+			Sources: []utils.TokenSource{utils.Header, utils.Cookie},
+			Issuers: []utils.TokenIssuer{utils.Director, utils.Issuer},
+			Scopes:  []string{"monitoring.scrape"}}
+
+		valid := utils.CheckAnyAuth(ctx, authOption)
 		if !valid {
 			ctx.AbortWithStatusJSON(403, gin.H{"error": "Authentication required to access this endpoint."})
 		}
@@ -325,4 +87,22 @@ func promMetricAuthHandler(ctx *gin.Context) {
 	}
 	// We don't care about other routes for this handler
 	ctx.Next()
+}
+
+// Handle the authorization of Prometheus query engine endpoint at `/api/v1.0/prometheus`
+func promQueryEngineAuthHandler(av1 *route.Router) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		authOption := utils.AuthOption{
+			// Cookie for web user access and header for external service like Grafana to access
+			Sources: []utils.TokenSource{utils.Cookie, utils.Header},
+			Issuers: []utils.TokenIssuer{utils.Issuer},
+			Scopes:  []string{"monitoring.query"}}
+
+		exists := utils.CheckAnyAuth(c, authOption)
+		if exists {
+			av1.ServeHTTP(c.Writer, c.Request)
+		} else {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Correct authorization required to access Prometheus query engine APIs"})
+		}
+	}
 }

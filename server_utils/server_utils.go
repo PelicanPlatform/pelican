@@ -16,26 +16,25 @@
  *
  ***************************************************************/
 
-import {Box} from "@mui/material";
+package server_utils
 
-import {Header} from "@/components/layout/Header";
+import (
+	"net/url"
 
-export const metadata = {
-    title: 'Pelican Login',
-    description: 'Software designed to make data distribution easy',
-}
+	"github.com/pelicanplatform/pelican/param"
+	"github.com/pkg/errors"
+)
 
-export default function RootLayout({
-                                       children,
-                                   }: {
-    children: React.ReactNode
-}) {
-    return (
-        <>
-            <Header text={"Pelican Software"}/>
-            <Box component={"main"} pt={"75px"} display={"flex"} minHeight={"100vh"}>
-                {children}
-            </Box>
-        </>
-    )
+// For calling from within the server. Returns the server's issuer URL/port
+func GetServerIssuerURL() (*url.URL, error) {
+	if param.Server_IssuerUrl.GetString() == "" {
+		return nil, errors.New("The server failed to determine its own issuer url. Something is wrong!")
+	}
+
+	issuerUrl, err := url.Parse(param.Server_IssuerUrl.GetString())
+	if err != nil {
+		return nil, errors.Wrapf(err, "The server's issuer URL is malformed: %s. Something is wrong!", param.Server_IssuerUrl.GetString())
+	}
+
+	return issuerUrl, nil
 }

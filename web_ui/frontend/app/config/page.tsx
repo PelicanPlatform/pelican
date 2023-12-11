@@ -23,7 +23,18 @@ import StatusBox from "@/components/StatusBox";
 
 import {TimeDuration} from "@/components/graphs/prometheus";
 
-import {Box, FormControl, Grid, InputLabel, MenuItem, Select, Typography, Skeleton, Link} from "@mui/material";
+import {
+    Box,
+    FormControl,
+    Grid,
+    InputLabel,
+    MenuItem,
+    Select,
+    Typography,
+    Skeleton,
+    Link,
+    Container
+} from "@mui/material";
 import React, {useEffect, useState} from "react";
 import {OverridableStringUnion} from "@mui/types";
 import {Variant} from "@mui/material/styles/createTypography";
@@ -287,26 +298,32 @@ export default function Config() {
     }
 
     return (
-        <Box width={"100%"}>
-            <Typography variant={"h4"} component={"h2"} mb={1}>Configuration</Typography>
-            <Grid container spacing={2}>
-                <Grid item xs={7} md={8} lg={6}>
-                    <form>
+        <Container maxWidth={"xl"} sx={{"mt": 2 }}>
+            <Box width={"100%"}>
+                <Grid container spacing={2}>
+                    <Grid item xs={7} md={8} lg={6}>
+                        <Typography variant={"h4"} component={"h2"} mb={1}>Configuration</Typography>
+                    </Grid>
+                    <Grid  item xs={5} md={4} lg={3}></Grid>
+                    <Grid item xs={7} md={8} lg={6}>
+                        <form>
+                            {
+                                config === undefined ?
+                                    <Skeleton  variant="rectangular" animation="wave" height={"1000px"}/> :
+                                    <ConfigDisplay id={[]} name={""} value={config} level={4}/>
+                            }
+                        </form>
+                    </Grid>
+                    <Grid item xs={5} md={4} lg={3}>
                         {
                             config === undefined ?
                                 <Skeleton  variant="rectangular" animation="wave" height={"1000px"}/> :
-                                <ConfigDisplay id={[]} name={""} value={config} level={4}/>
+                                <Box pt={2}><TableOfContents id={[]} name={""} value={config} level={1}/></Box>
                         }
-                    </form>
+                    </Grid>
                 </Grid>
-                <Grid item xs={5} md={4} lg={3}>
-                    {
-                        config === undefined ?
-                            <Skeleton  variant="rectangular" animation="wave" height={"1000px"}/> :
-                            <Box pt={2}><TableOfContents id={[]} name={""} value={config} level={1}/></Box>
-                    }
-                </Grid>
-            </Grid>
-        </Box>
+            </Box>
+        </Container>
+
     )
 }

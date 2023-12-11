@@ -145,22 +145,6 @@ func runtimeInfo() (api_v1.RuntimeInfo, error) {
 	return api_v1.RuntimeInfo{}, nil
 }
 
-func promQueryEngineAuthHandler(av1 *route.Router) gin.HandlerFunc {
-	/* A function which wraps around the av1 router to force a jwk token check using
-	 * the origin's private key. It will check the request's URL and Header for a token
-	 * and if found it will then attempt to validate the token. If valid, it will continue
-	 * the routing as normal, otherwise it will return an error
-	 */
-	return func(c *gin.Context) {
-		exists := checkAPIToken(c, []string{"prometheus.read"})
-		if exists {
-			av1.ServeHTTP(c.Writer, c.Request)
-		} else {
-			c.JSON(http.StatusForbidden, gin.H{"error": "Correct authorization required to access Prometheus query engine APIs"})
-		}
-	}
-}
-
 // Configure director's Prometheus scraper to use HTTP service discovery for origins
 func configDirectorPromScraper() (*config.ScrapeConfig, error) {
 	originDiscoveryUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
@@ -351,7 +335,7 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 		ScrapeConfigs: make([]*config.ScrapeConfig, 1),
 	}
 
-	selfScraperToken, err := CreatePromMetricToken()
+	selfScraperToken, err := createPromMetricToken()
 	if err != nil {
 		return fmt.Errorf("Failed to generate token for self-scraper at start: %v", err)
 	}
@@ -664,7 +648,7 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 							globalConfigMtx.Lock()
 							defer globalConfigMtx.Unlock()
 							// Create a new self-scrape token
-							selfScraperToken, err := CreatePromMetricToken()
+							selfScraperToken, err := createPromMetricToken()
 							if err != nil {
 								return fmt.Errorf("Failed to generate token for self-scraper at start: %v", err)
 							}

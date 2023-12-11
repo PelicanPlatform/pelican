@@ -48,13 +48,13 @@ function TextCenteredBox({text} : {text: string}) {
 
 export default function Home() {
 
-    const pelicanServices = ["origin"]
+    const pelicanServices = ["origin", "director"]
 
     return (
         <Box width={"100%"} pt={5}>
             <Container maxWidth={"xl"}>
                 <Typography pb={5} textAlign={"center"} variant={"h3"}>Pelican Services</Typography>
-                <Grid container justifyContent={"center"}>
+                <Grid container justifyContent={"center"} spacing={2}>
                     {pelicanServices.map((service) => {
                         return (
                             <Grid key={service} item xs={2}>

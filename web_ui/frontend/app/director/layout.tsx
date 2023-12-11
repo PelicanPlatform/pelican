@@ -26,7 +26,7 @@ import IconButton from "@mui/material/IconButton";
 import BuildIcon from "@mui/icons-material/Build";
 
 export const metadata = {
-    title: 'Pelican Origin',
+    title: 'Pelican Director',
     description: 'Software designed to make data distribution easy',
 }
 

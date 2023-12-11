@@ -140,7 +140,9 @@ func setLoginCookie(ctx *gin.Context, user string) {
 
 	now := time.Now()
 	tok, err := jwt.NewBuilder().
-		Claim("scope", "web_ui.access prometheus.read").
+		// The value of the "scope" claim is a JSON string containing a space-separated
+		// list of scopes associated with the token
+		Claim("scope", "web_ui.access monitoring.query monitoring.scrape").
 		Issuer(param.Server_ExternalWebUrl.GetString()).
 		IssuedAt(now).
 		Expiration(now.Add(30 * time.Minute)).
@@ -162,6 +164,9 @@ func setLoginCookie(ctx *gin.Context, user string) {
 		ctx.Request.URL.Host, true, true)
 	// Explicitly set Cookie for /metrics endpoint as they are in different paths
 	ctx.SetCookie("login", string(signed), 30*60, "/metrics",
+		ctx.Request.URL.Host, true, true)
+	// Explicitly set Cookie for /view endpoint as they are in different paths
+	ctx.SetCookie("login", string(signed), 30*60, "/view",
 		ctx.Request.URL.Host, true, true)
 	ctx.SetSameSite(http.SameSiteStrictMode)
 }
