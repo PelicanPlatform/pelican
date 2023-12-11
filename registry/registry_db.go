@@ -80,7 +80,7 @@ func createNamespaceTable() {
         prefix TEXT NOT NULL UNIQUE,
         pubkey TEXT NOT NULL,
         identity TEXT,
-        admin_metadata TEXT
+        admin_metadata TEXT CHECK (length("admin_metadata") <= 4000)
     );`
 
 	_, err := db.Exec(query)
