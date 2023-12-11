@@ -40,12 +40,12 @@ type (
 	TokenProfile string
 	TokenConfig  struct {
 		TokenProfile TokenProfile
-		Lifetime     time.Duration
-		Issuer       string
-		Audience     []string
-		Scope        string
-		Version      string // 'wlcg.ver' for WLCG profile and 'ver' for scitokens2
-		Subject      string
+		Lifetime     time.Duration      // Lifetime is used to set 'exp' claim from now
+		Issuer       string             // Issuer is 'iss' claim
+		Audience     []string           // Audience is 'aud' claim
+		Scope        string             // Scope is a space separated list of scopes
+		Version      string             // Version is the version for different profiles. 'wlcg.ver' for WLCG profile and 'ver' for scitokens2
+		Subject      string             // Subject is 'sub' claim
 		Claims       *map[string]string // Additional claims
 	}
 )
@@ -60,6 +60,8 @@ func (p TokenProfile) String() string {
 	return string(p)
 }
 
+// Validate a TokenConfig given its profile and checks if the required claims are present per profile requirement
+// and if provided config values are legal.
 func (config *TokenConfig) Validate() (bool, error) {
 	if config.Lifetime.Seconds() <= 0 {
 		return false, errors.New(fmt.Sprint("Invalid lifetime, lifetime must be positive number: ", config.Lifetime))
@@ -92,7 +94,7 @@ func (config *TokenConfig) verifyCreateSciTokens2() error {
 	}
 
 	if config.Scope == "" {
-		errMsg := "The 'subject' claim is required for the scitokens2 profile, but it could not be found."
+		errMsg := "The 'scope' claim is required for the scitokens2 profile, but it could not be found."
 		return errors.New(errMsg)
 	}
 
@@ -322,6 +324,7 @@ func CreateEncodedToken(claimsMap map[string]string, profile TokenProfile, lifet
 	return string(signed), nil
 }
 
+// CreateToken validate a JWT TokenConfig and if it's valid, create and sign a token based on the TokenConfig.
 func (tokenConfig *TokenConfig) CreateToken() (string, error) {
 	if ok, err := tokenConfig.Validate(); !ok || err != nil {
 		return "", errors.Wrap(err, "Invalid tokenConfig")
