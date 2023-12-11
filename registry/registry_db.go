@@ -314,8 +314,6 @@ func deleteNamespace(prefix string) error {
 	return tx.Commit()
 }
 
-/**
- * Commenting this out until we are ready to use it.  -BB
 func getNamespace(prefix string) (*Namespace, error) {
 	ns := &Namespace{}
 	query := `SELECT * FROM namespace WHERE prefix = ?`
@@ -325,7 +323,6 @@ func getNamespace(prefix string) (*Namespace, error) {
 	}
 	return ns, nil
 }
-*/
 
 func getAllNamespaces() ([]*Namespace, error) {
 	query := `SELECT * FROM namespace`

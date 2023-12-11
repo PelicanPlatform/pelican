@@ -782,6 +782,17 @@ func metadataHandler(ctx *gin.Context) {
 
 }
 
+func dbGetNamespace(ctx *gin.Context) {
+	prefix := ctx.GetHeader("prefix")
+	ns, err := getNamespace(prefix)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, ns)
+}
+
 // func getJwks(prefix string) (*jwk.Set, error) {
 // 	jwks, err := dbGetPrefixJwks(prefix)
 // 	if err != nil {
@@ -799,12 +810,22 @@ func getOpenIDConfiguration(c *gin.Context) {
 */
 
 func RegisterRegistryRoutes(router *gin.RouterGroup) {
-	registry := router.Group("/api/v1.0/registry")
+	registry1 := router.Group("/api/v1.0/registry")
 	{
-		registry.POST("", cliRegisterNamespace)
-		registry.GET("", dbGetAllNamespaces)
+		registry1.POST("", cliRegisterNamespace)
+		registry1.GET("", dbGetAllNamespaces)
 		// Will handle getting jwks, openid config, and listing namespaces
-		registry.GET("/*wildcard", metadataHandler)
-		registry.DELETE("/*wildcard", dbDeleteNamespace)
+		registry1.GET("/*wildcard", metadataHandler)
+		registry1.DELETE("/*wildcard", dbDeleteNamespace)
+	}
+
+	registry2 := router.Group("/api/v2.0/registry")
+	{
+		registry2.POST("", cliRegisterNamespace)
+		registry2.GET("", dbGetAllNamespaces)
+		registry2.GET("/getNamespace", dbGetNamespace)
+		// Will handle getting jwks, openid config, and listing namespaces
+		registry2.GET("/metadata/*wildcard", metadataHandler)
+		registry2.DELETE("/*wildcard", dbDeleteNamespace)
 	}
 }

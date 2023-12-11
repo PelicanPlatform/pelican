@@ -48,7 +48,7 @@ const (
 	keyMatch
 )
 
-func keyIsRegistered(privkey jwk.Key, url string) (keyStatus, error) {
+func keyIsRegistered(privkey jwk.Key, url string, prefix string) (keyStatus, error) {
 	keyId := privkey.KeyID()
 	if keyId == "" {
 		return noKeyPresent, errors.New("Provided key is missing a key ID")
@@ -58,13 +58,15 @@ func keyIsRegistered(privkey jwk.Key, url string) (keyStatus, error) {
 		return noKeyPresent, err
 	}
 
-	req, err := http.NewRequest("GET", url+"/getNamespaceKey/.well-known/issuer.jwks", nil)
+	req, err := http.NewRequest("GET", url, nil)
 
 	if err != nil {
 		return noKeyPresent, err
 	}
 
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("prefix", prefix)
+
 	tr := config.GetTransport()
 	client := &http.Client{Transport: tr}
 
@@ -93,7 +95,13 @@ func keyIsRegistered(privkey jwk.Key, url string) (keyStatus, error) {
 		}
 	}
 
-	registrySet, err := jwk.Parse(body)
+	var ns *nsregistry.Namespace
+	err = json.Unmarshal(body, &ns)
+	if err != nil {
+		return noKeyPresent, errors.Errorf("Failed unmarshals namespace from responce")
+	}
+
+	registrySet, err := jwk.ParseString(ns.Pubkey)
 	if err != nil {
 		log.Debugln("Failed to parse registry response:", string(body))
 		return noKeyPresent, errors.Wrap(err, "Failed to parse registry response as a JWKS")
@@ -128,9 +136,14 @@ func registerNamespacePrep() (key jwk.Key, prefix string, registrationEndpointUR
 		return
 	}
 
-	registrationEndpointURL, err = url.JoinPath(namespaceEndpoint, "api", "v1.0", "registry")
+	registrationEndpointURL, err = url.JoinPath(namespaceEndpoint, "api", "v2.0", "registry")
 	if err != nil {
-		err = errors.Wrap(err, "Failed to construction registration endpoint URL: %v")
+		err = errors.Wrap(err, "Failed to construct registration endpoint URL: %v")
+		return
+	}
+	registrationCheckEndpointURL, err := url.JoinPath(registrationEndpointURL, "getNamespace")
+	if err != nil {
+		err = errors.Wrap(err, "Failed to construct registration check endpoint URL: %v")
 		return
 	}
 
@@ -145,7 +158,7 @@ func registerNamespacePrep() (key jwk.Key, prefix string, registrationEndpointUR
 			return
 		}
 	}
-	keyStatus, err := keyIsRegistered(key, registrationEndpointURL+prefix)
+	keyStatus, err := keyIsRegistered(key, registrationCheckEndpointURL, prefix)
 	if err != nil {
 		err = errors.Wrap(err, "Failed to determine whether namespace is already registered")
 		return
