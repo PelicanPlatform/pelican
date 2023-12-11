@@ -23,15 +23,18 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/lestrrat-go/jwx/v2/jwk"
-	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-
 	// commented sqlite driver requires CGO
 	// _ "github.com/mattn/go-sqlite3" // SQLite driver
 	_ "modernc.org/sqlite"
+
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 type Namespace struct {
@@ -71,13 +74,39 @@ func createNamespaceTable() {
 
 	_, err := db.Exec(query)
 	if err != nil {
-		log.Fatalf("Failed to create table: %v", err)
+		log.Fatalf("Failed to create namespace table: %v", err)
+	}
+}
+
+func createTopologyTable() {
+	query := `
+    CREATE TABLE IF NOT EXISTS topology (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        prefix TEXT NOT NULL UNIQUE
+    );`
+
+	_, err := db.Exec(query)
+	if err != nil {
+		log.Fatalf("Failed to create topology table: %v", err)
 	}
 }
 
 func namespaceExists(prefix string) (bool, error) {
-	checkQuery := `SELECT prefix FROM namespace WHERE prefix = ?`
-	result, err := db.Query(checkQuery, prefix)
+	var checkQuery string
+	var args []interface{}
+	if config.GetPreferredPrefix() == "OSDF" {
+		checkQuery = `
+		SELECT prefix FROM namespace WHERE prefix = ?
+		UNION
+		SELECT prefix FROM topology WHERE prefix = ?
+		`
+		args = []interface{}{prefix, prefix}
+	} else {
+		checkQuery = `SELECT prefix FROM namespace WHERE prefix = ?`
+		args = []interface{}{prefix}
+	}
+
+	result, err := db.Query(checkQuery, args...)
 	if err != nil {
 		return false, err
 	}
@@ -91,7 +120,32 @@ func namespaceExists(prefix string) (bool, error) {
 	return found, nil
 }
 
-func namespaceSupSubChecks(prefix string) (superspaces []string, subspaces []string, err error) {
+func namespaceSupSubChecks(prefix string) (superspaces []string, subspaces []string, inTopo bool, err error) {
+	// The very first thing we do is check if there's a match in topo -- if there is, for now
+	// we simply refuse to allow registration of a superspace or a subspace, assuming the registrant
+	// has to go through topology
+	if config.GetPreferredPrefix() == "OSDF" {
+		topoSuperSubQuery := `
+		SELECT prefix FROM topology WHERE (? || '/') LIKE (prefix || '/%')
+		UNION
+		SELECT prefix FROM topology WHERE (prefix || '/') LIKE (? || '/%')
+		`
+		args := []interface{}{prefix, prefix}
+		topoSuperSubResults, tmpErr := db.Query(topoSuperSubQuery, args...)
+		if tmpErr != nil {
+			err = tmpErr
+			return
+		}
+		defer topoSuperSubResults.Close()
+
+		for topoSuperSubResults.Next() {
+			// if we make it here, there was a match -- it's a trap!
+			inTopo = true
+			return
+		}
+		topoSuperSubResults.Close()
+	}
+
 	// Check if any registered namespaces already superspace the incoming namespace,
 	// eg if /foo is already registered, this will be true for an incoming /foo/bar because
 	// /foo is logically above /foo/bar (according to my logic, anyway)
@@ -319,6 +373,128 @@ func InitializeDB() error {
 
 	createNamespaceTable()
 	return db.Ping()
+}
+
+func modifyTopologyTable(prefixes []string, mode string) error {
+	if len(prefixes) == 0 {
+		return nil // nothing to do!
+	}
+
+	var query string
+	switch mode {
+	case "add":
+		query = `INSERT INTO topology (prefix) VALUES (?)`
+	case "del":
+		query = `DELETE FROM topology WHERE prefix = ?`
+	default:
+		return errors.New("invalid mode, use 'add' or 'del'")
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+
+	stmt, err := tx.Prepare(query)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, prefix := range prefixes {
+		_, err := stmt.Exec(prefix)
+		if err != nil {
+			if errRoll := tx.Rollback(); errRoll != nil {
+				log.Errorln("Failed to rollback transaction:", errRoll)
+			}
+			return err
+		}
+	}
+
+	// One nice batch commit
+	err = tx.Commit()
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// Create a table in the registry to store namespace prefixes from topology
+func PopulateTopology() error {
+	// Create the toplogy table
+	createTopologyTable()
+
+	// The topology table may already exist from before, it may not. Because of this
+	// we need to add to the table any prefixes that are in topology, delete from the
+	// table any that aren't in topology, and skip any that exist in both.
+
+	// First get all that are in the table. At time of writing, this is ~57 entries,
+	// and that number should be monotonically decreasing. We're safe to load into mem.
+	retrieveQuery := "SELECT prefix FROM topology"
+	rows, err := db.Query(retrieveQuery)
+	if err != nil {
+		return errors.Wrap(err, "Could not construct topology database query")
+	}
+	defer rows.Close()
+
+	nsFromTopoTable := make(map[string]bool)
+	for rows.Next() {
+		var existingPrefix string
+		if err := rows.Scan(&existingPrefix); err != nil {
+			return errors.Wrap(err, "Error while scanning rows from topology table")
+		}
+		nsFromTopoTable[existingPrefix] = true
+	}
+	rows.Close()
+
+	// Next, get the values from topology
+	namespaces, err := utils.GetTopologyJSON()
+	if err != nil {
+		return errors.Wrapf(err, "Failed to get topology JSON")
+	}
+
+	// Be careful here, the ns object we iterate over is from topology,
+	// and it's not the same ns object we use elsewhere in this file.
+	nsFromTopoJSON := make(map[string]bool)
+	for _, ns := range namespaces.Namespaces {
+		nsFromTopoJSON[ns.Path] = true
+	}
+
+	toAdd := []string{}
+	toDelete := []string{}
+	// If in topo and not in the table, add
+	for prefix := range nsFromTopoJSON {
+		if found := nsFromTopoTable[prefix]; !found {
+			toAdd = append(toAdd, prefix)
+		}
+	}
+	// If in table and not in topo, delete
+	for prefix := range nsFromTopoTable {
+		if found := nsFromTopoJSON[prefix]; !found {
+			toDelete = append(toDelete, prefix)
+		}
+	}
+
+	if err := modifyTopologyTable(toAdd, "add"); err != nil {
+		return errors.Wrap(err, "Failed to update topology table with new values")
+	}
+	if err := modifyTopologyTable(toDelete, "del"); err != nil {
+		return errors.Wrap(err, "Failed to clean old values from topology table")
+	}
+
+	return nil
+}
+
+func PeriodicTopologyReload() {
+	for {
+		time.Sleep(time.Minute * param.Federation_TopologyReloadInterval.GetDuration())
+		err := PopulateTopology()
+		if err != nil {
+			log.Warningf("Failed to re-populate topology table: %s. Will try again later",
+				err)
+		}
+	}
 }
 
 func ShutdownDB() {

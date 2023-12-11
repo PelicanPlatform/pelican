@@ -140,9 +140,9 @@ func setLoginCookie(ctx *gin.Context, user string) {
 
 	now := time.Now()
 	tok, err := jwt.NewBuilder().
-		// TODO: We might want to come up with some names broader than this for a
-		// generic token for Web APIs, like web_ui.access
-		Claim("scope", "prometheus.read").
+		// The value of the "scope" claim is a JSON string containing a space-separated
+		// list of scopes associated with the token
+		Claim("scope", "monitoring.query monitoring.scrape").
 		Issuer(param.Server_ExternalWebUrl.GetString()).
 		IssuedAt(now).
 		Expiration(now.Add(30 * time.Minute)).

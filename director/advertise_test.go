@@ -7,11 +7,13 @@ import (
 
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 func TestParseServerAd(t *testing.T) {
 
-	server := Server{
+	server := utils.Server{
 		AuthEndpoint: "https://my-auth-endpoint.com",
 		Endpoint:     "http://my-endpoint.com",
 		Resource:     "MY_SERVER",

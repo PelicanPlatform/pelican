@@ -23,11 +23,9 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/base64"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -59,73 +57,33 @@ func TestPrometheusProtectionFederationURL(t *testing.T) {
 	// Create temp dir for the origin key file
 	tDir := t.TempDir()
 	kfile := filepath.Join(tDir, "testKey")
-
-	//Setup a private key and a token
+	//Setup a private key
 	viper.Set("IssuerKey", kfile)
 
 	w := httptest.NewRecorder()
 	c, r := gin.CreateTestContext(w)
-	// Note, this handler function intercepts the "http.Get call to the federation uri
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		issuerKeyFile := param.IssuerKey.GetString()
-		contents, err := os.ReadFile(issuerKeyFile)
-		if err != nil {
-			t.Fatal(err)
-		}
-		_, err = w.Write(contents)
-		if err != nil {
-			t.Fatal(err)
-		}
-	}))
-	defer ts.Close()
+
+	// Set ExternalWebUrl so that IssuerCheck can pass
+	viper.Set("Server.ExternalWebUrl", "https://test-origin.org:8444")
+
 	c.Request = &http.Request{
 		URL: &url.URL{},
 	}
 
-	privateKey, err := ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
-	assert.NoError(t, err, "Error generating private key")
-
-	// Convert from raw ecdsa to jwk.Key
-	pKey, err := jwk.FromRaw(privateKey)
-	assert.NoError(t, err, "Unable to convert ecdsa.PrivateKey to jwk.Key")
-
-	//Assign Key id to the private key
-	err = jwk.AssignKeyID(pKey)
-	assert.NoError(t, err, "Error assigning kid to private key")
-
-	//Set an algorithm for the key
-	err = pKey.Set(jwk.AlgorithmKey, jwa.ES512)
-	assert.NoError(t, err, "Unable to set algorithm for pKey")
-
-	buf, err := json.MarshalIndent(pKey, "", " ")
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = os.WriteFile(kfile, buf, 0644)
-
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Create a token
-	issuerURL := url.URL{}
-	issuerURL.Scheme = "https"
-	issuerURL.Host = "test-http"
-
 	jti_bytes := make([]byte, 16)
-	_, err = rand.Read(jti_bytes)
+	_, err := rand.Read(jti_bytes)
 	if err != nil {
 		t.Fatal(err)
 	}
 	jti := base64.RawURLEncoding.EncodeToString(jti_bytes)
 
-	originUrl := param.Origin_Url.GetString()
+	issuerUrl := param.Server_ExternalWebUrl.GetString()
 	tok, err := jwt.NewBuilder().
-		Claim("scope", "prometheus.read").
+		Claim("scope", "monitoring.query").
 		Claim("wlcg.ver", "1.0").
 		JwtID(jti).
-		Issuer(issuerURL.String()).
-		Audience([]string{originUrl}).
+		Issuer(issuerUrl).
+		Audience([]string{issuerUrl}).
 		Subject("sub").
 		Expiration(time.Now().Add(time.Minute)).
 		IssuedAt(time.Now()).
@@ -135,27 +93,24 @@ func TestPrometheusProtectionFederationURL(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	pkey, err := config.GetIssuerPrivateJWK()
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// Sign the token with the origin private key
-	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, pKey))
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, pkey))
 
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	//Set the Federation information so as not to run through all of DiscoverFederation (that should be a tested elsewhere)
-	viper.Set("Federation.DiscoveryUrl", "https://test-http")
-	viper.Set("Federation.DirectorUrl", "https://test-director")
-	viper.Set("Federation.NamespaceUrl", "https://test-namesapce")
-	viper.Set("Federation.JwkUrl", ts.URL)
-
 	// Set the request to run through the promQueryEngineAuthHandler function
 	r.GET("/api/v1.0/prometheus/*any", promQueryEngineAuthHandler(av1))
 	c.Request, _ = http.NewRequest(http.MethodGet, "/api/v1.0/prometheus/test", bytes.NewBuffer([]byte(`{}`)))
 
-	// Puts the token within the URL
-	new_query := c.Request.URL.Query()
-	new_query.Add("authz", string(signed))
-	c.Request.URL.RawQuery = new_query.Encode()
+	// Puts the token in cookie
+	c.Request.AddCookie(&http.Cookie{Name: "login", Value: string(signed)})
 
 	r.ServeHTTP(w, c.Request)
 
@@ -171,8 +126,7 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 	 */
 
 	viper.Reset()
-	viper.Set("Server.Hostname", "test-https")
-	viper.Set("Server.WebPort", "8444")
+	viper.Set("Server.ExternalWebUrl", "https://test-origin.org:8444")
 
 	av1 := route.New().WithPrefix("/api/v1.0/prometheus")
 
@@ -190,15 +144,8 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 		URL: &url.URL{},
 	}
 
-	// Generate the origin private and public keys
-	_, err := config.GetIssuerPublicJWKS()
-
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	// Load the private key
-	privKey, err := config.LoadPrivateKey(kfile)
+	privKey, err := config.GetIssuerPrivateJWK()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,13 +158,13 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 	}
 	jti := base64.RawURLEncoding.EncodeToString(jti_bytes)
 
-	originUrl := param.Origin_Url.GetString()
+	issuerUrl := param.Server_ExternalWebUrl.GetString()
 	tok, err := jwt.NewBuilder().
-		Claim("scope", "prometheus.read").
+		Claim("scope", "monitoring.query").
 		Claim("wlcg.ver", "1.0").
 		JwtID(jti).
-		Issuer(param.Server_ExternalWebUrl.GetString()).
-		Audience([]string{originUrl}).
+		Issuer(issuerUrl).
+		Audience([]string{issuerUrl}).
 		Subject("sub").
 		Expiration(time.Now().Add(time.Minute)).
 		IssuedAt(time.Now()).
@@ -278,11 +225,11 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 
 	// Create a new token to be used
 	tok, err = jwt.NewBuilder().
-		Claim("scope", "prometheus.read").
+		Claim("scope", "monitoring.query").
 		Claim("wlcg.ver", "1.0").
 		JwtID(jti).
-		Issuer(param.Server_ExternalWebUrl.GetString()).
-		Audience([]string{originUrl}).
+		Issuer(issuerUrl).
+		Audience([]string{issuerUrl}).
 		Subject("sub").
 		Expiration(time.Now().Add(time.Minute)).
 		IssuedAt(time.Now()).
@@ -317,8 +264,8 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 		Claim("scope", "not.prometheus").
 		Claim("wlcg.ver", "1.0").
 		JwtID(jti).
-		Issuer(param.Server_ExternalWebUrl.GetString()).
-		Audience([]string{originUrl}).
+		Issuer(issuerUrl).
+		Audience([]string{issuerUrl}).
 		Subject("sub").
 		Expiration(time.Now().Add(time.Minute)).
 		IssuedAt(time.Now()).
@@ -357,8 +304,8 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 
 	now := time.Now()
 	tok, err = jwt.NewBuilder().
-		Issuer(param.Server_ExternalWebUrl.GetString()).
-		Claim("scope", "prometheus.read").
+		Issuer(issuerUrl).
+		Claim("scope", "monitoring.query").
 		Claim("wlcg.ver", "1.0").
 		IssuedAt(now).
 		Expiration(now.Add(30 * time.Minute)).

@@ -122,6 +122,18 @@ ENV JAVA_HOME=/usr/lib/jvm/jre \
     QDL_HOME="/opt/qdl" \
     PATH="${ST_HOME}/bin:${QDL_HOME}/bin:${PATH}"
 
+# Install the S3 and HTTP server plugins for XRootD. For now we do this from source
+# until we can sort out the RPMs.
+RUN \
+    git clone https://github.com/PelicanPlatform/xrootd-s3-http.git && \
+    cd xrootd-s3-http && \
+    mkdir build && cd build && \
+    cmake .. && \
+    make install && \
+    # For now, until the RPM is set up, we install the libraries here, but
+    # we need to add to LD_LIBRARY_PATH so XRootD knows where to look
+    echo "/usr/local/lib" > /etc/ld.so.conf.d/xrdplugins.conf && ldconfig
+
 RUN chmod +x /pelican/osdf-client \
     && chmod +x /entrypoint.sh
 
