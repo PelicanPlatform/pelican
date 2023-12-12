@@ -452,9 +452,9 @@ func registerServeAd(ctx *gin.Context, sType ServerType) {
 	ctx.JSON(200, gin.H{"msg": "Successful registration"})
 }
 
-// Return a list of available origins URL in Prometheus HTTP SD format
+// Return a list of registered origins and caches in Prometheus HTTP SD format
 // for director's Prometheus service discovery
-func DiscoverOrigins(ctx *gin.Context) {
+func DiscoverOriginCache(ctx *gin.Context) {
 	// Check token for authorization
 	tokens, present := ctx.Request.Header["Authorization"]
 	if !present || len(tokens) == 0 {
@@ -479,24 +479,21 @@ func DiscoverOrigins(ctx *gin.Context) {
 	serverAds := serverAds.Keys()
 	promDiscoveryRes := make([]PromDiscoveryItem, 0)
 	for _, ad := range serverAds {
-		// We don't include caches in this discovery for right now
-		if ad.Type != OriginType {
-			continue
-		}
 		if ad.WebURL.String() == "" {
-			// Oririgns fetched from topology can't be scraped as they
+			// Oririgns and caches fetched from topology can't be scraped as they
 			// don't have a WebURL
 			continue
 		}
 		promDiscoveryRes = append(promDiscoveryRes, PromDiscoveryItem{
 			Targets: []string{ad.WebURL.Hostname() + ":" + ad.WebURL.Port()},
 			Labels: map[string]string{
-				"origin_name":     ad.Name,
-				"origin_auth_url": ad.AuthURL.String(),
-				"origin_url":      ad.URL.String(),
-				"origin_web_url":  ad.WebURL.String(),
-				"origin_lat":      fmt.Sprintf("%.4f", ad.Latitude),
-				"origin_long":     fmt.Sprintf("%.4f", ad.Longitude),
+				"server_type":     string(ad.Type),
+				"server_name":     ad.Name,
+				"server_auth_url": ad.AuthURL.String(),
+				"server_url":      ad.URL.String(),
+				"server_web_url":  ad.WebURL.String(),
+				"server_lat":      fmt.Sprintf("%.4f", ad.Latitude),
+				"server_long":     fmt.Sprintf("%.4f", ad.Longitude),
 			},
 		})
 	}
@@ -522,7 +519,7 @@ func RegisterDirector(router *gin.RouterGroup) {
 	router.GET("/api/v1.0/director/object/*any", RedirectToCache)
 	router.GET("/api/v1.0/director/origin/*any", RedirectToOrigin)
 	router.POST("/api/v1.0/director/registerOrigin", RegisterOrigin)
-	router.GET("/api/v1.0/director/discoverOrigins", DiscoverOrigins)
+	router.GET("/api/v1.0/director/discoverOrigins", DiscoverOriginCache)
 	router.POST("/api/v1.0/director/registerCache", RegisterCache)
 	router.GET("/api/v1.0/director/listNamespaces", ListNamespaces)
 }
