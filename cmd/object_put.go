@@ -29,26 +29,26 @@ import (
 )
 
 var (
-	getCmd = &cobra.Command{
-		Use:   "get {source ...} {destination}",
-		Short: "Get a file from a Pelican federation",
-		Run:   getMain,
+	putCmd = &cobra.Command{
+		Use:   "put {source ...} {destination}",
+		Short: "Send a file to a Pelican federation",
+		Run:   putMain,
 	}
 )
 
 func init() {
-	flagSet := getCmd.Flags()
+	flagSet := putCmd.Flags()
 	flagSet.StringP("cache", "c", "", "Cache to use")
 	flagSet.StringP("token", "t", "", "Token file to use for transfer")
-	flagSet.BoolP("recursive", "r", false, "Recursively download a directory.  Forces methods to only be http to get the freshest directory contents")
+	flagSet.BoolP("recursive", "r", false, "Recursively upload a directory.  Forces methods to only be http to get the freshest directory contents")
 	flagSet.StringP("cache-list-name", "n", "xroot", "(Deprecated) Cache list to use, currently either xroot or xroots; may be ignored")
 	flagSet.Lookup("cache-list-name").Hidden = true
 	flagSet.String("caches", "", "A JSON file containing the list of caches")
-	objectCmd.AddCommand(getCmd)
+	objectCmd.AddCommand(putCmd)
 
 }
 
-func getMain(cmd *cobra.Command, args []string) {
+func putMain(cmd *cobra.Command, args []string) {
 
 	client.ObjectClientOptions.Version = version
 
@@ -111,7 +111,7 @@ func getMain(cmd *cobra.Command, args []string) {
 		var tmpDownloaded int64
 		isRecursive, _ := cmd.Flags().GetBool("recursive")
 		client.ObjectClientOptions.Recursive = isRecursive
-		tmpDownloaded, result = client.DoGet(src, dest, isRecursive)
+		tmpDownloaded, result = client.DoPut(src, dest, isRecursive)
 		downloaded += tmpDownloaded
 		if result != nil {
 			lastSrc = src
@@ -128,7 +128,7 @@ func getMain(cmd *cobra.Command, args []string) {
 		if errMsg == "" {
 			errMsg = result.Error()
 		}
-		log.Errorln("Failure getting " + lastSrc + ": " + errMsg)
+		log.Errorln("Failure putting " + lastSrc + ": " + errMsg)
 		if client.ErrorsRetryable() {
 			log.Errorln("Errors are retryable")
 			os.Exit(11)

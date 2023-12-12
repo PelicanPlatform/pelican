@@ -464,6 +464,76 @@ func getNamespaceInfo(resourcePath, OSDFDirectorUrl string, isPut bool) (ns name
 		return
 	}
 }
+func DoPut(sourceFile string, destination string, recursive bool) (bytesTransferred int64, err error) {
+	// First, create a handler for any panics that occur
+	defer func() {
+		if r := recover(); r != nil {
+			log.Debugln("Panic captured while attempting to perform transfer (DoPut):", r)
+			log.Debugln("Panic caused by the following", string(debug.Stack()))
+			ret := fmt.Sprintf("Unrecoverable error (panic) captured in DoPut: %v", r)
+			err = errors.New(ret)
+			bytesTransferred = 0
+
+			// Attempt to add the panic to the error accumulator
+			AddError(errors.New(ret))
+		}
+	}()
+
+	// Parse the source and destination with URL parse
+	sourceFile, source_scheme := correctURLWithUnderscore(sourceFile)
+	source_url, err := url.Parse(sourceFile)
+	if err != nil {
+		log.Errorln("Failed to parse source URL:", err)
+		return 0, err
+	}
+	source_url.Scheme = source_scheme
+
+	destination, dest_scheme := correctURLWithUnderscore(destination)
+	dest_url, err := url.Parse(destination)
+	if err != nil {
+		log.Errorln("Failed to parse destination URL:", err)
+		return 0, err
+	}
+	dest_url.Scheme = dest_scheme
+
+	if dest_url.Host != "" {
+		if dest_url.Scheme == "osdf" || dest_url.Scheme == "stash" {
+			dest_url.Path = "/" + path.Join(dest_url.Host, dest_url.Path)
+		} else if dest_url.Scheme == "pelican" {
+			federationUrl, _ := url.Parse(dest_url.String())
+			federationUrl.Scheme = "https"
+			federationUrl.Path = ""
+			viper.Set("Federation.DiscoveryUrl", federationUrl.String())
+			err = config.DiscoverFederation()
+			if err != nil {
+				return 0, err
+			}
+		}
+	}
+	destScheme, _ := getTokenName(dest_url)
+
+	understoodSchemes := []string{"file", "osdf", "pelican", ""}
+
+	_, foundDest := Find(understoodSchemes, destScheme)
+	if !foundDest {
+		log.Errorln("Do not understand destination scheme:", source_url.Scheme)
+		return 0, errors.New("Do not understand destination scheme")
+	}
+
+	// Get the namespace of the remote filesystem
+	// For write back, it will be the destination
+	// For read it will be the source.
+	ns, err := namespaces.MatchNamespace(dest_url.Path)
+	if err != nil {
+		log.Errorln("Failed to get namespace information:", err)
+		AddError(err)
+		return 0, err
+	}
+	var transferred int64
+	transferred, err = doWriteBack(source_url.Path, dest_url, ns, recursive)
+	AddError(err)
+	return transferred, err
+}
 
 // Start the transfer for downloads specifically
 func DoGet(sourceFile string, destination string, recursive bool) (bytesTransferred int64, err error) {
