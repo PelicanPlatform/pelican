@@ -465,7 +465,153 @@ func getNamespaceInfo(resourcePath, OSDFDirectorUrl string, isPut bool) (ns name
 	}
 }
 
-// Start the transfer, whether read or write back
+// Start the transfer for downloads specifically
+func DoGet(sourceFile string, destination string, recursive bool) (bytesTransferred int64, err error) {
+	// First, create a handler for any panics that occur
+	defer func() {
+		if r := recover(); r != nil {
+			log.Debugln("Panic captured while attempting to perform transfer (DoGet):", r)
+			log.Debugln("Panic caused by the following", string(debug.Stack()))
+			ret := fmt.Sprintf("Unrecoverable error (panic) captured in DoGet: %v", r)
+			err = errors.New(ret)
+			bytesTransferred = 0
+
+			// Attempt to add the panic to the error accumulator
+			AddError(errors.New(ret))
+		}
+	}()
+
+	// Parse the source and destination with URL parse
+	sourceFile, source_scheme := correctURLWithUnderscore(sourceFile)
+	source_url, err := url.Parse(sourceFile)
+	if err != nil {
+		log.Errorln("Failed to parse source URL:", err)
+		return 0, err
+	}
+	source_url.Scheme = source_scheme
+
+	destination, dest_scheme := correctURLWithUnderscore(destination)
+	dest_url, err := url.Parse(destination)
+	if err != nil {
+		log.Errorln("Failed to parse destination URL:", err)
+		return 0, err
+	}
+	dest_url.Scheme = dest_scheme
+
+	// If there is a host specified, prepend it to the path in the osdf case
+	if source_url.Host != "" {
+		if source_url.Scheme == "osdf" {
+			source_url.Path = "/" + path.Join(source_url.Host, source_url.Path)
+		} else if source_url.Scheme == "pelican" {
+			federationUrl, _ := url.Parse(source_url.String())
+			federationUrl.Scheme = "https"
+			federationUrl.Path = ""
+			viper.Set("Federation.DiscoveryUrl", federationUrl.String())
+			err = config.DiscoverFederation()
+			if err != nil {
+				return 0, err
+			}
+		}
+	}
+
+	sourceScheme, _ := getTokenName(source_url)
+
+	understoodSchemes := []string{"file", "osdf", "pelican", ""}
+
+	_, foundSource := Find(understoodSchemes, sourceScheme)
+	if !foundSource {
+		log.Errorln("Do not understand source scheme:", source_url.Scheme)
+		return 0, errors.New("Do not understand source scheme")
+	}
+
+	if sourceScheme == "osdf" || sourceScheme == "pelican" {
+		sourceFile = source_url.Path
+	}
+
+	if string(sourceFile[0]) != "/" {
+		sourceFile = "/" + sourceFile
+	}
+
+	OSDFDirectorUrl := param.Federation_DirectorUrl.GetString()
+	useOSDFDirector := viper.IsSet("Federation.DirectorURL")
+
+	var ns namespaces.Namespace
+	if useOSDFDirector {
+		dirResp, err := QueryDirector(sourceFile, OSDFDirectorUrl)
+		if err != nil {
+			log.Errorln("Error while querying the Director:", err)
+			AddError(err)
+			return 0, err
+		}
+		ns, err = CreateNsFromDirectorResp(dirResp)
+		if err != nil {
+			AddError(err)
+			return 0, err
+		}
+	} else {
+		ns, err = namespaces.MatchNamespace(source_url.Path)
+		if err != nil {
+			AddError(err)
+			return 0, err
+		}
+	}
+
+	// get absolute path
+	destPath, _ := filepath.Abs(destination)
+
+	//Check if path exists or if its in a folder
+	if destStat, err := os.Stat(destPath); os.IsNotExist(err) {
+		destination = destPath
+	} else if destStat.IsDir() && source_url.Query().Get("pack") == "" {
+		// If we have an auto-pack request, it's OK for the destination to be a directory
+		// Otherwise, get the base name of the source and append it to the destination dir.
+		sourceFilename := path.Base(sourceFile)
+		destination = path.Join(destPath, sourceFilename)
+	}
+
+	payload := payloadStruct{}
+	payload.version = version
+
+	//Fill out the payload as much as possible
+	payload.filename = source_url.Path
+
+	parse_job_ad(payload)
+
+	payload.start1 = time.Now().Unix()
+
+	success := false
+
+	_, token_name := getTokenName(source_url)
+
+	var downloaded int64
+	if downloaded, err = download_http(source_url, destination, &payload, ns, recursive, token_name, OSDFDirectorUrl); err == nil {
+		success = true
+	}
+
+	payload.end1 = time.Now().Unix()
+
+	payload.timestamp = payload.end1
+	payload.downloadTime = (payload.end1 - payload.start1)
+
+	if success {
+		payload.status = "Success"
+
+		// Get the final size of the download file
+		payload.fileSize = downloaded
+		payload.downloadSize = downloaded
+	} else {
+		log.Error("Http GET failed! Unable to download file.")
+		payload.status = "Fail"
+	}
+
+	if !success {
+		return downloaded, errors.New("failed to download file")
+	} else {
+		return downloaded, nil
+	}
+}
+
+// Start the transfer, whether read or write back. Primarily used for backwards compatibility
 func DoStashCPSingle(sourceFile string, destination string, methods []string, recursive bool) (bytesTransferred int64, err error) {
 
 	// First, create a handler for any panics that occur
