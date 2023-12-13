@@ -39,9 +39,9 @@ export default function Home() {
                     <Box sx={{backgroundColor: "#F6F6F6", borderRadius: "1rem"}} p={2}>
                         <Box minHeight={"200px"}>
                             <RateGraph
-                                rate={TimeDuration.fromString("3h")}
-                                duration={TimeDuration.fromString("7d")}
-                                resolution={TimeDuration.fromString("30m")}
+                                rate={TimeDuration.fromString("30m")}
+                                duration={TimeDuration.fromString("1d")}
+                                resolution={TimeDuration.fromString("1m")}
                                 metrics={['xrootd_server_bytes{direction="rx"}', 'xrootd_server_bytes{direction="tx"}']}
                                 boxProps={{
                                     maxHeight:"400px",

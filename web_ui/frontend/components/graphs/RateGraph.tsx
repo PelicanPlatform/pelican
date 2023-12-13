@@ -229,7 +229,7 @@ interface RateGraphProps {
     datasetOptions?: Partial<ChartDataset<"line">> | Partial<ChartDataset<"line">>[];
 }
 
-export default function RateGraph({boxProps, metrics, rate=new TimeDuration(3, "h"), duration=new TimeDuration(7, "d"), resolution=new TimeDuration(30, "m"), options={}, datasetOptions={}}: RateGraphProps) {
+export default function RateGraph({boxProps, metrics, rate=new TimeDuration(30, "m"), duration=new TimeDuration(1, "d"), resolution=new TimeDuration(1, "m"), options={}, datasetOptions={}}: RateGraphProps) {
     let default_rate = rate
     let default_duration = duration
     let default_resolution = resolution
