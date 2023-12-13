@@ -93,7 +93,10 @@ func (me SwapMaps) Swap(left, right int) {
 func checkOverrides(addr net.IP) (coordinate *Coordinate) {
 	// Unmarshal the values, but only the first time we run through this block
 	if geoIPOverrides == nil {
-		_ = param.GeoIPOverrides.Unmarshal(&geoIPOverrides)
+		err := param.GeoIPOverrides.Unmarshal(&geoIPOverrides)
+		if err != nil {
+			log.Warningf("Error while unmarshaling GeoIP Overrides: %v", err)
+		}
 	}
 
 	for _, geoIPOverride := range geoIPOverrides {
