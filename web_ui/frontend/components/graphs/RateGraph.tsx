@@ -221,7 +221,7 @@ function RateGraphDrawer({reset, rate, resolution, duration, time, setRate, setR
 
 interface RateGraphProps {
     boxProps?: BoxProps;
-    metric: string[];
+    metrics: string[];
     rate?: TimeDuration;
     duration?: TimeDuration;
     resolution?: TimeDuration;
@@ -229,8 +229,7 @@ interface RateGraphProps {
     datasetOptions?: Partial<ChartDataset<"line">> | Partial<ChartDataset<"line">>[];
 }
 
-export default function RateGraph({boxProps, metric, rate=new TimeDuration(3, "h"), duration=new TimeDuration(7, "d"), resolution=new TimeDuration(30, "m"), options={}, datasetOptions={}}: RateGraphProps) {
-
+export default function RateGraph({boxProps, metrics, rate=new TimeDuration(3, "h"), duration=new TimeDuration(7, "d"), resolution=new TimeDuration(30, "m"), options={}, datasetOptions={}}: RateGraphProps) {
     let default_rate = rate
     let default_duration = duration
     let default_resolution = resolution
@@ -281,7 +280,7 @@ export default function RateGraph({boxProps, metric, rate=new TimeDuration(3, "h
 
     async function getData(){
         let chartData: ChartData<"line", any, any> = {
-            datasets: await Promise.all(metric.map(async (metric, index) => {
+            datasets: await Promise.all(metrics.map(async (metric, index) => {
 
                 let datasetOption: Partial<ChartDataset<"line">> = {}
                 if(datasetOptions instanceof Array){
@@ -298,9 +297,9 @@ export default function RateGraph({boxProps, metric, rate=new TimeDuration(3, "h
                 if (updatedTime.hasSame(DateTime.now(), "day")) {
                     updatedTime = DateTime.now()
                 }
-
+                
                 return {
-                    data: (await query_rate({metric: `${metric}`, rate:_rate, duration:_duration, resolution:_resolution, time:updatedTime})),
+                    data: (await query_rate({metric, rate:_rate, duration:_duration, resolution:_resolution, time:updatedTime})),
                     ...datasetOption
                 }
             }))
