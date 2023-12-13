@@ -174,7 +174,7 @@ function RateGraphDrawer({reset, rate, resolution, duration, time, setRate, setR
                                     </FormControl>
                                 </Grid>
                                 <Grid item xs={1} m={"auto"}>
-                                    <IconButton href={"https://prometheus.io/docs/prometheus/latest/querying/functions/#rate"} size={"small"}><QuestionMark/></IconButton>
+                                    <IconButton href={"https://prometheus.io/docs/prometheus/latest/querying/functions/#rate"} size={"small"} target="_blank" rel="noopener noreferrer"><QuestionMark/></IconButton>
                                 </Grid>
                             </Grid>
                         </Grid>
@@ -208,7 +208,7 @@ function RateGraphDrawer({reset, rate, resolution, duration, time, setRate, setR
                                     </FormControl>
                                 </Grid>
                                 <Grid item xs={1} m={"auto"}>
-                                    <IconButton href={"https://prometheus.io/docs/prometheus/latest/querying/examples/#subquery"} size={"small"}><QuestionMark/></IconButton>
+                                    <IconButton href={"https://prometheus.io/docs/prometheus/latest/querying/examples/#subquery"} size={"small"} target="_blank" rel="noopener noreferrer"><QuestionMark/></IconButton>
                                 </Grid>
                             </Grid>
                         </Grid>
@@ -239,9 +239,8 @@ export default function RateGraph({boxProps, metric, rate=new TimeDuration(3, "h
         setRate(default_rate.copy())
         setDuration(default_duration.copy())
         setResolution(default_resolution.copy())
-        setTime(DateTime.now())
+        setTime(DateTime.now().plus({ days: 1 }).set({ hour: 0, minute: 0, second: 0, millisecond: 0 }))
     }
-
 
     let [_rate, setRate] = useState(rate)
     let [_duration, _setDuration] = useState(duration)
