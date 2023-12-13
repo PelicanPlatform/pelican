@@ -41,7 +41,7 @@ export default function Home() {
                             <RateGraph
                                 rate={TimeDuration.fromString("3h")}
                                 duration={TimeDuration.fromString("7d")}
-                                resolution={TimeDuration.fromString("3h")}
+                                resolution={TimeDuration.fromString("30m")}
                                 metric={['xrootd_server_bytes{direction="rx"}', 'xrootd_server_bytes{direction="rx"}']}
                                 boxProps={{
                                     maxHeight:"400px",

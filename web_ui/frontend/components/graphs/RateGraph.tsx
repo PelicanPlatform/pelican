@@ -229,7 +229,7 @@ interface RateGraphProps {
     datasetOptions?: Partial<ChartDataset<"line">> | Partial<ChartDataset<"line">>[];
 }
 
-export default function RateGraph({boxProps, metric, rate=new TimeDuration(3, "h"), duration=new TimeDuration(7, "d"), resolution=new TimeDuration(3, "h"), options={}, datasetOptions={}}: RateGraphProps) {
+export default function RateGraph({boxProps, metric, rate=new TimeDuration(3, "h"), duration=new TimeDuration(7, "d"), resolution=new TimeDuration(30, "m"), options={}, datasetOptions={}}: RateGraphProps) {
 
     let default_rate = rate
     let default_duration = duration
@@ -239,22 +239,22 @@ export default function RateGraph({boxProps, metric, rate=new TimeDuration(3, "h
         setRate(default_rate.copy())
         setDuration(default_duration.copy())
         setResolution(default_resolution.copy())
-        setTime(DateTime.now().plus({ days: 1 }).set({ hour: 0, minute: 0, second: 0, millisecond: 0 }))
+        setTime(DateTime.now())
     }
 
     let [_rate, setRate] = useState(rate)
     let [_duration, _setDuration] = useState(duration)
     let [_resolution, setResolution] = useState(resolution)
-    let [_time, _setTime] = useState<DateTime>(DateTime.now().plus({ days: 1 }).set({ hour: 0, minute: 0, second: 0, millisecond: 0 }))
+    let [_time, _setTime] = useState<DateTime>(DateTime.now())
 
     // Create some reasonable defaults for the graph
     let setDuration = (duration: TimeDuration) => {
         if(duration.value == 1){
             setRate(new TimeDuration(30, "m"))
-            setResolution(new TimeDuration(30, "m"))
+            setResolution(new TimeDuration(10, "m"))
         } else if(duration.value == 7){
             setRate(new TimeDuration(3, "h"))
-            setResolution(new TimeDuration(3, "h"))
+            setResolution(new TimeDuration(30, "m"))
         } else if(duration.value == 31){
             setRate(new TimeDuration(12, "h"))
             setResolution(new TimeDuration(12, "h"))
@@ -264,7 +264,18 @@ export default function RateGraph({boxProps, metric, rate=new TimeDuration(3, "h
     }
 
     let setTime = (time: DateTime) => {
-        _setTime(time.set({ hour: 0, minute: 0, second: 0, millisecond: 0 }))
+        // If it's not today, then set time to the end of that day
+        // If it's today, then set to date.now
+        //
+        // This helps us to get the latest data while not going over the wanted time range
+        // If we set the time to the future, PromQL will give you random data in the future to
+        // interpolate the missing ones
+        if (time.hasSame(DateTime.now(), "day")) {
+            time = DateTime.now()
+        } else {
+            time.set({hour: 23, minute: 59, second: 59, millisecond: 999})
+        }
+        _setTime(time)
     }
 
 
@@ -283,8 +294,13 @@ export default function RateGraph({boxProps, metric, rate=new TimeDuration(3, "h
                     datasetOption = datasetOptions
                 }
 
+                let updatedTime = _time
+                if (updatedTime.hasSame(DateTime.now(), "day")) {
+                    updatedTime = DateTime.now()
+                }
+
                 return {
-                    data: (await query_rate({metric: `${metric}`, rate:_rate, duration:_duration, resolution:_resolution, time:_time})),
+                    data: (await query_rate({metric: `${metric}`, rate:_rate, duration:_duration, resolution:_resolution, time:updatedTime})),
                     ...datasetOption
                 }
             }))
