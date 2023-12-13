@@ -745,15 +745,8 @@ func metadataHandler(ctx *gin.Context) {
 	if filepath.Base(path) == "issuer.jwks" {
 		// do something
 		prefix := strings.TrimSuffix(path, "/.well-known/issuer.jwks")
-		var checkAdmin bool
-		if filepath.Base(prefix) == "getNamespaceKey" {
-			prefix = strings.TrimSuffix(prefix, "/getNamespaceKey")
-			checkAdmin = false
-		} else {
-			checkAdmin = true
-		}
 
-		jwks, err := dbGetPrefixJwks(prefix, checkAdmin)
+		jwks, err := dbGetPrefixJwks(prefix, true)
 
 		if err != nil {
 			if err == serverCredsErr {

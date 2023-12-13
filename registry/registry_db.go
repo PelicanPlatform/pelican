@@ -229,10 +229,10 @@ func getPrefixJwksById(id int) (jwk.Set, error) {
 	return set, nil
 }
 
-func dbGetPrefixJwks(prefix string, adminApproval bool) (*jwk.Set, error) {
+func dbGetPrefixJwks(prefix string, approvalRequired bool) (*jwk.Set, error) {
 	var jwksQuery string
 	var pubkeyStr string
-	if strings.HasPrefix(prefix, "/caches/") && adminApproval {
+	if strings.HasPrefix(prefix, "/caches/") && approvalRequired {
 		var admin_metadata string
 		jwksQuery = `SELECT pubkey, admin_metadata FROM namespace WHERE prefix = ?`
 		err := db.QueryRow(jwksQuery, prefix).Scan(&pubkeyStr, &admin_metadata)
