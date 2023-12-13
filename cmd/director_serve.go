@@ -28,6 +28,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
+	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/web_ui"
 	log "github.com/sirupsen/logrus"
@@ -49,6 +50,8 @@ func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
 
 	log.Info("Initializing Director GeoIP database...")
 	director.InitializeDB()
+
+	metrics.SetComponentHealthStatus(metrics.DirectorRegistry_Topology, metrics.StatusWarning, "Start requesting from topology, status unknown")
 
 	if config.GetPreferredPrefix() == "OSDF" {
 		log.Info("Generating/advertising server ads from OSG topology service...")
