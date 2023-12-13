@@ -105,6 +105,31 @@ type: duration
 default: 10s
 components: ["client", "nsregistry", "origin"]
 ---
+name: GeoIPOverrides
+description: >-
+  A list of IP addresses whose GeoIP resolution should be overridden with the supplied Lat/Long coordinates (in decimal form). This affects
+  both server ads (for determining the location of origins and caches) and incoming client requests (for determing where a client request is
+  coming from).
+
+  Configuration takes an IP address (both regular and CIDR) and a Coordinate made up of a lat/long pair in decimal format. For example:
+  ```
+  GeoIPOverrides:
+    - IP: "123.234.123.234"
+      Coordinate:
+        Lat: 43.073904
+        Long: -89.384859
+    - IP: "ABCD::1234/112"
+      Coordinate:
+        Lat: 39.8281
+        Long: -98.5795
+  ```
+
+  will result in the IP address "123.234.123.234" being mapped to Madison, WI, and IP addresses in the range ABCD::0000-FFFF will be mapped
+  to a field in Kansas.
+type: object
+default: none
+components: ["director"]
+---
 
 ############################
 #     Log-Level Configs    #
