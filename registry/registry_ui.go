@@ -16,7 +16,7 @@
  *
  ***************************************************************/
 
-package nsregistry
+package registry
 
 import (
 	"encoding/json"
@@ -112,7 +112,7 @@ func getNamespaceJWKS(ctx *gin.Context) {
 	ctx.Data(200, "application/json", jsonData)
 }
 
-func RegisterNamespacesRegistryWebAPI(router *gin.RouterGroup) {
+func RegisterRegistryWebAPI(router *gin.RouterGroup) {
 	registryWebAPI := router.Group("/api/v1.0/registry_ui")
 	// Follow RESTful schema
 	{

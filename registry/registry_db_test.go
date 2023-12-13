@@ -16,7 +16,7 @@
  *
  ***************************************************************/
 
-package nsregistry
+package registry
 
 import (
 	"database/sql"

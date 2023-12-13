@@ -16,7 +16,15 @@
  *
  ***************************************************************/
 
-package nsregistry
+// Package registry handles namespace management in Pelican ecosystem.
+//
+//   - It handles the logic to spin up a "registry" server for namespace management,
+//     including a web UI for interactive namespace registration, approval, and browsing.
+//   - It provides a CLI tool `./pelican namespace <command> <args>` to list, register, and delete a namespace
+//
+// To register a namespace, first spin up registry server by `./pelican registry -p <your-port-number>`, and then use either
+// the CLI tool or go to registry web UI at `https://localhost:<your-port-number>/view/`, and follow instructions for next steps.
+package registry
 
 import (
 	"context"
@@ -39,6 +47,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+
 	// use this sqlite driver instead of the one from
 	// github.com/mattn/go-sqlite3, because this one
 	// doesn't require compilation with CGO_ENABLED
@@ -762,7 +771,7 @@ func getOpenIDConfiguration(c *gin.Context) {
 }
 */
 
-func RegisterNamespaceRegistry(router *gin.RouterGroup) {
+func RegisterRegistryRoutes(router *gin.RouterGroup) {
 	registry := router.Group("/api/v1.0/registry")
 	{
 		registry.POST("", cliRegisterNamespace)
