@@ -58,8 +58,8 @@ func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		if err := director.AdvertiseOSDF(); err != nil {
 			panic(err)
 		}
-		go director.PeriodicCacheReload()
 	}
+	go director.PeriodicCacheReload()
 
 	director.ConfigTTLCache(shutdownCtx, &wg)
 	wg.Add(1) // Add to wait group after ConfigTTLCache finishes to avoid deadlock
