@@ -19,7 +19,7 @@
 // Package namespaces implements namespace lookups and matches for legacy [stashcp] and [osdf-client]
 // to maintain backward compatibility.
 //
-// The namespaces pacakge should not be used for any new features Pelican introduces.
+// The namespaces package should not be used for any new features Pelican introduces.
 //
 // [stashcp]: https://github.com/opensciencegrid/stashcp
 // [osdf-client]: https://github.com/htcondor/osdf-client

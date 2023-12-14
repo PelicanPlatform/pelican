@@ -22,7 +22,7 @@
 //     including a web UI for interactive namespace registration, approval, and browsing.
 //   - It provides a CLI tool `./pelican namespace <command> <args>` to list, register, and delete a namespace
 //
-// To register a namespace, first spin up registry server by `./pelican registry -p <your-port-number>`, and then use either
+// To register a namespace, first spin up registry server by `./pelican registry serve -p <your-port-number>`, and then use either
 // the CLI tool or go to registry web UI at `https://localhost:<your-port-number>/view/`, and follow instructions for next steps.
 package registry
 
