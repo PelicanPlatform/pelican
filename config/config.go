@@ -76,14 +76,14 @@ type (
 		JwksUri                       string `json:"jwks_uri"`
 	}
 
-	ServerType int
-
 	TokenOperation int
 
 	TokenGenerationOpts struct {
 		Operation TokenOperation
 	}
 )
+
+type ServerType int // ServerType is a bit mask indicating which Pelican server(s) are running in the current process
 
 const (
 	CacheType ServerType = 1 << iota
@@ -116,10 +116,43 @@ var (
 	// Our global transports that only will get reconfigured if needed
 	transport     *http.Transport
 	onceTransport sync.Once
+
+	// A global variable to be set and access to obtain enabled Pelican servers in the current process
+	enabledServers ServerType
+	setServerOnce  sync.Once
 )
 
-func (sType ServerType) IsSet(otherVal ServerType) bool {
-	return sType&otherVal == otherVal
+// Set sets a list of newServers to ServerType instance
+//
+// DON'T call this function on EnabledServers but call setEnabledServer instead
+func (sType *ServerType) Set(newServers []ServerType) {
+	for _, server := range newServers {
+		*sType |= server
+	}
+}
+
+// IsEnabled checks if a testServer is in the ServerType instance
+func (sType ServerType) IsEnabled(testServer ServerType) bool {
+	return sType&testServer == testServer
+}
+
+// setEnabledServer sets the global variable config.EnabledServers to include newServers.
+// Since this function should only be called in config package, we mark it "private" to avoid
+// reset value in other pacakge
+//
+// This will only be called once in a single process
+func setEnabledServer(newServers []ServerType) {
+	setServerOnce.Do(func() {
+		// For each process, we only want to set enabled servers once
+		enabledServers.Set(newServers)
+	})
+}
+
+// IsServerEnabled checks if testServer is enabled in the current process.
+//
+// Use this function to check which server(s) are running in the current process.
+func IsServerEnabled(testServer ServerType) bool {
+	return enabledServers.IsEnabled(testServer)
 }
 
 func (sType ServerType) String() string {
@@ -323,7 +356,7 @@ func setupTransport() {
 	}
 }
 
-func parseServerIssuerURL(sType ServerType) error {
+func parseServerIssuerURL() error {
 	if param.Server_IssuerUrl.GetString() != "" {
 		_, err := url.Parse(param.Server_IssuerUrl.GetString())
 		if err != nil {
@@ -345,7 +378,7 @@ func parseServerIssuerURL(sType ServerType) error {
 		return errors.New("If Server.IssuerHostname is configured, you must provide a valid port")
 	}
 
-	if sType == OriginType {
+	if enabledServers.IsEnabled(OriginType) {
 		// If Origin.Mode is set to anything that isn't "posix" or "", assume we're running a plugin and
 		// that the origin's issuer URL actually uses the same port as OriginUI instead of XRootD. This is
 		// because under that condition, keys are being served by the Pelican process instead of by XRootD
@@ -469,14 +502,17 @@ func initConfigDir() error {
 	return nil
 }
 
-func InitServer(sType ServerType) error {
+func InitServer(servers []ServerType) error {
 	if err := initConfigDir(); err != nil {
 		return errors.Wrap(err, "Failed to initialize the server configuration")
 	}
+
+	setEnabledServer(servers)
+
 	xrootdPrefix := ""
-	if sType.IsSet(OriginType) {
+	if enabledServers.IsEnabled(OriginType) {
 		xrootdPrefix = "origin"
-	} else if sType.IsSet(CacheType) {
+	} else if enabledServers.IsEnabled(CacheType) {
 		xrootdPrefix = "cache"
 	}
 	configDir := viper.GetString("ConfigDir")
@@ -550,7 +586,7 @@ func InitServer(sType ServerType) error {
 	// they have overridden the defaults.
 	hostname = viper.GetString("Server.Hostname")
 
-	if sType.IsSet(CacheType) {
+	if enabledServers.IsEnabled(CacheType) {
 		viper.Set("Xrootd.Port", param.Cache_Port.GetInt())
 	}
 	xrootdPort := param.Xrootd_Port.GetInt()
@@ -604,7 +640,7 @@ func InitServer(sType ServerType) error {
 
 	// Set up the server's issuer URL so we can access that data wherever we need to find keys and whatnot
 	// This populates Server.IssuerUrl, and can be safely fetched using server_utils.GetServerIssuerURL()
-	err = parseServerIssuerURL(sType)
+	err = parseServerIssuerURL()
 	if err != nil {
 		return err
 	}

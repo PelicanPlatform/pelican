@@ -28,7 +28,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/namespace_registry"
+	nsregistry "github.com/pelicanplatform/pelican/namespace_registry"
 	"github.com/pelicanplatform/pelican/web_ui"
 )
 
@@ -56,7 +56,7 @@ func serveNamespaceRegistry( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		return err
 	}
 
-	if err := web_ui.ConfigureServerWebAPI(engine, false); err != nil {
+	if err := web_ui.ConfigureServerWebAPI(engine); err != nil {
 		return err
 	}
 	rootRouterGroup := engine.Group("/")

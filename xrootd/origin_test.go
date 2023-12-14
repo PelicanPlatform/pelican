@@ -70,7 +70,7 @@ func originMockup(t *testing.T) context.CancelFunc {
 	// Increase the log level; otherwise, its difficult to debug failures
 	viper.Set("Logging.Level", "Debug")
 	config.InitConfig()
-	err = config.InitServer(config.OriginType)
+	err = config.InitServer([]config.ServerType{config.OriginType})
 	require.NoError(t, err)
 
 	err = config.GeneratePrivateKey(param.Server_TLSKey.GetString(), elliptic.P256())

@@ -36,6 +36,7 @@ import (
 	"github.com/grafana/regexp"
 	"github.com/mwitkow/go-conntrack"
 	"github.com/oklog/run"
+	pelican_config "github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/utils"
@@ -271,7 +272,8 @@ func (a LogrusAdapter) Log(keyvals ...interface{}) error {
 	return nil
 }
 
-func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
+func ConfigureEmbeddedPrometheus(engine *gin.Engine) error {
+	isDirector := pelican_config.IsServerEnabled(pelican_config.DirectorType)
 	cfg := flagConfig{}
 	ListenAddress := fmt.Sprintf("0.0.0.0:%v", param.Server_WebPort.GetInt())
 	cfg.webTimeout = model.Duration(5 * time.Minute)
