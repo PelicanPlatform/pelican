@@ -117,14 +117,12 @@ var (
 	transport     *http.Transport
 	onceTransport sync.Once
 
-	// A global variable to be set and access to obtain enabled Pelican servers in the current process
+	// A variable indicating enabled Pelican servers in the current process
 	enabledServers ServerType
 	setServerOnce  sync.Once
 )
 
 // Set sets a list of newServers to ServerType instance
-//
-// DON'T call this function on EnabledServers but call setEnabledServer instead
 func (sType *ServerType) Set(newServers []ServerType) {
 	for _, server := range newServers {
 		*sType |= server
@@ -378,7 +376,7 @@ func parseServerIssuerURL() error {
 		return errors.New("If Server.IssuerHostname is configured, you must provide a valid port")
 	}
 
-	if enabledServers.IsEnabled(OriginType) {
+	if IsServerEnabled(OriginType) {
 		// If Origin.Mode is set to anything that isn't "posix" or "", assume we're running a plugin and
 		// that the origin's issuer URL actually uses the same port as OriginUI instead of XRootD. This is
 		// because under that condition, keys are being served by the Pelican process instead of by XRootD
@@ -510,9 +508,9 @@ func InitServer(servers []ServerType) error {
 	setEnabledServer(servers)
 
 	xrootdPrefix := ""
-	if enabledServers.IsEnabled(OriginType) {
+	if IsServerEnabled(OriginType) {
 		xrootdPrefix = "origin"
-	} else if enabledServers.IsEnabled(CacheType) {
+	} else if IsServerEnabled(CacheType) {
 		xrootdPrefix = "cache"
 	}
 	configDir := viper.GetString("ConfigDir")
@@ -586,7 +584,7 @@ func InitServer(servers []ServerType) error {
 	// they have overridden the defaults.
 	hostname = viper.GetString("Server.Hostname")
 
-	if enabledServers.IsEnabled(CacheType) {
+	if IsServerEnabled(CacheType) {
 		viper.Set("Xrootd.Port", param.Cache_Port.GetInt())
 	}
 	xrootdPort := param.Xrootd_Port.GetInt()

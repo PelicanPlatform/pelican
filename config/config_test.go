@@ -159,7 +159,7 @@ func TestEnabledServers(t *testing.T) {
 	t.Run("no-value-set", func(t *testing.T) {
 		enabledServers = 0
 		for _, server := range allServerTypes {
-			assert.False(t, enabledServers.IsEnabled(server))
+			assert.False(t, IsServerEnabled(server))
 		}
 	})
 

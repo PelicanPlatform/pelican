@@ -18,8 +18,10 @@
 
 package server_utils
 
-import "github.com/pelicanplatform/pelican/config"
-import "github.com/pelicanplatform/pelican/director"
+import (
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/director"
+)
 
 type (
 	XRootDServer interface {
