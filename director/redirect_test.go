@@ -217,7 +217,7 @@ func TestDirectorRegistration(t *testing.T) {
 
 		r.ServeHTTP(w, c.Request)
 
-		assert.Equal(t, 400, w.Result().StatusCode, "Expected failing status code of 400")
+		assert.Equal(t, http.StatusForbidden, w.Result().StatusCode, "Expected failing status code of 403")
 		body, _ := io.ReadAll(w.Result().Body)
 		assert.Equal(t, `{"error":"Authorization token verification failed"}`, string(body), "Failure wasn't because token verification failed")
 

@@ -74,6 +74,8 @@ https://www.alexedwards.net/blog/organising-database-access
 var db *sql.DB
 
 func createNamespaceTable() {
+	//We put a size limit on admin_metadata to guard against potentially future
+	//malicious large inserts
 	query := `
     CREATE TABLE IF NOT EXISTS namespace (
         id INTEGER PRIMARY KEY AUTOINCREMENT,

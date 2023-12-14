@@ -132,7 +132,7 @@ func Advertise(server server_utils.XRootDServer) error {
 		if unmarshalErr := json.Unmarshal(body, &respErr); unmarshalErr != nil { // Error creating json
 			return errors.Wrapf(unmarshalErr, "Could not unmarshall the director's response, which responded %v from director registration: %v", resp.StatusCode, resp.Status)
 		}
-		if resp.StatusCode == 404 {
+		if resp.StatusCode == http.StatusForbidden {
 			return errors.Errorf("Error during director advertisement: Cache has not been approved by administrator.")
 		}
 		return errors.Errorf("Error during director registration: %v\n", respErr.Error)

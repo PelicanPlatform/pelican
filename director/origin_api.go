@@ -58,6 +58,8 @@ type NamespaceCache interface {
 var (
 	namespaceKeys      = ttlcache.New[string, NamespaceCache](ttlcache.WithTTL[string, NamespaceCache](15 * time.Minute))
 	namespaceKeysMutex = sync.RWMutex{}
+
+	adminApprovalErr error
 )
 
 func CreateAdvertiseToken(namespace string) (string, error) {
@@ -149,7 +151,8 @@ func VerifyAdvertiseToken(token, namespace string) (bool, error) {
 		}
 		log.Debugln("Constructed JWKS from fetching jwks:", string(jsonbuf))
 		if jsonbuf == nil {
-			return false, errors.Wrap(err, "Cache does not have admin approval")
+			adminApprovalErr = errors.New(namespace + " has not been approved by an administrator.")
+			return false, adminApprovalErr
 		}
 	}
 

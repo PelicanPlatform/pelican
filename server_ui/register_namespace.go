@@ -65,7 +65,7 @@ func keyIsRegistered(privkey jwk.Key, url string, prefix string) (keyStatus, err
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("prefix", prefix)
+	req.Header.Set("X-Pelican-Prefix", prefix)
 
 	tr := config.GetTransport()
 	client := &http.Client{Transport: tr}
