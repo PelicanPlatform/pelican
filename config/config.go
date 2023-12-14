@@ -484,10 +484,6 @@ func InitServer(sType ServerType) error {
 	viper.SetDefault("Server.TLSCertificate", filepath.Join(configDir, "certificates", "tls.crt"))
 	viper.SetDefault("Server.TLSKey", filepath.Join(configDir, "certificates", "tls.key"))
 	viper.SetDefault("Server.TLSCAKey", filepath.Join(configDir, "certificates", "tlsca.key"))
-	viper.SetDefault("Xrootd.RobotsTxtFile", filepath.Join(configDir, "robots.txt"))
-	viper.SetDefault("Xrootd.ScitokensConfig", filepath.Join(configDir, "xrootd", "scitokens.cfg"))
-	viper.SetDefault("Xrootd.Authfile", filepath.Join(configDir, "xrootd", "authfile"))
-	viper.SetDefault("Xrootd.MacaroonsKeyFile", filepath.Join(configDir, "macaroons-secret"))
 	viper.SetDefault("IssuerKey", filepath.Join(configDir, "issuer.jwk"))
 	viper.SetDefault("Server.UIPasswordFile", filepath.Join(configDir, "server-web-passwd"))
 	viper.SetDefault("Server.UIActivationCodeFile", filepath.Join(configDir, "server-web-activation-code"))
@@ -526,6 +522,13 @@ func InitServer(sType ServerType) error {
 		}
 		viper.SetDefault("Origin.Multiuser", false)
 	}
+
+	xrootdRunDir := param.Xrootd_RunLocation.GetString()
+	viper.SetDefault("Xrootd.RobotsTxtFile", filepath.Join(xrootdRunDir, "robots.txt"))
+	viper.SetDefault("Xrootd.ScitokensConfig", filepath.Join(xrootdRunDir, "scitokens.cfg"))
+	viper.SetDefault("Xrootd.Authfile", filepath.Join(xrootdRunDir, "authfile-generated"))
+	viper.SetDefault("Xrootd.MacaroonsKeyFile", filepath.Join(xrootdRunDir, "macaroons-secret"))
+
 	// Any platform-specific paths should go here
 	err := InitServerOSDefaults()
 	if err != nil {
