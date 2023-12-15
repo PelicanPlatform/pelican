@@ -22,7 +22,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"reflect"
 	"strconv"
+	"strings"
+	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pelicanplatform/pelican/param"
@@ -34,7 +38,107 @@ type (
 	listNamespaceRequest struct {
 		ServerType string `form:"server_type"`
 	}
+
+	registrationFieldType string
+	registrationField     struct {
+		Name     string                `json:"name"`
+		Type     registrationFieldType `json:"type"`
+		Required bool                  `json:"required"`
+		Options  []interface{}         `json:"options"`
+	}
 )
+
+const (
+	String   registrationFieldType = "string"
+	Int      registrationFieldType = "int"
+	Enum     registrationFieldType = "enum"
+	DateTime registrationFieldType = "datetime"
+)
+
+var (
+	registrationFields        []registrationField
+	setRegistrationFieldsOnce sync.Once
+)
+
+func init() {
+	setRegistrationFieldsOnce.Do(func() {
+		registrationFields = make([]registrationField, 0)
+		registrationFields = append(registrationFields, populateRegistrationFields("", Namespace{})...)
+		registrationFields = append(registrationFields, populateRegistrationFields("admin_metadata", AdminMetadata{})...)
+	})
+}
+
+// Populate registrationFields array for frontend to send registration data
+func populateRegistrationFields(prefix string, data interface{}) []registrationField {
+	var fields []registrationField
+
+	val := reflect.ValueOf(data)
+	typ := val.Type()
+	for i := 0; i < val.NumField(); i++ {
+		field := typ.Field(i)
+
+		// Check for the "post" tag, it can be "exlude" or "required"
+		if tag := field.Tag.Get("post"); tag == "exclude" {
+			continue
+		}
+
+		name := ""
+		if prefix != "" {
+			name += prefix + "."
+		}
+		// Find if the field has a json tag. Use the json tag name if so
+		tempName := field.Name
+		jsonTag := field.Tag.Get("json")
+		if jsonTag != "" {
+			splitJson := strings.Split(jsonTag, ",")[0]
+			if splitJson != "-" {
+				tempName = splitJson
+			} else {
+				// `json:"-"` means this field should be removed from any marshalling
+				continue
+			}
+		}
+
+		regField := registrationField{
+			Name:     name + tempName,
+			Required: field.Tag.Get("post") == "required",
+		}
+
+		switch field.Type.Kind() {
+		case reflect.Int:
+			regField.Type = Int
+			fields = append(fields, regField)
+			break
+		case reflect.String:
+			regField.Type = String
+			fields = append(fields, regField)
+			break
+		case reflect.Struct:
+			// Check if the struct is of type time.Time
+			if field.Type == reflect.TypeOf(time.Time{}) {
+				regField.Type = DateTime
+				fields = append(fields, regField)
+				break
+			}
+		}
+
+		if field.Type == reflect.TypeOf(RegistrationStatus(0)) {
+			regField.Type = Enum
+			options := make([]interface{}, 3)
+			options[0] = Pending
+			options[1] = Approved
+			options[2] = Denied
+			regField.Options = options
+			fields = append(fields, regField)
+		} else {
+			// Skip the field if it's not in the types listed above
+			continue
+		}
+
+	}
+
+	return fields
+}
 
 // Helper function to exclude pubkey field from marshalling into json
 func excludePubKey(nss []*Namespace) (nssNew []NamespaceWOPubkey) {
@@ -98,9 +202,8 @@ func listNamespacesForUser(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, namespaces)
 }
 
-func getEmptyNamespace(ctx *gin.Context) {
-	emptyNs := Namespace{}
-	ctx.JSON(http.StatusOK, emptyNs)
+func getNamespaceRegFields(ctx *gin.Context) {
+	ctx.JSON(http.StatusOK, registrationFields)
 }
 
 func createUpdateNamespace(ctx *gin.Context) {
@@ -113,23 +216,27 @@ func createUpdateNamespace(ctx *gin.Context) {
 	if ctx.ShouldBindJSON(&ns) != nil {
 		ctx.AbortWithStatusJSON(400, gin.H{"error": "Invalid create or update namespace request"})
 	}
-	exists, err := namespaceExistsById(ns.ID)
-	if err != nil {
-		log.Error("Failed to get namespace by ID:", err)
-		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Fail to find if namespace exists"})
-	}
-	if exists { // Update namespace
-		if err := updateNamespace(&ns); err != nil {
-			log.Errorf("Failed to update namespace with id %d. %v", ns.ID, err)
-			ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Fail to update namespace"})
-		}
-	} else { // Insert namespace
+	if ns.ID == 0 { // Create
 		ns.AdminMetadata.UserID = user
-		if err = addNamespace(&ns); err != nil {
+		if err := addNamespace(&ns); err != nil {
 			log.Errorf("Failed to insert namespace with id %d. %v", ns.ID, err)
 			ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Fail to insert namespace"})
 		}
 		ctx.JSON(http.StatusOK, gin.H{"message": "success"})
+	} else { // Update
+		exists, err := namespaceExistsById(ns.ID)
+		if err != nil {
+			log.Error("Failed to get namespace by ID:", err)
+			ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Fail to find if namespace exists"})
+		}
+		if exists { // Update namespace if namespace exists
+			if err := updateNamespace(&ns); err != nil {
+				log.Errorf("Failed to update namespace with id %d. %v", ns.ID, err)
+				ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Fail to update namespace"})
+			}
+		} else {
+			ctx.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "Can't update namespace: namespace not found"})
+		}
 	}
 }
 
@@ -211,7 +318,7 @@ func RegisterRegistryWebAPI(router *gin.RouterGroup) {
 		registryWebAPI.GET("/namespaces", listNamespaces)
 		registryWebAPI.POST("/namespaces", web_ui.AuthHandler, createUpdateNamespace)
 		registryWebAPI.PUT("/namespaces", web_ui.AuthHandler, createUpdateNamespace)
-		registryWebAPI.OPTIONS("/namespaces", web_ui.AuthHandler, getEmptyNamespace)
+		registryWebAPI.OPTIONS("/namespaces", web_ui.AuthHandler, getNamespaceRegFields)
 		registryWebAPI.GET("/namespaces/user", web_ui.AuthHandler, listNamespacesForUser)
 		registryWebAPI.GET("/namespaces/:id/pubkey", getNamespaceJWKS)
 		registryWebAPI.PATCH("/namespaces/:id/approve", web_ui.AuthHandler, adminAuthHandler, func(ctx *gin.Context) {

@@ -48,23 +48,23 @@ type RegistrationStatus int
 // the OAuth client issues if the user is logged in using OAuth, or it should be
 // "admin" from local password-based authentication
 type AdminMetadata struct {
-	UserID                string             `json:"user_id"` // "sub" claim of user JWT who requested registration
+	UserID                string             `json:"user_id" post:"exclude"` // "sub" claim of user JWT who requested registration
 	Description           string             `json:"description"`
-	SiteName              string             `json:"site_name"`
-	Institution           string             `json:"institution"`
+	SiteName              string             `json:"site_name" post:"required"`
+	Institution           string             `json:"institution" post:"required"`
 	SecurityContactUserID string             `json:"security_contact_user_id"` // "sub" claim of user who is responsible for taking security concern
-	Status                RegistrationStatus `json:"status"`
-	ApproverID            string             `json:"approver_id"` // "sub" claim of user JWT who approved registration
-	ApprovedAt            time.Time          `json:"approved_at"`
-	CreatedAt             time.Time          `json:"created_at"`
-	UpdatedAt             time.Time          `json:"updated_at"`
+	Status                RegistrationStatus `json:"status" post:"exclude"`
+	ApproverID            string             `json:"approver_id" post:"exclude"` // "sub" claim of user JWT who approved registration
+	ApprovedAt            time.Time          `json:"approved_at" post:"exclude"`
+	CreatedAt             time.Time          `json:"created_at" post:"exclude"`
+	UpdatedAt             time.Time          `json:"updated_at" post:"exclude"`
 }
 
 type Namespace struct {
-	ID            int           `json:"id"`
-	Prefix        string        `json:"prefix"`
-	Pubkey        string        `json:"pubkey"`
-	Identity      string        `json:"identity"`
+	ID            int           `json:"id" post:"exclude"`
+	Prefix        string        `json:"prefix" post:"required"`
+	Pubkey        string        `json:"pubkey" post:"required"`
+	Identity      string        `json:"identity" post:"exclude"`
 	AdminMetadata AdminMetadata `json:"admin_metadata"`
 }
 

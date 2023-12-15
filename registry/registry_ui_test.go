@@ -319,3 +319,9 @@ func TestAdminAuthHandler(t *testing.T) {
 		})
 	}
 }
+
+func TestPopulateRegistrationFields(t *testing.T) {
+	result := populateRegistrationFields("", Namespace{})
+	result = append(result, populateRegistrationFields("admin_metadata", AdminMetadata{})...)
+	assert.NotEqual(t, 0, len(result))
+}
