@@ -20,6 +20,7 @@ package registry
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -38,20 +39,41 @@ import (
 	"github.com/pelicanplatform/pelican/utils"
 )
 
+type RegistrationStatus int
+
+// The AdminMetadata is used in [Namespace] as a marshalled JSON string
+// to be stored in registry DB.
+//
+// The *UserID are meant to correspond to the "sub" claim of the user token that
+// the OAuth client issues if the user is logged in using OAuth, or it should be
+// "admin" from local password-based authentication
+type AdminMetadata struct {
+	UserID                string             `json:"user_id"` // "sub" claim of user JWT who requested registration
+	Description           string             `json:"description"`
+	SiteName              string             `json:"site_name"`
+	Institution           string             `json:"institution"`
+	SecurityContactUserID string             `json:"security_contact_user_id"` // "sub" claim of user who is responsible for taking security concern
+	Status                RegistrationStatus `json:"status"`
+	ApproverID            string             `json:"approver_id"` // "sub" claim of user JWT who approved registration
+	ApprovedAt            time.Time          `json:"approved_at"`
+	CreatedAt             time.Time          `json:"created_at"`
+	UpdatedAt             time.Time          `json:"updated_at"`
+}
+
 type Namespace struct {
-	ID            int    `json:"id"`
-	Prefix        string `json:"prefix"`
-	Pubkey        string `json:"pubkey"`
-	Identity      string `json:"identity"`
-	AdminMetadata string `json:"admin_metadata"`
+	ID            int           `json:"id"`
+	Prefix        string        `json:"prefix"`
+	Pubkey        string        `json:"pubkey"`
+	Identity      string        `json:"identity"`
+	AdminMetadata AdminMetadata `json:"admin_metadata"`
 }
 
 type NamespaceWOPubkey struct {
-	ID            int    `json:"id"`
-	Prefix        string `json:"prefix"`
-	Pubkey        string `json:"-"` // Don't include pubkey in this case
-	Identity      string `json:"identity"`
-	AdminMetadata string `json:"admin_metadata"`
+	ID            int           `json:"id"`
+	Prefix        string        `json:"prefix"`
+	Pubkey        string        `json:"-"` // Don't include pubkey in this case
+	Identity      string        `json:"identity"`
+	AdminMetadata AdminMetadata `json:"admin_metadata"`
 }
 
 type ServerType string
@@ -59,6 +81,12 @@ type ServerType string
 const (
 	OriginType ServerType = "origin"
 	CacheType  ServerType = "cache"
+)
+
+const (
+	Pending RegistrationStatus = iota
+	Approved
+	Denied
 )
 
 /*
@@ -208,7 +236,7 @@ func namespaceExistsById(id int) (bool, error) {
 	return found, nil
 }
 
-func getPrefixJwksById(id int) (jwk.Set, error) {
+func getNamespaceJwksById(id int) (jwk.Set, error) {
 	jwksQuery := `SELECT pubkey FROM namespace WHERE id = ?`
 	var pubkeyStr string
 	err := db.QueryRow(jwksQuery, id).Scan(&pubkeyStr)
@@ -227,7 +255,7 @@ func getPrefixJwksById(id int) (jwk.Set, error) {
 	return set, nil
 }
 
-func dbGetPrefixJwks(prefix string) (*jwk.Set, error) {
+func getNamespaceJwksByPrefix(prefix string) (*jwk.Set, error) {
 	jwksQuery := `SELECT pubkey FROM namespace WHERE prefix = ?`
 	var pubkeyStr string
 	err := db.QueryRow(jwksQuery, prefix).Scan(&pubkeyStr)
@@ -246,66 +274,25 @@ func dbGetPrefixJwks(prefix string) (*jwk.Set, error) {
 	return &set, nil
 }
 
-/*
-Some generic functions for CRUD actions on namespaces,
-used BY the registry (as opposed to the parallel
-functions) used by the client.
-*/
-func addNamespace(ns *Namespace) error {
-	query := `INSERT INTO namespace (prefix, pubkey, identity, admin_metadata) VALUES (?, ?, ?, ?)`
-	tx, err := db.Begin()
-	if err != nil {
-		return err
+func getNamespaceById(id int) (*Namespace, error) {
+	if id < 1 {
+		return nil, errors.New("Invalid id. id must be a positive number")
 	}
-	_, err = tx.Exec(query, ns.Prefix, ns.Pubkey, ns.Identity, ns.AdminMetadata)
-	if err != nil {
-		if errRoll := tx.Rollback(); errRoll != nil {
-			log.Errorln("Failed to rollback transaction:", errRoll)
-		}
-		return err
-	}
-	return tx.Commit()
-}
-
-/**
- * Commenting this out until we are ready to use it.  -BB
-func updateNamespace(ns *Namespace) error {
-	query := `UPDATE namespace SET pubkey = ?, identity = ?, admin_metadata = ? WHERE prefix = ?`
-	_, err := db.Exec(query, ns.Pubkey, ns.Identity, ns.AdminMetadata, ns.Prefix)
-	return err
-}
-*/
-
-func deleteNamespace(prefix string) error {
-	deleteQuery := `DELETE FROM namespace WHERE prefix = ?`
-	tx, err := db.Begin()
-	if err != nil {
-		return err
-	}
-	_, err = db.Exec(deleteQuery, prefix)
-	if err != nil {
-		if errRoll := tx.Rollback(); errRoll != nil {
-			log.Errorln("Failed to rollback transaction:", errRoll)
-		}
-		return errors.Wrap(err, "Failed to execute deletion query")
-	}
-	return tx.Commit()
-}
-
-/**
- * Commenting this out until we are ready to use it.  -BB
-func getNamespace(prefix string) (*Namespace, error) {
 	ns := &Namespace{}
-	query := `SELECT * FROM namespace WHERE prefix = ?`
-	err := db.QueryRow(query, prefix).Scan(&ns.ID, &ns.Prefix, &ns.Pubkey, &ns.Identity, &ns.AdminMetadata)
+	adminMetadataStr := ""
+	query := `SELECT * FROM namespace WHERE id = ?`
+	err := db.QueryRow(query, id).Scan(&ns.ID, &ns.Prefix, &ns.Pubkey, &ns.Identity, &adminMetadataStr)
 	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal([]byte(adminMetadataStr), &ns.AdminMetadata); err != nil {
 		return nil, err
 	}
 	return ns, nil
 }
-*/
 
-func getAllNamespaces() ([]*Namespace, error) {
+// Get a collection of namespaces by [Namespace.AdminMetadata.UserID]
+func getNamespacesByUserID(userID string) ([]*Namespace, error) {
 	query := `SELECT * FROM namespace`
 	rows, err := db.Query(query)
 	if err != nil {
@@ -316,12 +303,17 @@ func getAllNamespaces() ([]*Namespace, error) {
 	namespaces := make([]*Namespace, 0)
 	for rows.Next() {
 		ns := &Namespace{}
-		if err := rows.Scan(&ns.ID, &ns.Prefix, &ns.Pubkey, &ns.Identity, &ns.AdminMetadata); err != nil {
+		adminMetadataStr := ""
+		if err := rows.Scan(&ns.ID, &ns.Prefix, &ns.Pubkey, &ns.Identity, &adminMetadataStr); err != nil {
 			return nil, err
 		}
-		namespaces = append(namespaces, ns)
+		if err = json.Unmarshal([]byte(adminMetadataStr), &ns.AdminMetadata); err != nil {
+			return nil, err
+		}
+		if ns.AdminMetadata.UserID == userID {
+			namespaces = append(namespaces, ns)
+		}
 	}
-
 	return namespaces, nil
 }
 
@@ -345,7 +337,157 @@ func getNamespacesByServerType(serverType ServerType) ([]*Namespace, error) {
 	namespaces := make([]*Namespace, 0)
 	for rows.Next() {
 		ns := &Namespace{}
-		if err := rows.Scan(&ns.ID, &ns.Prefix, &ns.Pubkey, &ns.Identity, &ns.AdminMetadata); err != nil {
+		adminMetadataStr := ""
+		if err := rows.Scan(&ns.ID, &ns.Prefix, &ns.Pubkey, &ns.Identity, &adminMetadataStr); err != nil {
+			return nil, err
+		}
+		if err = json.Unmarshal([]byte(adminMetadataStr), &ns.AdminMetadata); err != nil {
+			return nil, err
+		}
+		namespaces = append(namespaces, ns)
+	}
+
+	return namespaces, nil
+}
+
+/*
+Some generic functions for CRUD actions on namespaces,
+used BY the registry (as opposed to the parallel
+functions) used by the client.
+*/
+
+func addNamespace(ns *Namespace) error {
+	query := `INSERT INTO namespace (prefix, pubkey, identity, admin_metadata) VALUES (?, ?, ?, ?)`
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+
+	// Adding default values to the field. Note that you need to pass other fields
+	// including user_id before this function
+	ns.AdminMetadata.CreatedAt = time.Now()
+	ns.AdminMetadata.UpdatedAt = time.Now()
+	ns.AdminMetadata.Status = Pending
+
+	strAdminMetadata, err := json.Marshal(ns.AdminMetadata)
+	if err != nil {
+		return errors.Wrap(err, "Fail to marshall AdminMetadata")
+	}
+
+	_, err = tx.Exec(query, ns.Prefix, ns.Pubkey, ns.Identity, strAdminMetadata)
+	if err != nil {
+		if errRoll := tx.Rollback(); errRoll != nil {
+			log.Errorln("Failed to rollback transaction:", errRoll)
+		}
+		return err
+	}
+	return tx.Commit()
+}
+
+func updateNamespace(ns *Namespace) error {
+	existingNs, err := getNamespaceById(ns.ID)
+	if err != nil || existingNs == nil {
+		return errors.Wrap(err, "Failed to get namespace")
+	}
+	existingNsAdmin := existingNs.AdminMetadata
+	// We prevent the following fields from being modified by the user for now.
+	// They are meant for "internal" use only and we don't support changing
+	// UserID on the fly. We also don't allow changing Status other than explicitly
+	// call updateNamespaceStatusById
+	ns.AdminMetadata.UserID = existingNsAdmin.UserID
+	ns.AdminMetadata.CreatedAt = existingNsAdmin.CreatedAt
+	ns.AdminMetadata.Status = existingNsAdmin.Status
+	ns.AdminMetadata.ApprovedAt = existingNsAdmin.ApprovedAt
+	ns.AdminMetadata.ApproverID = existingNsAdmin.ApproverID
+	ns.AdminMetadata.UpdatedAt = time.Now()
+	strAdminMetadata, err := json.Marshal(ns.AdminMetadata)
+	if err != nil {
+		return errors.Wrap(err, "Fail to marshall AdminMetadata")
+	}
+
+	query := `UPDATE namespace SET pubkey = ?, identity = ?, admin_metadata = ? WHERE id = ?`
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(query, ns.Pubkey, ns.Identity, strAdminMetadata, ns.ID)
+	if err != nil {
+		if errRoll := tx.Rollback(); errRoll != nil {
+			log.Errorln("Failed to rollback transaction:", errRoll)
+		}
+		return errors.Wrap(err, "Failed to execute update query")
+	}
+	return tx.Commit()
+}
+
+func updateNamespaceStatusById(id int, status RegistrationStatus, approverId string) error {
+	ns, err := getNamespaceById(id)
+	if err != nil {
+		return errors.Wrap(err, "Error getting namespace by id")
+	}
+
+	ns.AdminMetadata.Status = status
+	ns.AdminMetadata.UpdatedAt = time.Now()
+	if status == Approved {
+		if approverId == "" {
+			return errors.New("approverId can't be empty to approve")
+		}
+		ns.AdminMetadata.ApproverID = approverId
+		ns.AdminMetadata.ApprovedAt = time.Now()
+	}
+
+	adminMetadataByte, err := json.Marshal(ns.AdminMetadata)
+	if err != nil {
+		return errors.Wrap(err, "Error marshalling admin metadata")
+	}
+
+	query := `UPDATE namespace SET admin_metadata = ? WHERE id = ?`
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(query, string(adminMetadataByte), ns.ID)
+	if err != nil {
+		if errRoll := tx.Rollback(); errRoll != nil {
+			log.Errorln("Failed to rollback transaction:", errRoll)
+		}
+		return errors.Wrap(err, "Failed to execute update query")
+	}
+	return tx.Commit()
+}
+
+func deleteNamespace(prefix string) error {
+	deleteQuery := `DELETE FROM namespace WHERE prefix = ?`
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(deleteQuery, prefix)
+	if err != nil {
+		if errRoll := tx.Rollback(); errRoll != nil {
+			log.Errorln("Failed to rollback transaction:", errRoll)
+		}
+		return errors.Wrap(err, "Failed to execute deletion query")
+	}
+	return tx.Commit()
+}
+
+func getAllNamespaces() ([]*Namespace, error) {
+	query := `SELECT * FROM namespace`
+	rows, err := db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	namespaces := make([]*Namespace, 0)
+	for rows.Next() {
+		ns := &Namespace{}
+		adminMetadataStr := ""
+		if err := rows.Scan(&ns.ID, &ns.Prefix, &ns.Pubkey, &ns.Identity, &adminMetadataStr); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(adminMetadataStr), &ns.AdminMetadata); err != nil {
 			return nil, err
 		}
 		namespaces = append(namespaces, ns)

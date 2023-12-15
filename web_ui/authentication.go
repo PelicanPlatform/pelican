@@ -172,7 +172,7 @@ func setLoginCookie(ctx *gin.Context, user string) {
 }
 
 // Check if user is authenticated by checking if the "login" cookie is present and set the user identity to ctx
-func authHandler(ctx *gin.Context) {
+func AuthHandler(ctx *gin.Context) {
 	user, err := getUser(ctx)
 	if err != nil || user == "" {
 		log.Errorln("Invalid user cookie or unable to parse user cookie:", err)
@@ -271,7 +271,7 @@ func configureAuthEndpoints(router *gin.Engine) error {
 	group := router.Group("/api/v1.0/auth")
 	group.POST("/login", loginHandler)
 	group.POST("/initLogin", initLoginHandler)
-	group.POST("/resetLogin", authHandler, resetLoginHandler)
+	group.POST("/resetLogin", AuthHandler, resetLoginHandler)
 	group.GET("/whoami", func(ctx *gin.Context) {
 		if user, err := getUser(ctx); err != nil || user == "" {
 			ctx.JSON(200, gin.H{"authenticated": false})

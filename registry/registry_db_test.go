@@ -21,6 +21,7 @@ package registry
 import (
 	"database/sql"
 	"testing"
+	"time"
 
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
@@ -37,26 +38,21 @@ import (
 	"github.com/spf13/viper"
 )
 
-func setupMockNamespaceDB() error {
+func setupMockNamespaceDB(t *testing.T) {
 	mockDB, err := sql.Open("sqlite", ":memory:")
 	db = mockDB
-	if err != nil {
-		return err
-	}
+	require.NoError(t, err, "Error setting up mock namespace DB")
 	createNamespaceTable()
-	return nil
 }
 
-func resetNamespaceDB() error {
+func resetNamespaceDB(t *testing.T) {
 	_, err := db.Exec(`DELETE FROM namespace`)
-	if err != nil {
-		return err
-	}
-	return nil
+	require.NoError(t, err, "Error resetting namespace DB")
 }
 
-func teardownMockNamespaceDB() {
-	db.Close()
+func teardownMockNamespaceDB(t *testing.T) {
+	err := db.Close()
+	require.NoError(t, err, "Error tearing down mock namespace DB")
 }
 
 func insertMockDBData(nss []Namespace) error {
@@ -66,7 +62,15 @@ func insertMockDBData(nss []Namespace) error {
 		return err
 	}
 	for _, ns := range nss {
-		_, err = tx.Exec(query, ns.Prefix, ns.Pubkey, ns.Identity, ns.AdminMetadata)
+		adminMetaStr, err := json.Marshal(ns.AdminMetadata)
+		if err != nil {
+			if errRoll := tx.Rollback(); errRoll != nil {
+				return errors.Wrap(errRoll, "Failed to rollback transaction")
+			}
+			return err
+		}
+
+		_, err = tx.Exec(query, ns.Prefix, ns.Pubkey, ns.Identity, adminMetaStr)
 		if err != nil {
 			if errRoll := tx.Rollback(); errRoll != nil {
 				return errors.Wrap(errRoll, "Failed to rollback transaction")
@@ -112,7 +116,7 @@ func compareNamespaces(execpted []Namespace, returned interface{}, woPubkey bool
 	return true
 }
 
-func mockNamespace(prefix, pubkey, identity, adminMetadata string) Namespace {
+func mockNamespace(prefix, pubkey, identity string, adminMetadata AdminMetadata) Namespace {
 	return Namespace{
 		Prefix:        prefix,
 		Pubkey:        pubkey,
@@ -125,12 +129,12 @@ func mockNamespace(prefix, pubkey, identity, adminMetadata string) Namespace {
 // functinos in this package. Please treat them as "constants"
 var (
 	mockNssWithOrigins []Namespace = []Namespace{
-		mockNamespace("/test1", "pubkey1", "", ""),
-		mockNamespace("/test2", "pubkey2", "", ""),
+		mockNamespace("/test1", "pubkey1", "", AdminMetadata{}),
+		mockNamespace("/test2", "pubkey2", "", AdminMetadata{}),
 	}
 	mockNssWithCaches []Namespace = []Namespace{
-		mockNamespace("/caches/random1", "pubkey1", "", ""),
-		mockNamespace("/caches/random2", "pubkey2", "", ""),
+		mockNamespace("/caches/random1", "pubkey1", "", AdminMetadata{}),
+		mockNamespace("/caches/random2", "pubkey2", "", AdminMetadata{}),
 	}
 	mockNssWithMixed []Namespace = func() (mixed []Namespace) {
 		mixed = append(mixed, mockNssWithOrigins...)
@@ -139,16 +143,252 @@ var (
 	}()
 )
 
+func TestGetNamespacesById(t *testing.T) {
+	setupMockNamespaceDB(t)
+	defer teardownMockNamespaceDB(t)
+
+	t.Run("return-error-with-empty-db", func(t *testing.T) {
+		_, err := getNamespaceById(1)
+		assert.Error(t, err)
+	})
+
+	t.Run("return-error-with-invalid-id", func(t *testing.T) {
+		_, err := getNamespaceById(0)
+		assert.Error(t, err)
+
+		_, err = getNamespaceById(-1)
+		assert.Error(t, err)
+	})
+
+	t.Run("return-namespace-with-correct-id", func(t *testing.T) {
+		defer resetNamespaceDB(t)
+		mockNs := mockNamespace("/test", "", "", AdminMetadata{UserID: "foo"})
+		err := insertMockDBData([]Namespace{mockNs})
+		require.NoError(t, err)
+		nss, err := getAllNamespaces()
+		require.NoError(t, err)
+		require.Equal(t, 1, len(nss))
+
+		got, err := getNamespaceById(nss[0].ID)
+		require.NoError(t, err, "Error getting namespace by ID")
+		mockNs.ID = nss[0].ID
+		assert.Equal(t, mockNs, *got)
+	})
+
+	t.Run("return-error-with-id-dne", func(t *testing.T) {
+		err := insertMockDBData(mockNssWithOrigins)
+		require.NoError(t, err)
+		defer resetNamespaceDB(t)
+		_, err = getNamespaceById(100)
+		assert.Error(t, err)
+	})
+}
+
+func TestGetNamespacesByUserID(t *testing.T) {
+	setupMockNamespaceDB(t)
+	defer teardownMockNamespaceDB(t)
+
+	t.Run("empty-db-return-empty-array", func(t *testing.T) {
+		nss, err := getNamespacesByUserID("foo")
+		require.NoError(t, err)
+		assert.Equal(t, 0, len(nss))
+	})
+
+	t.Run("return-empty-array-with-no-userid-entries", func(t *testing.T) {
+		insertMockDBData(mockNssWithMixed)
+		defer resetNamespaceDB(t)
+		nss, err := getNamespacesByUserID("foo")
+		require.NoError(t, err)
+		assert.Equal(t, 0, len(nss))
+	})
+
+	t.Run("return-user-namespace-with-valid-userID", func(t *testing.T) {
+		insertMockDBData(mockNssWithMixed)
+		insertMockDBData([]Namespace{mockNamespace("/user1", "", "user1", AdminMetadata{UserID: "user1"})})
+		nss, err := getNamespacesByUserID("user1")
+		require.NoError(t, err)
+		require.Equal(t, 1, len(nss))
+		assert.Equal(t, "/user1", nss[0].Prefix)
+	})
+
+	t.Run("return-multiple-user-namespaces-with-valid-userID", func(t *testing.T) {
+		insertMockDBData(mockNssWithMixed)
+		insertMockDBData([]Namespace{mockNamespace("/user1", "", "user1", AdminMetadata{UserID: "user1"})})
+		insertMockDBData([]Namespace{mockNamespace("/user1-2", "", "user1", AdminMetadata{UserID: "user1"})})
+		nss, err := getNamespacesByUserID("user1")
+		require.NoError(t, err)
+		require.Equal(t, 2, len(nss))
+		assert.Equal(t, "/user1", nss[0].Prefix)
+		assert.Equal(t, "/user1-2", nss[1].Prefix)
+
+	})
+}
+
+func TestAddNamespace(t *testing.T) {
+	setupMockNamespaceDB(t)
+	defer teardownMockNamespaceDB(t)
+
+	t.Run("set-default-fields", func(t *testing.T) {
+		defer resetNamespaceDB(t)
+		mockNs := mockNamespace("/test", "pubkey", "identity", AdminMetadata{UserID: "someone"})
+		err := addNamespace(&mockNs)
+		require.NoError(t, err)
+		got, err := getAllNamespaces()
+		require.Equal(t, 1, len(got))
+		assert.Equal(t, mockNs.Prefix, got[0].Prefix)
+		// We can do this becuase we pass the pointer of mockNs to addNamespce which
+		// then modify the fields and insert into database
+		assert.Equal(t, mockNs.AdminMetadata.CreatedAt.UTC(), got[0].AdminMetadata.CreatedAt)
+		assert.Equal(t, mockNs.AdminMetadata.UpdatedAt.UTC(), got[0].AdminMetadata.UpdatedAt)
+		assert.Equal(t, mockNs.AdminMetadata.Status, got[0].AdminMetadata.Status)
+	})
+
+	t.Run("override-restricted-fields", func(t *testing.T) {
+		defer resetNamespaceDB(t)
+		mockCreateAt := time.Now().Add(time.Hour * 10)
+		mockUpdatedAt := time.Now().Add(time.Minute * 20)
+		mockStatus := Approved
+		mockNs := mockNamespace("/test", "pubkey", "identity", AdminMetadata{UserID: "someone", CreatedAt: mockCreateAt, UpdatedAt: mockUpdatedAt, Status: mockStatus})
+		err := addNamespace(&mockNs)
+		require.NoError(t, err)
+		got, err := getAllNamespaces()
+		require.Equal(t, 1, len(got))
+		assert.Equal(t, mockNs.Prefix, got[0].Prefix)
+
+		assert.NotEqual(t, mockCreateAt.UTC(), mockNs.AdminMetadata.CreatedAt.UTC())
+		assert.NotEqual(t, mockUpdatedAt.UTC(), mockNs.AdminMetadata.UpdatedAt.UTC())
+		assert.NotEqual(t, mockStatus, mockNs.AdminMetadata.Status)
+		// We can do this becuase we pass the pointer of mockNs to addNamespce which
+		// then modify the fields and insert into database
+		assert.Equal(t, mockNs.AdminMetadata.CreatedAt.UTC(), got[0].AdminMetadata.CreatedAt)
+		assert.Equal(t, mockNs.AdminMetadata.UpdatedAt.UTC(), got[0].AdminMetadata.UpdatedAt)
+		assert.Equal(t, mockNs.AdminMetadata.Status, got[0].AdminMetadata.Status)
+	})
+
+	t.Run("insert-data-integrity", func(t *testing.T) {
+		defer resetNamespaceDB(t)
+		mockNs := mockNamespace("/test", "pubkey", "identity", AdminMetadata{UserID: "someone", Description: "Some description", SiteName: "OSG", SecurityContactUserID: "security-001"})
+		err := addNamespace(&mockNs)
+		require.NoError(t, err)
+		got, err := getAllNamespaces()
+		require.Equal(t, 1, len(got))
+		assert.Equal(t, mockNs.Prefix, got[0].Prefix)
+		assert.Equal(t, mockNs.Pubkey, got[0].Pubkey)
+		assert.Equal(t, mockNs.Identity, got[0].Identity)
+		assert.Equal(t, mockNs.AdminMetadata.Description, got[0].AdminMetadata.Description)
+		assert.Equal(t, mockNs.AdminMetadata.SiteName, got[0].AdminMetadata.SiteName)
+		assert.Equal(t, mockNs.AdminMetadata.SecurityContactUserID, got[0].AdminMetadata.SecurityContactUserID)
+	})
+}
+
+func TestUpdateNamespace(t *testing.T) {
+	setupMockNamespaceDB(t)
+	defer teardownMockNamespaceDB(t)
+
+	t.Run("update-on-dne-entry-returns-error", func(t *testing.T) {
+		mockNs := mockNamespace("/test", "", "", AdminMetadata{})
+		err := updateNamespace(&mockNs)
+		assert.Error(t, err)
+	})
+
+	t.Run("update-preserve-internal-fields", func(t *testing.T) {
+		defer resetNamespaceDB(t)
+		mockNs := mockNamespace("/test", "", "", AdminMetadata{UserID: "foo"})
+		insertMockDBData([]Namespace{mockNs})
+		initialNss, err := getAllNamespaces()
+		require.NoError(t, err)
+		require.Equal(t, 1, len(initialNss))
+		initialNs := initialNss[0]
+		assert.Equal(t, mockNs.Prefix, initialNs.Prefix)
+		initialNs.AdminMetadata.UserID = "bar"
+		initialNs.AdminMetadata.CreatedAt = time.Now().Add(10 * time.Hour)
+		initialNs.AdminMetadata.UpdatedAt = time.Now().Add(10 * time.Hour)
+		initialNs.AdminMetadata.Status = Approved
+		initialNs.AdminMetadata.ApproverID = "hacker"
+		initialNs.AdminMetadata.ApprovedAt = time.Now().Add(10 * time.Hour)
+		err = updateNamespace(initialNs)
+		require.NoError(t, err)
+		finalNss, err := getAllNamespaces()
+		require.NoError(t, err)
+		require.Equal(t, 1, len(finalNss))
+		finalNs := finalNss[0]
+		assert.Equal(t, mockNs.Prefix, finalNs.Prefix)
+		assert.Equal(t, mockNs.AdminMetadata.UserID, finalNs.AdminMetadata.UserID)
+		assert.Equal(t, mockNs.AdminMetadata.CreatedAt.UTC(), finalNs.AdminMetadata.CreatedAt)
+		assert.Equal(t, mockNs.AdminMetadata.Status, finalNs.AdminMetadata.Status)
+		assert.Equal(t, mockNs.AdminMetadata.ApprovedAt.UTC(), finalNs.AdminMetadata.ApprovedAt)
+		assert.Equal(t, mockNs.AdminMetadata.ApproverID, finalNs.AdminMetadata.ApproverID)
+		// DB first changes initialNs.AdminMetadata.UpdatedAt then commit
+		assert.Equal(t, initialNs.AdminMetadata.UpdatedAt.UTC(), finalNs.AdminMetadata.UpdatedAt)
+	})
+}
+
+func TestUpdateNamespaceStatusById(t *testing.T) {
+	setupMockNamespaceDB(t)
+	defer teardownMockNamespaceDB(t)
+	t.Run("return-error-if-id-dne", func(t *testing.T) {
+		defer resetNamespaceDB(t)
+		insertMockDBData(mockNssWithOrigins)
+		err := updateNamespaceStatusById(100, Approved, "random")
+		assert.Error(t, err)
+	})
+
+	t.Run("return-error-if-invalid-approver-userId", func(t *testing.T) {
+		defer resetNamespaceDB(t)
+
+		mockNs := mockNamespace("/test", "pubkey", "identity", AdminMetadata{UserID: "someone"})
+		insertMockDBData([]Namespace{mockNs})
+		got, err := getAllNamespaces()
+		require.Equal(t, 1, len(got))
+		assert.Equal(t, mockNs.Prefix, got[0].Prefix)
+		err = updateNamespaceStatusById(got[0].ID, Approved, "")
+		assert.Error(t, err)
+	})
+
+	t.Run("update-status-with-valid-input-for-approval", func(t *testing.T) {
+		defer resetNamespaceDB(t)
+
+		mockNs := mockNamespace("/test", "pubkey", "identity", AdminMetadata{UserID: "someone"})
+		insertMockDBData([]Namespace{mockNs})
+		got, err := getAllNamespaces()
+		require.Equal(t, 1, len(got))
+		assert.Equal(t, mockNs.Prefix, got[0].Prefix)
+		err = updateNamespaceStatusById(got[0].ID, Approved, "approver1")
+		assert.NoError(t, err)
+		got, err = getAllNamespaces()
+		require.Equal(t, 1, len(got))
+		assert.Equal(t, mockNs.Prefix, got[0].Prefix)
+		assert.Equal(t, Approved, got[0].AdminMetadata.Status)
+		assert.Equal(t, "approver1", got[0].AdminMetadata.ApproverID)
+		assert.NotEqual(t, time.Time{}, got[0].AdminMetadata.ApprovedAt)
+	})
+
+	t.Run("deny-does-not-modify-approval-fields", func(t *testing.T) {
+		defer resetNamespaceDB(t)
+
+		mockNs := mockNamespace("/test", "pubkey", "identity", AdminMetadata{UserID: "someone"})
+		insertMockDBData([]Namespace{mockNs})
+		got, err := getAllNamespaces()
+		require.Equal(t, 1, len(got))
+		assert.Equal(t, mockNs.Prefix, got[0].Prefix)
+		err = updateNamespaceStatusById(got[0].ID, Denied, "approver1")
+		assert.NoError(t, err)
+		got, err = getAllNamespaces()
+		require.Equal(t, 1, len(got))
+		assert.Equal(t, mockNs.Prefix, got[0].Prefix)
+		assert.Equal(t, Denied, got[0].AdminMetadata.Status)
+		assert.Equal(t, "", got[0].AdminMetadata.ApproverID)
+		assert.Equal(t, time.Time{}, got[0].AdminMetadata.ApprovedAt)
+	})
+}
+
 // teardown must be called at the end of the test to close the in-memory SQLite db
 func TestGetNamespacesByServerType(t *testing.T) {
-
-	err := setupMockNamespaceDB()
-	require.NoError(t, err, "Error setting up the mock namespace DB")
-	defer teardownMockNamespaceDB()
+	setupMockNamespaceDB(t)
+	defer teardownMockNamespaceDB(t)
 
 	t.Run("wrong-server-type-gives-error", func(t *testing.T) {
-		err := resetNamespaceDB()
-		require.NoError(t, err)
+		resetNamespaceDB(t)
 
 		rss, err := getNamespacesByServerType("")
 		require.Error(t, err, "No error returns when give empty server type")
@@ -160,8 +400,7 @@ func TestGetNamespacesByServerType(t *testing.T) {
 	})
 
 	t.Run("empty-db-returns-empty-list", func(t *testing.T) {
-		err := resetNamespaceDB()
-		require.NoError(t, err)
+		resetNamespaceDB(t)
 
 		origins, err := getNamespacesByServerType(OriginType)
 		require.NoError(t, err)
@@ -173,10 +412,9 @@ func TestGetNamespacesByServerType(t *testing.T) {
 	})
 
 	t.Run("returns-origins-as-expected", func(t *testing.T) {
-		err := resetNamespaceDB()
-		require.NoError(t, err)
+		resetNamespaceDB(t)
 
-		err = insertMockDBData(mockNssWithOrigins)
+		err := insertMockDBData(mockNssWithOrigins)
 		require.NoError(t, err)
 
 		origins, err := getNamespacesByServerType(OriginType)
@@ -190,10 +428,9 @@ func TestGetNamespacesByServerType(t *testing.T) {
 	})
 
 	t.Run("return-caches-as-expected", func(t *testing.T) {
-		err := resetNamespaceDB()
-		require.NoError(t, err)
+		resetNamespaceDB(t)
 
-		err = insertMockDBData(mockNssWithCaches)
+		err := insertMockDBData(mockNssWithCaches)
 		require.NoError(t, err)
 
 		caches, err := getNamespacesByServerType(CacheType)
@@ -207,10 +444,9 @@ func TestGetNamespacesByServerType(t *testing.T) {
 	})
 
 	t.Run("return-correctly-with-mixed-server-type", func(t *testing.T) {
-		err := resetNamespaceDB()
-		require.NoError(t, err)
+		resetNamespaceDB(t)
 
-		err = insertMockDBData(mockNssWithMixed)
+		err := insertMockDBData(mockNssWithMixed)
 		require.NoError(t, err)
 
 		caches, err := getNamespacesByServerType(CacheType)
@@ -284,7 +520,7 @@ func TestRegistryTopology(t *testing.T) {
 		Prefix:        "/regular/foo",
 		Pubkey:        "",
 		Identity:      "",
-		AdminMetadata: "",
+		AdminMetadata: AdminMetadata{},
 	}
 	err = addNamespace(&ns)
 	require.NoError(t, err)

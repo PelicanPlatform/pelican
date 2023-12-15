@@ -14,6 +14,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pkg/errors"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -66,11 +67,8 @@ func GenerateMockJWKS() (string, error) {
 
 func TestListNamespaces(t *testing.T) {
 	// Initialize the mock database
-	err := setupMockNamespaceDB()
-	if err != nil {
-		t.Fatalf("Failed to set up mock namespace DB: %v", err)
-	}
-	defer teardownMockNamespaceDB()
+	setupMockNamespaceDB(t)
+	defer teardownMockNamespaceDB(t)
 
 	router := gin.Default()
 
@@ -125,10 +123,7 @@ func TestListNamespaces(t *testing.T) {
 				}
 			}
 			defer func() {
-				err := resetNamespaceDB()
-				if err != nil {
-					t.Fatalf("Failed to reset mock namespace DB: %v", err)
-				}
+				resetNamespaceDB(t)
 			}()
 
 			// Create a request to the endpoint
@@ -163,11 +158,8 @@ func TestGetNamespaceJWKS(t *testing.T) {
 		t.Fatalf("Failed to set up mock public key: %v", err)
 	}
 	// Initialize the mock database
-	err = setupMockNamespaceDB()
-	if err != nil {
-		t.Fatalf("Failed to set up mock namespace DB: %v", err)
-	}
-	defer teardownMockNamespaceDB()
+	setupMockNamespaceDB(t)
+	defer teardownMockNamespaceDB(t)
 
 	router := gin.Default()
 
@@ -229,12 +221,7 @@ func TestGetNamespaceJWKS(t *testing.T) {
 				}
 
 			}
-			defer func() {
-				err := resetNamespaceDB()
-				if err != nil {
-					t.Fatalf("Failed to reset mock namespace DB: %v", err)
-				}
-			}()
+			defer resetNamespaceDB(t)
 
 			// Create a request to the endpoint
 			w := httptest.NewRecorder()
@@ -248,6 +235,87 @@ func TestGetNamespaceJWKS(t *testing.T) {
 			if tc.expectedCode == http.StatusOK {
 				assert.Equal(t, tc.expectedData, w.Body.String())
 			}
+		})
+	}
+}
+
+func TestAdminAuthHandler(t *testing.T) {
+	// Initialize Gin and set it to test mode
+	gin.SetMode(gin.TestMode)
+
+	// Define test cases
+	testCases := []struct {
+		name          string
+		setupUserFunc func(*gin.Context) // Function to setup user and admin list
+		expectedCode  int                // Expected HTTP status code
+		expectedError string             // Expected error message
+	}{
+		{
+			name: "user-not-logged-in",
+			setupUserFunc: func(ctx *gin.Context) {
+				viper.Set("Registry.AdminUsers", []string{"admin1", "admin2"})
+				ctx.Set("User", "")
+			},
+			expectedCode:  http.StatusUnauthorized,
+			expectedError: "Login required to view this page",
+		},
+		{
+			name: "general-admin-access",
+			setupUserFunc: func(ctx *gin.Context) {
+				viper.Set("Registry.AdminUsers", []string{})
+				ctx.Set("User", "admin")
+			},
+			expectedCode: http.StatusOK,
+		},
+		{
+			name: "specific-admin-user-access",
+			setupUserFunc: func(ctx *gin.Context) {
+				viper.Set("Registry.AdminUsers", []string{"admin1", "admin2"})
+				ctx.Set("User", "admin1")
+			},
+			expectedCode: http.StatusOK,
+		},
+		{
+			name: "non-admin-user-access",
+			setupUserFunc: func(ctx *gin.Context) {
+				viper.Set("Registry.AdminUsers", []string{"admin1", "admin2"})
+				ctx.Set("User", "user")
+			},
+			expectedCode:  http.StatusForbidden,
+			expectedError: "You don't have permission to perform this action",
+		},
+		{
+			name: "admin-list-empty",
+			setupUserFunc: func(ctx *gin.Context) {
+				viper.Set("Registry.AdminUsers", []string{})
+				ctx.Set("User", "user")
+			},
+			expectedCode:  http.StatusForbidden,
+			expectedError: "You don't have permission to perform this action",
+		},
+		{
+			name: "admin-list-multiple-users",
+			setupUserFunc: func(ctx *gin.Context) {
+				viper.Set("Registry.AdminUsers", []string{"admin1", "admin2", "admin3"})
+				ctx.Set("User", "admin2")
+			},
+			expectedCode: http.StatusOK,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(w)
+			tc.setupUserFunc(ctx)
+
+			adminAuthHandler(ctx)
+
+			assert.Equal(t, tc.expectedCode, w.Code)
+			if tc.expectedError != "" {
+				assert.Contains(t, w.Body.String(), tc.expectedError)
+			}
+			viper.Reset()
 		})
 	}
 }

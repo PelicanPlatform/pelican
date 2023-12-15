@@ -111,7 +111,7 @@ func matchKeys(incomingKey jwk.Key, registeredNamespaces []string) (bool, error)
 	// permitting the action (assuming their keys haven't been stolen!)
 	foundMatch := false
 	for _, ns := range registeredNamespaces {
-		keyset, err := dbGetPrefixJwks(ns)
+		keyset, err := getNamespaceJwksByPrefix(ns)
 		if err != nil {
 			return false, errors.Wrapf(err, "Cannot get keyset for %s from the database", ns)
 		}
@@ -640,7 +640,7 @@ func dbDeleteNamespace(ctx *gin.Context) {
 	delTokenStr := strings.TrimPrefix(authHeader, "Bearer ")
 
 	// Have the token, now we need to load the JWKS for the prefix
-	originJwks, err := dbGetPrefixJwks(prefix)
+	originJwks, err := getNamespaceJwksByPrefix(prefix)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error loading the prefix's stored jwks"})
 		log.Errorf("Failed to get prefix's stored jwks: %v", err)
@@ -731,7 +731,7 @@ func metadataHandler(ctx *gin.Context) {
 	if filepath.Base(path) == "issuer.jwks" {
 		// do something
 		prefix := strings.TrimSuffix(path, "/.well-known/issuer.jwks")
-		jwks, err := dbGetPrefixJwks(prefix)
+		jwks, err := getNamespaceJwksByPrefix(prefix)
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error trying to get jwks for prefix"})
 			log.Errorf("Failed to load jwks for prefix %s: %v", prefix, err)
