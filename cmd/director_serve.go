@@ -36,6 +36,15 @@ import (
 )
 
 func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
+	err := serveDirectorInternal()
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func serveDirectorInternal() error {
 	// Use this context for any goroutines that needs to react to server shutdown
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 	// Use this wait group to ensure the goroutines can finish before the server exits/shutdown
@@ -60,8 +69,8 @@ func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		if err := director.AdvertiseOSDF(); err != nil {
 			panic(err)
 		}
+		go director.PeriodicCacheReload()
 	}
-	go director.PeriodicCacheReload()
 
 	director.ConfigTTLCache(shutdownCtx, &wg)
 	wg.Add(1) // Add to wait group after ConfigTTLCache finishes to avoid deadlock

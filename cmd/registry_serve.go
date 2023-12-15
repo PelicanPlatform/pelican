@@ -35,6 +35,15 @@ import (
 )
 
 func serveRegistry( /*cmd*/ *cobra.Command /*args*/, []string) error {
+	err := serveRegistryInternal()
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func serveRegistryInternal() error {
 	log.Info("Initializing the namespace registry's database...")
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 	defer shutdownCancel()

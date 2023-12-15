@@ -39,6 +39,15 @@ import (
 )
 
 func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
+	err := serveOriginInternal()
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func serveOriginInternal() error {
 	// Use this context for any goroutines that needs to react to server shutdown
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 	// Use this wait group to ensure the goroutines can finish before the server exits/shutdown
