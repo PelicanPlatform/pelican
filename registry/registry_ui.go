@@ -64,11 +64,11 @@ func init() {
 	setRegistrationFieldsOnce.Do(func() {
 		registrationFields = make([]registrationField, 0)
 		registrationFields = append(registrationFields, populateRegistrationFields("", Namespace{})...)
-		registrationFields = append(registrationFields, populateRegistrationFields("admin_metadata", AdminMetadata{})...)
 	})
 }
 
-// Populate registrationFields array for frontend to send registration data
+// Populate registrationFields array to provide available namespace registration fields
+// for UI to render registration form
 func populateRegistrationFields(prefix string, data interface{}) []registrationField {
 	var fields []registrationField
 
@@ -86,7 +86,7 @@ func populateRegistrationFields(prefix string, data interface{}) []registrationF
 		if prefix != "" {
 			name += prefix + "."
 		}
-		// Find if the field has a json tag. Use the json tag name if so
+		// If the field has a json tag. Use the name from json tag
 		tempName := field.Name
 		jsonTag := field.Tag.Get("json")
 		if jsonTag != "" {
@@ -120,6 +120,15 @@ func populateRegistrationFields(prefix string, data interface{}) []registrationF
 				fields = append(fields, regField)
 				break
 			}
+			// If it's AdminMetadata, add prefix and recursively call to parse fields
+			if field.Type == reflect.TypeOf(AdminMetadata{}) {
+				existing_prefix := ""
+				if prefix != "" {
+					existing_prefix = prefix + "."
+				}
+				fields = append(fields, populateRegistrationFields(existing_prefix+"admin_metadata", AdminMetadata{})...)
+				break
+			}
 		}
 
 		if field.Type == reflect.TypeOf(RegistrationStatus(0)) {
@@ -134,9 +143,7 @@ func populateRegistrationFields(prefix string, data interface{}) []registrationF
 			// Skip the field if it's not in the types listed above
 			continue
 		}
-
 	}
-
 	return fields
 }
 

@@ -46,7 +46,11 @@ type RegistrationStatus int
 //
 // The *UserID are meant to correspond to the "sub" claim of the user token that
 // the OAuth client issues if the user is logged in using OAuth, or it should be
-// "admin" from local password-based authentication
+// "admin" from local password-based authentication.
+//
+// To prevent users from writing to certain fields (readonly), you may use "post" tag
+// with value "exclude". This will exclude the field from user's create/update requests
+// and the field will also be excluded from field discovery endpoint (OPTION method).
 type AdminMetadata struct {
 	UserID                string             `json:"user_id" post:"exclude"` // "sub" claim of user JWT who requested registration
 	Description           string             `json:"description"`
