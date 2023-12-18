@@ -48,7 +48,7 @@ function TextCenteredBox({text} : {text: string}) {
 
 export default function Home() {
 
-    const pelicanServices = ["origin", "director"]
+    const pelicanServices = ["origin", "director", "registry"]
 
     return (
         <Box width={"100%"} pt={5}>

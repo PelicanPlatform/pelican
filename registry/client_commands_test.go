@@ -16,7 +16,7 @@
  *
  ***************************************************************/
 
-package nsregistry
+package registry
 
 import (
 	"net/http/httptest"
@@ -48,7 +48,7 @@ func registryMockup(t *testing.T, testName string) *httptest.Server {
 	engine := gin.Default()
 
 	//Configure registry
-	RegisterNamespaceRegistry(engine.Group("/"))
+	RegisterRegistryRoutes(engine.Group("/"))
 
 	//Set up a server to use for testing
 	svr := httptest.NewServer(engine)
@@ -92,7 +92,7 @@ func TestServeNamespaceRegistry(t *testing.T) {
 		capturedOutput := make([]byte, 1024)
 		n, _ := r.Read(capturedOutput)
 		stdoutCapture = string(capturedOutput[:n])
-		assert.Contains(t, stdoutCapture, `"Prefix":"/foo/bar"`)
+		assert.Contains(t, stdoutCapture, `"prefix":"/foo/bar"`)
 	})
 
 	//Test functionality of namespace get
@@ -111,7 +111,7 @@ func TestServeNamespaceRegistry(t *testing.T) {
 		capturedOutput := make([]byte, 1024)
 		n, _ := r.Read(capturedOutput)
 		stdoutCapture = string(capturedOutput[:n])
-		assert.Contains(t, stdoutCapture, `"Prefix":"/foo/bar"`)
+		assert.Contains(t, stdoutCapture, `"prefix":"/foo/bar"`)
 	})
 
 	t.Run("Test namespace delete", func(t *testing.T) {

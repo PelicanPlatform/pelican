@@ -28,8 +28,8 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
-	nsregistry "github.com/pelicanplatform/pelican/namespace_registry"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/registry"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
@@ -163,7 +163,7 @@ func registerNamespacePrep() (key jwk.Key, prefix string, registrationEndpointUR
 }
 
 func registerNamespaceImpl(key jwk.Key, prefix string, registrationEndpointURL string) error {
-	if err := nsregistry.NamespaceRegister(key, registrationEndpointURL, "", prefix); err != nil {
+	if err := registry.NamespaceRegister(key, registrationEndpointURL, "", prefix); err != nil {
 		return errors.Wrapf(err, "Failed to register prefix %s", prefix)
 	}
 	return nil

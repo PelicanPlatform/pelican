@@ -16,10 +16,11 @@
  *
  ***************************************************************/
 
-package nsregistry
+package registry
 
 import (
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -27,6 +28,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+
 	// commented sqlite driver requires CGO
 	// _ "github.com/mattn/go-sqlite3" // SQLite driver
 	_ "modernc.org/sqlite"
@@ -37,12 +39,27 @@ import (
 )
 
 type Namespace struct {
-	ID            int
-	Prefix        string
-	Pubkey        string
-	Identity      string
-	AdminMetadata string
+	ID            int    `json:"id"`
+	Prefix        string `json:"prefix"`
+	Pubkey        string `json:"pubkey"`
+	Identity      string `json:"identity"`
+	AdminMetadata string `json:"admin_metadata"`
 }
+
+type NamespaceWOPubkey struct {
+	ID            int    `json:"id"`
+	Prefix        string `json:"prefix"`
+	Pubkey        string `json:"-"` // Don't include pubkey in this case
+	Identity      string `json:"identity"`
+	AdminMetadata string `json:"admin_metadata"`
+}
+
+type ServerType string
+
+const (
+	OriginType ServerType = "origin"
+	CacheType  ServerType = "cache"
+)
 
 /*
 Declare the DB handle as an unexported global so that all
@@ -175,6 +192,41 @@ func namespaceSupSubChecks(prefix string) (superspaces []string, subspaces []str
 	return
 }
 
+func namespaceExistsById(id int) (bool, error) {
+	checkQuery := `SELECT id FROM namespace WHERE id = ?`
+	result, err := db.Query(checkQuery, id)
+	if err != nil {
+		return false, err
+	}
+	defer result.Close()
+
+	found := false
+	for result.Next() {
+		found = true
+		break
+	}
+	return found, nil
+}
+
+func getPrefixJwksById(id int) (jwk.Set, error) {
+	jwksQuery := `SELECT pubkey FROM namespace WHERE id = ?`
+	var pubkeyStr string
+	err := db.QueryRow(jwksQuery, id).Scan(&pubkeyStr)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, errors.New("prefix not found in database")
+		}
+		return nil, errors.Wrap(err, "error performing origin pubkey query")
+	}
+
+	set, err := jwk.ParseString(pubkeyStr)
+	if err != nil {
+		return nil, errors.Wrap(err, "Failed to parse pubkey as a jwks")
+	}
+
+	return set, nil
+}
+
 func dbGetPrefixJwks(prefix string) (*jwk.Set, error) {
 	jwksQuery := `SELECT pubkey FROM namespace WHERE prefix = ?`
 	var pubkeyStr string
@@ -255,6 +307,35 @@ func getNamespace(prefix string) (*Namespace, error) {
 
 func getAllNamespaces() ([]*Namespace, error) {
 	query := `SELECT * FROM namespace`
+	rows, err := db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	namespaces := make([]*Namespace, 0)
+	for rows.Next() {
+		ns := &Namespace{}
+		if err := rows.Scan(&ns.ID, &ns.Prefix, &ns.Pubkey, &ns.Identity, &ns.AdminMetadata); err != nil {
+			return nil, err
+		}
+		namespaces = append(namespaces, ns)
+	}
+
+	return namespaces, nil
+}
+
+func getNamespacesByServerType(serverType ServerType) ([]*Namespace, error) {
+	query := ""
+	if serverType == CacheType {
+		// Refer to the cache prefix name in cmd/cache_serve
+		query = `SELECT * FROM NAMESPACE WHERE PREFIX LIKE '/caches/%'`
+	} else if serverType == OriginType {
+		query = `SELECT * FROM NAMESPACE WHERE NOT PREFIX LIKE '/caches/%'`
+	} else {
+		return nil, errors.New(fmt.Sprint("Can't get namespace: unsupported server type: ", serverType))
+	}
+
 	rows, err := db.Query(query)
 	if err != nil {
 		return nil, err

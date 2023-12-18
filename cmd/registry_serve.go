@@ -28,27 +28,27 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/namespace_registry"
+	"github.com/pelicanplatform/pelican/registry"
 	"github.com/pelicanplatform/pelican/web_ui"
 )
 
-func serveNamespaceRegistry( /*cmd*/ *cobra.Command /*args*/, []string) error {
+func serveRegistry( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	log.Info("Initializing the namespace registry's database...")
 
 	// Initialize the registry's sqlite database
-	err := nsregistry.InitializeDB()
+	err := registry.InitializeDB()
 	if err != nil {
 		return errors.Wrap(err, "Unable to initialize the namespace registry database")
 	}
 
 	if config.GetPreferredPrefix() == "OSDF" {
 		log.Info("Populating registry with namespaces from OSG topology service...")
-		if err := nsregistry.PopulateTopology(); err != nil {
+		if err := registry.PopulateTopology(); err != nil {
 			panic(errors.Wrap(err, "Unable to populate topology table"))
 		}
 
 		// Checks topology for updates every 10 minutes
-		go nsregistry.PeriodicTopologyReload()
+		go registry.PeriodicTopologyReload()
 	}
 
 	engine, err := web_ui.GetEngine()
@@ -64,8 +64,10 @@ func serveNamespaceRegistry( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		return err
 	}
 
-	// Call out to nsregistry to establish routes for the gin engine
-	nsregistry.RegisterNamespaceRegistry(engine.Group("/"))
+	rootRouterGroup := engine.Group("/")
+	// Call out to registry to establish routes for the gin engine
+	registry.RegisterRegistryRoutes(rootRouterGroup)
+	registry.RegisterRegistryWebAPI(rootRouterGroup)
 	log.Info("Starting web engine...")
 
 	// Might need to play around with this setting more to handle
