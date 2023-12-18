@@ -32,7 +32,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pelicanplatform/pelican/config"
-	nsregistry "github.com/pelicanplatform/pelican/namespace_registry"
+	"github.com/pelicanplatform/pelican/registry"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -59,9 +59,9 @@ func TestRegistration(t *testing.T) {
 	err := config.InitServer([]config.ServerType{config.OriginType})
 	require.NoError(t, err)
 
-	err = nsregistry.InitializeDB()
+	err = registry.InitializeDB()
 	require.NoError(t, err)
-	defer nsregistry.ShutdownDB()
+	defer registry.ShutdownDB()
 
 	gin.SetMode(gin.TestMode)
 	engine := gin.Default()
@@ -78,7 +78,7 @@ func TestRegistration(t *testing.T) {
 	require.NotEmpty(t, keyId)
 
 	//Configure registry
-	nsregistry.RegisterNamespaceRegistry(engine.Group("/"))
+	registry.RegisterRegistryRoutes(engine.Group("/"))
 
 	//Create a test HTTP server that sends requests to gin
 	svr := httptest.NewServer(engine)

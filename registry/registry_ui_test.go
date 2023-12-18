@@ -1,4 +1,4 @@
-package nsregistry
+package registry
 
 import (
 	"crypto/ecdsa"
