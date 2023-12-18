@@ -102,7 +102,7 @@ func populateRegistrationFields(prefix string, data interface{}) []registrationF
 
 		regField := registrationField{
 			Name:     name + tempName,
-			Required: field.Tag.Get("post") == "required",
+			Required: strings.Contains(field.Tag.Get("validate"), "required"),
 		}
 
 		switch field.Type.Kind() {
@@ -207,7 +207,7 @@ func listNamespacesForUser(ctx *gin.Context) {
 	namespaces, err := getNamespacesByUserID(user)
 	if err != nil {
 		log.Error("Error getting namespaces for user ", user)
-		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Error getting namespaces by user ID"})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Error getting namespaces by user ID"})
 		return
 	}
 	ctx.JSON(http.StatusOK, namespaces)
@@ -225,14 +225,59 @@ func createUpdateNamespace(ctx *gin.Context) {
 	}
 	ns := Namespace{}
 	if ctx.ShouldBindJSON(&ns) != nil {
-		ctx.AbortWithStatusJSON(400, gin.H{"error": "Invalid create or update namespace request"})
+		ctx.JSON(400, gin.H{"error": "Invalid create or update namespace request"})
 		return
 	}
+	// Basic validatio (type, required, etc)
+	errs := config.GetValidate().Struct(ns)
+	if errs != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprint(errs)})
+		return
+	}
+	// Check that Prefix is a valid prefix
+	updated_prefix, err := validatePrefix(ns.Prefix)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprint("Error: Field validation for prefix failed:", err)})
+		return
+	}
+	ns.Prefix = updated_prefix
+
+	// Check if prefix exists before doing anything else
+	exists, err := namespaceExists(ns.Prefix)
+	if err != nil {
+		log.Errorf("Failed to check if namespace already exists: %v", err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Server encountered an error checking if namespace already exists"})
+		return
+	}
+	if exists {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("The prefix %s is already registered", ns.Prefix)})
+		return
+	}
+	// Check if pubKey is a valid JWK
+	pubkey, err := validateJwks(ns.Pubkey)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprint("Error: Field validation for pubkey failed:", err)})
+		return
+	}
+
+	// Check if the parent or child path along the prefix has been registered
+	valErr, sysErr := validateKeyChaining(ns.Prefix, pubkey)
+	if valErr != nil {
+		log.Errorln(err)
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err})
+		return
+	}
+	if sysErr != nil {
+		log.Errorln(err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err})
+		return
+	}
+
 	if ns.ID == 0 { // Create
 		ns.AdminMetadata.UserID = user
 		if err := addNamespace(&ns); err != nil {
 			log.Errorf("Failed to insert namespace with id %d. %v", ns.ID, err)
-			ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Fail to insert namespace"})
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Fail to insert namespace"})
 			return
 		}
 		ctx.JSON(http.StatusOK, gin.H{"message": "success"})
@@ -240,17 +285,17 @@ func createUpdateNamespace(ctx *gin.Context) {
 		exists, err := namespaceExistsById(ns.ID)
 		if err != nil {
 			log.Error("Failed to get namespace by ID:", err)
-			ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Fail to find if namespace exists"})
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Fail to find if namespace exists"})
 			return
 		}
 		if exists { // Update namespace if namespace exists
 			if err := updateNamespace(&ns); err != nil {
 				log.Errorf("Failed to update namespace with id %d. %v", ns.ID, err)
-				ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Fail to update namespace"})
+				ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Fail to update namespace"})
 				return
 			}
 		} else {
-			ctx.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "Can't update namespace: namespace not found"})
+			ctx.JSON(http.StatusNotFound, gin.H{"error": "Can't update namespace: namespace not found"})
 			return
 		}
 	}
@@ -268,7 +313,7 @@ func updateNamespaceStatus(ctx *gin.Context, status RegistrationStatus) {
 
 	if err = updateNamespaceStatusById(id, status, user); err != nil {
 		log.Error("Error updating namespace status by ID:", id, " to status:", status)
-		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to update namespace"})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update namespace"})
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"message": "ok"})
@@ -312,7 +357,7 @@ func getNamespaceJWKS(ctx *gin.Context) {
 func adminAuthHandler(ctx *gin.Context) {
 	user := ctx.GetString("User")
 	if user == "" {
-		ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Login required to view this page"})
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Login required to view this page"})
 	}
 	if user == "admin" {
 		ctx.Next()
@@ -325,7 +370,7 @@ func adminAuthHandler(ctx *gin.Context) {
 			return
 		}
 	}
-	ctx.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "You don't have permission to perform this action"})
+	ctx.JSON(http.StatusForbidden, gin.H{"error": "You don't have permission to perform this action"})
 }
 
 // Define Gin APIs for registry Web UI. All endpoints are user-facing

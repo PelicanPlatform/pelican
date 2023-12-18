@@ -51,11 +51,16 @@ type RegistrationStatus int
 // To prevent users from writing to certain fields (readonly), you may use "post" tag
 // with value "exclude". This will exclude the field from user's create/update requests
 // and the field will also be excluded from field discovery endpoint (OPTION method).
+//
+// We use validator package to validate struct fields from user requests. If a field is
+// required, add `validate:"required"` to that field. This tag will also be used by fields discovery
+// endpoint to tell the UI if a field is required. For other validator tags,
+// visit: https://pkg.go.dev/github.com/go-playground/validator/v10
 type AdminMetadata struct {
 	UserID                string             `json:"user_id" post:"exclude"` // "sub" claim of user JWT who requested registration
 	Description           string             `json:"description"`
-	SiteName              string             `json:"site_name" post:"required"`
-	Institution           string             `json:"institution" post:"required"`
+	SiteName              string             `json:"site_name" validate:"required"`
+	Institution           string             `json:"institution" validate:"required"`
 	SecurityContactUserID string             `json:"security_contact_user_id"` // "sub" claim of user who is responsible for taking security concern
 	Status                RegistrationStatus `json:"status" post:"exclude"`
 	ApproverID            string             `json:"approver_id" post:"exclude"` // "sub" claim of user JWT who approved registration
@@ -66,8 +71,8 @@ type AdminMetadata struct {
 
 type Namespace struct {
 	ID            int           `json:"id" post:"exclude"`
-	Prefix        string        `json:"prefix" post:"required"`
-	Pubkey        string        `json:"pubkey" post:"required"`
+	Prefix        string        `json:"prefix" validate:"required"`
+	Pubkey        string        `json:"pubkey" validate:"required"`
 	Identity      string        `json:"identity" post:"exclude"`
 	AdminMetadata AdminMetadata `json:"admin_metadata"`
 }

@@ -39,6 +39,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/go-playground/validator/v10"
 	"github.com/gorilla/csrf"
 	adapter "github.com/gwatts/gin-adapter"
 	"github.com/pelicanplatform/pelican/param"
@@ -120,9 +121,17 @@ var (
 	transport     *http.Transport
 	onceTransport sync.Once
 
+	// Global CSRF hanlder that shares the same auth key
 	csrfHanlder     gin.HandlerFunc
 	onceCSRFHanlder sync.Once
+
+	// Global struct validator
+	validate *validator.Validate
 )
+
+func init() {
+	validate = validator.New(validator.WithRequiredStructEnabled())
+}
 
 func (sType ServerType) IsSet(otherVal ServerType) bool {
 	return sType&otherVal == otherVal
@@ -416,6 +425,11 @@ func GetTransport() *http.Transport {
 		setupTransport()
 	})
 	return transport
+}
+
+// Get singleton global validte method for field validation
+func GetValidate() *validator.Validate {
+	return validate
 }
 
 func InitConfig() {

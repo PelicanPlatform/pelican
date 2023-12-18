@@ -225,31 +225,10 @@ func keySignChallengeInit(ctx *gin.Context, data *registrationData) error {
 }
 
 func keySignChallengeCommit(ctx *gin.Context, data *registrationData, action string) error {
-	// Parse the client's jwks as a set here
-	clientJwks, err := jwk.Parse(data.Pubkey)
+	// Validate the client's jwks as a set here
+	key, err := validateJwks(string(data.Pubkey))
 	if err != nil {
-		return errors.Wrap(err, "Couldn't parse the pubkey from the client")
-	}
-
-	if log.IsLevelEnabled(log.DebugLevel) {
-		// Let's check that we can convert to JSON and get the right thing...
-		jsonbuf, err := json.Marshal(clientJwks)
-		if err != nil {
-			return errors.Wrap(err, "failed to marshal the client's keyset into JSON")
-		}
-		log.Debugln("Client JWKS as seen by the registry server:", string(jsonbuf))
-	}
-
-	/*
-	 * TODO: This section makes the assumption that the incoming jwks only contains a single
-	 *       key, a property that is enforced by the client at the origin. Eventually we need
-	 *       to support the addition of other keys in the jwks stored for the origin. There is
-	 *       a similar TODO listed in client_commands.go, as the choices made there mirror the
-	 *       choices made here.
-	 */
-	key, exists := clientJwks.Key(0)
-	if !exists {
-		return errors.New("There was no key at index 0 in the client's JWKS. Something is wrong")
+		return err
 	}
 
 	var rawkey interface{} // This is the raw key, like *rsa.PrivateKey or *ecdsa.PrivateKey
@@ -303,63 +282,25 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData, action str
 				return nil
 			}
 
-			if param.Registry_RequireKeyChaining.GetBool() {
-				superspaces, subspaces, inTopo, err := namespaceSupSubChecks(data.Prefix)
-				if err != nil {
-					log.Errorf("Failed to check if namespace suffixes or prefixes another registered namespace: %v", err)
-					return errors.Wrap(err, "Server encountered an error checking if namespace already exists")
-				}
-
-				// if not in OSDF mode, this will be false
-				if inTopo {
-					_ = ctx.AbortWithError(403, errors.New("Cannot register a super or subspace of a namespace already registered in topology"))
-					return errors.New("Cannot register a super or subspace of a namespace already registered in topology")
-				}
-				// If we make the assumption that namespace prefixes are heirarchical, eg that the owner of /foo should own
-				// everything under /foo (/foo/bar, /foo/baz, etc), then it makes sense to check for superspaces first. If any
-				// superspace is found, they logically "own" the incoming namespace.
-				if len(superspaces) > 0 {
-					// If this is the case, we want to make sure that at least one of the superspaces has the
-					// same registration key as the incoming. This guarantees the owner of the superspace is
-					// permitting the action (assuming their keys haven't been stolen!)
-					matched, err := matchKeys(key, superspaces)
-					if err != nil {
-						ctx.JSON(500, gin.H{"error": "Server encountered an error checking for key matches in the database"})
-						return errors.Errorf("%v: Unable to check if the incoming key for %s matched any public keys for %s", err, data.Prefix, subspaces)
-					}
-					if !matched {
-						_ = ctx.AbortWithError(403, errors.New("Cannot register a namespace that is suffixed or prefixed by an already-registered namespace unless the incoming public key matches a registered key"))
-						return errors.New("Cannot register a namespace that is suffixed or prefixed by an already-registered namespace unless the incoming public key matches a registered key")
-					}
-
-				} else if len(subspaces) > 0 {
-					// If there are no superspaces, we can check the subspaces.
-
-					// TODO: Eventually we might want to check only the highest level subspaces and use those keys for matching. For example,
-					// if /foo/bar and /foo/bar/baz are registered with two keysets such that the complement of their intersections is not null,
-					// it may be the case that the only key we match against belongs to /foo/bar/baz. If we go ahead with registration at that
-					// point, we're essentially saying /foo/bar/baz, the logical subspace of /foo/bar, has authorized a superspace for both.
-					// More interestingly, if /foo/bar and /foo/baz are both registered, should they both be consulted before adding /foo?
-
-					// For now, we'll just check for any key match.
-					matched, err := matchKeys(key, subspaces)
-					if err != nil {
-						ctx.JSON(500, gin.H{"error": "Server encountered an error checking for key matches in the database"})
-						return errors.Errorf("%v: Unable to check if the incoming key for %s matched any public keys for %s", err, data.Prefix, subspaces)
-					}
-					if !matched {
-						_ = ctx.AbortWithError(403, errors.New("Cannot register a namespace that is suffixed or prefixed by an already-registered namespace unless the incoming public key matches a registered key"))
-						return errors.New("Cannot register a namespace that is suffixed or prefixed by an already-registered namespace unless the incoming public key matches a registered key")
-					}
-				}
-			}
-			reqPrefix, err := validateNSPath(data.Prefix)
+			reqPrefix, err := validatePrefix(data.Prefix)
 			if err != nil {
 				err = errors.Wrapf(err, "Requested namespace %s failed validation", reqPrefix)
 				log.Errorln(err)
 				return err
 			}
 			data.Prefix = reqPrefix
+
+			valErr, sysErr := validateKeyChaining(reqPrefix, key)
+			if valErr != nil {
+				log.Errorln(err)
+				ctx.JSON(http.StatusForbidden, gin.H{"error": err})
+				return err
+			}
+			if sysErr != nil {
+				log.Errorln(err)
+				ctx.JSON(http.StatusInternalServerError, gin.H{"error": err})
+				return err
+			}
 
 			err = dbAddNamespace(ctx, data)
 			if err != nil {
@@ -374,42 +315,6 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData, action str
 			"server verified:%t, client verified:%t", serverVerified, clientVerified)
 	}
 	return nil
-}
-
-func validateNSPath(nspath string) (string, error) {
-	if len(nspath) == 0 {
-		return "", errors.New("Path prefix may not be empty")
-	}
-	if nspath[0] != '/' {
-		return "", errors.New("Path prefix must be absolute - relative paths are not allowed")
-	}
-	components := strings.Split(nspath, "/")[1:]
-	if len(components) == 0 {
-		return "", errors.New("Cannot register the prefix '/' for an origin")
-	} else if components[0] == "api" {
-		return "", errors.New("Cannot register a prefix starting with '/api'")
-	} else if components[0] == "view" {
-		return "", errors.New("Cannot register a prefix starting with '/view'")
-	} else if components[0] == "pelican" {
-		return "", errors.New("Cannot register a prefix starting with '/pelican'")
-	}
-	result := ""
-	for _, component := range components {
-		if len(component) == 0 {
-			continue
-		} else if component == "." {
-			return "", errors.New("Path component cannot be '.'")
-		} else if component == ".." {
-			return "", errors.New("Path component cannot be '..'")
-		} else if component[0] == '.' {
-			return "", errors.New("Path component cannot begin with a '.'")
-		}
-		result += "/" + component
-	}
-	if result == "/" || len(result) == 0 {
-		return "", errors.New("Cannot register the prefix '/' for an origin")
-	}
-	return result, nil
 }
 
 /*
