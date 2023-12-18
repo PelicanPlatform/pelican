@@ -78,7 +78,7 @@ func TestRegistration(t *testing.T) {
 	require.NotEmpty(t, keyId)
 
 	//Configure registry
-	registry.RegisterRegistryRoutes(engine.Group("/"))
+	registry.RegisterRegistryAPI(engine.Group("/"))
 
 	//Create a test HTTP server that sends requests to gin
 	svr := httptest.NewServer(engine)

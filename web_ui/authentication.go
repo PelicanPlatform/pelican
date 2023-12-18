@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gorilla/csrf"
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
@@ -268,14 +269,23 @@ func configureAuthEndpoints(router *gin.Engine) error {
 		log.Infoln("Authorization not configured (non-fatal):", err)
 	}
 
+	csrfHandler, err := config.GetCSRFHandler()
+	if err != nil {
+		return err
+	}
+
 	group := router.Group("/api/v1.0/auth")
 	group.POST("/login", loginHandler)
 	group.POST("/initLogin", initLoginHandler)
 	group.POST("/resetLogin", AuthHandler, resetLoginHandler)
-	group.GET("/whoami", func(ctx *gin.Context) {
+	// Pass csrfhanlder only to the whoami route to generate CSRF token
+	// while leaving other routes free of CSRF check (we might want to do it some time in the future)
+	group.GET("/whoami", csrfHandler, func(ctx *gin.Context) {
 		if user, err := getUser(ctx); err != nil || user == "" {
 			ctx.JSON(200, gin.H{"authenticated": false})
 		} else {
+			// Set header to carry CSRF token
+			ctx.Header("X-CSRF-Token", csrf.Token(ctx.Request))
 			ctx.JSON(200, gin.H{"authenticated": true, "user": user})
 		}
 	})

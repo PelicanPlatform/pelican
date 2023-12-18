@@ -289,8 +289,11 @@ func getNamespaceById(id int) (*Namespace, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := json.Unmarshal([]byte(adminMetadataStr), &ns.AdminMetadata); err != nil {
-		return nil, err
+	// For backward compatibility, if adminMetadata is an empty string, don't unmarshall json
+	if adminMetadataStr != "" {
+		if err := json.Unmarshal([]byte(adminMetadataStr), &ns.AdminMetadata); err != nil {
+			return nil, err
+		}
 	}
 	return ns, nil
 }
@@ -311,8 +314,11 @@ func getNamespacesByUserID(userID string) ([]*Namespace, error) {
 		if err := rows.Scan(&ns.ID, &ns.Prefix, &ns.Pubkey, &ns.Identity, &adminMetadataStr); err != nil {
 			return nil, err
 		}
-		if err = json.Unmarshal([]byte(adminMetadataStr), &ns.AdminMetadata); err != nil {
-			return nil, err
+		// For backward compatibility, if adminMetadata is an empty string, don't unmarshall json
+		if adminMetadataStr != "" {
+			if err := json.Unmarshal([]byte(adminMetadataStr), &ns.AdminMetadata); err != nil {
+				return nil, err
+			}
 		}
 		if ns.AdminMetadata.UserID == userID {
 			namespaces = append(namespaces, ns)
@@ -345,8 +351,11 @@ func getNamespacesByServerType(serverType ServerType) ([]*Namespace, error) {
 		if err := rows.Scan(&ns.ID, &ns.Prefix, &ns.Pubkey, &ns.Identity, &adminMetadataStr); err != nil {
 			return nil, err
 		}
-		if err = json.Unmarshal([]byte(adminMetadataStr), &ns.AdminMetadata); err != nil {
-			return nil, err
+		// For backward compatibility, if adminMetadata is an empty string, don't unmarshall json
+		if adminMetadataStr != "" {
+			if err := json.Unmarshal([]byte(adminMetadataStr), &ns.AdminMetadata); err != nil {
+				return nil, err
+			}
 		}
 		namespaces = append(namespaces, ns)
 	}
@@ -491,8 +500,11 @@ func getAllNamespaces() ([]*Namespace, error) {
 		if err := rows.Scan(&ns.ID, &ns.Prefix, &ns.Pubkey, &ns.Identity, &adminMetadataStr); err != nil {
 			return nil, err
 		}
-		if err := json.Unmarshal([]byte(adminMetadataStr), &ns.AdminMetadata); err != nil {
-			return nil, err
+		// For backward compatibility, if adminMetadata is an empty string, don't unmarshall json
+		if adminMetadataStr != "" {
+			if err := json.Unmarshal([]byte(adminMetadataStr), &ns.AdminMetadata); err != nil {
+				return nil, err
+			}
 		}
 		namespaces = append(namespaces, ns)
 	}

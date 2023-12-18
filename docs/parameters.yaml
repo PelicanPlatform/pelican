@@ -646,7 +646,7 @@ components: ["origin", "director", "nsregistry"]
 name: Server.IssuerJwks
 description: >-
   A filepath indicating where the server's public JSON web keyset can be found.
-type: string
+type: filename
 default: none
 components: ["origin", "director", "nsregistry"]
 ---
@@ -669,7 +669,8 @@ name: Server.SessionSecretFile
 description: >-
   The filepath to the secret for encrypt/decrypt session data for Pelican web UI to initiate a session cookie
 
-  This is only used for sending redirect request for OAuth2 authentication flow as of 11/22/2023
+  This is used for sending redirect request for OAuth2 authentication follow.
+  This is also used for CSRF auth key.
 type: filename
 default: $ConfigBase/session-secret
   The default content of the file is the hash of the concatenation of "pelican" and the DER form of ${IssuerKey}

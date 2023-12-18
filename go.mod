@@ -8,7 +8,9 @@ require (
 	github.com/go-ini/ini v1.67.0
 	github.com/go-kit/log v0.2.1
 	github.com/golang-jwt/jwt v3.2.2+incompatible
+	github.com/gorilla/csrf v1.7.2
 	github.com/grafana/regexp v0.0.0-20221122212121-6b5c0a4cb7fd
+	github.com/gwatts/gin-adapter v1.0.0
 	github.com/hashicorp/go-version v1.6.0
 	github.com/jellydator/ttlcache/v3 v3.1.0
 	github.com/jsipprell/keyctl v1.0.4-0.20211208153515-36ca02672b6c
@@ -95,6 +97,7 @@ require (
 	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/google/uuid v1.3.0 // indirect
+	github.com/gorilla/securecookie v1.1.2 // indirect
 	github.com/hashicorp/hcl v1.0.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect

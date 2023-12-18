@@ -48,7 +48,7 @@ func registryMockup(t *testing.T, testName string) *httptest.Server {
 	engine := gin.Default()
 
 	//Configure registry
-	RegisterRegistryRoutes(engine.Group("/"))
+	RegisterRegistryAPI(engine.Group("/"))
 
 	//Set up a server to use for testing
 	svr := httptest.NewServer(engine)

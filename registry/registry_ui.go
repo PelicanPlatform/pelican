@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/web_ui"
 	log "github.com/sirupsen/logrus"
@@ -178,6 +179,7 @@ func listNamespaces(ctx *gin.Context) {
 		}
 		namespaces, err := getNamespacesByServerType(ServerType(queryParams.ServerType))
 		if err != nil {
+			log.Error("Failed to get namespaces by server type: ", err)
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Server encountered an error trying to list namespaces"})
 			return
 		}
@@ -187,6 +189,7 @@ func listNamespaces(ctx *gin.Context) {
 	} else {
 		namespaces, err := getAllNamespaces()
 		if err != nil {
+			log.Error("Failed to get all namespaces: ", err)
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Server encountered an error trying to list namespaces"})
 			return
 		}
@@ -205,6 +208,7 @@ func listNamespacesForUser(ctx *gin.Context) {
 	if err != nil {
 		log.Error("Error getting namespaces for user ", user)
 		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Error getting namespaces by user ID"})
+		return
 	}
 	ctx.JSON(http.StatusOK, namespaces)
 }
@@ -222,12 +226,14 @@ func createUpdateNamespace(ctx *gin.Context) {
 	ns := Namespace{}
 	if ctx.ShouldBindJSON(&ns) != nil {
 		ctx.AbortWithStatusJSON(400, gin.H{"error": "Invalid create or update namespace request"})
+		return
 	}
 	if ns.ID == 0 { // Create
 		ns.AdminMetadata.UserID = user
 		if err := addNamespace(&ns); err != nil {
 			log.Errorf("Failed to insert namespace with id %d. %v", ns.ID, err)
 			ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Fail to insert namespace"})
+			return
 		}
 		ctx.JSON(http.StatusOK, gin.H{"message": "success"})
 	} else { // Update
@@ -235,14 +241,17 @@ func createUpdateNamespace(ctx *gin.Context) {
 		if err != nil {
 			log.Error("Failed to get namespace by ID:", err)
 			ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Fail to find if namespace exists"})
+			return
 		}
 		if exists { // Update namespace if namespace exists
 			if err := updateNamespace(&ns); err != nil {
 				log.Errorf("Failed to update namespace with id %d. %v", ns.ID, err)
 				ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Fail to update namespace"})
+				return
 			}
 		} else {
 			ctx.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "Can't update namespace: namespace not found"})
+			return
 		}
 	}
 }
@@ -260,6 +269,7 @@ func updateNamespaceStatus(ctx *gin.Context, status RegistrationStatus) {
 	if err = updateNamespaceStatusById(id, status, user); err != nil {
 		log.Error("Error updating namespace status by ID:", id, " to status:", status)
 		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to update namespace"})
+		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"message": "ok"})
 }
@@ -318,8 +328,17 @@ func adminAuthHandler(ctx *gin.Context) {
 	ctx.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "You don't have permission to perform this action"})
 }
 
-func RegisterRegistryWebAPI(router *gin.RouterGroup) {
+// Define Gin APIs for registry Web UI. All endpoints are user-facing
+func RegisterRegistryWebAPI(router *gin.RouterGroup) error {
 	registryWebAPI := router.Group("/api/v1.0/registry_ui")
+	csrfHandler, err := config.GetCSRFHandler()
+	if err != nil {
+		return err
+	}
+	// Add CSRF middleware to all the routes below. CSRF middleware will look for
+	// any update methods (post/delete/patch, etc) and automatically check if a
+	// X-CSRF-Token header is present and the token matches
+	registryWebAPI.Use(csrfHandler)
 	// Follow RESTful schema
 	{
 		registryWebAPI.GET("/namespaces", listNamespaces)
@@ -335,4 +354,5 @@ func RegisterRegistryWebAPI(router *gin.RouterGroup) {
 			updateNamespaceStatus(ctx, Denied)
 		})
 	}
+	return nil
 }

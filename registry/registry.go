@@ -771,7 +771,7 @@ func getOpenIDConfiguration(c *gin.Context) {
 }
 */
 
-func RegisterRegistryRoutes(router *gin.RouterGroup) {
+func RegisterRegistryAPI(router *gin.RouterGroup) {
 	registry := router.Group("/api/v1.0/registry")
 	{
 		registry.POST("", cliRegisterNamespace)

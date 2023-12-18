@@ -38,6 +38,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gin-gonic/gin"
+	"github.com/gorilla/csrf"
+	adapter "github.com/gwatts/gin-adapter"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -116,6 +119,9 @@ var (
 	// Our global transports that only will get reconfigured if needed
 	transport     *http.Transport
 	onceTransport sync.Once
+
+	csrfHanlder     gin.HandlerFunc
+	onceCSRFHanlder sync.Once
 )
 
 func (sType ServerType) IsSet(otherVal ServerType) bool {
@@ -323,6 +329,33 @@ func setupTransport() {
 	}
 }
 
+func setupCSRFHandler() {
+	csrfKey, err := LoadSessionSecret()
+	if err != nil {
+		log.Error("Error loading session secret, abort setting up CSRF handler:", err)
+		return
+	}
+	CSRF := csrf.Protect(csrfKey,
+		csrf.SameSite(csrf.SameSiteStrictMode),
+		csrf.Path("/"),
+		csrf.ErrorHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusForbidden)
+			w.Write([]byte(`{"message": "CSRF token invalid"}`))
+		})),
+	)
+	csrfHanlder = adapter.Wrap(CSRF)
+}
+
+func GetCSRFHandler() (gin.HandlerFunc, error) {
+	onceCSRFHanlder.Do(func() {
+		setupCSRFHandler()
+	})
+	if csrfHanlder == nil {
+		return nil, errors.New("Error setting up the CSRF hanlder")
+	}
+	return csrfHanlder, nil
+}
+
 func parseServerIssuerURL(sType ServerType) error {
 	if param.Server_IssuerUrl.GetString() != "" {
 		_, err := url.Parse(param.Server_IssuerUrl.GetString())
@@ -492,6 +525,7 @@ func InitServer(sType ServerType) error {
 	viper.SetDefault("IssuerKey", filepath.Join(configDir, "issuer.jwk"))
 	viper.SetDefault("Server.UIPasswordFile", filepath.Join(configDir, "server-web-passwd"))
 	viper.SetDefault("Server.UIActivationCodeFile", filepath.Join(configDir, "server-web-activation-code"))
+	viper.SetDefault("Server.SessionSecretFile", filepath.Join(configDir, "session-secret"))
 	viper.SetDefault("OIDC.ClientIDFile", filepath.Join(configDir, "oidc-client-id"))
 	viper.SetDefault("OIDC.ClientSecretFile", filepath.Join(configDir, "oidc-client-secret"))
 	viper.SetDefault("Cache.ExportLocation", "/")
@@ -565,8 +599,6 @@ func InitServer(sType ServerType) error {
 		return errors.Wrap(err, fmt.Sprint("Invalid Server.ExternalWebUrl: ", externalAddressStr))
 	}
 
-	setupTransport()
-
 	tokenRefreshInterval := param.Monitoring_TokenRefreshInterval.GetDuration()
 	tokenExpiresIn := param.Monitoring_TokenExpiresIn.GetDuration()
 
@@ -597,14 +629,17 @@ func InitServer(sType ServerType) error {
 		return err
 	}
 
-	// Generate the session cookie secret and save it as the default value
-	err = GenerateSessionSecret()
-	if err != nil {
+	// Generate the session secret and save it as the default value
+	if err := GenerateSessionSecret(); err != nil {
 		return err
 	}
 
 	// After we know we have the certs we need, call setupTransport (which uses those certs for its TLSConfig)
 	setupTransport()
+
+	// Setup CSRF middleware. To use it, you need to add this middleware to your chain
+	// of http handlers by calling config.GetCSRFHandler()
+	setupCSRFHandler()
 
 	// Set up the server's issuer URL so we can access that data wherever we need to find keys and whatnot
 	// This populates Server.IssuerUrl, and can be safely fetched using server_utils.GetServerIssuerURL()
