@@ -109,11 +109,9 @@ func populateRegistrationFields(prefix string, data interface{}) []registrationF
 		case reflect.Int:
 			regField.Type = Int
 			fields = append(fields, regField)
-			break
 		case reflect.String:
 			regField.Type = String
 			fields = append(fields, regField)
-			break
 		case reflect.Struct:
 			// Check if the struct is of type time.Time
 			if field.Type == reflect.TypeOf(time.Time{}) {
