@@ -95,10 +95,10 @@ func keyIsRegistered(privkey jwk.Key, url string, prefix string) (keyStatus, err
 		}
 	}
 
-	var ns *nsregistry.Namespace
+	var ns *registry.Namespace
 	err = json.Unmarshal(body, &ns)
 	if err != nil {
-		return noKeyPresent, errors.Errorf("Failed unmarshals namespace from responce")
+		return noKeyPresent, errors.Errorf("Failed unmarshal namespace from response")
 	}
 
 	registrySet, err := jwk.ParseString(ns.Pubkey)
