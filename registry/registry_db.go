@@ -108,6 +108,23 @@ https://www.alexedwards.net/blog/organising-database-access
 */
 var db *sql.DB
 
+func (st ServerType) String() string {
+	return string(st)
+}
+
+func (rs RegistrationStatus) String() string {
+	switch rs {
+	case 0:
+		return "Pending"
+	case 1:
+		return "Approved"
+	case 2:
+		return "Denied"
+	default:
+		return "Unkown"
+	}
+}
+
 func createNamespaceTable() {
 	query := `
     CREATE TABLE IF NOT EXISTS namespace (
@@ -243,6 +260,35 @@ func namespaceExistsById(id int) (bool, error) {
 		break
 	}
 	return found, nil
+}
+
+func namespaceBelongsToUserId(id int, userId string) (bool, error) {
+	query := `SELECT * FROM namespace where id = ?`
+	rows, err := db.Query(query, id)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		ns := &Namespace{}
+		adminMetadataStr := ""
+		if err := rows.Scan(&ns.ID, &ns.Prefix, &ns.Pubkey, &ns.Identity, &adminMetadataStr); err != nil {
+			return false, err
+		}
+		// For backward compatibility, if adminMetadata is an empty string, don't unmarshall json
+		if adminMetadataStr != "" {
+			if err := json.Unmarshal([]byte(adminMetadataStr), &ns.AdminMetadata); err != nil {
+				return false, err
+			}
+		} else {
+			return false, nil // If adminMetadata is an empty string, no userId is present
+		}
+		if ns.AdminMetadata.UserID == userId {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func getNamespaceJwksById(id int) (jwk.Set, error) {

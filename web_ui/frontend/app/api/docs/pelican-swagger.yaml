@@ -1,22 +1,28 @@
-swagger: '2.0'
+swagger: "2.0"
 info:
   title: Pelican Server APIs
-  description: "[Pelican](https://pelicanplatform.org/) provides an open-source software platform for federating 
-      dataset repositories together and delivering the objects to computing capacity such as the [OSPool](https://osg-htc.org/services/open_science_pool.html)
+  description:
+    "[Pelican](https://pelicanplatform.org/) provides an open-source software platform for federating
+    dataset repositories together and delivering the objects to computing capacity such as the [OSPool](https://osg-htc.org/services/open_science_pool.html)
 
 
-      This is the API documentation for various APIs in Pelican servers (director, registry, origin, etc) 
-      to communicate with each other and in-between users accessing the servers. 
-      
+    This is the API documentation for various APIs in Pelican servers (director, registry, origin, etc)
+    to communicate with each other and in-between users accessing the servers.
 
-      For how to set up Pelican servers, please refer to the documentation at [docs.pelicanplatform.org](https://docs.pelicanplatform.org/)"
+
+    Note that we use cookie authentication and authorization. We check a cookie named `login` with value being a JWT.
+    The cookie is issued after a successful call to `/api/v1.0/auth/login`. However, OpenAPI 2.0 does not support specifying cookie-based security check.
+    Therefore, as an alternative, we will add `Authentication Required` to the API description where needed.
+
+
+    For how to set up Pelican servers, please refer to the documentation at [docs.pelicanplatform.org](https://docs.pelicanplatform.org/)"
   license:
     name: Apache 2.0
     url: http://www.apache.org/licenses/LICENSE-2.0
   contact:
     name: API Support via Pelican GitHub Issue
     url: https://github.com/PelicanPlatform/pelican/issues
-  version: '1.0'
+  version: "1.0"
 basePath: /api/v1.0/
 consumes:
   - application/json
@@ -36,7 +42,7 @@ definitions:
   HealthStatus:
     type: object
     description: The health status of a server component
-    properties: 
+    properties:
       status:
         type: string
         description: The status of the component, can be one of "unknown", "warning", "ok", and "critical"
@@ -53,36 +59,163 @@ definitions:
   ErrorModel:
     type: object
     description: The error reponse of a request
-    properties: 
+    properties:
       error:
         type: string
         description: The detail error message
-        example: Authentication required to perform this operation
+        example: Fail to bind to the struct
   SuccessModel:
     type: object
     description: The successful reponse of a request
-    properties: 
+    properties:
       msg:
         type: string
         description: The detail success message
         example: Success
+  AdminMetadata:
+    type: object
+    properties:
+      user_id:
+        type: string
+        description: '"sub" claim of user JWT who requested registration'
+      description:
+        type: string
+      site_name:
+        type: string
+        description: "Name of the site"
+      institution:
+        type: string
+        description: "Name of the institution"
+      security_contact_user_id:
+        type: string
+        description: '"sub" claim of user who is responsible for taking security concern'
+      status:
+        $ref: "#/definitions/RegistrationStatus"
+      approver_id:
+        type: string
+        description: '"sub" claim of user JWT who approved registration'
+      approved_at:
+        type: string
+        format: date-time
+        description: "Timestamp of when the registration was approved"
+      created_at:
+        type: string
+        format: date-time
+        description: "Timestamp of when the registration was created"
+      updated_at:
+        type: string
+        format: date-time
+        description: "Timestamp of the last update"
+  AdminMetadataForRegistration:
+    type: object
+    properties:
+      description:
+        type: string
+      site_name:
+        type: string
+        description: "Name of the site"
+      institution:
+        type: string
+        description: "Name of the institution"
+      security_contact_user_id:
+        type: string
+        description: '"sub" claim of user who is responsible for taking security concern'
+  RegistrationStatus:
+    type: integer
+    enum:
+      - 0 # Pending
+      - 1 # Approved
+      - 2 # Denied
+  NamespaceWOPubkey:
+    type: object
+    properties:
+      id:
+        type: integer
+        description: The ID of the namespace entry
+        example: 1
+      prefix:
+        type: string
+        description: The namespace prefix to register. Should be an obsolute paths
+        example: "/test"
+      admin_metadata:
+        $ref: "#/definitions/AdminMetadata"
+  Namespace:
+    type: object
+    properties:
+      id:
+        type: integer
+        description: The ID of the namespace entry
+        example: 1
+      prefix:
+        type: string
+        description: The namespace prefix to register. Should be an obsolute paths
+        example: "/test"
+      pubkey:
+        type: string
+        description:
+          The public JWK from the origin that wants to register the namespace.
+          It should be a marshalled (stringfied) JSON that contains either one JWK or a JWKS
+      admin_metadata:
+        $ref: "#/definitions/AdminMetadata"
+  NamespaceForRegistration:
+    type: object
+    properties:
+      prefix:
+        type: string
+        description: The namespace prefix to register. Should be an obsolute paths
+        example: "/test"
+      pubkey:
+        type: string
+        description:
+          The public JWK from the origin that wants to register the namespace.
+          It should be a marshalled (stringfied) JSON that contains either one JWK or a JWKS
+      admin_metadata:
+        $ref: "#/definitions/AdminMetadataForRegistration"
+  RegistrationFieldType:
+    type: string
+    enum:
+      - string
+      - int
+      - enum
+      - datetime
+  RegistrationField:
+    type: object
+    properties:
+      name:
+        type: string
+        description: The name of the field available to register
+        example: "prefix"
+      type:
+        description: The data type of the field
+        $ref: "#/definitions/RegistrationFieldType"
+      required:
+        description: If this field is required for registration
+        type: boolean
+      options:
+        description: The available options if the field is "enum" type
+        type: array
+        items:
+          type: string
+          minItems: 0
+
 tags:
   - name: auth
     description: Authentication APIs for all servers
   - name: common
     description: Common APIs for all servers
+  - name: registry_ui
+    description: APIs for Registry server Web UI
 paths:
   /health:
     get:
       tags:
         - common
       summary: Returns the health status of server components
+      description: "`Authentication Required`"
       produces:
         - application/json
-      security:
-        - Bearer: []
       responses:
-        '200':
+        "200":
           description: OK
           schema:
             type: object
@@ -93,41 +226,40 @@ paths:
               components:
                 type: object
                 description: The health status of each server components
-                properties: 
+                properties:
                   cmsd:
-                    $ref: '#/definitions/HealthStatus'
+                    $ref: "#/definitions/HealthStatus"
                   federation:
-                    $ref: '#/definitions/HealthStatus'
+                    $ref: "#/definitions/HealthStatus"
                   web-ui:
-                    $ref: '#/definitions/HealthStatus'
+                    $ref: "#/definitions/HealthStatus"
                   xrootd:
-                    $ref: '#/definitions/HealthStatus'
+                    $ref: "#/definitions/HealthStatus"
   /config:
     get:
       tags:
-        - common    
+        - common
       summary: Return the configuration values of the server
+      description: "`Authentication Required`"
       produces:
-      - application/json
-      security:
-        - Bearer: []
+        - application/json
       responses:
-        '200':
+        "200":
           description: OK
           schema:
             type: object
             description: The JSON object output from viper with all config values in the current server
-        '401':
+        "401":
           description: Unauthorized
   /auth/login:
     post:
       tags:
-        - auth    
+        - auth
       summary: Login with username and password to Pelican web UI
       consumes:
-      - application/json
+        - application/json
       produces:
-      - application/json
+        - application/json
       parameters:
         - in: body
           name: userCredential
@@ -137,23 +269,23 @@ paths:
             required:
               - user
               - password
-            properties: 
+            properties:
               user:
                 type: string
               password:
                 type: string
       responses:
-        '200':
+        "200":
           description: Login succeed
           schema:
             type: object
-            $ref: "#/definitions/SuccessModel"          
-        '400':
+            $ref: "#/definitions/SuccessModel"
+        "400":
           description: Invalid request, when username or password is missing
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"          
-        '401':
+            $ref: "#/definitions/ErrorModel"
+        "401":
           description: Login failed, when username or password doesn't match the record
           schema:
             type: object
@@ -161,12 +293,12 @@ paths:
   /auth/initLogin:
     post:
       tags:
-        - auth        
+        - auth
       summary: Login with one-time activation code to initialize web UI
       consumes:
-      - application/json
+        - application/json
       produces:
-      - application/json
+        - application/json
       parameters:
         - in: body
           name: activationCode
@@ -175,23 +307,24 @@ paths:
             type: object
             required:
               - code
-            properties: 
+            properties:
               code:
                 type: string
                 example: "123456"
       responses:
-        '200':
+        "200":
           description: Login succeed
           schema:
             type: object
-            $ref: "#/definitions/SuccessModel"          
-        '400':
-          description: Invalid request, when authentication is already initialized, 
+            $ref: "#/definitions/SuccessModel"
+        "400":
+          description:
+            Invalid request, when authentication is already initialized,
             code-based login is not available, or login code is not provided
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"          
-        '401':
+            $ref: "#/definitions/ErrorModel"
+        "401":
           description: Login failed, when code is not valid
           schema:
             type: object
@@ -199,14 +332,13 @@ paths:
   /auth/resetLogin:
     post:
       tags:
-        - auth        
+        - auth
       summary: Reset the password for the user
+      description: "`Authentication Required`"
       consumes:
-      - application/json
+        - application/json
       produces:
-      - application/json
-      security:
-        - Bearer: []
+        - application/json
       parameters:
         - in: body
           name: newPassword
@@ -215,28 +347,28 @@ paths:
             type: object
             required:
               - password
-            properties: 
+            properties:
               password:
                 type: string
                 description: The new password to reset to
                 example: ""
       responses:
-        '200':
+        "200":
           description: Reset succeed
           schema:
             type: object
-            $ref: "#/definitions/SuccessModel"          
-        '400':
+            $ref: "#/definitions/SuccessModel"
+        "400":
           description: Invalid request request, when password is missing
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"          
-        '500':
+            $ref: "#/definitions/ErrorModel"
+        "500":
           description: Server-side error, when failed to write the new password to auth file
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"            
-        '403':
+            $ref: "#/definitions/ErrorModel"
+        "403":
           description: Unauthorized request, when user is not logged in
           schema:
             type: object
@@ -244,18 +376,19 @@ paths:
   /auth/whoami:
     get:
       tags:
-        - auth    
+        - auth
       summary: Return the authentication status of the web ui
       produces:
-      - application/json
+        - application/json
       responses:
-        '200':
+        "200":
           description: OK
           schema:
             type: object
-            description: The authentication status and username, if any. "user" field is omitted
+            description:
+              The authentication status and username, if any. "user" field is omitted
               when "authenticated" is false
-            properties: 
+            properties:
               authenticated:
                 type: boolean
                 example: true
@@ -265,19 +398,376 @@ paths:
   /auth/loginInitialized:
     get:
       tags:
-        - auth    
+        - auth
       summary: Return the status of web UI initialization
-      description: The initialization depends on if the user has used the one-time activation
+      description:
+        The initialization depends on if the user has used the one-time activation
         code to set up the password for the admin user
       produces:
-      - application/json
+        - application/json
       responses:
-        '200':
+        "200":
           description: OK
           schema:
             type: object
             description: The initialization status
-            properties: 
+            properties:
               initialized:
                 type: boolean
                 example: true
+  /registry_ui/namespaces:
+    get:
+      tags:
+        - "registry_ui"
+      summary: Return a list of all namespaces in the registry
+      description: A public API to get all namespaces in the registry
+      parameters:
+        - name: server_type
+          in: query
+          required: false
+          description: The type of server to filter the results. The value can be either "origin" or "cache"
+          type: string
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: array
+            items:
+              $ref: "#/definitions/NamespaceWOPubkey"
+            description: An array of namespaces
+        "400":
+          description: Invalid request parameters
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "500":
+          description: Internal server error
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+    options:
+      tags:
+        - "registry_ui"
+      summary: Return a list of field available to register
+      description: "`Authentication Required`"
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: array
+            items:
+              $ref: "#/definitions/RegistrationField"
+    post:
+      tags:
+        - "registry_ui"
+      summary: Create a new namespace registration
+      description: "`Authentication Required`"
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: body
+          name: namespace
+          description: The namespace data to register
+          required: true
+          schema:
+            $ref: "#/definitions/NamespaceForRegistration"
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+            $ref: "#/definitions/SuccessModel"
+        "400":
+          description: The request data has invalid or missing field value
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "401":
+          description: Unauthorized
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "500":
+          description: Internal server error
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+  /registry_ui/namespaces/user:
+    get:
+      tags:
+        - "registry_ui"
+      summary: Return a list of namespaces for the currently authenticated user
+      description: "`Authentication Required`"
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: array
+            items:
+              $ref: "#/definitions/NamespaceWOPubkey"
+            description: An array of namespaces
+        "400":
+          description: Invalid request parameters
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "500":
+          description: Internal server error
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+  /registry_ui/namespaces/{id}:
+    get:
+      tags:
+        - "registry_ui"
+      summary: Return the namespace by `id`
+      description: "`Authentication Required`
+
+
+        For user with admin previlege, it returns for all valid namespace request.
+
+
+        For general users, it only returns namespace belonging to the user, or it returns 404
+        "
+      operationId: getNamespaceById
+      parameters:
+        - name: id
+          in: path
+          description: ID of the namespace to fetch
+          required: true
+          type: integer
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+            $ref: "#/definitions/Namespace"
+        "400":
+          description: Invalid namespace ID
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "401":
+          description: Authentication required to perform this action
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "404":
+          description: Namespace not found, either does not exists or the user doesn't have previlege to get it
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "500":
+          description: Internal server error
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+    put:
+      tags:
+        - "registry_ui"
+      summary: Update the namespace by `id`
+      description: "`Authentication Required`
+
+
+        For user with admin previlege, they can update any valid namespace.
+
+
+        For general users, they can only update the namespace belonging to the user, or it returns 404
+        "
+      operationId: updateNamespaceById
+      parameters:
+        - name: id
+          in: path
+          description: ID of the namespace to update
+          required: true
+          type: integer
+        - in: body
+          name: namespace
+          description: The namespace data to update
+          required: true
+          schema:
+            $ref: "#/definitions/NamespaceForRegistration"
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+            $ref: "#/definitions/SuccessModel"
+        "400":
+          description: Invalid namespace ID
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "401":
+          description: Authentication required to perform this action
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "403":
+          description: The user does not have previlege to update the namespace
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "404":
+          description: Namespace not found because it does not exist
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "500":
+          description: Internal server error
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+  /registry_ui/namespaces/{id}/pubkey:
+    get:
+      tags:
+        - "registry_ui"
+      summary: Returns the public key of the namespace by id, in JWK Set format
+      description: It returns the JWK set as a downloadable attachement. Refer to https://datatracker.ietf.org/doc/html/rfc7517#section-5 for the format of JWK set
+      operationId: getNamespacePubkeyById
+      parameters:
+        - name: id
+          in: path
+          description: ID of the namespace to get public key
+          required: true
+          type: integer
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK, an attachement is returned to download
+          schema:
+            type: object
+        "400":
+          description: Invalid namespace ID
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "404":
+          description: Namespace not found, either does not exist or the user doesn't have previlege to get it
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "500":
+          description: Internal server error
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+  /registry_ui/namespaces/{id}/approve:
+    patch:
+      tags:
+        - "registry_ui"
+      summary: Update namespace status to "approved"
+      description: "`Authentication Required`
+
+
+        Update namespace status to `approved` by namespace `id`.
+
+
+        This action requires admin previlege to perform.
+        "
+      parameters:
+        - name: id
+          in: path
+          description: ID of the namespace to update status
+          required: true
+          type: integer
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: Success
+          schema:
+            type: object
+            $ref: "#/definitions/SuccessModel"
+        "400":
+          description: Invalid namespace ID
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "401":
+          description: Authentication required to perform this action
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "403":
+          description: The user does not have previlege to update the namespace status
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "404":
+          description: Namespace not found because it does not exist
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "500":
+          description: Internal server error
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+  /registry_ui/namespaces/{id}/deny:
+    patch:
+      tags:
+        - "registry_ui"
+      summary: Update namespace status to "denied"
+      description: "`Authentication Required`
+
+
+        Update namespace status to `denied` by namespace `id`.
+
+
+        This action requires admin previlege to perform.
+        "
+      parameters:
+        - name: id
+          in: path
+          description: ID of the namespace to update status
+          required: true
+          type: integer
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: Success
+          schema:
+            type: object
+            $ref: "#/definitions/SuccessModel"
+        "400":
+          description: Invalid namespace ID
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "401":
+          description: Authentication required to perform this action
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "403":
+          description: The user does not have previlege to update the namespace status
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "404":
+          description: Namespace not found because it does not exist
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "500":
+          description: Internal server error
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
