@@ -285,6 +285,11 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 		return
 	}
 
+	if validInst := validateInstitution(ns.AdminMetadata.Institution); !validInst {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Institution \"%s\" is not in the list of available institutions to register.", ns.AdminMetadata.Institution)})
+		return
+	}
+
 	if !isUpdate { // Create
 		ns.AdminMetadata.UserID = user
 		if err := addNamespace(&ns); err != nil {
@@ -439,6 +444,15 @@ func getNamespaceJWKS(ctx *gin.Context) {
 	ctx.Data(200, "application/json", jsonData)
 }
 
+func listInstitutions(ctx *gin.Context) {
+	inst := param.Registry_Institutions.GetStringSlice()
+	if inst == nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Server didn't configure Registry.Institutions"})
+		return
+	}
+	ctx.JSON(http.StatusOK, inst)
+}
+
 // checkAdmin checks if a user string has admin privilege. It returns boolean and a message
 // indicating the error message
 func checkAdmin(user string) (isAdmin bool, message string) {
@@ -503,6 +517,9 @@ func RegisterRegistryWebAPI(router *gin.RouterGroup) error {
 		registryWebAPI.PATCH("/namespaces/:id/deny", web_ui.AuthHandler, adminAuthHandler, func(ctx *gin.Context) {
 			updateNamespaceStatus(ctx, Denied)
 		})
+	}
+	{
+		registryWebAPI.GET("/institutions", web_ui.AuthHandler, listInstitutions)
 	}
 	return nil
 }

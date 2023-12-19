@@ -771,3 +771,31 @@ paths:
           schema:
             type: object
             $ref: "#/definitions/ErrorModel"
+  /registry_ui/institutions:
+    get:
+      tags:
+        - "registry_ui"
+      summary: Returns a list of institution names available for user to select for namespace registration
+      description: "`Authentication Required`"
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: array
+            items:
+              type: string
+              description: Institution availbale to register
+              example: "Univerisity of Wisconsin - Madison"
+              minItems: 0
+        "401":
+          description: Authentication required to perform this action
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "500":
+          description: Server didn't configure Registry.Institutions.
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"

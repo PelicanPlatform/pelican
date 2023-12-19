@@ -150,3 +150,18 @@ func validateJwks(jwksStr string) (jwk.Key, error) {
 	}
 	return key, nil
 }
+
+func validateInstitution(inst string) bool {
+	instList := param.Registry_Institutions.GetStringSlice()
+	if instList == nil {
+		// If Registry_Institutions is unset, we don't check institutions, always pass
+		return true
+	}
+	for _, instOpt := range instList {
+		// We required full equality, as we expect the value is from the institution API
+		if inst == instOpt {
+			return true
+		}
+	}
+	return false
+}

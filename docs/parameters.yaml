@@ -534,6 +534,15 @@ type: stringSlice
 default: []
 components: ["nsregistry"]
 ---
+name: Registry.Institutions
+description: >-
+  A string slice of names of institutions available to register. Users can only select from this list
+  when they register a new namespace.
+
+type: stringSlice
+default: []
+components: ["nsregistry"]
+---
 ############################
 #   Server-level configs   #
 ############################
