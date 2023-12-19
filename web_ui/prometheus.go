@@ -11,8 +11,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// This package started as a fork of the `prometheus` CLI executable and was
+// This file started as a fork of the `prometheus` CLI executable and was
 // heavily adapted to make it embedded into the pelican web UI.
+
 package web_ui
 
 import (

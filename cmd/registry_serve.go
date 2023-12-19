@@ -59,6 +59,11 @@ func serveRegistry( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	if err := web_ui.ConfigureServerWebAPI(engine, false); err != nil {
 		return err
 	}
+
+	if err := web_ui.ConfigOAuthClientAPIs(engine); err != nil {
+		return err
+	}
+
 	rootRouterGroup := engine.Group("/")
 	// Call out to registry to establish routes for the gin engine
 	registry.RegisterRegistryRoutes(rootRouterGroup)

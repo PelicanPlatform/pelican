@@ -33,10 +33,37 @@ func ServerOIDCClient() (result Config, err error) {
 		return
 	}
 
+	if result.ClientID == "" {
+		err = errors.New("OIDC.ClientID is empty")
+		return
+	}
+
 	// load OIDC.ClientSecret
 	if result.ClientSecret, err = config.GetOIDCClientSecret(); err != nil {
 		return
 	}
+
+	if result.ClientSecret == "" {
+		err = errors.New("OIDC.ClientSecret is empty")
+		return
+	}
+
+	// Load OIDC.AuthorizationEndpoint
+	authorizationEndpoint, err := config.GetOIDCAuthorizationEndpoint()
+	if err != nil {
+		err = errors.Wrap(err, "Unable to get authorization endpoint for OIDC issuer")
+		return
+	}
+	if authorizationEndpoint == "" {
+		err = errors.New("Nothing set for config parameter OIDC.DeviceAuthEndpoint")
+		return
+	}
+	authorizationEndpointURL, err := url.Parse(authorizationEndpoint)
+	if err != nil {
+		err = errors.New("Failed to parse URL for parameter OIDC.DeviceAuthEndpoint")
+		return
+	}
+	result.Endpoint.AuthURL = authorizationEndpointURL.String()
 
 	// Load OIDC.DeviceAuthEndpoint
 	deviceAuthEndpoint, err := config.GetOIDCDeviceAuthEndpoint()

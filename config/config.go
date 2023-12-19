@@ -484,6 +484,7 @@ func InitServer(sType ServerType) error {
 	viper.SetDefault("Server.TLSCertificate", filepath.Join(configDir, "certificates", "tls.crt"))
 	viper.SetDefault("Server.TLSKey", filepath.Join(configDir, "certificates", "tls.key"))
 	viper.SetDefault("Server.TLSCAKey", filepath.Join(configDir, "certificates", "tlsca.key"))
+	viper.SetDefault("Server.SessionSecretFile", filepath.Join(configDir, "session-secret"))
 	viper.SetDefault("Xrootd.RobotsTxtFile", filepath.Join(configDir, "robots.txt"))
 	viper.SetDefault("Xrootd.ScitokensConfig", filepath.Join(configDir, "xrootd", "scitokens.cfg"))
 	viper.SetDefault("Xrootd.Authfile", filepath.Join(configDir, "xrootd", "authfile"))
@@ -592,6 +593,12 @@ func InitServer(sType ServerType) error {
 
 	// Check if we have required files in place to set up TLS, or we will generate them
 	err = GenerateCert()
+	if err != nil {
+		return err
+	}
+
+	// Generate the session cookie secret and save it as the default value
+	err = GenerateSessionSecret()
 	if err != nil {
 		return err
 	}
