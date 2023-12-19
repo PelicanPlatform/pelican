@@ -835,7 +835,7 @@ func UploadFile(src string, origDest *url.URL, token string, namespace namespace
 	}
 
 	// Parse the writeback host as a URL
-	writebackhostUrl, err := url.Parse(namespace.WriteBackHost)
+	writebackhostUrl, err := url.Parse(namespace.WritebackHost)
 	if err != nil {
 		return 0, err
 	}
@@ -1089,7 +1089,7 @@ func StatHttp(dest *url.URL, namespace namespaces.Namespace) (uint64, error) {
 	}
 
 	// Parse the writeback host as a URL
-	writebackhostUrl, err := url.Parse(namespace.WriteBackHost)
+	writebackhostUrl, err := url.Parse(namespace.WritebackHost)
 	if err != nil {
 		return 0, err
 	}

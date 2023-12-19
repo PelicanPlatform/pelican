@@ -498,13 +498,33 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 	// For write back, it will be the destination
 	// For read it will be the source.
 
+	OSDFDirectorUrl := param.Federation_DirectorUrl.GetString()
+	useOSDFDirector := viper.IsSet("Federation.DirectorURL")
+
+	var ns namespaces.Namespace
+
 	if destScheme == "stash" || destScheme == "osdf" || destScheme == "pelican" {
 		log.Debugln("Detected writeback")
-		ns, err := namespaces.MatchNamespace(dest_url.Path)
-		if err != nil {
-			log.Errorln("Failed to get namespace information:", err)
-			AddError(err)
-			return 0, err
+		// If we have a director set, go through that for namespace info, otherwise use topology
+		if useOSDFDirector {
+			destination = strings.TrimPrefix(destination, destScheme+"://")
+			dirResp, err := QueryDirector(destination, OSDFDirectorUrl)
+			if err != nil {
+				log.Errorln("Error while querying the Director:", err)
+				AddError(err)
+				return 0, err
+			}
+			ns, err = CreateNsFromDirectorResp(dirResp)
+			if err != nil {
+				AddError(err)
+				return 0, err
+			}
+		} else {
+			ns, err = namespaces.MatchNamespace(dest_url.Path)
+			if err != nil {
+				AddError(err)
+				return 0, err
+			}
 		}
 		_, err = doWriteBack(source_url.Path, dest_url, ns, recursive)
 		AddError(err)
@@ -522,11 +542,7 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 	if string(sourceFile[0]) != "/" {
 		sourceFile = "/" + sourceFile
 	}
-
-	OSDFDirectorUrl := param.Federation_DirectorUrl.GetString()
-	useOSDFDirector := viper.IsSet("Federation.DirectorURL")
-
-	var ns namespaces.Namespace
+	// If we have a director set, go through that for namespace info, otherwise use topology
 	if useOSDFDirector {
 		dirResp, err := QueryDirector(sourceFile, OSDFDirectorUrl)
 		if err != nil {

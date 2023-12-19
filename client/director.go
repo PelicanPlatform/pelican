@@ -74,6 +74,7 @@ func CreateNsFromDirectorResp(dirResp *http.Response) (namespace namespaces.Name
 	namespace.UseTokenOnRead, _ = strconv.ParseBool(xPelicanNamespace["require-token"])
 	namespace.ReadHTTPS, _ = strconv.ParseBool(xPelicanNamespace["readhttps"])
 	namespace.DirListHost = xPelicanNamespace["collections-url"]
+	namespace.WritebackHost = xPelicanNamespace["writebackhost"]
 
 	var xPelicanAuthorization map[string]string
 	if len(dirResp.Header.Values("X-Pelican-Authorization")) > 0 {
@@ -125,7 +126,11 @@ func CreateNsFromDirectorResp(dirResp *http.Response) (namespace namespaces.Name
 }
 
 func QueryDirector(source string, directorUrl string) (resp *http.Response, err error) {
-	resourceUrl := directorUrl + source
+	resourceUrl, err := url.JoinPath(directorUrl, source)
+	if err != nil {
+		return nil, err
+	}
+
 	// Here we use http.Transport to prevent the client from following the director's
 	// redirect. We use the Location url elsewhere (plus we still need to do the token
 	// dance!)

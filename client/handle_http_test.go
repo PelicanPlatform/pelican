@@ -389,7 +389,7 @@ func TestFullUpload(t *testing.T) {
 	testURL, err := url.Parse(ts.URL)
 	assert.NoError(t, err, "Error parsing test URL")
 	testNamespace := namespaces.Namespace{
-		WriteBackHost: "https://" + testURL.Host,
+		WritebackHost: "https://" + testURL.Host,
 	}
 
 	// Upload the file

@@ -175,7 +175,7 @@ func TestFullNamespace(t *testing.T) {
 	assert.Equal(t, true, ns.ReadHTTPS)
 	assert.Equal(t, true, ns.UseTokenOnRead)
 	assert.Equal(t, "/ospool/PROTECTED", ns.Path)
-	assert.Equal(t, "https://origin-auth2001.chtc.wisc.edu:1095", ns.WriteBackHost)
+	assert.Equal(t, "https://origin-auth2001.chtc.wisc.edu:1095", ns.WritebackHost)
 
 }
 
