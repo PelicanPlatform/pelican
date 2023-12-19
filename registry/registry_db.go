@@ -351,7 +351,7 @@ func getNamespaceById(id int) (*Namespace, error) {
 
 // Get a collection of namespaces by [Namespace.AdminMetadata.UserID]
 func getNamespacesByUserID(userID string) ([]*Namespace, error) {
-	query := `SELECT * FROM namespace`
+	query := `SELECT * FROM namespace ORDER BY id ASC`
 	rows, err := db.Query(query)
 	if err != nil {
 		return nil, err
@@ -382,9 +382,9 @@ func getNamespacesByServerType(serverType ServerType) ([]*Namespace, error) {
 	query := ""
 	if serverType == CacheType {
 		// Refer to the cache prefix name in cmd/cache_serve
-		query = `SELECT * FROM NAMESPACE WHERE PREFIX LIKE '/caches/%'`
+		query = `SELECT * FROM NAMESPACE WHERE PREFIX LIKE '/caches/%' ORDER BY id ASC`
 	} else if serverType == OriginType {
-		query = `SELECT * FROM NAMESPACE WHERE NOT PREFIX LIKE '/caches/%'`
+		query = `SELECT * FROM NAMESPACE WHERE NOT PREFIX LIKE '/caches/%' ORDER BY id ASC`
 	} else {
 		return nil, errors.New(fmt.Sprint("Can't get namespace: unsupported server type: ", serverType))
 	}
@@ -537,7 +537,7 @@ func deleteNamespace(prefix string) error {
 }
 
 func getAllNamespaces() ([]*Namespace, error) {
-	query := `SELECT * FROM namespace`
+	query := `SELECT * FROM namespace ORDER BY id ASC`
 	rows, err := db.Query(query)
 	if err != nil {
 		return nil, err
