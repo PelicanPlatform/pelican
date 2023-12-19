@@ -204,6 +204,7 @@ func TestGetNamespacesByUserID(t *testing.T) {
 	})
 
 	t.Run("return-user-namespace-with-valid-userID", func(t *testing.T) {
+		defer resetNamespaceDB(t)
 		err := insertMockDBData(mockNssWithMixed)
 		require.NoError(t, err)
 		err = insertMockDBData([]Namespace{mockNamespace("/user1", "", "user1", AdminMetadata{UserID: "user1"})})
@@ -215,6 +216,7 @@ func TestGetNamespacesByUserID(t *testing.T) {
 	})
 
 	t.Run("return-multiple-user-namespaces-with-valid-userID", func(t *testing.T) {
+		defer resetNamespaceDB(t)
 		err := insertMockDBData(mockNssWithMixed)
 		require.NoError(t, err)
 		err = insertMockDBData([]Namespace{mockNamespace("/user1", "", "user1", AdminMetadata{UserID: "user1"})})
@@ -295,6 +297,7 @@ func TestUpdateNamespace(t *testing.T) {
 	defer teardownMockNamespaceDB(t)
 
 	t.Run("update-on-dne-entry-returns-error", func(t *testing.T) {
+		defer resetNamespaceDB(t)
 		mockNs := mockNamespace("/test", "", "", AdminMetadata{})
 		err := updateNamespace(&mockNs)
 		assert.Error(t, err)
@@ -371,6 +374,7 @@ func TestUpdateNamespaceStatusById(t *testing.T) {
 		err = updateNamespaceStatusById(got[0].ID, Approved, "approver1")
 		assert.NoError(t, err)
 		got, err = getAllNamespaces()
+		assert.NoError(t, err)
 		require.Equal(t, 1, len(got))
 		assert.Equal(t, mockNs.Prefix, got[0].Prefix)
 		assert.Equal(t, Approved, got[0].AdminMetadata.Status)
@@ -382,13 +386,16 @@ func TestUpdateNamespaceStatusById(t *testing.T) {
 		defer resetNamespaceDB(t)
 
 		mockNs := mockNamespace("/test", "pubkey", "identity", AdminMetadata{UserID: "someone"})
-		insertMockDBData([]Namespace{mockNs})
+		err := insertMockDBData([]Namespace{mockNs})
+		assert.NoError(t, err)
 		got, err := getAllNamespaces()
+		assert.NoError(t, err)
 		require.Equal(t, 1, len(got))
 		assert.Equal(t, mockNs.Prefix, got[0].Prefix)
 		err = updateNamespaceStatusById(got[0].ID, Denied, "approver1")
 		assert.NoError(t, err)
 		got, err = getAllNamespaces()
+		assert.NoError(t, err)
 		require.Equal(t, 1, len(got))
 		assert.Equal(t, mockNs.Prefix, got[0].Prefix)
 		assert.Equal(t, Denied, got[0].AdminMetadata.Status)

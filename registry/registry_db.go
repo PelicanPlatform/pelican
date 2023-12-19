@@ -469,12 +469,14 @@ func updateNamespace(ns *Namespace) error {
 		return errors.Wrap(err, "Fail to marshall AdminMetadata")
 	}
 
-	query := `UPDATE namespace SET pubkey = ?, identity = ?, admin_metadata = ? WHERE id = ?`
+	// We intentionally exclude updating "identity" as this should only be updated
+	// when user registered through Pelican client with identity
+	query := `UPDATE namespace SET pubkey = ?, admin_metadata = ? WHERE id = ?`
 	tx, err := db.Begin()
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(query, ns.Pubkey, ns.Identity, strAdminMetadata, ns.ID)
+	_, err = tx.Exec(query, ns.Pubkey, strAdminMetadata, ns.ID)
 	if err != nil {
 		if errRoll := tx.Rollback(); errRoll != nil {
 			log.Errorln("Failed to rollback transaction:", errRoll)
