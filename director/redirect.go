@@ -363,7 +363,7 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 func registerServeAd(ctx *gin.Context, sType ServerType) {
 	tokens, present := ctx.Request.Header["Authorization"]
 	if !present || len(tokens) == 0 {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Bearer token not present in the 'Authorization' header"})
+		ctx.JSON(http.StatusForbidden, gin.H{"error": "Bearer token not present in the 'Authorization' header"})
 		return
 	}
 
@@ -414,7 +414,7 @@ func registerServeAd(ctx *gin.Context, sType ServerType) {
 		if !ok {
 			log.Warningf("%s %v advertised to namespace %v without valid registration\n",
 				sType, ad.Name, prefix)
-			ctx.JSON(http.StatusUnauthorized, gin.H{"error": sType + " not authorized to advertise to this namespace"})
+			ctx.JSON(http.StatusForbidden, gin.H{"error": sType + " not authorized to advertise to this namespace"})
 			return
 		}
 	}

@@ -23,7 +23,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
-	"path"
 	"strings"
 	"sync"
 	"time"
@@ -270,6 +269,9 @@ func GetRegistryIssuerURL(prefix string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	namespace_url.Path = path.Join(namespace_url.Path, "api", "v2.0", "registry", "metadata", prefix, ".well-known", "issuer.jwks")
+	namespace_url.Path, err = url.JoinPath(namespace_url.Path, "api", "v2.0", "registry", "metadata", prefix, ".well-known", "issuer.jwks")
+	if err != nil {
+		return "", err
+	}
 	return namespace_url.String(), nil
 }
