@@ -275,13 +275,13 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 	// Check if the parent or child path along the prefix has been registered
 	valErr, sysErr := validateKeyChaining(ns.Prefix, pubkey)
 	if valErr != nil {
-		log.Errorln(err)
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err})
+		log.Errorln(valErr)
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": valErr})
 		return
 	}
 	if sysErr != nil {
-		log.Errorln(err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err})
+		log.Errorln(sysErr)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": sysErr})
 		return
 	}
 

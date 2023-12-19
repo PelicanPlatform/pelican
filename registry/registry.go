@@ -293,13 +293,13 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData, action str
 			valErr, sysErr := validateKeyChaining(reqPrefix, key)
 			if valErr != nil {
 				log.Errorln(err)
-				ctx.JSON(http.StatusForbidden, gin.H{"error": err})
-				return err
+				ctx.JSON(http.StatusForbidden, gin.H{"error": valErr})
+				return valErr
 			}
 			if sysErr != nil {
 				log.Errorln(err)
-				ctx.JSON(http.StatusInternalServerError, gin.H{"error": err})
-				return err
+				ctx.JSON(http.StatusInternalServerError, gin.H{"error": sysErr})
+				return sysErr
 			}
 
 			err = dbAddNamespace(ctx, data)

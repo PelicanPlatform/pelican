@@ -67,7 +67,7 @@ func GenerateMockJWKS() (string, error) {
 
 func TestListNamespaces(t *testing.T) {
 	// Initialize the mock database
-	setupMockNamespaceDB(t)
+	setupMockRegistryDB(t)
 	defer teardownMockNamespaceDB(t)
 
 	router := gin.Default()
@@ -158,7 +158,7 @@ func TestGetNamespaceJWKS(t *testing.T) {
 		t.Fatalf("Failed to set up mock public key: %v", err)
 	}
 	// Initialize the mock database
-	setupMockNamespaceDB(t)
+	setupMockRegistryDB(t)
 	defer teardownMockNamespaceDB(t)
 
 	router := gin.Default()

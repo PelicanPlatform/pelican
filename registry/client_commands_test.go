@@ -37,12 +37,10 @@ func registryMockup(t *testing.T, testName string) *httptest.Server {
 
 	ikey := filepath.Join(issuerTempDir, "issuer.jwk")
 	viper.Set("IssuerKey", ikey)
-	viper.Set("Registry.DbLocation", filepath.Join(issuerTempDir, "test.sql"))
 	err := config.InitServer(config.RegistryType)
 	require.NoError(t, err)
 
-	err = InitializeDB()
-	require.NoError(t, err)
+	setupMockRegistryDB(t)
 
 	gin.SetMode(gin.TestMode)
 	engine := gin.Default()

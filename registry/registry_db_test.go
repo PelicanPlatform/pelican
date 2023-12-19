@@ -38,7 +38,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-func setupMockNamespaceDB(t *testing.T) {
+func setupMockRegistryDB(t *testing.T) {
 	mockDB, err := sql.Open("sqlite", ":memory:")
 	db = mockDB
 	require.NoError(t, err, "Error setting up mock namespace DB")
@@ -144,7 +144,7 @@ var (
 )
 
 func TestGetNamespacesById(t *testing.T) {
-	setupMockNamespaceDB(t)
+	setupMockRegistryDB(t)
 	defer teardownMockNamespaceDB(t)
 
 	t.Run("return-error-with-empty-db", func(t *testing.T) {
@@ -185,7 +185,7 @@ func TestGetNamespacesById(t *testing.T) {
 }
 
 func TestGetNamespacesByUserID(t *testing.T) {
-	setupMockNamespaceDB(t)
+	setupMockRegistryDB(t)
 	defer teardownMockNamespaceDB(t)
 
 	t.Run("empty-db-return-empty-array", func(t *testing.T) {
@@ -225,7 +225,7 @@ func TestGetNamespacesByUserID(t *testing.T) {
 }
 
 func TestAddNamespace(t *testing.T) {
-	setupMockNamespaceDB(t)
+	setupMockRegistryDB(t)
 	defer teardownMockNamespaceDB(t)
 
 	t.Run("set-default-fields", func(t *testing.T) {
@@ -282,7 +282,7 @@ func TestAddNamespace(t *testing.T) {
 }
 
 func TestUpdateNamespace(t *testing.T) {
-	setupMockNamespaceDB(t)
+	setupMockRegistryDB(t)
 	defer teardownMockNamespaceDB(t)
 
 	t.Run("update-on-dne-entry-returns-error", func(t *testing.T) {
@@ -324,7 +324,7 @@ func TestUpdateNamespace(t *testing.T) {
 }
 
 func TestUpdateNamespaceStatusById(t *testing.T) {
-	setupMockNamespaceDB(t)
+	setupMockRegistryDB(t)
 	defer teardownMockNamespaceDB(t)
 	t.Run("return-error-if-id-dne", func(t *testing.T) {
 		defer resetNamespaceDB(t)
@@ -384,7 +384,7 @@ func TestUpdateNamespaceStatusById(t *testing.T) {
 
 // teardown must be called at the end of the test to close the in-memory SQLite db
 func TestGetNamespacesByServerType(t *testing.T) {
-	setupMockNamespaceDB(t)
+	setupMockRegistryDB(t)
 	defer teardownMockNamespaceDB(t)
 
 	t.Run("wrong-server-type-gives-error", func(t *testing.T) {

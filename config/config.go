@@ -349,7 +349,10 @@ func setupCSRFHandler() {
 		csrf.Path("/"),
 		csrf.ErrorHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusForbidden)
-			w.Write([]byte(`{"message": "CSRF token invalid"}`))
+			_, err := w.Write([]byte(`{"message": "CSRF token invalid"}`))
+			if err != nil {
+				log.Error("Error writing error message back as response")
+			}
 		})),
 	)
 	csrfHanlder = adapter.Wrap(CSRF)
