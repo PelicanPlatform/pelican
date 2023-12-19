@@ -78,6 +78,7 @@ func AdvertiseOSDF() error {
 		nsAd.RequireToken = ns.UseTokenOnRead
 		nsAd.Path = ns.Path
 		nsAd.DirlistHost = ns.DirlistHost
+		nsAd.WritebackHost = ns.WritebackHost
 		issuerURL, err := url.Parse(ns.CredentialGeneration.Issuer)
 		if err != nil {
 			log.Warningf("Invalid URL %v when parsing topology response: %v\n", ns.CredentialGeneration.Issuer, err)
