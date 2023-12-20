@@ -55,7 +55,7 @@ func init() {
 	flagSet.StringP("cache-list-name", "n", "xroot", "(Deprecated) Cache list to use, currently either xroot or xroots; may be ignored")
 	flagSet.Lookup("cache-list-name").Hidden = true
 	// All the deprecated or hidden flags that are only relevant if we are in historical "stashcp mode"
-	if execName == "stashcp" {
+	if strings.HasPrefix(execName, "stashcp") {
 		copyCmd.Use = "stashcp {source ...} {destination}"
 		copyCmd.Short = "Copy a file to/from the OSDF"
 		flagSet.Lookup("cache-list-name").Hidden = false // Expose the help for this option
@@ -82,7 +82,7 @@ func copyMain(cmd *cobra.Command, args []string) {
 	client.ObjectClientOptions.Version = version
 
 	// Need to check just stashcp since it does not go through root, the other modes get checked there
-	if execName == "stashcp" {
+	if strings.HasPrefix(execName, "stashcp") {
 		if val, err := cmd.Flags().GetBool("debug"); err == nil && val {
 			config.SetLogging(log.DebugLevel)
 		} else {

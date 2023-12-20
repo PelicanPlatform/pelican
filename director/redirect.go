@@ -363,20 +363,20 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 func registerServeAd(ctx *gin.Context, sType ServerType) {
 	tokens, present := ctx.Request.Header["Authorization"]
 	if !present || len(tokens) == 0 {
-		ctx.JSON(401, gin.H{"error": "Bearer token not present in the 'Authorization' header"})
+		ctx.JSON(http.StatusForbidden, gin.H{"error": "Bearer token not present in the 'Authorization' header"})
 		return
 	}
 
 	err := versionCompatCheck(ctx)
 	if err != nil {
 		log.Debugf("A version incompatibility was encountered while registering %s and no response was served: %v", sType, err)
-		ctx.JSON(500, gin.H{"error": "Incompatible versions detected: " + fmt.Sprintf("%v", err)})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Incompatible versions detected: " + fmt.Sprintf("%v", err)})
 		return
 	}
 
 	ad := OriginAdvertise{}
 	if ctx.ShouldBind(&ad) != nil {
-		ctx.JSON(400, gin.H{"error": "Invalid " + sType + " registration"})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid " + sType + " registration"})
 		return
 	}
 
@@ -387,13 +387,13 @@ func registerServeAd(ctx *gin.Context, sType ServerType) {
 			ok, err := VerifyAdvertiseToken(token, namespace.Path)
 			if err != nil {
 				log.Warningln("Failed to verify token:", err)
-				ctx.JSON(400, gin.H{"error": "Authorization token verification failed"})
+				ctx.JSON(http.StatusForbidden, gin.H{"error": "Authorization token verification failed"})
 				return
 			}
 			if !ok {
 				log.Warningf("%s %v advertised to namespace %v without valid registration\n",
 					sType, ad.Name, namespace.Path)
-				ctx.JSON(400, gin.H{"error": sType + " not authorized to advertise to this namespace"})
+				ctx.JSON(http.StatusForbidden, gin.H{"error": sType + " not authorized to advertise to this namespace"})
 				return
 			}
 		}
@@ -402,14 +402,19 @@ func registerServeAd(ctx *gin.Context, sType ServerType) {
 		prefix := path.Join("caches", ad.Name)
 		ok, err := VerifyAdvertiseToken(token, prefix)
 		if err != nil {
-			log.Warningln("Failed to verify token:", err)
-			ctx.JSON(400, gin.H{"error": "Authorization token verification failed"})
+			if err == adminApprovalErr {
+				log.Warningln("Failed to verify token:", err)
+				ctx.JSON(http.StatusForbidden, gin.H{"error": "Cache is not admin approved"})
+			} else {
+				log.Warningln("Failed to verify token:", err)
+				ctx.JSON(http.StatusForbidden, gin.H{"error": "Authorization token verification failed"})
+			}
 			return
 		}
 		if !ok {
 			log.Warningf("%s %v advertised to namespace %v without valid registration\n",
 				sType, ad.Name, prefix)
-			ctx.JSON(400, gin.H{"error": sType + " not authorized to advertise to this namespace"})
+			ctx.JSON(http.StatusForbidden, gin.H{"error": sType + " not authorized to advertise to this namespace"})
 			return
 		}
 	}
@@ -417,14 +422,14 @@ func registerServeAd(ctx *gin.Context, sType ServerType) {
 	ad_url, err := url.Parse(ad.URL)
 	if err != nil {
 		log.Warningf("Failed to parse %s URL %v: %v\n", sType, ad.URL, err)
-		ctx.JSON(400, gin.H{"error": "Invalid " + sType + " URL"})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid " + sType + " URL"})
 		return
 	}
 
 	adWebUrl, err := url.Parse(ad.WebURL)
 	if err != nil && ad.WebURL != "" { // We allow empty WebURL string for backward compatibility
 		log.Warningf("Failed to parse origin Web URL %v: %v\n", ad.WebURL, err)
-		ctx.JSON(400, gin.H{"error": "Invalid origin Web URL"})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid origin Web URL"})
 		return
 	}
 
@@ -449,7 +454,7 @@ func registerServeAd(ctx *gin.Context, sType ServerType) {
 		go PeriodicDirectorTest(ctx, sAd)
 	}
 
-	ctx.JSON(200, gin.H{"msg": "Successful registration"})
+	ctx.JSON(http.StatusOK, gin.H{"msg": "Successful registration"})
 }
 
 // Return a list of available origins URL in Prometheus HTTP SD format

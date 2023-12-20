@@ -256,8 +256,7 @@ func TestAddNamespace(t *testing.T) {
 		defer resetNamespaceDB(t)
 		mockCreateAt := time.Now().Add(time.Hour * 10)
 		mockUpdatedAt := time.Now().Add(time.Minute * 20)
-		mockStatus := Approved
-		mockNs := mockNamespace("/test", "pubkey", "identity", AdminMetadata{UserID: "someone", CreatedAt: mockCreateAt, UpdatedAt: mockUpdatedAt, Status: mockStatus})
+		mockNs := mockNamespace("/test", "pubkey", "identity", AdminMetadata{UserID: "someone", CreatedAt: mockCreateAt, UpdatedAt: mockUpdatedAt})
 		err := addNamespace(&mockNs)
 		require.NoError(t, err)
 		got, err := getAllNamespaces()
@@ -267,7 +266,6 @@ func TestAddNamespace(t *testing.T) {
 
 		assert.NotEqual(t, mockCreateAt.UTC(), mockNs.AdminMetadata.CreatedAt.UTC())
 		assert.NotEqual(t, mockUpdatedAt.UTC(), mockNs.AdminMetadata.UpdatedAt.UTC())
-		assert.NotEqual(t, mockStatus, mockNs.AdminMetadata.Status)
 		// We can do this becuase we pass the pointer of mockNs to addNamespce which
 		// then modify the fields and insert into database
 		assert.Equal(t, mockNs.AdminMetadata.CreatedAt.UTC(), got[0].AdminMetadata.CreatedAt)
@@ -590,6 +588,93 @@ func TestRegistryTopology(t *testing.T) {
 	exists, err = namespaceExists("/regular/foo")
 	require.NoError(t, err)
 	require.True(t, exists)
+
+	viper.Reset()
+}
+
+func TestCacheAdminTrue(t *testing.T) {
+
+	registryDBDir := t.TempDir()
+	viper.Set("Registry.DbLocation", registryDBDir)
+
+	err := InitializeDB()
+	defer ShutdownDB()
+	require.NoError(t, err, "error initializing registry database")
+
+	adminTester := func(ns Namespace) func(t *testing.T) {
+		return func(t *testing.T) {
+			err = addNamespace(&ns)
+
+			require.NoError(t, err, "error adding test cache to registry database")
+
+			// This will return a serverCredsError if the AdminMetadata.Stauts != Approved, which we don't want to happen
+			// For these tests, otherwise it will get a key parsing error as ns.Pubkey isn't a real jwk
+			_, err = getNamespaceJwksByPrefix(ns.Prefix, true)
+			require.NotErrorIsf(t, err, serverCredsErr, "error chain contains serverCredErr")
+
+			require.ErrorContainsf(t, err, "Failed to parse pubkey as a jwks: failed to unmarshal JWK set: invalid character 'k' in literal true (expecting 'r')", "error doesn't contain jwks parsing error")
+		}
+	}
+
+	var ns Namespace
+	ns.Prefix = "/caches/test3"
+	ns.Identity = "testident3"
+	ns.Pubkey = "tkey"
+	ns.AdminMetadata.Status = Approved
+
+	t.Run("WithApproval", adminTester(ns))
+
+	ns.Prefix = "/orig/test1"
+	ns.Identity = "testident4"
+	ns.Pubkey = "tkey"
+	ns.AdminMetadata.Status = Pending
+
+	t.Run("OriginNoApproval", adminTester(ns))
+
+	ns.Prefix = "/orig/test2"
+	ns.Identity = "testident5"
+	ns.Pubkey = "tkey"
+	ns.AdminMetadata = AdminMetadata{}
+
+	t.Run("OriginEmptyApproval", adminTester(ns))
+
+	viper.Reset()
+}
+
+func TestCacheAdminFalse(t *testing.T) {
+	registryDBDir := t.TempDir()
+	viper.Set("Registry.DbLocation", registryDBDir)
+
+	err := InitializeDB()
+	defer ShutdownDB()
+
+	require.NoError(t, err, "error initializing registry database")
+
+	adminTester := func(ns Namespace) func(t *testing.T) {
+		return func(t *testing.T) {
+			err = addNamespace(&ns)
+			require.NoError(t, err, "error adding test cache to registry database")
+
+			// This will return a serverCredsError if the admin_approval == false check is triggered, which we want to happen
+			_, err = getNamespaceJwksByPrefix(ns.Prefix, true)
+
+			require.ErrorIs(t, err, serverCredsErr)
+		}
+	}
+
+	var ns Namespace
+	ns.Prefix = "/caches/test1"
+	ns.Identity = "testident1"
+	ns.Pubkey = "tkey"
+	ns.AdminMetadata.Status = Pending
+
+	t.Run("NoAdmin", adminTester(ns))
+
+	ns.Prefix = "/caches/test2"
+	ns.Identity = "testident2"
+	ns.AdminMetadata = AdminMetadata{}
+
+	t.Run("EmptyAdmin", adminTester(ns))
 
 	viper.Reset()
 }

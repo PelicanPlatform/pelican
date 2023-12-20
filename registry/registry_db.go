@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/lestrrat-go/jwx/v2/jwk"
@@ -93,7 +94,7 @@ const (
 )
 
 const (
-	Pending RegistrationStatus = iota
+	Pending RegistrationStatus = iota + 1 // 0 is the default value for GO, reserve it for empty check
 	Approved
 	Denied
 )
@@ -114,11 +115,11 @@ func (st ServerType) String() string {
 
 func (rs RegistrationStatus) String() string {
 	switch rs {
-	case 0:
-		return "Pending"
 	case 1:
-		return "Approved"
+		return "Pending"
 	case 2:
+		return "Approved"
+	case 3:
 		return "Denied"
 	default:
 		return "Unkown"
@@ -126,13 +127,15 @@ func (rs RegistrationStatus) String() string {
 }
 
 func createNamespaceTable() {
+	//We put a size limit on admin_metadata to guard against potentially future
+	//malicious large inserts
 	query := `
     CREATE TABLE IF NOT EXISTS namespace (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         prefix TEXT NOT NULL UNIQUE,
         pubkey TEXT NOT NULL,
         identity TEXT,
-        admin_metadata TEXT
+        admin_metadata TEXT CHECK (length("admin_metadata") <= 4000)
     );`
 
 	_, err := db.Exec(query)
@@ -310,15 +313,37 @@ func getNamespaceJwksById(id int) (jwk.Set, error) {
 	return set, nil
 }
 
-func getNamespaceJwksByPrefix(prefix string) (*jwk.Set, error) {
-	jwksQuery := `SELECT pubkey FROM namespace WHERE prefix = ?`
+func getNamespaceJwksByPrefix(prefix string, approvalRequired bool) (*jwk.Set, error) {
+	var jwksQuery string
 	var pubkeyStr string
-	err := db.QueryRow(jwksQuery, prefix).Scan(&pubkeyStr)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, errors.New("prefix not found in database")
+	if strings.HasPrefix(prefix, "/caches/") && approvalRequired {
+		adminMetadataStr := ""
+		jwksQuery = `SELECT pubkey, admin_metadata FROM namespace WHERE prefix = ?`
+		err := db.QueryRow(jwksQuery, prefix).Scan(&pubkeyStr, &adminMetadataStr)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				return nil, errors.New("prefix not found in database")
+			}
+			return nil, errors.Wrap(err, "error performing cache pubkey query")
 		}
-		return nil, errors.Wrap(err, "error performing origin pubkey query")
+		if adminMetadataStr != "" { // Older version didn't have admin_metadata populated, skip checking
+			adminMetadata := AdminMetadata{}
+			if err = json.Unmarshal([]byte(adminMetadataStr), &adminMetadata); err != nil {
+				return nil, errors.Wrap(err, "Failed to unmarshall admin_metadata")
+			}
+			if adminMetadata.Status != Approved {
+				return nil, serverCredsErr
+			}
+		}
+	} else {
+		jwksQuery := `SELECT pubkey FROM namespace WHERE prefix = ?`
+		err := db.QueryRow(jwksQuery, prefix).Scan(&pubkeyStr)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				return nil, errors.New("prefix not found in database")
+			}
+			return nil, errors.Wrap(err, "error performing origin pubkey query")
+		}
 	}
 
 	set, err := jwk.ParseString(pubkeyStr)
@@ -337,6 +362,26 @@ func getNamespaceById(id int) (*Namespace, error) {
 	adminMetadataStr := ""
 	query := `SELECT * FROM namespace WHERE id = ?`
 	err := db.QueryRow(query, id).Scan(&ns.ID, &ns.Prefix, &ns.Pubkey, &ns.Identity, &adminMetadataStr)
+	if err != nil {
+		return nil, err
+	}
+	// For backward compatibility, if adminMetadata is an empty string, don't unmarshall json
+	if adminMetadataStr != "" {
+		if err := json.Unmarshal([]byte(adminMetadataStr), &ns.AdminMetadata); err != nil {
+			return nil, err
+		}
+	}
+	return ns, nil
+}
+
+func getNamespaceByPrefix(prefix string) (*Namespace, error) {
+	if prefix == "" {
+		return nil, errors.New("Invalid prefix. Prefix must not be empty")
+	}
+	ns := &Namespace{}
+	adminMetadataStr := ""
+	query := `SELECT * FROM namespace WHERE prefix = ?`
+	err := db.QueryRow(query, prefix).Scan(&ns.ID, &ns.Prefix, &ns.Pubkey, &ns.Identity, &adminMetadataStr)
 	if err != nil {
 		return nil, err
 	}
@@ -431,7 +476,10 @@ func addNamespace(ns *Namespace) error {
 	// including user_id before this function
 	ns.AdminMetadata.CreatedAt = time.Now()
 	ns.AdminMetadata.UpdatedAt = time.Now()
-	ns.AdminMetadata.Status = Pending
+	// Set default value to pending if Status is empty
+	if ns.AdminMetadata.Status == 0 {
+		ns.AdminMetadata.Status = Pending
+	}
 
 	strAdminMetadata, err := json.Marshal(ns.AdminMetadata)
 	if err != nil {

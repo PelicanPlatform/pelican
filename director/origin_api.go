@@ -23,7 +23,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
-	"path"
 	"strings"
 	"sync"
 	"time"
@@ -58,6 +57,8 @@ type NamespaceCache interface {
 var (
 	namespaceKeys      = ttlcache.New[string, NamespaceCache](ttlcache.WithTTL[string, NamespaceCache](15 * time.Minute))
 	namespaceKeysMutex = sync.RWMutex{}
+
+	adminApprovalErr error
 )
 
 func CreateAdvertiseToken(namespace string) (string, error) {
@@ -148,6 +149,10 @@ func VerifyAdvertiseToken(token, namespace string) (bool, error) {
 			return false, errors.Wrap(err, "failed to marshal the public keyset into JWKS JSON")
 		}
 		log.Debugln("Constructed JWKS from fetching jwks:", string(jsonbuf))
+		if jsonbuf == nil {
+			adminApprovalErr = errors.New(namespace + " has not been approved by an administrator.")
+			return false, adminApprovalErr
+		}
 	}
 
 	if err != nil {
@@ -264,6 +269,9 @@ func GetRegistryIssuerURL(prefix string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	namespace_url.Path = path.Join(namespace_url.Path, "api", "v1.0", "registry", prefix, ".well-known", "issuer.jwks")
+	namespace_url.Path, err = url.JoinPath(namespace_url.Path, "api", "v2.0", "registry", "metadata", prefix, ".well-known", "issuer.jwks")
+	if err != nil {
+		return "", err
+	}
 	return namespace_url.String(), nil
 }

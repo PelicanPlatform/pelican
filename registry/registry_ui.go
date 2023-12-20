@@ -290,6 +290,8 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 
 	if !isUpdate { // Create
 		ns.AdminMetadata.UserID = user
+		// Overwrite status to Pending to filter malicious request
+		ns.AdminMetadata.Status = Pending
 		if err := addNamespace(&ns); err != nil {
 			log.Errorf("Failed to insert namespace with id %d. %v", ns.ID, err)
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Fail to insert namespace"})

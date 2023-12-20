@@ -111,7 +111,7 @@ func matchKeys(incomingKey jwk.Key, registeredNamespaces []string) (bool, error)
 	// permitting the action (assuming their keys haven't been stolen!)
 	foundMatch := false
 	for _, ns := range registeredNamespaces {
-		keyset, err := getNamespaceJwksByPrefix(ns)
+		keyset, err := getNamespaceJwksByPrefix(ns, false)
 		if err != nil {
 			return false, errors.Wrapf(err, "Cannot get keyset for %s from the database", ns)
 		}
@@ -504,6 +504,9 @@ func dbAddNamespace(ctx *gin.Context, data *registrationData) error {
 		ns.Identity = data.Identity
 	}
 
+	// Overwrite status to Pending to filter malicious request
+	ns.AdminMetadata.Status = Pending
+
 	err = addNamespace(&ns)
 	if err != nil {
 		return errors.Wrapf(err, "Failed to add prefix %s", ns.Prefix)
@@ -545,7 +548,7 @@ func dbDeleteNamespace(ctx *gin.Context) {
 	delTokenStr := strings.TrimPrefix(authHeader, "Bearer ")
 
 	// Have the token, now we need to load the JWKS for the prefix
-	originJwks, err := getNamespaceJwksByPrefix(prefix)
+	originJwks, err := getNamespaceJwksByPrefix(prefix, false)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error loading the prefix's stored jwks"})
 		log.Errorf("Failed to get prefix's stored jwks: %v", err)
@@ -636,8 +639,12 @@ func metadataHandler(ctx *gin.Context) {
 	if filepath.Base(path) == "issuer.jwks" {
 		// do something
 		prefix := strings.TrimSuffix(path, "/.well-known/issuer.jwks")
-		jwks, err := getNamespaceJwksByPrefix(prefix)
+		jwks, err := getNamespaceJwksByPrefix(prefix, true)
 		if err != nil {
+			if err == serverCredsErr {
+				ctx.JSON(404, gin.H{"error": "cache has not been approved by federation administrator"})
+				return
+			}
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error trying to get jwks for prefix"})
 			log.Errorf("Failed to load jwks for prefix %s: %v", prefix, err)
 			return
@@ -660,6 +667,17 @@ func metadataHandler(ctx *gin.Context) {
 
 }
 
+func dbGetNamespace(ctx *gin.Context) {
+	prefix := ctx.GetHeader("X-Pelican-Prefix")
+	ns, err := getNamespaceByPrefix(prefix)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, ns)
+}
+
 // func getJwks(prefix string) (*jwk.Set, error) {
 // 	jwks, err := dbGetPrefixJwks(prefix)
 // 	if err != nil {
@@ -677,13 +695,22 @@ func getOpenIDConfiguration(c *gin.Context) {
 */
 
 func RegisterRegistryAPI(router *gin.RouterGroup) {
-	registry := router.Group("/api/v1.0/registry")
+	v1registry := router.Group("/api/v1.0/registry")
 	{
-		registry.POST("", cliRegisterNamespace)
-		registry.GET("", dbGetAllNamespaces)
+		v1registry.POST("", cliRegisterNamespace)
+		v1registry.GET("", dbGetAllNamespaces)
 		// Will handle getting jwks, openid config, and listing namespaces
-		registry.GET("/*wildcard", metadataHandler)
+		v1registry.GET("/*wildcard", metadataHandler)
+		v1registry.DELETE("/*wildcard", dbDeleteNamespace)
+	}
 
-		registry.DELETE("/*wildcard", dbDeleteNamespace)
+	v2registry := router.Group("/api/v2.0/registry")
+	{
+		v2registry.POST("", cliRegisterNamespace)
+		v2registry.GET("", dbGetAllNamespaces)
+		v2registry.GET("/getNamespace", dbGetNamespace)
+		// Will handle getting jwks, openid config, and listing namespaces
+		v2registry.GET("/metadata/*wildcard", metadataHandler)
+		v2registry.DELETE("/*wildcard", dbDeleteNamespace)
 	}
 }
