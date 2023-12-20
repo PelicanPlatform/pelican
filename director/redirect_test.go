@@ -132,8 +132,8 @@ func TestDirectorRegistration(t *testing.T) {
 	setupMockCache := func(t *testing.T, publicKey jwk.Key) MockCache {
 		return MockCache{
 			GetFn: func(key string, keyset *jwk.Set) (jwk.Set, error) {
-				if key != "https://get-your-tokens.org/api/v1.0/registry/foo/bar/.well-known/issuer.jwks" {
-					t.Errorf("expecting: https://get-your-tokens.org/api/v1.0/registry/foo/bar/.well-known/issuer.jwks, got %q", key)
+				if key != "https://get-your-tokens.org/api/v2.0/registry/metadata/foo/bar/.well-known/issuer.jwks" {
+					t.Errorf("expecting: https://get-your-tokens.org/api/v2.0/registry/metadata/foo/bar/.well-known/issuer.jwks, got %q", key)
 				}
 				return *keyset, nil
 			},
@@ -217,7 +217,7 @@ func TestDirectorRegistration(t *testing.T) {
 
 		r.ServeHTTP(w, c.Request)
 
-		assert.Equal(t, 400, w.Result().StatusCode, "Expected failing status code of 400")
+		assert.Equal(t, http.StatusForbidden, w.Result().StatusCode, "Expected failing status code of 403")
 		body, _ := io.ReadAll(w.Result().Body)
 		assert.Equal(t, `{"error":"Authorization token verification failed"}`, string(body), "Failure wasn't because token verification failed")
 

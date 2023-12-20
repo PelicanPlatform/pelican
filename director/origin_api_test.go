@@ -37,8 +37,8 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 	kSet, err := config.GetIssuerPublicJWKS()
 	ar := MockCache{
 		GetFn: func(key string, keyset *jwk.Set) (jwk.Set, error) {
-			if key != "https://get-your-tokens.org/api/v1.0/registry/test-namespace/.well-known/issuer.jwks" {
-				t.Errorf("expecting: https://get-your-tokens.org/api/v1.0/registry/test-namespace/.well-known/issuer.jwks, got %q", key)
+			if key != "https://get-your-tokens.org/api/v2.0/registry/metadata/test-namespace/.well-known/issuer.jwks" {
+				t.Errorf("expecting: https://get-your-tokens.org/api/v2.0/registry/metadata/test-namespace/.well-known/issuer.jwks, got %q", key)
 			}
 			return *keyset, nil
 		},
@@ -160,7 +160,7 @@ func TestGetRegistryIssuerURL(t *testing.T) {
 	viper.Set("Federation.NamespaceURL", "test-path")
 	url, err = GetRegistryIssuerURL("test-prefix")
 	assert.Equal(t, nil, err)
-	assert.Equal(t, "test-path/api/v1.0/registry/test-prefix/.well-known/issuer.jwks", url)
+	assert.Equal(t, "test-path/api/v2.0/registry/metadata/test-prefix/.well-known/issuer.jwks", url)
 
 }
 

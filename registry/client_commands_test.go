@@ -72,7 +72,7 @@ func TestServeNamespaceRegistry(t *testing.T) {
 	require.NoError(t, err)
 
 	//Test functionality of registering a namespace (without identity)
-	err = NamespaceRegister(privKey, svr.URL+"/api/v1.0/registry", "", "/foo/bar")
+	err = NamespaceRegister(privKey, svr.URL+"/api/v2.0/registry", "", "/foo/bar")
 	require.NoError(t, err)
 
 	//Test we can list the namespace without an error
@@ -84,7 +84,7 @@ func TestServeNamespaceRegistry(t *testing.T) {
 		os.Stdout = w
 
 		//List the namespaces
-		err = NamespaceList(svr.URL + "/api/v1.0/registry")
+		err = NamespaceList(svr.URL + "/api/v2.0/registry")
 		require.NoError(t, err)
 		w.Close()
 		os.Stdout = oldStdout
@@ -103,7 +103,7 @@ func TestServeNamespaceRegistry(t *testing.T) {
 		r, w, _ := os.Pipe()
 		os.Stdout = w
 
-		err = NamespaceGet(svr.URL + "/api/v1.0/registry")
+		err = NamespaceGet(svr.URL + "/api/v2.0/registry")
 		require.NoError(t, err)
 		w.Close()
 		os.Stdout = oldStdout
@@ -116,13 +116,13 @@ func TestServeNamespaceRegistry(t *testing.T) {
 
 	t.Run("Test namespace delete", func(t *testing.T) {
 		//Test functionality of namespace delete
-		err = NamespaceDelete(svr.URL+"/api/v1.0/registry/foo/bar", "/foo/bar")
+		err = NamespaceDelete(svr.URL+"/api/v2.0/registry/foo/bar", "/foo/bar")
 		require.NoError(t, err)
 		var stdoutCapture string
 		oldStdout := os.Stdout
 		r, w, _ := os.Pipe()
 		os.Stdout = w
-		err = NamespaceGet(svr.URL + "/api/v1.0/registry")
+		err = NamespaceGet(svr.URL + "/api/v2.0/registry")
 		require.NoError(t, err)
 		w.Close()
 		os.Stdout = oldStdout
@@ -161,19 +161,19 @@ func TestRegistryKeyChainingOSDF(t *testing.T) {
 	require.NoError(t, err)
 
 	// Start by registering /foo/bar with the default key
-	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v1.0/registry", "", "/foo/bar")
+	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v2.0/registry", "", "/foo/bar")
 	require.NoError(t, err)
 
 	// Perform one test with a subspace and the same key -- should succeed
-	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v1.0/registry", "", "/foo/bar/test")
+	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v2.0/registry", "", "/foo/bar/test")
 	require.NoError(t, err)
 
 	// For now, we simply don't allow further super/sub spacing of namespaces from topo, because how
 	// can we validate via a key if there is none?
-	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v1.0/registry", "", "/topo/foo/bar")
+	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v2.0/registry", "", "/topo/foo/bar")
 	require.Error(t, err)
 
-	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v1.0/registry", "", "/topo")
+	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v2.0/registry", "", "/topo")
 	require.Error(t, err)
 
 	// Now we create a new key and try to use it to register a super/sub space. These shouldn't succeed
@@ -183,28 +183,28 @@ func TestRegistryKeyChainingOSDF(t *testing.T) {
 	privKey, err = config.GetIssuerPrivateJWK()
 	require.NoError(t, err)
 
-	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v1.0/registry", "", "/foo/bar/baz")
+	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v2.0/registry", "", "/foo/bar/baz")
 	require.ErrorContains(t, err, "Cannot register a namespace that is suffixed or prefixed")
 
-	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v1.0/registry", "", "/foo")
+	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v2.0/registry", "", "/foo")
 	require.ErrorContains(t, err, "Cannot register a namespace that is suffixed or prefixed")
 
 	// Make sure we can register things similar but distinct in prefix and suffix
-	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v1.0/registry", "", "/fo")
+	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v2.0/registry", "", "/fo")
 	require.NoError(t, err)
-	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v1.0/registry", "", "/foo/barz")
+	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v2.0/registry", "", "/foo/barz")
 	require.NoError(t, err)
 
 	// Now turn off token chaining and retry -- no errors should occur
 	viper.Set("Registry.RequireKeyChaining", false)
-	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v1.0/registry", "", "/foo/bar/baz")
+	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v2.0/registry", "", "/foo/bar/baz")
 	require.NoError(t, err)
 
-	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v1.0/registry", "", "/foo")
+	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v2.0/registry", "", "/foo")
 	require.NoError(t, err)
 
 	// Finally, test with one value for topo
-	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v1.0/registry", "", "/topo")
+	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v2.0/registry", "", "/topo")
 	require.NoError(t, err)
 
 	config.SetPreferredPrefix("pelican")
@@ -229,11 +229,11 @@ func TestRegistryKeyChaining(t *testing.T) {
 	require.NoError(t, err)
 
 	// Start by registering /foo/bar with the default key
-	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v1.0/registry", "", "/foo/bar")
+	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v2.0/registry", "", "/foo/bar")
 	require.NoError(t, err)
 
 	// Perform one test with a subspace and the same key -- should succeed
-	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v1.0/registry", "", "/foo/bar/test")
+	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v2.0/registry", "", "/foo/bar/test")
 	require.NoError(t, err)
 
 	// Now we create a new key and try to use it to register a super/sub space. These shouldn't succeed
@@ -243,18 +243,18 @@ func TestRegistryKeyChaining(t *testing.T) {
 	privKey, err = config.GetIssuerPrivateJWK()
 	require.NoError(t, err)
 
-	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v1.0/registry", "", "/foo/bar/baz")
+	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v2.0/registry", "", "/foo/bar/baz")
 	require.ErrorContains(t, err, "Cannot register a namespace that is suffixed or prefixed")
 
-	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v1.0/registry", "", "/foo")
+	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v2.0/registry", "", "/foo")
 	require.ErrorContains(t, err, "Cannot register a namespace that is suffixed or prefixed")
 
 	// Now turn off token chaining and retry -- no errors should occur
 	viper.Set("Registry.RequireKeyChaining", false)
-	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v1.0/registry", "", "/foo/bar/baz")
+	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v2.0/registry", "", "/foo/bar/baz")
 	require.NoError(t, err)
 
-	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v1.0/registry", "", "/foo")
+	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v2.0/registry", "", "/foo")
 	require.NoError(t, err)
 
 	viper.Reset()

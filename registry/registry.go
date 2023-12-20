@@ -80,6 +80,10 @@ type Response struct {
 	DeviceCode              string `json:"device_code"`
 }
 
+type AdminJSON struct {
+	AdminApproved bool `json:"admin_approved"`
+}
+
 type TokenResponse struct {
 	AccessToken string `json:"access_token"`
 	Error       string `json:"error"`
@@ -111,7 +115,7 @@ func matchKeys(incomingKey jwk.Key, registeredNamespaces []string) (bool, error)
 	// permitting the action (assuming their keys haven't been stolen!)
 	foundMatch := false
 	for _, ns := range registeredNamespaces {
-		keyset, err := dbGetPrefixJwks(ns)
+		keyset, err := dbGetPrefixJwks(ns, false)
 		if err != nil {
 			return false, errors.Wrapf(err, "Cannot get keyset for %s from the database", ns)
 		}
@@ -599,6 +603,16 @@ func dbAddNamespace(ctx *gin.Context, data *registrationData) error {
 		ns.Identity = data.Identity
 	}
 
+	//All caches added will not be approved (also false for origins, but that's fine as it doesn't check for origins)
+	jResult, err := json.Marshal(AdminJSON{
+		AdminApproved: false,
+	})
+
+	if err != nil {
+		return errors.Wrapf(err, "Failure to unmarshal json struct")
+	}
+	ns.AdminMetadata = string(jResult)
+
 	err = addNamespace(&ns)
 	if err != nil {
 		return errors.Wrapf(err, "Failed to add prefix %s", ns.Prefix)
@@ -640,7 +654,7 @@ func dbDeleteNamespace(ctx *gin.Context) {
 	delTokenStr := strings.TrimPrefix(authHeader, "Bearer ")
 
 	// Have the token, now we need to load the JWKS for the prefix
-	originJwks, err := dbGetPrefixJwks(prefix)
+	originJwks, err := dbGetPrefixJwks(prefix, false)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error loading the prefix's stored jwks"})
 		log.Errorf("Failed to get prefix's stored jwks: %v", err)
@@ -731,8 +745,14 @@ func metadataHandler(ctx *gin.Context) {
 	if filepath.Base(path) == "issuer.jwks" {
 		// do something
 		prefix := strings.TrimSuffix(path, "/.well-known/issuer.jwks")
-		jwks, err := dbGetPrefixJwks(prefix)
+
+		jwks, err := dbGetPrefixJwks(prefix, true)
+
 		if err != nil {
+			if err == serverCredsErr {
+				ctx.JSON(404, gin.H{"error": "cache has not been approved by federation administrator"})
+				return
+			}
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error trying to get jwks for prefix"})
 			log.Errorf("Failed to load jwks for prefix %s: %v", prefix, err)
 			return
@@ -755,6 +775,17 @@ func metadataHandler(ctx *gin.Context) {
 
 }
 
+func dbGetNamespace(ctx *gin.Context) {
+	prefix := ctx.GetHeader("X-Pelican-Prefix")
+	ns, err := getNamespace(prefix)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, ns)
+}
+
 // func getJwks(prefix string) (*jwk.Set, error) {
 // 	jwks, err := dbGetPrefixJwks(prefix)
 // 	if err != nil {
@@ -772,13 +803,22 @@ func getOpenIDConfiguration(c *gin.Context) {
 */
 
 func RegisterRegistryRoutes(router *gin.RouterGroup) {
-	registry := router.Group("/api/v1.0/registry")
+	v1registry := router.Group("/api/v1.0/registry")
 	{
-		registry.POST("", cliRegisterNamespace)
-		registry.GET("", dbGetAllNamespaces)
+		v1registry.POST("", cliRegisterNamespace)
+		v1registry.GET("", dbGetAllNamespaces)
 		// Will handle getting jwks, openid config, and listing namespaces
-		registry.GET("/*wildcard", metadataHandler)
+		v1registry.GET("/*wildcard", metadataHandler)
+		v1registry.DELETE("/*wildcard", dbDeleteNamespace)
+	}
 
-		registry.DELETE("/*wildcard", dbDeleteNamespace)
+	v2registry := router.Group("/api/v2.0/registry")
+	{
+		v2registry.POST("", cliRegisterNamespace)
+		v2registry.GET("", dbGetAllNamespaces)
+		v2registry.GET("/getNamespace", dbGetNamespace)
+		// Will handle getting jwks, openid config, and listing namespaces
+		v2registry.GET("/metadata/*wildcard", metadataHandler)
+		v2registry.DELETE("/*wildcard", dbDeleteNamespace)
 	}
 }
