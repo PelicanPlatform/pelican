@@ -298,13 +298,6 @@ type: bool
 default: true
 components: ["origin"]
 ---
-name: Origin.EnableUI
-description: >-
-  Indicate whether the origin should enable its web UI.
-type: bool
-default: true
-components: ["origin"]
----
 name: Origin.EnableIssuer
 description: >-
   Enable the built-in issuer daemon for the origin.
@@ -590,6 +583,13 @@ type: filename
 root_default: /etc/pelican/certificates/tls.key
 default: "$ConfigBase/certificates/tls.key"
 components: ["origin", "nsregistry", "director"]
+---
+name: Server.EnableUI
+description: >-
+  Indicate whether a server should enable its web UI.
+type: bool
+default: true
+components: ["origin", "nsregistry", "director", "cache"]
 ---
 name: Server.WebPort
 description: >-

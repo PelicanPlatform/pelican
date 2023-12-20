@@ -38,8 +38,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
-	err := serveOriginInternal()
+func serveOrigin(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	err := serveOriginInternal(ctx)
 	if err != nil {
 		return err
 	}
@@ -47,7 +48,7 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	return nil
 }
 
-func serveOriginInternal() error {
+func serveOriginInternal(ctx context.Context) error {
 	// Use this context for any goroutines that needs to react to server shutdown
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 	// Use this wait group to ensure the goroutines can finish before the server exits/shutdown
@@ -78,7 +79,7 @@ func serveOriginInternal() error {
 		return err
 	}
 
-	if param.Origin_EnableUI.GetBool() {
+	if param.Server_EnableUI.GetBool() {
 		// Set up necessary APIs to support Web UI, including auth and metrics
 		if err := web_ui.ConfigureServerWebAPI(engine); err != nil {
 			return err
@@ -118,7 +119,7 @@ func serveOriginInternal() error {
 		shutdownCancel()
 	}()
 
-	if param.Origin_EnableUI.GetBool() {
+	if param.Server_EnableUI.GetBool() {
 		go web_ui.InitServerWebLogin()
 	}
 
@@ -147,7 +148,6 @@ func serveOriginInternal() error {
 		launchers = append(launchers, oa4mp_launcher)
 	}
 
-	ctx := context.Background()
 	if err = daemon.LaunchDaemons(ctx, launchers); err != nil {
 		return err
 	}

@@ -141,6 +141,7 @@ var (
 	Issuer_GroupRequirements = StringSliceParam{"Issuer.GroupRequirements"}
 	Monitoring_AggregatePrefixes = StringSliceParam{"Monitoring.AggregatePrefixes"}
 	Origin_ScitokensRestrictedPaths = StringSliceParam{"Origin.ScitokensRestrictedPaths"}
+	Server_Modules = StringSliceParam{"Server.Modules"}
 )
 
 var (
@@ -175,6 +176,7 @@ var (
 	Origin_ScitokensMapSubject = BoolParam{"Origin.ScitokensMapSubject"}
 	Origin_SelfTest = BoolParam{"Origin.SelfTest"}
 	Registry_RequireKeyChaining = BoolParam{"Registry.RequireKeyChaining"}
+	Server_EnableUI = BoolParam{"Server.EnableUI"}
 	StagePlugin_Hook = BoolParam{"StagePlugin.Hook"}
 	TLSSkipVerify = BoolParam{"TLSSkipVerify"}
 )

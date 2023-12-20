@@ -30,12 +30,14 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/registry"
 	"github.com/pelicanplatform/pelican/web_ui"
 )
 
-func serveRegistry( /*cmd*/ *cobra.Command /*args*/, []string) error {
-	err := serveRegistryInternal()
+func serveRegistry(cmd *cobra.Command, _ []string) error {
+	ctx := cmd.Context()
+	err := serveRegistryInternal(ctx)
 	if err != nil {
 		return err
 	}
@@ -43,7 +45,7 @@ func serveRegistry( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	return nil
 }
 
-func serveRegistryInternal() error {
+func serveRegistryInternal(ctx context.Context) error {
 	log.Info("Initializing the namespace registry's database...")
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 	defer shutdownCancel()
@@ -70,12 +72,15 @@ func serveRegistryInternal() error {
 		return err
 	}
 
-	if err := web_ui.ConfigureServerWebAPI(engine); err != nil {
-		return err
-	}
+	if param.Server_EnableUI.GetBool() {
+		// Set up necessary APIs to support Web UI, including auth and metrics
+		if err := web_ui.ConfigureServerWebAPI(engine); err != nil {
+			return err
+		}
 
-	if err := web_ui.ConfigOAuthClientAPIs(engine); err != nil {
-		return err
+		if err := web_ui.ConfigOAuthClientAPIs(engine); err != nil {
+			return err
+		}
 	}
 
 	rootRouterGroup := engine.Group("/")
@@ -95,7 +100,10 @@ func serveRegistryInternal() error {
 		shutdownCancel()
 	}()
 
-	go web_ui.InitServerWebLogin()
+	if param.Server_EnableUI.GetBool() {
+		log.Info("Starting web engine...")
+		go web_ui.InitServerWebLogin()
+	}
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
