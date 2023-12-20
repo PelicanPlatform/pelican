@@ -35,8 +35,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
-	err := serveDirectorInternal()
+func serveDirector(cmd *cobra.Command, args []string) error {
+
+	ctx := cmd.Context()
+	err := serveDirectorInternal(ctx)
 	if err != nil {
 		return err
 	}
@@ -44,7 +46,7 @@ func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	return nil
 }
 
-func serveDirectorInternal() error {
+func serveDirectorInternal(ctx context.Context) error {
 	// Use this context for any goroutines that needs to react to server shutdown
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 	// Use this wait group to ensure the goroutines can finish before the server exits/shutdown
@@ -80,11 +82,13 @@ func serveDirectorInternal() error {
 		return err
 	}
 
-	// We configure Prometheus differently for director than for the rest servers,
-	// although in the future we probably want to pass the server type to the
-	// metric config function just because each server may have different config
-	if err := web_ui.ConfigureServerWebAPI(engine); err != nil {
-		return err
+	if param.Server_EnableUI.GetBool() {
+		// We configure Prometheus differently for director than for the rest servers,
+		// although in the future we probably want to pass the server type to the
+		// metric config function just because each server may have different config
+		if err := web_ui.ConfigureServerWebAPI(engine); err != nil {
+			return err
+		}
 	}
 
 	// Configure the shortcut middleware to either redirect to a cache
@@ -109,7 +113,10 @@ func serveDirectorInternal() error {
 		shutdownCancel()
 	}()
 
-	go web_ui.InitServerWebLogin()
+	if param.Server_EnableUI.GetBool() {
+		log.Info("Starting web engine...")
+		go web_ui.InitServerWebLogin()
+	}
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)

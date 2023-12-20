@@ -183,7 +183,7 @@ func TestCodeBasedLogin(t *testing.T) {
 
 	//Invoke the code login with the wrong code, ensure we get a 401
 	t.Run("With invalid code", func(t *testing.T) {
-		require.True(t, param.Origin_EnableUI.GetBool())
+		require.True(t, param.Server_EnableUI.GetBool())
 		req, err := http.NewRequest("POST", "/api/v1.0/auth/initLogin", strings.NewReader(`{"code": "20"}`))
 		assert.NoError(t, err)
 

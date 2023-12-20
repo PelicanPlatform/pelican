@@ -20,6 +20,7 @@ Logging:
 Server:
   WebPort: 8444
   WebHost: "0.0.0.0"
+  EnableUI: true
 Director:
   DefaultResponse: cache
 Cache:
@@ -30,7 +31,6 @@ Origin:
   EnableMacaroons: false
   EnableVoms: true
   SelfTest: true
-  EnableUI: true
 Monitoring:
   PortLower: 9930
   PortHigher: 9999
