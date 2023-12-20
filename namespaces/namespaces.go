@@ -86,7 +86,7 @@ type Namespace struct {
 	Issuer               string                `json:"issuer"`
 	ReadHTTPS            bool                  `json:"readhttps"`
 	UseTokenOnRead       bool                  `json:"usetokenonread"`
-	WritebackHost        string                `json:"writebackhost"`
+	PutEndpoint          string                `json:"writebackhost"`
 	DirListHost          string                `json:"dirlisthost"`
 }
 

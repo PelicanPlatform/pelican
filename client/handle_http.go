@@ -835,13 +835,13 @@ func UploadFile(src string, origDest *url.URL, token string, namespace namespace
 	}
 
 	// Parse the writeback host as a URL
-	writebackhostUrl, err := url.Parse(namespace.WritebackHost)
+	putEndpointUrl, err := url.Parse(namespace.PutEndpoint)
 	if err != nil {
 		return 0, err
 	}
 
 	dest := &url.URL{
-		Host:   writebackhostUrl.Host,
+		Host:   putEndpointUrl.Host,
 		Scheme: "https",
 		Path:   origDest.Path,
 	}
@@ -1089,11 +1089,11 @@ func StatHttp(dest *url.URL, namespace namespaces.Namespace) (uint64, error) {
 	}
 
 	// Parse the writeback host as a URL
-	writebackhostUrl, err := url.Parse(namespace.WritebackHost)
+	putEndpointUrl, err := url.Parse(namespace.PutEndpoint)
 	if err != nil {
 		return 0, err
 	}
-	dest.Host = writebackhostUrl.Host
+	dest.Host = putEndpointUrl.Host
 	dest.Scheme = "https"
 
 	canDisableProxy := CanDisableProxy()

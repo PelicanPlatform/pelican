@@ -56,7 +56,7 @@ type (
 		Path                 string               `json:"path"`
 		ReadHTTPS            bool                 `json:"readhttps"`
 		UseTokenOnRead       bool                 `json:"usetokenonread"`
-		WritebackHost        string               `json:"writebackhost"`
+		PutEndpoint          string               `json:"writebackhost"`
 	}
 
 	TopologyNamespacesJSON struct {

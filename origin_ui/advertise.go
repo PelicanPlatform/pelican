@@ -63,7 +63,7 @@ func (server *OriginServer) CreateAdvertisement(name string, originUrl string, o
 		Strategy:      "OAuth2",
 		BasePath:      prefix,
 		// TODO: This is set to the origin for now needs to become configurable
-		WritebackHost: originUrl,
+		PutEndpoint: originUrl,
 	}
 	ad = director.OriginAdvertise{
 		Name:       name,
