@@ -3,7 +3,7 @@
 # fail on building this container on arm machine
 FROM --platform=linux/amd64 hub.opensciencegrid.org/sciauth/scitokens-oauth2-server:release-20231118-1823 AS scitokens-oauth2-server
 
-FROM almalinux:8
+FROM almalinux:8 as builder
 
 # https://docs.docker.com/engine/reference/builder/#automatic-platform-args-in-the-global-scope
 ARG TARGETARCH
@@ -25,13 +25,52 @@ baseurl=https://repo.goreleaser.com/yum/ \n\
 enabled=1 \n\
 gpgcheck=0' > /etc/yum.repos.d/goreleaser.repo
 
-# Install proper version of nodejs so that make web-build works
-RUN dnf module install -y nodejs:20
-
 # Install goreleaser and various other packages we need
-RUN yum install -y goreleaser npm xrootd-devel xrootd-server-devel xrootd-client-devel nano xrootd-scitokens \
-    xrootd-voms xrdcl-http jq procps docker make curl-devel java-17-openjdk-headless git cmake3 gcc-c++ openssl-devel \
+RUN yum install -y goreleaser npm xrootd xrootd-server xrootd-client nano xrootd-scitokens \
+    xrootd-voms xrdcl-http jq procps docker make curl java-17-openjdk-headless \
     && yum clean all
+
+# Fork from previous environment to build xrootd plugin
+FROM builder AS xrootd-plugin-builder
+# Install necessary build dependencies
+RUN yum install -y xrootd-devel xrootd-server-devel xrootd-client-devel curl-devel openssl-devel git cmake3 gcc-c++ 
+# Install xrdcl-pelican plugin and replace the xrdcl-http plugin
+RUN \
+    git clone https://github.com/PelicanPlatform/xrdcl-pelican.git && \
+    cd xrdcl-pelican && \
+    mkdir build && cd build && \
+    cmake .. && \
+    make && make install
+# Install the S3 and HTTP server plugins for XRootD. For now we do this from source
+# until we can sort out the RPMs.
+RUN \
+    git clone https://github.com/PelicanPlatform/xrootd-s3-http.git && \
+    cd xrootd-s3-http && \
+    mkdir build && cd build && \
+    cmake .. && \
+    make install
+
+
+# Fork from previous environment to continue building the rest of the container
+FROM builder AS main
+
+# Copy built xrdcl-pelican plugin library and config from build
+COPY --from=xrootd-plugin-builder /usr/local/etc/xrootd/client.plugins.d/pelican-plugin.conf /etc/xrootd/client.plugins.d/pelican-plugin.conf
+COPY --from=xrootd-plugin-builder /usr/local/lib/libXrdClPelican-5.so /usr/local/lib/libXrdClPelican-5.so
+# Remove http plugin to use pelican plugin
+RUN rm -f /etc/xrootd/client.plugins.d/xrdcl-http-plugin.conf
+
+# Copy built s3 plugin library from build
+COPY --from=xrootd-plugin-builder /usr/local/lib/libXrdS3-5.so /usr/local/lib/libXrdS3-5.so
+COPY --from=xrootd-plugin-builder /usr/local/lib/libXrdHTTPServer-5.so /usr/local/lib/libXrdHTTPServer-5.so
+# For now, until the RPM is set up, we install the libraries here, but
+# we need to add to LD_LIBRARY_PATH so XRootD knows where to look
+RUN echo "/usr/local/lib" > /etc/ld.so.conf.d/xrdplugins.conf && ldconfig
+
+# Install proper version of nodejs so that make web-build works
+RUN \
+    dnf module reset -y nodejs && \
+    dnf module install -y nodejs:20
 
 # Installing the right version of go
 SHELL ["/bin/sh", "-c"]
@@ -105,18 +144,6 @@ ENV JAVA_HOME=/usr/lib/jvm/jre \
     PATH="${ST_HOME}/bin:${QDL_HOME}/bin:${PATH}"
 
 COPY images/dev-config.yaml /etc/pelican/pelican.yaml
-
-# Install the S3 and HTTP server plugins for XRootD. For now we do this from source
-# until we can sort out the RPMs.
-RUN \
-    git clone https://github.com/PelicanPlatform/xrootd-s3-http.git && \
-    cd xrootd-s3-http && \
-    mkdir build && cd build && \
-    cmake .. && \
-    make install && \
-    # For now, until the RPM is set up, we install the libraries here, but
-    # we need to add to LD_LIBRARY_PATH so XRootD knows where to look
-    echo "/usr/local/lib" > /etc/ld.so.conf.d/xrdplugins.conf && ldconfig
 
 # For S3 tests, we need the minIO server client, so we install based on detected arch
 RUN if [ "$TARGETARCH" = "amd64" ]; then \
