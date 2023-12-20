@@ -51,9 +51,8 @@ func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	log.Info("Initializing Director GeoIP database...")
 	director.InitializeDB()
 
-	metrics.SetComponentHealthStatus(metrics.DirectorRegistry_Topology, metrics.StatusWarning, "Start requesting from topology, status unknown")
-
 	if config.GetPreferredPrefix() == "OSDF" {
+		metrics.SetComponentHealthStatus(metrics.DirectorRegistry_Topology, metrics.StatusWarning, "Start requesting from topology, status unknown")
 		log.Info("Generating/advertising server ads from OSG topology service...")
 
 		// Get the ads from topology, populate the cache, and keep the cache
