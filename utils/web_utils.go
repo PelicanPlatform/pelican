@@ -28,6 +28,7 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 )
 
@@ -64,6 +65,8 @@ type (
 	}
 )
 
+// MakeRequest makes an http request with our custom http client. It acts similarly to the http.NewRequest but
+// it only takes json as the request data.
 func MakeRequest(url string, method string, data map[string]interface{}, headers map[string]string) ([]byte, error) {
 	payload, _ := json.Marshal(data)
 	req, err := http.NewRequest(method, url, bytes.NewBuffer(payload))
@@ -95,14 +98,17 @@ func MakeRequest(url string, method string, data map[string]interface{}, headers
 	return body, nil
 }
 
+// GetTopologyJSON returns the namespaces and caches from OSDF topology
 func GetTopologyJSON() (*TopologyNamespacesJSON, error) {
 	topoNamespaceUrl := param.Federation_TopologyNamespaceUrl.GetString()
 	if topoNamespaceUrl == "" {
+		metrics.SetComponentHealthStatus(metrics.DirectorRegistry_Topology, metrics.StatusCritical, "Topology namespaces.json configuration option (`Federation.TopologyNamespaceURL`) not set")
 		return nil, errors.New("Topology namespaces.json configuration option (`Federation.TopologyNamespaceURL`) not set")
 	}
 
 	req, err := http.NewRequest("GET", topoNamespaceUrl, nil)
 	if err != nil {
+		metrics.SetComponentHealthStatus(metrics.DirectorRegistry_Topology, metrics.StatusCritical, "Failure when getting OSDF namespace data from topology")
 		return nil, errors.Wrap(err, "Failure when getting OSDF namespace data from topology")
 	}
 
@@ -111,23 +117,29 @@ func GetTopologyJSON() (*TopologyNamespacesJSON, error) {
 	client := http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
+		metrics.SetComponentHealthStatus(metrics.DirectorRegistry_Topology, metrics.StatusCritical, "Failure when getting response for OSDF namespace data")
 		return nil, errors.Wrap(err, "Failure when getting response for OSDF namespace data")
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode > 299 {
+		metrics.SetComponentHealthStatus(metrics.DirectorRegistry_Topology, metrics.StatusCritical, fmt.Sprintf("Error response %v from OSDF namespace endpoint: %v", resp.StatusCode, resp.Status))
 		return nil, fmt.Errorf("Error response %v from OSDF namespace endpoint: %v", resp.StatusCode, resp.Status)
 	}
 
 	respBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
+		metrics.SetComponentHealthStatus(metrics.DirectorRegistry_Topology, metrics.StatusCritical, "Failure when reading OSDF namespace response")
 		return nil, errors.Wrap(err, "Failure when reading OSDF namespace response")
 	}
 
 	var namespaces TopologyNamespacesJSON
 	if err = json.Unmarshal(respBytes, &namespaces); err != nil {
+		metrics.SetComponentHealthStatus(metrics.DirectorRegistry_Topology, metrics.StatusCritical, fmt.Sprintf("Failure when parsing JSON response from topology URL %v", topoNamespaceUrl))
 		return nil, errors.Wrapf(err, "Failure when parsing JSON response from topology URL %v", topoNamespaceUrl)
 	}
+
+	metrics.SetComponentHealthStatus(metrics.DirectorRegistry_Topology, metrics.StatusOK, "")
 
 	return &namespaces, nil
 }

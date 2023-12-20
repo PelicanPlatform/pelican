@@ -28,6 +28,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
+	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/web_ui"
 	log "github.com/sirupsen/logrus"
@@ -51,6 +52,7 @@ func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	director.InitializeDB()
 
 	if config.GetPreferredPrefix() == "OSDF" {
+		metrics.SetComponentHealthStatus(metrics.DirectorRegistry_Topology, metrics.StatusWarning, "Start requesting from topology, status unknown")
 		log.Info("Generating/advertising server ads from OSG topology service...")
 
 		// Get the ads from topology, populate the cache, and keep the cache
