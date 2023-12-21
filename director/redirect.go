@@ -49,6 +49,12 @@ var (
 	healthTestCancelFuncsMutex = sync.RWMutex{}
 )
 
+// The endpoint for director Prometheus instance to discover Pelican servers
+// for scraping (origins/caches).
+//
+// TODO: Add registry server as well to this endpoint when we need to scrape from it
+const DirectorServerDiscoveryEndpoint = "/api/v1.0/director/discoverServers"
+
 func getRedirectURL(reqPath string, ad ServerAd, requiresAuth bool) (redirectURL url.URL) {
 	var serverURL url.URL
 	if requiresAuth {
@@ -480,7 +486,7 @@ func DiscoverOriginCache(ctx *gin.Context) {
 	promDiscoveryRes := make([]PromDiscoveryItem, 0)
 	for _, ad := range serverAds {
 		if ad.WebURL.String() == "" {
-			// Oririgns and caches fetched from topology can't be scraped as they
+			// Origins and caches fetched from topology can't be scraped as they
 			// don't have a WebURL
 			continue
 		}
@@ -519,7 +525,10 @@ func RegisterDirector(router *gin.RouterGroup) {
 	router.GET("/api/v1.0/director/object/*any", RedirectToCache)
 	router.GET("/api/v1.0/director/origin/*any", RedirectToOrigin)
 	router.POST("/api/v1.0/director/registerOrigin", RegisterOrigin)
-	router.GET("/api/v1.0/director/discoverOrigins", DiscoverOriginCache)
+	// In the foreseeable feature, director will scrape all servers in Pelican ecosystem (including registry)
+	// so that director can be our point of contact for collecting system-level metrics.
+	// Rename the endpoint to reflect such plan.
+	router.GET(DirectorServerDiscoveryEndpoint, DiscoverOriginCache)
 	router.POST("/api/v1.0/director/registerCache", RegisterCache)
 	router.GET("/api/v1.0/director/listNamespaces", ListNamespaces)
 }

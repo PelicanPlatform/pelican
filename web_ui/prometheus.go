@@ -158,7 +158,7 @@ func configDirectorPromScraper() (*config.ScrapeConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("Failed to generate token for director scraper at start: %v", err)
 	}
-	serverDiscoveryUrl.Path = "/api/v1.0/director/discoverOrigins"
+	serverDiscoveryUrl.Path = "/api/v1.0/director/discoverServers"
 	scrapeConfig := config.DefaultScrapeConfig
 	scrapeConfig.JobName = "origin_cache_servers"
 	scrapeConfig.Scheme = "https"
