@@ -584,7 +584,7 @@ func InitServer(enabledServers []ServerType, currentServer ServerType) error {
 	// they have overridden the defaults.
 	hostname = viper.GetString("Server.Hostname")
 
-	if IsServerEnabled(CacheType) {
+	if currentServer == CacheType {
 		viper.Set("Xrootd.Port", param.Cache_Port.GetInt())
 	}
 	xrootdPort := param.Xrootd_Port.GetInt()

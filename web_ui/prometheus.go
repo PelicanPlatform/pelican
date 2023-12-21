@@ -273,6 +273,9 @@ func (a LogrusAdapter) Log(keyvals ...interface{}) error {
 }
 
 func ConfigureEmbeddedPrometheus(engine *gin.Engine) error {
+	// This is fine if each process has only one server enabled
+	// Since the "federation-in-the-box" feature won't include any web components
+	// we can assume that this is the only server to enable
 	isDirector := pelican_config.IsServerEnabled(pelican_config.DirectorType)
 	cfg := flagConfig{}
 	ListenAddress := fmt.Sprintf("0.0.0.0:%v", param.Server_WebPort.GetInt())
