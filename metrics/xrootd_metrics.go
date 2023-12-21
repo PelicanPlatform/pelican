@@ -41,7 +41,8 @@ import (
 )
 
 type (
-	UserId struct {
+	SummaryStatType string
+	UserId          struct {
 		Id uint32
 	}
 
@@ -162,16 +163,41 @@ type (
 		// Ssq XrdXrootdMonStatSSQ // OPTIONAL, not implemented here yet
 	}
 
+	SummaryPathStat struct {
+		Id    string `xml:"id,attr"`
+		Lp    string `xml:"lp"`   // The minimally reduced logical file system path i.e. top-level namespace
+		Free  int    `xml:"free"` // Kilobytes available
+		Total int    `xml:"tot"`  // Kilobytes allocated
+	}
+
+	SummaryPath struct {
+		Idx   int               `xml:",chardata"`
+		Stats []SummaryPathStat `xml:"stats"`
+	}
+
+	SummaryCacheStore struct {
+		Size int `xml:"size"`
+		Used int `xml:"used"`
+		Min  int `xml:"min"`
+		Max  int `xml:"max"`
+	}
+
+	SummaryCacheMemory struct {
+		Size int `xml:"size"`
+		Used int `xml:"used"`
+		Wq   int `xml:"wq"`
+	}
+
 	SummaryStat struct {
-		Id string `xml:"id,attr"`
-		// Relevant for id="link"
-		// "tot" is the total connections since the start of the server
-		LinkConnections int `xml:"tot"`
-		LinkInBytes     int `xml:"in"`
-		LinkOutBytes    int `xml:"out"`
-		// Relevant for id="sched"
-		Threads     int `xml:"threads"`
-		ThreadsIdle int `xml:"idle"`
+		Id      SummaryStatType    `xml:"id,attr"`
+		Total   int                `xml:"tot"`
+		In      int                `xml:"in"`
+		Out     int                `xml:"out"`
+		Threads int                `xml:"threads"`
+		Idle    int                `xml:"idle"`
+		Paths   SummaryPath        `xml:"paths"` // For Oss Summary Data
+		Store   SummaryCacheStore  `xml:"store"`
+		Memory  SummaryCacheMemory `xml:"mem"`
 	}
 
 	SummaryStatistics struct {
@@ -189,6 +215,14 @@ const (
 	isTime
 	isXfr
 	isDisc
+)
+
+// Summary data types
+const (
+	LinkStat  SummaryStatType = "link"  // https://xrootd.slac.stanford.edu/doc/dev55/xrd_monitoring.htm#_Toc99653739
+	SchedStat SummaryStatType = "sched" // https://xrootd.slac.stanford.edu/doc/dev55/xrd_monitoring.htm#_Toc99653745
+	OssStat   SummaryStatType = "oss"   // https://xrootd.slac.stanford.edu/doc/dev55/xrd_monitoring.htm#_Toc99653741
+	CacheStat SummaryStatType = "cache" // https://xrootd.slac.stanford.edu/doc/dev55/xrd_monitoring.htm#_Toc99653733
 )
 
 var (
@@ -226,6 +260,11 @@ var (
 		Name: "xrootd_server_bytes",
 		Help: "Number of bytes read into the server",
 	}, []string{"direction"})
+
+	StorageVolume = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "xrootd_storage_volume_bytes",
+		Help: "Storage volume usage on the server",
+	}, []string{"ns", "type", "server_type"}) // type: total/free; server_type: origin/cache
 
 	lastStats SummaryStat
 
@@ -890,33 +929,53 @@ func HandleSummaryPacket(packet []byte) error {
 	for _, stat := range summaryStats.Stats {
 		switch stat.Id {
 
-		case "link":
-			// LinkConnections is the total connections since the start-up of the servcie
+		case LinkStat:
+			// When stats tag has id="link", the following definitions are valid:
+			// stat.Total: Connections since start-up.
+			// stat.In: Bytes received
+			// stat.Out: Bytes sent
+
+			// Note that stat.Total is the total connections since the start-up of the servcie
 			// So we just want to make sure here that no negative value is present
-			incBy := float64(stat.LinkConnections - lastStats.LinkConnections)
-			if stat.LinkConnections < lastStats.LinkConnections {
-				incBy = float64(stat.LinkConnections)
+			incBy := float64(stat.Total - lastStats.Total)
+			if stat.Total < lastStats.Total {
+				incBy = float64(stat.Total)
 			}
 			Connections.Add(incBy)
-			lastStats.LinkConnections = stat.LinkConnections
+			lastStats.Total = stat.Total
 
-			incBy = float64(stat.LinkInBytes - lastStats.LinkInBytes)
-			if stat.LinkInBytes < lastStats.LinkInBytes {
-				incBy = float64(stat.LinkInBytes)
+			incBy = float64(stat.In - lastStats.In)
+			if stat.In < lastStats.In {
+				incBy = float64(stat.In)
 			}
 			BytesXfer.With(prometheus.Labels{"direction": "rx"}).Add(incBy)
-			lastStats.LinkInBytes = stat.LinkInBytes
+			lastStats.In = stat.In
 
-			incBy = float64(stat.LinkOutBytes - lastStats.LinkOutBytes)
-			if stat.LinkOutBytes < lastStats.LinkOutBytes {
-				incBy = float64(stat.LinkOutBytes)
+			incBy = float64(stat.Out - lastStats.Out)
+			if stat.Out < lastStats.Out {
+				incBy = float64(stat.Out)
 			}
 			BytesXfer.With(prometheus.Labels{"direction": "tx"}).Add(incBy)
-			lastStats.LinkOutBytes = stat.LinkOutBytes
-		case "sched":
-			Threads.With(prometheus.Labels{"state": "idle"}).Set(float64(stat.ThreadsIdle))
+			lastStats.Out = stat.Out
+		case SchedStat:
+			Threads.With(prometheus.Labels{"state": "idle"}).Set(float64(stat.Idle))
 			Threads.With(prometheus.Labels{"state": "running"}).Set(float64(stat.Threads -
-				stat.ThreadsIdle))
+				stat.Idle))
+		case OssStat: // Oss stat should only appear on origin servers
+			for _, pathStat := range stat.Paths.Stats {
+				noQuoteLp := strings.Replace(pathStat.Lp, "\"", "", 2)
+				// pathStat.Total is in kilobytes but we want to standardize all data to bytes
+				StorageVolume.With(prometheus.Labels{"ns": noQuoteLp, "type": "total", "server_type": "origin"}).
+					Set(float64(pathStat.Total * 1024))
+				StorageVolume.With(prometheus.Labels{"ns": noQuoteLp, "type": "free", "server_type": "origin"}).
+					Set(float64(pathStat.Free * 1024))
+			}
+		case CacheStat:
+			cacheStore := stat.Store
+			StorageVolume.With(prometheus.Labels{"ns": "/cache", "type": "total", "server_type": "cache"}).
+				Set(float64(cacheStore.Size))
+			StorageVolume.With(prometheus.Labels{"ns": "/cache", "type": "free", "server_type": "cache"}).
+				Set(float64(cacheStore.Size - cacheStore.Used))
 		}
 	}
 	return nil
