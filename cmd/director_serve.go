@@ -84,11 +84,11 @@ func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
 			" but you provided %q. Was there a typo?", defaultResponse)
 	}
 	log.Debugf("The director will redirect to %ss by default", defaultResponse)
-	engine.Use(director.ShortcutMiddleware(defaultResponse))
 	rootGroup := engine.Group("/")
-	director.RegisterDirector(rootGroup)
 	director.RegisterDirectorAuth(rootGroup)
 	director.RegisterDirectorWebAPI(rootGroup)
+	engine.Use(director.ShortcutMiddleware(defaultResponse))
+	director.RegisterDirector(rootGroup)
 
 	log.Info("Starting web engine...")
 	go web_ui.RunEngine(engine)
