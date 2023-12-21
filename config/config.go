@@ -354,7 +354,7 @@ func setupTransport() {
 	}
 }
 
-func parseServerIssuerURL() error {
+func parseServerIssuerURL(sType ServerType) error {
 	if param.Server_IssuerUrl.GetString() != "" {
 		_, err := url.Parse(param.Server_IssuerUrl.GetString())
 		if err != nil {
@@ -376,7 +376,7 @@ func parseServerIssuerURL() error {
 		return errors.New("If Server.IssuerHostname is configured, you must provide a valid port")
 	}
 
-	if IsServerEnabled(OriginType) {
+	if sType == OriginType {
 		// If Origin.Mode is set to anything that isn't "posix" or "", assume we're running a plugin and
 		// that the origin's issuer URL actually uses the same port as OriginUI instead of XRootD. This is
 		// because under that condition, keys are being served by the Pelican process instead of by XRootD
@@ -500,17 +500,20 @@ func initConfigDir() error {
 	return nil
 }
 
-func InitServer(servers []ServerType) error {
+// Initialize Pelican server instance. Pass a list of "enabledServers" if you want to enable multiple servers,
+// and pass your "current" server to instantiate through "currentServer" so that the functions
+// knows which server it's being evoked for
+func InitServer(enabledServers []ServerType, currentServer ServerType) error {
 	if err := initConfigDir(); err != nil {
 		return errors.Wrap(err, "Failed to initialize the server configuration")
 	}
 
-	setEnabledServer(servers)
+	setEnabledServer(enabledServers)
 
 	xrootdPrefix := ""
-	if IsServerEnabled(OriginType) {
+	if currentServer == OriginType {
 		xrootdPrefix = "origin"
-	} else if IsServerEnabled(CacheType) {
+	} else if currentServer == CacheType {
 		xrootdPrefix = "cache"
 	}
 	configDir := viper.GetString("ConfigDir")
@@ -635,7 +638,7 @@ func InitServer(servers []ServerType) error {
 
 	// Set up the server's issuer URL so we can access that data wherever we need to find keys and whatnot
 	// This populates Server.IssuerUrl, and can be safely fetched using server_utils.GetServerIssuerURL()
-	err = parseServerIssuerURL()
+	err = parseServerIssuerURL(currentServer)
 	if err != nil {
 		return err
 	}
