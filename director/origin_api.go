@@ -33,7 +33,6 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/token_utils"
 	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -76,7 +75,7 @@ func CreateAdvertiseToken(namespace string) (string, error) {
 	}
 
 	tok, err := jwt.NewBuilder().
-		Claim("scope", token_utils.Pelican_Advertise.String()).
+		Claim("scope", utils.Pelican_Advertise.String()).
 		Issuer(issuerUrl).
 		Audience([]string{director}).
 		Subject("origin").
@@ -177,7 +176,7 @@ func VerifyAdvertiseToken(token, namespace string) (bool, error) {
 	scopes := strings.Split(scope, " ")
 
 	for _, scope := range scopes {
-		if scope == token_utils.Pelican_Advertise.String() {
+		if scope == utils.Pelican_Advertise.String() {
 			return true, nil
 		}
 	}
@@ -193,7 +192,7 @@ func CreateDirectorTestReportToken(originWebUrl string) (string, error) {
 	}
 
 	tok, err := jwt.NewBuilder().
-		Claim("scope", token_utils.Pelican_DirectorTestReport.String()).
+		Claim("scope", utils.Pelican_DirectorTestReport.String()).
 		Issuer(directorURL).
 		Audience([]string{originWebUrl}).
 		Subject("director").
@@ -254,7 +253,7 @@ func VerifyDirectorTestReportToken(strToken string) (bool, error) {
 	scopes := strings.Split(scope, " ")
 
 	for _, scope := range scopes {
-		if scope == token_utils.Pelican_DirectorTestReport.String() {
+		if scope == utils.Pelican_DirectorTestReport.String() {
 			return true, nil
 		}
 	}

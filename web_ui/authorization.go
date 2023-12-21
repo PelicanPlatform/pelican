@@ -40,7 +40,7 @@ func createPromMetricToken() (string, error) {
 	tokenExpireTime := param.Monitoring_TokenExpiresIn.GetDuration()
 
 	tok, err := jwt.NewBuilder().
-		Claim("scope", "monitoring.scrape").
+		Claim("scope", utils.Monitoring_Scrape.String()).
 		Issuer(serverURL).
 		Audience([]string{serverURL}).
 		Subject(serverURL).

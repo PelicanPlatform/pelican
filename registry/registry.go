@@ -48,7 +48,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/oauth2"
 	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/token_utils"
+	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
@@ -686,7 +686,7 @@ func dbDeleteNamespace(ctx *gin.Context) {
 		}
 
 		for _, scope := range strings.Split(scope, " ") {
-			if scope == token_utils.Pelican_NamespaceDelete.String() {
+			if scope == utils.Pelican_NamespaceDelete.String() {
 				return nil
 			}
 		}

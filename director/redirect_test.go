@@ -22,7 +22,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/token_utils"
+	"github.com/pelicanplatform/pelican/utils"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -107,7 +107,7 @@ func TestDirectorRegistration(t *testing.T) {
 		// Create a token to be inserted
 		tok, err := jwt.NewBuilder().
 			Issuer(issuerURL.String()).
-			Claim("scope", token_utils.Pelican_Advertise.String()).
+			Claim("scope", utils.Pelican_Advertise.String()).
 			Audience([]string{"director.test"}).
 			Subject("origin").
 			Build()
@@ -402,7 +402,7 @@ func TestDiscoverOriginCache(t *testing.T) {
 
 		tok, err := jwt.NewBuilder().
 			Issuer(tokenIssuerString).
-			Claim("scope", token_utils.Pelican_DirectorServiceDiscovery).
+			Claim("scope", utils.Pelican_DirectorServiceDiscovery).
 			Audience([]string{"director.test"}).
 			Subject("director").
 			Expiration(time.Now().Add(time.Hour)).
