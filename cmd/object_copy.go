@@ -27,6 +27,7 @@ import (
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/namespaces"
+	"github.com/pelicanplatform/pelican/param"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -54,7 +55,7 @@ func init() {
 	flagSet.StringP("cache-list-name", "n", "xroot", "(Deprecated) Cache list to use, currently either xroot or xroots; may be ignored")
 	flagSet.Lookup("cache-list-name").Hidden = true
 	// All the deprecated or hidden flags that are only relevant if we are in historical "stashcp mode"
-	if execName == "stashcp" {
+	if strings.HasPrefix(execName, "stashcp") {
 		copyCmd.Use = "stashcp {source ...} {destination}"
 		copyCmd.Short = "Copy a file to/from the OSDF"
 		flagSet.Lookup("cache-list-name").Hidden = false // Expose the help for this option
@@ -81,7 +82,7 @@ func copyMain(cmd *cobra.Command, args []string) {
 	client.ObjectClientOptions.Version = version
 
 	// Need to check just stashcp since it does not go through root, the other modes get checked there
-	if execName == "stashcp" {
+	if strings.HasPrefix(execName, "stashcp") {
 		if val, err := cmd.Flags().GetBool("debug"); err == nil && val {
 			config.SetLogging(log.DebugLevel)
 		} else {
@@ -106,9 +107,9 @@ func copyMain(cmd *cobra.Command, args []string) {
 	// Set the progress bars to the command line option
 	client.ObjectClientOptions.Token, _ = cmd.Flags().GetString("token")
 
-	// Check if the program was executed from a terminal
+	// Check if the program was executed from a terminal and does not specify a log location
 	// https://rosettacode.org/wiki/Check_output_device_is_a_terminal#Go
-	if fileInfo, _ := os.Stdout.Stat(); (fileInfo.Mode() & os.ModeCharDevice) != 0 {
+	if fileInfo, _ := os.Stdout.Stat(); (fileInfo.Mode()&os.ModeCharDevice) != 0 && param.Logging_LogLocation.GetString() == "" {
 		client.ObjectClientOptions.ProgressBars = true
 	} else {
 		client.ObjectClientOptions.ProgressBars = false
@@ -202,6 +203,7 @@ func copyMain(cmd *cobra.Command, args []string) {
 	for _, src := range source {
 		var tmpDownloaded int64
 		isRecursive, _ := cmd.Flags().GetBool("recursive")
+		client.ObjectClientOptions.Recursive = isRecursive
 		tmpDownloaded, result = client.DoStashCPSingle(src, dest, splitMethods, isRecursive)
 		downloaded += tmpDownloaded
 		if result != nil {

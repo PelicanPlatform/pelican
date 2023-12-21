@@ -49,6 +49,12 @@ var (
 	healthTestCancelFuncsMutex = sync.RWMutex{}
 )
 
+// The endpoint for director Prometheus instance to discover Pelican servers
+// for scraping (origins/caches).
+//
+// TODO: Add registry server as well to this endpoint when we need to scrape from it
+const DirectorServerDiscoveryEndpoint = "/api/v1.0/director/discoverServers"
+
 func getRedirectURL(reqPath string, ad ServerAd, requiresAuth bool) (redirectURL url.URL) {
 	var serverURL url.URL
 	if requiresAuth {
@@ -363,20 +369,20 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 func registerServeAd(ctx *gin.Context, sType ServerType) {
 	tokens, present := ctx.Request.Header["Authorization"]
 	if !present || len(tokens) == 0 {
-		ctx.JSON(401, gin.H{"error": "Bearer token not present in the 'Authorization' header"})
+		ctx.JSON(http.StatusForbidden, gin.H{"error": "Bearer token not present in the 'Authorization' header"})
 		return
 	}
 
 	err := versionCompatCheck(ctx)
 	if err != nil {
 		log.Debugf("A version incompatibility was encountered while registering %s and no response was served: %v", sType, err)
-		ctx.JSON(500, gin.H{"error": "Incompatible versions detected: " + fmt.Sprintf("%v", err)})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Incompatible versions detected: " + fmt.Sprintf("%v", err)})
 		return
 	}
 
 	ad := OriginAdvertise{}
 	if ctx.ShouldBind(&ad) != nil {
-		ctx.JSON(400, gin.H{"error": "Invalid " + sType + " registration"})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid " + sType + " registration"})
 		return
 	}
 
@@ -387,13 +393,13 @@ func registerServeAd(ctx *gin.Context, sType ServerType) {
 			ok, err := VerifyAdvertiseToken(token, namespace.Path)
 			if err != nil {
 				log.Warningln("Failed to verify token:", err)
-				ctx.JSON(400, gin.H{"error": "Authorization token verification failed"})
+				ctx.JSON(http.StatusForbidden, gin.H{"error": "Authorization token verification failed"})
 				return
 			}
 			if !ok {
 				log.Warningf("%s %v advertised to namespace %v without valid registration\n",
 					sType, ad.Name, namespace.Path)
-				ctx.JSON(400, gin.H{"error": sType + " not authorized to advertise to this namespace"})
+				ctx.JSON(http.StatusForbidden, gin.H{"error": sType + " not authorized to advertise to this namespace"})
 				return
 			}
 		}
@@ -402,14 +408,19 @@ func registerServeAd(ctx *gin.Context, sType ServerType) {
 		prefix := path.Join("caches", ad.Name)
 		ok, err := VerifyAdvertiseToken(token, prefix)
 		if err != nil {
-			log.Warningln("Failed to verify token:", err)
-			ctx.JSON(400, gin.H{"error": "Authorization token verification failed"})
+			if err == adminApprovalErr {
+				log.Warningln("Failed to verify token:", err)
+				ctx.JSON(http.StatusForbidden, gin.H{"error": "Cache is not admin approved"})
+			} else {
+				log.Warningln("Failed to verify token:", err)
+				ctx.JSON(http.StatusForbidden, gin.H{"error": "Authorization token verification failed"})
+			}
 			return
 		}
 		if !ok {
 			log.Warningf("%s %v advertised to namespace %v without valid registration\n",
 				sType, ad.Name, prefix)
-			ctx.JSON(400, gin.H{"error": sType + " not authorized to advertise to this namespace"})
+			ctx.JSON(http.StatusForbidden, gin.H{"error": sType + " not authorized to advertise to this namespace"})
 			return
 		}
 	}
@@ -417,14 +428,14 @@ func registerServeAd(ctx *gin.Context, sType ServerType) {
 	ad_url, err := url.Parse(ad.URL)
 	if err != nil {
 		log.Warningf("Failed to parse %s URL %v: %v\n", sType, ad.URL, err)
-		ctx.JSON(400, gin.H{"error": "Invalid " + sType + " URL"})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid " + sType + " URL"})
 		return
 	}
 
 	adWebUrl, err := url.Parse(ad.WebURL)
 	if err != nil && ad.WebURL != "" { // We allow empty WebURL string for backward compatibility
 		log.Warningf("Failed to parse origin Web URL %v: %v\n", ad.WebURL, err)
-		ctx.JSON(400, gin.H{"error": "Invalid origin Web URL"})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid origin Web URL"})
 		return
 	}
 
@@ -449,12 +460,12 @@ func registerServeAd(ctx *gin.Context, sType ServerType) {
 		go PeriodicDirectorTest(ctx, sAd)
 	}
 
-	ctx.JSON(200, gin.H{"msg": "Successful registration"})
+	ctx.JSON(http.StatusOK, gin.H{"msg": "Successful registration"})
 }
 
-// Return a list of available origins URL in Prometheus HTTP SD format
+// Return a list of registered origins and caches in Prometheus HTTP SD format
 // for director's Prometheus service discovery
-func DiscoverOrigins(ctx *gin.Context) {
+func DiscoverOriginCache(ctx *gin.Context) {
 	// Check token for authorization
 	tokens, present := ctx.Request.Header["Authorization"]
 	if !present || len(tokens) == 0 {
@@ -479,24 +490,21 @@ func DiscoverOrigins(ctx *gin.Context) {
 	serverAds := serverAds.Keys()
 	promDiscoveryRes := make([]PromDiscoveryItem, 0)
 	for _, ad := range serverAds {
-		// We don't include caches in this discovery for right now
-		if ad.Type != OriginType {
-			continue
-		}
 		if ad.WebURL.String() == "" {
-			// Oririgns fetched from topology can't be scraped as they
+			// Origins and caches fetched from topology can't be scraped as they
 			// don't have a WebURL
 			continue
 		}
 		promDiscoveryRes = append(promDiscoveryRes, PromDiscoveryItem{
 			Targets: []string{ad.WebURL.Hostname() + ":" + ad.WebURL.Port()},
 			Labels: map[string]string{
-				"origin_name":     ad.Name,
-				"origin_auth_url": ad.AuthURL.String(),
-				"origin_url":      ad.URL.String(),
-				"origin_web_url":  ad.WebURL.String(),
-				"origin_lat":      fmt.Sprintf("%.4f", ad.Latitude),
-				"origin_long":     fmt.Sprintf("%.4f", ad.Longitude),
+				"server_type":     string(ad.Type),
+				"server_name":     ad.Name,
+				"server_auth_url": ad.AuthURL.String(),
+				"server_url":      ad.URL.String(),
+				"server_web_url":  ad.WebURL.String(),
+				"server_lat":      fmt.Sprintf("%.4f", ad.Latitude),
+				"server_long":     fmt.Sprintf("%.4f", ad.Longitude),
 			},
 		})
 	}
@@ -522,7 +530,10 @@ func RegisterDirector(router *gin.RouterGroup) {
 	router.GET("/api/v1.0/director/object/*any", RedirectToCache)
 	router.GET("/api/v1.0/director/origin/*any", RedirectToOrigin)
 	router.POST("/api/v1.0/director/registerOrigin", RegisterOrigin)
-	router.GET("/api/v1.0/director/discoverOrigins", DiscoverOrigins)
+	// In the foreseeable feature, director will scrape all servers in Pelican ecosystem (including registry)
+	// so that director can be our point of contact for collecting system-level metrics.
+	// Rename the endpoint to reflect such plan.
+	router.GET(DirectorServerDiscoveryEndpoint, DiscoverOriginCache)
 	router.POST("/api/v1.0/director/registerCache", RegisterCache)
 	router.GET("/api/v1.0/director/listNamespaces", ListNamespaces)
 }

@@ -1,17 +1,19 @@
 package main
 
+// This should not be included in any release of pelican
+
 import (
 	"log"
 	"os"
 	"path/filepath"
 )
 
-// Generate a placeholder file under origin_ui/src/out so that
+// Generate a placeholder file under web_ui/frontend/out so that
 // we can build Go without error. This is mainly for the linter
 // GitHub Action that doesn't need frontend to be built. Refer to
 // linter GHA for details.
 func GenPlaceholderPathForNext() {
-	dir := "../origin_ui/src/out"
+	dir := "../web_ui/frontend/out"
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		log.Fatalf("error: %v", err)
 	}

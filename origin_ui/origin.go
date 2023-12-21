@@ -19,42 +19,18 @@
 package origin_ui
 
 import (
-	"embed"
-	"mime"
+	"encoding/json"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
 
-	"github.com/gin-gonic/gin"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+
+	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
 )
-
-var (
-
-	//go:embed src/out/*
-	webAssets embed.FS
-)
-
-func ConfigOriginUI(engine *gin.Engine) {
-	engine.GET("/view/*path", func(ctx *gin.Context) {
-		path := ctx.Param("path")
-
-		if strings.HasSuffix(path, "/") {
-			path += "index.html"
-		}
-
-		filePath := "src/out" + path
-		file, _ := webAssets.ReadFile(filePath)
-		ctx.Data(
-			http.StatusOK,
-			mime.TypeByExtension(filePath),
-			file,
-		)
-	})
-}
 
 // Configure XrootD directory for both self-based and director-based file transfer tests
 func ConfigureXrootdMonitoringDir() error {
@@ -85,4 +61,32 @@ func ConfigureXrootdMonitoringDir() error {
 	}
 
 	return nil
+}
+
+func ConfigIssJWKS(router *gin.RouterGroup) error {
+	if router == nil {
+		return errors.New("Origin configuration passed a nil pointer")
+	}
+
+	router.GET("/openid-configuration", ExportOpenIDConfig)
+	router.GET("/issuer.jwks", ExportIssuerJWKS)
+	return nil
+}
+
+func ExportOpenIDConfig(c *gin.Context) {
+	issuerURL, _ := url.Parse(param.Server_ExternalWebUrl.GetString())
+	jwksUri, _ := url.JoinPath(issuerURL.String(), "/.well-known/issuer.jwks")
+	jsonData := gin.H{
+		"issuer":   issuerURL.String(),
+		"jwks_uri": jwksUri,
+	}
+
+	c.JSON(http.StatusOK, jsonData)
+}
+
+func ExportIssuerJWKS(c *gin.Context) {
+	keys, _ := config.GetIssuerPublicJWKS()
+	buf, _ := json.MarshalIndent(keys, "", " ")
+
+	c.Data(http.StatusOK, "application/json; charset=utf-8", buf)
 }

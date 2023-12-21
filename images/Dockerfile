@@ -17,14 +17,14 @@
 ARG BASE_YUM_REPO=release
 ARG BASE_OSG_SERIES=3.6
 
-FROM node:18 AS website-build
+FROM node:20 AS website-build
 
 WORKDIR /webapp
 
-COPY origin_ui/src/package.json package.json
+COPY web_ui/frontend/package.json package.json
 
 RUN npm install
-COPY origin_ui/src ./
+COPY web_ui/frontend ./
 
 RUN npm run build
 
@@ -33,11 +33,11 @@ FROM goreleaser/goreleaser:v1.20.0 AS pelican-build
 WORKDIR /pelican
 
 COPY . .
-COPY --from=website-build /webapp/out ./origin_ui/src/out
+COPY --from=website-build /webapp/out ./web_ui/frontend/out
 
 RUN goreleaser --clean --snapshot
 
-FROM hub.opensciencegrid.org/sciauth/scitokens-oauth2-server:release-20231118-1823 AS scitokens-oauth2-server
+FROM --platform=linux/amd64 hub.opensciencegrid.org/sciauth/scitokens-oauth2-server:release-20231118-1823 AS scitokens-oauth2-server
 
 FROM --platform=linux/amd64 opensciencegrid/software-base:$BASE_OSG_SERIES-el8-$BASE_YUM_REPO
 
@@ -121,6 +121,18 @@ ENV JAVA_HOME=/usr/lib/jvm/jre \
     ST_HOME="/opt/scitokens-server" \
     QDL_HOME="/opt/qdl" \
     PATH="${ST_HOME}/bin:${QDL_HOME}/bin:${PATH}"
+
+# Install the S3 and HTTP server plugins for XRootD. For now we do this from source
+# until we can sort out the RPMs.
+RUN \
+    git clone https://github.com/PelicanPlatform/xrootd-s3-http.git && \
+    cd xrootd-s3-http && \
+    mkdir build && cd build && \
+    cmake .. && \
+    make install && \
+    # For now, until the RPM is set up, we install the libraries here, but
+    # we need to add to LD_LIBRARY_PATH so XRootD knows where to look
+    echo "/usr/local/lib" > /etc/ld.so.conf.d/xrdplugins.conf && ldconfig
 
 RUN chmod +x /pelican/osdf-client \
     && chmod +x /entrypoint.sh

@@ -25,6 +25,7 @@ import (
 	"github.com/pelicanplatform/pelican/token_utils"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type MockCache struct {
@@ -133,8 +134,8 @@ func TestDirectorRegistration(t *testing.T) {
 	setupMockCache := func(t *testing.T, publicKey jwk.Key) MockCache {
 		return MockCache{
 			GetFn: func(key string, keyset *jwk.Set) (jwk.Set, error) {
-				if key != "https://get-your-tokens.org/api/v1.0/registry/foo/bar/.well-known/issuer.jwks" {
-					t.Errorf("expecting: https://get-your-tokens.org/api/v1.0/registry/foo/bar/.well-known/issuer.jwks, got %q", key)
+				if key != "https://get-your-tokens.org/api/v2.0/registry/metadata/foo/bar/.well-known/issuer.jwks" {
+					t.Errorf("expecting: https://get-your-tokens.org/api/v2.0/registry/metadata/foo/bar/.well-known/issuer.jwks, got %q", key)
 				}
 				return *keyset, nil
 			},
@@ -218,7 +219,7 @@ func TestDirectorRegistration(t *testing.T) {
 
 		r.ServeHTTP(w, c.Request)
 
-		assert.Equal(t, 400, w.Result().StatusCode, "Expected failing status code of 400")
+		assert.Equal(t, http.StatusForbidden, w.Result().StatusCode, "Expected failing status code of 403")
 		body, _ := io.ReadAll(w.Result().Body)
 		assert.Equal(t, `{"error":"Authorization token verification failed"}`, string(body), "Failure wasn't because token verification failed")
 
@@ -315,9 +316,9 @@ func TestGetAuthzEscaped(t *testing.T) {
 	assert.Equal(t, escapedToken, "tokenstring")
 }
 
-func TestDiscoverOrigins(t *testing.T) {
+func TestDiscoverOriginCache(t *testing.T) {
 	mockPelicanOriginServerAd := ServerAd{
-		Name:    "test-origin-server",
+		Name:    "1-test-origin-server",
 		AuthURL: url.URL{},
 		URL: url.URL{
 			Scheme: "https",
@@ -333,11 +334,11 @@ func TestDiscoverOrigins(t *testing.T) {
 	}
 
 	mockTopoOriginServerAd := ServerAd{
-		Name:    "test-origin-server",
+		Name:    "test-topology-origin-server",
 		AuthURL: url.URL{},
 		URL: url.URL{
 			Scheme: "https",
-			Host:   "fake-origin.org:8443",
+			Host:   "fake-topology-origin.org:8443",
 		},
 		Type:      OriginType,
 		Latitude:  123.05,
@@ -345,9 +346,13 @@ func TestDiscoverOrigins(t *testing.T) {
 	}
 
 	mockCacheServerAd := ServerAd{
-		Name:    "test-cache-server",
+		Name:    "2-test-cache-server",
 		AuthURL: url.URL{},
 		URL: url.URL{
+			Scheme: "https",
+			Host:   "fake-cache.org:8443",
+		},
+		WebURL: url.URL{
 			Scheme: "https",
 			Host:   "fake-cache.org:8444",
 		},
@@ -368,7 +373,10 @@ func TestDiscoverOrigins(t *testing.T) {
 
 	mockDirectorUrl := "https://fake-director.org:8888"
 	viper.Reset()
-	viper.Set("Federation.DirectorUrl", mockDirectorUrl)
+	// Direcor SD will only be used for director's Prometheus scraper to get available origins,
+	// so the token issuer is issentially the director server itself
+	// There's no need to rely on Federation.DirectorUrl as token issuer in this case
+	viper.Set("Server.ExternalWebUrl", mockDirectorUrl)
 
 	tDir := t.TempDir()
 	kfile := filepath.Join(tDir, "testKey")
@@ -410,8 +418,33 @@ func TestDiscoverOrigins(t *testing.T) {
 		return signed
 	}
 
+	areSlicesEqualIgnoreOrder := func(slice1, slice2 []PromDiscoveryItem) bool {
+		if len(slice1) != len(slice2) {
+			return false
+		}
+
+		counts := make(map[string]int)
+
+		for _, item := range slice1 {
+			bytes, err := json.Marshal(item)
+			require.NoError(t, err)
+			counts[string(bytes)]++
+		}
+
+		for _, item := range slice2 {
+			bytes, err := json.Marshal(item)
+			require.NoError(t, err)
+			counts[string(bytes)]--
+			if counts[string(bytes)] < 0 {
+				return false
+			}
+		}
+
+		return true
+	}
+
 	r := gin.Default()
-	r.GET("/test", DiscoverOrigins)
+	r.GET("/test", DiscoverOriginCache)
 
 	t.Run("no-token-should-give-401", func(t *testing.T) {
 		req, err := http.NewRequest(http.MethodGet, "/test", nil)
@@ -453,28 +486,88 @@ func TestDiscoverOrigins(t *testing.T) {
 		assert.Equal(t, 200, w.Code)
 		assert.Equal(t, `[]`, w.Body.String())
 	})
-	t.Run("response-origin-should-match-cache", func(t *testing.T) {
+	t.Run("response-should-match-serverAds", func(t *testing.T) {
 		req, err := http.NewRequest(http.MethodGet, "/test", nil)
 		if err != nil {
 			t.Fatalf("Could not make a GET request: %v", err)
 		}
 
-		serverAdMutex.Lock()
-		serverAds.Set(mockPelicanOriginServerAd, []NamespaceAd{mockNamespaceAd}, time.Duration(10))
-		// Server fetched from topology should not be present in SD response
-		serverAds.Set(mockTopoOriginServerAd, []NamespaceAd{mockNamespaceAd}, time.Duration(10))
-		serverAds.Set(mockCacheServerAd, []NamespaceAd{mockNamespaceAd}, time.Duration(10))
-		serverAdMutex.Unlock()
+		func() {
+			serverAdMutex.Lock()
+			defer serverAdMutex.Unlock()
+			serverAds.DeleteAll()
+			serverAds.Set(mockPelicanOriginServerAd, []NamespaceAd{mockNamespaceAd}, ttlcache.DefaultTTL)
+			// Server fetched from topology should not be present in SD response
+			serverAds.Set(mockTopoOriginServerAd, []NamespaceAd{mockNamespaceAd}, ttlcache.DefaultTTL)
+			serverAds.Set(mockCacheServerAd, []NamespaceAd{mockNamespaceAd}, ttlcache.DefaultTTL)
+		}()
+
+		expectedRes := []PromDiscoveryItem{{
+			Targets: []string{mockCacheServerAd.WebURL.Hostname() + ":" + mockCacheServerAd.WebURL.Port()},
+			Labels: map[string]string{
+				"server_type":     string(mockCacheServerAd.Type),
+				"server_name":     mockCacheServerAd.Name,
+				"server_auth_url": mockCacheServerAd.AuthURL.String(),
+				"server_url":      mockCacheServerAd.URL.String(),
+				"server_web_url":  mockCacheServerAd.WebURL.String(),
+				"server_lat":      fmt.Sprintf("%.4f", mockCacheServerAd.Latitude),
+				"server_long":     fmt.Sprintf("%.4f", mockCacheServerAd.Longitude),
+			},
+		}, {
+			Targets: []string{mockPelicanOriginServerAd.WebURL.Hostname() + ":" + mockPelicanOriginServerAd.WebURL.Port()},
+			Labels: map[string]string{
+				"server_type":     string(mockPelicanOriginServerAd.Type),
+				"server_name":     mockPelicanOriginServerAd.Name,
+				"server_auth_url": mockPelicanOriginServerAd.AuthURL.String(),
+				"server_url":      mockPelicanOriginServerAd.URL.String(),
+				"server_web_url":  mockPelicanOriginServerAd.WebURL.String(),
+				"server_lat":      fmt.Sprintf("%.4f", mockPelicanOriginServerAd.Latitude),
+				"server_long":     fmt.Sprintf("%.4f", mockPelicanOriginServerAd.Longitude),
+			},
+		}}
+
+		req.Header.Set("Authorization", "Bearer "+string(setupToken("")))
+
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		require.Equal(t, 200, w.Code)
+
+		var resMarshalled []PromDiscoveryItem
+		err = json.Unmarshal(w.Body.Bytes(), &resMarshalled)
+		require.NoError(t, err, "Error unmarshall response to json")
+
+		assert.True(t, areSlicesEqualIgnoreOrder(expectedRes, resMarshalled))
+	})
+
+	t.Run("no-duplicated-origins", func(t *testing.T) {
+		req, err := http.NewRequest(http.MethodGet, "/test", nil)
+		if err != nil {
+			t.Fatalf("Could not make a GET request: %v", err)
+		}
+
+		func() {
+			serverAdMutex.Lock()
+			defer serverAdMutex.Unlock()
+			serverAds.DeleteAll()
+			// Add multiple same serverAds
+			serverAds.Set(mockPelicanOriginServerAd, []NamespaceAd{mockNamespaceAd}, ttlcache.DefaultTTL)
+			serverAds.Set(mockPelicanOriginServerAd, []NamespaceAd{mockNamespaceAd}, ttlcache.DefaultTTL)
+			serverAds.Set(mockPelicanOriginServerAd, []NamespaceAd{mockNamespaceAd}, ttlcache.DefaultTTL)
+			// Server fetched from topology should not be present in SD response
+			serverAds.Set(mockTopoOriginServerAd, []NamespaceAd{mockNamespaceAd}, ttlcache.DefaultTTL)
+		}()
 
 		expectedRes := []PromDiscoveryItem{{
 			Targets: []string{mockPelicanOriginServerAd.WebURL.Hostname() + ":" + mockPelicanOriginServerAd.WebURL.Port()},
 			Labels: map[string]string{
-				"origin_name":     mockPelicanOriginServerAd.Name,
-				"origin_auth_url": mockPelicanOriginServerAd.AuthURL.String(),
-				"origin_url":      mockPelicanOriginServerAd.URL.String(),
-				"origin_web_url":  mockPelicanOriginServerAd.WebURL.String(),
-				"origin_lat":      fmt.Sprintf("%.4f", mockPelicanOriginServerAd.Latitude),
-				"origin_long":     fmt.Sprintf("%.4f", mockPelicanOriginServerAd.Longitude),
+				"server_type":     string(mockPelicanOriginServerAd.Type),
+				"server_name":     mockPelicanOriginServerAd.Name,
+				"server_auth_url": mockPelicanOriginServerAd.AuthURL.String(),
+				"server_url":      mockPelicanOriginServerAd.URL.String(),
+				"server_web_url":  mockPelicanOriginServerAd.WebURL.String(),
+				"server_lat":      fmt.Sprintf("%.4f", mockPelicanOriginServerAd.Latitude),
+				"server_long":     fmt.Sprintf("%.4f", mockPelicanOriginServerAd.Longitude),
 			},
 		}}
 

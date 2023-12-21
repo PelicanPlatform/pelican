@@ -76,11 +76,20 @@ type (
 		JwksUri                       string `json:"jwks_uri"`
 	}
 
+	ServerType int
+
 	TokenOperation int
 
 	TokenGenerationOpts struct {
 		Operation TokenOperation
 	}
+)
+
+const (
+	CacheType ServerType = 1 << iota
+	OriginType
+	DirectorType
+	RegistryType
 )
 
 const (
@@ -108,6 +117,24 @@ var (
 	transport     *http.Transport
 	onceTransport sync.Once
 )
+
+func (sType ServerType) IsSet(otherVal ServerType) bool {
+	return sType&otherVal == otherVal
+}
+
+func (sType ServerType) String() string {
+	switch sType {
+	case CacheType:
+		return "Cache"
+	case OriginType:
+		return "Origin"
+	case DirectorType:
+		return "Director"
+	case RegistryType:
+		return "Registry"
+	}
+	return "Unknown"
+}
 
 // Based on the name of the current binary, determine the preferred "style"
 // of behavior.  For example, a binary with the "osdf_" prefix should utilize
@@ -296,6 +323,60 @@ func setupTransport() {
 	}
 }
 
+func parseServerIssuerURL(sType ServerType) error {
+	if param.Server_IssuerUrl.GetString() != "" {
+		_, err := url.Parse(param.Server_IssuerUrl.GetString())
+		if err != nil {
+			return errors.Wrapf(err, "Failed to parse the Server.IssuerUrl %s loaded from config", param.Server_IssuerUrl.GetString())
+		}
+		return nil
+	}
+
+	if param.Server_IssuerHostname.GetString() != "" {
+		if param.Server_IssuerPort.GetInt() != 0 { // Will be the default if not set
+			// We assume any issuer is running https, otherwise we're crazy
+			issuerUrl := url.URL{
+				Scheme: "https",
+				Host:   fmt.Sprintf("%s:%d", param.Server_IssuerHostname.GetString(), param.Server_IssuerPort.GetInt()),
+			}
+			viper.Set("Server.IssuerUrl", issuerUrl.String())
+			return nil
+		}
+		return errors.New("If Server.IssuerHostname is configured, you must provide a valid port")
+	}
+
+	if sType == OriginType {
+		// If Origin.Mode is set to anything that isn't "posix" or "", assume we're running a plugin and
+		// that the origin's issuer URL actually uses the same port as OriginUI instead of XRootD. This is
+		// because under that condition, keys are being served by the Pelican process instead of by XRootD
+		originMode := param.Origin_Mode.GetString()
+		if originMode == "" || originMode == "posix" {
+			// In this case, we use the default set up by config.go, which uses the xrootd port
+			issuerUrl, err := url.Parse(param.Origin_Url.GetString())
+			if err != nil {
+				return errors.Wrap(err, "Failed to parse the issuer URL from the default origin URL")
+			}
+			viper.Set("Server.IssuerUrl", issuerUrl.String())
+			return nil
+		} else {
+			issuerUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
+			if err != nil {
+				return errors.Wrap(err, "Failed to parse the issuer URL generated from Server.ExternalWebUrl")
+			}
+			viper.Set("Server.IssuerUrl", issuerUrl.String())
+			return nil
+		}
+	} else {
+		issuerUrlStr := param.Server_ExternalWebUrl.GetString()
+		issuerUrl, err := url.Parse(issuerUrlStr)
+		if err != nil {
+			return errors.Wrap(err, "Failed to parse the issuer URL generated using the parsed Server.ExternalWebUrl")
+		}
+		viper.Set("Server.IssuerUrl", issuerUrl.String())
+		return nil
+	}
+}
+
 // function to get/setup the transport (only once)
 func GetTransport() *http.Transport {
 	onceTransport.Do(func() {
@@ -388,15 +469,22 @@ func initConfigDir() error {
 	return nil
 }
 
-func InitServer() error {
+func InitServer(sType ServerType) error {
 	if err := initConfigDir(); err != nil {
 		return errors.Wrap(err, "Failed to initialize the server configuration")
+	}
+	xrootdPrefix := ""
+	if sType.IsSet(OriginType) {
+		xrootdPrefix = "origin"
+	} else if sType.IsSet(CacheType) {
+		xrootdPrefix = "cache"
 	}
 	configDir := viper.GetString("ConfigDir")
 	viper.SetConfigType("yaml")
 	viper.SetDefault("Server.TLSCertificate", filepath.Join(configDir, "certificates", "tls.crt"))
 	viper.SetDefault("Server.TLSKey", filepath.Join(configDir, "certificates", "tls.key"))
 	viper.SetDefault("Server.TLSCAKey", filepath.Join(configDir, "certificates", "tlsca.key"))
+	viper.SetDefault("Server.SessionSecretFile", filepath.Join(configDir, "session-secret"))
 	viper.SetDefault("Xrootd.RobotsTxtFile", filepath.Join(configDir, "robots.txt"))
 	viper.SetDefault("Xrootd.ScitokensConfig", filepath.Join(configDir, "xrootd", "scitokens.cfg"))
 	viper.SetDefault("Xrootd.Authfile", filepath.Join(configDir, "xrootd", "authfile"))
@@ -407,8 +495,9 @@ func InitServer() error {
 	viper.SetDefault("OIDC.ClientIDFile", filepath.Join(configDir, "oidc-client-id"))
 	viper.SetDefault("OIDC.ClientSecretFile", filepath.Join(configDir, "oidc-client-secret"))
 	viper.SetDefault("Cache.ExportLocation", "/")
+	viper.SetDefault("Registry.RequireKeyChaining", true)
 	if IsRootExecution() {
-		viper.SetDefault("Xrootd.RunLocation", "/run/pelican/xrootd")
+		viper.SetDefault("Xrootd.RunLocation", filepath.Join("/run", "pelican", "xrootd", xrootdPrefix))
 		viper.SetDefault("Cache.DataLocation", "/run/pelican/xcache")
 		viper.SetDefault("Origin.Multiuser", true)
 		viper.SetDefault("Director.GeoIPLocation", "/var/cache/pelican/maxmind/GeoLite2-City.mmdb")
@@ -420,7 +509,7 @@ func InitServer() error {
 		viper.SetDefault("Monitoring.DataLocation", filepath.Join(configDir, "monitoring/data"))
 
 		if userRuntimeDir := os.Getenv("XDG_RUNTIME_DIR"); userRuntimeDir != "" {
-			runtimeDir := filepath.Join(userRuntimeDir, "pelican")
+			runtimeDir := filepath.Join(userRuntimeDir, "pelican", xrootdPrefix)
 			err := os.MkdirAll(runtimeDir, 0750)
 			if err != nil {
 				return err
@@ -432,7 +521,7 @@ func InitServer() error {
 			if err != nil {
 				return err
 			}
-			viper.SetDefault("Xrootd.RunLocation", dir)
+			viper.SetDefault("Xrootd.RunLocation", filepath.Join(dir, xrootdPrefix))
 			viper.SetDefault("Cache.DataLocation", path.Join(dir, "xcache"))
 			cleanupDirOnShutdown(dir)
 		}
@@ -459,6 +548,9 @@ func InitServer() error {
 	// they have overridden the defaults.
 	hostname = viper.GetString("Server.Hostname")
 
+	if sType.IsSet(CacheType) {
+		viper.Set("Xrootd.Port", param.Cache_Port.GetInt())
+	}
 	xrootdPort := param.Xrootd_Port.GetInt()
 	if xrootdPort != 443 {
 		viper.SetDefault("Origin.Url", fmt.Sprintf("https://%v:%v", param.Server_Hostname.GetString(), xrootdPort))
@@ -505,8 +597,22 @@ func InitServer() error {
 		return err
 	}
 
+	// Generate the session cookie secret and save it as the default value
+	err = GenerateSessionSecret()
+	if err != nil {
+		return err
+	}
+
 	// After we know we have the certs we need, call setupTransport (which uses those certs for its TLSConfig)
 	setupTransport()
+
+	// Set up the server's issuer URL so we can access that data wherever we need to find keys and whatnot
+	// This populates Server.IssuerUrl, and can be safely fetched using server_utils.GetServerIssuerURL()
+	err = parseServerIssuerURL(sType)
+	if err != nil {
+		return err
+	}
+
 	return DiscoverFederation()
 }
 

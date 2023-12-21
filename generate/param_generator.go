@@ -25,13 +25,6 @@ type TemplateData struct {
 	GeneratedCode string
 }
 
-func main() {
-	GenParamEnum()
-	GenParamStruct()
-	GenPlaceholderPathForNext()
-	GenTokenScope()
-}
-
 var requiredKeys = [3]string{"description", "default", "type"}
 
 func GenParamEnum() {

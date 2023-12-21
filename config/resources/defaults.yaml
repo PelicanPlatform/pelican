@@ -22,10 +22,12 @@ Server:
   WebHost: "0.0.0.0"
 Director:
   DefaultResponse: cache
+Cache:
+  Port: 8443
 Origin:
   NamespacePrefix: ""
   Multiuser: false
-  EnableMacaroons: true
+  EnableMacaroons: false
   EnableVoms: true
   SelfTest: true
   EnableUI: true
@@ -51,6 +53,7 @@ Transport:
   ExpectContinueTimeout: 1s
   ResponseHeaderTimeout: 10s
 OIDC:
+  AuthorizationEndpoint:  "https://cilogon.org/authorize"
   DeviceAuthEndpoint: "https://cilogon.org/oauth2/device_authorization"
   TokenEndpoint: "https://cilogon.org/oauth2/token"
   UserInfoEndpoint: "https://cilogon.org/oauth2/userinfo"

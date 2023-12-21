@@ -20,7 +20,11 @@ package config
 
 import (
 	"os"
+	"os/exec"
+	"runtime"
 	"syscall"
+
+	"github.com/pkg/errors"
 )
 
 // This is the pelican version of `MkdirAll`; ensures that any created directory
@@ -69,5 +73,31 @@ func MkdirAll(path string, perm os.FileMode, uid int, gid int) error {
 		}
 		return err
 	}
-	return os.Chown(path, uid, gid)
+
+	user, err := GetDaemonUser()
+	if err != nil {
+		return err
+	}
+	groupname, err := GetDaemonGroup()
+	if err != nil {
+		return err
+	}
+
+	// Windows does not have "chown", has to work differently
+	currentOS := runtime.GOOS
+	if currentOS == "windows" {
+		cmd := exec.Command("icacls", path, "/grant", user+":F")
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return errors.Wrapf(err, "Failed to chown directory %v to groupname %v: %s",
+				path, groupname, string(output))
+		}
+		return nil
+	} else { // Else we are running on linux/mac
+		if err = os.Chown(path, uid, gid); err != nil {
+			return errors.Wrapf(err, "Failed to chown directory %v to groupname %v",
+				path, groupname)
+		}
+	}
+	return nil
 }

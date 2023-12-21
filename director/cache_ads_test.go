@@ -212,8 +212,8 @@ func TestConfigCacheEviction(t *testing.T) {
 		// Start cache eviction
 		shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 		var wg sync.WaitGroup
-		wg.Add(1)
 		ConfigTTLCache(shutdownCtx, &wg)
+		wg.Add(1)
 		defer func() {
 			shutdownCancel()
 			wg.Wait()
@@ -275,8 +275,8 @@ func TestServerAdsCacheEviction(t *testing.T) {
 		// Start cache eviction
 		shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 		var wg sync.WaitGroup
-		wg.Add(1)
 		ConfigTTLCache(shutdownCtx, &wg)
+		wg.Add(1)
 		defer func() {
 			shutdownCancel()
 			wg.Wait()

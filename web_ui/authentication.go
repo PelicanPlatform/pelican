@@ -134,15 +134,15 @@ func setLoginCookie(ctx *gin.Context, user string) {
 	key, err := config.GetIssuerPrivateJWK()
 	if err != nil {
 		log.Errorln("Failure when loading the cookie signing key:", err)
-		ctx.JSON(500, gin.H{"error": "Unable to create login cookies"})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Unable to create login cookies"})
 		return
 	}
 
 	now := time.Now()
 	tok, err := jwt.NewBuilder().
-		// TODO: We might want to come up with some names broader than this for a
-		// generic token for Web APIs, like web_ui.access
-		Claim("scope", "prometheus.read").
+		// The value of the "scope" claim is a JSON string containing a space-separated
+		// list of scopes associated with the token
+		Claim("scope", "web_ui.access monitoring.query monitoring.scrape").
 		Issuer(param.Server_ExternalWebUrl.GetString()).
 		IssuedAt(now).
 		Expiration(now.Add(30 * time.Minute)).
@@ -150,19 +150,13 @@ func setLoginCookie(ctx *gin.Context, user string) {
 		Subject(user).
 		Build()
 	if err != nil {
-		ctx.JSON(500, gin.H{"error": "Failed to build token"})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to build token"})
 		return
 	}
-	log.Debugf("Type of *key: %T\n", key)
-	var raw ecdsa.PrivateKey
-	if err = key.Raw(&raw); err != nil {
-		ctx.JSON(500, gin.H{"error": "Unable to sign login cookie"})
-		return
-	}
-	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, raw))
+
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, key))
 	if err != nil {
-		log.Errorln("Failure when signing the login cookie:", err)
-		ctx.JSON(500, gin.H{"error": "Unable to sign login cookie"})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to sign login token"})
 		return
 	}
 
@@ -170,6 +164,9 @@ func setLoginCookie(ctx *gin.Context, user string) {
 		ctx.Request.URL.Host, true, true)
 	// Explicitly set Cookie for /metrics endpoint as they are in different paths
 	ctx.SetCookie("login", string(signed), 30*60, "/metrics",
+		ctx.Request.URL.Host, true, true)
+	// Explicitly set Cookie for /view endpoint as they are in different paths
+	ctx.SetCookie("login", string(signed), 30*60, "/view",
 		ctx.Request.URL.Host, true, true)
 	ctx.SetSameSite(http.SameSiteStrictMode)
 }

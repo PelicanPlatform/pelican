@@ -28,6 +28,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
+	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/web_ui"
 	log "github.com/sirupsen/logrus"
@@ -51,6 +52,7 @@ func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	director.InitializeDB()
 
 	if config.GetPreferredPrefix() == "OSDF" {
+		metrics.SetComponentHealthStatus(metrics.DirectorRegistry_Topology, metrics.StatusWarning, "Start requesting from topology, status unknown")
 		log.Info("Generating/advertising server ads from OSG topology service...")
 
 		// Get the ads from topology, populate the cache, and keep the cache
@@ -61,8 +63,8 @@ func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	}
 	go director.PeriodicCacheReload()
 
-	wg.Add(1)
 	director.ConfigTTLCache(shutdownCtx, &wg)
+	wg.Add(1) // Add to wait group after ConfigTTLCache finishes to avoid deadlock
 
 	engine, err := web_ui.GetEngine()
 	if err != nil {
@@ -84,10 +86,11 @@ func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
 			" but you provided %q. Was there a typo?", defaultResponse)
 	}
 	log.Debugf("The director will redirect to %ss by default", defaultResponse)
-	engine.Use(director.ShortcutMiddleware(defaultResponse))
 	rootGroup := engine.Group("/")
-	director.RegisterDirector(rootGroup)
 	director.RegisterDirectorAuth(rootGroup)
+	director.RegisterDirectorWebAPI(rootGroup)
+	engine.Use(director.ShortcutMiddleware(defaultResponse))
+	director.RegisterDirector(rootGroup)
 
 	log.Info("Starting web engine...")
 	go web_ui.RunEngine(engine)

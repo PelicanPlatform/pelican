@@ -141,7 +141,15 @@ description: >-
 type: url
 osdf_default: https://topology.opensciencegrid.org/stashcache/namespaces.json
 default: none
-components: ["director"]
+components: ["director", "nsregistry"]
+---
+name: Federation.TopologyReloadInterval
+description: >-
+  The frequency, in minutes, that topology should be reloaded.
+type: duration
+osdf_default: 10
+default: none
+components: ["director", "nsregistry"]
 ---
 name: Federation.DirectorUrl
 description: >-
@@ -332,6 +340,81 @@ type: string
 default: none
 components: ["origin"]
 ---
+name: Origin.XRootDPrefix
+description: >-
+  The directory prefix for the xrootd origin configuration files.
+type: string
+default: origin
+components: ["origin"]
+---
+name: Origin.EnableVoms
+description: >-
+  Enable X.509 / VOMS-based authentication.  This allows HTTP clients to
+  present X.509 client credentials in order to authenticate.  The configuration
+  of the authorization for these clients must be done by the admin; Pelican
+  does not support automatic VOMS authorization configuration.
+type: bool
+default: true
+components: ["origin"]
+---
+name: Origin.EnableDirListing
+description: >-
+  Allows the origin to enable directory listings. Needs to be enabled for recursive
+  downloads to work properly and for directories to be visable.
+type: bool
+default: false
+---
+name: Origin.Mode
+description: >-
+  The backend mode to be used by an origin. Current values that can be selected from
+  are either "posix" or "s3".
+type: string
+default: posix
+components: ["origin"]
+---
+name: Origin.S3ServiceName
+description: >-
+  The S3 Service Name to be used by the XRootD plugin.
+type: string
+default: none
+components: ["origin"]
+---
+name: Origin.S3Region
+description: >-
+  The S3 region to be used by the XRootD plugin.
+type: string
+default: none
+components: ["origin"]
+---
+name: Origin.S3Bucket
+description: >-
+  The S3 bucket to be used by the XRootD plugin.
+type: string
+default: none
+components: ["origin"]
+---
+name: Origin.S3ServiceUrl
+description: >-
+  The S3 service URL to be used by the XRootD plugin.
+type: string
+default: none
+components: ["origin"]
+---
+name: Origin.S3AccessKeyfile
+description: >-
+  A path to a file containing an S3 access keyfile for authenticated buckets when an origin is run in S3 mode.
+type: filename
+default: none
+components: ["origin"]
+---
+name: Origin.S3SecretKeyfile
+description: >-
+  A path to a file containing an S3 secret keyfile for authenticated buckets when an origin is run in S3 mode.
+type: filename
+default: none
+components: ["origin"]
+---
+
 
 ############################
 #   Cache-level configs    #
@@ -351,6 +434,30 @@ description: >-
   relative to the mount location.
 type: string
 default: /
+components: ["cache"]
+---
+name: Cache.XRootDPrefix
+description: >-
+  The directory prefix for the xrootd cache configuration files.
+type: string
+default: cache
+components: ["cache"]
+---
+name: Cache.Port
+description: >-
+  The port over which the xrootd cache should be made available (this will overwrite Xrootd.Port)
+type: int
+default: 8447
+components: ["cache"]
+---
+name: Cache.EnableVoms
+description: >-
+  Enable X.509 / VOMS-based authentication for the cache.  This allows HTTP clients
+  to present X.509 client credentials in order to authenticate.  The configuration
+  of the authorization for these clients must be done by the admin; Pelican
+  does not support automatic VOMS authorization configuration.
+type: bool
+default: false
 components: ["cache"]
 ---
 
@@ -415,6 +522,15 @@ description: >-
 type: filename
 root_default: /var/lib/pelican/registry.sqlite
 default: $ConfigBase/ns-registry.sqlite
+components: ["nsregistry"]
+---
+name: Registry.RequireKeyChaining
+description: >-
+  Specifies whether namespaces requesting registration must possess a key matching any already-registered super/sub namespaces. For
+  example, if true and a namespace `/foo/bar` is already registered, then registration of `/foo` or `/foo/bar/baz` can only be done
+  using keys registered to `/foo/bar`.
+type: bool
+default: true
 components: ["nsregistry"]
 ---
 
@@ -503,6 +619,30 @@ type: string
 default: none
 components: ["origin", "director", "nsregistry"]
 ---
+name: Server.IssuerUrl
+description: >-
+  The URL and port at which the server's issuer can be accessed.
+type: string
+# Setting default to none for now because it changes based on server type and server mode.
+default: none
+components: ["origin", "director", "nsregistry"]
+---
+name: Server.IssuerHostname
+description: >-
+  The hostname at which the server's issuer can be accessed.
+type: string
+# Setting default to none for now because it changes based on server type and server mode.
+default: none
+components: ["origin", "director", "nsregistry"]
+---
+name: Server.IssuerPort
+description: >-
+  The port at which the server's issuer can be accessed.
+type: int
+# Setting default to none for now because it changes based on server type and server mode.
+default: none
+components: ["origin", "director", "nsregistry"]
+---
 name: Server.IssuerJwks
 description: >-
   A filepath indicating where the server's public JSON web keyset can be found.
@@ -514,18 +654,27 @@ name: Server.UIActivationCodeFile
 description: >-
   If the server's web UI has not yet been configured, this file will
   contain the activation code necessary to turn it on.
-type: string
+type: filename
 default: $ConfigBase/server-web-activation-code
 components: ["origin", "cache", "nsregistry", "director"]
 ---
 name: Server.UIPasswordFile
 description: >-
   A filepath specifying where the server's web UI password file should be stored.
-type: string
+type: filename
 default: $ConfigBase/server-web-passwd
 components:  ["origin", "cache", "nsregistry", "director"]
 ---
+name: Server.SessionSecretFile
+description: >-
+  The filepath to the secret for encrypt/decrypt session data for Pelican web UI to initiate a session cookie
 
+  This is only used for sending redirect request for OAuth2 authentication flow as of 11/22/2023
+type: filename
+default: $ConfigBase/session-secret 
+  The default content of the file is the hash of the concatenation of "pelican" and the DER form of ${IssuerKey}
+components:  ["nsregistry", "director"]
+---
 
 ################################
 #   Issuer's Configurations    #
@@ -711,6 +860,16 @@ type: url
 default: none
 components: ["nsregistry", "origin"]
 ---
+name: OIDC.ClientRedirectHostname
+description: >-
+  The hostname for the OIDC client redirect URL that the OIDC provider will redirect to after the user is authenticated
+
+  For development use only. Useful when developing in a container and you want to expose localhost 
+  instead of container hostname to your OAuth provider 
+type: string
+default: none
+components:  ["nsregistry", "director"]
+---
 
 ############################
 #   XRootD-level Configs   #
@@ -720,19 +879,19 @@ description: >-
   The port over which XRootD should be made available.
 type: int
 default: 8443
-components: ["origin"]
+components: ["origin", "cache"]
 ---
 name: Xrootd.RunLocation
 description: >-
   A directory where temporary configurations will be stored for the xrootd daemon
-  started by the origin.
+  started by the origin or cache.
 
   For non-root servers, if $XDG_RUNTIME_DIR is not set, a temporary directory will
   be created (and removed on shutdown)
 type: filename
 root_default: /run/pelican/xrootd
 default: $XDG_RUNTIME_DIR/pelican
-components: ["origin"]
+components: ["origin", "cache"]
 ---
 name: Xrootd.RobotsTxtFile
 description: >-

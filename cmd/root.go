@@ -88,7 +88,7 @@ func init() {
 	rootCmd.AddCommand(objectCmd)
 	objectCmd.CompletionOptions.DisableDefaultCmd = true
 	rootCmd.AddCommand(directorCmd)
-	rootCmd.AddCommand(namespaceRegistryCmd)
+	rootCmd.AddCommand(registryCmd)
 	rootCmd.AddCommand(originCmd)
 	rootCmd.AddCommand(cacheCmd)
 	rootCmd.AddCommand(namespaceCmd)
