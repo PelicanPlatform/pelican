@@ -31,6 +31,7 @@ import (
 	"github.com/pelicanplatform/pelican/cache_ui"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
+	"github.com/pelicanplatform/pelican/origin_ui"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/spf13/viper"
@@ -158,6 +159,44 @@ func TestGenerateConfig(t *testing.T) {
 	assert.Equal(t, issuer.MapSubject, true)
 }
 
+func TestWriteOriginAuthFiles(t *testing.T) {
+
+	originAuthTester := func(server server_utils.XRootDServer, authStart string, authResult string) func(t *testing.T) {
+		return func(t *testing.T) {
+
+			dirname := t.TempDir()
+			viper.Reset()
+			viper.Set("Xrootd.RunLocation", dirname)
+			viper.Set("Xrootd.ScitokensConfig", filepath.Join(dirname, "scitokens-generated.cfg"))
+			viper.Set("Xrootd.Authfile", filepath.Join(dirname, "authfile"))
+			xAuthFile := filepath.Join(param.Xrootd_RunLocation.GetString(), "authfile-generated")
+
+			authfileProvided := param.Xrootd_Authfile.GetString()
+
+			err := os.WriteFile(authfileProvided, []byte(authStart), 0600)
+			assert.NoError(t, err)
+
+			err = EmitAuthfile(server)
+			assert.NoError(t, err)
+
+			authGen, err := os.ReadFile(xAuthFile)
+			assert.NoError(t, err)
+			assert.Equal(t, authResult, string(authGen))
+		}
+	}
+	nsAds := []director.NamespaceAd{}
+
+	originServer := &origin_ui.OriginServer{}
+	originServer.SetNamespaceAds(nsAds)
+
+	t.Run("MultiIssuer", originAuthTester(originServer, "u * t1 lr t2 lr t3 lr", "u * /.well-known lr t1 lr t2 lr t3 lr\n"))
+
+	nsAds = []director.NamespaceAd{}
+	originServer.SetNamespaceAds(nsAds)
+
+	t.Run("EmptyAuth", originAuthTester(originServer, "", "u * /.well-known lr\n"))
+}
+
 func TestWriteCacheAuthFiles(t *testing.T) {
 
 	cacheAuthTester := func(server server_utils.XRootDServer, sciTokenResult string, authResult string) func(t *testing.T) {
@@ -179,14 +218,14 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 			genSciToken, err := os.ReadFile(sciFile)
 			assert.NoError(t, err)
 
-			assert.Equal(t, string(genSciToken), sciTokenResult)
+			assert.Equal(t, sciTokenResult, string(genSciToken))
 
 			err = EmitAuthfile(server)
 			assert.NoError(t, err)
 
 			authGen, err := os.ReadFile(authFile)
 			assert.NoError(t, err)
-			assert.Equal(t, string(authGen), authResult)
+			assert.Equal(t, authResult, string(authGen))
 		}
 	}
 
