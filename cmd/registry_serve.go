@@ -58,7 +58,7 @@ func serveRegistry( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		return err
 	}
 
-	if err := web_ui.ConfigureServerWebAPI(engine, false); err != nil {
+	if err := web_ui.ConfigureServerWebAPI(engine); err != nil {
 		return err
 	}
 
