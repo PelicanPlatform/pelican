@@ -21,10 +21,12 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io/fs"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/pelicanplatform/pelican/classads"
@@ -139,7 +141,8 @@ func stashPluginMain(args []string) {
 	if getCaches {
 		urls, err := client.GetCacheHostnames(testCachePath)
 		if err != nil {
-			log.Panicln("Failed to get cache URLs:", err)
+			log.Errorln("Failed to get cache URLs:", err)
+			os.Exit(1)
 		}
 
 		cachesToTry := client.CachesToTry
@@ -168,7 +171,8 @@ func stashPluginMain(args []string) {
 		// Open the input and output files
 		infileFile, err := os.Open(infile)
 		if err != nil {
-			log.Panicln("Failed to open infile:", err)
+			log.Errorln("Failed to open infile:", err)
+			os.Exit(1)
 		}
 		defer infileFile.Close()
 		// Read in classad from stdin
@@ -183,6 +187,26 @@ func stashPluginMain(args []string) {
 		for _, src := range source {
 			transfers = append(transfers, Transfer{url: src, localFile: dest})
 		}
+	}
+
+	// NOTE: HTCondor 23.3.0 and before would reuse the outfile names for multiple
+	// transfers, meaning the results of prior plugin invocations would be present
+	// by default in the outfile.  Combined with a bug that considered any exit code
+	// besides `1` a success (note: a go panic is exit code `2`), this caused the starter
+	// to incorrectly interpret plugin failures as successes, potentially leaving the user
+	// with missing or truncated output files.
+	//
+	// By moving the truncation of the output file to a very early codepath, we reduce
+	// the chances of hitting this problem.
+	outputFile := os.Stdout
+	if useOutFile {
+		var err error
+		outputFile, err = os.Create(outfile)
+		if err != nil {
+			log.Errorln("Failed to open outfile:", err)
+			os.Exit(1)
+		}
+		defer outputFile.Close()
 	}
 
 	var resultAds []*classads.ClassAd
@@ -259,21 +283,12 @@ func stashPluginMain(args []string) {
 
 	}
 
-	outputFile := os.Stdout
-	if useOutFile {
-		var err error
-		outputFile, err = os.Create(outfile)
-		if err != nil {
-			log.Panicln("Failed to open outfile:", err)
-		}
-		defer outputFile.Close()
-	}
-
 	success := true
 	for _, resultAd := range resultAds {
 		_, err := outputFile.WriteString(resultAd.String() + "\n")
 		if err != nil {
-			log.Panicln("Failed to write to outfile:", err)
+			log.Errorln("Failed to write to outfile:", err)
+			os.Exit(1)
 		}
 		transferSuccess, err := resultAd.Get("TransferSuccess")
 		if err != nil {
@@ -281,6 +296,16 @@ func stashPluginMain(args []string) {
 			success = false
 		}
 		success = success && transferSuccess.(bool)
+	}
+	if err = outputFile.Sync(); err != nil {
+		var perr *fs.PathError
+		var serr syscall.Errno
+		if errors.As(err, &perr) && errors.As(perr.Unwrap(), &serr) && serr == syscall.EINVAL {
+			log.Debugf("Error when syncing: %s; can be ignored\n", perr)
+		} else {
+			log.Errorln("Failed to sync output file:", err)
+			os.Exit(1)
+		}
 	}
 
 	if success {
