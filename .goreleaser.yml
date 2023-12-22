@@ -122,6 +122,7 @@ nfpms:
       # - osdf-client = {{ .Version }}
       # - stashcp = {{ .Version }}
       # - condor-stash-plugin = {{ .Version }}
+      - "stashcache-client = 7"
       - "osdf-client = 7"
       - "stashcp = 7"
       - "condor-stash-plugin = 7"
@@ -149,6 +150,7 @@ nfpms:
             dst: "/etc/condor/config.d/10-stash-plugin.conf"
             type: config|noreplace
         replaces:
+          - "stashcache-client < 7"
           - "osdf-client < 7"
           - "stashcp < 7"
           - "condor-stash-plugin < 7"
@@ -174,10 +176,12 @@ nfpms:
             type: config|noreplace
         # deb has different syntax
         provides:
+          - "stashcache-client (= 7)"
           - "osdf-client (= 7)"
           - "stashcp (= 7)"
           - "condor-stash-plugin (= 7)"
         replaces:
+          - "stashcache-client (<< 7)"
           - "osdf-client (<< 7)"
           - "stashcp (<< 7)"
           - "condor-stash-plugin (<< 7)"
