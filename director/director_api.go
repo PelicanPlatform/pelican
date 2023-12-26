@@ -148,7 +148,7 @@ func VerifyDirectorSDToken(strToken string) (bool, error) {
 }
 
 // Create a token for director's Prometheus scraper to access discovered
-// origins /metrics endpoint. This function is intended to be called on
+// origins and caches `/metrics` endpoint. This function is intended to be called on
 // a director server
 func CreateDirectorScrapeToken() (string, error) {
 	// We assume this function is only called on a director server,
@@ -156,19 +156,9 @@ func CreateDirectorScrapeToken() (string, error) {
 	directorURL := param.Server_ExternalWebUrl.GetString()
 	tokenExpireTime := param.Monitoring_TokenExpiresIn.GetDuration()
 
-	ads := ListServerAds([]ServerType{OriginType, CacheType})
-	aud := make([]string, 0)
-	for _, ad := range ads {
-		if ad.WebURL.String() != "" {
-			aud = append(aud, ad.WebURL.String())
-		}
-	}
-
 	tok, err := jwt.NewBuilder().
 		Claim("scope", "monitoring.scrape").
-		Issuer(directorURL).
-		// The audience of this token is all origins/caches that have WebURL set in their serverAds
-		Audience(aud).
+		Issuer(directorURL). // Exclude audience from token to prevent http header overflow
 		Subject("director").
 		Expiration(time.Now().Add(tokenExpireTime)).
 		Build()

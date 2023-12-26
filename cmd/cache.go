@@ -43,7 +43,7 @@ var (
 )
 
 func initCache() error {
-	err := config.InitServer(config.CacheType)
+	err := config.InitServer([]config.ServerType{config.CacheType}, config.CacheType)
 	cobra.CheckErr(err)
 	metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusCritical, "xrootd has not been started")
 	metrics.SetComponentHealthStatus(metrics.OriginCache_CMSD, metrics.StatusCritical, "cmsd has not been started")

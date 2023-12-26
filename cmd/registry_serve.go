@@ -28,6 +28,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/registry"
 	"github.com/pelicanplatform/pelican/web_ui"
 )
@@ -42,6 +43,7 @@ func serveRegistry( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	}
 
 	if config.GetPreferredPrefix() == "OSDF" {
+		metrics.SetComponentHealthStatus(metrics.DirectorRegistry_Topology, metrics.StatusWarning, "Start requesting from topology, status unknown")
 		log.Info("Populating registry with namespaces from OSG topology service...")
 		if err := registry.PopulateTopology(); err != nil {
 			panic(errors.Wrap(err, "Unable to populate topology table"))
@@ -56,7 +58,7 @@ func serveRegistry( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		return err
 	}
 
-	if err := web_ui.ConfigureServerWebAPI(engine, false); err != nil {
+	if err := web_ui.ConfigureServerWebAPI(engine); err != nil {
 		return err
 	}
 
