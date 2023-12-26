@@ -1,5 +1,7 @@
 module github.com/pelicanplatform/pelican
 
+retract v1.0.4 // Unpublish Go package
+
 go 1.20
 
 require (
