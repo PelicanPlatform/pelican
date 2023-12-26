@@ -219,8 +219,8 @@ func DiscoverFederation() error {
 	}
 	log.Debugln("Federation URL:", federationStr)
 	curDirectorURL := param.Federation_DirectorUrl.GetString()
-	curNamespaceURL := param.Federation_NamespaceUrl.GetString()
-	if len(curDirectorURL) != 0 && len(curNamespaceURL) != 0 {
+	curRegistryURL := param.Federation_RegistryUrl.GetString()
+	if len(curDirectorURL) != 0 && len(curRegistryURL) != 0 {
 		return nil
 	}
 
@@ -274,10 +274,10 @@ func DiscoverFederation() error {
 		log.Debugln("Federation service discovery resulted in director URL", metadata.DirectorEndpoint)
 		viper.Set("Federation.DirectorUrl", metadata.DirectorEndpoint)
 	}
-	if curNamespaceURL == "" {
-		log.Debugln("Federation service discovery resulted in namespace registration URL",
+	if curRegistryURL == "" {
+		log.Debugln("Federation service discovery resulted in namespace registry URL",
 			metadata.NamespaceRegistrationEndpoint)
-		viper.Set("Federation.NamespaceUrl", metadata.NamespaceRegistrationEndpoint)
+		viper.Set("Federation.RegistryUrl", metadata.NamespaceRegistrationEndpoint)
 	}
 
 	viper.Set("Federation.JwkUrl", metadata.JwksUri)
@@ -480,6 +480,11 @@ func InitConfig() {
 			os.Exit(1)
 		}
 		log.SetOutput(f)
+	}
+
+	if oldNsUrl := viper.GetString("Federation.NamespaceUrl"); oldNsUrl != "" {
+		log.Warningln("Federation.NamespaceUrl is deprecated and will be removed in future release. Please migrate to use Federation.RegistryUrl instead")
+		viper.SetDefault("Federation.RegistryUrl", oldNsUrl)
 	}
 }
 
@@ -719,7 +724,7 @@ func InitClient() error {
 	}
 	for _, prefix := range prefixes {
 		if val, isSet := os.LookupEnv(prefix + "_NAMESPACE_URL"); isSet {
-			viper.Set("Federation.NamespaceURL", val)
+			viper.Set("Federation.RegistryUrl", val)
 			break
 		}
 	}

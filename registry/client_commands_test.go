@@ -52,7 +52,7 @@ func registryMockup(t *testing.T, testName string) *httptest.Server {
 
 	//Set up a server to use for testing
 	svr := httptest.NewServer(engine)
-	viper.Set("Federation.NamespaceUrl", svr.URL)
+	viper.Set("Federation.RegistryUrl", svr.URL)
 	return svr
 }
 
