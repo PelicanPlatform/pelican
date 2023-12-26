@@ -76,14 +76,14 @@ type (
 		JwksUri                       string `json:"jwks_uri"`
 	}
 
-	ServerType int
-
 	TokenOperation int
 
 	TokenGenerationOpts struct {
 		Operation TokenOperation
 	}
 )
+
+type ServerType int // ServerType is a bit mask indicating which Pelican server(s) are running in the current process
 
 const (
 	CacheType ServerType = 1 << iota
@@ -116,10 +116,41 @@ var (
 	// Our global transports that only will get reconfigured if needed
 	transport     *http.Transport
 	onceTransport sync.Once
+
+	// A variable indicating enabled Pelican servers in the current process
+	enabledServers ServerType
+	setServerOnce  sync.Once
 )
 
-func (sType ServerType) IsSet(otherVal ServerType) bool {
-	return sType&otherVal == otherVal
+// Set sets a list of newServers to ServerType instance
+func (sType *ServerType) Set(newServers []ServerType) {
+	for _, server := range newServers {
+		*sType |= server
+	}
+}
+
+// IsEnabled checks if a testServer is in the ServerType instance
+func (sType ServerType) IsEnabled(testServer ServerType) bool {
+	return sType&testServer == testServer
+}
+
+// setEnabledServer sets the global variable config.EnabledServers to include newServers.
+// Since this function should only be called in config package, we mark it "private" to avoid
+// reset value in other pacakge
+//
+// This will only be called once in a single process
+func setEnabledServer(newServers []ServerType) {
+	setServerOnce.Do(func() {
+		// For each process, we only want to set enabled servers once
+		enabledServers.Set(newServers)
+	})
+}
+
+// IsServerEnabled checks if testServer is enabled in the current process.
+//
+// Use this function to check which server(s) are running in the current process.
+func IsServerEnabled(testServer ServerType) bool {
+	return enabledServers.IsEnabled(testServer)
 }
 
 func (sType ServerType) String() string {
@@ -469,42 +500,30 @@ func initConfigDir() error {
 	return nil
 }
 
-// Compute the string representation of the type of the server running
-func computeServerTypeString(sType ServerType) (string, error) {
-	if sType.IsSet(OriginType) {
-		return "origin", nil
-	}
-	if sType.IsSet(CacheType) {
-		return "cache", nil
-	}
-	if sType.IsSet(DirectorType) {
-		return "director", nil
-	}
-	if sType.IsSet(RegistryType) {
-		return "registry", nil
-	}
-	return "", errors.New("Unsupported server type: " + sType.String())
-}
-
-func InitServer(sType ServerType) error {
+// Initialize Pelican server instance. Pass a list of "enabledServers" if you want to enable multiple servers,
+// and pass your "current" server to instantiate through "currentServer" so that the functions
+// knows which server it's being evoked for
+func InitServer(enabledServers []ServerType, currentServer ServerType) error {
 	if err := initConfigDir(); err != nil {
 		return errors.Wrap(err, "Failed to initialize the server configuration")
 	}
+
+	setEnabledServer(enabledServers)
+
 	xrootdPrefix := ""
-	if sType.IsSet(OriginType) {
+	if currentServer == OriginType {
 		xrootdPrefix = "origin"
-	} else if sType.IsSet(CacheType) {
+	} else if currentServer == CacheType {
 		xrootdPrefix = "cache"
 	}
-	monitoringDataLocationPrefix, err := computeServerTypeString(sType)
-	if err != nil {
-		return err
-	}
+	monitoringDataLocationPrefix := strings.ToLower(currentServer.String())
+
 	configDir := viper.GetString("ConfigDir")
 	viper.SetConfigType("yaml")
 	viper.SetDefault("Server.TLSCertificate", filepath.Join(configDir, "certificates", "tls.crt"))
 	viper.SetDefault("Server.TLSKey", filepath.Join(configDir, "certificates", "tls.key"))
 	viper.SetDefault("Server.TLSCAKey", filepath.Join(configDir, "certificates", "tlsca.key"))
+	viper.SetDefault("Server.SessionSecretFile", filepath.Join(configDir, "session-secret"))
 	viper.SetDefault("Xrootd.RobotsTxtFile", filepath.Join(configDir, "robots.txt"))
 	viper.SetDefault("Xrootd.ScitokensConfig", filepath.Join(configDir, "xrootd", "scitokens.cfg"))
 	viper.SetDefault("Xrootd.Authfile", filepath.Join(configDir, "xrootd", "authfile"))
@@ -548,7 +567,7 @@ func InitServer(sType ServerType) error {
 		viper.SetDefault("Origin.Multiuser", false)
 	}
 	// Any platform-specific paths should go here
-	err = InitServerOSDefaults()
+	err := InitServerOSDefaults()
 	if err != nil {
 		return errors.Wrapf(err, "Failure when setting up OS-specific configuration")
 	}
@@ -568,7 +587,7 @@ func InitServer(sType ServerType) error {
 	// they have overridden the defaults.
 	hostname = viper.GetString("Server.Hostname")
 
-	if sType.IsSet(CacheType) {
+	if currentServer == CacheType {
 		viper.Set("Xrootd.Port", param.Cache_Port.GetInt())
 	}
 	xrootdPort := param.Xrootd_Port.GetInt()
@@ -617,12 +636,18 @@ func InitServer(sType ServerType) error {
 		return err
 	}
 
+	// Generate the session cookie secret and save it as the default value
+	err = GenerateSessionSecret()
+	if err != nil {
+		return err
+	}
+
 	// After we know we have the certs we need, call setupTransport (which uses those certs for its TLSConfig)
 	setupTransport()
 
 	// Set up the server's issuer URL so we can access that data wherever we need to find keys and whatnot
 	// This populates Server.IssuerUrl, and can be safely fetched using server_utils.GetServerIssuerURL()
-	err = parseServerIssuerURL(sType)
+	err = parseServerIssuerURL(currentServer)
 	if err != nil {
 		return err
 	}

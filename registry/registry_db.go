@@ -16,13 +16,15 @@
  *
  ***************************************************************/
 
-package nsregistry
+package registry
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/lestrrat-go/jwx/v2/jwk"
@@ -72,13 +74,15 @@ https://www.alexedwards.net/blog/organising-database-access
 var db *sql.DB
 
 func createNamespaceTable() {
+	//We put a size limit on admin_metadata to guard against potentially future
+	//malicious large inserts
 	query := `
     CREATE TABLE IF NOT EXISTS namespace (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         prefix TEXT NOT NULL UNIQUE,
         pubkey TEXT NOT NULL,
         identity TEXT,
-        admin_metadata TEXT
+        admin_metadata TEXT CHECK (length("admin_metadata") <= 4000)
     );`
 
 	_, err := db.Exec(query)
@@ -227,15 +231,35 @@ func getPrefixJwksById(id int) (jwk.Set, error) {
 	return set, nil
 }
 
-func dbGetPrefixJwks(prefix string) (*jwk.Set, error) {
-	jwksQuery := `SELECT pubkey FROM namespace WHERE prefix = ?`
+func dbGetPrefixJwks(prefix string, approvalRequired bool) (*jwk.Set, error) {
+	var jwksQuery string
 	var pubkeyStr string
-	err := db.QueryRow(jwksQuery, prefix).Scan(&pubkeyStr)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, errors.New("prefix not found in database")
+	if strings.HasPrefix(prefix, "/caches/") && approvalRequired {
+		var admin_metadata string
+		jwksQuery = `SELECT pubkey, admin_metadata FROM namespace WHERE prefix = ?`
+		err := db.QueryRow(jwksQuery, prefix).Scan(&pubkeyStr, &admin_metadata)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				return nil, errors.New("prefix not found in database")
+			}
+			return nil, errors.Wrap(err, "error performing cache pubkey query")
 		}
-		return nil, errors.Wrap(err, "error performing origin pubkey query")
+
+		var adminData AdminJSON
+		err = json.Unmarshal([]byte(admin_metadata), &adminData)
+
+		if !adminData.AdminApproved || err != nil {
+			return nil, serverCredsErr
+		}
+	} else {
+		jwksQuery := `SELECT pubkey FROM namespace WHERE prefix = ?`
+		err := db.QueryRow(jwksQuery, prefix).Scan(&pubkeyStr)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				return nil, errors.New("prefix not found in database")
+			}
+			return nil, errors.Wrap(err, "error performing origin pubkey query")
+		}
 	}
 
 	set, err := jwk.ParseString(pubkeyStr)
@@ -292,8 +316,6 @@ func deleteNamespace(prefix string) error {
 	return tx.Commit()
 }
 
-/**
- * Commenting this out until we are ready to use it.  -BB
 func getNamespace(prefix string) (*Namespace, error) {
 	ns := &Namespace{}
 	query := `SELECT * FROM namespace WHERE prefix = ?`
@@ -303,7 +325,6 @@ func getNamespace(prefix string) (*Namespace, error) {
 	}
 	return ns, nil
 }
-*/
 
 func getAllNamespaces() ([]*Namespace, error) {
 	query := `SELECT * FROM namespace`

@@ -71,7 +71,7 @@ func TestMain(m *testing.M) {
 
 	// Ensure we load up the default configs.
 	config.InitConfig()
-	if err := config.InitServer(config.OriginType); err != nil {
+	if err := config.InitServer([]config.ServerType{config.OriginType}, config.OriginType); err != nil {
 		fmt.Println("Failed to configure the test module")
 		os.Exit(1)
 	}
@@ -85,7 +85,7 @@ func TestMain(m *testing.M) {
 	router = gin.Default()
 
 	//Configure Web API
-	err = ConfigureServerWebAPI(router, false)
+	err = ConfigureServerWebAPI(router)
 	if err != nil {
 		fmt.Println("Error configuring web UI")
 		os.Exit(1)
@@ -104,7 +104,7 @@ func TestWaitUntilLogin(t *testing.T) {
 	viper.Reset()
 	viper.Set("ConfigDir", dirName)
 	config.InitConfig()
-	err := config.InitServer(config.OriginType)
+	err := config.InitServer([]config.ServerType{config.OriginType}, config.OriginType)
 	require.NoError(t, err)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -151,7 +151,7 @@ func TestCodeBasedLogin(t *testing.T) {
 	viper.Reset()
 	viper.Set("ConfigDir", dirName)
 	config.InitConfig()
-	err := config.InitServer(config.OriginType)
+	err := config.InitServer([]config.ServerType{config.OriginType}, config.OriginType)
 	require.NoError(t, err)
 	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256())
 	require.NoError(t, err)
@@ -203,7 +203,7 @@ func TestPasswordResetAPI(t *testing.T) {
 	viper.Reset()
 	viper.Set("ConfigDir", dirName)
 	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
-	err := config.InitServer(config.OriginType)
+	err := config.InitServer([]config.ServerType{config.OriginType}, config.OriginType)
 	require.NoError(t, err)
 	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256())
 	require.NoError(t, err)
@@ -306,7 +306,7 @@ func TestPasswordBasedLoginAPI(t *testing.T) {
 	viper.Reset()
 	config.InitConfig()
 	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
-	err := config.InitServer(config.OriginType)
+	err := config.InitServer([]config.ServerType{config.OriginType}, config.OriginType)
 	require.NoError(t, err)
 
 	///////////////////////////SETUP///////////////////////////////////
@@ -420,7 +420,7 @@ func TestWhoamiAPI(t *testing.T) {
 	config.InitConfig()
 	viper.Set("ConfigDir", dirName)
 	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
-	err := config.InitServer(config.OriginType)
+	err := config.InitServer([]config.ServerType{config.OriginType}, config.OriginType)
 	require.NoError(t, err)
 	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256())
 	require.NoError(t, err)

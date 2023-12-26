@@ -70,7 +70,7 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 
 	if param.Origin_EnableUI.GetBool() {
 		// Set up necessary APIs to support Web UI, including auth and metrics
-		if err := web_ui.ConfigureServerWebAPI(engine, false); err != nil {
+		if err := web_ui.ConfigureServerWebAPI(engine); err != nil {
 			return err
 		}
 	}

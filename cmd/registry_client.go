@@ -16,6 +16,15 @@
  *
  ***************************************************************/
 
+// The registry_client contains commands in Pelican CLI to register a namespace.
+//
+// You can access it through `./pelican namespace <command>`.
+//
+// Note that you need to have your registry server running either locally,
+// or by setting Federation.NamespaceUrl to the Url of your remote Pelican registry server
+//
+// Example: `./pelican namespace register --prefix /test`
+
 package main
 
 import (
@@ -24,8 +33,8 @@ import (
 
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pelicanplatform/pelican/config"
-	nsregistry "github.com/pelicanplatform/pelican/namespace_registry"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/registry"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -67,7 +76,7 @@ func registerANamespace(cmd *cobra.Command, args []string) {
 	}
 
 	// Parse the namespace URL to make sure it's okay
-	registrationEndpointURL, err := url.JoinPath(namespaceEndpoint, "api", "v1.0", "registry")
+	registrationEndpointURL, err := url.JoinPath(namespaceEndpoint, "api", "v2.0", "registry")
 	if err != nil {
 		log.Errorf("Failed to construction registration endpoint URL: %v", err)
 	}
@@ -107,13 +116,13 @@ func registerANamespace(cmd *cobra.Command, args []string) {
 	}
 
 	if withIdentity {
-		err := nsregistry.NamespaceRegisterWithIdentity(privateKey, registrationEndpointURL, prefix)
+		err := registry.NamespaceRegisterWithIdentity(privateKey, registrationEndpointURL, prefix)
 		if err != nil {
 			log.Errorf("Failed to register prefix %s with identity: %v", prefix, err)
 			os.Exit(1)
 		}
 	} else {
-		err := nsregistry.NamespaceRegister(privateKey, registrationEndpointURL, "", prefix)
+		err := registry.NamespaceRegister(privateKey, registrationEndpointURL, "", prefix)
 		if err != nil {
 			log.Errorf("Failed to register prefix %s: %v", prefix, err)
 			os.Exit(1)
@@ -134,12 +143,12 @@ func deleteANamespace(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	deletionEndpointURL, err := url.JoinPath(namespaceEndpoint, "api", "v1.0", "registry", prefix)
+	deletionEndpointURL, err := url.JoinPath(namespaceEndpoint, "api", "v2.0", "registry", prefix)
 	if err != nil {
 		log.Errorf("Failed to construction deletion endpoint URL: %v", err)
 	}
 
-	err = nsregistry.NamespaceDelete(deletionEndpointURL, prefix)
+	err = registry.NamespaceDelete(deletionEndpointURL, prefix)
 	if err != nil {
 		log.Errorf("Failed to delete prefix %s: %v", prefix, err)
 		os.Exit(1)
@@ -159,12 +168,12 @@ func listAllNamespaces(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	listEndpoint, err := url.JoinPath(namespaceEndpoint, "api", "v1.0", "registry")
+	listEndpoint, err := url.JoinPath(namespaceEndpoint, "api", "v2.0", "registry", "metadata")
 	if err != nil {
 		log.Errorf("Failed to construction list endpoint URL: %v", err)
 	}
 
-	err = nsregistry.NamespaceList(listEndpoint)
+	err = registry.NamespaceList(listEndpoint)
 	if err != nil {
 		log.Errorf("Failed to list namespace information: %v", err)
 		os.Exit(1)
@@ -188,7 +197,7 @@ func listAllNamespaces(cmd *cobra.Command, args []string) {
 // 		}
 
 // 		endpoint := url.JoinPath(namespaceEndpoint, prefix, "issuer.jwks")
-// 		err = nsregistry.NamespaceGet(endpoint)
+// 		err = registry.NamespaceGet(endpoint)
 // 		if err != nil {
 // 			log.Errorf("Failed to get jwks info for prefix %s: %v", prefix, err)
 // 			os.Exit(1)

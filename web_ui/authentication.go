@@ -134,7 +134,7 @@ func setLoginCookie(ctx *gin.Context, user string) {
 	key, err := config.GetIssuerPrivateJWK()
 	if err != nil {
 		log.Errorln("Failure when loading the cookie signing key:", err)
-		ctx.JSON(500, gin.H{"error": "Unable to create login cookies"})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Unable to create login cookies"})
 		return
 	}
 
@@ -142,7 +142,7 @@ func setLoginCookie(ctx *gin.Context, user string) {
 	tok, err := jwt.NewBuilder().
 		// The value of the "scope" claim is a JSON string containing a space-separated
 		// list of scopes associated with the token
-		Claim("scope", "monitoring.query monitoring.scrape").
+		Claim("scope", "web_ui.access monitoring.query monitoring.scrape").
 		Issuer(param.Server_ExternalWebUrl.GetString()).
 		IssuedAt(now).
 		Expiration(now.Add(30 * time.Minute)).
@@ -150,19 +150,13 @@ func setLoginCookie(ctx *gin.Context, user string) {
 		Subject(user).
 		Build()
 	if err != nil {
-		ctx.JSON(500, gin.H{"error": "Failed to build token"})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to build token"})
 		return
 	}
-	log.Debugf("Type of *key: %T\n", key)
-	var raw ecdsa.PrivateKey
-	if err = key.Raw(&raw); err != nil {
-		ctx.JSON(500, gin.H{"error": "Unable to sign login cookie"})
-		return
-	}
-	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, raw))
+
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, key))
 	if err != nil {
-		log.Errorln("Failure when signing the login cookie:", err)
-		ctx.JSON(500, gin.H{"error": "Unable to sign login cookie"})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to sign login token"})
 		return
 	}
 

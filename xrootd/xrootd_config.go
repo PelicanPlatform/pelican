@@ -313,7 +313,7 @@ func CheckXrootdEnv(server server_utils.XRootDServer) error {
 		}
 	}
 
-	if server.GetServerType().IsSet(config.OriginType) {
+	if server.GetServerType().IsEnabled(config.OriginType) {
 		exportPath, err = CheckOriginXrootdEnv(exportPath, uid, gid, groupname)
 	} else {
 		exportPath, err = CheckCacheXrootdEnv(exportPath, uid, gid, server.GetNamespaceAds())

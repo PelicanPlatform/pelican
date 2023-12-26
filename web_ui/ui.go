@@ -143,11 +143,11 @@ func configureCommonEndpoints(engine *gin.Engine) error {
 }
 
 // Configure metrics related endpoints, including Prometheus and /health API
-func configureMetrics(engine *gin.Engine, isDirector bool) error {
+func configureMetrics(engine *gin.Engine) error {
 	// Add authorization to /metric endpoint
 	engine.Use(promMetricAuthHandler)
 
-	err := ConfigureEmbeddedPrometheus(engine, isDirector)
+	err := ConfigureEmbeddedPrometheus(engine)
 	if err != nil {
 		return err
 	}
@@ -226,7 +226,7 @@ func waitUntilLogin(ctx context.Context) error {
 // specific paths but just redirect root path to /view.
 //
 // You need to mount the static resources for UI in a separate function
-func ConfigureServerWebAPI(engine *gin.Engine, isDirector bool) error {
+func ConfigureServerWebAPI(engine *gin.Engine) error {
 	if err := configureAuthEndpoints(engine); err != nil {
 		return err
 	}
@@ -236,7 +236,7 @@ func ConfigureServerWebAPI(engine *gin.Engine, isDirector bool) error {
 	if err := configureWebResource(engine); err != nil {
 		return err
 	}
-	if err := configureMetrics(engine, isDirector); err != nil {
+	if err := configureMetrics(engine); err != nil {
 		return err
 	}
 	// Redirect root to /view for web UI
