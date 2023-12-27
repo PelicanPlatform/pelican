@@ -28,6 +28,8 @@ import (
 	"time"
 
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/sirupsen/logrus"
+	"github.com/sirupsen/logrus/hooks/test"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 )
@@ -152,6 +154,33 @@ func TestInitConfig(t *testing.T) {
 	}
 	InitConfig()
 	assert.Equal(t, "", param.Federation_DiscoveryUrl.GetString())
+}
+
+func TestDeprecateLogMessage(t *testing.T) {
+	t.Run("expect-deprecated-message-if-namespace-url-is-set", func(t *testing.T) {
+		hook := test.NewGlobal()
+		viper.Reset()
+		viper.Set("Federation.NamespaceUrl", "https://dont-use.com")
+		InitConfig()
+
+		assert.Equal(t, 1, len(hook.Entries))
+		assert.Equal(t, logrus.WarnLevel, hook.LastEntry().Level)
+		assert.Equal(t, "Federation.NamespaceUrl is deprecated and will be removed in future release. Please migrate to use Federation.RegistryUrl instead", hook.LastEntry().Message)
+		// We expect the default value of Federation.RegistryUrl is set to Federation.NamespaceUrl
+		// if Federation.NamespaceUrl is not empty for backward compatibility
+		assert.Equal(t, "https://dont-use.com", viper.GetString("Federation.RegistryUrl"))
+	})
+
+	t.Run("no-deprecated-message-if-namespace-url-unset", func(t *testing.T) {
+		hook := test.NewGlobal()
+		viper.Reset()
+		viper.Set("Federation.RegistryUrl", "https://dont-use.com")
+		InitConfig()
+
+		assert.Equal(t, 0, len(hook.Entries))
+		assert.Equal(t, "https://dont-use.com", viper.GetString("Federation.RegistryUrl"))
+		assert.Equal(t, "", viper.GetString("Federation.NamespaceUrl"))
+	})
 }
 
 func TestEnabledServers(t *testing.T) {
