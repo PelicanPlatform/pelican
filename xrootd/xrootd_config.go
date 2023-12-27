@@ -350,23 +350,20 @@ func CheckXrootdEnv(server server_utils.XRootDServer) error {
 		}
 	}
 
-	// If the authfile does not exist, create one
+	// If the authfile does not exist, create one.
 	authfile := param.Xrootd_Authfile.GetString()
 	err = config.MkdirAll(path.Dir(authfile), 0755, -1, gid)
 	if err != nil {
 		return errors.Wrapf(err, "Unable to create directory %v",
 			path.Dir(authfile))
 	}
+	// For user-provided authfile, we don't chmod to daemon group as EmitAuthfile will
+	// make a copy of it and save it to xrootd run location
 	if file, err := os.OpenFile(authfile, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0640); err == nil {
 		file.Close()
 	} else if !errors.Is(err, os.ErrExist) {
 		return err
 	}
-	if err = os.Chown(authfile, -1, gid); err != nil {
-		return errors.Wrapf(err, "Unable to change ownership of authfile %v"+
-			" to desired daemon group %v", authfile, groupname)
-	}
-
 	if err := EmitAuthfile(server); err != nil {
 		return err
 	}
