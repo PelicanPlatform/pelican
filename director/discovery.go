@@ -27,25 +27,55 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-type DiscoveryResponse struct {
+type OpenIdDiscoveryResponse struct {
 	Issuer  string `json:"issuer"`
 	JwksUri string `json:"jwks_uri"`
 }
 
 const (
-	directorDiscoveryPath string = "/.well-known/openid-configuration"
-	directorJWKSPath      string = "/.well-known/issuer.jwks"
+	openIdDiscoveryPath     string = "/.well-known/openid-configuration"
+	federationDiscoveryPath string = "/.well-known/pelican-configuration"
+	directorJWKSPath        string = "/.well-known/issuer.jwks"
 )
 
-// Returns links related to director's authentication, including the link
-// to get the public key from the director
-func discoveryHandler(ctx *gin.Context) {
+func federationDiscoveryHandler(ctx *gin.Context) {
 	directorUrl := param.Federation_DirectorUrl.GetString()
 	if len(directorUrl) == 0 {
 		ctx.JSON(500, gin.H{"error": "Bad server configuration: Director URL is not set"})
 		return
 	}
-	rs := DiscoveryResponse{
+	registryUrl := param.Federation_NamespaceUrl.GetString()
+	if len(registryUrl) == 0 {
+		ctx.JSON(500, gin.H{"error": "Bad server configuration: Registry URL is not set"})
+		return
+	}
+
+	rs := config.FederationDiscovery{
+		DirectorEndpoint:              directorUrl,
+		NamespaceRegistrationEndpoint: registryUrl,
+		JwksUri:                       directorUrl + directorJWKSPath,
+	}
+
+	jsonData, err := json.MarshalIndent(rs, "", "  ")
+	if err != nil {
+		ctx.JSON(500, gin.H{"error": "Failed to marshal federation's discovery response"})
+		return
+	}
+	// Append a new line to the JSON data
+	jsonData = append(jsonData, '\n')
+	ctx.Header("Content-Disposition", "attachment; filename=pelican-configuration.json")
+	ctx.Data(200, "application/json", jsonData)
+}
+
+// Director metadata discovery endpoint for OpenID style
+// token authentication, providing issuer endpoint and director's jwks endpoint
+func openIdDiscoveryHandler(ctx *gin.Context) {
+	directorUrl := param.Federation_DirectorUrl.GetString()
+	if len(directorUrl) == 0 {
+		ctx.JSON(500, gin.H{"error": "Bad server configuration: Director URL is not set"})
+		return
+	}
+	rs := OpenIdDiscoveryResponse{
 		Issuer:  directorUrl,
 		JwksUri: directorUrl + directorJWKSPath,
 	}
@@ -80,6 +110,7 @@ func jwksHandler(ctx *gin.Context) {
 }
 
 func RegisterDirectorAuth(router *gin.RouterGroup) {
-	router.GET(directorDiscoveryPath, discoveryHandler)
+	router.GET(federationDiscoveryPath, federationDiscoveryHandler)
+	router.GET(openIdDiscoveryPath, openIdDiscoveryHandler)
 	router.GET(directorJWKSPath, jwksHandler)
 }
