@@ -33,6 +33,7 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_ui"
 	"github.com/pelicanplatform/pelican/utils"
+	"github.com/pelicanplatform/pelican/web_ui"
 	"github.com/pelicanplatform/pelican/xrootd"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -113,6 +114,19 @@ func serveCache( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	if err = server_ui.PeriodicAdvertise(cacheServer); err != nil {
 		return err
 	}
+
+	engine, err := web_ui.GetEngine()
+	if err != nil {
+		return err
+	}
+
+	// Set up necessary APIs to support Web UI, including auth and metrics
+	if err := web_ui.ConfigureServerWebAPI(engine); err != nil {
+		return err
+	}
+
+	go web_ui.RunEngine(engine)
+	go web_ui.InitServerWebLogin()
 
 	configPath, err := xrootd.ConfigXrootd(false)
 	if err != nil {
