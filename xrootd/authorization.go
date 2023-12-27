@@ -336,18 +336,13 @@ func makeSciTokensCfg() (cfg ScitokensCfg, err error) {
 		return cfg, errors.Wrapf(err, "Unable to create directory %v",
 			filepath.Dir(scitokensCfg))
 	}
-
+	// We only open the file without chmod to daemon group as we will make
+	// a copy of this file and save it into xrootd run location
 	if file, err := os.OpenFile(scitokensCfg, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0640); err == nil {
 		file.Close()
 	} else if !errors.Is(err, os.ErrExist) {
 		return cfg, err
 	}
-
-	if err = os.Chown(scitokensCfg, -1, gid); err != nil {
-		return cfg, errors.Wrapf(err, "Unable to change ownership of scitokens config %v"+
-			" to desired daemon group %v", scitokensCfg, gid)
-	}
-
 	cfg, err = LoadScitokensConfig(scitokensCfg)
 	if err != nil {
 		return cfg, errors.Wrapf(err, "Failed to load scitokens configuration at %s", scitokensCfg)
