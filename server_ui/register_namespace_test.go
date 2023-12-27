@@ -49,13 +49,12 @@ type (
 )
 
 func TestRegistration(t *testing.T) {
-	issuerTempDir := t.TempDir()
-
 	viper.Reset()
+	tempConfigDir := t.TempDir()
+	viper.Set("ConfigDir", tempConfigDir)
+
 	config.InitConfig()
-	ikey := filepath.Join(issuerTempDir, "issuer.jwk")
-	viper.Set("IssuerKey", ikey)
-	viper.Set("Registry.DbLocation", filepath.Join(issuerTempDir, "test.sql"))
+	viper.Set("Registry.DbLocation", filepath.Join(tempConfigDir, "test.sql"))
 	err := config.InitServer([]config.ServerType{config.OriginType}, config.OriginType)
 	require.NoError(t, err)
 
