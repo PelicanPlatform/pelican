@@ -1,4 +1,3 @@
-
 name: Release, Build, and Push Dev Image
 
 on:
@@ -13,13 +12,11 @@ jobs:
   build-dev-image:
     runs-on: ubuntu-latest
     steps:
-      -
-        name: Checkout
+      - name: Checkout
         uses: actions/checkout@v3
         with:
-          submodules: 'recursive'
-      -
-        name: Docker meta
+          submodules: "recursive"
+      - name: Docker meta
         id: meta
         uses: docker/metadata-action@v4
         with:
