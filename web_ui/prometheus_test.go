@@ -42,14 +42,9 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestPrometheusProtectionFederationURL(t *testing.T) {
-
-	/*
-	* Tests that prometheus metrics are behind federation's token. Specifically it signs a token
-	* with the a generated key o prometheus GET endpoint with both URL. It mimics matching the Federation URL
-	* to ensure that check is done, but intercepts with returning a generated jwk for testing purposes
-	 */
-
+// Test the Prometheus query engine endpoint auth check with an server issuer token
+// set in cookie
+func TestPrometheusProtectionCookieAuth(t *testing.T) {
 	// Setup httptest recorder and context for the the unit test
 	viper.Reset()
 
@@ -86,7 +81,7 @@ func TestPrometheusProtectionFederationURL(t *testing.T) {
 		Issuer(issuerUrl).
 		Audience([]string{issuerUrl}).
 		Subject("sub").
-		Expiration(time.Now().Add(time.Minute)).
+		Expiration(time.Now().Add(10 * time.Minute)).
 		IssuedAt(time.Now()).
 		Build()
 
@@ -118,14 +113,11 @@ func TestPrometheusProtectionFederationURL(t *testing.T) {
 	assert.Equal(t, 404, w.Result().StatusCode, "Expected status code of 404 representing failure due to minimal server setup, not token check")
 }
 
+// Tests that the prometheus protections are behind the server issuer token and tests that the token is accessable from
+// the header function. It signs a token with the issuer's jwks key and adds it to the header before attempting
+// to access the prometheus metrics. It then attempts to access the metrics with a token with an invalid scope.
+// It attempts to do so again with a token signed by a bad key. Both these are expected to fail.
 func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
-	/*
-	* Tests that the prometheus protections are behind the origin's token and tests that the token is accessable from
-	* the header function. It signs a token with the origin's jwks key and adds it to the header before attempting
-	* to access the prometheus metrics. It then attempts to access the metrics with a token with an invalid scope.
-	* It attempts to do so again with a token signed by a bad key. Both these are expected to fail.
-	 */
-
 	viper.Reset()
 	viper.Set("Server.ExternalWebUrl", "https://test-origin.org:8444")
 
@@ -137,207 +129,129 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 
 	//Setup a private key and a token
 	viper.Set("IssuerKey", kfile)
-
-	w := httptest.NewRecorder()
-	c, r := gin.CreateTestContext(w)
-
-	c.Request = &http.Request{
-		URL: &url.URL{},
-	}
-
-	// Load the private key
-	privKey, err := config.GetIssuerPrivateJWK()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Create a token
-	jti_bytes := make([]byte, 16)
-	_, err = rand.Read(jti_bytes)
-	if err != nil {
-		t.Fatal(err)
-	}
-	jti := base64.RawURLEncoding.EncodeToString(jti_bytes)
-
 	issuerUrl := param.Server_ExternalWebUrl.GetString()
-	tok, err := jwt.NewBuilder().
-		Claim("scope", "monitoring.query").
-		Claim("wlcg.ver", "1.0").
-		JwtID(jti).
-		Issuer(issuerUrl).
-		Audience([]string{issuerUrl}).
-		Subject("sub").
-		Expiration(time.Now().Add(time.Minute)).
-		IssuedAt(time.Now()).
-		Build()
 
-	if err != nil {
-		t.Fatal(err)
+	// Shared function to create a token
+	createToken := func(scope, aud string, key jwk.Key) string {
+		jti_bytes := make([]byte, 16)
+		if _, err := rand.Read(jti_bytes); err != nil {
+			t.Fatal(err)
+		}
+		jti := base64.RawURLEncoding.EncodeToString(jti_bytes)
+
+		tok, err := jwt.NewBuilder().
+			Claim("scope", scope).
+			Claim("wlcg.ver", "1.0").
+			JwtID(jti).
+			Issuer(issuerUrl).
+			Audience([]string{aud}).
+			Subject("sub").
+			Expiration(time.Now().Add(10 * time.Minute)).
+			IssuedAt(time.Now()).
+			Build()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, key))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(signed)
 	}
 
-	// Sign the token with the origin private key
-	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, privKey))
-	if err != nil {
-		t.Fatal(err)
-	}
+	t.Run("valid-token-in-header", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, r := gin.CreateTestContext(w)
+		c.Request = &http.Request{
+			URL: &url.URL{},
+		}
 
-	// Set the request to go through the promQueryEngineAuthHandler function
-	r.GET("/api/v1.0/prometheus/*any", promQueryEngineAuthHandler(av1))
-	c.Request, _ = http.NewRequest(http.MethodGet, "/api/v1.0/prometheus/test", bytes.NewBuffer([]byte(`{}`)))
+		// Load the private key
+		privKey, err := config.GetIssuerPrivateJWK()
+		if err != nil {
+			t.Fatal(err)
+		}
 
-	// Put the signed token within the header
-	c.Request.Header.Set("Authorization", "Bearer "+string(signed))
-	c.Request.Header.Set("Content-Type", "application/json")
+		token := createToken("monitoring.query", issuerUrl, privKey)
 
-	r.ServeHTTP(w, c.Request)
+		// Set the request to go through the promQueryEngineAuthHandler function
+		r.GET("/api/v1.0/prometheus/*any", promQueryEngineAuthHandler(av1))
+		c.Request, _ = http.NewRequest(http.MethodGet, "/api/v1.0/prometheus/test", bytes.NewBuffer([]byte(`{}`)))
 
-	assert.Equal(t, 404, w.Result().StatusCode, "Expected status code of 404 representing failure due to minimal server setup, not token check")
+		// Put the signed token within the header
+		c.Request.Header.Set("Authorization", "Bearer "+string(token))
+		c.Request.Header.Set("Content-Type", "application/json")
 
-	// Create a new Recorder and Context for the next HTTPtest call
-	w = httptest.NewRecorder()
-	c, r = gin.CreateTestContext(w)
+		r.ServeHTTP(w, c.Request)
 
-	c.Request = &http.Request{
-		URL: &url.URL{},
-	}
+		assert.Equal(t, 404, w.Result().StatusCode, "Expected status code of 404 representing failure due to minimal server setup, not token check")
 
-	// Create a private key to use for the test
-	privateKey, err := ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
-	assert.NoError(t, err, "Error generating private key")
+	})
 
-	// Convert from raw ecdsa to jwk.Key
-	pKey, err := jwk.FromRaw(privateKey)
-	assert.NoError(t, err, "Unable to convert ecdsa.PrivateKey to jwk.Key")
+	t.Run("invalid-token-sig-key", func(t *testing.T) {
+		// Create a new Recorder and Context for the next HTTPtest call
+		w := httptest.NewRecorder()
+		c, r := gin.CreateTestContext(w)
 
-	//Assign Key id to the private key
-	err = jwk.AssignKeyID(pKey)
-	assert.NoError(t, err, "Error assigning kid to private key")
+		c.Request = &http.Request{
+			URL: &url.URL{},
+		}
 
-	//Set an algorithm for the key
-	err = pKey.Set(jwk.AlgorithmKey, jwa.ES256)
-	assert.NoError(t, err, "Unable to set algorithm for pKey")
+		// Create a private key to use for the test
+		privateKey, err := ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
+		assert.NoError(t, err, "Error generating private key")
 
-	jti_bytes = make([]byte, 16)
-	_, err = rand.Read(jti_bytes)
-	if err != nil {
-		t.Fatal(err)
-	}
-	jti = base64.RawURLEncoding.EncodeToString(jti_bytes)
+		// Convert from raw ecdsa to jwk.Key
+		pKey, err := jwk.FromRaw(privateKey)
+		assert.NoError(t, err, "Unable to convert ecdsa.PrivateKey to jwk.Key")
 
-	// Create a new token to be used
-	tok, err = jwt.NewBuilder().
-		Claim("scope", "monitoring.query").
-		Claim("wlcg.ver", "1.0").
-		JwtID(jti).
-		Issuer(issuerUrl).
-		Audience([]string{issuerUrl}).
-		Subject("sub").
-		Expiration(time.Now().Add(time.Minute)).
-		IssuedAt(time.Now()).
-		Build()
+		// Assign Key id to the private key
+		err = jwk.AssignKeyID(pKey)
+		assert.NoError(t, err, "Error assigning kid to private key")
 
-	assert.NoError(t, err, "Error creating token")
+		// Set an algorithm for the key
+		err = pKey.Set(jwk.AlgorithmKey, jwa.ES256)
+		assert.NoError(t, err, "Unable to set algorithm for pKey")
 
-	// Sign token with private key (not the origin)
-	signed, err = jwt.Sign(tok, jwt.WithKey(jwa.ES256, pKey))
-	assert.NoError(t, err, "Error signing token")
+		token := createToken("monitoring.query", issuerUrl, pKey)
 
-	r.GET("/api/v1.0/prometheus/*any", promQueryEngineAuthHandler(av1))
-	c.Request, _ = http.NewRequest(http.MethodGet, "/api/v1.0/prometheus/test", bytes.NewBuffer([]byte(`{}`)))
+		r.GET("/api/v1.0/prometheus/*any", promQueryEngineAuthHandler(av1))
+		c.Request, _ = http.NewRequest(http.MethodGet, "/api/v1.0/prometheus/test", bytes.NewBuffer([]byte(`{}`)))
 
-	c.Request.Header.Set("Authorization", "Bearer "+string(signed))
-	c.Request.Header.Set("Content-Type", "application/json")
+		c.Request.Header.Set("Authorization", "Bearer "+string(token))
+		c.Request.Header.Set("Content-Type", "application/json")
 
-	r.ServeHTTP(w, c.Request)
-	// Assert that it gets the correct Permission Denied 403 code
-	assert.Equal(t, 403, w.Result().StatusCode, "Expected failing status code of 403: Permission Denied")
+		r.ServeHTTP(w, c.Request)
+		// Assert that it gets the correct Permission Denied 403 code
+		assert.Equal(t, 403, w.Result().StatusCode, "Expected failing status code of 403: Permission Denied")
+	})
 
-	// Create a new Recorder and Context for the next HTTPtest call
-	w = httptest.NewRecorder()
-	c, r = gin.CreateTestContext(w)
+	t.Run("token-with-wrong-scope", func(t *testing.T) {
+		// Create a new Recorder and Context for the next HTTPtest call
+		w := httptest.NewRecorder()
+		c, r := gin.CreateTestContext(w)
 
-	c.Request = &http.Request{
-		URL: &url.URL{},
-	}
+		c.Request = &http.Request{
+			URL: &url.URL{},
+		}
+		key, err := config.GetIssuerPrivateJWK()
+		if err != nil {
+			t.Fatal(err)
+		}
 
-	// Create a new token to be used
-	tok, err = jwt.NewBuilder().
-		Claim("scope", "not.prometheus").
-		Claim("wlcg.ver", "1.0").
-		JwtID(jti).
-		Issuer(issuerUrl).
-		Audience([]string{issuerUrl}).
-		Subject("sub").
-		Expiration(time.Now().Add(time.Minute)).
-		IssuedAt(time.Now()).
-		Build()
+		token := createToken("no.prometheus", issuerUrl, key)
 
-	if err != nil {
-		t.Fatal(err)
-	}
+		// Set the request to go through the promQueryEngineAuthHandler function
+		r.GET("/api/v1.0/prometheus/*any", promQueryEngineAuthHandler(av1))
+		c.Request, _ = http.NewRequest(http.MethodGet, "/api/v1.0/prometheus/test", bytes.NewBuffer([]byte(`{}`)))
 
-	// Sign the token with the origin private key
-	signed, err = jwt.Sign(tok, jwt.WithKey(jwa.ES256, privKey))
-	if err != nil {
-		t.Fatal(err)
-	}
+		// Put the signed token within the header
+		c.Request.Header.Set("Authorization", "Bearer "+string(token))
+		c.Request.Header.Set("Content-Type", "application/json")
 
-	// Set the request to go through the promQueryEngineAuthHandler function
-	r.GET("/api/v1.0/prometheus/*any", promQueryEngineAuthHandler(av1))
-	c.Request, _ = http.NewRequest(http.MethodGet, "/api/v1.0/prometheus/test", bytes.NewBuffer([]byte(`{}`)))
+		r.ServeHTTP(w, c.Request)
 
-	// Put the signed token within the header
-	c.Request.Header.Set("Authorization", "Bearer "+string(signed))
-	c.Request.Header.Set("Content-Type", "application/json")
-
-	r.ServeHTTP(w, c.Request)
-
-	assert.Equal(t, 403, w.Result().StatusCode, "Expected status code of 403 due to bad token scope")
-
-	key, err := config.GetIssuerPrivateJWK()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Create a new Recorder and Context for the next HTTPtest call
-	w = httptest.NewRecorder()
-	c, r = gin.CreateTestContext(w)
-
-	now := time.Now()
-	tok, err = jwt.NewBuilder().
-		Issuer(issuerUrl).
-		Claim("scope", "monitoring.query").
-		Claim("wlcg.ver", "1.0").
-		IssuedAt(now).
-		Expiration(now.Add(30 * time.Minute)).
-		NotBefore(now).
-		Subject("user").
-		Build()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var raw ecdsa.PrivateKey
-	if err = key.Raw(&raw); err != nil {
-		t.Fatal(err)
-	}
-	signed, err = jwt.Sign(tok, jwt.WithKey(jwa.ES256, raw))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Set the request to go through the promQueryEngineAuthHandler function
-	r.GET("/api/v1.0/prometheus/*any", promQueryEngineAuthHandler(av1))
-
-	http.SetCookie(w, &http.Cookie{Name: "login", Value: string(signed)})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	c.Request, _ = http.NewRequest(http.MethodGet, "/api/v1.0/prometheus/test", bytes.NewBuffer([]byte(`{}`)))
-	c.Request.Header.Set("Cookie", w.Header().Get("Set-Cookie"))
-
-	r.ServeHTTP(w, c.Request)
-
-	assert.Equal(t, 404, w.Result().StatusCode, "Expected status code of 404 representing failure due to minimal server setup, not token check")
+		assert.Equal(t, 403, w.Result().StatusCode, "Expected status code of 403 due to bad token scope")
+	})
 }
