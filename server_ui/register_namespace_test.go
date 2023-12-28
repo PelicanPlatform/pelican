@@ -84,7 +84,7 @@ func TestRegistration(t *testing.T) {
 	defer svr.CloseClientConnections()
 	defer svr.Close()
 
-	viper.Set("Federation.NamespaceUrl", svr.URL)
+	viper.Set("Federation.RegistryUrl", svr.URL)
 	viper.Set("Origin.NamespacePrefix", "/test123")
 
 	// Test registration succeeds
