@@ -461,6 +461,7 @@ func loadIssuerPrivateJWK(issuerKeyFile string) (jwk.Key, error) {
 		return nil, errors.Wrap(err, "Failed to assign key ID to private key")
 	}
 
+	// Store the key in the in-memory cache
 	issuerPrivateJWK.Store(&key)
 
 	return key, nil
@@ -497,15 +498,18 @@ func loadIssuerPublicJWKS(existingJWKS string, issuerKeyFile string) (jwk.Set, e
 
 // Return the private JWK for the server to sign tokens
 func GetIssuerPrivateJWK() (jwk.Key, error) {
-	key := issuerPrivateJWK.Load()
-	if key == nil {
-		issuerKeyFile := param.IssuerKey.GetString()
-		newKey, err := loadIssuerPrivateJWK(issuerKeyFile)
-		if err != nil {
-			return nil, errors.Wrap(err, "Failed to load issuer private key")
-		}
-		key = &newKey
+	// We don't call issuerPrivateJWK.Load() right away because in testing, issuerPrivateJWK might
+	// cache the key from previous tempDir, and loadIssuerPublicJWKS will generate new key for the current
+	// tempDir which will cause key mismatch
+	//
+	// Even if we call loadIssuerPrivateJWK() directly, if there is existing valid key file in IssuerKey path,
+	// we can expect to have the same private JWK and the matched public JWKS
+	issuerKeyFile := param.IssuerKey.GetString()
+	_, err := loadIssuerPrivateJWK(issuerKeyFile)
+	if err != nil {
+		return nil, errors.Wrap(err, "Failed to load issuer private key")
 	}
+	key := issuerPrivateJWK.Load()
 	return *key, nil
 }
 
