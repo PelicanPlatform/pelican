@@ -1,6 +1,7 @@
 module github.com/pelicanplatform/pelican
 
-retract v1.0.4 // Unpublish Go package
+// Unpublish Go package as we are not intended to allow users us import our packages for now
+retract [v1.0.0, v1.0.5]
 
 go 1.20
 
