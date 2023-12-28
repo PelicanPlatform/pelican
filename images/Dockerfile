@@ -62,7 +62,7 @@ RUN \
     git clone https://github.com/PelicanPlatform/xrdcl-pelican.git && \
     cd xrdcl-pelican && \
     mkdir build && cd build && \
-    cmake .. && \
+    cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
     make && make install
 # Install the S3 and HTTP server plugins for XRootD. For now we do this from source
 # until we can sort out the RPMs.
@@ -70,7 +70,7 @@ RUN \
     git clone https://github.com/PelicanPlatform/xrootd-s3-http.git && \
     cd xrootd-s3-http && \
     mkdir build && cd build && \
-    cmake .. && \
+    cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
     make install
 
 FROM dependency-build AS final-stage
@@ -144,18 +144,13 @@ ENV JAVA_HOME=/usr/lib/jvm/jre \
     QDL_HOME="/opt/qdl" \
     PATH="${ST_HOME}/bin:${QDL_HOME}/bin:${PATH}"
 
-# Copy built xrdcl-pelican plugin library and config from build
+# Copy xrdcl-pelican plugin config
 COPY --from=xrootd-plugin-builder /usr/local/etc/xrootd/client.plugins.d/pelican-plugin.conf /etc/xrootd/client.plugins.d/pelican-plugin.conf
-COPY --from=xrootd-plugin-builder /usr/local/lib/libXrdClPelican-5.so /usr/local/lib/libXrdClPelican-5.so
 # Remove http plugin to use pelican plugin
 RUN rm -f /etc/xrootd/client.plugins.d/xrdcl-http-plugin.conf
 
-# Copy built s3 plugin library from build
-COPY --from=xrootd-plugin-builder /usr/local/lib/libXrdS3-5.so /usr/local/lib/libXrdS3-5.so
-COPY --from=xrootd-plugin-builder /usr/local/lib/libXrdHTTPServer-5.so /usr/local/lib/libXrdHTTPServer-5.so
-# For now, until the RPM is set up, we install the libraries here, but
-# we need to add to LD_LIBRARY_PATH so XRootD knows where to look
-RUN echo "/usr/local/lib" > /etc/ld.so.conf.d/xrdplugins.conf && ldconfig
+# Copy built s3 plugin library and xrdcl-pelican plugin library from build
+COPY --from=xrootd-plugin-builder /usr/lib64/libXrdS3-5.so /usr/lib64/libXrdHTTPServer-5.so /usr/lib64/libXrdClPelican-5.so /usr/lib64
 
 RUN chmod +x /pelican/osdf-client \
     && chmod +x /entrypoint.sh
