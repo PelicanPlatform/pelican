@@ -45,6 +45,8 @@ func validatePrefix(nspath string) (string, error) {
 		return "", errors.New("Cannot register a prefix starting with '/api'")
 	} else if components[0] == "view" {
 		return "", errors.New("Cannot register a prefix starting with '/view'")
+	} else if components[0] == "caches" {
+		return "", errors.New("Cannot register a prefix starting with '/caches'")
 	} else if components[0] == "pelican" {
 		return "", errors.New("Cannot register a prefix starting with '/pelican'")
 	}
