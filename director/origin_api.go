@@ -261,7 +261,7 @@ func VerifyDirectorTestReportToken(strToken string) (bool, error) {
 }
 
 func GetRegistryIssuerURL(prefix string) (string, error) {
-	namespace_url_string := param.Federation_NamespaceUrl.GetString()
+	namespace_url_string := param.Federation_RegistryUrl.GetString()
 	if namespace_url_string == "" {
 		return "", errors.New("Namespace URL is not set")
 	}

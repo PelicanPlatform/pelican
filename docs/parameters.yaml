@@ -155,15 +155,26 @@ description: >-
 type: url
 osdf_default: Default is determined dynamically through metadata at <federation URL>/.well-known/pelican-configuration
 default: none
-components: ["client", "origin"]
+components: ["client", "origin", "cache"]
 ---
 name: Federation.NamespaceUrl
+description: >-
+  [Deprecated] `Federation.NamespaceUrl` is deprecated and will be removed in the future release. Please migrate to use
+  `Federation.RegistryUrl` instead.
+
+  A URL indicating where the namespace registry service is hosted.
+type: url
+osdf_default: Default is determined dynamically through metadata at <federation URL>/.well-known/pelican-configuration
+default: none
+components: ["client", "director", "origin", "cache"]
+---
+name: Federation.RegistryUrl
 description: >-
   A URL indicating where the namespace registry service is hosted.
 type: url
 osdf_default: Default is determined dynamically through metadata at <federation URL>/.well-known/pelican-configuration
 default: none
-components: ["client", "director", "origin"]
+components: ["client", "director", "origin", "cache"]
 ---
 name: Federation.JwkUrl
 description: >-
