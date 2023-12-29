@@ -105,7 +105,6 @@ type: duration
 default: 10s
 components: ["client", "nsregistry", "origin"]
 ---
-
 ############################
 #     Log-Level Configs    #
 ############################
@@ -123,7 +122,6 @@ type: filename
 default: none
 components: ["*"]
 ---
-
 ############################
 # Federation-Level Configs #
 ############################
@@ -157,15 +155,26 @@ description: >-
 type: url
 osdf_default: Default is determined dynamically through metadata at <federation URL>/.well-known/pelican-configuration
 default: none
-components: ["client", "origin"]
+components: ["client", "origin", "cache"]
 ---
 name: Federation.NamespaceUrl
+description: >-
+  [Deprecated] `Federation.NamespaceUrl` is deprecated and will be removed in the future release. Please migrate to use
+  `Federation.RegistryUrl` instead.
+
+  A URL indicating where the namespace registry service is hosted.
+type: url
+osdf_default: Default is determined dynamically through metadata at <federation URL>/.well-known/pelican-configuration
+default: none
+components: ["client", "director", "origin", "cache"]
+---
+name: Federation.RegistryUrl
 description: >-
   A URL indicating where the namespace registry service is hosted.
 type: url
 osdf_default: Default is determined dynamically through metadata at <federation URL>/.well-known/pelican-configuration
 default: none
-components: ["client", "director", "origin"]
+components: ["client", "director", "origin", "cache"]
 ---
 name: Federation.JwkUrl
 description: >-
@@ -175,7 +184,6 @@ osdf_default: Default is determined dynamically through metadata at <federtion U
 default: none
 components: ["client", "origin"]
 ---
-
 ############################
 #   Client-Level Configs   #
 ############################
@@ -242,7 +250,6 @@ type: int
 default: 102400
 components: ["client"]
 ---
-
 ############################
 #   Origin-level Configs   #
 ############################
@@ -414,8 +421,6 @@ type: filename
 default: none
 components: ["origin"]
 ---
-
-
 ############################
 #   Cache-level configs    #
 ############################
@@ -460,7 +465,6 @@ type: bool
 default: false
 components: ["cache"]
 ---
-
 ############################
 #  Director-level configs  #
 ############################
@@ -512,7 +516,6 @@ root_default: /var/cache/pelican/maxmind/GeoLite2-City.mmdb
 default: $ConfigBase/maxmind/GeoLite2-city.mmdb
 components: ["director"]
 ---
-
 ############################
 #  Registry-level configs  #
 ############################
@@ -533,7 +536,6 @@ type: bool
 default: true
 components: ["nsregistry"]
 ---
-
 ############################
 #   Server-level configs   #
 ############################
@@ -663,7 +665,7 @@ description: >-
   A filepath specifying where the server's web UI password file should be stored.
 type: filename
 default: $ConfigBase/server-web-passwd
-components:  ["origin", "cache", "nsregistry", "director"]
+components: ["origin", "cache", "nsregistry", "director"]
 ---
 name: Server.SessionSecretFile
 description: >-
@@ -671,11 +673,10 @@ description: >-
 
   This is only used for sending redirect request for OAuth2 authentication flow as of 11/22/2023
 type: filename
-default: $ConfigBase/session-secret 
+default: $ConfigBase/session-secret
   The default content of the file is the hash of the concatenation of "pelican" and the DER form of ${IssuerKey}
-components:  ["nsregistry", "director"]
+components: ["nsregistry", "director"]
 ---
-
 ################################
 #   Issuer's Configurations    #
 ################################
@@ -792,7 +793,6 @@ type: object
 default: []
 components: ["origin"]
 ---
-
 ###################################
 #   Server's OIDC Configuration   #
 ###################################
@@ -865,12 +865,11 @@ description: >-
   The hostname for the OIDC client redirect URL that the OIDC provider will redirect to after the user is authenticated
 
   For development use only. Useful when developing in a container and you want to expose localhost 
-  instead of container hostname to your OAuth provider 
+  instead of container hostname to your OAuth provider
 type: string
 default: none
-components:  ["nsregistry", "director"]
+components: ["nsregistry", "director"]
 ---
-
 ############################
 #   XRootD-level Configs   #
 ############################
@@ -971,7 +970,6 @@ type: string
 default: none
 components: ["origin"]
 ---
-
 ############################
 # Monitoring-level configs #
 ############################
@@ -1035,7 +1033,6 @@ type: bool
 default: true
 components: ["origin", "director", "nsregistry"]
 ---
-
 ############################
 #   Plugin-level configs   #
 ############################
