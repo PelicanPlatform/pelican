@@ -40,6 +40,7 @@ import (
 	"github.com/prometheus/common/route"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // Test the Prometheus query engine endpoint auth check with an server issuer token
@@ -55,6 +56,9 @@ func TestPrometheusProtectionCookieAuth(t *testing.T) {
 	kfile := filepath.Join(tDir, "testKey")
 	//Setup a private key
 	viper.Set("IssuerKey", kfile)
+	config.InitConfig()
+	err := config.InitServer([]config.ServerType{config.OriginType}, config.OriginType)
+	require.NoError(t, err)
 
 	w := httptest.NewRecorder()
 	c, r := gin.CreateTestContext(w)
@@ -67,7 +71,7 @@ func TestPrometheusProtectionCookieAuth(t *testing.T) {
 	}
 
 	jti_bytes := make([]byte, 16)
-	_, err := rand.Read(jti_bytes)
+	_, err = rand.Read(jti_bytes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,6 +133,11 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 
 	//Setup a private key and a token
 	viper.Set("IssuerKey", kfile)
+
+	config.InitConfig()
+	err := config.InitServer([]config.ServerType{config.OriginType}, config.OriginType)
+	require.NoError(t, err)
+
 	issuerUrl := param.Server_ExternalWebUrl.GetString()
 
 	// Shared function to create a token
