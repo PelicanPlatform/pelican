@@ -29,7 +29,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/utils"
+	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
@@ -79,7 +79,7 @@ func CreateDirectorSDToken() (string, error) {
 	tokenExpireTime := param.Monitoring_TokenExpiresIn.GetDuration()
 
 	tok, err := jwt.NewBuilder().
-		Claim("scope", utils.Pelican_DirectorServiceDiscovery.String()).
+		Claim("scope", token_scopes.Pelican_DirectorServiceDiscovery.String()).
 		Issuer(directorURL).
 		Audience([]string{directorURL}).
 		Subject("director").
@@ -141,7 +141,7 @@ func VerifyDirectorSDToken(strToken string) (bool, error) {
 	scopes := strings.Split(scope, " ")
 
 	for _, scope := range scopes {
-		if scope == utils.Pelican_DirectorServiceDiscovery.String() {
+		if scope == token_scopes.Pelican_DirectorServiceDiscovery.String() {
 			return true, nil
 		}
 	}
@@ -158,7 +158,7 @@ func CreateDirectorScrapeToken() (string, error) {
 	tokenExpireTime := param.Monitoring_TokenExpiresIn.GetDuration()
 
 	tok, err := jwt.NewBuilder().
-		Claim("scope", utils.Monitoring_Scrape.String()).
+		Claim("scope", token_scopes.Monitoring_Scrape.String()).
 		Issuer(directorURL). // Exclude audience from token to prevent http header overflow
 		Subject("director").
 		Expiration(time.Now().Add(tokenExpireTime)).

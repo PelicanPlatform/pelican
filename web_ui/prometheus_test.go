@@ -37,7 +37,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/utils"
+	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/prometheus/common/route"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
@@ -81,7 +81,7 @@ func TestPrometheusProtectionFederationURL(t *testing.T) {
 
 	issuerUrl := param.Server_ExternalWebUrl.GetString()
 	tok, err := jwt.NewBuilder().
-		Claim("scope", utils.Monitoring_Query.String()).
+		Claim("scope", token_scopes.Monitoring_Query.String()).
 		Claim("wlcg.ver", "1.0").
 		JwtID(jti).
 		Issuer(issuerUrl).
@@ -162,7 +162,7 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 
 	issuerUrl := param.Server_ExternalWebUrl.GetString()
 	tok, err := jwt.NewBuilder().
-		Claim("scope", utils.Monitoring_Query.String()).
+		Claim("scope", token_scopes.Monitoring_Query.String()).
 		Claim("wlcg.ver", "1.0").
 		JwtID(jti).
 		Issuer(issuerUrl).
@@ -227,7 +227,7 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 
 	// Create a new token to be used
 	tok, err = jwt.NewBuilder().
-		Claim("scope", utils.Monitoring_Query.String()).
+		Claim("scope", token_scopes.Monitoring_Query.String()).
 		Claim("wlcg.ver", "1.0").
 		JwtID(jti).
 		Issuer(issuerUrl).
@@ -307,7 +307,7 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 	now := time.Now()
 	tok, err = jwt.NewBuilder().
 		Issuer(issuerUrl).
-		Claim("scope", utils.Monitoring_Query.String()).
+		Claim("scope", token_scopes.Monitoring_Query.String()).
 		Claim("wlcg.ver", "1.0").
 		IssuedAt(now).
 		Expiration(now.Add(30 * time.Minute)).

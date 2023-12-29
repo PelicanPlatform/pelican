@@ -1,4 +1,4 @@
-package utils
+package token_scopes
 
 import "strings"
 

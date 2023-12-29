@@ -28,6 +28,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
 	"github.com/prometheus/common/route"
@@ -40,7 +41,7 @@ func createPromMetricToken() (string, error) {
 	tokenExpireTime := param.Monitoring_TokenExpiresIn.GetDuration()
 
 	tok, err := jwt.NewBuilder().
-		Claim("scope", utils.Monitoring_Scrape.String()).
+		Claim("scope", token_scopes.Monitoring_Scrape.String()).
 		Issuer(serverURL).
 		Audience([]string{serverURL}).
 		Subject(serverURL).
