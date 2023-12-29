@@ -547,11 +547,20 @@ components: ["nsregistry"]
 ---
 name: Registry.Institutions
 description: >-
-  A string slice of names of institutions available to register. Users can only select from this list
-  when they register a new namespace.
+  A array of institution objects available to register. Users can only select from this list
+  when they register a new namespace. Each object has `name` and `id` field where 
+  `name` is a human-readable name for the institution and `id` is a unique identifier
+  for the institution. For Pelican running in OSDF alias, the `id` will be OSG ID.
 
-type: stringSlice
-default: []
+  For example:
+
+  ```
+  - name: University of Wisconsin - Madison
+    id: https://osg-htc.org/iid/01y2jtd41
+  ```
+
+type: object
+default: none
 components: ["nsregistry"]
 ---
 ############################

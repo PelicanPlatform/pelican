@@ -85,7 +85,10 @@ definitions:
         description: "Name of the site"
       institution:
         type: string
-        description: "Name of the institution"
+        description: >
+          "Unique identifier of the institution to register to. 
+          For Pelican running in OSDF mode, this will be the OSG ID of the institution"
+        example: "https://osg-htc.org/iid/01y2jtd41"
       security_contact_user_id:
         type: string
         description: '"sub" claim of user responsible for the security of the service'
@@ -116,16 +119,20 @@ definitions:
         description: "Name of the site"
       institution:
         type: string
-        description: "Name of the institution"
+        description: >
+          "Unique identifier of the institution to register to. 
+          For Pelican running in OSDF mode, this will be the OSG ID of the institution"
+        example: "https://osg-htc.org/iid/01y2jtd41"
       security_contact_user_id:
         type: string
         description: '"sub" claim of user responsible for the security of the service'
   RegistrationStatus:
-    type: integer
+    type: string
     enum:
-      - 0 # Pending
-      - 1 # Approved
-      - 2 # Denied
+      - Pending
+      - Approved
+      - Denied
+      - Unknown
   NamespaceWOPubkey:
     type: object
     properties:
@@ -139,6 +146,17 @@ definitions:
         example: "/test"
       admin_metadata:
         $ref: "#/definitions/AdminMetadata"
+  Institution:
+    type: object
+    properties:
+      id:
+        type: string
+        description: The unique ID of the institution. For Pelican running in OSDF alias, this will be OSG ID of the institution
+        example: https://osg-htc.org/iid/01y2jtd41
+      name:
+        type: string
+        description: The name of the institution
+        example: University of Wisconsin - Madison
   Namespace:
     type: object
     properties:
@@ -785,9 +803,8 @@ paths:
           schema:
             type: array
             items:
-              type: string
-              description: Institution availbale to register
-              example: "Univerisity of Wisconsin - Madison"
+              type: object
+              $ref: "#/definitions/Institution"
               minItems: 0
         "401":
           description: Authentication required to perform this action
@@ -795,7 +812,7 @@ paths:
             type: object
             $ref: "#/definitions/ErrorModel"
         "500":
-          description: Server didn't configure Registry.Institutions.
+          description: Server didn't configure `Registry.Institutions` or server encoutered error in reading institution configuration
           schema:
             type: object
             $ref: "#/definitions/ErrorModel"

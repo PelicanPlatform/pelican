@@ -151,17 +151,21 @@ func validateJwks(jwksStr string) (jwk.Key, error) {
 	return key, nil
 }
 
-func validateInstitution(inst string) bool {
-	instList := param.Registry_Institutions.GetStringSlice()
-	if instList == nil {
-		// If Registry_Institutions is unset, we don't check institutions, always pass
-		return true
+// Validates if the instID, the id of the institution, matches the provided Registy.Institutions items.
+func validateInstitution(instID string) (bool, error) {
+	institutions := []Institution{}
+	if err := param.Registry_Institutions.Unmarshal(&institutions); err != nil {
+		return false, err
 	}
-	for _, instOpt := range instList {
+	// We don't check if config was populated
+	if len(institutions) == 0 {
+		return true, nil
+	}
+	for _, availableInst := range institutions {
 		// We required full equality, as we expect the value is from the institution API
-		if inst == instOpt {
-			return true
+		if instID == availableInst.ID {
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }

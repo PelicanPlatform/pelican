@@ -46,6 +46,11 @@ type (
 		Required bool                  `json:"required"`
 		Options  []interface{}         `json:"options"`
 	}
+
+	Institution struct {
+		Name string `mapstructure:"name" json:"name"`
+		ID   string `mapstructure:"id" json:"id"`
+	}
 )
 
 const (
@@ -279,7 +284,11 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 		return
 	}
 
-	if validInst := validateInstitution(ns.AdminMetadata.Institution); !validInst {
+	if validInst, err := validateInstitution(ns.AdminMetadata.Institution); !validInst {
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Error validating institution: %v", err)})
+			return
+		}
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Institution \"%s\" is not in the list of available institutions to register.", ns.AdminMetadata.Institution)})
 		return
 	}
@@ -441,12 +450,19 @@ func getNamespaceJWKS(ctx *gin.Context) {
 }
 
 func listInstitutions(ctx *gin.Context) {
-	inst := param.Registry_Institutions.GetStringSlice()
-	if inst == nil {
+	institutions := []Institution{}
+	if err := param.Registry_Institutions.Unmarshal(&institutions); err != nil {
+		log.Error("Fail to read server configuration of institutions", err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Fail to read server configuration of institutions"})
+		return
+	}
+
+	if len(institutions) == 0 {
+		log.Error("Server didn't configure Registry.Institutions")
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Server didn't configure Registry.Institutions"})
 		return
 	}
-	ctx.JSON(http.StatusOK, inst)
+	ctx.JSON(http.StatusOK, institutions)
 }
 
 // checkAdmin checks if a user string has admin privilege. It returns boolean and a message
