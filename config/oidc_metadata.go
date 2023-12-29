@@ -19,6 +19,7 @@
 package config
 
 import (
+	"io/fs"
 	"os"
 	"strings"
 	"sync"
@@ -125,7 +126,11 @@ func getClientID() {
 	}
 	contents, err := os.ReadFile(clientFile)
 	if err != nil {
-		clientError = errors.Wrapf(err, "Failed reading provided OIDC.ClientIDFile %s", clientFile)
+		if errors.Is(err, fs.ErrNotExist) {
+			clientError = errors.Errorf("%s, specified in the configuration value of `OIDC.ClientIDFile`, does not exist", clientFile)
+		} else {
+			clientError = errors.Wrapf(err, "Failed reading provided OIDC.ClientIDFile %s", clientFile)
+		}
 		return
 	}
 	clientID = strings.TrimSpace(string(contents))

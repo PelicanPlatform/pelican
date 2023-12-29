@@ -48,6 +48,12 @@ var (
 	issuerPrivateJWK atomic.Pointer[jwk.Key]
 )
 
+type (
+	noPrivateKeyError struct {
+		error
+	}
+)
+
 // Return a pointer to an ECDSA private key read from keyLocation.
 //
 // This can be used to load any ECDSA private key we generated for
@@ -79,7 +85,7 @@ func LoadPrivateKey(keyLocation string) (*ecdsa.PrivateKey, error) {
 		}
 	}
 	if privateKey == nil {
-		return nil, fmt.Errorf("Private key file, %v, contains no private key", keyLocation)
+		return nil, noPrivateKeyError{fmt.Errorf("Private key file, %v, contains no private key", keyLocation)}
 	}
 	return privateKey, nil
 }
@@ -110,7 +116,11 @@ func GeneratePrivateKey(keyLocation string, curve elliptic.Curve) error {
 		defer file.Close()
 		// Make sure key is valid if there is one
 		if _, err := LoadPrivateKey(keyLocation); err != nil {
-			return err
+			if _, ok := err.(noPrivateKeyError); ok {
+				return fmt.Errorf("Private key file, %v, exists but contains no private key; refusing to write a key into an existing file", keyLocation)
+			} else {
+				return err
+			}
 		}
 		return nil
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -200,11 +210,11 @@ func GenerateCACert() error {
 
 	tlsCAKey := param.Server_TLSCAKey.GetString()
 	if err := GeneratePrivateKey(tlsCAKey, elliptic.P256()); err != nil {
-		return err
+		return errors.Wrap(err, "Failed to generate a private key for the CA")
 	}
 	privateKey, err := LoadPrivateKey(tlsCAKey)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "Failed to load generated CA's private key")
 	}
 
 	log.Debugln("Will generate a new CA certificate for the server")
@@ -363,13 +373,13 @@ func GenerateCert() error {
 	}
 	privateKey, err := LoadPrivateKey(tlsKey)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "Failed to load host certificate's private key")
 	}
 
 	// The private key of CA will always be present
 	caPrivateKey, err := LoadPrivateKey(param.Server_TLSCAKey.GetString())
 	if err != nil {
-		return err
+		return errors.Wrap(err, "Failed to load CA's private key")
 	}
 
 	log.Debugln("Will generate a new host certificate for the server")
@@ -600,7 +610,7 @@ func GenerateSessionSecret() error {
 	issuerKeyFile := param.IssuerKey.GetString()
 	privateKey, err := LoadPrivateKey(issuerKeyFile)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "Failed to load private key for generating the session secret")
 	}
 
 	derPrivateKey, err := x509.MarshalPKCS8PrivateKey(privateKey)
