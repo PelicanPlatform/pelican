@@ -33,6 +33,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
 type (
@@ -42,10 +43,10 @@ type (
 		Lifetime     time.Duration     // Lifetime is used to set 'exp' claim from now
 		Issuer       string            // Issuer is 'iss' claim
 		Audience     []string          // Audience is 'aud' claim
-		Scope        string            // Scope is a space separated list of scopes
 		Version      string            // Version is the version for different profiles. 'wlcg.ver' for WLCG profile and 'ver' for scitokens2
 		Subject      string            // Subject is 'sub' claim
 		Claims       map[string]string // Additional claims
+		scope        string            // scope is a string with space-delimited list of scopes. To enforce type check, use AddRawScope or AddScopes to add scopes to your token
 	}
 )
 
@@ -93,7 +94,7 @@ func (config *TokenConfig) verifyCreateSciTokens2() error {
 		return errors.New(errMsg)
 	}
 
-	if config.Scope == "" {
+	if config.scope == "" {
 		errMsg := "The 'scope' claim is required for the scitokens2 profile, but it could not be found."
 		return errors.New(errMsg)
 	}
@@ -139,7 +140,39 @@ func (config *TokenConfig) verifyCreateWLCG() error {
 	return nil
 }
 
-// CreateToken validate a JWT TokenConfig and if it's valid, create and sign a token based on the TokenConfig.
+// AddScopes appends a list of token_scopes.TokenScope to the Scope field.
+func (config *TokenConfig) AddScopes(scopes []token_scopes.TokenScope) {
+	if config.scope == "" {
+		config.scope = token_scopes.GetScopeString(scopes)
+	} else {
+		scopeStr := token_scopes.GetScopeString(scopes)
+		if scopeStr != "" {
+			config.scope += " " + scopeStr
+		}
+	}
+}
+
+// AddRawScope appends a space-delimited, case-sensitive scope string to the Scope field.
+//
+// Examples for valid scopes:
+//   - "storage:read"
+//   - "storage:read storage:write"
+func (config *TokenConfig) AddRawScope(scope string) {
+	if config.scope == "" {
+		config.scope = scope
+	} else {
+		if scope != "" {
+			config.scope += " " + scope
+		}
+	}
+}
+
+// GetScope returns a list of space-delimited, case-sensitive strings from TokenConfig.scope
+func (config *TokenConfig) GetScope() string {
+	return config.scope
+}
+
+// CreateToken validates a JWT TokenConfig and if it's valid, create and sign a token based on the TokenConfig.
 func (tokenConfig *TokenConfig) CreateToken() (string, error) {
 	if ok, err := tokenConfig.Validate(); !ok || err != nil {
 		return "", errors.Wrap(err, "Invalid tokenConfig")
@@ -179,7 +212,7 @@ func (tokenConfig *TokenConfig) CreateToken() (string, error) {
 		NotBefore(now).
 		Audience(tokenConfig.Audience).
 		Subject(tokenConfig.Subject).
-		Claim("scope", tokenConfig.Scope).
+		Claim("scope", tokenConfig.scope).
 		JwtID(jti)
 
 	if tokenConfig.TokenProfile == Scitokens2 {
