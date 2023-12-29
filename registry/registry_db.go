@@ -40,7 +40,7 @@ import (
 	"github.com/pelicanplatform/pelican/utils"
 )
 
-type RegistrationStatus int
+type RegistrationStatus string
 
 // The AdminMetadata is used in [Namespace] as a marshalled JSON string
 // to be stored in registry DB.
@@ -60,7 +60,7 @@ type RegistrationStatus int
 type AdminMetadata struct {
 	UserID                string             `json:"user_id" post:"exclude"` // "sub" claim of user JWT who requested registration
 	Description           string             `json:"description"`
-	SiteName              string             `json:"site_name" validate:"required"`
+	SiteName              string             `json:"site_name"`
 	Institution           string             `json:"institution" validate:"required"`
 	SecurityContactUserID string             `json:"security_contact_user_id"` // "sub" claim of user who is responsible for taking security concern
 	Status                RegistrationStatus `json:"status" post:"exclude"`
@@ -94,9 +94,10 @@ const (
 )
 
 const (
-	Pending RegistrationStatus = iota + 1 // 0 is the default value for GO, reserve it for empty check
-	Approved
-	Denied
+	Pending  RegistrationStatus = "Pending"
+	Approved RegistrationStatus = "Approved"
+	Denied   RegistrationStatus = "Denied"
+	Unknown  RegistrationStatus = "Unknown"
 )
 
 /*
@@ -114,16 +115,7 @@ func (st ServerType) String() string {
 }
 
 func (rs RegistrationStatus) String() string {
-	switch rs {
-	case 1:
-		return "Pending"
-	case 2:
-		return "Approved"
-	case 3:
-		return "Denied"
-	default:
-		return "Unkown"
-	}
+	return string(rs)
 }
 
 func createNamespaceTable() {
@@ -266,7 +258,7 @@ func namespaceExistsById(id int) (bool, error) {
 }
 
 func namespaceBelongsToUserId(id int, userId string) (bool, error) {
-	query := `SELECT * FROM namespace where id = ?`
+	query := `SELECT admin_metadata FROM namespace where id = ?`
 	rows, err := db.Query(query, id)
 	if err != nil {
 		return false, err
@@ -276,7 +268,7 @@ func namespaceBelongsToUserId(id int, userId string) (bool, error) {
 	for rows.Next() {
 		ns := &Namespace{}
 		adminMetadataStr := ""
-		if err := rows.Scan(&ns.ID, &ns.Prefix, &ns.Pubkey, &ns.Identity, &adminMetadataStr); err != nil {
+		if err := rows.Scan(&adminMetadataStr); err != nil {
 			return false, err
 		}
 		// For backward compatibility, if adminMetadata is an empty string, don't unmarshall json
@@ -331,6 +323,7 @@ func getNamespaceJwksByPrefix(prefix string, approvalRequired bool) (*jwk.Set, e
 			if err = json.Unmarshal([]byte(adminMetadataStr), &adminMetadata); err != nil {
 				return nil, errors.Wrap(err, "Failed to unmarshall admin_metadata")
 			}
+			// TODO: Move this to upper functions that handles business logic to keep db access functions simple
 			if adminMetadata.Status != Approved {
 				return nil, serverCredsErr
 			}
@@ -360,7 +353,7 @@ func getNamespaceById(id int) (*Namespace, error) {
 	}
 	ns := &Namespace{}
 	adminMetadataStr := ""
-	query := `SELECT * FROM namespace WHERE id = ?`
+	query := `SELECT id, prefix, pubkey, identity, admin_metadata FROM namespace WHERE id = ?`
 	err := db.QueryRow(query, id).Scan(&ns.ID, &ns.Prefix, &ns.Pubkey, &ns.Identity, &adminMetadataStr)
 	if err != nil {
 		return nil, err
@@ -380,7 +373,7 @@ func getNamespaceByPrefix(prefix string) (*Namespace, error) {
 	}
 	ns := &Namespace{}
 	adminMetadataStr := ""
-	query := `SELECT * FROM namespace WHERE prefix = ?`
+	query := `SELECT id, prefix, pubkey, identity, admin_metadata FROM namespace WHERE prefix = ?`
 	err := db.QueryRow(query, prefix).Scan(&ns.ID, &ns.Prefix, &ns.Pubkey, &ns.Identity, &adminMetadataStr)
 	if err != nil {
 		return nil, err
@@ -396,7 +389,7 @@ func getNamespaceByPrefix(prefix string) (*Namespace, error) {
 
 // Get a collection of namespaces by [Namespace.AdminMetadata.UserID]
 func getNamespacesByUserID(userID string) ([]*Namespace, error) {
-	query := `SELECT * FROM namespace ORDER BY id ASC`
+	query := `SELECT id, prefix, pubkey, identity, admin_metadata FROM namespace ORDER BY id ASC`
 	rows, err := db.Query(query)
 	if err != nil {
 		return nil, err
@@ -427,9 +420,9 @@ func getNamespacesByServerType(serverType ServerType) ([]*Namespace, error) {
 	query := ""
 	if serverType == CacheType {
 		// Refer to the cache prefix name in cmd/cache_serve
-		query = `SELECT * FROM NAMESPACE WHERE PREFIX LIKE '/caches/%' ORDER BY id ASC`
+		query = `SELECT id, prefix, pubkey, identity, admin_metadata FROM NAMESPACE WHERE PREFIX LIKE '/caches/%' ORDER BY id ASC`
 	} else if serverType == OriginType {
-		query = `SELECT * FROM NAMESPACE WHERE NOT PREFIX LIKE '/caches/%' ORDER BY id ASC`
+		query = `SELECT id, prefix, pubkey, identity, admin_metadata FROM NAMESPACE WHERE NOT PREFIX LIKE '/caches/%' ORDER BY id ASC`
 	} else {
 		return nil, errors.New(fmt.Sprint("Can't get namespace: unsupported server type: ", serverType))
 	}
@@ -476,8 +469,9 @@ func addNamespace(ns *Namespace) error {
 	// including user_id before this function
 	ns.AdminMetadata.CreatedAt = time.Now()
 	ns.AdminMetadata.UpdatedAt = time.Now()
-	// Set default value to pending if Status is empty
-	if ns.AdminMetadata.Status == 0 {
+	// We only set status to pending when it's empty to allow tests to add a namespace with
+	// desired status
+	if ns.AdminMetadata.Status == "" {
 		ns.AdminMetadata.Status = Pending
 	}
 
@@ -587,7 +581,7 @@ func deleteNamespace(prefix string) error {
 }
 
 func getAllNamespaces() ([]*Namespace, error) {
-	query := `SELECT * FROM namespace ORDER BY id ASC`
+	query := `SELECT id, prefix, pubkey, identity, admin_metadata FROM namespace ORDER BY id ASC`
 	rows, err := db.Query(query)
 	if err != nil {
 		return nil, err

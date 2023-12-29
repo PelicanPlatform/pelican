@@ -63,7 +63,7 @@ definitions:
       error:
         type: string
         description: The detail error message
-        example: Fail to bind to the struct
+        example: Bad request
   SuccessModel:
     type: object
     description: The successful reponse of a request
@@ -88,12 +88,12 @@ definitions:
         description: "Name of the institution"
       security_contact_user_id:
         type: string
-        description: '"sub" claim of user who is responsible for taking security concern'
+        description: '"sub" claim of user responsible for the security of the service'
       status:
         $ref: "#/definitions/RegistrationStatus"
       approver_id:
         type: string
-        description: '"sub" claim of user JWT who approved registration'
+        description: '"sub" claim of user JWT who approved the service registration'
       approved_at:
         type: string
         format: date-time
@@ -119,7 +119,7 @@ definitions:
         description: "Name of the institution"
       security_contact_user_id:
         type: string
-        description: '"sub" claim of user who is responsible for taking security concern'
+        description: '"sub" claim of user responsible for the security of the service'
   RegistrationStatus:
     type: integer
     enum:
@@ -135,7 +135,7 @@ definitions:
         example: 1
       prefix:
         type: string
-        description: The namespace prefix to register. Should be an obsolute paths
+        description: The namespace prefix to register. Should be an absolute path.
         example: "/test"
       admin_metadata:
         $ref: "#/definitions/AdminMetadata"
@@ -148,7 +148,7 @@ definitions:
         example: 1
       prefix:
         type: string
-        description: The namespace prefix to register. Should be an obsolute paths
+        description: The namespace prefix to register. Should be an absolute path.
         example: "/test"
       pubkey:
         type: string

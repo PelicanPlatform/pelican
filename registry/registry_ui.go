@@ -25,7 +25,6 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -57,15 +56,12 @@ const (
 )
 
 var (
-	registrationFields        []registrationField
-	setRegistrationFieldsOnce sync.Once
+	registrationFields []registrationField
 )
 
 func init() {
-	setRegistrationFieldsOnce.Do(func() {
-		registrationFields = make([]registrationField, 0)
-		registrationFields = append(registrationFields, populateRegistrationFields("", Namespace{})...)
-	})
+	registrationFields = make([]registrationField, 0)
+	registrationFields = append(registrationFields, populateRegistrationFields("", Namespace{})...)
 }
 
 // Populate registrationFields array to provide available namespace registration fields
@@ -130,7 +126,7 @@ func populateRegistrationFields(prefix string, data interface{}) []registrationF
 			}
 		}
 
-		if field.Type == reflect.TypeOf(RegistrationStatus(0)) {
+		if field.Type == reflect.TypeOf(RegistrationStatus("")) {
 			regField.Type = Enum
 			options := make([]interface{}, 3)
 			options[0] = Pending

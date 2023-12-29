@@ -607,7 +607,7 @@ func TestCacheAdminTrue(t *testing.T) {
 
 			require.NoError(t, err, "error adding test cache to registry database")
 
-			// This will return a serverCredsError if the AdminMetadata.Stauts != Approved, which we don't want to happen
+			// This will return a serverCredsError if the AdminMetadata.Status != Approved, which we don't want to happen
 			// For these tests, otherwise it will get a key parsing error as ns.Pubkey isn't a real jwk
 			_, err = getNamespaceJwksByPrefix(ns.Prefix, true)
 			require.NotErrorIsf(t, err, serverCredsErr, "error chain contains serverCredErr")

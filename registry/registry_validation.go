@@ -81,7 +81,7 @@ func validateKeyChaining(prefix string, pubkey jwk.Key) (validationError error, 
 			validationError = errors.New("Cannot register a super or subspace of a namespace already registered in topology")
 			return
 		}
-		// If we make the assumption that namespace prefixes are heirarchical, eg that the owner of /foo should own
+		// If we make the assumption that namespace prefixes are hierarchical, eg that the owner of /foo should own
 		// everything under /foo (/foo/bar, /foo/baz, etc), then it makes sense to check for superspaces first. If any
 		// superspace is found, they logically "own" the incoming namespace.
 		if len(superspaces) > 0 {

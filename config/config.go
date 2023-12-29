@@ -38,10 +38,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
-	"github.com/gorilla/csrf"
-	adapter "github.com/gwatts/gin-adapter"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -120,10 +117,6 @@ var (
 	// Our global transports that only will get reconfigured if needed
 	transport     *http.Transport
 	onceTransport sync.Once
-
-	// Global CSRF hanlder that shares the same auth key
-	csrfHanlder     gin.HandlerFunc
-	onceCSRFHanlder sync.Once
 
 	// Global struct validator
 	validate *validator.Validate
@@ -367,36 +360,6 @@ func setupTransport() {
 			}
 		}
 	}
-}
-
-func setupCSRFHandler() {
-	csrfKey, err := LoadSessionSecret()
-	if err != nil {
-		log.Error("Error loading session secret, abort setting up CSRF handler:", err)
-		return
-	}
-	CSRF := csrf.Protect(csrfKey,
-		csrf.SameSite(csrf.SameSiteStrictMode),
-		csrf.Path("/"),
-		csrf.ErrorHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusForbidden)
-			_, err := w.Write([]byte(`{"message": "CSRF token invalid"}`))
-			if err != nil {
-				log.Error("Error writing error message back as response")
-			}
-		})),
-	)
-	csrfHanlder = adapter.Wrap(CSRF)
-}
-
-func GetCSRFHandler() (gin.HandlerFunc, error) {
-	onceCSRFHanlder.Do(func() {
-		setupCSRFHandler()
-	})
-	if csrfHanlder == nil {
-		return nil, errors.New("Error setting up the CSRF hanlder")
-	}
-	return csrfHanlder, nil
 }
 
 func parseServerIssuerURL(sType ServerType) error {
