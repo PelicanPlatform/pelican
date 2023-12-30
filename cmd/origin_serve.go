@@ -102,7 +102,12 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		}
 	}
 
-	go web_ui.RunEngine(engine)
+	go func() {
+		if err := web_ui.RunEngine(shutdownCtx, engine); err != nil {
+			log.Panicln("Failure when running the web engine:", err)
+		}
+		shutdownCancel()
+	}()
 
 	if param.Origin_EnableUI.GetBool() {
 		go web_ui.InitServerWebLogin()
