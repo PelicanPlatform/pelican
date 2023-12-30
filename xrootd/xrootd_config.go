@@ -33,13 +33,11 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"sync"
 	"text/template"
 	"time"
 
-	"github.com/fsnotify/fsnotify"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/metrics"
@@ -141,10 +139,10 @@ func CheckOriginXrootdEnv(exportPath string, uid int, gid int, groupname string)
 			}
 			volumeMountDst = filepath.Clean(volumeMountDst)
 			if volumeMountDst == "" {
-				return exportPath, fmt.Errorf("Export volume %v has empty destination path", volumeMount)
+				return exportPath, fmt.Errorf("export volume %v has empty destination path", volumeMount)
 			}
 			if volumeMountDst[0:1] != "/" {
-				return "", fmt.Errorf("Export volume %v has a relative destination path",
+				return "", fmt.Errorf("export volume %v has a relative destination path",
 					volumeMountDst)
 			}
 			destPath := path.Clean(filepath.Join(exportPath, volumeMountDst[1:]))
@@ -176,7 +174,7 @@ func CheckOriginXrootdEnv(exportPath string, uid int, gid int, groupname string)
 			mountPath = filepath.Clean(mountPath)
 			namespacePrefix = filepath.Clean(namespacePrefix)
 			if namespacePrefix[0:1] != "/" {
-				return exportPath, fmt.Errorf("Namespace prefix %v must have an absolute path",
+				return exportPath, fmt.Errorf("namespace prefix %v must have an absolute path",
 					namespacePrefix)
 			}
 			destPath := path.Clean(filepath.Join(exportPath, namespacePrefix[1:]))
@@ -464,67 +462,20 @@ func CopyXrootdCertificates() error {
 // Launch a separate goroutine that performs the XRootD maintenance tasks.
 // For maintenance that is periodic, `sleepTime` is the maintenance period.
 func LaunchXrootdMaintenance(ctx context.Context, sleepTime time.Duration) {
-	select_count := 4
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		select_count -= 2
-	} else if err = watcher.Add(filepath.Dir(param.Server_TLSCertificate.GetString())); err != nil {
-		select_count -= 2
-	}
-	cases := make([]reflect.SelectCase, select_count)
-	ticker := time.NewTicker(sleepTime)
-	cases[0].Dir = reflect.SelectRecv
-	cases[0].Chan = reflect.ValueOf(ticker.C)
-	cases[1].Dir = reflect.SelectRecv
-	cases[1].Chan = reflect.ValueOf(ctx.Done())
-	if err == nil {
-		cases[2].Dir = reflect.SelectRecv
-		cases[2].Chan = reflect.ValueOf(watcher.Events)
-		cases[3].Dir = reflect.SelectRecv
-		cases[3].Chan = reflect.ValueOf(watcher.Errors)
-	}
-	go func() {
-		defer watcher.Close()
-		for {
-			chosen, recv, ok := reflect.Select(cases)
-			if chosen == 0 {
-				if !ok {
-					log.Panicln("Ticker failed in the xrootd maintenance routine; exiting")
-				}
-				err := CopyXrootdCertificates()
-				if err != nil {
-					log.Warningln("Failed to update xrootd certificates during maintenance:", err)
-				}
-			} else if chosen == 1 {
-				log.Infoln("XRootD maintenance thread has been cancelled.  Shutting down")
-				return
-			} else if chosen == 2 { // watcher.Events
-				if !ok {
-					log.Panicln("Watcher events failed in xrootd maintenance routine; exiting")
-				}
-				if event, ok := recv.Interface().(fsnotify.Event); ok {
-					log.Debugf("Got filesystem event (%v); will update the xrootd certificates", event)
-					if err = CopyXrootdCertificates(); errors.Is(err, errBadKeyPair) {
-						log.Debugln("Bad keypair encountered when doing xrootd certificate maintenance:", err)
-					} else if err != nil {
-						log.Warningf("Failed to update xrootd certificates based on file event %v: %v", event, err)
-					}
-				} else {
-					log.Panicln("Watcher returned an unknown event")
-				}
-			} else if chosen == 3 { // watcher.Errors
-				if !ok {
-					log.Panicln("Watcher error channel closed in xrootd maintenance routine; exiting")
-				}
-				if err, ok := recv.Interface().(error); ok {
-					log.Errorf("Watcher failure in the xrootd maintenance routine: %v", err)
-				} else {
-					log.Panicln("Watcher error channel has internal error; exiting")
-				}
-				time.Sleep(time.Second)
+	server_utils.LaunchWatcherMaintenance(
+		ctx,
+		filepath.Dir(param.Server_TLSCertificate.GetString()),
+		"xrootd maintenance",
+		sleepTime,
+		func(notifyEvent bool) error {
+			err := CopyXrootdCertificates()
+			if notifyEvent && errors.Is(err, errBadKeyPair) {
+				log.Debugln("Bad keypair encountered when doing xrootd certificate maintenance:", err)
+				return nil
 			}
-		}
-	}()
+			return err
+		},
+	)
 }
 
 func ConfigXrootd(origin bool) (string, error) {
