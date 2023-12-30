@@ -30,6 +30,7 @@ Origin:
   Multiuser: false
   EnableMacaroons: false
   EnableVoms: true
+  EnableUI: true
   SelfTest: true
 Monitoring:
   PortLower: 9930

@@ -20,15 +20,52 @@ package server_utils
 
 import (
 	"context"
+	"net/http"
 	"net/url"
 	"reflect"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
+
+// Wait until given `reqUrl` returns a HTTP 200.
+// Logging messages emitted will refer to `server` (e.g., origin, cache, director)
+func WaitUntilWorking(method, reqUrl, server string, expectedStatus int) error {
+	expiry := time.Now().Add(10 * time.Second)
+	success := false
+	logged := false
+	for !(success || time.Now().After(expiry)) {
+		time.Sleep(50 * time.Millisecond)
+		req, err := http.NewRequest(method, reqUrl, nil)
+		if err != nil {
+			return err
+		}
+		httpClient := http.Client{
+			Transport: config.GetTransport(),
+			Timeout:   50 * time.Millisecond,
+		}
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			if !logged {
+				log.Infoln("Failed to send request to "+server+"; likely server is not up (will retry in 50ms):", err)
+				logged = true
+			}
+		} else {
+			if resp.StatusCode == expectedStatus {
+				log.Debugln(server + " server appears to be functioning")
+				return nil
+			}
+			// We didn't get the expected status
+			return errors.Errorf("Received bad status code in reply to server ping: %d. Expected %d,", resp.StatusCode, expectedStatus)
+		}
+	}
+
+	return errors.New("Server did not startup after 10s of waiting")
+}
 
 // For calling from within the server. Returns the server's issuer URL/port
 func GetServerIssuerURL() (*url.URL, error) {

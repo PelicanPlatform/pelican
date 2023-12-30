@@ -298,6 +298,13 @@ type: bool
 default: true
 components: ["origin"]
 ---
+name: Origin.EnableUI
+description: >-
+  Indicate whether the origin should enable its web UI.
+type: bool
+default: true
+components: ["origin"]
+---
 name: Origin.EnableIssuer
 description: >-
   Enable the built-in issuer daemon for the origin.
@@ -651,6 +658,12 @@ description: >-
 type: string
 default: none
 components: ["origin", "director", "nsregistry"]
+---
+name: Server.Modules
+description: >-
+  A list of modules to enable when running pelican in `pelican serve` mode.
+type: stringSlice
+default: []
 ---
 name: Server.UIActivationCodeFile
 description: >-

@@ -26,5 +26,5 @@ import (
 )
 
 func fedServeStart( /*cmd*/ *cobra.Command /*args*/, []string) error {
-	return errors.New("'origin serve' command is not supported on Windows")
+	return errors.New("'serve' command is not supported on Windows")
 }

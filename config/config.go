@@ -164,6 +164,11 @@ func IsServerEnabled(testServer ServerType) bool {
 	return enabledServers.IsEnabled(testServer)
 }
 
+// Create a new, empty ServerType bitmask
+func NewServerType() ServerType {
+	return ServerType(0)
+}
+
 func (sType ServerType) String() string {
 	switch sType {
 	case CacheType:
@@ -176,6 +181,24 @@ func (sType ServerType) String() string {
 		return "Registry"
 	}
 	return "Unknown"
+}
+
+func (sType *ServerType) SetString(name string) bool {
+	switch strings.ToLower(name) {
+	case "cache":
+		*sType |= CacheType
+		return true
+	case "origin":
+		*sType |= OriginType
+		return true
+	case "director":
+		*sType |= DirectorType
+		return true
+	case "registry":
+		*sType |= RegistryType
+		return true
+	}
+	return false
 }
 
 // Based on the name of the current binary, determine the preferred "style"
