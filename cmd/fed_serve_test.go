@@ -20,13 +20,16 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"io"
+	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -34,7 +37,11 @@ import (
 
 func TestFedServePosixOrigin(t *testing.T) {
 	viper.Reset()
-	moduleMap := map[string]uint16{"registry": 8446, "director": 8445, "origin": 8443}
+	ports := modulePorts{
+		Registry: 8446,
+		Director: 8445,
+		Origin:   8443,
+	}
 
 	// Create our own temp directory (for some reason t.TempDir() does not play well with xrootd)
 	tmpPathPattern := "XRootD-Test_Origin*"
@@ -42,7 +49,7 @@ func TestFedServePosixOrigin(t *testing.T) {
 	require.NoError(t, err)
 
 	// Need to set permissions or the xrootd process we spawn won't be able to write PID/UID files
-	permissions := os.FileMode(0777)
+	permissions := os.FileMode(0755)
 	err = os.Chmod(tmpPath, permissions)
 	require.NoError(t, err)
 
@@ -67,22 +74,30 @@ func TestFedServePosixOrigin(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
-		err = fedServeInternal(ctx, moduleMap)
+		err = fedServeInternal(ctx, ports)
 		require.NoError(t, err)
 	}()
 	defer cancel()
 
-	time.Sleep(2 * time.Second)
-	hostname, err := os.Hostname()
+	desiredURL := "https://" + param.Server_Hostname.GetString() + ":8445/.well-known/openid-configuration"
+	err = server_utils.WaitUntilWorking("GET", desiredURL, "director", 200)
 	require.NoError(t, err)
 
-	curlString := "https://" + hostname + ":8445/.well-known/openid-configuration"
-
-	curl := exec.Command("curl", "-v", "-k", curlString)
-	out, err := curl.Output()
+	httpc := http.Client{
+		Transport: config.GetTransport(),
+	}
+	resp, err := httpc.Get(desiredURL)
 	require.NoError(t, err)
 
-	assert.Contains(t, string(out), "jwks_uri")
+	assert.Equal(t, resp.StatusCode, http.StatusOK)
 
-	viper.Reset()
+	responseBody, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	expectedResponse := struct {
+		JwksUri string `json:"jwks_uri"`
+	}{}
+	err = json.Unmarshal(responseBody, &expectedResponse)
+	require.NoError(t, err)
+
+	assert.NotEmpty(t, expectedResponse.JwksUri)
 }

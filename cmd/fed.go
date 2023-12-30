@@ -20,6 +20,7 @@ package main
 
 import (
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 var (
@@ -33,13 +34,16 @@ var (
 		 If the director or namespace registry are enabled, then ensure there is a corresponding url in the
 		 pelican.yaml file.
 
-		 NOTE: This currently doesn't guarantee support for the web UIs`,
+		 This feature doesn't currently support the web UIs`,
 		RunE: fedServeStart,
 	}
 )
 
 func init() {
-	serveCmd.Flags().StringSlice("modules", []string{}, "Modules to be started.")
+	serveCmd.Flags().StringSlice("module", []string{}, "Modules to be started.")
+	if err := viper.BindPFlag("Server.Modules", serveCmd.Flags().Lookup("module")); err != nil {
+		panic(err)
+	}
 	serveCmd.Flags().Uint16("reg-port", 8446, "Port for the namespace registry")
 	serveCmd.Flags().Uint16("director-port", 8445, "Port for the director")
 	serveCmd.Flags().Uint16("origin-port", 8443, "Port for the origin")

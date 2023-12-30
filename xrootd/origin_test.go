@@ -25,25 +25,22 @@ import (
 	"context"
 	"crypto/elliptic"
 	"fmt"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/daemon"
 	"github.com/pelicanplatform/pelican/origin_ui"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/utils"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
-	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/require"
 )
@@ -106,40 +103,6 @@ func originMockup(t *testing.T) context.CancelFunc {
 	return cancel
 }
 
-// Provide the method (eg GET) and endpoint to ping while waiting for
-// server pieces to spin up. Returns true when
-func serverRunning(t *testing.T, method string, endpoint string, successStatus int) (bool, error) {
-	testExpiry := time.Now().Add(10 * time.Second)
-	testSuccess := false
-	logged := false
-	for !(time.Now().After(testExpiry)) {
-		time.Sleep(50 * time.Millisecond)
-		req, err := http.NewRequest(method, endpoint, nil)
-		if err != nil {
-			return false, errors.Errorf("Failed to make request to endpoint %s: %v", endpoint, err)
-		}
-		httpClient := http.Client{
-			Transport: config.GetTransport(),
-			Timeout:   50 * time.Millisecond,
-		}
-		resp, err := httpClient.Do(req)
-		if err != nil {
-			if !logged {
-				log.Infof("Failed to send request to %s; likely, server is not up. Will continue to retry: %v", endpoint, err)
-				logged = true
-			}
-		} else {
-			if resp.StatusCode == successStatus {
-				testSuccess = true
-				break
-			}
-			// We didn't get a success status
-			return false, errors.Errorf("Received bad status code in reply to server ping: %d. Expected %d,", resp.StatusCode, successStatus)
-		}
-	}
-	return testSuccess, nil
-}
-
 func TestOrigin(t *testing.T) {
 	viper.Reset()
 
@@ -155,11 +118,9 @@ func TestOrigin(t *testing.T) {
 	defer cancel()
 
 	// In this case a 403 means its running
-	running, err := serverRunning(t, "GET", param.Origin_Url.GetString(), 403)
+	err := server_utils.WaitUntilWorking("GET", param.Origin_Url.GetString(), "xrootd", 403)
 	if err != nil {
-		t.Fatalf("Unsucessful test: Server encountered an error: %v", err)
-	} else if !running {
-		t.Fatalf("Unsucessful test: timeout while waiting for xrootd")
+		t.Fatalf("Unsuccessful test: Server encountered an error: %v", err)
 	}
 	fileTests := utils.TestFileTransferImpl{}
 	ok, err := fileTests.RunTests(param.Origin_Url.GetString(), param.Origin_Url.GetString(), utils.OriginSelfFileTest)
@@ -194,11 +155,9 @@ func TestS3OriginConfig(t *testing.T) {
 	// Check if MinIO is running (by default at localhost:9000)
 	endpoint := "localhost:9000"
 	// Expect a 403 from this endpoint -- that means it's running
-	running, err := serverRunning(t, "GET", fmt.Sprintf("http://%s", endpoint), 403)
+	err = server_utils.WaitUntilWorking("GET", fmt.Sprintf("http://%s", endpoint), "xrootd", 403)
 	if err != nil {
-		t.Fatalf("Unsucessful test: Server encountered an error: %v", err)
-	} else if !running {
-		t.Fatalf("Unsucessful test: timeout while waiting for xrootd")
+		t.Fatalf("Unsuccessful test: Server encountered an error: %v", err)
 	}
 
 	defer func() {
@@ -269,11 +228,9 @@ func TestS3OriginConfig(t *testing.T) {
 	originEndpoint := fmt.Sprintf("%s/%s/%s/%s/%s", param.Origin_Url.GetString(), serviceName, regionName, bucketName, objectName)
 	// Until we sort out the things we mentioned above, we should expect a 403 because we don't try to pass tokens
 	// and we don't actually export any keys for token validation.
-	running, err = serverRunning(t, "GET", originEndpoint, 403)
+	err = server_utils.WaitUntilWorking("GET", originEndpoint, "xrootd", 403)
 	if err != nil {
 		t.Fatalf("Unsucessful test: Server encountered an error: %v", err)
-	} else if !running {
-		t.Fatalf("Unsucessful test: timeout while waiting for xrootd")
 	}
 
 	// One other quick check to do is that the namespace was correctly parsed:
