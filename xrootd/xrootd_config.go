@@ -1,21 +1,45 @@
+/***************************************************************
+ *
+ * Copyright (C) 2023, Pelican Project, Morgridge Institute for Research
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you
+ * may not use this file except in compliance with the License.  You may
+ * obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ ***************************************************************/
+
 package xrootd
 
 import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	_ "embed"
 	"encoding/base64"
+	builtin_errors "errors"
 	"fmt"
+	"io"
+	"io/fs"
 	"net/url"
 	"os"
 	"path"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"text/template"
 	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/metrics"
@@ -35,6 +59,8 @@ var (
 	xrootdCacheCfg string
 	//go:embed resources/robots.txt
 	robotsTxt string
+
+	errBadKeyPair error = errors.New("Bad X509 keypair")
 )
 
 type (
@@ -313,6 +339,10 @@ func CheckXrootdEnv(server server_utils.XRootDServer) error {
 		}
 	}
 
+	if err = CopyXrootdCertificates(); err != nil {
+		return err
+	}
+
 	if server.GetServerType().IsEnabled(config.OriginType) {
 		exportPath, err = CheckOriginXrootdEnv(exportPath, uid, gid, groupname)
 	} else {
@@ -369,6 +399,132 @@ func CheckXrootdEnv(server server_utils.XRootDServer) error {
 	}
 
 	return nil
+}
+
+// Copies the server certificate/key files into the XRootD runtime
+// directory.  Combines the two files into a single one so the new
+// certificate shows up atomically from XRootD's perspective.
+// Adjusts the ownership and mode to match that expected
+// by the XRootD framework.
+func CopyXrootdCertificates() error {
+	user, err := config.GetDaemonUserInfo()
+	if err != nil {
+		return errors.Wrap(err, "Unable to copy certificates to xrootd runtime directory; failed xrootd user lookup")
+	}
+
+	certFile := param.Server_TLSCertificate.GetString()
+	certKey := param.Server_TLSKey.GetString()
+	if _, err = tls.LoadX509KeyPair(certFile, certKey); err != nil {
+		return builtin_errors.Join(err, errBadKeyPair)
+	}
+
+	destination := filepath.Join(param.Xrootd_RunLocation.GetString(), "copied-tls-creds.crt")
+	tmpName := destination + ".tmp"
+	destFile, err := os.OpenFile(tmpName, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, fs.FileMode(0400))
+	if err != nil {
+		return errors.Wrap(err, "Failure when opening temporary certificate key pair file for xrootd")
+	}
+	defer destFile.Close()
+
+	if err = os.Chown(tmpName, user.Uid, user.Gid); err != nil {
+		return errors.Wrap(err, "Failure when chown'ing certificate key pair file for xrootd")
+	}
+
+	srcFile, err := os.Open(param.Server_TLSCertificate.GetString())
+	if err != nil {
+		return errors.Wrap(err, "Failure when opening source certificate for xrootd")
+	}
+	defer srcFile.Close()
+
+	if _, err = io.Copy(destFile, srcFile); err != nil {
+		return errors.Wrapf(err, "Failure when copying source certificate for xrootd")
+	}
+
+	if _, err = destFile.Write([]byte{'\n', '\n'}); err != nil {
+		return errors.Wrap(err, "Failure when writing into copied key pair for xrootd")
+	}
+
+	srcKeyFile, err := os.Open(param.Server_TLSKey.GetString())
+	if err != nil {
+		return errors.Wrap(err, "Failure when opening source key for xrootd")
+	}
+	defer srcKeyFile.Close()
+
+	if _, err = io.Copy(destFile, srcKeyFile); err != nil {
+		return errors.Wrapf(err, "Failure when copying source key for xrootd")
+	}
+
+	if err = os.Rename(tmpName, destination); err != nil {
+		return errors.Wrapf(err, "Failure when moving key pair for xrootd")
+	}
+
+	return nil
+}
+
+// Launch a separate goroutine that performs the XRootD maintenance tasks.
+// For maintenance that is periodic, `sleepTime` is the maintenance period.
+func LaunchXrootdMaintenance(ctx context.Context, sleepTime time.Duration) {
+	select_count := 4
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		select_count -= 2
+	} else if err = watcher.Add(filepath.Dir(param.Server_TLSCertificate.GetString())); err != nil {
+		select_count -= 2
+	}
+	cases := make([]reflect.SelectCase, select_count)
+	ticker := time.NewTicker(sleepTime)
+	cases[0].Dir = reflect.SelectRecv
+	cases[0].Chan = reflect.ValueOf(ticker.C)
+	cases[1].Dir = reflect.SelectRecv
+	cases[1].Chan = reflect.ValueOf(ctx.Done())
+	if err == nil {
+		cases[2].Dir = reflect.SelectRecv
+		cases[2].Chan = reflect.ValueOf(watcher.Events)
+		cases[3].Dir = reflect.SelectRecv
+		cases[3].Chan = reflect.ValueOf(watcher.Errors)
+	}
+	go func() {
+		defer watcher.Close()
+		for {
+			chosen, recv, ok := reflect.Select(cases)
+			if chosen == 0 {
+				if !ok {
+					log.Panicln("Ticker failed in the xrootd maintenance routine; exiting")
+				}
+				err := CopyXrootdCertificates()
+				if err != nil {
+					log.Warningln("Failed to update xrootd certificates during maintenance:", err)
+				}
+			} else if chosen == 1 {
+				log.Infoln("XRootD maintenance thread has been cancelled.  Shutting down")
+				return
+			} else if chosen == 2 { // watcher.Events
+				if !ok {
+					log.Panicln("Watcher events failed in xrootd maintenance routine; exiting")
+				}
+				if event, ok := recv.Interface().(fsnotify.Event); ok {
+					log.Debugf("Got filesystem event (%v); will update the xrootd certificates", event)
+					if err = CopyXrootdCertificates(); errors.Is(err, errBadKeyPair) {
+						log.Debugln("Bad keypair encountered when doing xrootd certificate maintenance:", err)
+					} else if err != nil {
+						log.Warningf("Failed to update xrootd certificates based on file event %v: %v", event, err)
+					}
+				} else {
+					log.Panicln("Watcher returned an unknown event")
+				}
+			} else if chosen == 3 { // watcher.Errors
+				if !ok {
+					log.Panicln("Watcher error channel closed in xrootd maintenance routine; exiting")
+				}
+				if err, ok := recv.Interface().(error); ok {
+					log.Errorf("Watcher failure in the xrootd maintenance routine: %v", err)
+				} else {
+					log.Panicln("Watcher error channel has internal error; exiting")
+				}
+				time.Sleep(time.Second)
+			}
+		}
+	}()
 }
 
 func ConfigXrootd(origin bool) (string, error) {

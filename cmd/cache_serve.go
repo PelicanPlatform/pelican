@@ -25,6 +25,7 @@ import (
 	"encoding/json"
 	"net/url"
 	"sync"
+	"time"
 
 	"github.com/pelicanplatform/pelican/cache_ui"
 	"github.com/pelicanplatform/pelican/config"
@@ -132,6 +133,8 @@ func serveCache( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	if err != nil {
 		return err
 	}
+
+	xrootd.LaunchXrootdMaintenance(shutdownCtx, 2*time.Minute)
 
 	log.Info("Launching cache")
 	launchers, err := xrootd.ConfigureLaunchers(false, configPath, false)

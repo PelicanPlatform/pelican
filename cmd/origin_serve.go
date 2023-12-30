@@ -24,6 +24,7 @@ import (
 	"context"
 	_ "embed"
 	"sync"
+	"time"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/daemon"
@@ -115,6 +116,8 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	if param.Origin_SelfTest.GetBool() {
 		go origin_ui.PeriodicSelfTest()
 	}
+
+	xrootd.LaunchXrootdMaintenance(shutdownCtx, 2*time.Minute)
 
 	privileged := param.Origin_Multiuser.GetBool()
 	launchers, err := xrootd.ConfigureLaunchers(privileged, configPath, param.Origin_EnableCmsd.GetBool())
