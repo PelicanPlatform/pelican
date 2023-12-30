@@ -202,25 +202,30 @@ func TestEnabledServers(t *testing.T) {
 		for _, server := range allServerTypes {
 			enabledServers = 0
 			// We didn't call setEnabledServer as it will only set once per process
-			enabledServers.Set([]ServerType{server})
+			enabledServers.SetList([]ServerType{server})
 			assert.True(t, IsServerEnabled(server))
 		}
 	})
 
 	t.Run("enable-multiple-servers", func(t *testing.T) {
 		enabledServers = 0
-		enabledServers.Set([]ServerType{OriginType, CacheType})
+		enabledServers.SetList([]ServerType{OriginType, CacheType})
 		assert.True(t, IsServerEnabled(OriginType))
 		assert.True(t, IsServerEnabled(CacheType))
 	})
 
 	t.Run("setEnabledServer-only-set-once", func(t *testing.T) {
 		enabledServers = 0
-		setEnabledServer([]ServerType{OriginType, CacheType})
+		sType := OriginType
+		sType.Set(CacheType)
+		setEnabledServer(sType)
 		assert.True(t, IsServerEnabled(OriginType))
 		assert.True(t, IsServerEnabled(CacheType))
 
-		setEnabledServer([]ServerType{DirectorType, RegistryType})
+		sType.Clear()
+		sType.Set(DirectorType)
+		sType.Set(RegistryType)
+		setEnabledServer(sType)
 		assert.True(t, IsServerEnabled(OriginType))
 		assert.True(t, IsServerEnabled(CacheType))
 		assert.False(t, IsServerEnabled(DirectorType))

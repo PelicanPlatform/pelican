@@ -19,6 +19,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"os/signal"
 	"syscall"
@@ -35,6 +36,8 @@ import (
 
 func serveRegistry( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	log.Info("Initializing the namespace registry's database...")
+	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
+	defer shutdownCancel()
 
 	// Initialize the registry's sqlite database
 	err := registry.InitializeDB()
@@ -76,7 +79,12 @@ func serveRegistry( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	// more complicated routing scenarios where we can't just use
 	// a wildcard. It removes duplicate / from the resource.
 	//engine.RemoveExtraSlash = true
-	go web_ui.RunEngine(engine)
+	go func() {
+		if err := web_ui.RunEngine(shutdownCtx, engine); err != nil {
+			log.Panicln("Failure when running the web engine:", err)
+		}
+		shutdownCancel()
+	}()
 
 	go web_ui.InitServerWebLogin()
 
@@ -84,6 +92,7 @@ func serveRegistry( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 	sig := <-sigs
 	_ = sig
+	shutdownCancel()
 
 	return nil
 }
