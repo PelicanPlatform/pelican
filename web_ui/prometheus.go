@@ -245,10 +245,15 @@ func (a LogrusAdapter) Log(keyvals ...interface{}) error {
 			} else if key == "err" {
 				logErr, ok := val.(error)
 				if !ok {
-					a.Logger.Error("log: invalid error log message")
-					return errors.New("log: invalid error log message")
+					if logStr, ok := val.(string); ok {
+						msg = logStr
+					} else {
+						a.Logger.Errorf("prometheus log adapter: invalid incoming error log message (err-tagged key doesn't have an error object attached).  Error is %v; type %T", val, val)
+						return errors.New("log: invalid error log message")
+					}
+				} else {
+					msg = logErr.Error()
 				}
-				msg = logErr.Error()
 			} else {
 				fields[key] = val
 			}
