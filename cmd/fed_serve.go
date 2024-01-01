@@ -80,6 +80,13 @@ func fedServeInternal(ctx context.Context, modules config.ServerType, egrp *errg
 		return shutdownCancel, errors.Wrap(err, "Failure when configuring the server")
 	}
 
+	if param.Server_EnableUI.GetBool() {
+		// Set up necessary APIs to support Web UI, including auth and metrics
+		if err := web_ui.ConfigureServerWebAPI(ctx, engine, egrp); err != nil {
+			return shutdownCancel, err
+		}
+	}
+
 	if modules.IsEnabled(config.RegistryType) {
 
 		viper.Set("Federation.RegistryURL", param.Server_ExternalWebUrl.GetString())
@@ -134,7 +141,7 @@ func fedServeInternal(ctx context.Context, modules config.ServerType, egrp *errg
 		return nil
 	})
 
-	if err = server_utils.WaitUntilWorking(ctx, "GET", param.Server_ExternalWebUrl.GetString()+"/view", "Web UI", http.StatusNotFound); err != nil {
+	if err = server_utils.WaitUntilWorking(ctx, "GET", param.Server_ExternalWebUrl.GetString()+"/view", "Web UI", http.StatusOK); err != nil {
 		log.Errorln("Web engine startup appears to have failed:", err)
 	}
 
@@ -149,6 +156,10 @@ func fedServeInternal(ctx context.Context, modules config.ServerType, egrp *errg
 	}
 
 	if param.Server_EnableUI.GetBool() {
+		if err = web_ui.ConfigureEmbeddedPrometheus(ctx, engine); err != nil {
+			return shutdownCancel, errors.Wrap(err, "Failed to configure embedded prometheus instance")
+		}
+
 		log.Info("Starting web login...")
 		egrp.Go(func() error { return web_ui.InitServerWebLogin(ctx) })
 	}

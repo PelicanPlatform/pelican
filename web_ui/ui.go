@@ -153,11 +153,6 @@ func configureMetrics(ctx context.Context, engine *gin.Engine) error {
 	// Add authorization to /metric endpoint
 	engine.Use(promMetricAuthHandler)
 
-	err := ConfigureEmbeddedPrometheus(ctx, engine)
-	if err != nil {
-		return errors.Wrap(err, "Failed to configure metrics")
-	}
-
 	prometheusMonitor := ginprometheus.NewPrometheus("gin")
 	prometheusMonitor.Use(engine)
 

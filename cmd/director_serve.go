@@ -71,6 +71,10 @@ func serveDirector(cmd *cobra.Command, args []string) error {
 	})
 
 	if param.Server_EnableUI.GetBool() {
+		if err = web_ui.ConfigureEmbeddedPrometheus(ctx, engine); err != nil {
+			return errors.Wrap(err, "Failed to configure embedded prometheus instance")
+		}
+
 		log.Info("Starting web engine...")
 		if err = web_ui.InitServerWebLogin(ctx); err != nil {
 			return err

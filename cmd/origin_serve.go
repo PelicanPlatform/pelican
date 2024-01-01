@@ -76,6 +76,10 @@ func serveOrigin(cmd *cobra.Command, args []string) error {
 	}()
 
 	if param.Server_EnableUI.GetBool() {
+		if err = web_ui.ConfigureEmbeddedPrometheus(ctx, engine); err != nil {
+			return errors.Wrap(err, "Failed to configure embedded prometheus instance")
+		}
+
 		if err := web_ui.InitServerWebLogin(ctx); err != nil {
 			log.Panicln("Failure when initializing the web login:", err)
 		}
