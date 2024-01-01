@@ -134,6 +134,10 @@ func fedServeInternal(ctx context.Context, modules config.ServerType, egrp *errg
 		return nil
 	})
 
+	if err = server_utils.WaitUntilWorking(ctx, "GET", param.Server_ExternalWebUrl.GetString()+"/view", "Web UI", http.StatusNotFound); err != nil {
+		log.Errorln("Web engine startup appears to have failed:", err)
+	}
+
 	log.Debug("Finishing origin server configuration")
 	if err = launchers.OriginServeFinish(ctx, egrp); err != nil {
 		return shutdownCancel, err
