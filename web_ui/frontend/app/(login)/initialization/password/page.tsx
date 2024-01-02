@@ -81,7 +81,7 @@ export default function Home() {
                         Set Password
                     </Typography>
                     <Typography textAlign={"center"} variant={"h6"} component={"p"}>
-                        Set root metrics password
+                        This will become the admin password for this Pelican endpoint
                     </Typography>
                 </Box>
                 <Box pt={2} mx={"auto"}>
