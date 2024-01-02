@@ -34,6 +34,7 @@ import (
 	"path/filepath"
 	"strings"
 	"text/template"
+	"unicode"
 
 	"github.com/go-ini/ini"
 	"github.com/pelicanplatform/pelican/config"
@@ -86,6 +87,67 @@ var (
 	//go:embed resources/scitokens.cfg
 	scitokensCfgTemplate string
 )
+
+// Remove a trailing carriage return from a slice.  Used by scanLinesWithCont
+func dropCR(data []byte) []byte {
+	if len(data) > 0 && data[len(data)-1] == '\r' {
+		return data[0 : len(data)-1]
+	}
+	return data
+}
+
+// Scan through the lines of a file, respecting line continuation characters.  That is,
+//
+// ```
+// foo \
+// bar
+// ```
+//
+// Would be parsed as a single line, `foo bar`.
+//
+// Follows the ScanFunc interface defined by bufio.
+func ScanLinesWithCont(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	if atEOF && len(data) == 0 {
+		return 0, nil, nil
+	}
+	curData := data
+	for {
+		firstControl := bytes.IndexAny(curData, "\\\n")
+		if firstControl < 0 {
+			if atEOF {
+				// EOF and no more control characters; gobble up the rest
+				token = append(token, curData...)
+				advance += len(curData)
+				return
+			} else {
+				// Not the end of the stream -- ask for more data to see if we get a full line.
+				return 0, nil, nil
+			}
+		} else if curData[firstControl] == '\\' {
+			// There's a line continuation.  Ignore the rest of the whitespace, advance to new line.
+			token = append(token, curData[0:firstControl]...)
+			idx := firstControl + 1
+			for {
+				if idx == len(curData) {
+					break
+				} else if curData[idx] == '\n' {
+					idx += 1
+					break
+				} else if unicode.IsSpace(rune(curData[idx])) {
+					idx += 1
+				} else {
+					return 0, nil, errors.Errorf("invalid character after line continuation: %s", string(curData[idx]))
+				}
+			}
+			curData = curData[idx:]
+			advance += idx
+		} else { // must be a newline.  Return.
+			token = dropCR(append(token, curData[0:firstControl]...))
+			advance += firstControl + 1
+			return
+		}
+	}
+}
 
 // Given a reference to a Scitokens configuration, write it out to a known location
 // on disk for the xrootd server
@@ -144,6 +206,7 @@ func EmitAuthfile(server server_utils.XRootDServer) error {
 	}
 
 	sc := bufio.NewScanner(strings.NewReader(string(contents)))
+	sc.Split(ScanLinesWithCont)
 	output := new(bytes.Buffer)
 	foundPublicLine := false
 	for sc.Scan() {

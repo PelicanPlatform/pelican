@@ -21,12 +21,15 @@
 package xrootd
 
 import (
+	"bufio"
 	"context"
 	_ "embed"
 	"fmt"
+	"io/fs"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/pelicanplatform/pelican/cache_ui"
@@ -65,7 +68,53 @@ var (
 
 	//go:embed resources/test-scitokens-cache-empty.cfg
 	cacheEmptyOutput string
+
+	sampleMultilineOutput = `foo \
+	bar
+	baz
+	abc \`
+
+	sampleMultilineOutputParsed = []string{"foo \tbar", "\tbaz", "\tabc "}
+
+	cacheAuthfileMultilineInput = `
+u * /user/ligo -rl \
+/Gluex rl \
+/NSG/PUBLIC rl \
+/VDC/PUBLIC rl`
+
+	cacheAuthfileOutput = "u * /user/ligo -rl /Gluex rl /NSG/PUBLIC rl /VDC/PUBLIC rl "
 )
+
+func TestAuthfileMultiline(t *testing.T) {
+	sc := bufio.NewScanner(strings.NewReader(sampleMultilineOutput))
+	sc.Split(ScanLinesWithCont)
+	idx := 0
+	for sc.Scan() {
+		require.Less(t, idx, len(sampleMultilineOutputParsed))
+		assert.Equal(t, string(sampleMultilineOutputParsed[idx]), sc.Text())
+		idx += 1
+	}
+	assert.Equal(t, idx, len(sampleMultilineOutputParsed))
+}
+
+func TestEmitAuthfile(t *testing.T) {
+	dirName := t.TempDir()
+	viper.Reset()
+	viper.Set("Xrootd.Authfile", filepath.Join(dirName, "authfile"))
+	viper.Set("Xrootd.RunLocation", dirName)
+	server := &cache_ui.CacheServer{}
+
+	err := os.WriteFile(filepath.Join(dirName, "authfile"), []byte(cacheAuthfileMultilineInput), fs.FileMode(0600))
+	require.NoError(t, err)
+
+	err = EmitAuthfile(server)
+	require.NoError(t, err)
+
+	contents, err := os.ReadFile(filepath.Join(dirName, "authfile-cache-generated"))
+	require.NoError(t, err)
+
+	assert.Equal(t, cacheAuthfileOutput, string(contents))
+}
 
 func TestEmitCfg(t *testing.T) {
 	dirname := t.TempDir()
