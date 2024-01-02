@@ -21,7 +21,6 @@ package director
 import (
 	"archive/tar"
 	"compress/gzip"
-	"errors"
 	"fmt"
 	"io"
 	"math/rand"
@@ -37,9 +36,11 @@ import (
 	"time"
 
 	"github.com/oschwald/geoip2-golang"
-	"github.com/pelicanplatform/pelican/param"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
+
+	"github.com/pelicanplatform/pelican/param"
 )
 
 const (
@@ -59,6 +60,19 @@ type (
 	SwapMaps []SwapMap
 )
 
+type Coordinate struct {
+	Lat  float64 `mapstructure:"lat"`
+	Long float64 `mapstructure:"long"`
+}
+
+type GeoIPOverride struct {
+	IP         string     `mapstructure:"IP"`
+	Coordinate Coordinate `mapstructure:"Coordinate"`
+}
+
+var invalidOverrideLogOnce = map[string]bool{}
+var geoIPOverrides []GeoIPOverride
+
 func (me SwapMaps) Len() int {
 	return len(me)
 }
@@ -71,8 +85,64 @@ func (me SwapMaps) Swap(left, right int) {
 	me[left], me[right] = me[right], me[left]
 }
 
+// Check for any pre-configured IP-to-lat/long overrides. If the passed address
+// matches an override IP (either directly or via CIDR masking), then we use the
+// configured lat/long from the override instead of relying on MaxMind.
+// NOTE: We don't return an error because if checkOverrides encounters an issue,
+// we still have GeoIP to fall back on.
+func checkOverrides(addr net.IP) (coordinate *Coordinate) {
+	// Unmarshal the values, but only the first time we run through this block
+	if geoIPOverrides == nil {
+		err := param.GeoIPOverrides.Unmarshal(&geoIPOverrides)
+		if err != nil {
+			log.Warningf("Error while unmarshaling GeoIP Overrides: %v", err)
+		}
+	}
+
+	for _, geoIPOverride := range geoIPOverrides {
+		// Check for regular IP addresses before CIDR
+		overrideIP := net.ParseIP(geoIPOverride.IP)
+		if overrideIP == nil {
+			// The IP is malformed
+			if !invalidOverrideLogOnce[geoIPOverride.IP] && !strings.Contains(geoIPOverride.IP, "/") {
+				// Don't return here, because we have more to check.
+				// Do provide a notice to the user, however.
+				log.Warningf("Failed to parse configured GeoIPOverride address (%s). Unable to use for GeoIP resolution!", geoIPOverride.IP)
+				invalidOverrideLogOnce[geoIPOverride.IP] = true
+			}
+		}
+		if overrideIP.Equal(addr) {
+			return &geoIPOverride.Coordinate
+		}
+
+		// Alternatively, we can match by CIDR blocks
+		if strings.Contains(geoIPOverride.IP, "/") {
+			_, ipNet, err := net.ParseCIDR(geoIPOverride.IP)
+			if err != nil {
+				if !invalidOverrideLogOnce[geoIPOverride.IP] {
+					// Same reason as above for not returning.
+					log.Warningf("Failed to parse configured GeoIPOverride CIDR address (%s): %v. Unable to use for GeoIP resolution!", geoIPOverride.IP, err)
+					invalidOverrideLogOnce[geoIPOverride.IP] = true
+				}
+				continue
+			}
+			if ipNet.Contains(addr) {
+				return &geoIPOverride.Coordinate
+			}
+		}
+	}
+
+	return nil
+}
+
 func GetLatLong(addr netip.Addr) (lat float64, long float64, err error) {
 	ip := net.IP(addr.AsSlice())
+	override := checkOverrides(ip)
+	if override != nil {
+		log.Infof("Overriding Geolocation of detected IP (%s) to lat:long %f:%f based on configured overrides", ip.String(), (override.Lat), override.Long)
+		return override.Lat, override.Long, nil
+	}
+
 	reader := maxMindReader.Load()
 	if reader == nil {
 		err = errors.New("No GeoIP database is available")
@@ -84,13 +154,19 @@ func GetLatLong(addr netip.Addr) (lat float64, long float64, err error) {
 	}
 	lat = record.Location.Latitude
 	long = record.Location.Longitude
+
+	if lat == 0 && long == 0 {
+		log.Infof("GeoIP Resolution of the address %s resulted in the nul lat/long.", ip.String())
+	}
 	return
 }
 
 func SortServers(addr netip.Addr, ads []ServerAd) ([]ServerAd, error) {
 	distances := make(SwapMaps, len(ads))
 	lat, long, err := GetLatLong(addr)
-	isInvalid := err != nil
+	// If we don't get a valid coordinate set for the incoming address, either because
+	// of an error or the null address, we randomize the output
+	isInvalid := (err != nil || (lat == 0 && long == 0))
 	for idx, ad := range ads {
 		if isInvalid || (ad.Latitude == 0 && ad.Longitude == 0) {
 			// Unable to compute distances for this server; just do random distances.
