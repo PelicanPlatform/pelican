@@ -2,6 +2,7 @@ package director
 
 import (
 	"bytes"
+	_ "embed"
 	"net"
 	"strings"
 	"testing"
@@ -11,6 +12,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// Geo Override Yaml mockup
+//
+//go:embed resources/geoip_overrides.yaml
+var yamlMockup string
+
 func TestCheckOverrides(t *testing.T) {
 	viper.Reset()
 
@@ -19,52 +25,6 @@ func TestCheckOverrides(t *testing.T) {
 	logOutput := &(bytes.Buffer{})
 	log.SetOutput(logOutput)
 	log.SetLevel(log.DebugLevel)
-
-	// Mockup of the YAML we need to kick off the tests. Note that if you mess with it, you need to
-	// make sure the indentations are spaces.
-	yamlMockup := `
-GeoIPOverrides:
-  # Valid IPv4
-  - IP: "192.168.0.1"
-    Coordinate:
-      Lat: 123.4
-      Long: 987.6
-  # Valid IPv4 CIDR
-  - IP: "10.0.0.0/24"
-    Coordinate:
-      Lat: 43.073904
-      Long: -89.384859
-  # Malformed IPv4
-  - IP: "192.168.0"
-    Coordinate:
-      Lat: 1000.0
-      Long: 2000.0
-  # Malformed IPv4 CIDR
-  - IP: "10.0.0./24"
-    Coordinate:
-      Lat: 1000.0
-      Long: 2000.0
-  # Valid IPv6
-  - IP: "FC00:0000:0000:0000:0000:0000:0000:0001"
-    Coordinate:
-      Lat: 123.4
-      Long: 987.6
-  # Valid IPv6
-  - IP: "FD00::FAB2/112"
-    Coordinate:
-      Lat: 43.073904
-      Long: -89.384859
-  # Malformed IPv6
-  - IP: "FD00::000G"
-    Coordinate:
-      Lat: 1000.0
-      Long: 2000.0
-  # Malformed IPv6
-  - IP: "FD00::000F/11S"
-    Coordinate:
-      Lat: 1000.0
-      Long: 2000.0
-`
 
 	viper.SetConfigType("yaml")
 	err := viper.ReadConfig(strings.NewReader(yamlMockup))
