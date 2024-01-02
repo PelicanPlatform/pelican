@@ -382,7 +382,7 @@ func TestDiscoverOriginCache(t *testing.T) {
 	viper.Set("IssuerKey", kfile)
 
 	config.InitConfig()
-	err := config.InitServer([]config.ServerType{config.DirectorType}, config.DirectorType)
+	err := config.InitServer(config.DirectorType)
 	require.NoError(t, err)
 
 	// Generate a private key to use for the test

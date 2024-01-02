@@ -57,7 +57,7 @@ func TestPrometheusProtectionCookieAuth(t *testing.T) {
 	//Setup a private key
 	viper.Set("IssuerKey", kfile)
 	config.InitConfig()
-	err := config.InitServer([]config.ServerType{config.OriginType}, config.OriginType)
+	err := config.InitServer(config.OriginType)
 	require.NoError(t, err)
 
 	w := httptest.NewRecorder()
@@ -135,7 +135,7 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 	viper.Set("IssuerKey", kfile)
 
 	config.InitConfig()
-	err := config.InitServer([]config.ServerType{config.OriginType}, config.OriginType)
+	err := config.InitServer(config.OriginType)
 	require.NoError(t, err)
 
 	issuerUrl := param.Server_ExternalWebUrl.GetString()

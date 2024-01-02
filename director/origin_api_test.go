@@ -34,7 +34,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 	viper.Set("Federation.DirectorURL", "https://director-url.org")
 
 	config.InitConfig()
-	err := config.InitServer([]config.ServerType{config.DirectorType}, config.DirectorType)
+	err := config.InitServer(config.DirectorType)
 	require.NoError(t, err)
 
 	kSet, err := config.GetIssuerPublicJWKS()
@@ -128,7 +128,7 @@ func TestCreateAdvertiseToken(t *testing.T) {
 	// Generate a private key
 	viper.Set("IssuerKey", kfile)
 	config.InitConfig()
-	err := config.InitServer([]config.ServerType{config.DirectorType}, config.DirectorType)
+	err := config.InitServer(config.DirectorType)
 	require.NoError(t, err)
 
 	// Test without a namsepace set and check to see if it returns the expected error
