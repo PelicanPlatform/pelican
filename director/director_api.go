@@ -19,21 +19,18 @@
 package director
 
 import (
-	"encoding/json"
-	"fmt"
-	"io"
-	"net/http"
-	"net/url"
+	"context"
 	"strings"
 	"time"
 
+	"github.com/jellydator/ttlcache/v3"
 	"github.com/lestrrat-go/jwx/v2/jwa"
-	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
 )
 
 // List all namespaces from origins registered at the director
@@ -65,73 +62,6 @@ func ListServerAds(serverTypes []ServerType) []ServerAd {
 		}
 	}
 	return ads
-}
-
-// Return director's public JWK for token verification. This function can be called
-// on any server (director/origin/registry) as long as the Federation_DirectorUrl is set
-func LoadDirectorPublicKey() (jwk.Key, error) {
-	directorDiscoveryUrlStr := param.Federation_DirectorUrl.GetString()
-	if len(directorDiscoveryUrlStr) == 0 {
-		return nil, errors.Errorf("Director URL is unset; Can't load director's public key")
-	}
-	log.Debugln("Director's discovery URL:", directorDiscoveryUrlStr)
-	directorDiscoveryUrl, err := url.Parse(directorDiscoveryUrlStr)
-	if err != nil {
-		return nil, errors.Wrap(err, fmt.Sprintln("Invalid director URL:", directorDiscoveryUrlStr))
-	}
-	directorDiscoveryUrl.Scheme = "https"
-	directorDiscoveryUrl.Path = directorDiscoveryUrl.Path + "/.well-known/pelican-configuration"
-
-	tr := config.GetTransport()
-	client := &http.Client{Transport: tr}
-
-	req, err := http.NewRequest(http.MethodGet, directorDiscoveryUrl.String(), nil)
-	if err != nil {
-		return nil, errors.Wrap(err, fmt.Sprintln("Failure when doing director metadata request creation for: ", directorDiscoveryUrl))
-	}
-
-	result, err := client.Do(req)
-	if err != nil {
-		return nil, errors.Wrap(err, fmt.Sprintln("Failure when doing director metadata lookup to: ", directorDiscoveryUrl))
-	}
-
-	if result.Body != nil {
-		defer result.Body.Close()
-	}
-
-	body, err := io.ReadAll(result.Body)
-	if err != nil {
-		return nil, errors.Wrap(err, fmt.Sprintln("Failure when doing director metadata read to: ", directorDiscoveryUrl))
-	}
-
-	metadata := DiscoveryResponse{}
-
-	err = json.Unmarshal(body, &metadata)
-	if err != nil {
-		return nil, errors.Wrap(err, fmt.Sprintln("Failure when parsing director metadata at: ", directorDiscoveryUrl))
-	}
-
-	jwksUri := metadata.JwksUri
-
-	response, err := client.Get(jwksUri)
-	if err != nil {
-		return nil, errors.Wrap(err, fmt.Sprintln("Failure when requesting director Jwks URI: ", jwksUri))
-	}
-	defer response.Body.Close()
-	contents, err := io.ReadAll(response.Body)
-	if err != nil {
-		return nil, errors.Wrap(err, fmt.Sprintln("Failure when requesting director Jwks URI: ", jwksUri))
-	}
-	keys, err := jwk.Parse(contents)
-	if err != nil {
-		return nil, errors.Wrap(err, fmt.Sprintln("Failure when parsing director's jwks: ", jwksUri))
-	}
-	key, ok := keys.Key(0)
-	if !ok {
-		return nil, errors.Wrap(err, fmt.Sprintln("Failure when getting director's first public key: ", jwksUri))
-	}
-
-	return key, nil
 }
 
 // Create a token for director's Prometheus instance to access
@@ -174,10 +104,10 @@ func CreateDirectorSDToken() (string, error) {
 // correct scope for accessing the service discovery endpoint. This function
 // is intended to be called on the same director server that issues the token.
 func VerifyDirectorSDToken(strToken string) (bool, error) {
-	// TODO: We might want to change this to ComputeExternalAddress() instead
-	// so that director admin don't need to specify Federation_DirectorUrl to get
-	// director working
-	directorURL := param.Federation_DirectorUrl.GetString()
+	// This token is essentialled an "issuer"/server itself issued token and
+	// the server happended to be a director. This allows us to just follow
+	// IssuerCheck logic for this token
+	directorURL := param.Server_ExternalWebUrl.GetString()
 	token, err := jwt.Parse([]byte(strToken), jwt.WithVerify(false))
 	if err != nil {
 		return false, err
@@ -218,27 +148,17 @@ func VerifyDirectorSDToken(strToken string) (bool, error) {
 }
 
 // Create a token for director's Prometheus scraper to access discovered
-// origins /metrics endpoint. This function is intended to be called on
+// origins and caches `/metrics` endpoint. This function is intended to be called on
 // a director server
 func CreateDirectorScrapeToken() (string, error) {
 	// We assume this function is only called on a director server,
 	// the external address of which should be the director's URL
-	directorURL := "https://" + config.ComputeExternalAddress()
+	directorURL := param.Server_ExternalWebUrl.GetString()
 	tokenExpireTime := param.Monitoring_TokenExpiresIn.GetDuration()
 
-	ads := ListServerAds([]ServerType{OriginType, CacheType})
-	aud := make([]string, 0)
-	for _, ad := range ads {
-		if ad.WebURL.String() != "" {
-			aud = append(aud, ad.WebURL.String())
-		}
-	}
-
 	tok, err := jwt.NewBuilder().
-		Claim("scope", "pelican.directorScrape").
-		Issuer(directorURL).
-		// The audience of this token is all origins/caches that have WebURL set in their serverAds
-		Audience(aud).
+		Claim("scope", "monitoring.scrape").
+		Issuer(directorURL). // Exclude audience from token to prevent http header overflow
 		Subject("director").
 		Expiration(time.Now().Add(tokenExpireTime)).
 		Build()
@@ -257,4 +177,37 @@ func CreateDirectorScrapeToken() (string, error) {
 		return "", err
 	}
 	return string(signed), nil
+}
+
+// Configure TTL caches to enable cache eviction and other additional cache events handling logic
+//
+// The `ctx` is the context for listening to server shutdown event in order to cleanup internal cache eviction
+// goroutine and `wg` is the wait group to notify when the clean up goroutine finishes
+func ConfigTTLCache(ctx context.Context, egrp *errgroup.Group) {
+	// Start automatic expired item deletion
+	go serverAds.Start()
+	go namespaceKeys.Start()
+
+	serverAds.OnEviction(func(ctx context.Context, er ttlcache.EvictionReason, i *ttlcache.Item[ServerAd, []NamespaceAd]) {
+		healthTestCancelFuncsMutex.Lock()
+		defer healthTestCancelFuncsMutex.Unlock()
+		if cancelFunc, exists := healthTestCancelFuncs[i.Key()]; exists {
+			// Call the cancel function for the evicted originAd to end its health test
+			cancelFunc()
+
+			// Remove the cancel function from the map as it's no longer needed
+			delete(healthTestCancelFuncs, i.Key())
+		}
+	})
+
+	// Put stop logic in a separate goroutine so that parent function is not blocking
+	egrp.Go(func() error {
+		<-ctx.Done()
+		log.Info("Gracefully stopping TTL cache eviction...")
+		serverAds.DeleteAll()
+		serverAds.Stop()
+		namespaceKeys.DeleteAll()
+		namespaceKeys.Stop()
+		return nil
+	})
 }

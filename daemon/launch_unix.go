@@ -35,6 +35,7 @@ import (
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
 )
 
 type (
@@ -121,8 +122,7 @@ func (launcher DaemonLauncher) Launch(ctx context.Context) (context.Context, int
 	return ctx_result, cmd.Process.Pid, nil
 }
 
-func LaunchDaemons(launchers []Launcher) (err error) {
-	ctx := context.Background()
+func LaunchDaemons(ctx context.Context, launchers []Launcher, egrp *errgroup.Group) (err error) {
 
 	daemons := make([]launchInfo, len(launchers))
 	for idx, daemon := range launchers {
@@ -150,46 +150,57 @@ func LaunchDaemons(launchers []Launcher) (err error) {
 	cases[len(daemons)].Chan = reflect.ValueOf(sigs)
 	cases[len(daemons)+1].Dir = reflect.SelectRecv
 
-	for {
-		timer := time.NewTimer(time.Second)
-		cases[len(daemons)+1].Chan = reflect.ValueOf(timer.C)
+	egrp.Go(func() error {
+		for {
+			timer := time.NewTimer(time.Second)
+			cases[len(daemons)+1].Chan = reflect.ValueOf(timer.C)
 
-		chosen, recv, _ := reflect.Select(cases)
-		if chosen == len(daemons) {
-			sys_sig, ok := recv.Interface().(syscall.Signal)
-			if !ok {
-				panic(errors.New("Unable to convert signal to syscall.Signal"))
-			}
-			log.Warnf("Forwarding signal %v to daemons\n", sys_sig)
-			var lastErr error
-			for idx, daemon := range daemons {
-				if err = syscall.Kill(daemon.pid, sys_sig); err != nil {
-					lastErr = errors.Wrapf(err, "Failed to forward signal to %s process", launchers[idx].Name())
+			chosen, recv, _ := reflect.Select(cases)
+			if chosen == len(daemons) {
+				sys_sig, ok := recv.Interface().(syscall.Signal)
+				if !ok {
+					panic(errors.New("Unable to convert signal to syscall.Signal"))
 				}
-				daemon.expiry = time.Now().Add(10 * time.Second)
-			}
-			if lastErr != nil {
-				return lastErr
-			}
-		} else if chosen < len(daemons) {
-			if waitResult := context.Cause(daemons[chosen].ctx); waitResult != nil {
-				if !daemons[chosen].expiry.IsZero() {
-					return nil
+				log.Warnf("Forwarding signal %v to daemons\n", sys_sig)
+				var lastErr error
+				for idx, daemon := range daemons {
+					if err = syscall.Kill(daemon.pid, sys_sig); err != nil {
+						lastErr = errors.Wrapf(err, "Failed to forward signal to %s process", launchers[idx].Name())
+					}
+					daemon.expiry = time.Now().Add(10 * time.Second)
 				}
-				metrics.SetComponentHealthStatus(metrics.HealthStatusComponent(launchers[chosen].Name()), metrics.StatusCritical,
-					"process failed unexpectedly")
-				return errors.Wrapf(waitResult, "%s process failed unexpectedly", launchers[chosen].Name())
-			}
-			log.Debugln("Daemons have been shut down successfully")
-			return nil
-		} else {
-			for idx, daemon := range daemons {
-				if !daemon.expiry.IsZero() && time.Now().After(daemon.expiry) {
-					if err = syscall.Kill(daemon.pid, syscall.SIGKILL); err != nil {
-						return errors.Wrapf(err, "Failed to SIGKILL the %s process", launchers[idx].Name())
+				if lastErr != nil {
+					log.Errorln("Last error when killing launched daemons:", lastErr)
+					return lastErr
+				}
+			} else if chosen < len(daemons) {
+				if waitResult := context.Cause(daemons[chosen].ctx); waitResult != nil {
+					if !daemons[chosen].expiry.IsZero() {
+						return nil
+					} else if errors.Is(waitResult, context.Canceled) {
+						return nil
+					}
+					metrics.SetComponentHealthStatus(metrics.HealthStatusComponent(launchers[chosen].Name()), metrics.StatusCritical,
+						"process failed unexpectedly")
+					err = errors.Wrapf(waitResult, "%s process failed unexpectedly", launchers[chosen].Name())
+					log.Errorln(err)
+					return err
+				}
+				log.Debugln("Daemons have been shut down successfully")
+				return nil
+			} else {
+				for idx, daemon := range daemons {
+					if !daemon.expiry.IsZero() && time.Now().After(daemon.expiry) {
+						if err = syscall.Kill(daemon.pid, syscall.SIGKILL); err != nil {
+							err = errors.Wrapf(err, "Failed to SIGKILL the %s process", launchers[idx].Name())
+							log.Errorln(err)
+							return err
+						}
 					}
 				}
 			}
 		}
-	}
+	})
+
+	return nil
 }

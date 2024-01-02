@@ -21,14 +21,21 @@
 package xrootd
 
 import (
+	"context"
 	_ "embed"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/pelicanplatform/pelican/cache_ui"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/director"
+	"github.com/pelicanplatform/pelican/origin_ui"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -52,6 +59,12 @@ var (
 
 	//go:embed resources/test-scitokens-monitoring.cfg
 	monitoringOutput string
+
+	//go:embed resources/test-scitokens-cache-issuer.cfg
+	cacheSciOutput string
+
+	//go:embed resources/test-scitokens-cache-empty.cfg
+	cacheEmptyOutput string
 )
 
 func TestEmitCfg(t *testing.T) {
@@ -63,10 +76,10 @@ func TestEmitCfg(t *testing.T) {
 
 	configTester := func(cfg *ScitokensCfg, configResult string) func(t *testing.T) {
 		return func(t *testing.T) {
-			err = EmitScitokensConfiguration(cfg)
+			err = EmitScitokensConfiguration(config.OriginType, cfg)
 			assert.NoError(t, err)
 
-			genCfg, err := os.ReadFile(filepath.Join(dirname, "scitokens-generated.cfg"))
+			genCfg, err := os.ReadFile(filepath.Join(dirname, "scitokens-origin-generated.cfg"))
 			assert.NoError(t, err)
 
 			assert.Equal(t, string(configResult), string(genCfg))
@@ -77,9 +90,9 @@ func TestEmitCfg(t *testing.T) {
 	t.Run("EmptyConfig", configTester(&ScitokensCfg{Global: globalCfg}, emptyOutput))
 
 	issuer := Issuer{Name: "Demo", Issuer: "https://demo.scitokens.org", BasePaths: []string{"/foo", "/bar"}, DefaultUser: "osg"}
-	t.Run("SimpleIssuer", configTester(&ScitokensCfg{Global: globalCfg, Issuers: []Issuer{issuer}}, simpleOutput))
+	t.Run("SimpleIssuer", configTester(&ScitokensCfg{Global: globalCfg, IssuerMap: map[string]Issuer{issuer.Issuer: issuer}}, simpleOutput))
 	issuer2 := Issuer{Name: "WLCG", Issuer: "https://wlcg.cnaf.infn.it", BasePaths: []string{"/baz"}}
-	t.Run("DualIssuers", configTester(&ScitokensCfg{Global: globalCfg, Issuers: []Issuer{issuer, issuer2}}, dualOutput))
+	t.Run("DualIssuers", configTester(&ScitokensCfg{Global: globalCfg, IssuerMap: map[string]Issuer{issuer.Issuer: issuer, issuer2.Issuer: issuer2}}, dualOutput))
 }
 
 func TestLoadScitokensConfig(t *testing.T) {
@@ -98,10 +111,10 @@ func TestLoadScitokensConfig(t *testing.T) {
 			cfg, err := LoadScitokensConfig(cfgFname)
 			require.NoError(t, err)
 
-			err = EmitScitokensConfiguration(&cfg)
+			err = EmitScitokensConfiguration(config.OriginType, &cfg)
 			assert.NoError(t, err)
 
-			genCfg, err := os.ReadFile(filepath.Join(dirname, "scitokens-generated.cfg"))
+			genCfg, err := os.ReadFile(filepath.Join(dirname, "scitokens-origin-generated.cfg"))
 			assert.NoError(t, err)
 
 			assert.Equal(t, string(configResult), string(genCfg))
@@ -114,6 +127,10 @@ func TestLoadScitokensConfig(t *testing.T) {
 }
 
 func TestGenerateConfig(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
 	viper.Reset()
 	viper.Set("Origin.SelfTest", false)
 	issuer, err := GenerateMonitoringIssuer()
@@ -121,7 +138,7 @@ func TestGenerateConfig(t *testing.T) {
 	assert.Equal(t, issuer.Name, "")
 
 	viper.Set("Origin.SelfTest", true)
-	err = config.InitServer()
+	err = config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
 	issuer, err = GenerateMonitoringIssuer()
 	require.NoError(t, err)
@@ -135,7 +152,7 @@ func TestGenerateConfig(t *testing.T) {
 	viper.Set("Origin.SelfTest", false)
 	viper.Set("Origin.ScitokensDefaultUser", "user1")
 	viper.Set("Origin.ScitokensMapSubject", true)
-	err = config.InitServer()
+	err = config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
 	issuer, err = GenerateOriginIssuer([]string{"/foo/bar/baz", "/another/exported/path"})
 	require.NoError(t, err)
@@ -148,19 +165,133 @@ func TestGenerateConfig(t *testing.T) {
 	assert.Equal(t, issuer.MapSubject, true)
 }
 
+func TestWriteOriginAuthFiles(t *testing.T) {
+
+	originAuthTester := func(server server_utils.XRootDServer, authStart string, authResult string) func(t *testing.T) {
+		return func(t *testing.T) {
+
+			dirname := t.TempDir()
+			viper.Reset()
+			viper.Set("Xrootd.RunLocation", dirname)
+			viper.Set("Xrootd.ScitokensConfig", filepath.Join(dirname, "scitokens-generated.cfg"))
+			viper.Set("Xrootd.Authfile", filepath.Join(dirname, "authfile"))
+			xAuthFile := filepath.Join(param.Xrootd_RunLocation.GetString(), "authfile-origin-generated")
+
+			authfileProvided := param.Xrootd_Authfile.GetString()
+
+			err := os.WriteFile(authfileProvided, []byte(authStart), 0600)
+			assert.NoError(t, err)
+
+			err = EmitAuthfile(server)
+			assert.NoError(t, err)
+
+			authGen, err := os.ReadFile(xAuthFile)
+			assert.NoError(t, err)
+			assert.Equal(t, authResult, string(authGen))
+		}
+	}
+	nsAds := []director.NamespaceAd{}
+
+	originServer := &origin_ui.OriginServer{}
+	originServer.SetNamespaceAds(nsAds)
+
+	t.Run("MultiIssuer", originAuthTester(originServer, "u * t1 lr t2 lr t3 lr", "u * /.well-known lr t1 lr t2 lr t3 lr\n"))
+
+	nsAds = []director.NamespaceAd{}
+	originServer.SetNamespaceAds(nsAds)
+
+	t.Run("EmptyAuth", originAuthTester(originServer, "", "u * /.well-known lr\n"))
+}
+
+func TestWriteCacheAuthFiles(t *testing.T) {
+
+	cacheAuthTester := func(server server_utils.XRootDServer, sciTokenResult string, authResult string) func(t *testing.T) {
+		return func(t *testing.T) {
+
+			dirname := t.TempDir()
+			viper.Reset()
+			viper.Set("Xrootd.RunLocation", dirname)
+			if server.GetServerType().IsEnabled(config.OriginType) {
+				viper.Set("Xrootd.ScitokensConfig", filepath.Join(dirname, "scitokens-origin-generated.cfg"))
+				viper.Set("Xrootd.Authfile", filepath.Join(dirname, "authfile-origin-generated"))
+			} else {
+				viper.Set("Xrootd.ScitokensConfig", filepath.Join(dirname, "scitokens-cache-generated.cfg"))
+				viper.Set("Xrootd.Authfile", filepath.Join(dirname, "authfile-cache-generated"))
+			}
+			authFile := param.Xrootd_Authfile.GetString()
+			err := os.WriteFile(authFile, []byte(""), 0600)
+			assert.NoError(t, err)
+
+			err = WriteCacheScitokensConfig(server.GetNamespaceAds())
+			assert.NoError(t, err)
+
+			sciFile := param.Xrootd_ScitokensConfig.GetString()
+			genSciToken, err := os.ReadFile(sciFile)
+			assert.NoError(t, err)
+
+			assert.Equal(t, sciTokenResult, string(genSciToken))
+
+			err = EmitAuthfile(server)
+			assert.NoError(t, err)
+
+			authGen, err := os.ReadFile(authFile)
+			assert.NoError(t, err)
+			assert.Equal(t, authResult, string(authGen))
+		}
+	}
+
+	issuer1URL := url.URL{}
+	issuer1URL.Scheme = "https"
+	issuer1URL.Host = "issuer1.com"
+
+	issuer2URL := url.URL{}
+	issuer2URL.Scheme = "https"
+	issuer2URL.Host = "issuer2.com"
+
+	issuer3URL := url.URL{}
+	issuer3URL.Scheme = "https"
+	issuer3URL.Host = "issuer3.com"
+
+	issuer4URL := url.URL{}
+	issuer4URL.Scheme = "https"
+	issuer4URL.Host = "issuer4.com"
+
+	nsAds := []director.NamespaceAd{
+		{RequireToken: true, Issuer: issuer1URL, BasePath: "/p1"},
+		{RequireToken: true, Issuer: issuer2URL, BasePath: "/p2/path"},
+		{RequireToken: false, Issuer: issuer3URL, BasePath: "/p3"},
+		{RequireToken: true, Issuer: issuer1URL, BasePath: "/p1_again"},
+		{RequireToken: false, Issuer: issuer4URL, BasePath: "/p4/depth"},
+		{RequireToken: false, Issuer: issuer2URL, BasePath: "/p2_noauth"},
+	}
+
+	cacheServer := &cache_ui.CacheServer{}
+	cacheServer.SetNamespaceAds(nsAds)
+
+	t.Run("MultiIssuer", cacheAuthTester(cacheServer, cacheSciOutput, "u * /p3 lr /p4/depth lr /p2_noauth lr "))
+
+	nsAds = []director.NamespaceAd{}
+	cacheServer.SetNamespaceAds(nsAds)
+
+	t.Run("EmptyNS", cacheAuthTester(cacheServer, cacheEmptyOutput, ""))
+}
+
 func TestWriteOriginScitokensConfig(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
 	viper.Reset()
 	dirname := t.TempDir()
 	os.Setenv("PELICAN_XROOTD_RUNLOCATION", dirname)
 	defer os.Unsetenv("PELICAN_XROOTD_RUNLOCATION")
 	config_dirname := t.TempDir()
-	viper.Reset()
 	viper.Set("Origin.SelfTest", true)
 	viper.Set("ConfigDir", config_dirname)
 	viper.Set("Xrootd.RunLocation", dirname)
 	viper.Set("Xrootd.Port", 8443)
 	viper.Set("Server.Hostname", "origin.example.com")
-	err := config.InitServer()
+	err := config.InitServer(ctx, config.OriginType)
 	require.Nil(t, err)
 
 	scitokensCfg := param.Xrootd_ScitokensConfig.GetString()
@@ -172,7 +303,7 @@ func TestWriteOriginScitokensConfig(t *testing.T) {
 	err = WriteOriginScitokensConfig([]string{"/foo/bar"})
 	require.NoError(t, err)
 
-	genCfg, err := os.ReadFile(filepath.Join(dirname, "scitokens-generated.cfg"))
+	genCfg, err := os.ReadFile(filepath.Join(dirname, "scitokens-origin-generated.cfg"))
 	require.NoError(t, err)
 
 	assert.Equal(t, string(monitoringOutput), string(genCfg))

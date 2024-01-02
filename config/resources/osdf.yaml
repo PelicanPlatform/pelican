@@ -21,3 +21,4 @@ Xrootd:
 Federation:
   DiscoveryUrl: osg-htc.org
   TopologyNamespaceURL: https://topology.opensciencegrid.org/stashcache/namespaces.json
+  TopologyReloadInterval: 10

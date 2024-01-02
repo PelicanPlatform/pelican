@@ -103,14 +103,17 @@ func getTokenName(destination *url.URL) (scheme, tokenName string) {
 }
 
 // Do writeback to stash using SciTokens
-func doWriteBack(source string, destination *url.URL, namespace namespaces.Namespace) (int64, error) {
+func doWriteBack(source string, destination *url.URL, namespace namespaces.Namespace, recursive bool) (int64, error) {
 
 	scitoken_contents, err := getToken(destination, namespace, true, "")
 	if err != nil {
 		return 0, err
 	}
-	return UploadFile(source, destination, scitoken_contents, namespace)
-
+	if recursive {
+		return UploadDirectory(source, destination, scitoken_contents, namespace)
+	} else {
+		return UploadFile(source, destination, scitoken_contents, namespace)
+	}
 }
 
 // getToken returns the token to use for the given destination
@@ -287,6 +290,7 @@ func CheckOSDF(destination string, methods []string) (remoteSize uint64, err err
 	return 0, err
 }
 
+// FIXME: GetCacheHostnames is not director-aware!
 func GetCacheHostnames(testFile string) (urls []string, err error) {
 
 	ns, err := namespaces.MatchNamespace(testFile)
@@ -294,12 +298,16 @@ func GetCacheHostnames(testFile string) (urls []string, err error) {
 		return
 	}
 
-	caches, err := GetCachesFromNamespace(ns)
+	caches, err := GetCachesFromNamespace(ns, false)
 	if err != nil {
 		return
 	}
 
-	for _, cache := range caches {
+	for _, cacheGeneric := range caches {
+		cache, ok := cacheGeneric.(namespaces.Cache)
+		if !ok {
+			continue
+		}
 		url_string := cache.AuthEndpoint
 		host := strings.Split(url_string, ":")[0]
 		urls = append(urls, host)
@@ -308,13 +316,36 @@ func GetCacheHostnames(testFile string) (urls []string, err error) {
 	return
 }
 
-func GetCachesFromNamespace(namespace namespaces.Namespace) (caches []namespaces.Cache, err error) {
+func GetCachesFromNamespace(namespace namespaces.Namespace, useDirector bool) (caches []CacheInterface, err error) {
 
-	cacheListName := "xroot"
-	if namespace.ReadHTTPS || namespace.UseTokenOnRead {
-		cacheListName = "xroots"
+	// The global cache override is set
+	if CacheOverride {
+		log.Debugf("Using the cache (%s) from the config override\n", NearestCache)
+		cache := namespaces.Cache{
+			Endpoint:     NearestCache,
+			AuthEndpoint: NearestCache,
+			Resource:     NearestCache,
+		}
+		caches = []CacheInterface{cache}
+		return
 	}
+
+	if useDirector {
+		log.Debugln("Using the returned sources from the director")
+		caches = make([]CacheInterface, len(namespace.SortedDirectorCaches))
+		for idx, val := range namespace.SortedDirectorCaches {
+			caches[idx] = val
+		}
+		log.Debugln("Matched caches:", caches)
+		return
+	}
+
 	if len(NearestCacheList) == 0 {
+		cacheListName := "xroot"
+		if namespace.ReadHTTPS || namespace.UseTokenOnRead {
+			cacheListName = "xroots"
+		}
+		// FIXME: GetBestCache, for some reason, sets the NearestCacheList global?
 		_, err = GetBestCache(cacheListName)
 		if err != nil {
 			log.Errorln("Failed to get best caches:", err)
@@ -325,18 +356,12 @@ func GetCachesFromNamespace(namespace namespaces.Namespace) (caches []namespaces
 	log.Debugln("Nearest cache list:", NearestCacheList)
 	log.Debugln("Cache list name:", namespace.Caches)
 
-	// The main routine can set a global cache to use
-	if CacheOverride {
-		cache := namespaces.Cache{
-			Endpoint:     NearestCache,
-			AuthEndpoint: NearestCache,
-			Resource:     NearestCache,
-		}
-		caches = []namespaces.Cache{cache}
-	} else {
-		caches = namespace.MatchCaches(NearestCacheList)
+	matchedCaches := namespace.MatchCaches(NearestCacheList)
+	log.Debugln("Matched caches:", matchedCaches)
+	caches = make([]CacheInterface, len(matchedCaches))
+	for idx, val := range matchedCaches {
+		caches[idx] = val
 	}
-	log.Debugln("Matched caches:", caches)
 
 	return
 }
@@ -481,7 +506,7 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 			AddError(err)
 			return 0, err
 		}
-		_, err = doWriteBack(source_url.Path, dest_url, ns)
+		_, err = doWriteBack(source_url.Path, dest_url, ns, recursive)
 		AddError(err)
 		return 0, err
 	}
@@ -528,8 +553,9 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 	//Check if path exists or if its in a folder
 	if destStat, err := os.Stat(destPath); os.IsNotExist(err) {
 		destination = destPath
-	} else if destStat.IsDir() {
-		// Get the file name of the source
+	} else if destStat.IsDir() && source_url.Query().Get("pack") == "" {
+		// If we have an auto-pack request, it's OK for the destination to be a directory
+		// Otherwise, get the base name of the source and append it to the destination dir.
 		sourceFilename := path.Base(sourceFile)
 		destination = path.Join(destPath, sourceFilename)
 	}
@@ -564,7 +590,7 @@ Loop:
 		switch method {
 		case "http":
 			log.Info("Trying HTTP...")
-			if downloaded, err = download_http(sourceFile, destination, &payload, ns, recursive, token_name, OSDFDirectorUrl); err == nil {
+			if downloaded, err = download_http(source_url, destination, &payload, ns, recursive, token_name, OSDFDirectorUrl); err == nil {
 				success = true
 				break Loop
 			}

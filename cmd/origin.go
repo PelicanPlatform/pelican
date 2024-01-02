@@ -19,10 +19,10 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -33,7 +33,7 @@ var (
 		Use:   "origin",
 		Short: "Operate a Pelican origin service",
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			err := initOrigin()
+			err := initOrigin(cmd.Context())
 			return err
 		},
 	}
@@ -98,23 +98,72 @@ func configOrigin( /*cmd*/ *cobra.Command /*args*/, []string) {
 	os.Exit(1)
 }
 
-func initOrigin() error {
-	err := config.InitServer()
-	cobra.CheckErr(err)
+func initOrigin(ctx context.Context) error {
 	metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusCritical, "xrootd has not been started")
 	metrics.SetComponentHealthStatus(metrics.OriginCache_CMSD, metrics.StatusCritical, "cmsd has not been started")
-	return err
+	return nil
 }
 
 func init() {
 	originCmd.AddCommand(originConfigCmd)
 	originCmd.AddCommand(originServeCmd)
-	originServeCmd.Flags().StringP("volume", "v", "", "Setting the volue to /SRC:/DEST will export the contents of /SRC as /DEST in the Pelican federation")
+
+	// The -m flag is used to specify what kind of backend we plan to use for the origin.
+	originServeCmd.Flags().StringP("mode", "m", "posix", "Set the mode for the origin service (default is 'posix')")
+	if err := viper.BindPFlag("Origin.Mode", originServeCmd.Flags().Lookup("mode")); err != nil {
+		panic(err)
+	}
+
+	// The -v flag is used when an origin is served in POSIX mode
+	originServeCmd.Flags().StringP("volume", "v", "", "Setting the volume to /SRC:/DEST will export the contents of /SRC as /DEST in the Pelican federation")
 	if err := viper.BindPFlag("Origin.ExportVolume", originServeCmd.Flags().Lookup("volume")); err != nil {
 		panic(err)
 	}
+
+	// A variety of flags we add for S3 mode. These are ultimately required for configuring the S3 xrootd plugin
+	originServeCmd.Flags().String("service-name", "", "Specify the S3 service-name. Only used when an origin is launched in S3 mode.")
+	originServeCmd.Flags().String("region", "", "Specify the S3 region. Only used when an origin is launched in S3 mode.")
+	originServeCmd.Flags().String("bucket", "", "Specify the S3 bucket. Only used when an origin is launched in S3 mode.")
+	originServeCmd.Flags().String("service-url", "", "Specify the S3 service-url. Only used when an origin is launched in S3 mode.")
+	originServeCmd.Flags().String("bucket-access-keyfile", "", "Specify a filepath to use for configuring the bucket's access key.")
+	originServeCmd.Flags().String("bucket-secret-keyfile", "", "Specify a filepath to use for configuring the bucket's access key.")
+	if err := viper.BindPFlag("Origin.S3ServiceName", originServeCmd.Flags().Lookup("service-name")); err != nil {
+		panic(err)
+	}
+	if err := viper.BindPFlag("Origin.S3Region", originServeCmd.Flags().Lookup("region")); err != nil {
+		panic(err)
+	}
+	if err := viper.BindPFlag("Origin.S3Bucket", originServeCmd.Flags().Lookup("bucket")); err != nil {
+		panic(err)
+	}
+	if err := viper.BindPFlag("Origin.S3ServiceUrl", originServeCmd.Flags().Lookup("service-url")); err != nil {
+		panic(err)
+	}
+	if err := viper.BindPFlag("Origin.S3AccessKeyfile", originServeCmd.Flags().Lookup("bucket-access-keyfile")); err != nil {
+		panic(err)
+	}
+	if err := viper.BindPFlag("Origin.S3SecretKeyfile", originServeCmd.Flags().Lookup("bucket-secret-keyfile")); err != nil {
+		panic(err)
+	}
+
+	// Would be nice to make these mutually exclusive to mode=posix instead of to --volume, but cobra
+	// doesn't seem to have something that can make the value of a flag exclusive to other flags
+	// Anyway, we never want to run the S3 flags with the -v flag.
+	originServeCmd.MarkFlagsMutuallyExclusive("volume", "service-name")
+	originServeCmd.MarkFlagsMutuallyExclusive("volume", "region")
+	originServeCmd.MarkFlagsMutuallyExclusive("volume", "bucket")
+	originServeCmd.MarkFlagsMutuallyExclusive("volume", "service-url")
+	originServeCmd.MarkFlagsMutuallyExclusive("volume", "bucket-access-keyfile")
+	originServeCmd.MarkFlagsMutuallyExclusive("volume", "bucket-secret-keyfile")
+	// We don't require the bucket access and secret keyfiles as they're not needed for unauthenticated buckets
+	originServeCmd.MarkFlagsRequiredTogether("service-name", "region", "bucket", "service-url")
+	originServeCmd.MarkFlagsRequiredTogether("bucket-access-keyfile", "bucket-secret-keyfile")
+
+	// The port any web UI stuff will be served on
 	originServeCmd.Flags().AddFlag(portFlag)
 
+	// origin token, used for creating and verifying tokens with
+	// the origin's signing jwk.
 	originCmd.AddCommand(originTokenCmd)
 	originTokenCmd.AddCommand(originTokenCreateCmd)
 	originTokenCmd.PersistentFlags().String("profile", "wlcg", "Passing a profile ensures the token adheres to the profile's requirements. Accepted values are scitokens2 and wlcg")

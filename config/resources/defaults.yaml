@@ -18,23 +18,27 @@ Debug: false
 Logging:
   Level: "Error"
 Server:
-  Port: 8444
-  Address: "0.0.0.0"
+  WebPort: 8444
+  WebHost: "0.0.0.0"
+  EnableUI: true
 Director:
   DefaultResponse: cache
+Cache:
+  Port: 8443
 Origin:
   NamespacePrefix: ""
   Multiuser: false
-  EnableMacaroons: true
+  EnableMacaroons: false
   EnableVoms: true
-  SelfTest: true
   EnableUI: true
+  SelfTest: true
 Monitoring:
   PortLower: 9930
   PortHigher: 9999
   TokenExpiresIn: 1h
   TokenRefreshInterval: 59m
   MetricAuthorization: true
+  AggregatePrefixes: ["/*"]
 Xrootd:
   Port: 8443
   Mount: ""
@@ -50,9 +54,13 @@ Transport:
   ExpectContinueTimeout: 1s
   ResponseHeaderTimeout: 10s
 OIDC:
+  AuthorizationEndpoint:  "https://cilogon.org/authorize"
   DeviceAuthEndpoint: "https://cilogon.org/oauth2/device_authorization"
   TokenEndpoint: "https://cilogon.org/oauth2/token"
   UserInfoEndpoint: "https://cilogon.org/oauth2/userinfo"
 Issuer:
   TomcatLocation: /opt/tomcat
   ScitokensServerLocation: /opt/scitokens-server
+  QDLLocation: /opt/qdl
+  OIDCAuthenticationUserClaim: sub
+  AuthenticationSource: OIDC

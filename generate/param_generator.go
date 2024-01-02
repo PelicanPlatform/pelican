@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"text/template"
 
@@ -26,13 +27,7 @@ type TemplateData struct {
 	GeneratedConfigWithType string
 }
 
-func main() {
-	GenParamEnum()
-	GenParamStruct()
-	GenPlaceholderPathForNext()
-}
-
-var requiredKeys = [4]string{"name", "description", "default", "type"}
+var requiredKeys = [3]string{"description", "default", "type"}
 
 func GenParamEnum() {
 	/*
@@ -68,18 +63,25 @@ func GenParamEnum() {
 	intParamMap := make(map[string]string)
 	boolParamMap := make(map[string]string)
 	durationParamMap := make(map[string]string)
+	objectParamMap := make(map[string]string)
 
 	// Skip the first parameter (ConfigBase is special)
 	// Save the first parameter seperately in order to do "<pname> Param = iota" for the enums
 
 	// Parse and check the values of each parameter against the required Keys
-	for i := 1; i < len(values); i++ {
-		entry := values[i].(map[string]interface{})
-		for j := 0; j < len(requiredKeys); j++ {
-			_, ok := entry[requiredKeys[j]]
-			if !ok {
-				errMsg := "all entries require the " + requiredKeys[j] + " field to populated"
-				panic(errMsg)
+	for idx, value := range values {
+		entry := value.(map[string]interface{})
+		entryName, ok := entry["name"]
+		if !ok {
+			panic(fmt.Sprintf("Parameter entry at position %d is missing the name attribute", idx))
+		}
+		if entryName == "ConfigBase" {
+			continue
+		}
+		for _, keyName := range requiredKeys {
+			if _, ok := entry[keyName]; !ok {
+				panic(fmt.Sprintf("Parameter entry '%s' is missing required key '%s'",
+					entryName, keyName))
 			}
 		}
 
@@ -112,6 +114,8 @@ func GenParamEnum() {
 			boolParamMap[name] = rawName
 		case "duration":
 			durationParamMap[name] = rawName
+		case "object":
+			objectParamMap[name] = rawName
 		default:
 			errMsg := fmt.Sprintf("UnknownType '%s': add a new struct and return method to the generator, or "+
 				"change the type in parameters.yaml to be an already-handled type", pType)
@@ -133,7 +137,8 @@ func GenParamEnum() {
 		IntMap         map[string]string
 		BoolMap        map[string]string
 		DurationMap    map[string]string
-	}{StringMap: stringParamMap, StringSliceMap: stringSliceParamMap, IntMap: intParamMap, BoolMap: boolParamMap, DurationMap: durationParamMap})
+		ObjectMap      map[string]string
+	}{StringMap: stringParamMap, StringSliceMap: stringSliceParamMap, IntMap: intParamMap, BoolMap: boolParamMap, DurationMap: durationParamMap, ObjectMap: objectParamMap})
 
 	if err != nil {
 		panic(err)
@@ -168,7 +173,14 @@ func generateGoStructCode(field *GoField, indent string) string {
 		return fmt.Sprintf("%s%s %s\n", indent, field.Name, field.Type)
 	}
 	code := fmt.Sprintf("%s%s struct {\n", indent, field.Name)
-	for _, nested := range field.NestedFields {
+	keys := make([]string, 0, len(field.NestedFields))
+	for key := range field.NestedFields {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		nested := field.NestedFields[key]
 		code += generateGoStructCode(nested, indent+"	")
 	}
 	code += fmt.Sprintf("%s}\n", indent)
@@ -247,6 +259,8 @@ func GenParamStruct() {
 			goType = "bool"
 		case "duration":
 			goType = "time.Duration"
+		case "object":
+			goType = "interface{}"
 		default:
 			errMsg := fmt.Sprintf("UnknownType '%s': add a new struct and return method to the generator, or "+
 				"change the type in parameters.yaml to be an already-handled type", pType)
@@ -327,6 +341,10 @@ type DurationParam struct {
 	name string
 }
 
+type ObjectParam struct {
+	name string
+}
+
 func (sP StringParam) GetString() string {
 	return viper.GetString(sP.name)
 }
@@ -345,6 +363,10 @@ func (bP BoolParam) GetBool() bool {
 
 func (bP DurationParam) GetDuration() time.Duration {
 	return viper.GetDuration(bP.name)
+}
+
+func (bP ObjectParam) Unmarshal(rawVal any) error {
+	return viper.UnmarshalKey(bP.name, rawVal)
 }
 
 var ({{range $key, $value := .StringMap}}
@@ -371,6 +393,11 @@ var ({{range $key, $value := .DurationMap}}
 	{{$key}} = DurationParam{{"{"}}{{printf "%q" $value}}{{"}"}}
 	{{- end}}
 )
+
+var ({{range $key, $value := .ObjectMap}}
+	{{$key}} = ObjectParam{{"{"}}{{printf "%q" $value}}{{"}"}}
+	{{- end}}
+)
 `))
 
 var structTemplate = template.Must(template.New("").Parse(`
@@ -381,7 +408,11 @@ import (
 	"time"
 )
 
+<<<<<<< HEAD
 {{.GeneratedConfig}}
 
 {{.GeneratedConfigWithType}}
+=======
+{{.GeneratedCode -}}
+>>>>>>> 2f1315d2974d91dba96e39a198ada6e9edbfc223
 `))

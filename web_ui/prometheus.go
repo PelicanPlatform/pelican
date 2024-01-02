@@ -11,22 +11,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// This package started as a fork of the `prometheus` CLI executable and was
+// This file started as a fork of the `prometheus` CLI executable and was
 // heavily adapted to make it embedded into the pelican web UI.
+
 package web_ui
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"net/http"
 	"net/url"
-	"os"
-	"os/signal"
+	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/alecthomas/units"
@@ -39,6 +37,8 @@ import (
 	pelican_config "github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/utils"
+	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/common/version"
@@ -143,27 +143,11 @@ func runtimeInfo() (api_v1.RuntimeInfo, error) {
 	return api_v1.RuntimeInfo{}, nil
 }
 
-func promQueryEngineAuthHandler(av1 *route.Router) gin.HandlerFunc {
-	/* A function which wraps around the av1 router to force a jwk token check using
-	 * the origin's private key. It will check the request's URL and Header for a token
-	 * and if found it will then attempt to validate the token. If valid, it will continue
-	 * the routing as normal, otherwise it will return an error
-	 */
-	return func(c *gin.Context) {
-		exists := checkAPIToken(c, []string{"prometheus.read"})
-		if exists {
-			av1.ServeHTTP(c.Writer, c.Request)
-		} else {
-			c.JSON(http.StatusForbidden, gin.H{"error": "Correct authorization required to access Prometheus query engine APIs"})
-		}
-	}
-}
-
-// Configure director's Prometheus scraper to use HTTP service discovery for origins
-func configDirectorPromScraper() (*config.ScrapeConfig, error) {
-	originDiscoveryUrl, err := url.Parse("https://" + pelican_config.ComputeExternalAddress())
+// Configure director's Prometheus scraper to use HTTP service discovery for origins/caches
+func configDirectorPromScraper(ctx context.Context) (*config.ScrapeConfig, error) {
+	serverDiscoveryUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
 	if err != nil {
-		return nil, fmt.Errorf("parse external URL https://%v: %w", pelican_config.ComputeExternalAddress(), err)
+		return nil, fmt.Errorf("parse external URL %v: %w", param.Server_ExternalWebUrl.GetString(), err)
 	}
 	sdToken, err := director.CreateDirectorSDToken()
 	if err != nil {
@@ -173,13 +157,22 @@ func configDirectorPromScraper() (*config.ScrapeConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("Failed to generate token for director scraper at start: %v", err)
 	}
-	originDiscoveryUrl.Path = "/api/v1.0/director/discoverOrigins"
+	serverDiscoveryUrl.Path = "/api/v1.0/director/discoverServers"
 	scrapeConfig := config.DefaultScrapeConfig
-	scrapeConfig.JobName = "origins"
+	scrapeConfig.JobName = "origin_cache_servers"
 	scrapeConfig.Scheme = "https"
+
+	// This will cause the director to maintain a CA bundle, including the custom CA, at
+	// the given location.  Makes up for the fact we can't provide Prometheus with a transport
+	caBundle := filepath.Join(param.Monitoring_DataLocation.GetString(), "ca-bundle.crt")
+	caCount, err := utils.LaunchPeriodicWriteCABundle(ctx, caBundle, 2*time.Minute)
+	if err != nil {
+		return nil, errors.Wrap(err, "Unable to generate CA bundle for prometheus")
+	}
+
 	scraperHttpClientConfig := common_config.HTTPClientConfig{
 		TLSConfig: common_config.TLSConfig{
-			// For the scraper to origins' metrics, we get TLSSkipVerify from config
+			// For the scraper to origin/caches' metrics, we get TLSSkipVerify from config
 			// As this request is to external address
 			InsecureSkipVerify: param.TLSSkipVerify.GetBool(),
 		},
@@ -189,6 +182,10 @@ func configDirectorPromScraper() (*config.ScrapeConfig, error) {
 			Credentials: common_config.Secret(scraperToken),
 		},
 	}
+	if caCount > 0 {
+		scraperHttpClientConfig.TLSConfig.CAFile = caBundle
+	}
+
 	scrapeConfig.HTTPClientConfig = scraperHttpClientConfig
 	scrapeConfig.ServiceDiscoveryConfigs = make([]discovery.Config, 1)
 	sdHttpClientConfig := common_config.HTTPClientConfig{
@@ -203,7 +200,7 @@ func configDirectorPromScraper() (*config.ScrapeConfig, error) {
 		},
 	}
 	scrapeConfig.ServiceDiscoveryConfigs[0] = &prom_http.SDConfig{
-		URL:              originDiscoveryUrl.String(),
+		URL:              serverDiscoveryUrl.String(),
 		RefreshInterval:  model.Duration(15 * time.Second),
 		HTTPClientConfig: sdHttpClientConfig,
 	}
@@ -245,10 +242,15 @@ func (a LogrusAdapter) Log(keyvals ...interface{}) error {
 			} else if key == "err" {
 				logErr, ok := val.(error)
 				if !ok {
-					a.Logger.Error("log: invalid error log message")
-					return errors.New("log: invalid error log message")
+					if logStr, ok := val.(string); ok {
+						msg = logStr
+					} else {
+						a.Logger.Errorf("prometheus log adapter: invalid incoming error log message (err-tagged key doesn't have an error object attached).  Error is %v; type %T", val, val)
+						return errors.New("log: invalid error log message")
+					}
+				} else {
+					msg = logErr.Error()
 				}
-				msg = logErr.Error()
 			} else {
 				fields[key] = val
 			}
@@ -273,9 +275,13 @@ func (a LogrusAdapter) Log(keyvals ...interface{}) error {
 	return nil
 }
 
-func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
+func ConfigureEmbeddedPrometheus(ctx context.Context, engine *gin.Engine) error {
+	// This is fine if each process has only one server enabled
+	// Since the "federation-in-the-box" feature won't include any web components
+	// we can assume that this is the only server to enable
+	isDirector := pelican_config.IsServerEnabled(pelican_config.DirectorType)
 	cfg := flagConfig{}
-	ListenAddress := fmt.Sprintf("0.0.0.0:%v", param.Server_Port.GetInt())
+	ListenAddress := fmt.Sprintf("0.0.0.0:%v", param.Server_WebPort.GetInt())
 	cfg.webTimeout = model.Duration(5 * time.Minute)
 	cfg.serverStoragePath = param.Monitoring_DataLocation.GetString()
 
@@ -320,9 +326,9 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 
 	localStoragePath := cfg.serverStoragePath
 
-	external_url, err := url.Parse("https://" + pelican_config.ComputeExternalAddress())
+	external_url, err := url.Parse(param.Server_ExternalWebUrl.GetString())
 	if err != nil {
-		return fmt.Errorf("parse external URL https://%v: %w", pelican_config.ComputeExternalAddress(), err)
+		return fmt.Errorf("parse external URL %v: %w", param.Server_ExternalWebUrl.GetString(), err)
 	}
 
 	CORSOrigin, err := compileCORSRegexString(".*")
@@ -336,7 +342,7 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 		ScrapeConfigs: make([]*config.ScrapeConfig, 1),
 	}
 
-	selfScraperToken, err := CreatePromMetricToken()
+	selfScraperToken, err := createPromMetricToken()
 	if err != nil {
 		return fmt.Errorf("Failed to generate token for self-scraper at start: %v", err)
 	}
@@ -357,18 +363,20 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 	}
 	scrapeConfig.HTTPClientConfig = scraperHttpClientConfig
 	scrapeConfig.ServiceDiscoveryConfigs = make([]discovery.Config, 1)
+	// model.AddressLabel needs a hostname (w/ port), so we cut the protocol here
+	externalAddressWoProtocol, _ := strings.CutPrefix(param.Server_ExternalWebUrl.GetString(), "https://")
 	scrapeConfig.ServiceDiscoveryConfigs[0] = discovery.StaticConfig{
 		&targetgroup.Group{
 			Targets: []model.LabelSet{{
-				model.AddressLabel: model.LabelValue(pelican_config.ComputeExternalAddress()),
+				model.AddressLabel: model.LabelValue(externalAddressWoProtocol),
 			}},
 		},
 	}
 	promCfg.ScrapeConfigs[0] = &scrapeConfig
 
-	// Add origins monitoring to director's prometheus instance
+	// Add origins/caches monitoring to director's prometheus instance
 	if isDirector {
-		dirPromScraperConfig, err := configDirectorPromScraper()
+		dirPromScraperConfig, err := configDirectorPromScraper(ctx)
 		if err != nil {
 			return err
 		}
@@ -581,19 +589,15 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 	var g run.Group
 	{
 		// Termination handler.
-		term := make(chan os.Signal, 1)
-		signal.Notify(term, os.Interrupt, syscall.SIGTERM)
 		cancel := make(chan struct{})
 		g.Add(
 			func() error {
 				// Don't forget to release the reloadReady channel so that waiting blocks can exit normally.
 				select {
-				case <-term:
-					err := level.Warn(logger).Log("msg", "Received SIGTERM, exiting gracefully...")
+				case <-ctx.Done():
+					err := level.Warn(logger).Log("msg", "Received shutdown, exiting gracefully...")
 					_ = err
 					reloadReady.Close()
-				//case <-webHandler.Quit():
-				//	level.Warn(logger).Log("msg", "Received termination request via web service, exiting gracefully...")
 				case <-cancel:
 					reloadReady.Close()
 				}
@@ -601,7 +605,6 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 			},
 			func(err error) {
 				close(cancel)
-				//webHandler.SetReady(false)
 				readyHandler.SetReady(false)
 			},
 		)
@@ -628,6 +631,11 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 		g.Add(
 			func() error {
 				refreshInterval := param.Monitoring_TokenRefreshInterval.GetDuration()
+				if refreshInterval <= 0 {
+					err := level.Warn(logger).Log("msg", "Refresh interval is non-positive value. Stop reloading.")
+					_ = err
+					return errors.New("Refresh interval is non-positive value. Stop reloading.")
+				}
 				ticker := time.NewTicker(refreshInterval)
 				for {
 					select {
@@ -642,7 +650,7 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 							globalConfigMtx.Lock()
 							defer globalConfigMtx.Unlock()
 							// Create a new self-scrape token
-							selfScraperToken, err := CreatePromMetricToken()
+							selfScraperToken, err := createPromMetricToken()
 							if err != nil {
 								return fmt.Errorf("Failed to generate token for self-scraper at start: %v", err)
 							}
@@ -696,11 +704,11 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine, isDirector bool) error {
 							if isDirector {
 								// Refresh service discovery token by re-configure scraper
 								if len(promCfg.ScrapeConfigs) < 2 {
-									return errors.New("Prometheus scraper config didn't include origins HTTP SD config. Length of configs less than 2.")
+									return errors.New("Prometheus scraper config didn't include origin/cache HTTP SD config. Length of configs less than 2.")
 								}
 								// Index 0 is the default config for servers
 								// Create new director-scrap token & service discovery token
-								promCfg.ScrapeConfigs[1], err = configDirectorPromScraper()
+								promCfg.ScrapeConfigs[1], err = configDirectorPromScraper(ctx)
 								if err != nil {
 									return fmt.Errorf("Failed to generate token for director scraper when refresh it: %v", err)
 								}

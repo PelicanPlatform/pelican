@@ -1,7 +1,7 @@
 
 # We specify the platform as scitokens-oauth2-server didn't publish arm version and we don't want to
 # fail on building this container on arm machine
-FROM --platform=linux/amd64 hub.opensciencegrid.org/sciauth/scitokens-oauth2-server:release AS scitokens-oauth2-server
+FROM --platform=linux/amd64 hub.opensciencegrid.org/sciauth/scitokens-oauth2-server:release-20231118-1823 AS scitokens-oauth2-server
 
 FROM almalinux:8
 
@@ -25,13 +25,36 @@ baseurl=https://repo.goreleaser.com/yum/ \n\
 enabled=1 \n\
 gpgcheck=0' > /etc/yum.repos.d/goreleaser.repo
 
-# Install proper version of nodejs so that make web-build works
-RUN dnf module install -y nodejs:18
-
 # Install goreleaser and various other packages we need
-RUN yum install -y goreleaser npm xrootd xrootd-server xrootd-client nano xrootd-scitokens \
-    xrootd-voms xrdcl-http jq procps docker make curl java-17-openjdk-headless \
+RUN yum install -y goreleaser npm xrootd-devel xrootd-server-devel xrootd-client-devel nano xrootd-scitokens \
+    xrootd-voms xrdcl-http jq procps docker make curl-devel java-17-openjdk-headless git cmake3 gcc-c++ openssl-devel \
     && yum clean all
+
+# Install xrdcl-pelican plugin and replace the xrdcl-http plugin
+RUN \
+    git clone https://github.com/PelicanPlatform/xrdcl-pelican.git && \
+    cd xrdcl-pelican && \
+    mkdir build && cd build && \
+    cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
+    make && make install
+# Install the S3 and HTTP server plugins for XRootD. For now we do this from source
+# until we can sort out the RPMs.
+RUN \
+    git clone https://github.com/PelicanPlatform/xrootd-s3-http.git && \
+    cd xrootd-s3-http && \
+    mkdir build && cd build && \
+    cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
+    make install
+
+# Copy xrdcl-pelican plugin config and remove http plugin to use pelican plugin
+RUN \
+    cp /usr/local/etc/xrootd/client.plugins.d/pelican-plugin.conf /etc/xrootd/client.plugins.d/pelican-plugin.conf && \
+    rm -f /etc/xrootd/client.plugins.d/xrdcl-http-plugin.conf
+
+# Install proper version of nodejs so that make web-build works
+RUN \
+    dnf module reset -y nodejs && \
+    dnf module install -y nodejs:20
 
 # Installing the right version of go
 SHELL ["/bin/sh", "-c"]
@@ -105,6 +128,17 @@ ENV JAVA_HOME=/usr/lib/jvm/jre \
     PATH="${ST_HOME}/bin:${QDL_HOME}/bin:${PATH}"
 
 COPY images/dev-config.yaml /etc/pelican/pelican.yaml
+
+# For S3 tests, we need the minIO server client, so we install based on detected arch
+RUN if [ "$TARGETARCH" = "amd64" ]; then \
+        curl -o minio.rpm https://dl.min.io/server/minio/release/linux-amd64/archive/minio-20231214185157.0.0-1.x86_64.rpm &&\
+        dnf install -y minio.rpm &&\
+        rm -f minio.rpm; \
+    elif [ "$TARGETARCH" = "arm64" ]; then \
+        curl -o minio.rpm https://dl.min.io/server/minio/release/linux-arm64/archive/minio-20231214185157.0.0-1.aarch64.rpm &&\
+        dnf install -y minio.rpm &&\
+        rm -f minio.rpm; \
+    fi
 
 WORKDIR /app
 

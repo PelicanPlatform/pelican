@@ -66,12 +66,12 @@ const statusIndexErrorMessage = "Error: status string index out of range"
 // i.e. For ""OriginCache_XRootD", it means this component is available at both
 // Origin and Cache. Please come up with the largest possible scope of the component
 const (
-	OriginCache_XRootD     HealthStatusComponent = "xrootd"
-	OriginCache_CMSD       HealthStatusComponent = "cmsd"
-	OriginCache_Federation HealthStatusComponent = "federation" // Advertise to the director
-	// TODO: WebUI health status is only set at origin_serve for now. We will soon
-	// move this logic to all server web-ui in issue #308
-	Server_WebUI HealthStatusComponent = "web-ui"
+	OriginCache_XRootD        HealthStatusComponent = "xrootd"
+	OriginCache_CMSD          HealthStatusComponent = "cmsd"
+	OriginCache_Federation    HealthStatusComponent = "federation" // Advertise to the director
+	OriginCache_Director      HealthStatusComponent = "director"   // File transfer with director
+	DirectorRegistry_Topology HealthStatusComponent = "topology"   // Fetch data from OSDF topology
+	Server_WebUI              HealthStatusComponent = "web-ui"
 )
 
 var (

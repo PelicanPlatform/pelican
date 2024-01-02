@@ -22,10 +22,12 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"testing"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -33,10 +35,14 @@ import (
 )
 
 func TestResetPassword(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
 	dirName := t.TempDir()
 	viper.Reset()
 	viper.Set("ConfigDir", dirName)
-	err := config.InitServer()
+	err := config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
 
 	rootCmd.SetArgs([]string{"origin", "web-ui", "reset-password", "--stdin"})
@@ -45,7 +51,7 @@ func TestResetPassword(t *testing.T) {
 	err = rootCmd.Execute()
 	require.NoError(t, err)
 
-	fileName := param.Origin_UIPasswordFile.GetString()
+	fileName := param.Server_UIPasswordFile.GetString()
 	auth, err := htpasswd.New(fileName, []htpasswd.PasswdParser{htpasswd.AcceptBcrypt}, nil)
 	require.NoError(t, err)
 

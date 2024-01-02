@@ -6,6 +6,10 @@ The Pelican command line tool allows one to use a Pelican
 federation as a client and serve datasets through running a
 Pelican origin service.
 
+For more information on Pelican, see the [Pelican Platform page](https://pelicanplatform.org/).
+
+For documentation on using the Pelican Platform, see the [Pelican Platform documentation page](https://docs.pelicanplatform.org/).
+
 Testing and Usage
 -----------------
 

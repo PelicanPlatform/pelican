@@ -1,6 +1,7 @@
 package director
 
 import (
+	"context"
 	"crypto/elliptic"
 	"path/filepath"
 	"testing"
@@ -11,14 +12,20 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 )
 
 func TestVerifyAdvertiseToken(t *testing.T) {
 	/*
 	* Runs unit tests on the VerifyAdvertiseToken function
 	 */
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
 
 	viper.Reset()
 
@@ -28,14 +35,14 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 	//Setup a private key and a token
 	viper.Set("IssuerKey", kfile)
 
-	viper.Set("Federation.NamespaceURL", "https://get-your-tokens.org")
+	viper.Set("Federation.RegistryUrl", "https://get-your-tokens.org")
 	viper.Set("Federation.DirectorURL", "https://director-url.org")
 
 	kSet, err := config.GetIssuerPublicJWKS()
 	ar := MockCache{
 		GetFn: func(key string, keyset *jwk.Set) (jwk.Set, error) {
-			if key != "https://get-your-tokens.org/api/v1.0/registry/test-namespace/.well-known/issuer.jwks" {
-				t.Errorf("expecting: https://get-your-tokens.org/api/v1.0/registry/test-namespace/.well-known/issuer.jwks, got %q", key)
+			if key != "https://get-your-tokens.org/api/v2.0/registry/metadata/test-namespace/.well-known/issuer.jwks" {
+				t.Errorf("expecting: https://get-your-tokens.org/api/v2.0/registry/metadata/test-namespace/.well-known/issuer.jwks, got %q", key)
 			}
 			return *keyset, nil
 		},
@@ -58,7 +65,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 	// A verified token with a the correct scope - should return no error
 	tok, err := CreateAdvertiseToken("test-namespace")
 	assert.NoError(t, err)
-	ok, err := VerifyAdvertiseToken(tok, "test-namespace")
+	ok, err := VerifyAdvertiseToken(ctx, tok, "test-namespace")
 	assert.NoError(t, err)
 	assert.Equal(t, true, ok, "Expected scope to be 'pelican.advertise'")
 
@@ -75,7 +82,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 
 	signed, err := jwt.Sign(scopelessTok, jwt.WithKey(jwa.ES256, key))
 
-	ok, err = VerifyAdvertiseToken(string(signed), "test-namespace")
+	ok, err = VerifyAdvertiseToken(ctx, string(signed), "test-namespace")
 	assert.Equal(t, false, ok)
 	assert.Equal(t, "No scope is present; required to advertise to director", err.Error())
 
@@ -89,7 +96,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 
 	signed, err = jwt.Sign(nonStrScopeTok, jwt.WithKey(jwa.ES256, key))
 
-	ok, err = VerifyAdvertiseToken(string(signed), "test-namespace")
+	ok, err = VerifyAdvertiseToken(ctx, string(signed), "test-namespace")
 	assert.Equal(t, false, ok)
 	assert.Equal(t, "scope claim in token is not string-valued", err.Error())
 
@@ -103,7 +110,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 
 	signed, err = jwt.Sign(wrongScopeTok, jwt.WithKey(jwa.ES256, key))
 
-	ok, err = VerifyAdvertiseToken(string(signed), "test-namespace")
+	ok, err = VerifyAdvertiseToken(ctx, string(signed), "test-namespace")
 	assert.Equal(t, false, ok, "Should fail due to incorrect scope name")
 	assert.NoError(t, err, "Incorrect scope name should not throw and error")
 }
@@ -128,7 +135,7 @@ func TestCreateAdvertiseToken(t *testing.T) {
 	tok, err := CreateAdvertiseToken("test-namespace")
 	assert.Equal(t, "", tok)
 	assert.Equal(t, "Namespace URL is not set", err.Error())
-	viper.Set("Federation.NamespaceURL", "https://get-your-tokens.org")
+	viper.Set("Federation.RegistryUrl", "https://get-your-tokens.org")
 
 	// Test without a DirectorURL set and check to see if it returns the expected error
 	tok, err = CreateAdvertiseToken("test-namespace")
@@ -154,9 +161,63 @@ func TestGetRegistryIssuerURL(t *testing.T) {
 	assert.Equal(t, "Namespace URL is not set", err.Error())
 
 	// Test to make sure the path is as expected
-	viper.Set("Federation.NamespaceURL", "test-path")
+	viper.Set("Federation.RegistryUrl", "test-path")
 	url, err = GetRegistryIssuerURL("test-prefix")
 	assert.Equal(t, nil, err)
-	assert.Equal(t, "test-path/api/v1.0/registry/test-prefix/.well-known/issuer.jwks", url)
+	assert.Equal(t, "test-path/api/v2.0/registry/metadata/test-prefix/.well-known/issuer.jwks", url)
 
+}
+
+func TestNamespaceKeysCacheEviction(t *testing.T) {
+	t.Run("evict-after-expire-time", func(t *testing.T) {
+		// Start cache eviction
+		shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
+		egrp, ctx := errgroup.WithContext(shutdownCtx)
+		ConfigTTLCache(ctx, egrp)
+		defer func() {
+			shutdownCancel()
+			err := egrp.Wait()
+			assert.NoError(t, err)
+		}()
+
+		mockNamespaceKey := "foo"
+		mockCtx := context.Background()
+		mockAr := jwk.NewCache(mockCtx)
+
+		deletedChan := make(chan int)
+		cancelChan := make(chan int)
+
+		go func() {
+			namespaceKeysMutex.Lock()
+			defer namespaceKeysMutex.Unlock()
+			namespaceKeys.DeleteAll()
+
+			namespaceKeys.Set(mockNamespaceKey, mockAr, time.Second*2)
+			require.True(t, namespaceKeys.Has(mockNamespaceKey), "Failed to register namespace key")
+		}()
+
+		// Keep checking if the cache item is absent or cancelled
+		go func() {
+			for {
+				select {
+				case <-cancelChan:
+					return
+				default:
+					if !namespaceKeys.Has(mockNamespaceKey) {
+						deletedChan <- 1
+						return
+					}
+				}
+			}
+		}()
+
+		// Wait for 3s to check if the expired cache item is evicted
+		select {
+		case <-deletedChan:
+			require.True(t, true)
+		case <-time.After(3 * time.Second):
+			cancelChan <- 1
+			require.False(t, true, "Cache didn't evict expired item")
+		}
+	})
 }
