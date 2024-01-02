@@ -30,6 +30,7 @@ import (
 	"testing"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/launchers"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
@@ -83,7 +84,7 @@ func TestFedServePosixOrigin(t *testing.T) {
 	err = config.InitServer(ctx, modules)
 	require.NoError(t, err)
 
-	fedCancel, err := fedServeInternal(ctx, modules, egrp)
+	fedCancel, err := launchers.LaunchModules(ctx, modules)
 	defer fedCancel()
 	if err != nil {
 		log.Errorln("Failure in fedServeInternal:", err)

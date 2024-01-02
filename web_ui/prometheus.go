@@ -22,12 +22,9 @@ import (
 	"math"
 	"net/http"
 	"net/url"
-	"os"
-	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/alecthomas/units"
@@ -592,19 +589,15 @@ func ConfigureEmbeddedPrometheus(ctx context.Context, engine *gin.Engine) error 
 	var g run.Group
 	{
 		// Termination handler.
-		term := make(chan os.Signal, 1)
-		signal.Notify(term, os.Interrupt, syscall.SIGTERM)
 		cancel := make(chan struct{})
 		g.Add(
 			func() error {
 				// Don't forget to release the reloadReady channel so that waiting blocks can exit normally.
 				select {
-				case <-term:
-					err := level.Warn(logger).Log("msg", "Received SIGTERM, exiting gracefully...")
+				case <-ctx.Done():
+					err := level.Warn(logger).Log("msg", "Received shutdown, exiting gracefully...")
 					_ = err
 					reloadReady.Close()
-				//case <-webHandler.Quit():
-				//	level.Warn(logger).Log("msg", "Received termination request via web service, exiting gracefully...")
 				case <-cancel:
 					reloadReady.Close()
 				}
@@ -612,7 +605,6 @@ func ConfigureEmbeddedPrometheus(ctx context.Context, engine *gin.Engine) error 
 			},
 			func(err error) {
 				close(cancel)
-				//webHandler.SetReady(false)
 				readyHandler.SetReady(false)
 			},
 		)

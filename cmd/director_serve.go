@@ -19,76 +19,12 @@
 package main
 
 import (
-	"context"
-	"os"
-	"os/signal"
-	"syscall"
-
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/launchers"
-	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/web_ui"
-	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	"golang.org/x/sync/errgroup"
 )
 
 func serveDirector(cmd *cobra.Command, args []string) error {
-
-	shutdownCtx, shutdownCancel := context.WithCancel(cmd.Context())
-	egrp, ctx := errgroup.WithContext(shutdownCtx)
-
-	defer func() {
-		shutdownCancel()
-		if err := egrp.Wait(); err != nil {
-			log.Errorln("Failure when cleaning up director:", err)
-		}
-	}()
-
-	engine, err := web_ui.GetEngine()
-	if err != nil {
-		return err
-	}
-
-	if param.Server_EnableUI.GetBool() {
-		// Set up necessary APIs to support Web UI, including auth and metrics
-		if err := web_ui.ConfigureServerWebAPI(ctx, engine, egrp); err != nil {
-			return err
-		}
-	}
-
-	if err = launchers.DirectorServe(ctx, engine, egrp); err != nil {
-		return err
-	}
-
-	log.Info("Starting web engine...")
-	egrp.Go(func() error {
-		if err := web_ui.RunEngine(ctx, engine, egrp); err != nil {
-			return errors.Wrap(err, "Failure when running the web engine:")
-		}
-		shutdownCancel()
-		return nil
-	})
-
-	if param.Server_EnableUI.GetBool() {
-		if err = web_ui.ConfigureEmbeddedPrometheus(ctx, engine); err != nil {
-			return errors.Wrap(err, "Failed to configure embedded prometheus instance")
-		}
-
-		log.Info("Starting web engine...")
-		if err = web_ui.InitServerWebLogin(ctx); err != nil {
-			return err
-		}
-	}
-
-	egrp.Go(func() error {
-		sigs := make(chan os.Signal, 1)
-		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
-		sig := <-sigs
-		_ = sig
-		shutdownCancel()
-		return errors.New("Director process has been cancelled")
-	})
-
-	return egrp.Wait()
+	_, err := launchers.LaunchModules(cmd.Context(), config.DirectorType)
+	return err
 }

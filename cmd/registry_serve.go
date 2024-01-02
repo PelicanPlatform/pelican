@@ -19,73 +19,13 @@
 package main
 
 import (
-	"context"
-	"os"
-	"os/signal"
-	"syscall"
-
-	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/launchers"
-	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/web_ui"
 )
 
 func serveRegistry(cmd *cobra.Command, _ []string) error {
-	ctx := cmd.Context()
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	egrp, ok := ctx.Value(config.EgrpKey).(*errgroup.Group)
-	if !ok {
-		egrp = &errgroup.Group{}
-	}
-
-	engine, err := web_ui.GetEngine()
-	if err != nil {
-		return err
-	}
-
-	if param.Server_EnableUI.GetBool() {
-		// Set up necessary APIs to support Web UI, including auth and metrics
-		if err := web_ui.ConfigureServerWebAPI(ctx, engine, egrp); err != nil {
-			return err
-		}
-	}
-
-	if err = launchers.RegistryServe(ctx, engine, egrp); err != nil {
-		return err
-	}
-
-	log.Info("Starting web engine...")
-	go func() {
-		if err := web_ui.RunEngine(ctx, engine, egrp); err != nil {
-			log.Panicln("Failure when running the web engine:", err)
-		}
-		cancel()
-	}()
-
-	if param.Server_EnableUI.GetBool() {
-		if err = web_ui.ConfigureEmbeddedPrometheus(ctx, engine); err != nil {
-			return errors.Wrap(err, "Failed to configure embedded prometheus instance")
-		}
-
-		if err := web_ui.InitServerWebLogin(ctx); err != nil {
-			log.Panicln("Failure when initializing the web login:", err)
-		}
-	}
-
-	egrp.Go(func() error {
-		sigs := make(chan os.Signal, 1)
-		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
-		sig := <-sigs
-		_ = sig
-		cancel()
-		return errors.New("Registry process has been cancelled")
-	})
-
-	return nil
+	_, err := launchers.LaunchModules(cmd.Context(), config.RegistryType)
+	return err
 }

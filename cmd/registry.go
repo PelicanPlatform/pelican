@@ -19,19 +19,12 @@
 package main
 
 import (
-	"context"
-
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/spf13/cobra"
 )
 
 var (
 	registryCmd = &cobra.Command{
-		Use: "registry",
-		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			err := initRegistry(cmd.Context())
-			return err
-		},
+		Use:   "registry",
 		Short: "Interact with a Pelican registry service",
 		Long: `Interact with a Pelican registry service:
 
@@ -56,13 +49,6 @@ var (
 		SilenceUsage: true,
 	}
 )
-
-func initRegistry(ctx context.Context) error {
-	err := config.InitServer(ctx, config.RegistryType)
-	cobra.CheckErr(err)
-
-	return err
-}
 
 func init() {
 	// Tie the registryServe command to the root CLI command

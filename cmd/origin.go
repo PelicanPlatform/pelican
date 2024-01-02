@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -100,11 +99,9 @@ func configOrigin( /*cmd*/ *cobra.Command /*args*/, []string) {
 }
 
 func initOrigin(ctx context.Context) error {
-	err := config.InitServer(ctx, config.OriginType)
-	cobra.CheckErr(err)
 	metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusCritical, "xrootd has not been started")
 	metrics.SetComponentHealthStatus(metrics.OriginCache_CMSD, metrics.StatusCritical, "cmsd has not been started")
-	return err
+	return nil
 }
 
 func init() {
