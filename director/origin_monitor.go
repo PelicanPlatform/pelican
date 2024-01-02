@@ -75,6 +75,7 @@ func reportStatusToOrigin(ctx context.Context, originWebUrl string, status strin
 
 	reqBody := bytes.NewBuffer(jsonData)
 
+	log.Debugln("Director is uploading origin test results to", reportUrl.String())
 	req, err := http.NewRequestWithContext(ctx, "POST", reportUrl.String(), reqBody)
 	if err != nil {
 		return errors.Wrap(err, "Failed to create POST request for reporting director test")
@@ -112,7 +113,6 @@ func LaunchPeriodicDirectorTest(ctx context.Context, originAd ServerAd) {
 
 	log.Debug(fmt.Sprintf("Starting Director test for origin %s at %s", originName, originUrl))
 	ticker := time.NewTicker(15 * time.Second)
-	defer ticker.Stop()
 
 	egrp, ok := ctx.Value(config.EgrpKey).(*errgroup.Group)
 	if !ok {
@@ -120,6 +120,8 @@ func LaunchPeriodicDirectorTest(ctx context.Context, originAd ServerAd) {
 	}
 
 	egrp.Go(func() error {
+		defer ticker.Stop()
+
 		for {
 			select {
 			case <-ctx.Done():

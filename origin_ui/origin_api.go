@@ -110,6 +110,7 @@ func LaunchPeriodicDirectorTimeout(ctx context.Context, egrp *errgroup.Group) {
 				log.Warningln("No director test report received within the time limit")
 				metrics.SetComponentHealthStatus(metrics.OriginCache_Director, metrics.StatusCritical, "No director test report received within the time limit")
 			case <-nChan:
+				log.Debugln("Got notification from director")
 				directorTimeoutTicker.Reset(directorTimeoutDuration)
 			case <-ctx.Done():
 				log.Infoln("Gracefully terminating the director-health test timeout loop...")
@@ -149,10 +150,6 @@ func ConfigureOriginAPI(router *gin.Engine, ctx context.Context, egrp *errgroup.
 	if router == nil {
 		return errors.New("Origin configuration passed a nil pointer")
 	}
-
-	notifyResponseOnce.Do(func() {
-
-	})
 
 	metrics.SetComponentHealthStatus(metrics.OriginCache_Director, metrics.StatusWarning, "Initializing origin, unknown status for director")
 	// start the timer for the director test report timeout
