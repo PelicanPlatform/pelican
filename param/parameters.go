@@ -142,6 +142,7 @@ var (
 	Monitoring_AggregatePrefixes = StringSliceParam{"Monitoring.AggregatePrefixes"}
 	Origin_ScitokensRestrictedPaths = StringSliceParam{"Origin.ScitokensRestrictedPaths"}
 	Registry_AdminUsers = StringSliceParam{"Registry.AdminUsers"}
+	Server_Modules = StringSliceParam{"Server.Modules"}
 )
 
 var (
@@ -176,6 +177,7 @@ var (
 	Origin_ScitokensMapSubject = BoolParam{"Origin.ScitokensMapSubject"}
 	Origin_SelfTest = BoolParam{"Origin.SelfTest"}
 	Registry_RequireKeyChaining = BoolParam{"Registry.RequireKeyChaining"}
+	Server_EnableUI = BoolParam{"Server.EnableUI"}
 	StagePlugin_Hook = BoolParam{"StagePlugin.Hook"}
 	TLSSkipVerify = BoolParam{"TLSSkipVerify"}
 )
@@ -193,6 +195,7 @@ var (
 )
 
 var (
+	GeoIPOverrides = ObjectParam{"GeoIPOverrides"}
 	Issuer_AuthorizationTemplates = ObjectParam{"Issuer.AuthorizationTemplates"}
 	Issuer_OIDCAuthenticationRequirements = ObjectParam{"Issuer.OIDCAuthenticationRequirements"}
 	Registry_Institutions = ObjectParam{"Registry.Institutions"}

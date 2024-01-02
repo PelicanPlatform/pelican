@@ -574,7 +574,7 @@ components: ["nsregistry"]
 name: Registry.Institutions
 description: >-
   A array of institution objects available to register. Users can only select from this list
-  when they register a new namespace. Each object has `name` and `id` field where 
+  when they register a new namespace. Each object has `name` and `id` field where
   `name` is a human-readable name for the institution and `id` is a unique identifier
   for the institution. For Pelican running in OSDF alias, the `id` will be OSG ID.
 
@@ -644,6 +644,13 @@ root_default: /etc/pelican/certificates/tls.key
 default: "$ConfigBase/certificates/tls.key"
 components: ["origin", "nsregistry", "director"]
 ---
+name: Server.EnableUI
+description: >-
+  Indicate whether a server should enable its web UI.
+type: bool
+default: true
+components: ["origin", "nsregistry", "director", "cache"]
+---
 name: Server.WebPort
 description: >-
   The port number the Pelican web interface and internal web APIs will be bound to.
@@ -704,6 +711,12 @@ description: >-
 type: filename
 default: none
 components: ["origin", "director", "nsregistry"]
+---
+name: Server.Modules
+description: >-
+  A list of modules to enable when running pelican in `pelican serve` mode.
+type: stringSlice
+default: []
 ---
 name: Server.UIActivationCodeFile
 description: >-
@@ -918,7 +931,7 @@ name: OIDC.ClientRedirectHostname
 description: >-
   The hostname for the OIDC client redirect URL that the OIDC provider will redirect to after the user is authenticated
 
-  For development use only. Useful when developing in a container and you want to expose localhost 
+  For development use only. Useful when developing in a container and you want to expose localhost
   instead of container hostname to your OAuth provider
 type: string
 default: none

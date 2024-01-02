@@ -21,6 +21,7 @@ package director
 import (
 	"archive/tar"
 	"compress/gzip"
+	"context"
 	"fmt"
 	"io"
 	"math/rand"
@@ -254,29 +255,35 @@ func DownloadDB(localFile string) error {
 	return nil
 }
 
-func PeriodicMaxMindReload() {
+func PeriodicMaxMindReload(ctx context.Context) {
 	// The MaxMindDB updates Tuesday/Thursday. While a free API key
 	// does get 1000 downloads a month, we might still want to change
 	// this eventually to guarantee we only update on those days...
+
+	// Update once every other day
+	ticker := time.NewTicker(48 * time.Hour)
 	for {
-		// Update once every other day
-		time.Sleep(time.Hour * 48)
-		localFile := param.Director_GeoIPLocation.GetString()
-		if err := DownloadDB(localFile); err != nil {
-			log.Warningln("Failed to download GeoIP database:", err)
-		} else {
-			localReader, err := geoip2.Open(localFile)
-			if err != nil {
-				log.Warningln("Failed to re-open GeoIP database:", err)
+		select {
+		case <-ticker.C:
+			localFile := param.Director_GeoIPLocation.GetString()
+			if err := DownloadDB(localFile); err != nil {
+				log.Warningln("Failed to download GeoIP database:", err)
 			} else {
-				maxMindReader.Store(localReader)
+				localReader, err := geoip2.Open(localFile)
+				if err != nil {
+					log.Warningln("Failed to re-open GeoIP database:", err)
+				} else {
+					maxMindReader.Store(localReader)
+				}
 			}
+		case <-ctx.Done():
+			return
 		}
 	}
 }
 
-func InitializeDB() {
-	go PeriodicMaxMindReload()
+func InitializeDB(ctx context.Context) {
+	go PeriodicMaxMindReload(ctx)
 	localFile := param.Director_GeoIPLocation.GetString()
 	localReader, err := geoip2.Open(localFile)
 	if err != nil {

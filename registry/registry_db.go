@@ -19,6 +19,7 @@
 package registry
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -607,7 +608,7 @@ func getAllNamespaces() ([]*Namespace, error) {
 	return namespaces, nil
 }
 
-func InitializeDB() error {
+func InitializeDB(ctx context.Context) error {
 	dbPath := param.Registry_DbLocation.GetString()
 	if dbPath == "" {
 		err := errors.New("Could not get path for the namespace registry database.")
@@ -759,9 +760,10 @@ func PeriodicTopologyReload() {
 	}
 }
 
-func ShutdownDB() {
+func ShutdownDB() error {
 	err := db.Close()
 	if err != nil {
 		log.Errorln("Failure when shutting down the database:", err)
 	}
+	return err
 }

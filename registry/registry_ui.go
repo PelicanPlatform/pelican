@@ -127,7 +127,6 @@ func populateRegistrationFields(prefix string, data interface{}) []registrationF
 					existing_prefix = prefix + "."
 				}
 				fields = append(fields, populateRegistrationFields(existing_prefix+"admin_metadata", AdminMetadata{})...)
-				break
 			}
 		}
 

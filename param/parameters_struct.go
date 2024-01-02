@@ -42,6 +42,7 @@ type config struct {
 		TopologyNamespaceUrl string
 		TopologyReloadInterval time.Duration
 	}
+	GeoIPOverrides interface{}
 	Issuer struct {
 		AuthenticationSource string
 		AuthorizationTemplates interface{}
@@ -115,12 +116,14 @@ type config struct {
 		RequireKeyChaining bool
 	}
 	Server struct {
+		EnableUI bool
 		ExternalWebUrl string
 		Hostname string
 		IssuerHostname string
 		IssuerJwks string
 		IssuerPort int
 		IssuerUrl string
+		Modules []string
 		SessionSecretFile string
 		TLSCACertificateDirectory string
 		TLSCACertificateFile string

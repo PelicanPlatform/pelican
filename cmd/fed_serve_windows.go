@@ -18,24 +18,13 @@
  *
  ***************************************************************/
 
-package daemon
+package main
 
 import (
-	"context"
-	"io"
-
 	"github.com/pkg/errors"
-	"golang.org/x/sync/errgroup"
+	"github.com/spf13/cobra"
 )
 
-func LaunchDaemons(ctx context.Context, launchers []Launcher, egrp *errgroup.Group) (err error) {
-	return errors.New("launching daemons is not supported on Windows")
-}
-
-func (launcher DaemonLauncher) Launch(ctx context.Context) (context.Context, int, error) {
-	return context.Background(), -1, errors.New("launching daemons is not supported on Windows")
-}
-
-func ForwardCommandToLogger(ctx context.Context, daemonName string, cmdStdout io.ReadCloser, cmdStderr io.ReadCloser) {
-	return
+func fedServeStart( /*cmd*/ *cobra.Command /*args*/, []string) error {
+	return errors.New("'serve' command is not supported on Windows")
 }

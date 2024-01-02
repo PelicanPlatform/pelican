@@ -1,4 +1,4 @@
-//go:build windows
+//go:build !windows
 
 /***************************************************************
  *
@@ -18,24 +18,31 @@
  *
  ***************************************************************/
 
-package daemon
+package main
 
 import (
-	"context"
-	"io"
-
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/launchers"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
-	"golang.org/x/sync/errgroup"
+	"github.com/spf13/cobra"
 )
 
-func LaunchDaemons(ctx context.Context, launchers []Launcher, egrp *errgroup.Group) (err error) {
-	return errors.New("launching daemons is not supported on Windows")
-}
+func fedServeStart(cmd *cobra.Command, args []string) error {
+	moduleSlice := param.Server_Modules.GetStringSlice()
+	if len(moduleSlice) == 0 {
+		return errors.New("No modules are enabled; pass the --module flag or set the Server.Modules parameter")
+	}
+	modules := config.NewServerType()
+	for _, module := range moduleSlice {
+		if !modules.SetString(module) {
+			return errors.Errorf("Unknown module name: %s", module)
+		}
+	}
+	if modules.IsEnabled(config.CacheType) {
+		return errors.New("`pelican serve` does not support the cache module")
+	}
 
-func (launcher DaemonLauncher) Launch(ctx context.Context) (context.Context, int, error) {
-	return context.Background(), -1, errors.New("launching daemons is not supported on Windows")
-}
-
-func ForwardCommandToLogger(ctx context.Context, daemonName string, cmdStdout io.ReadCloser, cmdStderr io.ReadCloser) {
-	return
+	_, err := launchers.LaunchModules(cmd.Context(), modules)
+	return err
 }

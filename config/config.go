@@ -19,6 +19,7 @@
 package config
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	_ "embed"
@@ -29,13 +30,11 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/signal"
 	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/go-playground/validator/v10"
@@ -44,6 +43,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"golang.org/x/sync/errgroup"
 )
 
 // Structs holding the OAuth2 state (and any other OSDF config needed)
@@ -82,15 +82,19 @@ type (
 	TokenGenerationOpts struct {
 		Operation TokenOperation
 	}
-)
 
-type ServerType int // ServerType is a bit mask indicating which Pelican server(s) are running in the current process
+	ServerType int // ServerType is a bit mask indicating which Pelican server(s) are running in the current process
+
+	ContextKey string
+)
 
 const (
 	CacheType ServerType = 1 << iota
 	OriginType
 	DirectorType
 	RegistryType
+
+	EgrpKey ContextKey = "egrp"
 )
 
 const (
@@ -172,6 +176,11 @@ func IsServerEnabled(testServer ServerType) bool {
 	return enabledServers.IsEnabled(testServer)
 }
 
+// Create a new, empty ServerType bitmask
+func NewServerType() ServerType {
+	return ServerType(0)
+}
+
 func (sType ServerType) String() string {
 	switch sType {
 	case CacheType:
@@ -184,6 +193,24 @@ func (sType ServerType) String() string {
 		return "Registry"
 	}
 	return "Unknown"
+}
+
+func (sType *ServerType) SetString(name string) bool {
+	switch strings.ToLower(name) {
+	case "cache":
+		*sType |= CacheType
+		return true
+	case "origin":
+		*sType |= OriginType
+		return true
+	case "director":
+		*sType |= DirectorType
+		return true
+	case "registry":
+		*sType |= RegistryType
+		return true
+	}
+	return false
 }
 
 // Based on the name of the current binary, determine the preferred "style"
@@ -304,23 +331,33 @@ func DiscoverFederation() error {
 	return nil
 }
 
-func cleanupDirOnShutdown(dir string) {
-	sigs := make(chan os.Signal, 1)
+// TODO: It's not clear that this function works correctly.  We should
+// pass an errgroup here and ensure that the cleanup is complete before
+// the main thread shuts down.
+func cleanupDirOnShutdown(ctx context.Context, dir string) {
 	tempRunDir = dir
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
-	go func() {
-		<-sigs
-		CleanupTempResources()
-	}()
+	egrp, ok := ctx.Value(EgrpKey).(*errgroup.Group)
+	if !ok {
+		egrp = &errgroup.Group{}
+	}
+	egrp.Go(func() error {
+		<-ctx.Done()
+		err := CleanupTempResources()
+		if err != nil {
+			log.Infoln("Error when cleaning up temporary directories:", err)
+		}
+		return err
+	})
 }
 
-func CleanupTempResources() {
+func CleanupTempResources() (err error) {
 	cleanupOnce.Do(func() {
 		if tempRunDir != "" {
-			os.RemoveAll(tempRunDir)
+			err = os.RemoveAll(tempRunDir)
 			tempRunDir = ""
 		}
 	})
+	return
 }
 
 func getConfigBase() (string, error) {
@@ -532,7 +569,7 @@ func initConfigDir() error {
 // Initialize Pelican server instance. Pass a list of `enabledServices` if you want to enable multiple services.
 // Note not all configurations are supported: currently, if you enable both cache and origin then an error
 // is thrown
-func InitServer(enabledServices ServerType) error {
+func InitServer(ctx context.Context, enabledServices ServerType) error {
 	if err := initConfigDir(); err != nil {
 		return errors.Wrap(err, "Failed to initialize the server configuration")
 	}
@@ -593,7 +630,7 @@ func InitServer(enabledServices ServerType) error {
 			}
 			viper.SetDefault("Xrootd.RunLocation", filepath.Join(dir, xrootdPrefix))
 			viper.SetDefault("Cache.DataLocation", path.Join(dir, "xcache"))
-			cleanupDirOnShutdown(dir)
+			cleanupDirOnShutdown(ctx, dir)
 		}
 		viper.SetDefault("Origin.Multiuser", false)
 	}
@@ -633,6 +670,10 @@ func InitServer(enabledServices ServerType) error {
 	externalAddressStr := param.Server_ExternalWebUrl.GetString()
 	if _, err = url.Parse(externalAddressStr); err != nil {
 		return errors.Wrap(err, fmt.Sprint("Invalid Server.ExternalWebUrl: ", externalAddressStr))
+	}
+
+	if enabledServices.IsEnabled(DirectorType) && param.Federation_DirectorUrl.GetString() == "" {
+		viper.SetDefault("Federation.DirectorUrl", viper.GetString("Server.ExternalWebUrl"))
 	}
 
 	tokenRefreshInterval := param.Monitoring_TokenRefreshInterval.GetDuration()
