@@ -89,10 +89,12 @@ func PeriodicWriteCABundle(filename string, sleepTime time.Duration) (count int,
 	}
 
 	go func() {
-		time.Sleep(sleepTime)
-		_, err := WriteCABundle(filename)
-		if err != nil {
-			log.Warningln("Failure during periodic CA bundle update:", err)
+		for {
+			time.Sleep(sleepTime)
+			_, err := WriteCABundle(filename)
+			if err != nil {
+				log.Warningln("Failure during periodic CA bundle update:", err)
+			}
 		}
 	}()
 

@@ -1,11 +1,12 @@
-
 name: Release, Build, and Push Dev Image
 
 on:
   pull_request:
   push:
     tags:
-      - v[0-9]+.[0-9]+.[0-9]+-**
+      # only build and publish container on v7.0.0 and up
+      - v[7-9]\.[0-9]+\.[0-9]+-**
+      - v[1-9][0-9]+\.[0-9]+\.[0-9]+-**
     branches:
       - main
 
@@ -13,13 +14,11 @@ jobs:
   build-dev-image:
     runs-on: ubuntu-latest
     steps:
-      -
-        name: Checkout
+      - name: Checkout
         uses: actions/checkout@v3
         with:
-          submodules: 'recursive'
-      -
-        name: Docker meta
+          submodules: "recursive"
+      - name: Docker meta
         id: meta
         uses: docker/metadata-action@v4
         with:

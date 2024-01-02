@@ -61,7 +61,7 @@ func TestDirectorRegistration(t *testing.T) {
 
 	viper.Reset()
 
-	viper.Set("Federation.NamespaceURL", "https://get-your-tokens.org")
+	viper.Set("Federation.RegistryUrl", "https://get-your-tokens.org")
 
 	setupContext := func() (*gin.Context, *gin.Engine, *httptest.ResponseRecorder) {
 		// Setup httptest recorder and context for the the unit test
