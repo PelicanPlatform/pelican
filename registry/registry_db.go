@@ -315,7 +315,7 @@ func getNamespaceJwksByPrefix(prefix string, approvalRequired bool) (*jwk.Set, e
 		err := db.QueryRow(jwksQuery, prefix).Scan(&pubkeyStr, &adminMetadataStr)
 		if err != nil {
 			if err == sql.ErrNoRows {
-				return nil, errors.New("prefix not found in database")
+				return nil, prefixDNE
 			}
 			return nil, errors.Wrap(err, "error performing cache pubkey query")
 		}
@@ -334,7 +334,7 @@ func getNamespaceJwksByPrefix(prefix string, approvalRequired bool) (*jwk.Set, e
 		err := db.QueryRow(jwksQuery, prefix).Scan(&pubkeyStr)
 		if err != nil {
 			if err == sql.ErrNoRows {
-				return nil, errors.New("prefix not found in database")
+				return nil, prefixDNE
 			}
 			return nil, errors.Wrap(err, "error performing origin pubkey query")
 		}

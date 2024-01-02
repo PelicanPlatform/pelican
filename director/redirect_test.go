@@ -21,11 +21,12 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
-	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 type MockCache struct {
@@ -65,7 +66,13 @@ func TestDirectorRegistration(t *testing.T) {
 
 	viper.Reset()
 
-	viper.Set("Federation.RegistryUrl", "https://get-your-tokens.org")
+	// Anything that needs to create/verify a token by getting the namespace's pubkey/issuer URL needs to
+	// do a lookup against a registry. Create a dummy registry that can return the correct value
+	registry := registryMockup(t, "/foo/bar")
+	defer registry.Close()
+	viper.Set("Federation.RegistryUrl", registry.URL)
+
+	// viper.Set("Federation.RegistryUrl", "https://get-your-tokens.org")
 
 	setupContext := func() (*gin.Context, *gin.Engine, *httptest.ResponseRecorder) {
 		// Setup httptest recorder and context for the the unit test
@@ -137,8 +144,8 @@ func TestDirectorRegistration(t *testing.T) {
 	setupMockCache := func(t *testing.T, publicKey jwk.Key) MockCache {
 		return MockCache{
 			GetFn: func(key string, keyset *jwk.Set) (jwk.Set, error) {
-				if key != "https://get-your-tokens.org/api/v2.0/registry/metadata/foo/bar/.well-known/issuer.jwks" {
-					t.Errorf("expecting: https://get-your-tokens.org/api/v2.0/registry/metadata/foo/bar/.well-known/issuer.jwks, got %q", key)
+				if key != "https://registry.com:8446/api/v2.0/registry/metadata/foo/bar/.well-known/issuer.jwks" {
+					t.Errorf("expecting: https://registry.com:8446/api/v2.0/registry/metadata/foo/bar/.well-known/issuer.jwks, got %q", key)
 				}
 				return *keyset, nil
 			},
