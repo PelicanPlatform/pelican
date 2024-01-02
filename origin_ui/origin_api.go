@@ -30,18 +30,36 @@ import (
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
 )
 
 var (
-	// Mutex for safe concurrent access to the timer
-	timerMutex sync.Mutex
-	// Timer for tracking timeout
-	directorTimeoutTimer *time.Timer
 	// Duration to wait before timeout
-	// TODO: Do we want to make this a configurable value?
 	directorTimeoutDuration = 30 * time.Second
-	exitLoop                = make(chan struct{})
+
+	notifyResponseOnce sync.Once
+	notifyChannel      chan bool
 )
+
+// Notify the periodic ticker that we have received a new response and it
+// should reset
+func notifyNewDirectorResponse(ctx context.Context) {
+	nChan := getNotifyChannel()
+	select {
+	case <-ctx.Done():
+		return
+	case nChan <- true:
+		return
+	}
+}
+
+// Get the notification channel in a thread-safe manner
+func getNotifyChannel() chan bool {
+	notifyResponseOnce.Do(func() {
+		notifyChannel = make(chan bool)
+	})
+	return notifyChannel
+}
 
 // Check the Bearer token from requests sent from the director to ensure
 // it's has correct authorization
@@ -80,38 +98,29 @@ func directorRequestAuthHandler(ctx *gin.Context) {
 }
 
 // Reset the timer safely
-func resetDirectorTimeoutTimer() {
-	timerMutex.Lock()
-	defer timerMutex.Unlock()
+func LaunchPeriodicDirectorTimeout(ctx context.Context, egrp *errgroup.Group) {
+	directorTimeoutTicker := time.NewTicker(directorTimeoutDuration)
+	nChan := getNotifyChannel()
 
-	if directorTimeoutTimer == nil {
-		directorTimeoutTimer = time.NewTimer(directorTimeoutDuration)
-		go func() {
-			for {
-				select {
-				case <-directorTimeoutTimer.C:
-					// Timer fired because no message was received in time.
-					log.Warningln("No director test report received within the time limit")
-					metrics.SetComponentHealthStatus(metrics.OriginCache_Director, metrics.StatusCritical, "No director test report received within the time limit")
-					// Reset the timer for the next period.
-					timerMutex.Lock()
-					directorTimeoutTimer.Reset(directorTimeoutDuration)
-					timerMutex.Unlock()
-				case <-exitLoop:
-					log.Infoln("Gracefully terminating the director-health test timeout loop...")
-					return
-				}
+	egrp.Go(func() error {
+		for {
+			select {
+			case <-directorTimeoutTicker.C:
+				// Timer fired because no message was received in time.
+				log.Warningln("No director test report received within the time limit")
+				metrics.SetComponentHealthStatus(metrics.OriginCache_Director, metrics.StatusCritical, "No director test report received within the time limit")
+			case <-nChan:
+				log.Debugln("Got notification from director")
+				directorTimeoutTicker.Reset(directorTimeoutDuration)
+			case <-ctx.Done():
+				log.Infoln("Gracefully terminating the director-health test timeout loop...")
+				return nil
 			}
-		}()
-	} else {
-		if !directorTimeoutTimer.Stop() {
-			<-directorTimeoutTimer.C
 		}
-		directorTimeoutTimer.Reset(directorTimeoutDuration)
-	}
+	})
 }
 
-// Director will periodiclly upload/download files to/from all connected
+// Director will periodically upload/download files to/from all connected
 // origins and test the health status of origins. It will send a request
 // reporting such status to this endpoint, and we will update origin internal
 // health status metric to reflect the director connection status.
@@ -123,7 +132,7 @@ func directorTestResponse(ctx *gin.Context) {
 		return
 	}
 	// We will let the timer go timeout if director didn't send a valid json request
-	resetDirectorTimeoutTimer()
+	notifyNewDirectorResponse(ctx)
 	if dt.Status == "ok" {
 		metrics.SetComponentHealthStatus(metrics.OriginCache_Director, metrics.StatusOK, fmt.Sprintf("Director timestamp: %v", dt.Timestamp))
 		ctx.JSON(200, gin.H{"msg": "Success"})
@@ -137,29 +146,14 @@ func directorTestResponse(ctx *gin.Context) {
 }
 
 // Configure API endpoints for origin that are not tied to UI
-func ConfigureOriginAPI(router *gin.Engine, ctx context.Context, wg *sync.WaitGroup) error {
+func ConfigureOriginAPI(router *gin.Engine, ctx context.Context, egrp *errgroup.Group) error {
 	if router == nil {
 		return errors.New("Origin configuration passed a nil pointer")
 	}
 
 	metrics.SetComponentHealthStatus(metrics.OriginCache_Director, metrics.StatusWarning, "Initializing origin, unknown status for director")
 	// start the timer for the director test report timeout
-	resetDirectorTimeoutTimer()
-
-	go func() {
-		// Gracefully stop the timer at the exit of the program
-		defer wg.Done()
-		<-ctx.Done()
-		timerMutex.Lock()
-		defer timerMutex.Unlock()
-		// Terminate the infinite loop to reset the timer
-		close(exitLoop)
-		if directorTimeoutTimer != nil {
-			directorTimeoutTimer.Stop()
-			directorTimeoutTimer = nil
-		}
-		log.Infoln("Gracefully stopping the director-health test timeout timer...")
-	}()
+	LaunchPeriodicDirectorTimeout(ctx, egrp)
 
 	group := router.Group("/api/v1.0/origin-api")
 	group.POST("/directorTest", directorRequestAuthHandler, directorTestResponse)

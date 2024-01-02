@@ -19,6 +19,7 @@
 package director
 
 import (
+	"context"
 	"net/url"
 	"strings"
 	"time"
@@ -115,16 +116,21 @@ func AdvertiseOSDF() error {
 	return nil
 }
 
-func PeriodicCacheReload() {
+func PeriodicCacheReload(ctx context.Context) {
+	ticker := time.NewTicker(param.Federation_TopologyReloadInterval.GetDuration())
 	for {
-		// The ad cache times out every 15 minutes, so update it every
-		// 10. If a key isn't updated, it will survive for 5 minutes
-		// and then disappear
-		time.Sleep(time.Minute * param.Federation_TopologyReloadInterval.GetDuration())
-		err := AdvertiseOSDF()
-		if err != nil {
-			log.Warningf("Failed to re-advertise: %s. Will try again later",
-				err)
+		select {
+		case <-ticker.C:
+			// The ad cache times out every 15 minutes, so update it every
+			// 10. If a key isn't updated, it will survive for 5 minutes
+			// and then disappear
+			err := AdvertiseOSDF()
+			if err != nil {
+				log.Warningf("Failed to re-advertise: %s. Will try again later",
+					err)
+			}
+		case <-ctx.Done():
+			return
 		}
 	}
 }

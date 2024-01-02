@@ -34,7 +34,6 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
-	"sync"
 	"text/template"
 	"time"
 
@@ -48,6 +47,7 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
+	"golang.org/x/sync/errgroup"
 )
 
 var (
@@ -478,7 +478,7 @@ func LaunchXrootdMaintenance(ctx context.Context, sleepTime time.Duration) {
 	)
 }
 
-func ConfigXrootd(origin bool) (string, error) {
+func ConfigXrootd(ctx context.Context, origin bool) (string, error) {
 	gid, err := config.GetDaemonGID()
 	if err != nil {
 		return "", err
@@ -491,10 +491,11 @@ func ConfigXrootd(origin bool) (string, error) {
 	}
 
 	runtimeCAs := filepath.Join(param.Xrootd_RunLocation.GetString(), "ca-bundle.crt")
-	caCount, err := utils.PeriodicWriteCABundle(runtimeCAs, 2*time.Minute)
+	caCount, err := utils.LaunchPeriodicWriteCABundle(ctx, runtimeCAs, 2*time.Minute)
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to setup the runtime CA bundle")
 	}
+	log.Debugf("A total of %d CA certificates were written", caCount)
 	if caCount > 0 {
 		xrdConfig.Server.TLSCACertificateFile = runtimeCAs
 	}
@@ -572,8 +573,8 @@ func ConfigXrootd(origin bool) (string, error) {
 //
 // The `ctx` is the context for listening to server shutdown event in order to cleanup internal cache eviction
 // goroutine and `wg` is the wait group to notify when the clean up goroutine finishes
-func SetUpMonitoring(ctx context.Context, wg *sync.WaitGroup) error {
-	monitorPort, err := metrics.ConfigureMonitoring(ctx, wg)
+func SetUpMonitoring(ctx context.Context, egrp *errgroup.Group) error {
+	monitorPort, err := metrics.ConfigureMonitoring(ctx, egrp)
 	if err != nil {
 		return err
 	}

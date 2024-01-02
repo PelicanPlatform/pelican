@@ -42,6 +42,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	ginprometheus "github.com/zsais/go-gin-prometheus"
 	"go.uber.org/atomic"
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/term"
 )
 
@@ -142,25 +143,20 @@ func configureWebResource(engine *gin.Engine) error {
 
 // Configure common endpoint available to all server web UI which are located at /api/v1.0/*
 func configureCommonEndpoints(engine *gin.Engine) error {
-	engine.GET("/api/v1.0/config", authHandler, getConfigValues)
+	engine.GET("/api/v1.0/config", AuthHandler, getConfigValues)
 
 	return nil
 }
 
 // Configure metrics related endpoints, including Prometheus and /health API
-func configureMetrics(engine *gin.Engine) error {
+func configureMetrics(ctx context.Context, engine *gin.Engine) error {
 	// Add authorization to /metric endpoint
 	engine.Use(promMetricAuthHandler)
-
-	err := ConfigureEmbeddedPrometheus(engine)
-	if err != nil {
-		return err
-	}
 
 	prometheusMonitor := ginprometheus.NewPrometheus("gin")
 	prometheusMonitor.Use(engine)
 
-	engine.GET("/api/v1.0/health", authHandler, func(ctx *gin.Context) {
+	engine.GET("/api/v1.0/health", AuthHandler, func(ctx *gin.Context) {
 		healthStatus := metrics.GetHealthStatus()
 		ctx.JSON(http.StatusOK, healthStatus)
 	})
@@ -231,8 +227,8 @@ func waitUntilLogin(ctx context.Context) error {
 // specific paths but just redirect root path to /view.
 //
 // You need to mount the static resources for UI in a separate function
-func ConfigureServerWebAPI(engine *gin.Engine) error {
-	if err := configureAuthEndpoints(engine); err != nil {
+func ConfigureServerWebAPI(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) error {
+	if err := configureAuthEndpoints(ctx, engine, egrp); err != nil {
 		return err
 	}
 	if err := configureCommonEndpoints(engine); err != nil {
@@ -241,7 +237,7 @@ func ConfigureServerWebAPI(engine *gin.Engine) error {
 	if err := configureWebResource(engine); err != nil {
 		return err
 	}
-	if err := configureMetrics(engine); err != nil {
+	if err := configureMetrics(ctx, engine); err != nil {
 		return err
 	}
 	// Redirect root to /view for web UI
@@ -253,14 +249,15 @@ func ConfigureServerWebAPI(engine *gin.Engine) error {
 
 // Setup the initial server web login by sending the one-time code to stdout
 // and record health status of the WebUI based on the success of the initialization
-func InitServerWebLogin() {
+func InitServerWebLogin(ctx context.Context) error {
 	metrics.SetComponentHealthStatus(metrics.Server_WebUI, metrics.StatusWarning, "Authentication not initialized")
 
-	if err := waitUntilLogin(context.Background()); err != nil {
+	if err := waitUntilLogin(ctx); err != nil {
 		log.Errorln("Failure when waiting for web UI to be initialized:", err)
-		return
+		return err
 	}
 	metrics.SetComponentHealthStatus(metrics.Server_WebUI, metrics.StatusOK, "")
+	return nil
 }
 
 func GetEngine() (*gin.Engine, error) {
@@ -288,7 +285,7 @@ func GetEngine() (*gin.Engine, error) {
 //
 // Will use a background golang routine to periodically reload the certificate
 // utilized by the UI.
-func RunEngine(ctx context.Context, engine *gin.Engine) error {
+func RunEngine(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) error {
 	addr := fmt.Sprintf("%v:%v", param.Server_WebHost.GetString(), param.Server_WebPort.GetInt())
 
 	ln, err := net.Listen("tcp", addr)
@@ -298,13 +295,13 @@ func RunEngine(ctx context.Context, engine *gin.Engine) error {
 
 	defer ln.Close()
 
-	return runEngineWithListener(ctx, ln, engine)
+	return runEngineWithListener(ctx, ln, engine, egrp)
 }
 
 // Run the engine with a given listener.
 // This was split out from RunEngine to allow unit tests to provide a Unix domain socket'
 // as a listener.
-func runEngineWithListener(ctx context.Context, ln net.Listener, engine *gin.Engine) error {
+func runEngineWithListener(ctx context.Context, ln net.Listener, engine *gin.Engine, egrp *errgroup.Group) error {
 	certFile := param.Server_TLSCertificate.GetString()
 	keyFile := param.Server_TLSKey.GetString()
 
@@ -353,7 +350,7 @@ func runEngineWithListener(ctx context.Context, ln net.Listener, engine *gin.Eng
 
 	// Once the context has been canceled, shutdown the HTTPS server.  Give it
 	// 10 seconds to shutdown existing requests.
-	go func() {
+	egrp.Go(func() error {
 		<-ctx.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -361,7 +358,8 @@ func runEngineWithListener(ctx context.Context, ln net.Listener, engine *gin.Eng
 		if err != nil {
 			log.Panicln("Failed to shutdown server:", err)
 		}
-	}()
+		return nil
+	})
 
 	if err := server.ServeTLS(ln, "", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err

@@ -29,7 +29,6 @@ import (
 	"path"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
@@ -38,6 +37,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
 )
 
 type (
@@ -243,7 +243,7 @@ var (
 //
 // The `ctx` is the context for listening to server shutdown event in order to cleanup internal cache eviction
 // goroutine and `wg` is the wait group to notify when the clean up goroutine finishes
-func ConfigureMonitoring(ctx context.Context, wg *sync.WaitGroup) (int, error) {
+func ConfigureMonitoring(ctx context.Context, egrp *errgroup.Group) (int, error) {
 	monitorPaths = make([]PathList, 0)
 	for _, monpath := range param.Monitoring_AggregatePrefixes.GetStringSlice() {
 		monitorPaths = append(monitorPaths, PathList{Paths: strings.Split(path.Clean(monpath), "/")})
@@ -281,21 +281,24 @@ func ConfigureMonitoring(ctx context.Context, wg *sync.WaitGroup) (int, error) {
 	go transfers.Start()
 
 	// Stop automatic eviction at shutdown
-	go func() {
-		defer wg.Done()
+	egrp.Go(func() error {
 		<-ctx.Done()
+		conn.Close() // This will cause an net.ErrClosed in the goroutine below
 		sessions.Stop()
 		userids.Stop()
 		transfers.Stop()
 		log.Infoln("Gracefully stopping metrics cache auto eviction...")
-	}()
+		return nil
+	})
 
 	go func() {
 		var buf [65536]byte
 		for {
 			// TODO: actually parse the UDP packets
 			plen, _, err := conn.ReadFromUDP(buf[:])
-			if err != nil {
+			if errors.Is(err, net.ErrClosed) {
+				return
+			} else if err != nil {
 				log.Errorln("Failed to read from UDP connection", err)
 				continue
 			}

@@ -44,7 +44,7 @@ jobs:
       if: runner.os != 'macOS'
       run: |
         make web-build
-        go test -v -coverpkg=./... -coverprofile=coverage.out -covermode=count ./...
+        go test ./...
     - name: Run GoReleaser for Non-Ubuntu
       uses: goreleaser/goreleaser-action@v4
       with:

@@ -20,6 +20,7 @@ package web_ui
 
 import (
 	"bufio"
+	"context"
 	"crypto/ecdsa"
 	"net/http"
 	"os"
@@ -28,6 +29,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gorilla/csrf"
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
@@ -36,6 +38,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/tg123/go-htpasswd"
 	"go.uber.org/atomic"
+	"golang.org/x/sync/errgroup"
 )
 
 type (
@@ -60,11 +63,16 @@ var (
 )
 
 // Periodically re-read the htpasswd file used for password-based authentication
-func periodicAuthDBReload() {
+func periodicAuthDBReload(ctx context.Context) error {
+	ticker := time.NewTicker(30 * time.Second)
 	for {
-		time.Sleep(30 * time.Second)
-		log.Debug("Reloading the auth database")
-		_ = doReload()
+		select {
+		case <-ticker.C:
+			log.Debug("Reloading the auth database")
+			_ = doReload()
+		case <-ctx.Done():
+			return nil
+		}
 	}
 }
 
@@ -172,7 +180,7 @@ func setLoginCookie(ctx *gin.Context, user string) {
 }
 
 // Check if user is authenticated by checking if the "login" cookie is present and set the user identity to ctx
-func authHandler(ctx *gin.Context) {
+func AuthHandler(ctx *gin.Context) {
 	user, err := getUser(ctx)
 	if err != nil || user == "" {
 		log.Errorln("Invalid user cookie or unable to parse user cookie:", err)
@@ -259,7 +267,7 @@ func resetLoginHandler(ctx *gin.Context) {
 }
 
 // Configure the authentication endpoints for the server web UI
-func configureAuthEndpoints(router *gin.Engine) error {
+func configureAuthEndpoints(ctx context.Context, router *gin.Engine, egrp *errgroup.Group) error {
 	if router == nil {
 		return errors.New("Web engine configuration passed a nil pointer")
 	}
@@ -268,14 +276,23 @@ func configureAuthEndpoints(router *gin.Engine) error {
 		log.Infoln("Authorization not configured (non-fatal):", err)
 	}
 
+	csrfHandler, err := config.GetCSRFHandler()
+	if err != nil {
+		return err
+	}
+
 	group := router.Group("/api/v1.0/auth")
 	group.POST("/login", loginHandler)
 	group.POST("/initLogin", initLoginHandler)
-	group.POST("/resetLogin", authHandler, resetLoginHandler)
-	group.GET("/whoami", func(ctx *gin.Context) {
+	group.POST("/resetLogin", AuthHandler, resetLoginHandler)
+	// Pass csrfhanlder only to the whoami route to generate CSRF token
+	// while leaving other routes free of CSRF check (we might want to do it some time in the future)
+	group.GET("/whoami", csrfHandler, func(ctx *gin.Context) {
 		if user, err := getUser(ctx); err != nil || user == "" {
 			ctx.JSON(200, gin.H{"authenticated": false})
 		} else {
+			// Set header to carry CSRF token
+			ctx.Header("X-CSRF-Token", csrf.Token(ctx.Request))
 			ctx.JSON(200, gin.H{"authenticated": true, "user": user})
 		}
 	})
@@ -288,7 +305,7 @@ func configureAuthEndpoints(router *gin.Engine) error {
 		}
 	})
 
-	go periodicAuthDBReload()
+	egrp.Go(func() error { return periodicAuthDBReload(ctx) })
 
 	return nil
 }

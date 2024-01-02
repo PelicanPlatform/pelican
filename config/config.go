@@ -19,6 +19,7 @@
 package config
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	_ "embed"
@@ -29,20 +30,20 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/signal"
 	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
+	"github.com/go-playground/validator/v10"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"golang.org/x/sync/errgroup"
 )
 
 // Structs holding the OAuth2 state (and any other OSDF config needed)
@@ -81,15 +82,19 @@ type (
 	TokenGenerationOpts struct {
 		Operation TokenOperation
 	}
-)
 
-type ServerType int // ServerType is a bit mask indicating which Pelican server(s) are running in the current process
+	ServerType int // ServerType is a bit mask indicating which Pelican server(s) are running in the current process
+
+	ContextKey string
+)
 
 const (
 	CacheType ServerType = 1 << iota
 	OriginType
 	DirectorType
 	RegistryType
+
+	EgrpKey ContextKey = "egrp"
 )
 
 const (
@@ -117,10 +122,17 @@ var (
 	transport     *http.Transport
 	onceTransport sync.Once
 
+	// Global struct validator
+	validate *validator.Validate
+
 	// A variable indicating enabled Pelican servers in the current process
 	enabledServers ServerType
 	setServerOnce  sync.Once
 )
+
+func init() {
+	validate = validator.New(validator.WithRequiredStructEnabled())
+}
 
 // Set sets a list of newServers to ServerType instance
 func (sType *ServerType) SetList(newServers []ServerType) {
@@ -164,6 +176,11 @@ func IsServerEnabled(testServer ServerType) bool {
 	return enabledServers.IsEnabled(testServer)
 }
 
+// Create a new, empty ServerType bitmask
+func NewServerType() ServerType {
+	return ServerType(0)
+}
+
 func (sType ServerType) String() string {
 	switch sType {
 	case CacheType:
@@ -176,6 +193,24 @@ func (sType ServerType) String() string {
 		return "Registry"
 	}
 	return "Unknown"
+}
+
+func (sType *ServerType) SetString(name string) bool {
+	switch strings.ToLower(name) {
+	case "cache":
+		*sType |= CacheType
+		return true
+	case "origin":
+		*sType |= OriginType
+		return true
+	case "director":
+		*sType |= DirectorType
+		return true
+	case "registry":
+		*sType |= RegistryType
+		return true
+	}
+	return false
 }
 
 // Based on the name of the current binary, determine the preferred "style"
@@ -300,23 +335,33 @@ func DiscoverFederation() error {
 	return nil
 }
 
-func cleanupDirOnShutdown(dir string) {
-	sigs := make(chan os.Signal, 1)
+// TODO: It's not clear that this function works correctly.  We should
+// pass an errgroup here and ensure that the cleanup is complete before
+// the main thread shuts down.
+func cleanupDirOnShutdown(ctx context.Context, dir string) {
 	tempRunDir = dir
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
-	go func() {
-		<-sigs
-		CleanupTempResources()
-	}()
+	egrp, ok := ctx.Value(EgrpKey).(*errgroup.Group)
+	if !ok {
+		egrp = &errgroup.Group{}
+	}
+	egrp.Go(func() error {
+		<-ctx.Done()
+		err := CleanupTempResources()
+		if err != nil {
+			log.Infoln("Error when cleaning up temporary directories:", err)
+		}
+		return err
+	})
 }
 
-func CleanupTempResources() {
+func CleanupTempResources() (err error) {
 	cleanupOnce.Do(func() {
 		if tempRunDir != "" {
-			os.RemoveAll(tempRunDir)
+			err = os.RemoveAll(tempRunDir)
 			tempRunDir = ""
 		}
 	})
+	return
 }
 
 func getConfigBase() (string, error) {
@@ -431,6 +476,11 @@ func GetTransport() *http.Transport {
 	return transport
 }
 
+// Get singleton global validte method for field validation
+func GetValidate() *validator.Validate {
+	return validate
+}
+
 func InitConfig() {
 	viper.SetConfigType("yaml")
 	// 1) Set up defaults.yaml
@@ -523,7 +573,7 @@ func initConfigDir() error {
 // Initialize Pelican server instance. Pass a bit mask of `currentServers` if you want to enable multiple services.
 // Note not all configurations are supported: currently, if you enable both cache and origin then an error
 // is thrown
-func InitServer(currentServers ServerType) error {
+func InitServer(ctx context.Context, currentServers ServerType) error {
 	if err := initConfigDir(); err != nil {
 		return errors.Wrap(err, "Failed to initialize the server configuration")
 	}
@@ -552,6 +602,7 @@ func InitServer(currentServers ServerType) error {
 	viper.SetDefault("IssuerKey", filepath.Join(configDir, "issuer.jwk"))
 	viper.SetDefault("Server.UIPasswordFile", filepath.Join(configDir, "server-web-passwd"))
 	viper.SetDefault("Server.UIActivationCodeFile", filepath.Join(configDir, "server-web-activation-code"))
+	viper.SetDefault("Server.SessionSecretFile", filepath.Join(configDir, "session-secret"))
 	viper.SetDefault("OIDC.ClientIDFile", filepath.Join(configDir, "oidc-client-id"))
 	viper.SetDefault("OIDC.ClientSecretFile", filepath.Join(configDir, "oidc-client-secret"))
 	viper.SetDefault("Cache.ExportLocation", "/")
@@ -583,7 +634,7 @@ func InitServer(currentServers ServerType) error {
 			}
 			viper.SetDefault("Xrootd.RunLocation", filepath.Join(dir, xrootdPrefix))
 			viper.SetDefault("Cache.DataLocation", path.Join(dir, "xcache"))
-			cleanupDirOnShutdown(dir)
+			cleanupDirOnShutdown(ctx, dir)
 		}
 		viper.SetDefault("Origin.Multiuser", false)
 	}
@@ -625,7 +676,9 @@ func InitServer(currentServers ServerType) error {
 		return errors.Wrap(err, fmt.Sprint("Invalid Server.ExternalWebUrl: ", externalAddressStr))
 	}
 
-	setupTransport()
+	if currentServers.IsEnabled(DirectorType) && param.Federation_DirectorUrl.GetString() == "" {
+		viper.SetDefault("Federation.DirectorUrl", viper.GetString("Server.ExternalWebUrl"))
+	}
 
 	tokenRefreshInterval := param.Monitoring_TokenRefreshInterval.GetDuration()
 	tokenExpiresIn := param.Monitoring_TokenExpiresIn.GetDuration()
@@ -657,14 +710,17 @@ func InitServer(currentServers ServerType) error {
 		return err
 	}
 
-	// Generate the session cookie secret and save it as the default value
-	err = GenerateSessionSecret()
-	if err != nil {
+	// Generate the session secret and save it as the default value
+	if err := GenerateSessionSecret(); err != nil {
 		return err
 	}
 
 	// After we know we have the certs we need, call setupTransport (which uses those certs for its TLSConfig)
 	setupTransport()
+
+	// Setup CSRF middleware. To use it, you need to add this middleware to your chain
+	// of http handlers by calling config.GetCSRFHandler()
+	setupCSRFHandler()
 
 	// Set up the server's issuer URL so we can access that data wherever we need to find keys and whatnot
 	// This populates Server.IssuerUrl, and can be safely fetched using server_utils.GetServerIssuerURL()

@@ -30,6 +30,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
@@ -37,24 +38,36 @@ import (
 )
 
 func TestXrootDOriginConfig(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
 	dirname := t.TempDir()
 	viper.Reset()
 	viper.Set("Xrootd.RunLocation", dirname)
-	configPath, err := ConfigXrootd(true)
+	configPath, err := ConfigXrootd(ctx, true)
 	require.NoError(t, err)
 	assert.NotNil(t, configPath)
 }
 
 func TestXrootDCacheConfig(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
 	dirname := t.TempDir()
 	viper.Reset()
 	viper.Set("Xrootd.RunLocation", dirname)
-	configPath, err := ConfigXrootd(false)
+	configPath, err := ConfigXrootd(ctx, false)
 	require.NoError(t, err)
 	assert.NotNil(t, configPath)
 }
 
 func TestCopyCertificates(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
 	runDirname := t.TempDir()
 	configDirname := t.TempDir()
 	viper.Reset()
@@ -67,7 +80,7 @@ func TestCopyCertificates(t *testing.T) {
 	err := CopyXrootdCertificates()
 	assert.ErrorIs(t, err, errBadKeyPair)
 
-	err = config.InitServer(config.OriginType)
+	err = config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
 	err = CopyXrootdCertificates()
 	require.NoError(t, err)
@@ -95,7 +108,7 @@ func TestCopyCertificates(t *testing.T) {
 	err = os.Rename(keyName, keyName+".orig")
 	require.NoError(t, err)
 
-	err = config.InitServer(config.OriginType)
+	err = config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
 
 	err = CopyXrootdCertificates()
@@ -105,8 +118,6 @@ func TestCopyCertificates(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, bytes.Equal(firstKeyPairContents, secondKeyPairContents))
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	LaunchXrootdMaintenance(ctx, 2*time.Hour)
 
 	// Helper function to wait for a copy of the first cert to show up

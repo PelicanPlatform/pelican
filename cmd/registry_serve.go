@@ -19,80 +19,13 @@
 package main
 
 import (
-	"context"
-	"os"
-	"os/signal"
-	"syscall"
-
-	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/metrics"
-	"github.com/pelicanplatform/pelican/registry"
-	"github.com/pelicanplatform/pelican/web_ui"
+	"github.com/pelicanplatform/pelican/launchers"
 )
 
-func serveRegistry( /*cmd*/ *cobra.Command /*args*/, []string) error {
-	log.Info("Initializing the namespace registry's database...")
-	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
-	defer shutdownCancel()
-
-	// Initialize the registry's sqlite database
-	err := registry.InitializeDB()
-	if err != nil {
-		return errors.Wrap(err, "Unable to initialize the namespace registry database")
-	}
-
-	if config.GetPreferredPrefix() == "OSDF" {
-		metrics.SetComponentHealthStatus(metrics.DirectorRegistry_Topology, metrics.StatusWarning, "Start requesting from topology, status unknown")
-		log.Info("Populating registry with namespaces from OSG topology service...")
-		if err := registry.PopulateTopology(); err != nil {
-			panic(errors.Wrap(err, "Unable to populate topology table"))
-		}
-
-		// Checks topology for updates every 10 minutes
-		go registry.PeriodicTopologyReload()
-	}
-
-	engine, err := web_ui.GetEngine()
-	if err != nil {
-		return err
-	}
-
-	if err := web_ui.ConfigureServerWebAPI(engine); err != nil {
-		return err
-	}
-
-	if err := web_ui.ConfigOAuthClientAPIs(engine); err != nil {
-		return err
-	}
-
-	rootRouterGroup := engine.Group("/")
-	// Call out to registry to establish routes for the gin engine
-	registry.RegisterRegistryRoutes(rootRouterGroup)
-	registry.RegisterRegistryWebAPI(rootRouterGroup)
-	log.Info("Starting web engine...")
-
-	// Might need to play around with this setting more to handle
-	// more complicated routing scenarios where we can't just use
-	// a wildcard. It removes duplicate / from the resource.
-	//engine.RemoveExtraSlash = true
-	go func() {
-		if err := web_ui.RunEngine(shutdownCtx, engine); err != nil {
-			log.Panicln("Failure when running the web engine:", err)
-		}
-		shutdownCancel()
-	}()
-
-	go web_ui.InitServerWebLogin()
-
-	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
-	sig := <-sigs
-	_ = sig
-	shutdownCancel()
-
-	return nil
+func serveRegistry(cmd *cobra.Command, _ []string) error {
+	_, err := launchers.LaunchModules(cmd.Context(), config.RegistryType)
+	return err
 }

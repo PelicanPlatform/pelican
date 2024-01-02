@@ -624,12 +624,19 @@ func GenerateSessionSecret() error {
 	return nil
 }
 
+// Load session secret from Server_SessionSecretFile. Generate session secret
+// if no file present.
 func LoadSessionSecret() ([]byte, error) {
 	secretLocation := param.Server_SessionSecretFile.GetString()
 
 	if secretLocation == "" {
 		return []byte{}, errors.New("Empty filename for Server_SessionSecretFile")
 	}
+
+	if err := GenerateSessionSecret(); err != nil {
+		return []byte{}, err
+	}
+
 	rest, err := os.ReadFile(secretLocation)
 	if err != nil {
 		return []byte{}, errors.Wrap(err, "Error reading secret file")
