@@ -43,6 +43,7 @@ type (
 		BasePath      string       `json:"basePath"`
 		VaultServer   string       `json:"vaultServer"`
 		DirlistHost   string       `json:"dirlisthost"`
+		PutEndpoint   string       `json:"writebackhost"`
 	}
 
 	ServerAd struct {
