@@ -18,7 +18,7 @@
 
 "use client"
 
-import {Box, Typography} from "@mui/material";
+import {Box, Grow, Typography} from "@mui/material";
 import { useRouter } from 'next/navigation'
 import { useState } from "react";
 
@@ -32,6 +32,7 @@ export default function Home() {
     let [password, _setPassword] = useState <string>("")
     let [confirmPassword, _setConfirmPassword] = useState <string>("")
     let [loading, setLoading] = useState(false);
+    let [error, setError] = useState<string | undefined>(undefined);
 
     async function submit(password: string) {
 
@@ -50,7 +51,15 @@ export default function Home() {
         if(response.ok){
             router.push("/")
         } else {
-            setLoading(false)
+            try {
+                let data = await response.json()
+
+                setLoading(false)
+                setError(response.status + ": " + data['error'])
+            } catch {
+                setLoading(false)
+                setError(response.status + ": " + response.statusText)
+            }
         }
     }
 
@@ -59,6 +68,8 @@ export default function Home() {
 
         if(password == confirmPassword){
             submit(password)
+        } else {
+            setError("Passwords do not match")
         }
     }
 
@@ -80,6 +91,7 @@ export default function Home() {
                                 InputProps: {
                                     onChange: (e) => {
                                         _setPassword(e.target.value)
+                                        setError(undefined)
                                     }
                                 }
                             }}/>
@@ -90,13 +102,24 @@ export default function Home() {
                                 InputProps: {
                                     onChange: (e) => {
                                         _setConfirmPassword(e.target.value)
+                                        setError(undefined)
                                     }
                                 },
                                 error: password != confirmPassword,
                                 helperText: password != confirmPassword ? "Passwords do not match" : ""
                             }}/>
                         </Box>
-                        <Box mt={3} display={"flex"}>
+                        <Box mt={2} display={"flex"} flexDirection={"column"}>
+                            <Grow in={error !== undefined}>
+                                <Typography
+                                    textAlign={"center"}
+                                    variant={"subtitle2"}
+                                    color={"error.main"}
+                                    mb={1}
+                                >
+                                    {error}
+                                </Typography>
+                            </Grow>
                             <LoadingButton
                                 variant="outlined"
                                 sx={{margin: "auto"}}

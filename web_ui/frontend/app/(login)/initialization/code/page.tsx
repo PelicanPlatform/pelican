@@ -18,33 +18,33 @@
 
 "use client"
 
-import {Box, Typography} from "@mui/material";
+import {Box, Typography, Grow} from "@mui/material";
 import { useRouter } from 'next/navigation'
 import { useState } from "react";
 
-import CodeInput from "../../components/CodeInput";
+import CodeInput, {Code} from "../../components/CodeInput";
 import LoadingButton from "../../components/LoadingButton";
 
 export default function Home() {
 
     const router = useRouter()
-    let [code, _setCode] = useState <number>(0)
+    let [code, _setCode] = useState<Code>([undefined, undefined, undefined, undefined, undefined, undefined])
     let [loading, setLoading] = useState(false);
+    let [error, setError] = useState<string | undefined>(undefined);
 
-    const setCode = (code: number) => {
+    const setCode = (code: Code ) => {
 
         _setCode(code)
+        setError(undefined)
 
-        if(code.toString().length == 6) {
-            submit(code)
+        if(!code.includes(undefined)) {
+            submit(code.map(x => x!.toString()).join(""))
         }
     }
 
-    async function submit(code: number) {
+    async function submit(code: string) {
 
         setLoading(true)
-
-        console.log(`Submitting code ${code}`)
 
         let response = await fetch("/api/v1.0/auth/initLogin", {
             method: "POST",
@@ -52,22 +52,31 @@ export default function Home() {
                 "Content-Type": "application/json"
             },
             body: JSON.stringify({
-                "code": code.toString()
+                "code": code
             })
         })
 
         if(response.ok){
             router.push("../password/index.html")
         } else {
-            setLoading(false)
+            try {
+                let data = await response.json()
+
+                setLoading(false)
+                setError(response.status + ": " + data['error'])
+            } catch {
+                setLoading(false)
+                setError(response.status + ": " + response.statusText)
+            }
         }
     }
 
     function onSubmit(e: React.FormEvent<HTMLFormElement>) {
+
         e.preventDefault()
 
-        if(code.toString().length == 6) {
-            submit(code)
+        if(!code.includes(undefined)) {
+            submit(code.map(x => x!.toString()).join(""))
         }
     }
 
@@ -85,7 +94,17 @@ export default function Home() {
                 <Box pt={3} mx={"auto"}>
                     <form onSubmit={onSubmit} action="#">
                         <CodeInput setCode={setCode} length={6}/>
-                        <Box mt={3} display={"flex"}>
+                        <Box mt={2} display={"flex"} flexDirection={"column"}>
+                            <Grow in={error !== undefined}>
+                                <Typography
+                                    textAlign={"center"}
+                                    variant={"subtitle2"}
+                                    color={"error.main"}
+                                    mb={1}
+                                >
+                                    {error}
+                                </Typography>
+                            </Grow>
                             <LoadingButton
                                 variant="outlined"
                                 sx={{margin: "auto"}}
