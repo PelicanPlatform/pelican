@@ -25,6 +25,7 @@ import (
 	"encoding/json"
 	"net/url"
 	"sync"
+	"time"
 
 	"github.com/pelicanplatform/pelican/cache_ui"
 	"github.com/pelicanplatform/pelican/config"
@@ -125,13 +126,20 @@ func serveCache( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		return err
 	}
 
-	go web_ui.RunEngine(engine)
+	go func() {
+		if err := web_ui.RunEngine(shutdownCtx, engine); err != nil {
+			log.Panicln("Failure when running the web engine:", err)
+		}
+		shutdownCancel()
+	}()
 	go web_ui.InitServerWebLogin()
 
 	configPath, err := xrootd.ConfigXrootd(false)
 	if err != nil {
 		return err
 	}
+
+	xrootd.LaunchXrootdMaintenance(shutdownCtx, 2*time.Minute)
 
 	log.Info("Launching cache")
 	launchers, err := xrootd.ConfigureLaunchers(false, configPath, false)

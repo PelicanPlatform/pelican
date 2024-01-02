@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"text/template"
 
@@ -171,7 +172,14 @@ func generateGoStructCode(field *GoField, indent string) string {
 		return fmt.Sprintf("%s%s %s\n", indent, field.Name, field.Type)
 	}
 	code := fmt.Sprintf("%s%s struct {\n", indent, field.Name)
-	for _, nested := range field.NestedFields {
+	keys := make([]string, 0, len(field.NestedFields))
+	for key := range field.NestedFields {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		nested := field.NestedFields[key]
 		code += generateGoStructCode(nested, indent+"	")
 	}
 	code += fmt.Sprintf("%s}\n", indent)
@@ -383,5 +391,5 @@ import (
 	"time"
 )
 
-{{.GeneratedCode}}
+{{.GeneratedCode -}}
 `))

@@ -82,7 +82,7 @@ func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	// or to an origin
 	defaultResponse := param.Director_DefaultResponse.GetString()
 	if !(defaultResponse == "cache" || defaultResponse == "origin") {
-		return fmt.Errorf("The director's default response must either be set to 'cache' or 'origin',"+
+		return fmt.Errorf("the director's default response must either be set to 'cache' or 'origin',"+
 			" but you provided %q. Was there a typo?", defaultResponse)
 	}
 	log.Debugf("The director will redirect to %ss by default", defaultResponse)
@@ -93,7 +93,12 @@ func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	director.RegisterDirector(rootGroup)
 
 	log.Info("Starting web engine...")
-	go web_ui.RunEngine(engine)
+	go func() {
+		if err := web_ui.RunEngine(shutdownCtx, engine); err != nil {
+			log.Panicln("Failure when running the web engine:", err)
+		}
+		shutdownCancel()
+	}()
 
 	go web_ui.InitServerWebLogin()
 

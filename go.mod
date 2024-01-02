@@ -1,6 +1,7 @@
 module github.com/pelicanplatform/pelican
 
-retract v1.0.4 // Unpublish Go package
+// Unpublish Go package as we are not intended to allow users us import our packages for now
+retract [v1.0.0, v1.0.5]
 
 go 1.20
 
@@ -72,7 +73,7 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/edsrzf/mmap-go v1.1.0 // indirect
 	github.com/felixge/httpsnoop v1.0.3 // indirect
-	github.com/fsnotify/fsnotify v1.6.0 // indirect
+	github.com/fsnotify/fsnotify v1.6.0
 	github.com/gabriel-vasile/mimetype v1.4.2 // indirect
 	github.com/gin-contrib/sessions v0.0.5
 	github.com/gin-contrib/sse v0.1.0 // indirect

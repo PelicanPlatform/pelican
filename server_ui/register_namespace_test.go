@@ -55,7 +55,7 @@ func TestRegistration(t *testing.T) {
 
 	config.InitConfig()
 	viper.Set("Registry.DbLocation", filepath.Join(tempConfigDir, "test.sql"))
-	err := config.InitServer([]config.ServerType{config.OriginType}, config.OriginType)
+	err := config.InitServer(config.OriginType)
 	require.NoError(t, err)
 
 	err = registry.InitializeDB()
@@ -84,7 +84,7 @@ func TestRegistration(t *testing.T) {
 	defer svr.CloseClientConnections()
 	defer svr.Close()
 
-	viper.Set("Federation.NamespaceUrl", svr.URL)
+	viper.Set("Federation.RegistryUrl", svr.URL)
 	viper.Set("Origin.NamespacePrefix", "/test123")
 
 	// Test registration succeeds

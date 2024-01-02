@@ -123,10 +123,16 @@ var (
 )
 
 // Set sets a list of newServers to ServerType instance
-func (sType *ServerType) Set(newServers []ServerType) {
+func (sType *ServerType) SetList(newServers []ServerType) {
 	for _, server := range newServers {
 		*sType |= server
 	}
+}
+
+// Enable a single server type in the bitmask
+func (sType *ServerType) Set(server ServerType) ServerType {
+	*sType |= server
+	return *sType
 }
 
 // IsEnabled checks if a testServer is in the ServerType instance
@@ -134,12 +140,17 @@ func (sType ServerType) IsEnabled(testServer ServerType) bool {
 	return sType&testServer == testServer
 }
 
+// Clear all values in a server type
+func (sType *ServerType) Clear() {
+	*sType = ServerType(0)
+}
+
 // setEnabledServer sets the global variable config.EnabledServers to include newServers.
 // Since this function should only be called in config package, we mark it "private" to avoid
 // reset value in other pacakge
 //
 // This will only be called once in a single process
-func setEnabledServer(newServers []ServerType) {
+func setEnabledServer(newServers ServerType) {
 	setServerOnce.Do(func() {
 		// For each process, we only want to set enabled servers once
 		enabledServers.Set(newServers)
@@ -219,8 +230,8 @@ func DiscoverFederation() error {
 	}
 	log.Debugln("Federation URL:", federationStr)
 	curDirectorURL := param.Federation_DirectorUrl.GetString()
-	curNamespaceURL := param.Federation_NamespaceUrl.GetString()
-	if len(curDirectorURL) != 0 && len(curNamespaceURL) != 0 {
+	curRegistryURL := param.Federation_RegistryUrl.GetString()
+	if len(curDirectorURL) != 0 && len(curRegistryURL) != 0 {
 		return nil
 	}
 
@@ -274,10 +285,10 @@ func DiscoverFederation() error {
 		log.Debugln("Federation service discovery resulted in director URL", metadata.DirectorEndpoint)
 		viper.Set("Federation.DirectorUrl", metadata.DirectorEndpoint)
 	}
-	if curNamespaceURL == "" {
-		log.Debugln("Federation service discovery resulted in namespace registration URL",
+	if curRegistryURL == "" {
+		log.Debugln("Federation service discovery resulted in namespace registry URL",
 			metadata.NamespaceRegistrationEndpoint)
-		viper.Set("Federation.NamespaceUrl", metadata.NamespaceRegistrationEndpoint)
+		viper.Set("Federation.RegistryUrl", metadata.NamespaceRegistrationEndpoint)
 	}
 
 	viper.Set("Federation.JwkUrl", metadata.JwksUri)
@@ -376,7 +387,7 @@ func parseServerIssuerURL(sType ServerType) error {
 		return errors.New("If Server.IssuerHostname is configured, you must provide a valid port")
 	}
 
-	if sType == OriginType {
+	if sType.IsEnabled(OriginType) {
 		// If Origin.Mode is set to anything that isn't "posix" or "", assume we're running a plugin and
 		// that the origin's issuer URL actually uses the same port as OriginUI instead of XRootD. This is
 		// because under that condition, keys are being served by the Pelican process instead of by XRootD
@@ -481,6 +492,11 @@ func InitConfig() {
 		}
 		log.SetOutput(f)
 	}
+
+	if oldNsUrl := viper.GetString("Federation.NamespaceUrl"); oldNsUrl != "" {
+		log.Warningln("Federation.NamespaceUrl is deprecated and will be removed in future release. Please migrate to use Federation.RegistryUrl instead")
+		viper.SetDefault("Federation.RegistryUrl", oldNsUrl)
+	}
 }
 
 func initConfigDir() error {
@@ -500,20 +516,23 @@ func initConfigDir() error {
 	return nil
 }
 
-// Initialize Pelican server instance. Pass a list of "enabledServers" if you want to enable multiple servers,
-// and pass your "current" server to instantiate through "currentServer" so that the functions
-// knows which server it's being evoked for
-func InitServer(enabledServers []ServerType, currentServer ServerType) error {
+// Initialize Pelican server instance. Pass a list of `enabledServices` if you want to enable multiple services.
+// Note not all configurations are supported: currently, if you enable both cache and origin then an error
+// is thrown
+func InitServer(enabledServices ServerType) error {
 	if err := initConfigDir(); err != nil {
 		return errors.Wrap(err, "Failed to initialize the server configuration")
 	}
+	if enabledServices.IsEnabled(OriginType) && enabledServices.IsEnabled(CacheType) {
+		return errors.New("A cache and origin cannot both be enabled in the same instance")
+	}
 
-	setEnabledServer(enabledServers)
+	setEnabledServer(enabledServices)
 
 	xrootdPrefix := ""
-	if currentServer == OriginType {
+	if enabledServices.IsEnabled(OriginType) {
 		xrootdPrefix = "origin"
-	} else if currentServer == CacheType {
+	} else if enabledServices.IsEnabled(CacheType) {
 		xrootdPrefix = "cache"
 	}
 	configDir := viper.GetString("ConfigDir")
@@ -585,7 +604,7 @@ func InitServer(enabledServers []ServerType, currentServer ServerType) error {
 	// they have overridden the defaults.
 	hostname = viper.GetString("Server.Hostname")
 
-	if currentServer == CacheType {
+	if enabledServices.IsEnabled(CacheType) {
 		viper.Set("Xrootd.Port", param.Cache_Port.GetInt())
 	}
 	xrootdPort := param.Xrootd_Port.GetInt()
@@ -645,7 +664,7 @@ func InitServer(enabledServers []ServerType, currentServer ServerType) error {
 
 	// Set up the server's issuer URL so we can access that data wherever we need to find keys and whatnot
 	// This populates Server.IssuerUrl, and can be safely fetched using server_utils.GetServerIssuerURL()
-	err = parseServerIssuerURL(currentServer)
+	err = parseServerIssuerURL(enabledServices)
 	if err != nil {
 		return err
 	}
@@ -719,7 +738,7 @@ func InitClient() error {
 	}
 	for _, prefix := range prefixes {
 		if val, isSet := os.LookupEnv(prefix + "_NAMESPACE_URL"); isSet {
-			viper.Set("Federation.NamespaceURL", val)
+			viper.Set("Federation.RegistryUrl", val)
 			break
 		}
 	}

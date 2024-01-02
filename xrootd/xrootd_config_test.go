@@ -21,8 +21,16 @@
 package xrootd
 
 import (
+	"bytes"
+	"context"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -44,4 +52,90 @@ func TestXrootDCacheConfig(t *testing.T) {
 	configPath, err := ConfigXrootd(false)
 	require.NoError(t, err)
 	assert.NotNil(t, configPath)
+}
+
+func TestCopyCertificates(t *testing.T) {
+	runDirname := t.TempDir()
+	configDirname := t.TempDir()
+	viper.Reset()
+	viper.Set("Logging.Level", "Debug")
+	viper.Set("Xrootd.RunLocation", runDirname)
+	viper.Set("ConfigDir", configDirname)
+	config.InitConfig()
+
+	// First, invoke CopyXrootdCertificates directly, ensure it works.
+	err := CopyXrootdCertificates()
+	assert.ErrorIs(t, err, errBadKeyPair)
+
+	err = config.InitServer(config.OriginType)
+	require.NoError(t, err)
+	err = CopyXrootdCertificates()
+	require.NoError(t, err)
+	destKeyPairName := filepath.Join(param.Xrootd_RunLocation.GetString(), "copied-tls-creds.crt")
+	assert.FileExists(t, destKeyPairName)
+
+	keyPairContents, err := os.ReadFile(destKeyPairName)
+	require.NoError(t, err)
+	certName := param.Server_TLSCertificate.GetString()
+	firstCertContents, err := os.ReadFile(certName)
+	require.NoError(t, err)
+	keyName := param.Server_TLSKey.GetString()
+	firstKeyContents, err := os.ReadFile(keyName)
+	require.NoError(t, err)
+	firstKeyPairContents := append(firstCertContents, '\n', '\n')
+	firstKeyPairContents = append(firstKeyPairContents, firstKeyContents...)
+	assert.True(t, bytes.Equal(firstKeyPairContents, keyPairContents))
+
+	err = os.Rename(certName, certName+".orig")
+	require.NoError(t, err)
+
+	err = CopyXrootdCertificates()
+	assert.ErrorIs(t, err, errBadKeyPair)
+
+	err = os.Rename(keyName, keyName+".orig")
+	require.NoError(t, err)
+
+	err = config.InitServer(config.OriginType)
+	require.NoError(t, err)
+
+	err = CopyXrootdCertificates()
+	require.NoError(t, err)
+
+	secondKeyPairContents, err := os.ReadFile(destKeyPairName)
+	require.NoError(t, err)
+	assert.False(t, bytes.Equal(firstKeyPairContents, secondKeyPairContents))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	LaunchXrootdMaintenance(ctx, 2*time.Hour)
+
+	// Helper function to wait for a copy of the first cert to show up
+	// in the destination
+	waitForCopy := func() bool {
+		for idx := 0; idx < 10; idx++ {
+			time.Sleep(50 * time.Millisecond)
+			logrus.Debug("Re-reading destination cert")
+			destContents, err := os.ReadFile(destKeyPairName)
+			require.NoError(t, err)
+			if bytes.Equal(destContents, firstKeyPairContents) {
+				return true
+			}
+		}
+		return false
+	}
+
+	// The maintenance thread should only copy if there's a valid keypair
+	// Thus, if we only copy one, we shouldn't see any changes
+	err = os.Rename(certName+".orig", certName)
+	require.NoError(t, err)
+	logrus.Debug("Will wait to see if the new certs are not copied")
+	assert.False(t, waitForCopy())
+
+	// Now, if we overwrite the key, the maintenance thread should notice
+	// and overwrite the destination
+	err = os.Rename(keyName+".orig", keyName)
+	require.NoError(t, err)
+	logrus.Debug("Will wait to see if the new certs are copied")
+	assert.True(t, waitForCopy())
+
 }

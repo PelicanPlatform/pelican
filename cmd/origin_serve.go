@@ -24,6 +24,7 @@ import (
 	"context"
 	_ "embed"
 	"sync"
+	"time"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/daemon"
@@ -101,7 +102,12 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		}
 	}
 
-	go web_ui.RunEngine(engine)
+	go func() {
+		if err := web_ui.RunEngine(shutdownCtx, engine); err != nil {
+			log.Panicln("Failure when running the web engine:", err)
+		}
+		shutdownCancel()
+	}()
 
 	if param.Origin_EnableUI.GetBool() {
 		go web_ui.InitServerWebLogin()
@@ -115,6 +121,8 @@ func serveOrigin( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	if param.Origin_SelfTest.GetBool() {
 		go origin_ui.PeriodicSelfTest()
 	}
+
+	xrootd.LaunchXrootdMaintenance(shutdownCtx, 2*time.Minute)
 
 	privileged := param.Origin_Multiuser.GetBool()
 	launchers, err := xrootd.ConfigureLaunchers(privileged, configPath, param.Origin_EnableCmsd.GetBool())

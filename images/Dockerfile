@@ -39,7 +39,7 @@ RUN goreleaser --clean --snapshot
 
 FROM --platform=linux/amd64 hub.opensciencegrid.org/sciauth/scitokens-oauth2-server:release-20231118-1823 AS scitokens-oauth2-server
 
-FROM --platform=linux/amd64 opensciencegrid/software-base:$BASE_OSG_SERIES-el8-$BASE_YUM_REPO
+FROM --platform=linux/amd64 opensciencegrid/software-base:$BASE_OSG_SERIES-el8-$BASE_YUM_REPO AS dependency-build
 
 # Create the xrootd user with a fixed GID/UID
 RUN groupadd -o -g 10940 xrootd
@@ -47,11 +47,33 @@ RUN useradd -o -u 10940 -g 10940 -s /bin/sh xrootd
 
 # Install dependencies
 RUN yum -y update \
-    && yum -y install xrootd xrootd-client xrdcl-http xrootd-server xrootd-scitokens xrootd-voms \
-    xrootd-devel xrootd-client-devel xrootd-server-devel \
-    curl-devel git cmake3 gcc-c++ openssl-devel java-17-openjdk-headless \
+    && yum -y install xrootd xrootd-client xrdcl-http xrootd-server xrootd-scitokens xrootd-voms curl java-17-openjdk-headless \
     && yum clean all \
     && rm -rf /var/cache/yum/
+
+####
+# Start building xrootd plugins (xrdcl-pelican and s3)
+####
+FROM dependency-build AS xrootd-plugin-builder
+# Install necessary build dependencies
+RUN  yum install -y xrootd-devel xrootd-server-devel xrootd-client-devel curl-devel openssl-devel git cmake3 gcc-c++ 
+# Install xrdcl-pelican plugin and replace the xrdcl-http plugin
+RUN \
+    git clone https://github.com/PelicanPlatform/xrdcl-pelican.git && \
+    cd xrdcl-pelican && \
+    mkdir build && cd build && \
+    cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
+    make && make install
+# Install the S3 and HTTP server plugins for XRootD. For now we do this from source
+# until we can sort out the RPMs.
+RUN \
+    git clone https://github.com/PelicanPlatform/xrootd-s3-http.git && \
+    cd xrootd-s3-http && \
+    mkdir build && cd build && \
+    cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
+    make install
+
+FROM dependency-build AS final-stage
 
 WORKDIR /pelican
 
@@ -122,17 +144,13 @@ ENV JAVA_HOME=/usr/lib/jvm/jre \
     QDL_HOME="/opt/qdl" \
     PATH="${ST_HOME}/bin:${QDL_HOME}/bin:${PATH}"
 
-# Install the S3 and HTTP server plugins for XRootD. For now we do this from source
-# until we can sort out the RPMs.
-RUN \
-    git clone https://github.com/PelicanPlatform/xrootd-s3-http.git && \
-    cd xrootd-s3-http && \
-    mkdir build && cd build && \
-    cmake .. && \
-    make install && \
-    # For now, until the RPM is set up, we install the libraries here, but
-    # we need to add to LD_LIBRARY_PATH so XRootD knows where to look
-    echo "/usr/local/lib" > /etc/ld.so.conf.d/xrdplugins.conf && ldconfig
+# Copy xrdcl-pelican plugin config
+COPY --from=xrootd-plugin-builder /usr/local/etc/xrootd/client.plugins.d/pelican-plugin.conf /etc/xrootd/client.plugins.d/pelican-plugin.conf
+# Remove http plugin to use pelican plugin
+RUN rm -f /etc/xrootd/client.plugins.d/xrdcl-http-plugin.conf
+
+# Copy built s3 plugin library and xrdcl-pelican plugin library from build
+COPY --from=xrootd-plugin-builder /usr/lib64/libXrdS3-5.so /usr/lib64/libXrdHTTPServer-5.so /usr/lib64/libXrdClPelican-5.so /usr/lib64
 
 RUN chmod +x /pelican/osdf-client \
     && chmod +x /entrypoint.sh
