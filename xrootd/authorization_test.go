@@ -175,7 +175,7 @@ func TestWriteOriginAuthFiles(t *testing.T) {
 			viper.Set("Xrootd.RunLocation", dirname)
 			viper.Set("Xrootd.ScitokensConfig", filepath.Join(dirname, "scitokens-generated.cfg"))
 			viper.Set("Xrootd.Authfile", filepath.Join(dirname, "authfile"))
-			xAuthFile := filepath.Join(param.Xrootd_RunLocation.GetString(), "authfile-generated")
+			xAuthFile := filepath.Join(param.Xrootd_RunLocation.GetString(), "authfile-origin-generated")
 
 			authfileProvided := param.Xrootd_Authfile.GetString()
 
