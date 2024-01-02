@@ -133,7 +133,6 @@ func registerNamespacePrep() (key jwk.Key, prefix string, registrationEndpointUR
 	}
 
 	namespaceEndpoint := param.Federation_RegistryUrl.GetString()
-	log.Error(namespaceEndpoint)
 	if namespaceEndpoint == "" {
 		err = errors.New("No namespace registry specified; try passing the `-f` flag specifying the federation name")
 		return
