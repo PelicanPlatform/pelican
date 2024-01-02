@@ -24,7 +24,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/url"
-	"sync"
 	"time"
 
 	"github.com/pelicanplatform/pelican/cache_ui"
@@ -33,6 +32,7 @@ import (
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_ui"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pelicanplatform/pelican/web_ui"
 	"github.com/pelicanplatform/pelican/xrootd"
@@ -40,6 +40,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"golang.org/x/sync/errgroup"
 )
 
 func getNSAdsFromDirector() ([]director.NamespaceAd, error) {
@@ -72,8 +73,8 @@ func getNSAdsFromDirector() ([]director.NamespaceAd, error) {
 	return respNS, nil
 }
 
-func serveCache( /*cmd*/ *cobra.Command /*args*/, []string) error {
-	err := serveCacheInternal()
+func serveCache(cmd *cobra.Command, _ []string) error {
+	err := serveCacheInternal(cmd.Context())
 	if err != nil {
 		return err
 	}
@@ -81,25 +82,28 @@ func serveCache( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	return nil
 }
 
-func serveCacheInternal() error {
+func serveCacheInternal(ctx context.Context) error {
 	// Use this context for any goroutines that needs to react to server shutdown
-	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
+	shutdownCtx, shutdownCancel := context.WithCancel(ctx)
 	// Use this wait group to ensure the goroutines can finish before the server exits/shutdown
-	var wg sync.WaitGroup
+	egrp, ctx := errgroup.WithContext(shutdownCtx)
 
 	// This anonymous function ensures we cancel any context and wait for those goroutines to
 	// finish their cleanup work before the server exits
 	defer func() {
 		shutdownCancel()
-		wg.Wait()
-		config.CleanupTempResources()
+		if err := egrp.Wait(); err != nil {
+			log.Errorln("Failure when cleaning up cache:", err)
+		}
+		if err := config.CleanupTempResources(); err != nil {
+			log.Errorln("Failure when cleaning up temp directories:", err)
+		}
 	}()
 
-	err := xrootd.SetUpMonitoring(shutdownCtx, &wg)
+	err := xrootd.SetUpMonitoring(ctx, egrp)
 	if err != nil {
 		return err
 	}
-	wg.Add(1) // Add to wait group after SetUpMonitoring finishes to avoid deadlock
 
 	nsAds, err := getNSAdsFromDirector()
 	if err != nil {
@@ -117,11 +121,11 @@ func serveCacheInternal() error {
 
 	viper.Set("Origin.NamespacePrefix", cachePrefix)
 
-	if err = server_ui.RegisterNamespaceWithRetry(); err != nil {
+	if err = server_ui.RegisterNamespaceWithRetry(ctx, egrp); err != nil {
 		return err
 	}
 
-	if err = server_ui.PeriodicAdvertise(cacheServer); err != nil {
+	if err = server_ui.LaunchPeriodicAdvertise(ctx, egrp, []server_utils.XRootDServer{cacheServer}); err != nil {
 		return err
 	}
 
@@ -131,24 +135,28 @@ func serveCacheInternal() error {
 	}
 
 	// Set up necessary APIs to support Web UI, including auth and metrics
-	if err := web_ui.ConfigureServerWebAPI(engine); err != nil {
+	if err := web_ui.ConfigureServerWebAPI(ctx, engine, egrp); err != nil {
 		return err
 	}
 
 	go func() {
-		if err := web_ui.RunEngine(shutdownCtx, engine); err != nil {
+		if err := web_ui.RunEngine(ctx, engine, egrp); err != nil {
 			log.Panicln("Failure when running the web engine:", err)
 		}
 		shutdownCancel()
 	}()
-	go web_ui.InitServerWebLogin()
+	if param.Server_EnableUI.GetBool() {
+		if err = web_ui.InitServerWebLogin(ctx); err != nil {
+			return err
+		}
+	}
 
-	configPath, err := xrootd.ConfigXrootd(false)
+	configPath, err := xrootd.ConfigXrootd(ctx, false)
 	if err != nil {
 		return err
 	}
 
-	xrootd.LaunchXrootdMaintenance(shutdownCtx, 2*time.Minute)
+	xrootd.LaunchXrootdMaintenance(ctx, 2*time.Minute)
 
 	log.Info("Launching cache")
 	launchers, err := xrootd.ConfigureLaunchers(false, configPath, false)
@@ -156,8 +164,7 @@ func serveCacheInternal() error {
 		return err
 	}
 
-	ctx := context.Background()
-	if err = daemon.LaunchDaemons(ctx, launchers); err != nil {
+	if err = daemon.LaunchDaemons(ctx, launchers, egrp); err != nil {
 		return err
 	}
 

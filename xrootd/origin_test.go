@@ -29,7 +29,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/pelicanplatform/pelican/config"
@@ -37,7 +36,9 @@ import (
 	"github.com/pelicanplatform/pelican/origin_ui"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/utils"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -45,7 +46,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func originMockup(t *testing.T) context.CancelFunc {
+func originMockup(ctx context.Context, egrp *errgroup.Group, t *testing.T) context.CancelFunc {
 	originServer := &origin_ui.OriginServer{}
 
 	// Create our own temp directory (for some reason t.TempDir() does not play well with xrootd)
@@ -54,7 +55,7 @@ func originMockup(t *testing.T) context.CancelFunc {
 	require.NoError(t, err)
 
 	// Need to set permissions or the xrootd process we spawn won't be able to write PID/UID files
-	permissions := os.FileMode(0777)
+	permissions := os.FileMode(0755)
 	err = os.Chmod(tmpPath, permissions)
 	require.NoError(t, err)
 
@@ -67,7 +68,7 @@ func originMockup(t *testing.T) context.CancelFunc {
 	// Increase the log level; otherwise, its difficult to debug failures
 	viper.Set("Logging.Level", "Debug")
 	config.InitConfig()
-	err = config.InitServer(config.OriginType)
+	err = config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
 
 	err = config.GeneratePrivateKey(param.Server_TLSKey.GetString(), elliptic.P256())
@@ -79,31 +80,27 @@ func originMockup(t *testing.T) context.CancelFunc {
 	require.NoError(t, err)
 
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
-	var wg sync.WaitGroup
-	wg.Add(1)
 
-	defer func() {
-		shutdownCancel()
-		wg.Wait()
-	}()
-
-	err = SetUpMonitoring(shutdownCtx, &wg)
+	err = SetUpMonitoring(shutdownCtx, egrp)
 	require.NoError(t, err)
 
-	configPath, err := ConfigXrootd(true)
+	configPath, err := ConfigXrootd(shutdownCtx, true)
 	require.NoError(t, err)
 
 	launchers, err := ConfigureLaunchers(false, configPath, false)
 	require.NoError(t, err)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		_ = daemon.LaunchDaemons(ctx, launchers)
-	}()
-	return cancel
+	err = daemon.LaunchDaemons(shutdownCtx, launchers, egrp)
+	require.NoError(t, err)
+
+	return shutdownCancel
 }
 
 func TestOrigin(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
 	viper.Reset()
 
 	viper.Set("Origin.ExportVolume", t.TempDir()+":/test")
@@ -114,16 +111,16 @@ func TestOrigin(t *testing.T) {
 	viper.Set("Origin.EnableVoms", false)
 	viper.Set("TLSSkipVerify", true)
 
-	cancel := originMockup(t)
-	defer cancel()
+	mockupCancel := originMockup(ctx, egrp, t)
+	defer mockupCancel()
 
 	// In this case a 403 means its running
-	err := server_utils.WaitUntilWorking("GET", param.Origin_Url.GetString(), "xrootd", 403)
+	err := server_utils.WaitUntilWorking(ctx, "GET", param.Origin_Url.GetString(), "xrootd", 403)
 	if err != nil {
 		t.Fatalf("Unsuccessful test: Server encountered an error: %v", err)
 	}
 	fileTests := utils.TestFileTransferImpl{}
-	ok, err := fileTests.RunTests(param.Origin_Url.GetString(), param.Origin_Url.GetString(), utils.OriginSelfFileTest)
+	ok, err := fileTests.RunTests(ctx, param.Origin_Url.GetString(), param.Origin_Url.GetString(), utils.OriginSelfFileTest)
 	require.NoError(t, err)
 	require.True(t, ok)
 
@@ -131,11 +128,15 @@ func TestOrigin(t *testing.T) {
 }
 
 func TestS3OriginConfig(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
 	viper.Reset()
 	tmpDir := t.TempDir()
 
 	// We need to start up a minio server, which is how we emulate S3. Open to better ways to do this!
-	minIOServerCmd := exec.Command("minio", "server", "--quiet", tmpDir)
+	minIOServerCmd := exec.CommandContext(ctx, "minio", "server", "--quiet", tmpDir)
 	minIOServerCmd.Env = []string{fmt.Sprintf("HOME=%s", tmpDir)}
 
 	// Create a few buffers to grab outputs
@@ -155,7 +156,7 @@ func TestS3OriginConfig(t *testing.T) {
 	// Check if MinIO is running (by default at localhost:9000)
 	endpoint := "localhost:9000"
 	// Expect a 403 from this endpoint -- that means it's running
-	err = server_utils.WaitUntilWorking("GET", fmt.Sprintf("http://%s", endpoint), "xrootd", 403)
+	err = server_utils.WaitUntilWorking(ctx, "GET", fmt.Sprintf("http://%s", endpoint), "xrootd", 403)
 	if err != nil {
 		t.Fatalf("Unsuccessful test: Server encountered an error: %v", err)
 	}
@@ -216,8 +217,8 @@ func TestS3OriginConfig(t *testing.T) {
 	viper.Set("Origin.SelfTest", false)
 	viper.Set("TLSSkipVerify", true)
 
-	cancel := originMockup(t)
-	defer cancel()
+	mockupCancel := originMockup(ctx, egrp, t)
+	defer mockupCancel()
 
 	// FOR NOW, we consider the test a success if the origin's xrootd server boots.
 	// TODO: When we've made it easier to come back and test whole pieces of this process by disentangling our
@@ -228,7 +229,7 @@ func TestS3OriginConfig(t *testing.T) {
 	originEndpoint := fmt.Sprintf("%s/%s/%s/%s/%s", param.Origin_Url.GetString(), serviceName, regionName, bucketName, objectName)
 	// Until we sort out the things we mentioned above, we should expect a 403 because we don't try to pass tokens
 	// and we don't actually export any keys for token validation.
-	err = server_utils.WaitUntilWorking("GET", originEndpoint, "xrootd", 403)
+	err = server_utils.WaitUntilWorking(ctx, "GET", originEndpoint, "xrootd", 403)
 	if err != nil {
 		t.Fatalf("Unsucessful test: Server encountered an error: %v", err)
 	}

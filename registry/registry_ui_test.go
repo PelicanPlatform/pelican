@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -13,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -65,8 +67,12 @@ func GenerateMockJWKS() (string, error) {
 }
 
 func TestListNamespaces(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
 	// Initialize the mock database
-	err := setupMockNamespaceDB()
+	err := setupMockNamespaceDB(ctx)
 	if err != nil {
 		t.Fatalf("Failed to set up mock namespace DB: %v", err)
 	}
@@ -158,12 +164,16 @@ func TestListNamespaces(t *testing.T) {
 }
 
 func TestGetNamespaceJWKS(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
 	mockPublicKey, err := GenerateMockJWKS()
 	if err != nil {
 		t.Fatalf("Failed to set up mock public key: %v", err)
 	}
 	// Initialize the mock database
-	err = setupMockNamespaceDB()
+	err = setupMockNamespaceDB(ctx)
 	if err != nil {
 		t.Fatalf("Failed to set up mock namespace DB: %v", err)
 	}

@@ -23,56 +23,32 @@ package main
 import (
 	"context"
 	_ "embed"
-	"sync"
-	"time"
+	"os"
+	"os/signal"
+	"syscall"
 
-	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/daemon"
-	"github.com/pelicanplatform/pelican/oa4mp"
-	"github.com/pelicanplatform/pelican/origin_ui"
+	"github.com/pelicanplatform/pelican/launchers"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_ui"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/web_ui"
-	"github.com/pelicanplatform/pelican/xrootd"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	"golang.org/x/sync/errgroup"
 )
 
 func serveOrigin(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
-	err := serveOriginInternal(ctx)
-	if err != nil {
-		return err
-	}
+	shutdownCtx, shutdownCancel := context.WithCancel(ctx)
+	egrp, ctx := errgroup.WithContext(shutdownCtx)
 
-	return nil
-}
-
-func serveOriginInternal(ctx context.Context) error {
-	// Use this context for any goroutines that needs to react to server shutdown
-	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
-	// Use this wait group to ensure the goroutines can finish before the server exits/shutdown
-	var wg sync.WaitGroup
-
-	// This anonymous function ensures we cancel any context and wait for those goroutines to
-	// finish their cleanup work before the server exits
 	defer func() {
 		shutdownCancel()
-		wg.Wait()
-		config.CleanupTempResources()
+		if err := egrp.Wait(); err != nil {
+			log.Errorln("Failure when cleaning up origin:", err)
+		}
 	}()
-
-	err := xrootd.SetUpMonitoring(shutdownCtx, &wg)
-	if err != nil {
-		return err
-	}
-	wg.Add(1) // Add to wg afterward to ensure no error causes deadlock
-
-	originServer := &origin_ui.OriginServer{}
-	err = server_ui.CheckDefaults(originServer)
-	if err != nil {
-		return err
-	}
 
 	engine, err := web_ui.GetEngine()
 	if err != nil {
@@ -81,76 +57,46 @@ func serveOriginInternal(ctx context.Context) error {
 
 	if param.Server_EnableUI.GetBool() {
 		// Set up necessary APIs to support Web UI, including auth and metrics
-		if err := web_ui.ConfigureServerWebAPI(engine); err != nil {
+		if err := web_ui.ConfigureServerWebAPI(ctx, engine, egrp); err != nil {
 			return err
 		}
 	}
 
-	// Set up the APIs unrelated to UI, which only contains director-based health test reporting endpoint for now
-	if err = origin_ui.ConfigureOriginAPI(engine, shutdownCtx, &wg); err != nil {
+	originServer, err := launchers.OriginServe(ctx, engine, egrp)
+	if err != nil {
 		return err
 	}
-	wg.Add(1)
 
-	// In posix mode, we rely on xrootd to export keys. When we run the origin with
-	// different backends, we instead export the keys via the Pelican process
-	if param.Origin_Mode.GetString() != "posix" {
-		if err = origin_ui.ConfigIssJWKS(engine.Group("/.well-known")); err != nil {
-			return err
-		}
-	}
-
-	if err = server_ui.RegisterNamespaceWithRetry(); err != nil {
-		return err
-	}
-	if err = server_ui.PeriodicAdvertise(originServer); err != nil {
-		return err
-	}
-	if param.Origin_EnableIssuer.GetBool() {
-		if err = oa4mp.ConfigureOA4MPProxy(engine); err != nil {
-			return err
-		}
-	}
-
+	log.Info("Starting web engine...")
 	go func() {
-		if err := web_ui.RunEngine(shutdownCtx, engine); err != nil {
+		if err := web_ui.RunEngine(shutdownCtx, engine, egrp); err != nil {
 			log.Panicln("Failure when running the web engine:", err)
 		}
 		shutdownCancel()
 	}()
 
 	if param.Server_EnableUI.GetBool() {
-		go web_ui.InitServerWebLogin()
-	}
-
-	configPath, err := xrootd.ConfigXrootd(true)
-	if err != nil {
-		return err
-	}
-
-	if param.Origin_SelfTest.GetBool() {
-		go origin_ui.PeriodicSelfTest()
-	}
-
-	xrootd.LaunchXrootdMaintenance(shutdownCtx, 2*time.Minute)
-
-	privileged := param.Origin_Multiuser.GetBool()
-	launchers, err := xrootd.ConfigureLaunchers(privileged, configPath, param.Origin_EnableCmsd.GetBool())
-	if err != nil {
-		return err
-	}
-
-	if param.Origin_EnableIssuer.GetBool() {
-		oa4mp_launcher, err := oa4mp.ConfigureOA4MP()
-		if err != nil {
-			return err
+		if err := web_ui.InitServerWebLogin(ctx); err != nil {
+			log.Panicln("Failure when initializing the web login:", err)
 		}
-		launchers = append(launchers, oa4mp_launcher)
 	}
 
-	if err = daemon.LaunchDaemons(ctx, launchers); err != nil {
+	if err = launchers.OriginServeFinish(ctx, egrp); err != nil {
 		return err
 	}
-	log.Info("Clean shutdown of the origin")
+
+	if err := server_ui.LaunchPeriodicAdvertise(ctx, egrp, []server_utils.XRootDServer{originServer}); err != nil {
+		return err
+	}
+
+	egrp.Go(func() error {
+		sigs := make(chan os.Signal, 1)
+		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+		sig := <-sigs
+		_ = sig
+		shutdownCancel()
+		return errors.New("Origin process has been cancelled")
+	})
+
 	return nil
 }

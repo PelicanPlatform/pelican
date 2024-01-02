@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/elliptic"
 	"path/filepath"
-	"sync"
 	"testing"
 	"time"
 
@@ -13,15 +12,20 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 )
 
 func TestVerifyAdvertiseToken(t *testing.T) {
 	/*
 	* Runs unit tests on the VerifyAdvertiseToken function
 	 */
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
 
 	viper.Reset()
 
@@ -61,7 +65,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 	// A verified token with a the correct scope - should return no error
 	tok, err := CreateAdvertiseToken("test-namespace")
 	assert.NoError(t, err)
-	ok, err := VerifyAdvertiseToken(tok, "test-namespace")
+	ok, err := VerifyAdvertiseToken(ctx, tok, "test-namespace")
 	assert.NoError(t, err)
 	assert.Equal(t, true, ok, "Expected scope to be 'pelican.advertise'")
 
@@ -78,7 +82,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 
 	signed, err := jwt.Sign(scopelessTok, jwt.WithKey(jwa.ES256, key))
 
-	ok, err = VerifyAdvertiseToken(string(signed), "test-namespace")
+	ok, err = VerifyAdvertiseToken(ctx, string(signed), "test-namespace")
 	assert.Equal(t, false, ok)
 	assert.Equal(t, "No scope is present; required to advertise to director", err.Error())
 
@@ -92,7 +96,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 
 	signed, err = jwt.Sign(nonStrScopeTok, jwt.WithKey(jwa.ES256, key))
 
-	ok, err = VerifyAdvertiseToken(string(signed), "test-namespace")
+	ok, err = VerifyAdvertiseToken(ctx, string(signed), "test-namespace")
 	assert.Equal(t, false, ok)
 	assert.Equal(t, "scope claim in token is not string-valued", err.Error())
 
@@ -106,7 +110,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 
 	signed, err = jwt.Sign(wrongScopeTok, jwt.WithKey(jwa.ES256, key))
 
-	ok, err = VerifyAdvertiseToken(string(signed), "test-namespace")
+	ok, err = VerifyAdvertiseToken(ctx, string(signed), "test-namespace")
 	assert.Equal(t, false, ok, "Should fail due to incorrect scope name")
 	assert.NoError(t, err, "Incorrect scope name should not throw and error")
 }
@@ -168,12 +172,12 @@ func TestNamespaceKeysCacheEviction(t *testing.T) {
 	t.Run("evict-after-expire-time", func(t *testing.T) {
 		// Start cache eviction
 		shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
-		var wg sync.WaitGroup
-		ConfigTTLCache(shutdownCtx, &wg)
-		wg.Add(1)
+		egrp, ctx := errgroup.WithContext(shutdownCtx)
+		ConfigTTLCache(ctx, egrp)
 		defer func() {
 			shutdownCancel()
-			wg.Wait()
+			err := egrp.Wait()
+			assert.NoError(t, err)
 		}()
 
 		mockNamespaceKey := "foo"

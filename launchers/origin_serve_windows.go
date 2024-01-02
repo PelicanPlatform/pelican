@@ -18,24 +18,16 @@
  *
  ***************************************************************/
 
-package daemon
+package launchers
 
 import (
 	"context"
-	"io"
+	"sync"
 
+	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
-	"golang.org/x/sync/errgroup"
 )
 
-func LaunchDaemons(ctx context.Context, launchers []Launcher, egrp *errgroup.Group) (err error) {
-	return errors.New("launching daemons is not supported on Windows")
-}
-
-func (launcher DaemonLauncher) Launch(ctx context.Context) (context.Context, int, error) {
-	return context.Background(), -1, errors.New("launching daemons is not supported on Windows")
-}
-
-func ForwardCommandToLogger(ctx context.Context, daemonName string, cmdStdout io.ReadCloser, cmdStderr io.ReadCloser) {
-	return
+func OriginServe(context.Context, *gin.Engine, *sync.WaitGroup) error {
+	return errors.New("Origin module is not supported on Windows")
 }

@@ -19,6 +19,7 @@
 package registry
 
 import (
+	"context"
 	"database/sql"
 	"testing"
 
@@ -34,10 +35,11 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/spf13/viper"
 )
 
-func setupMockNamespaceDB() error {
+func setupMockNamespaceDB(ctx context.Context) error {
 	mockDB, err := sql.Open("sqlite", ":memory:")
 	db = mockDB
 	if err != nil {
@@ -141,8 +143,11 @@ var (
 
 // teardown must be called at the end of the test to close the in-memory SQLite db
 func TestGetNamespacesByServerType(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
 
-	err := setupMockNamespaceDB()
+	err := setupMockNamespaceDB(ctx)
 	require.NoError(t, err, "Error setting up the mock namespace DB")
 	defer teardownMockNamespaceDB()
 
@@ -246,6 +251,10 @@ func topologyMockup(t *testing.T, namespaces []string) *httptest.Server {
 }
 
 func TestRegistryTopology(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
 	viper.Reset()
 
 	topoNamespaces := []string{"/topo/foo", "/topo/bar"}
@@ -257,9 +266,12 @@ func TestRegistryTopology(t *testing.T) {
 	viper.Set("Federation.TopologyNamespaceURL", svr.URL)
 	config.InitConfig()
 
-	err := InitializeDB()
+	err := InitializeDB(ctx)
 	require.NoError(t, err)
-	defer ShutdownDB()
+	defer func() {
+		err := ShutdownDB()
+		assert.NoError(t, err)
+	}()
 
 	// Set value so that config.GetPreferredPrefix() returns "OSDF"
 	config.SetPreferredPrefix("OSDF")
@@ -337,12 +349,18 @@ func TestRegistryTopology(t *testing.T) {
 }
 
 func TestCacheAdminTrue(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
 
 	registryDBDir := t.TempDir()
 	viper.Set("Registry.DbLocation", registryDBDir)
 
-	err := InitializeDB()
-	defer ShutdownDB()
+	err := InitializeDB(ctx)
+	defer func() {
+		err := ShutdownDB()
+		assert.NoError(t, err)
+	}()
 
 	require.NoError(t, err, "error initializing registry database")
 	jResult, err := json.Marshal(AdminJSON{
@@ -396,11 +414,18 @@ func TestCacheAdminTrue(t *testing.T) {
 }
 
 func TestCacheAdminFalse(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
 	registryDBDir := t.TempDir()
 	viper.Set("Registry.DbLocation", registryDBDir)
 
-	err := InitializeDB()
-	defer ShutdownDB()
+	err := InitializeDB(ctx)
+	defer func() {
+		err := ShutdownDB()
+		assert.NoError(t, err)
+	}()
 
 	require.NoError(t, err, "error initializing registry database")
 	jResult, err := json.Marshal(AdminJSON{

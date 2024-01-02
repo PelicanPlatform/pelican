@@ -30,41 +30,49 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
 )
 
 // Wait until given `reqUrl` returns a HTTP 200.
 // Logging messages emitted will refer to `server` (e.g., origin, cache, director)
-func WaitUntilWorking(method, reqUrl, server string, expectedStatus int) error {
+func WaitUntilWorking(ctx context.Context, method, reqUrl, server string, expectedStatus int) error {
 	expiry := time.Now().Add(10 * time.Second)
+	ctx, cancel := context.WithDeadline(ctx, expiry)
+	defer cancel()
+	ticker := time.NewTicker(50 * time.Millisecond)
 	success := false
 	logged := false
 	for !(success || time.Now().After(expiry)) {
-		time.Sleep(50 * time.Millisecond)
-		req, err := http.NewRequest(method, reqUrl, nil)
-		if err != nil {
-			return err
-		}
-		httpClient := http.Client{
-			Transport: config.GetTransport(),
-			Timeout:   50 * time.Millisecond,
-		}
-		resp, err := httpClient.Do(req)
-		if err != nil {
-			if !logged {
-				log.Infoln("Failed to send request to "+server+"; likely server is not up (will retry in 50ms):", err)
-				logged = true
+		select {
+		case <-ticker.C:
+			req, err := http.NewRequestWithContext(ctx, method, reqUrl, nil)
+			if err != nil {
+				return err
 			}
-		} else {
-			if resp.StatusCode == expectedStatus {
-				log.Debugln(server + " server appears to be functioning")
-				return nil
+			httpClient := http.Client{
+				Transport: config.GetTransport(),
+				Timeout:   50 * time.Millisecond,
 			}
-			// We didn't get the expected status
-			return errors.Errorf("Received bad status code in reply to server ping: %d. Expected %d,", resp.StatusCode, expectedStatus)
+			resp, err := httpClient.Do(req)
+			if err != nil {
+				if !logged {
+					log.Infoln("Failed to send request to "+server+"; likely server is not up (will retry in 50ms):", err)
+					logged = true
+				}
+			} else {
+				if resp.StatusCode == expectedStatus {
+					log.Debugln(server + " server appears to be functioning")
+					return nil
+				}
+				// We didn't get the expected status
+				return errors.Errorf("Received bad status code in reply to server ping: %d. Expected %d,", resp.StatusCode, expectedStatus)
+			}
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
 
-	return errors.New("Server did not startup after 10s of waiting")
+	return errors.Errorf("Server %s at %s did not startup after 10s of waiting", server, reqUrl)
 }
 
 // For calling from within the server. Returns the server's issuer URL/port
@@ -111,13 +119,17 @@ func LaunchWatcherMaintenance(ctx context.Context, dirPath string, description s
 		cases[3].Dir = reflect.SelectRecv
 		cases[3].Chan = reflect.ValueOf(watcher.Errors)
 	}
-	go func() {
+	egrp, ok := ctx.Value(config.EgrpKey).(*errgroup.Group)
+	if !ok {
+		egrp = &errgroup.Group{}
+	}
+	egrp.Go(func() error {
 		defer watcher.Close()
 		for {
 			chosen, recv, ok := reflect.Select(cases)
 			if chosen == 0 {
 				if !ok {
-					log.Panicf("Ticker failed in the %s routine; exiting", description)
+					return errors.Errorf("Ticker failed in the %s routine; exiting", description)
 				}
 				err := maintenanceFunc(false)
 				if err != nil {
@@ -125,10 +137,10 @@ func LaunchWatcherMaintenance(ctx context.Context, dirPath string, description s
 				}
 			} else if chosen == 1 {
 				log.Infof("%s routine has been cancelled.  Shutting down", description)
-				return
+				return nil
 			} else if chosen == 2 { // watcher.Events
 				if !ok {
-					log.Panicf("Watcher events failed in %s routine; exiting", description)
+					return errors.Errorf("Watcher events failed in %s routine; exiting", description)
 				}
 				if event, ok := recv.Interface().(fsnotify.Event); ok {
 					log.Debugf("Got filesystem event (%v); will run %s", event, description)
@@ -137,19 +149,19 @@ func LaunchWatcherMaintenance(ctx context.Context, dirPath string, description s
 						log.Warningf("Failure during %s routine: %v", description, err)
 					}
 				} else {
-					log.Panicln("Watcher returned an unknown event")
+					return errors.New("Watcher returned an unknown event")
 				}
 			} else if chosen == 3 { // watcher.Errors
 				if !ok {
-					log.Panicf("Watcher error channel closed in %s routine; exiting", description)
+					return errors.Errorf("Watcher error channel closed in %s routine; exiting", description)
 				}
 				if err, ok := recv.Interface().(error); ok {
 					log.Errorf("Watcher failure in the %s routine: %v", description, err)
 				} else {
-					log.Panicln("Watcher error channel has internal error; exiting")
+					return errors.New("Watcher error channel has internal error; exiting")
 				}
 				time.Sleep(time.Second)
 			}
 		}
-	}()
+	})
 }

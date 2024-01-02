@@ -19,14 +19,17 @@
 package main
 
 import (
+	"context"
 	"os"
 	"strconv"
 	"strings"
 
 	"github.com/pelicanplatform/pelican/config"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
+	"golang.org/x/sync/errgroup"
 )
 
 type uint16Value uint16
@@ -76,7 +79,15 @@ func (i *uint16Value) Type() string {
 func (i *uint16Value) String() string { return strconv.FormatUint(uint64(*i), 10) }
 
 func Execute() {
-	err := rootCmd.Execute()
+	egrp := errgroup.Group{}
+	defer func() {
+		err := egrp.Wait()
+		if err != nil {
+			log.Errorln("Error occurred when shutting down process:", err)
+		}
+	}()
+	ctx := context.WithValue(context.Background(), config.EgrpKey, &egrp)
+	err := rootCmd.ExecuteContext(ctx)
 	if err != nil {
 		os.Exit(1)
 	}

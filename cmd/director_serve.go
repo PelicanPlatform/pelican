@@ -20,62 +20,30 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 
-	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/director"
-	"github.com/pelicanplatform/pelican/metrics"
+	"github.com/pelicanplatform/pelican/launchers"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/web_ui"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	"golang.org/x/sync/errgroup"
 )
 
 func serveDirector(cmd *cobra.Command, args []string) error {
 
-	ctx := cmd.Context()
-	err := serveDirectorInternal(ctx)
-	if err != nil {
-		return err
-	}
+	shutdownCtx, shutdownCancel := context.WithCancel(cmd.Context())
+	egrp, ctx := errgroup.WithContext(shutdownCtx)
 
-	return nil
-}
-
-func serveDirectorInternal(ctx context.Context) error {
-	// Use this context for any goroutines that needs to react to server shutdown
-	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
-	// Use this wait group to ensure the goroutines can finish before the server exits/shutdown
-	var wg sync.WaitGroup
-
-	// This anonymous function ensures we cancel any context and wait for those goroutines to
-	// finish their cleanup work before the server exits
 	defer func() {
 		shutdownCancel()
-		wg.Wait()
-	}()
-
-	log.Info("Initializing Director GeoIP database...")
-	director.InitializeDB()
-
-	if config.GetPreferredPrefix() == "OSDF" {
-		metrics.SetComponentHealthStatus(metrics.DirectorRegistry_Topology, metrics.StatusWarning, "Start requesting from topology, status unknown")
-		log.Info("Generating/advertising server ads from OSG topology service...")
-
-		// Get the ads from topology, populate the cache, and keep the cache
-		// updated with fresh info
-		if err := director.AdvertiseOSDF(); err != nil {
-			panic(err)
+		if err := egrp.Wait(); err != nil {
+			log.Errorln("Failure when cleaning up director:", err)
 		}
-		go director.PeriodicCacheReload()
-	}
-
-	director.ConfigTTLCache(shutdownCtx, &wg)
-	wg.Add(1) // Add to wait group after ConfigTTLCache finishes to avoid deadlock
+	}()
 
 	engine, err := web_ui.GetEngine()
 	if err != nil {
@@ -83,45 +51,40 @@ func serveDirectorInternal(ctx context.Context) error {
 	}
 
 	if param.Server_EnableUI.GetBool() {
-		// We configure Prometheus differently for director than for the rest servers,
-		// although in the future we probably want to pass the server type to the
-		// metric config function just because each server may have different config
-		if err := web_ui.ConfigureServerWebAPI(engine); err != nil {
+		// Set up necessary APIs to support Web UI, including auth and metrics
+		if err := web_ui.ConfigureServerWebAPI(ctx, engine, egrp); err != nil {
 			return err
 		}
 	}
 
-	// Configure the shortcut middleware to either redirect to a cache
-	// or to an origin
-	defaultResponse := param.Director_DefaultResponse.GetString()
-	if !(defaultResponse == "cache" || defaultResponse == "origin") {
-		return fmt.Errorf("the director's default response must either be set to 'cache' or 'origin',"+
-			" but you provided %q. Was there a typo?", defaultResponse)
+	if err = launchers.DirectorServe(ctx, engine, egrp); err != nil {
+		return err
 	}
-	log.Debugf("The director will redirect to %ss by default", defaultResponse)
-	rootGroup := engine.Group("/")
-	director.RegisterDirectorAuth(rootGroup)
-	director.RegisterDirectorWebAPI(rootGroup)
-	engine.Use(director.ShortcutMiddleware(defaultResponse))
-	director.RegisterDirector(rootGroup)
 
 	log.Info("Starting web engine...")
-	go func() {
-		if err := web_ui.RunEngine(shutdownCtx, engine); err != nil {
-			log.Panicln("Failure when running the web engine:", err)
+	egrp.Go(func() error {
+		if err := web_ui.RunEngine(ctx, engine, egrp); err != nil {
+			return errors.Wrap(err, "Failure when running the web engine:")
 		}
 		shutdownCancel()
-	}()
+		return nil
+	})
 
 	if param.Server_EnableUI.GetBool() {
 		log.Info("Starting web engine...")
-		go web_ui.InitServerWebLogin()
+		if err = web_ui.InitServerWebLogin(ctx); err != nil {
+			return err
+		}
 	}
 
-	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
-	sig := <-sigs
-	_ = sig
+	egrp.Go(func() error {
+		sigs := make(chan os.Signal, 1)
+		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+		sig := <-sigs
+		_ = sig
+		shutdownCancel()
+		return errors.New("Director process has been cancelled")
+	})
 
-	return nil
+	return egrp.Wait()
 }

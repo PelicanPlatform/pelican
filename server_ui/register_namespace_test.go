@@ -19,6 +19,7 @@
 package server_ui
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -33,6 +34,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/registry"
+	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -49,18 +51,25 @@ type (
 )
 
 func TestRegistration(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
 	viper.Reset()
 	tempConfigDir := t.TempDir()
 	viper.Set("ConfigDir", tempConfigDir)
 
 	config.InitConfig()
 	viper.Set("Registry.DbLocation", filepath.Join(tempConfigDir, "test.sql"))
-	err := config.InitServer(config.OriginType)
+	err := config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
 
-	err = registry.InitializeDB()
+	err = registry.InitializeDB(ctx)
 	require.NoError(t, err)
-	defer registry.ShutdownDB()
+	defer func() {
+		err := registry.ShutdownDB()
+		assert.NoError(t, err)
+	}()
 
 	gin.SetMode(gin.TestMode)
 	engine := gin.Default()

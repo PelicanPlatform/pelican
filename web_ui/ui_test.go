@@ -36,9 +36,11 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 )
 
 var (
@@ -48,6 +50,15 @@ var (
 
 func TestMain(m *testing.M) {
 	gin.SetMode(gin.TestMode)
+	ctx, cancel := context.WithCancel(context.Background())
+	egrp, ctx := errgroup.WithContext(ctx)
+	defer func() {
+		if err := egrp.Wait(); err != nil {
+			fmt.Println("Failure when shutting down service:", err)
+			os.Exit(1)
+		}
+	}()
+	defer cancel()
 
 	//set a temporary password file:
 	tempFile, err := os.CreateTemp("", "web-ui-passwd")
@@ -71,7 +82,7 @@ func TestMain(m *testing.M) {
 
 	// Ensure we load up the default configs.
 	config.InitConfig()
-	if err := config.InitServer(config.OriginType); err != nil {
+	if err := config.InitServer(ctx, config.OriginType); err != nil {
 		fmt.Println("Failed to configure the test module")
 		os.Exit(1)
 	}
@@ -85,7 +96,7 @@ func TestMain(m *testing.M) {
 	router = gin.Default()
 
 	//Configure Web API
-	err = ConfigureServerWebAPI(router)
+	err = ConfigureServerWebAPI(ctx, router, egrp)
 	if err != nil {
 		fmt.Println("Error configuring web UI")
 		os.Exit(1)
@@ -100,14 +111,16 @@ func TestMain(m *testing.M) {
 }
 
 func TestWaitUntilLogin(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
 	dirName := t.TempDir()
 	viper.Reset()
 	viper.Set("ConfigDir", dirName)
 	config.InitConfig()
-	err := config.InitServer(config.OriginType)
+	err := config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	go func() {
 		err := waitUntilLogin(ctx)
 		require.NoError(t, err)
@@ -147,11 +160,15 @@ func TestWaitUntilLogin(t *testing.T) {
 }
 
 func TestCodeBasedLogin(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
 	dirName := t.TempDir()
 	viper.Reset()
 	viper.Set("ConfigDir", dirName)
 	config.InitConfig()
-	err := config.InitServer(config.OriginType)
+	err := config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
 	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256())
 	require.NoError(t, err)
@@ -199,11 +216,15 @@ func TestCodeBasedLogin(t *testing.T) {
 }
 
 func TestPasswordResetAPI(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
 	dirName := t.TempDir()
 	viper.Reset()
 	viper.Set("ConfigDir", dirName)
 	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
-	err := config.InitServer(config.OriginType)
+	err := config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
 	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256())
 	require.NoError(t, err)
@@ -303,10 +324,14 @@ func TestPasswordResetAPI(t *testing.T) {
 }
 
 func TestPasswordBasedLoginAPI(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
 	viper.Reset()
 	config.InitConfig()
 	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
-	err := config.InitServer(config.OriginType)
+	err := config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
 
 	///////////////////////////SETUP///////////////////////////////////
@@ -415,12 +440,16 @@ func TestPasswordBasedLoginAPI(t *testing.T) {
 }
 
 func TestWhoamiAPI(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
 	dirName := t.TempDir()
 	viper.Reset()
 	config.InitConfig()
 	viper.Set("ConfigDir", dirName)
 	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
-	err := config.InitServer(config.OriginType)
+	err := config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
 	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256())
 	require.NoError(t, err)

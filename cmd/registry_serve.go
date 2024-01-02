@@ -27,44 +27,21 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/metrics"
+	"github.com/pelicanplatform/pelican/launchers"
 	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/registry"
 	"github.com/pelicanplatform/pelican/web_ui"
 )
 
 func serveRegistry(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
-	err := serveRegistryInternal(ctx)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func serveRegistryInternal(ctx context.Context) error {
-	log.Info("Initializing the namespace registry's database...")
-	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
-	defer shutdownCancel()
-
-	// Initialize the registry's sqlite database
-	err := registry.InitializeDB()
-	if err != nil {
-		return errors.Wrap(err, "Unable to initialize the namespace registry database")
-	}
-
-	if config.GetPreferredPrefix() == "OSDF" {
-		metrics.SetComponentHealthStatus(metrics.DirectorRegistry_Topology, metrics.StatusWarning, "Start requesting from topology, status unknown")
-		log.Info("Populating registry with namespaces from OSG topology service...")
-		if err := registry.PopulateTopology(); err != nil {
-			panic(errors.Wrap(err, "Unable to populate topology table"))
-		}
-
-		// Checks topology for updates every 10 minutes
-		go registry.PeriodicTopologyReload()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	egrp, ok := ctx.Value(config.EgrpKey).(*errgroup.Group)
+	if !ok {
+		egrp = &errgroup.Group{}
 	}
 
 	engine, err := web_ui.GetEngine()
@@ -74,42 +51,37 @@ func serveRegistryInternal(ctx context.Context) error {
 
 	if param.Server_EnableUI.GetBool() {
 		// Set up necessary APIs to support Web UI, including auth and metrics
-		if err := web_ui.ConfigureServerWebAPI(engine); err != nil {
-			return err
-		}
-
-		if err := web_ui.ConfigOAuthClientAPIs(engine); err != nil {
+		if err := web_ui.ConfigureServerWebAPI(ctx, engine, egrp); err != nil {
 			return err
 		}
 	}
 
-	rootRouterGroup := engine.Group("/")
-	// Call out to registry to establish routes for the gin engine
-	registry.RegisterRegistryRoutes(rootRouterGroup)
-	registry.RegisterRegistryWebAPI(rootRouterGroup)
-	log.Info("Starting web engine...")
+	if err = launchers.RegistryServe(ctx, engine, egrp); err != nil {
+		return err
+	}
 
-	// Might need to play around with this setting more to handle
-	// more complicated routing scenarios where we can't just use
-	// a wildcard. It removes duplicate / from the resource.
-	//engine.RemoveExtraSlash = true
+	log.Info("Starting web engine...")
 	go func() {
-		if err := web_ui.RunEngine(shutdownCtx, engine); err != nil {
+		if err := web_ui.RunEngine(ctx, engine, egrp); err != nil {
 			log.Panicln("Failure when running the web engine:", err)
 		}
-		shutdownCancel()
+		cancel()
 	}()
 
 	if param.Server_EnableUI.GetBool() {
-		log.Info("Starting web engine...")
-		go web_ui.InitServerWebLogin()
+		if err := web_ui.InitServerWebLogin(ctx); err != nil {
+			log.Panicln("Failure when initializing the web login:", err)
+		}
 	}
 
-	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
-	sig := <-sigs
-	_ = sig
-	shutdownCancel()
+	egrp.Go(func() error {
+		sigs := make(chan os.Signal, 1)
+		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+		sig := <-sigs
+		_ = sig
+		cancel()
+		return errors.New("Registry process has been cancelled")
+	})
 
 	return nil
 }

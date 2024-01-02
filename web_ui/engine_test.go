@@ -35,23 +35,25 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/test_utils"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 )
 
 // Setup a gin engine that will serve up a /ping endpoint on a Unix domain socket.
-func setupPingEngine(t *testing.T) (chan bool, context.CancelFunc, string) {
+func setupPingEngine(t *testing.T, ctx context.Context, egrp *errgroup.Group) (chan bool, context.CancelFunc, string) {
 	dirname := t.TempDir()
 	viper.Reset()
 	viper.Set("Logging.Level", "Debug")
 	viper.Set("ConfigDir", dirname)
 	viper.Set("Server.WebPort", 0)
 	config.InitConfig()
-	err := config.InitServer(config.OriginType)
+	err := config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(ctx)
 
 	engine, err := GetEngine()
 	require.NoError(t, err)
@@ -66,11 +68,12 @@ func setupPingEngine(t *testing.T) (chan bool, context.CancelFunc, string) {
 	require.NoError(t, err)
 
 	doneChan := make(chan bool)
-	go func() {
-		err = runEngineWithListener(ctx, ln, engine)
+	egrp.Go(func() error {
+		err = runEngineWithListener(ctx, ln, engine, egrp)
 		require.NoError(t, err)
 		doneChan <- true
-	}()
+		return err
+	})
 
 	transport := *config.GetTransport()
 	transport.DialContext = func(_ context.Context, _, _ string) (net.Conn, error) {
@@ -105,7 +108,11 @@ func setupPingEngine(t *testing.T) (chan bool, context.CancelFunc, string) {
 // Test the engine startup, serving a single request using
 // TLS validation, then a clean shutdown.
 func TestRunEngine(t *testing.T) {
-	doneChan, cancel, _ := setupPingEngine(t)
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
+	doneChan, cancel, _ := setupPingEngine(t, ctx, egrp)
 
 	// Shutdown the engine
 	cancel()
@@ -121,8 +128,12 @@ func TestRunEngine(t *testing.T) {
 // Ensure that if the TLS certificate is updated on disk then new
 // connections will use the new version.
 func TestUpdateCert(t *testing.T) {
-	_, cancel, socketLocation := setupPingEngine(t)
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
+
+	doneChan, pingCancel, socketLocation := setupPingEngine(t, ctx, egrp)
+	defer pingCancel()
 
 	getCurrentFingerprint := func() [sha256.Size]byte {
 
@@ -159,7 +170,7 @@ func TestUpdateCert(t *testing.T) {
 	// Next, trigger a reload of the cert
 	require.NoError(t, os.Remove(certFile))
 	require.NoError(t, os.Remove(keyFile))
-	require.NoError(t, config.InitServer(config.OriginType))
+	require.NoError(t, config.InitServer(ctx, config.OriginType))
 
 	newDiskFingerprint := getDiskFingerprint()
 	assert.NotEqual(t, diskFingerprint, newDiskFingerprint)
@@ -178,4 +189,13 @@ func TestUpdateCert(t *testing.T) {
 		}
 	}
 	assert.True(t, sawUpdate)
+
+	cancel()
+	timeout := time.Tick(3 * time.Second)
+	select {
+	case ok := <-doneChan:
+		require.True(t, ok)
+	case <-timeout:
+		require.Fail(t, "Timeout when shutting down the engine")
+	}
 }

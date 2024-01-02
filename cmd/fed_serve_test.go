@@ -30,18 +30,24 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/test_utils"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestFedServePosixOrigin(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
 	viper.Reset()
-	ports := modulePorts{
-		Registry: 8446,
-		Director: 8445,
-		Origin:   8443,
-	}
+
+	modules := config.ServerType(0)
+	modules.Set(config.OriginType)
+	modules.Set(config.DirectorType)
+	modules.Set(config.RegistryType)
 
 	// Create our own temp directory (for some reason t.TempDir() does not play well with xrootd)
 	tmpPathPattern := "XRootD-Test_Origin*"
@@ -72,15 +78,18 @@ func TestFedServePosixOrigin(t *testing.T) {
 	viper.Set("TLSSkipVerify", true)
 	viper.Set("Server.EnableUI", false)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		err = fedServeInternal(ctx, ports)
-		require.NoError(t, err)
-	}()
-	defer cancel()
+	err = config.InitServer(ctx, modules)
+	require.NoError(t, err)
 
-	desiredURL := "https://" + param.Server_Hostname.GetString() + ":8445/.well-known/openid-configuration"
-	err = server_utils.WaitUntilWorking("GET", desiredURL, "director", 200)
+	fedCancel, err := fedServeInternal(ctx, modules, egrp)
+	defer fedCancel()
+	if err != nil {
+		log.Errorln("Failure in fedServeInternal:", err)
+		require.NoError(t, err)
+	}
+
+	desiredURL := param.Server_ExternalWebUrl.GetString() + "/.well-known/openid-configuration"
+	err = server_utils.WaitUntilWorking(ctx, "GET", desiredURL, "director", 200)
 	require.NoError(t, err)
 
 	httpc := http.Client{
@@ -100,4 +109,8 @@ func TestFedServePosixOrigin(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.NotEmpty(t, expectedResponse.JwksUri)
+
+	cancel()
+	fedCancel()
+	assert.NoError(t, egrp.Wait())
 }

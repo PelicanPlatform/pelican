@@ -89,7 +89,7 @@ var (
 
 // Given a reference to a Scitokens configuration, write it out to a known location
 // on disk for the xrootd server
-func EmitScitokensConfiguration(cfg *ScitokensCfg) error {
+func EmitScitokensConfiguration(modules config.ServerType, cfg *ScitokensCfg) error {
 
 	JSONify := func(v any) (string, error) {
 		result, err := json.Marshal(v)
@@ -124,7 +124,10 @@ func EmitScitokensConfiguration(cfg *ScitokensCfg) error {
 	// Note that we write to the file then rename it into place.  This is because the
 	// xrootd daemon will periodically reload the scitokens.cfg and, in some cases,
 	// we may want to update it without restarting the server.
-	finalConfigPath := filepath.Join(xrootdRun, "scitokens-generated.cfg")
+	finalConfigPath := filepath.Join(xrootdRun, "scitokens-origin-generated.cfg")
+	if modules.IsEnabled(config.CacheType) {
+		finalConfigPath = filepath.Join(xrootdRun, "scitokens-cache-generated.cfg")
+	}
 	if err = os.Rename(configPath, finalConfigPath); err != nil {
 		return errors.Wrapf(err, "Failed to rename scitokens.cfg to final location")
 	}
@@ -187,7 +190,10 @@ func EmitAuthfile(server server_utils.XRootDServer) error {
 	}
 
 	xrootdRun := param.Xrootd_RunLocation.GetString()
-	finalAuthPath := filepath.Join(xrootdRun, "authfile-generated")
+	finalAuthPath := filepath.Join(xrootdRun, "authfile-origin-generated")
+	if server.GetServerType().IsEnabled(config.CacheType) {
+		finalAuthPath = filepath.Join(xrootdRun, "authfile-cache-generated")
+	}
 	file, err := os.OpenFile(finalAuthPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0640)
 	if err != nil {
 		return errors.Wrapf(err, "Failed to create a generated authfile %s", finalAuthPath)
@@ -384,7 +390,7 @@ func WriteOriginScitokensConfig(exportedPaths []string) error {
 		}
 	}
 
-	return EmitScitokensConfiguration(&cfg)
+	return EmitScitokensConfiguration(config.OriginType, &cfg)
 }
 
 // Writes out the cache's scitokens.cfg configuration
@@ -408,7 +414,7 @@ func WriteCacheScitokensConfig(nsAds []director.NamespaceAd) error {
 		}
 	}
 
-	return EmitScitokensConfiguration(&cfg)
+	return EmitScitokensConfiguration(config.CacheType, &cfg)
 }
 
 func EmitIssuerMetadata(exportPath string) error {

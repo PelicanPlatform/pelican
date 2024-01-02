@@ -42,6 +42,7 @@ type config struct {
 		TopologyNamespaceUrl string
 		TopologyReloadInterval time.Duration
 	}
+	GeoIPOverrides interface{}
 	Issuer struct {
 		AuthenticationSource string
 		AuthorizationTemplates interface{}

@@ -1,5 +1,3 @@
-//go:build windows
-
 /***************************************************************
  *
  * Copyright (C) 2023, Pelican Project, Morgridge Institute for Research
@@ -18,24 +16,23 @@
  *
  ***************************************************************/
 
-package daemon
+package test_utils
 
 import (
 	"context"
-	"io"
+	"testing"
 
-	"github.com/pkg/errors"
+	"github.com/pelicanplatform/pelican/config"
 	"golang.org/x/sync/errgroup"
 )
 
-func LaunchDaemons(ctx context.Context, launchers []Launcher, egrp *errgroup.Group) (err error) {
-	return errors.New("launching daemons is not supported on Windows")
-}
-
-func (launcher DaemonLauncher) Launch(ctx context.Context) (context.Context, int, error) {
-	return context.Background(), -1, errors.New("launching daemons is not supported on Windows")
-}
-
-func ForwardCommandToLogger(ctx context.Context, daemonName string, cmdStdout io.ReadCloser, cmdStderr io.ReadCloser) {
+func TestContext(ictx context.Context, t *testing.T) (ctx context.Context, cancel context.CancelFunc, egrp *errgroup.Group) {
+	if deadline, ok := t.Deadline(); ok {
+		ctx, cancel = context.WithDeadline(ictx, deadline)
+	} else {
+		ctx, cancel = context.WithCancel(ictx)
+	}
+	egrp, ctx = errgroup.WithContext(ctx)
+	ctx = context.WithValue(ctx, config.EgrpKey, egrp)
 	return
 }

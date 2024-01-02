@@ -22,25 +22,23 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/launchers"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_ui"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/web_ui"
 	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"golang.org/x/sync/errgroup"
 )
-
-type modulePorts struct {
-	Registry uint16
-	Director uint16
-	Origin   uint16
-}
 
 func fedServeStart(cmd *cobra.Command, args []string) error {
 	moduleSlice := param.Server_Modules.GetStringSlice()
@@ -56,136 +54,114 @@ func fedServeStart(cmd *cobra.Command, args []string) error {
 	if modules.IsEnabled(config.CacheType) {
 		return errors.New("`pelican serve` does not support the cache module")
 	}
-	ports := modulePorts{}
-	var err error
-	if modules.IsEnabled(config.RegistryType) {
-		ports.Registry, err = cmd.Flags().GetUint16("reg-port")
-		if err != nil {
-			return errors.Wrap(err, "Failed to parse registry port")
+	egrp, ctx := errgroup.WithContext(cmd.Context())
+
+	cancel, err := fedServeInternal(ctx, modules, egrp)
+	if err != nil {
+		cancel()
+		if waitErr := egrp.Wait(); waitErr != nil {
+			log.Errorln("While waiting for server to shutdown, another error occurred:", waitErr)
 		}
+		return err
 	}
-	if modules.IsEnabled(config.DirectorType) {
-		ports.Director, err = cmd.Flags().GetUint16("director-port")
-		if err != nil {
-			return errors.Wrap(err, "Failed to parse director port")
-		}
-	}
-	if modules.IsEnabled(config.OriginType) {
-		ports.Origin, err = cmd.Flags().GetUint16("origin-port")
-		if err != nil {
-			return errors.Wrap(err, "Failed to parse origin port")
-		}
-	}
-	ctx := cmd.Context()
-	return fedServeInternal(ctx, ports)
+	defer cancel()
+	return egrp.Wait()
 }
 
-func fedServeInternal(ctx context.Context, ports modulePorts) error {
+func fedServeInternal(ctx context.Context, modules config.ServerType, egrp *errgroup.Group) (context.CancelFunc, error) {
+	ctx, shutdownCancel := context.WithCancel(ctx)
 
-	hostname := param.Server_Hostname.GetString()
+	engine, err := web_ui.GetEngine()
+	if err != nil {
+		return shutdownCancel, err
+	}
 
-	if ports.Registry != 0 {
-		err := initRegistry()
-		if err != nil {
-			return errors.Wrap(err, "Failure when initializing the registry")
-		}
+	if err = config.InitServer(ctx, modules); err != nil {
+		return shutdownCancel, errors.Wrap(err, "Failure when configuring the server")
+	}
 
-		ctx, cancel := context.WithCancel(context.Background())
-		viper.Set("Server.WebPort", ports.Registry)
+	if modules.IsEnabled(config.RegistryType) {
 
-		registryUrl := "https://" + hostname + ":" + fmt.Sprint(ports.Registry)
-		viper.Set("Federation.NamespaceURL", registryUrl)
+		viper.Set("Federation.RegistryURL", param.Server_ExternalWebUrl.GetString())
 
-		go func() {
-			err = serveRegistryInternal(ctx)
-			if err != nil {
-				return
-			}
-		}()
-		defer cancel()
-
-		err = server_utils.WaitUntilWorking("GET", param.Federation_NamespaceUrl.GetString()+"/api/v1.0/registry", "Registry", http.StatusOK)
-		if err != nil {
-			return err
+		if err = launchers.RegistryServe(ctx, engine, egrp); err != nil {
+			return shutdownCancel, err
 		}
 	}
 
-	if ports.Director != 0 {
-
-		err := initDirector()
-		if err != nil {
-			return errors.Wrap(err, "Failure when initializing for director")
-		}
+	if modules.IsEnabled(config.DirectorType) {
 
 		viper.Set("Director.DefaultResponse", "cache")
 
-		ctx, cancel := context.WithCancel(context.Background())
-		viper.Set("Server.WebPort", ports.Director)
+		viper.Set("Federation.DirectorURL", param.Server_ExternalWebUrl.GetString())
 
-		directorUrl := "https://" + hostname + ":" + fmt.Sprint(ports.Director)
-		viper.Set("Federation.DirectorURL", directorUrl)
-
-		go func() {
-			err = serveDirectorInternal(ctx)
-			if err != nil {
-				return
-			}
-		}()
-		defer cancel()
-
-		err = server_utils.WaitUntilWorking(
-			"GET",
-			param.Federation_DirectorUrl.GetString()+"/api/v1.0/director/listNamespaces",
-			"Director",
-			http.StatusOK,
-		)
-		if err != nil {
-			return err
+		if err = launchers.DirectorServe(ctx, engine, egrp); err != nil {
+			return shutdownCancel, err
 		}
 	}
 
-	if ports.Origin != 0 {
-		err := initOrigin()
-		if err != nil {
-			return errors.Wrap(err, "Failure when initializing for origin")
-		}
-
+	servers := make([]server_utils.XRootDServer, 0)
+	if modules.IsEnabled(config.OriginType) {
 		if param.Origin_Mode.GetString() != "posix" {
-			return errors.Errorf("Origin Mode must be set to posix, S3 is not currently supported.")
+			return shutdownCancel, errors.Errorf("Origin Mode must be set to posix, S3 is not currently supported.")
 		}
 
 		if param.Origin_ExportVolume.GetString() == "" {
-			return errors.Errorf("Origin.ExportVolume must be set in the parameters.yaml file.")
+			return shutdownCancel, errors.Errorf("Origin.ExportVolume must be set in the parameters.yaml file.")
 		}
 
-		ctx, cancel := context.WithCancel(context.Background())
-		viper.Set("Server.WebPort", 8444) //TODO remove hard coding once we add web support
-		viper.Set("Xrootd.Port", ports.Origin)
-
-		originUrl := "https://" + hostname + ":8444" //TODO remove hard coding once we add web support
-		issuerUrl := "https://" + hostname + ":" + fmt.Sprint(ports.Origin)
-		viper.Set("OriginURL", originUrl)
-		viper.Set("Server.IssuerUrl", issuerUrl)
-		viper.Set("Server.ExternalWebUrl", originUrl)
-
-		go func() {
-			err = serveOriginInternal(ctx)
-			if err != nil {
-				return
-			}
-		}()
-		defer cancel()
-
-		err = server_utils.WaitUntilWorking("GET", param.Origin_Url.GetString()+"/.well-known/openid-configuration", "Origin", http.StatusOK)
+		server, err := launchers.OriginServe(ctx, engine, egrp)
 		if err != nil {
-			return err
+			return shutdownCancel, err
+		}
+		servers = append(servers, server)
+
+		err = server_utils.WaitUntilWorking(ctx, "GET", param.Origin_Url.GetString()+"/.well-known/openid-configuration", "Origin", http.StatusOK)
+		if err != nil {
+			return shutdownCancel, err
 		}
 	}
 
-	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
-	sig := <-sigs
-	_ = sig
+	log.Info("Starting web engine...")
+	egrp.Go(func() error {
+		if err := web_ui.RunEngine(ctx, engine, egrp); err != nil {
+			log.Errorln("Failure when running the web engine:", err)
+			shutdownCancel()
+			return err
+		}
+		log.Info("Web engine has shutdown")
+		shutdownCancel()
+		return nil
+	})
 
-	return nil
+	log.Debug("Finishing origin server configuration")
+	if err = launchers.OriginServeFinish(ctx, egrp); err != nil {
+		return shutdownCancel, err
+	}
+
+	log.Debug("Launching periodic advertise")
+	if err := server_ui.LaunchPeriodicAdvertise(ctx, egrp, servers); err != nil {
+		return shutdownCancel, err
+	}
+
+	if param.Server_EnableUI.GetBool() {
+		log.Info("Starting web login...")
+		egrp.Go(func() error { return web_ui.InitServerWebLogin(ctx) })
+	}
+
+	egrp.Go(func() error {
+		log.Debug("Will shutdown process on signal")
+		sigs := make(chan os.Signal, 1)
+		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+		select {
+		case sig := <-sigs:
+			log.Debugf("Received signal %v; will shutdown process", sig)
+			shutdownCancel()
+			return errors.New("Federation process has been cancelled")
+		case <-ctx.Done():
+			return nil
+		}
+	})
+
+	return shutdownCancel, nil
 }

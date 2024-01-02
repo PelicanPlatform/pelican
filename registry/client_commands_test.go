@@ -19,6 +19,7 @@
 package registry
 
 import (
+	"context"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -26,22 +27,24 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/spf13/viper"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func registryMockup(t *testing.T, testName string) *httptest.Server {
+func registryMockup(ctx context.Context, t *testing.T, testName string) *httptest.Server {
+
 	issuerTempDir := filepath.Join(t.TempDir(), testName)
 
 	ikey := filepath.Join(issuerTempDir, "issuer.jwk")
 	viper.Set("IssuerKey", ikey)
 	viper.Set("Registry.DbLocation", filepath.Join(issuerTempDir, "test.sql"))
-	err := config.InitServer(config.RegistryType)
+	err := config.InitServer(ctx, config.RegistryType)
 	require.NoError(t, err)
 
-	err = InitializeDB()
+	err = InitializeDB(ctx)
 	require.NoError(t, err)
 
 	gin.SetMode(gin.TestMode)
@@ -57,11 +60,16 @@ func registryMockup(t *testing.T, testName string) *httptest.Server {
 }
 
 func TestServeNamespaceRegistry(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
 	viper.Reset()
 
-	svr := registryMockup(t, "serveregistry")
+	svr := registryMockup(ctx, t, "serveregistry")
 	defer func() {
-		ShutdownDB()
+		err := ShutdownDB()
+		assert.NoError(t, err)
 		svr.CloseClientConnections()
 		svr.Close()
 	}()
@@ -136,19 +144,24 @@ func TestServeNamespaceRegistry(t *testing.T) {
 }
 
 func TestRegistryKeyChainingOSDF(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
 	viper.Reset()
 	_ = config.SetPreferredPrefix("OSDF")
 	// On by default, but just to make things explicit
 	viper.Set("Registry.RequireKeyChaining", true)
 
-	registrySvr := registryMockup(t, "OSDFkeychaining")
+	registrySvr := registryMockup(ctx, t, "OSDFkeychaining")
 	topoSvr := topologyMockup(t, []string{"/topo/foo"})
 	viper.Set("Federation.TopologyNamespaceURL", topoSvr.URL)
 	err := PopulateTopology()
 	require.NoError(t, err)
 
 	defer func() {
-		ShutdownDB()
+		err := ShutdownDB()
+		assert.NoError(t, err)
 		registrySvr.CloseClientConnections()
 		registrySvr.Close()
 		topoSvr.CloseClientConnections()
@@ -212,13 +225,18 @@ func TestRegistryKeyChainingOSDF(t *testing.T) {
 }
 
 func TestRegistryKeyChaining(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
 	viper.Reset()
 	// On by default, but just to make things explicit
 	viper.Set("Registry.RequireKeyChaining", true)
 
-	registrySvr := registryMockup(t, "keychaining")
+	registrySvr := registryMockup(ctx, t, "keychaining")
 	defer func() {
-		ShutdownDB()
+		err := ShutdownDB()
+		assert.NoError(t, err)
 		registrySvr.CloseClientConnections()
 		registrySvr.Close()
 	}()
