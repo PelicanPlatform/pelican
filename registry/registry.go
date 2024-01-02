@@ -105,6 +105,13 @@ type checkStatusRes struct {
 }
 
 // Various auxiliary functions used for client-server security handshakes
+type NamespaceConfig struct {
+	JwksUri string `json:"jwks_uri"`
+}
+
+/*
+Various auxiliary functions used for client-server security handshakes
+*/
 type registrationData struct {
 	ClientNonce     string `json:"client_nonce"`
 	ClientPayload   string `json:"client_payload"`
@@ -697,10 +704,44 @@ func wildcardHandler(ctx *gin.Context) {
 		}
 		ctx.JSON(http.StatusOK, jwks)
 		return
-	}
+	} else if strings.HasSuffix(path, "/.well-known/openid-configuration") {
+		// Check that the namespace exists before constructing config JSON
+		prefix := strings.TrimSuffix(path, "/.well-known/openid-configuration")
+		exists, err := namespaceExists(prefix)
+		if err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Server encountered an error while checking if the prefix exists"})
+			log.Errorf("Error while checking for existence of prefix %s: %v", prefix, err)
+			return
+		}
+		if !exists {
+			ctx.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("The requested prefix %s does not exist in the registry's database", prefix)})
+		}
+		// Construct the openid-configuration JSON and return to the requester
+		// For a given namespace "foo", the jwks should be located at <registry url>/api/v1.0/registry/foo/.well-known/issuer.jwks
+		configUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
+		if err != nil {
+			log.Errorf("Failed to parse configured external web URL while constructing namespace jwks location: %v", err)
+			return
+		}
 
-	// No match found, return 404
-	ctx.String(http.StatusNotFound, "404 Not Found")
+		path := strings.TrimSuffix(path, "/openid-configuration")
+		configUrl.Path, err = url.JoinPath("api", "v1.0", "registry", path, "issuer.jwks")
+		if err != nil {
+			log.Errorf("Failed to construct namespace jwks URL: %v", err)
+			return
+		}
+
+		nsCfg := NamespaceConfig{
+			JwksUri: configUrl.String(),
+		}
+
+		ctx.JSON(http.StatusOK, nsCfg)
+		return
+	} else {
+
+		ctx.String(http.StatusNotFound, "404 Page not found")
+		return
+	}
 }
 
 // Check if a namespace prefix exists and its public key matches the registry record

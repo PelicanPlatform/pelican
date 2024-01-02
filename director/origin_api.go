@@ -34,12 +34,13 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
+	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
+
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/utils"
-	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 )
 
 type (
@@ -126,7 +127,7 @@ func CreateAdvertiseToken(namespace string) (string, error) {
 	// TODO: Need to come back and carefully consider a few naming practices.
 	//       Here, issuerUrl is actually the registry database url, and not
 	//       the token issuer url for this namespace
-	issuerUrl, err := GetRegistryIssuerURL(namespace)
+	issuerUrl, err := GetNSIssuerURL(namespace)
 	if err != nil {
 		return "", err
 	}
@@ -170,7 +171,7 @@ func CreateAdvertiseToken(namespace string) (string, error) {
 // see if the entity is authorized to advertise an origin for the
 // namespace
 func VerifyAdvertiseToken(ctx context.Context, token, namespace string) (bool, error) {
-	issuerUrl, err := GetRegistryIssuerURL(namespace)
+	issuerUrl, err := GetNSIssuerURL(namespace)
 	if err != nil {
 		return false, err
 	}
@@ -323,18 +324,49 @@ func VerifyDirectorTestReportToken(strToken string) (bool, error) {
 	return false, nil
 }
 
-func GetRegistryIssuerURL(prefix string) (string, error) {
-	namespace_url_string := param.Federation_RegistryUrl.GetString()
-	if namespace_url_string == "" {
-		return "", errors.New("Namespace URL is not set")
+// For a given prefix, get the url of the issuer/public key from the registry
+// This works by looking up the namespace-configuration json for the namespace
+// and grabbing the value corresponding to the "jwks_uri" key.
+func GetNSIssuerURL(prefix string) (string, error) {
+	if prefix == "" || !strings.HasPrefix(prefix, "/") {
+		return "", errors.New(fmt.Sprintf("the prefix \"%s\" is invalid", prefix))
 	}
-	namespace_url, err := url.Parse(namespace_url_string)
+	registryUrlStr := param.Federation_RegistryUrl.GetString()
+	if registryUrlStr == "" {
+		return "", errors.New("federation registry URL is not set and was not discovered")
+	}
+	registryUrl, err := url.Parse(registryUrlStr)
 	if err != nil {
 		return "", err
 	}
-	namespace_url.Path, err = url.JoinPath(namespace_url.Path, "api", "v1.0", "registry", prefix, ".well-known", "issuer.jwks")
+
+	registryUrl.Path, err = url.JoinPath(registryUrl.Path, "api", "v1.0", "registry", prefix, ".well-known", "openid-configuration")
 	if err != nil {
-		return "", err
+		return "", errors.Wrapf(err, "failed to construct namespace-configuration lookup URL for prefix %s", prefix)
 	}
-	return namespace_url.String(), nil
+
+	// Get/parse the namespace-configuration JSON to lookup key location
+	client := &http.Client{Transport: config.GetTransport()}
+	originConfig, err := client.Get(registryUrl.String())
+	if err != nil {
+		return "", errors.Wrapf(err, "failed to lookup namespace configuration for prefix %s", prefix)
+	}
+	defer originConfig.Body.Close()
+
+	body, err := io.ReadAll(originConfig.Body)
+	if err != nil {
+		return "", errors.Wrapf(err, "failed to read response body from %s", registryUrl.String())
+	}
+
+	var originCfgMap map[string]string
+	err = json.Unmarshal(body, &originCfgMap)
+	if err != nil {
+		return "", errors.Wrapf(err, "failed to unmarshal namespace configuration for prefix %s", prefix)
+	}
+
+	if keyLoc, ok := originCfgMap["jwks_uri"]; ok {
+		return keyLoc, nil
+	} else {
+		return "", errors.New(fmt.Sprintf("no key found in namespace configuration for prefix %s", prefix))
+	}
 }
