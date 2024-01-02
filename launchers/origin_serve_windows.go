@@ -22,12 +22,17 @@ package launchers
 
 import (
 	"context"
-	"sync"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pkg/errors"
+	"golang.org/x/sync/errgroup"
 )
 
-func OriginServe(context.Context, *gin.Engine, *sync.WaitGroup) error {
+func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) (server_utils.XRootDServer, error) {
+	return nil, errors.New("Origin module is not supported on Windows")
+}
+
+func OriginServeFinish(ctx context.Context, egrp *errgroup.Group) error {
 	return errors.New("Origin module is not supported on Windows")
 }
