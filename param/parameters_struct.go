@@ -110,7 +110,9 @@ type config struct {
 		Token string
 	}
 	Registry struct {
+		AdminUsers []string
 		DbLocation string
+		Institutions interface{}
 		RequireKeyChaining bool
 	}
 	Server struct {

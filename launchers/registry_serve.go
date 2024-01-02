@@ -60,9 +60,12 @@ func RegistryServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 	}
 
 	rootRouterGroup := engine.Group("/")
-	// Call out to registry to establish routes for the gin engine
-	registry.RegisterRegistryRoutes(rootRouterGroup)
-	registry.RegisterRegistryWebAPI(rootRouterGroup)
+	// Register routes for server/Pelican client facing APIs
+	registry.RegisterRegistryAPI(rootRouterGroup)
+	// Register routes for APIs to registry Web UI
+	if err := registry.RegisterRegistryWebAPI(rootRouterGroup); err != nil {
+		return err
+	}
 
 	egrp.Go(func() error {
 		<-ctx.Done()

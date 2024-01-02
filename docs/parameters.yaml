@@ -562,6 +562,33 @@ type: bool
 default: true
 components: ["nsregistry"]
 ---
+name: Registry.AdminUsers
+description: >-
+  A string slice of "subject" claim of users to give admin permission for registry UI.
+
+  The "subject" claim should be the "CILogon User Identifier" from CILogon user page: https://cilogon.org/
+type: stringSlice
+default: []
+components: ["nsregistry"]
+---
+name: Registry.Institutions
+description: >-
+  A array of institution objects available to register. Users can only select from this list
+  when they register a new namespace. Each object has `name` and `id` field where
+  `name` is a human-readable name for the institution and `id` is a unique identifier
+  for the institution. For Pelican running in OSDF alias, the `id` will be OSG ID.
+
+  For example:
+
+  ```
+  - name: University of Wisconsin - Madison
+    id: https://osg-htc.org/iid/01y2jtd41
+  ```
+
+type: object
+default: none
+components: ["nsregistry"]
+---
 ############################
 #   Server-level configs   #
 ############################
@@ -681,7 +708,7 @@ components: ["origin", "director", "nsregistry"]
 name: Server.IssuerJwks
 description: >-
   A filepath indicating where the server's public JSON web keyset can be found.
-type: string
+type: filename
 default: none
 components: ["origin", "director", "nsregistry"]
 ---
@@ -710,7 +737,8 @@ name: Server.SessionSecretFile
 description: >-
   The filepath to the secret for encrypt/decrypt session data for Pelican web UI to initiate a session cookie
 
-  This is only used for sending redirect request for OAuth2 authentication flow as of 11/22/2023
+  This is used for sending redirect request for OAuth2 authentication follow.
+  This is also used for CSRF auth key.
 type: filename
 default: $ConfigBase/session-secret
   The default content of the file is the hash of the concatenation of "pelican" and the DER form of ${IssuerKey}
@@ -903,7 +931,7 @@ name: OIDC.ClientRedirectHostname
 description: >-
   The hostname for the OIDC client redirect URL that the OIDC provider will redirect to after the user is authenticated
 
-  For development use only. Useful when developing in a container and you want to expose localhost 
+  For development use only. Useful when developing in a container and you want to expose localhost
   instead of container hostname to your OAuth provider
 type: string
 default: none

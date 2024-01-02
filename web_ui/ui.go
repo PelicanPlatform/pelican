@@ -143,7 +143,7 @@ func configureWebResource(engine *gin.Engine) error {
 
 // Configure common endpoint available to all server web UI which are located at /api/v1.0/*
 func configureCommonEndpoints(engine *gin.Engine) error {
-	engine.GET("/api/v1.0/config", authHandler, getConfigValues)
+	engine.GET("/api/v1.0/config", AuthHandler, getConfigValues)
 
 	return nil
 }
@@ -156,7 +156,7 @@ func configureMetrics(ctx context.Context, engine *gin.Engine) error {
 	prometheusMonitor := ginprometheus.NewPrometheus("gin")
 	prometheusMonitor.Use(engine)
 
-	engine.GET("/api/v1.0/health", authHandler, func(ctx *gin.Context) {
+	engine.GET("/api/v1.0/health", AuthHandler, func(ctx *gin.Context) {
 		healthStatus := metrics.GetHealthStatus()
 		ctx.JSON(http.StatusOK, healthStatus)
 	})
