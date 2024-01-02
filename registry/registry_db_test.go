@@ -247,8 +247,8 @@ func TestAddNamespace(t *testing.T) {
 		assert.Equal(t, mockNs.Prefix, got[0].Prefix)
 		// We can do this becuase we pass the pointer of mockNs to addNamespce which
 		// then modify the fields and insert into database
-		assert.Equal(t, mockNs.AdminMetadata.CreatedAt.UTC(), got[0].AdminMetadata.CreatedAt)
-		assert.Equal(t, mockNs.AdminMetadata.UpdatedAt.UTC(), got[0].AdminMetadata.UpdatedAt)
+		assert.Equal(t, mockNs.AdminMetadata.CreatedAt.Unix(), got[0].AdminMetadata.CreatedAt.Unix())
+		assert.Equal(t, mockNs.AdminMetadata.UpdatedAt.Unix(), got[0].AdminMetadata.UpdatedAt.Unix())
 		assert.Equal(t, mockNs.AdminMetadata.Status, got[0].AdminMetadata.Status)
 	})
 
@@ -264,12 +264,12 @@ func TestAddNamespace(t *testing.T) {
 		require.Equal(t, 1, len(got))
 		assert.Equal(t, mockNs.Prefix, got[0].Prefix)
 
-		assert.NotEqual(t, mockCreateAt.UTC(), mockNs.AdminMetadata.CreatedAt.UTC())
-		assert.NotEqual(t, mockUpdatedAt.UTC(), mockNs.AdminMetadata.UpdatedAt.UTC())
+		assert.NotEqual(t, mockCreateAt.Unix(), mockNs.AdminMetadata.CreatedAt.Unix())
+		assert.NotEqual(t, mockUpdatedAt.Unix(), mockNs.AdminMetadata.UpdatedAt.Unix())
 		// We can do this becuase we pass the pointer of mockNs to addNamespce which
 		// then modify the fields and insert into database
-		assert.Equal(t, mockNs.AdminMetadata.CreatedAt.UTC(), got[0].AdminMetadata.CreatedAt)
-		assert.Equal(t, mockNs.AdminMetadata.UpdatedAt.UTC(), got[0].AdminMetadata.UpdatedAt)
+		assert.Equal(t, mockNs.AdminMetadata.CreatedAt.Unix(), got[0].AdminMetadata.CreatedAt.Unix())
+		assert.Equal(t, mockNs.AdminMetadata.UpdatedAt.Unix(), got[0].AdminMetadata.UpdatedAt.Unix())
 		assert.Equal(t, mockNs.AdminMetadata.Status, got[0].AdminMetadata.Status)
 	})
 
@@ -325,12 +325,12 @@ func TestUpdateNamespace(t *testing.T) {
 		finalNs := finalNss[0]
 		assert.Equal(t, mockNs.Prefix, finalNs.Prefix)
 		assert.Equal(t, mockNs.AdminMetadata.UserID, finalNs.AdminMetadata.UserID)
-		assert.Equal(t, mockNs.AdminMetadata.CreatedAt.UTC(), finalNs.AdminMetadata.CreatedAt)
+		assert.Equal(t, mockNs.AdminMetadata.CreatedAt.Unix(), finalNs.AdminMetadata.CreatedAt.Unix())
 		assert.Equal(t, mockNs.AdminMetadata.Status, finalNs.AdminMetadata.Status)
-		assert.Equal(t, mockNs.AdminMetadata.ApprovedAt.UTC(), finalNs.AdminMetadata.ApprovedAt)
+		assert.Equal(t, mockNs.AdminMetadata.ApprovedAt.Unix(), finalNs.AdminMetadata.ApprovedAt.Unix())
 		assert.Equal(t, mockNs.AdminMetadata.ApproverID, finalNs.AdminMetadata.ApproverID)
 		// DB first changes initialNs.AdminMetadata.UpdatedAt then commit
-		assert.Equal(t, initialNs.AdminMetadata.UpdatedAt.UTC(), finalNs.AdminMetadata.UpdatedAt)
+		assert.Equal(t, initialNs.AdminMetadata.UpdatedAt.Unix(), finalNs.AdminMetadata.UpdatedAt.Unix())
 	})
 }
 
