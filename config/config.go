@@ -38,6 +38,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/go-playground/validator/v10"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -117,10 +118,17 @@ var (
 	transport     *http.Transport
 	onceTransport sync.Once
 
+	// Global struct validator
+	validate *validator.Validate
+
 	// A variable indicating enabled Pelican servers in the current process
 	enabledServers ServerType
 	setServerOnce  sync.Once
 )
+
+func init() {
+	validate = validator.New(validator.WithRequiredStructEnabled())
+}
 
 // Set sets a list of newServers to ServerType instance
 func (sType *ServerType) SetList(newServers []ServerType) {
@@ -427,6 +435,11 @@ func GetTransport() *http.Transport {
 	return transport
 }
 
+// Get singleton global validte method for field validation
+func GetValidate() *validator.Validate {
+	return validate
+}
+
 func InitConfig() {
 	viper.SetConfigType("yaml")
 	// 1) Set up defaults.yaml
@@ -548,6 +561,7 @@ func InitServer(enabledServices ServerType) error {
 	viper.SetDefault("IssuerKey", filepath.Join(configDir, "issuer.jwk"))
 	viper.SetDefault("Server.UIPasswordFile", filepath.Join(configDir, "server-web-passwd"))
 	viper.SetDefault("Server.UIActivationCodeFile", filepath.Join(configDir, "server-web-activation-code"))
+	viper.SetDefault("Server.SessionSecretFile", filepath.Join(configDir, "session-secret"))
 	viper.SetDefault("OIDC.ClientIDFile", filepath.Join(configDir, "oidc-client-id"))
 	viper.SetDefault("OIDC.ClientSecretFile", filepath.Join(configDir, "oidc-client-secret"))
 	viper.SetDefault("Cache.ExportLocation", "/")
@@ -621,8 +635,6 @@ func InitServer(enabledServices ServerType) error {
 		return errors.Wrap(err, fmt.Sprint("Invalid Server.ExternalWebUrl: ", externalAddressStr))
 	}
 
-	setupTransport()
-
 	tokenRefreshInterval := param.Monitoring_TokenRefreshInterval.GetDuration()
 	tokenExpiresIn := param.Monitoring_TokenExpiresIn.GetDuration()
 
@@ -653,14 +665,17 @@ func InitServer(enabledServices ServerType) error {
 		return err
 	}
 
-	// Generate the session cookie secret and save it as the default value
-	err = GenerateSessionSecret()
-	if err != nil {
+	// Generate the session secret and save it as the default value
+	if err := GenerateSessionSecret(); err != nil {
 		return err
 	}
 
 	// After we know we have the certs we need, call setupTransport (which uses those certs for its TLSConfig)
 	setupTransport()
+
+	// Setup CSRF middleware. To use it, you need to add this middleware to your chain
+	// of http handlers by calling config.GetCSRFHandler()
+	setupCSRFHandler()
 
 	// Set up the server's issuer URL so we can access that data wherever we need to find keys and whatnot
 	// This populates Server.IssuerUrl, and can be safely fetched using server_utils.GetServerIssuerURL()

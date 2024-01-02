@@ -141,6 +141,7 @@ var (
 	Issuer_GroupRequirements = StringSliceParam{"Issuer.GroupRequirements"}
 	Monitoring_AggregatePrefixes = StringSliceParam{"Monitoring.AggregatePrefixes"}
 	Origin_ScitokensRestrictedPaths = StringSliceParam{"Origin.ScitokensRestrictedPaths"}
+	Registry_AdminUsers = StringSliceParam{"Registry.AdminUsers"}
 )
 
 var (
@@ -194,4 +195,5 @@ var (
 var (
 	Issuer_AuthorizationTemplates = ObjectParam{"Issuer.AuthorizationTemplates"}
 	Issuer_OIDCAuthenticationRequirements = ObjectParam{"Issuer.OIDCAuthenticationRequirements"}
+	Registry_Institutions = ObjectParam{"Registry.Institutions"}
 )

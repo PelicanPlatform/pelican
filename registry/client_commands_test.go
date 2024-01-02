@@ -41,14 +41,13 @@ func registryMockup(t *testing.T, testName string) *httptest.Server {
 	err := config.InitServer(config.RegistryType)
 	require.NoError(t, err)
 
-	err = InitializeDB()
-	require.NoError(t, err)
+	setupMockRegistryDB(t)
 
 	gin.SetMode(gin.TestMode)
 	engine := gin.Default()
 
 	//Configure registry
-	RegisterRegistryRoutes(engine.Group("/"))
+	RegisterRegistryAPI(engine.Group("/"))
 
 	//Set up a server to use for testing
 	svr := httptest.NewServer(engine)
