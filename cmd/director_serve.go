@@ -102,6 +102,13 @@ func serveDirector( /*cmd*/ *cobra.Command /*args*/, []string) error {
 
 	go web_ui.InitServerWebLogin()
 
+	// Only discover federation when we run in OSDF mode; otherwise, the director is expected to be the federation
+	if config.GetPreferredPrefix() == "OSDF" {
+		if err := config.DiscoverFederation(); err != nil {
+			return err
+		}
+	}
+
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 	sig := <-sigs

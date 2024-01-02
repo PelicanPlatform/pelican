@@ -50,7 +50,6 @@ type (
 	}
 	AuthChecker interface {
 		FederationCheck(ctx *gin.Context, token string, expectedScopes []string, allScopes bool) error
-		DirectorCheck(ctx *gin.Context, token string, expectedScopes []string, allScopes bool) error
 		IssuerCheck(ctx *gin.Context, token string, expectedScopes []string, allScopes bool) error
 	}
 	AuthCheckImpl     struct{}
@@ -68,7 +67,6 @@ const (
 
 const (
 	Federation TokenIssuer = iota
-	Director
 	Issuer
 )
 
@@ -135,6 +133,9 @@ func createScopeValidator(expectedScopes []string, all bool) jwt.ValidatorFunc {
 	})
 }
 
+// [Deprecated] This function is expected to be removed very soon, after
+// https://github.com/PelicanPlatform/pelican/issues/559 is implemented
+//
 // Return director's public JWK for token verification. This function can be called
 // on any server (director/origin/registry) as long as the Federation_DirectorUrl is set
 //
@@ -198,8 +199,6 @@ func LoadDirectorPublicKey() (jwk.Key, error) {
 
 // Checks that the given token was signed by the federation jwk and also checks that the token has the expected scope
 func (a AuthCheckImpl) FederationCheck(c *gin.Context, strToken string, expectedScopes []string, allScopes bool) error {
-	var bKey *jwk.Key
-
 	fedURL := param.Federation_DiscoveryUrl.GetString()
 	token, err := jwt.Parse([]byte(strToken), jwt.WithVerify(false))
 
@@ -225,17 +224,8 @@ func (a AuthCheckImpl) FederationCheck(c *gin.Context, strToken string, expected
 	if err != nil {
 		return errors.Wrap(err, "Failed to get federation's public JWKS")
 	}
-	key, ok := jwks.Key(0)
-	if !ok {
-		return errors.Wrap(err, "Failed to get the first key of federation's public JWKS")
-	}
-	bKey = &key
-	var raw ecdsa.PrivateKey
-	if err = (*bKey).Raw(&raw); err != nil {
-		return errors.Wrap(err, "Failed to get raw key of the federation JWK")
-	}
 
-	parsed, err := jwt.Parse([]byte(strToken), jwt.WithKey(jwa.ES256, raw.PublicKey))
+	parsed, err := jwt.Parse([]byte(strToken), jwt.WithKeySet(jwks))
 
 	if err != nil {
 		return errors.Wrap(err, "Failed to verify JWT by federation's key")
@@ -292,39 +282,6 @@ func (a AuthCheckImpl) IssuerCheck(c *gin.Context, strToken string, expectedScop
 	}
 
 	c.Set("User", "Origin")
-	return nil
-}
-
-// Check if a JWT string was issued by the director and has the correct scope
-func (a AuthCheckImpl) DirectorCheck(c *gin.Context, strToken string, expectedScopes []string, allScopes bool) error {
-	directorURL := param.Federation_DirectorUrl.GetString()
-	if directorURL == "" {
-		return errors.New("Failed to check director; director URL is empty")
-	}
-	token, err := jwt.Parse([]byte(strToken), jwt.WithVerify(false))
-	if err != nil {
-		return errors.Wrap(err, "Invalid JWT")
-	}
-
-	if directorURL != token.Issuer() {
-		return errors.New(fmt.Sprint("Issuer is not a director: ", token.Issuer()))
-	}
-
-	key, err := LoadDirectorPublicKey()
-	if err != nil {
-		return errors.Wrap(err, "Failed to load director's public JWK")
-	}
-	tok, err := jwt.Parse([]byte(strToken), jwt.WithKey(jwa.ES256, key), jwt.WithValidate(true))
-	if err != nil {
-		return errors.Wrap(err, "Failed to verify JWT by director's key")
-	}
-
-	scopeValidator := createScopeValidator(expectedScopes, allScopes)
-	if err = jwt.Validate(tok, jwt.WithValidator(scopeValidator)); err != nil {
-		return errors.Wrap(err, "Failed to verify the scope of the token")
-	}
-
-	c.Set("User", "Director")
 	return nil
 }
 
@@ -391,16 +348,6 @@ func CheckAnyAuth(ctx *gin.Context, authOption AuthOption) bool {
 			if _, exists := ctx.Get("User"); err != nil || !exists {
 				errMsg += fmt.Sprintln("Token validation failed with federation issuer: ", err)
 				log.Debug("Token validation failed with federation issuer: ", err)
-				break
-			} else {
-				log.Debug("Token validation succeeded with federation issuer")
-				return exists
-			}
-		case Director:
-			err := authChecker.DirectorCheck(ctx, token, authOption.Scopes, authOption.AllScopes)
-			if _, exists := ctx.Get("User"); err != nil || !exists {
-				errMsg += fmt.Sprintln("Token validation failed with director issuer: ", err)
-				log.Debug("Token validation failed with director issuer: ", err)
 				break
 			} else {
 				log.Debug("Token validation succeeded with federation issuer")
