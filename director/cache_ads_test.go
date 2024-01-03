@@ -215,6 +215,8 @@ func TestConfigCacheEviction(t *testing.T) {
 		ConfigTTLCache(ctx, egrp)
 		defer func() {
 			shutdownCancel()
+			err := egrp.Wait()
+			assert.NoError(t, err)
 		}()
 
 		ctx, cancelFunc := context.WithDeadline(ctx, time.Now().Add(time.Second*5))
