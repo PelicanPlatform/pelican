@@ -23,7 +23,7 @@ import (
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
-// For these tests, we only need to lookup key locations. Create a dummy registry that only
+// For these tests, we only need to lookup key locations. Create a dummy registry that only returns
 // the jwks_uri location for the given key. Once a server is instantiated, it will only return
 // locations for the provided prefix. To change prefixes, create a new registry mockup.
 func registryMockup(t *testing.T, prefix string) *httptest.Server {
