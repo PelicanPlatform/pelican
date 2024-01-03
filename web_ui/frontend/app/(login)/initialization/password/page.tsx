@@ -38,28 +38,33 @@ export default function Home() {
 
         setLoading(true)
 
-        let response = await fetch("/api/v1.0/auth/resetLogin", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                "password": password
+        try {
+            let response = await fetch("/api/v1.0/auth/resetLogin", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    "password": password
+                })
             })
-        })
 
-        if(response.ok){
-            router.push("/")
-        } else {
-            try {
-                let data = await response.json()
+            if(response.ok){
+                router.push("/")
+            } else {
+                try {
+                    let data = await response.json()
 
-                setLoading(false)
-                setError(response.status + ": " + data['error'])
-            } catch {
-                setLoading(false)
-                setError(response.status + ": " + response.statusText)
+                    setLoading(false)
+                    setError(response.status + ": " + data['error'])
+                } catch {
+                    setLoading(false)
+                    setError(response.status + ": " + response.statusText)
+                }
             }
+        } catch {
+            setLoading(false)
+            setError("Could not connect to server")
         }
     }
 

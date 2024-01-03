@@ -46,29 +46,35 @@ export default function Home() {
 
         setLoading(true)
 
-        let response = await fetch("/api/v1.0/auth/initLogin", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                "code": code
+        try {
+            let response = await fetch("/api/v1.0/auth/initLogin", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    "code": code
+                })
             })
-        })
 
-        if(response.ok){
-            router.push("../password/index.html")
-        } else {
-            try {
-                let data = await response.json()
+            if(response.ok){
+                router.push("../password/index.html")
+            } else {
+                try {
+                    let data = await response.json()
 
-                setLoading(false)
-                setError(response.status + ": " + data['error'])
-            } catch {
-                setLoading(false)
-                setError(response.status + ": " + response.statusText)
+                    setLoading(false)
+                    setError(response.status + ": " + data['error'])
+                } catch {
+                    setLoading(false)
+                    setError(response.status + ": " + response.statusText)
+                }
             }
+        } catch {
+            setLoading(false)
+            setError("Could not connect to server")
         }
+
     }
 
     function onSubmit(e: React.FormEvent<HTMLFormElement>) {
