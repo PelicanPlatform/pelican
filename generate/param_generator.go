@@ -408,11 +408,7 @@ import (
 	"time"
 )
 
-<<<<<<< HEAD
 {{.GeneratedConfig}}
 
 {{.GeneratedConfigWithType}}
-=======
-{{.GeneratedCode -}}
->>>>>>> 2f1315d2974d91dba96e39a198ada6e9edbfc223
 `))
