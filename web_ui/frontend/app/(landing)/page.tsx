@@ -18,13 +18,8 @@
 
 "use client"
 
-import RateGraph from "@/components/graphs/RateGraph";
-import StatusBox from "@/components/StatusBox";
-
-import {TimeDuration} from "@/components/graphs/prometheus";
-
+import React, {useState, useEffect} from "react";
 import {Box, Container, Grid, Typography} from "@mui/material";
-import FederationOverview from "@/components/FederationOverview";
 import Link from "next/link";
 
 function TextCenteredBox({text} : {text: string}) {
@@ -48,14 +43,29 @@ function TextCenteredBox({text} : {text: string}) {
 
 export default function Home() {
 
-    const pelicanServices = ["origin", "director", "registry"]
+    const [enabledServers, setEnabledServers] = useState<string[]>([])
+
+    useEffect(() => {
+
+        const getEnabledServers = async () => {
+            try {
+                const res = await fetch("/api/v1.0/servers")
+                const data = await res.json()
+                setEnabledServers(data)
+            } catch {
+                setEnabledServers(["origin", "director", "registry"])
+            }
+        }
+
+        getEnabledServers()
+    }, []);
 
     return (
         <Box width={"100%"} pt={5}>
             <Container maxWidth={"xl"}>
                 <Typography pb={5} textAlign={"center"} variant={"h3"}>Pelican Services</Typography>
                 <Grid container justifyContent={"center"} spacing={2}>
-                    {pelicanServices.map((service) => {
+                    {enabledServers.map((service) => {
                         return (
                             <Grid key={service} item xs={2}>
                                 <Link href={`./${service}/index.html`}>

@@ -133,13 +133,18 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 	}
 
 	log.Debug("Finishing origin server configuration")
-	if err = OriginServeFinish(ctx, egrp); err != nil {
-		return shutdownCancel, err
+	if modules.IsEnabled(config.OriginType) {
+		if err = OriginServeFinish(ctx, egrp); err != nil {
+			return shutdownCancel, err
+		}
 	}
 
-	log.Debug("Launching periodic advertise")
-	if err := server_ui.LaunchPeriodicAdvertise(ctx, egrp, servers); err != nil {
-		return shutdownCancel, err
+	// Include cache here just in case, although we currently don't use launcher to launch cache
+	if modules.IsEnabled(config.OriginType) || modules.IsEnabled(config.CacheType) {
+		log.Debug("Launching periodic advertise")
+		if err := server_ui.LaunchPeriodicAdvertise(ctx, egrp, servers); err != nil {
+			return shutdownCancel, err
+		}
 	}
 
 	if param.Server_EnableUI.GetBool() {

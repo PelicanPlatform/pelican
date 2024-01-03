@@ -23,6 +23,7 @@ import (
 	"crypto/tls"
 	"embed"
 	"fmt"
+	"github.com/pelicanplatform/pelican/config"
 	"math/rand"
 	"mime"
 	"net"
@@ -58,13 +59,24 @@ func getConfigValues(ctx *gin.Context) {
 		ctx.JSON(401, gin.H{"error": "Authentication required to visit this API"})
 		return
 	}
-	config, err := param.GetUnmarshaledConfig()
+	rawConfig, err := param.UnmarshalConfig()
 	if err != nil {
-		ctx.JSON(500, gin.H{"error": "Failed to get the unmarshaled config"})
+		ctx.JSON(500, gin.H{"error": "Failed to get the unmarshaled rawConfig"})
+		return
+	}
+	configWithType := param.ConvertToConfigWithType(rawConfig)
+
+	ctx.JSON(200, configWithType)
+}
+
+func getEnabledServers(ctx *gin.Context) {
+	enabledServers := config.EnabledServers()
+	if len(enabledServers) == 0 {
+		ctx.JSON(500, gin.H{"error": "No enabled servers found"})
 		return
 	}
 
-	ctx.JSON(200, config)
+	ctx.JSON(200, enabledServers)
 }
 
 func configureWebResource(engine *gin.Engine) error {
@@ -118,6 +130,12 @@ func configureWebResource(engine *gin.Engine) error {
 			}
 		}
 
+		// If just one server is enabled, redirect to that server
+		if len(config.EnabledServers()) == 1 && path == "/index.html" {
+			ctx.Redirect(http.StatusFound, "/view/"+config.EnabledServers()[0]+"/index.html")
+			return
+		}
+
 		filePath := "frontend/out" + path
 		file, _ := webAssets.ReadFile(filePath)
 		ctx.Data(
@@ -144,6 +162,7 @@ func configureWebResource(engine *gin.Engine) error {
 // Configure common endpoint available to all server web UI which are located at /api/v1.0/*
 func configureCommonEndpoints(engine *gin.Engine) error {
 	engine.GET("/api/v1.0/config", AuthHandler, getConfigValues)
+	engine.GET("/api/v1.0/servers", getEnabledServers)
 
 	return nil
 }

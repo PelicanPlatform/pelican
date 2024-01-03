@@ -21,12 +21,15 @@
 package xrootd
 
 import (
+	"bufio"
 	"context"
 	_ "embed"
 	"fmt"
+	"io/fs"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/pelicanplatform/pelican/cache_ui"
@@ -65,7 +68,84 @@ var (
 
 	//go:embed resources/test-scitokens-cache-empty.cfg
 	cacheEmptyOutput string
+
+	sampleMultilineOutput = `foo \
+	bar
+	baz
+	abc \`
+
+	sampleMultilineOutputParsed = []string{"foo \tbar", "\tbaz", "\tabc "}
+
+	cacheAuthfileMultilineInput = `
+u * /user/ligo -rl \
+/Gluex rl \
+/NSG/PUBLIC rl \
+/VDC/PUBLIC rl`
+
+	cacheAuthfileOutput = "u * /.well-known lr /user/ligo -rl /Gluex rl /NSG/PUBLIC rl /VDC/PUBLIC rl\n"
+
+	// Actual authfile entries here are from the bug report #568
+	otherAuthfileEntries = `# DN: /CN=sc-origin.chtc.wisc.edu
+u 5a42185a.0 /chtc/PROTECTED/sc-origin lr
+# DN: /DC=org/DC=incommon/C=US/ST=California/O=University of California, San Diego/CN=osg-stash-sfu-computecanada-ca.nationalresearchplatform.org
+u 4ff08838.0 /chtc/PROTECTED/sc-origin lr
+# DN: /DC=org/DC=incommon/C=US/ST=Georgia/O=Georgia Institute of Technology/OU=Office of Information Technology/CN=osg-gftp2.pace.gatech.edu
+u 3af6a420.0 /chtc/PROTECTED/sc-origin lr
+`
+
+	mergedAuthfileEntries = otherAuthfileEntries + "u * /.well-known lr\n"
 )
+
+func TestAuthfileMultiline(t *testing.T) {
+	sc := bufio.NewScanner(strings.NewReader(sampleMultilineOutput))
+	sc.Split(ScanLinesWithCont)
+	idx := 0
+	for sc.Scan() {
+		require.Less(t, idx, len(sampleMultilineOutputParsed))
+		assert.Equal(t, string(sampleMultilineOutputParsed[idx]), sc.Text())
+		idx += 1
+	}
+	assert.Equal(t, idx, len(sampleMultilineOutputParsed))
+}
+
+func TestEmitAuthfile(t *testing.T) {
+	tests := []struct {
+		desc    string
+		authIn  string
+		authOut string
+	}{
+		{
+			desc:    "merge-multi-lines",
+			authIn:  cacheAuthfileMultilineInput,
+			authOut: cacheAuthfileOutput,
+		},
+		{
+			desc:    "merge-other-entries",
+			authIn:  otherAuthfileEntries,
+			authOut: mergedAuthfileEntries,
+		},
+	}
+	for _, testInput := range tests {
+		t.Run(testInput.desc, func(t *testing.T) {
+			dirName := t.TempDir()
+			viper.Reset()
+			viper.Set("Xrootd.Authfile", filepath.Join(dirName, "authfile"))
+			viper.Set("Xrootd.RunLocation", dirName)
+			server := &origin_ui.OriginServer{}
+
+			err := os.WriteFile(filepath.Join(dirName, "authfile"), []byte(testInput.authIn), fs.FileMode(0600))
+			require.NoError(t, err)
+
+			err = EmitAuthfile(server)
+			require.NoError(t, err)
+
+			contents, err := os.ReadFile(filepath.Join(dirName, "authfile-origin-generated"))
+			require.NoError(t, err)
+
+			assert.Equal(t, testInput.authOut, string(contents))
+		})
+	}
+}
 
 func TestEmitCfg(t *testing.T) {
 	dirname := t.TempDir()
@@ -268,7 +348,7 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 	cacheServer := &cache_ui.CacheServer{}
 	cacheServer.SetNamespaceAds(nsAds)
 
-	t.Run("MultiIssuer", cacheAuthTester(cacheServer, cacheSciOutput, "u * /p3 lr /p4/depth lr /p2_noauth lr "))
+	t.Run("MultiIssuer", cacheAuthTester(cacheServer, cacheSciOutput, "u * /p3 lr /p4/depth lr /p2_noauth lr \n"))
 
 	nsAds = []director.NamespaceAd{}
 	cacheServer.SetNamespaceAds(nsAds)

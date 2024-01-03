@@ -84,6 +84,7 @@ func TestFedServePosixOrigin(t *testing.T) {
 	viper.Set("Origin.EnableVoms", false)
 	viper.Set("TLSSkipVerify", true)
 	viper.Set("Server.EnableUI", false)
+	viper.Set("Registry.DbLocation", filepath.Join(t.TempDir(), "ns-registry.sqlite"))
 
 	err = config.InitServer(ctx, modules)
 	require.NoError(t, err)
