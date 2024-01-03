@@ -108,7 +108,7 @@ func CreateAdvertiseToken(namespace string) (string, error) {
 // Given a token and a location in the namespace to advertise in,
 // see if the entity is authorized to advertise an origin for the
 // namespace
-func VerifyAdvertiseToken(token, namespace string) (bool, error) {
+func VerifyAdvertiseToken(ctx context.Context, token, namespace string) (bool, error) {
 	issuerUrl, err := GetRegistryIssuerURL(namespace)
 	if err != nil {
 		return false, err
@@ -128,7 +128,6 @@ func VerifyAdvertiseToken(token, namespace string) (bool, error) {
 			}
 		}
 	}()
-	ctx := context.Background()
 	if ar == nil {
 		ar = jwk.NewCache(ctx)
 		client := &http.Client{Transport: config.GetTransport()}

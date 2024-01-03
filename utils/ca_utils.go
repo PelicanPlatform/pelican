@@ -19,6 +19,7 @@
 package utils
 
 import (
+	"context"
 	"crypto/x509"
 	"encoding/pem"
 	"io/fs"
@@ -28,9 +29,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
 )
 
 // Write out all the trusted CAs as a CA bundle on disk.  This is useful
@@ -82,21 +85,30 @@ func WriteCABundle(filename string) (int, error) {
 //
 // If we're on a platform (Mac, Windows) that does not provide a CA bundle, we return
 // a count of 0 and do not launch the go routine.
-func PeriodicWriteCABundle(filename string, sleepTime time.Duration) (count int, err error) {
+func LaunchPeriodicWriteCABundle(ctx context.Context, filename string, sleepTime time.Duration) (count int, err error) {
 	count, err = WriteCABundle(filename)
 	if err != nil || count == 0 {
 		return
 	}
 
-	go func() {
+	egrp, ok := ctx.Value(config.EgrpKey).(*errgroup.Group)
+	if !ok {
+		egrp = &errgroup.Group{}
+	}
+	egrp.Go(func() error {
+		ticker := time.NewTicker(sleepTime)
 		for {
-			time.Sleep(sleepTime)
-			_, err := WriteCABundle(filename)
-			if err != nil {
-				log.Warningln("Failure during periodic CA bundle update:", err)
+			select {
+			case <-ticker.C:
+				_, err := WriteCABundle(filename)
+				if err != nil {
+					log.Warningln("Failure during periodic CA bundle update:", err)
+				}
+			case <-ctx.Done():
+				return nil
 			}
 		}
-	}()
+	})
 
 	return
 }

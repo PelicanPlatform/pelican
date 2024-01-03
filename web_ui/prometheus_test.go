@@ -20,6 +20,7 @@ package web_ui
 
 import (
 	"bytes"
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -37,6 +38,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/prometheus/common/route"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
@@ -46,7 +48,10 @@ import (
 // Test the Prometheus query engine endpoint auth check with an server issuer token
 // set in cookie
 func TestPrometheusProtectionCookieAuth(t *testing.T) {
-	// Setup httptest recorder and context for the the unit test
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
 	viper.Reset()
 
 	av1 := route.New().WithPrefix("/api/v1.0/prometheus")
@@ -57,7 +62,7 @@ func TestPrometheusProtectionCookieAuth(t *testing.T) {
 	//Setup a private key
 	viper.Set("IssuerKey", kfile)
 	config.InitConfig()
-	err := config.InitServer(config.OriginType)
+	err := config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
 
 	w := httptest.NewRecorder()
@@ -122,6 +127,10 @@ func TestPrometheusProtectionCookieAuth(t *testing.T) {
 // to access the prometheus metrics. It then attempts to access the metrics with a token with an invalid scope.
 // It attempts to do so again with a token signed by a bad key. Both these are expected to fail.
 func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
 	viper.Reset()
 	viper.Set("Server.ExternalWebUrl", "https://test-origin.org:8444")
 
@@ -135,7 +144,7 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 	viper.Set("IssuerKey", kfile)
 
 	config.InitConfig()
-	err := config.InitServer(config.OriginType)
+	err := config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
 
 	issuerUrl := param.Server_ExternalWebUrl.GetString()

@@ -21,13 +21,13 @@ package director
 import (
 	"context"
 	"net/url"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 )
 
 func hasServerAdWithName(serverAds []ServerAd, name string) bool {
@@ -211,15 +211,15 @@ func TestConfigCacheEviction(t *testing.T) {
 	t.Run("evicted-origin-can-cancel-health-test", func(t *testing.T) {
 		// Start cache eviction
 		shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
-		var wg sync.WaitGroup
-		ConfigTTLCache(shutdownCtx, &wg)
-		wg.Add(1)
+		egrp, ctx := errgroup.WithContext(shutdownCtx)
+		ConfigTTLCache(ctx, egrp)
 		defer func() {
 			shutdownCancel()
-			wg.Wait()
+			err := egrp.Wait()
+			assert.NoError(t, err)
 		}()
 
-		ctx, cancelFunc := context.WithDeadline(context.Background(), time.Now().Add(time.Second*5))
+		ctx, cancelFunc := context.WithDeadline(ctx, time.Now().Add(time.Second*5))
 
 		func() {
 			serverAdMutex.Lock()
@@ -274,12 +274,12 @@ func TestServerAdsCacheEviction(t *testing.T) {
 	t.Run("evict-after-expire-time", func(t *testing.T) {
 		// Start cache eviction
 		shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
-		var wg sync.WaitGroup
-		ConfigTTLCache(shutdownCtx, &wg)
-		wg.Add(1)
+		egrp, ctx := errgroup.WithContext(shutdownCtx)
+		ConfigTTLCache(ctx, egrp)
 		defer func() {
 			shutdownCancel()
-			wg.Wait()
+			err := egrp.Wait()
+			assert.NoError(t, err)
 		}()
 
 		deletedChan := make(chan int)

@@ -19,12 +19,14 @@
 package utils
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -87,6 +89,10 @@ func TestVerifyCreateWLCG(t *testing.T) {
 }
 
 func TestCreateToken(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
 	// Some viper pre-requisites
 	viper.Reset()
 	viper.Set("IssuerUrl", "https://my-issuer.com")
@@ -94,7 +100,7 @@ func TestCreateToken(t *testing.T) {
 	kfile := filepath.Join(tDir, "testKey")
 	viper.Set("IssuerKey", kfile)
 	config.InitConfig()
-	err := config.InitServer(config.DirectorType)
+	err := config.InitServer(ctx, config.DirectorType)
 	require.NoError(t, err)
 
 	// Generate a private key to use for the test

@@ -506,9 +506,9 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 			AddError(err)
 			return 0, err
 		}
-		_, err = doWriteBack(source_url.Path, dest_url, ns, recursive)
+		uploadedBytes, err := doWriteBack(source_url.Path, dest_url, ns, recursive)
 		AddError(err)
-		return 0, err
+		return uploadedBytes, err
 	}
 
 	if dest_url.Scheme == "file" {

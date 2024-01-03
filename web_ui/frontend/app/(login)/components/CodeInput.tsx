@@ -18,11 +18,12 @@
 
 import {ChangeEvent, ClipboardEvent, KeyboardEvent, useRef} from "react";
 import {Grid, TextField} from "@mui/material";
-import {AppProps} from "next/app";
+
+export type Code = (number | undefined)[];
 
 interface CodeInputProps {
     length: number;
-    setCode: Function;
+    setCode: (code: Code) => void;
     submitFunction?: () => void;
 }
 
@@ -32,8 +33,8 @@ export default function CodeInput({length, setCode, submitFunction}: CodeInputPr
 
     /**
      * Set the code in the input blocks
-     * @param code: Array of digits to set
-     * @param offset: Offset to start setting the code at, if code is exact length this is set to 0
+     * @param code
+     * @param offset
      */
     function setInputs(code: number[], offset: number) {
 
@@ -54,8 +55,10 @@ export default function CodeInput({length, setCode, submitFunction}: CodeInputPr
     /**
      * Get the value of the input blocks
      */
-    function getValue() {
-        return Number(inputRefs.current.map(input => input!.value).join(""))
+    function getValue() : Code {
+        return inputRefs.current.map(input => {
+            return input!.value == "" ? undefined : Number(input!.value)
+        })
     }
 
     /**

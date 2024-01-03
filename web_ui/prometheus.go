@@ -22,12 +22,9 @@ import (
 	"math"
 	"net/http"
 	"net/url"
-	"os"
-	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/alecthomas/units"
@@ -147,7 +144,7 @@ func runtimeInfo() (api_v1.RuntimeInfo, error) {
 }
 
 // Configure director's Prometheus scraper to use HTTP service discovery for origins/caches
-func configDirectorPromScraper() (*config.ScrapeConfig, error) {
+func configDirectorPromScraper(ctx context.Context) (*config.ScrapeConfig, error) {
 	serverDiscoveryUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
 	if err != nil {
 		return nil, fmt.Errorf("parse external URL %v: %w", param.Server_ExternalWebUrl.GetString(), err)
@@ -168,7 +165,7 @@ func configDirectorPromScraper() (*config.ScrapeConfig, error) {
 	// This will cause the director to maintain a CA bundle, including the custom CA, at
 	// the given location.  Makes up for the fact we can't provide Prometheus with a transport
 	caBundle := filepath.Join(param.Monitoring_DataLocation.GetString(), "ca-bundle.crt")
-	caCount, err := utils.PeriodicWriteCABundle(caBundle, 2*time.Minute)
+	caCount, err := utils.LaunchPeriodicWriteCABundle(ctx, caBundle, 2*time.Minute)
 	if err != nil {
 		return nil, errors.Wrap(err, "Unable to generate CA bundle for prometheus")
 	}
@@ -245,10 +242,15 @@ func (a LogrusAdapter) Log(keyvals ...interface{}) error {
 			} else if key == "err" {
 				logErr, ok := val.(error)
 				if !ok {
-					a.Logger.Error("log: invalid error log message")
-					return errors.New("log: invalid error log message")
+					if logStr, ok := val.(string); ok {
+						msg = logStr
+					} else {
+						a.Logger.Errorf("prometheus log adapter: invalid incoming error log message (err-tagged key doesn't have an error object attached).  Error is %v; type %T", val, val)
+						return errors.New("log: invalid error log message")
+					}
+				} else {
+					msg = logErr.Error()
 				}
-				msg = logErr.Error()
 			} else {
 				fields[key] = val
 			}
@@ -273,7 +275,7 @@ func (a LogrusAdapter) Log(keyvals ...interface{}) error {
 	return nil
 }
 
-func ConfigureEmbeddedPrometheus(engine *gin.Engine) error {
+func ConfigureEmbeddedPrometheus(ctx context.Context, engine *gin.Engine) error {
 	// This is fine if each process has only one server enabled
 	// Since the "federation-in-the-box" feature won't include any web components
 	// we can assume that this is the only server to enable
@@ -374,7 +376,7 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine) error {
 
 	// Add origins/caches monitoring to director's prometheus instance
 	if isDirector {
-		dirPromScraperConfig, err := configDirectorPromScraper()
+		dirPromScraperConfig, err := configDirectorPromScraper(ctx)
 		if err != nil {
 			return err
 		}
@@ -587,19 +589,15 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine) error {
 	var g run.Group
 	{
 		// Termination handler.
-		term := make(chan os.Signal, 1)
-		signal.Notify(term, os.Interrupt, syscall.SIGTERM)
 		cancel := make(chan struct{})
 		g.Add(
 			func() error {
 				// Don't forget to release the reloadReady channel so that waiting blocks can exit normally.
 				select {
-				case <-term:
-					err := level.Warn(logger).Log("msg", "Received SIGTERM, exiting gracefully...")
+				case <-ctx.Done():
+					err := level.Warn(logger).Log("msg", "Received shutdown, exiting gracefully...")
 					_ = err
 					reloadReady.Close()
-				//case <-webHandler.Quit():
-				//	level.Warn(logger).Log("msg", "Received termination request via web service, exiting gracefully...")
 				case <-cancel:
 					reloadReady.Close()
 				}
@@ -607,7 +605,6 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine) error {
 			},
 			func(err error) {
 				close(cancel)
-				//webHandler.SetReady(false)
 				readyHandler.SetReady(false)
 			},
 		)
@@ -711,7 +708,7 @@ func ConfigureEmbeddedPrometheus(engine *gin.Engine) error {
 								}
 								// Index 0 is the default config for servers
 								// Create new director-scrap token & service discovery token
-								promCfg.ScrapeConfigs[1], err = configDirectorPromScraper()
+								promCfg.ScrapeConfigs[1], err = configDirectorPromScraper(ctx)
 								if err != nil {
 									return fmt.Errorf("Failed to generate token for director scraper when refresh it: %v", err)
 								}

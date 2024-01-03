@@ -21,18 +21,24 @@
 package xrootd
 
 import (
+	"bufio"
+	"context"
 	_ "embed"
 	"fmt"
+	"io/fs"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/pelicanplatform/pelican/cache_ui"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
+	"github.com/pelicanplatform/pelican/origin_ui"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -62,7 +68,84 @@ var (
 
 	//go:embed resources/test-scitokens-cache-empty.cfg
 	cacheEmptyOutput string
+
+	sampleMultilineOutput = `foo \
+	bar
+	baz
+	abc \`
+
+	sampleMultilineOutputParsed = []string{"foo \tbar", "\tbaz", "\tabc "}
+
+	cacheAuthfileMultilineInput = `
+u * /user/ligo -rl \
+/Gluex rl \
+/NSG/PUBLIC rl \
+/VDC/PUBLIC rl`
+
+	cacheAuthfileOutput = "u * /.well-known lr /user/ligo -rl /Gluex rl /NSG/PUBLIC rl /VDC/PUBLIC rl\n"
+
+	// Actual authfile entries here are from the bug report #568
+	otherAuthfileEntries = `# DN: /CN=sc-origin.chtc.wisc.edu
+u 5a42185a.0 /chtc/PROTECTED/sc-origin lr
+# DN: /DC=org/DC=incommon/C=US/ST=California/O=University of California, San Diego/CN=osg-stash-sfu-computecanada-ca.nationalresearchplatform.org
+u 4ff08838.0 /chtc/PROTECTED/sc-origin lr
+# DN: /DC=org/DC=incommon/C=US/ST=Georgia/O=Georgia Institute of Technology/OU=Office of Information Technology/CN=osg-gftp2.pace.gatech.edu
+u 3af6a420.0 /chtc/PROTECTED/sc-origin lr
+`
+
+	mergedAuthfileEntries = otherAuthfileEntries + "u * /.well-known lr\n"
 )
+
+func TestAuthfileMultiline(t *testing.T) {
+	sc := bufio.NewScanner(strings.NewReader(sampleMultilineOutput))
+	sc.Split(ScanLinesWithCont)
+	idx := 0
+	for sc.Scan() {
+		require.Less(t, idx, len(sampleMultilineOutputParsed))
+		assert.Equal(t, string(sampleMultilineOutputParsed[idx]), sc.Text())
+		idx += 1
+	}
+	assert.Equal(t, idx, len(sampleMultilineOutputParsed))
+}
+
+func TestEmitAuthfile(t *testing.T) {
+	tests := []struct {
+		desc    string
+		authIn  string
+		authOut string
+	}{
+		{
+			desc:    "merge-multi-lines",
+			authIn:  cacheAuthfileMultilineInput,
+			authOut: cacheAuthfileOutput,
+		},
+		{
+			desc:    "merge-other-entries",
+			authIn:  otherAuthfileEntries,
+			authOut: mergedAuthfileEntries,
+		},
+	}
+	for _, testInput := range tests {
+		t.Run(testInput.desc, func(t *testing.T) {
+			dirName := t.TempDir()
+			viper.Reset()
+			viper.Set("Xrootd.Authfile", filepath.Join(dirName, "authfile"))
+			viper.Set("Xrootd.RunLocation", dirName)
+			server := &origin_ui.OriginServer{}
+
+			err := os.WriteFile(filepath.Join(dirName, "authfile"), []byte(testInput.authIn), fs.FileMode(0600))
+			require.NoError(t, err)
+
+			err = EmitAuthfile(server)
+			require.NoError(t, err)
+
+			contents, err := os.ReadFile(filepath.Join(dirName, "authfile-origin-generated"))
+			require.NoError(t, err)
+
+			assert.Equal(t, testInput.authOut, string(contents))
+		})
+	}
+}
 
 func TestEmitCfg(t *testing.T) {
 	dirname := t.TempDir()
@@ -73,10 +156,10 @@ func TestEmitCfg(t *testing.T) {
 
 	configTester := func(cfg *ScitokensCfg, configResult string) func(t *testing.T) {
 		return func(t *testing.T) {
-			err = EmitScitokensConfiguration(cfg)
+			err = EmitScitokensConfiguration(config.OriginType, cfg)
 			assert.NoError(t, err)
 
-			genCfg, err := os.ReadFile(filepath.Join(dirname, "scitokens-generated.cfg"))
+			genCfg, err := os.ReadFile(filepath.Join(dirname, "scitokens-origin-generated.cfg"))
 			assert.NoError(t, err)
 
 			assert.Equal(t, string(configResult), string(genCfg))
@@ -108,10 +191,10 @@ func TestLoadScitokensConfig(t *testing.T) {
 			cfg, err := LoadScitokensConfig(cfgFname)
 			require.NoError(t, err)
 
-			err = EmitScitokensConfiguration(&cfg)
+			err = EmitScitokensConfiguration(config.OriginType, &cfg)
 			assert.NoError(t, err)
 
-			genCfg, err := os.ReadFile(filepath.Join(dirname, "scitokens-generated.cfg"))
+			genCfg, err := os.ReadFile(filepath.Join(dirname, "scitokens-origin-generated.cfg"))
 			assert.NoError(t, err)
 
 			assert.Equal(t, string(configResult), string(genCfg))
@@ -124,6 +207,10 @@ func TestLoadScitokensConfig(t *testing.T) {
 }
 
 func TestGenerateConfig(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
 	viper.Reset()
 	viper.Set("Origin.SelfTest", false)
 	issuer, err := GenerateMonitoringIssuer()
@@ -131,7 +218,7 @@ func TestGenerateConfig(t *testing.T) {
 	assert.Equal(t, issuer.Name, "")
 
 	viper.Set("Origin.SelfTest", true)
-	err = config.InitServer(config.OriginType)
+	err = config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
 	issuer, err = GenerateMonitoringIssuer()
 	require.NoError(t, err)
@@ -145,7 +232,7 @@ func TestGenerateConfig(t *testing.T) {
 	viper.Set("Origin.SelfTest", false)
 	viper.Set("Origin.ScitokensDefaultUser", "user1")
 	viper.Set("Origin.ScitokensMapSubject", true)
-	err = config.InitServer(config.OriginType)
+	err = config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
 	issuer, err = GenerateOriginIssuer([]string{"/foo/bar/baz", "/another/exported/path"})
 	require.NoError(t, err)
@@ -158,6 +245,44 @@ func TestGenerateConfig(t *testing.T) {
 	assert.Equal(t, issuer.MapSubject, true)
 }
 
+func TestWriteOriginAuthFiles(t *testing.T) {
+
+	originAuthTester := func(server server_utils.XRootDServer, authStart string, authResult string) func(t *testing.T) {
+		return func(t *testing.T) {
+
+			dirname := t.TempDir()
+			viper.Reset()
+			viper.Set("Xrootd.RunLocation", dirname)
+			viper.Set("Xrootd.ScitokensConfig", filepath.Join(dirname, "scitokens-generated.cfg"))
+			viper.Set("Xrootd.Authfile", filepath.Join(dirname, "authfile"))
+			xAuthFile := filepath.Join(param.Xrootd_RunLocation.GetString(), "authfile-origin-generated")
+
+			authfileProvided := param.Xrootd_Authfile.GetString()
+
+			err := os.WriteFile(authfileProvided, []byte(authStart), 0600)
+			assert.NoError(t, err)
+
+			err = EmitAuthfile(server)
+			assert.NoError(t, err)
+
+			authGen, err := os.ReadFile(xAuthFile)
+			assert.NoError(t, err)
+			assert.Equal(t, authResult, string(authGen))
+		}
+	}
+	nsAds := []director.NamespaceAd{}
+
+	originServer := &origin_ui.OriginServer{}
+	originServer.SetNamespaceAds(nsAds)
+
+	t.Run("MultiIssuer", originAuthTester(originServer, "u * t1 lr t2 lr t3 lr", "u * /.well-known lr t1 lr t2 lr t3 lr\n"))
+
+	nsAds = []director.NamespaceAd{}
+	originServer.SetNamespaceAds(nsAds)
+
+	t.Run("EmptyAuth", originAuthTester(originServer, "", "u * /.well-known lr\n"))
+}
+
 func TestWriteCacheAuthFiles(t *testing.T) {
 
 	cacheAuthTester := func(server server_utils.XRootDServer, sciTokenResult string, authResult string) func(t *testing.T) {
@@ -166,8 +291,13 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 			dirname := t.TempDir()
 			viper.Reset()
 			viper.Set("Xrootd.RunLocation", dirname)
-			viper.Set("Xrootd.ScitokensConfig", filepath.Join(dirname, "scitokens-generated.cfg"))
-			viper.Set("Xrootd.Authfile", filepath.Join(dirname, "authfile-generated"))
+			if server.GetServerType().IsEnabled(config.OriginType) {
+				viper.Set("Xrootd.ScitokensConfig", filepath.Join(dirname, "scitokens-origin-generated.cfg"))
+				viper.Set("Xrootd.Authfile", filepath.Join(dirname, "authfile-origin-generated"))
+			} else {
+				viper.Set("Xrootd.ScitokensConfig", filepath.Join(dirname, "scitokens-cache-generated.cfg"))
+				viper.Set("Xrootd.Authfile", filepath.Join(dirname, "authfile-cache-generated"))
+			}
 			authFile := param.Xrootd_Authfile.GetString()
 			err := os.WriteFile(authFile, []byte(""), 0600)
 			assert.NoError(t, err)
@@ -179,14 +309,14 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 			genSciToken, err := os.ReadFile(sciFile)
 			assert.NoError(t, err)
 
-			assert.Equal(t, string(genSciToken), sciTokenResult)
+			assert.Equal(t, sciTokenResult, string(genSciToken))
 
 			err = EmitAuthfile(server)
 			assert.NoError(t, err)
 
 			authGen, err := os.ReadFile(authFile)
 			assert.NoError(t, err)
-			assert.Equal(t, string(authGen), authResult)
+			assert.Equal(t, authResult, string(authGen))
 		}
 	}
 
@@ -218,7 +348,7 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 	cacheServer := &cache_ui.CacheServer{}
 	cacheServer.SetNamespaceAds(nsAds)
 
-	t.Run("MultiIssuer", cacheAuthTester(cacheServer, cacheSciOutput, "u * /p3 lr /p4/depth lr /p2_noauth lr "))
+	t.Run("MultiIssuer", cacheAuthTester(cacheServer, cacheSciOutput, "u * /p3 lr /p4/depth lr /p2_noauth lr \n"))
 
 	nsAds = []director.NamespaceAd{}
 	cacheServer.SetNamespaceAds(nsAds)
@@ -227,6 +357,10 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 }
 
 func TestWriteOriginScitokensConfig(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
 	viper.Reset()
 	dirname := t.TempDir()
 	os.Setenv("PELICAN_XROOTD_RUNLOCATION", dirname)
@@ -237,7 +371,7 @@ func TestWriteOriginScitokensConfig(t *testing.T) {
 	viper.Set("Xrootd.RunLocation", dirname)
 	viper.Set("Xrootd.Port", 8443)
 	viper.Set("Server.Hostname", "origin.example.com")
-	err := config.InitServer(config.OriginType)
+	err := config.InitServer(ctx, config.OriginType)
 	require.Nil(t, err)
 
 	scitokensCfg := param.Xrootd_ScitokensConfig.GetString()
@@ -249,7 +383,7 @@ func TestWriteOriginScitokensConfig(t *testing.T) {
 	err = WriteOriginScitokensConfig([]string{"/foo/bar"})
 	require.NoError(t, err)
 
-	genCfg, err := os.ReadFile(filepath.Join(dirname, "scitokens-generated.cfg"))
+	genCfg, err := os.ReadFile(filepath.Join(dirname, "scitokens-origin-generated.cfg"))
 	require.NoError(t, err)
 
 	assert.Equal(t, string(monitoringOutput), string(genCfg))

@@ -19,6 +19,7 @@
 package server_ui
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -32,6 +33,7 @@ import (
 	"github.com/pelicanplatform/pelican/registry"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
 )
 
 type (
@@ -183,7 +185,7 @@ func registerNamespaceImpl(key jwk.Key, prefix string, registrationEndpointURL s
 	return nil
 }
 
-func RegisterNamespaceWithRetry() error {
+func RegisterNamespaceWithRetry(ctx context.Context, egrp *errgroup.Group) error {
 	metrics.SetComponentHealthStatus(metrics.OriginCache_Federation, metrics.StatusCritical, "Origin not registered with federation")
 
 	key, prefix, url, isRegistered, err := registerNamespacePrep()
@@ -199,14 +201,19 @@ func RegisterNamespaceWithRetry() error {
 		return nil
 	}
 	log.Errorf("Failed to register with namespace service: %v; will automatically retry in 10 seconds\n", err)
-	go func() {
+	egrp.Go(func() error {
+		ticker := time.NewTicker(10 * time.Second)
 		for {
-			time.Sleep(10 * time.Second)
-			if err := registerNamespaceImpl(key, prefix, url); err == nil {
-				return
+			select {
+			case <-ticker.C:
+				if err := registerNamespaceImpl(key, prefix, url); err == nil {
+					return nil
+				}
+				log.Errorf("Failed to register with namespace service: %v; will automatically retry in 10 seconds\n", err)
+			case <-ctx.Done():
+				return nil
 			}
-			log.Errorf("Failed to register with namespace service: %v; will automatically retry in 10 seconds\n", err)
 		}
-	}()
+	})
 	return nil
 }

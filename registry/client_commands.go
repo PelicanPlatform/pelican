@@ -189,6 +189,11 @@ func NamespaceRegister(privateKey jwk.Key, namespaceRegistryEndpoint string, acc
 			return errors.Wrapf(err, "Failed to make request: %v", respData.Error)
 		}
 		fmt.Println(respData.Message)
+	} else {
+		if err != nil {
+			return errors.Wrapf(err, "Failed to make request: %s", resp)
+		}
+		return errors.Wrapf(unmarshalErr, "Failed to unmarshall request response: %v", respData.Error)
 	}
 
 	return nil

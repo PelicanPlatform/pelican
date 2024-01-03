@@ -24,7 +24,9 @@ import (
 	"context"
 	"encoding/json"
 	"net/url"
-	"sync"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/pelicanplatform/pelican/cache_ui"
@@ -33,6 +35,7 @@ import (
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_ui"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pelicanplatform/pelican/web_ui"
 	"github.com/pelicanplatform/pelican/xrootd"
@@ -40,6 +43,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"golang.org/x/sync/errgroup"
 )
 
 func getNSAdsFromDirector() ([]director.NamespaceAd, error) {
@@ -72,25 +76,45 @@ func getNSAdsFromDirector() ([]director.NamespaceAd, error) {
 	return respNS, nil
 }
 
-func serveCache( /*cmd*/ *cobra.Command /*args*/, []string) error {
-	// Use this context for any goroutines that needs to react to server shutdown
-	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
-	// Use this wait group to ensure the goroutines can finish before the server exits/shutdown
-	var wg sync.WaitGroup
-
-	// This anonymous function ensures we cancel any context and wait for those goroutines to
-	// finish their cleanup work before the server exits
-	defer func() {
-		shutdownCancel()
-		wg.Wait()
-		config.CleanupTempResources()
-	}()
-
-	err := xrootd.SetUpMonitoring(shutdownCtx, &wg)
+func serveCache(cmd *cobra.Command, _ []string) error {
+	err := serveCacheInternal(cmd.Context())
 	if err != nil {
 		return err
 	}
-	wg.Add(1) // Add to wait group after SetUpMonitoring finishes to avoid deadlock
+
+	return nil
+}
+
+func serveCacheInternal(ctx context.Context) error {
+	// Use this context for any goroutines that needs to react to server shutdown
+	ctx, shutdownCancel := context.WithCancel(ctx)
+
+	err := config.InitServer(ctx, config.CacheType)
+	cobra.CheckErr(err)
+
+	egrp, ok := ctx.Value(config.EgrpKey).(*errgroup.Group)
+	if !ok {
+		egrp = &errgroup.Group{}
+	}
+
+	egrp.Go(func() error {
+		log.Debug("Will shutdown process on signal")
+		sigs := make(chan os.Signal, 1)
+		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+		select {
+		case sig := <-sigs:
+			log.Debugf("Received signal %v; will shutdown process", sig)
+			shutdownCancel()
+			return errors.New("Federation process has been cancelled")
+		case <-ctx.Done():
+			return nil
+		}
+	})
+
+	err = xrootd.SetUpMonitoring(ctx, egrp)
+	if err != nil {
+		return err
+	}
 
 	nsAds, err := getNSAdsFromDirector()
 	if err != nil {
@@ -108,11 +132,11 @@ func serveCache( /*cmd*/ *cobra.Command /*args*/, []string) error {
 
 	viper.Set("Origin.NamespacePrefix", cachePrefix)
 
-	if err = server_ui.RegisterNamespaceWithRetry(); err != nil {
+	if err = server_ui.RegisterNamespaceWithRetry(ctx, egrp); err != nil {
 		return err
 	}
 
-	if err = server_ui.PeriodicAdvertise(cacheServer); err != nil {
+	if err = server_ui.LaunchPeriodicAdvertise(ctx, egrp, []server_utils.XRootDServer{cacheServer}); err != nil {
 		return err
 	}
 
@@ -122,24 +146,32 @@ func serveCache( /*cmd*/ *cobra.Command /*args*/, []string) error {
 	}
 
 	// Set up necessary APIs to support Web UI, including auth and metrics
-	if err := web_ui.ConfigureServerWebAPI(engine); err != nil {
+	if err := web_ui.ConfigureServerWebAPI(ctx, engine, egrp); err != nil {
 		return err
 	}
 
 	go func() {
-		if err := web_ui.RunEngine(shutdownCtx, engine); err != nil {
+		if err := web_ui.RunEngine(ctx, engine, egrp); err != nil {
 			log.Panicln("Failure when running the web engine:", err)
 		}
 		shutdownCancel()
 	}()
-	go web_ui.InitServerWebLogin()
+	if param.Server_EnableUI.GetBool() {
+		if err = web_ui.ConfigureEmbeddedPrometheus(ctx, engine); err != nil {
+			return errors.Wrap(err, "Failed to configure embedded prometheus instance")
+		}
 
-	configPath, err := xrootd.ConfigXrootd(false)
+		if err = web_ui.InitServerWebLogin(ctx); err != nil {
+			return err
+		}
+	}
+
+	configPath, err := xrootd.ConfigXrootd(ctx, false)
 	if err != nil {
 		return err
 	}
 
-	xrootd.LaunchXrootdMaintenance(shutdownCtx, 2*time.Minute)
+	xrootd.LaunchXrootdMaintenance(ctx, 2*time.Minute)
 
 	log.Info("Launching cache")
 	launchers, err := xrootd.ConfigureLaunchers(false, configPath, false)
@@ -147,8 +179,7 @@ func serveCache( /*cmd*/ *cobra.Command /*args*/, []string) error {
 		return err
 	}
 
-	ctx := context.Background()
-	if err = daemon.LaunchDaemons(ctx, launchers); err != nil {
+	if err = daemon.LaunchDaemons(ctx, launchers, egrp); err != nil {
 		return err
 	}
 
