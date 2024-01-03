@@ -114,8 +114,6 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		if err != nil {
 			return shutdownCancel, err
 		}
-
-		log.Debug("Finishing origin server configuration")
 	}
 
 	log.Info("Starting web engine...")
