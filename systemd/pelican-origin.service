@@ -1,6 +1,7 @@
 [Unit]
 Description = Pelican service pelican-origin
 After = network.target nss-lookup.target
+Conflicts = pelican-origin-multiuser.service
 
 [Service]
 ExecStart = /usr/bin/pelican --config /etc/pelican/pelican-origin.yaml origin serve
