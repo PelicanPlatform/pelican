@@ -42,6 +42,7 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 )
 
 type (
@@ -200,6 +201,7 @@ func EmitScitokensConfiguration(modules config.ServerType, cfg *ScitokensCfg) er
 // into the xrootd runtime directory
 func EmitAuthfile(server server_utils.XRootDServer) error {
 	authfile := param.Xrootd_Authfile.GetString()
+	log.Debugln("Location of input authfile:", authfile)
 	contents, err := os.ReadFile(authfile)
 	if err != nil {
 		return errors.Wrapf(err, "Failed to read xrootd authfile from %s", authfile)
@@ -209,23 +211,26 @@ func EmitAuthfile(server server_utils.XRootDServer) error {
 	sc.Split(ScanLinesWithCont)
 	output := new(bytes.Buffer)
 	foundPublicLine := false
+	log.Debugln("Parsing the input authfile")
 	for sc.Scan() {
 		lineContents := sc.Text()
 		words := strings.Fields(lineContents)
-		// There exists a public access already in the authfile
 		if len(words) >= 2 && words[0] == "u" && words[1] == "*" {
+			// There exists a public access already in the authfile
 			if server.GetServerType().IsEnabled(config.OriginType) {
 				// If Origin, add the ./well-known to the authfile
 				output.Write([]byte("u * /.well-known lr " + strings.Join(words[2:], " ") + "\n"))
 			} else {
-				output.Write([]byte(lineContents + " "))
+				output.Write([]byte(lineContents + "\n"))
 			}
 			foundPublicLine = true
+		} else {
+			// Copy over entry verbatim
+			output.Write([]byte(lineContents + "\n"))
 		}
 	}
-	// If Origin and no authfile already exists, add the ./well-know to the authfile
+	// If Origin and no authfile already exists, add the ./well-known to the authfile
 	if !foundPublicLine && server.GetServerType().IsEnabled(config.OriginType) {
-
 		output.Write([]byte("u * /.well-known lr\n"))
 	}
 
@@ -243,7 +248,7 @@ func EmitAuthfile(server server_utils.XRootDServer) error {
 		}
 		// A public namespace exists, so a line needs to be printed
 		if len(outStr) > 4 {
-			output.Write([]byte(outStr))
+			output.Write([]byte(outStr + "\n"))
 		}
 	}
 
