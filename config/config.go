@@ -195,6 +195,23 @@ func (sType ServerType) String() string {
 	return "Unknown"
 }
 
+func EnabledServers() []string {
+	servers := make([]string, 0)
+	if enabledServers.IsEnabled(CacheType) {
+		servers = append(servers, "cache")
+	}
+	if enabledServers.IsEnabled(OriginType) {
+		servers = append(servers, "origin")
+	}
+	if enabledServers.IsEnabled(DirectorType) {
+		servers = append(servers, "director")
+	}
+	if enabledServers.IsEnabled(RegistryType) {
+		servers = append(servers, "registry")
+	}
+	return servers
+}
+
 func (sType *ServerType) SetString(name string) bool {
 	switch strings.ToLower(name) {
 	case "cache":
