@@ -1,0 +1,9 @@
+[Unit]
+Description = Pelican service pelican-registry
+After = network.target nss-lookup.target
+
+[Service]
+ExecStart = /usr/bin/pelican --config /etc/pelican/pelican-registry.yaml registry serve
+
+[Install]
+WantedBy = multi-user.target
