@@ -69,8 +69,6 @@ func TestFedServePosixOrigin(t *testing.T) {
 			t.Fatal("Failed to clean up temPath")
 		}
 	})
-	// If tests run in root, DbLocation is a fixed path, so we need to manually set it
-	viper.Set("Registry.DbLocation", filepath.Join(tmpPath, "sqlite-test.sqlite"))
 
 	// Increase the log level; otherwise, its difficult to debug failures
 	viper.Set("Logging.Level", "Debug")
