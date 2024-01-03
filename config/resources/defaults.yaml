@@ -24,7 +24,7 @@ Server:
 Director:
   DefaultResponse: cache
 Cache:
-  Port: 8443
+  Port: 8442
 Origin:
   NamespacePrefix: ""
   Multiuser: false
@@ -32,6 +32,7 @@ Origin:
   EnableVoms: true
   EnableUI: true
   SelfTest: true
+  Port: 8443
 Monitoring:
   PortLower: 9930
   PortHigher: 9999
@@ -40,7 +41,6 @@ Monitoring:
   MetricAuthorization: true
   AggregatePrefixes: ["/*"]
 Xrootd:
-  Port: 8443
   Mount: ""
   ManagerPort: 1213
   DetailedMonitoringPort: 9930

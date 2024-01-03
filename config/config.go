@@ -655,17 +655,66 @@ func InitServer(ctx context.Context, enabledServices ServerType) error {
 	// they have overridden the defaults.
 	hostname = viper.GetString("Server.Hostname")
 
+	// XRootD port usage logic:
+	// - Origin.Port and Cache.Port take precedence for their respective types
+	// - If neither keys are set and Xrootd.Port is, then use that and emit a warning
+	// - If neither key is set, Xrootd.Port is, and both modules are enabled, then we don't
+	//   know the next steps -- throw an error
+	cachePort := viper.GetInt("Cache.Port")
+	originPort := viper.GetInt("Origin.Port")
+	xrootdPort := viper.GetInt("Xrootd.Port")
+	xrootdPortIsSet := viper.IsSet("Xrootd.Port")
+	cacheFallbackToXrootd := false
+	originFallbackToXrootd := false
 	if enabledServices.IsEnabled(CacheType) {
-		viper.Set("Xrootd.Port", param.Cache_Port.GetInt())
+		if !viper.IsSet("Cache.Port") {
+			if xrootdPortIsSet {
+				cacheFallbackToXrootd = true
+				cachePort = xrootdPort
+			} else {
+				return errors.New("the configuration Cache.Port is not set but the Cache module is enabled.  Please set Cache.Port")
+			}
+		}
 	}
-	xrootdPort := param.Xrootd_Port.GetInt()
-	if xrootdPort != 443 {
-		viper.SetDefault("Origin.Url", fmt.Sprintf("https://%v:%v", param.Server_Hostname.GetString(), xrootdPort))
+	if enabledServices.IsEnabled(OriginType) && !viper.IsSet("Origin.Port") {
+		if xrootdPortIsSet {
+			originFallbackToXrootd = true
+			originPort = xrootdPort
+		} else {
+			return errors.New("the configuration Origin.Port is not set but the Origin module is enabled.  Please set Origin.Port")
+		}
+	}
+	if cacheFallbackToXrootd && originFallbackToXrootd {
+		return errors.New("neither Cache.Port nor Origin.Port is set but both modules are enabled.  Please set both variables")
+	} else if cacheFallbackToXrootd {
+		log.Warningln("Cache.Port is not set but the Cache module is enabled; falling back to the deprecated Xrootd.Port")
+		cachePort = xrootdPort
+	} else if originFallbackToXrootd {
+		log.Warningln("Origin.Port is not set but the Origin module is enabled; falling back to the deprecated Xrootd.Port")
+		originPort = xrootdPort
+	}
+
+	viper.Set("Origin.CalculatedPort", strconv.Itoa(originPort))
+	if originPort == 0 {
+		viper.Set("Origin.CalculatedPort", "any")
+	}
+	viper.Set("Cache.CalculatedPort", strconv.Itoa(originPort))
+	if cachePort == 0 {
+		viper.Set("Cache.CalculatedPort", "any")
+	}
+	viper.Set("Origin.Port", originPort)
+	viper.Set("Cache.Port", cachePort)
+
+	if originPort != 443 {
+		viper.SetDefault("Origin.Url", fmt.Sprintf("https://%v:%v", param.Server_Hostname.GetString(), originPort))
 	} else {
 		viper.SetDefault("Origin.Url", fmt.Sprintf("https://%v", param.Server_Hostname.GetString()))
 	}
 
 	webPort := param.Server_WebPort.GetInt()
+	if webPort < 1 {
+		return errors.Errorf("the Server.WebPort setting of %d is invalid; TCP ports must be greater than 0", webPort)
+	}
 	viper.SetDefault("Server.ExternalWebUrl", fmt.Sprint("https://", hostname, ":", webPort))
 	externalAddressStr := param.Server_ExternalWebUrl.GetString()
 	if _, err = url.Parse(externalAddressStr); err != nil {

@@ -224,6 +224,8 @@ func TestPasswordResetAPI(t *testing.T) {
 	viper.Reset()
 	viper.Set("ConfigDir", dirName)
 	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
+	viper.Set("Server.WebPort", 8444)
+	viper.Set("Origin.Port", 8443)
 	err := config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
 	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256())

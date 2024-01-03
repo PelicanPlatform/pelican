@@ -282,10 +282,15 @@ components: ["client"]
 name: Origin.Url
 description: >-
   The origin's configured URL, as reported to XRootD. This is the file transfer endpoint for the origin.
-
-  This Url must not have the same port number as the one in Server.ExternalWebUrl (if any) or Server.WebPort
 type: url
 default: https://${Server.Hostname}:${Xrootd.Port}
+components: ["origin"]
+---
+name: Origin.Port
+description: >-
+  The TCP port to be used by the origin service for serving files
+default: 8443
+type: int
 components: ["origin"]
 ---
 name: Origin.ExportVolume
@@ -476,9 +481,9 @@ components: ["cache"]
 ---
 name: Cache.Port
 description: >-
-  The port over which the xrootd cache should be made available (this will overwrite Xrootd.Port)
+  The TCP port the cache service should use.
 type: int
-default: 8447
+default: 8442
 components: ["cache"]
 ---
 name: Cache.EnableVoms
@@ -668,8 +673,6 @@ components: ["origin", "director", "nsregistry"]
 name: Server.ExternalWebUrl
 description: >-
   A URL indicating the Pelican web interface and internal web APIs address as it appears externally.
-
-  This URL must not have the same port number as the one in Origin.Url (if any) or Xrootd.Port
 type: url
 default: https://${Server.Hostname}:${Server.WebPort}
 components: ["origin", "director", "nsregistry"]
@@ -943,8 +946,11 @@ components: ["nsregistry", "director"]
 name: Xrootd.Port
 description: >-
   The port over which XRootD should be made available.
+  This setting is deprecated; please use the Cache.Port or Origin.Port, as appropriate,
+  for the server.
 type: int
 default: 8443
+deprecated: true
 components: ["origin", "cache"]
 ---
 name: Xrootd.RunLocation

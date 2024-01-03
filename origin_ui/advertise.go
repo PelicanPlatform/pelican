@@ -45,7 +45,7 @@ func (server *OriginServer) CreateAdvertisement(name string, originUrl string, o
 	// Here we instantiate the namespaceAd slice, but we still need to define the namespace
 	issuerUrl := url.URL{}
 	issuerUrl.Scheme = "https"
-	issuerUrl.Host = fmt.Sprintf("%v:%v", param.Server_Hostname.GetString(), param.Xrootd_Port.GetInt())
+	issuerUrl.Host = fmt.Sprintf("%v:%v", param.Server_Hostname.GetString(), param.Origin_Port.GetInt())
 
 	if issuerUrl.String() == "" {
 		return ad, errors.New("No IssuerUrl is set")

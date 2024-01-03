@@ -154,6 +154,7 @@ var (
 	MinimumDownloadSpeed = IntParam{"MinimumDownloadSpeed"}
 	Monitoring_PortHigher = IntParam{"Monitoring.PortHigher"}
 	Monitoring_PortLower = IntParam{"Monitoring.PortLower"}
+	Origin_Port = IntParam{"Origin.Port"}
 	Server_IssuerPort = IntParam{"Server.IssuerPort"}
 	Server_WebPort = IntParam{"Server.WebPort"}
 	Transport_MaxIdleConns = IntParam{"Transport.MaxIdleConns"}
