@@ -39,8 +39,21 @@ func GetUnmarshaledConfig() (*config, error) {
 // Helper function to set a parameter field entry in configWithType
 func setField(fieldType reflect.Type, value interface{}) reflect.Value {
 	field := reflect.New(fieldType).Elem()
-	field.FieldByName("Type").SetString(reflect.TypeOf(value).String())
-	field.FieldByName("Value").Set(reflect.ValueOf(value))
+	sliceInterfaceType := reflect.TypeOf([]interface{}(nil))
+
+	// Check if the type of the value is nil
+	if reflect.TypeOf(value) == nil {
+		// If the value is nil, it is a object-type config without value
+		field.FieldByName("Type").SetString("[]object")
+	} else {
+		if reflect.TypeOf(value) == sliceInterfaceType {
+			field.FieldByName("Type").SetString("[]object")
+		} else {
+			field.FieldByName("Type").SetString(reflect.TypeOf(value).String())
+		}
+		field.FieldByName("Value").Set(reflect.ValueOf(value))
+	}
+
 	return field
 }
 
