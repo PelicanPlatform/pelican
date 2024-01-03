@@ -218,7 +218,7 @@ func EmitAuthfile(server server_utils.XRootDServer) error {
 		if len(words) >= 2 && words[0] == "u" && words[1] == "*" {
 			// There exists a public access already in the authfile
 			if server.GetServerType().IsEnabled(config.OriginType) {
-				// If Origin, add the ./well-known to the authfile
+				// If Origin, add the /.well-known to the authfile
 				output.Write([]byte("u * /.well-known lr " + strings.Join(words[2:], " ") + "\n"))
 			} else {
 				output.Write([]byte(lineContents + "\n"))
