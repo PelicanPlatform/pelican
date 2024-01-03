@@ -1,0 +1,9 @@
+[Unit]
+Description = Pelican service osdf-director
+After = network.target nss-lookup.target
+
+[Service]
+ExecStart = /usr/bin/pelican --config /etc/pelican/osdf-director.yaml director serve
+
+[Install]
+WantedBy = multi-user.target

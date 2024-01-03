@@ -1,0 +1,9 @@
+[Unit]
+Description = Pelican service pelican-origin
+After = network.target nss-lookup.target
+
+[Service]
+ExecStart = /usr/bin/pelican --config /etc/pelican/pelican-origin.yaml origin serve
+
+[Install]
+WantedBy = multi-user.target
