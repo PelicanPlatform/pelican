@@ -58,13 +58,14 @@ func getConfigValues(ctx *gin.Context) {
 		ctx.JSON(401, gin.H{"error": "Authentication required to visit this API"})
 		return
 	}
-	config, err := param.GetUnmarshaledConfig()
+	rawConfig, err := param.UnmarshalConfig()
 	if err != nil {
-		ctx.JSON(500, gin.H{"error": "Failed to get the unmarshaled config"})
+		ctx.JSON(500, gin.H{"error": "Failed to get the unmarshaled rawConfig"})
 		return
 	}
+	configWithType := param.ConvertToConfigWithType(rawConfig)
 
-	ctx.JSON(200, config)
+	ctx.JSON(200, configWithType)
 }
 
 func configureWebResource(engine *gin.Engine) error {
