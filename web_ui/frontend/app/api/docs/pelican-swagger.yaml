@@ -301,6 +301,26 @@ paths:
                   Value: ""
         "401":
           description: Unauthorized
+  /servers:
+    get:
+      tags:
+        - common
+      summary: Returns a list of enabled servers
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: array
+            items:
+              type: string
+              minItems: 1
+        "500":
+          description: Server encountered error in reading institution configuration
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
   /auth/login:
     post:
       tags:
@@ -844,7 +864,7 @@ paths:
             type: object
             $ref: "#/definitions/ErrorModel"
         "500":
-          description: Server didn't configure `Registry.Institutions` or server encoutered error in reading institution configuration
+          description: Server didn't configure `Registry.Institutions` or server encountered error in reading institution configuration
           schema:
             type: object
             $ref: "#/definitions/ErrorModel"
