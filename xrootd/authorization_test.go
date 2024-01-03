@@ -156,7 +156,7 @@ func TestEmitCfg(t *testing.T) {
 
 	configTester := func(cfg *ScitokensCfg, configResult string) func(t *testing.T) {
 		return func(t *testing.T) {
-			err = EmitScitokensConfiguration(config.OriginType, cfg)
+			err = writeScitokensConfiguration(config.OriginType, cfg)
 			assert.NoError(t, err)
 
 			genCfg, err := os.ReadFile(filepath.Join(dirname, "scitokens-origin-generated.cfg"))
@@ -191,7 +191,7 @@ func TestLoadScitokensConfig(t *testing.T) {
 			cfg, err := LoadScitokensConfig(cfgFname)
 			require.NoError(t, err)
 
-			err = EmitScitokensConfiguration(config.OriginType, &cfg)
+			err = writeScitokensConfiguration(config.OriginType, &cfg)
 			assert.NoError(t, err)
 
 			genCfg, err := os.ReadFile(filepath.Join(dirname, "scitokens-origin-generated.cfg"))
