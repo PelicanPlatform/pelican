@@ -366,7 +366,7 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 	}
 }
 
-func registerServeAd(ctx *gin.Context, sType ServerType) {
+func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType ServerType) {
 	tokens, present := ctx.Request.Header["Authorization"]
 	if !present || len(tokens) == 0 {
 		ctx.JSON(http.StatusForbidden, gin.H{"error": "Bearer token not present in the 'Authorization' header"})
@@ -390,7 +390,7 @@ func registerServeAd(ctx *gin.Context, sType ServerType) {
 		for _, namespace := range ad.Namespaces {
 			// We're assuming there's only one token in the slice
 			token := strings.TrimPrefix(tokens[0], "Bearer ")
-			ok, err := VerifyAdvertiseToken(token, namespace.Path)
+			ok, err := VerifyAdvertiseToken(engineCtx, token, namespace.Path)
 			if err != nil {
 				log.Warningln("Failed to verify token:", err)
 				ctx.JSON(http.StatusForbidden, gin.H{"error": "Authorization token verification failed"})
@@ -406,7 +406,7 @@ func registerServeAd(ctx *gin.Context, sType ServerType) {
 	} else {
 		token := strings.TrimPrefix(tokens[0], "Bearer ")
 		prefix := path.Join("caches", ad.Name)
-		ok, err := VerifyAdvertiseToken(token, prefix)
+		ok, err := VerifyAdvertiseToken(engineCtx, token, prefix)
 		if err != nil {
 			if err == adminApprovalErr {
 				log.Warningln("Failed to verify token:", err)
@@ -457,7 +457,7 @@ func registerServeAd(ctx *gin.Context, sType ServerType) {
 	if ad.WebURL != "" && !hasOriginAdInCache {
 		ctx, cancel := context.WithCancel(context.Background())
 		healthTestCancelFuncs[sAd] = cancel
-		go PeriodicDirectorTest(ctx, sAd)
+		LaunchPeriodicDirectorTest(ctx, sAd)
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{"msg": "Successful registration"})
@@ -511,12 +511,12 @@ func DiscoverOriginCache(ctx *gin.Context) {
 	ctx.JSON(200, promDiscoveryRes)
 }
 
-func RegisterOrigin(ctx *gin.Context) {
-	registerServeAd(ctx, OriginType)
+func RegisterOrigin(ctx context.Context, gctx *gin.Context) {
+	registerServeAd(ctx, gctx, OriginType)
 }
 
-func RegisterCache(ctx *gin.Context) {
-	registerServeAd(ctx, CacheType)
+func RegisterCache(ctx context.Context, gctx *gin.Context) {
+	registerServeAd(ctx, gctx, CacheType)
 }
 
 func ListNamespaces(ctx *gin.Context) {
@@ -525,15 +525,15 @@ func ListNamespaces(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, namespaceAds)
 }
 
-func RegisterDirector(router *gin.RouterGroup) {
+func RegisterDirector(ctx context.Context, router *gin.RouterGroup) {
 	// Establish the routes used for cache/origin redirection
 	router.GET("/api/v1.0/director/object/*any", RedirectToCache)
 	router.GET("/api/v1.0/director/origin/*any", RedirectToOrigin)
-	router.POST("/api/v1.0/director/registerOrigin", RegisterOrigin)
+	router.POST("/api/v1.0/director/registerOrigin", func(gctx *gin.Context) { RegisterOrigin(ctx, gctx) })
 	// In the foreseeable feature, director will scrape all servers in Pelican ecosystem (including registry)
 	// so that director can be our point of contact for collecting system-level metrics.
 	// Rename the endpoint to reflect such plan.
 	router.GET(DirectorServerDiscoveryEndpoint, DiscoverOriginCache)
-	router.POST("/api/v1.0/director/registerCache", RegisterCache)
+	router.POST("/api/v1.0/director/registerCache", func(gctx *gin.Context) { RegisterCache(ctx, gctx) })
 	router.GET("/api/v1.0/director/listNamespaces", ListNamespaces)
 }

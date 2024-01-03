@@ -21,7 +21,6 @@ package director
 import (
 	"context"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
@@ -32,6 +31,7 @@ import (
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
 )
 
 // List all namespaces from origins registered at the director
@@ -184,7 +184,7 @@ func CreateDirectorScrapeToken() (string, error) {
 //
 // The `ctx` is the context for listening to server shutdown event in order to cleanup internal cache eviction
 // goroutine and `wg` is the wait group to notify when the clean up goroutine finishes
-func ConfigTTLCache(ctx context.Context, wg *sync.WaitGroup) {
+func ConfigTTLCache(ctx context.Context, egrp *errgroup.Group) {
 	// Start automatic expired item deletion
 	go serverAds.Start()
 	go namespaceKeys.Start()
@@ -202,11 +202,13 @@ func ConfigTTLCache(ctx context.Context, wg *sync.WaitGroup) {
 	})
 
 	// Put stop logic in a separate goroutine so that parent function is not blocking
-	go func() {
-		defer wg.Done()
+	egrp.Go(func() error {
 		<-ctx.Done()
-		log.Info("Gracefully stoppping TTL cache eviction...")
+		log.Info("Gracefully stopping TTL cache eviction...")
+		serverAds.DeleteAll()
 		serverAds.Stop()
+		namespaceKeys.DeleteAll()
 		namespaceKeys.Stop()
-	}()
+		return nil
+	})
 }

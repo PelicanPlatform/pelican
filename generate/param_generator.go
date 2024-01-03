@@ -23,7 +23,8 @@ type GoField struct {
 }
 
 type TemplateData struct {
-	GeneratedCode string
+	GeneratedConfig         string
+	GeneratedConfigWithType string
 }
 
 var requiredKeys = [3]string{"description", "default", "type"}
@@ -186,6 +187,28 @@ func generateGoStructCode(field *GoField, indent string) string {
 	return code
 }
 
+// Recursively generate the struct code given the root of the GoField
+func generateGoStructWithTypeCode(field *GoField, indent string) string {
+	// If it has type, it should be a leaf node as parent node
+	// does not have a type
+	if field.Type != "" {
+		return fmt.Sprintf("%s%s struct { Type string; Value %s }\n", indent, field.Name, field.Type)
+	}
+	code := fmt.Sprintf("%s%s struct {\n", indent, field.Name)
+	keys := make([]string, 0, len(field.NestedFields))
+	for key := range field.NestedFields {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		nested := field.NestedFields[key]
+		code += generateGoStructWithTypeCode(nested, indent+"	")
+	}
+	code += fmt.Sprintf("%s}\n", indent)
+	return code
+}
+
 // This generates a file param/parameters_struct.go, a struct contains typed parameters
 // that is based off of docs/parameters.yaml to be used for marshalling config to a JSON
 func GenParamStruct() {
@@ -275,7 +298,8 @@ func GenParamStruct() {
 	}
 
 	data := TemplateData{
-		GeneratedCode: `type config` + generateGoStructCode(root, ""),
+		GeneratedConfig:         `type config` + generateGoStructCode(root, ""),
+		GeneratedConfigWithType: `type configWithType` + generateGoStructWithTypeCode(root, ""),
 	}
 
 	// Create the file to be generated
@@ -391,5 +415,7 @@ import (
 	"time"
 )
 
-{{.GeneratedCode -}}
+{{.GeneratedConfig}}
+
+{{.GeneratedConfigWithType}}
 `))

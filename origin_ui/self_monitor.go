@@ -19,6 +19,7 @@
 package origin_ui
 
 import (
+	"context"
 	"time"
 
 	"github.com/pelicanplatform/pelican/metrics"
@@ -27,27 +28,33 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+func doSelfMonitor(ctx context.Context) {
+	log.Debug("Starting a new self-test monitoring cycle")
+	fileTests := utils.TestFileTransferImpl{}
+	ok, err := fileTests.RunTests(ctx, param.Origin_Url.GetString(), param.Origin_Url.GetString(), utils.OriginSelfFileTest)
+	if ok && err == nil {
+		log.Debugln("Self-test monitoring cycle succeeded at", time.Now().Format(time.UnixDate))
+		metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusOK, "Self-test monitoring cycle succeeded at "+time.Now().Format(time.RFC3339))
+	} else {
+		log.Warningln("Self-test monitoring cycle failed: ", err)
+		metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusCritical, "Self-test monitoring cycle failed: "+err.Error())
+	}
+}
+
 // Start self-test monitoring of the origin.  This will upload, download, and delete
 // a generated filename every 15 seconds to the local origin.  On failure, it will
 // set the xrootd component's status to critical.
-func PeriodicSelfTest() {
-	firstRound := true
+func PeriodicSelfTest(ctx context.Context) error {
+	firstRound := time.After(5 * time.Second)
+	ticker := time.NewTicker(15 * time.Second)
 	for {
-		if firstRound {
-			time.Sleep(5 * time.Second)
-			firstRound = false
-		} else {
-			time.Sleep(15 * time.Second)
-		}
-		log.Debug("Starting a new self-test monitoring cycle")
-		fileTests := utils.TestFileTransferImpl{}
-		ok, err := fileTests.RunTests(param.Origin_Url.GetString(), param.Origin_Url.GetString(), utils.OriginSelfFileTest)
-		if ok && err == nil {
-			log.Debugln("Self-test monitoring cycle succeeded at", time.Now().Format(time.UnixDate))
-			metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusOK, "Self-test monitoring cycle succeeded at "+time.Now().Format(time.RFC3339))
-		} else {
-			log.Warningln("Self-test monitoring cycle failed: ", err)
-			metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusCritical, "Self-test monitoring cycle failed: "+err.Error())
+		select {
+		case <-firstRound:
+			doSelfMonitor(ctx)
+		case <-ticker.C:
+			doSelfMonitor(ctx)
+		case <-ctx.Done():
+			return nil
 		}
 	}
 }

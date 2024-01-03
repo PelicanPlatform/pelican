@@ -21,7 +21,6 @@ package main
 import (
 	"net/url"
 
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
@@ -30,11 +29,7 @@ import (
 
 var (
 	directorCmd = &cobra.Command{
-		Use: "director",
-		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			err := initDirector()
-			return err
-		},
+		Use:   "director",
 		Short: "Launch a Pelican Director",
 		Long: `Launch a Pelican Director service:
 
@@ -68,13 +63,6 @@ func getDirectorEndpoint() (string, error) {
 
 	// Return the string, as opposed to a pointer to the URL object
 	return directorEndpointURL.String(), nil
-}
-
-func initDirector() error {
-	err := config.InitServer([]config.ServerType{config.DirectorType}, config.DirectorType)
-	cobra.CheckErr(err)
-
-	return err
 }
 
 func init() {

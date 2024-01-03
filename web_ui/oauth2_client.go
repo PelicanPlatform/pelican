@@ -178,14 +178,7 @@ func handleOAuthCallback(ctx *gin.Context) {
 		return
 	}
 
-	userIdentifier := ""
-	if userInfo.Email != "" {
-		userIdentifier = userInfo.Email
-	} else if userInfo.SubID != "" {
-		userIdentifier = userInfo.SubID
-	} else {
-		userIdentifier = userInfo.Sub
-	}
+	userIdentifier := userInfo.Sub
 	if userIdentifier == "" {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Error setting login cookie: can't find valid user id from CILogon"})
 		return

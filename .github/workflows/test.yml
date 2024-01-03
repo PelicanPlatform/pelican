@@ -30,10 +30,21 @@ jobs:
       uses: actions/setup-go@v4
       with:
         go-version: ${{ matrix.go-version }}
-    - name: Test
+    - name: Install Mac OS X Dependencies
+      run: ./github_scripts/osx_install.sh
+      if: runner.os == 'macOS'
+    - name: Test OS X
+      if: runner.os == 'macOS'
       run: |
         make web-build
-        go test -coverpkg=./... -coverprofile=coverage.out -covermode=count ./...
+        # Explicitly set XRootD to IPv4-only on Mac OS X to avoid a subtle config bug.
+        export PELICAN_XROOTD_IPV4ONLY=true
+        go test -v -coverpkg=./... -coverprofile=coverage.out -covermode=count ./...
+    - name: Test
+      if: runner.os != 'macOS'
+      run: |
+        make web-build
+        go test ./...
     - name: Run GoReleaser for Non-Ubuntu
       uses: goreleaser/goreleaser-action@v4
       with:
@@ -115,4 +126,4 @@ jobs:
       run: |
         cp dist/pelican_linux_amd64_v1/pelican ./
     - name: Run Integration Tests
-      run: ./tests/citests.sh
+      run: ./github_scripts/citests.sh

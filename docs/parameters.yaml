@@ -105,6 +105,32 @@ type: duration
 default: 10s
 components: ["client", "nsregistry", "origin"]
 ---
+name: GeoIPOverrides
+description: >-
+  A list of IP addresses whose GeoIP resolution should be overridden with the supplied Lat/Long coordinates (in decimal form). This affects
+  both server ads (for determining the location of origins and caches) and incoming client requests (for determing where a client request is
+  coming from).
+
+  Configuration takes an IP address (both regular and CIDR) and a Coordinate made up of a lat/long pair in decimal format. For example:
+  ```
+  GeoIPOverrides:
+    - IP: "123.234.123.234"
+      Coordinate:
+        Lat: 43.073904
+        Long: -89.384859
+    - IP: "ABCD::1234/112"
+      Coordinate:
+        Lat: 39.8281
+        Long: -98.5795
+  ```
+
+  will result in the IP address "123.234.123.234" being mapped to Madison, WI, and IP addresses in the range ABCD::0000-FFFF will be mapped
+  to a field in Kansas.
+type: object
+default: none
+components: ["director"]
+---
+
 ############################
 #     Log-Level Configs    #
 ############################
@@ -536,6 +562,33 @@ type: bool
 default: true
 components: ["nsregistry"]
 ---
+name: Registry.AdminUsers
+description: >-
+  A string slice of "subject" claim of users to give admin permission for registry UI.
+
+  The "subject" claim should be the "CILogon User Identifier" from CILogon user page: https://cilogon.org/
+type: stringSlice
+default: []
+components: ["nsregistry"]
+---
+name: Registry.Institutions
+description: >-
+  A array of institution objects available to register. Users can only select from this list
+  when they register a new namespace. Each object has `name` and `id` field where
+  `name` is a human-readable name for the institution and `id` is a unique identifier
+  for the institution. For Pelican running in OSDF alias, the `id` will be OSG ID.
+
+  For example:
+
+  ```
+  - name: University of Wisconsin - Madison
+    id: https://osg-htc.org/iid/01y2jtd41
+  ```
+
+type: object
+default: none
+components: ["nsregistry"]
+---
 ############################
 #   Server-level configs   #
 ############################
@@ -590,6 +643,13 @@ type: filename
 root_default: /etc/pelican/certificates/tls.key
 default: "$ConfigBase/certificates/tls.key"
 components: ["origin", "nsregistry", "director"]
+---
+name: Server.EnableUI
+description: >-
+  Indicate whether a server should enable its web UI.
+type: bool
+default: true
+components: ["origin", "nsregistry", "director", "cache"]
 ---
 name: Server.WebPort
 description: >-
@@ -648,9 +708,15 @@ components: ["origin", "director", "nsregistry"]
 name: Server.IssuerJwks
 description: >-
   A filepath indicating where the server's public JSON web keyset can be found.
-type: string
+type: filename
 default: none
 components: ["origin", "director", "nsregistry"]
+---
+name: Server.Modules
+description: >-
+  A list of modules to enable when running pelican in `pelican serve` mode.
+type: stringSlice
+default: []
 ---
 name: Server.UIActivationCodeFile
 description: >-
@@ -671,7 +737,8 @@ name: Server.SessionSecretFile
 description: >-
   The filepath to the secret for encrypt/decrypt session data for Pelican web UI to initiate a session cookie
 
-  This is only used for sending redirect request for OAuth2 authentication flow as of 11/22/2023
+  This is used for sending redirect request for OAuth2 authentication follow.
+  This is also used for CSRF auth key.
 type: filename
 default: $ConfigBase/session-secret
   The default content of the file is the hash of the concatenation of "pelican" and the DER form of ${IssuerKey}
@@ -864,7 +931,7 @@ name: OIDC.ClientRedirectHostname
 description: >-
   The hostname for the OIDC client redirect URL that the OIDC provider will redirect to after the user is authenticated
 
-  For development use only. Useful when developing in a container and you want to expose localhost 
+  For development use only. Useful when developing in a container and you want to expose localhost
   instead of container hostname to your OAuth provider
 type: string
 default: none

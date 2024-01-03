@@ -48,10 +48,24 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 )
 
-var progressContainer = mpb.New()
+var (
+	progressCtrOnce sync.Once
+	progressCtr     *mpb.Progress
+)
 
 type StoppedTransferError struct {
 	Err string
+}
+
+// The progress container object creates several
+// background goroutines.  Instead of creating the object
+// globally, create it on first use.  This avoids having
+// the progress container routines launch in the server.
+func getProgressContainer() *mpb.Progress {
+	progressCtrOnce.Do(func() {
+		progressCtr = mpb.New()
+	})
+	return progressCtr
 }
 
 func (e *StoppedTransferError) Error() string {
@@ -333,7 +347,7 @@ func download_http(sourceUrl *url.URL, destination string, payload *payloadStruc
 	//tf := TransferFiles{files: files}
 
 	if ObjectClientOptions.Recursive && ObjectClientOptions.ProgressBars {
-		log.SetOutput(progressContainer)
+		log.SetOutput(getProgressContainer())
 	}
 	// Start the workers
 	for i := 1; i <= 5; i++ {
@@ -367,7 +381,7 @@ func download_http(sourceUrl *url.URL, destination string, payload *payloadStruc
 	}
 	// Make sure to close the progressContainer after all download complete
 	if ObjectClientOptions.Recursive && ObjectClientOptions.ProgressBars {
-		progressContainer.Wait()
+		getProgressContainer().Wait()
 		log.SetOutput(os.Stdout)
 	}
 	return downloaded, downloadError
@@ -545,7 +559,7 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 
 	var progressBar *mpb.Bar
 	if ObjectClientOptions.ProgressBars {
-		progressBar = progressContainer.AddBar(0,
+		progressBar = getProgressContainer().AddBar(0,
 			mpb.PrependDecorators(
 				decor.Name(filename, decor.WCSyncSpaceR),
 				decor.CountersKibiByte("% .2f / % .2f"),
@@ -610,7 +624,7 @@ Loop:
 					continue
 				} else if startBelowLimit == 0 {
 					warning := []byte("Warning! Downloading too slow...\n")
-					status, err := progressContainer.Write(warning)
+					status, err := getProgressContainer().Write(warning)
 					if err != nil {
 						log.Errorln("Problem displaying slow message", err, status)
 						continue
@@ -657,7 +671,7 @@ Loop:
 					if ObjectClientOptions.Recursive {
 						progressBar.Wait()
 					} else { // Otherwise just close it
-						progressContainer.Wait()
+						getProgressContainer().Wait()
 					}
 				}
 			}
@@ -768,7 +782,7 @@ func UploadDirectory(src string, dest *url.URL, token string, namespace namespac
 	}
 
 	if ObjectClientOptions.ProgressBars {
-		log.SetOutput(progressContainer)
+		log.SetOutput(getProgressContainer())
 	}
 	// Upload all of our files within the proper directories
 	for _, file := range files {
@@ -785,7 +799,7 @@ func UploadDirectory(src string, dest *url.URL, token string, namespace namespac
 	}
 	// Close progress bar container
 	if ObjectClientOptions.ProgressBars {
-		progressContainer.Wait()
+		getProgressContainer().Wait()
 		log.SetOutput(os.Stdout)
 	}
 	return amountDownloaded, err
@@ -875,7 +889,7 @@ func UploadFile(src string, origDest *url.URL, token string, namespace namespace
 
 	var progressBar *mpb.Bar
 	if ObjectClientOptions.ProgressBars {
-		progressBar = progressContainer.AddBar(0,
+		progressBar = getProgressContainer().AddBar(0,
 			mpb.PrependDecorators(
 				decor.Name(src, decor.WCSyncSpaceR),
 				decor.CountersKibiByte("% .2f / % .2f"),
@@ -897,7 +911,7 @@ func UploadFile(src string, origDest *url.URL, token string, namespace namespace
 			if ObjectClientOptions.Recursive {
 				progressBar.Wait()
 			} else { // If not recursive, go ahead and close it
-				progressContainer.Wait()
+				getProgressContainer().Wait()
 			}
 		}()
 	}

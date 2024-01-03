@@ -22,6 +22,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
@@ -59,6 +60,9 @@ func TestDirectorRegistration(t *testing.T) {
 	* corresponding token and invokes the registration endpoint, it then does
 	* so again with an invalid token and confirms that the correct error is returned
 	 */
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
 
 	viper.Reset()
 
@@ -120,7 +124,7 @@ func TestDirectorRegistration(t *testing.T) {
 	}
 
 	setupRequest := func(c *gin.Context, r *gin.Engine, bodyByt []byte, token string) {
-		r.POST("/", RegisterOrigin)
+		r.POST("/", func(gctx *gin.Context) { RegisterOrigin(ctx, gctx) })
 		c.Request, _ = http.NewRequest(http.MethodPost, "/", bytes.NewBuffer(bodyByt))
 		c.Request.Header.Set("Authorization", "Bearer "+token)
 		c.Request.Header.Set("Content-Type", "application/json")
