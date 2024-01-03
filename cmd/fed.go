@@ -44,8 +44,6 @@ func init() {
 	if err := viper.BindPFlag("Server.Modules", serveCmd.Flags().Lookup("module")); err != nil {
 		panic(err)
 	}
-	serveCmd.Flags().Uint16("reg-port", 8446, "Port for the namespace registry")
-	serveCmd.Flags().Uint16("director-port", 8445, "Port for the director")
 	serveCmd.Flags().Uint16("origin-port", 8443, "Port for the origin")
 	serveCmd.Flags().Uint16("cache-port", 8442, "Port for the cache")
 }

@@ -24,6 +24,9 @@ import (
 	"context"
 	"encoding/json"
 	"net/url"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/pelicanplatform/pelican/cache_ui"
@@ -84,23 +87,31 @@ func serveCache(cmd *cobra.Command, _ []string) error {
 
 func serveCacheInternal(ctx context.Context) error {
 	// Use this context for any goroutines that needs to react to server shutdown
-	shutdownCtx, shutdownCancel := context.WithCancel(ctx)
-	// Use this wait group to ensure the goroutines can finish before the server exits/shutdown
-	egrp, ctx := errgroup.WithContext(shutdownCtx)
+	ctx, shutdownCancel := context.WithCancel(ctx)
 
-	// This anonymous function ensures we cancel any context and wait for those goroutines to
-	// finish their cleanup work before the server exits
-	defer func() {
-		shutdownCancel()
-		if err := egrp.Wait(); err != nil {
-			log.Errorln("Failure when cleaning up cache:", err)
-		}
-		if err := config.CleanupTempResources(); err != nil {
-			log.Errorln("Failure when cleaning up temp directories:", err)
-		}
-	}()
+	err := config.InitServer(ctx, config.CacheType)
+	cobra.CheckErr(err)
 
-	err := xrootd.SetUpMonitoring(ctx, egrp)
+	egrp, ok := ctx.Value(config.EgrpKey).(*errgroup.Group)
+	if !ok {
+		egrp = &errgroup.Group{}
+	}
+
+	egrp.Go(func() error {
+		log.Debug("Will shutdown process on signal")
+		sigs := make(chan os.Signal, 1)
+		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+		select {
+		case sig := <-sigs:
+			log.Debugf("Received signal %v; will shutdown process", sig)
+			shutdownCancel()
+			return errors.New("Federation process has been cancelled")
+		case <-ctx.Done():
+			return nil
+		}
+	})
+
+	err = xrootd.SetUpMonitoring(ctx, egrp)
 	if err != nil {
 		return err
 	}
