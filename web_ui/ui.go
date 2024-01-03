@@ -318,7 +318,7 @@ func runEngineWithListener(ctx context.Context, ln net.Listener, engine *gin.Eng
 
 	server_utils.LaunchWatcherMaintenance(
 		ctx,
-		filepath.Dir(param.Server_TLSCertificate.GetString()),
+		[]string{filepath.Dir(param.Server_TLSCertificate.GetString())},
 		"server TLS maintenance",
 		2*time.Minute,
 		func(notifyEvent bool) error {
