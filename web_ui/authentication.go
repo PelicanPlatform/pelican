@@ -207,8 +207,16 @@ func loginHandler(ctx *gin.Context) {
 		ctx.JSON(400, gin.H{"error": "Missing user/password in form data"})
 		return
 	}
+	if strings.TrimSpace(login.User) == "" {
+		ctx.JSON(400, gin.H{"error": "User is required"})
+		return
+	}
+	if strings.TrimSpace(login.Password) == "" {
+		ctx.JSON(400, gin.H{"error": "Password is required"})
+		return
+	}
 	if !db.Match(login.User, login.Password) {
-		ctx.JSON(401, gin.H{"error": "Login failed"})
+		ctx.JSON(401, gin.H{"error": "Password and user didn't match"})
 		return
 	}
 
