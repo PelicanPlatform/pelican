@@ -257,7 +257,7 @@ paths:
     get:
       tags:
         - common
-      summary: Return the configuration values of the server
+      summary: Return the configuration values of the server and their type
       description: "`Authentication Required`"
       produces:
         - application/json
@@ -266,7 +266,39 @@ paths:
           description: OK
           schema:
             type: object
-            description: The JSON object output from viper with all config values in the current server
+            description: The JSON object output from viper with all config values and their type in the current server
+            example:
+              ConfigDir:
+                Type: "string"
+                Value: "/etc/pelican"
+              Debug:
+                Type: "bool"
+                Value: true
+              DisableHttpProxy:
+                Type: "bool"
+                Value: false
+              DisableProxyFallback:
+                Type: "bool"
+                Value: false
+              MinimumDownloadSpeed:
+                Type: "int"
+                Value: 0
+              Cache:
+                DataLocation:
+                  Type: "string"
+                  Value: "/run/pelican/xcache"
+                EnableVoms:
+                  Type: "bool"
+                  Value: false
+                ExportLocation:
+                  Type: "string"
+                  Value: "/"
+                Port:
+                  Type: "int"
+                  Value: 8447
+                XRootDPrefix:
+                  Type: "string"
+                  Value: ""
         "401":
           description: Unauthorized
   /auth/login:
