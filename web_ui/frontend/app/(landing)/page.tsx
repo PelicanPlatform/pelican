@@ -49,7 +49,7 @@ export default function Home() {
 
         const getEnabledServers = async () => {
             try {
-                const res = await fetch("/api/servers")
+                const res = await fetch("/api/v1.0/servers")
                 const data = await res.json()
                 setEnabledServers(data)
             } catch {
