@@ -8,6 +8,7 @@ Server:
   TLSCertificate: /etc/grid-security/xrd/xrdcert.pem
   TLSKey: /etc/grid-security/xrd/xrdkey.pem
   TLSCACertificateDirectory: /etc/grid-security/certificates
+  EnableUI: false
 #  Hostname: f.q.d.n
 Xrootd:
   Sitename: TOPOLOGY_RESOURCE_NAME
@@ -17,7 +18,7 @@ Xrootd:
   Mount: "/mnt/osdf"
   Port: 1095
 #  Authfile: /run/stash-origin-auth/Authfile
+#  ScitokensConfig: /run/stash-origin-auth/scitokens.conf
 Origin:
   NamespacePrefix: "/MY_NAMESPACE"
   Multiuser: false
-  EnableUI: false
