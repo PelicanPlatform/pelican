@@ -134,6 +134,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		log.Errorln("Web engine startup appears to have failed:", err)
 	}
 
+	log.Debug("Finishing origin server configuration")
 	if modules.IsEnabled(config.OriginType) {
 		if err = OriginServeFinish(ctx, egrp); err != nil {
 			return shutdownCancel, err
