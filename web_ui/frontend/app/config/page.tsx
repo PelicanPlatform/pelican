@@ -33,16 +33,20 @@ import {
     Typography,
     Skeleton,
     Link,
-    Container
+    Container, Tooltip
 } from "@mui/material";
 import React, {useEffect, useState} from "react";
 import {OverridableStringUnion} from "@mui/types";
 import {Variant} from "@mui/material/styles/createTypography";
 import {TypographyPropsVariantOverrides} from "@mui/material/Typography";
 import TextField from "@mui/material/TextField";
-import {ArrowDropDown, ArrowDropUp} from '@mui/icons-material';
+import {AppRegistration, ArrowDropDown, ArrowDropUp, AssistantDirection, TripOrigin} from '@mui/icons-material';
 import {fontSize} from "@mui/system"
 import {isLoggedIn} from "@/helpers/login";
+import {Sidebar} from "@/components/layout/Sidebar";
+import Image from "next/image";
+import PelicanLogo from "@/public/static/images/PelicanPlatformLogo_Icon.png";
+import IconButton from "@mui/material/IconButton";
 
 type duration = number | `${number}${"ns" | "us" | "µs" | "ms" |"s" | "m" | "h"}`;
 
@@ -266,6 +270,7 @@ function TableOfContents({id, name, value, level = 1}: TableOfContentsProps) {
 export default function Config() {
 
     const [config, setConfig] = useState<Config|undefined>(undefined)
+    const [enabledServers, setEnabledServers] = useState<string[]>([])
     const [error, setError] = useState<string|undefined>(undefined)
 
     let getConfig = async () => {
@@ -283,8 +288,19 @@ export default function Config() {
         }
     }
 
+    const getEnabledServers = async () => {
+        try {
+            const res = await fetch("/api/v1.0/servers")
+            const data = await res.json()
+            setEnabledServers(data)
+        } catch {
+            setEnabledServers(["origin", "director", "registry"])
+        }
+    }
+
     useEffect(() => {
         getConfig()
+        getEnabledServers()
     }, [])
 
 
@@ -298,32 +314,78 @@ export default function Config() {
     }
 
     return (
-        <Container maxWidth={"xl"} sx={{"mt": 2 }}>
-            <Box width={"100%"}>
-                <Grid container spacing={2}>
-                    <Grid item xs={7} md={8} lg={6}>
-                        <Typography variant={"h4"} component={"h2"} mb={1}>Configuration</Typography>
-                    </Grid>
-                    <Grid  item xs={5} md={4} lg={3}></Grid>
-                    <Grid item xs={7} md={8} lg={6}>
-                        <form>
-                            {
-                                config === undefined ?
-                                    <Skeleton  variant="rectangular" animation="wave" height={"1000px"}/> :
-                                    <ConfigDisplay id={[]} name={""} value={config} level={4}/>
-                            }
-                        </form>
-                    </Grid>
-                    <Grid item xs={5} md={4} lg={3}>
-                        {
-                            config === undefined ?
-                                <Skeleton  variant="rectangular" animation="wave" height={"1000px"}/> :
-                                <Box pt={2}><TableOfContents id={[]} name={""} value={config} level={1}/></Box>
-                        }
-                    </Grid>
-                </Grid>
+        <>
+            <Sidebar>
+                <Link href={"/index.html"}>
+                    <Image
+                        src={PelicanLogo}
+                        alt={"Pelican Logo"}
+                        width={36}
+                        height={36}
+                    />
+                </Link>
+                { enabledServers.includes("origin") &&
+                    <Box pt={3}>
+                        <Link href={"/view/origin/index.html"}>
+                            <Tooltip title={"Origin"} placement={"right"}>
+                                <IconButton>
+                                    <TripOrigin/>
+                                </IconButton>
+                            </Tooltip>
+                        </Link>
+                    </Box>
+                }
+                { enabledServers.includes("director") &&
+                    <Box pt={1}>
+                        <Link href={"/view/director/index.html"}>
+                            <Tooltip title={"Director"} placement={"right"}>
+                                <IconButton>
+                                    <AssistantDirection/>
+                                </IconButton>
+                            </Tooltip>
+                        </Link>
+                    </Box>
+                }
+                { enabledServers.includes("registry") &&
+                    <Box pt={1}>
+                        <Link href={"/view/registry/index.html"}>
+                            <Tooltip title={"Registry"} placement={"right"}>
+                                <IconButton>
+                                    <AppRegistration/>
+                                </IconButton>
+                            </Tooltip>
+                        </Link>
+                    </Box>
+                }
+            </Sidebar>
+            <Box component={"main"} pl={"72px"} pb={2} display={"flex"} minHeight={"100vh"} flexGrow={1}>
+                <Container maxWidth={"xl"} sx={{"mt": 2 }}>
+                    <Box width={"100%"}>
+                        <Grid container spacing={2}>
+                            <Grid item xs={7} md={8} lg={6}>
+                                <Typography variant={"h4"} component={"h2"} mb={1}>Configuration</Typography>
+                            </Grid>
+                            <Grid  item xs={5} md={4} lg={3}></Grid>
+                            <Grid item xs={7} md={8} lg={6}>
+                                <form>
+                                    {
+                                        config === undefined ?
+                                            <Skeleton  variant="rectangular" animation="wave" height={"1000px"}/> :
+                                            <ConfigDisplay id={[]} name={""} value={config} level={4}/>
+                                    }
+                                </form>
+                            </Grid>
+                            <Grid item xs={5} md={4} lg={3}>
+                                {
+                                    config === undefined ?
+                                        <Skeleton  variant="rectangular" animation="wave" height={"1000px"}/> :
+                                        <Box pt={2}><TableOfContents id={[]} name={""} value={config} level={1}/></Box>
+                                }
+                            </Grid>
+                        </Grid>
+                    </Box>
+                </Container>
             </Box>
-        </Container>
-
+        </>
     )
 }
