@@ -290,14 +290,12 @@ func LoadScitokensConfig(fileName string) (cfg ScitokensCfg, err error) {
 	cfg.IssuerMap = make(map[string]Issuer)
 
 	if section, err := configIni.GetSection("Global"); err == nil {
-		audienceKey := section.Key("audience")
-		if audienceKey != nil {
+		if audienceKey := section.Key("audience"); audienceKey != nil {
 			for _, audience := range audienceKey.Strings(",") {
 				cfg.Global.Audience = append(cfg.Global.Audience, strings.TrimSpace(audience))
 			}
 		}
-		audienceKey = section.Key("audience_json")
-		if audienceKey != nil {
+		if audienceKey := section.Key("audience_json"); audienceKey != nil && audienceKey.String() != "" {
 			var audiences []string
 			if err := json.Unmarshal([]byte(audienceKey.String()), &audiences); err != nil {
 				return cfg, errors.Wrapf(err, "Unable to parse audience_json from %s", fileName)

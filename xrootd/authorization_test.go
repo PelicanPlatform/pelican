@@ -29,6 +29,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -83,6 +84,16 @@ u * /user/ligo -rl \
 /VDC/PUBLIC rl`
 
 	cacheAuthfileOutput = "u * /.well-known lr /user/ligo -rl /Gluex rl /NSG/PUBLIC rl /VDC/PUBLIC rl\n"
+
+	// Configuration snippet from bug report #601
+	scitokensCfgAud = `
+[Global]
+audience = GLOW, HCC, IceCube, NRP, OSG, PATh, UCSD
+
+[Issuer https://ap20.uc.osg-htc.org:1094/ospool/ap20]
+issuer = https://ap20.uc.osg-htc.org:1094/ospool/ap20
+base_path = /ospool/ap20
+`
 
 	// Actual authfile entries here are from the bug report #568
 	otherAuthfileEntries = `# DN: /CN=sc-origin.chtc.wisc.edu
@@ -204,6 +215,41 @@ func TestLoadScitokensConfig(t *testing.T) {
 	t.Run("EmptyConfig", configTester(emptyOutput))
 	t.Run("SimpleIssuer", configTester(simpleOutput))
 	t.Run("DualIssuers", configTester(dualOutput))
+}
+
+// Test that merging the configuration works without throwing any errors
+func TestMergeConfig(t *testing.T) {
+	dirname := t.TempDir()
+	viper.Reset()
+	viper.Set("Xrootd.RunLocation", dirname)
+	scitokensConfigFile := filepath.Join(dirname, "scitokens-input.cfg")
+	viper.Set("Xrootd.ScitokensConfig", scitokensConfigFile)
+
+	configTester := func(configInput string, postProcess func(*testing.T, ScitokensCfg)) func(t *testing.T) {
+		return func(t *testing.T) {
+			ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+			defer func() { require.NoError(t, egrp.Wait()) }()
+			defer cancel()
+
+			err := os.WriteFile(scitokensConfigFile, []byte(configInput), fs.FileMode(0600))
+			require.NoError(t, err)
+
+			err = config.InitServer(ctx, config.OriginType)
+			require.NoError(t, err)
+
+			err = EmitScitokensConfig(&origin_ui.OriginServer{})
+			require.NoError(t, err)
+
+			cfg, err := LoadScitokensConfig(filepath.Join(dirname, "scitokens-origin-generated.cfg"))
+			require.NoError(t, err)
+
+			postProcess(t, cfg)
+		}
+	}
+
+	t.Run("AudienceNoJson", configTester(scitokensCfgAud, func(t *testing.T, cfg ScitokensCfg) {
+		assert.True(t, reflect.DeepEqual([]string{"GLOW", "HCC", "IceCube", "NRP", "OSG", "PATh", "UCSD", param.Server_IssuerUrl.GetString()}, cfg.Global.Audience))
+	}))
 }
 
 func TestGenerateConfig(t *testing.T) {
