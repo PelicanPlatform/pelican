@@ -3,6 +3,7 @@ Logging:
   Level: "Error"
 Federation:
   DiscoveryUrl: osg-htc.org
+  DirectorUrl: https://director-origins.osg-htc.org
   TopologyNamespaceURL: https://topology.opensciencegrid.org/osdf/namespaces
 Server:
   TLSCertificate: /etc/grid-security/xrd/xrdcert.pem
