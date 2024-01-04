@@ -694,23 +694,20 @@ func getOpenIDConfiguration(c *gin.Context) {
 }
 */
 
-func RegisterRegistryAPI(router *gin.RouterGroup) {
-	v1registry := router.Group("/api/v1.0/registry")
-	{
-		v1registry.POST("", cliRegisterNamespace)
-		v1registry.GET("", dbGetAllNamespaces)
-		// Will handle getting jwks, openid config, and listing namespaces
-		v1registry.GET("/*wildcard", metadataHandler)
-		v1registry.DELETE("/*wildcard", dbDeleteNamespace)
-	}
+func HandleWildcard(ctx *gin.Context) {
+	if strings.HasPrefix(ctx.Request.URL.Path, "/getNamespace") {
 
-	v2registry := router.Group("/api/v2.0/registry")
+	}
+}
+
+func RegisterRegistryAPI(router *gin.RouterGroup) {
+	registryAPI := router.Group("/api/v1.0/registry")
 	{
-		v2registry.POST("", cliRegisterNamespace)
-		v2registry.GET("", dbGetAllNamespaces)
-		v2registry.GET("/getNamespace", dbGetNamespace)
+		registryAPI.POST("", cliRegisterNamespace)
+		registryAPI.GET("", dbGetAllNamespaces)
+		registryAPI.GET("/getNamespace", dbGetNamespace)
 		// Will handle getting jwks, openid config, and listing namespaces
-		v2registry.GET("/metadata/*wildcard", metadataHandler)
-		v2registry.DELETE("/*wildcard", dbDeleteNamespace)
+		registryAPI.GET("/*wildcard", metadataHandler)
+		registryAPI.DELETE("/*wildcard", dbDeleteNamespace)
 	}
 }

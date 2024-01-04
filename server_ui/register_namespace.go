@@ -138,7 +138,7 @@ func registerNamespacePrep() (key jwk.Key, prefix string, registrationEndpointUR
 		return
 	}
 
-	registrationEndpointURL, err = url.JoinPath(namespaceEndpoint, "api", "v2.0", "registry")
+	registrationEndpointURL, err = url.JoinPath(namespaceEndpoint, "api", "v1.0", "registry")
 	if err != nil {
 		err = errors.Wrap(err, "Failed to construct registration endpoint URL: %v")
 		return
