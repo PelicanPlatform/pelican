@@ -73,6 +73,7 @@ var (
 	serverCredsLoad    sync.Once
 	serverCredsPrivKey *ecdsa.PrivateKey
 	serverCredsErr     error
+	prefixDNE          error = errors.New("Prefix does not exist")
 )
 
 type Response struct {
@@ -83,6 +84,10 @@ type Response struct {
 type TokenResponse struct {
 	AccessToken string `json:"access_token"`
 	Error       string `json:"error"`
+}
+
+type NamespaceConfig struct {
+	JwksUri string `json:"jwks_uri"`
 }
 
 /*
@@ -642,29 +647,57 @@ func metadataHandler(ctx *gin.Context) {
 		jwks, err := getNamespaceJwksByPrefix(prefix, true)
 		if err != nil {
 			if err == serverCredsErr {
-				ctx.JSON(404, gin.H{"error": "cache has not been approved by federation administrator"})
+				ctx.JSON(http.StatusNotFound, gin.H{"error": "cache has not been approved by federation administrator"})
+				return
+			} else if err == prefixDNE {
+				ctx.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("The requested prefix %s does not exist in the registry's database", prefix)})
+				return
+			} else {
+				ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error trying to get jwks for prefix"})
+				log.Errorf("Failed to load jwks for prefix %s: %v", prefix, err)
 				return
 			}
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error trying to get jwks for prefix"})
-			log.Errorf("Failed to load jwks for prefix %s: %v", prefix, err)
-			return
 		}
 		ctx.JSON(http.StatusOK, jwks)
+		return
+	} else if filepath.Base(path) == "namespace-configuration" {
+		// Check that the namespace exists before constructing config JSON
+		prefix := strings.TrimSuffix(path, "/.well-known/namespace-configuration")
+		exists, err := namespaceExists(prefix)
+		if err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Server encountered an error while checking if the prefix exists"})
+			log.Errorf("Error while checking for existence of prefix %s: %v", prefix, err)
+			return
+		}
+		if !exists {
+			ctx.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("The requested prefix %s does not exist in the registry's database", prefix)})
+		}
+		// Construct the namespace-configuration JSON and return to the requester
+		// For a given namespace "foo", the jwks should be located at <registry url>/api/v2.0/registry/metadata/foo/.well-known/issuer.jwks
+		configUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
+		if err != nil {
+			log.Errorf("Failed to parse configured external web URL while constructing namespace jwks location: %v", err)
+			return
+		}
+
+		path := strings.TrimSuffix(path, "/namespace-configuration")
+		configUrl.Path, err = url.JoinPath("api", "v2.0", "registry", "metadata", path, "issuer.jwks")
+		if err != nil {
+			log.Errorf("Failed to construct namespace jwks URL: %v", err)
+			return
+		}
+
+		nsCfg := NamespaceConfig{
+			JwksUri: configUrl.String(),
+		}
+
+		ctx.JSON(http.StatusOK, nsCfg)
+		return
+	} else {
+		log.Warningf("Request for unknown resource: /api/v2.0/registry/metadata/%s", path)
+		ctx.JSON(http.StatusNotFound, "Page not found")
+		return
 	}
-
-	// // Get OpenID config info
-	// match, err := filepath.Match("*/\\.well-known/openid-configuration", path)
-	// if err != nil {
-	// 	log.Errorf("Failed to check incoming path for match: %v", err)
-	// 	return
-	// }
-	// if match {
-	// 	// do something
-	// } else {
-	// 	log.Errorln("Unknown request")
-	// 	return
-	// }
-
 }
 
 func dbGetNamespace(ctx *gin.Context) {
