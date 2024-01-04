@@ -171,7 +171,7 @@ func serveCacheInternal(ctx context.Context) error {
 		return err
 	}
 
-	xrootd.LaunchXrootdMaintenance(ctx, 2*time.Minute)
+	xrootd.LaunchXrootdMaintenance(ctx, cacheServer, 2*time.Minute)
 
 	log.Info("Launching cache")
 	launchers, err := xrootd.ConfigureLaunchers(false, configPath, false)

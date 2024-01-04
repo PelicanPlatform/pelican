@@ -37,8 +37,10 @@ import (
 	"unicode"
 
 	"github.com/go-ini/ini"
+	"github.com/pelicanplatform/pelican/cache_ui"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
+	"github.com/pelicanplatform/pelican/origin_ui"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pkg/errors"
@@ -152,7 +154,7 @@ func ScanLinesWithCont(data []byte, atEOF bool) (advance int, token []byte, err 
 
 // Given a reference to a Scitokens configuration, write it out to a known location
 // on disk for the xrootd server
-func EmitScitokensConfiguration(modules config.ServerType, cfg *ScitokensCfg) error {
+func writeScitokensConfiguration(modules config.ServerType, cfg *ScitokensCfg) error {
 
 	JSONify := func(v any) (string, error) {
 		result, err := json.Marshal(v)
@@ -425,6 +427,17 @@ func makeSciTokensCfg() (cfg ScitokensCfg, err error) {
 	return cfg, nil
 }
 
+// Writes out the server's scitokens.cfg configuration
+func EmitScitokensConfig(server server_utils.XRootDServer) error {
+	if originServer, ok := server.(*origin_ui.OriginServer); ok {
+		return WriteOriginScitokensConfig(originServer.GetAuthorizedPrefixes())
+	} else if cacheServer, ok := server.(*cache_ui.CacheServer); ok {
+		return WriteCacheScitokensConfig(cacheServer.GetNamespaceAds())
+	} else {
+		return errors.New("Internal error: server object is neither cache nor origin")
+	}
+}
+
 // Writes out the origin's scitokens.cfg configuration
 func WriteOriginScitokensConfig(exportedPaths []string) error {
 	cfg, err := makeSciTokensCfg()
@@ -458,7 +471,7 @@ func WriteOriginScitokensConfig(exportedPaths []string) error {
 		}
 	}
 
-	return EmitScitokensConfiguration(config.OriginType, &cfg)
+	return writeScitokensConfiguration(config.OriginType, &cfg)
 }
 
 // Writes out the cache's scitokens.cfg configuration
@@ -482,7 +495,7 @@ func WriteCacheScitokensConfig(nsAds []director.NamespaceAd) error {
 		}
 	}
 
-	return EmitScitokensConfiguration(config.CacheType, &cfg)
+	return writeScitokensConfiguration(config.CacheType, &cfg)
 }
 
 func EmitIssuerMetadata(exportPath string) error {

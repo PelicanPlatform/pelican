@@ -77,7 +77,7 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) 
 		egrp.Go(func() error { return origin_ui.PeriodicSelfTest(ctx) })
 	}
 
-	xrootd.LaunchXrootdMaintenance(ctx, 2*time.Minute)
+	xrootd.LaunchXrootdMaintenance(ctx, originServer, 2*time.Minute)
 
 	privileged := param.Origin_Multiuser.GetBool()
 	launchers, err := xrootd.ConfigureLaunchers(privileged, configPath, param.Origin_EnableCmsd.GetBool())
