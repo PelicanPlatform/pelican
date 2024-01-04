@@ -42,6 +42,7 @@ func TestResetPassword(t *testing.T) {
 	dirName := t.TempDir()
 	viper.Reset()
 	viper.Set("ConfigDir", dirName)
+	config.InitConfig()
 	err := config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
 
