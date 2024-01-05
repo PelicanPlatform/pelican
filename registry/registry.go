@@ -342,7 +342,7 @@ func cliRegisterNamespace(ctx *gin.Context) {
 			return
 		}
 
-		resp, err := client.PostForm(OIDC.UserInfoEndpoint, payload)
+		resp, err := client.PostForm(oidcConfig.Endpoint.UserInfoURL, payload)
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error making request to user info endpoint"})
 			log.Errorf("Failed to execute post form to user info endpoint %s: %v", oidcConfig.Endpoint.UserInfoURL, err)
@@ -396,7 +396,7 @@ func cliRegisterNamespace(ctx *gin.Context) {
 		payload.Set("client_secret", oidcConfig.ClientSecret)
 		payload.Set("scope", strings.Join(oidcConfig.Scopes, " "))
 
-		response, err := client.PostForm(OIDC.DeviceAuthEndpoint, payload)
+		response, err := client.PostForm(oidcConfig.Endpoint.DeviceAuthURL, payload)
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered error requesting device code"})
 			log.Errorf("Failed to execute post form to device auth endpoint %s: %v", oidcConfig.Endpoint.DeviceAuthURL, err)
@@ -438,7 +438,7 @@ func cliRegisterNamespace(ctx *gin.Context) {
 		payload.Set("device_code", reqData.DeviceCode)
 		payload.Set("grant_type", "urn:ietf:params:oauth:grant-type:device_code")
 
-		response, err := client.PostForm(OIDC.TokenEndpoint, payload)
+		response, err := client.PostForm(oidcConfig.Endpoint.TokenURL, payload)
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error while making request to token endpoint"})
 			log.Errorf("Failed to execute post form to token endpoint %s: %v", oidcConfig.Endpoint.TokenURL, err)
