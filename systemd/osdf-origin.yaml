@@ -4,7 +4,8 @@ Logging:
 Server:
   TLSCertificate: /etc/grid-security/xrd/xrdcert.pem
   TLSKey: /etc/grid-security/xrd/xrdkey.pem
-  TLSCACertificateDirectory: /etc/grid-security/certificates
+  TLSCACertificateFile: /etc/pki/tls/certs/ca-bundle.crt
+  # TLSCACertificateDirectory: /etc/grid-security/certificates
   EnableUI: false
 #  Hostname: f.q.d.n
 Xrootd:
