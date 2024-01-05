@@ -264,19 +264,22 @@ func EmitAuthfile(server server_utils.XRootDServer) error {
 	if server.GetServerType().IsEnabled(config.CacheType) {
 		finalAuthPath = filepath.Join(xrootdRun, "authfile-cache-generated")
 	}
-	file, err := os.OpenFile(finalAuthPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0640)
+	tmpAuthPath := finalAuthPath + ".tmp"
+	file, err := os.OpenFile(tmpAuthPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0640)
 	if err != nil {
-		return errors.Wrapf(err, "Failed to create a generated authfile %s", finalAuthPath)
+		return errors.Wrapf(err, "Failed to create a generated authfile %s", tmpAuthPath)
 	}
 	defer file.Close()
-	if err = os.Chown(finalAuthPath, -1, gid); err != nil {
+	if err = os.Chown(tmpAuthPath, -1, gid); err != nil {
 		return errors.Wrapf(err, "Unable to change ownership of generated auth"+
-			"file %v to desired daemon gid %v", finalAuthPath, gid)
+			"file %v to desired daemon gid %v", tmpAuthPath, gid)
 	}
 	if _, err := output.WriteTo(file); err != nil {
-		return errors.Wrapf(err, "Failed to write to generated authfile %v", finalAuthPath)
+		return errors.Wrapf(err, "Failed to write to generated authfile %v", tmpAuthPath)
 	}
-
+	if err := os.Rename(tmpAuthPath, finalAuthPath); err != nil {
+		return errors.Wrapf(err, "Failed to move generated auth file to the final location")
+	}
 	return nil
 }
 

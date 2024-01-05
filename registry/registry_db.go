@@ -41,53 +41,59 @@ import (
 	"github.com/pelicanplatform/pelican/utils"
 )
 
-type RegistrationStatus string
+type (
+	RegistrationStatus string
 
-// The AdminMetadata is used in [Namespace] as a marshalled JSON string
-// to be stored in registry DB.
-//
-// The *UserID are meant to correspond to the "sub" claim of the user token that
-// the OAuth client issues if the user is logged in using OAuth, or it should be
-// "admin" from local password-based authentication.
-//
-// To prevent users from writing to certain fields (readonly), you may use "post" tag
-// with value "exclude". This will exclude the field from user's create/update requests
-// and the field will also be excluded from field discovery endpoint (OPTION method).
-//
-// We use validator package to validate struct fields from user requests. If a field is
-// required, add `validate:"required"` to that field. This tag will also be used by fields discovery
-// endpoint to tell the UI if a field is required. For other validator tags,
-// visit: https://pkg.go.dev/github.com/go-playground/validator/v10
-type AdminMetadata struct {
-	UserID                string             `json:"user_id" post:"exclude"` // "sub" claim of user JWT who requested registration
-	Description           string             `json:"description"`
-	SiteName              string             `json:"site_name"`
-	Institution           string             `json:"institution" validate:"required"` // the unique identifier of the institution
-	SecurityContactUserID string             `json:"security_contact_user_id"`        // "sub" claim of user who is responsible for taking security concern
-	Status                RegistrationStatus `json:"status" post:"exclude"`
-	ApproverID            string             `json:"approver_id" post:"exclude"` // "sub" claim of user JWT who approved registration
-	ApprovedAt            time.Time          `json:"approved_at" post:"exclude"`
-	CreatedAt             time.Time          `json:"created_at" post:"exclude"`
-	UpdatedAt             time.Time          `json:"updated_at" post:"exclude"`
-}
+	// The AdminMetadata is used in [Namespace] as a marshalled JSON string
+	// to be stored in registry DB.
+	//
+	// The *UserID are meant to correspond to the "sub" claim of the user token that
+	// the OAuth client issues if the user is logged in using OAuth, or it should be
+	// "admin" from local password-based authentication.
+	//
+	// To prevent users from writing to certain fields (readonly), you may use "post" tag
+	// with value "exclude". This will exclude the field from user's create/update requests
+	// and the field will also be excluded from field discovery endpoint (OPTION method).
+	//
+	// We use validator package to validate struct fields from user requests. If a field is
+	// required, add `validate:"required"` to that field. This tag will also be used by fields discovery
+	// endpoint to tell the UI if a field is required. For other validator tags,
+	// visit: https://pkg.go.dev/github.com/go-playground/validator/v10
+	AdminMetadata struct {
+		UserID                string             `json:"user_id" post:"exclude"` // "sub" claim of user JWT who requested registration
+		Description           string             `json:"description"`
+		SiteName              string             `json:"site_name"`
+		Institution           string             `json:"institution" validate:"required"` // the unique identifier of the institution
+		SecurityContactUserID string             `json:"security_contact_user_id"`        // "sub" claim of user who is responsible for taking security concern
+		Status                RegistrationStatus `json:"status" post:"exclude"`
+		ApproverID            string             `json:"approver_id" post:"exclude"` // "sub" claim of user JWT who approved registration
+		ApprovedAt            time.Time          `json:"approved_at" post:"exclude"`
+		CreatedAt             time.Time          `json:"created_at" post:"exclude"`
+		UpdatedAt             time.Time          `json:"updated_at" post:"exclude"`
+	}
 
-type Namespace struct {
-	ID            int           `json:"id" post:"exclude"`
-	Prefix        string        `json:"prefix" validate:"required"`
-	Pubkey        string        `json:"pubkey" validate:"required"`
-	Identity      string        `json:"identity" post:"exclude"`
-	AdminMetadata AdminMetadata `json:"admin_metadata"`
-}
+	Namespace struct {
+		ID            int           `json:"id" post:"exclude"`
+		Prefix        string        `json:"prefix" validate:"required"`
+		Pubkey        string        `json:"pubkey" validate:"required"`
+		Identity      string        `json:"identity" post:"exclude"`
+		AdminMetadata AdminMetadata `json:"admin_metadata"`
+	}
 
-type NamespaceWOPubkey struct {
-	ID            int           `json:"id"`
-	Prefix        string        `json:"prefix"`
-	Pubkey        string        `json:"-"` // Don't include pubkey in this case
-	Identity      string        `json:"identity"`
-	AdminMetadata AdminMetadata `json:"admin_metadata"`
-}
+	NamespaceWOPubkey struct {
+		ID            int           `json:"id"`
+		Prefix        string        `json:"prefix"`
+		Pubkey        string        `json:"-"` // Don't include pubkey in this case
+		Identity      string        `json:"identity"`
+		AdminMetadata AdminMetadata `json:"admin_metadata"`
+	}
 
-type ServerType string
+	ServerType string
+)
+
+var (
+	errNoPrefix error = errors.New("prefix not found in database")
+)
 
 const (
 	OriginType ServerType = "origin"
@@ -293,7 +299,7 @@ func getNamespaceJwksById(id int) (jwk.Set, error) {
 	err := db.QueryRow(jwksQuery, id).Scan(&pubkeyStr)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, errors.New("prefix not found in database")
+			return nil, errNoPrefix
 		}
 		return nil, errors.Wrap(err, "error performing origin pubkey query")
 	}
@@ -315,7 +321,7 @@ func getNamespaceJwksByPrefix(prefix string, approvalRequired bool) (*jwk.Set, e
 		err := db.QueryRow(jwksQuery, prefix).Scan(&pubkeyStr, &adminMetadataStr)
 		if err != nil {
 			if err == sql.ErrNoRows {
-				return nil, errors.New("prefix not found in database")
+				return nil, errNoPrefix
 			}
 			return nil, errors.Wrap(err, "error performing cache pubkey query")
 		}
@@ -334,7 +340,7 @@ func getNamespaceJwksByPrefix(prefix string, approvalRequired bool) (*jwk.Set, e
 		err := db.QueryRow(jwksQuery, prefix).Scan(&pubkeyStr)
 		if err != nil {
 			if err == sql.ErrNoRows {
-				return nil, errors.New("prefix not found in database")
+				return nil, errNoPrefix
 			}
 			return nil, errors.Wrap(err, "error performing origin pubkey query")
 		}

@@ -38,6 +38,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -633,16 +634,22 @@ func metadataHandler(ctx *gin.Context) {
 	// add a preceding /. Since the prefix / was trimmed
 	// out during the url parsing, we can just leave the
 	// new / here!
-	path := ctx.Param("wildcard")
+	path_param := ctx.Param("wildcard")
 
 	// Get the prefix's JWKS
-	if filepath.Base(path) == "issuer.jwks" {
+	if filepath.Base(path_param) == "issuer.jwks" {
 		// do something
-		prefix := strings.TrimSuffix(path, "/.well-known/issuer.jwks")
+		prefix := path.Clean(strings.TrimSuffix(path_param, "/.well-known/issuer.jwks"))
 		jwks, err := getNamespaceJwksByPrefix(prefix, true)
+
 		if err != nil {
-			if err == serverCredsErr {
-				ctx.JSON(404, gin.H{"error": "cache has not been approved by federation administrator"})
+			if errors.Is(err, serverCredsErr) {
+				ctx.JSON(http.StatusNotFound, gin.H{"error": "cache has not been approved by federation administrator"})
+				log.Warningf("Request for cache %s which is not approved by federation administrator", prefix)
+				return
+			} else if errors.Is(err, errNoPrefix) {
+				ctx.JSON(http.StatusNotFound, gin.H{"error": "Prefix has not been registered"})
+				log.Warningf("Request for prefix %s which has not yet been registered: %v", prefix, err)
 				return
 			}
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error trying to get jwks for prefix"})
@@ -653,7 +660,7 @@ func metadataHandler(ctx *gin.Context) {
 	}
 
 	// // Get OpenID config info
-	// match, err := filepath.Match("*/\\.well-known/openid-configuration", path)
+	// match, err := filepath.Match("*/\\.well-known/openid-configuration", path_param)
 	// if err != nil {
 	// 	log.Errorf("Failed to check incoming path for match: %v", err)
 	// 	return
