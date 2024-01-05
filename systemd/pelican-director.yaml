@@ -1,0 +1,5 @@
+Debug: false
+Logging:
+  Level: "Error"
+Federation:
+  DiscoveryUrl:

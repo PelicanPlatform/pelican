@@ -1,0 +1,20 @@
+## Enable Debug to send logs, including XRootD logs, to the system journal
+# Debug: false
+# Logging:
+#   Level: "Error"
+Federation:
+  DirectorUrl: https://director-origins.osg-htc.org
+Server:
+  TLSCertificate: /etc/grid-security/xrd/xrdcert.pem
+  TLSKey: /etc/grid-security/xrd/xrdkey.pem
+  TLSCACertificateFile: /etc/pki/tls/certs/ca-bundle.crt
+  # TLSCACertificateDirectory: /etc/grid-security/certificates
+  EnableUI: false
+#  Hostname: f.q.d.n
+Xrootd:
+  Sitename: TOPOLOGY_RESOURCE_NAME
+  Mount: "/mnt/osdf"
+  Authfile: /run/stash-cache-auth/Authfile
+  ScitokensConfig: /run/stash-cache-auth/scitokens.conf
+Cache:
+  Port: 8443

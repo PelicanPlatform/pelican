@@ -1,0 +1,15 @@
+## Enable Debug to send logs, including XRootD logs, to the system journal
+# Debug: false
+# Logging:
+#   Level: "Error"
+Federation:
+  DiscoveryUrl:
+#Server:
+#  Hostname: f.q.d.n
+Xrootd:
+  Mount: "/mnt/pelican"
+  Port: 8443
+Origin:
+  NamespacePrefix: "/MY_NAMESPACE"
+  Multiuser: false
+  EnableUI: true

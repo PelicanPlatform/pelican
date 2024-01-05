@@ -1,0 +1,8 @@
+## Enable Debug to send logs to the system journal
+# Debug: false
+# Logging:
+#   Level: "Error"
+Server:
+  TLSCertificate: /etc/grid-security/xrd/xrdcert.pem
+  TLSKey: /etc/grid-security/xrd/xrdkey.pem
+  TLSCACertificateFile: /etc/pki/tls/certs/ca-bundle.crt

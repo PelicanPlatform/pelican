@@ -1,0 +1,9 @@
+[Unit]
+Description = Pelican service pelican-cache
+After = network.target nss-lookup.target
+
+[Service]
+ExecStart = /usr/bin/pelican --config /etc/pelican/pelican-cache.yaml cache serve
+
+[Install]
+WantedBy = multi-user.target
