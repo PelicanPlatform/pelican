@@ -3,7 +3,7 @@ Description = Pelican service osdf-registry
 After = network.target nss-lookup.target
 
 [Service]
-ExecStart = /usr/bin/pelican --config /etc/pelican/osdf-registry.yaml registry serve
+ExecStart = /usr/bin/osdf --config /etc/pelican/osdf-registry.yaml registry serve
 
 [Install]
 WantedBy = multi-user.target
