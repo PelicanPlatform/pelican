@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -173,6 +174,7 @@ func TestGetNamespaceJWKS(t *testing.T) {
 
 	router := gin.Default()
 
+	router.GET("/metadata/*wildcard", metadataHandler)
 	router.GET("/test/:id/pubkey", getNamespaceJWKS)
 
 	tests := []struct {
@@ -247,6 +249,55 @@ func TestGetNamespaceJWKS(t *testing.T) {
 			}
 		})
 	}
+
+	testWKs := []struct {
+		description  string
+		prefix       string
+		expectedCode int
+		expectedData string
+	}{
+		{
+			description:  "valid-prefix-with-key",
+			prefix:       "/origin1",
+			expectedCode: http.StatusOK,
+			expectedData: strings.ReplaceAll(strings.ReplaceAll(mockPublicKey, "\n", ""), " ", ""), // Response removes newlines and whitespace
+		},
+		{
+			description:  "unregistered-prefix",
+			prefix:       "/origin_noprefix",
+			expectedCode: http.StatusNotFound,
+			expectedData: "",
+		},
+	}
+
+	for _, tc := range testWKs {
+		t.Run(tc.description, func(t *testing.T) {
+			err := insertMockDBData([]Namespace{
+				{
+					ID:     1,
+					Prefix: "/origin1",
+					Pubkey: mockPublicKey,
+				},
+			})
+			require.NoError(t, err)
+
+			defer resetNamespaceDB(t)
+
+			// Create a request to the endpoint
+			w := httptest.NewRecorder()
+			requestURL := fmt.Sprint("/metadata/", tc.prefix, "/.well-known/issuer.jwks")
+			req, _ := http.NewRequest("GET", requestURL, nil)
+			router.ServeHTTP(w, req)
+
+			// Check the response
+			require.Equal(t, tc.expectedCode, w.Code)
+
+			if tc.expectedCode == http.StatusOK {
+				assert.Equal(t, tc.expectedData, w.Body.String())
+			}
+		})
+	}
+
 }
 
 func TestAdminAuthHandler(t *testing.T) {

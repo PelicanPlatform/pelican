@@ -127,11 +127,24 @@ func mockNamespace(prefix, pubkey, identity string, adminMetadata AdminMetadata)
 	}
 }
 
-// Some genertic mock data function to be shared with other test
-// functinos in this package. Please treat them as "constants"
+// Some generic mock data function to be shared with other test
+// functions in this package. Please treat them as "constants"
 var (
+	mockPubkey string = `{
+  "keys": [
+    {
+      "alg": "ES512",
+      "crv": "P-521",
+      "kid": "2PAjb3vLeIyRGqWW4KofDf9rwxcjkQ_OyqMVTWvez58",
+      "kty": "EC",
+      "x": "AQgHgfD-_77ra3uiB9HbwiN2Ig00NdkpyiX-q2rIuCugh93XSmbwLdHiiemGbuvGShxPzE8IQP0j4KgP_LAOWvOi",
+      "y": "AbSESlmOXjWxAOaonePIbgIdm6CxSH1QB2b8tsCSNn6hr7KO2XMrCIUQKt5-CeUGe_h-IPRh_O1QO-PmBPI2WJZY"
+    }
+  ]
+}`
+
 	mockNssWithOrigins []Namespace = []Namespace{
-		mockNamespace("/test1", "pubkey1", "", AdminMetadata{}),
+		mockNamespace("/test1", mockPubkey, "", AdminMetadata{}),
 		mockNamespace("/test2", "pubkey2", "", AdminMetadata{}),
 	}
 	mockNssWithCaches []Namespace = []Namespace{
@@ -451,6 +464,26 @@ func TestGetNamespacesByServerType(t *testing.T) {
 		caches, err := getNamespacesByServerType(CacheType)
 		require.NoError(t, err)
 		assert.Equal(t, 0, len(caches), "Returned caches when only origins present in db")
+	})
+
+	t.Run("return-JWKS", func(t *testing.T) {
+		resetNamespaceDB(t)
+
+		err := insertMockDBData(mockNssWithOrigins)
+		require.NoError(t, err)
+
+		_, err = getNamespaceJwksByPrefix("/test1", false)
+		require.NoError(t, err)
+	})
+
+	t.Run("return-errNoPrefix", func(t *testing.T) {
+		resetNamespaceDB(t)
+
+		err := insertMockDBData(mockNssWithOrigins)
+		require.NoError(t, err)
+
+		_, err = getNamespaceJwksByPrefix("/test_noprefix", false)
+		require.Error(t, err, errNoPrefix)
 	})
 
 	t.Run("return-caches-as-expected", func(t *testing.T) {
