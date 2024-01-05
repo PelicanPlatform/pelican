@@ -23,7 +23,6 @@ import (
 	"crypto/tls"
 	"embed"
 	"fmt"
-	"github.com/pelicanplatform/pelican/config"
 	"math/rand"
 	"mime"
 	"net"
@@ -34,6 +33,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/pelicanplatform/pelican/config"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pelicanplatform/pelican/metrics"
@@ -88,7 +89,7 @@ func configureWebResource(engine *gin.Engine) error {
 		}
 
 		db := authDB.Load()
-		user, err := getUser(ctx)
+		user, err := GetUser(ctx)
 
 		// Redirect initialized users from initialization pages
 		if strings.HasPrefix(path, "/initialization") && strings.HasSuffix(path, "index.html") {

@@ -83,6 +83,19 @@ func insertMockDBData(nss []Namespace) error {
 	return tx.Commit()
 }
 
+func getLastNamespaceId() (int, error) {
+	var lastID int
+	err := db.QueryRow("SELECT id FROM namespace ORDER BY id DESC LIMIT 1").Scan(&lastID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return 0, errors.New("Empty database table.")
+		} else {
+			return 0, err
+		}
+	}
+	return lastID, nil
+}
+
 // Compares expected Namespace slice against either a slice of Namespace ptr or just Namespace
 func compareNamespaces(execpted []Namespace, returned interface{}, woPubkey bool) bool {
 	var normalizedReturned []Namespace
@@ -131,16 +144,30 @@ func mockNamespace(prefix, pubkey, identity string, adminMetadata AdminMetadata)
 // functinos in this package. Please treat them as "constants"
 var (
 	mockNssWithOrigins []Namespace = []Namespace{
-		mockNamespace("/test1", "pubkey1", "", AdminMetadata{}),
-		mockNamespace("/test2", "pubkey2", "", AdminMetadata{}),
+		mockNamespace("/test1", "pubkey1", "", AdminMetadata{Status: Approved}),
+		mockNamespace("/test2", "pubkey2", "", AdminMetadata{Status: Approved}),
 	}
 	mockNssWithCaches []Namespace = []Namespace{
-		mockNamespace("/caches/random1", "pubkey1", "", AdminMetadata{}),
-		mockNamespace("/caches/random2", "pubkey2", "", AdminMetadata{}),
+		mockNamespace("/caches/random1", "pubkey1", "", AdminMetadata{Status: Approved}),
+		mockNamespace("/caches/random2", "pubkey2", "", AdminMetadata{Status: Approved}),
+	}
+	mockNssWithOriginsNotApproved []Namespace = []Namespace{
+		mockNamespace("/pending1", "pubkey1", "", AdminMetadata{Status: Pending}),
+		mockNamespace("/pending2", "pubkey2", "", AdminMetadata{Status: Pending}),
+	}
+	mockNssWithCachesNotApproved []Namespace = []Namespace{
+		mockNamespace("/caches/pending1", "pubkey1", "", AdminMetadata{Status: Pending}),
+		mockNamespace("/caches/pending2", "pubkey2", "", AdminMetadata{Status: Pending}),
 	}
 	mockNssWithMixed []Namespace = func() (mixed []Namespace) {
 		mixed = append(mixed, mockNssWithOrigins...)
 		mixed = append(mixed, mockNssWithCaches...)
+		return
+	}()
+
+	mockNssWithMixedNotApproved []Namespace = func() (mixed []Namespace) {
+		mixed = append(mixed, mockNssWithOriginsNotApproved...)
+		mixed = append(mixed, mockNssWithCachesNotApproved...)
 		return
 	}()
 )
@@ -186,51 +213,43 @@ func TestGetNamespacesById(t *testing.T) {
 	})
 }
 
-func TestGetNamespacesByUserID(t *testing.T) {
+func TestGetNamespaceStatusById(t *testing.T) {
 	setupMockRegistryDB(t)
 	defer teardownMockNamespaceDB(t)
 
-	t.Run("empty-db-return-empty-array", func(t *testing.T) {
-		nss, err := getNamespacesByUserID("foo")
-		require.NoError(t, err)
-		assert.Equal(t, 0, len(nss))
+	t.Run("invalid-id", func(t *testing.T) {
+		_, err := getNamespaceStatusById(0)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "Invalid id")
 	})
 
-	t.Run("return-empty-array-with-no-userid-entries", func(t *testing.T) {
-		err := insertMockDBData(mockNssWithMixed)
-		require.NoError(t, err)
-		defer resetNamespaceDB(t)
-		nss, err := getNamespacesByUserID("foo")
-		require.NoError(t, err)
-		assert.Equal(t, 0, len(nss))
+	t.Run("db-query-error", func(t *testing.T) {
+		resetNamespaceDB(t)
+		// Simulate a DB error. You need to mock the db.QueryRow function to return an error
+		_, err := getNamespaceStatusById(1)
+		require.Error(t, err)
 	})
 
-	t.Run("return-user-namespace-with-valid-userID", func(t *testing.T) {
-		defer resetNamespaceDB(t)
-		err := insertMockDBData(mockNssWithMixed)
+	t.Run("valid-id-empty-admin-metadata", func(t *testing.T) {
+		resetNamespaceDB(t)
+		err := insertMockDBData([]Namespace{mockNamespace("/foo", "", "", AdminMetadata{})})
 		require.NoError(t, err)
-		err = insertMockDBData([]Namespace{mockNamespace("/user1", "", "user1", AdminMetadata{UserID: "user1"})})
+		lastId, err := getLastNamespaceId()
 		require.NoError(t, err)
-		nss, err := getNamespacesByUserID("user1")
+		status, err := getNamespaceStatusById(lastId)
 		require.NoError(t, err)
-		require.Equal(t, 1, len(nss))
-		assert.Equal(t, "/user1", nss[0].Prefix)
+		assert.Equal(t, Unknown, status)
 	})
 
-	t.Run("return-multiple-user-namespaces-with-valid-userID", func(t *testing.T) {
-		defer resetNamespaceDB(t)
-		err := insertMockDBData(mockNssWithMixed)
+	t.Run("valid-id-non-empty-admin-metadata", func(t *testing.T) {
+		resetNamespaceDB(t)
+		err := insertMockDBData([]Namespace{mockNamespace("/foo", "", "", AdminMetadata{Status: Approved})})
 		require.NoError(t, err)
-		err = insertMockDBData([]Namespace{mockNamespace("/user1", "", "user1", AdminMetadata{UserID: "user1"})})
+		lastId, err := getLastNamespaceId()
 		require.NoError(t, err)
-		err = insertMockDBData([]Namespace{mockNamespace("/user1-2", "", "user1", AdminMetadata{UserID: "user1"})})
+		status, err := getNamespaceStatusById(lastId)
 		require.NoError(t, err)
-		nss, err := getNamespacesByUserID("user1")
-		require.NoError(t, err)
-		require.Equal(t, 2, len(nss))
-		assert.Equal(t, "/user1", nss[0].Prefix)
-		assert.Equal(t, "/user1-2", nss[1].Prefix)
-
+		assert.Equal(t, Approved, status)
 	})
 }
 
@@ -404,8 +423,7 @@ func TestUpdateNamespaceStatusById(t *testing.T) {
 	})
 }
 
-// teardown must be called at the end of the test to close the in-memory SQLite db
-func TestGetNamespacesByServerType(t *testing.T) {
+func TestGetNamespacesByFilter(t *testing.T) {
 	_, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -413,77 +431,252 @@ func TestGetNamespacesByServerType(t *testing.T) {
 	setupMockRegistryDB(t)
 	defer teardownMockNamespaceDB(t)
 
-	t.Run("wrong-server-type-gives-error", func(t *testing.T) {
+	t.Run("return-error-for-unsupported-operations", func(t *testing.T) {
+		filterNsID := Namespace{
+			ID: 123,
+		}
+
+		_, err := getNamespacesByFilter(filterNsID, "")
+		require.Error(t, err, "Should return error for filtering against unsupported field ID")
+
+		filterNsIdentity := Namespace{
+			Identity: "someIdentity",
+		}
+
+		_, err = getNamespacesByFilter(filterNsIdentity, "")
+		require.Error(t, err, "Should return error for filtering against unsupported field Identity")
+
+		filterNsPubKey := Namespace{
+			Pubkey: "somePubkey",
+		}
+
+		_, err = getNamespacesByFilter(filterNsPubKey, "")
+		require.Error(t, err, "Should return error for filtering against unsupported field PubKey")
+
+		// Now, for AdminMetadata filters to work, we need to have a valid object
 		resetNamespaceDB(t)
+		err = insertMockDBData([]Namespace{{
+			Prefix: "/bar",
+			AdminMetadata: AdminMetadata{
+				Description:           "Mock description",
+				SiteName:              "UW-Madison",
+				Institution:           "123456",
+				SecurityContactUserID: "contactUserID",
+				ApproverID:            "mockApproverID",
+				Status:                Pending,
+			},
+		}})
+		require.NoError(t, err)
 
-		rss, err := getNamespacesByServerType("")
-		require.Error(t, err, "No error returns when give empty server type")
-		assert.Nil(t, rss, "Returns data when error is expected")
+		filterNsCreateAt := Namespace{
+			AdminMetadata: AdminMetadata{
+				CreatedAt: time.Now(),
+			},
+		}
 
-		rss, err = getNamespacesByServerType("random")
-		require.Error(t, err, "No error returns when give random server type")
-		assert.Nil(t, rss, "Returns data when error is expected")
+		_, err = getNamespacesByFilter(filterNsCreateAt, "")
+		require.Error(t, err, "Should return error for filtering against unsupported field CreatedAt")
+
+		filterNsUpdateAt := Namespace{
+			AdminMetadata: AdminMetadata{
+				UpdatedAt: time.Now(),
+			},
+		}
+
+		_, err = getNamespacesByFilter(filterNsUpdateAt, "")
+		require.Error(t, err, "Should return error for filtering against unsupported field UpdatedAt")
+
+		filterNsApproveAt := Namespace{
+			AdminMetadata: AdminMetadata{
+				ApprovedAt: time.Now(),
+			},
+		}
+
+		_, err = getNamespacesByFilter(filterNsApproveAt, "")
+		require.Error(t, err, "Should return error for filtering against unsupported field ApprovedAt")
 	})
 
-	t.Run("empty-db-returns-empty-list", func(t *testing.T) {
+	t.Run("filter-by-server-type", func(t *testing.T) {
+		// Assuming mock data and insertMockDBData function exist
 		resetNamespaceDB(t)
-
-		origins, err := getNamespacesByServerType(OriginType)
+		err := insertMockDBData(append(mockNssWithOrigins, mockNssWithCaches...))
 		require.NoError(t, err)
-		assert.Equal(t, 0, len(origins))
 
-		caches, err := getNamespacesByServerType(CacheType)
+		filterNs := Namespace{}
+		nssOrigins, err := getNamespacesByFilter(filterNs, OriginType)
 		require.NoError(t, err)
-		assert.Equal(t, 0, len(caches))
+		assert.NotEmpty(t, nssOrigins, "Should return non-empty result for OriginType")
+		assert.True(t, compareNamespaces(mockNssWithOrigins, nssOrigins, true))
+
+		nssCaches, err := getNamespacesByFilter(filterNs, CacheType)
+		require.NoError(t, err)
+		assert.NotEmpty(t, nssCaches, "Should return non-empty result for CacheType")
+		assert.True(t, compareNamespaces(mockNssWithCaches, nssCaches, true))
 	})
 
-	t.Run("returns-origins-as-expected", func(t *testing.T) {
+	t.Run("filter-by-admin-metadata", func(t *testing.T) {
 		resetNamespaceDB(t)
-
-		err := insertMockDBData(mockNssWithOrigins)
+		err := insertMockDBData([]Namespace{{
+			Prefix: "/bar",
+			AdminMetadata: AdminMetadata{
+				Description:           "Mock description",
+				SiteName:              "UW-Madison",
+				UserID:                "mockUserID",
+				Institution:           "123456",
+				SecurityContactUserID: "contactUserID",
+				ApproverID:            "mockApproverID",
+				Status:                Pending,
+			},
+		}})
 		require.NoError(t, err)
 
-		origins, err := getNamespacesByServerType(OriginType)
-		require.NoError(t, err)
-		assert.Equal(t, len(mockNssWithOrigins), len(origins), "Returned namespace has wrong length")
-		assert.True(t, compareNamespaces(mockNssWithOrigins, origins, false), "Returned namespaces does not match expected")
+		filterNs := Namespace{
+			AdminMetadata: AdminMetadata{
+				Description: "description",
+			},
+		}
 
-		caches, err := getNamespacesByServerType(CacheType)
+		namespaces, err := getNamespacesByFilter(filterNs, "")
 		require.NoError(t, err)
-		assert.Equal(t, 0, len(caches), "Returned caches when only origins present in db")
+		assert.NotEmpty(t, namespaces, "Should return non-empty result for Description")
+
+		filterNs = Namespace{
+			AdminMetadata: AdminMetadata{
+				SiteName: "Madison",
+			},
+		}
+		namespaces, err = getNamespacesByFilter(filterNs, "")
+		require.NoError(t, err)
+		assert.NotEmpty(t, namespaces, "Should return non-empty result for SiteName")
+
+		filterNs = Namespace{
+			AdminMetadata: AdminMetadata{
+				Institution: "123456",
+			},
+		}
+		namespaces, err = getNamespacesByFilter(filterNs, "")
+		require.NoError(t, err)
+		assert.NotEmpty(t, namespaces, "Should return non-empty result for Institution")
+
+		filterNs = Namespace{
+			AdminMetadata: AdminMetadata{
+				SecurityContactUserID: "contactUserID",
+			},
+		}
+		namespaces, err = getNamespacesByFilter(filterNs, "")
+		require.NoError(t, err)
+		assert.NotEmpty(t, namespaces, "Should return non-empty result for SecurityContactUserID")
+
+		filterNs = Namespace{
+			AdminMetadata: AdminMetadata{
+				ApproverID: "mockApproverID",
+			},
+		}
+		namespaces, err = getNamespacesByFilter(filterNs, "")
+		require.NoError(t, err)
+		assert.NotEmpty(t, namespaces, "Should return non-empty result for ApproverID")
+
+		filterNs = Namespace{
+			AdminMetadata: AdminMetadata{
+				Status: Pending,
+			},
+		}
+		namespaces, err = getNamespacesByFilter(filterNs, "")
+		require.NoError(t, err)
+		assert.NotEmpty(t, namespaces, "Should return non-empty result for Status")
+
+		filterNs = Namespace{
+			AdminMetadata: AdminMetadata{
+				UserID: "mockUserID",
+			},
+		}
+		namespaces, err = getNamespacesByFilter(filterNs, "")
+		require.NoError(t, err)
+		assert.NotEmpty(t, namespaces, "Should return non-empty result for UserID")
 	})
 
-	t.Run("return-caches-as-expected", func(t *testing.T) {
+	t.Run("multiple-AND-match", func(t *testing.T) {
 		resetNamespaceDB(t)
-
-		err := insertMockDBData(mockNssWithCaches)
+		err := insertMockDBData([]Namespace{{
+			Prefix: "/bar",
+			AdminMetadata: AdminMetadata{
+				Description:           "Mock description",
+				SiteName:              "UW-Madison",
+				Institution:           "123456",
+				SecurityContactUserID: "contactUserID",
+				ApproverID:            "mockApproverID",
+				Status:                Pending,
+			},
+		}})
 		require.NoError(t, err)
 
-		caches, err := getNamespacesByServerType(CacheType)
+		filterNs := Namespace{
+			Prefix: "/bar",
+			AdminMetadata: AdminMetadata{
+				SecurityContactUserID: "contactUserID",
+				ApproverID:            "mockApproverID",
+				Status:                Pending,
+			},
+		}
+		namespaces, err := getNamespacesByFilter(filterNs, "")
 		require.NoError(t, err)
-		assert.Equal(t, len(mockNssWithCaches), len(caches), "Returned namespace has wrong length")
-		assert.True(t, compareNamespaces(mockNssWithCaches, caches, false), "Returned namespaces does not match expected")
-
-		origins, err := getNamespacesByServerType(OriginType)
-		require.NoError(t, err)
-		assert.Equal(t, 0, len(origins), "Returned origins when only caches present in db")
+		assert.NotEmpty(t, namespaces, "Should return non-empty result for non-empty database without condition")
 	})
 
-	t.Run("return-correctly-with-mixed-server-type", func(t *testing.T) {
+	t.Run("fully-match", func(t *testing.T) {
+		resetNamespaceDB(t)
+		mockNs := Namespace{
+			Prefix: "/bar",
+			AdminMetadata: AdminMetadata{
+				Description:           "Mock description",
+				SiteName:              "UW-Madison",
+				UserID:                "mockUserID",
+				Institution:           "123456",
+				SecurityContactUserID: "contactUserID",
+				ApproverID:            "mockApproverID",
+				Status:                Pending,
+			},
+		}
+		err := insertMockDBData([]Namespace{mockNs})
+		require.NoError(t, err)
+
+		filterNs := mockNs
+		namespaces, err := getNamespacesByFilter(filterNs, "")
+		require.NoError(t, err)
+		assert.NotEmpty(t, namespaces, "Should return non-empty result for non-empty database without condition")
+	})
+
+	t.Run("no-match", func(t *testing.T) {
+		resetNamespaceDB(t)
+		mockNs := Namespace{
+			Prefix: "/bar",
+			AdminMetadata: AdminMetadata{
+				Description:           "Mock description",
+				UserID:                "mockUserID",
+				SiteName:              "UW-Madison",
+				Institution:           "123456",
+				SecurityContactUserID: "contactUserID",
+				ApproverID:            "mockApproverID",
+				Status:                Pending,
+			},
+		}
+		err := insertMockDBData([]Namespace{mockNs})
+		require.NoError(t, err)
+
+		filterNs := mockNs
+		filterNs.AdminMetadata.Status = Denied
+		namespaces, err := getNamespacesByFilter(filterNs, "")
+		require.NoError(t, err)
+		assert.Empty(t, namespaces, "Should return non-empty result for non-empty database without condition")
+	})
+
+	t.Run("empty-db-returns-empty-results", func(t *testing.T) {
 		resetNamespaceDB(t)
 
-		err := insertMockDBData(mockNssWithMixed)
+		filterNs := Namespace{}
+		namespaces, err := getNamespacesByFilter(filterNs, "")
 		require.NoError(t, err)
-
-		caches, err := getNamespacesByServerType(CacheType)
-		require.NoError(t, err)
-		assert.Equal(t, len(mockNssWithCaches), len(caches), "Returned caches namespace has wrong length")
-		assert.True(t, compareNamespaces(mockNssWithCaches, caches, false), "Returned caches namespaces does not match expected")
-
-		origins, err := getNamespacesByServerType(OriginType)
-		require.NoError(t, err)
-		assert.Equal(t, len(mockNssWithOrigins), len(origins), "Returned origins namespace has wrong length")
-		assert.True(t, compareNamespaces(mockNssWithOrigins, origins, false), "Returned origins namespaces does not match expected")
+		assert.Empty(t, namespaces, "Should return empty result for empty database")
 	})
 }
 

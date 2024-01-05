@@ -119,6 +119,19 @@ func (rs RegistrationStatus) String() string {
 	return string(rs)
 }
 
+func (a AdminMetadata) Equal(b AdminMetadata) bool {
+	return a.UserID == b.UserID &&
+		a.Description == b.Description &&
+		a.SiteName == b.SiteName &&
+		a.Institution == b.Institution &&
+		a.SecurityContactUserID == b.SecurityContactUserID &&
+		a.Status == b.Status &&
+		a.ApproverID == b.ApproverID &&
+		a.ApprovedAt.Equal(b.ApprovedAt) &&
+		a.CreatedAt.Equal(b.CreatedAt) &&
+		a.UpdatedAt.Equal(b.UpdatedAt)
+}
+
 func createNamespaceTable() {
 	//We put a size limit on admin_metadata to guard against potentially future
 	//malicious large inserts
@@ -348,6 +361,33 @@ func getNamespaceJwksByPrefix(prefix string, approvalRequired bool) (*jwk.Set, e
 	return &set, nil
 }
 
+func getNamespaceStatusById(id int) (RegistrationStatus, error) {
+	if id < 1 {
+		return "", errors.New("Invalid id. id must be a positive number")
+	}
+	adminMetadata := AdminMetadata{}
+	adminMetadataStr := ""
+	query := `SELECT admin_metadata FROM namespace WHERE id = ?`
+	err := db.QueryRow(query, id).Scan(&adminMetadataStr)
+	if err != nil {
+		return "", err
+	}
+	// For backward compatibility, if adminMetadata is an empty string, don't unmarshall json
+	if adminMetadataStr != "" {
+		if err := json.Unmarshal([]byte(adminMetadataStr), &adminMetadata); err != nil {
+			return "", err
+		}
+		// This should never happen in non-testing environment, but if it does, we want to
+		// decode it to known enumeration for this field
+		if adminMetadata.Status == "" {
+			return Unknown, nil
+		}
+		return adminMetadata.Status, nil
+	} else {
+		return Unknown, nil
+	}
+}
+
 func getNamespaceById(id int) (*Namespace, error) {
 	if id < 1 {
 		return nil, errors.New("Invalid id. id must be a positive number")
@@ -388,46 +428,41 @@ func getNamespaceByPrefix(prefix string) (*Namespace, error) {
 	return ns, nil
 }
 
-// Get a collection of namespaces by [Namespace.AdminMetadata.UserID]
-func getNamespacesByUserID(userID string) ([]*Namespace, error) {
-	query := `SELECT id, prefix, pubkey, identity, admin_metadata FROM namespace ORDER BY id ASC`
-	rows, err := db.Query(query)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	namespaces := make([]*Namespace, 0)
-	for rows.Next() {
-		ns := &Namespace{}
-		adminMetadataStr := ""
-		if err := rows.Scan(&ns.ID, &ns.Prefix, &ns.Pubkey, &ns.Identity, &adminMetadataStr); err != nil {
-			return nil, err
-		}
-		// For backward compatibility, if adminMetadata is an empty string, don't unmarshall json
-		if adminMetadataStr != "" {
-			if err := json.Unmarshal([]byte(adminMetadataStr), &ns.AdminMetadata); err != nil {
-				return nil, err
-			}
-		}
-		if ns.AdminMetadata.UserID == userID {
-			namespaces = append(namespaces, ns)
-		}
-	}
-	return namespaces, nil
-}
-
-func getNamespacesByServerType(serverType ServerType) ([]*Namespace, error) {
-	query := ""
+// Get a collection of namespaces by filtering against various non-default namespace fields
+// excluding Namespace.ID, Namespace.Identity, Namespace.Pubkey, and various dates
+//
+// For filterNs.AdminMetadata.Description and filterNs.AdminMetadata.SiteName,
+// the string will be matched using `strings.Contains`. The rest of the AdminMetadata fields is
+// matched by `==`
+func getNamespacesByFilter(filterNs Namespace, serverType ServerType) ([]*Namespace, error) {
+	query := `SELECT id, prefix, pubkey, identity, admin_metadata FROM namespace WHERE 1=1 `
 	if serverType == CacheType {
 		// Refer to the cache prefix name in cmd/cache_serve
-		query = `SELECT id, prefix, pubkey, identity, admin_metadata FROM NAMESPACE WHERE PREFIX LIKE '/caches/%' ORDER BY id ASC`
+		query += ` AND prefix LIKE '/caches/%'`
 	} else if serverType == OriginType {
-		query = `SELECT id, prefix, pubkey, identity, admin_metadata FROM NAMESPACE WHERE NOT PREFIX LIKE '/caches/%' ORDER BY id ASC`
-	} else {
+		query += ` AND NOT prefix LIKE '/caches/%'`
+	} else if serverType != "" {
 		return nil, errors.New(fmt.Sprint("Can't get namespace: unsupported server type: ", serverType))
 	}
 
+	if filterNs.ID != 0 {
+		return nil, errors.New("Unsupported operation: Can't filter against ID field.")
+	}
+	if filterNs.Identity != "" {
+		return nil, errors.New("Unsupported operation: Can't filter against Identity field.")
+	}
+	if filterNs.Pubkey != "" {
+		return nil, errors.New("Unsupported operation: Can't filter against Pubkey field.")
+	}
+	if filterNs.Prefix != "" {
+		query += fmt.Sprintf(" AND prefix like '%%%s%%' ", filterNs.Prefix)
+	}
+	if !filterNs.AdminMetadata.ApprovedAt.Equal(time.Time{}) || !filterNs.AdminMetadata.UpdatedAt.Equal(time.Time{}) || !filterNs.AdminMetadata.CreatedAt.Equal(time.Time{}) {
+		return nil, errors.New("Unsupported operation: Can't filter against date.")
+	}
+	// Always sort by id by default
+	query += " ORDER BY id ASC"
+	// For now, we need to execute the query first and manually filter out fields for AdminMetadata
 	rows, err := db.Query(query)
 	if err != nil {
 		return nil, err
@@ -442,12 +477,49 @@ func getNamespacesByServerType(serverType ServerType) ([]*Namespace, error) {
 			return nil, err
 		}
 		// For backward compatibility, if adminMetadata is an empty string, don't unmarshall json
-		if adminMetadataStr != "" {
+		if adminMetadataStr == "" {
+			// If we apply any filter against the AdminMetadata field but the
+			// entry didn't populate this field, skip it
+			if !filterNs.AdminMetadata.Equal(AdminMetadata{}) {
+				continue
+			} else {
+				// If we don't filter against AdminMetadata, just add it to result
+				namespaces = append(namespaces, ns)
+			}
+		} else {
 			if err := json.Unmarshal([]byte(adminMetadataStr), &ns.AdminMetadata); err != nil {
 				return nil, err
 			}
+			if filterNs.AdminMetadata.UserID != "" && filterNs.AdminMetadata.UserID != ns.AdminMetadata.UserID {
+				continue
+			}
+			if filterNs.AdminMetadata.Description != "" && !strings.Contains(ns.AdminMetadata.Description, filterNs.AdminMetadata.Description) {
+				continue
+			}
+			if filterNs.AdminMetadata.SiteName != "" && !strings.Contains(ns.AdminMetadata.SiteName, filterNs.AdminMetadata.SiteName) {
+				continue
+			}
+			if filterNs.AdminMetadata.Institution != "" && filterNs.AdminMetadata.Institution != ns.AdminMetadata.Institution {
+				continue
+			}
+			if filterNs.AdminMetadata.SecurityContactUserID != "" && filterNs.AdminMetadata.SecurityContactUserID != ns.AdminMetadata.SecurityContactUserID {
+				continue
+			}
+			if filterNs.AdminMetadata.Status != "" {
+				if filterNs.AdminMetadata.Status == Unknown {
+					if ns.AdminMetadata.Status != "" && ns.AdminMetadata.Status != Unknown {
+						continue
+					}
+				} else if filterNs.AdminMetadata.Status != ns.AdminMetadata.Status {
+					continue
+				}
+			}
+			if filterNs.AdminMetadata.ApproverID != "" && filterNs.AdminMetadata.ApproverID != ns.AdminMetadata.ApproverID {
+				continue
+			}
+			// Congrats! You passed all the filter check and this namespace matches what you want
+			namespaces = append(namespaces, ns)
 		}
-		namespaces = append(namespaces, ns)
 	}
 
 	return namespaces, nil

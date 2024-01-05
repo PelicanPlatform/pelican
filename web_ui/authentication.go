@@ -110,9 +110,9 @@ func configureAuthDB() error {
 	return nil
 }
 
-// Get the "subjuect" claim from the JWT that "login" cookie stores,
+// Get the "subject" claim from the JWT that "login" cookie stores,
 // where subject is set to be the username. Return empty string if no "login" cookie is present
-func getUser(ctx *gin.Context) (string, error) {
+func GetUser(ctx *gin.Context) (string, error) {
 	token, err := ctx.Cookie("login")
 	if err != nil {
 		return "", nil
@@ -181,7 +181,7 @@ func setLoginCookie(ctx *gin.Context, user string) {
 
 // Check if user is authenticated by checking if the "login" cookie is present and set the user identity to ctx
 func AuthHandler(ctx *gin.Context) {
-	user, err := getUser(ctx)
+	user, err := GetUser(ctx)
 	if err != nil || user == "" {
 		log.Errorln("Invalid user cookie or unable to parse user cookie:", err)
 		ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Authentication required to perform this operation"})
@@ -296,7 +296,7 @@ func configureAuthEndpoints(ctx context.Context, router *gin.Engine, egrp *errgr
 	// Pass csrfhanlder only to the whoami route to generate CSRF token
 	// while leaving other routes free of CSRF check (we might want to do it some time in the future)
 	group.GET("/whoami", csrfHandler, func(ctx *gin.Context) {
-		if user, err := getUser(ctx); err != nil || user == "" {
+		if user, err := GetUser(ctx); err != nil || user == "" {
 			ctx.JSON(200, gin.H{"authenticated": false})
 		} else {
 			// Set header to carry CSRF token
