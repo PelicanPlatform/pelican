@@ -283,7 +283,8 @@ func DiscoverFederation() error {
 	log.Debugln("Federation URL:", federationStr)
 	curDirectorURL := param.Federation_DirectorUrl.GetString()
 	curRegistryURL := param.Federation_RegistryUrl.GetString()
-	if len(curDirectorURL) != 0 && len(curRegistryURL) != 0 {
+	curFederationJwkURL := param.Federation_JwkUrl.GetString()
+	if len(curDirectorURL) != 0 && len(curRegistryURL) != 0 && len(curFederationJwkURL) != 0 {
 		return nil
 	}
 
@@ -342,8 +343,11 @@ func DiscoverFederation() error {
 			metadata.NamespaceRegistrationEndpoint)
 		viper.Set("Federation.RegistryUrl", metadata.NamespaceRegistrationEndpoint)
 	}
-
-	viper.Set("Federation.JwkUrl", metadata.JwksUri)
+	if curFederationJwkURL == "" {
+		log.Debugln("Federation service discovery resulted in JWKS URL",
+			metadata.JwksUri)
+		viper.Set("Federation.JwkUrl", metadata.JwksUri)
+	}
 
 	return nil
 }
@@ -583,23 +587,23 @@ func initConfigDir() error {
 	return nil
 }
 
-// Initialize Pelican server instance. Pass a list of `enabledServices` if you want to enable multiple services.
+// Initialize Pelican server instance. Pass a bit mask of `currentServers` if you want to enable multiple services.
 // Note not all configurations are supported: currently, if you enable both cache and origin then an error
 // is thrown
-func InitServer(ctx context.Context, enabledServices ServerType) error {
+func InitServer(ctx context.Context, currentServers ServerType) error {
 	if err := initConfigDir(); err != nil {
 		return errors.Wrap(err, "Failed to initialize the server configuration")
 	}
-	if enabledServices.IsEnabled(OriginType) && enabledServices.IsEnabled(CacheType) {
+	if currentServers.IsEnabled(OriginType) && currentServers.IsEnabled(CacheType) {
 		return errors.New("A cache and origin cannot both be enabled in the same instance")
 	}
 
-	setEnabledServer(enabledServices)
+	setEnabledServer(currentServers)
 
 	xrootdPrefix := ""
-	if enabledServices.IsEnabled(OriginType) {
+	if currentServers.IsEnabled(OriginType) {
 		xrootdPrefix = "origin"
-	} else if enabledServices.IsEnabled(CacheType) {
+	} else if currentServers.IsEnabled(CacheType) {
 		xrootdPrefix = "cache"
 	}
 	configDir := viper.GetString("ConfigDir")
@@ -672,7 +676,7 @@ func InitServer(ctx context.Context, enabledServices ServerType) error {
 	// they have overridden the defaults.
 	hostname = viper.GetString("Server.Hostname")
 
-	if enabledServices.IsEnabled(CacheType) {
+	if currentServers.IsEnabled(CacheType) {
 		viper.Set("Xrootd.Port", param.Cache_Port.GetInt())
 	}
 	xrootdPort := param.Xrootd_Port.GetInt()
@@ -689,7 +693,7 @@ func InitServer(ctx context.Context, enabledServices ServerType) error {
 		return errors.Wrap(err, fmt.Sprint("Invalid Server.ExternalWebUrl: ", externalAddressStr))
 	}
 
-	if enabledServices.IsEnabled(DirectorType) && param.Federation_DirectorUrl.GetString() == "" {
+	if currentServers.IsEnabled(DirectorType) && param.Federation_DirectorUrl.GetString() == "" {
 		viper.SetDefault("Federation.DirectorUrl", viper.GetString("Server.ExternalWebUrl"))
 	}
 
@@ -737,12 +741,18 @@ func InitServer(ctx context.Context, enabledServices ServerType) error {
 
 	// Set up the server's issuer URL so we can access that data wherever we need to find keys and whatnot
 	// This populates Server.IssuerUrl, and can be safely fetched using server_utils.GetServerIssuerURL()
-	err = parseServerIssuerURL(enabledServices)
+	err = parseServerIssuerURL(currentServers)
 	if err != nil {
 		return err
 	}
 
-	return DiscoverFederation()
+	// Since director is the federation, we need to wait until director's web engine is running
+	// to do DiscoverFederation on director server
+	if currentServers.IsEnabled(DirectorType) {
+		return nil
+	} else {
+		return DiscoverFederation()
+	}
 }
 
 func InitClient() error {

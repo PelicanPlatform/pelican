@@ -64,5 +64,12 @@ func DirectorServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 	engine.Use(director.ShortcutMiddleware(defaultResponse))
 	director.RegisterDirector(ctx, rootGroup)
 
+	// Only discover federation when we run in OSDF mode; otherwise, the director is expected to be the federation
+	if config.GetPreferredPrefix() == "OSDF" {
+		if err := config.DiscoverFederation(); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
