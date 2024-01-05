@@ -144,6 +144,9 @@ definitions:
         type: string
         description: The namespace prefix to register. Should be an absolute path.
         example: "/test"
+      identity:
+        type: string
+        description: The user identity we get from CILogon if the namespace is registered via CLI with `--identity` flag
       admin_metadata:
         $ref: "#/definitions/AdminMetadata"
   Institution:
@@ -168,6 +171,9 @@ definitions:
         type: string
         description: The namespace prefix to register. Should be an absolute path.
         example: "/test"
+      identity:
+        type: string
+        description: The user identity we get from CILogon if the namespace is registered via CLI with `--identity` flag
       pubkey:
         type: string
         description:
@@ -489,6 +495,52 @@ paths:
               initialized:
                 type: boolean
                 example: true
+  /auth/cilogon/login:
+    get:
+      tags:
+        - auth
+      summary: Redirect user to CILogon authentication page for OAuth2 third-party login
+      parameters:
+        - in: query
+          name: next_url
+          type: string
+          description: The path to redirect user to once they successfully authenticated against CILogon
+      responses:
+        "307":
+          description: Redirect user to CILogon authentication page
+        "500":
+          description: Internal server error when failed to generate CSRF cookie for the OAuth flow
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+  /auth/cilogon/callback:
+    get:
+      tags:
+        - "auth"
+      summary: The callback endpoint CILogon will call once the user has been successfully authenticated
+      description: Calling this URL with valid parameters will login the user to Pelican website
+      parameters:
+        - in: query
+          name: state
+          type: string
+          description: The CSRF token for validation and the next_url for redirect, in the form of `"<[16]byte>:<nextURL>"`
+        - in: query
+          name: code
+          type: string
+          description: The access token and refresh token returned from CILogon
+      responses:
+        "307":
+          description: Successfully log the user in, add login cookie, and direct user to `/` if `next_url` is empty; otherwise to `next_url`
+        "400":
+          description: Invalid request, when `state` or `token` query is invalid
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "500":
+          description: Internal server error when process the token and handshake with CILogon
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
   /registry_ui/namespaces:
     get:
       tags:
