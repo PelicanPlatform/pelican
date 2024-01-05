@@ -465,6 +465,10 @@ paths:
               user:
                 type: string
                 example: "admin"
+          headers:
+            X-CSRF-Token:
+              description: The CSRF token that user is expected to attach as the request header for any modification requests for registry APIs (PUT/PATCH/DELETE).
+              type: string
   /auth/loginInitialized:
     get:
       tags:
@@ -490,12 +494,28 @@ paths:
       tags:
         - "registry_ui"
       summary: Return a list of all namespaces in the registry
-      description: A public API to get all namespaces in the registry
+      description:
+        A public API to get all namespaces in the registry. Note that `pubkey` is not included in the return data.
+
+
+        For unauthenticated users, it only returns a list of approved namespaces.
+
+        For authenticated users, it returns namespaces with any approval status.
       parameters:
         - name: server_type
           in: query
           required: false
-          description: The type of server to filter the results. The value can be either "origin" or "cache"
+          description: The type of server to filter the results. The value can be either `origin` or `cache`
+          type: string
+        - name: status
+          in: query
+          required: false
+          description:
+            The approval status of the namespaces, can be `pending`, `approved`, `denied`, or `unknown`.
+
+            If `status == unknown`, internally it will match any registration with `status == ""` or `stauts == "unknown"`
+
+            For unauthenticated users, filter with `status != approved` will result in a 403 error.
           type: string
       produces:
         - application/json
@@ -509,6 +529,11 @@ paths:
             description: An array of namespaces
         "400":
           description: Invalid request parameters
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "403":
+          description: Operation forbidden, when an unauthenticated user trying to filter against `status != approval`
           schema:
             type: object
             $ref: "#/definitions/ErrorModel"
@@ -547,6 +572,11 @@ paths:
           required: true
           schema:
             $ref: "#/definitions/NamespaceForRegistration"
+        - in: header
+          name: X-CSRF-Token
+          description: The CSRF token for protecting Cross-Site Request Forgery (CSRF) attack. You will get this token by requesting `/api/v1.0/auth/whoami` and read response header `X-CSRF-Token`
+          type: string
+          required: true
       responses:
         "200":
           description: OK
@@ -574,6 +604,15 @@ paths:
         - "registry_ui"
       summary: Return a list of namespaces for the currently authenticated user
       description: "`Authentication Required`"
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description:
+            The approval status of the namespaces, can be `pending`, `approved`, `denied`, or `unknown`.
+
+            If `status == unknown`, internally it will match any registration with `status == ""` or `stauts == "unknown"`
+          type: string
       produces:
         - application/json
       responses:
@@ -652,7 +691,7 @@ paths:
         For user with admin previlege, they can update any valid namespace.
 
 
-        For general users, they can only update the namespace belonging to the user, or it returns 404
+        For non-admin users, they can only update the namespace belonging to the user, or it returns 404. They also cannot update a namespace if its `admin_metadata.status == approved`.
         "
       operationId: updateNamespaceById
       parameters:
@@ -667,6 +706,11 @@ paths:
           required: true
           schema:
             $ref: "#/definitions/NamespaceForRegistration"
+        - in: header
+          name: X-CSRF-Token
+          description: The CSRF token for protecting Cross-Site Request Forgery (CSRF) attack. You will get this token by requesting `/api/v1.0/auth/whoami` and read response header `X-CSRF-Token`
+          type: string
+          required: true
       consumes:
         - application/json
       produces:
@@ -756,6 +800,11 @@ paths:
           description: ID of the namespace to update status
           required: true
           type: integer
+        - in: header
+          name: X-CSRF-Token
+          description: The CSRF token for protecting Cross-Site Request Forgery (CSRF) attack. You will get this token by requesting `/api/v1.0/auth/whoami` and read response header `X-CSRF-Token`
+          type: string
+          required: true
       produces:
         - application/json
       responses:
@@ -808,6 +857,11 @@ paths:
           description: ID of the namespace to update status
           required: true
           type: integer
+        - in: header
+          name: X-CSRF-Token
+          description: The CSRF token for protecting Cross-Site Request Forgery (CSRF) attack. You will get this token by requesting `/api/v1.0/auth/whoami` and read response header `X-CSRF-Token`
+          type: string
+          required: true
       produces:
         - application/json
       responses:

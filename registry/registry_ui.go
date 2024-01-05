@@ -37,6 +37,11 @@ import (
 type (
 	listNamespaceRequest struct {
 		ServerType string `form:"server_type"`
+		Status     string `form:"status"`
+	}
+
+	listNamespacesForUserRequest struct {
+		Status string `form:"status"`
 	}
 
 	registrationFieldType string
@@ -163,46 +168,86 @@ func excludePubKey(nss []*Namespace) (nssNew []NamespaceWOPubkey) {
 	return
 }
 
+// List all namespaces in the registry.
+// For authenticated users, it returns all namespaces.
+// For non-authenticated users, it returns namespaces with AdminMetadata.Status = Approved
+//
+// Query against server_type, status
+//
+// GET /namespaces
 func listNamespaces(ctx *gin.Context) {
+	// Directly call GetUser as we want this endpoint to also be able to serve unauthed users
+	user, err := web_ui.GetUser(ctx)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check user login status"})
+		return
+	}
+	ctx.Set("User", user)
+	isAuthed := user != ""
 	queryParams := listNamespaceRequest{}
 	if ctx.ShouldBindQuery(&queryParams) != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid query parameters"})
 		return
 	}
 
-	if queryParams.ServerType != "" {
-		if queryParams.ServerType != string(OriginType) && queryParams.ServerType != string(CacheType) {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid server type"})
-			return
-		}
-		namespaces, err := getNamespacesByServerType(ServerType(queryParams.ServerType))
-		if err != nil {
-			log.Error("Failed to get namespaces by server type: ", err)
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Server encountered an error trying to list namespaces"})
-			return
-		}
-		nssWOPubkey := excludePubKey(namespaces)
-		ctx.JSON(http.StatusOK, nssWOPubkey)
-
-	} else {
-		namespaces, err := getAllNamespaces()
-		if err != nil {
-			log.Error("Failed to get all namespaces: ", err)
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Server encountered an error trying to list namespaces"})
-			return
-		}
-		nssWOPubkey := excludePubKey(namespaces)
-		ctx.JSON(http.StatusOK, nssWOPubkey)
+	// For unauthed user with non-empty Status query != Approved, return 403
+	if !isAuthed && queryParams.Status != "" && queryParams.Status != Approved.String() {
+		ctx.JSON(http.StatusForbidden, gin.H{"error": "You don't have permission to filter non-approved namespace registrations"})
+		return
 	}
+
+	// Filter ns by server type
+	if queryParams.ServerType != "" && queryParams.ServerType != string(OriginType) && queryParams.ServerType != string(CacheType) {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid server type"})
+		return
+	}
+
+	filterNs := Namespace{}
+
+	// For authenticated users, it returns all namespaces.
+	// For unauthenticated users, it returns namespaces with AdminMetadata.Status = Approved
+	if isAuthed {
+		if queryParams.Status != "" {
+			filterNs.AdminMetadata.Status = RegistrationStatus(queryParams.Status)
+		}
+	} else {
+		filterNs.AdminMetadata.Status = Approved
+	}
+
+	namespaces, err := getNamespacesByFilter(filterNs, ServerType(queryParams.ServerType))
+	if err != nil {
+		log.Error("Failed to get namespaces by server type: ", err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Server encountered an error trying to list namespaces"})
+		return
+	}
+	nssWOPubkey := excludePubKey(namespaces)
+	ctx.JSON(http.StatusOK, nssWOPubkey)
 }
 
+// List namespaces for the currently authenticated user
+//
+// # Query against status
+//
+// GET /namespaces/user
 func listNamespacesForUser(ctx *gin.Context) {
 	user := ctx.GetString("User")
 	if user == "" {
 		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "You need to login to perform this action"})
 		return
 	}
-	namespaces, err := getNamespacesByUserID(user)
+	queryParams := listNamespacesForUserRequest{}
+	if ctx.ShouldBindQuery(&queryParams) != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid query parameters"})
+		return
+	}
+
+	filterNs := Namespace{AdminMetadata: AdminMetadata{UserID: user}}
+
+	if queryParams.Status != "" {
+		filterNs.AdminMetadata.Status = RegistrationStatus(queryParams.Status)
+	}
+
+	namespaces, err := getNamespacesByFilter(filterNs, "")
 	if err != nil {
 		log.Error("Error getting namespaces for user ", user)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Error getting namespaces by user ID"})
@@ -215,9 +260,19 @@ func getNamespaceRegFields(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, registrationFields)
 }
 
+// Create a new namespace registration or update existing namespace registration.
+//
+// For update, only admin-user can update an existing registration if it's been approved already.
+//
+// One caveat in updating is that if the namespace to update was a legacy registration, i.e. It doesn't have
+// AdminMetaData populated, an update __will__ populate the AdminMetaData field and update
+// AdminMetaData based on user input. However, internal fields are still preserved.
+//
+// POST /namespaces
+// PUT /namespaces/:id
 func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 	user := ctx.GetString("User")
-	id := 0 // namespace ID when doing update
+	id := 0 // namespace ID when doing update, will be populated later
 	if user == "" {
 		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "You need to login to perform this action"})
 		return
@@ -330,6 +385,17 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 				ctx.JSON(http.StatusNotFound, gin.H{"error": "Namespace not found. Check the id or if you own the namespace"})
 				return
 			}
+			existingStatus, err := getNamespaceStatusById(id)
+			if err != nil {
+				log.Error("Error checking namespace status: ", err)
+				ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Error checking namespace status"})
+				return
+			}
+			if existingStatus == Approved {
+				log.Errorf("User '%s' is trying to modify approved namespace registration with id=%d", user, id)
+				ctx.JSON(http.StatusForbidden, gin.H{"error": "You don't have permission to modify an approved registration. Please contact your federation administrator"})
+				return
+			}
 		}
 		// If the user has previlege to udpate, go ahead
 		if err := updateNamespace(&ns); err != nil {
@@ -340,8 +406,11 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 	}
 }
 
+// Get one namespace by id.
+// Admin can see any namespace detail while non-admin can only see his/her namespace
+//
+// GET /namesapces/:id
 func getNamespace(ctx *gin.Context) {
-	// Admin can see any namespace detail while non-admin can only see his/her namespace
 	user := ctx.GetString("User")
 	idStr := ctx.Param("id")
 	id, err := strconv.Atoi(idStr)
