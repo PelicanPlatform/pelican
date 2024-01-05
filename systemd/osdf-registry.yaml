@@ -6,6 +6,3 @@ Server:
   TLSKey: /etc/grid-security/xrd/xrdkey.pem
   TLSCACertificateDirectory: /etc/grid-security/certificates
 #  Hostname: f.q.d.n
-Xrootd:
-  Sitename: TOPOLOGY_RESOURCE_NAME
-  Mount: "/mnt/osdf"
