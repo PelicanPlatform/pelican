@@ -13,8 +13,8 @@ Xrootd:
   Sitename: TOPOLOGY_RESOURCE_NAME
   Mount: "/mnt/osdf"
   Port: 1095
-#  Authfile: /run/stash-origin-auth/Authfile
-#  ScitokensConfig: /run/stash-origin-auth/scitokens.conf
+  Authfile: /run/stash-origin-auth/Authfile
+  ScitokensConfig: /run/stash-origin-auth/scitokens.conf
 Origin:
   NamespacePrefix: "/MY_NAMESPACE"
   Multiuser: false
