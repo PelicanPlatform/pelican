@@ -7,6 +7,5 @@ Federation:
 #  Hostname: f.q.d.n
 Xrootd:
   Mount: "/mnt/pelican"
-  Port: 8443
 Cache:
   Port: 8443
