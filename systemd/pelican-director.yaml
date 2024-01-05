@@ -3,8 +3,3 @@ Logging:
   Level: "Error"
 Federation:
   DiscoveryUrl:
-#Server:
-#  Hostname: f.q.d.n
-Xrootd:
-  Mount: "/mnt/pelican"
-  Port: 8443
