@@ -91,6 +91,7 @@ type config struct {
 		Mode string
 		Multiuser bool
 		NamespacePrefix string
+		Port int
 		S3AccessKeyfile string
 		S3Bucket string
 		S3Region string

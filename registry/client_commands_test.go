@@ -41,6 +41,7 @@ func registryMockup(ctx context.Context, t *testing.T, testName string) *httptes
 	ikey := filepath.Join(issuerTempDir, "issuer.jwk")
 	viper.Set("IssuerKey", ikey)
 	viper.Set("Registry.DbLocation", filepath.Join(issuerTempDir, "test.sql"))
+	viper.Set("Server.WebPort", 8444)
 	err := config.InitServer(ctx, config.RegistryType)
 	require.NoError(t, err)
 
