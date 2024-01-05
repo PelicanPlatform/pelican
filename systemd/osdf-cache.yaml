@@ -12,7 +12,6 @@ Server:
 Xrootd:
   Sitename: TOPOLOGY_RESOURCE_NAME
   Mount: "/mnt/osdf"
-  Port: 8443
 #  Authfile: /run/stash-cache-auth/Authfile
 #  ScitokensConfig: /run/stash-cache-auth/scitokens.conf
 Cache:
