@@ -144,16 +144,30 @@ func mockNamespace(prefix, pubkey, identity string, adminMetadata AdminMetadata)
 // functinos in this package. Please treat them as "constants"
 var (
 	mockNssWithOrigins []Namespace = []Namespace{
-		mockNamespace("/test1", "pubkey1", "", AdminMetadata{}),
-		mockNamespace("/test2", "pubkey2", "", AdminMetadata{}),
+		mockNamespace("/test1", "pubkey1", "", AdminMetadata{Status: Approved}),
+		mockNamespace("/test2", "pubkey2", "", AdminMetadata{Status: Approved}),
 	}
 	mockNssWithCaches []Namespace = []Namespace{
-		mockNamespace("/caches/random1", "pubkey1", "", AdminMetadata{}),
-		mockNamespace("/caches/random2", "pubkey2", "", AdminMetadata{}),
+		mockNamespace("/caches/random1", "pubkey1", "", AdminMetadata{Status: Approved}),
+		mockNamespace("/caches/random2", "pubkey2", "", AdminMetadata{Status: Approved}),
+	}
+	mockNssWithOriginsNotApproved []Namespace = []Namespace{
+		mockNamespace("/pending1", "pubkey1", "", AdminMetadata{Status: Pending}),
+		mockNamespace("/pending2", "pubkey2", "", AdminMetadata{Status: Pending}),
+	}
+	mockNssWithCachesNotApproved []Namespace = []Namespace{
+		mockNamespace("/caches/pending1", "pubkey1", "", AdminMetadata{Status: Pending}),
+		mockNamespace("/caches/pending2", "pubkey2", "", AdminMetadata{Status: Pending}),
 	}
 	mockNssWithMixed []Namespace = func() (mixed []Namespace) {
 		mixed = append(mixed, mockNssWithOrigins...)
 		mixed = append(mixed, mockNssWithCaches...)
+		return
+	}()
+
+	mockNssWithMixedNotApproved []Namespace = func() (mixed []Namespace) {
+		mixed = append(mixed, mockNssWithOriginsNotApproved...)
+		mixed = append(mixed, mockNssWithCachesNotApproved...)
 		return
 	}()
 )
