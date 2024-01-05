@@ -68,7 +68,7 @@ func TestStashPluginMain(t *testing.T) {
 	// Parts of test adapted from: https://stackoverflow.com/questions/26225513/how-to-test-os-exit-scenarios-in-go
 	if os.Getenv("RUN_STASHPLUGIN") == "1" {
 		// Download a test file
-		args := []string{"osdf:///osgconnect/public/osg/testfile.txt", tempDir}
+		args := []string{"pelican://pelican.example.com/osgconnect/public/osg/testfile.txt", tempDir}
 		stashPluginMain(args)
 		os.Unsetenv("STASH_LOGGING_LEVEL")
 		os.Unsetenv("RUN_STASHPLUGIN")
@@ -84,11 +84,11 @@ func TestStashPluginMain(t *testing.T) {
 	cmd.Stderr = &stderr
 
 	err := cmd.Run()
-	assert.NoError(t, err, stderr.String())
+	assert.Error(t, err, stderr.String())
 
 	// changing output for "\\" since in windows there are excess "\" printed in debug logs
 	output := strings.Replace(stderr.String(), "\\\\", "\\", -1)
 
-	expectedOutput := "Downloading: osdf:///osgconnect/public/osg/testfile.txt to " + tempDir
+	expectedOutput := "Downloading: pelican://pelican.example.com/osgconnect/public/osg/testfile.txt to " + tempDir
 	assert.Contains(t, output, expectedOutput)
 }
