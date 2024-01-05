@@ -45,6 +45,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/oauth2"
+	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
@@ -52,10 +56,6 @@ import (
 	// github.com/mattn/go-sqlite3, because this one
 	// doesn't require compilation with CGO_ENABLED
 	_ "modernc.org/sqlite"
-
-	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/oauth2"
-	"github.com/pelicanplatform/pelican/param"
 )
 
 var OIDC struct {
@@ -580,7 +580,7 @@ func dbDeleteNamespace(ctx *gin.Context) {
 		}
 
 		for _, scope := range strings.Split(scope, " ") {
-			if scope == "pelican.namespace_delete" {
+			if scope == token_scopes.Pelican_NamespaceDelete.String() {
 				return nil
 			}
 		}

@@ -41,11 +41,7 @@ func parseClaimsToTokenConfig(claims []string) (*utils.TokenConfig, error) {
 		case "aud":
 			tokenConfig.Audience = append(tokenConfig.Audience, val)
 		case "scope":
-			if tokenConfig.Scope == "" {
-				tokenConfig.Scope = val
-			} else {
-				tokenConfig.Scope = tokenConfig.Scope + " " + val
-			}
+			tokenConfig.AddRawScope(val)
 		case "ver":
 			tokenConfig.Version = val
 		case "wlcg.ver":

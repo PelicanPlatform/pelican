@@ -31,7 +31,7 @@ func TestParseClaimsToTokenConfig(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "http://random.org", tokenConfig.Issuer)
 	assert.Equal(t, []string{"foo"}, tokenConfig.Audience)
-	assert.Equal(t, "baz", tokenConfig.Scope)
+	assert.Equal(t, "baz", tokenConfig.GetScope())
 	assert.Equal(t, "1.0", tokenConfig.Version)
 
 	// Give it something valid

@@ -10,4 +10,5 @@ func main() {
 	GenParamEnum()
 	GenParamStruct()
 	GenPlaceholderPathForNext()
+	GenTokenScope()
 }
