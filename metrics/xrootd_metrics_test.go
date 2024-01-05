@@ -232,9 +232,9 @@ func TestHandlePacket(t *testing.T) {
 			Program: "xrootd",
 			Stats: []SummaryStat{
 				{
-					Id:          "sched",
-					Threads:     10,
-					ThreadsIdle: 8,
+					Id:      "sched",
+					Threads: 10,
+					Idle:    8,
 				},
 			},
 		}
@@ -265,10 +265,10 @@ func TestHandlePacket(t *testing.T) {
 			Program: "xrootd",
 			Stats: []SummaryStat{
 				{
-					Id:              "link",
-					LinkConnections: 9,
-					LinkInBytes:     99,
-					LinkOutBytes:    999,
+					Id:    "link",
+					Total: 9,
+					In:    99,
+					Out:   999,
 				},
 			},
 		}
@@ -277,10 +277,10 @@ func TestHandlePacket(t *testing.T) {
 			Program: "xrootd",
 			Stats: []SummaryStat{
 				{
-					Id:              "link",
-					LinkConnections: 10,
-					LinkInBytes:     100,
-					LinkOutBytes:    1000,
+					Id:    "link",
+					Total: 10,
+					In:    100,
+					Out:   1000,
 				},
 			},
 		}
@@ -289,10 +289,10 @@ func TestHandlePacket(t *testing.T) {
 			Program: "cmsd",
 			Stats: []SummaryStat{
 				{
-					Id:              "link",
-					LinkConnections: 2,
-					LinkInBytes:     0,
-					LinkOutBytes:    0,
+					Id:    "link",
+					Total: 2,
+					In:    0,
+					Out:   0,
 				},
 			},
 		}
