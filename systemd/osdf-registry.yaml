@@ -1,9 +1,6 @@
 Debug: false
 Logging:
   Level: "Error"
-Federation:
-  DiscoveryUrl: osg-htc.org
-  TopologyNamespaceURL: https://topology.opensciencegrid.org/osdf/namespaces
 Server:
   TLSCertificate: /etc/grid-security/xrd/xrdcert.pem
   TLSKey: /etc/grid-security/xrd/xrdkey.pem
@@ -11,7 +8,4 @@ Server:
 #  Hostname: f.q.d.n
 Xrootd:
   Sitename: TOPOLOGY_RESOURCE_NAME
-  ManagerHost: redirector.osgstorage.org
-  SummaryMonitoringHost: xrd-report.osgstorage.org
-  DetailedMonitoringHost: xrd-mon.osgstorage.org
   Mount: "/mnt/osdf"
