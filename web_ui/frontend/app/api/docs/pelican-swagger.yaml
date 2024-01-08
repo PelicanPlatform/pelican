@@ -146,7 +146,7 @@ definitions:
         example: "/test"
       identity:
         type: string
-        description: The user identity we get from CILogon if the namespace is registered via CLI with `--identity` flag
+        description: The user identity we get from CILogon if the namespace is registered via CLI with `--with-identity` flag
       admin_metadata:
         $ref: "#/definitions/AdminMetadata"
   Institution:
@@ -445,7 +445,7 @@ paths:
             type: object
             $ref: "#/definitions/ErrorModel"
         "403":
-          description: Unauthorized request, when user is not logged in
+          description: Unauthorized request, when users are not logged in
           schema:
             type: object
             $ref: "#/definitions/ErrorModel"
@@ -473,7 +473,7 @@ paths:
                 example: "admin"
           headers:
             X-CSRF-Token:
-              description: The CSRF token that user is expected to attach as the request header for any modification requests for registry APIs (PUT/PATCH/DELETE).
+              description: The CSRF token that users are expected to attach as the request header for any modification requests for registry APIs (PUT/PATCH/DELETE).
               type: string
   /auth/loginInitialized:
     get:
@@ -504,12 +504,12 @@ paths:
         - in: query
           name: next_url
           type: string
-          description: The path to redirect user to once they successfully authenticated against CILogon
+          description: The path to redirect users to once they successfully authenticated against CILogon
       responses:
         "307":
           description: Redirect user to CILogon authentication page
         "500":
-          description: Internal server error when failed to generate CSRF cookie for the OAuth flow
+          description: Internal server error when generating CSRF cookie for OAuth flow
           schema:
             type: object
             $ref: "#/definitions/ErrorModel"
@@ -537,7 +537,7 @@ paths:
             type: object
             $ref: "#/definitions/ErrorModel"
         "500":
-          description: Internal server error when process the token and handshake with CILogon
+          description: Internal server error when processing the token and handshake with CILogon
           schema:
             type: object
             $ref: "#/definitions/ErrorModel"
@@ -626,7 +626,7 @@ paths:
             $ref: "#/definitions/NamespaceForRegistration"
         - in: header
           name: X-CSRF-Token
-          description: The CSRF token for protecting Cross-Site Request Forgery (CSRF) attack. You will get this token by requesting `/api/v1.0/auth/whoami` and read response header `X-CSRF-Token`
+          description: The CSRF token for protecting against Cross-Site Request Forgery (CSRF) attacks. Obtained by requesting `/api/v1.0/auth/whoami` and reading response header `X-CSRF-Token`
           type: string
           required: true
       responses:
@@ -743,7 +743,7 @@ paths:
         For user with admin previlege, they can update any valid namespace.
 
 
-        For non-admin users, they can only update the namespace belonging to the user, or it returns 404. They also cannot update a namespace if its `admin_metadata.status == approved`.
+        Non-admin users can update only namespaces they own and only if the approval status is `admin_metadata.status == approved`, otherwise the endpoint returns 404.
         "
       operationId: updateNamespaceById
       parameters:
@@ -760,7 +760,7 @@ paths:
             $ref: "#/definitions/NamespaceForRegistration"
         - in: header
           name: X-CSRF-Token
-          description: The CSRF token for protecting Cross-Site Request Forgery (CSRF) attack. You will get this token by requesting `/api/v1.0/auth/whoami` and read response header `X-CSRF-Token`
+          description: The CSRF token for protecting against Cross-Site Request Forgery (CSRF) attacks. Obtained by requesting `/api/v1.0/auth/whoami` and reading response header `X-CSRF-Token`
           type: string
           required: true
       consumes:
@@ -854,7 +854,7 @@ paths:
           type: integer
         - in: header
           name: X-CSRF-Token
-          description: The CSRF token for protecting Cross-Site Request Forgery (CSRF) attack. You will get this token by requesting `/api/v1.0/auth/whoami` and read response header `X-CSRF-Token`
+          description: The CSRF token for protecting against Cross-Site Request Forgery (CSRF) attacks. Obtained by requesting `/api/v1.0/auth/whoami` and reading response header `X-CSRF-Token`
           type: string
           required: true
       produces:
@@ -911,7 +911,7 @@ paths:
           type: integer
         - in: header
           name: X-CSRF-Token
-          description: The CSRF token for protecting Cross-Site Request Forgery (CSRF) attack. You will get this token by requesting `/api/v1.0/auth/whoami` and read response header `X-CSRF-Token`
+          description: The CSRF token for protecting against Cross-Site Request Forgery (CSRF) attacks. Obtained by requesting `/api/v1.0/auth/whoami` and reading response header `X-CSRF-Token`
           type: string
           required: true
       produces:

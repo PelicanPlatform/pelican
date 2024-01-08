@@ -363,7 +363,7 @@ func getNamespaceJwksByPrefix(prefix string, approvalRequired bool) (*jwk.Set, e
 
 func getNamespaceStatusById(id int) (RegistrationStatus, error) {
 	if id < 1 {
-		return "", errors.New("Invalid id. id must be a positive number")
+		return "", errors.New("Invalid id. id must be a positive integer")
 	}
 	adminMetadata := AdminMetadata{}
 	adminMetadataStr := ""
@@ -432,8 +432,8 @@ func getNamespaceByPrefix(prefix string) (*Namespace, error) {
 // excluding Namespace.ID, Namespace.Identity, Namespace.Pubkey, and various dates
 //
 // For filterNs.AdminMetadata.Description and filterNs.AdminMetadata.SiteName,
-// the string will be matched using `strings.Contains`. The rest of the AdminMetadata fields is
-// matched by `==`
+// the string will be matched using `strings.Contains`. This is too mimic a SQL style `like` match.
+// The rest of the AdminMetadata fields is matched by `==`
 func getNamespacesByFilter(filterNs Namespace, serverType ServerType) ([]*Namespace, error) {
 	query := `SELECT id, prefix, pubkey, identity, admin_metadata FROM namespace WHERE 1=1 `
 	if serverType == CacheType {
