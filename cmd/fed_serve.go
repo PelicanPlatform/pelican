@@ -43,6 +43,10 @@ func fedServeStart(cmd *cobra.Command, args []string) error {
 		return errors.New("`pelican serve` does not support the cache module")
 	}
 
-	_, err := launchers.LaunchModules(cmd.Context(), modules)
+	cancel, err := launchers.LaunchModules(cmd.Context(), modules)
+	if err != nil {
+		cancel()
+	}
+
 	return err
 }

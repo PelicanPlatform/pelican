@@ -45,6 +45,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/oauth2"
+	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
@@ -52,10 +56,6 @@ import (
 	// github.com/mattn/go-sqlite3, because this one
 	// doesn't require compilation with CGO_ENABLED
 	_ "modernc.org/sqlite"
-
-	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/oauth2"
-	"github.com/pelicanplatform/pelican/param"
 )
 
 var OIDC struct {
@@ -342,7 +342,7 @@ func cliRegisterNamespace(ctx *gin.Context) {
 			return
 		}
 
-		resp, err := client.PostForm(OIDC.UserInfoEndpoint, payload)
+		resp, err := client.PostForm(oidcConfig.Endpoint.UserInfoURL, payload)
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error making request to user info endpoint"})
 			log.Errorf("Failed to execute post form to user info endpoint %s: %v", oidcConfig.Endpoint.UserInfoURL, err)
@@ -396,7 +396,7 @@ func cliRegisterNamespace(ctx *gin.Context) {
 		payload.Set("client_secret", oidcConfig.ClientSecret)
 		payload.Set("scope", strings.Join(oidcConfig.Scopes, " "))
 
-		response, err := client.PostForm(OIDC.DeviceAuthEndpoint, payload)
+		response, err := client.PostForm(oidcConfig.Endpoint.DeviceAuthURL, payload)
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered error requesting device code"})
 			log.Errorf("Failed to execute post form to device auth endpoint %s: %v", oidcConfig.Endpoint.DeviceAuthURL, err)
@@ -438,7 +438,7 @@ func cliRegisterNamespace(ctx *gin.Context) {
 		payload.Set("device_code", reqData.DeviceCode)
 		payload.Set("grant_type", "urn:ietf:params:oauth:grant-type:device_code")
 
-		response, err := client.PostForm(OIDC.TokenEndpoint, payload)
+		response, err := client.PostForm(oidcConfig.Endpoint.TokenURL, payload)
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error while making request to token endpoint"})
 			log.Errorf("Failed to execute post form to token endpoint %s: %v", oidcConfig.Endpoint.TokenURL, err)
@@ -580,7 +580,7 @@ func dbDeleteNamespace(ctx *gin.Context) {
 		}
 
 		for _, scope := range strings.Split(scope, " ") {
-			if scope == "pelican.namespace_delete" {
+			if scope == token_scopes.Pelican_NamespaceDelete.String() {
 				return nil
 			}
 		}

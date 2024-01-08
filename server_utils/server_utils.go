@@ -97,15 +97,24 @@ func GetServerIssuerURL() (*url.URL, error) {
 // Even if the filesystem watcher fails, this will invoke `maintenanceFunc` every `sleepTime` duration.
 // The maintenance function will be called with `true` if invoked due to a directory change, false otherwise
 // When generating error messages, `description` will be used to describe the task.
-func LaunchWatcherMaintenance(ctx context.Context, dirPath string, description string, sleepTime time.Duration, maintenanceFunc func(notifyEvent bool) error) {
+func LaunchWatcherMaintenance(ctx context.Context, dirPaths []string, description string, sleepTime time.Duration, maintenanceFunc func(notifyEvent bool) error) {
 	select_count := 4
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		log.Warningf("%s routine failed to create new watcher", description)
 		select_count -= 2
-	} else if err = watcher.Add(dirPath); err != nil {
-		log.Warningf("%s routine failed to add directory %s to watch: %v", description, dirPath, err)
-		select_count -= 2
+	} else {
+		uniquePaths := map[string]bool{}
+		for _, dirPath := range dirPaths {
+			uniquePaths[dirPath] = true
+		}
+		for dirPath := range uniquePaths {
+			if err = watcher.Add(dirPath); err != nil {
+				log.Warningf("%s routine failed to add directory %s to watch: %v", description, dirPath, err)
+				select_count -= 2
+				break
+			}
+		}
 	}
 	cases := make([]reflect.SelectCase, select_count)
 	ticker := time.NewTicker(sleepTime)

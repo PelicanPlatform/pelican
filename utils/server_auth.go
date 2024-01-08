@@ -24,7 +24,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"sort"
 	"strings"
 	"time"
 
@@ -35,6 +34,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
@@ -79,58 +79,6 @@ var (
 
 func init() {
 	authChecker = &AuthCheckImpl{}
-}
-
-// Return if expectedScopes contains the tokenScope and it's case-insensitive.
-// If all=false, it checks if the tokenScopes have any one scope in expectedScopes;
-// If all=true, it checks if tokenScopes is the same set as expectedScopes
-func scopeContains(tokenScopes []string, expectedScopes []string, all bool) bool {
-	if !all { // Any tokenScope in desiredScopes is OK
-		for _, tokenScope := range tokenScopes {
-			for _, sc := range expectedScopes {
-				if strings.EqualFold(sc, tokenScope) {
-					return true
-				}
-			}
-		}
-		return false
-	} else { // All tokenScope must be in desiredScopes
-		if len(tokenScopes) != len(expectedScopes) {
-			return false
-		}
-		sort.Strings(tokenScopes)
-		sort.Strings(expectedScopes)
-		for i := 0; i < len(tokenScopes); i++ {
-			if tokenScopes[i] != expectedScopes[i] {
-				return false
-			}
-		}
-		return true
-	}
-}
-
-// Creates a validator that checks if a token's scope matches the given scope: expectedScopes.
-// See `scopeContains` for detailed checking mechanism
-func createScopeValidator(expectedScopes []string, all bool) jwt.ValidatorFunc {
-
-	return jwt.ValidatorFunc(func(_ context.Context, tok jwt.Token) jwt.ValidationError {
-		// If no scope is present, always return true
-		if len(expectedScopes) == 0 {
-			return nil
-		}
-		scope_any, present := tok.Get("scope")
-		if !present {
-			return jwt.NewValidationError(errors.New("No scope is present; required for authorization"))
-		}
-		scope, ok := scope_any.(string)
-		if !ok {
-			return jwt.NewValidationError(errors.New("scope claim in token is not string-valued"))
-		}
-		if scopeContains(strings.Split(scope, " "), expectedScopes, all) {
-			return nil
-		}
-		return jwt.NewValidationError(errors.New(fmt.Sprint("Token does not contain any of the scopes: ", expectedScopes)))
-	})
 }
 
 // [Deprecated] This function is expected to be removed very soon, after
@@ -231,7 +179,7 @@ func (a AuthCheckImpl) FederationCheck(c *gin.Context, strToken string, expected
 		return errors.Wrap(err, "Failed to verify JWT by federation's key")
 	}
 
-	scopeValidator := createScopeValidator(expectedScopes, allScopes)
+	scopeValidator := token_scopes.CreateScopeValidator(expectedScopes, allScopes)
 	if err = jwt.Validate(parsed, jwt.WithValidator(scopeValidator)); err != nil {
 		return errors.Wrap(err, "Failed to verify the scope of the token")
 	}
@@ -276,7 +224,7 @@ func (a AuthCheckImpl) IssuerCheck(c *gin.Context, strToken string, expectedScop
 		return errors.Wrap(err, "Failed to verify JWT by issuer's key")
 	}
 
-	scopeValidator := createScopeValidator(expectedScopes, allScopes)
+	scopeValidator := token_scopes.CreateScopeValidator(expectedScopes, allScopes)
 	if err = jwt.Validate(parsed, jwt.WithValidator(scopeValidator)); err != nil {
 		return errors.Wrap(err, "Failed to verify the scope of the token")
 	}

@@ -388,9 +388,9 @@ func TestPasswordBasedLoginAPI(t *testing.T) {
 
 		recorder := httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
-		//Check http reponse code 401
-		assert.Equal(t, 401, recorder.Code)
-		assert.JSONEq(t, `{"error":"Login failed"}`, recorder.Body.String())
+		//Check http reponse code 400
+		assert.Equal(t, 400, recorder.Code)
+		assert.JSONEq(t, `{"error":"Password is required"}`, recorder.Body.String())
 	})
 
 	//Invoke with incorrect password should fail
@@ -405,7 +405,7 @@ func TestPasswordBasedLoginAPI(t *testing.T) {
 		router.ServeHTTP(recorder, req)
 		//Check http reponse code 401
 		assert.Equal(t, 401, recorder.Code)
-		assert.JSONEq(t, `{"error":"Login failed"}`, recorder.Body.String())
+		assert.JSONEq(t, `{"error":"Password and user didn't match"}`, recorder.Body.String())
 	})
 
 	//Invoke with incorrect user should fail
@@ -420,7 +420,7 @@ func TestPasswordBasedLoginAPI(t *testing.T) {
 		router.ServeHTTP(recorder, req)
 		//Check http reponse code 401
 		assert.Equal(t, 401, recorder.Code)
-		assert.JSONEq(t, `{"error":"Login failed"}`, recorder.Body.String())
+		assert.JSONEq(t, `{"error":"Password and user didn't match"}`, recorder.Body.String())
 	})
 
 	//Invoke with invalid user, should fail
@@ -433,9 +433,9 @@ func TestPasswordBasedLoginAPI(t *testing.T) {
 
 		recorder := httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
-		//Check http reponse code 401
-		assert.Equal(t, 401, recorder.Code)
-		assert.JSONEq(t, `{"error":"Login failed"}`, recorder.Body.String())
+		//Check http reponse code 400
+		assert.Equal(t, 400, recorder.Code)
+		assert.JSONEq(t, `{"error":"User is required"}`, recorder.Body.String())
 	})
 }
 

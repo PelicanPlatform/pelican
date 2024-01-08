@@ -70,6 +70,7 @@ func init() {
 }
 
 func stashPluginMain(args []string) {
+	config.InitConfig()
 	err := config.InitClient()
 	if err != nil {
 		log.Errorln(err)
@@ -83,7 +84,6 @@ func stashPluginMain(args []string) {
 	client.ObjectClientOptions.ProgressBars = false
 	client.ObjectClientOptions.Version = version
 	client.ObjectClientOptions.Plugin = true
-	config.SetLogging(log.PanicLevel)
 	methods := []string{"http"}
 	var infile, outfile, testCachePath string
 	var useOutFile bool = false
@@ -300,10 +300,17 @@ func stashPluginMain(args []string) {
 	if err = outputFile.Sync(); err != nil {
 		var perr *fs.PathError
 		var serr syscall.Errno
-		if errors.As(err, &perr) && errors.As(perr.Unwrap(), &serr) && serr == syscall.EINVAL {
+		// Error code 1 (serr) is ERROR_INVALID_FUNCTION, the expected Windows syscall error
+		// Error code EINVAL is returned on Linux
+		// Error code ENODEV is returned on Mac OS X
+		if errors.As(err, &perr) && errors.As(perr.Unwrap(), &serr) && (int(serr) == 1 || serr == syscall.EINVAL || serr == syscall.ENODEV) {
 			log.Debugf("Error when syncing: %s; can be ignored\n", perr)
 		} else {
-			log.Errorln("Failed to sync output file:", err)
+			if errors.As(err, &perr) && errors.As(perr.Unwrap(), &serr) {
+				log.Errorf("Failed to sync output file: %s (errno %d)", serr, int(serr))
+			} else {
+				log.Errorln("Failed to sync output file:", err)
+			}
 			os.Exit(1)
 		}
 	}
