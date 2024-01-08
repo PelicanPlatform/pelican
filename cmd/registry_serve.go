@@ -26,6 +26,10 @@ import (
 )
 
 func serveRegistry(cmd *cobra.Command, _ []string) error {
-	_, err := launchers.LaunchModules(cmd.Context(), config.RegistryType)
+	cancel, err := launchers.LaunchModules(cmd.Context(), config.RegistryType)
+	if err != nil {
+		cancel()
+	}
+
 	return err
 }

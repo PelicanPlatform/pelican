@@ -20,7 +20,6 @@ package main
 
 import (
 	"context"
-	"os"
 	"strconv"
 	"strings"
 
@@ -78,7 +77,7 @@ func (i *uint16Value) Type() string {
 
 func (i *uint16Value) String() string { return strconv.FormatUint(uint64(*i), 10) }
 
-func Execute() {
+func Execute() error {
 	egrp := errgroup.Group{}
 	defer func() {
 		err := egrp.Wait()
@@ -87,10 +86,7 @@ func Execute() {
 		}
 	}()
 	ctx := context.WithValue(context.Background(), config.EgrpKey, &egrp)
-	err := rootCmd.ExecuteContext(ctx)
-	if err != nil {
-		os.Exit(1)
-	}
+	return rootCmd.ExecuteContext(ctx)
 }
 
 func init() {
