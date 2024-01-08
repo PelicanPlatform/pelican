@@ -68,11 +68,9 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		return shutdownCancel, errors.Wrap(err, "Failure when configuring the server")
 	}
 
-	if param.Server_EnableUI.GetBool() {
-		// Set up necessary APIs to support Web UI, including auth and metrics
-		if err := web_ui.ConfigureServerWebAPI(ctx, engine, egrp); err != nil {
-			return shutdownCancel, err
-		}
+	// Set up necessary APIs to support Web UI, including auth and metrics
+	if err := web_ui.ConfigureServerWebAPI(ctx, engine, egrp); err != nil {
+		return shutdownCancel, err
 	}
 
 	if modules.IsEnabled(config.RegistryType) {
@@ -149,8 +147,9 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		return nil
 	})
 
-	if err = server_utils.WaitUntilWorking(ctx, "GET", param.Server_ExternalWebUrl.GetString()+"/view", "Web UI", http.StatusOK); err != nil {
+	if err = server_utils.WaitUntilWorking(ctx, "GET", param.Server_ExternalWebUrl.GetString()+"/api/v1.0/servers", "Web UI", http.StatusOK); err != nil {
 		log.Errorln("Web engine startup appears to have failed:", err)
+		return shutdownCancel, err
 	}
 
 	if modules.IsEnabled(config.OriginType) {

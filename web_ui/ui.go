@@ -23,7 +23,6 @@ import (
 	"crypto/tls"
 	"embed"
 	"fmt"
-	"github.com/pelicanplatform/pelican/config"
 	"math/rand"
 	"mime"
 	"net"
@@ -34,6 +33,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/pelicanplatform/pelican/config"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pelicanplatform/pelican/metrics"
@@ -247,18 +248,21 @@ func waitUntilLogin(ctx context.Context) error {
 //
 // You need to mount the static resources for UI in a separate function
 func ConfigureServerWebAPI(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) error {
-	if err := configureAuthEndpoints(ctx, engine, egrp); err != nil {
-		return err
-	}
 	if err := configureCommonEndpoints(engine); err != nil {
-		return err
-	}
-	if err := configureWebResource(engine); err != nil {
 		return err
 	}
 	if err := configureMetrics(ctx, engine); err != nil {
 		return err
 	}
+	if param.Server_EnableUI.GetBool() {
+		if err := configureAuthEndpoints(ctx, engine, egrp); err != nil {
+			return err
+		}
+		if err := configureWebResource(engine); err != nil {
+			return err
+		}
+	}
+
 	// Redirect root to /view for web UI
 	engine.GET("/", func(c *gin.Context) {
 		c.Redirect(http.StatusFound, "/view/")
