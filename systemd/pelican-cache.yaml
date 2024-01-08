@@ -6,7 +6,6 @@ Federation:
   DiscoveryUrl:
 #Server:
 #  Hostname: f.q.d.n
-Xrootd:
-  Mount: "/mnt/pelican"
 Cache:
   Port: 8443
+  DataLocation: "/mnt/pelican"
