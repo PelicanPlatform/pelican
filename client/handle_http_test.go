@@ -1,4 +1,5 @@
 //go:build !windows
+
 /***************************************************************
  *
  * Copyright (C) 2023, University of Nebraska-Lincoln
@@ -22,10 +23,10 @@ package client
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"io"
-	"math/rand"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -530,7 +531,7 @@ func TestFullUpload(t *testing.T) {
 		// Upload the file
 		tempPath := tempFile.Name()
 		fileName := filepath.Base(tempPath)
-		uploadURL := "stash:///test/"+fileName
+		uploadURL := "stash:///test/" + fileName
 
 		methods := []string{"http"}
 		uploaded, err := DoStashCPSingle(tempFile.Name(), uploadURL, methods, false)
