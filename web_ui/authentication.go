@@ -43,7 +43,8 @@ import (
 )
 
 type (
-	Login struct {
+	UserRole string
+	Login    struct {
 		User     string `form:"user"`
 		Password string `form:"password"`
 	}
@@ -55,12 +56,23 @@ type (
 	PasswordReset struct {
 		Password string `form:"password"`
 	}
+
+	WhoAmIRes struct {
+		Authenticated bool     `json:"authenticated"`
+		Role          UserRole `json:"role"`
+		User          string   `json:"user"`
+	}
 )
 
 var (
 	authDB       atomic.Pointer[htpasswd.File]
 	currentCode  atomic.Pointer[string]
 	previousCode atomic.Pointer[string]
+)
+
+const (
+	AdminRole    UserRole = "admin"
+	NonAdminRole UserRole = "user"
 )
 
 // Periodically re-read the htpasswd file used for password-based authentication
@@ -191,6 +203,44 @@ func AuthHandler(ctx *gin.Context) {
 	}
 }
 
+// checkAdmin checks if a user string has admin privilege. It returns boolean and a message
+// indicating the error message.
+//
+// Note that by default it only checks if user == "admin". If you have a custom list of admin identifiers
+// to check, you should set Registry.AdminUsers. See parameters.yaml for details.
+func CheckAdmin(user string) (isAdmin bool, message string) {
+	if user == "admin" {
+		return true, ""
+	}
+	adminList := param.Registry_AdminUsers.GetStringSlice()
+	if adminList == nil {
+		return false, "Registry.AdminUsers is not set, and user is not root user. Admin check returns false"
+	}
+	for _, admin := range adminList {
+		if user == admin {
+			return true, ""
+		}
+	}
+	return false, "You don't have permission to perform this action"
+}
+
+// adminAuthHandler checks the admin status of a logged-in user. This middleware
+// should be cascaded behind the [web_ui.AuthHandler]
+func AdminAuthHandler(ctx *gin.Context) {
+	user := ctx.GetString("User")
+	// This should be done by a regular auth handler from the upstream, but we check here just in case
+	if user == "" {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Login required to view this page"})
+	}
+	isAdmin, msg := CheckAdmin(user)
+	if isAdmin {
+		ctx.Next()
+		return
+	} else {
+		ctx.JSON(http.StatusForbidden, gin.H{"error": msg})
+	}
+}
+
 // Handle regular username/password based login
 func loginHandler(ctx *gin.Context) {
 	db := authDB.Load()
@@ -274,6 +324,27 @@ func resetLoginHandler(ctx *gin.Context) {
 	}
 }
 
+func whoamiHandler(ctx *gin.Context) {
+	res := WhoAmIRes{}
+	if user, err := getUser(ctx); err != nil || user == "" {
+		res.Authenticated = false
+		ctx.JSON(http.StatusOK, res)
+	} else {
+		res.Authenticated = true
+		res.User = user
+
+		// Set header to carry CSRF token
+		ctx.Header("X-CSRF-Token", csrf.Token(ctx.Request))
+		isAdmin, _ := CheckAdmin(user)
+		if isAdmin {
+			res.Role = AdminRole
+		} else {
+			res.Role = NonAdminRole
+		}
+		ctx.JSON(http.StatusOK, res)
+	}
+}
+
 // Configure the authentication endpoints for the server web UI
 func configureAuthEndpoints(ctx context.Context, router *gin.Engine, egrp *errgroup.Group) error {
 	if router == nil {
@@ -295,15 +366,7 @@ func configureAuthEndpoints(ctx context.Context, router *gin.Engine, egrp *errgr
 	group.POST("/resetLogin", AuthHandler, resetLoginHandler)
 	// Pass csrfhanlder only to the whoami route to generate CSRF token
 	// while leaving other routes free of CSRF check (we might want to do it some time in the future)
-	group.GET("/whoami", csrfHandler, func(ctx *gin.Context) {
-		if user, err := getUser(ctx); err != nil || user == "" {
-			ctx.JSON(200, gin.H{"authenticated": false})
-		} else {
-			// Set header to carry CSRF token
-			ctx.Header("X-CSRF-Token", csrf.Token(ctx.Request))
-			ctx.JSON(200, gin.H{"authenticated": true, "user": user})
-		}
-	})
+	group.GET("/whoami", csrfHandler, whoamiHandler)
 	group.GET("/loginInitialized", func(ctx *gin.Context) {
 		db := authDB.Load()
 		if db == nil {

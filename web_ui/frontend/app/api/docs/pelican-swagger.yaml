@@ -56,6 +56,26 @@ definitions:
         description: Int64 unix time of the last status update
         example: 1700594867
     readOnly: true
+  WhoAmI:
+    type: object
+    description: The return data of /auth/whoami endpoint
+    properties:
+      authenticated:
+        type: boolean
+        description: If the current user is authenticated
+        example: true
+        default: false
+      role:
+        type: string
+        description: The user role. Will be either "admin" or "user"
+        example: "user"
+        default: ""
+      user:
+        type: string
+        description: The user identifier. For root user, it will be "admin".
+          For regular user from CILogon login, it will be the "sub" claim of their CILogon access token
+        example: "http://cilogon.org/serverA/users/12345"
+        default: ""
   ErrorModel:
     type: object
     description: The error reponse of a request
@@ -455,16 +475,7 @@ paths:
           description: OK
           schema:
             type: object
-            description:
-              The authentication status and username, if any. "user" field is omitted
-              when "authenticated" is false
-            properties:
-              authenticated:
-                type: boolean
-                example: true
-              user:
-                type: string
-                example: "admin"
+            $ref: "#/definitions/WhoAmI"
   /auth/loginInitialized:
     get:
       tags:
