@@ -32,16 +32,6 @@ func TestHandleWildcard(t *testing.T) {
 		assert.Equal(t, http.StatusNotFound, w.Code)
 	})
 
-	t.Run("match-getNamespace", func(t *testing.T) {
-		req, _ := http.NewRequest("GET", "/registry/getNamespace", nil)
-		w := httptest.NewRecorder()
-
-		r.ServeHTTP(w, req)
-
-		// /getNamespace requires X-Pelican-Prefix header to be set or it will return 400
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-	})
-
 	t.Run("match-wildcard-metadataHandler", func(t *testing.T) {
 		mockPrefix := "/testnamespace/foo"
 

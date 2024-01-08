@@ -102,25 +102,6 @@ func TestServeNamespaceRegistry(t *testing.T) {
 		assert.Contains(t, stdoutCapture, `"prefix":"/foo/bar"`)
 	})
 
-	//Test functionality of namespace get
-	t.Run("Test namespace get", func(t *testing.T) {
-		//Set up a buffer to capture stdout
-		var stdoutCapture string
-		oldStdout := os.Stdout
-		r, w, _ := os.Pipe()
-		os.Stdout = w
-
-		err = NamespaceGet(svr.URL + "/api/v1.0/registry")
-		require.NoError(t, err)
-		w.Close()
-		os.Stdout = oldStdout
-
-		capturedOutput := make([]byte, 1024)
-		n, _ := r.Read(capturedOutput)
-		stdoutCapture = string(capturedOutput[:n])
-		assert.Contains(t, stdoutCapture, `"prefix":"/foo/bar"`)
-	})
-
 	t.Run("Test namespace delete", func(t *testing.T) {
 		//Test functionality of namespace delete
 		err = NamespaceDelete(svr.URL+"/api/v1.0/registry/foo/bar", "/foo/bar")

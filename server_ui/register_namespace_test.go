@@ -133,7 +133,7 @@ func TestRegistration(t *testing.T) {
 	assert.True(t, jwk.Equal(registryKey, key))
 
 	// Test the functionality of the keyIsRegistered function
-	keyStatus, err := keyIsRegistered(key, svr.URL+"/api/v1.0/registry/getNamespace", "/test123")
+	keyStatus, err := keyIsRegistered(key, svr.URL+"/api/v1.0/registry", "/test123")
 	assert.NoError(t, err)
 	require.Equal(t, keyStatus, keyMatch)
 
@@ -145,7 +145,7 @@ func TestRegistration(t *testing.T) {
 	keyAlt, err := privKeyAlt.PublicKey()
 	require.NoError(t, err)
 	assert.NoError(t, jwk.AssignKeyID(keyAlt))
-	keyStatus, err = keyIsRegistered(keyAlt, svr.URL+"/api/v1.0/registry/getNamespace", "/test123")
+	keyStatus, err = keyIsRegistered(keyAlt, svr.URL+"/api/v1.0/registry", "/test123")
 	assert.NoError(t, err)
 	assert.Equal(t, keyStatus, keyMismatch)
 

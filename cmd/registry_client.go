@@ -80,7 +80,6 @@ func registerANamespace(cmd *cobra.Command, args []string) {
 	if err != nil {
 		log.Errorf("Failed to construction registration endpoint URL: %v", err)
 	}
-	// registrationEndpoint := url.JoinPath(namespaceEndpoint, "/api/v1.0/registry/register").String()
 	if prefix == "" {
 		log.Error("Error: prefix is required")
 		os.Exit(1)

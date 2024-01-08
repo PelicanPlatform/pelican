@@ -271,6 +271,22 @@ func namespaceExistsById(id int) (bool, error) {
 	return found, nil
 }
 
+func namespaceExistsByPrefix(prefix string) (bool, error) {
+	checkQuery := `SELECT prefix FROM namespace WHERE prefix = ?`
+	result, err := db.Query(checkQuery, prefix)
+	if err != nil {
+		return false, err
+	}
+	defer result.Close()
+
+	found := false
+	for result.Next() {
+		found = true
+		break
+	}
+	return found, nil
+}
+
 func namespaceBelongsToUserId(id int, userId string) (bool, error) {
 	query := `SELECT admin_metadata FROM namespace where id = ?`
 	rows, err := db.Query(query, id)
@@ -319,7 +335,7 @@ func getNamespaceJwksById(id int) (jwk.Set, error) {
 	return set, nil
 }
 
-func getNamespaceJwksByPrefix(prefix string, approvalRequired bool) (*jwk.Set, error) {
+func getNamespaceJwksByPrefix(prefix string, approvalRequired bool) (jwk.Set, error) {
 	var jwksQuery string
 	var pubkeyStr string
 	if strings.HasPrefix(prefix, "/caches/") && approvalRequired {
@@ -358,7 +374,7 @@ func getNamespaceJwksByPrefix(prefix string, approvalRequired bool) (*jwk.Set, e
 		return nil, errors.Wrap(err, "Failed to parse pubkey as a jwks")
 	}
 
-	return &set, nil
+	return set, nil
 }
 
 func getNamespaceStatusById(id int) (RegistrationStatus, error) {
