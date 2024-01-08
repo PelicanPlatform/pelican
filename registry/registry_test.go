@@ -51,7 +51,8 @@ func TestHandleWildcard(t *testing.T) {
 		mockJWKS := jwk.NewSet()
 		mockJWKSBytes, err := json.Marshal(mockJWKS)
 		require.NoError(t, err)
-		insertMockDBData([]Namespace{{Prefix: mockPrefix, Pubkey: string(mockJWKSBytes)}})
+		err = insertMockDBData([]Namespace{{Prefix: mockPrefix, Pubkey: string(mockJWKSBytes)}})
+		require.NoError(t, err)
 		mockNs, err := getNamespaceByPrefix(mockPrefix)
 
 		require.NoError(t, err)
@@ -64,6 +65,6 @@ func TestHandleWildcard(t *testing.T) {
 
 		// Should return 200 for matched metadataHandler since the db is empty
 		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Equal(t, string(mockJWKSBytes), string(w.Body.Bytes()))
+		assert.Equal(t, string(mockJWKSBytes), w.Body.String())
 	})
 }

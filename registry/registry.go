@@ -16,7 +16,7 @@
  *
  ***************************************************************/
 
-// Package registry handles namespace management in Pelican ecosystem.
+// Package registry handles namespace registration in Pelican ecosystem.
 //
 //   - It handles the logic to spin up a "registry" server for namespace management,
 //     including a web UI for interactive namespace registration, approval, and browsing.
@@ -84,9 +84,7 @@ type TokenResponse struct {
 	Error       string `json:"error"`
 }
 
-/*
-Various auxiliary functions used for client-server security handshakes
-*/
+// Various auxiliary functions used for client-server security handshakes
 type registrationData struct {
 	ClientNonce     string `json:"client_nonce"`
 	ClientPayload   string `json:"client_payload"`
@@ -301,7 +299,7 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData, action str
 				return sysErr
 			}
 
-			err = dbAddNamespace(ctx, data)
+			err = addNamespaceHandler(ctx, data)
 			if err != nil {
 				ctx.JSON(500, gin.H{"error": "The server encountered an error while attempting to add the prefix to its database"})
 				return errors.Wrapf(err, "Failed while trying to add to database")
@@ -316,9 +314,7 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData, action str
 	return nil
 }
 
-/*
-Handler functions called upon by the gin router
-*/
+// Handler functions called upon by the gin router
 func cliRegisterNamespace(ctx *gin.Context) {
 
 	var reqData registrationData
@@ -490,7 +486,7 @@ func cliRegisterNamespace(ctx *gin.Context) {
 	}
 }
 
-func dbAddNamespace(ctx *gin.Context, data *registrationData) error {
+func addNamespaceHandler(ctx *gin.Context, data *registrationData) error {
 	var ns Namespace
 	ns.Prefix = data.Prefix
 
@@ -515,7 +511,7 @@ func dbAddNamespace(ctx *gin.Context, data *registrationData) error {
 	return nil
 }
 
-func dbDeleteNamespace(ctx *gin.Context) {
+func deleteNamespaceHandler(ctx *gin.Context) {
 	/*
 		A weird feature of gin is that wildcards always
 		add a preceding /. Since the URL parsing that happens
@@ -621,7 +617,7 @@ func cliListNamespaces(c *gin.Context) {
 }
 */
 
-func dbGetAllNamespaces(ctx *gin.Context) {
+func getAllNamespacesHandler(ctx *gin.Context) {
 	nss, err := getAllNamespaces()
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error trying to list all namespaces"})
@@ -644,7 +640,7 @@ func wildcardHandler(ctx *gin.Context) {
 
 	// Equivalent of group.GET("/getNamespace")
 	if path == "/getNamespace" {
-		dbGetNamespace(ctx)
+		handleGetNamespace(ctx)
 		return
 	}
 
@@ -671,7 +667,7 @@ func wildcardHandler(ctx *gin.Context) {
 	ctx.String(http.StatusNotFound, "404 Not Found")
 }
 
-func dbGetNamespace(ctx *gin.Context) {
+func handleGetNamespace(ctx *gin.Context) {
 	prefix := ctx.GetHeader("X-Pelican-Prefix")
 	if prefix == "" {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "X-Pelican-Prefix header required"})
@@ -694,10 +690,10 @@ func RegisterRegistryAPI(router *gin.RouterGroup) {
 	// routing if needed.
 	{
 		registryAPI.POST("", cliRegisterNamespace)
-		registryAPI.GET("", dbGetAllNamespaces)
+		registryAPI.GET("", getAllNamespacesHandler)
 
 		// Handle everything under "/" route with GET method
 		registryAPI.GET("/*wildcard", wildcardHandler)
-		registryAPI.DELETE("/*wildcard", dbDeleteNamespace)
+		registryAPI.DELETE("/*wildcard", deleteNamespaceHandler)
 	}
 }
