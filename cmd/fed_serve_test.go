@@ -66,7 +66,7 @@ func TestFedServePosixOrigin(t *testing.T) {
 	viper.Set("Xrootd.RunLocation", filepath.Join(tmpPath, "xrootd"))
 	t.Cleanup(func() {
 		if err := os.RemoveAll(tmpPath); err != nil {
-			t.Fatal("Failed to clean up temPath")
+			t.Fatal("Failed to clean up temp path")
 		}
 	})
 
