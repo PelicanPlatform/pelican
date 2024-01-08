@@ -252,16 +252,18 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 	}
 	ns.Prefix = updated_prefix
 
-	// Check if prefix exists before doing anything else
-	exists, err := namespaceExists(ns.Prefix)
-	if err != nil {
-		log.Errorf("Failed to check if namespace already exists: %v", err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Server encountered an error checking if namespace already exists"})
-		return
-	}
-	if exists {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("The prefix %s is already registered", ns.Prefix)})
-		return
+	if !isUpdate {
+		// Check if prefix exists before doing anything else. Skip check if it's update operation
+		exists, err := namespaceExists(ns.Prefix)
+		if err != nil {
+			log.Errorf("Failed to check if namespace already exists: %v", err)
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Server encountered an error checking if namespace already exists"})
+			return
+		}
+		if exists {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("The prefix %s is already registered", ns.Prefix)})
+			return
+		}
 	}
 	// Check if pubKey is a valid JWK
 	pubkey, err := validateJwks(ns.Pubkey)
