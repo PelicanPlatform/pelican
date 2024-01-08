@@ -38,7 +38,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"path/filepath"
 	"strings"
 	"sync"
 
@@ -526,6 +525,10 @@ func dbDeleteNamespace(ctx *gin.Context) {
 	*/
 	prefix := ctx.Param("wildcard")
 	log.Debug("Attempting to delete namespace prefix ", prefix)
+	if prefix == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "prefix is required to delete"})
+		return
+	}
 
 	// Check if prefix exists before trying to delete it
 	exists, err := namespaceExists(prefix)
@@ -628,16 +631,27 @@ func dbGetAllNamespaces(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, nss)
 }
 
-func metadataHandler(ctx *gin.Context) {
+// Gin requires no wildcard match and exact match fall under the same
+// parent path, so we need to handle all routing under "/" route ourselves.
+//
+// See https://github.com/PelicanPlatform/pelican/issues/566
+func wildcardHandler(ctx *gin.Context) {
 	// A weird feature of gin is that wildcards always
 	// add a preceding /. Since the prefix / was trimmed
 	// out during the url parsing, we can just leave the
 	// new / here!
 	path := ctx.Param("wildcard")
 
+	// Equivalent of group.GET("/getNamespace")
+	if path == "/getNamespace" {
+		dbGetNamespace(ctx)
+		return
+	}
+
 	// Get the prefix's JWKS
-	if filepath.Base(path) == "issuer.jwks" {
-		// do something
+	// Avoid using filepath.Base for path matching, as filepath format depends on OS
+	// while HTTP path is always slash (/)
+	if strings.HasSuffix(path, "/.well-known/issuer.jwks") {
 		prefix := strings.TrimSuffix(path, "/.well-known/issuer.jwks")
 		jwks, err := getNamespaceJwksByPrefix(prefix, true)
 		if err != nil {
@@ -650,25 +664,19 @@ func metadataHandler(ctx *gin.Context) {
 			return
 		}
 		ctx.JSON(http.StatusOK, jwks)
+		return
 	}
 
-	// // Get OpenID config info
-	// match, err := filepath.Match("*/\\.well-known/openid-configuration", path)
-	// if err != nil {
-	// 	log.Errorf("Failed to check incoming path for match: %v", err)
-	// 	return
-	// }
-	// if match {
-	// 	// do something
-	// } else {
-	// 	log.Errorln("Unknown request")
-	// 	return
-	// }
-
+	// No match found, return 404
+	ctx.String(http.StatusNotFound, "404 Not Found")
 }
 
 func dbGetNamespace(ctx *gin.Context) {
 	prefix := ctx.GetHeader("X-Pelican-Prefix")
+	if prefix == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "X-Pelican-Prefix header required"})
+		return
+	}
 	ns, err := getNamespaceByPrefix(prefix)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -678,36 +686,18 @@ func dbGetNamespace(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, ns)
 }
 
-// func getJwks(prefix string) (*jwk.Set, error) {
-// 	jwks, err := dbGetPrefixJwks(prefix)
-// 	if err != nil {
-// 		return nil, errors.Wrapf(err, "Could not load jwks for prefix %s", prefix)
-// 	}
-// 	return jwks, nil
-// }
-
-/*
- Commenting out until we're ready to use it.  -BB
-func getOpenIDConfiguration(c *gin.Context) {
-	prefix := c.Param("prefix")
-	c.JSON(http.StatusOK, gin.H{"status": "getOpenIDConfiguration is not implemented", "prefix": prefix})
-}
-*/
-
-func HandleWildcard(ctx *gin.Context) {
-	if strings.HasPrefix(ctx.Request.URL.Path, "/getNamespace") {
-
-	}
-}
-
 func RegisterRegistryAPI(router *gin.RouterGroup) {
 	registryAPI := router.Group("/api/v1.0/registry")
+
+	// DO NOT add any other GET route with path starts with "/" to registryAPI
+	// It will cause duplicated route error. Use wildcardHandler to handle such
+	// routing if needed.
 	{
 		registryAPI.POST("", cliRegisterNamespace)
 		registryAPI.GET("", dbGetAllNamespaces)
-		registryAPI.GET("/getNamespace", dbGetNamespace)
-		// Will handle getting jwks, openid config, and listing namespaces
-		registryAPI.GET("/*wildcard", metadataHandler)
+
+		// Handle everything under "/" route with GET method
+		registryAPI.GET("/*wildcard", wildcardHandler)
 		registryAPI.DELETE("/*wildcard", dbDeleteNamespace)
 	}
 }
