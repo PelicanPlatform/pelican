@@ -276,10 +276,28 @@ func GetAllPrefixes() []string {
 
 func DiscoverFederation() error {
 	federationStr := param.Federation_DiscoveryUrl.GetString()
+	externalUrlStr := param.Server_ExternalWebUrl.GetString()
+	defer func() {
+		// Set default guesses if these values are still unset.
+		if param.Federation_DirectorUrl.GetString() == "" && enabledServers.IsEnabled(DirectorType) {
+			viper.Set("Federation.DirectorUrl", externalUrlStr)
+		}
+		if param.Federation_RegistryUrl.GetString() == "" && enabledServers.IsEnabled(RegistryType) {
+			viper.Set("Federation.RegistryUrl", externalUrlStr)
+		}
+		if param.Federation_JwkUrl.GetString() == "" && enabledServers.IsEnabled(DirectorType) {
+			viper.Set("Federation.JwkUrl", externalUrlStr+"/.well-known/issuer.jwks")
+		}
+	}()
 	if len(federationStr) == 0 {
 		log.Debugln("Federation URL is unset; skipping discovery")
 		return nil
 	}
+	if federationStr == externalUrlStr {
+		log.Debugln("Current web engine hosts the federation; skipping auto-discovery of services")
+		return nil
+	}
+
 	log.Debugln("Federation URL:", federationStr)
 	curDirectorURL := param.Federation_DirectorUrl.GetString()
 	curRegistryURL := param.Federation_RegistryUrl.GetString()
@@ -339,7 +357,7 @@ func DiscoverFederation() error {
 		viper.Set("Federation.DirectorUrl", metadata.DirectorEndpoint)
 	}
 	if curRegistryURL == "" {
-		log.Debugln("Federation service discovery resulted in namespace registry URL",
+		log.Debugln("Federation service discovery resulted in registry URL",
 			metadata.NamespaceRegistrationEndpoint)
 		viper.Set("Federation.RegistryUrl", metadata.NamespaceRegistrationEndpoint)
 	}
@@ -746,13 +764,7 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 		return err
 	}
 
-	// Since director is the federation, we need to wait until director's web engine is running
-	// to do DiscoverFederation on director server
-	if currentServers.IsEnabled(DirectorType) {
-		return nil
-	} else {
-		return DiscoverFederation()
-	}
+	return DiscoverFederation()
 }
 
 func InitClient() error {

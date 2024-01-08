@@ -44,7 +44,7 @@ func federationDiscoveryHandler(ctx *gin.Context) {
 		ctx.JSON(500, gin.H{"error": "Bad server configuration: Director URL is not set"})
 		return
 	}
-	registryUrl := param.Federation_NamespaceUrl.GetString()
+	registryUrl := param.Federation_RegistryUrl.GetString()
 	if len(registryUrl) == 0 {
 		ctx.JSON(500, gin.H{"error": "Bad server configuration: Registry URL is not set"})
 		return
