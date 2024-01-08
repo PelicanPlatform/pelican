@@ -268,26 +268,41 @@ func RedirectToOrigin(ginCtx *gin.Context) {
 	// report the lack of path first -- this is most important for the user because it tells them
 	// they're trying to get an object that simply doesn't exist
 	if namespaceAd.Path == "" {
-		ginCtx.String(404, "No namespace found for path. Either it doesn't exist, or the Director is experiencing problems\n")
+		ginCtx.String(http.StatusNotFound, "No namespace found for path. Either it doesn't exist, or the Director is experiencing problems\n")
 		return
 	}
 	// If the namespace prefix DOES exist, then it makes sense to say we couldn't find the origin.
 	if len(originAds) == 0 {
-		ginCtx.String(404, "There are currently no origins exporting the provided namespace prefix\n")
+		ginCtx.String(http.StatusNotFound, "There are currently no origins exporting the provided namespace prefix\n")
 		return
 	}
 
 	originAds, err = SortServers(ipAddr, originAds)
 	if err != nil {
-		ginCtx.String(500, "Failed to determine origin ordering")
+		ginCtx.String(http.StatusInternalServerError, "Failed to determine origin ordering")
 		return
 	}
+	ginCtx.Writer.Header()["X-Pelican-Namespace"] = []string{fmt.Sprintf("namespace=%s, require-token=%v, collections-url=%s",
+		namespaceAd.Path, namespaceAd.RequireToken, namespaceAd.DirlistHost)}
 
-	redirectURL := getRedirectURL(reqPath, originAds[0], namespaceAd.RequireToken)
-	// See note in RedirectToCache as to why we only add the authz query parameter to this URL,
-	// not those in the `Link`.
-	ginCtx.Redirect(307, getFinalRedirectURL(redirectURL, authzBearerEscaped))
-
+	var redirectURL url.URL
+	// If we are doing a PUT, check to see if any origins are writeable
+	if ginCtx.Request.Method == "PUT" {
+		for idx, ad := range originAds {
+			if ad.WriteEnabled {
+				redirectURL = getRedirectURL(reqPath, originAds[idx], namespaceAd.RequireToken)
+				ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, authzBearerEscaped))
+				return
+			}
+		}
+		ginCtx.String(http.StatusMethodNotAllowed, "No origins on specified endpoint are writeable\n")
+		return
+	} else { // Otherwise, we are doing a GET
+		redirectURL := getRedirectURL(reqPath, originAds[0], namespaceAd.RequireToken)
+		// See note in RedirectToCache as to why we only add the authz query parameter to this URL,
+		// not those in the `Link`.
+		ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, authzBearerEscaped))
+	}
 }
 
 func checkHostnameRedirects(c *gin.Context, incomingHost string) {
@@ -440,11 +455,12 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType ServerTy
 	}
 
 	sAd := ServerAd{
-		Name:    ad.Name,
-		AuthURL: *ad_url,
-		URL:     *ad_url,
-		WebURL:  *adWebUrl,
-		Type:    sType,
+		Name:         ad.Name,
+		AuthURL:      *ad_url,
+		URL:          *ad_url,
+		WebURL:       *adWebUrl,
+		Type:         sType,
+		WriteEnabled: ad.WriteEnabled,
 	}
 
 	hasOriginAdInCache := serverAds.Has(sAd)
@@ -529,6 +545,7 @@ func RegisterDirector(ctx context.Context, router *gin.RouterGroup) {
 	// Establish the routes used for cache/origin redirection
 	router.GET("/api/v1.0/director/object/*any", RedirectToCache)
 	router.GET("/api/v1.0/director/origin/*any", RedirectToOrigin)
+	router.PUT("/api/v1.0/director/origin/*any", RedirectToOrigin)
 	router.POST("/api/v1.0/director/registerOrigin", func(gctx *gin.Context) { RegisterOrigin(ctx, gctx) })
 	// In the foreseeable feature, director will scrape all servers in Pelican ecosystem (including registry)
 	// so that director can be our point of contact for collecting system-level metrics.
