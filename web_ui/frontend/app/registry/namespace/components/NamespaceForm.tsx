@@ -61,6 +61,7 @@ const NamespaceForm = ({
         <form onSubmit={onSubmit}>
             <Box pb={2}>
                 <TextField
+                    required
                     fullWidth
                     size={"small"}
                     id={"prefix"}
@@ -97,6 +98,7 @@ const NamespaceForm = ({
             </Box>
             <Box pb={2}>
                 <TextField
+                    required
                     fullWidth
                     size={"small"}
                     id={"pubkey"}
@@ -113,8 +115,8 @@ const NamespaceForm = ({
                             minHeight: "1.5rem"
                         }
                     }}
-                    placeholder={`
-{
+                    helperText="Pubkey is your origin's public JWKS. It must in JSON format, not JSON string"
+                    placeholder={`{
     "keys": [
         {
             "alg": "ES256",
@@ -152,13 +154,13 @@ const NamespaceForm = ({
                 />
             </Box>
             <Box pb={2}>
-                <FormControl fullWidth size={"small"}>
+                <FormControl required fullWidth size={"small"}>
                     <InputLabel id="institution-label">Institution</InputLabel>
                     <Select
                         labelId="institution-label"
                         id="institution"
                         name={"institution"}
-                        label="Institution"
+                        label="Institution *"
                         value={institution}
                         onChange={event => setInstitution(event.target.value as string)}
                     >
@@ -175,10 +177,9 @@ const NamespaceForm = ({
                     name={"security-contact-user-id"}
                     label={"Security Contact ID"}
                     variant={"outlined"}
-                    FormHelperTextProps={{
-                        children: "CILogon User Identifier for Security Contact"
-                    }}
+                    helperText="CILogon User Identifier of the user responsible for the security of the service"
                     defaultValue={namespace?.admin_metadata?.security_contact_user_id || ""}
+                    placeholder="http://cilogon.org/serverA/users/12345"
                 />
             </Box>
             <Box pb={2}>
