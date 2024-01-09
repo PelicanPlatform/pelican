@@ -149,6 +149,8 @@ func VerifyAdvertiseToken(ctx context.Context, token, namespace string) (bool, e
 			return false, errors.Wrap(err, "failed to marshal the public keyset into JWKS JSON")
 		}
 		log.Debugln("Constructed JWKS from fetching jwks:", string(jsonbuf))
+		// This seems never get reached, as registry returns 403 for pending approval namespace
+		// and there will be HTTP error in getting jwks; thus it will always be error
 		if jsonbuf == nil {
 			adminApprovalErr = errors.New(namespace + " has not been approved by an administrator.")
 			return false, adminApprovalErr
@@ -269,7 +271,7 @@ func GetRegistryIssuerURL(prefix string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	namespace_url.Path, err = url.JoinPath(namespace_url.Path, "api", "v2.0", "registry", "metadata", prefix, ".well-known", "issuer.jwks")
+	namespace_url.Path, err = url.JoinPath(namespace_url.Path, "api", "v1.0", "registry", prefix, ".well-known", "issuer.jwks")
 	if err != nil {
 		return "", err
 	}

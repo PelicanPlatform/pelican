@@ -409,7 +409,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType ServerTy
 		ok, err := VerifyAdvertiseToken(engineCtx, token, prefix)
 		if err != nil {
 			if err == adminApprovalErr {
-				log.Warningln("Failed to verify token:", err)
+				log.Warningln("Failed to verify token. Cache was not approved:", err)
 				ctx.JSON(http.StatusForbidden, gin.H{"error": "Cache is not admin approved"})
 			} else {
 				log.Warningln("Failed to verify token:", err)

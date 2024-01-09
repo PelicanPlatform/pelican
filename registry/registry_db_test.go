@@ -172,6 +172,26 @@ var (
 	}()
 )
 
+func TestNamespaceExistsByPrefix(t *testing.T) {
+	setupMockRegistryDB(t)
+	defer teardownMockNamespaceDB(t)
+
+	t.Run("return-false-for-prefix-dne", func(t *testing.T) {
+		found, err := namespaceExistsByPrefix("/non-existed-namespace")
+		require.NoError(t, err)
+		assert.False(t, found)
+	})
+
+	t.Run("return-true-for-existing-ns", func(t *testing.T) {
+		resetNamespaceDB(t)
+		err := insertMockDBData([]Namespace{{Prefix: "/foo"}})
+		require.NoError(t, err)
+		found, err := namespaceExistsByPrefix("/foo")
+		require.NoError(t, err)
+		assert.True(t, found)
+	})
+}
+
 func TestGetNamespacesById(t *testing.T) {
 	setupMockRegistryDB(t)
 	defer teardownMockNamespaceDB(t)

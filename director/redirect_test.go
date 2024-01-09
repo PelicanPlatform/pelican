@@ -138,8 +138,8 @@ func TestDirectorRegistration(t *testing.T) {
 	setupMockCache := func(t *testing.T, publicKey jwk.Key) MockCache {
 		return MockCache{
 			GetFn: func(key string, keyset *jwk.Set) (jwk.Set, error) {
-				if key != "https://get-your-tokens.org/api/v2.0/registry/metadata/foo/bar/.well-known/issuer.jwks" {
-					t.Errorf("expecting: https://get-your-tokens.org/api/v2.0/registry/metadata/foo/bar/.well-known/issuer.jwks, got %q", key)
+				if key != "https://get-your-tokens.org/api/v1.0/registry/foo/bar/.well-known/issuer.jwks" {
+					t.Errorf("expecting: https://get-your-tokens.org/api/v1.0/registry/foo/bar/.well-known/issuer.jwks, got %q", key)
 				}
 				return *keyset, nil
 			},
