@@ -104,6 +104,7 @@ type config struct {
 		ScitokensUsernameClaim string
 		SelfTest bool
 		Url string
+		WriteEnabled bool
 		XRootDPrefix string
 	}
 	Plugin struct {
@@ -266,6 +267,7 @@ type configWithType struct {
 		ScitokensUsernameClaim struct { Type string; Value string }
 		SelfTest struct { Type string; Value bool }
 		Url struct { Type string; Value string }
+		WriteEnabled struct { Type string; Value bool }
 		XRootDPrefix struct { Type string; Value string }
 	}
 	Plugin struct {
@@ -328,4 +330,3 @@ type configWithType struct {
 		SummaryMonitoringHost struct { Type string; Value string }
 	}
 }
-

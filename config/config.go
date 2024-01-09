@@ -128,6 +128,9 @@ var (
 	// A variable indicating enabled Pelican servers in the current process
 	enabledServers ServerType
 	setServerOnce  sync.Once
+
+	// Pelican version
+	PelicanVersion string
 )
 
 func init() {

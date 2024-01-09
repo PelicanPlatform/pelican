@@ -19,6 +19,7 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -848,16 +849,40 @@ func UploadFile(src string, origDest *url.URL, token string, namespace namespace
 		nonZeroSize = fileInfo.Size() > 0
 	}
 
-	// Parse the writeback host as a URL
-	writebackhostUrl, err := url.Parse(namespace.WriteBackHost)
+	// call a GET on the director, director will respond with our endpoint
+	directorUrlStr := param.Federation_DirectorUrl.GetString()
+	directorUrl, err := url.Parse(directorUrlStr)
 	if err != nil {
-		return 0, err
+		return 0, errors.Wrap(err, "failed to parse director url")
+	}
+	directorUrl.Path, err = url.JoinPath("/api/v1.0/director/origin", origDest.Path)
+	if err != nil {
+		return 0, errors.Wrap(err, "failed to parse director path for upload")
 	}
 
-	dest := &url.URL{
-		Host:   writebackhostUrl.Host,
-		Scheme: "https",
-		Path:   origDest.Path,
+	payload := []byte("forPUT")
+	req, err := http.NewRequest("GET", directorUrl.String(), bytes.NewBuffer(payload))
+	if err != nil {
+		return 0, errors.Wrap(err, "failed to construct request for director-origin query")
+	}
+
+	client := &http.Client{
+		Transport: config.GetTransport(),
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, errors.Wrap(err, "failed to send request to director to obtain upload endpoint")
+	}
+	if resp.StatusCode == 405 {
+		return 0, errors.New("Error 405: No writeable origins were found")
+	}
+	defer resp.Body.Close()
+	dest, err := url.Parse(resp.Header.Get("Location"))
+	if err != nil {
+		return 0, errors.Wrap(err, "failed to parse location header from director response")
 	}
 
 	// Create the wrapped reader and send it to the request
@@ -972,10 +997,9 @@ Loop:
 
 }
 
-var UploadClient = &http.Client{Transport: config.GetTransport()}
-
 // Actually perform the Put request to the server
 func doPut(request *http.Request, responseChan chan<- *http.Response, errorChan chan<- error) {
+	var UploadClient = &http.Client{Transport: config.GetTransport()}
 	client := UploadClient
 	dump, _ := httputil.DumpRequestOut(request, false)
 	log.Debugf("Dumping request: %s", dump)

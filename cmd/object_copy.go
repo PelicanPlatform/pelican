@@ -79,7 +79,7 @@ func init() {
 
 func copyMain(cmd *cobra.Command, args []string) {
 
-	client.ObjectClientOptions.Version = version
+	client.ObjectClientOptions.Version = config.PelicanVersion
 
 	// Need to check just stashcp since it does not go through root, the other modes get checked there
 	if strings.HasPrefix(execName, "stashcp") {
