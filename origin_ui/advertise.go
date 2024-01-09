@@ -65,11 +65,11 @@ func (server *OriginServer) CreateAdvertisement(name string, originUrl string, o
 		BasePath:      prefix,
 	}
 	ad = director.OriginAdvertise{
-		Name:         name,
-		URL:          originUrl,
-		WebURL:       originWebUrl,
-		Namespaces:   []director.NamespaceAd{nsAd},
-		EnableWrite:  enableWrite,
+		Name:        name,
+		URL:         originUrl,
+		WebURL:      originWebUrl,
+		Namespaces:  []director.NamespaceAd{nsAd},
+		EnableWrite: enableWrite,
 	}
 
 	return ad, nil
