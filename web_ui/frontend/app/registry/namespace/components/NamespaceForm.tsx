@@ -96,13 +96,22 @@ const NamespaceForm = ({
                 </FormControl>
             </Box>
             <Box pb={2}>
-                <InputLabel id="institution-label">Pubkey</InputLabel>
-                <TextareaAutosize
+                <TextField
+                    fullWidth
+                    size={"small"}
                     id={"pubkey"}
                     name={"pubkey"}
-                    minRows={4}
-                    style={{maxWidth: "100%", minWidth: "100%"}}
+                    label={"Pubkey"}
+                    variant={"outlined"}
+                    multiline={true}
                     defaultValue={namespace?.pubkey || ""}
+                    inputProps={{
+                        style: {
+                            fontFamily: "monospace",
+                            fontSize: "0.8rem",
+                            lineHeight: "0.9rem",
+                        }
+                    }}
                 />
             </Box>
             <Box pb={2}>
