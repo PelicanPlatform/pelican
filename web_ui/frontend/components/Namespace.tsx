@@ -131,7 +131,7 @@ export const CreateNamespaceCard = ({text}: {text: string}) => {
 export const Card = ({
     namespace,
     authenticated
-} : {namespace: Namespace, authenticated: Authenticated}) => {
+} : {namespace: Namespace, authenticated?: Authenticated}) => {
     const ref = useRef<HTMLDivElement>(null);
     const [transition, setTransition] = useState<boolean>(false);
 
@@ -191,7 +191,7 @@ interface PendingCardProps {
     namespace: Namespace;
     onUpdate: () => void;
     onAlert: (alert: Alert) => void;
-    authenticated: Authenticated
+    authenticated?: Authenticated
 }
 
 export const PendingCard = ({
