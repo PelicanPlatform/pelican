@@ -159,7 +159,6 @@ func keyIsRegistered(privkey jwk.Key, registryUrlStr string, prefix string) (key
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Pelican-Prefix", prefix)
 
 	OSDFResp, err := client.Do(OSDFReq)
 	if err != nil {
