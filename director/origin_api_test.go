@@ -132,6 +132,10 @@ func TestCreateAdvertiseToken(t *testing.T) {
 	err := config.InitServer(ctx, config.DirectorType)
 	require.NoError(t, err)
 
+	// Launcher will set default values to some of the server urls. Reset here.
+	viper.Set("Federation.RegistryUrl", "")
+	viper.Set("Federation.DirectorURL", "")
+
 	// Test without a namsepace set and check to see if it returns the expected error
 	tok, err := CreateAdvertiseToken("test-namespace")
 	assert.Equal(t, "", tok)
