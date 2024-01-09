@@ -122,9 +122,9 @@ func configureAuthDB() error {
 	return nil
 }
 
-// Get the "subjuect" claim from the JWT that "login" cookie stores,
+// Get the "subject" claim from the JWT that "login" cookie stores,
 // where subject is set to be the username. Return empty string if no "login" cookie is present
-func getUser(ctx *gin.Context) (string, error) {
+func GetUser(ctx *gin.Context) (string, error) {
 	token, err := ctx.Cookie("login")
 	if err != nil {
 		return "", nil
@@ -193,7 +193,7 @@ func setLoginCookie(ctx *gin.Context, user string) {
 
 // Check if user is authenticated by checking if the "login" cookie is present and set the user identity to ctx
 func AuthHandler(ctx *gin.Context) {
-	user, err := getUser(ctx)
+	user, err := GetUser(ctx)
 	if err != nil || user == "" {
 		log.Errorln("Invalid user cookie or unable to parse user cookie:", err)
 		ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Authentication required to perform this operation"})

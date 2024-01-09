@@ -76,7 +76,7 @@ func promMetricAuthHandler(ctx *gin.Context) {
 		// 1.director scraper 2.server (self) scraper 3.authenticated web user (via cookie)
 		authOption := utils.AuthOption{
 			Sources: []utils.TokenSource{utils.Header, utils.Cookie},
-			Issuers: []utils.TokenIssuer{utils.Director, utils.Issuer},
+			Issuers: []utils.TokenIssuer{utils.Federation, utils.Issuer},
 			Scopes:  []string{"monitoring.scrape"}}
 
 		valid := utils.CheckAnyAuth(ctx, authOption)

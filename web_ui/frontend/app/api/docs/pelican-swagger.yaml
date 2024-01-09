@@ -164,6 +164,9 @@ definitions:
         type: string
         description: The namespace prefix to register. Should be an absolute path.
         example: "/test"
+      identity:
+        type: string
+        description: The user identity we get from CILogon if the namespace is registered via CLI with `--with-identity` flag
       admin_metadata:
         $ref: "#/definitions/AdminMetadata"
   Institution:
@@ -188,6 +191,9 @@ definitions:
         type: string
         description: The namespace prefix to register. Should be an absolute path.
         example: "/test"
+      identity:
+        type: string
+        description: The user identity we get from CILogon if the namespace is registered via CLI with `--identity` flag
       pubkey:
         type: string
         description:
@@ -459,7 +465,7 @@ paths:
             type: object
             $ref: "#/definitions/ErrorModel"
         "403":
-          description: Unauthorized request, when user is not logged in
+          description: Unauthorized request, when users are not logged in
           schema:
             type: object
             $ref: "#/definitions/ErrorModel"
@@ -476,6 +482,10 @@ paths:
           schema:
             type: object
             $ref: "#/definitions/WhoAmI"
+          headers:
+            X-CSRF-Token:
+              description: The CSRF token that users are expected to attach as the request header for any modification requests for registry APIs (PUT/PATCH/DELETE).
+              type: string
   /auth/loginInitialized:
     get:
       tags:
@@ -496,17 +506,79 @@ paths:
               initialized:
                 type: boolean
                 example: true
+  /auth/cilogon/login:
+    get:
+      tags:
+        - auth
+      summary: Redirect user to CILogon authentication page for OAuth2 third-party login
+      parameters:
+        - in: query
+          name: next_url
+          type: string
+          description: The path to redirect users to once they successfully authenticated against CILogon
+      responses:
+        "307":
+          description: Redirect user to CILogon authentication page
+        "500":
+          description: Internal server error when generating CSRF cookie for OAuth flow
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+  /auth/cilogon/callback:
+    get:
+      tags:
+        - "auth"
+      summary: The callback endpoint CILogon will call once the user has been successfully authenticated
+      description: Calling this URL with valid parameters will login the user to Pelican website
+      parameters:
+        - in: query
+          name: state
+          type: string
+          description: The CSRF token for validation and the next_url for redirect, in the form of `"<[16]byte>:<nextURL>"`
+        - in: query
+          name: code
+          type: string
+          description: The access token and refresh token returned from CILogon
+      responses:
+        "307":
+          description: Successfully log the user in, add login cookie, and direct user to `/` if `next_url` is empty; otherwise to `next_url`
+        "400":
+          description: Invalid request, when `state` or `token` query is invalid
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "500":
+          description: Internal server error when processing the token and handshake with CILogon
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
   /registry_ui/namespaces:
     get:
       tags:
         - "registry_ui"
       summary: Return a list of all namespaces in the registry
-      description: A public API to get all namespaces in the registry
+      description:
+        A public API to get all namespaces in the registry. Note that `pubkey` is not included in the return data.
+
+
+        For unauthenticated users, it only returns a list of approved namespaces.
+
+        For authenticated users, it returns namespaces with any approval status.
       parameters:
         - name: server_type
           in: query
           required: false
-          description: The type of server to filter the results. The value can be either "origin" or "cache"
+          description: The type of server to filter the results. The value can be either `origin` or `cache`
+          type: string
+        - name: status
+          in: query
+          required: false
+          description:
+            The approval status of the namespaces, can be `pending`, `approved`, `denied`, or `unknown`.
+
+            If `status == unknown`, internally it will match any registration with `status == ""` or `stauts == "unknown"`
+
+            For unauthenticated users, filter with `status != approved` will result in a 403 error.
           type: string
       produces:
         - application/json
@@ -520,6 +592,11 @@ paths:
             description: An array of namespaces
         "400":
           description: Invalid request parameters
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "403":
+          description: Operation forbidden, when an unauthenticated user trying to filter against `status != approval`
           schema:
             type: object
             $ref: "#/definitions/ErrorModel"
@@ -558,6 +635,11 @@ paths:
           required: true
           schema:
             $ref: "#/definitions/NamespaceForRegistration"
+        - in: header
+          name: X-CSRF-Token
+          description: The CSRF token for protecting against Cross-Site Request Forgery (CSRF) attacks. Obtained by requesting `/api/v1.0/auth/whoami` and reading response header `X-CSRF-Token`
+          type: string
+          required: true
       responses:
         "200":
           description: OK
@@ -585,6 +667,15 @@ paths:
         - "registry_ui"
       summary: Return a list of namespaces for the currently authenticated user
       description: "`Authentication Required`"
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description:
+            The approval status of the namespaces, can be `pending`, `approved`, `denied`, or `unknown`.
+
+            If `status == unknown`, internally it will match any registration with `status == ""` or `stauts == "unknown"`
+          type: string
       produces:
         - application/json
       responses:
@@ -663,7 +754,7 @@ paths:
         For user with admin previlege, they can update any valid namespace.
 
 
-        For general users, they can only update the namespace belonging to the user, or it returns 404
+        Non-admin users can update only namespaces they own and only if the approval status is `admin_metadata.status == approved`, otherwise the endpoint returns 404.
         "
       operationId: updateNamespaceById
       parameters:
@@ -678,6 +769,11 @@ paths:
           required: true
           schema:
             $ref: "#/definitions/NamespaceForRegistration"
+        - in: header
+          name: X-CSRF-Token
+          description: The CSRF token for protecting against Cross-Site Request Forgery (CSRF) attacks. Obtained by requesting `/api/v1.0/auth/whoami` and reading response header `X-CSRF-Token`
+          type: string
+          required: true
       consumes:
         - application/json
       produces:
@@ -767,6 +863,11 @@ paths:
           description: ID of the namespace to update status
           required: true
           type: integer
+        - in: header
+          name: X-CSRF-Token
+          description: The CSRF token for protecting against Cross-Site Request Forgery (CSRF) attacks. Obtained by requesting `/api/v1.0/auth/whoami` and reading response header `X-CSRF-Token`
+          type: string
+          required: true
       produces:
         - application/json
       responses:
@@ -819,6 +920,11 @@ paths:
           description: ID of the namespace to update status
           required: true
           type: integer
+        - in: header
+          name: X-CSRF-Token
+          description: The CSRF token for protecting against Cross-Site Request Forgery (CSRF) attacks. Obtained by requesting `/api/v1.0/auth/whoami` and reading response header `X-CSRF-Token`
+          type: string
+          required: true
       produces:
         - application/json
       responses:

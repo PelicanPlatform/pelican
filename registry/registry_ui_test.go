@@ -84,6 +84,7 @@ func TestListNamespaces(t *testing.T) {
 		serverType   string
 		expectedCode int
 		emptyDB      bool
+		notApproved  bool
 		expectedData []Namespace
 	}{
 		{
@@ -112,6 +113,13 @@ func TestListNamespaces(t *testing.T) {
 			expectedData: mockNssWithMixed,
 		},
 		{
+			description:  "unauthed-not-approved-without-type-returns-empty",
+			serverType:   "",
+			expectedCode: http.StatusOK,
+			expectedData: []Namespace{},
+			notApproved:  true,
+		},
+		{
 			description:  "invalid-request-parameters",
 			serverType:   "random_type", // some invalid query string
 			expectedCode: http.StatusBadRequest,
@@ -122,9 +130,16 @@ func TestListNamespaces(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.description, func(t *testing.T) {
 			if !tc.emptyDB {
-				err := insertMockDBData(mockNssWithMixed)
-				if err != nil {
-					t.Fatalf("Failed to set up mock data: %v", err)
+				if tc.notApproved {
+					err := insertMockDBData(mockNssWithMixedNotApproved)
+					if err != nil {
+						t.Fatalf("Failed to set up mock data: %v", err)
+					}
+				} else {
+					err := insertMockDBData(mockNssWithMixed)
+					if err != nil {
+						t.Fatalf("Failed to set up mock data: %v", err)
+					}
 				}
 			}
 			defer func() {

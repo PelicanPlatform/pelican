@@ -47,9 +47,8 @@ type (
 	}
 
 	oauthCallbackRequest struct {
-		State   string `form:"state"`
-		Code    string `form:"code"`
-		NextUrl string `form:"next_url,omitempty"`
+		State string `form:"state"`
+		Code  string `form:"code"`
 	}
 
 	cilogonUserInfo struct {
