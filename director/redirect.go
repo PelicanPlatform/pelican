@@ -21,7 +21,6 @@ package director
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -287,16 +286,10 @@ func RedirectToOrigin(ginCtx *gin.Context) {
 		namespaceAd.Path, namespaceAd.RequireToken, namespaceAd.DirlistHost)}
 
 	var redirectURL url.URL
-	body, err := io.ReadAll(ginCtx.Request.Body)
-	if err != nil {
-		ginCtx.String(http.StatusInternalServerError, "Could not read body of request\n")
-		return
-	}
-
 	// If we are doing a PUT, check to see if any origins are writeable
-	if strings.Contains(string(body), "forPUT") {
+	if ginCtx.Request.Method == "PUT" {
 		for idx, ad := range originAds {
-			if ad.WriteEnabled {
+			if ad.EnableWrite {
 				redirectURL = getRedirectURL(reqPath, originAds[idx], namespaceAd.RequireToken)
 				ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, authzBearerEscaped))
 				return
@@ -467,7 +460,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType ServerTy
 		URL:          *ad_url,
 		WebURL:       *adWebUrl,
 		Type:         sType,
-		WriteEnabled: ad.WriteEnabled,
+		EnableWrite:  ad.EnableWrite,
 	}
 
 	hasOriginAdInCache := serverAds.Has(sAd)
@@ -552,6 +545,7 @@ func RegisterDirector(ctx context.Context, router *gin.RouterGroup) {
 	// Establish the routes used for cache/origin redirection
 	router.GET("/api/v1.0/director/object/*any", RedirectToCache)
 	router.GET("/api/v1.0/director/origin/*any", RedirectToOrigin)
+	router.PUT("/api/v1.0/director/origin/*any", RedirectToOrigin)
 	router.POST("/api/v1.0/director/registerOrigin", func(gctx *gin.Context) { RegisterOrigin(ctx, gctx) })
 	// In the foreseeable feature, director will scrape all servers in Pelican ecosystem (including registry)
 	// so that director can be our point of contact for collecting system-level metrics.

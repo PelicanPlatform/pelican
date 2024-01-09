@@ -53,7 +53,7 @@ type (
 		Type         ServerType
 		Latitude     float64
 		Longitude    float64
-		WriteEnabled bool
+		EnableWrite  bool
 	}
 
 	ServerType   string

@@ -469,7 +469,7 @@ func TestFullUpload(t *testing.T) {
 	viper.Set("Origin.EnableCmsd", false)
 	viper.Set("Origin.EnableMacaroons", false)
 	viper.Set("Origin.EnableVoms", false)
-	viper.Set("Origin.WriteEnabled", true)
+	viper.Set("Origin.EnableWrite", true)
 	viper.Set("TLSSkipVerify", true)
 	viper.Set("Server.EnableUI", false)
 	viper.Set("Registry.DbLocation", filepath.Join(t.TempDir(), "ns-registry.sqlite"))

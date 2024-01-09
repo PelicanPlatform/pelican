@@ -87,6 +87,7 @@ type config struct {
 		EnableIssuer bool
 		EnableUI bool
 		EnableVoms bool
+		EnableWrite bool
 		ExportVolume string
 		Mode string
 		Multiuser bool
@@ -104,7 +105,6 @@ type config struct {
 		ScitokensUsernameClaim string
 		SelfTest bool
 		Url string
-		WriteEnabled bool
 		XRootDPrefix string
 	}
 	Plugin struct {
@@ -250,6 +250,7 @@ type configWithType struct {
 		EnableIssuer struct { Type string; Value bool }
 		EnableUI struct { Type string; Value bool }
 		EnableVoms struct { Type string; Value bool }
+		EnableWrite struct { Type string; Value bool }
 		ExportVolume struct { Type string; Value string }
 		Mode struct { Type string; Value string }
 		Multiuser struct { Type string; Value bool }
@@ -267,7 +268,6 @@ type configWithType struct {
 		ScitokensUsernameClaim struct { Type string; Value string }
 		SelfTest struct { Type string; Value bool }
 		Url struct { Type string; Value string }
-		WriteEnabled struct { Type string; Value bool }
 		XRootDPrefix struct { Type string; Value string }
 	}
 	Plugin struct {

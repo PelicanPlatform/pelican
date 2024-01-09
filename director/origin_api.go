@@ -45,7 +45,7 @@ type (
 		URL          string        `json:"url"`               // This is the url for origin's XRootD service and file transfer
 		WebURL       string        `json:"web_url,omitempty"` // This is the url for origin's web engine and APIs
 		Namespaces   []NamespaceAd `json:"namespaces"`
-		WriteEnabled bool          `json:"writeenabled"`
+		EnableWrite  bool          `json:"enablewrite"`
 	}
 )
 

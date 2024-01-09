@@ -302,9 +302,9 @@ type: string
 default: none
 components: ["origin"]
 ---
-name: Origin.WriteEnabled
+name: Origin.EnableWrite
 description: >-
-  A boolean indicating if an origin is writeable on startup
+  A boolean indicating if an origin allows write access
 type: bool
 default: true
 components: ["origin"]
