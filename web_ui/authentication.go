@@ -326,7 +326,7 @@ func resetLoginHandler(ctx *gin.Context) {
 
 func whoamiHandler(ctx *gin.Context) {
 	res := WhoAmIRes{}
-	if user, err := getUser(ctx); err != nil || user == "" {
+	if user, err := GetUser(ctx); err != nil || user == "" {
 		res.Authenticated = false
 		ctx.JSON(http.StatusOK, res)
 	} else {

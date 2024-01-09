@@ -424,6 +424,7 @@ func TestWhoamiAPI(t *testing.T) {
 		//Check for http reponse code 200
 		assert.Equal(t, 200, recorder.Code)
 		assert.JSONEq(t, string(resStr), recorder.Body.String())
+		assert.NotZero(t, recorder.Header().Get("X-CSRF-Token"))
 	})
 	//Invoked without valid cookie, should return there is no logged-in user
 	t.Run("Without a valid cookie", func(t *testing.T) {
