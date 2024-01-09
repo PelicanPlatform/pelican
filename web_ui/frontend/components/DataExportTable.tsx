@@ -78,8 +78,8 @@ export const DataExportTable = () => {
 
             setData([{
                 "Type": "POSIX",
-                "Local Path": ["", undefined].includes(responseData?.Xrootd?.Mount) ? "NULL" : responseData?.Xrootd?.Mount,
-                "Namespace Prefix": ["", undefined].includes(responseData?.Origin?.NamespacePrefix) ? "NULL" : responseData?.Origin?.NamespacePrefix
+                "Local Path": ["", undefined].includes(responseData?.Xrootd?.Mount?.Value) ? "NULL" : responseData?.Xrootd?.Mount?.Value,
+                "Namespace Prefix": ["", undefined].includes(responseData?.Origin?.NamespacePrefix?.Value) ? "NULL" : responseData?.Origin?.NamespacePrefix?.Value
             }])
 
         } else {
