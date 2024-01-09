@@ -374,7 +374,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 		}
 
 		// Then check if the user has previlege to update
-		isAdmin, _ := checkAdmin(user)
+		isAdmin, _ := web_ui.CheckAdmin(user)
 		if !isAdmin { // Not admin, need to check if the namespace belongs to the user
 			found, err := namespaceBelongsToUserId(id, user)
 			if err != nil {
@@ -433,7 +433,7 @@ func getNamespace(ctx *gin.Context) {
 		return
 	}
 
-	isAdmin, _ := checkAdmin(user)
+	isAdmin, _ := web_ui.CheckAdmin(user)
 	if !isAdmin { // Not admin, need to check if the namespace belongs to the user
 		found, err := namespaceBelongsToUserId(id, user)
 		if err != nil {
@@ -535,38 +535,6 @@ func listInstitutions(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, institutions)
 }
 
-// checkAdmin checks if a user string has admin privilege. It returns boolean and a message
-// indicating the error message
-func checkAdmin(user string) (isAdmin bool, message string) {
-	if user == "admin" {
-		return true, ""
-	}
-	adminList := param.Registry_AdminUsers.GetStringSlice()
-	for _, admin := range adminList {
-		if user == admin {
-			return true, ""
-		}
-	}
-	return false, "You don't have permission to perform this action"
-}
-
-// adminAuthHandler checks the admin status of a logged-in user. This middleware
-// should be cascaded behind the [web_ui.AuthHandler]
-func adminAuthHandler(ctx *gin.Context) {
-	user := ctx.GetString("User")
-	// This should be done by a regular auth handler from the upstream, but we check here just in case
-	if user == "" {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Login required to view this page"})
-	}
-	isAdmin, msg := checkAdmin(user)
-	if isAdmin {
-		ctx.Next()
-		return
-	} else {
-		ctx.JSON(http.StatusForbidden, gin.H{"error": msg})
-	}
-}
-
 // Define Gin APIs for registry Web UI. All endpoints are user-facing
 func RegisterRegistryWebAPI(router *gin.RouterGroup) error {
 	registryWebAPI := router.Group("/api/v1.0/registry_ui")
@@ -593,10 +561,10 @@ func RegisterRegistryWebAPI(router *gin.RouterGroup) error {
 			createUpdateNamespace(ctx, true)
 		})
 		registryWebAPI.GET("/namespaces/:id/pubkey", getNamespaceJWKS)
-		registryWebAPI.PATCH("/namespaces/:id/approve", web_ui.AuthHandler, adminAuthHandler, func(ctx *gin.Context) {
+		registryWebAPI.PATCH("/namespaces/:id/approve", web_ui.AuthHandler, web_ui.AdminAuthHandler, func(ctx *gin.Context) {
 			updateNamespaceStatus(ctx, Approved)
 		})
-		registryWebAPI.PATCH("/namespaces/:id/deny", web_ui.AuthHandler, adminAuthHandler, func(ctx *gin.Context) {
+		registryWebAPI.PATCH("/namespaces/:id/deny", web_ui.AuthHandler, web_ui.AdminAuthHandler, func(ctx *gin.Context) {
 			updateNamespaceStatus(ctx, Denied)
 		})
 	}
