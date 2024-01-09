@@ -18,29 +18,112 @@
 
 "use client"
 
-import RateGraph from "@/components/graphs/RateGraph";
-import StatusBox from "@/components/StatusBox";
+import {Box, Button, Grid, Typography, Skeleton, Alert, Collapse} from "@mui/material";
+import React, {useEffect, useMemo, useState} from "react";
 
-import {TimeDuration} from "@/components/graphs/prometheus";
-
-import {Box, Grid, Typography} from "@mui/material";
-import FederationOverview from "@/components/FederationOverview";
-import {ServerTable} from "@/components/ServerTable";
-import NamespaceTable from "@/components/NamespaceTable";
+import {PendingCard, Card, NamespaceCardSkeleton, CreateNamespaceCard} from "@/components/Namespace";
+import Link from "next/link";
+import {Namespace, Alert as AlertType} from "@/components/Main";
+import UnauthenticatedContent from "@/components/layout/UnauthenticatedContent";
+import {Authenticated, getAuthenticated, isLoggedIn} from "@/helpers/login";
 
 
 export default function Home() {
 
+    const [data, setData] = useState<Namespace[] | undefined>(undefined);
+    const [alert, setAlert] = useState<AlertType | undefined>(undefined)
+    const [authenticated, setAuthenticated] = useState<Authenticated | undefined>(undefined)
+
+    const getData = async () => {
+
+        let data : Namespace[] = []
+
+        const url = new URL("/api/v1.0/registry_ui/namespaces", window.location.origin)
+
+        const response = await fetch(url)
+        if (response.ok) {
+            const responseData: Namespace[] = await response.json()
+            responseData.sort((a, b) => a.id > b.id ? 1 : -1)
+            responseData.forEach((namespace) => {
+                if (namespace.prefix.startsWith("/cache")) {
+                    namespace.type = "cache"
+                } else {
+                    namespace.type = "origin"
+                }
+            })
+            data = responseData
+        }
+
+        return data
+    }
+
+    const _setData = async () => {setData(await getData())}
+
+    useEffect(() => {
+        _setData();
+        (async () => {
+            if(await isLoggedIn()){
+                setAuthenticated(getAuthenticated() as Authenticated)
+            }
+        })();
+    }, [])
+
+    const pendingData = useMemo(
+        () => data?.filter(
+            (namespace) => namespace.admin_metadata.status === "Pending" &&
+                (authenticated?.user == namespace.admin_metadata.user_id || authenticated?.role == "admin")
+                ), [data, authenticated]
+    )
+    const approvedCacheData = useMemo(
+        () => data?.filter(
+            (namespace) => namespace.admin_metadata.status === "Approved" && namespace.type == "cache"
+        ),
+        [data]
+    )
+    const approvedOriginData = useMemo(
+        () => data?.filter(
+            (namespace) => namespace.admin_metadata.status === "Approved" && namespace.type == "origin"
+        ),
+        [data]
+    )
+
     return (
         <Box width={"100%"}>
             <Grid container spacing={2}>
-                <Grid item xs={12} lg={6}>
-                    <Typography variant={"h4"}>Origins</Typography>
-                    <NamespaceTable type={"origin"}/>
+                <Grid item xs={12}>
+                    <Typography variant={"h4"}>Namespace Registry</Typography>
+                    <Collapse in={alert !== undefined}>
+                        <Box mt={2}>
+                            <Alert severity={alert?.severity}>{alert?.message}</Alert>
+                        </Box>
+                    </Collapse>
                 </Grid>
-                <Grid item xs={12} lg={6}>
-                    <Typography variant={"h4"} >Caches</Typography>
-                    <NamespaceTable type={"cache"}/>
+                <Grid item xs={12} lg={8} justifyContent={"space-between"}>
+                    <UnauthenticatedContent pb={2}>
+                        <Typography variant={"body1"}>
+                            Login to register new namespaces.
+                            <Button sx={{ml:2}} variant={"contained"} size={"small"} color={"primary"} href={"/view/login/index.html"}>Login</Button>
+                        </Typography>
+                    </UnauthenticatedContent>
+                    {
+                        pendingData && pendingData.length > 0 &&
+                        <Grid item xs={12}>
+                            <Typography variant={"h5"} pb={2}>Pending Registrations</Typography>
+
+                            {pendingData.map((namespace) => <PendingCard key={namespace.id} namespace={namespace} authenticated={authenticated} onAlert={(a) => setAlert(a)} onUpdate={_setData}/>)}
+                        </Grid>
+                    }
+
+                    <Typography variant={"h5"} py={2}>Origins</Typography>
+                    { approvedOriginData !== undefined ? approvedOriginData.map((namespace) => <Card key={namespace.id} namespace={namespace} authenticated={authenticated}/>) : <NamespaceCardSkeleton/> }
+                    { approvedOriginData !== undefined && approvedOriginData.length === 0 && <CreateNamespaceCard text={"Register Origin"}/>}
+
+                    <Typography variant={"h5"} py={2}>Caches</Typography>
+                    { approvedCacheData !== undefined ? approvedCacheData.map((namespace) => <Card key={namespace.id} namespace={namespace} authenticated={authenticated}/>) : <NamespaceCardSkeleton/> }
+                    { approvedCacheData !== undefined && approvedCacheData.length === 0 && <CreateNamespaceCard text={"Register Cache"}/>}
+
+                </Grid>
+                <Grid item lg={2}>
                 </Grid>
             </Grid>
         </Box>

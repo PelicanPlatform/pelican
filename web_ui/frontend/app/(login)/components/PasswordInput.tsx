@@ -50,6 +50,7 @@ export default function PasswordInput({FormControlProps, TextFieldProps}: Passwo
             <TextField
                 label="Password"
                 id="outlined-start-adornment"
+                size={"small"}
                 sx={{ m: 1, width: '50ch' }}
                 type={showPassword ? 'text' : 'password'}
                 {...TextFieldProps}

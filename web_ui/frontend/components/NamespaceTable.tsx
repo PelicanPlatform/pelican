@@ -6,17 +6,8 @@ import React, {
 } from "react";
 import {Skeleton} from "@mui/material";
 
-import DataTable, {Record} from "@/components/DataTable";
-import {TableCellOverflow, TableCellButton} from "@/components/Cell";
-
-
-interface Namespace extends Record {
-    id: number
-    prefix: string
-    pubKey: string
-    identity: string
-    adminMetadata: string
-}
+import {Card} from "@/components/Namespace";
+import {Namespace} from "@/components/Main";
 
 
 interface ServerTableProps {
@@ -27,25 +18,6 @@ const NamespaceTable = ({type} : ServerTableProps) => {
 
     const [data, setData] = useState<Namespace[] | undefined>(undefined);
     const [error, setError] = useState<string | undefined>(undefined);
-
-    const keyToName = {
-        "prefix": {
-            name: "Prefix",
-            cellNode: TableCellOverflow
-        },
-        "identity": {
-            name: "Identity",
-            cellNode: TableCellOverflow
-        },
-        "admin_metadata": {
-            name: "Admin Metadata",
-            cellNode: TableCellOverflow
-        },
-        "id": {
-            name: "JWK Download",
-            cellNode: ({children} : {children: number}) => <TableCellButton color={"primary"} href={`/api/v1.0/registry_ui/namespaces/${children}/pubkey`}>Download</TableCellButton>
-        }
-    }
 
     const getData = useCallback(async () => {
         const url = new URL("/api/v1.0/registry_ui/namespaces", window.location.origin)
@@ -77,9 +49,9 @@ const NamespaceTable = ({type} : ServerTableProps) => {
     }
 
     return (
-        <>
-            {data ? <DataTable columnMap={keyToName} data={data} /> : <Skeleton variant={"rectangular"} height={200} width={"100%"} />}
-        </>
+        <Box display={"flex"}>
+            {data ? data.map((namespace) => <Card key={namespace.id} namespace={namespace}/>) : <Skeleton variant={"rectangular"} width={"100%"} height={"100%"}/>}
+        </Box>
     )
 }
 

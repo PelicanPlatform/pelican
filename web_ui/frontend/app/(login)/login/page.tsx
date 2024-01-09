@@ -18,9 +18,9 @@
 
 "use client"
 
-import {Box, Grow, Typography} from "@mui/material";
+import {Box, Grow, Typography, Button} from "@mui/material";
 import { useRouter } from 'next/navigation'
-import { useState } from "react";
+import {useEffect, useState} from "react";
 
 import LoadingButton from "../components/LoadingButton";
 
@@ -31,7 +31,18 @@ export default function Home() {
     const router = useRouter()
     let [password, setPassword] = useState <string>("")
     let [loading, setLoading] = useState(false);
+    let [enabledServers, setEnabledServers] = useState<string[]>([])
     let [error, setError] = useState<string | undefined>(undefined);
+
+    useEffect(() => {
+        (async () => {
+            const response = await fetch("/api/v1.0/servers")
+            if (response.ok) {
+                const data = await response.json()
+                setEnabledServers(data)
+            }
+        })()
+    }, []);
 
     async function submit(password: string) {
 
@@ -88,18 +99,43 @@ export default function Home() {
                     </Typography>
                 </Box>
                 <Box pt={2} mx={"auto"}>
+                    { enabledServers !== undefined && enabledServers.includes("registry") &&
+                        <>
+                            <Typography textAlign={"center"} variant={"h6"} component={"h2"}>
+                                For Outside Administrators
+                            </Typography>
+                            <Box display={"flex"} justifyContent={"center"} my={2} mb={3}>
+                                <Button
+                                    size={"large"}
+                                    href={"/api/v1.0/auth/cilogon/login?next_url=/view/registry/"}
+                                    variant={"contained"}
+                                >
+                                    Login with CILogon
+                                </Button>
+                            </Box>
+                            <Typography sx={{color: "#646464"}} textAlign={"center"} variant={"subtitle1"} component={"h2"}>
+                                For Registry Administrator
+                            </Typography>
+                        </>
+                    }
                     <form onSubmit={onSubmit} action="#">
-                        <Box>
-                            <PasswordInput TextFieldProps={{
-                                InputProps: {
-                                    onChange: (e) => {
-                                        setPassword(e.target.value)
-                                        setError(undefined)
+                        <Box display={"flex"} justifyContent={"center"}>
+                            <PasswordInput
+                                FormControlProps={{
+                                    sx: {width: "50%"},
+                                }}
+                                TextFieldProps={{
+                                    InputProps: {
+                                        sx: {width: "50%"},
+                                        onChange: (e) => {
+                                            setPassword(e.target.value)
+                                            setError(undefined)
+                                        }
                                     }
-                                }
-                            }}/>
+                                }}
+                            />
                         </Box>
-                        <Box mt={3} display={"flex"} flexDirection={"column"}>
+                        <Box display={"flex"} flexDirection={"column"}>
                             <Grow in={error !== undefined}>
                                 <Typography
                                     textAlign={"center"}
