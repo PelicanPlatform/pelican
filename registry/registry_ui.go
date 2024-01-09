@@ -293,6 +293,8 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 		ctx.JSON(400, gin.H{"error": "Invalid create or update namespace request"})
 		return
 	}
+	// Assign ID from path param because the request data doesn't have ID set
+	ns.ID = id
 	// Basic validation (type, required, etc)
 	errs := config.GetValidate().Struct(ns)
 	if errs != nil {
@@ -376,25 +378,25 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 		// Then check if the user has previlege to update
 		isAdmin, _ := web_ui.CheckAdmin(user)
 		if !isAdmin { // Not admin, need to check if the namespace belongs to the user
-			found, err := namespaceBelongsToUserId(id, user)
+			found, err := namespaceBelongsToUserId(ns.ID, user)
 			if err != nil {
 				log.Error("Error checking if namespace belongs to the user: ", err)
 				ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Error checking if namespace belongs to the user"})
 				return
 			}
 			if !found {
-				log.Errorf("Namespace not found for id: %d", id)
+				log.Errorf("Namespace not found for id: %d", ns.ID)
 				ctx.JSON(http.StatusNotFound, gin.H{"error": "Namespace not found. Check the id or if you own the namespace"})
 				return
 			}
-			existingStatus, err := getNamespaceStatusById(id)
+			existingStatus, err := getNamespaceStatusById(ns.ID)
 			if err != nil {
 				log.Error("Error checking namespace status: ", err)
 				ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Error checking namespace status"})
 				return
 			}
 			if existingStatus == Approved {
-				log.Errorf("User '%s' is trying to modify approved namespace registration with id=%d", user, id)
+				log.Errorf("User '%s' is trying to modify approved namespace registration with id=%d", user, ns.ID)
 				ctx.JSON(http.StatusForbidden, gin.H{"error": "You don't have permission to modify an approved registration. Please contact your federation administrator"})
 				return
 			}
