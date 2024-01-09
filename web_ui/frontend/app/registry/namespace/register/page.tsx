@@ -72,7 +72,12 @@ export default function Register() {
             })
 
             if(!response.ok){
-                setAlert({severity: "error", message: `Failed to register namespace: ${formData.get("prefix")}`})
+                try {
+                    let data = await response.json()
+                    setAlert({severity: "error", message: response.status + ": " + data['error']})
+                } catch (e) {
+                    setAlert({severity: "error", message: `Failed to register namespace: ${formData.get("prefix")}`})
+                }
             } else {
                 setAlert({severity: "success", message: `Successfully registered namespace: ${formData.get("prefix")}`})
                 return true
