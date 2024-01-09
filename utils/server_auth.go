@@ -19,7 +19,6 @@ package utils
 
 import (
 	"context"
-	"crypto/ecdsa"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -29,7 +28,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/lestrrat-go/httprc"
-	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
