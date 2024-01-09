@@ -165,7 +165,7 @@ export const Card = ({
                         </Link>
                     </Tooltip>
                     {
-                        (authenticated?.role == "admin" || authenticated?.user == namespace.admin_metadata.user_id) &&
+                        authenticated?.role == "admin" &&
                         <Tooltip title={"Edit Registration"}>
                             <Link href={`/registry/namespace/edit?id=${namespace.id}`}>
                                 <IconButton onClick={(e: React.MouseEvent) => e.stopPropagation()}>
@@ -268,10 +268,10 @@ export const PendingCard = ({
                     { authenticated?.role == "admin" &&
                         <>
                             <Tooltip title={"Deny Registration"}>
-                                <IconButton sx={{bgcolor: "#ff00001a", mx: 1}} color={"error"} onClick={denyNamespace}><Block/></IconButton>
+                                <IconButton sx={{bgcolor: "#ff00001a", mx: 1}} color={"error"} onClick={(e) => denyNamespace(e)}><Block/></IconButton>
                             </Tooltip>
                             <Tooltip title={"Approve Registration"}>
-                                <IconButton sx={{bgcolor: "#2e7d3224", mx: 1}} color={"success"} onClick={approveNamespace}><Check/></IconButton>
+                                <IconButton sx={{bgcolor: "#2e7d3224", mx: 1}} color={"success"} onClick={(e) => approveNamespace(e)}><Check/></IconButton>
                             </Tooltip>
                         </>
                     }

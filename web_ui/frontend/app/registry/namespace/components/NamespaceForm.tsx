@@ -113,6 +113,20 @@ const NamespaceForm = ({
                             minHeight: "1.5rem"
                         }
                     }}
+                    placeholder={`
+{
+    "keys": [
+        {
+            "alg": "ES256",
+            "crv": "P-256",
+            "kid": "<Your-kid>",
+            "kty": "EC",
+            "x": "",
+            "y": ""
+        }
+    ]
+}
+                    `}
                 />
             </Box>
             <Box pb={2}>
@@ -161,6 +175,9 @@ const NamespaceForm = ({
                     name={"security-contact-user-id"}
                     label={"Security Contact ID"}
                     variant={"outlined"}
+                    FormHelperTextProps={{
+                        children: "CILogon User Identifier for Security Contact"
+                    }}
                     defaultValue={namespace?.admin_metadata?.security_contact_user_id || ""}
                 />
             </Box>
