@@ -19,6 +19,7 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -848,7 +849,7 @@ func UploadFile(src string, origDest *url.URL, token string, namespace namespace
 		nonZeroSize = fileInfo.Size() > 0
 	}
 
-	// call a PUT on the director, director will respond with our endpoint
+	// call a GET on the director, director will respond with our endpoint
 	directorUrlStr := param.Federation_DirectorUrl.GetString()
 	directorUrl, err := url.Parse(directorUrlStr)
 	if err != nil {
@@ -859,7 +860,8 @@ func UploadFile(src string, origDest *url.URL, token string, namespace namespace
 		return 0, errors.Wrap(err, "failed to parse director path for upload")
 	}
 
-	req, err := http.NewRequest("PUT", directorUrl.String(), nil)
+	payload := []byte("forPUT")
+	req, err := http.NewRequest("GET", directorUrl.String(), bytes.NewBuffer(payload))
 	if err != nil {
 		return 0, errors.Wrap(err, "failed to construct request for director-origin query")
 	}
