@@ -324,6 +324,7 @@ func resetLoginHandler(ctx *gin.Context) {
 	}
 }
 
+// Returns the authentication status of the current user, including user id and role
 func whoamiHandler(ctx *gin.Context) {
 	res := WhoAmIRes{}
 	if user, err := GetUser(ctx); err != nil || user == "" {
