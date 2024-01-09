@@ -110,6 +110,7 @@ const NamespaceForm = ({
                             fontFamily: "monospace",
                             fontSize: "0.8rem",
                             lineHeight: "0.9rem",
+                            minHeight: "1.5rem"
                         }
                     }}
                 />
