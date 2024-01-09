@@ -39,6 +39,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/test_utils"
+	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/prometheus/common/route"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
@@ -84,7 +85,7 @@ func TestPrometheusProtectionCookieAuth(t *testing.T) {
 
 	issuerUrl := param.Server_ExternalWebUrl.GetString()
 	tok, err := jwt.NewBuilder().
-		Claim("scope", "monitoring.query").
+		Claim("scope", token_scopes.Monitoring_Query.String()).
 		Claim("wlcg.ver", "1.0").
 		JwtID(jti).
 		Issuer(issuerUrl).

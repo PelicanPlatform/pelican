@@ -33,6 +33,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/tg123/go-htpasswd"
@@ -141,11 +142,10 @@ func setLoginCookie(ctx *gin.Context, user string) {
 		return
 	}
 
+	scopes := []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Monitoring_Query, token_scopes.Monitoring_Scrape}
 	now := time.Now()
 	tok, err := jwt.NewBuilder().
-		// The value of the "scope" claim is a JSON string containing a space-separated
-		// list of scopes associated with the token
-		Claim("scope", "web_ui.access monitoring.query monitoring.scrape").
+		Claim("scope", token_scopes.GetScopeString(scopes)).
 		Issuer(param.Server_ExternalWebUrl.GetString()).
 		IssuedAt(now).
 		Expiration(now.Add(30 * time.Minute)).

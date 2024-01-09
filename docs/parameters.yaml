@@ -163,7 +163,7 @@ description: >-
   A URL containing namespace information for origins and caches configured via the OSG Topology application (a legacy integration). The URL
   should point to the hosted namespace.json.
 type: url
-osdf_default: https://topology.opensciencegrid.org/stashcache/namespaces.json
+osdf_default: https://topology.opensciencegrid.org/osdf/namespaces
 default: none
 components: ["director", "nsregistry"]
 ---

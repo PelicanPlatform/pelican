@@ -72,3 +72,12 @@ func (server *OriginServer) CreateAdvertisement(name string, originUrl string, o
 
 	return ad, nil
 }
+
+// Return a list of paths where the origin's issuer is authoritative.
+//
+// Used to calculate the base_paths in the scitokens.cfg, for eaxmple
+func (server *OriginServer) GetAuthorizedPrefixes() []string {
+	// For now, just a single path.  In the future, we will allow
+	// multiple.
+	return []string{param.Origin_NamespacePrefix.GetString()}
+}

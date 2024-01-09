@@ -1,0 +1,73 @@
+#
+# Copyright (C) 2023, Pelican Project, Morgridge Institute for Research
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you
+# may not use this file except in compliance with the License.  You may
+# obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+# This file contains structured documentaion about the scopes of JWTs
+# that will be issued and exchanged for Pelican servers to communicate with
+# each other as well as for users to access functions in Pelican server Web UI
+
+# Naming covention: <resource_name>.<action_name> snake case for naming
+
+############################
+#     Top-level Scopes     #
+############################
+---
+name: pelican.advertise
+description: >-
+  For origin and cache to advertise itself to be registered at the director
+issuedBy: ["origin", "cache"]
+acceptedBy: ["director"]
+---
+name: pelican.director_test_report
+description: >-
+  For the director to report test result of file transfer back to origins
+issuedBy: ["director"]
+acceptedBy: ["origin"]
+---
+name: pelican.director_service_discovery
+description: >-
+  For director's Prometheus instance to discover available origins to scrape from
+issuedBy: ["director"]
+acceptedBy: ["director"]
+---
+name: pelican.namespace_delete
+description: >-
+  For namespace client to delete a namespace from namespace registry
+issuedBy: ["client"]
+acceptedBy: ["registry"]
+---
+############################
+#      Web UI Scopes       #
+############################
+name: web_ui.access
+description: >-
+  For user to access various server Web UI
+issuedBy: ["*"]
+acceptedBy: ["*"]
+---
+############################
+#    Monitoring Scopes     #
+############################
+name: monitoring.scrape
+description: >-
+  For server's Prometheus instance to scrape its Prometheus http data exporter at /metrics
+issuedBy: ["*"]
+acceptedBy: ["*"]
+---
+name: monitoring.query
+description: >-
+  For Web UI user and third-party tools to access server's Prometheus query engine endpoints at /api/v1.0/prometheus
+issuedBy: ["web_ui"]
+acceptedBy: ["*"]

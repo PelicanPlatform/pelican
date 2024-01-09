@@ -461,10 +461,14 @@ func CopyXrootdCertificates() error {
 
 // Launch a separate goroutine that performs the XRootD maintenance tasks.
 // For maintenance that is periodic, `sleepTime` is the maintenance period.
-func LaunchXrootdMaintenance(ctx context.Context, sleepTime time.Duration) {
+func LaunchXrootdMaintenance(ctx context.Context, server server_utils.XRootDServer, sleepTime time.Duration) {
 	server_utils.LaunchWatcherMaintenance(
 		ctx,
-		filepath.Dir(param.Server_TLSCertificate.GetString()),
+		[]string{
+			filepath.Dir(param.Server_TLSCertificate.GetString()),
+			filepath.Dir(param.Xrootd_Authfile.GetString()),
+			filepath.Dir(param.Xrootd_ScitokensConfig.GetString()),
+		},
 		"xrootd maintenance",
 		sleepTime,
 		func(notifyEvent bool) error {
@@ -472,8 +476,27 @@ func LaunchXrootdMaintenance(ctx context.Context, sleepTime time.Duration) {
 			if notifyEvent && errors.Is(err, errBadKeyPair) {
 				log.Debugln("Bad keypair encountered when doing xrootd certificate maintenance:", err)
 				return nil
+			} else {
+				log.Debugln("Successfully updated the Xrootd TLS certificates")
 			}
-			return err
+			lastErr := err
+			if err := EmitAuthfile(server); err != nil {
+				if lastErr != nil {
+					log.Errorln("Failure when generating authfile:", err)
+				}
+				lastErr = err
+			} else {
+				log.Debugln("Successfully updated the Xrootd authfile")
+			}
+			if err := EmitScitokensConfig(server); err != nil {
+				if lastErr != nil {
+					log.Errorln("Failure when emitting the scitokens.cfg:", err)
+				}
+				lastErr = err
+			} else {
+				log.Debugln("Successfully updated the Xrootd scitokens configuration")
+			}
+			return lastErr
 		},
 	)
 }
