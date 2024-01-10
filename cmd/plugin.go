@@ -259,14 +259,35 @@ func stashPluginMain(args []string) {
 				resultAd.Set("TransferError", result.Error())
 			} else {
 				errMsg := " Failure "
-				if upload {
+				if upload { // For problem uploading, continue to give partial result
 					errMsg += "uploading "
-				} else {
+					errMsg += transfer.url + ": " + client.GetErrors()
+					resultAd.Set("TransferError", errMsg)
+					client.ClearErrors()
+				} else { // If we have a problem downloading, we want to abort
 					errMsg += "downloading "
+					errMsg += transfer.url + ": " + client.GetErrors()
+					resultAd.Set("TransferError", errMsg)
+					client.ClearErrors()
+					resultAd.Set("TransferFileBytes", 0)
+					resultAd.Set("TransferTotalBytes", 0)
+
+					if client.ErrorsRetryable() {
+						resultAd.Set("TransferRetryable", true)
+						retryable = true
+					} else {
+						resultAd.Set("TransferRetryable", false)
+						retryable = false
+					}
+					resultAds = append(resultAds, resultAd)
+					_ = writeOutfile(resultAds, outputFile)
+
+					if retryable {
+						os.Exit(11)
+					} else {
+						os.Exit(1)
+					}
 				}
-				errMsg += transfer.url + ": " + client.GetErrors()
-				resultAd.Set("TransferError", errMsg)
-				client.ClearErrors()
 			}
 			resultAd.Set("TransferFileBytes", 0)
 			resultAd.Set("TransferTotalBytes", 0)
@@ -276,13 +297,26 @@ func stashPluginMain(args []string) {
 			} else {
 				resultAd.Set("TransferRetryable", false)
 				retryable = false
-
 			}
 		}
 		resultAds = append(resultAds, resultAd)
 
 	}
+	success := writeOutfile(resultAds, outputFile)
 
+	if success {
+		os.Exit(0)
+	} else if retryable {
+		os.Exit(11)
+	} else {
+		os.Exit(1)
+	}
+}
+
+// WriteOutfile takes in the result ads from the job and the file to be outputted, it returns a boolean indicating:
+// true: all result ads indicate transfer success
+// false: at least one result ad has failed
+func writeOutfile(resultAds []*classads.ClassAd, outputFile *os.File) bool {
 	success := true
 	for _, resultAd := range resultAds {
 		_, err := outputFile.WriteString(resultAd.String() + "\n")
@@ -297,7 +331,7 @@ func stashPluginMain(args []string) {
 		}
 		success = success && transferSuccess.(bool)
 	}
-	if err = outputFile.Sync(); err != nil {
+	if err := outputFile.Sync(); err != nil {
 		var perr *fs.PathError
 		var serr syscall.Errno
 		// Error code 1 (serr) is ERROR_INVALID_FUNCTION, the expected Windows syscall error
@@ -314,14 +348,7 @@ func stashPluginMain(args []string) {
 			os.Exit(1)
 		}
 	}
-
-	if success {
-		os.Exit(0)
-	} else if retryable {
-		os.Exit(11)
-	} else {
-		os.Exit(1)
-	}
+	return success
 }
 
 // readMultiTransfers reads the transfers from a Reader, such as stdin
