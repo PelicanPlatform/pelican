@@ -1,5 +1,5 @@
-import {Box, Typography, Collapse, Grid, IconButton, Button, Tooltip, Skeleton, BoxProps} from "@mui/material";
-import {Edit, Block, Check, Download, Add} from "@mui/icons-material";
+import {Box, Typography, Collapse, Grid, IconButton, Button, Tooltip, Skeleton, BoxProps, Avatar} from "@mui/material";
+import {Edit, Block, Check, Download, Add, Person} from "@mui/icons-material";
 import React, {useEffect, useRef, useState} from "react";
 import Link from "next/link";
 
@@ -153,8 +153,15 @@ export const Card = ({
                 bgcolor={"secondary"}
                 onClick={() => setTransition(!transition)}
             >
-                <Box my={"auto"} ml={1}>
+                <Box my={"auto"} ml={1} display={"flex"} flexDirection={"row"}>
                     <Typography>{namespace.prefix}</Typography>
+                    { authenticated !== undefined && authenticated.user == namespace.admin_metadata.user_id &&
+                        <Tooltip title={"Created By User"}>
+                            <Avatar sx={{height: "25px", width: "25px", my: "auto", ml:1}}>
+                                <Person/>
+                            </Avatar>
+                        </Tooltip>
+                    }
                 </Box>
                 <Box>
                     <Tooltip title={"Download JWK"}>
