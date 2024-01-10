@@ -112,7 +112,7 @@ export default function Home() {
                         <Grid item xs={12}>
                             <Typography variant={"h5"} pb={2}>Pending Registrations</Typography>
                             <Typography variant={"subtitle1"} pb={2}>
-                                Awaiting approval from registry administrators.
+                                {authenticated?.role == "admin" ? "Awaiting approval from you." : "Awaiting approval from registry administrators."}
                             </Typography>
 
                             {pendingData.map((namespace) => <PendingCard key={namespace.id} namespace={namespace} authenticated={authenticated} onAlert={(a) => setAlert(a)} onUpdate={_setData}/>)}
@@ -122,8 +122,11 @@ export default function Home() {
                     <Typography variant={"h5"} py={2}>Public Namespaces</Typography>
 
                     <Typography variant={"subtitle1"}>
-                        Public Namespaces are approved by the registry administrators. To edit a Namespace you own
-                        please contact the registry administrators.
+                        { 
+                            authenticated?.role == "admin" ? 
+                            "As an administrator, you can edit Public Namespaces by click the pencil button" :
+                            "Public Namespaces are approved by the registry administrators. To edit a Namespace you own please contact the registry administrators."
+                        }
                     </Typography>
 
                     <Typography variant={"h6"} py={2}>Origins</Typography>

@@ -156,7 +156,7 @@ export const Card = ({
                 <Box my={"auto"} ml={1} display={"flex"} flexDirection={"row"}>
                     <Typography>{namespace.prefix}</Typography>
                     { authenticated !== undefined && authenticated.user == namespace.admin_metadata.user_id &&
-                        <Tooltip title={"Created By User"}>
+                        <Tooltip title={"Created By You"}>
                             <Avatar sx={{height: "25px", width: "25px", my: "auto", ml:1}}>
                                 <Person/>
                             </Avatar>
