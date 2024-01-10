@@ -257,9 +257,17 @@ paths:
       tags:
         - "common"
       summary: Health check endpoint for server Web engine
+      produces:
+        - application/json
       responses:
         "200":
           description: "Server Web engine is running and taking requests"
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
+                example: "Web Engine Running. Time: 2024-01-10 22:32:59.637471175 +0000 UTC m=+35.515010725"
   /config:
     get:
       tags:
