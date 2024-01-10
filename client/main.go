@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
 	"regexp"
 	"runtime/debug"
@@ -412,6 +413,58 @@ func discoverHTCondorToken(tokenName string) string {
 	return tokenLocation
 }
 
+// Retrieve federation namespace information for a given URL.
+// If OSDFDirectorUrl is non-empty, then the namespace information will be pulled from the director;
+// otherwise, it is pulled from topology.
+func getNamespaceInfo(resourcePath, OSDFDirectorUrl string, isPut bool) (ns namespaces.Namespace, err error) {
+	// If we have a director set, go through that for namespace info, otherwise use topology
+	if OSDFDirectorUrl != "" {
+		log.Debugln("Will query director at", OSDFDirectorUrl, "for object", resourcePath)
+		verb := "GET"
+		if isPut {
+			verb = "PUT"
+		}
+		var dirResp *http.Response
+		dirResp, err = queryDirector(verb, resourcePath, OSDFDirectorUrl)
+		if err != nil {
+			if isPut && dirResp != nil && dirResp.StatusCode == 405 {
+				err = errors.New("Error 405: No writeable origins were found")
+				AddError(err)
+				return
+			} else {
+				log.Errorln("Error while querying the Director:", err)
+				AddError(err)
+				return
+			}
+		}
+		ns, err = CreateNsFromDirectorResp(dirResp)
+		if err != nil {
+			AddError(err)
+			return
+		}
+
+		// if we are doing a PUT, we need to get our endpoint from the director
+		if isPut {
+			var writeBackUrl *url.URL
+			location := dirResp.Header.Get("Location")
+			writeBackUrl, err = url.Parse(location)
+			if err != nil {
+				log.Errorf("The director responded with an invalid location (does not parse as URL: %v): %s", err, location)
+				return
+			}
+			ns.WriteBackHost = "https://" + writeBackUrl.Host
+		}
+		return
+	} else {
+		ns, err = namespaces.MatchNamespace(resourcePath)
+		if err != nil {
+			AddError(err)
+			return
+		}
+		return
+	}
+}
+
 // Start the transfer, whether read or write back
 func DoStashCPSingle(sourceFile string, destination string, methods []string, recursive bool) (bytesTransferred int64, err error) {
 
@@ -499,41 +552,14 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 	// For read it will be the source.
 
 	OSDFDirectorUrl := param.Federation_DirectorUrl.GetString()
-	useOSDFDirector := viper.IsSet("Federation.DirectorURL")
+	isPut := destScheme == "stash" || destScheme == "osdf" || destScheme == "pelican"
 
-	if destScheme == "stash" || destScheme == "osdf" || destScheme == "pelican" {
-		log.Debugln("Detected writeback")
-		if !strings.HasPrefix(destination, "/") {
-			destination = strings.TrimPrefix(destination, destScheme+"://")
-		}
-		var ns namespaces.Namespace
-		// If we have a director set, go through that for namespace info, otherwise use topology
-		if useOSDFDirector {
-			directorOriginsUrl, err := url.Parse(OSDFDirectorUrl)
-			if err != nil {
-				return 0, err
-			}
-			directorOriginsUrl.Path, err = url.JoinPath("api", "v1.0", "director", "origin")
-			if err != nil {
-				return 0, err
-			}
-			dirResp, err := QueryDirector(destination, directorOriginsUrl.String())
-			if err != nil {
-				log.Errorln("Error while querying the Director:", err)
-				AddError(err)
-				return 0, err
-			}
-			ns, err = CreateNsFromDirectorResp(dirResp)
-			if err != nil {
-				AddError(err)
-				return 0, err
-			}
-		} else {
-			ns, err = namespaces.MatchNamespace(dest_url.Path)
-			if err != nil {
-				AddError(err)
-				return 0, err
-			}
+	if isPut {
+		log.Debugln("Detected object write to remote federation object", dest_url.Path)
+		ns, err := getNamespaceInfo(dest_url.Path, OSDFDirectorUrl, isPut)
+		if err != nil {
+			log.Errorln(err)
+			return 0, errors.New("Failed to get namespace information from destination")
 		}
 		uploadedBytes, err := doWriteBack(source_url.Path, dest_url, ns, recursive)
 		AddError(err)
@@ -552,26 +578,10 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 		sourceFile = "/" + sourceFile
 	}
 
-	var ns namespaces.Namespace
-	// If we have a director set, go through that for namespace info, otherwise use topology
-	if useOSDFDirector {
-		dirResp, err := QueryDirector(sourceFile, OSDFDirectorUrl)
-		if err != nil {
-			log.Errorln("Error while querying the Director:", err)
-			AddError(err)
-			return 0, err
-		}
-		ns, err = CreateNsFromDirectorResp(dirResp)
-		if err != nil {
-			AddError(err)
-			return 0, err
-		}
-	} else {
-		ns, err = namespaces.MatchNamespace(source_url.Path)
-		if err != nil {
-			AddError(err)
-			return 0, err
-		}
+	ns, err := getNamespaceInfo(sourceFile, OSDFDirectorUrl, isPut)
+	if err != nil {
+		log.Errorln(err)
+		return 0, errors.New("Failed to get namespace information from source")
 	}
 
 	// get absolute path

@@ -170,13 +170,14 @@ var (
 	Monitoring_MetricAuthorization = BoolParam{"Monitoring.MetricAuthorization"}
 	Origin_EnableCmsd = BoolParam{"Origin.EnableCmsd"}
 	Origin_EnableDirListing = BoolParam{"Origin.EnableDirListing"}
+	Origin_EnableFallbackRead = BoolParam{"Origin.EnableFallbackRead"}
 	Origin_EnableIssuer = BoolParam{"Origin.EnableIssuer"}
 	Origin_EnableUI = BoolParam{"Origin.EnableUI"}
 	Origin_EnableVoms = BoolParam{"Origin.EnableVoms"}
+	Origin_EnableWrite = BoolParam{"Origin.EnableWrite"}
 	Origin_Multiuser = BoolParam{"Origin.Multiuser"}
 	Origin_ScitokensMapSubject = BoolParam{"Origin.ScitokensMapSubject"}
 	Origin_SelfTest = BoolParam{"Origin.SelfTest"}
-	Origin_WriteEnabled = BoolParam{"Origin.WriteEnabled"}
 	Registry_RequireKeyChaining = BoolParam{"Registry.RequireKeyChaining"}
 	Server_EnableUI = BoolParam{"Server.EnableUI"}
 	StagePlugin_Hook = BoolParam{"StagePlugin.Hook"}

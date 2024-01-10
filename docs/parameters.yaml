@@ -302,11 +302,19 @@ type: string
 default: none
 components: ["origin"]
 ---
-name: Origin.WriteEnabled
+name: Origin.EnableWrite
 description: >-
-  A boolean indicating if an origin is writeable on startup
+  A boolean indicating if an origin allows write access
 type: bool
 default: true
+components: ["origin"]
+---
+name: Origin.EnableFallbackRead
+description: >-
+  Set to `true` if the origin permits clients to directly read from it
+  when no cache service is available
+type: bool
+default: false
 components: ["origin"]
 ---
 name: Origin.Multiuser

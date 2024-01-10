@@ -41,11 +41,12 @@ import (
 
 type (
 	OriginAdvertise struct {
-		Name         string        `json:"name"`
-		URL          string        `json:"url"`               // This is the url for origin's XRootD service and file transfer
-		WebURL       string        `json:"web_url,omitempty"` // This is the url for origin's web engine and APIs
-		Namespaces   []NamespaceAd `json:"namespaces"`
-		WriteEnabled bool          `json:"writeenabled"`
+		Name               string        `json:"name"`
+		URL                string        `json:"url"`               // This is the url for origin's XRootD service and file transfer
+		WebURL             string        `json:"web_url,omitempty"` // This is the url for origin's web engine and APIs
+		Namespaces         []NamespaceAd `json:"namespaces"`
+		EnableWrite        bool          `json:"enablewrite"`
+		EnableFallbackRead bool          `json:"enable-fallback-read"` // True if the origin will allow direct client reads when no caches are available
 	}
 )
 

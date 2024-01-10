@@ -31,6 +31,7 @@ Origin:
   EnableMacaroons: false
   EnableVoms: true
   EnableUI: true
+  EnableWrite: true
   SelfTest: true
 Monitoring:
   PortLower: 9930
