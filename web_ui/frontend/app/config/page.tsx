@@ -42,6 +42,7 @@ import {Variant} from "@mui/material/styles/createTypography";
 import {TypographyPropsVariantOverrides} from "@mui/material/Typography";
 import TextField from "@mui/material/TextField";
 import {AppRegistration, ArrowDropDown, ArrowDropUp, AssistantDirection, TripOrigin} from '@mui/icons-material';
+import {default as NextLink} from "next/link";
 import {isLoggedIn} from "@/helpers/login";
 import {Sidebar} from "@/components/layout/Sidebar";
 import Image from "next/image";
@@ -334,45 +335,45 @@ export default function Config() {
     return (
         <>
             <Sidebar>
-                <Link href={"/index.html"}>
+                <NextLink href={"/index.html"}>
                     <Image
                         src={PelicanLogo}
                         alt={"Pelican Logo"}
                         width={36}
                         height={36}
                     />
-                </Link>
+                </NextLink>
                 { enabledServers.includes("origin") &&
                     <Box pt={3}>
-                        <Link href={"/view/origin/index.html"}>
+                        <NextLink href={"/origin/index.html"}>
                             <Tooltip title={"Origin"} placement={"right"}>
                                 <IconButton>
                                     <TripOrigin/>
                                 </IconButton>
                             </Tooltip>
-                        </Link>
+                        </NextLink>
                     </Box>
                 }
                 { enabledServers.includes("director") &&
                     <Box pt={1}>
-                        <Link href={"/view/director/index.html"}>
+                        <NextLink href={"/director/index.html"}>
                             <Tooltip title={"Director"} placement={"right"}>
                                 <IconButton>
                                     <AssistantDirection/>
                                 </IconButton>
                             </Tooltip>
-                        </Link>
+                        </NextLink>
                     </Box>
                 }
                 { enabledServers.includes("registry") &&
                     <Box pt={1}>
-                        <Link href={"/view/registry/index.html"}>
+                        <NextLink href={"/registry/index.html"}>
                             <Tooltip title={"Registry"} placement={"right"}>
                                 <IconButton>
                                     <AppRegistration/>
                                 </IconButton>
                             </Tooltip>
-                        </Link>
+                        </NextLink>
                     </Box>
                 }
             </Sidebar>
