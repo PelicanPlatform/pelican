@@ -386,7 +386,7 @@ func TestFailedUpload(t *testing.T) {
 func generateFileTestScitoken() (string, error) {
 	// Issuer is whichever server that initiates the test, so it's the server itself
 	issuerUrl := param.Origin_Url.GetString()
-	if issuerUrl == "" { // if both are empty, then error
+	if issuerUrl == "" { // if empty, then error
 		return "", errors.New("Failed to create token: Invalid iss, Server_ExternalWebUrl is empty")
 	}
 	jti_bytes := make([]byte, 16)
@@ -400,7 +400,7 @@ func generateFileTestScitoken() (string, error) {
 		Claim("wlcg.ver", "1.0").
 		JwtID(jti).
 		Issuer(issuerUrl).
-		Audience([]string{"https://wlcg.cern.ch/jwt/v1/any"}).
+		Audience([]string{param.Origin_Url.GetString()}).
 		Subject("origin").
 		Expiration(time.Now().Add(time.Minute)).
 		IssuedAt(time.Now()).
@@ -452,7 +452,7 @@ func TestFullUpload(t *testing.T) {
 	viper.Set("ConfigDir", tmpPath)
 
 	// Increase the log level; otherwise, its difficult to debug failures
-	// viper.Set("Logging.Level", "Debug")
+	viper.Set("Logging.Level", "Debug")
 	config.InitConfig()
 
 	originDir, err := os.MkdirTemp("", "Origin")
@@ -473,6 +473,7 @@ func TestFullUpload(t *testing.T) {
 	viper.Set("TLSSkipVerify", true)
 	viper.Set("Server.EnableUI", false)
 	viper.Set("Registry.DbLocation", filepath.Join(t.TempDir(), "ns-registry.sqlite"))
+	viper.Set("Xrootd.RunLocation", tmpPath)
 
 	err = config.InitServer(ctx, modules)
 	require.NoError(t, err)
@@ -525,7 +526,7 @@ func TestFullUpload(t *testing.T) {
 		defer os.Remove(tempToken.Name())
 		_, err = tempToken.WriteString(token)
 		assert.NoError(t, err, "Error writing to temp token file")
-		tempFile.Close()
+		tempToken.Close()
 		ObjectClientOptions.Token = tempToken.Name()
 
 		// Upload the file
