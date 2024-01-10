@@ -464,7 +464,16 @@ func getNamespaceInfo(resourcePath, OSDFDirectorUrl string, isPut bool) (ns name
 		return
 	}
 }
-func DoPut(sourceFile string, destination string, recursive bool) (bytesTransferred int64, err error) {
+
+/*
+	Start of transfer for pelican object put, gets information from the target destination before doing our HTTP PUT request
+
+localObject: the source file/directory you would like to upload
+remoteDestination: the end location of the upload
+recursive: a boolean indicating if the source is a directory or not
+*/
+func DoPut(localObject string, remoteDestination string, recursive bool) (bytesTransferred int64, err error) {
+	isPut := true
 	// First, create a handler for any panics that occur
 	defer func() {
 		if r := recover(); r != nil {
@@ -480,63 +489,66 @@ func DoPut(sourceFile string, destination string, recursive bool) (bytesTransfer
 	}()
 
 	// Parse the source and destination with URL parse
-	sourceFile, source_scheme := correctURLWithUnderscore(sourceFile)
-	source_url, err := url.Parse(sourceFile)
+	localObjectUrl, err := url.Parse(localObject)
 	if err != nil {
 		log.Errorln("Failed to parse source URL:", err)
 		return 0, err
 	}
-	source_url.Scheme = source_scheme
 
-	destination, dest_scheme := correctURLWithUnderscore(destination)
-	dest_url, err := url.Parse(destination)
+	remoteDestination, remoteDestScheme := correctURLWithUnderscore(remoteDestination)
+	remoteDestUrl, err := url.Parse(remoteDestination)
 	if err != nil {
-		log.Errorln("Failed to parse destination URL:", err)
+		log.Errorln("Failed to parse remote destination URL:", err)
 		return 0, err
 	}
-	dest_url.Scheme = dest_scheme
+	remoteDestUrl.Scheme = remoteDestScheme
 
-	if dest_url.Host != "" {
-		if dest_url.Scheme == "osdf" || dest_url.Scheme == "stash" {
-			dest_url.Path = "/" + path.Join(dest_url.Host, dest_url.Path)
-		} else if dest_url.Scheme == "pelican" {
-			federationUrl, _ := url.Parse(dest_url.String())
-			federationUrl.Scheme = "https"
-			federationUrl.Path = ""
-			viper.Set("Federation.DiscoveryUrl", federationUrl.String())
-			err = config.DiscoverFederation()
+	if remoteDestUrl.Host != "" {
+		if remoteDestUrl.Scheme == "osdf" || remoteDestUrl.Scheme == "stash" {
+			remoteDestUrl.Path, err = url.JoinPath(remoteDestUrl.Host, remoteDestUrl.Path)
 			if err != nil {
+				log.Errorln("Failed to join remote destination url path:", err)
 				return 0, err
 			}
 		}
 	}
-	destScheme, _ := getTokenName(dest_url)
+	remoteDestScheme, _ = getTokenName(remoteDestUrl)
 
 	understoodSchemes := []string{"file", "osdf", "pelican", ""}
 
-	_, foundDest := Find(understoodSchemes, destScheme)
+	_, foundDest := Find(understoodSchemes, remoteDestScheme)
 	if !foundDest {
-		log.Errorln("Do not understand destination scheme:", source_url.Scheme)
-		return 0, errors.New("Do not understand destination scheme")
+		return 0, fmt.Errorf("Do not understand the destination scheme: %s. Permitted values are %s",
+			remoteDestUrl.Scheme, strings.Join(understoodSchemes, ", "))
 	}
+
+	directorUrl := param.Federation_DirectorUrl.GetString()
 
 	// Get the namespace of the remote filesystem
 	// For write back, it will be the destination
-	// For read it will be the source.
-	ns, err := namespaces.MatchNamespace(dest_url.Path)
-	if err != nil {
-		log.Errorln("Failed to get namespace information:", err)
-		AddError(err)
-		return 0, err
+	if !strings.HasPrefix(remoteDestination, "/") {
+		remoteDestination = strings.TrimPrefix(remoteDestination, remoteDestScheme+"://")
 	}
-	var transferred int64
-	transferred, err = doWriteBack(source_url.Path, dest_url, ns, recursive)
+	ns, err := getNamespaceInfo(remoteDestination, directorUrl, isPut)
+	if err != nil {
+		log.Errorln(err)
+		return 0, errors.New("Failed to get namespace information from source")
+	}
+	uploadedBytes, err := doWriteBack(localObjectUrl.Path, remoteDestUrl, ns, recursive)
 	AddError(err)
-	return transferred, err
+	return uploadedBytes, err
+
 }
 
-// Start the transfer for downloads specifically
-func DoGet(sourceFile string, destination string, recursive bool) (bytesTransferred int64, err error) {
+/*
+	Start of transfer for pelican object get, gets information from the target source before doing our HTTP GET request
+
+remoteObject: the source file/directory you would like to upload
+localDestination: the end location of the upload
+recursive: a boolean indicating if the source is a directory or not
+*/
+func DoGet(remoteObject string, localDestination string, recursive bool) (bytesTransferred int64, err error) {
+	isPut := false
 	// First, create a handler for any panics that occur
 	defer func() {
 		if r := recover(); r != nil {
@@ -551,99 +563,70 @@ func DoGet(sourceFile string, destination string, recursive bool) (bytesTransfer
 		}
 	}()
 
-	// Parse the source and destination with URL parse
-	sourceFile, source_scheme := correctURLWithUnderscore(sourceFile)
-	source_url, err := url.Parse(sourceFile)
+	// Parse the source with URL parse
+	remoteObject, remoteObjectScheme := correctURLWithUnderscore(remoteObject)
+	remoteObjectUrl, err := url.Parse(remoteObject)
 	if err != nil {
 		log.Errorln("Failed to parse source URL:", err)
 		return 0, err
 	}
-	source_url.Scheme = source_scheme
-
-	destination, dest_scheme := correctURLWithUnderscore(destination)
-	dest_url, err := url.Parse(destination)
-	if err != nil {
-		log.Errorln("Failed to parse destination URL:", err)
-		return 0, err
-	}
-	dest_url.Scheme = dest_scheme
+	remoteObjectUrl.Scheme = remoteObjectScheme
 
 	// If there is a host specified, prepend it to the path in the osdf case
-	if source_url.Host != "" {
-		if source_url.Scheme == "osdf" {
-			source_url.Path = "/" + path.Join(source_url.Host, source_url.Path)
-		} else if source_url.Scheme == "pelican" {
-			federationUrl, _ := url.Parse(source_url.String())
-			federationUrl.Scheme = "https"
-			federationUrl.Path = ""
-			viper.Set("Federation.DiscoveryUrl", federationUrl.String())
-			err = config.DiscoverFederation()
+	if remoteObjectUrl.Host != "" {
+		if remoteObjectUrl.Scheme == "osdf" {
+			remoteObjectUrl.Path, err = url.JoinPath(remoteObjectUrl.Host, remoteObjectUrl.Path)
 			if err != nil {
+				log.Errorln("Failed to join source url path:", err)
 				return 0, err
 			}
 		}
 	}
 
-	sourceScheme, _ := getTokenName(source_url)
+	remoteObjectScheme, _ = getTokenName(remoteObjectUrl)
 
 	understoodSchemes := []string{"file", "osdf", "pelican", ""}
 
-	_, foundSource := Find(understoodSchemes, sourceScheme)
+	_, foundSource := Find(understoodSchemes, remoteObjectScheme)
 	if !foundSource {
-		log.Errorln("Do not understand source scheme:", source_url.Scheme)
-		return 0, errors.New("Do not understand source scheme")
+		return 0, fmt.Errorf("Do not understand the source scheme: %s. Permitted values are %s",
+			remoteObjectUrl.Scheme, strings.Join(understoodSchemes, ", "))
 	}
 
-	if sourceScheme == "osdf" || sourceScheme == "pelican" {
-		sourceFile = source_url.Path
+	if remoteObjectScheme == "osdf" || remoteObjectScheme == "pelican" {
+		remoteObject = remoteObjectUrl.Path
 	}
 
-	if string(sourceFile[0]) != "/" {
-		sourceFile = "/" + sourceFile
+	if string(remoteObject[0]) != "/" {
+		remoteObject = "/" + remoteObject
 	}
 
-	OSDFDirectorUrl := param.Federation_DirectorUrl.GetString()
-	useOSDFDirector := viper.IsSet("Federation.DirectorURL")
+	directorUrl := param.Federation_DirectorUrl.GetString()
 
-	var ns namespaces.Namespace
-	if useOSDFDirector {
-		dirResp, err := QueryDirector(sourceFile, OSDFDirectorUrl)
-		if err != nil {
-			log.Errorln("Error while querying the Director:", err)
-			AddError(err)
-			return 0, err
-		}
-		ns, err = CreateNsFromDirectorResp(dirResp)
-		if err != nil {
-			AddError(err)
-			return 0, err
-		}
-	} else {
-		ns, err = namespaces.MatchNamespace(source_url.Path)
-		if err != nil {
-			AddError(err)
-			return 0, err
-		}
+	ns, err := getNamespaceInfo(remoteObject, directorUrl, isPut)
+	if err != nil {
+		log.Errorln(err)
+		return 0, errors.New("Failed to get namespace information from source")
 	}
 
 	// get absolute path
-	destPath, _ := filepath.Abs(destination)
+	localDestPath, _ := filepath.Abs(localDestination)
 
 	//Check if path exists or if its in a folder
-	if destStat, err := os.Stat(destPath); os.IsNotExist(err) {
-		destination = destPath
-	} else if destStat.IsDir() && source_url.Query().Get("pack") == "" {
+	if destStat, err := os.Stat(localDestPath); os.IsNotExist(err) {
+		localDestination = localDestPath
+	} else if destStat.IsDir() && remoteObjectUrl.Query().Get("pack") == "" {
 		// If we have an auto-pack request, it's OK for the destination to be a directory
 		// Otherwise, get the base name of the source and append it to the destination dir.
-		sourceFilename := path.Base(sourceFile)
-		destination = path.Join(destPath, sourceFilename)
+		remoteObjectFilename := path.Base(remoteObject)
+		localDestination = path.Join(localDestPath, remoteObjectFilename)
 	}
 
 	payload := payloadStruct{}
 	payload.version = version
 
 	//Fill out the payload as much as possible
-	payload.filename = source_url.Path
+	payload.filename = remoteObjectUrl.Path
 
 	parse_job_ad(payload)
 
@@ -651,10 +634,10 @@ func DoGet(sourceFile string, destination string, recursive bool) (bytesTransfer
 
 	success := false
 
-	_, token_name := getTokenName(source_url)
+	_, token_name := getTokenName(remoteObjectUrl)
 
 	var downloaded int64
-	if downloaded, err = download_http(source_url, destination, &payload, ns, recursive, token_name, OSDFDirectorUrl); err == nil {
+	if downloaded, err = download_http(remoteObjectUrl, localDestination, &payload, ns, recursive, token_name); err == nil {
 		success = true
 	}
 
@@ -719,30 +702,12 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 	if source_url.Host != "" {
 		if source_url.Scheme == "osdf" || source_url.Scheme == "stash" {
 			source_url.Path = "/" + path.Join(source_url.Host, source_url.Path)
-		} else if source_url.Scheme == "pelican" {
-			federationUrl, _ := url.Parse(source_url.String())
-			federationUrl.Scheme = "https"
-			federationUrl.Path = ""
-			viper.Set("Federation.DiscoveryUrl", federationUrl.String())
-			err = config.DiscoverFederation()
-			if err != nil {
-				return 0, err
-			}
 		}
 	}
 
 	if dest_url.Host != "" {
 		if dest_url.Scheme == "osdf" || dest_url.Scheme == "stash" {
 			dest_url.Path = "/" + path.Join(dest_url.Host, dest_url.Path)
-		} else if dest_url.Scheme == "pelican" {
-			federationUrl, _ := url.Parse(dest_url.String())
-			federationUrl.Scheme = "https"
-			federationUrl.Path = ""
-			viper.Set("Federation.DiscoveryUrl", federationUrl.String())
-			err = config.DiscoverFederation()
-			if err != nil {
-				return 0, err
-			}
 		}
 	}
 
@@ -843,7 +808,7 @@ Loop:
 		switch method {
 		case "http":
 			log.Info("Trying HTTP...")
-			if downloaded, err = download_http(source_url, destination, &payload, ns, recursive, token_name, OSDFDirectorUrl); err == nil {
+			if downloaded, err = download_http(source_url, destination, &payload, ns, recursive, token_name); err == nil {
 				success = true
 				break Loop
 			}
@@ -864,17 +829,11 @@ Loop:
 		// Get the final size of the download file
 		payload.fileSize = downloaded
 		payload.downloadSize = downloaded
-	} else {
-		log.Error("All methods failed! Unable to download file.")
-		payload.status = "Fail"
-	}
-
-	if !success {
-		return downloaded, errors.New("failed to download file")
-	} else {
 		return downloaded, nil
+	} else {
+		payload.status = "Fail"
+		return downloaded, errors.New("All methods failed! Unable to download file.")
 	}
-
 }
 
 // Find takes a slice and looks for an element in it. If found it will

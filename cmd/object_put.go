@@ -38,14 +38,9 @@ var (
 
 func init() {
 	flagSet := putCmd.Flags()
-	flagSet.StringP("cache", "c", "", "Cache to use")
 	flagSet.StringP("token", "t", "", "Token file to use for transfer")
 	flagSet.BoolP("recursive", "r", false, "Recursively upload a directory.  Forces methods to only be http to get the freshest directory contents")
-	flagSet.StringP("cache-list-name", "n", "xroot", "(Deprecated) Cache list to use, currently either xroot or xroots; may be ignored")
-	flagSet.Lookup("cache-list-name").Hidden = true
-	flagSet.String("caches", "", "A JSON file containing the list of caches")
 	objectCmd.AddCommand(putCmd)
-
 }
 
 func putMain(cmd *cobra.Command, args []string) {
@@ -83,19 +78,6 @@ func putMain(cmd *cobra.Command, args []string) {
 
 	log.Debugln("Sources:", source)
 	log.Debugln("Destination:", dest)
-
-	// Check for manually entered cache to use ??
-	nearestCache, nearestCacheIsPresent := os.LookupEnv("NEAREST_CACHE")
-
-	if nearestCacheIsPresent {
-		client.NearestCache = nearestCache
-		client.NearestCacheList = append(client.NearestCacheList, client.NearestCache)
-		client.CacheOverride = true
-	} else if cache, _ := cmd.Flags().GetString("cache"); cache != "" {
-		client.NearestCache = cache
-		client.NearestCacheList = append(client.NearestCacheList, cache)
-		client.CacheOverride = true
-	}
 
 	if len(source) > 1 {
 		if destStat, err := os.Stat(dest); err != nil && destStat.IsDir() {

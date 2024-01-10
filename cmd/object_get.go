@@ -45,7 +45,6 @@ func init() {
 	flagSet.Lookup("cache-list-name").Hidden = true
 	flagSet.String("caches", "", "A JSON file containing the list of caches")
 	objectCmd.AddCommand(getCmd)
-
 }
 
 func getMain(cmd *cobra.Command, args []string) {
@@ -135,5 +134,4 @@ func getMain(cmd *cobra.Command, args []string) {
 		}
 		os.Exit(1)
 	}
-
 }
