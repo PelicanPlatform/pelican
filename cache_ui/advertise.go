@@ -30,8 +30,8 @@ type (
 	}
 )
 
-func (server *CacheServer) CreateAdvertisement(name string, originUrl string, originWebUrl string) (director.OriginAdvertise, error) {
-	ad := director.OriginAdvertise{
+func (server *CacheServer) CreateAdvertisement(name string, originUrl string, originWebUrl string) (director.ServerAdvertise, error) {
+	ad := director.ServerAdvertise{
 		Name:       name,
 		URL:        originUrl,
 		WebURL:     originWebUrl,

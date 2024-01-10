@@ -41,7 +41,7 @@ type (
 	}
 )
 
-func (req listServerRequest) ToInternalServerType() ServerType {
+func (req listServerRequest) toInternalServerType() ServerType {
 	if req.ServerType == "cache" {
 		return CacheType
 	}
@@ -57,15 +57,15 @@ func listServers(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid query parameters"})
 		return
 	}
-	var servers []ServerAd
+	var servers []serverDesc
 	if queryParams.ServerType != "" {
 		if !strings.EqualFold(queryParams.ServerType, string(OriginType)) && !strings.EqualFold(queryParams.ServerType, string(CacheType)) {
 			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid server type"})
 			return
 		}
-		servers = ListServerAds([]ServerType{ServerType(queryParams.ToInternalServerType())})
+		servers = listServerAds([]ServerType{ServerType(queryParams.toInternalServerType())})
 	} else {
-		servers = ListServerAds([]ServerType{OriginType, CacheType})
+		servers = listServerAds([]ServerType{OriginType, CacheType})
 
 	}
 	resList := make([]listServerResponse, 0)

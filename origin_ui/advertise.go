@@ -39,8 +39,8 @@ func (server *OriginServer) GetServerType() config.ServerType {
 	return config.OriginType
 }
 
-func (server *OriginServer) CreateAdvertisement(name string, originUrl string, originWebUrl string) (director.OriginAdvertise, error) {
-	ad := director.OriginAdvertise{}
+func (server *OriginServer) CreateAdvertisement(name string, originUrl string, originWebUrl string) (director.ServerAdvertise, error) {
+	ad := director.ServerAdvertise{}
 
 	// Here we instantiate the namespaceAd slice, but we still need to define the namespace
 	issuerUrl := url.URL{}
@@ -64,7 +64,7 @@ func (server *OriginServer) CreateAdvertisement(name string, originUrl string, o
 		Strategy:      "OAuth2",
 		BasePath:      prefix,
 	}
-	ad = director.OriginAdvertise{
+	ad = director.ServerAdvertise{
 		Name:         name,
 		URL:          originUrl,
 		WebURL:       originWebUrl,

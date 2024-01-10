@@ -39,16 +39,6 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-type (
-	OriginAdvertise struct {
-		Name         string        `json:"name"`
-		URL          string        `json:"url"`               // This is the url for origin's XRootD service and file transfer
-		WebURL       string        `json:"web_url,omitempty"` // This is the url for origin's web engine and APIs
-		Namespaces   []NamespaceAd `json:"namespaces"`
-		WriteEnabled bool          `json:"writeenabled"`
-	}
-)
-
 // Create interface
 // Add it to namespacekeys in place of jwk.cache
 type NamespaceCache interface {
@@ -110,7 +100,7 @@ func CreateAdvertiseToken(namespace string) (string, error) {
 // Given a token and a location in the namespace to advertise in,
 // see if the entity is authorized to advertise an origin for the
 // namespace
-func VerifyAdvertiseToken(ctx context.Context, token, namespace string) (bool, error) {
+func verifyAdvertiseToken(ctx context.Context, token, namespace string) (bool, error) {
 	issuerUrl, err := GetRegistryIssuerURL(namespace)
 	if err != nil {
 		return false, err
@@ -188,7 +178,7 @@ func VerifyAdvertiseToken(ctx context.Context, token, namespace string) (bool, e
 
 // Create a token for director to report the health status to the
 // origin
-func CreateDirectorTestReportToken(originWebUrl string) (string, error) {
+func createDirectorTestReportToken(originWebUrl string) (string, error) {
 	directorURL := param.Federation_DirectorUrl.GetString()
 	if directorURL == "" {
 		return "", errors.New("Director URL is not known; cannot create director test report token")

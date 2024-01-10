@@ -46,7 +46,7 @@ type PromDiscoveryItem struct {
 var (
 	minClientVersion, _        = version.NewVersion("7.0.0")
 	minOriginVersion, _        = version.NewVersion("7.0.0")
-	healthTestCancelFuncs      = make(map[ServerAd]context.CancelFunc)
+	healthTestCancelFuncs      = make(map[serverDesc]context.CancelFunc)
 	healthTestCancelFuncsMutex = sync.RWMutex{}
 )
 
@@ -56,7 +56,7 @@ var (
 // TODO: Add registry server as well to this endpoint when we need to scrape from it
 const DirectorServerDiscoveryEndpoint = "/api/v1.0/director/discoverServers"
 
-func getRedirectURL(reqPath string, ad ServerAd, requiresAuth bool) (redirectURL url.URL) {
+func getRedirectURL(reqPath string, ad serverDesc, requiresAuth bool) (redirectURL url.URL) {
 	var serverURL url.URL
 	if requiresAuth {
 		serverURL = ad.AuthURL
@@ -162,7 +162,7 @@ func versionCompatCheck(ginCtx *gin.Context) error {
 	return nil
 }
 
-func RedirectToCache(ginCtx *gin.Context) {
+func redirectToCache(ginCtx *gin.Context) {
 	err := versionCompatCheck(ginCtx)
 	if err != nil {
 		log.Debugf("A version incompatibility was encountered while redirecting to a cache and no response was served: %v", err)
@@ -180,7 +180,7 @@ func RedirectToCache(ginCtx *gin.Context) {
 
 	authzBearerEscaped := getAuthzEscaped(ginCtx.Request)
 
-	namespaceAd, _, cacheAds := GetAdsForPath(reqPath)
+	namespaceAd, _, cacheAds := getAdsForPath(reqPath)
 	// if GetAdsForPath doesn't find any ads because the prefix doesn't exist, we should
 	// report the lack of path first -- this is most important for the user because it tells them
 	// they're trying to get an object that simply doesn't exist
@@ -193,7 +193,7 @@ func RedirectToCache(ginCtx *gin.Context) {
 		ginCtx.String(404, "No cache found for path\n")
 		return
 	}
-	cacheAds, err = SortServers(ipAddr, cacheAds)
+	cacheAds, err = sortServers(ipAddr, cacheAds)
 	if err != nil {
 		ginCtx.String(500, "Failed to determine server ordering")
 		return
@@ -244,7 +244,7 @@ func RedirectToCache(ginCtx *gin.Context) {
 	ginCtx.Redirect(307, getFinalRedirectURL(redirectURL, authzBearerEscaped))
 }
 
-func RedirectToOrigin(ginCtx *gin.Context) {
+func redirectToOrigin(ginCtx *gin.Context) {
 	err := versionCompatCheck(ginCtx)
 	if err != nil {
 		log.Debugf("A version incompatibility was encountered while redirecting to an origin and no response was served: %v", err)
@@ -264,7 +264,7 @@ func RedirectToOrigin(ginCtx *gin.Context) {
 
 	authzBearerEscaped := getAuthzEscaped(ginCtx.Request)
 
-	namespaceAd, originAds, _ := GetAdsForPath(reqPath)
+	namespaceAd, originAds, _ := getAdsForPath(reqPath)
 	// if GetAdsForPath doesn't find any ads because the prefix doesn't exist, we should
 	// report the lack of path first -- this is most important for the user because it tells them
 	// they're trying to get an object that simply doesn't exist
@@ -278,7 +278,7 @@ func RedirectToOrigin(ginCtx *gin.Context) {
 		return
 	}
 
-	originAds, err = SortServers(ipAddr, originAds)
+	originAds, err = sortServers(ipAddr, originAds)
 	if err != nil {
 		ginCtx.String(http.StatusInternalServerError, "Failed to determine origin ordering")
 		return
@@ -320,7 +320,7 @@ func checkHostnameRedirects(c *gin.Context, incomingHost string) {
 		if hostname == incomingHost {
 			if !strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/director/") {
 				c.Request.URL.Path = "/api/v1.0/director/origin" + c.Request.URL.Path
-				RedirectToOrigin(c)
+				redirectToOrigin(c)
 				c.Abort()
 				log.Debugln("Director is serving an origin based on incoming 'Host' header value of '" + hostname + "'")
 				return
@@ -331,7 +331,7 @@ func checkHostnameRedirects(c *gin.Context, incomingHost string) {
 		if hostname == incomingHost {
 			if !strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/director/") {
 				c.Request.URL.Path = "/api/v1.0/director/object" + c.Request.URL.Path
-				RedirectToCache(c)
+				redirectToCache(c)
 				c.Abort()
 				log.Debugln("Director is serving a cache based on incoming 'Host' header value of '" + hostname + "'")
 				return
@@ -369,7 +369,7 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 		if defaultResponse == "cache" {
 			if !strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/director/") {
 				c.Request.URL.Path = "/api/v1.0/director/object" + c.Request.URL.Path
-				RedirectToCache(c)
+				redirectToCache(c)
 				c.Abort()
 				return
 			}
@@ -379,7 +379,7 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 		} else if defaultResponse == "origin" {
 			if !strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/director/") {
 				c.Request.URL.Path = "/api/v1.0/director/origin" + c.Request.URL.Path
-				RedirectToOrigin(c)
+				redirectToOrigin(c)
 				c.Abort()
 				return
 			}
@@ -388,107 +388,9 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 	}
 }
 
-func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType ServerType) {
-	tokens, present := ctx.Request.Header["Authorization"]
-	if !present || len(tokens) == 0 {
-		ctx.JSON(http.StatusForbidden, gin.H{"error": "Bearer token not present in the 'Authorization' header"})
-		return
-	}
-
-	err := versionCompatCheck(ctx)
-	if err != nil {
-		log.Debugf("A version incompatibility was encountered while registering %s and no response was served: %v", sType, err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Incompatible versions detected: " + fmt.Sprintf("%v", err)})
-		return
-	}
-
-	ad := OriginAdvertise{}
-	if ctx.ShouldBind(&ad) != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid " + sType + " registration"})
-		return
-	}
-
-	if sType == OriginType {
-		for _, namespace := range ad.Namespaces {
-			// We're assuming there's only one token in the slice
-			token := strings.TrimPrefix(tokens[0], "Bearer ")
-			ok, err := VerifyAdvertiseToken(engineCtx, token, namespace.Path)
-			if err != nil {
-				log.Warningln("Failed to verify token:", err)
-				ctx.JSON(http.StatusForbidden, gin.H{"error": "Authorization token verification failed"})
-				return
-			}
-			if !ok {
-				log.Warningf("%s %v advertised to namespace %v without valid registration\n",
-					sType, ad.Name, namespace.Path)
-				ctx.JSON(http.StatusForbidden, gin.H{"error": sType + " not authorized to advertise to this namespace"})
-				return
-			}
-		}
-	} else {
-		token := strings.TrimPrefix(tokens[0], "Bearer ")
-		prefix := path.Join("caches", ad.Name)
-		ok, err := VerifyAdvertiseToken(engineCtx, token, prefix)
-		if err != nil {
-			if err == adminApprovalErr {
-				log.Warningln("Failed to verify token. Cache was not approved:", err)
-				ctx.JSON(http.StatusForbidden, gin.H{"error": "Cache is not admin approved"})
-			} else {
-				log.Warningln("Failed to verify token:", err)
-				ctx.JSON(http.StatusForbidden, gin.H{"error": "Authorization token verification failed"})
-			}
-			return
-		}
-		if !ok {
-			log.Warningf("%s %v advertised to namespace %v without valid registration\n",
-				sType, ad.Name, prefix)
-			ctx.JSON(http.StatusForbidden, gin.H{"error": sType + " not authorized to advertise to this namespace"})
-			return
-		}
-	}
-
-	ad_url, err := url.Parse(ad.URL)
-	if err != nil {
-		log.Warningf("Failed to parse %s URL %v: %v\n", sType, ad.URL, err)
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid " + sType + " URL"})
-		return
-	}
-
-	adWebUrl, err := url.Parse(ad.WebURL)
-	if err != nil && ad.WebURL != "" { // We allow empty WebURL string for backward compatibility
-		log.Warningf("Failed to parse origin Web URL %v: %v\n", ad.WebURL, err)
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid origin Web URL"})
-		return
-	}
-
-	sAd := ServerAd{
-		Name:         ad.Name,
-		AuthURL:      *ad_url,
-		URL:          *ad_url,
-		WebURL:       *adWebUrl,
-		Type:         sType,
-		WriteEnabled: ad.WriteEnabled,
-	}
-
-	hasOriginAdInCache := serverAds.Has(sAd)
-	RecordAd(sAd, &ad.Namespaces)
-
-	// Start director periodic test of origin's health status if origin AD
-	// has WebURL field AND it's not already been registered
-	healthTestCancelFuncsMutex.Lock()
-	defer healthTestCancelFuncsMutex.Unlock()
-	if ad.WebURL != "" && !hasOriginAdInCache {
-		ctx, cancel := context.WithCancel(context.Background())
-		healthTestCancelFuncs[sAd] = cancel
-		LaunchPeriodicDirectorTest(ctx, sAd)
-	}
-
-	ctx.JSON(http.StatusOK, gin.H{"msg": "Successful registration"})
-}
-
 // Return a list of registered origins and caches in Prometheus HTTP SD format
 // for director's Prometheus service discovery
-func DiscoverOriginCache(ctx *gin.Context) {
+func discoverOriginCache(ctx *gin.Context) {
 	// Check token for authorization
 	tokens, present := ctx.Request.Header["Authorization"]
 	if !present || len(tokens) == 0 {
@@ -496,7 +398,7 @@ func DiscoverOriginCache(ctx *gin.Context) {
 		return
 	}
 	token := strings.TrimPrefix(tokens[0], "Bearer ")
-	ok, err := VerifyDirectorSDToken(token)
+	ok, err := verifyDirectorSDToken(token)
 	if err != nil {
 		log.Warningln("Failed to verify director service discovery token:", err)
 		ctx.JSON(401, gin.H{"error": fmt.Sprintf("Authorization token verification failed: %v\n", err)})
@@ -534,29 +436,21 @@ func DiscoverOriginCache(ctx *gin.Context) {
 	ctx.JSON(200, promDiscoveryRes)
 }
 
-func RegisterOrigin(ctx context.Context, gctx *gin.Context) {
-	registerServeAd(ctx, gctx, OriginType)
-}
-
-func RegisterCache(ctx context.Context, gctx *gin.Context) {
-	registerServeAd(ctx, gctx, CacheType)
-}
-
-func ListNamespaces(ctx *gin.Context) {
-	namespaceAds := ListNamespacesFromOrigins()
+func listNamespaces(ctx *gin.Context) {
+	namespaceAds := listNamespacesFromOrigins()
 
 	ctx.JSON(http.StatusOK, namespaceAds)
 }
 
 func RegisterDirector(ctx context.Context, router *gin.RouterGroup) {
 	// Establish the routes used for cache/origin redirection
-	router.GET("/api/v1.0/director/object/*any", RedirectToCache)
-	router.GET("/api/v1.0/director/origin/*any", RedirectToOrigin)
+	router.GET("/api/v1.0/director/object/*any", redirectToCache)
+	router.GET("/api/v1.0/director/origin/*any", redirectToOrigin)
 	router.POST("/api/v1.0/director/registerOrigin", func(gctx *gin.Context) { RegisterOrigin(ctx, gctx) })
 	// In the foreseeable feature, director will scrape all servers in Pelican ecosystem (including registry)
 	// so that director can be our point of contact for collecting system-level metrics.
 	// Rename the endpoint to reflect such plan.
-	router.GET(DirectorServerDiscoveryEndpoint, DiscoverOriginCache)
+	router.GET(DirectorServerDiscoveryEndpoint, discoverOriginCache)
 	router.POST("/api/v1.0/director/registerCache", func(gctx *gin.Context) { RegisterCache(ctx, gctx) })
-	router.GET("/api/v1.0/director/listNamespaces", ListNamespaces)
+	router.GET("/api/v1.0/director/listNamespaces", listNamespaces)
 }

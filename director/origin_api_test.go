@@ -65,7 +65,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 	// A verified token with a the correct scope - should return no error
 	tok, err := CreateAdvertiseToken("test-namespace")
 	assert.NoError(t, err)
-	ok, err := VerifyAdvertiseToken(ctx, tok, "test-namespace")
+	ok, err := verifyAdvertiseToken(ctx, tok, "test-namespace")
 	assert.NoError(t, err)
 	assert.Equal(t, true, ok, "Expected scope to be 'pelican.advertise'")
 
@@ -82,7 +82,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 
 	signed, err := jwt.Sign(scopelessTok, jwt.WithKey(jwa.ES256, key))
 
-	ok, err = VerifyAdvertiseToken(ctx, string(signed), "test-namespace")
+	ok, err = verifyAdvertiseToken(ctx, string(signed), "test-namespace")
 	assert.Equal(t, false, ok)
 	assert.Equal(t, "No scope is present; required to advertise to director", err.Error())
 
@@ -96,7 +96,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 
 	signed, err = jwt.Sign(nonStrScopeTok, jwt.WithKey(jwa.ES256, key))
 
-	ok, err = VerifyAdvertiseToken(ctx, string(signed), "test-namespace")
+	ok, err = verifyAdvertiseToken(ctx, string(signed), "test-namespace")
 	assert.Equal(t, false, ok)
 	assert.Equal(t, "scope claim in token is not string-valued", err.Error())
 
@@ -110,7 +110,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 
 	signed, err = jwt.Sign(wrongScopeTok, jwt.WithKey(jwa.ES256, key))
 
-	ok, err = VerifyAdvertiseToken(ctx, string(signed), "test-namespace")
+	ok, err = verifyAdvertiseToken(ctx, string(signed), "test-namespace")
 	assert.Equal(t, false, ok, "Should fail due to incorrect scope name")
 	assert.NoError(t, err, "Incorrect scope name should not throw and error")
 }

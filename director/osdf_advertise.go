@@ -31,8 +31,8 @@ import (
 	"github.com/pelicanplatform/pelican/utils"
 )
 
-func parseServerAd(server utils.Server, serverType ServerType) ServerAd {
-	serverAd := ServerAd{}
+func parseServerAd(server utils.Server, serverType ServerType) serverDesc {
+	serverAd := serverDesc{}
 	serverAd.Type = serverType
 	serverAd.Name = server.Resource
 
@@ -73,8 +73,8 @@ func AdvertiseOSDF() error {
 		return errors.Wrapf(err, "Failed to get topology JSON")
 	}
 
-	cacheAdMap := make(map[ServerAd][]NamespaceAd)
-	originAdMap := make(map[ServerAd][]NamespaceAd)
+	cacheAdMap := make(map[serverDesc][]NamespaceAd)
+	originAdMap := make(map[serverDesc][]NamespaceAd)
 	for _, ns := range namespaces.Namespaces {
 		nsAd := NamespaceAd{}
 		nsAd.RequireToken = ns.UseTokenOnRead
@@ -107,11 +107,11 @@ func AdvertiseOSDF() error {
 	}
 
 	for originAd, namespacesSlice := range originAdMap {
-		RecordAd(originAd, &namespacesSlice)
+		recordAd(originAd, &namespacesSlice)
 	}
 
 	for cacheAd, namespacesSlice := range cacheAdMap {
-		RecordAd(cacheAd, &namespacesSlice)
+		recordAd(cacheAd, &namespacesSlice)
 	}
 
 	return nil

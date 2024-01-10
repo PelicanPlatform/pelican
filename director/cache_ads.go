@@ -34,18 +34,10 @@ import (
 )
 
 type (
-	NamespaceAd struct {
-		RequireToken  bool         `json:"requireToken"`
-		Path          string       `json:"path"`
-		Issuer        url.URL      `json:"url"`
-		MaxScopeDepth uint         `json:"maxScopeDepth"`
-		Strategy      StrategyType `json:"strategy"`
-		BasePath      string       `json:"basePath"`
-		VaultServer   string       `json:"vaultServer"`
-		DirlistHost   string       `json:"dirlisthost"`
-	}
 
-	ServerAd struct {
+	// The in-memory description of a server.
+	// Internal to the director, distinct from the wire format from the origin or cache.
+	serverDesc struct {
 		Name         string
 		AuthURL      url.URL
 		URL          url.URL // This is server's XRootD URL for file transfer
@@ -71,12 +63,12 @@ const (
 )
 
 var (
-	serverAds     = ttlcache.New[ServerAd, []NamespaceAd](ttlcache.WithTTL[ServerAd, []NamespaceAd](15 * time.Minute))
+	serverAds     = ttlcache.New[serverDesc, []NamespaceAd](ttlcache.WithTTL[serverDesc, []NamespaceAd](15 * time.Minute))
 	serverAdMutex = sync.RWMutex{}
 )
 
-func RecordAd(ad ServerAd, namespaceAds *[]NamespaceAd) {
-	if err := UpdateLatLong(&ad); err != nil {
+func recordAd(ad serverDesc, namespaceAds *[]NamespaceAd) {
+	if err := updateLatLong(&ad); err != nil {
 		log.Debugln("Failed to lookup GeoIP coordinates for host", ad.URL.Host)
 	}
 	serverAdMutex.Lock()
@@ -84,7 +76,7 @@ func RecordAd(ad ServerAd, namespaceAds *[]NamespaceAd) {
 	serverAds.Set(ad, *namespaceAds, ttlcache.DefaultTTL)
 }
 
-func UpdateLatLong(ad *ServerAd) error {
+func updateLatLong(ad *serverDesc) error {
 	if ad == nil {
 		return errors.New("Cannot provide a nil ad to UpdateLatLong")
 	}
@@ -100,7 +92,7 @@ func UpdateLatLong(ad *ServerAd) error {
 	if !ok {
 		return errors.New("Failed to create address object from IP")
 	}
-	lat, long, err := GetLatLong(addr)
+	lat, long, err := getLatLong(addr)
 	if err != nil {
 		return err
 	}
@@ -147,7 +139,7 @@ func matchesPrefix(reqPath string, namespaceAds []NamespaceAd) *NamespaceAd {
 	return best
 }
 
-func GetAdsForPath(reqPath string) (originNamespace NamespaceAd, originAds []ServerAd, cacheAds []ServerAd) {
+func getAdsForPath(reqPath string) (originNamespace NamespaceAd, originAds []serverDesc, cacheAds []serverDesc) {
 	serverAdMutex.RLock()
 	defer serverAdMutex.RUnlock()
 
@@ -173,7 +165,7 @@ func GetAdsForPath(reqPath string) (originNamespace NamespaceAd, originAds []Ser
 					// prefix, we overwrite that here because we found a better ns. We also clear
 					// the other slice of server ads, because we know those aren't good anymore
 					originAds = append(originAds[:0], serverAd)
-					cacheAds = []ServerAd{}
+					cacheAds = []serverDesc{}
 				} else if ns.Path == best.Path {
 					originAds = append(originAds, serverAd)
 				}
@@ -184,7 +176,7 @@ func GetAdsForPath(reqPath string) (originNamespace NamespaceAd, originAds []Ser
 				if best == nil || len(ns.Path) > len(best.Path) {
 					best = ns
 					cacheAds = append(cacheAds[:0], serverAd)
-					originAds = []ServerAd{}
+					originAds = []serverDesc{}
 				} else if ns.Path == best.Path {
 					cacheAds = append(cacheAds, serverAd)
 				}

@@ -35,7 +35,7 @@ import (
 )
 
 // List all namespaces from origins registered at the director
-func ListNamespacesFromOrigins() []NamespaceAd {
+func listNamespacesFromOrigins() []NamespaceAd {
 
 	serverAdMutex.RLock()
 	defer serverAdMutex.RUnlock()
@@ -51,10 +51,10 @@ func ListNamespacesFromOrigins() []NamespaceAd {
 }
 
 // List all serverAds in the cache that matches the serverType array
-func ListServerAds(serverTypes []ServerType) []ServerAd {
+func listServerAds(serverTypes []ServerType) []serverDesc {
 	serverAdMutex.RLock()
 	defer serverAdMutex.RUnlock()
-	ads := make([]ServerAd, 0)
+	ads := make([]serverDesc, 0)
 	for _, ad := range serverAds.Keys() {
 		for _, serverType := range serverTypes {
 			if ad.Type == serverType {
@@ -104,7 +104,7 @@ func CreateDirectorSDToken() (string, error) {
 // Verify that a token received is a valid token from director and has
 // correct scope for accessing the service discovery endpoint. This function
 // is intended to be called on the same director server that issues the token.
-func VerifyDirectorSDToken(strToken string) (bool, error) {
+func verifyDirectorSDToken(strToken string) (bool, error) {
 	// This token is essentialled an "issuer"/server itself issued token and
 	// the server happended to be a director. This allows us to just follow
 	// IssuerCheck logic for this token
@@ -189,7 +189,7 @@ func ConfigTTLCache(ctx context.Context, egrp *errgroup.Group) {
 	go serverAds.Start()
 	go namespaceKeys.Start()
 
-	serverAds.OnEviction(func(ctx context.Context, er ttlcache.EvictionReason, i *ttlcache.Item[ServerAd, []NamespaceAd]) {
+	serverAds.OnEviction(func(ctx context.Context, er ttlcache.EvictionReason, i *ttlcache.Item[serverDesc, []NamespaceAd]) {
 		healthTestCancelFuncsMutex.Lock()
 		defer healthTestCancelFuncsMutex.Unlock()
 		if cancelFunc, exists := healthTestCancelFuncs[i.Key()]; exists {

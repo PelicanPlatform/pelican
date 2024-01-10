@@ -30,7 +30,7 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-func hasServerAdWithName(serverAds []ServerAd, name string) bool {
+func hasServerAdWithName(serverAds []serverDesc, name string) bool {
 	for _, serverAd := range serverAds {
 		if serverAd.Name == name {
 			return true
@@ -76,7 +76,7 @@ func TestGetAdsForPath(t *testing.T) {
 		},
 	}
 
-	cacheAd1 := ServerAd{
+	cacheAd1 := serverDesc{
 		Name: "cache1",
 		AuthURL: url.URL{
 			Scheme: "https",
@@ -89,7 +89,7 @@ func TestGetAdsForPath(t *testing.T) {
 		Type: CacheType,
 	}
 
-	cacheAd2 := ServerAd{
+	cacheAd2 := serverDesc{
 		Name: "cache2",
 		AuthURL: url.URL{
 			Scheme: "https",
@@ -102,7 +102,7 @@ func TestGetAdsForPath(t *testing.T) {
 		Type: CacheType,
 	}
 
-	originAd1 := ServerAd{
+	originAd1 := serverDesc{
 		Name: "origin1",
 		AuthURL: url.URL{
 			Scheme: "https",
@@ -115,7 +115,7 @@ func TestGetAdsForPath(t *testing.T) {
 		Type: OriginType,
 	}
 
-	originAd2 := ServerAd{
+	originAd2 := serverDesc{
 		Name: "origin2",
 		AuthURL: url.URL{
 			Scheme: "https",
@@ -131,12 +131,12 @@ func TestGetAdsForPath(t *testing.T) {
 	o1Slice := []NamespaceAd{nsAd1}
 	o2Slice := []NamespaceAd{nsAd2, nsAd3}
 	c1Slice := []NamespaceAd{nsAd1, nsAd2}
-	RecordAd(originAd2, &o2Slice)
-	RecordAd(originAd1, &o1Slice)
-	RecordAd(cacheAd1, &c1Slice)
-	RecordAd(cacheAd2, &o1Slice)
+	recordAd(originAd2, &o2Slice)
+	recordAd(originAd1, &o1Slice)
+	recordAd(cacheAd1, &c1Slice)
+	recordAd(cacheAd2, &o1Slice)
 
-	nsAd, oAds, cAds := GetAdsForPath("/chtc")
+	nsAd, oAds, cAds := getAdsForPath("/chtc")
 	assert.Equal(t, nsAd.Path, "/chtc")
 	assert.Equal(t, len(oAds), 1)
 	assert.Equal(t, len(cAds), 2)
@@ -144,7 +144,7 @@ func TestGetAdsForPath(t *testing.T) {
 	assert.True(t, hasServerAdWithName(cAds, "cache1"))
 	assert.True(t, hasServerAdWithName(cAds, "cache2"))
 
-	nsAd, oAds, cAds = GetAdsForPath("/chtc/")
+	nsAd, oAds, cAds = getAdsForPath("/chtc/")
 	assert.Equal(t, nsAd.Path, "/chtc")
 	assert.Equal(t, len(oAds), 1)
 	assert.Equal(t, len(cAds), 2)
@@ -152,7 +152,7 @@ func TestGetAdsForPath(t *testing.T) {
 	assert.True(t, hasServerAdWithName(cAds, "cache1"))
 	assert.True(t, hasServerAdWithName(cAds, "cache2"))
 
-	nsAd, oAds, cAds = GetAdsForPath("/chtc/PUBLI")
+	nsAd, oAds, cAds = getAdsForPath("/chtc/PUBLI")
 	assert.Equal(t, nsAd.Path, "/chtc")
 	assert.Equal(t, len(oAds), 1)
 	assert.Equal(t, len(cAds), 2)
@@ -160,14 +160,14 @@ func TestGetAdsForPath(t *testing.T) {
 	assert.True(t, hasServerAdWithName(cAds, "cache1"))
 	assert.True(t, hasServerAdWithName(cAds, "cache2"))
 
-	nsAd, oAds, cAds = GetAdsForPath("/chtc/PUBLIC")
+	nsAd, oAds, cAds = getAdsForPath("/chtc/PUBLIC")
 	assert.Equal(t, nsAd.Path, "/chtc/PUBLIC")
 	assert.Equal(t, len(oAds), 1)
 	assert.Equal(t, len(cAds), 1)
 	assert.True(t, hasServerAdWithName(oAds, "origin2"))
 	assert.True(t, hasServerAdWithName(cAds, "cache1"))
 
-	nsAd, oAds, cAds = GetAdsForPath("/chtc/PUBLIC2")
+	nsAd, oAds, cAds = getAdsForPath("/chtc/PUBLIC2")
 	// since the stored path is actually /chtc/PUBLIC2/, the extra / is returned
 	assert.Equal(t, nsAd.Path, "/chtc/PUBLIC2/")
 	assert.Equal(t, len(oAds), 1)
@@ -176,14 +176,14 @@ func TestGetAdsForPath(t *testing.T) {
 
 	// Finally, let's throw in a test for a path we know shouldn't exist
 	// in the ttlcache
-	nsAd, oAds, cAds = GetAdsForPath("/does/not/exist")
+	nsAd, oAds, cAds = getAdsForPath("/does/not/exist")
 	assert.Equal(t, nsAd.Path, "")
 	assert.Equal(t, len(oAds), 0)
 	assert.Equal(t, len(cAds), 0)
 }
 
 func TestConfigCacheEviction(t *testing.T) {
-	mockPelicanOriginServerAd := ServerAd{
+	mockPelicanOriginServerAd := serverDesc{
 		Name:    "test-origin-server",
 		AuthURL: url.URL{},
 		URL: url.URL{
@@ -229,7 +229,7 @@ func TestConfigCacheEviction(t *testing.T) {
 			healthTestCancelFuncsMutex.Lock()
 			defer healthTestCancelFuncsMutex.Unlock()
 			// Clear the map for the new test
-			healthTestCancelFuncs = make(map[ServerAd]context.CancelFunc)
+			healthTestCancelFuncs = make(map[serverDesc]context.CancelFunc)
 			healthTestCancelFuncs[mockPelicanOriginServerAd] = cancelFunc
 
 			require.True(t, serverAds.Has(mockPelicanOriginServerAd), "serverAds failed to register the originAd")
@@ -269,7 +269,7 @@ func TestConfigCacheEviction(t *testing.T) {
 }
 
 func TestServerAdsCacheEviction(t *testing.T) {
-	mockServerAd := ServerAd{Name: "foo", Type: OriginType, URL: url.URL{}}
+	mockServerAd := serverDesc{Name: "foo", Type: OriginType, URL: url.URL{}}
 
 	t.Run("evict-after-expire-time", func(t *testing.T) {
 		// Start cache eviction

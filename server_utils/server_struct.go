@@ -28,7 +28,7 @@ type (
 		GetServerType() config.ServerType
 		SetNamespaceAds([]director.NamespaceAd)
 		GetNamespaceAds() []director.NamespaceAd
-		CreateAdvertisement(name string, serverUrl string, serverWebUrl string) (director.OriginAdvertise, error)
+		CreateAdvertisement(name string, serverUrl string, serverWebUrl string) (director.ServerAdvertise, error)
 	}
 
 	NamespaceHolder struct {

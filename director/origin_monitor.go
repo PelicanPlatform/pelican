@@ -45,7 +45,7 @@ type (
 
 // Report the health status of test file transfer to origin
 func reportStatusToOrigin(ctx context.Context, originWebUrl string, status string, message string) error {
-	tkn, err := CreateDirectorTestReportToken(originWebUrl)
+	tkn, err := createDirectorTestReportToken(originWebUrl)
 	if err != nil {
 		return errors.Wrap(err, "Failed to create a token for the diretor test upload")
 	}
@@ -106,7 +106,7 @@ func reportStatusToOrigin(ctx context.Context, originWebUrl string, status strin
 
 // Run a periodic test file transfer against an origin to ensure
 // it's talking to the director
-func LaunchPeriodicDirectorTest(ctx context.Context, originAd ServerAd) {
+func launchPeriodicDirectorTest(ctx context.Context, originAd serverDesc) {
 	originName := originAd.Name
 	originUrl := originAd.URL.String()
 	originWebUrl := originAd.WebURL.String()
