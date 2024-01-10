@@ -721,7 +721,6 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 		if source_url.Scheme == "osdf" || source_url.Scheme == "stash" {
 			source_url.Path = "/" + path.Join(source_url.Host, source_url.Path)
 		} else if source_url.Scheme == "pelican" {
-			fmt.Printf("\n\n\nHERE\n\n\n")
 			federationUrl, _ := url.Parse(source_url.String())
 			federationUrl.Scheme = "https"
 			federationUrl.Path = ""
