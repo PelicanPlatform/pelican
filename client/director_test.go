@@ -20,12 +20,13 @@ package client
 
 import (
 	"bytes"
-	"github.com/stretchr/testify/assert"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 
 	namespaces "github.com/pelicanplatform/pelican/namespaces"
 )
@@ -194,7 +195,7 @@ func TestQueryDirector(t *testing.T) {
 	defer server.Close()
 
 	// Call QueryDirector with the test server URL and a source path
-	actualResp, err := QueryDirector("/foo/bar", server.URL)
+	actualResp, err := queryDirector("GET", "/foo/bar", server.URL)
 	if err != nil {
 		t.Fatal(err)
 	}

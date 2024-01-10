@@ -679,6 +679,13 @@ func TestRedirects(t *testing.T) {
 		expectedPath = "/api/v1.0/director/object/foo/bar"
 		assert.Equal(t, expectedPath, c.Request.URL.Path)
 
+		// test a PUT request always goes to the origin endpoint
+		req = httptest.NewRequest("PUT", "/foo/bar", nil)
+		c.Request = req
+		ShortcutMiddleware("cache")(c)
+		expectedPath = "/api/v1.0/director/origin/foo/bar"
+		assert.Equal(t, expectedPath, c.Request.URL.Path)
+
 		// Host-aware tests
 		// Test that we can turn on host-aware redirects and get one appropriate redirect from each
 		// type of header (as we've already tested that hostname redirects function)

@@ -344,6 +344,13 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 			c.Next()
 			return
 		}
+		// Regardless of the remainder of the settings, we currently handle a PUT as a query to the origin endpoint
+		if c.Request.Method == "PUT" {
+			c.Request.URL.Path = "/api/v1.0/director/origin" + c.Request.URL.Path
+			RedirectToOrigin(c)
+			c.Abort()
+			return
+		}
 
 		// We grab the host and x-forwarded-host headers, which can be set by a client with the intent of changing the
 		// Director's default behavior (eg the director normally forwards to caches, but if it receives a request with
