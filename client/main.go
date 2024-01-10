@@ -510,6 +510,15 @@ func DoPut(localObject string, remoteDestination string, recursive bool) (bytesT
 				log.Errorln("Failed to join remote destination url path:", err)
 				return 0, err
 			}
+		} else if remoteDestUrl.Scheme == "pelican" {
+			federationUrl, _ := url.Parse(remoteDestUrl.String())
+			federationUrl.Scheme = "https"
+			federationUrl.Path = ""
+			viper.Set("Federation.DiscoveryUrl", federationUrl.String())
+			err = config.DiscoverFederation()
+			if err != nil {
+				return 0, err
+			}
 		}
 	}
 	remoteDestScheme, _ = getTokenName(remoteDestUrl)
@@ -578,6 +587,15 @@ func DoGet(remoteObject string, localDestination string, recursive bool) (bytesT
 			remoteObjectUrl.Path, err = url.JoinPath(remoteObjectUrl.Host, remoteObjectUrl.Path)
 			if err != nil {
 				log.Errorln("Failed to join source url path:", err)
+				return 0, err
+			}
+		} else if remoteObjectUrl.Scheme == "pelican" {
+			federationUrl, _ := url.Parse(remoteObjectUrl.String())
+			federationUrl.Scheme = "https"
+			federationUrl.Path = ""
+			viper.Set("Federation.DiscoveryUrl", federationUrl.String())
+			err = config.DiscoverFederation()
+			if err != nil {
 				return 0, err
 			}
 		}
@@ -702,12 +720,31 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 	if source_url.Host != "" {
 		if source_url.Scheme == "osdf" || source_url.Scheme == "stash" {
 			source_url.Path = "/" + path.Join(source_url.Host, source_url.Path)
+		} else if source_url.Scheme == "pelican" {
+			fmt.Printf("\n\n\nHERE\n\n\n")
+			federationUrl, _ := url.Parse(source_url.String())
+			federationUrl.Scheme = "https"
+			federationUrl.Path = ""
+			viper.Set("Federation.DiscoveryUrl", federationUrl.String())
+			err = config.DiscoverFederation()
+			if err != nil {
+				return 0, err
+			}
 		}
 	}
 
 	if dest_url.Host != "" {
 		if dest_url.Scheme == "osdf" || dest_url.Scheme == "stash" {
 			dest_url.Path = "/" + path.Join(dest_url.Host, dest_url.Path)
+		} else if dest_url.Scheme == "pelican" {
+			federationUrl, _ := url.Parse(dest_url.String())
+			federationUrl.Scheme = "https"
+			federationUrl.Path = ""
+			viper.Set("Federation.DiscoveryUrl", federationUrl.String())
+			err = config.DiscoverFederation()
+			if err != nil {
+				return 0, err
+			}
 		}
 	}
 
