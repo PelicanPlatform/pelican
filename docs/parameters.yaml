@@ -309,6 +309,14 @@ type: bool
 default: true
 components: ["origin"]
 ---
+name: Origin.EnableFallbackRead
+description: >-
+  Set to `true` if the origin permits clients to directly read from it
+  when no cache service is available
+type: bool
+default: false
+components: ["origin"]
+---
 name: Origin.Multiuser
 description: >-
   A bool indicating whether an origin is "multiuser", ie whether the underlying XRootD instance must be configured in multi user mode.

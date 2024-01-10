@@ -179,7 +179,7 @@ func RedirectToCache(ginCtx *gin.Context) {
 
 	authzBearerEscaped := getAuthzEscaped(ginCtx.Request)
 
-	namespaceAd, _, cacheAds := GetAdsForPath(reqPath)
+	namespaceAd, originAds, cacheAds := GetAdsForPath(reqPath)
 	// if GetAdsForPath doesn't find any ads because the prefix doesn't exist, we should
 	// report the lack of path first -- this is most important for the user because it tells them
 	// they're trying to get an object that simply doesn't exist
@@ -189,13 +189,22 @@ func RedirectToCache(ginCtx *gin.Context) {
 	}
 	// If the namespace prefix DOES exist, then it makes sense to say we couldn't find a valid cache.
 	if len(cacheAds) == 0 {
-		ginCtx.String(404, "No cache found for path\n")
-		return
-	}
-	cacheAds, err = SortServers(ipAddr, cacheAds)
-	if err != nil {
-		ginCtx.String(500, "Failed to determine server ordering")
-		return
+		for _, originAd := range originAds {
+			if originAd.EnableFallbackRead {
+				cacheAds = append(cacheAds, originAd)
+				break
+			}
+		}
+		if len(cacheAds) == 0 {
+			ginCtx.String(http.StatusNotFound, "No cache found for path")
+			return
+		}
+	} else {
+		cacheAds, err = SortServers(ipAddr, cacheAds)
+		if err != nil {
+			ginCtx.String(http.StatusInternalServerError, "Failed to determine server ordering")
+			return
+		}
 	}
 	redirectURL := getRedirectURL(reqPath, cacheAds[0], namespaceAd.RequireToken)
 
@@ -462,12 +471,13 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType ServerTy
 	}
 
 	sAd := ServerAd{
-		Name:        ad.Name,
-		AuthURL:     *ad_url,
-		URL:         *ad_url,
-		WebURL:      *adWebUrl,
-		Type:        sType,
-		EnableWrite: ad.EnableWrite,
+		Name:               ad.Name,
+		AuthURL:            *ad_url,
+		URL:                *ad_url,
+		WebURL:             *adWebUrl,
+		Type:               sType,
+		EnableWrite:        ad.EnableWrite,
+		EnableFallbackRead: ad.EnableFallbackRead,
 	}
 
 	hasOriginAdInCache := serverAds.Has(sAd)

@@ -84,6 +84,7 @@ type config struct {
 	Origin struct {
 		EnableCmsd bool
 		EnableDirListing bool
+		EnableFallbackRead bool
 		EnableIssuer bool
 		EnableUI bool
 		EnableVoms bool
@@ -247,6 +248,7 @@ type configWithType struct {
 	Origin struct {
 		EnableCmsd struct { Type string; Value bool }
 		EnableDirListing struct { Type string; Value bool }
+		EnableFallbackRead struct { Type string; Value bool }
 		EnableIssuer struct { Type string; Value bool }
 		EnableUI struct { Type string; Value bool }
 		EnableVoms struct { Type string; Value bool }

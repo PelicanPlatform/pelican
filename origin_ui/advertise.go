@@ -53,7 +53,6 @@ func (server *OriginServer) CreateAdvertisement(name string, originUrl string, o
 
 	prefix := param.Origin_NamespacePrefix.GetString()
 
-	enableWrite := param.Origin_EnableWrite.GetBool()
 	// TODO: Need to figure out where to get some of these values
 	// 		 so that they aren't hardcoded...
 	nsAd := director.NamespaceAd{
@@ -65,11 +64,12 @@ func (server *OriginServer) CreateAdvertisement(name string, originUrl string, o
 		BasePath:      prefix,
 	}
 	ad = director.OriginAdvertise{
-		Name:        name,
-		URL:         originUrl,
-		WebURL:      originWebUrl,
-		Namespaces:  []director.NamespaceAd{nsAd},
-		EnableWrite: enableWrite,
+		Name:               name,
+		URL:                originUrl,
+		WebURL:             originWebUrl,
+		Namespaces:         []director.NamespaceAd{nsAd},
+		EnableWrite:        param.Origin_EnableWrite.GetBool(),
+		EnableFallbackRead: param.Origin_EnableFallbackRead.GetBool(),
 	}
 
 	return ad, nil
