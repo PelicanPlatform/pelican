@@ -91,43 +91,47 @@ func configureWebResource(engine *gin.Engine) error {
 		db := authDB.Load()
 		user, err := GetUser(ctx)
 
-		// Redirect initialized users from initialization pages
-		if strings.HasPrefix(path, "/initialization") && strings.HasSuffix(path, "index.html") {
+		// If requesting servers other than the registry
+		if !strings.HasPrefix(path, "/registry") {
 
-			// If the user has been initialized previously
-			if db != nil {
-				ctx.Redirect(http.StatusFound, "/view/")
-				return
+			// Redirect initialized users from initialization pages
+			if strings.HasPrefix(path, "/initialization") && strings.HasSuffix(path, "index.html") {
+
+				// If the user has been initialized previously
+				if db != nil {
+					ctx.Redirect(http.StatusFound, "/view/")
+					return
+				}
 			}
-		}
 
-		// Redirect authenticated users from login pages
-		if strings.HasPrefix(path, "/login") && strings.HasSuffix(path, "index.html") {
+			// Redirect authenticated users from login pages
+			if strings.HasPrefix(path, "/login") && strings.HasSuffix(path, "index.html") {
 
-			// If the user has been authenticated previously
-			if err == nil && user != "" {
-				ctx.Redirect(http.StatusFound, "/view/")
-				return
+				// If the user has been authenticated previously
+				if err == nil && user != "" {
+					ctx.Redirect(http.StatusFound, "/view/")
+					return
+				}
 			}
-		}
 
-		// Direct uninitialized users to initialization pages
-		if !strings.HasPrefix(path, "/initialization") && strings.HasSuffix(path, "index.html") {
+			// Direct uninitialized users to initialization pages
+			if !strings.HasPrefix(path, "/initialization") && strings.HasSuffix(path, "index.html") {
 
-			// If the user has not been initialized previously
-			if db == nil {
-				ctx.Redirect(http.StatusFound, "/view/initialization/code/")
-				return
+				// If the user has not been initialized previously
+				if db == nil {
+					ctx.Redirect(http.StatusFound, "/view/initialization/code/")
+					return
+				}
 			}
-		}
 
-		// Direct unauthenticated initialized users to login pages
-		if !strings.HasPrefix(path, "/login") && strings.HasSuffix(path, "index.html") {
+			// Direct unauthenticated initialized users to login pages
+			if !strings.HasPrefix(path, "/login") && strings.HasSuffix(path, "index.html") {
 
-			// If the user is not authenticated but initialized
-			if (err != nil || user == "") && db != nil {
-				ctx.Redirect(http.StatusFound, "/view/login/")
-				return
+				// If the user is not authenticated but initialized
+				if (err != nil || user == "") && db != nil {
+					ctx.Redirect(http.StatusFound, "/view/login/")
+					return
+				}
 			}
 		}
 

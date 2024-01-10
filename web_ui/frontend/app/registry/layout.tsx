@@ -23,7 +23,7 @@ import Link from "next/link";
 import Image from "next/image";
 import PelicanLogo from "@/public/static/images/PelicanPlatformLogo_Icon.png";
 import IconButton from "@mui/material/IconButton";
-import BuildIcon from "@mui/icons-material/Build";
+import {Add, Build} from "@mui/icons-material";
 
 export const metadata = {
     title: 'Pelican Registry',
@@ -38,7 +38,7 @@ export default function RootLayout({
     return (
         <Box display={"flex"} flexDirection={"row"}>
             <Sidebar>
-                <Link href={"/index.html"}>
+                <Link href={"/registry/index.html"}>
                     <Image
                         src={PelicanLogo}
                         alt={"Pelican Logo"}
@@ -47,10 +47,19 @@ export default function RootLayout({
                     />
                 </Link>
                 <Box pt={1}>
+                    <Tooltip title={"Register Namespace"} placement={"right"}>
+                        <Link href={"/registry/namespace/register/index.html"}>
+                            <IconButton>
+                                <Add/>
+                            </IconButton>
+                        </Link>
+                    </Tooltip>
+                </Box>
+                <Box pt={1}>
                     <Tooltip title={"Config"} placement={"right"}>
                         <Link href={"/config/index.html"}>
                             <IconButton>
-                                <BuildIcon/>
+                                <Build/>
                             </IconButton>
                         </Link>
                     </Tooltip>
