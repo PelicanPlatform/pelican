@@ -417,5 +417,4 @@ import (
 
 {{.GeneratedConfig}}
 
-{{.GeneratedConfigWithType}}
-`))
+{{.GeneratedConfigWithType}}`))
