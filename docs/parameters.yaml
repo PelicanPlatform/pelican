@@ -105,6 +105,31 @@ type: duration
 default: 10s
 components: ["client", "nsregistry", "origin"]
 ---
+name: GeoIPOverrides
+description: >-
+  A list of IP addresses whose GeoIP resolution should be overridden with the supplied Lat/Long coordinates (in decimal form). This affects
+  both server ads (for determining the location of origins and caches) and incoming client requests (for determing where a client request is
+  coming from).
+
+  Configuration takes an IP address (both regular and CIDR) and a Coordinate made up of a lat/long pair in decimal format. For example:
+  ```
+  GeoIPOverrides:
+    - IP: "123.234.123.234"
+      Coordinate:
+        Lat: 43.073904
+        Long: -89.384859
+    - IP: "ABCD::1234/112"
+      Coordinate:
+        Lat: 39.8281
+        Long: -98.5795
+  ```
+
+  will result in the IP address "123.234.123.234" being mapped to Madison, WI, and IP addresses in the range ABCD::0000-FFFF will be mapped
+  to a field in Kansas.
+type: object
+default: none
+components: ["director"]
+---
 
 ############################
 #     Log-Level Configs    #
@@ -123,7 +148,6 @@ type: filename
 default: none
 components: ["*"]
 ---
-
 ############################
 # Federation-Level Configs #
 ############################
@@ -134,12 +158,47 @@ type: url
 default: none
 components: ["*"]
 ---
+name: Federation.DirectorUrl
+description: >-
+  A URL indicating where a director service is hosted.
+type: url
+osdf_default: Default is determined dynamically through metadata at <Federation.DiscoveryUrl>/.well-known/pelican-configuration
+default: none
+components: ["client", "origin", "cache"]
+---
+name: Federation.NamespaceUrl
+description: >-
+  [Deprecated] `Federation.NamespaceUrl` is deprecated and will be removed in the future release. Please migrate to use
+  `Federation.RegistryUrl` instead.
+
+  A URL indicating where the namespace registry service is hosted.
+type: url
+osdf_default: Default is determined dynamically through metadata at <Federation.DiscoveryUrl>/.well-known/pelican-configuration
+default: none
+components: ["client", "director", "origin", "cache"]
+---
+name: Federation.RegistryUrl
+description: >-
+  A URL indicating where the namespace registry service is hosted.
+type: url
+osdf_default: Default is determined dynamically through metadata at <federation URL>/.well-known/pelican-configuration
+default: none
+components: ["client", "director", "origin", "cache"]
+---
+name: Federation.JwkUrl
+description: >-
+  A URL indicating where the JWKS for the Federation is hosted.
+type: url
+osdf_default: Default is determined dynamically through metadata at <Federation.DiscoveryUrl>/.well-known/pelican-configuration
+default: none
+components: ["*"]
+---
 name: Federation.TopologyNamespaceUrl
 description: >-
   A URL containing namespace information for origins and caches configured via the OSG Topology application (a legacy integration). The URL
   should point to the hosted namespace.json.
 type: url
-osdf_default: https://topology.opensciencegrid.org/stashcache/namespaces.json
+osdf_default: https://topology.opensciencegrid.org/osdf/namespaces
 default: none
 components: ["director", "nsregistry"]
 ---
@@ -151,31 +210,6 @@ osdf_default: 10
 default: none
 components: ["director", "nsregistry"]
 ---
-name: Federation.DirectorUrl
-description: >-
-  A URL indicating where a director service is hosted.
-type: url
-osdf_default: Default is determined dynamically through metadata at <federation URL>/.well-known/pelican-configuration
-default: none
-components: ["client", "origin"]
----
-name: Federation.NamespaceUrl
-description: >-
-  A URL indicating where the namespace registry service is hosted.
-type: url
-osdf_default: Default is determined dynamically through metadata at <federation URL>/.well-known/pelican-configuration
-default: none
-components: ["client", "director", "origin"]
----
-name: Federation.JwkUrl
-description: >-
-  A URL indicating where the JWKS for the Federation is hosted.
-type: url
-osdf_default: Default is determined dynamically through metadata at <federtion URL>/.well-known/pelican-configuration
-default: none
-components: ["client", "origin"]
----
-
 ############################
 #   Client-Level Configs   #
 ############################
@@ -242,7 +276,6 @@ type: int
 default: 102400
 components: ["client"]
 ---
-
 ############################
 #   Origin-level Configs   #
 ############################
@@ -267,6 +300,13 @@ description: >-
   The filepath prefix at which an origin's contents are made globally available, eg /pelican/PUBLIC.
 type: string
 default: none
+components: ["origin"]
+---
+name: Origin.WriteEnabled
+description: >-
+  A boolean indicating if an origin is writeable on startup
+type: bool
+default: true
 components: ["origin"]
 ---
 name: Origin.Multiuser
@@ -414,8 +454,6 @@ type: filename
 default: none
 components: ["origin"]
 ---
-
-
 ############################
 #   Cache-level configs    #
 ############################
@@ -460,7 +498,6 @@ type: bool
 default: false
 components: ["cache"]
 ---
-
 ############################
 #  Director-level configs  #
 ############################
@@ -512,7 +549,6 @@ root_default: /var/cache/pelican/maxmind/GeoLite2-City.mmdb
 default: $ConfigBase/maxmind/GeoLite2-city.mmdb
 components: ["director"]
 ---
-
 ############################
 #  Registry-level configs  #
 ############################
@@ -533,7 +569,33 @@ type: bool
 default: true
 components: ["nsregistry"]
 ---
+name: Registry.AdminUsers
+description: >-
+  A string slice of "subject" claim of users to give admin permission for registry UI.
 
+  The "subject" claim should be the "CILogon User Identifier" from CILogon user page: https://cilogon.org/
+type: stringSlice
+default: []
+components: ["nsregistry"]
+---
+name: Registry.Institutions
+description: >-
+  A array of institution objects available to register. Users can only select from this list
+  when they register a new namespace. Each object has `name` and `id` field where
+  `name` is a human-readable name for the institution and `id` is a unique identifier
+  for the institution. For Pelican running in OSDF alias, the `id` will be OSG ID.
+
+  For example:
+
+  ```
+  - name: University of Wisconsin - Madison
+    id: https://osg-htc.org/iid/01y2jtd41
+  ```
+
+type: object
+default: none
+components: ["nsregistry"]
+---
 ############################
 #   Server-level configs   #
 ############################
@@ -588,6 +650,13 @@ type: filename
 root_default: /etc/pelican/certificates/tls.key
 default: "$ConfigBase/certificates/tls.key"
 components: ["origin", "nsregistry", "director"]
+---
+name: Server.EnableUI
+description: >-
+  Indicate whether a server should enable its web UI.
+type: bool
+default: true
+components: ["origin", "nsregistry", "director", "cache"]
 ---
 name: Server.WebPort
 description: >-
@@ -646,27 +715,42 @@ components: ["origin", "director", "nsregistry"]
 name: Server.IssuerJwks
 description: >-
   A filepath indicating where the server's public JSON web keyset can be found.
-type: string
+type: filename
 default: none
 components: ["origin", "director", "nsregistry"]
+---
+name: Server.Modules
+description: >-
+  A list of modules to enable when running pelican in `pelican serve` mode.
+type: stringSlice
+default: []
 ---
 name: Server.UIActivationCodeFile
 description: >-
   If the server's web UI has not yet been configured, this file will
   contain the activation code necessary to turn it on.
-type: string
+type: filename
 default: $ConfigBase/server-web-activation-code
 components: ["origin", "cache", "nsregistry", "director"]
 ---
 name: Server.UIPasswordFile
 description: >-
   A filepath specifying where the server's web UI password file should be stored.
-type: string
+type: filename
 default: $ConfigBase/server-web-passwd
-components:  ["origin", "cache", "nsregistry", "director"]
+components: ["origin", "cache", "nsregistry", "director"]
 ---
+name: Server.SessionSecretFile
+description: >-
+  The filepath to the secret for encrypt/decrypt session data for Pelican web UI to initiate a session cookie
 
-
+  This is used for sending redirect request for OAuth2 authentication follow.
+  This is also used for CSRF auth key.
+type: filename
+default: $ConfigBase/session-secret
+  The default content of the file is the hash of the concatenation of "pelican" and the DER form of ${IssuerKey}
+components: ["nsregistry", "director"]
+---
 ################################
 #   Issuer's Configurations    #
 ################################
@@ -783,7 +867,6 @@ type: object
 default: []
 components: ["origin"]
 ---
-
 ###################################
 #   Server's OIDC Configuration   #
 ###################################
@@ -851,7 +934,16 @@ type: url
 default: none
 components: ["nsregistry", "origin"]
 ---
+name: OIDC.ClientRedirectHostname
+description: >-
+  The hostname for the OIDC client redirect URL that the OIDC provider will redirect to after the user is authenticated
 
+  For development use only. Useful when developing in a container and you want to expose localhost
+  instead of container hostname to your OAuth provider
+type: string
+default: none
+components: ["nsregistry", "director"]
+---
 ############################
 #   XRootD-level Configs   #
 ############################
@@ -952,7 +1044,6 @@ type: string
 default: none
 components: ["origin"]
 ---
-
 ############################
 # Monitoring-level configs #
 ############################
@@ -1016,7 +1107,6 @@ type: bool
 default: true
 components: ["origin", "director", "nsregistry"]
 ---
-
 ############################
 #   Plugin-level configs   #
 ############################

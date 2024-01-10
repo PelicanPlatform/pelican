@@ -34,13 +34,17 @@ import (
 	"path/filepath"
 	"strings"
 	"text/template"
+	"unicode"
 
 	"github.com/go-ini/ini"
+	"github.com/pelicanplatform/pelican/cache_ui"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
+	"github.com/pelicanplatform/pelican/origin_ui"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 )
 
 type (
@@ -87,9 +91,70 @@ var (
 	scitokensCfgTemplate string
 )
 
+// Remove a trailing carriage return from a slice.  Used by scanLinesWithCont
+func dropCR(data []byte) []byte {
+	if len(data) > 0 && data[len(data)-1] == '\r' {
+		return data[0 : len(data)-1]
+	}
+	return data
+}
+
+// Scan through the lines of a file, respecting line continuation characters.  That is,
+//
+// ```
+// foo \
+// bar
+// ```
+//
+// Would be parsed as a single line, `foo bar`.
+//
+// Follows the ScanFunc interface defined by bufio.
+func ScanLinesWithCont(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	if atEOF && len(data) == 0 {
+		return 0, nil, nil
+	}
+	curData := data
+	for {
+		firstControl := bytes.IndexAny(curData, "\\\n")
+		if firstControl < 0 {
+			if atEOF {
+				// EOF and no more control characters; gobble up the rest
+				token = append(token, curData...)
+				advance += len(curData)
+				return
+			} else {
+				// Not the end of the stream -- ask for more data to see if we get a full line.
+				return 0, nil, nil
+			}
+		} else if curData[firstControl] == '\\' {
+			// There's a line continuation.  Ignore the rest of the whitespace, advance to new line.
+			token = append(token, curData[0:firstControl]...)
+			idx := firstControl + 1
+			for {
+				if idx == len(curData) {
+					break
+				} else if curData[idx] == '\n' {
+					idx += 1
+					break
+				} else if unicode.IsSpace(rune(curData[idx])) {
+					idx += 1
+				} else {
+					return 0, nil, errors.Errorf("invalid character after line continuation: %s", string(curData[idx]))
+				}
+			}
+			curData = curData[idx:]
+			advance += idx
+		} else { // must be a newline.  Return.
+			token = dropCR(append(token, curData[0:firstControl]...))
+			advance += firstControl + 1
+			return
+		}
+	}
+}
+
 // Given a reference to a Scitokens configuration, write it out to a known location
 // on disk for the xrootd server
-func EmitScitokensConfiguration(cfg *ScitokensCfg) error {
+func writeScitokensConfiguration(modules config.ServerType, cfg *ScitokensCfg) error {
 
 	JSONify := func(v any) (string, error) {
 		result, err := json.Marshal(v)
@@ -124,7 +189,10 @@ func EmitScitokensConfiguration(cfg *ScitokensCfg) error {
 	// Note that we write to the file then rename it into place.  This is because the
 	// xrootd daemon will periodically reload the scitokens.cfg and, in some cases,
 	// we may want to update it without restarting the server.
-	finalConfigPath := filepath.Join(xrootdRun, "scitokens-generated.cfg")
+	finalConfigPath := filepath.Join(xrootdRun, "scitokens-origin-generated.cfg")
+	if modules.IsEnabled(config.CacheType) {
+		finalConfigPath = filepath.Join(xrootdRun, "scitokens-cache-generated.cfg")
+	}
 	if err = os.Rename(configPath, finalConfigPath); err != nil {
 		return errors.Wrapf(err, "Failed to rename scitokens.cfg to final location")
 	}
@@ -135,36 +203,41 @@ func EmitScitokensConfiguration(cfg *ScitokensCfg) error {
 // into the xrootd runtime directory
 func EmitAuthfile(server server_utils.XRootDServer) error {
 	authfile := param.Xrootd_Authfile.GetString()
+	log.Debugln("Location of input authfile:", authfile)
 	contents, err := os.ReadFile(authfile)
 	if err != nil {
 		return errors.Wrapf(err, "Failed to read xrootd authfile from %s", authfile)
 	}
 
 	sc := bufio.NewScanner(strings.NewReader(string(contents)))
+	sc.Split(ScanLinesWithCont)
 	output := new(bytes.Buffer)
 	foundPublicLine := false
+	log.Debugln("Parsing the input authfile")
 	for sc.Scan() {
 		lineContents := sc.Text()
 		words := strings.Fields(lineContents)
-		// There exists a public access already in the authfile
 		if len(words) >= 2 && words[0] == "u" && words[1] == "*" {
-			if server.GetServerType().IsSet(config.OriginType) {
-				// If Origin, add the ./well-known to the authfile
+			// There exists a public access already in the authfile
+			if server.GetServerType().IsEnabled(config.OriginType) {
+				// If Origin, add the /.well-known to the authfile
 				output.Write([]byte("u * /.well-known lr " + strings.Join(words[2:], " ") + "\n"))
 			} else {
-				output.Write([]byte(lineContents + " "))
+				output.Write([]byte(lineContents + "\n"))
 			}
 			foundPublicLine = true
+		} else {
+			// Copy over entry verbatim
+			output.Write([]byte(lineContents + "\n"))
 		}
 	}
-	// If Origin and no authfile already exists, add the ./well-know to the authfile
-	if !foundPublicLine && server.GetServerType().IsSet(config.OriginType) {
-
+	// If Origin and no authfile already exists, add the ./well-known to the authfile
+	if !foundPublicLine && server.GetServerType().IsEnabled(config.OriginType) {
 		output.Write([]byte("u * /.well-known lr\n"))
 	}
 
 	// For the cache, add the public namespaces
-	if server.GetServerType().IsSet(config.CacheType) {
+	if server.GetServerType().IsEnabled(config.CacheType) {
 		// If nothing has been written to the output yet
 		var outStr string
 		if !foundPublicLine {
@@ -177,7 +250,7 @@ func EmitAuthfile(server server_utils.XRootDServer) error {
 		}
 		// A public namespace exists, so a line needs to be printed
 		if len(outStr) > 4 {
-			output.Write([]byte(outStr))
+			output.Write([]byte(outStr + "\n"))
 		}
 	}
 
@@ -187,7 +260,10 @@ func EmitAuthfile(server server_utils.XRootDServer) error {
 	}
 
 	xrootdRun := param.Xrootd_RunLocation.GetString()
-	finalAuthPath := filepath.Join(xrootdRun, "authfile-generated")
+	finalAuthPath := filepath.Join(xrootdRun, "authfile-origin-generated")
+	if server.GetServerType().IsEnabled(config.CacheType) {
+		finalAuthPath = filepath.Join(xrootdRun, "authfile-cache-generated")
+	}
 	file, err := os.OpenFile(finalAuthPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0640)
 	if err != nil {
 		return errors.Wrapf(err, "Failed to create a generated authfile %s", finalAuthPath)
@@ -214,14 +290,12 @@ func LoadScitokensConfig(fileName string) (cfg ScitokensCfg, err error) {
 	cfg.IssuerMap = make(map[string]Issuer)
 
 	if section, err := configIni.GetSection("Global"); err == nil {
-		audienceKey := section.Key("audience")
-		if audienceKey != nil {
+		if audienceKey := section.Key("audience"); audienceKey != nil {
 			for _, audience := range audienceKey.Strings(",") {
 				cfg.Global.Audience = append(cfg.Global.Audience, strings.TrimSpace(audience))
 			}
 		}
-		audienceKey = section.Key("audience_json")
-		if audienceKey != nil {
+		if audienceKey := section.Key("audience_json"); audienceKey != nil && audienceKey.String() != "" {
 			var audiences []string
 			if err := json.Unmarshal([]byte(audienceKey.String()), &audiences); err != nil {
 				return cfg, errors.Wrapf(err, "Unable to parse audience_json from %s", fileName)
@@ -336,24 +410,30 @@ func makeSciTokensCfg() (cfg ScitokensCfg, err error) {
 		return cfg, errors.Wrapf(err, "Unable to create directory %v",
 			filepath.Dir(scitokensCfg))
 	}
-
+	// We only open the file without chmod to daemon group as we will make
+	// a copy of this file and save it into xrootd run location
 	if file, err := os.OpenFile(scitokensCfg, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0640); err == nil {
 		file.Close()
 	} else if !errors.Is(err, os.ErrExist) {
 		return cfg, err
 	}
-
-	if err = os.Chown(scitokensCfg, -1, gid); err != nil {
-		return cfg, errors.Wrapf(err, "Unable to change ownership of scitokens config %v"+
-			" to desired daemon group %v", scitokensCfg, gid)
-	}
-
 	cfg, err = LoadScitokensConfig(scitokensCfg)
 	if err != nil {
 		return cfg, errors.Wrapf(err, "Failed to load scitokens configuration at %s", scitokensCfg)
 	}
 
 	return cfg, nil
+}
+
+// Writes out the server's scitokens.cfg configuration
+func EmitScitokensConfig(server server_utils.XRootDServer) error {
+	if originServer, ok := server.(*origin_ui.OriginServer); ok {
+		return WriteOriginScitokensConfig(originServer.GetAuthorizedPrefixes())
+	} else if cacheServer, ok := server.(*cache_ui.CacheServer); ok {
+		return WriteCacheScitokensConfig(cacheServer.GetNamespaceAds())
+	} else {
+		return errors.New("Internal error: server object is neither cache nor origin")
+	}
 }
 
 // Writes out the origin's scitokens.cfg configuration
@@ -389,7 +469,7 @@ func WriteOriginScitokensConfig(exportedPaths []string) error {
 		}
 	}
 
-	return EmitScitokensConfiguration(&cfg)
+	return writeScitokensConfiguration(config.OriginType, &cfg)
 }
 
 // Writes out the cache's scitokens.cfg configuration
@@ -413,7 +493,7 @@ func WriteCacheScitokensConfig(nsAds []director.NamespaceAd) error {
 		}
 	}
 
-	return EmitScitokensConfiguration(&cfg)
+	return writeScitokensConfiguration(config.CacheType, &cfg)
 }
 
 func EmitIssuerMetadata(exportPath string) error {

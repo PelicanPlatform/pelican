@@ -19,6 +19,7 @@
 package server_ui
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -32,7 +33,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pelicanplatform/pelican/config"
-	nsregistry "github.com/pelicanplatform/pelican/namespace_registry"
+	"github.com/pelicanplatform/pelican/registry"
+	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -49,19 +51,25 @@ type (
 )
 
 func TestRegistration(t *testing.T) {
-	issuerTempDir := t.TempDir()
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
 
 	viper.Reset()
+	tempConfigDir := t.TempDir()
+	viper.Set("ConfigDir", tempConfigDir)
+
 	config.InitConfig()
-	ikey := filepath.Join(issuerTempDir, "issuer.jwk")
-	viper.Set("IssuerKey", ikey)
-	viper.Set("Registry.DbLocation", filepath.Join(issuerTempDir, "test.sql"))
-	err := config.InitServer(config.OriginType)
+	viper.Set("Registry.DbLocation", filepath.Join(tempConfigDir, "test.sql"))
+	err := config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
 
-	err = nsregistry.InitializeDB()
+	err = registry.InitializeDB(ctx)
 	require.NoError(t, err)
-	defer nsregistry.ShutdownDB()
+	defer func() {
+		err := registry.ShutdownDB()
+		assert.NoError(t, err)
+	}()
 
 	gin.SetMode(gin.TestMode)
 	engine := gin.Default()
@@ -78,14 +86,14 @@ func TestRegistration(t *testing.T) {
 	require.NotEmpty(t, keyId)
 
 	//Configure registry
-	nsregistry.RegisterNamespaceRegistry(engine.Group("/"))
+	registry.RegisterRegistryAPI(engine.Group("/"))
 
 	//Create a test HTTP server that sends requests to gin
 	svr := httptest.NewServer(engine)
 	defer svr.CloseClientConnections()
 	defer svr.Close()
 
-	viper.Set("Federation.NamespaceUrl", svr.URL)
+	viper.Set("Federation.RegistryUrl", svr.URL)
 	viper.Set("Origin.NamespacePrefix", "/test123")
 
 	// Test registration succeeds
@@ -125,7 +133,7 @@ func TestRegistration(t *testing.T) {
 	assert.True(t, jwk.Equal(registryKey, key))
 
 	// Test the functionality of the keyIsRegistered function
-	keyStatus, err := keyIsRegistered(key, svr.URL+"/api/v1.0/registry/test123")
+	keyStatus, err := keyIsRegistered(key, svr.URL+"/api/v1.0/registry", "/test123")
 	assert.NoError(t, err)
 	require.Equal(t, keyStatus, keyMatch)
 
@@ -137,12 +145,12 @@ func TestRegistration(t *testing.T) {
 	keyAlt, err := privKeyAlt.PublicKey()
 	require.NoError(t, err)
 	assert.NoError(t, jwk.AssignKeyID(keyAlt))
-	keyStatus, err = keyIsRegistered(keyAlt, svr.URL+"/api/v1.0/registry/test123")
+	keyStatus, err = keyIsRegistered(keyAlt, svr.URL+"/api/v1.0/registry", "/test123")
 	assert.NoError(t, err)
 	assert.Equal(t, keyStatus, keyMismatch)
 
 	// Verify that no key is present for an alternate prefix
-	keyStatus, err = keyIsRegistered(key, svr.URL+"/test456")
+	keyStatus, err = keyIsRegistered(key, svr.URL, "test456")
 	assert.NoError(t, err)
 	assert.Equal(t, keyStatus, noKeyPresent)
 

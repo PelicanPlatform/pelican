@@ -53,6 +53,7 @@ func (server *OriginServer) CreateAdvertisement(name string, originUrl string, o
 
 	prefix := param.Origin_NamespacePrefix.GetString()
 
+	writeEnabled := param.Origin_WriteEnabled.GetBool()
 	// TODO: Need to figure out where to get some of these values
 	// 		 so that they aren't hardcoded...
 	nsAd := director.NamespaceAd{
@@ -64,11 +65,21 @@ func (server *OriginServer) CreateAdvertisement(name string, originUrl string, o
 		BasePath:      prefix,
 	}
 	ad = director.OriginAdvertise{
-		Name:       name,
-		URL:        originUrl,
-		WebURL:     originWebUrl,
-		Namespaces: []director.NamespaceAd{nsAd},
+		Name:         name,
+		URL:          originUrl,
+		WebURL:       originWebUrl,
+		Namespaces:   []director.NamespaceAd{nsAd},
+		WriteEnabled: writeEnabled,
 	}
 
 	return ad, nil
+}
+
+// Return a list of paths where the origin's issuer is authoritative.
+//
+// Used to calculate the base_paths in the scitokens.cfg, for eaxmple
+func (server *OriginServer) GetAuthorizedPrefixes() []string {
+	// For now, just a single path.  In the future, we will allow
+	// multiple.
+	return []string{param.Origin_NamespacePrefix.GetString()}
 }

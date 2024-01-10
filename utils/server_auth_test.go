@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -15,16 +14,11 @@ import (
 // MockAuthChecker is the mock implementation of AuthChecker.
 type MockAuthChecker struct {
 	FederationCheckFunc func(ctx *gin.Context, token string, expectedScopes []string, allScope bool) error
-	DirectorCheckFunc   func(ctx *gin.Context, token string, expectedScopes []string, allScope bool) error
 	IssuerCheckFunc     func(ctx *gin.Context, token string, expectedScopes []string, allScope bool) error
 }
 
 func (m *MockAuthChecker) FederationCheck(ctx *gin.Context, token string, expectedScopes []string, allScope bool) error {
 	return m.FederationCheckFunc(ctx, token, expectedScopes, allScope)
-}
-
-func (m *MockAuthChecker) DirectorCheck(ctx *gin.Context, token string, expectedScopes []string, allScope bool) error {
-	return m.DirectorCheckFunc(ctx, token, expectedScopes, allScope)
 }
 
 func (m *MockAuthChecker) IssuerCheck(ctx *gin.Context, token string, expectedScopes []string, allScope bool) error {
@@ -54,44 +48,6 @@ func createContextWithToken(cookieToken, headerToken, queryToken string) *gin.Co
 	return ctx
 }
 
-func TestScopeContains(t *testing.T) {
-	tests := []struct {
-		name           string
-		tokenScopes    []string
-		expectedScopes []string
-		all            bool
-		want           bool
-	}{
-		{"empty-scopes", []string{}, []string{}, false, false},
-		{"single-match", []string{"read"}, []string{"read"}, false, true},
-		{"no-match", []string{"read"}, []string{"write"}, false, false},
-		{"multiple-matches", []string{"read", "write"}, []string{"read", "write"}, false, true},
-		{"partial-match-all-false", []string{"read", "write"}, []string{"read"}, false, true},
-		{"partial-match-all-true", []string{"read", "write"}, []string{"read"}, true, false},
-		{"case-insensitivity", []string{"Read"}, []string{"read"}, false, true},
-		{"different-lengths-all-true", []string{"read", "write"}, []string{"read"}, true, false},
-		{"exact-match-all-true", []string{"read", "write"}, []string{"write", "read"}, true, true},
-		{"large-input-sets", largeInputSet(), largeInputSet(), false, true},
-		{"nil-inputs", nil, nil, false, false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := scopeContains(tt.tokenScopes, tt.expectedScopes, tt.all); got != tt.want {
-				t.Errorf("scopeContains() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func largeInputSet() []string {
-	var scopes []string
-	for i := 0; i < 1000; i++ {
-		scopes = append(scopes, "scope"+strconv.Itoa(i))
-	}
-	return scopes
-}
-
 func TestCheckAnyAuth(t *testing.T) {
 	// Use a mock instance of authChecker to simplify testing
 	originalAuthChecker := authChecker
@@ -102,14 +58,6 @@ func TestCheckAnyAuth(t *testing.T) {
 		FederationCheckFunc: func(ctx *gin.Context, token string, expectedScopes []string, allScope bool) error {
 			if token != "" {
 				ctx.Set("User", "Federation")
-				return nil
-			} else {
-				return errors.New("No token is present")
-			}
-		},
-		DirectorCheckFunc: func(ctx *gin.Context, token string, expectedScopes []string, allScope bool) error {
-			if token != "" {
-				ctx.Set("User", "Director")
 				return nil
 			} else {
 				return errors.New("No token is present")
@@ -246,19 +194,12 @@ func TestCheckAnyAuth(t *testing.T) {
 			name: "valid-token-with-multiple-issuer",
 			authOption: AuthOption{
 				Sources: []TokenSource{Cookie},
-				Issuers: []TokenIssuer{Federation, Director, Issuer},
+				Issuers: []TokenIssuer{Federation, Issuer},
 			},
 			setupMock: func() {
 				mock.FederationCheckFunc = func(ctx *gin.Context, token string, expectedScopes []string, allScope bool) error {
 					if token == "for-federation" {
 						ctx.Set("User", "Federation")
-						return nil
-					}
-					return errors.New(fmt.Sprint("Invalid Token: ", token))
-				}
-				mock.DirectorCheckFunc = func(ctx *gin.Context, token string, expectedScopes []string, allScope bool) error {
-					if token == "for-director" {
-						ctx.Set("User", "Director")
 						return nil
 					}
 					return errors.New(fmt.Sprint("Invalid Token: ", token))
@@ -281,19 +222,12 @@ func TestCheckAnyAuth(t *testing.T) {
 			name: "invalid-token-with-multiple-issuer",
 			authOption: AuthOption{
 				Sources: []TokenSource{Cookie},
-				Issuers: []TokenIssuer{Federation, Director, Issuer},
+				Issuers: []TokenIssuer{Federation, Issuer},
 			},
 			setupMock: func() {
 				mock.FederationCheckFunc = func(ctx *gin.Context, token string, expectedScopes []string, allScope bool) error {
 					if token == "for-federation" {
 						ctx.Set("User", "Federation")
-						return nil
-					}
-					return errors.New(fmt.Sprint("Invalid Token: ", token))
-				}
-				mock.DirectorCheckFunc = func(ctx *gin.Context, token string, expectedScopes []string, allScope bool) error {
-					if token == "for-director" {
-						ctx.Set("User", "Director")
 						return nil
 					}
 					return errors.New(fmt.Sprint("Invalid Token: ", token))

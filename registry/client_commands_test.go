@@ -16,9 +16,10 @@
  *
  ***************************************************************/
 
-package nsregistry
+package registry
 
 import (
+	"context"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -26,42 +27,48 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/spf13/viper"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func registryMockup(t *testing.T, testName string) *httptest.Server {
+func registryMockup(ctx context.Context, t *testing.T, testName string) *httptest.Server {
+
 	issuerTempDir := filepath.Join(t.TempDir(), testName)
 
 	ikey := filepath.Join(issuerTempDir, "issuer.jwk")
 	viper.Set("IssuerKey", ikey)
 	viper.Set("Registry.DbLocation", filepath.Join(issuerTempDir, "test.sql"))
-	err := config.InitServer(config.RegistryType)
+	err := config.InitServer(ctx, config.RegistryType)
 	require.NoError(t, err)
 
-	err = InitializeDB()
-	require.NoError(t, err)
+	setupMockRegistryDB(t)
 
 	gin.SetMode(gin.TestMode)
 	engine := gin.Default()
 
 	//Configure registry
-	RegisterNamespaceRegistry(engine.Group("/"))
+	RegisterRegistryAPI(engine.Group("/"))
 
 	//Set up a server to use for testing
 	svr := httptest.NewServer(engine)
-	viper.Set("Federation.NamespaceUrl", svr.URL)
+	viper.Set("Federation.RegistryUrl", svr.URL)
 	return svr
 }
 
 func TestServeNamespaceRegistry(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
 	viper.Reset()
 
-	svr := registryMockup(t, "serveregistry")
+	svr := registryMockup(ctx, t, "serveregistry")
 	defer func() {
-		ShutdownDB()
+		err := ShutdownDB()
+		assert.NoError(t, err)
 		svr.CloseClientConnections()
 		svr.Close()
 	}()
@@ -95,25 +102,6 @@ func TestServeNamespaceRegistry(t *testing.T) {
 		assert.Contains(t, stdoutCapture, `"prefix":"/foo/bar"`)
 	})
 
-	//Test functionality of namespace get
-	t.Run("Test namespace get", func(t *testing.T) {
-		//Set up a buffer to capture stdout
-		var stdoutCapture string
-		oldStdout := os.Stdout
-		r, w, _ := os.Pipe()
-		os.Stdout = w
-
-		err = NamespaceGet(svr.URL + "/api/v1.0/registry")
-		require.NoError(t, err)
-		w.Close()
-		os.Stdout = oldStdout
-
-		capturedOutput := make([]byte, 1024)
-		n, _ := r.Read(capturedOutput)
-		stdoutCapture = string(capturedOutput[:n])
-		assert.Contains(t, stdoutCapture, `"prefix":"/foo/bar"`)
-	})
-
 	t.Run("Test namespace delete", func(t *testing.T) {
 		//Test functionality of namespace delete
 		err = NamespaceDelete(svr.URL+"/api/v1.0/registry/foo/bar", "/foo/bar")
@@ -136,19 +124,24 @@ func TestServeNamespaceRegistry(t *testing.T) {
 }
 
 func TestRegistryKeyChainingOSDF(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
 	viper.Reset()
 	_ = config.SetPreferredPrefix("OSDF")
 	// On by default, but just to make things explicit
 	viper.Set("Registry.RequireKeyChaining", true)
 
-	registrySvr := registryMockup(t, "OSDFkeychaining")
+	registrySvr := registryMockup(ctx, t, "OSDFkeychaining")
 	topoSvr := topologyMockup(t, []string{"/topo/foo"})
 	viper.Set("Federation.TopologyNamespaceURL", topoSvr.URL)
 	err := PopulateTopology()
 	require.NoError(t, err)
 
 	defer func() {
-		ShutdownDB()
+		err := ShutdownDB()
+		assert.NoError(t, err)
 		registrySvr.CloseClientConnections()
 		registrySvr.Close()
 		topoSvr.CloseClientConnections()
@@ -212,13 +205,18 @@ func TestRegistryKeyChainingOSDF(t *testing.T) {
 }
 
 func TestRegistryKeyChaining(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
 	viper.Reset()
 	// On by default, but just to make things explicit
 	viper.Set("Registry.RequireKeyChaining", true)
 
-	registrySvr := registryMockup(t, "keychaining")
+	registrySvr := registryMockup(ctx, t, "keychaining")
 	defer func() {
-		ShutdownDB()
+		err := ShutdownDB()
+		assert.NoError(t, err)
 		registrySvr.CloseClientConnections()
 		registrySvr.Close()
 	}()

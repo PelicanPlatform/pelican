@@ -1,3 +1,5 @@
+//go:build !windows
+
 /***************************************************************
  *
  * Copyright (C) 2023, University of Nebraska-Lincoln
@@ -20,6 +22,11 @@ package client
 
 import (
 	"bytes"
+	"context"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -31,11 +38,21 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lestrrat-go/jwx/v2/jwa"
+	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/lestrrat-go/jwx/v2/jwt"
+	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/launchers"
 	"github.com/pelicanplatform/pelican/namespaces"
+	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 func TestMain(m *testing.M) {
@@ -366,47 +383,176 @@ func TestFailedUpload(t *testing.T) {
 	}
 }
 
-func TestFullUpload(t *testing.T) {
-	testFileContent := "test file content"
-	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func generateFileTestScitoken() (string, error) {
+	// Issuer is whichever server that initiates the test, so it's the server itself
+	issuerUrl := param.Origin_Url.GetString()
+	if issuerUrl == "" { // if both are empty, then error
+		return "", errors.New("Failed to create token: Invalid iss, Server_ExternalWebUrl is empty")
+	}
+	jti_bytes := make([]byte, 16)
+	if _, err := rand.Read(jti_bytes); err != nil {
+		return "", err
+	}
+	jti := base64.RawURLEncoding.EncodeToString(jti_bytes)
 
-		//t.Logf("%s", dump)
-		assert.Equal(t, "PUT", r.Method, "Not PUT Method")
-		_, err := w.Write([]byte(":)"))
-		assert.NoError(t, err)
-	}))
-	defer ts.Close()
-
-	// Create the temporary file to upload
-	tempFile, err := os.CreateTemp(t.TempDir(), "test")
-	assert.NoError(t, err, "Error creating temp file")
-	defer os.Remove(tempFile.Name())
-	_, err = tempFile.WriteString(testFileContent)
-	assert.NoError(t, err, "Error writing to temp file")
-	tempFile.Close()
-
-	// Create the namespace (only the write back host is read)
-	testURL, err := url.Parse(ts.URL)
-	assert.NoError(t, err, "Error parsing test URL")
-	testNamespace := namespaces.Namespace{
-		WriteBackHost: "https://" + testURL.Host,
+	tok, err := jwt.NewBuilder().
+		Claim("scope", "storage.read:/ storage.modify:/").
+		Claim("wlcg.ver", "1.0").
+		JwtID(jti).
+		Issuer(issuerUrl).
+		Audience([]string{"https://wlcg.cern.ch/jwt/v1/any"}).
+		Subject("origin").
+		Expiration(time.Now().Add(time.Minute)).
+		IssuedAt(time.Now()).
+		Build()
+	if err != nil {
+		return "", err
 	}
 
-	// Upload the file
-	uploadURL, err := url.Parse("stash:///test/stuff/blah.txt")
-	assert.NoError(t, err, "Error parsing upload URL")
-	// Set the upload client to trust the server
-	UploadClient = ts.Client()
-	uploaded, err := UploadFile(tempFile.Name(), uploadURL, "Bearer test", testNamespace)
-	assert.NoError(t, err, "Error uploading file")
-	assert.Equal(t, int64(len(testFileContent)), uploaded, "Uploaded file size does not match")
+	key, err := config.GetIssuerPrivateJWK()
+	if err != nil {
+		return "", errors.Wrap(err, "Failed to load server's issuer key")
+	}
 
-	// Upload an osdf file
-	uploadURL, err = url.Parse("osdf:///test/stuff/blah.txt")
-	assert.NoError(t, err, "Error parsing upload URL")
-	// Set the upload client to trust the server
-	UploadClient = ts.Client()
-	uploaded, err = UploadFile(tempFile.Name(), uploadURL, "Bearer test", testNamespace)
-	assert.NoError(t, err, "Error uploading file")
-	assert.Equal(t, int64(len(testFileContent)), uploaded, "Uploaded file size does not match")
+	if err := jwk.AssignKeyID(key); err != nil {
+		return "", errors.Wrap(err, "Failed to assign kid to the token")
+	}
+
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, key))
+	if err != nil {
+		return "", err
+	}
+
+	return string(signed), nil
+}
+
+func TestFullUpload(t *testing.T) {
+	// Setup our test federation
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
+	viper.Reset()
+
+	modules := config.ServerType(0)
+	modules.Set(config.OriginType)
+	modules.Set(config.DirectorType)
+	modules.Set(config.RegistryType)
+
+	// Create our own temp directory (for some reason t.TempDir() does not play well with xrootd)
+	tmpPathPattern := "XRootD-Test_Origin*"
+	tmpPath, err := os.MkdirTemp("", tmpPathPattern)
+	require.NoError(t, err)
+
+	// Need to set permissions or the xrootd process we spawn won't be able to write PID/UID files
+	permissions := os.FileMode(0755)
+	err = os.Chmod(tmpPath, permissions)
+	require.NoError(t, err)
+
+	viper.Set("ConfigDir", tmpPath)
+
+	// Increase the log level; otherwise, its difficult to debug failures
+	// viper.Set("Logging.Level", "Debug")
+	config.InitConfig()
+
+	originDir, err := os.MkdirTemp("", "Origin")
+	assert.NoError(t, err)
+
+	// Change the permissions of the temporary directory
+	permissions = os.FileMode(0777)
+	err = os.Chmod(originDir, permissions)
+	require.NoError(t, err)
+
+	viper.Set("Origin.ExportVolume", originDir+":/test")
+	viper.Set("Origin.Mode", "posix")
+	// Disable functionality we're not using (and is difficult to make work on Mac)
+	viper.Set("Origin.EnableCmsd", false)
+	viper.Set("Origin.EnableMacaroons", false)
+	viper.Set("Origin.EnableVoms", false)
+	viper.Set("Origin.WriteEnabled", true)
+	viper.Set("TLSSkipVerify", true)
+	viper.Set("Server.EnableUI", false)
+	viper.Set("Registry.DbLocation", filepath.Join(t.TempDir(), "ns-registry.sqlite"))
+
+	err = config.InitServer(ctx, modules)
+	require.NoError(t, err)
+
+	fedCancel, err := launchers.LaunchModules(ctx, modules)
+	defer fedCancel()
+	if err != nil {
+		log.Errorln("Failure in fedServeInternal:", err)
+		require.NoError(t, err)
+	}
+
+	desiredURL := param.Server_ExternalWebUrl.GetString() + "/.well-known/openid-configuration"
+	err = server_utils.WaitUntilWorking(ctx, "GET", desiredURL, "director", 200)
+	require.NoError(t, err)
+
+	httpc := http.Client{
+		Transport: config.GetTransport(),
+	}
+	resp, err := httpc.Get(desiredURL)
+	require.NoError(t, err)
+
+	assert.Equal(t, resp.StatusCode, http.StatusOK)
+
+	responseBody, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	expectedResponse := struct {
+		JwksUri string `json:"jwks_uri"`
+	}{}
+	err = json.Unmarshal(responseBody, &expectedResponse)
+	require.NoError(t, err)
+
+	assert.NotEmpty(t, expectedResponse.JwksUri)
+
+	t.Run("testFullUpload", func(t *testing.T) {
+		testFileContent := "test file content"
+
+		// Create the temporary file to upload
+		tempFile, err := os.CreateTemp(t.TempDir(), "test")
+		assert.NoError(t, err, "Error creating temp file")
+		defer os.Remove(tempFile.Name())
+		_, err = tempFile.WriteString(testFileContent)
+		assert.NoError(t, err, "Error writing to temp file")
+		tempFile.Close()
+
+		// Create a token file
+		token, err := generateFileTestScitoken()
+		assert.NoError(t, err)
+		tempToken, err := os.CreateTemp(t.TempDir(), "token")
+		assert.NoError(t, err, "Error creating temp token file")
+		defer os.Remove(tempToken.Name())
+		_, err = tempToken.WriteString(token)
+		assert.NoError(t, err, "Error writing to temp token file")
+		tempFile.Close()
+		ObjectClientOptions.Token = tempToken.Name()
+
+		// Upload the file
+		tempPath := tempFile.Name()
+		fileName := filepath.Base(tempPath)
+		uploadURL := "stash:///test/" + fileName
+
+		methods := []string{"http"}
+		uploaded, err := DoStashCPSingle(tempFile.Name(), uploadURL, methods, false)
+		assert.NoError(t, err, "Error uploading file")
+		assert.Equal(t, int64(len(testFileContent)), uploaded, "Uploaded file size does not match")
+
+		// Upload an osdf file
+		uploadURL = "osdf:///test/stuff/blah.txt"
+		assert.NoError(t, err, "Error parsing upload URL")
+		uploaded, err = DoStashCPSingle(tempFile.Name(), uploadURL, methods, false)
+		assert.NoError(t, err, "Error uploading file")
+		assert.Equal(t, int64(len(testFileContent)), uploaded, "Uploaded file size does not match")
+	})
+	t.Cleanup(func() {
+		ObjectClientOptions.Token = ""
+		os.RemoveAll(tmpPath)
+		os.RemoveAll(originDir)
+	})
+
+	cancel()
+	fedCancel()
+	assert.NoError(t, egrp.Wait())
+	viper.Reset()
 }

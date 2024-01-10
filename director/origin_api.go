@@ -23,7 +23,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
-	"path"
 	"strings"
 	"sync"
 	"time"
@@ -34,6 +33,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -41,10 +41,11 @@ import (
 
 type (
 	OriginAdvertise struct {
-		Name       string        `json:"name"`
-		URL        string        `json:"url"`               // This is the url for origin's XRootD service and file transfer
-		WebURL     string        `json:"web_url,omitempty"` // This is the url for origin's web engine and APIs
-		Namespaces []NamespaceAd `json:"namespaces"`
+		Name         string        `json:"name"`
+		URL          string        `json:"url"`               // This is the url for origin's XRootD service and file transfer
+		WebURL       string        `json:"web_url,omitempty"` // This is the url for origin's web engine and APIs
+		Namespaces   []NamespaceAd `json:"namespaces"`
+		WriteEnabled bool          `json:"writeenabled"`
 	}
 )
 
@@ -58,6 +59,8 @@ type NamespaceCache interface {
 var (
 	namespaceKeys      = ttlcache.New[string, NamespaceCache](ttlcache.WithTTL[string, NamespaceCache](15 * time.Minute))
 	namespaceKeysMutex = sync.RWMutex{}
+
+	adminApprovalErr error
 )
 
 func CreateAdvertiseToken(namespace string) (string, error) {
@@ -74,7 +77,7 @@ func CreateAdvertiseToken(namespace string) (string, error) {
 	}
 
 	tok, err := jwt.NewBuilder().
-		Claim("scope", "pelican.advertise").
+		Claim("scope", token_scopes.Pelican_Advertise.String()).
 		Issuer(issuerUrl).
 		Audience([]string{director}).
 		Subject("origin").
@@ -107,7 +110,7 @@ func CreateAdvertiseToken(namespace string) (string, error) {
 // Given a token and a location in the namespace to advertise in,
 // see if the entity is authorized to advertise an origin for the
 // namespace
-func VerifyAdvertiseToken(token, namespace string) (bool, error) {
+func VerifyAdvertiseToken(ctx context.Context, token, namespace string) (bool, error) {
 	issuerUrl, err := GetRegistryIssuerURL(namespace)
 	if err != nil {
 		return false, err
@@ -127,7 +130,6 @@ func VerifyAdvertiseToken(token, namespace string) (bool, error) {
 			}
 		}
 	}()
-	ctx := context.Background()
 	if ar == nil {
 		ar = jwk.NewCache(ctx)
 		client := &http.Client{Transport: config.GetTransport()}
@@ -148,6 +150,12 @@ func VerifyAdvertiseToken(token, namespace string) (bool, error) {
 			return false, errors.Wrap(err, "failed to marshal the public keyset into JWKS JSON")
 		}
 		log.Debugln("Constructed JWKS from fetching jwks:", string(jsonbuf))
+		// This seems never get reached, as registry returns 403 for pending approval namespace
+		// and there will be HTTP error in getting jwks; thus it will always be error
+		if jsonbuf == nil {
+			adminApprovalErr = errors.New(namespace + " has not been approved by an administrator.")
+			return false, adminApprovalErr
+		}
 	}
 
 	if err != nil {
@@ -171,7 +179,7 @@ func VerifyAdvertiseToken(token, namespace string) (bool, error) {
 	scopes := strings.Split(scope, " ")
 
 	for _, scope := range scopes {
-		if scope == "pelican.advertise" {
+		if scope == token_scopes.Pelican_Advertise.String() {
 			return true, nil
 		}
 	}
@@ -187,7 +195,7 @@ func CreateDirectorTestReportToken(originWebUrl string) (string, error) {
 	}
 
 	tok, err := jwt.NewBuilder().
-		Claim("scope", "pelican.directorTestReport").
+		Claim("scope", token_scopes.Pelican_DirectorTestReport.String()).
 		Issuer(directorURL).
 		Audience([]string{originWebUrl}).
 		Subject("director").
@@ -248,7 +256,7 @@ func VerifyDirectorTestReportToken(strToken string) (bool, error) {
 	scopes := strings.Split(scope, " ")
 
 	for _, scope := range scopes {
-		if scope == "pelican.directorTestReport" {
+		if scope == token_scopes.Pelican_DirectorTestReport.String() {
 			return true, nil
 		}
 	}
@@ -256,7 +264,7 @@ func VerifyDirectorTestReportToken(strToken string) (bool, error) {
 }
 
 func GetRegistryIssuerURL(prefix string) (string, error) {
-	namespace_url_string := param.Federation_NamespaceUrl.GetString()
+	namespace_url_string := param.Federation_RegistryUrl.GetString()
 	if namespace_url_string == "" {
 		return "", errors.New("Namespace URL is not set")
 	}
@@ -264,6 +272,9 @@ func GetRegistryIssuerURL(prefix string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	namespace_url.Path = path.Join(namespace_url.Path, "api", "v1.0", "registry", prefix, ".well-known", "issuer.jwks")
+	namespace_url.Path, err = url.JoinPath(namespace_url.Path, "api", "v1.0", "registry", prefix, ".well-known", "issuer.jwks")
+	if err != nil {
+		return "", err
+	}
 	return namespace_url.String(), nil
 }

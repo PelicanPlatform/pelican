@@ -20,23 +20,31 @@ package web_ui
 
 import (
 	"context"
+	"crypto/tls"
 	"embed"
 	"fmt"
 	"math/rand"
 	"mime"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/pelicanplatform/pelican/config"
+
 	"github.com/gin-gonic/gin"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	ginprometheus "github.com/zsais/go-gin-prometheus"
+	"go.uber.org/atomic"
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/term"
 )
 
@@ -52,13 +60,24 @@ func getConfigValues(ctx *gin.Context) {
 		ctx.JSON(401, gin.H{"error": "Authentication required to visit this API"})
 		return
 	}
-	config, err := param.GetUnmarshaledConfig()
+	rawConfig, err := param.UnmarshalConfig()
 	if err != nil {
-		ctx.JSON(500, gin.H{"error": "Failed to get the unmarshaled config"})
+		ctx.JSON(500, gin.H{"error": "Failed to get the unmarshaled rawConfig"})
+		return
+	}
+	configWithType := param.ConvertToConfigWithType(rawConfig)
+
+	ctx.JSON(200, configWithType)
+}
+
+func getEnabledServers(ctx *gin.Context) {
+	enabledServers := config.EnabledServers()
+	if len(enabledServers) == 0 {
+		ctx.JSON(500, gin.H{"error": "No enabled servers found"})
 		return
 	}
 
-	ctx.JSON(200, config)
+	ctx.JSON(200, enabledServers)
 }
 
 func configureWebResource(engine *gin.Engine) error {
@@ -70,7 +89,7 @@ func configureWebResource(engine *gin.Engine) error {
 		}
 
 		db := authDB.Load()
-		user, err := getUser(ctx)
+		user, err := GetUser(ctx)
 
 		// Redirect initialized users from initialization pages
 		if strings.HasPrefix(path, "/initialization") && strings.HasSuffix(path, "index.html") {
@@ -112,6 +131,12 @@ func configureWebResource(engine *gin.Engine) error {
 			}
 		}
 
+		// If just one server is enabled, redirect to that server
+		if len(config.EnabledServers()) == 1 && path == "/index.html" {
+			ctx.Redirect(http.StatusFound, "/view/"+config.EnabledServers()[0]+"/index.html")
+			return
+		}
+
 		filePath := "frontend/out" + path
 		file, _ := webAssets.ReadFile(filePath)
 		ctx.Data(
@@ -137,25 +162,21 @@ func configureWebResource(engine *gin.Engine) error {
 
 // Configure common endpoint available to all server web UI which are located at /api/v1.0/*
 func configureCommonEndpoints(engine *gin.Engine) error {
-	engine.GET("/api/v1.0/config", authHandler, getConfigValues)
+	engine.GET("/api/v1.0/config", AuthHandler, getConfigValues)
+	engine.GET("/api/v1.0/servers", getEnabledServers)
 
 	return nil
 }
 
 // Configure metrics related endpoints, including Prometheus and /health API
-func configureMetrics(engine *gin.Engine, isDirector bool) error {
+func configureMetrics(ctx context.Context, engine *gin.Engine) error {
 	// Add authorization to /metric endpoint
 	engine.Use(promMetricAuthHandler)
-
-	err := ConfigureEmbeddedPrometheus(engine, isDirector)
-	if err != nil {
-		return err
-	}
 
 	prometheusMonitor := ginprometheus.NewPrometheus("gin")
 	prometheusMonitor.Use(engine)
 
-	engine.GET("/api/v1.0/health", authHandler, func(ctx *gin.Context) {
+	engine.GET("/api/v1.0/health", AuthHandler, func(ctx *gin.Context) {
 		healthStatus := metrics.GetHealthStatus()
 		ctx.JSON(http.StatusOK, healthStatus)
 	})
@@ -226,19 +247,22 @@ func waitUntilLogin(ctx context.Context) error {
 // specific paths but just redirect root path to /view.
 //
 // You need to mount the static resources for UI in a separate function
-func ConfigureServerWebAPI(engine *gin.Engine, isDirector bool) error {
-	if err := configureAuthEndpoints(engine); err != nil {
-		return err
-	}
+func ConfigureServerWebAPI(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) error {
 	if err := configureCommonEndpoints(engine); err != nil {
 		return err
 	}
-	if err := configureWebResource(engine); err != nil {
+	if err := configureMetrics(ctx, engine); err != nil {
 		return err
 	}
-	if err := configureMetrics(engine, isDirector); err != nil {
-		return err
+	if param.Server_EnableUI.GetBool() {
+		if err := configureAuthEndpoints(ctx, engine, egrp); err != nil {
+			return err
+		}
+		if err := configureWebResource(engine); err != nil {
+			return err
+		}
 	}
+
 	// Redirect root to /view for web UI
 	engine.GET("/", func(c *gin.Context) {
 		c.Redirect(http.StatusFound, "/view/")
@@ -248,14 +272,15 @@ func ConfigureServerWebAPI(engine *gin.Engine, isDirector bool) error {
 
 // Setup the initial server web login by sending the one-time code to stdout
 // and record health status of the WebUI based on the success of the initialization
-func InitServerWebLogin() {
+func InitServerWebLogin(ctx context.Context) error {
 	metrics.SetComponentHealthStatus(metrics.Server_WebUI, metrics.StatusWarning, "Authentication not initialized")
 
-	if err := waitUntilLogin(context.Background()); err != nil {
+	if err := waitUntilLogin(ctx); err != nil {
 		log.Errorln("Failure when waiting for web UI to be initialized:", err)
-		return
+		return err
 	}
 	metrics.SetComponentHealthStatus(metrics.Server_WebUI, metrics.StatusOK, "")
+	return nil
 }
 
 func GetEngine() (*gin.Engine, error) {
@@ -279,15 +304,89 @@ func GetEngine() (*gin.Engine, error) {
 	return engine, nil
 }
 
-func RunEngine(engine *gin.Engine) {
+// Run the gin engine.
+//
+// Will use a background golang routine to periodically reload the certificate
+// utilized by the UI.
+func RunEngine(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) error {
+	addr := fmt.Sprintf("%v:%v", param.Server_WebHost.GetString(), param.Server_WebPort.GetInt())
+
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+
+	defer ln.Close()
+
+	return runEngineWithListener(ctx, ln, engine, egrp)
+}
+
+// Run the engine with a given listener.
+// This was split out from RunEngine to allow unit tests to provide a Unix domain socket'
+// as a listener.
+func runEngineWithListener(ctx context.Context, ln net.Listener, engine *gin.Engine, egrp *errgroup.Group) error {
 	certFile := param.Server_TLSCertificate.GetString()
 	keyFile := param.Server_TLSKey.GetString()
 
-	addr := fmt.Sprintf("%v:%v", param.Server_WebHost.GetString(), param.Server_WebPort.GetInt())
+	port := param.Server_WebPort.GetInt()
+	addr := fmt.Sprintf("%v:%v", param.Server_WebHost.GetString(), port)
 
-	log.Debugln("Starting web engine at address", addr)
-	err := engine.RunTLS(addr, certFile, keyFile)
+	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
 		panic(err)
 	}
+
+	var certPtr atomic.Pointer[tls.Certificate]
+	certPtr.Store(&cert)
+
+	server_utils.LaunchWatcherMaintenance(
+		ctx,
+		[]string{filepath.Dir(param.Server_TLSCertificate.GetString())},
+		"server TLS maintenance",
+		2*time.Minute,
+		func(notifyEvent bool) error {
+			cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+			if err == nil {
+				log.Debugln("Loaded new X509 key pair")
+				certPtr.Store(&cert)
+			} else if notifyEvent {
+				log.Debugln("Failed to load new X509 key pair after filesystem event (may succeed eventually):", err)
+				return nil
+			}
+			return err
+		},
+	)
+
+	getCert := func(_ *tls.ClientHelloInfo) (*tls.Certificate, error) {
+		return certPtr.Load(), nil
+	}
+
+	config := &tls.Config{
+		GetCertificate: getCert,
+	}
+	server := &http.Server{
+		Addr:      addr,
+		Handler:   engine.Handler(),
+		TLSConfig: config,
+	}
+	log.Debugln("Starting web engine at address", addr)
+
+	// Once the context has been canceled, shutdown the HTTPS server.  Give it
+	// 10 seconds to shutdown existing requests.
+	egrp.Go(func() error {
+		<-ctx.Done()
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		err = server.Shutdown(ctx)
+		if err != nil {
+			log.Panicln("Failed to shutdown server:", err)
+		}
+		return nil
+	})
+
+	if err := server.ServeTLS(ln, "", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+
+	return nil
 }

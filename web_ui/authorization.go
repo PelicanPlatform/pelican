@@ -15,6 +15,7 @@
  * limitations under the License.
  *
  ***************************************************************/
+
 package web_ui
 
 import (
@@ -27,6 +28,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
 	"github.com/prometheus/common/route"
@@ -39,7 +41,7 @@ func createPromMetricToken() (string, error) {
 	tokenExpireTime := param.Monitoring_TokenExpiresIn.GetDuration()
 
 	tok, err := jwt.NewBuilder().
-		Claim("scope", "monitoring.scrape").
+		Claim("scope", token_scopes.Monitoring_Scrape.String()).
 		Issuer(serverURL).
 		Audience([]string{serverURL}).
 		Subject(serverURL).
@@ -74,7 +76,7 @@ func promMetricAuthHandler(ctx *gin.Context) {
 		// 1.director scraper 2.server (self) scraper 3.authenticated web user (via cookie)
 		authOption := utils.AuthOption{
 			Sources: []utils.TokenSource{utils.Header, utils.Cookie},
-			Issuers: []utils.TokenIssuer{utils.Director, utils.Issuer},
+			Issuers: []utils.TokenIssuer{utils.Federation, utils.Issuer},
 			Scopes:  []string{"monitoring.scrape"}}
 
 		valid := utils.CheckAnyAuth(ctx, authOption)

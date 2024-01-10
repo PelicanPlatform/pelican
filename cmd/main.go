@@ -39,9 +39,9 @@ func handleCLI(args []string) error {
 	// Being case-insensitive
 	execName = strings.ToLower(execName)
 
-	if execName == "stash_plugin" || execName == "osdf_plugin" || execName == "pelican_xfer_plugin" {
+	if strings.HasPrefix(execName, "stash_plugin") || strings.HasPrefix(execName, "osdf_plugin") || strings.HasPrefix(execName, "pelican_xfer_plugin") {
 		stashPluginMain(args[1:])
-	} else if execName == "stashcp" {
+	} else if strings.HasPrefix(execName, "stashcp") {
 		err := copyCmd.Execute()
 		if err != nil {
 			return err
@@ -60,7 +60,10 @@ func handleCLI(args []string) error {
 			fmt.Println("Built By:", builtBy)
 			return nil
 		}
-		Execute()
+		err := Execute()
+		if err != nil {
+			os.Exit(1)
+		}
 	}
 	return nil
 }

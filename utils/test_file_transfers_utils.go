@@ -23,6 +23,7 @@ package utils
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"io"
@@ -42,10 +43,10 @@ type (
 	TestType         string
 	TestFileTransfer interface {
 		generateFileTestScitoken(audienceUrl string) (string, error)
-		UploadTestfile(baseUrl string, testType TestType) (string, error)
-		DownloadTestfile(downloadUrl string) error
-		DeleteTestfile(fileUrl string) error
-		RunTests(baseUrl string, testType TestType) (bool, error)
+		UploadTestfile(ctx context.Context, baseUrl string, testType TestType) (string, error)
+		DownloadTestfile(ctx context.Context, downloadUrl string) error
+		DeleteTestfile(ctx context.Context, fileUrl string) error
+		RunTests(ctx context.Context, baseUrl string, testType TestType) (bool, error)
 	}
 	TestFileTransferImpl struct {
 		audienceUrl string
@@ -118,7 +119,7 @@ func (t TestFileTransferImpl) generateFileTestScitoken() (string, error) {
 
 // Private function to upload a test file to the `baseUrl` of an exported xrootd file direcotry
 // the test file content is based on the `testType` attribute
-func (t TestFileTransferImpl) uploadTestfile(baseUrl string) (string, error) {
+func (t TestFileTransferImpl) uploadTestfile(ctx context.Context, baseUrl string) (string, error) {
 	tkn, err := t.generateFileTestScitoken()
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to create a token for test file transfer")
@@ -130,7 +131,7 @@ func (t TestFileTransferImpl) uploadTestfile(baseUrl string) (string, error) {
 	}
 	uploadURL.Path = "/pelican/monitoring/" + t.testType.String() + "-" + time.Now().Format(time.RFC3339) + ".txt"
 
-	req, err := http.NewRequest("PUT", uploadURL.String(), bytes.NewBuffer([]byte(t.testBody)))
+	req, err := http.NewRequestWithContext(ctx, "PUT", uploadURL.String(), bytes.NewBuffer([]byte(t.testBody)))
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to create POST request for monitoring upload")
 	}
@@ -154,13 +155,13 @@ func (t TestFileTransferImpl) uploadTestfile(baseUrl string) (string, error) {
 
 // Private function to download a file from downloadUrl and make sure it matches the test file
 // content based on the `testBody` attribute
-func (t TestFileTransferImpl) downloadTestfile(downloadUrl string) error {
+func (t TestFileTransferImpl) downloadTestfile(ctx context.Context, downloadUrl string) error {
 	tkn, err := t.generateFileTestScitoken()
 	if err != nil {
 		return errors.Wrap(err, "Failed to create a token for test file transfer download")
 	}
 
-	req, err := http.NewRequest("GET", downloadUrl, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", downloadUrl, nil)
 	if err != nil {
 		return errors.Wrap(err, "Failed to create GET request for test file transfer download")
 	}
@@ -190,13 +191,13 @@ func (t TestFileTransferImpl) downloadTestfile(downloadUrl string) error {
 }
 
 // Private function to delete a test file from `fileUrl`
-func (t TestFileTransferImpl) deleteTestfile(fileUrl string) error {
+func (t TestFileTransferImpl) deleteTestfile(ctx context.Context, fileUrl string) error {
 	tkn, err := t.generateFileTestScitoken()
 	if err != nil {
 		return errors.Wrap(err, "Failed to create a token for the test file transfer deletion")
 	}
 
-	req, err := http.NewRequest("DELETE", fileUrl, nil)
+	req, err := http.NewRequestWithContext(ctx, "DELETE", fileUrl, nil)
 	if err != nil {
 		return errors.Wrap(err, "Failed to create DELETE request for test file transfer deletion")
 	}
@@ -227,7 +228,7 @@ func (t TestFileTransferImpl) deleteTestfile(fileUrl string) error {
 // WLCG rules for issuer metadata discovery and public key access
 //
 // Read more: https://github.com/WLCG-AuthZ-WG/common-jwt-profile/blob/master/profile.md#token-verification
-func (t TestFileTransferImpl) RunTests(baseUrl, issuerUrl string, testType TestType) (bool, error) {
+func (t TestFileTransferImpl) RunTests(ctx context.Context, baseUrl, issuerUrl string, testType TestType) (bool, error) {
 	t.audienceUrl = baseUrl
 	t.issuerUrl = issuerUrl
 	t.testType = testType
@@ -239,15 +240,15 @@ func (t TestFileTransferImpl) RunTests(baseUrl, issuerUrl string, testType TestT
 		return false, errors.New("Unsupported testType: " + testType.String())
 	}
 
-	downloadUrl, err := t.uploadTestfile(baseUrl)
+	downloadUrl, err := t.uploadTestfile(ctx, baseUrl)
 	if err != nil {
 		return false, errors.Wrap(err, "Test file transfer failed during upload")
 	}
-	err = t.downloadTestfile(downloadUrl)
+	err = t.downloadTestfile(ctx, downloadUrl)
 	if err != nil {
 		return false, errors.Wrap(err, "Test file transfer failed during download")
 	}
-	err = t.deleteTestfile(downloadUrl)
+	err = t.deleteTestfile(ctx, downloadUrl)
 	if err != nil {
 		return false, errors.Wrap(err, "Test file transfer failed during delete")
 	}

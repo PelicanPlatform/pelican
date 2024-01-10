@@ -28,8 +28,11 @@ import (
 	"time"
 
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/sirupsen/logrus"
+	"github.com/sirupsen/logrus/hooks/test"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 var server *httptest.Server
@@ -152,4 +155,80 @@ func TestInitConfig(t *testing.T) {
 	}
 	InitConfig()
 	assert.Equal(t, "", param.Federation_DiscoveryUrl.GetString())
+}
+
+func TestDeprecateLogMessage(t *testing.T) {
+	t.Run("expect-deprecated-message-if-namespace-url-is-set", func(t *testing.T) {
+		hook := test.NewGlobal()
+		viper.Reset()
+		// The default value is set to Error, but this is a warning message
+		viper.Set("Logging.Level", "Warning")
+		viper.Set("Federation.NamespaceUrl", "https://dont-use.com")
+		InitConfig()
+
+		require.Equal(t, 1, len(hook.Entries))
+		assert.Equal(t, logrus.WarnLevel, hook.LastEntry().Level)
+		assert.Equal(t, "Federation.NamespaceUrl is deprecated and will be removed in future release. Please migrate to use Federation.RegistryUrl instead", hook.LastEntry().Message)
+		// We expect the default value of Federation.RegistryUrl is set to Federation.NamespaceUrl
+		// if Federation.NamespaceUrl is not empty for backward compatibility
+		assert.Equal(t, "https://dont-use.com", viper.GetString("Federation.RegistryUrl"))
+		hook.Reset()
+	})
+
+	t.Run("no-deprecated-message-if-namespace-url-unset", func(t *testing.T) {
+		hook := test.NewGlobal()
+		viper.Reset()
+		viper.Set("Logging.Level", "Warning")
+		viper.Set("Federation.RegistryUrl", "https://dont-use.com")
+		InitConfig()
+
+		assert.Equal(t, 0, len(hook.Entries))
+		assert.Equal(t, "https://dont-use.com", viper.GetString("Federation.RegistryUrl"))
+		assert.Equal(t, "", viper.GetString("Federation.NamespaceUrl"))
+		hook.Reset()
+	})
+}
+
+func TestEnabledServers(t *testing.T) {
+	allServerTypes := []ServerType{OriginType, CacheType, DirectorType, RegistryType}
+	t.Run("no-value-set", func(t *testing.T) {
+		enabledServers = 0
+		for _, server := range allServerTypes {
+			assert.False(t, IsServerEnabled(server))
+		}
+	})
+
+	t.Run("enable-one-server", func(t *testing.T) {
+		for _, server := range allServerTypes {
+			enabledServers = 0
+			// We didn't call setEnabledServer as it will only set once per process
+			enabledServers.SetList([]ServerType{server})
+			assert.True(t, IsServerEnabled(server))
+		}
+	})
+
+	t.Run("enable-multiple-servers", func(t *testing.T) {
+		enabledServers = 0
+		enabledServers.SetList([]ServerType{OriginType, CacheType})
+		assert.True(t, IsServerEnabled(OriginType))
+		assert.True(t, IsServerEnabled(CacheType))
+	})
+
+	t.Run("setEnabledServer-only-set-once", func(t *testing.T) {
+		enabledServers = 0
+		sType := OriginType
+		sType.Set(CacheType)
+		setEnabledServer(sType)
+		assert.True(t, IsServerEnabled(OriginType))
+		assert.True(t, IsServerEnabled(CacheType))
+
+		sType.Clear()
+		sType.Set(DirectorType)
+		sType.Set(RegistryType)
+		setEnabledServer(sType)
+		assert.True(t, IsServerEnabled(OriginType))
+		assert.True(t, IsServerEnabled(CacheType))
+		assert.False(t, IsServerEnabled(DirectorType))
+		assert.False(t, IsServerEnabled(RegistryType))
+	})
 }

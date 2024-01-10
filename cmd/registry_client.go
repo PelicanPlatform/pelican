@@ -16,6 +16,15 @@
  *
  ***************************************************************/
 
+// The registry_client contains commands in Pelican CLI to register a namespace.
+//
+// You can access it through `./pelican namespace <command>`.
+//
+// Note that you need to have your registry server running either locally,
+// or by setting Federation.RegistryUrl to the Url of your remote Pelican registry server
+//
+// Example: `./pelican namespace register --prefix /test`
+
 package main
 
 import (
@@ -24,8 +33,8 @@ import (
 
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pelicanplatform/pelican/config"
-	nsregistry "github.com/pelicanplatform/pelican/namespace_registry"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/registry"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -39,14 +48,14 @@ var prefix string
 var pubkeyPath string
 
 func getNamespaceEndpoint() (string, error) {
-	namespaceEndpoint := param.Federation_NamespaceUrl.GetString()
+	namespaceEndpoint := param.Federation_RegistryUrl.GetString()
 	if namespaceEndpoint == "" {
 		return "", errors.New("No namespace registry specified; either give the federation name (-f) or specify the namespace API endpoint directly (e.g., --namespace-url=https://namespace.osg-htc.org/namespaces)")
 	}
 
 	namespaceEndpointURL, err := url.Parse(namespaceEndpoint)
 	if err != nil {
-		return "", errors.Wrap(err, "Unable to parse namespace url")
+		return "", errors.Wrap(err, "Unable to parse namespace registry url")
 	}
 
 	// Return the string, as opposed to a pointer to the URL object
@@ -62,7 +71,7 @@ func registerANamespace(cmd *cobra.Command, args []string) {
 
 	namespaceEndpoint, err := getNamespaceEndpoint()
 	if err != nil {
-		log.Errorln("Failed to get NamespaceURL from config: ", err)
+		log.Errorln("Failed to get RegistryUrl from config: ", err)
 		os.Exit(1)
 	}
 
@@ -71,7 +80,6 @@ func registerANamespace(cmd *cobra.Command, args []string) {
 	if err != nil {
 		log.Errorf("Failed to construction registration endpoint URL: %v", err)
 	}
-	// registrationEndpoint := url.JoinPath(namespaceEndpoint, "/api/v1.0/registry/register").String()
 	if prefix == "" {
 		log.Error("Error: prefix is required")
 		os.Exit(1)
@@ -107,13 +115,13 @@ func registerANamespace(cmd *cobra.Command, args []string) {
 	}
 
 	if withIdentity {
-		err := nsregistry.NamespaceRegisterWithIdentity(privateKey, registrationEndpointURL, prefix)
+		err := registry.NamespaceRegisterWithIdentity(privateKey, registrationEndpointURL, prefix)
 		if err != nil {
 			log.Errorf("Failed to register prefix %s with identity: %v", prefix, err)
 			os.Exit(1)
 		}
 	} else {
-		err := nsregistry.NamespaceRegister(privateKey, registrationEndpointURL, "", prefix)
+		err := registry.NamespaceRegister(privateKey, registrationEndpointURL, "", prefix)
 		if err != nil {
 			log.Errorf("Failed to register prefix %s: %v", prefix, err)
 			os.Exit(1)
@@ -130,7 +138,7 @@ func deleteANamespace(cmd *cobra.Command, args []string) {
 
 	namespaceEndpoint, err := getNamespaceEndpoint()
 	if err != nil {
-		log.Errorln("Failed to get NamespaceURL from config: ", err)
+		log.Errorln("Failed to get RegistryUrl from config: ", err)
 		os.Exit(1)
 	}
 
@@ -139,7 +147,7 @@ func deleteANamespace(cmd *cobra.Command, args []string) {
 		log.Errorf("Failed to construction deletion endpoint URL: %v", err)
 	}
 
-	err = nsregistry.NamespaceDelete(deletionEndpointURL, prefix)
+	err = registry.NamespaceDelete(deletionEndpointURL, prefix)
 	if err != nil {
 		log.Errorf("Failed to delete prefix %s: %v", prefix, err)
 		os.Exit(1)
@@ -155,7 +163,7 @@ func listAllNamespaces(cmd *cobra.Command, args []string) {
 
 	namespaceEndpoint, err := getNamespaceEndpoint()
 	if err != nil {
-		log.Errorln("Failed to get NamespaceURL from config: ", err)
+		log.Errorln("Failed to get RegistryUrl from config: ", err)
 		os.Exit(1)
 	}
 
@@ -164,7 +172,7 @@ func listAllNamespaces(cmd *cobra.Command, args []string) {
 		log.Errorf("Failed to construction list endpoint URL: %v", err)
 	}
 
-	err = nsregistry.NamespaceList(listEndpoint)
+	err = registry.NamespaceList(listEndpoint)
 	if err != nil {
 		log.Errorf("Failed to list namespace information: %v", err)
 		os.Exit(1)
@@ -183,12 +191,12 @@ func listAllNamespaces(cmd *cobra.Command, args []string) {
 // 	if jwks {
 // 		namespaceEndpoint, err := getNamespaceEndpoint()
 // 		if err != nil {
-// 			log.Errorln("Failed to get NamespaceURL from config:", err)
+// 			log.Errorln("Failed to get RegistryUrl from config:", err)
 // 			os.Exit(1)
 // 		}
 
 // 		endpoint := url.JoinPath(namespaceEndpoint, prefix, "issuer.jwks")
-// 		err = nsregistry.NamespaceGet(endpoint)
+// 		err = registry.NamespaceGet(endpoint)
 // 		if err != nil {
 // 			log.Errorf("Failed to get jwks info for prefix %s: %v", prefix, err)
 // 			os.Exit(1)
@@ -237,9 +245,9 @@ func init() {
 	deleteCmd.Flags().StringVar(&prefix, "prefix", "", "prefix for delete namespace")
 
 	namespaceCmd.PersistentFlags().String("namespace-url", "", "Endpoint for the namespace registry")
-	// Don't override Federation.NamespaceURL if the flag value is empty
+	// Don't override Federation.RegistryUrl if the flag value is empty
 	if namespaceCmd.PersistentFlags().Lookup("namespace-url").Value.String() != "" {
-		if err := viper.BindPFlag("Federation.NamespaceURL", namespaceCmd.PersistentFlags().Lookup("namespace-url")); err != nil {
+		if err := viper.BindPFlag("Federation.RegistryUrl", namespaceCmd.PersistentFlags().Lookup("namespace-url")); err != nil {
 			panic(err)
 		}
 	}

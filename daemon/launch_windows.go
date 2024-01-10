@@ -25,9 +25,10 @@ import (
 	"io"
 
 	"github.com/pkg/errors"
+	"golang.org/x/sync/errgroup"
 )
 
-func LaunchDaemons(launchers []Launcher) (err error) {
+func LaunchDaemons(ctx context.Context, launchers []Launcher, egrp *errgroup.Group) (err error) {
 	return errors.New("launching daemons is not supported on Windows")
 }
 

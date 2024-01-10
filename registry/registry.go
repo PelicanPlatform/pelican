@@ -16,7 +16,15 @@
  *
  ***************************************************************/
 
-package nsregistry
+// Package registry handles namespace registration in Pelican ecosystem.
+//
+//   - It handles the logic to spin up a "registry" server for namespace management,
+//     including a web UI for interactive namespace registration, approval, and browsing.
+//   - It provides a CLI tool `./pelican namespace <command> <args>` to list, register, and delete a namespace
+//
+// To register a namespace, first spin up registry server by `./pelican registry serve -p <your-port-number>`, and then use either
+// the CLI tool or go to registry web UI at `https://localhost:<your-port-number>/view/`, and follow instructions for next steps.
+package registry
 
 import (
 	"context"
@@ -30,23 +38,23 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"path/filepath"
 	"strings"
 	"sync"
 
 	"github.com/gin-gonic/gin"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/oauth2"
+	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+
 	// use this sqlite driver instead of the one from
 	// github.com/mattn/go-sqlite3, because this one
 	// doesn't require compilation with CGO_ENABLED
 	_ "modernc.org/sqlite"
-
-	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/oauth2"
-	"github.com/pelicanplatform/pelican/param"
 )
 
 var OIDC struct {
@@ -76,9 +84,19 @@ type TokenResponse struct {
 	Error       string `json:"error"`
 }
 
-/*
-Various auxiliary functions used for client-server security handshakes
-*/
+type checkNamespaceExistsReq struct {
+	Prefix string `json:"prefix"`
+	PubKey string `json:"pubkey"`
+}
+
+type checkNamespaceExistsRes struct {
+	PrefixExists bool   `json:"prefix_exists"`
+	KeyMatch     bool   `json:"key_match"`
+	Message      string `json:"message"`
+	Error        string `json:"error"`
+}
+
+// Various auxiliary functions used for client-server security handshakes
 type registrationData struct {
 	ClientNonce     string `json:"client_nonce"`
 	ClientPayload   string `json:"client_payload"`
@@ -102,7 +120,7 @@ func matchKeys(incomingKey jwk.Key, registeredNamespaces []string) (bool, error)
 	// permitting the action (assuming their keys haven't been stolen!)
 	foundMatch := false
 	for _, ns := range registeredNamespaces {
-		keyset, err := dbGetPrefixJwks(ns)
+		keyset, err := getNamespaceJwksByPrefix(ns, false)
 		if err != nil {
 			return false, errors.Wrapf(err, "Cannot get keyset for %s from the database", ns)
 		}
@@ -110,7 +128,7 @@ func matchKeys(incomingKey jwk.Key, registeredNamespaces []string) (bool, error)
 		// A super inelegant way to compare keys, but for whatever reason the keyset.Index(key) method
 		// doesn't seem to actually recognize when a key is in the keyset, even if that key decodes to
 		// the exact same JSON as a key in the set...
-		for it := (*keyset).Keys(context.Background()); it.Next(context.Background()); {
+		for it := (keyset).Keys(context.Background()); it.Next(context.Background()); {
 			pair := it.Pair()
 			registeredKey := pair.Value.(jwk.Key)
 			registeredKeyBuf, err := json.Marshal(registeredKey)
@@ -216,31 +234,10 @@ func keySignChallengeInit(ctx *gin.Context, data *registrationData) error {
 }
 
 func keySignChallengeCommit(ctx *gin.Context, data *registrationData, action string) error {
-	// Parse the client's jwks as a set here
-	clientJwks, err := jwk.Parse(data.Pubkey)
+	// Validate the client's jwks as a set here
+	key, err := validateJwks(string(data.Pubkey))
 	if err != nil {
-		return errors.Wrap(err, "Couldn't parse the pubkey from the client")
-	}
-
-	if log.IsLevelEnabled(log.DebugLevel) {
-		// Let's check that we can convert to JSON and get the right thing...
-		jsonbuf, err := json.Marshal(clientJwks)
-		if err != nil {
-			return errors.Wrap(err, "failed to marshal the client's keyset into JSON")
-		}
-		log.Debugln("Client JWKS as seen by the registry server:", string(jsonbuf))
-	}
-
-	/*
-	 * TODO: This section makes the assumption that the incoming jwks only contains a single
-	 *       key, a property that is enforced by the client at the origin. Eventually we need
-	 *       to support the addition of other keys in the jwks stored for the origin. There is
-	 *       a similar TODO listed in client_commands.go, as the choices made there mirror the
-	 *       choices made here.
-	 */
-	key, exists := clientJwks.Key(0)
-	if !exists {
-		return errors.New("There was no key at index 0 in the client's JWKS. Something is wrong")
+		return err
 	}
 
 	var rawkey interface{} // This is the raw key, like *rsa.PrivateKey or *ecdsa.PrivateKey
@@ -294,57 +291,7 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData, action str
 				return nil
 			}
 
-			if param.Registry_RequireKeyChaining.GetBool() {
-				superspaces, subspaces, inTopo, err := namespaceSupSubChecks(data.Prefix)
-				if err != nil {
-					log.Errorf("Failed to check if namespace suffixes or prefixes another registered namespace: %v", err)
-					return errors.Wrap(err, "Server encountered an error checking if namespace already exists")
-				}
-
-				// if not in OSDF mode, this will be false
-				if inTopo {
-					_ = ctx.AbortWithError(403, errors.New("Cannot register a super or subspace of a namespace already registered in topology"))
-					return errors.New("Cannot register a super or subspace of a namespace already registered in topology")
-				}
-				// If we make the assumption that namespace prefixes are heirarchical, eg that the owner of /foo should own
-				// everything under /foo (/foo/bar, /foo/baz, etc), then it makes sense to check for superspaces first. If any
-				// superspace is found, they logically "own" the incoming namespace.
-				if len(superspaces) > 0 {
-					// If this is the case, we want to make sure that at least one of the superspaces has the
-					// same registration key as the incoming. This guarantees the owner of the superspace is
-					// permitting the action (assuming their keys haven't been stolen!)
-					matched, err := matchKeys(key, superspaces)
-					if err != nil {
-						ctx.JSON(500, gin.H{"error": "Server encountered an error checking for key matches in the database"})
-						return errors.Errorf("%v: Unable to check if the incoming key for %s matched any public keys for %s", err, data.Prefix, subspaces)
-					}
-					if !matched {
-						_ = ctx.AbortWithError(403, errors.New("Cannot register a namespace that is suffixed or prefixed by an already-registered namespace unless the incoming public key matches a registered key"))
-						return errors.New("Cannot register a namespace that is suffixed or prefixed by an already-registered namespace unless the incoming public key matches a registered key")
-					}
-
-				} else if len(subspaces) > 0 {
-					// If there are no superspaces, we can check the subspaces.
-
-					// TODO: Eventually we might want to check only the highest level subspaces and use those keys for matching. For example,
-					// if /foo/bar and /foo/bar/baz are registered with two keysets such that the complement of their intersections is not null,
-					// it may be the case that the only key we match against belongs to /foo/bar/baz. If we go ahead with registration at that
-					// point, we're essentially saying /foo/bar/baz, the logical subspace of /foo/bar, has authorized a superspace for both.
-					// More interestingly, if /foo/bar and /foo/baz are both registered, should they both be consulted before adding /foo?
-
-					// For now, we'll just check for any key match.
-					matched, err := matchKeys(key, subspaces)
-					if err != nil {
-						ctx.JSON(500, gin.H{"error": "Server encountered an error checking for key matches in the database"})
-						return errors.Errorf("%v: Unable to check if the incoming key for %s matched any public keys for %s", err, data.Prefix, subspaces)
-					}
-					if !matched {
-						_ = ctx.AbortWithError(403, errors.New("Cannot register a namespace that is suffixed or prefixed by an already-registered namespace unless the incoming public key matches a registered key"))
-						return errors.New("Cannot register a namespace that is suffixed or prefixed by an already-registered namespace unless the incoming public key matches a registered key")
-					}
-				}
-			}
-			reqPrefix, err := validateNSPath(data.Prefix)
+			reqPrefix, err := validatePrefix(data.Prefix)
 			if err != nil {
 				err = errors.Wrapf(err, "Requested namespace %s failed validation", reqPrefix)
 				log.Errorln(err)
@@ -352,7 +299,19 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData, action str
 			}
 			data.Prefix = reqPrefix
 
-			err = dbAddNamespace(ctx, data)
+			valErr, sysErr := validateKeyChaining(reqPrefix, key)
+			if valErr != nil {
+				log.Errorln(err)
+				ctx.JSON(http.StatusForbidden, gin.H{"error": valErr})
+				return valErr
+			}
+			if sysErr != nil {
+				log.Errorln(err)
+				ctx.JSON(http.StatusInternalServerError, gin.H{"error": sysErr})
+				return sysErr
+			}
+
+			err = addNamespaceHandler(ctx, data)
 			if err != nil {
 				ctx.JSON(500, gin.H{"error": "The server encountered an error while attempting to add the prefix to its database"})
 				return errors.Wrapf(err, "Failed while trying to add to database")
@@ -367,45 +326,7 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData, action str
 	return nil
 }
 
-func validateNSPath(nspath string) (string, error) {
-	if len(nspath) == 0 {
-		return "", errors.New("Path prefix may not be empty")
-	}
-	if nspath[0] != '/' {
-		return "", errors.New("Path prefix must be absolute - relative paths are not allowed")
-	}
-	components := strings.Split(nspath, "/")[1:]
-	if len(components) == 0 {
-		return "", errors.New("Cannot register the prefix '/' for an origin")
-	} else if components[0] == "api" {
-		return "", errors.New("Cannot register a prefix starting with '/api'")
-	} else if components[0] == "view" {
-		return "", errors.New("Cannot register a prefix starting with '/view'")
-	} else if components[0] == "pelican" {
-		return "", errors.New("Cannot register a prefix starting with '/pelican'")
-	}
-	result := ""
-	for _, component := range components {
-		if len(component) == 0 {
-			continue
-		} else if component == "." {
-			return "", errors.New("Path component cannot be '.'")
-		} else if component == ".." {
-			return "", errors.New("Path component cannot be '..'")
-		} else if component[0] == '.' {
-			return "", errors.New("Path component cannot begin with a '.'")
-		}
-		result += "/" + component
-	}
-	if result == "/" || len(result) == 0 {
-		return "", errors.New("Cannot register the prefix '/' for an origin")
-	}
-	return result, nil
-}
-
-/*
-Handler functions called upon by the gin router
-*/
+// Handler functions called upon by the gin router
 func cliRegisterNamespace(ctx *gin.Context) {
 
 	var reqData registrationData
@@ -428,7 +349,7 @@ func cliRegisterNamespace(ctx *gin.Context) {
 			return
 		}
 
-		resp, err := client.PostForm(OIDC.UserInfoEndpoint, payload)
+		resp, err := client.PostForm(oidcConfig.Endpoint.UserInfoURL, payload)
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error making request to user info endpoint"})
 			log.Errorf("Failed to execute post form to user info endpoint %s: %v", oidcConfig.Endpoint.UserInfoURL, err)
@@ -482,7 +403,7 @@ func cliRegisterNamespace(ctx *gin.Context) {
 		payload.Set("client_secret", oidcConfig.ClientSecret)
 		payload.Set("scope", strings.Join(oidcConfig.Scopes, " "))
 
-		response, err := client.PostForm(OIDC.DeviceAuthEndpoint, payload)
+		response, err := client.PostForm(oidcConfig.Endpoint.DeviceAuthURL, payload)
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered error requesting device code"})
 			log.Errorf("Failed to execute post form to device auth endpoint %s: %v", oidcConfig.Endpoint.DeviceAuthURL, err)
@@ -524,7 +445,7 @@ func cliRegisterNamespace(ctx *gin.Context) {
 		payload.Set("device_code", reqData.DeviceCode)
 		payload.Set("grant_type", "urn:ietf:params:oauth:grant-type:device_code")
 
-		response, err := client.PostForm(OIDC.TokenEndpoint, payload)
+		response, err := client.PostForm(oidcConfig.Endpoint.TokenURL, payload)
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error while making request to token endpoint"})
 			log.Errorf("Failed to execute post form to token endpoint %s: %v", oidcConfig.Endpoint.TokenURL, err)
@@ -577,7 +498,7 @@ func cliRegisterNamespace(ctx *gin.Context) {
 	}
 }
 
-func dbAddNamespace(ctx *gin.Context, data *registrationData) error {
+func addNamespaceHandler(ctx *gin.Context, data *registrationData) error {
 	var ns Namespace
 	ns.Prefix = data.Prefix
 
@@ -590,6 +511,9 @@ func dbAddNamespace(ctx *gin.Context, data *registrationData) error {
 		ns.Identity = data.Identity
 	}
 
+	// Overwrite status to Pending to filter malicious request
+	ns.AdminMetadata.Status = Pending
+
 	err = addNamespace(&ns)
 	if err != nil {
 		return errors.Wrapf(err, "Failed to add prefix %s", ns.Prefix)
@@ -599,7 +523,7 @@ func dbAddNamespace(ctx *gin.Context, data *registrationData) error {
 	return nil
 }
 
-func dbDeleteNamespace(ctx *gin.Context) {
+func deleteNamespaceHandler(ctx *gin.Context) {
 	/*
 		A weird feature of gin is that wildcards always
 		add a preceding /. Since the URL parsing that happens
@@ -609,6 +533,10 @@ func dbDeleteNamespace(ctx *gin.Context) {
 	*/
 	prefix := ctx.Param("wildcard")
 	log.Debug("Attempting to delete namespace prefix ", prefix)
+	if prefix == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "prefix is required to delete"})
+		return
+	}
 
 	// Check if prefix exists before trying to delete it
 	exists, err := namespaceExists(prefix)
@@ -631,7 +559,7 @@ func dbDeleteNamespace(ctx *gin.Context) {
 	delTokenStr := strings.TrimPrefix(authHeader, "Bearer ")
 
 	// Have the token, now we need to load the JWKS for the prefix
-	originJwks, err := dbGetPrefixJwks(prefix)
+	originJwks, err := getNamespaceJwksByPrefix(prefix, false)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error loading the prefix's stored jwks"})
 		log.Errorf("Failed to get prefix's stored jwks: %v", err)
@@ -639,7 +567,7 @@ func dbDeleteNamespace(ctx *gin.Context) {
 	}
 
 	// Use the JWKS to verify the token -- verification means signature integrity
-	parsed, err := jwt.Parse([]byte(delTokenStr), jwt.WithKeySet(*originJwks))
+	parsed, err := jwt.Parse([]byte(delTokenStr), jwt.WithKeySet(originJwks))
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server could not verify/parse the provided deletion token"})
 		log.Errorf("Failed to parse the token: %v", err)
@@ -663,7 +591,7 @@ func dbDeleteNamespace(ctx *gin.Context) {
 		}
 
 		for _, scope := range strings.Split(scope, " ") {
-			if scope == "pelican.namespace_delete" {
+			if scope == token_scopes.Pelican_NamespaceDelete.String() {
 				return nil
 			}
 		}
@@ -701,7 +629,7 @@ func cliListNamespaces(c *gin.Context) {
 }
 */
 
-func dbGetAllNamespaces(ctx *gin.Context) {
+func getAllNamespacesHandler(ctx *gin.Context) {
 	nss, err := getAllNamespaces()
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error trying to list all namespaces"})
@@ -711,7 +639,11 @@ func dbGetAllNamespaces(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, nss)
 }
 
-func metadataHandler(ctx *gin.Context) {
+// Gin requires no wildcard match and exact match fall under the same
+// parent path, so we need to handle all routing under "/" route ourselves.
+//
+// See https://github.com/PelicanPlatform/pelican/issues/566
+func wildcardHandler(ctx *gin.Context) {
 	// A weird feature of gin is that wildcards always
 	// add a preceding /. Since the prefix / was trimmed
 	// out during the url parsing, we can just leave the
@@ -719,57 +651,121 @@ func metadataHandler(ctx *gin.Context) {
 	path := ctx.Param("wildcard")
 
 	// Get the prefix's JWKS
-	if filepath.Base(path) == "issuer.jwks" {
-		// do something
+	// Avoid using filepath.Base for path matching, as filepath format depends on OS
+	// while HTTP path is always slash (/)
+	if strings.HasSuffix(path, "/.well-known/issuer.jwks") {
 		prefix := strings.TrimSuffix(path, "/.well-known/issuer.jwks")
-		jwks, err := dbGetPrefixJwks(prefix)
+		found, err := namespaceExistsByPrefix(prefix)
 		if err != nil {
+			log.Error("Error checking if prefix ", prefix, " exists: ", err)
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error trying to check if the namespace exists"})
+			return
+		}
+		if !found {
+			ctx.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("namespace prefix '%s', was not found", prefix)})
+			return
+		}
+
+		jwks, err := getNamespaceJwksByPrefix(prefix, true)
+		if err != nil {
+			if err == serverCredsErr {
+				// Use 403 to distinguish between server error
+				ctx.JSON(http.StatusForbidden, gin.H{"error": "cache has not been approved by federation administrator"})
+				return
+			}
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error trying to get jwks for prefix"})
 			log.Errorf("Failed to load jwks for prefix %s: %v", prefix, err)
 			return
 		}
 		ctx.JSON(http.StatusOK, jwks)
+		return
 	}
 
-	// // Get OpenID config info
-	// match, err := filepath.Match("*/\\.well-known/openid-configuration", path)
-	// if err != nil {
-	// 	log.Errorf("Failed to check incoming path for match: %v", err)
-	// 	return
-	// }
-	// if match {
-	// 	// do something
-	// } else {
-	// 	log.Errorln("Unknown request")
-	// 	return
-	// }
-
+	// No match found, return 404
+	ctx.String(http.StatusNotFound, "404 Not Found")
 }
 
-// func getJwks(prefix string) (*jwk.Set, error) {
-// 	jwks, err := dbGetPrefixJwks(prefix)
-// 	if err != nil {
-// 		return nil, errors.Wrapf(err, "Could not load jwks for prefix %s", prefix)
-// 	}
-// 	return jwks, nil
-// }
+// Check if a namespace prefix exists and its public key matches the registry record
+func checkNamespaceExistsHandler(ctx *gin.Context) {
+	req := checkNamespaceExistsReq{}
+	if err := ctx.ShouldBind(&req); err != nil {
+		log.Debug("Failed to parse request body for namespace exits check: ", err)
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse request body"})
+		return
+	}
+	if req.Prefix == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "prefix is required"})
+		return
+	}
+	if req.PubKey == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "pubkey is required"})
+		return
+	}
+	jwksReq, err := jwk.ParseString(req.PubKey)
+	if err != nil {
+		log.Debug("pubkey is not a valid JWK string:", req.PubKey, err)
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("pubkey is not a valid JWK string: %s", req.PubKey)})
+		return
+	}
+	if jwksReq.Len() != 1 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("pubkey is a jwks with multiple or zero key: %s", req.PubKey)})
+		return
+	}
+	jwkReq, exists := jwksReq.Key(0)
+	if !exists {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("the first key from the pubkey does not exist: %s", req.PubKey)})
+		return
+	}
 
-/*
- Commenting out until we're ready to use it.  -BB
-func getOpenIDConfiguration(c *gin.Context) {
-	prefix := c.Param("prefix")
-	c.JSON(http.StatusOK, gin.H{"status": "getOpenIDConfiguration is not implemented", "prefix": prefix})
+	found, err := namespaceExistsByPrefix(req.Prefix)
+	if err != nil {
+		log.Debugln("Failed to check if namespace exists by prefix", err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check if the namespace exists"})
+		return
+	}
+	if !found {
+		// We return 200 even with prefix not found so that 404 can be used to check if the route exists (OSDF)
+		// and fallback to OSDF way of checking if we do get 404
+		res := checkNamespaceExistsRes{PrefixExists: false, Message: "Prefix was not found in database"}
+		ctx.JSON(http.StatusOK, res)
+		return
+	}
+	// Just to check if the key matches. We don't care about approval status
+	jwksDb, err := getNamespaceJwksByPrefix(req.Prefix, false)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	registryKey, isPresent := jwksDb.LookupKeyID(jwkReq.KeyID())
+	if !isPresent {
+		res := checkNamespaceExistsRes{PrefixExists: true, KeyMatch: false, Message: "Given JWK is not present in the JWKS from database"}
+		ctx.JSON(http.StatusOK, res)
+		return
+	} else if jwk.Equal(registryKey, jwkReq) {
+		res := checkNamespaceExistsRes{PrefixExists: true, KeyMatch: true}
+		ctx.JSON(http.StatusOK, res)
+		return
+	} else {
+		res := checkNamespaceExistsRes{PrefixExists: true, KeyMatch: false, Message: "Given JWK does not equal to the JWK from database"}
+		ctx.JSON(http.StatusOK, res)
+		return
+	}
 }
-*/
 
-func RegisterNamespaceRegistry(router *gin.RouterGroup) {
-	registry := router.Group("/api/v1.0/registry")
+func RegisterRegistryAPI(router *gin.RouterGroup) {
+	registryAPI := router.Group("/api/v1.0/registry")
+
+	// DO NOT add any other GET route with path starts with "/" to registryAPI
+	// It will cause duplicated route error. Use wildcardHandler to handle such
+	// routing if needed.
 	{
-		registry.POST("", cliRegisterNamespace)
-		registry.GET("", dbGetAllNamespaces)
-		// Will handle getting jwks, openid config, and listing namespaces
-		registry.GET("/*wildcard", metadataHandler)
+		registryAPI.POST("", cliRegisterNamespace)
+		registryAPI.GET("", getAllNamespacesHandler)
 
-		registry.DELETE("/*wildcard", dbDeleteNamespace)
+		// Handle everything under "/" route with GET method
+		registryAPI.GET("/*wildcard", wildcardHandler)
+		registryAPI.POST("/checkNamespaceExists", checkNamespaceExistsHandler)
+		registryAPI.DELETE("/*wildcard", deleteNamespaceHandler)
 	}
 }

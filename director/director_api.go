@@ -21,7 +21,6 @@ package director
 import (
 	"context"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
@@ -29,8 +28,10 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
 )
 
 // List all namespaces from origins registered at the director
@@ -78,7 +79,7 @@ func CreateDirectorSDToken() (string, error) {
 	tokenExpireTime := param.Monitoring_TokenExpiresIn.GetDuration()
 
 	tok, err := jwt.NewBuilder().
-		Claim("scope", "pelican.directorSD").
+		Claim("scope", token_scopes.Pelican_DirectorServiceDiscovery.String()).
 		Issuer(directorURL).
 		Audience([]string{directorURL}).
 		Subject("director").
@@ -140,7 +141,7 @@ func VerifyDirectorSDToken(strToken string) (bool, error) {
 	scopes := strings.Split(scope, " ")
 
 	for _, scope := range scopes {
-		if scope == "pelican.directorSD" {
+		if scope == token_scopes.Pelican_DirectorServiceDiscovery.String() {
 			return true, nil
 		}
 	}
@@ -148,7 +149,7 @@ func VerifyDirectorSDToken(strToken string) (bool, error) {
 }
 
 // Create a token for director's Prometheus scraper to access discovered
-// origins /metrics endpoint. This function is intended to be called on
+// origins and caches `/metrics` endpoint. This function is intended to be called on
 // a director server
 func CreateDirectorScrapeToken() (string, error) {
 	// We assume this function is only called on a director server,
@@ -156,19 +157,9 @@ func CreateDirectorScrapeToken() (string, error) {
 	directorURL := param.Server_ExternalWebUrl.GetString()
 	tokenExpireTime := param.Monitoring_TokenExpiresIn.GetDuration()
 
-	ads := ListServerAds([]ServerType{OriginType, CacheType})
-	aud := make([]string, 0)
-	for _, ad := range ads {
-		if ad.WebURL.String() != "" {
-			aud = append(aud, ad.WebURL.String())
-		}
-	}
-
 	tok, err := jwt.NewBuilder().
-		Claim("scope", "monitoring.scrape").
-		Issuer(directorURL).
-		// The audience of this token is all origins/caches that have WebURL set in their serverAds
-		Audience(aud).
+		Claim("scope", token_scopes.Monitoring_Scrape.String()).
+		Issuer(directorURL). // Exclude audience from token to prevent http header overflow
 		Subject("director").
 		Expiration(time.Now().Add(tokenExpireTime)).
 		Build()
@@ -193,7 +184,7 @@ func CreateDirectorScrapeToken() (string, error) {
 //
 // The `ctx` is the context for listening to server shutdown event in order to cleanup internal cache eviction
 // goroutine and `wg` is the wait group to notify when the clean up goroutine finishes
-func ConfigTTLCache(ctx context.Context, wg *sync.WaitGroup) {
+func ConfigTTLCache(ctx context.Context, egrp *errgroup.Group) {
 	// Start automatic expired item deletion
 	go serverAds.Start()
 	go namespaceKeys.Start()
@@ -211,11 +202,13 @@ func ConfigTTLCache(ctx context.Context, wg *sync.WaitGroup) {
 	})
 
 	// Put stop logic in a separate goroutine so that parent function is not blocking
-	go func() {
-		defer wg.Done()
+	egrp.Go(func() error {
 		<-ctx.Done()
-		log.Info("Gracefully stoppping TTL cache eviction...")
+		log.Info("Gracefully stopping TTL cache eviction...")
+		serverAds.DeleteAll()
 		serverAds.Stop()
+		namespaceKeys.DeleteAll()
 		namespaceKeys.Stop()
-	}()
+		return nil
+	})
 }

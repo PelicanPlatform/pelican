@@ -1,6 +1,7 @@
-package nsregistry
+package registry
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -13,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -65,12 +67,13 @@ func GenerateMockJWKS() (string, error) {
 }
 
 func TestListNamespaces(t *testing.T) {
+	_, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
 	// Initialize the mock database
-	err := setupMockNamespaceDB()
-	if err != nil {
-		t.Fatalf("Failed to set up mock namespace DB: %v", err)
-	}
-	defer teardownMockNamespaceDB()
+	setupMockRegistryDB(t)
+	defer teardownMockNamespaceDB(t)
 
 	router := gin.Default()
 
@@ -81,6 +84,7 @@ func TestListNamespaces(t *testing.T) {
 		serverType   string
 		expectedCode int
 		emptyDB      bool
+		notApproved  bool
 		expectedData []Namespace
 	}{
 		{
@@ -109,6 +113,13 @@ func TestListNamespaces(t *testing.T) {
 			expectedData: mockNssWithMixed,
 		},
 		{
+			description:  "unauthed-not-approved-without-type-returns-empty",
+			serverType:   "",
+			expectedCode: http.StatusOK,
+			expectedData: []Namespace{},
+			notApproved:  true,
+		},
+		{
 			description:  "invalid-request-parameters",
 			serverType:   "random_type", // some invalid query string
 			expectedCode: http.StatusBadRequest,
@@ -119,16 +130,20 @@ func TestListNamespaces(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.description, func(t *testing.T) {
 			if !tc.emptyDB {
-				err := insertMockDBData(mockNssWithMixed)
-				if err != nil {
-					t.Fatalf("Failed to set up mock data: %v", err)
+				if tc.notApproved {
+					err := insertMockDBData(mockNssWithMixedNotApproved)
+					if err != nil {
+						t.Fatalf("Failed to set up mock data: %v", err)
+					}
+				} else {
+					err := insertMockDBData(mockNssWithMixed)
+					if err != nil {
+						t.Fatalf("Failed to set up mock data: %v", err)
+					}
 				}
 			}
 			defer func() {
-				err := resetNamespaceDB()
-				if err != nil {
-					t.Fatalf("Failed to reset mock namespace DB: %v", err)
-				}
+				resetNamespaceDB(t)
 			}()
 
 			// Create a request to the endpoint
@@ -158,16 +173,17 @@ func TestListNamespaces(t *testing.T) {
 }
 
 func TestGetNamespaceJWKS(t *testing.T) {
+	_, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
 	mockPublicKey, err := GenerateMockJWKS()
 	if err != nil {
 		t.Fatalf("Failed to set up mock public key: %v", err)
 	}
 	// Initialize the mock database
-	err = setupMockNamespaceDB()
-	if err != nil {
-		t.Fatalf("Failed to set up mock namespace DB: %v", err)
-	}
-	defer teardownMockNamespaceDB()
+	setupMockRegistryDB(t)
+	defer teardownMockNamespaceDB(t)
 
 	router := gin.Default()
 
@@ -229,12 +245,7 @@ func TestGetNamespaceJWKS(t *testing.T) {
 				}
 
 			}
-			defer func() {
-				err := resetNamespaceDB()
-				if err != nil {
-					t.Fatalf("Failed to reset mock namespace DB: %v", err)
-				}
-			}()
+			defer resetNamespaceDB(t)
 
 			// Create a request to the endpoint
 			w := httptest.NewRecorder()
@@ -250,4 +261,9 @@ func TestGetNamespaceJWKS(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPopulateRegistrationFields(t *testing.T) {
+	result := populateRegistrationFields("", Namespace{})
+	assert.NotEqual(t, 0, len(result))
 }

@@ -498,17 +498,46 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 	// For write back, it will be the destination
 	// For read it will be the source.
 
+	OSDFDirectorUrl := param.Federation_DirectorUrl.GetString()
+	useOSDFDirector := viper.IsSet("Federation.DirectorURL")
+
 	if destScheme == "stash" || destScheme == "osdf" || destScheme == "pelican" {
 		log.Debugln("Detected writeback")
-		ns, err := namespaces.MatchNamespace(dest_url.Path)
-		if err != nil {
-			log.Errorln("Failed to get namespace information:", err)
-			AddError(err)
-			return 0, err
+		if !strings.HasPrefix(destination, "/") {
+			destination = strings.TrimPrefix(destination, destScheme+"://")
 		}
-		_, err = doWriteBack(source_url.Path, dest_url, ns, recursive)
+		var ns namespaces.Namespace
+		// If we have a director set, go through that for namespace info, otherwise use topology
+		if useOSDFDirector {
+			directorOriginsUrl, err := url.Parse(OSDFDirectorUrl)
+			if err != nil {
+				return 0, err
+			}
+			directorOriginsUrl.Path, err = url.JoinPath("api", "v1.0", "director", "origin")
+			if err != nil {
+				return 0, err
+			}
+			dirResp, err := QueryDirector(destination, directorOriginsUrl.String())
+			if err != nil {
+				log.Errorln("Error while querying the Director:", err)
+				AddError(err)
+				return 0, err
+			}
+			ns, err = CreateNsFromDirectorResp(dirResp)
+			if err != nil {
+				AddError(err)
+				return 0, err
+			}
+		} else {
+			ns, err = namespaces.MatchNamespace(dest_url.Path)
+			if err != nil {
+				AddError(err)
+				return 0, err
+			}
+		}
+		uploadedBytes, err := doWriteBack(source_url.Path, dest_url, ns, recursive)
 		AddError(err)
-		return 0, err
+		return uploadedBytes, err
 	}
 
 	if dest_url.Scheme == "file" {
@@ -523,10 +552,8 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 		sourceFile = "/" + sourceFile
 	}
 
-	OSDFDirectorUrl := param.Federation_DirectorUrl.GetString()
-	useOSDFDirector := viper.IsSet("Federation.DirectorURL")
-
 	var ns namespaces.Namespace
+	// If we have a director set, go through that for namespace info, otherwise use topology
 	if useOSDFDirector {
 		dirResp, err := QueryDirector(sourceFile, OSDFDirectorUrl)
 		if err != nil {

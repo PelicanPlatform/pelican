@@ -32,6 +32,7 @@ import (
 	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
 )
 
 type (
@@ -43,7 +44,7 @@ type (
 )
 
 // Report the health status of test file transfer to origin
-func reportStatusToOrigin(originWebUrl string, status string, message string) error {
+func reportStatusToOrigin(ctx context.Context, originWebUrl string, status string, message string) error {
 	tkn, err := CreateDirectorTestReportToken(originWebUrl)
 	if err != nil {
 		return errors.Wrap(err, "Failed to create a token for the diretor test upload")
@@ -74,7 +75,8 @@ func reportStatusToOrigin(originWebUrl string, status string, message string) er
 
 	reqBody := bytes.NewBuffer(jsonData)
 
-	req, err := http.NewRequest("POST", reportUrl.String(), reqBody)
+	log.Debugln("Director is uploading origin test results to", reportUrl.String())
+	req, err := http.NewRequestWithContext(ctx, "POST", reportUrl.String(), reqBody)
 	if err != nil {
 		return errors.Wrap(err, "Failed to create POST request for reporting director test")
 	}
@@ -104,36 +106,44 @@ func reportStatusToOrigin(originWebUrl string, status string, message string) er
 
 // Run a periodic test file transfer against an origin to ensure
 // it's talking to the director
-func PeriodicDirectorTest(ctx context.Context, originAd ServerAd) {
+func LaunchPeriodicDirectorTest(ctx context.Context, originAd ServerAd) {
 	originName := originAd.Name
 	originUrl := originAd.URL.String()
 	originWebUrl := originAd.WebURL.String()
 
 	log.Debug(fmt.Sprintf("Starting Director test for origin %s at %s", originName, originUrl))
 	ticker := time.NewTicker(15 * time.Second)
-	defer ticker.Stop()
 
-	for {
-		select {
-		case <-ctx.Done():
-			log.Debug(fmt.Sprintf("End director test cycle for origin: %s at %s", originName, originUrl))
-			return
-		case <-ticker.C:
-			log.Debug(fmt.Sprintf("Starting a new Director test cycle for origin: %s at %s", originName, originUrl))
-			fileTests := utils.TestFileTransferImpl{}
-			ok, err := fileTests.RunTests(originUrl, "", utils.DirectorFileTest)
-			if ok && err == nil {
-				log.Debugln("Director file transfer test cycle succeeded at", time.Now().Format(time.UnixDate), " for origin: ", originUrl)
-				if err := reportStatusToOrigin(originWebUrl, "ok", "Director test cycle succeeded at "+time.Now().Format(time.RFC3339)); err != nil {
-					log.Warningln("Failed to report director test result to origin:", err)
-				}
-			} else {
-				log.Warningln("Director file transfer test cycle failed for origin: ", originUrl, " ", err)
-				if err := reportStatusToOrigin(originWebUrl, "error", "Director file transfer test cycle failed for origin: "+originUrl+" "+err.Error()); err != nil {
-					log.Warningln("Failed to report director test result to origin: ", err)
-				}
-			}
-
-		}
+	egrp, ok := ctx.Value(config.EgrpKey).(*errgroup.Group)
+	if !ok {
+		egrp = &errgroup.Group{}
 	}
+
+	egrp.Go(func() error {
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				log.Debug(fmt.Sprintf("End director test cycle for origin: %s at %s", originName, originUrl))
+				return nil
+			case <-ticker.C:
+				log.Debug(fmt.Sprintf("Starting a new Director test cycle for origin: %s at %s", originName, originUrl))
+				fileTests := utils.TestFileTransferImpl{}
+				ok, err := fileTests.RunTests(ctx, originUrl, "", utils.DirectorFileTest)
+				if ok && err == nil {
+					log.Debugln("Director file transfer test cycle succeeded at", time.Now().Format(time.UnixDate), " for origin: ", originUrl)
+					if err := reportStatusToOrigin(ctx, originWebUrl, "ok", "Director test cycle succeeded at "+time.Now().Format(time.RFC3339)); err != nil {
+						log.Warningln("Failed to report director test result to origin:", err)
+					}
+				} else {
+					log.Warningln("Director file transfer test cycle failed for origin: ", originUrl, " ", err)
+					if err := reportStatusToOrigin(ctx, originWebUrl, "error", "Director file transfer test cycle failed for origin: "+originUrl+" "+err.Error()); err != nil {
+						log.Warningln("Failed to report director test result to origin: ", err)
+					}
+				}
+
+			}
+		}
+	})
 }

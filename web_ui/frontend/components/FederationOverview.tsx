@@ -39,11 +39,11 @@ const FederationOverview = () => {
             const responseData = await response.json() as Config
 
             setConfig({
-                JwkUrl: (responseData?.Federation as Config)?.NamespaceUrl as undefined | string,
-                NamespaceUrl: (responseData?.Federation as Config)?.NamespaceUrl as undefined | string,
-                DirectorUrl: (responseData?.Federation as Config)?.DirectorUrl as undefined | string,
-                TopologyNamespaceUrl: (responseData?.Federation as Config)?.TopologyNamespaceUrl as undefined | string,
-                DiscoveryUrl: (responseData?.Federation as Config)?.DiscoveryUrl as undefined | string,
+                JwkUrl: (responseData?.Federation as Config)?.NamespaceUrl?.Value as undefined | string,
+                NamespaceUrl: (responseData?.Federation as Config)?.NamespaceUrl?.Value as undefined | string,
+                DirectorUrl: (responseData?.Federation as Config)?.DirectorUrl?.Value as undefined | string,
+                TopologyNamespaceUrl: (responseData?.Federation as Config)?.TopologyNamespaceUrl?.Value as undefined | string,
+                DiscoveryUrl: (responseData?.Federation as Config)?.DiscoveryUrl?.Value as undefined | string,
             })
         } else {
             console.error("Failed to fetch config for Federation Overview, response status: " + response.status)
@@ -57,6 +57,8 @@ const FederationOverview = () => {
     if(config === undefined) {
         return
     }
+
+    console.log(config)
 
     return (
 

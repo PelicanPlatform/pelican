@@ -16,7 +16,7 @@
  *
  ***************************************************************/
 
-package nsregistry
+package registry
 
 import (
 	"bufio"
@@ -35,6 +35,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
+	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/utils"
 )
 
@@ -189,6 +190,11 @@ func NamespaceRegister(privateKey jwk.Key, namespaceRegistryEndpoint string, acc
 			return errors.Wrapf(err, "Failed to make request: %v", respData.Error)
 		}
 		fmt.Println(respData.Message)
+	} else {
+		if err != nil {
+			return errors.Wrapf(err, "Failed to make request: %s", resp)
+		}
+		return errors.Wrapf(unmarshalErr, "Failed to unmarshall request response: %v", respData.Error)
 	}
 
 	return nil
@@ -239,7 +245,7 @@ func NamespaceDelete(endpoint string, prefix string) error {
 	now := time.Now()
 	tok, err := jwt.NewBuilder().
 		Issuer(issuerURL).
-		Claim("scope", "pelican.namespace_delete").
+		Claim("scope", token_scopes.Pelican_NamespaceDelete.String()).
 		IssuedAt(now).
 		Expiration(now.Add(1 * time.Minute)).
 		NotBefore(now).

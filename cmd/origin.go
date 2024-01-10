@@ -19,10 +19,10 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -33,7 +33,7 @@ var (
 		Use:   "origin",
 		Short: "Operate a Pelican origin service",
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			err := initOrigin()
+			err := initOrigin(cmd.Context())
 			return err
 		},
 	}
@@ -98,12 +98,10 @@ func configOrigin( /*cmd*/ *cobra.Command /*args*/, []string) {
 	os.Exit(1)
 }
 
-func initOrigin() error {
-	err := config.InitServer(config.OriginType)
-	cobra.CheckErr(err)
+func initOrigin(ctx context.Context) error {
 	metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusCritical, "xrootd has not been started")
 	metrics.SetComponentHealthStatus(metrics.OriginCache_CMSD, metrics.StatusCritical, "cmsd has not been started")
-	return err
+	return nil
 }
 
 func init() {
@@ -119,6 +117,12 @@ func init() {
 	// The -v flag is used when an origin is served in POSIX mode
 	originServeCmd.Flags().StringP("volume", "v", "", "Setting the volume to /SRC:/DEST will export the contents of /SRC as /DEST in the Pelican federation")
 	if err := viper.BindPFlag("Origin.ExportVolume", originServeCmd.Flags().Lookup("volume")); err != nil {
+		panic(err)
+	}
+
+	// The -w flag is used if we want the origin to be writeable.
+	originServeCmd.Flags().BoolP("writeable", "", true, "Allow/disable writting to the origin")
+	if err := viper.BindPFlag("Origin.WriteEnabled", originServeCmd.Flags().Lookup("writeable")); err != nil {
 		panic(err)
 	}
 

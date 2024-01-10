@@ -19,19 +19,14 @@
 package main
 
 import (
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/spf13/cobra"
 )
 
 var (
-	namespaceRegistryCmd = &cobra.Command{
-		Use: "registry",
-		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			err := initRegistry()
-			return err
-		},
-		Short: "Interact with a Pelican namespace registry service",
-		Long: `Interact with a Pelican namespace registry service:
+	registryCmd = &cobra.Command{
+		Use:   "registry",
+		Short: "Interact with a Pelican registry service",
+		Long: `Interact with a Pelican registry service:
 
 		The namespace registry lies at the core of Pelican's security model
 		by serving as the central point for clients to fetch the public keys
@@ -49,22 +44,15 @@ var (
 
 	registryServeCmd = &cobra.Command{
 		Use:          "serve",
-		Short:        "serve the namespace registry",
-		RunE:         serveNamespaceRegistry,
+		Short:        "serve the registry",
+		RunE:         serveRegistry,
 		SilenceUsage: true,
 	}
 )
 
-func initRegistry() error {
-	err := config.InitServer(config.RegistryType)
-	cobra.CheckErr(err)
-
-	return err
-}
-
 func init() {
 	// Tie the registryServe command to the root CLI command
-	namespaceRegistryCmd.AddCommand(registryServeCmd)
+	registryCmd.AddCommand(registryServeCmd)
 	// Set up flags for the command
 	registryServeCmd.Flags().AddFlag(portFlag)
 }

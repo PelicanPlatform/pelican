@@ -19,6 +19,7 @@
 package config
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	_ "embed"
@@ -29,20 +30,20 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/signal"
 	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
+	"github.com/go-playground/validator/v10"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"golang.org/x/sync/errgroup"
 )
 
 // Structs holding the OAuth2 state (and any other OSDF config needed)
@@ -76,13 +77,15 @@ type (
 		JwksUri                       string `json:"jwks_uri"`
 	}
 
-	ServerType int
-
 	TokenOperation int
 
 	TokenGenerationOpts struct {
 		Operation TokenOperation
 	}
+
+	ServerType int // ServerType is a bit mask indicating which Pelican server(s) are running in the current process
+
+	ContextKey string
 )
 
 const (
@@ -90,6 +93,8 @@ const (
 	OriginType
 	DirectorType
 	RegistryType
+
+	EgrpKey ContextKey = "egrp"
 )
 
 const (
@@ -116,10 +121,67 @@ var (
 	// Our global transports that only will get reconfigured if needed
 	transport     *http.Transport
 	onceTransport sync.Once
+
+	// Global struct validator
+	validate *validator.Validate
+
+	// A variable indicating enabled Pelican servers in the current process
+	enabledServers ServerType
+	setServerOnce  sync.Once
+
+	// Pelican version
+	PelicanVersion string
 )
 
-func (sType ServerType) IsSet(otherVal ServerType) bool {
-	return sType&otherVal == otherVal
+func init() {
+	validate = validator.New(validator.WithRequiredStructEnabled())
+}
+
+// Set sets a list of newServers to ServerType instance
+func (sType *ServerType) SetList(newServers []ServerType) {
+	for _, server := range newServers {
+		*sType |= server
+	}
+}
+
+// Enable a single server type in the bitmask
+func (sType *ServerType) Set(server ServerType) ServerType {
+	*sType |= server
+	return *sType
+}
+
+// IsEnabled checks if a testServer is in the ServerType instance
+func (sType ServerType) IsEnabled(testServer ServerType) bool {
+	return sType&testServer == testServer
+}
+
+// Clear all values in a server type
+func (sType *ServerType) Clear() {
+	*sType = ServerType(0)
+}
+
+// setEnabledServer sets the global variable config.EnabledServers to include newServers.
+// Since this function should only be called in config package, we mark it "private" to avoid
+// reset value in other pacakge
+//
+// This will only be called once in a single process
+func setEnabledServer(newServers ServerType) {
+	setServerOnce.Do(func() {
+		// For each process, we only want to set enabled servers once
+		enabledServers.Set(newServers)
+	})
+}
+
+// IsServerEnabled checks if testServer is enabled in the current process.
+//
+// Use this function to check which server(s) are running in the current process.
+func IsServerEnabled(testServer ServerType) bool {
+	return enabledServers.IsEnabled(testServer)
+}
+
+// Create a new, empty ServerType bitmask
+func NewServerType() ServerType {
+	return ServerType(0)
 }
 
 func (sType ServerType) String() string {
@@ -134,6 +196,41 @@ func (sType ServerType) String() string {
 		return "Registry"
 	}
 	return "Unknown"
+}
+
+func EnabledServers() []string {
+	servers := make([]string, 0)
+	if enabledServers.IsEnabled(CacheType) {
+		servers = append(servers, "cache")
+	}
+	if enabledServers.IsEnabled(OriginType) {
+		servers = append(servers, "origin")
+	}
+	if enabledServers.IsEnabled(DirectorType) {
+		servers = append(servers, "director")
+	}
+	if enabledServers.IsEnabled(RegistryType) {
+		servers = append(servers, "registry")
+	}
+	return servers
+}
+
+func (sType *ServerType) SetString(name string) bool {
+	switch strings.ToLower(name) {
+	case "cache":
+		*sType |= CacheType
+		return true
+	case "origin":
+		*sType |= OriginType
+		return true
+	case "director":
+		*sType |= DirectorType
+		return true
+	case "registry":
+		*sType |= RegistryType
+		return true
+	}
+	return false
 }
 
 // Based on the name of the current binary, determine the preferred "style"
@@ -182,14 +279,33 @@ func GetAllPrefixes() []string {
 
 func DiscoverFederation() error {
 	federationStr := param.Federation_DiscoveryUrl.GetString()
+	externalUrlStr := param.Server_ExternalWebUrl.GetString()
+	defer func() {
+		// Set default guesses if these values are still unset.
+		if param.Federation_DirectorUrl.GetString() == "" && enabledServers.IsEnabled(DirectorType) {
+			viper.Set("Federation.DirectorUrl", externalUrlStr)
+		}
+		if param.Federation_RegistryUrl.GetString() == "" && enabledServers.IsEnabled(RegistryType) {
+			viper.Set("Federation.RegistryUrl", externalUrlStr)
+		}
+		if param.Federation_JwkUrl.GetString() == "" && enabledServers.IsEnabled(DirectorType) {
+			viper.Set("Federation.JwkUrl", externalUrlStr+"/.well-known/issuer.jwks")
+		}
+	}()
 	if len(federationStr) == 0 {
 		log.Debugln("Federation URL is unset; skipping discovery")
 		return nil
 	}
+	if federationStr == externalUrlStr {
+		log.Debugln("Current web engine hosts the federation; skipping auto-discovery of services")
+		return nil
+	}
+
 	log.Debugln("Federation URL:", federationStr)
 	curDirectorURL := param.Federation_DirectorUrl.GetString()
-	curNamespaceURL := param.Federation_NamespaceUrl.GetString()
-	if len(curDirectorURL) != 0 && len(curNamespaceURL) != 0 {
+	curRegistryURL := param.Federation_RegistryUrl.GetString()
+	curFederationJwkURL := param.Federation_JwkUrl.GetString()
+	if len(curDirectorURL) != 0 && len(curRegistryURL) != 0 && len(curFederationJwkURL) != 0 {
 		return nil
 	}
 
@@ -243,34 +359,47 @@ func DiscoverFederation() error {
 		log.Debugln("Federation service discovery resulted in director URL", metadata.DirectorEndpoint)
 		viper.Set("Federation.DirectorUrl", metadata.DirectorEndpoint)
 	}
-	if curNamespaceURL == "" {
-		log.Debugln("Federation service discovery resulted in namespace registration URL",
+	if curRegistryURL == "" {
+		log.Debugln("Federation service discovery resulted in registry URL",
 			metadata.NamespaceRegistrationEndpoint)
-		viper.Set("Federation.NamespaceUrl", metadata.NamespaceRegistrationEndpoint)
+		viper.Set("Federation.RegistryUrl", metadata.NamespaceRegistrationEndpoint)
 	}
-
-	viper.Set("Federation.JwkUrl", metadata.JwksUri)
+	if curFederationJwkURL == "" {
+		log.Debugln("Federation service discovery resulted in JWKS URL",
+			metadata.JwksUri)
+		viper.Set("Federation.JwkUrl", metadata.JwksUri)
+	}
 
 	return nil
 }
 
-func cleanupDirOnShutdown(dir string) {
-	sigs := make(chan os.Signal, 1)
+// TODO: It's not clear that this function works correctly.  We should
+// pass an errgroup here and ensure that the cleanup is complete before
+// the main thread shuts down.
+func cleanupDirOnShutdown(ctx context.Context, dir string) {
 	tempRunDir = dir
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
-	go func() {
-		<-sigs
-		CleanupTempResources()
-	}()
+	egrp, ok := ctx.Value(EgrpKey).(*errgroup.Group)
+	if !ok {
+		egrp = &errgroup.Group{}
+	}
+	egrp.Go(func() error {
+		<-ctx.Done()
+		err := CleanupTempResources()
+		if err != nil {
+			log.Infoln("Error when cleaning up temporary directories:", err)
+		}
+		return err
+	})
 }
 
-func CleanupTempResources() {
+func CleanupTempResources() (err error) {
 	cleanupOnce.Do(func() {
 		if tempRunDir != "" {
-			os.RemoveAll(tempRunDir)
+			err = os.RemoveAll(tempRunDir)
 			tempRunDir = ""
 		}
 	})
+	return
 }
 
 func getConfigBase() (string, error) {
@@ -345,7 +474,7 @@ func parseServerIssuerURL(sType ServerType) error {
 		return errors.New("If Server.IssuerHostname is configured, you must provide a valid port")
 	}
 
-	if sType == OriginType {
+	if sType.IsEnabled(OriginType) {
 		// If Origin.Mode is set to anything that isn't "posix" or "", assume we're running a plugin and
 		// that the origin's issuer URL actually uses the same port as OriginUI instead of XRootD. This is
 		// because under that condition, keys are being served by the Pelican process instead of by XRootD
@@ -383,6 +512,11 @@ func GetTransport() *http.Transport {
 		setupTransport()
 	})
 	return transport
+}
+
+// Get singleton global validte method for field validation
+func GetValidate() *validator.Validate {
+	return validate
 }
 
 func InitConfig() {
@@ -450,6 +584,11 @@ func InitConfig() {
 		}
 		log.SetOutput(f)
 	}
+
+	if oldNsUrl := viper.GetString("Federation.NamespaceUrl"); oldNsUrl != "" {
+		log.Warningln("Federation.NamespaceUrl is deprecated and will be removed in future release. Please migrate to use Federation.RegistryUrl instead")
+		viper.SetDefault("Federation.RegistryUrl", oldNsUrl)
+	}
 }
 
 func initConfigDir() error {
@@ -469,14 +608,23 @@ func initConfigDir() error {
 	return nil
 }
 
-func InitServer(sType ServerType) error {
+// Initialize Pelican server instance. Pass a bit mask of `currentServers` if you want to enable multiple services.
+// Note not all configurations are supported: currently, if you enable both cache and origin then an error
+// is thrown
+func InitServer(ctx context.Context, currentServers ServerType) error {
 	if err := initConfigDir(); err != nil {
 		return errors.Wrap(err, "Failed to initialize the server configuration")
 	}
+	if currentServers.IsEnabled(OriginType) && currentServers.IsEnabled(CacheType) {
+		return errors.New("A cache and origin cannot both be enabled in the same instance")
+	}
+
+	setEnabledServer(currentServers)
+
 	xrootdPrefix := ""
-	if sType.IsSet(OriginType) {
+	if currentServers.IsEnabled(OriginType) {
 		xrootdPrefix = "origin"
-	} else if sType.IsSet(CacheType) {
+	} else if currentServers.IsEnabled(CacheType) {
 		xrootdPrefix = "cache"
 	}
 	configDir := viper.GetString("ConfigDir")
@@ -484,6 +632,7 @@ func InitServer(sType ServerType) error {
 	viper.SetDefault("Server.TLSCertificate", filepath.Join(configDir, "certificates", "tls.crt"))
 	viper.SetDefault("Server.TLSKey", filepath.Join(configDir, "certificates", "tls.key"))
 	viper.SetDefault("Server.TLSCAKey", filepath.Join(configDir, "certificates", "tlsca.key"))
+	viper.SetDefault("Server.SessionSecretFile", filepath.Join(configDir, "session-secret"))
 	viper.SetDefault("Xrootd.RobotsTxtFile", filepath.Join(configDir, "robots.txt"))
 	viper.SetDefault("Xrootd.ScitokensConfig", filepath.Join(configDir, "xrootd", "scitokens.cfg"))
 	viper.SetDefault("Xrootd.Authfile", filepath.Join(configDir, "xrootd", "authfile"))
@@ -491,6 +640,7 @@ func InitServer(sType ServerType) error {
 	viper.SetDefault("IssuerKey", filepath.Join(configDir, "issuer.jwk"))
 	viper.SetDefault("Server.UIPasswordFile", filepath.Join(configDir, "server-web-passwd"))
 	viper.SetDefault("Server.UIActivationCodeFile", filepath.Join(configDir, "server-web-activation-code"))
+	viper.SetDefault("Server.SessionSecretFile", filepath.Join(configDir, "session-secret"))
 	viper.SetDefault("OIDC.ClientIDFile", filepath.Join(configDir, "oidc-client-id"))
 	viper.SetDefault("OIDC.ClientSecretFile", filepath.Join(configDir, "oidc-client-secret"))
 	viper.SetDefault("Cache.ExportLocation", "/")
@@ -522,7 +672,7 @@ func InitServer(sType ServerType) error {
 			}
 			viper.SetDefault("Xrootd.RunLocation", filepath.Join(dir, xrootdPrefix))
 			viper.SetDefault("Cache.DataLocation", path.Join(dir, "xcache"))
-			cleanupDirOnShutdown(dir)
+			cleanupDirOnShutdown(ctx, dir)
 		}
 		viper.SetDefault("Origin.Multiuser", false)
 	}
@@ -547,7 +697,7 @@ func InitServer(sType ServerType) error {
 	// they have overridden the defaults.
 	hostname = viper.GetString("Server.Hostname")
 
-	if sType.IsSet(CacheType) {
+	if currentServers.IsEnabled(CacheType) {
 		viper.Set("Xrootd.Port", param.Cache_Port.GetInt())
 	}
 	xrootdPort := param.Xrootd_Port.GetInt()
@@ -564,7 +714,9 @@ func InitServer(sType ServerType) error {
 		return errors.Wrap(err, fmt.Sprint("Invalid Server.ExternalWebUrl: ", externalAddressStr))
 	}
 
-	setupTransport()
+	if currentServers.IsEnabled(DirectorType) && param.Federation_DirectorUrl.GetString() == "" {
+		viper.SetDefault("Federation.DirectorUrl", viper.GetString("Server.ExternalWebUrl"))
+	}
 
 	tokenRefreshInterval := param.Monitoring_TokenRefreshInterval.GetDuration()
 	tokenExpiresIn := param.Monitoring_TokenExpiresIn.GetDuration()
@@ -596,12 +748,21 @@ func InitServer(sType ServerType) error {
 		return err
 	}
 
+	// Generate the session secret and save it as the default value
+	if err := GenerateSessionSecret(); err != nil {
+		return err
+	}
+
 	// After we know we have the certs we need, call setupTransport (which uses those certs for its TLSConfig)
 	setupTransport()
 
+	// Setup CSRF middleware. To use it, you need to add this middleware to your chain
+	// of http handlers by calling config.GetCSRFHandler()
+	setupCSRFHandler()
+
 	// Set up the server's issuer URL so we can access that data wherever we need to find keys and whatnot
 	// This populates Server.IssuerUrl, and can be safely fetched using server_utils.GetServerIssuerURL()
-	err = parseServerIssuerURL(sType)
+	err = parseServerIssuerURL(currentServers)
 	if err != nil {
 		return err
 	}
@@ -675,7 +836,7 @@ func InitClient() error {
 	}
 	for _, prefix := range prefixes {
 		if val, isSet := os.LookupEnv(prefix + "_NAMESPACE_URL"); isSet {
-			viper.Set("Federation.NamespaceURL", val)
+			viper.Set("Federation.RegistryUrl", val)
 			break
 		}
 	}

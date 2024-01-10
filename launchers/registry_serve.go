@@ -16,67 +16,61 @@
  *
  ***************************************************************/
 
-package main
+package launchers
 
 import (
-	"os"
-	"os/signal"
-	"syscall"
+	"context"
 
+	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/cobra"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/namespace_registry"
+	"github.com/pelicanplatform/pelican/metrics"
+	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/registry"
 	"github.com/pelicanplatform/pelican/web_ui"
 )
 
-func serveNamespaceRegistry( /*cmd*/ *cobra.Command /*args*/, []string) error {
+func RegistryServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) error {
 	log.Info("Initializing the namespace registry's database...")
 
 	// Initialize the registry's sqlite database
-	err := nsregistry.InitializeDB()
+	err := registry.InitializeDB(ctx)
 	if err != nil {
 		return errors.Wrap(err, "Unable to initialize the namespace registry database")
 	}
 
 	if config.GetPreferredPrefix() == "OSDF" {
+		metrics.SetComponentHealthStatus(metrics.DirectorRegistry_Topology, metrics.StatusWarning, "Start requesting from topology, status unknown")
 		log.Info("Populating registry with namespaces from OSG topology service...")
-		if err := nsregistry.PopulateTopology(); err != nil {
+		if err := registry.PopulateTopology(); err != nil {
 			panic(errors.Wrap(err, "Unable to populate topology table"))
 		}
 
 		// Checks topology for updates every 10 minutes
-		go nsregistry.PeriodicTopologyReload()
+		go registry.PeriodicTopologyReload()
 	}
 
-	engine, err := web_ui.GetEngine()
-	if err != nil {
-		return err
+	if param.Server_EnableUI.GetBool() {
+		if err := web_ui.ConfigOAuthClientAPIs(engine); err != nil {
+			return err
+		}
 	}
 
-	if err := web_ui.ConfigureServerWebAPI(engine, false); err != nil {
-		return err
-	}
 	rootRouterGroup := engine.Group("/")
-	// Call out to nsregistry to establish routes for the gin engine
-	nsregistry.RegisterNamespaceRegistry(rootRouterGroup)
-	nsregistry.RegisterNamespacesRegistryWebAPI(rootRouterGroup)
-	log.Info("Starting web engine...")
+	// Register routes for server/Pelican client facing APIs
+	registry.RegisterRegistryAPI(rootRouterGroup)
+	// Register routes for APIs to registry Web UI
+	if err := registry.RegisterRegistryWebAPI(rootRouterGroup); err != nil {
+		return err
+	}
 
-	// Might need to play around with this setting more to handle
-	// more complicated routing scenarios where we can't just use
-	// a wildcard. It removes duplicate / from the resource.
-	//engine.RemoveExtraSlash = true
-	go web_ui.RunEngine(engine)
-
-	go web_ui.InitServerWebLogin()
-
-	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
-	sig := <-sigs
-	_ = sig
+	egrp.Go(func() error {
+		<-ctx.Done()
+		return registry.ShutdownDB()
+	})
 
 	return nil
 }
