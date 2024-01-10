@@ -247,38 +247,19 @@ tags:
     description: Authentication APIs for all servers
   - name: common
     description: Common APIs for all servers
+  - name: metrics
+    description: APIs for various server metrics
   - name: registry_ui
     description: APIs for Registry server Web UI
 paths:
   /health:
     get:
       tags:
-        - common
-      summary: Returns the health status of server components
-      description: "`Authentication Required`"
-      produces:
-        - application/json
+        - "common"
+      summary: Health check endpoint for server Web engine
       responses:
         "200":
-          description: OK
-          schema:
-            type: object
-            properties:
-              status:
-                type: string
-                description: The overall health status of the server
-              components:
-                type: object
-                description: The health status of each server components
-                properties:
-                  cmsd:
-                    $ref: "#/definitions/HealthStatus"
-                  federation:
-                    $ref: "#/definitions/HealthStatus"
-                  web-ui:
-                    $ref: "#/definitions/HealthStatus"
-                  xrootd:
-                    $ref: "#/definitions/HealthStatus"
+          description: "Server Web engine is running and taking requests"
   /config:
     get:
       tags:
@@ -332,21 +313,58 @@ paths:
       tags:
         - common
       summary: Returns a list of enabled servers
+      description: "`Authentication Required`
+
+        Server names are in lower-case, sorted in alphabetical order.
+        "
       produces:
         - application/json
       responses:
         "200":
           description: OK
           schema:
-            type: array
-            items:
-              type: string
-              minItems: 1
+            type: object
+            properties:
+              servers:
+                type: array
+                items:
+                  type: string
+                  minItems: 1
+                example: ["director", "origin", "registry"]
         "500":
           description: Server encountered error in reading institution configuration
           schema:
             type: object
             $ref: "#/definitions/ErrorModel"
+  /metrics/health:
+    get:
+      tags:
+        - metrics
+      summary: Returns the health status of server components
+      description: "`Authentication Required`"
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+            properties:
+              status:
+                type: string
+                description: The overall health status of the server
+              components:
+                type: object
+                description: The health status of each server components
+                properties:
+                  cmsd:
+                    $ref: "#/definitions/HealthStatus"
+                  federation:
+                    $ref: "#/definitions/HealthStatus"
+                  web-ui:
+                    $ref: "#/definitions/HealthStatus"
+                  xrootd:
+                    $ref: "#/definitions/HealthStatus"
   /auth/login:
     post:
       tags:
