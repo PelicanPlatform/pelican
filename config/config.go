@@ -32,6 +32,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -179,11 +180,42 @@ func IsServerEnabled(testServer ServerType) bool {
 	return enabledServers.IsEnabled(testServer)
 }
 
+// Get a string slice of currently enabled servers, sorted by alphabetical order.
+// By default, it calls String method of each enabled server.
+// To get strings in lowerCase, set lowerCase = true.
+func GetEnabledServerString(lowerCase bool) []string {
+	servers := make([]string, 0)
+	if enabledServers.IsEnabled(CacheType) {
+		servers = append(servers, CacheType.String())
+	}
+	if enabledServers.IsEnabled(OriginType) {
+		servers = append(servers, OriginType.String())
+	}
+	if enabledServers.IsEnabled(DirectorType) {
+		servers = append(servers, DirectorType.String())
+	}
+	if enabledServers.IsEnabled(RegistryType) {
+		servers = append(servers, RegistryType.String())
+	}
+	sort.Strings(servers)
+	if lowerCase {
+		for i, serverStr := range servers {
+			servers[i] = strings.ToLower(serverStr)
+		}
+		return servers
+	} else {
+		return servers
+	}
+}
+
 // Create a new, empty ServerType bitmask
 func NewServerType() ServerType {
 	return ServerType(0)
 }
 
+// Get the string representation of a ServerType instance. This is intended
+// for getting the string form of a single ServerType contant, such as CacheType
+// OriginType, etc. To get a string slice of enabled servers, use EnabledServerString()
 func (sType ServerType) String() string {
 	switch sType {
 	case CacheType:
@@ -196,23 +228,6 @@ func (sType ServerType) String() string {
 		return "Registry"
 	}
 	return "Unknown"
-}
-
-func EnabledServers() []string {
-	servers := make([]string, 0)
-	if enabledServers.IsEnabled(CacheType) {
-		servers = append(servers, "cache")
-	}
-	if enabledServers.IsEnabled(OriginType) {
-		servers = append(servers, "origin")
-	}
-	if enabledServers.IsEnabled(DirectorType) {
-		servers = append(servers, "director")
-	}
-	if enabledServers.IsEnabled(RegistryType) {
-		servers = append(servers, "registry")
-	}
-	return servers
 }
 
 func (sType *ServerType) SetString(name string) bool {
