@@ -51,7 +51,7 @@ export default function Home() {
             try {
                 const res = await fetch("/api/v1.0/servers")
                 const data = await res.json()
-                setEnabledServers(data)
+                setEnabledServers(data?.servers)
             } catch {
                 setEnabledServers(["origin", "director", "registry"])
             }

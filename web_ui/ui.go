@@ -71,13 +71,13 @@ func getConfigValues(ctx *gin.Context) {
 }
 
 func getEnabledServers(ctx *gin.Context) {
-	enabledServers := config.EnabledServers()
+	enabledServers := config.GetEnabledServerString(true)
 	if len(enabledServers) == 0 {
 		ctx.JSON(500, gin.H{"error": "No enabled servers found"})
 		return
 	}
 
-	ctx.JSON(200, enabledServers)
+	ctx.JSON(200, gin.H{"servers": enabledServers})
 }
 
 func configureWebResource(engine *gin.Engine) error {
@@ -136,8 +136,8 @@ func configureWebResource(engine *gin.Engine) error {
 		}
 
 		// If just one server is enabled, redirect to that server
-		if len(config.EnabledServers()) == 1 && path == "/index.html" {
-			ctx.Redirect(http.StatusFound, "/view/"+config.EnabledServers()[0]+"/index.html")
+		if len(config.GetEnabledServerString(true)) == 1 && path == "/index.html" {
+			ctx.Redirect(http.StatusFound, "/view/"+config.GetEnabledServerString(true)[0]+"/index.html")
 			return
 		}
 
@@ -167,8 +167,11 @@ func configureWebResource(engine *gin.Engine) error {
 // Configure common endpoint available to all server web UI which are located at /api/v1.0/*
 func configureCommonEndpoints(engine *gin.Engine) error {
 	engine.GET("/api/v1.0/config", AuthHandler, getConfigValues)
-	engine.GET("/api/v1.0/servers", getEnabledServers)
-
+	engine.GET("/api/v1.0/servers", AuthHandler, getEnabledServers)
+	// Health check endpoint for web engine
+	engine.GET("/api/v1.0/health", func(ctx *gin.Context) {
+		ctx.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Web Engine Running. Time: %s", time.Now().String())})
+	})
 	return nil
 }
 
@@ -180,7 +183,7 @@ func configureMetrics(ctx context.Context, engine *gin.Engine) error {
 	prometheusMonitor := ginprometheus.NewPrometheus("gin")
 	prometheusMonitor.Use(engine)
 
-	engine.GET("/api/v1.0/health", AuthHandler, func(ctx *gin.Context) {
+	engine.GET("/api/v1.0/metrics/health", AuthHandler, func(ctx *gin.Context) {
 		healthStatus := metrics.GetHealthStatus()
 		ctx.JSON(http.StatusOK, healthStatus)
 	})
