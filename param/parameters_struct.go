@@ -57,6 +57,7 @@ type config struct {
 	}
 	IssuerKey string
 	Logging struct {
+		DisableProgressBars bool
 		Level string
 		LogLocation string
 	}
@@ -223,6 +224,7 @@ type configWithType struct {
 	}
 	IssuerKey struct { Type string; Value string }
 	Logging struct {
+		DisableProgressBars struct { Type string; Value bool }
 		Level struct { Type string; Value string }
 		LogLocation struct { Type string; Value string }
 	}

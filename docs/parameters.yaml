@@ -147,6 +147,13 @@ type: filename
 default: none
 components: ["*"]
 ---
+name: Logging.DisableProgressBars
+description: >-
+  A bool defining if progress bars should be enabled or not.
+type: bool
+default: false
+components: ["*"]
+---
 ############################
 # Federation-Level Configs #
 ############################
