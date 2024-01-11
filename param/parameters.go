@@ -105,6 +105,7 @@ var (
 	Origin_XRootDPrefix = StringParam{"Origin.XRootDPrefix"}
 	Plugin_Token = StringParam{"Plugin.Token"}
 	Registry_DbLocation = StringParam{"Registry.DbLocation"}
+	Registry_InstitutionsUrl = StringParam{"Registry.InstitutionsUrl"}
 	Server_ExternalWebUrl = StringParam{"Server.ExternalWebUrl"}
 	Server_Hostname = StringParam{"Server.Hostname"}
 	Server_IssuerHostname = StringParam{"Server.IssuerHostname"}
@@ -188,6 +189,7 @@ var (
 	Federation_TopologyReloadInterval = DurationParam{"Federation.TopologyReloadInterval"}
 	Monitoring_TokenExpiresIn = DurationParam{"Monitoring.TokenExpiresIn"}
 	Monitoring_TokenRefreshInterval = DurationParam{"Monitoring.TokenRefreshInterval"}
+	Registry_InstitutionsUrlReloadMinutes = DurationParam{"Registry.InstitutionsUrlReloadMinutes"}
 	Transport_DialerKeepAlive = DurationParam{"Transport.DialerKeepAlive"}
 	Transport_DialerTimeout = DurationParam{"Transport.DialerTimeout"}
 	Transport_ExpectContinueTimeout = DurationParam{"Transport.ExpectContinueTimeout"}
