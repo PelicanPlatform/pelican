@@ -60,6 +60,15 @@ type config struct {
 		DisableProgressBars bool
 		Level string
 		LogLocation string
+		XrootdCmsTrace string
+		XrootdOfsTrace string
+		XrootdPfcTrace string
+		XrootdPssSetOptCache string
+		XrootdPssSetOptOrigin string
+		XrootdPssTrace string
+		XrootdScitokensTrace string
+		XrootdXrdTrace string
+		XrootdXrootdTrace string
 	}
 	MinimumDownloadSpeed int
 	Monitoring struct {
@@ -227,6 +236,15 @@ type configWithType struct {
 		DisableProgressBars struct { Type string; Value bool }
 		Level struct { Type string; Value string }
 		LogLocation struct { Type string; Value string }
+		XrootdCmsTrace struct { Type string; Value string }
+		XrootdOfsTrace struct { Type string; Value string }
+		XrootdPfcTrace struct { Type string; Value string }
+		XrootdPssSetOptCache struct { Type string; Value string }
+		XrootdPssSetOptOrigin struct { Type string; Value string }
+		XrootdPssTrace struct { Type string; Value string }
+		XrootdScitokensTrace struct { Type string; Value string }
+		XrootdXrdTrace struct { Type string; Value string }
+		XrootdXrootdTrace struct { Type string; Value string }
 	}
 	MinimumDownloadSpeed struct { Type string; Value int }
 	Monitoring struct {

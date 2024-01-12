@@ -154,6 +154,74 @@ type: bool
 default: false
 components: ["Client"]
 ---
+name: Logging.XrootdPssSetOptOrigin
+description: >-
+  Configures the XRootD client used by the proxy top communicate with the origin (we use to set debug level).
+  Values include: DebugLevel (0, 1, 2, 3)
+type: string
+default: DebugLevel 1
+components: ["cache"]
+---
+name: Logging.XrootdPssSetOptCache
+description: >-
+  Configures the XRootD client used by the proxy top communicate with the cache (we use to set debug level).
+  Values include: DebugLevel (0, 1, 2, 3)
+type: string
+default: DebugLevel 3
+components: ["cache"]
+---
+name: Logging.XrootdPssTrace
+description: >-
+  Logging level of pss within Xrootd configuration values include: all, on, debug
+type: string
+default: all
+components: ["cache"]
+---
+name: Logging.XrootdScitokensTrace
+description: >-
+  Trace level of scitokens debug output within Xrootd configuration. Values include: all, on, debug
+type: string
+default: all
+components: ["origin", "cache"]
+---
+name: Logging.XrootdCmsTrace
+description: >-
+  Trace level of cms debug output within Xrootd configuration. Values include: all, debug, defer, files, forward, redirect, space, stage
+type: string
+default: all
+components: ["cache"]
+---
+name: Logging.XrootdOfsTrace
+description: >-
+  Trace level of ofs debug output within Xrootd configuration. Values include: aio, all, chmod, close, closedir, debug, delay, dir, exists,
+  fsctl, getstats, io, mkdir, most, open, opendir, qscan, read, readdir, redirect, remove, rename, sync, truncate, write
+type: string
+default: all
+components: ["cache"]
+---
+name: Logging.XrootdPfcTrace
+description: >-
+  Trace level of pfc debug output within Xrootd configuration. Values include: none, error, warning, info, debug, dump
+type: string
+default: info
+components: ["origin"]
+---
+name: Logging.XrootdXrootdTrace
+description: >-
+  Trace options for Xrootd debug output within Xrootd configuration. Values include: all, auth, debug, emsg, fs, fsaio, fsio, login, mem, off,
+  pgcserr, redirect, request, response, stall
+type: string
+default: emsg login stall redirect
+components: ["origin"]
+---
+name: Logging.XrootdXrdTrace
+description: >-
+  Trace options for Xrootd debug output (xrd) within Xrootd configuration. Values include: all, conn, debug, mem, net, none, off, poll, protocol,
+  sched, tls, tlsctx, tlsio, tlssok
+type: string
+default: all -sched
+components: ["cache"]
+---
 ############################
 # Federation-Level Configs #
 ############################

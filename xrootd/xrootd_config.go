@@ -112,11 +112,24 @@ type (
 		TLSCACertificateFile      string
 	}
 
+	LoggingConfig struct {
+		XrootdScitokensTrace  string
+		XrootdPssTrace        string
+		XrootdCmsTrace        string
+		XrootdOfsTrace        string
+		XrootdPfcTrace        string
+		XrootdXrootdTrace     string
+		XrootdXrdTrace        string
+		XrootdPssSetOptCache  string
+		XrootdPssSetOptOrigin string
+	}
+
 	XrootdConfig struct {
-		Server ServerConfig
-		Origin OriginConfig
-		Xrootd XrootdOptions
-		Cache  CacheConfig
+		Server  ServerConfig
+		Origin  OriginConfig
+		Xrootd  XrootdOptions
+		Cache   CacheConfig
+		Logging LoggingConfig
 	}
 )
 

@@ -79,6 +79,15 @@ var (
 	Issuer_TomcatLocation = StringParam{"Issuer.TomcatLocation"}
 	Logging_Level = StringParam{"Logging.Level"}
 	Logging_LogLocation = StringParam{"Logging.LogLocation"}
+	Logging_XrootdCmsTrace = StringParam{"Logging.XrootdCmsTrace"}
+	Logging_XrootdOfsTrace = StringParam{"Logging.XrootdOfsTrace"}
+	Logging_XrootdPfcTrace = StringParam{"Logging.XrootdPfcTrace"}
+	Logging_XrootdPssSetOptCache = StringParam{"Logging.XrootdPssSetOptCache"}
+	Logging_XrootdPssSetOptOrigin = StringParam{"Logging.XrootdPssSetOptOrigin"}
+	Logging_XrootdPssTrace = StringParam{"Logging.XrootdPssTrace"}
+	Logging_XrootdScitokensTrace = StringParam{"Logging.XrootdScitokensTrace"}
+	Logging_XrootdXrdTrace = StringParam{"Logging.XrootdXrdTrace"}
+	Logging_XrootdXrootdTrace = StringParam{"Logging.XrootdXrootdTrace"}
 	Monitoring_DataLocation = StringParam{"Monitoring.DataLocation"}
 	OIDC_AuthorizationEndpoint = StringParam{"OIDC.AuthorizationEndpoint"}
 	OIDC_ClientID = StringParam{"OIDC.ClientID"}

@@ -17,6 +17,15 @@
 Debug: false
 Logging:
   Level: "Error"
+  XrootdScitokensTrace: all
+  XrootdPssTrace: all
+  XrootdCmsTrace: all
+  XrootdOfsTrace: all
+  XrootdPfcTrace: info
+  XrootdXrdTrace: all -sched
+  XrootdXrootdTrace: emsg login stall redirect
+  XrootdPssSetOptCache: DebugLevel 3
+  XrootdPssSetOptOrigin: DebugLevel 1
 Server:
   WebPort: 8444
   WebHost: "0.0.0.0"
