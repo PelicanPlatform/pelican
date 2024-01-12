@@ -19,6 +19,7 @@
 package registry
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -37,6 +38,7 @@ import (
 	"github.com/pelicanplatform/pelican/web_ui"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
 )
 
 type (
@@ -682,7 +684,7 @@ func RegisterRegistryWebAPI(router *gin.RouterGroup) error {
 }
 
 // Initialize institutions list
-func InitInstConfig() error {
+func InitInstConfig(ctx context.Context, egrp *errgroup.Group) error {
 	institutions := []Institution{}
 	if err := param.Registry_Institutions.Unmarshal(&institutions); err != nil {
 		log.Error("Fail to read Registry.Institutions. Make sure you had the correct format", err)
@@ -710,20 +712,36 @@ func InitInstConfig() error {
 
 		institutionsCache = ttlcache.New[string, []Institution](ttlcache.WithTTL[string, []Institution](instCacheTTL))
 
-		go func() {
-			institutionsCache.Start()
-		}()
+		go institutionsCache.Start()
+
+		egrp.Go(func() error {
+			<-ctx.Done()
+			institutionsCacheMutex.Lock()
+			defer institutionsCacheMutex.Unlock()
+			log.Info("Gracefully stopping institution TTL cache eviction...")
+			if institutionsCache != nil {
+				institutionsCache.DeleteAll()
+				institutionsCache.Stop()
+			} else {
+				log.Info("Institution TTL cache is nil, stop clean up process.")
+			}
+			return nil
+		})
 
 		// Try to populate the cache at the server start. If error occured, it's non-blocking
 		cachedInsts, intErr, _ := getCachedInstitutions()
 		if intErr != nil {
-			log.Warning("Failed to populate institution cache. It's non-blocking", intErr)
+			log.Warning("Failed to populate institution cache. It's non-blocking. Error: ", intErr)
 		} else {
 			if !checkUniqueInstitutions(cachedInsts) {
 				return errors.Errorf("Institution IDs read from config are not unique")
 			}
 			log.Infof("Successfully populated institution TTL cache with %d entries", len(institutionsCache.Get(institutionsCache.Keys()[0]).Value()))
 		}
+	}
+
+	if !checkUniqueInstitutions(institutions) {
+		return errors.Errorf("Institution IDs read from config are not unique")
 	}
 	// Else we will read from Registry.Institutions. No extra action needed.
 	return nil
