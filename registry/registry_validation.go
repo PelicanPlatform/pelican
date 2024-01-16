@@ -20,7 +20,9 @@ package registry
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
+	"time"
 
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pelicanplatform/pelican/param"
@@ -168,4 +170,60 @@ func validateInstitution(instID string) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+func validateCustomFields(customFields map[string]interface{}) (bool, error) {
+	if len(customRegFieldsConfigs) == 0 {
+		if customFields != nil && len(customFields) > 0 {
+			return false, errors.New("Bad configuration, Registry.CustomRegistrationFields is not set while validate against custom fields")
+		} else {
+			return true, nil
+		}
+	}
+	for _, conf := range customRegFieldsConfigs {
+		val, ok := customFields[conf.Name]
+		if !ok && conf.Required {
+			return false, errors.New(fmt.Sprintf("%q is required", conf.Name))
+		}
+		if ok {
+			switch conf.Type {
+			case "string":
+				if _, ok := val.(string); !ok {
+					return false, errors.New(fmt.Sprintf("%q is expected to be a string, but got %v", conf.Name, val))
+				}
+			case "int":
+				if _, ok := val.(int); !ok {
+					return false, errors.New(fmt.Sprintf("%q is expected to be an int, but got %v", conf.Name, val))
+				}
+			case "bool":
+				if _, ok := val.(bool); !ok {
+					return false, errors.New(fmt.Sprintf("%q is expected to be a boolean, but got %v", conf.Name, val))
+				}
+			case "datetime":
+				switch v := val.(type) {
+				case int:
+					time.Unix(int64(v), 0)
+				case int32:
+					time.Unix(int64(v), 0)
+				case int64:
+					time.Unix(int64(v), 0)
+				default:
+					return false, fmt.Errorf("%q is expected to be a Unix timestamp, but got %v", conf.Name, val)
+				}
+			case "enum":
+				inOpt := false
+				for _, item := range conf.Options {
+					if item.ID == val {
+						inOpt = true
+					}
+				}
+				if !inOpt {
+					return false, fmt.Errorf("%q is an enumeration type, but the value is not in the options. Got %v", conf.Name, val)
+				}
+			default:
+				return false, errors.New(fmt.Sprintf("The type of %q is not supported", conf.Name))
+			}
+		}
+	}
+	return true, nil
 }

@@ -581,6 +581,25 @@ func InitCustomRegistrationFields() error {
 	}
 	customRegFieldsConfigs = configFields
 
+	fieldNames := make(map[string]bool, 0)
+
+	for _, conf := range configFields {
+		// Duplicated name check
+		if fieldNames[conf.Name] {
+			return errors.New(fmt.Sprintf("Bad custom registration fields, duplicated field name: %q", conf.Name))
+		} else {
+			fieldNames[conf.Name] = true
+		}
+		if conf.Type != "string" && conf.Type != "bool" && conf.Type != "int" && conf.Type != "enum" && conf.Type != "datetime" {
+			return errors.New(fmt.Sprintf("Bad custom registration field, unsupported field type: %q with %q", conf.Name, conf.Type))
+		}
+		if conf.Type == "enum" {
+			if conf.Options == nil {
+				return errors.New(fmt.Sprintf("Bad custom registration field, 'enum' type field does not have options: %q", conf.Name))
+			}
+		}
+	}
+
 	additionalRegFields := populateCustomRegFields(configFields)
 	registrationFields = append(registrationFields, additionalRegFields...)
 
