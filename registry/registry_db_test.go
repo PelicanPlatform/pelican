@@ -58,7 +58,7 @@ func teardownMockNamespaceDB(t *testing.T) {
 }
 
 func insertMockDBData(nss []Namespace) error {
-	query := `INSERT INTO namespace (prefix, pubkey, identity, admin_metadata) VALUES (?, ?, ?, ?)`
+	query := `INSERT INTO namespace (prefix, pubkey, identity, admin_metadata, custom_fields) VALUES (?, ?, ?, ?, ?)`
 	tx, err := db.Begin()
 	if err != nil {
 		return err
@@ -71,8 +71,15 @@ func insertMockDBData(nss []Namespace) error {
 			}
 			return err
 		}
+		customFieldsStr, err := json.Marshal(ns.CustomFields)
+		if err != nil {
+			if errRoll := tx.Rollback(); errRoll != nil {
+				return errors.Wrap(errRoll, "Failed to rollback transaction")
+			}
+			return err
+		}
 
-		_, err = tx.Exec(query, ns.Prefix, ns.Pubkey, ns.Identity, adminMetaStr)
+		_, err = tx.Exec(query, ns.Prefix, ns.Pubkey, ns.Identity, adminMetaStr, customFieldsStr)
 		if err != nil {
 			if errRoll := tx.Rollback(); errRoll != nil {
 				return errors.Wrap(errRoll, "Failed to rollback transaction")
@@ -170,6 +177,12 @@ var (
 		mixed = append(mixed, mockNssWithCachesNotApproved...)
 		return
 	}()
+
+	mockCustomFields = map[string]interface{}{
+		"key1": "value1",
+		"key2": 2,
+		"key3": true,
+	}
 )
 
 func TestNamespaceExistsByPrefix(t *testing.T) {
@@ -192,7 +205,7 @@ func TestNamespaceExistsByPrefix(t *testing.T) {
 	})
 }
 
-func TestGetNamespacesById(t *testing.T) {
+func TestGetNamespaceById(t *testing.T) {
 	setupMockRegistryDB(t)
 	defer teardownMockNamespaceDB(t)
 
@@ -212,6 +225,7 @@ func TestGetNamespacesById(t *testing.T) {
 	t.Run("return-namespace-with-correct-id", func(t *testing.T) {
 		defer resetNamespaceDB(t)
 		mockNs := mockNamespace("/test", "", "", AdminMetadata{UserID: "foo"})
+		mockNs.CustomFields = mockCustomFields
 		err := insertMockDBData([]Namespace{mockNs})
 		require.NoError(t, err)
 		nss, err := getAllNamespaces()
@@ -317,6 +331,7 @@ func TestAddNamespace(t *testing.T) {
 	t.Run("insert-data-integrity", func(t *testing.T) {
 		defer resetNamespaceDB(t)
 		mockNs := mockNamespace("/test", "pubkey", "identity", AdminMetadata{UserID: "someone", Description: "Some description", SiteName: "OSG", SecurityContactUserID: "security-001"})
+		mockNs.CustomFields = mockCustomFields
 		err := addNamespace(&mockNs)
 		require.NoError(t, err)
 		got, err := getAllNamespaces()
@@ -328,6 +343,7 @@ func TestAddNamespace(t *testing.T) {
 		assert.Equal(t, mockNs.AdminMetadata.Description, got[0].AdminMetadata.Description)
 		assert.Equal(t, mockNs.AdminMetadata.SiteName, got[0].AdminMetadata.SiteName)
 		assert.Equal(t, mockNs.AdminMetadata.SecurityContactUserID, got[0].AdminMetadata.SecurityContactUserID)
+		assert.Equal(t, mockCustomFields, got[0].CustomFields)
 	})
 }
 
@@ -458,6 +474,12 @@ func TestGetNamespacesByFilter(t *testing.T) {
 
 		_, err := getNamespacesByFilter(filterNsID, "")
 		require.Error(t, err, "Should return error for filtering against unsupported field ID")
+
+		filterNsCF := Namespace{
+			CustomFields: mockCustomFields,
+		}
+		_, err = getNamespacesByFilter(filterNsCF, "")
+		require.Error(t, err, "Should return error for filtering against unsupported custom fields")
 
 		filterNsIdentity := Namespace{
 			Identity: "someIdentity",

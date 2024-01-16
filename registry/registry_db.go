@@ -146,7 +146,8 @@ func createNamespaceTable() {
         prefix TEXT NOT NULL UNIQUE,
         pubkey TEXT NOT NULL,
         identity TEXT,
-        admin_metadata TEXT CHECK (length("admin_metadata") <= 4000)
+        admin_metadata TEXT CHECK (length("admin_metadata") <= 4000),
+				custom_fields TEXT CHECK (length("custom_fields") <= 4000)
     );`
 
 	_, err := db.Exec(query)
@@ -415,8 +416,9 @@ func getNamespaceById(id int) (*Namespace, error) {
 	}
 	ns := &Namespace{}
 	adminMetadataStr := ""
-	query := `SELECT id, prefix, pubkey, identity, admin_metadata FROM namespace WHERE id = ?`
-	err := db.QueryRow(query, id).Scan(&ns.ID, &ns.Prefix, &ns.Pubkey, &ns.Identity, &adminMetadataStr)
+	customRegFieldsStr := ""
+	query := `SELECT id, prefix, pubkey, identity, admin_metadata, custom_fields FROM namespace WHERE id = ?`
+	err := db.QueryRow(query, id).Scan(&ns.ID, &ns.Prefix, &ns.Pubkey, &ns.Identity, &adminMetadataStr, &customRegFieldsStr)
 	if err != nil {
 		return nil, err
 	}
@@ -424,6 +426,21 @@ func getNamespaceById(id int) (*Namespace, error) {
 	if adminMetadataStr != "" {
 		if err := json.Unmarshal([]byte(adminMetadataStr), &ns.AdminMetadata); err != nil {
 			return nil, err
+		}
+	}
+	if customRegFieldsStr != "" {
+		if err := json.Unmarshal([]byte(customRegFieldsStr), &ns.CustomFields); err != nil {
+			return nil, err
+		}
+	}
+	// By default, JSON unmarshall will convert any generic number to float
+	// and we only allow integer in custom fields, so we convert them back
+	for key, val := range ns.CustomFields {
+		switch v := val.(type) {
+		case float64:
+			ns.CustomFields[key] = int(v)
+		case float32:
+			ns.CustomFields[key] = int(v)
 		}
 	}
 	return ns, nil
@@ -435,8 +452,9 @@ func getNamespaceByPrefix(prefix string) (*Namespace, error) {
 	}
 	ns := &Namespace{}
 	adminMetadataStr := ""
-	query := `SELECT id, prefix, pubkey, identity, admin_metadata FROM namespace WHERE prefix = ?`
-	err := db.QueryRow(query, prefix).Scan(&ns.ID, &ns.Prefix, &ns.Pubkey, &ns.Identity, &adminMetadataStr)
+	customRegFieldsStr := ""
+	query := `SELECT id, prefix, pubkey, identity, admin_metadata, custom_fields FROM namespace WHERE prefix = ?`
+	err := db.QueryRow(query, prefix).Scan(&ns.ID, &ns.Prefix, &ns.Pubkey, &ns.Identity, &adminMetadataStr, &customRegFieldsStr)
 	if err != nil {
 		return nil, err
 	}
@@ -444,6 +462,21 @@ func getNamespaceByPrefix(prefix string) (*Namespace, error) {
 	if adminMetadataStr != "" {
 		if err := json.Unmarshal([]byte(adminMetadataStr), &ns.AdminMetadata); err != nil {
 			return nil, err
+		}
+	}
+	if customRegFieldsStr != "" {
+		if err := json.Unmarshal([]byte(customRegFieldsStr), &ns.CustomFields); err != nil {
+			return nil, err
+		}
+	}
+	// By default, JSON unmarshall will convert any generic number to float
+	// and we only allow integer in custom fields, so we convert them back
+	for key, val := range ns.CustomFields {
+		switch v := val.(type) {
+		case float64:
+			ns.CustomFields[key] = int(v)
+		case float32:
+			ns.CustomFields[key] = int(v)
 		}
 	}
 	return ns, nil
@@ -465,7 +498,9 @@ func getNamespacesByFilter(filterNs Namespace, serverType ServerType) ([]*Namesp
 	} else if serverType != "" {
 		return nil, errors.New(fmt.Sprint("Can't get namespace: unsupported server type: ", serverType))
 	}
-
+	if filterNs.CustomFields != nil {
+		return nil, errors.New("Unsupported operation: Can't filter against Custrom Registration field.")
+	}
 	if filterNs.ID != 0 {
 		return nil, errors.New("Unsupported operation: Can't filter against ID field.")
 	}
@@ -553,7 +588,7 @@ functions) used by the client.
 */
 
 func addNamespace(ns *Namespace) error {
-	query := `INSERT INTO namespace (prefix, pubkey, identity, admin_metadata) VALUES (?, ?, ?, ?)`
+	query := `INSERT INTO namespace (prefix, pubkey, identity, admin_metadata, custom_fields) VALUES (?, ?, ?, ?, ?)`
 	tx, err := db.Begin()
 	if err != nil {
 		return err
@@ -573,8 +608,12 @@ func addNamespace(ns *Namespace) error {
 	if err != nil {
 		return errors.Wrap(err, "Fail to marshall AdminMetadata")
 	}
+	strCustomRegFields, err := json.Marshal(ns.CustomFields)
+	if err != nil {
+		return errors.Wrap(err, "Fail to marshall custom registration fields")
+	}
 
-	_, err = tx.Exec(query, ns.Prefix, ns.Pubkey, ns.Identity, strAdminMetadata)
+	_, err = tx.Exec(query, ns.Prefix, ns.Pubkey, ns.Identity, strAdminMetadata, strCustomRegFields)
 	if err != nil {
 		if errRoll := tx.Rollback(); errRoll != nil {
 			log.Errorln("Failed to rollback transaction:", errRoll)
@@ -610,15 +649,19 @@ func updateNamespace(ns *Namespace) error {
 	if err != nil {
 		return errors.Wrap(err, "Fail to marshall AdminMetadata")
 	}
+	strCustomRegFields, err := json.Marshal(ns.CustomFields)
+	if err != nil {
+		return errors.Wrap(err, "Fail to marshall custom registration fields")
+	}
 
 	// We intentionally exclude updating "identity" as this should only be updated
 	// when user registered through Pelican client with identity
-	query := `UPDATE namespace SET prefix = ?, pubkey = ?, admin_metadata = ? WHERE id = ?`
+	query := `UPDATE namespace SET prefix = ?, pubkey = ?, admin_metadata = ?, custom_fields = ? WHERE id = ?`
 	tx, err := db.Begin()
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(query, ns.Prefix, ns.Pubkey, strAdminMetadata, ns.ID)
+	_, err = tx.Exec(query, ns.Prefix, ns.Pubkey, strAdminMetadata, strCustomRegFields, ns.ID)
 	if err != nil {
 		if errRoll := tx.Rollback(); errRoll != nil {
 			log.Errorln("Failed to rollback transaction:", errRoll)
@@ -681,7 +724,7 @@ func deleteNamespace(prefix string) error {
 }
 
 func getAllNamespaces() ([]*Namespace, error) {
-	query := `SELECT id, prefix, pubkey, identity, admin_metadata FROM namespace ORDER BY id ASC`
+	query := `SELECT id, prefix, pubkey, identity, admin_metadata, custom_fields FROM namespace ORDER BY id ASC`
 	rows, err := db.Query(query)
 	if err != nil {
 		return nil, err
@@ -692,13 +735,29 @@ func getAllNamespaces() ([]*Namespace, error) {
 	for rows.Next() {
 		ns := &Namespace{}
 		adminMetadataStr := ""
-		if err := rows.Scan(&ns.ID, &ns.Prefix, &ns.Pubkey, &ns.Identity, &adminMetadataStr); err != nil {
+		customRegFieldsStr := ""
+		if err := rows.Scan(&ns.ID, &ns.Prefix, &ns.Pubkey, &ns.Identity, &adminMetadataStr, &customRegFieldsStr); err != nil {
 			return nil, err
 		}
 		// For backward compatibility, if adminMetadata is an empty string, don't unmarshall json
 		if adminMetadataStr != "" {
 			if err := json.Unmarshal([]byte(adminMetadataStr), &ns.AdminMetadata); err != nil {
 				return nil, err
+			}
+		}
+		if customRegFieldsStr != "" {
+			if err := json.Unmarshal([]byte(customRegFieldsStr), &ns.CustomFields); err != nil {
+				return nil, err
+			}
+		}
+		// By default, JSON unmarshall will convert any generic number to float
+		// and we only allow integer in custom fields, so we convert them back
+		for key, val := range ns.CustomFields {
+			switch v := val.(type) {
+			case float64:
+				ns.CustomFields[key] = int(v)
+			case float32:
+				ns.CustomFields[key] = int(v)
 			}
 		}
 		namespaces = append(namespaces, ns)
