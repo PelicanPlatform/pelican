@@ -72,11 +72,12 @@ type AdminMetadata struct {
 }
 
 type Namespace struct {
-	ID            int           `json:"id" post:"exclude"`
-	Prefix        string        `json:"prefix" validate:"required"`
-	Pubkey        string        `json:"pubkey" validate:"required"`
-	Identity      string        `json:"identity" post:"exclude"`
-	AdminMetadata AdminMetadata `json:"admin_metadata"`
+	ID            int                    `json:"id" post:"exclude"`
+	Prefix        string                 `json:"prefix" validate:"required"`
+	Pubkey        string                 `json:"pubkey" validate:"required"`
+	Identity      string                 `json:"identity" post:"exclude"`
+	AdminMetadata AdminMetadata          `json:"admin_metadata"`
+	CustomFields  map[string]interface{} `json:"custom_fields"`
 }
 
 type NamespaceWOPubkey struct {
@@ -117,6 +118,10 @@ func (st ServerType) String() string {
 
 func (rs RegistrationStatus) String() string {
 	return string(rs)
+}
+
+func (rs RegistrationStatus) LowerString() string {
+	return strings.ToLower(string(rs))
 }
 
 func (a AdminMetadata) Equal(b AdminMetadata) bool {

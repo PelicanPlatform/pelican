@@ -42,6 +42,11 @@ func RegistryServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 		return errors.Wrap(err, "Unable to initialize the namespace registry database")
 	}
 
+	err = registry.InitCustomRegistrationFields()
+	if err != nil {
+		return err
+	}
+
 	if config.GetPreferredPrefix() == "OSDF" {
 		metrics.SetComponentHealthStatus(metrics.DirectorRegistry_Topology, metrics.StatusWarning, "Start requesting from topology, status unknown")
 		log.Info("Populating registry with namespaces from OSG topology service...")

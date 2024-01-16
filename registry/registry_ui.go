@@ -30,7 +30,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pelicanplatform/pelican/web_ui"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -45,28 +47,45 @@ type (
 	}
 
 	registrationFieldType string
-	registrationField     struct {
-		Name     string                `json:"name"`
-		Type     registrationFieldType `json:"type"`
-		Required bool                  `json:"required"`
-		Options  []interface{}         `json:"options"`
+
+	registrationFieldOption struct {
+		Name string `mapstructure:"name" json:"name"`
+		ID   string `mapstructure:"id" json:"id"`
+	}
+	registrationField struct {
+		Name          string                    `json:"name"`
+		DisplayedName string                    `json:"displayed_name"`
+		Type          registrationFieldType     `json:"type"`
+		Required      bool                      `json:"required"`
+		Options       []registrationFieldOption `json:"options"`
+		Description   string                    `json:"description"`
 	}
 
 	Institution struct {
 		Name string `mapstructure:"name" json:"name"`
 		ID   string `mapstructure:"id" json:"id"`
 	}
+
+	customRegFieldsConfig struct {
+		Name        string                    `mapstructure:"name"`
+		Type        string                    `mapstructure:"type"`
+		Required    bool                      `mapstructure:"required"`
+		Options     []registrationFieldOption `mapstructure:"options"`
+		Description string                    `mapstructure:"description"`
+	}
 )
 
 const (
 	String   registrationFieldType = "string"
 	Int      registrationFieldType = "int"
+	Boolean  registrationFieldType = "bool"
 	Enum     registrationFieldType = "enum"
 	DateTime registrationFieldType = "datetime"
 )
 
 var (
-	registrationFields []registrationField
+	registrationFields     []registrationField
+	customRegFieldsConfigs []customRegFieldsConfig
 )
 
 func init() {
@@ -107,8 +126,9 @@ func populateRegistrationFields(prefix string, data interface{}) []registrationF
 		}
 
 		regField := registrationField{
-			Name:     name + tempName,
-			Required: strings.Contains(field.Tag.Get("validate"), "required"),
+			Name:          name + tempName,
+			DisplayedName: utils.SnakeCaseToHumanReadable(tempName),
+			Required:      strings.Contains(field.Tag.Get("validate"), "required"),
 		}
 
 		switch field.Type.Kind() {
@@ -137,10 +157,10 @@ func populateRegistrationFields(prefix string, data interface{}) []registrationF
 
 		if field.Type == reflect.TypeOf(RegistrationStatus("")) {
 			regField.Type = Enum
-			options := make([]interface{}, 3)
-			options[0] = Pending
-			options[1] = Approved
-			options[2] = Denied
+			options := make([]registrationFieldOption, 3)
+			options[0] = registrationFieldOption{Name: Pending.String(), ID: Pending.LowerString()}
+			options[1] = registrationFieldOption{Name: Approved.String(), ID: Approved.LowerString()}
+			options[2] = registrationFieldOption{Name: Denied.String(), ID: Denied.LowerString()}
 			regField.Options = options
 			fields = append(fields, regField)
 		} else {
@@ -149,6 +169,22 @@ func populateRegistrationFields(prefix string, data interface{}) []registrationF
 		}
 	}
 	return fields
+}
+
+func populateCustomRegFields(configFields []customRegFieldsConfig) []registrationField {
+	regFields := make([]registrationField, 0)
+	for _, field := range configFields {
+		customRegField := registrationField{
+			Name:          "custom_fields." + field.Name,
+			DisplayedName: utils.SnakeCaseToHumanReadable(field.Name),
+			Type:          registrationFieldType(field.Type),
+			Options:       field.Options,
+			Required:      field.Required,
+			Description:   field.Description,
+		}
+		regFields = append(regFields, customRegField)
+	}
+	return regFields
 }
 
 // Helper function to exclude pubkey field from marshalling into json
@@ -535,6 +571,20 @@ func listInstitutions(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, institutions)
+}
+
+// Initialize custom registration fields provided via Registry.CustomRegistrationFields
+func InitCustomRegistrationFields() error {
+	configFields := []customRegFieldsConfig{}
+	if err := param.Registry_CustomRegistrationFields.Unmarshal(&configFields); err != nil {
+		return errors.Wrap(err, "Error reading from config value for Registry.CustomRegistrationFields")
+	}
+	customRegFieldsConfigs = configFields
+
+	additionalRegFields := populateCustomRegFields(configFields)
+	registrationFields = append(registrationFields, additionalRegFields...)
+
+	return nil
 }
 
 // Define Gin APIs for registry Web UI. All endpoints are user-facing

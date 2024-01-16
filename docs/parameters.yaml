@@ -130,7 +130,6 @@ type: object
 default: none
 components: ["director"]
 ---
-
 ############################
 #     Log-Level Configs    #
 ############################
@@ -600,6 +599,57 @@ description: >-
     id: https://osg-htc.org/iid/01y2jtd41
   ```
 
+type: object
+default: none
+components: ["nsregistry"]
+---
+name: Registry.CustomRegistrationFields
+description: >-
+  An array of objects specifying **additional** fields when registering namespaces.
+
+  The schema of the object is as follows:
+  ```
+  - name: department
+    type: enum
+    required: true
+    options:
+      - name: Math
+        id: math
+      - name: Computer Science
+        id: cs
+    optionsUrl: https://example.com/options
+    validationUrl: https://example.com/validate
+    description: The department of the organization that holds this namespace
+  ```
+
+  Note the following requirements:
+  - "name" must be snake case with underline connecting words, i.e. site_name. 
+  - "type" must be one of "string", "int", "bool", "datetime" (Unix time in seconds), or "enum".
+  - "options" must be a non-empty yaml array for field with type "enum". "optionsUrl" will be ignored if "options" is set.
+    example:
+
+      ```yaml
+      options:
+        - name: "Option A"
+          id: "optionA"
+      ```
+
+  - "optionsUrl" is alternative to options with a URL return an JSON array of options in the following format:
+
+      ```json
+      [
+        {
+            "name":"Option A",
+            "id":"optionA"
+        }
+      ]
+      ```
+  - "validationUrl" is an optional, user-provided validation endpoint 
+      that listens to a POST request with JSON body of {"field": "<field value>"}
+      and responds with a 200 code and JSON of {"valid": bool, "message": ""}. If it's non-empty,
+      for all create and update of namespace registration, this URL will be called
+      to validate the custom field. If "valid" == "false", the "message" will be returned by Pelican
+  - "description" will show up in the web UI as helper text to help user understand the field
 type: object
 default: none
 components: ["nsregistry"]
