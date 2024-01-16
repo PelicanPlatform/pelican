@@ -95,7 +95,6 @@ func TestGetAndPut(t *testing.T) {
 	//////////////////////////////Setup our test federation//////////////////////////////////////////
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
-	defer cancel()
 
 	viper.Reset()
 
@@ -150,7 +149,6 @@ func TestGetAndPut(t *testing.T) {
 	require.NoError(t, err)
 
 	fedCancel, err := launchers.LaunchModules(ctx, modules)
-	defer fedCancel()
 	if err != nil {
 		log.Errorln("Failure in fedServeInternal:", err)
 		require.NoError(t, err)
