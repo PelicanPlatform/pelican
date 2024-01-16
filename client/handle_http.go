@@ -493,6 +493,12 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 		if err != nil {
 			return 0, err
 		}
+		if dest == "." {
+			dest, err = os.Getwd()
+			if err != nil {
+				return 0, errors.Wrap(err, "Failed to get current directory for destination")
+			}
+		}
 		unpacker = newAutoUnpacker(dest, behavior)
 		if req, err = grab.NewRequestToWriter(unpacker, transfer.Url.String()); err != nil {
 			return 0, errors.Wrap(err, "Failed to create new download request")
