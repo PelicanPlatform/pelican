@@ -78,14 +78,14 @@ func (i *uint16Value) Type() string {
 func (i *uint16Value) String() string { return strconv.FormatUint(uint64(*i), 10) }
 
 func Execute() error {
-	egrp := errgroup.Group{}
+	egrp, egrpCtx := errgroup.WithContext(context.Background())
 	defer func() {
 		err := egrp.Wait()
 		if err != nil {
-			log.Errorln("Error occurred when shutting down process:", err)
+			log.Errorln("Fatal error occured that leads to shutdown of the process:", err)
 		}
 	}()
-	ctx := context.WithValue(context.Background(), config.EgrpKey, &egrp)
+	ctx := context.WithValue(egrpCtx, config.EgrpKey, egrp)
 	return rootCmd.ExecuteContext(ctx)
 }
 

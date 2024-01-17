@@ -145,7 +145,7 @@ func LaunchWatcherMaintenance(ctx context.Context, dirPaths []string, descriptio
 					log.Warningf("Failure during %s routine: %v", description, err)
 				}
 			} else if chosen == 1 {
-				log.Infof("%s routine has been cancelled.  Shutting down", description)
+				log.Infof("%s routine has been cancelled. Shutting down", description)
 				return nil
 			} else if chosen == 2 { // watcher.Events
 				if !ok {
