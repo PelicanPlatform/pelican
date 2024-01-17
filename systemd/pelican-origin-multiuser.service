@@ -6,7 +6,6 @@ Conflicts = pelican-origin.service
 [Service]
 ExecStart = /usr/bin/pelican --config /etc/pelican/pelican-origin.yaml origin serve
 CapabilityBoundingSet = CAP_SETUID CAP_SETGID CAP_DAC_OVERRIDE
-Capabilities = CAP_SETGID+p CAP_SETUID+p
 
 [Install]
 WantedBy = multi-user.target
