@@ -83,6 +83,9 @@ func Execute() error {
 		err := egrp.Wait()
 		if err != nil {
 			log.Errorln("Fatal error occured that leads to shutdown of the process:", err)
+		} else {
+			// Use Error instead of Info because our default log level is Error
+			log.Error("Pelican is safely exited")
 		}
 	}()
 	ctx := context.WithValue(egrpCtx, config.EgrpKey, egrp)
