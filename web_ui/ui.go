@@ -386,7 +386,7 @@ func runEngineWithListener(ctx context.Context, ln net.Listener, engine *gin.Eng
 		defer cancel()
 		err = server.Shutdown(ctx)
 		if err != nil {
-			log.Panicln("Failed to shutdown server:", err)
+			log.Errorln("Failed to shutdown server:", err)
 		}
 		return err
 	})
