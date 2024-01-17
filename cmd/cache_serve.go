@@ -85,9 +85,9 @@ func serveCache(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-func serveCacheInternal(ctx context.Context) error {
+func serveCacheInternal(cmdCtx context.Context) error {
 	// Use this context for any goroutines that needs to react to server shutdown
-	ctx, shutdownCancel := context.WithCancel(ctx)
+	ctx, shutdownCancel := context.WithCancel(cmdCtx)
 
 	err := config.InitServer(ctx, config.CacheType)
 	cobra.CheckErr(err)
@@ -103,9 +103,9 @@ func serveCacheInternal(ctx context.Context) error {
 		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 		select {
 		case sig := <-sigs:
-			log.Debugf("Received signal %v; will shutdown process", sig)
+			log.Infof("Received signal %v; will shutdown process", sig)
 			shutdownCancel()
-			return errors.New("Federation process has been cancelled")
+			return nil
 		case <-ctx.Done():
 			return nil
 		}
@@ -183,6 +183,5 @@ func serveCacheInternal(ctx context.Context) error {
 		return err
 	}
 
-	log.Info("Clean shutdown of the cache")
 	return nil
 }
