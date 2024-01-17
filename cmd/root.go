@@ -82,6 +82,10 @@ func Execute() error {
 	defer func() {
 		err := egrp.Wait()
 		if err != nil {
+			if err.Error() == "Federation process has been cancelled" {
+				log.Info("Process was shutdown")
+				return
+			}
 			log.Errorln("Error occurred when shutting down process:", err)
 		}
 	}()
