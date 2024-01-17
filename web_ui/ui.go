@@ -84,8 +84,17 @@ func configureWebResource(engine *gin.Engine) error {
 	engine.GET("/view/*path", func(ctx *gin.Context) {
 		path := ctx.Param("path")
 
+		// If the path is a directory indicate that we are looking for the index.html file
 		if strings.HasSuffix(path, "/") {
 			path += "index.html"
+		}
+
+		// If path doesn't have extension, is not a directory, and has a index file, redirect to index file
+		if !strings.Contains(path, ".") && !strings.HasSuffix(path, "/") {
+			if _, err := webAssets.ReadFile("frontend/out" + path + "/index.html"); err == nil {
+				ctx.Redirect(http.StatusFound, "/view/"+path+"/")
+				return
+			}
 		}
 
 		db := authDB.Load()
@@ -137,12 +146,20 @@ func configureWebResource(engine *gin.Engine) error {
 
 		// If just one server is enabled, redirect to that server
 		if len(config.GetEnabledServerString(true)) == 1 && path == "/index.html" {
-			ctx.Redirect(http.StatusFound, "/view/"+config.GetEnabledServerString(true)[0]+"/index.html")
+			ctx.Redirect(http.StatusFound, "/view/"+config.GetEnabledServerString(true)[0]+"/")
 			return
 		}
 
 		filePath := "frontend/out" + path
 		file, _ := webAssets.ReadFile(filePath)
+
+		// If the file is not found, return 404
+		if file == nil {
+			ctx.AbortWithStatus(http.StatusNotFound)
+			return
+		}
+
+		// If the file is found, return the file
 		ctx.Data(
 			http.StatusOK,
 			mime.TypeByExtension(filePath),
