@@ -147,7 +147,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		return nil
 	})
 
-	if err = server_utils.WaitUntilWorking(ctx, "GET", param.Server_ExternalWebUrl.GetString()+"/api/v1.0/servers", "Web UI", http.StatusOK); err != nil {
+	if err = server_utils.WaitUntilWorking(ctx, "GET", param.Server_ExternalWebUrl.GetString()+"/api/v1.0/health", "Web UI", http.StatusOK); err != nil {
 		log.Errorln("Web engine startup appears to have failed:", err)
 		return shutdownCancel, err
 	}
