@@ -180,14 +180,8 @@ func setLoginCookie(ctx *gin.Context, user string) {
 		return
 	}
 
-	ctx.SetCookie("login", string(signed), 30*60, "/api/v1.0",
-		ctx.Request.URL.Host, true, true)
-	// Explicitly set Cookie for /metrics endpoint as they are in different paths
-	ctx.SetCookie("login", string(signed), 30*60, "/metrics",
-		ctx.Request.URL.Host, true, true)
-	// Explicitly set Cookie for /view endpoint as they are in different paths
-	ctx.SetCookie("login", string(signed), 30*60, "/view",
-		ctx.Request.URL.Host, true, true)
+	// One cookie should be used for all path
+	ctx.SetCookie("login", string(signed), 30*60, "/", ctx.Request.URL.Host, true, true)
 	ctx.SetSameSite(http.SameSiteStrictMode)
 }
 
@@ -324,6 +318,13 @@ func resetLoginHandler(ctx *gin.Context) {
 	}
 }
 
+func logoutHandler(ctx *gin.Context) {
+	ctx.SetCookie("login", "", -1, "/", ctx.Request.URL.Host, true, true)
+	ctx.SetSameSite(http.SameSiteStrictMode)
+	ctx.Set("User", "")
+	ctx.JSON(http.StatusOK, gin.H{"message": "Success"})
+}
+
 // Returns the authentication status of the current user, including user id and role
 func whoamiHandler(ctx *gin.Context) {
 	res := WhoAmIRes{}
@@ -363,6 +364,7 @@ func configureAuthEndpoints(ctx context.Context, router *gin.Engine, egrp *errgr
 
 	group := router.Group("/api/v1.0/auth")
 	group.POST("/login", loginHandler)
+	group.POST("/logout", AuthHandler, logoutHandler)
 	group.POST("/initLogin", initLoginHandler)
 	group.POST("/resetLogin", AuthHandler, resetLoginHandler)
 	// Pass csrfhanlder only to the whoami route to generate CSRF token

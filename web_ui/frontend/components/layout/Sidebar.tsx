@@ -16,27 +16,72 @@
  *
  ***************************************************************/
 
+"use client"
+
 import Image from 'next/image'
-import Link from 'next/link'
-import {Typography, Box} from "@mui/material";
-import IconButton from "@mui/material/IconButton";
-import HomeIcon from '@mui/icons-material/Home';
-import BuildIcon from '@mui/icons-material/Build';
+import { useRouter } from 'next/navigation'
+import {Typography, Box, Button, Snackbar, Alert, Tooltip} from "@mui/material";
+import LogoutIcon from '@mui/icons-material/Logout';
 
 import styles from "../../app/page.module.css"
-import PelicanLogo from "../../public/static/images/PelicanPlatformLogo_Icon.png"
 import GithubIcon from "../../public/static/images/github-mark.png"
-import {ReactNode} from "react";
+import React, {ReactNode, useState} from "react";
 
 export const Sidebar = ({children}: {children: ReactNode}) => {
+    const router = useRouter()
+
+    const [error, setError] = useState("")
+
+    const handleLogout = async (e: React.MouseEvent<HTMLElement>) => {
+        try {
+            let response = await fetch("/api/v1.0/auth/logout", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                }
+            })
+
+            if(response.ok){
+                router.push("/")
+            } else {
+                try {
+                    let data = await response.json()
+                    if (data?.error) {
+                        setError(response.status + ": " + data['error'])
+                    } else {
+                        setError("Server error with status code " + response.status)
+                    }
+                } catch {
+                    setError("Server error with status code " + response.status)
+                }
+            }
+        } catch {
+            setError("Could not connect to server")
+        }
+    }
 
     return (
         <Box>
+            <Snackbar 
+                open={error!=""} 
+                autoHideDuration={6000}
+                onClose={() => {setError("")}}
+                anchorOrigin={{vertical: "top", horizontal: "center"}}
+            >
+                <Alert onClose={() => {setError("")}} severity="error" sx={{ width: '100%' }}>
+                    {error}
+                </Alert>
+            </Snackbar>
             <div className={styles.header} style={{display: "flex", flexDirection: "column", justifyContent:"space-between", padding:"1rem", top:0, position:"fixed", zIndex:"1", overflow: "hidden", height: "100vh"}}>
                 <div style={{display:"flex", flexDirection: "column"}}>
                     {children}
                 </div>
-                <Box display={"flex"} justifyContent={"center"}>
+                <Box display={"flex"} flexDirection={"column"} justifyContent={"center"} textAlign={"center"}>
+                    <Tooltip title="Logout" placement="right" arrow>
+                        <a aria-label='logout' onClick={handleLogout} style={{marginBottom: 10}}>
+                            <LogoutIcon/>
+                        </a>
+                    </Tooltip>
                     <a href={"https://github.com/PelicanPlatform"}>
                         <Image
                             src={GithubIcon}

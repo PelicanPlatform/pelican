@@ -524,3 +524,86 @@ func TestAdminAuthHandler(t *testing.T) {
 		})
 	}
 }
+
+func TestLogoutAPI(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
+	dirName := t.TempDir()
+	viper.Reset()
+	config.InitConfig()
+	viper.Set("ConfigDir", dirName)
+	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
+	err := config.InitServer(ctx, config.OriginType)
+	require.NoError(t, err)
+	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256())
+	require.NoError(t, err)
+	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
+
+	///////////////////////////SETUP///////////////////////////////////
+	//Add an admin user to file to configure
+	content := "admin:password\n"
+	_, err = tempPasswdFile.WriteString(content)
+	assert.NoError(t, err, "Error writing to temp password file")
+
+	//Configure UI
+	err = configureAuthDB()
+	assert.NoError(t, err)
+
+	//Create a user for testing
+	err = WritePasswordEntry("user", "password")
+	assert.NoError(t, err, "error writing a user")
+	password := "password"
+	user := "user"
+	payload := fmt.Sprintf(`{"user": "%s", "password": "%s"}`, user, password)
+
+	//Create a request
+	req, err := http.NewRequest("POST", "/api/v1.0/auth/login", strings.NewReader(payload))
+	assert.NoError(t, err)
+
+	req.Header.Set("Content-Type", "application/json")
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+	//Check ok http reponse
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	//Check that success message returned
+	assert.JSONEq(t, `{"msg":"Success"}`, recorder.Body.String())
+	//Get the cookie to test 'logout'
+	loginCookie := recorder.Result().Cookies()
+	cookieValue := loginCookie[0].Value
+
+	///////////////////////////////////////////////////////////////////
+
+	//Invoked with valid cookie, should return the username in the cookie
+	t.Run("With valid cookie", func(t *testing.T) {
+		req, err = http.NewRequest("POST", "/api/v1.0/auth/logout", nil)
+		assert.NoError(t, err)
+
+		req.AddCookie(&http.Cookie{
+			Name:  "login",
+			Value: cookieValue,
+		})
+
+		recorder = httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+
+		//Check for http reponse code 200
+		assert.Equal(t, 200, recorder.Code)
+		assert.Equal(t, 1, len(recorder.Result().Cookies()))
+		assert.Equal(t, "login", recorder.Result().Cookies()[0].Name)
+		assert.Greater(t, time.Now(), recorder.Result().Cookies()[0].Expires)
+	})
+	//Invoked without valid cookie, should return there is no logged-in user
+	t.Run("Without a valid cookie", func(t *testing.T) {
+		req, err = http.NewRequest("POST", "/api/v1.0/auth/logout", nil)
+		assert.NoError(t, err)
+
+		recorder = httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+
+		//Check for http reponse code 200
+		assert.Equal(t, 401, recorder.Code)
+	})
+}
