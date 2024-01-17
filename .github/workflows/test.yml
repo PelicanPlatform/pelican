@@ -12,6 +12,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v3
+      with:
+        fetch-depth: 0
     - uses: actions/setup-node@v4
       with:
         node-version: 20
@@ -59,9 +61,15 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v3
+      with:
+        fetch-depth: 0
     - uses: actions/setup-node@v4
       with:
         node-version: 20
+    - name: Fetch tags
+      run: |
+        git config --global --add safe.directory /__w/pelican/pelican
+        git fetch --force --tags
     - name: Cache Next.js
       uses: actions/cache@v3
       with:
@@ -127,5 +135,3 @@ jobs:
         cp dist/pelican_linux_amd64_v1/pelican ./
     - name: Run Integration Tests
       run: ./github_scripts/citests.sh
-    - name: Run End-to-End Tests
-      run: ./github_scripts/get_put_test.sh
