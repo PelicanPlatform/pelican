@@ -133,7 +133,7 @@ func serveCacheInternal(cmdCtx context.Context) error {
 
 	egrp.Go(func() error {
 		if err := web_ui.RunEngine(cmdCtx, engine, egrp); err != nil {
-			log.Panicln("Failure when running the web engine:", err)
+			log.Errorln("Failure when running the web engine:", err)
 			return err
 		} else {
 			return err
