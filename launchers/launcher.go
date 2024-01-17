@@ -53,7 +53,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		case sig := <-sigs:
 			log.Debugf("Received signal %v; will shutdown process", sig)
 			shutdownCancel()
-			return errors.New("Federation process has been cancelled")
+			return nil
 		case <-ctx.Done():
 			return nil
 		}
@@ -139,7 +139,6 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 	egrp.Go(func() error {
 		if err := web_ui.RunEngine(ctx, engine, egrp); err != nil {
 			log.Errorln("Failure when running the web engine:", err)
-			shutdownCancel()
 			return err
 		}
 		log.Info("Web engine has shutdown")

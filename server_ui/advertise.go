@@ -66,6 +66,7 @@ func LaunchPeriodicAdvertise(ctx context.Context, egrp *errgroup.Group, servers 
 					metrics.SetComponentHealthStatus(metrics.OriginCache_Federation, metrics.StatusOK, "")
 				}
 			case <-ctx.Done():
+				log.Infoln("Periodic advertisement loop has been terminated")
 				return nil
 			}
 		}
