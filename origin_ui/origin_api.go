@@ -113,7 +113,7 @@ func LaunchPeriodicDirectorTimeout(ctx context.Context, egrp *errgroup.Group) {
 				log.Debugln("Got notification from director")
 				directorTimeoutTicker.Reset(directorTimeoutDuration)
 			case <-ctx.Done():
-				log.Infoln("Gracefully terminating the director-health test timeout loop...")
+				log.Infoln("Director health test timeout loop has been terminated")
 				return nil
 			}
 		}

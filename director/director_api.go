@@ -204,11 +204,12 @@ func ConfigTTLCache(ctx context.Context, egrp *errgroup.Group) {
 	// Put stop logic in a separate goroutine so that parent function is not blocking
 	egrp.Go(func() error {
 		<-ctx.Done()
-		log.Info("Gracefully stopping TTL cache eviction...")
+		log.Info("Gracefully stopping director TTL cache eviction...")
 		serverAds.DeleteAll()
 		serverAds.Stop()
 		namespaceKeys.DeleteAll()
 		namespaceKeys.Stop()
+		log.Info("Director TTL cache eviction has been stopped")
 		return nil
 	})
 }

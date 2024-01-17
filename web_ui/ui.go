@@ -385,7 +385,7 @@ func runEngineWithListener(ctx context.Context, ln net.Listener, engine *gin.Eng
 		if err != nil {
 			log.Panicln("Failed to shutdown server:", err)
 		}
-		return nil
+		return err
 	})
 
 	if err := server.ServeTLS(ln, "", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {
