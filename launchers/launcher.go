@@ -51,7 +51,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 		select {
 		case sig := <-sigs:
-			log.Debugf("Received signal %v; will shutdown process", sig)
+			log.Warningf("Received signal %v; will shutdown process", sig)
 			shutdownCancel()
 			return nil
 		case <-ctx.Done():
