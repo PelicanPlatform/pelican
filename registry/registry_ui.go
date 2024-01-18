@@ -387,6 +387,15 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 		return
 	}
 
+	if validCF, err := validateCustomFields(ns.CustomFields, true); !validCF {
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Error validating custom fields: %v", err)})
+			return
+		}
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Invalid custom field: %s", err.Error())})
+		return
+	}
+
 	if !isUpdate { // Create
 		ns.AdminMetadata.UserID = user
 		// Overwrite status to Pending to filter malicious request

@@ -172,12 +172,18 @@ func validateInstitution(instID string) (bool, error) {
 	return false, nil
 }
 
-func validateCustomFields(customFields map[string]interface{}) (bool, error) {
+// Validates if customFields are valid based on config. Set exactMatch to false to be
+// backward compatible with legacy custom fields that were once defined but removed
+func validateCustomFields(customFields map[string]interface{}, exactMatch bool) (bool, error) {
 	if len(customRegFieldsConfigs) == 0 {
 		if customFields != nil && len(customFields) > 0 {
 			return false, errors.New("Bad configuration, Registry.CustomRegistrationFields is not set while validate against custom fields")
 		} else {
 			return true, nil
+		}
+	} else {
+		if customFields == nil {
+			return false, errors.New("Can't validate against nil customFields")
 		}
 	}
 	for _, conf := range customRegFieldsConfigs {
@@ -222,6 +228,21 @@ func validateCustomFields(customFields map[string]interface{}) (bool, error) {
 				}
 			default:
 				return false, errors.New(fmt.Sprintf("The type of %q is not supported", conf.Name))
+			}
+		}
+	}
+	// Optioanlly check if the customFields are defined in config
+	if exactMatch {
+		for key := range customFields {
+			found := false
+			for _, conf := range customRegFieldsConfigs {
+				if conf.Name == key {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return false, errors.New(fmt.Sprintf("%q is not a valid custom field", key))
 			}
 		}
 	}
