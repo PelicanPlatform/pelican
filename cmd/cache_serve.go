@@ -24,6 +24,9 @@ import (
 	"context"
 	"encoding/json"
 	"net/url"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/pelicanplatform/pelican/cache_ui"
@@ -74,97 +77,113 @@ func getNSAdsFromDirector() ([]director.NamespaceAd, error) {
 }
 
 func serveCache(cmd *cobra.Command, _ []string) error {
-	err := serveCacheInternal(cmd.Context())
+	cancel, err := serveCacheInternal(cmd.Context())
 	if err != nil {
+		cancel()
 		return err
 	}
 
 	return nil
 }
 
-func serveCacheInternal(cmdCtx context.Context) error {
+func serveCacheInternal(cmdCtx context.Context) (context.CancelFunc, error) {
 	// Use this context for any goroutines that needs to react to server shutdown
-	err := config.InitServer(cmdCtx, config.CacheType)
+	ctx, shutdownCancel := context.WithCancel(cmdCtx)
+
+	err := config.InitServer(ctx, config.CacheType)
 	cobra.CheckErr(err)
 
-	egrp, ok := cmdCtx.Value(config.EgrpKey).(*errgroup.Group)
+	egrp, ok := ctx.Value(config.EgrpKey).(*errgroup.Group)
 	if !ok {
 		egrp = &errgroup.Group{}
 	}
 
-	err = xrootd.SetUpMonitoring(cmdCtx, egrp)
+	// Added the same logic from launcher.go as we currently launch cache separately from other services
+	egrp.Go(func() error {
+		log.Debug("Will shutdown process on signal")
+		sigs := make(chan os.Signal, 1)
+		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+		select {
+		case sig := <-sigs:
+			log.Warningf("Received signal %v; will shutdown process", sig)
+			shutdownCancel()
+			return nil
+		case <-ctx.Done():
+			return nil
+		}
+	})
+
+	err = xrootd.SetUpMonitoring(ctx, egrp)
 	if err != nil {
-		return err
+		return shutdownCancel, err
 	}
 
 	nsAds, err := getNSAdsFromDirector()
 	if err != nil {
-		return err
+		return shutdownCancel, err
 	}
 
 	cacheServer := &cache_ui.CacheServer{}
 	cacheServer.SetNamespaceAds(nsAds)
 	err = server_ui.CheckDefaults(cacheServer)
 	if err != nil {
-		return err
+		return shutdownCancel, err
 	}
 
 	cachePrefix := "/caches/" + param.Xrootd_Sitename.GetString()
 
 	viper.Set("Origin.NamespacePrefix", cachePrefix)
 
-	if err = server_ui.RegisterNamespaceWithRetry(cmdCtx, egrp); err != nil {
-		return err
+	if err = server_ui.RegisterNamespaceWithRetry(ctx, egrp); err != nil {
+		return shutdownCancel, err
 	}
 
-	if err = server_ui.LaunchPeriodicAdvertise(cmdCtx, egrp, []server_utils.XRootDServer{cacheServer}); err != nil {
-		return err
+	if err = server_ui.LaunchPeriodicAdvertise(ctx, egrp, []server_utils.XRootDServer{cacheServer}); err != nil {
+		return shutdownCancel, err
 	}
 
 	engine, err := web_ui.GetEngine()
 	if err != nil {
-		return err
+		return shutdownCancel, err
 	}
 
 	// Set up necessary APIs to support Web UI, including auth and metrics
-	if err := web_ui.ConfigureServerWebAPI(cmdCtx, engine, egrp); err != nil {
-		return err
+	if err := web_ui.ConfigureServerWebAPI(ctx, engine, egrp); err != nil {
+		return shutdownCancel, err
 	}
 
-	egrp.Go(func() error {
-		if err := web_ui.RunEngine(cmdCtx, engine, egrp); err != nil {
+	egrp.Go(func() (err error) {
+		if err = web_ui.RunEngine(ctx, engine, egrp); err != nil {
 			log.Errorln("Failure when running the web engine:", err)
-			return err
-		} else {
-			return err
 		}
+		return
 	})
 	if param.Server_EnableUI.GetBool() {
-		if err = web_ui.ConfigureEmbeddedPrometheus(cmdCtx, engine); err != nil {
-			return errors.Wrap(err, "Failed to configure embedded prometheus instance")
+		if err = web_ui.ConfigureEmbeddedPrometheus(ctx, engine); err != nil {
+			return shutdownCancel, errors.Wrap(err, "Failed to configure embedded prometheus instance")
 		}
 
-		if err = web_ui.InitServerWebLogin(cmdCtx); err != nil {
-			return err
+		if err = web_ui.InitServerWebLogin(ctx); err != nil {
+			return shutdownCancel, err
 		}
 	}
 
-	configPath, err := xrootd.ConfigXrootd(cmdCtx, false)
+	configPath, err := xrootd.ConfigXrootd(ctx, false)
 	if err != nil {
-		return err
+		return shutdownCancel, err
 	}
 
-	xrootd.LaunchXrootdMaintenance(cmdCtx, cacheServer, 2*time.Minute)
+	xrootd.LaunchXrootdMaintenance(ctx, cacheServer, 2*time.Minute)
 
 	log.Info("Launching cache")
 	launchers, err := xrootd.ConfigureLaunchers(false, configPath, false)
 	if err != nil {
-		return err
+		return shutdownCancel, err
 	}
 
-	if err = daemon.LaunchDaemons(cmdCtx, launchers, egrp); err != nil {
-		return err
+	if err = daemon.LaunchDaemons(ctx, launchers, egrp); err != nil {
+		return shutdownCancel, err
 	}
 
-	return nil
+	return shutdownCancel, nil
 }

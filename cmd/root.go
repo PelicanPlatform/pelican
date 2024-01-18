@@ -82,7 +82,7 @@ func Execute() error {
 	defer func() {
 		err := egrp.Wait()
 		if err != nil {
-			log.Errorln("Fatal error occured that leads to shutdown of the process:", err)
+			log.Errorln("Fatal error occurred that lead to the shutdown of the process:", err)
 		} else {
 			// Use Error instead of Info because our default log level is Error
 			log.Error("Pelican is safely exited")
