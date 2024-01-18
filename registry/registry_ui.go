@@ -61,7 +61,7 @@ type (
 
 	Institution struct {
 		Name string `mapstructure:"name" json:"name" yaml:"name"`
-		ID   string `mapstructure:"id" json:"id" yaml:"name"`
+		ID   string `mapstructure:"id" json:"id" yaml:"id"`
 	}
 )
 
