@@ -175,7 +175,7 @@ func validateInstitution(instID string) (bool, error) {
 // backward compatible with legacy custom fields that were once defined but removed
 func validateCustomFields(customFields map[string]interface{}, exactMatch bool) (bool, error) {
 	if len(customRegFieldsConfigs) == 0 {
-		if customFields != nil && len(customFields) > 0 {
+		if len(customFields) > 0 {
 			return false, errors.New("Bad configuration, Registry.CustomRegistrationFields is not set while validate against custom fields")
 		} else {
 			return true, nil
