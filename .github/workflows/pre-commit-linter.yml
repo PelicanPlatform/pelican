@@ -1,15 +1,15 @@
-name: golangci-lint
+name: pre-commit-linter
 on:
   push:
     tags:
-      - '*'
+      - "*"
     branches:
       - master
       - main
   pull_request:
 jobs:
-  golangci:
-    name: lint
+  pre-commit-linter:
+    name: pre-commit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -24,7 +24,12 @@ jobs:
         id: generate-placeholder
         run: |
           go generate ./...
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          version: latest
+          python-version: "3.9"
+
+      # Our pre-commit config runs golangci-lint so we can merge them
+      - name: Run pre-commit
+        uses: pre-commit/action@v3.0.0
