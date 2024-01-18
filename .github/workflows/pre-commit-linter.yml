@@ -34,11 +34,11 @@ jobs:
         with:
           python-version: "3.9"
 
-      - name: Run pre-commit
-        uses: pre-commit/action@v3.0.0
-
       # We still run this so that we can get the nice hint of gofmt issues inline
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v3
         with:
           version: latest
+
+      - name: Run pre-commit
+        uses: pre-commit/action@v3.0.0
