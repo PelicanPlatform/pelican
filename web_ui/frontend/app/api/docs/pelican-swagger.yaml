@@ -106,7 +106,7 @@ definitions:
       institution:
         type: string
         description: >
-          "Unique identifier of the institution to register to. 
+          "Unique identifier of the institution to register to.
           For Pelican running in OSDF mode, this will be the OSG ID of the institution"
         example: "https://osg-htc.org/iid/01y2jtd41"
       security_contact_user_id:
@@ -131,6 +131,8 @@ definitions:
         description: "Timestamp of the last update"
   AdminMetadataForRegistration:
     type: object
+    required:
+      - "institution"
     properties:
       description:
         type: string
@@ -140,7 +142,7 @@ definitions:
       institution:
         type: string
         description: >
-          "Unique identifier of the institution to register to. 
+          "Unique identifier of the institution to register to.
           For Pelican running in OSDF mode, this will be the OSG ID of the institution"
         example: "https://osg-htc.org/iid/01y2jtd41"
       security_contact_user_id:
@@ -169,6 +171,9 @@ definitions:
         description: The user identity we get from CILogon if the namespace is registered via CLI with `--with-identity` flag
       admin_metadata:
         $ref: "#/definitions/AdminMetadata"
+      custom_fields:
+        type: object
+        description: The custom fields user registered, configurable by setting Registry.CustomRegistrationFields.
   Institution:
     type: object
     properties:
@@ -201,8 +206,14 @@ definitions:
           It should be a marshalled (stringfied) JSON that contains either one JWK or a JWKS
       admin_metadata:
         $ref: "#/definitions/AdminMetadata"
+      custom_fields:
+        type: object
+        description: The custom fields user registered, configurable by setting Registry.CustomRegistrationFields.
   NamespaceForRegistration:
     type: object
+    required:
+      - "prefix"
+      - "pubkey"
     properties:
       prefix:
         type: string
@@ -215,6 +226,9 @@ definitions:
           It should be a marshalled (stringfied) JSON that contains either one JWK or a JWKS
       admin_metadata:
         $ref: "#/definitions/AdminMetadataForRegistration"
+      custom_fields:
+        type: object
+        description: The custom fields to register, configurable by setting Registry.CustomRegistrationFields.
   RegistrationFieldType:
     type: string
     enum:
@@ -222,13 +236,35 @@ definitions:
       - int
       - enum
       - datetime
+    example: enum
   RegistrationField:
     type: object
+    required:
+      - "name"
+      - "displayed_name"
+      - "type"
+      - "required"
     properties:
       name:
         type: string
-        description: The name of the field available to register
-        example: "prefix"
+        description: |
+          The name of the field as the key of the object to submit the request. Note that if the
+          name is dot '.' separated, it means the hierarchy of the object.
+
+          For example, `custom_fields.department` means that your request needs to be
+
+          ```json
+            {
+              "custom_fields": {
+                "department": "value"
+              }
+            }
+          ```
+        example: "custom_fields.department"
+      displayed_name:
+        type: string
+        description: The human-readable name of the field
+        example: "Department"
       type:
         description: The data type of the field
         $ref: "#/definitions/RegistrationFieldType"
@@ -239,7 +275,16 @@ definitions:
         description: The available options if the field is "enum" type
         type: array
         items:
-          type: string
+          type: object
+          properties:
+            name:
+              type: string
+              description: The name of the option that will appear in UI
+              example: "Option A"
+            id:
+              type: string
+              description: The unique identifier of the option that will be stored in db
+              example: "option1"
           minItems: 0
 
 tags:
