@@ -154,6 +154,47 @@ func createNamespaceTable() {
 	if err != nil {
 		log.Fatalf("Failed to create namespace table: %v", err)
 	}
+
+	// Run a manual migration to add "custom_fields" field
+	// Check if the column exists
+	log.Info("Run manual migration for 'custom_fields' in namespace table")
+	columnExists := false
+	rows, err := db.Query(`PRAGMA table_info(namespace);`)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var (
+			cid       int
+			name      string
+			ctype     string
+			notnull   int
+			dfltValue interface{}
+			pk        int
+		)
+		err = rows.Scan(&cid, &name, &ctype, &notnull, &dfltValue, &pk)
+		if err != nil {
+			log.Fatal(err)
+		}
+		if name == "custom_fields" {
+			columnExists = true
+			break
+		}
+	}
+
+	// If the column does not exist, add it
+	if !columnExists {
+		_, err = db.Exec(`ALTER TABLE namespace ADD COLUMN custom_fields TEXT DEFAULT ''`)
+		if err != nil {
+			log.Fatal(err)
+		}
+		log.Info("Column 'custom_fields' added.")
+	} else {
+		log.Info("Column 'custom_fields' already exists.")
+	}
+
 }
 
 func createTopologyTable() {

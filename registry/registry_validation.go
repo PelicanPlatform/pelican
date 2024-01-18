@@ -22,7 +22,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pelicanplatform/pelican/param"
@@ -206,13 +205,13 @@ func validateCustomFields(customFields map[string]interface{}, exactMatch bool) 
 					return false, errors.New(fmt.Sprintf("%q is expected to be a boolean, but got %v", conf.Name, val))
 				}
 			case "datetime":
-				switch v := val.(type) {
+				switch val.(type) {
 				case int:
-					time.Unix(int64(v), 0)
+					break
 				case int32:
-					time.Unix(int64(v), 0)
+					break
 				case int64:
-					time.Unix(int64(v), 0)
+					break
 				default:
 					return false, fmt.Errorf("%q is expected to be a Unix timestamp, but got %v", conf.Name, val)
 				}
