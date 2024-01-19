@@ -513,7 +513,9 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string, payload *
 	// Set the headers
 	req.HTTPRequest.Header.Set("X-Transfer-Status", "true")
 	req.HTTPRequest.Header.Set("TE", "trailers")
-	req.HTTPRequest.Header.Set("User-Agent", payload.ProjectName)
+	if payload != nil && payload.ProjectName != "" {
+		req.HTTPRequest.Header.Set("User-Agent", payload.ProjectName)
+	}
 	req.WithContext(ctx)
 
 	// Test the transfer speed every 5 seconds
