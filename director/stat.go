@@ -24,10 +24,12 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
@@ -36,7 +38,7 @@ type (
 	objectMetadata struct {
 		ServerAd      ServerAd
 		Checksum      string
-		ContentLength int64
+		ContentLength int
 	}
 
 	timeoutError struct {
@@ -49,6 +51,11 @@ type (
 
 	cancelledError struct {
 		Message string
+	}
+
+	ObjectStat struct {
+		ReqHandler func(objectName string, originAd ServerAd, timeout time.Duration, maxCancelCtx context.Context) (*objectMetadata, error)
+		Query      func(objectName string, cancelContext context.Context) ([]*objectMetadata, error)
 	}
 )
 
@@ -73,14 +80,36 @@ func (meta objectMetadata) String() string {
 	)
 }
 
-func sendHeadReqToOrigin(objectName string, originAd ServerAd, timeout time.Duration, maxCancelCtx context.Context) (*objectMetadata, error) {
-	xrootdUrl := originAd.URL
+func NewObjectStat() *ObjectStat {
+	stat := &ObjectStat{}
+	stat.ReqHandler = stat.sendHeadReqToOrigin
+	stat.Query = stat.queryOriginsForObject
+	return stat
+}
+
+func (stat *ObjectStat) sendHeadReqToOrigin(objectName string, originAd ServerAd, timeout time.Duration, maxCancelCtx context.Context) (*objectMetadata, error) {
+	tokenConf := utils.TokenConfig{
+		Lifetime:     time.Minute,
+		TokenProfile: utils.WLCG,
+		Audience:     []string{originAd.URL.String()},
+		Subject:      originAd.URL.String(),
+		// Federation as the issuer
+		Issuer: param.Server_ExternalWebUrl.GetString(),
+	}
+	tokenConf.AddRawScope("storage.read:/")
+	token, err := tokenConf.CreateToken()
+	if err != nil {
+		return nil, errors.Wrap(err, "Failed to create token")
+	}
+
 	client := http.Client{Transport: config.GetTransport(), Timeout: timeout}
-	reqUrl := xrootdUrl.JoinPath(objectName)
+	reqUrl := originAd.URL.JoinPath(objectName)
 	req, err := http.NewRequestWithContext(maxCancelCtx, "HEAD", reqUrl.String(), nil)
 	if err != nil {
 		return nil, errors.Wrap(err, "Error creating request")
 	}
+	req.Header.Set("Authorization", "Bearer "+token)
+
 	res, err := client.Do(req)
 	if err != nil {
 		urlErr, ok := err.(*url.Error)
@@ -95,30 +124,28 @@ func sendHeadReqToOrigin(objectName string, originAd ServerAd, timeout time.Dura
 			}
 		}
 	}
-	if res.StatusCode != 200 {
-		// TODO: handle 404 (if that's what xrootd returns)
+	if res.StatusCode == 404 {
+		return nil, notFoundError{"File not found on the server " + originAd.URL.String()}
+	} else if res.StatusCode != 200 {
 		resBody, err := io.ReadAll(res.Body)
 		if err != nil {
 			return nil, errors.Wrap(err, "Failed to read error response body")
 		}
 		return nil, errors.New(fmt.Sprintf("Unknown origin response with status code %d and message: %s", res.StatusCode, string(resBody)))
 	} else {
-		return &objectMetadata{}, nil
+		cLenStr := res.Header.Get("Content-Length")
+		clen, err := strconv.Atoi(cLenStr)
+		if err != nil {
+			return nil, errors.New(fmt.Sprintf("Error parsing content-length header from response. Header was: %s", cLenStr))
+		}
+		return &objectMetadata{ContentLength: clen, ServerAd: originAd}, nil
 	}
 }
 
 // TODOs:
-// 1. Config values
-//
-// 2. Check objectName, ?how to ensure it's an object not a directory?
-// find prefix matched namespaces and their serverAds, Origins only
-//
-// 3. For a list of serverAds,
-// [] helper function to create token and setup request itself
-//
 // 4. Add new command line argument
 
-func QueryOriginsForObject(objectName string, cancelContext context.Context) ([]*objectMetadata, error) {
+func (stat *ObjectStat) queryOriginsForObject(objectName string, cancelContext context.Context) ([]*objectMetadata, error) {
 	_, originAds, _ := GetAdsForPath(objectName)
 	minReq := param.Director_MinStatResponse.GetInt()
 	maxReq := param.Director_MaxStatResponse.GetInt()
@@ -139,7 +166,7 @@ func QueryOriginsForObject(objectName string, cancelContext context.Context) ([]
 		// to goroutine
 		func(intOriginAd ServerAd) {
 			originUtil.Errgroup.Go(func() error {
-				metadata, err := sendHeadReqToOrigin(objectName, intOriginAd, timeout, maxCancelCtx)
+				metadata, err := stat.ReqHandler(objectName, intOriginAd, timeout, maxCancelCtx)
 
 				if err != nil {
 					switch e := err.(type) {
