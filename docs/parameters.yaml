@@ -556,6 +556,36 @@ root_default: /var/cache/pelican/maxmind/GeoLite2-City.mmdb
 default: $ConfigBase/maxmind/GeoLite2-city.mmdb
 components: ["director"]
 ---
+name: Director.MinStatResponse
+description: >-
+  A positive integer indicating minimum number of origin's responses required for a `stat` call
+type: int
+default: 1
+components: ["director"]
+---
+name: Director.MaxStatResponse
+description: >-
+  A positive integer indicating maximum number of origin's responses required for a `stat` call.
+  `stat` call will cancel the rest of the ongoing query if max reponse is hit.
+type: int
+default: 1
+components: ["director"]
+---
+name: Director.StatTimeout
+description: >-
+  The timeout for a single `stat` request.
+type: duration
+default: 200ms
+components: ["director"]
+---
+name: Director.StatConcurrencyLimit
+description: >-
+  The maximum number of concurrent `stat` request to a single origin server.
+  Additional requests are blocked until total requests for the origin is below limit
+type: int
+default: 100
+components: ["director"]
+---
 ############################
 #  Registry-level configs  #
 ############################
