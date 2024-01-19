@@ -742,6 +742,17 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 		log.Warningln("Invalid Monitoring.TokenRefreshInterval or Monitoring.TokenExpiresIn. Fallback to 59m for refresh interval and 1h for valid interval")
 	}
 
+	if currentServers.IsEnabled(DirectorType) {
+		minStatRes := param.Director_MinStatResponse.GetInt()
+		maxStatRes := param.Director_MaxStatResponse.GetInt()
+		if minStatRes <= 0 || maxStatRes <= 0 {
+			return errors.New("Invalid Director.MinStatResponse and Director.MaxStatResponse. MaxStatResponse and MinStatResponse must be positive integers")
+		}
+		if maxStatRes < minStatRes {
+			return errors.New("Invalid Director.MinStatResponse and Director.MaxStatResponse. MaxStatResponse is less than MinStatResponse")
+		}
+	}
+
 	// Unmarshal Viper config into a Go struct
 	unmarshalledConfig, err := param.UnmarshalConfig()
 	if err != nil || unmarshalledConfig == nil {

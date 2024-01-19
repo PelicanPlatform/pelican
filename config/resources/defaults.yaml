@@ -23,6 +23,10 @@ Server:
   EnableUI: true
 Director:
   DefaultResponse: cache
+  MinStatResponse: 1
+  MaxStatResponse: 1
+  StatTimeout: 200ms
+  StatConcurrencyLimit: 1000
 Cache:
   Port: 8443
 Origin:
@@ -55,7 +59,7 @@ Transport:
   ExpectContinueTimeout: 1s
   ResponseHeaderTimeout: 10s
 OIDC:
-  AuthorizationEndpoint:  "https://cilogon.org/authorize"
+  AuthorizationEndpoint: "https://cilogon.org/authorize"
   DeviceAuthEndpoint: "https://cilogon.org/oauth2/device_authorization"
   TokenEndpoint: "https://cilogon.org/oauth2/token"
   UserInfoEndpoint: "https://cilogon.org/oauth2/userinfo"

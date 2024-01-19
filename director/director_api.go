@@ -20,6 +20,7 @@ package director
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -198,6 +199,19 @@ func ConfigTTLCache(ctx context.Context, egrp *errgroup.Group) {
 
 			// Remove the cancel function from the map as it's no longer needed
 			delete(healthTestCancelFuncs, i.Key())
+		}
+
+		if i.Key().Type == OriginType {
+			originStatUtilsMutex.Lock()
+			defer originStatUtilsMutex.Unlock()
+			statUtil, ok := originStatUtils[i.Key()]
+			if ok {
+				statUtil.Cancel()
+				if err := statUtil.Errgroup.Wait(); err != nil {
+					log.Info(fmt.Sprintf("Error happened when stopping origin %q stat goroutine group: %v", i.Key().Name, err))
+				}
+				delete(originStatUtils, i.Key())
+			}
 		}
 	})
 

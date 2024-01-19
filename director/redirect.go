@@ -30,6 +30,7 @@ import (
 	"sync"
 
 	"github.com/pelicanplatform/pelican/param"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/gin-gonic/gin"
 	"github.com/hashicorp/go-version"
@@ -42,11 +43,20 @@ type PromDiscoveryItem struct {
 	Labels  map[string]string `json:"labels"`
 }
 
+type originStatUtil struct {
+	Context  context.Context
+	Cancel   context.CancelFunc
+	Errgroup *errgroup.Group
+}
+
 var (
 	minClientVersion, _        = version.NewVersion("7.0.0")
 	minOriginVersion, _        = version.NewVersion("7.0.0")
 	healthTestCancelFuncs      = make(map[ServerAd]context.CancelFunc)
 	healthTestCancelFuncsMutex = sync.RWMutex{}
+
+	originStatUtils      = make(map[ServerAd]originStatUtil)
+	originStatUtilsMutex = sync.RWMutex{}
 )
 
 // The endpoint for director Prometheus instance to discover Pelican servers
@@ -491,6 +501,24 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType ServerTy
 		ctx, cancel := context.WithCancel(context.Background())
 		healthTestCancelFuncs[sAd] = cancel
 		LaunchPeriodicDirectorTest(ctx, sAd)
+	}
+
+	if sType == OriginType {
+		originStatUtilsMutex.Lock()
+		defer originStatUtilsMutex.Unlock()
+		statUtil, ok := originStatUtils[sAd]
+		if !ok || statUtil.Errgroup == nil {
+			baseCtx, cancel := context.WithCancel(context.Background())
+			concLimit := param.Director_StatConcurrencyLimit.GetInt()
+			statErrGrp := errgroup.Group{}
+			statErrGrp.SetLimit(concLimit)
+			newUtil := originStatUtil{
+				Errgroup: &statErrGrp,
+				Cancel:   cancel,
+				Context:  baseCtx,
+			}
+			originStatUtils[sAd] = newUtil
+		}
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{"msg": "Successful registration"})

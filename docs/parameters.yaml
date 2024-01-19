@@ -581,9 +581,11 @@ components: ["director"]
 name: Director.StatConcurrencyLimit
 description: >-
   The maximum number of concurrent `stat` request to a single origin server.
-  Additional requests are blocked until total requests for the origin is below limit
+  Additional requests are blocked until total requests for the origin is below limit.
+  See [golang.org/x/sync/errgroup](https://pkg.go.dev/golang.org/x/sync@v0.6.0/errgroup#Group.SetLimit)
+  for detail
 type: int
-default: 100
+default: 1000
 components: ["director"]
 ---
 ############################
