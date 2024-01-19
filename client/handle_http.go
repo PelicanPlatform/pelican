@@ -353,7 +353,7 @@ func download_http(sourceUrl *url.URL, destination string, payload *payloadStruc
 	// Start the workers
 	for i := 1; i <= 5; i++ {
 		wg.Add(1)
-		go startDownloadWorker(sourceUrl.Path, destination, token, transfers, &wg, workChan, results)
+		go startDownloadWorker(sourceUrl.Path, destination, token, transfers, payload, &wg, workChan, results)
 	}
 
 	// For each file, send it to the worker
@@ -389,7 +389,7 @@ func download_http(sourceUrl *url.URL, destination string, payload *payloadStruc
 
 }
 
-func startDownloadWorker(source string, destination string, token string, transfers []TransferDetails, wg *sync.WaitGroup, workChan <-chan string, results chan<- TransferResults) {
+func startDownloadWorker(source string, destination string, token string, transfers []TransferDetails, payload *payloadStruct, wg *sync.WaitGroup, workChan <-chan string, results chan<- TransferResults) {
 
 	defer wg.Done()
 	var success bool
@@ -407,7 +407,7 @@ func startDownloadWorker(source string, destination string, token string, transf
 		for _, transfer := range transfers {
 			transfer.Url.Path = file
 			log.Debugln("Constructed URL:", transfer.Url.String())
-			if downloaded, err = DownloadHTTP(transfer, finalDest, token); err != nil {
+			if downloaded, err = DownloadHTTP(transfer, finalDest, token, payload); err != nil {
 				log.Debugln("Failed to download:", err)
 				var ope *net.OpError
 				var cse *ConnectionSetupError
@@ -468,7 +468,7 @@ func parseTransferStatus(status string) (int, string) {
 }
 
 // DownloadHTTP - Perform the actual download of the file
-func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, error) {
+func DownloadHTTP(transfer TransferDetails, dest string, token string, payload *payloadStruct) (int64, error) {
 
 	// Create the client, request, and context
 	client := grab.NewClient()
@@ -513,6 +513,7 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 	// Set the headers
 	req.HTTPRequest.Header.Set("X-Transfer-Status", "true")
 	req.HTTPRequest.Header.Set("TE", "trailers")
+	req.HTTPRequest.Header.Set("User-Agent", payload.ProjectName)
 	req.WithContext(ctx)
 
 	// Test the transfer speed every 5 seconds
