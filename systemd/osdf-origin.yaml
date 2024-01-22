@@ -1,6 +1,7 @@
-## Enable Debug to send logs, including XRootD logs, to the system journal
+## Enable Debug to send detailed logs, including XRootD logs, to the log file
 # Debug: false
-# Logging:
+Logging:
+  LogLocation: /var/log/osdf-origin.log
 #   Level: "Error"
 Server:
   TLSCertificate: /etc/grid-security/xrd/xrdcert.pem
