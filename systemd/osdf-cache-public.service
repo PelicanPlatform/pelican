@@ -1,0 +1,9 @@
+[Unit]
+Description = Pelican service osdf-cache, public endpoint
+After = network.target nss-lookup.target
+
+[Service]
+ExecStart = /usr/bin/osdf --config /etc/pelican/osdf-cache-public.yaml cache serve
+
+[Install]
+WantedBy = multi-user.target

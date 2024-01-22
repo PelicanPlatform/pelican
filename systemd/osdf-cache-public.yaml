@@ -1,7 +1,7 @@
 ## Enable Debug to send detailed logs, including XRootD logs, to the log file
 # Debug: false
 Logging:
-  LogLocation: /var/log/osdf-cache.log
+  LogLocation: /var/log/osdf-cache-public.log
 ##  Valid Levels are Trace, Debug, Info, Warning, Error, Fatal and Panic.
 #   Level: "Error"
 Federation:
@@ -12,13 +12,13 @@ Server:
   TLSCACertificateFile: /etc/pki/tls/certs/ca-bundle.crt
   # TLSCACertificateDirectory: /etc/grid-security/certificates
   EnableUI: false
-  # do not conflict with the public cache, if one is running
-  WebPort: 8445
+  # do not conflict with the authenticated cache, if one is running
+  WebPort: 8444
 #  Hostname: f.q.d.n
 Xrootd:
   Sitename: TOPOLOGY_RESOURCE_NAME
-  Authfile: /run/stash-cache-auth/Authfile
-  RunLocation: /run/pelican/osdf-cache/xrootd
+  Authfile: /run/stash-cache/Authfile
+  RunLocation: /run/pelican/osdf-cache-public/xrootd
 Cache:
-  Port: 8443
+  Port: 8000
   DataLocation: "/mnt/osdf"
