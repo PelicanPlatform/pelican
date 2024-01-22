@@ -106,7 +106,7 @@ definitions:
       institution:
         type: string
         description: >
-          "Unique identifier of the institution to register to. 
+          "Unique identifier of the institution to register to.
           For Pelican running in OSDF mode, this will be the OSG ID of the institution"
         example: "https://osg-htc.org/iid/01y2jtd41"
       security_contact_user_id:
@@ -140,7 +140,7 @@ definitions:
       institution:
         type: string
         description: >
-          "Unique identifier of the institution to register to. 
+          "Unique identifier of the institution to register to.
           For Pelican running in OSDF mode, this will be the OSG ID of the institution"
         example: "https://osg-htc.org/iid/01y2jtd41"
       security_contact_user_id:

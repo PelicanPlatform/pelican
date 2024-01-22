@@ -113,7 +113,7 @@ package token_scopes
 type TokenScope string
 
 const (
-	{{range $idx, $scope := .Scopes}}
+	{{- range $idx, $scope := .Scopes}}
 	{{$scope.Display}} TokenScope = "{{$scope.Raw}}"
 	{{- end}}
 )
