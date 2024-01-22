@@ -139,10 +139,10 @@ func TestGetAndPut(t *testing.T) {
 		// Create a token file
 		tokenConfig := utils.TokenConfig{
 			TokenProfile: utils.WLCG,
-			Lifetime: time.Minute,
-			Issuer: param.Origin_Url.GetString(),
-			Audience: []string{param.Origin_Url.GetString()},
-			Subject: "origin",
+			Lifetime:     time.Minute,
+			Issuer:       param.Origin_Url.GetString(),
+			Audience:     []string{param.Origin_Url.GetString()},
+			Subject:      "origin",
 		}
 		tokenConfig.AddRawScope("storage.read:/ storage.modify:/")
 		token, err := tokenConfig.CreateToken()
