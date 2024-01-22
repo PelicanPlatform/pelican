@@ -606,7 +606,7 @@ components: ["nsregistry"]
 ---
 name: Registry.InstitutionsUrl
 description: >-
-  A url to get a list of available institutions for users to regiter their namespaces to. 
+  A url to get a list of available institutions for users to register their namespaces to.
   The url must accept a GET request with 200 response in JSON/YAML content with the following format:
 
   JSON:

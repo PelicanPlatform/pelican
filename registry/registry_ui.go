@@ -731,7 +731,7 @@ func InitInstConfig(ctx context.Context, egrp *errgroup.Group) error {
 		// Try to populate the cache at the server start. If error occured, it's non-blocking
 		cachedInsts, intErr, _ := getCachedInstitutions()
 		if intErr != nil {
-			log.Warning("Failed to populate institution cache. It's non-blocking. Error: ", intErr)
+			log.Warning("Failed to populate institution cache. Error: ", intErr)
 		} else {
 			if !checkUniqueInstitutions(cachedInsts) {
 				return errors.Errorf("Institution IDs read from config are not unique")

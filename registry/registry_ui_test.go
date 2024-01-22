@@ -558,7 +558,7 @@ func TestInitInstConfig(t *testing.T) {
 		// No error should return, this is non-blcoking
 		require.NoError(t, err)
 		require.Equal(t, 1, len(hook.Entries))
-		assert.Contains(t, hook.LastEntry().Message, "Failed to populate institution cache. It's non-blocking")
+		assert.Contains(t, hook.LastEntry().Message, "Failed to populate institution cache.")
 		assert.NotNil(t, institutionsCache)
 	})
 
