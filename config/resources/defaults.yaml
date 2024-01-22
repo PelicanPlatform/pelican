@@ -33,6 +33,8 @@ Origin:
   EnableUI: true
   EnableWrite: true
   SelfTest: true
+Registry:
+  InstitutionsUrlReloadMinutes: 15m
 Monitoring:
   PortLower: 9930
   PortHigher: 9999
@@ -55,7 +57,7 @@ Transport:
   ExpectContinueTimeout: 1s
   ResponseHeaderTimeout: 10s
 OIDC:
-  AuthorizationEndpoint:  "https://cilogon.org/authorize"
+  AuthorizationEndpoint: "https://cilogon.org/authorize"
   DeviceAuthEndpoint: "https://cilogon.org/oauth2/device_authorization"
   TokenEndpoint: "https://cilogon.org/oauth2/token"
   UserInfoEndpoint: "https://cilogon.org/oauth2/userinfo"
