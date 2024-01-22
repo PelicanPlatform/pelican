@@ -104,16 +104,16 @@ func getTokenName(destination *url.URL) (scheme, tokenName string) {
 }
 
 // Do writeback to stash using SciTokens
-func doWriteBack(source string, destination *url.URL, namespace namespaces.Namespace, recursive bool) (int64, error) {
+func doWriteBack(source string, destination *url.URL, namespace namespaces.Namespace, recursive bool, projectName string) (int64, error) {
 
 	scitoken_contents, err := getToken(destination, namespace, true, "")
 	if err != nil {
 		return 0, err
 	}
 	if recursive {
-		return UploadDirectory(source, destination, scitoken_contents, namespace)
+		return UploadDirectory(source, destination, scitoken_contents, namespace, projectName)
 	} else {
-		return UploadFile(source, destination, scitoken_contents, namespace)
+		return UploadFile(source, destination, scitoken_contents, namespace, projectName)
 	}
 }
 
@@ -543,7 +543,7 @@ func DoPut(localObject string, remoteDestination string, recursive bool) (bytesT
 		log.Errorln(err)
 		return 0, errors.New("Failed to get namespace information from source")
 	}
-	uploadedBytes, err := doWriteBack(localObjectUrl.Path, remoteDestUrl, ns, recursive)
+	uploadedBytes, err := doWriteBack(localObjectUrl.Path, remoteDestUrl, ns, recursive, "")
 	AddError(err)
 	return uploadedBytes, err
 
@@ -764,6 +764,9 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 		return 0, errors.New("Do not understand destination scheme")
 	}
 
+	payload := payloadStruct{}
+	parse_job_ad(payload)
+
 	// Get the namespace of the remote filesystem
 	// For write back, it will be the destination
 	// For read it will be the source.
@@ -778,7 +781,7 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 			log.Errorln(err)
 			return 0, errors.New("Failed to get namespace information from destination")
 		}
-		uploadedBytes, err := doWriteBack(source_url.Path, dest_url, ns, recursive)
+		uploadedBytes, err := doWriteBack(source_url.Path, dest_url, ns, recursive, payload.ProjectName)
 		AddError(err)
 		return uploadedBytes, err
 	}
@@ -814,15 +817,10 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 		destination = path.Join(destPath, sourceFilename)
 	}
 
-	payload := payloadStruct{}
 	payload.version = version
 
 	//Fill out the payload as much as possible
 	payload.filename = source_url.Path
-
-	// ??
-
-	parse_job_ad(payload)
 
 	payload.start1 = time.Now().Unix()
 

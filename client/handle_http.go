@@ -781,7 +781,7 @@ func (pr *ProgressReader) Size() int64 {
 }
 
 // Recursively uploads a directory with all files and nested dirs, keeping file structure on server side
-func UploadDirectory(src string, dest *url.URL, token string, namespace namespaces.Namespace) (int64, error) {
+func UploadDirectory(src string, dest *url.URL, token string, namespace namespaces.Namespace, projectName string) (int64, error) {
 	var files []string
 	var amountDownloaded int64
 	srcUrl := url.URL{Path: src}
@@ -801,7 +801,7 @@ func UploadDirectory(src string, dest *url.URL, token string, namespace namespac
 		if err != nil {
 			return 0, err
 		}
-		downloaded, err := UploadFile(file, &tempDest, token, namespace)
+		downloaded, err := UploadFile(file, &tempDest, token, namespace, projectName)
 		if err != nil {
 			return 0, err
 		}
@@ -816,7 +816,7 @@ func UploadDirectory(src string, dest *url.URL, token string, namespace namespac
 }
 
 // UploadFile Uploads a file using HTTP
-func UploadFile(src string, origDest *url.URL, token string, namespace namespaces.Namespace) (int64, error) {
+func UploadFile(src string, origDest *url.URL, token string, namespace namespaces.Namespace, projectName string) (int64, error) {
 
 	log.Debugln("In UploadFile")
 	log.Debugln("Dest", origDest.String())
@@ -891,6 +891,9 @@ func UploadFile(src string, origDest *url.URL, token string, namespace namespace
 	}
 	// Set the authorization header
 	request.Header.Set("Authorization", "Bearer "+token)
+	if projectName != "" {
+		request.Header.Set("User-Agent", projectName)
+	}
 	var lastKnownWritten int64
 	t := time.NewTicker(20 * time.Second)
 	defer t.Stop()
