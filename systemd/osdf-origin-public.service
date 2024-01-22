@@ -1,0 +1,9 @@
+[Unit]
+Description = Pelican service osdf-origin, public instance
+After = network.target nss-lookup.target
+
+[Service]
+ExecStart = /usr/bin/osdf --config /etc/pelican/osdf-origin-public.yaml origin serve
+
+[Install]
+WantedBy = multi-user.target
