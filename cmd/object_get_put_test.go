@@ -22,8 +22,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -32,64 +30,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lestrrat-go/jwx/v2/jwa"
-	"github.com/lestrrat-go/jwx/v2/jwk"
-	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/launchers"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
+	"github.com/pelicanplatform/pelican/utils"
 
-	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-func generateFileTestScitoken() (string, error) {
-	// Issuer is whichever server that initiates the test, so it's the server itself
-	issuerUrl := param.Origin_Url.GetString()
-	if issuerUrl == "" { // if empty, then error
-		return "", errors.New("Failed to create token: Invalid iss, Server_ExternalWebUrl is empty")
-	}
-	jti_bytes := make([]byte, 16)
-	if _, err := rand.Read(jti_bytes); err != nil {
-		return "", err
-	}
-	jti := base64.RawURLEncoding.EncodeToString(jti_bytes)
-
-	tok, err := jwt.NewBuilder().
-		Claim("scope", "storage.read:/ storage.modify:/").
-		Claim("wlcg.ver", "1.0").
-		JwtID(jti).
-		Issuer(issuerUrl).
-		Audience([]string{param.Origin_Url.GetString()}).
-		Subject("origin").
-		Expiration(time.Now().Add(time.Minute)).
-		IssuedAt(time.Now()).
-		Build()
-	if err != nil {
-		return "", err
-	}
-
-	key, err := config.GetIssuerPrivateJWK()
-	if err != nil {
-		return "", errors.Wrap(err, "Failed to load server's issuer key")
-	}
-
-	if err := jwk.AssignKeyID(key); err != nil {
-		return "", errors.Wrap(err, "Failed to assign kid to the token")
-	}
-
-	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, key))
-	if err != nil {
-		return "", err
-	}
-
-	return string(signed), nil
-}
 
 func TestGetAndPut(t *testing.T) {
 	//////////////////////////////Setup our test federation//////////////////////////////////////////
@@ -150,8 +101,7 @@ func TestGetAndPut(t *testing.T) {
 
 	fedCancel, err := launchers.LaunchModules(ctx, modules)
 	if err != nil {
-		log.Errorln("Failure in fedServeInternal:", err)
-		require.NoError(t, err)
+		t.Fatalf("Failure in fedServeInternal: %v", err)
 	}
 
 	desiredURL := param.Server_ExternalWebUrl.GetString() + "/.well-known/openid-configuration"
@@ -187,7 +137,15 @@ func TestGetAndPut(t *testing.T) {
 		tempFile.Close()
 
 		// Create a token file
-		token, err := generateFileTestScitoken()
+		tokenConfig := utils.TokenConfig{
+			TokenProfile: utils.WLCG,
+			Lifetime: time.Minute,
+			Issuer: param.Origin_Url.GetString(),
+			Audience: []string{param.Origin_Url.GetString()},
+			Subject: "origin",
+		}
+		tokenConfig.AddRawScope("storage.read:/ storage.modify:/")
+		token, err := tokenConfig.CreateToken()
 		assert.NoError(t, err)
 		tempToken, err := os.CreateTemp(t.TempDir(), "token")
 		assert.NoError(t, err, "Error creating temp token file")

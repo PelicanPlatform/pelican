@@ -13,6 +13,8 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v3
       with:
+      # Do fetch depth 0 here because otherwise goreleaser might not work properly:
+      # https://goreleaser.com/ci/actions/?h=tag#workflow
         fetch-depth: 0
     - uses: actions/setup-node@v4
       with:
@@ -62,10 +64,13 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v3
       with:
+        # See above for why fetch depth is 0 here
         fetch-depth: 0
     - uses: actions/setup-node@v4
       with:
         node-version: 20
+      # Fetch the tags is essential so that goreleaser can build the correct version. Workaround found here:
+      # https://github.com/actions/checkout/issues/290
     - name: Fetch tags
       run: |
         git config --global --add safe.directory /__w/pelican/pelican
