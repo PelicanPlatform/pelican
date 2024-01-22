@@ -218,22 +218,22 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 		}
 
 		// Create a private key to use for the test
-		privateKey, err := ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
+		ecdsaPrivateKey, err := ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
 		assert.NoError(t, err, "Error generating private key")
 
 		// Convert from raw ecdsa to jwk.Key
-		pKey, err := jwk.FromRaw(privateKey)
+		privateKey, err := jwk.FromRaw(ecdsaPrivateKey)
 		assert.NoError(t, err, "Unable to convert ecdsa.PrivateKey to jwk.Key")
 
 		// Assign Key id to the private key
-		err = jwk.AssignKeyID(pKey)
+		err = jwk.AssignKeyID(privateKey)
 		assert.NoError(t, err, "Error assigning kid to private key")
 
 		// Set an algorithm for the key
-		err = pKey.Set(jwk.AlgorithmKey, jwa.ES256)
+		err = privateKey.Set(jwk.AlgorithmKey, jwa.ES256)
 		assert.NoError(t, err, "Unable to set algorithm for pKey")
 
-		token := createToken("monitoring.query", issuerUrl, pKey)
+		token := createToken("monitoring.query", issuerUrl, privateKey)
 
 		r.GET("/api/v1.0/prometheus/*any", promQueryEngineAuthHandler(av1))
 		c.Request, _ = http.NewRequest(http.MethodGet, "/api/v1.0/prometheus/test", bytes.NewBuffer([]byte(`{}`)))

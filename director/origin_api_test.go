@@ -59,13 +59,13 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 		}
 		namespaceKeysMutex.Lock()
 		defer namespaceKeysMutex.Unlock()
-		namespaceKeys.Set("test-namespace", &ar, ttlcache.DefaultTTL)
+		namespaceKeys.Set("/test-namespace", &ar, ttlcache.DefaultTTL)
 	}()
 
 	// A verified token with a the correct scope - should return no error
-	tok, err := CreateAdvertiseToken("test-namespace")
+	tok, err := CreateAdvertiseToken("/test-namespace")
 	assert.NoError(t, err)
-	ok, err := VerifyAdvertiseToken(ctx, tok, "test-namespace")
+	ok, err := VerifyAdvertiseToken(ctx, tok, "/test-namespace")
 	assert.NoError(t, err)
 	assert.Equal(t, true, ok, "Expected scope to be 'pelican.advertise'")
 
@@ -82,7 +82,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 
 	signed, err := jwt.Sign(scopelessTok, jwt.WithKey(jwa.ES256, key))
 
-	ok, err = VerifyAdvertiseToken(ctx, string(signed), "test-namespace")
+	ok, err = VerifyAdvertiseToken(ctx, string(signed), "/test-namespace")
 	assert.Equal(t, false, ok)
 	assert.Equal(t, "No scope is present; required to advertise to director", err.Error())
 
@@ -96,7 +96,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 
 	signed, err = jwt.Sign(nonStrScopeTok, jwt.WithKey(jwa.ES256, key))
 
-	ok, err = VerifyAdvertiseToken(ctx, string(signed), "test-namespace")
+	ok, err = VerifyAdvertiseToken(ctx, string(signed), "/test-namespace")
 	assert.Equal(t, false, ok)
 	assert.Equal(t, "scope claim in token is not string-valued", err.Error())
 
@@ -110,7 +110,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 
 	signed, err = jwt.Sign(wrongScopeTok, jwt.WithKey(jwa.ES256, key))
 
-	ok, err = VerifyAdvertiseToken(ctx, string(signed), "test-namespace")
+	ok, err = VerifyAdvertiseToken(ctx, string(signed), "/test-namespace")
 	assert.Equal(t, false, ok, "Should fail due to incorrect scope name")
 	assert.NoError(t, err, "Incorrect scope name should not throw and error")
 }
@@ -137,19 +137,19 @@ func TestCreateAdvertiseToken(t *testing.T) {
 	viper.Set("Federation.DirectorURL", "")
 
 	// Test without a namsepace set and check to see if it returns the expected error
-	tok, err := CreateAdvertiseToken("test-namespace")
+	tok, err := CreateAdvertiseToken("/test-namespace")
 	assert.Equal(t, "", tok)
 	assert.Equal(t, "Namespace URL is not set", err.Error())
 	viper.Set("Federation.RegistryUrl", "https://get-your-tokens.org")
 
 	// Test without a DirectorURL set and check to see if it returns the expected error
-	tok, err = CreateAdvertiseToken("test-namespace")
+	tok, err = CreateAdvertiseToken("/test-namespace")
 	assert.Equal(t, "", tok)
 	assert.Equal(t, "Director URL is not known; cannot create advertise token", err.Error())
 	viper.Set("Federation.DirectorURL", "https://director-url.org")
 
 	// Test the CreateAdvertiseToken with good values and test that it returns a non-nil token value and no error
-	tok, err = CreateAdvertiseToken("test-namespace")
+	tok, err = CreateAdvertiseToken("/test-namespace")
 	assert.Equal(t, nil, err)
 	assert.NotEqual(t, "", tok)
 }

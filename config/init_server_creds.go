@@ -482,12 +482,12 @@ func loadIssuerPublicJWKS(existingJWKS string, issuerKeyFile string) (jwk.Set, e
 	if key == nil {
 		// This returns issuerPrivateJWK if it's non-nil, or find and parse private JWK
 		// located at IssuerKey if there is one, or generate a new private key
-		_, err := loadIssuerPrivateJWK(issuerKeyFile)
+		loadedKey, err := loadIssuerPrivateJWK(issuerKeyFile)
 		if err != nil {
 			return nil, errors.Wrap(err, "Failed to load issuer private JWK")
 		}
+		key = &loadedKey
 	}
-	key = issuerPrivateJWK.Load()
 
 	pkey, err := jwk.PublicKeyOf(*key)
 	if err != nil {
