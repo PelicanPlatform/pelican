@@ -53,9 +53,10 @@ type (
 		Message string
 	}
 
+	// Represents a new stat instance
 	ObjectStat struct {
 		ReqHandler func(objectName string, originAd ServerAd, timeout time.Duration, maxCancelCtx context.Context) (*objectMetadata, error)
-		Query      func(objectName string, cancelContext context.Context) ([]*objectMetadata, error)
+		Query      func(objectName string, cancelContext context.Context) ([]*objectMetadata, string, error)
 	}
 )
 
@@ -80,6 +81,7 @@ func (meta objectMetadata) String() string {
 	)
 }
 
+// Initialize a new stat instance and set default method implementations
 func NewObjectStat() *ObjectStat {
 	stat := &ObjectStat{}
 	stat.ReqHandler = stat.sendHeadReqToOrigin
@@ -87,6 +89,7 @@ func NewObjectStat() *ObjectStat {
 	return stat
 }
 
+// Implementation of sending a HEAD request to an origin for an object
 func (stat *ObjectStat) sendHeadReqToOrigin(objectName string, originAd ServerAd, timeout time.Duration, maxCancelCtx context.Context) (*objectMetadata, error) {
 	tokenConf := utils.TokenConfig{
 		Lifetime:     time.Minute,
@@ -120,7 +123,7 @@ func (stat *ObjectStat) sendHeadReqToOrigin(objectName string, originAd ServerAd
 				return nil, cancelledError{"Request was cancelled by context"}
 			}
 			if urlErr.Timeout() {
-				return nil, cancelledError{"Request timeout"}
+				return nil, timeoutError{fmt.Sprintf("Request timeout after %dms", timeout.Milliseconds())}
 			}
 		}
 	}
@@ -142,10 +145,9 @@ func (stat *ObjectStat) sendHeadReqToOrigin(objectName string, originAd ServerAd
 	}
 }
 
-// TODOs:
-// 4. Add new command line argument
-
-func (stat *ObjectStat) queryOriginsForObject(objectName string, cancelContext context.Context) ([]*objectMetadata, error) {
+// Implementation of querying origins for their availability of an object.
+// It blocks until max successful requests has been received, all potential origins responded (or timeout), or cancelContext was closed
+func (stat *ObjectStat) queryOriginsForObject(objectName string, cancelContext context.Context) ([]*objectMetadata, string, error) {
 	_, originAds, _ := GetAdsForPath(objectName)
 	minReq := param.Director_MinStatResponse.GetInt()
 	maxReq := param.Director_MaxStatResponse.GetInt()
@@ -156,13 +158,19 @@ func (stat *ObjectStat) queryOriginsForObject(objectName string, cancelContext c
 	numTotalReq := 0
 	successResult := make([]*objectMetadata, 0)
 
+	if len(originAds) < 1 {
+		maxCancel()
+		return nil, "", errors.New("No namespace prefixes match found.")
+	}
+
 	for _, originAd := range originAds {
 		originUtil, ok := originStatUtils[originAd]
 		if !ok {
+			numTotalReq += 1
 			log.Warningf("Origin %q is missing data for stat call, skip querying...", originAd.Name)
 			continue
 		}
-		// Have to use a anonymous func to wrap the egrp call to pass loop variable safely
+		// Have to use an anonymous func to wrap the egrp call to pass loop variable safely
 		// to goroutine
 		func(intOriginAd ServerAd) {
 			originUtil.Errgroup.Go(func() error {
@@ -200,22 +208,22 @@ func (stat *ObjectStat) queryOriginsForObject(objectName string, cancelContext c
 		case metaRes := <-positiveReqChan:
 			numTotalReq += 1
 			successResult = append(successResult, metaRes)
-			if len(successResult) > maxReq {
+			if len(successResult) >= maxReq {
 				maxCancel()
 				// Reach the max
-				return successResult, nil
+				return successResult, "Maximum responses reached for stat. Return result and cancel ongoing requests.", nil
 			}
 		case <-cancelContext.Done():
 			maxCancel()
-			return successResult, nil
+			return successResult, fmt.Sprintf("Director stat for object %q is cancelled", objectName), nil
 		default:
 			// All requests finished
 			if numTotalReq == len(originAds) {
 				maxCancel()
 				if len(successResult) < minReq {
-					return successResult, errors.New(fmt.Sprintf("Number of success response: %d is less than MinStatResponse (%d) required.", len(successResult), minReq))
+					return successResult, "", errors.New(fmt.Sprintf("Number of success response: %d is less than MinStatResponse (%d) required.", len(successResult), minReq))
 				}
-				return successResult, nil
+				return successResult, "", nil
 			}
 		}
 	}

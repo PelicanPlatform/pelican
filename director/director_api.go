@@ -219,6 +219,10 @@ func ConfigTTLCache(ctx context.Context, egrp *errgroup.Group) {
 	egrp.Go(func() error {
 		<-ctx.Done()
 		log.Info("Gracefully stopping TTL cache eviction...")
+		serverAdMutex.Lock()
+		defer serverAdMutex.Unlock()
+		namespaceKeysMutex.Lock()
+		defer namespaceKeysMutex.Unlock()
 		serverAds.DeleteAll()
 		serverAds.Stop()
 		namespaceKeys.DeleteAll()
