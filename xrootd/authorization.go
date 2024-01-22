@@ -382,7 +382,7 @@ func GenerateOriginIssuer(exportedPaths []string) (issuer Issuer, err error) {
 	return
 }
 
-// We have a special issuer just for self-monitoring the origin.
+// We have a special issuer just for director-based monitoring of the origin.
 func GenerateDirectorMonitoringIssuer() (issuer Issuer, err error) {
 	if val := param.Federation_DirectorUrl.GetString(); val == "" {
 		return
@@ -390,6 +390,20 @@ func GenerateDirectorMonitoringIssuer() (issuer Issuer, err error) {
 	issuer.Name = "Director-based Monitoring"
 	issuer.Issuer = param.Federation_DirectorUrl.GetString()
 	issuer.BasePaths = []string{"/pelican/monitoring"}
+	issuer.DefaultUser = "xrootd"
+
+	return
+}
+
+// Director's `stat` feature requires access to origin's files,
+// so we need to add director as a valid issuer
+func GenerateDirectorStatIssuer(exportedPaths []string) (issuer Issuer, err error) {
+	if val := param.Federation_DirectorUrl.GetString(); val == "" {
+		return
+	}
+	issuer.Name = "Director Stat"
+	issuer.Issuer = param.Federation_DirectorUrl.GetString()
+	issuer.BasePaths = exportedPaths
 	issuer.DefaultUser = "xrootd"
 
 	return
@@ -461,6 +475,14 @@ func WriteOriginScitokensConfig(exportedPaths []string) error {
 		}
 	}
 	if issuer, err := GenerateDirectorMonitoringIssuer(); err == nil && len(issuer.Name) > 0 {
+		if val, ok := cfg.IssuerMap[issuer.Issuer]; ok {
+			val.BasePaths = append(val.BasePaths, issuer.BasePaths...)
+			cfg.IssuerMap[issuer.Issuer] = val
+		} else {
+			cfg.IssuerMap[issuer.Issuer] = issuer
+		}
+	}
+	if issuer, err := GenerateDirectorStatIssuer(exportedPaths); err == nil && len(issuer.Name) > 0 {
 		if val, ok := cfg.IssuerMap[issuer.Issuer]; ok {
 			val.BasePaths = append(val.BasePaths, issuer.BasePaths...)
 			cfg.IssuerMap[issuer.Issuer] = val
