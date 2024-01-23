@@ -106,7 +106,7 @@ definitions:
       institution:
         type: string
         description: >
-          "Unique identifier of the institution to register to. 
+          "Unique identifier of the institution to register to.
           For Pelican running in OSDF mode, this will be the OSG ID of the institution"
         example: "https://osg-htc.org/iid/01y2jtd41"
       security_contact_user_id:
@@ -140,7 +140,7 @@ definitions:
       institution:
         type: string
         description: >
-          "Unique identifier of the institution to register to. 
+          "Unique identifier of the institution to register to.
           For Pelican running in OSDF mode, this will be the OSG ID of the institution"
         example: "https://osg-htc.org/iid/01y2jtd41"
       security_contact_user_id:
@@ -241,7 +241,39 @@ definitions:
         items:
           type: string
           minItems: 0
-
+  ObjectStatMetadata:
+    type: object
+    properties:
+      checksum:
+        type: string
+        default: ""
+      content_length:
+        type: integer
+        example: 10
+      server_ad:
+        type: object
+        $ref: "#/definitions/ServerAd"
+  ServerAd:
+    type: object
+    properties:
+      name:
+        type: string
+      auth_url:
+        type: string
+      url:
+        type: string
+      web_url:
+        type: string
+      type:
+        type: string
+      latitude:
+        type: integer
+      longitude:
+        type: integer
+      enable_write:
+        type: boolean
+      enable_fallback_read:
+        type: boolean
 tags:
   - name: auth
     description: Authentication APIs for all servers
@@ -251,6 +283,8 @@ tags:
     description: APIs for various server metrics
   - name: registry_ui
     description: APIs for Registry server Web UI
+  - name: director_ui
+    description: APIs for Director server Web UI
 paths:
   /health:
     get:
@@ -1008,6 +1042,61 @@ paths:
             $ref: "#/definitions/ErrorModel"
         "500":
           description: Server didn't configure `Registry.Institutions` or server encountered error in reading institution configuration
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+  /director_ui/servers/origins/stat:
+    get:
+      tags:
+        - "director_ui"
+      summary: Get a list of origins willing to serve an object
+      description: "`Authentication Required`"
+      produces:
+        - application/json
+      parameters:
+        - in: path
+          name: object_name
+          type: string
+          required: true
+          description: >
+            The path to the name to query for. Example: `/foo/bar/barz.txt`
+        - in: query
+          name: min
+          type: integer
+          description: Minimum number of success responses required
+          default: 1
+        - in: query
+          name: max
+          type: integer
+          description: Maximum number of success responses required
+          default: 1
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
+                description: Additional message when a query returns
+                example: "Maximum responses reached for stat. Return result and cancel ongoing requests."
+              metadata:
+                type: array
+                items:
+                  $ref: "#/definitions/ObjectStatMetadata"
+                  minItems: 1
+
+            items:
+              type: object
+              $ref: "#/definitions/Institution"
+              minItems: 0
+        "401":
+          description: Authentication required to perform this action
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "500":
+          description: Server error when performing the query
           schema:
             type: object
             $ref: "#/definitions/ErrorModel"

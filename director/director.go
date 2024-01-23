@@ -48,6 +48,11 @@ type (
 		Message  string            `json:"message"`
 		Metadata []*objectMetadata `json:"metadata"`
 	}
+
+	statRequest struct {
+		Min int `form:"min"`
+		Max int `form:"max"`
+	}
 )
 
 func (req listServerRequest) ToInternalServerType() common.ServerType {
@@ -100,9 +105,14 @@ func queryOrigins(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Path should not be empty or ended with slash '/'"})
 		return
 	}
+	queryParams := statRequest{}
+	if ctx.ShouldBindQuery(&queryParams) != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid query parameters"})
+		return
+	}
 	cancelCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	meta, msg, err := NewObjectStat().Query(path, cancelCtx)
+	meta, msg, err := NewObjectStat().Query(path, cancelCtx, queryParams.Min, queryParams.Max)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

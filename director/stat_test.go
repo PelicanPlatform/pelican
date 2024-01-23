@@ -101,11 +101,23 @@ func TestQueryOriginsForObject(t *testing.T) {
 		defer cancel()
 		cleanupMock()
 
-		result, msg, err := stat.queryOriginsForObject("/foo/bar/test.txt", ctx)
+		result, msg, err := stat.queryOriginsForObject("/foo/bar/test.txt", ctx, 0, 0)
 
 		require.Error(t, err)
 		assert.Empty(t, msg)
 		assert.Equal(t, "No namespace prefixes match found.", err.Error())
+		assert.Equal(t, 0, len(result))
+	})
+
+	t.Run("invalid-min-max", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		result, msg, err := stat.queryOriginsForObject("/foo/bar/test.txt", ctx, 3, 1)
+
+		require.Error(t, err)
+		assert.Empty(t, msg)
+		assert.Equal(t, "Invalid parameter, maximum (1) must be larger than minimum (3)", err.Error())
 		assert.Equal(t, 0, len(result))
 	})
 
@@ -116,22 +128,7 @@ func TestQueryOriginsForObject(t *testing.T) {
 		mockTTLCache()
 		defer cleanupMock()
 
-		result, msg, err := stat.queryOriginsForObject("/dne/random.txt", ctx)
-
-		require.Error(t, err)
-		assert.Empty(t, msg)
-		assert.Equal(t, "No namespace prefixes match found.", err.Error())
-		assert.Equal(t, 0, len(result))
-	})
-
-	t.Run("unmatched-prefix-returns", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-
-		mockTTLCache()
-		defer cleanupMock()
-
-		result, msg, err := stat.queryOriginsForObject("/dne/random.txt", ctx)
+		result, msg, err := stat.queryOriginsForObject("/dne/random.txt", ctx, 0, 0)
 
 		require.Error(t, err)
 		assert.Empty(t, msg)
@@ -146,7 +143,7 @@ func TestQueryOriginsForObject(t *testing.T) {
 		mockTTLCache()
 		defer cleanupMock()
 
-		result, msg, err := stat.queryOriginsForObject("/foo/bar/test.txt", ctx)
+		result, msg, err := stat.queryOriginsForObject("/foo/bar/test.txt", ctx, 0, 0)
 
 		require.Error(t, err)
 		assert.Empty(t, msg)
@@ -163,7 +160,7 @@ func TestQueryOriginsForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result, msg, err := stat.queryOriginsForObject("/foo/bar/test.txt", ctx)
+		result, msg, err := stat.queryOriginsForObject("/foo/bar/test.txt", ctx, 0, 0)
 
 		require.NoError(t, err)
 		// By default maxReq is set to 1. Therefore, although there's 2 matched prefixes,
@@ -185,7 +182,7 @@ func TestQueryOriginsForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result, msg, err := stat.queryOriginsForObject("/foo/bar/test.txt", ctx)
+		result, msg, err := stat.queryOriginsForObject("/foo/bar/test.txt", ctx, 0, 0)
 
 		require.NoError(t, err)
 		assert.Contains(t, msg, "Maximum responses reached for stat. Return result and cancel ongoing requests.")
@@ -206,7 +203,7 @@ func TestQueryOriginsForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result, msg, err := stat.queryOriginsForObject("/foo/bar/test.txt", ctx)
+		result, msg, err := stat.queryOriginsForObject("/foo/bar/test.txt", ctx, 0, 0)
 
 		require.NoError(t, err)
 		// Response =2 < maxreq, so there won't be any message
@@ -230,13 +227,35 @@ func TestQueryOriginsForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result, msg, err := stat.queryOriginsForObject("/foo/bar/test.txt", ctx)
+		result, msg, err := stat.queryOriginsForObject("/foo/bar/test.txt", ctx, 0, 0)
 
 		require.Error(t, err)
 		assert.Equal(t, "Number of success response: 2 is less than MinStatResponse (3) required.", err.Error())
 		assert.Empty(t, msg)
 		require.NotNil(t, result)
 		require.Equal(t, 2, len(result))
+	})
+
+	t.Run("param-overwrites-config", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		viper.Set("Director.MinStatResponse", 3)
+		viper.Set("Director.MaxStatResponse", 4)
+		defer viper.Set("Director.MinStatResponse", 1)
+		defer viper.Set("Director.MaxStatResponse", 1)
+
+		mockTTLCache()
+		initMockStatUtils()
+		defer cleanupMock()
+
+		result, msg, err := stat.queryOriginsForObject("/foo/bar/test.txt", ctx, 1, 1)
+
+		require.NoError(t, err)
+		assert.Contains(t, msg, "Maximum responses reached for stat. Return result and cancel ongoing requests.")
+		require.NotNil(t, result)
+		require.Equal(t, 1, len(result))
+		assert.True(t, result[0].ServerAd.Name == "origin2" || result[0].ServerAd.Name == "origin3")
 	})
 
 	t.Run("cancel-cancels-query", func(t *testing.T) {
@@ -259,7 +278,7 @@ func TestQueryOriginsForObject(t *testing.T) {
 		msgChan := make(chan string)
 
 		go func() {
-			_, msg, _ := stat.queryOriginsForObject("/foo/bar/test.txt", ctx)
+			_, msg, _ := stat.queryOriginsForObject("/foo/bar/test.txt", ctx, 0, 0)
 			msgChan <- msg
 		}()
 
@@ -272,7 +291,7 @@ func TestQueryOriginsForObject(t *testing.T) {
 			case <-tick:
 				attempt += 1
 				if attempt > 3 {
-					assert.True(t, false, "queryOriginsForObject timeout for response")
+					assert.True(t, false, "queryOriginsForObject timeout for response", 0, 0)
 					return
 				}
 			case message := <-msgChan:
@@ -305,7 +324,7 @@ func TestQueryOriginsForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result, msg, err := stat.queryOriginsForObject("/foo/bar/test.txt", ctx)
+		result, msg, err := stat.queryOriginsForObject("/foo/bar/test.txt", ctx, 0, 0)
 
 		require.Error(t, err)
 		assert.Equal(t, "Number of success response: 0 is less than MinStatResponse (1) required.", err.Error())

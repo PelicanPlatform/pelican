@@ -54,10 +54,11 @@ type (
 		Message string
 	}
 
-	// Represents a new stat instance
+	// A struct to implement `object stat`, by querying against origins with namespaces match the prefix of an object name
+	// and return origins that have the object
 	ObjectStat struct {
 		ReqHandler func(objectName string, originAd common.ServerAd, timeout time.Duration, maxCancelCtx context.Context) (*objectMetadata, error)
-		Query      func(objectName string, cancelContext context.Context) ([]*objectMetadata, string, error)
+		Query      func(objectName string, cancelContext context.Context, mininum, maximum int) ([]*objectMetadata, string, error)
 	}
 )
 
@@ -148,10 +149,19 @@ func (stat *ObjectStat) sendHeadReqToOrigin(objectName string, originAd common.S
 
 // Implementation of querying origins for their availability of an object.
 // It blocks until max successful requests has been received, all potential origins responded (or timeout), or cancelContext was closed
-func (stat *ObjectStat) queryOriginsForObject(objectName string, cancelContext context.Context) ([]*objectMetadata, string, error) {
+func (stat *ObjectStat) queryOriginsForObject(objectName string, cancelContext context.Context, minimum, maximum int) ([]*objectMetadata, string, error) {
 	_, originAds, _ := GetAdsForPath(objectName)
 	minReq := param.Director_MinStatResponse.GetInt()
 	maxReq := param.Director_MaxStatResponse.GetInt()
+	if minimum > 0 {
+		minReq = minimum
+	}
+	if maximum > 0 {
+		maxReq = maximum
+	}
+	if maxReq < minReq {
+		return nil, "", errors.New(fmt.Sprintf("Invalid parameter, maximum (%d) must be larger than minimum (%d)", maxReq, minReq))
+	}
 	timeout := param.Director_StatTimeout.GetDuration()
 	positiveReqChan := make(chan *objectMetadata)
 	negitiveReqChan := make(chan error)
