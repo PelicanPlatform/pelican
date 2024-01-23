@@ -26,6 +26,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/pelicanplatform/pelican/common"
+	"github.com/pelicanplatform/pelican/web_ui"
 )
 
 type (
@@ -115,6 +116,6 @@ func RegisterDirectorWebAPI(router *gin.RouterGroup) {
 	// Follow RESTful schema
 	{
 		directorWebAPI.GET("/servers", listServers)
-		directorWebAPI.GET("/servers/origins/stat/*path", queryOrigins)
+		directorWebAPI.GET("/servers/origins/stat/*path", web_ui.AuthHandler, queryOrigins)
 	}
 }
