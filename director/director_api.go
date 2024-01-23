@@ -23,20 +23,21 @@ import (
 	"fmt"
 
 	"github.com/jellydator/ttlcache/v3"
+	"github.com/pelicanplatform/pelican/common"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 )
 
 // List all namespaces from origins registered at the director
-func ListNamespacesFromOrigins() []NamespaceAd {
+func ListNamespacesFromOrigins() []common.NamespaceAd {
 
 	serverAdMutex.RLock()
 	defer serverAdMutex.RUnlock()
 
 	serverAdItems := serverAds.Items()
-	namespaces := make([]NamespaceAd, 0, len(serverAdItems))
+	namespaces := make([]common.NamespaceAd, 0, len(serverAdItems))
 	for _, item := range serverAdItems {
-		if item.Key().Type == OriginType {
+		if item.Key().Type == common.OriginType {
 			namespaces = append(namespaces, item.Value()...)
 		}
 	}
@@ -44,10 +45,10 @@ func ListNamespacesFromOrigins() []NamespaceAd {
 }
 
 // List all serverAds in the cache that matches the serverType array
-func ListServerAds(serverTypes []ServerType) []ServerAd {
+func ListServerAds(serverTypes []common.ServerType) []common.ServerAd {
 	serverAdMutex.RLock()
 	defer serverAdMutex.RUnlock()
-	ads := make([]ServerAd, 0)
+	ads := make([]common.ServerAd, 0)
 	for _, ad := range serverAds.Keys() {
 		for _, serverType := range serverTypes {
 			if ad.Type == serverType {
@@ -67,7 +68,7 @@ func ConfigTTLCache(ctx context.Context, egrp *errgroup.Group) {
 	go serverAds.Start()
 	go namespaceKeys.Start()
 
-	serverAds.OnEviction(func(ctx context.Context, er ttlcache.EvictionReason, i *ttlcache.Item[ServerAd, []NamespaceAd]) {
+	serverAds.OnEviction(func(ctx context.Context, er ttlcache.EvictionReason, i *ttlcache.Item[common.ServerAd, []common.NamespaceAd]) {
 		healthTestCancelFuncsMutex.Lock()
 		defer healthTestCancelFuncsMutex.Unlock()
 		if cancelFunc, exists := healthTestCancelFuncs[i.Key()]; exists {
@@ -78,7 +79,7 @@ func ConfigTTLCache(ctx context.Context, egrp *errgroup.Group) {
 			delete(healthTestCancelFuncs, i.Key())
 		}
 
-		if i.Key().Type == OriginType {
+		if i.Key().Type == common.OriginType {
 			originStatUtilsMutex.Lock()
 			defer originStatUtilsMutex.Unlock()
 			statUtil, ok := originStatUtils[i.Key()]

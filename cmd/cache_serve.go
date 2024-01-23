@@ -30,9 +30,9 @@ import (
 	"time"
 
 	"github.com/pelicanplatform/pelican/cache_ui"
+	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/daemon"
-	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_ui"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -46,9 +46,9 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-func getNSAdsFromDirector() ([]director.NamespaceAd, error) {
+func getNSAdsFromDirector() ([]common.NamespaceAd, error) {
 	// Get the endpoint of the director
-	var respNS []director.NamespaceAd
+	var respNS []common.NamespaceAd
 	directorEndpoint, err := getDirectorEndpoint()
 	if err != nil {
 		return respNS, errors.Wrapf(err, "Failed to get DirectorURL from config: %v", err)

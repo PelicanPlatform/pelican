@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
+	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
@@ -28,7 +29,7 @@ func TestQueryOriginsForObject(t *testing.T) {
 	oldAds := serverAds
 
 	stat := NewObjectStat()
-	stat.ReqHandler = func(objectName string, originAd ServerAd, timeout time.Duration, maxCancelCtx context.Context) (*objectMetadata, error) {
+	stat.ReqHandler = func(objectName string, originAd common.ServerAd, timeout time.Duration, maxCancelCtx context.Context) (*objectMetadata, error) {
 		return &objectMetadata{ServerAd: originAd}, nil
 	}
 
@@ -38,28 +39,28 @@ func TestQueryOriginsForObject(t *testing.T) {
 	func() {
 		serverAdMutex.Lock()
 		defer serverAdMutex.Unlock()
-		serverAds = ttlcache.New[ServerAd, []NamespaceAd](ttlcache.WithTTL[ServerAd, []NamespaceAd](15 * time.Minute))
+		serverAds = ttlcache.New[common.ServerAd, []common.NamespaceAd](ttlcache.WithTTL[common.ServerAd, []common.NamespaceAd](15 * time.Minute))
 	}()
 
 	mockTTLCache := func() {
 		serverAdMutex.Lock()
 		defer serverAdMutex.Unlock()
-		mockServerAd1 := ServerAd{Name: "origin1", URL: url.URL{Host: "example1.com"}, Type: OriginType}
-		mockServerAd2 := ServerAd{Name: "origin2", URL: url.URL{Host: "example2.com"}, Type: OriginType}
-		mockServerAd3 := ServerAd{Name: "origin3", URL: url.URL{Host: "example3.com"}, Type: OriginType}
-		mockServerAd4 := ServerAd{Name: "origin4", URL: url.URL{Host: "example4.com"}, Type: OriginType}
-		mockServerAd5 := ServerAd{Name: "cache1", URL: url.URL{Host: "cache1.com"}, Type: OriginType}
-		mockNsAd0 := NamespaceAd{Path: "/foo"}
-		mockNsAd1 := NamespaceAd{Path: "/foo/bar"}
-		mockNsAd2 := NamespaceAd{Path: "/foo/x"}
-		mockNsAd3 := NamespaceAd{Path: "/foo/bar/barz"}
-		mockNsAd4 := NamespaceAd{Path: "/unrelated"}
-		mockNsAd5 := NamespaceAd{Path: "/caches/hostname"}
-		serverAds.Set(mockServerAd1, []NamespaceAd{mockNsAd0}, ttlcache.DefaultTTL)
-		serverAds.Set(mockServerAd2, []NamespaceAd{mockNsAd1}, ttlcache.DefaultTTL)
-		serverAds.Set(mockServerAd3, []NamespaceAd{mockNsAd1, mockNsAd4}, ttlcache.DefaultTTL)
-		serverAds.Set(mockServerAd4, []NamespaceAd{mockNsAd2, mockNsAd3}, ttlcache.DefaultTTL)
-		serverAds.Set(mockServerAd5, []NamespaceAd{mockNsAd5}, ttlcache.DefaultTTL)
+		mockServerAd1 := common.ServerAd{Name: "origin1", URL: url.URL{Host: "example1.com"}, Type: common.OriginType}
+		mockServerAd2 := common.ServerAd{Name: "origin2", URL: url.URL{Host: "example2.com"}, Type: common.OriginType}
+		mockServerAd3 := common.ServerAd{Name: "origin3", URL: url.URL{Host: "example3.com"}, Type: common.OriginType}
+		mockServerAd4 := common.ServerAd{Name: "origin4", URL: url.URL{Host: "example4.com"}, Type: common.OriginType}
+		mockServerAd5 := common.ServerAd{Name: "cache1", URL: url.URL{Host: "cache1.com"}, Type: common.OriginType}
+		mockNsAd0 := common.NamespaceAd{Path: "/foo"}
+		mockNsAd1 := common.NamespaceAd{Path: "/foo/bar"}
+		mockNsAd2 := common.NamespaceAd{Path: "/foo/x"}
+		mockNsAd3 := common.NamespaceAd{Path: "/foo/bar/barz"}
+		mockNsAd4 := common.NamespaceAd{Path: "/unrelated"}
+		mockNsAd5 := common.NamespaceAd{Path: "/caches/hostname"}
+		serverAds.Set(mockServerAd1, []common.NamespaceAd{mockNsAd0}, ttlcache.DefaultTTL)
+		serverAds.Set(mockServerAd2, []common.NamespaceAd{mockNsAd1}, ttlcache.DefaultTTL)
+		serverAds.Set(mockServerAd3, []common.NamespaceAd{mockNsAd1, mockNsAd4}, ttlcache.DefaultTTL)
+		serverAds.Set(mockServerAd4, []common.NamespaceAd{mockNsAd2, mockNsAd3}, ttlcache.DefaultTTL)
+		serverAds.Set(mockServerAd5, []common.NamespaceAd{mockNsAd5}, ttlcache.DefaultTTL)
 	}
 
 	cleanupMock := func() {
@@ -244,7 +245,7 @@ func TestQueryOriginsForObject(t *testing.T) {
 			stat.ReqHandler = oldHandler
 		}()
 
-		stat.ReqHandler = func(objectName string, originAd ServerAd, timeout time.Duration, maxCancelCtx context.Context) (*objectMetadata, error) {
+		stat.ReqHandler = func(objectName string, originAd common.ServerAd, timeout time.Duration, maxCancelCtx context.Context) (*objectMetadata, error) {
 			time.Sleep(time.Second * 30)
 			return &objectMetadata{ServerAd: originAd}, nil
 		}
@@ -287,7 +288,7 @@ func TestQueryOriginsForObject(t *testing.T) {
 			stat.ReqHandler = oldHandler
 		}()
 
-		stat.ReqHandler = func(objectName string, originAd ServerAd, timeout time.Duration, maxCancelCtx context.Context) (*objectMetadata, error) {
+		stat.ReqHandler = func(objectName string, originAd common.ServerAd, timeout time.Duration, maxCancelCtx context.Context) (*objectMetadata, error) {
 			if originAd.Name == "origin2" {
 				return nil, timeoutError{}
 			}
@@ -344,7 +345,7 @@ func TestSendHeadReqToOrigin(t *testing.T) {
 	realServerUrl, err := url.Parse(server.URL)
 	require.NoError(t, err)
 
-	mockOriginAd := ServerAd{Type: OriginType}
+	mockOriginAd := common.ServerAd{Type: common.OriginType}
 	mockOriginAd.URL = *realServerUrl
 
 	tDir := t.TempDir()

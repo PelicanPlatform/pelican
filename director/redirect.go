@@ -29,6 +29,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/utils"
@@ -54,10 +55,10 @@ type originStatUtil struct {
 var (
 	minClientVersion, _        = version.NewVersion("7.0.0")
 	minOriginVersion, _        = version.NewVersion("7.0.0")
-	healthTestCancelFuncs      = make(map[ServerAd]context.CancelFunc)
+	healthTestCancelFuncs      = make(map[common.ServerAd]context.CancelFunc)
 	healthTestCancelFuncsMutex = sync.RWMutex{}
 
-	originStatUtils      = make(map[ServerAd]originStatUtil)
+	originStatUtils      = make(map[common.ServerAd]originStatUtil)
 	originStatUtilsMutex = sync.RWMutex{}
 )
 
@@ -67,7 +68,7 @@ var (
 // TODO: Add registry server as well to this endpoint when we need to scrape from it
 const DirectorServerDiscoveryEndpoint = "/api/v1.0/director/discoverServers"
 
-func getRedirectURL(reqPath string, ad ServerAd, requiresAuth bool) (redirectURL url.URL) {
+func getRedirectURL(reqPath string, ad common.ServerAd, requiresAuth bool) (redirectURL url.URL) {
 	var serverURL url.URL
 	if requiresAuth {
 		serverURL = ad.AuthURL
@@ -409,7 +410,7 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 	}
 }
 
-func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType ServerType) {
+func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType common.ServerType) {
 	tokens, present := ctx.Request.Header["Authorization"]
 	if !present || len(tokens) == 0 {
 		ctx.JSON(http.StatusForbidden, gin.H{"error": "Bearer token not present in the 'Authorization' header"})
@@ -423,13 +424,13 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType ServerTy
 		return
 	}
 
-	ad := OriginAdvertise{}
+	ad := common.OriginAdvertise{}
 	if ctx.ShouldBind(&ad) != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid " + sType + " registration"})
 		return
 	}
 
-	if sType == OriginType {
+	if sType == common.OriginType {
 		for _, namespace := range ad.Namespaces {
 			// We're assuming there's only one token in the slice
 			token := strings.TrimPrefix(tokens[0], "Bearer ")
@@ -482,7 +483,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType ServerTy
 		return
 	}
 
-	sAd := ServerAd{
+	sAd := common.ServerAd{
 		Name:               ad.Name,
 		AuthURL:            *ad_url,
 		URL:                *ad_url,
@@ -505,7 +506,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType ServerTy
 		LaunchPeriodicDirectorTest(ctx, sAd)
 	}
 
-	if sType == OriginType {
+	if sType == common.OriginType {
 		originStatUtilsMutex.Lock()
 		defer originStatUtilsMutex.Unlock()
 		statUtil, ok := originStatUtils[sAd]
@@ -569,11 +570,11 @@ func DiscoverOriginCache(ctx *gin.Context) {
 }
 
 func RegisterOrigin(ctx context.Context, gctx *gin.Context) {
-	registerServeAd(ctx, gctx, OriginType)
+	registerServeAd(ctx, gctx, common.OriginType)
 }
 
 func RegisterCache(ctx context.Context, gctx *gin.Context) {
-	registerServeAd(ctx, gctx, CacheType)
+	registerServeAd(ctx, gctx, common.CacheType)
 }
 
 func ListNamespaces(ctx *gin.Context) {

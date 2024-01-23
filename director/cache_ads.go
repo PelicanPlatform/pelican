@@ -19,90 +19,26 @@
 package director
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"net/netip"
-	"net/url"
 	"path"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
+	"github.com/pelicanplatform/pelican/common"
 	log "github.com/sirupsen/logrus"
 )
 
-type (
-	NamespaceAd struct {
-		RequireToken  bool         `json:"requireToken"`
-		Path          string       `json:"path"`
-		Issuer        url.URL      `json:"url"`
-		MaxScopeDepth uint         `json:"maxScopeDepth"`
-		Strategy      StrategyType `json:"strategy"`
-		BasePath      string       `json:"basePath"`
-		VaultServer   string       `json:"vaultServer"`
-		DirlistHost   string       `json:"dirlisthost"`
-	}
-
-	ServerAd struct {
-		Name               string     `json:"name"`
-		AuthURL            url.URL    `json:"auth_url"`
-		URL                url.URL    `json:"url"`     // This is server's XRootD URL for file transfer
-		WebURL             url.URL    `json:"web_url"` // This is server's Web interface and API
-		Type               ServerType `json:"type"`
-		Latitude           float64    `json:"latitude"`
-		Longitude          float64    `json:"longitude"`
-		EnableWrite        bool       `json:"enable_write"`
-		EnableFallbackRead bool       `json:"enable_fallback_read"` // True if reads from the origin are permitted when no cache is available
-	}
-
-	ServerType   string
-	StrategyType string
-)
-
-const (
-	CacheType  ServerType = "Cache"
-	OriginType ServerType = "Origin"
-)
-
-const (
-	OAuthStrategy StrategyType = "OAuth2"
-	VaultStrategy StrategyType = "Vault"
-)
-
 var (
-	serverAds     = ttlcache.New[ServerAd, []NamespaceAd](ttlcache.WithTTL[ServerAd, []NamespaceAd](15 * time.Minute))
+	serverAds     = ttlcache.New[common.ServerAd, []common.NamespaceAd](ttlcache.WithTTL[common.ServerAd, []common.NamespaceAd](15 * time.Minute))
 	serverAdMutex = sync.RWMutex{}
 )
 
-func (ad ServerAd) MarshalJSON() ([]byte, error) {
-	baseAd := struct {
-		Name               string     `json:"name"`
-		AuthURL            string     `json:"auth_url"`
-		URL                string     `json:"url"`
-		WebURL             string     `json:"web_url"`
-		Type               ServerType `json:"type"`
-		Latitude           float64    `json:"latitude"`
-		Longitude          float64    `json:"longitude"`
-		EnableWrite        bool       `json:"enable_write"`
-		EnableFallbackRead bool       `json:"enable_fallback_read"`
-	}{
-		Name:               ad.Name,
-		AuthURL:            ad.AuthURL.String(),
-		URL:                ad.URL.String(),
-		WebURL:             ad.WebURL.String(),
-		Type:               ad.Type,
-		Latitude:           ad.Latitude,
-		Longitude:          ad.Longitude,
-		EnableWrite:        ad.EnableWrite,
-		EnableFallbackRead: ad.EnableFallbackRead,
-	}
-	return json.Marshal(baseAd)
-}
-
-func RecordAd(ad ServerAd, namespaceAds *[]NamespaceAd) {
+func RecordAd(ad common.ServerAd, namespaceAds *[]common.NamespaceAd) {
 	if err := UpdateLatLong(&ad); err != nil {
 		log.Debugln("Failed to lookup GeoIP coordinates for host", ad.URL.Host)
 	}
@@ -111,7 +47,7 @@ func RecordAd(ad ServerAd, namespaceAds *[]NamespaceAd) {
 	serverAds.Set(ad, *namespaceAds, ttlcache.DefaultTTL)
 }
 
-func UpdateLatLong(ad *ServerAd) error {
+func UpdateLatLong(ad *common.ServerAd) error {
 	if ad == nil {
 		return errors.New("Cannot provide a nil ad to UpdateLatLong")
 	}
@@ -136,8 +72,8 @@ func UpdateLatLong(ad *ServerAd) error {
 	return nil
 }
 
-func matchesPrefix(reqPath string, namespaceAds []NamespaceAd) *NamespaceAd {
-	var best *NamespaceAd
+func matchesPrefix(reqPath string, namespaceAds []common.NamespaceAd) *common.NamespaceAd {
+	var best *common.NamespaceAd
 
 	for _, namespace := range namespaceAds {
 		serverPath := namespace.Path
@@ -166,7 +102,7 @@ func matchesPrefix(reqPath string, namespaceAds []NamespaceAd) *NamespaceAd {
 		// Make the len comparison with tmpBest, because serverPath is one char longer now
 		if strings.HasPrefix(reqPath, serverPath) && len(serverPath) > len(tmpBest) {
 			if best == nil {
-				best = new(NamespaceAd)
+				best = new(common.NamespaceAd)
 			}
 			*best = namespace
 		}
@@ -174,7 +110,7 @@ func matchesPrefix(reqPath string, namespaceAds []NamespaceAd) *NamespaceAd {
 	return best
 }
 
-func GetAdsForPath(reqPath string) (originNamespace NamespaceAd, originAds []ServerAd, cacheAds []ServerAd) {
+func GetAdsForPath(reqPath string) (originNamespace common.NamespaceAd, originAds []common.ServerAd, cacheAds []common.ServerAd) {
 	serverAdMutex.RLock()
 	defer serverAdMutex.RUnlock()
 
@@ -186,13 +122,13 @@ func GetAdsForPath(reqPath string) (originNamespace NamespaceAd, originAds []Ser
 	// Iterate through all of the server ads. For each "item", the key
 	// is the server ad itself (either cache or origin), and the value
 	// is a slice of namespace prefixes are supported by that server
-	var best *NamespaceAd
+	var best *common.NamespaceAd
 	for _, item := range serverAds.Items() {
 		if item == nil {
 			continue
 		}
 		serverAd := item.Key()
-		if serverAd.Type == OriginType {
+		if serverAd.Type == common.OriginType {
 			if ns := matchesPrefix(reqPath, item.Value()); ns != nil {
 				if best == nil || len(ns.Path) > len(best.Path) {
 					best = ns
@@ -200,18 +136,18 @@ func GetAdsForPath(reqPath string) (originNamespace NamespaceAd, originAds []Ser
 					// prefix, we overwrite that here because we found a better ns. We also clear
 					// the other slice of server ads, because we know those aren't good anymore
 					originAds = append(originAds[:0], serverAd)
-					cacheAds = []ServerAd{}
+					cacheAds = []common.ServerAd{}
 				} else if ns.Path == best.Path {
 					originAds = append(originAds, serverAd)
 				}
 			}
 			continue
-		} else if serverAd.Type == CacheType {
+		} else if serverAd.Type == common.CacheType {
 			if ns := matchesPrefix(reqPath, item.Value()); ns != nil {
 				if best == nil || len(ns.Path) > len(best.Path) {
 					best = ns
 					cacheAds = append(cacheAds[:0], serverAd)
-					originAds = []ServerAd{}
+					originAds = []common.ServerAd{}
 				} else if ns.Path == best.Path {
 					cacheAds = append(cacheAds, serverAd)
 				}

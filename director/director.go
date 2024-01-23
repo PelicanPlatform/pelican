@@ -25,6 +25,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pelicanplatform/pelican/common"
 )
 
 type (
@@ -33,13 +34,13 @@ type (
 	}
 
 	listServerResponse struct {
-		Name      string     `json:"name"`
-		AuthURL   string     `json:"authUrl"`
-		URL       string     `json:"url"`    // This is server's XRootD URL for file transfer
-		WebURL    string     `json:"webUrl"` // This is server's Web interface and API
-		Type      ServerType `json:"type"`
-		Latitude  float64    `json:"latitude"`
-		Longitude float64    `json:"longitude"`
+		Name      string            `json:"name"`
+		AuthURL   string            `json:"authUrl"`
+		URL       string            `json:"url"`    // This is server's XRootD URL for file transfer
+		WebURL    string            `json:"webUrl"` // This is server's Web interface and API
+		Type      common.ServerType `json:"type"`
+		Latitude  float64           `json:"latitude"`
+		Longitude float64           `json:"longitude"`
 	}
 
 	statResponse struct {
@@ -48,12 +49,12 @@ type (
 	}
 )
 
-func (req listServerRequest) ToInternalServerType() ServerType {
+func (req listServerRequest) ToInternalServerType() common.ServerType {
 	if req.ServerType == "cache" {
-		return CacheType
+		return common.CacheType
 	}
 	if req.ServerType == "origin" {
-		return OriginType
+		return common.OriginType
 	}
 	return ""
 }
@@ -64,15 +65,15 @@ func listServers(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid query parameters"})
 		return
 	}
-	var servers []ServerAd
+	var servers []common.ServerAd
 	if queryParams.ServerType != "" {
-		if !strings.EqualFold(queryParams.ServerType, string(OriginType)) && !strings.EqualFold(queryParams.ServerType, string(CacheType)) {
+		if !strings.EqualFold(queryParams.ServerType, string(common.OriginType)) && !strings.EqualFold(queryParams.ServerType, string(common.CacheType)) {
 			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid server type"})
 			return
 		}
-		servers = ListServerAds([]ServerType{ServerType(queryParams.ToInternalServerType())})
+		servers = ListServerAds([]common.ServerType{common.ServerType(queryParams.ToInternalServerType())})
 	} else {
-		servers = ListServerAds([]ServerType{OriginType, CacheType})
+		servers = ListServerAds([]common.ServerType{common.OriginType, common.CacheType})
 
 	}
 	resList := make([]listServerResponse, 0)

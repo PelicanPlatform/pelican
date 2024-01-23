@@ -28,6 +28,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
@@ -106,7 +107,7 @@ func reportStatusToOrigin(ctx context.Context, originWebUrl string, status strin
 
 // Run a periodic test file transfer against an origin to ensure
 // it's talking to the director
-func LaunchPeriodicDirectorTest(ctx context.Context, originAd ServerAd) {
+func LaunchPeriodicDirectorTest(ctx context.Context, originAd common.ServerAd) {
 	originName := originAd.Name
 	originUrl := originAd.URL.String()
 	originWebUrl := originAd.WebURL.String()

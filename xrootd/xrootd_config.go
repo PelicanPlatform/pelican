@@ -37,8 +37,8 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/origin_ui"
 	"github.com/pelicanplatform/pelican/param"
@@ -248,7 +248,7 @@ func CheckOriginXrootdEnv(exportPath string, uid int, gid int, groupname string)
 	return exportPath, nil
 }
 
-func CheckCacheXrootdEnv(exportPath string, uid int, gid int, nsAds []director.NamespaceAd) (string, error) {
+func CheckCacheXrootdEnv(exportPath string, uid int, gid int, nsAds []common.NamespaceAd) (string, error) {
 	viper.Set("Xrootd.Mount", exportPath)
 	filepath.Join(exportPath, "/")
 	err := config.MkdirAll(exportPath, 0775, uid, gid)

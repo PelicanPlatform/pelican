@@ -22,8 +22,8 @@ import (
 	"fmt"
 	"net/url"
 
+	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pkg/errors"
@@ -39,8 +39,8 @@ func (server *OriginServer) GetServerType() config.ServerType {
 	return config.OriginType
 }
 
-func (server *OriginServer) CreateAdvertisement(name string, originUrl string, originWebUrl string) (director.OriginAdvertise, error) {
-	ad := director.OriginAdvertise{}
+func (server *OriginServer) CreateAdvertisement(name string, originUrl string, originWebUrl string) (common.OriginAdvertise, error) {
+	ad := common.OriginAdvertise{}
 
 	// Here we instantiate the namespaceAd slice, but we still need to define the namespace
 	issuerUrl := url.URL{}
@@ -55,7 +55,7 @@ func (server *OriginServer) CreateAdvertisement(name string, originUrl string, o
 
 	// TODO: Need to figure out where to get some of these values
 	// 		 so that they aren't hardcoded...
-	nsAd := director.NamespaceAd{
+	nsAd := common.NamespaceAd{
 		RequireToken:  true,
 		Path:          prefix,
 		Issuer:        issuerUrl,
@@ -63,11 +63,11 @@ func (server *OriginServer) CreateAdvertisement(name string, originUrl string, o
 		Strategy:      "OAuth2",
 		BasePath:      prefix,
 	}
-	ad = director.OriginAdvertise{
+	ad = common.OriginAdvertise{
 		Name:               name,
 		URL:                originUrl,
 		WebURL:             originWebUrl,
-		Namespaces:         []director.NamespaceAd{nsAd},
+		Namespaces:         []common.NamespaceAd{nsAd},
 		EnableWrite:        param.Origin_EnableWrite.GetBool(),
 		EnableFallbackRead: param.Origin_EnableFallbackRead.GetBool(),
 	}

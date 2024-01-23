@@ -38,8 +38,8 @@ import (
 
 	"github.com/go-ini/ini"
 	"github.com/pelicanplatform/pelican/cache_ui"
+	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/origin_ui"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -495,7 +495,7 @@ func WriteOriginScitokensConfig(exportedPaths []string) error {
 }
 
 // Writes out the cache's scitokens.cfg configuration
-func WriteCacheScitokensConfig(nsAds []director.NamespaceAd) error {
+func WriteCacheScitokensConfig(nsAds []common.NamespaceAd) error {
 
 	cfg, err := makeSciTokensCfg()
 	if err != nil {

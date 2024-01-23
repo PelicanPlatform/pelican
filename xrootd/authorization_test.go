@@ -34,8 +34,8 @@ import (
 	"testing"
 
 	"github.com/pelicanplatform/pelican/cache_ui"
+	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/origin_ui"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -316,14 +316,14 @@ func TestWriteOriginAuthFiles(t *testing.T) {
 			assert.Equal(t, authResult, string(authGen))
 		}
 	}
-	nsAds := []director.NamespaceAd{}
+	nsAds := []common.NamespaceAd{}
 
 	originServer := &origin_ui.OriginServer{}
 	originServer.SetNamespaceAds(nsAds)
 
 	t.Run("MultiIssuer", originAuthTester(originServer, "u * t1 lr t2 lr t3 lr", "u * /.well-known lr t1 lr t2 lr t3 lr\n"))
 
-	nsAds = []director.NamespaceAd{}
+	nsAds = []common.NamespaceAd{}
 	originServer.SetNamespaceAds(nsAds)
 
 	t.Run("EmptyAuth", originAuthTester(originServer, "", "u * /.well-known lr\n"))
@@ -382,7 +382,7 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 	issuer4URL.Scheme = "https"
 	issuer4URL.Host = "issuer4.com"
 
-	nsAds := []director.NamespaceAd{
+	nsAds := []common.NamespaceAd{
 		{RequireToken: true, Issuer: issuer1URL, BasePath: "/p1"},
 		{RequireToken: true, Issuer: issuer2URL, BasePath: "/p2/path"},
 		{RequireToken: false, Issuer: issuer3URL, BasePath: "/p3"},
@@ -396,7 +396,7 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 
 	t.Run("MultiIssuer", cacheAuthTester(cacheServer, cacheSciOutput, "u * /p3 lr /p4/depth lr /p2_noauth lr \n"))
 
-	nsAds = []director.NamespaceAd{}
+	nsAds = []common.NamespaceAd{}
 	cacheServer.SetNamespaceAds(nsAds)
 
 	t.Run("EmptyNS", cacheAuthTester(cacheServer, cacheEmptyOutput, ""))

@@ -25,12 +25,13 @@ import (
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
+	"github.com/pelicanplatform/pelican/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 )
 
-func hasServerAdWithName(serverAds []ServerAd, name string) bool {
+func hasServerAdWithName(serverAds []common.ServerAd, name string) bool {
 	for _, serverAd := range serverAds {
 		if serverAd.Name == name {
 			return true
@@ -49,7 +50,7 @@ func TestGetAdsForPath(t *testing.T) {
 			- Record the ads
 			- Query for a few paths and make sure the correct ads are returned
 	*/
-	nsAd1 := NamespaceAd{
+	nsAd1 := common.NamespaceAd{
 		RequireToken: true,
 		Path:         "/chtc",
 		Issuer: url.URL{
@@ -58,7 +59,7 @@ func TestGetAdsForPath(t *testing.T) {
 		},
 	}
 
-	nsAd2 := NamespaceAd{
+	nsAd2 := common.NamespaceAd{
 		RequireToken: false,
 		Path:         "/chtc/PUBLIC",
 		Issuer: url.URL{
@@ -67,7 +68,7 @@ func TestGetAdsForPath(t *testing.T) {
 		},
 	}
 
-	nsAd3 := NamespaceAd{
+	nsAd3 := common.NamespaceAd{
 		RequireToken: false,
 		Path:         "/chtc/PUBLIC2/",
 		Issuer: url.URL{
@@ -76,7 +77,7 @@ func TestGetAdsForPath(t *testing.T) {
 		},
 	}
 
-	cacheAd1 := ServerAd{
+	cacheAd1 := common.ServerAd{
 		Name: "cache1",
 		AuthURL: url.URL{
 			Scheme: "https",
@@ -86,10 +87,10 @@ func TestGetAdsForPath(t *testing.T) {
 			Scheme: "https",
 			Host:   "wisc.edu",
 		},
-		Type: CacheType,
+		Type: common.CacheType,
 	}
 
-	cacheAd2 := ServerAd{
+	cacheAd2 := common.ServerAd{
 		Name: "cache2",
 		AuthURL: url.URL{
 			Scheme: "https",
@@ -99,10 +100,10 @@ func TestGetAdsForPath(t *testing.T) {
 			Scheme: "https",
 			Host:   "wisc.edu",
 		},
-		Type: CacheType,
+		Type: common.CacheType,
 	}
 
-	originAd1 := ServerAd{
+	originAd1 := common.ServerAd{
 		Name: "origin1",
 		AuthURL: url.URL{
 			Scheme: "https",
@@ -112,10 +113,10 @@ func TestGetAdsForPath(t *testing.T) {
 			Scheme: "https",
 			Host:   "wisc.edu",
 		},
-		Type: OriginType,
+		Type: common.OriginType,
 	}
 
-	originAd2 := ServerAd{
+	originAd2 := common.ServerAd{
 		Name: "origin2",
 		AuthURL: url.URL{
 			Scheme: "https",
@@ -125,12 +126,12 @@ func TestGetAdsForPath(t *testing.T) {
 			Scheme: "https",
 			Host:   "wisc.edu",
 		},
-		Type: OriginType,
+		Type: common.OriginType,
 	}
 
-	o1Slice := []NamespaceAd{nsAd1}
-	o2Slice := []NamespaceAd{nsAd2, nsAd3}
-	c1Slice := []NamespaceAd{nsAd1, nsAd2}
+	o1Slice := []common.NamespaceAd{nsAd1}
+	o2Slice := []common.NamespaceAd{nsAd2, nsAd3}
+	c1Slice := []common.NamespaceAd{nsAd1, nsAd2}
 	RecordAd(originAd2, &o2Slice)
 	RecordAd(originAd1, &o1Slice)
 	RecordAd(cacheAd1, &c1Slice)
@@ -183,7 +184,7 @@ func TestGetAdsForPath(t *testing.T) {
 }
 
 func TestConfigCacheEviction(t *testing.T) {
-	mockPelicanOriginServerAd := ServerAd{
+	mockPelicanOriginServerAd := common.ServerAd{
 		Name:    "test-origin-server",
 		AuthURL: url.URL{},
 		URL: url.URL{
@@ -194,11 +195,11 @@ func TestConfigCacheEviction(t *testing.T) {
 			Scheme: "https",
 			Host:   "fake-origin.org:8444",
 		},
-		Type:      OriginType,
+		Type:      common.OriginType,
 		Latitude:  123.05,
 		Longitude: 456.78,
 	}
-	mockNamespaceAd := NamespaceAd{
+	mockNamespaceAd := common.NamespaceAd{
 		RequireToken:  true,
 		Path:          "/foo/bar/",
 		Issuer:        url.URL{},
@@ -225,11 +226,11 @@ func TestConfigCacheEviction(t *testing.T) {
 			serverAdMutex.Lock()
 			defer serverAdMutex.Unlock()
 			serverAds.DeleteAll()
-			serverAds.Set(mockPelicanOriginServerAd, []NamespaceAd{mockNamespaceAd}, ttlcache.DefaultTTL)
+			serverAds.Set(mockPelicanOriginServerAd, []common.NamespaceAd{mockNamespaceAd}, ttlcache.DefaultTTL)
 			healthTestCancelFuncsMutex.Lock()
 			defer healthTestCancelFuncsMutex.Unlock()
 			// Clear the map for the new test
-			healthTestCancelFuncs = make(map[ServerAd]context.CancelFunc)
+			healthTestCancelFuncs = make(map[common.ServerAd]context.CancelFunc)
 			healthTestCancelFuncs[mockPelicanOriginServerAd] = cancelFunc
 
 			require.True(t, serverAds.Has(mockPelicanOriginServerAd), "serverAds failed to register the originAd")
@@ -269,7 +270,7 @@ func TestConfigCacheEviction(t *testing.T) {
 }
 
 func TestServerAdsCacheEviction(t *testing.T) {
-	mockServerAd := ServerAd{Name: "foo", Type: OriginType, URL: url.URL{}}
+	mockServerAd := common.ServerAd{Name: "foo", Type: common.OriginType, URL: url.URL{}}
 
 	t.Run("evict-after-expire-time", func(t *testing.T) {
 		// Start cache eviction
@@ -290,7 +291,7 @@ func TestServerAdsCacheEviction(t *testing.T) {
 			defer serverAdMutex.Unlock()
 			serverAds.DeleteAll()
 
-			serverAds.Set(mockServerAd, []NamespaceAd{}, time.Second*2)
+			serverAds.Set(mockServerAd, []common.NamespaceAd{}, time.Second*2)
 			require.True(t, serverAds.Has(mockServerAd), "Failed to register server Ad")
 		}()
 

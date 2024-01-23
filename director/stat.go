@@ -27,6 +27,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/utils"
@@ -36,9 +37,9 @@ import (
 
 type (
 	objectMetadata struct {
-		ServerAd      ServerAd `json:"server_ad"`
-		Checksum      string   `json:"checksum"`
-		ContentLength int      `json:"content_length"`
+		ServerAd      common.ServerAd `json:"server_ad"`
+		Checksum      string          `json:"checksum"`
+		ContentLength int             `json:"content_length"`
 	}
 
 	timeoutError struct {
@@ -55,7 +56,7 @@ type (
 
 	// Represents a new stat instance
 	ObjectStat struct {
-		ReqHandler func(objectName string, originAd ServerAd, timeout time.Duration, maxCancelCtx context.Context) (*objectMetadata, error)
+		ReqHandler func(objectName string, originAd common.ServerAd, timeout time.Duration, maxCancelCtx context.Context) (*objectMetadata, error)
 		Query      func(objectName string, cancelContext context.Context) ([]*objectMetadata, string, error)
 	}
 )
@@ -90,7 +91,7 @@ func NewObjectStat() *ObjectStat {
 }
 
 // Implementation of sending a HEAD request to an origin for an object
-func (stat *ObjectStat) sendHeadReqToOrigin(objectName string, originAd ServerAd, timeout time.Duration, maxCancelCtx context.Context) (*objectMetadata, error) {
+func (stat *ObjectStat) sendHeadReqToOrigin(objectName string, originAd common.ServerAd, timeout time.Duration, maxCancelCtx context.Context) (*objectMetadata, error) {
 	tokenConf := utils.TokenConfig{
 		Lifetime:     time.Minute,
 		TokenProfile: utils.WLCG,
@@ -172,7 +173,7 @@ func (stat *ObjectStat) queryOriginsForObject(objectName string, cancelContext c
 		}
 		// Have to use an anonymous func to wrap the egrp call to pass loop variable safely
 		// to goroutine
-		func(intOriginAd ServerAd) {
+		func(intOriginAd common.ServerAd) {
 			originUtil.Errgroup.Go(func() error {
 				metadata, err := stat.ReqHandler(objectName, intOriginAd, timeout, maxCancelCtx)
 

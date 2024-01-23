@@ -27,12 +27,13 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/utils"
 )
 
-func parseServerAd(server utils.Server, serverType ServerType) ServerAd {
-	serverAd := ServerAd{}
+func parseServerAd(server utils.Server, serverType common.ServerType) common.ServerAd {
+	serverAd := common.ServerAd{}
 	serverAd.Type = serverType
 	serverAd.Name = server.Resource
 
@@ -73,10 +74,10 @@ func AdvertiseOSDF() error {
 		return errors.Wrapf(err, "Failed to get topology JSON")
 	}
 
-	cacheAdMap := make(map[ServerAd][]NamespaceAd)
-	originAdMap := make(map[ServerAd][]NamespaceAd)
+	cacheAdMap := make(map[common.ServerAd][]common.NamespaceAd)
+	originAdMap := make(map[common.ServerAd][]common.NamespaceAd)
 	for _, ns := range namespaces.Namespaces {
-		nsAd := NamespaceAd{}
+		nsAd := common.NamespaceAd{}
 		nsAd.RequireToken = ns.UseTokenOnRead
 		nsAd.Path = ns.Path
 		nsAd.DirlistHost = ns.DirlistHost
@@ -87,7 +88,7 @@ func AdvertiseOSDF() error {
 		}
 		nsAd.Issuer = *issuerURL
 		nsAd.MaxScopeDepth = uint(ns.CredentialGeneration.MaxScopeDepth)
-		nsAd.Strategy = StrategyType(ns.CredentialGeneration.Strategy)
+		nsAd.Strategy = common.StrategyType(ns.CredentialGeneration.Strategy)
 		nsAd.BasePath = ns.CredentialGeneration.BasePath
 		nsAd.VaultServer = ns.CredentialGeneration.VaultServer
 
@@ -96,12 +97,12 @@ func AdvertiseOSDF() error {
 		// they're listed as inactive by topology). These namespaces will all be mapped to the
 		// same useless origin ad, resulting in a 404 for queries to those namespaces
 		for _, origin := range ns.Origins {
-			originAd := parseServerAd(origin, OriginType)
+			originAd := parseServerAd(origin, common.OriginType)
 			originAdMap[originAd] = append(originAdMap[originAd], nsAd)
 		}
 
 		for _, cache := range ns.Caches {
-			cacheAd := parseServerAd(cache, CacheType)
+			cacheAd := parseServerAd(cache, common.CacheType)
 			cacheAdMap[cacheAd] = append(cacheAdMap[cacheAd], nsAd)
 		}
 	}
