@@ -340,6 +340,9 @@ func TestSendHeadReqToOrigin(t *testing.T) {
 	// Start a local HTTP server
 	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 		if req.Method == "HEAD" && req.URL.String() == "/foo/bar/test.txt" {
+			if req.Header.Get("Want-Digest") == "crc32c" {
+				rw.Header().Set("Digest", "mockChecksum")
+			}
 			rw.Header().Set("Content-Length", "1")
 			rw.WriteHeader(http.StatusOK)
 			return
@@ -381,6 +384,8 @@ func TestSendHeadReqToOrigin(t *testing.T) {
 		meta, err := stat.sendHeadReqToOrigin("/foo/bar/test.txt", mockOriginAd, time.Second, ctx)
 		require.NoError(t, err)
 		assert.NotNil(t, meta)
+		assert.Equal(t, 1, meta.ContentLength)
+		assert.Equal(t, "mockChecksum", meta.Checksum)
 	})
 
 	t.Run("404-input-gives-404-error", func(t *testing.T) {

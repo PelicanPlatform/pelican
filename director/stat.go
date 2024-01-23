@@ -114,6 +114,8 @@ func (stat *ObjectStat) sendHeadReqToOrigin(objectName string, originAd common.S
 		return nil, errors.Wrap(err, "Error creating request")
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
+	// Request checksum
+	req.Header.Set("Want-Digest", "crc32c")
 
 	res, err := client.Do(req)
 	if err != nil {
@@ -139,11 +141,12 @@ func (stat *ObjectStat) sendHeadReqToOrigin(objectName string, originAd common.S
 		return nil, errors.New(fmt.Sprintf("Unknown origin response with status code %d and message: %s", res.StatusCode, string(resBody)))
 	} else {
 		cLenStr := res.Header.Get("Content-Length")
+		checksumStr := res.Header.Get("Digest")
 		clen, err := strconv.Atoi(cLenStr)
 		if err != nil {
 			return nil, errors.New(fmt.Sprintf("Error parsing content-length header from response. Header was: %s", cLenStr))
 		}
-		return &objectMetadata{ContentLength: clen, ServerAd: originAd}, nil
+		return &objectMetadata{ContentLength: clen, Checksum: checksumStr, ServerAd: originAd}, nil
 	}
 }
 
