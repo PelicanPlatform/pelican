@@ -19,6 +19,7 @@
 package director
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -46,15 +47,15 @@ type (
 	}
 
 	ServerAd struct {
-		Name               string
-		AuthURL            url.URL
-		URL                url.URL // This is server's XRootD URL for file transfer
-		WebURL             url.URL // This is server's Web interface and API
-		Type               ServerType
-		Latitude           float64
-		Longitude          float64
-		EnableWrite        bool
-		EnableFallbackRead bool // True if reads from the origin are permitted when no cache is available
+		Name               string     `json:"name"`
+		AuthURL            url.URL    `json:"auth_url"`
+		URL                url.URL    `json:"url"`     // This is server's XRootD URL for file transfer
+		WebURL             url.URL    `json:"web_url"` // This is server's Web interface and API
+		Type               ServerType `json:"type"`
+		Latitude           float64    `json:"latitude"`
+		Longitude          float64    `json:"longitude"`
+		EnableWrite        bool       `json:"enable_write"`
+		EnableFallbackRead bool       `json:"enable_fallback_read"` // True if reads from the origin are permitted when no cache is available
 	}
 
 	ServerType   string
@@ -75,6 +76,31 @@ var (
 	serverAds     = ttlcache.New[ServerAd, []NamespaceAd](ttlcache.WithTTL[ServerAd, []NamespaceAd](15 * time.Minute))
 	serverAdMutex = sync.RWMutex{}
 )
+
+func (ad ServerAd) MarshalJSON() ([]byte, error) {
+	baseAd := struct {
+		Name               string     `json:"name"`
+		AuthURL            string     `json:"auth_url"`
+		URL                string     `json:"url"`
+		WebURL             string     `json:"web_url"`
+		Type               ServerType `json:"type"`
+		Latitude           float64    `json:"latitude"`
+		Longitude          float64    `json:"longitude"`
+		EnableWrite        bool       `json:"enable_write"`
+		EnableFallbackRead bool       `json:"enable_fallback_read"`
+	}{
+		Name:               ad.Name,
+		AuthURL:            ad.AuthURL.String(),
+		URL:                ad.URL.String(),
+		WebURL:             ad.WebURL.String(),
+		Type:               ad.Type,
+		Latitude:           ad.Latitude,
+		Longitude:          ad.Longitude,
+		EnableWrite:        ad.EnableWrite,
+		EnableFallbackRead: ad.EnableFallbackRead,
+	}
+	return json.Marshal(baseAd)
+}
 
 func RecordAd(ad ServerAd, namespaceAds *[]NamespaceAd) {
 	if err := UpdateLatLong(&ad); err != nil {
