@@ -37,8 +37,8 @@ import (
 type (
 	objectMetadata struct {
 		ServerAd      ServerAd
-		Checksum      string
-		ContentLength int
+		Checksum      string `json:"checksum"`
+		ContentLength int    `json:"content_length"`
 	}
 
 	timeoutError struct {

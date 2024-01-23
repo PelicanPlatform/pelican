@@ -19,7 +19,9 @@
 package director
 
 import (
+	"context"
 	"net/http"
+	"path"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -38,6 +40,11 @@ type (
 		Type      ServerType `json:"type"`
 		Latitude  float64    `json:"latitude"`
 		Longitude float64    `json:"longitude"`
+	}
+
+	statResponse struct {
+		Message  string            `json:"message"`
+		Metadata []*objectMetadata `json:"metadata"`
 	}
 )
 
@@ -84,10 +91,29 @@ func listServers(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, resList)
 }
 
+func queryOrigins(ctx *gin.Context) {
+	pathParam := ctx.Param("path")
+	path := path.Clean(pathParam)
+	if path == "" || strings.HasSuffix(path, "/") {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Path should not be empty or ended with slash '/'"})
+		return
+	}
+	cancelCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	meta, msg, err := NewObjectStat().Query(path, cancelCtx)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	res := statResponse{Message: msg, Metadata: meta}
+	ctx.JSON(http.StatusOK, res)
+}
+
 func RegisterDirectorWebAPI(router *gin.RouterGroup) {
-	registryWebAPI := router.Group("/api/v1.0/director_ui")
+	directorWebAPI := router.Group("/api/v1.0/director_ui")
 	// Follow RESTful schema
 	{
-		registryWebAPI.GET("/servers", listServers)
+		directorWebAPI.GET("/servers", listServers)
+		directorWebAPI.GET("/servers/origins/stat/*path", queryOrigins)
 	}
 }
