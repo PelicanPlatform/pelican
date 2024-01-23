@@ -25,60 +25,109 @@ export PELICAN_FEDERATION_REGISTRYURL="https://$HOSTNAME:8444"
 export PELICAN_TLSSKIPVERIFY=true
 export PELICAN_ORIGIN_ENABLEFALLBACKREAD=true
 export PELICAN_SERVER_ENABLEUI=false
+export PELICAN_XROOTD_RUNLOCATION=$PWD/xrootdRunLocation
+mkdir config
+export PELICAN_CONFIGDIR=$PWD/config
+export PELICAN_REGISTRY_DBLOCATION=$PWD/config/test.sql
 
-adduser test1234
-export PELICAN_OIDC_CLIENTID="test1234"
-su test1234 -c '
+export PELICAN_OIDC_CLIENTID="sometexthere"
 
-mkdir $HOME/origin
-chmod 777 $HOME/origin
-export PELICAN_ORIGIN_EXPORTVOLUME="$HOME/origin:/test"
+mkdir origin
+chmod 777 origin
+export PELICAN_ORIGIN_EXPORTVOLUME="origin:/test"
 
 # Make a file to use for testing
-echo "This is some random content in the random file" > $HOME/input.txt
+echo "This is some random content in the random file" > input.txt
 
 # Make a token to be used
-./pelican origin token create --audience "https://wlcg.cern.ch/jwt/v1/any" --issuer "https://`hostname`:8443" --scope "storage.read:/ storage.modify:/" --subject "bar" --lifetime 60 --private-key $HOME/.config/pelican/issuer.jwk > $HOME/token
+./pelican origin token create --audience "https://wlcg.cern.ch/jwt/v1/any" --issuer "https://`hostname`:8443" --scope "storage.read:/ storage.modify:/" --subject "bar" --lifetime 60 --private-key config/issuer.jwk > token
 
 # Run federation in the background
 federationServe="./pelican serve --module director --module registry --module origin -d"
 $federationServe &
 pid_federationServe=$!
 
-# Give the federation time to spin up
-sleep 10
+# Give the federation time to spin up:
+AUTH_TOKEN=$(cat token)
+API_URL="https://$HOSTNAME:8444/api/v1.0/servers"
+DESIRED_RESPONSE='["origin","director","registry"]'
+
+# Function to check if the response indicates all servers are running
+check_response() {
+    RESPONSE=$(curl -k -s -X GET "$API_URL" \
+                 -H "Authorization: Bearer $AUTH_TOKEN" \
+                 -H "Content-Type: application/json") \
+
+    # Check if the response matches the desired output
+    if [ "$RESPONSE" = "$DESIRED_RESPONSE" ]; then
+        echo "Desired response received: $RESPONSE"
+        return 0
+    else
+        echo "Waiting for desired response..."
+        return 1
+    fi
+}
+
+# We don't want to do this loop for too long, indicates there is an error
+TOTAL_SLEEP_TIME=0
+
+# Loop until director, origin, and registry are running
+while check_response; [ $? -ne 0 ]
+do
+    sleep .5
+    TOTAL_SLEEP_TIME=$((TOTAL_SLEEP_TIME + 1))
+
+    # Break loop if we sleep for more than 10 seconds
+    if [ "$TOTAL_SLEEP_TIME" -gt 20 ]; then
+        echo "Total sleep time exceeded, exiting..."
+
+        # Test failed, we need to clean up
+        rm -rf origin config xrootdRunLocation
+        rm -f input.txt token
+
+        unset PELICAN_FEDERATION_DIRECTORURL
+        unset PELICAN_FEDERATION_REGISTRYURL
+        unset PELICAN_TLSSKIPVERIFY
+        unset PELICAN_ORIGIN_EXPORTVOLUME
+        unset PELICAN_SERVER_ENABLEUI
+        unset PELICAN_OIDC_CLIENTID
+        unset PELICAN_ORIGIN_ENABLEFALLBACKREAD
+        echo "TEST FAILED"
+        exit 1
+    fi
+done
 
 # Run pelican object put
-./pelican object put $HOME/input.txt osdf:///test/input.txt -d -t $HOME/token -l $HOME/putOutput.txt
+./pelican object put input.txt osdf:///test/input.txt -d -t token -l putOutput.txt
 
 # Check output of command
-if grep -q "Uploaded bytes: 47" $HOME/putOutput.txt; then
+if grep -q "Uploaded bytes: 47" putOutput.txt; then
     echo "Uploaded bytes successfully!"
 else
     echo "Did not upload correctly"
-    cat $HOME/putOutput.txt
+    cat putOutput.txt
     to_exit=1
 fi
 
-./pelican object get osdf:///test/input.txt $HOME/output.txt -d -t $HOME/token -l $HOME/getOutput.txt
+./pelican object get osdf:///test/input.txt output.txt -d -t token -l getOutput.txt
 
 # Check output of command
-if grep -q "Downloaded bytes: 47" $HOME/getOutput.txt; then
+if grep -q "Downloaded bytes: 47" getOutput.txt; then
     echo "Downloaded bytes successfully!"
 else
     echo "Did not download correctly"
-    cat $HOME/getOutput.txt
+    cat getOutput.txt
     to_exit=1
 fi
 
-if grep -q "This is some random content in the random file" $HOME/output.txt; then
+if grep -q "This is some random content in the random file" output.txt; then
     echo "Content matches the uploaded file!"
 else
     echo "Did not download correctly, content in downloaded file is different from the uploaded file"
     echo "Contents of the downloaded file:"
-    cat $HOME/output.txt
+    cat output.txt
     echo "Contents of uploaded file:"
-    cat $HOME/input.txt
+    cat input.txt
     to_exit=1
 fi
 
@@ -86,12 +135,11 @@ fi
 kill $pid_federationServe
 
 # Clean up temporary files
-rm -f $HOME/input.txt $HOME/token $HOME/putOutput.txt $HOME/getOutput.txt $HOME/output.txt
+rm -f input.txt token putOutput.txt getOutput.txt output.txt
 
 # cleanup
-rm -rf $HOME/origin
-'
-userdel -r test1234
+rm -rf origin config xrootdRunLocation
+
 unset PELICAN_FEDERATION_DIRECTORURL
 unset PELICAN_FEDERATION_REGISTRYURL
 unset PELICAN_TLSSKIPVERIFY
