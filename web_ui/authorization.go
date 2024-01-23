@@ -77,7 +77,8 @@ func promMetricAuthHandler(ctx *gin.Context) {
 		authOption := utils.AuthOption{
 			Sources: []utils.TokenSource{utils.Header, utils.Cookie},
 			Issuers: []utils.TokenIssuer{utils.Federation, utils.Issuer},
-			Scopes:  []string{"monitoring.scrape"}}
+			Scopes:  []string{token_scopes.Monitoring_Scrape.String()},
+		}
 
 		valid := utils.CheckAnyAuth(ctx, authOption)
 		if !valid {
@@ -97,7 +98,8 @@ func promQueryEngineAuthHandler(av1 *route.Router) gin.HandlerFunc {
 			// Cookie for web user access and header for external service like Grafana to access
 			Sources: []utils.TokenSource{utils.Cookie, utils.Header},
 			Issuers: []utils.TokenIssuer{utils.Issuer},
-			Scopes:  []string{"monitoring.query"}}
+			Scopes:  []string{token_scopes.Monitoring_Query.String()},
+		}
 
 		exists := utils.CheckAnyAuth(c, authOption)
 		if exists {

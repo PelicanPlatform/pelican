@@ -30,6 +30,8 @@ import (
 	"sync"
 
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/token_scopes"
+	"github.com/pelicanplatform/pelican/utils"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/gin-gonic/gin"
@@ -527,19 +529,13 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType ServerTy
 // Return a list of registered origins and caches in Prometheus HTTP SD format
 // for director's Prometheus service discovery
 func DiscoverOriginCache(ctx *gin.Context) {
-	// Check token for authorization
-	tokens, present := ctx.Request.Header["Authorization"]
-	if !present || len(tokens) == 0 {
-		ctx.JSON(401, gin.H{"error": "Bearer token not present in the 'Authorization' header"})
-		return
+	authOption := utils.AuthOption{
+		Sources: []utils.TokenSource{utils.Header},
+		Issuers: []utils.TokenIssuer{utils.Issuer},
+		Scopes:  []string{token_scopes.Pelican_DirectorServiceDiscovery.String()},
 	}
-	token := strings.TrimPrefix(tokens[0], "Bearer ")
-	ok, err := VerifyDirectorSDToken(token)
-	if err != nil {
-		log.Warningln("Failed to verify director service discovery token:", err)
-		ctx.JSON(401, gin.H{"error": fmt.Sprintf("Authorization token verification failed: %v\n", err)})
-		return
-	}
+
+	ok := utils.CheckAnyAuth(ctx, authOption)
 	if !ok {
 		log.Warningf("Invalid token for accessing director's sevice discovery")
 		ctx.JSON(401, gin.H{"error": "Invalid token for accessing director's sevice discovery"})
