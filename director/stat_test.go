@@ -255,31 +255,30 @@ func TestQueryOriginsForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		msg := ""
-		var err error
+		msgChan := make(chan string)
 
 		go func() {
-			_, msg, err = stat.queryOriginsForObject("/foo/bar/test.txt", ctx)
+			_, msg, _ := stat.queryOriginsForObject("/foo/bar/test.txt", ctx)
+			msgChan <- msg
 		}()
 
 		cancel()
 
-		go func() {
-			attempt := 0
-			tick := time.Tick(time.Millisecond * 500)
-			for {
-				<-tick
+		attempt := 0
+		tick := time.Tick(1 * time.Second)
+		for {
+			select {
+			case <-tick:
 				attempt += 1
 				if attempt > 3 {
 					assert.True(t, false, "queryOriginsForObject timeout for response")
-				}
-				if msg != "" && err != nil {
-					require.NoError(t, err)
-					assert.Equal(t, "Director stat for object '/foo/bar/test.txt' is cancelled", msg)
 					return
 				}
+			case message := <-msgChan:
+				assert.Equal(t, "Director stat for object \"/foo/bar/test.txt\" is cancelled", message)
+				return
 			}
-		}()
+		}
 	})
 
 	t.Run("error-response", func(t *testing.T) {
