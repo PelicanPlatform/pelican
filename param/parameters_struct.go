@@ -116,10 +116,12 @@ type config struct {
 	}
 	Registry struct {
 		AdminUsers []string
+		CacheApprovedOnly bool
 		DbLocation string
 		Institutions interface{}
 		InstitutionsUrl string
 		InstitutionsUrlReloadMinutes time.Duration
+		OriginApprovedOnly bool
 		RequireKeyChaining bool
 	}
 	Server struct {
@@ -286,10 +288,12 @@ type configWithType struct {
 	}
 	Registry struct {
 		AdminUsers struct { Type string; Value []string }
+		CacheApprovedOnly struct { Type string; Value bool }
 		DbLocation struct { Type string; Value string }
 		Institutions struct { Type string; Value interface{} }
 		InstitutionsUrl struct { Type string; Value string }
 		InstitutionsUrlReloadMinutes struct { Type string; Value time.Duration }
+		OriginApprovedOnly struct { Type string; Value bool }
 		RequireKeyChaining struct { Type string; Value bool }
 	}
 	Server struct {

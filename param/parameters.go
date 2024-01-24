@@ -180,6 +180,8 @@ var (
 	Origin_Multiuser = BoolParam{"Origin.Multiuser"}
 	Origin_ScitokensMapSubject = BoolParam{"Origin.ScitokensMapSubject"}
 	Origin_SelfTest = BoolParam{"Origin.SelfTest"}
+	Registry_CacheApprovedOnly = BoolParam{"Registry.CacheApprovedOnly"}
+	Registry_OriginApprovedOnly = BoolParam{"Registry.OriginApprovedOnly"}
 	Registry_RequireKeyChaining = BoolParam{"Registry.RequireKeyChaining"}
 	Server_EnableUI = BoolParam{"Server.EnableUI"}
 	StagePlugin_Hook = BoolParam{"StagePlugin.Hook"}
