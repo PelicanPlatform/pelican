@@ -113,15 +113,16 @@ type (
 	}
 
 	LoggingConfig struct {
-		XrootdScitokensTrace  string
-		XrootdPssTrace        string
-		XrootdCmsTrace        string
-		XrootdOfsTrace        string
-		XrootdPfcTrace        string
-		XrootdXrootdTrace     string
-		XrootdXrdTrace        string
-		XrootdPssSetOptCache  string
-		XrootdPssSetOptOrigin string
+		CacheScitokens  string
+		CachePss        string
+		CacheCms        string
+		CacheOfs        string
+		CacheXrd        string
+		PssSetOptCache  string
+		OriginScitokens string
+		OriginPfc       string
+		OriginXrootd    string
+		PssSetOptOrigin string
 	}
 
 	XrootdConfig struct {
@@ -515,6 +516,7 @@ func LaunchXrootdMaintenance(ctx context.Context, server server_utils.XRootDServ
 }
 
 func ConfigXrootd(ctx context.Context, origin bool) (string, error) {
+
 	gid, err := config.GetDaemonGID()
 	if err != nil {
 		return "", err
@@ -525,6 +527,9 @@ func ConfigXrootd(ctx context.Context, origin bool) (string, error) {
 	if err := viper.Unmarshal(&xrdConfig); err != nil {
 		return "", err
 	}
+
+	// Map out xrootd logs
+	mapXrootdLogLevels(&xrdConfig)
 
 	runtimeCAs := filepath.Join(param.Xrootd_RunLocation.GetString(), "ca-bundle.crt")
 	caCount, err := utils.LaunchPeriodicWriteCABundle(ctx, runtimeCAs, 2*time.Minute)
@@ -618,4 +623,111 @@ func SetUpMonitoring(ctx context.Context, egrp *errgroup.Group) error {
 	viper.Set("Xrootd.LocalMonitoringPort", monitorPort)
 
 	return nil
+}
+
+// mapXrootdLogLevels is utilized to map Pelican config values to Xrootd ones
+// this is used to keep our log levels for Xrootd simple, so one does not need
+// to be an Xrootd expert to understand the inconsistent logs within Xrootd
+func mapXrootdLogLevels(xrdConfig *XrootdConfig) {
+	// Origin Scitokens
+	originScitokensConfig := param.Logging_Origin_Scitokens.GetString()
+	if originScitokensConfig == "debug" {
+		xrdConfig.Logging.OriginScitokens = "all"
+	} else if originScitokensConfig == "info" {
+		xrdConfig.Logging.OriginScitokens = "info"
+	} else { // Default is error
+		xrdConfig.Logging.OriginScitokens = "none"
+	}
+
+	// Cache PssSetOptOrigin
+	cachePssSetOptOrigin := param.Logging_Origin_PssSetOptOrigin.GetString()
+	if cachePssSetOptOrigin == "debug" {
+		xrdConfig.Logging.PssSetOptOrigin = "DebugLevel 3"
+	} else if cachePssSetOptOrigin == "info" {
+		xrdConfig.Logging.PssSetOptOrigin = "DebugLevel 2"
+	} else {
+		xrdConfig.Logging.PssSetOptOrigin = "DebugLevel 1"
+	}
+
+	// Origin Pfc
+	originPfcConfig := param.Logging_Origin_Pfc.GetString()
+	if originPfcConfig == "debug" {
+		xrdConfig.Logging.OriginPfc = "all"
+	} else if originPfcConfig == "error" {
+		xrdConfig.Logging.OriginPfc = "none"
+	} else { // Default is info
+		xrdConfig.Logging.OriginPfc = "info"
+	}
+
+	// Origin Xrootd
+	originXrootdConfig := param.Logging_Origin_Xrootd.GetString()
+	xrdConfig.Logging.OriginXrootd = originXrootdConfig
+	// Keeping this commented out here if we implement debug, info, error logging on origin
+	// if originXrootdConfig == "debug" {
+	// 	xrdConfig.Logging.OriginXrootd = "all"
+	// } else if originXrootdConfig == "info" {
+	// 	xrdConfig.Logging.OriginXrootd = "info"
+	// } else {
+	// 	xrdConfig.Logging.OriginXrootd = "none"
+	// }
+
+	// Cache Scitokens
+	cacheScitokensConfig := param.Logging_Cache_Scitokens.GetString()
+	if cacheScitokensConfig == "debug" {
+		xrdConfig.Logging.CacheScitokens = "all"
+	} else if cacheScitokensConfig == "info" {
+		xrdConfig.Logging.CacheScitokens = "info"
+	} else {
+		xrdConfig.Logging.CacheScitokens = "none"
+	}
+
+	// Cache PssSetOptCache
+	cachePssSetOptCache := param.Logging_Cache_PssSetOptCache.GetString()
+	if cachePssSetOptCache == "debug" {
+		xrdConfig.Logging.PssSetOptCache = "DebugLevel 3"
+	} else if cachePssSetOptCache == "info" {
+		xrdConfig.Logging.PssSetOptCache = "DebugLevel 2"
+	} else {
+		xrdConfig.Logging.PssSetOptCache = "DebugLevel 1"
+	}
+
+	// Cache Pss
+	cachePssConfig := param.Logging_Cache_Pss.GetString()
+	if cachePssConfig == "debug" {
+		xrdConfig.Logging.CachePss = "all"
+	} else if cachePssConfig == "info" {
+		xrdConfig.Logging.CachePss = "on"
+	} else {
+		xrdConfig.Logging.CachePss = "off"
+	}
+
+	// Cache Cms
+	cacheCmsConfig := param.Logging_Cache_Cms.GetString()
+	if cacheCmsConfig == "debug" {
+		xrdConfig.Logging.CacheCms = "all"
+	} else if cacheCmsConfig == "info" {
+		xrdConfig.Logging.CacheCms = "-all" // Not super sure what to do for info on this one
+	} else {
+		xrdConfig.Logging.CacheCms = "-all"
+	}
+
+	// Cache Cms
+	cacheOfsConfig := param.Logging_Cache_Ofs.GetString()
+	if cacheOfsConfig == "debug" {
+		xrdConfig.Logging.CacheOfs = "all"
+	} else if cacheOfsConfig == "info" {
+		xrdConfig.Logging.CacheOfs = "-all" // Not super sure what to do for info on this one
+	} else {
+		xrdConfig.Logging.CacheOfs = "-all"
+	}
+
+	// Cache Xrd
+	cacheXrdConfig := param.Logging_Cache_Xrd.GetString()
+	if cacheXrdConfig == "debug" {
+		xrdConfig.Logging.CacheXrd = "all -sched"
+	} else if cacheXrdConfig == "info" {
+		xrdConfig.Logging.CacheXrd = "-all" // Not super sure what to do for info on this one
+	} else {
+		xrdConfig.Logging.CacheXrd = "-all"
+	}
 }

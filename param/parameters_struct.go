@@ -57,18 +57,23 @@ type config struct {
 	}
 	IssuerKey string
 	Logging struct {
+		Cache struct {
+			Cms string
+			Ofs string
+			Pss string
+			PssSetOptCache string
+			Scitokens string
+			Xrd string
+		}
 		DisableProgressBars bool
 		Level string
 		LogLocation string
-		XrootdCmsTrace string
-		XrootdOfsTrace string
-		XrootdPfcTrace string
-		XrootdPssSetOptCache string
-		XrootdPssSetOptOrigin string
-		XrootdPssTrace string
-		XrootdScitokensTrace string
-		XrootdXrdTrace string
-		XrootdXrootdTrace string
+		Origin struct {
+			Pfc string
+			PssSetOptOrigin string
+			Scitokens string
+			Xrootd string
+		}
 	}
 	MinimumDownloadSpeed int
 	Monitoring struct {
@@ -233,18 +238,23 @@ type configWithType struct {
 	}
 	IssuerKey struct { Type string; Value string }
 	Logging struct {
+		Cache struct {
+			Cms struct { Type string; Value string }
+			Ofs struct { Type string; Value string }
+			Pss struct { Type string; Value string }
+			PssSetOptCache struct { Type string; Value string }
+			Scitokens struct { Type string; Value string }
+			Xrd struct { Type string; Value string }
+		}
 		DisableProgressBars struct { Type string; Value bool }
 		Level struct { Type string; Value string }
 		LogLocation struct { Type string; Value string }
-		XrootdCmsTrace struct { Type string; Value string }
-		XrootdOfsTrace struct { Type string; Value string }
-		XrootdPfcTrace struct { Type string; Value string }
-		XrootdPssSetOptCache struct { Type string; Value string }
-		XrootdPssSetOptOrigin struct { Type string; Value string }
-		XrootdPssTrace struct { Type string; Value string }
-		XrootdScitokensTrace struct { Type string; Value string }
-		XrootdXrdTrace struct { Type string; Value string }
-		XrootdXrootdTrace struct { Type string; Value string }
+		Origin struct {
+			Pfc struct { Type string; Value string }
+			PssSetOptOrigin struct { Type string; Value string }
+			Scitokens struct { Type string; Value string }
+			Xrootd struct { Type string; Value string }
+		}
 	}
 	MinimumDownloadSpeed struct { Type string; Value int }
 	Monitoring struct {
