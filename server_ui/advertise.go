@@ -151,7 +151,7 @@ func advertiseInternal(ctx context.Context, server server_utils.XRootDServer) er
 			return errors.Wrapf(unmarshalErr, "Could not unmarshall the director's response, which responded %v from director registration: %v", resp.StatusCode, resp.Status)
 		}
 		if resp.StatusCode == http.StatusForbidden {
-			return errors.Errorf("Error during director advertisement: Cache has not been approved by administrator.")
+			return errors.Errorf("Error during director advertisement: Your namespace has not been approved by an administrator.")
 		}
 		return errors.Errorf("Error during director registration: %v\n", respErr.Error)
 	}

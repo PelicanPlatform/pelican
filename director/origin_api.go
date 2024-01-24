@@ -20,7 +20,6 @@ package director
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/url"
 	"strings"
@@ -151,22 +150,11 @@ func VerifyAdvertiseToken(ctx context.Context, token, namespace string) (bool, e
 	log.Debugln("Attempting to fetch keys from ", issuerUrl)
 	keyset, err := ar.Get(ctx, issuerUrl)
 
-	if log.IsLevelEnabled(log.DebugLevel) {
-		// Let's check that we can convert to JSON and get the right thing...
-		jsonbuf, err := json.Marshal(keyset)
-		if err != nil {
-			return false, errors.Wrap(err, "failed to marshal the public keyset into JWKS JSON")
-		}
-		log.Debugln("Constructed JWKS from fetching jwks:", string(jsonbuf))
-		// This seems never get reached, as registry returns 403 for pending approval namespace
-		// and there will be HTTP error in getting jwks; thus it will always be error
-		if jsonbuf == nil {
+	if err != nil {
+		if strings.Contains(err.Error(), "403") {
 			adminApprovalErr = errors.New(namespace + " has not been approved by an administrator.")
 			return false, adminApprovalErr
 		}
-	}
-
-	if err != nil {
 		return false, err
 	}
 

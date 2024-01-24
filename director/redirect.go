@@ -428,14 +428,20 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType ServerTy
 			token := strings.TrimPrefix(tokens[0], "Bearer ")
 			ok, err := VerifyAdvertiseToken(engineCtx, token, namespace.Path)
 			if err != nil {
-				log.Warningln("Failed to verify token:", err)
-				ctx.JSON(http.StatusForbidden, gin.H{"error": "Authorization token verification failed"})
-				return
+				if err == adminApprovalErr {
+					log.Warningf("Failed to verify token. Namespace %q was not approved", namespace.Path)
+					ctx.JSON(http.StatusForbidden, gin.H{"error": fmt.Sprintf("The namespace %q was not approved by an administrator", namespace.Path)})
+					return
+				} else {
+					log.Warningln("Failed to verify token:", err)
+					ctx.JSON(http.StatusForbidden, gin.H{"error": "Authorization token verification failed."})
+					return
+				}
 			}
 			if !ok {
-				log.Warningf("%s %v advertised to namespace %v without valid registration\n",
+				log.Warningf("%s %v advertised to namespace %v without valid token scope\n",
 					sType, ad.Name, namespace.Path)
-				ctx.JSON(http.StatusForbidden, gin.H{"error": sType + " not authorized to advertise to this namespace"})
+				ctx.JSON(http.StatusForbidden, gin.H{"error": "Authorization token verification failed. Token missing required scope"})
 				return
 			}
 		}
@@ -445,18 +451,18 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType ServerTy
 		ok, err := VerifyAdvertiseToken(engineCtx, token, prefix)
 		if err != nil {
 			if err == adminApprovalErr {
-				log.Warningln("Failed to verify token. Cache was not approved:", err)
-				ctx.JSON(http.StatusForbidden, gin.H{"error": "Cache is not admin approved"})
+				log.Warningf("Failed to verify token. Cache %q was not approved", ad.Name)
+				ctx.JSON(http.StatusForbidden, gin.H{"error": fmt.Sprintf("Cache %q was not approved by an administrator", ad.Name)})
+				return
 			} else {
 				log.Warningln("Failed to verify token:", err)
-				ctx.JSON(http.StatusForbidden, gin.H{"error": "Authorization token verification failed"})
+				ctx.JSON(http.StatusForbidden, gin.H{"error": "Authorization token verification failed."})
+				return
 			}
-			return
 		}
 		if !ok {
-			log.Warningf("%s %v advertised to namespace %v without valid registration\n",
-				sType, ad.Name, prefix)
-			ctx.JSON(http.StatusForbidden, gin.H{"error": sType + " not authorized to advertise to this namespace"})
+			log.Warningf("%s %v advertised without valid token scope\n", sType, ad.Name)
+			ctx.JSON(http.StatusForbidden, gin.H{"error": "Authorization token verification failed. Token missing required scope"})
 			return
 		}
 	}
@@ -470,8 +476,8 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType ServerTy
 
 	adWebUrl, err := url.Parse(ad.WebURL)
 	if err != nil && ad.WebURL != "" { // We allow empty WebURL string for backward compatibility
-		log.Warningf("Failed to parse origin Web URL %v: %v\n", ad.WebURL, err)
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid origin Web URL"})
+		log.Warningf("Failed to parse server Web URL %v: %v\n", ad.WebURL, err)
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid server Web URL"})
 		return
 	}
 
