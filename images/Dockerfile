@@ -35,7 +35,7 @@ WORKDIR /pelican
 COPY . .
 COPY --from=website-build /webapp/out ./web_ui/frontend/out
 
-RUN goreleaser --clean --snapshot
+RUN goreleaser --clean
 
 FROM --platform=linux/amd64 hub.opensciencegrid.org/sciauth/scitokens-oauth2-server:release-20231118-1823 AS scitokens-oauth2-server
 
