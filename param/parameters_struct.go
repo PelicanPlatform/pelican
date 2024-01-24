@@ -119,6 +119,8 @@ type config struct {
 		AdminUsers []string
 		DbLocation string
 		Institutions interface{}
+		InstitutionsUrl string
+		InstitutionsUrlReloadMinutes time.Duration
 		RequireKeyChaining bool
 	}
 	Server struct {
@@ -287,6 +289,8 @@ type configWithType struct {
 		AdminUsers struct { Type string; Value []string }
 		DbLocation struct { Type string; Value string }
 		Institutions struct { Type string; Value interface{} }
+		InstitutionsUrl struct { Type string; Value string }
+		InstitutionsUrlReloadMinutes struct { Type string; Value time.Duration }
 		RequireKeyChaining struct { Type string; Value bool }
 	}
 	Server struct {

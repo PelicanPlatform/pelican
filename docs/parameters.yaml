@@ -205,7 +205,7 @@ name: Federation.TopologyReloadInterval
 description: >-
   The frequency, in minutes, that topology should be reloaded.
 type: duration
-osdf_default: 10
+osdf_default: 10m
 default: none
 components: ["director", "nsregistry"]
 ---
@@ -631,8 +631,46 @@ description: >-
     id: https://osg-htc.org/iid/01y2jtd41
   ```
 
+  Note that this value will take precedence over Registry.InstitutionsUrl if both are set
 type: object
 default: none
+components: ["nsregistry"]
+---
+name: Registry.InstitutionsUrl
+description: >-
+  A url to get a list of available institutions for users to register their namespaces to.
+  The url must accept a GET request with 200 response in JSON/YAML content with the following format:
+
+  JSON:
+  ```JSON
+    [
+      {
+        "name": "University of Wisconsin - Madison",
+        "id": " https://osg-htc.org/iid/01y2jtd41"
+      }
+    ]
+  ```
+
+  YAML:
+  ```yaml
+    ---
+    - name: University of Wisconsin - Madison
+      id: " https://osg-htc.org/iid/01y2jtd41"
+  ```
+
+  where the id field will be stored in registry database and must be unique, and name field will be displayed in UI as the option.
+
+  Note that Pelican will cache the response of the url in a TTL cache with default refresh time of 15 minutes.
+  Also note that Registry.Institutions will take precedence over this value if both are set.
+type: url
+default: none
+components: ["nsregistry"]
+---
+name: Registry.InstitutionsUrlReloadMinutes
+description: >-
+  Number of minutes that the Registry.InstitutionsUrl will be reloaded into the TTL cache.
+type: duration
+default: 15m
 components: ["nsregistry"]
 ---
 ############################

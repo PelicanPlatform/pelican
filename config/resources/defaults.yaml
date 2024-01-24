@@ -37,6 +37,8 @@ Origin:
   EnableUI: true
   EnableWrite: true
   SelfTest: true
+Registry:
+  InstitutionsUrlReloadMinutes: 15m
 Monitoring:
   PortLower: 9930
   PortHigher: 9999

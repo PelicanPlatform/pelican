@@ -62,8 +62,8 @@ export const Sidebar = ({children}: {children: ReactNode}) => {
 
     return (
         <Box>
-            <Snackbar 
-                open={error!=""} 
+            <Snackbar
+                open={error!=""}
                 autoHideDuration={6000}
                 onClose={() => {setError("")}}
                 anchorOrigin={{vertical: "top", horizontal: "center"}}

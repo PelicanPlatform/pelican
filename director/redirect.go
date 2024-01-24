@@ -55,6 +55,7 @@ type originStatUtil struct {
 var (
 	minClientVersion, _        = version.NewVersion("7.0.0")
 	minOriginVersion, _        = version.NewVersion("7.0.0")
+	minCacheVersion, _         = version.NewVersion("7.3.0")
 	healthTestCancelFuncs      = make(map[common.ServerAd]context.CancelFunc)
 	healthTestCancelFuncsMutex = sync.RWMutex{}
 
@@ -165,6 +166,10 @@ func versionCompatCheck(ginCtx *gin.Context) error {
 		minCompatVer = minClientVersion
 	case "origin":
 		minCompatVer = minOriginVersion
+	case "cache":
+		minCompatVer = minCacheVersion
+	default:
+		return errors.Errorf("Invalid version format. The director does not support your %s version (%s).", service, reqVer.String())
 	}
 
 	if reqVer.LessThan(minCompatVer) {

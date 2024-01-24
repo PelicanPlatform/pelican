@@ -616,7 +616,7 @@ func ConfigureEmbeddedPrometheus(ctx context.Context, engine *gin.Engine) error 
 				// Don't forget to release the reloadReady channel so that waiting blocks can exit normally.
 				select {
 				case <-ctx.Done():
-					err := level.Warn(logger).Log("msg", "Received shutdown, exiting gracefully...")
+					err := level.Info(logger).Log("msg", "Received shutdown, exiting gracefully...")
 					_ = err
 					reloadReady.Close()
 				case <-cancel:
