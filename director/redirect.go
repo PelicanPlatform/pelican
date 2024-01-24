@@ -430,7 +430,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType ServerTy
 			if err != nil {
 				if err == adminApprovalErr {
 					log.Warningf("Failed to verify token. Namespace %q was not approved", namespace.Path)
-					ctx.JSON(http.StatusForbidden, gin.H{"error": fmt.Sprintf("The namespace %q was not approved by an administrator", namespace.Path)})
+					ctx.JSON(http.StatusForbidden, gin.H{"approval_error": true, "error": fmt.Sprintf("The namespace %q was not approved by an administrator", namespace.Path)})
 					return
 				} else {
 					log.Warningln("Failed to verify token:", err)
@@ -452,7 +452,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType ServerTy
 		if err != nil {
 			if err == adminApprovalErr {
 				log.Warningf("Failed to verify token. Cache %q was not approved", ad.Name)
-				ctx.JSON(http.StatusForbidden, gin.H{"error": fmt.Sprintf("Cache %q was not approved by an administrator", ad.Name)})
+				ctx.JSON(http.StatusForbidden, gin.H{"approval_error": true, "error": fmt.Sprintf("Cache %q was not approved by an administrator", ad.Name)})
 				return
 			} else {
 				log.Warningln("Failed to verify token:", err)

@@ -40,7 +40,8 @@ import (
 )
 
 type directorResponse struct {
-	Error string `json:"error"`
+	Error         string `json:"error"`
+	ApprovalError bool   `json:"approval_error"`
 }
 
 func LaunchPeriodicAdvertise(ctx context.Context, egrp *errgroup.Group, servers []server_utils.XRootDServer) error {
@@ -150,8 +151,8 @@ func advertiseInternal(ctx context.Context, server server_utils.XRootDServer) er
 		if unmarshalErr := json.Unmarshal(body, &respErr); unmarshalErr != nil { // Error creating json
 			return errors.Wrapf(unmarshalErr, "Could not unmarshall the director's response, which responded %v from director registration: %v", resp.StatusCode, resp.Status)
 		}
-		if resp.StatusCode == http.StatusForbidden {
-			return errors.Errorf("Error during director advertisement: Your namespace has not been approved by an administrator.")
+		if respErr.ApprovalError {
+			return errors.Errorf("Your namespace has not been approved by an administrator.")
 		}
 		return errors.Errorf("Error during director registration: %v\n", respErr.Error)
 	}
