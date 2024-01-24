@@ -297,7 +297,7 @@ export default function RateGraph({boxProps, metrics, rate=new TimeDuration(30, 
                 if (updatedTime.hasSame(DateTime.now(), "day")) {
                     updatedTime = DateTime.now()
                 }
-                
+
                 return {
                     data: (await query_rate({metric, rate:_rate, duration:_duration, resolution:_resolution, time:updatedTime})),
                     ...datasetOption
