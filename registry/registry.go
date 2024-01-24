@@ -96,6 +96,14 @@ type checkNamespaceExistsRes struct {
 	Error        string `json:"error"`
 }
 
+type checkStatusReq struct {
+	Prefix string `json:"prefix"`
+}
+
+type checkStatusRes struct {
+	Approved bool `json:"approved"`
+}
+
 // Various auxiliary functions used for client-server security handshakes
 type registrationData struct {
 	ClientNonce     string `json:"client_nonce"`
@@ -763,6 +771,26 @@ func checkNamespaceExistsHandler(ctx *gin.Context) {
 	}
 }
 
+func checkNamespaceStatusHandler(ctx *gin.Context) {
+	req := checkStatusReq{}
+	if err := ctx.ShouldBind(&req); err != nil {
+		log.Debug("Failed to parse request body for namespace status check: ", err)
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse request body"})
+		return
+	}
+	if req.Prefix == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "prefix is required"})
+		return
+	}
+	ns, err := getNamespaceByPrefix(req.Prefix)
+	if err != nil || ns == nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Error getting namespace"})
+		return
+	}
+	res := checkStatusRes{Approved: ns.AdminMetadata.Status == Approved}
+	ctx.JSON(http.StatusOK, res)
+}
+
 func RegisterRegistryAPI(router *gin.RouterGroup) {
 	registryAPI := router.Group("/api/v1.0/registry")
 
@@ -776,6 +804,7 @@ func RegisterRegistryAPI(router *gin.RouterGroup) {
 		// Handle everything under "/" route with GET method
 		registryAPI.GET("/*wildcard", wildcardHandler)
 		registryAPI.POST("/checkNamespaceExists", checkNamespaceExistsHandler)
+		registryAPI.POST("/checkNamespaceStatus", checkNamespaceStatusHandler)
 		registryAPI.DELETE("/*wildcard", deleteNamespaceHandler)
 	}
 }

@@ -19,7 +19,11 @@
 package director
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -47,6 +51,14 @@ type (
 		EnableWrite        bool          `json:"enablewrite"`
 		EnableFallbackRead bool          `json:"enable-fallback-read"` // True if the origin will allow direct client reads when no caches are available
 	}
+
+	checkStatusReq struct {
+		Prefix string `json:"prefix"`
+	}
+
+	checkStatusRes struct {
+		Approved bool `json:"approved"`
+	}
 )
 
 // Create interface
@@ -62,6 +74,53 @@ var (
 
 	adminApprovalErr error
 )
+
+func checkNamespaceStatus(prefix string, registryWebUrlStr string) (bool, error) {
+	registryUrl, err := url.Parse(registryWebUrlStr)
+	if err != nil {
+		return false, err
+	}
+	reqUrl := registryUrl.JoinPath("/api/v1.0/registry/checkNamespaceStatus")
+
+	reqBody := checkStatusReq{Prefix: prefix}
+	reqByte, err := json.Marshal(reqBody)
+	if err != nil {
+		return false, err
+	}
+	client := http.Client{Transport: config.GetTransport()}
+	req, err := http.NewRequest("POST", reqUrl.String(), bytes.NewBuffer(reqByte))
+	req.Header.Add("Content-Type", "application/json")
+	if err != nil {
+		return false, err
+	}
+
+	res, err := client.Do(req)
+	if err != nil {
+		return false, err
+	}
+
+	if res.StatusCode != 200 {
+		if res.StatusCode == 404 {
+			// This is when we hit a legacy OSDF registry (or Pelican registry <= 7.4.0) which doesn't have such endpoint
+			log.Warningf("Request %q hit 404, either it's an OSDF registry or Pelican registry <= 7.4.0. Fallback to return true for approval status check", reqUrl.String())
+			return true, nil
+		} else {
+			return false, errors.New(fmt.Sprintf("Server error with status code %d", res.StatusCode))
+		}
+	}
+
+	resBody := checkStatusRes{}
+	bodyByte, err := io.ReadAll(res.Body)
+	if err != nil {
+		return false, err
+	}
+
+	if err := json.Unmarshal(bodyByte, &resBody); err != nil {
+		return false, err
+	}
+
+	return resBody.Approved, nil
+}
 
 func CreateAdvertiseToken(namespace string) (string, error) {
 	// TODO: Need to come back and carefully consider a few naming practices.
@@ -130,6 +189,15 @@ func VerifyAdvertiseToken(ctx context.Context, token, namespace string) (bool, e
 			}
 		}
 	}()
+	namespace_url_string := param.Federation_RegistryUrl.GetString()
+	approved, err := checkNamespaceStatus(namespace, namespace_url_string)
+	if err != nil {
+		return false, errors.Wrap(err, "Failed to check namespace approval status")
+	}
+	if !approved {
+		adminApprovalErr = errors.New(namespace + " has not been approved by an administrator.")
+		return false, adminApprovalErr
+	}
 	if ar == nil {
 		ar = jwk.NewCache(ctx)
 		client := &http.Client{Transport: config.GetTransport()}
@@ -151,10 +219,6 @@ func VerifyAdvertiseToken(ctx context.Context, token, namespace string) (bool, e
 	keyset, err := ar.Get(ctx, issuerUrl)
 
 	if err != nil {
-		if strings.Contains(err.Error(), "403") {
-			adminApprovalErr = errors.New(namespace + " has not been approved by an administrator.")
-			return false, adminApprovalErr
-		}
 		return false, err
 	}
 
