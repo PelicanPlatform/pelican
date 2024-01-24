@@ -26,9 +26,9 @@ export PELICAN_TLSSKIPVERIFY=true
 export PELICAN_ORIGIN_ENABLEFALLBACKREAD=true
 export PELICAN_SERVER_ENABLEUI=false
 export PELICAN_XROOTD_RUNLOCATION=$PWD/xrootdRunLocation
-mkdir config
-export PELICAN_CONFIGDIR=$PWD/config
-export PELICAN_REGISTRY_DBLOCATION=$PWD/config/test.sql
+mkdir get_put_config
+export PELICAN_CONFIGDIR=$PWD/get_put_config
+export PELICAN_REGISTRY_DBLOCATION=$PWD/get_put_config/test.sql
 
 export PELICAN_OIDC_CLIENTID="sometexthere"
 
@@ -40,7 +40,7 @@ export PELICAN_ORIGIN_EXPORTVOLUME="origin:/test"
 echo "This is some random content in the random file" > input.txt
 
 # Make a token to be used
-./pelican origin token create --audience "https://wlcg.cern.ch/jwt/v1/any" --issuer "https://`hostname`:8443" --scope "storage.read:/ storage.modify:/" --subject "bar" --lifetime 60 --private-key config/issuer.jwk > token
+./pelican origin token create --audience "https://wlcg.cern.ch/jwt/v1/any" --issuer "https://`hostname`:8443" --scope "storage.read:/ storage.modify:/" --subject "bar" --lifetime 60 --private-key get_put_config/issuer.jwk > token
 
 # Run federation in the background
 federationServe="./pelican serve --module director --module registry --module origin -d"
@@ -82,7 +82,7 @@ do
         echo "Total sleep time exceeded, exiting..."
 
         # Test failed, we need to clean up
-        rm -rf origin config xrootdRunLocation
+        rm -rf origin get_put_config xrootdRunLocation
         rm -f input.txt token
 
         unset PELICAN_FEDERATION_DIRECTORURL
@@ -138,7 +138,7 @@ kill $pid_federationServe
 rm -f input.txt token putOutput.txt getOutput.txt output.txt
 
 # cleanup
-rm -rf origin config xrootdRunLocation
+rm -rf origin get_put_config xrootdRunLocation
 
 unset PELICAN_FEDERATION_DIRECTORURL
 unset PELICAN_FEDERATION_REGISTRYURL
