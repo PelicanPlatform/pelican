@@ -43,6 +43,7 @@ type (
 		ctx    context.Context
 		expiry time.Time
 		pid    int
+		name   string
 	}
 )
 
@@ -105,7 +106,7 @@ func (launcher DaemonLauncher) Launch(ctx context.Context) (context.Context, int
 	if launcher.Uid != -1 && launcher.Gid != -1 {
 		cmd.SysProcAttr = &syscall.SysProcAttr{}
 		cmd.SysProcAttr.Credential = &syscall.Credential{Uid: uint32(launcher.Uid), Gid: uint32(launcher.Gid)}
-		log.Infof("Will launch daemon with UID %v and GID %v", launcher.Uid, launcher.Gid)
+		log.Infof("Will launch daemon %q with UID %v and GID %v", launcher.DaemonName, launcher.Uid, launcher.Gid)
 	} else if launcher.Uid != -1 || launcher.Gid != -1 {
 		return ctx, -1, errors.New("If either uid or gid is specified for daemon, both must be specified")
 	}
@@ -135,6 +136,7 @@ func LaunchDaemons(ctx context.Context, launchers []Launcher, egrp *errgroup.Gro
 		}
 		daemons[idx].ctx = ctx
 		daemons[idx].pid = pid
+		daemons[idx].name = daemon.Name()
 		log.Infoln("Successfully launched", daemon.Name())
 		metrics.SetComponentHealthStatus(metrics.HealthStatusComponent(daemon.Name()), metrics.StatusOK, "")
 	}
@@ -168,6 +170,7 @@ func LaunchDaemons(ctx context.Context, launchers []Launcher, egrp *errgroup.Gro
 						lastErr = errors.Wrapf(err, "Failed to forward signal to %s process", launchers[idx].Name())
 					}
 					daemon.expiry = time.Now().Add(10 * time.Second)
+					log.Infof("Daemon %q with pid %d was killed", daemon.name, daemon.pid)
 				}
 				if lastErr != nil {
 					log.Errorln("Last error when killing launched daemons:", lastErr)

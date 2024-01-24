@@ -62,6 +62,9 @@ func RegistryServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 		if err := web_ui.ConfigOAuthClientAPIs(engine); err != nil {
 			return err
 		}
+		if err := registry.InitInstConfig(ctx, egrp); err != nil {
+			return err
+		}
 	}
 
 	rootRouterGroup := engine.Group("/")

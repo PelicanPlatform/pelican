@@ -19,21 +19,27 @@
 package registry
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jellydator/ttlcache/v3"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pelicanplatform/pelican/web_ui"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
 )
 
 type (
@@ -62,8 +68,8 @@ type (
 	}
 
 	Institution struct {
-		Name string `mapstructure:"name" json:"name"`
-		ID   string `mapstructure:"id" json:"id"`
+		Name string `mapstructure:"name" json:"name" yaml:"name"`
+		ID   string `mapstructure:"id" json:"id" yaml:"id"`
 	}
 
 	customRegFieldsConfig struct {
@@ -86,6 +92,8 @@ const (
 var (
 	registrationFields     []registrationField
 	customRegFieldsConfigs []customRegFieldsConfig
+	institutionsCache      *ttlcache.Cache[string, []Institution]
+	institutionsCacheMutex = sync.RWMutex{}
 )
 
 func init() {
@@ -202,6 +210,88 @@ func excludePubKey(nss []*Namespace) (nssNew []NamespaceWOPubkey) {
 	}
 
 	return
+}
+
+func checkUniqueInstitutions(insts []Institution) bool {
+	repeatMap := make(map[string]bool)
+	for _, inst := range insts {
+		if repeatMap[inst.ID] {
+			return false
+		} else {
+			repeatMap[inst.ID] = true
+		}
+	}
+	return true
+}
+
+func getCachedInstitutions() (inst []Institution, intError error, extError error) {
+	if institutionsCache == nil {
+		return nil, errors.New("institutionsCache isn't initialized"), errors.New("Internal institution cache wasn't initialized")
+	}
+	instUrlStr := param.Registry_InstitutionsUrl.GetString()
+	if instUrlStr == "" {
+		intError = errors.New("Bad server configuration. Registry.InstitutionsUrl is unset")
+		extError = errors.New("Bad server configuration. Registry.InstitutionsUrl is unset")
+		return
+	}
+	instUrl, err := url.Parse(instUrlStr)
+	if err != nil {
+		intError = errors.Wrap(err, "Bad server configuration. Registry.InstitutionsUrl is invalid")
+		extError = errors.New("Bad server configuration. Registry.InstitutionsUrl is invalid")
+		return
+	}
+	if !institutionsCache.Has(instUrl.String()) {
+		log.Info("Cache miss for institutions TTL cache. Will fetch from source.")
+		client := &http.Client{Transport: config.GetTransport()}
+		req, err := http.NewRequest("GET", instUrl.String(), nil)
+		if err != nil {
+			intError = errors.Wrap(err, "Error making a request when fetching institution list")
+			extError = errors.New("Error when creating a request to fetch institution from remote url.")
+			return
+		}
+		res, err := client.Do(req)
+		if err != nil {
+			intError = errors.Wrap(err, "Error response when fetching institution list")
+			extError = errors.New("Error from response when fetching institution from remote url.")
+			return
+		}
+		if res.StatusCode != 200 {
+			intError = errors.Wrap(err, fmt.Sprintf("Error response when fetching institution list with code %d", res.StatusCode))
+			extError = errors.New(fmt.Sprint("Error when fetching institution from remote url, remote server error with code: ", res.StatusCode))
+			return
+		}
+		resBody, err := io.ReadAll(res.Body)
+		if err != nil {
+			intError = errors.Wrap(err, "Error reading response body when fetching institution list")
+			extError = errors.New("Error read response when fetching institution from remote url.")
+			return
+		}
+		institutions := []Institution{}
+		if err = json.Unmarshal(resBody, &institutions); err != nil {
+			intError = errors.Wrap(err, "Error parsing response body when fetching institution list")
+			extError = errors.New("Error parsing response when fetching institution from remote url.")
+			return
+		}
+		institutionsCacheMutex.Lock()
+		defer institutionsCacheMutex.Unlock()
+		institutionsCache.Set(instUrl.String(), institutions, ttlcache.DefaultTTL)
+		return institutions, nil, nil
+	} else {
+		institutionsCacheMutex.RLock()
+		defer institutionsCacheMutex.RUnlock()
+		institutions := institutionsCache.Get(instUrl.String())
+		if institutions.Value() == nil {
+			intError = errors.New(fmt.Sprint("Fail to get institutions from internal TTL cache, value is nil from key: ", instUrl))
+			extError = errors.New("Fail to get institutions from internal TTL cache")
+			return
+		}
+		if institutions.IsExpired() {
+			intError = errors.New(fmt.Sprintf("Cached institution with key %q is expired at %v", institutions.Key(), institutions.ExpiresAt()))
+			extError = errors.New("Expired institution cache")
+			return
+		}
+		return institutions.Value(), nil, nil
+	}
 }
 
 // List all namespaces in the registry.
@@ -567,6 +657,22 @@ func getNamespaceJWKS(ctx *gin.Context) {
 }
 
 func listInstitutions(ctx *gin.Context) {
+	// When Registry.InstitutionsUrl is set and Registry.Institutions is unset
+	if institutionsCache != nil {
+		insts, intErr, extErr := getCachedInstitutions()
+		if intErr != nil || extErr != nil {
+			if intErr != nil {
+				log.Error(intErr)
+			}
+			if extErr != nil {
+				ctx.JSON(http.StatusInternalServerError, gin.H{"error": extErr.Error()})
+			}
+			return
+		}
+		ctx.JSON(http.StatusOK, insts)
+		return
+	}
+	// When Registry.Institutions is set
 	institutions := []Institution{}
 	if err := param.Registry_Institutions.Unmarshal(&institutions); err != nil {
 		log.Error("Fail to read server configuration of institutions", err)
@@ -651,5 +757,69 @@ func RegisterRegistryWebAPI(router *gin.RouterGroup) error {
 	{
 		registryWebAPI.GET("/institutions", web_ui.AuthHandler, listInstitutions)
 	}
+	return nil
+}
+
+// Initialize institutions list
+func InitInstConfig(ctx context.Context, egrp *errgroup.Group) error {
+	institutions := []Institution{}
+	if err := param.Registry_Institutions.Unmarshal(&institutions); err != nil {
+		log.Error("Fail to read Registry.Institutions. Make sure you had the correct format", err)
+		return errors.Wrap(err, "Fail to read Registry.Institutions. Make sure you had the correct format")
+	}
+
+	if param.Registry_InstitutionsUrl.GetString() != "" {
+		// Read from Registry.Institutions if Registry.InstitutionsUrl is empty
+		// or Registry.Institutions and Registry.InstitutionsUrl are both set
+		if len(institutions) > 0 {
+			log.Warning("Registry.Institutions and Registry.InstitutionsUrl are both set. Registry.InstitutionsUrl is ignored")
+			if !checkUniqueInstitutions(institutions) {
+				return errors.Errorf("Institution IDs read from config are not unique")
+			}
+			// return here so that we don't init the institution url cache
+			return nil
+		}
+
+		_, err := url.Parse(param.Registry_InstitutionsUrl.GetString())
+		if err != nil {
+			log.Error("Invalid Registry.InstitutionsUrl: ", err)
+			return errors.Wrap(err, "Invalid Registry.InstitutionsUrl")
+		}
+		instCacheTTL := param.Registry_InstitutionsUrlReloadMinutes.GetDuration()
+
+		institutionsCache = ttlcache.New[string, []Institution](ttlcache.WithTTL[string, []Institution](instCacheTTL))
+
+		go institutionsCache.Start()
+
+		egrp.Go(func() error {
+			<-ctx.Done()
+			institutionsCacheMutex.Lock()
+			defer institutionsCacheMutex.Unlock()
+			log.Info("Gracefully stopping institution TTL cache eviction...")
+			if institutionsCache != nil {
+				institutionsCache.DeleteAll()
+				institutionsCache.Stop()
+			} else {
+				log.Info("Institution TTL cache is nil, stop clean up process.")
+			}
+			return nil
+		})
+
+		// Try to populate the cache at the server start. If error occured, it's non-blocking
+		cachedInsts, intErr, _ := getCachedInstitutions()
+		if intErr != nil {
+			log.Warning("Failed to populate institution cache. Error: ", intErr)
+		} else {
+			if !checkUniqueInstitutions(cachedInsts) {
+				return errors.Errorf("Institution IDs read from config are not unique")
+			}
+			log.Infof("Successfully populated institution TTL cache with %d entries", len(institutionsCache.Get(institutionsCache.Keys()[0]).Value()))
+		}
+	}
+
+	if !checkUniqueInstitutions(institutions) {
+		return errors.Errorf("Institution IDs read from config are not unique")
+	}
+	// Else we will read from Registry.Institutions. No extra action needed.
 	return nil
 }

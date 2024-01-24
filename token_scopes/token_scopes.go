@@ -5,7 +5,6 @@ package token_scopes
 type TokenScope string
 
 const (
-	
 	Pelican_Advertise TokenScope = "pelican.advertise"
 	Pelican_DirectorTestReport TokenScope = "pelican.director_test_report"
 	Pelican_DirectorServiceDiscovery TokenScope = "pelican.director_service_discovery"

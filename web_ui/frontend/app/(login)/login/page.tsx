@@ -39,7 +39,7 @@ export default function Home() {
             const response = await fetch("/api/v1.0/servers")
             if (response.ok) {
                 const data = await response.json()
-                setEnabledServers(data)
+                setEnabledServers(data?.servers)
             }
         })()
     }, []);

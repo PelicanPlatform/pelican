@@ -14,6 +14,8 @@ import (
 )
 
 func TestHandleCLIVersionFlag(t *testing.T) {
+	// Save the current version to reset this variable
+	var currentVersion = version
 	version = "0.0.1"
 	date = "2023-10-06T15:26:50Z"
 	commit = "f0f94a3edf6641c2472345819a0d5453fc9e68d1"
@@ -100,6 +102,9 @@ func TestHandleCLIVersionFlag(t *testing.T) {
 
 	// Restore the args back when test finished
 	os.Args = oldArgs
+
+	// Set the version back to what it was
+	version = currentVersion
 }
 
 func TestHandleCLIExecutableAlias(t *testing.T) {

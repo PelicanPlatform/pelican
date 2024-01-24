@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -191,6 +192,15 @@ func TestDeprecateLogMessage(t *testing.T) {
 
 func TestEnabledServers(t *testing.T) {
 	allServerTypes := []ServerType{OriginType, CacheType, DirectorType, RegistryType}
+	allServerStrs := make([]string, 0)
+	allServerStrsLower := make([]string, 0)
+	for _, st := range allServerTypes {
+		allServerStrs = append(allServerStrs, st.String())
+		allServerStrsLower = append(allServerStrsLower, strings.ToLower(st.String()))
+	}
+	sort.Strings(allServerStrs)
+	sort.Strings(allServerStrsLower)
+
 	t.Run("no-value-set", func(t *testing.T) {
 		enabledServers = 0
 		for _, server := range allServerTypes {
@@ -204,14 +214,33 @@ func TestEnabledServers(t *testing.T) {
 			// We didn't call setEnabledServer as it will only set once per process
 			enabledServers.SetList([]ServerType{server})
 			assert.True(t, IsServerEnabled(server))
+			assert.Equal(t, []string{server.String()}, GetEnabledServerString(false))
+			assert.Equal(t, []string{strings.ToLower(server.String())}, GetEnabledServerString(true))
 		}
 	})
 
 	t.Run("enable-multiple-servers", func(t *testing.T) {
 		enabledServers = 0
 		enabledServers.SetList([]ServerType{OriginType, CacheType})
+		serverStr := []string{OriginType.String(), CacheType.String()}
+		serverStrLower := []string{strings.ToLower(OriginType.String()), strings.ToLower(CacheType.String())}
+		sort.Strings(serverStr)
+		sort.Strings(serverStrLower)
 		assert.True(t, IsServerEnabled(OriginType))
 		assert.True(t, IsServerEnabled(CacheType))
+		assert.Equal(t, serverStr, GetEnabledServerString(false))
+		assert.Equal(t, serverStrLower, GetEnabledServerString(true))
+	})
+
+	t.Run("enable-all-servers", func(t *testing.T) {
+		enabledServers = 0
+		enabledServers.SetList(allServerTypes)
+		assert.True(t, IsServerEnabled(OriginType))
+		assert.True(t, IsServerEnabled(CacheType))
+		assert.True(t, IsServerEnabled(RegistryType))
+		assert.True(t, IsServerEnabled(DirectorType))
+		assert.Equal(t, allServerStrs, GetEnabledServerString(false))
+		assert.Equal(t, allServerStrsLower, GetEnabledServerString(true))
 	})
 
 	t.Run("setEnabledServer-only-set-once", func(t *testing.T) {

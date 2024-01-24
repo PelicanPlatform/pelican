@@ -116,6 +116,8 @@ type config struct {
 		CustomRegistrationFields interface{}
 		DbLocation string
 		Institutions interface{}
+		InstitutionsUrl string
+		InstitutionsUrlReloadMinutes time.Duration
 		RequireKeyChaining bool
 	}
 	Server struct {
@@ -281,6 +283,8 @@ type configWithType struct {
 		CustomRegistrationFields struct { Type string; Value interface{} }
 		DbLocation struct { Type string; Value string }
 		Institutions struct { Type string; Value interface{} }
+		InstitutionsUrl struct { Type string; Value string }
+		InstitutionsUrlReloadMinutes struct { Type string; Value time.Duration }
 		RequireKeyChaining struct { Type string; Value bool }
 	}
 	Server struct {
