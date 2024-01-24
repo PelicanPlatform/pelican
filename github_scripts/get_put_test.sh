@@ -48,18 +48,16 @@ $federationServe &
 pid_federationServe=$!
 
 # Give the federation time to spin up:
-AUTH_TOKEN=$(cat token)
-API_URL="https://$HOSTNAME:8444/api/v1.0/servers"
-DESIRED_RESPONSE='["origin","director","registry"]'
+API_URL="https://$HOSTNAME:8444/api/v1.0/health"
+DESIRED_RESPONSE="HTTP/2 200"
 
 # Function to check if the response indicates all servers are running
 check_response() {
-    RESPONSE=$(curl -k -s -X GET "$API_URL" \
-                 -H "Authorization: Bearer $AUTH_TOKEN" \
+    RESPONSE=$(curl -k -s -I -X GET "$API_URL" \
                  -H "Content-Type: application/json") \
 
     # Check if the response matches the desired output
-    if [ "$RESPONSE" = "$DESIRED_RESPONSE" ]; then
+    if echo "$RESPONSE" | grep -q "$DESIRED_RESPONSE"; then
         echo "Desired response received: $RESPONSE"
         return 0
     else
