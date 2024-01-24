@@ -120,7 +120,7 @@ func matchKeys(incomingKey jwk.Key, registeredNamespaces []string) (bool, error)
 	// permitting the action (assuming their keys haven't been stolen!)
 	foundMatch := false
 	for _, ns := range registeredNamespaces {
-		keyset, err := getNamespaceJwksByPrefix(ns, false)
+		keyset, _, err := getNamespaceJwksByPrefix(ns)
 		if err != nil {
 			return false, errors.Wrapf(err, "Cannot get keyset for %s from the database", ns)
 		}
@@ -559,7 +559,7 @@ func deleteNamespaceHandler(ctx *gin.Context) {
 	delTokenStr := strings.TrimPrefix(authHeader, "Bearer ")
 
 	// Have the token, now we need to load the JWKS for the prefix
-	originJwks, err := getNamespaceJwksByPrefix(prefix, false)
+	originJwks, _, err := getNamespaceJwksByPrefix(prefix)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error loading the prefix's stored jwks"})
 		log.Errorf("Failed to get prefix's stored jwks: %v", err)
@@ -666,16 +666,26 @@ func wildcardHandler(ctx *gin.Context) {
 			return
 		}
 
-		jwks, err := getNamespaceJwksByPrefix(prefix, true)
+		jwks, adminMetadata, err := getNamespaceJwksByPrefix(prefix)
 		if err != nil {
-			if err == serverCredsErr {
-				// Use 403 to distinguish between server error
-				ctx.JSON(http.StatusForbidden, gin.H{"error": "cache has not been approved by federation administrator"})
-				return
-			}
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error trying to get jwks for prefix"})
 			log.Errorf("Failed to load jwks for prefix %s: %v", prefix, err)
 			return
+		}
+		if adminMetadata != nil && adminMetadata.Status != Approved {
+			if strings.HasPrefix(prefix, "/caches/") { // Caches
+				if param.Registry_CacheApprovedOnly.GetBool() {
+					// Use 403 to distinguish between server error
+					ctx.JSON(http.StatusForbidden, gin.H{"error": "The cache has not been approved by federation administrator"})
+					return
+				}
+			} else { // Origins
+				if param.Registry_OriginApprovedOnly.GetBool() {
+					// Use 403 to distinguish between server error
+					ctx.JSON(http.StatusForbidden, gin.H{"error": "The origin has not been approved by federation administrator"})
+					return
+				}
+			}
 		}
 		ctx.JSON(http.StatusOK, jwks)
 		return
@@ -731,7 +741,7 @@ func checkNamespaceExistsHandler(ctx *gin.Context) {
 		return
 	}
 	// Just to check if the key matches. We don't care about approval status
-	jwksDb, err := getNamespaceJwksByPrefix(req.Prefix, false)
+	jwksDb, _, err := getNamespaceJwksByPrefix(req.Prefix)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

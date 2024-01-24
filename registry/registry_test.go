@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -33,6 +34,7 @@ func TestHandleWildcard(t *testing.T) {
 	})
 
 	t.Run("match-wildcard-metadataHandler", func(t *testing.T) {
+		viper.Reset()
 		mockPrefix := "/testnamespace/foo"
 
 		setupMockRegistryDB(t)
@@ -53,8 +55,91 @@ func TestHandleWildcard(t *testing.T) {
 
 		r.ServeHTTP(w, req)
 
-		// Should return 200 for matched metadataHandler since the db is empty
+		// Return 200 as by default Registry.OriginApprovedOnly == false
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Equal(t, string(mockJWKSBytes), w.Body.String())
 	})
+
+	mockApprovalTcs := []struct {
+		Name               string
+		CacheApprovedOnly  bool
+		OriginApprovedOnly bool
+		IsApproved         bool
+		IsCache            bool
+		ExpectedCode       int
+	}{
+		{
+			Name:               "cache-origin-both-req-approv-origin-no-approv",
+			CacheApprovedOnly:  true,
+			OriginApprovedOnly: true,
+			IsApproved:         false,
+			IsCache:            false,
+			ExpectedCode:       403,
+		},
+		{
+			Name:               "cache-origin-both-req-approv-cache-no-approv",
+			CacheApprovedOnly:  true,
+			OriginApprovedOnly: true,
+			IsApproved:         false,
+			IsCache:            true,
+			ExpectedCode:       403,
+		},
+		{
+			Name:               "cache-origin-both-req-approv-origin-approv",
+			CacheApprovedOnly:  true,
+			OriginApprovedOnly: true,
+			IsApproved:         true,
+			IsCache:            false,
+			ExpectedCode:       200,
+		},
+		{
+			Name:               "cache-origin-both-req-approv-cache-approv",
+			CacheApprovedOnly:  true,
+			OriginApprovedOnly: true,
+			IsApproved:         true,
+			IsCache:            true,
+			ExpectedCode:       200,
+		},
+	}
+
+	for _, tc := range mockApprovalTcs {
+		t.Run(tc.Name, func(t *testing.T) {
+			viper.Reset()
+			viper.Set("Registry.CacheApprovedOnly", tc.CacheApprovedOnly)
+			viper.Set("Registry.OriginApprovedOnly", tc.OriginApprovedOnly)
+
+			mockPrefix := "/testnamespace/foo"
+			if tc.IsCache {
+				mockPrefix = "/caches/hostname"
+			}
+
+			setupMockRegistryDB(t)
+			defer teardownMockNamespaceDB(t)
+
+			mockJWKS := jwk.NewSet()
+			mockJWKSBytes, err := json.Marshal(mockJWKS)
+			require.NoError(t, err)
+
+			mockStatus := Pending
+			if tc.IsApproved {
+				mockStatus = Approved
+			}
+			err = insertMockDBData([]Namespace{{Prefix: mockPrefix, Pubkey: string(mockJWKSBytes), AdminMetadata: AdminMetadata{Status: mockStatus}}})
+			require.NoError(t, err)
+			mockNs, err := getNamespaceByPrefix(mockPrefix)
+
+			require.NoError(t, err)
+			require.NotNil(t, mockNs)
+
+			req, _ := http.NewRequest("GET", fmt.Sprintf("/registry%s/.well-known/issuer.jwks", mockPrefix), nil)
+			w := httptest.NewRecorder()
+
+			r.ServeHTTP(w, req)
+
+			assert.Equal(t, tc.ExpectedCode, w.Code)
+			if tc.ExpectedCode == 200 {
+				assert.Equal(t, string(mockJWKSBytes), w.Body.String())
+			}
+		})
+	}
 }
