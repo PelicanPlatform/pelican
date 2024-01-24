@@ -77,17 +77,18 @@ func getNSAdsFromDirector() ([]director.NamespaceAd, error) {
 }
 
 func serveCache(cmd *cobra.Command, _ []string) error {
-	err := serveCacheInternal(cmd.Context())
+	cancel, err := serveCacheInternal(cmd.Context())
 	if err != nil {
+		cancel()
 		return err
 	}
 
 	return nil
 }
 
-func serveCacheInternal(ctx context.Context) error {
+func serveCacheInternal(cmdCtx context.Context) (context.CancelFunc, error) {
 	// Use this context for any goroutines that needs to react to server shutdown
-	ctx, shutdownCancel := context.WithCancel(ctx)
+	ctx, shutdownCancel := context.WithCancel(cmdCtx)
 
 	err := config.InitServer(ctx, config.CacheType)
 	cobra.CheckErr(err)
@@ -97,15 +98,16 @@ func serveCacheInternal(ctx context.Context) error {
 		egrp = &errgroup.Group{}
 	}
 
+	// Added the same logic from launcher.go as we currently launch cache separately from other services
 	egrp.Go(func() error {
 		log.Debug("Will shutdown process on signal")
 		sigs := make(chan os.Signal, 1)
 		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 		select {
 		case sig := <-sigs:
-			log.Debugf("Received signal %v; will shutdown process", sig)
+			log.Warningf("Received signal %v; will shutdown process", sig)
 			shutdownCancel()
-			return errors.New("Federation process has been cancelled")
+			return nil
 		case <-ctx.Done():
 			return nil
 		}
@@ -113,19 +115,19 @@ func serveCacheInternal(ctx context.Context) error {
 
 	err = xrootd.SetUpMonitoring(ctx, egrp)
 	if err != nil {
-		return err
+		return shutdownCancel, err
 	}
 
 	nsAds, err := getNSAdsFromDirector()
 	if err != nil {
-		return err
+		return shutdownCancel, err
 	}
 
 	cacheServer := &cache_ui.CacheServer{}
 	cacheServer.SetNamespaceAds(nsAds)
 	err = server_ui.CheckDefaults(cacheServer)
 	if err != nil {
-		return err
+		return shutdownCancel, err
 	}
 
 	cachePrefix := "/caches/" + param.Xrootd_Sitename.GetString()
@@ -133,42 +135,42 @@ func serveCacheInternal(ctx context.Context) error {
 	viper.Set("Origin.NamespacePrefix", cachePrefix)
 
 	if err = server_ui.RegisterNamespaceWithRetry(ctx, egrp); err != nil {
-		return err
+		return shutdownCancel, err
 	}
 
 	if err = server_ui.LaunchPeriodicAdvertise(ctx, egrp, []server_utils.XRootDServer{cacheServer}); err != nil {
-		return err
+		return shutdownCancel, err
 	}
 
 	engine, err := web_ui.GetEngine()
 	if err != nil {
-		return err
+		return shutdownCancel, err
 	}
 
 	// Set up necessary APIs to support Web UI, including auth and metrics
 	if err := web_ui.ConfigureServerWebAPI(ctx, engine, egrp); err != nil {
-		return err
+		return shutdownCancel, err
 	}
 
-	go func() {
-		if err := web_ui.RunEngine(ctx, engine, egrp); err != nil {
-			log.Panicln("Failure when running the web engine:", err)
+	egrp.Go(func() (err error) {
+		if err = web_ui.RunEngine(ctx, engine, egrp); err != nil {
+			log.Errorln("Failure when running the web engine:", err)
 		}
-		shutdownCancel()
-	}()
+		return
+	})
 	if param.Server_EnableUI.GetBool() {
 		if err = web_ui.ConfigureEmbeddedPrometheus(ctx, engine); err != nil {
-			return errors.Wrap(err, "Failed to configure embedded prometheus instance")
+			return shutdownCancel, errors.Wrap(err, "Failed to configure embedded prometheus instance")
 		}
 
 		if err = web_ui.InitServerWebLogin(ctx); err != nil {
-			return err
+			return shutdownCancel, err
 		}
 	}
 
 	configPath, err := xrootd.ConfigXrootd(ctx, false)
 	if err != nil {
-		return err
+		return shutdownCancel, err
 	}
 
 	xrootd.LaunchXrootdMaintenance(ctx, cacheServer, 2*time.Minute)
@@ -176,13 +178,12 @@ func serveCacheInternal(ctx context.Context) error {
 	log.Info("Launching cache")
 	launchers, err := xrootd.ConfigureLaunchers(false, configPath, false)
 	if err != nil {
-		return err
+		return shutdownCancel, err
 	}
 
 	if err = daemon.LaunchDaemons(ctx, launchers, egrp); err != nil {
-		return err
+		return shutdownCancel, err
 	}
 
-	log.Info("Clean shutdown of the cache")
-	return nil
+	return shutdownCancel, nil
 }
