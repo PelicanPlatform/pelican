@@ -269,6 +269,11 @@ func registerNamespaceImpl(key jwk.Key, prefix string, registrationEndpointURL s
 
 func RegisterNamespaceWithRetry(ctx context.Context, egrp *errgroup.Group) error {
 	metrics.SetComponentHealthStatus(metrics.OriginCache_Federation, metrics.StatusCritical, "Origin not registered with federation")
+	retryInterval := param.Server_RegistrationRetryInterval.GetDuration()
+	if retryInterval == 0 {
+		log.Warning("Server.RegistrationRetryInterval is 0. Fall back to 10s")
+		retryInterval = 10 * time.Second
+	}
 
 	key, prefix, url, isRegistered, err := registerNamespacePrep()
 	if err != nil {
@@ -283,8 +288,9 @@ func RegisterNamespaceWithRetry(ctx context.Context, egrp *errgroup.Group) error
 		return nil
 	}
 	log.Errorf("Failed to register with namespace service: %v; will automatically retry in 10 seconds\n", err)
+
 	egrp.Go(func() error {
-		ticker := time.NewTicker(10 * time.Second)
+		ticker := time.NewTicker(retryInterval)
 		for {
 			select {
 			case <-ticker.C:

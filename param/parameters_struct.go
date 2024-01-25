@@ -129,6 +129,7 @@ type config struct {
 		IssuerPort int
 		IssuerUrl string
 		Modules []string
+		RegistrationRetryInterval time.Duration
 		SessionSecretFile string
 		TLSCACertificateDirectory string
 		TLSCACertificateFile string
@@ -296,6 +297,7 @@ type configWithType struct {
 		IssuerPort struct { Type string; Value int }
 		IssuerUrl struct { Type string; Value string }
 		Modules struct { Type string; Value []string }
+		RegistrationRetryInterval struct { Type string; Value time.Duration }
 		SessionSecretFile struct { Type string; Value string }
 		TLSCACertificateDirectory struct { Type string; Value string }
 		TLSCACertificateFile struct { Type string; Value string }
