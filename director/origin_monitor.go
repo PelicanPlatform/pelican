@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -112,7 +113,16 @@ func LaunchPeriodicDirectorTest(ctx context.Context, originAd ServerAd) {
 	originWebUrl := originAd.WebURL.String()
 
 	log.Debug(fmt.Sprintf("Starting Director test for origin %s at %s", originName, originUrl))
-	ticker := time.NewTicker(15 * time.Second)
+
+	customInterval := param.Director_FileTransferInterval.GetDuration()
+	if customInterval < 15*time.Second {
+		log.Warningf("You set Director.FileTransferInterval to a very small number %s, which will cause high traffic volume to xrootd servers.", customInterval.String())
+	}
+	if customInterval == 0 {
+		customInterval = 15 * time.Second
+		log.Error("Invalid config value: Director.FileTransferInterval is 0. Fallback to 15s.")
+	}
+	ticker := time.NewTicker(customInterval)
 
 	egrp, ok := ctx.Value(config.EgrpKey).(*errgroup.Group)
 	if !ok {
