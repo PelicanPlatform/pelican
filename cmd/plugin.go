@@ -210,10 +210,10 @@ func stashPluginMain(args []string) {
 
 	var wg sync.WaitGroup
 
-	workChan := make(chan Transfer)
+	workChan := make(chan Transfer, len(transfers))
 	results := make(chan *classads.ClassAd, len(transfers))
 
-	// start workers
+	// Start workers
 	for i := 1; i <= 5; i++ {
 		wg.Add(1)
 		go moveObjects(source, methods, upload, &wg, workChan, results)
@@ -221,30 +221,47 @@ func stashPluginMain(args []string) {
 
 	success := true
 	var resultAds []*classads.ClassAd
-	for _, transfer := range transfers {
-		workChan <- transfer
+	counter := 0
+	done := false
+	for !done {
+		// Send to work channel the amount of transfers we have
+		if counter < len(transfers) {
+			workChan <- transfers[counter]
+			counter++
+		} else if counter == len(transfers) { // Once we sent all the work, close the channel
+			close(workChan)
+			// Increment counter so we no longer hit this case
+			counter++
+		}
 		select {
-		//case workChan <- transfer:
-		// We successfully sent work
 		case resultAd := <-results:
+			// Process results as soon as we get them
 			transferSuccess, err := resultAd.Get("TransferSuccess")
 			if err != nil {
 				log.Errorln("Failed to get TransferSuccess:", err)
+				success = false
 			}
 			// If we are not uploading and we fail, we want to abort
 			if !upload && !transferSuccess.(bool) {
 				success = false
+				// Add the final (failed) result to the resultAds
+				resultAds = append(resultAds, resultAd)
+				done = true
 				break
 			} else { // Otherwise, we add to end result ads
 				resultAds = append(resultAds, resultAd)
 			}
 		default:
-			// Nothing yet...
+			// We are either done or still downloading/uploading
+			if len(resultAds) == len(transfers) {
+				log.Debugln("Finished transfering objects! :)")
+				done = true
+				break
+			}
 		}
 	}
-	close(workChan)
 
-	// Wait for transfers & results if no failure
+	// Wait for transfers only if successful
 	if success {
 		wg.Wait()
 	}
