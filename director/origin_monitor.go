@@ -29,9 +29,11 @@ import (
 	"time"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 )
@@ -114,6 +116,16 @@ func LaunchPeriodicDirectorTest(ctx context.Context, originAd ServerAd) {
 
 	log.Debug(fmt.Sprintf("Starting Director test for origin %s at %s", originName, originUrl))
 
+	metrics.PelicanDirectorFileTransferTestSuite.With(
+		prometheus.Labels{
+			"server_name": originName, "server_web_url": originWebUrl, "server_type": string(originAd.Type),
+		}).Inc()
+
+	metrics.PelicanDirectorActiveFileTransferTestSuite.With(
+		prometheus.Labels{
+			"server_name": originName, "server_web_url": originWebUrl, "server_type": string(originAd.Type),
+		}).Inc()
+
 	customInterval := param.Director_FileTransferInterval.GetDuration()
 	if customInterval < 15*time.Second {
 		log.Warningf("You set Director.FileTransferInterval to a very small number %s, which will cause high traffic volume to xrootd servers.", customInterval.String())
@@ -136,6 +148,12 @@ func LaunchPeriodicDirectorTest(ctx context.Context, originAd ServerAd) {
 			select {
 			case <-ctx.Done():
 				log.Debug(fmt.Sprintf("End director test cycle for origin: %s at %s", originName, originUrl))
+
+				metrics.PelicanDirectorActiveFileTransferTestSuite.With(
+					prometheus.Labels{
+						"server_name": originName, "server_web_url": originWebUrl, "server_type": string(originAd.Type),
+					}).Dec()
+
 				return nil
 			case <-ticker.C:
 				log.Debug(fmt.Sprintf("Starting a new Director test cycle for origin: %s at %s", originName, originUrl))
@@ -145,11 +163,33 @@ func LaunchPeriodicDirectorTest(ctx context.Context, originAd ServerAd) {
 					log.Debugln("Director file transfer test cycle succeeded at", time.Now().Format(time.UnixDate), " for origin: ", originUrl)
 					if err := reportStatusToOrigin(ctx, originWebUrl, "ok", "Director test cycle succeeded at "+time.Now().Format(time.RFC3339)); err != nil {
 						log.Warningln("Failed to report director test result to origin:", err)
+						metrics.PelicanDirectorFileTransferTestsRuns.With(
+							prometheus.Labels{
+								"server_name": originName, "server_web_url": originWebUrl, "server_type": string(originAd.Type), "status": string(metrics.FTXTestSuccess), "report_status": string(metrics.FTXTestFailed),
+							},
+						).Inc()
+					} else {
+						metrics.PelicanDirectorFileTransferTestsRuns.With(
+							prometheus.Labels{
+								"server_name": originName, "server_web_url": originWebUrl, "server_type": string(originAd.Type), "status": string(metrics.FTXTestSuccess), "report_status": string(metrics.FTXTestSuccess),
+							},
+						).Inc()
 					}
 				} else {
 					log.Warningln("Director file transfer test cycle failed for origin: ", originUrl, " ", err)
 					if err := reportStatusToOrigin(ctx, originWebUrl, "error", "Director file transfer test cycle failed for origin: "+originUrl+" "+err.Error()); err != nil {
 						log.Warningln("Failed to report director test result to origin: ", err)
+						metrics.PelicanDirectorFileTransferTestsRuns.With(
+							prometheus.Labels{
+								"server_name": originName, "server_web_url": originWebUrl, "server_type": string(originAd.Type), "status": string(metrics.FTXTestFailed), "report_status": string(metrics.FTXTestFailed),
+							},
+						).Inc()
+					} else {
+						metrics.PelicanDirectorFileTransferTestsRuns.With(
+							prometheus.Labels{
+								"server_name": originName, "server_web_url": originWebUrl, "server_type": string(originAd.Type), "status": string(metrics.FTXTestFailed), "report_status": string(metrics.FTXTestSuccess),
+							},
+						).Inc()
 					}
 				}
 
