@@ -16,6 +16,7 @@
 
 ARG BASE_YUM_REPO=release
 ARG BASE_OSG_SERIES=3.6
+ARG IS_PR_BUILD=true
 
 FROM node:20 AS website-build
 
@@ -35,7 +36,11 @@ WORKDIR /pelican
 COPY . .
 COPY --from=website-build /webapp/out ./web_ui/frontend/out
 
-RUN goreleaser --clean --snapshot
+RUN\
+    if ["${IS_PR_BUILD}" == "false"];\
+        then goreleaser build --clean;\
+    else goreleaser build --clean --snapshot;\
+    fi
 
 FROM --platform=linux/amd64 hub.opensciencegrid.org/sciauth/scitokens-oauth2-server:release-20231118-1823 AS scitokens-oauth2-server
 

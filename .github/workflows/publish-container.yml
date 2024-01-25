@@ -95,3 +95,5 @@ jobs:
           file: ./images/Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
           tags: "${{ steps.generate-tag-list.outputs.taglist }}"
+          build-args: |
+            IS_PR_BUILD=${{ github.event_name == 'pull_request' }}
