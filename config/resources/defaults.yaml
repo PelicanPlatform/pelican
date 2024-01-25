@@ -19,14 +19,13 @@ Logging:
   Level: "Error"
   Cache:
     Scitokens: error
-    XrootdPssSetOptCache: error
     Pss: error
-    Cms: error
     Ofs: error
     Xrd: error
   Origin:
     Scitokens: error
-    PssSetOptOrigin: error
+    Pss: error
+    Cms: error
     Pfc: info
     Xrootd: emsg login stall redirect
 Server:

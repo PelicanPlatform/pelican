@@ -58,10 +58,8 @@ type config struct {
 	IssuerKey string
 	Logging struct {
 		Cache struct {
-			Cms string
 			Ofs string
 			Pss string
-			PssSetOptCache string
 			Scitokens string
 			Xrd string
 		}
@@ -69,8 +67,9 @@ type config struct {
 		Level string
 		LogLocation string
 		Origin struct {
+			Cms string
 			Pfc string
-			PssSetOptOrigin string
+			Pss string
 			Scitokens string
 			Xrootd string
 		}
@@ -239,10 +238,8 @@ type configWithType struct {
 	IssuerKey struct { Type string; Value string }
 	Logging struct {
 		Cache struct {
-			Cms struct { Type string; Value string }
 			Ofs struct { Type string; Value string }
 			Pss struct { Type string; Value string }
-			PssSetOptCache struct { Type string; Value string }
 			Scitokens struct { Type string; Value string }
 			Xrd struct { Type string; Value string }
 		}
@@ -250,8 +247,9 @@ type configWithType struct {
 		Level struct { Type string; Value string }
 		LogLocation struct { Type string; Value string }
 		Origin struct {
+			Cms struct { Type string; Value string }
 			Pfc struct { Type string; Value string }
-			PssSetOptOrigin struct { Type string; Value string }
+			Pss struct { Type string; Value string }
 			Scitokens struct { Type string; Value string }
 			Xrootd struct { Type string; Value string }
 		}

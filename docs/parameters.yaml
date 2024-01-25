@@ -161,24 +161,9 @@ type: string
 default: error
 components: ["cache"]
 ---
-name: Logging.Cache.PssSetOptCache
-description: >-
-  Configures the XRootD client used by the proxy top communicate with the cache (we use to set debug level).
-  Values include: debug, info, error (default of error/DebugLevel 1)
-type: string
-default: error
-components: ["cache"]
----
 name: Logging.Cache.Pss
 description: >-
-  Logging level of pss within Xrootd configuration values include: debug, info, error (default of error/off)
-type: string
-default: error
-components: ["cache"]
----
-name: Logging.Cache.Cms
-description: >-
-  Trace level of cms debug output within Xrootd configuration. Values include: debug, info, error (default of error/-all)
+  Logging level of pss and pssSetOptCache within Xrootd configuration values include: debug, info, error (default of error/off/Debug Level 1)
 type: string
 default: error
 components: ["cache"]
@@ -204,10 +189,16 @@ type: string
 default: error
 components: ["origin"]
 ---
-name: Logging.Origin.PssSetOptOrigin
+name: Logging.Origin.Pss
 description: >-
-  Configures the XRootD client used by the proxy top communicate with the origin (we use to set debug level).
-  Values include: debug, info, error (default of error/DebugLevel 1)
+  Logging level of pss and pssSetOptOrigin within Xrootd configuration values include: debug, info, error (default of error/off/Debug Level 1)
+type: string
+default: error
+components: ["origin"]
+---
+name: Logging.Origin.Cms
+description: >-
+  Trace level of cms debug output within Xrootd configuration. Values include: debug, info, error (default of error/-all)
 type: string
 default: error
 components: ["origin"]
