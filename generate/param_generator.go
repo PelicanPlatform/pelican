@@ -164,6 +164,11 @@ func GenParamEnum() {
 		panic(err)
 	}
 	// Copy the same json file ( for the web-ui )
+	webUIPath := "../web_ui/frontend/public/data/parameters.json"
+	// Create directories if they don't exist
+	if err := os.MkdirAll(filepath.Dir(webUIPath), 0755); err != nil {
+		panic(err)
+	}
 	fJSON, err = os.Create("../web_ui/frontend/public/data/parameters.json")
 	if err != nil {
 		panic(err)

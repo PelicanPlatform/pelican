@@ -69,6 +69,10 @@ web-clean:
 	@echo CLEAN $(WEBSITE_CLEAN_LIST)
 	@rm -rf $(WEBSITE_CLEAN_LIST)
 
+web_ui/frontend/public/data/parameters.json:
+	@echo Creating web_ui/frontend/public/data/parameters.json...
+	@mkdir -p web_ui/frontend/public/data && touch web_ui/frontend/public/data/parameters.json
+
 docs/parameters.json:
 	@echo Creating docs/parameters.json...
 	@touch docs/parameters.json

@@ -42,7 +42,7 @@ description: >-
   When set to true, Pelican will skip TLS verification.  This allows a "man in the middle" attack on the connection but can simplify testing.  Intended for developers.
 type: bool
 default: false
-components: ["origin", "nsregistry", "director"]
+components: ["origin", "registry", "director"]
 ---
 name: IssuerKey
 description: >-
@@ -53,42 +53,42 @@ description: >-
 type: filename
 root_default: /etc/pelican/issuer.jwk
 default: $ConfigBase/issuer.jwk
-components: ["client", "nsregistry", "director"]
+components: ["client", "registry", "director"]
 ---
 name: Transport.DialerTimeout
 description: >-
   Maximum time allowed for establishing a connection to target host.
 type: duration
 default: 10s
-components: ["client", "nsregistry", "origin"]
+components: ["client", "registry", "origin"]
 ---
 name: Transport.DialerKeepAlive
 description: >-
   Maximum time a TCP connection should be kept alive without any activity.
 type: duration
 default: 30s
-components: ["client", "nsregistry", "origin"]
+components: ["client", "registry", "origin"]
 ---
 name: Transport.MaxIdleConns
 description: >-
   Maximum number of idle connections that the HTTP client should maintain in its connection pool.
 type: int
 default: 30
-components: ["client", "nsregistry", "origin"]
+components: ["client", "registry", "origin"]
 ---
 name: Transport.IdleConnTimeout
 description: >-
   Maximum duration an idle connection should remain open in the connection pool.
 type: duration
 default: 90s
-components: ["client", "nsregistry", "origin"]
+components: ["client", "registry", "origin"]
 ---
 name: Transport.TLSHandshakeTimeout
 description: >-
   Maximum time allowed for the TLS handshake to complete when making an HTTPS connection
 type: duration
 default: 15s
-components: ["client", "nsregistry", "origin"]
+components: ["client", "registry", "origin"]
 ---
 name: Transport.ExpectContinueTimeout
 description: >-
@@ -96,14 +96,14 @@ description: >-
   body.
 type: duration
 default: 1s
-components: ["client", "nsregistry", "origin"]
+components: ["client", "registry", "origin"]
 ---
 name: Transport.ResponseHeaderTimeout
 description: >-
   Maximum time the client should wait for the response headers to be received from the server
 type: duration
 default: 10s
-components: ["client", "nsregistry", "origin"]
+components: ["client", "registry", "origin"]
 ---
 name: GeoIPOverrides
 description: >-
@@ -206,7 +206,7 @@ description: >-
 type: url
 osdf_default: https://topology.opensciencegrid.org/osdf/namespaces
 default: none
-components: ["director", "nsregistry"]
+components: ["director", "registry"]
 ---
 name: Federation.TopologyReloadInterval
 description: >-
@@ -214,7 +214,7 @@ description: >-
 type: duration
 osdf_default: 10m
 default: none
-components: ["director", "nsregistry"]
+components: ["director", "registry"]
 ---
 ############################
 #   Client-Level Configs   #
@@ -417,6 +417,7 @@ description: >-
   downloads to work properly and for directories to be visable.
 type: bool
 default: false
+components: ["origin"]
 ---
 name: Origin.Mode
 description: >-
@@ -572,7 +573,7 @@ description: >-
 type: filename
 root_default: /var/lib/pelican/registry.sqlite
 default: $ConfigBase/ns-registry.sqlite
-components: ["nsregistry"]
+components: ["registry"]
 ---
 name: Registry.RequireKeyChaining
 description: >-
@@ -581,7 +582,7 @@ description: >-
   using keys registered to `/foo/bar`.
 type: bool
 default: true
-components: ["nsregistry"]
+components: ["registry"]
 ---
 name: Registry.AdminUsers
 description: >-
@@ -590,7 +591,7 @@ description: >-
   The "subject" claim should be the "CILogon User Identifier" from CILogon user page: https://cilogon.org/
 type: stringSlice
 default: []
-components: ["nsregistry"]
+components: ["registry"]
 ---
 name: Registry.Institutions
 description: >-
@@ -609,7 +610,7 @@ description: >-
   Note that this value will take precedence over Registry.InstitutionsUrl if both are set
 type: object
 default: none
-components: ["nsregistry"]
+components: ["registry"]
 ---
 name: Registry.InstitutionsUrl
 description: >-
@@ -661,7 +662,7 @@ description: >-
 type: filename
 root_default: /etc/pelican/certificates/tls.crt
 default: "$ConfigBase/certificates/tls.crt"
-components: ["origin", "nsregistry", "director"]
+components: ["origin", "registry", "director"]
 ---
 name: Server.TLSCACertificateFile
 description: >-
@@ -672,7 +673,7 @@ description: >-
 type: filename
 root_default: /etc/pelican/certificates/tlsca.pem
 default: "$ConfigBase/certificates/tlsca.pem"
-components: ["origin", "nsregistry", "director"]
+components: ["origin", "registry", "director"]
 ---
 name: Server.TLSCACertificateDirectory
 description: >-
@@ -683,7 +684,7 @@ description: >-
   over Server.TLSCACertificateFile
 type: string
 default: none
-components: ["origin", "nsregistry", "director"]
+components: ["origin", "registry", "director"]
 ---
 name: Server.TLSCAKey
 description: >-
@@ -692,7 +693,7 @@ description: >-
 type: filename
 root_default: /etc/pelican/certificates/tlsca.key
 default: "$ConfigBase/certificates/tlsca.key"
-components: ["origin", "nsregistry", "director"]
+components: ["origin", "registry", "director"]
 ---
 name: Server.TLSKey
 description: >-
@@ -701,28 +702,28 @@ description: >-
 type: filename
 root_default: /etc/pelican/certificates/tls.key
 default: "$ConfigBase/certificates/tls.key"
-components: ["origin", "nsregistry", "director"]
+components: ["origin", "registry", "director"]
 ---
 name: Server.EnableUI
 description: >-
   Indicate whether a server should enable its web UI.
 type: bool
 default: true
-components: ["origin", "nsregistry", "director", "cache"]
+components: ["origin", "registry", "director", "cache"]
 ---
 name: Server.WebPort
 description: >-
   The port number the Pelican web interface and internal web APIs will be bound to.
 type: int
 default: 8444
-components: ["origin", "director", "nsregistry"]
+components: ["origin", "director", "registry"]
 ---
 name: Server.WebHost
 description: >-
   A string-encoded IP address that the Pelican web engine is configured to listen on.
 type: string
 default: "0.0.0.0"
-components: ["origin", "director", "nsregistry"]
+components: ["origin", "director", "registry"]
 ---
 name: Server.ExternalWebUrl
 description: >-
@@ -731,14 +732,14 @@ description: >-
   This URL must not have the same port number as the one in Origin.Url (if any) or Xrootd.Port
 type: url
 default: https://${Server.Hostname}:${Server.WebPort}
-components: ["origin", "director", "nsregistry"]
+components: ["origin", "director", "registry"]
 ---
 name: Server.Hostname
 description: >-
   The server's hostname, by default it's os.Hostname().
 type: string
 default: none
-components: ["origin", "director", "nsregistry"]
+components: ["origin", "director", "registry"]
 ---
 name: Server.IssuerUrl
 description: >-
@@ -746,7 +747,7 @@ description: >-
 type: string
 # Setting default to none for now because it changes based on server type and server mode.
 default: none
-components: ["origin", "director", "nsregistry"]
+components: ["origin", "director", "registry"]
 ---
 name: Server.IssuerHostname
 description: >-
@@ -754,7 +755,7 @@ description: >-
 type: string
 # Setting default to none for now because it changes based on server type and server mode.
 default: none
-components: ["origin", "director", "nsregistry"]
+components: ["origin", "director", "registry"]
 ---
 name: Server.IssuerPort
 description: >-
@@ -762,20 +763,21 @@ description: >-
 type: int
 # Setting default to none for now because it changes based on server type and server mode.
 default: none
-components: ["origin", "director", "nsregistry"]
+components: ["origin", "director", "registry"]
 ---
 name: Server.IssuerJwks
 description: >-
   A filepath indicating where the server's public JSON web keyset can be found.
 type: filename
 default: none
-components: ["origin", "director", "nsregistry"]
+components: ["origin", "director", "registry"]
 ---
 name: Server.Modules
 description: >-
   A list of modules to enable when running pelican in `pelican serve` mode.
 type: stringSlice
 default: []
+components: ["*"]
 ---
 name: Server.UIActivationCodeFile
 description: >-
@@ -783,14 +785,14 @@ description: >-
   contain the activation code necessary to turn it on.
 type: filename
 default: $ConfigBase/server-web-activation-code
-components: ["origin", "cache", "nsregistry", "director"]
+components: ["origin", "cache", "registry", "director"]
 ---
 name: Server.UIPasswordFile
 description: >-
   A filepath specifying where the server's web UI password file should be stored.
 type: filename
 default: $ConfigBase/server-web-passwd
-components: ["origin", "cache", "nsregistry", "director"]
+components: ["origin", "cache", "registry", "director"]
 ---
 name: Server.SessionSecretFile
 description: >-
@@ -801,7 +803,7 @@ description: >-
 type: filename
 default: $ConfigBase/session-secret
   The default content of the file is the hash of the concatenation of "pelican" and the DER form of ${IssuerKey}
-components: ["nsregistry", "director"]
+components: ["registry", "director"]
 ---
 ################################
 #   Issuer's Configurations    #
@@ -929,14 +931,14 @@ description: >-
 type: filename
 root_default: /etc/pelican/oidc-client-id
 default: $ConfigBase/oidc-client-id
-components: ["nsregistry", "origin"]
+components: ["registry", "origin"]
 ---
 name: OIDC.ClientID
 description: >-
   The OIDC ClientID to use for the server.
 type: string
 default: none
-components: ["nsregistry", "origin"]
+components: ["registry", "origin"]
 ---
 name: OIDC.ClientSecretFile
 description: >-
@@ -945,7 +947,7 @@ description: >-
 type: filename
 root_default: /etc/pelican/oidc-client-secret
 default: $ConfigBase/oidc-client-secret
-components: ["nsregistry", "origin"]
+components: ["registry", "origin"]
 ---
 name: OIDC.DeviceAuthEndpoint
 description: >-
@@ -953,7 +955,7 @@ description: >-
   for authenticated registration.
 type: url
 default: none
-components: ["nsregistry", "origin"]
+components: ["registry", "origin"]
 ---
 name: OIDC.TokenEndpoint
 description: >-
@@ -961,7 +963,7 @@ description: >-
   for authenticated registration.
 type: url
 default: none
-components: ["nsregistry", "origin"]
+components: ["registry", "origin"]
 ---
 name: OIDC.UserInfoEndpoint
 description: >-
@@ -969,7 +971,7 @@ description: >-
   for authenticated registration.
 type: url
 default: none
-components: ["nsregistry", "origin"]
+components: ["registry", "origin"]
 ---
 name: OIDC.AuthorizationEndpoint
 description: >-
@@ -984,7 +986,7 @@ description: >-
   device auth).
 type: url
 default: none
-components: ["nsregistry", "origin"]
+components: ["registry", "origin"]
 ---
 name: OIDC.ClientRedirectHostname
 description: >-
@@ -994,7 +996,7 @@ description: >-
   instead of container hostname to your OAuth provider
 type: string
 default: none
-components: ["nsregistry", "director"]
+components: ["registry", "director"]
 ---
 ############################
 #   XRootD-level Configs   #
@@ -1039,6 +1041,7 @@ description: >-
 type: filename
 root_default: /etc/pelican/xrootd/scitokens.cfg
 default: $ConfigBase/xrootd/scitokens.cfg
+components: ["*"]
 ---
 name: Xrootd.Mount
 description: >-
@@ -1139,7 +1142,7 @@ description: >-
   director's origin scraper, and server's self-scraper
 type: duration
 default: 1h
-components: ["origin", "director", "nsregistry"]
+components: ["origin", "director", "registry"]
 ---
 name: Monitoring.TokenRefreshInterval
 description: >-
@@ -1150,14 +1153,14 @@ description: >-
   This value must be less than Monitoring.TokenExpiresIn.
 type: duration
 default: 59m
-components: ["origin", "director", "nsregistry"]
+components: ["origin", "director", "registry"]
 ---
 name: Monitoring.MetricAuthorization
 description: >-
   If authorization (Bearer token) is required for accesing /metrics endpoint
 type: bool
 default: true
-components: ["origin", "director", "nsregistry"]
+components: ["origin", "director", "registry"]
 ---
 ############################
 #   Plugin-level configs   #
