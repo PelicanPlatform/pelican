@@ -474,6 +474,8 @@ func TestFullUpload(t *testing.T) {
 	viper.Set("Server.EnableUI", false)
 	viper.Set("Registry.DbLocation", filepath.Join(t.TempDir(), "ns-registry.sqlite"))
 	viper.Set("Xrootd.RunLocation", tmpPath)
+	viper.Set("Registry.OriginApprovedOnly", false)
+	viper.Set("Registry.CacheApprovedOnly", false)
 
 	err = config.InitServer(ctx, modules)
 	require.NoError(t, err)

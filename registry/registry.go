@@ -787,8 +787,36 @@ func checkNamespaceStatusHandler(ctx *gin.Context) {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Error getting namespace"})
 		return
 	}
-	res := checkStatusRes{Approved: ns.AdminMetadata.Status == Approved}
-	ctx.JSON(http.StatusOK, res)
+	emptyMetadata := AdminMetadata{}
+	// If Registry.CacheApprovedOnly or Registry.OriginApprovedOnly is false
+	// we return Approved == true
+	if ns.AdminMetadata != emptyMetadata {
+		// Caches
+		if strings.HasPrefix(req.Prefix, "/caches") && param.Registry_CacheApprovedOnly.GetBool() {
+			res := checkStatusRes{Approved: ns.AdminMetadata.Status == Approved}
+			ctx.JSON(http.StatusOK, res)
+			return
+		} else if !param.Registry_CacheApprovedOnly.GetBool() {
+			res := checkStatusRes{Approved: true}
+			ctx.JSON(http.StatusOK, res)
+			return
+		} else {
+			// Origins
+			if param.Registry_OriginApprovedOnly.GetBool() {
+				res := checkStatusRes{Approved: ns.AdminMetadata.Status == Approved}
+				ctx.JSON(http.StatusOK, res)
+				return
+			} else {
+				res := checkStatusRes{Approved: true}
+				ctx.JSON(http.StatusOK, res)
+				return
+			}
+		}
+	} else {
+		// For legacy Pelican (<=7.3.0) registry schema without Admin_Metadata
+		res := checkStatusRes{Approved: true}
+		ctx.JSON(http.StatusOK, res)
+	}
 }
 
 func RegisterRegistryAPI(router *gin.RouterGroup) {
