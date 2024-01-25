@@ -23,6 +23,8 @@ Server:
   EnableUI: true
 Director:
   DefaultResponse: cache
+  AdvertisementTTL: 15m
+  FileTransferInterval: 15s
 Cache:
   Port: 8443
 Origin:

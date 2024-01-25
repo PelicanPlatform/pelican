@@ -25,8 +25,10 @@ type config struct {
 	ConfigDir string
 	Debug bool
 	Director struct {
+		AdvertisementTTL time.Duration
 		CacheResponseHostnames []string
 		DefaultResponse string
+		FileTransferInterval time.Duration
 		GeoIPLocation string
 		MaxMindKeyFile string
 		OriginResponseHostnames []string
@@ -192,8 +194,10 @@ type configWithType struct {
 	ConfigDir struct { Type string; Value string }
 	Debug struct { Type string; Value bool }
 	Director struct {
+		AdvertisementTTL struct { Type string; Value time.Duration }
 		CacheResponseHostnames struct { Type string; Value []string }
 		DefaultResponse struct { Type string; Value string }
+		FileTransferInterval struct { Type string; Value time.Duration }
 		GeoIPLocation struct { Type string; Value string }
 		MaxMindKeyFile struct { Type string; Value string }
 		OriginResponseHostnames struct { Type string; Value []string }
