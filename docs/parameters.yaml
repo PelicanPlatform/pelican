@@ -803,6 +803,14 @@ default: $ConfigBase/session-secret
   The default content of the file is the hash of the concatenation of "pelican" and the DER form of ${IssuerKey}
 components: ["nsregistry", "director"]
 ---
+name: Server.RegistrationRetryInterval
+description: >-
+  The duration of delay in origin/cache registration retry attempts if the initial registration call to registry
+  was failed.
+type: duration
+default: 10s
+components: ["origin", "cache"]
+---
 ################################
 #   Issuer's Configurations    #
 ################################
