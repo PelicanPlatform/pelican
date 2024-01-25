@@ -74,7 +74,7 @@ docs/parameters.json:
 	@touch docs/parameters.json
 
 .PHONY: generate
-generate: docs/parameters.json
+generate: docs/parameters.json web_ui/frontend/public/data/parameters.json
 ifeq ($(USE_DOCKER),0)
 	@go generate ./...
 else
