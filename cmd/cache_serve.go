@@ -23,6 +23,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"os"
 	"os/signal"
@@ -130,7 +131,7 @@ func serveCacheInternal(cmdCtx context.Context) (context.CancelFunc, error) {
 		return shutdownCancel, err
 	}
 
-	cachePrefix := "/caches/" + param.Xrootd_Sitename.GetString()
+	cachePrefix := fmt.Sprintf("/caches/%s:%d", param.Xrootd_Sitename.GetString(), param.Xrootd_Port.GetInt())
 
 	viper.Set("Origin.NamespacePrefix", cachePrefix)
 
