@@ -60,6 +60,13 @@ func JSONHandler(w http.ResponseWriter, r *http.Request) {
 					"vault_issuer": null,
 					"vault_server": null
 				},
+				"scitokens": [
+					{
+						"base_path": ["/server"],
+						"issuer": "https://my-issuer.com",
+						"restricted_path": []
+					}
+				],
 				"dirlisthost": null,
 				"origins": [
 					{
@@ -82,6 +89,7 @@ func JSONHandler(w http.ResponseWriter, r *http.Request) {
 					}
 				],
 				"credential_generation": null,
+				"scitokens": [],
 				"dirlisthost": null,
 				"origins": [
 					{
@@ -120,13 +128,13 @@ func TestAdvertiseOSDF(t *testing.T) {
 	// Test a few values. If they're correct, it indicates the whole process likely succeeded
 	nsAd, oAds, cAds := GetAdsForPath("/my/server/path/to/file")
 	assert.Equal(t, nsAd.Path, "/my/server")
-	assert.Equal(t, nsAd.MaxScopeDepth, uint(3))
+	assert.Equal(t, nsAd.Generation[0].MaxScopeDepth, uint(3))
 	assert.Equal(t, oAds[0].AuthURL.String(), "https://origin1-auth-endpoint.com")
 	assert.Equal(t, cAds[0].URL.String(), "http://cache-endpoint.com")
 
 	nsAd, oAds, cAds = GetAdsForPath("/my/server/2/path/to/file")
 	assert.Equal(t, nsAd.Path, "/my/server/2")
-	assert.Equal(t, nsAd.RequireToken, false)
+	assert.Equal(t, nsAd.PublicRead, true)
 	assert.Equal(t, oAds[0].AuthURL.String(), "https://origin2-auth-endpoint.com")
 	assert.Equal(t, cAds[0].URL.String(), "http://cache-endpoint.com")
 }

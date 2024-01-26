@@ -46,26 +46,39 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-func getNSAdsFromDirector() ([]director.NamespaceAd, error) {
+func getNSAdsFromDirector() ([]director.NamespaceAdV2, error) {
 	// Get the endpoint of the director
-	var respNS []director.NamespaceAd
+	var respNS []director.NamespaceAdV2
 	directorEndpoint, err := getDirectorEndpoint()
 	if err != nil {
 		return respNS, errors.Wrapf(err, "Failed to get DirectorURL from config: %v", err)
 	}
 
 	// Create the listNamespaces url
-	directorNSListEndpointURL, err := url.JoinPath(directorEndpoint, "api", "v1.0", "director", "listNamespaces")
+	directorNSListEndpointURL, err := url.JoinPath(directorEndpoint, "api", "v2.0", "director", "listNamespaces")
 	if err != nil {
 		return respNS, err
 	}
 
 	respData, err := utils.MakeRequest(directorNSListEndpointURL, "GET", nil, nil)
 	if err != nil {
-		if jsonErr := json.Unmarshal(respData, &respNS); jsonErr == nil { // Error creating json
+		directorNSListEndpointURL, err = url.JoinPath(directorEndpoint, "api", "v1.0", "director", "listNamespaces")
+		if err != nil {
+			return respNS, err
+		}
+		respData, err = utils.MakeRequest(directorNSListEndpointURL, "GET", nil, nil)
+		if err != nil {
+			if jsonErr := json.Unmarshal(respData, &respNS); jsonErr == nil { // Error creating json
+				return respNS, errors.Wrapf(err, "Failed to make request: %v", err)
+			}
+			return respNS, errors.Wrap(err, "Failed to make request")
+		}
+	} else {
+		var respNSV1 []director.NamespaceAdV1
+		if jsonErr := json.Unmarshal(respData, &respNSV1); jsonErr == nil { // Error creating json
 			return respNS, errors.Wrapf(err, "Failed to make request: %v", err)
 		}
-		return respNS, errors.Wrap(err, "Failed to make request")
+		respNS = director.ConvertNamespaceAdsV1ToV2(respNSV1)
 	}
 
 	err = json.Unmarshal(respData, &respNS)
