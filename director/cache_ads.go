@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
+	"github.com/pelicanplatform/pelican/param"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -82,7 +83,13 @@ func RecordAd(ad ServerAd, namespaceAds *[]NamespaceAd) {
 	}
 	serverAdMutex.Lock()
 	defer serverAdMutex.Unlock()
-	serverAds.Set(ad, *namespaceAds, ttlcache.DefaultTTL)
+
+	customTTL := param.Director_AdvertisementTTL.GetDuration()
+	if customTTL == 0 {
+		serverAds.Set(ad, *namespaceAds, ttlcache.DefaultTTL)
+	} else {
+		serverAds.Set(ad, *namespaceAds, customTTL)
+	}
 }
 
 func UpdateLatLong(ad *ServerAd) error {

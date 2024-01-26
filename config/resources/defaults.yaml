@@ -24,6 +24,8 @@ Server:
   RegistrationRetryInterval: 10s
 Director:
   DefaultResponse: cache
+  AdvertisementTTL: 15m
+  OriginCacheHealthTestInterval: 15s
 Cache:
   Port: 8443
 Origin:

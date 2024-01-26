@@ -563,6 +563,20 @@ root_default: /var/cache/pelican/maxmind/GeoLite2-City.mmdb
 default: $ConfigBase/maxmind/GeoLite2-city.mmdb
 components: ["director"]
 ---
+name: Director.AdvertisementTTL
+description: >-
+  The time to live (TTL) of director's internal cache to store origins and caches advertisement.
+type: duration
+default: 15m
+components: ["director"]
+---
+name: Director.OriginCacheHealthTestInterval
+description: >-
+  The interval of which director issues a new file transfer test to all the registered origins and caches.
+type: duration
+default: 15s
+components: ["director"]
+---
 ############################
 #  Registry-level configs  #
 ############################

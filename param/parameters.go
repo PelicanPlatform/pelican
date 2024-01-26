@@ -187,6 +187,8 @@ var (
 )
 
 var (
+	Director_AdvertisementTTL = DurationParam{"Director.AdvertisementTTL"}
+	Director_OriginCacheHealthTestInterval = DurationParam{"Director.OriginCacheHealthTestInterval"}
 	Federation_TopologyReloadInterval = DurationParam{"Federation.TopologyReloadInterval"}
 	Monitoring_TokenExpiresIn = DurationParam{"Monitoring.TokenExpiresIn"}
 	Monitoring_TokenRefreshInterval = DurationParam{"Monitoring.TokenRefreshInterval"}
