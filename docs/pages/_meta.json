@@ -1,5 +1,6 @@
 {
   "index": "About Pelican",
   "install": "Install",
-  "parameters": "Configuration"
+  "parameters": "Configuration",
+  "prometheus": "Promethues"
 }
