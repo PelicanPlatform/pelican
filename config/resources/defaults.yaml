@@ -24,7 +24,7 @@ Server:
 Director:
   DefaultResponse: cache
   AdvertisementTTL: 15m
-  FileTransferInterval: 15s
+  OriginCacheHealthTestInterval: 15s
 Cache:
   Port: 8443
 Origin:

@@ -126,13 +126,13 @@ func LaunchPeriodicDirectorTest(ctx context.Context, originAd ServerAd) {
 			"server_name": originName, "server_web_url": originWebUrl, "server_type": string(originAd.Type),
 		}).Inc()
 
-	customInterval := param.Director_FileTransferInterval.GetDuration()
+	customInterval := param.Director_OriginCacheHealthTestInterval.GetDuration()
 	if customInterval < 15*time.Second {
-		log.Warningf("You set Director.FileTransferInterval to a very small number %s, which will cause high traffic volume to xrootd servers.", customInterval.String())
+		log.Warningf("You set Director.OriginCacheHealthTestInterval to a very small number %s, which will cause high traffic volume to xrootd servers.", customInterval.String())
 	}
 	if customInterval == 0 {
 		customInterval = 15 * time.Second
-		log.Error("Invalid config value: Director.FileTransferInterval is 0. Fallback to 15s.")
+		log.Error("Invalid config value: Director.OriginCacheHealthTestInterval is 0. Fallback to 15s.")
 	}
 	ticker := time.NewTicker(customInterval)
 

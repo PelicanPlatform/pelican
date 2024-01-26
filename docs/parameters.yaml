@@ -570,7 +570,7 @@ type: duration
 default: 15m
 components: ["director"]
 ---
-name: Director.FileTransferInterval
+name: Director.OriginCacheHealthTestInterval
 description: >-
   The interval of which director issues a new file transfer test to all the registered origins and caches.
 type: duration
