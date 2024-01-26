@@ -617,11 +617,13 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType ServerTy
 	}
 
 	sAd := ServerAd{
-		Name:    adV2.Name,
-		AuthURL: *ad_url,
-		URL:     *ad_url,
-		WebURL:  *adWebUrl,
-		Type:    sType,
+		Name:               adV2.Name,
+		AuthURL:            *ad_url,
+		URL:                *ad_url,
+		WebURL:             *adWebUrl,
+		Type:               sType,
+		EnableWrite:        adV2.Caps.Write,
+		EnableFallbackRead: adV2.Caps.FallBackRead,
 	}
 
 	hasOriginAdInCache := serverAds.Has(sAd)

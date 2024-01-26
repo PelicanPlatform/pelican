@@ -49,10 +49,11 @@ type (
 	}
 
 	Capabilities struct {
-		PublicRead bool
-		Read       bool
-		Write      bool
-		Listing    bool
+		PublicRead   bool
+		Read         bool
+		Write        bool
+		Listing      bool
+		FallBackRead bool
 	}
 
 	NamespaceAdV2 struct {

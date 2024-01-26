@@ -84,9 +84,10 @@ func (server *OriginServer) CreateAdvertisement(name string, originUrl string, o
 		WebURL:     originWebUrl,
 		Namespaces: []director.NamespaceAdV2{nsAd},
 		Caps: director.Capabilities{
-			PublicRead: param.Origin_EnablePublicReads.GetBool(),
-			Read:       true,
-			Write:      param.Origin_EnableWrite.GetBool(),
+			PublicRead:   param.Origin_EnablePublicReads.GetBool(),
+			Read:         true,
+			Write:        param.Origin_EnableWrite.GetBool(),
+			FallBackRead: param.Origin_EnableFallbackRead.GetBool(),
 		},
 		Issuer: []director.TokenIssuer{{
 			BasePaths: []string{prefix},
