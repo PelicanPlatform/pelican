@@ -332,4 +332,3 @@ type configWithType struct {
 		SummaryMonitoringHost struct { Type string; Value string }
 	}
 }
-
