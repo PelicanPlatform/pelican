@@ -28,9 +28,9 @@ type config struct {
 		AdvertisementTTL time.Duration
 		CacheResponseHostnames []string
 		DefaultResponse string
-		FileTransferInterval time.Duration
 		GeoIPLocation string
 		MaxMindKeyFile string
+		OriginCacheHealthTestInterval time.Duration
 		OriginResponseHostnames []string
 	}
 	DisableHttpProxy bool
@@ -194,9 +194,9 @@ type configWithType struct {
 		AdvertisementTTL struct { Type string; Value time.Duration }
 		CacheResponseHostnames struct { Type string; Value []string }
 		DefaultResponse struct { Type string; Value string }
-		FileTransferInterval struct { Type string; Value time.Duration }
 		GeoIPLocation struct { Type string; Value string }
 		MaxMindKeyFile struct { Type string; Value string }
+		OriginCacheHealthTestInterval struct { Type string; Value time.Duration }
 		OriginResponseHostnames struct { Type string; Value []string }
 	}
 	DisableHttpProxy struct { Type string; Value bool }
