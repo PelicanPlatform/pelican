@@ -104,6 +104,12 @@ func configureWebResource(engine *gin.Engine) error {
 		db := authDB.Load()
 		user, err := GetUser(ctx)
 
+		// If just one server is enabled, redirect to that server
+		if len(config.GetEnabledServerString(true)) == 1 && requestPath == "/index.html" {
+			ctx.Redirect(http.StatusFound, "/view/"+config.GetEnabledServerString(true)[0]+"/")
+			return
+		}
+
 		// If requesting servers other than the registry
 		if !strings.HasPrefix(requestPath, "/registry") {
 
@@ -146,12 +152,6 @@ func configureWebResource(engine *gin.Engine) error {
 					return
 				}
 			}
-		}
-
-		// If just one server is enabled, redirect to that server
-		if len(config.GetEnabledServerString(true)) == 1 && requestPath == "/index.html" {
-			ctx.Redirect(http.StatusFound, "/view/"+config.GetEnabledServerString(true)[0]+"/")
-			return
 		}
 
 		filePath := "frontend/out" + requestPath
