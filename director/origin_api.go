@@ -128,7 +128,14 @@ func VerifyAdvertiseToken(ctx context.Context, token, namespace string) (bool, e
 		}
 		namespaceKeysMutex.Lock()
 		defer namespaceKeysMutex.Unlock()
-		namespaceKeys.Set(namespace, ar, ttlcache.DefaultTTL)
+
+		customTTL := param.Director_AdvertisementTTL.GetDuration()
+		if customTTL == 0 {
+			namespaceKeys.Set(namespace, ar, ttlcache.DefaultTTL)
+		} else {
+			namespaceKeys.Set(namespace, ar, customTTL)
+		}
+
 	}
 	log.Debugln("Attempting to fetch keys from ", issuerUrl)
 	keyset, err := ar.Get(ctx, issuerUrl)

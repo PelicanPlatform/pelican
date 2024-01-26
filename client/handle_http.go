@@ -968,6 +968,7 @@ Loop:
 	if fileInfo.Size() == 0 {
 		return 0, lastError
 	} else {
+		log.Debugln("Uploaded bytes:", reader.BytesComplete())
 		return reader.BytesComplete(), lastError
 	}
 

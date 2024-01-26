@@ -506,6 +506,11 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType common.S
 	healthTestCancelFuncsMutex.Lock()
 	defer healthTestCancelFuncsMutex.Unlock()
 	if ad.WebURL != "" && !hasOriginAdInCache {
+		if _, ok := healthTestCancelFuncs[sAd]; ok {
+			// If somehow we didn't clear the key, we call cancel first before
+			// adding a new test cycle
+			healthTestCancelFuncs[sAd]()
+		}
 		ctx, cancel := context.WithCancel(context.Background())
 		healthTestCancelFuncs[sAd] = cancel
 		LaunchPeriodicDirectorTest(ctx, sAd)

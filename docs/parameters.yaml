@@ -147,6 +147,13 @@ type: filename
 default: none
 components: ["*"]
 ---
+name: Logging.DisableProgressBars
+description: >-
+  A bool defining if progress bars should be enabled or not.
+type: bool
+default: false
+components: ["Client"]
+---
 ############################
 # Federation-Level Configs #
 ############################
@@ -586,6 +593,19 @@ description: >-
   for detail
 type: int
 default: 1000
+---
+name: Director.AdvertisementTTL
+description: >-
+  The time to live (TTL) of director's internal cache to store origins and caches advertisement.
+type: duration
+default: 15m
+components: ["director"]
+---
+name: Director.OriginCacheHealthTestInterval
+description: >-
+  The interval of which director issues a new file transfer test to all the registered origins and caches.
+type: duration
+default: 15s
 components: ["director"]
 ---
 ############################
@@ -827,6 +847,14 @@ type: filename
 default: $ConfigBase/session-secret
   The default content of the file is the hash of the concatenation of "pelican" and the DER form of ${IssuerKey}
 components: ["nsregistry", "director"]
+---
+name: Server.RegistrationRetryInterval
+description: >-
+  The duration of delay in origin/cache registration retry attempts if the initial registration call to registry
+  was failed.
+type: duration
+default: 10s
+components: ["origin", "cache"]
 ---
 ################################
 #   Issuer's Configurations    #

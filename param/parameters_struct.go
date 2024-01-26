@@ -25,12 +25,14 @@ type config struct {
 	ConfigDir string
 	Debug bool
 	Director struct {
+		AdvertisementTTL time.Duration
 		CacheResponseHostnames []string
 		DefaultResponse string
 		GeoIPLocation string
 		MaxMindKeyFile string
 		MaxStatResponse int
 		MinStatResponse int
+		OriginCacheHealthTestInterval time.Duration
 		OriginResponseHostnames []string
 		StatConcurrencyLimit int
 		StatTimeout time.Duration
@@ -61,6 +63,7 @@ type config struct {
 	}
 	IssuerKey string
 	Logging struct {
+		DisableProgressBars bool
 		Level string
 		LogLocation string
 	}
@@ -132,6 +135,7 @@ type config struct {
 		IssuerPort int
 		IssuerUrl string
 		Modules []string
+		RegistrationRetryInterval time.Duration
 		SessionSecretFile string
 		TLSCACertificateDirectory string
 		TLSCACertificateFile string
@@ -195,12 +199,14 @@ type configWithType struct {
 	ConfigDir struct { Type string; Value string }
 	Debug struct { Type string; Value bool }
 	Director struct {
+		AdvertisementTTL struct { Type string; Value time.Duration }
 		CacheResponseHostnames struct { Type string; Value []string }
 		DefaultResponse struct { Type string; Value string }
 		GeoIPLocation struct { Type string; Value string }
 		MaxMindKeyFile struct { Type string; Value string }
 		MaxStatResponse struct { Type string; Value int }
 		MinStatResponse struct { Type string; Value int }
+		OriginCacheHealthTestInterval struct { Type string; Value time.Duration }
 		OriginResponseHostnames struct { Type string; Value []string }
 		StatConcurrencyLimit struct { Type string; Value int }
 		StatTimeout struct { Type string; Value time.Duration }
@@ -231,6 +237,7 @@ type configWithType struct {
 	}
 	IssuerKey struct { Type string; Value string }
 	Logging struct {
+		DisableProgressBars struct { Type string; Value bool }
 		Level struct { Type string; Value string }
 		LogLocation struct { Type string; Value string }
 	}
@@ -302,6 +309,7 @@ type configWithType struct {
 		IssuerPort struct { Type string; Value int }
 		IssuerUrl struct { Type string; Value string }
 		Modules struct { Type string; Value []string }
+		RegistrationRetryInterval struct { Type string; Value time.Duration }
 		SessionSecretFile struct { Type string; Value string }
 		TLSCACertificateDirectory struct { Type string; Value string }
 		TLSCACertificateFile struct { Type string; Value string }
