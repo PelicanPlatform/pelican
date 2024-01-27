@@ -44,7 +44,7 @@ func (launcher PrivilegedXrootdLauncher) Name() string {
 	return launcher.daemonName
 }
 
-func makeUnprivilegedXrootdLauncher(daemonName string, configPath string) (result UnprivilegedXrootdLauncher, err error) {
+func makeUnprivilegedXrootdLauncher(daemonName string, configPath string, isCache bool) (result UnprivilegedXrootdLauncher, err error) {
 	result.DaemonName = daemonName
 	result.Uid = -1
 	result.Gid = -1
@@ -62,10 +62,14 @@ func makeUnprivilegedXrootdLauncher(daemonName string, configPath string) (resul
 			return
 		}
 	}
+
+	if isCache {
+		result.ExtraEnv = []string{"XRD_PELICANBROKERSOCKET=" + filepath.Join(xrootdRun, "cache-reversal.sock")}
+	}
 	return
 }
 
-func ConfigureLaunchers(privileged bool, configPath string, useCMSD bool) (launchers []daemon.Launcher, err error) {
+func ConfigureLaunchers(privileged bool, configPath string, useCMSD bool, enableCache bool) (launchers []daemon.Launcher, err error) {
 	if privileged {
 		launchers = append(launchers, PrivilegedXrootdLauncher{"xrootd", configPath})
 		if useCMSD {
@@ -73,13 +77,13 @@ func ConfigureLaunchers(privileged bool, configPath string, useCMSD bool) (launc
 		}
 	} else {
 		var result UnprivilegedXrootdLauncher
-		result, err = makeUnprivilegedXrootdLauncher("xrootd", configPath)
+		result, err = makeUnprivilegedXrootdLauncher("xrootd", configPath, enableCache)
 		if err != nil {
 			return
 		}
 		launchers = append(launchers, result)
 		if useCMSD {
-			result, err = makeUnprivilegedXrootdLauncher("cmsd", configPath)
+			result, err = makeUnprivilegedXrootdLauncher("cmsd", configPath, false)
 			if err != nil {
 				return
 			}

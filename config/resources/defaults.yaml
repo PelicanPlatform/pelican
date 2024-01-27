@@ -26,6 +26,7 @@ Director:
   DefaultResponse: cache
   AdvertisementTTL: 15m
   OriginCacheHealthTestInterval: 15s
+  EnableBroker: true
 Cache:
   Port: 8443
 Origin:

@@ -1,6 +1,8 @@
+//go:build windows
+
 /***************************************************************
  *
- * Copyright (C) 2023, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -16,25 +18,15 @@
  *
  ***************************************************************/
 
-package main
+package cache_ui
 
 import (
-	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/launchers"
-	"github.com/pelicanplatform/pelican/param"
-	"github.com/spf13/cobra"
+	"context"
+
+	"github.com/pkg/errors"
+	"golang.org/x/sync/errgroup"
 )
 
-func serveDirector(cmd *cobra.Command, args []string) error {
-	modules := config.DirectorType
-	if param.Origin_EnableBroker.GetBool() {
-		modules.Set(config.BrokerType)
-	}
-
-	cancel, err := launchers.LaunchModules(cmd.Context(), config.DirectorType)
-	if err != nil {
-		cancel()
-	}
-
-	return err
+func LaunchRequestListener(ctx context.Context, egrp *errgroup.Group) error {
+	return errors.New("Broker functionality not supported on Windows")
 }

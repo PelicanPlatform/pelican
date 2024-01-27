@@ -30,7 +30,9 @@ import (
 	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pelicanplatform/pelican/broker"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/origin_ui"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_ui"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -82,6 +84,13 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		}
 	}
 
+	if modules.IsEnabled(config.BrokerType) {
+		viper.Set("Federation.BrokerURL", param.Server_ExternalWebUrl.GetString())
+
+		rootGroup := engine.Group("/")
+		broker.RegisterBroker(ctx, rootGroup)
+	}
+
 	if modules.IsEnabled(config.DirectorType) {
 
 		viper.Set("Director.DefaultResponse", "cache")
@@ -95,6 +104,12 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 
 	servers := make([]server_utils.XRootDServer, 0)
 	if modules.IsEnabled(config.OriginType) {
+		if param.Origin_EnableBroker.GetBool() {
+			if err = origin_ui.LaunchBrokerListener(ctx, egrp); err != nil {
+				return shutdownCancel, err
+			}
+		}
+
 		mode := param.Origin_Mode.GetString()
 		switch mode {
 		case "posix":

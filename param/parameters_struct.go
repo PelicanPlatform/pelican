@@ -28,6 +28,7 @@ type config struct {
 		AdvertisementTTL time.Duration
 		CacheResponseHostnames []string
 		DefaultResponse string
+		EnableBroker bool
 		GeoIPLocation string
 		MaxMindKeyFile string
 		OriginCacheHealthTestInterval time.Duration
@@ -36,6 +37,7 @@ type config struct {
 	DisableHttpProxy bool
 	DisableProxyFallback bool
 	Federation struct {
+		BrokerUrl string
 		DirectorUrl string
 		DiscoveryUrl string
 		JwkUrl string
@@ -85,6 +87,7 @@ type config struct {
 		UserInfoEndpoint string
 	}
 	Origin struct {
+		EnableBroker bool
 		EnableCmsd bool
 		EnableDirListing bool
 		EnableFallbackRead bool
@@ -198,6 +201,7 @@ type configWithType struct {
 		AdvertisementTTL struct { Type string; Value time.Duration }
 		CacheResponseHostnames struct { Type string; Value []string }
 		DefaultResponse struct { Type string; Value string }
+		EnableBroker struct { Type string; Value bool }
 		GeoIPLocation struct { Type string; Value string }
 		MaxMindKeyFile struct { Type string; Value string }
 		OriginCacheHealthTestInterval struct { Type string; Value time.Duration }
@@ -206,6 +210,7 @@ type configWithType struct {
 	DisableHttpProxy struct { Type string; Value bool }
 	DisableProxyFallback struct { Type string; Value bool }
 	Federation struct {
+		BrokerUrl struct { Type string; Value string }
 		DirectorUrl struct { Type string; Value string }
 		DiscoveryUrl struct { Type string; Value string }
 		JwkUrl struct { Type string; Value string }
@@ -255,6 +260,7 @@ type configWithType struct {
 		UserInfoEndpoint struct { Type string; Value string }
 	}
 	Origin struct {
+		EnableBroker struct { Type string; Value bool }
 		EnableCmsd struct { Type string; Value bool }
 		EnableDirListing struct { Type string; Value bool }
 		EnableFallbackRead struct { Type string; Value bool }

@@ -32,6 +32,7 @@ type (
 		Args       []string
 		Uid        int
 		Gid        int
+		ExtraEnv   []string
 	}
 )
 

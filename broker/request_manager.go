@@ -1,0 +1,91 @@
+/***************************************************************
+ *
+ * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you
+ * may not use this file except in compliance with the License.  You may
+ * obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ ***************************************************************/
+
+package broker
+
+import (
+	"context"
+	"errors"
+	"math/rand"
+	"sync"
+	"time"
+)
+
+var (
+	errRetrieveTimeout error                           = errors.New("retrieve request timed out")
+	errRequestTimeout  error                           = errors.New("reverse request timed out")
+	requestsLock       sync.Mutex                      = sync.Mutex{}
+	requests           map[string]chan reversalRequest = make(map[string]chan reversalRequest)
+)
+
+type reversalRequest struct {
+	CallbackUrl string `json:"callback_url"`
+	PrivateKey  string `json:"private_key"`
+	RequestId   string `json:"request_id"`
+}
+
+func getOriginQueue(origin string) chan reversalRequest {
+	requestsLock.Lock()
+	defer requestsLock.Unlock()
+	if reqChannel, ok := requests[origin]; ok {
+		return reqChannel
+	} else {
+		newChan := make(chan reversalRequest)
+		requests[origin] = newChan
+		return newChan
+	}
+}
+
+// Send a request to a given origin's queue.
+// Return a requestTimeout error if no origin retrieved the request before the context timed out.
+func handleRequest(ctx context.Context, origin string, req reversalRequest, timeout time.Duration) (err error) {
+	queue := getOriginQueue(origin)
+	maxTime := timeout - 500*time.Millisecond - time.Duration(rand.Intn(500))*time.Millisecond
+	tick := time.NewTicker(maxTime)
+	defer tick.Stop()
+
+	select {
+	case queue <- req:
+		break
+	case <-tick.C:
+		err = errRequestTimeout
+		break
+	case <-ctx.Done():
+		err = errRequestTimeout
+		break
+	}
+	return
+}
+
+func handleRetrieve(appCtx context.Context, ginCtx context.Context, origin string, timeout time.Duration) (req reversalRequest, err error) {
+	// Return randomly short of the timeout.
+	maxTime := timeout - 500*time.Millisecond - time.Duration(rand.Intn(500))*time.Millisecond
+	tick := time.NewTicker(maxTime)
+	defer tick.Stop()
+	select {
+	case req = <-getOriginQueue(origin):
+		break
+	case <-tick.C:
+		err = errRetrieveTimeout
+	case <-ginCtx.Done():
+		err = errRetrieveTimeout
+	case <-appCtx.Done():
+		err = errRetrieveTimeout
+	}
+	return
+}

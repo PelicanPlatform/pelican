@@ -173,10 +173,14 @@ func serveCacheInternal(cmdCtx context.Context) (context.CancelFunc, error) {
 		return shutdownCancel, err
 	}
 
+	if err = cache_ui.LaunchRequestListener(ctx, egrp); err != nil {
+		return shutdownCancel, err
+	}
+
 	xrootd.LaunchXrootdMaintenance(ctx, cacheServer, 2*time.Minute)
 
 	log.Info("Launching cache")
-	launchers, err := xrootd.ConfigureLaunchers(false, configPath, false)
+	launchers, err := xrootd.ConfigureLaunchers(false, configPath, false, true)
 	if err != nil {
 		return shutdownCancel, err
 	}

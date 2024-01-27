@@ -76,6 +76,7 @@ type (
 		DirectorEndpoint              string `json:"director_endpoint"`
 		NamespaceRegistrationEndpoint string `json:"namespace_registration_endpoint"`
 		JwksUri                       string `json:"jwks_uri"`
+		BrokerEndpoint                string `json:"broker_endpoint"`
 	}
 
 	TokenOperation int
@@ -94,6 +95,7 @@ const (
 	OriginType
 	DirectorType
 	RegistryType
+	BrokerType
 
 	EgrpKey ContextKey = "egrp"
 )
@@ -226,6 +228,8 @@ func (sType ServerType) String() string {
 		return "Director"
 	case RegistryType:
 		return "Registry"
+	case BrokerType:
+		return "Broker"
 	}
 	return "Unknown"
 }
@@ -306,6 +310,9 @@ func DiscoverFederation() error {
 		if param.Federation_JwkUrl.GetString() == "" && enabledServers.IsEnabled(DirectorType) {
 			viper.Set("Federation.JwkUrl", externalUrlStr+"/.well-known/issuer.jwks")
 		}
+		if param.Federation_BrokerUrl.GetString() == "" && enabledServers.IsEnabled(BrokerType) {
+			viper.Set("Federation.BrokerUrl", externalUrlStr)
+		}
 	}()
 	if len(federationStr) == 0 {
 		log.Debugln("Federation URL is unset; skipping discovery")
@@ -320,6 +327,7 @@ func DiscoverFederation() error {
 	curDirectorURL := param.Federation_DirectorUrl.GetString()
 	curRegistryURL := param.Federation_RegistryUrl.GetString()
 	curFederationJwkURL := param.Federation_JwkUrl.GetString()
+	curBrokerURL := param.Federation_BrokerUrl.GetString()
 	if len(curDirectorURL) != 0 && len(curRegistryURL) != 0 && len(curFederationJwkURL) != 0 {
 		return nil
 	}
@@ -349,7 +357,7 @@ func DiscoverFederation() error {
 	if err != nil {
 		return errors.Wrapf(err, "Failure when doing federation metadata request creation for %s", discoveryUrl)
 	}
-	req.Header.Set("User-Agent", "pelican/7")
+	req.Header.Set("User-Agent", "pelican/"+PelicanVersion)
 
 	result, err := httpClient.Do(req)
 	if err != nil {
@@ -383,6 +391,10 @@ func DiscoverFederation() error {
 		log.Debugln("Federation service discovery resulted in JWKS URL",
 			metadata.JwksUri)
 		viper.Set("Federation.JwkUrl", metadata.JwksUri)
+	}
+	if curBrokerURL == "" && metadata.BrokerEndpoint != "" {
+		log.Debugln("Federation service discovery resulted in JWKS URL", metadata.BrokerEndpoint)
+		viper.Set("Federation.BrokerUrl", metadata.BrokerEndpoint)
 	}
 
 	return nil
