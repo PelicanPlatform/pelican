@@ -36,6 +36,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -50,12 +51,6 @@ import (
 
 type (
 
-	// Struct representing the HTTP request for a connection reversal
-	reversalRequestClient struct {
-		RequestId  string `json:"req_id"`
-		PrivateKey string `json:"private_key"`
-	}
-
 	// Struct handling the cache's response to the origin's reversal
 	// callback.
 	reversalCallbackResponse struct {
@@ -65,7 +60,6 @@ type (
 	// Represents a connection we may want to hijack.  The default transport
 	// will create these connections and we'll later reverse them
 	hijackConn struct {
-		net.Conn
 		realConn *net.TCPConn
 	}
 
@@ -85,8 +79,64 @@ var (
 
 const requestIdBytes = "abcdefghijklmnopqrstuvwxyz0123456789"
 
-func (*hijackConn) Close() error {
+func (hj *hijackConn) Read(b []byte) (n int, err error) {
+	if hj.realConn == nil {
+		return 0, nil
+	} else {
+		return hj.realConn.Read(b)
+	}
+}
+
+func (hj *hijackConn) Write(b []byte) (n int, err error) {
+	if hj.realConn == nil {
+		return len(b), nil
+	} else {
+		return hj.realConn.Write(b)
+	}
+}
+
+func (hj *hijackConn) LocalAddr() net.Addr {
+	if hj.realConn == nil {
+		return nil
+	} else {
+		return hj.realConn.LocalAddr()
+	}
+}
+
+func (hj *hijackConn) RemoteAddr() net.Addr {
+	if hj.realConn == nil {
+		return nil
+	} else {
+		return hj.realConn.RemoteAddr()
+	}
+}
+
+func (hj *hijackConn) Close() error {
 	return nil
+}
+
+func (hj *hijackConn) SetDeadline(t time.Time) error {
+	if hj.realConn == nil {
+		return nil
+	} else {
+		return hj.realConn.SetDeadline(t)
+	}
+}
+
+func (hj *hijackConn) SetReadDeadline(t time.Time) error {
+	if hj.realConn == nil {
+		return nil
+	} else {
+		return hj.realConn.SetReadDeadline(t)
+	}
+}
+
+func (hj *hijackConn) SetWriteDeadline(t time.Time) error {
+	if hj.realConn == nil {
+		return nil
+	} else {
+		return hj.realConn.SetReadDeadline(t)
+	}
 }
 
 // Returns a new 'one shot listener' from a given TCP connection
@@ -100,6 +150,7 @@ func (listener *oneShotListener) Accept() (conn net.Conn, err error) {
 	tcpConn := listener.conn.Swap(nil)
 	if tcpConn == nil {
 		err = net.ErrClosed
+		return
 	}
 	conn = tcpConn
 	return
@@ -114,9 +165,9 @@ func (listener *oneShotListener) Addr() net.Addr {
 	return listener.addr
 }
 
-func generatePrivateKey() (keyContents string, err error) {
+func generatePrivateKey() (keyContents string, priv *ecdsa.PrivateKey, err error) {
 
-	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	priv, err = ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return
 	}
@@ -166,14 +217,15 @@ func GetCallback(ctx context.Context, brokerUrl string, originName string) (conn
 		return
 	}
 
-	keyContents, err := generatePrivateKey()
+	keyContents, privKey, err := generatePrivateKey()
 	if err != nil {
 		return
 	}
 
-	reqC := reversalRequestClient{
-		RequestId:  generateRequestId(),
-		PrivateKey: keyContents,
+	reqC := reversalRequest{
+		RequestId:   generateRequestId(),
+		PrivateKey:  keyContents,
+		CallbackUrl: param.Server_ExternalWebUrl.GetString() + "/api/v1.0/broker/callback",
 	}
 	reqBytes, err := json.Marshal(&reqC)
 	if err != nil {
@@ -242,7 +294,7 @@ func GetCallback(ctx context.Context, brokerUrl string, originName string) (conn
 		BasicConstraintsValid: true,
 	}
 	template.DNSNames = []string{originName}
-	derBytes, err := x509.CreateCertificate(rand.Reader, &template, caCert, &(caPrivateKey.PublicKey), caPrivateKey)
+	derBytes, err := x509.CreateCertificate(rand.Reader, &template, caCert, &privKey.PublicKey, caPrivateKey)
 	if err != nil {
 		return
 	}
@@ -257,13 +309,20 @@ func GetCallback(ctx context.Context, brokerUrl string, originName string) (conn
 	// Wait for the origin to callback to the cache's return endpoint; that HTTP handler
 	// will write to the channel we originally posted.
 	tck := time.NewTicker(20 * time.Second)
+	log.Debugf("Cache waiting for up to 20 seconds for the origin %s to callback", originName)
 	select {
+	case <-ctx.Done():
+		log.Debug("Context has been cancelled while waiting for callback")
+		err = ctx.Err()
+		return
 	case <-tck.C:
+		log.Debug("Request has timed out when waiting for callback")
 		err = errors.Errorf("Timeout when waiting for callback from origin")
 		return
 	case writer := <-responseChannel:
 		hj, ok := writer.(http.Hijacker)
 		if !ok {
+			log.Debug("Not able to hijack underlying TCP connection from server")
 			resp := brokerErrResp{
 				Msg:    "Unable to reverse TCP connection; HTTP/2 in use",
 				Status: "error",
@@ -283,18 +342,35 @@ func GetCallback(ctx context.Context, brokerUrl string, originName string) (conn
 			}
 			return
 		}
+
+		// Write headers including explicit length, then flush out the body.
+		// If we don't do both items, the response may still be buffered by time
+		// we hijack the connection, leading to a client that indefinitely waits.
+		writer.Header().Set("Content-Length", strconv.Itoa(len(callbackBytes)))
 		writer.WriteHeader(http.StatusOK)
 		if _, err = writer.Write(callbackBytes); err != nil {
-			log.Error("Failed to write callback response co client:", err)
+			log.Error("Failed to write callback response to client:", err)
 			return
 		}
+		flusher, ok := writer.(http.Flusher)
+		if !ok {
+			log.Error("Unable to flush data to client")
+			return
+		}
+		flusher.Flush()
+
 		conn, _, err = hj.Hijack()
+		tlsConn, ok := conn.(*tls.Conn)
+		if ok {
+			conn = tlsConn.NetConn()
+		}
 	}
 	return
 }
 
 // Callback to a given cache based on the request we got from a broker
 func doCallback(ctx context.Context, brokerResp reversalRequest) (listener net.Listener, err error) {
+	log.Debugln("Origin starting callback to cache at", brokerResp.CallbackUrl)
 
 	privateKey, err := privateKeyFromBytes(brokerResp.PrivateKey)
 	if err != nil {
@@ -321,8 +397,8 @@ func doCallback(ctx context.Context, brokerResp reversalRequest) (listener net.L
 
 	// Create a copy of the default transport; instead of using the existing connection pool,
 	// we will use a custom connection pool where we can hijack connections
-	tr := *config.GetTransport()
-	hijackConnList := make([]hijackConn, 0)
+	tr := config.GetTransport().Clone()
+	hijackConnList := make([]*hijackConn, 0)
 	hijackConnMutex := sync.Mutex{}
 	tr.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 		dialer := net.Dialer{}
@@ -334,13 +410,13 @@ func doCallback(ctx context.Context, brokerResp reversalRequest) (listener net.L
 		if !ok {
 			return conn, nil
 		}
-		hj := hijackConn{conn, tcpConn}
+		hj := &hijackConn{tcpConn}
 		hijackConnMutex.Lock()
 		hijackConnList = append(hijackConnList, hj)
 		hijackConnMutex.Unlock()
-		return &hj, nil
+		return hj, nil
 	}
-	client := &http.Client{Transport: &tr}
+	client := &http.Client{Transport: tr}
 	resp, err := client.Do(req)
 	if err != nil {
 		err = errors.Wrapf(err, "Failure when calling back to cache %s for a reversal request", brokerResp.CallbackUrl)
@@ -360,9 +436,11 @@ func doCallback(ctx context.Context, brokerResp reversalRequest) (listener net.L
 		} else {
 			err = errors.Errorf("Failure when invoking cache %s callback (status code %d): %s", brokerResp.CallbackUrl, resp.StatusCode, errResp.Msg)
 		}
+		log.Error("Callback failed:", err)
 		return
 	}
 
+	log.Debugln("Origin finished callback to cache at", brokerResp.CallbackUrl)
 	callbackResp := reversalCallbackResponse{}
 	if err = json.Unmarshal(responseBytes, &callbackResp); err != nil {
 		err = errors.Wrapf(err, "Failed to parse cache %s callback response", brokerResp.CallbackUrl)
@@ -380,13 +458,46 @@ func doCallback(ctx context.Context, brokerResp reversalRequest) (listener net.L
 			Certificate: [][]byte{hostCertificate},
 			PrivateKey:  privateKey,
 		}},
+		NextProtos: []string{"http/1.1"},
 	}
 
+	var hj *hijackConn
+	gotConn := false
 	hijackConnMutex.Lock()
-	hj := hijackConnList[len(hijackConnList)-1]
+	if len(hijackConnList) > 0 {
+		hj = hijackConnList[len(hijackConnList)-1]
+		gotConn = true
+	}
 	hijackConnMutex.Unlock()
+	if !gotConn {
+		err = errors.New("Internal error: no new connection made to remote cache")
+		return
+	}
 
-	listener = tls.NewListener(newOneShotListener(hj.realConn), &tlsConfig)
+	// Create a new socket from the old socket; resets state in the
+	// runtime to make it more like a "new" socket.
+	fp, err := hj.realConn.File()
+	if err != nil {
+		err = errors.Wrap(err, "Failure when duplicating hijacked connection")
+		return
+	}
+	hj.realConn.Close()
+	newConn, err := net.FileConn(fp)
+	if err != nil {
+		err = errors.Wrap(err, "Failure when making scoket from duplicated connection")
+		return
+	}
+	fp.Close()
+	revConn, ok := newConn.(*net.TCPConn)
+	if !ok {
+		err = errors.New("Failed to cast connection back to TCP socket")
+		return
+	}
+
+	hj.realConn = nil
+	listener = tls.NewListener(newOneShotListener(revConn), &tlsConfig)
+
+	client.CloseIdleConnections()
 
 	return
 }
@@ -396,7 +507,7 @@ func doCallback(ctx context.Context, brokerResp reversalRequest) (listener net.L
 // TLS listener where you can invoke "Accept" once before it automatically
 // closes itself.  It is the result of a successful connection reversal to
 // a cache.
-func LaunchRequestMonitor(ctx context.Context, egrp *errgroup.Group, resultChan chan net.Listener) (err error) {
+func LaunchRequestMonitor(ctx context.Context, egrp *errgroup.Group, resultChan chan any) (err error) {
 	brokerUrl := param.Federation_BrokerUrl.GetString() + "/api/v1.0/broker/retrieve"
 	originUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
 	if err != nil {
@@ -466,12 +577,13 @@ func LaunchRequestMonitor(ctx context.Context, egrp *errgroup.Group, resultChan 
 					break
 				}
 
-				conn, err := doCallback(ctx, brokerResp.Request)
+				listener, err := doCallback(ctx, brokerResp.Request)
 				if err != nil {
 					log.Errorln("Failed to callback to the cache:", err)
+					resultChan <- err
 					break
 				}
-				resultChan <- conn
+				resultChan <- listener
 				sleepDuration = 0
 			}
 			time.Sleep(sleepDuration)

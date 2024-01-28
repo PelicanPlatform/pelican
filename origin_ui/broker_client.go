@@ -87,7 +87,7 @@ func proxyOrigin(resp http.ResponseWriter, req *http.Request) {
 
 // Launch goroutines that continuously poll the broker
 func LaunchBrokerListener(ctx context.Context, egrp *errgroup.Group) (err error) {
-	listenerChan := make(chan net.Listener)
+	listenerChan := make(chan any)
 	// Startup 5 continuous polling routines
 	for cnt := 0; cnt < 5; cnt += 1 {
 		err = broker.LaunchRequestMonitor(ctx, egrp, listenerChan)
@@ -102,7 +102,16 @@ func LaunchBrokerListener(ctx context.Context, egrp *errgroup.Group) (err error)
 			select {
 			case <-ctx.Done():
 				return
-			case listener := <-listenerChan:
+			case res := <-listenerChan:
+				if err, ok := res.(error); ok {
+					log.Errorln("Callback failed:", err)
+					break
+				}
+				listener, ok := res.(net.Listener)
+				if !ok {
+					log.Errorln("Failed to determine callback result:", res)
+					break
+				}
 				srv := http.Server{
 					Handler: http.HandlerFunc(proxyOrigin),
 				}
