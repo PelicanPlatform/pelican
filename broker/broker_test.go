@@ -44,16 +44,6 @@ type (
 	}
 )
 
-func (cl *ConnLogger) Read(b []byte) (n int, err error) {
-	n, err = cl.Conn.Read(b)
-	return
-}
-
-func (cl *ConnLogger) Write(b []byte) (n int, err error) {
-	n, err = cl.Conn.Write(b)
-	return
-}
-
 // Return a transport that always dials the given connection
 func getTransport(conn net.Conn) (tr *http.Transport) {
 	tr = config.GetTransport().Clone()
@@ -112,7 +102,7 @@ func TestBroker(t *testing.T) {
 
 	// Initiate the callback using the cache-based routines.
 	brokerUrl := param.Server_ExternalWebUrl.GetString() + "/api/v1.0/broker/reverse/" + param.Server_Hostname.GetString()
-	clientConn, err := GetCallback(ctxQuick, brokerUrl, param.Server_Hostname.GetString())
+	clientConn, err := ConnectToOrigin(ctxQuick, brokerUrl, param.Server_Hostname.GetString())
 	require.NoError(t, err)
 	log.Debugf("Cache got reversed client connection with cache side %s and origin side %s", clientConn.LocalAddr(), clientConn.RemoteAddr())
 

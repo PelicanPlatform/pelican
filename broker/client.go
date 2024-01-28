@@ -60,6 +60,7 @@ type (
 	// Represents a connection we may want to hijack.  The default transport
 	// will create these connections and we'll later reverse them
 	hijackConn struct {
+		*net.TCPConn
 		realConn *net.TCPConn
 	}
 
@@ -79,64 +80,8 @@ var (
 
 const requestIdBytes = "abcdefghijklmnopqrstuvwxyz0123456789"
 
-func (hj *hijackConn) Read(b []byte) (n int, err error) {
-	if hj.realConn == nil {
-		return 0, nil
-	} else {
-		return hj.realConn.Read(b)
-	}
-}
-
-func (hj *hijackConn) Write(b []byte) (n int, err error) {
-	if hj.realConn == nil {
-		return len(b), nil
-	} else {
-		return hj.realConn.Write(b)
-	}
-}
-
-func (hj *hijackConn) LocalAddr() net.Addr {
-	if hj.realConn == nil {
-		return nil
-	} else {
-		return hj.realConn.LocalAddr()
-	}
-}
-
-func (hj *hijackConn) RemoteAddr() net.Addr {
-	if hj.realConn == nil {
-		return nil
-	} else {
-		return hj.realConn.RemoteAddr()
-	}
-}
-
 func (hj *hijackConn) Close() error {
 	return nil
-}
-
-func (hj *hijackConn) SetDeadline(t time.Time) error {
-	if hj.realConn == nil {
-		return nil
-	} else {
-		return hj.realConn.SetDeadline(t)
-	}
-}
-
-func (hj *hijackConn) SetReadDeadline(t time.Time) error {
-	if hj.realConn == nil {
-		return nil
-	} else {
-		return hj.realConn.SetReadDeadline(t)
-	}
-}
-
-func (hj *hijackConn) SetWriteDeadline(t time.Time) error {
-	if hj.realConn == nil {
-		return nil
-	} else {
-		return hj.realConn.SetReadDeadline(t)
-	}
 }
 
 // Returns a new 'one shot listener' from a given TCP connection
@@ -202,7 +147,7 @@ func generateRequestId() string {
 }
 
 // Given an origin's broker URL, return a connected socket to the origin
-func GetCallback(ctx context.Context, brokerUrl string, originName string) (conn net.Conn, err error) {
+func ConnectToOrigin(ctx context.Context, brokerUrl string, originName string) (conn net.Conn, err error) {
 
 	// Ensure we have a local CA for signing an origin host certificate.
 	if err = config.GenerateCACert(); err != nil {
@@ -368,7 +313,10 @@ func GetCallback(ctx context.Context, brokerUrl string, originName string) (conn
 	return
 }
 
-// Callback to a given cache based on the request we got from a broker
+// Callback to a given cache based on the request we got from a broker.
+//
+// The TCP socket used for the callback will be converted to a one-shot listener
+// and reused with the origin as the "server".
 func doCallback(ctx context.Context, brokerResp reversalRequest) (listener net.Listener, err error) {
 	log.Debugln("Origin starting callback to cache at", brokerResp.CallbackUrl)
 
@@ -376,8 +324,8 @@ func doCallback(ctx context.Context, brokerResp reversalRequest) (listener net.L
 	if err != nil {
 		return
 	}
-
-	reqBytes, err := json.Marshal(&brokerResp)
+	callbackReq := callbackRequest{RequestId: brokerResp.RequestId}
+	reqBytes, err := json.Marshal(&callbackReq)
 	if err != nil {
 		return
 	}
@@ -410,12 +358,27 @@ func doCallback(ctx context.Context, brokerResp reversalRequest) (listener net.L
 		if !ok {
 			return conn, nil
 		}
-		hj := &hijackConn{tcpConn}
+		// Take the connection and stash it onto our list.  After the client has shutdown, we will
+		// steal the last TCP connection
+		hj := &hijackConn{tcpConn, tcpConn}
 		hijackConnMutex.Lock()
 		hijackConnList = append(hijackConnList, hj)
 		hijackConnMutex.Unlock()
 		return hj, nil
 	}
+
+	// Cleanup any connections.  If we decide to steal one of them,
+	// we will set hj.realConn to nil.
+	defer func() {
+		hijackConnMutex.Lock()
+		defer hijackConnMutex.Unlock()
+		for _, hj := range hijackConnList {
+			if hj.realConn != nil {
+				hj.realConn.Close()
+			}
+		}
+	}()
+
 	client := &http.Client{Transport: tr}
 	resp, err := client.Do(req)
 	if err != nil {
