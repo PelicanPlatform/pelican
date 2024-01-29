@@ -221,7 +221,7 @@ func getCachedInstitutions() (inst []Institution, intError error, extError error
 			return
 		}
 		if res.StatusCode != 200 {
-			intError = errors.Wrap(err, fmt.Sprintf("Error response when fetching institution list with code %d", res.StatusCode))
+			intError = errors.New(fmt.Sprintf("Error response when fetching institution list with code %d", res.StatusCode))
 			extError = errors.New(fmt.Sprint("Error when fetching institution from remote url, remote server error with code: ", res.StatusCode))
 			return
 		}
@@ -245,14 +245,10 @@ func getCachedInstitutions() (inst []Institution, intError error, extError error
 		institutionsCacheMutex.RLock()
 		defer institutionsCacheMutex.RUnlock()
 		institutions := institutionsCache.Get(instUrl.String())
-		if institutions.Value() == nil {
-			intError = errors.New(fmt.Sprint("Fail to get institutions from internal TTL cache, value is nil from key: ", instUrl))
-			extError = errors.New("Fail to get institutions from internal TTL cache")
-			return
-		}
-		if institutions.IsExpired() {
-			intError = errors.New(fmt.Sprintf("Cached institution with key %q is expired at %v", institutions.Key(), institutions.ExpiresAt()))
-			extError = errors.New("Expired institution cache")
+		// institutions == nil if key DNE or item has expired
+		if institutions == nil || institutions.Value() == nil {
+			intError = errors.New(fmt.Sprint("Fail to get institutions from internal TTL cache, key is nil or value is nil from key: ", instUrl))
+			extError = errors.New("Fail to get institutions from internal cache, key might be expired")
 			return
 		}
 		return institutions.Value(), nil, nil
