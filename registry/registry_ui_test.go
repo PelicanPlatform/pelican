@@ -7,9 +7,11 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"testing"
 	"time"
 
@@ -332,6 +334,131 @@ func TestListNamespacesForUser(t *testing.T) {
 	}
 }
 
+func TestGetNamespace(t *testing.T) {
+	_, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
+	// Initialize the mock database
+	setupMockRegistryDB(t)
+	defer teardownMockNamespaceDB(t)
+
+	mockUserNs := mockNamespace("/mockUser", "", "", AdminMetadata{UserID: "mockUser"})
+
+	tests := []struct {
+		description  string
+		requestId    string
+		expectedCode int
+		validID      bool
+		checkAdmin   bool
+		userName     string
+	}{
+		{
+			description:  "valid-request-with-empty-key",
+			expectedCode: http.StatusOK,
+			validID:      true,
+		},
+		{
+			description:  "invalid-request-with-str-id",
+			requestId:    "crazy-id",
+			expectedCode: http.StatusBadRequest,
+		},
+		{
+			description:  "invalid-request-with-0-id",
+			requestId:    "0",
+			expectedCode: http.StatusBadRequest,
+		},
+		{
+			description:  "invalid-request-with-neg-id",
+			requestId:    "-10000",
+			expectedCode: http.StatusBadRequest,
+		},
+		{
+			description: "invalid-request-with-empty-id",
+			requestId:   "",
+			// empty id will resolve a child path of /test which DNE
+			expectedCode: http.StatusNotFound,
+		},
+		{
+			description:  "invalid-request-with-id-not-found",
+			requestId:    "100",
+			expectedCode: http.StatusNotFound,
+		},
+		{
+			description:  "user-can-see-their-own-ns",
+			validID:      true,
+			checkAdmin:   true,
+			userName:     "mockUser",
+			expectedCode: http.StatusOK,
+		},
+		{
+			description:  "user-cannot-see-others-ns",
+			validID:      true,
+			checkAdmin:   true,
+			userName:     "randomUser",
+			expectedCode: http.StatusForbidden,
+		},
+		{
+			description:  "admin-can-see-any-ns",
+			validID:      true,
+			checkAdmin:   true,
+			userName:     "admin",
+			expectedCode: http.StatusOK,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.description, func(t *testing.T) {
+			if tc.checkAdmin {
+				err := insertMockDBData([]Namespace{mockUserNs})
+				require.NoErrorf(t, err, "Failed to set up mock data: %v", err)
+			} else {
+				err := insertMockDBData(mockNssWithMixed)
+				require.NoErrorf(t, err, "Failed to set up mock data: %v", err)
+			}
+			defer resetNamespaceDB(t)
+
+			finalId := tc.requestId
+			if tc.validID {
+				id, err := getLastNamespaceId()
+				finalId = strconv.Itoa(id)
+				require.NoError(t, err)
+			}
+
+			// Create a request to the endpoint
+			w := httptest.NewRecorder()
+			requestURL := fmt.Sprint("/test/", finalId)
+			req, _ := http.NewRequest("GET", requestURL, nil)
+
+			if tc.checkAdmin {
+				router := gin.Default()
+				router.GET("/test/:id", func(ctx *gin.Context) {
+					ctx.Set("User", tc.userName)
+				}, getNamespace)
+				router.ServeHTTP(w, req)
+			} else {
+				router := gin.Default()
+				router.GET("/test/:id", getNamespace)
+				router.ServeHTTP(w, req)
+			}
+
+			// Check the response
+			require.Equal(t, tc.expectedCode, w.Code)
+
+			if tc.expectedCode == 200 {
+				getNs := Namespace{}
+
+				bytes, err := io.ReadAll(w.Body)
+				require.NoError(t, err)
+				err = json.Unmarshal(bytes, &getNs)
+				require.NoError(t, err)
+
+				require.NotEqual(t, Namespace{}, getNs)
+			}
+		})
+	}
+}
+
 func TestGetNamespaceJWKS(t *testing.T) {
 	_, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
@@ -423,6 +550,221 @@ func TestGetNamespaceJWKS(t *testing.T) {
 	}
 }
 
+func TestUpdateNamespaceStatus(t *testing.T) {
+	_, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
+	// Initialize the mock database
+	setupMockRegistryDB(t)
+	defer teardownMockNamespaceDB(t)
+
+	mockUserNs := mockNamespace("/mockUser", "", "", AdminMetadata{UserID: "mockUser"})
+
+	tests := []struct {
+		description  string
+		requestId    string
+		expectedCode int
+		validID      bool
+	}{
+		{
+			description:  "invalid-request-with-str-id",
+			requestId:    "crazy-id",
+			expectedCode: http.StatusBadRequest,
+		},
+		{
+			description:  "invalid-request-with-0-id",
+			requestId:    "0",
+			expectedCode: http.StatusBadRequest,
+		},
+		{
+			description:  "invalid-request-with-neg-id",
+			requestId:    "-10000",
+			expectedCode: http.StatusBadRequest,
+		},
+		{
+			description:  "invalid-request-with-empty-id",
+			requestId:    "",
+			expectedCode: http.StatusBadRequest,
+		},
+		{
+			description:  "invalid-request-with-id-not-found",
+			requestId:    "100",
+			expectedCode: http.StatusNotFound,
+		},
+		{
+			description:  "valid-id-should-update-correctly",
+			validID:      true,
+			expectedCode: http.StatusOK,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.description, func(t *testing.T) {
+			err := insertMockDBData([]Namespace{mockUserNs})
+			require.NoErrorf(t, err, "Failed to set up mock data: %v", err)
+			defer resetNamespaceDB(t)
+
+			router := gin.Default()
+			router.PATCH("/test/:id/approve", func(ctx *gin.Context) {
+				ctx.Set("User", "admin")
+				updateNamespaceStatus(ctx, Approved)
+			})
+			router.PATCH("/test/:id/deny", func(ctx *gin.Context) {
+				ctx.Set("User", "admin")
+				updateNamespaceStatus(ctx, Denied)
+			})
+
+			finalId := tc.requestId
+			if tc.validID {
+				id, err := getLastNamespaceId()
+				finalId = strconv.Itoa(id)
+				require.NoError(t, err)
+			}
+
+			// Create a request to the endpoint
+			wApprove := httptest.NewRecorder()
+			requestURLApprove := fmt.Sprint("/test/", finalId, "/approve")
+			reqApprove, _ := http.NewRequest("PATCH", requestURLApprove, nil)
+
+			router.ServeHTTP(wApprove, reqApprove)
+
+			// Check the response
+			require.Equal(t, tc.expectedCode, wApprove.Code)
+
+			if tc.expectedCode == 200 {
+				bytes, err := io.ReadAll(wApprove.Body)
+				require.NoError(t, err)
+				assert.JSONEq(t, `{"msg":"ok"}`, string(bytes))
+
+				if tc.validID {
+					intId, err := strconv.Atoi(finalId)
+					require.NoError(t, err)
+					ns, err := getNamespaceById(intId)
+					require.NoError(t, err)
+					assert.True(t, ns.AdminMetadata.Status == Approved)
+					assert.NotEqual(t, time.Time{}, ns.AdminMetadata.ApprovedAt)
+					assert.Equal(t, "admin", ns.AdminMetadata.ApproverID)
+				}
+			}
+		})
+	}
+}
+
+func TestListInsitutions(t *testing.T) {
+	router := gin.Default()
+	router.GET("/institutions", listInstitutions)
+
+	t.Run("nil-cache-with-nil-config-returns-error", func(t *testing.T) {
+		func() {
+			institutionsCacheMutex.Lock()
+			defer institutionsCacheMutex.Unlock()
+			institutionsCache = nil
+		}()
+
+		// Create a request to the endpoint
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/institutions", nil)
+		router.ServeHTTP(w, req)
+
+		bytes, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+
+		assert.Equal(t, http.StatusInternalServerError, w.Result().StatusCode)
+		assert.JSONEq(t, `{"error": "Server didn't configure Registry.Institutions"}`, string(bytes))
+	})
+
+	t.Run("cache-hit-returns", func(t *testing.T) {
+		viper.Reset()
+		mockUrl := url.URL{Scheme: "https", Host: "example.com"}
+		viper.Set("Registry.InstitutionsUrl", mockUrl.String())
+		mockInsts := []Institution{{Name: "Foo", ID: "001"}}
+		func() {
+			institutionsCacheMutex.Lock()
+			defer institutionsCacheMutex.Unlock()
+			institutionsCache = ttlcache.New[string, []Institution]()
+			// Expired but never evicted, so Has() still returns true
+			institutionsCache.Set(mockUrl.String(), mockInsts, time.Second)
+		}()
+
+		// Create a request to the endpoint
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/institutions", nil)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+		bytes, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+
+		getInsts := []Institution{}
+		err = json.Unmarshal(bytes, &getInsts)
+		require.NoError(t, err)
+
+		assert.Equal(t, mockInsts, getInsts)
+	})
+
+	t.Run("nil-cache-with-nonnil-config-returns", func(t *testing.T) {
+		viper.Reset()
+		func() {
+			institutionsCacheMutex.Lock()
+			defer institutionsCacheMutex.Unlock()
+			institutionsCache = nil
+		}()
+
+		mockInstsConfig := []Institution{{Name: "foo", ID: "bar"}}
+		viper.Set("Registry.Institutions", mockInstsConfig)
+
+		// Create a request to the endpoint
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/institutions", nil)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+
+		bytes, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+
+		getInsts := []Institution{}
+		err = json.Unmarshal(bytes, &getInsts)
+		require.NoError(t, err)
+
+		assert.Equal(t, mockInstsConfig, getInsts)
+	})
+
+	t.Run("non-nil-cache-with-nonnil-config-return-config", func(t *testing.T) {
+		viper.Reset()
+		mockUrl := url.URL{Scheme: "https", Host: "example.com"}
+		viper.Set("Registry.InstitutionsUrl", mockUrl.String())
+		mockInsts := []Institution{{Name: "Foo", ID: "001"}}
+		func() {
+			institutionsCacheMutex.Lock()
+			defer institutionsCacheMutex.Unlock()
+			institutionsCache = ttlcache.New[string, []Institution]()
+			// Expired but never evicted, so Has() still returns true
+			institutionsCache.Set(mockUrl.String(), mockInsts, time.Second)
+		}()
+
+		mockInstsConfig := []Institution{{Name: "foo", ID: "bar"}}
+		viper.Set("Registry.Institutions", mockInstsConfig)
+
+		// Create a request to the endpoint
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/institutions", nil)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+
+		bytes, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+
+		getInsts := []Institution{}
+		err = json.Unmarshal(bytes, &getInsts)
+		require.NoError(t, err)
+
+		assert.Equal(t, mockInstsConfig, getInsts)
+	})
+}
+
 func TestPopulateRegistrationFields(t *testing.T) {
 	result := populateRegistrationFields("", Namespace{})
 	assert.NotEqual(t, 0, len(result))
@@ -430,8 +772,11 @@ func TestPopulateRegistrationFields(t *testing.T) {
 
 func TestGetCachedInstitutions(t *testing.T) {
 	t.Run("nil-cache-returns-error", func(t *testing.T) {
-		institutionsCache = nil
-
+		func() {
+			institutionsCacheMutex.Lock()
+			defer institutionsCacheMutex.Unlock()
+			institutionsCache = nil
+		}()
 		_, intErr, extErr := getCachedInstitutions()
 		assert.Error(t, intErr)
 		assert.Error(t, extErr)
@@ -440,7 +785,11 @@ func TestGetCachedInstitutions(t *testing.T) {
 
 	t.Run("unset-config-val-returns-error", func(t *testing.T) {
 		viper.Reset()
-		institutionsCache = ttlcache.New[string, []Institution]()
+		func() {
+			institutionsCacheMutex.Lock()
+			defer institutionsCacheMutex.Unlock()
+			institutionsCache = ttlcache.New[string, []Institution]()
+		}()
 		_, intErr, extErr := getCachedInstitutions()
 		assert.Error(t, intErr)
 		assert.Error(t, extErr)
@@ -450,7 +799,11 @@ func TestGetCachedInstitutions(t *testing.T) {
 	t.Run("random-config-val-returns-error", func(t *testing.T) {
 		viper.Reset()
 		viper.Set("Registry.InstitutionsUrl", "random-url")
-		institutionsCache = ttlcache.New[string, []Institution]()
+		func() {
+			institutionsCacheMutex.Lock()
+			defer institutionsCacheMutex.Unlock()
+			institutionsCache = ttlcache.New[string, []Institution]()
+		}()
 		_, intErr, extErr := getCachedInstitutions()
 		assert.Error(t, intErr)
 		assert.Error(t, extErr)
@@ -462,11 +815,10 @@ func TestGetCachedInstitutions(t *testing.T) {
 		viper.Reset()
 		mockUrl := url.URL{Scheme: "https", Host: "example.com"}
 		viper.Set("Registry.InstitutionsUrl", mockUrl.String())
-		institutionsCache = ttlcache.New[string, []Institution]()
-
 		func() {
 			institutionsCacheMutex.Lock()
 			defer institutionsCacheMutex.Unlock()
+			institutionsCache = ttlcache.New[string, []Institution]()
 			institutionsCache.Set(mockUrl.String(), nil, ttlcache.NoTTL)
 		}()
 
@@ -486,12 +838,12 @@ func TestGetCachedInstitutions(t *testing.T) {
 		viper.Reset()
 		mockUrl := url.URL{Scheme: "https", Host: "example.com"}
 		viper.Set("Registry.InstitutionsUrl", mockUrl.String())
-		institutionsCache = ttlcache.New[string, []Institution]()
 		mockInsts := []Institution{{Name: "Foo", ID: "001"}}
 
 		func() {
 			institutionsCacheMutex.Lock()
 			defer institutionsCacheMutex.Unlock()
+			institutionsCache = ttlcache.New[string, []Institution]()
 			institutionsCache.Set(mockUrl.String(), mockInsts, ttlcache.NoTTL)
 		}()
 
@@ -511,12 +863,12 @@ func TestGetCachedInstitutions(t *testing.T) {
 		viper.Reset()
 		mockUrl := url.URL{Scheme: "https", Host: "example.com"}
 		viper.Set("Registry.InstitutionsUrl", mockUrl.String())
-		institutionsCache = ttlcache.New[string, []Institution]()
 		mockInsts := []Institution{{Name: "Foo", ID: "001"}}
 
 		func() {
 			institutionsCacheMutex.Lock()
 			defer institutionsCacheMutex.Unlock()
+			institutionsCache = ttlcache.New[string, []Institution]()
 			// Expired but never evicted, so Has() still returns true
 			institutionsCache.Set(mockUrl.String(), mockInsts, time.Second)
 		}()

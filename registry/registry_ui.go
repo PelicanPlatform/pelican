@@ -617,6 +617,19 @@ func getNamespaceJWKS(ctx *gin.Context) {
 }
 
 func listInstitutions(ctx *gin.Context) {
+	// When Registry.Institutions is set
+	institutions := []Institution{}
+	if err := param.Registry_Institutions.Unmarshal(&institutions); err != nil {
+		log.Error("Fail to read server configuration of institutions", err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Fail to read server configuration of institutions"})
+		return
+	}
+
+	if len(institutions) != 0 {
+		ctx.JSON(http.StatusOK, institutions)
+		return
+	}
+
 	// When Registry.InstitutionsUrl is set and Registry.Institutions is unset
 	if institutionsCache != nil {
 		insts, intErr, extErr := getCachedInstitutions()
@@ -632,20 +645,13 @@ func listInstitutions(ctx *gin.Context) {
 		ctx.JSON(http.StatusOK, insts)
 		return
 	}
-	// When Registry.Institutions is set
-	institutions := []Institution{}
-	if err := param.Registry_Institutions.Unmarshal(&institutions); err != nil {
-		log.Error("Fail to read server configuration of institutions", err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Fail to read server configuration of institutions"})
-		return
-	}
 
+	// When both are unset
 	if len(institutions) == 0 {
 		log.Error("Server didn't configure Registry.Institutions")
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Server didn't configure Registry.Institutions"})
 		return
 	}
-	ctx.JSON(http.StatusOK, institutions)
 }
 
 // Define Gin APIs for registry Web UI. All endpoints are user-facing
