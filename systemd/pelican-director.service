@@ -4,6 +4,8 @@ After = network.target nss-lookup.target
 
 [Service]
 ExecStart = /usr/bin/pelican --config /etc/pelican/pelican-director.yaml director serve
+Restart = on-failure
+RestartSec = 20s
 
 [Install]
 WantedBy = multi-user.target
