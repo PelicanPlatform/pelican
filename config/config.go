@@ -248,6 +248,9 @@ func (sType *ServerType) SetString(name string) bool {
 	case "registry":
 		*sType |= RegistryType
 		return true
+	case "broker":
+		*sType |= BrokerType
+		return true
 	}
 	return false
 }
