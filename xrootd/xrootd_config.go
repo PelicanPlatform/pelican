@@ -160,12 +160,23 @@ func CheckOriginXrootdEnv(exportPath string, uid int, gid int, groupname string)
 			mountPath := param.Xrootd_Mount.GetString()
 			namespacePrefix := param.Origin_NamespacePrefix.GetString()
 			if mountPath == "" || namespacePrefix == "" {
-				return exportPath, errors.New(`Export information was not provided.
-		Add command line flag:
+				return exportPath, errors.New(`
+	The origin should have parsed export information prior to this point, but has failed to do so.
+	Was the mount passed via the command line flag:
 
-			-v /mnt/foo:/bar
+		-v /mnt/foo:/bar
 
-		to export the directory /mnt/foo to the path /bar in the data federation`)
+	or via the parameters.yaml file:
+
+		# Option 1
+		Origin.ExportVolume: /mnt/foo:/bar
+
+		# Option 2
+		Xrootd
+			Mount: /mnt/foo
+		Origin:
+			NamespacePrefix: /bar
+				`)
 			}
 			mountPath, err := filepath.Abs(mountPath)
 			if err != nil {
