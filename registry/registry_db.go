@@ -845,7 +845,7 @@ func PopulateTopology() error {
 
 func PeriodicTopologyReload() {
 	for {
-		time.Sleep(time.Minute * param.Federation_TopologyReloadInterval.GetDuration())
+		time.Sleep(param.Federation_TopologyReloadInterval.GetDuration())
 		err := PopulateTopology()
 		if err != nil {
 			log.Warningf("Failed to re-populate topology table: %s. Will try again later",
