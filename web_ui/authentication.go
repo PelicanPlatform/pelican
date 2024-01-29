@@ -126,10 +126,12 @@ func configureAuthDB() error {
 // where subject is set to be the username. Return empty string if no "login" cookie is present
 func GetUser(ctx *gin.Context) (string, error) {
 	token, err := ctx.Cookie("login")
-	if err != nil && err == http.ErrNoCookie {
-		return "", nil
-	} else if err != http.ErrNoCookie {
-		return "", err
+	if err != nil {
+		if err == http.ErrNoCookie {
+			return "", nil
+		} else {
+			return "", err
+		}
 	}
 	if token == "" {
 		return "", errors.New("Login cookie is empty")

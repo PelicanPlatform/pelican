@@ -109,6 +109,7 @@ func TestListNamespaces(t *testing.T) {
 	tests := []struct {
 		description  string
 		serverType   string
+		status       string
 		expectedCode int
 		emptyDB      bool
 		notApproved  bool
@@ -136,23 +137,51 @@ func TestListNamespaces(t *testing.T) {
 		},
 		{
 			description:  "valid-request-without-type",
-			serverType:   "",
 			expectedCode: http.StatusOK,
 			expectedData: mockNssWithMixed,
 		},
 		{
 			description:  "unauthed-not-approved-without-type-returns-empty",
-			serverType:   "",
 			expectedCode: http.StatusOK,
 			expectedData: []Namespace{},
 			notApproved:  true,
 		},
 		{
-			description:  "authed-not-approved-without-type-returns",
-			serverType:   "",
+			description:  "unauthed-with-status-pending-returns-403",
+			expectedCode: http.StatusForbidden,
+			status:       "Pending",
+			expectedData: []Namespace{},
+			notApproved:  true,
+			authUser:     false,
+		},
+		{
+			description:  "authed-not-approved-returns",
 			expectedCode: http.StatusOK,
 			expectedData: mockNssWithMixedNotApproved,
 			notApproved:  true,
+			authUser:     true,
+		},
+		{
+			description:  "authed-returns-filtered-approved-status",
+			expectedCode: http.StatusOK,
+			status:       "Approved",
+			expectedData: []Namespace{},
+			notApproved:  true,
+			authUser:     true,
+		},
+		{
+			description:  "authed-returns-filtered-pending-status",
+			expectedCode: http.StatusOK,
+			status:       "Pending",
+			expectedData: mockNssWithMixedNotApproved,
+			notApproved:  true,
+			authUser:     true,
+		},
+		{
+			description:  "authed-returns-400-with-random-status",
+			expectedCode: http.StatusBadRequest,
+			status:       "random",
+			expectedData: nil,
 			authUser:     true,
 		},
 		{
@@ -184,12 +213,7 @@ func TestListNamespaces(t *testing.T) {
 
 			// Create a request to the endpoint
 			w := httptest.NewRecorder()
-			requestURL := ""
-			if tc.serverType != "" {
-				requestURL = "/namespaces?server_type=" + tc.serverType
-			} else {
-				requestURL = "/namespaces"
-			}
+			requestURL := "/namespaces?server_type=" + tc.serverType + "&status=" + tc.status
 			req, _ := http.NewRequest("GET", requestURL, nil)
 			if tc.authUser {
 				tokenCfg := utils.TokenConfig{Issuer: "https://mock-server.com", Lifetime: time.Minute, Subject: "admin", TokenProfile: utils.None}
@@ -209,6 +233,99 @@ func TestListNamespaces(t *testing.T) {
 				if err != nil {
 					t.Fatalf("Failed to unmarshal response body: %v", err)
 				}
+				assert.True(t, compareNamespaces(tc.expectedData, got, true), "Response data does not match expected")
+			}
+		})
+	}
+}
+
+func TestListNamespacesForUser(t *testing.T) {
+	viper.Reset()
+	_, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
+	// Initialize the mock database
+	setupMockRegistryDB(t)
+	defer teardownMockNamespaceDB(t)
+
+	mockUserNss := func() []Namespace {
+		return []Namespace{
+			mockNamespace("/foo", "", "", AdminMetadata{UserID: "mockUser", Status: Pending}),
+			mockNamespace("/bar", "", "", AdminMetadata{UserID: "mockUser", Status: Approved}),
+		}
+	}()
+
+	tests := []struct {
+		description  string
+		expectedCode int
+		emptyDB      bool
+		authUser     bool
+		queryParam   string
+		expectedData []Namespace
+	}{
+		{
+			description:  "unauthed-return-401",
+			expectedCode: http.StatusUnauthorized,
+			expectedData: []Namespace{},
+		},
+		{
+			description:  "valid-request-with-empty-db",
+			expectedCode: http.StatusOK,
+			emptyDB:      true,
+			expectedData: []Namespace{},
+			authUser:     true,
+		},
+		{
+			description:  "valid-request-without-type",
+			expectedCode: http.StatusOK,
+			expectedData: mockUserNss,
+			authUser:     true,
+		},
+		{
+			description:  "invalid-request-parameters",
+			expectedCode: http.StatusBadRequest,
+			queryParam:   "?status=random",
+			expectedData: nil,
+			authUser:     true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.description, func(t *testing.T) {
+			if !tc.emptyDB {
+				err := insertMockDBData(mockNssWithMixed)
+				require.NoErrorf(t, err, "Failed to set up mock data: %v", err)
+				err = insertMockDBData(mockUserNss)
+				require.NoErrorf(t, err, "Failed to set up mock data: %v", err)
+			}
+			defer func() {
+				resetNamespaceDB(t)
+			}()
+
+			// Create a request to the endpoint
+			w := httptest.NewRecorder()
+			requestURL := "/namespaces/user" + tc.queryParam
+			req, _ := http.NewRequest("GET", requestURL, nil)
+			if tc.authUser {
+				router := gin.Default()
+				router.GET("/namespaces/user", func(ctx *gin.Context) {
+					ctx.Set("User", "mockUser")
+				}, listNamespacesForUser)
+				router.ServeHTTP(w, req)
+			} else {
+				router := gin.Default()
+				router.GET("/namespaces/user", listNamespacesForUser)
+				router.ServeHTTP(w, req)
+			}
+
+			// Check the response
+			assert.Equal(t, tc.expectedCode, w.Code)
+
+			if tc.expectedCode == http.StatusOK {
+				var got []Namespace
+				err := json.Unmarshal(w.Body.Bytes(), &got)
+				require.NoErrorf(t, err, "Failed to unmarshal response body: %v", err)
 				assert.True(t, compareNamespaces(tc.expectedData, got, true), "Response data does not match expected")
 			}
 		})

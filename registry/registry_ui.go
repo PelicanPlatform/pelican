@@ -295,7 +295,11 @@ func listNamespaces(ctx *gin.Context) {
 	// For unauthenticated users, it returns namespaces with AdminMetadata.Status = Approved
 	if isAuthed {
 		if queryParams.Status != "" {
-			filterNs.AdminMetadata.Status = RegistrationStatus(queryParams.Status)
+			if IsValidRegStatus(queryParams.Status) {
+				filterNs.AdminMetadata.Status = RegistrationStatus(queryParams.Status)
+			} else {
+				ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid query parameters: status must be one of  'Pending', 'Approved', 'Denied', 'Unknown'"})
+			}
 		}
 	} else {
 		filterNs.AdminMetadata.Status = Approved
@@ -331,7 +335,11 @@ func listNamespacesForUser(ctx *gin.Context) {
 	filterNs := Namespace{AdminMetadata: AdminMetadata{UserID: user}}
 
 	if queryParams.Status != "" {
-		filterNs.AdminMetadata.Status = RegistrationStatus(queryParams.Status)
+		if IsValidRegStatus(queryParams.Status) {
+			filterNs.AdminMetadata.Status = RegistrationStatus(queryParams.Status)
+		} else {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid query parameters: status must be one of  'Pending', 'Approved', 'Denied', 'Unknown'"})
+		}
 	}
 
 	namespaces, err := getNamespacesByFilter(filterNs, "")
