@@ -68,7 +68,7 @@ cd build
 cmake .. -GNinja
 ninja libXrdAccSciTokens-5.so libXrdPss-5.so
 sudo ln -s $PWD/src/libXrdAccSciTokens-5.so $xrootd_libdir
-sudo ln -s $PWD/src/libXrdPss-5.so $xrootd_libdir
+sudo ln -sf $PWD/src/libXrdPss-5.so $xrootd_libdir
 popd
 
 popd
