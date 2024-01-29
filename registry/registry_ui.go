@@ -380,7 +380,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 		id, err = strconv.Atoi(idStr)
 		if err != nil || id <= 0 {
 			// Handle the error if id is not a valid integer
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID format. ID must a non-zero integer"})
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID format. ID must a positive integer"})
 			return
 		}
 	}
