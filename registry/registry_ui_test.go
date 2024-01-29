@@ -17,7 +17,11 @@ import (
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/test_utils"
+	"github.com/pelicanplatform/pelican/token_scopes"
+	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/sirupsen/logrus/hooks/test"
@@ -80,13 +84,23 @@ func GenerateMockJWKS() (string, error) {
 }
 
 func TestListNamespaces(t *testing.T) {
-	_, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	viper.Reset()
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
 
 	// Initialize the mock database
 	setupMockRegistryDB(t)
 	defer teardownMockNamespaceDB(t)
+
+	viper.Set("Server.ExternalWebUrl", "https://mock-server.com")
+
+	dirName := t.TempDir()
+	viper.Set("ConfigDir", dirName)
+	err := config.InitServer(ctx, config.OriginType)
+	require.NoError(t, err)
+	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256())
+	require.NoError(t, err)
 
 	router := gin.Default()
 
@@ -98,6 +112,7 @@ func TestListNamespaces(t *testing.T) {
 		expectedCode int
 		emptyDB      bool
 		notApproved  bool
+		authUser     bool
 		expectedData []Namespace
 	}{
 		{
@@ -131,6 +146,14 @@ func TestListNamespaces(t *testing.T) {
 			expectedCode: http.StatusOK,
 			expectedData: []Namespace{},
 			notApproved:  true,
+		},
+		{
+			description:  "authed-not-approved-without-type-returns",
+			serverType:   "",
+			expectedCode: http.StatusOK,
+			expectedData: mockNssWithMixedNotApproved,
+			notApproved:  true,
+			authUser:     true,
 		},
 		{
 			description:  "invalid-request-parameters",
@@ -168,6 +191,13 @@ func TestListNamespaces(t *testing.T) {
 				requestURL = "/namespaces"
 			}
 			req, _ := http.NewRequest("GET", requestURL, nil)
+			if tc.authUser {
+				tokenCfg := utils.TokenConfig{Issuer: "https://mock-server.com", Lifetime: time.Minute, Subject: "admin", TokenProfile: utils.None}
+				tokenCfg.AddScopes([]token_scopes.TokenScope{token_scopes.WebUi_Access})
+				token, err := tokenCfg.CreateToken()
+				require.NoError(t, err)
+				req.AddCookie(&http.Cookie{Name: "login", Value: token, Path: "/"})
+			}
 			router.ServeHTTP(w, req)
 
 			// Check the response
