@@ -20,14 +20,18 @@ package broker
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/registry"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/web_ui"
@@ -63,6 +67,8 @@ func getHelloWorldHandler(t *testing.T) func(resp http.ResponseWriter, req *http
 }
 
 func TestBroker(t *testing.T) {
+	dirpath := t.TempDir()
+
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -71,8 +77,33 @@ func TestBroker(t *testing.T) {
 	viper.Set("Logging.Level", "Debug")
 	config.InitConfig()
 	viper.Set("Server.WebPort", "0")
+	viper.Set("Registry.DbLocation", filepath.Join(dirpath, "ns-registry.sqlite"))
+	viper.Set("Origin.NamespacePrefix", "/foo")
 
 	err := config.InitServer(ctx, config.BrokerType)
+	require.NoError(t, err)
+
+	err = registry.InitializeDB(ctx)
+	require.NoError(t, err)
+
+	keyset, err := config.GetIssuerPublicJWKS()
+	require.NoError(t, err)
+	keysetBytes, err := json.Marshal(keyset)
+	require.NoError(t, err)
+
+	err = registry.AddNamespace(&registry.Namespace{
+		ID:       1,
+		Prefix:   "/cache/" + param.Server_Hostname.GetString(),
+		Pubkey:   string(keysetBytes),
+		Identity: "test_data",
+	})
+	require.NoError(t, err)
+	err = registry.AddNamespace(&registry.Namespace{
+		ID:       2,
+		Prefix:   "/foo",
+		Pubkey:   string(keysetBytes),
+		Identity: "test_data",
+	})
 	require.NoError(t, err)
 
 	// Setup the broker APIs
@@ -81,6 +112,15 @@ func TestBroker(t *testing.T) {
 	rootGroup := engine.Group("/")
 	RegisterBroker(ctx, rootGroup)
 	RegisterBrokerCallback(ctx, rootGroup)
+	registry.RegisterRegistryAPI(rootGroup)
+	// Register routes for APIs to registry Web UI
+	err = registry.RegisterRegistryWebAPI(rootGroup)
+	require.NoError(t, err)
+
+	egrp.Go(func() error {
+		<-ctx.Done()
+		return registry.ShutdownDB()
+	})
 
 	// Run the web engine, wait for it to be online.
 	err = web_ui.RunEngineRoutine(ctx, engine, egrp, false)
@@ -95,14 +135,22 @@ func TestBroker(t *testing.T) {
 
 	// Launch the origin-side monitoring of requests.
 	viper.Set("Federation.BrokerURL", param.Server_ExternalWebUrl.GetString())
+	viper.Set("Federation.RegistryUrl", param.Server_ExternalWebUrl.GetString())
 	listenerChan := make(chan any)
 	ctxQuick, deadlineCancel := context.WithTimeout(ctx, 5*time.Second) // Have shorter timeout for this handshake
 	err = LaunchRequestMonitor(ctxQuick, egrp, listenerChan)
 	require.NoError(t, err)
 
 	// Initiate the callback using the cache-based routines.
-	brokerUrl := param.Server_ExternalWebUrl.GetString() + "/api/v1.0/broker/reverse/" + param.Server_Hostname.GetString()
-	clientConn, err := ConnectToOrigin(ctxQuick, brokerUrl, param.Server_Hostname.GetString())
+	brokerUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
+	require.NoError(t, err)
+
+	brokerUrl.Path = "/api/v1.0/broker/reverse"
+	query := brokerUrl.Query()
+	query.Set("origin", param.Server_Hostname.GetString())
+	query.Set("prefix", "/foo")
+	brokerUrl.RawQuery = query.Encode()
+	clientConn, err := ConnectToOrigin(ctxQuick, brokerUrl.String(), "/foo", param.Server_Hostname.GetString())
 	require.NoError(t, err)
 	log.Debugf("Cache got reversed client connection with cache side %s and origin side %s", clientConn.LocalAddr(), clientConn.RemoteAddr())
 

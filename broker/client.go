@@ -44,6 +44,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
@@ -71,11 +72,17 @@ type (
 		conn atomic.Pointer[net.TCPConn]
 		addr net.Addr
 	}
+
+	// Struct holding pending requests waiting on an origin callback
+	pendingReversals struct {
+		channel chan http.ResponseWriter
+		prefix  string
+	}
 )
 
 var (
-	responseMapLock sync.Mutex                          = sync.Mutex{}
-	response        map[string]chan http.ResponseWriter = make(map[string]chan http.ResponseWriter)
+	responseMapLock sync.Mutex                  = sync.Mutex{}
+	response        map[string]pendingReversals = make(map[string]pendingReversals)
 )
 
 const requestIdBytes = "abcdefghijklmnopqrstuvwxyz0123456789"
@@ -147,7 +154,7 @@ func generateRequestId() string {
 }
 
 // Given an origin's broker URL, return a connected socket to the origin
-func ConnectToOrigin(ctx context.Context, brokerUrl string, originName string) (conn net.Conn, err error) {
+func ConnectToOrigin(ctx context.Context, brokerUrl, prefix, originName string) (conn net.Conn, err error) {
 
 	// Ensure we have a local CA for signing an origin host certificate.
 	if err = config.GenerateCACert(); err != nil {
@@ -171,6 +178,8 @@ func ConnectToOrigin(ctx context.Context, brokerUrl string, originName string) (
 		RequestId:   generateRequestId(),
 		PrivateKey:  keyContents,
 		CallbackUrl: param.Server_ExternalWebUrl.GetString() + "/api/v1.0/broker/callback",
+		OriginName:  originName,
+		Prefix:      prefix,
 	}
 	reqBytes, err := json.Marshal(&reqC)
 	if err != nil {
@@ -182,7 +191,7 @@ func ConnectToOrigin(ctx context.Context, brokerUrl string, originName string) (
 	responseChannel := make(chan http.ResponseWriter)
 	defer close(responseChannel)
 	responseMapLock.Lock()
-	response[reqC.RequestId] = responseChannel
+	response[reqC.RequestId] = pendingReversals{channel: responseChannel, prefix: prefix}
 	responseMapLock.Unlock()
 	defer func() {
 		responseMapLock.Lock()
@@ -194,7 +203,22 @@ func ConnectToOrigin(ctx context.Context, brokerUrl string, originName string) (
 	req, err := http.NewRequestWithContext(ctx, "POST", brokerUrl, reqReader)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "pelican-cache/"+config.PelicanVersion)
-	// TODO: set bearer token
+
+	brokerAud, err := url.Parse(brokerUrl)
+	if err != nil {
+		err = errors.Wrap(err, "failure when constructing the broker audience URL")
+		return
+	}
+	brokerAud.RawQuery = ""
+	brokerAud.Path = ""
+
+	cachePrefix := "/cache/" + param.Server_Hostname.GetString()
+	token, err := createToken(cachePrefix, brokerAud.String(), token_scopes.Broker_Reverse)
+	if err != nil {
+		err = errors.Wrap(err, "failure when constructing the broker request token")
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
 
 	tr := config.GetTransport()
 	client := &http.Client{Transport: tr}
@@ -211,6 +235,7 @@ func ConnectToOrigin(ctx context.Context, brokerUrl string, originName string) (
 	}
 	if resp.StatusCode >= 400 {
 		errResp := brokerErrResp{}
+		log.Errorf("Failure (status code %d) when invoking the broker: %s", resp.StatusCode, string(responseBytes))
 		if err = json.Unmarshal(responseBytes, &errResp); err != nil {
 			err = errors.Errorf("Failure when invoking the broker (status code %d); unable to parse error message", resp.StatusCode)
 		} else {
@@ -341,7 +366,18 @@ func doCallback(ctx context.Context, brokerResp reversalRequest) (listener net.L
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "pelican-origin/"+config.PelicanVersion)
 
-	// TODO: set bearer token
+	cacheAud, err := url.Parse(brokerResp.CallbackUrl)
+	if err != nil {
+		return
+	}
+	cacheAud.Path = ""
+
+	token, err := createToken(param.Origin_NamespacePrefix.GetString(), cacheAud.String(), token_scopes.Broker_Callback)
+	if err != nil {
+		err = errors.Wrap(err, "failure when constructing the cache callback token")
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
 
 	// Create a copy of the default transport; instead of using the existing connection pool,
 	// we will use a custom connection pool where we can hijack connections
@@ -506,7 +542,19 @@ func LaunchRequestMonitor(ctx context.Context, egrp *errgroup.Group, resultChan 
 				req.Header.Set("Content-Type", "application/json")
 				req.Header.Set("User-Agent", "pelican-origin/"+config.PelicanVersion)
 
-				// TODO: set bearer token
+				brokerAud, err := url.Parse(param.Federation_BrokerUrl.GetString())
+				if err != nil {
+					log.Errorln("Failure when parsing broker URL:", err)
+					break
+				}
+				brokerAud.Path = ""
+
+				token, err := createToken(param.Origin_NamespacePrefix.GetString(), brokerAud.String(), token_scopes.Broker_Retrieve)
+				if err != nil {
+					log.Errorln("Failure when constructing the broker retrieve token:", err)
+					break
+				}
+				req.Header.Set("Authorization", "Bearer "+token)
 
 				tr := config.GetTransport()
 				client := &http.Client{Transport: tr}

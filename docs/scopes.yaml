@@ -71,3 +71,24 @@ description: >-
   For Web UI user and third-party tools to access server's Prometheus query engine endpoints at /api/v1.0/prometheus
 issuedBy: ["web_ui"]
 acceptedBy: ["*"]
+---
+############################
+#       Broker Scopes      #
+############################
+name: broker.reverse
+description: >-
+  Permits reversal requests sent to the broker by a cache.
+issuedBy: ["cache"]
+acceptedBy: ["broker"]
+---
+name: broker.retrieve
+description: >-
+  Permits retrieval of requests to an origin
+issuedBy: ["origin"]
+acceptedBy: ["broker"]
+---
+name: broker.callback
+description: >-
+  Permits callbacks from the origin to the cache in response to a reversal request
+issuedBy: ["origin"]
+acceptedBy: [cache"]

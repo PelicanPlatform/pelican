@@ -22,9 +22,13 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/token_scopes"
+	log "github.com/sirupsen/logrus"
 )
 
 type (
@@ -73,9 +77,24 @@ func retrieveRequest(ctx context.Context, ginCtx *gin.Context) {
 		return
 	}
 
-	// TODO: check authorization token.
+	token := ginCtx.Request.Header.Get("Authorization")
+	token, hasPrefix := strings.CutPrefix(token, "Bearer ")
+	if !hasPrefix {
+		ginCtx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"status": "error", "msg": "Bearer authorization required for callback"})
+		return
+	}
 
-	req, err := handleRetrieve(ctx, ginCtx, originReq.Origin, timeoutVal)
+	ok, err := verifyToken(ctx, token, originReq.Prefix, param.Server_ExternalWebUrl.GetString(), token_scopes.Broker_Reverse)
+	if err != nil {
+		log.Errorln("Failed to verify token for reverse request:", err)
+		ginCtx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "error", "msg": "Failed to verify provided token"})
+		return
+	}
+	if !ok {
+		ginCtx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"status": "error", "msg": "Authorization denied"})
+	}
+
+	req, err := handleRetrieve(ctx, ginCtx, originReq.Prefix, originReq.Origin, timeoutVal)
 	if errors.Is(err, errRetrieveTimeout) {
 		ginCtx.JSON(http.StatusOK, gin.H{"status": "ok", "request": gin.H{}})
 		return
@@ -95,27 +114,49 @@ func reverseRequest(ctx context.Context, ginCtx *gin.Context) {
 
 	timeoutVal, err := time.ParseDuration(timeoutStr)
 	if err != nil {
-		ginCtx.String(http.StatusBadRequest, "Failed to parse X-Pelican-Timeout header to a duration (example: 5s)")
-		ginCtx.Abort()
+		ginCtx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "error", "msg": "Failed to parse X-Pelican-Timeout header to a duration (example: 5s)"})
 		return
 	}
 
-	// TODO: Verify authentication cache token.
+	token := ginCtx.Request.Header.Get("Authorization")
+	token, hasPrefix := strings.CutPrefix(token, "Bearer ")
+	if !hasPrefix {
+		ginCtx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"status": "error", "msg": "Bearer authorization required for callback"})
+		return
+	}
 
-	origin, ok := ginCtx.Params.Get("origin")
+	hostname, err := getCacheHostnameFromToken([]byte(token))
+	if err != nil {
+		ginCtx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"status": "error", "msg": "Failed to determine issuer: " + err.Error()})
+		return
+	}
+
+	ok, err := verifyToken(ctx, token, "/cache/"+hostname, param.Server_ExternalWebUrl.GetString(), token_scopes.Broker_Reverse)
+	if err != nil {
+		log.Errorln("Failed to verify token for cache reversal request:", err)
+		ginCtx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "error", "msg": "Failed to verify provided token"})
+		return
+	}
 	if !ok {
-		ginCtx.JSON(http.StatusBadRequest, gin.H{"status": "error", "msg": "Missing 'origin' parameter in request"})
-		ginCtx.Abort()
-		return
+		ginCtx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"status": "error", "msg": "Authorization denied"})
 	}
+
 	reversalReq := reversalRequest{}
 	if err := ginCtx.Bind(&reversalReq); err != nil {
 		ginCtx.JSON(http.StatusBadRequest, gin.H{"status": "error", "msg": "Failed to parse the cache's reversal request"})
 		ginCtx.Abort()
 		return
 	}
+	if reversalReq.OriginName == "" {
+		ginCtx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "error", "msg": "Missing 'origin' parameter in request"})
+		return
+	}
+	if reversalReq.Prefix == "" {
+		ginCtx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "error", "msg": "Missing 'prefix' parameter in request"})
+		return
+	}
 
-	if err = handleRequest(ctx, origin, reversalReq, timeoutVal); errors.Is(err, errRequestTimeout) {
+	if err = handleRequest(ctx, reversalReq.OriginName, reversalReq, timeoutVal); errors.Is(err, errRequestTimeout) {
 		ginCtx.JSON(http.StatusInternalServerError, gin.H{"status": "error", "msg": "Timeout when waiting for origin callback"})
 		ginCtx.Abort()
 		return
@@ -129,7 +170,7 @@ func reverseRequest(ctx context.Context, ginCtx *gin.Context) {
 func RegisterBroker(ctx context.Context, router *gin.RouterGroup) {
 	// Establish the routes used for cache/origin redirection
 	router.POST("/api/v1.0/broker/retrieve", func(ginCtx *gin.Context) { retrieveRequest(ctx, ginCtx) })
-	router.POST("/api/v1.0/broker/reverse/:origin", func(ginCtx *gin.Context) { reverseRequest(ctx, ginCtx) })
+	router.POST("/api/v1.0/broker/reverse", func(ginCtx *gin.Context) { reverseRequest(ctx, ginCtx) })
 }
 
 // Cache's HTTP handler function for callbacks from an origin
@@ -140,20 +181,37 @@ func handleCallback(ctx context.Context, ginCtx *gin.Context) {
 		ginCtx.Abort()
 		return
 	}
-	responseChannel, err := func() (responseChannel chan http.ResponseWriter, err error) {
+
+	token := ginCtx.Request.Header.Get("Authorization")
+	token, hasPrefix := strings.CutPrefix(token, "Bearer ")
+	if !hasPrefix {
+		ginCtx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"status": "error", "msg": "Bearer authorization required for callback"})
+		return
+	}
+
+	pendingRev, err := func() (pendingRev pendingReversals, err error) {
 		responseMapLock.Lock()
 		defer responseMapLock.Unlock()
-		responseChannel, ok := response[callbackReq.RequestId]
+		pendingRev, ok := response[callbackReq.RequestId]
 		if !ok {
 			err = errors.New("no such request ID")
 		}
 		return
 	}()
-
 	if err != nil {
 		ginCtx.JSON(http.StatusBadRequest, gin.H{"status": "error", "msg": "No such request ID"})
 		ginCtx.Abort()
 		return
+	}
+
+	ok, err := verifyToken(ctx, token, pendingRev.prefix, param.Server_ExternalWebUrl.GetString(), token_scopes.Broker_Callback)
+	if err != nil {
+		log.Errorln("Failed to verify token for cache callback:", err)
+		ginCtx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "error", "msg": "Failed to verify provided token"})
+		return
+	}
+	if !ok {
+		ginCtx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"status": "error", "msg": "Authorization denied"})
 	}
 
 	// Pass the response writer to the handler (or wait for
@@ -165,7 +223,7 @@ func handleCallback(ctx context.Context, ginCtx *gin.Context) {
 	case <-ginCtx.Done():
 		ginCtx.AbortWithStatus(http.StatusBadGateway)
 		return
-	case responseChannel <- ginCtx.Writer:
+	case pendingRev.channel <- ginCtx.Writer:
 		break
 	}
 
@@ -173,7 +231,7 @@ func handleCallback(ctx context.Context, ginCtx *gin.Context) {
 	// that the TCP connection has been hijacked or an error
 	// written back.
 	select {
-	case <-responseChannel:
+	case <-pendingRev.channel:
 		return
 	case <-ctx.Done():
 		return

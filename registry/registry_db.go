@@ -547,7 +547,7 @@ used BY the registry (as opposed to the parallel
 functions) used by the client.
 */
 
-func addNamespace(ns *Namespace) error {
+func AddNamespace(ns *Namespace) error {
 	query := `INSERT INTO namespace (prefix, pubkey, identity, admin_metadata) VALUES (?, ?, ?, ?)`
 	tx, err := db.Begin()
 	if err != nil {

@@ -26,27 +26,41 @@ import (
 	"time"
 )
 
-var (
-	errRetrieveTimeout error                           = errors.New("retrieve request timed out")
-	errRequestTimeout  error                           = errors.New("reverse request timed out")
-	requestsLock       sync.Mutex                      = sync.Mutex{}
-	requests           map[string]chan reversalRequest = make(map[string]chan reversalRequest)
+type (
+	reversalRequest struct {
+		CallbackUrl string `json:"callback_url"`
+		PrivateKey  string `json:"private_key"`
+		RequestId   string `json:"request_id"`
+		Prefix      string `json:"prefix"`
+		OriginName  string `json:"origin"`
+	}
+
+	requestInfo struct {
+		channel chan reversalRequest
+		prefix  string
+	}
+
+	requestKey struct {
+		origin string
+		prefix string
+	}
 )
 
-type reversalRequest struct {
-	CallbackUrl string `json:"callback_url"`
-	PrivateKey  string `json:"private_key"`
-	RequestId   string `json:"request_id"`
-}
+var (
+	errRetrieveTimeout error                      = errors.New("retrieve request timed out")
+	errRequestTimeout  error                      = errors.New("reverse request timed out")
+	requestsLock       sync.Mutex                 = sync.Mutex{}
+	requests           map[requestKey]requestInfo = make(map[requestKey]requestInfo)
+)
 
-func getOriginQueue(origin string) chan reversalRequest {
+func getOriginQueue(prefix, origin string) chan reversalRequest {
 	requestsLock.Lock()
 	defer requestsLock.Unlock()
-	if reqChannel, ok := requests[origin]; ok {
-		return reqChannel
+	if req, ok := requests[requestKey{origin: origin, prefix: prefix}]; ok {
+		return req.channel
 	} else {
 		newChan := make(chan reversalRequest)
-		requests[origin] = newChan
+		requests[requestKey{origin: origin, prefix: prefix}] = requestInfo{channel: newChan, prefix: prefix}
 		return newChan
 	}
 }
@@ -54,7 +68,7 @@ func getOriginQueue(origin string) chan reversalRequest {
 // Send a request to a given origin's queue.
 // Return a requestTimeout error if no origin retrieved the request before the context timed out.
 func handleRequest(ctx context.Context, origin string, req reversalRequest, timeout time.Duration) (err error) {
-	queue := getOriginQueue(origin)
+	queue := getOriginQueue(req.Prefix, origin)
 	maxTime := timeout - 500*time.Millisecond - time.Duration(rand.Intn(500))*time.Millisecond
 	tick := time.NewTicker(maxTime)
 	defer tick.Stop()
@@ -72,13 +86,14 @@ func handleRequest(ctx context.Context, origin string, req reversalRequest, time
 	return
 }
 
-func handleRetrieve(appCtx context.Context, ginCtx context.Context, origin string, timeout time.Duration) (req reversalRequest, err error) {
+// Handle the origin's request to retrieve any pending reversals.
+func handleRetrieve(appCtx context.Context, ginCtx context.Context, prefix, origin string, timeout time.Duration) (req reversalRequest, err error) {
 	// Return randomly short of the timeout.
 	maxTime := timeout - 500*time.Millisecond - time.Duration(rand.Intn(500))*time.Millisecond
 	tick := time.NewTicker(maxTime)
 	defer tick.Stop()
 	select {
-	case req = <-getOriginQueue(origin):
+	case req = <-getOriginQueue(prefix, origin):
 		break
 	case <-tick.C:
 		err = errRetrieveTimeout
