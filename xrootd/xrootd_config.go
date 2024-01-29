@@ -294,6 +294,11 @@ func CheckCacheXrootdEnv(exportPath string, uid int, gid int, nsAds []director.N
 	if discoveryUrlStr := param.Federation_DiscoveryUrl.GetString(); discoveryUrlStr != "" {
 		discoveryUrl, err := url.Parse(discoveryUrlStr)
 		if err == nil {
+			log.Debugln("Parsing discovery URL for 'pss.origin' setting:", discoveryUrlStr)
+			if len(discoveryUrl.Path) > 0 && len(discoveryUrl.Host) == 0 {
+				discoveryUrl.Host = discoveryUrl.Path
+				discoveryUrl.Path = ""
+			}
 			discoveryUrl.Scheme = "pelican"
 			discoveryUrl.Path = ""
 			discoveryUrl.RawQuery = ""
@@ -362,9 +367,9 @@ func CheckXrootdEnv(server server_utils.XRootDServer) error {
 			return errors.Wrap(err, "Unable to create cache client plugins directory")
 		}
 		if runtime.GOOS == "darwin" {
-			err = os.WriteFile(filepath.Join(clientPluginsDir, "pelican-plugin.conf"), []byte(clientPluginDefault), os.FileMode(0644))
-		} else {
 			err = os.WriteFile(filepath.Join(clientPluginsDir, "pelican-plugin.conf"), []byte(clientPluginMac), os.FileMode(0644))
+		} else {
+			err = os.WriteFile(filepath.Join(clientPluginsDir, "pelican-plugin.conf"), []byte(clientPluginDefault), os.FileMode(0644))
 		}
 		if err != nil {
 			return errors.Wrap(err, "Unable to configure cache client plugin")
