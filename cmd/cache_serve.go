@@ -78,7 +78,7 @@ func getNSAdsFromDirector() ([]director.NamespaceAdV2, error) {
 		if jsonErr := json.Unmarshal(respData, &respNSV1); jsonErr == nil { // Error creating json
 			return respNS, errors.Wrapf(err, "Failed to make request: %v", err)
 		}
-		respNS = director.ConvertNamespaceAdsV1ToV2(respNSV1)
+		respNS = director.ConvertNamespaceAdsV1ToV2(respNSV1, nil)
 	}
 
 	err = json.Unmarshal(respData, &respNS)

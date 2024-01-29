@@ -401,16 +401,16 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 			PublicRead: false,
 			Caps:       PrivateCaps,
 			Issuer: []director.TokenIssuer{{
-				IssuerUrl: issuer1URL,
-				BasePaths: []string{"/p1"},
-			}},
+				IssuerUrl:       issuer1URL,
+				BasePaths:       []string{"/p1"},
+				RestrictedPaths: []string{"/p1/nope", "p1/still_nope"}}},
 		},
 		{
 			PublicRead: false,
 			Caps:       PrivateCaps,
 			Issuer: []director.TokenIssuer{{
 				IssuerUrl: issuer2URL,
-				BasePaths: []string{"/p2/path"},
+				BasePaths: []string{"/p2/path", "/p2/foo", "/p2/baz"},
 			}},
 		},
 		{
@@ -424,7 +424,11 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 			Issuer: []director.TokenIssuer{{
 				IssuerUrl: issuer1URL,
 				BasePaths: []string{"/p1_again"},
-			}}},
+			}, {
+				IssuerUrl: issuer3URL,
+				BasePaths: []string{"/i3/multi", "/ithree/multi"},
+			}},
+		},
 		{
 			Path:       "/p4/depth",
 			PublicRead: true,
