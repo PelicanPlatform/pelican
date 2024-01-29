@@ -748,6 +748,9 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 		return err
 	}
 
+	// Reset issuerPrivateJWK to ensure test cases can use their own temp IssuerKey
+	issuerPrivateJWK.Store(nil)
+
 	// As necessary, generate private keys, JWKS and corresponding certs
 
 	// Note: This function will generate a private key in the location stored by the viper var "IssuerKey"
