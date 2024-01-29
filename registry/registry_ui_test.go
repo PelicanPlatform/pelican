@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -651,7 +652,212 @@ func TestUpdateNamespaceStatus(t *testing.T) {
 	}
 }
 
+func TestCreateNamespace(t *testing.T) {
+	viper.Reset()
+	_, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
+	// Initialize the mock database
+	setupMockRegistryDB(t)
+	defer teardownMockNamespaceDB(t)
+
+	router := gin.Default()
+	router.POST("/namespaces", func(ctx *gin.Context) {
+		ctx.Set("User", "admin")
+		createUpdateNamespace(ctx, false)
+	})
+
+	t.Run("no-user-returns-401", func(t *testing.T) {
+		resetNamespaceDB(t)
+
+		router := gin.Default()
+		router.POST("/namespaces", func(ctx *gin.Context) {
+			createUpdateNamespace(ctx, false)
+		})
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/namespaces", nil)
+		router.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusUnauthorized, w.Result().StatusCode)
+	})
+
+	t.Run("empty-request-returns-400", func(t *testing.T) {
+		resetNamespaceDB(t)
+
+		// Create a request to the endpoint
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/namespaces", nil)
+		router.ServeHTTP(w, req)
+
+		body, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+		assert.JSONEq(t, `{"error":"Invalid create or update namespace request"}`, string(body))
+	})
+
+	t.Run("missing-required-fields-returns-400", func(t *testing.T) {
+		resetNamespaceDB(t)
+
+		mockEmptyNs := Namespace{}
+		mockEmptyNsBytes, err := json.Marshal(mockEmptyNs)
+		require.NoError(t, err)
+		// Create a request to the endpoint
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/namespaces", bytes.NewReader(mockEmptyNsBytes))
+		req.Header.Set("Context-Type", "application/json")
+		router.ServeHTTP(w, req)
+
+		body, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+		assert.Contains(t, string(body), "Field validation for 'Prefix' failed on the 'required' tag")
+		assert.Contains(t, string(body), "Field validation for 'Pubkey' failed on the 'required' tag")
+		assert.Contains(t, string(body), "Field validation for 'Institution' failed on the 'required' tag")
+	})
+
+	t.Run("invalid-prefix-returns-400", func(t *testing.T) {
+		resetNamespaceDB(t)
+
+		mockEmptyNs := Namespace{Prefix: "/", Pubkey: "badKey", AdminMetadata: AdminMetadata{Institution: "001"}}
+		mockEmptyNsBytes, err := json.Marshal(mockEmptyNs)
+		require.NoError(t, err)
+		// Create a request to the endpoint
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/namespaces", bytes.NewReader(mockEmptyNsBytes))
+		req.Header.Set("Context-Type", "application/json")
+		router.ServeHTTP(w, req)
+
+		body, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+		assert.Contains(t, string(body), "Error: Field validation for prefix failed:")
+	})
+
+	t.Run("existing-prefix-returns-400", func(t *testing.T) {
+		resetNamespaceDB(t)
+		err := insertMockDBData([]Namespace{{Prefix: "/foo", Pubkey: "badKey", AdminMetadata: AdminMetadata{Status: Pending}}})
+		require.NoError(t, err)
+		defer resetNamespaceDB(t)
+
+		mockNs := Namespace{Prefix: "/foo", Pubkey: "badKey", AdminMetadata: AdminMetadata{Institution: "001"}}
+		mockNsBytes, err := json.Marshal(mockNs)
+		require.NoError(t, err)
+		// Create a request to the endpoint
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/namespaces", bytes.NewReader(mockNsBytes))
+		req.Header.Set("Context-Type", "application/json")
+		router.ServeHTTP(w, req)
+
+		body, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+		assert.Contains(t, string(body), "The prefix /foo is already registered")
+	})
+
+	t.Run("bad-pubkey-returns-400", func(t *testing.T) {
+		resetNamespaceDB(t)
+
+		mockNs := Namespace{Prefix: "/foo", Pubkey: "badKey", AdminMetadata: AdminMetadata{Institution: "001"}}
+		mockNsBytes, err := json.Marshal(mockNs)
+		require.NoError(t, err)
+		// Create a request to the endpoint
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/namespaces", bytes.NewReader(mockNsBytes))
+		req.Header.Set("Context-Type", "application/json")
+		router.ServeHTTP(w, req)
+
+		body, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+		assert.Contains(t, string(body), "Error: Field validation for pubkey failed:")
+	})
+
+	t.Run("keychain-failure-returns-400", func(t *testing.T) {
+		resetNamespaceDB(t)
+
+		pubKeyStr, err := GenerateMockJWKS()
+		require.NoError(t, err)
+
+		err = insertMockDBData([]Namespace{{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: AdminMetadata{Status: Pending}}})
+		require.NoError(t, err)
+		defer resetNamespaceDB(t)
+
+		diffPubKeyStr, err := GenerateMockJWKS()
+		require.NoError(t, err)
+
+		mockNs := Namespace{Prefix: "/foo", Pubkey: diffPubKeyStr, AdminMetadata: AdminMetadata{Institution: "001"}}
+		mockNsBytes, err := json.Marshal(mockNs)
+		require.NoError(t, err)
+		// Create a request to the endpoint
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/namespaces", bytes.NewReader(mockNsBytes))
+		req.Header.Set("Context-Type", "application/json")
+		router.ServeHTTP(w, req)
+
+		body, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+		assert.Contains(t, string(body), "The prefix /foo is already registered")
+	})
+
+	t.Run("inst-failure-returns-400", func(t *testing.T) {
+		resetNamespaceDB(t)
+		mockInsts := []Institution{{ID: "1000"}}
+		viper.Set("Registry.Institutions", mockInsts)
+
+		pubKeyStr, err := GenerateMockJWKS()
+		require.NoError(t, err)
+
+		mockNs := Namespace{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: AdminMetadata{Institution: "001"}}
+		mockNsBytes, err := json.Marshal(mockNs)
+		require.NoError(t, err)
+		// Create a request to the endpoint
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/namespaces", bytes.NewReader(mockNsBytes))
+		req.Header.Set("Context-Type", "application/json")
+		router.ServeHTTP(w, req)
+
+		body, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+		assert.Contains(t, string(body), `not in the list of available institutions to register`)
+	})
+
+	t.Run("valid-request-gives-200", func(t *testing.T) {
+		resetNamespaceDB(t)
+		mockInsts := []Institution{{ID: "1000"}}
+		viper.Set("Registry.Institutions", mockInsts)
+
+		pubKeyStr, err := GenerateMockJWKS()
+		require.NoError(t, err)
+
+		mockNs := Namespace{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: AdminMetadata{Institution: "1000"}}
+		mockNsBytes, err := json.Marshal(mockNs)
+		require.NoError(t, err)
+		// Create a request to the endpoint
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/namespaces", bytes.NewReader(mockNsBytes))
+		req.Header.Set("Context-Type", "application/json")
+		router.ServeHTTP(w, req)
+
+		body, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+		assert.JSONEq(t, `{"msg": "success"}`, string(body))
+
+		nss, err := getAllNamespaces()
+		require.NoError(t, err)
+		require.Equal(t, 1, len(nss))
+		assert.Equal(t, "/foo", nss[0].Prefix)
+		assert.Equal(t, "admin", nss[0].AdminMetadata.UserID)
+		assert.Equal(t, Pending, nss[0].AdminMetadata.Status)
+		assert.NotEqual(t, time.Time{}, nss[0].AdminMetadata.CreatedAt)
+	})
+}
+
 func TestListInsitutions(t *testing.T) {
+	viper.Reset()
 	router := gin.Default()
 	router.GET("/institutions", listInstitutions)
 

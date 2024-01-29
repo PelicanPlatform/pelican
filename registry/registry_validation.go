@@ -151,16 +151,37 @@ func validateJwks(jwksStr string) (jwk.Key, error) {
 	return key, nil
 }
 
-// Validates if the instID, the id of the institution, matches the provided Registy.Institutions items.
+// Validates if the instID, the id of the institution, matches institution options
+// provided through Registry.InstitutionsUrl or Registy.Institutions. If both are set,
+// content of Registry.InstitutionsUrl will be ignored
 func validateInstitution(instID string) (bool, error) {
 	institutions := []Institution{}
 	if err := param.Registry_Institutions.Unmarshal(&institutions); err != nil {
 		return false, err
 	}
-	// We don't check if config was populated
+
 	if len(institutions) == 0 {
-		return true, nil
+		if institutionsCache == nil || institutionsCache.Len() == 0 {
+			// We don't check if config and Registry.InstitutionsUrl was both unpopulated
+			return true, nil
+		} else {
+			cachedInsts, intErr, extErr := getCachedInstitutions()
+			if intErr != nil {
+				log.Warning(intErr)
+			}
+			if extErr != nil {
+				return false, errors.Wrap(extErr, "Error fetching instituions from TTL cache")
+			}
+			for _, availableInst := range cachedInsts {
+				// We required full equality, as we expect the value is from the institution API
+				if instID == availableInst.ID {
+					return true, nil
+				}
+			}
+		}
 	}
+
+	// When Registry.InstitutionsUrl was not set
 	for _, availableInst := range institutions {
 		// We required full equality, as we expect the value is from the institution API
 		if instID == availableInst.ID {

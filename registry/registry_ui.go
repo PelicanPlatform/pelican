@@ -189,6 +189,8 @@ func checkUniqueInstitutions(insts []Institution) bool {
 	return true
 }
 
+// Returns the institution options that are fetched from Registry.InstitutionsUrl
+// and stored in a TTL cache
 func getCachedInstitutions() (inst []Institution, intError error, extError error) {
 	if institutionsCache == nil {
 		return nil, errors.New("institutionsCache isn't initialized"), errors.New("Internal institution cache wasn't initialized")
