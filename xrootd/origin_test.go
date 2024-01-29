@@ -87,7 +87,7 @@ func originMockup(ctx context.Context, egrp *errgroup.Group, t *testing.T) conte
 	configPath, err := ConfigXrootd(shutdownCtx, true)
 	require.NoError(t, err)
 
-	launchers, err := ConfigureLaunchers(false, configPath, false)
+	launchers, err := ConfigureLaunchers(false, configPath, false, false)
 	require.NoError(t, err)
 
 	err = daemon.LaunchDaemons(shutdownCtx, launchers, egrp)
