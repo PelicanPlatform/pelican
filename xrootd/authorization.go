@@ -37,14 +37,15 @@ import (
 	"unicode"
 
 	"github.com/go-ini/ini"
+	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
+
 	"github.com/pelicanplatform/pelican/cache_ui"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/origin_ui"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
-	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 )
 
 type (
@@ -220,8 +221,12 @@ func EmitAuthfile(server server_utils.XRootDServer) error {
 		if len(words) >= 2 && words[0] == "u" && words[1] == "*" {
 			// There exists a public access already in the authfile
 			if server.GetServerType().IsEnabled(config.OriginType) {
-				// If Origin, add the /.well-known to the authfile
-				output.Write([]byte("u * /.well-known lr " + strings.Join(words[2:], " ") + "\n"))
+				outStr := "u * /.well-known lr "
+				// Set up public reads if the origin is configured for it
+				if param.Origin_EnablePublicReads.GetBool() {
+					outStr += param.Origin_NamespacePrefix.GetString() + " lr "
+				}
+				output.Write([]byte(outStr + strings.Join(words[2:], " ") + "\n"))
 			} else {
 				output.Write([]byte(lineContents + "\n"))
 			}
@@ -233,7 +238,12 @@ func EmitAuthfile(server server_utils.XRootDServer) error {
 	}
 	// If Origin and no authfile already exists, add the ./well-known to the authfile
 	if !foundPublicLine && server.GetServerType().IsEnabled(config.OriginType) {
-		output.Write([]byte("u * /.well-known lr\n"))
+		outStr := "u * /.well-known lr"
+		if param.Origin_EnablePublicReads.GetBool() {
+			outStr += " " + param.Origin_NamespacePrefix.GetString() + " lr"
+		}
+		outStr += "\n"
+		output.Write([]byte(outStr))
 	}
 
 	// For the cache, add the public namespaces
@@ -474,7 +484,6 @@ func WriteOriginScitokensConfig(exportedPaths []string) error {
 
 // Writes out the cache's scitokens.cfg configuration
 func WriteCacheScitokensConfig(nsAds []director.NamespaceAd) error {
-
 	cfg, err := makeSciTokensCfg()
 	if err != nil {
 		return err
