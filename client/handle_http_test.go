@@ -190,7 +190,7 @@ func TestSlowTransfers(t *testing.T) {
 	var err error
 	// Do a quick timeout
 	go func() {
-		_, err = DownloadHTTP(transfers[0], filepath.Join(t.TempDir(), "test.txt"), "", nil)
+		_, _, err = DownloadHTTP(transfers[0], filepath.Join(t.TempDir(), "test.txt"), "", nil)
 		finishedChannel <- true
 	}()
 
@@ -253,7 +253,7 @@ func TestStoppedTransfer(t *testing.T) {
 	var err error
 
 	go func() {
-		_, err = DownloadHTTP(transfers[0], filepath.Join(t.TempDir(), "test.txt"), "", nil)
+		_, _, err = DownloadHTTP(transfers[0], filepath.Join(t.TempDir(), "test.txt"), "", nil)
 		finishedChannel <- true
 	}()
 
@@ -283,7 +283,7 @@ func TestConnectionError(t *testing.T) {
 	addr := l.Addr().String()
 	l.Close()
 
-	_, err = DownloadHTTP(TransferDetails{Url: url.URL{Host: addr, Scheme: "http"}, Proxy: false}, filepath.Join(t.TempDir(), "test.txt"), "", nil)
+	_, _, err = DownloadHTTP(TransferDetails{Url: url.URL{Host: addr, Scheme: "http"}, Proxy: false}, filepath.Join(t.TempDir(), "test.txt"), "", nil)
 
 	assert.IsType(t, &ConnectionSetupError{}, err)
 
@@ -316,7 +316,7 @@ func TestTrailerError(t *testing.T) {
 	assert.Equal(t, svr.URL, transfers[0].Url.String())
 
 	// Call DownloadHTTP and check if the error is returned correctly
-	_, err := DownloadHTTP(transfers[0], filepath.Join(t.TempDir(), "test.txt"), "", nil)
+	_, _, err := DownloadHTTP(transfers[0], filepath.Join(t.TempDir(), "test.txt"), "", nil)
 
 	assert.NotNil(t, err)
 	assert.EqualError(t, err, "transfer error: Unable to read test.txt; input/output error")
@@ -529,16 +529,16 @@ func TestFullUpload(t *testing.T) {
 		uploadURL := "stash:///test/" + fileName
 
 		methods := []string{"http"}
-		uploaded, err := DoStashCPSingle(tempFile.Name(), uploadURL, methods, false)
+		transferResults, err := DoStashCPSingle(tempFile.Name(), uploadURL, methods, false)
 		assert.NoError(t, err, "Error uploading file")
-		assert.Equal(t, int64(len(testFileContent)), uploaded, "Uploaded file size does not match")
+		assert.Equal(t, int64(len(testFileContent)), transferResults[0].TransferedBytes, "Uploaded file size does not match")
 
 		// Upload an osdf file
 		uploadURL = "osdf:///test/stuff/blah.txt"
 		assert.NoError(t, err, "Error parsing upload URL")
-		uploaded, err = DoStashCPSingle(tempFile.Name(), uploadURL, methods, false)
+		transferResults, err = DoStashCPSingle(tempFile.Name(), uploadURL, methods, false)
 		assert.NoError(t, err, "Error uploading file")
-		assert.Equal(t, int64(len(testFileContent)), uploaded, "Uploaded file size does not match")
+		assert.Equal(t, int64(len(testFileContent)), transferResults[0].TransferedBytes, "Uploaded file size does not match")
 	})
 	t.Cleanup(func() {
 		ObjectClientOptions.Token = ""

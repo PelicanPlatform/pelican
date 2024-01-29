@@ -286,11 +286,11 @@ func moveObjects(source []string, methods []string, upload bool, wg *sync.WaitGr
 	defer wg.Done()
 	var result error
 	for transfer := range workChan {
-		var tmpDownloaded int64
+		var transferResults []client.TransferResults
 		if upload {
 			source = append(source, transfer.localFile)
 			log.Debugln("Uploading:", transfer.localFile, "to", transfer.url)
-			tmpDownloaded, result = client.DoStashCPSingle(transfer.localFile, transfer.url, methods, false)
+			transferResults, result = client.DoStashCPSingle(transfer.localFile, transfer.url, methods, false)
 		} else {
 			source = append(source, transfer.url)
 			log.Debugln("Downloading:", transfer.url, "to", transfer.localFile)
@@ -305,11 +305,36 @@ func moveObjects(source []string, methods []string, upload bool, wg *sync.WaitGr
 				if url.Query().Get("pack") != "" {
 					localFile = filepath.Dir(localFile)
 				}
-				tmpDownloaded, result = client.DoStashCPSingle(transfer.url, localFile, methods, false)
+				transferResults, result = client.DoStashCPSingle(transfer.url, localFile, methods, false)
 			}
 		}
 		startTime := time.Now().Unix()
 		resultAd := classads.NewClassAd()
+		// Set our DeveloperData:
+		developerData := make(map[string]interface{})
+		developerData["PelicanClientVersion"] = version
+		if len(transferResults) != 0 && !upload {
+			developerData["Attempts"] = len(transferResults[0].Attempts)
+			for _, attempt := range transferResults[0].Attempts {
+				developerData[fmt.Sprintf("TransferFileBytes%d", attempt.Number)] = attempt.TransferFileBytes
+				developerData[fmt.Sprintf("TimeToFirstByte%d", attempt.Number)] = attempt.TimeToFirstByte
+				developerData[fmt.Sprintf("Endpoint%d", attempt.Number)] = attempt.Endpoint
+				if attempt.Error != nil {
+					developerData[fmt.Sprintf("TransferError%d", attempt.Number)] = attempt.Error
+				}
+			}
+		} else if len(transferResults) != 0 && upload {
+			developerData["Attempts"] = 0
+			developerData["TransferFileBytes"] = transferResults[0].TransferedBytes
+			if transferResults[0].Error != nil {
+				developerData["TransferError"] = transferResults[0].Error
+			}
+		}
+		// TODO: more classAds...
+		//...
+
+		resultAd.Set("DeveloperData", developerData)
+
 		resultAd.Set("TransferStartTime", startTime)
 		resultAd.Set("TransferEndTime", time.Now().Unix())
 		hostname, _ := os.Hostname()
@@ -324,8 +349,8 @@ func moveObjects(source []string, methods []string, upload bool, wg *sync.WaitGr
 		}
 		if result == nil {
 			resultAd.Set("TransferSuccess", true)
-			resultAd.Set("TransferFileBytes", tmpDownloaded)
-			resultAd.Set("TransferTotalBytes", tmpDownloaded)
+			resultAd.Set("TransferFileBytes", transferResults[0].TransferedBytes)
+			resultAd.Set("TransferTotalBytes", transferResults[0].TransferedBytes) // idx 0 since we are not using recursive uploads/downloads
 		} else {
 			resultAd.Set("TransferSuccess", false)
 			if client.GetErrors() == "" {
