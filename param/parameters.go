@@ -120,6 +120,17 @@ var (
 	Server_UIActivationCodeFile = StringParam{"Server.UIActivationCodeFile"}
 	Server_UIPasswordFile = StringParam{"Server.UIPasswordFile"}
 	Server_WebHost = StringParam{"Server.WebHost"}
+	Shoveler_Cert = StringParam{"Shoveler.Cert"}
+	Shoveler_CertKey = StringParam{"Shoveler.CertKey"}
+	Shoveler_Exchange = StringParam{"Shoveler.Exchange"}
+	Shoveler_ListenIP = StringParam{"Shoveler.ListenIP"}
+	Shoveler_MessageQueueProtocol = StringParam{"Shoveler.MessageQueueProtocol"}
+	Shoveler_Password = StringParam{"Shoveler.Password"}
+	Shoveler_QueueDirectory = StringParam{"Shoveler.QueueDirectory"}
+	Shoveler_TokenLocation = StringParam{"Shoveler.TokenLocation"}
+	Shoveler_Topic = StringParam{"Shoveler.Topic"}
+	Shoveler_URL = StringParam{"Shoveler.URL"}
+	Shoveler_Username = StringParam{"Shoveler.Username"}
 	StagePlugin_MountPrefix = StringParam{"StagePlugin.MountPrefix"}
 	StagePlugin_OriginPrefix = StringParam{"StagePlugin.OriginPrefix"}
 	StagePlugin_ShadowOriginPrefix = StringParam{"StagePlugin.ShadowOriginPrefix"}
@@ -144,6 +155,7 @@ var (
 	Origin_ScitokensRestrictedPaths = StringSliceParam{"Origin.ScitokensRestrictedPaths"}
 	Registry_AdminUsers = StringSliceParam{"Registry.AdminUsers"}
 	Server_Modules = StringSliceParam{"Server.Modules"}
+	Shoveler_OutputDestinations = StringSliceParam{"Shoveler.OutputDestinations"}
 )
 
 var (
@@ -157,6 +169,7 @@ var (
 	Monitoring_PortLower = IntParam{"Monitoring.PortLower"}
 	Server_IssuerPort = IntParam{"Server.IssuerPort"}
 	Server_WebPort = IntParam{"Server.WebPort"}
+	Shoveler_ListenPort = IntParam{"Shoveler.ListenPort"}
 	Transport_MaxIdleConns = IntParam{"Transport.MaxIdleConns"}
 	Xrootd_Port = IntParam{"Xrootd.Port"}
 )
@@ -182,6 +195,8 @@ var (
 	Origin_SelfTest = BoolParam{"Origin.SelfTest"}
 	Registry_RequireKeyChaining = BoolParam{"Registry.RequireKeyChaining"}
 	Server_EnableUI = BoolParam{"Server.EnableUI"}
+	Shoveler_Enable = BoolParam{"Shoveler.Enable"}
+	Shoveler_VerifyHeader = BoolParam{"Shoveler.VerifyHeader"}
 	StagePlugin_Hook = BoolParam{"StagePlugin.Hook"}
 	TLSSkipVerify = BoolParam{"TLSSkipVerify"}
 )
@@ -207,4 +222,5 @@ var (
 	Issuer_AuthorizationTemplates = ObjectParam{"Issuer.AuthorizationTemplates"}
 	Issuer_OIDCAuthenticationRequirements = ObjectParam{"Issuer.OIDCAuthenticationRequirements"}
 	Registry_Institutions = ObjectParam{"Registry.Institutions"}
+	Shoveler_IPMapping = ObjectParam{"Shoveler.IPMapping"}
 )

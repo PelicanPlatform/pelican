@@ -143,6 +143,24 @@ type config struct {
 		WebHost string
 		WebPort int
 	}
+	Shoveler struct {
+		Cert string
+		CertKey string
+		Enable bool
+		Exchange string
+		IPMapping interface{}
+		ListenIP string
+		ListenPort int
+		MessageQueueProtocol string
+		OutputDestinations []string
+		Password string
+		QueueDirectory string
+		TokenLocation string
+		Topic string
+		URL string
+		Username string
+		VerifyHeader bool
+	}
 	StagePlugin struct {
 		Hook bool
 		MountPrefix string
@@ -312,6 +330,24 @@ type configWithType struct {
 		UIPasswordFile struct { Type string; Value string }
 		WebHost struct { Type string; Value string }
 		WebPort struct { Type string; Value int }
+	}
+	Shoveler struct {
+		Cert struct { Type string; Value string }
+		CertKey struct { Type string; Value string }
+		Enable struct { Type string; Value bool }
+		Exchange struct { Type string; Value string }
+		IPMapping struct { Type string; Value interface{} }
+		ListenIP struct { Type string; Value string }
+		ListenPort struct { Type string; Value int }
+		MessageQueueProtocol struct { Type string; Value string }
+		OutputDestinations struct { Type string; Value []string }
+		Password struct { Type string; Value string }
+		QueueDirectory struct { Type string; Value string }
+		TokenLocation struct { Type string; Value string }
+		Topic struct { Type string; Value string }
+		URL struct { Type string; Value string }
+		Username struct { Type string; Value string }
+		VerifyHeader struct { Type string; Value bool }
 	}
 	StagePlugin struct {
 		Hook struct { Type string; Value bool }

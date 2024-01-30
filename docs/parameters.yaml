@@ -1182,6 +1182,176 @@ default: true
 components: ["origin", "director", "nsregistry"]
 ---
 ############################
+#   Shoveler-level configs   #
+############################
+name: Shoveler.Enable
+description: >-
+  Enable XRootD monitoring shoveler: https://github.com/opensciencegrid/xrootd-monitoring-shoveler
+type: bool
+default: false
+components: ["origin", "cache"]
+---
+name: Shoveler.MessageQueueProtocol
+description: >-
+  Select which protocol to use in order to connect to the MQ. Options are amqp, stomp
+
+  For amqp, the following configurations are required:
+   - URL: amqps://username:password@example.com/vhost
+   - Exchange: shoveled-xrd
+   - Topic: mytopic
+   - TokenLocation: /etc/pelican/xrootd-monitoring-shoveler-token
+
+  For stomp, the following configurations are required:
+   - User: username
+   - Password: password
+   - URL: messagebroker.org:port
+   - Topic: mytopic
+   - Cert: path/to/cert/file
+   - CertKey: path/to/certkey/file
+type: string
+default: amqp
+components: ["origin", "cache"]
+---
+name: Shoveler.URL
+description: >-
+  For amqp and stomp.
+
+  The URL to connect to the shoveler
+type: url
+default: none
+components: ["origin", "cache"]
+---
+name: Shoveler.Exchange
+description: >-
+  For amqp only.
+
+  The exchange to shovel messages
+type: string
+default: none
+components: ["origin", "cache"]
+---
+name: Shoveler.Topic
+description: >-
+  For amqp and stomp.
+
+  The topic of the messages
+type: string
+default: none
+components: ["origin", "cache"]
+---
+name: Shoveler.TokenLocation
+description: >-
+  For amqp only.
+
+  A filepath to the location of the JWT used for authenticating amqp connection
+type: filename
+default: /etc/pelican/xrootd-monitoring-shoveler-token
+components: ["origin", "cache"]
+---
+name: Shoveler.Username
+description: >-
+  For stomp only.
+
+  Username for authentication
+type: string
+default: none
+components: ["origin", "cache"]
+---
+name: Shoveler.Password
+description: >-
+  For stomp only.
+
+  Password for authentication
+type: string
+default: none
+components: ["origin", "cache"]
+---
+name: Shoveler.Cert
+description: >-
+  For stomp only.
+
+  A filepath to the location of the TLS certifcate
+type: filename
+default: none
+components: ["origin", "cache"]
+---
+name: Shoveler.CertKey
+description: >-
+  For stomp only.
+
+  A filepath to the location of the private key associated with the certifacte
+type: filename
+default: none
+components: ["origin", "cache"]
+---
+name: Shoveler.ListenPort
+description: >-
+  The port to listen to the incoming XRootD monitoring packet in UDP
+type: int
+default: 9993
+components: ["origin", "cache"]
+---
+name: Shoveler.ListenIP
+description: >-
+  The IP addresses to listen to the incoming XRootD monitoring packet in UDP
+type: string
+default: "0.0.0.0"
+components: ["origin", "cache"]
+---
+name: Shoveler.OutputDestinations
+description: >-
+  A list of <IP:Port> destinations to forward XRootD monitoring packet to
+type: stringSlice
+default: none
+components: ["origin", "cache"]
+---
+name: Shoveler.VerifyHeader
+description: >-
+  Whether to verify the header of the packet matches XRootD's monitoring packet format
+type: bool
+default: true
+components: ["origin", "cache"]
+---
+name: Shoveler.QueueDirectory
+description: >-
+  Directory to store overflow of queue onto disk.
+  The queue keeps 100 messages in memory.  If the shoveler is disconnected from the message bus,
+  it will store messages over the 100 in memory onto disk into this directory.  Once the connection has been re-established
+  the queue will be emptied.  The queue on disk is persistent between restarts, so a persistent directory should be used.
+type: filename
+default: /var/spool/pelican/xrootd-monitoring-shoveler-queue
+components: ["origin", "cache"]
+---
+name: Shoveler.IPMapping
+description: >-
+  IP Mapping for remote IP addresses in forwarding to the destinations. You may either
+  pass one IP address to map all messages to the configured origin, or a list of key-value pairs for one-to-one mapping.
+
+  One-to-all mapping:
+
+  ```
+  IPMapping:
+    - All: "172.0.0.4"
+  ```
+
+  If a packet comes in with the private ip address of 192.168.0.4, the packet origin will be changed to 172.0.0.4
+  The port is always preserved.
+
+  One-to-one mapping:
+
+  ```
+  IPMapping:
+    - Source: "192.168.0.5"
+      Dest: "172.0.0.5"
+    - Source: "192.168.0.6"
+      Dest: "129.93.10.7"
+  ```
+
+type: object
+default: none
+components: ["origin", "cache"]
+---
+############################
 #   Plugin-level configs   #
 ############################
 name: Plugin.Token
