@@ -3,6 +3,7 @@ Description = Pelican service osdf-director
 After = network.target nss-lookup.target
 
 [Service]
+EnvironmentFile = -/etc/sysconfig/osdf-director
 ExecStart = /usr/bin/osdf --config /etc/pelican/osdf-director.yaml director serve
 Restart = on-failure
 RestartSec = 20s

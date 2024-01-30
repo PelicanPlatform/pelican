@@ -3,6 +3,7 @@ Description = Pelican service osdf-cache
 After = network.target nss-lookup.target
 
 [Service]
+EnvironmentFile = -/etc/sysconfig/osdf-cache
 ExecStart = /usr/bin/osdf --config /etc/pelican/osdf-cache.yaml cache serve
 Restart = on-failure
 RestartSec = 20s

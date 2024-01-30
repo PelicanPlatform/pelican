@@ -3,6 +3,7 @@ Description = Pelican service pelican-origin
 After = network.target nss-lookup.target
 
 [Service]
+EnvironmentFile = -/etc/sysconfig/pelican-origin
 ExecStart = /usr/bin/pelican --config /etc/pelican/pelican-origin.yaml origin serve
 Restart = on-failure
 RestartSec = 20s
