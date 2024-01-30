@@ -28,6 +28,3 @@ Xrootd:
 Origin:
   NamespacePrefix: "/MY_NAMESPACE"
   Multiuser: false
-  # ExportVolume must match Origin.NamespacePrefix and Xrootd.Mount
-  # (see https://github.com/PelicanPlatform/pelican/issues/621)
-  ExportVolume: "/mnt/osdf/MY_NAMESPACE:/MY_NAMESPACE"
