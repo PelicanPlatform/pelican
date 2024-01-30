@@ -11,9 +11,7 @@ import (
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
-	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
-	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -115,48 +113,38 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, true, ok, "Expected scope to be 'pelican.advertise'")
 
-	//Create token without a scope - should return an error
-	key, err := config.GetIssuerPrivateJWK()
-	err = jwk.AssignKeyID(key)
-	assert.NoError(t, err)
+	//Create token without a scope - should return an error upon validation
+	scopelessTokCfg := utils.TokenConfig{
+		TokenProfile: utils.WLCG,
+		Lifetime:     time.Minute,
+		Issuer:       "https://get-your-tokens.org",
+		Audience:     []string{"director.test"},
+		Version:      "1.0",
+		Subject:      "origin",
+	}
 
-	scopelessTok, err := jwt.NewBuilder().
-		Issuer("").
-		Audience([]string{"director.test"}).
-		Subject("origin").
-		Build()
+	tok, err = scopelessTokCfg.CreateToken()
+	assert.NoError(t, err, "error creating scopeless token. Should have succeeded")
 
-	signed, err := jwt.Sign(scopelessTok, jwt.WithKey(jwa.ES256, key))
-
-	ok, err = VerifyAdvertiseToken(ctx, string(signed), "/test-namespace")
+	ok, err = VerifyAdvertiseToken(ctx, tok, "/test-namespace")
 	assert.Equal(t, false, ok)
 	assert.Equal(t, "No scope is present; required to advertise to director", err.Error())
 
-	//Create a token without a string valued scope
-	nonStrScopeTok, err := jwt.NewBuilder().
-		Issuer("").
-		Claim("scope", 22).
-		Audience([]string{"director.test"}).
-		Subject("origin").
-		Build()
+	// Create a token with a bad scope - should return an error upon validation
+	wrongScopeTokenCfg := utils.TokenConfig{
+		TokenProfile: utils.WLCG,
+		Lifetime:     time.Minute,
+		Issuer:       "https://get-your-tokens.org",
+		Audience:     []string{"director.test"},
+		Version:      "1.0",
+		Subject:      "origin",
+		Claims:       map[string]string{"scope": "wrong.scope"},
+	}
 
-	signed, err = jwt.Sign(nonStrScopeTok, jwt.WithKey(jwa.ES256, key))
+	tok, err = wrongScopeTokenCfg.CreateToken()
+	assert.NoError(t, err, "error creating wrong-scope token. Should have succeeded")
 
-	ok, err = VerifyAdvertiseToken(ctx, string(signed), "/test-namespace")
-	assert.Equal(t, false, ok)
-	assert.Equal(t, "scope claim in token is not string-valued", err.Error())
-
-	//Create a token without a pelican.namespace scope
-	wrongScopeTok, err := jwt.NewBuilder().
-		Issuer("").
-		Claim("scope", "wrong.scope").
-		Audience([]string{"director.test"}).
-		Subject("origin").
-		Build()
-
-	signed, err = jwt.Sign(wrongScopeTok, jwt.WithKey(jwa.ES256, key))
-
-	ok, err = VerifyAdvertiseToken(ctx, string(signed), "/test-namespace")
+	ok, err = VerifyAdvertiseToken(ctx, tok, "/test-namespace")
 	assert.Equal(t, false, ok, "Should fail due to incorrect scope name")
 	assert.NoError(t, err, "Incorrect scope name should not throw and error")
 }

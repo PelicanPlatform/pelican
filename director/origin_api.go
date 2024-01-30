@@ -136,35 +136,23 @@ func CreateAdvertiseToken(namespace string) (string, error) {
 		return "", errors.New("Director URL is not known; cannot create advertise token")
 	}
 
-	tok, err := jwt.NewBuilder().
-		Claim("scope", token_scopes.Pelican_Advertise.String()).
-		Issuer(issuerUrl).
-		Audience([]string{director}).
-		Subject("origin").
-		Expiration(time.Now().Add(time.Minute)).
-		Build()
-	if err != nil {
-		return "", err
+	advTokenCfg := utils.TokenConfig{
+		TokenProfile: utils.WLCG,
+		Version:      "1.0",
+		Lifetime:     time.Minute,
+		Issuer:       issuerUrl,
+		Audience:     []string{director},
+		Subject:      "origin",
+		Claims:       map[string]string{"scope": token_scopes.Pelican_Advertise.String()},
 	}
 
-	key, err := config.GetIssuerPrivateJWK()
+	// CreateToken also handles validation for us
+	tok, err := advTokenCfg.CreateToken()
 	if err != nil {
-		return "", errors.Wrap(err, "failed to load the origin's JWK")
+		return "", errors.Wrap(err, "failed to create director prometheus token")
 	}
 
-	// Get/assign the kid, needed for verification of the token by the director
-	// TODO: Create more generic "tokenCreate" functions so we don't have to do
-	//       this by hand all the time
-	err = jwk.AssignKeyID(key)
-	if err != nil {
-		return "", errors.Wrap(err, "Failed to assign kid to the token")
-	}
-
-	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, key))
-	if err != nil {
-		return "", err
-	}
-	return string(signed), nil
+	return tok, nil
 }
 
 // Given a token and a location in the namespace to advertise in,
@@ -260,32 +248,22 @@ func CreateDirectorTestReportToken(originWebUrl string) (string, error) {
 		return "", errors.New("Director URL is not known; cannot create director test report token")
 	}
 
-	tok, err := jwt.NewBuilder().
-		Claim("scope", token_scopes.Pelican_DirectorTestReport.String()).
-		Issuer(directorURL).
-		Audience([]string{originWebUrl}).
-		Subject("director").
-		Expiration(time.Now().Add(time.Minute)).
-		Build()
-	if err != nil {
-		return "", err
+	testTokenCfg := utils.TokenConfig{
+		TokenProfile: utils.WLCG,
+		Version:      "1.0",
+		Lifetime:     time.Minute,
+		Issuer:       directorURL,
+		Audience:     []string{originWebUrl},
+		Subject:      "director",
+		Claims:       map[string]string{"scope": token_scopes.Pelican_DirectorTestReport.String()},
 	}
 
-	key, err := config.GetIssuerPrivateJWK()
+	tok, err := testTokenCfg.CreateToken()
 	if err != nil {
-		return "", errors.Wrap(err, "failed to load the origin's JWK")
+		return "", errors.Wrap(err, "failed to create director test report token")
 	}
 
-	err = jwk.AssignKeyID(key)
-	if err != nil {
-		return "", errors.Wrap(err, "Failed to assign kid to the token")
-	}
-
-	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, key))
-	if err != nil {
-		return "", err
-	}
-	return string(signed), nil
+	return tok, nil
 }
 
 // Verify that a token received is a valid token from director

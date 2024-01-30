@@ -29,16 +29,17 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/csrf"
-	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwt"
-	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/tg123/go-htpasswd"
 	"go.uber.org/atomic"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/token_scopes"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 type (
@@ -151,36 +152,28 @@ func GetUser(ctx *gin.Context) (string, error) {
 
 // Create a JWT and set the "login" cookie to store that JWT
 func setLoginCookie(ctx *gin.Context, user string) {
-	key, err := config.GetIssuerPrivateJWK()
+	scopes := []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Monitoring_Query, token_scopes.Monitoring_Scrape}
+
+	loginCookieTokenCfg := utils.TokenConfig{
+		TokenProfile: utils.WLCG,
+		Lifetime:     30 * time.Minute,
+		Issuer:       param.Server_ExternalWebUrl.GetString(),
+		Audience:     []string{param.Server_ExternalWebUrl.GetString()},
+		Version:      "1.0",
+		Subject:      "user",
+		Claims:       map[string]string{"scope": token_scopes.GetScopeString(scopes)},
+	}
+
+	// CreateToken also handles validation for us
+	tok, err := loginCookieTokenCfg.CreateToken()
 	if err != nil {
-		log.Errorln("Failure when loading the cookie signing key:", err)
+		log.Errorln("Failed to create login cookie token:", err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Unable to create login cookies"})
 		return
 	}
 
-	scopes := []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Monitoring_Query, token_scopes.Monitoring_Scrape}
-	now := time.Now()
-	tok, err := jwt.NewBuilder().
-		Claim("scope", token_scopes.GetScopeString(scopes)).
-		Issuer(param.Server_ExternalWebUrl.GetString()).
-		IssuedAt(now).
-		Expiration(now.Add(30 * time.Minute)).
-		NotBefore(now).
-		Subject(user).
-		Build()
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to build token"})
-		return
-	}
-
-	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, key))
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to sign login token"})
-		return
-	}
-
 	// One cookie should be used for all path
-	ctx.SetCookie("login", string(signed), 30*60, "/", ctx.Request.URL.Host, true, true)
+	ctx.SetCookie("login", tok, 30*60, "/", ctx.Request.URL.Host, true, true)
 	ctx.SetSameSite(http.SameSiteStrictMode)
 }
 

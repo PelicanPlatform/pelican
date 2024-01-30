@@ -21,17 +21,17 @@ package director
 import (
 	"context"
 	"strings"
-	"time"
 
 	"github.com/jellydator/ttlcache/v3"
-	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwt"
-	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/token_scopes"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 // List all namespaces from origins registered at the director
@@ -76,29 +76,24 @@ func CreateDirectorSDToken() (string, error) {
 	if directorURL == "" {
 		return "", errors.New("Director URL is not known; cannot create director service discovery token")
 	}
-	tokenExpireTime := param.Monitoring_TokenExpiresIn.GetDuration()
 
-	tok, err := jwt.NewBuilder().
-		Claim("scope", token_scopes.Pelican_DirectorServiceDiscovery.String()).
-		Issuer(directorURL).
-		Audience([]string{directorURL}).
-		Subject("director").
-		Expiration(time.Now().Add(tokenExpireTime)).
-		Build()
-	if err != nil {
-		return "", err
+	promTokenCfg := utils.TokenConfig{
+		TokenProfile: utils.WLCG,
+		Lifetime:     param.Monitoring_TokenExpiresIn.GetDuration(),
+		Issuer:       directorURL,
+		Audience:     []string{directorURL},
+		Version:      "1.0",
+		Subject:      "director",
+		Claims:       map[string]string{"scope": token_scopes.Pelican_DirectorServiceDiscovery.String()},
 	}
 
-	key, err := config.GetIssuerPrivateJWK()
+	// CreateToken also handles validation for us
+	tok, err := promTokenCfg.CreateToken()
 	if err != nil {
-		return "", errors.Wrap(err, "failed to load the director's JWK")
+		return "", errors.Wrap(err, "failed to create director prometheus token")
 	}
 
-	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, key))
-	if err != nil {
-		return "", err
-	}
-	return string(signed), nil
+	return tok, nil
 }
 
 // Verify that a token received is a valid token from director and has
@@ -155,29 +150,23 @@ func CreateDirectorScrapeToken() (string, error) {
 	// We assume this function is only called on a director server,
 	// the external address of which should be the director's URL
 	directorURL := param.Server_ExternalWebUrl.GetString()
-	tokenExpireTime := param.Monitoring_TokenExpiresIn.GetDuration()
 
-	tok, err := jwt.NewBuilder().
-		Claim("scope", token_scopes.Monitoring_Scrape.String()).
-		Issuer(directorURL). // Exclude audience from token to prevent http header overflow
-		Subject("director").
-		Expiration(time.Now().Add(tokenExpireTime)).
-		Build()
-	if err != nil {
-		return "", err
+	scrapeTokenCfg := utils.TokenConfig{
+		TokenProfile: utils.WLCG,
+		Version:      "1.0",
+		Lifetime:     param.Monitoring_TokenExpiresIn.GetDuration(),
+		Issuer:       directorURL,
+		Audience:     []string{"prometheus"},
+		Subject:      "director",
+		Claims:       map[string]string{"scope": token_scopes.Monitoring_Scrape.String()},
 	}
 
-	key, err := config.GetIssuerPrivateJWK()
-
+	tok, err := scrapeTokenCfg.CreateToken()
 	if err != nil {
-		return "", errors.Wrap(err, "failed to load the director's private JWK")
+		return "", errors.Wrap(err, "failed to create director scraping token")
 	}
 
-	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, key))
-	if err != nil {
-		return "", err
-	}
-	return string(signed), nil
+	return tok, nil
 }
 
 // Configure TTL caches to enable cache eviction and other additional cache events handling logic
