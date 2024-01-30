@@ -660,6 +660,7 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 	viper.SetDefault("OIDC.ClientSecretFile", filepath.Join(configDir, "oidc-client-secret"))
 	viper.SetDefault("Cache.ExportLocation", "/")
 	viper.SetDefault("Registry.RequireKeyChaining", true)
+	viper.SetDefault("Shoveler.TokenLocation", "/etc/pelican/shoveler-token")
 	if IsRootExecution() {
 		viper.SetDefault("Xrootd.RunLocation", filepath.Join("/run", "pelican", "xrootd", xrootdPrefix))
 		viper.SetDefault("Cache.DataLocation", "/run/pelican/xcache")
@@ -667,10 +668,12 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 		viper.SetDefault("Director.GeoIPLocation", "/var/cache/pelican/maxmind/GeoLite2-City.mmdb")
 		viper.SetDefault("Registry.DbLocation", "/var/lib/pelican/registry.sqlite")
 		viper.SetDefault("Monitoring.DataLocation", "/var/lib/pelican/monitoring/data")
+		viper.SetDefault("Shoveler.QueueDirectory", "/var/spool/pelican/shoveler/queue")
 	} else {
 		viper.SetDefault("Director.GeoIPLocation", filepath.Join(configDir, "maxmind", "GeoLite2-City.mmdb"))
 		viper.SetDefault("Registry.DbLocation", filepath.Join(configDir, "ns-registry.sqlite"))
 		viper.SetDefault("Monitoring.DataLocation", filepath.Join(configDir, "monitoring/data"))
+		viper.SetDefault("Shoveler.QueueDirectory", filepath.Join(configDir, "shoveler/queue"))
 
 		if userRuntimeDir := os.Getenv("XDG_RUNTIME_DIR"); userRuntimeDir != "" {
 			runtimeDir := filepath.Join(userRuntimeDir, "pelican", xrootdPrefix)
@@ -700,6 +703,11 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 	err = os.MkdirAll(param.Monitoring_DataLocation.GetString(), 0750)
 	if err != nil {
 		return errors.Wrapf(err, "Failure when creating a directory for the monitoring data")
+	}
+
+	err = os.MkdirAll(param.Shoveler_QueueDirectory.GetString(), 0750)
+	if err != nil {
+		return errors.Wrapf(err, "Failure when creating a directory for the shoveler on-disk queue")
 	}
 
 	hostname, err := os.Hostname()

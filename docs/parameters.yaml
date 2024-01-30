@@ -1227,14 +1227,14 @@ description: >-
 
   The exchange to shovel messages
 type: string
-default: none
+default: "shoveled-xrd"
 components: ["origin", "cache"]
 ---
 name: Shoveler.Topic
 description: >-
   For amqp and stomp.
 
-  The topic of the messages
+  The topic of the messages. For stomp, it defaults to xrootd.shoveler
 type: string
 default: none
 components: ["origin", "cache"]
@@ -1245,7 +1245,7 @@ description: >-
 
   A filepath to the location of the JWT used for authenticating amqp connection
 type: filename
-default: /etc/pelican/xrootd-monitoring-shoveler-token
+default: /etc/pelican/shoveler-token
 components: ["origin", "cache"]
 ---
 name: Shoveler.Username
@@ -1284,19 +1284,19 @@ type: filename
 default: none
 components: ["origin", "cache"]
 ---
-name: Shoveler.ListenPort
+name: Shoveler.PortLower
 description: >-
-  The port to listen to the incoming XRootD monitoring packet in UDP
+  The lower end of a range of Shoveler ports for Shoveler to set up UDP server
 type: int
-default: 9993
-components: ["origin", "cache"]
+default: 9930
+components: ["origin"]
 ---
-name: Shoveler.ListenIP
+name: Shoveler.PortHigher
 description: >-
-  The IP addresses to listen to the incoming XRootD monitoring packet in UDP
-type: string
-default: "0.0.0.0"
-components: ["origin", "cache"]
+  The lower end of a range of Shoveler ports for Shoveler to set up UDP server
+type: int
+default: 9999
+components: ["origin"]
 ---
 name: Shoveler.OutputDestinations
 description: >-
@@ -1319,7 +1319,8 @@ description: >-
   it will store messages over the 100 in memory onto disk into this directory.  Once the connection has been re-established
   the queue will be emptied.  The queue on disk is persistent between restarts, so a persistent directory should be used.
 type: filename
-default: /var/spool/pelican/xrootd-monitoring-shoveler-queue
+root_default: /var/spool/pelican/shoveler/queue
+default: $ConfigBase/shoveler/queue
 components: ["origin", "cache"]
 ---
 name: Shoveler.IPMapping

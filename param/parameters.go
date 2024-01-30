@@ -123,7 +123,6 @@ var (
 	Shoveler_Cert = StringParam{"Shoveler.Cert"}
 	Shoveler_CertKey = StringParam{"Shoveler.CertKey"}
 	Shoveler_Exchange = StringParam{"Shoveler.Exchange"}
-	Shoveler_ListenIP = StringParam{"Shoveler.ListenIP"}
 	Shoveler_MessageQueueProtocol = StringParam{"Shoveler.MessageQueueProtocol"}
 	Shoveler_Password = StringParam{"Shoveler.Password"}
 	Shoveler_QueueDirectory = StringParam{"Shoveler.QueueDirectory"}
@@ -169,7 +168,8 @@ var (
 	Monitoring_PortLower = IntParam{"Monitoring.PortLower"}
 	Server_IssuerPort = IntParam{"Server.IssuerPort"}
 	Server_WebPort = IntParam{"Server.WebPort"}
-	Shoveler_ListenPort = IntParam{"Shoveler.ListenPort"}
+	Shoveler_PortHigher = IntParam{"Shoveler.PortHigher"}
+	Shoveler_PortLower = IntParam{"Shoveler.PortLower"}
 	Transport_MaxIdleConns = IntParam{"Transport.MaxIdleConns"}
 	Xrootd_Port = IntParam{"Xrootd.Port"}
 )

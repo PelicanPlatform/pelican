@@ -149,11 +149,11 @@ type config struct {
 		Enable bool
 		Exchange string
 		IPMapping interface{}
-		ListenIP string
-		ListenPort int
 		MessageQueueProtocol string
 		OutputDestinations []string
 		Password string
+		PortHigher int
+		PortLower int
 		QueueDirectory string
 		TokenLocation string
 		Topic string
@@ -337,11 +337,11 @@ type configWithType struct {
 		Enable struct { Type string; Value bool }
 		Exchange struct { Type string; Value string }
 		IPMapping struct { Type string; Value interface{} }
-		ListenIP struct { Type string; Value string }
-		ListenPort struct { Type string; Value int }
 		MessageQueueProtocol struct { Type string; Value string }
 		OutputDestinations struct { Type string; Value []string }
 		Password struct { Type string; Value string }
+		PortHigher struct { Type string; Value int }
+		PortLower struct { Type string; Value int }
 		QueueDirectory struct { Type string; Value string }
 		TokenLocation struct { Type string; Value string }
 		Topic struct { Type string; Value string }
