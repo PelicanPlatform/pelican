@@ -189,6 +189,8 @@ func checkUniqueInstitutions(insts []Institution) bool {
 	return true
 }
 
+// Returns the institution options that are fetched from Registry.InstitutionsUrl
+// and stored in a TTL cache
 func getCachedInstitutions() (inst []Institution, intError error, extError error) {
 	if institutionsCache == nil {
 		return nil, errors.New("institutionsCache isn't initialized"), errors.New("Internal institution cache wasn't initialized")
@@ -221,7 +223,7 @@ func getCachedInstitutions() (inst []Institution, intError error, extError error
 			return
 		}
 		if res.StatusCode != 200 {
-			intError = errors.Wrap(err, fmt.Sprintf("Error response when fetching institution list with code %d", res.StatusCode))
+			intError = errors.New(fmt.Sprintf("Error response when fetching institution list with code %d", res.StatusCode))
 			extError = errors.New(fmt.Sprint("Error when fetching institution from remote url, remote server error with code: ", res.StatusCode))
 			return
 		}
@@ -245,14 +247,10 @@ func getCachedInstitutions() (inst []Institution, intError error, extError error
 		institutionsCacheMutex.RLock()
 		defer institutionsCacheMutex.RUnlock()
 		institutions := institutionsCache.Get(instUrl.String())
-		if institutions.Value() == nil {
-			intError = errors.New(fmt.Sprint("Fail to get institutions from internal TTL cache, value is nil from key: ", instUrl))
-			extError = errors.New("Fail to get institutions from internal TTL cache")
-			return
-		}
-		if institutions.IsExpired() {
-			intError = errors.New(fmt.Sprintf("Cached institution with key %q is expired at %v", institutions.Key(), institutions.ExpiresAt()))
-			extError = errors.New("Expired institution cache")
+		// institutions == nil if key DNE or item has expired
+		if institutions == nil || institutions.Value() == nil {
+			intError = errors.New(fmt.Sprint("Fail to get institutions from internal TTL cache, key is nil or value is nil from key: ", instUrl))
+			extError = errors.New("Fail to get institutions from internal cache, key might be expired")
 			return
 		}
 		return institutions.Value(), nil, nil
@@ -299,7 +297,11 @@ func listNamespaces(ctx *gin.Context) {
 	// For unauthenticated users, it returns namespaces with AdminMetadata.Status = Approved
 	if isAuthed {
 		if queryParams.Status != "" {
-			filterNs.AdminMetadata.Status = RegistrationStatus(queryParams.Status)
+			if IsValidRegStatus(queryParams.Status) {
+				filterNs.AdminMetadata.Status = RegistrationStatus(queryParams.Status)
+			} else {
+				ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid query parameters: status must be one of  'Pending', 'Approved', 'Denied', 'Unknown'"})
+			}
 		}
 	} else {
 		filterNs.AdminMetadata.Status = Approved
@@ -335,7 +337,11 @@ func listNamespacesForUser(ctx *gin.Context) {
 	filterNs := Namespace{AdminMetadata: AdminMetadata{UserID: user}}
 
 	if queryParams.Status != "" {
-		filterNs.AdminMetadata.Status = RegistrationStatus(queryParams.Status)
+		if IsValidRegStatus(queryParams.Status) {
+			filterNs.AdminMetadata.Status = RegistrationStatus(queryParams.Status)
+		} else {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid query parameters: status must be one of  'Pending', 'Approved', 'Denied', 'Unknown'"})
+		}
 	}
 
 	namespaces, err := getNamespacesByFilter(filterNs, "")
@@ -374,7 +380,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 		id, err = strconv.Atoi(idStr)
 		if err != nil || id <= 0 {
 			// Handle the error if id is not a valid integer
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID format. ID must a non-zero integer"})
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID format. ID must a positive integer"})
 			return
 		}
 	}
@@ -613,6 +619,19 @@ func getNamespaceJWKS(ctx *gin.Context) {
 }
 
 func listInstitutions(ctx *gin.Context) {
+	// When Registry.Institutions is set
+	institutions := []Institution{}
+	if err := param.Registry_Institutions.Unmarshal(&institutions); err != nil {
+		log.Error("Fail to read server configuration of institutions", err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Fail to read server configuration of institutions"})
+		return
+	}
+
+	if len(institutions) != 0 {
+		ctx.JSON(http.StatusOK, institutions)
+		return
+	}
+
 	// When Registry.InstitutionsUrl is set and Registry.Institutions is unset
 	if institutionsCache != nil {
 		insts, intErr, extErr := getCachedInstitutions()
@@ -628,20 +647,13 @@ func listInstitutions(ctx *gin.Context) {
 		ctx.JSON(http.StatusOK, insts)
 		return
 	}
-	// When Registry.Institutions is set
-	institutions := []Institution{}
-	if err := param.Registry_Institutions.Unmarshal(&institutions); err != nil {
-		log.Error("Fail to read server configuration of institutions", err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Fail to read server configuration of institutions"})
-		return
-	}
 
+	// When both are unset
 	if len(institutions) == 0 {
 		log.Error("Server didn't configure Registry.Institutions")
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Server didn't configure Registry.Institutions"})
 		return
 	}
-	ctx.JSON(http.StatusOK, institutions)
 }
 
 // Define Gin APIs for registry Web UI. All endpoints are user-facing

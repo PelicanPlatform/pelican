@@ -132,6 +132,10 @@ func (a AdminMetadata) Equal(b AdminMetadata) bool {
 		a.UpdatedAt.Equal(b.UpdatedAt)
 }
 
+func IsValidRegStatus(s string) bool {
+	return s == "Pending" || s == "Approved" || s == "Denied" || s == "Unknown"
+}
+
 func createNamespaceTable() {
 	//We put a size limit on admin_metadata to guard against potentially future
 	//malicious large inserts
