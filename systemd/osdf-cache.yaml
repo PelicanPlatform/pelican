@@ -5,15 +5,13 @@ Logging:
 ##  Valid Levels are Trace, Debug, Info, Warning, Error, Fatal and Panic.
 #   Level: "Error"
 Federation:
-  DirectorUrl: https://director-origins.osg-htc.org
+  DirectorUrl: https://osdf-director-origins.osg-htc.org
 Server:
   TLSCertificate: /etc/grid-security/xrd/xrdcert.pem
   TLSKey: /etc/grid-security/xrd/xrdkey.pem
   TLSCACertificateFile: /etc/pki/tls/certs/ca-bundle.crt
   # TLSCACertificateDirectory: /etc/grid-security/certificates
   EnableUI: false
-  # do not conflict with the public cache, if one is running
-  WebPort: 8445
 #  Hostname: f.q.d.n
 Xrootd:
   Sitename: TOPOLOGY_RESOURCE_NAME

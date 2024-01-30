@@ -10,8 +10,6 @@ Server:
   TLSCACertificateFile: /etc/pki/tls/certs/ca-bundle.crt
   # TLSCACertificateDirectory: /etc/grid-security/certificates
   EnableUI: false
-  # do not conflict with the public origin, if one is running
-  WebPort: 8445
 #  Hostname: f.q.d.n
 Xrootd:
   Sitename: TOPOLOGY_RESOURCE_NAME
