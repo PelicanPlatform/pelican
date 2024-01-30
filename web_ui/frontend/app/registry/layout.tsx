@@ -24,6 +24,7 @@ import Image from "next/image";
 import PelicanLogo from "@/public/static/images/PelicanPlatformLogo_Icon.png";
 import IconButton from "@mui/material/IconButton";
 import {Add, Build} from "@mui/icons-material";
+import {Main} from "@/components/layout/Main";
 
 export const metadata = {
     title: 'Pelican Registry',
@@ -65,9 +66,9 @@ export default function RootLayout({
                     </Tooltip>
                 </Box>
             </Sidebar>
-            <Box component={"main"} p={2} pl={"90px"} display={"flex"} minHeight={"100vh"} flexGrow={1}>
+            <Main>
                 {children}
-            </Box>
+            </Main>
         </Box>
     )
 }
