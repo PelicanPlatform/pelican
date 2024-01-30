@@ -2,7 +2,9 @@
 
 package token_scopes
 
-import "github.com/pkg/errors"
+import (
+	"github.com/pkg/errors"
+)
 
 type TokenScope string
 
@@ -15,7 +17,7 @@ const (
 	Monitoring_Scrape TokenScope = "monitoring.scrape"
 	Monitoring_Query TokenScope = "monitoring.query"
 
-	// WLCG Storage Token scopes
+	// Storage Scopes
 	Storage_Read TokenScope = "storage.read:"
 	Storage_Create TokenScope = "storage.create:"
 	Storage_Modify TokenScope = "storage.modify:"
@@ -29,7 +31,7 @@ func (s TokenScope) String() string {
 // Interface that allows us to assign a path to some token scopes, such as "storage.read:/foo/bar"
 func (s TokenScope) Path(path string) (TokenScope, error) {
 	// Only some of the token scopes can be assigned a path. This list might grow in the future.
-	if !(s == Storage_Read || s == Storage_Create || s == Storage_Modify || s == Storage_Stage) {
+	if !(s == Storage_Read || s == Storage_Create || s == Storage_Modify || s == Storage_Stage || false) { // final "false" is a hack so we don't have to post process the template we generate from
 		return "", errors.New("cannot assign path to non-storage token scope")
 	}
 
