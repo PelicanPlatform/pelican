@@ -570,7 +570,6 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string, payload *
 	log.Debugln("Starting the HTTP transfer...")
 	filename := path.Base(dest)
 	resp := client.Do(req)
-	serverVersion := resp.HTTPResponse.Header.Get("Server")
 	downloadStart := time.Now()
 	// Check the error real quick
 	if resp.IsComplete() {
@@ -579,9 +578,10 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string, payload *
 				err = fmt.Errorf("Local copy of file is larger than remote copy %w", grab.ErrBadLength)
 			}
 			log.Errorln("Failed to download:", err)
-			return 0, 0, serverVersion, &ConnectionSetupError{Err: err}
+			return 0, 0, "", &ConnectionSetupError{Err: err}
 		}
 	}
+	serverVersion := resp.HTTPResponse.Header.Get("Server")
 
 	// Size of the download
 	contentLength := resp.Size()
@@ -736,7 +736,7 @@ Loop:
 		if errors.Is(err, syscall.ECONNREFUSED) ||
 			errors.Is(err, syscall.ECONNRESET) ||
 			errors.Is(err, syscall.ECONNABORTED) {
-			return 0, 0, serverVersion, &ConnectionSetupError{URL: resp.Request.URL().String()}
+			return 0, 0, "", &ConnectionSetupError{URL: resp.Request.URL().String()}
 		}
 		log.Debugln("Got error from HTTP download", err)
 		return 0, 0, serverVersion, err
