@@ -58,7 +58,7 @@ export default function Home() {
             })
 
             if(response.ok){
-                router.push("../password/index.html")
+                router.push("../password/")
             } else {
                 try {
                     let data = await response.json()
