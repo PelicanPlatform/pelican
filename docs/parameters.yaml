@@ -1309,7 +1309,7 @@ name: Shoveler.VerifyHeader
 description: >-
   Whether to verify the header of the packet matches XRootD's monitoring packet format
 type: bool
-default: true
+default: false
 components: ["origin", "cache"]
 ---
 name: Shoveler.QueueDirectory
