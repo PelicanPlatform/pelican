@@ -1,15 +1,18 @@
-## Enable Debug to send logs, including XRootD logs, to the system journal
+## Enable Debug to send detailed logs, including XRootD logs, to the log file
 # Debug: false
-# Logging:
-#   Level: "Error"
+Logging:
+  LogLocation: /var/log/pelican-origin.log
+  ## Valid Levels are Trace, Debug, Info, Warning, Error, Fatal and Panic.
+  # Level: "Error"
 Federation:
+  ## The main URL for your federation. You must specify this.
   DiscoveryUrl:
-#Server:
-#  Hostname: f.q.d.n
+  ## Set Hostname to the external DNS name this can be accessed over, if
+  ## different than the current hostname.
+  # Hostname:
 Xrootd:
   Mount: "/mnt/pelican"
-  Port: 8443
 Origin:
   NamespacePrefix: "/MY_NAMESPACE"
-  Multiuser: false
-  EnableUI: true
+  ## Enable multiuser to support Unix-based file ownership in the objects being served.
+  # Multiuser: false

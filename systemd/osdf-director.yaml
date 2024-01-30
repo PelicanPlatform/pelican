@@ -1,7 +1,9 @@
-## Enable Debug to send logs to the system journal
+## Enable Debug to send detailed logs to the log file
 # Debug: false
-# Logging:
-#   Level: "Error"
+Logging:
+  LogLocation: /var/log/osdf-director.log
+  ## Valid Levels are Trace, Debug, Info, Warning, Error, Fatal and Panic.
+  # Level: "Error"
 Server:
   TLSCertificate: /etc/grid-security/xrd/xrdcert.pem
   TLSKey: /etc/grid-security/xrd/xrdkey.pem
