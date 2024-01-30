@@ -49,16 +49,12 @@ require (
 )
 
 require (
-	github.com/go-stomp/stomp/v3 v3.0.3 // indirect
-	github.com/gofrs/flock v0.7.1 // indirect
 	github.com/gorilla/context v1.1.1 // indirect
 	github.com/gorilla/securecookie v1.1.2 // indirect
 	github.com/gorilla/sessions v1.2.1 // indirect
-	github.com/joncrlsn/dque v0.0.0-20211108142734-c2ef48c5192a // indirect
 	github.com/sagikazarmark/locafero v0.4.0 // indirect
 	github.com/sagikazarmark/slog-shim v0.1.0 // indirect
 	github.com/sourcegraph/conc v0.3.0 // indirect
-	github.com/streadway/amqp v1.0.0 // indirect
 	go.uber.org/multierr v1.9.0 // indirect
 )
 
@@ -136,7 +132,6 @@ require (
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/oklog/ulid v1.3.1 // indirect
-	github.com/opensciencegrid/xrootd-monitoring-shoveler v1.3.0
 	github.com/oschwald/maxminddb-golang v1.11.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.1.0 // indirect
 	github.com/pkg/browser v0.0.0-20210911075715-681adbf594b8 // indirect
