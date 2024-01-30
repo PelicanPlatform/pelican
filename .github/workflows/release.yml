@@ -28,8 +28,8 @@ jobs:
 
           # Get the current tag and set the package.json version to it
           npm version ${GITHUB_REF_NAME:1}
-          
-          # Add some verbosity 
+
+          # Add some verbosity
           echo "NPM version is now $(npm version)"
       - name: Build the website
         run: |
