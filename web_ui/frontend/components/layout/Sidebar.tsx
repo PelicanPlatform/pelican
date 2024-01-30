@@ -139,7 +139,7 @@ const PelicanSpeedDial = () => {
                             <Box pl={1}>
                                 <Tooltip title={"Active Version"} arrow>
                                     <Paper elevation={2} sx={{ bgcolor: "primary.light", borderRadius: "20px", "&:hover": {bgcolor: "white"}}}>
-                                        <Button sx={{fontSize: "16px", color: "black"}} href={"https://github.com/PelicanPlatform/pelican/releases"}>
+                                        <Button sx={{fontSize: "16px", color: "black"}} href={`https://github.com/PelicanPlatform/pelican/releases/tag/v${getVersionNumber()}`}>
                                             {getVersionNumber()}
                                         </Button>
                                     </Paper>
