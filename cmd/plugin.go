@@ -319,19 +319,24 @@ func moveObjects(source []string, methods []string, upload bool, wg *sync.WaitGr
 				developerData[fmt.Sprintf("TransferFileBytes%d", attempt.Number)] = attempt.TransferFileBytes
 				developerData[fmt.Sprintf("TimeToFirstByte%d", attempt.Number)] = attempt.TimeToFirstByte
 				developerData[fmt.Sprintf("Endpoint%d", attempt.Number)] = attempt.Endpoint
+				developerData[fmt.Sprintf("TransferEndTime%d", attempt.Number)] = attempt.TransferEndTime
+				developerData[fmt.Sprintf("ServerVersion%d", attempt.Number)] = attempt.ServerVersion
 				if attempt.Error != nil {
 					developerData[fmt.Sprintf("TransferError%d", attempt.Number)] = attempt.Error
 				}
 			}
-		} else if len(transferResults) != 0 && upload {
-			developerData["Attempts"] = 0
+		} else if len(transferResults) != 0 && upload { // For uploads, we only care about idx 0 since there is only 1 Attempt and 1 TransferResult
 			developerData["TransferFileBytes"] = transferResults[0].TransferedBytes
+			if len(transferResults[0].Attempts) != 0 { // Should be fine but check to be sure so we don't go out of bounds
+				developerData["Endpoint"] = transferResults[0].Attempts[0].Endpoint
+				developerData["TransferEndTime"] = transferResults[0].Attempts[0].TransferEndTime
+				developerData["ServerVersion"] = transferResults[0].Attempts[0].ServerVersion
+				developerData["TimeToFirstByte"] = transferResults[0].Attempts[0].TimeToFirstByte
+			}
 			if transferResults[0].Error != nil {
 				developerData["TransferError"] = transferResults[0].Error
 			}
 		}
-		// TODO: more classAds...
-		//...
 
 		resultAd.Set("DeveloperData", developerData)
 

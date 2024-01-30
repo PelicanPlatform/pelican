@@ -190,7 +190,7 @@ func TestSlowTransfers(t *testing.T) {
 	var err error
 	// Do a quick timeout
 	go func() {
-		_, _, err = DownloadHTTP(transfers[0], filepath.Join(t.TempDir(), "test.txt"), "", nil)
+		_, _, _, err = DownloadHTTP(transfers[0], filepath.Join(t.TempDir(), "test.txt"), "", nil)
 		finishedChannel <- true
 	}()
 
@@ -253,7 +253,7 @@ func TestStoppedTransfer(t *testing.T) {
 	var err error
 
 	go func() {
-		_, _, err = DownloadHTTP(transfers[0], filepath.Join(t.TempDir(), "test.txt"), "", nil)
+		_, _, _, err = DownloadHTTP(transfers[0], filepath.Join(t.TempDir(), "test.txt"), "", nil)
 		finishedChannel <- true
 	}()
 
@@ -283,7 +283,7 @@ func TestConnectionError(t *testing.T) {
 	addr := l.Addr().String()
 	l.Close()
 
-	_, _, err = DownloadHTTP(TransferDetails{Url: url.URL{Host: addr, Scheme: "http"}, Proxy: false}, filepath.Join(t.TempDir(), "test.txt"), "", nil)
+	_, _, _, err = DownloadHTTP(TransferDetails{Url: url.URL{Host: addr, Scheme: "http"}, Proxy: false}, filepath.Join(t.TempDir(), "test.txt"), "", nil)
 
 	assert.IsType(t, &ConnectionSetupError{}, err)
 
@@ -316,7 +316,7 @@ func TestTrailerError(t *testing.T) {
 	assert.Equal(t, svr.URL, transfers[0].Url.String())
 
 	// Call DownloadHTTP and check if the error is returned correctly
-	_, _, err := DownloadHTTP(transfers[0], filepath.Join(t.TempDir(), "test.txt"), "", nil)
+	_, _, _, err := DownloadHTTP(transfers[0], filepath.Join(t.TempDir(), "test.txt"), "", nil)
 
 	assert.NotNil(t, err)
 	assert.EqualError(t, err, "transfer error: Unable to read test.txt; input/output error")
