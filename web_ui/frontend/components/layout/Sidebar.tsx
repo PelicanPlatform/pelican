@@ -93,7 +93,7 @@ const PelicanSpeedDial = () => {
         {
             icon: <GitHubIcon/>,
             title: 'Github',
-            href: "github.com/PelicanPlatform/pelican"
+            href: "https://github.com/PelicanPlatform/pelican"
         },
         {
             icon: <BugReport/>,
