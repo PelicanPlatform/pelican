@@ -6,7 +6,6 @@ After = network.target nss-lookup.target
 ExecStart = /usr/bin/osdf --config /etc/pelican/osdf-director.yaml director serve
 Restart = on-failure
 RestartSec = 20s
-WorkingDirectory = /var/spool/osdf
 
 [Install]
 WantedBy = multi-user.target
