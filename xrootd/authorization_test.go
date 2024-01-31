@@ -292,7 +292,7 @@ func TestGenerateConfig(t *testing.T) {
 }
 
 func TestWriteOriginAuthFiles(t *testing.T) {
-
+	viper.Reset()
 	originAuthTester := func(server server_utils.XRootDServer, authStart string, authResult string) func(t *testing.T) {
 		return func(t *testing.T) {
 			defer viper.Reset()
