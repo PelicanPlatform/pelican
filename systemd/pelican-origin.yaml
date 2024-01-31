@@ -10,7 +10,7 @@ Federation:
   ## Set Hostname to the external DNS name this can be accessed over, if
   ## different than the current hostname.
   # Hostname:
-Xrootd:
+XRootD:
   Mount: "/mnt/pelican"
 Origin:
   NamespacePrefix: "/MY_NAMESPACE"

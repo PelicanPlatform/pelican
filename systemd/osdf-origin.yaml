@@ -14,7 +14,7 @@ Server:
   ## Set Hostname to the external DNS name this can be accessed over, if
   ## different than the current hostname.
   # Hostname:
-Xrootd:
+XRootD:
   ## Sitename is the resource name this origin is registered as under Topology.
   ## You must set this.
   Sitename: TOPOLOGY_RESOURCE_NAME
