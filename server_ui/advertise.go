@@ -149,10 +149,10 @@ func advertiseInternal(ctx context.Context, server server_utils.XRootDServer) er
 	if resp.StatusCode > 299 {
 		var respErr directorResponse
 		if unmarshalErr := json.Unmarshal(body, &respErr); unmarshalErr != nil { // Error creating json
-			return errors.Wrapf(unmarshalErr, "Could not unmarshall the director's response, which responded %v from director registration: %v", resp.StatusCode, resp.Status)
+			return errors.Wrapf(unmarshalErr, "Could not unmarshal the director's response, which responded %v from director registration: %v", resp.StatusCode, resp.Status)
 		}
 		if respErr.ApprovalError {
-			return errors.Errorf("Your namespace has not been approved by an administrator.")
+			return fmt.Errorf("The namespace %q requires administrator approval. Please contact the administrators of %s for more information.", param.Origin_NamespacePrefix.GetString(), param.Federation_RegistryUrl.GetString())
 		}
 		return errors.Errorf("Error during director registration: %v\n", respErr.Error)
 	}

@@ -429,7 +429,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType ServerTy
 			ok, err := VerifyAdvertiseToken(engineCtx, token, namespace.Path)
 			if err != nil {
 				if err == adminApprovalErr {
-					log.Warningf("Failed to verify token. Namespace %q was not approved", namespace.Path)
+					log.Warningf("Failed to verify advertise token. Namespace %q requires administrator approval", namespace.Path)
 					ctx.JSON(http.StatusForbidden, gin.H{"approval_error": true, "error": fmt.Sprintf("The namespace %q was not approved by an administrator", namespace.Path)})
 					return
 				} else {

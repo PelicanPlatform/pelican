@@ -189,8 +189,8 @@ func VerifyAdvertiseToken(ctx context.Context, token, namespace string) (bool, e
 			}
 		}
 	}()
-	namespace_url_string := param.Federation_RegistryUrl.GetString()
-	approved, err := checkNamespaceStatus(namespace, namespace_url_string)
+	regUrlStr := param.Federation_RegistryUrl.GetString()
+	approved, err := checkNamespaceStatus(namespace, regUrlStr)
 	if err != nil {
 		return false, errors.Wrap(err, "Failed to check namespace approval status")
 	}
