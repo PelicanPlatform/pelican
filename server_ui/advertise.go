@@ -40,7 +40,8 @@ import (
 )
 
 type directorResponse struct {
-	Error string `json:"error"`
+	Error         string `json:"error"`
+	ApprovalError bool   `json:"approval_error"`
 }
 
 func LaunchPeriodicAdvertise(ctx context.Context, egrp *errgroup.Group, servers []server_utils.XRootDServer) error {
@@ -148,10 +149,10 @@ func advertiseInternal(ctx context.Context, server server_utils.XRootDServer) er
 	if resp.StatusCode > 299 {
 		var respErr directorResponse
 		if unmarshalErr := json.Unmarshal(body, &respErr); unmarshalErr != nil { // Error creating json
-			return errors.Wrapf(unmarshalErr, "Could not unmarshall the director's response, which responded %v from director registration: %v", resp.StatusCode, resp.Status)
+			return errors.Wrapf(unmarshalErr, "Could not unmarshal the director's response, which responded %v from director registration: %v", resp.StatusCode, resp.Status)
 		}
-		if resp.StatusCode == http.StatusForbidden {
-			return errors.Errorf("Error during director advertisement: Cache has not been approved by administrator.")
+		if respErr.ApprovalError {
+			return fmt.Errorf("The namespace %q requires administrator approval. Please contact the administrators of %s for more information.", param.Origin_NamespacePrefix.GetString(), param.Federation_RegistryUrl.GetString())
 		}
 		return errors.Errorf("Error during director registration: %v\n", respErr.Error)
 	}

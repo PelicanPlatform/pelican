@@ -2,6 +2,9 @@ package director
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"testing"
 	"time"
@@ -31,18 +34,39 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 	//Setup a private key and a token
 	viper.Set("IssuerKey", kfile)
 
-	viper.Set("Federation.RegistryUrl", "https://get-your-tokens.org")
 	viper.Set("Federation.DirectorURL", "https://director-url.org")
 
 	config.InitConfig()
 	err := config.InitServer(ctx, config.DirectorType)
 	require.NoError(t, err)
+	// Mock registry server
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.Method == "POST" && req.URL.Path == "/api/v1.0/registry/checkNamespaceStatus" {
+			res := checkStatusRes{Approved: true}
+			resByte, err := json.Marshal(res)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			_, err = w.Write(resByte)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		} else {
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ts.Close()
+
+	viper.Set("Federation.RegistryUrl", ts.URL)
 
 	kSet, err := config.GetIssuerPublicJWKS()
 	ar := MockCache{
 		GetFn: func(key string, keyset *jwk.Set) (jwk.Set, error) {
-			if key != "https://get-your-tokens.org/api/v1.0/registry/test-namespace/.well-known/issuer.jwks" {
-				t.Errorf("expecting: https://get-your-tokens.org/api/v1.0/registry/test-namespace/.well-known/issuer.jwks, got %q", key)
+			if key != ts.URL+"/api/v1.0/registry/test-namespace/.well-known/issuer.jwks" {
+				t.Errorf("expecting: %s/api/v1.0/registry/test-namespace/.well-known/issuer.jwks, got %q", ts.URL, key)
 			}
 			return *keyset, nil
 		},

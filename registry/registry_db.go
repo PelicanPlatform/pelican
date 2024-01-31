@@ -386,46 +386,34 @@ func getNamespaceJwksById(id int) (jwk.Set, error) {
 	return set, nil
 }
 
-func getNamespaceJwksByPrefix(prefix string, approvalRequired bool) (jwk.Set, error) {
-	var jwksQuery string
+func getNamespaceJwksByPrefix(prefix string) (jwk.Set, *AdminMetadata, error) {
 	var pubkeyStr string
-	if strings.HasPrefix(prefix, "/caches/") && approvalRequired {
-		adminMetadataStr := ""
-		jwksQuery = `SELECT pubkey, admin_metadata FROM namespace WHERE prefix = ?`
-		err := db.QueryRow(jwksQuery, prefix).Scan(&pubkeyStr, &adminMetadataStr)
-		if err != nil {
-			if err == sql.ErrNoRows {
-				return nil, errors.New("prefix not found in database")
-			}
-			return nil, errors.Wrap(err, "error performing cache pubkey query")
+	var adminMetadataStr string
+
+	jwksQuery := `SELECT pubkey, admin_metadata FROM namespace WHERE prefix = ?`
+	err := db.QueryRow(jwksQuery, prefix).Scan(&pubkeyStr, &adminMetadataStr)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil, errors.New("prefix not found in database")
 		}
-		if adminMetadataStr != "" { // Older version didn't have admin_metadata populated, skip checking
-			adminMetadata := AdminMetadata{}
-			if err = json.Unmarshal([]byte(adminMetadataStr), &adminMetadata); err != nil {
-				return nil, errors.Wrap(err, "Failed to unmarshal admin_metadata")
-			}
-			// TODO: Move this to upper functions that handles business logic to keep db access functions simple
-			if adminMetadata.Status != Approved {
-				return nil, serverCredsErr
-			}
-		}
-	} else {
-		jwksQuery := `SELECT pubkey FROM namespace WHERE prefix = ?`
-		err := db.QueryRow(jwksQuery, prefix).Scan(&pubkeyStr)
-		if err != nil {
-			if err == sql.ErrNoRows {
-				return nil, errors.New("prefix not found in database")
-			}
-			return nil, errors.Wrap(err, "error performing origin pubkey query")
+		return nil, nil, errors.Wrap(err, "error performing origin pubkey query")
+	}
+
+	adminMetadata := AdminMetadata{}
+
+	// For backward compatibility, if adminMetadata is an empty string, don't unmarshal json
+	if adminMetadataStr != "" {
+		if err := json.Unmarshal([]byte(adminMetadataStr), &adminMetadata); err != nil {
+			return nil, nil, errors.Wrap(err, "error parsing admin metadata")
 		}
 	}
 
 	set, err := jwk.ParseString(pubkeyStr)
 	if err != nil {
-		return nil, errors.Wrap(err, "Failed to parse pubkey as a jwks")
+		return nil, nil, errors.Wrap(err, "Failed to parse pubkey as a jwks")
 	}
 
-	return set, nil
+	return set, &adminMetadata, nil
 }
 
 func getNamespaceStatusById(id int) (RegistrationStatus, error) {

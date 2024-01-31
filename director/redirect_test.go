@@ -66,26 +66,37 @@ func TestDirectorRegistration(t *testing.T) {
 
 	viper.Reset()
 
-	viper.Set("Federation.RegistryUrl", "https://get-your-tokens.org")
+	// Mock registry server
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.Method == "POST" && req.URL.Path == "/api/v1.0/registry/checkNamespaceStatus" {
+			res := checkStatusRes{Approved: true}
+			resByte, err := json.Marshal(res)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			_, err = w.Write(resByte)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		} else {
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ts.Close()
+
+	viper.Set("Federation.RegistryUrl", ts.URL)
 
 	setupContext := func() (*gin.Context, *gin.Engine, *httptest.ResponseRecorder) {
 		// Setup httptest recorder and context for the the unit test
 		w := httptest.NewRecorder()
 		c, r := gin.CreateTestContext(w)
-		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			assert.Equal(t, "POST", req.Method, "Not POST Method")
-			_, err := w.Write([]byte(":)"))
-			assert.NoError(t, err)
-		}))
-		defer ts.Close()
-
-		c.Request = &http.Request{
-			URL: &url.URL{},
-		}
 		return c, r, w
 	}
 
-	generateToken := func(c *gin.Context) (jwk.Key, string, url.URL) {
+	generateToken := func() (jwk.Key, string, url.URL) {
 		// Create a private key to use for the test
 		privateKey, err := ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
 		assert.NoError(t, err, "Error generating private key")
@@ -104,8 +115,7 @@ func TestDirectorRegistration(t *testing.T) {
 
 		issuerURL := url.URL{
 			Scheme: "https",
-			Path:   "get-your-tokens.org/namespaces/foo/bar",
-			Host:   c.Request.URL.Host,
+			Path:   ts.URL,
 		}
 
 		// Create a token to be inserted
@@ -138,8 +148,9 @@ func TestDirectorRegistration(t *testing.T) {
 	setupMockCache := func(t *testing.T, publicKey jwk.Key) MockCache {
 		return MockCache{
 			GetFn: func(key string, keyset *jwk.Set) (jwk.Set, error) {
-				if key != "https://get-your-tokens.org/api/v1.0/registry/foo/bar/.well-known/issuer.jwks" {
-					t.Errorf("expecting: https://get-your-tokens.org/api/v1.0/registry/foo/bar/.well-known/issuer.jwks, got %q", key)
+				expectedKey := ts.URL + "/api/v1.0/registry/foo/bar/.well-known/issuer.jwks"
+				if key != expectedKey {
+					t.Errorf("expecting: %q, got %q", expectedKey, key)
 				}
 				return *keyset, nil
 			},
@@ -171,7 +182,7 @@ func TestDirectorRegistration(t *testing.T) {
 
 	t.Run("valid-token", func(t *testing.T) {
 		c, r, w := setupContext()
-		pKey, token, issuerURL := generateToken(c)
+		pKey, token, issuerURL := generateToken()
 		publicKey, err := jwk.PublicKeyOf(pKey)
 		assert.NoError(t, err, "Error creating public key from private key")
 
@@ -179,7 +190,7 @@ func TestDirectorRegistration(t *testing.T) {
 		useMockCache(ar, issuerURL)
 
 		isurl := url.URL{}
-		isurl.Path = "https://get-your-tokens.org"
+		isurl.Path = ts.URL
 
 		ad := OriginAdvertise{Name: "test", URL: "https://or-url.org", Namespaces: []NamespaceAd{{Path: "/foo/bar", Issuer: isurl}}}
 
@@ -204,7 +215,7 @@ func TestDirectorRegistration(t *testing.T) {
 		c, r, w := setupContext()
 		wrongPrivateKey, err := ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
 		assert.NoError(t, err, "Error creating another private key")
-		_, token, issuerURL := generateToken(c)
+		_, token, issuerURL := generateToken()
 
 		wrongPublicKey, err := jwk.PublicKeyOf(wrongPrivateKey)
 		assert.NoError(t, err, "Error creating public key from private key")
@@ -212,7 +223,7 @@ func TestDirectorRegistration(t *testing.T) {
 		useMockCache(ar, issuerURL)
 
 		isurl := url.URL{}
-		isurl.Path = "https://get-your-tokens.org"
+		isurl.Path = ts.URL
 
 		ad := OriginAdvertise{Name: "test", URL: "https://or-url.org", Namespaces: []NamespaceAd{{Path: "/foo/bar", Issuer: isurl}}}
 
@@ -234,14 +245,14 @@ func TestDirectorRegistration(t *testing.T) {
 
 	t.Run("valid-token-with-web-url", func(t *testing.T) {
 		c, r, w := setupContext()
-		pKey, token, issuerURL := generateToken(c)
+		pKey, token, issuerURL := generateToken()
 		publicKey, err := jwk.PublicKeyOf(pKey)
 		assert.NoError(t, err, "Error creating public key from private key")
 		ar := setupMockCache(t, publicKey)
 		useMockCache(ar, issuerURL)
 
 		isurl := url.URL{}
-		isurl.Path = "https://get-your-tokens.org"
+		isurl.Path = ts.URL
 
 		ad := OriginAdvertise{WebURL: "https://localhost:8844", Namespaces: []NamespaceAd{{Path: "/foo/bar", Issuer: isurl}}}
 
@@ -261,14 +272,14 @@ func TestDirectorRegistration(t *testing.T) {
 	// We want to ensure backwards compatibility for WebURL
 	t.Run("valid-token-without-web-url", func(t *testing.T) {
 		c, r, w := setupContext()
-		pKey, token, issuerURL := generateToken(c)
+		pKey, token, issuerURL := generateToken()
 		publicKey, err := jwk.PublicKeyOf(pKey)
 		assert.NoError(t, err, "Error creating public key from private key")
 		ar := setupMockCache(t, publicKey)
 		useMockCache(ar, issuerURL)
 
 		isurl := url.URL{}
-		isurl.Path = "https://get-your-tokens.org"
+		isurl.Path = ts.URL
 
 		ad := OriginAdvertise{Namespaces: []NamespaceAd{{Path: "/foo/bar", Issuer: isurl}}}
 
