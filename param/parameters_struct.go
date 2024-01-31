@@ -124,7 +124,9 @@ type config struct {
 		Institutions interface{}
 		InstitutionsUrl string
 		InstitutionsUrlReloadMinutes time.Duration
+		RequireCacheApproval bool
 		RequireKeyChaining bool
+		RequireOriginApproval bool
 	}
 	Server struct {
 		EnableUI bool
@@ -298,7 +300,9 @@ type configWithType struct {
 		Institutions struct { Type string; Value interface{} }
 		InstitutionsUrl struct { Type string; Value string }
 		InstitutionsUrlReloadMinutes struct { Type string; Value time.Duration }
+		RequireCacheApproval struct { Type string; Value bool }
 		RequireKeyChaining struct { Type string; Value bool }
+		RequireOriginApproval struct { Type string; Value bool }
 	}
 	Server struct {
 		EnableUI struct { Type string; Value bool }

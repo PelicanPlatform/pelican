@@ -132,6 +132,10 @@ func (a AdminMetadata) Equal(b AdminMetadata) bool {
 		a.UpdatedAt.Equal(b.UpdatedAt)
 }
 
+func IsValidRegStatus(s string) bool {
+	return s == "Pending" || s == "Approved" || s == "Denied" || s == "Unknown"
+}
+
 func createNamespaceTable() {
 	//We put a size limit on admin_metadata to guard against potentially future
 	//malicious large inserts
@@ -335,46 +339,34 @@ func getNamespaceJwksById(id int) (jwk.Set, error) {
 	return set, nil
 }
 
-func getNamespaceJwksByPrefix(prefix string, approvalRequired bool) (jwk.Set, error) {
-	var jwksQuery string
+func getNamespaceJwksByPrefix(prefix string) (jwk.Set, *AdminMetadata, error) {
 	var pubkeyStr string
-	if strings.HasPrefix(prefix, "/caches/") && approvalRequired {
-		adminMetadataStr := ""
-		jwksQuery = `SELECT pubkey, admin_metadata FROM namespace WHERE prefix = ?`
-		err := db.QueryRow(jwksQuery, prefix).Scan(&pubkeyStr, &adminMetadataStr)
-		if err != nil {
-			if err == sql.ErrNoRows {
-				return nil, errors.New("prefix not found in database")
-			}
-			return nil, errors.Wrap(err, "error performing cache pubkey query")
+	var adminMetadataStr string
+
+	jwksQuery := `SELECT pubkey, admin_metadata FROM namespace WHERE prefix = ?`
+	err := db.QueryRow(jwksQuery, prefix).Scan(&pubkeyStr, &adminMetadataStr)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil, errors.New("prefix not found in database")
 		}
-		if adminMetadataStr != "" { // Older version didn't have admin_metadata populated, skip checking
-			adminMetadata := AdminMetadata{}
-			if err = json.Unmarshal([]byte(adminMetadataStr), &adminMetadata); err != nil {
-				return nil, errors.Wrap(err, "Failed to unmarshall admin_metadata")
-			}
-			// TODO: Move this to upper functions that handles business logic to keep db access functions simple
-			if adminMetadata.Status != Approved {
-				return nil, serverCredsErr
-			}
-		}
-	} else {
-		jwksQuery := `SELECT pubkey FROM namespace WHERE prefix = ?`
-		err := db.QueryRow(jwksQuery, prefix).Scan(&pubkeyStr)
-		if err != nil {
-			if err == sql.ErrNoRows {
-				return nil, errors.New("prefix not found in database")
-			}
-			return nil, errors.Wrap(err, "error performing origin pubkey query")
+		return nil, nil, errors.Wrap(err, "error performing origin pubkey query")
+	}
+
+	adminMetadata := AdminMetadata{}
+
+	// For backward compatibility, if adminMetadata is an empty string, don't unmarshall json
+	if adminMetadataStr != "" {
+		if err := json.Unmarshal([]byte(adminMetadataStr), &adminMetadata); err != nil {
+			return nil, nil, errors.Wrap(err, "error parsing admin metadata")
 		}
 	}
 
 	set, err := jwk.ParseString(pubkeyStr)
 	if err != nil {
-		return nil, errors.Wrap(err, "Failed to parse pubkey as a jwks")
+		return nil, nil, errors.Wrap(err, "Failed to parse pubkey as a jwks")
 	}
 
-	return set, nil
+	return set, &adminMetadata, nil
 }
 
 func getNamespaceStatusById(id int) (RegistrationStatus, error) {
@@ -845,7 +837,7 @@ func PopulateTopology() error {
 
 func PeriodicTopologyReload() {
 	for {
-		time.Sleep(time.Minute * param.Federation_TopologyReloadInterval.GetDuration())
+		time.Sleep(param.Federation_TopologyReloadInterval.GetDuration())
 		err := PopulateTopology()
 		if err != nil {
 			log.Warningf("Failed to re-populate topology table: %s. Will try again later",

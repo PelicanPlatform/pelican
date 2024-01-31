@@ -29,6 +29,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -81,21 +82,39 @@ func getEnabledServers(ctx *gin.Context) {
 }
 
 func configureWebResource(engine *gin.Engine) error {
-	engine.GET("/view/*path", func(ctx *gin.Context) {
-		path := ctx.Param("path")
+	engine.GET("/view/*requestPath", func(ctx *gin.Context) {
+		requestPath := ctx.Param("requestPath")
 
-		if strings.HasSuffix(path, "/") {
-			path += "index.html"
+		// If the requestPath is a directory indicate that we are looking for the index.html file
+		if strings.HasSuffix(requestPath, "/") {
+			requestPath += "index.html"
+		}
+
+		// Clean the request path
+		requestPath = path.Clean(requestPath)
+
+		// If requestPath doesn't have extension, is not a directory, and has a index file, redirect to index file
+		if !strings.Contains(requestPath, ".") && !strings.HasSuffix(requestPath, "/") {
+			if _, err := webAssets.ReadFile("frontend/out" + requestPath + "/index.html"); err == nil {
+				ctx.Redirect(http.StatusMovedPermanently, "/view/"+requestPath+"/")
+				return
+			}
 		}
 
 		db := authDB.Load()
 		user, err := GetUser(ctx)
 
+		// If just one server is enabled, redirect to that server
+		if len(config.GetEnabledServerString(true)) == 1 && requestPath == "/index.html" {
+			ctx.Redirect(http.StatusFound, "/view/"+config.GetEnabledServerString(true)[0]+"/")
+			return
+		}
+
 		// If requesting servers other than the registry
-		if !strings.HasPrefix(path, "/registry") {
+		if !strings.HasPrefix(requestPath, "/registry") {
 
 			// Redirect initialized users from initialization pages
-			if strings.HasPrefix(path, "/initialization") && strings.HasSuffix(path, "index.html") {
+			if strings.HasPrefix(requestPath, "/initialization") && strings.HasSuffix(requestPath, "index.html") {
 
 				// If the user has been initialized previously
 				if db != nil {
@@ -105,7 +124,7 @@ func configureWebResource(engine *gin.Engine) error {
 			}
 
 			// Redirect authenticated users from login pages
-			if strings.HasPrefix(path, "/login") && strings.HasSuffix(path, "index.html") {
+			if strings.HasPrefix(requestPath, "/login") && strings.HasSuffix(requestPath, "index.html") {
 
 				// If the user has been authenticated previously
 				if err == nil && user != "" {
@@ -115,7 +134,7 @@ func configureWebResource(engine *gin.Engine) error {
 			}
 
 			// Direct uninitialized users to initialization pages
-			if !strings.HasPrefix(path, "/initialization") && strings.HasSuffix(path, "index.html") {
+			if !strings.HasPrefix(requestPath, "/initialization") && strings.HasSuffix(requestPath, "index.html") {
 
 				// If the user has not been initialized previously
 				if db == nil {
@@ -125,7 +144,7 @@ func configureWebResource(engine *gin.Engine) error {
 			}
 
 			// Direct unauthenticated initialized users to login pages
-			if !strings.HasPrefix(path, "/login") && strings.HasSuffix(path, "index.html") {
+			if !strings.HasPrefix(requestPath, "/login") && strings.HasSuffix(requestPath, "index.html") {
 
 				// If the user is not authenticated but initialized
 				if (err != nil || user == "") && db != nil {
@@ -135,19 +154,26 @@ func configureWebResource(engine *gin.Engine) error {
 			}
 		}
 
-		// If just one server is enabled, redirect to that server
-		if len(config.GetEnabledServerString(true)) == 1 && path == "/index.html" {
-			ctx.Redirect(http.StatusFound, "/view/"+config.GetEnabledServerString(true)[0]+"/index.html")
-			return
-		}
-
-		filePath := "frontend/out" + path
+		filePath := "frontend/out" + requestPath
 		file, _ := webAssets.ReadFile(filePath)
-		ctx.Data(
-			http.StatusOK,
-			mime.TypeByExtension(filePath),
-			file,
-		)
+
+		// If the file is not found, return 404
+		if file == nil {
+			notFoundFilePath := "frontend/out/404/index.html"
+			file, _ := webAssets.ReadFile(notFoundFilePath)
+			ctx.Data(
+				http.StatusOK,
+				mime.TypeByExtension(notFoundFilePath),
+				file,
+			)
+		} else {
+			// If the file is found, return the file
+			ctx.Data(
+				http.StatusOK,
+				mime.TypeByExtension(filePath),
+				file,
+			)
+		}
 	})
 
 	engine.GET("/api/v1.0/docs", func(ctx *gin.Context) {

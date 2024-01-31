@@ -28,23 +28,23 @@ type (
 )
 
 const (
-	FTXTestSuccess DirectorFTXTestStatus = "Success"
-	FTXTestFailed  DirectorFTXTestStatus = "Failed"
+	FTXTestSucceeded DirectorFTXTestStatus = "Succeeded"
+	FTXTestFailed    DirectorFTXTestStatus = "Failed"
 )
 
 var (
 	PelicanDirectorFileTransferTestSuite = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_director_total_ftx_test_suite",
-		Help: "The number of file transfer test suite the director issued",
+		Help: "The total number of file transfer test suite the director issued. A new test suite is a new goroutine started at origin's advertisement to the director and is cancelled when such registration expired in director's TTL cache",
 	}, []string{"server_name", "server_web_url", "server_type"})
 
 	PelicanDirectorActiveFileTransferTestSuite = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "pelican_director_active_ftx_test_suite",
-		Help: "The number of active director file transfer test suite",
+		Help: "The number of active director file transfer test suite. The number of active goroutines that executes test run",
 	}, []string{"server_name", "server_web_url", "server_type"})
 
 	PelicanDirectorFileTransferTestsRuns = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_director_total_ftx_test_runs",
-		Help: "The number of file transfer test suite director issued",
+		Help: "The number of file transfer test runs the director issued. A test run is a cycle of upload/download/delete test file, which is executed per 15s per origin (by defult)",
 	}, []string{"server_name", "server_web_url", "server_type", "status", "report_status"})
 )

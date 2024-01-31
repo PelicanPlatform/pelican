@@ -19,8 +19,11 @@
 package director
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -31,12 +34,32 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
+	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+)
+
+type (
+	OriginAdvertise struct {
+		Name               string               `json:"name"`
+		URL                string               `json:"url"`               // This is the url for origin's XRootD service and file transfer
+		WebURL             string               `json:"web_url,omitempty"` // This is the url for origin's web engine and APIs
+		Namespaces         []common.NamespaceAd `json:"namespaces"`
+		EnableWrite        bool                 `json:"enablewrite"`
+		EnableFallbackRead bool                 `json:"enable-fallback-read"` // True if the origin will allow direct client reads when no caches are available
+	}
+
+	checkStatusReq struct {
+		Prefix string `json:"prefix"`
+	}
+
+	checkStatusRes struct {
+		Approved bool `json:"approved"`
+	}
 )
 
 // Create interface
@@ -52,6 +75,53 @@ var (
 
 	adminApprovalErr error
 )
+
+func checkNamespaceStatus(prefix string, registryWebUrlStr string) (bool, error) {
+	registryUrl, err := url.Parse(registryWebUrlStr)
+	if err != nil {
+		return false, err
+	}
+	reqUrl := registryUrl.JoinPath("/api/v1.0/registry/checkNamespaceStatus")
+
+	reqBody := checkStatusReq{Prefix: prefix}
+	reqByte, err := json.Marshal(reqBody)
+	if err != nil {
+		return false, err
+	}
+	client := http.Client{Transport: config.GetTransport()}
+	req, err := http.NewRequest("POST", reqUrl.String(), bytes.NewBuffer(reqByte))
+	req.Header.Add("Content-Type", "application/json")
+	if err != nil {
+		return false, err
+	}
+
+	res, err := client.Do(req)
+	if err != nil {
+		return false, err
+	}
+
+	if res.StatusCode != 200 {
+		if res.StatusCode == 404 {
+			// This is when we hit a legacy OSDF registry (or Pelican registry <= 7.4.0) which doesn't have such endpoint
+			log.Warningf("Request %q hit 404, either it's an OSDF registry or Pelican registry <= 7.4.0. Fallback to return true for approval status check", reqUrl.String())
+			return true, nil
+		} else {
+			return false, errors.New(fmt.Sprintf("Server error with status code %d", res.StatusCode))
+		}
+	}
+
+	resBody := checkStatusRes{}
+	bodyByte, err := io.ReadAll(res.Body)
+	if err != nil {
+		return false, err
+	}
+
+	if err := json.Unmarshal(bodyByte, &resBody); err != nil {
+		return false, err
+	}
+
+	return resBody.Approved, nil
+}
 
 func CreateAdvertiseToken(namespace string) (string, error) {
 	// TODO: Need to come back and carefully consider a few naming practices.
@@ -120,6 +190,15 @@ func VerifyAdvertiseToken(ctx context.Context, token, namespace string) (bool, e
 			}
 		}
 	}()
+	regUrlStr := param.Federation_RegistryUrl.GetString()
+	approved, err := checkNamespaceStatus(namespace, regUrlStr)
+	if err != nil {
+		return false, errors.Wrap(err, "Failed to check namespace approval status")
+	}
+	if !approved {
+		adminApprovalErr = errors.New(namespace + " has not been approved by an administrator.")
+		return false, adminApprovalErr
+	}
 	if ar == nil {
 		ar = jwk.NewCache(ctx)
 		client := &http.Client{Transport: config.GetTransport()}
@@ -139,21 +218,6 @@ func VerifyAdvertiseToken(ctx context.Context, token, namespace string) (bool, e
 	}
 	log.Debugln("Attempting to fetch keys from ", issuerUrl)
 	keyset, err := ar.Get(ctx, issuerUrl)
-
-	if log.IsLevelEnabled(log.DebugLevel) {
-		// Let's check that we can convert to JSON and get the right thing...
-		jsonbuf, err := json.Marshal(keyset)
-		if err != nil {
-			return false, errors.Wrap(err, "failed to marshal the public keyset into JWKS JSON")
-		}
-		log.Debugln("Constructed JWKS from fetching jwks:", string(jsonbuf))
-		// This seems never get reached, as registry returns 403 for pending approval namespace
-		// and there will be HTTP error in getting jwks; thus it will always be error
-		if jsonbuf == nil {
-			adminApprovalErr = errors.New(namespace + " has not been approved by an administrator.")
-			return false, adminApprovalErr
-		}
-	}
 
 	if err != nil {
 		return false, err

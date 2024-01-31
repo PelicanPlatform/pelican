@@ -38,7 +38,7 @@ export default function RootLayout({
     return (
         <Box display={"flex"} flexDirection={"row"}>
             <Sidebar>
-                <Link href={"/registry/index.html"}>
+                <Link href={"/registry/"}>
                     <Image
                         src={PelicanLogo}
                         alt={"Pelican Logo"}
@@ -48,7 +48,7 @@ export default function RootLayout({
                 </Link>
                 <Box pt={1}>
                     <Tooltip title={"Register Namespace"} placement={"right"}>
-                        <Link href={"/registry/namespace/register/index.html"}>
+                        <Link href={"/registry/namespace/register/"}>
                             <IconButton>
                                 <Add/>
                             </IconButton>
@@ -57,7 +57,7 @@ export default function RootLayout({
                 </Box>
                 <Box pt={1}>
                     <Tooltip title={"Config"} placement={"right"}>
-                        <Link href={"/config/index.html"}>
+                        <Link href={"/config/"}>
                             <IconButton>
                                 <Build/>
                             </IconButton>
