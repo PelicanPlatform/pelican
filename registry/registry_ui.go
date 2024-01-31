@@ -128,7 +128,7 @@ func populateRegistrationFields(prefix string, data interface{}) []registrationF
 			if splitJson != "-" {
 				tempName = splitJson
 			} else {
-				// `json:"-"` means this field should be removed from any marshalling
+				// `json:"-"` means this field should be removed from any marshaling
 				continue
 			}
 		}
@@ -195,7 +195,7 @@ func populateCustomRegFields(configFields []customRegFieldsConfig) []registratio
 	return regFields
 }
 
-// Helper function to exclude pubkey field from marshalling into json
+// Helper function to exclude pubkey field from marshaling into json
 func excludePubKey(nss []*Namespace) (nssNew []NamespaceWOPubkey) {
 	nssNew = make([]NamespaceWOPubkey, 0)
 	for _, ns := range nss {

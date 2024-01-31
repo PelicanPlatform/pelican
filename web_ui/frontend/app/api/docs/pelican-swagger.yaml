@@ -203,7 +203,7 @@ definitions:
         type: string
         description:
           The public JWK from the origin that wants to register the namespace.
-          It should be a marshalled (stringfied) JSON that contains either one JWK or a JWKS
+          It should be a marshaled (stringfied) JSON that contains either one JWK or a JWKS
       admin_metadata:
         $ref: "#/definitions/AdminMetadata"
       custom_fields:
@@ -223,7 +223,7 @@ definitions:
         type: string
         description:
           The public JWK from the origin that wants to register the namespace.
-          It should be a marshalled (stringfied) JSON that contains either one JWK or a JWKS
+          It should be a marshaled (stringfied) JSON that contains either one JWK or a JWKS
       admin_metadata:
         $ref: "#/definitions/AdminMetadataForRegistration"
       custom_fields:

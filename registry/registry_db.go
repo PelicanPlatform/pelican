@@ -43,7 +43,7 @@ import (
 
 type RegistrationStatus string
 
-// The AdminMetadata is used in [Namespace] as a marshalled JSON string
+// The AdminMetadata is used in [Namespace] as a marshaled JSON string
 // to be stored in registry DB.
 //
 // The *UserID are meant to correspond to the "sub" claim of the user token that
@@ -348,7 +348,7 @@ func namespaceBelongsToUserId(id int, userId string) (bool, error) {
 		if err := rows.Scan(&adminMetadataStr); err != nil {
 			return false, err
 		}
-		// For backward compatibility, if adminMetadata is an empty string, don't unmarshall json
+		// For backward compatibility, if adminMetadata is an empty string, don't unmarshal json
 		if adminMetadataStr != "" {
 			if err := json.Unmarshal([]byte(adminMetadataStr), &ns.AdminMetadata); err != nil {
 				return false, err
@@ -398,7 +398,7 @@ func getNamespaceJwksByPrefix(prefix string, approvalRequired bool) (jwk.Set, er
 		if adminMetadataStr != "" { // Older version didn't have admin_metadata populated, skip checking
 			adminMetadata := AdminMetadata{}
 			if err = json.Unmarshal([]byte(adminMetadataStr), &adminMetadata); err != nil {
-				return nil, errors.Wrap(err, "Failed to unmarshall admin_metadata")
+				return nil, errors.Wrap(err, "Failed to unmarshal admin_metadata")
 			}
 			// TODO: Move this to upper functions that handles business logic to keep db access functions simple
 			if adminMetadata.Status != Approved {
@@ -435,7 +435,7 @@ func getNamespaceStatusById(id int) (RegistrationStatus, error) {
 	if err != nil {
 		return "", err
 	}
-	// For backward compatibility, if adminMetadata is an empty string, don't unmarshall json
+	// For backward compatibility, if adminMetadata is an empty string, don't unmarshal json
 	if adminMetadataStr != "" {
 		if err := json.Unmarshal([]byte(adminMetadataStr), &adminMetadata); err != nil {
 			return "", err
@@ -463,7 +463,7 @@ func getNamespaceById(id int) (*Namespace, error) {
 	if err != nil {
 		return nil, err
 	}
-	// For backward compatibility, if adminMetadata is an empty string, don't unmarshall json
+	// For backward compatibility, if adminMetadata is an empty string, don't unmarshal json
 	if adminMetadataStr != "" {
 		if err := json.Unmarshal([]byte(adminMetadataStr), &ns.AdminMetadata); err != nil {
 			return nil, err
@@ -474,7 +474,7 @@ func getNamespaceById(id int) (*Namespace, error) {
 			return nil, err
 		}
 	}
-	// By default, JSON unmarshall will convert any generic number to float
+	// By default, JSON unmarshal will convert any generic number to float
 	// and we only allow integer in custom fields, so we convert them back
 	for key, val := range ns.CustomFields {
 		switch v := val.(type) {
@@ -499,7 +499,7 @@ func getNamespaceByPrefix(prefix string) (*Namespace, error) {
 	if err != nil {
 		return nil, err
 	}
-	// For backward compatibility, if adminMetadata is an empty string, don't unmarshall json
+	// For backward compatibility, if adminMetadata is an empty string, don't unmarshal json
 	if adminMetadataStr != "" {
 		if err := json.Unmarshal([]byte(adminMetadataStr), &ns.AdminMetadata); err != nil {
 			return nil, err
@@ -510,7 +510,7 @@ func getNamespaceByPrefix(prefix string) (*Namespace, error) {
 			return nil, err
 		}
 	}
-	// By default, JSON unmarshall will convert any generic number to float
+	// By default, JSON unmarshal will convert any generic number to float
 	// and we only allow integer in custom fields, so we convert them back
 	for key, val := range ns.CustomFields {
 		switch v := val.(type) {
@@ -573,7 +573,7 @@ func getNamespacesByFilter(filterNs Namespace, serverType ServerType) ([]*Namesp
 		if err := rows.Scan(&ns.ID, &ns.Prefix, &ns.Pubkey, &ns.Identity, &adminMetadataStr); err != nil {
 			return nil, err
 		}
-		// For backward compatibility, if adminMetadata is an empty string, don't unmarshall json
+		// For backward compatibility, if adminMetadata is an empty string, don't unmarshal json
 		if adminMetadataStr == "" {
 			// If we apply any filter against the AdminMetadata field but the
 			// entry didn't populate this field, skip it
@@ -647,11 +647,11 @@ func addNamespace(ns *Namespace) error {
 
 	strAdminMetadata, err := json.Marshal(ns.AdminMetadata)
 	if err != nil {
-		return errors.Wrap(err, "Fail to marshall AdminMetadata")
+		return errors.Wrap(err, "Fail to marshal AdminMetadata")
 	}
 	strCustomRegFields, err := json.Marshal(ns.CustomFields)
 	if err != nil {
-		return errors.Wrap(err, "Fail to marshall custom registration fields")
+		return errors.Wrap(err, "Fail to marshal custom registration fields")
 	}
 
 	_, err = tx.Exec(query, ns.Prefix, ns.Pubkey, ns.Identity, strAdminMetadata, strCustomRegFields)
@@ -688,11 +688,11 @@ func updateNamespace(ns *Namespace) error {
 	ns.AdminMetadata.UpdatedAt = time.Now()
 	strAdminMetadata, err := json.Marshal(ns.AdminMetadata)
 	if err != nil {
-		return errors.Wrap(err, "Fail to marshall AdminMetadata")
+		return errors.Wrap(err, "Fail to marshal AdminMetadata")
 	}
 	strCustomRegFields, err := json.Marshal(ns.CustomFields)
 	if err != nil {
-		return errors.Wrap(err, "Fail to marshall custom registration fields")
+		return errors.Wrap(err, "Fail to marshal custom registration fields")
 	}
 
 	// We intentionally exclude updating "identity" as this should only be updated
@@ -730,7 +730,7 @@ func updateNamespaceStatusById(id int, status RegistrationStatus, approverId str
 
 	adminMetadataByte, err := json.Marshal(ns.AdminMetadata)
 	if err != nil {
-		return errors.Wrap(err, "Error marshalling admin metadata")
+		return errors.Wrap(err, "Error marshaling admin metadata")
 	}
 
 	query := `UPDATE namespace SET admin_metadata = ? WHERE id = ?`
@@ -780,7 +780,7 @@ func getAllNamespaces() ([]*Namespace, error) {
 		if err := rows.Scan(&ns.ID, &ns.Prefix, &ns.Pubkey, &ns.Identity, &adminMetadataStr, &customRegFieldsStr); err != nil {
 			return nil, err
 		}
-		// For backward compatibility, if adminMetadata is an empty string, don't unmarshall json
+		// For backward compatibility, if adminMetadata is an empty string, don't unmarshal json
 		if adminMetadataStr != "" {
 			if err := json.Unmarshal([]byte(adminMetadataStr), &ns.AdminMetadata); err != nil {
 				return nil, err
@@ -791,7 +791,7 @@ func getAllNamespaces() ([]*Namespace, error) {
 				return nil, err
 			}
 		}
-		// By default, JSON unmarshall will convert any generic number to float
+		// By default, JSON unmarshal will convert any generic number to float
 		// and we only allow integer in custom fields, so we convert them back
 		for key, val := range ns.CustomFields {
 			switch v := val.(type) {
