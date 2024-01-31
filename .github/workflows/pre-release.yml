@@ -1,4 +1,4 @@
-# .github/workflows/release.yaml
+# .github/workflows/pre-release.yaml
 name: Pre Release Workflow
 
 on:
