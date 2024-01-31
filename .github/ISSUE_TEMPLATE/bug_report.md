@@ -41,8 +41,7 @@ _If applicable, add screenshots to help explain your problem._
 
 **Desktop (please complete the following information):**
  - OS: [e.g. iOS]
- - Browser: [e.g. chrome, safari]
- - Version: [e.g. 22]
+ - Browser: [e.g. chrome, safari, if the bug relates to any web user interface]
 
 
 **Additional context**
