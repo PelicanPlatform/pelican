@@ -104,16 +104,16 @@ func getTokenName(destination *url.URL) (scheme, tokenName string) {
 }
 
 // Do writeback to stash using SciTokens
-func doWriteBack(source string, destination *url.URL, namespace namespaces.Namespace, recursive bool) (int64, error) {
+func doWriteBack(source string, destination *url.URL, namespace namespaces.Namespace, recursive bool, projectName string) (int64, error) {
 
 	scitoken_contents, err := getToken(destination, namespace, true, "")
 	if err != nil {
 		return 0, err
 	}
 	if recursive {
-		return UploadDirectory(source, destination, scitoken_contents, namespace)
+		return UploadDirectory(source, destination, scitoken_contents, namespace, projectName)
 	} else {
-		return UploadFile(source, destination, scitoken_contents, namespace)
+		return UploadFile(source, destination, scitoken_contents, namespace, projectName)
 	}
 }
 
@@ -543,7 +543,7 @@ func DoPut(localObject string, remoteDestination string, recursive bool) (bytesT
 		log.Errorln(err)
 		return 0, errors.New("Failed to get namespace information from source")
 	}
-	uploadedBytes, err := doWriteBack(localObjectUrl.Path, remoteDestUrl, ns, recursive)
+	uploadedBytes, err := doWriteBack(localObjectUrl.Path, remoteDestUrl, ns, recursive, "")
 	AddError(err)
 	return uploadedBytes, err
 
@@ -646,7 +646,7 @@ func DoGet(remoteObject string, localDestination string, recursive bool) (bytesT
 	//Fill out the payload as much as possible
 	payload.filename = remoteObjectUrl.Path
 
-	parse_job_ad(payload)
+	parse_job_ad(&payload)
 
 	payload.start1 = time.Now().Unix()
 
@@ -764,6 +764,9 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 		return 0, errors.New("Do not understand destination scheme")
 	}
 
+	payload := payloadStruct{}
+	parse_job_ad(&payload)
+
 	// Get the namespace of the remote filesystem
 	// For write back, it will be the destination
 	// For read it will be the source.
@@ -778,7 +781,7 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 			log.Errorln(err)
 			return 0, errors.New("Failed to get namespace information from destination")
 		}
-		uploadedBytes, err := doWriteBack(source_url.Path, dest_url, ns, recursive)
+		uploadedBytes, err := doWriteBack(source_url.Path, dest_url, ns, recursive, payload.ProjectName)
 		AddError(err)
 		return uploadedBytes, err
 	}
@@ -814,15 +817,10 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 		destination = path.Join(destPath, sourceFilename)
 	}
 
-	payload := payloadStruct{}
 	payload.version = version
 
 	//Fill out the payload as much as possible
 	payload.filename = source_url.Path
-
-	// ??
-
-	parse_job_ad(payload)
 
 	payload.start1 = time.Now().Unix()
 
@@ -918,7 +916,7 @@ func get_ips(name string) []string {
 
 }
 
-func parse_job_ad(payload payloadStruct) { // TODO: needs the payload
+func parse_job_ad(payload *payloadStruct) {
 
 	//Parse the .job.ad file for the Owner (username) and ProjectName of the callee.
 
@@ -940,18 +938,34 @@ func parse_job_ad(payload payloadStruct) { // TODO: needs the payload
 	}
 
 	// Get all matches from file
-	classadRegex, e := regexp.Compile(`^\s*(Owner|ProjectName)\s=\s"(.*)"`)
+	// Note: This appears to be invalid regex but is the only thing that appears to work. This way it successfully finds our matches
+	classadRegex, e := regexp.Compile(`^*\s*(Owner|ProjectName)\s=\s"(.*)"`)
 	if e != nil {
 		log.Fatal(e)
 	}
 
 	matches := classadRegex.FindAll(b, -1)
-
 	for _, match := range matches {
-		if string(match[0]) == "Owner" {
-			payload.Owner = string(match[1])
-		} else if string(match) == "ProjectName" {
-			payload.ProjectName = string(match[1])
+		matchString := strings.TrimSpace(string(match))
+
+		if strings.HasPrefix(matchString, "Owner") {
+			matchParts := strings.Split(strings.TrimSpace(matchString), "=")
+
+			if len(matchParts) == 2 { // just confirm we get 2 parts of the string
+				matchValue := strings.TrimSpace(matchParts[1])
+				matchValue = strings.Trim(matchValue, "\"") //trim any "" around the match if present
+				payload.Owner = matchValue
+			}
+		}
+
+		if strings.HasPrefix(matchString, "ProjectName") {
+			matchParts := strings.Split(strings.TrimSpace(matchString), "=")
+
+			if len(matchParts) == 2 { // just confirm we get 2 parts of the string
+				matchValue := strings.TrimSpace(matchParts[1])
+				matchValue = strings.Trim(matchValue, "\"") //trim any "" around the match if present
+				payload.ProjectName = matchValue
+			}
 		}
 	}
 
