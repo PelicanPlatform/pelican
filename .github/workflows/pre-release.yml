@@ -32,10 +32,14 @@ jobs:
           # Add some verbosity
           echo "NPM version is now $(npm version)"
 
+      - name: Set Branch
+        id: set_branch
+        run: echo "::set-output name=branch::$(echo ${GITHUB_REF_NAME%.*}.x)"
+
       - uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "Pre Release: Update npm version"
-          branch: ${{GITHUB_REF_NAME%.*}}.x
+          branch: ${{ steps.set_branch.outputs.branch }}
 
   build-website:
     needs: [pre-release]
