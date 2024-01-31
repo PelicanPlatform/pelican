@@ -2,11 +2,7 @@
 name: goreleaser
 
 on:
-  push:
-    tags:
-      # only run release on v7.0.0 and up
-      - v[7-9]\.[0-9]+\.[0-9]+
-      - v[1-9][0-9]+\.[0-9]+\.[0-9]+
+  workflow_call:
 
 permissions:
   contents: write

@@ -3,16 +3,13 @@ name: Release, Build, and Push
 on:
   pull_request:
   push:
-    tags:
-      # only build and publish container on v7.0.0 and up
-      - v[7-9]\.[0-9]+\.[0-9]+ # match v7.x.x to v9.x.x
-      - v[1-9][0-9]+\.[0-9]+\.[0-9]+ # match any version higher
     branches:
       - main
   repository_dispatch:
     types:
       - dispatch-build
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: write
