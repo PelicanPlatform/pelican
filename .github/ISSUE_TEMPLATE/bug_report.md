@@ -8,31 +8,33 @@ assignees: ''
 ---
 
 Pelican Version: 
-Pelican Service: 
+Pelican Service: [Client/Plugin/Registry/Director/Origin/Cache/etc]
 
 **Describe the bug**
-A clear and concise description of what the bug is.
+_A clear and concise description of what the bug is._
+
+
 
 **To Reproduce**
-Steps to reproduce the behavior:
-1. Using the <client/plugin/registry/director/origin/cache/etc> from Pelican version '...'
+_Steps to reproduce the behavior._
+
+
 
 **Expected behavior**
-A clear and concise description of what you expected to happen.
+_A clear and concise description of what you expected to happen._
+
+
 
 **Screenshots**
-If applicable, add screenshots to help explain your problem.
+_If applicable, add screenshots to help explain your problem._
+
+
 
 **Desktop (please complete the following information):**
  - OS: [e.g. iOS]
- - Browser [e.g. chrome, safari]
- - Version [e.g. 22]
+ - Browser: [e.g. chrome, safari]
+ - Version: [e.g. 22]
 
-**Smartphone (please complete the following information):**
- - Device: [e.g. iPhone6]
- - OS: [e.g. iOS8.1]
- - Browser [e.g. stock browser, safari]
- - Version [e.g. 22]
 
 **Additional context**
-Add any other context about the problem here.
+_Add any other context about the problem here._
