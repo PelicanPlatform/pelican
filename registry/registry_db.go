@@ -796,7 +796,6 @@ func getAllNamespaces() ([]*Namespace, error) {
 		for key, val := range ns.CustomFields {
 			switch v := val.(type) {
 			case float64:
-				ns.CustomFields[key] = int(v)
 			case float32:
 				ns.CustomFields[key] = int(v)
 			}
