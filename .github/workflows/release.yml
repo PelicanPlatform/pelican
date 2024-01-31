@@ -26,7 +26,7 @@ jobs:
       - name: Update npm version
         run: |
           cd web_ui/frontend
-          
+
           # Add some verbosity
           echo "NPM version is now $(npm version)"
 
