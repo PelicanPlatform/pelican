@@ -29,6 +29,8 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
+	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -200,6 +202,41 @@ func writeScitokensConfiguration(modules config.ServerType, cfg *ScitokensCfg) e
 	return nil
 }
 
+func getOSDFAuthFiles(server server_utils.XRootDServer) ([]byte, error) {
+	var stype string
+	if server.GetServerType().IsEnabled(config.OriginType) {
+		stype = "origin"
+	} else {
+		stype = "cache"
+	}
+
+	base, err := url.Parse(param.Federation_TopologyUrl.GetString())
+	if err != nil {
+		return nil, err
+	}
+	endpoint, err := url.Parse("/" + stype + "/Authfile?fqdn=" + param.Server_Hostname.GetString())
+	if err != nil {
+		return nil, err
+	}
+	url := base.ResolveReference(endpoint)
+	resp, err := http.Get(url.String())
+
+	if err != nil {
+		return nil, err
+	}
+
+	defer resp.Body.Close()
+
+	buf := new(bytes.Buffer)
+
+	_, err = io.Copy(buf, resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
+}
+
 // Parse the input xrootd authfile, add any default configurations, and then save it
 // into the xrootd runtime directory
 func EmitAuthfile(server server_utils.XRootDServer) error {
@@ -210,10 +247,21 @@ func EmitAuthfile(server server_utils.XRootDServer) error {
 		return errors.Wrapf(err, "Failed to read xrootd authfile from %s", authfile)
 	}
 
-	sc := bufio.NewScanner(strings.NewReader(string(contents)))
-	sc.Split(ScanLinesWithCont)
 	output := new(bytes.Buffer)
 	foundPublicLine := false
+	if config.GetPreferredPrefix() == "OSDF" {
+		log.Debugln("Retrieving OSDF Authfile for server")
+		bytes, err := getOSDFAuthFiles(server)
+		if err != nil {
+			return errors.Wrapf(err, "Failed to fetch osdf authfile from topology")
+		}
+
+		log.Debugln("Parsing OSDF Authfile")
+		output.Write(bytes)
+	}
+
+	sc := bufio.NewScanner(strings.NewReader(string(contents)))
+	sc.Split(ScanLinesWithCont)
 	log.Debugln("Parsing the input authfile")
 	for sc.Scan() {
 		lineContents := sc.Text()

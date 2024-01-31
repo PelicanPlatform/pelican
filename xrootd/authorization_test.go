@@ -107,6 +107,102 @@ u 3af6a420.0 /chtc/PROTECTED/sc-origin lr
 	mergedAuthfileEntries = otherAuthfileEntries + "u * /.well-known lr\n"
 )
 
+func TestOSDFAuthRetrieval(t *testing.T) {
+	viper.Reset()
+	viper.Set("Federation.TopologyUrl", "https://topology.opensciencegrid.org/")
+	viper.Set("Server.Hostname", "sc-origin.chtc.wisc.edu")
+
+	originServer := &origin_ui.OriginServer{}
+	_, err := getOSDFAuthFiles(originServer)
+
+	require.NoError(t, err, "error")
+	viper.Reset()
+}
+
+func TestOSDFAuthCreation(t *testing.T) {
+	tests := []struct {
+		desc     string
+		authIn   string
+		authOut1 string
+		authOut2 string
+		server   server_utils.XRootDServer
+	}{
+		{
+			desc:     "osdf-origin-auth-no-merge",
+			authIn:   "",
+			authOut1: "u * /.well-known lr",
+			authOut2: "/chtc/PROTECTED/sc-origin lr",
+			server:   &origin_ui.OriginServer{},
+		},
+		{
+			desc:     "osdf-origin-auth-merge",
+			authIn:   cacheAuthfileMultilineInput,
+			authOut1: cacheAuthfileOutput,
+			authOut2: "/chtc/PROTECTED/sc-origin lr",
+			server:   &origin_ui.OriginServer{},
+		},
+		{
+			desc:     "osdf-cache-auth-merge",
+			authIn:   cacheAuthfileMultilineInput,
+			authOut1: "u * /user/ligo -rl /Gluex rl /NSG/PUBLIC rl /VDC/PUBLIC rl",
+			authOut2: "",
+			server:   &cache_ui.CacheServer{},
+		},
+	}
+	for _, testInput := range tests {
+		t.Run(testInput.desc, func(t *testing.T) {
+			dirName := t.TempDir()
+			viper.Reset()
+
+			viper.Set("Xrootd.Authfile", filepath.Join(dirName, "authfile"))
+			viper.Set("Federation.TopologyUrl", "https://topology.opensciencegrid.org/")
+			viper.Set("Server.Hostname", "sc-origin.chtc.wisc.edu")
+			if testInput.server.GetServerType().IsEnabled(config.CacheType) {
+				viper.Set("Server.Hostname", "sc-cache.chtc.wisc.edu")
+			}
+			viper.Set("Xrootd.RunLocation", dirName)
+			config.SetPreferredPrefix("OSDF")
+
+			err := os.WriteFile(filepath.Join(dirName, "authfile"), []byte(testInput.authIn), fs.FileMode(0600))
+			require.NoError(t, err, "Failure writing test input authfile")
+
+			err = EmitAuthfile(testInput.server)
+			require.NoError(t, err, "Failure generating authfile")
+
+			xrootdRun := param.Xrootd_RunLocation.GetString()
+
+			finalAuthPath := filepath.Join(xrootdRun, "authfile-origin-generated")
+			if testInput.server.GetServerType().IsEnabled(config.CacheType) {
+				finalAuthPath = filepath.Join(xrootdRun, "authfile-cache-generated")
+			}
+
+			genAuth, err := os.ReadFile(finalAuthPath)
+			require.NoError(t, err, "Error reading generated authfile")
+
+			sc := bufio.NewScanner(strings.NewReader(string(genAuth)))
+			sc.Split(ScanLinesWithCont)
+
+			sc.Scan()
+			firstLine := sc.Text()
+			if testInput.server.GetServerType().IsEnabled(config.OriginType) {
+				require.Contains(t, firstLine, "# DN: /")
+			} else {
+				require.Contains(t, firstLine, "# FQAN")
+			}
+			secondLine := ""
+
+			for sc.Scan() {
+				firstLine = secondLine
+				secondLine = sc.Text()
+			}
+
+			require.Equal(t, strings.TrimSuffix(testInput.authOut1, "\n"), secondLine)
+			require.Contains(t, firstLine, testInput.authOut2)
+			viper.Reset()
+		})
+	}
+}
+
 func TestAuthfileMultiline(t *testing.T) {
 	sc := bufio.NewScanner(strings.NewReader(sampleMultilineOutput))
 	sc.Split(ScanLinesWithCont)
