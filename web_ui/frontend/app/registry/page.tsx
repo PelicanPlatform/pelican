@@ -104,7 +104,7 @@ export default function Home() {
                     <UnauthenticatedContent pb={2}>
                         <Typography variant={"body1"}>
                             Login to register new namespaces.
-                            <Button sx={{ml:2}} variant={"contained"} size={"small"} color={"primary"} href={"/view/login/index.html"}>Login</Button>
+                            <Button sx={{ml:2}} variant={"contained"} size={"small"} color={"primary"} href={"/view/login/"}>Login</Button>
                         </Typography>
                     </UnauthenticatedContent>
                     {
