@@ -8,7 +8,16 @@ assignees: ''
 ---
 
 Pelican Version: 
-Pelican Service: [Client/Plugin/Registry/Director/Origin/Cache/etc]
+_Run `./pelican --version` to get version number._
+
+Pelican Service: 
+- [ ] Client
+- [ ] Plugin
+- [ ] Registry
+- [ ] Director
+- [ ] Origin
+- [ ] Cache
+- [ ] Other (please give the detail)
 
 **Describe the bug**
 _A clear and concise description of what the bug is._
