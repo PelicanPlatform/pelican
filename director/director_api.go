@@ -31,7 +31,6 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/token_scopes"
-	"github.com/pelicanplatform/pelican/utils"
 )
 
 // List all namespaces from origins registered at the director
@@ -63,37 +62,6 @@ func ListServerAds(serverTypes []ServerType) []ServerAd {
 		}
 	}
 	return ads
-}
-
-// Create a token for director's Prometheus instance to access
-// director's origins service discovery endpoint. This function is intended
-// to be called only on a director server
-func CreateDirectorSDToken() (string, error) {
-	// TODO: We might want to change this to ComputeExternalAddress() instead
-	// so that director admin don't need to specify Federation_DirectorUrl to get
-	// director working
-	directorURL := param.Federation_DirectorUrl.GetString()
-	if directorURL == "" {
-		return "", errors.New("Director URL is not known; cannot create director service discovery token")
-	}
-
-	promTokenCfg := utils.TokenConfig{
-		TokenProfile: utils.WLCG,
-		Lifetime:     param.Monitoring_TokenExpiresIn.GetDuration(),
-		Issuer:       directorURL,
-		Audience:     []string{directorURL},
-		Version:      "1.0",
-		Subject:      "director",
-		Claims:       map[string]string{"scope": token_scopes.Pelican_DirectorServiceDiscovery.String()},
-	}
-
-	// CreateToken also handles validation for us
-	tok, err := promTokenCfg.CreateToken()
-	if err != nil {
-		return "", errors.Wrap(err, "failed to create director prometheus token")
-	}
-
-	return tok, nil
 }
 
 // Verify that a token received is a valid token from director and has
@@ -141,32 +109,6 @@ func VerifyDirectorSDToken(strToken string) (bool, error) {
 		}
 	}
 	return false, nil
-}
-
-// Create a token for director's Prometheus scraper to access discovered
-// origins and caches `/metrics` endpoint. This function is intended to be called on
-// a director server
-func CreateDirectorScrapeToken() (string, error) {
-	// We assume this function is only called on a director server,
-	// the external address of which should be the director's URL
-	directorURL := param.Server_ExternalWebUrl.GetString()
-
-	scrapeTokenCfg := utils.TokenConfig{
-		TokenProfile: utils.WLCG,
-		Version:      "1.0",
-		Lifetime:     param.Monitoring_TokenExpiresIn.GetDuration(),
-		Issuer:       directorURL,
-		Audience:     []string{"prometheus"},
-		Subject:      "director",
-		Claims:       map[string]string{"scope": token_scopes.Monitoring_Scrape.String()},
-	}
-
-	tok, err := scrapeTokenCfg.CreateToken()
-	if err != nil {
-		return "", errors.Wrap(err, "failed to create director scraping token")
-	}
-
-	return tok, nil
 }
 
 // Configure TTL caches to enable cache eviction and other additional cache events handling logic

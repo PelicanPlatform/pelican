@@ -240,32 +240,6 @@ func VerifyAdvertiseToken(ctx context.Context, token, namespace string) (bool, e
 	return false, nil
 }
 
-// Create a token for director to report the health status to the
-// origin
-func CreateDirectorTestReportToken(originWebUrl string) (string, error) {
-	directorURL := param.Federation_DirectorUrl.GetString()
-	if directorURL == "" {
-		return "", errors.New("Director URL is not known; cannot create director test report token")
-	}
-
-	testTokenCfg := utils.TokenConfig{
-		TokenProfile: utils.WLCG,
-		Version:      "1.0",
-		Lifetime:     time.Minute,
-		Issuer:       directorURL,
-		Audience:     []string{originWebUrl},
-		Subject:      "director",
-		Claims:       map[string]string{"scope": token_scopes.Pelican_DirectorTestReport.String()},
-	}
-
-	tok, err := testTokenCfg.CreateToken()
-	if err != nil {
-		return "", errors.Wrap(err, "failed to create director test report token")
-	}
-
-	return tok, nil
-}
-
 // Verify that a token received is a valid token from director
 func VerifyDirectorTestReportToken(strToken string) (bool, error) {
 	directorURL := param.Federation_DirectorUrl.GetString()

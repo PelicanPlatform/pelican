@@ -104,7 +104,7 @@ func GenTokenScope() {
 	defer f.Close()
 
 	err = tokenTemplate.Execute(f, struct {
-		Scopes []ScopeName
+		Scopes        []ScopeName
 		StorageScopes []ScopeName
 	}{
 		Scopes:        scopes,

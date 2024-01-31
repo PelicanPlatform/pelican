@@ -406,8 +406,8 @@ func generateFileTestScitoken() (string, error) {
 		Audience:     []string{param.Origin_Url.GetString()},
 		Version:      "1.0",
 		Subject:      "origin",
-		Claims:       map[string]string{"scope": token_scopes.GetScopeString(scopes)},
 	}
+	fTestTokenCfg.AddScopes(scopes)
 
 	// CreateToken also handles validation for us
 	tok, err := fTestTokenCfg.CreateToken()
