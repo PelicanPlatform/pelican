@@ -78,7 +78,7 @@ func GenerateMockJWKS() (string, error) {
 
 	jsonData, err := json.MarshalIndent(jwks, "", "  ")
 	if err != nil {
-		return "", errors.Wrap(err, "Unable to marshall the json into string")
+		return "", errors.Wrap(err, "Unable to marshal the json into string")
 	}
 	// Append a new line to the JSON data
 	jsonData = append(jsonData, '\n')

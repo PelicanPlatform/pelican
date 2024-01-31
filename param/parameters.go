@@ -208,5 +208,6 @@ var (
 	GeoIPOverrides = ObjectParam{"GeoIPOverrides"}
 	Issuer_AuthorizationTemplates = ObjectParam{"Issuer.AuthorizationTemplates"}
 	Issuer_OIDCAuthenticationRequirements = ObjectParam{"Issuer.OIDCAuthenticationRequirements"}
+	Registry_CustomRegistrationFields = ObjectParam{"Registry.CustomRegistrationFields"}
 	Registry_Institutions = ObjectParam{"Registry.Institutions"}
 )

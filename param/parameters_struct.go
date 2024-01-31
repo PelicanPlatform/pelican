@@ -116,6 +116,7 @@ type config struct {
 	}
 	Registry struct {
 		AdminUsers []string
+		CustomRegistrationFields interface{}
 		DbLocation string
 		Institutions interface{}
 		InstitutionsUrl string
@@ -288,6 +289,7 @@ type configWithType struct {
 	}
 	Registry struct {
 		AdminUsers struct { Type string; Value []string }
+		CustomRegistrationFields struct { Type string; Value interface{} }
 		DbLocation struct { Type string; Value string }
 		Institutions struct { Type string; Value interface{} }
 		InstitutionsUrl struct { Type string; Value string }
