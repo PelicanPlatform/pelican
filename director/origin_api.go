@@ -123,38 +123,6 @@ func checkNamespaceStatus(prefix string, registryWebUrlStr string) (bool, error)
 	return resBody.Approved, nil
 }
 
-func CreateAdvertiseToken(namespace string) (string, error) {
-	// TODO: Need to come back and carefully consider a few naming practices.
-	//       Here, issuerUrl is actually the registry database url, and not
-	//       the token issuer url for this namespace
-	issuerUrl, err := GetNSIssuerURL(namespace)
-	if err != nil {
-		return "", err
-	}
-	director := param.Federation_DirectorUrl.GetString()
-	if director == "" {
-		return "", errors.New("Director URL is not known; cannot create advertise token")
-	}
-
-	advTokenCfg := utils.TokenConfig{
-		TokenProfile: utils.WLCG,
-		Version:      "1.0",
-		Lifetime:     time.Minute,
-		Issuer:       issuerUrl,
-		Audience:     []string{director},
-		Subject:      "origin",
-		Claims:       map[string]string{"scope": token_scopes.Pelican_Advertise.String()},
-	}
-
-	// CreateToken also handles validation for us
-	tok, err := advTokenCfg.CreateToken()
-	if err != nil {
-		return "", errors.Wrap(err, "failed to create director prometheus token")
-	}
-
-	return tok, nil
-}
-
 // Given a token and a location in the namespace to advertise in,
 // see if the entity is authorized to advertise an origin for the
 // namespace
