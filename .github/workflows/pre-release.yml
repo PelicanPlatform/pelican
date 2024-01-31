@@ -35,6 +35,7 @@ jobs:
       - uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "Pre Release: Update npm version"
+          branch: ${{GITHUB_REF_NAME%.*}}.x
 
   build-website:
     needs: [pre-release]
