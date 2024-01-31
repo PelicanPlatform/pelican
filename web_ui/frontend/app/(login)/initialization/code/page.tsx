@@ -91,7 +91,7 @@ export default function Home() {
             <Box m={"auto"} mt={12}  display={"flex"} flexDirection={"column"}>
                 <Box>
                     <Typography textAlign={"center"} variant={"h3"} component={"h3"}>
-                        Activate Origin Website
+                        Activate Website
                     </Typography>
                     <Typography textAlign={"center"} variant={"h6"} component={"p"}>
                         Enter the activation code displayed on the command line
