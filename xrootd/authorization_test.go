@@ -161,7 +161,8 @@ func TestOSDFAuthCreation(t *testing.T) {
 				viper.Set("Server.Hostname", "sc-cache.chtc.wisc.edu")
 			}
 			viper.Set("Xrootd.RunLocation", dirName)
-			config.SetPreferredPrefix("OSDF")
+			oldPrefix := config.SetPreferredPrefix("OSDF")
+			defer config.SetPreferredPrefix(oldPrefix)
 
 			err := os.WriteFile(filepath.Join(dirName, "authfile"), []byte(testInput.authIn), fs.FileMode(0600))
 			require.NoError(t, err, "Failure writing test input authfile")
