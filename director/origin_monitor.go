@@ -165,13 +165,13 @@ func LaunchPeriodicDirectorTest(ctx context.Context, originAd ServerAd) {
 						log.Warningln("Failed to report director test result to origin:", err)
 						metrics.PelicanDirectorFileTransferTestsRuns.With(
 							prometheus.Labels{
-								"server_name": originName, "server_web_url": originWebUrl, "server_type": string(originAd.Type), "status": string(metrics.FTXTestSuccess), "report_status": string(metrics.FTXTestFailed),
+								"server_name": originName, "server_web_url": originWebUrl, "server_type": string(originAd.Type), "status": string(metrics.FTXTestSucceeded), "report_status": string(metrics.FTXTestFailed),
 							},
 						).Inc()
 					} else {
 						metrics.PelicanDirectorFileTransferTestsRuns.With(
 							prometheus.Labels{
-								"server_name": originName, "server_web_url": originWebUrl, "server_type": string(originAd.Type), "status": string(metrics.FTXTestSuccess), "report_status": string(metrics.FTXTestSuccess),
+								"server_name": originName, "server_web_url": originWebUrl, "server_type": string(originAd.Type), "status": string(metrics.FTXTestSucceeded), "report_status": string(metrics.FTXTestSucceeded),
 							},
 						).Inc()
 					}
@@ -187,7 +187,7 @@ func LaunchPeriodicDirectorTest(ctx context.Context, originAd ServerAd) {
 					} else {
 						metrics.PelicanDirectorFileTransferTestsRuns.With(
 							prometheus.Labels{
-								"server_name": originName, "server_web_url": originWebUrl, "server_type": string(originAd.Type), "status": string(metrics.FTXTestFailed), "report_status": string(metrics.FTXTestSuccess),
+								"server_name": originName, "server_web_url": originWebUrl, "server_type": string(originAd.Type), "status": string(metrics.FTXTestFailed), "report_status": string(metrics.FTXTestSucceeded),
 							},
 						).Inc()
 					}
