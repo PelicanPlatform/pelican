@@ -34,7 +34,7 @@ jobs:
 
       - name: Set Branch
         id: set_branch
-        run: echo "{branch}={$(echo ${GITHUB_REF_NAME%.*}.x)}" >> $GITHUB_STATE
+        run: echo "branch=$(echo ${GITHUB_REF_NAME%.*}.x)" >> $GITHUB_STATE
 
       - uses: stefanzweifel/git-auto-commit-action@v5
         with:
