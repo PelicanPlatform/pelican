@@ -154,7 +154,7 @@ func GenParamEnum() {
 	if err != nil {
 		panic(err)
 	}
-	// Create the json file to be generated (for the documentation website
+	// Create the json file to be generated (for the documentation website)
 	fJSON, err := os.Create("../docs/parameters.json")
 	if err != nil {
 		panic(err)
