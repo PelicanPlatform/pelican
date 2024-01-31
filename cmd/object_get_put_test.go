@@ -99,8 +99,8 @@ func TestGetAndPut(t *testing.T) {
 	err = config.InitServer(ctx, modules)
 	require.NoError(t, err)
 
-	viper.Set("Registry.OriginApprovedOnly", false)
-	viper.Set("Registry.CacheApprovedOnly", false)
+	viper.Set("Registry.RequireOriginApproval", false)
+	viper.Set("Registry.RequireCacheApproval", false)
 
 	fedCancel, err := launchers.LaunchModules(ctx, modules)
 	if err != nil {

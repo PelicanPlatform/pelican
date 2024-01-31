@@ -682,13 +682,13 @@ func wildcardHandler(ctx *gin.Context) {
 		}
 		if adminMetadata != nil && adminMetadata.Status != Approved {
 			if strings.HasPrefix(prefix, "/caches/") { // Caches
-				if param.Registry_CacheApprovedOnly.GetBool() {
+				if param.Registry_RequireCacheApproval.GetBool() {
 					// Use 403 to distinguish between server error
 					ctx.JSON(http.StatusForbidden, gin.H{"error": "The cache has not been approved by federation administrator"})
 					return
 				}
 			} else { // Origins
-				if param.Registry_OriginApprovedOnly.GetBool() {
+				if param.Registry_RequireOriginApproval.GetBool() {
 					// Use 403 to distinguish between server error
 					ctx.JSON(http.StatusForbidden, gin.H{"error": "The origin has not been approved by federation administrator"})
 					return
@@ -788,21 +788,21 @@ func checkNamespaceStatusHandler(ctx *gin.Context) {
 		return
 	}
 	emptyMetadata := AdminMetadata{}
-	// If Registry.CacheApprovedOnly or Registry.OriginApprovedOnly is false
+	// If Registry.RequireCacheApproval or Registry.RequireOriginApproval is false
 	// we return Approved == true
 	if ns.AdminMetadata != emptyMetadata {
 		// Caches
-		if strings.HasPrefix(req.Prefix, "/caches") && param.Registry_CacheApprovedOnly.GetBool() {
+		if strings.HasPrefix(req.Prefix, "/caches") && param.Registry_RequireCacheApproval.GetBool() {
 			res := checkStatusRes{Approved: ns.AdminMetadata.Status == Approved}
 			ctx.JSON(http.StatusOK, res)
 			return
-		} else if !param.Registry_CacheApprovedOnly.GetBool() {
+		} else if !param.Registry_RequireCacheApproval.GetBool() {
 			res := checkStatusRes{Approved: true}
 			ctx.JSON(http.StatusOK, res)
 			return
 		} else {
 			// Origins
-			if param.Registry_OriginApprovedOnly.GetBool() {
+			if param.Registry_RequireOriginApproval.GetBool() {
 				res := checkStatusRes{Approved: ns.AdminMetadata.Status == Approved}
 				ctx.JSON(http.StatusOK, res)
 				return

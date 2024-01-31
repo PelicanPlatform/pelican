@@ -55,7 +55,7 @@ func TestHandleWildcard(t *testing.T) {
 
 		r.ServeHTTP(w, req)
 
-		// Return 200 as by default Registry.OriginApprovedOnly == false
+		// Return 200 as by default Registry.RequireOriginApproval == false
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Equal(t, string(mockJWKSBytes), w.Body.String())
 	})
@@ -105,8 +105,8 @@ func TestHandleWildcard(t *testing.T) {
 	for _, tc := range mockApprovalTcs {
 		t.Run(tc.Name, func(t *testing.T) {
 			viper.Reset()
-			viper.Set("Registry.CacheApprovedOnly", tc.CacheApprovedOnly)
-			viper.Set("Registry.OriginApprovedOnly", tc.OriginApprovedOnly)
+			viper.Set("Registry.RequireCacheApproval", tc.CacheApprovedOnly)
+			viper.Set("Registry.RequireOriginApproval", tc.OriginApprovedOnly)
 
 			mockPrefix := "/testnamespace/foo"
 			if tc.IsCache {
