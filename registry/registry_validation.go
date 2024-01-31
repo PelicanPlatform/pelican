@@ -69,54 +69,59 @@ func validatePrefix(nspath string) (string, error) {
 }
 
 func validateKeyChaining(prefix string, pubkey jwk.Key) (validationError error, serverError error) {
-	if param.Registry_RequireKeyChaining.GetBool() {
-		superspaces, subspaces, inTopo, err := namespaceSupSubChecks(prefix)
+	if !param.Registry_RequireKeyChaining.GetBool() {
+		return
+	}
+	// We don't check keyChaining for caches
+	if strings.HasPrefix(prefix, "/caches/") {
+		return
+	}
+	superspaces, subspaces, inTopo, err := namespaceSupSubChecks(prefix)
+	if err != nil {
+		serverError = errors.Wrap(err, "Server encountered an error checking if namespace already exists")
+		return
+	}
+
+	// if not in OSDF mode, this will be false
+	if inTopo {
+		validationError = errors.New("Cannot register a super or subspace of a namespace already registered in topology")
+		return
+	}
+	// If we make the assumption that namespace prefixes are hierarchical, eg that the owner of /foo should own
+	// everything under /foo (/foo/bar, /foo/baz, etc), then it makes sense to check for superspaces first. If any
+	// superspace is found, they logically "own" the incoming namespace.
+	if len(superspaces) > 0 {
+		// If this is the case, we want to make sure that at least one of the superspaces has the
+		// same registration key as the incoming. This guarantees the owner of the superspace is
+		// permitting the action (assuming their keys haven't been stolen!)
+		matched, err := matchKeys(pubkey, superspaces)
 		if err != nil {
-			serverError = errors.Wrap(err, "Server encountered an error checking if namespace already exists")
+			serverError = errors.Errorf("%v: Unable to check if the incoming key for %s matched any public keys for %s", err, prefix, subspaces)
+			return
+		}
+		if !matched {
+			validationError = errors.New("Cannot register a namespace that is suffixed or prefixed by an already-registered namespace unless the incoming public key matches a registered key")
 			return
 		}
 
-		// if not in OSDF mode, this will be false
-		if inTopo {
-			validationError = errors.New("Cannot register a super or subspace of a namespace already registered in topology")
+	} else if len(subspaces) > 0 {
+		// If there are no superspaces, we can check the subspaces.
+
+		// TODO: Eventually we might want to check only the highest level subspaces and use those keys for matching. For example,
+		// if /foo/bar and /foo/bar/baz are registered with two keysets such that the complement of their intersections is not null,
+		// it may be the case that the only key we match against belongs to /foo/bar/baz. If we go ahead with registration at that
+		// point, we're essentially saying /foo/bar/baz, the logical subspace of /foo/bar, has authorized a superspace for both.
+		// More interestingly, if /foo/bar and /foo/baz are both registered, should they both be consulted before adding /foo?
+
+		// For now, we'll just check for any key match.
+		matched, err := matchKeys(pubkey, subspaces)
+		if err != nil {
+			serverError = errors.Errorf("%v: Unable to check if the incoming key for %s matched any public keys for %s", err, prefix, subspaces)
 			return
 		}
-		// If we make the assumption that namespace prefixes are hierarchical, eg that the owner of /foo should own
-		// everything under /foo (/foo/bar, /foo/baz, etc), then it makes sense to check for superspaces first. If any
-		// superspace is found, they logically "own" the incoming namespace.
-		if len(superspaces) > 0 {
-			// If this is the case, we want to make sure that at least one of the superspaces has the
-			// same registration key as the incoming. This guarantees the owner of the superspace is
-			// permitting the action (assuming their keys haven't been stolen!)
-			matched, err := matchKeys(pubkey, superspaces)
-			if err != nil {
-				serverError = errors.Errorf("%v: Unable to check if the incoming key for %s matched any public keys for %s", err, prefix, subspaces)
-				return
-			}
-			if !matched {
-				validationError = errors.New("Cannot register a namespace that is suffixed or prefixed by an already-registered namespace unless the incoming public key matches a registered key")
-				return
-			}
-
-		} else if len(subspaces) > 0 {
-			// If there are no superspaces, we can check the subspaces.
-
-			// TODO: Eventually we might want to check only the highest level subspaces and use those keys for matching. For example,
-			// if /foo/bar and /foo/bar/baz are registered with two keysets such that the complement of their intersections is not null,
-			// it may be the case that the only key we match against belongs to /foo/bar/baz. If we go ahead with registration at that
-			// point, we're essentially saying /foo/bar/baz, the logical subspace of /foo/bar, has authorized a superspace for both.
-			// More interestingly, if /foo/bar and /foo/baz are both registered, should they both be consulted before adding /foo?
-
-			// For now, we'll just check for any key match.
-			matched, err := matchKeys(pubkey, subspaces)
-			if err != nil {
-				serverError = errors.Errorf("%v: Unable to check if the incoming key for %s matched any public keys for %s", err, prefix, subspaces)
-				return
-			}
-			if !matched {
-				validationError = errors.New("Cannot register a namespace that is suffixed or prefixed by an already-registered namespace unless the incoming public key matches a registered key")
-				return
-			}
+		if !matched {
+			validationError = errors.New("Cannot register a namespace that is suffixed or prefixed by an already-registered namespace unless the incoming public key matches a registered key")
+			return
 		}
 	}
 	return
