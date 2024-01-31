@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"testing"
 	"time"
@@ -13,13 +14,34 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
-	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
+
+// For these tests, we only need to lookup key locations. Create a dummy registry that only returns
+// the jwks_uri location for the given key. Once a server is instantiated, it will only return
+// locations for the provided prefix. To change prefixes, create a new registry mockup.
+func registryMockup(t *testing.T, prefix string) *httptest.Server {
+	registryUrl, _ := url.Parse("https://registry.com:8446")
+	path, err := url.JoinPath("/api/v1.0/registry", prefix, ".well-known/issuer.jwks")
+	if err != nil {
+		t.Fatalf("Failed to parse key path for prefix %s", prefix)
+	}
+	registryUrl.Path = path
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		jsonResponse := `{"jwks_uri": "` + registryUrl.String() + `"}`
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(jsonResponse))
+	}))
+	return server
+}
 
 func TestVerifyAdvertiseToken(t *testing.T) {
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
@@ -160,11 +182,14 @@ func TestCreateAdvertiseToken(t *testing.T) {
 	viper.Set("Federation.RegistryUrl", "")
 	viper.Set("Federation.DirectorURL", "")
 
-	// Test without a namsepace set and check to see if it returns the expected error
+	registry := registryMockup(t, "/test-namespace")
+	defer registry.Close()
+
+	// Test without a registry URL set and check to see if it returns the expected error
 	tok, err := CreateAdvertiseToken("/test-namespace")
 	assert.Equal(t, "", tok)
-	assert.Equal(t, "Namespace URL is not set", err.Error())
-	viper.Set("Federation.RegistryUrl", "https://get-your-tokens.org")
+	assert.Equal(t, "federation registry URL is not set and was not discovered", err.Error())
+	viper.Set("Federation.RegistryUrl", registry.URL)
 
 	// Test without a DirectorURL set and check to see if it returns the expected error
 	tok, err = CreateAdvertiseToken("/test-namespace")
@@ -178,23 +203,28 @@ func TestCreateAdvertiseToken(t *testing.T) {
 	assert.NotEqual(t, "", tok)
 }
 
-func TestGetRegistryIssuerURL(t *testing.T) {
-	/*
-	* Runs unit tests on the GetRegistryIssuerURL function
-	 */
+func TestGetNSIssuerURL(t *testing.T) {
 	viper.Reset()
-
-	// No namespace url has been set, so an error is expected
-	url, err := GetRegistryIssuerURL("")
-	assert.Equal(t, "", url)
-	assert.Equal(t, "Namespace URL is not set", err.Error())
-
-	// Test to make sure the path is as expected
-	viper.Set("Federation.RegistryUrl", "test-path")
-	url, err = GetRegistryIssuerURL("test-prefix")
+	viper.Set("Federation.RegistryUrl", "https://registry.com:8446")
+	url, err := GetNSIssuerURL("/test-prefix")
 	assert.Equal(t, nil, err)
-	assert.Equal(t, "test-path/api/v1.0/registry/test-prefix/.well-known/issuer.jwks", url)
+	assert.Equal(t, "https://registry.com:8446/api/v1.0/registry/test-prefix", url)
+	viper.Reset()
+}
 
+func TestGetJWKSURLFromIssuerURL(t *testing.T) {
+	viper.Reset()
+	registry := registryMockup(t, "/test-prefix")
+	defer registry.Close()
+	viper.Set("Federation.RegistryUrl", registry.URL)
+	expectedIssuerUrl := registry.URL + "/api/v1.0/registry/test-prefix"
+	url, err := GetNSIssuerURL("/test-prefix")
+	assert.Equal(t, nil, err)
+	assert.Equal(t, expectedIssuerUrl, url)
+
+	keyLoc, err := GetJWKSURLFromIssuerURL(url)
+	assert.Equal(t, nil, err)
+	assert.Equal(t, "https://registry.com:8446/api/v1.0/registry/test-prefix/.well-known/issuer.jwks", keyLoc)
 }
 
 func TestNamespaceKeysCacheEviction(t *testing.T) {

@@ -233,9 +233,9 @@ func NamespaceDelete(endpoint string, prefix string) error {
 	// TODO: We might consider moving widely-useful functions like `GetRegistryIssuerURL`
 	//       to a more generic `pelican/utils` package so that they're easier to find
 	//       and more likely to be used.
-	issuerURL, err := director.GetRegistryIssuerURL(prefix)
+	issuerURL, err := director.GetNSIssuerURL(prefix)
 	if err != nil {
-		return errors.Wrap(err, "Failed to determine issuer URL for creating deletion token")
+		return errors.Wrap(err, "Failed to determine prefix's issuer/pubkey URL for creating deletion token")
 	}
 
 	// TODO: Eventually we should think about a naming scheme for
