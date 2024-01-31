@@ -25,6 +25,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"syscall"
@@ -49,6 +50,10 @@ var (
 		Use:   "plugin",
 		Short: "Plugin management for HTCSS",
 	}
+
+	// Need these for recovery function if we want to try to write our classAd outfile
+	useOutFile bool = false
+	outfile    string
 )
 
 type Transfer struct {
@@ -71,11 +76,43 @@ func init() {
 }
 
 func stashPluginMain(args []string) {
+	// Handler function to recover from panics
+	defer func() {
+		if r := recover(); r != nil {
+			log.Debugln("Panic captured while attempting to perform transfer:", r)
+			log.Debugln("Panic caused by the following", string(debug.Stack()))
+			ret := fmt.Sprintf("Unrecoverable error (panic) captured in stashPluginMain(): %v", r)
+
+			debugStack := strings.ReplaceAll(string(debug.Stack()), "\n", ";")
+			client.AddError(errors.New(debugStack))
+
+			// Attempt to add the panic to the error accumulator
+			client.AddError(errors.New(ret))
+
+			// Write our important classAds
+			resultAd := classads.NewClassAd()
+			var resultAds []*classads.ClassAd
+
+			// Set as failure and add errors
+			resultAd.Set("TransferSuccess", false)
+			resultAd.Set("TransferError", client.GetErrors())
+			resultAds = append(resultAds, resultAd)
+
+			// Attempt to write our file and bail
+			writeClassadOutputAndBail(1, resultAds)
+
+			os.Exit(1) //exit here just in case
+		}
+	}()
+
+	var isConfigErr = false
 	config.InitConfig()
 	err := config.InitClient()
 	if err != nil {
-		log.Errorln(err)
-		os.Exit(1)
+		log.Errorf("Problem initializing the Pelican client config: %v", err)
+		err = errors.Wrap(err, "Problem initializing the Pelican Client configuration")
+		client.AddError(err)
+		isConfigErr = true
 	}
 
 	// Parse command line arguments
@@ -86,13 +123,11 @@ func stashPluginMain(args []string) {
 	client.ObjectClientOptions.Version = version
 	client.ObjectClientOptions.Plugin = true
 	methods := []string{"http"}
-	var infile, outfile, testCachePath string
-	var useOutFile bool = false
+	var infile, testCachePath string
 	var getCaches bool = false
 
 	// Pop the executable off the args list
 	for len(args) > 0 {
-
 		if args[0] == "-classad" {
 			// Print classad and exit
 			fmt.Println("MultipleFileSupport = true")
@@ -137,6 +172,23 @@ func stashPluginMain(args []string) {
 		}
 		// Pop off the args
 		args = args[1:]
+	}
+
+	// Want to bail here for config fail to see if we want to write an outfile
+	if isConfigErr {
+		// Write our important classAds
+		resultAd := classads.NewClassAd()
+		var resultAds []*classads.ClassAd
+
+		// Set as failure and add errors
+		resultAd.Set("TransferSuccess", false)
+		resultAd.Set("TransferError", client.GetErrors())
+		resultAds = append(resultAds, resultAd)
+
+		// Attempt to write our file and bail
+		writeClassadOutputAndBail(1, resultAds)
+
+		os.Exit(1) //exit here just in case
 	}
 
 	if getCaches {
@@ -203,7 +255,7 @@ func stashPluginMain(args []string) {
 		outputFile, err = os.Create(outfile)
 		if err != nil {
 			log.Errorln("Failed to open outfile:", err)
-			os.Exit(1)
+			os.Exit(3) // unique error code to give us info
 		}
 		defer outputFile.Close()
 	}
@@ -277,6 +329,29 @@ func stashPluginMain(args []string) {
 	} else {
 		os.Exit(1)
 	}
+}
+
+// This function is used if we get some error requiring us to bail
+// We attempt to write and output file and call an exit(1)
+// In the future if we get more unique exit codes, we can change the passed in exit code
+func writeClassadOutputAndBail(exitCode int, resultAds []*classads.ClassAd) {
+	// Attempt to write out outfile:
+	outputFile := os.Stdout
+	if useOutFile {
+		var err error
+		outputFile, err = os.Create(outfile)
+		if err != nil {
+			log.Errorln("Failed to open outfile:", err)
+			os.Exit(3) // Code of 3 to let us know that the outfile failed to be created
+		}
+		defer outputFile.Close()
+	}
+
+	// We'll exit 3 in here if anything fails to write the file
+	writeOutfile(resultAds, outputFile)
+
+	log.Errorln("Failure with pelican plugin. Exiting...")
+	os.Exit(exitCode)
 }
 
 // moveObjects performs the appropriate download or upload functions for the plugin as well as
@@ -364,7 +439,7 @@ func writeOutfile(resultAds []*classads.ClassAd, outputFile *os.File) (bool, boo
 		_, err := outputFile.WriteString(resultAd.String() + "\n")
 		if err != nil {
 			log.Errorln("Failed to write to outfile:", err)
-			os.Exit(1)
+			os.Exit(3)
 		}
 		transferSuccess, err := resultAd.Get("TransferSuccess")
 		if err != nil {
@@ -378,7 +453,9 @@ func writeOutfile(resultAds []*classads.ClassAd, outputFile *os.File) (bool, boo
 			if err != nil {
 				log.Errorln("Failed to see if ad is retryable", err)
 			}
-			retryable = retryableTransfer.(bool)
+			if retryableTransfer != nil {
+				retryable = retryableTransfer.(bool)
+			}
 		}
 	}
 	if err := outputFile.Sync(); err != nil {
@@ -395,7 +472,7 @@ func writeOutfile(resultAds []*classads.ClassAd, outputFile *os.File) (bool, boo
 			} else {
 				log.Errorln("Failed to sync output file:", err)
 			}
-			os.Exit(1)
+			os.Exit(3) // Unique error code to let us know the outfile could not be created
 		}
 	}
 	return success, retryable
