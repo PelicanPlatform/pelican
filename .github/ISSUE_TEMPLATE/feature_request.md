@@ -7,7 +7,7 @@ assignees: ''
 
 ---
 
-Pelican Service: 
+Pelican Service:
 - [ ] Client
 - [ ] Plugin
 - [ ] Registry

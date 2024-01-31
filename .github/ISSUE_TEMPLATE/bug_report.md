@@ -7,10 +7,10 @@ assignees: ''
 
 ---
 
-Pelican Version: 
+Pelican Version:
 _Run `./pelican --version` to get version number._
 
-Pelican Service: 
+Pelican Service:
 - [ ] Client
 - [ ] Plugin
 - [ ] Registry
