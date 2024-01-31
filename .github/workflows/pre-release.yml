@@ -1,0 +1,52 @@
+# .github/workflows/release.yaml
+name: Pre Release Workflow
+
+on:
+  push:
+    tags:
+      # only run release on v7.0.0 and up
+      - v[7-9]\.[0-9]+\.[0-9]+
+      - v[1-9][0-9]+\.[0-9]+\.[0-9]+
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  pre-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Update npm version
+        run: |
+          cd web_ui/frontend
+
+          # Get the current tag and set the package.json version to it
+          npm version ${GITHUB_REF_NAME:1}
+
+          # Add some verbosity
+          echo "NPM version is now $(npm version)"
+
+      - name: Set Branch
+        id: set_branch
+        run: |
+          echo "branch=${GITHUB_REF_NAME%.*}.x" >> $GITHUB_OUTPUT
+
+      - uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "Pre Release: Update npm version"
+          branch: ${{ steps.set_branch.outputs.branch }}
+
+  build-website:
+    needs: [pre-release]
+    uses: PelicanPlatform/pelican/.github/workflows/publish-container.yml@main
+
+  goreleaser:
+    needs: [pre-release]
+    uses: PelicanPlatform/pelican/.github/workflows/release.yml@main

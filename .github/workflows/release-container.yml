@@ -1,14 +1,7 @@
 name: Release, Build, and Push
 
 on:
-  pull_request:
-  push:
-    branches:
-      - main
-  repository_dispatch:
-    types:
-      - dispatch-build
-  workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: write
@@ -29,7 +22,17 @@ jobs:
     strategy:
       fail-fast: False
     steps:
-      - uses: actions/checkout@v2
+
+      - name: Set Branch
+        id: set_branch
+        run: |
+          echo "branch=${GITHUB_REF_NAME%.*}.x" >> $GITHUB_OUTPUT
+
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          ref: ${{ steps.set_branch.outputs.branch }}
 
       - name: Generate tag list
         id: generate-tag-list

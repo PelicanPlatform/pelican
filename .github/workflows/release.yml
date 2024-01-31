@@ -2,11 +2,7 @@
 name: goreleaser
 
 on:
-  push:
-    tags:
-      # only run release on v7.0.0 and up
-      - v[7-9]\.[0-9]+\.[0-9]+
-      - v[1-9][0-9]+\.[0-9]+\.[0-9]+
+  workflow_call:
 
 permissions:
   contents: write
@@ -15,16 +11,24 @@ jobs:
   goreleaser:
     runs-on: ubuntu-latest
     steps:
+      - name: Set Branch
+        id: set_branch
+        run: |
+          echo "branch=${GITHUB_REF_NAME%.*}.x" >> $GITHUB_OUTPUT
       - name: Checkout
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
+          ref: ${{ steps.set_branch.outputs.branch }}
       - uses: actions/setup-node@v4
         with:
           node-version: 20
       - name: Update npm version
         run: |
           cd web_ui/frontend
+          
+          # Add some verbosity
+          echo "NPM version is now $(npm version)"
 
           # Get the current tag and set the package.json version to it
           npm version ${GITHUB_REF_NAME:1}
