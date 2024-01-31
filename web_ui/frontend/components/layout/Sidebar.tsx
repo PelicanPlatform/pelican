@@ -62,7 +62,7 @@ const SpeedDialButton = ({open, order, icon, title, onClick, href, boxProps} : S
                 <Tooltip title={title} arrow>
                     <Paper elevation={2} sx={{ borderRadius: "50%", bgcolor: "#ffffff00"}}>
                         { href != undefined ?
-                            <Link href={href}>
+                            <Link href={href} target={"_blank"}>
                                 <IconButton sx={{bgcolor: "primary.light", "&:hover": {bgcolor: "white"}}}>
                                     {icon}
                                 </IconButton>
