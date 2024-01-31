@@ -662,6 +662,25 @@ type: duration
 default: 15m
 components: ["nsregistry"]
 ---
+name: Registry.RequireCacheApproval
+description: >-
+  Only allow approved caches to join the federation and serve files. If set to true, caches can
+  successfully self-register or registered via registry, but director won't direct traffic to the cache.
+type: bool
+default: false
+osdf_default: true
+components: ["nsregistry"]
+---
+name: Registry.RequireOriginApproval
+description: >-
+  Only allow approved origins to join the federation and serve files. If set to true, origins can
+  successfully self-register or registered via registry, but director won't direct traffic to the origin,
+  nor would files on the origin show up in the federation.
+type: bool
+default: false
+osdf_default: true
+components: ["nsregistry"]
+---
 ############################
 #   Server-level configs   #
 ############################
