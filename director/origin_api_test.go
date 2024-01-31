@@ -205,23 +205,26 @@ func TestCreateAdvertiseToken(t *testing.T) {
 
 func TestGetNSIssuerURL(t *testing.T) {
 	viper.Reset()
+	viper.Set("Federation.RegistryUrl", "https://registry.com:8446")
+	url, err := GetNSIssuerURL("/test-prefix")
+	assert.Equal(t, nil, err)
+	assert.Equal(t, "https://registry.com:8446/api/v1.0/registry/test-prefix", url)
+	viper.Reset()
+}
 
-	emptyRegistry := registryMockup(t, "")
-	defer emptyRegistry.Close()
-
-	viper.Set("Federation.RegistryUrl", emptyRegistry.URL)
-	// No namespace url has been set, so an error is expected
-	url, err := GetNSIssuerURL("")
-	assert.Equal(t, "the prefix \"\" is invalid", err.Error())
-	assert.Equal(t, "", url)
-
-	// Test to make sure the path is as expected
+func TestGetJWKSURLFromIssuerURL(t *testing.T) {
+	viper.Reset()
 	registry := registryMockup(t, "/test-prefix")
 	defer registry.Close()
 	viper.Set("Federation.RegistryUrl", registry.URL)
-	url, err = GetNSIssuerURL("/test-prefix")
+	expectedIssuerUrl := registry.URL + "/api/v1.0/registry/test-prefix"
+	url, err := GetNSIssuerURL("/test-prefix")
 	assert.Equal(t, nil, err)
-	assert.Equal(t, "https://registry.com:8446/api/v1.0/registry/test-prefix/.well-known/issuer.jwks", url)
+	assert.Equal(t, expectedIssuerUrl, url)
+
+	keyLoc, err := GetJWKSURLFromIssuerURL(url)
+	assert.Equal(t, nil, err)
+	assert.Equal(t, "https://registry.com:8446/api/v1.0/registry/test-prefix/.well-known/issuer.jwks", keyLoc)
 }
 
 func TestNamespaceKeysCacheEviction(t *testing.T) {
