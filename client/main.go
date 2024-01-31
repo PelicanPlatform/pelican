@@ -938,6 +938,7 @@ func parse_job_ad(payload *payloadStruct) {
 	}
 
 	// Get all matches from file
+	// Note: This appears to be invalid regex but is the only thing that appears to work. This way it successfully finds our matches
 	classadRegex, e := regexp.Compile(`^*\s*(Owner|ProjectName)\s=\s"(.*)"`)
 	if e != nil {
 		log.Fatal(e)
