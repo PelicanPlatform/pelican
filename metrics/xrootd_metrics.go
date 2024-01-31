@@ -326,7 +326,7 @@ func ConfigureMonitoring(ctx context.Context, egrp *errgroup.Group) (int, error)
 		sessions.Stop()
 		userids.Stop()
 		transfers.Stop()
-		log.Infoln("Gracefully stopping metrics cache auto eviction...")
+		log.Infoln("Xrootd metrics cache eviction has been stopped")
 		return nil
 	})
 

@@ -76,7 +76,7 @@ export default function Graph({getData, options, boxProps, drawer}: GraphProps) 
             setLoading(false)
             if(response.datasets[0].data.length == 0){
                 let date = new Date(Date.now()).toLocaleTimeString()
-                setError(`No data returned by database as of ${date}; Plot will auto-refresh`)
+                setError(`No data returned by database as of ${date}; Plot will auto-refresh. Adjust Graph Settings to set a lower Rate Time Range and Resolution.`)
             } else {
                 setError("")
             }
@@ -130,8 +130,8 @@ export default function Graph({getData, options, boxProps, drawer}: GraphProps) 
                     </Box>
                 </>
             }
-            <Box display={"flex"} pt={1}>
-                <Typography m={"auto"} color={"red"} variant={"body2"}>{error}</Typography>
+            <Box display={"flex"} flexDirection={"column"} pt={1}>
+                <Typography m={"auto"} color={"red"} variant={"body2"} textAlign={"center"}>{error}</Typography>
             </Box>
         </Box>
     )

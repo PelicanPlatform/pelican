@@ -45,6 +45,7 @@ type PromDiscoveryItem struct {
 var (
 	minClientVersion, _        = version.NewVersion("7.0.0")
 	minOriginVersion, _        = version.NewVersion("7.0.0")
+	minCacheVersion, _         = version.NewVersion("7.3.0")
 	healthTestCancelFuncs      = make(map[ServerAd]context.CancelFunc)
 	healthTestCancelFuncsMutex = sync.RWMutex{}
 )
@@ -152,6 +153,10 @@ func versionCompatCheck(ginCtx *gin.Context) error {
 		minCompatVer = minClientVersion
 	case "origin":
 		minCompatVer = minOriginVersion
+	case "cache":
+		minCompatVer = minCacheVersion
+	default:
+		return errors.Errorf("Invalid version format. The director does not support your %s version (%s).", service, reqVer.String())
 	}
 
 	if reqVer.LessThan(minCompatVer) {
@@ -488,6 +493,11 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType ServerTy
 	healthTestCancelFuncsMutex.Lock()
 	defer healthTestCancelFuncsMutex.Unlock()
 	if ad.WebURL != "" && !hasOriginAdInCache {
+		if _, ok := healthTestCancelFuncs[sAd]; ok {
+			// If somehow we didn't clear the key, we call cancel first before
+			// adding a new test cycle
+			healthTestCancelFuncs[sAd]()
+		}
 		ctx, cancel := context.WithCancel(context.Background())
 		healthTestCancelFuncs[sAd] = cancel
 		LaunchPeriodicDirectorTest(ctx, sAd)

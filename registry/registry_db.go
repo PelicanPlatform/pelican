@@ -137,6 +137,10 @@ func (a AdminMetadata) Equal(b AdminMetadata) bool {
 		a.UpdatedAt.Equal(b.UpdatedAt)
 }
 
+func IsValidRegStatus(s string) bool {
+	return s == "Pending" || s == "Approved" || s == "Denied" || s == "Unknown"
+}
+
 func createNamespaceTable() {
 	//We put a size limit on admin_metadata to guard against potentially future
 	//malicious large inserts
@@ -950,7 +954,7 @@ func PopulateTopology() error {
 
 func PeriodicTopologyReload() {
 	for {
-		time.Sleep(time.Minute * param.Federation_TopologyReloadInterval.GetDuration())
+		time.Sleep(param.Federation_TopologyReloadInterval.GetDuration())
 		err := PopulateTopology()
 		if err != nil {
 			log.Warningf("Failed to re-populate topology table: %s. Will try again later",

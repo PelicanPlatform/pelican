@@ -26,6 +26,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -158,8 +159,6 @@ func stashPluginMain(args []string) {
 
 	var source []string
 	var dest string
-	var result error
-	//var downloaded int64 = 0
 	var transfers []Transfer
 
 	if len(args) == 0 && (infile == "" || outfile == "") {
@@ -209,10 +208,84 @@ func stashPluginMain(args []string) {
 		defer outputFile.Close()
 	}
 
-	var resultAds []*classads.ClassAd
-	retryable := false
-	for _, transfer := range transfers {
+	var wg sync.WaitGroup
 
+	workChan := make(chan Transfer, len(transfers))
+	results := make(chan *classads.ClassAd, len(transfers))
+
+	// Start workers
+	for i := 1; i <= 5; i++ {
+		wg.Add(1)
+		go moveObjects(source, methods, upload, &wg, workChan, results)
+	}
+
+	success := true
+	var resultAds []*classads.ClassAd
+	counter := 0
+	done := false
+	for !done {
+		// Send to work channel the amount of transfers we have
+		if counter < len(transfers) {
+			workChan <- transfers[counter]
+			counter++
+		} else if counter == len(transfers) { // Once we sent all the work, close the channel
+			close(workChan)
+			// Increment counter so we no longer hit this case
+			counter++
+		}
+		select {
+		case resultAd := <-results:
+			// Process results as soon as we get them
+			transferSuccess, err := resultAd.Get("TransferSuccess")
+			if err != nil {
+				log.Errorln("Failed to get TransferSuccess:", err)
+				success = false
+			}
+			// If we are not uploading and we fail, we want to abort
+			if !upload && !transferSuccess.(bool) {
+				success = false
+				// Add the final (failed) result to the resultAds
+				resultAds = append(resultAds, resultAd)
+				done = true
+				break
+			} else { // Otherwise, we add to end result ads
+				resultAds = append(resultAds, resultAd)
+			}
+		default:
+			// We are either done or still downloading/uploading
+			if len(resultAds) == len(transfers) {
+				log.Debugln("Finished transfering objects! :)")
+				done = true
+				break
+			}
+		}
+	}
+
+	// Wait for transfers only if successful
+	if success {
+		wg.Wait()
+	}
+
+	close(results)
+
+	success, retryable := writeOutfile(resultAds, outputFile)
+
+	if success {
+		os.Exit(0)
+	} else if retryable {
+		os.Exit(11)
+	} else {
+		os.Exit(1)
+	}
+}
+
+// moveObjects performs the appropriate download or upload functions for the plugin as well as
+// writes the resultAds for each transfer
+// Returns: resultAds and if an error given is retryable
+func moveObjects(source []string, methods []string, upload bool, wg *sync.WaitGroup, workChan <-chan Transfer, results chan<- *classads.ClassAd) {
+	defer wg.Done()
+	var result error
+	for transfer := range workChan {
 		var tmpDownloaded int64
 		if upload {
 			source = append(source, transfer.localFile)
@@ -266,24 +339,27 @@ func stashPluginMain(args []string) {
 				}
 				errMsg += transfer.url + ": " + client.GetErrors()
 				resultAd.Set("TransferError", errMsg)
-				client.ClearErrors()
 			}
 			resultAd.Set("TransferFileBytes", 0)
 			resultAd.Set("TransferTotalBytes", 0)
 			if client.ErrorsRetryable() {
 				resultAd.Set("TransferRetryable", true)
-				retryable = true
 			} else {
 				resultAd.Set("TransferRetryable", false)
-				retryable = false
-
 			}
+			client.ClearErrors()
 		}
-		resultAds = append(resultAds, resultAd)
-
+		results <- resultAd
 	}
+}
 
+// WriteOutfile takes in the result ads from the job and the file to be outputted, it returns a boolean indicating:
+// true: all result ads indicate transfer success
+// false: at least one result ad has failed
+// As well as a boolean letting us know if errors are retryable
+func writeOutfile(resultAds []*classads.ClassAd, outputFile *os.File) (bool, bool) {
 	success := true
+	retryable := false
 	for _, resultAd := range resultAds {
 		_, err := outputFile.WriteString(resultAd.String() + "\n")
 		if err != nil {
@@ -296,8 +372,16 @@ func stashPluginMain(args []string) {
 			success = false
 		}
 		success = success && transferSuccess.(bool)
+		// If we do not get a success, check if it is retryable
+		if !success {
+			retryableTransfer, err := resultAd.Get("TransferRetryable")
+			if err != nil {
+				log.Errorln("Failed to see if ad is retryable", err)
+			}
+			retryable = retryableTransfer.(bool)
+		}
 	}
-	if err = outputFile.Sync(); err != nil {
+	if err := outputFile.Sync(); err != nil {
 		var perr *fs.PathError
 		var serr syscall.Errno
 		// Error code 1 (serr) is ERROR_INVALID_FUNCTION, the expected Windows syscall error
@@ -314,14 +398,7 @@ func stashPluginMain(args []string) {
 			os.Exit(1)
 		}
 	}
-
-	if success {
-		os.Exit(0)
-	} else if retryable {
-		os.Exit(11)
-	} else {
-		os.Exit(1)
-	}
+	return success, retryable
 }
 
 // readMultiTransfers reads the transfers from a Reader, such as stdin

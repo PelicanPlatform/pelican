@@ -33,6 +33,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"text/template"
 	"time"
@@ -61,6 +62,20 @@ var (
 	errBadKeyPair error = errors.New("Bad X509 keypair")
 )
 
+const (
+	clientPluginDefault = `
+url = pelican://*
+lib = libXrdClPelican.so
+enable = true
+`
+
+	clientPluginMac = `
+url = pelican://*
+lib = libXrdClPelican.dylib
+enable = true
+`
+)
+
 type (
 	OriginConfig struct {
 		Multiuser        bool
@@ -84,7 +99,7 @@ type (
 		EnableVoms     bool
 		ExportLocation string
 		DataLocation   string
-		DirectorUrl    string
+		PSSOrigin      string
 	}
 
 	XrootdOptions struct {
@@ -160,12 +175,23 @@ func CheckOriginXrootdEnv(exportPath string, uid int, gid int, groupname string)
 			mountPath := param.Xrootd_Mount.GetString()
 			namespacePrefix := param.Origin_NamespacePrefix.GetString()
 			if mountPath == "" || namespacePrefix == "" {
-				return exportPath, errors.New(`Export information was not provided.
-		Add command line flag:
+				return exportPath, errors.New(`
+	The origin should have parsed export information prior to this point, but has failed to do so.
+	Was the mount passed via the command line flag:
 
-			-v /mnt/foo:/bar
+		-v /mnt/foo:/bar
 
-		to export the directory /mnt/foo to the path /bar in the data federation`)
+	or via the parameters.yaml file:
+
+		# Option 1
+		Origin.ExportVolume: /mnt/foo:/bar
+
+		# Option 2
+		Xrootd
+			Mount: /mnt/foo
+		Origin:
+			NamespacePrefix: /bar
+				`)
 			}
 			mountPath, err := filepath.Abs(mountPath)
 			if err != nil {
@@ -275,7 +301,23 @@ func CheckCacheXrootdEnv(exportPath string, uid int, gid int, nsAds []director.N
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to pull information from the federation")
 	}
-	viper.Set("Cache.DirectorUrl", param.Federation_DirectorUrl.GetString())
+	viper.Set("Cache.PSSOrigin", param.Federation_DirectorUrl.GetString())
+	if discoveryUrlStr := param.Federation_DiscoveryUrl.GetString(); discoveryUrlStr != "" {
+		discoveryUrl, err := url.Parse(discoveryUrlStr)
+		if err == nil {
+			log.Debugln("Parsing discovery URL for 'pss.origin' setting:", discoveryUrlStr)
+			if len(discoveryUrl.Path) > 0 && len(discoveryUrl.Host) == 0 {
+				discoveryUrl.Host = discoveryUrl.Path
+				discoveryUrl.Path = ""
+			}
+			discoveryUrl.Scheme = "pelican"
+			discoveryUrl.Path = ""
+			discoveryUrl.RawQuery = ""
+			viper.Set("Cache.PSSOrigin", discoveryUrl.String())
+		} else {
+			return "", errors.Wrapf(err, "Failed to parse discovery URL %s", discoveryUrlStr)
+		}
+	}
 
 	if err := WriteCacheScitokensConfig(nsAds); err != nil {
 		return "", errors.Wrap(err, "Failed to create scitokens configuration for the cache")
@@ -328,6 +370,21 @@ func CheckXrootdEnv(server server_utils.XRootDServer) error {
 	}
 	if err = os.Setenv("XDG_CACHE_HOME", cacheDir); err != nil {
 		return errors.Wrap(err, "Unable to set $XDG_CACHE_HOME for scitokens library")
+	}
+
+	if server.GetServerType().IsEnabled(config.CacheType) {
+		clientPluginsDir := filepath.Join(runtimeDir, "cache-client.plugins.d")
+		if err = os.MkdirAll(clientPluginsDir, os.FileMode(0755)); err != nil {
+			return errors.Wrap(err, "Unable to create cache client plugins directory")
+		}
+		if runtime.GOOS == "darwin" {
+			err = os.WriteFile(filepath.Join(clientPluginsDir, "pelican-plugin.conf"), []byte(clientPluginMac), os.FileMode(0644))
+		} else {
+			err = os.WriteFile(filepath.Join(clientPluginsDir, "pelican-plugin.conf"), []byte(clientPluginDefault), os.FileMode(0644))
+		}
+		if err != nil {
+			return errors.Wrap(err, "Unable to configure cache client plugin")
+		}
 	}
 
 	exportPath := filepath.Join(runtimeDir, "export")
@@ -533,12 +590,12 @@ func ConfigXrootd(ctx context.Context, origin bool) (string, error) {
 				return "", errors.New("Origin.Multiuser is set to `true` but the command was run without sufficient privilege; was it launched as root?")
 			}
 		}
-	} else if xrdConfig.Cache.DirectorUrl != "" {
+	} else if xrdConfig.Cache.PSSOrigin != "" {
 		// Workaround for a bug in XRootD 5.6.3: if the director URL is missing a port number, then
 		// XRootD crashes.
-		urlParsed, err := url.Parse(xrdConfig.Cache.DirectorUrl)
+		urlParsed, err := url.Parse(xrdConfig.Cache.PSSOrigin)
 		if err != nil {
-			return "", errors.Errorf("Director URL (%s) does not parse as a URL", xrdConfig.Cache.DirectorUrl)
+			return "", errors.Errorf("Director URL (%s) does not parse as a URL", xrdConfig.Cache.PSSOrigin)
 		}
 		if !strings.Contains(urlParsed.Host, ":") {
 			switch urlParsed.Scheme {
@@ -546,10 +603,12 @@ func ConfigXrootd(ctx context.Context, origin bool) (string, error) {
 				urlParsed.Host += ":80"
 			case "https":
 				urlParsed.Host += ":443"
+			case "pelican":
+				urlParsed.Host += ":443"
 			default:
-				log.Warningf("The Director URL (%s) does not contain an explicit port number; XRootD 5.6.3 and earlier are known to segfault in thie case", xrdConfig.Cache.DirectorUrl)
+				log.Warningf("The Director URL (%s) does not contain an explicit port number; XRootD 5.6.3 and earlier are known to segfault in thie case", xrdConfig.Cache.PSSOrigin)
 			}
-			xrdConfig.Cache.DirectorUrl = urlParsed.String()
+			xrdConfig.Cache.PSSOrigin = urlParsed.String()
 		}
 	}
 

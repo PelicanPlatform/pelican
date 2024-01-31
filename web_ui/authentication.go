@@ -21,7 +21,6 @@ package web_ui
 import (
 	"bufio"
 	"context"
-	"crypto/ecdsa"
 	"net/http"
 	"os"
 	"path"
@@ -127,20 +126,20 @@ func configureAuthDB() error {
 func GetUser(ctx *gin.Context) (string, error) {
 	token, err := ctx.Cookie("login")
 	if err != nil {
-		return "", nil
+		if err == http.ErrNoCookie {
+			return "", nil
+		} else {
+			return "", err
+		}
 	}
 	if token == "" {
 		return "", errors.New("Login cookie is empty")
 	}
-	key, err := config.GetIssuerPrivateJWK()
+	jwks, err := config.GetIssuerPublicJWKS()
 	if err != nil {
 		return "", err
 	}
-	var raw ecdsa.PrivateKey
-	if err = key.Raw(&raw); err != nil {
-		return "", errors.New("Failed to extract cookie signing key")
-	}
-	parsed, err := jwt.Parse([]byte(token), jwt.WithKey(jwa.ES256, raw.PublicKey))
+	parsed, err := jwt.Parse([]byte(token), jwt.WithKeySet(jwks))
 	if err != nil {
 		return "", err
 	}

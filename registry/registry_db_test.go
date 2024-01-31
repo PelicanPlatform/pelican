@@ -45,6 +45,7 @@ func setupMockRegistryDB(t *testing.T) {
 	db = mockDB
 	require.NoError(t, err, "Error setting up mock namespace DB")
 	createNamespaceTable()
+	createTopologyTable()
 }
 
 func resetNamespaceDB(t *testing.T) {

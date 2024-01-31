@@ -335,7 +335,7 @@ export default function Config() {
     return (
         <>
             <Sidebar>
-                <NextLink href={"/index.html"}>
+                <NextLink href={"/"}>
                     <Image
                         src={PelicanLogo}
                         alt={"Pelican Logo"}
@@ -345,7 +345,7 @@ export default function Config() {
                 </NextLink>
                 { enabledServers.includes("origin") &&
                     <Box pt={3}>
-                        <NextLink href={"/origin/index.html"}>
+                        <NextLink href={"/origin/"}>
                             <Tooltip title={"Origin"} placement={"right"}>
                                 <IconButton>
                                     <TripOrigin/>
@@ -356,7 +356,7 @@ export default function Config() {
                 }
                 { enabledServers.includes("director") &&
                     <Box pt={1}>
-                        <NextLink href={"/director/index.html"}>
+                        <NextLink href={"/director/"}>
                             <Tooltip title={"Director"} placement={"right"}>
                                 <IconButton>
                                     <AssistantDirection/>
@@ -367,7 +367,7 @@ export default function Config() {
                 }
                 { enabledServers.includes("registry") &&
                     <Box pt={1}>
-                        <NextLink href={"/registry/index.html"}>
+                        <NextLink href={"/registry/"}>
                             <Tooltip title={"Registry"} placement={"right"}>
                                 <IconButton>
                                     <AppRegistration/>

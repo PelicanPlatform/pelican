@@ -42,7 +42,7 @@ export default function Home() {
                                 rate={TimeDuration.fromString("3h")}
                                 duration={TimeDuration.fromString("7d")}
                                 resolution={TimeDuration.fromString("3h")}
-                                metric={['xrootd_server_bytes{direction="rx"}', 'xrootd_server_bytes{direction="rx"}']}
+                                metrics={['xrootd_server_bytes{direction="rx"}', 'xrootd_server_bytes{direction="tx"}']}
                                 boxProps={{
                                     maxHeight:"400px",
                                     flexGrow:1,

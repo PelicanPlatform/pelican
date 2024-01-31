@@ -21,8 +21,11 @@ Server:
   WebPort: 8444
   WebHost: "0.0.0.0"
   EnableUI: true
+  RegistrationRetryInterval: 10s
 Director:
   DefaultResponse: cache
+  AdvertisementTTL: 15m
+  OriginCacheHealthTestInterval: 15s
 Cache:
   Port: 8443
 Origin:

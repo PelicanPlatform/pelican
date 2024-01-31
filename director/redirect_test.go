@@ -376,6 +376,11 @@ func TestDiscoverOriginCache(t *testing.T) {
 	}
 
 	mockDirectorUrl := "https://fake-director.org:8888"
+
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
 	viper.Reset()
 	// Direcor SD will only be used for director's Prometheus scraper to get available origins,
 	// so the token issuer is issentially the director server itself
@@ -386,8 +391,12 @@ func TestDiscoverOriginCache(t *testing.T) {
 	kfile := filepath.Join(tDir, "testKey")
 	viper.Set("IssuerKey", kfile)
 
+	config.InitConfig()
+	err := config.InitServer(ctx, config.DirectorType)
+	require.NoError(t, err)
+
 	// Generate a private key to use for the test
-	_, err := config.GetIssuerPublicJWKS()
+	_, err = config.GetIssuerPublicJWKS()
 	assert.NoError(t, err, "Error generating private key")
 	// Get private key
 	privateKey, err := config.GetIssuerPrivateJWK()

@@ -19,6 +19,7 @@
 package utils
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -26,6 +27,7 @@ import (
 
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
@@ -193,15 +195,22 @@ func TestAddRawScope(t *testing.T) {
 }
 
 func TestCreateToken(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
 	// Some viper pre-requisites
 	viper.Reset()
 	viper.Set("IssuerUrl", "https://my-issuer.com")
 	tDir := t.TempDir()
 	kfile := filepath.Join(tDir, "testKey")
 	viper.Set("IssuerKey", kfile)
+	config.InitConfig()
+	err := config.InitServer(ctx, config.DirectorType)
+	require.NoError(t, err)
 
 	// Generate a private key to use for the test
-	_, err := config.GetIssuerPublicJWKS()
+	_, err = config.GetIssuerPublicJWKS()
 	assert.NoError(t, err)
 
 	// Test that the wlcg profile works

@@ -19,7 +19,6 @@ package utils
 
 import (
 	"context"
-	"crypto/ecdsa"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -29,7 +28,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/lestrrat-go/httprc"
-	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
@@ -208,17 +206,14 @@ func (a AuthCheckImpl) IssuerCheck(c *gin.Context, strToken string, expectedScop
 		}
 	}
 
-	bKey, err := config.GetIssuerPrivateJWK()
+	// Since whenever this function is called, the IssuerCheck is checking token signature
+	// against the server's public key, we can directly get the public key
+	jwks, err := config.GetIssuerPublicJWKS()
 	if err != nil {
-		return errors.Wrap(err, "Failed to load issuer server's private key")
+		return errors.Wrap(err, "Failed to load issuer server's public key")
 	}
 
-	var raw ecdsa.PrivateKey
-	if err = bKey.Raw(&raw); err != nil {
-		return errors.Wrap(err, "Failed to get raw key of the issuer's JWK")
-	}
-
-	parsed, err := jwt.Parse([]byte(strToken), jwt.WithKey(jwa.ES256, raw.PublicKey))
+	parsed, err := jwt.Parse([]byte(strToken), jwt.WithKeySet(jwks))
 
 	if err != nil {
 		return errors.Wrap(err, "Failed to verify JWT by issuer's key")

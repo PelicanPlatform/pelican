@@ -51,9 +51,9 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 		select {
 		case sig := <-sigs:
-			log.Debugf("Received signal %v; will shutdown process", sig)
+			log.Warningf("Received signal %v; will shutdown process", sig)
 			shutdownCancel()
-			return errors.New("Federation process has been cancelled")
+			return nil
 		case <-ctx.Done():
 			return nil
 		}
@@ -98,8 +98,24 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		mode := param.Origin_Mode.GetString()
 		switch mode {
 		case "posix":
-			if param.Origin_ExportVolume.GetString() == "" {
-				return shutdownCancel, errors.Errorf("Origin.ExportVolume must be set in the parameters.yaml file.")
+			if param.Origin_ExportVolume.GetString() == "" && (param.Xrootd_Mount.GetString() == "" || param.Origin_NamespacePrefix.GetString() == "") {
+				return shutdownCancel, errors.Errorf(`
+	Export information was not provided.
+	Add the command line flag:
+
+		-v /mnt/foo:/bar
+
+	to export the directory /mnt/foo to the namespace prefix /bar in the data federation. Alternatively, specify Origin.ExportVolume in the parameters.yaml file:
+
+		Origin:
+			ExportVolume: /mnt/foo:/bar
+
+	Or, specify Xrootd.Mount and Origin.NamespacePrefix in the parameters.yaml file:
+
+		Xrootd:
+			Mount: /mnt/foo
+		Origin:
+			NamespacePrefix: /bar`)
 			}
 		case "s3":
 			if param.Origin_S3Bucket.GetString() == "" || param.Origin_S3Region.GetString() == "" ||
@@ -139,7 +155,6 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 	egrp.Go(func() error {
 		if err := web_ui.RunEngine(ctx, engine, egrp); err != nil {
 			log.Errorln("Failure when running the web engine:", err)
-			shutdownCancel()
 			return err
 		}
 		log.Info("Web engine has shutdown")

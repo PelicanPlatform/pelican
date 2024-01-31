@@ -1,0 +1,77 @@
+From 5b7357cb59a1ffe2fb99b68c1dc5796fd063acdb Mon Sep 17 00:00:00 2001
+From: Brian Bockelman <bbockelman@morgridge.org>
+Date: Thu, 25 Jan 2024 09:46:39 -0600
+Subject: [PATCH] Add support for pelican:// protocol
+
+In https://github.com/PelicanPlatform/xrdcl-pelican, we are developing
+a XrdCl plugin that can talk to the infrastructure for a new project,
+christening the URL scheme `pelican://`.
+
+This commit adds the new schema so it can be utilized from both
+xrdcp (primarily for testing) and XCache.
+---
+ src/XrdApps/XrdCpConfig.cc | 2 ++
+ src/XrdApps/XrdCpFile.cc   | 1 +
+ src/XrdApps/XrdCpFile.hh   | 2 +-
+ src/XrdPss/XrdPssUtils.cc  | 3 ++-
+ 4 files changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/src/XrdApps/XrdCpConfig.cc b/src/XrdApps/XrdCpConfig.cc
+index 890f80198cc..7f8e8702efa 100644
+--- a/src/XrdApps/XrdCpConfig.cc
++++ b/src/XrdApps/XrdCpConfig.cc
+@@ -385,6 +385,7 @@ do{while(optind < Argc && Legacy(optind)) {}
+      if (dstFile->Protocol != XrdCpFile::isFile
+      &&  dstFile->Protocol != XrdCpFile::isStdIO
+      &&  dstFile->Protocol != XrdCpFile::isXroot
++     &&  dstFile->Protocol != XrdCpFile::isPelican
+      &&  (!Want(DoAllowHttp) && ((dstFile->Protocol == XrdCpFile::isHttp) ||
+                                  (dstFile->Protocol == XrdCpFile::isHttps))))
+         {FMSG(dstFile->ProtName <<"file protocol is not supported.", 22)}
+@@ -903,6 +904,7 @@ void XrdCpConfig::ProcFile(const char *fname)
+             }
+     else if (!((pFile->Protocol == XrdCpFile::isXroot) ||
+                (pFile->Protocol == XrdCpFile::isXroots) ||
++               (pFile->Protocol == XrdCpFile::isPelican) ||
+                (Want(DoAllowHttp) && ((pFile->Protocol == XrdCpFile::isHttp) ||
+                                       (pFile->Protocol == XrdCpFile::isHttps)))))
+                {FMSG(pFile->ProtName <<" file protocol is not supported.", 22)}
+diff --git a/src/XrdApps/XrdCpFile.cc b/src/XrdApps/XrdCpFile.cc
+index a6f8a6496e2..e1e5dc98086 100644
+--- a/src/XrdApps/XrdCpFile.cc
++++ b/src/XrdApps/XrdCpFile.cc
+@@ -56,6 +56,7 @@ XrdCpFile::XrdCpFile(const char *FSpec, int &badURL)
+                            {"root://",   7, isXroot},
+                            {"roots://",  8, isXroots},
+                            {"http://",   7, isHttp},
++                           {"pelican://",  10, isPelican},
+                            {"https://",  8, isHttps}
+                           };
+    static int pTnum = sizeof(pTab)/sizeof(struct proto);
+diff --git a/src/XrdApps/XrdCpFile.hh b/src/XrdApps/XrdCpFile.hh
+index ef09301b56c..03972c360d8 100644
+--- a/src/XrdApps/XrdCpFile.hh
++++ b/src/XrdApps/XrdCpFile.hh
+@@ -38,7 +38,7 @@ class XrdCpFile
+ public:
+ 
+ enum PType {isOther = 0, isDir,    isFile, isStdIO,
+-            isXroot,     isXroots, isHttp, isHttps, isDevNull, isDevZero
++            isXroot,     isXroots, isHttp, isHttps, isPelican, isDevNull, isDevZero
+            };
+ 
+ XrdCpFile        *Next;         // -> Next file in list
+diff --git a/src/XrdPss/XrdPssUtils.cc b/src/XrdPss/XrdPssUtils.cc
+index be14fa55c9a..42f37534f14 100644
+--- a/src/XrdPss/XrdPssUtils.cc
++++ b/src/XrdPss/XrdPssUtils.cc
+@@ -42,7 +42,8 @@ namespace
+    struct pEnt {const char *pname; int pnlen;} pTab[] =
+                {{ "https://", 8},  { "http://", 7},
+                 { "roots://", 8},  { "root://", 7},
+-                {"xroots://", 9},  {"xroot://", 8}
++                {"xroots://", 9},  {"xroot://", 8},
++                {"pelican://", 10}
+                };
+    int pTNum = sizeof(pTab)/sizeof(pEnt);
+    int xrBeg = 2;

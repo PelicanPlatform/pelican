@@ -168,6 +168,7 @@ var (
 	Debug = BoolParam{"Debug"}
 	DisableHttpProxy = BoolParam{"DisableHttpProxy"}
 	DisableProxyFallback = BoolParam{"DisableProxyFallback"}
+	Logging_DisableProgressBars = BoolParam{"Logging.DisableProgressBars"}
 	Monitoring_MetricAuthorization = BoolParam{"Monitoring.MetricAuthorization"}
 	Origin_EnableCmsd = BoolParam{"Origin.EnableCmsd"}
 	Origin_EnableDirListing = BoolParam{"Origin.EnableDirListing"}
@@ -186,10 +187,13 @@ var (
 )
 
 var (
+	Director_AdvertisementTTL = DurationParam{"Director.AdvertisementTTL"}
+	Director_OriginCacheHealthTestInterval = DurationParam{"Director.OriginCacheHealthTestInterval"}
 	Federation_TopologyReloadInterval = DurationParam{"Federation.TopologyReloadInterval"}
 	Monitoring_TokenExpiresIn = DurationParam{"Monitoring.TokenExpiresIn"}
 	Monitoring_TokenRefreshInterval = DurationParam{"Monitoring.TokenRefreshInterval"}
 	Registry_InstitutionsUrlReloadMinutes = DurationParam{"Registry.InstitutionsUrlReloadMinutes"}
+	Server_RegistrationRetryInterval = DurationParam{"Server.RegistrationRetryInterval"}
 	Transport_DialerKeepAlive = DurationParam{"Transport.DialerKeepAlive"}
 	Transport_DialerTimeout = DurationParam{"Transport.DialerTimeout"}
 	Transport_ExpectContinueTimeout = DurationParam{"Transport.ExpectContinueTimeout"}

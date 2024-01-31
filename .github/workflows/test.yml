@@ -11,12 +11,16 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
+      with:
+      # Do fetch depth 0 here because otherwise goreleaser might not work properly:
+      # https://goreleaser.com/ci/actions/?h=tag#workflow
+        fetch-depth: 0
     - uses: actions/setup-node@v4
       with:
         node-version: 20
     - name: Cache Next.js
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: |
           ~/.npm
@@ -27,7 +31,7 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-nextjs-${{ hashFiles('**/package-lock.json') }}-
     - name: Install Go
-      uses: actions/setup-go@v4
+      uses: actions/setup-go@v5
       with:
         go-version: ${{ matrix.go-version }}
     - name: Install Mac OS X Dependencies
@@ -46,7 +50,7 @@ jobs:
         make web-build
         go test ./...
     - name: Run GoReleaser for Non-Ubuntu
-      uses: goreleaser/goreleaser-action@v4
+      uses: goreleaser/goreleaser-action@v5
       with:
         # either 'goreleaser' (default) or 'goreleaser-pro'
         distribution: goreleaser
@@ -58,12 +62,21 @@ jobs:
       image: hub.opensciencegrid.org/pelican_platform/pelican-dev:latest-itb
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
+      with:
+        # See above for why fetch depth is 0 here
+        fetch-depth: 0
     - uses: actions/setup-node@v4
       with:
         node-version: 20
+      # Fetch the tags is essential so that goreleaser can build the correct version. Workaround found here:
+      # https://github.com/actions/checkout/issues/290
+    - name: Fetch tags
+      run: |
+        git config --global --add safe.directory /__w/pelican/pelican
+        git fetch --force --tags
     - name: Cache Next.js
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: |
           ~/.npm
@@ -87,7 +100,7 @@ jobs:
     - name: Restore base test coverage
       id: base-coverage
       if: github.event.pull_request.base.sha != ''
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: |
           unit-base.txt
@@ -116,7 +129,7 @@ jobs:
       if: github.event_name == 'pull_request'
       run: echo 'Code coverage ' ${{steps.cc.outputs.cc_total}}'% Prev ' ${{steps.cc_b.outputs.cc_base_total}}'%' >> $GITHUB_STEP_SUMMARY
     - name: Run GoReleaser for Ubuntu
-      uses: goreleaser/goreleaser-action@v4
+      uses: goreleaser/goreleaser-action@v5
       with:
         # either 'goreleaser' (default) or 'goreleaser-pro'
         distribution: goreleaser
@@ -127,3 +140,5 @@ jobs:
         cp dist/pelican_linux_amd64_v1/pelican ./
     - name: Run Integration Tests
       run: ./github_scripts/citests.sh
+    - name: Run End-to-End Tests
+      run: ./github_scripts/get_put_test.sh
