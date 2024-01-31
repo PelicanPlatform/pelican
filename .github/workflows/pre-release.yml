@@ -40,6 +40,7 @@ jobs:
         with:
           commit_message: "Pre Release: Update npm version"
           branch: ${{ steps.set_branch.outputs.branch }}
+          create_branch: true
 
   build-website:
     needs: [pre-release]
