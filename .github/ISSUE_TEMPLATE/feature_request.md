@@ -7,6 +7,15 @@ assignees: ''
 
 ---
 
+Pelican Service: 
+- [ ] Client
+- [ ] Plugin
+- [ ] Registry
+- [ ] Director
+- [ ] Origin
+- [ ] Cache
+- [ ] Other (please give the detail)
+
 **Is your feature request related to a problem? Please describe.**
 _A clear and concise description of what the problem is. Ex. I'm always frustrated when [...]_
 
