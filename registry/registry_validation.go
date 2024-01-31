@@ -73,7 +73,7 @@ func validateKeyChaining(prefix string, pubkey jwk.Key) (validationError error, 
 		return
 	}
 	// We don't check keyChaining for caches
-	if strings.HasPrefix(prefix, "/caches") {
+	if strings.HasPrefix(prefix, "/caches/") {
 		return
 	}
 	superspaces, subspaces, inTopo, err := namespaceSupSubChecks(prefix)
