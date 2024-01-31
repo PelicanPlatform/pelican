@@ -23,18 +23,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Update npm version
-        run: |
-          cd web_ui/frontend
-
-          # Add some verbosity
-          echo "NPM version is now $(npm version)"
-
-          # Get the current tag and set the package.json version to it
-          npm version ${GITHUB_REF_NAME:1}
-
-          # Add some verbosity
-          echo "NPM version is now $(npm version)"
       - name: Build the website
         run: |
           make web-build
