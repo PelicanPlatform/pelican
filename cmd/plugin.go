@@ -412,15 +412,16 @@ func readMultiTransfers(stdin bufio.Reader) (transfers []Transfer, err error) {
 		return nil, errors.New("No transfers found")
 	}
 	for _, ad := range ads {
-		url, err := ad.Get("Url")
+		adUrl, err := ad.Get("Url")
 		if err != nil {
 			return nil, err
 		}
+
 		destination, err := ad.Get("LocalFileName")
 		if err != nil {
 			return nil, err
 		}
-		transfers = append(transfers, Transfer{url: url.(string), localFile: destination.(string)})
+		transfers = append(transfers, Transfer{url: adUrl.(string), localFile: destination.(string)})
 	}
 
 	return transfers, nil

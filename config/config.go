@@ -400,6 +400,22 @@ func DiscoverFederation() error {
 	return nil
 }
 
+// Return a struct representing the current (global) federation metadata
+func GetFederation() FederationDiscovery {
+	return FederationDiscovery{
+		DirectorEndpoint:              param.Federation_DirectorUrl.GetString(),
+		NamespaceRegistrationEndpoint: param.Federation_RegistryUrl.GetString(),
+		JwksUri:                       param.Federation_JwkUrl.GetString(),
+	}
+}
+
+// Set the current global federation metadata
+func SetFederation(fd FederationDiscovery) {
+	viper.Set("Federation.DirectorUrl", fd.DirectorEndpoint)
+	viper.Set("Federation.RegistryUrl", fd.NamespaceRegistrationEndpoint)
+	viper.Set("Federation.JwkUrl", fd.JwksUri)
+}
+
 // TODO: It's not clear that this function works correctly.  We should
 // pass an errgroup here and ensure that the cleanup is complete before
 // the main thread shuts down.
