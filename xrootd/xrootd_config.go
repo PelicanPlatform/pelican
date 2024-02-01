@@ -38,8 +38,8 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/pelicanplatform/pelican/cache_ui"
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/origin_ui"
 	"github.com/pelicanplatform/pelican/param"
@@ -135,7 +135,7 @@ type (
 	}
 )
 
-func CheckOriginXrootdEnv(exportPath string, uid int, gid int, groupname string) (string, error) {
+func CheckOriginXrootdEnv(exportPath string, server server_utils.XRootDServer, uid int, gid int, groupname string) (string, error) {
 	originMode := param.Origin_Mode.GetString()
 	if originMode == "posix" {
 		// If we use "volume mount" style options, configure the export directories.
@@ -261,12 +261,12 @@ func CheckOriginXrootdEnv(exportPath string, uid int, gid int, groupname string)
 			" to desired daemon group %v", macaroonsSecret, groupname)
 	}
 	// If the scitokens.cfg does not exist, create one
-	// Set up exportedPaths, which we later use to grant access to the origin's issuer.
-	exportedPaths := viper.GetStringSlice("Origin.NamespacePrefix")
-	if err := WriteOriginScitokensConfig(exportedPaths); err != nil {
-		return exportPath, errors.Wrap(err, "Failed to create scitokens configuration for the origin")
+	if originServer, ok := server.(*origin_ui.OriginServer); ok {
+		err := WriteOriginScitokensConfig(originServer.GetAuthorizedPrefixes())
+		if err != nil {
+			return exportPath, err
+		}
 	}
-
 	if err := origin_ui.ConfigureXrootdMonitoringDir(); err != nil {
 		return exportPath, err
 	}
@@ -274,7 +274,7 @@ func CheckOriginXrootdEnv(exportPath string, uid int, gid int, groupname string)
 	return exportPath, nil
 }
 
-func CheckCacheXrootdEnv(exportPath string, uid int, gid int, nsAds []director.NamespaceAd) (string, error) {
+func CheckCacheXrootdEnv(exportPath string, server server_utils.XRootDServer, uid int, gid int) (string, error) {
 	viper.Set("Xrootd.Mount", exportPath)
 	filepath.Join(exportPath, "/")
 	err := config.MkdirAll(exportPath, 0775, uid, gid)
@@ -319,10 +319,12 @@ func CheckCacheXrootdEnv(exportPath string, uid int, gid int, nsAds []director.N
 		}
 	}
 
-	if err := WriteCacheScitokensConfig(nsAds); err != nil {
-		return "", errors.Wrap(err, "Failed to create scitokens configuration for the cache")
+	if cacheServer, ok := server.(*cache_ui.CacheServer); ok {
+		err := WriteCacheScitokensConfig(cacheServer.GetNamespaceAds())
+		if err != nil {
+			return "", errors.Wrap(err, "Failed to create scitokens configuration for the cache")
+		}
 	}
-
 	return exportPath, nil
 }
 
@@ -399,9 +401,9 @@ func CheckXrootdEnv(server server_utils.XRootDServer) error {
 	}
 
 	if server.GetServerType().IsEnabled(config.OriginType) {
-		exportPath, err = CheckOriginXrootdEnv(exportPath, uid, gid, groupname)
+		exportPath, err = CheckOriginXrootdEnv(exportPath, server, uid, gid, groupname)
 	} else {
-		exportPath, err = CheckCacheXrootdEnv(exportPath, uid, gid, server.GetNamespaceAds())
+		exportPath, err = CheckCacheXrootdEnv(exportPath, server, uid, gid)
 	}
 	if err != nil {
 		return err

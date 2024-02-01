@@ -308,6 +308,14 @@ type: string
 default: none
 components: ["origin"]
 ---
+name: Origin.EnablePublicReads
+description: >-
+  A boolean indicating whether an origin allows public read access. When false, reads from the origin will require a properly-scoped authorization
+  token signed by the origin's issuer.
+type: bool
+default: false
+components: ["origin"]
+---
 name: Origin.EnableWrite
 description: >-
   A boolean indicating if an origin allows write access

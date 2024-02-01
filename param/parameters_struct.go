@@ -89,6 +89,7 @@ type config struct {
 		EnableDirListing bool
 		EnableFallbackRead bool
 		EnableIssuer bool
+		EnablePublicReads bool
 		EnableUI bool
 		EnableVoms bool
 		EnableWrite bool
@@ -262,6 +263,7 @@ type configWithType struct {
 		EnableDirListing struct { Type string; Value bool }
 		EnableFallbackRead struct { Type string; Value bool }
 		EnableIssuer struct { Type string; Value bool }
+		EnablePublicReads struct { Type string; Value bool }
 		EnableUI struct { Type string; Value bool }
 		EnableVoms struct { Type string; Value bool }
 		EnableWrite struct { Type string; Value bool }

@@ -34,6 +34,7 @@ Origin:
   EnableMacaroons: false
   EnableVoms: true
   EnableUI: true
+  EnablePublicRead: false
   EnableWrite: true
   SelfTest: true
 Registry:

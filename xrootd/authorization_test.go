@@ -292,12 +292,11 @@ func TestGenerateConfig(t *testing.T) {
 }
 
 func TestWriteOriginAuthFiles(t *testing.T) {
-
+	viper.Reset()
 	originAuthTester := func(server server_utils.XRootDServer, authStart string, authResult string) func(t *testing.T) {
 		return func(t *testing.T) {
-
+			defer viper.Reset()
 			dirname := t.TempDir()
-			viper.Reset()
 			viper.Set("Xrootd.RunLocation", dirname)
 			viper.Set("Xrootd.ScitokensConfig", filepath.Join(dirname, "scitokens-generated.cfg"))
 			viper.Set("Xrootd.Authfile", filepath.Join(dirname, "authfile"))
@@ -327,6 +326,10 @@ func TestWriteOriginAuthFiles(t *testing.T) {
 	originServer.SetNamespaceAds(nsAds)
 
 	t.Run("EmptyAuth", originAuthTester(originServer, "", "u * /.well-known lr\n"))
+
+	viper.Set("Origin.EnablePublicReads", true)
+	viper.Set("Origin.NamespacePrefix", "/foo/bar")
+	t.Run("PublicAuth", originAuthTester(originServer, "", "u * /.well-known lr /foo/bar lr\n"))
 }
 
 func TestWriteCacheAuthFiles(t *testing.T) {

@@ -174,6 +174,7 @@ var (
 	Origin_EnableDirListing = BoolParam{"Origin.EnableDirListing"}
 	Origin_EnableFallbackRead = BoolParam{"Origin.EnableFallbackRead"}
 	Origin_EnableIssuer = BoolParam{"Origin.EnableIssuer"}
+	Origin_EnablePublicReads = BoolParam{"Origin.EnablePublicReads"}
 	Origin_EnableUI = BoolParam{"Origin.EnableUI"}
 	Origin_EnableVoms = BoolParam{"Origin.EnableVoms"}
 	Origin_EnableWrite = BoolParam{"Origin.EnableWrite"}
