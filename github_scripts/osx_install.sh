@@ -19,6 +19,8 @@
 # Mac OS X instance in GitHub.
 #
 
+scriptdir=`dirname $0`
+
 brew install minio xrootd ninja
 
 mkdir dependencies
@@ -60,11 +62,13 @@ popd
 
 git clone --depth=1 https://github.com/xrootd/xrootd.git
 pushd xrootd
+patch -p1 $scriptdir/pelican_protocol.patch
 mkdir build
 cd build
 cmake .. -GNinja
-ninja libXrdAccSciTokens-5.so
+ninja libXrdAccSciTokens-5.so libXrdPss-5.so
 sudo ln -s $PWD/src/libXrdAccSciTokens-5.so $xrootd_libdir
+sudo ln -sf $PWD/src/libXrdPss-5.so $xrootd_libdir
 popd
 
 popd

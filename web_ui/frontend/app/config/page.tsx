@@ -36,7 +36,7 @@ import {
     Container,
     Tooltip
 } from "@mui/material";
-import React, {useEffect, useState} from "react";
+import React, {useEffect, useMemo, useState} from "react";
 import {OverridableStringUnion} from "@mui/types";
 import {Variant} from "@mui/material/styles/createTypography";
 import {TypographyPropsVariantOverrides} from "@mui/material/Typography";
@@ -48,8 +48,21 @@ import {Sidebar} from "@/components/layout/Sidebar";
 import Image from "next/image";
 import PelicanLogo from "@/public/static/images/PelicanPlatformLogo_Icon.png";
 import IconButton from "@mui/material/IconButton";
+import {Main} from "@/components/layout/Main";
 
 type duration = number | `${number}${"ns" | "us" | "µs" | "ms" |"s" | "m" | "h"}`;
+
+interface ConfigMetadata {
+    [key: string]: ConfigMetadataValue
+}
+
+interface ConfigMetadataValue {
+    components: string[]
+    default: boolean
+    description: string
+    name: string
+    type: string
+}
 
 export type Config = {
     [key: string]: ConfigValue | Config
@@ -74,6 +87,22 @@ function sortConfig (a: [string, ConfigValue | Config], b: [string, ConfigValue 
         return -1
     }
     return a[0].localeCompare(b[0])
+}
+
+interface StringObject {
+    [key: string]: any
+}
+
+function deleteKey (obj: StringObject, key: string[]) {
+    if(key.length === 1) {
+        delete obj[key[0]]
+        return
+    } else {
+        deleteKey(obj[key[0]], key.slice(1))
+        if(Object.keys(obj[key[0]]).length === 0){
+            delete obj[key[0]]
+        }
+    }
 }
 
 const ConfigDisplayFormElement = ({name, id, configValue}:{name: string, id: string[], configValue: ConfigValue}) : JSX.Element => {
@@ -148,8 +177,6 @@ interface ConfigDisplayProps {
 }
 
 function ConfigDisplay({id, name, value, level = 1}: ConfigDisplayProps) {
-
-    console.log("ConfigDisplay", id, name, value, level)
 
     if(name != "") {
         id = [...id, name]
@@ -286,10 +313,11 @@ function TableOfContents({id, name, value, level = 1}: TableOfContentsProps) {
     )
 }
 
-export default function Config() {
+function Config() {
 
     const [config, setConfig] = useState<Config|undefined>(undefined)
     const [enabledServers, setEnabledServers] = useState<string[]>([])
+    const [configMetadata, setConfigMetadata] = useState<ConfigMetadata|undefined>(undefined)
     const [error, setError] = useState<string|undefined>(undefined)
 
     let getConfig = async () => {
@@ -317,10 +345,50 @@ export default function Config() {
         }
     }
 
+    const getConfigMetadata = async () => {
+        try {
+            const res = await fetch("/view/data/parameters.json")
+            const data = await res.json() as ConfigMetadata[]
+            const metadata = data.reduce((acc: ConfigMetadata, curr: ConfigMetadata) => {
+                const [key, value] = Object.entries(curr)[0]
+                acc[key] = value
+                return acc
+            }, {})
+
+            setConfigMetadata(metadata)
+        } catch {
+            setConfigMetadata(undefined)
+        }
+    }
+
     useEffect(() => {
         getConfig()
         getEnabledServers()
+        getConfigMetadata()
     }, [])
+
+    const filteredConfig = useMemo(() => {
+
+        if(!config) {
+            return undefined
+        }
+
+        if(!enabledServers || !configMetadata) {
+            return config
+        }
+
+        // Filter out the inactive config values
+        const filteredConfig: Config = structuredClone(config)
+        Object.entries(configMetadata).forEach(([key, value]) => {
+
+            if([...enabledServers, "*"].filter(i => value.components.includes(i)).length === 0) {
+                deleteKey(filteredConfig, key.split("."))
+            }
+        })
+
+        return filteredConfig
+
+    }, [config, enabledServers, configMetadata])
 
 
     if(error){
@@ -335,7 +403,7 @@ export default function Config() {
     return (
         <>
             <Sidebar>
-                <NextLink href={"/index.html"}>
+                <NextLink href={"/"}>
                     <Image
                         src={PelicanLogo}
                         alt={"Pelican Logo"}
@@ -345,7 +413,7 @@ export default function Config() {
                 </NextLink>
                 { enabledServers.includes("origin") &&
                     <Box pt={3}>
-                        <NextLink href={"/origin/index.html"}>
+                        <NextLink href={"/origin/"}>
                             <Tooltip title={"Origin"} placement={"right"}>
                                 <IconButton>
                                     <TripOrigin/>
@@ -356,7 +424,7 @@ export default function Config() {
                 }
                 { enabledServers.includes("director") &&
                     <Box pt={1}>
-                        <NextLink href={"/director/index.html"}>
+                        <NextLink href={"/director/"}>
                             <Tooltip title={"Director"} placement={"right"}>
                                 <IconButton>
                                     <AssistantDirection/>
@@ -367,7 +435,7 @@ export default function Config() {
                 }
                 { enabledServers.includes("registry") &&
                     <Box pt={1}>
-                        <NextLink href={"/registry/index.html"}>
+                        <NextLink href={"/registry/"}>
                             <Tooltip title={"Registry"} placement={"right"}>
                                 <IconButton>
                                     <AppRegistration/>
@@ -377,7 +445,7 @@ export default function Config() {
                     </Box>
                 }
             </Sidebar>
-            <Box component={"main"} pl={"72px"} pb={2} display={"flex"} minHeight={"100vh"} flexGrow={1}>
+            <Main>
                 <Container maxWidth={"xl"} sx={{"mt": 2 }}>
                     <Box width={"100%"}>
                         <Grid container spacing={2}>
@@ -388,23 +456,25 @@ export default function Config() {
                             <Grid item xs={7} md={8} lg={6}>
                                 <form>
                                     {
-                                        config === undefined ?
+                                        filteredConfig === undefined ?
                                             <Skeleton  variant="rectangular" animation="wave" height={"1000px"}/> :
-                                            <ConfigDisplay id={[]} name={""} value={config} level={4}/>
+                                            <ConfigDisplay id={[]} name={""} value={filteredConfig} level={4}/>
                                     }
                                 </form>
                             </Grid>
                             <Grid item xs={5} md={4} lg={3}>
                                 {
-                                    config === undefined ?
+                                    filteredConfig === undefined ?
                                         <Skeleton  variant="rectangular" animation="wave" height={"1000px"}/> :
-                                        <Box pt={2}><TableOfContents id={[]} name={""} value={config} level={1}/></Box>
+                                        <Box pt={2}><TableOfContents id={[]} name={""} value={filteredConfig} level={1}/></Box>
                                 }
                             </Grid>
                         </Grid>
                     </Box>
                 </Container>
-            </Box>
+            </Main>
         </>
     )
 }
+
+export default Config;

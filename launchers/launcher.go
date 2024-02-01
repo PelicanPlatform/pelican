@@ -37,6 +37,10 @@ import (
 	"github.com/pelicanplatform/pelican/web_ui"
 )
 
+var (
+	ErrExitOnSignal error = errors.New("Exit program on signal")
+)
+
 func LaunchModules(ctx context.Context, modules config.ServerType) (context.CancelFunc, error) {
 	egrp, ok := ctx.Value(config.EgrpKey).(*errgroup.Group)
 	if !ok {
@@ -53,7 +57,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		case sig := <-sigs:
 			log.Warningf("Received signal %v; will shutdown process", sig)
 			shutdownCancel()
-			return nil
+			return ErrExitOnSignal
 		case <-ctx.Done():
 			return nil
 		}

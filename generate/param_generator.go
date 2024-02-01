@@ -154,8 +154,22 @@ func GenParamEnum() {
 	if err != nil {
 		panic(err)
 	}
-	// Create the json file to be generated (for the web ui)
+	// Create the json file to be generated (for the documentation website)
 	fJSON, err := os.Create("../docs/parameters.json")
+	if err != nil {
+		panic(err)
+	}
+	_, err = fJSON.Write(prettyJSON.Bytes())
+	if err != nil {
+		panic(err)
+	}
+	// Copy the same json file ( for the web-ui )
+	webUIPath := "../web_ui/frontend/public/data/parameters.json"
+	// Create directories if they don't exist
+	if err := os.MkdirAll(filepath.Dir(webUIPath), 0755); err != nil {
+		panic(err)
+	}
+	fJSON, err = os.Create("../web_ui/frontend/public/data/parameters.json")
 	if err != nil {
 		panic(err)
 	}

@@ -1,0 +1,12 @@
+[Unit]
+Description = Pelican service pelican-director
+After = network.target nss-lookup.target
+
+[Service]
+EnvironmentFile = -/etc/sysconfig/pelican-director
+ExecStart = /usr/bin/pelican --config /etc/pelican/pelican-director.yaml director serve
+Restart = on-failure
+RestartSec = 20s
+
+[Install]
+WantedBy = multi-user.target

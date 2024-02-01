@@ -33,12 +33,13 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"text/template"
 	"time"
 
+	"github.com/pelicanplatform/pelican/cache_ui"
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/origin_ui"
 	"github.com/pelicanplatform/pelican/param"
@@ -59,6 +60,20 @@ var (
 	robotsTxt string
 
 	errBadKeyPair error = errors.New("Bad X509 keypair")
+)
+
+const (
+	clientPluginDefault = `
+url = pelican://*
+lib = libXrdClPelican.so
+enable = true
+`
+
+	clientPluginMac = `
+url = pelican://*
+lib = libXrdClPelican.dylib
+enable = true
+`
 )
 
 type (
@@ -84,7 +99,7 @@ type (
 		EnableVoms     bool
 		ExportLocation string
 		DataLocation   string
-		DirectorUrl    string
+		PSSOrigin      string
 	}
 
 	XrootdOptions struct {
@@ -112,15 +127,30 @@ type (
 		TLSCACertificateFile      string
 	}
 
+	LoggingConfig struct {
+		CacheScitokens  string
+		CachePss        string
+		CacheOfs        string
+		CacheXrd        string
+		PssSetOptCache  string
+		OriginScitokens string
+		OriginPss       string
+		OriginPfc       string
+		OriginCms       string
+		OriginXrootd    string
+		PssSetOptOrigin string
+	}
+
 	XrootdConfig struct {
-		Server ServerConfig
-		Origin OriginConfig
-		Xrootd XrootdOptions
-		Cache  CacheConfig
+		Server  ServerConfig
+		Origin  OriginConfig
+		Xrootd  XrootdOptions
+		Cache   CacheConfig
+		Logging LoggingConfig
 	}
 )
 
-func CheckOriginXrootdEnv(exportPath string, uid int, gid int, groupname string) (string, error) {
+func CheckOriginXrootdEnv(exportPath string, server server_utils.XRootDServer, uid int, gid int, groupname string) (string, error) {
 	originMode := param.Origin_Mode.GetString()
 	if originMode == "posix" {
 		// If we use "volume mount" style options, configure the export directories.
@@ -246,12 +276,12 @@ func CheckOriginXrootdEnv(exportPath string, uid int, gid int, groupname string)
 			" to desired daemon group %v", macaroonsSecret, groupname)
 	}
 	// If the scitokens.cfg does not exist, create one
-	// Set up exportedPaths, which we later use to grant access to the origin's issuer.
-	exportedPaths := viper.GetStringSlice("Origin.NamespacePrefix")
-	if err := WriteOriginScitokensConfig(exportedPaths); err != nil {
-		return exportPath, errors.Wrap(err, "Failed to create scitokens configuration for the origin")
+	if originServer, ok := server.(*origin_ui.OriginServer); ok {
+		err := WriteOriginScitokensConfig(originServer.GetAuthorizedPrefixes())
+		if err != nil {
+			return exportPath, err
+		}
 	}
-
 	if err := origin_ui.ConfigureXrootdMonitoringDir(); err != nil {
 		return exportPath, err
 	}
@@ -259,7 +289,7 @@ func CheckOriginXrootdEnv(exportPath string, uid int, gid int, groupname string)
 	return exportPath, nil
 }
 
-func CheckCacheXrootdEnv(exportPath string, uid int, gid int, nsAds []director.NamespaceAd) (string, error) {
+func CheckCacheXrootdEnv(exportPath string, server server_utils.XRootDServer, uid int, gid int) (string, error) {
 	viper.Set("Xrootd.Mount", exportPath)
 	filepath.Join(exportPath, "/")
 	err := config.MkdirAll(exportPath, 0775, uid, gid)
@@ -286,12 +316,30 @@ func CheckCacheXrootdEnv(exportPath string, uid int, gid int, nsAds []director.N
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to pull information from the federation")
 	}
-	viper.Set("Cache.DirectorUrl", param.Federation_DirectorUrl.GetString())
-
-	if err := WriteCacheScitokensConfig(nsAds); err != nil {
-		return "", errors.Wrap(err, "Failed to create scitokens configuration for the cache")
+	viper.Set("Cache.PSSOrigin", param.Federation_DirectorUrl.GetString())
+	if discoveryUrlStr := param.Federation_DiscoveryUrl.GetString(); discoveryUrlStr != "" {
+		discoveryUrl, err := url.Parse(discoveryUrlStr)
+		if err == nil {
+			log.Debugln("Parsing discovery URL for 'pss.origin' setting:", discoveryUrlStr)
+			if len(discoveryUrl.Path) > 0 && len(discoveryUrl.Host) == 0 {
+				discoveryUrl.Host = discoveryUrl.Path
+				discoveryUrl.Path = ""
+			}
+			discoveryUrl.Scheme = "pelican"
+			discoveryUrl.Path = ""
+			discoveryUrl.RawQuery = ""
+			viper.Set("Cache.PSSOrigin", discoveryUrl.String())
+		} else {
+			return "", errors.Wrapf(err, "Failed to parse discovery URL %s", discoveryUrlStr)
+		}
 	}
 
+	if cacheServer, ok := server.(*cache_ui.CacheServer); ok {
+		err := WriteCacheScitokensConfig(cacheServer.GetNamespaceAds())
+		if err != nil {
+			return "", errors.Wrap(err, "Failed to create scitokens configuration for the cache")
+		}
+	}
 	return exportPath, nil
 }
 
@@ -341,6 +389,21 @@ func CheckXrootdEnv(server server_utils.XRootDServer) error {
 		return errors.Wrap(err, "Unable to set $XDG_CACHE_HOME for scitokens library")
 	}
 
+	if server.GetServerType().IsEnabled(config.CacheType) {
+		clientPluginsDir := filepath.Join(runtimeDir, "cache-client.plugins.d")
+		if err = os.MkdirAll(clientPluginsDir, os.FileMode(0755)); err != nil {
+			return errors.Wrap(err, "Unable to create cache client plugins directory")
+		}
+		if runtime.GOOS == "darwin" {
+			err = os.WriteFile(filepath.Join(clientPluginsDir, "pelican-plugin.conf"), []byte(clientPluginMac), os.FileMode(0644))
+		} else {
+			err = os.WriteFile(filepath.Join(clientPluginsDir, "pelican-plugin.conf"), []byte(clientPluginDefault), os.FileMode(0644))
+		}
+		if err != nil {
+			return errors.Wrap(err, "Unable to configure cache client plugin")
+		}
+	}
+
 	exportPath := filepath.Join(runtimeDir, "export")
 	if _, err := os.Stat(exportPath); err == nil {
 		if err = os.RemoveAll(exportPath); err != nil {
@@ -353,9 +416,9 @@ func CheckXrootdEnv(server server_utils.XRootDServer) error {
 	}
 
 	if server.GetServerType().IsEnabled(config.OriginType) {
-		exportPath, err = CheckOriginXrootdEnv(exportPath, uid, gid, groupname)
+		exportPath, err = CheckOriginXrootdEnv(exportPath, server, uid, gid, groupname)
 	} else {
-		exportPath, err = CheckCacheXrootdEnv(exportPath, uid, gid, server.GetNamespaceAds())
+		exportPath, err = CheckCacheXrootdEnv(exportPath, server, uid, gid)
 	}
 	if err != nil {
 		return err
@@ -513,6 +576,7 @@ func LaunchXrootdMaintenance(ctx context.Context, server server_utils.XRootDServ
 }
 
 func ConfigXrootd(ctx context.Context, origin bool) (string, error) {
+
 	gid, err := config.GetDaemonGID()
 	if err != nil {
 		return "", err
@@ -523,6 +587,9 @@ func ConfigXrootd(ctx context.Context, origin bool) (string, error) {
 	if err := viper.Unmarshal(&xrdConfig); err != nil {
 		return "", err
 	}
+
+	// Map out xrootd logs
+	mapXrootdLogLevels(&xrdConfig)
 
 	runtimeCAs := filepath.Join(param.Xrootd_RunLocation.GetString(), "ca-bundle.crt")
 	caCount, err := utils.LaunchPeriodicWriteCABundle(ctx, runtimeCAs, 2*time.Minute)
@@ -544,12 +611,12 @@ func ConfigXrootd(ctx context.Context, origin bool) (string, error) {
 				return "", errors.New("Origin.Multiuser is set to `true` but the command was run without sufficient privilege; was it launched as root?")
 			}
 		}
-	} else if xrdConfig.Cache.DirectorUrl != "" {
+	} else if xrdConfig.Cache.PSSOrigin != "" {
 		// Workaround for a bug in XRootD 5.6.3: if the director URL is missing a port number, then
 		// XRootD crashes.
-		urlParsed, err := url.Parse(xrdConfig.Cache.DirectorUrl)
+		urlParsed, err := url.Parse(xrdConfig.Cache.PSSOrigin)
 		if err != nil {
-			return "", errors.Errorf("Director URL (%s) does not parse as a URL", xrdConfig.Cache.DirectorUrl)
+			return "", errors.Errorf("Director URL (%s) does not parse as a URL", xrdConfig.Cache.PSSOrigin)
 		}
 		if !strings.Contains(urlParsed.Host, ":") {
 			switch urlParsed.Scheme {
@@ -557,10 +624,12 @@ func ConfigXrootd(ctx context.Context, origin bool) (string, error) {
 				urlParsed.Host += ":80"
 			case "https":
 				urlParsed.Host += ":443"
+			case "pelican":
+				urlParsed.Host += ":443"
 			default:
-				log.Warningf("The Director URL (%s) does not contain an explicit port number; XRootD 5.6.3 and earlier are known to segfault in thie case", xrdConfig.Cache.DirectorUrl)
+				log.Warningf("The Director URL (%s) does not contain an explicit port number; XRootD 5.6.3 and earlier are known to segfault in thie case", xrdConfig.Cache.PSSOrigin)
 			}
-			xrdConfig.Cache.DirectorUrl = urlParsed.String()
+			xrdConfig.Cache.PSSOrigin = urlParsed.String()
 		}
 	}
 
@@ -625,4 +694,159 @@ func SetUpMonitoring(ctx context.Context, egrp *errgroup.Group) error {
 	viper.Set("Xrootd.LocalMonitoringPort", monitorPort)
 
 	return nil
+}
+
+// mapXrootdLogLevels is utilized to map Pelican config values to Xrootd ones
+// this is used to keep our log levels for Xrootd simple, so one does not need
+// to be an Xrootd expert to understand the inconsistent logs within Xrootd
+func mapXrootdLogLevels(xrdConfig *XrootdConfig) {
+	// Origin Scitokens
+	originScitokensConfig := param.Logging_Origin_Scitokens.GetString()
+	if originScitokensConfig == "debug" {
+		xrdConfig.Logging.OriginScitokens = "all"
+	} else if originScitokensConfig == "info" {
+		xrdConfig.Logging.OriginScitokens = "info"
+	} else if originScitokensConfig == "error" {
+		xrdConfig.Logging.OriginScitokens = "none"
+	} else { // Default is error
+		log.Errorln("Unrecognized log-level for Origin_Scitokens, setting to default (error) setting.")
+		xrdConfig.Logging.OriginScitokens = "none"
+	}
+
+	// pssSetOptOrigin and pssOrigin
+	pssSetOptOrigin := param.Logging_Origin_Pss.GetString()
+	if pssSetOptOrigin == "debug" {
+		xrdConfig.Logging.PssSetOptOrigin = "DebugLevel 3"
+		xrdConfig.Logging.OriginPss = "all"
+	} else if pssSetOptOrigin == "info" {
+		xrdConfig.Logging.PssSetOptOrigin = "DebugLevel 2"
+		xrdConfig.Logging.OriginPss = "on"
+	} else if pssSetOptOrigin == "error" {
+		xrdConfig.Logging.PssSetOptOrigin = "DebugLevel 1"
+		xrdConfig.Logging.OriginPss = "off"
+	} else {
+		log.Errorln("Unrecognized log-level for Origin_Pss, setting to default (error) setting.")
+		xrdConfig.Logging.PssSetOptOrigin = "DebugLevel 1"
+		xrdConfig.Logging.OriginPss = "off"
+	}
+
+	// Origin Pfc
+	originPfcConfig := param.Logging_Origin_Pfc.GetString()
+	if originPfcConfig == "debug" {
+		xrdConfig.Logging.OriginPfc = "all"
+	} else if originPfcConfig == "error" {
+		xrdConfig.Logging.OriginPfc = "none"
+	} else if originPfcConfig == "info" { // Default is info
+		xrdConfig.Logging.OriginPfc = "info"
+	} else {
+		log.Errorln("Unrecognized log-level for Origin_Pfc, setting to default (info) setting.")
+		xrdConfig.Logging.OriginPfc = "info"
+	}
+
+	// Origin Cms
+	originCmsConfig := param.Logging_Origin_Cms.GetString()
+	if originCmsConfig == "debug" {
+		xrdConfig.Logging.OriginCms = "all"
+	} else if originCmsConfig == "info" {
+		xrdConfig.Logging.OriginCms = "-all" // Not super sure what to do for info on this one
+	} else if originCmsConfig == "error" {
+		xrdConfig.Logging.OriginCms = "-all"
+	} else {
+		log.Errorln("Unrecognized log-level for Origin_Cms, setting to default (error) setting.")
+		xrdConfig.Logging.OriginCms = "-all"
+	}
+
+	// Origin Xrootd
+	// Have this for now with the regular config options, not sure what to do to make it more
+	// user-friendly since our/osg's defaults are pretty specific
+	originXrootdConfig := param.Logging_Origin_Xrootd.GetString()
+
+	// Want to make sure everything specified is a valid config value:
+	allowedVariables := map[string]bool{
+		"all":      true,
+		"auth":     true,
+		"debug":    true,
+		"emsg":     true,
+		"fs":       true,
+		"fsaio":    true,
+		"fsio":     true,
+		"login":    true,
+		"mem":      true,
+		"off":      true,
+		"pgcserr":  true,
+		"redirect": true,
+		"request":  true,
+		"response": true,
+		"stall":    true,
+	}
+
+	configValues := strings.Fields(originXrootdConfig)
+	validConfig := true
+	for _, value := range configValues {
+		if _, exists := allowedVariables[value]; !exists {
+			log.Errorln("Unrecognized log-level found for Origin_Xrootd, setting to default (emsg login stall redirect) setting.")
+			xrdConfig.Logging.OriginXrootd = "emsg login stall redirect"
+			validConfig = false
+			break
+		}
+	}
+	if validConfig {
+		xrdConfig.Logging.OriginXrootd = originXrootdConfig
+	}
+
+	// Cache Scitokens
+	cacheScitokensConfig := param.Logging_Cache_Scitokens.GetString()
+	if cacheScitokensConfig == "debug" {
+		xrdConfig.Logging.CacheScitokens = "all"
+	} else if cacheScitokensConfig == "info" {
+		xrdConfig.Logging.CacheScitokens = "info"
+	} else if cacheScitokensConfig == "error" {
+		xrdConfig.Logging.CacheScitokens = "none"
+	} else { // Default is error
+		log.Errorln("Unrecognized log-level for Cache_Scitokens, setting to default (error) setting.")
+		xrdConfig.Logging.CacheScitokens = "none"
+	}
+
+	// Cache PssSetOptCache and Cache Pss
+	cachePssConfig := param.Logging_Cache_Pss.GetString()
+	if cachePssConfig == "debug" {
+		xrdConfig.Logging.PssSetOptCache = "DebugLevel 3"
+		xrdConfig.Logging.CachePss = "all"
+	} else if cachePssConfig == "info" {
+		xrdConfig.Logging.PssSetOptCache = "DebugLevel 2"
+		xrdConfig.Logging.CachePss = "on"
+	} else if cachePssConfig == "error" {
+		xrdConfig.Logging.PssSetOptCache = "DebugLevel 1"
+		xrdConfig.Logging.CachePss = "off"
+	} else {
+		log.Errorln("Unrecognized log-level for Cache_Pss, setting to default (error) setting.")
+		xrdConfig.Logging.PssSetOptOrigin = "DebugLevel 1"
+		xrdConfig.Logging.CachePss = "off"
+	}
+
+	// Cache Ofs
+	cacheOfsConfig := param.Logging_Cache_Ofs.GetString()
+	if cacheOfsConfig == "debug" {
+		xrdConfig.Logging.CacheOfs = "all"
+	} else if cacheOfsConfig == "info" {
+		xrdConfig.Logging.CacheOfs = "-all" // Not super sure what to do for info on this one
+	} else if cacheOfsConfig == "error" {
+		xrdConfig.Logging.CacheOfs = "-all"
+	} else {
+		log.Errorln("Unrecognized log-level for Cache_Ofs, setting to default (error) setting.")
+		xrdConfig.Logging.CacheOfs = "-all"
+	}
+
+	// Cache Xrd
+	cacheXrdConfig := param.Logging_Cache_Xrd.GetString()
+	if cacheXrdConfig == "debug" {
+		xrdConfig.Logging.CacheXrd = "all -sched"
+	} else if cacheXrdConfig == "info" {
+		xrdConfig.Logging.CacheXrd = "-all" // Not super sure what to do for info on this one
+	} else if cacheXrdConfig == "error" {
+		xrdConfig.Logging.CacheXrd = "-all"
+	} else {
+		log.Errorln("Unrecognized log-level for Cache_Xrd, setting to default (error) setting.")
+		xrdConfig.Logging.CacheXrd = "-all"
+	}
 }

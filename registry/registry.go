@@ -96,7 +96,22 @@ type checkNamespaceExistsRes struct {
 	Error        string `json:"error"`
 }
 
+type checkStatusReq struct {
+	Prefix string `json:"prefix"`
+}
+
+type checkStatusRes struct {
+	Approved bool `json:"approved"`
+}
+
 // Various auxiliary functions used for client-server security handshakes
+type NamespaceConfig struct {
+	JwksUri string `json:"jwks_uri"`
+}
+
+/*
+Various auxiliary functions used for client-server security handshakes
+*/
 type registrationData struct {
 	ClientNonce     string `json:"client_nonce"`
 	ClientPayload   string `json:"client_payload"`
@@ -120,7 +135,7 @@ func matchKeys(incomingKey jwk.Key, registeredNamespaces []string) (bool, error)
 	// permitting the action (assuming their keys haven't been stolen!)
 	foundMatch := false
 	for _, ns := range registeredNamespaces {
-		keyset, err := getNamespaceJwksByPrefix(ns, false)
+		keyset, _, err := getNamespaceJwksByPrefix(ns)
 		if err != nil {
 			return false, errors.Wrapf(err, "Cannot get keyset for %s from the database", ns)
 		}
@@ -559,7 +574,7 @@ func deleteNamespaceHandler(ctx *gin.Context) {
 	delTokenStr := strings.TrimPrefix(authHeader, "Bearer ")
 
 	// Have the token, now we need to load the JWKS for the prefix
-	originJwks, err := getNamespaceJwksByPrefix(prefix, false)
+	originJwks, _, err := getNamespaceJwksByPrefix(prefix)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error loading the prefix's stored jwks"})
 		log.Errorf("Failed to get prefix's stored jwks: %v", err)
@@ -666,23 +681,67 @@ func wildcardHandler(ctx *gin.Context) {
 			return
 		}
 
-		jwks, err := getNamespaceJwksByPrefix(prefix, true)
+		jwks, adminMetadata, err := getNamespaceJwksByPrefix(prefix)
 		if err != nil {
-			if err == serverCredsErr {
-				// Use 403 to distinguish between server error
-				ctx.JSON(http.StatusForbidden, gin.H{"error": "cache has not been approved by federation administrator"})
-				return
-			}
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error trying to get jwks for prefix"})
 			log.Errorf("Failed to load jwks for prefix %s: %v", prefix, err)
 			return
 		}
+		if adminMetadata != nil && adminMetadata.Status != Approved {
+			if strings.HasPrefix(prefix, "/caches/") { // Caches
+				if param.Registry_RequireCacheApproval.GetBool() {
+					// Use 403 to distinguish between server error
+					ctx.JSON(http.StatusForbidden, gin.H{"error": "The cache has not been approved by federation administrator"})
+					return
+				}
+			} else { // Origins
+				if param.Registry_RequireOriginApproval.GetBool() {
+					// Use 403 to distinguish between server error
+					ctx.JSON(http.StatusForbidden, gin.H{"error": "The origin has not been approved by federation administrator"})
+					return
+				}
+			}
+		}
 		ctx.JSON(http.StatusOK, jwks)
 		return
-	}
+	} else if strings.HasSuffix(path, "/.well-known/openid-configuration") {
+		// Check that the namespace exists before constructing config JSON
+		prefix := strings.TrimSuffix(path, "/.well-known/openid-configuration")
+		exists, err := namespaceExists(prefix)
+		if err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Server encountered an error while checking if the prefix exists"})
+			log.Errorf("Error while checking for existence of prefix %s: %v", prefix, err)
+			return
+		}
+		if !exists {
+			ctx.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("The requested prefix %s does not exist in the registry's database", prefix)})
+		}
+		// Construct the openid-configuration JSON and return to the requester
+		// For a given namespace "foo", the jwks should be located at <registry url>/api/v1.0/registry/foo/.well-known/issuer.jwks
+		configUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
+		if err != nil {
+			log.Errorf("Failed to parse configured external web URL while constructing namespace jwks location: %v", err)
+			return
+		}
 
-	// No match found, return 404
-	ctx.String(http.StatusNotFound, "404 Not Found")
+		path := strings.TrimSuffix(path, "/openid-configuration")
+		configUrl.Path, err = url.JoinPath("api", "v1.0", "registry", path, "issuer.jwks")
+		if err != nil {
+			log.Errorf("Failed to construct namespace jwks URL: %v", err)
+			return
+		}
+
+		nsCfg := NamespaceConfig{
+			JwksUri: configUrl.String(),
+		}
+
+		ctx.JSON(http.StatusOK, nsCfg)
+		return
+	} else {
+
+		ctx.String(http.StatusNotFound, "404 Page not found")
+		return
+	}
 }
 
 // Check if a namespace prefix exists and its public key matches the registry record
@@ -731,7 +790,7 @@ func checkNamespaceExistsHandler(ctx *gin.Context) {
 		return
 	}
 	// Just to check if the key matches. We don't care about approval status
-	jwksDb, err := getNamespaceJwksByPrefix(req.Prefix, false)
+	jwksDb, _, err := getNamespaceJwksByPrefix(req.Prefix)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -753,6 +812,54 @@ func checkNamespaceExistsHandler(ctx *gin.Context) {
 	}
 }
 
+func checkNamespaceStatusHandler(ctx *gin.Context) {
+	req := checkStatusReq{}
+	if err := ctx.ShouldBind(&req); err != nil {
+		log.Debug("Failed to parse request body for namespace status check: ", err)
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse request body"})
+		return
+	}
+	if req.Prefix == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "prefix is required"})
+		return
+	}
+	ns, err := getNamespaceByPrefix(req.Prefix)
+	if err != nil || ns == nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Error getting namespace"})
+		return
+	}
+	emptyMetadata := AdminMetadata{}
+	// If Registry.RequireCacheApproval or Registry.RequireOriginApproval is false
+	// we return Approved == true
+	if ns.AdminMetadata != emptyMetadata {
+		// Caches
+		if strings.HasPrefix(req.Prefix, "/caches") && param.Registry_RequireCacheApproval.GetBool() {
+			res := checkStatusRes{Approved: ns.AdminMetadata.Status == Approved}
+			ctx.JSON(http.StatusOK, res)
+			return
+		} else if !param.Registry_RequireCacheApproval.GetBool() {
+			res := checkStatusRes{Approved: true}
+			ctx.JSON(http.StatusOK, res)
+			return
+		} else {
+			// Origins
+			if param.Registry_RequireOriginApproval.GetBool() {
+				res := checkStatusRes{Approved: ns.AdminMetadata.Status == Approved}
+				ctx.JSON(http.StatusOK, res)
+				return
+			} else {
+				res := checkStatusRes{Approved: true}
+				ctx.JSON(http.StatusOK, res)
+				return
+			}
+		}
+	} else {
+		// For legacy Pelican (<=7.3.0) registry schema without Admin_Metadata
+		res := checkStatusRes{Approved: true}
+		ctx.JSON(http.StatusOK, res)
+	}
+}
+
 func RegisterRegistryAPI(router *gin.RouterGroup) {
 	registryAPI := router.Group("/api/v1.0/registry")
 
@@ -766,6 +873,7 @@ func RegisterRegistryAPI(router *gin.RouterGroup) {
 		// Handle everything under "/" route with GET method
 		registryAPI.GET("/*wildcard", wildcardHandler)
 		registryAPI.POST("/checkNamespaceExists", checkNamespaceExistsHandler)
+		registryAPI.POST("/checkNamespaceStatus", checkNamespaceStatusHandler)
 		registryAPI.DELETE("/*wildcard", deleteNamespaceHandler)
 	}
 }

@@ -3,4 +3,21 @@ import Parameters from "/components/Parameters";
 
 # Parameters
 
+Pelican is configured using a [YAML](https://yaml.org/) file found at `/etc/pelican/pelican.yaml`. Each config value is represented by a
+key-value pair. Below is an example configuration file with a key-value pair, a nested key-value pair, and a list of key-value pairs.
+
+```yaml  filename="/etc/pelican/pelican.yaml"
+OriginUrl: https://localhost:8444
+
+OIDC:
+	ClientIDFile: /etc/pelican/oidc-client-id
+
+Registry:
+  Institutions:
+    - id: 0
+      name: institution0
+    - id: 1
+      name: institution1
+```
+
 <Parameters parameters={parameters}/>

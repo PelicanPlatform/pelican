@@ -29,18 +29,22 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
-	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
-	"golang.org/x/sync/errgroup"
+	"github.com/pelicanplatform/pelican/token_scopes"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 type directorResponse struct {
-	Error string `json:"error"`
+	Error         string `json:"error"`
+	ApprovalError bool   `json:"approval_error"`
 }
 
 func LaunchPeriodicAdvertise(ctx context.Context, egrp *errgroup.Group, servers []server_utils.XRootDServer) error {
@@ -118,9 +122,25 @@ func advertiseInternal(ctx context.Context, server server_utils.XRootDServer) er
 
 	prefix := param.Origin_NamespacePrefix.GetString()
 
-	token, err := director.CreateAdvertiseToken(prefix)
+	issuerUrl, err := director.GetNSIssuerURL(prefix)
 	if err != nil {
-		return errors.Wrap(err, "Failed to generate advertise token")
+		return err
+	}
+
+	advTokenCfg := utils.TokenConfig{
+		TokenProfile: utils.WLCG,
+		Version:      "1.0",
+		Lifetime:     time.Minute,
+		Issuer:       issuerUrl,
+		Audience:     []string{param.Federation_DirectorUrl.GetString()},
+		Subject:      "origin",
+	}
+	advTokenCfg.AddScopes([]token_scopes.TokenScope{token_scopes.Pelican_Advertise})
+
+	// CreateToken also handles validation for us
+	tok, err := advTokenCfg.CreateToken()
+	if err != nil {
+		return errors.Wrap(err, "failed to create director advertisement token")
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", directorUrl.String(), bytes.NewBuffer(body))
@@ -129,7 +149,7 @@ func advertiseInternal(ctx context.Context, server server_utils.XRootDServer) er
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Authorization", "Bearer "+tok)
 	userAgent := "pelican-" + strings.ToLower(server.GetServerType().String()) + "/" + config.PelicanVersion
 	req.Header.Set("User-Agent", userAgent)
 
@@ -148,10 +168,10 @@ func advertiseInternal(ctx context.Context, server server_utils.XRootDServer) er
 	if resp.StatusCode > 299 {
 		var respErr directorResponse
 		if unmarshalErr := json.Unmarshal(body, &respErr); unmarshalErr != nil { // Error creating json
-			return errors.Wrapf(unmarshalErr, "Could not unmarshall the director's response, which responded %v from director registration: %v", resp.StatusCode, resp.Status)
+			return errors.Wrapf(unmarshalErr, "Could not unmarshal the director's response, which responded %v from director registration: %v", resp.StatusCode, resp.Status)
 		}
-		if resp.StatusCode == http.StatusForbidden {
-			return errors.Errorf("Error during director advertisement: Cache has not been approved by administrator.")
+		if respErr.ApprovalError {
+			return fmt.Errorf("The namespace %q requires administrator approval. Please contact the administrators of %s for more information.", param.Origin_NamespacePrefix.GetString(), param.Federation_RegistryUrl.GetString())
 		}
 		return errors.Errorf("Error during director registration: %v\n", respErr.Error)
 	}

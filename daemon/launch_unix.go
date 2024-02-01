@@ -29,6 +29,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"reflect"
+	"strings"
 	"syscall"
 	"time"
 
@@ -109,6 +110,30 @@ func (launcher DaemonLauncher) Launch(ctx context.Context) (context.Context, int
 		log.Infof("Will launch daemon %q with UID %v and GID %v", launcher.DaemonName, launcher.Uid, launcher.Gid)
 	} else if launcher.Uid != -1 || launcher.Gid != -1 {
 		return ctx, -1, errors.New("If either uid or gid is specified for daemon, both must be specified")
+	}
+
+	if len(launcher.ExtraEnv) > 0 {
+		// Merge the "extra env" options into the existing OS environment
+		existingEnv := os.Environ()
+		newEnv := make([]string, 0)
+		for _, defEnvStr := range existingEnv {
+			useEnv := true
+			for _, newEnvStr := range launcher.ExtraEnv {
+				if eqPos := strings.IndexByte(newEnvStr, '='); eqPos == -1 {
+					return ctx, -1, errors.Errorf("Environment override string %s lacking '=' character", newEnvStr)
+				} else {
+					envPrefix := newEnvStr[:eqPos]
+					if strings.HasPrefix(defEnvStr, envPrefix) {
+						useEnv = false
+						break
+					}
+				}
+			}
+			if useEnv {
+				newEnv = append(newEnv, defEnvStr)
+			}
+		}
+		cmd.Env = append(newEnv, launcher.ExtraEnv...)
 	}
 
 	if err := cmd.Start(); err != nil {

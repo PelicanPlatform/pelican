@@ -21,17 +21,16 @@ package director
 import (
 	"context"
 	"strings"
-	"time"
 
 	"github.com/jellydator/ttlcache/v3"
-	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwt"
-	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
 // List all namespaces from origins registered at the director
@@ -63,42 +62,6 @@ func ListServerAds(serverTypes []ServerType) []ServerAd {
 		}
 	}
 	return ads
-}
-
-// Create a token for director's Prometheus instance to access
-// director's origins service discovery endpoint. This function is intended
-// to be called only on a director server
-func CreateDirectorSDToken() (string, error) {
-	// TODO: We might want to change this to ComputeExternalAddress() instead
-	// so that director admin don't need to specify Federation_DirectorUrl to get
-	// director working
-	directorURL := param.Federation_DirectorUrl.GetString()
-	if directorURL == "" {
-		return "", errors.New("Director URL is not known; cannot create director service discovery token")
-	}
-	tokenExpireTime := param.Monitoring_TokenExpiresIn.GetDuration()
-
-	tok, err := jwt.NewBuilder().
-		Claim("scope", token_scopes.Pelican_DirectorServiceDiscovery.String()).
-		Issuer(directorURL).
-		Audience([]string{directorURL}).
-		Subject("director").
-		Expiration(time.Now().Add(tokenExpireTime)).
-		Build()
-	if err != nil {
-		return "", err
-	}
-
-	key, err := config.GetIssuerPrivateJWK()
-	if err != nil {
-		return "", errors.Wrap(err, "failed to load the director's JWK")
-	}
-
-	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, key))
-	if err != nil {
-		return "", err
-	}
-	return string(signed), nil
 }
 
 // Verify that a token received is a valid token from director and has
@@ -146,38 +109,6 @@ func VerifyDirectorSDToken(strToken string) (bool, error) {
 		}
 	}
 	return false, nil
-}
-
-// Create a token for director's Prometheus scraper to access discovered
-// origins and caches `/metrics` endpoint. This function is intended to be called on
-// a director server
-func CreateDirectorScrapeToken() (string, error) {
-	// We assume this function is only called on a director server,
-	// the external address of which should be the director's URL
-	directorURL := param.Server_ExternalWebUrl.GetString()
-	tokenExpireTime := param.Monitoring_TokenExpiresIn.GetDuration()
-
-	tok, err := jwt.NewBuilder().
-		Claim("scope", token_scopes.Monitoring_Scrape.String()).
-		Issuer(directorURL). // Exclude audience from token to prevent http header overflow
-		Subject("director").
-		Expiration(time.Now().Add(tokenExpireTime)).
-		Build()
-	if err != nil {
-		return "", err
-	}
-
-	key, err := config.GetIssuerPrivateJWK()
-
-	if err != nil {
-		return "", errors.Wrap(err, "failed to load the director's private JWK")
-	}
-
-	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, key))
-	if err != nil {
-		return "", err
-	}
-	return string(signed), nil
 }
 
 // Configure TTL caches to enable cache eviction and other additional cache events handling logic
