@@ -48,6 +48,7 @@ import {Sidebar} from "@/components/layout/Sidebar";
 import Image from "next/image";
 import PelicanLogo from "@/public/static/images/PelicanPlatformLogo_Icon.png";
 import IconButton from "@mui/material/IconButton";
+import {Main} from "@/components/layout/Main";
 
 type duration = number | `${number}${"ns" | "us" | "µs" | "ms" |"s" | "m" | "h"}`;
 
@@ -444,7 +445,7 @@ function Config() {
                     </Box>
                 }
             </Sidebar>
-            <Box component={"main"} pl={"72px"} pb={2} display={"flex"} minHeight={"100vh"} flexGrow={1}>
+            <Main>
                 <Container maxWidth={"xl"} sx={{"mt": 2 }}>
                     <Box width={"100%"}>
                         <Grid container spacing={2}>
@@ -471,7 +472,7 @@ function Config() {
                         </Grid>
                     </Box>
                 </Container>
-            </Box>
+            </Main>
         </>
     )
 }
