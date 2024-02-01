@@ -20,10 +20,12 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/launchers"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -79,17 +81,23 @@ func (i *uint16Value) String() string { return strconv.FormatUint(uint64(*i), 10
 
 func Execute() error {
 	egrp, egrpCtx := errgroup.WithContext(context.Background())
-	defer func() {
-		err := egrp.Wait()
-		if err != nil {
-			log.Errorln("Fatal error occurred that lead to the shutdown of the process:", err)
-		} else {
-			// Use Error instead of Info because our default log level is Error
-			log.Error("Pelican is safely exited")
-		}
-	}()
 	ctx := context.WithValue(egrpCtx, config.EgrpKey, egrp)
-	return rootCmd.ExecuteContext(ctx)
+	err := rootCmd.ExecuteContext(ctx)
+	if err != nil {
+		log.Errorln("Fatal error occurred at the start of the program:", err)
+		return err
+	}
+	// Wait until all goroutines in errgroup return
+	err = egrp.Wait()
+	if err == launchers.ErrExitOnSignal {
+		fmt.Println("Pelican is safely exited")
+		return nil
+	}
+	if err != nil {
+		log.Errorln("Fatal error occurred that lead to the shutdown of the process:", err)
+		return err
+	}
+	return nil
 }
 
 func init() {

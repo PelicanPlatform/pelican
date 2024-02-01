@@ -63,9 +63,22 @@ type config struct {
 	}
 	IssuerKey string
 	Logging struct {
+		Cache struct {
+			Ofs string
+			Pss string
+			Scitokens string
+			Xrd string
+		}
 		DisableProgressBars bool
 		Level string
 		LogLocation string
+		Origin struct {
+			Cms string
+			Pfc string
+			Pss string
+			Scitokens string
+			Xrootd string
+		}
 	}
 	MinimumDownloadSpeed int
 	Monitoring struct {
@@ -93,6 +106,7 @@ type config struct {
 		EnableDirListing bool
 		EnableFallbackRead bool
 		EnableIssuer bool
+		EnablePublicReads bool
 		EnableUI bool
 		EnableVoms bool
 		EnableWrite bool
@@ -120,6 +134,7 @@ type config struct {
 	}
 	Registry struct {
 		AdminUsers []string
+		CustomRegistrationFields interface{}
 		DbLocation string
 		Institutions interface{}
 		InstitutionsUrl string
@@ -239,9 +254,22 @@ type configWithType struct {
 	}
 	IssuerKey struct { Type string; Value string }
 	Logging struct {
+		Cache struct {
+			Ofs struct { Type string; Value string }
+			Pss struct { Type string; Value string }
+			Scitokens struct { Type string; Value string }
+			Xrd struct { Type string; Value string }
+		}
 		DisableProgressBars struct { Type string; Value bool }
 		Level struct { Type string; Value string }
 		LogLocation struct { Type string; Value string }
+		Origin struct {
+			Cms struct { Type string; Value string }
+			Pfc struct { Type string; Value string }
+			Pss struct { Type string; Value string }
+			Scitokens struct { Type string; Value string }
+			Xrootd struct { Type string; Value string }
+		}
 	}
 	MinimumDownloadSpeed struct { Type string; Value int }
 	Monitoring struct {
@@ -269,6 +297,7 @@ type configWithType struct {
 		EnableDirListing struct { Type string; Value bool }
 		EnableFallbackRead struct { Type string; Value bool }
 		EnableIssuer struct { Type string; Value bool }
+		EnablePublicReads struct { Type string; Value bool }
 		EnableUI struct { Type string; Value bool }
 		EnableVoms struct { Type string; Value bool }
 		EnableWrite struct { Type string; Value bool }
@@ -296,6 +325,7 @@ type configWithType struct {
 	}
 	Registry struct {
 		AdminUsers struct { Type string; Value []string }
+		CustomRegistrationFields struct { Type string; Value interface{} }
 		DbLocation struct { Type string; Value string }
 		Institutions struct { Type string; Value interface{} }
 		InstitutionsUrl struct { Type string; Value string }

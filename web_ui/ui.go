@@ -334,6 +334,7 @@ func GetEngine() (*gin.Engine, error) {
 			"resource": ctx.Request.URL.Path},
 		).Info("Served Request")
 	})
+	engine.HandleMethodNotAllowed = true
 	return engine, nil
 }
 

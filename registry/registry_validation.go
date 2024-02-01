@@ -20,6 +20,7 @@ package registry
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/lestrrat-go/jwx/v2/jwk"
@@ -194,4 +195,81 @@ func validateInstitution(instID string) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+// Validates if customFields are valid based on config. Set exactMatch to false to be
+// backward compatible with legacy custom fields that were once defined but removed
+func validateCustomFields(customFields map[string]interface{}, exactMatch bool) (bool, error) {
+	if len(customRegFieldsConfigs) == 0 {
+		if len(customFields) > 0 {
+			return false, errors.New("Bad configuration, Registry.CustomRegistrationFields is not set while validate against custom fields")
+		} else {
+			return true, nil
+		}
+	} else {
+		if customFields == nil {
+			return false, errors.New("Can't validate against nil customFields")
+		}
+	}
+	for _, conf := range customRegFieldsConfigs {
+		val, ok := customFields[conf.Name]
+		if !ok && conf.Required {
+			return false, errors.New(fmt.Sprintf("%q is required", conf.Name))
+		}
+		if ok {
+			switch conf.Type {
+			case "string":
+				if _, ok := val.(string); !ok {
+					return false, errors.New(fmt.Sprintf("%q is expected to be a string, but got %v", conf.Name, val))
+				}
+			case "int":
+				if _, ok := val.(int); !ok {
+					return false, errors.New(fmt.Sprintf("%q is expected to be an int, but got %v", conf.Name, val))
+				}
+			case "bool":
+				if _, ok := val.(bool); !ok {
+					return false, errors.New(fmt.Sprintf("%q is expected to be a boolean, but got %v", conf.Name, val))
+				}
+			case "datetime":
+				switch val.(type) {
+				case int:
+					break
+				case int32:
+					break
+				case int64:
+					break
+				default:
+					return false, fmt.Errorf("%q is expected to be a Unix timestamp, but got %v", conf.Name, val)
+				}
+			case "enum":
+				inOpt := false
+				for _, item := range conf.Options {
+					if item.ID == val {
+						inOpt = true
+					}
+				}
+				if !inOpt {
+					return false, fmt.Errorf("%q is an enumeration type, but the value is not in the options. Got %v", conf.Name, val)
+				}
+			default:
+				return false, errors.New(fmt.Sprintf("The type of %q is not supported", conf.Name))
+			}
+		}
+	}
+	// Optioanlly check if the customFields are defined in config
+	if exactMatch {
+		for key := range customFields {
+			found := false
+			for _, conf := range customRegFieldsConfigs {
+				if conf.Name == key {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return false, errors.New(fmt.Sprintf("%q is not a valid custom field", key))
+			}
+		}
+	}
+	return true, nil
 }

@@ -56,7 +56,7 @@ func (server *OriginServer) CreateAdvertisement(name string, originUrl string, o
 	// TODO: Need to figure out where to get some of these values
 	// 		 so that they aren't hardcoded...
 	nsAd := common.NamespaceAd{
-		RequireToken:  true,
+		RequireToken:  !param.Origin_EnablePublicReads.GetBool(),
 		Path:          prefix,
 		Issuer:        issuerUrl,
 		MaxScopeDepth: 3,
@@ -81,5 +81,9 @@ func (server *OriginServer) CreateAdvertisement(name string, originUrl string, o
 func (server *OriginServer) GetAuthorizedPrefixes() []string {
 	// For now, just a single path.  In the future, we will allow
 	// multiple.
+	if param.Origin_EnablePublicReads.GetBool() {
+		return []string{}
+	}
+
 	return []string{param.Origin_NamespacePrefix.GetString()}
 }

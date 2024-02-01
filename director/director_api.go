@@ -24,6 +24,7 @@ import (
 
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/pelicanplatform/pelican/common"
+
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 )

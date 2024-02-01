@@ -43,7 +43,7 @@ import (
 
 type RegistrationStatus string
 
-// The AdminMetadata is used in [Namespace] as a marshalled JSON string
+// The AdminMetadata is used in [Namespace] as a marshaled JSON string
 // to be stored in registry DB.
 //
 // The *UserID are meant to correspond to the "sub" claim of the user token that
@@ -72,11 +72,12 @@ type AdminMetadata struct {
 }
 
 type Namespace struct {
-	ID            int           `json:"id" post:"exclude"`
-	Prefix        string        `json:"prefix" validate:"required"`
-	Pubkey        string        `json:"pubkey" validate:"required"`
-	Identity      string        `json:"identity" post:"exclude"`
-	AdminMetadata AdminMetadata `json:"admin_metadata"`
+	ID            int                    `json:"id" post:"exclude"`
+	Prefix        string                 `json:"prefix" validate:"required"`
+	Pubkey        string                 `json:"pubkey" validate:"required"`
+	Identity      string                 `json:"identity" post:"exclude"`
+	AdminMetadata AdminMetadata          `json:"admin_metadata"`
+	CustomFields  map[string]interface{} `json:"custom_fields"`
 }
 
 type NamespaceWOPubkey struct {
@@ -119,6 +120,10 @@ func (rs RegistrationStatus) String() string {
 	return string(rs)
 }
 
+func (rs RegistrationStatus) LowerString() string {
+	return strings.ToLower(string(rs))
+}
+
 func (a AdminMetadata) Equal(b AdminMetadata) bool {
 	return a.UserID == b.UserID &&
 		a.Description == b.Description &&
@@ -145,13 +150,55 @@ func createNamespaceTable() {
         prefix TEXT NOT NULL UNIQUE,
         pubkey TEXT NOT NULL,
         identity TEXT,
-        admin_metadata TEXT CHECK (length("admin_metadata") <= 4000)
+        admin_metadata TEXT CHECK (length("admin_metadata") <= 4000),
+				custom_fields TEXT CHECK (length("custom_fields") <= 4000)
     );`
 
 	_, err := db.Exec(query)
 	if err != nil {
 		log.Fatalf("Failed to create namespace table: %v", err)
 	}
+
+	// Run a manual migration to add "custom_fields" field
+	// Check if the column exists
+	log.Info("Run manual migration for 'custom_fields' in namespace table")
+	columnExists := false
+	rows, err := db.Query(`PRAGMA table_info(namespace);`)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var (
+			cid       int
+			name      string
+			ctype     string
+			notnull   int
+			dfltValue interface{}
+			pk        int
+		)
+		err = rows.Scan(&cid, &name, &ctype, &notnull, &dfltValue, &pk)
+		if err != nil {
+			log.Fatal(err)
+		}
+		if name == "custom_fields" {
+			columnExists = true
+			break
+		}
+	}
+
+	// If the column does not exist, add it
+	if !columnExists {
+		_, err = db.Exec(`ALTER TABLE namespace ADD COLUMN custom_fields TEXT DEFAULT ''`)
+		if err != nil {
+			log.Fatal(err)
+		}
+		log.Info("Column 'custom_fields' added.")
+	} else {
+		log.Info("Column 'custom_fields' already exists.")
+	}
+
 }
 
 func createTopologyTable() {
@@ -305,7 +352,7 @@ func namespaceBelongsToUserId(id int, userId string) (bool, error) {
 		if err := rows.Scan(&adminMetadataStr); err != nil {
 			return false, err
 		}
-		// For backward compatibility, if adminMetadata is an empty string, don't unmarshall json
+		// For backward compatibility, if adminMetadata is an empty string, don't unmarshal json
 		if adminMetadataStr != "" {
 			if err := json.Unmarshal([]byte(adminMetadataStr), &ns.AdminMetadata); err != nil {
 				return false, err
@@ -354,7 +401,7 @@ func getNamespaceJwksByPrefix(prefix string) (jwk.Set, *AdminMetadata, error) {
 
 	adminMetadata := AdminMetadata{}
 
-	// For backward compatibility, if adminMetadata is an empty string, don't unmarshall json
+	// For backward compatibility, if adminMetadata is an empty string, don't unmarshal json
 	if adminMetadataStr != "" {
 		if err := json.Unmarshal([]byte(adminMetadataStr), &adminMetadata); err != nil {
 			return nil, nil, errors.Wrap(err, "error parsing admin metadata")
@@ -380,7 +427,7 @@ func getNamespaceStatusById(id int) (RegistrationStatus, error) {
 	if err != nil {
 		return "", err
 	}
-	// For backward compatibility, if adminMetadata is an empty string, don't unmarshall json
+	// For backward compatibility, if adminMetadata is an empty string, don't unmarshal json
 	if adminMetadataStr != "" {
 		if err := json.Unmarshal([]byte(adminMetadataStr), &adminMetadata); err != nil {
 			return "", err
@@ -402,15 +449,31 @@ func getNamespaceById(id int) (*Namespace, error) {
 	}
 	ns := &Namespace{}
 	adminMetadataStr := ""
-	query := `SELECT id, prefix, pubkey, identity, admin_metadata FROM namespace WHERE id = ?`
-	err := db.QueryRow(query, id).Scan(&ns.ID, &ns.Prefix, &ns.Pubkey, &ns.Identity, &adminMetadataStr)
+	customRegFieldsStr := ""
+	query := `SELECT id, prefix, pubkey, identity, admin_metadata, custom_fields FROM namespace WHERE id = ?`
+	err := db.QueryRow(query, id).Scan(&ns.ID, &ns.Prefix, &ns.Pubkey, &ns.Identity, &adminMetadataStr, &customRegFieldsStr)
 	if err != nil {
 		return nil, err
 	}
-	// For backward compatibility, if adminMetadata is an empty string, don't unmarshall json
+	// For backward compatibility, if adminMetadata is an empty string, don't unmarshal json
 	if adminMetadataStr != "" {
 		if err := json.Unmarshal([]byte(adminMetadataStr), &ns.AdminMetadata); err != nil {
 			return nil, err
+		}
+	}
+	if customRegFieldsStr != "" {
+		if err := json.Unmarshal([]byte(customRegFieldsStr), &ns.CustomFields); err != nil {
+			return nil, err
+		}
+	}
+	// By default, JSON unmarshal will convert any generic number to float
+	// and we only allow integer in custom fields, so we convert them back
+	for key, val := range ns.CustomFields {
+		switch v := val.(type) {
+		case float64:
+			ns.CustomFields[key] = int(v)
+		case float32:
+			ns.CustomFields[key] = int(v)
 		}
 	}
 	return ns, nil
@@ -422,15 +485,31 @@ func getNamespaceByPrefix(prefix string) (*Namespace, error) {
 	}
 	ns := &Namespace{}
 	adminMetadataStr := ""
-	query := `SELECT id, prefix, pubkey, identity, admin_metadata FROM namespace WHERE prefix = ?`
-	err := db.QueryRow(query, prefix).Scan(&ns.ID, &ns.Prefix, &ns.Pubkey, &ns.Identity, &adminMetadataStr)
+	customRegFieldsStr := ""
+	query := `SELECT id, prefix, pubkey, identity, admin_metadata, custom_fields FROM namespace WHERE prefix = ?`
+	err := db.QueryRow(query, prefix).Scan(&ns.ID, &ns.Prefix, &ns.Pubkey, &ns.Identity, &adminMetadataStr, &customRegFieldsStr)
 	if err != nil {
 		return nil, err
 	}
-	// For backward compatibility, if adminMetadata is an empty string, don't unmarshall json
+	// For backward compatibility, if adminMetadata is an empty string, don't unmarshal json
 	if adminMetadataStr != "" {
 		if err := json.Unmarshal([]byte(adminMetadataStr), &ns.AdminMetadata); err != nil {
 			return nil, err
+		}
+	}
+	if customRegFieldsStr != "" {
+		if err := json.Unmarshal([]byte(customRegFieldsStr), &ns.CustomFields); err != nil {
+			return nil, err
+		}
+	}
+	// By default, JSON unmarshal will convert any generic number to float
+	// and we only allow integer in custom fields, so we convert them back
+	for key, val := range ns.CustomFields {
+		switch v := val.(type) {
+		case float64:
+			ns.CustomFields[key] = int(v)
+		case float32:
+			ns.CustomFields[key] = int(v)
 		}
 	}
 	return ns, nil
@@ -452,7 +531,9 @@ func getNamespacesByFilter(filterNs Namespace, serverType ServerType) ([]*Namesp
 	} else if serverType != "" {
 		return nil, errors.New(fmt.Sprint("Can't get namespace: unsupported server type: ", serverType))
 	}
-
+	if filterNs.CustomFields != nil {
+		return nil, errors.New("Unsupported operation: Can't filter against Custrom Registration field.")
+	}
 	if filterNs.ID != 0 {
 		return nil, errors.New("Unsupported operation: Can't filter against ID field.")
 	}
@@ -484,7 +565,7 @@ func getNamespacesByFilter(filterNs Namespace, serverType ServerType) ([]*Namesp
 		if err := rows.Scan(&ns.ID, &ns.Prefix, &ns.Pubkey, &ns.Identity, &adminMetadataStr); err != nil {
 			return nil, err
 		}
-		// For backward compatibility, if adminMetadata is an empty string, don't unmarshall json
+		// For backward compatibility, if adminMetadata is an empty string, don't unmarshal json
 		if adminMetadataStr == "" {
 			// If we apply any filter against the AdminMetadata field but the
 			// entry didn't populate this field, skip it
@@ -540,7 +621,7 @@ functions) used by the client.
 */
 
 func addNamespace(ns *Namespace) error {
-	query := `INSERT INTO namespace (prefix, pubkey, identity, admin_metadata) VALUES (?, ?, ?, ?)`
+	query := `INSERT INTO namespace (prefix, pubkey, identity, admin_metadata, custom_fields) VALUES (?, ?, ?, ?, ?)`
 	tx, err := db.Begin()
 	if err != nil {
 		return err
@@ -558,10 +639,14 @@ func addNamespace(ns *Namespace) error {
 
 	strAdminMetadata, err := json.Marshal(ns.AdminMetadata)
 	if err != nil {
-		return errors.Wrap(err, "Fail to marshall AdminMetadata")
+		return errors.Wrap(err, "Fail to marshal AdminMetadata")
+	}
+	strCustomRegFields, err := json.Marshal(ns.CustomFields)
+	if err != nil {
+		return errors.Wrap(err, "Fail to marshal custom registration fields")
 	}
 
-	_, err = tx.Exec(query, ns.Prefix, ns.Pubkey, ns.Identity, strAdminMetadata)
+	_, err = tx.Exec(query, ns.Prefix, ns.Pubkey, ns.Identity, strAdminMetadata, strCustomRegFields)
 	if err != nil {
 		if errRoll := tx.Rollback(); errRoll != nil {
 			log.Errorln("Failed to rollback transaction:", errRoll)
@@ -595,17 +680,21 @@ func updateNamespace(ns *Namespace) error {
 	ns.AdminMetadata.UpdatedAt = time.Now()
 	strAdminMetadata, err := json.Marshal(ns.AdminMetadata)
 	if err != nil {
-		return errors.Wrap(err, "Fail to marshall AdminMetadata")
+		return errors.Wrap(err, "Fail to marshal AdminMetadata")
+	}
+	strCustomRegFields, err := json.Marshal(ns.CustomFields)
+	if err != nil {
+		return errors.Wrap(err, "Fail to marshal custom registration fields")
 	}
 
 	// We intentionally exclude updating "identity" as this should only be updated
 	// when user registered through Pelican client with identity
-	query := `UPDATE namespace SET prefix = ?, pubkey = ?, admin_metadata = ? WHERE id = ?`
+	query := `UPDATE namespace SET prefix = ?, pubkey = ?, admin_metadata = ?, custom_fields = ? WHERE id = ?`
 	tx, err := db.Begin()
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(query, ns.Prefix, ns.Pubkey, strAdminMetadata, ns.ID)
+	_, err = tx.Exec(query, ns.Prefix, ns.Pubkey, strAdminMetadata, strCustomRegFields, ns.ID)
 	if err != nil {
 		if errRoll := tx.Rollback(); errRoll != nil {
 			log.Errorln("Failed to rollback transaction:", errRoll)
@@ -633,7 +722,7 @@ func updateNamespaceStatusById(id int, status RegistrationStatus, approverId str
 
 	adminMetadataByte, err := json.Marshal(ns.AdminMetadata)
 	if err != nil {
-		return errors.Wrap(err, "Error marshalling admin metadata")
+		return errors.Wrap(err, "Error marshaling admin metadata")
 	}
 
 	query := `UPDATE namespace SET admin_metadata = ? WHERE id = ?`
@@ -668,7 +757,7 @@ func deleteNamespace(prefix string) error {
 }
 
 func getAllNamespaces() ([]*Namespace, error) {
-	query := `SELECT id, prefix, pubkey, identity, admin_metadata FROM namespace ORDER BY id ASC`
+	query := `SELECT id, prefix, pubkey, identity, admin_metadata, custom_fields FROM namespace ORDER BY id ASC`
 	rows, err := db.Query(query)
 	if err != nil {
 		return nil, err
@@ -679,13 +768,29 @@ func getAllNamespaces() ([]*Namespace, error) {
 	for rows.Next() {
 		ns := &Namespace{}
 		adminMetadataStr := ""
-		if err := rows.Scan(&ns.ID, &ns.Prefix, &ns.Pubkey, &ns.Identity, &adminMetadataStr); err != nil {
+		customRegFieldsStr := ""
+		if err := rows.Scan(&ns.ID, &ns.Prefix, &ns.Pubkey, &ns.Identity, &adminMetadataStr, &customRegFieldsStr); err != nil {
 			return nil, err
 		}
-		// For backward compatibility, if adminMetadata is an empty string, don't unmarshall json
+		// For backward compatibility, if adminMetadata is an empty string, don't unmarshal json
 		if adminMetadataStr != "" {
 			if err := json.Unmarshal([]byte(adminMetadataStr), &ns.AdminMetadata); err != nil {
 				return nil, err
+			}
+		}
+		if customRegFieldsStr != "" {
+			if err := json.Unmarshal([]byte(customRegFieldsStr), &ns.CustomFields); err != nil {
+				return nil, err
+			}
+		}
+		// By default, JSON unmarshal will convert any generic number to float
+		// and we only allow integer in custom fields, so we convert them back
+		for key, val := range ns.CustomFields {
+			switch v := val.(type) {
+			case float64:
+				ns.CustomFields[key] = int(v)
+			case float32:
+				ns.CustomFields[key] = int(v)
 			}
 		}
 		namespaces = append(namespaces, ns)

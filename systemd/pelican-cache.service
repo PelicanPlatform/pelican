@@ -1,0 +1,13 @@
+[Unit]
+Description = Pelican service pelican-cache
+After = network.target nss-lookup.target
+
+[Service]
+EnvironmentFile = -/etc/sysconfig/pelican-cache
+ExecStart = /usr/bin/pelican --config /etc/pelican/pelican-cache.yaml cache serve
+Restart = on-failure
+RestartSec = 20s
+WorkingDirectory = /var/spool/pelican
+
+[Install]
+WantedBy = multi-user.target

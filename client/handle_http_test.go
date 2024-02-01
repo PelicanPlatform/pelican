@@ -23,8 +23,6 @@ package client
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net"
@@ -38,9 +36,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lestrrat-go/jwx/v2/jwa"
-	"github.com/lestrrat-go/jwx/v2/jwk"
-	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
@@ -53,6 +48,8 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
+	"github.com/pelicanplatform/pelican/token_scopes"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 func TestMain(m *testing.M) {
@@ -193,7 +190,7 @@ func TestSlowTransfers(t *testing.T) {
 	var err error
 	// Do a quick timeout
 	go func() {
-		_, err = DownloadHTTP(transfers[0], filepath.Join(t.TempDir(), "test.txt"), "")
+		_, err = DownloadHTTP(transfers[0], filepath.Join(t.TempDir(), "test.txt"), "", nil)
 		finishedChannel <- true
 	}()
 
@@ -256,7 +253,7 @@ func TestStoppedTransfer(t *testing.T) {
 	var err error
 
 	go func() {
-		_, err = DownloadHTTP(transfers[0], filepath.Join(t.TempDir(), "test.txt"), "")
+		_, err = DownloadHTTP(transfers[0], filepath.Join(t.TempDir(), "test.txt"), "", nil)
 		finishedChannel <- true
 	}()
 
@@ -286,7 +283,7 @@ func TestConnectionError(t *testing.T) {
 	addr := l.Addr().String()
 	l.Close()
 
-	_, err = DownloadHTTP(TransferDetails{Url: url.URL{Host: addr, Scheme: "http"}, Proxy: false}, filepath.Join(t.TempDir(), "test.txt"), "")
+	_, err = DownloadHTTP(TransferDetails{Url: url.URL{Host: addr, Scheme: "http"}, Proxy: false}, filepath.Join(t.TempDir(), "test.txt"), "", nil)
 
 	assert.IsType(t, &ConnectionSetupError{}, err)
 
@@ -319,7 +316,7 @@ func TestTrailerError(t *testing.T) {
 	assert.Equal(t, svr.URL, transfers[0].Url.String())
 
 	// Call DownloadHTTP and check if the error is returned correctly
-	_, err := DownloadHTTP(transfers[0], filepath.Join(t.TempDir(), "test.txt"), "")
+	_, err := DownloadHTTP(transfers[0], filepath.Join(t.TempDir(), "test.txt"), "", nil)
 
 	assert.NotNil(t, err)
 	assert.EqualError(t, err, "transfer error: Unable to read test.txt; input/output error")
@@ -389,41 +386,36 @@ func generateFileTestScitoken() (string, error) {
 	if issuerUrl == "" { // if empty, then error
 		return "", errors.New("Failed to create token: Invalid iss, Server_ExternalWebUrl is empty")
 	}
-	jti_bytes := make([]byte, 16)
-	if _, err := rand.Read(jti_bytes); err != nil {
-		return "", err
-	}
-	jti := base64.RawURLEncoding.EncodeToString(jti_bytes)
 
-	tok, err := jwt.NewBuilder().
-		Claim("scope", "storage.read:/ storage.modify:/").
-		Claim("wlcg.ver", "1.0").
-		JwtID(jti).
-		Issuer(issuerUrl).
-		Audience([]string{param.Origin_Url.GetString()}).
-		Subject("origin").
-		Expiration(time.Now().Add(time.Minute)).
-		IssuedAt(time.Now()).
-		Build()
+	scopes := []token_scopes.TokenScope{}
+	readScope, err := token_scopes.Storage_Read.Path("/")
 	if err != nil {
-		return "", err
+		return "", errors.Wrap(err, "failed to create 'read' scope for file test token:")
 	}
-
-	key, err := config.GetIssuerPrivateJWK()
+	scopes = append(scopes, readScope)
+	modScope, err := token_scopes.Storage_Modify.Path("/")
 	if err != nil {
-		return "", errors.Wrap(err, "Failed to load server's issuer key")
+		return "", errors.Wrap(err, "failed to create 'modify' scope for file test token:")
 	}
+	scopes = append(scopes, modScope)
 
-	if err := jwk.AssignKeyID(key); err != nil {
-		return "", errors.Wrap(err, "Failed to assign kid to the token")
+	fTestTokenCfg := utils.TokenConfig{
+		TokenProfile: utils.WLCG,
+		Lifetime:     time.Minute,
+		Issuer:       issuerUrl,
+		Audience:     []string{param.Origin_Url.GetString()},
+		Version:      "1.0",
+		Subject:      "origin",
 	}
+	fTestTokenCfg.AddScopes(scopes)
 
-	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, key))
+	// CreateToken also handles validation for us
+	tok, err := fTestTokenCfg.CreateToken()
 	if err != nil {
-		return "", err
+		return "", errors.Wrap(err, "failed to create file test token:")
 	}
 
-	return string(signed), nil
+	return tok, nil
 }
 
 func TestFullUpload(t *testing.T) {

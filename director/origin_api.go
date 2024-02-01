@@ -35,12 +35,13 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/common"
+	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
+
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/utils"
-	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 )
 
 type (
@@ -123,55 +124,16 @@ func checkNamespaceStatus(prefix string, registryWebUrlStr string) (bool, error)
 	return resBody.Approved, nil
 }
 
-func CreateAdvertiseToken(namespace string) (string, error) {
-	// TODO: Need to come back and carefully consider a few naming practices.
-	//       Here, issuerUrl is actually the registry database url, and not
-	//       the token issuer url for this namespace
-	issuerUrl, err := GetRegistryIssuerURL(namespace)
-	if err != nil {
-		return "", err
-	}
-	director := param.Federation_DirectorUrl.GetString()
-	if director == "" {
-		return "", errors.New("Director URL is not known; cannot create advertise token")
-	}
-
-	tok, err := jwt.NewBuilder().
-		Claim("scope", token_scopes.Pelican_Advertise.String()).
-		Issuer(issuerUrl).
-		Audience([]string{director}).
-		Subject("origin").
-		Expiration(time.Now().Add(time.Minute)).
-		Build()
-	if err != nil {
-		return "", err
-	}
-
-	key, err := config.GetIssuerPrivateJWK()
-	if err != nil {
-		return "", errors.Wrap(err, "failed to load the origin's JWK")
-	}
-
-	// Get/assign the kid, needed for verification of the token by the director
-	// TODO: Create more generic "tokenCreate" functions so we don't have to do
-	//       this by hand all the time
-	err = jwk.AssignKeyID(key)
-	if err != nil {
-		return "", errors.Wrap(err, "Failed to assign kid to the token")
-	}
-
-	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, key))
-	if err != nil {
-		return "", err
-	}
-	return string(signed), nil
-}
-
 // Given a token and a location in the namespace to advertise in,
 // see if the entity is authorized to advertise an origin for the
 // namespace
 func VerifyAdvertiseToken(ctx context.Context, token, namespace string) (bool, error) {
-	issuerUrl, err := GetRegistryIssuerURL(namespace)
+	issuerUrl, err := GetNSIssuerURL(namespace)
+	if err != nil {
+		return false, err
+	}
+
+	keyLoc, err := GetJWKSURLFromIssuerURL(issuerUrl)
 	if err != nil {
 		return false, err
 	}
@@ -202,7 +164,7 @@ func VerifyAdvertiseToken(ctx context.Context, token, namespace string) (bool, e
 	if ar == nil {
 		ar = jwk.NewCache(ctx)
 		client := &http.Client{Transport: config.GetTransport()}
-		if err = ar.Register(issuerUrl, jwk.WithMinRefreshInterval(15*time.Minute), jwk.WithHTTPClient(client)); err != nil {
+		if err = ar.Register(keyLoc, jwk.WithMinRefreshInterval(15*time.Minute), jwk.WithHTTPClient(client)); err != nil {
 			return false, err
 		}
 		namespaceKeysMutex.Lock()
@@ -216,8 +178,8 @@ func VerifyAdvertiseToken(ctx context.Context, token, namespace string) (bool, e
 		}
 
 	}
-	log.Debugln("Attempting to fetch keys from ", issuerUrl)
-	keyset, err := ar.Get(ctx, issuerUrl)
+	log.Debugln("Attempting to fetch keys from ", keyLoc)
+	keyset, err := ar.Get(ctx, keyLoc)
 
 	if err != nil {
 		return false, err
@@ -245,42 +207,6 @@ func VerifyAdvertiseToken(ctx context.Context, token, namespace string) (bool, e
 		}
 	}
 	return false, nil
-}
-
-// Create a token for director to report the health status to the
-// origin
-func CreateDirectorTestReportToken(originWebUrl string) (string, error) {
-	directorURL := param.Federation_DirectorUrl.GetString()
-	if directorURL == "" {
-		return "", errors.New("Director URL is not known; cannot create director test report token")
-	}
-
-	tok, err := jwt.NewBuilder().
-		Claim("scope", token_scopes.Pelican_DirectorTestReport.String()).
-		Issuer(directorURL).
-		Audience([]string{originWebUrl}).
-		Subject("director").
-		Expiration(time.Now().Add(time.Minute)).
-		Build()
-	if err != nil {
-		return "", err
-	}
-
-	key, err := config.GetIssuerPrivateJWK()
-	if err != nil {
-		return "", errors.Wrap(err, "failed to load the origin's JWK")
-	}
-
-	err = jwk.AssignKeyID(key)
-	if err != nil {
-		return "", errors.Wrap(err, "Failed to assign kid to the token")
-	}
-
-	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, key))
-	if err != nil {
-		return "", err
-	}
-	return string(signed), nil
 }
 
 // Verify that a token received is a valid token from director
@@ -324,18 +250,73 @@ func VerifyDirectorTestReportToken(strToken string) (bool, error) {
 	return false, nil
 }
 
-func GetRegistryIssuerURL(prefix string) (string, error) {
-	namespace_url_string := param.Federation_RegistryUrl.GetString()
-	if namespace_url_string == "" {
-		return "", errors.New("Namespace URL is not set")
+// For a given prefix, get the prefix's issuer URL, where we consider that the openid endpoint
+// we use to look up a key location. Note that this is NOT the same as the issuer key -- to
+// find that, follow openid-style discovery using the issuer URL as a base.
+func GetNSIssuerURL(prefix string) (string, error) {
+	if prefix == "" || !strings.HasPrefix(prefix, "/") {
+		return "", errors.New(fmt.Sprintf("the prefix \"%s\" is invalid", prefix))
 	}
-	namespace_url, err := url.Parse(namespace_url_string)
+	registryUrlStr := param.Federation_RegistryUrl.GetString()
+	if registryUrlStr == "" {
+		return "", errors.New("federation registry URL is not set and was not discovered")
+	}
+	registryUrl, err := url.Parse(registryUrlStr)
 	if err != nil {
 		return "", err
 	}
-	namespace_url.Path, err = url.JoinPath(namespace_url.Path, "api", "v1.0", "registry", prefix, ".well-known", "issuer.jwks")
+
+	registryUrl.Path, err = url.JoinPath(registryUrl.Path, "api", "v1.0", "registry", prefix)
+
 	if err != nil {
-		return "", err
+		return "", errors.Wrapf(err, "failed to construct openid-configuration lookup URL for prefix %s", prefix)
 	}
-	return namespace_url.String(), nil
+	return registryUrl.String(), nil
+}
+
+// Given an issuer url, lookup the JWKS URL from the openid-configuration
+// For example, if the issuer URL is https://registry.com:8446/api/v1.0/registry/test-namespace,
+// this function will return the key indicated by the openid-configuration JSON hosted at
+// https://registry.com:8446/api/v1.0/registry/test-namespace/.well-known/openid-configuration.
+func GetJWKSURLFromIssuerURL(issuerUrl string) (string, error) {
+	// Get/parse the openid-configuration JSON to lookup key location
+	issOpenIDUrl, err := url.Parse(issuerUrl)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to parse issuer URL")
+	}
+	issOpenIDUrl.Path, _ = url.JoinPath(issOpenIDUrl.Path, ".well-known", "openid-configuration")
+
+	client := &http.Client{Transport: config.GetTransport()}
+	openIDCfg, err := client.Get(issOpenIDUrl.String())
+	if err != nil {
+		return "", errors.Wrapf(err, "failed to lookup openid-configuration for issuer %s", issuerUrl)
+	}
+	defer openIDCfg.Body.Close()
+
+	// If we hit an old registry, it may not have the openid-configuration. In that case, we fallback to the old
+	// behavior of looking for the key directly at the issuer URL.
+	if openIDCfg.StatusCode == http.StatusNotFound {
+		oldKeyLoc, err := url.JoinPath(issuerUrl, ".well-known", "issuer.jwks")
+		if err != nil {
+			return "", errors.Wrapf(err, "failed to construct key lookup URL for issuer %s", issuerUrl)
+		}
+		return oldKeyLoc, nil
+	}
+
+	body, err := io.ReadAll(openIDCfg.Body)
+	if err != nil {
+		return "", errors.Wrapf(err, "failed to read response body from %s", issuerUrl)
+	}
+
+	var openIDCfgMap map[string]string
+	err = json.Unmarshal(body, &openIDCfgMap)
+	if err != nil {
+		return "", errors.Wrapf(err, "failed to unmarshal openid-configuration for issuer %s", issuerUrl)
+	}
+
+	if keyLoc, ok := openIDCfgMap["jwks_uri"]; ok {
+		return keyLoc, nil
+	} else {
+		return "", errors.New(fmt.Sprintf("no key found in openid-configuration for issuer %s", issuerUrl))
+	}
 }

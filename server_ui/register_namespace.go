@@ -98,7 +98,7 @@ func keyIsRegistered(privkey jwk.Key, registryUrlStr string, prefix string) (key
 	keyCheckReq := checkNamespaceExistsReq{Prefix: prefix, PubKey: string(pubkeyStr)}
 	jsonData, err := json.Marshal(keyCheckReq)
 	if err != nil {
-		return noKeyPresent, errors.Wrap(err, "Error marshalling request to json string")
+		return noKeyPresent, errors.Wrap(err, "Error marshaling request to json string")
 	}
 
 	req, err := http.NewRequest("POST", pelicanReqURL.String(), bytes.NewBuffer(jsonData))

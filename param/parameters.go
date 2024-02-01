@@ -77,8 +77,17 @@ var (
 	Issuer_QDLLocation = StringParam{"Issuer.QDLLocation"}
 	Issuer_ScitokensServerLocation = StringParam{"Issuer.ScitokensServerLocation"}
 	Issuer_TomcatLocation = StringParam{"Issuer.TomcatLocation"}
+	Logging_Cache_Ofs = StringParam{"Logging.Cache.Ofs"}
+	Logging_Cache_Pss = StringParam{"Logging.Cache.Pss"}
+	Logging_Cache_Scitokens = StringParam{"Logging.Cache.Scitokens"}
+	Logging_Cache_Xrd = StringParam{"Logging.Cache.Xrd"}
 	Logging_Level = StringParam{"Logging.Level"}
 	Logging_LogLocation = StringParam{"Logging.LogLocation"}
+	Logging_Origin_Cms = StringParam{"Logging.Origin.Cms"}
+	Logging_Origin_Pfc = StringParam{"Logging.Origin.Pfc"}
+	Logging_Origin_Pss = StringParam{"Logging.Origin.Pss"}
+	Logging_Origin_Scitokens = StringParam{"Logging.Origin.Scitokens"}
+	Logging_Origin_Xrootd = StringParam{"Logging.Origin.Xrootd"}
 	Monitoring_DataLocation = StringParam{"Monitoring.DataLocation"}
 	OIDC_AuthorizationEndpoint = StringParam{"OIDC.AuthorizationEndpoint"}
 	OIDC_ClientID = StringParam{"OIDC.ClientID"}
@@ -177,6 +186,7 @@ var (
 	Origin_EnableDirListing = BoolParam{"Origin.EnableDirListing"}
 	Origin_EnableFallbackRead = BoolParam{"Origin.EnableFallbackRead"}
 	Origin_EnableIssuer = BoolParam{"Origin.EnableIssuer"}
+	Origin_EnablePublicReads = BoolParam{"Origin.EnablePublicReads"}
 	Origin_EnableUI = BoolParam{"Origin.EnableUI"}
 	Origin_EnableVoms = BoolParam{"Origin.EnableVoms"}
 	Origin_EnableWrite = BoolParam{"Origin.EnableWrite"}
@@ -192,9 +202,9 @@ var (
 )
 
 var (
-	Director_StatTimeout = DurationParam{"Director.StatTimeout"}
 	Director_AdvertisementTTL = DurationParam{"Director.AdvertisementTTL"}
 	Director_OriginCacheHealthTestInterval = DurationParam{"Director.OriginCacheHealthTestInterval"}
+	Director_StatTimeout = DurationParam{"Director.StatTimeout"}
 	Federation_TopologyReloadInterval = DurationParam{"Federation.TopologyReloadInterval"}
 	Monitoring_TokenExpiresIn = DurationParam{"Monitoring.TokenExpiresIn"}
 	Monitoring_TokenRefreshInterval = DurationParam{"Monitoring.TokenRefreshInterval"}
@@ -212,5 +222,6 @@ var (
 	GeoIPOverrides = ObjectParam{"GeoIPOverrides"}
 	Issuer_AuthorizationTemplates = ObjectParam{"Issuer.AuthorizationTemplates"}
 	Issuer_OIDCAuthenticationRequirements = ObjectParam{"Issuer.OIDCAuthenticationRequirements"}
+	Registry_CustomRegistrationFields = ObjectParam{"Registry.CustomRegistrationFields"}
 	Registry_Institutions = ObjectParam{"Registry.Institutions"}
 )

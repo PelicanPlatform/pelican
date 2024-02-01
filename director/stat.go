@@ -193,11 +193,11 @@ func (stat *ObjectStat) queryOriginsForObject(objectName string, cancelContext c
 				if err != nil {
 					switch e := err.(type) {
 					case timeoutError:
-						fmt.Println("Timeout error:", e)
+						fmt.Println("Timeout error:", e.Message)
 						negitiveReqChan <- err
 						return nil
 					case notFoundError:
-						fmt.Println("Not found error:", e)
+						fmt.Println("Not found error:", e.Message)
 						negitiveReqChan <- err
 						return nil
 					case cancelledError:

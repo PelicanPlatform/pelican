@@ -145,39 +145,43 @@ func runtimeInfo() (api_v1.RuntimeInfo, error) {
 
 // Configure director's Prometheus scraper to use HTTP service discovery for origins/caches
 func configDirectorPromScraper(ctx context.Context) (*config.ScrapeConfig, error) {
-	serverDiscoveryUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
+	directorBaseUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
 	if err != nil {
 		return nil, fmt.Errorf("parse external URL %v: %w", param.Server_ExternalWebUrl.GetString(), err)
 	}
-	// Create token for querying service discovery
-	sdTokenCfg := utils.TokenConfig{
-		TokenProfile: utils.None,
-		// Since this token will be verified on the same server that director exists
-		// use the discovery URL instead of Federation_DirectorUrl
-		Issuer:   serverDiscoveryUrl.String(),
-		Lifetime: param.Monitoring_TokenExpiresIn.GetDuration(),
-		Audience: []string{serverDiscoveryUrl.String()},
-		Subject:  "director",
-	}
-	sdTokenCfg.AddScopes([]token_scopes.TokenScope{token_scopes.Pelican_DirectorServiceDiscovery})
-	sdToken, err := sdTokenCfg.CreateToken()
-	if err != nil {
-		return nil, fmt.Errorf("Failed to generate token for Prometheus service discovery at start: %v", err)
-	}
 
-	// Create token for scrape origins and caches
-	scraperTokenCfg := utils.TokenConfig{
-		TokenProfile: utils.None,
-		Issuer:       serverDiscoveryUrl.String(),
+	promTokenCfg := utils.TokenConfig{
+		TokenProfile: utils.WLCG,
 		Lifetime:     param.Monitoring_TokenExpiresIn.GetDuration(),
+		Issuer:       directorBaseUrl.String(),
+		Audience:     []string{directorBaseUrl.String()},
+		Version:      "1.0",
 		Subject:      "director",
 	}
-	scraperTokenCfg.AddScopes([]token_scopes.TokenScope{token_scopes.Monitoring_Scrape})
-	scraperToken, err := scraperTokenCfg.CreateToken()
+	promTokenCfg.AddScopes([]token_scopes.TokenScope{token_scopes.Pelican_DirectorServiceDiscovery})
+
+	// CreateToken also handles validation for us
+	sdToken, err := promTokenCfg.CreateToken()
 	if err != nil {
-		return nil, fmt.Errorf("Failed to generate token for director scraper at start: %v", err)
+		return nil, errors.Wrap(err, "failed to create director prometheus token")
 	}
 
+	scrapeTokenCfg := utils.TokenConfig{
+		TokenProfile: utils.WLCG,
+		Version:      "1.0",
+		Lifetime:     param.Monitoring_TokenExpiresIn.GetDuration(),
+		Issuer:       directorBaseUrl.String(),
+		Audience:     []string{"prometheus"},
+		Subject:      "director",
+	}
+	scrapeTokenCfg.AddScopes([]token_scopes.TokenScope{token_scopes.Monitoring_Scrape})
+
+	scraperToken, err := scrapeTokenCfg.CreateToken()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create director scraping token")
+	}
+
+	serverDiscoveryUrl := directorBaseUrl
 	serverDiscoveryUrl.Path = "/api/v1.0/director/discoverServers"
 	scrapeConfig := config.DefaultScrapeConfig
 	scrapeConfig.JobName = "origin_cache_servers"
