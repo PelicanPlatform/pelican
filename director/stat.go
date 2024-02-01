@@ -193,10 +193,11 @@ func (stat *ObjectStat) queryOriginsForObject(objectName string, cancelContext c
 				if err != nil {
 					switch e := err.(type) {
 					case timeoutError:
-						fmt.Println("Timeout error:", e.Message)
+						log.Warningf("Timeout error when issue stat to origin %s for object %s after %d: %s", intOriginAd.WebURL.String(), objectName, timeout, e.Message)
 						negitiveReqChan <- err
 						return nil
 					case notFoundError:
+						log.Warningf("Object %s not found at origin %s: %s", objectName, intOriginAd.WebURL.String(), e.Message)
 						fmt.Println("Not found error:", e.Message)
 						negitiveReqChan <- err
 						return nil
