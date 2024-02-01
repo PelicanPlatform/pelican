@@ -213,7 +213,7 @@ func TestDirectorRegistration(t *testing.T) {
 
 	t.Run("valid-token-V2", func(t *testing.T) {
 		c, r, w := setupContext()
-		pKey, token, issuerURL := generateToken(c)
+		pKey, token, issuerURL := generateToken()
 		publicKey, err := jwk.PublicKeyOf(pKey)
 		assert.NoError(t, err, "Error creating public key from private key")
 
@@ -221,7 +221,7 @@ func TestDirectorRegistration(t *testing.T) {
 		useMockCache(ar, issuerURL)
 
 		isurl := url.URL{}
-		isurl.Path = "https://get-your-tokens.org"
+		isurl.Path = ts.URL
 
 		ad := OriginAdvertiseV2{
 			DataURL: "https://or-url.org",
@@ -285,7 +285,7 @@ func TestDirectorRegistration(t *testing.T) {
 		c, r, w := setupContext()
 		wrongPrivateKey, err := ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
 		assert.NoError(t, err, "Error creating another private key")
-		_, token, issuerURL := generateToken(c)
+		_, token, issuerURL := generateToken()
 
 		wrongPublicKey, err := jwk.PublicKeyOf(wrongPrivateKey)
 		assert.NoError(t, err, "Error creating public key from private key")
@@ -293,7 +293,7 @@ func TestDirectorRegistration(t *testing.T) {
 		useMockCache(ar, issuerURL)
 
 		isurl := url.URL{}
-		isurl.Path = "https://get-your-tokens.org"
+		isurl.Path = ts.URL
 
 		ad := OriginAdvertiseV2{Name: "test", DataURL: "https://or-url.org", Namespaces: []NamespaceAdV2{{
 			Path:   "/foo/bar",
@@ -344,14 +344,14 @@ func TestDirectorRegistration(t *testing.T) {
 
 	t.Run("valid-token-with-web-url-V2", func(t *testing.T) {
 		c, r, w := setupContext()
-		pKey, token, issuerURL := generateToken(c)
+		pKey, token, issuerURL := generateToken()
 		publicKey, err := jwk.PublicKeyOf(pKey)
 		assert.NoError(t, err, "Error creating public key from private key")
 		ar := setupMockCache(t, publicKey)
 		useMockCache(ar, issuerURL)
 
 		isurl := url.URL{}
-		isurl.Path = "https://get-your-tokens.org"
+		isurl.Path = ts.URL
 
 		ad := OriginAdvertiseV2{DataURL: "https://or-url.org", WebURL: "https://localhost:8844", Namespaces: []NamespaceAdV2{{
 			Path:   "/foo/bar",
@@ -400,14 +400,14 @@ func TestDirectorRegistration(t *testing.T) {
 
 	t.Run("valid-token-without-web-url-V2", func(t *testing.T) {
 		c, r, w := setupContext()
-		pKey, token, issuerURL := generateToken(c)
+		pKey, token, issuerURL := generateToken()
 		publicKey, err := jwk.PublicKeyOf(pKey)
 		assert.NoError(t, err, "Error creating public key from private key")
 		ar := setupMockCache(t, publicKey)
 		useMockCache(ar, issuerURL)
 
 		isurl := url.URL{}
-		isurl.Path = "https://get-your-tokens.org"
+		isurl.Path = ts.URL
 
 		ad := OriginAdvertiseV2{DataURL: "https://or-url.org", Namespaces: []NamespaceAdV2{{Path: "/foo/bar",
 			Issuer: []TokenIssuer{{IssuerUrl: isurl}}}}}

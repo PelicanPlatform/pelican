@@ -507,7 +507,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType ServerTy
 		return
 	}
 
-	adWebUrl, err := url.Parse(ad.WebURL)
+	adWebUrl, err := url.Parse(adV2.WebURL)
 	if err != nil && adV2.WebURL != "" { // We allow empty WebURL string for backward compatibility
 		log.Warningf("Failed to parse server Web URL %v: %v\n", adV2.WebURL, err)
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid server Web URL"})
