@@ -22,7 +22,7 @@ Pelican also has a set of built-in metrics to monitor Pelican server's status, l
 
 All of the Pelican servers have the following metrics:
 
-* `pelican_component_health_status`
+### `pelican_component_health_status`
 
   The health status of Pelican server components. The value can be converted into following status:
 
@@ -33,7 +33,7 @@ All of the Pelican servers have the following metrics:
   4: Unknown
   ```
 
-  Label: `component`
+  #### Label: `component`
 
   Label values:
   ```
@@ -47,23 +47,23 @@ All of the Pelican servers have the following metrics:
   *: only available at origin and cache servers
   ```
 
-* `pelican_component_health_status_last_update`
+### `pelican_component_health_status_last_update`
 
   The timestamp of last update of health status of Pelican server components. The value is UNIX time in seconds. It shares the same label as `pelican_component_health_status`
 
 
 ## Storage Servers (Origin and Cache)
 
-* `xrootd_monitoring_packets_received`
+### `xrootd_monitoring_packets_received`
 
   The total number of [XRootD monitoring](https://xrootd.slac.stanford.edu/doc/dev56/xrd_monitoring.htm) UDP pacakets received.
 
 
-* `xrootd_sched_thread_count`
+### `xrootd_sched_thread_count`
 
   The number of XRootD scheduler threads. Ref: https://xrootd.slac.stanford.edu/doc/dev56/xrd_monitoring.htm#_Toc138968509
 
-  Label: `status`
+  #### Label: `status`
 
   Label values:
   ```
@@ -71,11 +71,11 @@ All of the Pelican servers have the following metrics:
   "running": Scheduler threads running
   ```
 
-* `xrootd_server_bytes`
+### `xrootd_server_bytes`
 
   The total number of bytes XRootD sent/received. Ref: https://xrootd.slac.stanford.edu/doc/dev56/xrd_monitoring.htm#_Toc138968503 (See `link.in` and `link.out`)
 
-  Label: `direction`
+  #### Label: `direction`
 
   Label values:
   ```
@@ -83,15 +83,15 @@ All of the Pelican servers have the following metrics:
   "rx": Bytes received
   ```
 
-* `xrootd_server_connection_count`
+### `xrootd_server_connection_count`
 
   The total number of server connections to XRootD.
 
-* `xrootd_storage_volume_bytes`
+### `xrootd_storage_volume_bytes`
 
   The storage volume usage on the storage server.
 
-  Label: `type`
+  #### Label: `type`
 
   Label values:
   ```
@@ -99,7 +99,7 @@ All of the Pelican servers have the following metrics:
   "free":   Available bytes to use
   ```
 
-  Label: `server_type`
+  #### Label: `server_type`
 
   Label values:
   ```
@@ -107,35 +107,35 @@ All of the Pelican servers have the following metrics:
   "cache":   Cache server
   ```
 
-  Label: `ns`
+  #### Label: `ns`
 
   The top-level namespace the XRootD is serving for. Example: `/foo`
 
-* `xrootd_transfer_bytes`
+### `xrootd_transfer_bytes`
 
   The bytes of transfers for individual object. Ref: https://xrootd.slac.stanford.edu/doc/dev56/xrd_monitoring.htm#_Toc138968522 (See XrdXrootdMonStatXFR)
 
-  Label: `path`
+  #### Label: `path`
 
   The path to the object (filename).
 
-  Label: `ap`
+  #### Label: `ap`
 
   Authentication protocol name used to authenticate the client. Default is `https`
 
-  Label: `dn`
+  #### Label: `dn`
 
   Client’s distinguished name as reported by ap. If no name is present, the variable data is null.
 
-  Label: `role`
+  #### Label: `role`
 
   Client’s role name as reported by prot. If no role name is present, the variable data is null.
 
-  Label: `org`
+  #### Label: `org`
 
   Client’s group names in a space-separated list. If no groups are present, the tag variable data is null.
 
-  Label: `type`
+  #### Label: `type`
 
   Label values:
   ```
@@ -144,26 +144,26 @@ All of the Pelican servers have the following metrics:
   "write":  Bytes written to file
   ```
 
-* `xrootd_transfer_operations_count`
+### `xrootd_transfer_operations_count`
 
   The number of transfer operations performed for individual object. The labels for this metric is the same as the ones in `xrootd_transfer_bytes`
 
-* `xrootd_transfer_readv_segments_count`
+### `xrootd_transfer_readv_segments_count`
 
   The number of segments in readv operations for individual object. The labels for this metric is the same as the ones in `xrootd_transfer_bytes` except that `type` label isn't available in this metric.
 
 
 ## Director
 
-* `up`
+### `up`
 
   Although a Prometheus built-in metric, Pelican uses this metric to record number of origin/cache servers in the federation, as Pelican director scrape all the storage servers in the federation and get their Promtheus metrics.
 
-  Label: `server_name`
+  #### Label: `server_name`
 
   The name of the storage server. By default it's the hostname.
 
-  Label: `server_type`
+  #### Label: `server_type`
 
   Label values:
   ```
@@ -171,35 +171,35 @@ All of the Pelican servers have the following metrics:
   "Cache":  Cache server
   ```
 
-  Label: `server_url`
+  #### Label: `server_url`
 
   The storage server XRootD url.
 
-  Label: `server_web_url`
+  #### Label: `server_web_url`
 
   The storage server web url.
 
-  Label: `server_auth_url`
+  #### Label: `server_auth_url`
 
   The storage server authentication url.
 
-  Label: `server_lat`
+  #### Label: `server_lat`
 
   The storage server latitute.
 
-  Label: `server_long`
+  #### Label: `server_long`
 
   The storage server longitute.
 
-* `pelican_director_total_ftx_test_suite`
+### `pelican_director_total_ftx_test_suite`
 
   The number of file transfer test suite the director issued. In Pelican, director creates a test file and sent to origin servers to as a health test. It issues such test suite when it receives the registration from the origin server. In a test suite, a timer was set to run a cylce of uploading, getting, and deleting the test file every 15 seconds. Such cycle is called a "test run". In theory, director should issue only one test for each origin servers; however, since the registration information was stored in a TTL cache in director, and it expires after certain period of time, and the test suite issued will be cancelled. A new test suite is issued with the new registration. Thus, director _can_ issue multiple test suites to an origin server.
 
-  Label: `server_name`
+  #### Label: `server_name`
 
   The name of the storage server. By default it's the hostname.
 
-  Label: `server_type`
+  #### Label: `server_type`
 
   Label values:
   ```
@@ -207,23 +207,23 @@ All of the Pelican servers have the following metrics:
   "Cache":  Cache server
   ```
 
-  Label: `server_web_url`
+  #### Label: `server_web_url`
 
   The storage server web url.
 
-* `pelican_director_active_ftx_test_suite`
+### `pelican_director_active_ftx_test_suite`
 
   The number of _active_ director file transfer test suite. As mentioned in previous metric, the test suites are individual tasks running independently from the main program logic. This can cause race condition in some condition where an expired test suite was not cleared but a new test suite is issued for the same origin. This metric records such condition for debugging and monitoring. The value of the metric _should_ be 1 for all the time.
 
   This metric shares the same label as `pelican_director_total_ftx_test_suite`
 
-* `pelican_director_total_ftx_test_runs`
+### `pelican_director_total_ftx_test_runs`
 
   The number of file transfer test runs the director issued. A "test run" is a set of upload/get/delete of test files to a origin. It executes in a cycle of 15s (by default).
 
   This metric shares the same label as `pelican_director_total_ftx_test_suite`, with two additions:
 
-  Label: `status`
+  #### Label: `status`
 
   Label values:
   ```
@@ -231,7 +231,7 @@ All of the Pelican servers have the following metrics:
   "Failed":   The test run failed
   ```
 
-  Label: `report_status`
+  #### Label: `report_status`
 
   Label values:
   ```
