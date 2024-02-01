@@ -127,11 +127,26 @@ type (
 		TLSCACertificateFile      string
 	}
 
+	LoggingConfig struct {
+		CacheScitokens  string
+		CachePss        string
+		CacheOfs        string
+		CacheXrd        string
+		PssSetOptCache  string
+		OriginScitokens string
+		OriginPss       string
+		OriginPfc       string
+		OriginCms       string
+		OriginXrootd    string
+		PssSetOptOrigin string
+	}
+
 	XrootdConfig struct {
-		Server ServerConfig
-		Origin OriginConfig
-		Xrootd XrootdOptions
-		Cache  CacheConfig
+		Server  ServerConfig
+		Origin  OriginConfig
+		Xrootd  XrootdOptions
+		Cache   CacheConfig
+		Logging LoggingConfig
 	}
 )
 
@@ -561,6 +576,7 @@ func LaunchXrootdMaintenance(ctx context.Context, server server_utils.XRootDServ
 }
 
 func ConfigXrootd(ctx context.Context, origin bool) (string, error) {
+
 	gid, err := config.GetDaemonGID()
 	if err != nil {
 		return "", err
@@ -571,6 +587,9 @@ func ConfigXrootd(ctx context.Context, origin bool) (string, error) {
 	if err := viper.Unmarshal(&xrdConfig); err != nil {
 		return "", err
 	}
+
+	// Map out xrootd logs
+	mapXrootdLogLevels(&xrdConfig)
 
 	runtimeCAs := filepath.Join(param.Xrootd_RunLocation.GetString(), "ca-bundle.crt")
 	caCount, err := utils.LaunchPeriodicWriteCABundle(ctx, runtimeCAs, 2*time.Minute)
@@ -666,4 +685,159 @@ func SetUpMonitoring(ctx context.Context, egrp *errgroup.Group) error {
 	viper.Set("Xrootd.LocalMonitoringPort", monitorPort)
 
 	return nil
+}
+
+// mapXrootdLogLevels is utilized to map Pelican config values to Xrootd ones
+// this is used to keep our log levels for Xrootd simple, so one does not need
+// to be an Xrootd expert to understand the inconsistent logs within Xrootd
+func mapXrootdLogLevels(xrdConfig *XrootdConfig) {
+	// Origin Scitokens
+	originScitokensConfig := param.Logging_Origin_Scitokens.GetString()
+	if originScitokensConfig == "debug" {
+		xrdConfig.Logging.OriginScitokens = "all"
+	} else if originScitokensConfig == "info" {
+		xrdConfig.Logging.OriginScitokens = "info"
+	} else if originScitokensConfig == "error" {
+		xrdConfig.Logging.OriginScitokens = "none"
+	} else { // Default is error
+		log.Errorln("Unrecognized log-level for Origin_Scitokens, setting to default (error) setting.")
+		xrdConfig.Logging.OriginScitokens = "none"
+	}
+
+	// pssSetOptOrigin and pssOrigin
+	pssSetOptOrigin := param.Logging_Origin_Pss.GetString()
+	if pssSetOptOrigin == "debug" {
+		xrdConfig.Logging.PssSetOptOrigin = "DebugLevel 3"
+		xrdConfig.Logging.OriginPss = "all"
+	} else if pssSetOptOrigin == "info" {
+		xrdConfig.Logging.PssSetOptOrigin = "DebugLevel 2"
+		xrdConfig.Logging.OriginPss = "on"
+	} else if pssSetOptOrigin == "error" {
+		xrdConfig.Logging.PssSetOptOrigin = "DebugLevel 1"
+		xrdConfig.Logging.OriginPss = "off"
+	} else {
+		log.Errorln("Unrecognized log-level for Origin_Pss, setting to default (error) setting.")
+		xrdConfig.Logging.PssSetOptOrigin = "DebugLevel 1"
+		xrdConfig.Logging.OriginPss = "off"
+	}
+
+	// Origin Pfc
+	originPfcConfig := param.Logging_Origin_Pfc.GetString()
+	if originPfcConfig == "debug" {
+		xrdConfig.Logging.OriginPfc = "all"
+	} else if originPfcConfig == "error" {
+		xrdConfig.Logging.OriginPfc = "none"
+	} else if originPfcConfig == "info" { // Default is info
+		xrdConfig.Logging.OriginPfc = "info"
+	} else {
+		log.Errorln("Unrecognized log-level for Origin_Pfc, setting to default (info) setting.")
+		xrdConfig.Logging.OriginPfc = "info"
+	}
+
+	// Origin Cms
+	originCmsConfig := param.Logging_Origin_Cms.GetString()
+	if originCmsConfig == "debug" {
+		xrdConfig.Logging.OriginCms = "all"
+	} else if originCmsConfig == "info" {
+		xrdConfig.Logging.OriginCms = "-all" // Not super sure what to do for info on this one
+	} else if originCmsConfig == "error" {
+		xrdConfig.Logging.OriginCms = "-all"
+	} else {
+		log.Errorln("Unrecognized log-level for Origin_Cms, setting to default (error) setting.")
+		xrdConfig.Logging.OriginCms = "-all"
+	}
+
+	// Origin Xrootd
+	// Have this for now with the regular config options, not sure what to do to make it more
+	// user-friendly since our/osg's defaults are pretty specific
+	originXrootdConfig := param.Logging_Origin_Xrootd.GetString()
+
+	// Want to make sure everything specified is a valid config value:
+	allowedVariables := map[string]bool{
+		"all":      true,
+		"auth":     true,
+		"debug":    true,
+		"emsg":     true,
+		"fs":       true,
+		"fsaio":    true,
+		"fsio":     true,
+		"login":    true,
+		"mem":      true,
+		"off":      true,
+		"pgcserr":  true,
+		"redirect": true,
+		"request":  true,
+		"response": true,
+		"stall":    true,
+	}
+
+	configValues := strings.Fields(originXrootdConfig)
+	validConfig := true
+	for _, value := range configValues {
+		if _, exists := allowedVariables[value]; !exists {
+			log.Errorln("Unrecognized log-level found for Origin_Xrootd, setting to default (emsg login stall redirect) setting.")
+			xrdConfig.Logging.OriginXrootd = "emsg login stall redirect"
+			validConfig = false
+			break
+		}
+	}
+	if validConfig {
+		xrdConfig.Logging.OriginXrootd = originXrootdConfig
+	}
+
+	// Cache Scitokens
+	cacheScitokensConfig := param.Logging_Cache_Scitokens.GetString()
+	if cacheScitokensConfig == "debug" {
+		xrdConfig.Logging.CacheScitokens = "all"
+	} else if cacheScitokensConfig == "info" {
+		xrdConfig.Logging.CacheScitokens = "info"
+	} else if cacheScitokensConfig == "error" {
+		xrdConfig.Logging.CacheScitokens = "none"
+	} else { // Default is error
+		log.Errorln("Unrecognized log-level for Cache_Scitokens, setting to default (error) setting.")
+		xrdConfig.Logging.CacheScitokens = "none"
+	}
+
+	// Cache PssSetOptCache and Cache Pss
+	cachePssConfig := param.Logging_Cache_Pss.GetString()
+	if cachePssConfig == "debug" {
+		xrdConfig.Logging.PssSetOptCache = "DebugLevel 3"
+		xrdConfig.Logging.CachePss = "all"
+	} else if cachePssConfig == "info" {
+		xrdConfig.Logging.PssSetOptCache = "DebugLevel 2"
+		xrdConfig.Logging.CachePss = "on"
+	} else if cachePssConfig == "error" {
+		xrdConfig.Logging.PssSetOptCache = "DebugLevel 1"
+		xrdConfig.Logging.CachePss = "off"
+	} else {
+		log.Errorln("Unrecognized log-level for Cache_Pss, setting to default (error) setting.")
+		xrdConfig.Logging.PssSetOptOrigin = "DebugLevel 1"
+		xrdConfig.Logging.CachePss = "off"
+	}
+
+	// Cache Ofs
+	cacheOfsConfig := param.Logging_Cache_Ofs.GetString()
+	if cacheOfsConfig == "debug" {
+		xrdConfig.Logging.CacheOfs = "all"
+	} else if cacheOfsConfig == "info" {
+		xrdConfig.Logging.CacheOfs = "-all" // Not super sure what to do for info on this one
+	} else if cacheOfsConfig == "error" {
+		xrdConfig.Logging.CacheOfs = "-all"
+	} else {
+		log.Errorln("Unrecognized log-level for Cache_Ofs, setting to default (error) setting.")
+		xrdConfig.Logging.CacheOfs = "-all"
+	}
+
+	// Cache Xrd
+	cacheXrdConfig := param.Logging_Cache_Xrd.GetString()
+	if cacheXrdConfig == "debug" {
+		xrdConfig.Logging.CacheXrd = "all -sched"
+	} else if cacheXrdConfig == "info" {
+		xrdConfig.Logging.CacheXrd = "-all" // Not super sure what to do for info on this one
+	} else if cacheXrdConfig == "error" {
+		xrdConfig.Logging.CacheXrd = "-all"
+	} else {
+		log.Errorln("Unrecognized log-level for Cache_Xrd, setting to default (error) setting.")
+		xrdConfig.Logging.CacheXrd = "-all"
+	}
 }
