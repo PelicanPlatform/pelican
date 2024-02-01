@@ -145,7 +145,7 @@ func runtimeInfo() (api_v1.RuntimeInfo, error) {
 
 // Configure director's Prometheus scraper to use HTTP service discovery for origins/caches
 func configDirectorPromScraper(ctx context.Context) (*config.ScrapeConfig, error) {
-	serverDiscoveryUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
+	directorBaseUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
 	if err != nil {
 		return nil, fmt.Errorf("parse external URL %v: %w", param.Server_ExternalWebUrl.GetString(), err)
 	}
@@ -153,11 +153,10 @@ func configDirectorPromScraper(ctx context.Context) (*config.ScrapeConfig, error
 	promTokenCfg := utils.TokenConfig{
 		TokenProfile: utils.WLCG,
 		Lifetime:     param.Monitoring_TokenExpiresIn.GetDuration(),
-		Issuer:       serverDiscoveryUrl.String(),
-		Audience:     []string{serverDiscoveryUrl.String()},
+		Issuer:       directorBaseUrl.String(),
+		Audience:     []string{directorBaseUrl.String()},
 		Version:      "1.0",
 		Subject:      "director",
-		// Claims:       map[string]string{"scope": token_scopes.Pelican_DirectorServiceDiscovery.String()},
 	}
 	promTokenCfg.AddScopes([]token_scopes.TokenScope{token_scopes.Pelican_DirectorServiceDiscovery})
 
@@ -171,7 +170,7 @@ func configDirectorPromScraper(ctx context.Context) (*config.ScrapeConfig, error
 		TokenProfile: utils.WLCG,
 		Version:      "1.0",
 		Lifetime:     param.Monitoring_TokenExpiresIn.GetDuration(),
-		Issuer:       serverDiscoveryUrl.String(),
+		Issuer:       directorBaseUrl.String(),
 		Audience:     []string{"prometheus"},
 		Subject:      "director",
 	}
@@ -182,6 +181,7 @@ func configDirectorPromScraper(ctx context.Context) (*config.ScrapeConfig, error
 		return nil, errors.Wrap(err, "failed to create director scraping token")
 	}
 
+	serverDiscoveryUrl := directorBaseUrl
 	serverDiscoveryUrl.Path = "/api/v1.0/director/discoverServers"
 	scrapeConfig := config.DefaultScrapeConfig
 	scrapeConfig.JobName = "origin_cache_servers"
