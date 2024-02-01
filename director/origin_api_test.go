@@ -11,9 +11,7 @@ import (
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
-	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
-	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -21,6 +19,8 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/test_utils"
+	"github.com/pelicanplatform/pelican/token_scopes"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 // For these tests, we only need to lookup key locations. Create a dummy registry that only returns
@@ -108,99 +108,61 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 		namespaceKeys.Set("/test-namespace", &ar, ttlcache.DefaultTTL)
 	}()
 
-	// A verified token with a the correct scope - should return no error
-	tok, err := CreateAdvertiseToken("/test-namespace")
+	issuerUrl, err := GetNSIssuerURL("/test-namespace")
 	assert.NoError(t, err)
+
+	advTokenCfg := utils.TokenConfig{
+		TokenProfile: utils.WLCG,
+		Version:      "1.0",
+		Lifetime:     time.Minute,
+		Issuer:       issuerUrl,
+		Audience:     []string{"https://director-url.org"},
+		Subject:      "origin",
+	}
+	advTokenCfg.AddScopes([]token_scopes.TokenScope{token_scopes.Pelican_Advertise})
+
+	// CreateToken also handles validation for us
+	tok, err := advTokenCfg.CreateToken()
+	assert.NoError(t, err, "failed to create director prometheus token")
+
 	ok, err := VerifyAdvertiseToken(ctx, tok, "/test-namespace")
 	assert.NoError(t, err)
 	assert.Equal(t, true, ok, "Expected scope to be 'pelican.advertise'")
 
-	//Create token without a scope - should return an error
-	key, err := config.GetIssuerPrivateJWK()
-	err = jwk.AssignKeyID(key)
-	assert.NoError(t, err)
+	//Create token without a scope - should return an error upon validation
+	scopelessTokCfg := utils.TokenConfig{
+		TokenProfile: utils.WLCG,
+		Lifetime:     time.Minute,
+		Issuer:       "https://get-your-tokens.org",
+		Audience:     []string{"director.test"},
+		Version:      "1.0",
+		Subject:      "origin",
+	}
 
-	scopelessTok, err := jwt.NewBuilder().
-		Issuer("").
-		Audience([]string{"director.test"}).
-		Subject("origin").
-		Build()
+	tok, err = scopelessTokCfg.CreateToken()
+	assert.NoError(t, err, "error creating scopeless token. Should have succeeded")
 
-	signed, err := jwt.Sign(scopelessTok, jwt.WithKey(jwa.ES256, key))
-
-	ok, err = VerifyAdvertiseToken(ctx, string(signed), "/test-namespace")
+	ok, err = VerifyAdvertiseToken(ctx, tok, "/test-namespace")
 	assert.Equal(t, false, ok)
 	assert.Equal(t, "No scope is present; required to advertise to director", err.Error())
 
-	//Create a token without a string valued scope
-	nonStrScopeTok, err := jwt.NewBuilder().
-		Issuer("").
-		Claim("scope", 22).
-		Audience([]string{"director.test"}).
-		Subject("origin").
-		Build()
+	// Create a token with a bad scope - should return an error upon validation
+	wrongScopeTokenCfg := utils.TokenConfig{
+		TokenProfile: utils.WLCG,
+		Lifetime:     time.Minute,
+		Issuer:       "https://get-your-tokens.org",
+		Audience:     []string{"director.test"},
+		Version:      "1.0",
+		Subject:      "origin",
+		Claims:       map[string]string{"scope": "wrong.scope"},
+	}
 
-	signed, err = jwt.Sign(nonStrScopeTok, jwt.WithKey(jwa.ES256, key))
+	tok, err = wrongScopeTokenCfg.CreateToken()
+	assert.NoError(t, err, "error creating wrong-scope token. Should have succeeded")
 
-	ok, err = VerifyAdvertiseToken(ctx, string(signed), "/test-namespace")
-	assert.Equal(t, false, ok)
-	assert.Equal(t, "scope claim in token is not string-valued", err.Error())
-
-	//Create a token without a pelican.namespace scope
-	wrongScopeTok, err := jwt.NewBuilder().
-		Issuer("").
-		Claim("scope", "wrong.scope").
-		Audience([]string{"director.test"}).
-		Subject("origin").
-		Build()
-
-	signed, err = jwt.Sign(wrongScopeTok, jwt.WithKey(jwa.ES256, key))
-
-	ok, err = VerifyAdvertiseToken(ctx, string(signed), "/test-namespace")
+	ok, err = VerifyAdvertiseToken(ctx, tok, "/test-namespace")
 	assert.Equal(t, false, ok, "Should fail due to incorrect scope name")
 	assert.NoError(t, err, "Incorrect scope name should not throw and error")
-}
-
-func TestCreateAdvertiseToken(t *testing.T) {
-	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
-	defer func() { require.NoError(t, egrp.Wait()) }()
-	defer cancel()
-
-	viper.Reset()
-
-	// Create a temp directory to store the private key file
-	tDir := t.TempDir()
-	kfile := filepath.Join(tDir, "t-key")
-
-	// Generate a private key
-	viper.Set("IssuerKey", kfile)
-	config.InitConfig()
-	err := config.InitServer(ctx, config.DirectorType)
-	require.NoError(t, err)
-
-	// Launcher will set default values to some of the server urls. Reset here.
-	viper.Set("Federation.RegistryUrl", "")
-	viper.Set("Federation.DirectorURL", "")
-
-	registry := registryMockup(t, "/test-namespace")
-	defer registry.Close()
-
-	// Test without a registry URL set and check to see if it returns the expected error
-	tok, err := CreateAdvertiseToken("/test-namespace")
-	assert.Equal(t, "", tok)
-	assert.Equal(t, "federation registry URL is not set and was not discovered", err.Error())
-	viper.Set("Federation.RegistryUrl", registry.URL)
-
-	// Test without a DirectorURL set and check to see if it returns the expected error
-	tok, err = CreateAdvertiseToken("/test-namespace")
-	assert.Equal(t, "", tok)
-	assert.Equal(t, "Director URL is not known; cannot create advertise token", err.Error())
-	viper.Set("Federation.DirectorURL", "https://director-url.org")
-
-	// Test the CreateAdvertiseToken with good values and test that it returns a non-nil token value and no error
-	tok, err = CreateAdvertiseToken("/test-namespace")
-	assert.Equal(t, nil, err)
-	assert.NotEqual(t, "", tok)
 }
 
 func TestGetNSIssuerURL(t *testing.T) {

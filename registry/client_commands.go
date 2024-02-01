@@ -27,13 +27,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
-	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/utils"
@@ -242,44 +239,30 @@ func NamespaceDelete(endpoint string, prefix string) error {
 	//       including an audience with these tokens.
 	// TODO: Investigate whether 1 min is a good expiration interval
 	//       or whether this should be altered.
-	now := time.Now()
-	tok, err := jwt.NewBuilder().
-		Issuer(issuerURL).
-		Claim("scope", token_scopes.Pelican_NamespaceDelete.String()).
-		IssuedAt(now).
-		Expiration(now.Add(1 * time.Minute)).
-		NotBefore(now).
-		Subject("origin").
-		Build()
-	if err != nil {
-		return errors.Wrap(err, "Failed to generated deletion token")
+	delTokenCfg := utils.TokenConfig{
+		TokenProfile: utils.WLCG,
+		Lifetime:     time.Minute,
+		Issuer:       issuerURL,
+		Audience:     []string{"registry"},
+		Version:      "1.0",
+		Subject:      "origin",
+		Claims:       map[string]string{"scope": token_scopes.Pelican_NamespaceDelete.String()},
 	}
 
-	// Now that we have a token, it needs signing
-	key, err := config.GetIssuerPrivateJWK()
+	// CreateToken also handles validation for us
+	tok, err := delTokenCfg.CreateToken()
 	if err != nil {
-		return errors.Wrap(err, "failed to load the registry's JWK")
-	}
-
-	// Get/assign the kid, needed for verification by the client
-	err = jwk.AssignKeyID(key)
-	if err != nil {
-		return errors.Wrap(err, "Failed to assign kid to the token")
-	}
-
-	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, key))
-	if err != nil {
-		return errors.Wrap(err, "Failed to sign the deletion token")
+		return errors.Wrap(err, "failed to create namespace deletion token")
 	}
 
 	// We're at the client, so it *should* be safe to print the signed token to
 	// stdout when the client asks for debug -- a future attacker will only find
 	// expired tokens, and an attacker with current access can just use the priv
 	// key to create their own. Famous last words?
-	log.Debugln("Signed deletion token:", string(signed))
+	log.Debugln("Signed deletion token:", tok)
 
 	authHeader := map[string]string{
-		"Authorization": "Bearer " + string(signed),
+		"Authorization": "Bearer " + tok,
 	}
 
 	respData, err := utils.MakeRequest(endpoint, "DELETE", nil, authHeader)

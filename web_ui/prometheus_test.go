@@ -21,10 +21,6 @@ package web_ui
 import (
 	"bytes"
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
-	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -33,17 +29,16 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/lestrrat-go/jwx/v2/jwa"
-	"github.com/lestrrat-go/jwx/v2/jwk"
-	"github.com/lestrrat-go/jwx/v2/jwt"
-	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/test_utils"
-	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/prometheus/common/route"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/test_utils"
+	"github.com/pelicanplatform/pelican/token_scopes"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 // Test the Prometheus query engine endpoint auth check with an server issuer token
@@ -76,47 +71,26 @@ func TestPrometheusProtectionCookieAuth(t *testing.T) {
 		URL: &url.URL{},
 	}
 
-	jti_bytes := make([]byte, 16)
-	_, err = rand.Read(jti_bytes)
-	if err != nil {
-		t.Fatal(err)
-	}
-	jti := base64.RawURLEncoding.EncodeToString(jti_bytes)
-
 	issuerUrl := param.Server_ExternalWebUrl.GetString()
-	tok, err := jwt.NewBuilder().
-		Claim("scope", token_scopes.Monitoring_Query.String()).
-		Claim("wlcg.ver", "1.0").
-		JwtID(jti).
-		Issuer(issuerUrl).
-		Audience([]string{issuerUrl}).
-		Subject("sub").
-		Expiration(time.Now().Add(10 * time.Minute)).
-		IssuedAt(time.Now()).
-		Build()
-
-	if err != nil {
-		t.Fatal(err)
+	promTokenCfg := utils.TokenConfig{
+		TokenProfile: utils.WLCG,
+		Lifetime:     10 * time.Minute,
+		Issuer:       issuerUrl,
+		Audience:     []string{issuerUrl},
+		Version:      "1.0",
+		Subject:      "sub",
+		Claims:       map[string]string{"scope": token_scopes.Monitoring_Query.String()},
 	}
 
-	pkey, err := config.GetIssuerPrivateJWK()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Sign the token with the origin private key
-	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, pkey))
-
-	if err != nil {
-		t.Fatal(err)
-	}
+	tok, err := promTokenCfg.CreateToken()
+	assert.NoError(t, err, "failed to create prometheus token")
 
 	// Set the request to run through the promQueryEngineAuthHandler function
 	r.GET("/api/v1.0/prometheus/*any", promQueryEngineAuthHandler(av1))
 	c.Request, _ = http.NewRequest(http.MethodGet, "/api/v1.0/prometheus/test", bytes.NewBuffer([]byte(`{}`)))
 
 	// Puts the token in cookie
-	c.Request.AddCookie(&http.Cookie{Name: "login", Value: string(signed)})
+	c.Request.AddCookie(&http.Cookie{Name: "login", Value: tok})
 
 	r.ServeHTTP(w, c.Request)
 
@@ -151,32 +125,21 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 	issuerUrl := param.Server_ExternalWebUrl.GetString()
 
 	// Shared function to create a token
-	createToken := func(scope, aud string, key jwk.Key) string {
-		jti_bytes := make([]byte, 16)
-		if _, err := rand.Read(jti_bytes); err != nil {
-			t.Fatal(err)
-		}
-		jti := base64.RawURLEncoding.EncodeToString(jti_bytes)
-
-		tok, err := jwt.NewBuilder().
-			Claim("scope", scope).
-			Claim("wlcg.ver", "1.0").
-			JwtID(jti).
-			Issuer(issuerUrl).
-			Audience([]string{aud}).
-			Subject("sub").
-			Expiration(time.Now().Add(10 * time.Minute)).
-			IssuedAt(time.Now()).
-			Build()
-		if err != nil {
-			t.Fatal(err)
+	createToken := func(scope, aud string) string {
+		tokenCfg := utils.TokenConfig{
+			TokenProfile: utils.WLCG,
+			Lifetime:     param.Monitoring_TokenExpiresIn.GetDuration(),
+			Issuer:       issuerUrl,
+			Audience:     []string{aud},
+			Version:      "1.0",
+			Subject:      "sub",
+			Claims:       map[string]string{"scope": scope},
 		}
 
-		signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, key))
-		if err != nil {
-			t.Fatal(err)
-		}
-		return string(signed)
+		tok, err := tokenCfg.CreateToken()
+		assert.NoError(t, err, "failed to create prometheus test token")
+
+		return tok
 	}
 
 	t.Run("valid-token-in-header", func(t *testing.T) {
@@ -186,13 +149,7 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 			URL: &url.URL{},
 		}
 
-		// Load the private key
-		privKey, err := config.GetIssuerPrivateJWK()
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		token := createToken("monitoring.query", issuerUrl, privKey)
+		token := createToken("monitoring.query", issuerUrl)
 
 		// Set the request to go through the promQueryEngineAuthHandler function
 		r.GET("/api/v1.0/prometheus/*any", promQueryEngineAuthHandler(av1))
@@ -217,28 +174,23 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 			URL: &url.URL{},
 		}
 
-		// Create a private key to use for the test
-		ecdsaPrivateKey, err := ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
-		assert.NoError(t, err, "Error generating private key")
+		// Create a new private key by re-initializing config to point at a new temp dir
+		k2file := filepath.Join(tDir, "testKey2")
+		viper.Set("IssuerKey", k2file)
+		err = config.InitServer(ctx, config.OriginType)
+		require.NoError(t, err)
 
-		// Convert from raw ecdsa to jwk.Key
-		privateKey, err := jwk.FromRaw(ecdsaPrivateKey)
-		assert.NoError(t, err, "Unable to convert ecdsa.PrivateKey to jwk.Key")
+		token := createToken("monitoring.query", issuerUrl)
 
-		// Assign Key id to the private key
-		err = jwk.AssignKeyID(privateKey)
-		assert.NoError(t, err, "Error assigning kid to private key")
-
-		// Set an algorithm for the key
-		err = privateKey.Set(jwk.AlgorithmKey, jwa.ES256)
-		assert.NoError(t, err, "Unable to set algorithm for pKey")
-
-		token := createToken("monitoring.query", issuerUrl, privateKey)
+		// Re-init the config again, this time pointing at the original key
+		viper.Set("IssuerKey", kfile)
+		err = config.InitServer(ctx, config.OriginType)
+		require.NoError(t, err)
 
 		r.GET("/api/v1.0/prometheus/*any", promQueryEngineAuthHandler(av1))
 		c.Request, _ = http.NewRequest(http.MethodGet, "/api/v1.0/prometheus/test", bytes.NewBuffer([]byte(`{}`)))
 
-		c.Request.Header.Set("Authorization", "Bearer "+string(token))
+		c.Request.Header.Set("Authorization", "Bearer "+token)
 		c.Request.Header.Set("Content-Type", "application/json")
 
 		r.ServeHTTP(w, c.Request)
@@ -254,12 +206,8 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 		c.Request = &http.Request{
 			URL: &url.URL{},
 		}
-		key, err := config.GetIssuerPrivateJWK()
-		if err != nil {
-			t.Fatal(err)
-		}
 
-		token := createToken("no.prometheus", issuerUrl, key)
+		token := createToken("no.prometheus", issuerUrl)
 
 		// Set the request to go through the promQueryEngineAuthHandler function
 		r.GET("/api/v1.0/prometheus/*any", promQueryEngineAuthHandler(av1))

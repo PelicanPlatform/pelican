@@ -28,14 +28,16 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/metrics"
-	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/metrics"
+	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/token_scopes"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 type (
@@ -48,9 +50,24 @@ type (
 
 // Report the health status of test file transfer to origin
 func reportStatusToOrigin(ctx context.Context, originWebUrl string, status string, message string) error {
-	tkn, err := CreateDirectorTestReportToken(originWebUrl)
+	directorUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
 	if err != nil {
-		return errors.Wrap(err, "Failed to create a token for the diretor test upload")
+		return errors.Wrapf(err, "failed to parse external URL %v", param.Server_ExternalWebUrl.GetString())
+	}
+
+	testTokenCfg := utils.TokenConfig{
+		TokenProfile: utils.WLCG,
+		Version:      "1.0",
+		Lifetime:     time.Minute,
+		Issuer:       directorUrl.String(),
+		Audience:     []string{originWebUrl},
+		Subject:      "director",
+	}
+	testTokenCfg.AddScopes([]token_scopes.TokenScope{token_scopes.Pelican_DirectorTestReport})
+
+	tok, err := testTokenCfg.CreateToken()
+	if err != nil {
+		return errors.Wrap(err, "failed to create director test report token")
 	}
 
 	reportUrl, err := url.Parse(originWebUrl)
@@ -84,7 +101,7 @@ func reportStatusToOrigin(ctx context.Context, originWebUrl string, status strin
 		return errors.Wrap(err, "Failed to create POST request for reporting director test")
 	}
 
-	req.Header.Set("Authorization", "Bearer "+tkn)
+	req.Header.Set("Authorization", "Bearer "+tok)
 	req.Header.Set("Content-Type", "application/json")
 
 	tr := config.GetTransport()

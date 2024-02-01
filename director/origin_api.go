@@ -123,50 +123,6 @@ func checkNamespaceStatus(prefix string, registryWebUrlStr string) (bool, error)
 	return resBody.Approved, nil
 }
 
-func CreateAdvertiseToken(namespace string) (string, error) {
-	// TODO: Need to come back and carefully consider a few naming practices.
-	//       Here, issuerUrl is actually the registry database url, and not
-	//       the token issuer url for this namespace
-	issuerUrl, err := GetNSIssuerURL(namespace)
-	if err != nil {
-		return "", err
-	}
-	director := param.Federation_DirectorUrl.GetString()
-	if director == "" {
-		return "", errors.New("Director URL is not known; cannot create advertise token")
-	}
-
-	tok, err := jwt.NewBuilder().
-		Claim("scope", token_scopes.Pelican_Advertise.String()).
-		Issuer(issuerUrl).
-		Audience([]string{director}).
-		Subject("origin").
-		Expiration(time.Now().Add(time.Minute)).
-		Build()
-	if err != nil {
-		return "", err
-	}
-
-	key, err := config.GetIssuerPrivateJWK()
-	if err != nil {
-		return "", errors.Wrap(err, "failed to load the origin's JWK")
-	}
-
-	// Get/assign the kid, needed for verification of the token by the director
-	// TODO: Create more generic "tokenCreate" functions so we don't have to do
-	//       this by hand all the time
-	err = jwk.AssignKeyID(key)
-	if err != nil {
-		return "", errors.Wrap(err, "Failed to assign kid to the token")
-	}
-
-	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, key))
-	if err != nil {
-		return "", err
-	}
-	return string(signed), nil
-}
-
 // Given a token and a location in the namespace to advertise in,
 // see if the entity is authorized to advertise an origin for the
 // namespace
@@ -250,42 +206,6 @@ func VerifyAdvertiseToken(ctx context.Context, token, namespace string) (bool, e
 		}
 	}
 	return false, nil
-}
-
-// Create a token for director to report the health status to the
-// origin
-func CreateDirectorTestReportToken(originWebUrl string) (string, error) {
-	directorURL := param.Federation_DirectorUrl.GetString()
-	if directorURL == "" {
-		return "", errors.New("Director URL is not known; cannot create director test report token")
-	}
-
-	tok, err := jwt.NewBuilder().
-		Claim("scope", token_scopes.Pelican_DirectorTestReport.String()).
-		Issuer(directorURL).
-		Audience([]string{originWebUrl}).
-		Subject("director").
-		Expiration(time.Now().Add(time.Minute)).
-		Build()
-	if err != nil {
-		return "", err
-	}
-
-	key, err := config.GetIssuerPrivateJWK()
-	if err != nil {
-		return "", errors.Wrap(err, "failed to load the origin's JWK")
-	}
-
-	err = jwk.AssignKeyID(key)
-	if err != nil {
-		return "", errors.Wrap(err, "Failed to assign kid to the token")
-	}
-
-	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, key))
-	if err != nil {
-		return "", err
-	}
-	return string(signed), nil
 }
 
 // Verify that a token received is a valid token from director
