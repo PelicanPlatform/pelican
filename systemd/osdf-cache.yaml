@@ -8,8 +8,8 @@ Federation:
   # We need the "origins" director to find origins instead of the default ("caches" director)
   DirectorUrl: https://osdf-director-origins.osg-htc.org
 Server:
-  TLSCertificate: /etc/grid-security/xrd/xrdcert.pem
-  TLSKey: /etc/grid-security/xrd/xrdkey.pem
+  TLSCertificate: /etc/pki/tls/certs/pelican.crt
+  TLSKey: /etc/pki/tls/private/pelican.key
   ## Use TLSCACertificateDirectory instead of TLSCACertificateFile to support auth from grid clients
   TLSCACertificateFile: /etc/pki/tls/certs/ca-bundle.crt
   # TLSCACertificateDirectory: /etc/grid-security/certificates
