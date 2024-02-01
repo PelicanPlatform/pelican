@@ -202,6 +202,10 @@ func writeScitokensConfiguration(modules config.ServerType, cfg *ScitokensCfg) e
 	return nil
 }
 
+// Retrieves authorization auth files for OSDF caches and origins
+// This function queries the topology url for the specific authfiles for the cache and origin
+// and returns a pointer to a byte buffer containing the file contents, returns nil if the
+// authfile doesn't exist - considering it an empty file
 func getOSDFAuthFiles(server server_utils.XRootDServer) ([]byte, error) {
 	var stype string
 	if server.GetServerType().IsEnabled(config.OriginType) {
@@ -218,8 +222,15 @@ func getOSDFAuthFiles(server server_utils.XRootDServer) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	client := http.Client{Transport: config.GetTransport()}
 	url := base.ResolveReference(endpoint)
-	resp, err := http.Get(url.String())
+	log.Debugln("Querying OSDF url:", url.String())
+
+	req, err := http.NewRequest("GET", url.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Do(req)
 
 	if err != nil {
 		return nil, err
@@ -227,6 +238,11 @@ func getOSDFAuthFiles(server server_utils.XRootDServer) ([]byte, error) {
 
 	defer resp.Body.Close()
 
+	// If endpoint isn't in topology, we simply want to return an empty buffer
+	// The cache an origin still run, but without any information from the authfile
+	if resp.StatusCode == 404 {
+		return nil, nil
+	}
 	buf := new(bytes.Buffer)
 
 	_, err = io.Copy(buf, resp.Body)
@@ -257,7 +273,9 @@ func EmitAuthfile(server server_utils.XRootDServer) error {
 		}
 
 		log.Debugln("Parsing OSDF Authfile")
-		output.Write(bytes)
+		if bytes != nil {
+			output.Write(bytes)
+		}
 	}
 
 	sc := bufio.NewScanner(strings.NewReader(string(contents)))
