@@ -121,7 +121,7 @@ func TestCreateNsFromDirectorResp(t *testing.T) {
 	assert.Equal(t, constructedNamespace.ReadHTTPS, ns.ReadHTTPS)
 	assert.Equal(t, constructedNamespace.UseTokenOnRead, ns.UseTokenOnRead)
 
-	// Test the old version of parsing the issuer from the director to ensure backwards compatibility with a V1 cliean and a V2 director
+	// Test the old version of parsing the issuer from the director to ensure backwards compatibility with a V1 client and a V2 director
 	var xPelicanAuthorization map[string]string
 	var issuer string
 	if len(directorResponse.Header.Values("X-Pelican-Authorization")) > 0 {

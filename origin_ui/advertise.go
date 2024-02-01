@@ -39,7 +39,7 @@ func (server *OriginServer) GetServerType() config.ServerType {
 	return config.OriginType
 }
 
-func (server *OriginServer) CreateAdvertisement(name string, originUrl string, originWebUrl string) (director.OriginAdvertiseV2, error) {
+func (server *OriginServer) CreateAdvertisement(name string, originUrlStr string, originWebUrl string) (director.OriginAdvertiseV2, error) {
 	ad := director.OriginAdvertiseV2{}
 
 	// Here we instantiate the namespaceAd slice, but we still need to define the namespace
@@ -53,7 +53,7 @@ func (server *OriginServer) CreateAdvertisement(name string, originUrl string, o
 
 	prefix := param.Origin_NamespacePrefix.GetString()
 
-	originUrlURL, err := url.Parse(originUrl)
+	originUrlURL, err := url.Parse(originUrlStr)
 	if err != nil {
 		return ad, errors.New("Invalid Origin Url")
 	}
@@ -80,7 +80,7 @@ func (server *OriginServer) CreateAdvertisement(name string, originUrl string, o
 	}
 	ad = director.OriginAdvertiseV2{
 		Name:       name,
-		DataURL:    originUrl,
+		DataURL:    originUrlStr,
 		WebURL:     originWebUrl,
 		Namespaces: []director.NamespaceAdV2{nsAd},
 		Caps: director.Capabilities{
