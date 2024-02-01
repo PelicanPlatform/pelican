@@ -43,10 +43,10 @@ jobs:
           commit_message: "Pre Release: Update npm version"
           branch: ${{ steps.set_branch.outputs.branch }}
 
-  build-website:
+  release-container:
     needs: [pre-release]
-    uses: PelicanPlatform/pelican/.github/workflows/publish-container.yml@main
+    uses: PelicanPlatform/pelican/.github/workflows/release-container.yml@main
 
-  goreleaser:
+  release:
     needs: [pre-release]
     uses: PelicanPlatform/pelican/.github/workflows/release.yml@main
