@@ -1,0 +1,13 @@
+[Unit]
+Description = Pelican service osdf-origin
+After = network.target nss-lookup.target
+
+[Service]
+EnvironmentFile = -/etc/sysconfig/osdf-origin
+ExecStart = /usr/bin/osdf --config /etc/pelican/osdf-origin.yaml origin serve
+Restart = on-failure
+RestartSec = 20s
+WorkingDirectory = /var/spool/osdf
+
+[Install]
+WantedBy = multi-user.target
