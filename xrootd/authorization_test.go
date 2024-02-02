@@ -26,6 +26,8 @@ import (
 	_ "embed"
 	"fmt"
 	"io/fs"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -105,7 +107,155 @@ u 3af6a420.0 /chtc/PROTECTED/sc-origin lr
 `
 
 	mergedAuthfileEntries = otherAuthfileEntries + "u * /.well-known lr\n"
+
+	otherMergedAuthfileEntries = otherAuthfileEntries + "u * /.well-known lr /user/ligo -rl /Gluex rl /NSG/PUBLIC rl /VDC/PUBLIC rl\n"
+
+	//Actual cache authfile entriese here for testing
+	cacheAuthfileEntries = `# FQAN: /GLOW
+g /GLOW /chtc/PROTECTED/sc-origin rl /chtc/PROTECTED/sc-origin2000 rl /chtc/itb/helm-origin/PROTECTED rl
+# DN: /DC=org/DC=cilogon/C=US/O=University of Wisconsin-Madison/CN=Matyas Selmeci A148276
+u 5922b3b6.0 /chtc/PROTECTED/sc-origin rl /chtc/PROTECTED/sc-origin2000 rl /chtc/itb/helm-origin/PROTECTED rl
+# FQAN: /hcc
+g /hcc /hcc/focusday rl
+# DN: /DC=ch/DC=cern/OU=Organic Units/OU=Users/CN=bbockelm/CN=659869/CN=Brian Paul Bockelman
+u 6fb7593d.0 /hcc/focusday rl
+# FQAN: /xenon.biggrid.nl/*
+g /xenon.biggrid.nl/* /nrp/protected/xenon-biggrid-nl/ rl
+# DN: /DC=ch/DC=cern/OU=Organic Units/OU=Users/CN=jstephen/CN=781624/CN=Judith Lorraine Stephen
+u eeccb14b.0 /nrp/protected/xenon-biggrid-nl/ rl
+`
+
+	cacheMergedAuthfileEntries = cacheAuthfileEntries + "u * /user/ligo -rl /Gluex rl /NSG/PUBLIC rl /VDC/PUBLIC rl\n"
 )
+
+func TestOSDFAuthRetrieval(t *testing.T) {
+	viper.Reset()
+	viper.Set("Federation.TopologyUrl", "https://topology.opensciencegrid.org/")
+	viper.Set("Server.Hostname", "sc-origin.chtc.wisc.edu")
+
+	originServer := &origin_ui.OriginServer{}
+	_, err := getOSDFAuthFiles(originServer)
+
+	require.NoError(t, err, "error")
+	viper.Reset()
+}
+
+func TestOSDFAuthCreation(t *testing.T) {
+	tests := []struct {
+		desc     string
+		authIn   string
+		authOut  string
+		server   server_utils.XRootDServer
+		hostname string
+	}{
+		{
+			desc:     "osdf-origin-auth-no-merge",
+			authIn:   "",
+			authOut:  mergedAuthfileEntries,
+			server:   &origin_ui.OriginServer{},
+			hostname: "origin-test",
+		},
+		{
+			desc:     "osdf-origin-auth-merge",
+			authIn:   cacheAuthfileMultilineInput,
+			authOut:  otherMergedAuthfileEntries,
+			server:   &origin_ui.OriginServer{},
+			hostname: "origin-test",
+		},
+		{
+			desc:     "osdf-cache-auth-no-merge",
+			authIn:   "",
+			authOut:  cacheAuthfileEntries,
+			server:   &cache_ui.CacheServer{},
+			hostname: "cache-test",
+		},
+		{
+			desc:     "osdf-cach-auth-merge",
+			authIn:   cacheAuthfileMultilineInput,
+			authOut:  cacheMergedAuthfileEntries,
+			server:   &cache_ui.CacheServer{},
+			hostname: "cache-test",
+		},
+		{
+			desc:     "osdf-origin-no-authfile",
+			authIn:   "",
+			authOut:  "u * /.well-known lr\n",
+			server:   &origin_ui.OriginServer{},
+			hostname: "origin-test-empty",
+		},
+		{
+			desc:     "osdf-cache-no-authfile",
+			authIn:   "",
+			authOut:  "",
+			server:   &cache_ui.CacheServer{},
+			hostname: "cache-test-empty",
+		},
+	}
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.Method == "GET" && req.URL.Path == "/origin/Authfile" {
+			if req.URL.RawQuery == "fqdn=origin-test" {
+				res := []byte(otherAuthfileEntries)
+				_, err := w.Write(res)
+				if err != nil {
+					w.WriteHeader(http.StatusInternalServerError)
+					return
+				}
+				w.WriteHeader(http.StatusOK)
+			} else {
+				w.WriteHeader(http.StatusNotFound)
+			}
+		} else if req.Method == "GET" && req.URL.Path == "/cache/Authfile" {
+			if req.URL.RawQuery == "fqdn=cache-test" {
+				res := []byte(cacheAuthfileEntries)
+				_, err := w.Write(res)
+				if err != nil {
+					w.WriteHeader(http.StatusInternalServerError)
+					return
+				}
+				w.WriteHeader(http.StatusOK)
+			} else {
+				w.WriteHeader(http.StatusNotFound)
+			}
+		} else {
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ts.Close()
+
+	for _, testInput := range tests {
+		t.Run(testInput.desc, func(t *testing.T) {
+			dirName := t.TempDir()
+			viper.Reset()
+
+			viper.Set("Xrootd.Authfile", filepath.Join(dirName, "authfile"))
+			viper.Set("Federation.TopologyUrl", ts.URL)
+			viper.Set("Server.Hostname", testInput.hostname)
+			viper.Set("Xrootd.RunLocation", dirName)
+			oldPrefix := config.SetPreferredPrefix("OSDF")
+			defer config.SetPreferredPrefix(oldPrefix)
+
+			err := os.WriteFile(filepath.Join(dirName, "authfile"), []byte(testInput.authIn), fs.FileMode(0600))
+			require.NoError(t, err, "Failure writing test input authfile")
+
+			err = EmitAuthfile(testInput.server)
+			require.NoError(t, err, "Failure generating authfile")
+
+			xrootdRun := param.Xrootd_RunLocation.GetString()
+
+			finalAuthPath := filepath.Join(xrootdRun, "authfile-origin-generated")
+			if testInput.server.GetServerType().IsEnabled(config.CacheType) {
+				finalAuthPath = filepath.Join(xrootdRun, "authfile-cache-generated")
+			}
+
+			genAuth, err := os.ReadFile(finalAuthPath)
+			require.NoError(t, err, "Error reading generated authfile")
+
+			require.Equal(t, testInput.authOut, string(genAuth))
+			viper.Reset()
+		})
+	}
+}
 
 func TestAuthfileMultiline(t *testing.T) {
 	sc := bufio.NewScanner(strings.NewReader(sampleMultilineOutput))
