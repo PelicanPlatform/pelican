@@ -755,9 +755,6 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 			dest_url.Path = "/" + path.Join(dest_url.Host, dest_url.Path)
 		} else if dest_url.Scheme == "pelican" {
 			config.SetFederation(config.FederationDiscovery{})
-			viper.Set("Federation.DiscoveryUrl", "")
-			viper.Set("Federation.DirectorUrl", "")
-			viper.Set("Federation.RegistryUrl", "")
 			federationUrl, _ := url.Parse(dest_url.String())
 			federationUrl.Scheme = "https"
 			federationUrl.Path = ""
