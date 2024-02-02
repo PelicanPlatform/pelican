@@ -480,7 +480,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType ServerTy
 		}
 	} else {
 		token := strings.TrimPrefix(tokens[0], "Bearer ")
-		prefix := path.Join("caches", adV2.Name)
+		prefix := path.Join("/caches", adV2.Name)
 		ok, err := VerifyAdvertiseToken(engineCtx, token, prefix)
 		if err != nil {
 			if err == adminApprovalErr {
