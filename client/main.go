@@ -294,24 +294,30 @@ func CheckOSDF(destination string, methods []string) (remoteSize uint64, err err
 // FIXME: GetCacheHostnames is not director-aware!
 func GetCacheHostnames(testFile string) (urls []string, err error) {
 
-	ns, err := namespaces.MatchNamespace(testFile)
+	directorUrl := param.Federation_DirectorUrl.GetString()
+	ns, err := getNamespaceInfo(testFile, directorUrl, false)
 	if err != nil {
 		return
 	}
 
-	caches, err := GetCachesFromNamespace(ns, false)
+	caches, err := GetCachesFromNamespace(ns, directorUrl != "")
 	if err != nil {
 		return
 	}
 
 	for _, cacheGeneric := range caches {
-		cache, ok := cacheGeneric.(namespaces.Cache)
-		if !ok {
-			continue
+		if cache, ok := cacheGeneric.(namespaces.Cache); ok {
+			url_string := cache.AuthEndpoint
+			host := strings.Split(url_string, ":")[0]
+			urls = append(urls, host)
+		} else if cache, ok := cacheGeneric.(namespaces.DirectorCache); ok {
+			cacheUrl, err := url.Parse(cache.EndpointUrl)
+			if err != nil {
+				log.Debugln("Failed to parse returned cache as a URL:", cacheUrl)
+				continue
+			}
+			urls = append(urls, cacheUrl.Hostname())
 		}
-		url_string := cache.AuthEndpoint
-		host := strings.Split(url_string, ":")[0]
-		urls = append(urls, host)
 	}
 
 	return
