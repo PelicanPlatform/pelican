@@ -74,9 +74,6 @@ func getNSAdsFromDirector() ([]director.NamespaceAdV2, error) {
 			respData, err = utils.MakeRequest(directorNSListEndpointURL, "GET", nil, nil)
 			var respNSV1 []director.NamespaceAdV1
 			if err != nil {
-				if jsonErr := json.Unmarshal(respData, &respNSV1); jsonErr == nil { // Error creating json
-					return respNS, errors.Wrapf(err, "Failed to make request: %v", err)
-				}
 				return respNS, errors.Wrap(err, "Failed to make request")
 			} else {
 				if jsonErr := json.Unmarshal(respData, &respNSV1); jsonErr == nil { // Error creating json
@@ -84,11 +81,7 @@ func getNSAdsFromDirector() ([]director.NamespaceAdV2, error) {
 				}
 				respNS = director.ConvertNamespaceAdsV1ToV2(respNSV1, nil)
 			}
-		}
-		if err != nil {
-			if jsonErr := json.Unmarshal(respData, &respNS); jsonErr == nil { // Error creating json
-				return respNS, errors.Wrapf(err, "Failed to make request: %v", err)
-			}
+		} else {
 			return respNS, errors.Wrap(err, "Failed to make request")
 		}
 	} else {
