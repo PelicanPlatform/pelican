@@ -736,22 +736,6 @@ description: >-
         - name: "Option A"
           id: "optionA"
       ```
-
-  - "optionsUrl" is alternative to options with a URL return an JSON array of options in the following format:
-
-      ```json
-      [
-        {
-            "name":"Option A",
-            "id":"optionA"
-        }
-      ]
-      ```
-  - "validationUrl" is an optional, user-provided validation endpoint
-      that listens to a POST request with JSON body of {"field": "<field value>"}
-      and responds with a 200 code and JSON of {"valid": bool, "message": ""}. If it's non-empty,
-      for all create and update of namespace registration, this URL will be called
-      to validate the custom field. If "valid" == "false", the "message" will be returned by Pelican
   - "description" will show up in the web UI as helper text to help user understand the field
 type: object
 default: none
