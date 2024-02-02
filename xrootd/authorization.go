@@ -320,8 +320,8 @@ func EmitAuthfile(server server_utils.XRootDServer) error {
 			outStr = "u * "
 		}
 		for _, ad := range server.GetNamespaceAds() {
-			if !ad.RequireToken && ad.BasePath != "" {
-				outStr += ad.BasePath + " lr "
+			if ad.PublicRead && ad.Path != "" {
+				outStr += ad.Path + " lr "
 			}
 		}
 		// A public namespace exists, so a line needs to be printed
@@ -549,20 +549,20 @@ func WriteOriginScitokensConfig(exportedPaths []string) error {
 }
 
 // Writes out the cache's scitokens.cfg configuration
-func WriteCacheScitokensConfig(nsAds []director.NamespaceAd) error {
+func WriteCacheScitokensConfig(nsAds []director.NamespaceAdV2) error {
 	cfg, err := makeSciTokensCfg()
 	if err != nil {
 		return err
 	}
 	for _, ad := range nsAds {
-		if ad.RequireToken {
-			if ad.Issuer.String() != "" && ad.BasePath != "" {
-				if val, ok := cfg.IssuerMap[ad.Issuer.String()]; ok {
-					val.BasePaths = append(val.BasePaths, ad.BasePath)
-					cfg.IssuerMap[ad.Issuer.String()] = val
+		if !ad.PublicRead {
+			for _, ti := range ad.Issuer {
+				if val, ok := cfg.IssuerMap[ti.IssuerUrl.String()]; ok {
+					val.BasePaths = append(val.BasePaths, ti.BasePaths...)
+					cfg.IssuerMap[ti.IssuerUrl.String()] = val
 				} else {
-					cfg.IssuerMap[ad.Issuer.String()] = Issuer{Issuer: ad.Issuer.String(), BasePaths: []string{ad.BasePath}, Name: ad.Issuer.String()}
-					cfg.Global.Audience = append(cfg.Global.Audience, ad.Issuer.String())
+					cfg.IssuerMap[ti.IssuerUrl.String()] = Issuer{Issuer: ti.IssuerUrl.String(), BasePaths: ti.BasePaths, Name: ti.IssuerUrl.String()}
+					cfg.Global.Audience = append(cfg.Global.Audience, ti.IssuerUrl.String())
 				}
 			}
 		}

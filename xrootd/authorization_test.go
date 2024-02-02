@@ -465,14 +465,14 @@ func TestWriteOriginAuthFiles(t *testing.T) {
 			assert.Equal(t, authResult, string(authGen))
 		}
 	}
-	nsAds := []director.NamespaceAd{}
+	nsAds := []director.NamespaceAdV2{}
 
 	originServer := &origin_ui.OriginServer{}
 	originServer.SetNamespaceAds(nsAds)
 
 	t.Run("MultiIssuer", originAuthTester(originServer, "u * t1 lr t2 lr t3 lr", "u * /.well-known lr t1 lr t2 lr t3 lr\n"))
 
-	nsAds = []director.NamespaceAd{}
+	nsAds = []director.NamespaceAdV2{}
 	originServer.SetNamespaceAds(nsAds)
 
 	t.Run("EmptyAuth", originAuthTester(originServer, "", "u * /.well-known lr\n"))
@@ -535,13 +535,60 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 	issuer4URL.Scheme = "https"
 	issuer4URL.Host = "issuer4.com"
 
-	nsAds := []director.NamespaceAd{
-		{RequireToken: true, Issuer: issuer1URL, BasePath: "/p1"},
-		{RequireToken: true, Issuer: issuer2URL, BasePath: "/p2/path"},
-		{RequireToken: false, Issuer: issuer3URL, BasePath: "/p3"},
-		{RequireToken: true, Issuer: issuer1URL, BasePath: "/p1_again"},
-		{RequireToken: false, Issuer: issuer4URL, BasePath: "/p4/depth"},
-		{RequireToken: false, Issuer: issuer2URL, BasePath: "/p2_noauth"},
+	PublicCaps := director.Capabilities{
+		PublicRead: true,
+		Read:       true,
+		Write:      true,
+	}
+	PrivateCaps := director.Capabilities{
+		PublicRead: false,
+		Read:       true,
+		Write:      true,
+	}
+
+	nsAds := []director.NamespaceAdV2{
+		{
+			PublicRead: false,
+			Caps:       PrivateCaps,
+			Issuer: []director.TokenIssuer{{
+				IssuerUrl:       issuer1URL,
+				BasePaths:       []string{"/p1"},
+				RestrictedPaths: []string{"/p1/nope", "p1/still_nope"}}},
+		},
+		{
+			PublicRead: false,
+			Caps:       PrivateCaps,
+			Issuer: []director.TokenIssuer{{
+				IssuerUrl: issuer2URL,
+				BasePaths: []string{"/p2/path", "/p2/foo", "/p2/baz"},
+			}},
+		},
+		{
+			Path:       "/p3",
+			PublicRead: true,
+			Caps:       PublicCaps,
+		},
+		{
+			PublicRead: false,
+			Caps:       PrivateCaps,
+			Issuer: []director.TokenIssuer{{
+				IssuerUrl: issuer1URL,
+				BasePaths: []string{"/p1_again"},
+			}, {
+				IssuerUrl: issuer3URL,
+				BasePaths: []string{"/i3/multi", "/ithree/multi"},
+			}},
+		},
+		{
+			Path:       "/p4/depth",
+			PublicRead: true,
+			Caps:       PublicCaps,
+		},
+		{
+			Path:       "/p2_noauth",
+			PublicRead: true,
+			Caps:       PublicCaps,
+		},
 	}
 
 	cacheServer := &cache_ui.CacheServer{}
@@ -549,7 +596,7 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 
 	t.Run("MultiIssuer", cacheAuthTester(cacheServer, cacheSciOutput, "u * /p3 lr /p4/depth lr /p2_noauth lr \n"))
 
-	nsAds = []director.NamespaceAd{}
+	nsAds = []director.NamespaceAdV2{}
 	cacheServer.SetNamespaceAds(nsAds)
 
 	t.Run("EmptyNS", cacheAuthTester(cacheServer, cacheEmptyOutput, ""))

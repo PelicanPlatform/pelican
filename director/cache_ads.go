@@ -35,7 +35,36 @@ import (
 )
 
 type (
-	NamespaceAd struct {
+	TokenIssuer struct {
+		BasePaths       []string `json:"base-paths"`
+		RestrictedPaths []string `json:"restricted-paths"`
+		IssuerUrl       url.URL  `json:"issuer"`
+	}
+
+	TokenGen struct {
+		Strategy         StrategyType `json:"strategy"`
+		VaultServer      string       `json:"vault-server"`
+		MaxScopeDepth    uint         `json:"max-scope-depth"`
+		CredentialIssuer url.URL      `json:"issuer"`
+	}
+
+	Capabilities struct {
+		PublicRead   bool
+		Read         bool
+		Write        bool
+		Listing      bool
+		FallBackRead bool
+	}
+
+	NamespaceAdV2 struct {
+		PublicRead bool
+		Caps       Capabilities  // Namespace capabilities should be considered independently of the origin’s capabilities.
+		Path       string        `json:"path"`
+		Generation []TokenGen    `json:"token-generation"`
+		Issuer     []TokenIssuer `json:"token-issuer"`
+	}
+
+	NamespaceAdV1 struct {
 		RequireToken  bool         `json:"requireToken"`
 		Path          string       `json:"path"`
 		Issuer        url.URL      `json:"url"`
@@ -73,11 +102,11 @@ const (
 )
 
 var (
-	serverAds     = ttlcache.New[ServerAd, []NamespaceAd](ttlcache.WithTTL[ServerAd, []NamespaceAd](15 * time.Minute))
+	serverAds     = ttlcache.New[ServerAd, []NamespaceAdV2](ttlcache.WithTTL[ServerAd, []NamespaceAdV2](15 * time.Minute))
 	serverAdMutex = sync.RWMutex{}
 )
 
-func RecordAd(ad ServerAd, namespaceAds *[]NamespaceAd) {
+func RecordAd(ad ServerAd, namespaceAds *[]NamespaceAdV2) {
 	if err := UpdateLatLong(&ad); err != nil {
 		log.Debugln("Failed to lookup GeoIP coordinates for host", ad.URL.Host)
 	}
@@ -117,8 +146,8 @@ func UpdateLatLong(ad *ServerAd) error {
 	return nil
 }
 
-func matchesPrefix(reqPath string, namespaceAds []NamespaceAd) *NamespaceAd {
-	var best *NamespaceAd
+func matchesPrefix(reqPath string, namespaceAds []NamespaceAdV2) *NamespaceAdV2 {
+	var best *NamespaceAdV2
 
 	for _, namespace := range namespaceAds {
 		serverPath := namespace.Path
@@ -147,7 +176,7 @@ func matchesPrefix(reqPath string, namespaceAds []NamespaceAd) *NamespaceAd {
 		// Make the len comparison with tmpBest, because serverPath is one char longer now
 		if strings.HasPrefix(reqPath, serverPath) && len(serverPath) > len(tmpBest) {
 			if best == nil {
-				best = new(NamespaceAd)
+				best = new(NamespaceAdV2)
 			}
 			*best = namespace
 		}
@@ -155,7 +184,7 @@ func matchesPrefix(reqPath string, namespaceAds []NamespaceAd) *NamespaceAd {
 	return best
 }
 
-func GetAdsForPath(reqPath string) (originNamespace NamespaceAd, originAds []ServerAd, cacheAds []ServerAd) {
+func GetAdsForPath(reqPath string) (originNamespace NamespaceAdV2, originAds []ServerAd, cacheAds []ServerAd) {
 	serverAdMutex.RLock()
 	defer serverAdMutex.RUnlock()
 
@@ -167,7 +196,7 @@ func GetAdsForPath(reqPath string) (originNamespace NamespaceAd, originAds []Ser
 	// Iterate through all of the server ads. For each "item", the key
 	// is the server ad itself (either cache or origin), and the value
 	// is a slice of namespace prefixes are supported by that server
-	var best *NamespaceAd
+	var best *NamespaceAdV2
 	for _, item := range serverAds.Items() {
 		if item == nil {
 			continue

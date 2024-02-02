@@ -26,6 +26,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -46,31 +47,48 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-func getNSAdsFromDirector() ([]director.NamespaceAd, error) {
+func getNSAdsFromDirector() ([]director.NamespaceAdV2, error) {
 	// Get the endpoint of the director
-	var respNS []director.NamespaceAd
+	var respNS []director.NamespaceAdV2
 	directorEndpoint, err := getDirectorEndpoint()
 	if err != nil {
 		return respNS, errors.Wrapf(err, "Failed to get DirectorURL from config: %v", err)
 	}
 
 	// Create the listNamespaces url
-	directorNSListEndpointURL, err := url.JoinPath(directorEndpoint, "api", "v1.0", "director", "listNamespaces")
+	directorNSListEndpointURL, err := url.JoinPath(directorEndpoint, "api", "v2.0", "director", "listNamespaces")
 	if err != nil {
 		return respNS, err
 	}
 
+	// Attempt to get data from the 2.0 endpoint, if that returns a 404 error, then attempt to get data
+	// from the 1.0 endpoint and convert from V1 to V2
+
 	respData, err := utils.MakeRequest(directorNSListEndpointURL, "GET", nil, nil)
 	if err != nil {
-		if jsonErr := json.Unmarshal(respData, &respNS); jsonErr == nil { // Error creating json
-			return respNS, errors.Wrapf(err, "Failed to make request: %v", err)
+		if strings.Contains(err.Error(), "404") {
+			directorNSListEndpointURL, err = url.JoinPath(directorEndpoint, "api", "v1.0", "director", "listNamespaces")
+			if err != nil {
+				return respNS, err
+			}
+			respData, err = utils.MakeRequest(directorNSListEndpointURL, "GET", nil, nil)
+			var respNSV1 []director.NamespaceAdV1
+			if err != nil {
+				return respNS, errors.Wrap(err, "Failed to make request")
+			} else {
+				if jsonErr := json.Unmarshal(respData, &respNSV1); jsonErr == nil { // Error creating json
+					return respNS, errors.Wrapf(err, "Failed to make request: %v", err)
+				}
+				respNS = director.ConvertNamespaceAdsV1ToV2(respNSV1, nil)
+			}
+		} else {
+			return respNS, errors.Wrap(err, "Failed to make request")
 		}
-		return respNS, errors.Wrap(err, "Failed to make request")
-	}
-
-	err = json.Unmarshal(respData, &respNS)
-	if err != nil {
-		return respNS, errors.Wrapf(err, "Failed to marshal response in to JSON: %v", err)
+	} else {
+		err = json.Unmarshal(respData, &respNS)
+		if err != nil {
+			return respNS, errors.Wrapf(err, "Failed to marshal response in to JSON: %v", err)
+		}
 	}
 
 	return respNS, nil

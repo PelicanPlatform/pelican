@@ -34,13 +34,13 @@ import (
 )
 
 // List all namespaces from origins registered at the director
-func ListNamespacesFromOrigins() []NamespaceAd {
+func ListNamespacesFromOrigins() []NamespaceAdV2 {
 
 	serverAdMutex.RLock()
 	defer serverAdMutex.RUnlock()
 
 	serverAdItems := serverAds.Items()
-	namespaces := make([]NamespaceAd, 0, len(serverAdItems))
+	namespaces := make([]NamespaceAdV2, 0, len(serverAdItems))
 	for _, item := range serverAdItems {
 		if item.Key().Type == OriginType {
 			namespaces = append(namespaces, item.Value()...)
@@ -120,7 +120,7 @@ func ConfigTTLCache(ctx context.Context, egrp *errgroup.Group) {
 	go serverAds.Start()
 	go namespaceKeys.Start()
 
-	serverAds.OnEviction(func(ctx context.Context, er ttlcache.EvictionReason, i *ttlcache.Item[ServerAd, []NamespaceAd]) {
+	serverAds.OnEviction(func(ctx context.Context, er ttlcache.EvictionReason, i *ttlcache.Item[ServerAd, []NamespaceAdV2]) {
 		healthTestCancelFuncsMutex.Lock()
 		defer healthTestCancelFuncsMutex.Unlock()
 		if cancelFunc, exists := healthTestCancelFuncs[i.Key()]; exists {
