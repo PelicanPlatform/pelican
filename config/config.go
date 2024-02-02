@@ -335,7 +335,10 @@ func DiscoverFederation() error {
 		federationUrl.Path = ""
 	}
 
-	discoveryUrl, _ := url.Parse(federationUrl.String())
+	discoveryUrl, err := url.Parse(federationUrl.String())
+	if err != nil {
+		return errors.Wrap(err, "unable to parse federation discovery URL")
+	}
 	discoveryUrl.Path, err = url.JoinPath(federationUrl.Path, ".well-known/pelican-configuration")
 	if err != nil {
 		return errors.Wrap(err, "Unable to parse federation url because of invalid path")
@@ -363,6 +366,15 @@ func DiscoverFederation() error {
 	body, err := io.ReadAll(result.Body)
 	if err != nil {
 		return errors.Wrapf(err, "Failure when doing federation metadata read to %s", discoveryUrl)
+	}
+
+	if result.StatusCode != http.StatusOK {
+		truncatedMessage := string(body)
+		if len(body) > 1000 {
+			truncatedMessage = string(body[:1000])
+			truncatedMessage += " [... remainder truncated ...]"
+		}
+		return errors.Errorf("Federation metadata discovery failed with HTTP status %d.  Error message: %s", result.StatusCode, truncatedMessage)
 	}
 
 	metadata := FederationDiscovery{}
