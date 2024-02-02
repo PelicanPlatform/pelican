@@ -61,6 +61,15 @@ type Transfer struct {
 	localFile string
 }
 
+type ExitCode int
+
+const (
+	Success ExitCode = iota
+	Error
+	FailedOutfile = 3
+	Retryable     = 11
+)
+
 func init() {
 	// Define the file transfer plugin command
 	xferCmd := &cobra.Command{
@@ -79,8 +88,8 @@ func stashPluginMain(args []string) {
 	// Handler function to recover from panics
 	defer func() {
 		if r := recover(); r != nil {
-			log.Debugln("Panic captured while attempting to perform transfer:", r)
-			log.Debugln("Panic caused by the following", string(debug.Stack()))
+			log.Warningln("Panic captured while attempting to perform transfer:", r)
+			log.Warningln("Panic caused by the following", string(debug.Stack()))
 			ret := fmt.Sprintf("Unrecoverable error (panic) captured in stashPluginMain(): %v", r)
 
 			debugStack := strings.ReplaceAll(string(debug.Stack()), "\n", ";")
@@ -255,7 +264,7 @@ func stashPluginMain(args []string) {
 		outputFile, err = os.Create(outfile)
 		if err != nil {
 			log.Errorln("Failed to open outfile:", err)
-			os.Exit(3) // unique error code to give us info
+			os.Exit(FailedOutfile) // unique error code to give us info
 		}
 		defer outputFile.Close()
 	}
@@ -325,7 +334,7 @@ func stashPluginMain(args []string) {
 	if success {
 		os.Exit(0)
 	} else if retryable {
-		os.Exit(11)
+		os.Exit(Retryable)
 	} else {
 		os.Exit(1)
 	}
@@ -338,11 +347,12 @@ func writeClassadOutputAndBail(exitCode int, resultAds []*classads.ClassAd) {
 	// Attempt to write out outfile:
 	outputFile := os.Stdout
 	if useOutFile {
+		log.Debugln("Attempting to write classad output file... ")
 		var err error
 		outputFile, err = os.Create(outfile)
 		if err != nil {
 			log.Errorln("Failed to open outfile:", err)
-			os.Exit(3) // Code of 3 to let us know that the outfile failed to be created
+			os.Exit(FailedOutfile) // Code of 3 to let us know that the outfile failed to be created
 		}
 		defer outputFile.Close()
 	}
@@ -439,7 +449,7 @@ func writeOutfile(resultAds []*classads.ClassAd, outputFile *os.File) (bool, boo
 		_, err := outputFile.WriteString(resultAd.String() + "\n")
 		if err != nil {
 			log.Errorln("Failed to write to outfile:", err)
-			os.Exit(3)
+			os.Exit(FailedOutfile)
 		}
 		transferSuccess, err := resultAd.Get("TransferSuccess")
 		if err != nil {
@@ -472,7 +482,7 @@ func writeOutfile(resultAds []*classads.ClassAd, outputFile *os.File) (bool, boo
 			} else {
 				log.Errorln("Failed to sync output file:", err)
 			}
-			os.Exit(3) // Unique error code to let us know the outfile could not be created
+			os.Exit(FailedOutfile) // Unique error code to let us know the outfile could not be created
 		}
 	}
 	return success, retryable
