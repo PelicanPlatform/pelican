@@ -26,20 +26,20 @@ import (
 type (
 	XRootDServer interface {
 		GetServerType() config.ServerType
-		SetNamespaceAds([]common.NamespaceAd)
-		GetNamespaceAds() []common.NamespaceAd
-		CreateAdvertisement(name string, serverUrl string, serverWebUrl string) (common.OriginAdvertise, error)
+		SetNamespaceAds([]common.NamespaceAdV2)
+		GetNamespaceAds() []common.NamespaceAdV2
+		CreateAdvertisement(name string, serverUrl string, serverWebUrl string) (common.OriginAdvertiseV2, error)
 	}
 
 	NamespaceHolder struct {
-		namespaceAds []common.NamespaceAd
+		namespaceAds []common.NamespaceAdV2
 	}
 )
 
-func (ns *NamespaceHolder) SetNamespaceAds(ads []common.NamespaceAd) {
+func (ns *NamespaceHolder) SetNamespaceAds(ads []common.NamespaceAdV2) {
 	ns.namespaceAds = ads
 }
 
-func (ns *NamespaceHolder) GetNamespaceAds() []common.NamespaceAd {
+func (ns *NamespaceHolder) GetNamespaceAds() []common.NamespaceAdV2 {
 	return ns.namespaceAds
 }

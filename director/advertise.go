@@ -74,23 +74,65 @@ func AdvertiseOSDF() error {
 		return errors.Wrapf(err, "Failed to get topology JSON")
 	}
 
-	cacheAdMap := make(map[common.ServerAd][]common.NamespaceAd)
-	originAdMap := make(map[common.ServerAd][]common.NamespaceAd)
+	cacheAdMap := make(map[common.ServerAd][]common.NamespaceAdV2)
+	originAdMap := make(map[common.ServerAd][]common.NamespaceAdV2)
+	tGen := common.TokenGen{}
 	for _, ns := range namespaces.Namespaces {
-		nsAd := common.NamespaceAd{}
-		nsAd.RequireToken = ns.UseTokenOnRead
-		nsAd.Path = ns.Path
-		nsAd.DirlistHost = ns.DirlistHost
-		issuerURL, err := url.Parse(ns.CredentialGeneration.Issuer)
-		if err != nil {
-			log.Warningf("Invalid URL %v when parsing topology response: %v\n", ns.CredentialGeneration.Issuer, err)
-			continue
+		requireToken := ns.UseTokenOnRead
+
+		tokenIssuers := []common.TokenIssuer{}
+		// A token is required on read, so scitokens will be populated
+		if requireToken {
+			credUrl, err := url.Parse(ns.CredentialGeneration.Issuer)
+			if err != nil {
+				log.Warningf("Invalid URL %v when parsing topology response %v\n", ns.CredentialGeneration.Issuer, err)
+				continue
+			}
+
+			credIssuer := *credUrl
+			tGen.Strategy = common.StrategyType(ns.CredentialGeneration.Strategy)
+			tGen.VaultServer = ns.CredentialGeneration.VaultServer
+			tGen.MaxScopeDepth = uint(ns.CredentialGeneration.MaxScopeDepth)
+			tGen.CredentialIssuer = credIssuer
+
+			// Each namespace can have multiple entries into the scitoken
+			// and each scitoken entry can have multiple basepaths.
+			for _, scitok := range ns.Scitokens {
+				issuerURL, err := url.Parse(scitok.Issuer)
+				if err != nil {
+					log.Warningf("Invalid URL %v when parsing topology response: %v\n", scitok.Issuer, err)
+					continue
+				}
+				issuer := *issuerURL
+				tIssuer := common.TokenIssuer{
+					BasePaths:       scitok.BasePath,
+					RestrictedPaths: scitok.Restricted,
+					IssuerUrl:       issuer,
+				}
+				tokenIssuers = append(tokenIssuers, tIssuer)
+			}
+
 		}
-		nsAd.Issuer = *issuerURL
-		nsAd.MaxScopeDepth = uint(ns.CredentialGeneration.MaxScopeDepth)
-		nsAd.Strategy = common.StrategyType(ns.CredentialGeneration.Strategy)
-		nsAd.BasePath = ns.CredentialGeneration.BasePath
-		nsAd.VaultServer = ns.CredentialGeneration.VaultServer
+
+		var write bool
+		if ns.WritebackHost != "" {
+			write = true
+		} else {
+			write = false
+		}
+
+		caps := common.Capabilities{
+			PublicRead: !ns.UseTokenOnRead,
+			Read:       ns.ReadHTTPS,
+			Write:      write,
+		}
+		nsAd := common.NamespaceAdV2{
+			Path:       ns.Path,
+			PublicRead: !ns.UseTokenOnRead,
+			Caps:       caps,
+			Generation: []common.TokenGen{tGen},
+			Issuer:     tokenIssuers,
+		}
 
 		// We assume each namespace may have multiple origins, although most likely will not
 		// Some namespaces show up in topology but don't have an origin (perhaps because

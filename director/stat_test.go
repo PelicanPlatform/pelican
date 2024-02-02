@@ -39,7 +39,7 @@ func TestQueryOriginsForObject(t *testing.T) {
 	func() {
 		serverAdMutex.Lock()
 		defer serverAdMutex.Unlock()
-		serverAds = ttlcache.New[common.ServerAd, []common.NamespaceAd](ttlcache.WithTTL[common.ServerAd, []common.NamespaceAd](15 * time.Minute))
+		serverAds = ttlcache.New[common.ServerAd, []common.NamespaceAdV2](ttlcache.WithTTL[common.ServerAd, []common.NamespaceAdV2](15 * time.Minute))
 	}()
 
 	mockTTLCache := func() {
@@ -50,17 +50,17 @@ func TestQueryOriginsForObject(t *testing.T) {
 		mockServerAd3 := common.ServerAd{Name: "origin3", URL: url.URL{Host: "example3.com"}, Type: common.OriginType}
 		mockServerAd4 := common.ServerAd{Name: "origin4", URL: url.URL{Host: "example4.com"}, Type: common.OriginType}
 		mockServerAd5 := common.ServerAd{Name: "cache1", URL: url.URL{Host: "cache1.com"}, Type: common.OriginType}
-		mockNsAd0 := common.NamespaceAd{Path: "/foo"}
-		mockNsAd1 := common.NamespaceAd{Path: "/foo/bar"}
-		mockNsAd2 := common.NamespaceAd{Path: "/foo/x"}
-		mockNsAd3 := common.NamespaceAd{Path: "/foo/bar/barz"}
-		mockNsAd4 := common.NamespaceAd{Path: "/unrelated"}
-		mockNsAd5 := common.NamespaceAd{Path: "/caches/hostname"}
-		serverAds.Set(mockServerAd1, []common.NamespaceAd{mockNsAd0}, ttlcache.DefaultTTL)
-		serverAds.Set(mockServerAd2, []common.NamespaceAd{mockNsAd1}, ttlcache.DefaultTTL)
-		serverAds.Set(mockServerAd3, []common.NamespaceAd{mockNsAd1, mockNsAd4}, ttlcache.DefaultTTL)
-		serverAds.Set(mockServerAd4, []common.NamespaceAd{mockNsAd2, mockNsAd3}, ttlcache.DefaultTTL)
-		serverAds.Set(mockServerAd5, []common.NamespaceAd{mockNsAd5}, ttlcache.DefaultTTL)
+		mockNsAd0 := common.NamespaceAdV2{Path: "/foo"}
+		mockNsAd1 := common.NamespaceAdV2{Path: "/foo/bar"}
+		mockNsAd2 := common.NamespaceAdV2{Path: "/foo/x"}
+		mockNsAd3 := common.NamespaceAdV2{Path: "/foo/bar/barz"}
+		mockNsAd4 := common.NamespaceAdV2{Path: "/unrelated"}
+		mockNsAd5 := common.NamespaceAdV2{Path: "/caches/hostname"}
+		serverAds.Set(mockServerAd1, []common.NamespaceAdV2{mockNsAd0}, ttlcache.DefaultTTL)
+		serverAds.Set(mockServerAd2, []common.NamespaceAdV2{mockNsAd1}, ttlcache.DefaultTTL)
+		serverAds.Set(mockServerAd3, []common.NamespaceAdV2{mockNsAd1, mockNsAd4}, ttlcache.DefaultTTL)
+		serverAds.Set(mockServerAd4, []common.NamespaceAdV2{mockNsAd2, mockNsAd3}, ttlcache.DefaultTTL)
+		serverAds.Set(mockServerAd5, []common.NamespaceAdV2{mockNsAd5}, ttlcache.DefaultTTL)
 	}
 
 	cleanupMock := func() {

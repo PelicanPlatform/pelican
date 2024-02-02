@@ -263,6 +263,14 @@ osdf_default: Default is determined dynamically through metadata at <Federation.
 default: none
 components: ["*"]
 ---
+name: Federation.TopologyUrl
+description: >-
+  A URL for the top level OSG Topology location (a legacy integration). This URL is needed to retrieve authorization file information.
+type: url
+osdf_default: "https://topology.opensciencegrid.org"
+default: none
+components: ["origin", "cache"]
+---
 name: Federation.TopologyNamespaceUrl
 description: >-
   A URL containing namespace information for origins and caches configured via the OSG Topology application (a legacy integration). The URL

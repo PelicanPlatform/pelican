@@ -35,11 +35,11 @@ import (
 )
 
 var (
-	serverAds     = ttlcache.New[common.ServerAd, []common.NamespaceAd](ttlcache.WithTTL[common.ServerAd, []common.NamespaceAd](15 * time.Minute))
+	serverAds     = ttlcache.New[common.ServerAd, []common.NamespaceAdV2](ttlcache.WithTTL[common.ServerAd, []common.NamespaceAdV2](15 * time.Minute))
 	serverAdMutex = sync.RWMutex{}
 )
 
-func RecordAd(ad common.ServerAd, namespaceAds *[]common.NamespaceAd) {
+func RecordAd(ad common.ServerAd, namespaceAds *[]common.NamespaceAdV2) {
 	if err := UpdateLatLong(&ad); err != nil {
 		log.Debugln("Failed to lookup GeoIP coordinates for host", ad.URL.Host)
 	}
@@ -79,8 +79,8 @@ func UpdateLatLong(ad *common.ServerAd) error {
 	return nil
 }
 
-func matchesPrefix(reqPath string, namespaceAds []common.NamespaceAd) *common.NamespaceAd {
-	var best *common.NamespaceAd
+func matchesPrefix(reqPath string, namespaceAds []common.NamespaceAdV2) *common.NamespaceAdV2 {
+	var best *common.NamespaceAdV2
 
 	for _, namespace := range namespaceAds {
 		serverPath := namespace.Path
@@ -109,7 +109,7 @@ func matchesPrefix(reqPath string, namespaceAds []common.NamespaceAd) *common.Na
 		// Make the len comparison with tmpBest, because serverPath is one char longer now
 		if strings.HasPrefix(reqPath, serverPath) && len(serverPath) > len(tmpBest) {
 			if best == nil {
-				best = new(common.NamespaceAd)
+				best = new(common.NamespaceAdV2)
 			}
 			*best = namespace
 		}
@@ -117,7 +117,7 @@ func matchesPrefix(reqPath string, namespaceAds []common.NamespaceAd) *common.Na
 	return best
 }
 
-func GetAdsForPath(reqPath string) (originNamespace common.NamespaceAd, originAds []common.ServerAd, cacheAds []common.ServerAd) {
+func GetAdsForPath(reqPath string) (originNamespace common.NamespaceAdV2, originAds []common.ServerAd, cacheAds []common.ServerAd) {
 	serverAdMutex.RLock()
 	defer serverAdMutex.RUnlock()
 
@@ -129,7 +129,7 @@ func GetAdsForPath(reqPath string) (originNamespace common.NamespaceAd, originAd
 	// Iterate through all of the server ads. For each "item", the key
 	// is the server ad itself (either cache or origin), and the value
 	// is a slice of namespace prefixes are supported by that server
-	var best *common.NamespaceAd
+	var best *common.NamespaceAdV2
 	for _, item := range serverAds.Items() {
 		if item == nil {
 			continue

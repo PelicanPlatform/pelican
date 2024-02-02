@@ -39,8 +39,8 @@ func (server *OriginServer) GetServerType() config.ServerType {
 	return config.OriginType
 }
 
-func (server *OriginServer) CreateAdvertisement(name string, originUrl string, originWebUrl string) (common.OriginAdvertise, error) {
-	ad := common.OriginAdvertise{}
+func (server *OriginServer) CreateAdvertisement(name string, originUrlStr string, originWebUrl string) (common.OriginAdvertiseV2, error) {
+	ad := common.OriginAdvertiseV2{}
 
 	// Here we instantiate the namespaceAd slice, but we still need to define the namespace
 	issuerUrl := url.URL{}
@@ -53,23 +53,46 @@ func (server *OriginServer) CreateAdvertisement(name string, originUrl string, o
 
 	prefix := param.Origin_NamespacePrefix.GetString()
 
+	originUrlURL, err := url.Parse(originUrlStr)
+	if err != nil {
+		return ad, errors.New("Invalid Origin Url")
+	}
 	// TODO: Need to figure out where to get some of these values
 	// 		 so that they aren't hardcoded...
-	nsAd := common.NamespaceAd{
-		RequireToken:  !param.Origin_EnablePublicReads.GetBool(),
-		Path:          prefix,
-		Issuer:        issuerUrl,
-		MaxScopeDepth: 3,
-		Strategy:      "OAuth2",
-		BasePath:      prefix,
+
+	nsAd := common.NamespaceAdV2{
+		PublicRead: param.Origin_EnablePublicReads.GetBool(),
+		Caps: common.Capabilities{
+			PublicRead: param.Origin_EnablePublicReads.GetBool(),
+			Read:       true,
+			Write:      param.Origin_EnableWrite.GetBool(),
+		},
+		Path: prefix,
+		Generation: []common.TokenGen{{
+			Strategy:         common.StrategyType("OAuth2"),
+			MaxScopeDepth:    3,
+			CredentialIssuer: *originUrlURL,
+		}},
+		Issuer: []common.TokenIssuer{{
+			BasePaths: []string{prefix},
+			IssuerUrl: issuerUrl,
+		}},
 	}
-	ad = common.OriginAdvertise{
-		Name:               name,
-		URL:                originUrl,
-		WebURL:             originWebUrl,
-		Namespaces:         []common.NamespaceAd{nsAd},
-		EnableWrite:        param.Origin_EnableWrite.GetBool(),
-		EnableFallbackRead: param.Origin_EnableFallbackRead.GetBool(),
+	ad = common.OriginAdvertiseV2{
+		Name:       name,
+		DataURL:    originUrlStr,
+		WebURL:     originWebUrl,
+		Namespaces: []common.NamespaceAdV2{nsAd},
+		Caps: common.Capabilities{
+			PublicRead:   param.Origin_EnablePublicReads.GetBool(),
+			Read:         true,
+			Write:        param.Origin_EnableWrite.GetBool(),
+			FallBackRead: param.Origin_EnableFallbackRead.GetBool(),
+		},
+		Issuer: []common.TokenIssuer{{
+			BasePaths: []string{prefix},
+			IssuerUrl: issuerUrl,
+		}},
 	}
 
 	return ad, nil

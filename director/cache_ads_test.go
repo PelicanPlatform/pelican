@@ -50,30 +50,42 @@ func TestGetAdsForPath(t *testing.T) {
 			- Record the ads
 			- Query for a few paths and make sure the correct ads are returned
 	*/
-	nsAd1 := common.NamespaceAd{
-		RequireToken: true,
-		Path:         "/chtc",
-		Issuer: url.URL{
-			Scheme: "https",
-			Host:   "wisc.edu",
+	nsAd1 := common.NamespaceAdV2{
+		PublicRead: false,
+		Caps:       common.Capabilities{PublicRead: false},
+		Path:       "/chtc",
+		Issuer: []common.TokenIssuer{{
+			IssuerUrl: url.URL{
+				Scheme: "https",
+				Host:   "wisc.edu",
+			},
+		},
 		},
 	}
 
-	nsAd2 := common.NamespaceAd{
-		RequireToken: false,
-		Path:         "/chtc/PUBLIC",
-		Issuer: url.URL{
-			Scheme: "https",
-			Host:   "wisc.edu",
+	nsAd2 := common.NamespaceAdV2{
+		PublicRead: true,
+		Caps:       common.Capabilities{PublicRead: true},
+		Path:       "/chtc/PUBLIC",
+		Issuer: []common.TokenIssuer{{
+			IssuerUrl: url.URL{
+				Scheme: "https",
+				Host:   "wisc.edu",
+			},
+		},
 		},
 	}
 
-	nsAd3 := common.NamespaceAd{
-		RequireToken: false,
-		Path:         "/chtc/PUBLIC2/",
-		Issuer: url.URL{
-			Scheme: "https",
-			Host:   "wisc.edu",
+	nsAd3 := common.NamespaceAdV2{
+		PublicRead: true,
+		Caps:       common.Capabilities{PublicRead: true},
+		Path:       "/chtc/PUBLIC2/",
+		Issuer: []common.TokenIssuer{{
+			IssuerUrl: url.URL{
+				Scheme: "https",
+				Host:   "wisc.edu",
+			},
+		},
 		},
 	}
 
@@ -129,9 +141,9 @@ func TestGetAdsForPath(t *testing.T) {
 		Type: common.OriginType,
 	}
 
-	o1Slice := []common.NamespaceAd{nsAd1}
-	o2Slice := []common.NamespaceAd{nsAd2, nsAd3}
-	c1Slice := []common.NamespaceAd{nsAd1, nsAd2}
+	o1Slice := []common.NamespaceAdV2{nsAd1}
+	o2Slice := []common.NamespaceAdV2{nsAd2, nsAd3}
+	c1Slice := []common.NamespaceAdV2{nsAd1, nsAd2}
 	RecordAd(originAd2, &o2Slice)
 	RecordAd(originAd1, &o1Slice)
 	RecordAd(cacheAd1, &c1Slice)
@@ -199,14 +211,17 @@ func TestConfigCacheEviction(t *testing.T) {
 		Latitude:  123.05,
 		Longitude: 456.78,
 	}
-	mockNamespaceAd := common.NamespaceAd{
-		RequireToken:  true,
-		Path:          "/foo/bar/",
-		Issuer:        url.URL{},
-		MaxScopeDepth: 1,
-		Strategy:      "",
-		BasePath:      "",
-		VaultServer:   "",
+	mockNamespaceAd := common.NamespaceAdV2{
+		PublicRead: false,
+		Caps:       common.Capabilities{PublicRead: false},
+		Path:       "/foo/bar/",
+		Issuer:     []common.TokenIssuer{{IssuerUrl: url.URL{}}},
+		Generation: []common.TokenGen{{
+			MaxScopeDepth: 1,
+			Strategy:      "",
+			VaultServer:   "",
+		},
+		},
 	}
 
 	t.Run("evicted-origin-can-cancel-health-test", func(t *testing.T) {
@@ -226,7 +241,7 @@ func TestConfigCacheEviction(t *testing.T) {
 			serverAdMutex.Lock()
 			defer serverAdMutex.Unlock()
 			serverAds.DeleteAll()
-			serverAds.Set(mockPelicanOriginServerAd, []common.NamespaceAd{mockNamespaceAd}, ttlcache.DefaultTTL)
+			serverAds.Set(mockPelicanOriginServerAd, []common.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
 			healthTestCancelFuncsMutex.Lock()
 			defer healthTestCancelFuncsMutex.Unlock()
 			// Clear the map for the new test
@@ -291,7 +306,7 @@ func TestServerAdsCacheEviction(t *testing.T) {
 			defer serverAdMutex.Unlock()
 			serverAds.DeleteAll()
 
-			serverAds.Set(mockServerAd, []common.NamespaceAd{}, time.Second*2)
+			serverAds.Set(mockServerAd, []common.NamespaceAdV2{}, time.Second*2)
 			require.True(t, serverAds.Has(mockServerAd), "Failed to register server Ad")
 		}()
 

@@ -47,6 +47,7 @@ type config struct {
 		RegistryUrl string
 		TopologyNamespaceUrl string
 		TopologyReloadInterval time.Duration
+		TopologyUrl string
 	}
 	GeoIPOverrides interface{}
 	Issuer struct {
@@ -238,6 +239,7 @@ type configWithType struct {
 		RegistryUrl struct { Type string; Value string }
 		TopologyNamespaceUrl struct { Type string; Value string }
 		TopologyReloadInterval struct { Type string; Value time.Duration }
+		TopologyUrl struct { Type string; Value string }
 	}
 	GeoIPOverrides struct { Type string; Value interface{} }
 	Issuer struct {
