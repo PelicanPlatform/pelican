@@ -291,7 +291,6 @@ func CheckOSDF(destination string, methods []string) (remoteSize uint64, err err
 	return 0, err
 }
 
-// FIXME: GetCacheHostnames is not director-aware!
 func GetCacheHostnames(testFile string) (urls []string, err error) {
 
 	directorUrl := param.Federation_DirectorUrl.GetString()
