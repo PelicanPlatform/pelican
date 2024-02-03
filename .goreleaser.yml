@@ -58,8 +58,8 @@ nfpms:
     file_name_template: "{{ .ConventionalFileName }}"
     id: pelican
     vendor: OSG Consortium
-    homepage: https://github.com/PelicanPlatform/pelican
-    maintainer: Brian Bockelman <bbockelman@morgridge.org>
+    homepage: https://pelicanplatform.org
+    maintainer: Pelican Team <help@pelicanplatform.org>
     description: Command-line copy tool for the Open Science Data Federation
     license: ASL 2.0
     formats:
@@ -102,8 +102,8 @@ nfpms:
     file_name_template: "{{ .ConventionalFileName }}"
     id: pelican-osdf-compat
     vendor: OSG Consortium
-    homepage: https://github.com/PelicanPlatform/pelican
-    maintainer: Brian Bockelman <bbockelman@morgridge.org>
+    homepage: https://pelicanplatform.org
+    maintainer: Pelican Team <help@pelicanplatform.org>
     description: OSDF compatibility files for Pelican
     license: ASL 2.0
     meta: true
@@ -192,8 +192,8 @@ nfpms:
     file_name_template: "{{ .ConventionalFileName }}"
     id: pelican-server
     vendor: OSG Consortium
-    homepage: https://github.com/PelicanPlatform/pelican
-    maintainer: Brian Bockelman <bbockelman@morgridge.org>
+    homepage: https://pelicanplatform.org
+    maintainer: Pelican Team <help@pelicanplatform.org>
     description: SystemD files and configs for Pelican services
     license: ASL 2.0
     meta: true
