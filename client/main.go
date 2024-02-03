@@ -291,27 +291,32 @@ func CheckOSDF(destination string, methods []string) (remoteSize uint64, err err
 	return 0, err
 }
 
-// FIXME: GetCacheHostnames is not director-aware!
 func GetCacheHostnames(testFile string) (urls []string, err error) {
 
-	ns, err := namespaces.MatchNamespace(testFile)
+	directorUrl := param.Federation_DirectorUrl.GetString()
+	ns, err := getNamespaceInfo(testFile, directorUrl, false)
 	if err != nil {
 		return
 	}
 
-	caches, err := GetCachesFromNamespace(ns, false)
+	caches, err := GetCachesFromNamespace(ns, directorUrl != "")
 	if err != nil {
 		return
 	}
 
 	for _, cacheGeneric := range caches {
-		cache, ok := cacheGeneric.(namespaces.Cache)
-		if !ok {
-			continue
+		if cache, ok := cacheGeneric.(namespaces.Cache); ok {
+			url_string := cache.AuthEndpoint
+			host := strings.Split(url_string, ":")[0]
+			urls = append(urls, host)
+		} else if cache, ok := cacheGeneric.(namespaces.DirectorCache); ok {
+			cacheUrl, err := url.Parse(cache.EndpointUrl)
+			if err != nil {
+				log.Debugln("Failed to parse returned cache as a URL:", cacheUrl)
+				continue
+			}
+			urls = append(urls, cacheUrl.Hostname())
 		}
-		url_string := cache.AuthEndpoint
-		host := strings.Split(url_string, ":")[0]
-		urls = append(urls, host)
 	}
 
 	return
@@ -502,6 +507,8 @@ func DoPut(localObject string, remoteDestination string, recursive bool) (bytesT
 		return 0, err
 	}
 	remoteDestUrl.Scheme = remoteDestScheme
+	fd := config.GetFederation()
+	defer config.SetFederation(fd)
 
 	if remoteDestUrl.Host != "" {
 		if remoteDestUrl.Scheme == "osdf" || remoteDestUrl.Scheme == "stash" {
@@ -511,6 +518,8 @@ func DoPut(localObject string, remoteDestination string, recursive bool) (bytesT
 				return 0, err
 			}
 		} else if remoteDestUrl.Scheme == "pelican" {
+
+			config.SetFederation(config.FederationDiscovery{})
 			federationUrl, _ := url.Parse(remoteDestUrl.String())
 			federationUrl.Scheme = "https"
 			federationUrl.Path = ""
@@ -538,6 +547,7 @@ func DoPut(localObject string, remoteDestination string, recursive bool) (bytesT
 	if !strings.HasPrefix(remoteDestination, "/") {
 		remoteDestination = strings.TrimPrefix(remoteDestination, remoteDestScheme+"://")
 	}
+
 	ns, err := getNamespaceInfo(remoteDestination, directorUrl, isPut)
 	if err != nil {
 		log.Errorln(err)
@@ -580,6 +590,8 @@ func DoGet(remoteObject string, localDestination string, recursive bool) (bytesT
 		return 0, err
 	}
 	remoteObjectUrl.Scheme = remoteObjectScheme
+	fd := config.GetFederation()
+	defer config.SetFederation(fd)
 
 	// If there is a host specified, prepend it to the path in the osdf case
 	if remoteObjectUrl.Host != "" {
@@ -590,6 +602,8 @@ func DoGet(remoteObject string, localDestination string, recursive bool) (bytesT
 				return 0, err
 			}
 		} else if remoteObjectUrl.Scheme == "pelican" {
+
+			config.SetFederation(fd)
 			federationUrl, _ := url.Parse(remoteObjectUrl.String())
 			federationUrl.Scheme = "https"
 			federationUrl.Path = ""
@@ -715,12 +729,15 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 		return 0, err
 	}
 	dest_url.Scheme = dest_scheme
+	fd := config.GetFederation()
+	defer config.SetFederation(fd)
 
 	// If there is a host specified, prepend it to the path in the osdf case
 	if source_url.Host != "" {
 		if source_url.Scheme == "osdf" || source_url.Scheme == "stash" {
 			source_url.Path = "/" + path.Join(source_url.Host, source_url.Path)
 		} else if source_url.Scheme == "pelican" {
+			config.SetFederation(config.FederationDiscovery{})
 			federationUrl, _ := url.Parse(source_url.String())
 			federationUrl.Scheme = "https"
 			federationUrl.Path = ""
@@ -736,6 +753,7 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 		if dest_url.Scheme == "osdf" || dest_url.Scheme == "stash" {
 			dest_url.Path = "/" + path.Join(dest_url.Host, dest_url.Path)
 		} else if dest_url.Scheme == "pelican" {
+			config.SetFederation(config.FederationDiscovery{})
 			federationUrl, _ := url.Parse(dest_url.String())
 			federationUrl.Scheme = "https"
 			federationUrl.Path = ""
