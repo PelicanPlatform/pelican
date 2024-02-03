@@ -421,6 +421,7 @@ func GetFederation() FederationDiscovery {
 		DirectorEndpoint:              param.Federation_DirectorUrl.GetString(),
 		NamespaceRegistrationEndpoint: param.Federation_RegistryUrl.GetString(),
 		JwksUri:                       param.Federation_JwkUrl.GetString(),
+		BrokerEndpoint:                param.Federation_BrokerUrl.GetString(),
 	}
 }
 
