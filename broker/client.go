@@ -213,7 +213,7 @@ func ConnectToOrigin(ctx context.Context, brokerUrl, prefix, originName string) 
 	brokerAud.Path = ""
 
 	cachePrefix := "/cache/" + param.Server_Hostname.GetString()
-	token, err := createToken(cachePrefix, brokerAud.String(), token_scopes.Broker_Reverse)
+	token, err := createToken(cachePrefix, param.Server_Hostname.GetString(), brokerAud.String(), token_scopes.Broker_Reverse)
 	if err != nil {
 		err = errors.Wrap(err, "failure when constructing the broker request token")
 		return
@@ -372,7 +372,7 @@ func doCallback(ctx context.Context, brokerResp reversalRequest) (listener net.L
 	}
 	cacheAud.Path = ""
 
-	token, err := createToken(param.Origin_NamespacePrefix.GetString(), cacheAud.String(), token_scopes.Broker_Callback)
+	token, err := createToken(param.Origin_NamespacePrefix.GetString(), param.Server_Hostname.GetString(), cacheAud.String(), token_scopes.Broker_Callback)
 	if err != nil {
 		err = errors.Wrap(err, "failure when constructing the cache callback token")
 		return
@@ -549,7 +549,7 @@ func LaunchRequestMonitor(ctx context.Context, egrp *errgroup.Group, resultChan 
 				}
 				brokerAud.Path = ""
 
-				token, err := createToken(param.Origin_NamespacePrefix.GetString(), brokerAud.String(), token_scopes.Broker_Retrieve)
+				token, err := createToken(param.Origin_NamespacePrefix.GetString(), param.Server_Hostname.GetString(), brokerAud.String(), token_scopes.Broker_Retrieve)
 				if err != nil {
 					log.Errorln("Failure when constructing the broker retrieve token:", err)
 					break

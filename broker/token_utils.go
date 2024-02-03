@@ -27,12 +27,12 @@ import (
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
-	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/token_scopes"
+	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
@@ -97,61 +97,24 @@ func getRegistryIssuerInfo(ctx context.Context, prefix string) (iss string, keys
 	return
 }
 
-func validateScope(desiredScope token_scopes.TokenScope) func(context.Context, jwt.Token) jwt.ValidationError {
-	return func(_ context.Context, tok jwt.Token) jwt.ValidationError {
-		scopeAny, ok := tok.Get("scope")
-		if !ok {
-			return jwt.NewValidationError(errors.New("no scope is present; required to advertise to director"))
-		}
-		scope, ok := scopeAny.(string)
-		if !ok {
-			return jwt.NewValidationError(errors.New("scope claim in token is not string-valued"))
-		}
-
-		for _, scope := range strings.Split(scope, " ") {
-			if scope == desiredScope.String() {
-				return nil
-			}
-		}
-		return jwt.NewValidationError(errors.Errorf("token scope claim is missing value %s", desiredScope.String()))
-	}
-}
-
 // Create a signed JWT appropriate for retrieving requests from the connection broker
-func createToken(namespace, audience string, desiredScope token_scopes.TokenScope) (token string, err error) {
+func createToken(namespace, subject, audience string, desiredScope token_scopes.TokenScope) (token string, err error) {
 	issuerUrl, err := getRegistryIssValue(namespace)
 	if err != nil {
 		return
 	}
 
-	tok, err := jwt.NewBuilder().
-		Claim("scope", desiredScope.String()).
-		Issuer(issuerUrl).
-		Audience([]string{audience}).
-		Subject(param.Server_Hostname.GetString()).
-		Expiration(time.Now().Add(time.Minute)).
-		Build()
-	if err != nil {
-		return
+	tokenCfg := utils.TokenConfig{
+		Lifetime:     time.Minute,
+		TokenProfile: utils.WLCG,
+		Audience:     []string{audience},
+		Issuer:       issuerUrl,
+		Version:      "1.0",
+		Subject:      subject,
+		Claims:       map[string]string{"scope": desiredScope.String()},
 	}
+	token, err = tokenCfg.CreateToken()
 
-	key, err := config.GetIssuerPrivateJWK()
-	if err != nil {
-		err = errors.Wrap(err, "failed to load the origin's JWK")
-		return
-	}
-
-	err = jwk.AssignKeyID(key)
-	if err != nil {
-		err = errors.Wrap(err, "Failed to assign kid to the token")
-		return
-	}
-
-	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, key))
-	if err != nil {
-		return
-	}
-	token = string(signed)
 	return
 }
 
@@ -186,10 +149,10 @@ func verifyToken(ctx context.Context, token, namespace, audience string, require
 		return
 	}
 
-	validator := jwt.ValidatorFunc(validateScope(requiredScope))
+	scopeValidator := token_scopes.CreateScopeValidator([]token_scopes.TokenScope{requiredScope}, false)
 	err = jwt.Validate(tok,
 		jwt.WithAudience(param.Server_ExternalWebUrl.GetString()),
-		jwt.WithValidator(validator),
+		jwt.WithValidator(scopeValidator),
 		jwt.WithClaimValue("iss", issuerUrl),
 	)
 	if err == nil {
