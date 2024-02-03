@@ -43,12 +43,12 @@ type (
 	AuthOption  struct {
 		Sources   []TokenSource
 		Issuers   []TokenIssuer
-		Scopes    []string
+		Scopes    []token_scopes.TokenScope
 		AllScopes bool
 	}
 	AuthChecker interface {
-		FederationCheck(ctx *gin.Context, token string, expectedScopes []string, allScopes bool) error
-		IssuerCheck(ctx *gin.Context, token string, expectedScopes []string, allScopes bool) error
+		FederationCheck(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScopes bool) error
+		IssuerCheck(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScopes bool) error
 	}
 	AuthCheckImpl     struct{}
 	DiscoveryResponse struct { // This is a duplicate from director/authentication to ensure we don't have cyclic import
@@ -144,7 +144,7 @@ func LoadDirectorPublicKey() (jwk.Key, error) {
 }
 
 // Checks that the given token was signed by the federation jwk and also checks that the token has the expected scope
-func (a AuthCheckImpl) FederationCheck(c *gin.Context, strToken string, expectedScopes []string, allScopes bool) error {
+func (a AuthCheckImpl) FederationCheck(c *gin.Context, strToken string, expectedScopes []token_scopes.TokenScope, allScopes bool) error {
 	fedURL := param.Federation_DiscoveryUrl.GetString()
 	token, err := jwt.Parse([]byte(strToken), jwt.WithVerify(false))
 
@@ -191,7 +191,7 @@ func (a AuthCheckImpl) FederationCheck(c *gin.Context, strToken string, expected
 //
 // Note that this means the issuer jwk MUST be the one server created. It can't be provided by
 // the user if they want to use a different issuer than the server. This can be changed in the future.
-func (a AuthCheckImpl) IssuerCheck(c *gin.Context, strToken string, expectedScopes []string, allScopes bool) error {
+func (a AuthCheckImpl) IssuerCheck(c *gin.Context, strToken string, expectedScopes []token_scopes.TokenScope, allScopes bool) error {
 	token, err := jwt.Parse([]byte(strToken), jwt.WithVerify(false))
 	if err != nil {
 		return errors.Wrap(err, "Invalid JWT")
