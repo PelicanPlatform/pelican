@@ -19,8 +19,10 @@
 package server_ui
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -37,12 +39,20 @@ import (
 )
 
 type (
-	errorResp struct {
-		Error string `json:"error"`
-	}
-
 	keyStatus int
 )
+
+type checkNamespaceExistsReq struct {
+	Prefix string `json:"prefix"`
+	PubKey string `json:"pubkey"` // Pass a JWK
+}
+
+type checkNamespaceExistsRes struct {
+	PrefixExists bool   `json:"prefix_exists"`
+	KeyMatch     bool   `json:"key_match"`
+	Message      string `json:"message"`
+	Error        string `json:"error"`
+}
 
 const (
 	noKeyPresent keyStatus = iota
@@ -50,7 +60,24 @@ const (
 	keyMatch
 )
 
-func keyIsRegistered(privkey jwk.Key, url string, prefix string) (keyStatus, error) {
+// Check if a namespace private JWK with namespace prefix from the origin is registered at the given registry.
+//
+// registryUrlStr is the URL with base path to the registry's API. For Pelican registry,
+// this should be https://<registry-host>/api/v1.0/registry
+//
+// If the prefix is not found in the registry, it returns noKeyPresent with error == nil
+// If the prefix is found, but the public key of the private key doesn't match what's in the registry,
+// it will return keyMismatch with error == nil. Otherwise, it returns keyMatch
+//
+// Note that this function will first send a POST request to /api/v1.0/registry/checkNamespaceExists,
+// which is the current Pelican registry endpoint. However, OSDF registry and Pelican registry < v7.4.0 doesn't
+// have this endpoint, so if calling it returns 404, we will then check using /api/v1.0/registry/<prefix>/.well-known/issuer.jwks,
+// which should always give the jwks if it exists.
+func keyIsRegistered(privkey jwk.Key, registryUrlStr string, prefix string) (keyStatus, error) {
+	registryUrl, err := url.Parse(registryUrlStr)
+	if err != nil {
+		return noKeyPresent, errors.Wrap(err, "Error parsing registryUrlStr")
+	}
 	keyId := privkey.KeyID()
 	if keyId == "" {
 		return noKeyPresent, errors.New("Provided key is missing a key ID")
@@ -60,14 +87,27 @@ func keyIsRegistered(privkey jwk.Key, url string, prefix string) (keyStatus, err
 		return noKeyPresent, err
 	}
 
-	req, err := http.NewRequest("GET", url, nil)
+	// We first check against Pelican's registry at /api/v1.0/registry/checkNamespaceExists
+	// so that the registry won't give out the public key
+	pelicanReqURL := registryUrl.JoinPath("/checkNamespaceExists")
+	pubkeyStr, err := json.Marshal(key)
+	if err != nil {
+		return noKeyPresent, err
+	}
+
+	keyCheckReq := checkNamespaceExistsReq{Prefix: prefix, PubKey: string(pubkeyStr)}
+	jsonData, err := json.Marshal(keyCheckReq)
+	if err != nil {
+		return noKeyPresent, errors.Wrap(err, "Error marshalling request to json string")
+	}
+
+	req, err := http.NewRequest("POST", pelicanReqURL.String(), bytes.NewBuffer(jsonData))
 
 	if err != nil {
 		return noKeyPresent, err
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Pelican-Prefix", prefix)
 
 	tr := config.GetTransport()
 	client := &http.Client{Transport: tr}
@@ -78,34 +118,82 @@ func keyIsRegistered(privkey jwk.Key, url string, prefix string) (keyStatus, err
 	}
 	defer resp.Body.Close()
 
-	// Check HTTP response -- should be 200, else something went wrong
 	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode == 404 || resp.StatusCode == 500 {
-		// TODO: The registry returns a 500 for unregistered namespaces instead of a 404.
-		// It would be better to have an error message in this case but we must instead assume
-		// it's an unregistered namespace.
-		return noKeyPresent, nil
-	} else if resp.StatusCode != 200 {
-		var msg errorResp
-		if err := json.Unmarshal(body, &msg); err != nil {
+
+	// For Pelican's registry at /api/v1.0/registry/checkNamespaceExists, it only returns 200, 400, and 500.
+	// If it returns 404, that means we are not hitting Pelican's registry but OSDF's registry or Pelican registry < v7.4.0
+	if resp.StatusCode != http.StatusNotFound {
+		resData := checkNamespaceExistsRes{}
+		if err := json.Unmarshal(body, &resData); err != nil {
 			log.Warningln("Failed to unmarshal error message response from namespace registry", err)
 		}
-		if msg.Error != "" {
-			return noKeyPresent, errors.Errorf("Failed to query registry for public key (status code %v): %v", resp.StatusCode, msg.Error)
+		switch resp.StatusCode {
+		case http.StatusInternalServerError:
+			return noKeyPresent, errors.Errorf("Failed to query registry for public key with server error (status code %v): %v", resp.StatusCode, resData.Error)
+		case http.StatusBadRequest:
+			return noKeyPresent, errors.Errorf("Failed to query registry for public key with a bad request (status code %v): %v", resp.StatusCode, resData.Error)
+		case http.StatusOK:
+			if !resData.PrefixExists {
+				return noKeyPresent, nil
+			}
+			if !resData.KeyMatch {
+				return keyMismatch, nil
+			} else {
+				return keyMatch, nil
+			}
+		default:
+			return noKeyPresent, errors.Errorf("Failed to query registry for public key with unknown server response (status code %v)", resp.StatusCode)
+		}
+	}
+
+	// In this case, we got 404 from the first request, so we will try to check against legacy OSDF endpoint at
+	// "/api/v1.0/registry/<prefix>/.well-known/issuer.jwks"
+	log.Warningf("Getting 404 from checking if key is registered at: %s Fall back to check issuer.jwks", pelicanReqURL.String())
+
+	OSDFReqUrl := registryUrl.JoinPath(prefix, ".well-known", "issuer.jwks")
+
+	OSDFReq, err := http.NewRequest("GET", OSDFReqUrl.String(), nil)
+
+	if err != nil {
+		return noKeyPresent, err
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	OSDFResp, err := client.Do(OSDFReq)
+	if err != nil {
+		return noKeyPresent, err
+	}
+	defer OSDFResp.Body.Close()
+
+	// Check HTTP response -- should be 200, else something went wrong
+	OSDFBody, _ := io.ReadAll(OSDFResp.Body)
+
+	// 404 is from Pelican issuer.jwks endpoint while 500 is from OSDF endpoint
+	if resp.StatusCode == 404 || resp.StatusCode == 500 {
+		return noKeyPresent, nil
+	} else if resp.StatusCode != 200 {
+		resData := checkNamespaceExistsRes{}
+		if err := json.Unmarshal(OSDFBody, &resData); err != nil {
+			log.Warningln("Failed to unmarshal error message response from namespace registry", err)
+		}
+		if resData.Error != "" {
+			return noKeyPresent, errors.Errorf("Failed to query registry for public key (status code %v): %v", resp.StatusCode, resData.Error)
 		} else {
 			return noKeyPresent, errors.Errorf("Failed to query registry for public key: status code %v", resp.StatusCode)
 		}
 	}
 
 	var ns *registry.Namespace
-	err = json.Unmarshal(body, &ns)
+	err = json.Unmarshal(OSDFBody, &ns)
 	if err != nil {
+		log.Error(fmt.Sprintf("Failed unmarshal namespace from response: %v, body: %v, response code: %v, URL: %v", err, OSDFBody, resp.StatusCode, registryUrl))
 		return noKeyPresent, errors.Errorf("Failed unmarshal namespace from response")
 	}
 
 	registrySet, err := jwk.ParseString(ns.Pubkey)
 	if err != nil {
-		log.Debugln("Failed to parse registry response:", string(body))
+		log.Debugln("Failed to parse registry response:", string(OSDFBody))
 		return noKeyPresent, errors.Wrap(err, "Failed to parse registry response as a JWKS")
 	}
 
@@ -138,17 +226,11 @@ func registerNamespacePrep() (key jwk.Key, prefix string, registrationEndpointUR
 		return
 	}
 
-	registrationEndpointURL, err = url.JoinPath(namespaceEndpoint, "api", "v2.0", "registry")
+	registrationEndpointURL, err = url.JoinPath(namespaceEndpoint, "api", "v1.0", "registry")
 	if err != nil {
 		err = errors.Wrap(err, "Failed to construct registration endpoint URL: %v")
 		return
 	}
-	registrationCheckEndpointURL, err := url.JoinPath(registrationEndpointURL, "getNamespace")
-	if err != nil {
-		err = errors.Wrap(err, "Failed to construct registration check endpoint URL: %v")
-		return
-	}
-
 	key, err = config.GetIssuerPrivateJWK()
 	if err != nil {
 		err = errors.Wrap(err, "failed to load the origin's JWK")
@@ -160,7 +242,7 @@ func registerNamespacePrep() (key jwk.Key, prefix string, registrationEndpointUR
 			return
 		}
 	}
-	keyStatus, err := keyIsRegistered(key, registrationCheckEndpointURL, prefix)
+	keyStatus, err := keyIsRegistered(key, registrationEndpointURL, prefix)
 	if err != nil {
 		err = errors.Wrap(err, "Failed to determine whether namespace is already registered")
 		return
@@ -187,6 +269,11 @@ func registerNamespaceImpl(key jwk.Key, prefix string, registrationEndpointURL s
 
 func RegisterNamespaceWithRetry(ctx context.Context, egrp *errgroup.Group) error {
 	metrics.SetComponentHealthStatus(metrics.OriginCache_Federation, metrics.StatusCritical, "Origin not registered with federation")
+	retryInterval := param.Server_RegistrationRetryInterval.GetDuration()
+	if retryInterval == 0 {
+		log.Warning("Server.RegistrationRetryInterval is 0. Fall back to 10s")
+		retryInterval = 10 * time.Second
+	}
 
 	key, prefix, url, isRegistered, err := registerNamespacePrep()
 	if err != nil {
@@ -201,8 +288,9 @@ func RegisterNamespaceWithRetry(ctx context.Context, egrp *errgroup.Group) error
 		return nil
 	}
 	log.Errorf("Failed to register with namespace service: %v; will automatically retry in 10 seconds\n", err)
+
 	egrp.Go(func() error {
-		ticker := time.NewTicker(10 * time.Second)
+		ticker := time.NewTicker(retryInterval)
 		for {
 			select {
 			case <-ticker.C:

@@ -130,7 +130,6 @@ type: object
 default: none
 components: ["director"]
 ---
-
 ############################
 #     Log-Level Configs    #
 ############################
@@ -148,6 +147,13 @@ type: filename
 default: none
 components: ["*"]
 ---
+name: Logging.DisableProgressBars
+description: >-
+  A bool defining if progress bars should be enabled or not.
+type: bool
+default: false
+components: ["Client"]
+---
 ############################
 # Federation-Level Configs #
 ############################
@@ -158,28 +164,11 @@ type: url
 default: none
 components: ["*"]
 ---
-name: Federation.TopologyNamespaceUrl
-description: >-
-  A URL containing namespace information for origins and caches configured via the OSG Topology application (a legacy integration). The URL
-  should point to the hosted namespace.json.
-type: url
-osdf_default: https://topology.opensciencegrid.org/stashcache/namespaces.json
-default: none
-components: ["director", "nsregistry"]
----
-name: Federation.TopologyReloadInterval
-description: >-
-  The frequency, in minutes, that topology should be reloaded.
-type: duration
-osdf_default: 10
-default: none
-components: ["director", "nsregistry"]
----
 name: Federation.DirectorUrl
 description: >-
   A URL indicating where a director service is hosted.
 type: url
-osdf_default: Default is determined dynamically through metadata at <federation URL>/.well-known/pelican-configuration
+osdf_default: Default is determined dynamically through metadata at <Federation.DiscoveryUrl>/.well-known/pelican-configuration
 default: none
 components: ["client", "origin", "cache"]
 ---
@@ -190,7 +179,7 @@ description: >-
 
   A URL indicating where the namespace registry service is hosted.
 type: url
-osdf_default: Default is determined dynamically through metadata at <federation URL>/.well-known/pelican-configuration
+osdf_default: Default is determined dynamically through metadata at <Federation.DiscoveryUrl>/.well-known/pelican-configuration
 default: none
 components: ["client", "director", "origin", "cache"]
 ---
@@ -206,9 +195,26 @@ name: Federation.JwkUrl
 description: >-
   A URL indicating where the JWKS for the Federation is hosted.
 type: url
-osdf_default: Default is determined dynamically through metadata at <federtion URL>/.well-known/pelican-configuration
+osdf_default: Default is determined dynamically through metadata at <Federation.DiscoveryUrl>/.well-known/pelican-configuration
 default: none
-components: ["client", "origin"]
+components: ["*"]
+---
+name: Federation.TopologyNamespaceUrl
+description: >-
+  A URL containing namespace information for origins and caches configured via the OSG Topology application (a legacy integration). The URL
+  should point to the hosted namespace.json.
+type: url
+osdf_default: https://topology.opensciencegrid.org/osdf/namespaces
+default: none
+components: ["director", "nsregistry"]
+---
+name: Federation.TopologyReloadInterval
+description: >-
+  The frequency, in minutes, that topology should be reloaded.
+type: duration
+osdf_default: 10m
+default: none
+components: ["director", "nsregistry"]
 ---
 ############################
 #   Client-Level Configs   #
@@ -305,6 +311,21 @@ description: >-
   The filepath prefix at which an origin's contents are made globally available, eg /pelican/PUBLIC.
 type: string
 default: none
+components: ["origin"]
+---
+name: Origin.EnableWrite
+description: >-
+  A boolean indicating if an origin allows write access
+type: bool
+default: true
+components: ["origin"]
+---
+name: Origin.EnableFallbackRead
+description: >-
+  Set to `true` if the origin permits clients to directly read from it
+  when no cache service is available
+type: bool
+default: false
 components: ["origin"]
 ---
 name: Origin.Multiuser
@@ -547,6 +568,20 @@ root_default: /var/cache/pelican/maxmind/GeoLite2-City.mmdb
 default: $ConfigBase/maxmind/GeoLite2-city.mmdb
 components: ["director"]
 ---
+name: Director.AdvertisementTTL
+description: >-
+  The time to live (TTL) of director's internal cache to store origins and caches advertisement.
+type: duration
+default: 15m
+components: ["director"]
+---
+name: Director.OriginCacheHealthTestInterval
+description: >-
+  The interval of which director issues a new file transfer test to all the registered origins and caches.
+type: duration
+default: 15s
+components: ["director"]
+---
 ############################
 #  Registry-level configs  #
 ############################
@@ -590,8 +625,46 @@ description: >-
     id: https://osg-htc.org/iid/01y2jtd41
   ```
 
+  Note that this value will take precedence over Registry.InstitutionsUrl if both are set
 type: object
 default: none
+components: ["nsregistry"]
+---
+name: Registry.InstitutionsUrl
+description: >-
+  A url to get a list of available institutions for users to register their namespaces to.
+  The url must accept a GET request with 200 response in JSON/YAML content with the following format:
+
+  JSON:
+  ```JSON
+    [
+      {
+        "name": "University of Wisconsin - Madison",
+        "id": " https://osg-htc.org/iid/01y2jtd41"
+      }
+    ]
+  ```
+
+  YAML:
+  ```yaml
+    ---
+    - name: University of Wisconsin - Madison
+      id: " https://osg-htc.org/iid/01y2jtd41"
+  ```
+
+  where the id field will be stored in registry database and must be unique, and name field will be displayed in UI as the option.
+
+  Note that Pelican will cache the response of the url in a TTL cache with default refresh time of 15 minutes.
+  Also note that Registry.Institutions will take precedence over this value if both are set.
+type: url
+default: none
+components: ["nsregistry"]
+---
+name: Registry.InstitutionsUrlReloadMinutes
+description: >-
+  Number of minutes that the Registry.InstitutionsUrl will be reloaded into the TTL cache.
+type: duration
+default: 15m
 components: ["nsregistry"]
 ---
 ############################
@@ -746,6 +819,14 @@ type: filename
 default: $ConfigBase/session-secret
   The default content of the file is the hash of the concatenation of "pelican" and the DER form of ${IssuerKey}
 components: ["nsregistry", "director"]
+---
+name: Server.RegistrationRetryInterval
+description: >-
+  The duration of delay in origin/cache registration retry attempts if the initial registration call to registry
+  was failed.
+type: duration
+default: 10s
+components: ["origin", "cache"]
 ---
 ################################
 #   Issuer's Configurations    #

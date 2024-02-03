@@ -6,11 +6,11 @@ This ui is generated with Next.js.
 
 ### Local
 
-In production builds the website is compiled and included with the code. This step 
-takes a couple minutes and is not well suited for development. Since the website 
+In production builds the website is compiled and included with the code. This step
+takes a couple minutes and is not well suited for development. Since the website
 sits on top of the api the best way to develop just the website is to run the api
 and the website separately and then use nginx to make them come from the same host
-as they would in production. 
+as they would in production.
 
 #### To run the api:
 
@@ -18,7 +18,7 @@ as they would in production.
 # From repo root
 make web-build
 goreleaser --clean --snapshot
-docker run --rm -it -p 8444:8443 -w /app -v $PWD/dist/pelican_linux_arm64/:/app pelican-dev /bin/bash
+docker run --rm -it -p 8444:8444 -w /app -v $PWD/dist/pelican_linux_arm64/:/app -v $PWD/local/:/etc/pelican/ pelican-dev /bin/bash
 ```
 
 ```shell

@@ -124,7 +124,9 @@ func CreateNsFromDirectorResp(dirResp *http.Response) (namespace namespaces.Name
 	return
 }
 
-func QueryDirector(source string, directorUrl string) (resp *http.Response, err error) {
+// Make a request to the director for a given verb/resource; return the
+// HTTP response object only if a 307 is returned.
+func queryDirector(verb, source, directorUrl string) (resp *http.Response, err error) {
 	resourceUrl := directorUrl + source
 	// Here we use http.Transport to prevent the client from following the director's
 	// redirect. We use the Location url elsewhere (plus we still need to do the token
@@ -138,7 +140,7 @@ func QueryDirector(source string, directorUrl string) (resp *http.Response, err 
 		},
 	}
 
-	req, err := http.NewRequest("GET", resourceUrl, nil)
+	req, err := http.NewRequest(verb, resourceUrl, nil)
 	if err != nil {
 		log.Errorln("Failed to create an HTTP request:", err)
 		return nil, err
@@ -172,7 +174,7 @@ func QueryDirector(source string, directorUrl string) (resp *http.Response, err 
 		if unmarshalErr := json.Unmarshal(body, &respErr); unmarshalErr != nil { // Error creating json
 			return nil, errors.Wrap(unmarshalErr, "Could not unmarshall the director's response")
 		}
-		return nil, errors.Errorf("The director reported an error: %s\n", respErr.Error)
+		return resp, errors.Errorf("The director reported an error: %s", respErr.Error)
 	}
 
 	return

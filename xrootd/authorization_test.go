@@ -21,12 +21,16 @@
 package xrootd
 
 import (
+	"bufio"
 	"context"
 	_ "embed"
 	"fmt"
+	"io/fs"
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/pelicanplatform/pelican/cache_ui"
@@ -65,7 +69,94 @@ var (
 
 	//go:embed resources/test-scitokens-cache-empty.cfg
 	cacheEmptyOutput string
+
+	sampleMultilineOutput = `foo \
+	bar
+	baz
+	abc \`
+
+	sampleMultilineOutputParsed = []string{"foo \tbar", "\tbaz", "\tabc "}
+
+	cacheAuthfileMultilineInput = `
+u * /user/ligo -rl \
+/Gluex rl \
+/NSG/PUBLIC rl \
+/VDC/PUBLIC rl`
+
+	cacheAuthfileOutput = "u * /.well-known lr /user/ligo -rl /Gluex rl /NSG/PUBLIC rl /VDC/PUBLIC rl\n"
+
+	// Configuration snippet from bug report #601
+	scitokensCfgAud = `
+[Global]
+audience = GLOW, HCC, IceCube, NRP, OSG, PATh, UCSD
+
+[Issuer https://ap20.uc.osg-htc.org:1094/ospool/ap20]
+issuer = https://ap20.uc.osg-htc.org:1094/ospool/ap20
+base_path = /ospool/ap20
+`
+
+	// Actual authfile entries here are from the bug report #568
+	otherAuthfileEntries = `# DN: /CN=sc-origin.chtc.wisc.edu
+u 5a42185a.0 /chtc/PROTECTED/sc-origin lr
+# DN: /DC=org/DC=incommon/C=US/ST=California/O=University of California, San Diego/CN=osg-stash-sfu-computecanada-ca.nationalresearchplatform.org
+u 4ff08838.0 /chtc/PROTECTED/sc-origin lr
+# DN: /DC=org/DC=incommon/C=US/ST=Georgia/O=Georgia Institute of Technology/OU=Office of Information Technology/CN=osg-gftp2.pace.gatech.edu
+u 3af6a420.0 /chtc/PROTECTED/sc-origin lr
+`
+
+	mergedAuthfileEntries = otherAuthfileEntries + "u * /.well-known lr\n"
 )
+
+func TestAuthfileMultiline(t *testing.T) {
+	sc := bufio.NewScanner(strings.NewReader(sampleMultilineOutput))
+	sc.Split(ScanLinesWithCont)
+	idx := 0
+	for sc.Scan() {
+		require.Less(t, idx, len(sampleMultilineOutputParsed))
+		assert.Equal(t, string(sampleMultilineOutputParsed[idx]), sc.Text())
+		idx += 1
+	}
+	assert.Equal(t, idx, len(sampleMultilineOutputParsed))
+}
+
+func TestEmitAuthfile(t *testing.T) {
+	tests := []struct {
+		desc    string
+		authIn  string
+		authOut string
+	}{
+		{
+			desc:    "merge-multi-lines",
+			authIn:  cacheAuthfileMultilineInput,
+			authOut: cacheAuthfileOutput,
+		},
+		{
+			desc:    "merge-other-entries",
+			authIn:  otherAuthfileEntries,
+			authOut: mergedAuthfileEntries,
+		},
+	}
+	for _, testInput := range tests {
+		t.Run(testInput.desc, func(t *testing.T) {
+			dirName := t.TempDir()
+			viper.Reset()
+			viper.Set("Xrootd.Authfile", filepath.Join(dirName, "authfile"))
+			viper.Set("Xrootd.RunLocation", dirName)
+			server := &origin_ui.OriginServer{}
+
+			err := os.WriteFile(filepath.Join(dirName, "authfile"), []byte(testInput.authIn), fs.FileMode(0600))
+			require.NoError(t, err)
+
+			err = EmitAuthfile(server)
+			require.NoError(t, err)
+
+			contents, err := os.ReadFile(filepath.Join(dirName, "authfile-origin-generated"))
+			require.NoError(t, err)
+
+			assert.Equal(t, testInput.authOut, string(contents))
+		})
+	}
+}
 
 func TestEmitCfg(t *testing.T) {
 	dirname := t.TempDir()
@@ -76,7 +167,7 @@ func TestEmitCfg(t *testing.T) {
 
 	configTester := func(cfg *ScitokensCfg, configResult string) func(t *testing.T) {
 		return func(t *testing.T) {
-			err = EmitScitokensConfiguration(config.OriginType, cfg)
+			err = writeScitokensConfiguration(config.OriginType, cfg)
 			assert.NoError(t, err)
 
 			genCfg, err := os.ReadFile(filepath.Join(dirname, "scitokens-origin-generated.cfg"))
@@ -111,7 +202,7 @@ func TestLoadScitokensConfig(t *testing.T) {
 			cfg, err := LoadScitokensConfig(cfgFname)
 			require.NoError(t, err)
 
-			err = EmitScitokensConfiguration(config.OriginType, &cfg)
+			err = writeScitokensConfiguration(config.OriginType, &cfg)
 			assert.NoError(t, err)
 
 			genCfg, err := os.ReadFile(filepath.Join(dirname, "scitokens-origin-generated.cfg"))
@@ -124,6 +215,42 @@ func TestLoadScitokensConfig(t *testing.T) {
 	t.Run("EmptyConfig", configTester(emptyOutput))
 	t.Run("SimpleIssuer", configTester(simpleOutput))
 	t.Run("DualIssuers", configTester(dualOutput))
+}
+
+// Test that merging the configuration works without throwing any errors
+func TestMergeConfig(t *testing.T) {
+	dirname := t.TempDir()
+	viper.Reset()
+	viper.Set("Xrootd.RunLocation", dirname)
+	viper.Set("Origin.Port", 8443)
+	scitokensConfigFile := filepath.Join(dirname, "scitokens-input.cfg")
+	viper.Set("Xrootd.ScitokensConfig", scitokensConfigFile)
+
+	configTester := func(configInput string, postProcess func(*testing.T, ScitokensCfg)) func(t *testing.T) {
+		return func(t *testing.T) {
+			ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+			defer func() { require.NoError(t, egrp.Wait()) }()
+			defer cancel()
+
+			err := os.WriteFile(scitokensConfigFile, []byte(configInput), fs.FileMode(0600))
+			require.NoError(t, err)
+
+			err = config.InitServer(ctx, config.OriginType)
+			require.NoError(t, err)
+
+			err = EmitScitokensConfig(&origin_ui.OriginServer{})
+			require.NoError(t, err)
+
+			cfg, err := LoadScitokensConfig(filepath.Join(dirname, "scitokens-origin-generated.cfg"))
+			require.NoError(t, err)
+
+			postProcess(t, cfg)
+		}
+	}
+
+	t.Run("AudienceNoJson", configTester(scitokensCfgAud, func(t *testing.T, cfg ScitokensCfg) {
+		assert.True(t, reflect.DeepEqual([]string{"GLOW", "HCC", "IceCube", "NRP", "OSG", "PATh", "UCSD", param.Server_IssuerUrl.GetString()}, cfg.Global.Audience))
+	}))
 }
 
 func TestGenerateConfig(t *testing.T) {
@@ -272,7 +399,7 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 	cacheServer := &cache_ui.CacheServer{}
 	cacheServer.SetNamespaceAds(nsAds)
 
-	t.Run("MultiIssuer", cacheAuthTester(cacheServer, cacheSciOutput, "u * /p3 lr /p4/depth lr /p2_noauth lr "))
+	t.Run("MultiIssuer", cacheAuthTester(cacheServer, cacheSciOutput, "u * /p3 lr /p4/depth lr /p2_noauth lr \n"))
 
 	nsAds = []director.NamespaceAd{}
 	cacheServer.SetNamespaceAds(nsAds)

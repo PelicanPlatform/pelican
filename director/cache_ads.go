@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
+	"github.com/pelicanplatform/pelican/param"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -46,13 +47,15 @@ type (
 	}
 
 	ServerAd struct {
-		Name      string
-		AuthURL   url.URL
-		URL       url.URL // This is server's XRootD URL for file transfer
-		WebURL    url.URL // This is server's Web interface and API
-		Type      ServerType
-		Latitude  float64
-		Longitude float64
+		Name               string
+		AuthURL            url.URL
+		URL                url.URL // This is server's XRootD URL for file transfer
+		WebURL             url.URL // This is server's Web interface and API
+		Type               ServerType
+		Latitude           float64
+		Longitude          float64
+		EnableWrite        bool
+		EnableFallbackRead bool // True if reads from the origin are permitted when no cache is available
 	}
 
 	ServerType   string
@@ -80,7 +83,13 @@ func RecordAd(ad ServerAd, namespaceAds *[]NamespaceAd) {
 	}
 	serverAdMutex.Lock()
 	defer serverAdMutex.Unlock()
-	serverAds.Set(ad, *namespaceAds, ttlcache.DefaultTTL)
+
+	customTTL := param.Director_AdvertisementTTL.GetDuration()
+	if customTTL == 0 {
+		serverAds.Set(ad, *namespaceAds, ttlcache.DefaultTTL)
+	} else {
+		serverAds.Set(ad, *namespaceAds, customTTL)
+	}
 }
 
 func UpdateLatLong(ad *ServerAd) error {

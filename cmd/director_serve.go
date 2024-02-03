@@ -25,6 +25,10 @@ import (
 )
 
 func serveDirector(cmd *cobra.Command, args []string) error {
-	_, err := launchers.LaunchModules(cmd.Context(), config.DirectorType)
+	cancel, err := launchers.LaunchModules(cmd.Context(), config.DirectorType)
+	if err != nil {
+		cancel()
+	}
+
 	return err
 }

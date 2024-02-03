@@ -21,7 +21,6 @@ package web_ui
 import (
 	"bufio"
 	"context"
-	"crypto/ecdsa"
 	"net/http"
 	"os"
 	"path"
@@ -34,6 +33,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/tg123/go-htpasswd"
@@ -42,7 +42,8 @@ import (
 )
 
 type (
-	Login struct {
+	UserRole string
+	Login    struct {
 		User     string `form:"user"`
 		Password string `form:"password"`
 	}
@@ -54,12 +55,23 @@ type (
 	PasswordReset struct {
 		Password string `form:"password"`
 	}
+
+	WhoAmIRes struct {
+		Authenticated bool     `json:"authenticated"`
+		Role          UserRole `json:"role"`
+		User          string   `json:"user"`
+	}
 )
 
 var (
 	authDB       atomic.Pointer[htpasswd.File]
 	currentCode  atomic.Pointer[string]
 	previousCode atomic.Pointer[string]
+)
+
+const (
+	AdminRole    UserRole = "admin"
+	NonAdminRole UserRole = "user"
 )
 
 // Periodically re-read the htpasswd file used for password-based authentication
@@ -109,9 +121,9 @@ func configureAuthDB() error {
 	return nil
 }
 
-// Get the "subjuect" claim from the JWT that "login" cookie stores,
+// Get the "subject" claim from the JWT that "login" cookie stores,
 // where subject is set to be the username. Return empty string if no "login" cookie is present
-func getUser(ctx *gin.Context) (string, error) {
+func GetUser(ctx *gin.Context) (string, error) {
 	token, err := ctx.Cookie("login")
 	if err != nil {
 		return "", nil
@@ -119,15 +131,11 @@ func getUser(ctx *gin.Context) (string, error) {
 	if token == "" {
 		return "", errors.New("Login cookie is empty")
 	}
-	key, err := config.GetIssuerPrivateJWK()
+	jwks, err := config.GetIssuerPublicJWKS()
 	if err != nil {
 		return "", err
 	}
-	var raw ecdsa.PrivateKey
-	if err = key.Raw(&raw); err != nil {
-		return "", errors.New("Failed to extract cookie signing key")
-	}
-	parsed, err := jwt.Parse([]byte(token), jwt.WithKey(jwa.ES256, raw.PublicKey))
+	parsed, err := jwt.Parse([]byte(token), jwt.WithKeySet(jwks))
 	if err != nil {
 		return "", err
 	}
@@ -146,11 +154,10 @@ func setLoginCookie(ctx *gin.Context, user string) {
 		return
 	}
 
+	scopes := []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Monitoring_Query, token_scopes.Monitoring_Scrape}
 	now := time.Now()
 	tok, err := jwt.NewBuilder().
-		// The value of the "scope" claim is a JSON string containing a space-separated
-		// list of scopes associated with the token
-		Claim("scope", "web_ui.access monitoring.query monitoring.scrape").
+		Claim("scope", token_scopes.GetScopeString(scopes)).
 		Issuer(param.Server_ExternalWebUrl.GetString()).
 		IssuedAt(now).
 		Expiration(now.Add(30 * time.Minute)).
@@ -168,26 +175,58 @@ func setLoginCookie(ctx *gin.Context, user string) {
 		return
 	}
 
-	ctx.SetCookie("login", string(signed), 30*60, "/api/v1.0",
-		ctx.Request.URL.Host, true, true)
-	// Explicitly set Cookie for /metrics endpoint as they are in different paths
-	ctx.SetCookie("login", string(signed), 30*60, "/metrics",
-		ctx.Request.URL.Host, true, true)
-	// Explicitly set Cookie for /view endpoint as they are in different paths
-	ctx.SetCookie("login", string(signed), 30*60, "/view",
-		ctx.Request.URL.Host, true, true)
+	// One cookie should be used for all path
+	ctx.SetCookie("login", string(signed), 30*60, "/", ctx.Request.URL.Host, true, true)
 	ctx.SetSameSite(http.SameSiteStrictMode)
 }
 
 // Check if user is authenticated by checking if the "login" cookie is present and set the user identity to ctx
 func AuthHandler(ctx *gin.Context) {
-	user, err := getUser(ctx)
+	user, err := GetUser(ctx)
 	if err != nil || user == "" {
 		log.Errorln("Invalid user cookie or unable to parse user cookie:", err)
 		ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Authentication required to perform this operation"})
 	} else {
 		ctx.Set("User", user)
 		ctx.Next()
+	}
+}
+
+// checkAdmin checks if a user string has admin privilege. It returns boolean and a message
+// indicating the error message.
+//
+// Note that by default it only checks if user == "admin". If you have a custom list of admin identifiers
+// to check, you should set Registry.AdminUsers. See parameters.yaml for details.
+func CheckAdmin(user string) (isAdmin bool, message string) {
+	if user == "admin" {
+		return true, ""
+	}
+	adminList := param.Registry_AdminUsers.GetStringSlice()
+	if adminList == nil {
+		return false, "Registry.AdminUsers is not set, and user is not root user. Admin check returns false"
+	}
+	for _, admin := range adminList {
+		if user == admin {
+			return true, ""
+		}
+	}
+	return false, "You don't have permission to perform this action"
+}
+
+// adminAuthHandler checks the admin status of a logged-in user. This middleware
+// should be cascaded behind the [web_ui.AuthHandler]
+func AdminAuthHandler(ctx *gin.Context) {
+	user := ctx.GetString("User")
+	// This should be done by a regular auth handler from the upstream, but we check here just in case
+	if user == "" {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Login required to view this page"})
+	}
+	isAdmin, msg := CheckAdmin(user)
+	if isAdmin {
+		ctx.Next()
+		return
+	} else {
+		ctx.JSON(http.StatusForbidden, gin.H{"error": msg})
 	}
 }
 
@@ -207,8 +246,16 @@ func loginHandler(ctx *gin.Context) {
 		ctx.JSON(400, gin.H{"error": "Missing user/password in form data"})
 		return
 	}
+	if strings.TrimSpace(login.User) == "" {
+		ctx.JSON(400, gin.H{"error": "User is required"})
+		return
+	}
+	if strings.TrimSpace(login.Password) == "" {
+		ctx.JSON(400, gin.H{"error": "Password is required"})
+		return
+	}
 	if !db.Match(login.User, login.Password) {
-		ctx.JSON(401, gin.H{"error": "Login failed"})
+		ctx.JSON(401, gin.H{"error": "Password and user didn't match"})
 		return
 	}
 
@@ -266,6 +313,35 @@ func resetLoginHandler(ctx *gin.Context) {
 	}
 }
 
+func logoutHandler(ctx *gin.Context) {
+	ctx.SetCookie("login", "", -1, "/", ctx.Request.URL.Host, true, true)
+	ctx.SetSameSite(http.SameSiteStrictMode)
+	ctx.Set("User", "")
+	ctx.JSON(http.StatusOK, gin.H{"message": "Success"})
+}
+
+// Returns the authentication status of the current user, including user id and role
+func whoamiHandler(ctx *gin.Context) {
+	res := WhoAmIRes{}
+	if user, err := GetUser(ctx); err != nil || user == "" {
+		res.Authenticated = false
+		ctx.JSON(http.StatusOK, res)
+	} else {
+		res.Authenticated = true
+		res.User = user
+
+		// Set header to carry CSRF token
+		ctx.Header("X-CSRF-Token", csrf.Token(ctx.Request))
+		isAdmin, _ := CheckAdmin(user)
+		if isAdmin {
+			res.Role = AdminRole
+		} else {
+			res.Role = NonAdminRole
+		}
+		ctx.JSON(http.StatusOK, res)
+	}
+}
+
 // Configure the authentication endpoints for the server web UI
 func configureAuthEndpoints(ctx context.Context, router *gin.Engine, egrp *errgroup.Group) error {
 	if router == nil {
@@ -283,19 +359,12 @@ func configureAuthEndpoints(ctx context.Context, router *gin.Engine, egrp *errgr
 
 	group := router.Group("/api/v1.0/auth")
 	group.POST("/login", loginHandler)
+	group.POST("/logout", AuthHandler, logoutHandler)
 	group.POST("/initLogin", initLoginHandler)
 	group.POST("/resetLogin", AuthHandler, resetLoginHandler)
 	// Pass csrfhanlder only to the whoami route to generate CSRF token
 	// while leaving other routes free of CSRF check (we might want to do it some time in the future)
-	group.GET("/whoami", csrfHandler, func(ctx *gin.Context) {
-		if user, err := getUser(ctx); err != nil || user == "" {
-			ctx.JSON(200, gin.H{"authenticated": false})
-		} else {
-			// Set header to carry CSRF token
-			ctx.Header("X-CSRF-Token", csrf.Token(ctx.Request))
-			ctx.JSON(200, gin.H{"authenticated": true, "user": user})
-		}
-	})
+	group.GET("/whoami", csrfHandler, whoamiHandler)
 	group.GET("/loginInitialized", func(ctx *gin.Context) {
 		db := authDB.Load()
 		if db == nil {

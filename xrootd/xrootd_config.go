@@ -162,12 +162,23 @@ func CheckOriginXrootdEnv(exportPath string, uid int, gid int, groupname string)
 			mountPath := param.Xrootd_Mount.GetString()
 			namespacePrefix := param.Origin_NamespacePrefix.GetString()
 			if mountPath == "" || namespacePrefix == "" {
-				return exportPath, errors.New(`Export information was not provided.
-		Add command line flag:
+				return exportPath, errors.New(`
+	The origin should have parsed export information prior to this point, but has failed to do so.
+	Was the mount passed via the command line flag:
 
-			-v /mnt/foo:/bar
+		-v /mnt/foo:/bar
 
-		to export the directory /mnt/foo to the path /bar in the data federation`)
+	or via the parameters.yaml file:
+
+		# Option 1
+		Origin.ExportVolume: /mnt/foo:/bar
+
+		# Option 2
+		Xrootd
+			Mount: /mnt/foo
+		Origin:
+			NamespacePrefix: /bar
+				`)
 			}
 			mountPath, err := filepath.Abs(mountPath)
 			if err != nil {
@@ -463,10 +474,14 @@ func CopyXrootdCertificates() error {
 
 // Launch a separate goroutine that performs the XRootD maintenance tasks.
 // For maintenance that is periodic, `sleepTime` is the maintenance period.
-func LaunchXrootdMaintenance(ctx context.Context, sleepTime time.Duration) {
+func LaunchXrootdMaintenance(ctx context.Context, server server_utils.XRootDServer, sleepTime time.Duration) {
 	server_utils.LaunchWatcherMaintenance(
 		ctx,
-		filepath.Dir(param.Server_TLSCertificate.GetString()),
+		[]string{
+			filepath.Dir(param.Server_TLSCertificate.GetString()),
+			filepath.Dir(param.Xrootd_Authfile.GetString()),
+			filepath.Dir(param.Xrootd_ScitokensConfig.GetString()),
+		},
 		"xrootd maintenance",
 		sleepTime,
 		func(notifyEvent bool) error {
@@ -474,8 +489,27 @@ func LaunchXrootdMaintenance(ctx context.Context, sleepTime time.Duration) {
 			if notifyEvent && errors.Is(err, errBadKeyPair) {
 				log.Debugln("Bad keypair encountered when doing xrootd certificate maintenance:", err)
 				return nil
+			} else {
+				log.Debugln("Successfully updated the Xrootd TLS certificates")
 			}
-			return err
+			lastErr := err
+			if err := EmitAuthfile(server); err != nil {
+				if lastErr != nil {
+					log.Errorln("Failure when generating authfile:", err)
+				}
+				lastErr = err
+			} else {
+				log.Debugln("Successfully updated the Xrootd authfile")
+			}
+			if err := EmitScitokensConfig(server); err != nil {
+				if lastErr != nil {
+					log.Errorln("Failure when emitting the scitokens.cfg:", err)
+				}
+				lastErr = err
+			} else {
+				log.Debugln("Successfully updated the Xrootd scitokens configuration")
+			}
+			return lastErr
 		},
 	)
 }

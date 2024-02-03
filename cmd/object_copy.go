@@ -79,7 +79,7 @@ func init() {
 
 func copyMain(cmd *cobra.Command, args []string) {
 
-	client.ObjectClientOptions.Version = version
+	client.ObjectClientOptions.Version = config.PelicanVersion
 
 	// Need to check just stashcp since it does not go through root, the other modes get checked there
 	if strings.HasPrefix(execName, "stashcp") {
@@ -109,7 +109,7 @@ func copyMain(cmd *cobra.Command, args []string) {
 
 	// Check if the program was executed from a terminal and does not specify a log location
 	// https://rosettacode.org/wiki/Check_output_device_is_a_terminal#Go
-	if fileInfo, _ := os.Stdout.Stat(); (fileInfo.Mode()&os.ModeCharDevice) != 0 && param.Logging_LogLocation.GetString() == "" {
+	if fileInfo, _ := os.Stdout.Stat(); (fileInfo.Mode()&os.ModeCharDevice) != 0 && param.Logging_LogLocation.GetString() == "" && !param.Logging_DisableProgressBars.GetBool() {
 		client.ObjectClientOptions.ProgressBars = true
 	} else {
 		client.ObjectClientOptions.ProgressBars = false

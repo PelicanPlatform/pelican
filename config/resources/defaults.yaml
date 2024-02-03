@@ -21,8 +21,11 @@ Server:
   WebPort: 8444
   WebHost: "0.0.0.0"
   EnableUI: true
+  RegistrationRetryInterval: 10s
 Director:
   DefaultResponse: cache
+  AdvertisementTTL: 15m
+  OriginCacheHealthTestInterval: 15s
 Cache:
   Port: 8442
 Origin:
@@ -31,8 +34,11 @@ Origin:
   EnableMacaroons: false
   EnableVoms: true
   EnableUI: true
+  EnableWrite: true
   SelfTest: true
   Port: 8443
+Registry:
+  InstitutionsUrlReloadMinutes: 15m
 Monitoring:
   PortLower: 9930
   PortHigher: 9999
@@ -54,7 +60,7 @@ Transport:
   ExpectContinueTimeout: 1s
   ResponseHeaderTimeout: 10s
 OIDC:
-  AuthorizationEndpoint:  "https://cilogon.org/authorize"
+  AuthorizationEndpoint: "https://cilogon.org/authorize"
   DeviceAuthEndpoint: "https://cilogon.org/oauth2/device_authorization"
   TokenEndpoint: "https://cilogon.org/oauth2/token"
   UserInfoEndpoint: "https://cilogon.org/oauth2/userinfo"

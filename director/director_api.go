@@ -28,6 +28,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
@@ -78,7 +79,7 @@ func CreateDirectorSDToken() (string, error) {
 	tokenExpireTime := param.Monitoring_TokenExpiresIn.GetDuration()
 
 	tok, err := jwt.NewBuilder().
-		Claim("scope", "pelican.directorSD").
+		Claim("scope", token_scopes.Pelican_DirectorServiceDiscovery.String()).
 		Issuer(directorURL).
 		Audience([]string{directorURL}).
 		Subject("director").
@@ -140,7 +141,7 @@ func VerifyDirectorSDToken(strToken string) (bool, error) {
 	scopes := strings.Split(scope, " ")
 
 	for _, scope := range scopes {
-		if scope == "pelican.directorSD" {
+		if scope == token_scopes.Pelican_DirectorServiceDiscovery.String() {
 			return true, nil
 		}
 	}
@@ -157,7 +158,7 @@ func CreateDirectorScrapeToken() (string, error) {
 	tokenExpireTime := param.Monitoring_TokenExpiresIn.GetDuration()
 
 	tok, err := jwt.NewBuilder().
-		Claim("scope", "monitoring.scrape").
+		Claim("scope", token_scopes.Monitoring_Scrape.String()).
 		Issuer(directorURL). // Exclude audience from token to prevent http header overflow
 		Subject("director").
 		Expiration(time.Now().Add(tokenExpireTime)).
@@ -203,11 +204,12 @@ func ConfigTTLCache(ctx context.Context, egrp *errgroup.Group) {
 	// Put stop logic in a separate goroutine so that parent function is not blocking
 	egrp.Go(func() error {
 		<-ctx.Done()
-		log.Info("Gracefully stopping TTL cache eviction...")
+		log.Info("Gracefully stopping director TTL cache eviction...")
 		serverAds.DeleteAll()
 		serverAds.Stop()
 		namespaceKeys.DeleteAll()
 		namespaceKeys.Stop()
+		log.Info("Director TTL cache eviction has been stopped")
 		return nil
 	})
 }

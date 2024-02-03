@@ -120,6 +120,12 @@ func init() {
 		panic(err)
 	}
 
+	// The -w flag is used if we want the origin to be writeable.
+	originServeCmd.Flags().BoolP("writeable", "", true, "Allow/disable writting to the origin")
+	if err := viper.BindPFlag("Origin.EnableWrite", originServeCmd.Flags().Lookup("writeable")); err != nil {
+		panic(err)
+	}
+
 	// A variety of flags we add for S3 mode. These are ultimately required for configuring the S3 xrootd plugin
 	originServeCmd.Flags().String("service-name", "", "Specify the S3 service-name. Only used when an origin is launched in S3 mode.")
 	originServeCmd.Flags().String("region", "", "Specify the S3 region. Only used when an origin is launched in S3 mode.")

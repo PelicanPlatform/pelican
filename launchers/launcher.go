@@ -25,15 +25,16 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_ui"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/web_ui"
-	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
-	"golang.org/x/sync/errgroup"
 )
 
 func LaunchModules(ctx context.Context, modules config.ServerType) (context.CancelFunc, error) {
@@ -50,9 +51,9 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 		select {
 		case sig := <-sigs:
-			log.Debugf("Received signal %v; will shutdown process", sig)
+			log.Warningf("Received signal %v; will shutdown process", sig)
 			shutdownCancel()
-			return errors.New("Federation process has been cancelled")
+			return nil
 		case <-ctx.Done():
 			return nil
 		}
@@ -67,11 +68,9 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		return shutdownCancel, errors.Wrap(err, "Failure when configuring the server")
 	}
 
-	if param.Server_EnableUI.GetBool() {
-		// Set up necessary APIs to support Web UI, including auth and metrics
-		if err := web_ui.ConfigureServerWebAPI(ctx, engine, egrp); err != nil {
-			return shutdownCancel, err
-		}
+	// Set up necessary APIs to support Web UI, including auth and metrics
+	if err := web_ui.ConfigureServerWebAPI(ctx, engine, egrp); err != nil {
+		return shutdownCancel, err
 	}
 
 	if modules.IsEnabled(config.RegistryType) {
@@ -96,12 +95,37 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 
 	servers := make([]server_utils.XRootDServer, 0)
 	if modules.IsEnabled(config.OriginType) {
-		if param.Origin_Mode.GetString() != "posix" {
-			return shutdownCancel, errors.Errorf("Origin Mode must be set to posix, S3 is not currently supported.")
-		}
+		mode := param.Origin_Mode.GetString()
+		switch mode {
+		case "posix":
+			if param.Origin_ExportVolume.GetString() == "" && (param.Xrootd_Mount.GetString() == "" || param.Origin_NamespacePrefix.GetString() == "") {
+				return shutdownCancel, errors.Errorf(`
+	Export information was not provided.
+	Add the command line flag:
 
-		if param.Origin_ExportVolume.GetString() == "" {
-			return shutdownCancel, errors.Errorf("Origin.ExportVolume must be set in the parameters.yaml file.")
+		-v /mnt/foo:/bar
+
+	to export the directory /mnt/foo to the namespace prefix /bar in the data federation. Alternatively, specify Origin.ExportVolume in the parameters.yaml file:
+
+		Origin:
+			ExportVolume: /mnt/foo:/bar
+
+	Or, specify Xrootd.Mount and Origin.NamespacePrefix in the parameters.yaml file:
+
+		Xrootd:
+			Mount: /mnt/foo
+		Origin:
+			NamespacePrefix: /bar`)
+			}
+		case "s3":
+			if param.Origin_S3Bucket.GetString() == "" || param.Origin_S3Region.GetString() == "" ||
+				param.Origin_S3ServiceName.GetString() == "" || param.Origin_S3ServiceUrl.GetString() == "" {
+				return shutdownCancel, errors.Errorf("The S3 origin is missing configuration options to run properly." +
+					" You must specify a bucket, a region, a service name and a service URL via the command line or via" +
+					" your configuration file.")
+			}
+		default:
+			return shutdownCancel, errors.Errorf("Currently-supported origin modes include posix and s3.")
 		}
 
 		server, err := OriginServe(ctx, engine, egrp)
@@ -110,9 +134,20 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		}
 		servers = append(servers, server)
 
-		err = server_utils.WaitUntilWorking(ctx, "GET", param.Origin_Url.GetString()+"/.well-known/openid-configuration", "Origin", http.StatusOK)
-		if err != nil {
-			return shutdownCancel, err
+		switch mode {
+		case "posix":
+			err = server_utils.WaitUntilWorking(ctx, "GET", param.Origin_Url.GetString()+"/.well-known/openid-configuration", "Origin", http.StatusOK)
+			if err != nil {
+				return shutdownCancel, err
+			}
+		case "s3":
+			// A GET on the server root should cause XRootD to reply with permission denied -- as long as the origin is
+			// running in auth mode (probably). This might need to be revisted if we set up an S3 origin without requiring
+			// tokens
+			err = server_utils.WaitUntilWorking(ctx, "GET", param.Origin_Url.GetString(), "Origin", http.StatusForbidden)
+			if err != nil {
+				return shutdownCancel, err
+			}
 		}
 	}
 
@@ -120,7 +155,6 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 	egrp.Go(func() error {
 		if err := web_ui.RunEngine(ctx, engine, egrp); err != nil {
 			log.Errorln("Failure when running the web engine:", err)
-			shutdownCancel()
 			return err
 		}
 		log.Info("Web engine has shutdown")
@@ -128,18 +162,24 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		return nil
 	})
 
-	if err = server_utils.WaitUntilWorking(ctx, "GET", param.Server_ExternalWebUrl.GetString()+"/view", "Web UI", http.StatusOK); err != nil {
+	if err = server_utils.WaitUntilWorking(ctx, "GET", param.Server_ExternalWebUrl.GetString()+"/api/v1.0/health", "Web UI", http.StatusOK); err != nil {
 		log.Errorln("Web engine startup appears to have failed:", err)
-	}
-
-	log.Debug("Finishing origin server configuration")
-	if err = OriginServeFinish(ctx, egrp); err != nil {
 		return shutdownCancel, err
 	}
 
-	log.Debug("Launching periodic advertise")
-	if err := server_ui.LaunchPeriodicAdvertise(ctx, egrp, servers); err != nil {
-		return shutdownCancel, err
+	if modules.IsEnabled(config.OriginType) {
+		log.Debug("Finishing origin server configuration")
+		if err = OriginServeFinish(ctx, egrp); err != nil {
+			return shutdownCancel, err
+		}
+	}
+
+	// Include cache here just in case, although we currently don't use launcher to launch cache
+	if modules.IsEnabled(config.OriginType) || modules.IsEnabled(config.CacheType) {
+		log.Debug("Launching periodic advertise")
+		if err := server_ui.LaunchPeriodicAdvertise(ctx, egrp, servers); err != nil {
+			return shutdownCancel, err
+		}
 	}
 
 	if param.Server_EnableUI.GetBool() {

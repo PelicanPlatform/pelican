@@ -94,7 +94,7 @@ export default function StatusBox() {
     const [error, setError] = useState<string | undefined>(undefined)
 
     let getStatus = async () => {
-        let response = await fetch("/api/v1.0/health")
+        let response = await fetch("/api/v1.0/metrics/health")
 
         if(response.ok) {
             let data = await response.json()

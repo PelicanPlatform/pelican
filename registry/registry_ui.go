@@ -19,24 +19,36 @@
 package registry
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jellydator/ttlcache/v3"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/web_ui"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
 )
 
 type (
 	listNamespaceRequest struct {
 		ServerType string `form:"server_type"`
+		Status     string `form:"status"`
+	}
+
+	listNamespacesForUserRequest struct {
+		Status string `form:"status"`
 	}
 
 	registrationFieldType string
@@ -48,8 +60,8 @@ type (
 	}
 
 	Institution struct {
-		Name string `mapstructure:"name" json:"name"`
-		ID   string `mapstructure:"id" json:"id"`
+		Name string `mapstructure:"name" json:"name" yaml:"name"`
+		ID   string `mapstructure:"id" json:"id" yaml:"id"`
 	}
 )
 
@@ -61,7 +73,9 @@ const (
 )
 
 var (
-	registrationFields []registrationField
+	registrationFields     []registrationField
+	institutionsCache      *ttlcache.Cache[string, []Institution]
+	institutionsCacheMutex = sync.RWMutex{}
 )
 
 func init() {
@@ -163,46 +177,168 @@ func excludePubKey(nss []*Namespace) (nssNew []NamespaceWOPubkey) {
 	return
 }
 
+func checkUniqueInstitutions(insts []Institution) bool {
+	repeatMap := make(map[string]bool)
+	for _, inst := range insts {
+		if repeatMap[inst.ID] {
+			return false
+		} else {
+			repeatMap[inst.ID] = true
+		}
+	}
+	return true
+}
+
+func getCachedInstitutions() (inst []Institution, intError error, extError error) {
+	if institutionsCache == nil {
+		return nil, errors.New("institutionsCache isn't initialized"), errors.New("Internal institution cache wasn't initialized")
+	}
+	instUrlStr := param.Registry_InstitutionsUrl.GetString()
+	if instUrlStr == "" {
+		intError = errors.New("Bad server configuration. Registry.InstitutionsUrl is unset")
+		extError = errors.New("Bad server configuration. Registry.InstitutionsUrl is unset")
+		return
+	}
+	instUrl, err := url.Parse(instUrlStr)
+	if err != nil {
+		intError = errors.Wrap(err, "Bad server configuration. Registry.InstitutionsUrl is invalid")
+		extError = errors.New("Bad server configuration. Registry.InstitutionsUrl is invalid")
+		return
+	}
+	if !institutionsCache.Has(instUrl.String()) {
+		log.Info("Cache miss for institutions TTL cache. Will fetch from source.")
+		client := &http.Client{Transport: config.GetTransport()}
+		req, err := http.NewRequest("GET", instUrl.String(), nil)
+		if err != nil {
+			intError = errors.Wrap(err, "Error making a request when fetching institution list")
+			extError = errors.New("Error when creating a request to fetch institution from remote url.")
+			return
+		}
+		res, err := client.Do(req)
+		if err != nil {
+			intError = errors.Wrap(err, "Error response when fetching institution list")
+			extError = errors.New("Error from response when fetching institution from remote url.")
+			return
+		}
+		if res.StatusCode != 200 {
+			intError = errors.Wrap(err, fmt.Sprintf("Error response when fetching institution list with code %d", res.StatusCode))
+			extError = errors.New(fmt.Sprint("Error when fetching institution from remote url, remote server error with code: ", res.StatusCode))
+			return
+		}
+		resBody, err := io.ReadAll(res.Body)
+		if err != nil {
+			intError = errors.Wrap(err, "Error reading response body when fetching institution list")
+			extError = errors.New("Error read response when fetching institution from remote url.")
+			return
+		}
+		institutions := []Institution{}
+		if err = json.Unmarshal(resBody, &institutions); err != nil {
+			intError = errors.Wrap(err, "Error parsing response body when fetching institution list")
+			extError = errors.New("Error parsing response when fetching institution from remote url.")
+			return
+		}
+		institutionsCacheMutex.Lock()
+		defer institutionsCacheMutex.Unlock()
+		institutionsCache.Set(instUrl.String(), institutions, ttlcache.DefaultTTL)
+		return institutions, nil, nil
+	} else {
+		institutionsCacheMutex.RLock()
+		defer institutionsCacheMutex.RUnlock()
+		institutions := institutionsCache.Get(instUrl.String())
+		if institutions.Value() == nil {
+			intError = errors.New(fmt.Sprint("Fail to get institutions from internal TTL cache, value is nil from key: ", instUrl))
+			extError = errors.New("Fail to get institutions from internal TTL cache")
+			return
+		}
+		if institutions.IsExpired() {
+			intError = errors.New(fmt.Sprintf("Cached institution with key %q is expired at %v", institutions.Key(), institutions.ExpiresAt()))
+			extError = errors.New("Expired institution cache")
+			return
+		}
+		return institutions.Value(), nil, nil
+	}
+}
+
+// List all namespaces in the registry.
+// For authenticated users, it returns all namespaces.
+// For non-authenticated users, it returns namespaces with AdminMetadata.Status = Approved
+//
+// Query against server_type, status
+//
+// GET /namespaces
 func listNamespaces(ctx *gin.Context) {
+	// Directly call GetUser as we want this endpoint to also be able to serve unauthed users
+	user, err := web_ui.GetUser(ctx)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check user login status"})
+		return
+	}
+	ctx.Set("User", user)
+	isAuthed := user != ""
 	queryParams := listNamespaceRequest{}
 	if ctx.ShouldBindQuery(&queryParams) != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid query parameters"})
 		return
 	}
 
-	if queryParams.ServerType != "" {
-		if queryParams.ServerType != string(OriginType) && queryParams.ServerType != string(CacheType) {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid server type"})
-			return
-		}
-		namespaces, err := getNamespacesByServerType(ServerType(queryParams.ServerType))
-		if err != nil {
-			log.Error("Failed to get namespaces by server type: ", err)
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Server encountered an error trying to list namespaces"})
-			return
-		}
-		nssWOPubkey := excludePubKey(namespaces)
-		ctx.JSON(http.StatusOK, nssWOPubkey)
-
-	} else {
-		namespaces, err := getAllNamespaces()
-		if err != nil {
-			log.Error("Failed to get all namespaces: ", err)
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Server encountered an error trying to list namespaces"})
-			return
-		}
-		nssWOPubkey := excludePubKey(namespaces)
-		ctx.JSON(http.StatusOK, nssWOPubkey)
+	// For unauthed user with non-empty Status query != Approved, return 403
+	if !isAuthed && queryParams.Status != "" && queryParams.Status != Approved.String() {
+		ctx.JSON(http.StatusForbidden, gin.H{"error": "You don't have permission to filter non-approved namespace registrations"})
+		return
 	}
+
+	// Filter ns by server type
+	if queryParams.ServerType != "" && queryParams.ServerType != string(OriginType) && queryParams.ServerType != string(CacheType) {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid server type"})
+		return
+	}
+
+	filterNs := Namespace{}
+
+	// For authenticated users, it returns all namespaces.
+	// For unauthenticated users, it returns namespaces with AdminMetadata.Status = Approved
+	if isAuthed {
+		if queryParams.Status != "" {
+			filterNs.AdminMetadata.Status = RegistrationStatus(queryParams.Status)
+		}
+	} else {
+		filterNs.AdminMetadata.Status = Approved
+	}
+
+	namespaces, err := getNamespacesByFilter(filterNs, ServerType(queryParams.ServerType))
+	if err != nil {
+		log.Error("Failed to get namespaces by server type: ", err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Server encountered an error trying to list namespaces"})
+		return
+	}
+	nssWOPubkey := excludePubKey(namespaces)
+	ctx.JSON(http.StatusOK, nssWOPubkey)
 }
 
+// List namespaces for the currently authenticated user
+//
+// # Query against status
+//
+// GET /namespaces/user
 func listNamespacesForUser(ctx *gin.Context) {
 	user := ctx.GetString("User")
 	if user == "" {
 		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "You need to login to perform this action"})
 		return
 	}
-	namespaces, err := getNamespacesByUserID(user)
+	queryParams := listNamespacesForUserRequest{}
+	if ctx.ShouldBindQuery(&queryParams) != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid query parameters"})
+		return
+	}
+
+	filterNs := Namespace{AdminMetadata: AdminMetadata{UserID: user}}
+
+	if queryParams.Status != "" {
+		filterNs.AdminMetadata.Status = RegistrationStatus(queryParams.Status)
+	}
+
+	namespaces, err := getNamespacesByFilter(filterNs, "")
 	if err != nil {
 		log.Error("Error getting namespaces for user ", user)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Error getting namespaces by user ID"})
@@ -215,9 +351,19 @@ func getNamespaceRegFields(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, registrationFields)
 }
 
+// Create a new namespace registration or update existing namespace registration.
+//
+// For update, only admin-user can update an existing registration if it's been approved already.
+//
+// One caveat in updating is that if the namespace to update was a legacy registration, i.e. It doesn't have
+// AdminMetaData populated, an update __will__ populate the AdminMetaData field and update
+// AdminMetaData based on user input. However, internal fields are still preserved.
+//
+// POST /namespaces
+// PUT /namespaces/:id
 func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 	user := ctx.GetString("User")
-	id := 0 // namespace ID when doing update
+	id := 0 // namespace ID when doing update, will be populated later
 	if user == "" {
 		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "You need to login to perform this action"})
 		return
@@ -238,6 +384,8 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 		ctx.JSON(400, gin.H{"error": "Invalid create or update namespace request"})
 		return
 	}
+	// Assign ID from path param because the request data doesn't have ID set
+	ns.ID = id
 	// Basic validation (type, required, etc)
 	errs := config.GetValidate().Struct(ns)
 	if errs != nil {
@@ -252,16 +400,18 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 	}
 	ns.Prefix = updated_prefix
 
-	// Check if prefix exists before doing anything else
-	exists, err := namespaceExists(ns.Prefix)
-	if err != nil {
-		log.Errorf("Failed to check if namespace already exists: %v", err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Server encountered an error checking if namespace already exists"})
-		return
-	}
-	if exists {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("The prefix %s is already registered", ns.Prefix)})
-		return
+	if !isUpdate {
+		// Check if prefix exists before doing anything else. Skip check if it's update operation
+		exists, err := namespaceExists(ns.Prefix)
+		if err != nil {
+			log.Errorf("Failed to check if namespace already exists: %v", err)
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Server encountered an error checking if namespace already exists"})
+			return
+		}
+		if exists {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("The prefix %s is already registered", ns.Prefix)})
+			return
+		}
 	}
 	// Check if pubKey is a valid JWK
 	pubkey, err := validateJwks(ns.Pubkey)
@@ -317,17 +467,28 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 		}
 
 		// Then check if the user has previlege to update
-		isAdmin, _ := checkAdmin(user)
+		isAdmin, _ := web_ui.CheckAdmin(user)
 		if !isAdmin { // Not admin, need to check if the namespace belongs to the user
-			found, err := namespaceBelongsToUserId(id, user)
+			found, err := namespaceBelongsToUserId(ns.ID, user)
 			if err != nil {
 				log.Error("Error checking if namespace belongs to the user: ", err)
 				ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Error checking if namespace belongs to the user"})
 				return
 			}
 			if !found {
-				log.Errorf("Namespace not found for id: %d", id)
+				log.Errorf("Namespace not found for id: %d", ns.ID)
 				ctx.JSON(http.StatusNotFound, gin.H{"error": "Namespace not found. Check the id or if you own the namespace"})
+				return
+			}
+			existingStatus, err := getNamespaceStatusById(ns.ID)
+			if err != nil {
+				log.Error("Error checking namespace status: ", err)
+				ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Error checking namespace status"})
+				return
+			}
+			if existingStatus == Approved {
+				log.Errorf("User '%s' is trying to modify approved namespace registration with id=%d", user, ns.ID)
+				ctx.JSON(http.StatusForbidden, gin.H{"error": "You don't have permission to modify an approved registration. Please contact your federation administrator"})
 				return
 			}
 		}
@@ -340,8 +501,11 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 	}
 }
 
+// Get one namespace by id.
+// Admin can see any namespace detail while non-admin can only see his/her namespace
+//
+// GET /namesapces/:id
 func getNamespace(ctx *gin.Context) {
-	// Admin can see any namespace detail while non-admin can only see his/her namespace
 	user := ctx.GetString("User")
 	idStr := ctx.Param("id")
 	id, err := strconv.Atoi(idStr)
@@ -362,7 +526,7 @@ func getNamespace(ctx *gin.Context) {
 		return
 	}
 
-	isAdmin, _ := checkAdmin(user)
+	isAdmin, _ := web_ui.CheckAdmin(user)
 	if !isAdmin { // Not admin, need to check if the namespace belongs to the user
 		found, err := namespaceBelongsToUserId(id, user)
 		if err != nil {
@@ -449,6 +613,22 @@ func getNamespaceJWKS(ctx *gin.Context) {
 }
 
 func listInstitutions(ctx *gin.Context) {
+	// When Registry.InstitutionsUrl is set and Registry.Institutions is unset
+	if institutionsCache != nil {
+		insts, intErr, extErr := getCachedInstitutions()
+		if intErr != nil || extErr != nil {
+			if intErr != nil {
+				log.Error(intErr)
+			}
+			if extErr != nil {
+				ctx.JSON(http.StatusInternalServerError, gin.H{"error": extErr.Error()})
+			}
+			return
+		}
+		ctx.JSON(http.StatusOK, insts)
+		return
+	}
+	// When Registry.Institutions is set
 	institutions := []Institution{}
 	if err := param.Registry_Institutions.Unmarshal(&institutions); err != nil {
 		log.Error("Fail to read server configuration of institutions", err)
@@ -462,38 +642,6 @@ func listInstitutions(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, institutions)
-}
-
-// checkAdmin checks if a user string has admin privilege. It returns boolean and a message
-// indicating the error message
-func checkAdmin(user string) (isAdmin bool, message string) {
-	if user == "admin" {
-		return true, ""
-	}
-	adminList := param.Registry_AdminUsers.GetStringSlice()
-	for _, admin := range adminList {
-		if user == admin {
-			return true, ""
-		}
-	}
-	return false, "You don't have permission to perform this action"
-}
-
-// adminAuthHandler checks the admin status of a logged-in user. This middleware
-// should be cascaded behind the [web_ui.AuthHandler]
-func adminAuthHandler(ctx *gin.Context) {
-	user := ctx.GetString("User")
-	// This should be done by a regular auth handler from the upstream, but we check here just in case
-	if user == "" {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Login required to view this page"})
-	}
-	isAdmin, msg := checkAdmin(user)
-	if isAdmin {
-		ctx.Next()
-		return
-	} else {
-		ctx.JSON(http.StatusForbidden, gin.H{"error": msg})
-	}
 }
 
 // Define Gin APIs for registry Web UI. All endpoints are user-facing
@@ -522,15 +670,79 @@ func RegisterRegistryWebAPI(router *gin.RouterGroup) error {
 			createUpdateNamespace(ctx, true)
 		})
 		registryWebAPI.GET("/namespaces/:id/pubkey", getNamespaceJWKS)
-		registryWebAPI.PATCH("/namespaces/:id/approve", web_ui.AuthHandler, adminAuthHandler, func(ctx *gin.Context) {
+		registryWebAPI.PATCH("/namespaces/:id/approve", web_ui.AuthHandler, web_ui.AdminAuthHandler, func(ctx *gin.Context) {
 			updateNamespaceStatus(ctx, Approved)
 		})
-		registryWebAPI.PATCH("/namespaces/:id/deny", web_ui.AuthHandler, adminAuthHandler, func(ctx *gin.Context) {
+		registryWebAPI.PATCH("/namespaces/:id/deny", web_ui.AuthHandler, web_ui.AdminAuthHandler, func(ctx *gin.Context) {
 			updateNamespaceStatus(ctx, Denied)
 		})
 	}
 	{
 		registryWebAPI.GET("/institutions", web_ui.AuthHandler, listInstitutions)
 	}
+	return nil
+}
+
+// Initialize institutions list
+func InitInstConfig(ctx context.Context, egrp *errgroup.Group) error {
+	institutions := []Institution{}
+	if err := param.Registry_Institutions.Unmarshal(&institutions); err != nil {
+		log.Error("Fail to read Registry.Institutions. Make sure you had the correct format", err)
+		return errors.Wrap(err, "Fail to read Registry.Institutions. Make sure you had the correct format")
+	}
+
+	if param.Registry_InstitutionsUrl.GetString() != "" {
+		// Read from Registry.Institutions if Registry.InstitutionsUrl is empty
+		// or Registry.Institutions and Registry.InstitutionsUrl are both set
+		if len(institutions) > 0 {
+			log.Warning("Registry.Institutions and Registry.InstitutionsUrl are both set. Registry.InstitutionsUrl is ignored")
+			if !checkUniqueInstitutions(institutions) {
+				return errors.Errorf("Institution IDs read from config are not unique")
+			}
+			// return here so that we don't init the institution url cache
+			return nil
+		}
+
+		_, err := url.Parse(param.Registry_InstitutionsUrl.GetString())
+		if err != nil {
+			log.Error("Invalid Registry.InstitutionsUrl: ", err)
+			return errors.Wrap(err, "Invalid Registry.InstitutionsUrl")
+		}
+		instCacheTTL := param.Registry_InstitutionsUrlReloadMinutes.GetDuration()
+
+		institutionsCache = ttlcache.New[string, []Institution](ttlcache.WithTTL[string, []Institution](instCacheTTL))
+
+		go institutionsCache.Start()
+
+		egrp.Go(func() error {
+			<-ctx.Done()
+			institutionsCacheMutex.Lock()
+			defer institutionsCacheMutex.Unlock()
+			log.Info("Gracefully stopping institution TTL cache eviction...")
+			if institutionsCache != nil {
+				institutionsCache.DeleteAll()
+				institutionsCache.Stop()
+			} else {
+				log.Info("Institution TTL cache is nil, stop clean up process.")
+			}
+			return nil
+		})
+
+		// Try to populate the cache at the server start. If error occured, it's non-blocking
+		cachedInsts, intErr, _ := getCachedInstitutions()
+		if intErr != nil {
+			log.Warning("Failed to populate institution cache. Error: ", intErr)
+		} else {
+			if !checkUniqueInstitutions(cachedInsts) {
+				return errors.Errorf("Institution IDs read from config are not unique")
+			}
+			log.Infof("Successfully populated institution TTL cache with %d entries", len(institutionsCache.Get(institutionsCache.Keys()[0]).Value()))
+		}
+	}
+
+	if !checkUniqueInstitutions(institutions) {
+		return errors.Errorf("Institution IDs read from config are not unique")
+	}
+	// Else we will read from Registry.Institutions. No extra action needed.
 	return nil
 }

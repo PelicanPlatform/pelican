@@ -60,7 +60,10 @@ func handleCLI(args []string) error {
 			fmt.Println("Built By:", builtBy)
 			return nil
 		}
-		Execute()
+		err := Execute()
+		if err != nil {
+			os.Exit(1)
+		}
 	}
 	return nil
 }

@@ -20,5 +20,5 @@ Xrootd:
   DetailedMonitoringHost: xrd-mon.osgstorage.org
 Federation:
   DiscoveryUrl: osg-htc.org
-  TopologyNamespaceURL: https://topology.opensciencegrid.org/stashcache/namespaces.json
+  TopologyNamespaceURL: https://topology.opensciencegrid.org/osdf/namespaces
   TopologyReloadInterval: 10

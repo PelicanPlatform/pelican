@@ -32,6 +32,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -128,6 +129,9 @@ var (
 	// A variable indicating enabled Pelican servers in the current process
 	enabledServers ServerType
 	setServerOnce  sync.Once
+
+	// Pelican version
+	PelicanVersion string
 )
 
 func init() {
@@ -176,11 +180,42 @@ func IsServerEnabled(testServer ServerType) bool {
 	return enabledServers.IsEnabled(testServer)
 }
 
+// Get a string slice of currently enabled servers, sorted by alphabetical order.
+// By default, it calls String method of each enabled server.
+// To get strings in lowerCase, set lowerCase = true.
+func GetEnabledServerString(lowerCase bool) []string {
+	servers := make([]string, 0)
+	if enabledServers.IsEnabled(CacheType) {
+		servers = append(servers, CacheType.String())
+	}
+	if enabledServers.IsEnabled(OriginType) {
+		servers = append(servers, OriginType.String())
+	}
+	if enabledServers.IsEnabled(DirectorType) {
+		servers = append(servers, DirectorType.String())
+	}
+	if enabledServers.IsEnabled(RegistryType) {
+		servers = append(servers, RegistryType.String())
+	}
+	sort.Strings(servers)
+	if lowerCase {
+		for i, serverStr := range servers {
+			servers[i] = strings.ToLower(serverStr)
+		}
+		return servers
+	} else {
+		return servers
+	}
+}
+
 // Create a new, empty ServerType bitmask
 func NewServerType() ServerType {
 	return ServerType(0)
 }
 
+// Get the string representation of a ServerType instance. This is intended
+// for getting the string form of a single ServerType contant, such as CacheType
+// OriginType, etc. To get a string slice of enabled servers, use EnabledServerString()
 func (sType ServerType) String() string {
 	switch sType {
 	case CacheType:
@@ -259,14 +294,33 @@ func GetAllPrefixes() []string {
 
 func DiscoverFederation() error {
 	federationStr := param.Federation_DiscoveryUrl.GetString()
+	externalUrlStr := param.Server_ExternalWebUrl.GetString()
+	defer func() {
+		// Set default guesses if these values are still unset.
+		if param.Federation_DirectorUrl.GetString() == "" && enabledServers.IsEnabled(DirectorType) {
+			viper.Set("Federation.DirectorUrl", externalUrlStr)
+		}
+		if param.Federation_RegistryUrl.GetString() == "" && enabledServers.IsEnabled(RegistryType) {
+			viper.Set("Federation.RegistryUrl", externalUrlStr)
+		}
+		if param.Federation_JwkUrl.GetString() == "" && enabledServers.IsEnabled(DirectorType) {
+			viper.Set("Federation.JwkUrl", externalUrlStr+"/.well-known/issuer.jwks")
+		}
+	}()
 	if len(federationStr) == 0 {
 		log.Debugln("Federation URL is unset; skipping discovery")
 		return nil
 	}
+	if federationStr == externalUrlStr {
+		log.Debugln("Current web engine hosts the federation; skipping auto-discovery of services")
+		return nil
+	}
+
 	log.Debugln("Federation URL:", federationStr)
 	curDirectorURL := param.Federation_DirectorUrl.GetString()
 	curRegistryURL := param.Federation_RegistryUrl.GetString()
-	if len(curDirectorURL) != 0 && len(curRegistryURL) != 0 {
+	curFederationJwkURL := param.Federation_JwkUrl.GetString()
+	if len(curDirectorURL) != 0 && len(curRegistryURL) != 0 && len(curFederationJwkURL) != 0 {
 		return nil
 	}
 
@@ -321,12 +375,15 @@ func DiscoverFederation() error {
 		viper.Set("Federation.DirectorUrl", metadata.DirectorEndpoint)
 	}
 	if curRegistryURL == "" {
-		log.Debugln("Federation service discovery resulted in namespace registry URL",
+		log.Debugln("Federation service discovery resulted in registry URL",
 			metadata.NamespaceRegistrationEndpoint)
 		viper.Set("Federation.RegistryUrl", metadata.NamespaceRegistrationEndpoint)
 	}
-
-	viper.Set("Federation.JwkUrl", metadata.JwksUri)
+	if curFederationJwkURL == "" {
+		log.Debugln("Federation service discovery resulted in JWKS URL",
+			metadata.JwksUri)
+		viper.Set("Federation.JwkUrl", metadata.JwksUri)
+	}
 
 	return nil
 }
@@ -566,23 +623,23 @@ func initConfigDir() error {
 	return nil
 }
 
-// Initialize Pelican server instance. Pass a list of `enabledServices` if you want to enable multiple services.
+// Initialize Pelican server instance. Pass a bit mask of `currentServers` if you want to enable multiple services.
 // Note not all configurations are supported: currently, if you enable both cache and origin then an error
 // is thrown
-func InitServer(ctx context.Context, enabledServices ServerType) error {
+func InitServer(ctx context.Context, currentServers ServerType) error {
 	if err := initConfigDir(); err != nil {
 		return errors.Wrap(err, "Failed to initialize the server configuration")
 	}
-	if enabledServices.IsEnabled(OriginType) && enabledServices.IsEnabled(CacheType) {
+	if currentServers.IsEnabled(OriginType) && currentServers.IsEnabled(CacheType) {
 		return errors.New("A cache and origin cannot both be enabled in the same instance")
 	}
 
-	setEnabledServer(enabledServices)
+	setEnabledServer(currentServers)
 
 	xrootdPrefix := ""
-	if enabledServices.IsEnabled(OriginType) {
+	if currentServers.IsEnabled(OriginType) {
 		xrootdPrefix = "origin"
-	} else if enabledServices.IsEnabled(CacheType) {
+	} else if currentServers.IsEnabled(CacheType) {
 		xrootdPrefix = "cache"
 	}
 	configDir := viper.GetString("ConfigDir")
@@ -666,7 +723,7 @@ func InitServer(ctx context.Context, enabledServices ServerType) error {
 	xrootdPortIsSet := viper.IsSet("Xrootd.Port")
 	cacheFallbackToXrootd := false
 	originFallbackToXrootd := false
-	if enabledServices.IsEnabled(CacheType) {
+	if currentServers.IsEnabled(CacheType) {
 		if !viper.IsSet("Cache.Port") {
 			if xrootdPortIsSet {
 				cacheFallbackToXrootd = true
@@ -676,7 +733,7 @@ func InitServer(ctx context.Context, enabledServices ServerType) error {
 			}
 		}
 	}
-	if enabledServices.IsEnabled(OriginType) && !viper.IsSet("Origin.Port") {
+	if currentServers.IsEnabled(OriginType) && !viper.IsSet("Origin.Port") {
 		if xrootdPortIsSet {
 			originFallbackToXrootd = true
 			originPort = xrootdPort
@@ -712,7 +769,7 @@ func InitServer(ctx context.Context, enabledServices ServerType) error {
 	}
 
 	webPort := param.Server_WebPort.GetInt()
-	if webPort < 1 {
+	if webPort < 0 {
 		return errors.Errorf("the Server.WebPort setting of %d is invalid; TCP ports must be greater than 0", webPort)
 	}
 	viper.SetDefault("Server.ExternalWebUrl", fmt.Sprint("https://", hostname, ":", webPort))
@@ -721,7 +778,7 @@ func InitServer(ctx context.Context, enabledServices ServerType) error {
 		return errors.Wrap(err, fmt.Sprint("Invalid Server.ExternalWebUrl: ", externalAddressStr))
 	}
 
-	if enabledServices.IsEnabled(DirectorType) && param.Federation_DirectorUrl.GetString() == "" {
+	if currentServers.IsEnabled(DirectorType) && param.Federation_DirectorUrl.GetString() == "" {
 		viper.SetDefault("Federation.DirectorUrl", viper.GetString("Server.ExternalWebUrl"))
 	}
 
@@ -739,6 +796,9 @@ func InitServer(ctx context.Context, enabledServices ServerType) error {
 	if err != nil || unmarshalledConfig == nil {
 		return err
 	}
+
+	// Reset issuerPrivateJWK to ensure test cases can use their own temp IssuerKey
+	issuerPrivateJWK.Store(nil)
 
 	// As necessary, generate private keys, JWKS and corresponding certs
 
@@ -769,7 +829,7 @@ func InitServer(ctx context.Context, enabledServices ServerType) error {
 
 	// Set up the server's issuer URL so we can access that data wherever we need to find keys and whatnot
 	// This populates Server.IssuerUrl, and can be safely fetched using server_utils.GetServerIssuerURL()
-	err = parseServerIssuerURL(enabledServices)
+	err = parseServerIssuerURL(currentServers)
 	if err != nil {
 		return err
 	}

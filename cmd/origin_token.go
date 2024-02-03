@@ -1,13 +1,16 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
 
-	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
+
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 // Take an input slice and append its claim name
@@ -41,11 +44,7 @@ func parseClaimsToTokenConfig(claims []string) (*utils.TokenConfig, error) {
 		case "aud":
 			tokenConfig.Audience = append(tokenConfig.Audience, val)
 		case "scope":
-			if tokenConfig.Scope == "" {
-				tokenConfig.Scope = val
-			} else {
-				tokenConfig.Scope = tokenConfig.Scope + " " + val
-			}
+			tokenConfig.AddRawScope(val)
 		case "ver":
 			tokenConfig.Version = val
 		case "wlcg.ver":
@@ -68,6 +67,14 @@ func parseClaimsToTokenConfig(claims []string) (*utils.TokenConfig, error) {
 }
 
 func cliTokenCreate(cmd *cobra.Command, args []string) error {
+	// Although we don't actually run any server stuff, we need access to the Origin's configuration
+	// to know where private keys live for token signing, so we still need to call InitServer()
+	ctx := context.Background()
+	err := config.InitServer(ctx, config.OriginType)
+	if err != nil {
+		return errors.Wrap(err, "Cannot create token, failed to initialize configuration")
+	}
+
 	// Additional claims can be passed via the --claims flag, or
 	// they can be passed as args. We join those two slices here
 	claimsSlice, err := cmd.Flags().GetStringSlice("claim")

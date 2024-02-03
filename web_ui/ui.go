@@ -29,10 +29,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path"
 	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/pelicanplatform/pelican/config"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pelicanplatform/pelican/metrics"
@@ -58,73 +61,119 @@ func getConfigValues(ctx *gin.Context) {
 		ctx.JSON(401, gin.H{"error": "Authentication required to visit this API"})
 		return
 	}
-	config, err := param.GetUnmarshaledConfig()
+	rawConfig, err := param.UnmarshalConfig()
 	if err != nil {
-		ctx.JSON(500, gin.H{"error": "Failed to get the unmarshaled config"})
+		ctx.JSON(500, gin.H{"error": "Failed to get the unmarshaled rawConfig"})
+		return
+	}
+	configWithType := param.ConvertToConfigWithType(rawConfig)
+
+	ctx.JSON(200, configWithType)
+}
+
+func getEnabledServers(ctx *gin.Context) {
+	enabledServers := config.GetEnabledServerString(true)
+	if len(enabledServers) == 0 {
+		ctx.JSON(500, gin.H{"error": "No enabled servers found"})
 		return
 	}
 
-	ctx.JSON(200, config)
+	ctx.JSON(200, gin.H{"servers": enabledServers})
 }
 
 func configureWebResource(engine *gin.Engine) error {
-	engine.GET("/view/*path", func(ctx *gin.Context) {
-		path := ctx.Param("path")
+	engine.GET("/view/*requestPath", func(ctx *gin.Context) {
+		requestPath := ctx.Param("requestPath")
 
-		if strings.HasSuffix(path, "/") {
-			path += "index.html"
+		// If the requestPath is a directory indicate that we are looking for the index.html file
+		if strings.HasSuffix(requestPath, "/") {
+			requestPath += "index.html"
+		}
+
+		// Clean the request path
+		requestPath = path.Clean(requestPath)
+
+		// If requestPath doesn't have extension, is not a directory, and has a index file, redirect to index file
+		if !strings.Contains(requestPath, ".") && !strings.HasSuffix(requestPath, "/") {
+			if _, err := webAssets.ReadFile("frontend/out" + requestPath + "/index.html"); err == nil {
+				ctx.Redirect(http.StatusMovedPermanently, "/view/"+requestPath+"/")
+				return
+			}
 		}
 
 		db := authDB.Load()
-		user, err := getUser(ctx)
+		user, err := GetUser(ctx)
 
-		// Redirect initialized users from initialization pages
-		if strings.HasPrefix(path, "/initialization") && strings.HasSuffix(path, "index.html") {
+		// If just one server is enabled, redirect to that server
+		if len(config.GetEnabledServerString(true)) == 1 && requestPath == "/index.html" {
+			ctx.Redirect(http.StatusFound, "/view/"+config.GetEnabledServerString(true)[0]+"/")
+			return
+		}
 
-			// If the user has been initialized previously
-			if db != nil {
-				ctx.Redirect(http.StatusFound, "/view/")
-				return
+		// If requesting servers other than the registry
+		if !strings.HasPrefix(requestPath, "/registry") {
+
+			// Redirect initialized users from initialization pages
+			if strings.HasPrefix(requestPath, "/initialization") && strings.HasSuffix(requestPath, "index.html") {
+
+				// If the user has been initialized previously
+				if db != nil {
+					ctx.Redirect(http.StatusFound, "/view/")
+					return
+				}
+			}
+
+			// Redirect authenticated users from login pages
+			if strings.HasPrefix(requestPath, "/login") && strings.HasSuffix(requestPath, "index.html") {
+
+				// If the user has been authenticated previously
+				if err == nil && user != "" {
+					ctx.Redirect(http.StatusFound, "/view/")
+					return
+				}
+			}
+
+			// Direct uninitialized users to initialization pages
+			if !strings.HasPrefix(requestPath, "/initialization") && strings.HasSuffix(requestPath, "index.html") {
+
+				// If the user has not been initialized previously
+				if db == nil {
+					ctx.Redirect(http.StatusFound, "/view/initialization/code/")
+					return
+				}
+			}
+
+			// Direct unauthenticated initialized users to login pages
+			if !strings.HasPrefix(requestPath, "/login") && strings.HasSuffix(requestPath, "index.html") {
+
+				// If the user is not authenticated but initialized
+				if (err != nil || user == "") && db != nil {
+					ctx.Redirect(http.StatusFound, "/view/login/")
+					return
+				}
 			}
 		}
 
-		// Redirect authenticated users from login pages
-		if strings.HasPrefix(path, "/login") && strings.HasSuffix(path, "index.html") {
-
-			// If the user has been authenticated previously
-			if err == nil && user != "" {
-				ctx.Redirect(http.StatusFound, "/view/")
-				return
-			}
-		}
-
-		// Direct uninitialized users to initialization pages
-		if !strings.HasPrefix(path, "/initialization") && strings.HasSuffix(path, "index.html") {
-
-			// If the user has not been initialized previously
-			if db == nil {
-				ctx.Redirect(http.StatusFound, "/view/initialization/code/")
-				return
-			}
-		}
-
-		// Direct unauthenticated initialized users to login pages
-		if !strings.HasPrefix(path, "/login") && strings.HasSuffix(path, "index.html") {
-
-			// If the user is not authenticated but initialized
-			if (err != nil || user == "") && db != nil {
-				ctx.Redirect(http.StatusFound, "/view/login/")
-				return
-			}
-		}
-
-		filePath := "frontend/out" + path
+		filePath := "frontend/out" + requestPath
 		file, _ := webAssets.ReadFile(filePath)
-		ctx.Data(
-			http.StatusOK,
-			mime.TypeByExtension(filePath),
-			file,
-		)
+
+		// If the file is not found, return 404
+		if file == nil {
+			notFoundFilePath := "frontend/out/404/index.html"
+			file, _ := webAssets.ReadFile(notFoundFilePath)
+			ctx.Data(
+				http.StatusOK,
+				mime.TypeByExtension(notFoundFilePath),
+				file,
+			)
+		} else {
+			// If the file is found, return the file
+			ctx.Data(
+				http.StatusOK,
+				mime.TypeByExtension(filePath),
+				file,
+			)
+		}
 	})
 
 	engine.GET("/api/v1.0/docs", func(ctx *gin.Context) {
@@ -144,7 +193,11 @@ func configureWebResource(engine *gin.Engine) error {
 // Configure common endpoint available to all server web UI which are located at /api/v1.0/*
 func configureCommonEndpoints(engine *gin.Engine) error {
 	engine.GET("/api/v1.0/config", AuthHandler, getConfigValues)
-
+	engine.GET("/api/v1.0/servers", AuthHandler, getEnabledServers)
+	// Health check endpoint for web engine
+	engine.GET("/api/v1.0/health", func(ctx *gin.Context) {
+		ctx.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Web Engine Running. Time: %s", time.Now().String())})
+	})
 	return nil
 }
 
@@ -156,7 +209,7 @@ func configureMetrics(ctx context.Context, engine *gin.Engine) error {
 	prometheusMonitor := ginprometheus.NewPrometheus("gin")
 	prometheusMonitor.Use(engine)
 
-	engine.GET("/api/v1.0/health", AuthHandler, func(ctx *gin.Context) {
+	engine.GET("/api/v1.0/metrics/health", AuthHandler, func(ctx *gin.Context) {
 		healthStatus := metrics.GetHealthStatus()
 		ctx.JSON(http.StatusOK, healthStatus)
 	})
@@ -228,18 +281,21 @@ func waitUntilLogin(ctx context.Context) error {
 //
 // You need to mount the static resources for UI in a separate function
 func ConfigureServerWebAPI(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) error {
-	if err := configureAuthEndpoints(ctx, engine, egrp); err != nil {
-		return err
-	}
 	if err := configureCommonEndpoints(engine); err != nil {
-		return err
-	}
-	if err := configureWebResource(engine); err != nil {
 		return err
 	}
 	if err := configureMetrics(ctx, engine); err != nil {
 		return err
 	}
+	if param.Server_EnableUI.GetBool() {
+		if err := configureAuthEndpoints(ctx, engine, egrp); err != nil {
+			return err
+		}
+		if err := configureWebResource(engine); err != nil {
+			return err
+		}
+	}
+
 	// Redirect root to /view for web UI
 	engine.GET("/", func(c *gin.Context) {
 		c.Redirect(http.StatusFound, "/view/")
@@ -318,7 +374,7 @@ func runEngineWithListener(ctx context.Context, ln net.Listener, engine *gin.Eng
 
 	server_utils.LaunchWatcherMaintenance(
 		ctx,
-		filepath.Dir(param.Server_TLSCertificate.GetString()),
+		[]string{filepath.Dir(param.Server_TLSCertificate.GetString())},
 		"server TLS maintenance",
 		2*time.Minute,
 		func(notifyEvent bool) error {
@@ -356,9 +412,9 @@ func runEngineWithListener(ctx context.Context, ln net.Listener, engine *gin.Eng
 		defer cancel()
 		err = server.Shutdown(ctx)
 		if err != nil {
-			log.Panicln("Failed to shutdown server:", err)
+			log.Errorln("Failed to shutdown server:", err)
 		}
-		return nil
+		return err
 	})
 
 	if err := server.ServeTLS(ln, "", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {

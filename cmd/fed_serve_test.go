@@ -65,7 +65,9 @@ func TestFedServePosixOrigin(t *testing.T) {
 	viper.Set("ConfigDir", tmpPath)
 	viper.Set("Xrootd.RunLocation", filepath.Join(tmpPath, "xrootd"))
 	t.Cleanup(func() {
-		os.RemoveAll(tmpPath)
+		if err := os.RemoveAll(tmpPath); err != nil {
+			t.Fatal("Failed to clean up temp path")
+		}
 	})
 
 	// Increase the log level; otherwise, its difficult to debug failures

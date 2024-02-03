@@ -264,7 +264,7 @@ func GenerateTransferDetailsUsingCache(cache CacheInterface, opts TransferDetail
 	return nil
 }
 
-func download_http(sourceUrl *url.URL, destination string, payload *payloadStruct, namespace namespaces.Namespace, recursive bool, tokenName string, OSDFDirectorUrl string) (bytesTransferred int64, err error) {
+func download_http(sourceUrl *url.URL, destination string, payload *payloadStruct, namespace namespaces.Namespace, recursive bool, tokenName string) (bytesTransferred int64, err error) {
 
 	// First, create a handler for any panics that occur
 	defer func() {
@@ -298,7 +298,8 @@ func download_http(sourceUrl *url.URL, destination string, payload *payloadStruc
 	// Check the env var "USE_OSDF_DIRECTOR" and decide if ordered caches should come from director
 	var transfers []TransferDetails
 	var files []string
-	closestNamespaceCaches, err := GetCachesFromNamespace(namespace, OSDFDirectorUrl != "")
+	directorUrl := param.Federation_DirectorUrl.GetString()
+	closestNamespaceCaches, err := GetCachesFromNamespace(namespace, directorUrl != "")
 	if err != nil {
 		log.Errorln("Failed to get namespaced caches (treated as non-fatal):", err)
 	}
@@ -967,15 +968,15 @@ Loop:
 	if fileInfo.Size() == 0 {
 		return 0, lastError
 	} else {
+		log.Debugln("Uploaded bytes:", reader.BytesComplete())
 		return reader.BytesComplete(), lastError
 	}
 
 }
 
-var UploadClient = &http.Client{Transport: config.GetTransport()}
-
 // Actually perform the Put request to the server
 func doPut(request *http.Request, responseChan chan<- *http.Response, errorChan chan<- error) {
+	var UploadClient = &http.Client{Transport: config.GetTransport()}
 	client := UploadClient
 	dump, _ := httputil.DumpRequestOut(request, false)
 	log.Debugf("Dumping request: %s", dump)

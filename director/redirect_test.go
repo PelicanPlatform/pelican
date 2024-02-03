@@ -23,6 +23,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/test_utils"
+	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -110,7 +111,7 @@ func TestDirectorRegistration(t *testing.T) {
 		// Create a token to be inserted
 		tok, err := jwt.NewBuilder().
 			Issuer(issuerURL.String()).
-			Claim("scope", "pelican.advertise").
+			Claim("scope", token_scopes.Pelican_Advertise.String()).
 			Audience([]string{"director.test"}).
 			Subject("origin").
 			Build()
@@ -137,8 +138,8 @@ func TestDirectorRegistration(t *testing.T) {
 	setupMockCache := func(t *testing.T, publicKey jwk.Key) MockCache {
 		return MockCache{
 			GetFn: func(key string, keyset *jwk.Set) (jwk.Set, error) {
-				if key != "https://get-your-tokens.org/api/v2.0/registry/metadata/foo/bar/.well-known/issuer.jwks" {
-					t.Errorf("expecting: https://get-your-tokens.org/api/v2.0/registry/metadata/foo/bar/.well-known/issuer.jwks, got %q", key)
+				if key != "https://get-your-tokens.org/api/v1.0/registry/foo/bar/.well-known/issuer.jwks" {
+					t.Errorf("expecting: https://get-your-tokens.org/api/v1.0/registry/foo/bar/.well-known/issuer.jwks, got %q", key)
 				}
 				return *keyset, nil
 			},
@@ -375,6 +376,11 @@ func TestDiscoverOriginCache(t *testing.T) {
 	}
 
 	mockDirectorUrl := "https://fake-director.org:8888"
+
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
 	viper.Reset()
 	// Direcor SD will only be used for director's Prometheus scraper to get available origins,
 	// so the token issuer is issentially the director server itself
@@ -385,8 +391,12 @@ func TestDiscoverOriginCache(t *testing.T) {
 	kfile := filepath.Join(tDir, "testKey")
 	viper.Set("IssuerKey", kfile)
 
+	config.InitConfig()
+	err := config.InitServer(ctx, config.DirectorType)
+	require.NoError(t, err)
+
 	// Generate a private key to use for the test
-	_, err := config.GetIssuerPublicJWKS()
+	_, err = config.GetIssuerPublicJWKS()
 	assert.NoError(t, err, "Error generating private key")
 	// Get private key
 	privateKey, err := config.GetIssuerPrivateJWK()
@@ -405,7 +415,7 @@ func TestDiscoverOriginCache(t *testing.T) {
 
 		tok, err := jwt.NewBuilder().
 			Issuer(tokenIssuerString).
-			Claim("scope", "pelican.directorSD").
+			Claim("scope", token_scopes.Pelican_DirectorServiceDiscovery).
 			Audience([]string{"director.test"}).
 			Subject("director").
 			Expiration(time.Now().Add(time.Hour)).
@@ -676,6 +686,13 @@ func TestRedirects(t *testing.T) {
 		c.Request = req
 		ShortcutMiddleware("cache")(c)
 		expectedPath = "/api/v1.0/director/object/foo/bar"
+		assert.Equal(t, expectedPath, c.Request.URL.Path)
+
+		// test a PUT request always goes to the origin endpoint
+		req = httptest.NewRequest("PUT", "/foo/bar", nil)
+		c.Request = req
+		ShortcutMiddleware("cache")(c)
+		expectedPath = "/api/v1.0/director/origin/foo/bar"
 		assert.Equal(t, expectedPath, c.Request.URL.Path)
 
 		// Host-aware tests

@@ -20,7 +20,6 @@ package main
 
 import (
 	"context"
-	"os"
 	"strconv"
 	"strings"
 
@@ -78,23 +77,23 @@ func (i *uint16Value) Type() string {
 
 func (i *uint16Value) String() string { return strconv.FormatUint(uint64(*i), 10) }
 
-func Execute() {
-	egrp := errgroup.Group{}
+func Execute() error {
+	egrp, egrpCtx := errgroup.WithContext(context.Background())
 	defer func() {
 		err := egrp.Wait()
 		if err != nil {
-			log.Errorln("Error occurred when shutting down process:", err)
+			log.Errorln("Fatal error occurred that lead to the shutdown of the process:", err)
+		} else {
+			// Use Error instead of Info because our default log level is Error
+			log.Error("Pelican is safely exited")
 		}
 	}()
-	ctx := context.WithValue(context.Background(), config.EgrpKey, &egrp)
-	err := rootCmd.ExecuteContext(ctx)
-	if err != nil {
-		os.Exit(1)
-	}
+	ctx := context.WithValue(egrpCtx, config.EgrpKey, egrp)
+	return rootCmd.ExecuteContext(ctx)
 }
 
 func init() {
-
+	config.PelicanVersion = version
 	cobra.OnInitialize(config.InitConfig)
 	rootCmd.AddCommand(objectCmd)
 	objectCmd.CompletionOptions.DisableDefaultCmd = true

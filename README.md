@@ -1,6 +1,12 @@
 
-Pelican Command Line
-====================
+<h1 align="center">Pelican Command Line</h1>
+
+<p align="center">
+  <img alt="Build Status" src="https://img.shields.io/github/actions/workflow/status/PelicanPlatform/pelican/codeql-analysis.yml?style=for-the-badge">
+  <img alt="License" src="https://img.shields.io/github/license/PelicanPlatform/pelican?style=for-the-badge">
+  <img alt="Release" src="https://img.shields.io/github/v/release/pelicanplatform/pelican?style=for-the-badge">
+  <img alt="Downloads for all releases" src="https://img.shields.io/github/downloads/pelicanplatform/pelican/total?style=for-the-badge">
+</p>
 
 The Pelican command line tool allows one to use a Pelican
 federation as a client and serve datasets through running a

@@ -140,9 +140,15 @@ RUN if [ "$TARGETARCH" = "amd64" ]; then \
         rm -f minio.rpm; \
     fi
 
+# Install pre-commit
+RUN yum install -y python39 &&\
+    /bin/pip-3.9 install pre-commit
+
+COPY ./images/dev-container-entrypoint.sh /usr/local/bin/
+
 WORKDIR /app
 
-CMD ["/bin/bash"]
+ENTRYPOINT ["dev-container-entrypoint.sh"]
 
 # Build with `docker build -t pelican-dev -f images/dev.Dockerfile .`
 # Run from repo root with `docker run -it -p 8444:8444 -v $PWD:/app  pelican-dev`

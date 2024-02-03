@@ -18,7 +18,7 @@
 
 "use client"
 
-import {Box, Typography} from "@mui/material";
+import {Box, Grow, Typography} from "@mui/material";
 import { useRouter } from 'next/navigation'
 import { useState } from "react";
 
@@ -32,25 +32,39 @@ export default function Home() {
     let [password, _setPassword] = useState <string>("")
     let [confirmPassword, _setConfirmPassword] = useState <string>("")
     let [loading, setLoading] = useState(false);
+    let [error, setError] = useState<string | undefined>(undefined);
 
     async function submit(password: string) {
 
         setLoading(true)
 
-        let response = await fetch("/api/v1.0/auth/resetLogin", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                "password": password
+        try {
+            let response = await fetch("/api/v1.0/auth/resetLogin", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    "password": password
+                })
             })
-        })
 
-        if(response.ok){
-            router.push("/")
-        } else {
+            if(response.ok){
+                router.push("/")
+            } else {
+                try {
+                    let data = await response.json()
+
+                    setLoading(false)
+                    setError(response.status + ": " + data['error'])
+                } catch {
+                    setLoading(false)
+                    setError(response.status + ": " + response.statusText)
+                }
+            }
+        } catch {
             setLoading(false)
+            setError("Could not connect to server")
         }
     }
 
@@ -59,6 +73,8 @@ export default function Home() {
 
         if(password == confirmPassword){
             submit(password)
+        } else {
+            setError("Passwords do not match")
         }
     }
 
@@ -70,7 +86,7 @@ export default function Home() {
                         Set Password
                     </Typography>
                     <Typography textAlign={"center"} variant={"h6"} component={"p"}>
-                        Set root metrics password
+                        This will become the admin password for this Pelican endpoint
                     </Typography>
                 </Box>
                 <Box pt={2} mx={"auto"}>
@@ -80,6 +96,7 @@ export default function Home() {
                                 InputProps: {
                                     onChange: (e) => {
                                         _setPassword(e.target.value)
+                                        setError(undefined)
                                     }
                                 }
                             }}/>
@@ -90,13 +107,24 @@ export default function Home() {
                                 InputProps: {
                                     onChange: (e) => {
                                         _setConfirmPassword(e.target.value)
+                                        setError(undefined)
                                     }
                                 },
                                 error: password != confirmPassword,
                                 helperText: password != confirmPassword ? "Passwords do not match" : ""
                             }}/>
                         </Box>
-                        <Box mt={3} display={"flex"}>
+                        <Box mt={2} display={"flex"} flexDirection={"column"}>
+                            <Grow in={error !== undefined}>
+                                <Typography
+                                    textAlign={"center"}
+                                    variant={"subtitle2"}
+                                    color={"error.main"}
+                                    mb={1}
+                                >
+                                    {error}
+                                </Typography>
+                            </Grow>
                             <LoadingButton
                                 variant="outlined"
                                 sx={{margin: "auto"}}

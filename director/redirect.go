@@ -45,6 +45,7 @@ type PromDiscoveryItem struct {
 var (
 	minClientVersion, _        = version.NewVersion("7.0.0")
 	minOriginVersion, _        = version.NewVersion("7.0.0")
+	minCacheVersion, _         = version.NewVersion("7.3.0")
 	healthTestCancelFuncs      = make(map[ServerAd]context.CancelFunc)
 	healthTestCancelFuncsMutex = sync.RWMutex{}
 )
@@ -152,6 +153,10 @@ func versionCompatCheck(ginCtx *gin.Context) error {
 		minCompatVer = minClientVersion
 	case "origin":
 		minCompatVer = minOriginVersion
+	case "cache":
+		minCompatVer = minCacheVersion
+	default:
+		return errors.Errorf("Invalid version format. The director does not support your %s version (%s).", service, reqVer.String())
 	}
 
 	if reqVer.LessThan(minCompatVer) {
@@ -179,7 +184,7 @@ func RedirectToCache(ginCtx *gin.Context) {
 
 	authzBearerEscaped := getAuthzEscaped(ginCtx.Request)
 
-	namespaceAd, _, cacheAds := GetAdsForPath(reqPath)
+	namespaceAd, originAds, cacheAds := GetAdsForPath(reqPath)
 	// if GetAdsForPath doesn't find any ads because the prefix doesn't exist, we should
 	// report the lack of path first -- this is most important for the user because it tells them
 	// they're trying to get an object that simply doesn't exist
@@ -189,13 +194,22 @@ func RedirectToCache(ginCtx *gin.Context) {
 	}
 	// If the namespace prefix DOES exist, then it makes sense to say we couldn't find a valid cache.
 	if len(cacheAds) == 0 {
-		ginCtx.String(404, "No cache found for path\n")
-		return
-	}
-	cacheAds, err = SortServers(ipAddr, cacheAds)
-	if err != nil {
-		ginCtx.String(500, "Failed to determine server ordering")
-		return
+		for _, originAd := range originAds {
+			if originAd.EnableFallbackRead {
+				cacheAds = append(cacheAds, originAd)
+				break
+			}
+		}
+		if len(cacheAds) == 0 {
+			ginCtx.String(http.StatusNotFound, "No cache found for path")
+			return
+		}
+	} else {
+		cacheAds, err = SortServers(ipAddr, cacheAds)
+		if err != nil {
+			ginCtx.String(http.StatusInternalServerError, "Failed to determine server ordering")
+			return
+		}
 	}
 	redirectURL := getRedirectURL(reqPath, cacheAds[0], namespaceAd.RequireToken)
 
@@ -268,26 +282,41 @@ func RedirectToOrigin(ginCtx *gin.Context) {
 	// report the lack of path first -- this is most important for the user because it tells them
 	// they're trying to get an object that simply doesn't exist
 	if namespaceAd.Path == "" {
-		ginCtx.String(404, "No namespace found for path. Either it doesn't exist, or the Director is experiencing problems\n")
+		ginCtx.String(http.StatusNotFound, "No namespace found for path. Either it doesn't exist, or the Director is experiencing problems\n")
 		return
 	}
 	// If the namespace prefix DOES exist, then it makes sense to say we couldn't find the origin.
 	if len(originAds) == 0 {
-		ginCtx.String(404, "There are currently no origins exporting the provided namespace prefix\n")
+		ginCtx.String(http.StatusNotFound, "There are currently no origins exporting the provided namespace prefix\n")
 		return
 	}
 
 	originAds, err = SortServers(ipAddr, originAds)
 	if err != nil {
-		ginCtx.String(500, "Failed to determine origin ordering")
+		ginCtx.String(http.StatusInternalServerError, "Failed to determine origin ordering")
 		return
 	}
+	ginCtx.Writer.Header()["X-Pelican-Namespace"] = []string{fmt.Sprintf("namespace=%s, require-token=%v, collections-url=%s",
+		namespaceAd.Path, namespaceAd.RequireToken, namespaceAd.DirlistHost)}
 
-	redirectURL := getRedirectURL(reqPath, originAds[0], namespaceAd.RequireToken)
-	// See note in RedirectToCache as to why we only add the authz query parameter to this URL,
-	// not those in the `Link`.
-	ginCtx.Redirect(307, getFinalRedirectURL(redirectURL, authzBearerEscaped))
-
+	var redirectURL url.URL
+	// If we are doing a PUT, check to see if any origins are writeable
+	if ginCtx.Request.Method == "PUT" {
+		for idx, ad := range originAds {
+			if ad.EnableWrite {
+				redirectURL = getRedirectURL(reqPath, originAds[idx], namespaceAd.RequireToken)
+				ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, authzBearerEscaped))
+				return
+			}
+		}
+		ginCtx.String(http.StatusMethodNotAllowed, "No origins on specified endpoint are writeable\n")
+		return
+	} else { // Otherwise, we are doing a GET
+		redirectURL := getRedirectURL(reqPath, originAds[0], namespaceAd.RequireToken)
+		// See note in RedirectToCache as to why we only add the authz query parameter to this URL,
+		// not those in the `Link`.
+		ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, authzBearerEscaped))
+	}
 }
 
 func checkHostnameRedirects(c *gin.Context, incomingHost string) {
@@ -327,6 +356,13 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 		if strings.HasPrefix(c.Request.URL.Path, "/.well-known/") ||
 			(strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/") && !strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/director/")) {
 			c.Next()
+			return
+		}
+		// Regardless of the remainder of the settings, we currently handle a PUT as a query to the origin endpoint
+		if c.Request.Method == "PUT" {
+			c.Request.URL.Path = "/api/v1.0/director/origin" + c.Request.URL.Path
+			RedirectToOrigin(c)
+			c.Abort()
 			return
 		}
 
@@ -409,7 +445,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType ServerTy
 		ok, err := VerifyAdvertiseToken(engineCtx, token, prefix)
 		if err != nil {
 			if err == adminApprovalErr {
-				log.Warningln("Failed to verify token:", err)
+				log.Warningln("Failed to verify token. Cache was not approved:", err)
 				ctx.JSON(http.StatusForbidden, gin.H{"error": "Cache is not admin approved"})
 			} else {
 				log.Warningln("Failed to verify token:", err)
@@ -440,11 +476,13 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType ServerTy
 	}
 
 	sAd := ServerAd{
-		Name:    ad.Name,
-		AuthURL: *ad_url,
-		URL:     *ad_url,
-		WebURL:  *adWebUrl,
-		Type:    sType,
+		Name:               ad.Name,
+		AuthURL:            *ad_url,
+		URL:                *ad_url,
+		WebURL:             *adWebUrl,
+		Type:               sType,
+		EnableWrite:        ad.EnableWrite,
+		EnableFallbackRead: ad.EnableFallbackRead,
 	}
 
 	hasOriginAdInCache := serverAds.Has(sAd)
@@ -455,6 +493,11 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType ServerTy
 	healthTestCancelFuncsMutex.Lock()
 	defer healthTestCancelFuncsMutex.Unlock()
 	if ad.WebURL != "" && !hasOriginAdInCache {
+		if _, ok := healthTestCancelFuncs[sAd]; ok {
+			// If somehow we didn't clear the key, we call cancel first before
+			// adding a new test cycle
+			healthTestCancelFuncs[sAd]()
+		}
 		ctx, cancel := context.WithCancel(context.Background())
 		healthTestCancelFuncs[sAd] = cancel
 		LaunchPeriodicDirectorTest(ctx, sAd)
@@ -529,6 +572,7 @@ func RegisterDirector(ctx context.Context, router *gin.RouterGroup) {
 	// Establish the routes used for cache/origin redirection
 	router.GET("/api/v1.0/director/object/*any", RedirectToCache)
 	router.GET("/api/v1.0/director/origin/*any", RedirectToOrigin)
+	router.PUT("/api/v1.0/director/origin/*any", RedirectToOrigin)
 	router.POST("/api/v1.0/director/registerOrigin", func(gctx *gin.Context) { RegisterOrigin(ctx, gctx) })
 	// In the foreseeable feature, director will scrape all servers in Pelican ecosystem (including registry)
 	// so that director can be our point of contact for collecting system-level metrics.

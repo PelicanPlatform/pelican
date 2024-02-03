@@ -105,6 +105,7 @@ var (
 	Origin_XRootDPrefix = StringParam{"Origin.XRootDPrefix"}
 	Plugin_Token = StringParam{"Plugin.Token"}
 	Registry_DbLocation = StringParam{"Registry.DbLocation"}
+	Registry_InstitutionsUrl = StringParam{"Registry.InstitutionsUrl"}
 	Server_ExternalWebUrl = StringParam{"Server.ExternalWebUrl"}
 	Server_Hostname = StringParam{"Server.Hostname"}
 	Server_IssuerHostname = StringParam{"Server.IssuerHostname"}
@@ -168,12 +169,15 @@ var (
 	Debug = BoolParam{"Debug"}
 	DisableHttpProxy = BoolParam{"DisableHttpProxy"}
 	DisableProxyFallback = BoolParam{"DisableProxyFallback"}
+	Logging_DisableProgressBars = BoolParam{"Logging.DisableProgressBars"}
 	Monitoring_MetricAuthorization = BoolParam{"Monitoring.MetricAuthorization"}
 	Origin_EnableCmsd = BoolParam{"Origin.EnableCmsd"}
 	Origin_EnableDirListing = BoolParam{"Origin.EnableDirListing"}
+	Origin_EnableFallbackRead = BoolParam{"Origin.EnableFallbackRead"}
 	Origin_EnableIssuer = BoolParam{"Origin.EnableIssuer"}
 	Origin_EnableUI = BoolParam{"Origin.EnableUI"}
 	Origin_EnableVoms = BoolParam{"Origin.EnableVoms"}
+	Origin_EnableWrite = BoolParam{"Origin.EnableWrite"}
 	Origin_Multiuser = BoolParam{"Origin.Multiuser"}
 	Origin_ScitokensMapSubject = BoolParam{"Origin.ScitokensMapSubject"}
 	Origin_SelfTest = BoolParam{"Origin.SelfTest"}
@@ -184,9 +188,13 @@ var (
 )
 
 var (
+	Director_AdvertisementTTL = DurationParam{"Director.AdvertisementTTL"}
+	Director_OriginCacheHealthTestInterval = DurationParam{"Director.OriginCacheHealthTestInterval"}
 	Federation_TopologyReloadInterval = DurationParam{"Federation.TopologyReloadInterval"}
 	Monitoring_TokenExpiresIn = DurationParam{"Monitoring.TokenExpiresIn"}
 	Monitoring_TokenRefreshInterval = DurationParam{"Monitoring.TokenRefreshInterval"}
+	Registry_InstitutionsUrlReloadMinutes = DurationParam{"Registry.InstitutionsUrlReloadMinutes"}
+	Server_RegistrationRetryInterval = DurationParam{"Server.RegistrationRetryInterval"}
 	Transport_DialerKeepAlive = DurationParam{"Transport.DialerKeepAlive"}
 	Transport_DialerTimeout = DurationParam{"Transport.DialerTimeout"}
 	Transport_ExpectContinueTimeout = DurationParam{"Transport.ExpectContinueTimeout"}

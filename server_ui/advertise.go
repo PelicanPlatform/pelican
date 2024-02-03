@@ -29,7 +29,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/metrics"
@@ -67,6 +66,7 @@ func LaunchPeriodicAdvertise(ctx context.Context, egrp *errgroup.Group, servers 
 					metrics.SetComponentHealthStatus(metrics.OriginCache_Federation, metrics.StatusOK, "")
 				}
 			case <-ctx.Done():
+				log.Infoln("Periodic advertisement loop has been terminated")
 				return nil
 			}
 		}
@@ -130,7 +130,7 @@ func advertiseInternal(ctx context.Context, server server_utils.XRootDServer) er
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
-	userAgent := "pelican-" + strings.ToLower(server.GetServerType().String()) + "/" + client.ObjectClientOptions.Version
+	userAgent := "pelican-" + strings.ToLower(server.GetServerType().String()) + "/" + config.PelicanVersion
 	req.Header.Set("User-Agent", userAgent)
 
 	// We should switch this over to use the common transport, but for that to happen

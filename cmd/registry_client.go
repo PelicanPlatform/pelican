@@ -76,11 +76,10 @@ func registerANamespace(cmd *cobra.Command, args []string) {
 	}
 
 	// Parse the namespace URL to make sure it's okay
-	registrationEndpointURL, err := url.JoinPath(namespaceEndpoint, "api", "v2.0", "registry")
+	registrationEndpointURL, err := url.JoinPath(namespaceEndpoint, "api", "v1.0", "registry")
 	if err != nil {
 		log.Errorf("Failed to construction registration endpoint URL: %v", err)
 	}
-	// registrationEndpoint := url.JoinPath(namespaceEndpoint, "/api/v1.0/registry/register").String()
 	if prefix == "" {
 		log.Error("Error: prefix is required")
 		os.Exit(1)
@@ -143,7 +142,7 @@ func deleteANamespace(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	deletionEndpointURL, err := url.JoinPath(namespaceEndpoint, "api", "v2.0", "registry", prefix)
+	deletionEndpointURL, err := url.JoinPath(namespaceEndpoint, "api", "v1.0", "registry", prefix)
 	if err != nil {
 		log.Errorf("Failed to construction deletion endpoint URL: %v", err)
 	}
@@ -168,7 +167,7 @@ func listAllNamespaces(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	listEndpoint, err := url.JoinPath(namespaceEndpoint, "api", "v2.0", "registry", "metadata")
+	listEndpoint, err := url.JoinPath(namespaceEndpoint, "api", "v1.0", "registry")
 	if err != nil {
 		log.Errorf("Failed to construction list endpoint URL: %v", err)
 	}

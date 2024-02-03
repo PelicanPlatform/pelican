@@ -29,6 +29,10 @@ import (
 )
 
 func serveOrigin(cmd *cobra.Command, args []string) error {
-	_, err := launchers.LaunchModules(cmd.Context(), config.OriginType)
+	cancel, err := launchers.LaunchModules(cmd.Context(), config.OriginType)
+	if err != nil {
+		cancel()
+	}
+
 	return err
 }
