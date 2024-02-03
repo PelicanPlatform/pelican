@@ -78,8 +78,9 @@ type (
 	ServerAd struct {
 		Name               string
 		AuthURL            url.URL
-		URL                url.URL // This is server's XRootD URL for file transfer
-		WebURL             url.URL // This is server's Web interface and API
+		BrokerURL          *url.URL // The URL of the broker service to use for this host.
+		URL                url.URL  // This is server's XRootD URL for file transfer
+		WebURL             url.URL  // This is server's Web interface and API
 		Type               ServerType
 		Latitude           float64
 		Longitude          float64

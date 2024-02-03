@@ -48,6 +48,7 @@ type (
 		Name       string          `json:"name"`
 		DataURL    string          `json:"data-url" binding:"required"`
 		WebURL     string          `json:"web-url,omitempty"`
+		BrokerURL  string          `json:"broker-url,omitempty"`
 		Caps       Capabilities    `json:"capabilities"`
 		Namespaces []NamespaceAdV2 `json:"namespaces"`
 		Issuer     []TokenIssuer   `json:"token-issuer"`

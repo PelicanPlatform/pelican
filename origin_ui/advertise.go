@@ -39,8 +39,7 @@ func (server *OriginServer) GetServerType() config.ServerType {
 	return config.OriginType
 }
 
-func (server *OriginServer) CreateAdvertisement(name string, originUrlStr string, originWebUrl string) (director.OriginAdvertiseV2, error) {
-	ad := director.OriginAdvertiseV2{}
+func (server *OriginServer) CreateAdvertisement(name string, originUrlStr string, originWebUrl string) (ad director.OriginAdvertiseV2, err error) {
 
 	// Here we instantiate the namespaceAd slice, but we still need to define the namespace
 	issuerUrl := url.URL{}
@@ -48,14 +47,16 @@ func (server *OriginServer) CreateAdvertisement(name string, originUrlStr string
 	issuerUrl.Host = fmt.Sprintf("%v:%v", param.Server_Hostname.GetString(), param.Xrootd_Port.GetInt())
 
 	if issuerUrl.String() == "" {
-		return ad, errors.New("No IssuerUrl is set")
+		err = errors.New("No IssuerUrl is set")
+		return
 	}
 
 	prefix := param.Origin_NamespacePrefix.GetString()
 
 	originUrlURL, err := url.Parse(originUrlStr)
 	if err != nil {
-		return ad, errors.New("Invalid Origin Url")
+		err = errors.Wrap(err, "Invalid Origin Url")
+		return
 	}
 	// TODO: Need to figure out where to get some of these values
 	// 		 so that they aren't hardcoded...
@@ -94,8 +95,22 @@ func (server *OriginServer) CreateAdvertisement(name string, originUrlStr string
 			IssuerUrl: issuerUrl,
 		}},
 	}
+	if param.Origin_EnableBroker.GetBool() {
+		var brokerUrl *url.URL
+		brokerUrl, err = url.Parse(param.Federation_BrokerUrl.GetString())
+		if err != nil {
+			err = errors.Wrap(err, "Invalid Broker URL")
+			return
+		}
+		brokerUrl.Path = "/api/v1.0/broker/reverse"
+		values := brokerUrl.Query()
+		values.Set("origin", param.Server_Hostname.GetString())
+		values.Set("prefix", prefix)
+		brokerUrl.RawQuery = values.Encode()
+		ad.BrokerURL = brokerUrl.String()
+	}
 
-	return ad, nil
+	return
 }
 
 // Return a list of paths where the origin's issuer is authoritative.

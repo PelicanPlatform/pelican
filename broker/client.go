@@ -507,7 +507,11 @@ func doCallback(ctx context.Context, brokerResp reversalRequest) (listener net.L
 // closes itself.  It is the result of a successful connection reversal to
 // a cache.
 func LaunchRequestMonitor(ctx context.Context, egrp *errgroup.Group, resultChan chan any) (err error) {
-	brokerUrl := param.Federation_BrokerUrl.GetString() + "/api/v1.0/broker/retrieve"
+	brokerUrl := param.Federation_BrokerUrl.GetString()
+	if brokerUrl == "" {
+		return errors.New("Broker service is not set or discovered; cannot enable broker functionality.  Try setting Federation.BrokerUrl")
+	}
+	brokerEndpoint := brokerUrl + "/api/v1.0/broker/retrieve"
 	originUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
 	if err != nil {
 		return
@@ -531,7 +535,7 @@ func LaunchRequestMonitor(ctx context.Context, egrp *errgroup.Group, resultChan 
 			default:
 				// Send a request to the broker for a connection reversal
 				reqReader.Reset(req)
-				req, err := http.NewRequestWithContext(ctx, "POST", brokerUrl, reqReader)
+				req, err := http.NewRequestWithContext(ctx, "POST", brokerEndpoint, reqReader)
 				if err != nil {
 					log.Errorln("Failure when creating new broker URL request:", err)
 					break

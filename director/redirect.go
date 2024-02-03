@@ -328,6 +328,9 @@ func RedirectToOrigin(ginCtx *gin.Context) {
 		for idx, ad := range originAds {
 			if ad.EnableWrite {
 				redirectURL = getRedirectURL(reqPath, originAds[idx], !namespaceAd.PublicRead)
+				if brokerUrl := originAds[idx].BrokerURL; brokerUrl != nil {
+					ginCtx.Header("X-Pelican-Broker", brokerUrl.String())
+				}
 				ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, authzBearerEscaped))
 				return
 			}
@@ -336,6 +339,10 @@ func RedirectToOrigin(ginCtx *gin.Context) {
 		return
 	} else { // Otherwise, we are doing a GET
 		redirectURL := getRedirectURL(reqPath, originAds[0], !namespaceAd.PublicRead)
+		if brokerUrl := originAds[0].BrokerURL; brokerUrl != nil {
+			ginCtx.Header("X-Pelican-Broker", brokerUrl.String())
+		}
+
 		// See note in RedirectToCache as to why we only add the authz query parameter to this URL,
 		// not those in the `Link`.
 		ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, authzBearerEscaped))
@@ -514,11 +521,18 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType ServerTy
 		return
 	}
 
+	brokerUrl, err := url.Parse(adV2.BrokerURL)
+	if err != nil {
+		log.Warningf("Failed to parse broker URL %s: %s", adV2.BrokerURL, err)
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid broker URL"})
+	}
+
 	sAd := ServerAd{
 		Name:               adV2.Name,
 		AuthURL:            *ad_url,
 		URL:                *ad_url,
 		WebURL:             *adWebUrl,
+		BrokerURL:          brokerUrl,
 		Type:               sType,
 		EnableWrite:        adV2.Caps.Write,
 		EnableFallbackRead: adV2.Caps.FallBackRead,
