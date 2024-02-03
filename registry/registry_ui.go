@@ -35,6 +35,7 @@ import (
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pelicanplatform/pelican/web_ui"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -52,28 +53,45 @@ type (
 	}
 
 	registrationFieldType string
-	registrationField     struct {
-		Name     string                `json:"name"`
-		Type     registrationFieldType `json:"type"`
-		Required bool                  `json:"required"`
-		Options  []interface{}         `json:"options"`
+
+	registrationFieldOption struct {
+		Name string `mapstructure:"name" json:"name"`
+		ID   string `mapstructure:"id" json:"id"`
+	}
+	registrationField struct {
+		Name          string                    `json:"name"`
+		DisplayedName string                    `json:"displayed_name"`
+		Type          registrationFieldType     `json:"type"`
+		Required      bool                      `json:"required"`
+		Options       []registrationFieldOption `json:"options"`
+		Description   string                    `json:"description"`
 	}
 
 	Institution struct {
 		Name string `mapstructure:"name" json:"name" yaml:"name"`
 		ID   string `mapstructure:"id" json:"id" yaml:"id"`
 	}
+
+	customRegFieldsConfig struct {
+		Name        string                    `mapstructure:"name"`
+		Type        string                    `mapstructure:"type"`
+		Required    bool                      `mapstructure:"required"`
+		Options     []registrationFieldOption `mapstructure:"options"`
+		Description string                    `mapstructure:"description"`
+	}
 )
 
 const (
 	String   registrationFieldType = "string"
 	Int      registrationFieldType = "int"
+	Boolean  registrationFieldType = "bool"
 	Enum     registrationFieldType = "enum"
 	DateTime registrationFieldType = "datetime"
 )
 
 var (
 	registrationFields     []registrationField
+	customRegFieldsConfigs []customRegFieldsConfig
 	institutionsCache      *ttlcache.Cache[string, []Institution]
 	institutionsCacheMutex = sync.RWMutex{}
 )
@@ -110,14 +128,15 @@ func populateRegistrationFields(prefix string, data interface{}) []registrationF
 			if splitJson != "-" {
 				tempName = splitJson
 			} else {
-				// `json:"-"` means this field should be removed from any marshalling
+				// `json:"-"` means this field should be removed from any marshaling
 				continue
 			}
 		}
 
 		regField := registrationField{
-			Name:     name + tempName,
-			Required: strings.Contains(field.Tag.Get("validate"), "required"),
+			Name:          name + tempName,
+			DisplayedName: utils.SnakeCaseToHumanReadable(tempName),
+			Required:      strings.Contains(field.Tag.Get("validate"), "required"),
 		}
 
 		switch field.Type.Kind() {
@@ -146,10 +165,10 @@ func populateRegistrationFields(prefix string, data interface{}) []registrationF
 
 		if field.Type == reflect.TypeOf(RegistrationStatus("")) {
 			regField.Type = Enum
-			options := make([]interface{}, 3)
-			options[0] = Pending
-			options[1] = Approved
-			options[2] = Denied
+			options := make([]registrationFieldOption, 3)
+			options[0] = registrationFieldOption{Name: Pending.String(), ID: Pending.LowerString()}
+			options[1] = registrationFieldOption{Name: Approved.String(), ID: Approved.LowerString()}
+			options[2] = registrationFieldOption{Name: Denied.String(), ID: Denied.LowerString()}
 			regField.Options = options
 			fields = append(fields, regField)
 		} else {
@@ -160,7 +179,23 @@ func populateRegistrationFields(prefix string, data interface{}) []registrationF
 	return fields
 }
 
-// Helper function to exclude pubkey field from marshalling into json
+func populateCustomRegFields(configFields []customRegFieldsConfig) []registrationField {
+	regFields := make([]registrationField, 0)
+	for _, field := range configFields {
+		customRegField := registrationField{
+			Name:          "custom_fields." + field.Name,
+			DisplayedName: utils.SnakeCaseToHumanReadable(field.Name),
+			Type:          registrationFieldType(field.Type),
+			Options:       field.Options,
+			Required:      field.Required,
+			Description:   field.Description,
+		}
+		regFields = append(regFields, customRegField)
+	}
+	return regFields
+}
+
+// Helper function to exclude pubkey field from marshaling into json
 func excludePubKey(nss []*Namespace) (nssNew []NamespaceWOPubkey) {
 	nssNew = make([]NamespaceWOPubkey, 0)
 	for _, ns := range nss {
@@ -189,6 +224,8 @@ func checkUniqueInstitutions(insts []Institution) bool {
 	return true
 }
 
+// Returns the institution options that are fetched from Registry.InstitutionsUrl
+// and stored in a TTL cache
 func getCachedInstitutions() (inst []Institution, intError error, extError error) {
 	if institutionsCache == nil {
 		return nil, errors.New("institutionsCache isn't initialized"), errors.New("Internal institution cache wasn't initialized")
@@ -221,7 +258,7 @@ func getCachedInstitutions() (inst []Institution, intError error, extError error
 			return
 		}
 		if res.StatusCode != 200 {
-			intError = errors.Wrap(err, fmt.Sprintf("Error response when fetching institution list with code %d", res.StatusCode))
+			intError = errors.New(fmt.Sprintf("Error response when fetching institution list with code %d", res.StatusCode))
 			extError = errors.New(fmt.Sprint("Error when fetching institution from remote url, remote server error with code: ", res.StatusCode))
 			return
 		}
@@ -245,14 +282,10 @@ func getCachedInstitutions() (inst []Institution, intError error, extError error
 		institutionsCacheMutex.RLock()
 		defer institutionsCacheMutex.RUnlock()
 		institutions := institutionsCache.Get(instUrl.String())
-		if institutions.Value() == nil {
-			intError = errors.New(fmt.Sprint("Fail to get institutions from internal TTL cache, value is nil from key: ", instUrl))
-			extError = errors.New("Fail to get institutions from internal TTL cache")
-			return
-		}
-		if institutions.IsExpired() {
-			intError = errors.New(fmt.Sprintf("Cached institution with key %q is expired at %v", institutions.Key(), institutions.ExpiresAt()))
-			extError = errors.New("Expired institution cache")
+		// institutions == nil if key DNE or item has expired
+		if institutions == nil || institutions.Value() == nil {
+			intError = errors.New(fmt.Sprint("Fail to get institutions from internal TTL cache, key is nil or value is nil from key: ", instUrl))
+			extError = errors.New("Fail to get institutions from internal cache, key might be expired")
 			return
 		}
 		return institutions.Value(), nil, nil
@@ -299,7 +332,11 @@ func listNamespaces(ctx *gin.Context) {
 	// For unauthenticated users, it returns namespaces with AdminMetadata.Status = Approved
 	if isAuthed {
 		if queryParams.Status != "" {
-			filterNs.AdminMetadata.Status = RegistrationStatus(queryParams.Status)
+			if IsValidRegStatus(queryParams.Status) {
+				filterNs.AdminMetadata.Status = RegistrationStatus(queryParams.Status)
+			} else {
+				ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid query parameters: status must be one of  'Pending', 'Approved', 'Denied', 'Unknown'"})
+			}
 		}
 	} else {
 		filterNs.AdminMetadata.Status = Approved
@@ -335,7 +372,11 @@ func listNamespacesForUser(ctx *gin.Context) {
 	filterNs := Namespace{AdminMetadata: AdminMetadata{UserID: user}}
 
 	if queryParams.Status != "" {
-		filterNs.AdminMetadata.Status = RegistrationStatus(queryParams.Status)
+		if IsValidRegStatus(queryParams.Status) {
+			filterNs.AdminMetadata.Status = RegistrationStatus(queryParams.Status)
+		} else {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid query parameters: status must be one of  'Pending', 'Approved', 'Denied', 'Unknown'"})
+		}
 	}
 
 	namespaces, err := getNamespacesByFilter(filterNs, "")
@@ -374,7 +415,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 		id, err = strconv.Atoi(idStr)
 		if err != nil || id <= 0 {
 			// Handle the error if id is not a valid integer
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID format. ID must a non-zero integer"})
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID format. ID must a positive integer"})
 			return
 		}
 	}
@@ -439,6 +480,15 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 			return
 		}
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Institution \"%s\" is not in the list of available institutions to register.", ns.AdminMetadata.Institution)})
+		return
+	}
+
+	if validCF, err := validateCustomFields(ns.CustomFields, true); !validCF {
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Error validating custom fields: %v", err)})
+			return
+		}
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Invalid custom field: %s", err.Error())})
 		return
 	}
 
@@ -613,6 +663,19 @@ func getNamespaceJWKS(ctx *gin.Context) {
 }
 
 func listInstitutions(ctx *gin.Context) {
+	// When Registry.Institutions is set
+	institutions := []Institution{}
+	if err := param.Registry_Institutions.Unmarshal(&institutions); err != nil {
+		log.Error("Fail to read server configuration of institutions", err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Fail to read server configuration of institutions"})
+		return
+	}
+
+	if len(institutions) != 0 {
+		ctx.JSON(http.StatusOK, institutions)
+		return
+	}
+
 	// When Registry.InstitutionsUrl is set and Registry.Institutions is unset
 	if institutionsCache != nil {
 		insts, intErr, extErr := getCachedInstitutions()
@@ -628,20 +691,46 @@ func listInstitutions(ctx *gin.Context) {
 		ctx.JSON(http.StatusOK, insts)
 		return
 	}
-	// When Registry.Institutions is set
-	institutions := []Institution{}
-	if err := param.Registry_Institutions.Unmarshal(&institutions); err != nil {
-		log.Error("Fail to read server configuration of institutions", err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Fail to read server configuration of institutions"})
-		return
-	}
 
+	// When both are unset
 	if len(institutions) == 0 {
 		log.Error("Server didn't configure Registry.Institutions")
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Server didn't configure Registry.Institutions"})
 		return
 	}
-	ctx.JSON(http.StatusOK, institutions)
+}
+
+// Initialize custom registration fields provided via Registry.CustomRegistrationFields
+func InitCustomRegistrationFields() error {
+	configFields := []customRegFieldsConfig{}
+	if err := param.Registry_CustomRegistrationFields.Unmarshal(&configFields); err != nil {
+		return errors.Wrap(err, "Error reading from config value for Registry.CustomRegistrationFields")
+	}
+	customRegFieldsConfigs = configFields
+
+	fieldNames := make(map[string]bool, 0)
+
+	for _, conf := range configFields {
+		// Duplicated name check
+		if fieldNames[conf.Name] {
+			return errors.New(fmt.Sprintf("Bad custom registration fields, duplicated field name: %q", conf.Name))
+		} else {
+			fieldNames[conf.Name] = true
+		}
+		if conf.Type != "string" && conf.Type != "bool" && conf.Type != "int" && conf.Type != "enum" && conf.Type != "datetime" {
+			return errors.New(fmt.Sprintf("Bad custom registration field, unsupported field type: %q with %q", conf.Name, conf.Type))
+		}
+		if conf.Type == "enum" {
+			if conf.Options == nil {
+				return errors.New(fmt.Sprintf("Bad custom registration field, 'enum' type field does not have options: %q", conf.Name))
+			}
+		}
+	}
+
+	additionalRegFields := populateCustomRegFields(configFields)
+	registrationFields = append(registrationFields, additionalRegFields...)
+
+	return nil
 }
 
 // Define Gin APIs for registry Web UI. All endpoints are user-facing

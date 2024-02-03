@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -45,6 +46,7 @@ func setupMockRegistryDB(t *testing.T) {
 	db = mockDB
 	require.NoError(t, err, "Error setting up mock namespace DB")
 	createNamespaceTable()
+	createTopologyTable()
 }
 
 func resetNamespaceDB(t *testing.T) {
@@ -58,7 +60,7 @@ func teardownMockNamespaceDB(t *testing.T) {
 }
 
 func insertMockDBData(nss []Namespace) error {
-	query := `INSERT INTO namespace (prefix, pubkey, identity, admin_metadata) VALUES (?, ?, ?, ?)`
+	query := `INSERT INTO namespace (prefix, pubkey, identity, admin_metadata, custom_fields) VALUES (?, ?, ?, ?, ?)`
 	tx, err := db.Begin()
 	if err != nil {
 		return err
@@ -71,8 +73,15 @@ func insertMockDBData(nss []Namespace) error {
 			}
 			return err
 		}
+		customFieldsStr, err := json.Marshal(ns.CustomFields)
+		if err != nil {
+			if errRoll := tx.Rollback(); errRoll != nil {
+				return errors.Wrap(errRoll, "Failed to rollback transaction")
+			}
+			return err
+		}
 
-		_, err = tx.Exec(query, ns.Prefix, ns.Pubkey, ns.Identity, adminMetaStr)
+		_, err = tx.Exec(query, ns.Prefix, ns.Pubkey, ns.Identity, adminMetaStr, customFieldsStr)
 		if err != nil {
 			if errRoll := tx.Rollback(); errRoll != nil {
 				return errors.Wrap(errRoll, "Failed to rollback transaction")
@@ -170,6 +179,12 @@ var (
 		mixed = append(mixed, mockNssWithCachesNotApproved...)
 		return
 	}()
+
+	mockCustomFields = map[string]interface{}{
+		"key1": "value1",
+		"key2": 2,
+		"key3": true,
+	}
 )
 
 func TestNamespaceExistsByPrefix(t *testing.T) {
@@ -192,7 +207,7 @@ func TestNamespaceExistsByPrefix(t *testing.T) {
 	})
 }
 
-func TestGetNamespacesById(t *testing.T) {
+func TestGetNamespaceById(t *testing.T) {
 	setupMockRegistryDB(t)
 	defer teardownMockNamespaceDB(t)
 
@@ -212,6 +227,7 @@ func TestGetNamespacesById(t *testing.T) {
 	t.Run("return-namespace-with-correct-id", func(t *testing.T) {
 		defer resetNamespaceDB(t)
 		mockNs := mockNamespace("/test", "", "", AdminMetadata{UserID: "foo"})
+		mockNs.CustomFields = mockCustomFields
 		err := insertMockDBData([]Namespace{mockNs})
 		require.NoError(t, err)
 		nss, err := getAllNamespaces()
@@ -245,7 +261,6 @@ func TestGetNamespaceStatusById(t *testing.T) {
 
 	t.Run("db-query-error", func(t *testing.T) {
 		resetNamespaceDB(t)
-		// Simulate a DB error. You need to mock the db.QueryRow function to return an error
 		_, err := getNamespaceStatusById(1)
 		require.Error(t, err)
 	})
@@ -317,6 +332,7 @@ func TestAddNamespace(t *testing.T) {
 	t.Run("insert-data-integrity", func(t *testing.T) {
 		defer resetNamespaceDB(t)
 		mockNs := mockNamespace("/test", "pubkey", "identity", AdminMetadata{UserID: "someone", Description: "Some description", SiteName: "OSG", SecurityContactUserID: "security-001"})
+		mockNs.CustomFields = mockCustomFields
 		err := AddNamespace(&mockNs)
 		require.NoError(t, err)
 		got, err := getAllNamespaces()
@@ -328,6 +344,7 @@ func TestAddNamespace(t *testing.T) {
 		assert.Equal(t, mockNs.AdminMetadata.Description, got[0].AdminMetadata.Description)
 		assert.Equal(t, mockNs.AdminMetadata.SiteName, got[0].AdminMetadata.SiteName)
 		assert.Equal(t, mockNs.AdminMetadata.SecurityContactUserID, got[0].AdminMetadata.SecurityContactUserID)
+		assert.Equal(t, mockCustomFields, got[0].CustomFields)
 	})
 }
 
@@ -458,6 +475,12 @@ func TestGetNamespacesByFilter(t *testing.T) {
 
 		_, err := getNamespacesByFilter(filterNsID, "")
 		require.Error(t, err, "Should return error for filtering against unsupported field ID")
+
+		filterNsCF := Namespace{
+			CustomFields: mockCustomFields,
+		}
+		_, err = getNamespacesByFilter(filterNsCF, "")
+		require.Error(t, err, "Should return error for filtering against unsupported custom fields")
 
 		filterNsIdentity := Namespace{
 			Identity: "someIdentity",
@@ -700,6 +723,43 @@ func TestGetNamespacesByFilter(t *testing.T) {
 	})
 }
 
+func TestGetNamespaceJwksByPrefix(t *testing.T) {
+	setupMockRegistryDB(t)
+	defer teardownMockNamespaceDB(t)
+
+	t.Run("db-query-error", func(t *testing.T) {
+		resetNamespaceDB(t)
+		_, _, err := getNamespaceJwksByPrefix("/")
+		require.Error(t, err)
+	})
+
+	t.Run("valid-prefix-empty-admin-metadata", func(t *testing.T) {
+		resetNamespaceDB(t)
+		mockJwks := jwk.NewSet()
+		jwksByte, err := json.Marshal(mockJwks)
+		require.NoError(t, err)
+
+		err = insertMockDBData([]Namespace{mockNamespace("/foo", string(jwksByte), "", AdminMetadata{})})
+		require.NoError(t, err)
+		_, admin_meta, err := getNamespaceJwksByPrefix("/foo")
+		require.NoError(t, err)
+		assert.Equal(t, AdminMetadata{}, *admin_meta)
+	})
+
+	t.Run("valid-prefix-non-empty-admin-metadata", func(t *testing.T) {
+		resetNamespaceDB(t)
+		mockJwks := jwk.NewSet()
+		jwksByte, err := json.Marshal(mockJwks)
+		require.NoError(t, err)
+
+		err = insertMockDBData([]Namespace{mockNamespace("/foo", string(jwksByte), "", AdminMetadata{Status: Approved})})
+		require.NoError(t, err)
+		_, admin_meta, err := getNamespaceJwksByPrefix("/foo")
+		require.NoError(t, err)
+		assert.Equal(t, Approved, admin_meta.Status)
+	})
+}
+
 func topologyMockup(t *testing.T, namespaces []string) *httptest.Server {
 	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var namespaceList []map[string]string
@@ -814,107 +874,6 @@ func TestRegistryTopology(t *testing.T) {
 	exists, err = namespaceExists("/regular/foo")
 	require.NoError(t, err)
 	require.True(t, exists)
-
-	viper.Reset()
-}
-
-func TestCacheAdminTrue(t *testing.T) {
-	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
-	defer func() { require.NoError(t, egrp.Wait()) }()
-	defer cancel()
-
-	registryDBDir := t.TempDir()
-	viper.Set("Registry.DbLocation", registryDBDir)
-
-	err := InitializeDB(ctx)
-	defer func() {
-		err := ShutdownDB()
-		assert.NoError(t, err)
-	}()
-
-	require.NoError(t, err, "error initializing registry database")
-
-	adminTester := func(ns Namespace) func(t *testing.T) {
-		return func(t *testing.T) {
-			err = AddNamespace(&ns)
-
-			require.NoError(t, err, "error adding test cache to registry database")
-
-			// This will return a serverCredsError if the AdminMetadata.Status != Approved, which we don't want to happen
-			// For these tests, otherwise it will get a key parsing error as ns.Pubkey isn't a real jwk
-			_, err = getNamespaceJwksByPrefix(ns.Prefix, true)
-			require.NotErrorIsf(t, err, serverCredsErr, "error chain contains serverCredErr")
-
-			require.ErrorContainsf(t, err, "Failed to parse pubkey as a jwks: failed to unmarshal JWK set: invalid character 'k' in literal true (expecting 'r')", "error doesn't contain jwks parsing error")
-		}
-	}
-
-	var ns Namespace
-	ns.Prefix = "/caches/test3"
-	ns.Identity = "testident3"
-	ns.Pubkey = "tkey"
-	ns.AdminMetadata.Status = Approved
-
-	t.Run("WithApproval", adminTester(ns))
-
-	ns.Prefix = "/orig/test1"
-	ns.Identity = "testident4"
-	ns.Pubkey = "tkey"
-	ns.AdminMetadata.Status = Pending
-
-	t.Run("OriginNoApproval", adminTester(ns))
-
-	ns.Prefix = "/orig/test2"
-	ns.Identity = "testident5"
-	ns.Pubkey = "tkey"
-	ns.AdminMetadata = AdminMetadata{}
-
-	t.Run("OriginEmptyApproval", adminTester(ns))
-
-	viper.Reset()
-}
-
-func TestCacheAdminFalse(t *testing.T) {
-	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
-	defer func() { require.NoError(t, egrp.Wait()) }()
-	defer cancel()
-
-	registryDBDir := t.TempDir()
-	viper.Set("Registry.DbLocation", registryDBDir)
-
-	err := InitializeDB(ctx)
-	defer func() {
-		err := ShutdownDB()
-		assert.NoError(t, err)
-	}()
-
-	require.NoError(t, err, "error initializing registry database")
-
-	adminTester := func(ns Namespace) func(t *testing.T) {
-		return func(t *testing.T) {
-			err = AddNamespace(&ns)
-			require.NoError(t, err, "error adding test cache to registry database")
-
-			// This will return a serverCredsError if the admin_approval == false check is triggered, which we want to happen
-			_, err = getNamespaceJwksByPrefix(ns.Prefix, true)
-
-			require.ErrorIs(t, err, serverCredsErr)
-		}
-	}
-
-	var ns Namespace
-	ns.Prefix = "/caches/test1"
-	ns.Identity = "testident1"
-	ns.Pubkey = "tkey"
-	ns.AdminMetadata.Status = Pending
-
-	t.Run("NoAdmin", adminTester(ns))
-
-	ns.Prefix = "/caches/test2"
-	ns.Identity = "testident2"
-	ns.AdminMetadata = AdminMetadata{}
-
-	t.Run("EmptyAdmin", adminTester(ns))
 
 	viper.Reset()
 }

@@ -84,7 +84,7 @@ func retrieveRequest(ctx context.Context, ginCtx *gin.Context) {
 		return
 	}
 
-	ok, err := verifyToken(ctx, token, originReq.Prefix, param.Server_ExternalWebUrl.GetString(), token_scopes.Broker_Reverse)
+	ok, err := verifyToken(ctx, token, originReq.Prefix, param.Server_ExternalWebUrl.GetString(), token_scopes.Broker_Retrieve)
 	if err != nil {
 		log.Errorln("Failed to verify token for reverse request:", err)
 		ginCtx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "error", "msg": "Failed to verify provided token"})

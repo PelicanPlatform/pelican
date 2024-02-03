@@ -2,11 +2,7 @@
 name: goreleaser
 
 on:
-  push:
-    tags:
-      # only run release on v7.0.0 and up
-      - v[7-9]\.[0-9]+\.[0-9]+
-      - v[1-9][0-9]+\.[0-9]+\.[0-9]+
+  workflow_call:
 
 permissions:
   contents: write
@@ -15,10 +11,15 @@ jobs:
   goreleaser:
     runs-on: ubuntu-latest
     steps:
+      - name: Set Branch
+        id: set_branch
+        run: |
+          echo "branch=${GITHUB_REF_NAME%.*}.x" >> $GITHUB_OUTPUT
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ steps.set_branch.outputs.branch }}
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -26,11 +27,11 @@ jobs:
         run: |
           make web-build
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
         with:
           go-version: "1.20"
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v4
+        uses: goreleaser/goreleaser-action@v5
         with:
           # either 'goreleaser' (default) or 'goreleaser-pro'
           distribution: goreleaser

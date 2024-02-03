@@ -21,46 +21,37 @@ package web_ui
 import (
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/lestrrat-go/jwx/v2/jwa"
-	"github.com/lestrrat-go/jwx/v2/jwt"
-	"github.com/pelicanplatform/pelican/config"
+	"github.com/pkg/errors"
+	"github.com/prometheus/common/route"
+
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/utils"
-	"github.com/pkg/errors"
-	"github.com/prometheus/common/route"
 )
 
 // Create a token for accessing Prometheus /metrics endpoint on
 // the server itself
 func createPromMetricToken() (string, error) {
-	serverURL := param.Server_ExternalWebUrl.GetString()
-	tokenExpireTime := param.Monitoring_TokenExpiresIn.GetDuration()
-
-	tok, err := jwt.NewBuilder().
-		Claim("scope", token_scopes.Monitoring_Scrape.String()).
-		Issuer(serverURL).
-		Audience([]string{serverURL}).
-		Subject(serverURL).
-		Expiration(time.Now().Add(tokenExpireTime)).
-		Build()
-	if err != nil {
-		return "", err
+	serverUrl := param.Server_ExternalWebUrl.GetString()
+	promMetricTokCfg := utils.TokenConfig{
+		TokenProfile: utils.WLCG,
+		Lifetime:     param.Monitoring_TokenExpiresIn.GetDuration(),
+		Issuer:       serverUrl,
+		Audience:     []string{serverUrl},
+		Version:      "1.0",
+		Subject:      serverUrl,
+		Claims:       map[string]string{"scope": token_scopes.Monitoring_Scrape.String()},
 	}
 
-	key, err := config.GetIssuerPrivateJWK()
+	// CreateToken also handles validation for us
+	tok, err := promMetricTokCfg.CreateToken()
 	if err != nil {
-		return "", errors.Wrap(err, "failed to load the director's private JWK")
+		return "", errors.Wrap(err, "failed to create prometheus metrics token")
 	}
 
-	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, key))
-	if err != nil {
-		return "", err
-	}
-	return string(signed), nil
+	return tok, nil
 }
 
 // Handle the authorization of Prometheus /metrics endpoint by checking

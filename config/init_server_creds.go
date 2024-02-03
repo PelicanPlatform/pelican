@@ -461,6 +461,7 @@ func loadIssuerPrivateJWK(issuerKeyFile string) (jwk.Key, error) {
 		return nil, errors.Wrap(err, "Failed to assign key ID to private key")
 	}
 
+	// Store the key in the in-memory cache
 	issuerPrivateJWK.Store(&key)
 
 	return key, nil
@@ -477,14 +478,18 @@ func loadIssuerPublicJWKS(existingJWKS string, issuerKeyFile string) (jwk.Set, e
 			return nil, errors.Wrap(err, "Failed to read issuer JWKS file")
 		}
 	}
-	// This returns issuerPrivateJWK if it's non-nil, or find and parse private JWK
-	// located at IssuerKey if there is one, or generate a new private key
-	key, err := loadIssuerPrivateJWK(issuerKeyFile)
-	if err != nil {
-		return nil, errors.Wrap(err, "Failed to load issuer private JWK")
+	key := issuerPrivateJWK.Load()
+	if key == nil {
+		// This returns issuerPrivateJWK if it's non-nil, or find and parse private JWK
+		// located at IssuerKey if there is one, or generate a new private key
+		loadedKey, err := loadIssuerPrivateJWK(issuerKeyFile)
+		if err != nil {
+			return nil, errors.Wrap(err, "Failed to load issuer private JWK")
+		}
+		key = &loadedKey
 	}
 
-	pkey, err := jwk.PublicKeyOf(key)
+	pkey, err := jwk.PublicKeyOf(*key)
 	if err != nil {
 		return nil, errors.Wrapf(err, "Failed to generate public key from file %v", issuerKeyFile)
 	}

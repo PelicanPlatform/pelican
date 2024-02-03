@@ -24,6 +24,7 @@ import Image from "next/image";
 import PelicanLogo from "@/public/static/images/PelicanPlatformLogo_Icon.png";
 import IconButton from "@mui/material/IconButton";
 import BuildIcon from "@mui/icons-material/Build";
+import Main from "@/components/layout/Main";
 
 export const metadata = {
     title: 'Pelican Origin',
@@ -38,7 +39,7 @@ export default function RootLayout({
     return (
         <Box display={"flex"} flexDirection={"row"}>
             <Sidebar>
-                <Link href={"/index.html"}>
+                <Link href={"/"}>
                     <Image
                         src={PelicanLogo}
                         alt={"Pelican Logo"}
@@ -48,7 +49,7 @@ export default function RootLayout({
                 </Link>
                 <Box pt={1}>
                     <Tooltip title={"Config"} placement={"right"}>
-                        <Link href={"/config/index.html"}>
+                        <Link href={"/config/"}>
                             <IconButton>
                                 <BuildIcon/>
                             </IconButton>
@@ -56,9 +57,9 @@ export default function RootLayout({
                     </Tooltip>
                 </Box>
             </Sidebar>
-            <Box component={"main"} p={2} pl={"90px"} display={"flex"} minHeight={"100vh"} flexGrow={1}>
+            <Main>
                 {children}
-            </Box>
+            </Main>
         </Box>
     )
 }

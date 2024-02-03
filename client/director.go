@@ -75,10 +75,16 @@ func CreateNsFromDirectorResp(dirResp *http.Response) (namespace namespaces.Name
 	namespace.ReadHTTPS, _ = strconv.ParseBool(xPelicanNamespace["readhttps"])
 	namespace.DirListHost = xPelicanNamespace["collections-url"]
 
-	var xPelicanAuthorization map[string]string
+	xPelicanAuthorization := []string{} // map of header to x - single entry - want to create an array for issuer
 	if len(dirResp.Header.Values("X-Pelican-Authorization")) > 0 {
-		xPelicanAuthorization = HeaderParser(dirResp.Header.Values("X-Pelican-Authorization")[0])
-		namespace.Issuer = xPelicanAuthorization["issuer"]
+		//For each entry,(which is an array of issuer=0)
+		//So it's a map entry - HeaderParser returns a max entry
+		//We want to appen the value
+		for _, authEntry := range dirResp.Header.Values("X-Pelican-Authorization") {
+			parsedEntry := HeaderParser(authEntry)
+			xPelicanAuthorization = append(xPelicanAuthorization, parsedEntry["issuer"])
+		}
+		namespace.Issuer = xPelicanAuthorization
 	}
 
 	var xPelicanTokenGeneration map[string]string

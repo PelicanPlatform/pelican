@@ -39,6 +39,10 @@ import (
 	"github.com/pelicanplatform/pelican/web_ui"
 )
 
+var (
+	ErrExitOnSignal error = errors.New("Exit program on signal")
+)
+
 func LaunchModules(ctx context.Context, modules config.ServerType) (context.CancelFunc, error) {
 	egrp, ok := ctx.Value(config.EgrpKey).(*errgroup.Group)
 	if !ok {
@@ -55,7 +59,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		case sig := <-sigs:
 			log.Warningf("Received signal %v; will shutdown process", sig)
 			shutdownCancel()
-			return nil
+			return ErrExitOnSignal
 		case <-ctx.Done():
 			return nil
 		}
@@ -113,8 +117,24 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		mode := param.Origin_Mode.GetString()
 		switch mode {
 		case "posix":
-			if param.Origin_ExportVolume.GetString() == "" {
-				return shutdownCancel, errors.Errorf("Origin.ExportVolume must be set in the parameters.yaml file.")
+			if param.Origin_ExportVolume.GetString() == "" && (param.Xrootd_Mount.GetString() == "" || param.Origin_NamespacePrefix.GetString() == "") {
+				return shutdownCancel, errors.Errorf(`
+	Export information was not provided.
+	Add the command line flag:
+
+		-v /mnt/foo:/bar
+
+	to export the directory /mnt/foo to the namespace prefix /bar in the data federation. Alternatively, specify Origin.ExportVolume in the parameters.yaml file:
+
+		Origin:
+			ExportVolume: /mnt/foo:/bar
+
+	Or, specify Xrootd.Mount and Origin.NamespacePrefix in the parameters.yaml file:
+
+		Xrootd:
+			Mount: /mnt/foo
+		Origin:
+			NamespacePrefix: /bar`)
 			}
 		case "s3":
 			if param.Origin_S3Bucket.GetString() == "" || param.Origin_S3Region.GetString() == "" ||

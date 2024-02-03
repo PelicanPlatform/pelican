@@ -346,7 +346,10 @@ func DiscoverFederation() error {
 		federationUrl.Path = ""
 	}
 
-	discoveryUrl, _ := url.Parse(federationUrl.String())
+	discoveryUrl, err := url.Parse(federationUrl.String())
+	if err != nil {
+		return errors.Wrap(err, "unable to parse federation discovery URL")
+	}
 	discoveryUrl.Path, err = url.JoinPath(federationUrl.Path, ".well-known/pelican-configuration")
 	if err != nil {
 		return errors.Wrap(err, "Unable to parse federation url because of invalid path")
@@ -376,6 +379,15 @@ func DiscoverFederation() error {
 		return errors.Wrapf(err, "Failure when doing federation metadata read to %s", discoveryUrl)
 	}
 
+	if result.StatusCode != http.StatusOK {
+		truncatedMessage := string(body)
+		if len(body) > 1000 {
+			truncatedMessage = string(body[:1000])
+			truncatedMessage += " [... remainder truncated ...]"
+		}
+		return errors.Errorf("Federation metadata discovery failed with HTTP status %d.  Error message: %s", result.StatusCode, truncatedMessage)
+	}
+
 	metadata := FederationDiscovery{}
 	err = json.Unmarshal(body, &metadata)
 	if err != nil {
@@ -401,6 +413,22 @@ func DiscoverFederation() error {
 	}
 
 	return nil
+}
+
+// Return a struct representing the current (global) federation metadata
+func GetFederation() FederationDiscovery {
+	return FederationDiscovery{
+		DirectorEndpoint:              param.Federation_DirectorUrl.GetString(),
+		NamespaceRegistrationEndpoint: param.Federation_RegistryUrl.GetString(),
+		JwksUri:                       param.Federation_JwkUrl.GetString(),
+	}
+}
+
+// Set the current global federation metadata
+func SetFederation(fd FederationDiscovery) {
+	viper.Set("Federation.DirectorUrl", fd.DirectorEndpoint)
+	viper.Set("Federation.RegistryUrl", fd.NamespaceRegistrationEndpoint)
+	viper.Set("Federation.JwkUrl", fd.JwksUri)
 }
 
 // TODO: It's not clear that this function works correctly.  We should
@@ -558,7 +586,11 @@ func InitConfig() {
 	}
 	// 2) Set up osdf.yaml (if needed)
 	prefix := GetPreferredPrefix()
-	if prefix == "OSDF" {
+	loadOSDF := prefix == "OSDF"
+	if os.Getenv("STASH_USE_TOPOLOGY") == "" {
+		loadOSDF = loadOSDF || (prefix == "STASH")
+	}
+	if loadOSDF {
 		err := viper.MergeConfig(strings.NewReader(osdfDefaultsYaml))
 		if err != nil {
 			cobra.CheckErr(err)
@@ -762,6 +794,9 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 	if err != nil || unmarshalledConfig == nil {
 		return err
 	}
+
+	// Reset issuerPrivateJWK to ensure test cases can use their own temp IssuerKey
+	issuerPrivateJWK.Store(nil)
 
 	// As necessary, generate private keys, JWKS and corresponding certs
 

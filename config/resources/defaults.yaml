@@ -17,6 +17,17 @@
 Debug: false
 Logging:
   Level: "Error"
+  Cache:
+    Scitokens: error
+    Pss: error
+    Ofs: error
+    Xrd: error
+  Origin:
+    Scitokens: error
+    Pss: error
+    Cms: error
+    Pfc: info
+    Xrootd: emsg login stall redirect
 Server:
   WebPort: 8444
   WebHost: "0.0.0.0"
@@ -35,10 +46,13 @@ Origin:
   EnableMacaroons: false
   EnableVoms: true
   EnableUI: true
+  EnablePublicRead: false
   EnableWrite: true
   SelfTest: true
 Registry:
   InstitutionsUrlReloadMinutes: 15m
+  CacheApprovedOnly: false
+  OriginApprovedOnly: false
 Monitoring:
   PortLower: 9930
   PortHigher: 9999

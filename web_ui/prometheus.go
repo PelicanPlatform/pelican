@@ -35,8 +35,8 @@ import (
 	"github.com/mwitkow/go-conntrack"
 	"github.com/oklog/run"
 	pelican_config "github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
@@ -145,18 +145,43 @@ func runtimeInfo() (api_v1.RuntimeInfo, error) {
 
 // Configure director's Prometheus scraper to use HTTP service discovery for origins/caches
 func configDirectorPromScraper(ctx context.Context) (*config.ScrapeConfig, error) {
-	serverDiscoveryUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
+	directorBaseUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
 	if err != nil {
 		return nil, fmt.Errorf("parse external URL %v: %w", param.Server_ExternalWebUrl.GetString(), err)
 	}
-	sdToken, err := director.CreateDirectorSDToken()
-	if err != nil {
-		return nil, fmt.Errorf("Failed to generate token for Prometheus service discovery at start: %v", err)
+
+	promTokenCfg := utils.TokenConfig{
+		TokenProfile: utils.WLCG,
+		Lifetime:     param.Monitoring_TokenExpiresIn.GetDuration(),
+		Issuer:       directorBaseUrl.String(),
+		Audience:     []string{directorBaseUrl.String()},
+		Version:      "1.0",
+		Subject:      "director",
 	}
-	scraperToken, err := director.CreateDirectorScrapeToken()
+	promTokenCfg.AddScopes([]token_scopes.TokenScope{token_scopes.Pelican_DirectorServiceDiscovery})
+
+	// CreateToken also handles validation for us
+	sdToken, err := promTokenCfg.CreateToken()
 	if err != nil {
-		return nil, fmt.Errorf("Failed to generate token for director scraper at start: %v", err)
+		return nil, errors.Wrap(err, "failed to create director prometheus token")
 	}
+
+	scrapeTokenCfg := utils.TokenConfig{
+		TokenProfile: utils.WLCG,
+		Version:      "1.0",
+		Lifetime:     param.Monitoring_TokenExpiresIn.GetDuration(),
+		Issuer:       directorBaseUrl.String(),
+		Audience:     []string{"prometheus"},
+		Subject:      "director",
+	}
+	scrapeTokenCfg.AddScopes([]token_scopes.TokenScope{token_scopes.Monitoring_Scrape})
+
+	scraperToken, err := scrapeTokenCfg.CreateToken()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create director scraping token")
+	}
+
+	serverDiscoveryUrl := directorBaseUrl
 	serverDiscoveryUrl.Path = "/api/v1.0/director/discoverServers"
 	scrapeConfig := config.DefaultScrapeConfig
 	scrapeConfig.JobName = "origin_cache_servers"

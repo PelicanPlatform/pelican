@@ -1,22 +1,30 @@
 package registry
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/test_utils"
+	"github.com/pelicanplatform/pelican/token_scopes"
+	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/sirupsen/logrus/hooks/test"
@@ -70,7 +78,7 @@ func GenerateMockJWKS() (string, error) {
 
 	jsonData, err := json.MarshalIndent(jwks, "", "  ")
 	if err != nil {
-		return "", errors.Wrap(err, "Unable to marshall the json into string")
+		return "", errors.Wrap(err, "Unable to marshal the json into string")
 	}
 	// Append a new line to the JSON data
 	jsonData = append(jsonData, '\n')
@@ -79,13 +87,23 @@ func GenerateMockJWKS() (string, error) {
 }
 
 func TestListNamespaces(t *testing.T) {
-	_, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	viper.Reset()
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
 
 	// Initialize the mock database
 	setupMockRegistryDB(t)
 	defer teardownMockNamespaceDB(t)
+
+	viper.Set("Server.ExternalWebUrl", "https://mock-server.com")
+
+	dirName := t.TempDir()
+	viper.Set("ConfigDir", dirName)
+	err := config.InitServer(ctx, config.OriginType)
+	require.NoError(t, err)
+	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256())
+	require.NoError(t, err)
 
 	router := gin.Default()
 
@@ -94,9 +112,11 @@ func TestListNamespaces(t *testing.T) {
 	tests := []struct {
 		description  string
 		serverType   string
+		status       string
 		expectedCode int
 		emptyDB      bool
 		notApproved  bool
+		authUser     bool
 		expectedData []Namespace
 	}{
 		{
@@ -120,16 +140,52 @@ func TestListNamespaces(t *testing.T) {
 		},
 		{
 			description:  "valid-request-without-type",
-			serverType:   "",
 			expectedCode: http.StatusOK,
 			expectedData: mockNssWithMixed,
 		},
 		{
 			description:  "unauthed-not-approved-without-type-returns-empty",
-			serverType:   "",
 			expectedCode: http.StatusOK,
 			expectedData: []Namespace{},
 			notApproved:  true,
+		},
+		{
+			description:  "unauthed-with-status-pending-returns-403",
+			expectedCode: http.StatusForbidden,
+			status:       "Pending",
+			expectedData: []Namespace{},
+			notApproved:  true,
+			authUser:     false,
+		},
+		{
+			description:  "authed-not-approved-returns",
+			expectedCode: http.StatusOK,
+			expectedData: mockNssWithMixedNotApproved,
+			notApproved:  true,
+			authUser:     true,
+		},
+		{
+			description:  "authed-returns-filtered-approved-status",
+			expectedCode: http.StatusOK,
+			status:       "Approved",
+			expectedData: []Namespace{},
+			notApproved:  true,
+			authUser:     true,
+		},
+		{
+			description:  "authed-returns-filtered-pending-status",
+			expectedCode: http.StatusOK,
+			status:       "Pending",
+			expectedData: mockNssWithMixedNotApproved,
+			notApproved:  true,
+			authUser:     true,
+		},
+		{
+			description:  "authed-returns-400-with-random-status",
+			expectedCode: http.StatusBadRequest,
+			status:       "random",
+			expectedData: nil,
+			authUser:     true,
 		},
 		{
 			description:  "invalid-request-parameters",
@@ -160,13 +216,15 @@ func TestListNamespaces(t *testing.T) {
 
 			// Create a request to the endpoint
 			w := httptest.NewRecorder()
-			requestURL := ""
-			if tc.serverType != "" {
-				requestURL = "/namespaces?server_type=" + tc.serverType
-			} else {
-				requestURL = "/namespaces"
-			}
+			requestURL := "/namespaces?server_type=" + tc.serverType + "&status=" + tc.status
 			req, _ := http.NewRequest("GET", requestURL, nil)
+			if tc.authUser {
+				tokenCfg := utils.TokenConfig{Issuer: "https://mock-server.com", Lifetime: time.Minute, Subject: "admin", TokenProfile: utils.None}
+				tokenCfg.AddScopes([]token_scopes.TokenScope{token_scopes.WebUi_Access})
+				token, err := tokenCfg.CreateToken()
+				require.NoError(t, err)
+				req.AddCookie(&http.Cookie{Name: "login", Value: token, Path: "/"})
+			}
 			router.ServeHTTP(w, req)
 
 			// Check the response
@@ -179,6 +237,224 @@ func TestListNamespaces(t *testing.T) {
 					t.Fatalf("Failed to unmarshal response body: %v", err)
 				}
 				assert.True(t, compareNamespaces(tc.expectedData, got, true), "Response data does not match expected")
+			}
+		})
+	}
+}
+
+func TestListNamespacesForUser(t *testing.T) {
+	viper.Reset()
+	_, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
+	// Initialize the mock database
+	setupMockRegistryDB(t)
+	defer teardownMockNamespaceDB(t)
+
+	mockUserNss := func() []Namespace {
+		return []Namespace{
+			mockNamespace("/foo", "", "", AdminMetadata{UserID: "mockUser", Status: Pending}),
+			mockNamespace("/bar", "", "", AdminMetadata{UserID: "mockUser", Status: Approved}),
+		}
+	}()
+
+	tests := []struct {
+		description  string
+		expectedCode int
+		emptyDB      bool
+		authUser     bool
+		queryParam   string
+		expectedData []Namespace
+	}{
+		{
+			description:  "unauthed-return-401",
+			expectedCode: http.StatusUnauthorized,
+			expectedData: []Namespace{},
+		},
+		{
+			description:  "valid-request-with-empty-db",
+			expectedCode: http.StatusOK,
+			emptyDB:      true,
+			expectedData: []Namespace{},
+			authUser:     true,
+		},
+		{
+			description:  "valid-request-without-type",
+			expectedCode: http.StatusOK,
+			expectedData: mockUserNss,
+			authUser:     true,
+		},
+		{
+			description:  "invalid-request-parameters",
+			expectedCode: http.StatusBadRequest,
+			queryParam:   "?status=random",
+			expectedData: nil,
+			authUser:     true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.description, func(t *testing.T) {
+			if !tc.emptyDB {
+				err := insertMockDBData(mockNssWithMixed)
+				require.NoErrorf(t, err, "Failed to set up mock data: %v", err)
+				err = insertMockDBData(mockUserNss)
+				require.NoErrorf(t, err, "Failed to set up mock data: %v", err)
+			}
+			defer func() {
+				resetNamespaceDB(t)
+			}()
+
+			// Create a request to the endpoint
+			w := httptest.NewRecorder()
+			requestURL := "/namespaces/user" + tc.queryParam
+			req, _ := http.NewRequest("GET", requestURL, nil)
+			if tc.authUser {
+				router := gin.Default()
+				router.GET("/namespaces/user", func(ctx *gin.Context) {
+					ctx.Set("User", "mockUser")
+				}, listNamespacesForUser)
+				router.ServeHTTP(w, req)
+			} else {
+				router := gin.Default()
+				router.GET("/namespaces/user", listNamespacesForUser)
+				router.ServeHTTP(w, req)
+			}
+
+			// Check the response
+			assert.Equal(t, tc.expectedCode, w.Code)
+
+			if tc.expectedCode == http.StatusOK {
+				var got []Namespace
+				err := json.Unmarshal(w.Body.Bytes(), &got)
+				require.NoErrorf(t, err, "Failed to unmarshal response body: %v", err)
+				assert.True(t, compareNamespaces(tc.expectedData, got, true), "Response data does not match expected")
+			}
+		})
+	}
+}
+
+func TestGetNamespace(t *testing.T) {
+	_, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
+	// Initialize the mock database
+	setupMockRegistryDB(t)
+	defer teardownMockNamespaceDB(t)
+
+	mockUserNs := mockNamespace("/mockUser", "", "", AdminMetadata{UserID: "mockUser"})
+
+	tests := []struct {
+		description  string
+		requestId    string
+		expectedCode int
+		validID      bool
+		checkAdmin   bool
+		userName     string
+	}{
+		{
+			description:  "valid-request-with-empty-key",
+			expectedCode: http.StatusOK,
+			validID:      true,
+		},
+		{
+			description:  "invalid-request-with-str-id",
+			requestId:    "crazy-id",
+			expectedCode: http.StatusBadRequest,
+		},
+		{
+			description:  "invalid-request-with-0-id",
+			requestId:    "0",
+			expectedCode: http.StatusBadRequest,
+		},
+		{
+			description:  "invalid-request-with-neg-id",
+			requestId:    "-10000",
+			expectedCode: http.StatusBadRequest,
+		},
+		{
+			description: "invalid-request-with-empty-id",
+			requestId:   "",
+			// empty id will resolve a child path of /test which DNE
+			expectedCode: http.StatusNotFound,
+		},
+		{
+			description:  "invalid-request-with-id-not-found",
+			requestId:    "100",
+			expectedCode: http.StatusNotFound,
+		},
+		{
+			description:  "user-can-see-their-own-ns",
+			validID:      true,
+			checkAdmin:   true,
+			userName:     "mockUser",
+			expectedCode: http.StatusOK,
+		},
+		{
+			description:  "user-cannot-see-others-ns",
+			validID:      true,
+			checkAdmin:   true,
+			userName:     "randomUser",
+			expectedCode: http.StatusForbidden,
+		},
+		{
+			description:  "admin-can-see-any-ns",
+			validID:      true,
+			checkAdmin:   true,
+			userName:     "admin",
+			expectedCode: http.StatusOK,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.description, func(t *testing.T) {
+			if tc.checkAdmin {
+				err := insertMockDBData([]Namespace{mockUserNs})
+				require.NoErrorf(t, err, "Failed to set up mock data: %v", err)
+			} else {
+				err := insertMockDBData(mockNssWithMixed)
+				require.NoErrorf(t, err, "Failed to set up mock data: %v", err)
+			}
+			defer resetNamespaceDB(t)
+
+			finalId := tc.requestId
+			if tc.validID {
+				id, err := getLastNamespaceId()
+				finalId = strconv.Itoa(id)
+				require.NoError(t, err)
+			}
+
+			// Create a request to the endpoint
+			w := httptest.NewRecorder()
+			requestURL := fmt.Sprint("/test/", finalId)
+			req, _ := http.NewRequest("GET", requestURL, nil)
+
+			if tc.checkAdmin {
+				router := gin.Default()
+				router.GET("/test/:id", func(ctx *gin.Context) {
+					ctx.Set("User", tc.userName)
+				}, getNamespace)
+				router.ServeHTTP(w, req)
+			} else {
+				router := gin.Default()
+				router.GET("/test/:id", getNamespace)
+				router.ServeHTTP(w, req)
+			}
+
+			// Check the response
+			require.Equal(t, tc.expectedCode, w.Code)
+
+			if tc.expectedCode == 200 {
+				getNs := Namespace{}
+
+				bytes, err := io.ReadAll(w.Body)
+				require.NoError(t, err)
+				err = json.Unmarshal(bytes, &getNs)
+				require.NoError(t, err)
+
+				require.NotEqual(t, Namespace{}, getNs)
 			}
 		})
 	}
@@ -275,6 +551,670 @@ func TestGetNamespaceJWKS(t *testing.T) {
 	}
 }
 
+func TestUpdateNamespaceStatus(t *testing.T) {
+	_, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
+	// Initialize the mock database
+	setupMockRegistryDB(t)
+	defer teardownMockNamespaceDB(t)
+
+	mockUserNs := mockNamespace("/mockUser", "", "", AdminMetadata{UserID: "mockUser"})
+
+	tests := []struct {
+		description  string
+		requestId    string
+		expectedCode int
+		validID      bool
+	}{
+		{
+			description:  "invalid-request-with-str-id",
+			requestId:    "crazy-id",
+			expectedCode: http.StatusBadRequest,
+		},
+		{
+			description:  "invalid-request-with-0-id",
+			requestId:    "0",
+			expectedCode: http.StatusBadRequest,
+		},
+		{
+			description:  "invalid-request-with-neg-id",
+			requestId:    "-10000",
+			expectedCode: http.StatusBadRequest,
+		},
+		{
+			description:  "invalid-request-with-empty-id",
+			requestId:    "",
+			expectedCode: http.StatusBadRequest,
+		},
+		{
+			description:  "invalid-request-with-id-not-found",
+			requestId:    "100",
+			expectedCode: http.StatusNotFound,
+		},
+		{
+			description:  "valid-id-should-update-correctly",
+			validID:      true,
+			expectedCode: http.StatusOK,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.description, func(t *testing.T) {
+			err := insertMockDBData([]Namespace{mockUserNs})
+			require.NoErrorf(t, err, "Failed to set up mock data: %v", err)
+			defer resetNamespaceDB(t)
+
+			router := gin.Default()
+			router.PATCH("/test/:id/approve", func(ctx *gin.Context) {
+				ctx.Set("User", "admin")
+				updateNamespaceStatus(ctx, Approved)
+			})
+			router.PATCH("/test/:id/deny", func(ctx *gin.Context) {
+				ctx.Set("User", "admin")
+				updateNamespaceStatus(ctx, Denied)
+			})
+
+			finalId := tc.requestId
+			if tc.validID {
+				id, err := getLastNamespaceId()
+				finalId = strconv.Itoa(id)
+				require.NoError(t, err)
+			}
+
+			// Create a request to the endpoint
+			wApprove := httptest.NewRecorder()
+			requestURLApprove := fmt.Sprint("/test/", finalId, "/approve")
+			reqApprove, _ := http.NewRequest("PATCH", requestURLApprove, nil)
+
+			router.ServeHTTP(wApprove, reqApprove)
+
+			// Check the response
+			require.Equal(t, tc.expectedCode, wApprove.Code)
+
+			if tc.expectedCode == 200 {
+				bytes, err := io.ReadAll(wApprove.Body)
+				require.NoError(t, err)
+				assert.JSONEq(t, `{"msg":"ok"}`, string(bytes))
+
+				if tc.validID {
+					intId, err := strconv.Atoi(finalId)
+					require.NoError(t, err)
+					ns, err := getNamespaceById(intId)
+					require.NoError(t, err)
+					assert.True(t, ns.AdminMetadata.Status == Approved)
+					assert.NotEqual(t, time.Time{}, ns.AdminMetadata.ApprovedAt)
+					assert.Equal(t, "admin", ns.AdminMetadata.ApproverID)
+				}
+			}
+		})
+	}
+}
+
+func TestCreateNamespace(t *testing.T) {
+	viper.Reset()
+	_, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
+	// Initialize the mock database
+	setupMockRegistryDB(t)
+	defer teardownMockNamespaceDB(t)
+
+	router := gin.Default()
+	router.POST("/namespaces", func(ctx *gin.Context) {
+		ctx.Set("User", "admin")
+		createUpdateNamespace(ctx, false)
+	})
+
+	t.Run("no-user-returns-401", func(t *testing.T) {
+		resetNamespaceDB(t)
+
+		router := gin.Default()
+		router.POST("/namespaces", func(ctx *gin.Context) {
+			createUpdateNamespace(ctx, false)
+		})
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/namespaces", nil)
+		router.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusUnauthorized, w.Result().StatusCode)
+	})
+
+	t.Run("empty-request-returns-400", func(t *testing.T) {
+		resetNamespaceDB(t)
+
+		// Create a request to the endpoint
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/namespaces", nil)
+		router.ServeHTTP(w, req)
+
+		body, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+		assert.JSONEq(t, `{"error":"Invalid create or update namespace request"}`, string(body))
+	})
+
+	t.Run("missing-required-fields-returns-400", func(t *testing.T) {
+		resetNamespaceDB(t)
+
+		mockEmptyNs := Namespace{}
+		mockEmptyNsBytes, err := json.Marshal(mockEmptyNs)
+		require.NoError(t, err)
+		// Create a request to the endpoint
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/namespaces", bytes.NewReader(mockEmptyNsBytes))
+		req.Header.Set("Context-Type", "application/json")
+		router.ServeHTTP(w, req)
+
+		body, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+		assert.Contains(t, string(body), "Field validation for 'Prefix' failed on the 'required' tag")
+		assert.Contains(t, string(body), "Field validation for 'Pubkey' failed on the 'required' tag")
+		assert.Contains(t, string(body), "Field validation for 'Institution' failed on the 'required' tag")
+	})
+
+	t.Run("invalid-prefix-returns-400", func(t *testing.T) {
+		resetNamespaceDB(t)
+
+		mockEmptyNs := Namespace{Prefix: "/", Pubkey: "badKey", AdminMetadata: AdminMetadata{Institution: "001"}}
+		mockEmptyNsBytes, err := json.Marshal(mockEmptyNs)
+		require.NoError(t, err)
+		// Create a request to the endpoint
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/namespaces", bytes.NewReader(mockEmptyNsBytes))
+		req.Header.Set("Context-Type", "application/json")
+		router.ServeHTTP(w, req)
+
+		body, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+		assert.Contains(t, string(body), "Error: Field validation for prefix failed:")
+	})
+
+	t.Run("existing-prefix-returns-400", func(t *testing.T) {
+		resetNamespaceDB(t)
+		err := insertMockDBData([]Namespace{{Prefix: "/foo", Pubkey: "badKey", AdminMetadata: AdminMetadata{Status: Pending}}})
+		require.NoError(t, err)
+		defer resetNamespaceDB(t)
+
+		mockNs := Namespace{Prefix: "/foo", Pubkey: "badKey", AdminMetadata: AdminMetadata{Institution: "001"}}
+		mockNsBytes, err := json.Marshal(mockNs)
+		require.NoError(t, err)
+		// Create a request to the endpoint
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/namespaces", bytes.NewReader(mockNsBytes))
+		req.Header.Set("Context-Type", "application/json")
+		router.ServeHTTP(w, req)
+
+		body, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+		assert.Contains(t, string(body), "The prefix /foo is already registered")
+	})
+
+	t.Run("bad-pubkey-returns-400", func(t *testing.T) {
+		resetNamespaceDB(t)
+
+		mockNs := Namespace{Prefix: "/foo", Pubkey: "badKey", AdminMetadata: AdminMetadata{Institution: "001"}}
+		mockNsBytes, err := json.Marshal(mockNs)
+		require.NoError(t, err)
+		// Create a request to the endpoint
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/namespaces", bytes.NewReader(mockNsBytes))
+		req.Header.Set("Context-Type", "application/json")
+		router.ServeHTTP(w, req)
+
+		body, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+		assert.Contains(t, string(body), "Error: Field validation for pubkey failed:")
+	})
+
+	t.Run("keychain-failure-returns-400", func(t *testing.T) {
+		resetNamespaceDB(t)
+
+		pubKeyStr, err := GenerateMockJWKS()
+		require.NoError(t, err)
+
+		err = insertMockDBData([]Namespace{{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: AdminMetadata{Status: Pending}}})
+		require.NoError(t, err)
+		defer resetNamespaceDB(t)
+
+		diffPubKeyStr, err := GenerateMockJWKS()
+		require.NoError(t, err)
+
+		mockNs := Namespace{Prefix: "/foo", Pubkey: diffPubKeyStr, AdminMetadata: AdminMetadata{Institution: "001"}}
+		mockNsBytes, err := json.Marshal(mockNs)
+		require.NoError(t, err)
+		// Create a request to the endpoint
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/namespaces", bytes.NewReader(mockNsBytes))
+		req.Header.Set("Context-Type", "application/json")
+		router.ServeHTTP(w, req)
+
+		body, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+		assert.Contains(t, string(body), "The prefix /foo is already registered")
+	})
+
+	t.Run("inst-failure-returns-400", func(t *testing.T) {
+		resetNamespaceDB(t)
+		mockInsts := []Institution{{ID: "1000"}}
+		viper.Set("Registry.Institutions", mockInsts)
+
+		pubKeyStr, err := GenerateMockJWKS()
+		require.NoError(t, err)
+
+		mockNs := Namespace{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: AdminMetadata{Institution: "001"}}
+		mockNsBytes, err := json.Marshal(mockNs)
+		require.NoError(t, err)
+		// Create a request to the endpoint
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/namespaces", bytes.NewReader(mockNsBytes))
+		req.Header.Set("Context-Type", "application/json")
+		router.ServeHTTP(w, req)
+
+		body, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+		assert.Contains(t, string(body), `not in the list of available institutions to register`)
+	})
+
+	t.Run("valid-request-gives-200", func(t *testing.T) {
+		resetNamespaceDB(t)
+		mockInsts := []Institution{{ID: "1000"}}
+		viper.Set("Registry.Institutions", mockInsts)
+
+		pubKeyStr, err := GenerateMockJWKS()
+		require.NoError(t, err)
+
+		mockNs := Namespace{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: AdminMetadata{Institution: "1000"}}
+		mockNsBytes, err := json.Marshal(mockNs)
+		require.NoError(t, err)
+		// Create a request to the endpoint
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/namespaces", bytes.NewReader(mockNsBytes))
+		req.Header.Set("Context-Type", "application/json")
+		router.ServeHTTP(w, req)
+
+		body, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+		assert.JSONEq(t, `{"msg": "success"}`, string(body))
+
+		nss, err := getAllNamespaces()
+		require.NoError(t, err)
+		require.Equal(t, 1, len(nss))
+		assert.Equal(t, "/foo", nss[0].Prefix)
+		assert.Equal(t, "admin", nss[0].AdminMetadata.UserID)
+		assert.Equal(t, Pending, nss[0].AdminMetadata.Status)
+		assert.NotEqual(t, time.Time{}, nss[0].AdminMetadata.CreatedAt)
+	})
+}
+
+func TestUpdateNamespaceHandler(t *testing.T) {
+	viper.Reset()
+	_, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
+	// Initialize the mock database
+	setupMockRegistryDB(t)
+	defer teardownMockNamespaceDB(t)
+
+	router := gin.Default()
+	router.PUT("/namespaces/:id", func(ctx *gin.Context) {
+		ctx.Set("User", "mockUser")
+		createUpdateNamespace(ctx, true)
+	})
+
+	t.Run("no-id-returns-404", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/namespaces/", nil)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusNotFound, w.Result().StatusCode)
+	})
+
+	t.Run("str-id-returns-400", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/namespaces/crazy-id", nil)
+		router.ServeHTTP(w, req)
+
+		body, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+		assert.JSONEq(t, `{"error": "Invalid ID format. ID must a positive integer"}`, string(body))
+	})
+
+	t.Run("ng-id-returns-400", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/namespaces/-100", nil)
+		router.ServeHTTP(w, req)
+
+		body, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+		assert.JSONEq(t, `{"error": "Invalid ID format. ID must a positive integer"}`, string(body))
+	})
+
+	t.Run("zero-id-returns-400", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/namespaces/0", nil)
+		router.ServeHTTP(w, req)
+
+		body, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+		assert.JSONEq(t, `{"error": "Invalid ID format. ID must a positive integer"}`, string(body))
+	})
+
+	t.Run("valid-request-but-ns-dne-returns-404", func(t *testing.T) {
+		resetNamespaceDB(t)
+		mockInsts := []Institution{{ID: "1000"}}
+		viper.Set("Registry.Institutions", mockInsts)
+
+		pubKeyStr, err := GenerateMockJWKS()
+		require.NoError(t, err)
+
+		mockNs := Namespace{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: AdminMetadata{Institution: "1000"}}
+		mockNsBytes, err := json.Marshal(mockNs)
+		require.NoError(t, err)
+		// Create a request to the endpoint
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/namespaces/1", bytes.NewReader(mockNsBytes))
+		router.ServeHTTP(w, req)
+
+		body, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusNotFound, w.Result().StatusCode)
+		assert.JSONEq(t, `{"error": "Can't update namespace: namespace not found"}`, string(body))
+	})
+
+	t.Run("valid-request-not-owner-gives-404", func(t *testing.T) {
+		resetNamespaceDB(t)
+		mockInsts := []Institution{{ID: "1000"}}
+		viper.Set("Registry.Institutions", mockInsts)
+
+		pubKeyStr, err := GenerateMockJWKS()
+		require.NoError(t, err)
+
+		mockNs := Namespace{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: AdminMetadata{Institution: "1000", UserID: "notYourNs"}}
+
+		err = insertMockDBData([]Namespace{mockNs})
+		require.NoError(t, err)
+
+		id, err := getLastNamespaceId()
+		require.NoError(t, err)
+
+		mockNsBytes, err := json.Marshal(mockNs)
+		require.NoError(t, err)
+		// Create a request to the endpoint
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/namespaces/"+strconv.Itoa(id), bytes.NewReader(mockNsBytes))
+		router.ServeHTTP(w, req)
+
+		body, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusNotFound, w.Result().StatusCode)
+		assert.JSONEq(t, `{"error": "Namespace not found. Check the id or if you own the namespace"}`, string(body))
+	})
+
+	t.Run("reg-user-cant-change-after-approv", func(t *testing.T) {
+		resetNamespaceDB(t)
+		mockInsts := []Institution{{ID: "1000"}}
+		viper.Set("Registry.Institutions", mockInsts)
+
+		pubKeyStr, err := GenerateMockJWKS()
+		require.NoError(t, err)
+
+		mockNs := Namespace{
+			Prefix: "/foo",
+			Pubkey: pubKeyStr,
+			AdminMetadata: AdminMetadata{
+				Institution: "1000",
+				UserID:      "mockUser", // same as currently sign-in user
+				Status:      Approved,   // but it's approved
+			},
+		}
+
+		err = insertMockDBData([]Namespace{mockNs})
+		require.NoError(t, err)
+
+		id, err := getLastNamespaceId()
+		require.NoError(t, err)
+
+		mockNsBytes, err := json.Marshal(mockNs)
+		require.NoError(t, err)
+		// Create a request to the endpoint
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/namespaces/"+strconv.Itoa(id), bytes.NewReader(mockNsBytes))
+		router.ServeHTTP(w, req)
+
+		body, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusForbidden, w.Result().StatusCode)
+		assert.JSONEq(t, `{"error": "You don't have permission to modify an approved registration. Please contact your federation administrator"}`, string(body))
+	})
+
+	t.Run("reg-user-success-change", func(t *testing.T) {
+		resetNamespaceDB(t)
+		mockInsts := []Institution{{ID: "1000"}}
+		viper.Set("Registry.Institutions", mockInsts)
+
+		pubKeyStr, err := GenerateMockJWKS()
+		require.NoError(t, err)
+
+		mockNs := Namespace{
+			Prefix: "/foo",
+			Pubkey: pubKeyStr,
+			AdminMetadata: AdminMetadata{
+				Description: "oldDescription",
+				Institution: "1000",
+				UserID:      "mockUser", // same as currently sign-in user
+				Status:      Pending,    // but it's approved
+			},
+		}
+
+		err = insertMockDBData([]Namespace{mockNs})
+		require.NoError(t, err)
+
+		id, err := getLastNamespaceId()
+		require.NoError(t, err)
+
+		updatedNs := mockNs
+		updatedNs.AdminMetadata.Description = "newDescription"
+
+		mockNsBytes, err := json.Marshal(updatedNs)
+		require.NoError(t, err)
+		// Create a request to the endpoint
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/namespaces/"+strconv.Itoa(id), bytes.NewReader(mockNsBytes))
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+
+		nss, err := getAllNamespaces()
+		require.NoError(t, err)
+		require.Equal(t, 1, len(nss))
+		assert.Equal(t, "/foo", nss[0].Prefix)
+		assert.Equal(t, "newDescription", nss[0].AdminMetadata.Description)
+	})
+
+	t.Run("admin-can-change-anybody", func(t *testing.T) {
+		resetNamespaceDB(t)
+		mockInsts := []Institution{{ID: "1000"}}
+		viper.Set("Registry.Institutions", mockInsts)
+
+		pubKeyStr, err := GenerateMockJWKS()
+		require.NoError(t, err)
+
+		mockNs := Namespace{
+			Prefix: "/foo",
+			Pubkey: pubKeyStr,
+			AdminMetadata: AdminMetadata{
+				Description: "oldDescription",
+				Institution: "1000",
+				UserID:      "mockUser", // same as currently sign-in user
+				Status:      Approved,   // but it's approved
+			},
+		}
+
+		err = insertMockDBData([]Namespace{mockNs})
+		require.NoError(t, err)
+
+		id, err := getLastNamespaceId()
+		require.NoError(t, err)
+
+		updatedNs := mockNs
+		updatedNs.AdminMetadata.Description = "newDescription"
+
+		mockNsBytes, err := json.Marshal(updatedNs)
+		require.NoError(t, err)
+
+		router := gin.Default()
+		router.PUT("/namespaces/:id", func(ctx *gin.Context) {
+			ctx.Set("User", "admin")
+			createUpdateNamespace(ctx, true)
+		})
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/namespaces/"+strconv.Itoa(id), bytes.NewReader(mockNsBytes))
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+
+		nss, err := getAllNamespaces()
+		require.NoError(t, err)
+		require.Equal(t, 1, len(nss))
+		assert.Equal(t, "/foo", nss[0].Prefix)
+		assert.Equal(t, "newDescription", nss[0].AdminMetadata.Description)
+	})
+}
+
+func TestListInsitutions(t *testing.T) {
+	viper.Reset()
+	router := gin.Default()
+	router.GET("/institutions", listInstitutions)
+
+	t.Run("nil-cache-with-nil-config-returns-error", func(t *testing.T) {
+		func() {
+			institutionsCacheMutex.Lock()
+			defer institutionsCacheMutex.Unlock()
+			institutionsCache = nil
+		}()
+
+		// Create a request to the endpoint
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/institutions", nil)
+		router.ServeHTTP(w, req)
+
+		bytes, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+
+		assert.Equal(t, http.StatusInternalServerError, w.Result().StatusCode)
+		assert.JSONEq(t, `{"error": "Server didn't configure Registry.Institutions"}`, string(bytes))
+	})
+
+	t.Run("cache-hit-returns", func(t *testing.T) {
+		viper.Reset()
+		mockUrl := url.URL{Scheme: "https", Host: "example.com"}
+		viper.Set("Registry.InstitutionsUrl", mockUrl.String())
+		mockInsts := []Institution{{Name: "Foo", ID: "001"}}
+		func() {
+			institutionsCacheMutex.Lock()
+			defer institutionsCacheMutex.Unlock()
+			institutionsCache = ttlcache.New[string, []Institution]()
+			// Expired but never evicted, so Has() still returns true
+			institutionsCache.Set(mockUrl.String(), mockInsts, time.Second)
+		}()
+
+		// Create a request to the endpoint
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/institutions", nil)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+		bytes, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+
+		getInsts := []Institution{}
+		err = json.Unmarshal(bytes, &getInsts)
+		require.NoError(t, err)
+
+		assert.Equal(t, mockInsts, getInsts)
+	})
+
+	t.Run("nil-cache-with-nonnil-config-returns", func(t *testing.T) {
+		viper.Reset()
+		func() {
+			institutionsCacheMutex.Lock()
+			defer institutionsCacheMutex.Unlock()
+			institutionsCache = nil
+		}()
+
+		mockInstsConfig := []Institution{{Name: "foo", ID: "bar"}}
+		viper.Set("Registry.Institutions", mockInstsConfig)
+
+		// Create a request to the endpoint
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/institutions", nil)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+
+		bytes, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+
+		getInsts := []Institution{}
+		err = json.Unmarshal(bytes, &getInsts)
+		require.NoError(t, err)
+
+		assert.Equal(t, mockInstsConfig, getInsts)
+	})
+
+	t.Run("non-nil-cache-with-nonnil-config-return-config", func(t *testing.T) {
+		viper.Reset()
+		mockUrl := url.URL{Scheme: "https", Host: "example.com"}
+		viper.Set("Registry.InstitutionsUrl", mockUrl.String())
+		mockInsts := []Institution{{Name: "Foo", ID: "001"}}
+		func() {
+			institutionsCacheMutex.Lock()
+			defer institutionsCacheMutex.Unlock()
+			institutionsCache = ttlcache.New[string, []Institution]()
+			// Expired but never evicted, so Has() still returns true
+			institutionsCache.Set(mockUrl.String(), mockInsts, time.Second)
+		}()
+
+		mockInstsConfig := []Institution{{Name: "foo", ID: "bar"}}
+		viper.Set("Registry.Institutions", mockInstsConfig)
+
+		// Create a request to the endpoint
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/institutions", nil)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+
+		bytes, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+
+		getInsts := []Institution{}
+		err = json.Unmarshal(bytes, &getInsts)
+		require.NoError(t, err)
+
+		assert.Equal(t, mockInstsConfig, getInsts)
+	})
+}
+
 func TestPopulateRegistrationFields(t *testing.T) {
 	result := populateRegistrationFields("", Namespace{})
 	assert.NotEqual(t, 0, len(result))
@@ -282,8 +1222,11 @@ func TestPopulateRegistrationFields(t *testing.T) {
 
 func TestGetCachedInstitutions(t *testing.T) {
 	t.Run("nil-cache-returns-error", func(t *testing.T) {
-		institutionsCache = nil
-
+		func() {
+			institutionsCacheMutex.Lock()
+			defer institutionsCacheMutex.Unlock()
+			institutionsCache = nil
+		}()
 		_, intErr, extErr := getCachedInstitutions()
 		assert.Error(t, intErr)
 		assert.Error(t, extErr)
@@ -292,7 +1235,11 @@ func TestGetCachedInstitutions(t *testing.T) {
 
 	t.Run("unset-config-val-returns-error", func(t *testing.T) {
 		viper.Reset()
-		institutionsCache = ttlcache.New[string, []Institution]()
+		func() {
+			institutionsCacheMutex.Lock()
+			defer institutionsCacheMutex.Unlock()
+			institutionsCache = ttlcache.New[string, []Institution]()
+		}()
 		_, intErr, extErr := getCachedInstitutions()
 		assert.Error(t, intErr)
 		assert.Error(t, extErr)
@@ -302,7 +1249,11 @@ func TestGetCachedInstitutions(t *testing.T) {
 	t.Run("random-config-val-returns-error", func(t *testing.T) {
 		viper.Reset()
 		viper.Set("Registry.InstitutionsUrl", "random-url")
-		institutionsCache = ttlcache.New[string, []Institution]()
+		func() {
+			institutionsCacheMutex.Lock()
+			defer institutionsCacheMutex.Unlock()
+			institutionsCache = ttlcache.New[string, []Institution]()
+		}()
 		_, intErr, extErr := getCachedInstitutions()
 		assert.Error(t, intErr)
 		assert.Error(t, extErr)
@@ -314,11 +1265,10 @@ func TestGetCachedInstitutions(t *testing.T) {
 		viper.Reset()
 		mockUrl := url.URL{Scheme: "https", Host: "example.com"}
 		viper.Set("Registry.InstitutionsUrl", mockUrl.String())
-		institutionsCache = ttlcache.New[string, []Institution]()
-
 		func() {
 			institutionsCacheMutex.Lock()
 			defer institutionsCacheMutex.Unlock()
+			institutionsCache = ttlcache.New[string, []Institution]()
 			institutionsCache.Set(mockUrl.String(), nil, ttlcache.NoTTL)
 		}()
 
@@ -338,12 +1288,12 @@ func TestGetCachedInstitutions(t *testing.T) {
 		viper.Reset()
 		mockUrl := url.URL{Scheme: "https", Host: "example.com"}
 		viper.Set("Registry.InstitutionsUrl", mockUrl.String())
-		institutionsCache = ttlcache.New[string, []Institution]()
 		mockInsts := []Institution{{Name: "Foo", ID: "001"}}
 
 		func() {
 			institutionsCacheMutex.Lock()
 			defer institutionsCacheMutex.Unlock()
+			institutionsCache = ttlcache.New[string, []Institution]()
 			institutionsCache.Set(mockUrl.String(), mockInsts, ttlcache.NoTTL)
 		}()
 
@@ -351,6 +1301,34 @@ func TestGetCachedInstitutions(t *testing.T) {
 		require.NoError(t, intErr)
 		require.NoError(t, extErr)
 		assert.Equal(t, mockInsts, getInsts)
+
+		func() {
+			institutionsCacheMutex.Lock()
+			defer institutionsCacheMutex.Unlock()
+			institutionsCache.DeleteAll()
+		}()
+	})
+
+	t.Run("cache-hit-with-expired-item", func(t *testing.T) {
+		viper.Reset()
+		mockUrl := url.URL{Scheme: "https", Host: "example.com"}
+		viper.Set("Registry.InstitutionsUrl", mockUrl.String())
+		mockInsts := []Institution{{Name: "Foo", ID: "001"}}
+
+		func() {
+			institutionsCacheMutex.Lock()
+			defer institutionsCacheMutex.Unlock()
+			institutionsCache = ttlcache.New[string, []Institution]()
+			// Expired but never evicted, so Has() still returns true
+			institutionsCache.Set(mockUrl.String(), mockInsts, time.Second)
+		}()
+
+		time.Sleep(2 * time.Second)
+		getInsts, intErr, extErr := getCachedInstitutions()
+		require.Error(t, intErr)
+		require.Error(t, extErr)
+		assert.Equal(t, "Fail to get institutions from internal cache, key might be expired", extErr.Error())
+		assert.Equal(t, 0, len(getInsts))
 
 		func() {
 			institutionsCacheMutex.Lock()
@@ -376,6 +1354,25 @@ func TestGetCachedInstitutions(t *testing.T) {
 		assert.Greater(t, len(getInsts), 0)
 		assert.Equal(t, 1, len(hook.Entries))
 		assert.Contains(t, hook.LastEntry().Message, "Cache miss for institutions TTL cache")
+
+		func() {
+			institutionsCacheMutex.Lock()
+			defer institutionsCacheMutex.Unlock()
+			institutionsCache.DeleteAll()
+		}()
+	})
+
+	t.Run("cache-miss-with-404-fetch", func(t *testing.T) {
+		viper.Reset()
+
+		viper.Set("Registry.InstitutionsUrl", "https://example.com/foo.bar")
+		institutionsCache = ttlcache.New[string, []Institution]()
+
+		getInsts, intErr, extErr := getCachedInstitutions()
+		require.Error(t, intErr)
+		require.Error(t, extErr)
+		assert.Equal(t, "Error response when fetching institution list with code 404", intErr.Error())
+		assert.Equal(t, len(getInsts), 0)
 
 		func() {
 			institutionsCacheMutex.Lock()

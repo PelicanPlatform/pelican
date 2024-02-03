@@ -11,7 +11,7 @@ const AuthenticatedContent = ({...props} : BoxProps) => {
             const loggedIn = await isLoggedIn()
             setAuthenticated(loggedIn)
             if(!loggedIn){
-                window.location.replace("/view/login/index.html")
+                window.location.replace("/view/login/")
             }
         })()
     }, []);

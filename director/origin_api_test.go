@@ -2,27 +2,48 @@ package director
 
 import (
 	"context"
-	"crypto/elliptic"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
-	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
-	"github.com/lestrrat-go/jwx/v2/jwt"
-	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/test_utils"
+	"github.com/pelicanplatform/pelican/token_scopes"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
+// For these tests, we only need to lookup key locations. Create a dummy registry that only returns
+// the jwks_uri location for the given key. Once a server is instantiated, it will only return
+// locations for the provided prefix. To change prefixes, create a new registry mockup.
+func registryMockup(t *testing.T, prefix string) *httptest.Server {
+	registryUrl, _ := url.Parse("https://registry.com:8446")
+	path, err := url.JoinPath("/api/v1.0/registry", prefix, ".well-known/issuer.jwks")
+	if err != nil {
+		t.Fatalf("Failed to parse key path for prefix %s", prefix)
+	}
+	registryUrl.Path = path
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		jsonResponse := `{"jwks_uri": "` + registryUrl.String() + `"}`
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(jsonResponse))
+	}))
+	return server
+}
+
 func TestVerifyAdvertiseToken(t *testing.T) {
-	/*
-	* Runs unit tests on the VerifyAdvertiseToken function
-	 */
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -35,14 +56,39 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 	//Setup a private key and a token
 	viper.Set("IssuerKey", kfile)
 
-	viper.Set("Federation.RegistryUrl", "https://get-your-tokens.org")
 	viper.Set("Federation.DirectorURL", "https://director-url.org")
+
+	config.InitConfig()
+	err := config.InitServer(ctx, config.DirectorType)
+	require.NoError(t, err)
+	// Mock registry server
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.Method == "POST" && req.URL.Path == "/api/v1.0/registry/checkNamespaceStatus" {
+			res := checkStatusRes{Approved: true}
+			resByte, err := json.Marshal(res)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			_, err = w.Write(resByte)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		} else {
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ts.Close()
+
+	viper.Set("Federation.RegistryUrl", ts.URL)
 
 	kSet, err := config.GetIssuerPublicJWKS()
 	ar := MockCache{
 		GetFn: func(key string, keyset *jwk.Set) (jwk.Set, error) {
-			if key != "https://get-your-tokens.org/api/v1.0/registry/test-namespace/.well-known/issuer.jwks" {
-				t.Errorf("expecting: https://get-your-tokens.org/api/v1.0/registry/test-namespace/.well-known/issuer.jwks, got %q", key)
+			if key != ts.URL+"/api/v1.0/registry/test-namespace/.well-known/issuer.jwks" {
+				t.Errorf("expecting: %s/api/v1.0/registry/test-namespace/.well-known/issuer.jwks, got %q", ts.URL, key)
 			}
 			return *keyset, nil
 		},
@@ -59,113 +105,88 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 		}
 		namespaceKeysMutex.Lock()
 		defer namespaceKeysMutex.Unlock()
-		namespaceKeys.Set("test-namespace", &ar, ttlcache.DefaultTTL)
+		namespaceKeys.Set("/test-namespace", &ar, ttlcache.DefaultTTL)
 	}()
 
-	// A verified token with a the correct scope - should return no error
-	tok, err := CreateAdvertiseToken("test-namespace")
+	issuerUrl, err := GetNSIssuerURL("/test-namespace")
 	assert.NoError(t, err)
-	ok, err := VerifyAdvertiseToken(ctx, tok, "test-namespace")
+
+	advTokenCfg := utils.TokenConfig{
+		TokenProfile: utils.WLCG,
+		Version:      "1.0",
+		Lifetime:     time.Minute,
+		Issuer:       issuerUrl,
+		Audience:     []string{"https://director-url.org"},
+		Subject:      "origin",
+	}
+	advTokenCfg.AddScopes([]token_scopes.TokenScope{token_scopes.Pelican_Advertise})
+
+	// CreateToken also handles validation for us
+	tok, err := advTokenCfg.CreateToken()
+	assert.NoError(t, err, "failed to create director prometheus token")
+
+	ok, err := VerifyAdvertiseToken(ctx, tok, "/test-namespace")
 	assert.NoError(t, err)
 	assert.Equal(t, true, ok, "Expected scope to be 'pelican.advertise'")
 
-	//Create token without a scope - should return an error
-	key, err := config.GetIssuerPrivateJWK()
-	err = jwk.AssignKeyID(key)
-	assert.NoError(t, err)
+	//Create token without a scope - should return an error upon validation
+	scopelessTokCfg := utils.TokenConfig{
+		TokenProfile: utils.WLCG,
+		Lifetime:     time.Minute,
+		Issuer:       "https://get-your-tokens.org",
+		Audience:     []string{"director.test"},
+		Version:      "1.0",
+		Subject:      "origin",
+	}
 
-	scopelessTok, err := jwt.NewBuilder().
-		Issuer("").
-		Audience([]string{"director.test"}).
-		Subject("origin").
-		Build()
+	tok, err = scopelessTokCfg.CreateToken()
+	assert.NoError(t, err, "error creating scopeless token. Should have succeeded")
 
-	signed, err := jwt.Sign(scopelessTok, jwt.WithKey(jwa.ES256, key))
-
-	ok, err = VerifyAdvertiseToken(ctx, string(signed), "test-namespace")
+	ok, err = VerifyAdvertiseToken(ctx, tok, "/test-namespace")
 	assert.Equal(t, false, ok)
 	assert.Equal(t, "No scope is present; required to advertise to director", err.Error())
 
-	//Create a token without a string valued scope
-	nonStrScopeTok, err := jwt.NewBuilder().
-		Issuer("").
-		Claim("scope", 22).
-		Audience([]string{"director.test"}).
-		Subject("origin").
-		Build()
+	// Create a token with a bad scope - should return an error upon validation
+	wrongScopeTokenCfg := utils.TokenConfig{
+		TokenProfile: utils.WLCG,
+		Lifetime:     time.Minute,
+		Issuer:       "https://get-your-tokens.org",
+		Audience:     []string{"director.test"},
+		Version:      "1.0",
+		Subject:      "origin",
+		Claims:       map[string]string{"scope": "wrong.scope"},
+	}
 
-	signed, err = jwt.Sign(nonStrScopeTok, jwt.WithKey(jwa.ES256, key))
+	tok, err = wrongScopeTokenCfg.CreateToken()
+	assert.NoError(t, err, "error creating wrong-scope token. Should have succeeded")
 
-	ok, err = VerifyAdvertiseToken(ctx, string(signed), "test-namespace")
-	assert.Equal(t, false, ok)
-	assert.Equal(t, "scope claim in token is not string-valued", err.Error())
-
-	//Create a token without a pelican.namespace scope
-	wrongScopeTok, err := jwt.NewBuilder().
-		Issuer("").
-		Claim("scope", "wrong.scope").
-		Audience([]string{"director.test"}).
-		Subject("origin").
-		Build()
-
-	signed, err = jwt.Sign(wrongScopeTok, jwt.WithKey(jwa.ES256, key))
-
-	ok, err = VerifyAdvertiseToken(ctx, string(signed), "test-namespace")
+	ok, err = VerifyAdvertiseToken(ctx, tok, "/test-namespace")
 	assert.Equal(t, false, ok, "Should fail due to incorrect scope name")
 	assert.NoError(t, err, "Incorrect scope name should not throw and error")
 }
 
-func TestCreateAdvertiseToken(t *testing.T) {
-	/*
-	* Runs unit tests on the CreateAdvertiseToken function
-	 */
-
+func TestGetNSIssuerURL(t *testing.T) {
 	viper.Reset()
-
-	// Create a temp directory to store the private key file
-	tDir := t.TempDir()
-	kfile := filepath.Join(tDir, "t-key")
-
-	// Generate a private key
-	viper.Set("IssuerKey", kfile)
-	err := config.GeneratePrivateKey(kfile, elliptic.P521())
-	assert.NoError(t, err)
-
-	// Test without a namsepace set and check to see if it returns the expected error
-	tok, err := CreateAdvertiseToken("test-namespace")
-	assert.Equal(t, "", tok)
-	assert.Equal(t, "Namespace URL is not set", err.Error())
-	viper.Set("Federation.RegistryUrl", "https://get-your-tokens.org")
-
-	// Test without a DirectorURL set and check to see if it returns the expected error
-	tok, err = CreateAdvertiseToken("test-namespace")
-	assert.Equal(t, "", tok)
-	assert.Equal(t, "Director URL is not known; cannot create advertise token", err.Error())
-	viper.Set("Federation.DirectorURL", "https://director-url.org")
-
-	// Test the CreateAdvertiseToken with good values and test that it returns a non-nil token value and no error
-	tok, err = CreateAdvertiseToken("test-namespace")
+	viper.Set("Federation.RegistryUrl", "https://registry.com:8446")
+	url, err := GetNSIssuerURL("/test-prefix")
 	assert.Equal(t, nil, err)
-	assert.NotEqual(t, "", tok)
+	assert.Equal(t, "https://registry.com:8446/api/v1.0/registry/test-prefix", url)
+	viper.Reset()
 }
 
-func TestGetRegistryIssuerURL(t *testing.T) {
-	/*
-	* Runs unit tests on the GetRegistryIssuerURL function
-	 */
+func TestGetJWKSURLFromIssuerURL(t *testing.T) {
 	viper.Reset()
-
-	// No namespace url has been set, so an error is expected
-	url, err := GetRegistryIssuerURL("")
-	assert.Equal(t, "", url)
-	assert.Equal(t, "Namespace URL is not set", err.Error())
-
-	// Test to make sure the path is as expected
-	viper.Set("Federation.RegistryUrl", "test-path")
-	url, err = GetRegistryIssuerURL("test-prefix")
+	registry := registryMockup(t, "/test-prefix")
+	defer registry.Close()
+	viper.Set("Federation.RegistryUrl", registry.URL)
+	expectedIssuerUrl := registry.URL + "/api/v1.0/registry/test-prefix"
+	url, err := GetNSIssuerURL("/test-prefix")
 	assert.Equal(t, nil, err)
-	assert.Equal(t, "test-path/api/v1.0/registry/test-prefix/.well-known/issuer.jwks", url)
+	assert.Equal(t, expectedIssuerUrl, url)
 
+	keyLoc, err := GetJWKSURLFromIssuerURL(url)
+	assert.Equal(t, nil, err)
+	assert.Equal(t, "https://registry.com:8446/api/v1.0/registry/test-prefix/.well-known/issuer.jwks", keyLoc)
 }
 
 func TestNamespaceKeysCacheEviction(t *testing.T) {

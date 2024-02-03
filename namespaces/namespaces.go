@@ -83,7 +83,7 @@ type Namespace struct {
 	SortedDirectorCaches []DirectorCache
 	Path                 string                `json:"path"`
 	CredentialGen        *CredentialGeneration `json:"credential_generation"`
-	Issuer               string                `json:"issuer"`
+	Issuer               []string              `json:"issuer"`
 	ReadHTTPS            bool                  `json:"readhttps"`
 	UseTokenOnRead       bool                  `json:"usetokenonread"`
 	WriteBackHost        string                `json:"writebackhost"`

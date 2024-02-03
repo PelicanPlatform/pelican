@@ -353,7 +353,7 @@ func download_http(sourceUrl *url.URL, destination string, payload *payloadStruc
 	// Start the workers
 	for i := 1; i <= 5; i++ {
 		wg.Add(1)
-		go startDownloadWorker(sourceUrl.Path, destination, token, transfers, &wg, workChan, results)
+		go startDownloadWorker(sourceUrl.Path, destination, token, transfers, payload, &wg, workChan, results)
 	}
 
 	// For each file, send it to the worker
@@ -389,7 +389,7 @@ func download_http(sourceUrl *url.URL, destination string, payload *payloadStruc
 
 }
 
-func startDownloadWorker(source string, destination string, token string, transfers []TransferDetails, wg *sync.WaitGroup, workChan <-chan string, results chan<- TransferResults) {
+func startDownloadWorker(source string, destination string, token string, transfers []TransferDetails, payload *payloadStruct, wg *sync.WaitGroup, workChan <-chan string, results chan<- TransferResults) {
 
 	defer wg.Done()
 	var success bool
@@ -407,7 +407,7 @@ func startDownloadWorker(source string, destination string, token string, transf
 		for _, transfer := range transfers {
 			transfer.Url.Path = file
 			log.Debugln("Constructed URL:", transfer.Url.String())
-			if downloaded, err = DownloadHTTP(transfer, finalDest, token); err != nil {
+			if downloaded, err = DownloadHTTP(transfer, finalDest, token, payload); err != nil {
 				log.Debugln("Failed to download:", err)
 				var ope *net.OpError
 				var cse *ConnectionSetupError
@@ -468,7 +468,7 @@ func parseTransferStatus(status string) (int, string) {
 }
 
 // DownloadHTTP - Perform the actual download of the file
-func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, error) {
+func DownloadHTTP(transfer TransferDetails, dest string, token string, payload *payloadStruct) (int64, error) {
 
 	// Create the client, request, and context
 	client := grab.NewClient()
@@ -493,6 +493,12 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 		if err != nil {
 			return 0, err
 		}
+		if dest == "." {
+			dest, err = os.Getwd()
+			if err != nil {
+				return 0, errors.Wrap(err, "Failed to get current directory for destination")
+			}
+		}
 		unpacker = newAutoUnpacker(dest, behavior)
 		if req, err = grab.NewRequestToWriter(unpacker, transfer.Url.String()); err != nil {
 			return 0, errors.Wrap(err, "Failed to create new download request")
@@ -507,6 +513,9 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string) (int64, e
 	// Set the headers
 	req.HTTPRequest.Header.Set("X-Transfer-Status", "true")
 	req.HTTPRequest.Header.Set("TE", "trailers")
+	if payload != nil && payload.ProjectName != "" {
+		req.HTTPRequest.Header.Set("User-Agent", payload.ProjectName)
+	}
 	req.WithContext(ctx)
 
 	// Test the transfer speed every 5 seconds
@@ -772,7 +781,7 @@ func (pr *ProgressReader) Size() int64 {
 }
 
 // Recursively uploads a directory with all files and nested dirs, keeping file structure on server side
-func UploadDirectory(src string, dest *url.URL, token string, namespace namespaces.Namespace) (int64, error) {
+func UploadDirectory(src string, dest *url.URL, token string, namespace namespaces.Namespace, projectName string) (int64, error) {
 	var files []string
 	var amountDownloaded int64
 	srcUrl := url.URL{Path: src}
@@ -792,7 +801,7 @@ func UploadDirectory(src string, dest *url.URL, token string, namespace namespac
 		if err != nil {
 			return 0, err
 		}
-		downloaded, err := UploadFile(file, &tempDest, token, namespace)
+		downloaded, err := UploadFile(file, &tempDest, token, namespace, projectName)
 		if err != nil {
 			return 0, err
 		}
@@ -807,7 +816,7 @@ func UploadDirectory(src string, dest *url.URL, token string, namespace namespac
 }
 
 // UploadFile Uploads a file using HTTP
-func UploadFile(src string, origDest *url.URL, token string, namespace namespaces.Namespace) (int64, error) {
+func UploadFile(src string, origDest *url.URL, token string, namespace namespaces.Namespace, projectName string) (int64, error) {
 
 	log.Debugln("In UploadFile")
 	log.Debugln("Dest", origDest.String())
@@ -882,6 +891,9 @@ func UploadFile(src string, origDest *url.URL, token string, namespace namespace
 	}
 	// Set the authorization header
 	request.Header.Set("Authorization", "Bearer "+token)
+	if projectName != "" {
+		request.Header.Set("User-Agent", projectName)
+	}
 	var lastKnownWritten int64
 	t := time.NewTicker(20 * time.Second)
 	defer t.Stop()

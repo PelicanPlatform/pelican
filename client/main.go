@@ -104,16 +104,16 @@ func getTokenName(destination *url.URL) (scheme, tokenName string) {
 }
 
 // Do writeback to stash using SciTokens
-func doWriteBack(source string, destination *url.URL, namespace namespaces.Namespace, recursive bool) (int64, error) {
+func doWriteBack(source string, destination *url.URL, namespace namespaces.Namespace, recursive bool, projectName string) (int64, error) {
 
 	scitoken_contents, err := getToken(destination, namespace, true, "")
 	if err != nil {
 		return 0, err
 	}
 	if recursive {
-		return UploadDirectory(source, destination, scitoken_contents, namespace)
+		return UploadDirectory(source, destination, scitoken_contents, namespace, projectName)
 	} else {
-		return UploadFile(source, destination, scitoken_contents, namespace)
+		return UploadFile(source, destination, scitoken_contents, namespace, projectName)
 	}
 }
 
@@ -291,27 +291,32 @@ func CheckOSDF(destination string, methods []string) (remoteSize uint64, err err
 	return 0, err
 }
 
-// FIXME: GetCacheHostnames is not director-aware!
 func GetCacheHostnames(testFile string) (urls []string, err error) {
 
-	ns, err := namespaces.MatchNamespace(testFile)
+	directorUrl := param.Federation_DirectorUrl.GetString()
+	ns, err := getNamespaceInfo(testFile, directorUrl, false)
 	if err != nil {
 		return
 	}
 
-	caches, err := GetCachesFromNamespace(ns, false)
+	caches, err := GetCachesFromNamespace(ns, directorUrl != "")
 	if err != nil {
 		return
 	}
 
 	for _, cacheGeneric := range caches {
-		cache, ok := cacheGeneric.(namespaces.Cache)
-		if !ok {
-			continue
+		if cache, ok := cacheGeneric.(namespaces.Cache); ok {
+			url_string := cache.AuthEndpoint
+			host := strings.Split(url_string, ":")[0]
+			urls = append(urls, host)
+		} else if cache, ok := cacheGeneric.(namespaces.DirectorCache); ok {
+			cacheUrl, err := url.Parse(cache.EndpointUrl)
+			if err != nil {
+				log.Debugln("Failed to parse returned cache as a URL:", cacheUrl)
+				continue
+			}
+			urls = append(urls, cacheUrl.Hostname())
 		}
-		url_string := cache.AuthEndpoint
-		host := strings.Split(url_string, ":")[0]
-		urls = append(urls, host)
 	}
 
 	return
@@ -502,6 +507,8 @@ func DoPut(localObject string, remoteDestination string, recursive bool) (bytesT
 		return 0, err
 	}
 	remoteDestUrl.Scheme = remoteDestScheme
+	fd := config.GetFederation()
+	defer config.SetFederation(fd)
 
 	if remoteDestUrl.Host != "" {
 		if remoteDestUrl.Scheme == "osdf" || remoteDestUrl.Scheme == "stash" {
@@ -511,6 +518,8 @@ func DoPut(localObject string, remoteDestination string, recursive bool) (bytesT
 				return 0, err
 			}
 		} else if remoteDestUrl.Scheme == "pelican" {
+
+			config.SetFederation(config.FederationDiscovery{})
 			federationUrl, _ := url.Parse(remoteDestUrl.String())
 			federationUrl.Scheme = "https"
 			federationUrl.Path = ""
@@ -538,12 +547,13 @@ func DoPut(localObject string, remoteDestination string, recursive bool) (bytesT
 	if !strings.HasPrefix(remoteDestination, "/") {
 		remoteDestination = strings.TrimPrefix(remoteDestination, remoteDestScheme+"://")
 	}
+
 	ns, err := getNamespaceInfo(remoteDestination, directorUrl, isPut)
 	if err != nil {
 		log.Errorln(err)
 		return 0, errors.New("Failed to get namespace information from source")
 	}
-	uploadedBytes, err := doWriteBack(localObjectUrl.Path, remoteDestUrl, ns, recursive)
+	uploadedBytes, err := doWriteBack(localObjectUrl.Path, remoteDestUrl, ns, recursive, "")
 	AddError(err)
 	return uploadedBytes, err
 
@@ -580,6 +590,8 @@ func DoGet(remoteObject string, localDestination string, recursive bool) (bytesT
 		return 0, err
 	}
 	remoteObjectUrl.Scheme = remoteObjectScheme
+	fd := config.GetFederation()
+	defer config.SetFederation(fd)
 
 	// If there is a host specified, prepend it to the path in the osdf case
 	if remoteObjectUrl.Host != "" {
@@ -590,6 +602,8 @@ func DoGet(remoteObject string, localDestination string, recursive bool) (bytesT
 				return 0, err
 			}
 		} else if remoteObjectUrl.Scheme == "pelican" {
+
+			config.SetFederation(fd)
 			federationUrl, _ := url.Parse(remoteObjectUrl.String())
 			federationUrl.Scheme = "https"
 			federationUrl.Path = ""
@@ -646,7 +660,7 @@ func DoGet(remoteObject string, localDestination string, recursive bool) (bytesT
 	//Fill out the payload as much as possible
 	payload.filename = remoteObjectUrl.Path
 
-	parse_job_ad(payload)
+	parse_job_ad(&payload)
 
 	payload.start1 = time.Now().Unix()
 
@@ -715,12 +729,15 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 		return 0, err
 	}
 	dest_url.Scheme = dest_scheme
+	fd := config.GetFederation()
+	defer config.SetFederation(fd)
 
 	// If there is a host specified, prepend it to the path in the osdf case
 	if source_url.Host != "" {
 		if source_url.Scheme == "osdf" || source_url.Scheme == "stash" {
 			source_url.Path = "/" + path.Join(source_url.Host, source_url.Path)
 		} else if source_url.Scheme == "pelican" {
+			config.SetFederation(config.FederationDiscovery{})
 			federationUrl, _ := url.Parse(source_url.String())
 			federationUrl.Scheme = "https"
 			federationUrl.Path = ""
@@ -736,6 +753,7 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 		if dest_url.Scheme == "osdf" || dest_url.Scheme == "stash" {
 			dest_url.Path = "/" + path.Join(dest_url.Host, dest_url.Path)
 		} else if dest_url.Scheme == "pelican" {
+			config.SetFederation(config.FederationDiscovery{})
 			federationUrl, _ := url.Parse(dest_url.String())
 			federationUrl.Scheme = "https"
 			federationUrl.Path = ""
@@ -764,6 +782,9 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 		return 0, errors.New("Do not understand destination scheme")
 	}
 
+	payload := payloadStruct{}
+	parse_job_ad(&payload)
+
 	// Get the namespace of the remote filesystem
 	// For write back, it will be the destination
 	// For read it will be the source.
@@ -778,7 +799,7 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 			log.Errorln(err)
 			return 0, errors.New("Failed to get namespace information from destination")
 		}
-		uploadedBytes, err := doWriteBack(source_url.Path, dest_url, ns, recursive)
+		uploadedBytes, err := doWriteBack(source_url.Path, dest_url, ns, recursive, payload.ProjectName)
 		AddError(err)
 		return uploadedBytes, err
 	}
@@ -814,15 +835,10 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 		destination = path.Join(destPath, sourceFilename)
 	}
 
-	payload := payloadStruct{}
 	payload.version = version
 
 	//Fill out the payload as much as possible
 	payload.filename = source_url.Path
-
-	// ??
-
-	parse_job_ad(payload)
 
 	payload.start1 = time.Now().Unix()
 
@@ -918,7 +934,7 @@ func get_ips(name string) []string {
 
 }
 
-func parse_job_ad(payload payloadStruct) { // TODO: needs the payload
+func parse_job_ad(payload *payloadStruct) {
 
 	//Parse the .job.ad file for the Owner (username) and ProjectName of the callee.
 
@@ -940,18 +956,34 @@ func parse_job_ad(payload payloadStruct) { // TODO: needs the payload
 	}
 
 	// Get all matches from file
-	classadRegex, e := regexp.Compile(`^\s*(Owner|ProjectName)\s=\s"(.*)"`)
+	// Note: This appears to be invalid regex but is the only thing that appears to work. This way it successfully finds our matches
+	classadRegex, e := regexp.Compile(`^*\s*(Owner|ProjectName)\s=\s"(.*)"`)
 	if e != nil {
 		log.Fatal(e)
 	}
 
 	matches := classadRegex.FindAll(b, -1)
-
 	for _, match := range matches {
-		if string(match[0]) == "Owner" {
-			payload.Owner = string(match[1])
-		} else if string(match) == "ProjectName" {
-			payload.ProjectName = string(match[1])
+		matchString := strings.TrimSpace(string(match))
+
+		if strings.HasPrefix(matchString, "Owner") {
+			matchParts := strings.Split(strings.TrimSpace(matchString), "=")
+
+			if len(matchParts) == 2 { // just confirm we get 2 parts of the string
+				matchValue := strings.TrimSpace(matchParts[1])
+				matchValue = strings.Trim(matchValue, "\"") //trim any "" around the match if present
+				payload.Owner = matchValue
+			}
+		}
+
+		if strings.HasPrefix(matchString, "ProjectName") {
+			matchParts := strings.Split(strings.TrimSpace(matchString), "=")
+
+			if len(matchParts) == 2 { // just confirm we get 2 parts of the string
+				matchValue := strings.TrimSpace(matchParts[1])
+				matchValue = strings.Trim(matchValue, "\"") //trim any "" around the match if present
+				payload.ProjectName = matchValue
+			}
 		}
 	}
 
