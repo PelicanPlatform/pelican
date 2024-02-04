@@ -53,10 +53,12 @@ type (
 // Given revConn, a reversed connection from the origin, send it to
 // the xrootd process over the xrdConn unix socket
 func sendXrootdSocket(xrdConn *net.UnixConn, revConn *net.TCPConn) error {
+	defer revConn.Close()
 	revFile, err := revConn.File()
 	if err != nil {
 		return errors.Wrap(err, "Unable to get file descriptor from socket for xrootd process")
 	}
+	log.Debugf("Sending TCP socket %d to XRootD", int(revFile.Fd()))
 	oob := syscall.UnixRights(int(revFile.Fd()))
 	if _, _, err := xrdConn.WriteMsgUnix([]byte(`{"status": "success"}`), oob, nil); err != nil {
 		return errors.Wrap(err, "Failed to send file descriptor back to the xrootd process")
