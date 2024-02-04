@@ -20,7 +20,6 @@ package origin_ui
 
 import (
 	"context"
-	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -31,33 +30,42 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/utils"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/time/rate"
 )
 
 var (
 	// We have a custom transport object to force all our connections to the
 	// localhost to avoid potentially going over the external network to talk
 	// to our xrootd child process.
-	transport *http.Transport
+	proxyTransport *http.Transport
 
 	onceTransport sync.Once
+
+	// It's possible to overwhelm the XRootD listen socket with requests.  This rate
+	// limiter will allow no more than 32 requests / second and 8 new ones in a burst
+	xrdConnLimit *rate.Limiter = rate.NewLimiter(32, 8)
 )
 
 // Return a custom HTTP transport object; starts with the default transport for
 // Pelican but forces all connections to go to the local xrootd port.
 func getTransport() *http.Transport {
 	onceTransport.Do(func() {
-		var copyTransport http.Transport = *config.GetTransport()
-		transport = &copyTransport
+		proxyTransport = config.GetTransport().Clone()
 		// When creating a new socket out to the remote server, ignore the actual
 		// requested address and return a localhost socket.
-		transport.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
+		proxyTransport.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
 			dialer := net.Dialer{}
+			if err := xrdConnLimit.Wait(ctx); err != nil {
+				err = errors.Wrap(err, "Failed to rate-limit local connection")
+				return nil, err
+			}
 			return dialer.DialContext(ctx, "tcp", "localhost:"+strconv.Itoa(param.Xrootd_Port.GetInt()))
 		}
 	})
-	return transport
+	return proxyTransport
 }
 
 func proxyOrigin(resp http.ResponseWriter, req *http.Request) {
@@ -66,7 +74,7 @@ func proxyOrigin(resp http.ResponseWriter, req *http.Request) {
 	url.Host = param.Server_Hostname.GetString() + ":" + strconv.Itoa(param.Xrootd_Port.GetInt())
 
 	log.Debugln("Will proxy request to URL", url.String())
-	transport = getTransport()
+	transport := getTransport()
 	xrdResp, err := transport.RoundTrip(req)
 	if err != nil {
 		log.Infoln("Failed to talk to xrootd service:", err)
