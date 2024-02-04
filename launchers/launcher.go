@@ -108,11 +108,6 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 
 	servers := make([]server_utils.XRootDServer, 0)
 	if modules.IsEnabled(config.OriginType) {
-		if param.Origin_EnableBroker.GetBool() {
-			if err = origin_ui.LaunchBrokerListener(ctx, egrp); err != nil {
-				return shutdownCancel, err
-			}
-		}
 
 		mode := param.Origin_Mode.GetString()
 		switch mode {
@@ -152,6 +147,14 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 			return shutdownCancel, err
 		}
 		servers = append(servers, server)
+
+		// Ordering: `LaunchBrokerListener` depends on the "right" value of Origin.NamespacePrefix
+		// which is possibly not set until `OriginServe` is called.
+		if param.Origin_EnableBroker.GetBool() {
+			if err = origin_ui.LaunchBrokerListener(ctx, egrp); err != nil {
+				return shutdownCancel, err
+			}
+		}
 
 		switch mode {
 		case "posix":

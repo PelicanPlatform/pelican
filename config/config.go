@@ -938,6 +938,11 @@ func InitClient() error {
 		viper.Set("Client.MinimumDownloadSpeed", downloadLimit)
 	}
 
+	// The transport will automatically trust this CA cert file.
+	// Even though it's a "server" setting, it's useful to have this in the client when testing
+	// against a local self-signed server.
+	viper.SetDefault("Server.TLSCACertificateFile", filepath.Join(configDir, "certificates", "tlsca.pem"))
+
 	// Handle more legacy config options
 	if viper.IsSet("DisableProxyFallback") {
 		viper.SetDefault("Client.DisableProxyFallback", param.DisableProxyFallback.GetBool())

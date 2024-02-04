@@ -95,7 +95,7 @@ func TestBroker(t *testing.T) {
 
 	err = registry.AddNamespace(&registry.Namespace{
 		ID:       1,
-		Prefix:   "/cache/" + param.Server_Hostname.GetString(),
+		Prefix:   "/caches/" + param.Server_Hostname.GetString(),
 		Pubkey:   string(keysetBytes),
 		Identity: "test_data",
 	})

@@ -30,6 +30,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/pelicanplatform/pelican/broker"
 	"github.com/pelicanplatform/pelican/cache_ui"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/daemon"
@@ -185,6 +186,7 @@ func serveCacheInternal(cmdCtx context.Context) (context.CancelFunc, error) {
 			return shutdownCancel, err
 		}
 	}
+	broker.RegisterBrokerCallback(ctx, engine.Group("/"))
 
 	configPath, err := xrootd.ConfigXrootd(ctx, false)
 	if err != nil {

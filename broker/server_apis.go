@@ -96,7 +96,7 @@ func retrieveRequest(ctx context.Context, ginCtx *gin.Context) {
 
 	req, err := handleRetrieve(ctx, ginCtx, originReq.Prefix, originReq.Origin, timeoutVal)
 	if errors.Is(err, errRetrieveTimeout) {
-		ginCtx.JSON(http.StatusOK, gin.H{"status": "ok", "request": gin.H{}})
+		ginCtx.JSON(http.StatusOK, gin.H{"status": "timeout", "request": gin.H{}})
 		return
 	} else if err != nil {
 		ginCtx.JSON(http.StatusInternalServerError, brokerErrResp{Status: "error", Msg: "Failure when retrieving requests for this origin"})
@@ -131,7 +131,7 @@ func reverseRequest(ctx context.Context, ginCtx *gin.Context) {
 		return
 	}
 
-	ok, err := verifyToken(ctx, token, "/cache/"+hostname, param.Server_ExternalWebUrl.GetString(), token_scopes.Broker_Reverse)
+	ok, err := verifyToken(ctx, token, "/caches/"+hostname, param.Server_ExternalWebUrl.GetString(), token_scopes.Broker_Reverse)
 	if err != nil {
 		log.Errorln("Failed to verify token for cache reversal request:", err)
 		ginCtx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "error", "msg": "Failed to verify provided token"})

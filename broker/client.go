@@ -212,7 +212,7 @@ func ConnectToOrigin(ctx context.Context, brokerUrl, prefix, originName string) 
 	brokerAud.RawQuery = ""
 	brokerAud.Path = ""
 
-	cachePrefix := "/cache/" + param.Server_Hostname.GetString()
+	cachePrefix := "/caches/" + param.Server_Hostname.GetString()
 	token, err := createToken(cachePrefix, param.Server_Hostname.GetString(), brokerAud.String(), token_scopes.Broker_Reverse)
 	if err != nil {
 		err = errors.Wrap(err, "failure when constructing the broker request token")
@@ -541,7 +541,7 @@ func LaunchRequestMonitor(ctx context.Context, egrp *errgroup.Group, resultChan 
 					break
 				}
 
-				dur := time.Duration(5*time.Second - time.Duration(mrand.Intn(500))*time.Millisecond)
+				dur := param.Transport_ResponseHeaderTimeout.GetDuration() - time.Duration(mrand.Intn(500))*time.Millisecond
 				req.Header.Set("X-Pelican-Timeout", dur.String())
 				req.Header.Set("Content-Type", "application/json")
 				req.Header.Set("User-Agent", "pelican-origin/"+config.PelicanVersion)
@@ -592,13 +592,15 @@ func LaunchRequestMonitor(ctx context.Context, egrp *errgroup.Group, resultChan 
 					break
 				}
 
-				listener, err := doCallback(ctx, brokerResp.Request)
-				if err != nil {
-					log.Errorln("Failed to callback to the cache:", err)
-					resultChan <- err
-					break
+				if brokerResp.Status == "ok" {
+					listener, err := doCallback(ctx, brokerResp.Request)
+					if err != nil {
+						log.Errorln("Failed to callback to the cache:", err)
+						resultChan <- err
+						break
+					}
+					resultChan <- listener
 				}
-				resultChan <- listener
 				sleepDuration = 0
 			}
 			time.Sleep(sleepDuration)

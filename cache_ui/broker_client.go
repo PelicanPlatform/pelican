@@ -40,7 +40,7 @@ import (
 type (
 	xrootdBrokerRequest struct {
 		BrokerURL  string `json:"broker_url"`
-		OriginName string `json:"origin_name"`
+		OriginName string `json:"origin"`
 		Prefix     string `json:"prefix"`
 		err        error
 	}
@@ -163,24 +163,28 @@ func LaunchRequestListener(ctx context.Context, egrp *errgroup.Group) error {
 		return errors.Wrap(err, "Failed to set ownership for Unix socket")
 	}
 
-	var connChannel chan net.Conn
+	connChannel := make(chan net.Conn)
 	egrp.Go(func() (err error) {
 		for {
-			conn, err := listener.Accept()
+			var conn net.Conn
+			conn, err = listener.Accept()
 			if err != nil {
 				if errors.Is(err, net.ErrClosed) {
 					err = nil
 				}
 				return err
 			}
-			connChannel <- conn
+			select {
+			case <-ctx.Done():
+				return
+			case connChannel <- conn:
+			}
 		}
 	})
 	egrp.Go(func() (err error) {
 		defer listener.Close()
 		defer os.Remove(socketName)
 		for {
-
 			select {
 			case <-ctx.Done():
 				return

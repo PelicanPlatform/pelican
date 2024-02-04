@@ -91,8 +91,8 @@ func getRegistryIssuerInfo(ctx context.Context, prefix string) (iss string, keys
 		namespaceKeysMutex.Lock()
 		namespaceKeys.Set(prefix, ar, ttlcache.DefaultTTL)
 		namespaceKeysMutex.Unlock()
+		log.Debugln("Attempting to fetch public key for issuer", iss)
 	}
-	log.Debugln("Attempting to fetch public key for issuer", iss)
 	keyset, err = ar.Get(ctx, jwksUrl)
 	return
 }
@@ -124,7 +124,7 @@ func getCacheHostnameFromToken(token []byte) (hostname string, err error) {
 		return
 	}
 	iss := tok.Issuer()
-	expectedPrefix, err := getRegistryIssValue("/cache")
+	expectedPrefix, err := getRegistryIssValue("/caches")
 	if err != nil {
 		return
 	}
