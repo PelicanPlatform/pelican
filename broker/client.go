@@ -36,6 +36,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -332,7 +333,42 @@ func ConnectToOrigin(ctx context.Context, brokerUrl, prefix, originName string) 
 		conn, _, err = hj.Hijack()
 		tlsConn, ok := conn.(*tls.Conn)
 		if ok {
+			// Once the cache recieves the HTTP response, it'll close the TLS connection
+			// That will cause a "close notify" to be sent back to the origin (this goroutine),
+			// which indicates the last TLS record has been received.  That will cause an EOF
+			// to be read from the TLS socket.
+			for {
+				ignoreBytes := make([]byte, 1024)
+				_, err = tlsConn.Read(ignoreBytes)
+				if errors.Is(err, io.EOF) {
+					break
+				} else if err != nil {
+					log.Error("Failed to get close notification from cache")
+					return
+				}
+			}
 			conn = tlsConn.NetConn()
+			tcpConn, ok := conn.(*net.TCPConn)
+			if !ok {
+				tlsConn.Close()
+				log.Error("Remote connection is not over TCP")
+				return
+			}
+			var fp *os.File
+			fp, err = tcpConn.File()
+			// Close the TCP connection out from underneath the TLS socket, preventing it
+			// from sending spurious TLS records to the remote side and confusing it.
+			tcpConn.Close()
+			if err != nil {
+				log.Error("Failed to duplicate TCP connection")
+				return
+			}
+			defer fp.Close()
+			conn, err = net.FileConn(fp)
+			if err != nil {
+				log.Error("Failed to convert file pointer to a TCP connection")
+				return
+			}
 		}
 	}
 	return
@@ -452,6 +488,9 @@ func doCallback(ctx context.Context, brokerResp reversalRequest) (listener net.L
 		return
 	}
 
+	// Send the "close notify" packet to the origin
+	client.CloseIdleConnections()
+
 	tlsConfig := tls.Config{
 		Certificates: []tls.Certificate{{
 			Certificate: [][]byte{hostCertificate},
@@ -495,8 +534,6 @@ func doCallback(ctx context.Context, brokerResp reversalRequest) (listener net.L
 
 	hj.realConn = nil
 	listener = tls.NewListener(newOneShotListener(revConn), &tlsConfig)
-
-	client.CloseIdleConnections()
 
 	return
 }
