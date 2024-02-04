@@ -156,7 +156,7 @@ func GetTopologyJSON() (*TopologyNamespacesJSON, error) {
 // https://www.rfc-editor.org/rfc/rfc9110#field.connection)
 func CopyHeader(dst, src http.Header) {
 	hopByHop := make(map[string]bool)
-	hopByHop["Proxy-Conenction"] = true
+	hopByHop["Proxy-Connection"] = true
 	hopByHop["Keep-Alive"] = true
 	hopByHop["TE"] = true
 	hopByHop["Transfer-Encoding"] = true
