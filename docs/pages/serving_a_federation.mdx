@@ -85,7 +85,24 @@ Registry:
   AdminUsers: ["http://cilogon.org/serverA/users/123456"]
 ```
 
-Then, the admin user may login to the registry using CILogon.
+
+#### `Registry.RequireOriginApproval`
+
+By default, Pelican registry allows any origins to join the federation and serve objects (not the case for OSDF). If can set `Registry.RequireOriginApproval` if you want to review registration details of a new origin before allowing it to join your federation. What `Registry.RequireOriginApproval == true`, new origin can successfully _register_ against your regisry, but the director will not be able to direct object request to the unapproved origin.
+
+A registry admin may edit, review, approve, or deny a new origin registration in your registry Web UI.
+
+#### `Registry.RequireCacheApproval`
+
+Similarly, Pelican by default allows any cache to join the federation. You can set `Registry.RequireCacheApproval` to `true` in order for caches to be approved before they can serve an object.
+
+#### `Registry.RequireKeyChaining`
+
+By default, Pelican requires namespaces requesting registration to possess a key matching any already-registered super/sub namespaces. For example, if a namespace `/foo/bar` is already registered, then registration of `/foo` or `/foo/bar/baz` can only be done using the public key registered to `/foo/bar`.
+
+#### `Registry.Institutions` and `Registry.InstitutionsUrl`
+
+In registry web UI, when a user wants to register a namespace, they must specify which institution this namespace is for, which is a list of options you need to provide. To do so, you may either feed a list of `name` and `id` pairs of available institutions to register to `Registry.Institutions`, or if you already have a web endpoint to serve such information, you may pass the URL to `Registry.InstitutionsUrl`. Please refer to https://docs.pelicanplatform.org/parameters#Registry-Institutions for details.
 
 ### Register a Namespace via Registry Web UI
 
