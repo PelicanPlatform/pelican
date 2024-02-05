@@ -366,10 +366,7 @@ paths:
       tags:
         - common
       summary: Returns a list of enabled servers
-      description: "`Authentication Required`
-
-        Server names are in lower-case, sorted in alphabetical order.
-        "
+      description: Server names are in lower-case, sorted in alphabetical order.
       produces:
         - application/json
       responses:
