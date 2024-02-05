@@ -834,10 +834,30 @@ func UploadDirectory(src string, dest *url.URL, token string, namespace namespac
 		log.SetOutput(getProgressContainer())
 	}
 	var transfer TransferResults
+
+	// Check if there is a directory specified in dest, if not then use the local one
+	cleanDest := path.Clean(dest.Path)
+	destComponents := strings.Split(cleanDest, "/")
+	destDirSpecified := false
+
+	if len(destComponents) == 2 {
+		log.Debugln("No directory specified in destination, using local directory name")
+	} else {
+		destDirSpecified = true
+	}
+
 	// Upload all of our files within the proper directories
 	for _, file := range files {
 		tempDest := url.URL{}
-		tempDest.Path, err = url.JoinPath(dest.Path, file)
+
+		if destDirSpecified {
+			destFile := strings.TrimPrefix(file, src)
+			tempDest.Path, err = url.JoinPath(dest.Path, destFile)
+		} else {
+			destFile := strings.TrimPrefix(file, src)
+			tempDest.Path, err = url.JoinPath(dest.Path, path.Base(src), destFile)
+		}
+
 		if err != nil {
 			return nil, err
 		}
@@ -1120,12 +1140,6 @@ func walkDavDir(url *url.URL, namespace namespaces.Namespace, token string, dest
 func walkDirUpload(path string, client *gowebdav.Client, destPath string) ([]string, error) {
 	// List of files to return
 	var files []string
-	// Whenever this function is called, we should create a new dir on the server side for uploads
-	err := client.Mkdir(destPath+path, 0755)
-	if err != nil {
-		return nil, err
-	}
-	log.Debugf("Creating directory: %s", destPath+path)
 
 	// Get our list of files
 	infos, err := os.ReadDir(path)
@@ -1134,9 +1148,10 @@ func walkDirUpload(path string, client *gowebdav.Client, destPath string) ([]str
 	}
 	for _, info := range infos {
 		newPath := path + "/" + info.Name()
+		newDestPath := destPath + "/" + info.Name() //TODO make path.Join
 		if info.IsDir() {
 			// Recursively call this function to create any nested dir's as well as list their files
-			returnedFiles, err := walkDirUpload(newPath, client, destPath)
+			returnedFiles, err := walkDirUpload(newPath, client, newDestPath)
 			if err != nil {
 				return nil, err
 			}
