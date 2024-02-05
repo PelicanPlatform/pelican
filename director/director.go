@@ -121,7 +121,7 @@ func queryOrigins(ctx *gin.Context) {
 		} else if err == InsufficientResError {
 			// Insufficient response does not cause a 500 error, but OK field in reponse is false
 			if len(meta) < 1 {
-				ctx.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+				ctx.JSON(http.StatusNotFound, gin.H{"error": msg + " If no object is available, please check if the object is in a public namespace."})
 				return
 			}
 			res := statResponse{Message: msg, Metadata: meta, OK: false}
@@ -132,7 +132,7 @@ func queryOrigins(ctx *gin.Context) {
 		}
 	}
 	if len(meta) < 1 {
-		ctx.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		ctx.JSON(http.StatusNotFound, gin.H{"error": err.Error() + " If no object is available, please check if the object is in a public namespace."})
 	}
 	res := statResponse{Message: msg, Metadata: meta, OK: true}
 	ctx.JSON(http.StatusOK, res)

@@ -34,6 +34,7 @@ mkdir -p /tmp/pelican-test/stat_test/origin
 chmod 777 /tmp/pelican-test/stat_test/origin
 
 export PELICAN_ORIGIN_EXPORTVOLUME="/tmp/pelican-test/stat_test/origin:/test"
+export PELICAN_ORIGIN_ENABLEPUBLICREADS=true
 
 echo "This is some random content in the random file" > /tmp/pelican-test/stat_test/origin/input.txt
 export PELICAN_OIDC_CLIENTSECRETFILE=/tmp/pelican-test/stat_test/oidc-secret
@@ -94,6 +95,7 @@ do
         unset PELICAN_OIDC_CLIENTID
         unset PELICAN_ORIGIN_EXPORTVOLUME
         unset PELICAN_OIDC_CLIENTSECRETFILE
+        unset PELICAN_ORIGIN_ENABLEPUBLICREADS
         echo "TEST FAILED"
         exit 1
     fi
@@ -126,6 +128,7 @@ unset PELICAN_REGISTRY_DBLOCATION
 unset PELICAN_OIDC_CLIENTID
 unset PELICAN_ORIGIN_EXPORTVOLUME
 unset PELICAN_OIDC_CLIENTSECRETFILE
+unset PELICAN_ORIGIN_ENABLEPUBLICREADS
 
 if  [ "$to_exit" -eq 1 ]; then
     echo "Test Failed"

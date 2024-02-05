@@ -139,6 +139,8 @@ func (stat *ObjectStat) sendHeadReqToOrigin(objectName string, dataUrl url.URL, 
 	}
 	if res.StatusCode == 404 {
 		return nil, notFoundError{"File not found on the server " + dataUrl.String()}
+	} else if res.StatusCode == 403 {
+		return nil, errors.New(fmt.Sprintf("Query was forbidden for origin %s. Can only query public namespace.", dataUrl.String()))
 	} else if res.StatusCode != 200 {
 		resBody, err := io.ReadAll(res.Body)
 		if err != nil {
