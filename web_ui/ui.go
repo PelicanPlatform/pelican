@@ -36,11 +36,11 @@ import (
 	"time"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/server_utils"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	ginprometheus "github.com/zsais/go-gin-prometheus"

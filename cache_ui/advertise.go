@@ -19,8 +19,8 @@
 package cache_ui
 
 import (
+	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/server_utils"
 )
 
@@ -30,8 +30,8 @@ type (
 	}
 )
 
-func (server *CacheServer) CreateAdvertisement(name string, originUrl string, originWebUrl string) (director.OriginAdvertiseV2, error) {
-	ad := director.OriginAdvertiseV2{
+func (server *CacheServer) CreateAdvertisement(name string, originUrl string, originWebUrl string) (common.OriginAdvertiseV2, error) {
+	ad := common.OriginAdvertiseV2{
 		Name:       name,
 		DataURL:    originUrl,
 		WebURL:     originWebUrl,

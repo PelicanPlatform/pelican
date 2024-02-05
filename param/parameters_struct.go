@@ -30,8 +30,12 @@ type config struct {
 		DefaultResponse string
 		GeoIPLocation string
 		MaxMindKeyFile string
+		MaxStatResponse int
+		MinStatResponse int
 		OriginCacheHealthTestInterval time.Duration
 		OriginResponseHostnames []string
+		StatConcurrencyLimit int
+		StatTimeout time.Duration
 	}
 	DisableHttpProxy bool
 	DisableProxyFallback bool
@@ -236,8 +240,12 @@ type configWithType struct {
 		DefaultResponse struct { Type string; Value string }
 		GeoIPLocation struct { Type string; Value string }
 		MaxMindKeyFile struct { Type string; Value string }
+		MaxStatResponse struct { Type string; Value int }
+		MinStatResponse struct { Type string; Value int }
 		OriginCacheHealthTestInterval struct { Type string; Value time.Duration }
 		OriginResponseHostnames struct { Type string; Value []string }
+		StatConcurrencyLimit struct { Type string; Value int }
+		StatTimeout struct { Type string; Value time.Duration }
 	}
 	DisableHttpProxy struct { Type string; Value bool }
 	DisableProxyFallback struct { Type string; Value bool }

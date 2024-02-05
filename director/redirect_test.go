@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/token_scopes"
@@ -46,7 +47,7 @@ func (m *MockCache) Register(u string, options ...jwk.RegisterOption) error {
 	return m.RegisterFn(m)
 }
 
-func NamespaceAdContainsPath(ns []NamespaceAdV2, path string) bool {
+func NamespaceAdContainsPath(ns []common.NamespaceAdV2, path string) bool {
 	for _, v := range ns {
 		if v.Path == path {
 			return true
@@ -193,7 +194,7 @@ func TestDirectorRegistration(t *testing.T) {
 		isurl := url.URL{}
 		isurl.Path = ts.URL
 
-		ad := OriginAdvertiseV1{Name: "test", URL: "https://or-url.org", Namespaces: []NamespaceAdV1{{Path: "/foo/bar", Issuer: isurl}}}
+		ad := common.OriginAdvertiseV1{Name: "test", URL: "https://or-url.org", Namespaces: []common.NamespaceAdV1{{Path: "/foo/bar", Issuer: isurl}}}
 
 		jsonad, err := json.Marshal(ad)
 		assert.NoError(t, err, "Error marshalling OriginAdvertise")
@@ -223,12 +224,12 @@ func TestDirectorRegistration(t *testing.T) {
 		isurl := url.URL{}
 		isurl.Path = ts.URL
 
-		ad := OriginAdvertiseV2{
+		ad := common.OriginAdvertiseV2{
 			DataURL: "https://or-url.org",
 			Name:    "test",
-			Namespaces: []NamespaceAdV2{{
+			Namespaces: []common.NamespaceAdV2{{
 				Path:   "/foo/bar",
-				Issuer: []TokenIssuer{{IssuerUrl: isurl}},
+				Issuer: []common.TokenIssuer{{IssuerUrl: isurl}},
 			}},
 		}
 
@@ -263,7 +264,7 @@ func TestDirectorRegistration(t *testing.T) {
 		isurl := url.URL{}
 		isurl.Path = ts.URL
 
-		ad := OriginAdvertiseV1{Name: "test", URL: "https://or-url.org", Namespaces: []NamespaceAdV1{{Path: "/foo/bar", Issuer: isurl}}}
+		ad := common.OriginAdvertiseV1{Name: "test", URL: "https://or-url.org", Namespaces: []common.NamespaceAdV1{{Path: "/foo/bar", Issuer: isurl}}}
 
 		jsonad, err := json.Marshal(ad)
 		assert.NoError(t, err, "Error marshalling OriginAdvertise")
@@ -295,9 +296,9 @@ func TestDirectorRegistration(t *testing.T) {
 		isurl := url.URL{}
 		isurl.Path = ts.URL
 
-		ad := OriginAdvertiseV2{Name: "test", DataURL: "https://or-url.org", Namespaces: []NamespaceAdV2{{
+		ad := common.OriginAdvertiseV2{Name: "test", DataURL: "https://or-url.org", Namespaces: []common.NamespaceAdV2{{
 			Path:   "/foo/bar",
-			Issuer: []TokenIssuer{{IssuerUrl: isurl}},
+			Issuer: []common.TokenIssuer{{IssuerUrl: isurl}},
 		}}}
 
 		jsonad, err := json.Marshal(ad)
@@ -327,7 +328,7 @@ func TestDirectorRegistration(t *testing.T) {
 		isurl := url.URL{}
 		isurl.Path = ts.URL
 
-		ad := OriginAdvertiseV1{URL: "https://or-url.org", WebURL: "https://localhost:8844", Namespaces: []NamespaceAdV1{{Path: "/foo/bar", Issuer: isurl}}}
+		ad := common.OriginAdvertiseV1{URL: "https://or-url.org", WebURL: "https://localhost:8844", Namespaces: []common.NamespaceAdV1{{Path: "/foo/bar", Issuer: isurl}}}
 
 		jsonad, err := json.Marshal(ad)
 		assert.NoError(t, err, "Error marshalling OriginAdvertise")
@@ -353,9 +354,9 @@ func TestDirectorRegistration(t *testing.T) {
 		isurl := url.URL{}
 		isurl.Path = ts.URL
 
-		ad := OriginAdvertiseV2{DataURL: "https://or-url.org", WebURL: "https://localhost:8844", Namespaces: []NamespaceAdV2{{
+		ad := common.OriginAdvertiseV2{DataURL: "https://or-url.org", WebURL: "https://localhost:8844", Namespaces: []common.NamespaceAdV2{{
 			Path:   "/foo/bar",
-			Issuer: []TokenIssuer{{IssuerUrl: isurl}},
+			Issuer: []common.TokenIssuer{{IssuerUrl: isurl}},
 		}}}
 
 		jsonad, err := json.Marshal(ad)
@@ -383,7 +384,7 @@ func TestDirectorRegistration(t *testing.T) {
 		isurl := url.URL{}
 		isurl.Path = ts.URL
 
-		ad := OriginAdvertiseV1{URL: "https://or-url.org", Namespaces: []NamespaceAdV1{{Path: "/foo/bar", Issuer: isurl}}}
+		ad := common.OriginAdvertiseV1{URL: "https://or-url.org", Namespaces: []common.NamespaceAdV1{{Path: "/foo/bar", Issuer: isurl}}}
 
 		jsonad, err := json.Marshal(ad)
 		assert.NoError(t, err, "Error marshalling OriginAdvertise")
@@ -409,8 +410,8 @@ func TestDirectorRegistration(t *testing.T) {
 		isurl := url.URL{}
 		isurl.Path = ts.URL
 
-		ad := OriginAdvertiseV2{DataURL: "https://or-url.org", Namespaces: []NamespaceAdV2{{Path: "/foo/bar",
-			Issuer: []TokenIssuer{{IssuerUrl: isurl}}}}}
+		ad := common.OriginAdvertiseV2{DataURL: "https://or-url.org", Namespaces: []common.NamespaceAdV2{{Path: "/foo/bar",
+			Issuer: []common.TokenIssuer{{IssuerUrl: isurl}}}}}
 
 		jsonad, err := json.Marshal(ad)
 		assert.NoError(t, err, "Error marshalling OriginAdvertise")
@@ -461,7 +462,7 @@ func TestGetAuthzEscaped(t *testing.T) {
 }
 
 func TestDiscoverOriginCache(t *testing.T) {
-	mockPelicanOriginServerAd := ServerAd{
+	mockPelicanOriginServerAd := common.ServerAd{
 		Name:    "1-test-origin-server",
 		AuthURL: url.URL{},
 		URL: url.URL{
@@ -472,24 +473,24 @@ func TestDiscoverOriginCache(t *testing.T) {
 			Scheme: "https",
 			Host:   "fake-origin.org:8444",
 		},
-		Type:      OriginType,
+		Type:      common.OriginType,
 		Latitude:  123.05,
 		Longitude: 456.78,
 	}
 
-	mockTopoOriginServerAd := ServerAd{
+	mockTopoOriginServerAd := common.ServerAd{
 		Name:    "test-topology-origin-server",
 		AuthURL: url.URL{},
 		URL: url.URL{
 			Scheme: "https",
 			Host:   "fake-topology-origin.org:8443",
 		},
-		Type:      OriginType,
+		Type:      common.OriginType,
 		Latitude:  123.05,
 		Longitude: 456.78,
 	}
 
-	mockCacheServerAd := ServerAd{
+	mockCacheServerAd := common.ServerAd{
 		Name:    "2-test-cache-server",
 		AuthURL: url.URL{},
 		URL: url.URL{
@@ -500,15 +501,15 @@ func TestDiscoverOriginCache(t *testing.T) {
 			Scheme: "https",
 			Host:   "fake-cache.org:8444",
 		},
-		Type:      CacheType,
+		Type:      common.CacheType,
 		Latitude:  45.67,
 		Longitude: 123.05,
 	}
 
-	mockNamespaceAd := NamespaceAdV2{
+	mockNamespaceAd := common.NamespaceAdV2{
 		PublicRead: false,
 		Path:       "/foo/bar/",
-		Issuer: []TokenIssuer{{
+		Issuer: []common.TokenIssuer{{
 			BasePaths: []string{""},
 			IssuerUrl: url.URL{},
 		}},
@@ -608,7 +609,7 @@ func TestDiscoverOriginCache(t *testing.T) {
 		r.ServeHTTP(w, req)
 
 		assert.Equal(t, 401, w.Code)
-		assert.Equal(t, `{"error":"Bearer token not present in the 'Authorization' header"}`, w.Body.String())
+		assert.Equal(t, `{"error":"Invalid token for accessing director's sevice discovery"}`, w.Body.String())
 	})
 	t.Run("token-present-with-wrong-issuer-should-give-401", func(t *testing.T) {
 		req, err := http.NewRequest(http.MethodGet, "/test", nil)
@@ -622,7 +623,7 @@ func TestDiscoverOriginCache(t *testing.T) {
 		r.ServeHTTP(w, req)
 
 		assert.Equal(t, 401, w.Code)
-		assert.Equal(t, `{"error":"Authorization token verification failed: Token issuer is not a director\n"}`, w.Body.String())
+		assert.Equal(t, `{"error":"Invalid token for accessing director's sevice discovery"}`, w.Body.String())
 	})
 	t.Run("token-present-valid-should-give-200-and-empty-array", func(t *testing.T) {
 		req, err := http.NewRequest(http.MethodGet, "/test", nil)
@@ -648,10 +649,10 @@ func TestDiscoverOriginCache(t *testing.T) {
 			serverAdMutex.Lock()
 			defer serverAdMutex.Unlock()
 			serverAds.DeleteAll()
-			serverAds.Set(mockPelicanOriginServerAd, []NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
+			serverAds.Set(mockPelicanOriginServerAd, []common.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
 			// Server fetched from topology should not be present in SD response
-			serverAds.Set(mockTopoOriginServerAd, []NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
-			serverAds.Set(mockCacheServerAd, []NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
+			serverAds.Set(mockTopoOriginServerAd, []common.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
+			serverAds.Set(mockCacheServerAd, []common.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
 		}()
 
 		expectedRes := []PromDiscoveryItem{{
@@ -703,11 +704,11 @@ func TestDiscoverOriginCache(t *testing.T) {
 			defer serverAdMutex.Unlock()
 			serverAds.DeleteAll()
 			// Add multiple same serverAds
-			serverAds.Set(mockPelicanOriginServerAd, []NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
-			serverAds.Set(mockPelicanOriginServerAd, []NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
-			serverAds.Set(mockPelicanOriginServerAd, []NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
+			serverAds.Set(mockPelicanOriginServerAd, []common.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
+			serverAds.Set(mockPelicanOriginServerAd, []common.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
+			serverAds.Set(mockPelicanOriginServerAd, []common.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
 			// Server fetched from topology should not be present in SD response
-			serverAds.Set(mockTopoOriginServerAd, []NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
+			serverAds.Set(mockTopoOriginServerAd, []common.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
 		}()
 
 		expectedRes := []PromDiscoveryItem{{

@@ -6,43 +6,44 @@ import (
 	"testing"
 
 	"github.com/jellydator/ttlcache/v3"
+	"github.com/pelicanplatform/pelican/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-var mockOriginServerAd ServerAd = ServerAd{
+var mockOriginServerAd common.ServerAd = common.ServerAd{
 	Name:      "test-origin-server",
 	AuthURL:   url.URL{},
 	URL:       url.URL{},
-	Type:      OriginType,
+	Type:      common.OriginType,
 	Latitude:  123.05,
 	Longitude: 456.78,
 }
 
-var mockCacheServerAd ServerAd = ServerAd{
+var mockCacheServerAd common.ServerAd = common.ServerAd{
 	Name:      "test-cache-server",
 	AuthURL:   url.URL{},
 	URL:       url.URL{},
-	Type:      CacheType,
+	Type:      common.CacheType,
 	Latitude:  45.67,
 	Longitude: 123.05,
 }
 
 const mockPathPreix string = "/foo/bar/"
 
-func mockNamespaceAds(size int, serverPrefix string) []NamespaceAdV2 {
-	namespaceAds := make([]NamespaceAdV2, size)
+func mockNamespaceAds(size int, serverPrefix string) []common.NamespaceAdV2 {
+	namespaceAds := make([]common.NamespaceAdV2, size)
 	for i := 0; i < size; i++ {
-		namespaceAds[i] = NamespaceAdV2{
+		namespaceAds[i] = common.NamespaceAdV2{
 			PublicRead: false,
-			Caps: Capabilities{
+			Caps: common.Capabilities{
 				PublicRead: false,
 			},
 			Path: mockPathPreix + serverPrefix + "/" + fmt.Sprint(i),
-			Issuer: []TokenIssuer{{
+			Issuer: []common.TokenIssuer{{
 				IssuerUrl: url.URL{},
 			}},
-			Generation: []TokenGen{{
+			Generation: []common.TokenGen{{
 				MaxScopeDepth: 1,
 				Strategy:      "",
 				VaultServer:   "",
@@ -52,7 +53,7 @@ func mockNamespaceAds(size int, serverPrefix string) []NamespaceAdV2 {
 	return namespaceAds
 }
 
-func namespaceAdContainsPath(ns []NamespaceAdV2, path string) bool {
+func namespaceAdContainsPath(ns []common.NamespaceAdV2, path string) bool {
 	for _, v := range ns {
 		if v.Path == path {
 			return true
@@ -127,7 +128,7 @@ func TestListServerAds(t *testing.T) {
 			defer serverAdMutex.Unlock()
 			serverAds.DeleteAll()
 		}()
-		ads := ListServerAds([]ServerType{OriginType, CacheType})
+		ads := ListServerAds([]common.ServerType{common.OriginType, common.CacheType})
 		assert.Equal(t, 0, len(ads))
 	})
 
@@ -137,16 +138,16 @@ func TestListServerAds(t *testing.T) {
 			defer serverAdMutex.Unlock()
 			serverAds.DeleteAll()
 		}()
-		serverAds.Set(mockOriginServerAd, []NamespaceAdV2{}, ttlcache.DefaultTTL)
-		serverAds.Set(mockCacheServerAd, []NamespaceAdV2{}, ttlcache.DefaultTTL)
-		adsAll := ListServerAds([]ServerType{OriginType, CacheType})
+		serverAds.Set(mockOriginServerAd, []common.NamespaceAdV2{}, ttlcache.DefaultTTL)
+		serverAds.Set(mockCacheServerAd, []common.NamespaceAdV2{}, ttlcache.DefaultTTL)
+		adsAll := ListServerAds([]common.ServerType{common.OriginType, common.CacheType})
 		assert.Equal(t, 2, len(adsAll))
 
-		adsOrigin := ListServerAds([]ServerType{OriginType})
+		adsOrigin := ListServerAds([]common.ServerType{common.OriginType})
 		require.Equal(t, 1, len(adsOrigin))
 		assert.True(t, adsOrigin[0] == mockOriginServerAd)
 
-		adsCache := ListServerAds([]ServerType{CacheType})
+		adsCache := ListServerAds([]common.ServerType{common.CacheType})
 		require.Equal(t, 1, len(adsCache))
 		assert.True(t, adsCache[0] == mockCacheServerAd)
 	})

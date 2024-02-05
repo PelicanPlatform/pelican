@@ -173,6 +173,9 @@ var (
 	Client_SlowTransferRampupTime = IntParam{"Client.SlowTransferRampupTime"}
 	Client_SlowTransferWindow = IntParam{"Client.SlowTransferWindow"}
 	Client_StoppedTransferTimeout = IntParam{"Client.StoppedTransferTimeout"}
+	Director_MaxStatResponse = IntParam{"Director.MaxStatResponse"}
+	Director_MinStatResponse = IntParam{"Director.MinStatResponse"}
+	Director_StatConcurrencyLimit = IntParam{"Director.StatConcurrencyLimit"}
 	MinimumDownloadSpeed = IntParam{"MinimumDownloadSpeed"}
 	Monitoring_PortHigher = IntParam{"Monitoring.PortHigher"}
 	Monitoring_PortLower = IntParam{"Monitoring.PortLower"}
@@ -217,6 +220,7 @@ var (
 var (
 	Director_AdvertisementTTL = DurationParam{"Director.AdvertisementTTL"}
 	Director_OriginCacheHealthTestInterval = DurationParam{"Director.OriginCacheHealthTestInterval"}
+	Director_StatTimeout = DurationParam{"Director.StatTimeout"}
 	Federation_TopologyReloadInterval = DurationParam{"Federation.TopologyReloadInterval"}
 	Monitoring_TokenExpiresIn = DurationParam{"Monitoring.TokenExpiresIn"}
 	Monitoring_TokenRefreshInterval = DurationParam{"Monitoring.TokenRefreshInterval"}
