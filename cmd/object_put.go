@@ -87,14 +87,11 @@ func putMain(cmd *cobra.Command, args []string) {
 	}
 
 	var result error
-	var downloaded int64 = 0
 	lastSrc := ""
 	for _, src := range source {
-		var tmpDownloaded int64
 		isRecursive, _ := cmd.Flags().GetBool("recursive")
 		client.ObjectClientOptions.Recursive = isRecursive
-		tmpDownloaded, result = client.DoPut(src, dest, isRecursive)
-		downloaded += tmpDownloaded
+		_, result = client.DoPut(src, dest, isRecursive)
 		if result != nil {
 			lastSrc = src
 			break

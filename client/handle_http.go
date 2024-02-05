@@ -244,8 +244,19 @@ func NewTransferDetails(cache namespaces.Cache, opts TransferDetailsOptions) []T
 }
 
 type TransferResults struct {
-	Error      error
-	Downloaded int64
+	Error           error
+	TransferedBytes int64
+	Attempts        []Attempt
+}
+
+type Attempt struct {
+	Number            int    // indicates which attempt this is
+	TransferFileBytes int64  // how much each attempt downloaded
+	TimeToFirstByte   int64  // how long it took to download the first byte
+	TransferEndTime   int64  // when the transfer ends
+	Endpoint          string // which origin did it use
+	ServerVersion     string // TODO: figure out how to get this???
+	Error             error  // what error the attempt returned (if any)
 }
 
 type TransferDetailsOptions struct {
@@ -264,15 +275,13 @@ func GenerateTransferDetailsUsingCache(cache CacheInterface, opts TransferDetail
 	return nil
 }
 
-func download_http(sourceUrl *url.URL, destination string, payload *payloadStruct, namespace namespaces.Namespace, recursive bool, tokenName string) (bytesTransferred int64, err error) {
-
+func download_http(sourceUrl *url.URL, destination string, payload *payloadStruct, namespace namespaces.Namespace, recursive bool, tokenName string) (transferResults []TransferResults, err error) {
 	// First, create a handler for any panics that occur
 	defer func() {
 		if r := recover(); r != nil {
 			log.Errorln("Panic occurred in download_http:", r)
 			ret := fmt.Sprintf("Unrecoverable error (panic) occurred in download_http: %v", r)
 			err = errors.New(ret)
-			bytesTransferred = 0
 
 			// Attempt to add the panic to the error accumulator
 			AddError(errors.New(ret))
@@ -291,7 +300,7 @@ func download_http(sourceUrl *url.URL, destination string, payload *payloadStruc
 		token, err = getToken(sourceUrl, namespace, false, tokenName)
 		if err != nil {
 			log.Errorln("Failed to get token though required to read from this namespace:", err)
-			return 0, err
+			return nil, err
 		}
 	}
 
@@ -318,7 +327,7 @@ func download_http(sourceUrl *url.URL, destination string, payload *payloadStruc
 		files, err = walkDavDir(sourceUrl, namespace, token, "", false)
 		if err != nil {
 			log.Errorln("Error from walkDavDir", err)
-			return 0, err
+			return nil, err
 		}
 	} else {
 		files = append(files, sourceUrl.Path)
@@ -338,7 +347,7 @@ func download_http(sourceUrl *url.URL, destination string, payload *payloadStruc
 		log.Debugln("Transfers:", transfers[0].Url.Opaque)
 	} else {
 		log.Debugln("No transfers possible as no caches are found")
-		return 0, errors.New("No transfers possible as no caches are found")
+		return nil, errors.New("No transfers possible as no caches are found")
 	}
 	// Create the wait group and the transfer files
 	var wg sync.WaitGroup
@@ -365,13 +374,12 @@ func download_http(sourceUrl *url.URL, destination string, payload *payloadStruc
 	// Wait for all the transfers to complete
 	wg.Wait()
 
-	var downloaded int64
 	var downloadError error = nil
 	// Every transfer should send a TransferResults to the results channel
 	for i := 0; i < len(files); i++ {
 		select {
 		case result := <-results:
-			downloaded += result.Downloaded
+			transferResults = append(transferResults, result)
 			if result.Error != nil {
 				downloadError = result.Error
 			}
@@ -385,7 +393,7 @@ func download_http(sourceUrl *url.URL, destination string, payload *payloadStruc
 		getProgressContainer().Wait()
 		log.SetOutput(os.Stdout)
 	}
-	return downloaded, downloadError
+	return transferResults, downloadError
 
 }
 
@@ -393,6 +401,7 @@ func startDownloadWorker(source string, destination string, token string, transf
 
 	defer wg.Done()
 	var success bool
+	var attempts []Attempt
 	for file := range workChan {
 		// Remove the source from the file path
 		newFile := strings.Replace(file, source, "", 1)
@@ -404,11 +413,17 @@ func startDownloadWorker(source string, destination string, token string, transf
 			results <- TransferResults{Error: errors.New("Failed to make directory:" + directory)}
 			continue
 		}
-		for _, transfer := range transfers {
+		for idx, transfer := range transfers { // For each transfer (usually 3), populate each attempt given
+			var attempt Attempt
+			var timeToFirstByte int64
+			var serverVersion string
+			attempt.Number = idx // Start with 0
+			attempt.Endpoint = transfer.Url.Host
 			transfer.Url.Path = file
 			log.Debugln("Constructed URL:", transfer.Url.String())
-			if downloaded, err = DownloadHTTP(transfer, finalDest, token, payload); err != nil {
+			if downloaded, timeToFirstByte, serverVersion, err = DownloadHTTP(transfer, finalDest, token, payload); err != nil {
 				log.Debugln("Failed to download:", err)
+				transferEndTime := time.Now().Unix()
 				var ope *net.OpError
 				var cse *ConnectionSetupError
 				errorString := "Failed to download from " + transfer.Url.Hostname() + ":" +
@@ -432,9 +447,21 @@ func startDownloadWorker(source string, destination string, token string, transf
 						": " + err.Error()
 				}
 				AddError(&FileDownloadError{errorString, err})
+				attempt.TransferFileBytes = downloaded
+				attempt.TimeToFirstByte = timeToFirstByte
+				attempt.Error = errors.New(errorString)
+				attempt.TransferEndTime = int64(transferEndTime)
+				attempt.ServerVersion = serverVersion
+				attempts = append(attempts, attempt)
 				continue
 			} else {
+				transferEndTime := time.Now().Unix()
+				attempt.TransferEndTime = int64(transferEndTime)
+				attempt.TimeToFirstByte = timeToFirstByte
+				attempt.TransferFileBytes = downloaded
+				attempt.ServerVersion = serverVersion
 				log.Debugln("Downloaded bytes:", downloaded)
+				attempts = append(attempts, attempt)
 				success = true
 				break
 			}
@@ -442,12 +469,17 @@ func startDownloadWorker(source string, destination string, token string, transf
 		}
 		if !success {
 			log.Debugln("Failed to download with HTTP")
-			results <- TransferResults{Error: errors.New("failed to download with HTTP")}
+			results <- TransferResults{
+				TransferedBytes: downloaded,
+				Error:           errors.New("failed to download with HTTP"),
+				Attempts:        attempts,
+			}
 			return
 		} else {
 			results <- TransferResults{
-				Downloaded: downloaded,
-				Error:      nil,
+				TransferedBytes: downloaded,
+				Error:           nil,
+				Attempts:        attempts,
 			}
 		}
 	}
@@ -468,7 +500,8 @@ func parseTransferStatus(status string) (int, string) {
 }
 
 // DownloadHTTP - Perform the actual download of the file
-func DownloadHTTP(transfer TransferDetails, dest string, token string, payload *payloadStruct) (int64, error) {
+// Returns: downloaded size, time to 1st byte downloaded, serverVersion and an error if there is one
+func DownloadHTTP(transfer TransferDetails, dest string, token string, payload *payloadStruct) (int64, int64, string, error) {
 
 	// Create the client, request, and context
 	client := grab.NewClient()
@@ -478,7 +511,7 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string, payload *
 	}
 	httpClient, ok := client.HTTPClient.(*http.Client)
 	if !ok {
-		return 0, errors.New("Internal error: implementation is not a http.Client type")
+		return 0, 0, "", errors.New("Internal error: implementation is not a http.Client type")
 	}
 	httpClient.Transport = transport
 
@@ -491,20 +524,20 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string, payload *
 	if transfer.PackOption != "" {
 		behavior, err := GetBehavior(transfer.PackOption)
 		if err != nil {
-			return 0, err
+			return 0, 0, "", err
 		}
 		if dest == "." {
 			dest, err = os.Getwd()
 			if err != nil {
-				return 0, errors.Wrap(err, "Failed to get current directory for destination")
+				return 0, 0, "", errors.Wrap(err, "Failed to get current directory for destination")
 			}
 		}
 		unpacker = newAutoUnpacker(dest, behavior)
 		if req, err = grab.NewRequestToWriter(unpacker, transfer.Url.String()); err != nil {
-			return 0, errors.Wrap(err, "Failed to create new download request")
+			return 0, 0, "", errors.Wrap(err, "Failed to create new download request")
 		}
 	} else if req, err = grab.NewRequest(dest, transfer.Url.String()); err != nil {
-		return 0, errors.Wrap(err, "Failed to create new download request")
+		return 0, 0, "", errors.Wrap(err, "Failed to create new download request")
 	}
 
 	if token != "" {
@@ -536,6 +569,7 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string, payload *
 	log.Debugln("Starting the HTTP transfer...")
 	filename := path.Base(dest)
 	resp := client.Do(req)
+	downloadStart := time.Now()
 	// Check the error real quick
 	if resp.IsComplete() {
 		if err := resp.Err(); err != nil {
@@ -543,9 +577,10 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string, payload *
 				err = fmt.Errorf("Local copy of file is larger than remote copy %w", grab.ErrBadLength)
 			}
 			log.Errorln("Failed to download:", err)
-			return 0, &ConnectionSetupError{Err: err}
+			return 0, 0, "", &ConnectionSetupError{Err: err}
 		}
 	}
+	serverVersion := resp.HTTPResponse.Header.Get("Server")
 
 	// Size of the download
 	contentLength := resp.Size()
@@ -556,7 +591,7 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string, payload *
 		headResponse, err := headClient.Do(headRequest)
 		if err != nil {
 			log.Errorln("Could not successfully get response for HEAD request")
-			return 0, errors.Wrap(err, "Could not determine the size of the remote object")
+			return 0, 0, serverVersion, errors.Wrap(err, "Could not determine the size of the remote object")
 		}
 		defer headResponse.Body.Close()
 		contentLengthStr := headResponse.Header.Get("Content-Length")
@@ -590,11 +625,16 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string, payload *
 	var previousCompletedTime = time.Now()
 	var noProgressStartTime time.Time
 	var lastBytesComplete int64
+	var timeToFirstByte int64
+	timeToFirstByteRecorded := false
 	// Loop of the download
 Loop:
 	for {
 		select {
 		case <-progressTicker.C:
+			if !timeToFirstByteRecorded && resp.BytesComplete() > 1 {
+				timeToFirstByte = int64(time.Since(downloadStart))
+			}
 			if ObjectClientOptions.ProgressBars {
 				progressBar.SetTotal(contentLength, false)
 				currentCompletedBytes := resp.BytesComplete()
@@ -618,7 +658,7 @@ Loop:
 						progressBar.Abort(true)
 						progressBar.Wait()
 					}
-					return 5, &StoppedTransferError{
+					return 5, timeToFirstByte, serverVersion, &StoppedTransferError{
 						Err: errMsg,
 					}
 				}
@@ -654,7 +694,7 @@ Loop:
 
 				log.Errorln("Cancelled: Download speed of ", resp.BytesPerSecond(), "bytes/s", " is below the limit of", downloadLimit, "bytes/s")
 
-				return 0, &SlowTransferError{
+				return 0, timeToFirstByte, serverVersion, &SlowTransferError{
 					BytesTransferred: resp.BytesComplete(),
 					BytesPerSecond:   int64(resp.BytesPerSecond()),
 					Duration:         resp.Duration(),
@@ -695,10 +735,10 @@ Loop:
 		if errors.Is(err, syscall.ECONNREFUSED) ||
 			errors.Is(err, syscall.ECONNRESET) ||
 			errors.Is(err, syscall.ECONNABORTED) {
-			return 0, &ConnectionSetupError{URL: resp.Request.URL().String()}
+			return 0, 0, "", &ConnectionSetupError{URL: resp.Request.URL().String()}
 		}
 		log.Debugln("Got error from HTTP download", err)
-		return 0, err
+		return 0, 0, serverVersion, err
 	} else {
 		// Check the trailers for any error information
 		trailer := resp.HTTPResponse.Trailer
@@ -706,7 +746,7 @@ Loop:
 			statusCode, statusText := parseTransferStatus(errorStatus)
 			if statusCode != 200 {
 				log.Debugln("Got error from file transfer")
-				return 0, errors.New("transfer error: " + statusText)
+				return 0, 0, serverVersion, errors.New("transfer error: " + statusText)
 			}
 		}
 	}
@@ -714,19 +754,19 @@ Loop:
 	// prior attempt.
 	if resp.HTTPResponse.StatusCode != 200 && resp.HTTPResponse.StatusCode != 206 {
 		log.Debugln("Got failure status code:", resp.HTTPResponse.StatusCode)
-		return 0, &HttpErrResp{resp.HTTPResponse.StatusCode, fmt.Sprintf("Request failed (HTTP status %d): %s",
+		return 0, 0, serverVersion, &HttpErrResp{resp.HTTPResponse.StatusCode, fmt.Sprintf("Request failed (HTTP status %d): %s",
 			resp.HTTPResponse.StatusCode, resp.Err().Error())}
 	}
 
 	if unpacker != nil {
 		unpacker.Close()
 		if err := unpacker.Error(); err != nil {
-			return 0, err
+			return 0, 0, serverVersion, err
 		}
 	}
 
 	log.Debugln("HTTP Transfer was successful")
-	return resp.BytesComplete(), nil
+	return resp.BytesComplete(), timeToFirstByte, serverVersion, nil
 }
 
 type Sizer interface {
@@ -781,51 +821,52 @@ func (pr *ProgressReader) Size() int64 {
 }
 
 // Recursively uploads a directory with all files and nested dirs, keeping file structure on server side
-func UploadDirectory(src string, dest *url.URL, token string, namespace namespaces.Namespace, projectName string) (int64, error) {
+func UploadDirectory(src string, dest *url.URL, token string, namespace namespaces.Namespace, projectName string) (transferResults []TransferResults, err error) {
 	var files []string
-	var amountDownloaded int64
 	srcUrl := url.URL{Path: src}
 	// Get the list of files as well as make any directories on the server end
-	files, err := walkDavDir(&srcUrl, namespace, token, dest.Path, true)
+	files, err = walkDavDir(&srcUrl, namespace, token, dest.Path, true)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	if ObjectClientOptions.ProgressBars {
 		log.SetOutput(getProgressContainer())
 	}
+	var transfer TransferResults
 	// Upload all of our files within the proper directories
 	for _, file := range files {
 		tempDest := url.URL{}
 		tempDest.Path, err = url.JoinPath(dest.Path, file)
 		if err != nil {
-			return 0, err
+			return nil, err
 		}
-		downloaded, err := UploadFile(file, &tempDest, token, namespace, projectName)
+		transfer, err = UploadFile(file, &tempDest, token, namespace, projectName)
 		if err != nil {
-			return 0, err
+			return nil, err
 		}
-		amountDownloaded += downloaded
+		// Add info from each transfer to transferResults
+		transferResults = append(transferResults, transfer)
 	}
 	// Close progress bar container
 	if ObjectClientOptions.ProgressBars {
 		getProgressContainer().Wait()
 		log.SetOutput(os.Stdout)
 	}
-	return amountDownloaded, err
+	return transferResults, err
 }
 
 // UploadFile Uploads a file using HTTP
-func UploadFile(src string, origDest *url.URL, token string, namespace namespaces.Namespace, projectName string) (int64, error) {
-
+func UploadFile(src string, origDest *url.URL, token string, namespace namespaces.Namespace, projectName string) (transferResult TransferResults, err error) {
 	log.Debugln("In UploadFile")
 	log.Debugln("Dest", origDest.String())
-
+	var attempt Attempt
 	// Stat the file to get the size (for progress bar)
 	fileInfo, err := os.Stat(src)
 	if err != nil {
 		log.Errorln("Error checking local file ", src, ":", err)
-		return 0, err
+		transferResult.Error = err
+		return transferResult, err
 	}
 
 	var ioreader io.ReadCloser
@@ -834,11 +875,14 @@ func UploadFile(src string, origDest *url.URL, token string, namespace namespace
 	nonZeroSize := true
 	if pack != "" {
 		if !fileInfo.IsDir() {
-			return 0, errors.Errorf("Upload with pack=%v only works when input (%v) is a directory", pack, src)
+			err = errors.Errorf("Upload with pack=%v only works when input (%v) is a directory", pack, src)
+			transferResult.Error = err
+			return transferResult, err
 		}
 		behavior, err := GetBehavior(pack)
 		if err != nil {
-			return 0, err
+			transferResult.Error = err
+			return transferResult, err
 		}
 		if behavior == autoBehavior {
 			behavior = defaultBehavior
@@ -851,7 +895,8 @@ func UploadFile(src string, origDest *url.URL, token string, namespace namespace
 		file, err := os.Open(src)
 		if err != nil {
 			log.Errorln("Error opening local file:", err)
-			return 0, err
+			transferResult.Error = err
+			return transferResult, err
 		}
 		ioreader = file
 		sizer = &ConstantSizer{size: fileInfo.Size()}
@@ -861,7 +906,8 @@ func UploadFile(src string, origDest *url.URL, token string, namespace namespace
 	// Parse the writeback host as a URL
 	writebackhostUrl, err := url.Parse(namespace.WriteBackHost)
 	if err != nil {
-		return 0, err
+		transferResult.Error = err
+		return transferResult, err
 	}
 
 	dest := &url.URL{
@@ -869,7 +915,7 @@ func UploadFile(src string, origDest *url.URL, token string, namespace namespace
 		Scheme: "https",
 		Path:   origDest.Path,
 	}
-
+	attempt.Endpoint = dest.Host
 	// Create the wrapped reader and send it to the request
 	closed := make(chan bool, 1)
 	errorChan := make(chan error, 1)
@@ -887,7 +933,8 @@ func UploadFile(src string, origDest *url.URL, token string, namespace namespace
 	}
 	if err != nil {
 		log.Errorln("Error creating request:", err)
-		return 0, err
+		transferResult.Error = err
+		return transferResult, err
 	}
 	// Set the authorization header
 	request.Header.Set("Authorization", "Bearer "+token)
@@ -898,6 +945,7 @@ func UploadFile(src string, origDest *url.URL, token string, namespace namespace
 	t := time.NewTicker(20 * time.Second)
 	defer t.Stop()
 	go doPut(request, responseChan, errorChan)
+	uploadStart := time.Now()
 	var lastError error = nil
 
 	var progressBar *mpb.Bar
@@ -930,6 +978,7 @@ func UploadFile(src string, origDest *url.URL, token string, namespace namespace
 	}
 	tickerDuration := 500 * time.Millisecond
 	progressTicker := time.NewTicker(tickerDuration)
+	firstByteRecorded := false
 	defer progressTicker.Stop()
 
 	// Do the select on a ticker, and the writeChan
@@ -937,6 +986,10 @@ Loop:
 	for {
 		select {
 		case <-progressTicker.C:
+			if !firstByteRecorded && reader.BytesComplete() > 0 {
+				attempt.TimeToFirstByte = int64(time.Since(uploadStart))
+				firstByteRecorded = true
+			}
 			if progressBar != nil {
 				progressBar.SetTotal(reader.Size(), false)
 				progressBar.EwmaSetCurrent(reader.BytesComplete(), tickerDuration)
@@ -961,6 +1014,7 @@ Loop:
 			// The file has been closed, we're done here
 			log.Debugln("File closed")
 		case response := <-responseChan:
+			attempt.ServerVersion = response.Header.Get("Server")
 			if response.StatusCode != 200 {
 				log.Errorln("Got failure status code:", response.StatusCode)
 				lastError = &HttpErrResp{response.StatusCode, fmt.Sprintf("Request failed (HTTP status %d)",
@@ -978,10 +1032,20 @@ Loop:
 	}
 
 	if fileInfo.Size() == 0 {
-		return 0, lastError
+		transferResult.Error = lastError
+		attempt.TransferEndTime = time.Now().Unix()
+
+		// Add our attempt fields
+		transferResult.Attempts = append(transferResult.Attempts, attempt)
+		return transferResult, lastError
 	} else {
 		log.Debugln("Uploaded bytes:", reader.BytesComplete())
-		return reader.BytesComplete(), lastError
+		transferResult.TransferedBytes = reader.BytesComplete()
+		attempt.TransferEndTime = time.Now().Unix()
+
+		// Add our attempt fields
+		transferResult.Attempts = append(transferResult.Attempts, attempt)
+		return transferResult, lastError
 	}
 
 }
