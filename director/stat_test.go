@@ -1,3 +1,21 @@
+/***************************************************************
+ *
+ * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you
+ * may not use this file except in compliance with the License.  You may
+ * obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ ***************************************************************/
+
 package director
 
 import (
@@ -30,7 +48,7 @@ func TestQueryOriginsForObject(t *testing.T) {
 
 	stat := NewObjectStat()
 	stat.ReqHandler = func(objectName string, originAd common.ServerAd, timeout time.Duration, maxCancelCtx context.Context) (*objectMetadata, error) {
-		return &objectMetadata{ServerAd: originAd}, nil
+		return &objectMetadata{URL: *originAd.URL.JoinPath(objectName)}, nil
 	}
 
 	// The OnEviction function is added to serverAds, which will clear deleted cache item
@@ -45,11 +63,11 @@ func TestQueryOriginsForObject(t *testing.T) {
 	mockTTLCache := func() {
 		serverAdMutex.Lock()
 		defer serverAdMutex.Unlock()
-		mockServerAd1 := common.ServerAd{Name: "origin1", URL: url.URL{Host: "example1.com"}, Type: common.OriginType}
-		mockServerAd2 := common.ServerAd{Name: "origin2", URL: url.URL{Host: "example2.com"}, Type: common.OriginType}
-		mockServerAd3 := common.ServerAd{Name: "origin3", URL: url.URL{Host: "example3.com"}, Type: common.OriginType}
-		mockServerAd4 := common.ServerAd{Name: "origin4", URL: url.URL{Host: "example4.com"}, Type: common.OriginType}
-		mockServerAd5 := common.ServerAd{Name: "cache1", URL: url.URL{Host: "cache1.com"}, Type: common.OriginType}
+		mockServerAd1 := common.ServerAd{Name: "origin1", URL: url.URL{Host: "example1.com", Scheme: "https"}, Type: common.OriginType}
+		mockServerAd2 := common.ServerAd{Name: "origin2", URL: url.URL{Host: "example2.com", Scheme: "https"}, Type: common.OriginType}
+		mockServerAd3 := common.ServerAd{Name: "origin3", URL: url.URL{Host: "example3.com", Scheme: "https"}, Type: common.OriginType}
+		mockServerAd4 := common.ServerAd{Name: "origin4", URL: url.URL{Host: "example4.com", Scheme: "https"}, Type: common.OriginType}
+		mockServerAd5 := common.ServerAd{Name: "cache1", URL: url.URL{Host: "cache1.com", Scheme: "https"}, Type: common.OriginType}
 		mockNsAd0 := common.NamespaceAdV2{Path: "/foo"}
 		mockNsAd1 := common.NamespaceAdV2{Path: "/foo/bar"}
 		mockNsAd2 := common.NamespaceAdV2{Path: "/foo/x"}
@@ -168,7 +186,7 @@ func TestQueryOriginsForObject(t *testing.T) {
 		assert.Contains(t, msg, "Maximum responses reached for stat. Return result and cancel ongoing requests.")
 		require.NotNil(t, result)
 		require.Equal(t, 1, len(result))
-		assert.True(t, result[0].ServerAd.Name == "origin2" || result[0].ServerAd.Name == "origin3")
+		assert.True(t, result[0].URL.String() == "https://example2.com/foo/bar/test.txt" || result[0].URL.String() == "https://example3.com/foo/bar/test.txt", "Return value is not expected:", result[0].URL.String())
 	})
 
 	t.Run("matched-prefixes-with-max-2-returns-response", func(t *testing.T) {
@@ -188,8 +206,8 @@ func TestQueryOriginsForObject(t *testing.T) {
 		assert.Contains(t, msg, "Maximum responses reached for stat. Return result and cancel ongoing requests.")
 		require.NotNil(t, result)
 		require.Equal(t, 2, len(result))
-		assert.True(t, result[0].ServerAd.Name == "origin2" || result[0].ServerAd.Name == "origin3")
-		assert.True(t, result[1].ServerAd.Name == "origin2" || result[1].ServerAd.Name == "origin3")
+		assert.True(t, result[0].URL.String() == "https://example2.com/foo/bar/test.txt" || result[0].URL.String() == "https://example3.com/foo/bar/test.txt")
+		assert.True(t, result[1].URL.String() == "https://example2.com/foo/bar/test.txt" || result[1].URL.String() == "https://example3.com/foo/bar/test.txt")
 	})
 
 	t.Run("matched-prefixes-with-max-3-returns-response", func(t *testing.T) {
@@ -210,8 +228,8 @@ func TestQueryOriginsForObject(t *testing.T) {
 		assert.Empty(t, msg)
 		require.NotNil(t, result)
 		require.Equal(t, 2, len(result))
-		assert.True(t, result[0].ServerAd.Name == "origin2" || result[0].ServerAd.Name == "origin3")
-		assert.True(t, result[1].ServerAd.Name == "origin2" || result[1].ServerAd.Name == "origin3")
+		assert.True(t, result[0].URL.String() == "https://example2.com/foo/bar/test.txt" || result[0].URL.String() == "https://example3.com/foo/bar/test.txt")
+		assert.True(t, result[1].URL.String() == "https://example2.com/foo/bar/test.txt" || result[1].URL.String() == "https://example3.com/foo/bar/test.txt")
 	})
 
 	t.Run("matched-prefixes-with-min-3-returns-error", func(t *testing.T) {
@@ -255,7 +273,7 @@ func TestQueryOriginsForObject(t *testing.T) {
 		assert.Contains(t, msg, "Maximum responses reached for stat. Return result and cancel ongoing requests.")
 		require.NotNil(t, result)
 		require.Equal(t, 1, len(result))
-		assert.True(t, result[0].ServerAd.Name == "origin2" || result[0].ServerAd.Name == "origin3")
+		assert.True(t, result[0].URL.String() == "https://example2.com/foo/bar/test.txt" || result[0].URL.String() == "https://example3.com/foo/bar/test.txt")
 	})
 
 	t.Run("cancel-cancels-query", func(t *testing.T) {
@@ -266,7 +284,7 @@ func TestQueryOriginsForObject(t *testing.T) {
 
 		stat.ReqHandler = func(objectName string, originAd common.ServerAd, timeout time.Duration, maxCancelCtx context.Context) (*objectMetadata, error) {
 			time.Sleep(time.Second * 30)
-			return &objectMetadata{ServerAd: originAd}, nil
+			return &objectMetadata{URL: *originAd.URL.JoinPath(objectName)}, nil
 		}
 
 		ctx, cancel := context.WithCancel(context.Background())

@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2023, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -37,9 +37,10 @@ import (
 
 type (
 	objectMetadata struct {
-		ServerAd      common.ServerAd `json:"server_ad"`
-		Checksum      string          `json:"checksum"`
-		ContentLength int             `json:"content_length"`
+		// ServerAd      common.ServerAd `json:"server_ad"`
+		URL           url.URL `json:"url"`
+		Checksum      string  `json:"checksum"`
+		ContentLength int     `json:"content_length"`
 	}
 
 	timeoutError struct {
@@ -75,9 +76,8 @@ func (e cancelledError) Error() string {
 }
 
 func (meta objectMetadata) String() string {
-	return fmt.Sprintf("Object Meatadata: From server %q at %q.\nContent-length:%d\nChecksum: %s\n",
-		meta.ServerAd.Name,
-		meta.ServerAd.URL.String(),
+	return fmt.Sprintf("Object Meatadata: File URL %q\nContent-length:%d\nChecksum: %s\n",
+		meta.URL.String(),
 		meta.ContentLength,
 		meta.Checksum,
 	)
@@ -92,7 +92,7 @@ func NewObjectStat() *ObjectStat {
 }
 
 // Implementation of sending a HEAD request to an origin for an object
-func (stat *ObjectStat) sendHeadReqToOrigin(objectName string, originAd common.ServerAd, timeout time.Duration, maxCancelCtx context.Context) (*objectMetadata, error) {
+func (stat *ObjectStat) sendHeadReqToOrigin(objectName string, originAd common.ServerAd, timeout time.Duration, ctx context.Context) (*objectMetadata, error) {
 	tokenConf := utils.TokenConfig{
 		Lifetime:     time.Minute,
 		TokenProfile: utils.WLCG,
@@ -109,7 +109,7 @@ func (stat *ObjectStat) sendHeadReqToOrigin(objectName string, originAd common.S
 
 	client := http.Client{Transport: config.GetTransport(), Timeout: timeout}
 	reqUrl := originAd.URL.JoinPath(objectName)
-	req, err := http.NewRequestWithContext(maxCancelCtx, "HEAD", reqUrl.String(), nil)
+	req, err := http.NewRequestWithContext(ctx, "HEAD", reqUrl.String(), nil)
 	if err != nil {
 		return nil, errors.Wrap(err, "Error creating request")
 	}
@@ -146,7 +146,7 @@ func (stat *ObjectStat) sendHeadReqToOrigin(objectName string, originAd common.S
 		if err != nil {
 			return nil, errors.New(fmt.Sprintf("Error parsing content-length header from response. Header was: %s", cLenStr))
 		}
-		return &objectMetadata{ContentLength: clen, Checksum: checksumStr, ServerAd: originAd}, nil
+		return &objectMetadata{ContentLength: clen, Checksum: checksumStr, URL: *originAd.URL.JoinPath(objectName)}, nil
 	}
 }
 
@@ -167,7 +167,7 @@ func (stat *ObjectStat) queryOriginsForObject(objectName string, cancelContext c
 	}
 	timeout := param.Director_StatTimeout.GetDuration()
 	positiveReqChan := make(chan *objectMetadata)
-	negitiveReqChan := make(chan error)
+	negativeReqChan := make(chan error)
 	maxCancelCtx, maxCancel := context.WithCancel(context.Background())
 	numTotalReq := 0
 	successResult := make([]*objectMetadata, 0)
@@ -193,19 +193,19 @@ func (stat *ObjectStat) queryOriginsForObject(objectName string, cancelContext c
 				if err != nil {
 					switch e := err.(type) {
 					case timeoutError:
-						log.Warningf("Timeout error when issue stat to origin %s for object %s after %d: %s", intOriginAd.WebURL.String(), objectName, timeout, e.Message)
-						negitiveReqChan <- err
+						log.Warningf("Timeout error when issue stat to origin %s for object %s after %d: %s", intOriginAd.URL.String(), objectName, timeout, e.Message)
+						negativeReqChan <- err
 						return nil
 					case notFoundError:
-						log.Warningf("Object %s not found at origin %s: %s", objectName, intOriginAd.WebURL.String(), e.Message)
+						log.Warningf("Object %s not found at origin %s: %s", objectName, intOriginAd.URL.String(), e.Message)
 						fmt.Println("Not found error:", e.Message)
-						negitiveReqChan <- err
+						negativeReqChan <- err
 						return nil
 					case cancelledError:
-						// Don't send to negitiveReqChan as cancellation won't count towards total requests
+						// Don't send to negativeReqChan as cancellation won't count towards total requests
 						return nil
 					default:
-						negitiveReqChan <- err
+						negativeReqChan <- err
 						return err
 					}
 				} else {
@@ -218,7 +218,7 @@ func (stat *ObjectStat) queryOriginsForObject(objectName string, cancelContext c
 
 	for {
 		select {
-		case <-negitiveReqChan:
+		case <-negativeReqChan:
 			numTotalReq += 1
 		case metaRes := <-positiveReqChan:
 			numTotalReq += 1

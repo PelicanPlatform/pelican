@@ -560,7 +560,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType common.S
 		defer originStatUtilsMutex.Unlock()
 		statUtil, ok := originStatUtils[sAd]
 		if !ok || statUtil.Errgroup == nil {
-			baseCtx, cancel := context.WithCancel(context.Background())
+			baseCtx, cancel := context.WithCancel(engineCtx)
 			concLimit := param.Director_StatConcurrencyLimit.GetInt()
 			statErrGrp := errgroup.Group{}
 			statErrGrp.SetLimit(concLimit)

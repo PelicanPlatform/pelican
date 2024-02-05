@@ -19,7 +19,6 @@
 package director
 
 import (
-	"context"
 	"net/http"
 	"path"
 	"strings"
@@ -50,8 +49,8 @@ type (
 	}
 
 	statRequest struct {
-		Min int `form:"min"`
-		Max int `form:"max"`
+		MinResponses int `form:"min_responses"`
+		MaxResponses int `form:"max_responses"`
 	}
 )
 
@@ -110,9 +109,7 @@ func queryOrigins(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid query parameters"})
 		return
 	}
-	cancelCtx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	meta, msg, err := NewObjectStat().Query(path, cancelCtx, queryParams.Min, queryParams.Max)
+	meta, msg, err := NewObjectStat().Query(path, ctx, queryParams.MinResponses, queryParams.MaxResponses)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -127,5 +124,6 @@ func RegisterDirectorWebAPI(router *gin.RouterGroup) {
 	{
 		directorWebAPI.GET("/servers", listServers)
 		directorWebAPI.GET("/servers/origins/stat/*path", web_ui.AuthHandler, queryOrigins)
+		directorWebAPI.HEAD("/servers/origins/stat/*path", web_ui.AuthHandler, queryOrigins)
 	}
 }
