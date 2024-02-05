@@ -70,14 +70,22 @@ func ConfigTTLCache(ctx context.Context, egrp *errgroup.Group) {
 	go namespaceKeys.Start()
 
 	serverAds.OnEviction(func(ctx context.Context, er ttlcache.EvictionReason, i *ttlcache.Item[common.ServerAd, []common.NamespaceAdV2]) {
-		healthTestCancelFuncsMutex.Lock()
-		defer healthTestCancelFuncsMutex.Unlock()
-		if cancelFunc, exists := healthTestCancelFuncs[i.Key()]; exists {
-			// Call the cancel function for the evicted originAd to end its health test
-			cancelFunc()
-
-			// Remove the cancel function from the map as it's no longer needed
-			delete(healthTestCancelFuncs, i.Key())
+		healthTestUtilsMutex.RLock()
+		defer healthTestUtilsMutex.RUnlock()
+		if util, exists := healthTestUtils[i.Key()]; exists {
+			util.Cancel()
+			if util.ErrGrp != nil {
+				err := util.ErrGrp.Wait()
+				if err != nil {
+					log.Debugf("Error from errgroup when evict the registration from TTL cache for %s %s %s", string(i.Key().Type), i.Key().Name, err.Error())
+				} else {
+					log.Debugf("Errgroup successfully emptied at TTL cache eviction for %s %s", string(i.Key().Type), i.Key().Name)
+				}
+			} else {
+				log.Debugf("errgroup is nil when evict the registration from TTL cache for %s %s", string(i.Key().Type), i.Key().Name)
+			}
+		} else {
+			log.Debugf("healthTestUtil not found for %s when evicting TTL cache item", i.Key().Name)
 		}
 
 		if i.Key().Type == common.OriginType {

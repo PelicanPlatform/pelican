@@ -235,18 +235,23 @@ func TestConfigCacheEviction(t *testing.T) {
 			assert.NoError(t, err)
 		}()
 
-		ctx, cancelFunc := context.WithDeadline(ctx, time.Now().Add(time.Second*5))
+		errgrp, errgrpCtx := errgroup.WithContext(shutdownCtx)
+		ctx, cancelFunc := context.WithDeadline(errgrpCtx, time.Now().Add(time.Second*5))
 
 		func() {
 			serverAdMutex.Lock()
 			defer serverAdMutex.Unlock()
 			serverAds.DeleteAll()
 			serverAds.Set(mockPelicanOriginServerAd, []common.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
-			healthTestCancelFuncsMutex.Lock()
-			defer healthTestCancelFuncsMutex.Unlock()
+			healthTestUtilsMutex.Lock()
+			defer healthTestUtilsMutex.Unlock()
 			// Clear the map for the new test
-			healthTestCancelFuncs = make(map[common.ServerAd]context.CancelFunc)
-			healthTestCancelFuncs[mockPelicanOriginServerAd] = cancelFunc
+			healthTestUtils = make(map[common.ServerAd]*healthTestUtil)
+			healthTestUtils[mockPelicanOriginServerAd] = &healthTestUtil{
+				Cancel:        cancelFunc,
+				ErrGrp:        errgrp,
+				ErrGrpContext: errgrpCtx,
+			}
 
 			require.True(t, serverAds.Has(mockPelicanOriginServerAd), "serverAds failed to register the originAd")
 		}()
@@ -276,11 +281,6 @@ func TestConfigCacheEviction(t *testing.T) {
 		case <-time.After(3 * time.Second):
 			require.False(t, true)
 		}
-		func() {
-			healthTestCancelFuncsMutex.RLock()
-			defer healthTestCancelFuncsMutex.RUnlock()
-			assert.True(t, healthTestCancelFuncs[mockPelicanOriginServerAd] == nil, "Evicted origin didn't clear cancelFunc in the map")
-		}()
 	})
 }
 

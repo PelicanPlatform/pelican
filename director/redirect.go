@@ -42,10 +42,18 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-type PromDiscoveryItem struct {
-	Targets []string          `json:"targets"`
-	Labels  map[string]string `json:"labels"`
-}
+type (
+	PromDiscoveryItem struct {
+		Targets []string          `json:"targets"`
+		Labels  map[string]string `json:"labels"`
+	}
+
+	healthTestUtil struct {
+		ErrGrp        *errgroup.Group
+		ErrGrpContext context.Context
+		Cancel        context.CancelFunc
+	}
+)
 
 type originStatUtil struct {
 	Context  context.Context
@@ -54,11 +62,11 @@ type originStatUtil struct {
 }
 
 var (
-	minClientVersion, _        = version.NewVersion("7.0.0")
-	minOriginVersion, _        = version.NewVersion("7.0.0")
-	minCacheVersion, _         = version.NewVersion("7.3.0")
-	healthTestCancelFuncs      = make(map[common.ServerAd]context.CancelFunc)
-	healthTestCancelFuncsMutex = sync.RWMutex{}
+	minClientVersion, _  = version.NewVersion("7.0.0")
+	minOriginVersion, _  = version.NewVersion("7.0.0")
+	minCacheVersion, _   = version.NewVersion("7.3.0")
+	healthTestUtils      = make(map[common.ServerAd]*healthTestUtil)
+	healthTestUtilsMutex = sync.RWMutex{}
 
 	originStatUtils      = make(map[url.URL]originStatUtil)
 	originStatUtilsMutex = sync.RWMutex{}
@@ -537,22 +545,69 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType common.S
 		EnableFallbackRead: adV2.Caps.FallBackRead,
 	}
 
-	hasOriginAdInCache := serverAds.Has(sAd)
 	RecordAd(sAd, &adV2.Namespaces)
 
 	// Start director periodic test of origin's health status if origin AD
 	// has WebURL field AND it's not already been registered
-	healthTestCancelFuncsMutex.Lock()
-	defer healthTestCancelFuncsMutex.Unlock()
-	if adV2.WebURL != "" && !hasOriginAdInCache {
-		if _, ok := healthTestCancelFuncs[sAd]; ok {
-			// If somehow we didn't clear the key, we call cancel first before
-			// adding a new test cycle
-			healthTestCancelFuncs[sAd]()
+	healthTestUtilsMutex.Lock()
+	defer healthTestUtilsMutex.Unlock()
+	if sAd.Type == common.OriginType && adV2.WebURL != "" {
+		if existingUtil, ok := healthTestUtils[sAd]; ok {
+			// Existing registration
+			if existingUtil != nil {
+				if existingUtil.ErrGrp != nil {
+					if existingUtil.ErrGrpContext.Err() != nil {
+						// ErrGroup has been Done. Start a new one
+						errgrp, errgrpCtx := errgroup.WithContext(engineCtx)
+						cancelCtx, cancel := context.WithCancel(errgrpCtx)
+
+						errgrp.SetLimit(1)
+						healthTestUtils[sAd] = &healthTestUtil{
+							Cancel:        cancel,
+							ErrGrp:        errgrp,
+							ErrGrpContext: errgrpCtx,
+						}
+						errgrp.Go(func() error {
+							LaunchPeriodicDirectorTest(cancelCtx, sAd)
+							return nil
+						})
+						log.Debugf("New director test suite issued for %s %s. Errgroup was evicted", string(sType), sAd.URL.String())
+					} else {
+						cancelCtx, cancel := context.WithCancel(existingUtil.ErrGrpContext)
+						started := existingUtil.ErrGrp.TryGo(func() error {
+							LaunchPeriodicDirectorTest(cancelCtx, sAd)
+							return nil
+						})
+						if !started {
+							cancel()
+							log.Debugf("New director test suite blocked for %s %s, existing test has been running", string(sType), sAd.URL.String())
+						} else {
+							log.Debugf("New director test suite issued for %s %s. Existing registration", string(sType), sAd.URL.String())
+							existingUtil.Cancel()
+							existingUtil.Cancel = cancel
+						}
+					}
+				} else {
+					log.Errorf("%s %s registration didn't start a new director test cycle: errgroup is nil", string(sType), &sAd.URL)
+				}
+			} else {
+				log.Errorf("%s %s registration didn't start a new director test cycle: healthTestUtils item is nil", string(sType), &sAd.URL)
+			}
+		} else { // No healthTestUtils found, new registration
+			errgrp, errgrpCtx := errgroup.WithContext(engineCtx)
+			cancelCtx, cancel := context.WithCancel(errgrpCtx)
+
+			errgrp.SetLimit(1)
+			healthTestUtils[sAd] = &healthTestUtil{
+				Cancel:        cancel,
+				ErrGrp:        errgrp,
+				ErrGrpContext: errgrpCtx,
+			}
+			errgrp.Go(func() error {
+				LaunchPeriodicDirectorTest(cancelCtx, sAd)
+				return nil
+			})
 		}
-		ctx, cancel := context.WithCancel(context.Background())
-		healthTestCancelFuncs[sAd] = cancel
-		LaunchPeriodicDirectorTest(ctx, sAd)
 	}
 
 	if sType == common.OriginType {
