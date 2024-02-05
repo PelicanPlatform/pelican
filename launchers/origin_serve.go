@@ -23,9 +23,12 @@ package launchers
 import (
 	"context"
 	_ "embed"
+	"regexp"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/daemon"
 	"github.com/pelicanplatform/pelican/oa4mp"
 	"github.com/pelicanplatform/pelican/origin_ui"
@@ -33,6 +36,9 @@ import (
 	"github.com/pelicanplatform/pelican/server_ui"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/xrootd"
+	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -93,8 +99,48 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) 
 		launchers = append(launchers, oa4mp_launcher)
 	}
 
+	startupChan := make(chan int)
+	re := regexp.MustCompile(`^------ xrootd [A-Za-z0-9]+@[A-Za-z0-9.\-]+:([0-9]+) initialization complete.*`)
+	config.AddFilter(&config.RegexpFilter{
+		Name:   "xrootd_startup",
+		Regexp: re,
+		Levels: []log.Level{log.InfoLevel},
+		Fire: func(e *log.Entry) error {
+			portStrs := re.FindStringSubmatch(e.Message)
+			if len(portStrs) < 1 {
+				portStrs = []string{"", ""}
+			}
+			port, err := strconv.Atoi(portStrs[1])
+			if err != nil {
+				port = -1
+			}
+			select {
+			case <-ctx.Done():
+				return nil
+			case startupChan <- port:
+				return nil
+			}
+		},
+	})
+	defer func() {
+		config.RemoveFilter("xrootd_startup")
+		close(startupChan)
+	}()
+
 	if err = daemon.LaunchDaemons(ctx, launchers, egrp); err != nil {
 		return nil, err
+	}
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case port := <-startupChan:
+		if port == -1 {
+			return nil, errors.New("Xrootd initialization failed")
+		} else {
+			viper.Set("Xrootd.Port", port)
+			log.Infoln("Origin startup complete on port", port)
+		}
 	}
 
 	return originServer, nil

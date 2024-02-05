@@ -137,24 +137,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 			return shutdownCancel, err
 		}
 		servers = append(servers, server)
-
-		switch mode {
-		case "posix":
-			err = server_utils.WaitUntilWorking(ctx, "GET", param.Origin_Url.GetString()+"/.well-known/openid-configuration", "Origin", http.StatusOK)
-			if err != nil {
-				return shutdownCancel, err
-			}
-		case "s3":
-			// A GET on the server root should cause XRootD to reply with permission denied -- as long as the origin is
-			// running in auth mode (probably). This might need to be revisted if we set up an S3 origin without requiring
-			// tokens
-			err = server_utils.WaitUntilWorking(ctx, "GET", param.Origin_Url.GetString(), "Origin", http.StatusForbidden)
-			if err != nil {
-				return shutdownCancel, err
-			}
-		}
 	}
-
 	log.Info("Starting web engine...")
 	egrp.Go(func() error {
 		if err := web_ui.RunEngine(ctx, engine, egrp); err != nil {

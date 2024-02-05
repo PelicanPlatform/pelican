@@ -866,6 +866,9 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 		return err
 	}
 
+	// Sets up the server log filter mechanism
+	initFilterLogging()
+
 	return DiscoverFederation()
 }
 
