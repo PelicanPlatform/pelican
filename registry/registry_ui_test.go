@@ -114,6 +114,8 @@ func TestListNamespaces(t *testing.T) {
 	setupMockRegistryDB(t)
 	defer teardownMockNamespaceDB(t)
 
+	viper.Set("Origin.Port", 8443)
+	viper.Set("Server.WebPort", 8444)
 	viper.Set("Server.ExternalWebUrl", "https://mock-server.com")
 
 	dirName := t.TempDir()

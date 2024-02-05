@@ -379,7 +379,7 @@ name: Origin.Url
 description: >-
   The origin's configured URL, as reported to XRootD. This is the file transfer endpoint for the origin.
 type: url
-default: https://${Server.Hostname}:${Xrootd.Port}
+default: https://${Server.Hostname}:${Origin.Port}
 components: ["origin"]
 ---
 name: Origin.Port
@@ -1269,6 +1269,9 @@ components: ["registry", "director"]
 ############################
 name: Xrootd.Port
 description: >-
+  [Deprecated] `Xrootd.Port` is deprecated and will be removed in the future release. Please migrate to use
+  `Origin.Port` or `Cache.Port` instead.
+
   The port over which XRootD should be made available.
   This setting is deprecated; please use the Cache.Port or Origin.Port, as appropriate,
   for the server.
