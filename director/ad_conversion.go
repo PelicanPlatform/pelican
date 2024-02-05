@@ -20,19 +20,21 @@ package director
 
 import (
 	"net/url"
+
+	"github.com/pelicanplatform/pelican/common"
 )
 
-func convertNamespaceAdsV2ToV1(nsV2 []NamespaceAdV2) []NamespaceAdV1 {
+func convertNamespaceAdsV2ToV1(nsV2 []common.NamespaceAdV2) []common.NamespaceAdV1 {
 	// Converts a list of V2 namespace ads to a list of V1 namespace ads.
 	// This is for backwards compatibility in the case an old version of a client calls
 	// out to a newer verion of the director
-	nsV1 := []NamespaceAdV1{}
+	nsV1 := []common.NamespaceAdV1{}
 
 	for _, nsAd := range nsV2 {
 		if len(nsAd.Issuer) != 0 {
 			for _, iss := range nsAd.Issuer {
 				for _, bp := range iss.BasePaths {
-					v1Ad := NamespaceAdV1{
+					v1Ad := common.NamespaceAdV1{
 						Path:          nsAd.Path,
 						RequireToken:  !nsAd.Caps.PublicRead,
 						Issuer:        iss.IssuerUrl,
@@ -45,7 +47,7 @@ func convertNamespaceAdsV2ToV1(nsV2 []NamespaceAdV2) []NamespaceAdV1 {
 				}
 			}
 		} else {
-			v1Ad := NamespaceAdV1{
+			v1Ad := common.NamespaceAdV1{
 				Path:         nsAd.Path,
 				RequireToken: false,
 			}
@@ -56,7 +58,7 @@ func convertNamespaceAdsV2ToV1(nsV2 []NamespaceAdV2) []NamespaceAdV1 {
 	return nsV1
 }
 
-func ConvertNamespaceAdsV1ToV2(nsAdsV1 []NamespaceAdV1, oAd *OriginAdvertiseV1) []NamespaceAdV2 {
+func ConvertNamespaceAdsV1ToV2(nsAdsV1 []common.NamespaceAdV1, oAd *common.OriginAdvertiseV1) []common.NamespaceAdV2 {
 	//Convert a list of V1 namespace ads to a list of V2 namespace ads, note that this
 	//isn't the most efficient way of doing so (an interative search as opposed to some sort
 	//of index or hash based search)
@@ -72,7 +74,7 @@ func ConvertNamespaceAdsV1ToV2(nsAdsV1 []NamespaceAdV1, oAd *OriginAdvertiseV1) 
 		fallback = true
 		wr = false
 	}
-	nsAdsV2 := []NamespaceAdV2{}
+	nsAdsV2 := []common.NamespaceAdV2{}
 	for _, nsAd := range nsAdsV1 {
 		nsFound := false
 		for i := range nsAdsV2 {
@@ -106,7 +108,7 @@ func ConvertNamespaceAdsV1ToV2(nsAdsV1 []NamespaceAdV1, oAd *OriginAdvertiseV1) 
 							credurl = nsAd.Issuer
 						}
 
-						tIss := TokenIssuer{
+						tIss := common.TokenIssuer{
 							BasePaths:       []string{nsAd.BasePath},
 							RestrictedPaths: []string{},
 							IssuerUrl:       nsAd.Issuer,
@@ -115,13 +117,13 @@ func ConvertNamespaceAdsV1ToV2(nsAdsV1 []NamespaceAdV1, oAd *OriginAdvertiseV1) 
 						tis := append(nsAdsV2[i].Issuer, tIss)
 						(*v2NS).Issuer = tis
 						if len(nsAdsV2[i].Generation) == 0 {
-							tGen := TokenGen{
+							tGen := common.TokenGen{
 								Strategy:         nsAd.Strategy,
 								VaultServer:      nsAd.VaultServer,
 								MaxScopeDepth:    nsAd.MaxScopeDepth,
 								CredentialIssuer: credurl,
 							}
-							(*v2NS).Generation = []TokenGen{tGen}
+							(*v2NS).Generation = []common.TokenGen{tGen}
 						}
 					}
 				}
@@ -141,7 +143,7 @@ func ConvertNamespaceAdsV1ToV2(nsAdsV1 []NamespaceAdV1, oAd *OriginAdvertiseV1) 
 				credurl = nsAd.Issuer
 			}
 
-			caps := Capabilities{
+			caps := common.Capabilities{
 				PublicRead:   !nsAd.RequireToken,
 				Read:         true,
 				Write:        wr,
@@ -149,20 +151,20 @@ func ConvertNamespaceAdsV1ToV2(nsAdsV1 []NamespaceAdV1, oAd *OriginAdvertiseV1) 
 				FallBackRead: fallback,
 			}
 
-			newNS := NamespaceAdV2{
+			newNS := common.NamespaceAdV2{
 				PublicRead: !nsAd.RequireToken,
 				Caps:       caps,
 				Path:       nsAd.Path,
 			}
 
 			if nsAd.RequireToken {
-				tGen := []TokenGen{{
+				tGen := []common.TokenGen{{
 					Strategy:         nsAd.Strategy,
 					VaultServer:      nsAd.VaultServer,
 					MaxScopeDepth:    nsAd.MaxScopeDepth,
 					CredentialIssuer: credurl,
 				}}
-				tIss := []TokenIssuer{{
+				tIss := []common.TokenIssuer{{
 					BasePaths:       []string{nsAd.BasePath},
 					RestrictedPaths: []string{},
 					IssuerUrl:       nsAd.Issuer,
@@ -178,10 +180,10 @@ func ConvertNamespaceAdsV1ToV2(nsAdsV1 []NamespaceAdV1, oAd *OriginAdvertiseV1) 
 	return nsAdsV2
 }
 
-func convertOriginAd(oAd1 OriginAdvertiseV1) OriginAdvertiseV2 {
+func convertOriginAd(oAd1 common.OriginAdvertiseV1) common.OriginAdvertiseV2 {
 	// Converts a V1 origin ad ot a V2 origin ad
 	nsAdsV2 := ConvertNamespaceAdsV1ToV2(oAd1.Namespaces, &oAd1)
-	tokIssuers := []TokenIssuer{}
+	tokIssuers := []common.TokenIssuer{}
 
 	for _, v2Ad := range nsAdsV2 {
 		tokIssuers = append(tokIssuers, v2Ad.Issuer...)
@@ -190,7 +192,7 @@ func convertOriginAd(oAd1 OriginAdvertiseV1) OriginAdvertiseV2 {
 	//Origin Capabilities may be different from Namespace Capabilities, but since the original
 	//origin didn't contain capabilities, these are currently the defaults - we might want to potentially
 	//change this in the future
-	caps := Capabilities{
+	caps := common.Capabilities{
 		PublicRead:   true,
 		Read:         true,
 		Write:        oAd1.EnableWrite,
@@ -198,7 +200,7 @@ func convertOriginAd(oAd1 OriginAdvertiseV1) OriginAdvertiseV2 {
 		FallBackRead: oAd1.EnableFallbackRead,
 	}
 
-	oAd2 := OriginAdvertiseV2{
+	oAd2 := common.OriginAdvertiseV2{
 		Name:       oAd1.Name,
 		DataURL:    oAd1.URL,
 		WebURL:     oAd1.WebURL,

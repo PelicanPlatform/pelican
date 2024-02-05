@@ -22,6 +22,7 @@ import (
 	"net/url"
 	"testing"
 
+	"github.com/pelicanplatform/pelican/common"
 	"github.com/stretchr/testify/require"
 )
 
@@ -36,16 +37,16 @@ func TestConversion(t *testing.T) {
 	issUrl2, err := url.Parse("https://issuer2.org")
 	require.NoError(t, err, "error parsing test issuer url")
 
-	v2Ads := []NamespaceAdV2{{
+	v2Ads := []common.NamespaceAdV2{{
 		PublicRead: false,
-		Caps:       Capabilities{PublicRead: false, Read: true, Write: true, FallBackRead: false, Listing: true},
+		Caps:       common.Capabilities{PublicRead: false, Read: true, Write: true, FallBackRead: false, Listing: true},
 		Path:       "/foo/bar",
-		Generation: []TokenGen{{
+		Generation: []common.TokenGen{{
 			Strategy:         "OAuth2",
 			MaxScopeDepth:    3,
 			CredentialIssuer: *credUrl,
 		}},
-		Issuer: []TokenIssuer{
+		Issuer: []common.TokenIssuer{
 			{
 				BasePaths:       []string{"/foo/bar/baz", "/foo/bar/wazzit"},
 				IssuerUrl:       *issUrl1,
@@ -59,7 +60,7 @@ func TestConversion(t *testing.T) {
 	},
 		{
 			PublicRead: true,
-			Caps: Capabilities{
+			Caps: common.Capabilities{
 				PublicRead:   true,
 				Read:         true,
 				Write:        true,
@@ -69,7 +70,7 @@ func TestConversion(t *testing.T) {
 		},
 	}
 
-	v1Ads := []NamespaceAdV1{
+	v1Ads := []common.NamespaceAdV1{
 		{
 			RequireToken:  true,
 			Path:          "/foo/bar",
@@ -104,7 +105,7 @@ func TestConversion(t *testing.T) {
 
 	require.Equal(t, v1Ads, v1Conv)
 
-	oAdV1 := OriginAdvertiseV1{
+	oAdV1 := common.OriginAdvertiseV1{
 		Name:               "OriginTest",
 		URL:                "https://origin-url.org",
 		WebURL:             "https://WebUrl.org",
@@ -113,19 +114,19 @@ func TestConversion(t *testing.T) {
 		EnableFallbackRead: false,
 	}
 
-	oAdV2 := OriginAdvertiseV2{
+	oAdV2 := common.OriginAdvertiseV2{
 		Name:       "OriginTest",
 		DataURL:    "https://origin-url.org",
 		WebURL:     "https://WebUrl.org",
 		Namespaces: v2Ads,
-		Caps: Capabilities{
+		Caps: common.Capabilities{
 			PublicRead:   true,
 			Write:        true,
 			FallBackRead: false,
 			Listing:      true,
 			Read:         true,
 		},
-		Issuer: []TokenIssuer{
+		Issuer: []common.TokenIssuer{
 			{
 				BasePaths:       []string{"/foo/bar/baz", "/foo/bar/wazzit"},
 				IssuerUrl:       *issUrl1,

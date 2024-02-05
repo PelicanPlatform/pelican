@@ -30,8 +30,12 @@ type config struct {
 		DefaultResponse string
 		GeoIPLocation string
 		MaxMindKeyFile string
+		MaxStatResponse int
+		MinStatResponse int
 		OriginCacheHealthTestInterval time.Duration
 		OriginResponseHostnames []string
+		StatConcurrencyLimit int
+		StatTimeout time.Duration
 	}
 	DisableHttpProxy bool
 	DisableProxyFallback bool
@@ -161,6 +165,24 @@ type config struct {
 		WebHost string
 		WebPort int
 	}
+	Shoveler struct {
+		AMQPExchange string
+		AMQPTokenLocation string
+		Enable bool
+		IPMapping interface{}
+		MessageQueueProtocol string
+		OutputDestinations []string
+		PortHigher int
+		PortLower int
+		QueueDirectory string
+		StompCert string
+		StompCertKey string
+		StompPassword string
+		StompUsername string
+		Topic string
+		URL string
+		VerifyHeader bool
+	}
 	StagePlugin struct {
 		Hook bool
 		MountPrefix string
@@ -218,8 +240,12 @@ type configWithType struct {
 		DefaultResponse struct { Type string; Value string }
 		GeoIPLocation struct { Type string; Value string }
 		MaxMindKeyFile struct { Type string; Value string }
+		MaxStatResponse struct { Type string; Value int }
+		MinStatResponse struct { Type string; Value int }
 		OriginCacheHealthTestInterval struct { Type string; Value time.Duration }
 		OriginResponseHostnames struct { Type string; Value []string }
+		StatConcurrencyLimit struct { Type string; Value int }
+		StatTimeout struct { Type string; Value time.Duration }
 	}
 	DisableHttpProxy struct { Type string; Value bool }
 	DisableProxyFallback struct { Type string; Value bool }
@@ -348,6 +374,24 @@ type configWithType struct {
 		UIPasswordFile struct { Type string; Value string }
 		WebHost struct { Type string; Value string }
 		WebPort struct { Type string; Value int }
+	}
+	Shoveler struct {
+		AMQPExchange struct { Type string; Value string }
+		AMQPTokenLocation struct { Type string; Value string }
+		Enable struct { Type string; Value bool }
+		IPMapping struct { Type string; Value interface{} }
+		MessageQueueProtocol struct { Type string; Value string }
+		OutputDestinations struct { Type string; Value []string }
+		PortHigher struct { Type string; Value int }
+		PortLower struct { Type string; Value int }
+		QueueDirectory struct { Type string; Value string }
+		StompCert struct { Type string; Value string }
+		StompCertKey struct { Type string; Value string }
+		StompPassword struct { Type string; Value string }
+		StompUsername struct { Type string; Value string }
+		Topic struct { Type string; Value string }
+		URL struct { Type string; Value string }
+		VerifyHeader struct { Type string; Value bool }
 	}
 	StagePlugin struct {
 		Hook struct { Type string; Value bool }
