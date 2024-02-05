@@ -44,6 +44,7 @@ type (
 	}
 
 	statResponse struct {
+		OK       bool              `json:"ok"`
 		Message  string            `json:"message"`
 		Metadata []*objectMetadata `json:"metadata"`
 	}
@@ -111,10 +112,29 @@ func queryOrigins(ctx *gin.Context) {
 	}
 	meta, msg, err := NewObjectStat().Query(path, ctx, queryParams.MinResponses, queryParams.MaxResponses)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+		if err == NoPrefixMatchError {
+			ctx.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		} else if err == ParameterError {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		} else if err == InsufficientResError {
+			// Insufficient response does not cause a 500 error, but OK field in reponse is false
+			if len(meta) < 1 {
+				ctx.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+				return
+			}
+			res := statResponse{Message: msg, Metadata: meta, OK: false}
+			ctx.JSON(http.StatusOK, res)
+		} else {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 	}
-	res := statResponse{Message: msg, Metadata: meta}
+	if len(meta) < 1 {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+	}
+	res := statResponse{Message: msg, Metadata: meta, OK: true}
 	ctx.JSON(http.StatusOK, res)
 }
 

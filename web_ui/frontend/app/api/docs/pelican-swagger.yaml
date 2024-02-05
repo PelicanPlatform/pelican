@@ -1097,10 +1097,15 @@ paths:
           default: 1
       responses:
         "200":
-          description: OK
+          description: Object is found in active origins and at least one origin responses successfully.
+            It returns 200 even if min_responses wasn't reached but it will mark `ok` field to `false`.
           schema:
             type: object
             properties:
+              ok:
+                type: boolean
+                description: If the min_responses is satistifed.
+                example: true
               message:
                 type: string
                 description: Additional message when a query returns
@@ -1110,12 +1115,18 @@ paths:
                 items:
                   $ref: "#/definitions/ObjectStatMetadata"
                   minItems: 1
-            items:
-              type: object
-              $ref: "#/definitions/Institution"
-              minItems: 0
+        "400":
+          description: Bad request. Either min_responses > max_responses, or invalid path to the object.
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
         "401":
           description: Authentication required to perform this action
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "404":
+          description: Object namespace not found in active origins, or no origin responses successfully.
           schema:
             type: object
             $ref: "#/definitions/ErrorModel"
@@ -1150,10 +1161,15 @@ paths:
           default: 1
       responses:
         "200":
-          description: OK
+          description: Object is found in active origins and at least one origin responses successfully.
+            It returns 200 even if min_responses wasn't reached but it will mark `ok` field to `false`.
           schema:
             type: object
             properties:
+              ok:
+                type: boolean
+                description: If the min_responses is satistifed.
+                example: true
               message:
                 type: string
                 description: Additional message when a query returns
@@ -1163,10 +1179,16 @@ paths:
                 items:
                   $ref: "#/definitions/ObjectStatMetadata"
                   minItems: 1
-            items:
-              type: object
-              $ref: "#/definitions/Institution"
-              minItems: 0
+        "400":
+          description: Bad request. Either min_responses > max_responses, or invalid path to the object.
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "404":
+          description: Object namespace not found in active origins, or no origin responses successfully.
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
         "401":
           description: Authentication required to perform this action
           schema:

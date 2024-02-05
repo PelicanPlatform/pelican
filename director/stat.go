@@ -63,6 +63,12 @@ type (
 	}
 )
 
+var (
+	ParameterError       = errors.New("Invalid parameter, max_responses must be larger than min_responses")
+	NoPrefixMatchError   = errors.New("No namespace prefixes match found")
+	InsufficientResError = errors.New("Number of success responses is less than MinStatResponse required.")
+)
+
 func (e timeoutError) Error() string {
 	return e.Message
 }
@@ -163,7 +169,7 @@ func (stat *ObjectStat) queryOriginsForObject(objectName string, cancelContext c
 		maxReq = maximum
 	}
 	if maxReq < minReq {
-		return nil, "", errors.New(fmt.Sprintf("Invalid parameter, maximum (%d) must be larger than minimum (%d)", maxReq, minReq))
+		return nil, "", ParameterError
 	}
 	timeout := param.Director_StatTimeout.GetDuration()
 	positiveReqChan := make(chan *objectMetadata)
@@ -174,7 +180,7 @@ func (stat *ObjectStat) queryOriginsForObject(objectName string, cancelContext c
 
 	if len(originAds) < 1 {
 		maxCancel()
-		return nil, "", errors.New("No namespace prefixes match found.")
+		return nil, "", NoPrefixMatchError
 	}
 
 	originStatUtilsMutex.RLock()
@@ -239,7 +245,7 @@ func (stat *ObjectStat) queryOriginsForObject(objectName string, cancelContext c
 			if numTotalReq == len(originAds) {
 				maxCancel()
 				if len(successResult) < minReq {
-					return successResult, "", errors.New(fmt.Sprintf("Number of success response: %d is less than MinStatResponse (%d) required.", len(successResult), minReq))
+					return successResult, fmt.Sprintf("Number of success response: %d is less than MinStatResponse (%d) required.", len(successResult), minReq), InsufficientResError
 				}
 				return successResult, "", nil
 			}

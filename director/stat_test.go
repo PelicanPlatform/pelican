@@ -123,7 +123,7 @@ func TestQueryOriginsForObject(t *testing.T) {
 
 		require.Error(t, err)
 		assert.Empty(t, msg)
-		assert.Equal(t, "No namespace prefixes match found.", err.Error())
+		assert.Equal(t, NoPrefixMatchError, err)
 		assert.Equal(t, 0, len(result))
 	})
 
@@ -135,7 +135,7 @@ func TestQueryOriginsForObject(t *testing.T) {
 
 		require.Error(t, err)
 		assert.Empty(t, msg)
-		assert.Equal(t, "Invalid parameter, maximum (1) must be larger than minimum (3)", err.Error())
+		assert.Equal(t, ParameterError, err)
 		assert.Equal(t, 0, len(result))
 	})
 
@@ -150,7 +150,7 @@ func TestQueryOriginsForObject(t *testing.T) {
 
 		require.Error(t, err)
 		assert.Empty(t, msg)
-		assert.Equal(t, "No namespace prefixes match found.", err.Error())
+		assert.Equal(t, NoPrefixMatchError, err)
 		assert.Equal(t, 0, len(result))
 	})
 
@@ -164,8 +164,7 @@ func TestQueryOriginsForObject(t *testing.T) {
 		result, msg, err := stat.queryOriginsForObject("/foo/bar/test.txt", ctx, 0, 0)
 
 		require.Error(t, err)
-		assert.Empty(t, msg)
-		assert.Contains(t, err.Error(), "Number of success response: 0 is less than MinStatRespons")
+		assert.Contains(t, msg, "Number of success response: 0 is less than MinStatRespons")
 		require.NotNil(t, result)
 		require.Equal(t, 0, len(result))
 	})
@@ -248,8 +247,7 @@ func TestQueryOriginsForObject(t *testing.T) {
 		result, msg, err := stat.queryOriginsForObject("/foo/bar/test.txt", ctx, 0, 0)
 
 		require.Error(t, err)
-		assert.Equal(t, "Number of success response: 2 is less than MinStatResponse (3) required.", err.Error())
-		assert.Empty(t, msg)
+		assert.Equal(t, "Number of success response: 2 is less than MinStatResponse (3) required.", msg)
 		require.NotNil(t, result)
 		require.Equal(t, 2, len(result))
 	})
@@ -345,8 +343,7 @@ func TestQueryOriginsForObject(t *testing.T) {
 		result, msg, err := stat.queryOriginsForObject("/foo/bar/test.txt", ctx, 0, 0)
 
 		require.Error(t, err)
-		assert.Equal(t, "Number of success response: 0 is less than MinStatResponse (1) required.", err.Error())
-		assert.Empty(t, msg)
+		assert.Equal(t, "Number of success response: 0 is less than MinStatResponse (1) required.", msg)
 		require.NotNil(t, result)
 		assert.Len(t, result, 0)
 	})
