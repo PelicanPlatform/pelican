@@ -12,6 +12,7 @@ repos:
         # in our docs/parameters.yaml. We need this argument so those parse.
         args: [--allow-multiple-documents]
     -   id: check-added-large-files
+        args: ['--maxkb=1024']
 -   repo: https://github.com/golangci/golangci-lint
     rev: v1.55.2
     hooks:

@@ -1,0 +1,94 @@
+# Serve a Pelican Federation
+
+Federation in Pelican refers to an instance of a data sharing ecosystem where memebers of it can share and access data as objects. To
+allow such exchange of data to work, Pelican has two top-level _central server components_ to coordiante origins and caches in the
+federation, direct client requests to proper storage server, and manage namespace registration. They are *director* and *registry*.
+A Pelican federation requires both *director* and *reigstry* to be set up first before any origin or cache server can join
+the federation or any client to access objects in the federaiton.
+
+## Install Pelican
+
+Grab the appropriate binary for your system from the [pelican repository](https://github.com/PelicanPlatform/pelican/releases). For more details, see [the installation instructions](/install.mdx).
+
+## Serve a Registry
+
+The Pelican registry manages namespace registration and public keys distribution. An origin or cache will automatically attempt to register their namespace at their start. A federation user may also register a namespace without running a storage server by visiting the registry website.
+
+### Get OIDC Credential (Required)
+
+Pelican reigstry follows [OIDC](https://openid.net/developers/how-connect-works/) for user authentication, and [CILogon](https://www.cilogon.org/) is our OpenID Provider by default, which enables single sign-on for users with an account associated with an institution that joins CILogon. (Check out [this page](https://cilogon.org) for institutions in CILogon)
+
+For your Pelican registry to work, you need to obtain a client id and associated client secret from CILogon. [This page](https://www.cilogon.org/oidc#h.p_ID_38) details where can how you can request a client credential. You will need to register your client at https://cilogon.org/oauth2/register and wait for approval before proceed.
+
+
+Once approved, you will get your `client_id` and `client_secret` from CILogon, and you need to pass them as configuration parameter and configuration files to Pelican.
+
+* Set `OIDC.ClientID` config parameter to your `<client_id>` value.
+* Create a file under `/etc/pelican/oidc-client-secret`
+
+  ```
+  touch /etc/pelican/oidc-client-secret
+  ```
+
+* Copy and paste your `client_secret` to the file. Please don't share your `client_secret`.
+
+If you prefer to store your `client_secret` file in a path different from the default file path, change `OIDC.ClientSecretFile` to your desired file location.
+
+
+#### Bypass Required Credential Check
+
+If you want to run your registry as an admin and not allow users to login via CILogon, you will need to create file under `/etc/pelican/oidc-client-id` and `/etc/pelican/oidc-client-secret` and populate the files with non-empty content. Note that by doing this, when your user attempt to use `CILogon` to login to your registry, they will get an error page from `CILogon`.
+
+
+### Finish Setup
+
+That's it! Now you can serve the registry by running the following command:
+
+```bash
+pelican registry serve
+```
+
+and you will see the following message:
+
+```console
+Pelican admin interface is not initialized
+To initialize, login at https://<hostname>:8444/view/initialization/code/ with the following code:
+865309
+```
+
+Now you want to initialize the admin account for your registry web UI. You may refer to https://docs.pelicanplatform.org/serving_an_origin#running-origin-serve for details.
+
+Once your finished initialization, you should be able to see the following page as an admin user (lists are expected to be empty at a fresh start):
+
+<ExportedImage src={"/pelican/registry-admin.png"} alt={"Image registry home page in public view"} />
+
+You may view and manage namespaces registered in your federation. Pending registrations are shown as the first list, you can click each namespace strip for its detail information. You can click the check button to approve a namespace registration or the cross button to deny the registration. As an admin user, you can also edit the registration by clicking the pencil icon.
+
+For approved namespaces, you can download the public key associated with the namespace by clicking the downward-arrow button.
+
+The homepage of the registry web UI is also publicly accessible, meaning users can see a list of _approved_ namespaces without logging into the registry. Denied and pending registrations are hidden from the public view. The image below shows how the public view looks like.
+
+<ExportedImage src={"/pelican/registry-public.png"} alt={"Image registry home page in public view"} />
+
+### Useful Configurations for the Registry
+
+There are a couple of configuration parameters you could use to customize the behavior of your registry. Here we highlight the ones that are most frequently set for an admin. You may refer to the full set of registry parameters in the [Parameters page](https://docs.pelicanplatform.org/parameters#Registry-DbLocation).
+
+#### `Registry.AdminUsers`
+
+By default, Pelican registry only has one user with admin privilege, which is whoever started the registry service and initialize the web UI with the admin password.
+
+However, Pelican also allows you to pass a list of CILogon user identities and grant them the admin privilege. This requires you have your CILogon `client_id` and `client_secret` set up. The user identity of each admin user can be found on their https://cilogon.org/ user page, under "User Attributes", `CILogon User Identifier`, which looks something like `http://cilogon.org/serverA/users/123456`. Once you have the idetifier, simply pass them as an array to `Registry.AdminUsers`:
+
+```yaml
+Registry:
+  AdminUsers: ["http://cilogon.org/serverA/users/123456"]
+```
+
+Then, the admin user may login to the registry using CILogon.
+
+### Register a Namespace via Registry Web UI
+
+### Register a Namespace via Registry CLI
+
+Refer to [Register the origin with the namespace-registry](https://docs.pelicanplatform.org/serving_an_origin#register-the-origin-with-the-namespace-registry) for how to register a namespace using Pelican command line tool.
