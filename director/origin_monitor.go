@@ -28,17 +28,17 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/pelicanplatform/pelican/common"
-	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/metrics"
-	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pelicanplatform/pelican/common"
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/metrics"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/token_scopes"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 type (
