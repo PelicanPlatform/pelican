@@ -212,8 +212,11 @@ func (tokenConfig *TokenConfig) CreateToken() (string, error) {
 		NotBefore(now).
 		Audience(tokenConfig.Audience).
 		Subject(tokenConfig.Subject).
-		Claim("scope", tokenConfig.scope).
 		JwtID(jti)
+
+	if tokenConfig.scope != "" {
+		builder.Claim("scope", tokenConfig.scope)
+	}
 
 	if tokenConfig.TokenProfile == Scitokens2 {
 		builder.Claim("ver", tokenConfig.Version)

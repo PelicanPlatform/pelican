@@ -1,3 +1,21 @@
+/***************************************************************
+ *
+ * Copyright (C) 2023, Pelican Project, Morgridge Institute for Research
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you
+ * may not use this file except in compliance with the License.  You may
+ * obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ ***************************************************************/
+
 package director
 
 import (
@@ -60,6 +78,13 @@ func JSONHandler(w http.ResponseWriter, r *http.Request) {
 					"vault_issuer": null,
 					"vault_server": null
 				},
+				"scitokens": [
+					{
+						"base_path": ["/server"],
+						"issuer": "https://my-issuer.com",
+						"restricted_path": []
+					}
+				],
 				"dirlisthost": null,
 				"origins": [
 					{
@@ -82,6 +107,7 @@ func JSONHandler(w http.ResponseWriter, r *http.Request) {
 					}
 				],
 				"credential_generation": null,
+				"scitokens": [],
 				"dirlisthost": null,
 				"origins": [
 					{
@@ -120,13 +146,13 @@ func TestAdvertiseOSDF(t *testing.T) {
 	// Test a few values. If they're correct, it indicates the whole process likely succeeded
 	nsAd, oAds, cAds := GetAdsForPath("/my/server/path/to/file")
 	assert.Equal(t, nsAd.Path, "/my/server")
-	assert.Equal(t, nsAd.MaxScopeDepth, uint(3))
+	assert.Equal(t, nsAd.Generation[0].MaxScopeDepth, uint(3))
 	assert.Equal(t, oAds[0].AuthURL.String(), "https://origin1-auth-endpoint.com")
 	assert.Equal(t, cAds[0].URL.String(), "http://cache-endpoint.com")
 
 	nsAd, oAds, cAds = GetAdsForPath("/my/server/2/path/to/file")
 	assert.Equal(t, nsAd.Path, "/my/server/2")
-	assert.Equal(t, nsAd.RequireToken, false)
+	assert.Equal(t, nsAd.PublicRead, true)
 	assert.Equal(t, oAds[0].AuthURL.String(), "https://origin2-auth-endpoint.com")
 	assert.Equal(t, cAds[0].URL.String(), "http://cache-endpoint.com")
 }

@@ -80,7 +80,7 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) 
 	xrootd.LaunchXrootdMaintenance(ctx, originServer, 2*time.Minute)
 
 	privileged := param.Origin_Multiuser.GetBool()
-	launchers, err := xrootd.ConfigureLaunchers(privileged, configPath, param.Origin_EnableCmsd.GetBool())
+	launchers, err := xrootd.ConfigureLaunchers(privileged, configPath, param.Origin_EnableCmsd.GetBool(), false)
 	if err != nil {
 		return nil, err
 	}

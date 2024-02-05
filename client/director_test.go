@@ -76,7 +76,7 @@ func TestCreateNsFromDirectorResp(t *testing.T) {
 	directorHeaders := make(map[string][]string)
 	directorHeaders["Link"] = []string{"<my-cache.edu:8443>; rel=\"duplicate\"; pri=1, <another-cache.edu:8443>; rel=\"duplicate\"; pri=2"}
 	directorHeaders["X-Pelican-Namespace"] = []string{"namespace=/foo/bar, readhttps=True, require-token=True"}
-	directorHeaders["X-Pelican-Authorization"] = []string{"issuer=https://get-your-tokens.org, base-path=/foo/bar"}
+	directorHeaders["X-Pelican-Authorization"] = []string{"issuer=https://get-your-tokens.org", "issuer=https://get-your-tokens2.org"}
 	directorBody := []byte(`{"key": "value"}`)
 
 	directorResponse := &http.Response{
@@ -104,7 +104,7 @@ func TestCreateNsFromDirectorResp(t *testing.T) {
 	constructedNamespace := &namespaces.Namespace{
 		SortedDirectorCaches: caches,
 		Path:                 "/foo/bar",
-		Issuer:               "https://get-your-tokens.org",
+		Issuer:               []string{"https://get-your-tokens.org", "https://get-your-tokens2.org"},
 		ReadHTTPS:            true,
 		UseTokenOnRead:       true,
 	}
@@ -120,6 +120,17 @@ func TestCreateNsFromDirectorResp(t *testing.T) {
 	assert.Equal(t, constructedNamespace.Issuer, ns.Issuer)
 	assert.Equal(t, constructedNamespace.ReadHTTPS, ns.ReadHTTPS)
 	assert.Equal(t, constructedNamespace.UseTokenOnRead, ns.UseTokenOnRead)
+
+	// Test the old version of parsing the issuer from the director to ensure backwards compatibility with a V1 client and a V2 director
+	var xPelicanAuthorization map[string]string
+	var issuer string
+	if len(directorResponse.Header.Values("X-Pelican-Authorization")) > 0 {
+		xPelicanAuthorization = HeaderParser(directorResponse.Header.Values("X-Pelican-Authorization")[0])
+		issuer = xPelicanAuthorization["issuer"]
+	}
+
+	assert.Equal(t, "https://get-your-tokens.org", issuer)
+
 }
 
 func TestNewTransferDetailsUsingDirector(t *testing.T) {

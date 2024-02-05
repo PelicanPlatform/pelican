@@ -68,7 +68,7 @@ export default function Home() {
                     {enabledServers.map((service) => {
                         return (
                             <Grid key={service} item xs={2}>
-                                <Link href={`./${service}/index.html`}>
+                                <Link href={`./${service}/`}>
                                     <TextCenteredBox text={service}/>
                                 </Link>
                             </Grid>

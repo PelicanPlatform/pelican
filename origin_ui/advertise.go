@@ -39,8 +39,8 @@ func (server *OriginServer) GetServerType() config.ServerType {
 	return config.OriginType
 }
 
-func (server *OriginServer) CreateAdvertisement(name string, originUrl string, originWebUrl string) (director.OriginAdvertise, error) {
-	ad := director.OriginAdvertise{}
+func (server *OriginServer) CreateAdvertisement(name string, originUrlStr string, originWebUrl string) (director.OriginAdvertiseV2, error) {
+	ad := director.OriginAdvertiseV2{}
 
 	// Here we instantiate the namespaceAd slice, but we still need to define the namespace
 	issuerUrl := url.URL{}
@@ -53,23 +53,46 @@ func (server *OriginServer) CreateAdvertisement(name string, originUrl string, o
 
 	prefix := param.Origin_NamespacePrefix.GetString()
 
+	originUrlURL, err := url.Parse(originUrlStr)
+	if err != nil {
+		return ad, errors.New("Invalid Origin Url")
+	}
 	// TODO: Need to figure out where to get some of these values
 	// 		 so that they aren't hardcoded...
-	nsAd := director.NamespaceAd{
-		RequireToken:  true,
-		Path:          prefix,
-		Issuer:        issuerUrl,
-		MaxScopeDepth: 3,
-		Strategy:      "OAuth2",
-		BasePath:      prefix,
+
+	nsAd := director.NamespaceAdV2{
+		PublicRead: param.Origin_EnablePublicReads.GetBool(),
+		Caps: director.Capabilities{
+			PublicRead: param.Origin_EnablePublicReads.GetBool(),
+			Read:       true,
+			Write:      param.Origin_EnableWrite.GetBool(),
+		},
+		Path: prefix,
+		Generation: []director.TokenGen{{
+			Strategy:         director.StrategyType("OAuth2"),
+			MaxScopeDepth:    3,
+			CredentialIssuer: *originUrlURL,
+		}},
+		Issuer: []director.TokenIssuer{{
+			BasePaths: []string{prefix},
+			IssuerUrl: issuerUrl,
+		}},
 	}
-	ad = director.OriginAdvertise{
-		Name:               name,
-		URL:                originUrl,
-		WebURL:             originWebUrl,
-		Namespaces:         []director.NamespaceAd{nsAd},
-		EnableWrite:        param.Origin_EnableWrite.GetBool(),
-		EnableFallbackRead: param.Origin_EnableFallbackRead.GetBool(),
+	ad = director.OriginAdvertiseV2{
+		Name:       name,
+		DataURL:    originUrlStr,
+		WebURL:     originWebUrl,
+		Namespaces: []director.NamespaceAdV2{nsAd},
+		Caps: director.Capabilities{
+			PublicRead:   param.Origin_EnablePublicReads.GetBool(),
+			Read:         true,
+			Write:        param.Origin_EnableWrite.GetBool(),
+			FallBackRead: param.Origin_EnableFallbackRead.GetBool(),
+		},
+		Issuer: []director.TokenIssuer{{
+			BasePaths: []string{prefix},
+			IssuerUrl: issuerUrl,
+		}},
 	}
 
 	return ad, nil
@@ -81,5 +104,9 @@ func (server *OriginServer) CreateAdvertisement(name string, originUrl string, o
 func (server *OriginServer) GetAuthorizedPrefixes() []string {
 	// For now, just a single path.  In the future, we will allow
 	// multiple.
+	if param.Origin_EnablePublicReads.GetBool() {
+		return []string{}
+	}
+
 	return []string{param.Origin_NamespacePrefix.GetString()}
 }
