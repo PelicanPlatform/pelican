@@ -60,7 +60,7 @@ var (
 	healthTestCancelFuncs      = make(map[common.ServerAd]context.CancelFunc)
 	healthTestCancelFuncsMutex = sync.RWMutex{}
 
-	originStatUtils      = make(map[common.ServerAd]originStatUtil)
+	originStatUtils      = make(map[url.URL]originStatUtil)
 	originStatUtilsMutex = sync.RWMutex{}
 )
 
@@ -558,7 +558,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType common.S
 	if sType == common.OriginType {
 		originStatUtilsMutex.Lock()
 		defer originStatUtilsMutex.Unlock()
-		statUtil, ok := originStatUtils[sAd]
+		statUtil, ok := originStatUtils[sAd.URL]
 		if !ok || statUtil.Errgroup == nil {
 			baseCtx, cancel := context.WithCancel(engineCtx)
 			concLimit := param.Director_StatConcurrencyLimit.GetInt()
@@ -569,7 +569,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType common.S
 				Cancel:   cancel,
 				Context:  baseCtx,
 			}
-			originStatUtils[sAd] = newUtil
+			originStatUtils[sAd.URL] = newUtil
 		}
 	}
 

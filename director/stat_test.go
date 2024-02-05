@@ -47,8 +47,8 @@ func TestQueryOriginsForObject(t *testing.T) {
 	oldAds := serverAds
 
 	stat := NewObjectStat()
-	stat.ReqHandler = func(objectName string, originAd common.ServerAd, timeout time.Duration, maxCancelCtx context.Context) (*objectMetadata, error) {
-		return &objectMetadata{URL: *originAd.URL.JoinPath(objectName)}, nil
+	stat.ReqHandler = func(objectName string, dataUrl url.URL, timeout time.Duration, maxCancelCtx context.Context) (*objectMetadata, error) {
+		return &objectMetadata{URL: *dataUrl.JoinPath(objectName)}, nil
 	}
 
 	// The OnEviction function is added to serverAds, which will clear deleted cache item
@@ -100,7 +100,7 @@ func TestQueryOriginsForObject(t *testing.T) {
 
 		for _, key := range serverAds.Keys() {
 			ctx, cancel := context.WithCancel(context.Background())
-			originStatUtils[key] = originStatUtil{
+			originStatUtils[key.URL] = originStatUtil{
 				Context:  ctx,
 				Cancel:   cancel,
 				Errgroup: &errgroup.Group{},
@@ -282,9 +282,9 @@ func TestQueryOriginsForObject(t *testing.T) {
 			stat.ReqHandler = oldHandler
 		}()
 
-		stat.ReqHandler = func(objectName string, originAd common.ServerAd, timeout time.Duration, maxCancelCtx context.Context) (*objectMetadata, error) {
+		stat.ReqHandler = func(objectName string, dataUrl url.URL, timeout time.Duration, maxCancelCtx context.Context) (*objectMetadata, error) {
 			time.Sleep(time.Second * 30)
-			return &objectMetadata{URL: *originAd.URL.JoinPath(objectName)}, nil
+			return &objectMetadata{URL: *dataUrl.JoinPath(objectName)}, nil
 		}
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -325,11 +325,11 @@ func TestQueryOriginsForObject(t *testing.T) {
 			stat.ReqHandler = oldHandler
 		}()
 
-		stat.ReqHandler = func(objectName string, originAd common.ServerAd, timeout time.Duration, maxCancelCtx context.Context) (*objectMetadata, error) {
-			if originAd.Name == "origin2" {
+		stat.ReqHandler = func(objectName string, dataUrl url.URL, timeout time.Duration, maxCancelCtx context.Context) (*objectMetadata, error) {
+			if dataUrl.Host == "example2.com" {
 				return nil, timeoutError{}
 			}
-			if originAd.Name == "origin3" {
+			if dataUrl.Host == "example3.com" {
 				return nil, notFoundError{}
 			}
 			return nil, errors.New("Default error")
@@ -399,7 +399,7 @@ func TestSendHeadReqToOrigin(t *testing.T) {
 		stat := NewObjectStat()
 
 		defer cancel()
-		meta, err := stat.sendHeadReqToOrigin("/foo/bar/test.txt", mockOriginAd, time.Second, ctx)
+		meta, err := stat.sendHeadReqToOrigin("/foo/bar/test.txt", mockOriginAd.URL, time.Second, ctx)
 		require.NoError(t, err)
 		assert.NotNil(t, meta)
 		assert.Equal(t, 1, meta.ContentLength)
@@ -411,7 +411,7 @@ func TestSendHeadReqToOrigin(t *testing.T) {
 		stat := NewObjectStat()
 
 		defer cancel()
-		meta, err := stat.sendHeadReqToOrigin("/foo/bar/dne", mockOriginAd, time.Second, ctx)
+		meta, err := stat.sendHeadReqToOrigin("/foo/bar/dne", mockOriginAd.URL, time.Second, ctx)
 		require.Error(t, err)
 		_, ok := err.(notFoundError)
 		assert.True(t, ok)
@@ -423,7 +423,7 @@ func TestSendHeadReqToOrigin(t *testing.T) {
 		stat := NewObjectStat()
 
 		defer cancel()
-		meta, err := stat.sendHeadReqToOrigin("/foo/bar/timeout.txt", mockOriginAd, 200*time.Millisecond, ctx)
+		meta, err := stat.sendHeadReqToOrigin("/foo/bar/timeout.txt", mockOriginAd.URL, 200*time.Millisecond, ctx)
 		require.Error(t, err)
 		_, ok := err.(timeoutError)
 		assert.True(t, ok)
@@ -439,7 +439,7 @@ func TestSendHeadReqToOrigin(t *testing.T) {
 			cancel()
 		}()
 
-		meta, err := stat.sendHeadReqToOrigin("/foo/bar/timeout.txt", mockOriginAd, 5*time.Second, ctx)
+		meta, err := stat.sendHeadReqToOrigin("/foo/bar/timeout.txt", mockOriginAd.URL, 5*time.Second, ctx)
 
 		require.Error(t, err)
 		_, ok := err.(cancelledError)
@@ -452,7 +452,7 @@ func TestSendHeadReqToOrigin(t *testing.T) {
 		stat := NewObjectStat()
 
 		defer cancel()
-		meta, err := stat.sendHeadReqToOrigin("/foo/bar/error.txt", mockOriginAd, 200*time.Millisecond, ctx)
+		meta, err := stat.sendHeadReqToOrigin("/foo/bar/error.txt", mockOriginAd.URL, 200*time.Millisecond, ctx)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "Unknown origin response with status code 500")
 		assert.Nil(t, meta)

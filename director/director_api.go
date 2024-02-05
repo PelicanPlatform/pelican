@@ -83,13 +83,13 @@ func ConfigTTLCache(ctx context.Context, egrp *errgroup.Group) {
 		if i.Key().Type == common.OriginType {
 			originStatUtilsMutex.Lock()
 			defer originStatUtilsMutex.Unlock()
-			statUtil, ok := originStatUtils[i.Key()]
+			statUtil, ok := originStatUtils[i.Key().URL]
 			if ok {
 				statUtil.Cancel()
 				if err := statUtil.Errgroup.Wait(); err != nil {
 					log.Info(fmt.Sprintf("Error happened when stopping origin %q stat goroutine group: %v", i.Key().Name, err))
 				}
-				delete(originStatUtils, i.Key())
+				delete(originStatUtils, i.Key().URL)
 			}
 		}
 	})

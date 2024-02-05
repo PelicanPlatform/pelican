@@ -58,7 +58,7 @@ type (
 	// A struct to implement `object stat`, by querying against origins with namespaces match the prefix of an object name
 	// and return origins that have the object
 	ObjectStat struct {
-		ReqHandler func(objectName string, originAd common.ServerAd, timeout time.Duration, maxCancelCtx context.Context) (*objectMetadata, error)
+		ReqHandler func(objectName string, dataUrl url.URL, timeout time.Duration, maxCancelCtx context.Context) (*objectMetadata, error)
 		Query      func(objectName string, cancelContext context.Context, mininum, maximum int) ([]*objectMetadata, string, error)
 	}
 )
@@ -92,12 +92,12 @@ func NewObjectStat() *ObjectStat {
 }
 
 // Implementation of sending a HEAD request to an origin for an object
-func (stat *ObjectStat) sendHeadReqToOrigin(objectName string, originAd common.ServerAd, timeout time.Duration, ctx context.Context) (*objectMetadata, error) {
+func (stat *ObjectStat) sendHeadReqToOrigin(objectName string, dataUrl url.URL, timeout time.Duration, ctx context.Context) (*objectMetadata, error) {
 	tokenConf := utils.TokenConfig{
 		Lifetime:     time.Minute,
 		TokenProfile: utils.WLCG,
-		Audience:     []string{originAd.URL.String()},
-		Subject:      originAd.URL.String(),
+		Audience:     []string{dataUrl.String()},
+		Subject:      dataUrl.String(),
 		// Federation as the issuer
 		Issuer: param.Server_ExternalWebUrl.GetString(),
 	}
@@ -108,7 +108,7 @@ func (stat *ObjectStat) sendHeadReqToOrigin(objectName string, originAd common.S
 	}
 
 	client := http.Client{Transport: config.GetTransport(), Timeout: timeout}
-	reqUrl := originAd.URL.JoinPath(objectName)
+	reqUrl := dataUrl.JoinPath(objectName)
 	req, err := http.NewRequestWithContext(ctx, "HEAD", reqUrl.String(), nil)
 	if err != nil {
 		return nil, errors.Wrap(err, "Error creating request")
@@ -132,7 +132,7 @@ func (stat *ObjectStat) sendHeadReqToOrigin(objectName string, originAd common.S
 		}
 	}
 	if res.StatusCode == 404 {
-		return nil, notFoundError{"File not found on the server " + originAd.URL.String()}
+		return nil, notFoundError{"File not found on the server " + dataUrl.String()}
 	} else if res.StatusCode != 200 {
 		resBody, err := io.ReadAll(res.Body)
 		if err != nil {
@@ -146,7 +146,7 @@ func (stat *ObjectStat) sendHeadReqToOrigin(objectName string, originAd common.S
 		if err != nil {
 			return nil, errors.New(fmt.Sprintf("Error parsing content-length header from response. Header was: %s", cLenStr))
 		}
-		return &objectMetadata{ContentLength: clen, Checksum: checksumStr, URL: *originAd.URL.JoinPath(objectName)}, nil
+		return &objectMetadata{ContentLength: clen, Checksum: checksumStr, URL: *dataUrl.JoinPath(objectName)}, nil
 	}
 }
 
@@ -177,8 +177,11 @@ func (stat *ObjectStat) queryOriginsForObject(objectName string, cancelContext c
 		return nil, "", errors.New("No namespace prefixes match found.")
 	}
 
+	originStatUtilsMutex.RLock()
+	defer originStatUtilsMutex.RUnlock()
+
 	for _, originAd := range originAds {
-		originUtil, ok := originStatUtils[originAd]
+		originUtil, ok := originStatUtils[originAd.URL]
 		if !ok {
 			numTotalReq += 1
 			log.Warningf("Origin %q is missing data for stat call, skip querying...", originAd.Name)
@@ -188,7 +191,7 @@ func (stat *ObjectStat) queryOriginsForObject(objectName string, cancelContext c
 		// to goroutine
 		func(intOriginAd common.ServerAd) {
 			originUtil.Errgroup.Go(func() error {
-				metadata, err := stat.ReqHandler(objectName, intOriginAd, timeout, maxCancelCtx)
+				metadata, err := stat.ReqHandler(objectName, intOriginAd.URL, timeout, maxCancelCtx)
 
 				if err != nil {
 					switch e := err.(type) {
