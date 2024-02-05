@@ -682,6 +682,15 @@ func SetUpMonitoring(ctx context.Context, egrp *errgroup.Group) error {
 		return err
 	}
 
+	// If shoveler is enabled, shoveler will send a forwarding UDP stream to metrics handler above
+	// and shoveler will start a new UDP server to listen to XRootD stream
+	if param.Shoveler_Enable.GetBool() {
+		monitorPort, err = metrics.LaunchShoveler(ctx, egrp, monitorPort)
+		if err != nil {
+			return err
+		}
+	}
+
 	viper.Set("Xrootd.LocalMonitoringPort", monitorPort)
 
 	return nil
