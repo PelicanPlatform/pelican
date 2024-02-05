@@ -63,7 +63,7 @@ Shoveler:
   MessageQueueProtocol: amqp
   PortLower: 9930
   PortHigher: 9999
-  Exchange: shoveled-xrd
+  AMQPExchange: shoveled-xrd
 Xrootd:
   Port: 8443
   Mount: ""

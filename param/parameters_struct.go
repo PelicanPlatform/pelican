@@ -161,21 +161,21 @@ type config struct {
 		WebPort int
 	}
 	Shoveler struct {
-		Cert string
-		CertKey string
+		AMQPExchange string
+		AMQPTokenLocation string
 		Enable bool
-		Exchange string
 		IPMapping interface{}
 		MessageQueueProtocol string
 		OutputDestinations []string
-		Password string
 		PortHigher int
 		PortLower int
 		QueueDirectory string
-		TokenLocation string
+		StompCert string
+		StompCertKey string
+		StompPassword string
+		StompUsername string
 		Topic string
 		URL string
-		Username string
 		VerifyHeader bool
 	}
 	StagePlugin struct {
@@ -366,21 +366,21 @@ type configWithType struct {
 		WebPort struct { Type string; Value int }
 	}
 	Shoveler struct {
-		Cert struct { Type string; Value string }
-		CertKey struct { Type string; Value string }
+		AMQPExchange struct { Type string; Value string }
+		AMQPTokenLocation struct { Type string; Value string }
 		Enable struct { Type string; Value bool }
-		Exchange struct { Type string; Value string }
 		IPMapping struct { Type string; Value interface{} }
 		MessageQueueProtocol struct { Type string; Value string }
 		OutputDestinations struct { Type string; Value []string }
-		Password struct { Type string; Value string }
 		PortHigher struct { Type string; Value int }
 		PortLower struct { Type string; Value int }
 		QueueDirectory struct { Type string; Value string }
-		TokenLocation struct { Type string; Value string }
+		StompCert struct { Type string; Value string }
+		StompCertKey struct { Type string; Value string }
+		StompPassword struct { Type string; Value string }
+		StompUsername struct { Type string; Value string }
 		Topic struct { Type string; Value string }
 		URL struct { Type string; Value string }
-		Username struct { Type string; Value string }
 		VerifyHeader struct { Type string; Value bool }
 	}
 	StagePlugin struct {

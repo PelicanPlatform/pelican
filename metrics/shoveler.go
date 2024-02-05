@@ -63,28 +63,28 @@ func configShoveler(c *shoveler.Config) error {
 		log.Debugln("AMQP URL:", c.AmqpURL.String())
 
 		// Get the AMQP Exchange
-		c.AmqpExchange = param.Shoveler_Exchange.GetString()
+		c.AmqpExchange = param.Shoveler_AMQPExchange.GetString()
 		log.Debugln("AMQP Exchange:", c.AmqpExchange)
 
-		c.AmqpToken = param.Shoveler_TokenLocation.GetString()
+		c.AmqpToken = param.Shoveler_AMQPTokenLocation.GetString()
 		log.Debugln("AMQP Token location:", c.AmqpToken)
 		_, err := os.Stat(c.AmqpToken)
 		if err != nil {
-			return fmt.Errorf("Token in Shoveler.TokenLocation does not exists: %s", err.Error())
+			return fmt.Errorf("Token in Shoveler.AMQPTokenLocation does not exists: %s", err.Error())
 		}
 		tokenContents, err := os.ReadFile(c.AmqpToken)
 		if err != nil {
 			return fmt.Errorf("Unable to read file: %s", c.AmqpToken)
 		}
 		if strings.TrimSpace(string(tokenContents)) == "" {
-			return fmt.Errorf("Token content is empty. Reading from Shoveler.TokenLocation at %s", c.AmqpToken)
+			return fmt.Errorf("Token content is empty. Reading from Shoveler.AMQPTokenLocation at %s", c.AmqpToken)
 		}
 	} else { // Stomp
 		viper.SetDefault("Shoveler.Topic", "xrootd.shoveler")
 
-		c.StompUser = param.Shoveler_Username.GetString()
+		c.StompUser = param.Shoveler_StompUsername.GetString()
 		log.Debugln("STOMP User:", c.StompUser)
-		c.StompPassword = param.Shoveler_Password.GetString()
+		c.StompPassword = param.Shoveler_StompPassword.GetString()
 
 		// Get the STOMP URL
 		c.StompURL, err = url.Parse(param.Shoveler_URL.GetString())
@@ -97,11 +97,11 @@ func configShoveler(c *shoveler.Config) error {
 		log.Debugln("STOMP Topic:", c.StompTopic)
 
 		// Get the STOMP cert
-		c.StompCert = param.Shoveler_Cert.GetString()
+		c.StompCert = param.Shoveler_StompCert.GetString()
 		log.Debugln("STOMP CERT:", c.StompCert)
 
 		// Get the STOMP certkey
-		c.StompCertKey = param.Shoveler_CertKey.GetString()
+		c.StompCertKey = param.Shoveler_StompCertKey.GetString()
 		log.Debugln("STOMP CERTKEY:", c.StompCertKey)
 	}
 

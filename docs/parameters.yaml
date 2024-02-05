@@ -1342,17 +1342,17 @@ description: >-
 
   For amqp, the following configurations are required:
    - URL: amqps://username:password@example.com/vhost
-   - Exchange: shoveled-xrd
    - Topic: mytopic
-   - TokenLocation: /etc/pelican/xrootd-monitoring-shoveler-token
+   - AMQPExchange: shoveled-xrd
+   - AMQPTokenLocation: /etc/pelican/xrootd-monitoring-shoveler-token
 
   For stomp, the following configurations are required:
-   - User: username
-   - Password: password
    - URL: messagebroker.org:port
    - Topic: mytopic
-   - Cert: path/to/cert/file
-   - CertKey: path/to/certkey/file
+   - StompUsername: username
+   - StompPassword: password
+   - StompCert: path/to/cert/file
+   - StompCertKey: path/to/certkey/file
 type: string
 default: amqp
 components: ["origin", "cache"]
@@ -1366,15 +1366,6 @@ type: url
 default: none
 components: ["origin", "cache"]
 ---
-name: Shoveler.Exchange
-description: >-
-  For amqp only.
-
-  The exchange to shovel messages
-type: string
-default: "shoveled-xrd"
-components: ["origin", "cache"]
----
 name: Shoveler.Topic
 description: >-
   For amqp and stomp.
@@ -1384,16 +1375,26 @@ type: string
 default: none
 components: ["origin", "cache"]
 ---
-name: Shoveler.TokenLocation
+name: Shoveler.AMQPExchange
+description: >-
+  For amqp only.
+
+  The exchange to shovel messages
+type: string
+default: "shoveled-xrd"
+components: ["origin", "cache"]
+---
+name: Shoveler.AMQPTokenLocation
 description: >-
   For amqp only.
 
   A filepath to the location of the JWT used for authenticating amqp connection
 type: filename
-default: /etc/pelican/shoveler-token
+default: $ConfigBase/shoveler-token
+root_default: /etc/pelican/shoveler-token
 components: ["origin", "cache"]
 ---
-name: Shoveler.Username
+name: Shoveler.StompUsername
 description: >-
   For stomp only.
 
@@ -1402,7 +1403,7 @@ type: string
 default: none
 components: ["origin", "cache"]
 ---
-name: Shoveler.Password
+name: Shoveler.StompPassword
 description: >-
   For stomp only.
 
@@ -1411,7 +1412,7 @@ type: string
 default: none
 components: ["origin", "cache"]
 ---
-name: Shoveler.Cert
+name: Shoveler.StompCert
 description: >-
   For stomp only.
 
@@ -1420,7 +1421,7 @@ type: filename
 default: none
 components: ["origin", "cache"]
 ---
-name: Shoveler.CertKey
+name: Shoveler.StompCertKey
 description: >-
   For stomp only.
 
