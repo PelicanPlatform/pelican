@@ -382,7 +382,10 @@ func TestFailedUpload(t *testing.T) {
 
 func generateFileTestScitoken() (string, error) {
 	// Issuer is whichever server that initiates the test, so it's the server itself
-	issuerUrl := param.Origin_Url.GetString()
+	issuerUrl, err := config.GetServerIssuerURL()
+	if err != nil {
+		return "", err
+	}
 	if issuerUrl == "" { // if empty, then error
 		return "", errors.New("Failed to create token: Invalid iss, Server_ExternalWebUrl is empty")
 	}
@@ -468,6 +471,7 @@ func TestFullUpload(t *testing.T) {
 	viper.Set("Xrootd.RunLocation", tmpPath)
 	viper.Set("Registry.RequireOriginApproval", false)
 	viper.Set("Registry.RequireCacheApproval", false)
+	viper.Set("Logging.Origin.Scitokens", "debug")
 
 	err = config.InitServer(ctx, modules)
 	require.NoError(t, err)

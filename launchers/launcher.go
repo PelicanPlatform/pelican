@@ -20,6 +20,8 @@ package launchers
 
 import (
 	"context"
+	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -97,6 +99,22 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		}
 	}
 
+	// Start listening on the socket.  If `Server.WebPort` is 0, then a random port will be
+	// selected and we'll update the configuration accordingly.  This needs to be done before
+	// the XRootD configuration is written as the Server.WebPort is incorporated into the issuer URL.
+	addr := fmt.Sprintf("%v:%v", param.Server_WebHost.GetString(), param.Server_WebPort.GetInt())
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return shutdownCancel, err
+	}
+	lnReference := ln
+	defer func() {
+		if lnReference != nil {
+			lnReference.Close()
+		}
+	}()
+	config.UpdateConfigFromListener(ln)
+
 	servers := make([]server_utils.XRootDServer, 0)
 	if modules.IsEnabled(config.OriginType) {
 		mode := param.Origin_Mode.GetString()
@@ -132,15 +150,16 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 			return shutdownCancel, errors.Errorf("Currently-supported origin modes include posix and s3.")
 		}
 
-		server, err := OriginServe(ctx, engine, egrp)
+		server, err := OriginServe(ctx, engine, egrp, modules)
 		if err != nil {
 			return shutdownCancel, err
 		}
 		servers = append(servers, server)
 	}
 	log.Info("Starting web engine...")
+	lnReference = nil
 	egrp.Go(func() error {
-		if err := web_ui.RunEngine(ctx, engine, egrp); err != nil {
+		if err := web_ui.RunEngineRoutineWithListener(ctx, engine, egrp, true, ln); err != nil {
 			log.Errorln("Failure when running the web engine:", err)
 			return err
 		}

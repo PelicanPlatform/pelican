@@ -338,21 +338,38 @@ func GetEngine() (*gin.Engine, error) {
 	return engine, nil
 }
 
-// Run the gin engine.
+// Run the gin engine in the current goroutine.
 //
 // Will use a background golang routine to periodically reload the certificate
 // utilized by the UI.
 func RunEngine(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) error {
-	addr := fmt.Sprintf("%v:%v", param.Server_WebHost.GetString(), param.Server_WebPort.GetInt())
+	return RunEngineRoutine(ctx, engine, egrp, true)
+}
 
+// Run the gin engine; if curRoutine is false, it will run in a background goroutine.
+func RunEngineRoutine(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, curRoutine bool) error {
+	addr := fmt.Sprintf("%v:%v", param.Server_WebHost.GetString(), param.Server_WebPort.GetInt())
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
 	}
+	config.UpdateConfigFromListener(ln)
+	return RunEngineRoutineWithListener(ctx, engine, egrp, curRoutine, ln)
+}
 
-	defer ln.Close()
+// Run the web engine connected to a provided listener `ln`.
+func RunEngineRoutineWithListener(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, curRoutine bool, ln net.Listener) error {
 
-	return runEngineWithListener(ctx, ln, engine, egrp)
+	if curRoutine {
+		defer ln.Close()
+		return runEngineWithListener(ctx, ln, engine, egrp)
+	} else {
+		egrp.Go(func() error {
+			defer ln.Close()
+			return runEngineWithListener(ctx, ln, engine, egrp)
+		})
+		return nil
+	}
 }
 
 // Run the engine with a given listener.

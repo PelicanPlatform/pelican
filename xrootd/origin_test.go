@@ -25,6 +25,7 @@ import (
 	"context"
 	"crypto/elliptic"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -32,7 +33,6 @@ import (
 	"testing"
 
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/daemon"
 	"github.com/pelicanplatform/pelican/origin_ui"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -85,6 +85,25 @@ func originMockup(ctx context.Context, egrp *errgroup.Group, t *testing.T) conte
 	require.NoError(t, err)
 
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
+	defer func() {
+		if err != nil {
+			shutdownCancel()
+		}
+	}()
+
+	addr := fmt.Sprintf("%v:%v", param.Server_WebHost.GetString(), param.Server_WebPort.GetInt())
+	ln, err := net.Listen("tcp", addr)
+	require.NoError(t, err)
+	lnReference := ln
+	defer func() {
+		if lnReference != nil {
+			lnReference.Close()
+		}
+	}()
+	config.UpdateConfigFromListener(ln)
+
+	err = CheckXrootdEnv(originServer)
+	require.NoError(t, err)
 
 	err = SetUpMonitoring(shutdownCtx, egrp)
 	require.NoError(t, err)
@@ -95,8 +114,20 @@ func originMockup(ctx context.Context, egrp *errgroup.Group, t *testing.T) conte
 	launchers, err := ConfigureLaunchers(false, configPath, false, false)
 	require.NoError(t, err)
 
-	err = daemon.LaunchDaemons(shutdownCtx, launchers, egrp)
+	err = LaunchOriginDaemons(shutdownCtx, launchers, egrp)
 	require.NoError(t, err)
+
+	log.Info("Starting web engine...")
+	lnReference = nil
+	egrp.Go(func() error {
+		if err := web_ui.RunEngineRoutineWithListener(ctx, engine, egrp, true, ln); err != nil {
+			log.Errorln("Failure when running the web engine:", err)
+			return err
+		}
+		log.Info("Web engine has shutdown")
+		shutdownCancel()
+		return nil
+	})
 
 	return shutdownCancel
 }
@@ -226,6 +257,7 @@ func TestS3OriginConfig(t *testing.T) {
 	viper.Set("Origin.EnableMacaroons", false)
 	viper.Set("Origin.EnableVoms", false)
 	viper.Set("Origin.SelfTest", false)
+	viper.Set("Origin.Port", 0)
 	viper.Set("TLSSkipVerify", true)
 
 	mockupCancel := originMockup(ctx, egrp, t)

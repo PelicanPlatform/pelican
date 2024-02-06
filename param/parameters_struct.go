@@ -300,6 +300,7 @@ type configWithType struct {
 		Mode struct { Type string; Value string }
 		Multiuser struct { Type string; Value bool }
 		NamespacePrefix struct { Type string; Value string }
+		Port struct { Type string; Value int }
 		S3AccessKeyfile struct { Type string; Value string }
 		S3Bucket struct { Type string; Value string }
 		S3Region struct { Type string; Value string }
