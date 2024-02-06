@@ -34,6 +34,16 @@ jobs:
           # Add some verbosity
           echo "NPM version is now $(npm version)"
 
+      - name: Set Branch
+        id: set_branch
+        run: |
+          echo "branch=${GITHUB_REF_NAME%.*}.x" >> $GITHUB_OUTPUT
+
+      - uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "Pre Release: Update npm version"
+          branch: ${{ steps.set_branch.outputs.branch }}
+
       - name: Reset the tag to the newest commit
         run: |
 
@@ -44,16 +54,6 @@ jobs:
           # Create and push the new tag
           git tag ${GITHUB_REF_NAME}
           git push origin --tags
-
-      - name: Set Branch
-        id: set_branch
-        run: |
-          echo "branch=${GITHUB_REF_NAME%.*}.x" >> $GITHUB_OUTPUT
-
-      - uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "Pre Release: Update npm version"
-          branch: ${{ steps.set_branch.outputs.branch }}
 
   release-container:
     needs: [pre-release]
