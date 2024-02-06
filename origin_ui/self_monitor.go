@@ -52,6 +52,7 @@ func PeriodicSelfTest(ctx context.Context) error {
 		log.Error("Invalid config value: Origin.SelfTestInterval is 0. Fallback to 15s.")
 	}
 	ticker := time.NewTicker(customInterval)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-firstRound:
