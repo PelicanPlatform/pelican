@@ -27,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	ratelimit "github.com/JGLTechnologies/gin-rate-limit"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/csrf"
 	"github.com/lestrrat-go/jwx/v2/jwt"
@@ -353,8 +354,19 @@ func configureAuthEndpoints(ctx context.Context, router *gin.Engine, egrp *errgr
 		return err
 	}
 
+	store := ratelimit.InMemoryStore(&ratelimit.InMemoryOptions{
+		Rate:  time.Second,
+		Limit: 1,
+	})
+	mw := ratelimit.RateLimiter(store, &ratelimit.Options{
+		ErrorHandler: func(ctx *gin.Context, info ratelimit.Info) {
+			ctx.JSON(http.StatusTooManyRequests, gin.H{"error": "Too many requests. Try again in " + time.Until(info.ResetTime).String()})
+		},
+		KeyFunc: func(ctx *gin.Context) string { return ctx.ClientIP() },
+	})
+
 	group := router.Group("/api/v1.0/auth")
-	group.POST("/login", loginHandler)
+	group.POST("/login", mw, loginHandler)
 	group.POST("/logout", AuthHandler, logoutHandler)
 	group.POST("/initLogin", initLoginHandler)
 	group.POST("/resetLogin", AuthHandler, resetLoginHandler)
