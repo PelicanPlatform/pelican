@@ -35,6 +35,10 @@ Server:
   RegistrationRetryInterval: 10s
 Director:
   DefaultResponse: cache
+  MinStatResponse: 1
+  MaxStatResponse: 1
+  StatTimeout: 200ms
+  StatConcurrencyLimit: 1000
   AdvertisementTTL: 15m
   OriginCacheHealthTestInterval: 15s
 Cache:
@@ -60,6 +64,11 @@ Monitoring:
   TokenRefreshInterval: 59m
   MetricAuthorization: true
   AggregatePrefixes: ["/*"]
+Shoveler:
+  MessageQueueProtocol: amqp
+  PortLower: 9930
+  PortHigher: 9999
+  AMQPExchange: shoveled-xrd
 Xrootd:
   Mount: ""
   ManagerPort: 1213

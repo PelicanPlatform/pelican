@@ -29,7 +29,11 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/token_scopes"
+	"github.com/pelicanplatform/pelican/utils"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
@@ -38,17 +42,34 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-type PromDiscoveryItem struct {
-	Targets []string          `json:"targets"`
-	Labels  map[string]string `json:"labels"`
+type (
+	PromDiscoveryItem struct {
+		Targets []string          `json:"targets"`
+		Labels  map[string]string `json:"labels"`
+	}
+
+	healthTestUtil struct {
+		ErrGrp        *errgroup.Group
+		ErrGrpContext context.Context
+		Cancel        context.CancelFunc
+	}
+)
+
+type originStatUtil struct {
+	Context  context.Context
+	Cancel   context.CancelFunc
+	Errgroup *errgroup.Group
 }
 
 var (
-	minClientVersion, _        = version.NewVersion("7.0.0")
-	minOriginVersion, _        = version.NewVersion("7.0.0")
-	minCacheVersion, _         = version.NewVersion("7.3.0")
-	healthTestCancelFuncs      = make(map[ServerAd]context.CancelFunc)
-	healthTestCancelFuncsMutex = sync.RWMutex{}
+	minClientVersion, _  = version.NewVersion("7.0.0")
+	minOriginVersion, _  = version.NewVersion("7.0.0")
+	minCacheVersion, _   = version.NewVersion("7.3.0")
+	healthTestUtils      = make(map[common.ServerAd]*healthTestUtil)
+	healthTestUtilsMutex = sync.RWMutex{}
+
+	originStatUtils      = make(map[url.URL]originStatUtil)
+	originStatUtilsMutex = sync.RWMutex{}
 )
 
 // The endpoint for director Prometheus instance to discover Pelican servers
@@ -57,7 +78,7 @@ var (
 // TODO: Add registry server as well to this endpoint when we need to scrape from it
 const DirectorServerDiscoveryEndpoint = "/api/v1.0/director/discoverServers"
 
-func getRedirectURL(reqPath string, ad ServerAd, requiresAuth bool) (redirectURL url.URL) {
+func getRedirectURL(reqPath string, ad common.ServerAd, requiresAuth bool) (redirectURL url.URL) {
 	var serverURL url.URL
 	if requiresAuth {
 		serverURL = ad.AuthURL
@@ -425,7 +446,7 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 	}
 }
 
-func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType ServerType) {
+func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType common.ServerType) {
 	tokens, present := ctx.Request.Header["Authorization"]
 	if !present || len(tokens) == 0 {
 		ctx.JSON(http.StatusForbidden, gin.H{"error": "Bearer token not present in the 'Authorization' header"})
@@ -439,12 +460,12 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType ServerTy
 		return
 	}
 
-	ad := OriginAdvertiseV1{}
-	adV2 := OriginAdvertiseV2{}
+	ad := common.OriginAdvertiseV1{}
+	adV2 := common.OriginAdvertiseV2{}
 	err = ctx.ShouldBindBodyWith(&ad, binding.JSON)
 	if err != nil {
 		// Failed binding to a V1 type, so should now check to see if it's a V2 type
-		adV2 = OriginAdvertiseV2{}
+		adV2 = common.OriginAdvertiseV2{}
 		err = ctx.ShouldBindBodyWith(&adV2, binding.JSON)
 		if err != nil {
 			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid " + sType + " registration"})
@@ -455,7 +476,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType ServerTy
 		adV2 = convertOriginAd(ad)
 	}
 
-	if sType == OriginType {
+	if sType == common.OriginType {
 		for _, namespace := range adV2.Namespaces {
 			// We're assuming there's only one token in the slice
 			token := strings.TrimPrefix(tokens[0], "Bearer ")
@@ -514,7 +535,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType ServerTy
 		return
 	}
 
-	sAd := ServerAd{
+	sAd := common.ServerAd{
 		Name:               adV2.Name,
 		AuthURL:            *ad_url,
 		URL:                *ad_url,
@@ -524,22 +545,87 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType ServerTy
 		EnableFallbackRead: adV2.Caps.FallBackRead,
 	}
 
-	hasOriginAdInCache := serverAds.Has(sAd)
 	RecordAd(sAd, &adV2.Namespaces)
 
 	// Start director periodic test of origin's health status if origin AD
 	// has WebURL field AND it's not already been registered
-	healthTestCancelFuncsMutex.Lock()
-	defer healthTestCancelFuncsMutex.Unlock()
-	if adV2.WebURL != "" && !hasOriginAdInCache {
-		if _, ok := healthTestCancelFuncs[sAd]; ok {
-			// If somehow we didn't clear the key, we call cancel first before
-			// adding a new test cycle
-			healthTestCancelFuncs[sAd]()
+	healthTestUtilsMutex.Lock()
+	defer healthTestUtilsMutex.Unlock()
+	if sAd.Type == common.OriginType && adV2.WebURL != "" {
+		if existingUtil, ok := healthTestUtils[sAd]; ok {
+			// Existing registration
+			if existingUtil != nil {
+				if existingUtil.ErrGrp != nil {
+					if existingUtil.ErrGrpContext.Err() != nil {
+						// ErrGroup has been Done. Start a new one
+						errgrp, errgrpCtx := errgroup.WithContext(engineCtx)
+						cancelCtx, cancel := context.WithCancel(errgrpCtx)
+
+						errgrp.SetLimit(1)
+						healthTestUtils[sAd] = &healthTestUtil{
+							Cancel:        cancel,
+							ErrGrp:        errgrp,
+							ErrGrpContext: errgrpCtx,
+						}
+						errgrp.Go(func() error {
+							LaunchPeriodicDirectorTest(cancelCtx, sAd)
+							return nil
+						})
+						log.Debugf("New director test suite issued for %s %s. Errgroup was evicted", string(sType), sAd.URL.String())
+					} else {
+						cancelCtx, cancel := context.WithCancel(existingUtil.ErrGrpContext)
+						started := existingUtil.ErrGrp.TryGo(func() error {
+							LaunchPeriodicDirectorTest(cancelCtx, sAd)
+							return nil
+						})
+						if !started {
+							cancel()
+							log.Debugf("New director test suite blocked for %s %s, existing test has been running", string(sType), sAd.URL.String())
+						} else {
+							log.Debugf("New director test suite issued for %s %s. Existing registration", string(sType), sAd.URL.String())
+							existingUtil.Cancel()
+							existingUtil.Cancel = cancel
+						}
+					}
+				} else {
+					log.Errorf("%s %s registration didn't start a new director test cycle: errgroup is nil", string(sType), &sAd.URL)
+				}
+			} else {
+				log.Errorf("%s %s registration didn't start a new director test cycle: healthTestUtils item is nil", string(sType), &sAd.URL)
+			}
+		} else { // No healthTestUtils found, new registration
+			errgrp, errgrpCtx := errgroup.WithContext(engineCtx)
+			cancelCtx, cancel := context.WithCancel(errgrpCtx)
+
+			errgrp.SetLimit(1)
+			healthTestUtils[sAd] = &healthTestUtil{
+				Cancel:        cancel,
+				ErrGrp:        errgrp,
+				ErrGrpContext: errgrpCtx,
+			}
+			errgrp.Go(func() error {
+				LaunchPeriodicDirectorTest(cancelCtx, sAd)
+				return nil
+			})
 		}
-		ctx, cancel := context.WithCancel(context.Background())
-		healthTestCancelFuncs[sAd] = cancel
-		LaunchPeriodicDirectorTest(ctx, sAd)
+	}
+
+	if sType == common.OriginType {
+		originStatUtilsMutex.Lock()
+		defer originStatUtilsMutex.Unlock()
+		statUtil, ok := originStatUtils[sAd.URL]
+		if !ok || statUtil.Errgroup == nil {
+			baseCtx, cancel := context.WithCancel(engineCtx)
+			concLimit := param.Director_StatConcurrencyLimit.GetInt()
+			statErrGrp := errgroup.Group{}
+			statErrGrp.SetLimit(concLimit)
+			newUtil := originStatUtil{
+				Errgroup: &statErrGrp,
+				Cancel:   cancel,
+				Context:  baseCtx,
+			}
+			originStatUtils[sAd.URL] = newUtil
+		}
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{"msg": "Successful registration"})
@@ -548,19 +634,13 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType ServerTy
 // Return a list of registered origins and caches in Prometheus HTTP SD format
 // for director's Prometheus service discovery
 func DiscoverOriginCache(ctx *gin.Context) {
-	// Check token for authorization
-	tokens, present := ctx.Request.Header["Authorization"]
-	if !present || len(tokens) == 0 {
-		ctx.JSON(401, gin.H{"error": "Bearer token not present in the 'Authorization' header"})
-		return
+	authOption := utils.AuthOption{
+		Sources: []utils.TokenSource{utils.Header},
+		Issuers: []utils.TokenIssuer{utils.Issuer},
+		Scopes:  []string{token_scopes.Pelican_DirectorServiceDiscovery.String()},
 	}
-	token := strings.TrimPrefix(tokens[0], "Bearer ")
-	ok, err := VerifyDirectorSDToken(token)
-	if err != nil {
-		log.Warningln("Failed to verify director service discovery token:", err)
-		ctx.JSON(401, gin.H{"error": fmt.Sprintf("Authorization token verification failed: %v\n", err)})
-		return
-	}
+
+	ok := utils.CheckAnyAuth(ctx, authOption)
 	if !ok {
 		log.Warningf("Invalid token for accessing director's sevice discovery")
 		ctx.JSON(401, gin.H{"error": "Invalid token for accessing director's sevice discovery"})
@@ -594,11 +674,11 @@ func DiscoverOriginCache(ctx *gin.Context) {
 }
 
 func RegisterOrigin(ctx context.Context, gctx *gin.Context) {
-	registerServeAd(ctx, gctx, OriginType)
+	registerServeAd(ctx, gctx, common.OriginType)
 }
 
 func RegisterCache(ctx context.Context, gctx *gin.Context) {
-	registerServeAd(ctx, gctx, CacheType)
+	registerServeAd(ctx, gctx, common.CacheType)
 }
 
 func ListNamespacesV1(ctx *gin.Context) {

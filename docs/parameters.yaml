@@ -649,6 +649,37 @@ root_default: /var/cache/pelican/maxmind/GeoLite2-City.mmdb
 default: $ConfigBase/maxmind/GeoLite2-city.mmdb
 components: ["director"]
 ---
+name: Director.MinStatResponse
+description: >-
+  A positive integer indicating minimum number of origin's responses required for a `stat` call
+type: int
+default: 1
+components: ["director"]
+---
+name: Director.MaxStatResponse
+description: >-
+  A positive integer indicating maximum number of origin's responses required for a `stat` call.
+  `stat` call will cancel the rest of the ongoing query if max reponse is hit.
+type: int
+default: 1
+components: ["director"]
+---
+name: Director.StatTimeout
+description: >-
+  The timeout for a single `stat` request.
+type: duration
+default: 200ms
+components: ["director"]
+---
+name: Director.StatConcurrencyLimit
+description: >-
+  The maximum number of concurrent `stat` request to a single origin server.
+  Additional requests are blocked until total requests for the origin is below limit.
+  See [golang.org/x/sync/errgroup](https://pkg.go.dev/golang.org/x/sync@v0.6.0/errgroup#Group.SetLimit)
+  for detail
+type: int
+default: 1000
+---
 name: Director.AdvertisementTTL
 description: >-
   The time to live (TTL) of director's internal cache to store origins and caches advertisement.
@@ -1323,6 +1354,178 @@ description: >-
 type: bool
 default: true
 components: ["origin", "director", "registry"]
+---
+############################
+#   Shoveler-level configs   #
+############################
+name: Shoveler.Enable
+description: >-
+  Enable XRootD monitoring shoveler: https://github.com/opensciencegrid/xrootd-monitoring-shoveler
+type: bool
+default: false
+components: ["origin", "cache"]
+---
+name: Shoveler.MessageQueueProtocol
+description: >-
+  Select which protocol to use in order to connect to the MQ. Options are amqp, stomp
+
+  For amqp, the following configurations are required:
+   - URL: amqps://username:password@example.com/vhost
+   - Topic: mytopic
+   - AMQPExchange: shoveled-xrd
+   - AMQPTokenLocation: /etc/pelican/xrootd-monitoring-shoveler-token
+
+  For stomp, the following configurations are required:
+   - URL: messagebroker.org:port
+   - Topic: mytopic
+   - StompUsername: username
+   - StompPassword: password
+   - StompCert: path/to/cert/file
+   - StompCertKey: path/to/certkey/file
+type: string
+default: amqp
+components: ["origin", "cache"]
+---
+name: Shoveler.URL
+description: >-
+  For amqp and stomp.
+
+  The URL to connect to the shoveler
+type: url
+default: none
+components: ["origin", "cache"]
+---
+name: Shoveler.Topic
+description: >-
+  For amqp and stomp.
+
+  The topic of the messages. For stomp, it defaults to xrootd.shoveler
+type: string
+default: none
+components: ["origin", "cache"]
+---
+name: Shoveler.AMQPExchange
+description: >-
+  For amqp only.
+
+  The exchange to shovel messages
+type: string
+default: "shoveled-xrd"
+components: ["origin", "cache"]
+---
+name: Shoveler.AMQPTokenLocation
+description: >-
+  For amqp only.
+
+  A filepath to the location of the JWT used for authenticating amqp connection
+type: filename
+default: $ConfigBase/shoveler-token
+root_default: /etc/pelican/shoveler-token
+components: ["origin", "cache"]
+---
+name: Shoveler.StompUsername
+description: >-
+  For stomp only.
+
+  Username for authentication
+type: string
+default: none
+components: ["origin", "cache"]
+---
+name: Shoveler.StompPassword
+description: >-
+  For stomp only.
+
+  Password for authentication
+type: string
+default: none
+components: ["origin", "cache"]
+---
+name: Shoveler.StompCert
+description: >-
+  For stomp only.
+
+  A filepath to the location of the TLS certifcate
+type: filename
+default: none
+components: ["origin", "cache"]
+---
+name: Shoveler.StompCertKey
+description: >-
+  For stomp only.
+
+  A filepath to the location of the private key associated with the certifacte
+type: filename
+default: none
+components: ["origin", "cache"]
+---
+name: Shoveler.PortLower
+description: >-
+  The lower end of a range of Shoveler ports for Shoveler to set up UDP server
+type: int
+default: 9930
+components: ["origin"]
+---
+name: Shoveler.PortHigher
+description: >-
+  The lower end of a range of Shoveler ports for Shoveler to set up UDP server
+type: int
+default: 9999
+components: ["origin"]
+---
+name: Shoveler.OutputDestinations
+description: >-
+  A list of <IP:Port> destinations to forward XRootD monitoring packet to
+type: stringSlice
+default: none
+components: ["origin", "cache"]
+---
+name: Shoveler.VerifyHeader
+description: >-
+  Whether to verify the header of the packet matches XRootD's monitoring packet format
+type: bool
+default: false
+components: ["origin", "cache"]
+---
+name: Shoveler.QueueDirectory
+description: >-
+  Directory to store overflow of queue onto disk.
+  The queue keeps 100 messages in memory.  If the shoveler is disconnected from the message bus,
+  it will store messages over the 100 in memory onto disk into this directory.  Once the connection has been re-established
+  the queue will be emptied.  The queue on disk is persistent between restarts, so a persistent directory should be used.
+type: filename
+root_default: /var/spool/pelican/shoveler/queue
+default: $ConfigBase/shoveler/queue
+components: ["origin", "cache"]
+---
+name: Shoveler.IPMapping
+description: >-
+  IP Mapping for remote IP addresses in forwarding to the destinations. You may either
+  pass one IP address to map all messages to the configured origin, or a list of key-value pairs for one-to-one mapping.
+
+  One-to-all mapping:
+
+  ```
+  IPMapping:
+    - All: "172.0.0.4"
+  ```
+
+  If a packet comes in with the private ip address of 192.168.0.4, the packet origin will be changed to 172.0.0.4
+  The port is always preserved.
+
+  One-to-one mapping:
+
+  ```
+  IPMapping:
+    - Source: "192.168.0.5"
+      Dest: "172.0.0.5"
+    - Source: "192.168.0.6"
+      Dest: "129.93.10.7"
+  ```
+
+type: object
+default: none
+components: ["origin", "cache"]
 ---
 ############################
 #   Plugin-level configs   #

@@ -43,8 +43,8 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/cache_ui"
+	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/origin_ui"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -458,7 +458,7 @@ func GenerateOriginIssuer(exportedPaths []string) (issuer Issuer, err error) {
 	return
 }
 
-// We have a special issuer just for self-monitoring the origin.
+// We have a special issuer just for director-based monitoring of the origin.
 func GenerateDirectorMonitoringIssuer() (issuer Issuer, err error) {
 	if val := param.Federation_DirectorUrl.GetString(); val == "" {
 		return
@@ -549,7 +549,7 @@ func WriteOriginScitokensConfig(exportedPaths []string) error {
 }
 
 // Writes out the cache's scitokens.cfg configuration
-func WriteCacheScitokensConfig(nsAds []director.NamespaceAdV2) error {
+func WriteCacheScitokensConfig(nsAds []common.NamespaceAdV2) error {
 	cfg, err := makeSciTokensCfg()
 	if err != nil {
 		return err

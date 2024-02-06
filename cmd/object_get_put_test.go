@@ -249,3 +249,89 @@ func TestGetPublicRead(t *testing.T) {
 		assert.Contains(t, string(out), "Downloaded bytes: 17")
 	})
 }
+
+func TestRecursiveUploadsAndDownloads(t *testing.T) {
+	// Create instance of test federation
+	viper.Reset()
+	fed := FedTest{T: t}
+	fed.Spinup()
+	defer fed.Teardown()
+	t.Run("testRecursiveGetAndPut", func(t *testing.T) {
+		//////////////////////////SETUP///////////////////////////
+		// Create a token file
+		tokenConfig := utils.TokenConfig{
+			TokenProfile: utils.WLCG,
+			Lifetime:     time.Minute,
+			Issuer:       param.Origin_Url.GetString(),
+			Audience:     []string{param.Origin_Url.GetString()},
+			Subject:      "origin",
+		}
+		tokenConfig.AddRawScope("storage.read:/ storage.modify:/")
+		token, err := tokenConfig.CreateToken()
+		assert.NoError(t, err)
+		tempToken, err := os.CreateTemp(t.TempDir(), "token")
+		assert.NoError(t, err, "Error creating temp token file")
+		defer os.Remove(tempToken.Name())
+		_, err = tempToken.WriteString(token)
+		assert.NoError(t, err, "Error writing to temp token file")
+		tempToken.Close()
+
+		// Disable progress bars to not reuse the same mpb instance
+		viper.Set("Logging.DisableProgressBars", true)
+
+		// Make our test directories and files
+		tempDir, err := os.MkdirTemp("", "UploadDir")
+		assert.NoError(t, err)
+		defer os.RemoveAll(tempDir)
+		permissions := os.FileMode(0777)
+		err = os.Chmod(tempDir, permissions)
+		require.NoError(t, err)
+
+		testFileContent1 := "test file content"
+		testFileContent2 := "more test file content!"
+		tempFile1, err := os.CreateTemp(tempDir, "test1")
+		assert.NoError(t, err, "Error creating temp1 file")
+		tempFile2, err := os.CreateTemp(tempDir, "test1")
+		assert.NoError(t, err, "Error creating temp2 file")
+		defer os.Remove(tempFile1.Name())
+		defer os.Remove(tempFile2.Name())
+		_, err = tempFile1.WriteString(testFileContent1)
+		assert.NoError(t, err, "Error writing to temp1 file")
+		tempFile1.Close()
+		_, err = tempFile2.WriteString(testFileContent2)
+		assert.NoError(t, err, "Error writing to temp2 file")
+		tempFile2.Close()
+
+		// Set path for object to upload/download
+		tempPath := tempDir
+		dirName := filepath.Base(tempPath)
+		uploadURL := "osdf:///test/" + dirName
+
+		//////////////////////////////////////////////////////////
+
+		// Upload the file with PUT
+		rootCmd.SetArgs([]string{"object", "put", tempDir, uploadURL, "-d", "-r", "-t", tempToken.Name()})
+
+		err = rootCmd.Execute()
+		assert.NoError(t, err, "Failed to run pelican object put")
+		out, err := io.ReadAll(fed.Output)
+		assert.NoError(t, err)
+
+		// Confirm we're uploading size we are expecting
+		assert.Contains(t, string(out), "Uploaded bytes: 23")
+		assert.Contains(t, string(out), "Uploaded bytes: 17")
+
+		// Download that same file with GET
+		rootCmd.SetArgs([]string{"object", "get", uploadURL, t.TempDir(), "-d", "-r", "-c", param.Origin_Url.GetString(), "-t", tempToken.Name()})
+
+		err = rootCmd.Execute()
+		assert.NoError(t, err, "Failed to run pelican object get")
+
+		out, err = io.ReadAll(fed.Output)
+		assert.NoError(t, err)
+		// Confirm we download same amount of bytes as upload
+		assert.Contains(t, string(out), "Downloaded bytes: 23")
+		assert.Contains(t, string(out), "Downloaded bytes: 17")
+	})
+
+}
