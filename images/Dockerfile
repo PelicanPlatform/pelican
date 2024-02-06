@@ -29,7 +29,7 @@ COPY web_ui/frontend ./
 
 RUN npm run build
 
-FROM goreleaser/goreleaser:v1.20.0 AS pelican-build
+FROM goreleaser/goreleaser:v1.21.0 AS pelican-build
 
 WORKDIR /pelican
 
