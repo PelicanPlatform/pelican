@@ -10,9 +10,37 @@ the federation or any client to access objects in the federaiton.
 
 Grab the appropriate binary for your system from the [pelican repository](https://github.com/PelicanPlatform/pelican/releases). For more details, see [the installation instructions](/install.mdx).
 
+## Prepare TLS Credentials
+
+Pelican servers use `https` for serving its web UI and handling internal http requests. `https` requires a set of credential files in place to work, including:
+
+- A valid TLS certificate
+- The private key associated with the certificate
+- The Intermediate Certificate or the chain file, that establishes the trust chain to a root certificate
+
+> For local development and testing, you may skip setting up TLS credentials by setting configuration parameter `TLSSkipVerify` to `true`. You should **NOT** set this for production.
+
+You need to contact a Certifcate Authority (CA) who owns the root certificate for getting these credentials. One popular CA that provides free TLS certifactes is [Let's Encrypt](https://letsencrypt.org/). You may follow [their guide](https://letsencrypt.org/getting-started/) to obtain the credentials listed above. **Note that you need to have a valid domain before proceeding.**
+
+Once you go through the process, locate your credential files and set the following parametes to the file locations, or copy the credential files to the default location of the parameter:
+
+- `Server.TLSCertificate`
+  - The certicate file from Let's Encrypt, usually named as `example.com.crt` or `example.com.pem`
+  - Default location: `~/.config/pelican/certificates/tls.crt` for non-root users or `/etc/pelican/certificates/tls.crt` for root users.
+
+- `Server.TLSKey`
+  - The private key corresponding to the TLS certificate, usually named as `example.com.key`.
+  - Default location: `~/.config/pelican/certificates/tls.key` for non-root users or `/etc/pelican/certificates/tls.key` for root users.
+
+- `Server.TLSCACertificateFile`
+  - The intermediate certificate from Let's Encrypt to establishe the trust chain to a root certificate, usually named as `letsencrypt-intermediate.pem` or `chain.pem`
+  - Default location: `~/.config/pelican/certificates/tlsca.pem` for non-root users or `/etc/pelican/certificates/tlsca.pem` for root users.
+
+Since your TLS certificate is associated with your domain name, you will need to change the default hostname of Pelican server to be consistent. Set `Server.Hostname` to your domain name i.e. `example.com`.
+
 ## Serve a Registry
 
-The Pelican registry manages namespace registration and public keys distribution. An origin or cache will automatically attempt to register their namespace at their start. A federation user may also register a namespace without running a storage server by visiting the registry website.
+Pelican _registry_ manages namespace registration and public keys distribution. An origin or cache will automatically attempt to register their namespace at their start. A federation user may also register a namespace without running a storage server by visiting the registry website.
 
 ### Get OIDC Credential (Required)
 
@@ -56,9 +84,12 @@ To initialize, login at https://<hostname>:8444/view/initialization/code/ with t
 865309
 ```
 
+By default, registry runs on port `8444`. You may change the port number by passing `-p <port>` when serving
+the registry, or by setting `Server.WebPort` in the configuration file.
+
 Now you want to initialize the admin account for your registry web UI. You may refer to https://docs.pelicanplatform.org/serving_an_origin#running-origin-serve for details.
 
-Once your finished initialization, you should be able to see the following page as an admin user (lists are expected to be empty at a fresh start):
+Once you finished the initialization, you should be able to see the following page as an admin user (lists are expected to be empty at a fresh start):
 
 <ExportedImage src={"/pelican/registry-admin.png"} alt={"Image registry home page in public view"} />
 
@@ -68,7 +99,7 @@ For approved namespaces, you can download the public key associated with the nam
 
 The homepage of the registry web UI is also publicly accessible, meaning users can see a list of _approved_ namespaces without logging into the registry. Denied and pending registrations are hidden from the public view. The image below shows how the public view looks like.
 
-<ExportedImage src={"/pelican/registry-public.png"} alt={"Image registry home page in public view"} />
+<ExportedImage src={"/pelican/registry-public.png"} alt={"Image of registry homepage in public view"} />
 
 ### Useful Configurations for the Registry
 
@@ -104,8 +135,75 @@ By default, Pelican requires namespaces requesting registration to possess a key
 
 In registry web UI, when a user wants to register a namespace, they must specify which institution this namespace is for, which is a list of options you need to provide. To do so, you may either feed a list of `name` and `id` pairs of available institutions to register to `Registry.Institutions`, or if you already have a web endpoint to serve such information, you may pass the URL to `Registry.InstitutionsUrl`. Please refer to https://docs.pelicanplatform.org/parameters#Registry-Institutions for details.
 
-### Register a Namespace via Registry Web UI
+## Serve a Director
 
-### Register a Namespace via Registry CLI
+Pelican _director_ handles data distribution in a Pelican federation. It directs object request from a Pelican client to the proper object provider (can be cache or oriign). It also maintains a collection of actively running origin/cache servers in the federation.
 
-Refer to [Register the origin with the namespace-registry](https://docs.pelicanplatform.org/serving_an_origin#register-the-origin-with-the-namespace-registry) for how to register a namespace using Pelican command line tool.
+### Get MaxMind License key (required)
+
+Pelican director uses the [MaxMind GeoLite City database](https://dev.maxmind.com/geoip/docs/databases/city-and-country)
+to determine which cache is nearest to a client's IP address.
+The database, if not already found,
+will be downloaded automatically when a director is served and a valid key is present. The database is free to use, but you need a GeoLite2 account
+and provide a license key to Pelican so that we can download the database for you.
+Please follow the instruction [here](https://dev.maxmind.com/geoip/docs/databases/city-and-country) to [register a free account](https://www.maxmind.com/en/geolite2/signup) and [get your license key](https://www.maxmind.com/en/accounts/current/license-key/).
+
+Once your have the key, copy and paste it to a desired location on your server.
+Then pass the file location to `Director.MaxMindKeyFile`.
+
+### Set Registry URL (required)
+
+Pelican director needs to talk to the registry to get the public keys for namespaces. You will need to set `Federation.RegistryUrl` to the public endpoint of your registry
+for Pelican director to work.
+
+### Director as a Federation (optional)
+
+For Pelican origins and caches, they need to know where the _federation_ is so that they can
+attemp to join it. They know it either by manually passed configuration values or by requesting
+`Federation.DiscoveryUrl` endpoint, which contains various URLs to a federation's registry and director.
+You may supply your own endpoint to provide such information, or Pelican director can do it for you.
+
+This can be done by setting `Federation.DiscoveryUrl` of your _origins_ and _caches_ to the public url of your director, i.e. `https://<your-director-hostname>:<director-web-port>`. Make sure your director is up and running before starting your origins and caches.
+
+### Finish Setup
+
+That's it! Now you can serve the director by running the following command:
+
+```bash
+pelican director serve
+```
+
+and you will see the following message:
+
+```console
+Pelican admin interface is not initialized
+To initialize, login at https://<hostname>:8444/view/initialization/code/ with the following code:
+865309
+```
+
+By default, redirect runs on port `8444`. You may change the port number by passing `-p <port>` when serving
+the director, or by setting `Server.WebPort` in the configuration file.
+
+To finish setting up the web UI for the director, please refer to the previous section in the registry. Once finished the initialization and login with your admin password, you should be able to see the following page as an admin user (lists are expected to be empty at a fresh start):
+
+<ExportedImage src={"/pelican/director-homepage.png"} alt={"Image of director homepage in admin view"} />
+
+The "Origins" table and "Caches" table show the _active_ origins and caches in the federtaion.
+
+### Useful Configurations for Director
+
+There are a couple of configuration parameters you could use to customize the behavior of your registry. Here we highlight the ones that are most frequently set for an admin. You may refer to the full set of director parameters in the [Parameters page](https://docs.pelicanplatform.org/parameters#Director-DefaultResponse).
+
+#### `Director.DefaultResponse`
+
+Pelican director by default redirects object request from clients to the geospatially nearest cache in the federation, to improve data transfer efficiency. If a director is hosted at https://director.com, then a `GET` request to https://director.com/foo/bar.txt will be redirected to the nearest cache for namespace `/foo`. You may change the default response type of a redirect for director by setting `Director.DefaultResponse`. It can be either `cache` or `origin`. If set to `origin`, director will redirect the request to the origin, bypassing caches.
+
+#### `GeoIPOverrides`
+
+The MaxMind database may fail to return a valid longitute/latitute pair given a server IP. For example, the database does not support IPV6 addresses. In such cases, you may pass a list of IP addresses to `GeoIPOverrides` parameter whose GeoIP resolution should be overridden with the supplied Lat/Long coordinates (in decimal form). This affects both server ads (for determining the location of origins and caches) and incoming client requests (for determing where a client request is coming from).
+
+#### `Director.CacheResponseHostnames` and `Director.OriginResponseHostnames`
+
+You may allow the director to redirect client traffic to both caches and origins. You can do it by adding virtual hostnames to `Director.CacheResponseHostnames` for cache response or `Director.OriginResponseHostnames` for origin reponse. If a request is sent by the client to one of these hostnames, the director assumes it should respond with a redirect to a cache/origin.
+
+If present, the hostname is taken from the    `X-Forwarded-Host` header in the request. Otherwise, Host is used.
