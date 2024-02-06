@@ -33,16 +33,14 @@ jobs:
 
           # Add some verbosity
           echo "NPM version is now $(npm version)"
-          
-            - name: Update npm version
 
       - name: Reset the tag to the newest commit
         run: |
-          
+
           # Delete the previous tag
           git tag --delete ${GITHUB_REF_NAME}
           git push origin :refs/tags/${GITHUB_REF_NAME}
-          
+
           # Create and push the new tag
           git tag ${GITHUB_REF_NAME}
           git push origin --tags
