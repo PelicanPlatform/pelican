@@ -353,10 +353,15 @@ func configureAuthEndpoints(ctx context.Context, router *gin.Engine, egrp *errgr
 	if err != nil {
 		return err
 	}
+	limit := param.Server_UILoginRateLimit.GetInt()
+	if limit <= 0 {
+		log.Warning("Invalid Server.UILoginRateLimit. Value is less than 1. Fallback to 1")
+		limit = 1
+	}
 
 	store := ratelimit.InMemoryStore(&ratelimit.InMemoryOptions{
 		Rate:  time.Second,
-		Limit: 1,
+		Limit: uint(limit),
 	})
 	mw := ratelimit.RateLimiter(store, &ratelimit.Options{
 		ErrorHandler: func(ctx *gin.Context, info ratelimit.Info) {
