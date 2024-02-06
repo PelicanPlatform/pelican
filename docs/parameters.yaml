@@ -155,69 +155,82 @@ type: bool
 default: false
 components: ["Client"]
 ---
-name: Logging.Cache.Scitokens
-description: >-
-  Trace level of scitokens debug output within Xrootd configuration. Values include: debug, info, error (default of error/none)
-type: string
-default: error
-components: ["cache"]
----
-name: Logging.Cache.Pss
-description: >-
-  Logging level of pss and pssSetOptCache within Xrootd configuration values include: debug, info, error (default of error/off/Debug Level 1)
-type: string
-default: error
-components: ["cache"]
----
-name: Logging.Cache.Ofs
-description: >-
-  Trace level of ofs debug output within Xrootd configuration. Values include: debug, info, error (default of error/-all)
-type: string
-default: error
-components: ["cache"]
----
-name: Logging.Cache.Xrd
-description: >-
-  Trace options for Xrootd debug output (xrd) within Xrootd configuration. Values include: debug, info, error (default of error/-all)
-type: string
-default: error
-components: ["cache"]
----
-name: Logging.Origin.Scitokens
-description: >-
-  Trace level of scitokens debug output within Xrootd configuration. Values include: debug, info, error (default of error/none)
-type: string
-default: error
-components: ["origin"]
----
-name: Logging.Origin.Pss
-description: >-
-  Logging level of pss and pssSetOptOrigin within Xrootd configuration values include: debug, info, error (default of error/off/Debug Level 1)
-type: string
-default: error
-components: ["origin"]
----
 name: Logging.Origin.Cms
 description: >-
-  Trace level of cms debug output within Xrootd configuration. Values include: debug, info, error (default of error/-all)
+  Trace level of Xrootd cluster management service.
 type: string
 default: error
 components: ["origin"]
 ---
 name: Logging.Origin.Pfc
 description: >-
-  Trace level of pfc debug output within Xrootd configuration. Values include: debug, info, error (default of info/info)
+  Trace level of Xrootd Proxy File Cache, the caching mechanism used by Xrootd.
 type: string
 default: info
 components: ["origin"]
 ---
+name: Logging.Origin.Pss
+description: >-
+  Trace level of Xrootd Proxy System Service.
+type: string
+default: error
+components: ["origin"]
+---
+name: Logging.Origin.Scitokens
+description: >-
+  Trace level of scitokens debug output within Xrootd configuration.
+type: string
+default: error
+components: ["origin"]
+---
+name: Logging.Origin.Xrd
+description: >-
+  Trace level of the eXtended Request Daemon within Xrootd.
+type: string
+default: error
+components: ["origin"]
+---
 name: Logging.Origin.Xrootd
 description: >-
-  Trace options for Xrootd debug output within Xrootd configuration. Values include: all, auth, debug, emsg, fs, fsaio, fsio, login, mem, off,
-  pgcserr, redirect, request, response, stall
+  Trace options for Xrootd debug output within Xrootd configuration.
 type: string
-default: emsg login stall redirect # Not sure how to do defaults for this one since ours/osg's are so specific
+default: info
 components: ["origin"]
+---
+name: Logging.Cache.Ofs
+description: >-
+  Trace level of Xrootd's Open File System.
+type: string
+default: error
+components: ["cache"]
+---
+name: Logging.Cache.Pss
+description: >-
+  Trace level of Xrootd's Proxy System Service.
+type: string
+default: error
+components: ["cache"]
+---
+name: Logging.Cache.Scitokens
+description: >-
+  Trace level of scitokens debug output within Xrootd configuration.
+type: string
+default: error
+components: ["cache"]
+---
+name: Logging.Cache.Xrd
+description: >-
+  Trace level of the eXtended Request Daemon within Xrootd.
+type: string
+default: error
+components: ["cache"]
+---
+name: Logging.Cache.Xrootd
+description: >-
+  Trace options for Xrootd debug output within Xrootd configuration.
+type: string
+default: error
+components: ["cache"]
 ---
 ############################
 # Federation-Level Configs #

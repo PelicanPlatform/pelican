@@ -92,6 +92,7 @@ type Config struct {
 			Pss string
 			Scitokens string
 			Xrd string
+			Xrootd string
 		}
 		DisableProgressBars bool
 		Level string
@@ -101,6 +102,7 @@ type Config struct {
 			Pfc string
 			Pss string
 			Scitokens string
+			Xrd string
 			Xrootd string
 		}
 	}
@@ -316,6 +318,7 @@ type configWithType struct {
 			Pss struct { Type string; Value string }
 			Scitokens struct { Type string; Value string }
 			Xrd struct { Type string; Value string }
+			Xrootd struct { Type string; Value string }
 		}
 		DisableProgressBars struct { Type string; Value bool }
 		Level struct { Type string; Value string }
@@ -325,6 +328,7 @@ type configWithType struct {
 			Pfc struct { Type string; Value string }
 			Pss struct { Type string; Value string }
 			Scitokens struct { Type string; Value string }
+			Xrd struct { Type string; Value string }
 			Xrootd struct { Type string; Value string }
 		}
 	}

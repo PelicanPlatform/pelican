@@ -16,17 +16,19 @@
 
 Logging:
   Level: "Error"
-  Cache:
-    Scitokens: error
-    Pss: error
-    Ofs: error
-    Xrd: error
   Origin:
-    Scitokens: error
+    Cms: "error"
+    Pfc: "info"
+    Pss: "error"
+    Scitokens: "fatal"
+    Xrd: "error"
+    Xrootd: "info"
+  Cache:
+    Ofs: error
     Pss: error
-    Cms: error
-    Pfc: info
-    Xrootd: emsg login stall redirect
+    Scitokens: fatal
+    Xrd: error
+    Xrootd: error
 Client:
   WorkerCount: 5
 Server:

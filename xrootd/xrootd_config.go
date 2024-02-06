@@ -133,17 +133,19 @@ type (
 	}
 
 	LoggingConfig struct {
-		CacheScitokens  string
-		CachePss        string
-		CacheOfs        string
-		CacheXrd        string
-		PssSetOptCache  string
-		OriginScitokens string
-		OriginPss       string
-		OriginPfc       string
 		OriginCms       string
-		OriginXrootd    string
+		OriginPfc       string
+		OriginPss       string
 		PssSetOptOrigin string
+		OriginScitokens string
+		OriginXrd       string
+		OriginXrootd    string
+		CacheOfs        string
+		CachePss        string
+		PssSetOptCache  string
+		CacheScitokens  string
+		CacheXrd        string
+		CacheXrootd     string
 	}
 
 	XrootdConfig struct {
@@ -632,7 +634,10 @@ func ConfigXrootd(ctx context.Context, origin bool) (string, error) {
 	}
 
 	// Map out xrootd logs
-	mapXrootdLogLevels(&xrdConfig)
+	err = mapXrootdLogLevels(&xrdConfig)
+	if err != nil {
+		return "", err
+	}
 
 	runtimeCAs := filepath.Join(param.Origin_RunLocation.GetString(), "ca-bundle.crt")
 	if !origin {
@@ -747,154 +752,308 @@ func SetUpMonitoring(ctx context.Context, egrp *errgroup.Group) error {
 // mapXrootdLogLevels is utilized to map Pelican config values to Xrootd ones
 // this is used to keep our log levels for Xrootd simple, so one does not need
 // to be an Xrootd expert to understand the inconsistent logs within Xrootd
-func mapXrootdLogLevels(xrdConfig *XrootdConfig) {
-	// Origin Scitokens
-	originScitokensConfig := param.Logging_Origin_Scitokens.GetString()
-	if originScitokensConfig == "debug" {
-		xrdConfig.Logging.OriginScitokens = "all"
-	} else if originScitokensConfig == "info" {
-		xrdConfig.Logging.OriginScitokens = "info"
-	} else if originScitokensConfig == "error" {
-		xrdConfig.Logging.OriginScitokens = "none"
-	} else { // Default is error
-		log.Errorln("Unrecognized log-level for Origin_Scitokens, setting to default (error) setting.")
-		xrdConfig.Logging.OriginScitokens = "none"
-	}
+func mapXrootdLogLevels(xrdConfig *XrootdConfig) error {
 
-	// pssSetOptOrigin and pssOrigin
-	pssSetOptOrigin := param.Logging_Origin_Pss.GetString()
-	if pssSetOptOrigin == "debug" {
-		xrdConfig.Logging.PssSetOptOrigin = "DebugLevel 3"
-		xrdConfig.Logging.OriginPss = "all"
-	} else if pssSetOptOrigin == "info" {
-		xrdConfig.Logging.PssSetOptOrigin = "DebugLevel 2"
-		xrdConfig.Logging.OriginPss = "on"
-	} else if pssSetOptOrigin == "error" {
-		xrdConfig.Logging.PssSetOptOrigin = "DebugLevel 1"
-		xrdConfig.Logging.OriginPss = "off"
-	} else {
-		log.Errorln("Unrecognized log-level for Origin_Pss, setting to default (error) setting.")
-		xrdConfig.Logging.PssSetOptOrigin = "DebugLevel 1"
-		xrdConfig.Logging.OriginPss = "off"
+	/////////////////////////ORIGIN/////////////////////////////
+	// Origin Cms
+	// https://xrootd.slac.stanford.edu/doc/dev54/cms_config.htm
+	originCmsConfig, err := log.ParseLevel(param.Logging_Origin_Cms.GetString())
+	if err != nil {
+		return errors.Wrap(err, "Error parsing specified log level for Origin_Cms, proper values include: panic, fatal, error, warn, info, debug, trace")
+	}
+	switch originCmsConfig {
+	case log.PanicLevel:
+		xrdConfig.Logging.OriginCms = "-all"
+	case log.FatalLevel:
+		xrdConfig.Logging.OriginCms = "-all"
+	case log.ErrorLevel:
+		xrdConfig.Logging.OriginCms = "-all"
+	case log.WarnLevel:
+		xrdConfig.Logging.OriginCms = "all"
+	case log.InfoLevel:
+		xrdConfig.Logging.OriginCms = "all"
+	case log.DebugLevel:
+		xrdConfig.Logging.OriginCms = "debug"
+	case log.TraceLevel:
+		xrdConfig.Logging.OriginCms = "debug"
+	default:
+		return errors.New("Improper xrootd logging config for Origin_Cms, proper values include: panic, fatal, error, warn, info, debug, trace")
 	}
 
 	// Origin Pfc
-	originPfcConfig := param.Logging_Origin_Pfc.GetString()
-	if originPfcConfig == "debug" {
-		xrdConfig.Logging.OriginPfc = "all"
-	} else if originPfcConfig == "error" {
+	// https://xrootd.slac.stanford.edu/doc/dev56/pss_config.htm
+	originPfcConfig, err := log.ParseLevel(param.Logging_Origin_Pfc.GetString())
+	if err != nil {
+		return errors.Wrap(err, "Error parsing specified log level for Origin_Pfc, proper values include: panic, fatal, error, warn, info, debug, trace")
+	}
+	switch originPfcConfig {
+	case log.PanicLevel:
 		xrdConfig.Logging.OriginPfc = "none"
-	} else if originPfcConfig == "info" { // Default is info
+	case log.FatalLevel:
+		xrdConfig.Logging.OriginPfc = "none"
+	case log.ErrorLevel:
+		xrdConfig.Logging.OriginPfc = "error"
+	case log.WarnLevel:
+		xrdConfig.Logging.OriginPfc = "warning"
+	case log.InfoLevel:
 		xrdConfig.Logging.OriginPfc = "info"
-	} else {
-		log.Errorln("Unrecognized log-level for Origin_Pfc, setting to default (info) setting.")
-		xrdConfig.Logging.OriginPfc = "info"
+	case log.DebugLevel:
+		xrdConfig.Logging.OriginPfc = "debug"
+	case log.TraceLevel:
+		xrdConfig.Logging.OriginPfc = "dump"
+	default:
+		return errors.New("Improper xrootd logging config for Origin_Pfc, proper values include: panic, fatal, error, warn, info, debug, trace")
 	}
 
-	// Origin Cms
-	originCmsConfig := param.Logging_Origin_Cms.GetString()
-	if originCmsConfig == "debug" {
-		xrdConfig.Logging.OriginCms = "all"
-	} else if originCmsConfig == "info" {
-		xrdConfig.Logging.OriginCms = "-all" // Not super sure what to do for info on this one
-	} else if originCmsConfig == "error" {
-		xrdConfig.Logging.OriginCms = "-all"
-	} else {
-		log.Errorln("Unrecognized log-level for Origin_Cms, setting to default (error) setting.")
-		xrdConfig.Logging.OriginCms = "-all"
+	// pssSetOptOrigin and pssOrigin
+	// https://xrootd.slac.stanford.edu/doc/dev56/pss_config.htm
+	// Note: pss has interesting config options:
+	// all     informational events.
+	// on      warning events.
+	// debug   error events.
+	// Therefore the following pss.trace I came up with is what follows:
+	originPssConfig, err := log.ParseLevel(param.Logging_Origin_Pss.GetString())
+	if err != nil {
+		return errors.Wrap(err, "Error parsing specified log level for Origin_Pss, proper values include: panic, fatal, error, warn, info, debug, trace")
+	}
+	switch originPssConfig {
+	case log.PanicLevel:
+		xrdConfig.Logging.PssSetOptOrigin = "DebugLevel 0"
+		xrdConfig.Logging.OriginPss = "off"
+	case log.FatalLevel:
+		xrdConfig.Logging.PssSetOptOrigin = "DebugLevel 0"
+		xrdConfig.Logging.OriginPss = "off"
+	case log.ErrorLevel:
+		xrdConfig.Logging.PssSetOptOrigin = "DebugLevel 1"
+		xrdConfig.Logging.OriginPss = "off"
+	case log.WarnLevel:
+		xrdConfig.Logging.PssSetOptOrigin = "DebugLevel 2"
+		xrdConfig.Logging.OriginPss = "debug"
+	case log.InfoLevel:
+		xrdConfig.Logging.PssSetOptOrigin = "DebugLevel 2"
+		xrdConfig.Logging.OriginPss = "on"
+	case log.DebugLevel:
+		xrdConfig.Logging.PssSetOptOrigin = "DebugLevel 3"
+		xrdConfig.Logging.OriginPss = "all"
+	case log.TraceLevel:
+		xrdConfig.Logging.PssSetOptOrigin = "DebugLevel 3"
+		xrdConfig.Logging.OriginPss = "all"
+	default:
+		return errors.New("Improper xrootd logging config for Origin_Pss, proper values include: panic, fatal, error, warn, info, debug, trace")
+	}
+
+	// Origin Scitokens
+	// https://github.com/xrootd/xrootd/blob/8f8498d66aa583c54c0875bb1cfe432f4be040f4/src/XrdSciTokens/XrdSciTokensAccess.cc#L951-L963
+	originScitokensConfig, err := log.ParseLevel(param.Logging_Origin_Scitokens.GetString())
+	if err != nil {
+		return errors.Wrap(err, "Error parsing specified log level for Origin_Scitokens, proper values include: panic, fatal, error, warn, info, debug, trace")
+	}
+	switch originScitokensConfig {
+	case log.PanicLevel:
+		xrdConfig.Logging.OriginScitokens = "none"
+	case log.FatalLevel:
+		xrdConfig.Logging.OriginScitokens = "none"
+	case log.ErrorLevel:
+		xrdConfig.Logging.OriginScitokens = "error"
+	case log.WarnLevel:
+		xrdConfig.Logging.OriginScitokens = "warning"
+	case log.InfoLevel:
+		xrdConfig.Logging.OriginScitokens = "info"
+	case log.DebugLevel:
+		xrdConfig.Logging.OriginScitokens = "debug"
+	case log.TraceLevel:
+		xrdConfig.Logging.OriginScitokens = "all"
+	default:
+		return errors.New("Improper xrootd logging config for Origin_Scitokens, proper values include: panic, fatal, error, warn, info, debug, trace")
+	}
+
+	// Origin Xrd
+	// https://xrootd.slac.stanford.edu/doc/dev56/xrd_config.htm
+	originXrdConfig, err := log.ParseLevel(param.Logging_Origin_Xrd.GetString())
+	if err != nil {
+		return errors.Wrap(err, "Error parsing specified log level for Origin_Xrd, proper values include: panic, fatal, error, warn, info, debug, trace")
+	}
+	switch originXrdConfig {
+	case log.PanicLevel:
+		xrdConfig.Logging.OriginXrd = "-all"
+	case log.FatalLevel:
+		xrdConfig.Logging.OriginXrd = "-all"
+	case log.ErrorLevel:
+		xrdConfig.Logging.OriginXrd = "-all"
+	case log.WarnLevel:
+		xrdConfig.Logging.OriginXrd = "-all"
+	case log.InfoLevel:
+		xrdConfig.Logging.OriginXrd = "-all"
+	case log.DebugLevel:
+		xrdConfig.Logging.OriginXrd = "debug"
+	case log.TraceLevel:
+		xrdConfig.Logging.OriginXrd = "all"
+	default:
+		return errors.New("Improper xrootd logging config for Origin_Xrd, proper values include: panic, fatal, error, warn, info, debug, trace")
 	}
 
 	// Origin Xrootd
-	// Have this for now with the regular config options, not sure what to do to make it more
-	// user-friendly since our/osg's defaults are pretty specific
-	originXrootdConfig := param.Logging_Origin_Xrootd.GetString()
-
-	// Want to make sure everything specified is a valid config value:
-	allowedVariables := map[string]bool{
-		"all":      true,
-		"auth":     true,
-		"debug":    true,
-		"emsg":     true,
-		"fs":       true,
-		"fsaio":    true,
-		"fsio":     true,
-		"login":    true,
-		"mem":      true,
-		"off":      true,
-		"pgcserr":  true,
-		"redirect": true,
-		"request":  true,
-		"response": true,
-		"stall":    true,
+	// https://xrootd.slac.stanford.edu/doc/dev56/xrd_config.htm
+	originXrootdConfig, err := log.ParseLevel(param.Logging_Origin_Xrootd.GetString())
+	if err != nil {
+		return errors.Wrap(err, "Error parsing specified log level for Origin_Xrootd, proper values include: panic, fatal, error, warn, info, debug, trace")
+	}
+	switch originXrootdConfig {
+	case log.PanicLevel:
+		xrdConfig.Logging.OriginXrootd = "-all"
+	case log.FatalLevel:
+		xrdConfig.Logging.OriginXrootd = "-all"
+	case log.ErrorLevel:
+		xrdConfig.Logging.OriginXrootd = "-all"
+	case log.WarnLevel:
+		xrdConfig.Logging.OriginXrootd = "emsg" // errors sent back to the client
+	case log.InfoLevel:
+		xrdConfig.Logging.OriginXrootd = "emsg login stall redirect" // what we had set originally
+	case log.DebugLevel:
+		xrdConfig.Logging.OriginXrootd = "debug"
+	case log.TraceLevel:
+		xrdConfig.Logging.OriginXrootd = "all"
+	default:
+		return errors.New("Improper xrootd logging config for Origin_Xrootd, proper values include: panic, fatal, error, warn, info, debug, trace")
 	}
 
-	configValues := strings.Fields(originXrootdConfig)
-	validConfig := true
-	for _, value := range configValues {
-		if _, exists := allowedVariables[value]; !exists {
-			log.Errorln("Unrecognized log-level found for Origin_Xrootd, setting to default (emsg login stall redirect) setting.")
-			xrdConfig.Logging.OriginXrootd = "emsg login stall redirect"
-			validConfig = false
-			break
-		}
+	//////////////////////////CACHE/////////////////////////////
+	// Cache Ofs
+	// https://xrootd.slac.stanford.edu/doc/dev56/ofs_config.htm
+	cacheOfsConfig, err := log.ParseLevel(param.Logging_Cache_Ofs.GetString())
+	if err != nil {
+		return errors.Wrap(err, "Error parsing specified log level for Cache_Ofs, proper values include: panic, fatal, error, warn, info, debug, trace")
 	}
-	if validConfig {
-		xrdConfig.Logging.OriginXrootd = originXrootdConfig
-	}
-
-	// Cache Scitokens
-	cacheScitokensConfig := param.Logging_Cache_Scitokens.GetString()
-	if cacheScitokensConfig == "debug" {
-		xrdConfig.Logging.CacheScitokens = "all"
-	} else if cacheScitokensConfig == "info" {
-		xrdConfig.Logging.CacheScitokens = "info"
-	} else if cacheScitokensConfig == "error" {
-		xrdConfig.Logging.CacheScitokens = "none"
-	} else { // Default is error
-		log.Errorln("Unrecognized log-level for Cache_Scitokens, setting to default (error) setting.")
-		xrdConfig.Logging.CacheScitokens = "none"
+	switch cacheOfsConfig {
+	case log.PanicLevel:
+		xrdConfig.Logging.CacheOfs = "-all"
+	case log.FatalLevel:
+		xrdConfig.Logging.CacheOfs = "-all"
+	case log.ErrorLevel:
+		xrdConfig.Logging.CacheOfs = "-all"
+	case log.WarnLevel:
+		xrdConfig.Logging.CacheOfs = "most"
+	case log.InfoLevel:
+		xrdConfig.Logging.CacheOfs = "info"
+	case log.DebugLevel:
+		xrdConfig.Logging.CacheOfs = "debug"
+	case log.TraceLevel:
+		xrdConfig.Logging.CacheOfs = "all"
+	default:
+		return errors.New("Improper xrootd logging config for Cache_Ofs, proper values include: panic, fatal, error, warn, info, debug, trace")
 	}
 
 	// Cache PssSetOptCache and Cache Pss
-	cachePssConfig := param.Logging_Cache_Pss.GetString()
-	if cachePssConfig == "debug" {
-		xrdConfig.Logging.PssSetOptCache = "DebugLevel 3"
-		xrdConfig.Logging.CachePss = "all"
-	} else if cachePssConfig == "info" {
-		xrdConfig.Logging.PssSetOptCache = "DebugLevel 2"
-		xrdConfig.Logging.CachePss = "on"
-	} else if cachePssConfig == "error" {
+	// https://xrootd.slac.stanford.edu/doc/dev56/pss_config.htm
+	// Note: pss has interesting config options:
+	// all     informational events.
+	// on      warning events.
+	// debug   error events.
+	// Therefore the following pss.trace I came up with is what follows:
+	cachePssConfig, err := log.ParseLevel(param.Logging_Cache_Pss.GetString())
+	if err != nil {
+		return errors.Wrap(err, "Error parsing specified log level for Cache_Pss, proper values include: panic, fatal, error, warn, info, debug, trace")
+	}
+	switch cachePssConfig {
+	case log.PanicLevel:
+		xrdConfig.Logging.PssSetOptCache = "DebugLevel 0"
+		xrdConfig.Logging.CachePss = "off"
+	case log.FatalLevel:
+		xrdConfig.Logging.PssSetOptCache = "DebugLevel 0"
+		xrdConfig.Logging.CachePss = "off"
+	case log.ErrorLevel:
 		xrdConfig.Logging.PssSetOptCache = "DebugLevel 1"
 		xrdConfig.Logging.CachePss = "off"
-	} else {
-		log.Errorln("Unrecognized log-level for Cache_Pss, setting to default (error) setting.")
-		xrdConfig.Logging.PssSetOptOrigin = "DebugLevel 1"
-		xrdConfig.Logging.CachePss = "off"
+	case log.WarnLevel:
+		xrdConfig.Logging.PssSetOptCache = "DebugLevel 2"
+		xrdConfig.Logging.CachePss = "debug"
+	case log.InfoLevel:
+		xrdConfig.Logging.PssSetOptCache = "DebugLevel 2"
+		xrdConfig.Logging.CachePss = "on"
+	case log.DebugLevel:
+		xrdConfig.Logging.PssSetOptCache = "DebugLevel 3"
+		xrdConfig.Logging.CachePss = "all"
+	case log.TraceLevel:
+		xrdConfig.Logging.PssSetOptCache = "DebugLevel 3"
+		xrdConfig.Logging.CachePss = "all"
+	default:
+		return errors.New("Improper xrootd logging config for Cache_Pss, proper values include: panic, fatal, error, warn, info, debug, trace")
 	}
 
-	// Cache Ofs
-	cacheOfsConfig := param.Logging_Cache_Ofs.GetString()
-	if cacheOfsConfig == "debug" {
-		xrdConfig.Logging.CacheOfs = "all"
-	} else if cacheOfsConfig == "info" {
-		xrdConfig.Logging.CacheOfs = "-all" // Not super sure what to do for info on this one
-	} else if cacheOfsConfig == "error" {
-		xrdConfig.Logging.CacheOfs = "-all"
-	} else {
-		log.Errorln("Unrecognized log-level for Cache_Ofs, setting to default (error) setting.")
-		xrdConfig.Logging.CacheOfs = "-all"
+	// Cache Scitokens
+	// https://github.com/xrootd/xrootd/blob/8f8498d66aa583c54c0875bb1cfe432f4be040f4/src/XrdSciTokens/XrdSciTokensAccess.cc#L951-L963
+	cacheScitokensConfig, err := log.ParseLevel(param.Logging_Cache_Scitokens.GetString())
+	if err != nil {
+		return errors.Wrap(err, "Error parsing specified log level for Cache_Scitokens, proper values include: panic, fatal, error, warn, info, debug, trace")
+	}
+	switch cacheScitokensConfig {
+	case log.PanicLevel:
+		xrdConfig.Logging.CacheScitokens = "none"
+	case log.FatalLevel:
+		xrdConfig.Logging.CacheScitokens = "none"
+	case log.ErrorLevel:
+		xrdConfig.Logging.CacheScitokens = "error"
+	case log.WarnLevel:
+		xrdConfig.Logging.CacheScitokens = "warning"
+	case log.InfoLevel:
+		xrdConfig.Logging.CacheScitokens = "info"
+	case log.DebugLevel:
+		xrdConfig.Logging.CacheScitokens = "debug"
+	case log.TraceLevel:
+		xrdConfig.Logging.CacheScitokens = "all"
+	default:
+		return errors.New("Improper xrootd logging config for Cache_Scitokens, proper values include: panic, fatal, error, warn, info, debug, trace")
 	}
 
 	// Cache Xrd
-	cacheXrdConfig := param.Logging_Cache_Xrd.GetString()
-	if cacheXrdConfig == "debug" {
-		xrdConfig.Logging.CacheXrd = "all -sched"
-	} else if cacheXrdConfig == "info" {
-		xrdConfig.Logging.CacheXrd = "-all" // Not super sure what to do for info on this one
-	} else if cacheXrdConfig == "error" {
-		xrdConfig.Logging.CacheXrd = "-all"
-	} else {
-		log.Errorln("Unrecognized log-level for Cache_Xrd, setting to default (error) setting.")
-		xrdConfig.Logging.CacheXrd = "-all"
+	// https://xrootd.slac.stanford.edu/doc/dev56/xrd_config.htm
+	cacheXrdConfig, err := log.ParseLevel(param.Logging_Cache_Xrd.GetString())
+	if err != nil {
+		return errors.Wrap(err, "Error parsing specified log level for Cache_Xrd, proper values include: panic, fatal, error, warn, info, debug, trace")
 	}
+	switch cacheXrdConfig {
+	case log.PanicLevel:
+		xrdConfig.Logging.CacheXrd = "-all"
+	case log.FatalLevel:
+		xrdConfig.Logging.CacheXrd = "-all"
+	case log.ErrorLevel:
+		xrdConfig.Logging.CacheXrd = "-all"
+	case log.WarnLevel:
+		xrdConfig.Logging.CacheXrd = "-all"
+	case log.InfoLevel:
+		xrdConfig.Logging.CacheXrd = "-all"
+	case log.DebugLevel:
+		xrdConfig.Logging.CacheXrd = "debug"
+	case log.TraceLevel:
+		xrdConfig.Logging.CacheXrd = "all"
+	default:
+		return errors.New("Improper xrootd logging config for Cache_Xrd, proper values include: panic, fatal, error, warn, info, debug, trace")
+	}
+
+	// Cache Xrootd
+	// https://xrootd.slac.stanford.edu/doc/dev56/xrd_config.htm
+	cacheXrootdConfig, err := log.ParseLevel(param.Logging_Cache_Xrootd.GetString())
+	if err != nil {
+		return errors.Wrap(err, "Error parsing specified log level for Cache_Xrootd, proper values include: panic, fatal, error, warn, info, debug, trace")
+	}
+	switch cacheXrootdConfig {
+	case log.PanicLevel:
+		xrdConfig.Logging.CacheXrootd = "-all"
+	case log.FatalLevel:
+		xrdConfig.Logging.CacheXrootd = "-all"
+	case log.ErrorLevel:
+		xrdConfig.Logging.CacheXrootd = "-all"
+	case log.WarnLevel:
+		xrdConfig.Logging.CacheXrootd = "emsg" // errors sent back to the client
+	case log.InfoLevel:
+		xrdConfig.Logging.CacheXrootd = "emsg login stall redirect" // what we had set originally
+	case log.DebugLevel:
+		xrdConfig.Logging.CacheXrootd = "debug"
+	case log.TraceLevel:
+		xrdConfig.Logging.CacheXrootd = "all"
+	default:
+		return errors.New("Improper xrootd logging config for Cache_Xrootd, proper values include: panic, fatal, error, warn, info, debug, trace")
+	}
+
+	return nil
 }

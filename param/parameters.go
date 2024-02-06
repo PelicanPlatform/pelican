@@ -102,12 +102,14 @@ var (
 	Logging_Cache_Pss = StringParam{"Logging.Cache.Pss"}
 	Logging_Cache_Scitokens = StringParam{"Logging.Cache.Scitokens"}
 	Logging_Cache_Xrd = StringParam{"Logging.Cache.Xrd"}
+	Logging_Cache_Xrootd = StringParam{"Logging.Cache.Xrootd"}
 	Logging_Level = StringParam{"Logging.Level"}
 	Logging_LogLocation = StringParam{"Logging.LogLocation"}
 	Logging_Origin_Cms = StringParam{"Logging.Origin.Cms"}
 	Logging_Origin_Pfc = StringParam{"Logging.Origin.Pfc"}
 	Logging_Origin_Pss = StringParam{"Logging.Origin.Pss"}
 	Logging_Origin_Scitokens = StringParam{"Logging.Origin.Scitokens"}
+	Logging_Origin_Xrd = StringParam{"Logging.Origin.Xrd"}
 	Logging_Origin_Xrootd = StringParam{"Logging.Origin.Xrootd"}
 	Monitoring_DataLocation = StringParam{"Monitoring.DataLocation"}
 	OIDC_AuthorizationEndpoint = StringParam{"OIDC.AuthorizationEndpoint"}
