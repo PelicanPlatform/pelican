@@ -495,13 +495,18 @@ func setupTransport() {
 	}
 }
 
-func parseServerIssuerURL(sType ServerType) error {
-	if param.Server_IssuerUrl.GetString() != "" {
+// Return an audience string appropriate for the current server
+func GetServerAudience() string {
+	return viper.GetString("Origin.AudienceURL")
+}
+
+func GetServerIssuerURL() (string, error) {
+	if issuerUrl := param.Server_IssuerUrl.GetString(); issuerUrl != "" {
 		_, err := url.Parse(param.Server_IssuerUrl.GetString())
 		if err != nil {
-			return errors.Wrapf(err, "Failed to parse the Server.IssuerUrl %s loaded from config", param.Server_IssuerUrl.GetString())
+			return "", errors.Wrapf(err, "Failed to parse the Server.IssuerUrl %s loaded from config", param.Server_IssuerUrl.GetString())
 		}
-		return nil
+		return issuerUrl, nil
 	}
 
 	if param.Server_IssuerHostname.GetString() != "" {
@@ -511,42 +516,18 @@ func parseServerIssuerURL(sType ServerType) error {
 				Scheme: "https",
 				Host:   fmt.Sprintf("%s:%d", param.Server_IssuerHostname.GetString(), param.Server_IssuerPort.GetInt()),
 			}
-			viper.Set("Server.IssuerUrl", issuerUrl.String())
-			return nil
+			return issuerUrl.String(), nil
 		}
-		return errors.New("If Server.IssuerHostname is configured, you must provide a valid port")
+		return "", errors.New("If Server.IssuerHostname is configured, you must provide a valid port")
 	}
 
-	if sType.IsEnabled(OriginType) {
-		// If Origin.Mode is set to anything that isn't "posix" or "", assume we're running a plugin and
-		// that the origin's issuer URL actually uses the same port as OriginUI instead of XRootD. This is
-		// because under that condition, keys are being served by the Pelican process instead of by XRootD
-		originMode := param.Origin_Mode.GetString()
-		if originMode == "" || originMode == "posix" {
-			// In this case, we use the default set up by config.go, which uses the xrootd port
-			issuerUrl, err := url.Parse(param.Origin_Url.GetString())
-			if err != nil {
-				return errors.Wrap(err, "Failed to parse the issuer URL from the default origin URL")
-			}
-			viper.Set("Server.IssuerUrl", issuerUrl.String())
-			return nil
-		} else {
-			issuerUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
-			if err != nil {
-				return errors.Wrap(err, "Failed to parse the issuer URL generated from Server.ExternalWebUrl")
-			}
-			viper.Set("Server.IssuerUrl", issuerUrl.String())
-			return nil
-		}
-	} else {
-		issuerUrlStr := param.Server_ExternalWebUrl.GetString()
-		issuerUrl, err := url.Parse(issuerUrlStr)
-		if err != nil {
-			return errors.Wrap(err, "Failed to parse the issuer URL generated using the parsed Server.ExternalWebUrl")
-		}
-		viper.Set("Server.IssuerUrl", issuerUrl.String())
-		return nil
+	issuerUrlStr := param.Server_ExternalWebUrl.GetString()
+	issuerUrl, err := url.Parse(issuerUrlStr)
+	log.Debugln("GetServerIssuerURL:", issuerUrlStr)
+	if err != nil {
+		return "", errors.Wrap(err, "Failed to parse the issuer URL generated using the parsed Server.ExternalWebUrl")
 	}
+	return issuerUrl.String(), nil
 }
 
 // function to get/setup the transport (only once)
@@ -852,19 +833,18 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 		return err
 	}
 
+	// Setup the audience to use.  We may customize the Origin.URL in the future if it has
+	// a `0` for the port number; to make the audience predictable (it goes into the xrootd
+	// configuration but we don't know the origin's port until after xrootd has started), we
+	// stash a copy of its value now.
+	viper.Set("Origin.AudienceURL", param.Origin_Url.GetString())
+
 	// After we know we have the certs we need, call setupTransport (which uses those certs for its TLSConfig)
 	setupTransport()
 
 	// Setup CSRF middleware. To use it, you need to add this middleware to your chain
 	// of http handlers by calling config.GetCSRFHandler()
 	setupCSRFHandler()
-
-	// Set up the server's issuer URL so we can access that data wherever we need to find keys and whatnot
-	// This populates Server.IssuerUrl, and can be safely fetched using server_utils.GetServerIssuerURL()
-	err = parseServerIssuerURL(currentServers)
-	if err != nil {
-		return err
-	}
 
 	// Sets up the server log filter mechanism
 	initFilterLogging()

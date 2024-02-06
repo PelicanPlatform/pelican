@@ -44,10 +44,10 @@ type (
 		RunTests(ctx context.Context, baseUrl string, testType TestType) (bool, error)
 	}
 	TestFileTransferImpl struct {
-		audienceUrl string
-		issuerUrl   string
-		testType    TestType
-		testBody    string
+		audiences []string
+		issuerUrl string
+		testType  TestType
+		testBody  string
 	}
 )
 
@@ -80,7 +80,7 @@ func (t TestFileTransferImpl) generateFileTestScitoken() (string, error) {
 		TokenProfile: WLCG,
 		Lifetime:     time.Minute,
 		Issuer:       issuerUrl,
-		Audience:     []string{t.audienceUrl},
+		Audience:     t.audiences,
 		Version:      "1.0",
 		Subject:      "origin",
 		Claims:       map[string]string{"scope": "storage.read:/ storage.modify:/"},
@@ -206,8 +206,8 @@ func (t TestFileTransferImpl) deleteTestfile(ctx context.Context, fileUrl string
 // WLCG rules for issuer metadata discovery and public key access
 //
 // Read more: https://github.com/WLCG-AuthZ-WG/common-jwt-profile/blob/master/profile.md#token-verification
-func (t TestFileTransferImpl) RunTests(ctx context.Context, baseUrl, issuerUrl string, testType TestType) (bool, error) {
-	t.audienceUrl = baseUrl
+func (t TestFileTransferImpl) RunTests(ctx context.Context, baseUrl, audienceUrl, issuerUrl string, testType TestType) (bool, error) {
+	t.audiences = []string{baseUrl, audienceUrl}
 	t.issuerUrl = issuerUrl
 	t.testType = testType
 	if testType == OriginSelfFileTest {

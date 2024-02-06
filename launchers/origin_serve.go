@@ -60,12 +60,8 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) 
 		return nil, err
 	}
 
-	// In posix mode, we rely on xrootd to export keys. When we run the origin with
-	// different backends, we instead export the keys via the Pelican process
-	if param.Origin_Mode.GetString() != "posix" {
-		if err = origin_ui.ConfigIssJWKS(engine.Group("/.well-known")); err != nil {
-			return nil, err
-		}
+	if err = origin_ui.ConfigIssJWKS(engine.Group("/.well-known")); err != nil {
+		return nil, err
 	}
 
 	if param.Origin_EnableIssuer.GetBool() {

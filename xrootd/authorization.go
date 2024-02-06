@@ -524,7 +524,7 @@ func WriteOriginScitokensConfig(exportedPaths []string) error {
 			cfg.IssuerMap[issuer.Issuer] = val
 		} else {
 			cfg.IssuerMap[issuer.Issuer] = issuer
-			cfg.Global.Audience = append(cfg.Global.Audience, issuer.Issuer)
+			cfg.Global.Audience = append(cfg.Global.Audience, config.GetServerAudience())
 		}
 	}
 	if issuer, err := GenerateOriginIssuer(exportedPaths); err == nil && len(issuer.Name) > 0 {
@@ -533,7 +533,7 @@ func WriteOriginScitokensConfig(exportedPaths []string) error {
 			cfg.IssuerMap[issuer.Issuer] = val
 		} else {
 			cfg.IssuerMap[issuer.Issuer] = issuer
-			cfg.Global.Audience = append(cfg.Global.Audience, issuer.Issuer)
+			cfg.Global.Audience = append(cfg.Global.Audience, config.GetServerAudience())
 		}
 	}
 	if issuer, err := GenerateDirectorMonitoringIssuer(); err == nil && len(issuer.Name) > 0 {
@@ -562,7 +562,6 @@ func WriteCacheScitokensConfig(nsAds []director.NamespaceAdV2) error {
 					cfg.IssuerMap[ti.IssuerUrl.String()] = val
 				} else {
 					cfg.IssuerMap[ti.IssuerUrl.String()] = Issuer{Issuer: ti.IssuerUrl.String(), BasePaths: ti.BasePaths, Name: ti.IssuerUrl.String()}
-					cfg.Global.Audience = append(cfg.Global.Audience, ti.IssuerUrl.String())
 				}
 			}
 		}

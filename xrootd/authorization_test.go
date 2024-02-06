@@ -399,7 +399,7 @@ func TestMergeConfig(t *testing.T) {
 	}
 
 	t.Run("AudienceNoJson", configTester(scitokensCfgAud, func(t *testing.T, cfg ScitokensCfg) {
-		assert.True(t, reflect.DeepEqual([]string{"GLOW", "HCC", "IceCube", "NRP", "OSG", "PATh", "UCSD", param.Server_IssuerUrl.GetString()}, cfg.Global.Audience))
+		assert.True(t, reflect.DeepEqual([]string{"GLOW", "HCC", "IceCube", "NRP", "OSG", "PATh", "UCSD", config.GetServerAudience()}, cfg.Global.Audience))
 	}))
 }
 

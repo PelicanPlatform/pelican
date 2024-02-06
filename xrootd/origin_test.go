@@ -38,6 +38,8 @@ import (
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/utils"
+	"github.com/pelicanplatform/pelican/web_ui"
+	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/minio/minio-go/v7"
@@ -76,7 +78,10 @@ func originMockup(ctx context.Context, egrp *errgroup.Group, t *testing.T) conte
 	err = config.GenerateCert()
 	require.NoError(t, err)
 
-	err = CheckXrootdEnv(originServer)
+	engine, err := web_ui.GetEngine()
+	require.NoError(t, err)
+
+	origin_ui.ConfigIssJWKS(engine.Group("/.well-known"))
 	require.NoError(t, err)
 
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
@@ -109,7 +114,10 @@ func TestOrigin(t *testing.T) {
 	viper.Set("Origin.EnableCmsd", false)
 	viper.Set("Origin.EnableMacaroons", false)
 	viper.Set("Origin.EnableVoms", false)
+	viper.Set("Origin.Port", 0)
+	viper.Set("Server.WebPort", 0)
 	viper.Set("TLSSkipVerify", true)
+	viper.Set("Logging.Origin.Scitokens", "debug")
 
 	mockupCancel := originMockup(ctx, egrp, t)
 	defer mockupCancel()
@@ -120,7 +128,10 @@ func TestOrigin(t *testing.T) {
 		t.Fatalf("Unsuccessful test: Server encountered an error: %v", err)
 	}
 	fileTests := utils.TestFileTransferImpl{}
-	ok, err := fileTests.RunTests(ctx, param.Origin_Url.GetString(), param.Origin_Url.GetString(), utils.OriginSelfFileTest)
+	issuerUrl, err := config.GetServerIssuerURL()
+	require.NoError(t, err)
+
+	ok, err := fileTests.RunTests(ctx, param.Origin_Url.GetString(), config.GetServerAudience(), issuerUrl, utils.OriginSelfFileTest)
 	require.NoError(t, err)
 	require.True(t, ok)
 
