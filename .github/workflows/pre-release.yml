@@ -34,8 +34,6 @@ jobs:
           # Add some verbosity
           echo "NPM version is now $(npm version)"
 
-            - name: Update npm version
-
       - name: Reset the tag to the newest commit
         run: |
 
