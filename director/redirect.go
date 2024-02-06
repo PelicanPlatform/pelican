@@ -36,15 +36,24 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
 	"github.com/hashicorp/go-version"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
 
-type PromDiscoveryItem struct {
-	Targets []string          `json:"targets"`
-	Labels  map[string]string `json:"labels"`
-}
+type (
+	PromDiscoveryItem struct {
+		Targets []string          `json:"targets"`
+		Labels  map[string]string `json:"labels"`
+	}
+
+	healthTestUtil struct {
+		ErrGrp        *errgroup.Group
+		ErrGrpContext context.Context
+		Cancel        context.CancelFunc
+	}
+)
 
 type originStatUtil struct {
 	Context  context.Context
@@ -53,13 +62,13 @@ type originStatUtil struct {
 }
 
 var (
-	minClientVersion, _        = version.NewVersion("7.0.0")
-	minOriginVersion, _        = version.NewVersion("7.0.0")
-	minCacheVersion, _         = version.NewVersion("7.3.0")
-	healthTestCancelFuncs      = make(map[common.ServerAd]context.CancelFunc)
-	healthTestCancelFuncsMutex = sync.RWMutex{}
+	minClientVersion, _  = version.NewVersion("7.0.0")
+	minOriginVersion, _  = version.NewVersion("7.0.0")
+	minCacheVersion, _   = version.NewVersion("7.3.0")
+	healthTestUtils      = make(map[common.ServerAd]*healthTestUtil)
+	healthTestUtilsMutex = sync.RWMutex{}
 
-	originStatUtils      = make(map[common.ServerAd]originStatUtil)
+	originStatUtils      = make(map[url.URL]originStatUtil)
 	originStatUtilsMutex = sync.RWMutex{}
 )
 
@@ -224,7 +233,7 @@ func RedirectToCache(ginCtx *gin.Context) {
 			return
 		}
 	}
-	redirectURL := getRedirectURL(reqPath, cacheAds[0], namespaceAd.RequireToken)
+	redirectURL := getRedirectURL(reqPath, cacheAds[0], !namespaceAd.Caps.PublicRead)
 
 	linkHeader := ""
 	first := true
@@ -234,18 +243,25 @@ func RedirectToCache(ginCtx *gin.Context) {
 		} else {
 			linkHeader += ", "
 		}
-		redirectURL := getRedirectURL(reqPath, ad, namespaceAd.RequireToken)
+		redirectURL := getRedirectURL(reqPath, ad, !namespaceAd.Caps.PublicRead)
 		linkHeader += fmt.Sprintf(`<%s>; rel="duplicate"; pri=%d`, redirectURL.String(), idx+1)
 	}
 	ginCtx.Writer.Header()["Link"] = []string{linkHeader}
-	if namespaceAd.Issuer.Host != "" {
-		ginCtx.Writer.Header()["X-Pelican-Authorization"] = []string{"issuer=" + namespaceAd.Issuer.String()}
+	if len(namespaceAd.Issuer) != 0 {
 
+		issStrings := []string{}
+		for _, tokIss := range namespaceAd.Issuer {
+			issStrings = append(issStrings, "issuer="+tokIss.IssuerUrl.String())
+		}
+		ginCtx.Writer.Header()["X-Pelican-Authorization"] = issStrings
+	}
+
+	if len(namespaceAd.Generation) != 0 {
 		tokenGen := ""
 		first := true
-		hdrVals := []string{namespaceAd.Issuer.String(), fmt.Sprint(namespaceAd.MaxScopeDepth), string(namespaceAd.Strategy),
-			namespaceAd.BasePath, namespaceAd.VaultServer}
-		for idx, hdrKey := range []string{"issuer", "max-scope-depth", "strategy", "base-path", "vault-server"} {
+		hdrVals := []string{namespaceAd.Generation[0].CredentialIssuer.String(), fmt.Sprint(namespaceAd.Generation[0].MaxScopeDepth), string(namespaceAd.Generation[0].Strategy),
+			string(namespaceAd.Generation[0].Strategy)}
+		for idx, hdrKey := range []string{"issuer", "max-scope-depth", "strategy", "vault-server"} {
 			hdrVal := hdrVals[idx]
 			if hdrVal == "" {
 				continue
@@ -260,8 +276,15 @@ func RedirectToCache(ginCtx *gin.Context) {
 			ginCtx.Writer.Header()["X-Pelican-Token-Generation"] = []string{tokenGen}
 		}
 	}
+
+	var colUrl string
+	if namespaceAd.PublicRead {
+		colUrl = originAds[0].URL.String()
+	} else {
+		colUrl = originAds[0].AuthURL.String()
+	}
 	ginCtx.Writer.Header()["X-Pelican-Namespace"] = []string{fmt.Sprintf("namespace=%s, require-token=%v, collections-url=%s",
-		namespaceAd.Path, namespaceAd.RequireToken, namespaceAd.DirlistHost)}
+		namespaceAd.Path, !namespaceAd.PublicRead, colUrl)}
 
 	// Note we only append the `authz` query parameter in the case of the redirect response and not the
 	// duplicate link metadata above.  This is purposeful: the Link header might get too long if we repeat
@@ -309,15 +332,23 @@ func RedirectToOrigin(ginCtx *gin.Context) {
 		ginCtx.String(http.StatusInternalServerError, "Failed to determine origin ordering")
 		return
 	}
+
+	var colUrl string
+
+	if namespaceAd.PublicRead {
+		colUrl = originAds[0].URL.String()
+	} else {
+		colUrl = originAds[0].AuthURL.String()
+	}
 	ginCtx.Writer.Header()["X-Pelican-Namespace"] = []string{fmt.Sprintf("namespace=%s, require-token=%v, collections-url=%s",
-		namespaceAd.Path, namespaceAd.RequireToken, namespaceAd.DirlistHost)}
+		namespaceAd.Path, !namespaceAd.PublicRead, colUrl)}
 
 	var redirectURL url.URL
 	// If we are doing a PUT, check to see if any origins are writeable
 	if ginCtx.Request.Method == "PUT" {
 		for idx, ad := range originAds {
 			if ad.EnableWrite {
-				redirectURL = getRedirectURL(reqPath, originAds[idx], namespaceAd.RequireToken)
+				redirectURL = getRedirectURL(reqPath, originAds[idx], !namespaceAd.PublicRead)
 				ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, authzBearerEscaped))
 				return
 			}
@@ -325,7 +356,7 @@ func RedirectToOrigin(ginCtx *gin.Context) {
 		ginCtx.String(http.StatusMethodNotAllowed, "No origins on specified endpoint are writeable\n")
 		return
 	} else { // Otherwise, we are doing a GET
-		redirectURL := getRedirectURL(reqPath, originAds[0], namespaceAd.RequireToken)
+		redirectURL := getRedirectURL(reqPath, originAds[0], !namespaceAd.PublicRead)
 		// See note in RedirectToCache as to why we only add the authz query parameter to this URL,
 		// not those in the `Link`.
 		ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, authzBearerEscaped))
@@ -429,14 +460,24 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType common.S
 		return
 	}
 
-	ad := common.OriginAdvertise{}
-	if ctx.ShouldBind(&ad) != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid " + sType + " registration"})
-		return
+	ad := common.OriginAdvertiseV1{}
+	adV2 := common.OriginAdvertiseV2{}
+	err = ctx.ShouldBindBodyWith(&ad, binding.JSON)
+	if err != nil {
+		// Failed binding to a V1 type, so should now check to see if it's a V2 type
+		adV2 = common.OriginAdvertiseV2{}
+		err = ctx.ShouldBindBodyWith(&adV2, binding.JSON)
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid " + sType + " registration"})
+			return
+		}
+	} else {
+		// If the OriginAdvertisement is a V1 type, convert to a V2 type
+		adV2 = convertOriginAd(ad)
 	}
 
 	if sType == common.OriginType {
-		for _, namespace := range ad.Namespaces {
+		for _, namespace := range adV2.Namespaces {
 			// We're assuming there's only one token in the slice
 			token := strings.TrimPrefix(tokens[0], "Bearer ")
 			ok, err := VerifyAdvertiseToken(engineCtx, token, namespace.Path)
@@ -453,14 +494,14 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType common.S
 			}
 			if !ok {
 				log.Warningf("%s %v advertised to namespace %v without valid token scope\n",
-					sType, ad.Name, namespace.Path)
+					sType, adV2.Name, namespace.Path)
 				ctx.JSON(http.StatusForbidden, gin.H{"error": "Authorization token verification failed. Token missing required scope"})
 				return
 			}
 		}
 	} else {
 		token := strings.TrimPrefix(tokens[0], "Bearer ")
-		prefix := path.Join("caches", ad.Name)
+		prefix := path.Join("/caches", adV2.Name)
 		ok, err := VerifyAdvertiseToken(engineCtx, token, prefix)
 		if err != nil {
 			if err == adminApprovalErr {
@@ -474,60 +515,107 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType common.S
 			}
 		}
 		if !ok {
-			log.Warningf("%s %v advertised without valid token scope\n", sType, ad.Name)
+			log.Warningf("%s %v advertised without valid token scope\n", sType, adV2.Name)
 			ctx.JSON(http.StatusForbidden, gin.H{"error": "Authorization token verification failed. Token missing required scope"})
 			return
 		}
 	}
 
-	ad_url, err := url.Parse(ad.URL)
+	ad_url, err := url.Parse(adV2.DataURL)
 	if err != nil {
-		log.Warningf("Failed to parse %s URL %v: %v\n", sType, ad.URL, err)
+		log.Warningf("Failed to parse %s URL %v: %v\n", sType, adV2.DataURL, err)
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid " + sType + " URL"})
 		return
 	}
 
-	adWebUrl, err := url.Parse(ad.WebURL)
-	if err != nil && ad.WebURL != "" { // We allow empty WebURL string for backward compatibility
-		log.Warningf("Failed to parse server Web URL %v: %v\n", ad.WebURL, err)
+	adWebUrl, err := url.Parse(adV2.WebURL)
+	if err != nil && adV2.WebURL != "" { // We allow empty WebURL string for backward compatibility
+		log.Warningf("Failed to parse server Web URL %v: %v\n", adV2.WebURL, err)
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid server Web URL"})
 		return
 	}
 
 	sAd := common.ServerAd{
-		Name:               ad.Name,
+		Name:               adV2.Name,
 		AuthURL:            *ad_url,
 		URL:                *ad_url,
 		WebURL:             *adWebUrl,
 		Type:               sType,
-		EnableWrite:        ad.EnableWrite,
-		EnableFallbackRead: ad.EnableFallbackRead,
+		EnableWrite:        adV2.Caps.Write,
+		EnableFallbackRead: adV2.Caps.FallBackRead,
 	}
 
-	hasOriginAdInCache := serverAds.Has(sAd)
-	RecordAd(sAd, &ad.Namespaces)
+	RecordAd(sAd, &adV2.Namespaces)
 
 	// Start director periodic test of origin's health status if origin AD
 	// has WebURL field AND it's not already been registered
-	healthTestCancelFuncsMutex.Lock()
-	defer healthTestCancelFuncsMutex.Unlock()
-	if ad.WebURL != "" && !hasOriginAdInCache {
-		if _, ok := healthTestCancelFuncs[sAd]; ok {
-			// If somehow we didn't clear the key, we call cancel first before
-			// adding a new test cycle
-			healthTestCancelFuncs[sAd]()
+	healthTestUtilsMutex.Lock()
+	defer healthTestUtilsMutex.Unlock()
+	if sAd.Type == common.OriginType && adV2.WebURL != "" {
+		if existingUtil, ok := healthTestUtils[sAd]; ok {
+			// Existing registration
+			if existingUtil != nil {
+				if existingUtil.ErrGrp != nil {
+					if existingUtil.ErrGrpContext.Err() != nil {
+						// ErrGroup has been Done. Start a new one
+						errgrp, errgrpCtx := errgroup.WithContext(engineCtx)
+						cancelCtx, cancel := context.WithCancel(errgrpCtx)
+
+						errgrp.SetLimit(1)
+						healthTestUtils[sAd] = &healthTestUtil{
+							Cancel:        cancel,
+							ErrGrp:        errgrp,
+							ErrGrpContext: errgrpCtx,
+						}
+						errgrp.Go(func() error {
+							LaunchPeriodicDirectorTest(cancelCtx, sAd)
+							return nil
+						})
+						log.Debugf("New director test suite issued for %s %s. Errgroup was evicted", string(sType), sAd.URL.String())
+					} else {
+						cancelCtx, cancel := context.WithCancel(existingUtil.ErrGrpContext)
+						started := existingUtil.ErrGrp.TryGo(func() error {
+							LaunchPeriodicDirectorTest(cancelCtx, sAd)
+							return nil
+						})
+						if !started {
+							cancel()
+							log.Debugf("New director test suite blocked for %s %s, existing test has been running", string(sType), sAd.URL.String())
+						} else {
+							log.Debugf("New director test suite issued for %s %s. Existing registration", string(sType), sAd.URL.String())
+							existingUtil.Cancel()
+							existingUtil.Cancel = cancel
+						}
+					}
+				} else {
+					log.Errorf("%s %s registration didn't start a new director test cycle: errgroup is nil", string(sType), &sAd.URL)
+				}
+			} else {
+				log.Errorf("%s %s registration didn't start a new director test cycle: healthTestUtils item is nil", string(sType), &sAd.URL)
+			}
+		} else { // No healthTestUtils found, new registration
+			errgrp, errgrpCtx := errgroup.WithContext(engineCtx)
+			cancelCtx, cancel := context.WithCancel(errgrpCtx)
+
+			errgrp.SetLimit(1)
+			healthTestUtils[sAd] = &healthTestUtil{
+				Cancel:        cancel,
+				ErrGrp:        errgrp,
+				ErrGrpContext: errgrpCtx,
+			}
+			errgrp.Go(func() error {
+				LaunchPeriodicDirectorTest(cancelCtx, sAd)
+				return nil
+			})
 		}
-		ctx, cancel := context.WithCancel(context.Background())
-		healthTestCancelFuncs[sAd] = cancel
-		LaunchPeriodicDirectorTest(ctx, sAd)
 	}
 
 	if sType == common.OriginType {
 		originStatUtilsMutex.Lock()
 		defer originStatUtilsMutex.Unlock()
-		statUtil, ok := originStatUtils[sAd]
+		statUtil, ok := originStatUtils[sAd.URL]
 		if !ok || statUtil.Errgroup == nil {
-			baseCtx, cancel := context.WithCancel(context.Background())
+			baseCtx, cancel := context.WithCancel(engineCtx)
 			concLimit := param.Director_StatConcurrencyLimit.GetInt()
 			statErrGrp := errgroup.Group{}
 			statErrGrp.SetLimit(concLimit)
@@ -536,7 +624,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType common.S
 				Cancel:   cancel,
 				Context:  baseCtx,
 			}
-			originStatUtils[sAd] = newUtil
+			originStatUtils[sAd.URL] = newUtil
 		}
 	}
 
@@ -593,10 +681,17 @@ func RegisterCache(ctx context.Context, gctx *gin.Context) {
 	registerServeAd(ctx, gctx, common.CacheType)
 }
 
-func ListNamespaces(ctx *gin.Context) {
-	namespaceAds := ListNamespacesFromOrigins()
+func ListNamespacesV1(ctx *gin.Context) {
+	namespaceAdsV2 := ListNamespacesFromOrigins()
 
-	ctx.JSON(http.StatusOK, namespaceAds)
+	namespaceAdsV1 := convertNamespaceAdsV2ToV1(namespaceAdsV2)
+
+	ctx.JSON(http.StatusOK, namespaceAdsV1)
+}
+
+func ListNamespacesV2(ctx *gin.Context) {
+	namespacesAdsV2 := ListNamespacesFromOrigins()
+	ctx.JSON(http.StatusOK, namespacesAdsV2)
 }
 
 func RegisterDirector(ctx context.Context, router *gin.RouterGroup) {
@@ -610,5 +705,6 @@ func RegisterDirector(ctx context.Context, router *gin.RouterGroup) {
 	// Rename the endpoint to reflect such plan.
 	router.GET(DirectorServerDiscoveryEndpoint, DiscoverOriginCache)
 	router.POST("/api/v1.0/director/registerCache", func(gctx *gin.Context) { RegisterCache(ctx, gctx) })
-	router.GET("/api/v1.0/director/listNamespaces", ListNamespaces)
+	router.GET("/api/v1.0/director/listNamespaces", ListNamespacesV1)
+	router.GET("/api/v2.0/director/listNamespaces", ListNamespacesV2)
 }

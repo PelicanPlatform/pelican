@@ -28,17 +28,16 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus"
+	log "github.com/sirupsen/logrus"
+
 	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/utils"
-	"github.com/pkg/errors"
-	"github.com/prometheus/client_golang/prometheus"
-	log "github.com/sirupsen/logrus"
-	"golang.org/x/sync/errgroup"
-
 	"github.com/pelicanplatform/pelican/token_scopes"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 type (
@@ -132,7 +131,7 @@ func LaunchPeriodicDirectorTest(ctx context.Context, originAd common.ServerAd) {
 	originUrl := originAd.URL.String()
 	originWebUrl := originAd.WebURL.String()
 
-	log.Debug(fmt.Sprintf("Starting Director test for origin %s at %s", originName, originUrl))
+	log.Debug(fmt.Sprintf("Starting a new director test suite for origin %s at %s", originName, originUrl))
 
 	metrics.PelicanDirectorFileTransferTestSuite.With(
 		prometheus.Labels{
@@ -154,64 +153,57 @@ func LaunchPeriodicDirectorTest(ctx context.Context, originAd common.ServerAd) {
 	}
 	ticker := time.NewTicker(customInterval)
 
-	egrp, ok := ctx.Value(config.EgrpKey).(*errgroup.Group)
-	if !ok {
-		egrp = &errgroup.Group{}
-	}
+	defer ticker.Stop()
 
-	egrp.Go(func() error {
-		defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			log.Debug(fmt.Sprintf("End director test suite for origin: %s at %s", originName, originUrl))
 
-		for {
-			select {
-			case <-ctx.Done():
-				log.Debug(fmt.Sprintf("End director test cycle for origin: %s at %s", originName, originUrl))
+			metrics.PelicanDirectorActiveFileTransferTestSuite.With(
+				prometheus.Labels{
+					"server_name": originName, "server_web_url": originWebUrl, "server_type": string(originAd.Type),
+				}).Dec()
 
-				metrics.PelicanDirectorActiveFileTransferTestSuite.With(
-					prometheus.Labels{
-						"server_name": originName, "server_web_url": originWebUrl, "server_type": string(originAd.Type),
-					}).Dec()
-
-				return nil
-			case <-ticker.C:
-				log.Debug(fmt.Sprintf("Starting a new Director test cycle for origin: %s at %s", originName, originUrl))
-				fileTests := utils.TestFileTransferImpl{}
-				ok, err := fileTests.RunTests(ctx, originUrl, "", utils.DirectorFileTest)
-				if ok && err == nil {
-					log.Debugln("Director file transfer test cycle succeeded at", time.Now().Format(time.UnixDate), " for origin: ", originUrl)
-					if err := reportStatusToOrigin(ctx, originWebUrl, "ok", "Director test cycle succeeded at "+time.Now().Format(time.RFC3339)); err != nil {
-						log.Warningln("Failed to report director test result to origin:", err)
-						metrics.PelicanDirectorFileTransferTestsRuns.With(
-							prometheus.Labels{
-								"server_name": originName, "server_web_url": originWebUrl, "server_type": string(originAd.Type), "status": string(metrics.FTXTestSucceeded), "report_status": string(metrics.FTXTestFailed),
-							},
-						).Inc()
-					} else {
-						metrics.PelicanDirectorFileTransferTestsRuns.With(
-							prometheus.Labels{
-								"server_name": originName, "server_web_url": originWebUrl, "server_type": string(originAd.Type), "status": string(metrics.FTXTestSucceeded), "report_status": string(metrics.FTXTestSucceeded),
-							},
-						).Inc()
-					}
+			return
+		case <-ticker.C:
+			log.Debug(fmt.Sprintf("Starting a director test cycle for origin: %s at %s", originName, originUrl))
+			fileTests := utils.TestFileTransferImpl{}
+			ok, err := fileTests.RunTests(ctx, originUrl, "", utils.DirectorFileTest)
+			if ok && err == nil {
+				log.Debugln("Director file transfer test cycle succeeded at", time.Now().Format(time.UnixDate), " for origin: ", originUrl)
+				if err := reportStatusToOrigin(ctx, originWebUrl, "ok", "Director test cycle succeeded at "+time.Now().Format(time.RFC3339)); err != nil {
+					log.Warningln("Failed to report director test result to origin:", err)
+					metrics.PelicanDirectorFileTransferTestsRuns.With(
+						prometheus.Labels{
+							"server_name": originName, "server_web_url": originWebUrl, "server_type": string(originAd.Type), "status": string(metrics.FTXTestSucceeded), "report_status": string(metrics.FTXTestFailed),
+						},
+					).Inc()
 				} else {
-					log.Warningln("Director file transfer test cycle failed for origin: ", originUrl, " ", err)
-					if err := reportStatusToOrigin(ctx, originWebUrl, "error", "Director file transfer test cycle failed for origin: "+originUrl+" "+err.Error()); err != nil {
-						log.Warningln("Failed to report director test result to origin: ", err)
-						metrics.PelicanDirectorFileTransferTestsRuns.With(
-							prometheus.Labels{
-								"server_name": originName, "server_web_url": originWebUrl, "server_type": string(originAd.Type), "status": string(metrics.FTXTestFailed), "report_status": string(metrics.FTXTestFailed),
-							},
-						).Inc()
-					} else {
-						metrics.PelicanDirectorFileTransferTestsRuns.With(
-							prometheus.Labels{
-								"server_name": originName, "server_web_url": originWebUrl, "server_type": string(originAd.Type), "status": string(metrics.FTXTestFailed), "report_status": string(metrics.FTXTestSucceeded),
-							},
-						).Inc()
-					}
+					metrics.PelicanDirectorFileTransferTestsRuns.With(
+						prometheus.Labels{
+							"server_name": originName, "server_web_url": originWebUrl, "server_type": string(originAd.Type), "status": string(metrics.FTXTestSucceeded), "report_status": string(metrics.FTXTestSucceeded),
+						},
+					).Inc()
 				}
-
+			} else {
+				log.Warningln("Director file transfer test cycle failed for origin: ", originUrl, " ", err)
+				if err := reportStatusToOrigin(ctx, originWebUrl, "error", "Director file transfer test cycle failed for origin: "+originUrl+" "+err.Error()); err != nil {
+					log.Warningln("Failed to report director test result to origin: ", err)
+					metrics.PelicanDirectorFileTransferTestsRuns.With(
+						prometheus.Labels{
+							"server_name": originName, "server_web_url": originWebUrl, "server_type": string(originAd.Type), "status": string(metrics.FTXTestFailed), "report_status": string(metrics.FTXTestFailed),
+						},
+					).Inc()
+				} else {
+					metrics.PelicanDirectorFileTransferTestsRuns.With(
+						prometheus.Labels{
+							"server_name": originName, "server_web_url": originWebUrl, "server_type": string(originAd.Type), "status": string(metrics.FTXTestFailed), "report_status": string(metrics.FTXTestSucceeded),
+						},
+					).Inc()
+				}
 			}
+
 		}
-	})
+	}
 }

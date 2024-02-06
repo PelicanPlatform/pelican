@@ -69,6 +69,7 @@ var (
 	Federation_NamespaceUrl = StringParam{"Federation.NamespaceUrl"}
 	Federation_RegistryUrl = StringParam{"Federation.RegistryUrl"}
 	Federation_TopologyNamespaceUrl = StringParam{"Federation.TopologyNamespaceUrl"}
+	Federation_TopologyUrl = StringParam{"Federation.TopologyUrl"}
 	IssuerKey = StringParam{"IssuerKey"}
 	Issuer_AuthenticationSource = StringParam{"Issuer.AuthenticationSource"}
 	Issuer_GroupFile = StringParam{"Issuer.GroupFile"}
@@ -129,6 +130,16 @@ var (
 	Server_UIActivationCodeFile = StringParam{"Server.UIActivationCodeFile"}
 	Server_UIPasswordFile = StringParam{"Server.UIPasswordFile"}
 	Server_WebHost = StringParam{"Server.WebHost"}
+	Shoveler_AMQPExchange = StringParam{"Shoveler.AMQPExchange"}
+	Shoveler_AMQPTokenLocation = StringParam{"Shoveler.AMQPTokenLocation"}
+	Shoveler_MessageQueueProtocol = StringParam{"Shoveler.MessageQueueProtocol"}
+	Shoveler_QueueDirectory = StringParam{"Shoveler.QueueDirectory"}
+	Shoveler_StompCert = StringParam{"Shoveler.StompCert"}
+	Shoveler_StompCertKey = StringParam{"Shoveler.StompCertKey"}
+	Shoveler_StompPassword = StringParam{"Shoveler.StompPassword"}
+	Shoveler_StompUsername = StringParam{"Shoveler.StompUsername"}
+	Shoveler_Topic = StringParam{"Shoveler.Topic"}
+	Shoveler_URL = StringParam{"Shoveler.URL"}
 	StagePlugin_MountPrefix = StringParam{"StagePlugin.MountPrefix"}
 	StagePlugin_OriginPrefix = StringParam{"StagePlugin.OriginPrefix"}
 	StagePlugin_ShadowOriginPrefix = StringParam{"StagePlugin.ShadowOriginPrefix"}
@@ -153,6 +164,7 @@ var (
 	Origin_ScitokensRestrictedPaths = StringSliceParam{"Origin.ScitokensRestrictedPaths"}
 	Registry_AdminUsers = StringSliceParam{"Registry.AdminUsers"}
 	Server_Modules = StringSliceParam{"Server.Modules"}
+	Shoveler_OutputDestinations = StringSliceParam{"Shoveler.OutputDestinations"}
 )
 
 var (
@@ -169,6 +181,8 @@ var (
 	Monitoring_PortLower = IntParam{"Monitoring.PortLower"}
 	Server_IssuerPort = IntParam{"Server.IssuerPort"}
 	Server_WebPort = IntParam{"Server.WebPort"}
+	Shoveler_PortHigher = IntParam{"Shoveler.PortHigher"}
+	Shoveler_PortLower = IntParam{"Shoveler.PortLower"}
 	Transport_MaxIdleConns = IntParam{"Transport.MaxIdleConns"}
 	Xrootd_Port = IntParam{"Xrootd.Port"}
 )
@@ -197,6 +211,8 @@ var (
 	Registry_RequireKeyChaining = BoolParam{"Registry.RequireKeyChaining"}
 	Registry_RequireOriginApproval = BoolParam{"Registry.RequireOriginApproval"}
 	Server_EnableUI = BoolParam{"Server.EnableUI"}
+	Shoveler_Enable = BoolParam{"Shoveler.Enable"}
+	Shoveler_VerifyHeader = BoolParam{"Shoveler.VerifyHeader"}
 	StagePlugin_Hook = BoolParam{"StagePlugin.Hook"}
 	TLSSkipVerify = BoolParam{"TLSSkipVerify"}
 )
@@ -224,4 +240,5 @@ var (
 	Issuer_OIDCAuthenticationRequirements = ObjectParam{"Issuer.OIDCAuthenticationRequirements"}
 	Registry_CustomRegistrationFields = ObjectParam{"Registry.CustomRegistrationFields"}
 	Registry_Institutions = ObjectParam{"Registry.Institutions"}
+	Shoveler_IPMapping = ObjectParam{"Shoveler.IPMapping"}
 )

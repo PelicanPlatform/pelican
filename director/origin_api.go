@@ -34,7 +34,6 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
-	"github.com/pelicanplatform/pelican/common"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
@@ -45,15 +44,6 @@ import (
 )
 
 type (
-	OriginAdvertise struct {
-		Name               string               `json:"name"`
-		URL                string               `json:"url"`               // This is the url for origin's XRootD service and file transfer
-		WebURL             string               `json:"web_url,omitempty"` // This is the url for origin's web engine and APIs
-		Namespaces         []common.NamespaceAd `json:"namespaces"`
-		EnableWrite        bool                 `json:"enablewrite"`
-		EnableFallbackRead bool                 `json:"enable-fallback-read"` // True if the origin will allow direct client reads when no caches are available
-	}
-
 	checkStatusReq struct {
 		Prefix string `json:"prefix"`
 	}

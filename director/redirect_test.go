@@ -21,13 +21,14 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
+	"github.com/spf13/viper"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/token_scopes"
-	"github.com/spf13/viper"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 type MockCache struct {
@@ -46,7 +47,7 @@ func (m *MockCache) Register(u string, options ...jwk.RegisterOption) error {
 	return m.RegisterFn(m)
 }
 
-func NamespaceAdContainsPath(ns []common.NamespaceAd, path string) bool {
+func NamespaceAdContainsPath(ns []common.NamespaceAdV2, path string) bool {
 	for _, v := range ns {
 		if v.Path == path {
 			return true
@@ -181,7 +182,7 @@ func TestDirectorRegistration(t *testing.T) {
 		serverAds.DeleteAll()
 	}
 
-	t.Run("valid-token", func(t *testing.T) {
+	t.Run("valid-token-V1", func(t *testing.T) {
 		c, r, w := setupContext()
 		pKey, token, issuerURL := generateToken()
 		publicKey, err := jwk.PublicKeyOf(pKey)
@@ -193,7 +194,44 @@ func TestDirectorRegistration(t *testing.T) {
 		isurl := url.URL{}
 		isurl.Path = ts.URL
 
-		ad := common.OriginAdvertise{Name: "test", URL: "https://or-url.org", Namespaces: []common.NamespaceAd{{Path: "/foo/bar", Issuer: isurl}}}
+		ad := common.OriginAdvertiseV1{Name: "test", URL: "https://or-url.org", Namespaces: []common.NamespaceAdV1{{Path: "/foo/bar", Issuer: isurl}}}
+
+		jsonad, err := json.Marshal(ad)
+		assert.NoError(t, err, "Error marshalling OriginAdvertise")
+
+		setupRequest(c, r, jsonad, token)
+
+		r.ServeHTTP(w, c.Request)
+
+		// Check to see that the code exits with status code 200 after given it a good token
+		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
+
+		namaspaceADs := ListNamespacesFromOrigins()
+		// If the origin was successfully registed at director, we should be able to find it in director's originAds
+		assert.True(t, NamespaceAdContainsPath(namaspaceADs, "/foo/bar"), "Coudln't find namespace in the director cache.")
+		teardown()
+	})
+
+	t.Run("valid-token-V2", func(t *testing.T) {
+		c, r, w := setupContext()
+		pKey, token, issuerURL := generateToken()
+		publicKey, err := jwk.PublicKeyOf(pKey)
+		assert.NoError(t, err, "Error creating public key from private key")
+
+		ar := setupMockCache(t, publicKey)
+		useMockCache(ar, issuerURL)
+
+		isurl := url.URL{}
+		isurl.Path = ts.URL
+
+		ad := common.OriginAdvertiseV2{
+			DataURL: "https://or-url.org",
+			Name:    "test",
+			Namespaces: []common.NamespaceAdV2{{
+				Path:   "/foo/bar",
+				Issuer: []common.TokenIssuer{{IssuerUrl: isurl}},
+			}},
+		}
 
 		jsonad, err := json.Marshal(ad)
 		assert.NoError(t, err, "Error marshalling OriginAdvertise")
@@ -212,7 +250,7 @@ func TestDirectorRegistration(t *testing.T) {
 	})
 
 	// Now repeat the above test, but with an invalid token
-	t.Run("invalid-token", func(t *testing.T) {
+	t.Run("invalid-token-V1", func(t *testing.T) {
 		c, r, w := setupContext()
 		wrongPrivateKey, err := ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
 		assert.NoError(t, err, "Error creating another private key")
@@ -226,7 +264,7 @@ func TestDirectorRegistration(t *testing.T) {
 		isurl := url.URL{}
 		isurl.Path = ts.URL
 
-		ad := common.OriginAdvertise{Name: "test", URL: "https://or-url.org", Namespaces: []common.NamespaceAd{{Path: "/foo/bar", Issuer: isurl}}}
+		ad := common.OriginAdvertiseV1{Name: "test", URL: "https://or-url.org", Namespaces: []common.NamespaceAdV1{{Path: "/foo/bar", Issuer: isurl}}}
 
 		jsonad, err := json.Marshal(ad)
 		assert.NoError(t, err, "Error marshalling OriginAdvertise")
@@ -244,7 +282,42 @@ func TestDirectorRegistration(t *testing.T) {
 		teardown()
 	})
 
-	t.Run("valid-token-with-web-url", func(t *testing.T) {
+	t.Run("invalid-token-V2", func(t *testing.T) {
+		c, r, w := setupContext()
+		wrongPrivateKey, err := ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
+		assert.NoError(t, err, "Error creating another private key")
+		_, token, issuerURL := generateToken()
+
+		wrongPublicKey, err := jwk.PublicKeyOf(wrongPrivateKey)
+		assert.NoError(t, err, "Error creating public key from private key")
+		ar := setupMockCache(t, wrongPublicKey)
+		useMockCache(ar, issuerURL)
+
+		isurl := url.URL{}
+		isurl.Path = ts.URL
+
+		ad := common.OriginAdvertiseV2{Name: "test", DataURL: "https://or-url.org", Namespaces: []common.NamespaceAdV2{{
+			Path:   "/foo/bar",
+			Issuer: []common.TokenIssuer{{IssuerUrl: isurl}},
+		}}}
+
+		jsonad, err := json.Marshal(ad)
+		assert.NoError(t, err, "Error marshalling OriginAdvertise")
+
+		setupRequest(c, r, jsonad, token)
+
+		r.ServeHTTP(w, c.Request)
+
+		assert.Equal(t, http.StatusForbidden, w.Result().StatusCode, "Expected failing status code of 403")
+		body, _ := io.ReadAll(w.Result().Body)
+		assert.Equal(t, `{"error":"Authorization token verification failed"}`, string(body), "Failure wasn't because token verification failed")
+
+		namaspaceADs := ListNamespacesFromOrigins()
+		assert.False(t, NamespaceAdContainsPath(namaspaceADs, "/foo/bar"), "Found namespace in the director cache even if the token validation failed.")
+		teardown()
+	})
+
+	t.Run("valid-token-with-web-url-V1", func(t *testing.T) {
 		c, r, w := setupContext()
 		pKey, token, issuerURL := generateToken()
 		publicKey, err := jwk.PublicKeyOf(pKey)
@@ -255,7 +328,36 @@ func TestDirectorRegistration(t *testing.T) {
 		isurl := url.URL{}
 		isurl.Path = ts.URL
 
-		ad := common.OriginAdvertise{WebURL: "https://localhost:8844", Namespaces: []common.NamespaceAd{{Path: "/foo/bar", Issuer: isurl}}}
+		ad := common.OriginAdvertiseV1{URL: "https://or-url.org", WebURL: "https://localhost:8844", Namespaces: []common.NamespaceAdV1{{Path: "/foo/bar", Issuer: isurl}}}
+
+		jsonad, err := json.Marshal(ad)
+		assert.NoError(t, err, "Error marshalling OriginAdvertise")
+
+		setupRequest(c, r, jsonad, token)
+
+		r.ServeHTTP(w, c.Request)
+
+		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
+		assert.Equal(t, 1, len(serverAds.Keys()), "Origin fail to register at serverAds")
+		assert.Equal(t, "https://localhost:8844", serverAds.Keys()[0].WebURL.String(), "WebURL in serverAds does not match data in origin registration request")
+		teardown()
+	})
+
+	t.Run("valid-token-with-web-url-V2", func(t *testing.T) {
+		c, r, w := setupContext()
+		pKey, token, issuerURL := generateToken()
+		publicKey, err := jwk.PublicKeyOf(pKey)
+		assert.NoError(t, err, "Error creating public key from private key")
+		ar := setupMockCache(t, publicKey)
+		useMockCache(ar, issuerURL)
+
+		isurl := url.URL{}
+		isurl.Path = ts.URL
+
+		ad := common.OriginAdvertiseV2{DataURL: "https://or-url.org", WebURL: "https://localhost:8844", Namespaces: []common.NamespaceAdV2{{
+			Path:   "/foo/bar",
+			Issuer: []common.TokenIssuer{{IssuerUrl: isurl}},
+		}}}
 
 		jsonad, err := json.Marshal(ad)
 		assert.NoError(t, err, "Error marshalling OriginAdvertise")
@@ -271,7 +373,7 @@ func TestDirectorRegistration(t *testing.T) {
 	})
 
 	// We want to ensure backwards compatibility for WebURL
-	t.Run("valid-token-without-web-url", func(t *testing.T) {
+	t.Run("valid-token-without-web-url-V1", func(t *testing.T) {
 		c, r, w := setupContext()
 		pKey, token, issuerURL := generateToken()
 		publicKey, err := jwk.PublicKeyOf(pKey)
@@ -282,7 +384,34 @@ func TestDirectorRegistration(t *testing.T) {
 		isurl := url.URL{}
 		isurl.Path = ts.URL
 
-		ad := common.OriginAdvertise{Namespaces: []common.NamespaceAd{{Path: "/foo/bar", Issuer: isurl}}}
+		ad := common.OriginAdvertiseV1{URL: "https://or-url.org", Namespaces: []common.NamespaceAdV1{{Path: "/foo/bar", Issuer: isurl}}}
+
+		jsonad, err := json.Marshal(ad)
+		assert.NoError(t, err, "Error marshalling OriginAdvertise")
+
+		setupRequest(c, r, jsonad, token)
+
+		r.ServeHTTP(w, c.Request)
+
+		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
+		assert.Equal(t, 1, len(serverAds.Keys()), "Origin fail to register at serverAds")
+		assert.Equal(t, "", serverAds.Keys()[0].WebURL.String(), "WebURL in serverAds isn't empty with no WebURL provided in registration")
+		teardown()
+	})
+
+	t.Run("valid-token-without-web-url-V2", func(t *testing.T) {
+		c, r, w := setupContext()
+		pKey, token, issuerURL := generateToken()
+		publicKey, err := jwk.PublicKeyOf(pKey)
+		assert.NoError(t, err, "Error creating public key from private key")
+		ar := setupMockCache(t, publicKey)
+		useMockCache(ar, issuerURL)
+
+		isurl := url.URL{}
+		isurl.Path = ts.URL
+
+		ad := common.OriginAdvertiseV2{DataURL: "https://or-url.org", Namespaces: []common.NamespaceAdV2{{Path: "/foo/bar",
+			Issuer: []common.TokenIssuer{{IssuerUrl: isurl}}}}}
 
 		jsonad, err := json.Marshal(ad)
 		assert.NoError(t, err, "Error marshalling OriginAdvertise")
@@ -377,14 +506,13 @@ func TestDiscoverOriginCache(t *testing.T) {
 		Longitude: 123.05,
 	}
 
-	mockNamespaceAd := common.NamespaceAd{
-		RequireToken:  true,
-		Path:          "/foo/bar/",
-		Issuer:        url.URL{},
-		MaxScopeDepth: 1,
-		Strategy:      "",
-		BasePath:      "",
-		VaultServer:   "",
+	mockNamespaceAd := common.NamespaceAdV2{
+		PublicRead: false,
+		Path:       "/foo/bar/",
+		Issuer: []common.TokenIssuer{{
+			BasePaths: []string{""},
+			IssuerUrl: url.URL{},
+		}},
 	}
 
 	mockDirectorUrl := "https://fake-director.org:8888"
@@ -521,10 +649,10 @@ func TestDiscoverOriginCache(t *testing.T) {
 			serverAdMutex.Lock()
 			defer serverAdMutex.Unlock()
 			serverAds.DeleteAll()
-			serverAds.Set(mockPelicanOriginServerAd, []common.NamespaceAd{mockNamespaceAd}, ttlcache.DefaultTTL)
+			serverAds.Set(mockPelicanOriginServerAd, []common.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
 			// Server fetched from topology should not be present in SD response
-			serverAds.Set(mockTopoOriginServerAd, []common.NamespaceAd{mockNamespaceAd}, ttlcache.DefaultTTL)
-			serverAds.Set(mockCacheServerAd, []common.NamespaceAd{mockNamespaceAd}, ttlcache.DefaultTTL)
+			serverAds.Set(mockTopoOriginServerAd, []common.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
+			serverAds.Set(mockCacheServerAd, []common.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
 		}()
 
 		expectedRes := []PromDiscoveryItem{{
@@ -576,11 +704,11 @@ func TestDiscoverOriginCache(t *testing.T) {
 			defer serverAdMutex.Unlock()
 			serverAds.DeleteAll()
 			// Add multiple same serverAds
-			serverAds.Set(mockPelicanOriginServerAd, []common.NamespaceAd{mockNamespaceAd}, ttlcache.DefaultTTL)
-			serverAds.Set(mockPelicanOriginServerAd, []common.NamespaceAd{mockNamespaceAd}, ttlcache.DefaultTTL)
-			serverAds.Set(mockPelicanOriginServerAd, []common.NamespaceAd{mockNamespaceAd}, ttlcache.DefaultTTL)
+			serverAds.Set(mockPelicanOriginServerAd, []common.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
+			serverAds.Set(mockPelicanOriginServerAd, []common.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
+			serverAds.Set(mockPelicanOriginServerAd, []common.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
 			// Server fetched from topology should not be present in SD response
-			serverAds.Set(mockTopoOriginServerAd, []common.NamespaceAd{mockNamespaceAd}, ttlcache.DefaultTTL)
+			serverAds.Set(mockTopoOriginServerAd, []common.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
 		}()
 
 		expectedRes := []PromDiscoveryItem{{

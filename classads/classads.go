@@ -65,6 +65,16 @@ func (c *ClassAd) String() string {
 			newVal := strings.Replace(v, "\"", "\\\"", -1)
 			buffer.WriteString(newVal)
 			buffer.WriteString("\"")
+		case map[string]interface{}:
+			buffer.WriteString("[")
+			for key, value := range v {
+				buffer.WriteString(key)
+				buffer.WriteString(" = ")
+				buffer.WriteString("\"")
+				buffer.WriteString(fmt.Sprintf("%v", value))
+				buffer.WriteString("\"; ")
+			}
+			buffer.WriteString("]")
 		default:
 			buffer.WriteString(fmt.Sprintf("%v", value))
 		}

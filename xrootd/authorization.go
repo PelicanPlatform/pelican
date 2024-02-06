@@ -29,6 +29,8 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
+	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -200,6 +202,57 @@ func writeScitokensConfiguration(modules config.ServerType, cfg *ScitokensCfg) e
 	return nil
 }
 
+// Retrieves authorization auth files for OSDF caches and origins
+// This function queries the topology url for the specific authfiles for the cache and origin
+// and returns a pointer to a byte buffer containing the file contents, returns nil if the
+// authfile doesn't exist - considering it an empty file
+func getOSDFAuthFiles(server server_utils.XRootDServer) ([]byte, error) {
+	var stype string
+	if server.GetServerType().IsEnabled(config.OriginType) {
+		stype = "origin"
+	} else {
+		stype = "cache"
+	}
+
+	base, err := url.Parse(param.Federation_TopologyUrl.GetString())
+	if err != nil {
+		return nil, err
+	}
+	endpoint, err := url.Parse("/" + stype + "/Authfile?fqdn=" + param.Server_Hostname.GetString())
+	if err != nil {
+		return nil, err
+	}
+	client := http.Client{Transport: config.GetTransport()}
+	url := base.ResolveReference(endpoint)
+	log.Debugln("Querying OSDF url:", url.String())
+
+	req, err := http.NewRequest("GET", url.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Do(req)
+
+	if err != nil {
+		return nil, err
+	}
+
+	defer resp.Body.Close()
+
+	// If endpoint isn't in topology, we simply want to return an empty buffer
+	// The cache an origin still run, but without any information from the authfile
+	if resp.StatusCode == 404 {
+		return nil, nil
+	}
+	buf := new(bytes.Buffer)
+
+	_, err = io.Copy(buf, resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
+}
+
 // Parse the input xrootd authfile, add any default configurations, and then save it
 // into the xrootd runtime directory
 func EmitAuthfile(server server_utils.XRootDServer) error {
@@ -210,10 +263,23 @@ func EmitAuthfile(server server_utils.XRootDServer) error {
 		return errors.Wrapf(err, "Failed to read xrootd authfile from %s", authfile)
 	}
 
-	sc := bufio.NewScanner(strings.NewReader(string(contents)))
-	sc.Split(ScanLinesWithCont)
 	output := new(bytes.Buffer)
 	foundPublicLine := false
+	if config.GetPreferredPrefix() == "OSDF" {
+		log.Debugln("Retrieving OSDF Authfile for server")
+		bytes, err := getOSDFAuthFiles(server)
+		if err != nil {
+			return errors.Wrapf(err, "Failed to fetch osdf authfile from topology")
+		}
+
+		log.Debugln("Parsing OSDF Authfile")
+		if bytes != nil {
+			output.Write(bytes)
+		}
+	}
+
+	sc := bufio.NewScanner(strings.NewReader(string(contents)))
+	sc.Split(ScanLinesWithCont)
 	log.Debugln("Parsing the input authfile")
 	for sc.Scan() {
 		lineContents := sc.Text()
@@ -254,8 +320,8 @@ func EmitAuthfile(server server_utils.XRootDServer) error {
 			outStr = "u * "
 		}
 		for _, ad := range server.GetNamespaceAds() {
-			if !ad.RequireToken && ad.BasePath != "" {
-				outStr += ad.BasePath + " lr "
+			if ad.PublicRead && ad.Path != "" {
+				outStr += ad.Path + " lr "
 			}
 		}
 		// A public namespace exists, so a line needs to be printed
@@ -405,20 +471,6 @@ func GenerateDirectorMonitoringIssuer() (issuer Issuer, err error) {
 	return
 }
 
-// Director's `stat` feature requires access to origin's files,
-// so we need to add director as a valid issuer
-func GenerateDirectorStatIssuer(exportedPaths []string) (issuer Issuer, err error) {
-	if val := param.Federation_DirectorUrl.GetString(); val == "" {
-		return
-	}
-	issuer.Name = "Director Stat"
-	issuer.Issuer = param.Federation_DirectorUrl.GetString()
-	issuer.BasePaths = exportedPaths
-	issuer.DefaultUser = "xrootd"
-
-	return
-}
-
 // Makes the general scitokens config to be used by both the origin and the cache
 func makeSciTokensCfg() (cfg ScitokensCfg, err error) {
 	gid, err := config.GetDaemonGID()
@@ -492,33 +544,25 @@ func WriteOriginScitokensConfig(exportedPaths []string) error {
 			cfg.IssuerMap[issuer.Issuer] = issuer
 		}
 	}
-	if issuer, err := GenerateDirectorStatIssuer(exportedPaths); err == nil && len(issuer.Name) > 0 {
-		if val, ok := cfg.IssuerMap[issuer.Issuer]; ok {
-			val.BasePaths = append(val.BasePaths, issuer.BasePaths...)
-			cfg.IssuerMap[issuer.Issuer] = val
-		} else {
-			cfg.IssuerMap[issuer.Issuer] = issuer
-		}
-	}
 
 	return writeScitokensConfiguration(config.OriginType, &cfg)
 }
 
 // Writes out the cache's scitokens.cfg configuration
-func WriteCacheScitokensConfig(nsAds []common.NamespaceAd) error {
+func WriteCacheScitokensConfig(nsAds []common.NamespaceAdV2) error {
 	cfg, err := makeSciTokensCfg()
 	if err != nil {
 		return err
 	}
 	for _, ad := range nsAds {
-		if ad.RequireToken {
-			if ad.Issuer.String() != "" && ad.BasePath != "" {
-				if val, ok := cfg.IssuerMap[ad.Issuer.String()]; ok {
-					val.BasePaths = append(val.BasePaths, ad.BasePath)
-					cfg.IssuerMap[ad.Issuer.String()] = val
+		if !ad.PublicRead {
+			for _, ti := range ad.Issuer {
+				if val, ok := cfg.IssuerMap[ti.IssuerUrl.String()]; ok {
+					val.BasePaths = append(val.BasePaths, ti.BasePaths...)
+					cfg.IssuerMap[ti.IssuerUrl.String()] = val
 				} else {
-					cfg.IssuerMap[ad.Issuer.String()] = Issuer{Issuer: ad.Issuer.String(), BasePaths: []string{ad.BasePath}, Name: ad.Issuer.String()}
-					cfg.Global.Audience = append(cfg.Global.Audience, ad.Issuer.String())
+					cfg.IssuerMap[ti.IssuerUrl.String()] = Issuer{Issuer: ti.IssuerUrl.String(), BasePaths: ti.BasePaths, Name: ti.IssuerUrl.String()}
+					cfg.Global.Audience = append(cfg.Global.Audience, ti.IssuerUrl.String())
 				}
 			}
 		}

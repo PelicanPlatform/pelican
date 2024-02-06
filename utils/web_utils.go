@@ -39,6 +39,12 @@ type (
 		Resource     string `json:"resource"`
 	}
 
+	Scitokens struct {
+		BasePath   []string `json:"base_path"`
+		Issuer     string   `json:"issuer"`
+		Restricted []string `json:"restricted_path"`
+	}
+
 	CredentialGeneration struct {
 		BasePath      string `json:"base_path"`
 		Issuer        string `json:"issuer"`
@@ -55,6 +61,7 @@ type (
 		DirlistHost          string               `json:"dirlisthost"`
 		Path                 string               `json:"path"`
 		ReadHTTPS            bool                 `json:"readhttps"`
+		Scitokens            []Scitokens          `json:"scitokens"`
 		UseTokenOnRead       bool                 `json:"usetokenonread"`
 		WritebackHost        string               `json:"writebackhost"`
 	}

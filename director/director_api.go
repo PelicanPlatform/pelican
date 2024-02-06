@@ -30,13 +30,13 @@ import (
 )
 
 // List all namespaces from origins registered at the director
-func ListNamespacesFromOrigins() []common.NamespaceAd {
+func ListNamespacesFromOrigins() []common.NamespaceAdV2 {
 
 	serverAdMutex.RLock()
 	defer serverAdMutex.RUnlock()
 
 	serverAdItems := serverAds.Items()
-	namespaces := make([]common.NamespaceAd, 0, len(serverAdItems))
+	namespaces := make([]common.NamespaceAdV2, 0, len(serverAdItems))
 	for _, item := range serverAdItems {
 		if item.Key().Type == common.OriginType {
 			namespaces = append(namespaces, item.Value()...)
@@ -69,27 +69,35 @@ func ConfigTTLCache(ctx context.Context, egrp *errgroup.Group) {
 	go serverAds.Start()
 	go namespaceKeys.Start()
 
-	serverAds.OnEviction(func(ctx context.Context, er ttlcache.EvictionReason, i *ttlcache.Item[common.ServerAd, []common.NamespaceAd]) {
-		healthTestCancelFuncsMutex.Lock()
-		defer healthTestCancelFuncsMutex.Unlock()
-		if cancelFunc, exists := healthTestCancelFuncs[i.Key()]; exists {
-			// Call the cancel function for the evicted originAd to end its health test
-			cancelFunc()
-
-			// Remove the cancel function from the map as it's no longer needed
-			delete(healthTestCancelFuncs, i.Key())
+	serverAds.OnEviction(func(ctx context.Context, er ttlcache.EvictionReason, i *ttlcache.Item[common.ServerAd, []common.NamespaceAdV2]) {
+		healthTestUtilsMutex.RLock()
+		defer healthTestUtilsMutex.RUnlock()
+		if util, exists := healthTestUtils[i.Key()]; exists {
+			util.Cancel()
+			if util.ErrGrp != nil {
+				err := util.ErrGrp.Wait()
+				if err != nil {
+					log.Debugf("Error from errgroup when evict the registration from TTL cache for %s %s %s", string(i.Key().Type), i.Key().Name, err.Error())
+				} else {
+					log.Debugf("Errgroup successfully emptied at TTL cache eviction for %s %s", string(i.Key().Type), i.Key().Name)
+				}
+			} else {
+				log.Debugf("errgroup is nil when evict the registration from TTL cache for %s %s", string(i.Key().Type), i.Key().Name)
+			}
+		} else {
+			log.Debugf("healthTestUtil not found for %s when evicting TTL cache item", i.Key().Name)
 		}
 
 		if i.Key().Type == common.OriginType {
 			originStatUtilsMutex.Lock()
 			defer originStatUtilsMutex.Unlock()
-			statUtil, ok := originStatUtils[i.Key()]
+			statUtil, ok := originStatUtils[i.Key().URL]
 			if ok {
 				statUtil.Cancel()
 				if err := statUtil.Errgroup.Wait(); err != nil {
 					log.Info(fmt.Sprintf("Error happened when stopping origin %q stat goroutine group: %v", i.Key().Name, err))
 				}
-				delete(originStatUtils, i.Key())
+				delete(originStatUtils, i.Key().URL)
 			}
 		}
 	})

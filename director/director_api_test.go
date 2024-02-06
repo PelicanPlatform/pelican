@@ -31,23 +31,29 @@ var mockCacheServerAd common.ServerAd = common.ServerAd{
 
 const mockPathPreix string = "/foo/bar/"
 
-func mockNamespaceAds(size int, serverPrefix string) []common.NamespaceAd {
-	namespaceAds := make([]common.NamespaceAd, size)
+func mockNamespaceAds(size int, serverPrefix string) []common.NamespaceAdV2 {
+	namespaceAds := make([]common.NamespaceAdV2, size)
 	for i := 0; i < size; i++ {
-		namespaceAds[i] = common.NamespaceAd{
-			RequireToken:  true,
-			Path:          mockPathPreix + serverPrefix + "/" + fmt.Sprint(i),
-			Issuer:        url.URL{},
-			MaxScopeDepth: 1,
-			Strategy:      "",
-			BasePath:      "",
-			VaultServer:   "",
+		namespaceAds[i] = common.NamespaceAdV2{
+			PublicRead: false,
+			Caps: common.Capabilities{
+				PublicRead: false,
+			},
+			Path: mockPathPreix + serverPrefix + "/" + fmt.Sprint(i),
+			Issuer: []common.TokenIssuer{{
+				IssuerUrl: url.URL{},
+			}},
+			Generation: []common.TokenGen{{
+				MaxScopeDepth: 1,
+				Strategy:      "",
+				VaultServer:   "",
+			}},
 		}
 	}
 	return namespaceAds
 }
 
-func namespaceAdContainsPath(ns []common.NamespaceAd, path string) bool {
+func namespaceAdContainsPath(ns []common.NamespaceAdV2, path string) bool {
 	for _, v := range ns {
 		if v.Path == path {
 			return true
@@ -132,8 +138,8 @@ func TestListServerAds(t *testing.T) {
 			defer serverAdMutex.Unlock()
 			serverAds.DeleteAll()
 		}()
-		serverAds.Set(mockOriginServerAd, []common.NamespaceAd{}, ttlcache.DefaultTTL)
-		serverAds.Set(mockCacheServerAd, []common.NamespaceAd{}, ttlcache.DefaultTTL)
+		serverAds.Set(mockOriginServerAd, []common.NamespaceAdV2{}, ttlcache.DefaultTTL)
+		serverAds.Set(mockCacheServerAd, []common.NamespaceAdV2{}, ttlcache.DefaultTTL)
 		adsAll := ListServerAds([]common.ServerType{common.OriginType, common.CacheType})
 		assert.Equal(t, 2, len(adsAll))
 

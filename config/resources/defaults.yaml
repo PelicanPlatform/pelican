@@ -63,6 +63,11 @@ Monitoring:
   TokenRefreshInterval: 59m
   MetricAuthorization: true
   AggregatePrefixes: ["/*"]
+Shoveler:
+  MessageQueueProtocol: amqp
+  PortLower: 9930
+  PortHigher: 9999
+  AMQPExchange: shoveled-xrd
 Xrootd:
   Port: 8443
   Mount: ""

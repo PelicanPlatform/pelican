@@ -58,8 +58,8 @@ nfpms:
     file_name_template: "{{ .ConventionalFileName }}"
     id: pelican
     vendor: OSG Consortium
-    homepage: https://github.com/PelicanPlatform/pelican
-    maintainer: Brian Bockelman <bbockelman@morgridge.org>
+    homepage: https://pelicanplatform.org
+    maintainer: Pelican Team <help@pelicanplatform.org>
     description: Command-line copy tool for the Open Science Data Federation
     license: ASL 2.0
     formats:
@@ -102,8 +102,8 @@ nfpms:
     file_name_template: "{{ .ConventionalFileName }}"
     id: pelican-osdf-compat
     vendor: OSG Consortium
-    homepage: https://github.com/PelicanPlatform/pelican
-    maintainer: Brian Bockelman <bbockelman@morgridge.org>
+    homepage: https://pelicanplatform.org
+    maintainer: Pelican Team <help@pelicanplatform.org>
     description: OSDF compatibility files for Pelican
     license: ASL 2.0
     meta: true
@@ -186,3 +186,57 @@ nfpms:
           - "stashcp (<< 7)"
           - "condor-stash-plugin (<< 7)"
   # end package pelican-osdf-compet
+
+  - package_name: pelican-server
+    builds: []
+    file_name_template: "{{ .ConventionalFileName }}"
+    id: pelican-server
+    vendor: OSG Consortium
+    homepage: https://pelicanplatform.org
+    maintainer: Pelican Team <help@pelicanplatform.org>
+    description: SystemD files and configs for Pelican services
+    license: ASL 2.0
+    meta: true
+    formats:
+      # XXX Deb has some different conventions; planned for a later release
+      # - deb
+      - rpm
+    release: 1
+    section: default
+    priority: extra
+    # dependencies are per-package format
+    provides:
+      ## {{ .Version }} substitutions do not work in this list
+      - "pelican-origin = 7"
+      - "pelican-cache = 7"
+      - "pelican-registry = 7"
+      - "pelican-director = 7"
+    contents:
+      - src: "systemd/pelican-cache.service"
+        dst: "/usr/lib/systemd/system/pelican-cache.service"
+      - src: "systemd/pelican-origin.service"
+        dst: "/usr/lib/systemd/system/pelican-origin.service"
+      - src: "systemd/pelican-director.service"
+        dst: "/usr/lib/systemd/system/pelican-director.service"
+      - src: "systemd/pelican-registry.service"
+        dst: "/usr/lib/systemd/system/pelican-registry.service"
+      - src: "systemd/pelican-cache.yaml"
+        dst: "/etc/pelican/pelican-cache.yaml"
+        type: config|noreplace
+      - src: "systemd/pelican-origin.yaml"
+        dst: "/etc/pelican/pelican-origin.yaml"
+        type: config|noreplace
+      - src: "systemd/pelican-director.yaml"
+        dst: "/etc/pelican/pelican-director.yaml"
+        type: config|noreplace
+      - src: "systemd/pelican-registry.yaml"
+        dst: "/etc/pelican/pelican-registry.yaml"
+        type: config|noreplace
+    overrides:
+      rpm:
+        dependencies:
+          - "pelican >= 7.4.0"
+          - "xrootd-server >= 1:5.6.3"
+          - "xrootd-scitokens"
+          - "xrootd-voms"
+  # end package pelican-server

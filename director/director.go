@@ -19,7 +19,6 @@
 package director
 
 import (
-	"context"
 	"net/http"
 	"path"
 	"strings"
@@ -45,13 +44,14 @@ type (
 	}
 
 	statResponse struct {
+		OK       bool              `json:"ok"`
 		Message  string            `json:"message"`
 		Metadata []*objectMetadata `json:"metadata"`
 	}
 
 	statRequest struct {
-		Min int `form:"min"`
-		Max int `form:"max"`
+		MinResponses int `form:"min_responses"`
+		MaxResponses int `form:"max_responses"`
 	}
 )
 
@@ -110,14 +110,31 @@ func queryOrigins(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid query parameters"})
 		return
 	}
-	cancelCtx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	meta, msg, err := NewObjectStat().Query(path, cancelCtx, queryParams.Min, queryParams.Max)
+	meta, msg, err := NewObjectStat().Query(path, ctx, queryParams.MinResponses, queryParams.MaxResponses)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+		if err == NoPrefixMatchError {
+			ctx.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		} else if err == ParameterError {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		} else if err == InsufficientResError {
+			// Insufficient response does not cause a 500 error, but OK field in reponse is false
+			if len(meta) < 1 {
+				ctx.JSON(http.StatusNotFound, gin.H{"error": msg + " If no object is available, please check if the object is in a public namespace."})
+				return
+			}
+			res := statResponse{Message: msg, Metadata: meta, OK: false}
+			ctx.JSON(http.StatusOK, res)
+		} else {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 	}
-	res := statResponse{Message: msg, Metadata: meta}
+	if len(meta) < 1 {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": err.Error() + " If no object is available, please check if the object is in a public namespace."})
+	}
+	res := statResponse{Message: msg, Metadata: meta, OK: true}
 	ctx.JSON(http.StatusOK, res)
 }
 
@@ -127,5 +144,6 @@ func RegisterDirectorWebAPI(router *gin.RouterGroup) {
 	{
 		directorWebAPI.GET("/servers", listServers)
 		directorWebAPI.GET("/servers/origins/stat/*path", web_ui.AuthHandler, queryOrigins)
+		directorWebAPI.HEAD("/servers/origins/stat/*path", web_ui.AuthHandler, queryOrigins)
 	}
 }

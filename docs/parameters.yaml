@@ -263,6 +263,14 @@ osdf_default: Default is determined dynamically through metadata at <Federation.
 default: none
 components: ["*"]
 ---
+name: Federation.TopologyUrl
+description: >-
+  A URL for the top level OSG Topology location (a legacy integration). This URL is needed to retrieve authorization file information.
+type: url
+osdf_default: "https://topology.opensciencegrid.org"
+default: none
+components: ["origin", "cache"]
+---
 name: Federation.TopologyNamespaceUrl
 description: >-
   A URL containing namespace information for origins and caches configured via the OSG Topology application (a legacy integration). The URL
@@ -759,22 +767,6 @@ description: >-
         - name: "Option A"
           id: "optionA"
       ```
-
-  - "optionsUrl" is alternative to options with a URL return an JSON array of options in the following format:
-
-      ```json
-      [
-        {
-            "name":"Option A",
-            "id":"optionA"
-        }
-      ]
-      ```
-  - "validationUrl" is an optional, user-provided validation endpoint
-      that listens to a POST request with JSON body of {"field": "<field value>"}
-      and responds with a 200 code and JSON of {"valid": bool, "message": ""}. If it's non-empty,
-      for all create and update of namespace registration, this URL will be called
-      to validate the custom field. If "valid" == "false", the "message" will be returned by Pelican
   - "description" will show up in the web UI as helper text to help user understand the field
 type: object
 default: none
@@ -1356,6 +1348,178 @@ description: >-
 type: bool
 default: true
 components: ["origin", "director", "registry"]
+---
+############################
+#   Shoveler-level configs   #
+############################
+name: Shoveler.Enable
+description: >-
+  Enable XRootD monitoring shoveler: https://github.com/opensciencegrid/xrootd-monitoring-shoveler
+type: bool
+default: false
+components: ["origin", "cache"]
+---
+name: Shoveler.MessageQueueProtocol
+description: >-
+  Select which protocol to use in order to connect to the MQ. Options are amqp, stomp
+
+  For amqp, the following configurations are required:
+   - URL: amqps://username:password@example.com/vhost
+   - Topic: mytopic
+   - AMQPExchange: shoveled-xrd
+   - AMQPTokenLocation: /etc/pelican/xrootd-monitoring-shoveler-token
+
+  For stomp, the following configurations are required:
+   - URL: messagebroker.org:port
+   - Topic: mytopic
+   - StompUsername: username
+   - StompPassword: password
+   - StompCert: path/to/cert/file
+   - StompCertKey: path/to/certkey/file
+type: string
+default: amqp
+components: ["origin", "cache"]
+---
+name: Shoveler.URL
+description: >-
+  For amqp and stomp.
+
+  The URL to connect to the shoveler
+type: url
+default: none
+components: ["origin", "cache"]
+---
+name: Shoveler.Topic
+description: >-
+  For amqp and stomp.
+
+  The topic of the messages. For stomp, it defaults to xrootd.shoveler
+type: string
+default: none
+components: ["origin", "cache"]
+---
+name: Shoveler.AMQPExchange
+description: >-
+  For amqp only.
+
+  The exchange to shovel messages
+type: string
+default: "shoveled-xrd"
+components: ["origin", "cache"]
+---
+name: Shoveler.AMQPTokenLocation
+description: >-
+  For amqp only.
+
+  A filepath to the location of the JWT used for authenticating amqp connection
+type: filename
+default: $ConfigBase/shoveler-token
+root_default: /etc/pelican/shoveler-token
+components: ["origin", "cache"]
+---
+name: Shoveler.StompUsername
+description: >-
+  For stomp only.
+
+  Username for authentication
+type: string
+default: none
+components: ["origin", "cache"]
+---
+name: Shoveler.StompPassword
+description: >-
+  For stomp only.
+
+  Password for authentication
+type: string
+default: none
+components: ["origin", "cache"]
+---
+name: Shoveler.StompCert
+description: >-
+  For stomp only.
+
+  A filepath to the location of the TLS certifcate
+type: filename
+default: none
+components: ["origin", "cache"]
+---
+name: Shoveler.StompCertKey
+description: >-
+  For stomp only.
+
+  A filepath to the location of the private key associated with the certifacte
+type: filename
+default: none
+components: ["origin", "cache"]
+---
+name: Shoveler.PortLower
+description: >-
+  The lower end of a range of Shoveler ports for Shoveler to set up UDP server
+type: int
+default: 9930
+components: ["origin"]
+---
+name: Shoveler.PortHigher
+description: >-
+  The lower end of a range of Shoveler ports for Shoveler to set up UDP server
+type: int
+default: 9999
+components: ["origin"]
+---
+name: Shoveler.OutputDestinations
+description: >-
+  A list of <IP:Port> destinations to forward XRootD monitoring packet to
+type: stringSlice
+default: none
+components: ["origin", "cache"]
+---
+name: Shoveler.VerifyHeader
+description: >-
+  Whether to verify the header of the packet matches XRootD's monitoring packet format
+type: bool
+default: false
+components: ["origin", "cache"]
+---
+name: Shoveler.QueueDirectory
+description: >-
+  Directory to store overflow of queue onto disk.
+  The queue keeps 100 messages in memory.  If the shoveler is disconnected from the message bus,
+  it will store messages over the 100 in memory onto disk into this directory.  Once the connection has been re-established
+  the queue will be emptied.  The queue on disk is persistent between restarts, so a persistent directory should be used.
+type: filename
+root_default: /var/spool/pelican/shoveler/queue
+default: $ConfigBase/shoveler/queue
+components: ["origin", "cache"]
+---
+name: Shoveler.IPMapping
+description: >-
+  IP Mapping for remote IP addresses in forwarding to the destinations. You may either
+  pass one IP address to map all messages to the configured origin, or a list of key-value pairs for one-to-one mapping.
+
+  One-to-all mapping:
+
+  ```
+  IPMapping:
+    - All: "172.0.0.4"
+  ```
+
+  If a packet comes in with the private ip address of 192.168.0.4, the packet origin will be changed to 172.0.0.4
+  The port is always preserved.
+
+  One-to-one mapping:
+
+  ```
+  IPMapping:
+    - Source: "192.168.0.5"
+      Dest: "172.0.0.5"
+    - Source: "192.168.0.6"
+      Dest: "129.93.10.7"
+  ```
+
+type: object
+default: none
+components: ["origin", "cache"]
 ---
 ############################
 #   Plugin-level configs   #

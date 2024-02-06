@@ -47,6 +47,7 @@ type config struct {
 		RegistryUrl string
 		TopologyNamespaceUrl string
 		TopologyReloadInterval time.Duration
+		TopologyUrl string
 	}
 	GeoIPOverrides interface{}
 	Issuer struct {
@@ -164,6 +165,24 @@ type config struct {
 		WebHost string
 		WebPort int
 	}
+	Shoveler struct {
+		AMQPExchange string
+		AMQPTokenLocation string
+		Enable bool
+		IPMapping interface{}
+		MessageQueueProtocol string
+		OutputDestinations []string
+		PortHigher int
+		PortLower int
+		QueueDirectory string
+		StompCert string
+		StompCertKey string
+		StompPassword string
+		StompUsername string
+		Topic string
+		URL string
+		VerifyHeader bool
+	}
 	StagePlugin struct {
 		Hook bool
 		MountPrefix string
@@ -238,6 +257,7 @@ type configWithType struct {
 		RegistryUrl struct { Type string; Value string }
 		TopologyNamespaceUrl struct { Type string; Value string }
 		TopologyReloadInterval struct { Type string; Value time.Duration }
+		TopologyUrl struct { Type string; Value string }
 	}
 	GeoIPOverrides struct { Type string; Value interface{} }
 	Issuer struct {
@@ -354,6 +374,24 @@ type configWithType struct {
 		UIPasswordFile struct { Type string; Value string }
 		WebHost struct { Type string; Value string }
 		WebPort struct { Type string; Value int }
+	}
+	Shoveler struct {
+		AMQPExchange struct { Type string; Value string }
+		AMQPTokenLocation struct { Type string; Value string }
+		Enable struct { Type string; Value bool }
+		IPMapping struct { Type string; Value interface{} }
+		MessageQueueProtocol struct { Type string; Value string }
+		OutputDestinations struct { Type string; Value []string }
+		PortHigher struct { Type string; Value int }
+		PortLower struct { Type string; Value int }
+		QueueDirectory struct { Type string; Value string }
+		StompCert struct { Type string; Value string }
+		StompCertKey struct { Type string; Value string }
+		StompPassword struct { Type string; Value string }
+		StompUsername struct { Type string; Value string }
+		Topic struct { Type string; Value string }
+		URL struct { Type string; Value string }
+		VerifyHeader struct { Type string; Value bool }
 	}
 	StagePlugin struct {
 		Hook struct { Type string; Value bool }
