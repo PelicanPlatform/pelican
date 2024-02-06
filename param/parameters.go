@@ -224,6 +224,7 @@ var (
 	Federation_TopologyReloadInterval = DurationParam{"Federation.TopologyReloadInterval"}
 	Monitoring_TokenExpiresIn = DurationParam{"Monitoring.TokenExpiresIn"}
 	Monitoring_TokenRefreshInterval = DurationParam{"Monitoring.TokenRefreshInterval"}
+	Origin_SelfTestInterval = DurationParam{"Origin.SelfTestInterval"}
 	Registry_InstitutionsUrlReloadMinutes = DurationParam{"Registry.InstitutionsUrlReloadMinutes"}
 	Server_RegistrationRetryInterval = DurationParam{"Server.RegistrationRetryInterval"}
 	Transport_DialerKeepAlive = DurationParam{"Transport.DialerKeepAlive"}

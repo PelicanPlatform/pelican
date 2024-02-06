@@ -52,6 +52,7 @@ Origin:
   EnablePublicRead: false
   EnableWrite: true
   SelfTest: true
+  SelfTestInterval: 15s
 Registry:
   InstitutionsUrlReloadMinutes: 15m
   CacheApprovedOnly: false
