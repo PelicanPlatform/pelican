@@ -53,6 +53,7 @@ Origin:
   EnableWrite: true
   SelfTest: true
   Port: 8443
+  SelfTestInterval: 15s
 Registry:
   InstitutionsUrlReloadMinutes: 15m
   CacheApprovedOnly: false

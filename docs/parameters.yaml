@@ -430,6 +430,13 @@ type: bool
 default: true
 components: ["origin"]
 ---
+name: Origin.SelfTestInterval
+description: >-
+  The interval of which the origin starts a new file transfer test to itself.
+type: duration
+default: 15s
+components: ["origin"]
+---
 name: Origin.EnableUI
 description: >-
   Indicate whether the origin should enable its web UI.
