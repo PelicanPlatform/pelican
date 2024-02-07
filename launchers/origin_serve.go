@@ -76,8 +76,6 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		egrp.Go(func() error { return origin_ui.PeriodicSelfTest(ctx) })
 	}
 
-	xrootd.LaunchXrootdMaintenance(ctx, originServer, 2*time.Minute)
-
 	privileged := param.Origin_Multiuser.GetBool()
 	launchers, err := xrootd.ConfigureLaunchers(privileged, configPath, param.Origin_EnableCmsd.GetBool(), false)
 	if err != nil {
@@ -95,6 +93,10 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 	if err = xrootd.LaunchOriginDaemons(ctx, launchers, egrp); err != nil {
 		return nil, err
 	}
+
+	// LaunchOriginDaemons may edit the viper config; these launched goroutines are purposely
+	// delayed until after the viper config is done.
+	xrootd.LaunchXrootdMaintenance(ctx, originServer, 2*time.Minute)
 
 	return originServer, nil
 }
