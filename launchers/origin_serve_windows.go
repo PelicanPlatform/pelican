@@ -24,6 +24,7 @@ import (
 	"context"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
