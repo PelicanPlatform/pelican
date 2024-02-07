@@ -839,7 +839,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 	fed.Spinup()
 	defer fed.Teardown()
 
-//////////////////////////SETUP///////////////////////////
+	//////////////////////////SETUP///////////////////////////
 	// Create a token file
 	tokenConfig := utils.TokenConfig{
 		TokenProfile: utils.WLCG,
@@ -949,7 +949,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 				// We would hit this case if 1 counter got hit twice for some reason
 				t.Fatal("One of the files was not downloaded correctly")
 			} else if len(transferDetailsDownload) != 2 {
-			t.Fatalf("Amount of transfers results returned for download was not correct. Transfer details returned: %d", len(transferDetailsDownload))
+				t.Fatalf("Amount of transfers results returned for download was not correct. Transfer details returned: %d", len(transferDetailsDownload))
 			}
 		}
 		ObjectClientOptions.Token = ""
@@ -1020,7 +1020,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 				// We would hit this case if 1 counter got hit twice for some reason
 				t.Fatal("One of the files was not downloaded correctly")
 			} else if len(transferDetailsDownload) != 2 {
-			t.Fatalf("Amount of transfers results returned for download was not correct. Transfer details returned: %d", len(transferDetailsDownload))
+				t.Fatalf("Amount of transfers results returned for download was not correct. Transfer details returned: %d", len(transferDetailsDownload))
 			}
 		}
 		ObjectClientOptions.Token = ""
@@ -1091,7 +1091,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 				// We would hit this case if 1 counter got hit twice for some reason
 				t.Fatal("One of the files was not downloaded correctly")
 			} else if len(transferDetailsDownload) != 2 {
-			t.Fatalf("Amount of transfers results returned for download was not correct. Transfer details returned: %d", len(transferDetailsDownload))
+				t.Fatalf("Amount of transfers results returned for download was not correct. Transfer details returned: %d", len(transferDetailsDownload))
 			}
 		}
 		ObjectClientOptions.Token = ""
@@ -1162,7 +1162,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 				// We would hit this case if 1 counter got hit twice for some reason
 				t.Fatal("One of the files was not downloaded correctly")
 			} else if len(transferDetailsDownload) != 2 {
-			t.Fatalf("Amount of transfers results returned for download was not correct. Transfer details returned: %d", len(transferDetailsDownload))
+				t.Fatalf("Amount of transfers results returned for download was not correct. Transfer details returned: %d", len(transferDetailsDownload))
 			}
 		}
 		ObjectClientOptions.Token = ""
