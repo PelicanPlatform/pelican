@@ -411,7 +411,7 @@ func moveObjects(source []string, methods []string, upload bool, wg *sync.WaitGr
 				}
 			}
 		} else if len(transferResults) != 0 && upload { // For uploads, we only care about idx 0 since there is only 1 Attempt and 1 TransferResult
-			developerData["TransferFileBytes"] = transferResults[0].TransferedBytes
+			developerData["TransferFileBytes"] = transferResults[0].TransferredBytes
 			if len(transferResults[0].Attempts) != 0 { // Should be fine but check to be sure so we don't go out of bounds
 				developerData["Endpoint"] = transferResults[0].Attempts[0].Endpoint
 				developerData["TransferEndTime"] = transferResults[0].Attempts[0].TransferEndTime
@@ -439,8 +439,8 @@ func moveObjects(source []string, methods []string, upload bool, wg *sync.WaitGr
 		}
 		if result == nil {
 			resultAd.Set("TransferSuccess", true)
-			resultAd.Set("TransferFileBytes", transferResults[0].TransferedBytes)
-			resultAd.Set("TransferTotalBytes", transferResults[0].TransferedBytes) // idx 0 since we are not using recursive uploads/downloads
+			resultAd.Set("TransferFileBytes", transferResults[0].TransferredBytes)
+			resultAd.Set("TransferTotalBytes", transferResults[0].TransferredBytes) // idx 0 since we are not using recursive uploads/downloads
 		} else {
 			resultAd.Set("TransferSuccess", false)
 			if client.GetErrors() == "" {
