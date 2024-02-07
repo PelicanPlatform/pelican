@@ -105,6 +105,8 @@ func (f *FedTest) Spinup() {
 	viper.Set("Server.EnableUI", false)
 	viper.Set("Registry.DbLocation", filepath.Join(f.T.TempDir(), "ns-registry.sqlite"))
 	viper.Set("Xrootd.RunLocation", tmpPath)
+	viper.Set("Origin.Port", 0)
+	viper.Set("Server.WebPort", 0)
 
 	err = config.InitServer(ctx, modules)
 	require.NoError(f.T, err)
@@ -167,12 +169,16 @@ func TestGetAndPutAuth(t *testing.T) {
 		assert.NoError(t, err, "Error writing to temp file")
 		tempFile.Close()
 
+		issuer, err := config.GetServerIssuerURL()
+		require.NoError(t, err)
+		audience := config.GetServerAudience()
+
 		// Create a token file
 		tokenConfig := utils.TokenConfig{
 			TokenProfile: utils.WLCG,
 			Lifetime:     time.Minute,
-			Issuer:       param.Origin_Url.GetString(),
-			Audience:     []string{param.Origin_Url.GetString()},
+			Issuer:       issuer,
+			Audience:     []string{audience},
 			Subject:      "origin",
 		}
 		tokenConfig.AddRawScope("storage.read:/ storage.modify:/")
@@ -259,11 +265,15 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 	t.Run("testRecursiveGetAndPut", func(t *testing.T) {
 		//////////////////////////SETUP///////////////////////////
 		// Create a token file
+		issuer, err := config.GetServerIssuerURL()
+		require.NoError(t, err)
+		audience := config.GetServerAudience()
+
 		tokenConfig := utils.TokenConfig{
 			TokenProfile: utils.WLCG,
 			Lifetime:     time.Minute,
-			Issuer:       param.Origin_Url.GetString(),
-			Audience:     []string{param.Origin_Url.GetString()},
+			Issuer:       issuer,
+			Audience:     []string{audience},
 			Subject:      "origin",
 		}
 		tokenConfig.AddRawScope("storage.read:/ storage.modify:/")
