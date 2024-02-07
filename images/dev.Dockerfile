@@ -58,8 +58,8 @@ RUN \
 
 # Installing the right version of go
 SHELL ["/bin/sh", "-c"]
-RUN curl https://dl.google.com/go/go1.20.8.linux-$TARGETARCH.tar.gz -o go1.20.8.linux-$TARGETARCH.tar.gz && \
-    rm -rf /usr/local/go && tar -C /usr/local -xzf go1.20.8.linux-$TARGETARCH.tar.gz
+RUN curl https://dl.google.com/go/go1.21.6.linux-$TARGETARCH.tar.gz -o go1.21.6.linux-$TARGETARCH.tar.gz && \
+    rm -rf /usr/local/go && tar -C /usr/local -xzf go1.21.6.linux-$TARGETARCH.tar.gz
 ENV PATH="/usr/local/go/bin:${PATH}"
 
 # Use npm to install node

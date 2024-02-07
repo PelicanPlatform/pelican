@@ -41,6 +41,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 
+	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/param"
 )
 
@@ -162,7 +163,7 @@ func GetLatLong(addr netip.Addr) (lat float64, long float64, err error) {
 	return
 }
 
-func SortServers(addr netip.Addr, ads []ServerAd) ([]ServerAd, error) {
+func SortServers(addr netip.Addr, ads []common.ServerAd) ([]common.ServerAd, error) {
 	distances := make(SwapMaps, len(ads))
 	lat, long, err := GetLatLong(addr)
 	// If we don't get a valid coordinate set for the incoming address, either because
@@ -180,7 +181,7 @@ func SortServers(addr netip.Addr, ads []ServerAd) ([]ServerAd, error) {
 		}
 	}
 	sort.Sort(distances)
-	resultAds := make([]ServerAd, len(ads))
+	resultAds := make([]common.ServerAd, len(ads))
 	for idx, distance := range distances {
 		resultAds[idx] = ads[distance.Index]
 	}

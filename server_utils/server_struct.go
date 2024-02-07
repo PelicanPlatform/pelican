@@ -19,27 +19,27 @@
 package server_utils
 
 import (
+	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/director"
 )
 
 type (
 	XRootDServer interface {
 		GetServerType() config.ServerType
-		SetNamespaceAds([]director.NamespaceAdV2)
-		GetNamespaceAds() []director.NamespaceAdV2
-		CreateAdvertisement(name string, serverUrl string, serverWebUrl string) (director.OriginAdvertiseV2, error)
+		SetNamespaceAds([]common.NamespaceAdV2)
+		GetNamespaceAds() []common.NamespaceAdV2
+		CreateAdvertisement(name string, serverUrl string, serverWebUrl string) (common.OriginAdvertiseV2, error)
 	}
 
 	NamespaceHolder struct {
-		namespaceAds []director.NamespaceAdV2
+		namespaceAds []common.NamespaceAdV2
 	}
 )
 
-func (ns *NamespaceHolder) SetNamespaceAds(ads []director.NamespaceAdV2) {
+func (ns *NamespaceHolder) SetNamespaceAds(ads []common.NamespaceAdV2) {
 	ns.namespaceAds = ads
 }
 
-func (ns *NamespaceHolder) GetNamespaceAds() []director.NamespaceAdV2 {
+func (ns *NamespaceHolder) GetNamespaceAds() []common.NamespaceAdV2 {
 	return ns.namespaceAds
 }

@@ -46,7 +46,13 @@ func doSelfMonitor(ctx context.Context) {
 // set the xrootd component's status to critical.
 func PeriodicSelfTest(ctx context.Context) error {
 	firstRound := time.After(5 * time.Second)
-	ticker := time.NewTicker(15 * time.Second)
+	customInterval := param.Origin_SelfTestInterval.GetDuration()
+	if customInterval == 0 {
+		customInterval = 15 * time.Second
+		log.Error("Invalid config value: Origin.SelfTestInterval is 0. Fallback to 15s.")
+	}
+	ticker := time.NewTicker(customInterval)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-firstRound:

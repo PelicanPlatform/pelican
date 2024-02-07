@@ -38,12 +38,12 @@ import (
 	"time"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/spf13/viper"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	ginprometheus "github.com/zsais/go-gin-prometheus"
@@ -196,7 +196,7 @@ func configureWebResource(engine *gin.Engine) error {
 // Configure common endpoint available to all server web UI which are located at /api/v1.0/*
 func configureCommonEndpoints(engine *gin.Engine) error {
 	engine.GET("/api/v1.0/config", AuthHandler, getConfigValues)
-	engine.GET("/api/v1.0/servers", AuthHandler, getEnabledServers)
+	engine.GET("/api/v1.0/servers", getEnabledServers)
 	// Health check endpoint for web engine
 	engine.GET("/api/v1.0/health", func(ctx *gin.Context) {
 		ctx.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Web Engine Running. Time: %s", time.Now().String())})

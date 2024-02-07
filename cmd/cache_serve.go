@@ -32,6 +32,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/broker"
 	"github.com/pelicanplatform/pelican/cache_ui"
+	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/daemon"
 	"github.com/pelicanplatform/pelican/director"
@@ -48,9 +49,9 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-func getNSAdsFromDirector() ([]director.NamespaceAdV2, error) {
+func getNSAdsFromDirector() ([]common.NamespaceAdV2, error) {
 	// Get the endpoint of the director
-	var respNS []director.NamespaceAdV2
+	var respNS []common.NamespaceAdV2
 	directorEndpoint, err := getDirectorEndpoint()
 	if err != nil {
 		return respNS, errors.Wrapf(err, "Failed to get DirectorURL from config: %v", err)
@@ -73,7 +74,7 @@ func getNSAdsFromDirector() ([]director.NamespaceAdV2, error) {
 				return respNS, err
 			}
 			respData, err = utils.MakeRequest(directorNSListEndpointURL, "GET", nil, nil)
-			var respNSV1 []director.NamespaceAdV1
+			var respNSV1 []common.NamespaceAdV1
 			if err != nil {
 				return respNS, errors.Wrap(err, "Failed to make request")
 			} else {

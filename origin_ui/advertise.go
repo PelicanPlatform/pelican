@@ -22,8 +22,8 @@ import (
 	"fmt"
 	"net/url"
 
+	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pkg/errors"
@@ -39,8 +39,7 @@ func (server *OriginServer) GetServerType() config.ServerType {
 	return config.OriginType
 }
 
-func (server *OriginServer) CreateAdvertisement(name string, originUrlStr string, originWebUrl string) (ad director.OriginAdvertiseV2, err error) {
-
+func (server *OriginServer) CreateAdvertisement(name string, originUrlStr string, originWebUrl string) (ad common.OriginAdvertiseV2, err error) {
 	// Here we instantiate the namespaceAd slice, but we still need to define the namespace
 	issuerUrl := url.URL{}
 	issuerUrl.Scheme = "https"
@@ -61,36 +60,36 @@ func (server *OriginServer) CreateAdvertisement(name string, originUrlStr string
 	// TODO: Need to figure out where to get some of these values
 	// 		 so that they aren't hardcoded...
 
-	nsAd := director.NamespaceAdV2{
+	nsAd := common.NamespaceAdV2{
 		PublicRead: param.Origin_EnablePublicReads.GetBool(),
-		Caps: director.Capabilities{
+		Caps: common.Capabilities{
 			PublicRead: param.Origin_EnablePublicReads.GetBool(),
 			Read:       true,
 			Write:      param.Origin_EnableWrite.GetBool(),
 		},
 		Path: prefix,
-		Generation: []director.TokenGen{{
-			Strategy:         director.StrategyType("OAuth2"),
+		Generation: []common.TokenGen{{
+			Strategy:         common.StrategyType("OAuth2"),
 			MaxScopeDepth:    3,
 			CredentialIssuer: *originUrlURL,
 		}},
-		Issuer: []director.TokenIssuer{{
+		Issuer: []common.TokenIssuer{{
 			BasePaths: []string{prefix},
 			IssuerUrl: issuerUrl,
 		}},
 	}
-	ad = director.OriginAdvertiseV2{
+	ad = common.OriginAdvertiseV2{
 		Name:       name,
 		DataURL:    originUrlStr,
 		WebURL:     originWebUrl,
-		Namespaces: []director.NamespaceAdV2{nsAd},
-		Caps: director.Capabilities{
+		Namespaces: []common.NamespaceAdV2{nsAd},
+		Caps: common.Capabilities{
 			PublicRead:   param.Origin_EnablePublicReads.GetBool(),
 			Read:         true,
 			Write:        param.Origin_EnableWrite.GetBool(),
 			FallBackRead: param.Origin_EnableFallbackRead.GetBool(),
 		},
-		Issuer: []director.TokenIssuer{{
+		Issuer: []common.TokenIssuer{{
 			BasePaths: []string{prefix},
 			IssuerUrl: issuerUrl,
 		}},

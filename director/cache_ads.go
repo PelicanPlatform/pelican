@@ -23,91 +23,23 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
-	"net/url"
 	"path"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
+	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/param"
 	log "github.com/sirupsen/logrus"
 )
 
-type (
-	TokenIssuer struct {
-		BasePaths       []string `json:"base-paths"`
-		RestrictedPaths []string `json:"restricted-paths"`
-		IssuerUrl       url.URL  `json:"issuer"`
-	}
-
-	TokenGen struct {
-		Strategy         StrategyType `json:"strategy"`
-		VaultServer      string       `json:"vault-server"`
-		MaxScopeDepth    uint         `json:"max-scope-depth"`
-		CredentialIssuer url.URL      `json:"issuer"`
-	}
-
-	Capabilities struct {
-		PublicRead   bool
-		Read         bool
-		Write        bool
-		Listing      bool
-		FallBackRead bool
-	}
-
-	NamespaceAdV2 struct {
-		PublicRead bool
-		Caps       Capabilities  // Namespace capabilities should be considered independently of the origin’s capabilities.
-		Path       string        `json:"path"`
-		Generation []TokenGen    `json:"token-generation"`
-		Issuer     []TokenIssuer `json:"token-issuer"`
-	}
-
-	NamespaceAdV1 struct {
-		RequireToken  bool         `json:"requireToken"`
-		Path          string       `json:"path"`
-		Issuer        url.URL      `json:"url"`
-		MaxScopeDepth uint         `json:"maxScopeDepth"`
-		Strategy      StrategyType `json:"strategy"`
-		BasePath      string       `json:"basePath"`
-		VaultServer   string       `json:"vaultServer"`
-		DirlistHost   string       `json:"dirlisthost"`
-	}
-
-	ServerAd struct {
-		Name               string
-		AuthURL            url.URL
-		BrokerURL          *url.URL // The URL of the broker service to use for this host.
-		URL                url.URL  // This is server's XRootD URL for file transfer
-		WebURL             url.URL  // This is server's Web interface and API
-		Type               ServerType
-		Latitude           float64
-		Longitude          float64
-		EnableWrite        bool
-		EnableFallbackRead bool // True if reads from the origin are permitted when no cache is available
-	}
-
-	ServerType   string
-	StrategyType string
-)
-
-const (
-	CacheType  ServerType = "Cache"
-	OriginType ServerType = "Origin"
-)
-
-const (
-	OAuthStrategy StrategyType = "OAuth2"
-	VaultStrategy StrategyType = "Vault"
-)
-
 var (
-	serverAds     = ttlcache.New[ServerAd, []NamespaceAdV2](ttlcache.WithTTL[ServerAd, []NamespaceAdV2](15 * time.Minute))
+	serverAds     = ttlcache.New[common.ServerAd, []common.NamespaceAdV2](ttlcache.WithTTL[common.ServerAd, []common.NamespaceAdV2](15 * time.Minute))
 	serverAdMutex = sync.RWMutex{}
 )
 
-func RecordAd(ad ServerAd, namespaceAds *[]NamespaceAdV2) {
+func RecordAd(ad common.ServerAd, namespaceAds *[]common.NamespaceAdV2) {
 	if err := UpdateLatLong(&ad); err != nil {
 		log.Debugln("Failed to lookup GeoIP coordinates for host", ad.URL.Host)
 	}
@@ -122,7 +54,7 @@ func RecordAd(ad ServerAd, namespaceAds *[]NamespaceAdV2) {
 	}
 }
 
-func UpdateLatLong(ad *ServerAd) error {
+func UpdateLatLong(ad *common.ServerAd) error {
 	if ad == nil {
 		return errors.New("Cannot provide a nil ad to UpdateLatLong")
 	}
@@ -147,8 +79,8 @@ func UpdateLatLong(ad *ServerAd) error {
 	return nil
 }
 
-func matchesPrefix(reqPath string, namespaceAds []NamespaceAdV2) *NamespaceAdV2 {
-	var best *NamespaceAdV2
+func matchesPrefix(reqPath string, namespaceAds []common.NamespaceAdV2) *common.NamespaceAdV2 {
+	var best *common.NamespaceAdV2
 
 	for _, namespace := range namespaceAds {
 		serverPath := namespace.Path
@@ -177,7 +109,7 @@ func matchesPrefix(reqPath string, namespaceAds []NamespaceAdV2) *NamespaceAdV2 
 		// Make the len comparison with tmpBest, because serverPath is one char longer now
 		if strings.HasPrefix(reqPath, serverPath) && len(serverPath) > len(tmpBest) {
 			if best == nil {
-				best = new(NamespaceAdV2)
+				best = new(common.NamespaceAdV2)
 			}
 			*best = namespace
 		}
@@ -185,7 +117,7 @@ func matchesPrefix(reqPath string, namespaceAds []NamespaceAdV2) *NamespaceAdV2 
 	return best
 }
 
-func GetAdsForPath(reqPath string) (originNamespace NamespaceAdV2, originAds []ServerAd, cacheAds []ServerAd) {
+func GetAdsForPath(reqPath string) (originNamespace common.NamespaceAdV2, originAds []common.ServerAd, cacheAds []common.ServerAd) {
 	serverAdMutex.RLock()
 	defer serverAdMutex.RUnlock()
 
@@ -197,13 +129,13 @@ func GetAdsForPath(reqPath string) (originNamespace NamespaceAdV2, originAds []S
 	// Iterate through all of the server ads. For each "item", the key
 	// is the server ad itself (either cache or origin), and the value
 	// is a slice of namespace prefixes are supported by that server
-	var best *NamespaceAdV2
+	var best *common.NamespaceAdV2
 	for _, item := range serverAds.Items() {
 		if item == nil {
 			continue
 		}
 		serverAd := item.Key()
-		if serverAd.Type == OriginType {
+		if serverAd.Type == common.OriginType {
 			if ns := matchesPrefix(reqPath, item.Value()); ns != nil {
 				if best == nil || len(ns.Path) > len(best.Path) {
 					best = ns
@@ -211,18 +143,18 @@ func GetAdsForPath(reqPath string) (originNamespace NamespaceAdV2, originAds []S
 					// prefix, we overwrite that here because we found a better ns. We also clear
 					// the other slice of server ads, because we know those aren't good anymore
 					originAds = append(originAds[:0], serverAd)
-					cacheAds = []ServerAd{}
+					cacheAds = []common.ServerAd{}
 				} else if ns.Path == best.Path {
 					originAds = append(originAds, serverAd)
 				}
 			}
 			continue
-		} else if serverAd.Type == CacheType {
+		} else if serverAd.Type == common.CacheType {
 			if ns := matchesPrefix(reqPath, item.Value()); ns != nil {
 				if best == nil || len(ns.Path) > len(best.Path) {
 					best = ns
 					cacheAds = append(cacheAds[:0], serverAd)
-					originAds = []ServerAd{}
+					originAds = []common.ServerAd{}
 				} else if ns.Path == best.Path {
 					cacheAds = append(cacheAds, serverAd)
 				}

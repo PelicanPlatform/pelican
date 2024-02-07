@@ -30,16 +30,11 @@ import (
 	"strconv"
 	"strings"
 
-	//"net/http"
 	"math/rand"
 	"os"
 	"path"
 	"path/filepath"
 	"time"
-
-	// "crypto/sha1"
-	// "encoding/hex"
-	// "strings"
 
 	log "github.com/sirupsen/logrus"
 
@@ -104,16 +99,18 @@ func getTokenName(destination *url.URL) (scheme, tokenName string) {
 }
 
 // Do writeback to stash using SciTokens
-func doWriteBack(source string, destination *url.URL, namespace namespaces.Namespace, recursive bool, projectName string) (int64, error) {
+func doWriteBack(source string, destination *url.URL, namespace namespaces.Namespace, recursive bool, projectName string) (transferResults []TransferResults, err error) {
 
 	scitoken_contents, err := getToken(destination, namespace, true, "")
 	if err != nil {
-		return 0, err
+		return nil, fmt.Errorf("Failed to get token for write-back: %v", err)
 	}
 	if recursive {
 		return UploadDirectory(source, destination, scitoken_contents, namespace, projectName)
 	} else {
-		return UploadFile(source, destination, scitoken_contents, namespace, projectName)
+		transferResult, err := UploadFile(source, destination, scitoken_contents, namespace, projectName)
+		transferResults = append(transferResults, transferResult)
+		return transferResults, err
 	}
 }
 
@@ -477,7 +474,7 @@ localObject: the source file/directory you would like to upload
 remoteDestination: the end location of the upload
 recursive: a boolean indicating if the source is a directory or not
 */
-func DoPut(localObject string, remoteDestination string, recursive bool) (bytesTransferred int64, err error) {
+func DoPut(localObject string, remoteDestination string, recursive bool) (transferResults []TransferResults, err error) {
 	isPut := true
 	// First, create a handler for any panics that occur
 	defer func() {
@@ -486,7 +483,6 @@ func DoPut(localObject string, remoteDestination string, recursive bool) (bytesT
 			log.Debugln("Panic caused by the following", string(debug.Stack()))
 			ret := fmt.Sprintf("Unrecoverable error (panic) captured in DoPut: %v", r)
 			err = errors.New(ret)
-			bytesTransferred = 0
 
 			// Attempt to add the panic to the error accumulator
 			AddError(errors.New(ret))
@@ -497,14 +493,14 @@ func DoPut(localObject string, remoteDestination string, recursive bool) (bytesT
 	localObjectUrl, err := url.Parse(localObject)
 	if err != nil {
 		log.Errorln("Failed to parse source URL:", err)
-		return 0, err
+		return nil, err
 	}
 
 	remoteDestination, remoteDestScheme := correctURLWithUnderscore(remoteDestination)
 	remoteDestUrl, err := url.Parse(remoteDestination)
 	if err != nil {
 		log.Errorln("Failed to parse remote destination URL:", err)
-		return 0, err
+		return nil, err
 	}
 	remoteDestUrl.Scheme = remoteDestScheme
 	fd := config.GetFederation()
@@ -515,7 +511,7 @@ func DoPut(localObject string, remoteDestination string, recursive bool) (bytesT
 			remoteDestUrl.Path, err = url.JoinPath(remoteDestUrl.Host, remoteDestUrl.Path)
 			if err != nil {
 				log.Errorln("Failed to join remote destination url path:", err)
-				return 0, err
+				return nil, err
 			}
 		} else if remoteDestUrl.Scheme == "pelican" {
 
@@ -526,7 +522,7 @@ func DoPut(localObject string, remoteDestination string, recursive bool) (bytesT
 			viper.Set("Federation.DiscoveryUrl", federationUrl.String())
 			err = config.DiscoverFederation()
 			if err != nil {
-				return 0, err
+				return nil, err
 			}
 		}
 	}
@@ -536,7 +532,7 @@ func DoPut(localObject string, remoteDestination string, recursive bool) (bytesT
 
 	_, foundDest := Find(understoodSchemes, remoteDestScheme)
 	if !foundDest {
-		return 0, fmt.Errorf("Do not understand the destination scheme: %s. Permitted values are %s",
+		return nil, fmt.Errorf("Do not understand the destination scheme: %s. Permitted values are %s",
 			remoteDestUrl.Scheme, strings.Join(understoodSchemes, ", "))
 	}
 
@@ -551,7 +547,7 @@ func DoPut(localObject string, remoteDestination string, recursive bool) (bytesT
 	ns, err := getNamespaceInfo(remoteDestination, directorUrl, isPut)
 	if err != nil {
 		log.Errorln(err)
-		return 0, errors.New("Failed to get namespace information from source")
+		return nil, errors.New("Failed to get namespace information from source")
 	}
 	uploadedBytes, err := doWriteBack(localObjectUrl.Path, remoteDestUrl, ns, recursive, "")
 	AddError(err)
@@ -566,7 +562,7 @@ remoteObject: the source file/directory you would like to upload
 localDestination: the end location of the upload
 recursive: a boolean indicating if the source is a directory or not
 */
-func DoGet(remoteObject string, localDestination string, recursive bool) (bytesTransferred int64, err error) {
+func DoGet(remoteObject string, localDestination string, recursive bool) (transferResults []TransferResults, err error) {
 	isPut := false
 	// First, create a handler for any panics that occur
 	defer func() {
@@ -575,7 +571,6 @@ func DoGet(remoteObject string, localDestination string, recursive bool) (bytesT
 			log.Debugln("Panic caused by the following", string(debug.Stack()))
 			ret := fmt.Sprintf("Unrecoverable error (panic) captured in DoGet: %v", r)
 			err = errors.New(ret)
-			bytesTransferred = 0
 
 			// Attempt to add the panic to the error accumulator
 			AddError(errors.New(ret))
@@ -587,7 +582,7 @@ func DoGet(remoteObject string, localDestination string, recursive bool) (bytesT
 	remoteObjectUrl, err := url.Parse(remoteObject)
 	if err != nil {
 		log.Errorln("Failed to parse source URL:", err)
-		return 0, err
+		return nil, err
 	}
 	remoteObjectUrl.Scheme = remoteObjectScheme
 	fd := config.GetFederation()
@@ -599,7 +594,7 @@ func DoGet(remoteObject string, localDestination string, recursive bool) (bytesT
 			remoteObjectUrl.Path, err = url.JoinPath(remoteObjectUrl.Host, remoteObjectUrl.Path)
 			if err != nil {
 				log.Errorln("Failed to join source url path:", err)
-				return 0, err
+				return nil, err
 			}
 		} else if remoteObjectUrl.Scheme == "pelican" {
 
@@ -610,7 +605,7 @@ func DoGet(remoteObject string, localDestination string, recursive bool) (bytesT
 			viper.Set("Federation.DiscoveryUrl", federationUrl.String())
 			err = config.DiscoverFederation()
 			if err != nil {
-				return 0, err
+				return nil, err
 			}
 		}
 	}
@@ -621,7 +616,7 @@ func DoGet(remoteObject string, localDestination string, recursive bool) (bytesT
 
 	_, foundSource := Find(understoodSchemes, remoteObjectScheme)
 	if !foundSource {
-		return 0, fmt.Errorf("Do not understand the source scheme: %s. Permitted values are %s",
+		return nil, fmt.Errorf("Do not understand the source scheme: %s. Permitted values are %s",
 			remoteObjectUrl.Scheme, strings.Join(understoodSchemes, ", "))
 	}
 
@@ -638,7 +633,7 @@ func DoGet(remoteObject string, localDestination string, recursive bool) (bytesT
 	ns, err := getNamespaceInfo(remoteObject, directorUrl, isPut)
 	if err != nil {
 		log.Errorln(err)
-		return 0, errors.New("Failed to get namespace information from source")
+		return nil, errors.New("Failed to get namespace information from source")
 	}
 
 	// get absolute path
@@ -669,7 +664,7 @@ func DoGet(remoteObject string, localDestination string, recursive bool) (bytesT
 	_, token_name := getTokenName(remoteObjectUrl)
 
 	var downloaded int64
-	if downloaded, err = download_http(remoteObjectUrl, localDestination, &payload, ns, recursive, token_name); err == nil {
+	if transferResults, err = download_http(remoteObjectUrl, localDestination, &payload, ns, recursive, token_name); err == nil {
 		success = true
 	}
 
@@ -690,14 +685,14 @@ func DoGet(remoteObject string, localDestination string, recursive bool) (bytesT
 	}
 
 	if !success {
-		return downloaded, errors.New("failed to download file")
+		return nil, errors.New("failed to download file")
 	} else {
-		return downloaded, nil
+		return transferResults, err
 	}
 }
 
 // Start the transfer, whether read or write back. Primarily used for backwards compatibility
-func DoStashCPSingle(sourceFile string, destination string, methods []string, recursive bool) (bytesTransferred int64, err error) {
+func DoStashCPSingle(sourceFile string, destination string, methods []string, recursive bool) (transferResults []TransferResults, err error) {
 
 	// First, create a handler for any panics that occur
 	defer func() {
@@ -706,7 +701,6 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 			log.Debugln("Panic caused by the following", string(debug.Stack()))
 			ret := fmt.Sprintf("Unrecoverable error (panic) captured in DoStashCPSingle: %v", r)
 			err = errors.New(ret)
-			bytesTransferred = 0
 
 			// Attempt to add the panic to the error accumulator
 			AddError(errors.New(ret))
@@ -718,7 +712,7 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 	source_url, err := url.Parse(sourceFile)
 	if err != nil {
 		log.Errorln("Failed to parse source URL:", err)
-		return 0, err
+		return nil, err
 	}
 	source_url.Scheme = source_scheme
 
@@ -726,7 +720,7 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 	dest_url, err := url.Parse(destination)
 	if err != nil {
 		log.Errorln("Failed to parse destination URL:", err)
-		return 0, err
+		return nil, err
 	}
 	dest_url.Scheme = dest_scheme
 	fd := config.GetFederation()
@@ -744,7 +738,7 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 			viper.Set("Federation.DiscoveryUrl", federationUrl.String())
 			err = config.DiscoverFederation()
 			if err != nil {
-				return 0, err
+				return nil, err
 			}
 		}
 	}
@@ -760,7 +754,7 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 			viper.Set("Federation.DiscoveryUrl", federationUrl.String())
 			err = config.DiscoverFederation()
 			if err != nil {
-				return 0, err
+				return nil, err
 			}
 		}
 	}
@@ -773,13 +767,13 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 	_, foundSource := Find(understoodSchemes, sourceScheme)
 	if !foundSource {
 		log.Errorln("Do not understand source scheme:", source_url.Scheme)
-		return 0, errors.New("Do not understand source scheme")
+		return nil, errors.New("Do not understand source scheme")
 	}
 
 	_, foundDest := Find(understoodSchemes, destScheme)
 	if !foundDest {
 		log.Errorln("Do not understand destination scheme:", source_url.Scheme)
-		return 0, errors.New("Do not understand destination scheme")
+		return nil, errors.New("Do not understand destination scheme")
 	}
 
 	payload := payloadStruct{}
@@ -797,11 +791,11 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 		ns, err := getNamespaceInfo(dest_url.Path, OSDFDirectorUrl, isPut)
 		if err != nil {
 			log.Errorln(err)
-			return 0, errors.New("Failed to get namespace information from destination")
+			return nil, errors.New("Failed to get namespace information from destination")
 		}
-		uploadedBytes, err := doWriteBack(source_url.Path, dest_url, ns, recursive, payload.ProjectName)
+		transferResults, err := doWriteBack(source_url.Path, dest_url, ns, recursive, payload.ProjectName) //TODO dowriteback transferResults!!!!!
 		AddError(err)
-		return uploadedBytes, err
+		return transferResults, err
 	}
 
 	if dest_url.Scheme == "file" {
@@ -819,7 +813,7 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 	ns, err := getNamespaceInfo(sourceFile, OSDFDirectorUrl, isPut)
 	if err != nil {
 		log.Errorln(err)
-		return 0, errors.New("Failed to get namespace information from source")
+		return nil, errors.New("Failed to get namespace information from source")
 	}
 
 	// get absolute path
@@ -860,7 +854,7 @@ Loop:
 		switch method {
 		case "http":
 			log.Info("Trying HTTP...")
-			if downloaded, err = download_http(source_url, destination, &payload, ns, recursive, token_name); err == nil {
+			if transferResults, err = download_http(source_url, destination, &payload, ns, recursive, token_name); err == nil {
 				success = true
 				break Loop
 			}
@@ -881,10 +875,10 @@ Loop:
 		// Get the final size of the download file
 		payload.fileSize = downloaded
 		payload.downloadSize = downloaded
-		return downloaded, nil
+		return transferResults, nil
 	} else {
 		payload.status = "Fail"
-		return downloaded, errors.New("All methods failed! Unable to download file.")
+		return transferResults, errors.New("All methods failed! Unable to download file.")
 	}
 }
 

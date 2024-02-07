@@ -715,10 +715,14 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 		viper.SetDefault("Director.GeoIPLocation", "/var/cache/pelican/maxmind/GeoLite2-City.mmdb")
 		viper.SetDefault("Registry.DbLocation", "/var/lib/pelican/registry.sqlite")
 		viper.SetDefault("Monitoring.DataLocation", "/var/lib/pelican/monitoring/data")
+		viper.SetDefault("Shoveler.QueueDirectory", "/var/spool/pelican/shoveler/queue")
+		viper.SetDefault("Shoveler.AMQPTokenLocation", "/etc/pelican/shoveler-token")
 	} else {
 		viper.SetDefault("Director.GeoIPLocation", filepath.Join(configDir, "maxmind", "GeoLite2-City.mmdb"))
 		viper.SetDefault("Registry.DbLocation", filepath.Join(configDir, "ns-registry.sqlite"))
 		viper.SetDefault("Monitoring.DataLocation", filepath.Join(configDir, "monitoring/data"))
+		viper.SetDefault("Shoveler.QueueDirectory", filepath.Join(configDir, "shoveler/queue"))
+		viper.SetDefault("Shoveler.AMQPTokenLocation", filepath.Join(configDir, "shoveler-token"))
 
 		if userRuntimeDir := os.Getenv("XDG_RUNTIME_DIR"); userRuntimeDir != "" {
 			runtimeDir := filepath.Join(userRuntimeDir, "pelican", xrootdPrefix)
@@ -748,6 +752,11 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 	err = os.MkdirAll(param.Monitoring_DataLocation.GetString(), 0750)
 	if err != nil {
 		return errors.Wrapf(err, "Failure when creating a directory for the monitoring data")
+	}
+
+	err = os.MkdirAll(param.Shoveler_QueueDirectory.GetString(), 0750)
+	if err != nil {
+		return errors.Wrapf(err, "Failure when creating a directory for the shoveler on-disk queue")
 	}
 
 	hostname, err := os.Hostname()
@@ -788,6 +797,17 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 		viper.Set("Monitoring.TokenRefreshInterval", time.Minute*59)
 		viper.Set("Monitoring.TokenExpiresIn", time.Hour*1)
 		log.Warningln("Invalid Monitoring.TokenRefreshInterval or Monitoring.TokenExpiresIn. Fallback to 59m for refresh interval and 1h for valid interval")
+	}
+
+	if currentServers.IsEnabled(DirectorType) {
+		minStatRes := param.Director_MinStatResponse.GetInt()
+		maxStatRes := param.Director_MaxStatResponse.GetInt()
+		if minStatRes <= 0 || maxStatRes <= 0 {
+			return errors.New("Invalid Director.MinStatResponse and Director.MaxStatResponse. MaxStatResponse and MinStatResponse must be positive integers")
+		}
+		if maxStatRes < minStatRes {
+			return errors.New("Invalid Director.MinStatResponse and Director.MaxStatResponse. MaxStatResponse is less than MinStatResponse")
+		}
 	}
 
 	// Unmarshal Viper config into a Go struct

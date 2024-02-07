@@ -140,5 +140,7 @@ jobs:
         cp dist/pelican_linux_amd64_v1/pelican ./
     - name: Run Integration Tests
       run: ./github_scripts/citests.sh
-    - name: Run End-to-End Tests
+    - name: Run End-to-End Test for Object get/put
       run: ./github_scripts/get_put_test.sh
+    - name: Run End-to-End Test for Director stat
+      run: ./github_scripts/stat_test.sh

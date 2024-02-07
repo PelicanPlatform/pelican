@@ -20,29 +20,25 @@ package director
 
 import (
 	"context"
-	"strings"
+	"fmt"
 
 	"github.com/jellydator/ttlcache/v3"
-	"github.com/lestrrat-go/jwx/v2/jwt"
-	"github.com/pkg/errors"
+	"github.com/pelicanplatform/pelican/common"
+
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
-
-	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
 // List all namespaces from origins registered at the director
-func ListNamespacesFromOrigins() []NamespaceAdV2 {
+func ListNamespacesFromOrigins() []common.NamespaceAdV2 {
 
 	serverAdMutex.RLock()
 	defer serverAdMutex.RUnlock()
 
 	serverAdItems := serverAds.Items()
-	namespaces := make([]NamespaceAdV2, 0, len(serverAdItems))
+	namespaces := make([]common.NamespaceAdV2, 0, len(serverAdItems))
 	for _, item := range serverAdItems {
-		if item.Key().Type == OriginType {
+		if item.Key().Type == common.OriginType {
 			namespaces = append(namespaces, item.Value()...)
 		}
 	}
@@ -50,10 +46,10 @@ func ListNamespacesFromOrigins() []NamespaceAdV2 {
 }
 
 // List all serverAds in the cache that matches the serverType array
-func ListServerAds(serverTypes []ServerType) []ServerAd {
+func ListServerAds(serverTypes []common.ServerType) []common.ServerAd {
 	serverAdMutex.RLock()
 	defer serverAdMutex.RUnlock()
-	ads := make([]ServerAd, 0)
+	ads := make([]common.ServerAd, 0)
 	for _, ad := range serverAds.Keys() {
 		for _, serverType := range serverTypes {
 			if ad.Type == serverType {
@@ -62,53 +58,6 @@ func ListServerAds(serverTypes []ServerType) []ServerAd {
 		}
 	}
 	return ads
-}
-
-// Verify that a token received is a valid token from director and has
-// correct scope for accessing the service discovery endpoint. This function
-// is intended to be called on the same director server that issues the token.
-func VerifyDirectorSDToken(strToken string) (bool, error) {
-	// This token is essentialled an "issuer"/server itself issued token and
-	// the server happended to be a director. This allows us to just follow
-	// IssuerCheck logic for this token
-	directorURL := param.Server_ExternalWebUrl.GetString()
-	token, err := jwt.Parse([]byte(strToken), jwt.WithVerify(false))
-	if err != nil {
-		return false, err
-	}
-
-	if directorURL != token.Issuer() {
-		return false, errors.Errorf("Token issuer is not a director")
-	}
-	// Given that this function is intended to be called on the same director server
-	// that issues the token. so it's safe to skip getting the public key
-	// from director's discovery URL.
-	key, err := config.GetIssuerPublicJWKS()
-	if err != nil {
-		return false, err
-	}
-	tok, err := jwt.Parse([]byte(strToken), jwt.WithKeySet(key), jwt.WithValidate(true))
-	if err != nil {
-		return false, err
-	}
-
-	scope_any, present := tok.Get("scope")
-	if !present {
-		return false, errors.New("No scope is present; required to advertise to director")
-	}
-	scope, ok := scope_any.(string)
-	if !ok {
-		return false, errors.New("scope claim in token is not string-valued")
-	}
-
-	scopes := strings.Split(scope, " ")
-
-	for _, scope := range scopes {
-		if scope == token_scopes.Pelican_DirectorServiceDiscovery.String() {
-			return true, nil
-		}
-	}
-	return false, nil
 }
 
 // Configure TTL caches to enable cache eviction and other additional cache events handling logic
@@ -120,15 +69,36 @@ func ConfigTTLCache(ctx context.Context, egrp *errgroup.Group) {
 	go serverAds.Start()
 	go namespaceKeys.Start()
 
-	serverAds.OnEviction(func(ctx context.Context, er ttlcache.EvictionReason, i *ttlcache.Item[ServerAd, []NamespaceAdV2]) {
-		healthTestCancelFuncsMutex.Lock()
-		defer healthTestCancelFuncsMutex.Unlock()
-		if cancelFunc, exists := healthTestCancelFuncs[i.Key()]; exists {
-			// Call the cancel function for the evicted originAd to end its health test
-			cancelFunc()
+	serverAds.OnEviction(func(ctx context.Context, er ttlcache.EvictionReason, i *ttlcache.Item[common.ServerAd, []common.NamespaceAdV2]) {
+		healthTestUtilsMutex.RLock()
+		defer healthTestUtilsMutex.RUnlock()
+		if util, exists := healthTestUtils[i.Key()]; exists {
+			util.Cancel()
+			if util.ErrGrp != nil {
+				err := util.ErrGrp.Wait()
+				if err != nil {
+					log.Debugf("Error from errgroup when evict the registration from TTL cache for %s %s %s", string(i.Key().Type), i.Key().Name, err.Error())
+				} else {
+					log.Debugf("Errgroup successfully emptied at TTL cache eviction for %s %s", string(i.Key().Type), i.Key().Name)
+				}
+			} else {
+				log.Debugf("errgroup is nil when evict the registration from TTL cache for %s %s", string(i.Key().Type), i.Key().Name)
+			}
+		} else {
+			log.Debugf("healthTestUtil not found for %s when evicting TTL cache item", i.Key().Name)
+		}
 
-			// Remove the cancel function from the map as it's no longer needed
-			delete(healthTestCancelFuncs, i.Key())
+		if i.Key().Type == common.OriginType {
+			originStatUtilsMutex.Lock()
+			defer originStatUtilsMutex.Unlock()
+			statUtil, ok := originStatUtils[i.Key().URL]
+			if ok {
+				statUtil.Cancel()
+				if err := statUtil.Errgroup.Wait(); err != nil {
+					log.Info(fmt.Sprintf("Error happened when stopping origin %q stat goroutine group: %v", i.Key().Name, err))
+				}
+				delete(originStatUtils, i.Key().URL)
+			}
 		}
 	})
 
@@ -136,6 +106,10 @@ func ConfigTTLCache(ctx context.Context, egrp *errgroup.Group) {
 	egrp.Go(func() error {
 		<-ctx.Done()
 		log.Info("Gracefully stopping director TTL cache eviction...")
+		serverAdMutex.Lock()
+		defer serverAdMutex.Unlock()
+		namespaceKeysMutex.Lock()
+		defer namespaceKeysMutex.Unlock()
 		serverAds.DeleteAll()
 		serverAds.Stop()
 		namespaceKeys.DeleteAll()
