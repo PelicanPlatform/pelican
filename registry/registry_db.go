@@ -163,23 +163,23 @@ func createTopologyTable() {
 func namespaceExists(prefix string) (bool, error) {
 	var count int64
 
-	if config.GetPreferredPrefix() == "OSDF" {
-		// Perform a count across both 'namespace' and 'topology' tables
-		err := db.Model(&Namespace{}).Where("prefix = ?", prefix).
-			Or(db.Model(&Topology{}).Where("prefix = ?", prefix)).
-			Count(&count).Error
-		if err != nil {
-			return false, err
-		}
+	err := db.Model(&Namespace{}).Where("prefix = ?", prefix).Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+	if count > 0 {
+		return true, nil
 	} else {
-		// Perform a count only on the 'namespace' table
-		err := db.Model(&Namespace{}).Where("prefix = ?", prefix).Count(&count).Error
-		if err != nil {
-			return false, err
+		if config.GetPreferredPrefix() == "OSDF" {
+			// Perform a count across both 'namespace' and 'topology' tables
+			err := db.Model(&Topology{}).Where("prefix = ?", prefix).Count(&count).Error
+			if err != nil {
+				return false, err
+			}
+			return count > 0, nil
 		}
 	}
-
-	return count > 0, nil
+	return false, nil
 }
 
 func namespaceSupSubChecks(prefix string) (superspaces []string, subspaces []string, inTopo bool, err error) {
@@ -277,7 +277,7 @@ func getNamespaceJwksById(id int) (jwk.Set, error) {
 
 func getNamespaceJwksByPrefix(prefix string) (jwk.Set, *AdminMetadata, error) {
 	var result Namespace
-	err := db.Select("pubkey").Where("prefix = ?", prefix).Last(&result).Error
+	err := db.Select("pubkey", "admin_metadata").Where("prefix = ?", prefix).Last(&result).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil, fmt.Errorf("namespace with prefix %q not found in database", prefix)
 	} else if err != nil {
@@ -403,7 +403,7 @@ func getNamespacesByFilter(filterNs Namespace, serverType ServerType) ([]*Namesp
 	}
 
 	namespacesOut := []*Namespace{}
-	for _, ns := range namespacesIn {
+	for idx, ns := range namespacesIn {
 		if filterNs.AdminMetadata.UserID != "" && filterNs.AdminMetadata.UserID != ns.AdminMetadata.UserID {
 			continue
 		}
@@ -432,7 +432,7 @@ func getNamespacesByFilter(filterNs Namespace, serverType ServerType) ([]*Namesp
 			continue
 		}
 		// Congrats! You passed all the filter check and this namespace matches what you want
-		namespacesOut = append(namespacesOut, &ns)
+		namespacesOut = append(namespacesOut, &namespacesIn[idx])
 	}
 	return namespacesOut, nil
 }

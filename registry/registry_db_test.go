@@ -520,7 +520,7 @@ func TestGetNamespacesByFilter(t *testing.T) {
 		nssOrigins, err := getNamespacesByFilter(filterNs, OriginType)
 		require.NoError(t, err)
 		assert.NotEmpty(t, nssOrigins, "Should return non-empty result for OriginType")
-		assert.True(t, compareNamespaces(mockNssWithOrigins, nssOrigins, true))
+		assert.True(t, compareNamespaces(mockNssWithOrigins, nssOrigins, true), "Returned nssOrigins does not match")
 
 		nssCaches, err := getNamespacesByFilter(filterNs, CacheType)
 		require.NoError(t, err)
