@@ -168,5 +168,5 @@ func TestSharingUrl(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotEmpty(t, token)
 	fmt.Println(token)
-	os.Unsetenv(config.GetPreferredPrefix()+"_SKIP_TERMINAL_CHECK")
+	os.Unsetenv(config.GetPreferredPrefix() + "_SKIP_TERMINAL_CHECK")
 }
