@@ -165,7 +165,7 @@ export const Card = ({
                 </Box>
                 <Box>
                     <Tooltip title={"Download JWK"}>
-                        <Link href={`https://localhost:8444/api/v1.0/registry_ui/namespaces/${namespace.id}/pubkey`}>
+                        <Link href={`/api/v1.0/registry_ui/namespaces/${namespace.id}/pubkey`}>
                             <IconButton onClick={(e: React.MouseEvent) => e.stopPropagation()} sx={{mx: 1}}>
                                 <Download/>
                             </IconButton>
