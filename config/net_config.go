@@ -21,8 +21,15 @@ func UpdateConfigFromListener(ln net.Listener) {
 			serverUrlStr := param.Server_ExternalWebUrl.GetString()
 			serverUrl, err := url.Parse(serverUrlStr)
 			if err == nil {
+				newUrlStr := "https://" + serverUrl.Hostname() + ":" + strconv.Itoa(tcpAddr.Port)
 				viper.Set("Server.WebHost", serverUrl.Hostname())
-				viper.Set("Server.ExternalWebUrl", "https://"+serverUrl.Hostname()+":"+strconv.Itoa(tcpAddr.Port))
+				viper.Set("Server.ExternalWebUrl", newUrlStr)
+				if param.Federation_DirectorUrl.GetString() == serverUrlStr {
+					viper.Set("Federation.DirectorUrl", newUrlStr)
+				}
+				if param.Federation_RegistryUrl.GetString() == serverUrlStr {
+					viper.Set("Federation.RegistryUrl", newUrlStr)
+				}
 				log.Debugln("Random web port used; updated external web URL to", param.Server_ExternalWebUrl.GetString())
 			} else {
 				log.Errorln("Unable to update external web URL for random port; unable to parse existing URL:", serverUrlStr)
