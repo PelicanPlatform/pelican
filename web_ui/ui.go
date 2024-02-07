@@ -110,8 +110,8 @@ func configureWebResource(engine *gin.Engine) error {
 			return
 		}
 
-		// If requesting servers other than the registry
-		if !strings.HasPrefix(requestPath, "/registry") {
+		// If requesting servers other than the registry or the director
+		if !strings.HasPrefix(requestPath, "/registry") && !strings.HasPrefix(requestPath, "/director") {
 
 			// Redirect initialized users from initialization pages
 			if strings.HasPrefix(requestPath, "/initialization") && strings.HasSuffix(requestPath, "index.html") {
