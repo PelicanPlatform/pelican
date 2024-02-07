@@ -24,15 +24,13 @@ interface ExportData extends Record {
 
 const TableCellOverflowLink: React.JSX.ElementType = ({ children, ...props }) => {
 
-    console.log(children)
-
     if (children === null){
         children = ""
     }
 
     return (
         <TableCellOverflow sx={{color: "blue", cursor: "pointer"}} {...props}>
-            <Link href={children as string}>
+            <Link href={children}>
                 {children}
             </Link>
         </TableCellOverflow>
