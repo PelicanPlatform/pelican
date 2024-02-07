@@ -538,6 +538,10 @@ func DoPut(localObject string, remoteDestination string, recursive bool) (transf
 
 	directorUrl := param.Federation_DirectorUrl.GetString()
 
+	if remoteDestScheme == "osdf" || remoteDestScheme == "pelican" {
+		remoteDestination = remoteDestUrl.Path
+	}
+
 	// Get the namespace of the remote filesystem
 	// For write back, it will be the destination
 	if !strings.HasPrefix(remoteDestination, "/") {
@@ -598,7 +602,7 @@ func DoGet(remoteObject string, localDestination string, recursive bool) (transf
 			}
 		} else if remoteObjectUrl.Scheme == "pelican" {
 
-			config.SetFederation(fd)
+			config.SetFederation(config.FederationDiscovery{})
 			federationUrl, _ := url.Parse(remoteObjectUrl.String())
 			federationUrl.Scheme = "https"
 			federationUrl.Path = ""

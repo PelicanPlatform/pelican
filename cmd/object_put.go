@@ -79,13 +79,6 @@ func putMain(cmd *cobra.Command, args []string) {
 	log.Debugln("Sources:", source)
 	log.Debugln("Destination:", dest)
 
-	if len(source) > 1 {
-		if destStat, err := os.Stat(dest); err != nil && destStat.IsDir() {
-			log.Errorln("Destination is not a directory")
-			os.Exit(1)
-		}
-	}
-
 	var result error
 	lastSrc := ""
 	for _, src := range source {
