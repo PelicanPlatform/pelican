@@ -41,7 +41,7 @@ export PELICAN_OIDC_CLIENTSECRETFILE=/tmp/pelican-test/stat_test/oidc-secret
 echo "placeholder OIDC secret" > /tmp/pelican-test/stat_test/oidc-secret
 
 # Prepare token for calling stat
-TOKEN=$(./pelican origin token create --audience "https://wlcg.cern.ch/jwt/v1/any" --issuer "https://`hostname`:8443" --scope "web_ui.access" --subject "bar" --lifetime 3600 --private-key /tmp/pelican-test/stat_test/issuer.jwk)
+TOKEN=$(./pelican origin token create --audience "https://wlcg.cern.ch/jwt/v1/any" --issuer "https://`hostname`:8444" --scope "web_ui.access" --subject "bar" --lifetime 3600 --private-key /tmp/pelican-test/stat_test/issuer.jwk)
 
 # Run federation in the background
 federationServe="./pelican serve --module director --module registry --module origin"
