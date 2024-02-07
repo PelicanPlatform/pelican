@@ -3,7 +3,7 @@ module github.com/pelicanplatform/pelican
 // Unpublish Go package as we are not intended to allow users us import our packages for now
 retract [v1.0.0, v1.0.5]
 
-go 1.20
+go 1.21
 
 require (
 	github.com/alecthomas/units v0.0.0-20211218093645-b94a6e3cc137
