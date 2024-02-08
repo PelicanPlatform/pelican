@@ -22,7 +22,7 @@ Federation:
   DiscoveryUrl: osg-htc.org
   TopologyURL: https://topology.opensciencegrid.org
   TopologyNamespaceURL: https://topology.opensciencegrid.org/osdf/namespaces
-  TopologyReloadInterval: 10
+  TopologyReloadInterval: 10m
 Registry:
   CacheApprovedOnly: true
   OriginApprovedOnly: true

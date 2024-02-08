@@ -45,8 +45,10 @@ func setupMockRegistryDB(t *testing.T) {
 	mockDB, err := sql.Open("sqlite", ":memory:")
 	db = mockDB
 	require.NoError(t, err, "Error setting up mock namespace DB")
-	createNamespaceTable()
-	createTopologyTable()
+	err = createNamespaceTable()
+	require.NoError(t, err, "Error creating namespace table")
+	err = createTopologyTable()
+	require.NoError(t, err, "Error creating topology table")
 }
 
 func resetNamespaceDB(t *testing.T) {
@@ -807,6 +809,8 @@ func TestRegistryTopology(t *testing.T) {
 	config.SetPreferredPrefix("OSDF")
 
 	//Test topology table population
+	err = createTopologyTable()
+	require.NoError(t, err)
 	err = PopulateTopology()
 	require.NoError(t, err)
 
