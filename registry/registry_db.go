@@ -76,7 +76,7 @@ type Namespace struct {
 	Pubkey        string                 `json:"pubkey" validate:"required" gorm:"not null"`
 	Identity      string                 `json:"identity" post:"exclude"`
 	AdminMetadata AdminMetadata          `json:"admin_metadata" gorm:"serializer:json;check:length(admin_metadata) <= 4000"`
-	CustomFields  map[string]interface{} `json:"custom_fields" gorm:"serializer:json;check:length(custom_fields) <= 4000"`
+	CustomFields  map[string]interface{} `json:"custom_fields" gorm:"serializer:json;default:'';check:length(custom_fields) <= 4000"`
 }
 
 type NamespaceWOPubkey struct {
@@ -645,8 +645,10 @@ func PopulateTopology() error {
 			return err
 		}
 
-		if err := tx.Create(&toAddTopo).Error; err != nil {
-			return err
+		if len(toAddTopo) > 0 {
+			if err := tx.Create(&toAddTopo).Error; err != nil {
+				return err
+			}
 		}
 		return nil
 	})
