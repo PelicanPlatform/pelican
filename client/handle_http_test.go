@@ -585,8 +585,6 @@ func (f *FedTest) Spinup() {
 
 	viper.Set("ConfigDir", tmpPath)
 
-	// Increase the log level; otherwise, its difficult to debug failures
-	//viper.Set("Logging.Level", "Debug")
 	config.InitConfig()
 	// Create a file to capture output from commands
 	output, err := os.CreateTemp(f.T.TempDir(), "output")
@@ -686,7 +684,15 @@ func TestGetAndPutAuth(t *testing.T) {
 		Audience:     []string{param.Origin_Url.GetString()},
 		Subject:      "origin",
 	}
-	tokenConfig.AddRawScope("storage.read:/ storage.modify:/")
+
+	scopes := []token_scopes.TokenScope{}
+	readScope, err := token_scopes.Storage_Read.Path("/")
+	assert.NoError(t, err)
+	scopes = append(scopes, readScope)
+	modScope, err := token_scopes.Storage_Modify.Path("/")
+	assert.NoError(t, err)
+	scopes = append(scopes, modScope)
+	tokenConfig.AddScopes(scopes)
 	token, err := tokenConfig.CreateToken()
 	assert.NoError(t, err)
 	tempToken, err := os.CreateTemp(t.TempDir(), "token")
@@ -848,7 +854,14 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 		Audience:     []string{param.Origin_Url.GetString()},
 		Subject:      "origin",
 	}
-	tokenConfig.AddRawScope("storage.read:/ storage.modify:/")
+	scopes := []token_scopes.TokenScope{}
+	readScope, err := token_scopes.Storage_Read.Path("/")
+	assert.NoError(t, err)
+	scopes = append(scopes, readScope)
+	modScope, err := token_scopes.Storage_Modify.Path("/")
+	assert.NoError(t, err)
+	scopes = append(scopes, modScope)
+	tokenConfig.AddScopes(scopes)
 	token, err := tokenConfig.CreateToken()
 	assert.NoError(t, err)
 	tempToken, err := os.CreateTemp(t.TempDir(), "token")
