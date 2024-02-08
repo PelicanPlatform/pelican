@@ -106,7 +106,12 @@ func configShoveler(c *shoveler.Config) error {
 	}
 
 	c.DestUdp = param.Shoveler_OutputDestinations.GetStringSlice()
-	c.Debug = param.Debug.GetBool()
+	logLevel, err := log.ParseLevel(param.Logging_Level.GetString())
+	if logLevel == log.DebugLevel {
+		c.Debug = true
+	} else {
+		c.Debug = false
+	}
 	c.Verify = param.Shoveler_VerifyHeader.GetBool()
 
 	ipMappings := []ipMappingItem{}

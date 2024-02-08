@@ -607,6 +607,7 @@ func InitConfig() {
 	}
 	if param.Debug.GetBool() {
 		SetLogging(log.DebugLevel)
+		log.Warnln("Debug is set as a flag or in config, this will override anything set for Logging.Level within your configuration")
 	} else {
 		logLevel := param.Logging_Level.GetString()
 		level, err := log.ParseLevel(logLevel)
