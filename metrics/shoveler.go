@@ -107,6 +107,9 @@ func configShoveler(c *shoveler.Config) error {
 
 	c.DestUdp = param.Shoveler_OutputDestinations.GetStringSlice()
 	logLevel, err := log.ParseLevel(param.Logging_Level.GetString())
+	if err != nil {
+		return errors.Wrap(err, "Issue parsing specified log level")
+	}
 	if logLevel == log.DebugLevel {
 		c.Debug = true
 	} else {
