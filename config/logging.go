@@ -19,10 +19,13 @@
 package config
 
 import (
+	"io"
+	"os"
 	"regexp"
 	"sync/atomic"
 
 	log "github.com/sirupsen/logrus"
+	"github.com/sirupsen/logrus/hooks/writer"
 )
 
 type (
@@ -60,9 +63,28 @@ func (fh *RegexpFilterHook) Fire(entry *log.Entry) (err error) {
 }
 
 func initFilterLogging() {
+	// Our filters may want to see every log message, even those that
+	// are not otherwise printed.  Have the log levels printed via a hook
+	// (instead of the typical output mechanism) so we can crank up the
+	// global log.
 	filters := make([]*RegexpFilter, 0)
 	globalFilters.filters.Store(&filters)
+
+	configLevel := log.GetLevel()
+	log.SetLevel(log.DebugLevel)
+	hookLevel := make([]log.Level, 0)
+	for _, lvl := range log.AllLevels {
+		if lvl <= configLevel {
+			hookLevel = append(hookLevel, lvl)
+		}
+	}
+
 	log.AddHook(&globalFilters)
+	log.SetOutput(io.Discard)
+	log.AddHook(&writer.Hook{
+		Writer:    os.Stderr,
+		LogLevels: hookLevel,
+	})
 }
 
 func AddFilter(newFilter *RegexpFilter) {

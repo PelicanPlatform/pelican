@@ -27,6 +27,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"time"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/daemon"
@@ -146,6 +147,8 @@ func LaunchOriginDaemons(ctx context.Context, launchers []daemon.Launcher, egrp 
 		return err
 	}
 
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -162,6 +165,9 @@ func LaunchOriginDaemons(ctx context.Context, launchers []daemon.Launcher, egrp 
 			}
 			log.Infoln("Origin startup complete on port", port)
 		}
+	case <-ticker.C:
+		log.Errorln("XRootD did not startup after 10s of waiting")
+		return errors.New("XRootD did not startup after 10s of waiting")
 	}
 
 	return nil
