@@ -551,11 +551,23 @@ func InitializeDB(ctx context.Context) error {
 
 	dbName := "file:" + dbPath + "?_busy_timeout=5000&_journal_mode=WAL"
 
+	globalLogLevel := log.GetLevel()
+	var ormLevel logger.LogLevel
+	if globalLogLevel == log.DebugLevel || globalLogLevel == log.TraceLevel || globalLogLevel == log.InfoLevel {
+		ormLevel = logger.Info
+	} else if globalLogLevel == log.WarnLevel {
+		ormLevel = logger.Warn
+	} else if globalLogLevel == log.ErrorLevel {
+		ormLevel = logger.Error
+	} else {
+		ormLevel = logger.Info
+	}
+
 	gormLogger := gormlog.NewGormlog(
 		gormlog.WithLogrusEntry(log.WithField("component", "gorm")),
 		gormlog.WithGormOptions(gormlog.GormOptions{
 			LogLatency: true,
-			LogLevel:   logger.Error,
+			LogLevel:   ormLevel,
 		}),
 	)
 
@@ -571,7 +583,6 @@ func InitializeDB(ctx context.Context) error {
 		return errors.Wrapf(err, "Failed to migrate DB for namespace table")
 	}
 
-	// createNamespaceTable()
 	return nil
 }
 
