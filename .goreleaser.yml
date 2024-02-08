@@ -232,6 +232,13 @@ nfpms:
       - src: "systemd/pelican-registry.yaml"
         dst: "/etc/pelican/pelican-registry.yaml"
         type: config|noreplace
+      - dst: "/var/log/pelican"
+        type: "dir"
+        file_info:
+          owner: root
+          group: root
+          mode: 0700
+
     overrides:
       rpm:
         dependencies:
