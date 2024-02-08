@@ -180,6 +180,7 @@ var (
 	Monitoring_PortHigher = IntParam{"Monitoring.PortHigher"}
 	Monitoring_PortLower = IntParam{"Monitoring.PortLower"}
 	Server_IssuerPort = IntParam{"Server.IssuerPort"}
+	Server_UILoginRateLimit = IntParam{"Server.UILoginRateLimit"}
 	Server_WebPort = IntParam{"Server.WebPort"}
 	Shoveler_PortHigher = IntParam{"Shoveler.PortHigher"}
 	Shoveler_PortLower = IntParam{"Shoveler.PortLower"}

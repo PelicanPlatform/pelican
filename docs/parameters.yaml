@@ -999,6 +999,13 @@ type: duration
 default: 10s
 components: ["origin", "cache"]
 ---
+name: Server.UILoginRateLimit
+description: >-
+  The maximum number of requests a user can be made under the same IP address per second against the login endpoint
+type: int
+default: 1
+components: ["*"]
+---
 ################################
 #   Issuer's Configurations    #
 ################################
