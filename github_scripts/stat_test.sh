@@ -36,6 +36,9 @@ chmod 777 /tmp/pelican-test/stat_test/origin
 export PELICAN_ORIGIN_EXPORTVOLUME="/tmp/pelican-test/stat_test/origin:/test"
 export PELICAN_ORIGIN_ENABLEPUBLICREADS=true
 
+export PELICAN_DIRECTOR_STATTIMEOUT=1s
+export PELICAN_LOGGING_LEVEL=debug
+
 echo "This is some random content in the random file" > /tmp/pelican-test/stat_test/origin/input.txt
 export PELICAN_OIDC_CLIENTSECRETFILE=/tmp/pelican-test/stat_test/oidc-secret
 echo "placeholder OIDC secret" > /tmp/pelican-test/stat_test/oidc-secret
@@ -50,11 +53,12 @@ pid_federationServe=$!
 
 # Give the federation time to spin up:
 API_URL="https://$HOSTNAME:8444/api/v1.0/health"
-DESIRED_RESPONSE="HTTP/2 200"
+DESIRED_RESPONSE="200"
 
 # Function to check if the response indicates all servers are running
 check_response() {
-    RESPONSE=$(curl -k -s -I -X GET "$API_URL" \
+    date
+    RESPONSE=$(curl -m 10 -k -s -I -X GET "$API_URL" --write-out "%{http_code}" --output /dev/null \
                  -H "Content-Type: application/json") \
 
     # Check if the response matches the desired output
