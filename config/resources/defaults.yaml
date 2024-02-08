@@ -14,7 +14,6 @@
 # limitations under the License.
 #
 
-Debug: false
 Logging:
   Level: "Error"
   Cache:

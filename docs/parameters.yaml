@@ -33,6 +33,7 @@ type: filename
 name: Debug
 description: >-
   A bool indicating whether Pelican should emit debug messages in its log.
+  NOTE: this will override whatever is set within your configuration file under Logging.Level!
 type: bool
 default: false
 components: ["*"]
