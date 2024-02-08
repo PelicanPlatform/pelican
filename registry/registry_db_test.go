@@ -809,6 +809,8 @@ func TestRegistryTopology(t *testing.T) {
 	config.SetPreferredPrefix("OSDF")
 
 	//Test topology table population
+	err = createTopologyTable()
+	require.NoError(t, err)
 	err = PopulateTopology()
 	require.NoError(t, err)
 
