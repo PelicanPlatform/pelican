@@ -810,7 +810,7 @@ func mapXrootdLogLevels(xrdConfig *XrootdConfig) {
 	// Cache PssSetOptCache and Cache Pss
 	cachePssConfig := param.Logging_Cache_Pss.GetString()
 	if cachePssConfig == "debug" {
-		xrdConfig.Logging.PssSetOptCache = "DebugLevel 3"
+		xrdConfig.Logging.PssSetOptCache = "DebugLevel 4"
 		xrdConfig.Logging.CachePss = "all"
 	} else if cachePssConfig == "info" {
 		xrdConfig.Logging.PssSetOptCache = "DebugLevel 2"
