@@ -830,13 +830,13 @@ func mapXrootdLogLevels(xrdConfig *XrootdConfig) error {
 		xrdConfig.Logging.PssSetOptOrigin = "DebugLevel 2"
 		xrdConfig.Logging.OriginPss = "debug"
 	case log.InfoLevel:
-		xrdConfig.Logging.PssSetOptOrigin = "DebugLevel 2"
+		xrdConfig.Logging.PssSetOptOrigin = "DebugLevel 3"
 		xrdConfig.Logging.OriginPss = "on"
 	case log.DebugLevel:
-		xrdConfig.Logging.PssSetOptOrigin = "DebugLevel 3"
+		xrdConfig.Logging.PssSetOptOrigin = "DebugLevel 4"
 		xrdConfig.Logging.OriginPss = "all"
 	case log.TraceLevel:
-		xrdConfig.Logging.PssSetOptOrigin = "DebugLevel 3"
+		xrdConfig.Logging.PssSetOptOrigin = "DebugLevel 4"
 		xrdConfig.Logging.OriginPss = "all"
 	default:
 		return errors.New("Improper xrootd logging config for Origin_Pss, proper values include: panic, fatal, error, warn, info, debug, trace")
@@ -968,13 +968,13 @@ func mapXrootdLogLevels(xrdConfig *XrootdConfig) error {
 		xrdConfig.Logging.PssSetOptCache = "DebugLevel 2"
 		xrdConfig.Logging.CachePss = "debug"
 	case log.InfoLevel:
-		xrdConfig.Logging.PssSetOptCache = "DebugLevel 2"
+		xrdConfig.Logging.PssSetOptCache = "DebugLevel 3"
 		xrdConfig.Logging.CachePss = "on"
 	case log.DebugLevel:
-		xrdConfig.Logging.PssSetOptCache = "DebugLevel 3"
+		xrdConfig.Logging.PssSetOptCache = "DebugLevel 4"
 		xrdConfig.Logging.CachePss = "all"
 	case log.TraceLevel:
-		xrdConfig.Logging.PssSetOptCache = "DebugLevel 3"
+		xrdConfig.Logging.PssSetOptCache = "DebugLevel 4"
 		xrdConfig.Logging.CachePss = "all"
 	default:
 		return errors.New("Improper xrootd logging config for Cache_Pss, proper values include: panic, fatal, error, warn, info, debug, trace")
