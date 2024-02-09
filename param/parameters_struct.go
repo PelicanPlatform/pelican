@@ -127,6 +127,7 @@ type config struct {
 		ScitokensRestrictedPaths []string
 		ScitokensUsernameClaim string
 		SelfTest bool
+		SelfTestInterval time.Duration
 		Url string
 		XRootDPrefix string
 	}
@@ -161,6 +162,7 @@ type config struct {
 		TLSCertificate string
 		TLSKey string
 		UIActivationCodeFile string
+		UILoginRateLimit int
 		UIPasswordFile string
 		WebHost string
 		WebPort int
@@ -337,6 +339,7 @@ type configWithType struct {
 		ScitokensRestrictedPaths struct { Type string; Value []string }
 		ScitokensUsernameClaim struct { Type string; Value string }
 		SelfTest struct { Type string; Value bool }
+		SelfTestInterval struct { Type string; Value time.Duration }
 		Url struct { Type string; Value string }
 		XRootDPrefix struct { Type string; Value string }
 	}
@@ -371,6 +374,7 @@ type configWithType struct {
 		TLSCertificate struct { Type string; Value string }
 		TLSKey struct { Type string; Value string }
 		UIActivationCodeFile struct { Type string; Value string }
+		UILoginRateLimit struct { Type string; Value int }
 		UIPasswordFile struct { Type string; Value string }
 		WebHost struct { Type string; Value string }
 		WebPort struct { Type string; Value int }

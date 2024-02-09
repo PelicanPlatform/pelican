@@ -72,6 +72,8 @@ func TestMain(m *testing.M) {
 
 	// Ensure we load up the default configs.
 	config.InitConfig()
+	viper.Set("Server.UILoginRateLimit", 100)
+
 	if err := config.InitServer(ctx, config.OriginType); err != nil {
 		fmt.Println("Failed to configure the test module")
 		os.Exit(1)

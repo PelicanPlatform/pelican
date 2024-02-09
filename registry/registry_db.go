@@ -153,11 +153,12 @@ func IsValidRegStatus(s string) bool {
 	return s == "Pending" || s == "Approved" || s == "Denied" || s == "Unknown"
 }
 
-func createTopologyTable() {
+func createTopologyTable() error {
 	err := db.AutoMigrate(&Topology{})
 	if err != nil {
-		log.Fatalf("Failed to migrate topology table: %v", err)
+		return fmt.Errorf("Failed to migrate topology table: %v", err)
 	}
+	return nil
 }
 
 func namespaceExists(prefix string) (bool, error) {
@@ -583,14 +584,18 @@ func InitializeDB(ctx context.Context) error {
 		return errors.Wrapf(err, "Failed to migrate DB for namespace table")
 	}
 
+	if config.GetPreferredPrefix() == "OSDF" {
+		// Create the toplogy table
+		if err := db.AutoMigrate(&Topology{}); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
 // Create a table in the registry to store namespace prefixes from topology
 func PopulateTopology() error {
-	// Create the toplogy table
-	createTopologyTable()
-
 	// The topology table may already exist from before, it may not. Because of this
 	// we need to add to the table any prefixes that are in topology, delete from the
 	// table any that aren't in topology, and skip any that exist in both.

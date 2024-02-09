@@ -46,7 +46,8 @@ func setupMockRegistryDB(t *testing.T) {
 	require.NoError(t, err, "Error setting up mock namespace DB")
 	err = db.AutoMigrate(&Namespace{})
 	require.NoError(t, err, "Failed to migrate DB for namespace table")
-	createTopologyTable()
+	err = createTopologyTable()
+	require.NoError(t, err, "Error creating topology table")
 }
 
 func resetNamespaceDB(t *testing.T) {
@@ -778,6 +779,8 @@ func TestRegistryTopology(t *testing.T) {
 	config.SetPreferredPrefix("OSDF")
 
 	//Test topology table population
+	err = createTopologyTable()
+	require.NoError(t, err)
 	err = PopulateTopology()
 	require.NoError(t, err)
 

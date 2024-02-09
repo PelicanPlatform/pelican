@@ -294,7 +294,7 @@ func EmitAuthfile(server server_utils.XRootDServer) error {
 				}
 				output.Write([]byte(outStr + strings.Join(words[2:], " ") + "\n"))
 			} else {
-				output.Write([]byte(lineContents + "\n"))
+				output.Write([]byte(lineContents + " "))
 			}
 			foundPublicLine = true
 		} else {

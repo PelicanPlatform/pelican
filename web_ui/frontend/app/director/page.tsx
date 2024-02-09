@@ -34,11 +34,11 @@ export default function Home() {
         <Box width={"100%"}>
             <Grid container spacing={2}>
                 <Grid item xs={12} lg={6}>
-                    <Typography variant={"h4"}>Origins</Typography>
+                    <Typography variant={"h4"} pb={2}>Origins</Typography>
                     <ServerTable type={"origin"}/>
                 </Grid>
                 <Grid item xs={12} lg={6}>
-                    <Typography variant={"h4"} >Caches</Typography>
+                    <Typography variant={"h4"} pb={2}>Caches</Typography>
                     <ServerTable type={"cache"}/>
                 </Grid>
             </Grid>
