@@ -176,7 +176,7 @@ func TestXrootDOriginConfig(t *testing.T) {
 		content, err := io.ReadAll(file)
 		assert.NoError(t, err)
 		assert.Contains(t, string(content), "pss.trace all")
-		assert.Contains(t, string(content), "pss.setopt DebugLevel 3")
+		assert.Contains(t, string(content), "pss.setopt DebugLevel 4")
 		viper.Reset()
 	})
 
@@ -447,7 +447,7 @@ func TestXrootDCacheConfig(t *testing.T) {
 
 		content, err := io.ReadAll(file)
 		assert.NoError(t, err)
-		assert.Contains(t, string(content), "pss.setopt DebugLevel 3")
+		assert.Contains(t, string(content), "pss.setopt DebugLevel 4")
 		viper.Reset()
 	})
 
