@@ -2,17 +2,24 @@ import ExportedImage from "next-image-export-optimizer";
 
 # Serve a Pelican Origin
 
-The [Pelican](http://pelicanplatform.org/) origin exposes a storage backend such as POSIX or S3 to other members of the federation. This will give you the steps to install XRootD as well as how to install Pelican and start up an origin.
+The [Pelican](http://pelicanplatform.org/) *Origin* is the service to connect your data to the data federation. It acts like an adapter plug to your data store, which means it does **NOT** hold any data itself. Rather, it takes your storage backend, such as a POSIX file system or S3 buckets, does the dirty work of communicating with Pelican federation, and exposes your data to federation memebers.
 
-## Before Starting
+To achieve high performance data transfer in-and-out-of your data store, Pelican depends on [XRootD (eXtended ROOT Daemon)](https://github.com/xrootd/xrootd), a software initiated from High Energy Physics (HEP) community and widely used by the larger science community to handle massive data distribution. Pelican uses XRootD as the tool to transfer your data.
 
+Follow these steps to install and run a Pelican Origin.
+
+## Installing XRootD
 
 Before starting the installation process, consider the following points:
 
 -   **User IDs:** If it does not exist already, the installation will create the Linux user ID `xrootd`
 -   **Service certificate:** The XRootD service uses a host certificate and key pair at
     `/etc/grid-security/xrd/xrdcert.pem` and `/etc/grid-security/xrd/xrdkey.pem` that must be owned by the `xrootd` user
--   **Networking:** The XRootD service uses port 1094 by default
+-   **Networking:** The XRootD service uses port 8443 by default
+
+### OSG Specific Tips
+
+The following tips are optional and are specific to OSG installation. If you do not install Pelican Origin for OSG, skip to [Installing XRootD](https://docs.pelicanplatform.org/serving_an_origin#installing-xrootd)
 
 As with all OSG software installations, there are some one-time (per host) steps to prepare in advance:
 
@@ -20,27 +27,23 @@ As with all OSG software installations, there are some one-time (per host) steps
 -   Obtain root access to the host
 -   Prepare [the required Yum repositories](https://osg-htc.org/docs/common/yum/)
 -   Install [CA certificates](https://osg-htc.org/docs/common/ca/)
--   Install XRootD (Instructions to follow)
 
-## XRootD
+**Enabling multi-user support**
 
-#### Requirements for XRootD-Multiuser with VOMS FQANs
-
-    Using XRootD-Multiuser with a VOMS FQAN requires mapping the FQAN to a username, which requires a `voms-mapfile`.
-    Support is available in `xrootd-voms 5.4.2-1.1`, in the OSG 3.6 repos, though it is expected in XRootD 5.5.0.
-    If you want to use multiuser, ensure you are getting `xrootd-voms` from the OSG repos.
+> Using XRootD-Multiuser with a VOMS FQAN requires mapping the FQAN to a username, which requires a `voms-mapfile`.
+Support is available in `xrootd-voms 5.4.2-1.1`, in the OSG 3.6 repos, though it is expected in XRootD 5.5.0.
+If you want to use multiuser, ensure you are getting `xrootd-voms` from the OSG repos.
 
 
 ### Installing XRootD
 
-To install an XRootD Standalone server, run the following command:
+Run the following command:
 
 ```console
 root@xrootd-standalone # yum install osg-xrootd-standalone
 ```
 
 ## Installing Pelican
-
 
 Grab the appropriate binary for your system from the [pelican repository](https://github.com/PelicanPlatform/pelican/releases). For more details, see [the client installation instructions](/install.mdx)
 
