@@ -1,10 +1,10 @@
 # Serve a Pelican Federation
 
-A federation in Pelican refers to an instance of a data sharing ecosystem where memebers of it can share and access data as objects. To
-allow such exchange of data to work, Pelican has two top-level *central server components* to coordinate origins and caches in the
+A federation in Pelican refers to an instance of a data sharing ecosystem where memebers can share and access data as objects. To
+allow such an exchange of data to work, Pelican has two top-level *central server components* to coordinate origins and caches in the
 federation, direct client requests to the proper storage server, and manage namespace registration. They are the *director* and the *registry*.
 A Pelican federation requires both a *director* and a *registry* to be set up first before any origin or cache server can join
-the federation or any client to access objects in the federaiton.
+the federation or any client can access objects in the federaiton.
 
 ## Install Pelican
 
@@ -22,7 +22,7 @@ Pelican servers use `https` for serving its web UI and handling internal http re
 
 You need to contact a Certificate Authority (CA) who owns the root certificate for getting these credentials. One popular CA that provides free TLS certificates is [Let's Encrypt](https://letsencrypt.org/). You may follow [their guide](https://letsencrypt.org/getting-started/) to obtain the credentials listed above. **Note that you need to have a valid domain before proceeding.**
 
-Once you go through the process, locate your credential files and set the following parameters to the file locations, or copy the credential files to the default location of the parameter:
+Once you go through the process, locate your credential files and set the following parameters to the file locations, or copy the credential files to the default locations of the parameters:
 
 - `Server.TLSCertificate`
   - The certicate file from Let's Encrypt (or another CA), usually named as `example.com.crt` or `example.com.pem`
@@ -36,20 +36,20 @@ Once you go through the process, locate your credential files and set the follow
   - The intermediate certificate from Let's Encrypt to establish the trust chain to a root certificate, usually named as `letsencrypt-intermediate.pem` or `chain.pem`
   - Default location: `~/.config/pelican/certificates/tlsca.pem` for non-root users or `/etc/pelican/certificates/tlsca.pem` for root users.
 
-Since your TLS certificate is associated with your domain name, you will need to change the default hostname of Pelican server to be consistent. Set `Server.Hostname` to your domain name i.e. `example.com`.
+Since your TLS certificate is associated with your domain name, you will need to change the default hostname of Pelican server to be consistent. Set `Server.Hostname` to your domain name (e.g. `example.com`).
 
 ## Serve a Registry
 
-The Pelican *registry* manages namespace registration and public key distribution. An origin or cache will automatically attempt to register their namespace at their start. A federation user may also register a namespace without running a storage server by visiting the registry website through `https://<your-registry.com>`.
+The Pelican *registry* manages namespace registration and public key distribution. An origin or cache will automatically attempt to register their namespace when they are started. A federation user may also register a namespace without running a storage server by visiting the registry website through `https://<your-registry.com>`.
 
 ### Get OIDC Credential (Required)
 
 The Pelican registry follows [OIDC](https://openid.net/developers/how-connect-works/) for user authentication, and [CILogon](https://www.cilogon.org/) is our OpenID Provider by default, which enables single sign-on for users with an account associated with an institution that joins CILogon. (Check out [this page](https://cilogon.org) for institutions in CILogon)
 
-For your Pelican registry to work, you need to obtain a client id and associated client secret from CILogon. [This page](https://www.cilogon.org/oidc#h.p_ID_38) details how you can request a client credential. You will need to register your client at https://cilogon.org/oauth2/register and wait for approval before proceed.
+For your Pelican registry to work, you need to obtain a client id and associated client secret from CILogon. [This page](https://www.cilogon.org/oidc#h.p_ID_38) details how you can request a client credential. You will need to register your client at https://cilogon.org/oauth2/register and wait for approval before proceeding.
 
 
-Once approved, you will get your `client_id` and `client_secret` from CILogon, and you need to pass them as configuration parameters and configuration files to Pelican.
+Once approved, you will get your `client_id` and `client_secret` from CILogon, and you will need to pass them as configuration parameters and configuration files to Pelican.
 
 * Set the `OIDC.ClientID` config parameter to your `<client_id>` value.
 * Create a file named `/etc/pelican/oidc-client-secret`
@@ -65,9 +65,9 @@ If you prefer to store your `client_secret` file in a path different from the de
 
 #### Bypass Required Credential Check
 
-To run the registry without CILogon credentials, create two files named `/etc/pelican/oidc-client-id` and `/etc/pelican/oidc-client-secret` and populate the files with non-empty content. Pelican checks if the files exit and are non-empty. It won't check the content of the file.
+To run the registry without CILogon credentials, create two files named `/etc/pelican/oidc-client-id` and `/etc/pelican/oidc-client-secret` and populate the files with non-empty content. Pelican checks if the files exist and are non-empty. It won't check the content of the file.
 
-Note that by doing this, when users attempt to use `CILogon` to login to the registry, they will get an error page from `CILogon`, and it's only possible to login using admin password.
+Note that, by doing this, when users attempt to use `CILogon` to login to the registry they will get an error page from `CILogon` and it's only possible to login using admin password.
 
 
 ### Finish Setup
@@ -86,8 +86,10 @@ To initialize, login at https://<hostname>:8444/view/initialization/code/ with t
 865309
 ```
 
+> Note that your code is different from what is being shown here.
+
 By default, a registry runs on port `8444`. You may change the port number by passing `-p <port>` when serving
-the registry, or by setting `Server.WebPort` in the configuration file.
+the registry or by setting `Server.WebPort` in the configuration file.
 
 Now you want to initialize the admin account for your registry web UI. You may refer to https://docs.pelicanplatform.org/serving_an_origin#running-origin-serve for details.
 
@@ -135,7 +137,7 @@ By default, Pelican requires namespaces requesting registration to possess a key
 
 #### `Registry.Institutions` and `Registry.InstitutionsUrl`
 
-In the registry web UI, when a user wants to register a namespace, they must specify which institution this namespace is for, which is a list of options you need to provide. To do so, you may either feed a list of `name` and `id` pairs of available institutions to register to `Registry.Institutions`, or if you already have a web endpoint to serve such information, you may pass the URL to `Registry.InstitutionsUrl`. Please refer to https://docs.pelicanplatform.org/parameters#Registry-Institutions for details.
+When a user wants to register a namespace In the registry web UI they must specify which institution this namespace is for. This is a list of options you need to provide. To do so you may either feed a list of `name` and `id` pairs of available institutions to register to `Registry.Institutions` or, if you already have a web endpoint to serve such information, you may pass the URL to `Registry.InstitutionsUrl`. Please refer to https://docs.pelicanplatform.org/parameters#Registry-Institutions for details.
 
 ## Serve a Director
 
@@ -156,14 +158,14 @@ Then pass the file location to `Director.MaxMindKeyFile`.
 ### Set Registry URL (required)
 
 A Pelican director needs to talk to the registry to get the public keys for namespaces. You will need to set `Federation.RegistryUrl` to the public endpoint of your registry
-for your Pelican director to work.
+for your Pelican director to work. An example value looks like `https://your-registry.org:9999`
 
 ### Director as a Federation (optional)
 
 For Pelican origins and caches, they need to know where the *federation* is so that they can
 attempt to join it. This can be done by either manually passing configuration values or by requesting the
 `Federation.DiscoveryUrl` endpoint, which contains various URLs to a federation's registry and director.
-You may supply your own endpoint to provide such information, or the Pelican director can do it for you.
+You may supply your own endpoint to provide such information or the Pelican director can do it for you.
 
 This can be done by setting `Federation.DiscoveryUrl` of your *origins* and *caches* to the public url of your director, i.e. `https://<your-director-hostname>:<director-web-port>`. Make sure your director is up and running before starting your origins and caches.
 
@@ -184,7 +186,7 @@ To initialize, login at https://<hostname>:8444/view/initialization/code/ with t
 ```
 
 By default, a director runs on port `8444`. You may change the port number by passing `-p <port>` when serving
-the director, or by setting `Server.WebPort` in the configuration file.
+the director or by setting `Server.WebPort` in the configuration file.
 
 To finish setting up the web UI for the director, please refer to the previous section in the registry. Once finished the initialization and login with your admin password, you should be able to see the following page as an admin user (lists are expected to be empty at a fresh start):
 
@@ -198,7 +200,7 @@ There are a couple of configuration parameters you could use to customize the be
 
 #### `Director.DefaultResponse`
 
-A Pelican director by default redirects object request from clients to the geospatially nearest cache in the federation, to improve data transfer efficiency. If a director is hosted at https://director.com, then a `GET` request to https://director.com/foo/bar.txt will be redirected to the nearest cache for namespace `/foo`. You may change the default response type of a redirect for director by setting `Director.DefaultResponse`. It can be either `cache` or `origin`. If set to `origin`, director will redirect the request to the origin, bypassing caches.
+A Pelican director by default redirects object request from clients to the geospatially nearest cache in the federation to improve data transfer efficiency. If a director is hosted at https://director.com, then a `GET` request to https://director.com/foo/bar.txt will be redirected to the nearest cache for namespace `/foo`. You may change the default response type of a redirect for director by setting `Director.DefaultResponse`. It can be either `cache` or `origin`. If set to `origin`, director will redirect the request to the origin, bypassing caches.
 
 #### `GeoIPOverrides`
 
@@ -208,4 +210,4 @@ The MaxMind database may fail to return a valid longitute/latitute pair given a 
 
 You may allow the director to redirect client traffic to both caches and origins. You can do it by adding virtual hostnames to `Director.CacheResponseHostnames` for a cache response or `Director.OriginResponseHostnames` for an origin response. If a request is sent by the client to one of these hostnames, the director assumes it should respond with a redirect to a cache/origin.
 
-If present, the hostname is taken from the    `X-Forwarded-Host` header in the request. Otherwise, Host is used.
+If present, the hostname is taken from the `X-Forwarded-Host` header in the request. Otherwise, Host is used.
