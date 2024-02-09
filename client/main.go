@@ -85,6 +85,14 @@ type payloadStruct struct {
 	downloadSize int64
 }
 
+type UrlMetadata struct {
+	objectName           string //Might not need this?
+	discoveryUrl         string
+	directorUrl          string
+	registryUrl          string
+	topologyNamespaceUrl string //Might not need this?
+}
+
 // Determine the token name if it is embedded in the scheme, Condor-style
 func getTokenName(destination *url.URL) (scheme, tokenName string) {
 	schemePieces := strings.Split(destination.Scheme, "+")
@@ -467,6 +475,63 @@ func getNamespaceInfo(resourcePath, OSDFDirectorUrl string, isPut bool) (ns name
 	}
 }
 
+func getUrlMetadata(remoteUrl *url.URL, scheme string) (metadata UrlMetadata, err error) {
+	if remoteUrl.Host != "" {
+		if scheme == "osdf" || scheme == "stash" {
+			remoteUrl.Path, err = url.JoinPath(remoteUrl.Host, remoteUrl.Path)
+			if err != nil {
+				log.Errorln("Failed to join remote destination url path:", err)
+				return UrlMetadata{}, err
+			}
+		} else if scheme == "pelican" {
+			// If we have a host and url is pelican, we need to extract federation data from the host
+			log.Debugln("Detected pelican:// url, getting federation metadata from specified host")
+			federationUrl, _ := url.Parse(remoteUrl.String())
+			federationUrl.Scheme = "https"
+			federationUrl.Path = ""
+
+			// Discover our federation for the specified pelican:// url
+			urlFederation, err := config.DisoverUrlFederation(federationUrl.String())
+			if err != nil {
+				return UrlMetadata{}, err
+			}
+			// Set our local url metadata
+			metadata.directorUrl = urlFederation.DirectorEndpoint
+			metadata.discoveryUrl = federationUrl.String()
+			metadata.registryUrl = urlFederation.NamespaceRegistrationEndpoint
+		}
+	}
+
+	// With an osdf:// url scheme, we assume the user will be using the OSDF so load in our osdf metadata for our url
+	if scheme == "osdf" {
+		// If we are using an osdf/stash binary, we discovered the federation already --> load into local url metadata
+		if config.GetPreferredPrefix() == "OSDF" {
+			log.Debugln("Detected an osdf binary with an osdf:// url, populating metadata with osdf defaults")
+			metadata.directorUrl = param.Federation_DirectorUrl.GetString()
+			metadata.discoveryUrl = param.Federation_DiscoveryUrl.GetString()
+			metadata.registryUrl = param.Federation_RegistryUrl.GetString()
+		} else if config.GetPreferredPrefix() == "PELICAN" {
+			// We hit this case when we are using a pelican binary but an osdf:// url, therefore we need to disover the osdf federation
+			log.Debugln("Detected an pelican binary with an osdf:// url, populating metadata with osdf defaults")
+			urlFederation, err := config.DisoverUrlFederation("osg-htc.org")
+			if err != nil {
+				return UrlMetadata{}, err
+			}
+			metadata.directorUrl = urlFederation.DirectorEndpoint
+			metadata.discoveryUrl = "osg-htc.org"
+			metadata.registryUrl = urlFederation.NamespaceRegistrationEndpoint
+		}
+	} else if scheme == "" {
+		// If we don't have a url scheme, then our metadata information should be in the config
+		log.Debugln("No url scheme detected, getting metadata information from configuration")
+		metadata.directorUrl = param.Federation_DirectorUrl.GetString()
+		metadata.discoveryUrl = param.Federation_DiscoveryUrl.GetString()
+		metadata.registryUrl = param.Federation_RegistryUrl.GetString()
+	}
+
+	return metadata, nil
+}
+
 /*
 	Start of transfer for pelican object put, gets information from the target destination before doing our HTTP PUT request
 
@@ -502,30 +567,7 @@ func DoPut(localObject string, remoteDestination string, recursive bool) (transf
 		log.Errorln("Failed to parse remote destination URL:", err)
 		return nil, err
 	}
-	remoteDestUrl.Scheme = remoteDestScheme
-	fd := config.GetFederation()
-	defer config.SetFederation(fd)
 
-	if remoteDestUrl.Host != "" {
-		if remoteDestUrl.Scheme == "osdf" || remoteDestUrl.Scheme == "stash" {
-			remoteDestUrl.Path, err = url.JoinPath(remoteDestUrl.Host, remoteDestUrl.Path)
-			if err != nil {
-				log.Errorln("Failed to join remote destination url path:", err)
-				return nil, err
-			}
-		} else if remoteDestUrl.Scheme == "pelican" {
-
-			config.SetFederation(config.FederationDiscovery{})
-			federationUrl, _ := url.Parse(remoteDestUrl.String())
-			federationUrl.Scheme = "https"
-			federationUrl.Path = ""
-			viper.Set("Federation.DiscoveryUrl", federationUrl.String())
-			err = config.DiscoverFederation()
-			if err != nil {
-				return nil, err
-			}
-		}
-	}
 	remoteDestScheme, _ = getTokenName(remoteDestUrl)
 
 	understoodSchemes := []string{"file", "osdf", "pelican", ""}
@@ -536,7 +578,13 @@ func DoPut(localObject string, remoteDestination string, recursive bool) (transf
 			remoteDestUrl.Scheme, strings.Join(understoodSchemes, ", "))
 	}
 
-	directorUrl := param.Federation_DirectorUrl.GetString()
+	remoteDestUrl.Scheme = remoteDestScheme
+	metadata, err := getUrlMetadata(remoteDestUrl, remoteDestScheme)
+	if err != nil {
+		return nil, err
+	}
+
+	directorUrl := metadata.directorUrl
 
 	if remoteDestScheme == "osdf" || remoteDestScheme == "pelican" {
 		remoteDestination = remoteDestUrl.Path
@@ -556,7 +604,6 @@ func DoPut(localObject string, remoteDestination string, recursive bool) (transf
 	uploadedBytes, err := doWriteBack(localObjectUrl.Path, remoteDestUrl, ns, recursive, "")
 	AddError(err)
 	return uploadedBytes, err
-
 }
 
 /*
@@ -589,39 +636,22 @@ func DoGet(remoteObject string, localDestination string, recursive bool) (transf
 		return nil, err
 	}
 	remoteObjectUrl.Scheme = remoteObjectScheme
-	fd := config.GetFederation()
-	defer config.SetFederation(fd)
 
-	// If there is a host specified, prepend it to the path in the osdf case
-	if remoteObjectUrl.Host != "" {
-		if remoteObjectUrl.Scheme == "osdf" {
-			remoteObjectUrl.Path, err = url.JoinPath(remoteObjectUrl.Host, remoteObjectUrl.Path)
-			if err != nil {
-				log.Errorln("Failed to join source url path:", err)
-				return nil, err
-			}
-		} else if remoteObjectUrl.Scheme == "pelican" {
-
-			config.SetFederation(config.FederationDiscovery{})
-			federationUrl, _ := url.Parse(remoteObjectUrl.String())
-			federationUrl.Scheme = "https"
-			federationUrl.Path = ""
-			viper.Set("Federation.DiscoveryUrl", federationUrl.String())
-			err = config.DiscoverFederation()
-			if err != nil {
-				return nil, err
-			}
-		}
-	}
-
+	// This is for condor cases:
 	remoteObjectScheme, _ = getTokenName(remoteObjectUrl)
 
+	// Check we have a valid scheme
 	understoodSchemes := []string{"file", "osdf", "pelican", ""}
-
 	_, foundSource := Find(understoodSchemes, remoteObjectScheme)
 	if !foundSource {
 		return nil, fmt.Errorf("Do not understand the source scheme: %s. Permitted values are %s",
 			remoteObjectUrl.Scheme, strings.Join(understoodSchemes, ", "))
+	}
+
+	// Get our url metadata
+	metadata, err := getUrlMetadata(remoteObjectUrl, remoteObjectScheme)
+	if err != nil {
+		return nil, err
 	}
 
 	if remoteObjectScheme == "osdf" || remoteObjectScheme == "pelican" {
@@ -632,7 +662,8 @@ func DoGet(remoteObject string, localDestination string, recursive bool) (transf
 		remoteObject = "/" + remoteObject
 	}
 
-	directorUrl := param.Federation_DirectorUrl.GetString()
+	//directorUrl := param.Federation_DirectorUrl.GetString()
+	directorUrl := metadata.directorUrl
 
 	ns, err := getNamespaceInfo(remoteObject, directorUrl, isPut)
 	if err != nil {
@@ -668,7 +699,7 @@ func DoGet(remoteObject string, localDestination string, recursive bool) (transf
 	_, token_name := getTokenName(remoteObjectUrl)
 
 	var downloaded int64
-	if transferResults, err = download_http(remoteObjectUrl, localDestination, &payload, ns, recursive, token_name); err == nil {
+	if transferResults, err = download_http(remoteObjectUrl, localDestination, metadata, &payload, ns, recursive, token_name); err == nil {
 		success = true
 	}
 
@@ -727,47 +758,13 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 		return nil, err
 	}
 	dest_url.Scheme = dest_scheme
-	fd := config.GetFederation()
-	defer config.SetFederation(fd)
 
-	// If there is a host specified, prepend it to the path in the osdf case
-	if source_url.Host != "" {
-		if source_url.Scheme == "osdf" || source_url.Scheme == "stash" {
-			source_url.Path = "/" + path.Join(source_url.Host, source_url.Path)
-		} else if source_url.Scheme == "pelican" {
-			config.SetFederation(config.FederationDiscovery{})
-			federationUrl, _ := url.Parse(source_url.String())
-			federationUrl.Scheme = "https"
-			federationUrl.Path = ""
-			viper.Set("Federation.DiscoveryUrl", federationUrl.String())
-			err = config.DiscoverFederation()
-			if err != nil {
-				return nil, err
-			}
-		}
-	}
-
-	if dest_url.Host != "" {
-		if dest_url.Scheme == "osdf" || dest_url.Scheme == "stash" {
-			dest_url.Path = "/" + path.Join(dest_url.Host, dest_url.Path)
-		} else if dest_url.Scheme == "pelican" {
-			config.SetFederation(config.FederationDiscovery{})
-			federationUrl, _ := url.Parse(dest_url.String())
-			federationUrl.Scheme = "https"
-			federationUrl.Path = ""
-			viper.Set("Federation.DiscoveryUrl", federationUrl.String())
-			err = config.DiscoverFederation()
-			if err != nil {
-				return nil, err
-			}
-		}
-	}
-
+	// Check for scheme here for when using condor
 	sourceScheme, _ := getTokenName(source_url)
 	destScheme, _ := getTokenName(dest_url)
 
+	// Verify valid scheme
 	understoodSchemes := []string{"stash", "file", "osdf", "pelican", ""}
-
 	_, foundSource := Find(understoodSchemes, sourceScheme)
 	if !foundSource {
 		log.Errorln("Do not understand source scheme:", source_url.Scheme)
@@ -780,6 +777,14 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 		return nil, errors.New("Do not understand destination scheme")
 	}
 
+	// Get our metadata (here we check if it is a put)
+	metadata, err := getUrlMetadata(source_url, sourceScheme)
+
+	// if metadata is empty, then we are doing a get so try to populate it again with our destination
+	if metadata.directorUrl == "" && metadata.discoveryUrl == "" && metadata.registryUrl == "" {
+		metadata, err = getUrlMetadata(dest_url, destScheme)
+	}
+
 	payload := payloadStruct{}
 	parse_job_ad(&payload)
 
@@ -787,9 +792,10 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 	// For write back, it will be the destination
 	// For read it will be the source.
 
-	OSDFDirectorUrl := param.Federation_DirectorUrl.GetString()
+	OSDFDirectorUrl := metadata.directorUrl
 	isPut := destScheme == "stash" || destScheme == "osdf" || destScheme == "pelican"
 
+	// If we are a put, do the writeback function and exit
 	if isPut {
 		log.Debugln("Detected object write to remote federation object", dest_url.Path)
 		ns, err := getNamespaceInfo(dest_url.Path, OSDFDirectorUrl, isPut)
@@ -797,11 +803,12 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 			log.Errorln(err)
 			return nil, errors.New("Failed to get namespace information from destination")
 		}
-		transferResults, err := doWriteBack(source_url.Path, dest_url, ns, recursive, payload.ProjectName) //TODO dowriteback transferResults!!!!!
+		transferResults, err := doWriteBack(source_url.Path, dest_url, ns, recursive, payload.ProjectName)
 		AddError(err)
 		return transferResults, err
 	}
 
+	// If we continue here, we are doing a get
 	if dest_url.Scheme == "file" {
 		destination = dest_url.Path
 	}
@@ -858,7 +865,7 @@ Loop:
 		switch method {
 		case "http":
 			log.Info("Trying HTTP...")
-			if transferResults, err = download_http(source_url, destination, &payload, ns, recursive, token_name); err == nil {
+			if transferResults, err = download_http(source_url, destination, metadata, &payload, ns, recursive, token_name); err == nil { //TODO FIX THIS!
 				success = true
 				break Loop
 			}

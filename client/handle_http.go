@@ -275,7 +275,7 @@ func GenerateTransferDetailsUsingCache(cache CacheInterface, opts TransferDetail
 	return nil
 }
 
-func download_http(sourceUrl *url.URL, destination string, payload *payloadStruct, namespace namespaces.Namespace, recursive bool, tokenName string) (transferResults []TransferResults, err error) {
+func download_http(sourceUrl *url.URL, destination string, metadata UrlMetadata, payload *payloadStruct, namespace namespaces.Namespace, recursive bool, tokenName string) (transferResults []TransferResults, err error) {
 	// First, create a handler for any panics that occur
 	defer func() {
 		if r := recover(); r != nil {
@@ -307,7 +307,7 @@ func download_http(sourceUrl *url.URL, destination string, payload *payloadStruc
 	// Check the env var "USE_OSDF_DIRECTOR" and decide if ordered caches should come from director
 	var transfers []TransferDetails
 	var files []string
-	directorUrl := param.Federation_DirectorUrl.GetString()
+	directorUrl := metadata.directorUrl
 	closestNamespaceCaches, err := GetCachesFromNamespace(namespace, directorUrl != "")
 	if err != nil {
 		log.Errorln("Failed to get namespaced caches (treated as non-fatal):", err)

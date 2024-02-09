@@ -37,7 +37,6 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -422,141 +421,6 @@ func generateFileTestScitoken() (string, error) {
 	return tok, nil
 }
 
-func TestFullUpload(t *testing.T) {
-	// Setup our test federation
-	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
-	defer func() { require.NoError(t, egrp.Wait()) }()
-	defer cancel()
-
-	viper.Reset()
-
-	modules := config.ServerType(0)
-	modules.Set(config.OriginType)
-	modules.Set(config.DirectorType)
-	modules.Set(config.RegistryType)
-
-	// Create our own temp directory (for some reason t.TempDir() does not play well with xrootd)
-	tmpPathPattern := "XRootD-Test_Origin*"
-	tmpPath, err := os.MkdirTemp("", tmpPathPattern)
-	require.NoError(t, err)
-
-	// Need to set permissions or the xrootd process we spawn won't be able to write PID/UID files
-	permissions := os.FileMode(0755)
-	err = os.Chmod(tmpPath, permissions)
-	require.NoError(t, err)
-
-	viper.Set("ConfigDir", tmpPath)
-
-	// Increase the log level; otherwise, its difficult to debug failures
-	viper.Set("Logging.Level", "Debug")
-	config.InitConfig()
-
-	originDir, err := os.MkdirTemp("", "Origin")
-	assert.NoError(t, err)
-
-	// Change the permissions of the temporary directory
-	permissions = os.FileMode(0777)
-	err = os.Chmod(originDir, permissions)
-	require.NoError(t, err)
-
-	viper.Set("Origin.ExportVolume", originDir+":/test")
-	viper.Set("Origin.Mode", "posix")
-	// Disable functionality we're not using (and is difficult to make work on Mac)
-	viper.Set("Origin.EnableCmsd", false)
-	viper.Set("Origin.EnableMacaroons", false)
-	viper.Set("Origin.EnableVoms", false)
-	viper.Set("Origin.EnableWrite", true)
-	viper.Set("TLSSkipVerify", true)
-	viper.Set("Server.EnableUI", false)
-	viper.Set("Registry.DbLocation", filepath.Join(t.TempDir(), "ns-registry.sqlite"))
-	viper.Set("Xrootd.RunLocation", tmpPath)
-	viper.Set("Registry.RequireOriginApproval", false)
-	viper.Set("Registry.RequireCacheApproval", false)
-	viper.Set("Logging.Origin.Scitokens", "debug")
-
-	err = config.InitServer(ctx, modules)
-	require.NoError(t, err)
-
-	fedCancel, err := launchers.LaunchModules(ctx, modules)
-	defer fedCancel()
-	if err != nil {
-		log.Errorln("Failure in fedServeInternal:", err)
-		require.NoError(t, err)
-	}
-
-	desiredURL := param.Server_ExternalWebUrl.GetString() + "/.well-known/openid-configuration"
-	err = server_utils.WaitUntilWorking(ctx, "GET", desiredURL, "director", 200)
-	require.NoError(t, err)
-
-	httpc := http.Client{
-		Transport: config.GetTransport(),
-	}
-	resp, err := httpc.Get(desiredURL)
-	require.NoError(t, err)
-
-	assert.Equal(t, resp.StatusCode, http.StatusOK)
-
-	responseBody, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-	expectedResponse := struct {
-		JwksUri string `json:"jwks_uri"`
-	}{}
-	err = json.Unmarshal(responseBody, &expectedResponse)
-	require.NoError(t, err)
-
-	assert.NotEmpty(t, expectedResponse.JwksUri)
-
-	t.Run("testFullUpload", func(t *testing.T) {
-		testFileContent := "test file content"
-
-		// Create the temporary file to upload
-		tempFile, err := os.CreateTemp(t.TempDir(), "test")
-		assert.NoError(t, err, "Error creating temp file")
-		defer os.Remove(tempFile.Name())
-		_, err = tempFile.WriteString(testFileContent)
-		assert.NoError(t, err, "Error writing to temp file")
-		tempFile.Close()
-
-		// Create a token file
-		token, err := generateFileTestScitoken()
-		assert.NoError(t, err)
-		tempToken, err := os.CreateTemp(t.TempDir(), "token")
-		assert.NoError(t, err, "Error creating temp token file")
-		defer os.Remove(tempToken.Name())
-		_, err = tempToken.WriteString(token)
-		assert.NoError(t, err, "Error writing to temp token file")
-		tempToken.Close()
-		ObjectClientOptions.Token = tempToken.Name()
-
-		// Upload the file
-		tempPath := tempFile.Name()
-		fileName := filepath.Base(tempPath)
-		uploadURL := "stash:///test/" + fileName
-
-		methods := []string{"http"}
-		transferResults, err := DoStashCPSingle(tempFile.Name(), uploadURL, methods, false)
-		assert.NoError(t, err, "Error uploading file")
-		assert.Equal(t, int64(len(testFileContent)), transferResults[0].TransferredBytes, "Uploaded file size does not match")
-
-		// Upload an osdf file
-		uploadURL = "osdf:///test/stuff/blah.txt"
-		assert.NoError(t, err, "Error parsing upload URL")
-		transferResults, err = DoStashCPSingle(tempFile.Name(), uploadURL, methods, false)
-		assert.NoError(t, err, "Error uploading file")
-		assert.Equal(t, int64(len(testFileContent)), transferResults[0].TransferredBytes, "Uploaded file size does not match")
-	})
-	t.Cleanup(func() {
-		ObjectClientOptions.Token = ""
-		os.RemoveAll(tmpPath)
-		os.RemoveAll(originDir)
-	})
-
-	cancel()
-	fedCancel()
-	assert.NoError(t, egrp.Wait())
-	viper.Reset()
-}
-
 type FedTest struct {
 	T         *testing.T
 	TmpPath   string
@@ -664,6 +528,150 @@ func (f *FedTest) Teardown() {
 	viper.Reset()
 }
 
+func TestObjectCopyAuth(t *testing.T) {
+	// Create instance of test federation
+	viper.Reset()
+	fed := FedTest{T: t}
+	fed.Spinup()
+	defer fed.Teardown()
+
+	// Other set-up items:
+	testFileContent := "test file content"
+	// Create the temporary file to upload
+	tempFile, err := os.CreateTemp(t.TempDir(), "test")
+	assert.NoError(t, err, "Error creating temp file")
+	defer os.Remove(tempFile.Name())
+	_, err = tempFile.WriteString(testFileContent)
+	assert.NoError(t, err, "Error writing to temp file")
+	tempFile.Close()
+
+	// Create a token file
+	tokenConfig := utils.TokenConfig{
+		TokenProfile: utils.WLCG,
+		Lifetime:     time.Minute,
+		Issuer:       param.Origin_Url.GetString(),
+		Audience:     []string{param.Origin_Url.GetString()},
+		Subject:      "origin",
+	}
+
+	scopes := []token_scopes.TokenScope{}
+	readScope, err := token_scopes.Storage_Read.Path("/")
+	assert.NoError(t, err)
+	scopes = append(scopes, readScope)
+	modScope, err := token_scopes.Storage_Modify.Path("/")
+	assert.NoError(t, err)
+	scopes = append(scopes, modScope)
+	tokenConfig.AddScopes(scopes)
+	token, err := tokenConfig.CreateToken()
+	assert.NoError(t, err)
+	tempToken, err := os.CreateTemp(t.TempDir(), "token")
+	assert.NoError(t, err, "Error creating temp token file")
+	defer os.Remove(tempToken.Name())
+	_, err = tempToken.WriteString(token)
+	assert.NoError(t, err, "Error writing to temp token file")
+	tempToken.Close()
+	// Disable progress bars to not reuse the same mpb instance
+	viper.Set("Logging.DisableProgressBars", true)
+
+	// This tests pelican object get/put with a pelican:// url
+	t.Run("testPelicanObjectCopyWithPelicanUrl", func(t *testing.T) {
+		config.SetPreferredPrefix("PELICAN")
+		// Set path for object to upload/download
+		tempPath := tempFile.Name()
+		fileName := filepath.Base(tempPath)
+		hostname, err := os.Hostname()
+		assert.NoError(t, err)
+		uploadURL := "pelican://"+ hostname + ":8444/test/" + fileName
+
+		// Upload the file with PUT
+		ObjectClientOptions.Token = tempToken.Name()
+		transferResultsUpload, err := DoStashCPSingle(tempFile.Name(), uploadURL, []string{"http"}, false)
+		assert.NoError(t, err)
+		if err == nil {
+			assert.Equal(t, transferResultsUpload[0].TransferredBytes, int64(17))
+		}
+
+		// Download that same file with GET
+		transferResultsDownload, err := DoStashCPSingle(uploadURL, t.TempDir(), []string{"http"}, false)
+		assert.NoError(t, err)
+		if err == nil {
+			assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
+		}
+		ObjectClientOptions.Token = ""
+	})
+
+	// This tests pelican object copy with an osdf url
+	t.Run("testPelicanObjectCopyWithOSDFUrl", func(t *testing.T) {
+		config.SetPreferredPrefix("PELICAN")
+		// Set path for object to upload/download
+		tempPath := tempFile.Name()
+		fileName := filepath.Base(tempPath)
+		uploadStr := "osdf:///test/" + fileName
+		uploadURL, err := url.Parse(uploadStr)
+		assert.NoError(t, err)
+
+		// For OSDF url's, we don't want to rely on osdf metadata to be running therefore, just ensure we get correct metadata for the url:
+		metadata, err := getUrlMetadata(uploadURL, "osdf")
+		assert.NoError(t, err)
+
+		// Check valid metadata:
+		assert.Equal(t, "https://osdf-director.osg-htc.org", metadata.directorUrl)
+		assert.Equal(t, "https://osdf-registry.osg-htc.org", metadata.registryUrl)
+		assert.Equal(t, "osg-htc.org", metadata.discoveryUrl)
+	})
+
+	// This tests osdf object copy with a pelican:// url
+	t.Run("testOsdfObjectCopyWithPelicanUrl", func(t *testing.T) {
+		config.SetPreferredPrefix("OSDF")
+		// Set path for object to upload/download
+		tempPath := tempFile.Name()
+		fileName := filepath.Base(tempPath)
+		hostname, err := os.Hostname()
+		assert.NoError(t, err)
+		uploadURL := "pelican://"+ hostname + ":8444/test/" + fileName
+
+		// Upload the file with PUT
+		ObjectClientOptions.Token = tempToken.Name()
+		transferResultsUpload, err := DoStashCPSingle(tempFile.Name(), uploadURL, []string{"http"}, false)
+		assert.NoError(t, err)
+		if err == nil {
+			assert.Equal(t, transferResultsUpload[0].TransferredBytes, int64(17))
+		}
+
+		// Download that same file with GET
+		transferResultsDownload, err := DoStashCPSingle(uploadURL, t.TempDir(), []string{"http"}, false)
+		assert.NoError(t, err)
+		if err == nil {
+			assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
+		}
+		ObjectClientOptions.Token = ""
+	})
+
+	// This tests osdf object copy with an osdf url
+	// NOTE: this test MUST be last since we need to reset a good amount of config values to get osdf defaults
+	t.Run("testOsdfObjectCopyWithOSDFUrl", func(t *testing.T) {
+		viper.Reset()
+		config.SetPreferredPrefix("OSDF")
+		config.InitConfig()
+		config.InitClient()
+		// Set path for object to upload/download
+		tempPath := tempFile.Name()
+		fileName := filepath.Base(tempPath)
+		uploadStr := "osdf:///test/" + fileName
+		uploadURL, err := url.Parse(uploadStr)
+		assert.NoError(t, err)
+
+		// For OSDF url's, we don't want to rely on osdf metadata to be running therefore, just ensure we get correct metadata for the url:
+		metadata, err := getUrlMetadata(uploadURL, "osdf")
+		assert.NoError(t, err)
+
+		// Check valid metadata:
+		assert.Equal(t, "https://osdf-director.osg-htc.org", metadata.directorUrl)
+		assert.Equal(t, "https://osdf-registry.osg-htc.org", metadata.registryUrl)
+		assert.Equal(t, "osg-htc.org", metadata.discoveryUrl)
+	})
+}
+
 // A test that spins up a federation, and tests object get and put
 func TestGetAndPutAuth(t *testing.T) {
 	// Create instance of test federation
@@ -714,13 +722,15 @@ func TestGetAndPutAuth(t *testing.T) {
 	// Disable progress bars to not reuse the same mpb instance
 	viper.Set("Logging.DisableProgressBars", true)
 
-	// This tests object get/put with a pelican:// url
+	// This tests pelican object get/put with a pelican:// url
 	t.Run("testPelicanObjectPutAndGetWithPelicanUrl", func(t *testing.T) {
-		config.SetPreferredPrefix("pelican")
+		config.SetPreferredPrefix("PELICAN")
 		// Set path for object to upload/download
 		tempPath := tempFile.Name()
 		fileName := filepath.Base(tempPath)
-		uploadURL := "pelican:///test/" + fileName
+		hostname, err := os.Hostname()
+		assert.NoError(t, err)
+		uploadURL := "pelican://"+ hostname + ":8444/test/" + fileName
 
 		// Upload the file with PUT
 		ObjectClientOptions.Token = tempToken.Name()
@@ -741,36 +751,33 @@ func TestGetAndPutAuth(t *testing.T) {
 
 	// This tests pelican object get/put with an osdf url
 	t.Run("testPelicanObjectPutAndGetWithOSDFUrl", func(t *testing.T) {
-		config.SetPreferredPrefix("pelican")
+		config.SetPreferredPrefix("PELICAN")
 		// Set path for object to upload/download
 		tempPath := tempFile.Name()
 		fileName := filepath.Base(tempPath)
-		uploadURL := "osdf:///test/" + fileName
-
-		// Upload the file with PUT
-		ObjectClientOptions.Token = tempToken.Name()
-		transferResultsUpload, err := DoPut(tempFile.Name(), uploadURL, false)
+		uploadStr := "osdf:///test/" + fileName
+		uploadURL, err := url.Parse(uploadStr)
 		assert.NoError(t, err)
-		if err == nil {
-			assert.Equal(t, transferResultsUpload[0].TransferredBytes, int64(17))
-		}
 
-		// Download that same file with GET
-		transferResultsDownload, err := DoGet(uploadURL, t.TempDir(), false)
+		// For OSDF url's, we don't want to rely on osdf metadata to be running therefore, just ensure we get correct metadata for the url:
+		metadata, err := getUrlMetadata(uploadURL, "osdf")
 		assert.NoError(t, err)
-		if err == nil {
-			assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
-		}
-		ObjectClientOptions.Token = ""
+
+		// Check valid metadata:
+		assert.Equal(t, "https://osdf-director.osg-htc.org", metadata.directorUrl)
+		assert.Equal(t, "https://osdf-registry.osg-htc.org", metadata.registryUrl)
+		assert.Equal(t, "osg-htc.org", metadata.discoveryUrl)
 	})
 
 	// This tests object get/put with a pelican:// url
 	t.Run("testOsdfObjectPutAndGetWithPelicanUrl", func(t *testing.T) {
-		config.SetPreferredPrefix("osdf")
+		config.SetPreferredPrefix("OSDF")
 		// Set path for object to upload/download
 		tempPath := tempFile.Name()
 		fileName := filepath.Base(tempPath)
-		uploadURL := "pelican:///test/" + fileName
+		hostname, err := os.Hostname()
+		assert.NoError(t, err)
+		uploadURL := "pelican://"+ hostname + ":8444/test/" + fileName
 
 		// Upload the file with PUT
 		ObjectClientOptions.Token = tempToken.Name()
@@ -790,28 +797,28 @@ func TestGetAndPutAuth(t *testing.T) {
 	})
 
 	// This tests pelican object get/put with an osdf url
+	// NOTE: this test MUST be last since we need to reset a good amount of config values to get osdf defaults
 	t.Run("testOsdfObjectPutAndGetWithOSDFUrl", func(t *testing.T) {
-		config.SetPreferredPrefix("osdf")
+		viper.Reset()
+		config.SetPreferredPrefix("OSDF")
+		config.InitConfig()
+		config.InitClient()
 		// Set path for object to upload/download
 		tempPath := tempFile.Name()
 		fileName := filepath.Base(tempPath)
-		uploadURL := "osdf:///test/" + fileName
-
-		// Upload the file with PUT
-		ObjectClientOptions.Token = tempToken.Name()
-		transferResultsUpload, err := DoPut(tempFile.Name(), uploadURL, false)
+		uploadStr := "osdf:///test/" + fileName
+		uploadURL, err := url.Parse(uploadStr)
 		assert.NoError(t, err)
-		if err == nil {
-			assert.Equal(t, transferResultsUpload[0].TransferredBytes, int64(17))
-		}
 
-		// Download that same file with GET
-		transferResultsDownload, err := DoGet(uploadURL, t.TempDir(), false)
+		// For OSDF url's, we don't want to rely on osdf metadata to be running therefore, just ensure we get correct metadata for the url:
+		metadata, err := getUrlMetadata(uploadURL, "osdf")
 		assert.NoError(t, err)
-		if err == nil {
-			assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
-		}
-		ObjectClientOptions.Token = ""
+
+		// Check valid metadata:
+		assert.Equal(t, "https://osdf-director.osg-htc.org", metadata.directorUrl)
+		assert.Equal(t, "https://osdf-registry.osg-htc.org", metadata.registryUrl)
+		assert.Equal(t, "osg-htc.org", metadata.discoveryUrl)
+		viper.Reset()
 	})
 }
 
@@ -836,8 +843,9 @@ func TestGetPublicRead(t *testing.T) {
 
 		// Set path for object to upload/download
 		tempPath := tempFile.Name()
+		hostname, err := os.Hostname()
 		fileName := filepath.Base(tempPath)
-		uploadURL := "osdf:///test/" + fileName
+		uploadURL := "pelican://"+ hostname + ":8444/test/" + fileName
 
 		// Download the file with GET. Shouldn't need a token to succeed
 		transferResults, err := DoGet(uploadURL, t.TempDir(), false)
@@ -912,154 +920,33 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 	tempFile2.Close()
 
 	t.Run("testPelicanRecursiveGetAndPutOsdfURL", func(t *testing.T) {
-		ObjectClientOptions.Token = tempToken.Name()
-		config.SetPreferredPrefix("pelican")
+		config.SetPreferredPrefix("PELICAN")
 		// Set path for object to upload/download
 		tempPath := tempDir
 		dirName := filepath.Base(tempPath)
-		uploadURL := "osdf:///test/" + dirName
-
-		//////////////////////////////////////////////////////////
-
-		// Upload the file with PUT
-		transferDetailsUpload, err := DoPut(tempDir, uploadURL, true)
+		uploadStr := "osdf:///test/" + dirName
+		uploadURL, err := url.Parse(uploadStr)
 		assert.NoError(t, err)
-		if err == nil && len(transferDetailsUpload) == 2 {
-			countBytes17 := 0
-			countBytes23 := 0
-			// Verify we got the correct files back (have to do this since files upload in different orders at times)
-			for _, transfer := range transferDetailsUpload {
-				transferredBytes := transfer.TransferredBytes
-				switch transferredBytes {
-				case int64(17):
-					countBytes17++
-					continue
-				case int64(23):
-					countBytes23++
-					continue
-				default:
-					// We got a byte amount we are not expecting
-					t.Fatal("did not upload proper amount of bytes")
-				}
-			}
-			if countBytes17 != 1 || countBytes23 != 1 {
-				// We would hit this case if 1 counter got hit twice for some reason
-				t.Fatal("One of the files was not uploaded correctly")
-			}
-		} else if len(transferDetailsUpload) != 2 {
-			t.Fatalf("Amount of transfers results returned for upload was not correct. Transfer details returned: %d", len(transferDetailsUpload))
-		}
 
-		// Download the files we just uploaded
-		transferDetailsDownload, err := DoGet(uploadURL, t.TempDir(), true)
+		// For OSDF url's, we don't want to rely on osdf metadata to be running therefore, just ensure we get correct metadata for the url:
+		metadata, err := getUrlMetadata(uploadURL, "osdf")
 		assert.NoError(t, err)
-		if err == nil && len(transferDetailsUpload) == 2 {
-			countBytesUploadIdx0 := 0
-			countBytesUploadIdx1 := 0
-			// Verify we got the correct files back (have to do this since files upload in different orders at times)
-			// In this case, we want to match them to the sizes of the uploaded files
-			for _, transfer := range transferDetailsUpload {
-				transferredBytes := transfer.TransferredBytes
-				switch transferredBytes {
-				case transferDetailsUpload[0].TransferredBytes:
-					countBytesUploadIdx0++
-					continue
-				case transferDetailsUpload[1].TransferredBytes:
-					countBytesUploadIdx1++
-					continue
-				default:
-					// We got a byte amount we are not expecting
-					t.Fatal("did not download proper amount of bytes")
-				}
-			}
-			if countBytesUploadIdx0 != 1 || countBytesUploadIdx1 != 1 {
-				// We would hit this case if 1 counter got hit twice for some reason
-				t.Fatal("One of the files was not downloaded correctly")
-			} else if len(transferDetailsDownload) != 2 {
-				t.Fatalf("Amount of transfers results returned for download was not correct. Transfer details returned: %d", len(transferDetailsDownload))
-			}
-		}
-		ObjectClientOptions.Token = ""
+
+		// Check valid metadata:
+		assert.Equal(t, "https://osdf-director.osg-htc.org", metadata.directorUrl)
+		assert.Equal(t, "https://osdf-registry.osg-htc.org", metadata.registryUrl)
+		assert.Equal(t, "osg-htc.org", metadata.discoveryUrl)
 	})
 
 	t.Run("testPelicanRecursiveGetAndPutPelicanURL", func(t *testing.T) {
 		ObjectClientOptions.Token = tempToken.Name()
-		config.SetPreferredPrefix("pelican")
+		config.SetPreferredPrefix("PELICAN")
 		// Set path for object to upload/download
 		tempPath := tempDir
 		dirName := filepath.Base(tempPath)
-		uploadURL := "pelican:///test/" + dirName
-
-		//////////////////////////////////////////////////////////
-
-		// Upload the file with PUT
-		transferDetailsUpload, err := DoPut(tempDir, uploadURL, true)
+		hostname, err := os.Hostname()
 		assert.NoError(t, err)
-		if err == nil && len(transferDetailsUpload) == 2 {
-			countBytes17 := 0
-			countBytes23 := 0
-			// Verify we got the correct files back (have to do this since files upload in different orders at times)
-			for _, transfer := range transferDetailsUpload {
-				transferredBytes := transfer.TransferredBytes
-				switch transferredBytes {
-				case int64(17):
-					countBytes17++
-					continue
-				case int64(23):
-					countBytes23++
-					continue
-				default:
-					// We got a byte amount we are not expecting
-					t.Fatal("did not upload proper amount of bytes")
-				}
-			}
-			if countBytes17 != 1 || countBytes23 != 1 {
-				// We would hit this case if 1 counter got hit twice for some reason
-				t.Fatal("One of the files was not uploaded correctly")
-			}
-		} else if len(transferDetailsUpload) != 2 {
-			t.Fatalf("Amount of transfers results returned for upload was not correct. Transfer details returned: %d", len(transferDetailsUpload))
-		}
-
-		// Download the files we just uploaded
-		transferDetailsDownload, err := DoGet(uploadURL, t.TempDir(), true)
-		assert.NoError(t, err)
-		if err == nil && len(transferDetailsUpload) == 2 {
-			countBytesUploadIdx0 := 0
-			countBytesUploadIdx1 := 0
-			// Verify we got the correct files back (have to do this since files upload in different orders at times)
-			// In this case, we want to match them to the sizes of the uploaded files
-			for _, transfer := range transferDetailsUpload {
-				transferredBytes := transfer.TransferredBytes
-				switch transferredBytes {
-				case transferDetailsUpload[0].TransferredBytes:
-					countBytesUploadIdx0++
-					continue
-				case transferDetailsUpload[1].TransferredBytes:
-					countBytesUploadIdx1++
-					continue
-				default:
-					// We got a byte amount we are not expecting
-					t.Fatal("did not download proper amount of bytes")
-				}
-			}
-			if countBytesUploadIdx0 != 1 || countBytesUploadIdx1 != 1 {
-				// We would hit this case if 1 counter got hit twice for some reason
-				t.Fatal("One of the files was not downloaded correctly")
-			} else if len(transferDetailsDownload) != 2 {
-				t.Fatalf("Amount of transfers results returned for download was not correct. Transfer details returned: %d", len(transferDetailsDownload))
-			}
-		}
-		ObjectClientOptions.Token = ""
-	})
-
-	t.Run("testOsdfRecursiveGetAndPutOsdfURL", func(t *testing.T) {
-		ObjectClientOptions.Token = tempToken.Name()
-		config.SetPreferredPrefix("osdf")
-		// Set path for object to upload/download
-		tempPath := tempDir
-		dirName := filepath.Base(tempPath)
-		uploadURL := "osdf:///test/" + dirName
+		uploadURL := "pelican://"+ hostname + ":8444/test/" + dirName
 
 		//////////////////////////////////////////////////////////
 
@@ -1126,11 +1013,13 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 
 	t.Run("testOsdfRecursiveGetAndPutPelicanURL", func(t *testing.T) {
 		ObjectClientOptions.Token = tempToken.Name()
-		config.SetPreferredPrefix("osdf")
+		config.SetPreferredPrefix("OSDF")
 		// Set path for object to upload/download
 		tempPath := tempDir
 		dirName := filepath.Base(tempPath)
-		uploadURL := "pelican:///test/" + dirName
+		hostname, err := os.Hostname()
+		assert.NoError(t, err)
+		uploadURL := "pelican://"+ hostname + ":8444/test/" + dirName
 
 		//////////////////////////////////////////////////////////
 
@@ -1195,4 +1084,26 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 		ObjectClientOptions.Token = ""
 	})
 
+	// NOTE: This test must be last since we reset a lot of config for osdf defaults
+	t.Run("testOsdfRecursiveGetAndPutOsdfURL", func(t *testing.T) {
+		viper.Reset()
+		config.SetPreferredPrefix("OSDF")
+		config.InitConfig()
+		config.InitClient()
+		// Set path for object to upload/download
+		tempPath := tempDir
+		dirName := filepath.Base(tempPath)
+		uploadStr := "osdf:///test/" + dirName
+		uploadURL, err := url.Parse(uploadStr)
+		assert.NoError(t, err)
+
+		// For OSDF url's, we don't want to rely on osdf metadata to be running therefore, just ensure we get correct metadata for the url:
+		metadata, err := getUrlMetadata(uploadURL, "osdf")
+		assert.NoError(t, err)
+
+		// Check valid metadata:
+		assert.Equal(t, "https://osdf-director.osg-htc.org", metadata.directorUrl)
+		assert.Equal(t, "https://osdf-registry.osg-htc.org", metadata.registryUrl)
+		assert.Equal(t, "osg-htc.org", metadata.discoveryUrl)
+	})
 }
