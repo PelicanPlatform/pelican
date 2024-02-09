@@ -40,7 +40,7 @@ Since your TLS certificate is associated with your domain name, you will need to
 
 ## Serve a Registry
 
-The Pelican *registry* manages namespace registration and public key distribution. An origin or cache will automatically attempt to register their namespace at their start. A federation user may also register a namespace without running a storage server by visiting the registry website.
+The Pelican *registry* manages namespace registration and public key distribution. An origin or cache will automatically attempt to register their namespace at their start. A federation user may also register a namespace without running a storage server by visiting the registry website through `https://<your-registry.com>`.
 
 ### Get OIDC Credential (Required)
 
@@ -65,7 +65,9 @@ If you prefer to store your `client_secret` file in a path different from the de
 
 #### Bypass Required Credential Check
 
-If you want to run your registry as an admin and not allow users to login via CILogon, you will need to create two files named `/etc/pelican/oidc-client-id` and `/etc/pelican/oidc-client-secret` and populate the files with non-empty content. Note that by doing this, when your user attempts to use `CILogon` to login to your registry, they will get an error page from `CILogon`.
+To run the registry without CILogon credentials, create two files named `/etc/pelican/oidc-client-id` and `/etc/pelican/oidc-client-secret` and populate the files with non-empty content. Pelican checks if the files exit and are non-empty. It won't check the content of the file.
+
+Note that by doing this, when users attempt to use `CILogon` to login to the registry, they will get an error page from `CILogon`, and it's only possible to login using admin password.
 
 
 ### Finish Setup
