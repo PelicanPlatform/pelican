@@ -639,7 +639,7 @@ description: >-
   A filepath to a MaxMind API key. The director service uses the MaxMind GeoLite City database (available [here](https://dev.maxmind.com/geoip/docs/databases/city-and-country))
   to determine which cache is nearest to a client's IP address. The database, if not already found, will be downloaded
   automatically when a director is served and a valid key is present.
-type: url
+type: filename
 default: none
 components: ["director"]
 ---
