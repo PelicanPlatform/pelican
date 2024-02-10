@@ -131,8 +131,8 @@ func createToken(namespace, subject, audience string, desiredScope token_scopes.
 		Issuer:       issuerUrl,
 		Version:      "1.0",
 		Subject:      subject,
-		Claims:       map[string]string{"scope": desiredScope.String()},
 	}
+	tokenCfg.AddScopes([]token_scopes.TokenScope{desiredScope})
 	token, err = tokenCfg.CreateToken()
 
 	return

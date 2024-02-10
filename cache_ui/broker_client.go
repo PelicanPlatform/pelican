@@ -24,6 +24,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
@@ -150,7 +151,10 @@ func LaunchRequestListener(ctx context.Context, egrp *errgroup.Group) error {
 	if err != nil {
 		return err
 	}
-	os.Remove(socketName)
+	err = os.Remove(socketName)
+	if err != nil && errors.Is(err, fs.ErrNotExist) {
+		return errors.Wrapf(err, "Failed to cleanup Unix socket %s", socketName)
+	}
 	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: socketName, Net: "unix"})
 	if err != nil {
 		return errors.Wrapf(err, "Failed to listen on Unix socket %s", socketName)
@@ -185,7 +189,12 @@ func LaunchRequestListener(ctx context.Context, egrp *errgroup.Group) error {
 	})
 	egrp.Go(func() (err error) {
 		defer listener.Close()
-		defer os.Remove(socketName)
+		defer func() {
+			err = os.Remove(socketName)
+			if err != nil {
+				log.Errorln("Error when cleaning up listener socket:", err)
+			}
+		}()
 		for {
 			select {
 			case <-ctx.Done():

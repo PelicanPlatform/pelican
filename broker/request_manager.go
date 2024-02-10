@@ -70,6 +70,9 @@ func getOriginQueue(prefix, origin string) chan reversalRequest {
 func handleRequest(ctx context.Context, origin string, req reversalRequest, timeout time.Duration) (err error) {
 	queue := getOriginQueue(req.Prefix, origin)
 	maxTime := timeout - 500*time.Millisecond - time.Duration(rand.Intn(500))*time.Millisecond
+	if maxTime <= 0 {
+		maxTime = time.Millisecond
+	}
 	tick := time.NewTicker(maxTime)
 	defer tick.Stop()
 

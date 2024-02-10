@@ -221,7 +221,11 @@ func ConnectToOrigin(ctx context.Context, brokerUrl, prefix, originName string) 
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 
-	tr := config.GetTransport()
+	// Create a cloned transport which disables HTTP/2 (as that TCP string can't
+	// be hijacked which we will need to do below).  The clone ensures that we're
+	// not going to be reusing TCP connections.
+	tr := config.GetTransport().Clone()
+	tr.TLSNextProto = make(map[string]func(string, *tls.Conn) http.RoundTripper)
 	client := &http.Client{Transport: tr}
 
 	resp, err := client.Do(req)
