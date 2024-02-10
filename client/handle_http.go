@@ -244,9 +244,9 @@ func NewTransferDetails(cache namespaces.Cache, opts TransferDetailsOptions) []T
 }
 
 type TransferResults struct {
-	Error           error
-	TransferedBytes int64
-	Attempts        []Attempt
+	Error            error
+	TransferredBytes int64
+	Attempts         []Attempt
 }
 
 type Attempt struct {
@@ -470,16 +470,16 @@ func startDownloadWorker(source string, destination string, token string, transf
 		if !success {
 			log.Debugln("Failed to download with HTTP")
 			results <- TransferResults{
-				TransferedBytes: downloaded,
-				Error:           errors.New("failed to download with HTTP"),
-				Attempts:        attempts,
+				TransferredBytes: downloaded,
+				Error:            errors.New("failed to download with HTTP"),
+				Attempts:         attempts,
 			}
 			return
 		} else {
 			results <- TransferResults{
-				TransferedBytes: downloaded,
-				Error:           nil,
-				Attempts:        attempts,
+				TransferredBytes: downloaded,
+				Error:            nil,
+				Attempts:         attempts,
 			}
 		}
 	}
@@ -1060,7 +1060,7 @@ Loop:
 		return transferResult, lastError
 	} else {
 		log.Debugln("Uploaded bytes:", reader.BytesComplete())
-		transferResult.TransferedBytes = reader.BytesComplete()
+		transferResult.TransferredBytes = reader.BytesComplete()
 		attempt.TransferEndTime = time.Now().Unix()
 
 		// Add our attempt fields

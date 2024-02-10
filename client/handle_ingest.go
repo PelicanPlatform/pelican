@@ -114,7 +114,7 @@ func DoShadowIngest(sourceFile string, originPrefix string, shadowOriginPrefix s
 			return 0, "", err
 		}
 		if shadowFilePost == shadowFile {
-			return transferResults[0].TransferedBytes, shadowFile, err
+			return transferResults[0].TransferredBytes, shadowFile, err
 		}
 	}
 	return 0, "", errors.New("After 10 upload attempts, file was still being modified during ingest.")

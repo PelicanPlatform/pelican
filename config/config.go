@@ -588,6 +588,7 @@ func InitConfig() {
 	}
 	if param.Debug.GetBool() {
 		SetLogging(log.DebugLevel)
+		log.Warnln("Debug is set as a flag or in config, this will override anything set for Logging.Level within your configuration")
 	} else {
 		logLevel := param.Logging_Level.GetString()
 		level, err := log.ParseLevel(logLevel)
@@ -599,13 +600,13 @@ func InitConfig() {
 	if logLocation != "" {
 		dir := filepath.Dir(logLocation)
 		if dir != "" {
-			if err := os.MkdirAll(dir, 0644); err != nil {
+			if err := os.MkdirAll(dir, 0640); err != nil {
 				log.Errorf("Failed to access/create specified directory. Error: %v", err)
 				os.Exit(1)
 			}
 		}
 		// Note: do not need to close the file, logrus does it for us
-		f, err := os.OpenFile(logLocation, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
+		f, err := os.OpenFile(logLocation, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0640)
 		if err != nil {
 			log.Errorf("Failed to access specified log file. Error: %v", err)
 			os.Exit(1)

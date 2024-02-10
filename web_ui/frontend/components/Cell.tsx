@@ -22,7 +22,7 @@ export const TableCellOverflow: FunctionComponent<any> = ({ children, ...props }
                 border: "solid #ececec 1px",
                 ...props?.sx
             }}>
-            {String(children)}
+            {children}
         </TableCell>
     )
 }

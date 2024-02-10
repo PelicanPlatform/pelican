@@ -33,6 +33,7 @@ type: filename
 name: Debug
 description: >-
   A bool indicating whether Pelican should emit debug messages in its log.
+  NOTE: this will override whatever is set within your configuration file under Logging.Level!
 type: bool
 default: false
 components: ["*"]
@@ -1001,6 +1002,13 @@ description: >-
 type: duration
 default: 10s
 components: ["origin", "cache"]
+---
+name: Server.UILoginRateLimit
+description: >-
+  The maximum number of requests a user can be made under the same IP address per second against the login endpoint
+type: int
+default: 1
+components: ["*"]
 ---
 ################################
 #   Issuer's Configurations    #

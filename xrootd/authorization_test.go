@@ -125,7 +125,7 @@ g /xenon.biggrid.nl/* /nrp/protected/xenon-biggrid-nl/ rl
 u eeccb14b.0 /nrp/protected/xenon-biggrid-nl/ rl
 `
 
-	cacheMergedAuthfileEntries = cacheAuthfileEntries + "u * /user/ligo -rl /Gluex rl /NSG/PUBLIC rl /VDC/PUBLIC rl\n"
+	cacheMergedAuthfileEntries = cacheAuthfileEntries + "u * /user/ligo -rl /Gluex rl /NSG/PUBLIC rl /VDC/PUBLIC rl "
 )
 
 func TestOSDFAuthRetrieval(t *testing.T) {

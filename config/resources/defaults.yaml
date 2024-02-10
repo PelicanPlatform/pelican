@@ -14,7 +14,6 @@
 # limitations under the License.
 #
 
-Debug: false
 Logging:
   Level: "Error"
   Cache:
@@ -33,6 +32,7 @@ Server:
   WebHost: "0.0.0.0"
   EnableUI: true
   RegistrationRetryInterval: 10s
+  UILoginRateLimit: 1
 Director:
   DefaultResponse: cache
   MinStatResponse: 1

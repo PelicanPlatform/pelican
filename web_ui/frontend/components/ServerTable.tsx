@@ -30,8 +30,8 @@ const TableCellOverflowLink: React.JSX.ElementType = ({ children, ...props }) =>
 
     return (
         <TableCellOverflow sx={{color: "blue", cursor: "pointer"}} {...props}>
-            <Link href={children as string}>
-                {children as string}
+            <Link href={children}>
+                {children}
             </Link>
         </TableCellOverflow>
     )
@@ -108,8 +108,11 @@ export const ServerTable = ({type} : ServerTableProps) => {
     }
 
     return (
-        <>
+        <Paper
+            elevation={2}
+            sx={{backgroundColor: "#F6F6F6", borderRadius: "1rem", overflow: "hidden"}}
+        >
             {data ? <DataTable columnMap={keyToName} data={data} /> : <Skeleton variant={"rectangular"} height={200} width={"100%"} />}
-        </>
+        </Paper>
     )
 }

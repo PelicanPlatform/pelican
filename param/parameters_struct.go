@@ -163,6 +163,7 @@ type config struct {
 		TLSCertificate string
 		TLSKey string
 		UIActivationCodeFile string
+		UILoginRateLimit int
 		UIPasswordFile string
 		WebHost string
 		WebPort int
@@ -375,6 +376,7 @@ type configWithType struct {
 		TLSCertificate struct { Type string; Value string }
 		TLSKey struct { Type string; Value string }
 		UIActivationCodeFile struct { Type string; Value string }
+		UILoginRateLimit struct { Type string; Value int }
 		UIPasswordFile struct { Type string; Value string }
 		WebHost struct { Type string; Value string }
 		WebPort struct { Type string; Value int }

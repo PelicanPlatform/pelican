@@ -1,3 +1,5 @@
+import DownloadsComponent from "/components/DownloadsComponent";
+
 # Installing the Pelican Platform
 
 This document explains how a user can download and install the Pelican client.
@@ -6,25 +8,9 @@ This document explains how a user can download and install the Pelican client.
 
 
 ### 1. Install the Pelican Platform Binary
-Navigate to the [Pelican release page](https://github.com/PelicanPlatform/pelican/releases/). Download the proper binary for the system you are running on and select which version you would like to install. If you do not know which binary to install, below is a chart that may help:
+Download the proper binary for the system you are running on and select which version you would like to install. If you do not know which binary to install, below is a chart that may help:
 
-| Package Name                   | Description                                                            |
-|--------------------------------|------------------------------------------------------------------------|
-| `pelican-7.1.2-1.arm64.rpm`    | RPM package for ARM64 architecture on Linux systems.                  |
-| `pelican-7.1.2-1.ppc64le.rpm`  | RPM package for little endian PowerPC architecture on Linux systems.   |
-| `pelican-7.1.2-1.x86_64.rpm`   | RPM package for x86_64 (64-bit) architecture on Linux systems.         |
-| `pelican-7.1.2-1_amd64.deb`    | Debian package for AMD64 (x86_64) architecture on Debian-based Linux systems. |
-| `pelican-7.1.2-1_arm64.deb`    | Debian package for ARM64 architecture on Debian-based Linux systems. |
-| `pelican-7.1.2-1_ppc64le.deb`  | Debian package for little-endian PowerPC architecture on Debian-based Linux systems. |
-| `pelican_amd64.apk`            | APK package for AMD64 (x86_64) architecture. |
-| `pelican_arm64.apk`            | APK package for ARM64 architecture. |
-| `pelican_Darwin_arm64.tar.gz`  | Tarball for macOS systems running on ARM64 architecture (Apple Silicon). |
-| `pelican_Darwin_x86_64.tar.gz` | Tarball for macOS systems with x86_64 architecture. |
-| `pelican_Linux_arm64.tar.gz`   | Tarball for Linux systems with ARM64 architecture. |
-| `pelican_Linux_ppc64le.tar.gz` | Tarball for Linux systems with little-endian PowerPC architecture. |
-| `pelican_Linux_x86_64.tar.gz`  | Tarball for Linux systems with x86_64 (64-bit) architecture. |
-| `pelican_ppc64le.apk`          | APK package for little-endian PowerPC architecture, suitable for some PowerPC-based systems or specific Linux distributions. |
-| `pelican_Windows_x86_64.zip`   | ZIP archive for Windows systems with x86_64 (64-bit) architecture. **Note:** Pelican on Windows is still experimental and you may run into issues. |
+<DownloadsComponent />
 
 ##### RPM, APK, or DEB?
 ###### RPM (Red Hat Package Manager):
