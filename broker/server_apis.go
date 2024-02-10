@@ -194,7 +194,7 @@ func handleCallback(ctx context.Context, ginCtx *gin.Context) {
 		defer responseMapLock.Unlock()
 		pendingRev, ok := response[callbackReq.RequestId]
 		if !ok {
-			err = errors.New("no such request ID")
+			err = fmt.Errorf("no such request ID: %q", callbackReq.RequestId)
 		}
 		return
 	}()
