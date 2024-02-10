@@ -21,6 +21,7 @@
 package broker
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -36,12 +37,14 @@ import (
 	"github.com/pelicanplatform/pelican/registry"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
+	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/web_ui"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 )
 
 type (
@@ -68,15 +71,12 @@ func getHelloWorldHandler(t *testing.T) func(resp http.ResponseWriter, req *http
 	}
 }
 
-func TestBroker(t *testing.T) {
+func Setup(t *testing.T, ctx context.Context, egrp *errgroup.Group) {
 	dirpath := t.TempDir()
-
-	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
-	defer func() { require.NoError(t, egrp.Wait()) }()
-	defer cancel()
 
 	viper.Reset()
 	viper.Set("Logging.Level", "Debug")
+	viper.Set("ConfigDir", filepath.Join(dirpath, "config"))
 	config.InitConfig()
 	viper.Set("Server.WebPort", "0")
 	viper.Set("Registry.DbLocation", filepath.Join(dirpath, "ns-registry.sqlite"))
@@ -107,6 +107,55 @@ func TestBroker(t *testing.T) {
 		Identity: "test_data",
 	})
 	require.NoError(t, err)
+
+	LaunchNamespaceKeyMaintenance(ctx, egrp)
+}
+
+// Perform a single retrieve request, return (but don't parse)
+// result
+func doRetrieveRequest(t *testing.T, ctx context.Context, dur time.Duration) (*http.Response, error) {
+	brokerEndpoint := param.Server_ExternalWebUrl.GetString() + "/api/v1.0/broker/retrieve"
+	originUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
+	require.NoError(t, err)
+
+	oReq := originRequest{
+		Origin: originUrl.Hostname(),
+		Prefix: param.Origin_NamespacePrefix.GetString(),
+	}
+	reqBytes, err := json.Marshal(&oReq)
+	require.NoError(t, err)
+
+	reqReader := bytes.NewReader(reqBytes)
+
+	brokerAud, err := url.Parse(param.Federation_BrokerUrl.GetString())
+	require.NoError(t, err)
+	brokerAud.Path = ""
+
+	token, err := createToken(param.Origin_NamespacePrefix.GetString(), param.Server_Hostname.GetString(), brokerAud.String(), token_scopes.Broker_Retrieve)
+	require.NoError(t, err)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", brokerEndpoint, reqReader)
+	require.NoError(t, err)
+
+	req.Header.Set("X-Pelican-Timeout", dur.String())
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "pelican-origin/"+config.PelicanVersion)
+
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	tr := config.GetTransport()
+	client := &http.Client{Transport: tr}
+
+	return client.Do(req)
+}
+
+// End-to-end test of the broker doing a TCP reversal
+func TestBroker(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
+	Setup(t, ctx, egrp)
 
 	// Setup the broker APIs
 	engine, err := web_ui.GetEngine()
@@ -215,4 +264,53 @@ func TestBroker(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "Hello world", string(respBody))
 	log.Debugln("Finished HTTPS client call to the origin server")
+}
+
+// Ensure the retrieve handler times out
+func TestRetrieveTimeout(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
+	Setup(t, ctx, egrp)
+
+	// Setup the broker APIs
+	engine, err := web_ui.GetEngine()
+	require.NoError(t, err)
+	rootGroup := engine.Group("/")
+	RegisterBroker(ctx, rootGroup)
+	registry.RegisterRegistryAPI(rootGroup)
+
+	egrp.Go(func() error {
+		<-ctx.Done()
+		return registry.ShutdownDB()
+	})
+
+	// Run the web engine, wait for it to be online.
+	err = web_ui.RunEngineRoutine(ctx, engine, egrp, false)
+	require.NoError(t, err)
+	err = server_utils.WaitUntilWorking(ctx, "GET", param.Server_ExternalWebUrl.GetString()+"/", "Web UI", http.StatusNotFound)
+	require.NoError(t, err)
+
+	viper.Set("Federation.BrokerUrl", param.Server_ExternalWebUrl.GetString())
+	viper.Set("Federation.RegistryUrl", param.Server_ExternalWebUrl.GetString())
+
+	resp, err := doRetrieveRequest(t, ctx, time.Millisecond)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	defer resp.Body.Close()
+	responseBytes, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+
+	brokerResp := &brokerRetrievalResp{}
+	err = json.Unmarshal(responseBytes, &brokerResp)
+	require.NoError(t, err)
+
+	assert.Equal(t, brokerReponseStatusTimeout, brokerResp.Status)
+
+	ctx, cancelFunc := context.WithTimeout(ctx, 50*time.Millisecond)
+	defer cancelFunc()
+	_, err = doRetrieveRequest(t, ctx, 10*time.Second)
+	assert.True(t, errors.Is(err, context.DeadlineExceeded))
 }
