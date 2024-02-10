@@ -90,6 +90,9 @@ func handleRequest(ctx context.Context, origin string, req reversalRequest, time
 func handleRetrieve(appCtx context.Context, ginCtx context.Context, prefix, origin string, timeout time.Duration) (req reversalRequest, err error) {
 	// Return randomly short of the timeout.
 	maxTime := timeout - 500*time.Millisecond - time.Duration(rand.Intn(500))*time.Millisecond
+	if maxTime <= 0 {
+		maxTime = time.Millisecond
+	}
 	tick := time.NewTicker(maxTime)
 	defer tick.Stop()
 	select {

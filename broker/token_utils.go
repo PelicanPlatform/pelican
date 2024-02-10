@@ -23,7 +23,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
@@ -35,12 +34,50 @@ import (
 	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
 )
 
 var (
-	namespaceKeys      = ttlcache.New[string, *jwk.Cache](ttlcache.WithTTL[string, *jwk.Cache](15 * time.Minute))
-	namespaceKeysMutex = sync.RWMutex{}
+	// A thread-safe cache for the namespace public keys
+	namespaceKeys *ttlcache.Cache[string, *jwk.Cache]
 )
+
+// Launches a background goroutine that periodically expires
+// the namespace key cache
+func LaunchNamespaceKeyMaintenance(ctx context.Context, egrp *errgroup.Group) {
+	loader := ttlcache.LoaderFunc[string, *jwk.Cache](
+		func(cache *ttlcache.Cache[string, *jwk.Cache], prefix string) *ttlcache.Item[string, *jwk.Cache] {
+			iss, err := getRegistryIssValue(prefix)
+			log.Debugln("Loading cache for prefix", prefix)
+			if err != nil {
+				return nil
+			}
+			// The actual location of the JWKS at the registry
+			jwksUrl := iss + "/.well-known/issuer.jwks"
+
+			ar := jwk.NewCache(ctx)
+			client := &http.Client{Transport: config.GetTransport()}
+			if err = ar.Register(jwksUrl, jwk.WithMinRefreshInterval(15*time.Minute), jwk.WithHTTPClient(client)); err != nil {
+				return nil
+			}
+			log.Debugln("Setting public key cache for issuer", iss)
+			item := cache.Set(prefix, ar, ttlcache.DefaultTTL)
+			return item
+		},
+	)
+	namespaceKeys = ttlcache.New[string, *jwk.Cache](
+		ttlcache.WithTTL[string, *jwk.Cache](15*time.Minute),
+		ttlcache.WithLoader[string, *jwk.Cache](loader),
+	)
+
+	go namespaceKeys.Start()
+	egrp.Go(func() error {
+		<-ctx.Done()
+		namespaceKeys.Stop()
+		namespaceKeys.DeleteAll()
+		return nil
+	})
+}
 
 // Given a namespace prefix, return the value that should be used
 // by the `iss` claim in a token for this federation's registry.
@@ -73,27 +110,10 @@ func getRegistryIssuerInfo(ctx context.Context, prefix string) (iss string, keys
 	// The actual location of the JWKS at the registry
 	jwksUrl := iss + "/.well-known/issuer.jwks"
 
-	var ar *jwk.Cache
-	namespaceKeysMutex.RLock()
 	item := namespaceKeys.Get(prefix)
-	if item != nil {
-		if !item.IsExpired() {
-			ar = item.Value()
-		}
+	if item.Value() != nil {
+		keyset, err = item.Value().Get(ctx, jwksUrl)
 	}
-	namespaceKeysMutex.RUnlock()
-	if ar == nil {
-		ar = jwk.NewCache(ctx)
-		client := &http.Client{Transport: config.GetTransport()}
-		if err = ar.Register(jwksUrl, jwk.WithMinRefreshInterval(15*time.Minute), jwk.WithHTTPClient(client)); err != nil {
-			return
-		}
-		namespaceKeysMutex.Lock()
-		namespaceKeys.Set(prefix, ar, ttlcache.DefaultTTL)
-		namespaceKeysMutex.Unlock()
-		log.Debugln("Attempting to fetch public key for issuer", iss)
-	}
-	keyset, err = ar.Get(ctx, jwksUrl)
 	return
 }
 
