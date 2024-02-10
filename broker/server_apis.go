@@ -20,7 +20,6 @@ package broker
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -28,6 +27,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/token_scopes"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -39,16 +39,18 @@ type (
 		Prefix string `json:"prefix"`
 	}
 
-	// Structure for an origin retrieval response from the broker
-	originResp struct {
-		Status  string          `json:"status"`
-		Request reversalRequest `json:"request"`
+	brokerResponseStatus string
+
+	// Base response for a request or retrieval
+	brokerMsgResp struct {
+		Status brokerResponseStatus `json:"status"`
+		Msg    string               `json:"msg,omitempty"`
 	}
 
-	// Error response for a request or retrieval
-	brokerErrResp struct {
-		Status string `json:"status"`
-		Msg    string `json:"msg"`
+	// Response for a successful retrieval
+	brokerRetrievalResp struct {
+		brokerMsgResp
+		Request reversalRequest `json:"req"`
 	}
 
 	// Structure for an origin calling back to the cache
@@ -56,6 +58,30 @@ type (
 		RequestId string `json:"request_id"`
 	}
 )
+
+const (
+	brokerResponseStatusOK     brokerResponseStatus = "success"
+	brokerReponseStatusFailed  brokerResponseStatus = "error"
+	brokerReponseStatusTimeout brokerResponseStatus = "timeout"
+)
+
+func newBrokerReqResp(req reversalRequest) (result brokerRetrievalResp) {
+	result.Request = req
+	result.brokerMsgResp.Status = brokerResponseStatusOK
+	return
+}
+
+func newBrokerRespFail(msg string) brokerMsgResp {
+	return brokerMsgResp{
+		Status: brokerReponseStatusFailed,
+		Msg:    msg,
+	}
+}
+
+func newBrokerRespTimeout() (result brokerRetrievalResp) {
+	result.brokerMsgResp.Status = brokerReponseStatusTimeout
+	return
+}
 
 func retrieveRequest(ctx context.Context, ginCtx *gin.Context) {
 	timeoutStr := "5s"
@@ -80,30 +106,30 @@ func retrieveRequest(ctx context.Context, ginCtx *gin.Context) {
 	token := ginCtx.Request.Header.Get("Authorization")
 	token, hasPrefix := strings.CutPrefix(token, "Bearer ")
 	if !hasPrefix {
-		ginCtx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"status": "error", "msg": "Bearer authorization required for callback"})
+		ginCtx.AbortWithStatusJSON(http.StatusUnauthorized, newBrokerRespFail("Bearer authorization required for callback"))
 		return
 	}
 
 	ok, err := verifyToken(ctx, token, originReq.Prefix, param.Server_ExternalWebUrl.GetString(), token_scopes.Broker_Retrieve)
 	if err != nil {
 		log.Errorln("Failed to verify token for reverse request:", err)
-		ginCtx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "error", "msg": "Failed to verify provided token"})
+		ginCtx.AbortWithStatusJSON(http.StatusBadRequest, newBrokerRespFail("Failed to verify provided token"))
 		return
 	}
 	if !ok {
-		ginCtx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"status": "error", "msg": "Authorization denied"})
+		ginCtx.AbortWithStatusJSON(http.StatusUnauthorized, newBrokerRespFail("Authorization denied"))
 	}
 
 	req, err := handleRetrieve(ctx, ginCtx, originReq.Prefix, originReq.Origin, timeoutVal)
 	if errors.Is(err, errRetrieveTimeout) {
-		ginCtx.JSON(http.StatusOK, gin.H{"status": "timeout", "request": gin.H{}})
+		ginCtx.JSON(http.StatusOK, newBrokerRespTimeout())
 		return
 	} else if err != nil {
-		ginCtx.JSON(http.StatusInternalServerError, brokerErrResp{Status: "error", Msg: "Failure when retrieving requests for this origin"})
+		ginCtx.JSON(http.StatusInternalServerError, newBrokerRespFail("Failure when retrieving requests for this origin"))
 		return
 	}
 
-	ginCtx.JSON(http.StatusOK, gin.H{"status": "ok", "request": req})
+	ginCtx.JSON(http.StatusOK, newBrokerReqResp(req))
 }
 
 func reverseRequest(ctx context.Context, ginCtx *gin.Context) {
@@ -114,55 +140,52 @@ func reverseRequest(ctx context.Context, ginCtx *gin.Context) {
 
 	timeoutVal, err := time.ParseDuration(timeoutStr)
 	if err != nil {
-		ginCtx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "error", "msg": "Failed to parse X-Pelican-Timeout header to a duration (example: 5s)"})
+		ginCtx.AbortWithStatusJSON(http.StatusBadRequest, newBrokerRespFail("Failed to parse X-Pelican-Timeout header to a duration (example: 5s)"))
 		return
 	}
 
 	token := ginCtx.Request.Header.Get("Authorization")
 	token, hasPrefix := strings.CutPrefix(token, "Bearer ")
 	if !hasPrefix {
-		ginCtx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"status": "error", "msg": "Bearer authorization required for callback"})
+		ginCtx.AbortWithStatusJSON(http.StatusUnauthorized, newBrokerRespFail("Bearer authorization required for callback"))
 		return
 	}
 
 	hostname, err := getCacheHostnameFromToken([]byte(token))
 	if err != nil {
-		ginCtx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"status": "error", "msg": "Failed to determine issuer: " + err.Error()})
+		ginCtx.AbortWithStatusJSON(http.StatusUnauthorized, newBrokerRespFail("Failed to determine issuer: "+err.Error()))
 		return
 	}
 
 	ok, err := verifyToken(ctx, token, "/caches/"+hostname, param.Server_ExternalWebUrl.GetString(), token_scopes.Broker_Reverse)
 	if err != nil {
 		log.Errorln("Failed to verify token for cache reversal request:", err)
-		ginCtx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "error", "msg": "Failed to verify provided token"})
+		ginCtx.AbortWithStatusJSON(http.StatusBadRequest, newBrokerRespFail("Failed to verify provided token"))
 		return
 	}
 	if !ok {
-		ginCtx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"status": "error", "msg": "Authorization denied"})
+		ginCtx.AbortWithStatusJSON(http.StatusUnauthorized, newBrokerRespFail("Authorization denied"))
 	}
 
 	reversalReq := reversalRequest{}
 	if err := ginCtx.Bind(&reversalReq); err != nil {
-		ginCtx.JSON(http.StatusBadRequest, gin.H{"status": "error", "msg": "Failed to parse the cache's reversal request"})
-		ginCtx.Abort()
+		ginCtx.AbortWithStatusJSON(http.StatusBadRequest, newBrokerRespFail("Failed to parse the cache's reversal request"))
 		return
 	}
 	if reversalReq.OriginName == "" {
-		ginCtx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "error", "msg": "Missing 'origin' parameter in request"})
+		ginCtx.AbortWithStatusJSON(http.StatusBadRequest, newBrokerRespFail("Missing 'origin' parameter in request"))
 		return
 	}
 	if reversalReq.Prefix == "" {
-		ginCtx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "error", "msg": "Missing 'prefix' parameter in request"})
+		ginCtx.AbortWithStatusJSON(http.StatusBadRequest, newBrokerRespFail("Missing 'prefix' parameter in request"))
 		return
 	}
 
 	if err = handleRequest(ctx, reversalReq.OriginName, reversalReq, timeoutVal); errors.Is(err, errRequestTimeout) {
-		ginCtx.JSON(http.StatusInternalServerError, gin.H{"status": "error", "msg": "Timeout when waiting for origin callback"})
-		ginCtx.Abort()
+		ginCtx.AbortWithStatusJSON(http.StatusInternalServerError, newBrokerRespFail("Timeout when waiting for origin callback"))
 		return
 	} else if err != nil {
-		ginCtx.JSON(http.StatusInternalServerError, gin.H{"status": "error", "msg": "Failure when waiting for origin callback"})
-		ginCtx.Abort()
+		ginCtx.AbortWithStatusJSON(http.StatusInternalServerError, newBrokerRespFail("Failure when waiting for origin callback"))
 		return
 	}
 }
@@ -177,7 +200,7 @@ func RegisterBroker(ctx context.Context, router *gin.RouterGroup) {
 func handleCallback(ctx context.Context, ginCtx *gin.Context) {
 	callbackReq := callbackRequest{}
 	if err := ginCtx.Bind(&callbackReq); err != nil {
-		ginCtx.JSON(http.StatusBadRequest, gin.H{"status": "error", "msg": "Failed to parse the origin's callback request"})
+		ginCtx.JSON(http.StatusBadRequest, newBrokerRespFail("Failed to parse the origin's callback request"))
 		ginCtx.Abort()
 		return
 	}
@@ -185,7 +208,7 @@ func handleCallback(ctx context.Context, ginCtx *gin.Context) {
 	token := ginCtx.Request.Header.Get("Authorization")
 	token, hasPrefix := strings.CutPrefix(token, "Bearer ")
 	if !hasPrefix {
-		ginCtx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"status": "error", "msg": "Bearer authorization required for callback"})
+		ginCtx.AbortWithStatusJSON(http.StatusUnauthorized, newBrokerRespFail("Bearer authorization required for callback"))
 		return
 	}
 
@@ -194,12 +217,12 @@ func handleCallback(ctx context.Context, ginCtx *gin.Context) {
 		defer responseMapLock.Unlock()
 		pendingRev, ok := response[callbackReq.RequestId]
 		if !ok {
-			err = fmt.Errorf("no such request ID: %q", callbackReq.RequestId)
+			err = errors.Errorf("no such request ID: %q", callbackReq.RequestId)
 		}
 		return
 	}()
 	if err != nil {
-		ginCtx.JSON(http.StatusBadRequest, gin.H{"status": "error", "msg": "No such request ID"})
+		ginCtx.JSON(http.StatusBadRequest, newBrokerRespFail("No such request ID"))
 		ginCtx.Abort()
 		return
 	}
@@ -207,11 +230,11 @@ func handleCallback(ctx context.Context, ginCtx *gin.Context) {
 	ok, err := verifyToken(ctx, token, pendingRev.prefix, param.Server_ExternalWebUrl.GetString(), token_scopes.Broker_Callback)
 	if err != nil {
 		log.Errorln("Failed to verify token for cache callback:", err)
-		ginCtx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"status": "error", "msg": "Failed to verify provided token"})
+		ginCtx.AbortWithStatusJSON(http.StatusBadRequest, newBrokerRespFail("Failed to verify provided token"))
 		return
 	}
 	if !ok {
-		ginCtx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"status": "error", "msg": "Authorization denied"})
+		ginCtx.AbortWithStatusJSON(http.StatusUnauthorized, newBrokerRespFail("Authorization denied"))
 	}
 
 	// Pass the response writer to the handler (or wait for

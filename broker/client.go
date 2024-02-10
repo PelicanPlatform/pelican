@@ -235,7 +235,7 @@ func ConnectToOrigin(ctx context.Context, brokerUrl, prefix, originName string) 
 		err = errors.Wrap(err, "Failure when reading response from broker response")
 	}
 	if resp.StatusCode >= 400 {
-		errResp := brokerErrResp{}
+		errResp := brokerMsgResp{}
 		log.Errorf("Failure (status code %d) when invoking the broker: %s", resp.StatusCode, string(responseBytes))
 		if err = json.Unmarshal(responseBytes, &errResp); err != nil {
 			err = errors.Errorf("Failure when invoking the broker (status code %d); unable to parse error message", resp.StatusCode)
@@ -294,7 +294,7 @@ func ConnectToOrigin(ctx context.Context, brokerUrl, prefix, originName string) 
 		hj, ok := writer.(http.Hijacker)
 		if !ok {
 			log.Debug("Not able to hijack underlying TCP connection from server")
-			resp := brokerErrResp{
+			resp := brokerMsgResp{
 				Msg:    "Unable to reverse TCP connection; HTTP/2 in use",
 				Status: "error",
 			}
@@ -465,7 +465,7 @@ func doCallback(ctx context.Context, brokerResp reversalRequest) (listener net.L
 	}
 
 	if resp.StatusCode >= 400 {
-		errResp := brokerErrResp{}
+		errResp := brokerMsgResp{}
 		if err = json.Unmarshal(responseBytes, &errResp); err != nil {
 			err = errors.Errorf("Failure when invoking cache %s callback (status code %d); unable to parse error message", brokerResp.CallbackUrl, resp.StatusCode)
 		} else {
@@ -612,7 +612,7 @@ func LaunchRequestMonitor(ctx context.Context, egrp *errgroup.Group, resultChan 
 					break
 				}
 				if resp.StatusCode >= 400 {
-					errResp := brokerErrResp{}
+					errResp := brokerMsgResp{}
 					if err = json.Unmarshal(responseBytes, &errResp); err != nil {
 						log.Errorf("Failure when invoking the broker (status code %d); unable to parse error message", resp.StatusCode)
 					} else {
@@ -623,13 +623,13 @@ func LaunchRequestMonitor(ctx context.Context, egrp *errgroup.Group, resultChan 
 					log.Errorf("Unknown response status code: %d", resp.StatusCode)
 					break
 				}
-				brokerResp := &originResp{}
+				brokerResp := &brokerRetrievalResp{}
 				if err = json.Unmarshal(responseBytes, &brokerResp); err != nil {
 					log.Errorln("Failed to unmarshal response from origin retrieval:", err)
 					break
 				}
 
-				if brokerResp.Status == "ok" {
+				if brokerResp.Status == brokerResponseStatusOK {
 					listener, err := doCallback(ctx, brokerResp.Request)
 					if err != nil {
 						log.Errorln("Failed to callback to the cache:", err)
@@ -637,6 +637,14 @@ func LaunchRequestMonitor(ctx context.Context, egrp *errgroup.Group, resultChan 
 						break
 					}
 					resultChan <- listener
+				} else if brokerResp.Status == brokerReponseStatusFailed {
+					log.Errorln("Broker responded to origin retrieve with an error:", brokerResp.Msg)
+				} else if brokerResp.Status != brokerReponseStatusTimeout { // We expect timeouts; do not log them.
+					if brokerResp.Msg != "" {
+						log.Errorf("Broker responded with unknown status (%s); msg: %s", brokerResp.Status, brokerResp.Msg)
+					} else {
+						log.Errorf("Broker responded with unknown status %s", brokerResp.Status)
+					}
 				}
 				sleepDuration = 0
 			}

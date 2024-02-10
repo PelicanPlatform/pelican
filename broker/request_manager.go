@@ -28,11 +28,11 @@ import (
 
 type (
 	reversalRequest struct {
-		CallbackUrl string `json:"callback_url"`
-		PrivateKey  string `json:"private_key"`
-		RequestId   string `json:"request_id"`
-		Prefix      string `json:"prefix"`
-		OriginName  string `json:"origin"`
+		CallbackUrl string `json:"callback_url,omitempty"`
+		PrivateKey  string `json:"private_key,omitempty"`
+		RequestId   string `json:"request_id,omitempty"`
+		Prefix      string `json:"prefix,omitempty"`
+		OriginName  string `json:"origin,omitempty"`
 	}
 
 	requestInfo struct {
