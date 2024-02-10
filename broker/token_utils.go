@@ -150,7 +150,7 @@ func getCacheHostnameFromToken(token []byte) (hostname string, err error) {
 	}
 	hostname, hasPrefix := strings.CutPrefix(iss, expectedPrefix+"/")
 	if !hasPrefix {
-		err = errors.Errorf("Token issuer %s doesnt start with expected registry issuer %s", iss, expectedPrefix)
+		err = errors.Errorf("Token issuer %s doesn't start with expected registry issuer %s", iss, expectedPrefix)
 		return
 	}
 	return
