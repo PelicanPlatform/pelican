@@ -93,6 +93,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 
 		rootGroup := engine.Group("/")
 		broker.RegisterBroker(ctx, rootGroup)
+		broker.LaunchNamespaceKeyMaintenance(ctx, egrp)
 	}
 
 	if modules.IsEnabled(config.DirectorType) {

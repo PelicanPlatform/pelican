@@ -152,7 +152,7 @@ func LaunchRequestListener(ctx context.Context, egrp *errgroup.Group) error {
 		return err
 	}
 	err = os.Remove(socketName)
-	if err != nil && errors.Is(err, fs.ErrNotExist) {
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return errors.Wrapf(err, "Failed to cleanup Unix socket %s", socketName)
 	}
 	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: socketName, Net: "unix"})

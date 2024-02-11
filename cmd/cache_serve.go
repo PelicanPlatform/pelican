@@ -188,6 +188,7 @@ func serveCacheInternal(cmdCtx context.Context) (context.CancelFunc, error) {
 		}
 	}
 	broker.RegisterBrokerCallback(ctx, engine.Group("/"))
+	broker.LaunchNamespaceKeyMaintenance(ctx, egrp)
 
 	configPath, err := xrootd.ConfigXrootd(ctx, false)
 	if err != nil {

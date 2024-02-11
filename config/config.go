@@ -408,7 +408,7 @@ func DiscoverFederation() error {
 		viper.Set("Federation.JwkUrl", metadata.JwksUri)
 	}
 	if curBrokerURL == "" && metadata.BrokerEndpoint != "" {
-		log.Debugln("Federation service discovery resulted in JWKS URL", metadata.BrokerEndpoint)
+		log.Debugln("Federation service discovery resulted in broker URL", metadata.BrokerEndpoint)
 		viper.Set("Federation.BrokerUrl", metadata.BrokerEndpoint)
 	}
 

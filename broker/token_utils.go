@@ -48,7 +48,6 @@ func LaunchNamespaceKeyMaintenance(ctx context.Context, egrp *errgroup.Group) {
 	loader := ttlcache.LoaderFunc[string, *jwk.Cache](
 		func(cache *ttlcache.Cache[string, *jwk.Cache], prefix string) *ttlcache.Item[string, *jwk.Cache] {
 			iss, err := getRegistryIssValue(prefix)
-			log.Debugln("Loading cache for prefix", prefix)
 			if err != nil {
 				return nil
 			}
