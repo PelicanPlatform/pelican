@@ -325,7 +325,7 @@ func CheckCacheXrootdEnv(exportPath string, server server_utils.XRootDServer, ui
 				discoveryUrl.Host = discoveryUrl.Path
 				discoveryUrl.Path = ""
 			} else if discoveryUrl.Path != "" && discoveryUrl.Path != "/" {
-				return "", errors.New("The discoveryUrl Path is non-empty, ensure the Federation.DiscoveryUrl has the format <host>:<port>")
+				return "", errors.New("The Federation.DiscoveryUrl's path is non-empty, ensure the Federation.DiscoveryUrl has the format <host>:<port>")
 			}
 			discoveryUrl.Scheme = "pelican"
 			discoveryUrl.Path = ""
