@@ -16,6 +16,9 @@ const (
 	WebUi_Access TokenScope = "web_ui.access"
 	Monitoring_Scrape TokenScope = "monitoring.scrape"
 	Monitoring_Query TokenScope = "monitoring.query"
+	Broker_Reverse TokenScope = "broker.reverse"
+	Broker_Retrieve TokenScope = "broker.retrieve"
+	Broker_Callback TokenScope = "broker.callback"
 
 	// Storage Scopes
 	Storage_Read TokenScope = "storage.read:"

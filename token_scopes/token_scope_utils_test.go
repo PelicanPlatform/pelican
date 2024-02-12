@@ -34,24 +34,32 @@ func largeInputSet() []string {
 	return scopes
 }
 
+func largeInputSetScopes() []TokenScope {
+	var scopes []TokenScope
+	for i := 0; i < 1000; i++ {
+		scopes = append(scopes, TokenScope("scope"+strconv.Itoa(i)))
+	}
+	return scopes
+}
+
 func TestScopeContains(t *testing.T) {
 	tests := []struct {
 		name           string
 		tokenScopes    []string
-		expectedScopes []string
+		expectedScopes []TokenScope
 		all            bool
 		want           bool
 	}{
-		{"empty-scopes", []string{}, []string{}, false, false},
-		{"single-match", []string{"read"}, []string{"read"}, false, true},
-		{"no-match", []string{"read"}, []string{"write"}, false, false},
-		{"multiple-matches", []string{"read", "write"}, []string{"read", "write"}, false, true},
-		{"partial-match-all-false", []string{"read", "write"}, []string{"read"}, false, true},
-		{"partial-match-all-true", []string{"read", "write"}, []string{"read"}, true, false},
-		{"case-insensitivity", []string{"Read"}, []string{"read"}, false, true},
-		{"different-lengths-all-true", []string{"read", "write"}, []string{"read"}, true, false},
-		{"exact-match-all-true", []string{"read", "write"}, []string{"write", "read"}, true, true},
-		{"large-input-sets", largeInputSet(), largeInputSet(), false, true},
+		{"empty-scopes", []string{}, []TokenScope{}, false, false},
+		{"single-match", []string{"read"}, []TokenScope{"read"}, false, true},
+		{"no-match", []string{"read"}, []TokenScope{"write"}, false, false},
+		{"multiple-matches", []string{"read", "write"}, []TokenScope{"read", "write"}, false, true},
+		{"partial-match-all-false", []string{"read", "write"}, []TokenScope{"read"}, false, true},
+		{"partial-match-all-true", []string{"read", "write"}, []TokenScope{"read"}, true, false},
+		{"case-insensitivity", []string{"Read"}, []TokenScope{"read"}, false, true},
+		{"different-lengths-all-true", []string{"read", "write"}, []TokenScope{"read"}, true, false},
+		{"exact-match-all-true", []string{"read", "write"}, []TokenScope{"write", "read"}, true, true},
+		{"large-input-sets", largeInputSet(), largeInputSetScopes(), false, true},
 		{"nil-inputs", nil, nil, false, false},
 	}
 

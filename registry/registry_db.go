@@ -438,7 +438,7 @@ func getNamespacesByFilter(filterNs Namespace, serverType ServerType) ([]*Namesp
 	return namespacesOut, nil
 }
 
-func addNamespace(ns *Namespace) error {
+func AddNamespace(ns *Namespace) error {
 	// Adding default values to the field. Note that you need to pass other fields
 	// including user_id before this function
 	ns.AdminMetadata.CreatedAt = time.Now()

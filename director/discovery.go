@@ -49,11 +49,13 @@ func federationDiscoveryHandler(ctx *gin.Context) {
 		ctx.JSON(500, gin.H{"error": "Bad server configuration: Registry URL is not set"})
 		return
 	}
+	brokerUrl := param.Federation_BrokerUrl.GetString()
 
 	rs := config.FederationDiscovery{
 		DirectorEndpoint:              directorUrl,
 		NamespaceRegistrationEndpoint: registryUrl,
 		JwksUri:                       directorUrl + directorJWKSPath,
+		BrokerEndpoint:                brokerUrl,
 	}
 
 	jsonData, err := json.MarshalIndent(rs, "", "  ")

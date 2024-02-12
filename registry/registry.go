@@ -524,7 +524,7 @@ func addNamespaceHandler(ctx *gin.Context, data *registrationData) error {
 	// Overwrite status to Pending to filter malicious request
 	ns.AdminMetadata.Status = Pending
 
-	err = addNamespace(&ns)
+	err = AddNamespace(&ns)
 	if err != nil {
 		return errors.Wrapf(err, "Failed to add prefix %s", ns.Prefix)
 	}
