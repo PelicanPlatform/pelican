@@ -316,7 +316,17 @@ func CheckCacheXrootdEnv(exportPath string, server server_utils.XRootDServer, ui
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to pull information from the federation")
 	}
-	viper.Set("Cache.PSSOrigin", param.Federation_DirectorUrl.GetString())
+	if directorUrlStr := param.Federation_DirectorUrl.GetString(); directorUrlStr != "" {
+		directorUrl, err := url.Parse(param.Federation_DirectorUrl.GetString())
+		if err == nil {
+			log.Debugln("Parsing director URL for 'pss.origin' setting:", directorUrlStr)
+			directorUrl.Scheme = "pelican"
+			viper.Set("Cache.PSSOrigin", directorUrl.String())
+		} else {
+			return "", errors.Wrapf(err, "Failed to parse director URL %s", directorUrlStr)
+		}
+	}
+
 	if discoveryUrlStr := param.Federation_DiscoveryUrl.GetString(); discoveryUrlStr != "" {
 		discoveryUrl, err := url.Parse(discoveryUrlStr)
 		if err == nil {
@@ -332,6 +342,10 @@ func CheckCacheXrootdEnv(exportPath string, server server_utils.XRootDServer, ui
 		} else {
 			return "", errors.Wrapf(err, "Failed to parse discovery URL %s", discoveryUrlStr)
 		}
+	}
+
+	if viper.GetString("Cache.PSSOrigin") == "" {
+		return "", errors.New("Cache pss.origin url empty")
 	}
 
 	if cacheServer, ok := server.(*cache_ui.CacheServer); ok {
