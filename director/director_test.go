@@ -40,6 +40,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -309,6 +310,7 @@ func TestDirectorRegistration(t *testing.T) {
 
 		ad := server_structs.OriginAdvertiseV1{Name: "test", URL: "https://or-url.org", Namespaces: []server_structs.NamespaceAdV1{{Path: "/foo/bar", Issuer: isurl}}}
 
+		log.Debugln("Checking V1 Ad", ad)
 		jsonad, err := json.Marshal(ad)
 		assert.NoError(t, err, "Error marshalling OriginAdvertise")
 
@@ -316,6 +318,7 @@ func TestDirectorRegistration(t *testing.T) {
 
 		r.ServeHTTP(w, c.Request)
 
+		log.Debugln("Checking Result", w.Result().Body)
 		// Check to see that the code exits with status code 200 after given it a good token
 		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
 
