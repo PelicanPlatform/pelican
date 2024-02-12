@@ -17,5 +17,4 @@ CREATE TABLE IF NOT EXISTS topology (
 
 -- +goose Down
 -- +goose StatementBegin
-SELECT 'down SQL query';
 -- +goose StatementEnd
