@@ -289,6 +289,15 @@ osdf_default: 10m
 default: none
 components: ["director", "registry"]
 ---
+name: Federation.BrokerUrl
+description: >-
+  The URL of the broker endpoint used by the origin.
+
+  If left unset, it will be populated by the federation metadata discovery.
+type: url
+default: none
+components: ["origin"]
+---
 ############################
 #   Client-Level Configs   #
 ############################
@@ -438,6 +447,14 @@ description: >-
   Indicate whether the origin should enable its web UI.
 type: bool
 default: true
+components: ["origin"]
+---
+name: Origin.EnableBroker
+description: >-
+  Indicate whether the origin should utilize the broker service to avoid
+  the need for incoming connections.
+type: bool
+default: false
 components: ["origin"]
 ---
 name: Origin.EnableIssuer
@@ -695,6 +712,14 @@ description: >-
   The interval of which director issues a new file transfer test to all the registered origins and caches.
 type: duration
 default: 15s
+components: ["director"]
+---
+name: Director.EnableBroker
+description: >-
+  Whether the director should also run the connection brokering
+  service.
+type: bool
+default: true
 components: ["director"]
 ---
 ############################
