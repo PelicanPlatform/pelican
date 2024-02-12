@@ -316,16 +316,6 @@ func CheckCacheXrootdEnv(exportPath string, server server_utils.XRootDServer, ui
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to pull information from the federation")
 	}
-	if directorUrlStr := param.Federation_DirectorUrl.GetString(); directorUrlStr != "" {
-		directorUrl, err := url.Parse(param.Federation_DirectorUrl.GetString())
-		if err == nil {
-			log.Debugln("Parsing director URL for 'pss.origin' setting:", directorUrlStr)
-			directorUrl.Scheme = "pelican"
-			viper.Set("Cache.PSSOrigin", directorUrl.String())
-		} else {
-			return "", errors.Wrapf(err, "Failed to parse director URL %s", directorUrlStr)
-		}
-	}
 
 	if discoveryUrlStr := param.Federation_DiscoveryUrl.GetString(); discoveryUrlStr != "" {
 		discoveryUrl, err := url.Parse(discoveryUrlStr)
@@ -334,6 +324,8 @@ func CheckCacheXrootdEnv(exportPath string, server server_utils.XRootDServer, ui
 			if len(discoveryUrl.Path) > 0 && len(discoveryUrl.Host) == 0 {
 				discoveryUrl.Host = discoveryUrl.Path
 				discoveryUrl.Path = ""
+			} else if discoveryUrl.Path != "" && discoveryUrl.Path != "/" {
+				return "", errors.New("The discoveryUrl Path is non-empty, ensure the Federation.DiscoveryUrl has the format <host>:<port>")
 			}
 			discoveryUrl.Scheme = "pelican"
 			discoveryUrl.Path = ""
@@ -344,8 +336,22 @@ func CheckCacheXrootdEnv(exportPath string, server server_utils.XRootDServer, ui
 		}
 	}
 
+	if directorUrlStr := param.Federation_DirectorUrl.GetString(); directorUrlStr != "" {
+		directorUrl, err := url.Parse(param.Federation_DirectorUrl.GetString())
+		if err == nil {
+			log.Debugln("Parsing director URL for 'pss.origin' setting:", directorUrlStr)
+			if directorUrl.Path != "" && directorUrl.Path != "/" {
+				return "", errors.New("The directorUrl Path is non-empty, ensure the Federation.DirectorUrl has the format <host>:<port>")
+			}
+			directorUrl.Scheme = "pelican"
+			viper.Set("Cache.PSSOrigin", directorUrl.String())
+		} else {
+			return "", errors.Wrapf(err, "Failed to parse director URL %s", directorUrlStr)
+		}
+	}
+
 	if viper.GetString("Cache.PSSOrigin") == "" {
-		return "", errors.New("Cache pss.origin url empty")
+		return "", errors.New("One of Federation.DiscoveryUrl or Federation.DirectorUrl must be set to configure a cache")
 	}
 
 	if cacheServer, ok := server.(*cache_ui.CacheServer); ok {
