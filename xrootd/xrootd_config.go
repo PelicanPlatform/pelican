@@ -341,7 +341,7 @@ func CheckCacheXrootdEnv(exportPath string, server server_utils.XRootDServer, ui
 		if err == nil {
 			log.Debugln("Parsing director URL for 'pss.origin' setting:", directorUrlStr)
 			if directorUrl.Path != "" && directorUrl.Path != "/" {
-				return "", errors.New("The directorUrl Path is non-empty, ensure the Federation.DirectorUrl has the format <host>:<port>")
+				return "", errors.New("The Federation.DirectorUrl's path is non-empty, ensure the Federation.DirectorUrl has the format <host>:<port>")
 			}
 			directorUrl.Scheme = "pelican"
 			viper.Set("Cache.PSSOrigin", directorUrl.String())
