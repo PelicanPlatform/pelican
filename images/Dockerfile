@@ -37,7 +37,7 @@ COPY . .
 COPY --from=website-build /webapp/out ./web_ui/frontend/out
 
 RUN\
-    if ["${IS_PR_BUILD}" == "false"];\
+    if ["$IS_PR_BUILD" == false];\
         then goreleaser build --clean;\
     else goreleaser build --clean --snapshot;\
     fi
