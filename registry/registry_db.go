@@ -20,6 +20,8 @@ package registry
 
 import (
 	"context"
+	"database/sql"
+	"embed"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -30,6 +32,7 @@ import (
 	"github.com/glebarez/sqlite" // It doesn't require CGO
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pkg/errors"
+	"github.com/pressly/goose/v3"
 	log "github.com/sirupsen/logrus"
 	gormlog "github.com/thomas-tacquet/gormv2-logrus"
 	"gorm.io/gorm"
@@ -71,12 +74,12 @@ type AdminMetadata struct {
 }
 
 type Namespace struct {
-	ID            int                    `json:"id" post:"exclude" gorm:"primaryKey;autoIncrement"`
-	Prefix        string                 `json:"prefix" validate:"required" gorm:"unique;not null"`
-	Pubkey        string                 `json:"pubkey" validate:"required" gorm:"not null"`
+	ID            int                    `json:"id" post:"exclude" gorm:"primaryKey"`
+	Prefix        string                 `json:"prefix" validate:"required"`
+	Pubkey        string                 `json:"pubkey" validate:"required"`
 	Identity      string                 `json:"identity" post:"exclude"`
-	AdminMetadata AdminMetadata          `json:"admin_metadata" gorm:"serializer:json;check:length(admin_metadata) <= 4000"`
-	CustomFields  map[string]interface{} `json:"custom_fields" gorm:"serializer:json;default:'';check:length(custom_fields) <= 4000"`
+	AdminMetadata AdminMetadata          `json:"admin_metadata" gorm:"serializer:json"`
+	CustomFields  map[string]interface{} `json:"custom_fields" gorm:"serializer:json"`
 }
 
 type NamespaceWOPubkey struct {
@@ -115,6 +118,9 @@ is based off of 1.b from
 https://www.alexedwards.net/blog/organising-database-access
 */
 var db *gorm.DB
+
+//go:embed migrations/*.sql
+var embedMigrations embed.FS
 
 func (st ServerType) String() string {
 	return string(st)
@@ -531,6 +537,19 @@ func getAllNamespaces() ([]*Namespace, error) {
 	return namespaces, nil
 }
 
+func MigrateDB(sqldb *sql.DB) error {
+	goose.SetBaseFS(embedMigrations)
+
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		return err
+	}
+
+	if err := goose.Up(sqldb, "migrations"); err != nil {
+		return err
+	}
+	return nil
+}
+
 func InitializeDB(ctx context.Context) error {
 	dbPath := param.Registry_DbLocation.GetString()
 	if dbPath == "" {
@@ -550,7 +569,7 @@ func InitializeDB(ctx context.Context) error {
 		dbPath += ".sqlite"
 	}
 
-	dbName := "file:" + dbPath + "?_busy_timeout=5000&_journal_mode=WAL"
+	dbName := dbPath + "?_busy_timeout=5000&_journal_mode=WAL"
 
 	globalLogLevel := log.GetLevel()
 	var ormLevel logger.LogLevel
@@ -580,15 +599,15 @@ func InitializeDB(ctx context.Context) error {
 		return errors.Wrapf(err, "Failed to open the database with path: %s", dbPath)
 	}
 
-	if err = db.AutoMigrate(&Namespace{}); err != nil {
-		return errors.Wrapf(err, "Failed to migrate DB for namespace table")
+	sqldb, err := db.DB()
+
+	if err != nil {
+		return errors.Wrapf(err, "Failed to get sql.DB from gorm DB: %s", dbPath)
 	}
 
-	if config.GetPreferredPrefix() == "OSDF" {
-		// Create the toplogy table
-		if err := db.AutoMigrate(&Topology{}); err != nil {
-			return err
-		}
+	// Run database migrations
+	if err := MigrateDB(sqldb); err != nil {
+		return err
 	}
 
 	return nil
