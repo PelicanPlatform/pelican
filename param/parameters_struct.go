@@ -30,6 +30,7 @@ type Config struct {
 		EnableVoms bool
 		ExportLocation string
 		Port int
+		RunLocation string
 		XRootDPrefix string
 	}
 	Client struct {
@@ -139,6 +140,7 @@ type Config struct {
 		Multiuser bool
 		NamespacePrefix string
 		Port int
+		RunLocation string
 		S3AccessKeyfile string
 		S3Bucket string
 		S3Region string
@@ -236,7 +238,6 @@ type Config struct {
 		Mount string
 		Port int
 		RobotsTxtFile string
-		RunLocation string
 		ScitokensConfig string
 		Sitename string
 		SummaryMonitoringHost string
@@ -251,6 +252,7 @@ type configWithType struct {
 		EnableVoms struct { Type string; Value bool }
 		ExportLocation struct { Type string; Value string }
 		Port struct { Type string; Value int }
+		RunLocation struct { Type string; Value string }
 		XRootDPrefix struct { Type string; Value string }
 	}
 	Client struct {
@@ -360,6 +362,7 @@ type configWithType struct {
 		Multiuser struct { Type string; Value bool }
 		NamespacePrefix struct { Type string; Value string }
 		Port struct { Type string; Value int }
+		RunLocation struct { Type string; Value string }
 		S3AccessKeyfile struct { Type string; Value string }
 		S3Bucket struct { Type string; Value string }
 		S3Region struct { Type string; Value string }
@@ -457,7 +460,6 @@ type configWithType struct {
 		Mount struct { Type string; Value string }
 		Port struct { Type string; Value int }
 		RobotsTxtFile struct { Type string; Value string }
-		RunLocation struct { Type string; Value string }
 		ScitokensConfig struct { Type string; Value string }
 		Sitename struct { Type string; Value string }
 		SummaryMonitoringHost struct { Type string; Value string }

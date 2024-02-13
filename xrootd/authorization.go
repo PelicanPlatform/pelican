@@ -172,7 +172,12 @@ func writeScitokensConfiguration(modules config.ServerType, cfg *ScitokensCfg) e
 		return err
 	}
 
-	xrootdRun := param.Xrootd_RunLocation.GetString()
+	var xrootdRun string
+	if modules.IsEnabled(config.CacheType) {
+		xrootdRun = param.Cache_RunLocation.GetString()
+	} else {
+		xrootdRun = param.Origin_RunLocation.GetString()
+	}
 	configPath := filepath.Join(xrootdRun, "scitokens-generated.cfg.tmp")
 	file, err := os.OpenFile(configPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0640)
 	if err != nil {
@@ -335,7 +340,13 @@ func EmitAuthfile(server server_utils.XRootDServer) error {
 		return err
 	}
 
-	xrootdRun := param.Xrootd_RunLocation.GetString()
+	var xrootdRun string
+
+	if server.GetServerType().IsEnabled(config.CacheType) {
+		xrootdRun = param.Cache_RunLocation.GetString()
+	} else {
+		xrootdRun = param.Origin_RunLocation.GetString()
+	}
 	finalAuthPath := filepath.Join(xrootdRun, "authfile-origin-generated")
 	if server.GetServerType().IsEnabled(config.CacheType) {
 		finalAuthPath = filepath.Join(xrootdRun, "authfile-cache-generated")

@@ -86,6 +86,7 @@ type (
 		SelfTest         bool
 		CalculatedPort   string
 		NamespacePrefix  string
+		RunLocation      string
 		Mode             string
 		S3Bucket         string
 		S3Region         string
@@ -101,6 +102,7 @@ type (
 		EnableVoms     bool
 		CalculatedPort string
 		ExportLocation string
+		RunLocation    string
 		DataLocation   string
 		PSSOrigin      string
 		Concurrency    int
@@ -117,7 +119,6 @@ type (
 		SummaryMonitoringPort  int
 		DetailedMonitoringHost string
 		DetailedMonitoringPort int
-		RunLocation            string
 		Authfile               string
 		ScitokensConfig        string
 		Mount                  string
@@ -386,7 +387,12 @@ func CheckXrootdEnv(server server_utils.XRootDServer) error {
 	}
 
 	// Ensure the runtime directory exists
-	runtimeDir := param.Xrootd_RunLocation.GetString()
+	var runtimeDir string
+	if server.GetServerType().IsEnabled(config.CacheType) {
+		runtimeDir = param.Cache_RunLocation.GetString()
+	} else {
+		runtimeDir = param.Origin_RunLocation.GetString()
+	}
 	err = config.MkdirAll(runtimeDir, 0755, uid, gid)
 	if err != nil {
 		return errors.Wrapf(err, "Unable to create runtime directory %v", runtimeDir)
@@ -435,7 +441,7 @@ func CheckXrootdEnv(server server_utils.XRootDServer) error {
 		}
 	}
 
-	if err = CopyXrootdCertificates(); err != nil {
+	if err = CopyXrootdCertificates(server); err != nil {
 		return err
 	}
 
@@ -502,7 +508,7 @@ func CheckXrootdEnv(server server_utils.XRootDServer) error {
 // certificate shows up atomically from XRootD's perspective.
 // Adjusts the ownership and mode to match that expected
 // by the XRootD framework.
-func CopyXrootdCertificates() error {
+func CopyXrootdCertificates(server server_utils.XRootDServer) error {
 	user, err := config.GetDaemonUserInfo()
 	if err != nil {
 		return errors.Wrap(err, "Unable to copy certificates to xrootd runtime directory; failed xrootd user lookup")
@@ -514,7 +520,12 @@ func CopyXrootdCertificates() error {
 		return builtin_errors.Join(err, errBadKeyPair)
 	}
 
-	destination := filepath.Join(param.Xrootd_RunLocation.GetString(), "copied-tls-creds.crt")
+	var destination string
+	if server.GetServerType().IsEnabled(config.CacheType) {
+		destination = filepath.Join(param.Cache_RunLocation.GetString(), "copied-tls-creds.crt")
+	} else {
+		destination = filepath.Join(param.Origin_RunLocation.GetString(), "copied-tls-creds.crt")
+	}
 	tmpName := destination + ".tmp"
 	destFile, err := os.OpenFile(tmpName, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, fs.FileMode(0400))
 	if err != nil {
@@ -570,7 +581,7 @@ func LaunchXrootdMaintenance(ctx context.Context, server server_utils.XRootDServ
 		"xrootd maintenance",
 		sleepTime,
 		func(notifyEvent bool) error {
-			err := CopyXrootdCertificates()
+			err := CopyXrootdCertificates(server)
 			if notifyEvent && errors.Is(err, errBadKeyPair) {
 				log.Debugln("Bad keypair encountered when doing xrootd certificate maintenance:", err)
 				return nil
@@ -622,7 +633,12 @@ func ConfigXrootd(ctx context.Context, origin bool) (string, error) {
 	// Map out xrootd logs
 	mapXrootdLogLevels(&xrdConfig)
 
-	runtimeCAs := filepath.Join(param.Xrootd_RunLocation.GetString(), "ca-bundle.crt")
+	var runtimeCAs string
+	if origin {
+		runtimeCAs = filepath.Join(param.Origin_RunLocation.GetString(), "ca-bundle.crt")
+	} else {
+		runtimeCAs = filepath.Join(param.Cache_RunLocation.GetString(), "ca-bundle.crt")
+	}
 	caCount, err := utils.LaunchPeriodicWriteCABundle(ctx, runtimeCAs, 2*time.Minute)
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to setup the runtime CA bundle")
@@ -673,8 +689,12 @@ func ConfigXrootd(ctx context.Context, origin bool) (string, error) {
 
 	templ := template.Must(template.New("xrootd.cfg").Parse(xrootdCfg))
 
-	xrootdRun := param.Xrootd_RunLocation.GetString()
-	configPath := filepath.Join(xrootdRun, "xrootd.cfg")
+	var configPath string
+	if origin {
+		configPath = filepath.Join(param.Origin_RunLocation.GetString(), "xrootd.cfg")
+	} else {
+		configPath = filepath.Join(param.Cache_RunLocation.GetString(), "xrootd.cfg")
+	}
 	file, err := os.OpenFile(configPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0640)
 	if err != nil {
 		return "", err

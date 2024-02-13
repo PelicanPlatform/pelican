@@ -23,6 +23,7 @@ import (
 	"net/url"
 	"os"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -44,13 +45,28 @@ func checkConfigFileReadable(fileName string, errMsg string) error {
 }
 
 func CheckDefaults(server server_utils.XRootDServer) error {
-	requiredConfigs := []param.StringParam{param.Server_TLSCertificate, param.Server_TLSKey, param.Xrootd_RunLocation, param.Xrootd_RobotsTxtFile}
+	requiredConfigs := []param.StringParam{param.Server_TLSCertificate, param.Server_TLSKey, param.Xrootd_RobotsTxtFile}
 	for _, configName := range requiredConfigs {
 		mgr := configName.GetString()
 		if mgr == "" {
 			return errors.New(fmt.Sprintf("Required value of '%v' is not set in config",
 				configName))
 		}
+	}
+
+	var runDir string
+	var paramName string
+	if server.GetServerType().IsEnabled(config.CacheType) {
+		runDir = param.Cache_RunLocation.GetString()
+		paramName = "param.Cache_RunLocation"
+	} else {
+		runDir = param.Origin_RunLocation.GetString()
+		paramName = "param.Origin_RunLocation"
+	}
+
+	if runDir == "" {
+		return errors.New(fmt.Sprintf("Required value of '%v' is not set in config",
+			paramName))
 	}
 
 	if managerHost := param.Xrootd_ManagerHost.GetString(); managerHost == "" {

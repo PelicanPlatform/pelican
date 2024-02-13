@@ -177,12 +177,12 @@ RUN rm -f /etc/xrootd/client.plugins.d/xrdcl-http-plugin.conf
 
 # Copy built s3 plugin library and xrdcl-pelican plugin library from build
 COPY --from=xrootd-plugin-builder /usr/lib64/libXrdS3-5.so /usr/lib64/libXrdHTTPServer-5.so /usr/lib64/libXrdClPelican-5.so \
-    /usr/lib64/libLotMan.so /usr/lib64
+    /usr/lib64/libLotMan.so /usr/lib64/
 
 # Copy the nlohmann json headers
 COPY --from=xrootd-plugin-builder /usr/include/nlohmann /usr/include/nlohmann
 # Copy the JSON schema validator library
-COPY --from=xrootd-plugin-builder /usr/lib64/libnlohmann_json_schema_validator.a /usr/lib64
+COPY --from=xrootd-plugin-builder /usr/lib64/libnlohmann_json_schema_validator.a /usr/lib64/
 
 RUN chmod +x /pelican/osdf-client \
     && chmod +x /entrypoint.sh

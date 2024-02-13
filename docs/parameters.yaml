@@ -397,6 +397,18 @@ type: string
 default: none
 components: ["origin"]
 ---
+name: Origin.RunLocation
+description: >-
+  A directory where temporary configurations will be stored for the xrootd daemon
+  started by the origin.
+
+  For non-root servers, if $XDG_RUNTIME_DIR is not set, a temporary directory will
+  be created (and removed on shutdown)
+type: filename
+root_default: /run/pelican/xrootd/origin
+default: $XDG_RUNTIME_DIR/pelican/origin
+components: ["origin"]
+---
 name: Origin.NamespacePrefix
 description: >-
   The filepath prefix at which an origin's contents are made globally available, eg /pelican/PUBLIC.
@@ -614,6 +626,18 @@ description: >-
   relative to the mount location.
 type: string
 default: /
+components: ["cache"]
+---
+name: Cache.RunLocation
+description: >-
+  A directory where temporary configurations will be stored for the xrootd daemon
+  started by the cache.
+
+  For non-root servers, if $XDG_RUNTIME_DIR is not set, a temporary directory will
+  be created (and removed on shutdown)
+type: filename
+root_default: /run/pelican/xrootd/cache
+default: $XDG_RUNTIME_DIR/pelican/cache
 components: ["cache"]
 ---
 name: Cache.XRootDPrefix
@@ -1280,18 +1304,6 @@ default: 8443
 deprecated: true
 components: ["origin", "cache"]
 ---
-name: Xrootd.RunLocation
-description: >-
-  A directory where temporary configurations will be stored for the xrootd daemon
-  started by the origin or cache.
-
-  For non-root servers, if $XDG_RUNTIME_DIR is not set, a temporary directory will
-  be created (and removed on shutdown)
-type: filename
-root_default: /run/pelican/xrootd
-default: $XDG_RUNTIME_DIR/pelican
-components: ["origin", "cache"]
----
 name: Xrootd.RobotsTxtFile
 description: >-
   Origins may be indexed by web search engines; to control the behavior of search
@@ -1341,28 +1353,28 @@ description: >-
   A URL pointing toward the XRootD instance's Manager Host.
 type: url
 default: none
-components: ["origin"]
+components: ["origin", "cache"]
 ---
 name: Xrootd.SummaryMonitoringHost
 description: >-
   A URL pointing toward the XRootD instance's Summary Monitoring Host.
 type: url
 default: none
-components: ["origin"]
+components: ["origin", "cache"]
 ---
 name: Xrootd.DetailedMonitoringHost
 description: >-
   A URL pointing toward the XRootD instance's Detailed Monitoring Host.
 type: url
 default: none
-components: ["origin"]
+components: ["origin", "cache"]
 ---
 name: Xrootd.LocalMonitoringHost
 description: >-
   A URL pointing toward the XRootD instance's Local Monitoring Host.
 type: url
 default: none
-components: ["origin"]
+components: ["origin", "cache"]
 ---
 name: Xrootd.Sitename
 description: >-

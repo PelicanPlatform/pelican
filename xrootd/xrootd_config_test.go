@@ -65,7 +65,7 @@ func TestXrootDOriginConfig(t *testing.T) {
 
 	dirname := t.TempDir()
 	viper.Reset()
-	viper.Set("Xrootd.RunLocation", dirname)
+	viper.Set("Origin.RunLocation", dirname)
 	configPath, err := ConfigXrootd(ctx, true)
 	require.NoError(t, err)
 	assert.NotNil(t, configPath)
@@ -79,7 +79,7 @@ func TestXrootDCacheConfig(t *testing.T) {
 	dirname := t.TempDir()
 	viper.Reset()
 	config.InitConfig()
-	viper.Set("Xrootd.RunLocation", dirname)
+	viper.Set("Cache.RunLocation", dirname)
 	configPath, err := ConfigXrootd(ctx, false)
 	require.NoError(t, err)
 	assert.NotNil(t, configPath)
@@ -146,7 +146,7 @@ func TestUpdateAuth(t *testing.T) {
 	configDirname := t.TempDir()
 	viper.Reset()
 	viper.Set("Logging.Level", "Debug")
-	viper.Set("Xrootd.RunLocation", runDirname)
+	viper.Set("Origin.RunLocation", runDirname)
 	viper.Set("ConfigDir", configDirname)
 	authfileName := filepath.Join(configDirname, "authfile")
 	viper.Set("Xrootd.Authfile", authfileName)
@@ -187,9 +187,9 @@ default_user = user2
 	err = EmitAuthfile(server)
 	require.NoError(t, err)
 
-	destScitokensName := filepath.Join(param.Xrootd_RunLocation.GetString(), "scitokens-origin-generated.cfg")
+	destScitokensName := filepath.Join(param.Origin_RunLocation.GetString(), "scitokens-origin-generated.cfg")
 	assert.FileExists(t, destScitokensName)
-	destAuthfileName := filepath.Join(param.Xrootd_RunLocation.GetString(), "authfile-origin-generated")
+	destAuthfileName := filepath.Join(param.Origin_RunLocation.GetString(), "authfile-origin-generated")
 	assert.FileExists(t, destAuthfileName)
 
 	scitokensContents, err := os.ReadFile(destScitokensName)
@@ -239,21 +239,21 @@ func TestCopyCertificates(t *testing.T) {
 	configDirname := t.TempDir()
 	viper.Reset()
 	viper.Set("Logging.Level", "Debug")
-	viper.Set("Xrootd.RunLocation", runDirname)
+	viper.Set("Origin.RunLocation", runDirname)
 	viper.Set("ConfigDir", configDirname)
 	config.InitConfig()
 
 	// First, invoke CopyXrootdCertificates directly, ensure it works.
-	err := CopyXrootdCertificates()
+	err := CopyXrootdCertificates(&origin_ui.OriginServer{})
 	assert.ErrorIs(t, err, errBadKeyPair)
 
 	err = config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
 	err = config.MkdirAll(path.Dir(param.Xrootd_Authfile.GetString()), 0755, -1, -1)
 	require.NoError(t, err)
-	err = CopyXrootdCertificates()
+	err = CopyXrootdCertificates(&origin_ui.OriginServer{})
 	require.NoError(t, err)
-	destKeyPairName := filepath.Join(param.Xrootd_RunLocation.GetString(), "copied-tls-creds.crt")
+	destKeyPairName := filepath.Join(param.Origin_RunLocation.GetString(), "copied-tls-creds.crt")
 	assert.FileExists(t, destKeyPairName)
 
 	keyPairContents, err := os.ReadFile(destKeyPairName)
@@ -271,7 +271,7 @@ func TestCopyCertificates(t *testing.T) {
 	err = os.Rename(certName, certName+".orig")
 	require.NoError(t, err)
 
-	err = CopyXrootdCertificates()
+	err = CopyXrootdCertificates(&origin_ui.OriginServer{})
 	assert.ErrorIs(t, err, errBadKeyPair)
 
 	err = os.Rename(keyName, keyName+".orig")
@@ -280,7 +280,7 @@ func TestCopyCertificates(t *testing.T) {
 	err = config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
 
-	err = CopyXrootdCertificates()
+	err = CopyXrootdCertificates(&origin_ui.OriginServer{})
 	require.NoError(t, err)
 
 	secondKeyPairContents, err := os.ReadFile(destKeyPairName)

@@ -143,7 +143,7 @@ func handleRequest(ctx context.Context, xrdConn net.Conn) {
 
 // Launch a goroutine that listens for socket reversal requests from the XRootD daemon
 func LaunchRequestListener(ctx context.Context, egrp *errgroup.Group) error {
-	socketName := filepath.Join(param.Xrootd_RunLocation.GetString(), "cache-reversal.sock")
+	socketName := filepath.Join(param.Cache_RunLocation.GetString(), "cache-reversal.sock")
 	if len(socketName) > 104 {
 		return errors.Errorf("Unix socket name, %s, is too long; cannot be more than 104 characters", socketName)
 	}

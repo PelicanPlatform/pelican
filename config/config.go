@@ -686,12 +686,6 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 
 	setEnabledServer(currentServers)
 
-	xrootdPrefix := ""
-	if currentServers.IsEnabled(OriginType) {
-		xrootdPrefix = "origin"
-	} else if currentServers.IsEnabled(CacheType) {
-		xrootdPrefix = "cache"
-	}
 	configDir := viper.GetString("ConfigDir")
 	viper.SetConfigType("yaml")
 	viper.SetDefault("Server.TLSCertificate", filepath.Join(configDir, "certificates", "tls.crt"))
@@ -729,7 +723,12 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 	}
 
 	if IsRootExecution() {
-		viper.SetDefault("Xrootd.RunLocation", filepath.Join("/run", "pelican", "xrootd", xrootdPrefix))
+		if currentServers.IsEnabled(OriginType) {
+			viper.SetDefault("Origin.RunLocation", filepath.Join("/run", "pelican", "xrootd", "origin"))
+		}
+		if currentServers.IsEnabled(CacheType) {
+			viper.SetDefault("Cache.RunLocation", filepath.Join("/run", "pelican", "xrootd", "cache"))
+		}
 		viper.SetDefault("Cache.DataLocation", "/run/pelican/xcache")
 		viper.SetDefault("Origin.Multiuser", true)
 		viper.SetDefault("Director.GeoIPLocation", "/var/cache/pelican/maxmind/GeoLite2-City.mmdb")
@@ -745,19 +744,29 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 		viper.SetDefault("Shoveler.AMQPTokenLocation", filepath.Join(configDir, "shoveler-token"))
 
 		if userRuntimeDir := os.Getenv("XDG_RUNTIME_DIR"); userRuntimeDir != "" {
-			runtimeDir := filepath.Join(userRuntimeDir, "pelican", xrootdPrefix)
+			runtimeDir := filepath.Join(userRuntimeDir, "pelican")
 			err := os.MkdirAll(runtimeDir, 0750)
 			if err != nil {
 				return err
 			}
-			viper.SetDefault("Xrootd.RunLocation", runtimeDir)
+			if currentServers.IsEnabled(OriginType) {
+				viper.SetDefault("Origin.RunLocation", filepath.Join(runtimeDir, "origin"))
+			}
+			if currentServers.IsEnabled(CacheType) {
+				viper.SetDefault("Cache.RunLocation", filepath.Join(runtimeDir, "cache"))
+			}
 			viper.SetDefault("Cache.DataLocation", path.Join(runtimeDir, "xcache"))
 		} else {
 			dir, err := os.MkdirTemp("", "pelican-xrootd-*")
 			if err != nil {
 				return err
 			}
-			viper.SetDefault("Xrootd.RunLocation", filepath.Join(dir, xrootdPrefix))
+			if currentServers.IsEnabled(OriginType) {
+				viper.SetDefault("Origin.RunLocation", filepath.Join(dir, "origin"))
+			}
+			if currentServers.IsEnabled(CacheType) {
+				viper.SetDefault("Cache.RunLocation", filepath.Join(dir, "cache"))
+			}
 			viper.SetDefault("Cache.DataLocation", path.Join(dir, "xcache"))
 			cleanupDirOnShutdown(ctx, dir)
 		}
@@ -832,7 +841,7 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 	if originPort == 0 {
 		viper.Set("Origin.CalculatedPort", "any")
 	}
-	viper.Set("Cache.CalculatedPort", strconv.Itoa(originPort))
+	viper.Set("Cache.CalculatedPort", strconv.Itoa(cachePort))
 	if cachePort == 0 {
 		viper.Set("Cache.CalculatedPort", "any")
 	}
