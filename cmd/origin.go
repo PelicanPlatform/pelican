@@ -162,7 +162,7 @@ func init() {
 	originServeCmd.MarkFlagsMutuallyExclusive("volume", "bucket-access-keyfile")
 	originServeCmd.MarkFlagsMutuallyExclusive("volume", "bucket-secret-keyfile")
 	// We don't require the bucket access and secret keyfiles as they're not needed for unauthenticated buckets
-	originServeCmd.MarkFlagsRequiredTogether("service-name", "region", "bucket", "service-url")
+	originServeCmd.MarkFlagsRequiredTogether("service-name", "region", "service-url")
 	originServeCmd.MarkFlagsRequiredTogether("bucket-access-keyfile", "bucket-secret-keyfile")
 
 	// The port any web UI stuff will be served on

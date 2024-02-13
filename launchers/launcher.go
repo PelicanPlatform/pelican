@@ -133,10 +133,10 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 			NamespacePrefix: /bar`)
 			}
 		case "s3":
-			if param.Origin_S3Bucket.GetString() == "" || param.Origin_S3Region.GetString() == "" ||
-				param.Origin_S3ServiceName.GetString() == "" || param.Origin_S3ServiceUrl.GetString() == "" {
+			if param.Origin_S3Region.GetString() == "" || param.Origin_S3ServiceName.GetString() == "" ||
+				param.Origin_S3ServiceUrl.GetString() == "" {
 				return shutdownCancel, errors.Errorf("The S3 origin is missing configuration options to run properly." +
-					" You must specify a bucket, a region, a service name and a service URL via the command line or via" +
+					" You must specify a region, a service name and a service URL via the command line or via" +
 					" your configuration file.")
 			}
 		default:
