@@ -87,6 +87,7 @@ type (
 		job              *TransferJob
 		Error            error
 		TransferredBytes int64
+		Scheme           string
 		Attempts         []TransferResult
 	}
 
@@ -95,6 +96,7 @@ type (
 		TransferFileBytes int64  // how much each attempt downloaded
 		TimeToFirstByte   int64  // how long it took to download the first byte
 		TransferEndTime   int64  // when the transfer ends
+		TransferTime      int64  // amount of time we were transferring per attempt (in seconds)
 		Endpoint          string // which origin did it use
 		ServerVersion     string // TODO: figure out how to get this???
 		Error             error  // what error the attempt returned (if any)
@@ -1528,6 +1530,7 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	var attempt TransferResult
 	// Stat the file to get the size (for progress bar)
 	fileInfo, err := os.Stat(transfer.localPath)
+	transferResult.Scheme = transfer.remoteURL.Scheme
 	if err != nil {
 		log.Errorln("Error checking local file ", transfer.localPath, ":", err)
 		transferResult.Error = err
@@ -1585,6 +1588,7 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	responseChan := make(chan *http.Response)
 	reader := &ProgressReader{ioreader, sizer, closed}
 	putContext, cancel := context.WithCancel(transfer.ctx)
+	transferStartTime := time.Now().Unix()
 	defer cancel()
 	log.Debugln("Full destination URL:", dest.String())
 	var request *http.Request
@@ -1624,6 +1628,10 @@ Loop:
 			}
 			if !firstByteRecorded && reader.BytesComplete() > 0 {
 				attempt.TimeToFirstByte = int64(time.Since(uploadStart))
+				// We get the time since in nanoseconds:
+				timeToFirstByteNs := time.Since(uploadStart)
+				// Convert to seconds
+				attempt.TimeToFirstByte = int64(timeToFirstByteNs.Seconds())
 				firstByteRecorded = true
 			}
 
@@ -1666,6 +1674,7 @@ Loop:
 	if fileInfo.Size() == 0 {
 		transferResult.Error = lastError
 		attempt.TransferEndTime = time.Now().Unix()
+		attempt.TransferTime = attempt.TransferEndTime - transferStartTime
 
 		// Add our attempt fields
 		transferResult.Attempts = append(transferResult.Attempts, attempt)
@@ -1674,6 +1683,7 @@ Loop:
 		log.Debugln("Uploaded bytes:", reader.BytesComplete())
 		transferResult.TransferredBytes = reader.BytesComplete()
 		attempt.TransferEndTime = time.Now().Unix()
+		attempt.TransferTime = attempt.TransferEndTime - transferStartTime
 
 		// Add our attempt fields
 		transferResult.Attempts = append(transferResult.Attempts, attempt)

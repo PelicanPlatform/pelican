@@ -444,6 +444,7 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 				developerData[fmt.Sprintf("Endpoint%d", attempt.Number)] = attempt.Endpoint
 				developerData[fmt.Sprintf("TransferEndTime%d", attempt.Number)] = attempt.TransferEndTime
 				developerData[fmt.Sprintf("ServerVersion%d", attempt.Number)] = attempt.ServerVersion
+				developerData[fmt.Sprintf("TransferTime%d", attempt.Number)] = attempt.TransferTime
 				if attempt.Error != nil {
 					developerData[fmt.Sprintf("TransferError%d", attempt.Number)] = attempt.Error
 				}
@@ -455,7 +456,7 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 			resultAd.Set("TransferEndTime", time.Now().Unix())
 			hostname, _ := os.Hostname()
 			resultAd.Set("TransferLocalMachineName", hostname)
-			resultAd.Set("TransferProtocol", "stash")
+			resultAd.Set("TransferProtocol", result.Scheme)
 			transfer := jobMap[result.JobId.String()]
 			resultAd.Set("TransferUrl", transfer.url.String())
 			resultAd.Set("TransferFileName", transfer.localFile)

@@ -70,9 +70,15 @@ func (c *ClassAd) String() string {
 			for key, value := range v {
 				buffer.WriteString(key)
 				buffer.WriteString(" = ")
-				buffer.WriteString("\"")
-				buffer.WriteString(fmt.Sprintf("%v", value))
-				buffer.WriteString("\"; ")
+
+				switch valueType := value.(type) {
+				case int, int64:
+					fmt.Fprintf(&buffer, "%v; ", valueType)
+				case string:
+					fmt.Fprintf(&buffer, "\"%s\"; ", valueType)
+				default:
+					fmt.Fprintf(&buffer, "\"%v\"; ", valueType)
+				}
 			}
 			buffer.WriteString("]")
 		default:
