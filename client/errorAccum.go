@@ -26,6 +26,8 @@ import (
 	"time"
 
 	grab "github.com/opensaucerer/grab/v3"
+	"github.com/pelicanplatform/pelican/config"
+	log "github.com/sirupsen/logrus"
 )
 
 type (
@@ -126,6 +128,9 @@ func IsRetryable(err error) bool {
 	if errors.Is(err, grab.ErrBadLength) {
 		return false
 	}
+	if errors.Is(err, &config.MetaDataErr{}) {
+		return true
+	}
 	var cse *ConnectionSetupError
 	if errors.As(err, &cse) {
 		if sce, ok := cse.Unwrap().(grab.StatusCodeError); ok {
@@ -166,6 +171,10 @@ func (te *TransferErrors) AllErrorsRetryable() bool {
 		if !IsRetryable(err) {
 			return false
 		}
+	}
+	if len(bunchOfErrors) == 0 {
+		log.Debugln("No errors sent to client for checking")
+		return false
 	}
 	return true
 }

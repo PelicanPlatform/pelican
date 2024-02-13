@@ -217,6 +217,7 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 		viper.Set("Federation.DiscoveryUrl", federationUrl.String())
 		err = config.DiscoverFederation()
 		if err != nil {
+			AddError(err)
 			return 0, err
 		}
 	}
@@ -474,6 +475,7 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 			viper.Set("Federation.DiscoveryUrl", federationUrl.String())
 			err = config.DiscoverFederation()
 			if err != nil {
+				AddError(err)
 				return nil, err
 			}
 		}
@@ -558,6 +560,7 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 			viper.Set("Federation.DiscoveryUrl", federationUrl.String())
 			err = config.DiscoverFederation()
 			if err != nil {
+				AddError(err)
 				return nil, err
 			}
 		}
@@ -707,6 +710,7 @@ func DoCopy(ctx context.Context, sourceFile string, destination string, recursiv
 			viper.Set("Federation.DiscoveryUrl", federationUrl.String())
 			err = config.DiscoverFederation()
 			if err != nil {
+				AddError(err)
 				return nil, err
 			}
 		}
@@ -723,6 +727,7 @@ func DoCopy(ctx context.Context, sourceFile string, destination string, recursiv
 			viper.Set("Federation.DiscoveryUrl", federationUrl.String())
 			err = config.DiscoverFederation()
 			if err != nil {
+				AddError(err)
 				return nil, err
 			}
 		}

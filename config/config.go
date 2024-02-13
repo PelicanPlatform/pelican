@@ -88,6 +88,10 @@ type (
 	ServerType int // ServerType is a bit mask indicating which Pelican server(s) are running in the current process
 
 	ContextKey string
+
+	MetaDataErr struct {
+		Err string
+	}
 )
 
 const (
@@ -137,6 +141,15 @@ var (
 	// Pelican version
 	version string = "dev"
 )
+
+func (e *MetaDataErr) Error() string {
+	return e.Err
+}
+
+func (e *MetaDataErr) Is(target error) bool {
+	_, ok := target.(*MetaDataErr)
+	return ok
+}
 
 func init() {
 	validate = validator.New(validator.WithRequiredStructEnabled())
@@ -381,7 +394,10 @@ func DiscoverFederation() error {
 
 	result, err := httpClient.Do(req)
 	if err != nil {
-		return errors.Wrapf(err, "Failure when doing federation metadata lookup to %s", discoveryUrl)
+		errMsg := errors.Wrapf(err, "Failure when doing federation metadata lookup to %s", discoveryUrl)
+		return &MetaDataErr{
+			Err: errMsg.Error(),
+		}
 	}
 
 	if result.Body != nil {

@@ -50,7 +50,13 @@ func putMain(cmd *cobra.Command, args []string) {
 	err := config.InitClient()
 	if err != nil {
 		log.Errorln(err)
-		os.Exit(1)
+		client.AddError(err)
+		if client.ErrorsRetryable() {
+			log.Errorln("Errors are retryable")
+			os.Exit(11)
+		} else {
+			os.Exit(1)
+		}
 	}
 
 	// Set the progress bars to the command line option
