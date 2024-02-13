@@ -63,6 +63,7 @@ var (
 	Director_DefaultResponse = StringParam{"Director.DefaultResponse"}
 	Director_GeoIPLocation = StringParam{"Director.GeoIPLocation"}
 	Director_MaxMindKeyFile = StringParam{"Director.MaxMindKeyFile"}
+	Federation_BrokerUrl = StringParam{"Federation.BrokerUrl"}
 	Federation_DirectorUrl = StringParam{"Federation.DirectorUrl"}
 	Federation_DiscoveryUrl = StringParam{"Federation.DiscoveryUrl"}
 	Federation_JwkUrl = StringParam{"Federation.JwkUrl"}
@@ -180,6 +181,7 @@ var (
 	Monitoring_PortHigher = IntParam{"Monitoring.PortHigher"}
 	Monitoring_PortLower = IntParam{"Monitoring.PortLower"}
 	Server_IssuerPort = IntParam{"Server.IssuerPort"}
+	Server_UILoginRateLimit = IntParam{"Server.UILoginRateLimit"}
 	Server_WebPort = IntParam{"Server.WebPort"}
 	Shoveler_PortHigher = IntParam{"Shoveler.PortHigher"}
 	Shoveler_PortLower = IntParam{"Shoveler.PortLower"}
@@ -192,10 +194,12 @@ var (
 	Client_DisableHttpProxy = BoolParam{"Client.DisableHttpProxy"}
 	Client_DisableProxyFallback = BoolParam{"Client.DisableProxyFallback"}
 	Debug = BoolParam{"Debug"}
+	Director_EnableBroker = BoolParam{"Director.EnableBroker"}
 	DisableHttpProxy = BoolParam{"DisableHttpProxy"}
 	DisableProxyFallback = BoolParam{"DisableProxyFallback"}
 	Logging_DisableProgressBars = BoolParam{"Logging.DisableProgressBars"}
 	Monitoring_MetricAuthorization = BoolParam{"Monitoring.MetricAuthorization"}
+	Origin_EnableBroker = BoolParam{"Origin.EnableBroker"}
 	Origin_EnableCmsd = BoolParam{"Origin.EnableCmsd"}
 	Origin_EnableDirListing = BoolParam{"Origin.EnableDirListing"}
 	Origin_EnableFallbackRead = BoolParam{"Origin.EnableFallbackRead"}

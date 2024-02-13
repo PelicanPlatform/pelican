@@ -29,6 +29,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
@@ -56,29 +57,6 @@ func getTransport() *http.Transport {
 	return transport
 }
 
-// Copy headers from proxied src to dst, removing those defined
-// by HTTP as "hop-by-hop" and not to be forwarded (see
-// https://www.rfc-editor.org/rfc/rfc9110#field.connection)
-func copyHeader(dst, src http.Header) {
-	hopByHop := make(map[string]bool)
-	hopByHop["Proxy-Conenction"] = true
-	hopByHop["Keep-Alive"] = true
-	hopByHop["TE"] = true
-	hopByHop["Transfer-Encoding"] = true
-	hopByHop["Upgrade"] = true
-	for _, value := range src["Connection"] {
-		hopByHop[http.CanonicalHeaderKey(value)] = true
-	}
-	for headerName, headerValues := range src {
-		if hopByHop[headerName] {
-			continue
-		}
-		for _, value := range headerValues {
-			dst.Add(headerName, value)
-		}
-	}
-}
-
 func oa4mpProxy(ctx *gin.Context) {
 	origPath := ctx.Request.URL.Path
 	origPath = strings.TrimPrefix(origPath, "/api/v1.0/issuer")
@@ -96,7 +74,7 @@ func oa4mpProxy(ctx *gin.Context) {
 	}
 	defer resp.Body.Close()
 
-	copyHeader(ctx.Writer.Header(), resp.Header)
+	utils.CopyHeader(ctx.Writer.Header(), resp.Header)
 	ctx.Writer.WriteHeader(resp.StatusCode)
 	if _, err = io.Copy(ctx.Writer, resp.Body); err != nil {
 		log.Warningln("Failed to copy response body from OA4MP to client:", err)

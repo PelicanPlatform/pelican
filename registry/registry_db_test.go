@@ -45,8 +45,10 @@ func setupMockRegistryDB(t *testing.T) {
 	mockDB, err := sql.Open("sqlite", ":memory:")
 	db = mockDB
 	require.NoError(t, err, "Error setting up mock namespace DB")
-	createNamespaceTable()
-	createTopologyTable()
+	err = createNamespaceTable()
+	require.NoError(t, err, "Error creating namespace table")
+	err = createTopologyTable()
+	require.NoError(t, err, "Error creating topology table")
 }
 
 func resetNamespaceDB(t *testing.T) {
@@ -295,7 +297,7 @@ func TestAddNamespace(t *testing.T) {
 	t.Run("set-default-fields", func(t *testing.T) {
 		defer resetNamespaceDB(t)
 		mockNs := mockNamespace("/test", "pubkey", "identity", AdminMetadata{UserID: "someone"})
-		err := addNamespace(&mockNs)
+		err := AddNamespace(&mockNs)
 		require.NoError(t, err)
 		got, err := getAllNamespaces()
 		require.NoError(t, err)
@@ -313,7 +315,7 @@ func TestAddNamespace(t *testing.T) {
 		mockCreateAt := time.Now().Add(time.Hour * 10)
 		mockUpdatedAt := time.Now().Add(time.Minute * 20)
 		mockNs := mockNamespace("/test", "pubkey", "identity", AdminMetadata{UserID: "someone", CreatedAt: mockCreateAt, UpdatedAt: mockUpdatedAt})
-		err := addNamespace(&mockNs)
+		err := AddNamespace(&mockNs)
 		require.NoError(t, err)
 		got, err := getAllNamespaces()
 		require.NoError(t, err)
@@ -333,7 +335,7 @@ func TestAddNamespace(t *testing.T) {
 		defer resetNamespaceDB(t)
 		mockNs := mockNamespace("/test", "pubkey", "identity", AdminMetadata{UserID: "someone", Description: "Some description", SiteName: "OSG", SecurityContactUserID: "security-001"})
 		mockNs.CustomFields = mockCustomFields
-		err := addNamespace(&mockNs)
+		err := AddNamespace(&mockNs)
 		require.NoError(t, err)
 		got, err := getAllNamespaces()
 		require.NoError(t, err)
@@ -807,6 +809,8 @@ func TestRegistryTopology(t *testing.T) {
 	config.SetPreferredPrefix("OSDF")
 
 	//Test topology table population
+	err = createTopologyTable()
+	require.NoError(t, err)
 	err = PopulateTopology()
 	require.NoError(t, err)
 
@@ -828,7 +832,7 @@ func TestRegistryTopology(t *testing.T) {
 		Identity:      "",
 		AdminMetadata: AdminMetadata{},
 	}
-	err = addNamespace(&ns)
+	err = AddNamespace(&ns)
 	require.NoError(t, err)
 
 	// Check that the regular namespace exists

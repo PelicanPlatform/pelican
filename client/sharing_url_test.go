@@ -163,8 +163,10 @@ func TestSharingUrl(t *testing.T) {
 	// Call QueryDirector with the test server URL and a source path
 	testUrl, err := url.Parse("/test/foo/bar")
 	require.NoError(t, err)
+	os.Setenv(config.GetPreferredPrefix()+"_SKIP_TERMINAL_CHECK", "true")
 	token, err := CreateSharingUrl(testUrl, true)
 	assert.NoError(t, err)
 	assert.NotEmpty(t, token)
 	fmt.Println(token)
+	os.Unsetenv(config.GetPreferredPrefix() + "_SKIP_TERMINAL_CHECK")
 }

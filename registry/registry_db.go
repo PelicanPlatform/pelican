@@ -141,7 +141,7 @@ func IsValidRegStatus(s string) bool {
 	return s == "Pending" || s == "Approved" || s == "Denied" || s == "Unknown"
 }
 
-func createNamespaceTable() {
+func createNamespaceTable() error {
 	//We put a size limit on admin_metadata to guard against potentially future
 	//malicious large inserts
 	query := `
@@ -156,7 +156,7 @@ func createNamespaceTable() {
 
 	_, err := db.Exec(query)
 	if err != nil {
-		log.Fatalf("Failed to create namespace table: %v", err)
+		return fmt.Errorf("Failed to create namespace table: %v", err)
 	}
 
 	// Run a manual migration to add "custom_fields" field
@@ -165,7 +165,7 @@ func createNamespaceTable() {
 	columnExists := false
 	rows, err := db.Query(`PRAGMA table_info(namespace);`)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	defer rows.Close()
 
@@ -180,7 +180,7 @@ func createNamespaceTable() {
 		)
 		err = rows.Scan(&cid, &name, &ctype, &notnull, &dfltValue, &pk)
 		if err != nil {
-			log.Fatal(err)
+			return err
 		}
 		if name == "custom_fields" {
 			columnExists = true
@@ -192,16 +192,16 @@ func createNamespaceTable() {
 	if !columnExists {
 		_, err = db.Exec(`ALTER TABLE namespace ADD COLUMN custom_fields TEXT DEFAULT ''`)
 		if err != nil {
-			log.Fatal(err)
+			return err
 		}
 		log.Info("Column 'custom_fields' added.")
 	} else {
 		log.Info("Column 'custom_fields' already exists.")
 	}
-
+	return nil
 }
 
-func createTopologyTable() {
+func createTopologyTable() error {
 	query := `
     CREATE TABLE IF NOT EXISTS topology (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -210,8 +210,9 @@ func createTopologyTable() {
 
 	_, err := db.Exec(query)
 	if err != nil {
-		log.Fatalf("Failed to create topology table: %v", err)
+		return fmt.Errorf("Failed to create topology table: %v", err)
 	}
+	return nil
 }
 
 func namespaceExists(prefix string) (bool, error) {
@@ -620,7 +621,7 @@ used BY the registry (as opposed to the parallel
 functions) used by the client.
 */
 
-func addNamespace(ns *Namespace) error {
+func AddNamespace(ns *Namespace) error {
 	query := `INSERT INTO namespace (prefix, pubkey, identity, admin_metadata, custom_fields) VALUES (?, ?, ?, ?, ?)`
 	tx, err := db.Begin()
 	if err != nil {
@@ -825,7 +826,15 @@ func InitializeDB(ctx context.Context) error {
 		return errors.Wrapf(err, "Failed to open the database with path: %s", dbPath)
 	}
 
-	createNamespaceTable()
+	if err := createNamespaceTable(); err != nil {
+		return err
+	}
+	if config.GetPreferredPrefix() == "OSDF" {
+		// Create the toplogy table
+		if err := createTopologyTable(); err != nil {
+			return err
+		}
+	}
 	return db.Ping()
 }
 
@@ -876,9 +885,6 @@ func modifyTopologyTable(prefixes []string, mode string) error {
 
 // Create a table in the registry to store namespace prefixes from topology
 func PopulateTopology() error {
-	// Create the toplogy table
-	createTopologyTable()
-
 	// The topology table may already exist from before, it may not. Because of this
 	// we need to add to the table any prefixes that are in topology, delete from the
 	// table any that aren't in topology, and skip any that exist in both.

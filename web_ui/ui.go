@@ -27,16 +27,19 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/spf13/viper"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pelicanplatform/pelican/metrics"
@@ -338,11 +341,16 @@ func GetEngine() (*gin.Engine, error) {
 	return engine, nil
 }
 
-// Run the gin engine.
+// Run the gin engine in the current goroutine.
 //
 // Will use a background golang routine to periodically reload the certificate
 // utilized by the UI.
 func RunEngine(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) error {
+	return RunEngineRoutine(ctx, engine, egrp, true)
+}
+
+// Run the gin engine; if curRoutine is false, it will run in a background goroutine.
+func RunEngineRoutine(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, curRoutine bool) error {
 	addr := fmt.Sprintf("%v:%v", param.Server_WebHost.GetString(), param.Server_WebPort.GetInt())
 
 	ln, err := net.Listen("tcp", addr)
@@ -350,9 +358,37 @@ func RunEngine(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) er
 		return err
 	}
 
-	defer ln.Close()
+	// If we allow net.Listen to select a random open port, we should update the
+	// configuration with its value.
+	if param.Server_WebPort.GetInt() == 0 {
+		addr := ln.Addr()
+		tcpAddr, ok := addr.(*net.TCPAddr)
+		if ok {
+			viper.Set("Server.WebPort", tcpAddr.Port)
+			serverUrlStr := param.Server_ExternalWebUrl.GetString()
+			serverUrl, err := url.Parse(serverUrlStr)
+			if err == nil {
+				viper.Set("Server.WebHost", serverUrl.Hostname())
+				viper.Set("Server.ExternalWebUrl", "https://"+serverUrl.Hostname()+":"+strconv.Itoa(tcpAddr.Port))
+				log.Debugln("Random web port used; updated external web URL to", param.Server_ExternalWebUrl.GetString())
+			} else {
+				log.Errorln("Unable to update external web URL for random port; unable to parse existing URL:", serverUrlStr)
+			}
+		} else {
+			log.Error("Unable to determine TCP address of runtime engine")
+		}
+	}
 
-	return runEngineWithListener(ctx, ln, engine, egrp)
+	if curRoutine {
+		defer ln.Close()
+		return runEngineWithListener(ctx, ln, engine, egrp)
+	} else {
+		egrp.Go(func() error {
+			defer ln.Close()
+			return runEngineWithListener(ctx, ln, engine, egrp)
+		})
+		return nil
+	}
 }
 
 // Run the engine with a given listener.

@@ -29,6 +29,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/token_scopes"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 type MockCache struct {
@@ -135,6 +136,21 @@ func TestDirectorRegistration(t *testing.T) {
 		return pKey, string(signed), issuerURL
 	}
 
+	generateReadToken := func(key jwk.Key, object, issuer string) string {
+		tc := utils.TokenConfig{
+			TokenProfile: utils.WLCG,
+			Version:      "1.0",
+			Lifetime:     time.Minute,
+			Issuer:       issuer,
+			Audience:     []string{"director"},
+			Subject:      "test",
+			Claims:       map[string]string{"scope": "storage.read:" + object},
+		}
+		tok, err := tc.CreateTokenWithKey(key)
+		require.NoError(t, err)
+		return tok
+	}
+
 	setupRequest := func(c *gin.Context, r *gin.Engine, bodyByt []byte, token string) {
 		r.POST("/", func(gctx *gin.Context) { RegisterOrigin(ctx, gctx) })
 		c.Request, _ = http.NewRequest(http.MethodPost, "/", bytes.NewBuffer(bodyByt))
@@ -142,6 +158,15 @@ func TestDirectorRegistration(t *testing.T) {
 		c.Request.Header.Set("Content-Type", "application/json")
 		// Hard code the current min version. When this test starts failing because of new stuff in the Director,
 		// we'll know that means it's time to update the min version in redirect.go
+		c.Request.Header.Set("User-Agent", "pelican-origin/7.0.0")
+	}
+
+	// Configure the request context and Gin router to generate a redirect
+	setupRedirect := func(c *gin.Context, r *gin.Engine, object, token string) {
+		r.GET("/api/v1.0/director/origin/*any", RedirectToOrigin)
+		c.Request, _ = http.NewRequest(http.MethodGet, "/api/v1.0/director/origin"+object, nil)
+		c.Request.Header.Set("X-Real-Ip", "1.1.1.1")
+		c.Request.Header.Set("Authorization", "Bearer "+token)
 		c.Request.Header.Set("User-Agent", "pelican-origin/7.0.0")
 	}
 
@@ -225,8 +250,9 @@ func TestDirectorRegistration(t *testing.T) {
 		isurl.Path = ts.URL
 
 		ad := common.OriginAdvertiseV2{
-			DataURL: "https://or-url.org",
-			Name:    "test",
+			BrokerURL: "https://broker-url.org",
+			DataURL:   "https://or-url.org",
+			Name:      "test",
 			Namespaces: []common.NamespaceAdV2{{
 				Path:   "/foo/bar",
 				Issuer: []common.TokenIssuer{{IssuerUrl: isurl}},
@@ -425,6 +451,57 @@ func TestDirectorRegistration(t *testing.T) {
 		assert.Equal(t, "", serverAds.Keys()[0].WebURL.String(), "WebURL in serverAds isn't empty with no WebURL provided in registration")
 		teardown()
 	})
+
+	// Determines if the broker URL set in the advertisement is the same one received on redirect
+	t.Run("broker-url-redirect", func(t *testing.T) {
+		c, r, w := setupContext()
+		pKey, token, issuerURL := generateToken()
+		publicKey, err := jwk.PublicKeyOf(pKey)
+		assert.NoError(t, err, "Error creating public key from private key")
+
+		ar := setupMockCache(t, publicKey)
+		useMockCache(ar, issuerURL)
+
+		isurl := url.URL{}
+		isurl.Path = ts.URL
+
+		brokerUrl := "https://broker-url.org/some/path?origin=foo"
+
+		ad := common.OriginAdvertiseV2{
+			DataURL:   "https://or-url.org",
+			BrokerURL: brokerUrl,
+			Name:      "test",
+			Namespaces: []common.NamespaceAdV2{{
+				Path:   "/foo/bar",
+				Issuer: []common.TokenIssuer{{IssuerUrl: isurl}},
+			}},
+		}
+
+		jsonad, err := json.Marshal(ad)
+		assert.NoError(t, err, "Error marshalling OriginAdvertise")
+
+		setupRequest(c, r, jsonad, token)
+
+		r.ServeHTTP(w, c.Request)
+
+		// Check to see that the code exits with status code 200 after given it a good token
+		require.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
+
+		c, r, w = setupContext()
+		token = generateReadToken(pKey, "/foo/bar", isurl.String())
+		setupRedirect(c, r, "/foo/bar/baz", token)
+
+		r.ServeHTTP(w, c.Request)
+
+		assert.Equal(t, http.StatusTemporaryRedirect, w.Result().StatusCode)
+		if w.Result().StatusCode != http.StatusTemporaryRedirect {
+			body, err := io.ReadAll(w.Result().Body)
+			assert.NoError(t, err)
+			assert.Fail(t, "Error when generating redirect: "+string(body))
+		}
+		assert.Equal(t, brokerUrl, w.Result().Header.Get("X-Pelican-Broker"))
+	})
+
 }
 
 func TestGetAuthzEscaped(t *testing.T) {
