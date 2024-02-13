@@ -395,8 +395,15 @@ func DiscoverFederation() error {
 	result, err := httpClient.Do(req)
 	if err != nil {
 		errMsg := errors.Wrapf(err, "Failure when doing federation metadata lookup to %s", discoveryUrl)
-		return &MetaDataErr{
-			Err: errMsg.Error(),
+		// If DNS timeout, we want this to be retryable so return a specific error
+		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			errMsg = errors.Wrap(errMsg, "Timeout getting metadata response")
+			return &MetaDataErr{
+				Err: errMsg.Error(),
+			}
+		} else {
+			// Otherwise, we want to indicate a non-retryable error
+			return err
 		}
 	}
 
