@@ -454,7 +454,13 @@ func CheckXrootdEnv(server server_utils.XRootDServer) error {
 		return err
 	}
 
-	if err = EmitIssuerMetadata(exportPath); err != nil {
+	var xServerUrl string
+	if server.GetServerType().IsEnabled(config.OriginType) {
+		xServerUrl = param.Origin_Url.GetString()
+	} else {
+		xServerUrl = param.Cache_Url.GetString()
+	}
+	if err = EmitIssuerMetadata(exportPath, xServerUrl); err != nil {
 		return err
 	}
 

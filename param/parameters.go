@@ -76,7 +76,9 @@ func (bP ObjectParam) Unmarshal(rawVal any) error {
 var (
 	Cache_DataLocation = StringParam{"Cache.DataLocation"}
 	Cache_ExportLocation = StringParam{"Cache.ExportLocation"}
+	Cache_NamespacePrefix = StringParam{"Cache.NamespacePrefix"}
 	Cache_RunLocation = StringParam{"Cache.RunLocation"}
+	Cache_Url = StringParam{"Cache.Url"}
 	Cache_XRootDPrefix = StringParam{"Cache.XRootDPrefix"}
 	Director_DefaultResponse = StringParam{"Director.DefaultResponse"}
 	Director_GeoIPLocation = StringParam{"Director.GeoIPLocation"}

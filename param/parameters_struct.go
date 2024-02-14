@@ -29,8 +29,10 @@ type Config struct {
 		DataLocation string
 		EnableVoms bool
 		ExportLocation string
+		NamespacePrefix string
 		Port int
 		RunLocation string
+		Url string
 		XRootDPrefix string
 	}
 	Client struct {
@@ -251,8 +253,10 @@ type configWithType struct {
 		DataLocation struct { Type string; Value string }
 		EnableVoms struct { Type string; Value bool }
 		ExportLocation struct { Type string; Value string }
+		NamespacePrefix struct { Type string; Value string }
 		Port struct { Type string; Value int }
 		RunLocation struct { Type string; Value string }
+		Url struct { Type string; Value string }
 		XRootDPrefix struct { Type string; Value string }
 	}
 	Client struct {

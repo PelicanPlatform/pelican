@@ -640,11 +640,25 @@ root_default: /run/pelican/xrootd/cache
 default: $XDG_RUNTIME_DIR/pelican/cache
 components: ["cache"]
 ---
+name: Cache.NamespacePrefix
+description: >-
+  The filepath prefix at which a cache is registered in the registry. Note that this value is not expected to be set by the user.
+type: string
+default: none
+components: ["cache"]
+---
 name: Cache.XRootDPrefix
 description: >-
   The directory prefix for the xrootd cache configuration files.
 type: string
 default: cache
+components: ["cache"]
+---
+name: Cache.Url
+description: >-
+  The origin's configured URL, as reported to XRootD. This is the file transfer endpoint for the cache.
+type: url
+default: https://${Server.Hostname}:${Cache.Port}
 components: ["cache"]
 ---
 name: Cache.Port

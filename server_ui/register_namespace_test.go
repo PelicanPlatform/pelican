@@ -33,6 +33,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/registry"
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/spf13/viper"
@@ -97,11 +98,11 @@ func TestRegistration(t *testing.T) {
 	viper.Set("Origin.NamespacePrefix", "/test123")
 
 	// Test registration succeeds
-	key, prefix, registerURL, isRegistered, err := registerNamespacePrep()
+	prefix := param.Origin_NamespacePrefix.GetString()
+	key, registerURL, isRegistered, err := registerNamespacePrep(prefix)
 	require.NoError(t, err)
 	assert.False(t, isRegistered)
 	assert.Equal(t, registerURL, svr.URL+"/api/v1.0/registry")
-	assert.Equal(t, prefix, "/test123")
 	err = registerNamespaceImpl(key, prefix, registerURL)
 	require.NoError(t, err)
 
@@ -155,9 +156,9 @@ func TestRegistration(t *testing.T) {
 	assert.Equal(t, keyStatus, noKeyPresent)
 
 	// Redo the namespace prep, ensure that isPresent is true
-	_, prefix, registerURL, isRegistered, err = registerNamespacePrep()
+	prefix = param.Origin_NamespacePrefix.GetString()
+	_, registerURL, isRegistered, err = registerNamespacePrep(prefix)
 	assert.Equal(t, svr.URL+"/api/v1.0/registry", registerURL)
 	assert.NoError(t, err)
-	assert.Equal(t, prefix, "/test123")
 	assert.True(t, isRegistered)
 }

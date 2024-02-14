@@ -104,5 +104,5 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 // Finish configuration of the origin server.  To be invoked after the web UI components
 // have been launched.
 func OriginServeFinish(ctx context.Context, egrp *errgroup.Group) error {
-	return server_ui.RegisterNamespaceWithRetry(ctx, egrp)
+	return server_ui.RegisterNamespaceWithRetry(ctx, egrp, param.Origin_NamespacePrefix.GetString())
 }

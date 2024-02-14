@@ -100,11 +100,20 @@ func advertiseInternal(ctx context.Context, server server_utils.XRootDServer) er
 	if err != nil {
 		return errors.Wrap(err, fmt.Sprintf("%s failed to get namespaceAds from the director", server.GetServerType()))
 	}
+	var serverUrl string
+	var webUrl string
+	var prefix string
+	if server.GetServerType().IsEnabled(config.CacheType) {
+		serverUrl = param.Origin_Url.GetString()
+		webUrl = param.Server_ExternalWebUrl.GetString()
+		prefix = param.Cache_NamespacePrefix.GetString()
+	} else {
+		serverUrl = param.Origin_Url.GetString()
+		webUrl = param.Server_ExternalWebUrl.GetString()
+		prefix = param.Origin_NamespacePrefix.GetString()
+	}
 
-	originUrl := param.Origin_Url.GetString()
-	originWebUrl := param.Server_ExternalWebUrl.GetString()
-
-	ad, err := server.CreateAdvertisement(name, originUrl, originWebUrl)
+	ad, err := server.CreateAdvertisement(name, serverUrl, webUrl)
 	if err != nil {
 		return err
 	}
@@ -124,8 +133,6 @@ func advertiseInternal(ctx context.Context, server server_utils.XRootDServer) er
 	}
 
 	directorUrl.Path = "/api/v1.0/director/register" + server.GetServerType().String()
-
-	prefix := param.Origin_NamespacePrefix.GetString()
 
 	issuerUrl, err := director.GetNSIssuerURL(prefix)
 	if err != nil {

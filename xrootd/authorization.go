@@ -581,7 +581,7 @@ func WriteCacheScitokensConfig(nsAds []common.NamespaceAdV2) error {
 	return writeScitokensConfiguration(config.CacheType, &cfg)
 }
 
-func EmitIssuerMetadata(exportPath string) error {
+func EmitIssuerMetadata(exportPath string, xServeUrl string) error {
 	gid, err := config.GetDaemonGID()
 	if err != nil {
 		return err
@@ -618,15 +618,14 @@ func EmitIssuerMetadata(exportPath string) error {
 	}
 	defer openidFile.Close()
 
-	originUrlStr := param.Origin_Url.GetString()
-	jwksUrl, err := url.Parse(originUrlStr)
+	jwksUrl, err := url.Parse(xServeUrl)
 	if err != nil {
 		return err
 	}
 	jwksUrl.Path = "/.well-known/issuer.jwks"
 
 	cfg := openIdConfig{
-		Issuer:  param.Origin_Url.GetString(),
+		Issuer:  xServeUrl,
 		JWKSURI: jwksUrl.String(),
 	}
 

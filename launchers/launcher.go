@@ -132,6 +132,15 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 	config.UpdateConfigFromListener(ln)
 
 	servers := make([]server_utils.XRootDServer, 0)
+	if modules.IsEnabled(config.CacheType) {
+		server, err := CacheServe(ctx, engine, egrp)
+		if err != nil {
+			return shutdownCancel, err
+		}
+
+		servers = append(servers, server)
+	}
+
 	if modules.IsEnabled(config.OriginType) {
 
 		mode := param.Origin_Mode.GetString()
@@ -196,6 +205,13 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 	if err = server_utils.WaitUntilWorking(ctx, "GET", param.Server_ExternalWebUrl.GetString()+"/api/v1.0/health", "Web UI", http.StatusOK); err != nil {
 		log.Errorln("Web engine startup appears to have failed:", err)
 		return shutdownCancel, err
+	}
+
+	if modules.IsEnabled(config.CacheType) {
+		log.Debug("Finishing cache server configuration")
+		if err = CacheServeFinish(ctx, egrp); err != nil {
+			return shutdownCancel, err
+		}
 	}
 
 	if modules.IsEnabled(config.OriginType) {

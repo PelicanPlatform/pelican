@@ -94,13 +94,24 @@ func CheckDefaults(server server_utils.XRootDServer) error {
 	// Check that OriginUrl is defined in the config file. Make sure it parses.
 	// Fail if either condition isn't met, although note that url.Parse doesn't
 	// generate errors for many things that are not recognizable urls.
-	originUrlStr := param.Origin_Url.GetString()
-	if originUrlStr == "" {
-		return errors.New("OriginUrl must be configured to serve an origin")
-	}
 
-	if _, err := url.Parse(originUrlStr); err != nil {
-		return errors.Wrapf(err, "Could not parse the provided OriginUrl (%v)", originUrlStr)
+	if server.GetServerType().IsEnabled(config.CacheType) {
+		cacheUrlStr := param.Cache_Url.GetString()
+		if cacheUrlStr == "" {
+			return errors.New("CacheUrl must be configured to serve a cache")
+		}
+
+		if _, err := url.Parse(cacheUrlStr); err != nil {
+			return errors.Wrapf(err, "Could not parse the provided CacheUrl (%v)", cacheUrlStr)
+		}
+	} else {
+		originUrlStr := param.Origin_Url.GetString()
+		if originUrlStr == "" {
+			return errors.New("OriginUrl must be configured to serve an origin")
+		}
+		if _, err := url.Parse(originUrlStr); err != nil {
+			return errors.Wrapf(err, "Could not parse the provided OriginUrl (%v)", originUrlStr)
+		}
 	}
 
 	return nil
