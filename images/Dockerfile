@@ -52,7 +52,7 @@ RUN useradd -o -u 10940 -g 10940 -s /bin/sh xrootd
 
 # Install dependencies
 RUN yum -y update \
-    && yum -y install xrootd xrootd-client xrdcl-http xrootd-server xrootd-scitokens xrootd-voms curl java-17-openjdk-headless \
+    && yum -y install xrootd xrootd-client xrdcl-http xrootd-server xrootd-scitokens xrootd-voms curl java-17-openjdk-headless sqlite-devel \
     && yum clean all \
     && rm -rf /var/cache/yum/
 
@@ -74,6 +74,14 @@ RUN \
 RUN \
     git clone https://github.com/PelicanPlatform/xrootd-s3-http.git && \
     cd xrootd-s3-http && \
+    mkdir build && cd build && \
+    cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
+    make install
+
+# Install LotMan. For now we do this from source until we can sort out the RPMs.
+RUN \
+    git clone https://github.com/PelicanPlatform/lotman.git && \
+    cd lotman && \
     mkdir build && cd build && \
     cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
     make install

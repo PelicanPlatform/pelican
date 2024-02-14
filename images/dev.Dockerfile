@@ -27,7 +27,7 @@ gpgcheck=0' > /etc/yum.repos.d/goreleaser.repo
 
 # Install goreleaser and various other packages we need
 RUN yum install -y goreleaser npm xrootd-devel xrootd-server-devel xrootd-client-devel nano xrootd-scitokens \
-    xrootd-voms xrdcl-http jq procps docker make curl-devel java-17-openjdk-headless git cmake3 gcc-c++ openssl-devel \
+    xrootd-voms xrdcl-http jq procps docker make curl-devel java-17-openjdk-headless git cmake3 gcc-c++ openssl-devel sqlite-devel \
     && yum clean all
 
 # Install xrdcl-pelican plugin and replace the xrdcl-http plugin
@@ -42,6 +42,14 @@ RUN \
 RUN \
     git clone https://github.com/PelicanPlatform/xrootd-s3-http.git && \
     cd xrootd-s3-http && \
+    mkdir build && cd build && \
+    cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
+    make install
+
+# Install LotMan. For now we do this from source until we can sort out the RPMs.
+RUN \
+    git clone https://github.com/PelicanPlatform/lotman.git && \
+    cd lotman && \
     mkdir build && cd build && \
     cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
     make install
