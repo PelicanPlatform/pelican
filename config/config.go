@@ -90,7 +90,8 @@ type (
 	ContextKey string
 
 	MetadataErr struct {
-		err string
+		Msg      string
+		InnerErr error
 	}
 )
 
@@ -141,23 +142,34 @@ var (
 	// Pelican version
 	version string = "dev"
 
-	MetadataTimeoutErr *MetadataErr = &MetadataErr{err: "Timeout when querying metadata"}
+	MetadataTimeoutErr *MetadataErr = &MetadataErr{Msg: "Timeout when querying metadata"}
 )
 
 // This function creates a new MetadataError by wrapping the previous error
 func NewMetadataError(err error, msg string) *MetadataErr {
 	return &MetadataErr{
-		err: fmt.Sprintf("%s: %v", msg, err),
+		Msg: fmt.Sprintf("%s: %v", msg, err),
 	}
 }
 
 func (e *MetadataErr) Error() string {
-	return e.err
+	return fmt.Sprintf("%v; %s", e.InnerErr, e.Msg)
 }
 
 func (e *MetadataErr) Is(target error) bool {
 	_, ok := target.(*MetadataErr)
 	return ok
+}
+
+func (e *MetadataErr) Wrap(err error) *MetadataErr {
+	return &MetadataErr {
+		InnerErr: err,
+		Msg: fmt.Sprintf("%s", e.Msg),
+	}
+}
+
+func (e *MetadataErr) Unwrap() error {
+	return e.InnerErr
 }
 
 func init() {
@@ -404,9 +416,8 @@ func DiscoverFederation() error {
 	result, err := httpClient.Do(req)
 	if err != nil {
 		var netErr net.Error
-		if errors.As(err, &netErr) {
-			err = errors.Wrap(MetadataTimeoutErr, err.Error())
-			return err
+		if errors.As(err, &netErr) && netErr.Timeout() {
+			return MetadataTimeoutErr.Wrap(err)
 		} else {
 			return NewMetadataError(err, "Error occured when querying for metadata")
 		}
