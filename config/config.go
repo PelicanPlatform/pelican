@@ -89,8 +89,8 @@ type (
 
 	ContextKey string
 
-	MetaDataErr struct {
-		Err string
+	MetadataErr struct {
+		err string
 	}
 )
 
@@ -140,14 +140,23 @@ var (
 
 	// Pelican version
 	version string = "dev"
+
+	MetadataTimeoutErr *MetadataErr = &MetadataErr{err: "Timeout when querying metadata"}
 )
 
-func (e *MetaDataErr) Error() string {
-	return e.Err
+// This function creates a new MetadataError by wrapping the previous error
+func NewMetadataError(err error, msg string) *MetadataErr {
+	return &MetadataErr {
+		err: fmt.Sprintf("%s: %v", msg, err),
+	}
 }
 
-func (e *MetaDataErr) Is(target error) bool {
-	_, ok := target.(*MetaDataErr)
+func (e *MetadataErr) Error() string {
+	return e.err
+}
+
+func (e *MetadataErr) Is(target error) bool {
+	_, ok := target.(*MetadataErr)
 	return ok
 }
 
@@ -394,16 +403,12 @@ func DiscoverFederation() error {
 
 	result, err := httpClient.Do(req)
 	if err != nil {
-		errMsg := errors.Wrapf(err, "Failure when doing federation metadata lookup to %s", discoveryUrl)
-		// If DNS timeout, we want this to be retryable so return a specific error
-		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-			errMsg = errors.Wrap(errMsg, "Timeout getting metadata response")
-			return &MetaDataErr{
-				Err: errMsg.Error(),
-			}
-		} else {
-			// Otherwise, we want to indicate a non-retryable error
+		var netErr net.Error
+		if errors.As(err, &netErr) {
+			err = errors.Wrap(MetadataTimeoutErr, err.Error())
 			return err
+		} else {
+			return NewMetadataError(err, "Error occured when querying for metadata")
 		}
 	}
 

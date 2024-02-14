@@ -128,7 +128,7 @@ func IsRetryable(err error) bool {
 	if errors.Is(err, grab.ErrBadLength) {
 		return false
 	}
-	if errors.Is(err, &config.MetaDataErr{}) {
+	if errors.Is(err, config.MetadataTimeoutErr) {
 		return true
 	}
 	var cse *ConnectionSetupError
