@@ -162,9 +162,9 @@ func (e *MetadataErr) Is(target error) bool {
 }
 
 func (e *MetadataErr) Wrap(err error) *MetadataErr {
-	return &MetadataErr {
+	return &MetadataErr{
 		InnerErr: err,
-		Msg: fmt.Sprintf("%s", e.Msg),
+		Msg:      e.Msg,
 	}
 }
 
