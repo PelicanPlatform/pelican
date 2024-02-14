@@ -146,7 +146,7 @@ var (
 
 // This function creates a new MetadataError by wrapping the previous error
 func NewMetadataError(err error, msg string) *MetadataErr {
-	return &MetadataErr {
+	return &MetadataErr{
 		err: fmt.Sprintf("%s: %v", msg, err),
 	}
 }
