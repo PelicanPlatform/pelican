@@ -1379,7 +1379,7 @@ description: >-
   The tokens that are affected by this config are the same as the one in Monitoring.TokenExpiresIn.
   This value must be less than Monitoring.TokenExpiresIn.
 type: duration
-default: 59m
+default: 5m
 components: ["origin", "director", "registry"]
 ---
 name: Monitoring.MetricAuthorization

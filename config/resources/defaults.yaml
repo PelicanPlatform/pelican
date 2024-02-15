@@ -62,7 +62,7 @@ Monitoring:
   PortLower: 9930
   PortHigher: 9999
   TokenExpiresIn: 1h
-  TokenRefreshInterval: 59m
+  TokenRefreshInterval: 5m
   MetricAuthorization: true
   AggregatePrefixes: ["/*"]
 Shoveler:
