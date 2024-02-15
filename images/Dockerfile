@@ -29,7 +29,7 @@ COPY web_ui/frontend ./
 RUN npm run build
 
 FROM goreleaser/goreleaser:v1.21.0 AS pelican-build
-ARG IS_PR_BUILD="true"
+ARG IS_NONRELEASE_BUILD="true"
 
 WORKDIR /pelican
 
@@ -37,7 +37,7 @@ COPY . .
 COPY --from=website-build /webapp/out ./web_ui/frontend/out
 
 RUN\
-    if $IS_PR_BUILD;\
+    if $IS_NONRELEASE_BUILD;\
         then goreleaser build --clean --snapshot;\
     else goreleaser build --clean;\
     fi
