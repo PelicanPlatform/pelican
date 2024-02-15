@@ -92,14 +92,14 @@ type (
 	}
 
 	TransferResult struct {
-		Number            int    // indicates which attempt this is
-		TransferFileBytes int64  // how much each attempt downloaded
-		TimeToFirstByte   int64  // how long it took to download the first byte
-		TransferEndTime   int64  // when the transfer ends
-		TransferTime      int64  // amount of time we were transferring per attempt (in seconds)
-		Endpoint          string // which origin did it use
-		ServerVersion     string // TODO: figure out how to get this???
-		Error             error  // what error the attempt returned (if any)
+		Number            int      // indicates which attempt this is
+		TransferFileBytes int64    // how much each attempt downloaded
+		TimeToFirstByte   float64  // how long it took to download the first byte
+		TransferEndTime   int64    // when the transfer ends
+		TransferTime      int64    // amount of time we were transferring per attempt (in seconds)
+		Endpoint          string   // which origin did it use
+		ServerVersion     string   // version of the server
+		Error             error    // what error the attempt returned (if any)
 	}
 
 	clientTransferResults struct {
@@ -1130,7 +1130,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 	success := false
 	for idx, transferEndpoint := range transfer.attempts { // For each transfer (usually 3), populate each attempt given
 		var attempt TransferResult
-		var timeToFirstByte int64
+		var timeToFirstByte float64
 		var serverVersion string
 		attempt.Number = idx // Start with 0
 		attempt.Endpoint = transferEndpoint.Url.Host
@@ -1203,7 +1203,7 @@ func parseTransferStatus(status string) (int, string) {
 // Perform the actual download of the file
 //
 // Returns the downloaded size, time to 1st byte downloaded, serverVersion and an error if there is one
-func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCallbackFunc, transfer transferAttemptDetails, dest string, token string, payload *payloadStruct) (downloaded int64, timeToFirstByte int64, serverVersion string, err error) {
+func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCallbackFunc, transfer transferAttemptDetails, dest string, token string, payload *payloadStruct) (downloaded int64, timeToFirstByte float64, serverVersion string, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Errorln("Panic occurred in downloadHTTP:", r)
@@ -1285,8 +1285,8 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 
 	// Start the transfer
 	log.Debugln("Starting the HTTP transfer...")
-	resp := client.Do(req)
 	downloadStart := time.Now()
+	resp := client.Do(req)
 	// Check the error real quick
 	if resp.IsComplete() {
 		if err = resp.Err(); err != nil {
@@ -1337,12 +1337,16 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	// Loop of the download
 Loop:
 	for {
+		if !timeToFirstByteRecorded && resp.BytesComplete() > 1 {
+			// We get the time since in nanoseconds:
+			timeToFirstByteNs := time.Since(downloadStart)
+			// Convert to seconds
+			timeToFirstByte = float64(timeToFirstByteNs.Round(time.Millisecond).Milliseconds()) / 1000.0
+			timeToFirstByteRecorded = true
+		}
 		select {
 		case <-progressTicker.C:
 			downloaded = resp.BytesComplete()
-			if !timeToFirstByteRecorded && downloaded > 1 {
-				timeToFirstByte = int64(time.Since(downloadStart))
-			}
 			currentTime := time.Now()
 			if te != nil {
 				te.ewmaCtr.Add(int64(currentTime.Sub(lastUpdate)))
@@ -1609,8 +1613,9 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	var lastKnownWritten int64
 	t := time.NewTicker(20 * time.Second)
 	defer t.Stop()
-	go runPut(request, responseChan, errorChan)
 	uploadStart := time.Now()
+
+	go runPut(request, responseChan, errorChan)
 	var lastError error = nil
 
 	tickerDuration := 100 * time.Millisecond
@@ -1621,18 +1626,17 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	// Do the select on a ticker, and the writeChan
 Loop:
 	for {
+		if !firstByteRecorded && reader.BytesComplete() > 1 {
+			// We get the time since in nanoseconds:
+			timeToFirstByteNs := time.Since(uploadStart)
+			// Convert to seconds
+			attempt.TimeToFirstByte = float64(timeToFirstByteNs.Round(time.Millisecond).Milliseconds()) / 1000.0
+			firstByteRecorded = true
+		}
 		select {
 		case <-progressTicker.C:
 			if transfer.callback != nil {
 				transfer.callback(transfer.localPath, reader.BytesComplete(), sizer.Size(), false)
-			}
-			if !firstByteRecorded && reader.BytesComplete() > 0 {
-				attempt.TimeToFirstByte = int64(time.Since(uploadStart))
-				// We get the time since in nanoseconds:
-				timeToFirstByteNs := time.Since(uploadStart)
-				// Convert to seconds
-				attempt.TimeToFirstByte = int64(timeToFirstByteNs.Seconds())
-				firstByteRecorded = true
 			}
 
 		case <-t.C:
