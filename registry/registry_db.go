@@ -167,6 +167,7 @@ func createTopologyTable() error {
 	return nil
 }
 
+// Check if a namespace exists in either Topology or Pelican registry
 func namespaceExists(prefix string) (bool, error) {
 	var count int64
 
@@ -537,6 +538,7 @@ func getAllNamespaces() ([]*Namespace, error) {
 	return namespaces, nil
 }
 
+// Update database schema based on migration files under /migrations folder
 func MigrateDB(sqldb *sql.DB) error {
 	goose.SetBaseFS(embedMigrations)
 
@@ -692,7 +694,7 @@ func PeriodicTopologyReload() {
 func ShutdownDB() error {
 	sqldb, err := db.DB()
 	if err != nil {
-		log.Errorln("Failure when shutting donw the database", err)
+		log.Errorln("Failure when getting database instance from gorm:", err)
 		return err
 	}
 	err = sqldb.Close()
