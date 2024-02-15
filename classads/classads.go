@@ -62,8 +62,7 @@ func (c *ClassAd) String() string {
 		buffer.WriteString(" = ")
 		switch v := value.(type) {
 		case string:
-			newVal := strings.Replace(v, "\"", "\\\"", -1)
-			buffer.WriteString(strconv.QuoteToASCII(newVal))
+			buffer.WriteString(strconv.QuoteToASCII(v))
 		case map[string]interface{}:
 			buffer.WriteString("[")
 			for key, value := range v {
