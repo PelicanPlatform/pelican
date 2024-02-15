@@ -90,8 +90,8 @@ type (
 	ContextKey string
 
 	MetadataErr struct {
-		Msg      string
-		InnerErr error
+		msg      string
+		innerErr error
 	}
 )
 
@@ -142,34 +142,42 @@ var (
 	// Pelican version
 	version string = "dev"
 
-	MetadataTimeoutErr *MetadataErr = &MetadataErr{Msg: "Timeout when querying metadata"}
+	MetadataTimeoutErr *MetadataErr = &MetadataErr{msg: "Timeout when querying metadata"}
 )
 
 // This function creates a new MetadataError by wrapping the previous error
 func NewMetadataError(err error, msg string) *MetadataErr {
 	return &MetadataErr{
-		Msg: fmt.Sprintf("%s: %v", msg, err),
+		msg: fmt.Sprintf("%s: %v", msg, err),
 	}
 }
 
 func (e *MetadataErr) Error() string {
-	return fmt.Sprintf("%v; %s", e.InnerErr, e.Msg)
+	// If the inner error is nil, we don't want to print out "<nil>"
+	if e.innerErr != nil {
+		return fmt.Sprintf("%v: %s", e.innerErr, e.msg)
+	} else {
+		return e.msg
+	}
 }
 
 func (e *MetadataErr) Is(target error) bool {
-	_, ok := target.(*MetadataErr)
-	return ok
+	// We want to verify we have a timeout error
+	if _, ok := target.(*MetadataErr); ok {
+		return e.msg == "Timeout when querying metadata"
+	}
+	return false
 }
 
 func (e *MetadataErr) Wrap(err error) *MetadataErr {
 	return &MetadataErr{
-		InnerErr: err,
-		Msg:      e.Msg,
+		innerErr: err,
+		msg:      e.msg,
 	}
 }
 
 func (e *MetadataErr) Unwrap() error {
-	return e.InnerErr
+	return e.innerErr
 }
 
 func init() {
