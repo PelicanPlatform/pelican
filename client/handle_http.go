@@ -1135,9 +1135,12 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 		attempt.Number = idx // Start with 0
 		attempt.Endpoint = transferEndpoint.Url.Host
 		transferEndpoint.Url.Path = transfer.remoteURL.Path
+		transferStartTime := time.Now()
 		if downloaded, timeToFirstByte, serverVersion, err = downloadHTTP(transfer.ctx, transfer.engine, transfer.callback, transferEndpoint, transfer.localPath, transfer.token, &transfer.accounting); err != nil {
 			log.Debugln("Failed to download:", err)
-			transferEndTime := time.Now().Unix()
+			transferEndTime := time.Now()
+			transferTime := transferEndTime.Unix() - transferStartTime.Unix()
+			attempt.TransferTime = transferTime
 			var ope *net.OpError
 			var cse *ConnectionSetupError
 			errorString := "Failed to download from " + transferEndpoint.Url.Hostname() + ":" +
@@ -1163,12 +1166,14 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 			attempt.TransferFileBytes = downloaded
 			attempt.TimeToFirstByte = timeToFirstByte
 			attempt.Error = errors.New(errorString)
-			attempt.TransferEndTime = int64(transferEndTime)
+			attempt.TransferEndTime = transferEndTime.Unix()
 			attempt.ServerVersion = serverVersion
 			transferResults.Attempts = append(transferResults.Attempts, attempt)
 		} else { // Success
-			transferEndTime := time.Now().Unix()
-			attempt.TransferEndTime = int64(transferEndTime)
+			transferEndTime := time.Now()
+			transferTime := transferEndTime.Unix() - transferStartTime.Unix()
+			attempt.TransferEndTime = transferEndTime.Unix()
+			attempt.TransferTime = transferTime
 			attempt.TimeToFirstByte = timeToFirstByte
 			attempt.TransferFileBytes = downloaded
 			attempt.ServerVersion = serverVersion
@@ -1592,7 +1597,7 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	responseChan := make(chan *http.Response)
 	reader := &ProgressReader{ioreader, sizer, closed}
 	putContext, cancel := context.WithCancel(transfer.ctx)
-	transferStartTime := time.Now().Unix()
+	transferStartTime := time.Now()
 	defer cancel()
 	log.Debugln("Full destination URL:", dest.String())
 	var request *http.Request
@@ -1677,8 +1682,9 @@ Loop:
 
 	if fileInfo.Size() == 0 {
 		transferResult.Error = lastError
-		attempt.TransferEndTime = time.Now().Unix()
-		attempt.TransferTime = attempt.TransferEndTime - transferStartTime
+		transferEndTime := time.Now()
+		attempt.TransferEndTime = transferEndTime.Unix()
+		attempt.TransferTime = attempt.TransferEndTime - transferStartTime.Unix()
 
 		// Add our attempt fields
 		transferResult.Attempts = append(transferResult.Attempts, attempt)
@@ -1686,8 +1692,9 @@ Loop:
 	} else {
 		log.Debugln("Uploaded bytes:", reader.BytesComplete())
 		transferResult.TransferredBytes = reader.BytesComplete()
-		attempt.TransferEndTime = time.Now().Unix()
-		attempt.TransferTime = attempt.TransferEndTime - transferStartTime
+		transferEndTime := time.Now()
+		attempt.TransferEndTime = transferEndTime.Unix()
+		attempt.TransferTime = attempt.TransferEndTime - transferStartTime.Unix()
 
 		// Add our attempt fields
 		transferResult.Attempts = append(transferResult.Attempts, attempt)
