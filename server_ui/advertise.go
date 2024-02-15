@@ -96,6 +96,11 @@ func advertiseInternal(ctx context.Context, server server_utils.XRootDServer) er
 		return errors.New(fmt.Sprintf("%s name isn't set", server.GetServerType()))
 	}
 
+	err := server.GetNamespaceAdsFromDirector()
+	if err != nil {
+		return errors.Wrap(err, fmt.Sprintf("%s failed to get namespaceAds from the director", server.GetServerType()))
+	}
+
 	originUrl := param.Origin_Url.GetString()
 	originWebUrl := param.Server_ExternalWebUrl.GetString()
 

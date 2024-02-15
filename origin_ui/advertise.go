@@ -39,9 +39,11 @@ func (server *OriginServer) GetServerType() config.ServerType {
 	return config.OriginType
 }
 
-func (server *OriginServer) CreateAdvertisement(name string, originUrlStr string, originWebUrl string) (common.OriginAdvertiseV2, error) {
-	ad := common.OriginAdvertiseV2{}
+func (server *OriginServer) GetNamespaceAdsFromDirector() error {
+	return nil
+}
 
+func (server *OriginServer) CreateAdvertisement(name string, originUrlStr string, originWebUrl string) (ad common.OriginAdvertiseV2, err error) {
 	// Here we instantiate the namespaceAd slice, but we still need to define the namespace
 	issuerUrl := url.URL{}
 	issuerUrl.Scheme = "https"
