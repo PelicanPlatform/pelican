@@ -62,7 +62,7 @@ func originMockup(ctx context.Context, egrp *errgroup.Group, t *testing.T) conte
 	require.NoError(t, err)
 
 	viper.Set("ConfigDir", tmpPath)
-	viper.Set("Origin.RunLocation", filepath.Join(tmpPath, "xrootd", "origin"))
+	viper.Set("Origin.RunLocation", filepath.Join(tmpPath, "xorigin"))
 	t.Cleanup(func() {
 		os.RemoveAll(tmpPath)
 	})
