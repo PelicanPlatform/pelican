@@ -19,9 +19,17 @@
 package cache_ui
 
 import (
+	"encoding/json"
+	"net/url"
+	"strings"
+
 	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/director"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/utils"
+	"github.com/pkg/errors"
 )
 
 type (
@@ -39,6 +47,65 @@ func (server *CacheServer) CreateAdvertisement(name string, originUrl string, or
 	}
 
 	return ad, nil
+}
+
+func (server *CacheServer) GetNamespaceAdsFromDirector() error {
+	// Get the endpoint of the director
+	var respNS []common.NamespaceAdV2
+
+	directorEndpoint := param.Federation_DirectorUrl.GetString()
+	if directorEndpoint == "" {
+		return errors.New("No director specified; give the federation name (-f)")
+	}
+
+	directorEndpointURL, err := url.Parse(directorEndpoint)
+	if err != nil {
+		return errors.Wrap(err, "Unable to parse director url")
+	}
+
+	if err != nil {
+		return errors.Wrapf(err, "Failed to get DirectorURL from config: %v", err)
+	}
+
+	// Create the listNamespaces url
+	directorNSListEndpointURL, err := url.JoinPath(directorEndpointURL.String(), "api", "v2.0", "director", "listNamespaces")
+	if err != nil {
+		return err
+	}
+
+	// Attempt to get data from the 2.0 endpoint, if that returns a 404 error, then attempt to get data
+	// from the 1.0 endpoint and convert from V1 to V2
+
+	respData, err := utils.MakeRequest(directorNSListEndpointURL, "GET", nil, nil)
+	if err != nil {
+		if strings.Contains(err.Error(), "404") {
+			directorNSListEndpointURL, err = url.JoinPath(directorEndpoint, "api", "v1.0", "director", "listNamespaces")
+			if err != nil {
+				return err
+			}
+			respData, err = utils.MakeRequest(directorNSListEndpointURL, "GET", nil, nil)
+			var respNSV1 []common.NamespaceAdV1
+			if err != nil {
+				return errors.Wrap(err, "Failed to make request")
+			} else {
+				if jsonErr := json.Unmarshal(respData, &respNSV1); jsonErr == nil { // Error creating json
+					return errors.Wrapf(err, "Failed to make request: %v", err)
+				}
+				respNS = director.ConvertNamespaceAdsV1ToV2(respNSV1, nil)
+			}
+		} else {
+			return errors.Wrap(err, "Failed to make request")
+		}
+	} else {
+		err = json.Unmarshal(respData, &respNS)
+		if err != nil {
+			return errors.Wrapf(err, "Failed to marshal response in to JSON: %v", err)
+		}
+	}
+
+	server.SetNamespaceAds(respNS)
+
+	return nil
 }
 
 func (server *CacheServer) GetServerType() config.ServerType {
