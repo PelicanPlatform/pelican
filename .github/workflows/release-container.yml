@@ -95,4 +95,4 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: "${{ steps.generate-tag-list.outputs.taglist }}"
           build-args: |
-            IS_PR_BUILD=${{ github.event_name == 'pull_request' }}
+            IS_NONRELEASE_BUILD=${{ inputs.tag == '' }}

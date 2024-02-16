@@ -32,7 +32,9 @@ import (
 	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pelicanplatform/pelican/broker"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/origin_ui"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_ui"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -88,6 +90,14 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		}
 	}
 
+	if modules.IsEnabled(config.BrokerType) {
+		viper.Set("Federation.BrokerURL", param.Server_ExternalWebUrl.GetString())
+
+		rootGroup := engine.Group("/")
+		broker.RegisterBroker(ctx, rootGroup)
+		broker.LaunchNamespaceKeyMaintenance(ctx, egrp)
+	}
+
 	if modules.IsEnabled(config.DirectorType) {
 
 		viper.Set("Director.DefaultResponse", "cache")
@@ -117,6 +127,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 
 	servers := make([]server_utils.XRootDServer, 0)
 	if modules.IsEnabled(config.OriginType) {
+
 		mode := param.Origin_Mode.GetString()
 		switch mode {
 		case "posix":
@@ -140,10 +151,10 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 			NamespacePrefix: /bar`)
 			}
 		case "s3":
-			if param.Origin_S3Bucket.GetString() == "" || param.Origin_S3Region.GetString() == "" ||
-				param.Origin_S3ServiceName.GetString() == "" || param.Origin_S3ServiceUrl.GetString() == "" {
+			if param.Origin_S3Region.GetString() == "" || param.Origin_S3ServiceName.GetString() == "" ||
+				param.Origin_S3ServiceUrl.GetString() == "" {
 				return shutdownCancel, errors.Errorf("The S3 origin is missing configuration options to run properly." +
-					" You must specify a bucket, a region, a service name and a service URL via the command line or via" +
+					" You must specify a region, a service name and a service URL via the command line or via" +
 					" your configuration file.")
 			}
 		default:
@@ -155,6 +166,14 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 			return shutdownCancel, err
 		}
 		servers = append(servers, server)
+
+		// Ordering: `LaunchBrokerListener` depends on the "right" value of Origin.NamespacePrefix
+		// which is possibly not set until `OriginServe` is called.
+		if param.Origin_EnableBroker.GetBool() {
+			if err = origin_ui.LaunchBrokerListener(ctx, egrp); err != nil {
+				return shutdownCancel, err
+			}
+		}
 	}
 	log.Info("Starting web engine...")
 	lnReference = nil

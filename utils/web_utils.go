@@ -150,3 +150,26 @@ func GetTopologyJSON() (*TopologyNamespacesJSON, error) {
 
 	return &namespaces, nil
 }
+
+// Copy headers from proxied src to dst, removing those defined
+// by HTTP as "hop-by-hop" and not to be forwarded (see
+// https://www.rfc-editor.org/rfc/rfc9110#field.connection)
+func CopyHeader(dst, src http.Header) {
+	hopByHop := make(map[string]bool)
+	hopByHop["Proxy-Connection"] = true
+	hopByHop["Keep-Alive"] = true
+	hopByHop["TE"] = true
+	hopByHop["Transfer-Encoding"] = true
+	hopByHop["Upgrade"] = true
+	for _, value := range src["Connection"] {
+		hopByHop[http.CanonicalHeaderKey(value)] = true
+	}
+	for headerName, headerValues := range src {
+		if hopByHop[headerName] {
+			continue
+		}
+		for _, value := range headerValues {
+			dst.Add(headerName, value)
+		}
+	}
+}

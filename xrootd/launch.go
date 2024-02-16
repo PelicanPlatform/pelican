@@ -73,7 +73,11 @@ func makeUnprivilegedXrootdLauncher(daemonName string, configPath string, isCach
 	}
 
 	if isCache {
-		result.ExtraEnv = []string{"XRD_PLUGINCONFDIR=" + filepath.Join(xrootdRun, "cache-client.plugins.d")}
+		result.ExtraEnv = []string{
+			"XRD_PELICANBROKERSOCKET=" + filepath.Join(xrootdRun, "cache-reversal.sock"),
+			"XRD_PLUGINCONFDIR=" + filepath.Join(xrootdRun, "cache-client.plugins.d"),
+			"X509_CERT_FILE=" + filepath.Join(xrootdRun, "ca-bundle.crt"),
+		}
 	}
 	return
 }

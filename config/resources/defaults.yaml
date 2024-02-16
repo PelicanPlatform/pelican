@@ -41,6 +41,7 @@ Director:
   StatConcurrencyLimit: 1000
   AdvertisementTTL: 15m
   OriginCacheHealthTestInterval: 15s
+  EnableBroker: true
 Cache:
   Port: 8442
 Origin:

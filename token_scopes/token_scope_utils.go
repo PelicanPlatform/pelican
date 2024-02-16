@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -31,11 +32,11 @@ func GetScopeString(scopes []TokenScope) (scopeString string) {
 // Return if expectedScopes contains the tokenScope and it's case-insensitive.
 // If all=false, it checks if the tokenScopes have any one scope in expectedScopes;
 // If all=true, it checks if tokenScopes is the same set as expectedScopes
-func ScopeContains(tokenScopes []string, expectedScopes []string, all bool) bool {
+func ScopeContains(tokenScopes []string, expectedScopes []TokenScope, all bool) bool {
 	if !all { // Any tokenScope in desiredScopes is OK
 		for _, tokenScope := range tokenScopes {
 			for _, sc := range expectedScopes {
-				if strings.EqualFold(sc, tokenScope) {
+				if strings.EqualFold(sc.String(), tokenScope) {
 					return true
 				}
 			}
@@ -46,9 +47,9 @@ func ScopeContains(tokenScopes []string, expectedScopes []string, all bool) bool
 			return false
 		}
 		sort.Strings(tokenScopes)
-		sort.Strings(expectedScopes)
+		slices.Sort(expectedScopes)
 		for i := 0; i < len(tokenScopes); i++ {
-			if tokenScopes[i] != expectedScopes[i] {
+			if tokenScopes[i] != expectedScopes[i].String() {
 				return false
 			}
 		}
@@ -58,7 +59,7 @@ func ScopeContains(tokenScopes []string, expectedScopes []string, all bool) bool
 
 // Creates a validator that checks if a token's scope matches the given scope: expectedScopes.
 // See `scopeContains` for detailed checking mechanism
-func CreateScopeValidator(expectedScopes []string, all bool) jwt.ValidatorFunc {
+func CreateScopeValidator(expectedScopes []TokenScope, all bool) jwt.ValidatorFunc {
 
 	return jwt.ValidatorFunc(func(_ context.Context, tok jwt.Token) jwt.ValidationError {
 		// If no scope is present, always return true

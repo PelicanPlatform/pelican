@@ -174,6 +174,21 @@ func (config *TokenConfig) GetScope() string {
 
 // CreateToken validates a JWT TokenConfig and if it's valid, create and sign a token based on the TokenConfig.
 func (tokenConfig *TokenConfig) CreateToken() (string, error) {
+
+	// Now that we have a token, it needs signing. Note that GetIssuerPrivateJWK
+	// will get the private key passed via the command line because that
+	// file path has already been bound to IssuerKey
+	key, err := config.GetIssuerPrivateJWK()
+	if err != nil {
+		return "", errors.Wrap(err, "Failed to load signing keys. Either generate one at the default "+
+			"location by serving an origin, or provide one via the --private-key flag")
+	}
+
+	return tokenConfig.CreateTokenWithKey(key)
+}
+
+// Variant of CreateToken with a JWT provided by the caller
+func (tokenConfig *TokenConfig) CreateTokenWithKey(key jwk.Key) (string, error) {
 	if ok, err := tokenConfig.Validate(); !ok || err != nil {
 		return "", errors.Wrap(err, "Invalid tokenConfig")
 	}
@@ -233,15 +248,6 @@ func (tokenConfig *TokenConfig) CreateToken() (string, error) {
 	tok, err := builder.Build()
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to generate token")
-	}
-
-	// Now that we have a token, it needs signing. Note that GetIssuerPrivateJWK
-	// will get the private key passed via the command line because that
-	// file path has already been bound to IssuerKey
-	key, err := config.GetIssuerPrivateJWK()
-	if err != nil {
-		return "", errors.Wrap(err, "Failed to load signing keys. Either generate one at the default "+
-			"location by serving an origin, or provide one via the --private-key flag")
 	}
 
 	// Get/assign the kid, needed for verification by the client
