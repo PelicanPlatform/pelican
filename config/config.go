@@ -148,14 +148,14 @@ var (
 // This function creates a new MetadataError by wrapping the previous error
 func NewMetadataError(err error, msg string) *MetadataErr {
 	return &MetadataErr{
-		msg: fmt.Sprintf("%s: %v", msg, err),
+		msg: msg,
 	}
 }
 
 func (e *MetadataErr) Error() string {
 	// If the inner error is nil, we don't want to print out "<nil>"
 	if e.innerErr != nil {
-		return fmt.Sprintf("%v: %s", e.innerErr, e.msg)
+		return fmt.Sprintf("%s: %v", e.msg, e.innerErr)
 	} else {
 		return e.msg
 	}
@@ -164,12 +164,12 @@ func (e *MetadataErr) Error() string {
 func (e *MetadataErr) Is(target error) bool {
 	// We want to verify we have a timeout error
 	if _, ok := target.(*MetadataErr); ok {
-		return e.msg == "Timeout when querying metadata"
+		return e.msg == target.Error()
 	}
 	return false
 }
 
-func (e *MetadataErr) Wrap(err error) *MetadataErr {
+func (e *MetadataErr) Wrap(err error) error {
 	return &MetadataErr{
 		innerErr: err,
 		msg:      e.msg,
