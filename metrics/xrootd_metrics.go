@@ -580,6 +580,7 @@ func HandlePacket(packet []byte) error {
 					"dn":   "",
 					"role": "",
 					"org":  "",
+					"proj": "",
 				}
 				var oldReadvSegs uint64 = 0
 				var oldReadOps uint32 = 0
@@ -683,6 +684,7 @@ func HandlePacket(packet []byte) error {
 					"dn":   "",
 					"role": "",
 					"org":  "",
+					"proj": "",
 				}
 
 				if item != nil {

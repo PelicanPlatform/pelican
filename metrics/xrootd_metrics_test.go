@@ -582,23 +582,23 @@ func TestHandlePacket(t *testing.T) {
 		expectedTransferReadvSegs := `
 		# HELP xrootd_transfer_readv_segments_count Number of segments in readv operations
 		# TYPE xrootd_transfer_readv_segments_count counter
-		xrootd_transfer_readv_segments_count{ap="",dn="",org="",path="/",role=""} 1000
+		xrootd_transfer_readv_segments_count{ap="",dn="",org="",path="/",proj="",role=""} 1000
 		`
 
 		expectedTransferOps := `
 		# HELP xrootd_transfer_operations_count Number of transfer operations performed
 		# TYPE xrootd_transfer_operations_count counter
-		xrootd_transfer_operations_count{ap="",dn="",org="",path="/",role="",type="read"} 120
-		xrootd_transfer_operations_count{ap="",dn="",org="",path="/",role="",type="readv"} 10
-		xrootd_transfer_operations_count{ap="",dn="",org="",path="/",role="",type="write"} 30
+		xrootd_transfer_operations_count{ap="",dn="",org="",path="/",proj="",role="",type="read"} 120
+		xrootd_transfer_operations_count{ap="",dn="",org="",path="/",proj="",role="",type="readv"} 10
+		xrootd_transfer_operations_count{ap="",dn="",org="",path="/",proj="",role="",type="write"} 30
 		`
 
 		expectedTransferBytes := `
 		# HELP xrootd_transfer_bytes Bytes of transfers
 		# TYPE xrootd_transfer_bytes counter
-		xrootd_transfer_bytes{ap="",dn="",org="",path="/",role="",type="read"} 10000
-		xrootd_transfer_bytes{ap="",dn="",org="",path="/",role="",type="readv"} 20000
-		xrootd_transfer_bytes{ap="",dn="",org="",path="/",role="",type="write"} 120
+		xrootd_transfer_bytes{ap="",dn="",org="",path="/",proj="",role="",type="read"} 10000
+		xrootd_transfer_bytes{ap="",dn="",org="",path="/",proj="",role="",type="readv"} 20000
+		xrootd_transfer_bytes{ap="",dn="",org="",path="/",proj="",role="",type="write"} 120
 		`
 
 		expectedTransferReadvSegsReader := strings.NewReader(expectedTransferReadvSegs)
