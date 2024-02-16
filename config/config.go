@@ -581,14 +581,19 @@ func InitConfig() {
 	if configFile := viper.GetString("config"); configFile != "" {
 		viper.SetConfigFile(configFile)
 	} else {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			log.Warningln("No home directory found for user -- will check for configuration yaml in /etc/pelican/")
+		configDir := viper.GetString("ConfigDir")
+		if configDir == "" {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				log.Warningln("No home directory found for user -- will check for configuration yaml in /etc/pelican/")
+			} else {
+				// 3) Set up pelican.yaml (has higher precedence)
+				viper.AddConfigPath(filepath.Join(home, ".config", "pelican"))
+			}
+			viper.AddConfigPath(filepath.Join("/etc", "pelican"))
+		} else {
+			viper.AddConfigPath(configDir)
 		}
-
-		// 3) Set up pelican.yaml (has higher precedence)
-		viper.AddConfigPath(filepath.Join(home, ".config", "pelican"))
-		viper.AddConfigPath(filepath.Join("/etc", "pelican"))
 		viper.SetConfigType("yaml")
 		viper.SetConfigName("pelican")
 	}
