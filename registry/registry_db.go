@@ -21,6 +21,7 @@ package registry
 import (
 	"context"
 	"database/sql"
+	"embed"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -28,13 +29,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/glebarez/sqlite" // It doesn't require CGO
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pkg/errors"
+	"github.com/pressly/goose/v3"
 	log "github.com/sirupsen/logrus"
-
-	// commented sqlite driver requires CGO
-	// _ "github.com/mattn/go-sqlite3" // SQLite driver
-	_ "modernc.org/sqlite"
+	gormlog "github.com/thomas-tacquet/gormv2-logrus"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
@@ -72,12 +74,12 @@ type AdminMetadata struct {
 }
 
 type Namespace struct {
-	ID            int                    `json:"id" post:"exclude"`
+	ID            int                    `json:"id" post:"exclude" gorm:"primaryKey"`
 	Prefix        string                 `json:"prefix" validate:"required"`
 	Pubkey        string                 `json:"pubkey" validate:"required"`
 	Identity      string                 `json:"identity" post:"exclude"`
-	AdminMetadata AdminMetadata          `json:"admin_metadata"`
-	CustomFields  map[string]interface{} `json:"custom_fields"`
+	AdminMetadata AdminMetadata          `json:"admin_metadata" gorm:"serializer:json"`
+	CustomFields  map[string]interface{} `json:"custom_fields" gorm:"serializer:json"`
 }
 
 type NamespaceWOPubkey struct {
@@ -86,6 +88,11 @@ type NamespaceWOPubkey struct {
 	Pubkey        string        `json:"-"` // Don't include pubkey in this case
 	Identity      string        `json:"identity"`
 	AdminMetadata AdminMetadata `json:"admin_metadata"`
+}
+
+type Topology struct {
+	ID     int    `json:"id" gorm:"primaryKey;autoIncrement"`
+	Prefix string `json:"prefix" gorm:"unique;not null"`
 }
 
 type ServerType string
@@ -110,7 +117,10 @@ the handle is already thread-safe! The approach being used
 is based off of 1.b from
 https://www.alexedwards.net/blog/organising-database-access
 */
-var db *sql.DB
+var db *gorm.DB
+
+//go:embed migrations/*.sql
+var embedMigrations embed.FS
 
 func (st ServerType) String() string {
 	return string(st)
@@ -137,111 +147,47 @@ func (a AdminMetadata) Equal(b AdminMetadata) bool {
 		a.UpdatedAt.Equal(b.UpdatedAt)
 }
 
+func (Namespace) TableName() string {
+	return "namespace"
+}
+
+func (Topology) TableName() string {
+	return "topology"
+}
+
 func IsValidRegStatus(s string) bool {
 	return s == "Pending" || s == "Approved" || s == "Denied" || s == "Unknown"
 }
 
-func createNamespaceTable() error {
-	//We put a size limit on admin_metadata to guard against potentially future
-	//malicious large inserts
-	query := `
-    CREATE TABLE IF NOT EXISTS namespace (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        prefix TEXT NOT NULL UNIQUE,
-        pubkey TEXT NOT NULL,
-        identity TEXT,
-        admin_metadata TEXT CHECK (length("admin_metadata") <= 4000),
-				custom_fields TEXT CHECK (length("custom_fields") <= 4000)
-    );`
-
-	_, err := db.Exec(query)
-	if err != nil {
-		return fmt.Errorf("Failed to create namespace table: %v", err)
-	}
-
-	// Run a manual migration to add "custom_fields" field
-	// Check if the column exists
-	log.Info("Run manual migration for 'custom_fields' in namespace table")
-	columnExists := false
-	rows, err := db.Query(`PRAGMA table_info(namespace);`)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var (
-			cid       int
-			name      string
-			ctype     string
-			notnull   int
-			dfltValue interface{}
-			pk        int
-		)
-		err = rows.Scan(&cid, &name, &ctype, &notnull, &dfltValue, &pk)
-		if err != nil {
-			return err
-		}
-		if name == "custom_fields" {
-			columnExists = true
-			break
-		}
-	}
-
-	// If the column does not exist, add it
-	if !columnExists {
-		_, err = db.Exec(`ALTER TABLE namespace ADD COLUMN custom_fields TEXT DEFAULT ''`)
-		if err != nil {
-			return err
-		}
-		log.Info("Column 'custom_fields' added.")
-	} else {
-		log.Info("Column 'custom_fields' already exists.")
-	}
-	return nil
-}
-
 func createTopologyTable() error {
-	query := `
-    CREATE TABLE IF NOT EXISTS topology (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        prefix TEXT NOT NULL UNIQUE
-    );`
-
-	_, err := db.Exec(query)
+	err := db.AutoMigrate(&Topology{})
 	if err != nil {
-		return fmt.Errorf("Failed to create topology table: %v", err)
+		return fmt.Errorf("Failed to migrate topology table: %v", err)
 	}
 	return nil
 }
 
+// Check if a namespace exists in either Topology or Pelican registry
 func namespaceExists(prefix string) (bool, error) {
-	var checkQuery string
-	var args []interface{}
-	if config.GetPreferredPrefix() == "OSDF" {
-		checkQuery = `
-		SELECT prefix FROM namespace WHERE prefix = ?
-		UNION
-		SELECT prefix FROM topology WHERE prefix = ?
-		`
-		args = []interface{}{prefix, prefix}
-	} else {
-		checkQuery = `SELECT prefix FROM namespace WHERE prefix = ?`
-		args = []interface{}{prefix}
-	}
+	var count int64
 
-	result, err := db.Query(checkQuery, args...)
+	err := db.Model(&Namespace{}).Where("prefix = ?", prefix).Count(&count).Error
 	if err != nil {
 		return false, err
 	}
-	defer result.Close()
-
-	found := false
-	for result.Next() {
-		found = true
-		break
+	if count > 0 {
+		return true, nil
+	} else {
+		if config.GetPreferredPrefix() == "OSDF" {
+			// Perform a count across both 'namespace' and 'topology' tables
+			err := db.Model(&Topology{}).Where("prefix = ?", prefix).Count(&count).Error
+			if err != nil {
+				return false, err
+			}
+			return count > 0, nil
+		}
 	}
-	return found, nil
+	return false, nil
 }
 
 func namespaceSupSubChecks(prefix string) (superspaces []string, subspaces []string, inTopo bool, err error) {
@@ -254,132 +200,82 @@ func namespaceSupSubChecks(prefix string) (superspaces []string, subspaces []str
 		UNION
 		SELECT prefix FROM topology WHERE (prefix || '/') LIKE (? || '/%')
 		`
-		args := []interface{}{prefix, prefix}
-		topoSuperSubResults, tmpErr := db.Query(topoSuperSubQuery, args...)
-		if tmpErr != nil {
-			err = tmpErr
+		var results []Topology
+		err = db.Raw(topoSuperSubQuery, prefix, prefix).Scan(&results).Error
+		if err != nil {
 			return
 		}
-		defer topoSuperSubResults.Close()
 
-		for topoSuperSubResults.Next() {
-			// if we make it here, there was a match -- it's a trap!
+		if len(results) > 0 {
+			// If we get here, there was a match -- it's a trap!
 			inTopo = true
 			return
 		}
-		topoSuperSubResults.Close()
 	}
 
 	// Check if any registered namespaces already superspace the incoming namespace,
 	// eg if /foo is already registered, this will be true for an incoming /foo/bar because
 	// /foo is logically above /foo/bar (according to my logic, anyway)
 	superspaceQuery := `SELECT prefix FROM namespace WHERE (? || '/') LIKE (prefix || '/%')`
-	superspaceResults, err := db.Query(superspaceQuery, prefix)
+	err = db.Raw(superspaceQuery, prefix).Scan(&superspaces).Error
 	if err != nil {
 		return
-	}
-	defer superspaceResults.Close()
-
-	for superspaceResults.Next() {
-		var foundSuperspace string
-		if err := superspaceResults.Scan(&foundSuperspace); err == nil {
-			superspaces = append(superspaces, foundSuperspace)
-		}
 	}
 
 	// Check if any registered namespaces already subspace the incoming namespace,
 	// eg if /foo/bar is already registered, this will be true for an incoming /foo because
 	// /foo/bar is logically below /foo
 	subspaceQuery := `SELECT prefix FROM namespace WHERE (prefix || '/') LIKE (? || '/%')`
-	subspaceResults, err := db.Query(subspaceQuery, prefix)
+	err = db.Raw(subspaceQuery, prefix).Scan(&subspaces).Error
 	if err != nil {
 		return
-	}
-	defer subspaceResults.Close()
-
-	for subspaceResults.Next() {
-		var foundSubspace string
-		if err := subspaceResults.Scan(&foundSubspace); err == nil {
-			subspaces = append(subspaces, foundSubspace)
-		}
 	}
 
 	return
 }
 
 func namespaceExistsById(id int) (bool, error) {
-	checkQuery := `SELECT id FROM namespace WHERE id = ?`
-	result, err := db.Query(checkQuery, id)
-	if err != nil {
-		return false, err
+	var namespaces []Namespace
+	result := db.Limit(1).Find(&namespaces, id)
+	if result.Error != nil {
+		return false, result.Error
+	} else {
+		return result.RowsAffected > 0, nil
 	}
-	defer result.Close()
-
-	found := false
-	for result.Next() {
-		found = true
-		break
-	}
-	return found, nil
 }
 
 func namespaceExistsByPrefix(prefix string) (bool, error) {
-	checkQuery := `SELECT prefix FROM namespace WHERE prefix = ?`
-	result, err := db.Query(checkQuery, prefix)
-	if err != nil {
-		return false, err
-	}
-	defer result.Close()
+	var namespaces []Namespace
+	result := db.Where("prefix = ?", prefix).Limit(1).Find(&namespaces)
 
-	found := false
-	for result.Next() {
-		found = true
-		break
+	if result.Error != nil {
+		return false, result.Error
+	} else {
+		return result.RowsAffected > 0, nil
 	}
-	return found, nil
 }
 
 func namespaceBelongsToUserId(id int, userId string) (bool, error) {
-	query := `SELECT admin_metadata FROM namespace where id = ?`
-	rows, err := db.Query(query, id)
-	if err != nil {
-		return false, err
+	var result Namespace
+	err := db.First(&result, "id = ?", id).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, fmt.Errorf("Namespace with id = %d does not exists", id)
+	} else if err != nil {
+		return false, errors.Wrap(err, "error retrieving namespace")
 	}
-	defer rows.Close()
-
-	for rows.Next() {
-		ns := &Namespace{}
-		adminMetadataStr := ""
-		if err := rows.Scan(&adminMetadataStr); err != nil {
-			return false, err
-		}
-		// For backward compatibility, if adminMetadata is an empty string, don't unmarshal json
-		if adminMetadataStr != "" {
-			if err := json.Unmarshal([]byte(adminMetadataStr), &ns.AdminMetadata); err != nil {
-				return false, err
-			}
-		} else {
-			return false, nil // If adminMetadata is an empty string, no userId is present
-		}
-		if ns.AdminMetadata.UserID == userId {
-			return true, nil
-		}
-	}
-	return false, nil
+	return result.AdminMetadata.UserID == userId, nil
 }
 
 func getNamespaceJwksById(id int) (jwk.Set, error) {
-	jwksQuery := `SELECT pubkey FROM namespace WHERE id = ?`
-	var pubkeyStr string
-	err := db.QueryRow(jwksQuery, id).Scan(&pubkeyStr)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, errors.New("prefix not found in database")
-		}
-		return nil, errors.Wrap(err, "error performing origin pubkey query")
+	var result Namespace
+	err := db.Select("pubkey").Where("id = ?", id).Last(&result).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, fmt.Errorf("namespace with id %d not found in database", id)
+	} else if err != nil {
+		return nil, errors.Wrap(err, "error retrieving pubkey")
 	}
 
-	set, err := jwk.ParseString(pubkeyStr)
+	set, err := jwk.ParseString(result.Pubkey)
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to parse pubkey as a jwks")
 	}
@@ -388,85 +284,52 @@ func getNamespaceJwksById(id int) (jwk.Set, error) {
 }
 
 func getNamespaceJwksByPrefix(prefix string) (jwk.Set, *AdminMetadata, error) {
-	var pubkeyStr string
-	var adminMetadataStr string
-
-	jwksQuery := `SELECT pubkey, admin_metadata FROM namespace WHERE prefix = ?`
-	err := db.QueryRow(jwksQuery, prefix).Scan(&pubkeyStr, &adminMetadataStr)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil, errors.New("prefix not found in database")
-		}
-		return nil, nil, errors.Wrap(err, "error performing origin pubkey query")
+	var result Namespace
+	err := db.Select("pubkey", "admin_metadata").Where("prefix = ?", prefix).Last(&result).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil, fmt.Errorf("namespace with prefix %q not found in database", prefix)
+	} else if err != nil {
+		return nil, nil, errors.Wrap(err, "error retrieving pubkey")
 	}
 
-	adminMetadata := AdminMetadata{}
-
-	// For backward compatibility, if adminMetadata is an empty string, don't unmarshal json
-	if adminMetadataStr != "" {
-		if err := json.Unmarshal([]byte(adminMetadataStr), &adminMetadata); err != nil {
-			return nil, nil, errors.Wrap(err, "error parsing admin metadata")
-		}
-	}
-
-	set, err := jwk.ParseString(pubkeyStr)
+	set, err := jwk.ParseString(result.Pubkey)
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "Failed to parse pubkey as a jwks")
 	}
 
-	return set, &adminMetadata, nil
+	return set, &result.AdminMetadata, nil
 }
 
 func getNamespaceStatusById(id int) (RegistrationStatus, error) {
 	if id < 1 {
 		return "", errors.New("Invalid id. id must be a positive integer")
 	}
-	adminMetadata := AdminMetadata{}
-	adminMetadataStr := ""
-	query := `SELECT admin_metadata FROM namespace WHERE id = ?`
-	err := db.QueryRow(query, id).Scan(&adminMetadataStr)
-	if err != nil {
-		return "", err
+	var result Namespace
+	query := db.Select("admin_metadata").Where("id = ?", id).Last(&result)
+	err := query.Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return Unknown, fmt.Errorf("namespace with id %d not found in database", id)
+	} else if err != nil {
+		return Unknown, errors.Wrap(err, "error retrieving pubkey")
 	}
-	// For backward compatibility, if adminMetadata is an empty string, don't unmarshal json
-	if adminMetadataStr != "" {
-		if err := json.Unmarshal([]byte(adminMetadataStr), &adminMetadata); err != nil {
-			return "", err
-		}
-		// This should never happen in non-testing environment, but if it does, we want to
-		// decode it to known enumeration for this field
-		if adminMetadata.Status == "" {
-			return Unknown, nil
-		}
-		return adminMetadata.Status, nil
-	} else {
+	if result.AdminMetadata.Status == "" {
 		return Unknown, nil
 	}
+	return result.AdminMetadata.Status, nil
 }
 
 func getNamespaceById(id int) (*Namespace, error) {
 	if id < 1 {
 		return nil, errors.New("Invalid id. id must be a positive number")
 	}
-	ns := &Namespace{}
-	adminMetadataStr := ""
-	customRegFieldsStr := ""
-	query := `SELECT id, prefix, pubkey, identity, admin_metadata, custom_fields FROM namespace WHERE id = ?`
-	err := db.QueryRow(query, id).Scan(&ns.ID, &ns.Prefix, &ns.Pubkey, &ns.Identity, &adminMetadataStr, &customRegFieldsStr)
-	if err != nil {
-		return nil, err
+	ns := Namespace{}
+	err := db.Last(&ns, id).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, fmt.Errorf("namespace with id %d not found in database", id)
+	} else if err != nil {
+		return nil, errors.Wrap(err, "error retrieving pubkey")
 	}
-	// For backward compatibility, if adminMetadata is an empty string, don't unmarshal json
-	if adminMetadataStr != "" {
-		if err := json.Unmarshal([]byte(adminMetadataStr), &ns.AdminMetadata); err != nil {
-			return nil, err
-		}
-	}
-	if customRegFieldsStr != "" {
-		if err := json.Unmarshal([]byte(customRegFieldsStr), &ns.CustomFields); err != nil {
-			return nil, err
-		}
-	}
+
 	// By default, JSON unmarshal will convert any generic number to float
 	// and we only allow integer in custom fields, so we convert them back
 	for key, val := range ns.CustomFields {
@@ -477,32 +340,21 @@ func getNamespaceById(id int) (*Namespace, error) {
 			ns.CustomFields[key] = int(v)
 		}
 	}
-	return ns, nil
+	return &ns, nil
 }
 
 func getNamespaceByPrefix(prefix string) (*Namespace, error) {
 	if prefix == "" {
 		return nil, errors.New("Invalid prefix. Prefix must not be empty")
 	}
-	ns := &Namespace{}
-	adminMetadataStr := ""
-	customRegFieldsStr := ""
-	query := `SELECT id, prefix, pubkey, identity, admin_metadata, custom_fields FROM namespace WHERE prefix = ?`
-	err := db.QueryRow(query, prefix).Scan(&ns.ID, &ns.Prefix, &ns.Pubkey, &ns.Identity, &adminMetadataStr, &customRegFieldsStr)
-	if err != nil {
-		return nil, err
+	ns := Namespace{}
+	err := db.Where("prefix = ? ", prefix).Last(&ns).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, fmt.Errorf("namespace with id %q not found in database", prefix)
+	} else if err != nil {
+		return nil, errors.Wrap(err, "error retrieving pubkey")
 	}
-	// For backward compatibility, if adminMetadata is an empty string, don't unmarshal json
-	if adminMetadataStr != "" {
-		if err := json.Unmarshal([]byte(adminMetadataStr), &ns.AdminMetadata); err != nil {
-			return nil, err
-		}
-	}
-	if customRegFieldsStr != "" {
-		if err := json.Unmarshal([]byte(customRegFieldsStr), &ns.CustomFields); err != nil {
-			return nil, err
-		}
-	}
+
 	// By default, JSON unmarshal will convert any generic number to float
 	// and we only allow integer in custom fields, so we convert them back
 	for key, val := range ns.CustomFields {
@@ -513,7 +365,7 @@ func getNamespaceByPrefix(prefix string) (*Namespace, error) {
 			ns.CustomFields[key] = int(v)
 		}
 	}
-	return ns, nil
+	return &ns, nil
 }
 
 // Get a collection of namespaces by filtering against various non-default namespace fields
@@ -552,109 +404,59 @@ func getNamespacesByFilter(filterNs Namespace, serverType ServerType) ([]*Namesp
 	}
 	// Always sort by id by default
 	query += " ORDER BY id ASC"
-	// For now, we need to execute the query first and manually filter out fields for AdminMetadata
-	rows, err := db.Query(query)
-	if err != nil {
+
+	namespacesIn := []Namespace{}
+	if err := db.Raw(query).Scan(&namespacesIn).Error; err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
-	namespaces := make([]*Namespace, 0)
-	for rows.Next() {
-		ns := &Namespace{}
-		adminMetadataStr := ""
-		if err := rows.Scan(&ns.ID, &ns.Prefix, &ns.Pubkey, &ns.Identity, &adminMetadataStr); err != nil {
-			return nil, err
+	namespacesOut := []*Namespace{}
+	for idx, ns := range namespacesIn {
+		if filterNs.AdminMetadata.UserID != "" && filterNs.AdminMetadata.UserID != ns.AdminMetadata.UserID {
+			continue
 		}
-		// For backward compatibility, if adminMetadata is an empty string, don't unmarshal json
-		if adminMetadataStr == "" {
-			// If we apply any filter against the AdminMetadata field but the
-			// entry didn't populate this field, skip it
-			if !filterNs.AdminMetadata.Equal(AdminMetadata{}) {
-				continue
-			} else {
-				// If we don't filter against AdminMetadata, just add it to result
-				namespaces = append(namespaces, ns)
-			}
-		} else {
-			if err := json.Unmarshal([]byte(adminMetadataStr), &ns.AdminMetadata); err != nil {
-				return nil, err
-			}
-			if filterNs.AdminMetadata.UserID != "" && filterNs.AdminMetadata.UserID != ns.AdminMetadata.UserID {
-				continue
-			}
-			if filterNs.AdminMetadata.Description != "" && !strings.Contains(ns.AdminMetadata.Description, filterNs.AdminMetadata.Description) {
-				continue
-			}
-			if filterNs.AdminMetadata.SiteName != "" && !strings.Contains(ns.AdminMetadata.SiteName, filterNs.AdminMetadata.SiteName) {
-				continue
-			}
-			if filterNs.AdminMetadata.Institution != "" && filterNs.AdminMetadata.Institution != ns.AdminMetadata.Institution {
-				continue
-			}
-			if filterNs.AdminMetadata.SecurityContactUserID != "" && filterNs.AdminMetadata.SecurityContactUserID != ns.AdminMetadata.SecurityContactUserID {
-				continue
-			}
-			if filterNs.AdminMetadata.Status != "" {
-				if filterNs.AdminMetadata.Status == Unknown {
-					if ns.AdminMetadata.Status != "" && ns.AdminMetadata.Status != Unknown {
-						continue
-					}
-				} else if filterNs.AdminMetadata.Status != ns.AdminMetadata.Status {
+		if filterNs.AdminMetadata.Description != "" && !strings.Contains(ns.AdminMetadata.Description, filterNs.AdminMetadata.Description) {
+			continue
+		}
+		if filterNs.AdminMetadata.SiteName != "" && !strings.Contains(ns.AdminMetadata.SiteName, filterNs.AdminMetadata.SiteName) {
+			continue
+		}
+		if filterNs.AdminMetadata.Institution != "" && filterNs.AdminMetadata.Institution != ns.AdminMetadata.Institution {
+			continue
+		}
+		if filterNs.AdminMetadata.SecurityContactUserID != "" && filterNs.AdminMetadata.SecurityContactUserID != ns.AdminMetadata.SecurityContactUserID {
+			continue
+		}
+		if filterNs.AdminMetadata.Status != "" {
+			if filterNs.AdminMetadata.Status == Unknown {
+				if ns.AdminMetadata.Status != "" && ns.AdminMetadata.Status != Unknown {
 					continue
 				}
-			}
-			if filterNs.AdminMetadata.ApproverID != "" && filterNs.AdminMetadata.ApproverID != ns.AdminMetadata.ApproverID {
+			} else if filterNs.AdminMetadata.Status != ns.AdminMetadata.Status {
 				continue
 			}
-			// Congrats! You passed all the filter check and this namespace matches what you want
-			namespaces = append(namespaces, ns)
 		}
+		if filterNs.AdminMetadata.ApproverID != "" && filterNs.AdminMetadata.ApproverID != ns.AdminMetadata.ApproverID {
+			continue
+		}
+		// Congrats! You passed all the filter check and this namespace matches what you want
+		namespacesOut = append(namespacesOut, &namespacesIn[idx])
 	}
-
-	return namespaces, nil
+	return namespacesOut, nil
 }
 
-/*
-Some generic functions for CRUD actions on namespaces,
-used BY the registry (as opposed to the parallel
-functions) used by the client.
-*/
-
 func AddNamespace(ns *Namespace) error {
-	query := `INSERT INTO namespace (prefix, pubkey, identity, admin_metadata, custom_fields) VALUES (?, ?, ?, ?, ?)`
-	tx, err := db.Begin()
-	if err != nil {
-		return err
-	}
-
 	// Adding default values to the field. Note that you need to pass other fields
 	// including user_id before this function
 	ns.AdminMetadata.CreatedAt = time.Now()
 	ns.AdminMetadata.UpdatedAt = time.Now()
-	// We only set status to pending when it's empty to allow tests to add a namespace with
+	// We only set status to pending when it's empty to allow unit tests to add a namespace with
 	// desired status
 	if ns.AdminMetadata.Status == "" {
 		ns.AdminMetadata.Status = Pending
 	}
 
-	strAdminMetadata, err := json.Marshal(ns.AdminMetadata)
-	if err != nil {
-		return errors.Wrap(err, "Fail to marshal AdminMetadata")
-	}
-	strCustomRegFields, err := json.Marshal(ns.CustomFields)
-	if err != nil {
-		return errors.Wrap(err, "Fail to marshal custom registration fields")
-	}
-
-	_, err = tx.Exec(query, ns.Prefix, ns.Pubkey, ns.Identity, strAdminMetadata, strCustomRegFields)
-	if err != nil {
-		if errRoll := tx.Rollback(); errRoll != nil {
-			log.Errorln("Failed to rollback transaction:", errRoll)
-		}
-		return err
-	}
-	return tx.Commit()
+	return db.Save(&ns).Error
 }
 
 func updateNamespace(ns *Namespace) error {
@@ -668,6 +470,10 @@ func updateNamespace(ns *Namespace) error {
 	if ns.Pubkey == "" {
 		ns.Pubkey = existingNs.Pubkey
 	}
+	// We intentionally exclude updating "identity" as this should only be updated
+	// when user registered through Pelican client with identity
+	ns.Identity = existingNs.Identity
+
 	existingNsAdmin := existingNs.AdminMetadata
 	// We prevent the following fields from being modified by the user for now.
 	// They are meant for "internal" use only and we don't support changing
@@ -679,30 +485,8 @@ func updateNamespace(ns *Namespace) error {
 	ns.AdminMetadata.ApprovedAt = existingNsAdmin.ApprovedAt
 	ns.AdminMetadata.ApproverID = existingNsAdmin.ApproverID
 	ns.AdminMetadata.UpdatedAt = time.Now()
-	strAdminMetadata, err := json.Marshal(ns.AdminMetadata)
-	if err != nil {
-		return errors.Wrap(err, "Fail to marshal AdminMetadata")
-	}
-	strCustomRegFields, err := json.Marshal(ns.CustomFields)
-	if err != nil {
-		return errors.Wrap(err, "Fail to marshal custom registration fields")
-	}
 
-	// We intentionally exclude updating "identity" as this should only be updated
-	// when user registered through Pelican client with identity
-	query := `UPDATE namespace SET prefix = ?, pubkey = ?, admin_metadata = ?, custom_fields = ? WHERE id = ?`
-	tx, err := db.Begin()
-	if err != nil {
-		return err
-	}
-	_, err = tx.Exec(query, ns.Prefix, ns.Pubkey, strAdminMetadata, strCustomRegFields, ns.ID)
-	if err != nil {
-		if errRoll := tx.Rollback(); errRoll != nil {
-			log.Errorln("Failed to rollback transaction:", errRoll)
-		}
-		return errors.Wrap(err, "Failed to execute update query")
-	}
-	return tx.Commit()
+	return db.Save(ns).Error
 }
 
 func updateNamespaceStatusById(id int, status RegistrationStatus, approverId string) error {
@@ -726,66 +510,21 @@ func updateNamespaceStatusById(id int, status RegistrationStatus, approverId str
 		return errors.Wrap(err, "Error marshaling admin metadata")
 	}
 
-	query := `UPDATE namespace SET admin_metadata = ? WHERE id = ?`
-	tx, err := db.Begin()
-	if err != nil {
-		return err
-	}
-	_, err = tx.Exec(query, string(adminMetadataByte), ns.ID)
-	if err != nil {
-		if errRoll := tx.Rollback(); errRoll != nil {
-			log.Errorln("Failed to rollback transaction:", errRoll)
-		}
-		return errors.Wrap(err, "Failed to execute update query")
-	}
-	return tx.Commit()
+	return db.Model(ns).Where("id = ?", id).Update("admin_metadata", string(adminMetadataByte)).Error
 }
 
 func deleteNamespace(prefix string) error {
-	deleteQuery := `DELETE FROM namespace WHERE prefix = ?`
-	tx, err := db.Begin()
-	if err != nil {
-		return err
-	}
-	_, err = tx.Exec(deleteQuery, prefix)
-	if err != nil {
-		if errRoll := tx.Rollback(); errRoll != nil {
-			log.Errorln("Failed to rollback transaction:", errRoll)
-		}
-		return errors.Wrap(err, "Failed to execute deletion query")
-	}
-	return tx.Commit()
+	// GORM by default uses transaction for write operations
+	return db.Where("prefix = ?", prefix).Delete(&Namespace{}).Error
 }
 
 func getAllNamespaces() ([]*Namespace, error) {
-	query := `SELECT id, prefix, pubkey, identity, admin_metadata, custom_fields FROM namespace ORDER BY id ASC`
-	rows, err := db.Query(query)
-	if err != nil {
-		return nil, err
+	var namespaces []*Namespace
+	if result := db.Order("id ASC").Find(&namespaces); result.Error != nil {
+		return nil, result.Error
 	}
-	defer rows.Close()
 
-	namespaces := make([]*Namespace, 0)
-	for rows.Next() {
-		ns := &Namespace{}
-		adminMetadataStr := ""
-		customRegFieldsStr := ""
-		if err := rows.Scan(&ns.ID, &ns.Prefix, &ns.Pubkey, &ns.Identity, &adminMetadataStr, &customRegFieldsStr); err != nil {
-			return nil, err
-		}
-		// For backward compatibility, if adminMetadata is an empty string, don't unmarshal json
-		if adminMetadataStr != "" {
-			if err := json.Unmarshal([]byte(adminMetadataStr), &ns.AdminMetadata); err != nil {
-				return nil, err
-			}
-		}
-		if customRegFieldsStr != "" {
-			if err := json.Unmarshal([]byte(customRegFieldsStr), &ns.CustomFields); err != nil {
-				return nil, err
-			}
-		}
-		// By default, JSON unmarshal will convert any generic number to float
-		// and we only allow integer in custom fields, so we convert them back
+	for _, ns := range namespaces {
 		for key, val := range ns.CustomFields {
 			switch v := val.(type) {
 			case float64:
@@ -794,10 +533,23 @@ func getAllNamespaces() ([]*Namespace, error) {
 				ns.CustomFields[key] = int(v)
 			}
 		}
-		namespaces = append(namespaces, ns)
 	}
 
 	return namespaces, nil
+}
+
+// Update database schema based on migration files under /migrations folder
+func MigrateDB(sqldb *sql.DB) error {
+	goose.SetBaseFS(embedMigrations)
+
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		return err
+	}
+
+	if err := goose.Up(sqldb, "migrations"); err != nil {
+		return err
+	}
+	return nil
 }
 
 func InitializeDB(ctx context.Context) error {
@@ -819,64 +571,44 @@ func InitializeDB(ctx context.Context) error {
 		dbPath += ".sqlite"
 	}
 
-	dbName := "file:" + dbPath + "?_busy_timeout=5000&_journal_mode=WAL"
+	dbName := dbPath + "?_busy_timeout=5000&_journal_mode=WAL"
+
+	globalLogLevel := log.GetLevel()
+	var ormLevel logger.LogLevel
+	if globalLogLevel == log.DebugLevel || globalLogLevel == log.TraceLevel || globalLogLevel == log.InfoLevel {
+		ormLevel = logger.Info
+	} else if globalLogLevel == log.WarnLevel {
+		ormLevel = logger.Warn
+	} else if globalLogLevel == log.ErrorLevel {
+		ormLevel = logger.Error
+	} else {
+		ormLevel = logger.Info
+	}
+
+	gormLogger := gormlog.NewGormlog(
+		gormlog.WithLogrusEntry(log.WithField("component", "gorm")),
+		gormlog.WithGormOptions(gormlog.GormOptions{
+			LogLatency: true,
+			LogLevel:   ormLevel,
+		}),
+	)
+
 	log.Debugln("Opening connection to sqlite DB", dbName)
-	db, err = sql.Open("sqlite", dbName)
+
+	db, err = gorm.Open(sqlite.Open(dbName), &gorm.Config{Logger: gormLogger})
+
 	if err != nil {
 		return errors.Wrapf(err, "Failed to open the database with path: %s", dbPath)
 	}
 
-	if err := createNamespaceTable(); err != nil {
-		return err
-	}
-	if config.GetPreferredPrefix() == "OSDF" {
-		// Create the toplogy table
-		if err := createTopologyTable(); err != nil {
-			return err
-		}
-	}
-	return db.Ping()
-}
+	sqldb, err := db.DB()
 
-func modifyTopologyTable(prefixes []string, mode string) error {
-	if len(prefixes) == 0 {
-		return nil // nothing to do!
-	}
-
-	var query string
-	switch mode {
-	case "add":
-		query = `INSERT INTO topology (prefix) VALUES (?)`
-	case "del":
-		query = `DELETE FROM topology WHERE prefix = ?`
-	default:
-		return errors.New("invalid mode, use 'add' or 'del'")
-	}
-
-	tx, err := db.Begin()
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "Failed to get sql.DB from gorm DB: %s", dbPath)
 	}
 
-	stmt, err := tx.Prepare(query)
-	if err != nil {
-		return err
-	}
-	defer stmt.Close()
-
-	for _, prefix := range prefixes {
-		_, err := stmt.Exec(prefix)
-		if err != nil {
-			if errRoll := tx.Rollback(); errRoll != nil {
-				log.Errorln("Failed to rollback transaction:", errRoll)
-			}
-			return err
-		}
-	}
-
-	// One nice batch commit
-	err = tx.Commit()
-	if err != nil {
+	// Run database migrations
+	if err := MigrateDB(sqldb); err != nil {
 		return err
 	}
 
@@ -891,22 +623,15 @@ func PopulateTopology() error {
 
 	// First get all that are in the table. At time of writing, this is ~57 entries,
 	// and that number should be monotonically decreasing. We're safe to load into mem.
-	retrieveQuery := "SELECT prefix FROM topology"
-	rows, err := db.Query(retrieveQuery)
-	if err != nil {
-		return errors.Wrap(err, "Could not construct topology database query")
+	var topologies []Topology
+	if err := db.Model(&Topology{}).Select("prefix").Find(&topologies).Error; err != nil {
+		return err
 	}
-	defer rows.Close()
 
 	nsFromTopoTable := make(map[string]bool)
-	for rows.Next() {
-		var existingPrefix string
-		if err := rows.Scan(&existingPrefix); err != nil {
-			return errors.Wrap(err, "Error while scanning rows from topology table")
-		}
-		nsFromTopoTable[existingPrefix] = true
+	for _, topo := range topologies {
+		nsFromTopoTable[topo.Prefix] = true
 	}
-	rows.Close()
 
 	// Next, get the values from topology
 	namespaces, err := utils.GetTopologyJSON()
@@ -936,14 +661,23 @@ func PopulateTopology() error {
 		}
 	}
 
-	if err := modifyTopologyTable(toAdd, "add"); err != nil {
-		return errors.Wrap(err, "Failed to update topology table with new values")
-	}
-	if err := modifyTopologyTable(toDelete, "del"); err != nil {
-		return errors.Wrap(err, "Failed to clean old values from topology table")
+	var toAddTopo []Topology
+	for _, prefix := range toAdd {
+		toAddTopo = append(toAddTopo, Topology{Prefix: prefix})
 	}
 
-	return nil
+	return db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("prefix IN ?", toDelete).Delete(&Topology{}).Error; err != nil {
+			return err
+		}
+
+		if len(toAddTopo) > 0 {
+			if err := tx.Create(&toAddTopo).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func PeriodicTopologyReload() {
@@ -958,7 +692,12 @@ func PeriodicTopologyReload() {
 }
 
 func ShutdownDB() error {
-	err := db.Close()
+	sqldb, err := db.DB()
+	if err != nil {
+		log.Errorln("Failure when getting database instance from gorm:", err)
+		return err
+	}
+	err = sqldb.Close()
 	if err != nil {
 		log.Errorln("Failure when shutting down the database:", err)
 	}

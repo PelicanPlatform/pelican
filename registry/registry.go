@@ -50,11 +50,6 @@ import (
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-
-	// use this sqlite driver instead of the one from
-	// github.com/mattn/go-sqlite3, because this one
-	// doesn't require compilation with CGO_ENABLED
-	_ "modernc.org/sqlite"
 )
 
 var OIDC struct {

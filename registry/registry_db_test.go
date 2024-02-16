@@ -20,21 +20,20 @@ package registry
 
 import (
 	"context"
-	"database/sql"
 	"testing"
 	"time"
 
+	"github.com/glebarez/sqlite"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-
-	_ "modernc.org/sqlite"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/test_utils"
@@ -42,69 +41,40 @@ import (
 )
 
 func setupMockRegistryDB(t *testing.T) {
-	mockDB, err := sql.Open("sqlite", ":memory:")
+	mockDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	db = mockDB
 	require.NoError(t, err, "Error setting up mock namespace DB")
-	err = createNamespaceTable()
-	require.NoError(t, err, "Error creating namespace table")
+	err = db.AutoMigrate(&Namespace{})
+	require.NoError(t, err, "Failed to migrate DB for namespace table")
 	err = createTopologyTable()
 	require.NoError(t, err, "Error creating topology table")
 }
 
 func resetNamespaceDB(t *testing.T) {
-	_, err := db.Exec(`DELETE FROM namespace`)
+	err := db.Where("1 = 1").Delete(&Namespace{}).Error
 	require.NoError(t, err, "Error resetting namespace DB")
 }
 
 func teardownMockNamespaceDB(t *testing.T) {
-	err := db.Close()
+	err := ShutdownDB()
 	require.NoError(t, err, "Error tearing down mock namespace DB")
 }
 
 func insertMockDBData(nss []Namespace) error {
-	query := `INSERT INTO namespace (prefix, pubkey, identity, admin_metadata, custom_fields) VALUES (?, ?, ?, ?, ?)`
-	tx, err := db.Begin()
-	if err != nil {
-		return err
-	}
-	for _, ns := range nss {
-		adminMetaStr, err := json.Marshal(ns.AdminMetadata)
-		if err != nil {
-			if errRoll := tx.Rollback(); errRoll != nil {
-				return errors.Wrap(errRoll, "Failed to rollback transaction")
-			}
-			return err
-		}
-		customFieldsStr, err := json.Marshal(ns.CustomFields)
-		if err != nil {
-			if errRoll := tx.Rollback(); errRoll != nil {
-				return errors.Wrap(errRoll, "Failed to rollback transaction")
-			}
-			return err
-		}
-
-		_, err = tx.Exec(query, ns.Prefix, ns.Pubkey, ns.Identity, adminMetaStr, customFieldsStr)
-		if err != nil {
-			if errRoll := tx.Rollback(); errRoll != nil {
-				return errors.Wrap(errRoll, "Failed to rollback transaction")
-			}
-			return err
-		}
-	}
-	return tx.Commit()
+	return db.Create(&nss).Error
 }
 
 func getLastNamespaceId() (int, error) {
-	var lastID int
-	err := db.QueryRow("SELECT id FROM namespace ORDER BY id DESC LIMIT 1").Scan(&lastID)
-	if err != nil {
-		if err == sql.ErrNoRows {
+	var namespace Namespace
+	result := db.Select("id").Order("id DESC").First(&namespace)
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return 0, errors.New("Empty database table.")
 		} else {
-			return 0, err
+			return 0, result.Error
 		}
 	}
-	return lastID, nil
+	return namespace.ID, nil
 }
 
 // Compares expected Namespace slice against either a slice of Namespace ptr or just Namespace
@@ -551,7 +521,7 @@ func TestGetNamespacesByFilter(t *testing.T) {
 		nssOrigins, err := getNamespacesByFilter(filterNs, OriginType)
 		require.NoError(t, err)
 		assert.NotEmpty(t, nssOrigins, "Should return non-empty result for OriginType")
-		assert.True(t, compareNamespaces(mockNssWithOrigins, nssOrigins, true))
+		assert.True(t, compareNamespaces(mockNssWithOrigins, nssOrigins, true), "Returned nssOrigins does not match")
 
 		nssCaches, err := getNamespacesByFilter(filterNs, CacheType)
 		require.NoError(t, err)
