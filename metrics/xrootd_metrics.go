@@ -62,6 +62,7 @@ type (
 		Role                   string
 		Org                    string
 		Groups                 []string
+		Project                string
 	}
 
 	FileId struct {
@@ -234,17 +235,17 @@ var (
 	TransferReadvSegs = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "xrootd_transfer_readv_segments_count",
 		Help: "Number of segments in readv operations",
-	}, []string{"path", "ap", "dn", "role", "org"})
+	}, []string{"path", "ap", "dn", "role", "org", "proj"})
 
 	TransferOps = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "xrootd_transfer_operations_count",
 		Help: "Number of transfer operations performed",
-	}, []string{"path", "ap", "dn", "role", "org", "type"})
+	}, []string{"path", "ap", "dn", "role", "org", "proj", "type"})
 
 	TransferBytes = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "xrootd_transfer_bytes",
 		Help: "Bytes of transfers",
-	}, []string{"path", "ap", "dn", "role", "org", "type"})
+	}, []string{"path", "ap", "dn", "role", "org", "proj", "type"})
 
 	Threads = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "xrootd_sched_thread_count",
@@ -596,6 +597,7 @@ func HandlePacket(packet []byte) error {
 						labels["dn"] = userRecord.Value().DN
 						labels["role"] = userRecord.Value().Role
 						labels["org"] = userRecord.Value().Org
+						labels["proj"] = userRecord.Value().Project
 					}
 					oldReadvSegs = xferRecord.Value().ReadvSegs
 					oldReadOps = xferRecord.Value().ReadOps
@@ -692,6 +694,7 @@ func HandlePacket(packet []byte) error {
 						labels["dn"] = userRecord.Value().DN
 						labels["role"] = userRecord.Value().Role
 						labels["org"] = userRecord.Value().Org
+						labels["proj"] = userRecord.Value().Project
 					}
 				}
 
@@ -743,8 +746,27 @@ func HandlePacket(packet []byte) error {
 		}
 	case 'g':
 		log.Debug("MonPacket: Received a g-stream packet")
+	case 'i':
+		log.Debug("MonPacket: Received an appinfo packet")
+		infoSize := uint32(header.Plen - 12)
+		log.Warn("Dictid in appinfo is ", dictid)
+		if xrdUserId, appinfo, err := GetSIDRest(packet[12 : 12+infoSize]); err == nil {
+			if userids.Has(xrdUserId) {
+				userId := userids.Get(xrdUserId).Value()
+				if sessions.Has(userId) {
+					existingRec := sessions.Get(userId).Value()
+					existingRec.Project = appinfo
+					sessions.Set(userId, existingRec, ttlcache.DefaultTTL)
+				} else {
+					sessions.Set(userId, UserRecord{Project: appinfo}, ttlcache.DefaultTTL)
+				}
+			}
+		} else {
+			return err
+		}
 	case 'u':
 		log.Debug("MonPacket: Received a user login packet")
+		log.Warn("Dictid in login is ", dictid)
 		infoSize := uint32(header.Plen - 12)
 		if xrdUserId, auth, err := GetSIDRest(packet[12 : 12+infoSize]); err == nil {
 			var record UserRecord
@@ -777,6 +799,7 @@ func HandlePacket(packet []byte) error {
 	case 'T':
 		log.Debug("MonPacket: Received a token info packet")
 		infoSize := uint32(header.Plen - 12)
+		log.Warn("Dictid in token is ", dictid)
 		if _, tokenauth, err := GetSIDRest(packet[12 : 12+infoSize]); err == nil {
 			userId, userRecord, err := ParseTokenAuth(tokenauth)
 			if err != nil {
