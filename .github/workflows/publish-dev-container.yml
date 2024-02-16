@@ -48,5 +48,5 @@ jobs:
           file: ./images/dev.Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=registry,ref=hub.opensciencegrid.org/pelican_platform/pelican-dev:buildcache
+          cache-to: type=registry,ref=hub.opensciencegrid.org/pelican_platform/pelican-dev:buildcache,mode=max,ignore-error=true
