@@ -36,19 +36,26 @@ type (
 		Fire   func(*log.Entry) error
 	}
 
+	// A logrus hook that carries a list of regexp-based "filters".
+	// If any of the filters matches the incoming log line, the corresponding
+	// callback is invoked.
 	RegexpFilterHook struct {
 		filters atomic.Pointer[[]*RegexpFilter]
 	}
 )
 
 var (
-	globalFilters RegexpFilterHook
+	globalFilters      RegexpFilterHook
+	addedGlobalFilters bool
 )
 
 func (fh *RegexpFilterHook) Levels() []log.Level {
 	return log.AllLevels
 }
 
+// Process a single log entry coming from logrus; iterate through the
+// internal list of regexp filters and invoke any callbacks for regexps
+// that match the entry.Message.
 func (fh *RegexpFilterHook) Fire(entry *log.Entry) (err error) {
 	filters := fh.filters.Load()
 	for _, filter := range *filters {
@@ -79,12 +86,17 @@ func initFilterLogging() {
 		}
 	}
 
-	log.AddHook(&globalFilters)
-	log.SetOutput(io.Discard)
-	log.AddHook(&writer.Hook{
-		Writer:    os.Stderr,
-		LogLevels: hookLevel,
-	})
+	// Unit tests may initialize the server multiple times; avoid configuring
+	// the global logging multiple times
+	if !addedGlobalFilters {
+		log.AddHook(&globalFilters)
+		addedGlobalFilters = true
+		log.SetOutput(io.Discard)
+		log.AddHook(&writer.Hook{
+			Writer:    os.Stderr,
+			LogLevels: hookLevel,
+		})
+	}
 }
 
 func AddFilter(newFilter *RegexpFilter) {

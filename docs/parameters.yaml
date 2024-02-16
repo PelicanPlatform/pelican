@@ -376,7 +376,8 @@ components: ["origin"]
 ---
 name: Origin.Port
 description: >-
-  The TCP port to be used by the origin service for serving files
+  The TCP port to be used by the origin service for serving files.  If set to 0,
+  then a random open port will be used.
 default: 8443
 type: int
 components: ["origin"]
@@ -608,7 +609,8 @@ components: ["cache"]
 ---
 name: Cache.Port
 description: >-
-  The TCP port the cache service should use.
+  The TCP port the cache service should use.  If set to 0,
+  then a random open port will be used.
 type: int
 default: 8442
 components: ["cache"]
