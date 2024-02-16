@@ -26,7 +26,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/pelicanplatform/pelican/daemon"
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/oa4mp"
 	"github.com/pelicanplatform/pelican/origin_ui"
 	"github.com/pelicanplatform/pelican/param"
@@ -36,7 +36,7 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) (server_utils.XRootDServer, error) {
+func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, modules config.ServerType) (server_utils.XRootDServer, error) {
 
 	err := xrootd.SetUpMonitoring(ctx, egrp)
 	if err != nil {
@@ -54,9 +54,8 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) 
 		return nil, err
 	}
 
-	// In posix mode, we rely on xrootd to export keys. When we run the origin with
-	// different backends, we instead export the keys via the Pelican process
-	if param.Origin_Mode.GetString() != "posix" {
+	// Director also registers this metadata URL; avoid registering twice.
+	if !modules.IsEnabled(config.DirectorType) {
 		if err = origin_ui.ConfigIssJWKS(engine.Group("/.well-known")); err != nil {
 			return nil, err
 		}
@@ -77,8 +76,6 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) 
 		egrp.Go(func() error { return origin_ui.PeriodicSelfTest(ctx) })
 	}
 
-	xrootd.LaunchXrootdMaintenance(ctx, originServer, 2*time.Minute)
-
 	privileged := param.Origin_Multiuser.GetBool()
 	launchers, err := xrootd.ConfigureLaunchers(privileged, configPath, param.Origin_EnableCmsd.GetBool(), false)
 	if err != nil {
@@ -93,9 +90,13 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) 
 		launchers = append(launchers, oa4mp_launcher)
 	}
 
-	if err = daemon.LaunchDaemons(ctx, launchers, egrp); err != nil {
+	if err = xrootd.LaunchOriginDaemons(ctx, launchers, egrp); err != nil {
 		return nil, err
 	}
+
+	// LaunchOriginDaemons may edit the viper config; these launched goroutines are purposely
+	// delayed until after the viper config is done.
+	xrootd.LaunchXrootdMaintenance(ctx, originServer, 2*time.Minute)
 
 	return originServer, nil
 }

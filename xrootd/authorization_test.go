@@ -372,6 +372,7 @@ func TestMergeConfig(t *testing.T) {
 	dirname := t.TempDir()
 	viper.Reset()
 	viper.Set("Xrootd.RunLocation", dirname)
+	viper.Set("Origin.Port", 8443)
 	scitokensConfigFile := filepath.Join(dirname, "scitokens-input.cfg")
 	viper.Set("Xrootd.ScitokensConfig", scitokensConfigFile)
 
@@ -398,7 +399,7 @@ func TestMergeConfig(t *testing.T) {
 	}
 
 	t.Run("AudienceNoJson", configTester(scitokensCfgAud, func(t *testing.T, cfg ScitokensCfg) {
-		assert.True(t, reflect.DeepEqual([]string{"GLOW", "HCC", "IceCube", "NRP", "OSG", "PATh", "UCSD", param.Server_IssuerUrl.GetString()}, cfg.Global.Audience))
+		assert.True(t, reflect.DeepEqual([]string{"GLOW", "HCC", "IceCube", "NRP", "OSG", "PATh", "UCSD", config.GetServerAudience()}, cfg.Global.Audience))
 	}))
 }
 
@@ -414,12 +415,14 @@ func TestGenerateConfig(t *testing.T) {
 	assert.Equal(t, issuer.Name, "")
 
 	viper.Set("Origin.SelfTest", true)
+	viper.Set("Origin.Port", 8443)
+	viper.Set("Server.WebPort", 8443)
 	err = config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
 	issuer, err = GenerateMonitoringIssuer()
 	require.NoError(t, err)
 	assert.Equal(t, issuer.Name, "Built-in Monitoring")
-	assert.Equal(t, issuer.Issuer, "https://"+param.Server_Hostname.GetString()+":"+fmt.Sprint(param.Xrootd_Port.GetInt()))
+	assert.Equal(t, issuer.Issuer, "https://"+param.Server_Hostname.GetString()+":"+fmt.Sprint(param.Origin_Port.GetInt()))
 	require.Equal(t, len(issuer.BasePaths), 1)
 	assert.Equal(t, issuer.BasePaths[0], "/pelican/monitoring")
 	assert.Equal(t, issuer.DefaultUser, "xrootd")
@@ -428,12 +431,14 @@ func TestGenerateConfig(t *testing.T) {
 	viper.Set("Origin.SelfTest", false)
 	viper.Set("Origin.ScitokensDefaultUser", "user1")
 	viper.Set("Origin.ScitokensMapSubject", true)
+	viper.Set("Origin.Port", 8443)
+	viper.Set("Server.WebPort", 8443)
 	err = config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
 	issuer, err = GenerateOriginIssuer([]string{"/foo/bar/baz", "/another/exported/path"})
 	require.NoError(t, err)
 	assert.Equal(t, issuer.Name, "Origin")
-	assert.Equal(t, issuer.Issuer, "https://"+param.Server_Hostname.GetString()+":"+fmt.Sprint(param.Xrootd_Port.GetInt()))
+	assert.Equal(t, issuer.Issuer, "https://"+param.Server_Hostname.GetString()+":"+fmt.Sprint(param.Origin_Port.GetInt()))
 	require.Equal(t, len(issuer.BasePaths), 2)
 	assert.Equal(t, issuer.BasePaths[0], "/foo/bar/baz")
 	assert.Equal(t, issuer.BasePaths[1], "/another/exported/path")
@@ -615,7 +620,8 @@ func TestWriteOriginScitokensConfig(t *testing.T) {
 	viper.Set("Origin.SelfTest", true)
 	viper.Set("ConfigDir", config_dirname)
 	viper.Set("Xrootd.RunLocation", dirname)
-	viper.Set("Xrootd.Port", 8443)
+	viper.Set("Origin.Port", 8443)
+	viper.Set("Server.WebPort", 8444)
 	viper.Set("Server.Hostname", "origin.example.com")
 	err := config.InitServer(ctx, config.OriginType)
 	require.Nil(t, err)

@@ -43,7 +43,7 @@ Director:
   OriginCacheHealthTestInterval: 15s
   EnableBroker: true
 Cache:
-  Port: 8443
+  Port: 8442
 Origin:
   NamespacePrefix: ""
   Multiuser: false
@@ -53,6 +53,7 @@ Origin:
   EnablePublicRead: false
   EnableWrite: true
   SelfTest: true
+  Port: 8443
   SelfTestInterval: 15s
 Registry:
   InstitutionsUrlReloadMinutes: 15m
@@ -71,7 +72,6 @@ Shoveler:
   PortHigher: 9999
   AMQPExchange: shoveled-xrd
 Xrootd:
-  Port: 8443
   Mount: ""
   ManagerPort: 1213
   DetailedMonitoringPort: 9930

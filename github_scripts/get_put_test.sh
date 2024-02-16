@@ -40,7 +40,7 @@ export PELICAN_ORIGIN_EXPORTVOLUME="origin:/test"
 echo "This is some random content in the random file" > input.txt
 
 # Make a token to be used
-./pelican origin token create --audience "https://wlcg.cern.ch/jwt/v1/any" --issuer "https://`hostname`:8443" --scope "storage.read:/ storage.modify:/" --subject "bar" --lifetime 60 --private-key get_put_config/issuer.jwk > token
+./pelican origin token create --audience "https://wlcg.cern.ch/jwt/v1/any" --issuer "https://`hostname`:8444" --scope "storage.read:/ storage.modify:/" --subject "bar" --lifetime 60 --private-key get_put_config/issuer.jwk > token
 
 # Run federation in the background
 federationServe="./pelican serve --module director --module registry --module origin -d"

@@ -153,6 +153,11 @@ func TestSharingUrl(t *testing.T) {
 	defer server.Close()
 	myUrl = server.URL
 
+	config.SetPreferredPrefix("PELICAN")
+	viper.Set("ConfigDir", t.TempDir())
+	viper.Set("Logging.Level", "debug")
+	config.InitConfig()
+
 	os.Setenv("PELICAN_SKIP_TERMINAL_CHECK", "password")
 	defer os.Unsetenv("PELICAN_SKIP_TERMINAL_CHECK")
 	viper.Set("Federation.DirectorURL", myUrl)

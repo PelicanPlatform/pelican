@@ -27,19 +27,16 @@ import (
 	"mime"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"os/signal"
 	"path"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/server_utils"
-	"github.com/spf13/viper"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pelicanplatform/pelican/metrics"
@@ -352,32 +349,16 @@ func RunEngine(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) er
 // Run the gin engine; if curRoutine is false, it will run in a background goroutine.
 func RunEngineRoutine(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, curRoutine bool) error {
 	addr := fmt.Sprintf("%v:%v", param.Server_WebHost.GetString(), param.Server_WebPort.GetInt())
-
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
 	}
+	config.UpdateConfigFromListener(ln)
+	return RunEngineRoutineWithListener(ctx, engine, egrp, curRoutine, ln)
+}
 
-	// If we allow net.Listen to select a random open port, we should update the
-	// configuration with its value.
-	if param.Server_WebPort.GetInt() == 0 {
-		addr := ln.Addr()
-		tcpAddr, ok := addr.(*net.TCPAddr)
-		if ok {
-			viper.Set("Server.WebPort", tcpAddr.Port)
-			serverUrlStr := param.Server_ExternalWebUrl.GetString()
-			serverUrl, err := url.Parse(serverUrlStr)
-			if err == nil {
-				viper.Set("Server.WebHost", serverUrl.Hostname())
-				viper.Set("Server.ExternalWebUrl", "https://"+serverUrl.Hostname()+":"+strconv.Itoa(tcpAddr.Port))
-				log.Debugln("Random web port used; updated external web URL to", param.Server_ExternalWebUrl.GetString())
-			} else {
-				log.Errorln("Unable to update external web URL for random port; unable to parse existing URL:", serverUrlStr)
-			}
-		} else {
-			log.Error("Unable to determine TCP address of runtime engine")
-		}
-	}
+// Run the web engine connected to a provided listener `ln`.
+func RunEngineRoutineWithListener(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, curRoutine bool, ln net.Listener) error {
 
 	if curRoutine {
 		defer ln.Close()

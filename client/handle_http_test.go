@@ -383,7 +383,10 @@ func TestFailedUpload(t *testing.T) {
 
 func generateFileTestScitoken() (string, error) {
 	// Issuer is whichever server that initiates the test, so it's the server itself
-	issuerUrl := param.Origin_Url.GetString()
+	issuerUrl, err := config.GetServerIssuerURL()
+	if err != nil {
+		return "", err
+	}
 	if issuerUrl == "" { // if empty, then error
 		return "", errors.New("Failed to create token: Invalid iss, Server_ExternalWebUrl is empty")
 	}
@@ -469,6 +472,7 @@ func TestFullUpload(t *testing.T) {
 	viper.Set("Xrootd.RunLocation", tmpPath)
 	viper.Set("Registry.RequireOriginApproval", false)
 	viper.Set("Registry.RequireCacheApproval", false)
+	viper.Set("Logging.Origin.Scitokens", "debug")
 
 	err = config.InitServer(ctx, modules)
 	require.NoError(t, err)
@@ -613,6 +617,8 @@ func (f *FedTest) Spinup() {
 	viper.Set("Server.EnableUI", false)
 	viper.Set("Registry.DbLocation", filepath.Join(f.T.TempDir(), "ns-registry.sqlite"))
 	viper.Set("Xrootd.RunLocation", tmpPath)
+	viper.Set("Origin.Port", 0)
+	viper.Set("Server.WebPort", 0)
 
 	err = config.InitServer(ctx, modules)
 	require.NoError(f.T, err)
@@ -676,12 +682,16 @@ func TestGetAndPutAuth(t *testing.T) {
 	assert.NoError(t, err, "Error writing to temp file")
 	tempFile.Close()
 
+	issuer, err := config.GetServerIssuerURL()
+	require.NoError(t, err)
+	audience := config.GetServerAudience()
+
 	// Create a token file
 	tokenConfig := utils.TokenConfig{
 		TokenProfile: utils.WLCG,
 		Lifetime:     time.Minute,
-		Issuer:       param.Origin_Url.GetString(),
-		Audience:     []string{param.Origin_Url.GetString()},
+		Issuer:       issuer,
+		Audience:     []string{audience},
 		Subject:      "origin",
 	}
 
@@ -847,11 +857,15 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 
 	//////////////////////////SETUP///////////////////////////
 	// Create a token file
+	issuer, err := config.GetServerIssuerURL()
+	require.NoError(t, err)
+	audience := config.GetServerAudience()
+
 	tokenConfig := utils.TokenConfig{
 		TokenProfile: utils.WLCG,
 		Lifetime:     time.Minute,
-		Issuer:       param.Origin_Url.GetString(),
-		Audience:     []string{param.Origin_Url.GetString()},
+		Issuer:       issuer,
+		Audience:     []string{audience},
 		Subject:      "origin",
 	}
 	scopes := []token_scopes.TokenScope{}

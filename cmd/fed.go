@@ -45,5 +45,15 @@ func init() {
 		panic(err)
 	}
 	serveCmd.Flags().Uint16("origin-port", 8443, "Port for the origin")
+	if err := viper.BindPFlag("Origin.Port", serveCmd.Flags().Lookup("origin-port")); err != nil {
+		panic(err)
+	}
 	serveCmd.Flags().Uint16("cache-port", 8442, "Port for the cache")
+	if err := viper.BindPFlag("Cache.Port", serveCmd.Flags().Lookup("cache-port")); err != nil {
+		panic(err)
+	}
+	serveCmd.Flags().Uint16("port", 8444, "Port for Pelican server and web UI")
+	if err := viper.BindPFlag("Server.WebPort", serveCmd.Flags().Lookup("port")); err != nil {
+		panic(err)
+	}
 }

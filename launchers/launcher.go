@@ -20,6 +20,8 @@ package launchers
 
 import (
 	"context"
+	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -107,6 +109,22 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		}
 	}
 
+	// Start listening on the socket.  If `Server.WebPort` is 0, then a random port will be
+	// selected and we'll update the configuration accordingly.  This needs to be done before
+	// the XRootD configuration is written as the Server.WebPort is incorporated into the issuer URL.
+	addr := fmt.Sprintf("%v:%v", param.Server_WebHost.GetString(), param.Server_WebPort.GetInt())
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return shutdownCancel, err
+	}
+	lnReference := ln
+	defer func() {
+		if lnReference != nil {
+			lnReference.Close()
+		}
+	}()
+	config.UpdateConfigFromListener(ln)
+
 	servers := make([]server_utils.XRootDServer, 0)
 	if modules.IsEnabled(config.OriginType) {
 
@@ -143,7 +161,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 			return shutdownCancel, errors.Errorf("Currently-supported origin modes include posix and s3.")
 		}
 
-		server, err := OriginServe(ctx, engine, egrp)
+		server, err := OriginServe(ctx, engine, egrp, modules)
 		if err != nil {
 			return shutdownCancel, err
 		}
@@ -156,27 +174,11 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 				return shutdownCancel, err
 			}
 		}
-
-		switch mode {
-		case "posix":
-			err = server_utils.WaitUntilWorking(ctx, "GET", param.Origin_Url.GetString()+"/.well-known/openid-configuration", "Origin", http.StatusOK)
-			if err != nil {
-				return shutdownCancel, err
-			}
-		case "s3":
-			// A GET on the server root should cause XRootD to reply with permission denied -- as long as the origin is
-			// running in auth mode (probably). This might need to be revisted if we set up an S3 origin without requiring
-			// tokens
-			err = server_utils.WaitUntilWorking(ctx, "GET", param.Origin_Url.GetString(), "Origin", http.StatusForbidden)
-			if err != nil {
-				return shutdownCancel, err
-			}
-		}
 	}
-
 	log.Info("Starting web engine...")
+	lnReference = nil
 	egrp.Go(func() error {
-		if err := web_ui.RunEngine(ctx, engine, egrp); err != nil {
+		if err := web_ui.RunEngineRoutineWithListener(ctx, engine, egrp, true, ln); err != nil {
 			log.Errorln("Failure when running the web engine:", err)
 			return err
 		}

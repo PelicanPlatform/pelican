@@ -84,6 +84,7 @@ type (
 		EnableVoms       bool
 		EnableDirListing bool
 		SelfTest         bool
+		CalculatedPort   string
 		NamespacePrefix  string
 		Mode             string
 		S3Bucket         string
@@ -97,6 +98,7 @@ type (
 	CacheConfig struct {
 		UseCmsd        bool
 		EnableVoms     bool
+		CalculatedPort string
 		ExportLocation string
 		DataLocation   string
 		PSSOrigin      string

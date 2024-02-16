@@ -21,12 +21,21 @@
 package xrootd
 
 import (
+	"context"
 	_ "embed"
+	"net/url"
 	"path/filepath"
+	"regexp"
+	"strconv"
+	"time"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/daemon"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
+	"golang.org/x/sync/errgroup"
 )
 
 type (
@@ -95,4 +104,75 @@ func ConfigureLaunchers(privileged bool, configPath string, useCMSD bool, enable
 		}
 	}
 	return
+}
+
+func LaunchOriginDaemons(ctx context.Context, launchers []daemon.Launcher, egrp *errgroup.Group) (err error) {
+	startupChan := make(chan int)
+	readyChan := make(chan bool)
+	defer close(readyChan)
+	re := regexp.MustCompile(`^------ xrootd [A-Za-z0-9]+@[A-Za-z0-9.\-]+:([0-9]+) initialization complete.*`)
+	config.AddFilter(&config.RegexpFilter{
+		Name:   "xrootd_startup",
+		Regexp: re,
+		Levels: []log.Level{log.InfoLevel},
+		Fire: func(e *log.Entry) error {
+			portStrs := re.FindStringSubmatch(e.Message)
+			if len(portStrs) < 1 {
+				portStrs = []string{"", ""}
+			}
+			port, err := strconv.Atoi(portStrs[1])
+			if err != nil {
+				port = -1
+			}
+			if _, ok := <-readyChan; ok {
+				startupChan <- port
+			}
+			return nil
+		},
+	})
+	config.AddFilter(&config.RegexpFilter{
+		Name:   "xrootd_startup_failed",
+		Regexp: regexp.MustCompile(`^------ xrootd [A-Za-z0-9]+@[A-Za-z0-9.\-]+:([0-9]+) initialization failed.*`),
+		Levels: []log.Level{log.InfoLevel},
+		Fire: func(e *log.Entry) error {
+			if _, ok := <-readyChan; ok {
+				startupChan <- -1
+			}
+			return nil
+		},
+	})
+	defer func() {
+		config.RemoveFilter("xrootd_startup")
+		config.RemoveFilter("xrootd_startup_failed")
+		close(startupChan)
+	}()
+
+	if err = daemon.LaunchDaemons(ctx, launchers, egrp); err != nil {
+		return err
+	}
+
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case readyChan <- true:
+		port := <-startupChan
+		if port == -1 {
+			return errors.New("Xrootd initialization failed")
+		} else {
+			viper.Set("Origin.Port", port)
+			if originUrl, err := url.Parse(param.Origin_Url.GetString()); err == nil {
+				originUrl.Host = originUrl.Hostname() + ":" + strconv.Itoa(port)
+				viper.Set("Origin.Url", originUrl.String())
+				log.Debugln("Resetting Origin.Url to", originUrl.String())
+			}
+			log.Infoln("Origin startup complete on port", port)
+		}
+	case <-ticker.C:
+		log.Errorln("XRootD did not startup after 10s of waiting")
+		return errors.New("XRootD did not startup after 10s of waiting")
+	}
+
+	return nil
 }

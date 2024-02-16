@@ -100,6 +100,7 @@ func TestListNamespaces(t *testing.T) {
 
 	dirName := t.TempDir()
 	viper.Set("ConfigDir", dirName)
+	viper.Set("Origin.Port", 0)
 	err := config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
 	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256())

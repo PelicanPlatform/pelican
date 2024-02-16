@@ -22,6 +22,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/utils"
@@ -31,7 +32,12 @@ import (
 func doSelfMonitor(ctx context.Context) {
 	log.Debug("Starting a new self-test monitoring cycle")
 	fileTests := utils.TestFileTransferImpl{}
-	ok, err := fileTests.RunTests(ctx, param.Origin_Url.GetString(), param.Origin_Url.GetString(), utils.OriginSelfFileTest)
+	issuerUrl, err := config.GetServerIssuerURL()
+	if err != nil {
+		log.Warningln("Self-test monitoring cycle failed due to lack of issuer URL: ", err)
+		metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusCritical, "Self-test monitoring cycle due to lack of issuer URL: "+err.Error())
+	}
+	ok, err := fileTests.RunTests(ctx, param.Origin_Url.GetString(), config.GetServerAudience(), issuerUrl, utils.OriginSelfFileTest)
 	if ok && err == nil {
 		log.Debugln("Self-test monitoring cycle succeeded at", time.Now().Format(time.UnixDate))
 		metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusOK, "Self-test monitoring cycle succeeded at "+time.Now().Format(time.RFC3339))

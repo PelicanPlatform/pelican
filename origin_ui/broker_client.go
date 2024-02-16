@@ -62,7 +62,7 @@ func getTransport() *http.Transport {
 				err = errors.Wrap(err, "Failed to rate-limit local connection")
 				return nil, err
 			}
-			return dialer.DialContext(ctx, "tcp", "localhost:"+strconv.Itoa(param.Xrootd_Port.GetInt()))
+			return dialer.DialContext(ctx, "tcp", "localhost:"+strconv.Itoa(param.Origin_Port.GetInt()))
 		}
 	})
 	return proxyTransport
@@ -71,7 +71,7 @@ func getTransport() *http.Transport {
 func proxyOrigin(resp http.ResponseWriter, req *http.Request) {
 	url := req.URL
 	url.Scheme = "https"
-	url.Host = param.Server_Hostname.GetString() + ":" + strconv.Itoa(param.Xrootd_Port.GetInt())
+	url.Host = param.Server_Hostname.GetString() + ":" + strconv.Itoa(param.Origin_Port.GetInt())
 
 	log.Debugln("Will proxy request to URL", url.String())
 	transport := getTransport()

@@ -511,13 +511,18 @@ func setupTransport() {
 	}
 }
 
-func parseServerIssuerURL(sType ServerType) error {
-	if param.Server_IssuerUrl.GetString() != "" {
+// Return an audience string appropriate for the current server
+func GetServerAudience() string {
+	return viper.GetString("Origin.AudienceURL")
+}
+
+func GetServerIssuerURL() (string, error) {
+	if issuerUrl := param.Server_IssuerUrl.GetString(); issuerUrl != "" {
 		_, err := url.Parse(param.Server_IssuerUrl.GetString())
 		if err != nil {
-			return errors.Wrapf(err, "Failed to parse the Server.IssuerUrl %s loaded from config", param.Server_IssuerUrl.GetString())
+			return "", errors.Wrapf(err, "Failed to parse the Server.IssuerUrl %s loaded from config", param.Server_IssuerUrl.GetString())
 		}
-		return nil
+		return issuerUrl, nil
 	}
 
 	if param.Server_IssuerHostname.GetString() != "" {
@@ -527,42 +532,18 @@ func parseServerIssuerURL(sType ServerType) error {
 				Scheme: "https",
 				Host:   fmt.Sprintf("%s:%d", param.Server_IssuerHostname.GetString(), param.Server_IssuerPort.GetInt()),
 			}
-			viper.Set("Server.IssuerUrl", issuerUrl.String())
-			return nil
+			return issuerUrl.String(), nil
 		}
-		return errors.New("If Server.IssuerHostname is configured, you must provide a valid port")
+		return "", errors.New("If Server.IssuerHostname is configured, you must provide a valid port")
 	}
 
-	if sType.IsEnabled(OriginType) {
-		// If Origin.Mode is set to anything that isn't "posix" or "", assume we're running a plugin and
-		// that the origin's issuer URL actually uses the same port as OriginUI instead of XRootD. This is
-		// because under that condition, keys are being served by the Pelican process instead of by XRootD
-		originMode := param.Origin_Mode.GetString()
-		if originMode == "" || originMode == "posix" {
-			// In this case, we use the default set up by config.go, which uses the xrootd port
-			issuerUrl, err := url.Parse(param.Origin_Url.GetString())
-			if err != nil {
-				return errors.Wrap(err, "Failed to parse the issuer URL from the default origin URL")
-			}
-			viper.Set("Server.IssuerUrl", issuerUrl.String())
-			return nil
-		} else {
-			issuerUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
-			if err != nil {
-				return errors.Wrap(err, "Failed to parse the issuer URL generated from Server.ExternalWebUrl")
-			}
-			viper.Set("Server.IssuerUrl", issuerUrl.String())
-			return nil
-		}
-	} else {
-		issuerUrlStr := param.Server_ExternalWebUrl.GetString()
-		issuerUrl, err := url.Parse(issuerUrlStr)
-		if err != nil {
-			return errors.Wrap(err, "Failed to parse the issuer URL generated using the parsed Server.ExternalWebUrl")
-		}
-		viper.Set("Server.IssuerUrl", issuerUrl.String())
-		return nil
+	issuerUrlStr := param.Server_ExternalWebUrl.GetString()
+	issuerUrl, err := url.Parse(issuerUrlStr)
+	log.Debugln("GetServerIssuerURL:", issuerUrlStr)
+	if err != nil {
+		return "", errors.Wrap(err, "Failed to parse the issuer URL generated using the parsed Server.ExternalWebUrl")
 	}
+	return issuerUrl.String(), nil
 }
 
 // function to get/setup the transport (only once)
@@ -600,14 +581,19 @@ func InitConfig() {
 	if configFile := viper.GetString("config"); configFile != "" {
 		viper.SetConfigFile(configFile)
 	} else {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			log.Warningln("No home directory found for user -- will check for configuration yaml in /etc/pelican/")
+		configDir := viper.GetString("ConfigDir")
+		if configDir == "" {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				log.Warningln("No home directory found for user -- will check for configuration yaml in /etc/pelican/")
+			} else {
+				// 3) Set up pelican.yaml (has higher precedence)
+				viper.AddConfigPath(filepath.Join(home, ".config", "pelican"))
+			}
+			viper.AddConfigPath(filepath.Join("/etc", "pelican"))
+		} else {
+			viper.AddConfigPath(configDir)
 		}
-
-		// 3) Set up pelican.yaml (has higher precedence)
-		viper.AddConfigPath(filepath.Join(home, ".config", "pelican"))
-		viper.AddConfigPath(filepath.Join("/etc", "pelican"))
 		viper.SetConfigType("yaml")
 		viper.SetConfigName("pelican")
 	}
@@ -770,17 +756,66 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 	// they have overridden the defaults.
 	hostname = viper.GetString("Server.Hostname")
 
+	// XRootD port usage logic:
+	// - Origin.Port and Cache.Port take precedence for their respective types
+	// - If neither keys are set and Xrootd.Port is, then use that and emit a warning
+	// - If neither key is set, Xrootd.Port is, and both modules are enabled, then we don't
+	//   know the next steps -- throw an error
+	cachePort := viper.GetInt("Cache.Port")
+	originPort := viper.GetInt("Origin.Port")
+	xrootdPort := viper.GetInt("Xrootd.Port")
+	xrootdPortIsSet := viper.IsSet("Xrootd.Port")
+	cacheFallbackToXrootd := false
+	originFallbackToXrootd := false
 	if currentServers.IsEnabled(CacheType) {
-		viper.Set("Xrootd.Port", param.Cache_Port.GetInt())
+		if !viper.IsSet("Cache.Port") {
+			if xrootdPortIsSet {
+				cacheFallbackToXrootd = true
+				cachePort = xrootdPort
+			} else {
+				return errors.New("the configuration Cache.Port is not set but the Cache module is enabled.  Please set Cache.Port")
+			}
+		}
 	}
-	xrootdPort := param.Xrootd_Port.GetInt()
-	if xrootdPort != 443 {
-		viper.SetDefault("Origin.Url", fmt.Sprintf("https://%v:%v", param.Server_Hostname.GetString(), xrootdPort))
+	if currentServers.IsEnabled(OriginType) && !viper.IsSet("Origin.Port") {
+		if xrootdPortIsSet {
+			originFallbackToXrootd = true
+			originPort = xrootdPort
+		} else {
+			return errors.New("the configuration Origin.Port is not set but the Origin module is enabled.  Please set Origin.Port")
+		}
+	}
+	if cacheFallbackToXrootd && originFallbackToXrootd {
+		return errors.New("neither Cache.Port nor Origin.Port is set but both modules are enabled.  Please set both variables")
+	} else if cacheFallbackToXrootd {
+		log.Warningln("Cache.Port is not set but the Cache module is enabled; falling back to the deprecated Xrootd.Port")
+		cachePort = xrootdPort
+	} else if originFallbackToXrootd {
+		log.Warningln("Origin.Port is not set but the Origin module is enabled; falling back to the deprecated Xrootd.Port")
+		originPort = xrootdPort
+	}
+
+	viper.Set("Origin.CalculatedPort", strconv.Itoa(originPort))
+	if originPort == 0 {
+		viper.Set("Origin.CalculatedPort", "any")
+	}
+	viper.Set("Cache.CalculatedPort", strconv.Itoa(originPort))
+	if cachePort == 0 {
+		viper.Set("Cache.CalculatedPort", "any")
+	}
+	viper.Set("Origin.Port", originPort)
+	viper.Set("Cache.Port", cachePort)
+
+	if originPort != 443 {
+		viper.SetDefault("Origin.Url", fmt.Sprintf("https://%v:%v", param.Server_Hostname.GetString(), originPort))
 	} else {
 		viper.SetDefault("Origin.Url", fmt.Sprintf("https://%v", param.Server_Hostname.GetString()))
 	}
 
 	webPort := param.Server_WebPort.GetInt()
+	if webPort < 0 {
+		return errors.Errorf("the Server.WebPort setting of %d is invalid; TCP ports must be greater than 0", webPort)
+	}
 	viper.SetDefault("Server.ExternalWebUrl", fmt.Sprint("https://", hostname, ":", webPort))
 	externalAddressStr := param.Server_ExternalWebUrl.GetString()
 	if _, err = url.Parse(externalAddressStr); err != nil {
@@ -840,6 +875,12 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 		return err
 	}
 
+	// Setup the audience to use.  We may customize the Origin.URL in the future if it has
+	// a `0` for the port number; to make the audience predictable (it goes into the xrootd
+	// configuration but we don't know the origin's port until after xrootd has started), we
+	// stash a copy of its value now.
+	viper.Set("Origin.AudienceURL", param.Origin_Url.GetString())
+
 	// After we know we have the certs we need, call setupTransport (which uses those certs for its TLSConfig)
 	setupTransport()
 
@@ -847,12 +888,8 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 	// of http handlers by calling config.GetCSRFHandler()
 	setupCSRFHandler()
 
-	// Set up the server's issuer URL so we can access that data wherever we need to find keys and whatnot
-	// This populates Server.IssuerUrl, and can be safely fetched using server_utils.GetServerIssuerURL()
-	err = parseServerIssuerURL(currentServers)
-	if err != nil {
-		return err
-	}
+	// Sets up the server log filter mechanism
+	initFilterLogging()
 
 	return DiscoverFederation()
 }
