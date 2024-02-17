@@ -27,6 +27,8 @@ Logging:
     Cms: error
     Pfc: info
     Xrootd: emsg login stall redirect
+Client:
+  WorkerCount: 5
 Server:
   WebPort: 8444
   WebHost: "0.0.0.0"

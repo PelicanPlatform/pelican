@@ -42,6 +42,7 @@ import (
 	"github.com/studio-b12/gowebdav"
 	"github.com/vbauerster/mpb/v8"
 	"github.com/vbauerster/mpb/v8/decor"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/namespaces"
@@ -277,7 +278,7 @@ func GenerateTransferDetailsUsingCache(cache CacheInterface, opts TransferDetail
 	return nil
 }
 
-func download_http(sourceUrl *url.URL, destination string, payload *payloadStruct, namespace namespaces.Namespace, recursive bool, tokenName string) (transferResults []TransferResults, err error) {
+func downloadHttp(ctx context.Context, sourceUrl *url.URL, destination string, payload *payloadStruct, namespace namespaces.Namespace, recursive bool, tokenName string) (transferResults []TransferResults, err error) {
 	// First, create a handler for any panics that occur
 	defer func() {
 		if r := recover(); r != nil {
@@ -295,17 +296,25 @@ func download_http(sourceUrl *url.URL, destination string, payload *payloadStruc
 
 	var token string
 	if namespace.UseTokenOnRead {
-		var err error
 		token, err = getToken(sourceUrl, namespace, false, tokenName)
 		if err != nil {
 			log.Errorln("Failed to get token though required to read from this namespace:", err)
-			return nil, err
+			return
 		}
 	}
 
 	// Check the env var "USE_OSDF_DIRECTOR" and decide if ordered caches should come from director
 	var transfers []TransferDetails
-	var files []string
+	files := make(chan string, 5)
+	ctx, cancel := context.WithCancel(ctx)
+	egrp, egrpCtx := errgroup.WithContext(ctx)
+	defer func() {
+		err = egrp.Wait()
+		if err != context.Canceled {
+			log.Errorln("Error when shutting down worker:", err)
+		}
+	}()
+	defer cancel()
 	directorUrl := param.Federation_DirectorUrl.GetString()
 	closestNamespaceCaches, err := GetCachesFromNamespace(namespace, directorUrl != "")
 	if err != nil {
@@ -322,14 +331,14 @@ func download_http(sourceUrl *url.URL, destination string, payload *payloadStruc
 	log.Debugln("Trying the caches:", closestNamespaceCaches[:cachesToTry])
 
 	if recursive {
-		var err error
-		files, err = walkDavDir(sourceUrl, namespace, token, "", false)
-		if err != nil {
-			log.Errorln("Error from walkDavDir", err)
-			return nil, err
-		}
+		egrp.Go(func() error {
+			err = walkDirDownload(ctx, files, sourceUrl, namespace, token)
+			close(files)
+			return err
+		})
 	} else {
-		files = append(files, sourceUrl.Path)
+		files <- sourceUrl.Path
+		close(files)
 	}
 
 	for _, cache := range closestNamespaceCaches[:cachesToTry] {
@@ -346,139 +355,154 @@ func download_http(sourceUrl *url.URL, destination string, payload *payloadStruc
 		log.Debugln("Transfers:", transfers[0].Url.Opaque)
 	} else {
 		log.Debugln("No transfers possible as no caches are found")
-		return nil, errors.New("No transfers possible as no caches are found")
+		err = errors.New("No transfers possible as no caches are found")
+		return
 	}
-	// Create the wait group and the transfer files
-	var wg sync.WaitGroup
-
-	workChan := make(chan string)
-	results := make(chan TransferResults, len(files))
-	//tf := TransferFiles{files: files}
 
 	if ObjectClientOptions.Recursive && ObjectClientOptions.ProgressBars {
 		log.SetOutput(getProgressContainer())
+		defer func() {
+			getProgressContainer().Wait()
+			log.SetOutput(os.Stdout)
+		}()
 	}
 	// Start the workers
-	for i := 1; i <= 5; i++ {
-		wg.Add(1)
-		go startDownloadWorker(sourceUrl.Path, destination, token, transfers, payload, &wg, workChan, results)
+	results := make(chan *TransferResults)
+	workerCount := param.Client_WorkerCount.GetInt()
+	if workerCount <= 0 {
+		return nil, errors.New("Parameter Client.WorkerCount must be set to a positive integer")
+	}
+	for i := 1; i <= workerCount; i++ {
+		egrp.Go(func() error {
+			startDownloadWorker(ctx, sourceUrl.Path, destination, token, transfers, payload, files, results)
+			return nil
+		})
 	}
 
-	// For each file, send it to the worker
-	for _, file := range files {
-		workChan <- file
-	}
-	close(workChan)
-
-	// Wait for all the transfers to complete
-	wg.Wait()
-
-	var downloadError error = nil
+	var downloadError *TransferErrors = nil
+	finishedWorkers := 0
 	// Every transfer should send a TransferResults to the results channel
-	for i := 0; i < len(files); i++ {
+	for {
 		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-egrpCtx.Done():
+			return nil, egrpCtx.Err()
 		case result := <-results:
-			transferResults = append(transferResults, result)
-			if result.Error != nil {
-				downloadError = result.Error
+			if result == nil {
+				finishedWorkers += 1
+				if finishedWorkers == workerCount {
+					close(results)
+					if downloadError != nil {
+						return transferResults, downloadError
+					} else {
+						return transferResults, nil
+					}
+				}
+				break
 			}
-		default:
-			// Didn't get a result, that's weird
-			downloadError = errors.New("failed to get outputs from one of the transfers")
+			transferResults = append(transferResults, *result)
+			if result.Error != nil {
+				if downloadError == nil {
+					downloadError = NewTransferErrors()
+				}
+				downloadError.AddError(result.Error)
+			}
 		}
 	}
-	// Make sure to close the progressContainer after all download complete
-	if ObjectClientOptions.Recursive && ObjectClientOptions.ProgressBars {
-		getProgressContainer().Wait()
-		log.SetOutput(os.Stdout)
-	}
-	return transferResults, downloadError
 
 }
 
-func startDownloadWorker(source string, destination string, token string, transfers []TransferDetails, payload *payloadStruct, wg *sync.WaitGroup, workChan <-chan string, results chan<- TransferResults) {
+func startDownloadWorker(ctx context.Context, source string, destination string, token string, transfers []TransferDetails, payload *payloadStruct, workChan <-chan string, results chan<- *TransferResults) {
 
-	defer wg.Done()
 	var success bool
 	var attempts []Attempt
-	for file := range workChan {
-		// Remove the source from the file path
-		newFile := strings.Replace(file, source, "", 1)
-		finalDest := path.Join(destination, newFile)
-		directory := path.Dir(finalDest)
-		var downloaded int64
-		err := os.MkdirAll(directory, 0700)
-		if err != nil {
-			results <- TransferResults{Error: errors.New("Failed to make directory:" + directory)}
-			continue
-		}
-		for idx, transfer := range transfers { // For each transfer (usually 3), populate each attempt given
-			var attempt Attempt
-			var timeToFirstByte int64
-			var serverVersion string
-			attempt.Number = idx // Start with 0
-			attempt.Endpoint = transfer.Url.Host
-			transfer.Url.Path = file
-			log.Debugln("Constructed URL:", transfer.Url.String())
-			if downloaded, timeToFirstByte, serverVersion, err = DownloadHTTP(transfer, finalDest, token, payload); err != nil {
-				log.Debugln("Failed to download:", err)
-				transferEndTime := time.Now().Unix()
-				var ope *net.OpError
-				var cse *ConnectionSetupError
-				errorString := "Failed to download from " + transfer.Url.Hostname() + ":" +
-					transfer.Url.Port() + " "
-				if errors.As(err, &ope) && ope.Op == "proxyconnect" {
-					log.Debugln(ope)
-					AddrString, _ := os.LookupEnv("http_proxy")
-					if ope.Addr != nil {
-						AddrString = " " + ope.Addr.String()
-					}
-					errorString += "due to proxy " + AddrString + " error: " + ope.Unwrap().Error()
-				} else if errors.As(err, &cse) {
-					errorString += "+ proxy=" + strconv.FormatBool(transfer.Proxy) + ": "
-					if sce, ok := cse.Unwrap().(grab.StatusCodeError); ok {
-						errorString += sce.Error()
-					} else {
-						errorString += err.Error()
-					}
-				} else {
-					errorString += "+ proxy=" + strconv.FormatBool(transfer.Proxy) +
-						": " + err.Error()
-				}
-				AddError(&FileDownloadError{errorString, err})
-				attempt.TransferFileBytes = downloaded
-				attempt.TimeToFirstByte = timeToFirstByte
-				attempt.Error = errors.New(errorString)
-				attempt.TransferEndTime = int64(transferEndTime)
-				attempt.ServerVersion = serverVersion
-				attempts = append(attempts, attempt)
-				continue
-			} else {
-				transferEndTime := time.Now().Unix()
-				attempt.TransferEndTime = int64(transferEndTime)
-				attempt.TimeToFirstByte = timeToFirstByte
-				attempt.TransferFileBytes = downloaded
-				attempt.ServerVersion = serverVersion
-				log.Debugln("Downloaded bytes:", downloaded)
-				attempts = append(attempts, attempt)
-				success = true
-				break
-			}
-
-		}
-		if !success {
-			log.Debugln("Failed to download with HTTP")
-			results <- TransferResults{
-				TransferredBytes: downloaded,
-				Error:            errors.New("failed to download with HTTP"),
-				Attempts:         attempts,
-			}
+	for {
+		select {
+		case <-ctx.Done():
 			return
-		} else {
-			results <- TransferResults{
-				TransferredBytes: downloaded,
-				Error:            nil,
-				Attempts:         attempts,
+		case file, ok := <-workChan:
+			if !ok {
+				results <- nil
+				return
+			}
+			// Remove the source from the file path
+			newFile := strings.Replace(file, source, "", 1)
+			finalDest := path.Join(destination, newFile)
+			directory := path.Dir(finalDest)
+			var downloaded int64
+			err := os.MkdirAll(directory, 0700)
+			if err != nil {
+				results <- &TransferResults{Error: errors.New("Failed to make directory:" + directory)}
+				continue
+			}
+			for idx, transfer := range transfers { // For each transfer (usually 3), populate each attempt given
+				var attempt Attempt
+				var timeToFirstByte int64
+				var serverVersion string
+				attempt.Number = idx // Start with 0
+				attempt.Endpoint = transfer.Url.Host
+				transfer.Url.Path = file
+				log.Debugln("Constructed URL:", transfer.Url.String())
+				if downloaded, timeToFirstByte, serverVersion, err = downloadHTTP(ctx, transfer, finalDest, token, payload); err != nil {
+					log.Debugln("Failed to download:", err)
+					transferEndTime := time.Now().Unix()
+					var ope *net.OpError
+					var cse *ConnectionSetupError
+					errorString := "Failed to download from " + transfer.Url.Hostname() + ":" +
+						transfer.Url.Port() + " "
+					if errors.As(err, &ope) && ope.Op == "proxyconnect" {
+						log.Debugln(ope)
+						AddrString, _ := os.LookupEnv("http_proxy")
+						if ope.Addr != nil {
+							AddrString = " " + ope.Addr.String()
+						}
+						errorString += "due to proxy " + AddrString + " error: " + ope.Unwrap().Error()
+					} else if errors.As(err, &cse) {
+						errorString += "+ proxy=" + strconv.FormatBool(transfer.Proxy) + ": "
+						if sce, ok := cse.Unwrap().(grab.StatusCodeError); ok {
+							errorString += sce.Error()
+						} else {
+							errorString += err.Error()
+						}
+					} else {
+						errorString += "+ proxy=" + strconv.FormatBool(transfer.Proxy) +
+							": " + err.Error()
+					}
+					attempt.TransferFileBytes = downloaded
+					attempt.TimeToFirstByte = timeToFirstByte
+					attempt.Error = errors.New(errorString)
+					attempt.TransferEndTime = int64(transferEndTime)
+					attempt.ServerVersion = serverVersion
+					attempts = append(attempts, attempt)
+					continue
+				} else {
+					transferEndTime := time.Now().Unix()
+					attempt.TransferEndTime = int64(transferEndTime)
+					attempt.TimeToFirstByte = timeToFirstByte
+					attempt.TransferFileBytes = downloaded
+					attempt.ServerVersion = serverVersion
+					log.Debugln("Downloaded bytes:", downloaded)
+					attempts = append(attempts, attempt)
+					success = true
+					break
+				}
+
+			}
+			if !success {
+				log.Debugln("Failed to download with HTTP")
+				results <- &TransferResults{
+					TransferredBytes: downloaded,
+					Error:            errors.New("failed to download with HTTP"),
+					Attempts:         attempts,
+				}
+				return
+			} else {
+				results <- &TransferResults{
+					TransferredBytes: downloaded,
+					Error:            nil,
+					Attempts:         attempts,
+				}
 			}
 		}
 	}
@@ -498,9 +522,9 @@ func parseTransferStatus(status string) (int, string) {
 	return statusCode, strings.TrimSpace(parts[1])
 }
 
-// DownloadHTTP - Perform the actual download of the file
+// downloadHTTP - Perform the actual download of the file
 // Returns: downloaded size, time to 1st byte downloaded, serverVersion and an error if there is one
-func DownloadHTTP(transfer TransferDetails, dest string, token string, payload *payloadStruct) (int64, int64, string, error) {
+func downloadHTTP(ctx context.Context, transfer TransferDetails, dest string, token string, payload *payloadStruct) (int64, int64, string, error) {
 
 	// Create the client, request, and context
 	client := grab.NewClient()
@@ -514,7 +538,7 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string, payload *
 	}
 	httpClient.Transport = transport
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	log.Debugln("Transfer URL String:", transfer.Url.String())
 	var req *grab.Request
@@ -548,7 +572,7 @@ func DownloadHTTP(transfer TransferDetails, dest string, token string, payload *
 	if payload != nil && payload.ProjectName != "" {
 		req.HTTPRequest.Header.Set("User-Agent", payload.ProjectName)
 	}
-	req.WithContext(ctx)
+	req = req.WithContext(ctx)
 
 	// Test the transfer speed every 5 seconds
 	t := time.NewTicker(5000 * time.Millisecond)
@@ -820,17 +844,23 @@ func (pr *ProgressReader) Size() int64 {
 }
 
 // Recursively uploads a directory with all files and nested dirs, keeping file structure on server side
-func UploadDirectory(src string, dest *url.URL, token string, namespace namespaces.Namespace, projectName string) (transferResults []TransferResults, err error) {
-	var files []string
-	srcUrl := url.URL{Path: src}
+func uploadDirectory(ctx context.Context, src string, dest *url.URL, token string, namespace namespaces.Namespace, projectName string) (transferResults []TransferResults, err error) {
+	egrp, egrpCtx := errgroup.WithContext(ctx)
+
+	files := make(chan string)
 	// Get the list of files as well as make any directories on the server end
-	files, err = walkDavDir(&srcUrl, namespace, token, dest.Path, true)
-	if err != nil {
-		return nil, err
-	}
+	egrp.Go(func() error {
+		err := walkDirUpload(ctx, src, files)
+		close(files)
+		return err
+	})
 
 	if ObjectClientOptions.ProgressBars {
 		log.SetOutput(getProgressContainer())
+		defer func() {
+			getProgressContainer().Wait()
+			log.SetOutput(os.Stdout)
+		}()
 	}
 	var transfer TransferResults
 
@@ -846,37 +876,50 @@ func UploadDirectory(src string, dest *url.URL, token string, namespace namespac
 	}
 
 	// Upload all of our files within the proper directories
-	for _, file := range files {
-		tempDest := url.URL{}
+	var uploadError *TransferErrors
+	for {
+		select {
+		case <-ctx.Done():
+			err = ctx.Err()
+			return
+		case <-egrpCtx.Done():
+			err = egrpCtx.Err()
+			return
+		case file, ok := <-files:
+			if !ok {
+				if uploadError != nil {
+					err = uploadError
+				}
+				return transferResults, err
+			}
+			tempDest := url.URL{}
 
-		if destDirSpecified {
-			destFile := strings.TrimPrefix(file, src)
-			tempDest.Path, err = url.JoinPath(dest.Path, destFile)
-		} else {
-			destFile := strings.TrimPrefix(file, src)
-			tempDest.Path, err = url.JoinPath(dest.Path, path.Base(src), destFile)
-		}
+			if destDirSpecified {
+				destFile := strings.TrimPrefix(file, src)
+				tempDest.Path, err = url.JoinPath(dest.Path, destFile)
+			} else {
+				destFile := strings.TrimPrefix(file, src)
+				tempDest.Path, err = url.JoinPath(dest.Path, path.Base(src), destFile)
+			}
 
-		if err != nil {
-			return nil, err
+			if err != nil {
+				return nil, err
+			}
+			transfer, err = uploadFile(ctx, file, &tempDest, token, namespace, projectName)
+			if err != nil {
+				if uploadError == nil {
+					uploadError = &TransferErrors{}
+				}
+				uploadError.AddError(err)
+			}
+			// Add info from each transfer to transferResults
+			transferResults = append(transferResults, transfer)
 		}
-		transfer, err = UploadFile(file, &tempDest, token, namespace, projectName)
-		if err != nil {
-			return nil, err
-		}
-		// Add info from each transfer to transferResults
-		transferResults = append(transferResults, transfer)
 	}
-	// Close progress bar container
-	if ObjectClientOptions.ProgressBars {
-		getProgressContainer().Wait()
-		log.SetOutput(os.Stdout)
-	}
-	return transferResults, err
 }
 
-// UploadFile Uploads a file using HTTP
-func UploadFile(src string, origDest *url.URL, token string, namespace namespaces.Namespace, projectName string) (transferResult TransferResults, err error) {
+// Upload a single object to the origin
+func uploadFile(ctx context.Context, src string, origDest *url.URL, token string, namespace namespaces.Namespace, projectName string) (transferResult TransferResults, err error) {
 	log.Debugln("In UploadFile")
 	log.Debugln("Dest", origDest.String())
 	var attempt Attempt
@@ -940,7 +983,7 @@ func UploadFile(src string, origDest *url.URL, token string, namespace namespace
 	errorChan := make(chan error, 1)
 	responseChan := make(chan *http.Response)
 	reader := &ProgressReader{ioreader, sizer, closed}
-	putContext, cancel := context.WithCancel(context.Background())
+	putContext, cancel := context.WithCancel(ctx)
 	defer cancel()
 	log.Debugln("Full destination URL:", dest.String())
 	var request *http.Request
@@ -1098,8 +1141,8 @@ func doPut(request *http.Request, responseChan chan<- *http.Response, errorChan 
 
 }
 
-func walkDavDir(url *url.URL, namespace namespaces.Namespace, token string, destPath string, upload bool) ([]string, error) {
-
+// Walk a remote directory in a WebDAV server, emitting the files discovered
+func walkDirDownload(ctx context.Context, files chan string, url *url.URL, namespace namespaces.Namespace, token string) error {
 	// Create the client to walk the filesystem
 	rootUrl := *url
 	if namespace.DirListHost != "" {
@@ -1107,13 +1150,13 @@ func walkDavDir(url *url.URL, namespace namespaces.Namespace, token string, dest
 		dirListURL, err := url.Parse(namespace.DirListHost)
 		if err != nil {
 			log.Errorln("Failed to parse dirlisthost from namespaces into URL:", err)
-			return nil, err
+			return err
 		}
 		rootUrl = *dirListURL
 
 	} else {
 		log.Errorln("Host for directory listings is unknown")
-		return nil, errors.New("Host for directory listings is unknown")
+		return errors.New("Host for directory listings is unknown")
 	}
 	log.Debugln("Dir list host: ", rootUrl.String())
 
@@ -1123,70 +1166,62 @@ func walkDavDir(url *url.URL, namespace namespaces.Namespace, token string, dest
 	// XRootD does not like keep alives and kills things, so turn them off.
 	transport := config.GetTransport()
 	c.SetTransport(transport)
-	var files []string
-	var err error
-	if upload {
-		files, err = walkDirUpload(url.Path, c, destPath)
-	} else {
-		files, err = walkDir(url.Path, c)
-	}
-	log.Debugln("Found files:", files)
-	return files, err
-
+	return walkDir(ctx, files, url.Path, c)
 }
 
-// For uploads, we want to make directories on the server end
-func walkDirUpload(path string, client *gowebdav.Client, destPath string) ([]string, error) {
-	// List of files to return
-	var files []string
-
-	// Get our list of files
-	infos, err := os.ReadDir(path)
-	if err != nil {
-		return nil, err
-	}
-	for _, info := range infos {
-		newPath := path + "/" + info.Name()
-		newDestPath := destPath + "/" + info.Name() //TODO make path.Join
-		if info.IsDir() {
-			// Recursively call this function to create any nested dir's as well as list their files
-			returnedFiles, err := walkDirUpload(newPath, client, newDestPath)
-			if err != nil {
-				return nil, err
-			}
-			files = append(files, returnedFiles...)
-		} else {
-			// It is a normal file
-			files = append(files, newPath)
-		}
-	}
-	return files, err
-}
-
-func walkDir(path string, client *gowebdav.Client) ([]string, error) {
-	var files []string
+func walkDir(ctx context.Context, files chan string, path string, client *gowebdav.Client) error {
 	log.Debugln("Reading directory: ", path)
 	infos, err := client.ReadDir(path)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	for _, info := range infos {
 		newPath := path + "/" + info.Name()
 		if info.IsDir() {
-			returnedFiles, err := walkDir(newPath, client)
+			err := walkDir(ctx, files, newPath, client)
 			if err != nil {
-				return nil, err
+				return err
 			}
-			files = append(files, returnedFiles...)
 		} else {
-			// It is a normal file
-			files = append(files, newPath)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case files <- newPath:
+			}
 		}
 	}
-	return files, nil
+	return nil
 }
 
-func StatHttp(dest *url.URL, namespace namespaces.Namespace) (uint64, error) {
+// Walk a local directory structure, writing all discovered files to the files channel
+func walkDirUpload(ctx context.Context, path string, files chan string) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
+	// Get our list of directory entries
+	infos, err := os.ReadDir(path)
+	if err != nil {
+		return err
+	}
+
+	for _, info := range infos {
+		newPath := path + "/" + info.Name()
+		if info.IsDir() {
+			// Recursively call this function to create any nested dir's as well as list their files
+			err := walkDirUpload(ctx, newPath, files)
+			if err != nil {
+				return err
+			}
+		} else if info.Type().IsRegular() {
+			// It is a normal file
+			files <- newPath
+		}
+	}
+	return err
+}
+
+func statHttp(ctx context.Context, dest *url.URL, namespace namespaces.Namespace) (uint64, error) {
 
 	scitoken_contents, err := getToken(dest, namespace, false, "")
 	if err != nil {
@@ -1215,7 +1250,7 @@ func StatHttp(dest *url.URL, namespace namespaces.Namespace) (uint64, error) {
 		}
 
 		client := &http.Client{Transport: transport}
-		req, err := http.NewRequest("HEAD", dest.String(), nil)
+		req, err := http.NewRequestWithContext(ctx, "HEAD", dest.String(), nil)
 		if err != nil {
 			log.Errorln("Failed to create HTTP request:", err)
 			return 0, err

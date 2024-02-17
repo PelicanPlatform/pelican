@@ -331,5 +331,5 @@ func TestParseNoJobAd(t *testing.T) {
 	os.Setenv("_CONDOR_JOB_AD", path)
 
 	payload := payloadStruct{}
-	parse_job_ad(&payload)
+	parseJobAd(&payload)
 }

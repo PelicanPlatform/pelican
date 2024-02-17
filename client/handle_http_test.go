@@ -152,6 +152,8 @@ func TestNewTransferDetailsEnv(t *testing.T) {
 }
 
 func TestSlowTransfers(t *testing.T) {
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+
 	// Adjust down some timeouts to speed up the test
 	viper.Set("Client.SlowTransferWindow", 5)
 	viper.Set("Client.SlowTransferRampupTime", 10)
@@ -191,7 +193,7 @@ func TestSlowTransfers(t *testing.T) {
 	var err error
 	// Do a quick timeout
 	go func() {
-		_, _, _, err = DownloadHTTP(transfers[0], filepath.Join(t.TempDir(), "test.txt"), "", nil)
+		_, _, _, err = downloadHTTP(ctx, transfers[0], filepath.Join(t.TempDir(), "test.txt"), "", nil)
 		finishedChannel <- true
 	}()
 
@@ -215,6 +217,8 @@ func TestSlowTransfers(t *testing.T) {
 
 // Test stopped transfer
 func TestStoppedTransfer(t *testing.T) {
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+
 	// Adjust down the timeouts
 	viper.Set("Client.StoppedTransferTimeout", 3)
 	viper.Set("Client.SlowTransferRampupTime", 100)
@@ -254,7 +258,7 @@ func TestStoppedTransfer(t *testing.T) {
 	var err error
 
 	go func() {
-		_, _, _, err = DownloadHTTP(transfers[0], filepath.Join(t.TempDir(), "test.txt"), "", nil)
+		_, _, _, err = downloadHTTP(ctx, transfers[0], filepath.Join(t.TempDir(), "test.txt"), "", nil)
 		finishedChannel <- true
 	}()
 
@@ -277,6 +281,8 @@ func TestStoppedTransfer(t *testing.T) {
 
 // Test connection error
 func TestConnectionError(t *testing.T) {
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("dialClosedPort: Listen failed: %v", err)
@@ -284,13 +290,15 @@ func TestConnectionError(t *testing.T) {
 	addr := l.Addr().String()
 	l.Close()
 
-	_, _, _, err = DownloadHTTP(TransferDetails{Url: url.URL{Host: addr, Scheme: "http"}, Proxy: false}, filepath.Join(t.TempDir(), "test.txt"), "", nil)
+	_, _, _, err = downloadHTTP(ctx, TransferDetails{Url: url.URL{Host: addr, Scheme: "http"}, Proxy: false}, filepath.Join(t.TempDir(), "test.txt"), "", nil)
 
 	assert.IsType(t, &ConnectionSetupError{}, err)
 
 }
 
 func TestTrailerError(t *testing.T) {
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+
 	// Set up an HTTP server that returns an error trailer
 	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Trailer", "X-Transfer-Status")
@@ -317,7 +325,7 @@ func TestTrailerError(t *testing.T) {
 	assert.Equal(t, svr.URL, transfers[0].Url.String())
 
 	// Call DownloadHTTP and check if the error is returned correctly
-	_, _, _, err := DownloadHTTP(transfers[0], filepath.Join(t.TempDir(), "test.txt"), "", nil)
+	_, _, _, err := downloadHTTP(ctx, transfers[0], filepath.Join(t.TempDir(), "test.txt"), "", nil)
 
 	assert.NotNil(t, err)
 	assert.EqualError(t, err, "transfer error: Unable to read test.txt; input/output error")
@@ -533,15 +541,14 @@ func TestFullUpload(t *testing.T) {
 		fileName := filepath.Base(tempPath)
 		uploadURL := "stash:///test/" + fileName
 
-		methods := []string{"http"}
-		transferResults, err := DoStashCPSingle(tempFile.Name(), uploadURL, methods, false)
+		transferResults, err := DoCopy(ctx, tempFile.Name(), uploadURL, false)
 		assert.NoError(t, err, "Error uploading file")
 		assert.Equal(t, int64(len(testFileContent)), transferResults[0].TransferredBytes, "Uploaded file size does not match")
 
 		// Upload an osdf file
 		uploadURL = "osdf:///test/stuff/blah.txt"
 		assert.NoError(t, err, "Error parsing upload URL")
-		transferResults, err = DoStashCPSingle(tempFile.Name(), uploadURL, methods, false)
+		transferResults, err = DoCopy(ctx, tempFile.Name(), uploadURL, false)
 		assert.NoError(t, err, "Error uploading file")
 		assert.Equal(t, int64(len(testFileContent)), transferResults[0].TransferredBytes, "Uploaded file size does not match")
 	})
@@ -667,6 +674,8 @@ func (f *FedTest) Teardown() {
 // A test that spins up a federation, and tests object get and put
 func TestGetAndPutAuth(t *testing.T) {
 	// Create instance of test federation
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+
 	viper.Reset()
 	fed := FedTest{T: t}
 	fed.Spinup()
@@ -724,14 +733,14 @@ func TestGetAndPutAuth(t *testing.T) {
 
 		// Upload the file with PUT
 		ObjectClientOptions.Token = tempToken.Name()
-		transferResultsUpload, err := DoPut(tempFile.Name(), uploadURL, false)
+		transferResultsUpload, err := DoPut(ctx, tempFile.Name(), uploadURL, false)
 		assert.NoError(t, err)
 		if err == nil {
 			assert.Equal(t, transferResultsUpload[0].TransferredBytes, int64(17))
 		}
 
 		// Download that same file with GET
-		transferResultsDownload, err := DoGet(uploadURL, t.TempDir(), false)
+		transferResultsDownload, err := DoGet(ctx, uploadURL, t.TempDir(), false)
 		assert.NoError(t, err)
 		if err == nil {
 			assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
@@ -749,14 +758,14 @@ func TestGetAndPutAuth(t *testing.T) {
 
 		// Upload the file with PUT
 		ObjectClientOptions.Token = tempToken.Name()
-		transferResultsUpload, err := DoPut(tempFile.Name(), uploadURL, false)
+		transferResultsUpload, err := DoPut(ctx, tempFile.Name(), uploadURL, false)
 		assert.NoError(t, err)
 		if err == nil {
 			assert.Equal(t, transferResultsUpload[0].TransferredBytes, int64(17))
 		}
 
 		// Download that same file with GET
-		transferResultsDownload, err := DoGet(uploadURL, t.TempDir(), false)
+		transferResultsDownload, err := DoGet(ctx, uploadURL, t.TempDir(), false)
 		assert.NoError(t, err)
 		if err == nil {
 			assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
@@ -774,14 +783,14 @@ func TestGetAndPutAuth(t *testing.T) {
 
 		// Upload the file with PUT
 		ObjectClientOptions.Token = tempToken.Name()
-		transferResultsUpload, err := DoPut(tempFile.Name(), uploadURL, false)
+		transferResultsUpload, err := DoPut(ctx, tempFile.Name(), uploadURL, false)
 		assert.NoError(t, err)
 		if err == nil {
 			assert.Equal(t, transferResultsUpload[0].TransferredBytes, int64(17))
 		}
 
 		// Download that same file with GET
-		transferResultsDownload, err := DoGet(uploadURL, t.TempDir(), false)
+		transferResultsDownload, err := DoGet(ctx, uploadURL, t.TempDir(), false)
 		assert.NoError(t, err)
 		if err == nil {
 			assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
@@ -799,14 +808,14 @@ func TestGetAndPutAuth(t *testing.T) {
 
 		// Upload the file with PUT
 		ObjectClientOptions.Token = tempToken.Name()
-		transferResultsUpload, err := DoPut(tempFile.Name(), uploadURL, false)
+		transferResultsUpload, err := DoPut(ctx, tempFile.Name(), uploadURL, false)
 		assert.NoError(t, err)
 		if err == nil {
 			assert.Equal(t, transferResultsUpload[0].TransferredBytes, int64(17))
 		}
 
 		// Download that same file with GET
-		transferResultsDownload, err := DoGet(uploadURL, t.TempDir(), false)
+		transferResultsDownload, err := DoGet(ctx, uploadURL, t.TempDir(), false)
 		assert.NoError(t, err)
 		if err == nil {
 			assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
@@ -817,6 +826,7 @@ func TestGetAndPutAuth(t *testing.T) {
 
 // A test that spins up the federation, where the origin is in EnablePublicReads mode. Then GET a file from the origin without a token
 func TestGetPublicRead(t *testing.T) {
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 	viper.Reset()
 	viper.Set("Origin.EnablePublicReads", true)
 	fed := FedTest{T: t}
@@ -840,7 +850,7 @@ func TestGetPublicRead(t *testing.T) {
 		uploadURL := "osdf:///test/" + fileName
 
 		// Download the file with GET. Shouldn't need a token to succeed
-		transferResults, err := DoGet(uploadURL, t.TempDir(), false)
+		transferResults, err := DoGet(ctx, uploadURL, t.TempDir(), false)
 		assert.NoError(t, err)
 		if err == nil {
 			assert.Equal(t, transferResults[0].TransferredBytes, int64(17))
@@ -850,6 +860,8 @@ func TestGetPublicRead(t *testing.T) {
 
 func TestRecursiveUploadsAndDownloads(t *testing.T) {
 	// Create instance of test federation
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+
 	viper.Reset()
 	fed := FedTest{T: t}
 	fed.Spinup()
@@ -922,8 +934,8 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 		//////////////////////////////////////////////////////////
 
 		// Upload the file with PUT
-		transferDetailsUpload, err := DoPut(tempDir, uploadURL, true)
-		assert.NoError(t, err)
+		transferDetailsUpload, err := DoPut(ctx, tempDir, uploadURL, true)
+		require.NoError(t, err)
 		if err == nil && len(transferDetailsUpload) == 2 {
 			countBytes17 := 0
 			countBytes23 := 0
@@ -951,7 +963,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 		}
 
 		// Download the files we just uploaded
-		transferDetailsDownload, err := DoGet(uploadURL, t.TempDir(), true)
+		transferDetailsDownload, err := DoGet(ctx, uploadURL, t.TempDir(), true)
 		assert.NoError(t, err)
 		if err == nil && len(transferDetailsUpload) == 2 {
 			countBytesUploadIdx0 := 0
@@ -993,7 +1005,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 		//////////////////////////////////////////////////////////
 
 		// Upload the file with PUT
-		transferDetailsUpload, err := DoPut(tempDir, uploadURL, true)
+		transferDetailsUpload, err := DoPut(ctx, tempDir, uploadURL, true)
 		assert.NoError(t, err)
 		if err == nil && len(transferDetailsUpload) == 2 {
 			countBytes17 := 0
@@ -1022,7 +1034,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 		}
 
 		// Download the files we just uploaded
-		transferDetailsDownload, err := DoGet(uploadURL, t.TempDir(), true)
+		transferDetailsDownload, err := DoGet(ctx, uploadURL, t.TempDir(), true)
 		assert.NoError(t, err)
 		if err == nil && len(transferDetailsUpload) == 2 {
 			countBytesUploadIdx0 := 0
@@ -1064,7 +1076,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 		//////////////////////////////////////////////////////////
 
 		// Upload the file with PUT
-		transferDetailsUpload, err := DoPut(tempDir, uploadURL, true)
+		transferDetailsUpload, err := DoPut(ctx, tempDir, uploadURL, true)
 		assert.NoError(t, err)
 		if err == nil && len(transferDetailsUpload) == 2 {
 			countBytes17 := 0
@@ -1093,7 +1105,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 		}
 
 		// Download the files we just uploaded
-		transferDetailsDownload, err := DoGet(uploadURL, t.TempDir(), true)
+		transferDetailsDownload, err := DoGet(ctx, uploadURL, t.TempDir(), true)
 		assert.NoError(t, err)
 		if err == nil && len(transferDetailsUpload) == 2 {
 			countBytesUploadIdx0 := 0
@@ -1135,7 +1147,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 		//////////////////////////////////////////////////////////
 
 		// Upload the file with PUT
-		transferDetailsUpload, err := DoPut(tempDir, uploadURL, true)
+		transferDetailsUpload, err := DoPut(ctx, tempDir, uploadURL, true)
 		assert.NoError(t, err)
 		if err == nil && len(transferDetailsUpload) == 2 {
 			countBytes17 := 0
@@ -1164,7 +1176,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 		}
 
 		// Download the files we just uploaded
-		transferDetailsDownload, err := DoGet(uploadURL, t.TempDir(), true)
+		transferDetailsDownload, err := DoGet(ctx, uploadURL, t.TempDir(), true)
 		assert.NoError(t, err)
 		if err == nil && len(transferDetailsUpload) == 2 {
 			countBytesUploadIdx0 := 0

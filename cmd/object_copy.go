@@ -19,6 +19,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -182,15 +183,6 @@ func copyMain(cmd *cobra.Command, args []string) {
 		client.CacheOverride = true
 	}
 
-	// Convert the methods
-	methodNames, _ := cmd.Flags().GetString("methods")
-	splitMethods := strings.Split(methodNames, ",")
-
-	// If the user overrides the cache, then only use HTTP
-	if client.CacheOverride {
-		splitMethods = []string{"http"}
-	}
-
 	if len(source) > 1 {
 		if destStat, err := os.Stat(dest); err != nil && destStat.IsDir() {
 			log.Errorln("Destination is not a directory")
@@ -203,7 +195,7 @@ func copyMain(cmd *cobra.Command, args []string) {
 	for _, src := range source {
 		isRecursive, _ := cmd.Flags().GetBool("recursive")
 		client.ObjectClientOptions.Recursive = isRecursive
-		_, result = client.DoStashCPSingle(src, dest, splitMethods, isRecursive)
+		_, result = client.DoCopy(context.Background(), src, dest, isRecursive)
 		if result != nil {
 			lastSrc = src
 			break

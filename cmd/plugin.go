@@ -20,6 +20,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io/fs"
 	"net/url"
@@ -27,7 +28,6 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -37,6 +37,7 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	"golang.org/x/sync/errgroup"
 )
 
 var (
@@ -123,7 +124,6 @@ func stashPluginMain(args []string) {
 	client.ObjectClientOptions.ProgressBars = false
 	client.ObjectClientOptions.Version = version
 	client.ObjectClientOptions.Plugin = true
-	methods := []string{"http"}
 	var infile, testCachePath string
 	var getCaches bool = false
 
@@ -219,6 +219,7 @@ func stashPluginMain(args []string) {
 		os.Exit(1)
 	}
 
+	var workChan chan Transfer
 	if len(args) == 0 {
 		// Open the input and output files
 		infileFile, err := os.Open(infile)
@@ -233,13 +234,22 @@ func stashPluginMain(args []string) {
 			log.Errorln("Failed to read in from stdin:", err)
 			os.Exit(1)
 		}
-	} else {
+		workChan = make(chan Transfer, len(transfers))
+		for _, transfer := range transfers {
+			workChan <- transfer
+		}
+	} else if len(args) > 1 {
 		source = args[:len(args)-1]
 		dest = args[len(args)-1]
+		workChan = make(chan Transfer, len(args)-1)
 		for _, src := range source {
-			transfers = append(transfers, Transfer{url: src, localFile: dest})
+			workChan <- Transfer{url: src, localFile: dest}
 		}
+	} else {
+		log.Errorln("Must provide both source and destination as argument")
+		os.Exit(1)
 	}
+	close(workChan)
 
 	// NOTE: HTCondor 23.3.0 and before would reuse the outfile names for multiple
 	// transfers, meaning the results of prior plugin invocations would be present
@@ -261,31 +271,30 @@ func stashPluginMain(args []string) {
 		defer outputFile.Close()
 	}
 
-	var wg sync.WaitGroup
+	ctx, cancel := context.WithCancel(context.Background())
+	egrp, _ := errgroup.WithContext(ctx)
+	defer func() {
+		err = egrp.Wait()
+		if err != context.Canceled {
+			log.Errorln("Error when shutting down worker:", err)
+		}
+	}()
+	defer cancel()
 
-	workChan := make(chan Transfer, len(transfers))
-	results := make(chan *classads.ClassAd, len(transfers))
+	results := make(chan *classads.ClassAd, 5)
 
 	// Start workers
 	for i := 1; i <= 5; i++ {
-		wg.Add(1)
-		go moveObjects(source, methods, upload, &wg, workChan, results)
+		egrp.Go(func() error {
+			launchMoveWorker(upload, workChan, results)
+			return nil
+		})
 	}
 
 	success := true
 	var resultAds []*classads.ClassAd
-	counter := 0
 	done := false
 	for !done {
-		// Send to work channel the amount of transfers we have
-		if counter < len(transfers) {
-			workChan <- transfers[counter]
-			counter++
-		} else if counter == len(transfers) { // Once we sent all the work, close the channel
-			close(workChan)
-			// Increment counter so we no longer hit this case
-			counter++
-		}
 		select {
 		case resultAd := <-results:
 			// Process results as soon as we get them
@@ -300,25 +309,17 @@ func stashPluginMain(args []string) {
 				// Add the final (failed) result to the resultAds
 				resultAds = append(resultAds, resultAd)
 				done = true
-				break
 			} else { // Otherwise, we add to end result ads
 				resultAds = append(resultAds, resultAd)
-			}
-		default:
-			// We are either done or still downloading/uploading
-			if len(resultAds) == len(transfers) {
-				log.Debugln("Finished transfering objects! :)")
-				done = true
-				break
 			}
 		}
 	}
 
-	// Wait for transfers only if successful
-	if success {
-		wg.Wait()
+	// Ensure all our workers are shut down.
+	cancel()
+	if waitErr := egrp.Wait(); waitErr != nil && waitErr != context.Canceled {
+		log.Errorln("Error when shutting down worker:", waitErr)
 	}
-
 	close(results)
 
 	success, retryable := writeOutfile(resultAds, outputFile)
@@ -356,20 +357,17 @@ func writeClassadOutputAndBail(exitCode int, resultAds []*classads.ClassAd) {
 	os.Exit(exitCode)
 }
 
-// moveObjects performs the appropriate download or upload functions for the plugin as well as
+// launchMoveWorker performs the appropriate download or upload functions for the plugin as well as
 // writes the resultAds for each transfer
 // Returns: resultAds and if an error given is retryable
-func moveObjects(source []string, methods []string, upload bool, wg *sync.WaitGroup, workChan <-chan Transfer, results chan<- *classads.ClassAd) {
-	defer wg.Done()
+func launchMoveWorker(upload bool, workChan <-chan Transfer, results chan<- *classads.ClassAd) {
 	var result error
 	for transfer := range workChan {
 		var transferResults []client.TransferResults
 		if upload {
-			source = append(source, transfer.localFile)
 			log.Debugln("Uploading:", transfer.localFile, "to", transfer.url)
-			transferResults, result = client.DoStashCPSingle(transfer.localFile, transfer.url, methods, false)
+			transferResults, result = client.DoCopy(context.Background(), transfer.localFile, transfer.url, false)
 		} else {
-			source = append(source, transfer.url)
 			log.Debugln("Downloading:", transfer.url, "to", transfer.localFile)
 
 			// When we want to auto-unpack files, we should do this to the containing directory, not the destination
@@ -382,7 +380,7 @@ func moveObjects(source []string, methods []string, upload bool, wg *sync.WaitGr
 				if url.Query().Get("pack") != "" {
 					localFile = filepath.Dir(localFile)
 				}
-				transferResults, result = client.DoStashCPSingle(transfer.url, localFile, methods, false)
+				transferResults, result = client.DoCopy(context.Background(), transfer.url, localFile, false)
 			}
 		}
 		startTime := time.Now().Unix()

@@ -19,6 +19,7 @@
 package client
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"path"
@@ -52,7 +53,7 @@ func generate_destination(filePath string, originPrefix string, shadowOriginPref
 	return "", 0, errors.New("File path must have the origin prefix")
 }
 
-func DoShadowIngest(sourceFile string, originPrefix string, shadowOriginPrefix string) (int64, string, error) {
+func DoShadowIngest(ctx context.Context, sourceFile string, originPrefix string, shadowOriginPrefix string) (int64, string, error) {
 	// After each transfer attempt, we'll check to see if the local file was modified.  If so, we'll re-upload.
 	for idx := 0; idx < 10; idx++ {
 		shadowFile, localSize, err := generate_destination(sourceFile, originPrefix, shadowOriginPrefix)
@@ -60,14 +61,13 @@ func DoShadowIngest(sourceFile string, originPrefix string, shadowOriginPrefix s
 		if err != nil {
 			return 0, "", err
 		}
-		methods := []string{"http"}
 
 		lastRemoteSize := uint64(0)
 		lastUpdateTime := time.Now()
 		startTime := lastUpdateTime
 		maxRuntime := float64(localSize/10*1024*1024) + 300
 		for {
-			remoteSize, err := CheckOSDF(shadowFile, methods)
+			remoteSize, err := DoStat(ctx, shadowFile)
 			if httpErr, ok := err.(*HttpErrResp); ok {
 				if httpErr.Code == 404 {
 					break
@@ -103,7 +103,7 @@ func DoShadowIngest(sourceFile string, originPrefix string, shadowOriginPrefix s
 			time.Sleep(5 * time.Second)
 		}
 
-		transferResults, err := DoStashCPSingle(sourceFile, shadowFile, methods, false)
+		transferResults, err := DoCopy(ctx, sourceFile, shadowFile, false)
 		if err != nil {
 			return 0, "", err
 		}

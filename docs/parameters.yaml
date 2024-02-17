@@ -329,6 +329,14 @@ type: bool
 default: false
 components: ["client"]
 ---
+name: Client.WorkerCount
+description: >-
+  An integer indicating the number of file transfer tasks that should be
+  executed in parallel
+type: int
+default: 5
+components: ["client"]
+---
 name: DisableHttpProxy
 description: >-
   A legacy configuration for disabling the client's HTTP proxy. See Client.DisableHttpProxy for new config.

@@ -19,6 +19,7 @@
 package client
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -98,17 +99,17 @@ func getTokenName(destination *url.URL) (scheme, tokenName string) {
 	return
 }
 
-// Do writeback to stash using SciTokens
-func doWriteBack(source string, destination *url.URL, namespace namespaces.Namespace, recursive bool, projectName string) (transferResults []TransferResults, err error) {
+// Do write to the origin
+func doWriteBack(ctx context.Context, source string, destination *url.URL, namespace namespaces.Namespace, recursive bool, projectName string) (transferResults []TransferResults, err error) {
 
 	scitoken_contents, err := getToken(destination, namespace, true, "")
 	if err != nil {
 		return nil, fmt.Errorf("Failed to get token for write-back: %v", err)
 	}
 	if recursive {
-		return UploadDirectory(source, destination, scitoken_contents, namespace, projectName)
+		return uploadDirectory(ctx, source, destination, scitoken_contents, namespace, projectName)
 	} else {
-		transferResult, err := UploadFile(source, destination, scitoken_contents, namespace, projectName)
+		transferResult, err := uploadFile(ctx, source, destination, scitoken_contents, namespace, projectName)
 		transferResults = append(transferResults, transferResult)
 		return transferResults, err
 	}
@@ -221,7 +222,7 @@ func getToken(destination *url.URL, namespace namespaces.Namespace, isWrite bool
 }
 
 // Check the size of a remote file in an origin
-func CheckOSDF(destination string, methods []string) (remoteSize uint64, err error) {
+func DoStat(ctx context.Context, destination string) (remoteSize uint64, err error) {
 
 	defer func() {
 		if r := recover(); r != nil {
@@ -270,18 +271,8 @@ func CheckOSDF(destination string, methods []string) (remoteSize uint64, err err
 		return 0, err
 	}
 
-	for _, method := range methods {
-
-		switch method {
-		case "http":
-			log.Info("Trying HTTP...")
-			if remoteSize, err = StatHttp(dest_uri, ns); err == nil {
-				return remoteSize, nil
-			}
-		default:
-			log.Errorf("Unknown transfer method: %s", method)
-			return 0, errors.New("Unknown transfer method")
-		}
+	if remoteSize, err = statHttp(ctx, dest_uri, ns); err == nil {
+		return remoteSize, nil
 	}
 	return 0, err
 }
@@ -468,8 +459,7 @@ localObject: the source file/directory you would like to upload
 remoteDestination: the end location of the upload
 recursive: a boolean indicating if the source is a directory or not
 */
-func DoPut(localObject string, remoteDestination string, recursive bool) (transferResults []TransferResults, err error) {
-	isPut := true
+func DoPut(ctx context.Context, localObject string, remoteDestination string, recursive bool) (transferResults []TransferResults, err error) {
 	// First, create a handler for any panics that occur
 	defer func() {
 		if r := recover(); r != nil {
@@ -539,12 +529,12 @@ func DoPut(localObject string, remoteDestination string, recursive bool) (transf
 		remoteDestination = strings.TrimPrefix(remoteDestination, remoteDestScheme+"://")
 	}
 
-	ns, err := getNamespaceInfo(remoteDestination, directorUrl, isPut)
+	ns, err := getNamespaceInfo(remoteDestination, directorUrl, true)
 	if err != nil {
 		log.Errorln(err)
 		return nil, errors.New("Failed to get namespace information from source")
 	}
-	uploadedBytes, err := doWriteBack(localObjectUrl.Path, remoteDestUrl, ns, recursive, "")
+	uploadedBytes, err := doWriteBack(ctx, localObjectUrl.Path, remoteDestUrl, ns, recursive, "")
 	return uploadedBytes, err
 
 }
@@ -556,8 +546,7 @@ remoteObject: the source file/directory you would like to upload
 localDestination: the end location of the upload
 recursive: a boolean indicating if the source is a directory or not
 */
-func DoGet(remoteObject string, localDestination string, recursive bool) (transferResults []TransferResults, err error) {
-	isPut := false
+func DoGet(ctx context.Context, remoteObject string, localDestination string, recursive bool) (transferResults []TransferResults, err error) {
 	// First, create a handler for any panics that occur
 	defer func() {
 		if r := recover(); r != nil {
@@ -621,7 +610,7 @@ func DoGet(remoteObject string, localDestination string, recursive bool) (transf
 
 	directorUrl := param.Federation_DirectorUrl.GetString()
 
-	ns, err := getNamespaceInfo(remoteObject, directorUrl, isPut)
+	ns, err := getNamespaceInfo(remoteObject, directorUrl, false)
 	if err != nil {
 		log.Errorln(err)
 		return nil, errors.New("Failed to get namespace information from source")
@@ -646,7 +635,7 @@ func DoGet(remoteObject string, localDestination string, recursive bool) (transf
 	//Fill out the payload as much as possible
 	payload.filename = remoteObjectUrl.Path
 
-	parse_job_ad(&payload)
+	parseJobAd(&payload)
 
 	payload.start1 = time.Now().Unix()
 
@@ -655,7 +644,7 @@ func DoGet(remoteObject string, localDestination string, recursive bool) (transf
 	_, token_name := getTokenName(remoteObjectUrl)
 
 	var downloaded int64
-	if transferResults, err = download_http(remoteObjectUrl, localDestination, &payload, ns, recursive, token_name); err == nil {
+	if transferResults, err = downloadHttp(ctx, remoteObjectUrl, localDestination, &payload, ns, recursive, token_name); err == nil {
 		success = true
 	}
 
@@ -671,7 +660,7 @@ func DoGet(remoteObject string, localDestination string, recursive bool) (transf
 		payload.fileSize = downloaded
 		payload.downloadSize = downloaded
 	} else {
-		log.Error("Http GET failed! Unable to download file.")
+		log.Error("Http GET failed! Unable to download file:", err)
 		payload.status = "Fail"
 	}
 
@@ -683,7 +672,7 @@ func DoGet(remoteObject string, localDestination string, recursive bool) (transf
 }
 
 // Start the transfer, whether read or write back. Primarily used for backwards compatibility
-func DoStashCPSingle(sourceFile string, destination string, methods []string, recursive bool) (transferResults []TransferResults, err error) {
+func DoCopy(ctx context.Context, sourceFile string, destination string, recursive bool) (transferResults []TransferResults, err error) {
 
 	// First, create a handler for any panics that occur
 	defer func() {
@@ -697,12 +686,12 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 
 	// Parse the source and destination with URL parse
 	sourceFile, source_scheme := correctURLWithUnderscore(sourceFile)
-	source_url, err := url.Parse(sourceFile)
+	sourceURL, err := url.Parse(sourceFile)
 	if err != nil {
 		log.Errorln("Failed to parse source URL:", err)
 		return nil, err
 	}
-	source_url.Scheme = source_scheme
+	sourceURL.Scheme = source_scheme
 
 	destination, dest_scheme := correctURLWithUnderscore(destination)
 	dest_url, err := url.Parse(destination)
@@ -715,12 +704,12 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 	defer config.SetFederation(fd)
 
 	// If there is a host specified, prepend it to the path in the osdf case
-	if source_url.Host != "" {
-		if source_url.Scheme == "osdf" || source_url.Scheme == "stash" {
-			source_url.Path = "/" + path.Join(source_url.Host, source_url.Path)
-		} else if source_url.Scheme == "pelican" {
+	if sourceURL.Host != "" {
+		if sourceURL.Scheme == "osdf" || sourceURL.Scheme == "stash" {
+			sourceURL.Path = "/" + path.Join(sourceURL.Host, sourceURL.Path)
+		} else if sourceURL.Scheme == "pelican" {
 			config.SetFederation(config.FederationDiscovery{})
-			federationUrl, _ := url.Parse(source_url.String())
+			federationUrl, _ := url.Parse(sourceURL.String())
 			federationUrl.Scheme = "https"
 			federationUrl.Path = ""
 			viper.Set("Federation.DiscoveryUrl", federationUrl.String())
@@ -747,25 +736,25 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 		}
 	}
 
-	sourceScheme, _ := getTokenName(source_url)
+	sourceScheme, _ := getTokenName(sourceURL)
 	destScheme, _ := getTokenName(dest_url)
 
 	understoodSchemes := []string{"stash", "file", "osdf", "pelican", ""}
 
 	_, foundSource := Find(understoodSchemes, sourceScheme)
 	if !foundSource {
-		log.Errorln("Do not understand source scheme:", source_url.Scheme)
+		log.Errorln("Do not understand source scheme:", sourceURL.Scheme)
 		return nil, errors.New("Do not understand source scheme")
 	}
 
 	_, foundDest := Find(understoodSchemes, destScheme)
 	if !foundDest {
-		log.Errorln("Do not understand destination scheme:", source_url.Scheme)
+		log.Errorln("Do not understand destination scheme:", sourceURL.Scheme)
 		return nil, errors.New("Do not understand destination scheme")
 	}
 
 	payload := payloadStruct{}
-	parse_job_ad(&payload)
+	parseJobAd(&payload)
 
 	// Get the namespace of the remote filesystem
 	// For write back, it will be the destination
@@ -781,7 +770,7 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 			log.Errorln(err)
 			return nil, errors.New("Failed to get namespace information from destination")
 		}
-		transferResults, err := doWriteBack(source_url.Path, dest_url, ns, recursive, payload.ProjectName) //TODO dowriteback transferResults!!!!!
+		transferResults, err := doWriteBack(ctx, sourceURL.Path, dest_url, ns, recursive, payload.ProjectName) //TODO dowriteback transferResults!!!!!
 		return transferResults, err
 	}
 
@@ -790,7 +779,7 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 	}
 
 	if sourceScheme == "stash" || sourceScheme == "osdf" || sourceScheme == "pelican" {
-		sourceFile = source_url.Path
+		sourceFile = sourceURL.Path
 	}
 
 	if string(sourceFile[0]) != "/" {
@@ -809,7 +798,7 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 	//Check if path exists or if its in a folder
 	if destStat, err := os.Stat(destPath); os.IsNotExist(err) {
 		destination = destPath
-	} else if destStat.IsDir() && source_url.Query().Get("pack") == "" {
+	} else if destStat.IsDir() && sourceURL.Query().Get("pack") == "" {
 		// If we have an auto-pack request, it's OK for the destination to be a directory
 		// Otherwise, get the base name of the source and append it to the destination dir.
 		sourceFilename := path.Base(sourceFile)
@@ -819,36 +808,19 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 	payload.version = version
 
 	//Fill out the payload as much as possible
-	payload.filename = source_url.Path
+	payload.filename = sourceURL.Path
 
 	payload.start1 = time.Now().Unix()
 
 	// Go thru the download methods
 	success := false
 
-	// If recursive, only do http method to guarantee freshest directory contents
-	if ObjectClientOptions.Recursive {
-		methods = []string{"http"}
-	}
-
-	_, token_name := getTokenName(source_url)
+	_, token_name := getTokenName(sourceURL)
 
 	// switch statement?
 	var downloaded int64 = 0
-Loop:
-	for _, method := range methods {
-
-		switch method {
-		case "http":
-			log.Info("Trying HTTP...")
-			if transferResults, err = download_http(source_url, destination, &payload, ns, recursive, token_name); err == nil {
-				success = true
-				break Loop
-			}
-
-		default:
-			log.Errorf("Unknown transfer method: %s", method)
-		}
+	if transferResults, err = downloadHttp(ctx, sourceURL, destination, &payload, ns, recursive, token_name); err == nil {
+		success = true
 	}
 
 	payload.end1 = time.Now().Unix()
@@ -915,7 +887,7 @@ func get_ips(name string) []string {
 
 }
 
-func parse_job_ad(payload *payloadStruct) {
+func parseJobAd(payload *payloadStruct) {
 
 	//Parse the .job.ad file for the Owner (username) and ProjectName of the callee.
 

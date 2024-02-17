@@ -19,6 +19,7 @@
 package main
 
 import (
+	"context"
 	"os"
 
 	"github.com/pelicanplatform/pelican/client"
@@ -85,7 +86,7 @@ func putMain(cmd *cobra.Command, args []string) {
 	for _, src := range source {
 		isRecursive, _ := cmd.Flags().GetBool("recursive")
 		client.ObjectClientOptions.Recursive = isRecursive
-		_, result = client.DoPut(src, dest, isRecursive)
+		_, result = client.DoPut(context.Background(), src, dest, isRecursive)
 		if result != nil {
 			lastSrc = src
 			break

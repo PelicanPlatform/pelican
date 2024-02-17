@@ -19,6 +19,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"os"
@@ -187,7 +188,7 @@ func stagePluginMain(cmd *cobra.Command, args []string) {
 	var result error
 	var xformSources []string
 	for _, src := range sources {
-		_, newSource, result := client.DoShadowIngest(src, mountPrefixStr, shadowOriginPrefixStr)
+		_, newSource, result := client.DoShadowIngest(context.Background(), src, mountPrefixStr, shadowOriginPrefixStr)
 		if result != nil {
 			// What's the correct behavior on failure?  For now, we silently put the transfer
 			// back on the original list.  This is arguably the wrong approach as it might
