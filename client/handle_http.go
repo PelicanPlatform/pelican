@@ -53,9 +53,11 @@ var (
 	progressCtr     *mpb.Progress
 )
 
-type StoppedTransferError struct {
-	Err string
-}
+type (
+	StoppedTransferError struct {
+		Err string
+	}
+)
 
 // The progress container object creates several
 // background goroutines.  Instead of creating the object
@@ -282,9 +284,6 @@ func download_http(sourceUrl *url.URL, destination string, payload *payloadStruc
 			log.Errorln("Panic occurred in download_http:", r)
 			ret := fmt.Sprintf("Unrecoverable error (panic) occurred in download_http: %v", r)
 			err = errors.New(ret)
-
-			// Attempt to add the panic to the error accumulator
-			AddError(errors.New(ret))
 		}
 	}()
 

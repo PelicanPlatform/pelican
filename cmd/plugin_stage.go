@@ -204,8 +204,8 @@ func stagePluginMain(cmd *cobra.Command, args []string) {
 	// Exit with failure
 	if result != nil {
 		// Print the list of errors
-		log.Errorln(client.GetErrors())
-		if client.ErrorsRetryable() {
+		log.Errorln("Failure in staging files:", result)
+		if client.ShouldRetry(result) {
 			log.Errorln("Errors are retryable")
 			os.Exit(11)
 		}

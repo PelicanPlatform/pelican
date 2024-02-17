@@ -194,12 +194,10 @@ func getToken(destination *url.URL, namespace namespaces.Namespace, isWrite bool
 				log.Errorln("Failed to generate a new authorization token for this transfer: ", err)
 				log.Errorln("This transfer requires authorization to complete and no token is available")
 				err = errors.New("failed to find or generate a token as required for " + destination.String())
-				AddError(err)
 				return "", err
 			} else {
 				log.Errorln("Credential is required, but currently mssing")
 				err := errors.New("Credential is required for " + destination.String() + " but is currently missing")
-				AddError(err)
 				return "", err
 			}
 		}
@@ -431,17 +429,14 @@ func getNamespaceInfo(resourcePath, OSDFDirectorUrl string, isPut bool) (ns name
 		if err != nil {
 			if isPut && dirResp != nil && dirResp.StatusCode == 405 {
 				err = errors.New("Error 405: No writeable origins were found")
-				AddError(err)
 				return
 			} else {
 				log.Errorln("Error while querying the Director:", err)
-				AddError(err)
 				return
 			}
 		}
 		ns, err = CreateNsFromDirectorResp(dirResp)
 		if err != nil {
-			AddError(err)
 			return
 		}
 
@@ -460,7 +455,6 @@ func getNamespaceInfo(resourcePath, OSDFDirectorUrl string, isPut bool) (ns name
 	} else {
 		ns, err = namespaces.MatchNamespace(resourcePath)
 		if err != nil {
-			AddError(err)
 			return
 		}
 		return
@@ -483,9 +477,6 @@ func DoPut(localObject string, remoteDestination string, recursive bool) (transf
 			log.Debugln("Panic caused by the following", string(debug.Stack()))
 			ret := fmt.Sprintf("Unrecoverable error (panic) captured in DoPut: %v", r)
 			err = errors.New(ret)
-
-			// Attempt to add the panic to the error accumulator
-			AddError(errors.New(ret))
 		}
 	}()
 
@@ -554,7 +545,6 @@ func DoPut(localObject string, remoteDestination string, recursive bool) (transf
 		return nil, errors.New("Failed to get namespace information from source")
 	}
 	uploadedBytes, err := doWriteBack(localObjectUrl.Path, remoteDestUrl, ns, recursive, "")
-	AddError(err)
 	return uploadedBytes, err
 
 }
@@ -575,9 +565,6 @@ func DoGet(remoteObject string, localDestination string, recursive bool) (transf
 			log.Debugln("Panic caused by the following", string(debug.Stack()))
 			ret := fmt.Sprintf("Unrecoverable error (panic) captured in DoGet: %v", r)
 			err = errors.New(ret)
-
-			// Attempt to add the panic to the error accumulator
-			AddError(errors.New(ret))
 		}
 	}()
 
@@ -705,9 +692,6 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 			log.Debugln("Panic caused by the following", string(debug.Stack()))
 			ret := fmt.Sprintf("Unrecoverable error (panic) captured in DoStashCPSingle: %v", r)
 			err = errors.New(ret)
-
-			// Attempt to add the panic to the error accumulator
-			AddError(errors.New(ret))
 		}
 	}()
 
@@ -798,7 +782,6 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 			return nil, errors.New("Failed to get namespace information from destination")
 		}
 		transferResults, err := doWriteBack(source_url.Path, dest_url, ns, recursive, payload.ProjectName) //TODO dowriteback transferResults!!!!!
-		AddError(err)
 		return transferResults, err
 	}
 
@@ -882,7 +865,7 @@ Loop:
 		return transferResults, nil
 	} else {
 		payload.status = "Fail"
-		return transferResults, errors.New("All methods failed! Unable to download file.")
+		return transferResults, err
 	}
 }
 

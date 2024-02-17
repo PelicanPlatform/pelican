@@ -92,19 +92,12 @@ func stashPluginMain(args []string) {
 			log.Warningln("Panic caused by the following", string(debug.Stack()))
 			ret := fmt.Sprintf("Unrecoverable error (panic) captured in stashPluginMain(): %v", r)
 
-			debugStack := strings.ReplaceAll(string(debug.Stack()), "\n", ";")
-			client.AddError(errors.New(debugStack))
-
-			// Attempt to add the panic to the error accumulator
-			client.AddError(errors.New(ret))
-
-			// Write our important classAds
 			resultAd := classads.NewClassAd()
 			var resultAds []*classads.ClassAd
 
 			// Set as failure and add errors
 			resultAd.Set("TransferSuccess", false)
-			resultAd.Set("TransferError", client.GetErrors())
+			resultAd.Set("TransferError", ret+";"+strings.ReplaceAll(string(debug.Stack()), "\n", ";"))
 			resultAds = append(resultAds, resultAd)
 
 			// Attempt to write our file and bail
@@ -120,7 +113,6 @@ func stashPluginMain(args []string) {
 	if err != nil {
 		log.Errorf("Problem initializing the Pelican client config: %v", err)
 		err = errors.Wrap(err, "Problem initializing the Pelican Client configuration")
-		client.AddError(err)
 		isConfigErr = true
 	}
 
@@ -191,7 +183,7 @@ func stashPluginMain(args []string) {
 
 		// Set as failure and add errors
 		resultAd.Set("TransferSuccess", false)
-		resultAd.Set("TransferError", client.GetErrors())
+		resultAd.Set("TransferError", err.Error())
 		resultAds = append(resultAds, resultAd)
 
 		// Attempt to write our file and bail
@@ -443,26 +435,26 @@ func moveObjects(source []string, methods []string, upload bool, wg *sync.WaitGr
 			resultAd.Set("TransferTotalBytes", transferResults[0].TransferredBytes) // idx 0 since we are not using recursive uploads/downloads
 		} else {
 			resultAd.Set("TransferSuccess", false)
-			if client.GetErrors() == "" {
-				resultAd.Set("TransferError", result.Error())
-			} else {
-				errMsg := " Failure "
-				if upload {
-					errMsg += "uploading "
-				} else {
-					errMsg += "downloading "
-				}
-				errMsg += transfer.url + ": " + client.GetErrors()
-				resultAd.Set("TransferError", errMsg)
+			var te *client.TransferErrors
+			errMsgInternal := result.Error()
+			if errors.As(result, &te) {
+				errMsgInternal = te.UserError()
 			}
+			errMsg := " Failure "
+			if upload {
+				errMsg += "uploading "
+			} else {
+				errMsg += "downloading "
+			}
+			errMsg += transfer.url + ": " + errMsgInternal
+			resultAd.Set("TransferError", errMsg)
 			resultAd.Set("TransferFileBytes", 0)
 			resultAd.Set("TransferTotalBytes", 0)
-			if client.ErrorsRetryable() {
+			if client.ShouldRetry(result) {
 				resultAd.Set("TransferRetryable", true)
 			} else {
 				resultAd.Set("TransferRetryable", false)
 			}
-			client.ClearErrors()
 		}
 		results <- resultAd
 	}

@@ -28,6 +28,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/namespaces"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -206,20 +207,19 @@ func copyMain(cmd *cobra.Command, args []string) {
 		if result != nil {
 			lastSrc = src
 			break
-		} else {
-			client.ClearErrors()
 		}
 	}
 
 	// Exit with failure
 	if result != nil {
 		// Print the list of errors
-		errMsg := client.GetErrors()
-		if errMsg == "" {
-			errMsg = result.Error()
+		errMsg := result.Error()
+		var te *client.TransferErrors
+		if errors.As(result, &te) {
+			errMsg = te.UserError()
 		}
 		log.Errorln("Failure transferring " + lastSrc + ": " + errMsg)
-		if client.ErrorsRetryable() {
+		if client.ShouldRetry(err) {
 			log.Errorln("Errors are retryable")
 			os.Exit(11)
 		}
