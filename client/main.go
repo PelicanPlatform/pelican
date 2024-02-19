@@ -36,6 +36,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/jellydator/ttlcache/v3"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/config"
@@ -85,13 +86,17 @@ type payloadStruct struct {
 	downloadSize int64
 }
 
-type UrlMetadata struct {
-	objectName           string //Might not need this?
+type PelicanURL struct {
+	objectUrl            *url.URL
 	discoveryUrl         string
 	directorUrl          string
 	registryUrl          string
 	topologyNamespaceUrl string //Might not need this?
 }
+
+var pelicanURLCache = ttlcache.New[string, PelicanURL](
+	ttlcache.WithTTL[string, PelicanURL](15 * time.Minute),
+)
 
 // Determine the token name if it is embedded in the scheme, Condor-style
 func getTokenName(destination *url.URL) (scheme, tokenName string) {
@@ -107,16 +112,16 @@ func getTokenName(destination *url.URL) (scheme, tokenName string) {
 }
 
 // Do writeback to stash using SciTokens
-func doWriteBack(source string, destination *url.URL, namespace namespaces.Namespace, recursive bool, projectName string) (transferResults []TransferResults, err error) {
-
-	scitoken_contents, err := getToken(destination, namespace, true, "")
+func doWriteBack(source string, pelicanURL PelicanURL, namespace namespaces.Namespace, recursive bool, projectName string) (transferResults []TransferResults, err error) {
+	// As of now, uploads do not rely on any global metadata therefore we will just pass the destination URL. If this changes in the future, we will need to pass the pelicanURL object
+	scitoken_contents, err := getToken(pelicanURL.objectUrl, namespace, true, "")
 	if err != nil {
 		return nil, fmt.Errorf("Failed to get token for write-back: %v", err)
 	}
 	if recursive {
-		return UploadDirectory(source, destination, scitoken_contents, namespace, projectName)
+		return UploadDirectory(source, pelicanURL.objectUrl, scitoken_contents, namespace, projectName)
 	} else {
-		transferResult, err := UploadFile(source, destination, scitoken_contents, namespace, projectName)
+		transferResult, err := UploadFile(source, pelicanURL.objectUrl, scitoken_contents, namespace, projectName)
 		transferResults = append(transferResults, transferResult)
 		return transferResults, err
 	}
@@ -475,13 +480,24 @@ func getNamespaceInfo(resourcePath, OSDFDirectorUrl string, isPut bool) (ns name
 	}
 }
 
-func getUrlMetadata(remoteUrl *url.URL, scheme string) (metadata UrlMetadata, err error) {
+func schemeUnderstood(scheme string) error {
+	understoodSchemes := []string{"file", "osdf", "pelican", "stash", ""}
+
+	_, foundDest := Find(understoodSchemes, scheme)
+	if !foundDest {
+		return fmt.Errorf("Do not understand the destination scheme: %s. Permitted values are %s",
+			scheme, strings.Join(understoodSchemes, ", "))
+	}
+	return nil
+}
+
+func newPelicanURL(remoteUrl *url.URL, scheme string) (pelicanURL PelicanURL, err error) {
 	if remoteUrl.Host != "" {
 		if scheme == "osdf" || scheme == "stash" {
 			remoteUrl.Path, err = url.JoinPath(remoteUrl.Host, remoteUrl.Path)
 			if err != nil {
 				log.Errorln("Failed to join remote destination url path:", err)
-				return UrlMetadata{}, err
+				return PelicanURL{}, err
 			}
 		} else if scheme == "pelican" {
 			// If we have a host and url is pelican, we need to extract federation data from the host
@@ -490,15 +506,28 @@ func getUrlMetadata(remoteUrl *url.URL, scheme string) (metadata UrlMetadata, er
 			federationUrl.Scheme = "https"
 			federationUrl.Path = ""
 
-			// Discover our federation for the specified pelican:// url
-			urlFederation, err := config.DisoverUrlFederation(federationUrl.String())
+			// Check if cache has key of federationURL:
+			// If yes: load data from the cache
+			if pelicanURLCache.Has(federationUrl.String()) {
+				log.Debugln("Federation URL found in cache, using previous")
+				pelicanURL = pelicanURLCache.Get(federationUrl.String()).Value()
+				// Make sure to set the object url since it might be different than the cached one
+				pelicanURL.objectUrl = remoteUrl
+				return pelicanURL, nil
+			}
+
+			// If no: discover our federation for the specified pelican:// url
+			urlFederation, err := config.DiscoverUrlFederation(federationUrl.String())
 			if err != nil {
-				return UrlMetadata{}, err
+				return PelicanURL{}, err
 			}
 			// Set our local url metadata
-			metadata.directorUrl = urlFederation.DirectorEndpoint
-			metadata.discoveryUrl = federationUrl.String()
-			metadata.registryUrl = urlFederation.NamespaceRegistrationEndpoint
+			pelicanURL.directorUrl = urlFederation.DirectorEndpoint
+			pelicanURL.discoveryUrl = federationUrl.String()
+			pelicanURL.registryUrl = urlFederation.NamespaceRegistrationEndpoint
+
+			// Populate cache with data
+			pelicanURLCache.Set(federationUrl.String(), pelicanURL, ttlcache.DefaultTTL)
 		}
 	}
 
@@ -507,29 +536,33 @@ func getUrlMetadata(remoteUrl *url.URL, scheme string) (metadata UrlMetadata, er
 		// If we are using an osdf/stash binary, we discovered the federation already --> load into local url metadata
 		if config.GetPreferredPrefix() == "OSDF" {
 			log.Debugln("Detected an osdf binary with an osdf:// url, populating metadata with osdf defaults")
-			metadata.directorUrl = param.Federation_DirectorUrl.GetString()
-			metadata.discoveryUrl = param.Federation_DiscoveryUrl.GetString()
-			metadata.registryUrl = param.Federation_RegistryUrl.GetString()
+			if param.Federation_DirectorUrl.GetString() == "" || param.Federation_DiscoveryUrl.GetString() == "" || param.Federation_RegistryUrl.GetString() == "" {
+				return PelicanURL{}, errors.New("osdf default metadata is not populated in config")
+			} else {
+				pelicanURL.directorUrl = param.Federation_DirectorUrl.GetString()
+				pelicanURL.discoveryUrl = param.Federation_DiscoveryUrl.GetString()
+				pelicanURL.registryUrl = param.Federation_RegistryUrl.GetString()
+			}
 		} else if config.GetPreferredPrefix() == "PELICAN" {
 			// We hit this case when we are using a pelican binary but an osdf:// url, therefore we need to disover the osdf federation
 			log.Debugln("Detected an pelican binary with an osdf:// url, populating metadata with osdf defaults")
-			urlFederation, err := config.DisoverUrlFederation("osg-htc.org")
+			urlFederation, err := config.DiscoverUrlFederation("osg-htc.org")
 			if err != nil {
-				return UrlMetadata{}, err
+				return PelicanURL{}, err
 			}
-			metadata.directorUrl = urlFederation.DirectorEndpoint
-			metadata.discoveryUrl = "osg-htc.org"
-			metadata.registryUrl = urlFederation.NamespaceRegistrationEndpoint
+			pelicanURL.directorUrl = urlFederation.DirectorEndpoint
+			pelicanURL.discoveryUrl = "osg-htc.org"
+			pelicanURL.registryUrl = urlFederation.NamespaceRegistrationEndpoint
 		}
 	} else if scheme == "" {
 		// If we don't have a url scheme, then our metadata information should be in the config
 		log.Debugln("No url scheme detected, getting metadata information from configuration")
-		metadata.directorUrl = param.Federation_DirectorUrl.GetString()
-		metadata.discoveryUrl = param.Federation_DiscoveryUrl.GetString()
-		metadata.registryUrl = param.Federation_RegistryUrl.GetString()
+		pelicanURL.directorUrl = param.Federation_DirectorUrl.GetString()
+		pelicanURL.discoveryUrl = param.Federation_DiscoveryUrl.GetString()
+		pelicanURL.registryUrl = param.Federation_RegistryUrl.GetString()
 	}
-
-	return metadata, nil
+	pelicanURL.objectUrl = remoteUrl
+	return pelicanURL, nil
 }
 
 /*
@@ -570,24 +603,20 @@ func DoPut(localObject string, remoteDestination string, recursive bool) (transf
 
 	remoteDestScheme, _ = getTokenName(remoteDestUrl)
 
-	understoodSchemes := []string{"file", "osdf", "pelican", ""}
-
-	_, foundDest := Find(understoodSchemes, remoteDestScheme)
-	if !foundDest {
-		return nil, fmt.Errorf("Do not understand the destination scheme: %s. Permitted values are %s",
-			remoteDestUrl.Scheme, strings.Join(understoodSchemes, ", "))
-	}
-
-	remoteDestUrl.Scheme = remoteDestScheme
-	metadata, err := getUrlMetadata(remoteDestUrl, remoteDestScheme)
+	// Check if we understand the found url scheme
+	err = schemeUnderstood(remoteDestScheme)
 	if err != nil {
 		return nil, err
 	}
 
-	directorUrl := metadata.directorUrl
+	remoteDestUrl.Scheme = remoteDestScheme
+	pelicanURL, err := newPelicanURL(remoteDestUrl, remoteDestScheme)
+	if err != nil {
+		return nil, err
+	}
 
 	if remoteDestScheme == "osdf" || remoteDestScheme == "pelican" {
-		remoteDestination = remoteDestUrl.Path
+		remoteDestination = pelicanURL.objectUrl.Path
 	}
 
 	// Get the namespace of the remote filesystem
@@ -596,12 +625,12 @@ func DoPut(localObject string, remoteDestination string, recursive bool) (transf
 		remoteDestination = strings.TrimPrefix(remoteDestination, remoteDestScheme+"://")
 	}
 
-	ns, err := getNamespaceInfo(remoteDestination, directorUrl, isPut)
+	ns, err := getNamespaceInfo(remoteDestination, pelicanURL.directorUrl, isPut)
 	if err != nil {
 		log.Errorln(err)
 		return nil, errors.New("Failed to get namespace information from source")
 	}
-	uploadedBytes, err := doWriteBack(localObjectUrl.Path, remoteDestUrl, ns, recursive, "")
+	uploadedBytes, err := doWriteBack(localObjectUrl.Path, pelicanURL, ns, recursive, "")
 	AddError(err)
 	return uploadedBytes, err
 }
@@ -640,16 +669,14 @@ func DoGet(remoteObject string, localDestination string, recursive bool) (transf
 	// This is for condor cases:
 	remoteObjectScheme, _ = getTokenName(remoteObjectUrl)
 
-	// Check we have a valid scheme
-	understoodSchemes := []string{"file", "osdf", "pelican", ""}
-	_, foundSource := Find(understoodSchemes, remoteObjectScheme)
-	if !foundSource {
-		return nil, fmt.Errorf("Do not understand the source scheme: %s. Permitted values are %s",
-			remoteObjectUrl.Scheme, strings.Join(understoodSchemes, ", "))
+	// Check if we understand the found url scheme
+	err = schemeUnderstood(remoteObjectScheme)
+	if err != nil {
+		return nil, err
 	}
 
 	// Get our url metadata
-	metadata, err := getUrlMetadata(remoteObjectUrl, remoteObjectScheme)
+	pelicanURL, err := newPelicanURL(remoteObjectUrl, remoteObjectScheme)
 	if err != nil {
 		return nil, err
 	}
@@ -662,10 +689,7 @@ func DoGet(remoteObject string, localDestination string, recursive bool) (transf
 		remoteObject = "/" + remoteObject
 	}
 
-	//directorUrl := param.Federation_DirectorUrl.GetString()
-	directorUrl := metadata.directorUrl
-
-	ns, err := getNamespaceInfo(remoteObject, directorUrl, isPut)
+	ns, err := getNamespaceInfo(remoteObject, pelicanURL.directorUrl, isPut)
 	if err != nil {
 		log.Errorln(err)
 		return nil, errors.New("Failed to get namespace information from source")
@@ -699,7 +723,7 @@ func DoGet(remoteObject string, localDestination string, recursive bool) (transf
 	_, token_name := getTokenName(remoteObjectUrl)
 
 	var downloaded int64
-	if transferResults, err = download_http(remoteObjectUrl, localDestination, metadata, &payload, ns, recursive, token_name); err == nil {
+	if transferResults, err = download_http(pelicanURL, localDestination, &payload, ns, recursive, token_name); err == nil {
 		success = true
 	}
 
@@ -763,28 +787,6 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 	sourceScheme, _ := getTokenName(source_url)
 	destScheme, _ := getTokenName(dest_url)
 
-	// Verify valid scheme
-	understoodSchemes := []string{"stash", "file", "osdf", "pelican", ""}
-	_, foundSource := Find(understoodSchemes, sourceScheme)
-	if !foundSource {
-		log.Errorln("Do not understand source scheme:", source_url.Scheme)
-		return nil, errors.New("Do not understand source scheme")
-	}
-
-	_, foundDest := Find(understoodSchemes, destScheme)
-	if !foundDest {
-		log.Errorln("Do not understand destination scheme:", source_url.Scheme)
-		return nil, errors.New("Do not understand destination scheme")
-	}
-
-	// Get our metadata (here we check if it is a put)
-	metadata, err := getUrlMetadata(source_url, sourceScheme)
-
-	// if metadata is empty, then we are doing a get so try to populate it again with our destination
-	if metadata.directorUrl == "" && metadata.discoveryUrl == "" && metadata.registryUrl == "" {
-		metadata, err = getUrlMetadata(dest_url, destScheme)
-	}
-
 	payload := payloadStruct{}
 	parse_job_ad(&payload)
 
@@ -792,23 +794,38 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 	// For write back, it will be the destination
 	// For read it will be the source.
 
-	OSDFDirectorUrl := metadata.directorUrl
 	isPut := destScheme == "stash" || destScheme == "osdf" || destScheme == "pelican"
 
 	// If we are a put, do the writeback function and exit
 	if isPut {
+		// Verify valid scheme
+		err = schemeUnderstood(destScheme)
+		if err != nil {
+			return nil, err
+		}
+
+		pelicanURL, err := newPelicanURL(dest_url, destScheme)
 		log.Debugln("Detected object write to remote federation object", dest_url.Path)
-		ns, err := getNamespaceInfo(dest_url.Path, OSDFDirectorUrl, isPut)
+		ns, err := getNamespaceInfo(dest_url.Path, pelicanURL.directorUrl, isPut)
 		if err != nil {
 			log.Errorln(err)
 			return nil, errors.New("Failed to get namespace information from destination")
 		}
-		transferResults, err := doWriteBack(source_url.Path, dest_url, ns, recursive, payload.ProjectName)
+		transferResults, err := doWriteBack(source_url.Path, pelicanURL, ns, recursive, payload.ProjectName)
 		AddError(err)
 		return transferResults, err
 	}
 
 	// If we continue here, we are doing a get
+
+	// Verify valid scheme
+	err = schemeUnderstood(sourceScheme)
+	if err != nil {
+		return nil, err
+	}
+
+	pelicanURL, err := newPelicanURL(source_url, sourceScheme)
+
 	if dest_url.Scheme == "file" {
 		destination = dest_url.Path
 	}
@@ -821,7 +838,7 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 		sourceFile = "/" + sourceFile
 	}
 
-	ns, err := getNamespaceInfo(sourceFile, OSDFDirectorUrl, isPut)
+	ns, err := getNamespaceInfo(sourceFile, pelicanURL.directorUrl, isPut)
 	if err != nil {
 		log.Errorln(err)
 		return nil, errors.New("Failed to get namespace information from source")
@@ -865,7 +882,7 @@ Loop:
 		switch method {
 		case "http":
 			log.Info("Trying HTTP...")
-			if transferResults, err = download_http(source_url, destination, metadata, &payload, ns, recursive, token_name); err == nil { //TODO FIX THIS!
+			if transferResults, err = download_http(pelicanURL, destination, &payload, ns, recursive, token_name); err == nil {
 				success = true
 				break Loop
 			}

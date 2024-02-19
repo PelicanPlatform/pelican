@@ -275,7 +275,7 @@ func GenerateTransferDetailsUsingCache(cache CacheInterface, opts TransferDetail
 	return nil
 }
 
-func download_http(sourceUrl *url.URL, destination string, metadata UrlMetadata, payload *payloadStruct, namespace namespaces.Namespace, recursive bool, tokenName string) (transferResults []TransferResults, err error) {
+func download_http(pelicanURL PelicanURL, destination string, payload *payloadStruct, namespace namespaces.Namespace, recursive bool, tokenName string) (transferResults []TransferResults, err error) {
 	// First, create a handler for any panics that occur
 	defer func() {
 		if r := recover(); r != nil {
@@ -288,16 +288,16 @@ func download_http(sourceUrl *url.URL, destination string, metadata UrlMetadata,
 		}
 	}()
 
-	packOption := sourceUrl.Query().Get("pack")
+	packOption := pelicanURL.objectUrl.Query().Get("pack")
 	if packOption != "" {
 		log.Debugln("Will use unpack option value", packOption)
 	}
-	sourceUrl = &url.URL{Path: sourceUrl.Path}
+	pelicanURL.objectUrl = &url.URL{Path: pelicanURL.objectUrl.Path}
 
 	var token string
 	if namespace.UseTokenOnRead {
 		var err error
-		token, err = getToken(sourceUrl, namespace, false, tokenName)
+		token, err = getToken(pelicanURL.objectUrl, namespace, false, tokenName)
 		if err != nil {
 			log.Errorln("Failed to get token though required to read from this namespace:", err)
 			return nil, err
@@ -307,7 +307,7 @@ func download_http(sourceUrl *url.URL, destination string, metadata UrlMetadata,
 	// Check the env var "USE_OSDF_DIRECTOR" and decide if ordered caches should come from director
 	var transfers []TransferDetails
 	var files []string
-	directorUrl := metadata.directorUrl
+	directorUrl := pelicanURL.directorUrl
 	closestNamespaceCaches, err := GetCachesFromNamespace(namespace, directorUrl != "")
 	if err != nil {
 		log.Errorln("Failed to get namespaced caches (treated as non-fatal):", err)
@@ -324,13 +324,13 @@ func download_http(sourceUrl *url.URL, destination string, metadata UrlMetadata,
 
 	if recursive {
 		var err error
-		files, err = walkDavDir(sourceUrl, namespace, token, "", false)
+		files, err = walkDavDir(pelicanURL.objectUrl, namespace, token, "", false)
 		if err != nil {
 			log.Errorln("Error from walkDavDir", err)
 			return nil, err
 		}
 	} else {
-		files = append(files, sourceUrl.Path)
+		files = append(files, pelicanURL.objectUrl.Path)
 	}
 
 	for _, cache := range closestNamespaceCaches[:cachesToTry] {
@@ -362,7 +362,7 @@ func download_http(sourceUrl *url.URL, destination string, metadata UrlMetadata,
 	// Start the workers
 	for i := 1; i <= 5; i++ {
 		wg.Add(1)
-		go startDownloadWorker(sourceUrl.Path, destination, token, transfers, payload, &wg, workChan, results)
+		go startDownloadWorker(pelicanURL.objectUrl.Path, destination, token, transfers, payload, &wg, workChan, results)
 	}
 
 	// For each file, send it to the worker

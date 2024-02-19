@@ -19,6 +19,7 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -260,4 +261,70 @@ func TestEnabledServers(t *testing.T) {
 		assert.False(t, IsServerEnabled(DirectorType))
 		assert.False(t, IsServerEnabled(RegistryType))
 	})
+}
+
+func TestDiscoverUrlFederation(t *testing.T) {
+	// Server to be a "mock" federation
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// make our response:
+		response := FederationDiscovery{
+			DirectorEndpoint:              "director",
+			NamespaceRegistrationEndpoint: "registry",
+			JwksUri:                       "jwks",
+			BrokerEndpoint:                "broker",
+		}
+
+		responseJSON, err := json.Marshal(response)
+		if err != nil {
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		w.Write(responseJSON)
+	}))
+	defer server.Close()
+	metadata, err := DiscoverUrlFederation(server.URL)
+	assert.NoError(t, err)
+
+	// Assert that the metadata matches expectations
+	assert.Equal(t, "director", metadata.DirectorEndpoint, "Unexpected DirectorEndpoint")
+	assert.Equal(t, "registry", metadata.NamespaceRegistrationEndpoint, "Unexpected NamespaceRegistrationEndpoint")
+	assert.Equal(t, "jwks", metadata.JwksUri, "Unexpected JwksUri")
+	assert.Equal(t, "broker", metadata.BrokerEndpoint, "Unexpected BrokerEndpoint")
+}
+
+func TestDiscoverFederation(t *testing.T) {
+	viper.Reset()
+	viper.Set("tlsskipverify", true)
+	// Server to be a "mock" federation
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// make our response:
+		response := FederationDiscovery{
+			DirectorEndpoint:              "director",
+			NamespaceRegistrationEndpoint: "registry",
+			JwksUri:                       "jwks",
+			BrokerEndpoint:                "broker",
+		}
+
+		responseJSON, err := json.Marshal(response)
+		if err != nil {
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		w.Write(responseJSON)
+	}))
+	defer server.Close()
+	viper.Set("Federation.DiscoveryUrl", server.URL)
+	err := DiscoverFederation()
+	assert.NoError(t, err)
+
+	// Assert that the metadata matches expectations
+	assert.Equal(t, "director", param.Federation_DirectorUrl.GetString(), "Unexpected DirectorEndpoint")
+	assert.Equal(t, "registry", param.Federation_RegistryUrl.GetString(), "Unexpected NamespaceRegistrationEndpoint")
+	assert.Equal(t, "jwks", param.Federation_JwkUrl.GetString(), "Unexpected JwksUri")
+	assert.Equal(t, "broker", param.Federation_BrokerUrl.GetString(), "Unexpected BrokerEndpoint")
+	viper.Reset()
 }

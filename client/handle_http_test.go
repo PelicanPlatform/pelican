@@ -571,7 +571,7 @@ func TestObjectCopyAuth(t *testing.T) {
 	assert.NoError(t, err, "Error writing to temp token file")
 	tempToken.Close()
 	// Disable progress bars to not reuse the same mpb instance
-	viper.Set("Logging.DisableProgressBars", true)
+	ObjectClientOptions.ProgressBars = false
 
 	// This tests pelican object get/put with a pelican:// url
 	t.Run("testPelicanObjectCopyWithPelicanUrl", func(t *testing.T) {
@@ -581,7 +581,7 @@ func TestObjectCopyAuth(t *testing.T) {
 		fileName := filepath.Base(tempPath)
 		hostname, err := os.Hostname()
 		assert.NoError(t, err)
-		uploadURL := "pelican://"+ hostname + ":8444/test/" + fileName
+		uploadURL := "pelican://" + hostname + ":8444/test/" + fileName
 
 		// Upload the file with PUT
 		ObjectClientOptions.Token = tempToken.Name()
@@ -611,13 +611,13 @@ func TestObjectCopyAuth(t *testing.T) {
 		assert.NoError(t, err)
 
 		// For OSDF url's, we don't want to rely on osdf metadata to be running therefore, just ensure we get correct metadata for the url:
-		metadata, err := getUrlMetadata(uploadURL, "osdf")
+		pelicanURL, err := newPelicanURL(uploadURL, "osdf")
 		assert.NoError(t, err)
 
 		// Check valid metadata:
-		assert.Equal(t, "https://osdf-director.osg-htc.org", metadata.directorUrl)
-		assert.Equal(t, "https://osdf-registry.osg-htc.org", metadata.registryUrl)
-		assert.Equal(t, "osg-htc.org", metadata.discoveryUrl)
+		assert.Equal(t, "https://osdf-director.osg-htc.org", pelicanURL.directorUrl)
+		assert.Equal(t, "https://osdf-registry.osg-htc.org", pelicanURL.registryUrl)
+		assert.Equal(t, "osg-htc.org", pelicanURL.discoveryUrl)
 	})
 
 	// This tests osdf object copy with a pelican:// url
@@ -628,7 +628,7 @@ func TestObjectCopyAuth(t *testing.T) {
 		fileName := filepath.Base(tempPath)
 		hostname, err := os.Hostname()
 		assert.NoError(t, err)
-		uploadURL := "pelican://"+ hostname + ":8444/test/" + fileName
+		uploadURL := "pelican://" + hostname + ":8444/test/" + fileName
 
 		// Upload the file with PUT
 		ObjectClientOptions.Token = tempToken.Name()
@@ -648,7 +648,7 @@ func TestObjectCopyAuth(t *testing.T) {
 	})
 
 	// This tests osdf object copy with an osdf url
-	// NOTE: this test MUST be last since we need to reset a good amount of config values to get osdf defaults
+	// NOTE: this test MUST be last since we need to reset a good amount of config values to get osdf defaults as well as re-init config and client
 	t.Run("testOsdfObjectCopyWithOSDFUrl", func(t *testing.T) {
 		viper.Reset()
 		config.SetPreferredPrefix("OSDF")
@@ -662,13 +662,13 @@ func TestObjectCopyAuth(t *testing.T) {
 		assert.NoError(t, err)
 
 		// For OSDF url's, we don't want to rely on osdf metadata to be running therefore, just ensure we get correct metadata for the url:
-		metadata, err := getUrlMetadata(uploadURL, "osdf")
+		pelicanURL, err := newPelicanURL(uploadURL, "osdf")
 		assert.NoError(t, err)
 
 		// Check valid metadata:
-		assert.Equal(t, "https://osdf-director.osg-htc.org", metadata.directorUrl)
-		assert.Equal(t, "https://osdf-registry.osg-htc.org", metadata.registryUrl)
-		assert.Equal(t, "osg-htc.org", metadata.discoveryUrl)
+		assert.Equal(t, "https://osdf-director.osg-htc.org", pelicanURL.directorUrl)
+		assert.Equal(t, "https://osdf-registry.osg-htc.org", pelicanURL.registryUrl)
+		assert.Equal(t, "osg-htc.org", pelicanURL.discoveryUrl)
 	})
 }
 
@@ -720,7 +720,7 @@ func TestGetAndPutAuth(t *testing.T) {
 	assert.NoError(t, err, "Error writing to temp token file")
 	tempToken.Close()
 	// Disable progress bars to not reuse the same mpb instance
-	viper.Set("Logging.DisableProgressBars", true)
+	ObjectClientOptions.ProgressBars = false
 
 	// This tests pelican object get/put with a pelican:// url
 	t.Run("testPelicanObjectPutAndGetWithPelicanUrl", func(t *testing.T) {
@@ -730,7 +730,7 @@ func TestGetAndPutAuth(t *testing.T) {
 		fileName := filepath.Base(tempPath)
 		hostname, err := os.Hostname()
 		assert.NoError(t, err)
-		uploadURL := "pelican://"+ hostname + ":8444/test/" + fileName
+		uploadURL := "pelican://" + hostname + ":8444/test/" + fileName
 
 		// Upload the file with PUT
 		ObjectClientOptions.Token = tempToken.Name()
@@ -760,13 +760,13 @@ func TestGetAndPutAuth(t *testing.T) {
 		assert.NoError(t, err)
 
 		// For OSDF url's, we don't want to rely on osdf metadata to be running therefore, just ensure we get correct metadata for the url:
-		metadata, err := getUrlMetadata(uploadURL, "osdf")
+		pelicanURL, err := newPelicanURL(uploadURL, "osdf")
 		assert.NoError(t, err)
 
 		// Check valid metadata:
-		assert.Equal(t, "https://osdf-director.osg-htc.org", metadata.directorUrl)
-		assert.Equal(t, "https://osdf-registry.osg-htc.org", metadata.registryUrl)
-		assert.Equal(t, "osg-htc.org", metadata.discoveryUrl)
+		assert.Equal(t, "https://osdf-director.osg-htc.org", pelicanURL.directorUrl)
+		assert.Equal(t, "https://osdf-registry.osg-htc.org", pelicanURL.registryUrl)
+		assert.Equal(t, "osg-htc.org", pelicanURL.discoveryUrl)
 	})
 
 	// This tests object get/put with a pelican:// url
@@ -777,7 +777,7 @@ func TestGetAndPutAuth(t *testing.T) {
 		fileName := filepath.Base(tempPath)
 		hostname, err := os.Hostname()
 		assert.NoError(t, err)
-		uploadURL := "pelican://"+ hostname + ":8444/test/" + fileName
+		uploadURL := "pelican://" + hostname + ":8444/test/" + fileName
 
 		// Upload the file with PUT
 		ObjectClientOptions.Token = tempToken.Name()
@@ -797,7 +797,7 @@ func TestGetAndPutAuth(t *testing.T) {
 	})
 
 	// This tests pelican object get/put with an osdf url
-	// NOTE: this test MUST be last since we need to reset a good amount of config values to get osdf defaults
+	// NOTE: this test MUST be last since we need to reset a good amount of config values to get osdf defaults as well as re-init config and client
 	t.Run("testOsdfObjectPutAndGetWithOSDFUrl", func(t *testing.T) {
 		viper.Reset()
 		config.SetPreferredPrefix("OSDF")
@@ -811,13 +811,13 @@ func TestGetAndPutAuth(t *testing.T) {
 		assert.NoError(t, err)
 
 		// For OSDF url's, we don't want to rely on osdf metadata to be running therefore, just ensure we get correct metadata for the url:
-		metadata, err := getUrlMetadata(uploadURL, "osdf")
+		pelicanURL, err := newPelicanURL(uploadURL, "osdf")
 		assert.NoError(t, err)
 
 		// Check valid metadata:
-		assert.Equal(t, "https://osdf-director.osg-htc.org", metadata.directorUrl)
-		assert.Equal(t, "https://osdf-registry.osg-htc.org", metadata.registryUrl)
-		assert.Equal(t, "osg-htc.org", metadata.discoveryUrl)
+		assert.Equal(t, "https://osdf-director.osg-htc.org", pelicanURL.directorUrl)
+		assert.Equal(t, "https://osdf-registry.osg-htc.org", pelicanURL.registryUrl)
+		assert.Equal(t, "osg-htc.org", pelicanURL.discoveryUrl)
 		viper.Reset()
 	})
 }
@@ -832,20 +832,20 @@ func TestGetPublicRead(t *testing.T) {
 	t.Run("testPubObjGet", func(t *testing.T) {
 		testFileContent := "test file content"
 		// Drop the testFileContent into the origin directory
-		tempFile, err := os.Create(filepath.Join(fed.OriginDir, "test.txt"))
+		tempFile, err := os.Create(filepath.Join(fed.OriginDir, "test1234.txt"))
 		assert.NoError(t, err, "Error creating temp file")
 		defer os.Remove(tempFile.Name())
 		_, err = tempFile.WriteString(testFileContent)
 		assert.NoError(t, err, "Error writing to temp file")
 		tempFile.Close()
 
-		viper.Set("Logging.DisableProgressBars", true)
+		ObjectClientOptions.ProgressBars = false
 
 		// Set path for object to upload/download
 		tempPath := tempFile.Name()
 		hostname, err := os.Hostname()
 		fileName := filepath.Base(tempPath)
-		uploadURL := "pelican://"+ hostname + ":8444/test/" + fileName
+		uploadURL := "pelican://" + hostname + ":8444/test/" + fileName
 
 		// Download the file with GET. Shouldn't need a token to succeed
 		transferResults, err := DoGet(uploadURL, t.TempDir(), false)
@@ -894,7 +894,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 	tempToken.Close()
 
 	// Disable progress bars to not reuse the same mpb instance
-	viper.Set("Logging.DisableProgressBars", true)
+	ObjectClientOptions.ProgressBars = false
 
 	// Make our test directories and files
 	tempDir, err := os.MkdirTemp("", "UploadDir")
@@ -929,13 +929,13 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 		assert.NoError(t, err)
 
 		// For OSDF url's, we don't want to rely on osdf metadata to be running therefore, just ensure we get correct metadata for the url:
-		metadata, err := getUrlMetadata(uploadURL, "osdf")
+		pelicanURL, err := newPelicanURL(uploadURL, "osdf")
 		assert.NoError(t, err)
 
 		// Check valid metadata:
-		assert.Equal(t, "https://osdf-director.osg-htc.org", metadata.directorUrl)
-		assert.Equal(t, "https://osdf-registry.osg-htc.org", metadata.registryUrl)
-		assert.Equal(t, "osg-htc.org", metadata.discoveryUrl)
+		assert.Equal(t, "https://osdf-director.osg-htc.org", pelicanURL.directorUrl)
+		assert.Equal(t, "https://osdf-registry.osg-htc.org", pelicanURL.registryUrl)
+		assert.Equal(t, "osg-htc.org", pelicanURL.discoveryUrl)
 	})
 
 	t.Run("testPelicanRecursiveGetAndPutPelicanURL", func(t *testing.T) {
@@ -946,7 +946,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 		dirName := filepath.Base(tempPath)
 		hostname, err := os.Hostname()
 		assert.NoError(t, err)
-		uploadURL := "pelican://"+ hostname + ":8444/test/" + dirName
+		uploadURL := "pelican://" + hostname + ":8444/test/" + dirName
 
 		//////////////////////////////////////////////////////////
 
@@ -1019,7 +1019,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 		dirName := filepath.Base(tempPath)
 		hostname, err := os.Hostname()
 		assert.NoError(t, err)
-		uploadURL := "pelican://"+ hostname + ":8444/test/" + dirName
+		uploadURL := "pelican://" + hostname + ":8444/test/" + dirName
 
 		//////////////////////////////////////////////////////////
 
@@ -1098,12 +1098,12 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 		assert.NoError(t, err)
 
 		// For OSDF url's, we don't want to rely on osdf metadata to be running therefore, just ensure we get correct metadata for the url:
-		metadata, err := getUrlMetadata(uploadURL, "osdf")
+		pelicanURL, err := newPelicanURL(uploadURL, "osdf")
 		assert.NoError(t, err)
 
 		// Check valid metadata:
-		assert.Equal(t, "https://osdf-director.osg-htc.org", metadata.directorUrl)
-		assert.Equal(t, "https://osdf-registry.osg-htc.org", metadata.registryUrl)
-		assert.Equal(t, "osg-htc.org", metadata.discoveryUrl)
+		assert.Equal(t, "https://osdf-director.osg-htc.org", pelicanURL.directorUrl)
+		assert.Equal(t, "https://osdf-registry.osg-htc.org", pelicanURL.registryUrl)
+		assert.Equal(t, "osg-htc.org", pelicanURL.discoveryUrl)
 	})
 }
