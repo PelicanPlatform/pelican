@@ -123,6 +123,21 @@ type registrationData struct {
 	DeviceCode       string          `json:"device_code"`
 	Prefix           string          `json:"prefix"`
 }
+type permissionDeniedError struct {
+	Message string
+}
+
+type badRequestError struct {
+	Message string
+}
+
+func (e permissionDeniedError) Error() string {
+	return e.Message
+}
+
+func (e badRequestError) Error() string {
+	return e.Message
+}
 
 func matchKeys(incomingKey jwk.Key, registeredNamespaces []string) (bool, error) {
 	// If this is the case, we want to make sure that at least one of the superspaces has the
@@ -160,26 +175,6 @@ func matchKeys(incomingKey jwk.Key, registeredNamespaces []string) (bool, error)
 	return foundMatch, nil
 }
 
-func keySignChallenge(ctx *gin.Context, data *registrationData, action string) error {
-	if data.ClientNonce != "" && data.ClientPayload != "" && data.ClientSignature != "" &&
-		data.ServerNonce != "" && data.ServerPayload != "" && data.ServerSignature != "" {
-		err := keySignChallengeCommit(ctx, data, action)
-		if err != nil {
-			return errors.Wrap(err, "commit failed")
-		}
-	} else if data.ClientNonce != "" {
-		err := keySignChallengeInit(ctx, data)
-		if err != nil {
-			return errors.Wrap(err, "init failed")
-		}
-
-	} else {
-		ctx.JSON(http.StatusMultipleChoices, gin.H{"error": "MISSING PARAMETERS"})
-		return errors.New("key sign challenge was missing parameters")
-	}
-	return nil
-}
-
 func generateNonce() (string, error) {
 	nonce := make([]byte, 32)
 	_, err := rand.Read(nonce)
@@ -213,130 +208,162 @@ func verifySignature(payload []byte, signature []byte, publicKey *ecdsa.PublicKe
 	return ecdsa.VerifyASN1(publicKey, hash[:], signature)
 }
 
-func keySignChallengeInit(ctx *gin.Context, data *registrationData) error {
+// Generate server nonce for key-sign challenge
+func keySignChallengeInit(ctx *gin.Context, data *registrationData) (map[string]interface{}, error) {
 	serverNonce, err := generateNonce()
 	if err != nil {
-		ctx.JSON(500, gin.H{"error": "Failed to generate nonce for key sign challenge"})
-		return errors.Wrap(err, "Failed to generate nonce for key-sign challenge")
+		return nil, errors.Wrap(err, "Failed to generate nonce for key-sign challenge")
 	}
 
 	serverPayload := []byte(data.ClientNonce + data.ServerNonce)
 
 	privateKey, err := loadServerKeys()
 	if err != nil {
-		ctx.JSON(500, gin.H{"error": "Server is unable to generate a key sign challenge"})
-		return errors.Wrap(err, "Failed to load the server's private key")
+		return nil, errors.Wrap(err, "Server is unable to generate a key sign challenge: Failed to load the server's private key")
 	}
 
 	serverSignature, err := signPayload(serverPayload, privateKey)
 	if err != nil {
-		ctx.JSON(500, gin.H{"error": "Failure when signing the challenge"})
-		return errors.Wrap(err, "Failed to sign payload for key-sign challenge")
+		return nil, errors.Wrap(err, "Failed to sign payload for key-sign challenge")
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{
+	res := map[string]interface{}{
 		"server_nonce":     serverNonce,
 		"client_nonce":     data.ClientNonce,
 		"server_payload":   hex.EncodeToString(serverPayload),
 		"server_signature": hex.EncodeToString(serverSignature),
-	})
-	return nil
+	}
+	return res, nil
 }
 
-func keySignChallengeCommit(ctx *gin.Context, data *registrationData, action string) error {
+// Add namespace prefix if the request passed client and server verification for nonce.
+// It returns whether registration is created, the response data, and an error if any
+func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map[string]interface{}, error) {
 	// Validate the client's jwks as a set here
 	key, err := validateJwks(string(data.Pubkey))
 	if err != nil {
-		return err
+		return false, nil, badRequestError{Message: err.Error()}
 	}
 
 	var rawkey interface{} // This is the raw key, like *rsa.PrivateKey or *ecdsa.PrivateKey
 	if err := key.Raw(&rawkey); err != nil {
-		return errors.Wrap(err, "failed to generate raw pubkey from jwks")
+		return false, nil, errors.Wrap(err, "failed to generate raw pubkey from jwks")
 	}
 
 	clientPayload := []byte(data.ClientNonce + data.ServerNonce)
 	clientSignature, err := hex.DecodeString(data.ClientSignature)
 	if err != nil {
-		ctx.JSON(500, gin.H{"error": "Failed to decode client's signature"})
-		return errors.Wrap(err, "Failed to decode the client's signature")
+		return false, nil, errors.Wrap(err, "Failed to decode the client's signature")
 	}
 	clientVerified := verifySignature(clientPayload, clientSignature, (rawkey).(*ecdsa.PublicKey))
 	serverPayload, err := hex.DecodeString(data.ServerPayload)
 	if err != nil {
-		ctx.JSON(500, gin.H{"error": "Failed to decode the server's payload"})
-		return errors.Wrap(err, "Failed to decode the server's payload")
+		return false, nil, errors.Wrap(err, "Failed to decode the server's payload")
 	}
 
 	serverSignature, err := hex.DecodeString(data.ServerSignature)
 	if err != nil {
-		ctx.JSON(500, gin.H{"error": "Failed to decode the server's signature"})
-		return errors.Wrap(err, "Failed to decode the server's signature")
+		return false, nil, errors.Wrap(err, "Failed to decode the server's signature")
 	}
 
 	serverPrivateKey, err := loadServerKeys()
 	if err != nil {
-		ctx.JSON(500, gin.H{"error": "Failed to load server's private key"})
-		return errors.Wrap(err, "Failed to decode the server's private key")
+		return false, nil, errors.Wrap(err, "Failed to decode the server's private key")
 	}
 	serverPubkey := serverPrivateKey.PublicKey
 	serverVerified := verifySignature(serverPayload, serverSignature, &serverPubkey)
 
 	if clientVerified && serverVerified {
-		if action == "register" {
-			log.Debug("Registering namespace ", data.Prefix)
+		log.Debug("Registering namespace ", data.Prefix)
 
-			// Check if prefix exists before doing anything else
-			exists, err := namespaceExists(data.Prefix)
-			if err != nil {
-				log.Errorf("Failed to check if namespace already exists: %v", err)
-				return errors.Wrap(err, "Server encountered an error checking if namespace already exists")
+		// Check if prefix exists before doing anything else
+		exists, err := namespaceExists(data.Prefix)
+		if err != nil {
+			log.Errorf("Failed to check if namespace already exists: %v", err)
+			return false, nil, errors.Wrap(err, "Server encountered an error checking if namespace already exists")
+		}
+		if exists {
+			returnMsg := map[string]interface{}{
+				"message": fmt.Sprintf("The prefix %s is already registered -- nothing else to do!", data.Prefix),
 			}
-			if exists {
-				returnMsg := map[string]interface{}{
-					"message": fmt.Sprintf("The prefix %s is already registered -- nothing else to do!", data.Prefix),
-				}
-				ctx.AbortWithStatusJSON(200, returnMsg)
-				log.Infof("Skipping registration of prefix %s because it's already registered.", data.Prefix)
-				return nil
-			}
+			log.Infof("Skipping registration of prefix %s because it's already registered.", data.Prefix)
+			return false, returnMsg, nil
+		}
 
-			reqPrefix, err := validatePrefix(data.Prefix)
-			if err != nil {
-				err = errors.Wrapf(err, "Requested namespace %s failed validation", reqPrefix)
-				log.Errorln(err)
-				return err
-			}
-			data.Prefix = reqPrefix
+		reqPrefix, err := validatePrefix(data.Prefix)
+		if err != nil {
+			err = errors.Wrapf(err, "Requested namespace %s failed validation", data.Prefix)
+			log.Errorln(err)
+			return false, nil, badRequestError{Message: err.Error()}
+		}
+		data.Prefix = reqPrefix
 
-			valErr, sysErr := validateKeyChaining(reqPrefix, key)
-			if valErr != nil {
-				log.Errorln(err)
-				ctx.JSON(http.StatusForbidden, gin.H{"error": valErr})
-				return valErr
-			}
-			if sysErr != nil {
-				log.Errorln(err)
-				ctx.JSON(http.StatusInternalServerError, gin.H{"error": sysErr})
-				return sysErr
-			}
+		valErr, sysErr := validateKeyChaining(reqPrefix, key)
+		if valErr != nil {
+			log.Errorln(err)
+			return false, nil, permissionDeniedError{Message: valErr.Error()}
+		}
+		if sysErr != nil {
+			log.Errorln(err)
+			return false, nil, sysErr
+		}
 
-			err = addNamespaceHandler(ctx, data)
-			if err != nil {
-				ctx.JSON(500, gin.H{"error": "The server encountered an error while attempting to add the prefix to its database"})
-				return errors.Wrapf(err, "Failed while trying to add to database")
-			}
-			return nil
+		var ns Namespace
+		ns.Prefix = data.Prefix
+
+		pubkeyData, err := json.Marshal(data.Pubkey)
+		if err != nil {
+			return false, nil, errors.Wrapf(err, "Failed to convert public key from json to string format for the prefix %s", ns.Prefix)
+		}
+		ns.Pubkey = string(pubkeyData)
+		ns.Identity = data.Identity
+
+		// Overwrite status to Pending to filter malicious request
+		ns.AdminMetadata.Status = Pending
+
+		err = AddNamespace(&ns)
+		if err != nil {
+			return false, nil, errors.Wrapf(err, "Failed to add the prefix %q to the database", ns.Prefix)
+		} else {
+			return true, map[string]interface{}{
+				"message": "Prefix successfully registered",
+			}, nil
 		}
 	} else {
-		ctx.JSON(500, gin.H{"error": "Server was either unable to verify the client's public key, or an encountered an error with its own"})
-		return errors.Errorf("Either the server or the client could not be verified: "+
+		return false, nil, errors.Errorf("Unable to verify the client's public key, or an encountered an error with its own: "+
 			"server verified:%t, client verified:%t", serverVerified, clientVerified)
 	}
-	return nil
 }
 
-// Handler functions called upon by the gin router
+// Handle the namespace registration with nonce generation and verifcation, regardless of
+// using OIDC Authorization or not
+func keySignChallenge(ctx *gin.Context, data *registrationData) (bool, map[string]interface{}, error) {
+	if data.ClientNonce != "" && data.ClientPayload != "" && data.ClientSignature != "" &&
+		data.ServerNonce != "" && data.ServerPayload != "" && data.ServerSignature != "" {
+		created, res, err := keySignChallengeCommit(ctx, data)
+		if err != nil {
+			return false, nil, err
+		} else {
+			return created, res, nil
+		}
+	} else if data.ClientNonce != "" {
+		res, err := keySignChallengeInit(ctx, data)
+		if err != nil {
+			return false, nil, err
+		} else {
+			return false, res, nil
+		}
+	} else {
+		return false, nil, badRequestError{Message: "Key sign challenge is missing parameters"}
+	}
+}
+
+// Gin handler for Pelican CLI/automatic namespace registration. If request asks for OIDC authorization,
+// it will initiate OIDC device authorization flow and handles all next steps in the single endpoint.
+// The CLI client is expected to hit this endpoint multiple times for OIDC authorization flow with
+// the device code returned.
+//
+// If not with authorization, it will check nonce of the request and register the namespace
 func cliRegisterNamespace(ctx *gin.Context) {
 
 	var reqData registrationData
@@ -348,6 +375,9 @@ func cliRegisterNamespace(ctx *gin.Context) {
 
 	client := http.Client{Transport: config.GetTransport()}
 
+	// Last step in OIDC device authorization flow. Given the AccessToken
+	// this server sent in previous step, and other request data (prefix, etc)
+	// It will validate the request, verify nonce, and register the namespace prefix
 	if reqData.AccessToken != "" {
 		payload := url.Values{}
 		payload.Set("access_token", reqData.AccessToken)
@@ -382,19 +412,44 @@ func cliRegisterNamespace(ctx *gin.Context) {
 		}
 
 		reqData.Identity = string(body)
-		err = keySignChallenge(ctx, &reqData, "register")
+		created, res, err := keySignChallenge(ctx, &reqData)
 		if err != nil {
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error during key-sign challenge: " + err.Error()})
-			log.Warningf("Failed to complete key sign challenge with identity requirement: %v", err)
+			if errors.As(err, &permissionDeniedError{}) {
+				ctx.JSON(http.StatusForbidden, gin.H{"error": "You don't have permission to register the prefix: " + err.Error()})
+			} else if errors.As(err, &badRequestError{}) {
+				ctx.JSON(http.StatusBadRequest, gin.H{"error": "Bad request for key-sign challenge: " + err.Error()})
+			} else {
+				ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Server encountered an error during key-sign challenge: " + err.Error()})
+				log.Warningf("Failed to complete key sign challenge with identity requirement: %v", err)
+			}
+		} else {
+			if created {
+				ctx.JSON(http.StatusCreated, res)
+			} else {
+				ctx.JSON(http.StatusOK, res)
+			}
 		}
 		return
 	}
 
+	// For no-auth registration, it calls keySignChallenge to verify nonce and register the namespace
 	if reqData.IdentityRequired == "false" || reqData.IdentityRequired == "" {
-		err := keySignChallenge(ctx, &reqData, "register")
+		created, res, err := keySignChallenge(ctx, &reqData)
 		if err != nil {
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error during key-sign challenge: " + err.Error()})
-			log.Warningf("Failed to complete key sign challenge without identity requirement: %v", err)
+			if errors.As(err, &permissionDeniedError{}) {
+				ctx.JSON(http.StatusForbidden, gin.H{"error": "You don't have permission to register the prefix: " + err.Error()})
+			} else if errors.As(err, &badRequestError{}) {
+				ctx.JSON(http.StatusBadRequest, gin.H{"error": "Bad request for key-sign challenge: " + err.Error()})
+			} else {
+				ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Server encountered an error during key-sign challenge: " + err.Error()})
+				log.Warningf("Failed to complete key sign challenge without identity requirement: %v", err)
+			}
+		} else {
+			if created {
+				ctx.JSON(http.StatusCreated, res)
+			} else {
+				ctx.JSON(http.StatusOK, res)
+			}
 		}
 		return
 	}
@@ -406,6 +461,9 @@ func cliRegisterNamespace(ctx *gin.Context) {
 		return
 	}
 
+	// The first step in OIDC device authorization flow, where we ask for the
+	// device code on the behalf of client user. In this case, the client is
+	// Pelican CLI.
 	if reqData.DeviceCode == "" {
 		log.Debug("Getting Device Code")
 		payload := url.Values{}
@@ -448,6 +506,8 @@ func cliRegisterNamespace(ctx *gin.Context) {
 		})
 		return
 	} else {
+		// Second step in OIDC device authorization flow,
+		// we exchange access token with the device token obtained in the previous step
 		log.Debug("Verifying Device Code")
 		payload := url.Values{}
 		payload.Set("client_id", oidcConfig.ClientID)
@@ -506,31 +566,6 @@ func cliRegisterNamespace(ctx *gin.Context) {
 		}
 		return
 	}
-}
-
-func addNamespaceHandler(ctx *gin.Context, data *registrationData) error {
-	var ns Namespace
-	ns.Prefix = data.Prefix
-
-	pubkeyData, err := json.Marshal(data.Pubkey)
-	if err != nil {
-		return errors.Wrapf(err, "Failed to marshal the pubkey for prefix %s", ns.Prefix)
-	}
-	ns.Pubkey = string(pubkeyData)
-	if data.Identity != "" {
-		ns.Identity = data.Identity
-	}
-
-	// Overwrite status to Pending to filter malicious request
-	ns.AdminMetadata.Status = Pending
-
-	err = AddNamespace(&ns)
-	if err != nil {
-		return errors.Wrapf(err, "Failed to add prefix %s", ns.Prefix)
-	}
-
-	ctx.JSON(http.StatusCreated, gin.H{"status": "success"})
-	return nil
 }
 
 func deleteNamespaceHandler(ctx *gin.Context) {
