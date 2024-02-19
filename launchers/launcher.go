@@ -26,6 +26,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -132,17 +133,8 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 	config.UpdateConfigFromListener(ln)
 
 	servers := make([]server_utils.XRootDServer, 0)
-	if modules.IsEnabled(config.CacheType) {
-		server, err := CacheServe(ctx, engine, egrp)
-		if err != nil {
-			return shutdownCancel, err
-		}
-
-		servers = append(servers, server)
-	}
 
 	if modules.IsEnabled(config.OriginType) {
-
 		mode := param.Origin_Mode.GetString()
 		switch mode {
 		case "posix":
@@ -207,13 +199,6 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		return shutdownCancel, err
 	}
 
-	if modules.IsEnabled(config.CacheType) {
-		log.Debug("Finishing cache server configuration")
-		if err = CacheServeFinish(ctx, egrp); err != nil {
-			return shutdownCancel, err
-		}
-	}
-
 	if modules.IsEnabled(config.OriginType) {
 		log.Debug("Finishing origin server configuration")
 		if err = OriginServeFinish(ctx, egrp); err != nil {
@@ -221,10 +206,35 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		}
 	}
 
-	// Include cache here just in case, although we currently don't use launcher to launch cache
+	// Origin needs to advertise once before the cache starts
+	if modules.IsEnabled(config.CacheType) && modules.IsEnabled(config.OriginType) {
+		log.Debug("Advertise Origin")
+		if err := server_ui.Advertise(ctx, servers); err != nil {
+			return shutdownCancel, err
+		}
+	}
+
+	if modules.IsEnabled(config.CacheType) {
+		// Give five seconds for the origin to finish advertising to the director
+		time.Sleep(5 * time.Second)
+		server, err := CacheServe(ctx, engine, egrp)
+		if err != nil {
+			return shutdownCancel, err
+		}
+
+		servers = append(servers, server)
+	}
+
 	if modules.IsEnabled(config.OriginType) || modules.IsEnabled(config.CacheType) {
 		log.Debug("Launching periodic advertise")
 		if err := server_ui.LaunchPeriodicAdvertise(ctx, egrp, servers); err != nil {
+			return shutdownCancel, err
+		}
+	}
+
+	if modules.IsEnabled(config.CacheType) {
+		log.Debug("Finishing cache server configuration")
+		if err = CacheServeFinish(ctx, egrp); err != nil {
 			return shutdownCancel, err
 		}
 	}

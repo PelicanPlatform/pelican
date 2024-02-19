@@ -22,8 +22,10 @@ package launchers
 
 import (
 	"context"
+	"crypto/tls"
 	_ "embed"
 	"encoding/json"
+	"net/http"
 	"net/url"
 	"strings"
 	"time"
@@ -59,7 +61,6 @@ func getNSAdsFromDirector() ([]common.NamespaceAdV2, error) {
 		return nil, errors.Wrap(err, "Unable to parse director url")
 	}
 
-	//directorEndpoint := directorEndpointURL.String()
 	if err != nil {
 		return respNS, errors.Wrapf(err, "Failed to get DirectorURL from config: %v", err)
 	}
@@ -69,6 +70,22 @@ func getNSAdsFromDirector() ([]common.NamespaceAdV2, error) {
 	if err != nil {
 		return respNS, err
 	}
+
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+	client := &http.Client{Transport: tr}
+
+	req, err := http.NewRequest("GET", "https://70fa1e4d6777:8444/api/v2.0/director/listNamespaces", nil)
+	if err != nil {
+		return respNS, err
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return respNS, err
+	}
+	defer resp.Body.Close()
 
 	// Attempt to get data from the 2.0 endpoint, if that returns a 404 error, then attempt to get data
 	// from the 1.0 endpoint and convert from V1 to V2

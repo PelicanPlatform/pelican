@@ -680,9 +680,6 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 	if err := initConfigDir(); err != nil {
 		return errors.Wrap(err, "Failed to initialize the server configuration")
 	}
-	if currentServers.IsEnabled(OriginType) && currentServers.IsEnabled(CacheType) {
-		return errors.New("A cache and origin cannot both be enabled in the same instance")
-	}
 
 	setEnabledServer(currentServers)
 
