@@ -232,6 +232,9 @@ nfpms:
       - src: "systemd/pelican-registry.yaml"
         dst: "/etc/pelican/pelican-registry.yaml"
         type: config|noreplace
+      - src: "systemd/pelican.logrotate"
+        dst: "/etc/logrotate.d/pelican"
+        type: config|noreplace
       - dst: "/var/log/pelican"
         type: "dir"
         file_info:
