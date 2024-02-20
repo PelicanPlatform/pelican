@@ -144,6 +144,7 @@ func runtimeInfo() (api_v1.RuntimeInfo, error) {
 }
 
 // Configure director's Prometheus scraper to use HTTP service discovery for origins/caches
+// and carry the token for scraping origin/caches' /metrics endpoint
 func configDirectorPromScraper(ctx context.Context) (*config.ScrapeConfig, error) {
 	directorBaseUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
 	if err != nil {
@@ -653,7 +654,8 @@ func ConfigureEmbeddedPrometheus(ctx context.Context, engine *gin.Engine) error 
 		)
 	}
 	{
-		// Periodic scraper config reload to refresh service discovery token
+		// Periodic scraper config reload to refresh service discovery token and
+		// origin/cache /metrics scrape token
 		cancel := make(chan struct{})
 		g.Add(
 			func() error {
@@ -676,14 +678,14 @@ func ConfigureEmbeddedPrometheus(ctx context.Context, engine *gin.Engine) error 
 						err := func() error {
 							globalConfigMtx.Lock()
 							defer globalConfigMtx.Unlock()
-							// Create a new self-scrape token
+							// Create a new token for scraping /metrics endpoint on the server itself
 							selfScraperToken, err := createPromMetricToken()
 							if err != nil {
 								return fmt.Errorf("Failed to generate token for self-scraper at start: %v", err)
 							}
 
-							// We need a fresh ScrapeConfigs copy so that deepEqual can give us green light
-							// before reload the scrape config
+							// We need a fresh ScrapeConfigs copy so that it can pass deepEqual check
+							// or it won't reload
 							tempConfig := config.Config{
 								GlobalConfig:  promCfg.GlobalConfig,
 								ScrapeConfigs: make([]*config.ScrapeConfig, 1),
@@ -709,36 +711,41 @@ func ConfigureEmbeddedPrometheus(ctx context.Context, engine *gin.Engine) error 
 								},
 							}
 							newScrapeConfig.HTTPClientConfig = scraperHttpClientConfig
+							// Here the service discovery basically points scraper to /metrics endpoint
+							// on the same server
 							newScrapeConfig.ServiceDiscoveryConfigs = make([]discovery.Config, 1)
 							newScrapeConfig.ServiceDiscoveryConfigs[0] = oldScrapeCfg.ServiceDiscoveryConfigs[0]
 							tempConfig.ScrapeConfigs[0] = &newScrapeConfig
 
-							if len(promCfg.ScrapeConfigs) > 1 {
-								for idx, cfg := range promCfg.ScrapeConfigs {
-									if idx != 0 {
-										tempConfig.ScrapeConfigs = append(tempConfig.ScrapeConfigs, cfg)
-									}
+							// For director, it scrapes metrics from origin/cache servers.
+							// 	It discovers such servers via an HTTP discovery endpoint with token auth
+							// so we need to attach a valid token and refresh it whenever it's about to expire
+							// 	It scrapes origin/cache servers' protected /metrics endpoint so we need to attach
+							// another token and refresh it. We do all the refresh work below
+							if isDirector {
+								// Refresh service discovery token by re-configure the scraper
+								if len(promCfg.ScrapeConfigs) < 2 {
+									return errors.New("Prometheus scraper config didn't include origin/cache HTTP SD config. Length of configs less than 2.")
 								}
+
+								// The returned config has both service discovery token and scraper token refreshed
+								storageServerScrapeCfg, err := configDirectorPromScraper(ctx)
+								if err != nil {
+									return fmt.Errorf("Failed to generate token for director scraper when refresh it: %v", err)
+								}
+
+								// Idx 0 is the config for server's onboard scraper
+								// Idx 1 is the config for director scraper at origins/caches
+								promCfg.ScrapeConfigs[1] = storageServerScrapeCfg // update existing config
+								// Add to the temp config so that reloader can pass deepEqual check
+								tempConfig.ScrapeConfigs = append(tempConfig.ScrapeConfigs, storageServerScrapeCfg)
 							}
 
-							// Refresh the scraper token by reloading the scraper config
+							// Reload all scraper config
 							err = scrapeManager.ApplyConfig(&tempConfig)
 
 							if err != nil {
 								return fmt.Errorf("Failed to reapply scrape configs: %v", err)
-							}
-
-							if isDirector {
-								// Refresh service discovery token by re-configure scraper
-								if len(promCfg.ScrapeConfigs) < 2 {
-									return errors.New("Prometheus scraper config didn't include origin/cache HTTP SD config. Length of configs less than 2.")
-								}
-								// Index 0 is the default config for servers
-								// Create new director-scrap token & service discovery token
-								promCfg.ScrapeConfigs[1], err = configDirectorPromScraper(ctx)
-								if err != nil {
-									return fmt.Errorf("Failed to generate token for director scraper when refresh it: %v", err)
-								}
 							}
 
 							c := make(map[string]discovery.Configs)
@@ -749,7 +756,7 @@ func ConfigureEmbeddedPrometheus(ctx context.Context, engine *gin.Engine) error 
 							for _, v := range scfgs {
 								c[v.JobName] = v.ServiceDiscoveryConfigs
 							}
-							// We refresh the service discovery config for all the scrapers
+							// Reload service discovery configs, separated from reloading scraper config
 							if err := discoveryManagerScrape.ApplyConfig(c); err != nil {
 								err2 := level.Error(logger).Log("msg", fmt.Sprint("Scraper service discovery config periodic reload failed: ", err))
 								_ = err2

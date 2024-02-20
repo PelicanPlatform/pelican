@@ -830,9 +830,9 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 	tokenExpiresIn := param.Monitoring_TokenExpiresIn.GetDuration()
 
 	if tokenExpiresIn == 0 || tokenRefreshInterval == 0 || tokenRefreshInterval > tokenExpiresIn {
-		viper.Set("Monitoring.TokenRefreshInterval", time.Minute*59)
+		viper.Set("Monitoring.TokenRefreshInterval", time.Minute*5)
 		viper.Set("Monitoring.TokenExpiresIn", time.Hour*1)
-		log.Warningln("Invalid Monitoring.TokenRefreshInterval or Monitoring.TokenExpiresIn. Fallback to 59m for refresh interval and 1h for valid interval")
+		log.Warningln("Invalid Monitoring.TokenRefreshInterval or Monitoring.TokenExpiresIn. Fallback to 5m for refresh interval and 1h for valid interval")
 	}
 
 	if currentServers.IsEnabled(DirectorType) {
