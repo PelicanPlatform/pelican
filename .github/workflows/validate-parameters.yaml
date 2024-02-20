@@ -1,0 +1,18 @@
+name: Validate Parameters File
+on:
+  pull_request:
+jobs:
+  validate-parameters:
+    name: Validate Parameters
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          cache: 'pip'
+          python-version: '3.9'
+      - name: Install dependencies
+        run: pip install -r .github/scripts/validate-parameters/requirements.txt
+
+      - name: Validate parameters
+        run: python .github/scripts/validate-parameters/main.py

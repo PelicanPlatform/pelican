@@ -128,6 +128,7 @@ description: >-
   will result in the IP address "123.234.123.234" being mapped to Madison, WI, and IP addresses in the range ABCD::0000-FFFF will be mapped
   to a field in Kansas.
 type: object
+objectStructure: GeoIPOverride
 default: none
 components: ["director"]
 ---
@@ -706,6 +707,7 @@ description: >-
   for detail
 type: int
 default: 1000
+components: ["director"]
 ---
 name: Director.AdvertisementTTL
 description: >-
@@ -774,6 +776,7 @@ description: >-
 
   Note that this value will take precedence over Registry.InstitutionsUrl if both are set
 type: object
+objectStructure: Institution
 default: none
 components: ["registry"]
 ---
@@ -809,6 +812,7 @@ description: >-
       ```
   - "description" will show up in the web UI as helper text to help user understand the field
 type: object
+objectStructure: CustomRegistrationField
 default: none
 components: ["nsregistry"]
 ---
@@ -1083,6 +1087,7 @@ description: >-
 
   would only allow tokens with `"idp_name": "University of Wisconsin-Madison"` set to authenticate.
 type: object
+objectStructure: OIDCAuthenticationRequirement
 default: []
 components: ["origin"]
 ---
@@ -1150,6 +1155,7 @@ description: >-
   - read /home/bbockelm
   - modify /home/bbockelm
 type: object
+objectStructure: AuthorizationTemplate
 default: []
 components: ["origin"]
 ---
@@ -1566,6 +1572,7 @@ description: >-
   ```
 
 type: object
+objectStructure: IPMapping
 default: none
 components: ["origin", "cache"]
 ---
