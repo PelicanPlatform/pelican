@@ -93,3 +93,5 @@ jobs:
           tags: "${{ steps.generate-tag-list.outputs.taglist }}"
           build-args: |
             IS_PR_BUILD=${{ github.event_name == 'pull_request' }}
+          cache-from: type=registry,ref=hub.opensciencegrid.org/pelican_platform/pelican:buildcache
+          cache-to: type=registry,ref=hub.opensciencegrid.org/pelican_platform/pelican:buildcache,mode=max,ignore-error=true
