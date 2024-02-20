@@ -57,8 +57,8 @@ Origin:
   SelfTestInterval: 15s
 Registry:
   InstitutionsUrlReloadMinutes: 15m
-  CacheApprovedOnly: false
-  OriginApprovedOnly: false
+  RequireCacheApproval: false
+  RequireOriginApproval: false
 Monitoring:
   PortLower: 9930
   PortHigher: 9999
