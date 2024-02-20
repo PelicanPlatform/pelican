@@ -241,7 +241,7 @@ func configureWebResource(engine *gin.Engine) error {
 // Configure common endpoint available to all server web UI which are located at /api/v1.0/*
 func configureCommonEndpoints(engine *gin.Engine) error {
 	engine.GET("/api/v1.0/config", AuthHandler, getConfigValues)
-	engine.POST("/api/v1.0/config", AuthHandler, AdminAuthHandler, updateConfigValues)
+	engine.PATCH("/api/v1.0/config", AuthHandler, AdminAuthHandler, updateConfigValues)
 	engine.GET("/api/v1.0/servers", getEnabledServers)
 	// Health check endpoint for web engine
 	engine.GET("/api/v1.0/health", func(ctx *gin.Context) {
