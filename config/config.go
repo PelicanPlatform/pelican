@@ -163,8 +163,8 @@ func (e *MetadataErr) Error() string {
 
 func (e *MetadataErr) Is(target error) bool {
 	// We want to verify we have a timeout error
-	if _, ok := target.(*MetadataErr); ok {
-		return e.msg == target.Error()
+	if target, ok := target.(*MetadataErr); ok {
+		return e.msg == target.msg
 	}
 	return false
 }
