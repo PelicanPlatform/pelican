@@ -132,6 +132,8 @@ var (
 	enabledServers ServerType
 	setServerOnce  sync.Once
 
+	RestartFlag = make(chan any) // A channel flag to restart the server instance that launcher listens to (including cache)
+
 	// Pelican version
 	PelicanVersion string
 )
@@ -693,8 +695,26 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 	viper.SetDefault("Server.SessionSecretFile", filepath.Join(configDir, "session-secret"))
 	viper.SetDefault("OIDC.ClientIDFile", filepath.Join(configDir, "oidc-client-id"))
 	viper.SetDefault("OIDC.ClientSecretFile", filepath.Join(configDir, "oidc-client-secret"))
+	viper.SetDefault("Server.WebConfigFile", filepath.Join(configDir, "web-config.yaml"))
 	viper.SetDefault("Cache.ExportLocation", "/")
 	viper.SetDefault("Registry.RequireKeyChaining", true)
+
+	if webConfigPath := param.Server_WebConfigFile.GetString(); webConfigPath != "" {
+		err := os.MkdirAll(filepath.Dir(webConfigPath), 0700)
+		if err != nil {
+			return err
+		}
+		webConfigFile, err := os.OpenFile(webConfigPath, os.O_RDONLY|os.O_CREATE, 0644)
+		if err != nil {
+			return err
+		} else {
+			defer webConfigFile.Close()
+			if err := viper.MergeConfig(webConfigFile); err != nil {
+				return err
+			}
+		}
+	}
+
 	if IsRootExecution() {
 		viper.SetDefault("Xrootd.RunLocation", filepath.Join("/run", "pelican", "xrootd", xrootdPrefix))
 		viper.SetDefault("Cache.DataLocation", "/run/pelican/xcache")

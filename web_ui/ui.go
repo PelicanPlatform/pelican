@@ -37,8 +37,10 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/spf13/viper"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
@@ -69,6 +71,52 @@ func getConfigValues(ctx *gin.Context) {
 	configWithType := param.ConvertToConfigWithType(rawConfig)
 
 	ctx.JSON(200, configWithType)
+}
+
+func updateConfigValues(ctx *gin.Context) {
+	updatedConfig := param.Config{}
+	updatedConfigMap := map[string]interface{}{}
+
+	// Check if the request data is valid config params
+	if err := ctx.ShouldBindBodyWith(&updatedConfig, binding.JSON); err != nil {
+		ctx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Failed to bind the request. Invalid request data format: " + err.Error()})
+		return
+	}
+	if err := ctx.ShouldBindBodyWith(&updatedConfigMap, binding.JSON); err != nil {
+		ctx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Failed to bind the request into a map: " + err.Error()})
+		return
+	}
+
+	webConfigPath := param.Server_WebConfigFile.GetString()
+	if webConfigPath == "" {
+		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Bad server configuration: Server.WebConfigFile value is empty"})
+		return
+	}
+
+	// Create a new viper instance to handle config validation and merging
+	webCfgViper := viper.New()
+	webCfgViper.SetConfigFile(webConfigPath)
+
+	if err := webCfgViper.ReadInConfig(); err != nil {
+		log.Error("Failed to read existing web-based config into internal config struct: ", err.Error())
+		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to read existing web-based config into internal config struct"})
+		return
+	}
+
+	if err := webCfgViper.MergeConfigMap(updatedConfigMap); err != nil {
+		log.Error("Failed to update web-based config with requested changes: ", err.Error())
+		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to update web-based config with requested changes"})
+		return
+	}
+
+	if err := webCfgViper.WriteConfig(); err != nil {
+		log.Error("Failed to write back the updated config: ", err.Error())
+		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to write back the updated config"})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"message": "success"})
+	config.RestartFlag <- true
 }
 
 func getEnabledServers(ctx *gin.Context) {
@@ -193,6 +241,7 @@ func configureWebResource(engine *gin.Engine) error {
 // Configure common endpoint available to all server web UI which are located at /api/v1.0/*
 func configureCommonEndpoints(engine *gin.Engine) error {
 	engine.GET("/api/v1.0/config", AuthHandler, getConfigValues)
+	engine.POST("/api/v1.0/config", AuthHandler, AdminAuthHandler, updateConfigValues)
 	engine.GET("/api/v1.0/servers", getEnabledServers)
 	// Health check endpoint for web engine
 	engine.GET("/api/v1.0/health", func(ctx *gin.Context) {

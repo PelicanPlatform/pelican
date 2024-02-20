@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-type config struct {
+type Config struct {
 	Cache struct {
 		DataLocation string
 		EnableVoms bool
@@ -168,6 +168,7 @@ type config struct {
 		UIActivationCodeFile string
 		UILoginRateLimit int
 		UIPasswordFile string
+		WebConfigFile string
 		WebHost string
 		WebPort int
 	}
@@ -384,6 +385,7 @@ type configWithType struct {
 		UIActivationCodeFile struct { Type string; Value string }
 		UILoginRateLimit struct { Type string; Value int }
 		UIPasswordFile struct { Type string; Value string }
+		WebConfigFile struct { Type string; Value string }
 		WebHost struct { Type string; Value string }
 		WebPort struct { Type string; Value int }
 	}

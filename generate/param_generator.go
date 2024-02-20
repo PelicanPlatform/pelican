@@ -312,7 +312,7 @@ func GenParamStruct() {
 	}
 
 	data := TemplateData{
-		GeneratedConfig:         `type config` + generateGoStructCode(root, ""),
+		GeneratedConfig:         `type Config` + generateGoStructCode(root, ""),
 		GeneratedConfigWithType: `type configWithType` + generateGoStructWithTypeCode(root, ""),
 	}
 
