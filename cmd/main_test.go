@@ -108,6 +108,7 @@ func TestHandleCLIVersionFlag(t *testing.T) {
 }
 
 func TestHandleCLIExecutableAlias(t *testing.T) {
+	aliases := []string{"stashcp", "stash_plugin"}
 	// If we're in the process started by exec.Command, run the handleCLI function.
 	if os.Getenv("BE_CRASHER") == "1" {
 		err := handleCLI(os.Args[1:])
@@ -115,6 +116,58 @@ func TestHandleCLIExecutableAlias(t *testing.T) {
 			t.Fatalf("Function returns error")
 		}
 		return
+	} else {
+		// Compile the test binary.
+		if runningOS := runtime.GOOS; runningOS == "windows" {
+			cmd := exec.Command("go", "build", "-o", "pelican.exe", ".")
+			err := cmd.Run()
+			if err != nil {
+				t.Fatal(err, "Error copying the binary to pelican.exe")
+			}
+			defer os.Remove("pelican.exe") // Clean up the test binary when done.
+		} else {
+			cmd := exec.Command("go", "build", "-o", "pelican", ".")
+			err := cmd.Run()
+			if err != nil {
+				t.Fatal(err, "Error copying the binary to pelican")
+			}
+			defer os.Remove("pelican") // Clean up the test binary when done.
+
+			// Copy binary into various aliases
+			cmd = exec.Command("cp", "pelican", "pelican.exe")
+			err = cmd.Run()
+			if err != nil {
+				t.Fatal(err, "Error copying the binary to pelican.exe")
+			}
+			defer os.Remove("pelican.exe") // Clean up the test binary when done.
+		}
+
+		for _, alias := range aliases {
+			// On windows, .exe is the only valid executable format
+			if runningOS := runtime.GOOS; runningOS == "windows" {
+				cmd := exec.Command("cp", "pelican.exe", alias+".exe")
+				err := cmd.Run()
+				if err != nil {
+					t.Fatal(err, "Error copying the binary to "+alias+".exe")
+				}
+				defer os.Remove(alias + ".exe") // Clean up the test binary when done.
+			} else {
+				cmd := exec.Command("cp", "pelican", alias)
+				err := cmd.Run()
+				if err != nil {
+					t.Fatal(err, "Error copying the binary to "+alias)
+				}
+				defer os.Remove(alias) // Clean up the test binary when done.
+
+				cmd = exec.Command("cp", "pelican", alias+".exe")
+				err = cmd.Run()
+				if err != nil {
+					t.Fatal(err, "Error copying the binary to "+alias+".exe")
+				}
+				defer os.Remove(alias + ".exe") // Clean up the test binary when done.
+			}
+
+		}
 	}
 
 	oldArgs := os.Args
@@ -155,16 +208,8 @@ func TestHandleCLIExecutableAlias(t *testing.T) {
 	}
 
 	batchTest := func(t *testing.T, arguments []string, expected string) {
-		// Compile the test binary.
-		cmd := exec.Command("go", "build", "-o", arguments[0], ".")
-		err := cmd.Run()
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer os.Remove(arguments[0]) // Clean up the test binary when done.
-
 		// Run the test binary with the BE_CRASHER environment variable set.
-		cmd = exec.Command("./"+arguments[0], arguments[1:]...)
+		cmd := exec.Command("./"+arguments[0], arguments[1:]...)
 		cmd.Env = append(os.Environ(), "BE_CRASHER=1")
 
 		// Set up pipes to capture stdout and stderr.
@@ -179,7 +224,7 @@ func TestHandleCLIExecutableAlias(t *testing.T) {
 		errBytes, _ := io.ReadAll(stderr)
 
 		// Wait for the command to finish.
-		err = cmd.Wait()
+		err := cmd.Wait()
 
 		got := strings.TrimSpace(string(gotBytes))
 		errString := strings.TrimSpace(string(errBytes))
