@@ -624,6 +624,9 @@ func DoPut(localObject string, remoteDestination string, recursive bool) (transf
 		return nil, err
 	}
 
+	remoteDestUrl.Scheme = remoteDestScheme
+
+	// This is for condor cases:
 	remoteDestScheme, _ = getTokenName(remoteDestUrl)
 
 	// Check if we understand the found url scheme
@@ -632,7 +635,6 @@ func DoPut(localObject string, remoteDestination string, recursive bool) (transf
 		return nil, err
 	}
 
-	remoteDestUrl.Scheme = remoteDestScheme
 	pelicanURL, err := newPelicanURL(remoteDestUrl, remoteDestScheme)
 	if err != nil {
 		return nil, fmt.Errorf("%v: error generating metadata for specified url", err)

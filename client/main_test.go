@@ -400,7 +400,8 @@ func TestNewPelicanURL(t *testing.T) {
 	t.Run("TestPelicanSchemeNoError", func(t *testing.T) {
 		viper.Reset()
 		viper.Set("TLSSkipVerify", true)
-		config.InitClient()
+		err := config.InitClient()
+		assert.NoError(t, err)
 		// Create a server that gives us a mock response
 		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// make our response:
@@ -418,7 +419,8 @@ func TestNewPelicanURL(t *testing.T) {
 			}
 
 			w.WriteHeader(http.StatusOK)
-			w.Write(responseJSON)
+			_, err = w.Write(responseJSON)
+			assert.NoError(t, err)
 		}))
 		defer server.Close()
 

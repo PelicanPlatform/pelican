@@ -281,7 +281,8 @@ func TestDiscoverUrlFederation(t *testing.T) {
 		}
 
 		w.WriteHeader(http.StatusOK)
-		w.Write(responseJSON)
+		_, err = w.Write(responseJSON)
+		assert.NoError(t, err)
 	}))
 	defer server.Close()
 	metadata, err := DiscoverUrlFederation(server.URL)
@@ -314,7 +315,8 @@ func TestDiscoverFederation(t *testing.T) {
 		}
 
 		w.WriteHeader(http.StatusOK)
-		w.Write(responseJSON)
+		_, err = w.Write(responseJSON)
+		assert.NoError(t, err)
 	}))
 	defer server.Close()
 	viper.Set("Federation.DiscoveryUrl", server.URL)
