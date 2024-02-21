@@ -438,7 +438,7 @@ func TestNewPelicanURL(t *testing.T) {
 		assert.Equal(t, "registry", pelicanURL.registryUrl)
 		assert.Equal(t, remoteObjectURL, pelicanURL.objectUrl)
 		// Check to make sure it was populated in our cache
-		assert.True(t, pelicanURLCache.Has(pelicanURL.discoveryUrl))
+		assert.True(t, PelicanURLCache.Has(pelicanURL.discoveryUrl))
 		viper.Reset()
 	})
 

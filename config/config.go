@@ -301,7 +301,7 @@ func GetAllPrefixes() []string {
 
 // This function is for discovering federations as specified by a url during a pelican:// transfer.
 // this does not populate global fields and is more temporary per url
-func DiscoverUrlFederation(federationDiscoveryUrl string) (FederationDiscovery, error) {
+func DiscoverUrlFederation(federationDiscoveryUrl string) (metadata FederationDiscovery, err error) {
 	log.Debugln("Performing federation service discovery for specified url against endpoint", federationDiscoveryUrl)
 	federationUrl, err := url.Parse(federationDiscoveryUrl)
 	if err != nil {
@@ -355,7 +355,7 @@ func DiscoverUrlFederation(federationDiscoveryUrl string) (FederationDiscovery, 
 		return FederationDiscovery{}, errors.Errorf("Federation metadata discovery failed with HTTP status %d.  Error message: %s", result.StatusCode, truncatedMessage)
 	}
 
-	metadata := FederationDiscovery{}
+	metadata = FederationDiscovery{}
 	err = json.Unmarshal(body, &metadata)
 	if err != nil {
 		return FederationDiscovery{}, errors.Wrapf(err, "Failure when parsing federation metadata at %s", discoveryUrl)
@@ -401,7 +401,7 @@ func DiscoverFederation() error {
 	curRegistryURL := param.Federation_RegistryUrl.GetString()
 	curFederationJwkURL := param.Federation_JwkUrl.GetString()
 	curBrokerURL := param.Federation_BrokerUrl.GetString()
-	if len(curDirectorURL) != 0 && len(curRegistryURL) != 0 && len(curFederationJwkURL) != 0 {
+	if curDirectorURL != "" && curRegistryURL != "" && curFederationJwkURL != "" && curBrokerURL != "" {
 		return nil
 	}
 

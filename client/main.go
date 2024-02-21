@@ -87,15 +87,31 @@ type payloadStruct struct {
 }
 
 type PelicanURL struct {
-	objectUrl            *url.URL
-	discoveryUrl         string
-	directorUrl          string
-	registryUrl          string
-	topologyNamespaceUrl string //Might not need this?
+	objectUrl    *url.URL
+	discoveryUrl string
+	directorUrl  string
+	registryUrl  string
 }
 
-var pelicanURLCache = ttlcache.New[string, PelicanURL](
-	ttlcache.WithTTL[string, PelicanURL](15 * time.Minute),
+var PelicanURLCache = ttlcache.New[string, PelicanURL](
+	ttlcache.WithTTL[string, PelicanURL](30*time.Minute),
+	ttlcache.WithLoader[string, PelicanURL](loader),
+)
+
+var loader = ttlcache.LoaderFunc[string, PelicanURL](
+	func(c *ttlcache.Cache[string, PelicanURL], key string) *ttlcache.Item[string, PelicanURL] {
+		urlFederation, err := config.DiscoverUrlFederation(key)
+		if err != nil {
+			return nil
+		}
+		// Set our local url metadata
+		item := c.Set(key, PelicanURL{
+			directorUrl:  urlFederation.DirectorEndpoint,
+			discoveryUrl: key,
+			registryUrl:  urlFederation.NamespaceRegistrationEndpoint,
+		}, ttlcache.DefaultTTL)
+		return item
+	},
 )
 
 // Determine the token name if it is embedded in the scheme, Condor-style
@@ -471,6 +487,7 @@ func getNamespaceInfo(resourcePath, OSDFDirectorUrl string, isPut bool) (ns name
 		}
 		return
 	} else {
+		log.Debugln("Director URL not found, searching in topology")
 		ns, err = namespaces.MatchNamespace(resourcePath)
 		if err != nil {
 			AddError(err)
@@ -494,6 +511,7 @@ func schemeUnderstood(scheme string) error {
 func newPelicanURL(remoteUrl *url.URL, scheme string) (pelicanURL PelicanURL, err error) {
 	if remoteUrl.Host != "" {
 		if scheme == "osdf" || scheme == "stash" {
+			// in the osdf/stash case, fix url's that have a hostname
 			remoteUrl.Path, err = url.JoinPath(remoteUrl.Host, remoteUrl.Path)
 			if err != nil {
 				log.Errorln("Failed to join remote destination url path:", err)
@@ -502,32 +520,19 @@ func newPelicanURL(remoteUrl *url.URL, scheme string) (pelicanURL PelicanURL, er
 		} else if scheme == "pelican" {
 			// If we have a host and url is pelican, we need to extract federation data from the host
 			log.Debugln("Detected pelican:// url, getting federation metadata from specified host")
-			federationUrl, _ := url.Parse(remoteUrl.String())
+			federationUrl := &url.URL{}
+			// federationUrl, _ := url.Parse(remoteUrl.String())
 			federationUrl.Scheme = "https"
 			federationUrl.Path = ""
+			federationUrl.Host = remoteUrl.Host
 
-			// Check if cache has key of federationURL:
-			// If yes: load data from the cache
-			if pelicanURLCache.Has(federationUrl.String()) {
-				log.Debugln("Federation URL found in cache, using previous")
-				pelicanURL = pelicanURLCache.Get(federationUrl.String()).Value()
-				// Make sure to set the object url since it might be different than the cached one
-				pelicanURL.objectUrl = remoteUrl
-				return pelicanURL, nil
+			// Check if cache has key of federationURL, if not, loader will add it:
+			pelicanUrlItem := PelicanURLCache.Get(federationUrl.String())
+			if pelicanUrlItem != nil {
+				pelicanURL = pelicanUrlItem.Value()
+			} else {
+				return PelicanURL{}, fmt.Errorf("Issue getting metadata information from cache")
 			}
-
-			// If no: discover our federation for the specified pelican:// url
-			urlFederation, err := config.DiscoverUrlFederation(federationUrl.String())
-			if err != nil {
-				return PelicanURL{}, err
-			}
-			// Set our local url metadata
-			pelicanURL.directorUrl = urlFederation.DirectorEndpoint
-			pelicanURL.discoveryUrl = federationUrl.String()
-			pelicanURL.registryUrl = urlFederation.NamespaceRegistrationEndpoint
-
-			// Populate cache with data
-			pelicanURLCache.Set(federationUrl.String(), pelicanURL, ttlcache.DefaultTTL)
 		}
 	}
 
@@ -537,7 +542,7 @@ func newPelicanURL(remoteUrl *url.URL, scheme string) (pelicanURL PelicanURL, er
 		if config.GetPreferredPrefix() == "OSDF" {
 			log.Debugln("Detected an osdf binary with an osdf:// url, populating metadata with osdf defaults")
 			if param.Federation_DirectorUrl.GetString() == "" || param.Federation_DiscoveryUrl.GetString() == "" || param.Federation_RegistryUrl.GetString() == "" {
-				return PelicanURL{}, errors.New("osdf default metadata is not populated in config")
+				return PelicanURL{}, fmt.Errorf("osdf default metadata is not populated in config")
 			} else {
 				pelicanURL.directorUrl = param.Federation_DirectorUrl.GetString()
 				pelicanURL.discoveryUrl = param.Federation_DiscoveryUrl.GetString()
@@ -546,13 +551,26 @@ func newPelicanURL(remoteUrl *url.URL, scheme string) (pelicanURL PelicanURL, er
 		} else if config.GetPreferredPrefix() == "PELICAN" {
 			// We hit this case when we are using a pelican binary but an osdf:// url, therefore we need to disover the osdf federation
 			log.Debugln("Detected an pelican binary with an osdf:// url, populating metadata with osdf defaults")
-			urlFederation, err := config.DiscoverUrlFederation("osg-htc.org")
-			if err != nil {
-				return PelicanURL{}, err
+			// Check if cache has key of federationURL, if not, loader will add it:
+			pelicanUrlItem := PelicanURLCache.Get("osg-htc.org")
+			if pelicanUrlItem != nil {
+				pelicanURL = pelicanUrlItem.Value()
+			} else {
+				return PelicanURL{}, fmt.Errorf("Issue getting metadata information from cache")
 			}
-			pelicanURL.directorUrl = urlFederation.DirectorEndpoint
-			pelicanURL.discoveryUrl = "osg-htc.org"
-			pelicanURL.registryUrl = urlFederation.NamespaceRegistrationEndpoint
+		}
+	} else if scheme == "pelican" && remoteUrl.Host == "" {
+		// We hit this case when we do not have a hostname with a pelican:// url
+		if param.Federation_DiscoveryUrl.GetString() == "" {
+			return PelicanURL{}, fmt.Errorf("Pelican url scheme without discovery-url detected, please provide a federation discovery-url within the hostname or with the -f flag")
+		} else {
+			// Check if cache has key of federationURL, if not, loader will add it:
+			pelicanUrlItem := PelicanURLCache.Get(param.Federation_DiscoveryUrl.GetString())
+			if pelicanUrlItem != nil {
+				pelicanURL = pelicanUrlItem.Value()
+			} else {
+				return PelicanURL{}, fmt.Errorf("Issue getting metadata information from cache")
+			}
 		}
 	} else if scheme == "" {
 		// If we don't have a url scheme, then our metadata information should be in the config
@@ -560,6 +578,11 @@ func newPelicanURL(remoteUrl *url.URL, scheme string) (pelicanURL PelicanURL, er
 		pelicanURL.directorUrl = param.Federation_DirectorUrl.GetString()
 		pelicanURL.discoveryUrl = param.Federation_DiscoveryUrl.GetString()
 		pelicanURL.registryUrl = param.Federation_RegistryUrl.GetString()
+
+		// If the values do not exist, exit with failure
+		if pelicanURL.directorUrl == "" || pelicanURL.discoveryUrl == "" || pelicanURL.registryUrl == "" {
+			return PelicanURL{}, fmt.Errorf("Missing metadata information in config, ensure Federation DirectorUrl, RegistryUrl, and DiscoverUrl are all set")
+		}
 	}
 	pelicanURL.objectUrl = remoteUrl
 	return pelicanURL, nil
@@ -612,7 +635,7 @@ func DoPut(localObject string, remoteDestination string, recursive bool) (transf
 	remoteDestUrl.Scheme = remoteDestScheme
 	pelicanURL, err := newPelicanURL(remoteDestUrl, remoteDestScheme)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%v: error generating metadata for specified url", err)
 	}
 
 	if remoteDestScheme == "osdf" || remoteDestScheme == "pelican" {
@@ -678,7 +701,7 @@ func DoGet(remoteObject string, localDestination string, recursive bool) (transf
 	// Get our url metadata
 	pelicanURL, err := newPelicanURL(remoteObjectUrl, remoteObjectScheme)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%v: error generating metadata for specified url", err)
 	}
 
 	if remoteObjectScheme == "osdf" || remoteObjectScheme == "pelican" {
@@ -805,6 +828,10 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 		}
 
 		pelicanURL, err := newPelicanURL(dest_url, destScheme)
+		if err != nil {
+			return nil, fmt.Errorf("%v: error generating metadata for specified url", err)
+		}
+
 		log.Debugln("Detected object write to remote federation object", dest_url.Path)
 		ns, err := getNamespaceInfo(dest_url.Path, pelicanURL.directorUrl, isPut)
 		if err != nil {
@@ -825,6 +852,9 @@ func DoStashCPSingle(sourceFile string, destination string, methods []string, re
 	}
 
 	pelicanURL, err := newPelicanURL(source_url, sourceScheme)
+	if err != nil {
+		return nil, fmt.Errorf("%v: error generating metadata for specified url", err)
+	}
 
 	if dest_url.Scheme == "file" {
 		destination = dest_url.Path

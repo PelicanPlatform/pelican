@@ -197,6 +197,9 @@ func copyMain(cmd *cobra.Command, args []string) {
 		}
 	}
 
+	// Start our cache for url metadata
+	go client.PelicanURLCache.Start()
+
 	var result error
 	lastSrc := ""
 	for _, src := range source {
@@ -211,6 +214,7 @@ func copyMain(cmd *cobra.Command, args []string) {
 		}
 	}
 
+	client.PelicanURLCache.Stop()
 	// Exit with failure
 	if result != nil {
 		// Print the list of errors
