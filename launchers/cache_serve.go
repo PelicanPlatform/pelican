@@ -22,103 +22,21 @@ package launchers
 
 import (
 	"context"
-	"crypto/tls"
 	_ "embed"
-	"encoding/json"
-	"net/http"
-	"net/url"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pelicanplatform/pelican/broker"
 	"github.com/pelicanplatform/pelican/cache_ui"
-	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/daemon"
-	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_ui"
 	"github.com/pelicanplatform/pelican/server_utils"
-	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pelicanplatform/pelican/xrootd"
-	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
 )
-
-func getNSAdsFromDirector() ([]common.NamespaceAdV2, error) {
-	// Get the endpoint of the director
-	var respNS []common.NamespaceAdV2
-
-	directorEndpoint := param.Federation_DirectorUrl.GetString()
-	if directorEndpoint == "" {
-		return nil, errors.New("No director specified; give the federation name (-f)")
-	}
-
-	directorEndpointURL, err := url.Parse(directorEndpoint)
-	if err != nil {
-		return nil, errors.Wrap(err, "Unable to parse director url")
-	}
-
-	if err != nil {
-		return respNS, errors.Wrapf(err, "Failed to get DirectorURL from config: %v", err)
-	}
-
-	// Create the listNamespaces url
-	directorNSListEndpointURL, err := url.JoinPath(directorEndpointURL.String(), "api", "v2.0", "director", "listNamespaces")
-	if err != nil {
-		return respNS, err
-	}
-
-	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-	}
-	client := &http.Client{Transport: tr}
-
-	req, err := http.NewRequest("GET", "https://70fa1e4d6777:8444/api/v2.0/director/listNamespaces", nil)
-	if err != nil {
-		return respNS, err
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return respNS, err
-	}
-	defer resp.Body.Close()
-
-	// Attempt to get data from the 2.0 endpoint, if that returns a 404 error, then attempt to get data
-	// from the 1.0 endpoint and convert from V1 to V2
-
-	respData, err := utils.MakeRequest(directorNSListEndpointURL, "GET", nil, nil)
-	if err != nil {
-		if strings.Contains(err.Error(), "404") {
-			directorNSListEndpointURL, err = url.JoinPath(directorEndpoint, "api", "v1.0", "director", "listNamespaces")
-			if err != nil {
-				return respNS, err
-			}
-			respData, err = utils.MakeRequest(directorNSListEndpointURL, "GET", nil, nil)
-			var respNSV1 []common.NamespaceAdV1
-			if err != nil {
-				return respNS, errors.Wrap(err, "Failed to make request")
-			} else {
-				if jsonErr := json.Unmarshal(respData, &respNSV1); jsonErr == nil { // Error creating json
-					return respNS, errors.Wrapf(err, "Failed to make request: %v", err)
-				}
-				respNS = director.ConvertNamespaceAdsV1ToV2(respNSV1, nil)
-			}
-		} else {
-			return respNS, errors.Wrap(err, "Failed to make request")
-		}
-	} else {
-		err = json.Unmarshal(respData, &respNS)
-		if err != nil {
-			return respNS, errors.Wrapf(err, "Failed to marshal response in to JSON: %v", err)
-		}
-	}
-
-	return respNS, nil
-}
 
 func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) (server_utils.XRootDServer, error) {
 

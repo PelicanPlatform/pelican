@@ -54,14 +54,11 @@ func CheckDefaults(server server_utils.XRootDServer) error {
 		}
 	}
 
-	var runDir string
-	var paramName string
+	runDir := param.Origin_RunLocation.GetString()
+	paramName := "param.Origin_RunLocation"
 	if server.GetServerType().IsEnabled(config.CacheType) {
 		runDir = param.Cache_RunLocation.GetString()
 		paramName = "param.Cache_RunLocation"
-	} else {
-		runDir = param.Origin_RunLocation.GetString()
-		paramName = "param.Origin_RunLocation"
 	}
 
 	if runDir == "" {

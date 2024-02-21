@@ -387,12 +387,11 @@ func CheckXrootdEnv(server server_utils.XRootDServer) error {
 	}
 
 	// Ensure the runtime directory exists
-	var runtimeDir string
+	runtimeDir := param.Origin_RunLocation.GetString()
 	if server.GetServerType().IsEnabled(config.CacheType) {
 		runtimeDir = param.Cache_RunLocation.GetString()
-	} else {
-		runtimeDir = param.Origin_RunLocation.GetString()
 	}
+
 	err = config.MkdirAll(runtimeDir, 0755, uid, gid)
 	if err != nil {
 		return errors.Wrapf(err, "Unable to create runtime directory %v", runtimeDir)
@@ -454,10 +453,8 @@ func CheckXrootdEnv(server server_utils.XRootDServer) error {
 		return err
 	}
 
-	var xServerUrl string
-	if server.GetServerType().IsEnabled(config.OriginType) {
-		xServerUrl = param.Origin_Url.GetString()
-	} else {
+	xServerUrl := param.Origin_Url.GetString()
+	if server.GetServerType().IsEnabled(config.CacheType) {
 		xServerUrl = param.Cache_Url.GetString()
 	}
 	if err = EmitIssuerMetadata(exportPath, xServerUrl); err != nil {
@@ -526,11 +523,9 @@ func CopyXrootdCertificates(server server_utils.XRootDServer) error {
 		return builtin_errors.Join(err, errBadKeyPair)
 	}
 
-	var destination string
+	destination := filepath.Join(param.Origin_RunLocation.GetString(), "copied-tls-creds.crt")
 	if server.GetServerType().IsEnabled(config.CacheType) {
 		destination = filepath.Join(param.Cache_RunLocation.GetString(), "copied-tls-creds.crt")
-	} else {
-		destination = filepath.Join(param.Origin_RunLocation.GetString(), "copied-tls-creds.crt")
 	}
 	tmpName := destination + ".tmp"
 	destFile, err := os.OpenFile(tmpName, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, fs.FileMode(0400))
@@ -639,10 +634,8 @@ func ConfigXrootd(ctx context.Context, origin bool) (string, error) {
 	// Map out xrootd logs
 	mapXrootdLogLevels(&xrdConfig)
 
-	var runtimeCAs string
-	if origin {
-		runtimeCAs = filepath.Join(param.Origin_RunLocation.GetString(), "ca-bundle.crt")
-	} else {
+	runtimeCAs := filepath.Join(param.Origin_RunLocation.GetString(), "ca-bundle.crt")
+	if !origin {
 		runtimeCAs = filepath.Join(param.Cache_RunLocation.GetString(), "ca-bundle.crt")
 	}
 	caCount, err := utils.LaunchPeriodicWriteCABundle(ctx, runtimeCAs, 2*time.Minute)
@@ -695,10 +688,8 @@ func ConfigXrootd(ctx context.Context, origin bool) (string, error) {
 
 	templ := template.Must(template.New("xrootd.cfg").Parse(xrootdCfg))
 
-	var configPath string
-	if origin {
-		configPath = filepath.Join(param.Origin_RunLocation.GetString(), "xrootd.cfg")
-	} else {
+	configPath := filepath.Join(param.Origin_RunLocation.GetString(), "xrootd.cfg")
+	if !origin {
 		configPath = filepath.Join(param.Cache_RunLocation.GetString(), "xrootd.cfg")
 	}
 	file, err := os.OpenFile(configPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0640)
