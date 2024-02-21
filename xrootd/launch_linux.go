@@ -82,12 +82,7 @@ func (plauncher PrivilegedXrootdLauncher) Launch(ctx context.Context) (context.C
 		return ctx, -1, errors.Wrapf(err, "Unable to create stderr pipe for %s", plauncher.Name())
 	}
 
-	var xrootdRun string
-	if plauncher.isCache {
-		xrootdRun = param.Cache_RunLocation.GetString()
-	} else {
-		xrootdRun = param.Origin_RunLocation.GetString()
-	}
+	xrootdRun := param.Origin_RunLocation.GetString()
 	pidFile := filepath.Join(xrootdRun, "xrootd.pid")
 
 	executable, err := findDaemon(plauncher.Name())

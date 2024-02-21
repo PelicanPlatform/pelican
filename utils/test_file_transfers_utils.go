@@ -245,7 +245,7 @@ func (t TestFileTransferImpl) RunTests(ctx context.Context, baseUrl, audienceUrl
 //
 // Read more: https://github.com/WLCG-AuthZ-WG/common-jwt-profile/blob/master/profile.md#token-verification
 func (t TestFileTransferImpl) RunTestsCache(ctx context.Context, origUrl, cacheUrl, issuerUrl string, namespace string, body string) (bool, error) {
-	t.audienceUrl = origUrl
+	t.audiences = []string{"https://wlcg.cern.ch/jwt/v1/any"}
 	t.issuerUrl = issuerUrl
 	t.testBody = body
 

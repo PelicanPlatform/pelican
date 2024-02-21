@@ -42,7 +42,6 @@ type (
 	PrivilegedXrootdLauncher struct {
 		daemonName string
 		configPath string
-		isCache    bool
 	}
 
 	UnprivilegedXrootdLauncher struct {
@@ -60,11 +59,9 @@ func makeUnprivilegedXrootdLauncher(daemonName string, configPath string, isCach
 	result.Uid = -1
 	result.Gid = -1
 	result.isCache = isCache
-	var xrootdRun string
+	xrootdRun := param.Origin_RunLocation.GetString()
 	if isCache {
 		xrootdRun = param.Cache_RunLocation.GetString()
-	} else {
-		xrootdRun = param.Origin_RunLocation.GetString()
 	}
 	pidFile := filepath.Join(xrootdRun, "xrootd.pid")
 	result.Args = []string{daemonName, "-s", pidFile, "-c", configPath}
@@ -92,9 +89,9 @@ func makeUnprivilegedXrootdLauncher(daemonName string, configPath string, isCach
 
 func ConfigureLaunchers(privileged bool, configPath string, useCMSD bool, enableCache bool) (launchers []daemon.Launcher, err error) {
 	if privileged {
-		launchers = append(launchers, PrivilegedXrootdLauncher{"xrootd", configPath, enableCache})
+		launchers = append(launchers, PrivilegedXrootdLauncher{"xrootd", configPath})
 		if useCMSD {
-			launchers = append(launchers, PrivilegedXrootdLauncher{"cmsd", configPath, enableCache})
+			launchers = append(launchers, PrivilegedXrootdLauncher{"cmsd", configPath})
 		}
 	} else {
 		var result UnprivilegedXrootdLauncher

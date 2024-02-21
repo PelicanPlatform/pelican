@@ -120,8 +120,10 @@ func TestFedServeCache(t *testing.T) {
 	require.NoError(t, err)
 
 	fileTests := utils.TestFileTransferImpl{}
+	issuerUrl, err := config.GetServerIssuerURL()
+	require.NoError(t, err)
 
-	ok, err := fileTests.RunTestsCache(ctx, param.Origin_Url.GetString(), param.Cache_Url.GetString(), param.Origin_Url.GetString(), "/test/test-file.txt", "This is the content of the test file.")
+	ok, err := fileTests.RunTestsCache(ctx, param.Origin_Url.GetString(), param.Cache_Url.GetString(), issuerUrl, "/test/test-file.txt", "This is the content of the test file.")
 	require.NoError(t, err)
 	require.True(t, ok)
 
