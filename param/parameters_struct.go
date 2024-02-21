@@ -90,6 +90,7 @@ type config struct {
 		MetricAuthorization bool
 		PortHigher int
 		PortLower int
+		PromQLAuthorization bool
 		TokenExpiresIn time.Duration
 		TokenRefreshInterval time.Duration
 	}
@@ -306,6 +307,7 @@ type configWithType struct {
 		MetricAuthorization struct { Type string; Value bool }
 		PortHigher struct { Type string; Value int }
 		PortLower struct { Type string; Value int }
+		PromQLAuthorization struct { Type string; Value bool }
 		TokenExpiresIn struct { Type string; Value time.Duration }
 		TokenRefreshInterval struct { Type string; Value time.Duration }
 	}

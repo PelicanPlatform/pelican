@@ -200,6 +200,7 @@ var (
 	DisableProxyFallback = BoolParam{"DisableProxyFallback"}
 	Logging_DisableProgressBars = BoolParam{"Logging.DisableProgressBars"}
 	Monitoring_MetricAuthorization = BoolParam{"Monitoring.MetricAuthorization"}
+	Monitoring_PromQLAuthorization = BoolParam{"Monitoring.PromQLAuthorization"}
 	Origin_EnableBroker = BoolParam{"Origin.EnableBroker"}
 	Origin_EnableCmsd = BoolParam{"Origin.EnableCmsd"}
 	Origin_EnableDirListing = BoolParam{"Origin.EnableDirListing"}
