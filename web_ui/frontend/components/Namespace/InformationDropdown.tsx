@@ -1,6 +1,6 @@
 import {Box, Tooltip, Collapse, Grid, Typography} from "@mui/material";
 import React from "react";
-import {NamespaceAdminMetadata} from "@/components/Namespace/Namespace";
+import {NamespaceAdminMetadata} from "./index.d";
 
 const InformationSpan = ({name, value}: {name: string, value: string}) => {
     return (

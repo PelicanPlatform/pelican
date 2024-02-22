@@ -1,18 +1,21 @@
+"use client"
+
 import React, {ReactNode, useState} from "react";
-import {BugReport, Description, HelpOutline} from "@mui/icons-material";
-import GitHubIcon from "@mui/icons-material/GitHub";
+import {Add} from "@mui/icons-material";
 import {Box, BoxProps, Button, Grow, IconButton, Paper, Tooltip} from "@mui/material";
 import Link from "next/link";
 import {ClickAwayListener} from "@mui/base";
 
 interface SpeedButtonProps {
-    open: boolean,
-    order: number,
-    icon: ReactNode,
-    title: string,
-    onClick?: () => void
-    href?: string
-    boxProps?: BoxProps
+    boxProps?: BoxProps,
+    href?: string,
+    icon: ReactNode
+    newTab?: boolean,
+    onClick?: () => void,
+    open: boolean
+    order: number
+    text?: string
+    title: string
 }
 
 export const getVersionNumber = () => {
@@ -20,11 +23,21 @@ export const getVersionNumber = () => {
     return version;
 }
 
-const SpeedDialButton = ({open, order, icon, title, onClick, href, boxProps} : SpeedButtonProps) => {
+const SpeedDialButton = ({open, order, text, icon, title, onClick, href, newTab, boxProps} : SpeedButtonProps) => {
 
-    // Logical XOR
-    if((href != undefined) == (onClick != undefined)){
-        throw new Error("SpeedDialButton must have either an onClick xor href prop")
+    let button = <></>
+    if (text) {
+        button = (
+            <Button variant="outlined" sx={{bgcolor: "white", "&:hover": {bgcolor: "white"}}} startIcon={icon} onClick={onClick}>
+                {text}
+            </Button>
+        )
+    } else {
+        button = (
+            <IconButton sx={{bgcolor: "primary.light", "&:hover": {bgcolor: "white"}}} onClick={onClick}>
+                {icon}
+            </IconButton>
+        )
     }
 
     return (
@@ -33,19 +46,15 @@ const SpeedDialButton = ({open, order, icon, title, onClick, href, boxProps} : S
             style={{ transformOrigin: '0 0 0' }}
             {...(open ? { timeout: 200 * order } : {})}
         >
-            <Box pl={1} {...boxProps}>
+            <Box pl={order == 0 ? 3 : 1} {...boxProps}>
                 <Tooltip title={title} arrow>
                     <Paper elevation={2} sx={{ borderRadius: "50%", bgcolor: "#ffffff00"}}>
                         { href != undefined ?
-                            <Link href={href} rel={"noopener noreferrer"} target={"_blank"}>
-                                <IconButton sx={{bgcolor: "primary.light", "&:hover": {bgcolor: "white"}}}>
-                                    {icon}
-                                </IconButton>
+                            <Link href={href} rel={"noopener noreferrer"} target={newTab ? "_blank" : undefined}>
+                                {button}
                             </Link>
                             :
-                            <IconButton sx={{bgcolor: "primary.light", "&:hover": {bgcolor: "white"}}} onClick={onClick}>
-                                {icon}
-                            </IconButton>
+                            button
                         }
                     </Paper>
                 </Tooltip>
@@ -55,41 +64,29 @@ const SpeedDialButton = ({open, order, icon, title, onClick, href, boxProps} : S
 
 }
 
+export type SpeedButtonControlledProps = Omit<SpeedButtonProps, "open"|"order">
+
 interface SpeedDialProps {
-    actions: SpeedButtonProps[]
+    actions: SpeedButtonControlledProps[]
+
 }
 
 const SpeedDial = ({actions}: SpeedDialProps) => {
-    const [open, setOpen] = useState(false);
 
-    const actions = [
-        {
-            boxProps: {pl: 3},
-            icon: <Description/>,
-            title: 'Documentation',
-            href: "https://docs.pelicanplatform.org"
-        },
-        {
-            icon: <GitHubIcon/>,
-            title: 'Github',
-            href: "https://github.com/PelicanPlatform/pelican"
-        },
-        {
-            icon: <BugReport/>,
-            title: 'Report Bug',
-            href: "https://github.com/PelicanPlatform/pelican/issues/new"
-        }
-    ];
+    const [open, setOpen] = useState(false);
 
     return (
         <ClickAwayListener onClickAway={() => setOpen(false)}>
-            <Box sx={{
-                display: "flex",
-                flexDirection: "row",
-            }}>
+            <Box
+                sx={{
+                    display: "flex",
+                    flexDirection: "row",
+                }}
+                onMouseLeave={() => setOpen(false)}
+            >
                 <Paper elevation={open ? 2 : 0} sx={{ borderRadius: "50%", bgcolor: "#ffffff00"}}>
-                    <IconButton onClick={() => setOpen(!open)}>
-                        <HelpOutline/>
+                    <IconButton onClick={() => setOpen(!open)} onMouseEnter={() => setOpen(true)}>
+                        <Add/>
                     </IconButton>
                 </Paper>
                 <Box position={"relative"}>
@@ -107,6 +104,7 @@ const SpeedDial = ({actions}: SpeedDialProps) => {
                                 key={action.title}
                                 open={open}
                                 order={index}
+                                onClick={() => setOpen(false)}
                                 {...action}
                             />
                         ))}
@@ -116,3 +114,5 @@ const SpeedDial = ({actions}: SpeedDialProps) => {
         </ClickAwayListener>
     )
 }
+
+export default SpeedDial

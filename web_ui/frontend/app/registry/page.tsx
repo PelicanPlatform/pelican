@@ -92,7 +92,7 @@ export default function Home() {
     return (
         <Box width={"100%"}>
             <Grid container spacing={2}>
-                <Grid item xs={12} lg={6} xl={4}>
+                <Grid item xs={12} lg={6} xl={5}>
                     <Typography variant={"h4"}>Namespace Registry</Typography>
                     <Collapse in={alert !== undefined}>
                         <Box mt={2}>
@@ -100,7 +100,7 @@ export default function Home() {
                         </Box>
                     </Collapse>
                 </Grid>
-                <Grid item lg={6} xl={8}>
+                <Grid item lg={6} xl={7}>
                 </Grid>
                 <Grid item xs={12} lg={6} xl={4} justifyContent={"space-between"}>
                     <UnauthenticatedContent pb={2}>
