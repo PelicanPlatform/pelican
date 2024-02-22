@@ -72,7 +72,7 @@ func TestDirectorRegistration(t *testing.T) {
 	// Mock registry server
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if req.Method == "POST" && req.URL.Path == "/api/v1.0/registry/checkNamespaceStatus" {
-			res := checkStatusRes{Approved: true}
+			res := common.CheckNamespaceStatusRes{Approved: true}
 			resByte, err := json.Marshal(res)
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)

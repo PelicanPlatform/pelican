@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
@@ -41,18 +42,6 @@ import (
 type (
 	keyStatus int
 )
-
-type checkNamespaceExistsReq struct {
-	Prefix string `json:"prefix"`
-	PubKey string `json:"pubkey"` // Pass a JWK
-}
-
-type checkNamespaceExistsRes struct {
-	PrefixExists bool   `json:"prefix_exists"`
-	KeyMatch     bool   `json:"key_match"`
-	Message      string `json:"message"`
-	Error        string `json:"error"`
-}
 
 const (
 	noKeyPresent keyStatus = iota
@@ -95,7 +84,7 @@ func keyIsRegistered(privkey jwk.Key, registryUrlStr string, prefix string) (key
 		return noKeyPresent, err
 	}
 
-	keyCheckReq := checkNamespaceExistsReq{Prefix: prefix, PubKey: string(pubkeyStr)}
+	keyCheckReq := common.CheckNamespaceExistsReq{Prefix: prefix, PubKey: string(pubkeyStr)}
 	jsonData, err := json.Marshal(keyCheckReq)
 	if err != nil {
 		return noKeyPresent, errors.Wrap(err, "Error marshaling request to json string")
@@ -123,7 +112,7 @@ func keyIsRegistered(privkey jwk.Key, registryUrlStr string, prefix string) (key
 	// For Pelican's registry at /api/v1.0/registry/checkNamespaceExists, it only returns 200, 400, and 500.
 	// If it returns 404, that means we are not hitting Pelican's registry but OSDF's registry or Pelican registry < v7.4.0
 	if resp.StatusCode != http.StatusNotFound {
-		resData := checkNamespaceExistsRes{}
+		resData := common.CheckNamespaceExistsRes{}
 		if err := json.Unmarshal(body, &resData); err != nil {
 			log.Warningln("Failed to unmarshal error message response from namespace registry", err)
 		}
@@ -173,7 +162,7 @@ func keyIsRegistered(privkey jwk.Key, registryUrlStr string, prefix string) (key
 	if resp.StatusCode == 404 || resp.StatusCode == 500 {
 		return noKeyPresent, nil
 	} else if resp.StatusCode != 200 {
-		resData := checkNamespaceExistsRes{}
+		resData := common.CheckNamespaceExistsRes{}
 		if err := json.Unmarshal(OSDFBody, &resData); err != nil {
 			log.Warningln("Failed to unmarshal error message response from namespace registry", err)
 		}

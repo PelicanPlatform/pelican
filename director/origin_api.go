@@ -37,21 +37,12 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
-)
-
-type (
-	checkStatusReq struct {
-		Prefix string `json:"prefix"`
-	}
-
-	checkStatusRes struct {
-		Approved bool `json:"approved"`
-	}
 )
 
 // Create interface
@@ -75,7 +66,7 @@ func checkNamespaceStatus(prefix string, registryWebUrlStr string) (bool, error)
 	}
 	reqUrl := registryUrl.JoinPath("/api/v1.0/registry/checkNamespaceStatus")
 
-	reqBody := checkStatusReq{Prefix: prefix}
+	reqBody := common.CheckNamespaceStatusReq{Prefix: prefix}
 	reqByte, err := json.Marshal(reqBody)
 	if err != nil {
 		return false, err
@@ -102,7 +93,7 @@ func checkNamespaceStatus(prefix string, registryWebUrlStr string) (bool, error)
 		}
 	}
 
-	resBody := checkStatusRes{}
+	resBody := common.CheckNamespaceStatusRes{}
 	bodyByte, err := io.ReadAll(res.Body)
 	if err != nil {
 		return false, err
