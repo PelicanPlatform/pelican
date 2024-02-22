@@ -306,5 +306,5 @@ func Verify(ctx *gin.Context, authOption AuthOption) (status int, verfied bool, 
 
 	// If the function reaches here, it means no token check passed
 	log.Debug("Cannot verify token:\n", errMsg)
-	return http.StatusUnauthorized, false, errors.New("Cannot verify token: " + errMsg)
+	return http.StatusForbidden, false, errors.New("Cannot verify token: " + errMsg)
 }
