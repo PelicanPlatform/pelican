@@ -23,39 +23,64 @@ import {
     Button,
     Grid,
     Typography,
-    TextField,
-    FormControl,
-    InputLabel,
-    Select,
-    MenuItem,
-    TextareaAutosize,
-    FormHelperText,
     Collapse,
-    Alert
+    Alert,
+    Skeleton
 } from "@mui/material";
 import React, {ReactNode, useEffect, useMemo, useState} from "react";
 
 import Link from "next/link";
 
-import {Alert as AlertType} from "@/components/Main";
-import NamespaceForm from "@/app/registry/namespace/components/NamespaceForm";
 import AuthenticatedContent from "@/components/layout/AuthenticatedContent";
 import {secureFetch} from "@/helpers/login";
+import {Namespace, Alert as AlertType} from "@/components/Main";
+import CacheForm from "@/app/registry/components/CacheForm";
 
 export default function Register() {
 
+    const [id, setId] = useState<string | undefined>(undefined)
+    const [namespace, setNamespace] = useState<Namespace | undefined>(undefined)
     const [alert, setAlert] = useState<AlertType | undefined>(undefined)
 
-    const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) : Promise<boolean> => {
+
+    useEffect(() => {
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const id = urlParams.get('id')
+
+        if(id === null){
+            setAlert({severity: "error", message: "No Namespace ID Provided"})
+        } else {
+            setId(id)
+        }
+
+        (async () => {
+
+            const urlParams = new URLSearchParams(window.location.search);
+            const id = urlParams.get('id');
+
+            const url = new URL(`/api/v1.0/registry_ui/namespaces/${id}`, window.location.origin)
+            const response = await fetch(url)
+            if (response.ok) {
+                const namespace: Namespace = await response.json()
+                setNamespace(namespace)
+                console.log(namespace)
+            } else {
+                setAlert({severity: "error", message: `Failed to fetch namespace: ${id}`})
+            }
+        })()
+    }, [id])
+
+    const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
 
         e.preventDefault()
 
         const formData = new FormData(e.currentTarget);
 
         try {
-            const response = await secureFetch("/api/v1.0/registry_ui/namespaces", {
+            const response = await secureFetch(`/api/v1.0/registry_ui/namespaces/${id}`, {
                 body: JSON.stringify({
-                    prefix: formData.get("prefix"),
+                    prefix: `/cache/${formData.get("prefix")}`,
                     pubkey: formData.get("pubkey"),
                     admin_metadata: {
                         description: formData.get("description"),
@@ -64,7 +89,7 @@ export default function Register() {
                         security_contact_user_id: formData.get("security-contact-user-id")
                     }
                 }),
-                method: "POST",
+                method: "PUT",
                 headers: {
                     "Content-Type": "application/json"
                 },
@@ -76,11 +101,11 @@ export default function Register() {
                     let data = await response.json()
                     setAlert({severity: "error", message: response.status + ": " + data['error']})
                 } catch (e) {
-                    setAlert({severity: "error", message: `Failed to register namespace: ${formData.get("prefix")}`})
+                    setAlert({severity: "error", message: `Failed to edit namespace: ${formData.get("prefix")}`})
                 }
             } else {
-                setAlert({severity: "success", message: `Successfully registered namespace: ${formData.get("prefix")}`})
-                return true
+                setAlert({severity: "success", message: `Successfully edited namespace: ${formData.get("prefix")}`})
+                window.location.href = "/view/registry/"
             }
 
         } catch (e) {
@@ -94,16 +119,19 @@ export default function Register() {
         <AuthenticatedContent width={"100%"}>
             <Grid container spacing={2}>
                 <Grid item xs={12}>
-                    <Typography variant={"h4"} pb={3}>Namespace Registry</Typography>
+                    <Typography variant={"h4"} pb={2}>Edit Cache</Typography>
                 </Grid>
                 <Grid item xs={12} lg={8} justifyContent={"space-between"}>
-                    <Typography variant={"h5"} pb={3}>Register Namespace</Typography>
                     <Collapse in={alert !== undefined}>
                         <Box mb={2}>
                             <Alert severity={alert?.severity}>{alert?.message}</Alert>
                         </Box>
                     </Collapse>
-                    <NamespaceForm handleSubmit={handleSubmit}/>
+                    {
+                        namespace ?
+                        <CacheForm handleSubmit={handleSubmit} namespace={namespace}/> :
+                        <Skeleton variant="rounded" width={"100%"} height={400} />
+                    }
                 </Grid>
                 <Grid item lg={2}>
                 </Grid>

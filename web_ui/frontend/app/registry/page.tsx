@@ -18,14 +18,16 @@
 
 "use client"
 
-import {Box, Button, Grid, Typography, Skeleton, Alert, Collapse} from "@mui/material";
+import {Box, Button, Grid, Typography, Skeleton, Alert, Collapse, IconButton} from "@mui/material";
 import React, {useEffect, useMemo, useState} from "react";
 
-import {PendingCard, Card, NamespaceCardSkeleton, CreateNamespaceCard} from "@/components/Namespace";
+import {PendingCard, Card, CardSkeleton, CreateNamespaceCard} from "@/components/Namespace";
 import Link from "next/link";
 import {Namespace, Alert as AlertType} from "@/components/Main";
 import UnauthenticatedContent from "@/components/layout/UnauthenticatedContent";
 import {Authenticated, getAuthenticated, isLoggedIn} from "@/helpers/login";
+import {Add} from "@mui/icons-material";
+import CardList from "@/components/Namespace/CardList";
 
 
 export default function Home() {
@@ -131,13 +133,31 @@ export default function Home() {
                         }
                     </Typography>
 
-                    <Typography variant={"h6"} py={2}>Origins</Typography>
-                    { approvedOriginData !== undefined ? approvedOriginData.map((namespace) => <Card key={namespace.id} namespace={namespace} authenticated={authenticated}/>) : <NamespaceCardSkeleton/> }
-                    { approvedOriginData !== undefined && approvedOriginData.length === 0 && <CreateNamespaceCard text={"Register Origin"}/>}
+                    <Typography variant={"h6"} py={2}>
+                        Origins
+                        { approvedCacheData !== undefined &&
+                            <Link href={"origin/register"}>
+                                <IconButton sx={{ml: 1}} size={"small"}>
+                                    <Add/>
+                                </IconButton>
+                            </Link>
+                        }
+                    </Typography>
+                    { approvedOriginData !== undefined ? <CardList namespaces={approvedOriginData} authenticated={authenticated} /> : <CardSkeleton/> }
+                    { approvedOriginData !== undefined && approvedOriginData.length === 0 && <CreateNamespaceCard text={"Register Origin"} url={"origin/register"}/>}
 
-                    <Typography variant={"h6"} py={2}>Caches</Typography>
-                    { approvedCacheData !== undefined ? approvedCacheData.map((namespace) => <Card key={namespace.id} namespace={namespace} authenticated={authenticated}/>) : <NamespaceCardSkeleton/> }
-                    { approvedCacheData !== undefined && approvedCacheData.length === 0 && <CreateNamespaceCard text={"Register Cache"}/>}
+                    <Typography variant={"h6"} py={2}>
+                        Caches
+                        { approvedCacheData !== undefined &&
+                            <Link href={"cache/register"}>
+                                <IconButton sx={{ml: 1}} size={"small"}>
+                                    <Add/>
+                                </IconButton>
+                            </Link>
+                        }
+                    </Typography>
+                    { approvedCacheData !== undefined ? <CardList namespaces={approvedCacheData} authenticated={authenticated} /> : <CardSkeleton/> }
+                    { approvedCacheData !== undefined && approvedCacheData.length === 0 && <CreateNamespaceCard text={"Register Cache"} url={"cache/register"}/>}
 
                 </Grid>
                 <Grid item lg={6} xl={8}>

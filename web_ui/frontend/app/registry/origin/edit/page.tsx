@@ -34,7 +34,7 @@ import Link from "next/link";
 import AuthenticatedContent from "@/components/layout/AuthenticatedContent";
 import {secureFetch} from "@/helpers/login";
 import {Namespace, Alert as AlertType} from "@/components/Main";
-import NamespaceForm from "@/app/registry/namespace/components/NamespaceForm";
+import OriginForm from "@/app/registry/components/OriginForm";
 
 interface Institution {
     id: string;
@@ -109,6 +109,7 @@ export default function Register() {
                 }
             } else {
                 setAlert({severity: "success", message: `Successfully edited namespace: ${formData.get("prefix")}`})
+                window.location.href = "/view/registry/"
             }
 
         } catch (e) {
@@ -134,7 +135,7 @@ export default function Register() {
                     </Collapse>
                     {
                         namespace ?
-                        <NamespaceForm handleSubmit={handleSubmit} namespace={namespace}/> :
+                        <OriginForm handleSubmit={handleSubmit} namespace={namespace}/> :
                         <Skeleton variant="rounded" width={"100%"} height={400} />
                     }
                 </Grid>
