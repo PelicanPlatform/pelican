@@ -658,10 +658,10 @@ func discoverOriginCache(ctx *gin.Context) {
 		Scopes:  []token_scopes.TokenScope{token_scopes.Pelican_DirectorServiceDiscovery},
 	}
 
-	ok := token.CheckAnyAuth(ctx, authOption)
+	status, ok, error := token.Verify(ctx, authOption)
 	if !ok {
-		log.Warningf("Invalid token for accessing director's sevice discovery")
-		ctx.JSON(401, gin.H{"error": "Invalid token for accessing director's sevice discovery"})
+		log.Warningf("Cannot verify token for accessing director's sevice discovery")
+		ctx.JSON(status, gin.H{"error": error.Error()})
 		return
 	}
 

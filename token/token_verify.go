@@ -234,9 +234,8 @@ func (a AuthCheckImpl) IssuerCheck(c *gin.Context, strToken string, expectedScop
 // authOption.Scopes, return true and set "User" context to the issuer if any of the issuer check succeed
 //
 // Scope check will pass if your token has ANY of the scopes in authOption.Scopes
-func CheckAnyAuth(ctx *gin.Context, authOption AuthOption) bool {
+func Verify(ctx *gin.Context, authOption AuthOption) (status int, verfied bool, err error) {
 	token := ""
-	errMsg := ""
 	// Find token from the provided sources list, stop when found the first token
 	tokenFound := false
 	for _, opt := range authOption.Sources {
@@ -247,7 +246,6 @@ func CheckAnyAuth(ctx *gin.Context, authOption AuthOption) bool {
 		case Cookie:
 			cookieToken, err := ctx.Cookie("login")
 			if err != nil || cookieToken == "" {
-				errMsg += fmt.Sprintln("No 'login' cookie present: ", err)
 				continue
 			} else {
 				token = cookieToken
@@ -257,7 +255,6 @@ func CheckAnyAuth(ctx *gin.Context, authOption AuthOption) bool {
 		case Header:
 			headerToken := ctx.Request.Header["Authorization"]
 			if len(headerToken) <= 0 {
-				errMsg += fmt.Sprintln("No Authorization header present")
 				continue
 			} else {
 				token = strings.TrimPrefix(headerToken[0], "Bearer ")
@@ -267,7 +264,6 @@ func CheckAnyAuth(ctx *gin.Context, authOption AuthOption) bool {
 		case Authz:
 			authzToken := ctx.Request.URL.Query()["authz"]
 			if len(authzToken) <= 0 {
-				errMsg += fmt.Sprintln("No Authz query parameter present")
 				continue
 			} else {
 				token = authzToken[0]
@@ -275,45 +271,40 @@ func CheckAnyAuth(ctx *gin.Context, authOption AuthOption) bool {
 				break
 			}
 		default:
-			log.Info("Authentication failed. Invalid/unsupported token source")
-			return false
+			log.Error("Invalid/unsupported token source")
+			return http.StatusInternalServerError, false, errors.New("Cannot verify token due to bad server configuration. Invalid/unsupported token source")
 		}
 	}
 
 	if token == "" {
-		log.Info("Authentication failed. No token is present from the list of potential token positions")
-		return false
+		log.Debug("Unauthorized. No token is present from the list of potential token positions")
+		return http.StatusUnauthorized, false, errors.New("Authentication is required but no token is present.")
 	}
 
+	errMsg := ""
 	for _, iss := range authOption.Issuers {
 		switch iss {
 		case Federation:
-			err := authChecker.FederationCheck(ctx, token, authOption.Scopes, authOption.AllScopes)
-			if _, exists := ctx.Get("User"); err != nil || !exists {
-				errMsg += fmt.Sprintln("Token validation failed with federation issuer: ", err)
-				log.Debug("Token validation failed with federation issuer: ", err)
+			if err := authChecker.FederationCheck(ctx, token, authOption.Scopes, authOption.AllScopes); err != nil {
+				errMsg += fmt.Sprintln("Cannot verify token with federation issuer: ", err)
 				break
 			} else {
-				log.Debug("Token validation succeeded with federation issuer")
-				return exists
+				return http.StatusOK, true, nil
 			}
 		case Issuer:
-			err := authChecker.IssuerCheck(ctx, token, authOption.Scopes, authOption.AllScopes)
-			if _, exists := ctx.Get("User"); err != nil || !exists {
-				errMsg += fmt.Sprintln("Token validation failed with server issuer: ", err)
-				log.Debug("Token validation failed with server issuer: ", err)
+			if err := authChecker.IssuerCheck(ctx, token, authOption.Scopes, authOption.AllScopes); err != nil {
+				errMsg += fmt.Sprintln("Cannot verify token with server issuer: ", err)
 				break
 			} else {
-				log.Debug("Token validation succeeded with server issuer")
-				return exists
+				return http.StatusOK, true, nil
 			}
 		default:
-			log.Info("Authentication failed. Invalid/unsupported token issuer")
-			return false
+			log.Error("Invalid/unsupported token issuer")
+			return http.StatusInternalServerError, false, errors.New("Cannot verify token due to bad server configuration. Invalid/unsupported token issuer")
 		}
 	}
 
 	// If the function reaches here, it means no token check passed
-	log.Info("Authentication failed. Didn't pass the chain of checking:\n", errMsg)
-	return false
+	log.Debug("Cannot verify token:\n", errMsg)
+	return http.StatusUnauthorized, false, errors.New("Cannot verify token: " + errMsg)
 }

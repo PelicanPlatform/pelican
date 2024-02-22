@@ -279,8 +279,8 @@ func TestCheckAnyAuth(t *testing.T) {
 
 			ctx := tc.tokenSetup()
 
-			if got := CheckAnyAuth(ctx, tc.authOption); got != tc.want {
-				t.Errorf("CheckAnyAuth() = %v, want %v", got, tc.want)
+			if _, ok, _ := Verify(ctx, tc.authOption); ok != tc.want {
+				t.Errorf("CheckAnyAuth() = %v, want %v", ok, tc.want)
 			}
 		})
 	}

@@ -19,7 +19,6 @@
 package web_ui
 
 import (
-	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -70,9 +69,9 @@ func promMetricAuthHandler(ctx *gin.Context) {
 			Issuers: []token.TokenIssuer{token.Federation, token.Issuer},
 			Scopes:  []token_scopes.TokenScope{token_scopes.Monitoring_Scrape}}
 
-		valid := token.CheckAnyAuth(ctx, authOption)
-		if !valid {
-			ctx.AbortWithStatusJSON(403, gin.H{"error": "Authentication required to access this endpoint."})
+		status, ok, err := token.Verify(ctx, authOption)
+		if !ok {
+			ctx.AbortWithStatusJSON(status, gin.H{"error": err.Error()})
 		}
 		// Valid director/self request, pass to the next handler
 		ctx.Next()
@@ -91,14 +90,12 @@ func promQueryEngineAuthHandler(av1 *route.Router) gin.HandlerFunc {
 				Issuers: []token.TokenIssuer{token.Issuer},
 				Scopes:  []token_scopes.TokenScope{token_scopes.Monitoring_Query}}
 
-			exists := token.CheckAnyAuth(c, authOption)
-			if exists {
+			status, ok, err := token.Verify(c, authOption)
+			if ok {
 				av1.ServeHTTP(c.Writer, c.Request)
 			} else {
-				c.JSON(http.StatusForbidden, gin.H{"error": "Correct authorization required to access Prometheus query engine APIs"})
+				c.JSON(status, gin.H{"error": "Correct authorization required to access Prometheus query engine APIs. " + err.Error()})
 			}
-		} else {
-			av1.ServeHTTP(c.Writer, c.Request)
 		}
 	}
 }
