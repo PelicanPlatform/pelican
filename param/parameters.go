@@ -130,6 +130,7 @@ var (
 	Server_TLSKey = StringParam{"Server.TLSKey"}
 	Server_UIActivationCodeFile = StringParam{"Server.UIActivationCodeFile"}
 	Server_UIPasswordFile = StringParam{"Server.UIPasswordFile"}
+	Server_WebConfigFile = StringParam{"Server.WebConfigFile"}
 	Server_WebHost = StringParam{"Server.WebHost"}
 	Shoveler_AMQPExchange = StringParam{"Shoveler.AMQPExchange"}
 	Shoveler_AMQPTokenLocation = StringParam{"Shoveler.AMQPTokenLocation"}

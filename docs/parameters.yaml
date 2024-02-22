@@ -1038,6 +1038,14 @@ type: int
 default: 1
 components: ["*"]
 ---
+name: Server.WebConfigFile
+description: >-
+  A filepath to the file where web-based configuration changes are stored
+type: filename
+root_default: /etc/pelican/web-config.yaml
+default: "$ConfigBase/web-config.yaml"
+components: ["*"]
+---
 ################################
 #   Issuer's Configurations    #
 ################################

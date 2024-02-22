@@ -375,6 +375,66 @@ paths:
                   Value: ""
         "401":
           description: Unauthorized
+    patch:
+      tags:
+        - "common"
+      summary: Update the server configuration with user-provided changes
+      description:
+        "`Authentication Required` `Admin Previlege Required`
+
+
+        The server will restart promptly after a  successful request. You may query against
+        `/health` endpoint to check if the server is back online.
+
+
+        Note that the endpoint will update the value of **all parameters provided**, no matter the value is in default or not (`0`, `null`,`undefined`, etc).
+
+
+        This means you want to eliminate parameters from the request body that are untouched."
+      parameters:
+        - in: body
+          name: config
+          required: true
+          description:
+            The config value to update.
+            It must be a JSON object with keys/values that match config parameters' name and data type.
+            Parameter names are case-insensitive.
+          schema:
+            type: object
+            example:
+              Logging:
+                Cache:
+                  Scitokens: "info"
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: Successfully updated the config. Server is restarting.
+          schema:
+            type: object
+            $ref: "#/definitions/SuccessModel"
+        "400":
+          description: Bad request. The requested changes of config values are invalid.
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "401":
+          description: Unauthorized. You need to login to take this action.
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "403":
+          description: Forbidden. You need admin privileges to take this action.
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "500":
+          description: Server error. Can't update the config due to internal server error.
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
   /servers:
     get:
       tags:

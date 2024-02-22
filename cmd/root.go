@@ -21,11 +21,14 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/launchers"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -92,10 +95,27 @@ func Execute() error {
 	if err == launchers.ErrExitOnSignal {
 		fmt.Println("Pelican is safely exited")
 		return nil
+	} else if err == launchers.ErrRestart {
+		fmt.Println("Restarting server...")
+		return restartProgram()
 	}
 	if err != nil {
 		log.Errorln("Fatal error occurred that lead to the shutdown of the process:", err)
 		return err
+	}
+	return nil
+}
+
+func restartProgram() error {
+	executable, err := os.Executable()
+	if err != nil {
+		return errors.Wrap(err, "Failed to determine executable path")
+	}
+
+	err = syscall.Exec(executable, os.Args, os.Environ())
+
+	if err != nil {
+		return errors.Wrap(err, "Failed to restart")
 	}
 	return nil
 }

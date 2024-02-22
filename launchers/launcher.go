@@ -43,6 +43,7 @@ import (
 
 var (
 	ErrExitOnSignal error = errors.New("Exit program on signal")
+	ErrRestart      error = errors.New("Restart program")
 )
 
 func LaunchModules(ctx context.Context, modules config.ServerType) (context.CancelFunc, error) {
@@ -54,6 +55,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 	ctx, shutdownCancel := context.WithCancel(ctx)
 
 	egrp.Go(func() error {
+		_ = config.RestartFlag
 		log.Debug("Will shutdown process on signal")
 		sigs := make(chan os.Signal, 1)
 		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
@@ -62,6 +64,10 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 			log.Warningf("Received signal %v; will shutdown process", sig)
 			shutdownCancel()
 			return ErrExitOnSignal
+		case <-config.RestartFlag:
+			log.Warningf("Received restart request; will restart the process")
+			shutdownCancel()
+			return ErrRestart
 		case <-ctx.Done():
 			return nil
 		}
