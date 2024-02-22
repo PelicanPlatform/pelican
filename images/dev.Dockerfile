@@ -61,7 +61,7 @@ gpgcheck=0' > /etc/yum.repos.d/local.repo
 
 # Install goreleaser and various other packages we need
 RUN yum install -y goreleaser npm xrootd-devel xrootd-server-devel xrootd-client-devel nano xrootd-scitokens \
-    xrootd-voms xrdcl-http jq procps docker make curl-devel java-17-openjdk-headless git cmake3 gcc-c++ openssl-devel \
+    xrootd-voms xrdcl-http jq procps docker make curl-devel java-17-openjdk-headless git cmake3 gcc-c++ openssl-devel sqlite-devel \
     && yum clean all
 
 # Install xrdcl-pelican plugin and replace the xrdcl-http plugin
@@ -79,6 +79,25 @@ RUN \
     mkdir build && cd build && \
     cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
     make install
+
+# LotMan Installation
+# First install dependencies
+RUN git clone https://github.com/nlohmann/json.git && \
+    cd json && mkdir build && \
+    cd build && cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
+    make -j`nproc` install
+RUN git clone https://github.com/pboettch/json-schema-validator.git && \
+    cd json-schema-validator && mkdir build && \
+    cd build && cmake -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_INSTALL_PREFIX=/usr .. && \
+    make -j`nproc` install
+#Finally LotMan proper. For now we do this from source until we can sort out the RPMs.
+RUN \
+    git clone https://github.com/PelicanPlatform/lotman.git && \
+    cd lotman && \
+    mkdir build && cd build && \
+    # LotMan CMakeLists.txt needs to be updated to use -DLIB_INSTALL_DIR. Issue #6
+    cmake -DCMAKE_INSTALL_PREFIX=/usr .. && \
+    make -j`nproc` install
 
 # Copy xrdcl-pelican plugin config and remove http plugin to use pelican plugin
 RUN \
