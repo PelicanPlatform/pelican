@@ -416,17 +416,17 @@ paths:
             type: object
             $ref: "#/definitions/SuccessModel"
         "400":
-          description: Bad request. The requested changes of config value are invalid.
+          description: Bad request. The requested changes of config values are invalid.
           schema:
             type: object
             $ref: "#/definitions/ErrorModel"
         "401":
-          description: Unauthorized. You need you login to take this action.
+          description: Unauthorized. You need to login to take this action.
           schema:
             type: object
             $ref: "#/definitions/ErrorModel"
         "403":
-          description: Forbidden. You need admin previlege to take this action.
+          description: Forbidden. You need admin privileges to take this action.
           schema:
             type: object
             $ref: "#/definitions/ErrorModel"

@@ -77,7 +77,7 @@ func updateConfigValues(ctx *gin.Context) {
 	updatedConfig := param.Config{}
 	updatedConfigMap := map[string]interface{}{}
 
-	// Check if the request data is valid config params
+	// Check if the request data is a valid config
 	if err := ctx.ShouldBindBodyWith(&updatedConfig, binding.JSON); err != nil {
 		ctx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Failed to bind the request. Invalid request data format: " + err.Error()})
 		return
