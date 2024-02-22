@@ -19,7 +19,6 @@
 package main
 
 import (
-	"context"
 	"os"
 
 	"github.com/pelicanplatform/pelican/client"
@@ -46,8 +45,7 @@ func init() {
 }
 
 func putMain(cmd *cobra.Command, args []string) {
-
-	client.ObjectClientOptions.Version = version
+	ctx := cmd.Context()
 
 	err := config.InitClient()
 	if err != nil {
@@ -56,14 +54,15 @@ func putMain(cmd *cobra.Command, args []string) {
 	}
 
 	// Set the progress bars to the command line option
-	client.ObjectClientOptions.Token, _ = cmd.Flags().GetString("token")
+	tokenLocation, _ := cmd.Flags().GetString("token")
+
+	pb := newProgressBar()
+	defer pb.shutdown()
 
 	// Check if the program was executed from a terminal
 	// https://rosettacode.org/wiki/Check_output_device_is_a_terminal#Go
 	if fileInfo, _ := os.Stdout.Stat(); (fileInfo.Mode()&os.ModeCharDevice) != 0 && param.Logging_LogLocation.GetString() == "" && !param.Logging_DisableProgressBars.GetBool() {
-		client.ObjectClientOptions.ProgressBars = true
-	} else {
-		client.ObjectClientOptions.ProgressBars = false
+		pb.launchDisplay(ctx)
 	}
 
 	log.Debugln("Len of source:", len(args))
@@ -85,8 +84,7 @@ func putMain(cmd *cobra.Command, args []string) {
 	lastSrc := ""
 	for _, src := range source {
 		isRecursive, _ := cmd.Flags().GetBool("recursive")
-		client.ObjectClientOptions.Recursive = isRecursive
-		_, result = client.DoPut(context.Background(), src, dest, isRecursive)
+		_, result = client.DoPut(ctx, src, dest, isRecursive, client.WithCallback(pb.callback), client.WithTokenLocation(tokenLocation))
 		if result != nil {
 			lastSrc = src
 			break

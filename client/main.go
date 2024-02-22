@@ -45,18 +45,20 @@ import (
 	"github.com/spf13/viper"
 )
 
-type OptionsStruct struct {
-	ProgressBars bool
-	Recursive    bool
-	Plugin       bool
-	Token        string
-	Version      string
-}
-
-var ObjectClientOptions OptionsStruct
-
-var (
-	version string
+type (
+	payloadStruct struct {
+		filename     string
+		status       string
+		Owner        string
+		ProjectName  string
+		version      string
+		start1       int64
+		end1         int64
+		timestamp    int64
+		downloadTime int64
+		fileSize     int64
+		downloadSize int64
+	}
 )
 
 // Nearest cache
@@ -72,20 +74,6 @@ var CachesToTry int = 3
 // CacheOverride
 var CacheOverride bool
 
-type payloadStruct struct {
-	filename     string
-	status       string
-	Owner        string
-	ProjectName  string
-	version      string
-	start1       int64
-	end1         int64
-	timestamp    int64
-	downloadTime int64
-	fileSize     int64
-	downloadSize int64
-}
-
 // Determine the token name if it is embedded in the scheme, Condor-style
 func getTokenName(destination *url.URL) (scheme, tokenName string) {
 	schemePieces := strings.Split(destination.Scheme, "+")
@@ -99,29 +87,13 @@ func getTokenName(destination *url.URL) (scheme, tokenName string) {
 	return
 }
 
-// Do write to the origin
-func doWriteBack(ctx context.Context, source string, destination *url.URL, namespace namespaces.Namespace, recursive bool, projectName string) (transferResults []TransferResults, err error) {
-
-	scitoken_contents, err := getToken(destination, namespace, true, "")
-	if err != nil {
-		return nil, fmt.Errorf("Failed to get token for write-back: %v", err)
-	}
-	if recursive {
-		return uploadDirectory(ctx, source, destination, scitoken_contents, namespace, projectName)
-	} else {
-		transferResult, err := uploadFile(ctx, source, destination, scitoken_contents, namespace, projectName)
-		transferResults = append(transferResults, transferResult)
-		return transferResults, err
-	}
-}
-
 // getToken returns the token to use for the given destination
 //
-// If token_name is not empty, it will be used as the token name.
-// If token_name is empty, the token name will be determined from the destination URL (if possible) using getTokenName
-func getToken(destination *url.URL, namespace namespaces.Namespace, isWrite bool, token_name string) (string, error) {
-	if token_name == "" {
-		_, token_name = getTokenName(destination)
+// If tokenName is not empty, it will be used as the token name.
+// If tokenName is empty, the token name will be determined from the destination URL (if possible) using getTokenName
+func getToken(destination *url.URL, namespace namespaces.Namespace, isWrite bool, tokenName string, tokenLocation string, acquireToken bool) (string, error) {
+	if tokenName == "" {
+		_, tokenName = getTokenName(destination)
 	}
 
 	type tokenJson struct {
@@ -133,80 +105,73 @@ func getToken(destination *url.URL, namespace namespaces.Namespace, isWrite bool
 		with the environment variable "TOKEN", or it can be searched in the standard HTCondor directory pointed
 		to by the environment variable "_CONDOR_CREDS".
 	*/
-	var token_location string
-	if ObjectClientOptions.Token != "" {
-		token_location = ObjectClientOptions.Token
-		log.Debugln("Getting token location from command line:", ObjectClientOptions.Token)
-	} else {
-
-		// WLCG Token Discovery
-		if bearerToken, isBearerTokenSet := os.LookupEnv("BEARER_TOKEN"); isBearerTokenSet {
-			return bearerToken, nil
-		} else if bearerTokenFile, isBearerTokenFileSet := os.LookupEnv("BEARER_TOKEN_FILE"); isBearerTokenFileSet {
-			if _, err := os.Stat(bearerTokenFile); err != nil {
-				log.Warningln("Environment variable BEARER_TOKEN_FILE is set, but file being point to does not exist:", err)
-			} else {
-				token_location = bearerTokenFile
-			}
+	// WLCG Token Discovery
+	if bearerToken, isBearerTokenSet := os.LookupEnv("BEARER_TOKEN"); tokenLocation == "" && isBearerTokenSet {
+		return bearerToken, nil
+	} else if bearerTokenFile, isBearerTokenFileSet := os.LookupEnv("BEARER_TOKEN_FILE"); tokenLocation == "" && isBearerTokenFileSet {
+		if _, err := os.Stat(bearerTokenFile); err != nil {
+			log.Warningln("Environment variable BEARER_TOKEN_FILE is set, but file being point to does not exist:", err)
+		} else {
+			tokenLocation = bearerTokenFile
 		}
-		if xdgRuntimeDir, xdgRuntimeDirSet := os.LookupEnv("XDG_RUNTIME_DIR"); token_location == "" && xdgRuntimeDirSet {
-			// Get the uid
-			uid := os.Getuid()
-			tmpTokenPath := filepath.Join(xdgRuntimeDir, "bt_u"+strconv.Itoa(uid))
-			if _, err := os.Stat(tmpTokenPath); err == nil {
-				token_location = tmpTokenPath
-			}
+	}
+	if xdgRuntimeDir, xdgRuntimeDirSet := os.LookupEnv("XDG_RUNTIME_DIR"); tokenLocation == "" && xdgRuntimeDirSet {
+		// Get the uid
+		uid := os.Getuid()
+		tmpTokenPath := filepath.Join(xdgRuntimeDir, "bt_u"+strconv.Itoa(uid))
+		if _, err := os.Stat(tmpTokenPath); err == nil {
+			tokenLocation = tmpTokenPath
 		}
+	}
 
-		// Check for /tmp/bt_u<uid>
-		if token_location == "" {
-			uid := os.Getuid()
-			tmpTokenPath := "/tmp/bt_u" + strconv.Itoa(uid)
-			if _, err := os.Stat(tmpTokenPath); err == nil {
-				token_location = tmpTokenPath
-			}
+	// Check for /tmp/bt_u<uid>
+	if tokenLocation == "" {
+		uid := os.Getuid()
+		tmpTokenPath := "/tmp/bt_u" + strconv.Itoa(uid)
+		if _, err := os.Stat(tmpTokenPath); err == nil {
+			tokenLocation = tmpTokenPath
 		}
+	}
 
-		// Backwards compatibility for getting scitokens
-		// If TOKEN is not set in environment, and _CONDOR_CREDS is set, then...
-		if tokenFile, isTokenSet := os.LookupEnv("TOKEN"); isTokenSet && token_location == "" {
-			if _, err := os.Stat(tokenFile); err != nil {
-				log.Warningln("Environment variable TOKEN is set, but file being point to does not exist:", err)
-			} else {
-				token_location = tokenFile
-			}
+	// Backwards compatibility for getting scitokens
+	// If TOKEN is not set in environment, and _CONDOR_CREDS is set, then...
+	if tokenFile, isTokenSet := os.LookupEnv("TOKEN"); isTokenSet && tokenLocation == "" {
+		if _, err := os.Stat(tokenFile); err != nil {
+			log.Warningln("Environment variable TOKEN is set, but file being point to does not exist:", err)
+		} else {
+			tokenLocation = tokenFile
 		}
+	}
 
-		// Finally, look in the HTCondor runtime
-		if token_location == "" {
-			token_location = discoverHTCondorToken(token_name)
-		}
+	// Finally, look in the HTCondor runtime
+	if tokenLocation == "" {
+		tokenLocation = discoverHTCondorToken(tokenName)
+	}
 
-		if token_location == "" {
-			if !ObjectClientOptions.Plugin {
-				opts := config.TokenGenerationOpts{Operation: config.TokenSharedRead}
-				if isWrite {
-					opts.Operation = config.TokenSharedWrite
-				}
-				value, err := AcquireToken(destination, namespace, opts)
-				if err == nil {
-					return value, nil
-				}
-				log.Errorln("Failed to generate a new authorization token for this transfer: ", err)
-				log.Errorln("This transfer requires authorization to complete and no token is available")
-				err = errors.New("failed to find or generate a token as required for " + destination.String())
-				return "", err
-			} else {
-				log.Errorln("Credential is required, but currently mssing")
-				err := errors.New("Credential is required for " + destination.String() + " but is currently missing")
-				return "", err
+	if tokenLocation == "" {
+		if acquireToken {
+			opts := config.TokenGenerationOpts{Operation: config.TokenSharedRead}
+			if isWrite {
+				opts.Operation = config.TokenSharedWrite
 			}
+			value, err := AcquireToken(destination, namespace, opts)
+			if err == nil {
+				return value, nil
+			}
+			log.Errorln("Failed to generate a new authorization token for this transfer: ", err)
+			log.Errorln("This transfer requires authorization to complete and no token is available")
+			err = errors.New("failed to find or generate a token as required for " + destination.String())
+			return "", err
+		} else {
+			log.Errorln("Credential is required, but currently mssing")
+			err := errors.New("Credential is required for " + destination.String() + " but is currently missing")
+			return "", err
 		}
 	}
 
 	//Read in the JSON
-	log.Debug("Opening token file: " + token_location)
-	tokenContents, err := os.ReadFile(token_location)
+	log.Debug("Opening token file: " + tokenLocation)
+	tokenContents, err := os.ReadFile(tokenLocation)
 	if err != nil {
 		log.Errorln("Error reading token file:", err)
 		return "", err
@@ -222,7 +187,7 @@ func getToken(destination *url.URL, namespace namespaces.Namespace, isWrite bool
 }
 
 // Check the size of a remote file in an origin
-func DoStat(ctx context.Context, destination string) (remoteSize uint64, err error) {
+func DoStat(ctx context.Context, destination string, options ...TransferOption) (remoteSize uint64, err error) {
 
 	defer func() {
 		if r := recover(); r != nil {
@@ -271,7 +236,18 @@ func DoStat(ctx context.Context, destination string) (remoteSize uint64, err err
 		return 0, err
 	}
 
-	if remoteSize, err = statHttp(ctx, dest_uri, ns); err == nil {
+	tokenLocation := ""
+	acquire := true
+	for _, option := range options {
+		switch option.Ident() {
+		case identTransferOptionTokenLocation{}:
+			tokenLocation = option.Value().(string)
+		case identTransferOptionAcquireToken{}:
+			acquire = option.Value().(bool)
+		}
+	}
+
+	if remoteSize, err = statHttp(ctx, dest_uri, ns, tokenLocation, acquire); err == nil {
 		return remoteSize, nil
 	}
 	return 0, err
@@ -285,7 +261,7 @@ func GetCacheHostnames(testFile string) (urls []string, err error) {
 		return
 	}
 
-	caches, err := GetCachesFromNamespace(ns, directorUrl != "")
+	caches, err := getCachesFromNamespace(ns, directorUrl != "")
 	if err != nil {
 		return
 	}
@@ -467,7 +443,7 @@ localObject: the source file/directory you would like to upload
 remoteDestination: the end location of the upload
 recursive: a boolean indicating if the source is a directory or not
 */
-func DoPut(ctx context.Context, localObject string, remoteDestination string, recursive bool) (transferResults []TransferResults, err error) {
+func DoPut(ctx context.Context, localObject string, remoteDestination string, recursive bool, options ...TransferOption) (transferResults []TransferResults, err error) {
 	// First, create a handler for any panics that occur
 	defer func() {
 		if r := recover(); r != nil {
@@ -477,13 +453,6 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 			err = errors.New(ret)
 		}
 	}()
-
-	// Parse the source and destination with URL parse
-	localObjectUrl, err := url.Parse(localObject)
-	if err != nil {
-		log.Errorln("Failed to parse source URL:", err)
-		return nil, err
-	}
 
 	remoteDestination, remoteDestScheme := correctURLWithUnderscore(remoteDestination)
 	remoteDestUrl, err := url.Parse(remoteDestination)
@@ -525,26 +494,32 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 			remoteDestUrl.Scheme, strings.Join(understoodSchemes, ", "))
 	}
 
-	directorUrl := param.Federation_DirectorUrl.GetString()
-
 	if remoteDestScheme == "osdf" || remoteDestScheme == "pelican" {
 		remoteDestination = remoteDestUrl.Path
 	}
 
-	// Get the namespace of the remote filesystem
-	// For write back, it will be the destination
-	if !strings.HasPrefix(remoteDestination, "/") {
-		remoteDestination = strings.TrimPrefix(remoteDestination, remoteDestScheme+"://")
-	}
-
-	ns, err := getNamespaceInfo(remoteDestination, directorUrl, true)
+	te := NewTransferEngine(ctx)
+	defer func() {
+		if err := te.Shutdown(); err != nil {
+			log.Errorln("Failure when shutting down transfer engine:", err)
+		}
+	}()
+	client, err := te.NewClient(options...)
 	if err != nil {
-		log.Errorln(err)
-		return nil, errors.New("Failed to get namespace information from source")
+		return
 	}
-	uploadedBytes, err := doWriteBack(ctx, localObjectUrl.Path, remoteDestUrl, ns, recursive, "")
-	return uploadedBytes, err
-
+	tj, err := client.NewTransferJob(remoteDestUrl, localObject, true, recursive)
+	if err != nil {
+		return
+	}
+	if err = client.Submit(tj); err != nil {
+		return
+	}
+	transferResults, err = client.Shutdown()
+	if tj.lookupErr != nil {
+		err = tj.lookupErr
+	}
+	return
 }
 
 /*
@@ -554,7 +529,7 @@ remoteObject: the source file/directory you would like to upload
 localDestination: the end location of the upload
 recursive: a boolean indicating if the source is a directory or not
 */
-func DoGet(ctx context.Context, remoteObject string, localDestination string, recursive bool) (transferResults []TransferResults, err error) {
+func DoGet(ctx context.Context, remoteObject string, localDestination string, recursive bool, options ...TransferOption) (transferResults []TransferResults, err error) {
 	// First, create a handler for any panics that occur
 	defer func() {
 		if r := recover(); r != nil {
@@ -616,14 +591,6 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 		remoteObject = "/" + remoteObject
 	}
 
-	directorUrl := param.Federation_DirectorUrl.GetString()
-
-	ns, err := getNamespaceInfo(remoteObject, directorUrl, false)
-	if err != nil {
-		log.Errorln(err)
-		return nil, errors.New("Failed to get namespace information from source")
-	}
-
 	// get absolute path
 	localDestPath, _ := filepath.Abs(localDestination)
 
@@ -645,21 +612,44 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 
 	parseJobAd(&payload)
 
-	payload.start1 = time.Now().Unix()
+	start := time.Now()
+	payload.start1 = start.Unix()
 
 	success := false
 
-	_, token_name := getTokenName(remoteObjectUrl)
-
-	var downloaded int64
-	if transferResults, err = downloadHttp(ctx, remoteObjectUrl, localDestination, &payload, ns, recursive, token_name); err == nil {
-		success = true
+	te := NewTransferEngine(ctx)
+	defer func() {
+		if err := te.Shutdown(); err != nil {
+			log.Errorln("Failure when shutting down transfer engine:", err)
+		}
+	}()
+	tc, err := te.NewClient(options...)
+	if err != nil {
+		return
+	}
+	tj, err := tc.NewTransferJob(remoteObjectUrl, localDestination, false, recursive)
+	if err != nil {
+		return
+	}
+	err = tc.Submit(tj)
+	if err != nil {
+		return
 	}
 
-	payload.end1 = time.Now().Unix()
+	transferResults, err = tc.Shutdown()
+	end := time.Now()
+	if err == nil {
+		success = true
+	}
+	var downloaded int64 = 0
+	for _, result := range transferResults {
+		downloaded += result.TransferredBytes
+	}
+
+	payload.end1 = end.Unix()
 
 	payload.timestamp = payload.end1
-	payload.downloadTime = (payload.end1 - payload.start1)
+	payload.downloadTime = int64(end.Sub(start).Seconds())
 
 	if success {
 		payload.status = "Success"
@@ -680,7 +670,7 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 }
 
 // Start the transfer, whether read or write back. Primarily used for backwards compatibility
-func DoCopy(ctx context.Context, sourceFile string, destination string, recursive bool) (transferResults []TransferResults, err error) {
+func DoCopy(ctx context.Context, sourceFile string, destination string, recursive bool, options ...TransferOption) (transferResults []TransferResults, err error) {
 
 	// First, create a handler for any panics that occur
 	defer func() {
@@ -764,77 +754,90 @@ func DoCopy(ctx context.Context, sourceFile string, destination string, recursiv
 	payload := payloadStruct{}
 	parseJobAd(&payload)
 
-	// Get the namespace of the remote filesystem
-	// For write back, it will be the destination
-	// For read it will be the source.
-
-	OSDFDirectorUrl := param.Federation_DirectorUrl.GetString()
 	isPut := destScheme == "stash" || destScheme == "osdf" || destScheme == "pelican"
 
+	var localPath string
+	var remoteURL *url.URL
 	if isPut {
 		log.Debugln("Detected object write to remote federation object", dest_url.Path)
-		ns, err := getNamespaceInfo(dest_url.Path, OSDFDirectorUrl, isPut)
-		if err != nil {
-			log.Errorln(err)
-			return nil, errors.New("Failed to get namespace information from destination")
+		localPath = sourceFile
+		remoteURL = dest_url
+	} else {
+
+		if dest_url.Scheme == "file" {
+			destination = dest_url.Path
 		}
-		transferResults, err := doWriteBack(ctx, sourceURL.Path, dest_url, ns, recursive, payload.ProjectName) //TODO dowriteback transferResults!!!!!
-		return transferResults, err
+
+		if sourceScheme == "stash" || sourceScheme == "osdf" || sourceScheme == "pelican" {
+			sourceFile = sourceURL.Path
+		}
+
+		if string(sourceFile[0]) != "/" {
+			sourceFile = "/" + sourceFile
+		}
+
+		// get absolute path
+		destPath, _ := filepath.Abs(destination)
+
+		//Check if path exists or if its in a folder
+		if destStat, err := os.Stat(destPath); os.IsNotExist(err) {
+			destination = destPath
+		} else if destStat.IsDir() && sourceURL.Query().Get("pack") == "" {
+			// If we have an auto-pack request, it's OK for the destination to be a directory
+			// Otherwise, get the base name of the source and append it to the destination dir.
+			sourceFilename := path.Base(sourceFile)
+			destination = path.Join(destPath, sourceFilename)
+		}
+		localPath = destination
+		remoteURL = sourceURL
 	}
 
-	if dest_url.Scheme == "file" {
-		destination = dest_url.Path
-	}
-
-	if sourceScheme == "stash" || sourceScheme == "osdf" || sourceScheme == "pelican" {
-		sourceFile = sourceURL.Path
-	}
-
-	if string(sourceFile[0]) != "/" {
-		sourceFile = "/" + sourceFile
-	}
-
-	ns, err := getNamespaceInfo(sourceFile, OSDFDirectorUrl, isPut)
-	if err != nil {
-		log.Errorln(err)
-		return nil, errors.New("Failed to get namespace information from source")
-	}
-
-	// get absolute path
-	destPath, _ := filepath.Abs(destination)
-
-	//Check if path exists or if its in a folder
-	if destStat, err := os.Stat(destPath); os.IsNotExist(err) {
-		destination = destPath
-	} else if destStat.IsDir() && sourceURL.Query().Get("pack") == "" {
-		// If we have an auto-pack request, it's OK for the destination to be a directory
-		// Otherwise, get the base name of the source and append it to the destination dir.
-		sourceFilename := path.Base(sourceFile)
-		destination = path.Join(destPath, sourceFilename)
-	}
-
-	payload.version = version
+	payload.version = config.GetVersion()
 
 	//Fill out the payload as much as possible
 	payload.filename = sourceURL.Path
 
-	payload.start1 = time.Now().Unix()
+	start := time.Now()
+	payload.start1 = start.Unix()
 
 	// Go thru the download methods
 	success := false
 
-	_, token_name := getTokenName(sourceURL)
-
 	// switch statement?
 	var downloaded int64 = 0
-	if transferResults, err = downloadHttp(ctx, sourceURL, destination, &payload, ns, recursive, token_name); err == nil {
+
+	te := NewTransferEngine(ctx)
+	defer func() {
+		if err := te.Shutdown(); err != nil {
+			log.Errorln("Failure when shutting down transfer engine:", err)
+		}
+	}()
+	tc, err := te.NewClient(options...)
+	if err != nil {
+		return
+	}
+	tj, err := tc.NewTransferJob(remoteURL, localPath, isPut, recursive)
+	if err != nil {
+		return
+	}
+	if err = tc.Submit(tj); err != nil {
+		return
+	}
+	transferResults, err = tc.Shutdown()
+	if err == nil {
 		success = true
 	}
 
-	payload.end1 = time.Now().Unix()
+	end := time.Now()
+
+	for _, result := range transferResults {
+		downloaded += result.TransferredBytes
+	}
+
+	payload.end1 = end.Unix()
 
 	payload.timestamp = payload.end1
-	payload.downloadTime = (payload.end1 - payload.start1)
+	payload.downloadTime = int64(end.Sub(start).Seconds())
 
 	if success {
 		payload.status = "Success"

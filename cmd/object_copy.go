@@ -19,7 +19,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -80,8 +79,7 @@ func init() {
 }
 
 func copyMain(cmd *cobra.Command, args []string) {
-
-	client.ObjectClientOptions.Version = config.PelicanVersion
+	ctx := cmd.Context()
 
 	// Need to check just stashcp since it does not go through root, the other modes get checked there
 	if strings.HasPrefix(execName, "stashcp") {
@@ -99,22 +97,22 @@ func copyMain(cmd *cobra.Command, args []string) {
 	}
 
 	if val, err := cmd.Flags().GetBool("version"); err == nil && val {
-		fmt.Println("Version:", version)
+		fmt.Println("Version:", config.GetVersion())
 		fmt.Println("Build Date:", date)
 		fmt.Println("Build Commit:", commit)
 		fmt.Println("Built By:", builtBy)
 		os.Exit(0)
 	}
 
-	// Set the progress bars to the command line option
-	client.ObjectClientOptions.Token, _ = cmd.Flags().GetString("token")
+	pb := newProgressBar()
+	defer pb.shutdown()
+
+	tokenLocation, _ := cmd.Flags().GetString("token")
 
 	// Check if the program was executed from a terminal and does not specify a log location
 	// https://rosettacode.org/wiki/Check_output_device_is_a_terminal#Go
 	if fileInfo, _ := os.Stdout.Stat(); (fileInfo.Mode()&os.ModeCharDevice) != 0 && param.Logging_LogLocation.GetString() == "" && !param.Logging_DisableProgressBars.GetBool() {
-		client.ObjectClientOptions.ProgressBars = true
-	} else {
-		client.ObjectClientOptions.ProgressBars = false
+		pb.launchDisplay(ctx)
 	}
 
 	if val, err := cmd.Flags().GetBool("namespaces"); err == nil && val {
@@ -194,8 +192,7 @@ func copyMain(cmd *cobra.Command, args []string) {
 	lastSrc := ""
 	for _, src := range source {
 		isRecursive, _ := cmd.Flags().GetBool("recursive")
-		client.ObjectClientOptions.Recursive = isRecursive
-		_, result = client.DoCopy(context.Background(), src, dest, isRecursive)
+		_, result = client.DoCopy(ctx, src, dest, isRecursive, client.WithCallback(pb.callback), client.WithTokenLocation(tokenLocation))
 		if result != nil {
 			lastSrc = src
 			break

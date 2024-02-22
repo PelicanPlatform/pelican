@@ -120,10 +120,6 @@ func stashPluginMain(args []string) {
 	// Parse command line arguments
 	var upload bool = false
 	// Set the options
-	client.ObjectClientOptions.Recursive = false
-	client.ObjectClientOptions.ProgressBars = false
-	client.ObjectClientOptions.Version = version
-	client.ObjectClientOptions.Plugin = true
 	var infile, testCachePath string
 	var getCaches bool = false
 
@@ -296,6 +292,8 @@ func stashPluginMain(args []string) {
 	done := false
 	for !done {
 		select {
+		case <-ctx.Done():
+			done = true
 		case resultAd := <-results:
 			// Process results as soon as we get them
 			transferSuccess, err := resultAd.Get("TransferSuccess")
@@ -366,7 +364,7 @@ func launchMoveWorker(upload bool, workChan <-chan Transfer, results chan<- *cla
 		var transferResults []client.TransferResults
 		if upload {
 			log.Debugln("Uploading:", transfer.localFile, "to", transfer.url)
-			transferResults, result = client.DoCopy(context.Background(), transfer.localFile, transfer.url, false)
+			transferResults, result = client.DoCopy(context.Background(), transfer.localFile, transfer.url, false, client.WithAcquireToken(false))
 		} else {
 			log.Debugln("Downloading:", transfer.url, "to", transfer.localFile)
 
