@@ -211,6 +211,8 @@ type (
 		work          chan *TransferJob
 		closed        bool
 		results       chan *TransferResults
+		finalResults  chan TransferResults
+		setupResults  sync.Once
 	}
 
 	TransferOption                   = option.Interface
@@ -649,14 +651,21 @@ func (te *TransferEngine) runJobHandler() error {
 				close(te.files)
 				return nil
 			}
-
-			err := te.createTransferFiles(job)
-			job.job.lookupErr = err
+			if job.job.ctx.Err() == context.Canceled {
+				job.job.lookupErr = job.job.ctx.Err()
+			} else {
+				err := te.createTransferFiles(job)
+				job.job.lookupErr = err
+			}
 			te.jobLookupDone <- job
 		}
 	}
 }
 
+// Create a new transfer job for the client
+//
+// The returned object can be further customized as desired.
+// This function does not "submit" the job for execution.
 func (tc *TransferClient) NewTransferJob(remoteUrl *url.URL, localPath string, upload bool, recursive bool, options ...TransferOption) (tj *TransferJob, err error) {
 	copyUrl := *remoteUrl // Make a copy of the input URL to avoid concurrent issues.
 	tj = &TransferJob{
@@ -700,7 +709,7 @@ func (tc *TransferClient) NewTransferJob(remoteUrl *url.URL, localPath string, u
 // Submit the transfer job to the client for processing
 func (tc *TransferClient) Submit(tj *TransferJob) error {
 	// Ensure that a tj.Wait() immediately after Submit will always block.
-	log.Debugln("Submiting transfer job", tj)
+	log.Debugln("Submiting transfer job", tj.uuid.String())
 	select {
 	case <-tc.ctx.Done():
 		return tc.ctx.Err()
@@ -726,25 +735,61 @@ func (tc *TransferClient) Close() {
 func (tc *TransferClient) Shutdown() (results []TransferResults, err error) {
 	tc.Close()
 	results = make([]TransferResults, 0)
+	resultsChan := tc.Results()
 	for {
 		select {
 		case <-tc.ctx.Done():
 			err = tc.ctx.Err()
 			return
-		case result, ok := <-tc.results:
+		case result, ok := <-resultsChan:
 			if !ok {
 				return
 			}
-			newResult := *result
-			newResult.job = nil
-			results = append(results, newResult)
+			results = append(results, result)
 		}
 	}
+}
+
+// Return a channel containing the results from the client
+func (tc *TransferClient) Results() chan TransferResults {
+	tc.setupResults.Do(func() {
+		tc.finalResults = make(chan TransferResults)
+		go func() {
+			for {
+				select {
+				case <-tc.ctx.Done():
+					return
+				case result, ok := <-tc.results:
+					if !ok {
+						close(tc.finalResults)
+						return
+					}
+					newResult := *result
+					newResult.job = nil
+					tc.finalResults <- newResult
+				}
+			}
+		}()
+	})
+	return tc.finalResults
+}
+
+// Cancel a client
+//
+// When cancelled, all channels and goroutines associated with
+// the client will close/exit immediately.
+func (tc *TransferClient) Cancel() {
+	tc.cancel()
 }
 
 // Cancel the transfer job
 func (tj *TransferJob) Cancel() {
 	tj.cancel()
+}
+
+// Get the transfer's ID
+func (tj *TransferJob) ID() string {
+	return tj.uuid.String()
 }
 
 // newTransferDetails creates the TransferDetails struct with the given cache
@@ -932,6 +977,15 @@ func runTransferWorker(ctx context.Context, workChan <-chan *clientTransferFile,
 			if !ok {
 				results <- nil
 				return nil
+			}
+			if file.file.ctx.Err() == context.Canceled {
+				results <- &clientTransferResults{
+					id: file.uuid,
+					results: TransferResults{
+						Error: file.file.ctx.Err(),
+					},
+				}
+				break
 			}
 			if file.file.err != nil {
 				results <- &clientTransferResults{

@@ -56,8 +56,8 @@ var (
 	outfile    string
 )
 
-type Transfer struct {
-	url       string
+type PluginTransfer struct {
+	url       *url.URL
 	localFile string
 }
 
@@ -207,14 +207,14 @@ func stashPluginMain(args []string) {
 
 	var source []string
 	var dest string
-	var transfers []Transfer
+	var transfers []PluginTransfer
 
 	if len(args) == 0 && (infile == "" || outfile == "") {
 		fmt.Fprint(os.Stderr, "No source or destination specified\n")
 		os.Exit(1)
 	}
 
-	var workChan chan Transfer
+	var workChan chan PluginTransfer
 	if len(args) == 0 {
 		// Open the input and output files
 		infileFile, err := os.Open(infile)
@@ -229,16 +229,20 @@ func stashPluginMain(args []string) {
 			log.Errorln("Failed to read in from stdin:", err)
 			os.Exit(1)
 		}
-		workChan = make(chan Transfer, len(transfers))
+		workChan = make(chan PluginTransfer, len(transfers))
 		for _, transfer := range transfers {
 			workChan <- transfer
 		}
 	} else if len(args) > 1 {
 		source = args[:len(args)-1]
 		dest = args[len(args)-1]
-		workChan = make(chan Transfer, len(args)-1)
+		workChan = make(chan PluginTransfer, len(args)-1)
 		for _, src := range source {
-			workChan <- Transfer{url: src, localFile: dest}
+			srcUrl, err := url.Parse(src)
+			if err != nil {
+				log.Errorf("Failed to parse input URL (%s): %s", src, err)
+			}
+			workChan <- PluginTransfer{url: srcUrl, localFile: dest}
 		}
 	} else {
 		log.Errorln("Must provide both source and destination as argument")
@@ -278,13 +282,9 @@ func stashPluginMain(args []string) {
 
 	results := make(chan *classads.ClassAd, 5)
 
-	// Start workers
-	for i := 1; i <= 5; i++ {
-		egrp.Go(func() error {
-			launchMoveWorker(upload, workChan, results)
-			return nil
-		})
-	}
+	egrp.Go(func() error {
+		return runPluginWorker(ctx, upload, workChan, results)
+	})
 
 	success := true
 	var resultAds []*classads.ClassAd
@@ -355,40 +355,62 @@ func writeClassadOutputAndBail(exitCode int, resultAds []*classads.ClassAd) {
 	os.Exit(exitCode)
 }
 
-// launchMoveWorker performs the appropriate download or upload functions for the plugin as well as
+// runPluginWorker performs the appropriate download or upload functions for the plugin as well as
 // writes the resultAds for each transfer
 // Returns: resultAds and if an error given is retryable
-func launchMoveWorker(upload bool, workChan <-chan Transfer, results chan<- *classads.ClassAd) {
-	var result error
-	for transfer := range workChan {
-		var transferResults []client.TransferResults
-		if upload {
-			log.Debugln("Uploading:", transfer.localFile, "to", transfer.url)
-			transferResults, result = client.DoCopy(context.Background(), transfer.localFile, transfer.url, false, client.WithAcquireToken(false))
-		} else {
-			log.Debugln("Downloading:", transfer.url, "to", transfer.localFile)
-
-			// When we want to auto-unpack files, we should do this to the containing directory, not the destination
-			// file which HTCondor prepares
-			url, err := url.Parse(transfer.url)
-			if err != nil {
-				result = errors.Wrap(err, "Unable to parse transfer source as a URL")
-			} else {
-				localFile := transfer.localFile
-				if url.Query().Get("pack") != "" {
-					localFile = filepath.Dir(localFile)
-				}
-				transferResults, result = client.DoCopy(context.Background(), transfer.url, localFile, false)
-			}
+func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTransfer, results chan<- *classads.ClassAd) (err error) {
+	te := client.NewTransferEngine(ctx)
+	defer func() {
+		err = te.Shutdown()
+	}()
+	tc, err := te.NewClient(client.WithAcquireToken(false))
+	if err != nil {
+		return
+	}
+	defer func() {
+		if err != nil {
+			tc.Cancel()
 		}
-		startTime := time.Now().Unix()
-		resultAd := classads.NewClassAd()
-		// Set our DeveloperData:
-		developerData := make(map[string]interface{})
-		developerData["PelicanClientVersion"] = config.GetVersion()
-		if len(transferResults) != 0 && !upload {
-			developerData["Attempts"] = len(transferResults[0].Attempts)
-			for _, attempt := range transferResults[0].Attempts {
+	}()
+	defer close(results)
+
+	jobMap := make(map[string]PluginTransfer)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case transfer := <-workChan:
+			if upload {
+				log.Debugln("Uploading:", transfer.localFile, "to", transfer.url)
+			} else {
+				log.Debugln("Downloading:", transfer.url, "to", transfer.localFile)
+
+				// When we want to auto-unpack files, we should do this to the containing directory, not the destination
+				// file which HTCondor prepares
+				if transfer.url.Query().Get("pack") != "" {
+					transfer.localFile = filepath.Dir(transfer.localFile)
+				}
+			}
+
+			var tj *client.TransferJob
+			tj, err = tc.NewTransferJob(transfer.url, transfer.localFile, upload, false, client.WithAcquireToken(false))
+			jobMap[tj.ID()] = transfer
+			if err != nil {
+				return errors.Wrap(err, "Failed to create new transfer job")
+			}
+
+			if err = tc.Submit(tj); err != nil {
+				return err
+			}
+		case result := <-tc.Results():
+			startTime := time.Now().Unix()
+			resultAd := classads.NewClassAd()
+			// Set our DeveloperData:
+			developerData := make(map[string]interface{})
+			developerData["PelicanClientVersion"] = config.GetVersion()
+			developerData["Attempts"] = len(result.Attempts)
+			for _, attempt := range result.Attempts {
 				developerData[fmt.Sprintf("TransferFileBytes%d", attempt.Number)] = attempt.TransferFileBytes
 				developerData[fmt.Sprintf("TimeToFirstByte%d", attempt.Number)] = attempt.TimeToFirstByte
 				developerData[fmt.Sprintf("Endpoint%d", attempt.Number)] = attempt.Endpoint
@@ -398,61 +420,51 @@ func launchMoveWorker(upload bool, workChan <-chan Transfer, results chan<- *cla
 					developerData[fmt.Sprintf("TransferError%d", attempt.Number)] = attempt.Error
 				}
 			}
-		} else if len(transferResults) != 0 && upload { // For uploads, we only care about idx 0 since there is only 1 Attempt and 1 TransferResult
-			developerData["TransferFileBytes"] = transferResults[0].TransferredBytes
-			if len(transferResults[0].Attempts) != 0 { // Should be fine but check to be sure so we don't go out of bounds
-				developerData["Endpoint"] = transferResults[0].Attempts[0].Endpoint
-				developerData["TransferEndTime"] = transferResults[0].Attempts[0].TransferEndTime
-				developerData["ServerVersion"] = transferResults[0].Attempts[0].ServerVersion
-				developerData["TimeToFirstByte"] = transferResults[0].Attempts[0].TimeToFirstByte
-			}
-			if transferResults[0].Error != nil {
-				developerData["TransferError"] = transferResults[0].Error
-			}
-		}
 
-		resultAd.Set("DeveloperData", developerData)
+			resultAd.Set("DeveloperData", developerData)
 
-		resultAd.Set("TransferStartTime", startTime)
-		resultAd.Set("TransferEndTime", time.Now().Unix())
-		hostname, _ := os.Hostname()
-		resultAd.Set("TransferLocalMachineName", hostname)
-		resultAd.Set("TransferProtocol", "stash")
-		resultAd.Set("TransferUrl", transfer.url)
-		resultAd.Set("TransferFileName", transfer.localFile)
-		if upload {
-			resultAd.Set("TransferType", "upload")
-		} else {
-			resultAd.Set("TransferType", "download")
-		}
-		if result == nil {
-			resultAd.Set("TransferSuccess", true)
-			resultAd.Set("TransferFileBytes", transferResults[0].TransferredBytes)
-			resultAd.Set("TransferTotalBytes", transferResults[0].TransferredBytes) // idx 0 since we are not using recursive uploads/downloads
-		} else {
-			resultAd.Set("TransferSuccess", false)
-			var te *client.TransferErrors
-			errMsgInternal := result.Error()
-			if errors.As(result, &te) {
-				errMsgInternal = te.UserError()
-			}
-			errMsg := " Failure "
+			resultAd.Set("TransferStartTime", startTime)
+			resultAd.Set("TransferEndTime", time.Now().Unix())
+			hostname, _ := os.Hostname()
+			resultAd.Set("TransferLocalMachineName", hostname)
+			resultAd.Set("TransferProtocol", "stash")
+			transfer := jobMap[result.JobId.String()]
+			resultAd.Set("TransferUrl", transfer.url)
+			resultAd.Set("TransferFileName", transfer.localFile)
 			if upload {
-				errMsg += "uploading "
+				resultAd.Set("TransferType", "upload")
 			} else {
-				errMsg += "downloading "
+				resultAd.Set("TransferType", "download")
 			}
-			errMsg += transfer.url + ": " + errMsgInternal
-			resultAd.Set("TransferError", errMsg)
-			resultAd.Set("TransferFileBytes", 0)
-			resultAd.Set("TransferTotalBytes", 0)
-			if client.ShouldRetry(result) {
-				resultAd.Set("TransferRetryable", true)
+			if result.Error == nil {
+				resultAd.Set("TransferSuccess", true)
+				resultAd.Set("TransferFileBytes", result.Attempts[len(result.Attempts)].TransferFileBytes)
+				resultAd.Set("TransferTotalBytes", result.Attempts[len(result.Attempts)].TransferFileBytes)
 			} else {
-				resultAd.Set("TransferRetryable", false)
+				resultAd.Set("TransferSuccess", false)
+				var te *client.TransferErrors
+				errMsgInternal := result.Error.Error()
+				if errors.As(result.Error, &te) {
+					errMsgInternal = te.UserError()
+				}
+				errMsg := " Failure "
+				if upload {
+					errMsg += "uploading "
+				} else {
+					errMsg += "downloading "
+				}
+				errMsg += transfer.url.String() + ": " + errMsgInternal
+				resultAd.Set("TransferError", errMsg)
+				resultAd.Set("TransferFileBytes", 0)
+				resultAd.Set("TransferTotalBytes", 0)
+				if client.ShouldRetry(result.Error) {
+					resultAd.Set("TransferRetryable", true)
+				} else {
+					resultAd.Set("TransferRetryable", false)
+				}
 			}
+			results <- resultAd
 		}
-		results <- resultAd
 	}
 }
 
@@ -507,7 +519,7 @@ func writeOutfile(resultAds []*classads.ClassAd, outputFile *os.File) (bool, boo
 }
 
 // readMultiTransfers reads the transfers from a Reader, such as stdin
-func readMultiTransfers(stdin bufio.Reader) (transfers []Transfer, err error) {
+func readMultiTransfers(stdin bufio.Reader) (transfers []PluginTransfer, err error) {
 	// Check stdin for a list of transfers
 	ads, err := classads.ReadClassAd(&stdin)
 	if err != nil {
@@ -517,7 +529,11 @@ func readMultiTransfers(stdin bufio.Reader) (transfers []Transfer, err error) {
 		return nil, errors.New("No transfers found")
 	}
 	for _, ad := range ads {
-		adUrl, err := ad.Get("Url")
+		adUrlStr, err := ad.Get("Url")
+		if err != nil {
+			return nil, err
+		}
+		adUrl, err := url.Parse(adUrlStr.(string))
 		if err != nil {
 			return nil, err
 		}
@@ -526,7 +542,7 @@ func readMultiTransfers(stdin bufio.Reader) (transfers []Transfer, err error) {
 		if err != nil {
 			return nil, err
 		}
-		transfers = append(transfers, Transfer{url: adUrl.(string), localFile: destination.(string)})
+		transfers = append(transfers, PluginTransfer{url: adUrl, localFile: destination.(string)})
 	}
 
 	return transfers, nil
