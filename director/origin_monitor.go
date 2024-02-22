@@ -41,14 +41,6 @@ import (
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
-type (
-	DirectorTest struct {
-		Status    string `json:"status"`
-		Message   string `json:"message"`
-		Timestamp int64  `json:"timestamp"`
-	}
-)
-
 // Report the health status of test file transfer to origin
 func reportStatusToOrigin(ctx context.Context, originWebUrl string, status string, message string) error {
 	directorUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
@@ -82,7 +74,7 @@ func reportStatusToOrigin(ctx context.Context, originWebUrl string, status strin
 
 	reportUrl.Path = "/api/v1.0/origin-api/directorTest"
 
-	dt := DirectorTest{
+	dt := common.DirectorTestResult{
 		Status:    status,
 		Message:   message,
 		Timestamp: time.Now().Unix(),

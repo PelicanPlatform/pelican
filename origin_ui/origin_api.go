@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pkg/errors"
@@ -125,7 +126,7 @@ func LaunchPeriodicDirectorTimeout(ctx context.Context, egrp *errgroup.Group) {
 // reporting such status to this endpoint, and we will update origin internal
 // health status metric to reflect the director connection status.
 func directorTestResponse(ctx *gin.Context) {
-	dt := director.DirectorTest{}
+	dt := common.DirectorTestResult{}
 	if err := ctx.ShouldBind(&dt); err != nil {
 		log.Errorf("Invalid director test response")
 		ctx.JSON(400, gin.H{"error": "Invalid director test response"})
