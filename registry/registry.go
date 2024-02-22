@@ -631,29 +631,8 @@ func deleteNamespaceHandler(ctx *gin.Context) {
 		return
 	}
 
-	/*
-	* The signature is verified, now we need to make sure this token actually gives us
-	* permission to delete the namespace from the db. Let's check the subject and the scope.
-	* NOTE: The validate function also handles checking `iat` and `exp` to make sure the token
-	*       remains valid.
-	 */
-	scopeValidator := jwt.ValidatorFunc(func(_ context.Context, tok jwt.Token) jwt.ValidationError {
-		scope_any, present := tok.Get("scope")
-		if !present {
-			return jwt.NewValidationError(errors.New("No scope is present; required for authorization"))
-		}
-		scope, ok := scope_any.(string)
-		if !ok {
-			return jwt.NewValidationError(errors.New("scope claim in token is not string-valued"))
-		}
+	scopeValidator := token_scopes.CreateScopeValidator([]token_scopes.TokenScope{token_scopes.Pelican_NamespaceDelete}, true)
 
-		for _, scope := range strings.Split(scope, " ") {
-			if scope == token_scopes.Pelican_NamespaceDelete.String() {
-				return nil
-			}
-		}
-		return jwt.NewValidationError(errors.New("Token does not contain namespace deletion authorization"))
-	})
 	if err = jwt.Validate(parsed, jwt.WithValidator(scopeValidator)); err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server could not validate the provided deletion token"})
 		log.Errorf("Failed to validate the token: %v", err)
