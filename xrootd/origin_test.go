@@ -52,7 +52,7 @@ func originMockup(ctx context.Context, egrp *errgroup.Group, t *testing.T) conte
 	originServer := &origin_ui.OriginServer{}
 
 	// Create our own temp directory (for some reason t.TempDir() does not play well with xrootd)
-	tmpPathPattern := "XRootD-Test_Origin*"
+	tmpPathPattern := "XRD-Tst_Orgn*"
 	tmpPath, err := os.MkdirTemp("", tmpPathPattern)
 	require.NoError(t, err)
 
