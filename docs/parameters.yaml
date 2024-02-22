@@ -706,6 +706,7 @@ description: >-
   for detail
 type: int
 default: 1000
+components: ["director"]
 ---
 name: Director.AdvertisementTTL
 description: >-
