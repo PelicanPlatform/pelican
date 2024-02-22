@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"sync"
+	"time"
 
 	"testing"
 
@@ -108,6 +110,8 @@ func TestHandleCLIVersionFlag(t *testing.T) {
 }
 
 func TestHandleCLIExecutableAlias(t *testing.T) {
+	aliasTestMutex := sync.Mutex{} // Lock to ensure each t.Run goroutine have consistent access to binary
+
 	// If we're in the process started by exec.Command, run the handleCLI function.
 	if os.Getenv("BE_CRASHER") == "1" {
 		err := handleCLI(os.Args[1:])
@@ -115,6 +119,23 @@ func TestHandleCLIExecutableAlias(t *testing.T) {
 			t.Fatalf("Function returns error")
 		}
 		return
+	} else {
+		// Compile the test binary.
+		if runningOS := runtime.GOOS; runningOS == "windows" {
+			cmd := exec.Command("go", "build", "-o", "pelican.exe", ".")
+			err := cmd.Run()
+			if err != nil {
+				t.Fatal(err, "Error copying the binary to pelican.exe")
+			}
+			defer os.Remove("pelican.exe") // Clean up the test binary when done.
+		} else {
+			cmd := exec.Command("go", "build", "-o", "pelican", ".")
+			err := cmd.Run()
+			if err != nil {
+				t.Fatal(err, "Error copying the binary to pelican")
+			}
+			defer os.Remove("pelican") // Clean up the test binary when done.
+		}
 	}
 
 	oldArgs := os.Args
@@ -154,17 +175,43 @@ func TestHandleCLIExecutableAlias(t *testing.T) {
 		},
 	}
 
-	batchTest := func(t *testing.T, arguments []string, expected string) {
-		// Compile the test binary.
-		cmd := exec.Command("go", "build", "-o", arguments[0], ".")
-		err := cmd.Run()
-		if err != nil {
-			t.Fatal(err)
+	cleanupBinary := func(name string) {
+		err := os.Remove(name) // Clean up the test binary when done.
+		assert.NoError(t, err, "No binary to remove for "+name)
+		waitDuration := time.Tick(100 * time.Millisecond)
+		times := 3
+		for times > 0 {
+			<-waitDuration
+			_, err := os.Stat(name)
+			if err != nil { // Ensure that the binary was successfully removed
+				return
+			} else {
+				times--
+			}
 		}
-		defer os.Remove(arguments[0]) // Clean up the test binary when done.
+		t.Error("Failed to remove binary after 300ms for ", name)
+	}
+
+	batchTest := func(t *testing.T, arguments []string, expected string) {
+		aliasTestMutex.Lock()
+		defer aliasTestMutex.Unlock()
+
+		if _, err := os.Stat(arguments[0]); err != nil { // Binary not found, copy it
+			if runningOS := runtime.GOOS; runningOS == "windows" {
+				if err := exec.Command("cp", "pelican.exe", arguments[0]).Run(); err != nil {
+					t.Fatal(err, "Error copying the binary to "+arguments[0])
+				}
+				defer cleanupBinary(arguments[0])
+			} else {
+				if err := exec.Command("cp", "pelican", arguments[0]).Run(); err != nil {
+					t.Fatal(err, "Error copying the binary to "+arguments[0])
+				}
+				defer cleanupBinary(arguments[0])
+			}
+		}
 
 		// Run the test binary with the BE_CRASHER environment variable set.
-		cmd = exec.Command("./"+arguments[0], arguments[1:]...)
+		cmd := exec.Command("./"+arguments[0], arguments[1:]...)
 		cmd.Env = append(os.Environ(), "BE_CRASHER=1")
 
 		// Set up pipes to capture stdout and stderr.
@@ -179,7 +226,7 @@ func TestHandleCLIExecutableAlias(t *testing.T) {
 		errBytes, _ := io.ReadAll(stderr)
 
 		// Wait for the command to finish.
-		err = cmd.Wait()
+		err := cmd.Wait()
 
 		got := strings.TrimSpace(string(gotBytes))
 		errString := strings.TrimSpace(string(errBytes))
