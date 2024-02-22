@@ -128,7 +128,7 @@ func GetBestCache(cacheListName string) ([]string, error) {
 					break
 				}
 				req.Header.Add("Cache-control", "max-age=0")
-				req.Header.Add("User-Agent", "pelican/"+ObjectClientOptions.Version)
+				req.Header.Add("User-Agent", getUserAgent(""))
 				resp, err = client.Do(req)
 				if err == nil {
 					break

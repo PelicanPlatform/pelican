@@ -308,7 +308,15 @@ func GetCacheHostnames(testFile string) (urls []string, err error) {
 	return
 }
 
-func GetCachesFromNamespace(namespace namespaces.Namespace, useDirector bool) (caches []CacheInterface, err error) {
+func getUserAgent(project string) (agent string) {
+	agent = "pelican-client/" + config.GetVersion()
+	if project != "" {
+		agent += " project/" + project
+	}
+	return
+}
+
+func getCachesFromNamespace(namespace namespaces.Namespace, useDirector bool) (caches []CacheInterface, err error) {
 
 	// The global cache override is set
 	if CacheOverride {
@@ -630,7 +638,7 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 	}
 
 	payload := payloadStruct{}
-	payload.version = version
+	payload.version = config.GetVersion()
 
 	//Fill out the payload as much as possible
 	payload.filename = remoteObjectUrl.Path

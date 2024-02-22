@@ -570,7 +570,7 @@ func downloadHTTP(ctx context.Context, transfer TransferDetails, dest string, to
 	req.HTTPRequest.Header.Set("X-Transfer-Status", "true")
 	req.HTTPRequest.Header.Set("TE", "trailers")
 	if payload != nil && payload.ProjectName != "" {
-		req.HTTPRequest.Header.Set("User-Agent", payload.ProjectName)
+		req.HTTPRequest.Header.Set("User-Agent", getUserAgent(payload.ProjectName))
 	}
 	req = req.WithContext(ctx)
 
@@ -999,10 +999,8 @@ func uploadFile(ctx context.Context, src string, origDest *url.URL, token string
 		return transferResult, err
 	}
 	// Set the authorization header
-	request.Header.Set("Authorization", "Bearer "+token)
-	if projectName != "" {
-		request.Header.Set("User-Agent", projectName)
-	}
+	request.Header.Set("Authorization", "Bearer "+transfer.token)
+	request.Header.Set("User-Agent", getUserAgent(transfer.project))
 	var lastKnownWritten int64
 	t := time.NewTicker(20 * time.Second)
 	defer t.Stop()

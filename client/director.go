@@ -155,8 +155,7 @@ func queryDirector(verb, source, directorUrl string) (resp *http.Response, err e
 	// Include the Client's version as a User-Agent header. The Director will decide
 	// if it supports the version, and provide an error message in the case that it
 	// cannot.
-	userAgent := "pelican-client/" + ObjectClientOptions.Version
-	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("User-Agent", getUserAgent(""))
 
 	// Perform the HTTP request
 	resp, err = client.Do(req)

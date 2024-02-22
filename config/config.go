@@ -133,7 +133,7 @@ var (
 	setServerOnce  sync.Once
 
 	// Pelican version
-	PelicanVersion string
+	version string = "dev"
 )
 
 func init() {
@@ -180,6 +180,18 @@ func setEnabledServer(newServers ServerType) {
 // Use this function to check which server(s) are running in the current process.
 func IsServerEnabled(testServer ServerType) bool {
 	return enabledServers.IsEnabled(testServer)
+}
+
+// Returns the version of the current binary
+func GetVersion() string {
+	return version
+}
+
+// Overrides the version of the current binary
+//
+// Intended mainly for use in unit tests
+func SetVersion(newVersion string) {
+	version = newVersion
 }
 
 // Get a string slice of currently enabled servers, sorted by alphabetical order.
@@ -363,7 +375,7 @@ func DiscoverFederation() error {
 	if err != nil {
 		return errors.Wrapf(err, "Failure when doing federation metadata request creation for %s", discoveryUrl)
 	}
-	req.Header.Set("User-Agent", "pelican/"+PelicanVersion)
+	req.Header.Set("User-Agent", "pelican/"+version)
 
 	result, err := httpClient.Do(req)
 	if err != nil {
