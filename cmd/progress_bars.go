@@ -71,7 +71,9 @@ func (pb *progressBars) callback(path string, xfer int64, size int64, completed 
 func (pb *progressBars) shutdown() {
 	if pb.egrp != nil {
 		pb.done <- true
-		pb.egrp.Wait()
+		if err := pb.egrp.Wait(); err != nil {
+			log.Debugln("Failure to shut down progress bar:", err)
+		}
 	}
 }
 

@@ -494,10 +494,6 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 			remoteDestUrl.Scheme, strings.Join(understoodSchemes, ", "))
 	}
 
-	if remoteDestScheme == "osdf" || remoteDestScheme == "pelican" {
-		remoteDestination = remoteDestUrl.Path
-	}
-
 	te := NewTransferEngine(ctx)
 	defer func() {
 		if err := te.Shutdown(); err != nil {

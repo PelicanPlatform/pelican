@@ -319,7 +319,8 @@ func stashPluginMain(args []string) {
 	}
 	close(results)
 
-	success, retryable := writeOutfile(resultAds, outputFile)
+	tmpSuccess, retryable := writeOutfile(resultAds, outputFile)
+	success = tmpSuccess && success
 
 	if success {
 		os.Exit(0)
