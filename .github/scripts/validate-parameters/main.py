@@ -9,11 +9,11 @@ ENUMERATIONS = {
 }
 
 VERIFIED_OBJECT_STRUCTURES = [
-    "GeoIPOverride",
-    "Institution",
-    "CustomRegistrationField",
-    "OIDCAuthenticationRequirement",
-    "AuthorizationTemplate",
+    "GeoIPOverrides",
+    "Institutions",
+    "CustomRegistrationFields",
+    "OIDCAuthenticationRequirements",
+    "AuthorizationTemplates",
     "IPMapping"
 ]
 
@@ -47,12 +47,10 @@ def main():
 
             if parameter['type'] == 'object':
 
-                if 'objectStructure' not in parameter:
-                    errors.append(f"Parameter with type 'object' is missing a objectStructure key: {parameter['name']}")
-                    continue
+                object_structure = parameter['name'].split(".")[-1]
 
-                if parameter['objectStructure'] not in VERIFIED_OBJECT_STRUCTURES:
-                    errors.append(f"Parameter objectStructure is not a verified object structure. Web Dev must contribute to config spec: {parameter['name']}")
+                if object_structure not in VERIFIED_OBJECT_STRUCTURES:
+                    errors.append(f"Parameter objectStructure is not verified. Web Dev must create new config ui for: {object_structure}")
                     continue
 
         if len(errors) != 0:
