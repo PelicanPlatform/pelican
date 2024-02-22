@@ -37,11 +37,11 @@ type MockAuthChecker struct {
 	IssuerCheckFunc     func(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScope bool) error
 }
 
-func (m *MockAuthChecker) FederationCheck(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScope bool) error {
+func (m *MockAuthChecker) federationCheck(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScope bool) error {
 	return m.FederationCheckFunc(ctx, token, expectedScopes, allScope)
 }
 
-func (m *MockAuthChecker) IssuerCheck(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScope bool) error {
+func (m *MockAuthChecker) issuerCheck(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScope bool) error {
 	return m.IssuerCheckFunc(ctx, token, expectedScopes, allScope)
 }
 

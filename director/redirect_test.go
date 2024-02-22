@@ -704,7 +704,7 @@ func TestDiscoverOriginCache(t *testing.T) {
 		r.ServeHTTP(w, req)
 
 		assert.Equal(t, 401, w.Code)
-		assert.Equal(t, `{"error":"Invalid token for accessing director's sevice discovery"}`, w.Body.String())
+		assert.Equal(t, `{"error":"Authentication is required but no token is present."}`, w.Body.String())
 	})
 	t.Run("token-present-with-wrong-issuer-should-give-401", func(t *testing.T) {
 		req, err := http.NewRequest(http.MethodGet, "/test", nil)
@@ -717,8 +717,8 @@ func TestDiscoverOriginCache(t *testing.T) {
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
 
-		assert.Equal(t, 401, w.Code)
-		assert.Equal(t, `{"error":"Invalid token for accessing director's sevice discovery"}`, w.Body.String())
+		assert.Equal(t, 403, w.Code)
+		assert.Equal(t, `{"error":"Cannot verify token: Cannot verify token with server issuer:  Issuer is not server itself: https://wrong-issuer.org\n"}`, w.Body.String())
 	})
 	t.Run("token-present-valid-should-give-200-and-empty-array", func(t *testing.T) {
 		req, err := http.NewRequest(http.MethodGet, "/test", nil)
