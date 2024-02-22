@@ -1008,6 +1008,19 @@ func runTransferWorker(ctx context.Context, workChan <-chan *clientTransferFile,
 				transferResults = newTransferResults(file.file.job)
 				transferResults.JobId = file.jobId
 				transferResults.Error = err
+			} else if transferResults.Error == nil {
+				xferErrors := NewTransferErrors()
+				lastXferGood := false
+				for _, attempt := range transferResults.Attempts {
+					if attempt.Error == nil {
+						lastXferGood = true
+					} else {
+						xferErrors.AddError(attempt.Error)
+					}
+					if !lastXferGood {
+						transferResults.Error = xferErrors
+					}
+				}
 			}
 			results <- &clientTransferResults{id: file.uuid, results: transferResults}
 		}
