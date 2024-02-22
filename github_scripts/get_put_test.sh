@@ -21,6 +21,7 @@
 # Setup env variables needed
 to_exit=0
 export PELICAN_FEDERATION_DIRECTORURL="https://$HOSTNAME:8444"
+export PELICAN_DIRECTOR_DEFAULTRESPONSE="origins"
 export PELICAN_FEDERATION_REGISTRYURL="https://$HOSTNAME:8444"
 export PELICAN_TLSSKIPVERIFY=true
 export PELICAN_ORIGIN_ENABLEFALLBACKREAD=true
@@ -96,7 +97,7 @@ do
 done
 
 # Run pelican object put
-./pelican object put input.txt osdf:///test/input.txt -d -t token -l putOutput.txt
+./pelican object put input.txt pelican://$HOSTNAME:8444/test/input.txt -d -t token -l putOutput.txt
 
 # Check output of command
 if grep -q "Uploaded bytes: 47" putOutput.txt; then
@@ -107,7 +108,7 @@ else
     to_exit=1
 fi
 
-./pelican object get osdf:///test/input.txt output.txt -d -t token -l getOutput.txt
+./pelican object get pelican://$HOSTNAME:8444/test/input.txt output.txt -d -t token -l getOutput.txt
 
 # Check output of command
 if grep -q "Downloaded bytes: 47" getOutput.txt; then
