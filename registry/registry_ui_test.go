@@ -23,8 +23,8 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/test_utils"
+	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
-	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/sirupsen/logrus/hooks/test"
@@ -220,7 +220,7 @@ func TestListNamespaces(t *testing.T) {
 			requestURL := "/namespaces?server_type=" + tc.serverType + "&status=" + tc.status
 			req, _ := http.NewRequest("GET", requestURL, nil)
 			if tc.authUser {
-				tokenCfg := utils.TokenConfig{Issuer: "https://mock-server.com", Lifetime: time.Minute, Subject: "admin", TokenProfile: utils.None}
+				tokenCfg := token.TokenConfig{Issuer: "https://mock-server.com", Lifetime: time.Minute, Subject: "admin", TokenProfile: token.None}
 				tokenCfg.AddScopes([]token_scopes.TokenScope{token_scopes.WebUi_Access})
 				token, err := tokenCfg.CreateToken()
 				require.NoError(t, err)

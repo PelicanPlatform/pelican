@@ -27,16 +27,16 @@ import (
 	"github.com/prometheus/common/route"
 
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
-	"github.com/pelicanplatform/pelican/utils"
 )
 
 // Create a token for accessing Prometheus /metrics endpoint on
 // the server itself
 func createPromMetricToken() (string, error) {
 	serverUrl := param.Server_ExternalWebUrl.GetString()
-	promMetricTokCfg := utils.TokenConfig{
-		TokenProfile: utils.WLCG,
+	promMetricTokCfg := token.TokenConfig{
+		TokenProfile: token.WLCG,
 		Lifetime:     param.Monitoring_TokenExpiresIn.GetDuration(),
 		Issuer:       serverUrl,
 		Audience:     []string{serverUrl},
@@ -65,12 +65,12 @@ func promMetricAuthHandler(ctx *gin.Context) {
 		}
 		// Auth is granted if the request is from either
 		// 1.director scraper 2.server (self) scraper 3.authenticated web user (via cookie)
-		authOption := utils.AuthOption{
-			Sources: []utils.TokenSource{utils.Header, utils.Cookie},
-			Issuers: []utils.TokenIssuer{utils.Federation, utils.Issuer},
+		authOption := token.AuthOption{
+			Sources: []token.TokenSource{token.Header, token.Cookie},
+			Issuers: []token.TokenIssuer{token.Federation, token.Issuer},
 			Scopes:  []token_scopes.TokenScope{token_scopes.Monitoring_Scrape}}
 
-		valid := utils.CheckAnyAuth(ctx, authOption)
+		valid := token.CheckAnyAuth(ctx, authOption)
 		if !valid {
 			ctx.AbortWithStatusJSON(403, gin.H{"error": "Authentication required to access this endpoint."})
 		}
@@ -84,13 +84,13 @@ func promMetricAuthHandler(ctx *gin.Context) {
 // Handle the authorization of Prometheus query engine endpoint at `/api/v1.0/prometheus`
 func promQueryEngineAuthHandler(av1 *route.Router) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		authOption := utils.AuthOption{
+		authOption := token.AuthOption{
 			// Cookie for web user access and header for external service like Grafana to access
-			Sources: []utils.TokenSource{utils.Cookie, utils.Header},
-			Issuers: []utils.TokenIssuer{utils.Issuer},
+			Sources: []token.TokenSource{token.Cookie, token.Header},
+			Issuers: []token.TokenIssuer{token.Issuer},
 			Scopes:  []token_scopes.TokenScope{token_scopes.Monitoring_Query}}
 
-		exists := utils.CheckAnyAuth(c, authOption)
+		exists := token.CheckAnyAuth(c, authOption)
 		if exists {
 			av1.ServeHTTP(c.Writer, c.Request)
 		} else {

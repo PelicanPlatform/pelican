@@ -36,8 +36,9 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
-	"github.com/pelicanplatform/pelican/utils"
 )
 
 type (
@@ -55,8 +56,8 @@ func reportStatusToOrigin(ctx context.Context, originWebUrl string, status strin
 		return errors.Wrapf(err, "failed to parse external URL %v", param.Server_ExternalWebUrl.GetString())
 	}
 
-	testTokenCfg := utils.TokenConfig{
-		TokenProfile: utils.WLCG,
+	testTokenCfg := token.TokenConfig{
+		TokenProfile: token.WLCG,
 		Version:      "1.0",
 		Lifetime:     time.Minute,
 		Issuer:       directorUrl.String(),
@@ -168,8 +169,8 @@ func LaunchPeriodicDirectorTest(ctx context.Context, originAd common.ServerAd) {
 			return
 		case <-ticker.C:
 			log.Debug(fmt.Sprintf("Starting a director test cycle for origin: %s at %s", originName, originUrl))
-			fileTests := utils.TestFileTransferImpl{}
-			ok, err := fileTests.RunTests(ctx, originUrl, originUrl, "", utils.DirectorFileTest)
+			fileTests := server_utils.TestFileTransferImpl{}
+			ok, err := fileTests.RunTests(ctx, originUrl, originUrl, "", server_utils.DirectorFileTest)
 			if ok && err == nil {
 				log.Debugln("Director file transfer test cycle succeeded at", time.Now().Format(time.UnixDate), " for origin: ", originUrl)
 				if err := reportStatusToOrigin(ctx, originWebUrl, "ok", "Director test cycle succeeded at "+time.Now().Format(time.RFC3339)); err != nil {

@@ -31,7 +31,8 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/pelicanplatform/pelican/director"
+	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/utils"
 )
@@ -230,7 +231,7 @@ func NamespaceDelete(endpoint string, prefix string) error {
 	// TODO: We might consider moving widely-useful functions like `GetRegistryIssuerURL`
 	//       to a more generic `pelican/utils` package so that they're easier to find
 	//       and more likely to be used.
-	issuerURL, err := director.GetNSIssuerURL(prefix)
+	issuerURL, err := server_utils.GetNSIssuerURL(prefix)
 	if err != nil {
 		return errors.Wrap(err, "Failed to determine prefix's issuer/pubkey URL for creating deletion token")
 	}
@@ -239,8 +240,8 @@ func NamespaceDelete(endpoint string, prefix string) error {
 	//       including an audience with these tokens.
 	// TODO: Investigate whether 1 min is a good expiration interval
 	//       or whether this should be altered.
-	delTokenCfg := utils.TokenConfig{
-		TokenProfile: utils.WLCG,
+	delTokenCfg := token.TokenConfig{
+		TokenProfile: token.WLCG,
 		Lifetime:     time.Minute,
 		Issuer:       issuerURL,
 		Audience:     []string{"registry"},

@@ -30,7 +30,7 @@ import (
 	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/utils"
+	"github.com/pelicanplatform/pelican/token"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
@@ -99,9 +99,9 @@ func NewObjectStat() *ObjectStat {
 
 // Implementation of sending a HEAD request to an origin for an object
 func (stat *ObjectStat) sendHeadReqToOrigin(objectName string, dataUrl url.URL, timeout time.Duration, ctx context.Context) (*objectMetadata, error) {
-	tokenConf := utils.TokenConfig{
+	tokenConf := token.TokenConfig{
 		Lifetime:     time.Minute,
-		TokenProfile: utils.WLCG,
+		TokenProfile: token.WLCG,
 		Audience:     []string{dataUrl.String()},
 		Subject:      dataUrl.String(),
 		// Federation as the issuer

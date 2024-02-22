@@ -37,8 +37,8 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/test_utils"
+	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
-	"github.com/pelicanplatform/pelican/utils"
 )
 
 // Test the Prometheus query engine endpoint auth check with an server issuer token
@@ -72,8 +72,8 @@ func TestPrometheusProtectionCookieAuth(t *testing.T) {
 	}
 
 	issuerUrl := param.Server_ExternalWebUrl.GetString()
-	promTokenCfg := utils.TokenConfig{
-		TokenProfile: utils.WLCG,
+	promTokenCfg := token.TokenConfig{
+		TokenProfile: token.WLCG,
 		Lifetime:     10 * time.Minute,
 		Issuer:       issuerUrl,
 		Audience:     []string{issuerUrl},
@@ -126,8 +126,8 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 
 	// Shared function to create a token
 	createToken := func(scope, aud string) string {
-		tokenCfg := utils.TokenConfig{
-			TokenProfile: utils.WLCG,
+		tokenCfg := token.TokenConfig{
+			TokenProfile: token.WLCG,
 			Lifetime:     param.Monitoring_TokenExpiresIn.GetDuration(),
 			Issuer:       issuerUrl,
 			Audience:     []string{aud},

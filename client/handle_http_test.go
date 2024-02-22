@@ -49,8 +49,8 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
+	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
-	"github.com/pelicanplatform/pelican/utils"
 )
 
 func TestMain(m *testing.M) {
@@ -403,8 +403,8 @@ func generateFileTestScitoken() (string, error) {
 	}
 	scopes = append(scopes, modScope)
 
-	fTestTokenCfg := utils.TokenConfig{
-		TokenProfile: utils.WLCG,
+	fTestTokenCfg := token.TokenConfig{
+		TokenProfile: token.WLCG,
 		Lifetime:     time.Minute,
 		Issuer:       issuerUrl,
 		Audience:     []string{param.Origin_Url.GetString()},
@@ -687,8 +687,8 @@ func TestGetAndPutAuth(t *testing.T) {
 	audience := config.GetServerAudience()
 
 	// Create a token file
-	tokenConfig := utils.TokenConfig{
-		TokenProfile: utils.WLCG,
+	tokenConfig := token.TokenConfig{
+		TokenProfile: token.WLCG,
 		Lifetime:     time.Minute,
 		Issuer:       issuer,
 		Audience:     []string{audience},
@@ -861,8 +861,8 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 	require.NoError(t, err)
 	audience := config.GetServerAudience()
 
-	tokenConfig := utils.TokenConfig{
-		TokenProfile: utils.WLCG,
+	tokenConfig := token.TokenConfig{
+		TokenProfile: token.WLCG,
 		Lifetime:     time.Minute,
 		Issuer:       issuer,
 		Audience:     []string{audience},

@@ -31,8 +31,8 @@ import (
 
 	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
-	"github.com/pelicanplatform/pelican/utils"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/gin-gonic/gin"
@@ -648,13 +648,13 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType common.S
 // Return a list of registered origins and caches in Prometheus HTTP SD format
 // for director's Prometheus service discovery
 func DiscoverOriginCache(ctx *gin.Context) {
-	authOption := utils.AuthOption{
-		Sources: []utils.TokenSource{utils.Header},
-		Issuers: []utils.TokenIssuer{utils.Issuer},
+	authOption := token.AuthOption{
+		Sources: []token.TokenSource{token.Header},
+		Issuers: []token.TokenIssuer{token.Issuer},
 		Scopes:  []token_scopes.TokenScope{token_scopes.Pelican_DirectorServiceDiscovery},
 	}
 
-	ok := utils.CheckAnyAuth(ctx, authOption)
+	ok := token.CheckAnyAuth(ctx, authOption)
 	if !ok {
 		log.Warningf("Invalid token for accessing director's sevice discovery")
 		ctx.JSON(401, gin.H{"error": "Invalid token for accessing director's sevice discovery"})

@@ -28,8 +28,8 @@ import (
 	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/test_utils"
+	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
-	"github.com/pelicanplatform/pelican/utils"
 )
 
 type MockCache struct {
@@ -137,8 +137,8 @@ func TestDirectorRegistration(t *testing.T) {
 	}
 
 	generateReadToken := func(key jwk.Key, object, issuer string) string {
-		tc := utils.TokenConfig{
-			TokenProfile: utils.WLCG,
+		tc := token.TokenConfig{
+			TokenProfile: token.WLCG,
 			Version:      "1.0",
 			Lifetime:     time.Minute,
 			Issuer:       issuer,
