@@ -318,6 +318,37 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 		ns.Pubkey = string(pubkeyData)
 		ns.Identity = data.Identity
 
+		if data.Identity != "" {
+			idMap := map[string]interface{}{}
+			err := json.Unmarshal([]byte(data.Identity), &idMap)
+			if err != nil {
+				log.Errorln("Failed to decode non-empty Identity field:", err)
+				return false, nil, err
+			}
+			sub, ok := idMap["sub"]
+			if ok {
+				val, ok := sub.(string)
+				if ok {
+					ns.AdminMetadata.UserID = val
+				}
+			}
+			email, ok := idMap["email"]
+			if ok {
+				val, ok := email.(string)
+				if ok {
+					ns.AdminMetadata.Description = "User email: " + val + " This is a namespace registration from Pelican CLI with OIDC authentication. Certain fields may not be populated"
+				}
+			}
+		} else {
+			// This is either a registration from CLI without --with-identity flag or
+			// an automated registration from origin or cache
+			ns.AdminMetadata.Description = "This is a namespace registration from Pelican CLI or an automated registration. Certain fields may not be populated"
+		}
+
+		// Since CLI/auto-registered namespace did not have site name as part of their registration
+		// Use their IP for an educated guess
+		ns.AdminMetadata.SiteName = ctx.ClientIP()
+
 		// Overwrite status to Pending to filter malicious request
 		ns.AdminMetadata.Status = Pending
 
