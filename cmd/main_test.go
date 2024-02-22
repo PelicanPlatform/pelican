@@ -10,13 +10,14 @@ import (
 
 	"testing"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestHandleCLIVersionFlag(t *testing.T) {
 	// Save the current version to reset this variable
-	var currentVersion = version
-	version = "0.0.1"
+	var currentVersion = config.GetVersion()
+	config.SetVersion("0.0.1")
 	date = "2023-10-06T15:26:50Z"
 	commit = "f0f94a3edf6641c2472345819a0d5453fc9e68d1"
 	builtBy = "goreleaser"
@@ -27,7 +28,7 @@ func TestHandleCLIVersionFlag(t *testing.T) {
 
 	mockVersionOutput := fmt.Sprintf(
 		"Version: %s\nBuild Date: %s\nBuild Commit: %s\nBuilt By: %s",
-		version, date, commit, builtBy,
+		config.GetVersion(), date, commit, builtBy,
 	)
 
 	testCases := []struct {
@@ -104,7 +105,7 @@ func TestHandleCLIVersionFlag(t *testing.T) {
 	os.Args = oldArgs
 
 	// Set the version back to what it was
-	version = currentVersion
+	config.SetVersion(currentVersion)
 }
 
 func TestHandleCLIExecutableAlias(t *testing.T) {

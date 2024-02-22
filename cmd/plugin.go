@@ -41,7 +41,6 @@ import (
 )
 
 var (
-	version = "dev"
 	commit  = "none"
 	date    = "unknown"
 	builtBy = "unknown"
@@ -128,12 +127,12 @@ func stashPluginMain(args []string) {
 		if args[0] == "-classad" {
 			// Print classad and exit
 			fmt.Println("MultipleFileSupport = true")
-			fmt.Println("PluginVersion = \"" + version + "\"")
+			fmt.Println("PluginVersion = \"" + config.GetVersion() + "\"")
 			fmt.Println("PluginType = \"FileTransfer\"")
 			fmt.Println("SupportedMethods = \"stash, osdf\"")
 			os.Exit(0)
 		} else if args[0] == "-version" || args[0] == "-v" {
-			fmt.Println("Version:", version)
+			fmt.Println("Version:", config.GetVersion())
 			fmt.Println("Build Date:", date)
 			fmt.Println("Build Commit:", commit)
 			fmt.Println("Built By:", builtBy)
@@ -385,7 +384,7 @@ func launchMoveWorker(upload bool, workChan <-chan Transfer, results chan<- *cla
 		resultAd := classads.NewClassAd()
 		// Set our DeveloperData:
 		developerData := make(map[string]interface{})
-		developerData["PelicanClientVersion"] = version
+		developerData["PelicanClientVersion"] = config.GetVersion()
 		if len(transferResults) != 0 && !upload {
 			developerData["Attempts"] = len(transferResults[0].Attempts)
 			for _, attempt := range transferResults[0].Attempts {
