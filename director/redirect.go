@@ -706,11 +706,18 @@ func getPrefixByPath(ctx *gin.Context) {
 	pathParam := ctx.Param("path")
 	if pathParam == "" {
 		ctx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Bad request. Path is empty"})
+		return
 	}
 	namespaceKeysMutex.Lock()
 	defer namespaceKeysMutex.Unlock()
 
 	originNs, _, _ := getAdsForPath(pathParam)
+
+	// If originNs.Path is an empty value, then the namespace is not found
+	if originNs.Path == "" {
+		ctx.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "Namespace prefix not found for " + pathParam})
+		return
+	}
 
 	res := common.GetPrefixByPathRes{Prefix: originNs.Path}
 	ctx.JSON(http.StatusOK, res)
