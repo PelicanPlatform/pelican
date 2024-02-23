@@ -293,7 +293,11 @@ func stashPluginMain(args []string) {
 		select {
 		case <-ctx.Done():
 			done = true
-		case resultAd := <-results:
+		case resultAd, ok := <-results:
+			if !ok {
+				done = true
+				break
+			}
 			// Process results as soon as we get them
 			transferSuccess, err := resultAd.Get("TransferSuccess")
 			if err != nil {
@@ -317,7 +321,6 @@ func stashPluginMain(args []string) {
 	if waitErr := egrp.Wait(); waitErr != nil && waitErr != context.Canceled {
 		log.Errorln("Error when shutting down worker:", waitErr)
 	}
-	close(results)
 
 	tmpSuccess, retryable := writeOutfile(resultAds, outputFile)
 	success = tmpSuccess && success
@@ -380,7 +383,12 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case transfer := <-workChan:
+		case transfer, ok := <-workChan:
+			if !ok {
+				tc.Close()
+				workChan = nil
+				break
+			}
 			if upload {
 				log.Debugln("Uploading:", transfer.localFile, "to", transfer.url)
 			} else {
@@ -394,7 +402,8 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 			}
 
 			var tj *client.TransferJob
-			tj, err = tc.NewTransferJob(transfer.url, transfer.localFile, upload, false, client.WithAcquireToken(false))
+			urlCopy := *transfer.url
+			tj, err = tc.NewTransferJob(&urlCopy, transfer.localFile, upload, false, client.WithAcquireToken(false))
 			jobMap[tj.ID()] = transfer
 			if err != nil {
 				return errors.Wrap(err, "Failed to create new transfer job")
@@ -403,7 +412,12 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 			if err = tc.Submit(tj); err != nil {
 				return err
 			}
-		case result := <-tc.Results():
+		case result, ok := <-tc.Results():
+			if !ok {
+				log.Debugln("Client has no more results")
+				return
+			}
+			log.Debugln("Got result from transfer client")
 			startTime := time.Now().Unix()
 			resultAd := classads.NewClassAd()
 			// Set our DeveloperData:
@@ -429,7 +443,7 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 			resultAd.Set("TransferLocalMachineName", hostname)
 			resultAd.Set("TransferProtocol", "stash")
 			transfer := jobMap[result.JobId.String()]
-			resultAd.Set("TransferUrl", transfer.url)
+			resultAd.Set("TransferUrl", transfer.url.String())
 			resultAd.Set("TransferFileName", transfer.localFile)
 			if upload {
 				resultAd.Set("TransferType", "upload")
@@ -438,8 +452,8 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 			}
 			if result.Error == nil {
 				resultAd.Set("TransferSuccess", true)
-				resultAd.Set("TransferFileBytes", result.Attempts[len(result.Attempts)].TransferFileBytes)
-				resultAd.Set("TransferTotalBytes", result.Attempts[len(result.Attempts)].TransferFileBytes)
+				resultAd.Set("TransferFileBytes", result.Attempts[len(result.Attempts)-1].TransferFileBytes)
+				resultAd.Set("TransferTotalBytes", result.Attempts[len(result.Attempts)-1].TransferFileBytes)
 			} else {
 				resultAd.Set("TransferSuccess", false)
 				var te *client.TransferErrors

@@ -337,7 +337,7 @@ func NewTransferEngine(ctx context.Context) *TransferEngine {
 	egrp, _ := errgroup.WithContext(ctx)
 	work := make(chan *clientTransferJob)
 	files := make(chan *clientTransferFile)
-	results := make(chan *clientTransferResults)
+	results := make(chan *clientTransferResults, 5)
 	te := &TransferEngine{
 		ctx:           ctx,
 		cancel:        cancel,
@@ -436,11 +436,10 @@ func (te *TransferEngine) NewClient(options ...TransferOption) (client *Transfer
 // Waits until all workers have finished
 func (te *TransferEngine) Shutdown() error {
 	te.Close()
-	_, ok := <-te.closeDoneChan
-	if ok {
-		te.ewmaTick.Stop()
-		te.cancel()
-	}
+	<-te.closeDoneChan
+	te.ewmaTick.Stop()
+	te.cancel()
+
 	err := te.egrp.Wait()
 	if err != nil && err != context.Canceled {
 		return err
@@ -518,12 +517,13 @@ func (te *TransferEngine) runMux() error {
 			close(te.work)
 			closedWorkChan = true
 		}
-		//log.Debugf("runMux running with %d active client channels", len(workMap))
+		//log.Debugf("runMux running with %d active client channels and sending %d client responses", len(workMap), len(resultsMap))
 		chosen, recv, ok := reflect.Select(cases)
 		if chosen < len(workMap) {
 			// One of the clients has produced work.  Send it to the central queue.
 			id := workKeys[chosen]
 			if !ok {
+				// Client has closed its input channels.  See if we're done.
 				func() {
 					te.clientLock.Lock()
 					defer te.clientLock.Unlock()
@@ -600,6 +600,8 @@ func (te *TransferEngine) runMux() error {
 			}
 		} else if chosen == len(workMap)+len(resultsMap)+3 {
 			// Engine's context has been cancelled; immediately exit.
+			log.Debugln("Transfer engine has been cancelled")
+			close(te.closeDoneChan)
 			return te.ctx.Err()
 		} else if chosen == len(workMap)+len(resultsMap)+4 {
 			// Notification that a job has been processed into files (or failed)
@@ -620,6 +622,7 @@ func (te *TransferEngine) runMux() error {
 		} else if chosen == len(workMap)+len(resultsMap)+5 {
 			// Notification that the engine should shut down
 			closing = true
+			log.Debugln("Shutting down transfer engine")
 			func() {
 				te.clientLock.Lock()
 				defer te.clientLock.Unlock()
@@ -646,9 +649,11 @@ func (te *TransferEngine) runJobHandler() error {
 	for {
 		select {
 		case <-te.ctx.Done():
+			log.Debugln("Job handler has been cancelled")
 			return te.ctx.Err()
 		case job, ok := <-te.work:
 			if !ok {
+				log.Debugln("Job handler has been shutdown")
 				close(te.files)
 				return nil
 			}
@@ -983,7 +988,15 @@ func runTransferWorker(ctx context.Context, workChan <-chan *clientTransferFile,
 			return ctx.Err()
 		case file, ok := <-workChan:
 			if !ok {
-				results <- nil
+				// If the transfer engine is cancelled while a shutdown is occurring, the
+				// write to the results channel may block.  Hence, we should see if we're
+				// cancelled while the write is pending.
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case results <- nil:
+					return nil
+				}
 				return nil
 			}
 			if file.file.ctx.Err() == context.Canceled {
@@ -1027,9 +1040,9 @@ func runTransferWorker(ctx context.Context, workChan <-chan *clientTransferFile,
 					} else {
 						xferErrors.AddError(attempt.Error)
 					}
-					if !lastXferGood {
-						transferResults.Error = xferErrors
-					}
+				}
+				if !lastXferGood {
+					transferResults.Error = xferErrors
 				}
 			}
 			results <- &clientTransferResults{id: file.uuid, results: transferResults}
@@ -1038,6 +1051,7 @@ func runTransferWorker(ctx context.Context, workChan <-chan *clientTransferFile,
 }
 
 func downloadObject(transfer *transferFile) (transferResults TransferResults, err error) {
+	log.Debugln("Downloading file from", transfer.remoteURL)
 	// Remove the source from the file path
 	directory := path.Dir(transfer.localPath)
 	var downloaded int64
