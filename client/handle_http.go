@@ -45,6 +45,7 @@ import (
 	"github.com/opensaucerer/grab/v3"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
 	"github.com/studio-b12/gowebdav"
 	"github.com/vbauerster/mpb/v8"
 	"golang.org/x/sync/errgroup"
@@ -703,6 +704,22 @@ func (tc *TransferClient) NewTransferJob(remoteUrl *url.URL, localPath string, u
 		}
 	}
 
+	if remoteUrl.Scheme == "pelican" && remoteUrl.Host != "" {
+		fd := config.GetFederation()
+		defer config.SetFederation(fd)
+		config.SetFederation(config.FederationDiscovery{})
+		fedUrlCopy := *remoteUrl
+		fedUrlCopy.Scheme = "https"
+		fedUrlCopy.Path = ""
+		fedUrlCopy.RawFragment = ""
+		fedUrlCopy.RawQuery = ""
+		viper.Set("Federation.DiscoveryUrl", fedUrlCopy.String())
+		err = config.DiscoverFederation()
+		if err != nil {
+			return
+		}
+	}
+
 	ns, err := getNamespaceInfo(remoteUrl.Path, param.Federation_DirectorUrl.GetString(), upload)
 	if err != nil {
 		log.Errorln(err)
@@ -997,7 +1014,6 @@ func runTransferWorker(ctx context.Context, workChan <-chan *clientTransferFile,
 				case results <- nil:
 					return nil
 				}
-				return nil
 			}
 			if file.file.ctx.Err() == context.Canceled {
 				results <- &clientTransferResults{

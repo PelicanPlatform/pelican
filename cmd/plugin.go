@@ -320,9 +320,11 @@ func stashPluginMain(args []string) {
 	cancel()
 	if waitErr := egrp.Wait(); waitErr != nil && waitErr != context.Canceled {
 		log.Errorln("Error when shutting down worker:", waitErr)
+		success = false
+		err = waitErr
 	}
 
-	tmpSuccess, retryable := writeOutfile(resultAds, outputFile)
+	tmpSuccess, retryable := writeOutfile(err, resultAds, outputFile)
 	success = tmpSuccess && success
 
 	if success {
@@ -352,7 +354,7 @@ func writeClassadOutputAndBail(exitCode int, resultAds []*classads.ClassAd) {
 	}
 
 	// We'll exit 3 in here if anything fails to write the file
-	writeOutfile(resultAds, outputFile)
+	writeOutfile(nil, resultAds, outputFile)
 
 	log.Errorln("Failure with pelican plugin. Exiting...")
 	os.Exit(exitCode)
@@ -364,7 +366,9 @@ func writeClassadOutputAndBail(exitCode int, resultAds []*classads.ClassAd) {
 func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTransfer, results chan<- *classads.ClassAd) (err error) {
 	te := client.NewTransferEngine(ctx)
 	defer func() {
-		err = te.Shutdown()
+		if shutdownErr := te.Shutdown(); shutdownErr != nil && err == nil {
+			err = shutdownErr
+		}
 	}()
 	tc, err := te.NewClient(client.WithAcquireToken(false))
 	if err != nil {
@@ -486,7 +490,24 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 // true: all result ads indicate transfer success
 // false: at least one result ad has failed
 // As well as a boolean letting us know if errors are retryable
-func writeOutfile(resultAds []*classads.ClassAd, outputFile *os.File) (bool, bool) {
+func writeOutfile(err error, resultAds []*classads.ClassAd, outputFile *os.File) (bool, bool) {
+
+	if err != nil {
+		alreadyFailed := false
+		for _, ad := range resultAds {
+			failed, getErr := ad.Get("TransferSuccess")
+			if getErr != nil || failed.(bool) {
+				alreadyFailed = true
+				break
+			}
+		}
+		if !alreadyFailed {
+			resultAd := classads.NewClassAd()
+			resultAd.Set("TransferSuccess", false)
+			resultAd.Set("TransferError", err.Error())
+			resultAds = append(resultAds, resultAd)
+		}
+	}
 	success := true
 	retryable := false
 	for _, resultAd := range resultAds {
