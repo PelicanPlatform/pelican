@@ -324,6 +324,7 @@ func hasPort(host string) bool {
 func newTransferResults(job *TransferJob) TransferResults {
 	return TransferResults{
 		job:      job,
+		JobId:    job.uuid,
 		Attempts: make([]TransferResult, 0),
 	}
 }
@@ -667,6 +668,12 @@ func (te *TransferEngine) runJobHandler() error {
 // The returned object can be further customized as desired.
 // This function does not "submit" the job for execution.
 func (tc *TransferClient) NewTransferJob(remoteUrl *url.URL, localPath string, upload bool, recursive bool, options ...TransferOption) (tj *TransferJob, err error) {
+
+	id, err := uuid.NewV7()
+	if err != nil {
+		return
+	}
+
 	copyUrl := *remoteUrl // Make a copy of the input URL to avoid concurrent issues.
 	tj = &TransferJob{
 		recursive:     recursive,
@@ -676,6 +683,7 @@ func (tc *TransferClient) NewTransferJob(remoteUrl *url.URL, localPath string, u
 		skipAcquire:   tc.skipAcquire,
 		tokenLocation: tc.tokenLocation,
 		upload:        upload,
+		uuid:          id,
 	}
 	tj.ctx, tj.cancel = context.WithCancel(tc.ctx)
 
@@ -982,6 +990,7 @@ func runTransferWorker(ctx context.Context, workChan <-chan *clientTransferFile,
 				results <- &clientTransferResults{
 					id: file.uuid,
 					results: TransferResults{
+						JobId: file.jobId,
 						Error: file.file.ctx.Err(),
 					},
 				}
@@ -991,6 +1000,7 @@ func runTransferWorker(ctx context.Context, workChan <-chan *clientTransferFile,
 				results <- &clientTransferResults{
 					id: file.uuid,
 					results: TransferResults{
+						JobId: file.jobId,
 						Error: file.file.err,
 					},
 				}
@@ -1003,10 +1013,10 @@ func runTransferWorker(ctx context.Context, workChan <-chan *clientTransferFile,
 			} else {
 				transferResults, err = downloadObject(file.file)
 			}
+			transferResults.JobId = file.jobId
 			if err != nil {
 				log.Errorf("Error when attempting to transfer object %s for client %s", file.file.remoteURL, file.uuid.String())
 				transferResults = newTransferResults(file.file.job)
-				transferResults.JobId = file.jobId
 				transferResults.Error = err
 			} else if transferResults.Error == nil {
 				xferErrors := NewTransferErrors()
