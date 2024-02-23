@@ -131,7 +131,7 @@ func TestXrootDCacheConfig(t *testing.T) {
 		content, err := io.ReadAll(file)
 		assert.NoError(t, err)
 		assert.NotContains(t, string(content), "xrootd.fslib throttle default")
-		assert.NotContains(t, string(content), "throttle.throttle concurrency 10")
+		assert.NotContains(t, string(content), "throttle.throttle concurrency")
 		viper.Reset()
 
 	})
