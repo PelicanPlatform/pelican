@@ -867,26 +867,26 @@ func TestRedirects(t *testing.T) {
 		c.Request = req
 
 		// test both APIs when in cache mode
-		shortcutMiddleware("cache")(c)
+		ShortcutMiddleware("cache")(c)
 		expectedPath := "/api/v1.0/director/origin/foo/bar"
 		assert.Equal(t, expectedPath, c.Request.URL.Path)
 
 		req = httptest.NewRequest("GET", "/api/v1.0/director/object/foo/bar", nil)
 		c.Request = req
-		shortcutMiddleware("cache")(c)
+		ShortcutMiddleware("cache")(c)
 		expectedPath = "/api/v1.0/director/object/foo/bar"
 		assert.Equal(t, expectedPath, c.Request.URL.Path)
 
 		// test both APIs when in origin mode
 		req = httptest.NewRequest("GET", "/api/v1.0/director/origin/foo/bar", nil)
 		c.Request = req
-		shortcutMiddleware("origin")(c)
+		ShortcutMiddleware("origin")(c)
 		expectedPath = "/api/v1.0/director/origin/foo/bar"
 		assert.Equal(t, expectedPath, c.Request.URL.Path)
 
 		req = httptest.NewRequest("GET", "/api/v1.0/director/object/foo/bar", nil)
 		c.Request = req
-		shortcutMiddleware("origin")(c)
+		ShortcutMiddleware("origin")(c)
 		expectedPath = "/api/v1.0/director/object/foo/bar"
 		assert.Equal(t, expectedPath, c.Request.URL.Path)
 
@@ -894,21 +894,21 @@ func TestRedirects(t *testing.T) {
 		// test that we get an origin at the base path when in origin mode
 		req = httptest.NewRequest("GET", "/foo/bar", nil)
 		c.Request = req
-		shortcutMiddleware("origin")(c)
+		ShortcutMiddleware("origin")(c)
 		expectedPath = "/api/v1.0/director/origin/foo/bar"
 		assert.Equal(t, expectedPath, c.Request.URL.Path)
 
 		// test that we get a cache at the base path when in cache mode
 		req = httptest.NewRequest("GET", "/api/v1.0/director/object/foo/bar", nil)
 		c.Request = req
-		shortcutMiddleware("cache")(c)
+		ShortcutMiddleware("cache")(c)
 		expectedPath = "/api/v1.0/director/object/foo/bar"
 		assert.Equal(t, expectedPath, c.Request.URL.Path)
 
 		// test a PUT request always goes to the origin endpoint
 		req = httptest.NewRequest("PUT", "/foo/bar", nil)
 		c.Request = req
-		shortcutMiddleware("cache")(c)
+		ShortcutMiddleware("cache")(c)
 		expectedPath = "/api/v1.0/director/origin/foo/bar"
 		assert.Equal(t, expectedPath, c.Request.URL.Path)
 
@@ -922,7 +922,7 @@ func TestRedirects(t *testing.T) {
 		req = httptest.NewRequest("GET", "/foo/bar", nil)
 		c.Request = req
 		c.Request.Header.Set("Host", "origin-hostname.com")
-		shortcutMiddleware("cache")(c)
+		ShortcutMiddleware("cache")(c)
 		expectedPath = "/api/v1.0/director/origin/foo/bar"
 		assert.Equal(t, expectedPath, c.Request.URL.Path)
 
@@ -930,7 +930,7 @@ func TestRedirects(t *testing.T) {
 		req = httptest.NewRequest("GET", "/foo/bar", nil)
 		c.Request = req
 		c.Request.Header.Set("X-Forwarded-Host", "origin-hostname.com")
-		shortcutMiddleware("cache")(c)
+		ShortcutMiddleware("cache")(c)
 		expectedPath = "/api/v1.0/director/origin/foo/bar"
 		assert.Equal(t, expectedPath, c.Request.URL.Path)
 

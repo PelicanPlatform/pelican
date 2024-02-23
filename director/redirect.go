@@ -394,7 +394,7 @@ func checkHostnameRedirects(c *gin.Context, incomingHost string) {
 
 // Middleware sends GET /foo/bar to the RedirectToCache function, as if the
 // original request had been made to /api/v1.0/director/object/foo/bar
-func shortcutMiddleware(defaultResponse string) gin.HandlerFunc {
+func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// If this is a request for getting public key, don't modify the path
 		// If this is a request to the Prometheus API, don't modify the path
@@ -723,8 +723,8 @@ func getPrefixByPath(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, res)
 }
 
-func RegisterDirector(ctx context.Context, router *gin.RouterGroup, defaultResponse string) {
-	directorAPIV1 := router.Group("/api/v1.0/director", shortcutMiddleware(defaultResponse))
+func RegisterDirector(ctx context.Context, router *gin.RouterGroup) {
+	directorAPIV1 := router.Group("/api/v1.0/director")
 	{
 		// Establish the routes used for cache/origin redirection
 		directorAPIV1.GET("/object/*any", redirectToCache)

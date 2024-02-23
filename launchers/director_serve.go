@@ -61,7 +61,8 @@ func DirectorServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 	rootGroup := engine.Group("/")
 	director.RegisterDirectorAuth(rootGroup)
 	director.RegisterDirectorWebAPI(rootGroup)
-	director.RegisterDirector(ctx, rootGroup, defaultResponse)
+	engine.Use(director.ShortcutMiddleware(defaultResponse))
+	director.RegisterDirector(ctx, rootGroup)
 
 	return nil
 }
