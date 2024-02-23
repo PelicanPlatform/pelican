@@ -625,6 +625,15 @@ type: bool
 default: false
 components: ["cache"]
 ---
+name: Cache.Concurrency
+description: >-
+  This value represents the maximum number of connections to a cache for Xrootd throttling.
+  When this value is set, it enables the xrootd throttling plugin and will set the maximum
+  number of connections to this value.
+type: int
+default: none
+components: ["cache"]
+---
 ############################
 #  Director-level configs  #
 ############################

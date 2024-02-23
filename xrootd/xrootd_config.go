@@ -102,6 +102,7 @@ type (
 		ExportLocation string
 		DataLocation   string
 		PSSOrigin      string
+		Concurrency    int
 	}
 
 	XrootdOptions struct {

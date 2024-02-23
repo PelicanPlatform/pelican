@@ -23,6 +23,7 @@ package xrootd
 import (
 	"bytes"
 	"context"
+	"io"
 	"io/fs"
 	"os"
 	"path"
@@ -39,7 +40,24 @@ import (
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 )
+
+
+type xrootdTest struct {
+	T   *testing.T
+	ctx context.Context
+}
+
+func (x *xrootdTest) setup() {
+	viper.Reset()
+	config.InitConfig()
+	var cancel context.CancelFunc
+	var egrp *errgroup.Group
+	x.ctx, cancel, egrp = test_utils.TestContext(context.Background(), x.T)
+	defer func() { require.NoError(x.T, egrp.Wait()) }()
+	defer cancel()
+}
 
 func TestXrootDOriginConfig(t *testing.T) {
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
@@ -61,10 +79,63 @@ func TestXrootDCacheConfig(t *testing.T) {
 
 	dirname := t.TempDir()
 	viper.Reset()
+	config.InitConfig()
 	viper.Set("Xrootd.RunLocation", dirname)
 	configPath, err := ConfigXrootd(ctx, false)
 	require.NoError(t, err)
 	assert.NotNil(t, configPath)
+
+	t.Run("TestCacheThrottlePluginEnabled", func(t *testing.T) {
+		xrootd := xrootdTest{T: t}
+		xrootd.setup()
+
+		// Set our config
+		viper.Set("Cache.Concurrency", 10)
+		dirname := t.TempDir()
+		viper.Set("Xrootd.RunLocation", dirname)
+
+		// Generate the xrootd config
+		configPath, err := ConfigXrootd(ctx, false)
+		require.NoError(t, err)
+		assert.NotNil(t, configPath)
+
+		// Verify the output
+		file, err := os.Open(configPath)
+		assert.NoError(t, err)
+		defer file.Close()
+
+		content, err := io.ReadAll(file)
+		assert.NoError(t, err)
+		assert.Contains(t, string(content), "xrootd.fslib throttle default")
+		assert.Contains(t, string(content), "throttle.throttle concurrency 10")
+		viper.Reset()
+	})
+
+	t.Run("TestCacheThrottlePluginDisabled", func(t *testing.T) {
+		xrootd := xrootdTest{T: t}
+		xrootd.setup()
+
+		// Set our config
+		dirname := t.TempDir()
+		viper.Set("Xrootd.RunLocation", dirname)
+
+		// Generate the xrootd config
+		configPath, err := ConfigXrootd(ctx, false)
+		require.NoError(t, err)
+		assert.NotNil(t, configPath)
+
+		// Verify the output
+		file, err := os.Open(configPath)
+		assert.NoError(t, err)
+		defer file.Close()
+
+		content, err := io.ReadAll(file)
+		assert.NoError(t, err)
+		assert.NotContains(t, string(content), "xrootd.fslib throttle default")
+		assert.NotContains(t, string(content), "throttle.throttle concurrency 10")
+		viper.Reset()
+
+	})
 }
 
 func TestUpdateAuth(t *testing.T) {
