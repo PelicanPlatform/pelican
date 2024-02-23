@@ -8,6 +8,7 @@ import (
 
 type Config struct {
 	Cache struct {
+		Concurrency int
 		DataLocation string
 		EnableVoms bool
 		ExportLocation string
@@ -225,6 +226,7 @@ type Config struct {
 
 type configWithType struct {
 	Cache struct {
+		Concurrency struct { Type string; Value int }
 		DataLocation struct { Type string; Value string }
 		EnableVoms struct { Type string; Value bool }
 		ExportLocation struct { Type string; Value string }

@@ -170,6 +170,7 @@ var (
 )
 
 var (
+	Cache_Concurrency = IntParam{"Cache.Concurrency"}
 	Cache_Port = IntParam{"Cache.Port"}
 	Client_MinimumDownloadSpeed = IntParam{"Client.MinimumDownloadSpeed"}
 	Client_SlowTransferRampupTime = IntParam{"Client.SlowTransferRampupTime"}
