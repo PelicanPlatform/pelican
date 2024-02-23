@@ -34,6 +34,7 @@ func TestListServers(t *testing.T) {
 		Type:      mockOriginServerAd.Type,
 		Latitude:  mockOriginServerAd.Latitude,
 		Longitude: mockOriginServerAd.Longitude,
+		Status:    HealthStatusUnknown,
 	}
 	mocklistCacheRes := listServerResponse{
 		Name:      mockCacheServerAd.Name,
@@ -43,6 +44,7 @@ func TestListServers(t *testing.T) {
 		Type:      mockCacheServerAd.Type,
 		Latitude:  mockCacheServerAd.Latitude,
 		Longitude: mockCacheServerAd.Longitude,
+		Status:    HealthStatusUnknown,
 	}
 
 	t.Run("query-origin", func(t *testing.T) {
