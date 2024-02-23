@@ -704,8 +704,8 @@ func listNamespacesV2(ctx *gin.Context) {
 
 func getPrefixByPath(ctx *gin.Context) {
 	pathParam := ctx.Param("path")
-	if pathParam == "" {
-		ctx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Bad request. Path is empty"})
+	if pathParam == "" || pathParam == "/" {
+		ctx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Bad request. Path is empty or '/' "})
 		return
 	}
 	namespaceKeysMutex.Lock()
