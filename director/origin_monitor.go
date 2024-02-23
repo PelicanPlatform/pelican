@@ -172,6 +172,15 @@ func LaunchPeriodicDirectorTest(ctx context.Context, originAd common.ServerAd) {
 			ok, err := fileTests.RunTests(ctx, originUrl, originUrl, "", utils.DirectorFileTest)
 			if ok && err == nil {
 				log.Debugln("Director file transfer test cycle succeeded at", time.Now().Format(time.UnixDate), " for origin: ", originUrl)
+				func() {
+					healthTestUtilsMutex.Lock()
+					defer healthTestUtilsMutex.Unlock()
+					if existingUtil, ok := healthTestUtils[originAd]; ok {
+						existingUtil.Status = HealthStatusOK
+					} else {
+						log.Debugln("HealthTestUtil missing for origin: ", originUrl, " Failed to update internal status")
+					}
+				}()
 				if err := reportStatusToOrigin(ctx, originWebUrl, "ok", "Director test cycle succeeded at "+time.Now().Format(time.RFC3339)); err != nil {
 					log.Warningln("Failed to report director test result to origin:", err)
 					metrics.PelicanDirectorFileTransferTestsRuns.With(
@@ -188,6 +197,15 @@ func LaunchPeriodicDirectorTest(ctx context.Context, originAd common.ServerAd) {
 				}
 			} else {
 				log.Warningln("Director file transfer test cycle failed for origin: ", originUrl, " ", err)
+				func() {
+					healthTestUtilsMutex.Lock()
+					defer healthTestUtilsMutex.Unlock()
+					if existingUtil, ok := healthTestUtils[originAd]; ok {
+						existingUtil.Status = HealthStatusError
+					} else {
+						log.Debugln("HealthTestUtil missing for origin: ", originUrl, " Failed to update internal status")
+					}
+				}()
 				if err := reportStatusToOrigin(ctx, originWebUrl, "error", "Director file transfer test cycle failed for origin: "+originUrl+" "+err.Error()); err != nil {
 					log.Warningln("Failed to report director test result to origin: ", err)
 					metrics.PelicanDirectorFileTransferTestsRuns.With(
