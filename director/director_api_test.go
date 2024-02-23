@@ -71,7 +71,7 @@ func TestListNamespaces(t *testing.T) {
 
 	t.Run("empty-entry", func(t *testing.T) {
 		setup()
-		ns := ListNamespacesFromOrigins()
+		ns := listNamespacesFromOrigins()
 
 		// Initially there should be 0 namespaces registered
 		assert.Equal(t, 0, len(ns), "List is not empty for empty namespace cache.")
@@ -79,7 +79,7 @@ func TestListNamespaces(t *testing.T) {
 	t.Run("one-origin-namespace-entry", func(t *testing.T) {
 		setup()
 		serverAds.Set(mockOriginServerAd, mockNamespaceAds(1, "origin1"), ttlcache.DefaultTTL)
-		ns := ListNamespacesFromOrigins()
+		ns := listNamespacesFromOrigins()
 
 		// Only one entry added
 		assert.Equal(t, 1, len(ns), "List has length not equal to 1 for namespace cache with 1 entry.")
@@ -88,7 +88,7 @@ func TestListNamespaces(t *testing.T) {
 	t.Run("multiple-origin-namespace-entries-from-same-origin", func(t *testing.T) {
 		setup()
 		serverAds.Set(mockOriginServerAd, mockNamespaceAds(10, "origin1"), ttlcache.DefaultTTL)
-		ns := ListNamespacesFromOrigins()
+		ns := listNamespacesFromOrigins()
 
 		assert.Equal(t, 10, len(ns), "List has length not equal to 10 for namespace cache with 10 entries.")
 		assert.True(t, namespaceAdContainsPath(ns, mockPathPreix+"origin1/"+fmt.Sprint(5)), "Returned namespace path does not match what's added")
@@ -103,7 +103,7 @@ func TestListNamespaces(t *testing.T) {
 		mockOriginServerAd.Name = "test-origin-server-2"
 
 		serverAds.Set(mockOriginServerAd, mockNamespaceAds(10, "origin2"), ttlcache.DefaultTTL)
-		ns := ListNamespacesFromOrigins()
+		ns := listNamespacesFromOrigins()
 
 		assert.Equal(t, 20, len(ns), "List has length not equal to 10 for namespace cache with 10 entries.")
 		assert.True(t, namespaceAdContainsPath(ns, mockPathPreix+"origin1/"+fmt.Sprint(5)), "Returned namespace path does not match what's added")
@@ -113,7 +113,7 @@ func TestListNamespaces(t *testing.T) {
 	t.Run("one-cache-namespace-entry", func(t *testing.T) {
 		setup()
 		serverAds.Set(mockCacheServerAd, mockNamespaceAds(1, "cache1"), ttlcache.DefaultTTL)
-		ns := ListNamespacesFromOrigins()
+		ns := listNamespacesFromOrigins()
 
 		// Should not show namespace from cache server
 		assert.Equal(t, 0, len(ns), "List is not empty for namespace cache with entry from cache server.")
@@ -128,7 +128,7 @@ func TestListServerAds(t *testing.T) {
 			defer serverAdMutex.Unlock()
 			serverAds.DeleteAll()
 		}()
-		ads := ListServerAds([]common.ServerType{common.OriginType, common.CacheType})
+		ads := listServerAds([]common.ServerType{common.OriginType, common.CacheType})
 		assert.Equal(t, 0, len(ads))
 	})
 
@@ -140,14 +140,14 @@ func TestListServerAds(t *testing.T) {
 		}()
 		serverAds.Set(mockOriginServerAd, []common.NamespaceAdV2{}, ttlcache.DefaultTTL)
 		serverAds.Set(mockCacheServerAd, []common.NamespaceAdV2{}, ttlcache.DefaultTTL)
-		adsAll := ListServerAds([]common.ServerType{common.OriginType, common.CacheType})
+		adsAll := listServerAds([]common.ServerType{common.OriginType, common.CacheType})
 		assert.Equal(t, 2, len(adsAll))
 
-		adsOrigin := ListServerAds([]common.ServerType{common.OriginType})
+		adsOrigin := listServerAds([]common.ServerType{common.OriginType})
 		require.Equal(t, 1, len(adsOrigin))
 		assert.True(t, adsOrigin[0] == mockOriginServerAd)
 
-		adsCache := ListServerAds([]common.ServerType{common.CacheType})
+		adsCache := listServerAds([]common.ServerType{common.CacheType})
 		require.Equal(t, 1, len(adsCache))
 		assert.True(t, adsCache[0] == mockCacheServerAd)
 	})

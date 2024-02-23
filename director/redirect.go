@@ -200,7 +200,7 @@ func redirectToCache(ginCtx *gin.Context) {
 
 	authzBearerEscaped := getAuthzEscaped(ginCtx.Request)
 
-	namespaceAd, originAds, cacheAds := GetAdsForPath(reqPath)
+	namespaceAd, originAds, cacheAds := getAdsForPath(reqPath)
 	// if GetAdsForPath doesn't find any ads because the prefix doesn't exist, we should
 	// report the lack of path first -- this is most important for the user because it tells them
 	// they're trying to get an object that simply doesn't exist
@@ -221,7 +221,7 @@ func redirectToCache(ginCtx *gin.Context) {
 			return
 		}
 	} else {
-		cacheAds, err = SortServers(ipAddr, cacheAds)
+		cacheAds, err = sortServers(ipAddr, cacheAds)
 		if err != nil {
 			ginCtx.String(http.StatusInternalServerError, "Failed to determine server ordering")
 			return
@@ -307,7 +307,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 
 	authzBearerEscaped := getAuthzEscaped(ginCtx.Request)
 
-	namespaceAd, originAds, _ := GetAdsForPath(reqPath)
+	namespaceAd, originAds, _ := getAdsForPath(reqPath)
 	// if GetAdsForPath doesn't find any ads because the prefix doesn't exist, we should
 	// report the lack of path first -- this is most important for the user because it tells them
 	// they're trying to get an object that simply doesn't exist
@@ -321,7 +321,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		return
 	}
 
-	originAds, err = SortServers(ipAddr, originAds)
+	originAds, err = sortServers(ipAddr, originAds)
 	if err != nil {
 		ginCtx.String(http.StatusInternalServerError, "Failed to determine origin ordering")
 		return
@@ -553,7 +553,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType common.S
 		EnableFallbackRead: adV2.Caps.FallBackRead,
 	}
 
-	RecordAd(sAd, &adV2.Namespaces)
+	recordAd(sAd, &adV2.Namespaces)
 
 	// Start director periodic test of origin's health status if origin AD
 	// has WebURL field AND it's not already been registered
@@ -690,7 +690,7 @@ func registerCache(ctx context.Context, gctx *gin.Context) {
 }
 
 func listNamespacesV1(ctx *gin.Context) {
-	namespaceAdsV2 := ListNamespacesFromOrigins()
+	namespaceAdsV2 := listNamespacesFromOrigins()
 
 	namespaceAdsV1 := convertNamespaceAdsV2ToV1(namespaceAdsV2)
 
@@ -698,7 +698,7 @@ func listNamespacesV1(ctx *gin.Context) {
 }
 
 func listNamespacesV2(ctx *gin.Context) {
-	namespacesAdsV2 := ListNamespacesFromOrigins()
+	namespacesAdsV2 := listNamespacesFromOrigins()
 	ctx.JSON(http.StatusOK, namespacesAdsV2)
 }
 
@@ -710,7 +710,7 @@ func getPrefixByPath(ctx *gin.Context) {
 	namespaceKeysMutex.Lock()
 	defer namespaceKeysMutex.Unlock()
 
-	originNs, _, _ := GetAdsForPath(pathParam)
+	originNs, _, _ := getAdsForPath(pathParam)
 
 	res := common.GetPrefixByPathRes{Prefix: originNs.Path}
 	ctx.JSON(http.StatusOK, res)

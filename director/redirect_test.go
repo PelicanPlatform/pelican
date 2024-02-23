@@ -231,7 +231,7 @@ func TestDirectorRegistration(t *testing.T) {
 		// Check to see that the code exits with status code 200 after given it a good token
 		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
 
-		namaspaceADs := ListNamespacesFromOrigins()
+		namaspaceADs := listNamespacesFromOrigins()
 		// If the origin was successfully registed at director, we should be able to find it in director's originAds
 		assert.True(t, NamespaceAdContainsPath(namaspaceADs, "/foo/bar"), "Coudln't find namespace in the director cache.")
 		teardown()
@@ -269,7 +269,7 @@ func TestDirectorRegistration(t *testing.T) {
 		// Check to see that the code exits with status code 200 after given it a good token
 		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
 
-		namaspaceADs := ListNamespacesFromOrigins()
+		namaspaceADs := listNamespacesFromOrigins()
 		// If the origin was successfully registed at director, we should be able to find it in director's originAds
 		assert.True(t, NamespaceAdContainsPath(namaspaceADs, "/foo/bar"), "Coudln't find namespace in the director cache.")
 		teardown()
@@ -303,7 +303,7 @@ func TestDirectorRegistration(t *testing.T) {
 		body, _ := io.ReadAll(w.Result().Body)
 		assert.Equal(t, `{"error":"Authorization token verification failed"}`, string(body), "Failure wasn't because token verification failed")
 
-		namaspaceADs := ListNamespacesFromOrigins()
+		namaspaceADs := listNamespacesFromOrigins()
 		assert.False(t, NamespaceAdContainsPath(namaspaceADs, "/foo/bar"), "Found namespace in the director cache even if the token validation failed.")
 		teardown()
 	})
@@ -338,7 +338,7 @@ func TestDirectorRegistration(t *testing.T) {
 		body, _ := io.ReadAll(w.Result().Body)
 		assert.Equal(t, `{"error":"Authorization token verification failed"}`, string(body), "Failure wasn't because token verification failed")
 
-		namaspaceADs := ListNamespacesFromOrigins()
+		namaspaceADs := listNamespacesFromOrigins()
 		assert.False(t, NamespaceAdContainsPath(namaspaceADs, "/foo/bar"), "Found namespace in the director cache even if the token validation failed.")
 		teardown()
 	})

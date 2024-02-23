@@ -150,11 +150,11 @@ func AdvertiseOSDF() error {
 	}
 
 	for originAd, namespacesSlice := range originAdMap {
-		RecordAd(originAd, &namespacesSlice)
+		recordAd(originAd, &namespacesSlice)
 	}
 
 	for cacheAd, namespacesSlice := range cacheAdMap {
-		RecordAd(cacheAd, &namespacesSlice)
+		recordAd(cacheAd, &namespacesSlice)
 	}
 
 	return nil
