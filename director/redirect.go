@@ -702,6 +702,20 @@ func listNamespacesV2(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, namespacesAdsV2)
 }
 
+func getPrefixByPath(ctx *gin.Context) {
+	pathParam := ctx.Param("path")
+	if pathParam == "" {
+		ctx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Bad request. Path is empty"})
+	}
+	namespaceKeysMutex.Lock()
+	defer namespaceKeysMutex.Unlock()
+
+	originNs, _, _ := GetAdsForPath(pathParam)
+
+	res := common.GetPrefixByPathRes{Prefix: originNs.Path}
+	ctx.JSON(http.StatusOK, res)
+}
+
 func RegisterDirector(ctx context.Context, router *gin.RouterGroup, defaultResponse string) {
 	directorAPIV1 := router.Group("/api/v1.0/director", shortcutMiddleware(defaultResponse))
 	{
@@ -712,6 +726,8 @@ func RegisterDirector(ctx context.Context, router *gin.RouterGroup, defaultRespo
 		directorAPIV1.POST("/registerOrigin", func(gctx *gin.Context) { registerOrigin(ctx, gctx) })
 		directorAPIV1.POST("/registerCache", func(gctx *gin.Context) { registerCache(ctx, gctx) })
 		directorAPIV1.GET("/listNamespaces", listNamespacesV1)
+		directorAPIV1.GET("/namespaces/prefix/*path", getPrefixByPath)
+
 		// In the foreseeable feature, director will scrape all servers in Pelican ecosystem (including registry)
 		// so that director can be our point of contact for collecting system-level metrics.
 		// Rename the endpoint to reflect such plan.
