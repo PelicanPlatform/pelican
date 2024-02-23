@@ -64,6 +64,7 @@ type (
 
 const (
 	HealthStatusUnknown HealthTestStatus = "Unknown"
+	HealthStatusInit    HealthTestStatus = "Initializing"
 	HealthStatusOK      HealthTestStatus = "OK"
 	HealthStatusError   HealthTestStatus = "Error"
 )
@@ -587,6 +588,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType common.S
 							Cancel:        cancel,
 							ErrGrp:        errgrp,
 							ErrGrpContext: errgrpCtx,
+							Status:        HealthStatusInit,
 						}
 						errgrp.Go(func() error {
 							LaunchPeriodicDirectorTest(cancelCtx, sAd)
