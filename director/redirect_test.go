@@ -152,7 +152,7 @@ func TestDirectorRegistration(t *testing.T) {
 	}
 
 	setupRequest := func(c *gin.Context, r *gin.Engine, bodyByt []byte, token string) {
-		r.POST("/", func(gctx *gin.Context) { RegisterOrigin(ctx, gctx) })
+		r.POST("/", func(gctx *gin.Context) { registerOrigin(ctx, gctx) })
 		c.Request, _ = http.NewRequest(http.MethodPost, "/", bytes.NewBuffer(bodyByt))
 		c.Request.Header.Set("Authorization", "Bearer "+token)
 		c.Request.Header.Set("Content-Type", "application/json")
@@ -163,7 +163,7 @@ func TestDirectorRegistration(t *testing.T) {
 
 	// Configure the request context and Gin router to generate a redirect
 	setupRedirect := func(c *gin.Context, r *gin.Engine, object, token string) {
-		r.GET("/api/v1.0/director/origin/*any", RedirectToOrigin)
+		r.GET("/api/v1.0/director/origin/*any", redirectToOrigin)
 		c.Request, _ = http.NewRequest(http.MethodGet, "/api/v1.0/director/origin"+object, nil)
 		c.Request.Header.Set("X-Real-Ip", "1.1.1.1")
 		c.Request.Header.Set("Authorization", "Bearer "+token)
@@ -674,7 +674,7 @@ func TestDiscoverOriginCache(t *testing.T) {
 	}
 
 	r := gin.Default()
-	r.GET("/test", DiscoverOriginCache)
+	r.GET("/test", discoverOriginCache)
 
 	t.Run("no-token-should-give-401", func(t *testing.T) {
 		req, err := http.NewRequest(http.MethodGet, "/test", nil)
@@ -867,26 +867,26 @@ func TestRedirects(t *testing.T) {
 		c.Request = req
 
 		// test both APIs when in cache mode
-		ShortcutMiddleware("cache")(c)
+		shortcutMiddleware("cache")(c)
 		expectedPath := "/api/v1.0/director/origin/foo/bar"
 		assert.Equal(t, expectedPath, c.Request.URL.Path)
 
 		req = httptest.NewRequest("GET", "/api/v1.0/director/object/foo/bar", nil)
 		c.Request = req
-		ShortcutMiddleware("cache")(c)
+		shortcutMiddleware("cache")(c)
 		expectedPath = "/api/v1.0/director/object/foo/bar"
 		assert.Equal(t, expectedPath, c.Request.URL.Path)
 
 		// test both APIs when in origin mode
 		req = httptest.NewRequest("GET", "/api/v1.0/director/origin/foo/bar", nil)
 		c.Request = req
-		ShortcutMiddleware("origin")(c)
+		shortcutMiddleware("origin")(c)
 		expectedPath = "/api/v1.0/director/origin/foo/bar"
 		assert.Equal(t, expectedPath, c.Request.URL.Path)
 
 		req = httptest.NewRequest("GET", "/api/v1.0/director/object/foo/bar", nil)
 		c.Request = req
-		ShortcutMiddleware("origin")(c)
+		shortcutMiddleware("origin")(c)
 		expectedPath = "/api/v1.0/director/object/foo/bar"
 		assert.Equal(t, expectedPath, c.Request.URL.Path)
 
@@ -894,21 +894,21 @@ func TestRedirects(t *testing.T) {
 		// test that we get an origin at the base path when in origin mode
 		req = httptest.NewRequest("GET", "/foo/bar", nil)
 		c.Request = req
-		ShortcutMiddleware("origin")(c)
+		shortcutMiddleware("origin")(c)
 		expectedPath = "/api/v1.0/director/origin/foo/bar"
 		assert.Equal(t, expectedPath, c.Request.URL.Path)
 
 		// test that we get a cache at the base path when in cache mode
 		req = httptest.NewRequest("GET", "/api/v1.0/director/object/foo/bar", nil)
 		c.Request = req
-		ShortcutMiddleware("cache")(c)
+		shortcutMiddleware("cache")(c)
 		expectedPath = "/api/v1.0/director/object/foo/bar"
 		assert.Equal(t, expectedPath, c.Request.URL.Path)
 
 		// test a PUT request always goes to the origin endpoint
 		req = httptest.NewRequest("PUT", "/foo/bar", nil)
 		c.Request = req
-		ShortcutMiddleware("cache")(c)
+		shortcutMiddleware("cache")(c)
 		expectedPath = "/api/v1.0/director/origin/foo/bar"
 		assert.Equal(t, expectedPath, c.Request.URL.Path)
 
@@ -922,7 +922,7 @@ func TestRedirects(t *testing.T) {
 		req = httptest.NewRequest("GET", "/foo/bar", nil)
 		c.Request = req
 		c.Request.Header.Set("Host", "origin-hostname.com")
-		ShortcutMiddleware("cache")(c)
+		shortcutMiddleware("cache")(c)
 		expectedPath = "/api/v1.0/director/origin/foo/bar"
 		assert.Equal(t, expectedPath, c.Request.URL.Path)
 
@@ -930,7 +930,7 @@ func TestRedirects(t *testing.T) {
 		req = httptest.NewRequest("GET", "/foo/bar", nil)
 		c.Request = req
 		c.Request.Header.Set("X-Forwarded-Host", "origin-hostname.com")
-		ShortcutMiddleware("cache")(c)
+		shortcutMiddleware("cache")(c)
 		expectedPath = "/api/v1.0/director/origin/foo/bar"
 		assert.Equal(t, expectedPath, c.Request.URL.Path)
 

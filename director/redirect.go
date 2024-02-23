@@ -72,12 +72,6 @@ var (
 	originStatUtilsMutex = sync.RWMutex{}
 )
 
-// The endpoint for director Prometheus instance to discover Pelican servers
-// for scraping (origins/caches).
-//
-// TODO: Add registry server as well to this endpoint when we need to scrape from it
-const DirectorServerDiscoveryEndpoint = "/api/v1.0/director/discoverServers"
-
 func getRedirectURL(reqPath string, ad common.ServerAd, requiresAuth bool) (redirectURL url.URL) {
 	var serverURL url.URL
 	if requiresAuth {
@@ -188,7 +182,7 @@ func versionCompatCheck(ginCtx *gin.Context) error {
 	return nil
 }
 
-func RedirectToCache(ginCtx *gin.Context) {
+func redirectToCache(ginCtx *gin.Context) {
 	err := versionCompatCheck(ginCtx)
 	if err != nil {
 		log.Debugf("A version incompatibility was encountered while redirecting to a cache and no response was served: %v", err)
@@ -293,7 +287,7 @@ func RedirectToCache(ginCtx *gin.Context) {
 	ginCtx.Redirect(307, getFinalRedirectURL(redirectURL, authzBearerEscaped))
 }
 
-func RedirectToOrigin(ginCtx *gin.Context) {
+func redirectToOrigin(ginCtx *gin.Context) {
 	err := versionCompatCheck(ginCtx)
 	if err != nil {
 		log.Debugf("A version incompatibility was encountered while redirecting to an origin and no response was served: %v", err)
@@ -378,7 +372,7 @@ func checkHostnameRedirects(c *gin.Context, incomingHost string) {
 		if hostname == incomingHost {
 			if !strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/director/") {
 				c.Request.URL.Path = "/api/v1.0/director/origin" + c.Request.URL.Path
-				RedirectToOrigin(c)
+				redirectToOrigin(c)
 				c.Abort()
 				log.Debugln("Director is serving an origin based on incoming 'Host' header value of '" + hostname + "'")
 				return
@@ -389,7 +383,7 @@ func checkHostnameRedirects(c *gin.Context, incomingHost string) {
 		if hostname == incomingHost {
 			if !strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/director/") {
 				c.Request.URL.Path = "/api/v1.0/director/object" + c.Request.URL.Path
-				RedirectToCache(c)
+				redirectToCache(c)
 				c.Abort()
 				log.Debugln("Director is serving a cache based on incoming 'Host' header value of '" + hostname + "'")
 				return
@@ -400,7 +394,7 @@ func checkHostnameRedirects(c *gin.Context, incomingHost string) {
 
 // Middleware sends GET /foo/bar to the RedirectToCache function, as if the
 // original request had been made to /api/v1.0/director/object/foo/bar
-func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
+func shortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// If this is a request for getting public key, don't modify the path
 		// If this is a request to the Prometheus API, don't modify the path
@@ -412,7 +406,7 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 		// Regardless of the remainder of the settings, we currently handle a PUT as a query to the origin endpoint
 		if c.Request.Method == "PUT" {
 			c.Request.URL.Path = "/api/v1.0/director/origin" + c.Request.URL.Path
-			RedirectToOrigin(c)
+			redirectToOrigin(c)
 			c.Abort()
 			return
 		}
@@ -434,7 +428,7 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 		if defaultResponse == "cache" {
 			if !strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/director/") {
 				c.Request.URL.Path = "/api/v1.0/director/object" + c.Request.URL.Path
-				RedirectToCache(c)
+				redirectToCache(c)
 				c.Abort()
 				return
 			}
@@ -444,7 +438,7 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 		} else if defaultResponse == "origin" {
 			if !strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/director/") {
 				c.Request.URL.Path = "/api/v1.0/director/origin" + c.Request.URL.Path
-				RedirectToOrigin(c)
+				redirectToOrigin(c)
 				c.Abort()
 				return
 			}
@@ -647,7 +641,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType common.S
 
 // Return a list of registered origins and caches in Prometheus HTTP SD format
 // for director's Prometheus service discovery
-func DiscoverOriginCache(ctx *gin.Context) {
+func discoverOriginCache(ctx *gin.Context) {
 	authOption := utils.AuthOption{
 		Sources: []utils.TokenSource{utils.Header},
 		Issuers: []utils.TokenIssuer{utils.Issuer},
@@ -687,15 +681,15 @@ func DiscoverOriginCache(ctx *gin.Context) {
 	ctx.JSON(200, promDiscoveryRes)
 }
 
-func RegisterOrigin(ctx context.Context, gctx *gin.Context) {
+func registerOrigin(ctx context.Context, gctx *gin.Context) {
 	registerServeAd(ctx, gctx, common.OriginType)
 }
 
-func RegisterCache(ctx context.Context, gctx *gin.Context) {
+func registerCache(ctx context.Context, gctx *gin.Context) {
 	registerServeAd(ctx, gctx, common.CacheType)
 }
 
-func ListNamespacesV1(ctx *gin.Context) {
+func listNamespacesV1(ctx *gin.Context) {
 	namespaceAdsV2 := ListNamespacesFromOrigins()
 
 	namespaceAdsV1 := convertNamespaceAdsV2ToV1(namespaceAdsV2)
@@ -703,22 +697,29 @@ func ListNamespacesV1(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, namespaceAdsV1)
 }
 
-func ListNamespacesV2(ctx *gin.Context) {
+func listNamespacesV2(ctx *gin.Context) {
 	namespacesAdsV2 := ListNamespacesFromOrigins()
 	ctx.JSON(http.StatusOK, namespacesAdsV2)
 }
 
-func RegisterDirector(ctx context.Context, router *gin.RouterGroup) {
-	// Establish the routes used for cache/origin redirection
-	router.GET("/api/v1.0/director/object/*any", RedirectToCache)
-	router.GET("/api/v1.0/director/origin/*any", RedirectToOrigin)
-	router.PUT("/api/v1.0/director/origin/*any", RedirectToOrigin)
-	router.POST("/api/v1.0/director/registerOrigin", func(gctx *gin.Context) { RegisterOrigin(ctx, gctx) })
-	// In the foreseeable feature, director will scrape all servers in Pelican ecosystem (including registry)
-	// so that director can be our point of contact for collecting system-level metrics.
-	// Rename the endpoint to reflect such plan.
-	router.GET(DirectorServerDiscoveryEndpoint, DiscoverOriginCache)
-	router.POST("/api/v1.0/director/registerCache", func(gctx *gin.Context) { RegisterCache(ctx, gctx) })
-	router.GET("/api/v1.0/director/listNamespaces", ListNamespacesV1)
-	router.GET("/api/v2.0/director/listNamespaces", ListNamespacesV2)
+func RegisterDirector(ctx context.Context, router *gin.RouterGroup, defaultResponse string) {
+	directorAPIV1 := router.Group("/api/v1.0/director", shortcutMiddleware(defaultResponse))
+	{
+		// Establish the routes used for cache/origin redirection
+		directorAPIV1.GET("/object/*any", redirectToCache)
+		directorAPIV1.GET("/origin/*any", redirectToOrigin)
+		directorAPIV1.PUT("/origin/*any", redirectToOrigin)
+		directorAPIV1.POST("/registerOrigin", func(gctx *gin.Context) { registerOrigin(ctx, gctx) })
+		directorAPIV1.POST("/registerCache", func(gctx *gin.Context) { registerCache(ctx, gctx) })
+		directorAPIV1.GET("/listNamespaces", listNamespacesV1)
+		// In the foreseeable feature, director will scrape all servers in Pelican ecosystem (including registry)
+		// so that director can be our point of contact for collecting system-level metrics.
+		// Rename the endpoint to reflect such plan.
+		directorAPIV1.GET("/discoverServers", discoverOriginCache)
+	}
+
+	directorAPIV2 := router.Group("/api/v2.0/director")
+	{
+		directorAPIV2.GET("/listNamespaces", listNamespacesV2)
+	}
 }
