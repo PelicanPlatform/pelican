@@ -43,7 +43,6 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-
 type xrootdTest struct {
 	T   *testing.T
 	ctx context.Context
