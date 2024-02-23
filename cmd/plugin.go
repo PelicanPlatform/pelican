@@ -503,14 +503,14 @@ func writeOutfile(resultAds []*classads.ClassAd, outputFile *os.File) (bool, boo
 		var serr syscall.Errno
 		// Error code 1 (serr) is ERROR_INVALID_FUNCTION, the expected Windows syscall error
 		// Error code EINVAL is returned on Linux
-		// Error code ENODEV is returned on Mac OS X
-		if errors.As(err, &perr) && errors.As(perr.Unwrap(), &serr) && (int(serr) == 1 || serr == syscall.EINVAL || serr == syscall.ENODEV) {
+		// Error code ENODEV (/dev/null) or ENOTTY (/dev/stdout) is returned on Mac OS X
+		if errors.As(err, &perr) && errors.As(perr.Unwrap(), &serr) && (int(serr) == 1 || serr == syscall.EINVAL || serr == syscall.ENODEV || serr == syscall.ENOTTY) {
 			log.Debugf("Error when syncing: %s; can be ignored\n", perr)
 		} else {
 			if errors.As(err, &perr) && errors.As(perr.Unwrap(), &serr) {
-				log.Errorf("Failed to sync output file: %s (errno %d)", serr, int(serr))
+				log.Errorf("Failed to sync output file (%s): %s (errno %d)", outputFile.Name(), serr, int(serr))
 			} else {
-				log.Errorln("Failed to sync output file:", err)
+				log.Errorf("Failed to sync output file (%s): %s", outputFile.Name(), err)
 			}
 			os.Exit(FailedOutfile) // Unique error code to let us know the outfile could not be created
 		}
