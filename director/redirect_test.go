@@ -152,7 +152,7 @@ func TestDirectorRegistration(t *testing.T) {
 	}
 
 	setupRequest := func(c *gin.Context, r *gin.Engine, bodyByt []byte, token string) {
-		r.POST("/", func(gctx *gin.Context) { RegisterOrigin(ctx, gctx) })
+		r.POST("/", func(gctx *gin.Context) { registerOrigin(ctx, gctx) })
 		c.Request, _ = http.NewRequest(http.MethodPost, "/", bytes.NewBuffer(bodyByt))
 		c.Request.Header.Set("Authorization", "Bearer "+token)
 		c.Request.Header.Set("Content-Type", "application/json")
@@ -163,7 +163,7 @@ func TestDirectorRegistration(t *testing.T) {
 
 	// Configure the request context and Gin router to generate a redirect
 	setupRedirect := func(c *gin.Context, r *gin.Engine, object, token string) {
-		r.GET("/api/v1.0/director/origin/*any", RedirectToOrigin)
+		r.GET("/api/v1.0/director/origin/*any", redirectToOrigin)
 		c.Request, _ = http.NewRequest(http.MethodGet, "/api/v1.0/director/origin"+object, nil)
 		c.Request.Header.Set("X-Real-Ip", "1.1.1.1")
 		c.Request.Header.Set("Authorization", "Bearer "+token)
@@ -231,7 +231,7 @@ func TestDirectorRegistration(t *testing.T) {
 		// Check to see that the code exits with status code 200 after given it a good token
 		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
 
-		namaspaceADs := ListNamespacesFromOrigins()
+		namaspaceADs := listNamespacesFromOrigins()
 		// If the origin was successfully registed at director, we should be able to find it in director's originAds
 		assert.True(t, NamespaceAdContainsPath(namaspaceADs, "/foo/bar"), "Coudln't find namespace in the director cache.")
 		teardown()
@@ -269,7 +269,7 @@ func TestDirectorRegistration(t *testing.T) {
 		// Check to see that the code exits with status code 200 after given it a good token
 		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
 
-		namaspaceADs := ListNamespacesFromOrigins()
+		namaspaceADs := listNamespacesFromOrigins()
 		// If the origin was successfully registed at director, we should be able to find it in director's originAds
 		assert.True(t, NamespaceAdContainsPath(namaspaceADs, "/foo/bar"), "Coudln't find namespace in the director cache.")
 		teardown()
@@ -303,7 +303,7 @@ func TestDirectorRegistration(t *testing.T) {
 		body, _ := io.ReadAll(w.Result().Body)
 		assert.Equal(t, `{"error":"Authorization token verification failed"}`, string(body), "Failure wasn't because token verification failed")
 
-		namaspaceADs := ListNamespacesFromOrigins()
+		namaspaceADs := listNamespacesFromOrigins()
 		assert.False(t, NamespaceAdContainsPath(namaspaceADs, "/foo/bar"), "Found namespace in the director cache even if the token validation failed.")
 		teardown()
 	})
@@ -338,7 +338,7 @@ func TestDirectorRegistration(t *testing.T) {
 		body, _ := io.ReadAll(w.Result().Body)
 		assert.Equal(t, `{"error":"Authorization token verification failed"}`, string(body), "Failure wasn't because token verification failed")
 
-		namaspaceADs := ListNamespacesFromOrigins()
+		namaspaceADs := listNamespacesFromOrigins()
 		assert.False(t, NamespaceAdContainsPath(namaspaceADs, "/foo/bar"), "Found namespace in the director cache even if the token validation failed.")
 		teardown()
 	})
@@ -674,7 +674,7 @@ func TestDiscoverOriginCache(t *testing.T) {
 	}
 
 	r := gin.Default()
-	r.GET("/test", DiscoverOriginCache)
+	r.GET("/test", discoverOriginCache)
 
 	t.Run("no-token-should-give-401", func(t *testing.T) {
 		req, err := http.NewRequest(http.MethodGet, "/test", nil)

@@ -99,6 +99,10 @@ type (
 		EnableWrite        bool            `json:"enablewrite"`
 		EnableFallbackRead bool            `json:"enable-fallback-read"` // True if the origin will allow direct client reads when no caches are available
 	}
+
+	GetPrefixByPathRes struct {
+		Prefix string `json:"prefix"`
+	}
 )
 
 const (

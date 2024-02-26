@@ -30,7 +30,7 @@ import (
 )
 
 // List all namespaces from origins registered at the director
-func ListNamespacesFromOrigins() []common.NamespaceAdV2 {
+func listNamespacesFromOrigins() []common.NamespaceAdV2 {
 
 	serverAdMutex.RLock()
 	defer serverAdMutex.RUnlock()
@@ -46,7 +46,7 @@ func ListNamespacesFromOrigins() []common.NamespaceAdV2 {
 }
 
 // List all serverAds in the cache that matches the serverType array
-func ListServerAds(serverTypes []common.ServerType) []common.ServerAd {
+func listServerAds(serverTypes []common.ServerType) []common.ServerAd {
 	serverAdMutex.RLock()
 	defer serverAdMutex.RUnlock()
 	ads := make([]common.ServerAd, 0)
