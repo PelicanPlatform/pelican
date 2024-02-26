@@ -130,6 +130,7 @@ var (
 	Server_TLSKey = StringParam{"Server.TLSKey"}
 	Server_UIActivationCodeFile = StringParam{"Server.UIActivationCodeFile"}
 	Server_UIPasswordFile = StringParam{"Server.UIPasswordFile"}
+	Server_WebConfigFile = StringParam{"Server.WebConfigFile"}
 	Server_WebHost = StringParam{"Server.WebHost"}
 	Shoveler_AMQPExchange = StringParam{"Shoveler.AMQPExchange"}
 	Shoveler_AMQPTokenLocation = StringParam{"Shoveler.AMQPTokenLocation"}
@@ -169,6 +170,7 @@ var (
 )
 
 var (
+	Cache_Concurrency = IntParam{"Cache.Concurrency"}
 	Cache_Port = IntParam{"Cache.Port"}
 	Client_MinimumDownloadSpeed = IntParam{"Client.MinimumDownloadSpeed"}
 	Client_SlowTransferRampupTime = IntParam{"Client.SlowTransferRampupTime"}
@@ -200,6 +202,7 @@ var (
 	DisableProxyFallback = BoolParam{"DisableProxyFallback"}
 	Logging_DisableProgressBars = BoolParam{"Logging.DisableProgressBars"}
 	Monitoring_MetricAuthorization = BoolParam{"Monitoring.MetricAuthorization"}
+	Monitoring_PromQLAuthorization = BoolParam{"Monitoring.PromQLAuthorization"}
 	Origin_EnableBroker = BoolParam{"Origin.EnableBroker"}
 	Origin_EnableCmsd = BoolParam{"Origin.EnableCmsd"}
 	Origin_EnableDirListing = BoolParam{"Origin.EnableDirListing"}

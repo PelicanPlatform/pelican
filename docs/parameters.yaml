@@ -625,6 +625,15 @@ type: bool
 default: false
 components: ["cache"]
 ---
+name: Cache.Concurrency
+description: >-
+  This value represents the maximum number of connections to a cache for Xrootd throttling.
+  When this value is set, it enables the xrootd throttling plugin and will set the maximum
+  number of connections to this value.
+type: int
+default: none
+components: ["cache"]
+---
 ############################
 #  Director-level configs  #
 ############################
@@ -1038,6 +1047,14 @@ type: int
 default: 1
 components: ["*"]
 ---
+name: Server.WebConfigFile
+description: >-
+  A filepath to the file where web-based configuration changes are stored
+type: filename
+root_default: /etc/pelican/web-config.yaml
+default: "$ConfigBase/web-config.yaml"
+components: ["*"]
+---
 ################################
 #   Issuer's Configurations    #
 ################################
@@ -1396,7 +1413,14 @@ description: >-
   If authorization (Bearer token) is required for accesing /metrics endpoint
 type: bool
 default: true
-components: ["origin", "director", "registry"]
+components: ["origin", "cache", "director", "registry"]
+---
+name: Monitoring.PromQLAuthorization
+description: >-
+  If authorization (Bearer token or cookie) is required for accesing /prometheus/query endpoint
+type: bool
+default: true
+components: ["origin", "cache", "director", "registry"]
 ---
 ############################
 #   Shoveler-level configs   #

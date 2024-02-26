@@ -161,7 +161,7 @@ func (stat *ObjectStat) sendHeadReqToOrigin(objectName string, dataUrl url.URL, 
 // Implementation of querying origins for their availability of an object.
 // It blocks until max successful requests has been received, all potential origins responded (or timeout), or cancelContext was closed
 func (stat *ObjectStat) queryOriginsForObject(objectName string, cancelContext context.Context, minimum, maximum int) ([]*objectMetadata, string, error) {
-	_, originAds, _ := GetAdsForPath(objectName)
+	_, originAds, _ := getAdsForPath(objectName)
 	minReq := param.Director_MinStatResponse.GetInt()
 	maxReq := param.Director_MaxStatResponse.GetInt()
 	if minimum > 0 {

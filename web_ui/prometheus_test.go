@@ -49,6 +49,7 @@ func TestPrometheusProtectionCookieAuth(t *testing.T) {
 	defer cancel()
 
 	viper.Reset()
+	viper.Set("Monitoring.PromQLAuthorization", true)
 
 	av1 := route.New().WithPrefix("/api/v1.0/prometheus")
 
@@ -108,6 +109,7 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 
 	viper.Reset()
 	viper.Set("Server.ExternalWebUrl", "https://test-origin.org:8444")
+	viper.Set("Monitoring.PromQLAuthorization", true)
 
 	av1 := route.New().WithPrefix("/api/v1.0/prometheus")
 

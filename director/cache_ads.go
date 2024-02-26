@@ -39,8 +39,8 @@ var (
 	serverAdMutex = sync.RWMutex{}
 )
 
-func RecordAd(ad common.ServerAd, namespaceAds *[]common.NamespaceAdV2) {
-	if err := UpdateLatLong(&ad); err != nil {
+func recordAd(ad common.ServerAd, namespaceAds *[]common.NamespaceAdV2) {
+	if err := updateLatLong(&ad); err != nil {
 		log.Debugln("Failed to lookup GeoIP coordinates for host", ad.URL.Host)
 	}
 	serverAdMutex.Lock()
@@ -54,7 +54,7 @@ func RecordAd(ad common.ServerAd, namespaceAds *[]common.NamespaceAdV2) {
 	}
 }
 
-func UpdateLatLong(ad *common.ServerAd) error {
+func updateLatLong(ad *common.ServerAd) error {
 	if ad == nil {
 		return errors.New("Cannot provide a nil ad to UpdateLatLong")
 	}
@@ -70,7 +70,7 @@ func UpdateLatLong(ad *common.ServerAd) error {
 	if !ok {
 		return errors.New("Failed to create address object from IP")
 	}
-	lat, long, err := GetLatLong(addr)
+	lat, long, err := getLatLong(addr)
 	if err != nil {
 		return err
 	}
@@ -117,7 +117,7 @@ func matchesPrefix(reqPath string, namespaceAds []common.NamespaceAdV2) *common.
 	return best
 }
 
-func GetAdsForPath(reqPath string) (originNamespace common.NamespaceAdV2, originAds []common.ServerAd, cacheAds []common.ServerAd) {
+func getAdsForPath(reqPath string) (originNamespace common.NamespaceAdV2, originAds []common.ServerAd, cacheAds []common.ServerAd) {
 	serverAdMutex.RLock()
 	defer serverAdMutex.RUnlock()
 

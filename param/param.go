@@ -9,15 +9,15 @@ import (
 )
 
 var (
-	viperConfig *config
+	viperConfig *Config
 	configMutex sync.RWMutex
 )
 
 // Unmarshal Viper config into a struct viperConfig and returns it
-func UnmarshalConfig() (*config, error) {
+func UnmarshalConfig() (*Config, error) {
 	configMutex.Lock()
 	defer configMutex.Unlock()
-	viperConfig = new(config)
+	viperConfig = new(Config)
 	err := viper.Unmarshal(viperConfig)
 	if err != nil {
 		return nil, err
@@ -27,7 +27,7 @@ func UnmarshalConfig() (*config, error) {
 }
 
 // Return the unmarshaled viper config struct as a pointer
-func GetUnmarshaledConfig() (*config, error) {
+func GetUnmarshaledConfig() (*Config, error) {
 	configMutex.RLock()
 	defer configMutex.RUnlock()
 	if viperConfig == nil {
@@ -95,7 +95,7 @@ func convertStruct(srcVal, destVal reflect.Value) {
 }
 
 // Convert a config struct to configWithType struct
-func ConvertToConfigWithType(rawConfig *config) *configWithType {
+func ConvertToConfigWithType(rawConfig *Config) *configWithType {
 	typedConfig := configWithType{}
 
 	srcVal := reflect.ValueOf(rawConfig).Elem()

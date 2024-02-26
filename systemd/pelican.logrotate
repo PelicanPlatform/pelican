@@ -1,0 +1,8 @@
+/var/log/pelican/*.log {
+    compress
+    copytruncate
+    size 500M
+    missingok
+    notifempty
+    rotate 10
+}

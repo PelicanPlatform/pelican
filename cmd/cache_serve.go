@@ -31,6 +31,7 @@ import (
 	"github.com/pelicanplatform/pelican/cache_ui"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/daemon"
+	"github.com/pelicanplatform/pelican/launchers"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_ui"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -74,7 +75,11 @@ func serveCacheInternal(cmdCtx context.Context) (context.CancelFunc, error) {
 		case sig := <-sigs:
 			log.Warningf("Received signal %v; will shutdown process", sig)
 			shutdownCancel()
-			return nil
+			return launchers.ErrExitOnSignal
+		case <-config.RestartFlag:
+			log.Warningf("Received restart request; will restart the process")
+			shutdownCancel()
+			return launchers.ErrRestart
 		case <-ctx.Done():
 			return nil
 		}

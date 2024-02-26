@@ -84,17 +84,21 @@ func promMetricAuthHandler(ctx *gin.Context) {
 // Handle the authorization of Prometheus query engine endpoint at `/api/v1.0/prometheus`
 func promQueryEngineAuthHandler(av1 *route.Router) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		authOption := token.AuthOption{
-			// Cookie for web user access and header for external service like Grafana to access
-			Sources: []token.TokenSource{token.Cookie, token.Header},
-			Issuers: []token.TokenIssuer{token.Issuer},
-			Scopes:  []token_scopes.TokenScope{token_scopes.Monitoring_Query}}
+		if param.Monitoring_PromQLAuthorization.GetBool() {
+			authOption := token.AuthOption{
+				// Cookie for web user access and header for external service like Grafana to access
+				Sources: []token.TokenSource{token.Cookie, token.Header},
+				Issuers: []token.TokenIssuer{token.Issuer},
+				Scopes:  []token_scopes.TokenScope{token_scopes.Monitoring_Query}}
 
-		exists := token.CheckAnyAuth(c, authOption)
-		if exists {
-			av1.ServeHTTP(c.Writer, c.Request)
+			exists := token.CheckAnyAuth(c, authOption)
+			if exists {
+				av1.ServeHTTP(c.Writer, c.Request)
+			} else {
+				c.JSON(http.StatusForbidden, gin.H{"error": "Correct authorization required to access Prometheus query engine APIs"})
+			}
 		} else {
-			c.JSON(http.StatusForbidden, gin.H{"error": "Correct authorization required to access Prometheus query engine APIs"})
+			av1.ServeHTTP(c.Writer, c.Request)
 		}
 	}
 }

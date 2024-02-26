@@ -305,11 +305,13 @@ tags:
   - name: common
     description: Common APIs for all servers
   - name: metrics
-    description: APIs for various server metrics
+    description: APIs for server metrics
   - name: registry_ui
-    description: APIs for Registry server Web UI
+    description: APIs for the Registry server Web UI
   - name: director_ui
-    description: APIs for Director server Web UI
+    description: APIs for the Director server Web UI
+  - name: director
+    description: Non-UI facing APIs for the Director server
 paths:
   /health:
     get:
@@ -375,6 +377,66 @@ paths:
                   Value: ""
         "401":
           description: Unauthorized
+    patch:
+      tags:
+        - "common"
+      summary: Update the server configuration with user-provided changes
+      description:
+        "`Authentication Required` `Admin Previlege Required`
+
+
+        The server will restart promptly after a  successful request. You may query against
+        `/health` endpoint to check if the server is back online.
+
+
+        Note that the endpoint will update the value of **all parameters provided**, no matter the value is in default or not (`0`, `null`,`undefined`, etc).
+
+
+        This means you want to eliminate parameters from the request body that are untouched."
+      parameters:
+        - in: body
+          name: config
+          required: true
+          description:
+            The config value to update.
+            It must be a JSON object with keys/values that match config parameters' name and data type.
+            Parameter names are case-insensitive.
+          schema:
+            type: object
+            example:
+              Logging:
+                Cache:
+                  Scitokens: "info"
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: Successfully updated the config. Server is restarting.
+          schema:
+            type: object
+            $ref: "#/definitions/SuccessModel"
+        "400":
+          description: Bad request. The requested changes of config values are invalid.
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "401":
+          description: Unauthorized. You need to login to take this action.
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "403":
+          description: Forbidden. You need admin privileges to take this action.
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "500":
+          description: Server error. Can't update the config due to internal server error.
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
   /servers:
     get:
       tags:
@@ -1193,6 +1255,38 @@ paths:
             $ref: "#/definitions/ErrorModel"
         "500":
           description: Server error when performing the query
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+  /director/namespaces/prefix/{path}:
+    get:
+      summary: "Get the longest matched namespace prefix of a path"
+      description: ""
+      parameters:
+        - name: path
+          in: path
+          description: "The path to an object or directory to get the namespace prefix for"
+          required: true
+          type: string
+      tags:
+        - "director"
+      responses:
+        "200":
+          description: "OK"
+          schema:
+            type: object
+            properties:
+              prefix:
+                type: string
+                example: "/test/namespace"
+                description: The longest matched namespace prefix
+        "400":
+          description: "Bad request. Path parameter is missing"
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "404":
+          description: "Namespace prefix not found for the path"
           schema:
             type: object
             $ref: "#/definitions/ErrorModel"

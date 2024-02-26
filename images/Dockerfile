@@ -61,7 +61,7 @@ RUN yum -y update \
 ####
 FROM dependency-build AS xrootd-plugin-builder
 # Install necessary build dependencies
-RUN  yum install -y xrootd-devel xrootd-server-devel xrootd-client-devel curl-devel openssl-devel git cmake3 gcc-c++
+RUN  yum install -y xrootd-devel xrootd-server-devel xrootd-client-devel curl-devel openssl-devel git cmake3 gcc-c++ sqlite-devel
 # Install xrdcl-pelican plugin and replace the xrdcl-http plugin
 RUN \
     git clone https://github.com/PelicanPlatform/xrdcl-pelican.git && \
@@ -77,6 +77,25 @@ RUN \
     mkdir build && cd build && \
     cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
     make install
+
+# LotMan Installation
+# First install dependencies
+RUN git clone https://github.com/nlohmann/json.git && \
+    cd json && mkdir build && \
+    cd build && cmake .. && \
+    make -j`nproc` install
+RUN git clone https://github.com/pboettch/json-schema-validator.git && \
+    cd json-schema-validator && mkdir build && \
+    cd build && cmake -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_INSTALL_PREFIX=/usr .. && \
+    make -j`nproc` install
+#Finally LotMan proper. For now we do this from source until we can sort out the RPMs.
+RUN \
+    git clone https://github.com/PelicanPlatform/lotman.git && \
+    cd lotman && \
+    mkdir build && cd build && \
+    # LotMan CMakeLists.txt needs to be updated to use -DLIB_INSTALL_DIR. Issue #6
+    cmake -DCMAKE_INSTALL_PREFIX=/usr .. && \
+    make -j`nproc` install
 
 FROM dependency-build AS final-stage
 
@@ -155,7 +174,13 @@ COPY --from=xrootd-plugin-builder /usr/local/etc/xrootd/client.plugins.d/pelican
 RUN rm -f /etc/xrootd/client.plugins.d/xrdcl-http-plugin.conf
 
 # Copy built s3 plugin library and xrdcl-pelican plugin library from build
-COPY --from=xrootd-plugin-builder /usr/lib64/libXrdS3-5.so /usr/lib64/libXrdHTTPServer-5.so /usr/lib64/libXrdClPelican-5.so /usr/lib64
+COPY --from=xrootd-plugin-builder /usr/lib64/libXrdS3-5.so /usr/lib64/libXrdHTTPServer-5.so /usr/lib64/libXrdClPelican-5.so \
+    /usr/lib64/libLotMan.so /usr/lib64
+
+# Copy the nlohmann json headers
+COPY --from=xrootd-plugin-builder /usr/include/nlohmann /usr/include/nlohmann
+# Copy the JSON schema validator library
+COPY --from=xrootd-plugin-builder /usr/lib64/libnlohmann_json_schema_validator.a /usr/lib64
 
 RUN chmod +x /pelican/osdf-client \
     && chmod +x /entrypoint.sh

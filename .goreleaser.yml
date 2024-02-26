@@ -1,5 +1,7 @@
 project_name: pelican
 
+release:
+  prerelease: true
 before:
   hooks:
     - go mod tidy
@@ -231,6 +233,9 @@ nfpms:
         type: config|noreplace
       - src: "systemd/pelican-registry.yaml"
         dst: "/etc/pelican/pelican-registry.yaml"
+        type: config|noreplace
+      - src: "systemd/pelican.logrotate"
+        dst: "/etc/logrotate.d/pelican"
         type: config|noreplace
       - dst: "/var/log/pelican"
         type: "dir"

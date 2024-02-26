@@ -65,6 +65,7 @@ Monitoring:
   TokenExpiresIn: 1h
   TokenRefreshInterval: 5m
   MetricAuthorization: true
+  PromQLAuthorization: true
   AggregatePrefixes: ["/*"]
 Shoveler:
   MessageQueueProtocol: amqp

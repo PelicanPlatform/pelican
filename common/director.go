@@ -105,6 +105,9 @@ type (
 		Message   string `json:"message"`
 		Timestamp int64  `json:"timestamp"`
 	}
+	GetPrefixByPathRes struct {
+		Prefix string `json:"prefix"`
+	}
 )
 
 const (

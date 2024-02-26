@@ -6,8 +6,9 @@ import (
 	"time"
 )
 
-type config struct {
+type Config struct {
 	Cache struct {
+		Concurrency int
 		DataLocation string
 		EnableVoms bool
 		ExportLocation string
@@ -90,6 +91,7 @@ type config struct {
 		MetricAuthorization bool
 		PortHigher int
 		PortLower int
+		PromQLAuthorization bool
 		TokenExpiresIn time.Duration
 		TokenRefreshInterval time.Duration
 	}
@@ -168,6 +170,7 @@ type config struct {
 		UIActivationCodeFile string
 		UILoginRateLimit int
 		UIPasswordFile string
+		WebConfigFile string
 		WebHost string
 		WebPort int
 	}
@@ -224,6 +227,7 @@ type config struct {
 
 type configWithType struct {
 	Cache struct {
+		Concurrency struct { Type string; Value int }
 		DataLocation struct { Type string; Value string }
 		EnableVoms struct { Type string; Value bool }
 		ExportLocation struct { Type string; Value string }
@@ -306,6 +310,7 @@ type configWithType struct {
 		MetricAuthorization struct { Type string; Value bool }
 		PortHigher struct { Type string; Value int }
 		PortLower struct { Type string; Value int }
+		PromQLAuthorization struct { Type string; Value bool }
 		TokenExpiresIn struct { Type string; Value time.Duration }
 		TokenRefreshInterval struct { Type string; Value time.Duration }
 	}
@@ -384,6 +389,7 @@ type configWithType struct {
 		UIActivationCodeFile struct { Type string; Value string }
 		UILoginRateLimit struct { Type string; Value int }
 		UIPasswordFile struct { Type string; Value string }
+		WebConfigFile struct { Type string; Value string }
 		WebHost struct { Type string; Value string }
 		WebPort struct { Type string; Value int }
 	}
