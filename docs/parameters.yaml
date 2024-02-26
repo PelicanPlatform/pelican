@@ -1413,7 +1413,14 @@ description: >-
   If authorization (Bearer token) is required for accesing /metrics endpoint
 type: bool
 default: true
-components: ["origin", "director", "registry"]
+components: ["origin", "cache", "director", "registry"]
+---
+name: Monitoring.PromQLAuthorization
+description: >-
+  If authorization (Bearer token or cookie) is required for accesing /prometheus/query endpoint
+type: bool
+default: true
+components: ["origin", "cache", "director", "registry"]
 ---
 ############################
 #   Shoveler-level configs   #

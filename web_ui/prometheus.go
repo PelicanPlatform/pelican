@@ -553,15 +553,15 @@ func ConfigureEmbeddedPrometheus(ctx context.Context, engine *gin.Engine) error 
 	//WithInstrumentation(setPathWithPrefix("/api/v1"))
 	apiV1.Register(av1)
 
-	// TODO: Add authorization to director's PromQL endpoint once there's a
-	// way that user can be authenticated or we have a web UI for director
-	if !isDirector {
-		engine.GET("/api/v1.0/prometheus/*any", promQueryEngineAuthHandler(av1))
-	} else {
-		engine.GET("/api/v1.0/prometheus/*any", func(ctx *gin.Context) {
-			av1.ServeHTTP(ctx.Writer, ctx.Request)
-		})
-	}
+	engine.GET("/api/v1.0/prometheus/*any", func(ctx *gin.Context) {
+		// Grafana visits Prometheus default router at /api/v1. We rewrite the request path to /api/v1.0/prometheus
+		// so that routes still work for Grafana
+		if strings.HasPrefix(ctx.Param("any"), "/api/v1") {
+			ctx.Request.URL.Path = strings.TrimPrefix(ctx.Request.URL.Path, "/api/v1.0/prometheus/api/v1")
+			ctx.Request.URL.Path = "/api/v1.0/prometheus" + ctx.Request.URL.Path
+			ctx.Next()
+		}
+	}, promQueryEngineAuthHandler(av1))
 
 	reloaders := []reloader{
 		{
