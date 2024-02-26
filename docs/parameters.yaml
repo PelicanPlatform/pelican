@@ -157,77 +157,95 @@ components: ["Client"]
 ---
 name: Logging.Origin.Cms
 description: >-
-  Trace level of Xrootd cluster management service.
+  Trace level of Xrootd cluster management service, one of the main xrootd executables.
+  Cms basically is a file (or asset) discovery service. Each server has a cmsd daemon which
+  connect to a master one informing it if a server is available. Xrootd asks cms where a file
+  could be found and cms works to report back the server for where the file is located.
 type: string
 default: error
 components: ["origin"]
 ---
 name: Logging.Origin.Pfc
 description: >-
-  Trace level of Xrootd Proxy File Cache, the caching mechanism used by Xrootd.
+  Trace level of Xrootd Proxy File Cache (XCache), the caching mechanism used by Xrootd. This component
+  entails information for caches/caching within Xrootd. This component instantiates its own Open Storage
+  System (OSS) to write local files to.
 type: string
 default: info
 components: ["origin"]
 ---
 name: Logging.Origin.Pss
 description: >-
-  Trace level of Xrootd Proxy System Service.
+  Trace level of Xrootd Proxy System Service. Variables this component reports include: number of remotes file opens,
+  number of opens that failed, number of remote file closes, and number of closes that failed.
 type: string
 default: error
 components: ["origin"]
 ---
 name: Logging.Origin.Scitokens
 description: >-
-  Trace level of scitokens debug output within Xrootd configuration.
+  Trace level of scitokens debug output within Xrootd configuration. This entails token management
+  and security credentials within Xrootd.
 type: string
 default: error
 components: ["origin"]
 ---
 name: Logging.Origin.Xrd
 description: >-
-  Trace level of the eXtended Request Daemon within Xrootd.
+  Trace level of the eXtended Request Daemon within Xrootd, another main xrootd executable. This reports information
+  the xrootd protocol and works with cms.
 type: string
 default: error
 components: ["origin"]
 ---
 name: Logging.Origin.Xrootd
 description: >-
-  Trace options for Xrootd debug output within Xrootd configuration.
+  Trace options for Xrootd debug output within Xrootd configuration. This prefix is reserved for the xroot protocol,
+  which is the component that sits on sockets and talks to clients as they query file-system info, open files, and read data.
+  This is the protocol for xrootd (like http) and handles connections and requests.
 type: string
 default: info
 components: ["origin"]
 ---
 name: Logging.Cache.Ofs
 description: >-
-  Trace level of Xrootd's Open File System.
+  Trace level of Xrootd's Open File System. This component cares about files and directories from the administrative perspective.
+  This component is build on top of the Open Storage System component, which deals with things like file creation and reads and
+  writes for files and directories.
 type: string
 default: error
 components: ["cache"]
 ---
 name: Logging.Cache.Pss
 description: >-
-  Trace level of Xrootd's Proxy System Service.
+  Trace level of Xrootd Proxy System Service. Variables this component reports include: number of remotes file opens,
+  number of opens that failed, number of remote file closes, and number of closes that failed.
 type: string
 default: error
 components: ["cache"]
 ---
 name: Logging.Cache.Scitokens
 description: >-
-  Trace level of scitokens debug output within Xrootd configuration.
+  Trace level of scitokens debug output within Xrootd configuration. This entails token management
+  and security credentials within Xrootd.
 type: string
 default: error
 components: ["cache"]
 ---
 name: Logging.Cache.Xrd
 description: >-
-  Trace level of the eXtended Request Daemon within Xrootd.
+  Trace level of the eXtended Request Daemon within Xrootd, another main xrootd executable. This reports information
+  the xrootd protocol and works with cms.
 type: string
 default: error
 components: ["cache"]
 ---
 name: Logging.Cache.Xrootd
 description: >-
-  Trace options for Xrootd debug output within Xrootd configuration.
+  Trace options for Xrootd debug output within Xrootd configuration. This prefix is reserved for the xroot protocol,
+  which is the component that sits on sockets and talks to clients as they query file-system info, open files, and read data.
+  This is the protocol for xrootd (like http) and handles connections and requests
+
 type: string
 default: error
 components: ["cache"]
