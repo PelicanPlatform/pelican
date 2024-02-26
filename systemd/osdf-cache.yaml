@@ -21,9 +21,6 @@ XRootD:
   ## Sitename is the resource name this cache is registered as under Topology.
   ## You must set this.
   Sitename: TOPOLOGY_RESOURCE_NAME
-  ## Authfile is the xrootd authorization file for VOMS/X.509 auth
-  ## XXX remove this once #564 (https://github.com/PelicanPlatform/pelican/issues/564) is done
-  Authfile: /run/stash-cache-auth/Authfile
   RunLocation: /run/pelican/osdf-cache/xrootd
 Cache:
   DataLocation: "/mnt/osdf"

@@ -137,7 +137,7 @@ func checkOverrides(addr net.IP) (coordinate *Coordinate) {
 	return nil
 }
 
-func GetLatLong(addr netip.Addr) (lat float64, long float64, err error) {
+func getLatLong(addr netip.Addr) (lat float64, long float64, err error) {
 	ip := net.IP(addr.AsSlice())
 	override := checkOverrides(ip)
 	if override != nil {
@@ -163,9 +163,9 @@ func GetLatLong(addr netip.Addr) (lat float64, long float64, err error) {
 	return
 }
 
-func SortServers(addr netip.Addr, ads []common.ServerAd) ([]common.ServerAd, error) {
+func sortServers(addr netip.Addr, ads []common.ServerAd) ([]common.ServerAd, error) {
 	distances := make(SwapMaps, len(ads))
-	lat, long, err := GetLatLong(addr)
+	lat, long, err := getLatLong(addr)
 	// If we don't get a valid coordinate set for the incoming address, either because
 	// of an error or the null address, we randomize the output
 	isInvalid := (err != nil || (lat == 0 && long == 0))
@@ -188,7 +188,7 @@ func SortServers(addr netip.Addr, ads []common.ServerAd) ([]common.ServerAd, err
 	return resultAds, nil
 }
 
-func DownloadDB(localFile string) error {
+func downloadDB(localFile string) error {
 	err := os.MkdirAll(filepath.Dir(localFile), 0755)
 	if err != nil {
 		return err
@@ -256,7 +256,7 @@ func DownloadDB(localFile string) error {
 	return nil
 }
 
-func PeriodicMaxMindReload(ctx context.Context) {
+func periodicMaxMindReload(ctx context.Context) {
 	// The MaxMindDB updates Tuesday/Thursday. While a free API key
 	// does get 1000 downloads a month, we might still want to change
 	// this eventually to guarantee we only update on those days...
@@ -267,7 +267,7 @@ func PeriodicMaxMindReload(ctx context.Context) {
 		select {
 		case <-ticker.C:
 			localFile := param.Director_GeoIPLocation.GetString()
-			if err := DownloadDB(localFile); err != nil {
+			if err := downloadDB(localFile); err != nil {
 				log.Warningln("Failed to download GeoIP database:", err)
 			} else {
 				localReader, err := geoip2.Open(localFile)
@@ -284,12 +284,12 @@ func PeriodicMaxMindReload(ctx context.Context) {
 }
 
 func InitializeDB(ctx context.Context) {
-	go PeriodicMaxMindReload(ctx)
+	go periodicMaxMindReload(ctx)
 	localFile := param.Director_GeoIPLocation.GetString()
 	localReader, err := geoip2.Open(localFile)
 	if err != nil {
 		log.Warningln("Local GeoIP database file not present; will attempt a download.", err)
-		err = DownloadDB(localFile)
+		err = downloadDB(localFile)
 		if err != nil {
 			log.Errorln("Failed to download GeoIP database!  Will not be available:", err)
 			return

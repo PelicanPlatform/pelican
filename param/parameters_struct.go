@@ -8,6 +8,7 @@ import (
 
 type Config struct {
 	Cache struct {
+		Concurrency int
 		DataLocation string
 		EnableVoms bool
 		ExportLocation string
@@ -90,6 +91,7 @@ type Config struct {
 		MetricAuthorization bool
 		PortHigher int
 		PortLower int
+		PromQLAuthorization bool
 		TokenExpiresIn time.Duration
 		TokenRefreshInterval time.Duration
 	}
@@ -225,6 +227,7 @@ type Config struct {
 
 type configWithType struct {
 	Cache struct {
+		Concurrency struct { Type string; Value int }
 		DataLocation struct { Type string; Value string }
 		EnableVoms struct { Type string; Value bool }
 		ExportLocation struct { Type string; Value string }
@@ -307,6 +310,7 @@ type configWithType struct {
 		MetricAuthorization struct { Type string; Value bool }
 		PortHigher struct { Type string; Value int }
 		PortLower struct { Type string; Value int }
+		PromQLAuthorization struct { Type string; Value bool }
 		TokenExpiresIn struct { Type string; Value time.Duration }
 		TokenRefreshInterval struct { Type string; Value time.Duration }
 	}

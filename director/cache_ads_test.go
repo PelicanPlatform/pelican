@@ -144,12 +144,12 @@ func TestGetAdsForPath(t *testing.T) {
 	o1Slice := []common.NamespaceAdV2{nsAd1}
 	o2Slice := []common.NamespaceAdV2{nsAd2, nsAd3}
 	c1Slice := []common.NamespaceAdV2{nsAd1, nsAd2}
-	RecordAd(originAd2, &o2Slice)
-	RecordAd(originAd1, &o1Slice)
-	RecordAd(cacheAd1, &c1Slice)
-	RecordAd(cacheAd2, &o1Slice)
+	recordAd(originAd2, &o2Slice)
+	recordAd(originAd1, &o1Slice)
+	recordAd(cacheAd1, &c1Slice)
+	recordAd(cacheAd2, &o1Slice)
 
-	nsAd, oAds, cAds := GetAdsForPath("/chtc")
+	nsAd, oAds, cAds := getAdsForPath("/chtc")
 	assert.Equal(t, nsAd.Path, "/chtc")
 	assert.Equal(t, len(oAds), 1)
 	assert.Equal(t, len(cAds), 2)
@@ -157,7 +157,7 @@ func TestGetAdsForPath(t *testing.T) {
 	assert.True(t, hasServerAdWithName(cAds, "cache1"))
 	assert.True(t, hasServerAdWithName(cAds, "cache2"))
 
-	nsAd, oAds, cAds = GetAdsForPath("/chtc/")
+	nsAd, oAds, cAds = getAdsForPath("/chtc/")
 	assert.Equal(t, nsAd.Path, "/chtc")
 	assert.Equal(t, len(oAds), 1)
 	assert.Equal(t, len(cAds), 2)
@@ -165,7 +165,7 @@ func TestGetAdsForPath(t *testing.T) {
 	assert.True(t, hasServerAdWithName(cAds, "cache1"))
 	assert.True(t, hasServerAdWithName(cAds, "cache2"))
 
-	nsAd, oAds, cAds = GetAdsForPath("/chtc/PUBLI")
+	nsAd, oAds, cAds = getAdsForPath("/chtc/PUBLI")
 	assert.Equal(t, nsAd.Path, "/chtc")
 	assert.Equal(t, len(oAds), 1)
 	assert.Equal(t, len(cAds), 2)
@@ -173,14 +173,14 @@ func TestGetAdsForPath(t *testing.T) {
 	assert.True(t, hasServerAdWithName(cAds, "cache1"))
 	assert.True(t, hasServerAdWithName(cAds, "cache2"))
 
-	nsAd, oAds, cAds = GetAdsForPath("/chtc/PUBLIC")
+	nsAd, oAds, cAds = getAdsForPath("/chtc/PUBLIC")
 	assert.Equal(t, nsAd.Path, "/chtc/PUBLIC")
 	assert.Equal(t, len(oAds), 1)
 	assert.Equal(t, len(cAds), 1)
 	assert.True(t, hasServerAdWithName(oAds, "origin2"))
 	assert.True(t, hasServerAdWithName(cAds, "cache1"))
 
-	nsAd, oAds, cAds = GetAdsForPath("/chtc/PUBLIC2")
+	nsAd, oAds, cAds = getAdsForPath("/chtc/PUBLIC2")
 	// since the stored path is actually /chtc/PUBLIC2/, the extra / is returned
 	assert.Equal(t, nsAd.Path, "/chtc/PUBLIC2/")
 	assert.Equal(t, len(oAds), 1)
@@ -189,7 +189,7 @@ func TestGetAdsForPath(t *testing.T) {
 
 	// Finally, let's throw in a test for a path we know shouldn't exist
 	// in the ttlcache
-	nsAd, oAds, cAds = GetAdsForPath("/does/not/exist")
+	nsAd, oAds, cAds = getAdsForPath("/does/not/exist")
 	assert.Equal(t, nsAd.Path, "")
 	assert.Equal(t, len(oAds), 0)
 	assert.Equal(t, len(cAds), 0)

@@ -340,11 +340,13 @@ tags:
   - name: common
     description: Common APIs for all servers
   - name: metrics
-    description: APIs for various server metrics
+    description: APIs for server metrics
   - name: registry_ui
-    description: APIs for Registry server Web UI
+    description: APIs for the Registry server Web UI
   - name: director_ui
-    description: APIs for Director server Web UI
+    description: APIs for the Director server Web UI
+  - name: director
+    description: Non-UI facing APIs for the Director server
 paths:
   /health:
     get:
@@ -1311,6 +1313,38 @@ paths:
             $ref: "#/definitions/ErrorModel"
         "500":
           description: Server error when performing the query
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+  /director/namespaces/prefix/{path}:
+    get:
+      summary: "Get the longest matched namespace prefix of a path"
+      description: ""
+      parameters:
+        - name: path
+          in: path
+          description: "The path to an object or directory to get the namespace prefix for"
+          required: true
+          type: string
+      tags:
+        - "director"
+      responses:
+        "200":
+          description: "OK"
+          schema:
+            type: object
+            properties:
+              prefix:
+                type: string
+                example: "/test/namespace"
+                description: The longest matched namespace prefix
+        "400":
+          description: "Bad request. Path parameter is missing"
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "404":
+          description: "Namespace prefix not found for the path"
           schema:
             type: object
             $ref: "#/definitions/ErrorModel"

@@ -78,9 +78,9 @@ func listServers(ctx *gin.Context) {
 			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid server type"})
 			return
 		}
-		servers = ListServerAds([]common.ServerType{common.ServerType(queryParams.ToInternalServerType())})
+		servers = listServerAds([]common.ServerType{common.ServerType(queryParams.ToInternalServerType())})
 	} else {
-		servers = ListServerAds([]common.ServerType{common.OriginType, common.CacheType})
+		servers = listServerAds([]common.ServerType{common.OriginType, common.CacheType})
 	}
 	healthTestUtilsMutex.RLock()
 	defer healthTestUtilsMutex.RUnlock()
