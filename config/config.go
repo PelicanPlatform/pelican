@@ -819,7 +819,7 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 	if originPort == 0 {
 		viper.Set("Origin.CalculatedPort", "any")
 	}
-	viper.Set("Cache.CalculatedPort", strconv.Itoa(originPort))
+	viper.Set("Cache.CalculatedPort", strconv.Itoa(cachePort))
 	if cachePort == 0 {
 		viper.Set("Cache.CalculatedPort", "any")
 	}
