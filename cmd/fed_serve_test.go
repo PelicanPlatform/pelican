@@ -85,8 +85,10 @@ func TestFedServePosixOrigin(t *testing.T) {
 	viper.Set("Registry.DbLocation", filepath.Join(t.TempDir(), "ns-registry.sqlite"))
 	viper.Set("Registry.RequireOriginApproval", false)
 	viper.Set("Registry.RequireCacheApproval", false)
+	defer cancel()
 
 	fedCancel, err := launchers.LaunchModules(ctx, modules)
+
 	defer fedCancel()
 	if err != nil {
 		log.Errorln("Failure in fedServeInternal:", err)

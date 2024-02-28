@@ -640,13 +640,6 @@ root_default: /run/pelican/xrootd/cache
 default: $XDG_RUNTIME_DIR/pelican/cache
 components: ["cache"]
 ---
-name: Cache.NamespacePrefix
-description: >-
-  The filepath prefix at which a cache is registered in the registry. Note that this value is not expected to be set by the user.
-type: string
-default: none
-components: ["cache"]
----
 name: Cache.XRootDPrefix
 description: >-
   The directory prefix for the xrootd cache configuration files.
@@ -656,7 +649,7 @@ components: ["cache"]
 ---
 name: Cache.Url
 description: >-
-  The origin's configured URL, as reported to XRootD. This is the file transfer endpoint for the cache.
+  The cache's configured URL, as reported to XRootD. This is the file transfer endpoint for the cache.
 type: url
 default: https://${Server.Hostname}:${Cache.Port}
 components: ["cache"]
@@ -1315,6 +1308,23 @@ description: >-
   for the server.
 type: int
 default: 8443
+deprecated: true
+components: ["origin", "cache"]
+---
+name: Xrootd.RunLocation
+description: >-
+  [Deprecated] `Xrootd.RunLocation` is deprecated and will be removed in a future release. Please migrate to
+  use `Cache.RunLocation` or `Origin.RunLocation` instread.
+
+  A directory where temporary configurations will be stored for the xrootd daemon
+  started by the origin or cache.
+  For non-root servers, if $XDG_RUNTIME_DIR is not set, a temporary directory will
+  be created (and removed on shutdown)
+  This setting is deprecated; please use the Cache.RunLocation or Origin.RunLocation, as appropriate,
+  for the server.
+type: filename
+root_default: /run/pelican/xrootd
+default: $XDG_RUNTIME_DIR/pelican
 deprecated: true
 components: ["origin", "cache"]
 ---

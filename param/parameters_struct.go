@@ -29,7 +29,6 @@ type Config struct {
 		DataLocation string
 		EnableVoms bool
 		ExportLocation string
-		NamespacePrefix string
 		Port int
 		RunLocation string
 		Url string
@@ -240,6 +239,7 @@ type Config struct {
 		Mount string
 		Port int
 		RobotsTxtFile string
+		RunLocation string
 		ScitokensConfig string
 		Sitename string
 		SummaryMonitoringHost string
@@ -253,7 +253,6 @@ type configWithType struct {
 		DataLocation struct { Type string; Value string }
 		EnableVoms struct { Type string; Value bool }
 		ExportLocation struct { Type string; Value string }
-		NamespacePrefix struct { Type string; Value string }
 		Port struct { Type string; Value int }
 		RunLocation struct { Type string; Value string }
 		Url struct { Type string; Value string }
@@ -464,6 +463,7 @@ type configWithType struct {
 		Mount struct { Type string; Value string }
 		Port struct { Type string; Value int }
 		RobotsTxtFile struct { Type string; Value string }
+		RunLocation struct { Type string; Value string }
 		ScitokensConfig struct { Type string; Value string }
 		Sitename struct { Type string; Value string }
 		SummaryMonitoringHost struct { Type string; Value string }

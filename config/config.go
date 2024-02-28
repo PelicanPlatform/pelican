@@ -745,11 +745,43 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 			if err != nil {
 				return err
 			}
+			// XRootD RunLocation usage logic:
+			// - Origin.RunLocation and Cache.RunLocation take precedence for their respective types
+			// - If neither keys are set and Xrootd.RunLocation is, then use that and emit a warning
+			// - If neither key is set, Xrootd.Runlocation is, and both modules are enabled, then we don't
+			//   know the next steps -- throw an error
+			cacheLocation := viper.GetString("Cache.RunLocation")
+			originLocation := viper.GetString("Origin.RunLocation")
+			xrootdLocation := viper.GetString("Xrootd.RunLocation")
+			xrootdLocationIsSet := viper.IsSet("Xrootd.Location")
+			cacheLocFallbackToXrootd := false
+			originLocFallbackToXrootd := false
+			if currentServers.IsEnabled(CacheType) {
+				if !viper.IsSet("Cache.RunLocation") {
+					if xrootdLocationIsSet {
+						cacheLocFallbackToXrootd = true
+						cacheLocation = xrootdLocation
+					} else {
+						cacheLocation = filepath.Join(runtimeDir, "cache")
+					}
+				}
+			}
+			if currentServers.IsEnabled(OriginType) && !viper.IsSet("Origin.RunLocation") {
+				if xrootdLocationIsSet {
+					originLocFallbackToXrootd = true
+					originLocation = xrootdLocation
+				} else {
+					originLocation = filepath.Join(runtimeDir, "origin")
+				}
+			}
+			if cacheLocFallbackToXrootd && originLocFallbackToXrootd {
+				return errors.New("Xrootd.RunLocation is set, but both modules are enabled.  Please set Cache.RunLocation and Origin.RunLocation or disable Xrootd.RunLocation so the default location can be used.")
+			}
 			if currentServers.IsEnabled(OriginType) {
-				viper.SetDefault("Origin.RunLocation", filepath.Join(runtimeDir, "origin"))
+				viper.SetDefault("Origin.RunLocation", originLocation)
 			}
 			if currentServers.IsEnabled(CacheType) {
-				viper.SetDefault("Cache.RunLocation", filepath.Join(runtimeDir, "cache"))
+				viper.SetDefault("Cache.RunLocation", cacheLocation)
 			}
 			viper.SetDefault("Cache.DataLocation", path.Join(runtimeDir, "xcache"))
 		} else {
@@ -757,11 +789,43 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 			if err != nil {
 				return err
 			}
+			// XRootD RunLocation usage logic:
+			// - Origin.RunLocation and Cache.RunLocation take precedence for their respective types
+			// - If neither keys are set and Xrootd.RunLocation is, then use that and emit a warning
+			// - If neither key is set, Xrootd.Runlocation is, and both modules are enabled, then we don't
+			//   know the next steps -- throw an error
+			cacheLocation := viper.GetString("Cache.RunLocation")
+			originLocation := viper.GetString("Origin.RunLocation")
+			xrootdLocation := viper.GetString("Xrootd.RunLocation")
+			xrootdLocationIsSet := viper.IsSet("Xrootd.Location")
+			cacheLocFallbackToXrootd := false
+			originLocFallbackToXrootd := false
+			if currentServers.IsEnabled(CacheType) {
+				if !viper.IsSet("Cache.RunLocation") {
+					if xrootdLocationIsSet {
+						cacheLocFallbackToXrootd = true
+						cacheLocation = xrootdLocation
+					} else {
+						cacheLocation = filepath.Join(dir, "cache")
+					}
+				}
+			}
+			if currentServers.IsEnabled(OriginType) && !viper.IsSet("Origin.RunLocation") {
+				if xrootdLocationIsSet {
+					originLocFallbackToXrootd = true
+					originLocation = xrootdLocation
+				} else {
+					originLocation = filepath.Join(dir, "origin")
+				}
+			}
+			if cacheLocFallbackToXrootd && originLocFallbackToXrootd {
+				return errors.New("Xrootd.RunLocation is set, but both modules are enabled.  Please set Cache.RunLocation and Origin.RunLocation or disable Xrootd.RunLocation so the default location can be used.")
+			}
 			if currentServers.IsEnabled(OriginType) {
-				viper.SetDefault("Origin.RunLocation", filepath.Join(dir, "origin"))
+				viper.SetDefault("Origin.RunLocation", originLocation)
 			}
 			if currentServers.IsEnabled(CacheType) {
-				viper.SetDefault("Cache.RunLocation", filepath.Join(dir, "cache"))
+				viper.SetDefault("Cache.RunLocation", cacheLocation)
 			}
 			viper.SetDefault("Cache.DataLocation", path.Join(dir, "xcache"))
 			cleanupDirOnShutdown(ctx, dir)
@@ -825,12 +889,6 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 	}
 	if cacheFallbackToXrootd && originFallbackToXrootd {
 		return errors.New("neither Cache.Port nor Origin.Port is set but both modules are enabled.  Please set both variables")
-	} else if cacheFallbackToXrootd {
-		log.Warningln("Cache.Port is not set but the Cache module is enabled; falling back to the deprecated Xrootd.Port")
-		cachePort = xrootdPort
-	} else if originFallbackToXrootd {
-		log.Warningln("Origin.Port is not set but the Origin module is enabled; falling back to the deprecated Xrootd.Port")
-		originPort = xrootdPort
 	}
 
 	viper.Set("Origin.CalculatedPort", strconv.Itoa(originPort))

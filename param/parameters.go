@@ -76,7 +76,6 @@ func (bP ObjectParam) Unmarshal(rawVal any) error {
 var (
 	Cache_DataLocation = StringParam{"Cache.DataLocation"}
 	Cache_ExportLocation = StringParam{"Cache.ExportLocation"}
-	Cache_NamespacePrefix = StringParam{"Cache.NamespacePrefix"}
 	Cache_RunLocation = StringParam{"Cache.RunLocation"}
 	Cache_Url = StringParam{"Cache.Url"}
 	Cache_XRootDPrefix = StringParam{"Cache.XRootDPrefix"}
@@ -174,6 +173,7 @@ var (
 	Xrootd_ManagerHost = StringParam{"Xrootd.ManagerHost"}
 	Xrootd_Mount = StringParam{"Xrootd.Mount"}
 	Xrootd_RobotsTxtFile = StringParam{"Xrootd.RobotsTxtFile"}
+	Xrootd_RunLocation = StringParam{"Xrootd.RunLocation"}
 	Xrootd_ScitokensConfig = StringParam{"Xrootd.ScitokensConfig"}
 	Xrootd_Sitename = StringParam{"Xrootd.Sitename"}
 	Xrootd_SummaryMonitoringHost = StringParam{"Xrootd.SummaryMonitoringHost"}

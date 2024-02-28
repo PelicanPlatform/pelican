@@ -234,22 +234,22 @@ func (t TestFileTransferImpl) RunTests(ctx context.Context, baseUrl, audienceUrl
 	return true, nil
 }
 
-// Run a file transfer test suite with upload/download/delete a test file from
-// the server and a xrootd service. It expects `baseUrl` to be the url to the xrootd
-// endpoint, `issuerUrl` be the url to issue scitoken for file transfer, and the
-// test file content/name be based on `testType`
+// Run a file transfer test to download a test file from
+// the server and a xrootd service. It expects `cacheUrl` to be the url to the xrootd cache,
+// `issuerUrl` be the url to issue  a scitoken for file transfer, `filePath“ to be the namespace
+// and file name of the test file, and the test file to contain the string `body`
 //
 // Note that for this test to work, you need to have the `issuerUrl` registered in
 // your xrootd as a list of trusted token issuers and the issuer is expected to follow
 // WLCG rules for issuer metadata discovery and public key access
 //
 // Read more: https://github.com/WLCG-AuthZ-WG/common-jwt-profile/blob/master/profile.md#token-verification
-func (t TestFileTransferImpl) RunTestsCache(ctx context.Context, origUrl, cacheUrl, issuerUrl string, namespace string, body string) (bool, error) {
+func (t TestFileTransferImpl) RunTestsCache(ctx context.Context, cacheUrl, issuerUrl string, filePath string, body string) (bool, error) {
 	t.audiences = []string{"https://wlcg.cern.ch/jwt/v1/any"}
 	t.issuerUrl = issuerUrl
 	t.testBody = body
 
-	downloadUrl, err := url.JoinPath(cacheUrl, namespace)
+	downloadUrl, err := url.JoinPath(cacheUrl, filePath)
 	if err != nil {
 		return false, errors.Wrap(err, "Unable to crete download URL")
 	}

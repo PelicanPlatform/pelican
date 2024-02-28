@@ -91,7 +91,7 @@ func TestXrootDCacheConfig(t *testing.T) {
 		// Set our config
 		viper.Set("Cache.Concurrency", 10)
 		dirname := t.TempDir()
-		viper.Set("Xrootd.RunLocation", dirname)
+		viper.Set("Cache.RunLocation", dirname)
 
 		// Generate the xrootd config
 		configPath, err := ConfigXrootd(ctx, false)
@@ -116,7 +116,7 @@ func TestXrootDCacheConfig(t *testing.T) {
 
 		// Set our config
 		dirname := t.TempDir()
-		viper.Set("Xrootd.RunLocation", dirname)
+		viper.Set("Cache.RunLocation", dirname)
 
 		// Generate the xrootd config
 		configPath, err := ConfigXrootd(ctx, false)

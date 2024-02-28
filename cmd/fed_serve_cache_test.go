@@ -112,7 +112,7 @@ func TestFedServeCache(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	// In this case 403 means the cache is runngin
+	// In this case 403 means the cache is running
 	err = server_utils.WaitUntilWorking(ctx, "GET", param.Cache_Url.GetString(), "xrootd", 403)
 	require.NoError(t, err)
 
@@ -120,7 +120,7 @@ func TestFedServeCache(t *testing.T) {
 	issuerUrl, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
 
-	ok, err := fileTests.RunTestsCache(ctx, param.Origin_Url.GetString(), param.Cache_Url.GetString(), issuerUrl, "/test/test-file.txt", "This is the content of the test file.")
+	ok, err := fileTests.RunTestsCache(ctx, param.Cache_Url.GetString(), issuerUrl, "/test/test-file.txt", "This is the content of the test file.")
 	require.NoError(t, err)
 	require.True(t, ok)
 

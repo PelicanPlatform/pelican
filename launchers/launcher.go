@@ -209,14 +209,22 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 	// Origin needs to advertise once before the cache starts
 	if modules.IsEnabled(config.CacheType) && modules.IsEnabled(config.OriginType) {
 		log.Debug("Advertise Origin")
-		if err := server_ui.Advertise(ctx, servers); err != nil {
+		if err = server_ui.Advertise(ctx, servers); err != nil {
 			return shutdownCancel, err
 		}
 	}
 
 	if modules.IsEnabled(config.CacheType) {
 		// Give five seconds for the origin to finish advertising to the director
-		time.Sleep(5 * time.Second)
+		if modules.IsEnabled(config.OriginType) {
+			time.Sleep(5 * time.Second)
+		} else {
+			desiredURL := param.Server_ExternalWebUrl.GetString() + "/.well-known/openid-configuration"
+			if err = server_utils.WaitUntilWorking(ctx, "GET", desiredURL, "director", 200); err != nil {
+				log.Errorln("Director does not seem to be working:", err)
+				return shutdownCancel, err
+			}
+		}
 		server, err := CacheServe(ctx, engine, egrp)
 		if err != nil {
 			return shutdownCancel, err

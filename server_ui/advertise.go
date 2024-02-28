@@ -104,9 +104,9 @@ func advertiseInternal(ctx context.Context, server server_utils.XRootDServer) er
 	webUrl := param.Server_ExternalWebUrl.GetString()
 	prefix := param.Origin_NamespacePrefix.GetString()
 	if server.GetServerType().IsEnabled(config.CacheType) {
-		serverUrl = param.Origin_Url.GetString()
+		serverUrl = param.Cache_Url.GetString()
 		webUrl = param.Server_ExternalWebUrl.GetString()
-		prefix = param.Cache_NamespacePrefix.GetString()
+		prefix = "/caches/" + param.Xrootd_Sitename.GetString()
 	}
 
 	ad, err := server.CreateAdvertisement(name, serverUrl, webUrl)

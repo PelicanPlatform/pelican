@@ -34,7 +34,6 @@ import (
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/xrootd"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -54,10 +53,6 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) (
 	if err != nil {
 		return nil, err
 	}
-
-	cachePrefix := "/caches/" + param.Xrootd_Sitename.GetString()
-
-	viper.Set("Cache.NamespacePrefix", cachePrefix)
 
 	broker.RegisterBrokerCallback(ctx, engine.Group("/"))
 	broker.LaunchNamespaceKeyMaintenance(ctx, egrp)
@@ -83,5 +78,5 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) (
 
 // Finish configuration of the cache server.
 func CacheServeFinish(ctx context.Context, egrp *errgroup.Group) error {
-	return server_ui.RegisterNamespaceWithRetry(ctx, egrp, param.Cache_NamespacePrefix.GetString())
+	return server_ui.RegisterNamespaceWithRetry(ctx, egrp, "/caches/"+param.Xrootd_Sitename.GetString())
 }
