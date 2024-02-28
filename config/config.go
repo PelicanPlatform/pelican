@@ -396,6 +396,9 @@ func DiscoverFederation() error {
 	if err != nil {
 		return errors.Wrapf(err, "Invalid federation value %s:", federationStr)
 	}
+	if federationUrl.Path != "" {
+		return errors.New("Invalid federation discovery url is set. No path allowed for federation discovery url")
+	}
 	federationUrl.Scheme = "https"
 	if len(federationUrl.Path) > 0 && len(federationUrl.Host) == 0 {
 		federationUrl.Host = federationUrl.Path

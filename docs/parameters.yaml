@@ -225,6 +225,7 @@ components: ["origin"]
 name: Federation.DiscoveryUrl
 description: >-
   A URL pointing to the federation's metadata discovery host.
+  NOTE: this does not work if the url contains a path!
 type: url
 default: none
 components: ["*"]
