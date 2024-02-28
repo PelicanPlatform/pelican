@@ -41,7 +41,7 @@ func doReload() error {
 		return nil
 	}
 	fileName := param.Server_UIPasswordFile.GetString()
-	fp, err := os.OpenFile(fileName, os.O_WRONLY|os.O_CREATE, 0600)
+	fp, err := os.OpenFile(fileName, os.O_RDONLY|os.O_CREATE, 0600)
 	if err != nil {
 		log.Warning("Failed to open auth database for reload:", err)
 		return err
