@@ -38,9 +38,9 @@ type (
 	TestType         string
 	TestFileTransfer interface {
 		generateFileTestScitoken(audienceUrl string) (string, error)
-		UploadTestfile(ctx context.Context, baseUrl string, testType TestType) (string, error)
-		DownloadTestfile(ctx context.Context, downloadUrl string) error
-		DeleteTestfile(ctx context.Context, fileUrl string) error
+		uploadTestfile(ctx context.Context, baseUrl string, testType TestType) (string, error)
+		downloadTestfile(ctx context.Context, downloadUrl string) error
+		deleteTestfile(ctx context.Context, fileUrl string) error
 		RunTests(ctx context.Context, baseUrl string, testType TestType) (bool, error)
 	}
 	TestFileTransferImpl struct {
@@ -65,7 +65,6 @@ func (t TestType) String() string {
 	return string(t)
 }
 
-// TODO: Replace by CreateEncodedToken once it's free from main package #320
 func (t TestFileTransferImpl) generateFileTestScitoken() (string, error) {
 	// Issuer is whichever server that initiates the test, so it's the server itself
 	issuerUrl := param.Server_ExternalWebUrl.GetString()
