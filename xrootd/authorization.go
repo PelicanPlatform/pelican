@@ -293,7 +293,7 @@ func EmitAuthfile(server server_utils.XRootDServer) error {
 					outStr += param.Origin_NamespacePrefix.GetString() + " lr "
 				}
 				output.Write([]byte(outStr + strings.Join(words[2:], " ") + "\n"))
-			} else if server.GetServerType().IsEnabled(config.CacheType) {
+			} else if server.GetServerType().IsEnabled(config.CacheType) && param.Cache_SelfTest.GetBool() {
 				// Set up cache self-test public read
 				outStr := "u * /pelican/monitoring lr "
 				output.Write([]byte(outStr + strings.Join(words[2:], " ") + "\n"))
@@ -321,7 +321,11 @@ func EmitAuthfile(server server_utils.XRootDServer) error {
 		// If nothing has been written to the output yet
 		var outStr string
 		if !foundPublicLine {
-			outStr = "u * /pelican/monitoring lr "
+			if param.Cache_SelfTest.GetBool() {
+				outStr = "u * /pelican/monitoring lr "
+			} else {
+				outStr = "u * "
+			}
 		}
 		for _, ad := range server.GetNamespaceAds() {
 			if ad.PublicRead && ad.Path != "" {

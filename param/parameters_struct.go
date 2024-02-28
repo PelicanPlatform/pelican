@@ -13,6 +13,8 @@ type Config struct {
 		EnableVoms bool
 		ExportLocation string
 		Port int
+		SelfTest bool
+		SelfTestInterval time.Duration
 		XRootDPrefix string
 	}
 	Client struct {
@@ -232,6 +234,8 @@ type configWithType struct {
 		EnableVoms struct { Type string; Value bool }
 		ExportLocation struct { Type string; Value string }
 		Port struct { Type string; Value int }
+		SelfTest struct { Type string; Value bool }
+		SelfTestInterval struct { Type string; Value time.Duration }
 		XRootDPrefix struct { Type string; Value string }
 	}
 	Client struct {
