@@ -116,6 +116,13 @@ func serveCacheInternal(cmdCtx context.Context) (context.CancelFunc, error) {
 		return shutdownCancel, err
 	}
 
+	err = cache_ui.InitSelfTestDir()
+	if err != nil {
+		return shutdownCancel, err
+	}
+
+	cache_ui.PeriodicCacheSelfTest(ctx, egrp)
+
 	engine, err := web_ui.GetEngine()
 	if err != nil {
 		return shutdownCancel, err
