@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2023, University of Nebraska-Lincoln
+ * Copyright (C) 2024, University of Nebraska-Lincoln
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -15,6 +15,7 @@
  * limitations under the License.
  *
  ***************************************************************/
+
 package client
 
 import (
