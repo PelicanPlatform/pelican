@@ -293,6 +293,10 @@ func EmitAuthfile(server server_utils.XRootDServer) error {
 					outStr += param.Origin_NamespacePrefix.GetString() + " lr "
 				}
 				output.Write([]byte(outStr + strings.Join(words[2:], " ") + "\n"))
+			} else if server.GetServerType().IsEnabled(config.CacheType) {
+				// Set up cache self-test public read
+				outStr := "u * /pelican/monitoring lr "
+				output.Write([]byte(outStr + strings.Join(words[2:], " ") + "\n"))
 			} else {
 				output.Write([]byte(lineContents + " "))
 			}
@@ -302,7 +306,7 @@ func EmitAuthfile(server server_utils.XRootDServer) error {
 			output.Write([]byte(lineContents + "\n"))
 		}
 	}
-	// If Origin and no authfile already exists, add the ./well-known to the authfile
+	// If Origin has no authfile already exists, add the ./well-known to the authfile
 	if !foundPublicLine && server.GetServerType().IsEnabled(config.OriginType) {
 		outStr := "u * /.well-known lr"
 		if param.Origin_EnablePublicReads.GetBool() {
@@ -317,7 +321,7 @@ func EmitAuthfile(server server_utils.XRootDServer) error {
 		// If nothing has been written to the output yet
 		var outStr string
 		if !foundPublicLine {
-			outStr = "u * "
+			outStr = "u * /pelican/monitoring lr "
 		}
 		for _, ad := range server.GetNamespaceAds() {
 			if ad.PublicRead && ad.Path != "" {
