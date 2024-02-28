@@ -35,6 +35,9 @@ import (
 
 func TestDoReload(t *testing.T) {
 	viper.Reset()
+	savedAuthDB := authDB.Load()
+	authDB.Store(nil)
+	defer authDB.Store(savedAuthDB)
 
 	tempDir := t.TempDir()
 	passwordFile := path.Join(tempDir, "/authdb")
