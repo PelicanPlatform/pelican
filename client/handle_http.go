@@ -61,6 +61,7 @@ var (
 )
 
 type (
+	// Error type for when the transfer started to return data then completely stopped
 	StoppedTransferError struct {
 		Err string
 	}
@@ -462,7 +463,13 @@ func (te *TransferEngine) runMux() error {
 	activeJobs := make(map[uuid.UUID][]*TransferJob)
 	closing := false
 	closedWorkChan := false
+	// The main body of the routine; continuously select on one of the channels,
+	// which indicate some event occurs, until an exit condition is met.
 	for {
+		// The channels we interact with on depend on how many clients and how many results we have.
+		// Since this is dynamic, we can't do a fixed-size case statement and instead need to use reflect.Select.
+		// This helper function iterates through the TransferEngine's internals with a read-lock held, building up
+		// the list of work.
 		cases, workMap, workKeys, resultsMap, resultsKeys := func() (cases []reflect.SelectCase, workMap map[uuid.UUID]chan *TransferJob, workKeys []uuid.UUID, resultsMap map[uuid.UUID]chan *TransferResults, resultsKeys []uuid.UUID) {
 			te.clientLock.RLock()
 			defer te.clientLock.RUnlock()
@@ -498,26 +505,39 @@ func (te *TransferEngine) runMux() error {
 				cases[ctr].Send = reflect.ValueOf(tmpResults[key][0])
 				ctr++
 			}
+			// Notification a new client has been started; recompute the channels
 			cases[ctr].Dir = reflect.SelectRecv
 			cases[ctr].Chan = reflect.ValueOf(te.notifyChan)
+			// Notification that a transfer has finished.
 			cases[ctr+1].Dir = reflect.SelectRecv
 			cases[ctr+1].Chan = reflect.ValueOf(te.results)
+			// Placeholder; never used.
 			cases[ctr+2].Dir = reflect.SelectRecv
 			cases[ctr+2].Chan = reflect.ValueOf(nil)
+			// Notification that the TransferEngine has been cancelled; shutdown immediately
 			cases[ctr+3].Dir = reflect.SelectRecv
 			cases[ctr+3].Chan = reflect.ValueOf(te.ctx.Done())
+			// Notification the translation from job-to-file has been completed.
 			cases[ctr+4].Dir = reflect.SelectRecv
 			cases[ctr+4].Chan = reflect.ValueOf(te.jobLookupDone)
+			// Notification the transfer engine has been "closed".  No more jobs will come in
+			// and shutdown can start.
 			cases[ctr+5].Dir = reflect.SelectRecv
 			cases[ctr+5].Chan = reflect.ValueOf(te.closeChan)
+			// The transfer engine keeps statistics on the number of concurrent transfers occur
+			// (this is later used to normalize the minimum transfer rate); this ticker periodically
+			// will recalculate the average.
 			cases[ctr+6].Dir = reflect.SelectRecv
 			cases[ctr+6].Chan = reflect.ValueOf(te.ewmaTick.C)
 			return
 		}()
 		if closing && len(workMap) == 0 && !closedWorkChan {
+			// If there's no more incoming work, we can safely close the work channel
+			// which will cause the job-to-file worker to shutdown.
 			close(te.work)
 			closedWorkChan = true
 		}
+		// Statement purposely left commented out; too heavyweight/noisy to leave in at runtime but useful for developer debugging.
 		//log.Debugf("runMux running with %d active client channels and sending %d client responses", len(workMap), len(resultsMap))
 		chosen, recv, ok := reflect.Select(cases)
 		if chosen < len(workMap) {
@@ -551,21 +571,30 @@ func (te *TransferEngine) runMux() error {
 			job := clientJob.job
 			job.activeXfer.Add(-1)
 			if len(tmpResults[id]) == 1 {
+				// The last result back to this client has been sent; delete the
+				// slice from the map and check if the overall job is done.
 				delete(tmpResults, id)
-				// Test to see if the job is done
+				// Test to see if the transfer job is done (true if job-to-file translation
+				// has completed and there are no remaining active transfers)
 				if job.lookupDone.Load() && job.activeXfer.Load() == 0 {
 					log.Debugln("Job is done")
 					if len(activeJobs[id]) == 1 {
+						// Delete the job from the list of active jobs
 						delete(activeJobs, id)
 						func() {
 							te.clientLock.Lock()
 							defer te.clientLock.Unlock()
+							// If the client is closed and there are no remaining
+							// jobs for that client, we can close the results channel
+							// for the client -- a clean shutdown of the client.
 							if te.workMap[id] == nil {
 								close(te.resultsMap[id])
 							}
 						}()
 					} else {
-						newJobList := make([]*TransferJob, 0)
+						// Scan through the list of active jobs, removing the recently
+						// completed one and saving the updated list.
+						newJobList := make([]*TransferJob, 0, len(activeJobs[id]))
 						for _, oldJob := range activeJobs[id] {
 							if oldJob.uuid != job.uuid {
 								newJobList = append(newJobList, oldJob)
@@ -611,14 +640,10 @@ func (te *TransferEngine) runMux() error {
 			// If no transfers were created and we have an error, the job is no
 			// longer active
 			if job.job.lookupErr != nil && job.job.totalXfer == 0 {
-				jobList := activeJobs[job.uuid]
-				newJobList := make([]*TransferJob, 0)
-				for _, oldJob := range jobList {
-					if oldJob.uuid != job.job.uuid {
-						newJobList = append(newJobList, oldJob)
-					}
-				}
-				activeJobs[job.uuid] = newJobList
+				// Remove this job from the list of active jobs for the client.
+				activeJobs[job.uuid] = slices.DeleteFunc(activeJobs[job.uuid], func(oldJob *TransferJob) bool {
+					return oldJob.uuid == job.job.uuid
+				})
 			}
 		} else if chosen == len(workMap)+len(resultsMap)+5 {
 			// Notification that the engine should shut down
