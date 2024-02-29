@@ -181,6 +181,7 @@ func copyMain(cmd *cobra.Command, args []string) {
 		log.Errorf("Unable to parse preferred cache (%s) as URL: %s", preferredCache, err.Error())
 	} else {
 		caches[0] = preferredCacheURL
+		log.Debugln("Preferred cache for transfer:", preferredCacheURL)
 	}
 
 	if len(source) > 1 {

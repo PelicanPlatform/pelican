@@ -716,6 +716,7 @@ func (tc *TransferClient) NewTransferJob(remoteUrl *url.URL, localPath string, u
 
 	copyUrl := *remoteUrl // Make a copy of the input URL to avoid concurrent issues.
 	tj = &TransferJob{
+		caches:        tc.caches,
 		recursive:     recursive,
 		localPath:     localPath,
 		remoteURL:     &copyUrl,
