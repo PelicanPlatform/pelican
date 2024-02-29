@@ -80,11 +80,6 @@ type (
 		Err error
 	}
 
-	FileDownloadError struct {
-		Text string
-		Err  error
-	}
-
 	// Represents the results of a single object transfer,
 	// potentially across multiple attempts / retries.
 	TransferResults struct {
@@ -268,14 +263,6 @@ func (e *SlowTransferError) Error() string {
 func (e *SlowTransferError) Is(target error) bool {
 	_, ok := target.(*SlowTransferError)
 	return ok
-}
-
-func (e *FileDownloadError) Error() string {
-	return e.Text
-}
-
-func (e *FileDownloadError) Unwrap() error {
-	return e.Err
 }
 
 // Determines whether or not we can interact with the site HTTP proxy
