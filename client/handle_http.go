@@ -1246,6 +1246,14 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	if !transfer.Proxy {
 		transport.Proxy = nil
 	}
+	if transfer.Url.Scheme == "unix" {
+		transport.Proxy = nil // Proxies make no sense when reading via a Unix socket
+		transport = transport.Clone()
+		transport.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
+			dialer := net.Dialer{}
+			return dialer.DialContext(ctx, "unix", transfer.Url.Path)
+		}
+	}
 	httpClient, ok := client.HTTPClient.(*http.Client)
 	if !ok {
 		return 0, 0, "", errors.New("Internal error: implementation is not a http.Client type")

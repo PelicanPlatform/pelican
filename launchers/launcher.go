@@ -34,6 +34,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/broker"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/file_cache"
 	"github.com/pelicanplatform/pelican/origin_ui"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_ui"
@@ -181,6 +182,15 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 			}
 		}
 	}
+
+	if modules.IsEnabled(config.LocalCacheType) {
+		log.Debugln("Starting local cache listener")
+		if err := simple_cache.LaunchListener(ctx, egrp); err != nil {
+			log.Errorln("Failure when starting the local cache listener:", err)
+			return shutdownCancel, err
+		}
+	}
+
 	log.Info("Starting web engine...")
 	lnReference = nil
 	egrp.Go(func() error {
