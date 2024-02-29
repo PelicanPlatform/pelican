@@ -43,6 +43,7 @@ import (
 )
 
 type (
+	HealthTestStatus  string
 	PromDiscoveryItem struct {
 		Targets []string          `json:"targets"`
 		Labels  map[string]string `json:"labels"`
@@ -52,14 +53,21 @@ type (
 		ErrGrp        *errgroup.Group
 		ErrGrpContext context.Context
 		Cancel        context.CancelFunc
+		Status        HealthTestStatus
+	}
+	originStatUtil struct {
+		Context  context.Context
+		Cancel   context.CancelFunc
+		Errgroup *errgroup.Group
 	}
 )
 
-type originStatUtil struct {
-	Context  context.Context
-	Cancel   context.CancelFunc
-	Errgroup *errgroup.Group
-}
+const (
+	HealthStatusUnknown HealthTestStatus = "Unknown"
+	HealthStatusInit    HealthTestStatus = "Initializing"
+	HealthStatusOK      HealthTestStatus = "OK"
+	HealthStatusError   HealthTestStatus = "Error"
+)
 
 var (
 	minClientVersion, _  = version.NewVersion("7.0.0")
@@ -574,6 +582,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType common.S
 							Cancel:        cancel,
 							ErrGrp:        errgrp,
 							ErrGrpContext: errgrpCtx,
+							Status:        HealthStatusInit,
 						}
 						errgrp.Go(func() error {
 							LaunchPeriodicDirectorTest(cancelCtx, sAd)
@@ -610,6 +619,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType common.S
 				Cancel:        cancel,
 				ErrGrp:        errgrp,
 				ErrGrpContext: errgrpCtx,
+				Status:        HealthStatusUnknown,
 			}
 			errgrp.Go(func() error {
 				LaunchPeriodicDirectorTest(cancelCtx, sAd)
