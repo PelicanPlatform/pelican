@@ -45,7 +45,7 @@ const PubkeyField = ({namespace}: PubkeyFieldProps) => {
                 }
             }}
             error={error}
-            helperText={error ? "Invalid JSON" : "Pubkey is your origin's public JWKS"}
+            helperText={error ? "Invalid JSON" : "Pubkey is your origin's public key in JWKS form"}
             placeholder={JSON.stringify(JWKPlaceholder, null, 2)}
             onChange={(e) => {
                 try {

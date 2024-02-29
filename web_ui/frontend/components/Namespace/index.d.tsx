@@ -1,3 +1,8 @@
+import {Namespace} from "@/components/Main";
+import {Authenticated} from "@/helpers/login";
+import {PendingCardProps} from "./PendingCard";
+import {CardProps} from "./Card";
+
 export interface NamespaceAdminMetadata {
     user_id: string;
     description: string;
@@ -10,3 +15,5 @@ export interface NamespaceAdminMetadata {
     created_at: string;
     updated_at: string;
 }
+
+export type NamespaceCardProps = CardProps & PendingCardProps

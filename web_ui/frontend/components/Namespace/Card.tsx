@@ -6,17 +6,20 @@ import {Download, Edit, Person} from "@mui/icons-material";
 import Link from "next/link";
 
 import InformationDropdown from "./InformationDropdown";
+import {NamespaceIcon} from "@/components/Namespace/index";
 
-export const Card = ({
-                         namespace,
-                         authenticated,
-                         editUrl
-                     } : {namespace: Namespace, authenticated?: Authenticated, editUrl: string}) => {
+export interface CardProps {
+    namespace: Namespace
+    authenticated?: Authenticated
+}
+
+export const Card = ({ namespace, authenticated } : CardProps) => {
+
     const ref = useRef<HTMLDivElement>(null);
     const [transition, setTransition] = useState<boolean>(false);
 
     return (
-        <Paper elevation={transition ? 2 : 0} sx={{mb:1}}>
+        <Paper elevation={transition ? 2 : 0}>
             <Box
                 sx={{
                     cursor: "pointer",
@@ -34,33 +37,38 @@ export const Card = ({
                 onClick={() => setTransition(!transition)}
             >
                 <Box my={"auto"} ml={1} display={"flex"} flexDirection={"row"}>
-                    { authenticated !== undefined && authenticated.user == namespace.admin_metadata.user_id &&
-                        <Tooltip title={"Created By You"}>
-                            <Avatar sx={{height: "25px", width: "25px", my: "auto", mr:2}}>
-                                <Person/>
-                            </Avatar>
-                        </Tooltip>
-                    }
-                    <Typography>{namespace.prefix}</Typography>
+                    <NamespaceIcon namespace={namespace} />
+                    <Typography sx={{pt: "2px"}}>{namespace.prefix}</Typography>
                 </Box>
-                <Box>
-                    <Tooltip title={"Download JWK"}>
-                        <Link href={`/api/v1.0/registry_ui/namespaces/${namespace.id}/pubkey`}>
-                            <IconButton onClick={(e: React.MouseEvent) => e.stopPropagation()} sx={{mx: 1}}>
-                                <Download/>
-                            </IconButton>
-                        </Link>
-                    </Tooltip>
-                    {
-                        authenticated?.role == "admin" &&
-                        <Tooltip title={"Edit Registration"}>
-                            <Link href={editUrl}>
-                                <IconButton onClick={(e: React.MouseEvent) => e.stopPropagation()}>
-                                    <Edit/>
+                <Box display={"flex"} flexDirection={"row"}>
+                    <Box my={"auto"} display={"flex"}>
+                        { authenticated !== undefined && authenticated.user == namespace.admin_metadata.user_id &&
+                            <Box sx={{borderRight: "solid 1px #ececec", mr: 1}}>
+                                <Tooltip title={"Created By You"}>
+                                    <Avatar sx={{height: "40px", width: "40px", my: "auto", mr:2}}>
+                                        <Person/>
+                                    </Avatar>
+                                </Tooltip>
+                            </Box>
+                        }
+                        <Tooltip title={"Download Public Key"}>
+                            <a href={`/api/v1.0/registry_ui/namespaces/${namespace.id}/pubkey`}>
+                                <IconButton onClick={(e: React.MouseEvent) => e.stopPropagation()} sx={{mx: 1}}>
+                                    <Download/>
                                 </IconButton>
-                            </Link>
+                            </a>
                         </Tooltip>
-                    }
+                        {
+                            authenticated?.role == "admin" &&
+                            <Tooltip title={"Edit Registration"}>
+                                <Link href={`/registry/${namespace.type}/edit/?id=${namespace.id}`}>
+                                    <IconButton onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+                                        <Edit/>
+                                    </IconButton>
+                                </Link>
+                            </Tooltip>
+                        }
+                    </Box>
                 </Box>
             </Box>
             <Box ref={ref}>

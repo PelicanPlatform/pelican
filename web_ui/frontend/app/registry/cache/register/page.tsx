@@ -47,7 +47,7 @@ export default function Register() {
         try {
             const response = await secureFetch("/api/v1.0/registry_ui/namespaces", {
                 body: JSON.stringify({
-                    prefix: `/cache/${formData.get("prefix")}`,
+                    prefix: `/caches/${formData.get("prefix")}`,
                     pubkey: formData.get("pubkey"),
                     admin_metadata: {
                         description: formData.get("description"),

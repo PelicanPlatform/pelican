@@ -1,14 +1,13 @@
 import {Namespace} from "@/components/Main";
 import Card from "./Card";
-import CacheCard from "./CacheCard";
-import OriginCard from "./OriginCard";
 import CreateNamespaceCard from "./CreateNamespaceCard";
 import CardSkeleton from "./CardSkeleton";
 import PendingCard from "./PendingCard";
 import CardList from "./CardList";
+import NamespaceIcon from "./NamespaceIcon";
 
 export {
-    Card, CacheCard, CardList, CreateNamespaceCard, CardSkeleton, PendingCard, OriginCard
+    Card, CardList, CreateNamespaceCard, CardSkeleton, PendingCard, NamespaceIcon
 }
 
 
@@ -20,7 +19,7 @@ export const getServerType = (namespace: Namespace) => {
     }
 
     // If the namespace prefix starts with /cache, it is a cache server
-    if (namespace.prefix.startsWith("/cache")) {
+    if (namespace.prefix.startsWith("/caches/")) {
         return "cache"
     }
 

@@ -40,6 +40,7 @@ const OriginForm = ({
                     label={"Prefix"}
                     defaultValue={namespace?.prefix || ""}
                     variant={"outlined"}
+                    placeholder={"/project/namespace"}
                 />
             </Box>
             <Box pb={2}>
@@ -84,7 +85,7 @@ const OriginForm = ({
                 />
             </Box>
             <Box pb={2}>
-                <Button type={"submit"} variant={"contained"}>Register</Button>
+                <Button type={"submit"} variant={"contained"}>Submit</Button>
             </Box>
         </form>
     )

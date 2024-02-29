@@ -29,6 +29,8 @@ const InstitutionField = ({inputInstitution} : InstitutionFieldsProps) => {
                 }
 
                 setInstitutions(responseData)
+            } else {
+                setError(true)
             }
         })()
     }, []);
@@ -38,6 +40,7 @@ const InstitutionField = ({inputInstitution} : InstitutionFieldsProps) => {
             required
             fullWidth
             size={"small"}
+            error={error}
         >
             <InputLabel id="institution-label">Institution</InputLabel>
             <Select

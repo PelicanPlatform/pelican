@@ -19,7 +19,7 @@ const InformationSpan = ({name, value}: {name: string, value: string}) => {
                 display: "flex",
                 justifyContent: "space-between",
             }}>
-                <Typography variant={"body2"} sx={{fontWeight: 500,  display: "inline"}}>{name}</Typography>
+                <Typography variant={"body2"} sx={{fontWeight: 500,  display: "inline", mr: 2}}>{name}</Typography>
                 <Typography variant={"body2"} sx={{display: "inline"}}>{value}</Typography>
             </Box>
         </Tooltip>
@@ -34,6 +34,9 @@ interface InformationDropdownProps {
 
 const InformationDropdown = ({adminMetadata, transition, parentRef} : InformationDropdownProps) => {
 
+    const approvedAt = adminMetadata.approved_at == "0001-01-01T00:00:00Z" ?
+        "" : new Date(Date.parse(adminMetadata.approved_at)).toLocaleString()
+
     const information = [
         {name: "User ID", value: adminMetadata.user_id},
         {name: "Description", value: adminMetadata.description},
@@ -42,9 +45,9 @@ const InformationDropdown = ({adminMetadata, transition, parentRef} : Informatio
         {name: "Security Contact User ID", value: adminMetadata.security_contact_user_id},
         {name: "Status", value: adminMetadata.status},
         {name: "Approver ID", value: adminMetadata.approver_id.toString()},
-        {name: "Approved At", value: adminMetadata.approved_at},
-        {name: "Created At", value: adminMetadata.created_at},
-        {name: "Updated At", value: adminMetadata.updated_at}
+        {name: "Approved At", value: approvedAt},
+        {name: "Created At", value: new Date(Date.parse(adminMetadata.created_at)).toLocaleString()},
+        {name: "Updated At", value: new Date(Date.parse(adminMetadata.updated_at)).toLocaleString()}
     ]
 
     return (

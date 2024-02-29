@@ -34,7 +34,7 @@ const CacheForm = ({
         }
     }
 
-    const hostname = namespace?.prefix.replace("/cache/", "") || ""
+    const hostname = namespace?.prefix.replace("/caches/", "") || ""
 
 
     return (
@@ -49,6 +49,7 @@ const CacheForm = ({
                     label={"Hostname"}
                     defaultValue={hostname}
                     variant={"outlined"}
+                    placeholder={"example.com"}
                 />
             </Box>
             <Box pb={2}>
@@ -93,7 +94,7 @@ const CacheForm = ({
                 />
             </Box>
             <Box pb={2}>
-                <Button type={"submit"} variant={"contained"}>Register</Button>
+                <Button type={"submit"} variant={"contained"}>Submit</Button>
             </Box>
         </form>
     )
