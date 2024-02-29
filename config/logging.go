@@ -42,14 +42,46 @@ type (
 	RegexpFilterHook struct {
 		filters atomic.Pointer[[]*RegexpFilter]
 	}
+
+	// A logrus hook that censors the contents of the logs.
+	// If any of the log messages matches one of the regexps, then the corresponding
+	// expansions are made.
+	//
+	// Intended to be used to censor or transform logs
+	regexpTransformHook struct {
+		replacements []replacement
+		hook         *writer.Hook
+	}
+
+	replacement struct {
+		regex    *regexp.Regexp
+		template string
+	}
 )
 
 var (
 	globalFilters      RegexpFilterHook
 	addedGlobalFilters bool
+
+	globalTransform *regexpTransformHook = &regexpTransformHook{
+		hook: &writer.Hook{
+			Writer:    os.Stderr,
+			LogLevels: log.AllLevels,
+		},
+		replacements: []replacement{
+			{
+				regex:    regexp.MustCompile(`(?P<prefix>Bearer%20)?(?P<header>ey[A-Za-z0-9_=-]{18,})[.](?P<payload>ey[A-Za-z0-9_=-]{18,})[.]([A-Za-z0-9_=-]{64,})`),
+				template: "$prefix$header.$payload.REDACTED",
+			},
+		},
+	}
 )
 
 func (fh *RegexpFilterHook) Levels() []log.Level {
+	return log.AllLevels
+}
+
+func (rt *regexpTransformHook) Levels() []log.Level {
 	return log.AllLevels
 }
 
@@ -67,6 +99,14 @@ func (fh *RegexpFilterHook) Fire(entry *log.Entry) (err error) {
 		}
 	}
 	return
+}
+
+// Process a single log entry, updating it as necessary
+func (rt *regexpTransformHook) Fire(entry *log.Entry) (err error) {
+	for _, replace := range rt.replacements {
+		entry.Message = replace.regex.ReplaceAllString(entry.Message, replace.template)
+	}
+	return rt.hook.Fire(entry)
 }
 
 func initFilterLogging() {
@@ -92,10 +132,8 @@ func initFilterLogging() {
 		log.AddHook(&globalFilters)
 		addedGlobalFilters = true
 		log.SetOutput(io.Discard)
-		log.AddHook(&writer.Hook{
-			Writer:    os.Stderr,
-			LogLevels: hookLevel,
-		})
+		globalTransform.hook.LogLevels = hookLevel
+		log.AddHook(globalTransform)
 	}
 }
 
