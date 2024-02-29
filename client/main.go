@@ -286,6 +286,10 @@ func getCachesFromNamespace(namespace namespaces.Namespace, useDirector bool, pr
 
 	// The global cache override is set
 	if len(preferredCaches) > 0 {
+		if preferredCaches[0].String() == "" {
+			err = errors.New("Preferred cache was specified as an empty string")
+			return
+		}
 		log.Debugf("Using the cache (%s) from the config override\n", preferredCaches[0])
 		cache := namespaces.Cache{
 			Endpoint:     preferredCaches[0].String(),

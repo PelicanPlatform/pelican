@@ -176,12 +176,15 @@ func copyMain(cmd *cobra.Command, args []string) {
 	} else if cache, _ := cmd.Flags().GetString("cache"); cache != "" {
 		preferredCache = cache
 	}
-	caches := make([]*url.URL, 1)
-	if preferredCacheURL, err := url.Parse(preferredCache); err != nil {
-		log.Errorf("Unable to parse preferred cache (%s) as URL: %s", preferredCache, err.Error())
-	} else {
-		caches[0] = preferredCacheURL
-		log.Debugln("Preferred cache for transfer:", preferredCacheURL)
+	caches := make([]*url.URL, 0, 1)
+	if preferredCache != "" {
+		if preferredCacheURL, err := url.Parse(preferredCache); err != nil {
+			log.Errorf("Unable to parse preferred cache (%s) as URL: %s", preferredCache, err.Error())
+			os.Exit(1)
+		} else {
+			caches = append(caches, preferredCacheURL)
+			log.Debugln("Preferred cache for transfer:", preferredCacheURL)
+		}
 	}
 
 	if len(source) > 1 {
