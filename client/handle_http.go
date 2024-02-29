@@ -751,8 +751,21 @@ func (tc *TransferClient) NewTransferJob(remoteUrl *url.URL, localPath string, u
 		fedUrlCopy.RawFragment = ""
 		fedUrlCopy.RawQuery = ""
 		viper.Set("Federation.DiscoveryUrl", fedUrlCopy.String())
-		err = config.DiscoverFederation()
-		if err != nil {
+		if err = config.DiscoverFederation(); err != nil {
+			return
+		}
+	} else if remoteUrl.Scheme == "osdf" {
+		if remoteUrl.Host != "" {
+			remoteUrl.Path = path.Clean(path.Join("/", remoteUrl.Host, remoteUrl.Path))
+		}
+		fd := config.GetFederation()
+		defer config.SetFederation(fd)
+		config.SetFederation(config.FederationDiscovery{})
+		fedUrl := &url.URL{}
+		fedUrl.Scheme = "https"
+		fedUrl.Host = "osg-htc.org"
+		viper.Set("Federation.DiscoveryUrl", fedUrl.String())
+		if err = config.DiscoverFederation(); err != nil {
 			return
 		}
 	}

@@ -32,6 +32,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -557,7 +558,7 @@ func TestFullUpload(t *testing.T) {
 		assert.Equal(t, int64(len(testFileContent)), transferResults[0].TransferredBytes, "Uploaded file size does not match")
 
 		// Upload an osdf file
-		uploadURL = "osdf:///test/stuff/blah.txt"
+		uploadURL = "pelican:///test/stuff/blah.txt"
 		assert.NoError(t, err, "Error parsing upload URL")
 		transferResults, err = DoCopy(ctx, tempFile.Name(), uploadURL, false, WithTokenLocation(tempToken.Name()))
 		assert.NoError(t, err, "Error uploading file")
@@ -762,7 +763,8 @@ func TestGetAndPutAuth(t *testing.T) {
 		// Set path for object to upload/download
 		tempPath := tempFile.Name()
 		fileName := filepath.Base(tempPath)
-		uploadURL := "osdf:///test/" + fileName
+		// Minimal fix of test as it is soon to be replaced
+		uploadURL := "pelican:///test/" + fileName
 
 		// Upload the file with PUT
 		transferResultsUpload, err := DoPut(ctx, tempFile.Name(), uploadURL, false, WithTokenLocation(tempToken.Name()))
@@ -808,7 +810,8 @@ func TestGetAndPutAuth(t *testing.T) {
 		// Set path for object to upload/download
 		tempPath := tempFile.Name()
 		fileName := filepath.Base(tempPath)
-		uploadURL := "osdf:///test/" + fileName
+		// Minimal fix of test as it is soon to be replaced
+		uploadURL := "pelican:///test/" + fileName
 
 		// Upload the file with PUT
 		transferResultsUpload, err := DoPut(ctx, tempFile.Name(), uploadURL, false, WithTokenLocation(tempToken.Name()))
@@ -849,7 +852,7 @@ func TestGetPublicRead(t *testing.T) {
 		// Set path for object to upload/download
 		tempPath := tempFile.Name()
 		fileName := filepath.Base(tempPath)
-		uploadURL := "osdf:///test/" + fileName
+		uploadURL := "pelican:///test/" + fileName
 
 		// Download the file with GET. Shouldn't need a token to succeed
 		transferResults, err := DoGet(ctx, uploadURL, t.TempDir(), false)
@@ -930,7 +933,8 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 		// Set path for object to upload/download
 		tempPath := tempDir
 		dirName := filepath.Base(tempPath)
-		uploadURL := "osdf:///test/" + dirName
+		// Note: minimally fixing this test as it is soon to be replaced
+		uploadURL := "pelican://" + param.Server_Hostname.GetString() + ":" + strconv.Itoa(param.Server_WebPort.GetInt()) + "/test/" + dirName
 
 		//////////////////////////////////////////////////////////
 
@@ -1068,7 +1072,8 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 		// Set path for object to upload/download
 		tempPath := tempDir
 		dirName := filepath.Base(tempPath)
-		uploadURL := "osdf:///test/" + dirName
+		// Note: minimally fixing this test as it is soon to be replaced
+		uploadURL := "pelican://" + param.Server_Hostname.GetString() + ":" + strconv.Itoa(param.Server_WebPort.GetInt()) + "/test/" + dirName
 
 		//////////////////////////////////////////////////////////
 
