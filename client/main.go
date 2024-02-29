@@ -21,7 +21,6 @@ package client
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -37,6 +36,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/config"
@@ -61,18 +61,8 @@ type (
 	}
 )
 
-// Nearest cache
-var NearestCache string
-
-// List of caches, in order from closest to furthest
-var NearestCacheList []string
-var CachesJsonLocation string
-
 // Number of caches to attempt to use in any invocation
 var CachesToTry int = 3
-
-// CacheOverride
-var CacheOverride bool
 
 // Determine the token name if it is embedded in the scheme, Condor-style
 func getTokenName(destination *url.URL) (scheme, tokenName string) {
@@ -261,7 +251,7 @@ func GetCacheHostnames(testFile string) (urls []string, err error) {
 		return
 	}
 
-	caches, err := getCachesFromNamespace(ns, directorUrl != "")
+	caches, err := getCachesFromNamespace(ns, directorUrl != "", make([]*url.URL, 0))
 	if err != nil {
 		return
 	}
@@ -292,15 +282,15 @@ func getUserAgent(project string) (agent string) {
 	return
 }
 
-func getCachesFromNamespace(namespace namespaces.Namespace, useDirector bool) (caches []CacheInterface, err error) {
+func getCachesFromNamespace(namespace namespaces.Namespace, useDirector bool, preferredCaches []*url.URL) (caches []CacheInterface, err error) {
 
 	// The global cache override is set
-	if CacheOverride {
-		log.Debugf("Using the cache (%s) from the config override\n", NearestCache)
+	if len(preferredCaches) > 0 {
+		log.Debugf("Using the cache (%s) from the config override\n", preferredCaches[0])
 		cache := namespaces.Cache{
-			Endpoint:     NearestCache,
-			AuthEndpoint: NearestCache,
-			Resource:     NearestCache,
+			Endpoint:     preferredCaches[0].String(),
+			AuthEndpoint: preferredCaches[0].String(),
+			Resource:     preferredCaches[0].String(),
 		}
 		caches = []CacheInterface{cache}
 		return
@@ -316,23 +306,23 @@ func getCachesFromNamespace(namespace namespaces.Namespace, useDirector bool) (c
 		return
 	}
 
-	if len(NearestCacheList) == 0 {
+	var bestCaches []string
+	if len(preferredCaches) == 0 {
 		cacheListName := "xroot"
 		if namespace.ReadHTTPS || namespace.UseTokenOnRead {
 			cacheListName = "xroots"
 		}
-		// FIXME: GetBestCache, for some reason, sets the NearestCacheList global?
-		_, err = GetBestCache(cacheListName)
+		bestCaches, err = GetBestCache(cacheListName)
 		if err != nil {
 			log.Errorln("Failed to get best caches:", err)
 			return
 		}
 	}
 
-	log.Debugln("Nearest cache list:", NearestCacheList)
+	log.Debugln("Nearest cache list:", bestCaches)
 	log.Debugln("Cache list name:", namespace.Caches)
 
-	matchedCaches := namespace.MatchCaches(NearestCacheList)
+	matchedCaches := namespace.MatchCaches(bestCaches)
 	log.Debugln("Matched caches:", matchedCaches)
 	caches = make([]CacheInterface, len(matchedCaches))
 	for idx, val := range matchedCaches {
@@ -635,7 +625,11 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 	transferResults, err = tc.Shutdown()
 	end := time.Now()
 	if err == nil {
-		success = true
+		if tj.lookupErr == nil {
+			success = true
+		} else {
+			err = tj.lookupErr
+		}
 	}
 	var downloaded int64 = 0
 	for _, result := range transferResults {
@@ -659,7 +653,7 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 	}
 
 	if !success {
-		return nil, errors.New("failed to download file")
+		return nil, errors.Wrap(err, "failed to download file")
 	} else {
 		return transferResults, err
 	}

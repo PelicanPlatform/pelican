@@ -154,6 +154,8 @@ type (
 		upload        bool
 		recursive     bool
 		skipAcquire   bool
+		caches        []*url.URL
+		useDirector   bool
 		tokenLocation string
 		token         string
 		project       string
@@ -207,12 +209,14 @@ type (
 		tokenLocation string
 		work          chan *TransferJob
 		closed        bool
+		caches        []*url.URL
 		results       chan *TransferResults
 		finalResults  chan TransferResults
 		setupResults  sync.Once
 	}
 
 	TransferOption                   = option.Interface
+	identTransferOptionCaches        struct{}
 	identTransferOptionCallback      struct{}
 	identTransferOptionTokenLocation struct{}
 	identTransferOptionAcquireToken  struct{}
@@ -368,6 +372,11 @@ func WithCallback(callback TransferCallbackFunc) TransferOption {
 	return option.New(identTransferOptionCallback{}, callback)
 }
 
+// Create an option to override the cache list
+func WithCaches(caches ...*url.URL) TransferOption {
+	return option.New(identTransferOptionCaches{}, caches)
+}
+
 // Create an option to override the token locating logic
 //
 // This will force the transfer to use a specific file for the token
@@ -402,6 +411,8 @@ func (te *TransferEngine) NewClient(options ...TransferOption) (client *Transfer
 
 	for _, option := range options {
 		switch option.Ident() {
+		case identTransferOptionCaches{}:
+			client.caches = option.Value().([]*url.URL)
 		case identTransferOptionCallback{}:
 			client.callback = option.Value().(TransferCallbackFunc)
 		case identTransferOptionTokenLocation{}:
@@ -631,6 +642,17 @@ func (te *TransferEngine) runMux() error {
 				activeJobs[job.uuid] = slices.DeleteFunc(activeJobs[job.uuid], func(oldJob *TransferJob) bool {
 					return oldJob.uuid == job.job.uuid
 				})
+				if len(activeJobs[job.uuid]) == 0 {
+					func() {
+						te.clientLock.Lock()
+						defer te.clientLock.Unlock()
+						// If the client is closed and there are no remaining
+						// jobs for that client, we can close the results channel.
+						if te.workMap[job.uuid] == nil {
+							close(te.resultsMap[job.uuid])
+						}
+					}()
+				}
 			}
 		} else if chosen == len(workMap)+len(resultsMap)+5 {
 			// Notification that the engine should shut down
@@ -707,6 +729,8 @@ func (tc *TransferClient) NewTransferJob(remoteUrl *url.URL, localPath string, u
 
 	for _, option := range options {
 		switch option.Ident() {
+		case identTransferOptionCaches{}:
+			tc.caches = option.Value().([]*url.URL)
 		case identTransferOptionCallback{}:
 			tc.callback = option.Value().(TransferCallbackFunc)
 		case identTransferOptionTokenLocation{}:
@@ -732,6 +756,7 @@ func (tc *TransferClient) NewTransferJob(remoteUrl *url.URL, localPath string, u
 		}
 	}
 
+	tj.useDirector = param.Federation_DirectorUrl.GetString() != ""
 	ns, err := getNamespaceInfo(remoteUrl.Path, param.Federation_DirectorUrl.GetString(), upload)
 	if err != nil {
 		log.Errorln(err)
@@ -941,9 +966,8 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 			PackOption: packOption,
 		})
 	} else {
-		directorUrl := param.Federation_DirectorUrl.GetString()
 		var closestNamespaceCaches []CacheInterface
-		closestNamespaceCaches, err = getCachesFromNamespace(job.job.namespace, directorUrl != "")
+		closestNamespaceCaches, err = getCachesFromNamespace(job.job.namespace, job.job.useDirector, job.job.caches)
 		if err != nil {
 			log.Errorln("Failed to get namespaced caches (treated as non-fatal):", err)
 		}

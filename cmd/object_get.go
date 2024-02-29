@@ -19,6 +19,7 @@
 package main
 
 import (
+	"net/url"
 	"os"
 
 	"github.com/pelicanplatform/pelican/client"
@@ -83,17 +84,18 @@ func getMain(cmd *cobra.Command, args []string) {
 	log.Debugln("Sources:", source)
 	log.Debugln("Destination:", dest)
 
-	// Check for manually entered cache to use ??
-	nearestCache, nearestCacheIsPresent := os.LookupEnv("NEAREST_CACHE")
-
-	if nearestCacheIsPresent {
-		client.NearestCache = nearestCache
-		client.NearestCacheList = append(client.NearestCacheList, client.NearestCache)
-		client.CacheOverride = true
+	// Check for manually entered cache to use
+	var preferredCache string
+	if nearestCache, ok := os.LookupEnv("NEAREST_CACHE"); ok {
+		preferredCache = nearestCache
 	} else if cache, _ := cmd.Flags().GetString("cache"); cache != "" {
-		client.NearestCache = cache
-		client.NearestCacheList = append(client.NearestCacheList, cache)
-		client.CacheOverride = true
+		preferredCache = cache
+	}
+	caches := make([]*url.URL, 1)
+	if preferredCacheURL, err := url.Parse(preferredCache); err != nil {
+		log.Errorf("Unable to parse preferred cache (%s) as URL: %s", preferredCache, err.Error())
+	} else {
+		caches[0] = preferredCacheURL
 	}
 
 	if len(source) > 1 {
@@ -107,7 +109,7 @@ func getMain(cmd *cobra.Command, args []string) {
 	lastSrc := ""
 	for _, src := range source {
 		isRecursive, _ := cmd.Flags().GetBool("recursive")
-		_, result = client.DoGet(ctx, src, dest, isRecursive, client.WithCallback(pb.callback), client.WithTokenLocation(tokenLocation))
+		_, result = client.DoGet(ctx, src, dest, isRecursive, client.WithCallback(pb.callback), client.WithTokenLocation(tokenLocation), client.WithCaches(caches...))
 		if result != nil {
 			lastSrc = src
 			break

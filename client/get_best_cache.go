@@ -26,7 +26,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 
@@ -49,43 +48,15 @@ func GetBestCache(cacheListName string) ([]string, error) {
 	})
 
 	var caches_list []string
+	//Use Stashservers.dat api
 
-	// Check if the user provided a caches json file location
-	if CachesJsonLocation != "" {
-		if _, err := os.Stat(CachesJsonLocation); os.IsNotExist(err) {
-			// path does not exist
-			log.Errorln(CachesJsonLocation, "does not exist")
+	//api_text = "stashservers.dat"
+	GeoIpUrl.Path = "stashservers.dat"
 
-			return nil, errors.New("Unable to open caches json file at: " + CachesJsonLocation)
-		}
-
-		//Use geo ip api on caches in provided json file
-		//caches_list := get_json_caches(caches_json_location)
-		var caches_string string = ""
-
-		for _, cache := range caches_list {
-			parsed_url, err := url.Parse(cache)
-			if err != nil {
-				log.Errorln("Could not parse URL")
-			}
-
-			caches_string = caches_string + parsed_url.Host
-
-			// Remove the first comma
-			caches_string = string([]rune(caches_string)[1:])
-			GeoIpUrl.Path = "api/v1.0/geo/stashcp/" + caches_string
-		}
-	} else {
-		//Use Stashservers.dat api
-
-		//api_text = "stashservers.dat"
-		GeoIpUrl.Path = "stashservers.dat"
-
-		if cacheListName != "" {
-			queryParams := GeoIpUrl.Query()
-			queryParams.Set("list", cacheListName)
-			GeoIpUrl.RawQuery = queryParams.Encode()
-		}
+	if cacheListName != "" {
+		queryParams := GeoIpUrl.Query()
+		queryParams.Set("list", cacheListName)
+		GeoIpUrl.RawQuery = queryParams.Encode()
 	}
 
 	var responselines_b [][]byte
@@ -186,7 +157,6 @@ func GetBestCache(cacheListName string) ([]string, error) {
 			caches_list[i], caches_list[j] = caches_list[j], caches_list[i]
 		})
 		minsite := caches_list[0]
-		NearestCacheList = caches_list
 		log.Debugf("Unable to use Geoip to find closest cache!  Returning random cache %s", minsite)
 		log.Debugf("Randomized list of nearest caches: %s", strings.Join(caches_list, ","))
 		return caches_list, nil
@@ -214,13 +184,14 @@ func GetBestCache(cacheListName string) ([]string, error) {
 		minsite := cachesList[cacheListName][minIndex-1]
 		log.Debugln("Closest cache:", minsite)
 
+		finalCacheList := make([]string, 0, len(ordered_list))
 		for _, ordered_index := range ordered_list {
 			orderedIndex, _ := strconv.Atoi(ordered_index)
-			NearestCacheList = append(NearestCacheList, cachesList[cacheListName][orderedIndex-1])
+			finalCacheList = append(finalCacheList, cachesList[cacheListName][orderedIndex-1])
 		}
 
 		log.Debugf("Returning closest cache: %s", minsite)
-		log.Debugf("Ordered list of nearest caches: %s", NearestCacheList)
-		return NearestCacheList, nil
+		log.Debugf("Ordered list of nearest caches: %s", finalCacheList)
+		return finalCacheList, nil
 	}
 }
