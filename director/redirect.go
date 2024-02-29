@@ -116,6 +116,32 @@ func getRealIP(ginCtx *gin.Context) (ipAddr netip.Addr, err error) {
 
 }
 
+// Calculate the depth attribute of Link header given the path to the file
+// and the prefix of the namespace that can serve the file
+//
+// Ref: https://www.rfc-editor.org/rfc/rfc6249.html#section-3.4
+func getLinkDepth(filepath, prefix string) (int, error) {
+	if filepath == "" || prefix == "" {
+		return 0, errors.New("either filepath or prefix is an empty path")
+	}
+	if !strings.HasPrefix(filepath, prefix) {
+		return 0, errors.New("filepath does not contain the prefix")
+	}
+	// We want to remove shared prefix between filepath and prefix, then split the remaining string by slash.
+	// To make the final calculation easier, we also remove the head slash from the file path.
+	// e.g. filepath = /foo/bar/barz.txt   prefix = /foo
+	// we want commonPath = bar/barz.txt
+	if !strings.HasSuffix(prefix, "/") && prefix != "/" {
+		prefix += "/"
+	}
+	commonPath := strings.TrimPrefix(filepath, prefix)
+	pathDepth := len(strings.Split(commonPath, "/"))
+	if pathDepth < 0 {
+		return 0, errors.New("negative depth is not allowed")
+	}
+	return pathDepth, nil
+}
+
 func getAuthzEscaped(req *http.Request) (authzEscaped string) {
 	if authzQuery := req.URL.Query()["authz"]; len(authzQuery) > 0 {
 		authzEscaped = authzQuery[0]
@@ -216,6 +242,12 @@ func redirectToCache(ginCtx *gin.Context) {
 		ginCtx.String(404, "No namespace found for path. Either it doesn't exist, or the Director is experiencing problems\n")
 		return
 	}
+	// if err != nil, depth == 0, which is the default value for depth
+	// so we can use it as the value for the header even with err
+	depth, err := getLinkDepth(reqPath, namespaceAd.Path)
+	if err != nil {
+		log.Errorf("Failed to get depth attribute for the redirecting request to %q, with best match namespace prefix %q", reqPath, namespaceAd.Path)
+	}
 	// If the namespace prefix DOES exist, then it makes sense to say we couldn't find a valid cache.
 	if len(cacheAds) == 0 {
 		for _, originAd := range originAds {
@@ -246,7 +278,7 @@ func redirectToCache(ginCtx *gin.Context) {
 			linkHeader += ", "
 		}
 		redirectURL := getRedirectURL(reqPath, ad, !namespaceAd.Caps.PublicRead)
-		linkHeader += fmt.Sprintf(`<%s>; rel="duplicate"; pri=%d`, redirectURL.String(), idx+1)
+		linkHeader += fmt.Sprintf(`<%s>; rel="duplicate"; pri=%d; depth=%d`, redirectURL.String(), idx+1, depth)
 	}
 	ginCtx.Writer.Header()["Link"] = []string{linkHeader}
 	if len(namespaceAd.Issuer) != 0 {
