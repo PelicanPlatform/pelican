@@ -1,0 +1,88 @@
+/***************************************************************
+ *
+ * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you
+ * may not use this file except in compliance with the License.  You may
+ * obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ ***************************************************************/
+
+package simple_cache
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"strings"
+
+	"github.com/pelicanplatform/pelican/param"
+	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
+)
+
+// Launch the unix socket listener as a separate goroutine
+func LaunchListener(ctx context.Context, egrp *errgroup.Group) error {
+	socketName := param.FileCache_DataLocation.GetString()
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: socketName, Net: "unix"})
+	if err != nil {
+		return err
+	}
+	sc, err := NewSimpleCache(ctx, egrp)
+	if err != nil {
+		return err
+	}
+
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "GET" {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		transferStatusStr := r.Header.Get("X-Transfer-Status")
+		sendTrailer := false
+		if transferStatusStr == "true" {
+			for _, encoding := range r.Header.Values("TE") {
+				if encoding == "trailers" {
+					sendTrailer = true
+					break
+				}
+			}
+		}
+
+		bearerToken := r.Header.Get("Authorization")
+		bearerToken = strings.TrimPrefix(bearerToken, "Bearer ")
+		reader, err := sc.Get(r.URL.Path, bearerToken)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			log.Errorln("Failed to get file from cache")
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		if _, err = io.Copy(w, reader); err != nil && sendTrailer {
+			// TODO: Enumerate more error values
+			w.Header().Set("X-Transfer-Status", fmt.Sprintf("%d: %s", 500, err))
+		} else if sendTrailer {
+			w.Header().Set("X-Transfer-Status", "200: OK")
+		}
+	}
+	srv := http.Server{
+		Handler: http.HandlerFunc(handler),
+	}
+	egrp.Go(func() error {
+		return srv.Serve(listener)
+	})
+	egrp.Go(func() error {
+		return srv.Shutdown(ctx)
+	})
+	return nil
+}

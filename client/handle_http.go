@@ -205,8 +205,9 @@ type (
 		ctx           context.Context
 		cancel        context.CancelFunc
 		callback      TransferCallbackFunc
-		skipAcquire   bool // Enable/disable the token acquisition logic.  Defaults to acquiring a token
-		tokenLocation string
+		skipAcquire   bool   // Enable/disable the token acquisition logic.  Defaults to acquiring a token
+		tokenLocation string // Location of a token file to use for transfers
+		token         string // Token that should be used for transfers
 		work          chan *TransferJob
 		closed        bool
 		caches        []*url.URL
@@ -220,6 +221,7 @@ type (
 	identTransferOptionCallback      struct{}
 	identTransferOptionTokenLocation struct{}
 	identTransferOptionAcquireToken  struct{}
+	identTransferOptionToken         struct{}
 
 	transferDetailsOptions struct {
 		NeedsToken bool
@@ -385,6 +387,13 @@ func WithTokenLocation(location string) TransferOption {
 	return option.New(identTransferOptionTokenLocation{}, location)
 }
 
+// Create an option to provide a specific token to the transfer
+//
+// The contents of the token will be used as part of the HTTP request
+func WithToken(token string) TransferOption {
+	return option.New(identTransferOptionToken{}, token)
+}
+
 // Create an option to specify the token acquisition logic
 //
 // Token acquisition (e.g., using OAuth2 to get a token when one
@@ -419,6 +428,8 @@ func (te *TransferEngine) NewClient(options ...TransferOption) (client *Transfer
 			client.tokenLocation = option.Value().(string)
 		case identTransferOptionAcquireToken{}:
 			client.skipAcquire = !option.Value().(bool)
+		case identTransferOptionToken{}:
+			client.token = option.Value().(string)
 		}
 	}
 	func() {
@@ -738,6 +749,8 @@ func (tc *TransferClient) NewTransferJob(remoteUrl *url.URL, localPath string, u
 			tc.tokenLocation = option.Value().(string)
 		case identTransferOptionAcquireToken{}:
 			tc.skipAcquire = !option.Value().(bool)
+		case identTransferOptionToken{}:
+			tj.token = option.Value().(string)
 		}
 	}
 
@@ -778,7 +791,7 @@ func (tc *TransferClient) NewTransferJob(remoteUrl *url.URL, localPath string, u
 	}
 	tj.namespace = ns
 
-	if upload || ns.UseTokenOnRead {
+	if upload || ns.UseTokenOnRead && tj.token == "" {
 		tj.token, err = getToken(remoteUrl, ns, true, "", tc.tokenLocation, !tj.skipAcquire)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get token for transfer: %v", err)
@@ -962,6 +975,8 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 			err = errors.New(ret)
 		}
 	}()
+
+	log.Debugln("Processing transfer job for URL", job.job.remoteURL.String())
 
 	packOption := job.job.remoteURL.Query().Get("pack")
 	if packOption != "" {

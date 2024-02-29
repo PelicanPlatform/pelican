@@ -72,6 +72,16 @@ type Config struct {
 		TopologyReloadInterval time.Duration
 		TopologyUrl string
 	}
+	FileCache struct {
+		DataLocation string
+		HighWaterMarkPercentage int
+		RunLocation string
+		Size string
+		Socket string
+	}
+	FileCcache struct {
+		LowWaterMarkPercentage int
+	}
 	GeoIPOverrides interface{}
 	Issuer struct {
 		AuthenticationSource string
@@ -295,6 +305,16 @@ type configWithType struct {
 		TopologyNamespaceUrl struct { Type string; Value string }
 		TopologyReloadInterval struct { Type string; Value time.Duration }
 		TopologyUrl struct { Type string; Value string }
+	}
+	FileCache struct {
+		DataLocation struct { Type string; Value string }
+		HighWaterMarkPercentage struct { Type string; Value int }
+		RunLocation struct { Type string; Value string }
+		Size struct { Type string; Value string }
+		Socket struct { Type string; Value string }
+	}
+	FileCcache struct {
+		LowWaterMarkPercentage struct { Type string; Value int }
 	}
 	GeoIPOverrides struct { Type string; Value interface{} }
 	Issuer struct {

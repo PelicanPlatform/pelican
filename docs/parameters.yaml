@@ -609,6 +609,51 @@ default: path
 components: ["origin"]
 ---
 ############################
+#   File-cache configs     #
+############################
+name: FileCache.RunLocation
+description: >-
+  The directory for the runtime files of the file cache
+type: string
+root_default: /run/pelican/filecache
+default: $XDG_RUNTIME_DIR/pelican/filecache
+---
+name: FileCache.DataLocation
+description: >-
+  The directory for the location of the cache data files - this is where the actual data in the cache is stored
+  for the file cache.
+type: string
+default: $PELICAN_FILECACHE_RUNLOCATION/cache
+---
+name: FileCache.Socket
+description: >-
+  The location of the socket used for client communication for the file cache
+type: string
+default: $PELICAN_FILECACHE_RUNLOCATION/cache.sock
+---
+name: FileCache.Size
+description: >-
+  The maximum size of the file cache.  If not set, it is assumed the entire device can be used.
+type: string
+default: 0
+---
+name: FileCache.HighWaterMarkPercentage
+description: >-
+  A percentage value where the cache cleanup routines will triggered.  Once the cache usage
+  of completed files hits the high water mark, files will be deleted until the usage hits the
+  low water mark.
+type: int
+default: 95
+---
+name: FileCache.LowWaterMarkPercentage
+description: >-
+  A percentage value where the cache cleanup routines will complete.  Once the cache usage
+  of completed files hits the high water mark, files will be deleted until the usage hits the
+  low water mark.
+type: int
+default: 85
+---
+############################
 #   Cache-level configs    #
 ############################
 name: Cache.DataLocation

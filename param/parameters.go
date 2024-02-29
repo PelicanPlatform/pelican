@@ -90,6 +90,10 @@ var (
 	Federation_RegistryUrl = StringParam{"Federation.RegistryUrl"}
 	Federation_TopologyNamespaceUrl = StringParam{"Federation.TopologyNamespaceUrl"}
 	Federation_TopologyUrl = StringParam{"Federation.TopologyUrl"}
+	FileCache_DataLocation = StringParam{"FileCache.DataLocation"}
+	FileCache_RunLocation = StringParam{"FileCache.RunLocation"}
+	FileCache_Size = StringParam{"FileCache.Size"}
+	FileCache_Socket = StringParam{"FileCache.Socket"}
 	IssuerKey = StringParam{"IssuerKey"}
 	Issuer_AuthenticationSource = StringParam{"Issuer.AuthenticationSource"}
 	Issuer_GroupFile = StringParam{"Issuer.GroupFile"}
@@ -201,6 +205,8 @@ var (
 	Director_MaxStatResponse = IntParam{"Director.MaxStatResponse"}
 	Director_MinStatResponse = IntParam{"Director.MinStatResponse"}
 	Director_StatConcurrencyLimit = IntParam{"Director.StatConcurrencyLimit"}
+	FileCache_HighWaterMarkPercentage = IntParam{"FileCache.HighWaterMarkPercentage"}
+	FileCache_LowWaterMarkPercentage = IntParam{"FileCcache.LowWaterMarkPercentage"}
 	MinimumDownloadSpeed = IntParam{"MinimumDownloadSpeed"}
 	Monitoring_PortHigher = IntParam{"Monitoring.PortHigher"}
 	Monitoring_PortLower = IntParam{"Monitoring.PortLower"}

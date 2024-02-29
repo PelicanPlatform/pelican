@@ -75,6 +75,7 @@ require (
 	go.opentelemetry.io/collector/pdata v1.0.0-rcv0016 // indirect
 	go.opentelemetry.io/collector/semconv v0.87.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
+	golang.org/x/sys v0.15.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20231120223509-83a465c0220f // indirect
 	google.golang.org/grpc v1.59.0 // indirect
 	modernc.org/sqlite v1.28.0 // indirect
@@ -181,7 +182,6 @@ require (
 	golang.org/x/arch v0.3.0 // indirect
 	golang.org/x/exp v0.0.0-20231006140011-7918f672742d // indirect
 	golang.org/x/sync v0.6.0
-	golang.org/x/sys v0.15.0 // indirect
 	golang.org/x/text v0.14.0
 	golang.org/x/time v0.5.0
 	google.golang.org/appengine v1.6.7 // indirect

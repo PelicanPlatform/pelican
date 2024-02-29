@@ -46,6 +46,9 @@ Director:
   EnableBroker: true
 Cache:
   Port: 8442
+FileCache:
+  HighWaterMarkPercentage: 95
+  LowWaterMarkPercentage: 85
 Origin:
   NamespacePrefix: ""
   Multiuser: false
