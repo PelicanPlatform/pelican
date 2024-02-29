@@ -79,7 +79,6 @@ func (pb *progressBars) shutdown() {
 
 func (pb *progressBars) launchDisplay(ctx context.Context) {
 	progressCtr := mpb.NewWithContext(ctx)
-	log.SetOutput(progressCtr)
 	pb.egrp, _ = errgroup.WithContext(ctx)
 	log.Debugln("Launch progress bars display")
 
