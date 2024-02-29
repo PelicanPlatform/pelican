@@ -164,9 +164,9 @@ func handleOAuthCallback(ctx *gin.Context) {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprint("Error requesting user info from CILogon: ", err)})
 		return
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprint("Error parsing user info from CILogon: ", err)})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprint("Failed to get OAuth2 user info response: ", err)})
 		return
 	}
 
