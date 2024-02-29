@@ -23,6 +23,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/pelicanplatform/pelican/config"
 )
 
 func main() {
@@ -54,7 +56,7 @@ func handleCLI(args []string) error {
 		// version info regardless of the commands and whether they are defined
 		// * Remove the -v shorthand since in "origin serve" flagset it's already used for "volume" flag
 		if args[len(args)-1] == "--version" {
-			fmt.Println("Version:", version)
+			fmt.Println("Version:", config.GetVersion())
 			fmt.Println("Build Date:", date)
 			fmt.Println("Build Commit:", commit)
 			fmt.Println("Built By:", builtBy)

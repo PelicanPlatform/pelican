@@ -24,6 +24,7 @@ import (
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -44,8 +45,7 @@ func init() {
 }
 
 func putMain(cmd *cobra.Command, args []string) {
-
-	client.ObjectClientOptions.Version = version
+	ctx := cmd.Context()
 
 	err := config.InitClient()
 	if err != nil {
@@ -54,14 +54,15 @@ func putMain(cmd *cobra.Command, args []string) {
 	}
 
 	// Set the progress bars to the command line option
-	client.ObjectClientOptions.Token, _ = cmd.Flags().GetString("token")
+	tokenLocation, _ := cmd.Flags().GetString("token")
+
+	pb := newProgressBar()
+	defer pb.shutdown()
 
 	// Check if the program was executed from a terminal
 	// https://rosettacode.org/wiki/Check_output_device_is_a_terminal#Go
 	if fileInfo, _ := os.Stdout.Stat(); (fileInfo.Mode()&os.ModeCharDevice) != 0 && param.Logging_LogLocation.GetString() == "" && !param.Logging_DisableProgressBars.GetBool() {
-		client.ObjectClientOptions.ProgressBars = true
-	} else {
-		client.ObjectClientOptions.ProgressBars = false
+		pb.launchDisplay(ctx)
 	}
 
 	log.Debugln("Len of source:", len(args))
@@ -83,25 +84,23 @@ func putMain(cmd *cobra.Command, args []string) {
 	lastSrc := ""
 	for _, src := range source {
 		isRecursive, _ := cmd.Flags().GetBool("recursive")
-		client.ObjectClientOptions.Recursive = isRecursive
-		_, result = client.DoPut(src, dest, isRecursive)
+		_, result = client.DoPut(ctx, src, dest, isRecursive, client.WithCallback(pb.callback), client.WithTokenLocation(tokenLocation))
 		if result != nil {
 			lastSrc = src
 			break
-		} else {
-			client.ClearErrors()
 		}
 	}
 
 	// Exit with failure
 	if result != nil {
 		// Print the list of errors
-		errMsg := client.GetErrors()
-		if errMsg == "" {
-			errMsg = result.Error()
+		errMsg := result.Error()
+		var te *client.TransferErrors
+		if errors.As(result, &te) {
+			errMsg = te.UserError()
 		}
 		log.Errorln("Failure putting " + lastSrc + ": " + errMsg)
-		if client.ErrorsRetryable() {
+		if client.ShouldRetry(result) {
 			log.Errorln("Errors are retryable")
 			os.Exit(11)
 		}

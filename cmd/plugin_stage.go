@@ -19,6 +19,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"os"
@@ -85,6 +86,7 @@ Terminology:
 }
 
 func stagePluginMain(cmd *cobra.Command, args []string) {
+	ctx := cmd.Context()
 
 	originPrefixStr := param.StagePlugin_OriginPrefix.GetString()
 	if len(originPrefixStr) == 0 {
@@ -115,16 +117,15 @@ func stagePluginMain(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	// Set the progress bars to the command line option
-	client.ObjectClientOptions.Token = param.Plugin_Token.GetString()
-	client.ObjectClientOptions.Plugin = true
+	tokenLocation := param.Plugin_Token.GetString()
+
+	pb := newProgressBar()
+	defer pb.shutdown()
 
 	// Check if the program was executed from a terminal
 	// https://rosettacode.org/wiki/Check_output_device_is_a_terminal#Go
 	if fileInfo, _ := os.Stdout.Stat(); (fileInfo.Mode() & os.ModeCharDevice) != 0 {
-		client.ObjectClientOptions.ProgressBars = true
-	} else {
-		client.ObjectClientOptions.ProgressBars = false
+		pb.launchDisplay(ctx)
 	}
 
 	var sources []string
@@ -187,7 +188,7 @@ func stagePluginMain(cmd *cobra.Command, args []string) {
 	var result error
 	var xformSources []string
 	for _, src := range sources {
-		_, newSource, result := client.DoShadowIngest(src, mountPrefixStr, shadowOriginPrefixStr)
+		_, newSource, result := client.DoShadowIngest(context.Background(), src, mountPrefixStr, shadowOriginPrefixStr, client.WithTokenLocation(tokenLocation), client.WithAcquireToken(false))
 		if result != nil {
 			// What's the correct behavior on failure?  For now, we silently put the transfer
 			// back on the original list.  This is arguably the wrong approach as it might
@@ -204,8 +205,8 @@ func stagePluginMain(cmd *cobra.Command, args []string) {
 	// Exit with failure
 	if result != nil {
 		// Print the list of errors
-		log.Errorln(client.GetErrors())
-		if client.ErrorsRetryable() {
+		log.Errorln("Failure in staging files:", result)
+		if client.ShouldRetry(result) {
 			log.Errorln("Errors are retryable")
 			os.Exit(11)
 		}

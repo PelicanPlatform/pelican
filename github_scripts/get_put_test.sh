@@ -96,7 +96,7 @@ do
 done
 
 # Run pelican object put
-./pelican object put input.txt osdf:///test/input.txt -d -t token -l putOutput.txt
+./pelican object put input.txt pelican:///test/input.txt -d -t token -l putOutput.txt
 
 # Check output of command
 if grep -q "Uploaded bytes: 47" putOutput.txt; then
@@ -107,7 +107,7 @@ else
     to_exit=1
 fi
 
-./pelican object get osdf:///test/input.txt output.txt -d -t token -l getOutput.txt
+./pelican object get pelican:///test/input.txt output.txt -d -t token -l getOutput.txt
 
 # Check output of command
 if grep -q "Downloaded bytes: 47" getOutput.txt; then

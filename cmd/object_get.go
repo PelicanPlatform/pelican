@@ -19,11 +19,13 @@
 package main
 
 import (
+	"net/url"
 	"os"
 
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -48,8 +50,7 @@ func init() {
 }
 
 func getMain(cmd *cobra.Command, args []string) {
-
-	client.ObjectClientOptions.Version = version
+	ctx := cmd.Context()
 
 	err := config.InitClient()
 	if err != nil {
@@ -57,15 +58,15 @@ func getMain(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	// Set the progress bars to the command line option
-	client.ObjectClientOptions.Token, _ = cmd.Flags().GetString("token")
+	tokenLocation, _ := cmd.Flags().GetString("token")
+
+	pb := newProgressBar()
+	defer pb.shutdown()
 
 	// Check if the program was executed from a terminal
 	// https://rosettacode.org/wiki/Check_output_device_is_a_terminal#Go
 	if fileInfo, _ := os.Stdout.Stat(); (fileInfo.Mode()&os.ModeCharDevice) != 0 && param.Logging_LogLocation.GetString() == "" && !param.Logging_DisableProgressBars.GetBool() {
-		client.ObjectClientOptions.ProgressBars = true
-	} else {
-		client.ObjectClientOptions.ProgressBars = false
+		pb.launchDisplay(ctx)
 	}
 
 	log.Debugln("Len of source:", len(args))
@@ -83,17 +84,22 @@ func getMain(cmd *cobra.Command, args []string) {
 	log.Debugln("Sources:", source)
 	log.Debugln("Destination:", dest)
 
-	// Check for manually entered cache to use ??
-	nearestCache, nearestCacheIsPresent := os.LookupEnv("NEAREST_CACHE")
-
-	if nearestCacheIsPresent {
-		client.NearestCache = nearestCache
-		client.NearestCacheList = append(client.NearestCacheList, client.NearestCache)
-		client.CacheOverride = true
+	// Check for manually entered cache to use
+	var preferredCache string
+	if nearestCache, ok := os.LookupEnv("NEAREST_CACHE"); ok {
+		preferredCache = nearestCache
 	} else if cache, _ := cmd.Flags().GetString("cache"); cache != "" {
-		client.NearestCache = cache
-		client.NearestCacheList = append(client.NearestCacheList, cache)
-		client.CacheOverride = true
+		preferredCache = cache
+	}
+	caches := make([]*url.URL, 0, 1)
+	if preferredCache != "" {
+		if preferredCacheURL, err := url.Parse(preferredCache); err != nil {
+			log.Errorf("Unable to parse preferred cache (%s) as URL: %s", preferredCache, err.Error())
+			os.Exit(1)
+		} else {
+			caches = append(caches, preferredCacheURL)
+			log.Debugln("Preferred cache for transfer:", preferredCacheURL)
+		}
 	}
 
 	if len(source) > 1 {
@@ -107,25 +113,23 @@ func getMain(cmd *cobra.Command, args []string) {
 	lastSrc := ""
 	for _, src := range source {
 		isRecursive, _ := cmd.Flags().GetBool("recursive")
-		client.ObjectClientOptions.Recursive = isRecursive
-		_, result = client.DoGet(src, dest, isRecursive)
+		_, result = client.DoGet(ctx, src, dest, isRecursive, client.WithCallback(pb.callback), client.WithTokenLocation(tokenLocation), client.WithCaches(caches...))
 		if result != nil {
 			lastSrc = src
 			break
-		} else {
-			client.ClearErrors()
 		}
 	}
 
 	// Exit with failure
 	if result != nil {
 		// Print the list of errors
-		errMsg := client.GetErrors()
-		if errMsg == "" {
-			errMsg = result.Error()
+		errMsg := result.Error()
+		var te *client.TransferErrors
+		if errors.As(result, &te) {
+			errMsg = te.UserError()
 		}
 		log.Errorln("Failure getting " + lastSrc + ": " + errMsg)
-		if client.ErrorsRetryable() {
+		if client.ShouldRetry(result) {
 			log.Errorln("Errors are retryable")
 			os.Exit(11)
 		}

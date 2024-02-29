@@ -121,7 +121,6 @@ func restartProgram() error {
 }
 
 func init() {
-	config.PelicanVersion = version
 	cobra.OnInitialize(config.InitConfig)
 	rootCmd.AddCommand(objectCmd)
 	objectCmd.CompletionOptions.DisableDefaultCmd = true

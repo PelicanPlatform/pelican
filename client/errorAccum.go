@@ -22,46 +22,75 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"sync"
+	"strings"
 	"time"
 
 	grab "github.com/opensaucerer/grab/v3"
 )
 
-type TimestampedError struct {
-	err       error
-	timestamp time.Time
-}
+type (
+	TimestampedError struct {
+		err       error
+		timestamp time.Time
+	}
 
-var (
-	bunchOfErrors []TimestampedError
-	mu            sync.Mutex
-	// We will generate an error string including the time since startup
-	startup time.Time = time.Now()
+	// A container object for multiple sub-errors representing transfer failures.
+	TransferErrors struct {
+		start  time.Time
+		errors []error
+	}
 )
 
-// AddError will add an accumulated error to the error stack
-func AddError(err error) bool {
-	mu.Lock()
-	defer mu.Unlock()
-	bunchOfErrors = append(bunchOfErrors, TimestampedError{err, time.Now()})
-	return true
+func (te *TimestampedError) Error() string {
+	return te.err.Error()
 }
 
-func ClearErrors() {
-	mu.Lock()
-	defer mu.Unlock()
-
-	bunchOfErrors = make([]TimestampedError, 0)
+func (te *TimestampedError) Unwrap() error {
+	return te.err
 }
 
-func GetErrors() string {
-	mu.Lock()
-	defer mu.Unlock()
+// Create a new transfer error object
+func NewTransferErrors() *TransferErrors {
+	return &TransferErrors{
+		start:  time.Now(),
+		errors: make([]error, 0),
+	}
+}
+
+func (te *TransferErrors) AddError(err error) {
+	if te.errors == nil {
+		te.errors = make([]error, 0)
+	}
+	if err != nil {
+		te.errors = append(te.errors, &TimestampedError{err: err, timestamp: time.Now()})
+	}
+}
+
+func (te *TransferErrors) Unwrap() []error {
+	return te.errors
+}
+
+func (te *TransferErrors) Error() string {
+	if te.errors == nil {
+		return "transfer error unknown"
+	}
+	if len(te.errors) == 1 {
+		return "transfer error: " + te.errors[0].Error()
+	}
+	errors := make([]string, len(te.errors))
+	for idx, err := range te.errors {
+		errors[idx] = err.Error()
+	}
+	return "transfer errors: [" + strings.Join(errors, ", ") + "]"
+}
+
+// Return a more refined, user-friendly error string
+func (te *TransferErrors) UserError() string {
 	first := true
-	lastError := startup
+	lastError := te.start
 	var errorsFormatted []string
-	for idx, theError := range bunchOfErrors {
+	for idx, err := range te.errors {
+		theError := err.(*TimestampedError)
 		errFmt := fmt.Sprintf("Attempt #%v: %s", idx+1, theError.err.Error())
 		timeElapsed := theError.timestamp.Sub(lastError)
 		timeFormat := timeElapsed.Truncate(100 * time.Millisecond).String()
@@ -69,7 +98,7 @@ func GetErrors() string {
 		if first {
 			errFmt += " since start)"
 		} else {
-			timeSinceStart := theError.timestamp.Sub(startup)
+			timeSinceStart := theError.timestamp.Sub(te.start)
 			timeSinceStartFormat := timeSinceStart.Truncate(100 * time.Millisecond).String()
 			errFmt += " elapsed, " + timeSinceStartFormat + " since start)"
 		}
@@ -127,15 +156,24 @@ func IsRetryable(err error) bool {
 	return false
 }
 
-// ErrorsRetryable returns if the errors in the stack are retryable later
-func ErrorsRetryable() bool {
-	mu.Lock()
-	defer mu.Unlock()
-	// Loop through the errors and see if all of them are retryable
-	for _, theError := range bunchOfErrors {
-		if !IsRetryable(theError.err) {
+// Returns true if all errors are retryable.
+// If no errors are present, then returns true
+func (te *TransferErrors) AllErrorsRetryable() bool {
+	if te.errors == nil {
+		return true
+	}
+	for _, err := range te.errors {
+		if !IsRetryable(err) {
 			return false
 		}
 	}
 	return true
+}
+
+func ShouldRetry(err error) bool {
+	var te *TransferErrors
+	if errors.As(err, &te) {
+		return te.AllErrorsRetryable()
+	}
+	return IsRetryable(err)
 }

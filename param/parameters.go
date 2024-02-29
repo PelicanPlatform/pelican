@@ -176,6 +176,7 @@ var (
 	Client_SlowTransferRampupTime = IntParam{"Client.SlowTransferRampupTime"}
 	Client_SlowTransferWindow = IntParam{"Client.SlowTransferWindow"}
 	Client_StoppedTransferTimeout = IntParam{"Client.StoppedTransferTimeout"}
+	Client_WorkerCount = IntParam{"Client.WorkerCount"}
 	Director_MaxStatResponse = IntParam{"Director.MaxStatResponse"}
 	Director_MinStatResponse = IntParam{"Director.MinStatResponse"}
 	Director_StatConcurrencyLimit = IntParam{"Director.StatConcurrencyLimit"}

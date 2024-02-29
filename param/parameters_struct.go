@@ -22,6 +22,7 @@ type Config struct {
 		SlowTransferRampupTime int
 		SlowTransferWindow int
 		StoppedTransferTimeout int
+		WorkerCount int
 	}
 	ConfigDir string
 	Debug bool
@@ -241,6 +242,7 @@ type configWithType struct {
 		SlowTransferRampupTime struct { Type string; Value int }
 		SlowTransferWindow struct { Type string; Value int }
 		StoppedTransferTimeout struct { Type string; Value int }
+		WorkerCount struct { Type string; Value int }
 	}
 	ConfigDir struct { Type string; Value string }
 	Debug struct { Type string; Value bool }

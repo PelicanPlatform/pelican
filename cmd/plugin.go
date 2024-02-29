@@ -20,6 +20,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io/fs"
 	"net/url"
@@ -27,7 +28,6 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -37,10 +37,10 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	"golang.org/x/sync/errgroup"
 )
 
 var (
-	version = "dev"
 	commit  = "none"
 	date    = "unknown"
 	builtBy = "unknown"
@@ -56,8 +56,8 @@ var (
 	outfile    string
 )
 
-type Transfer struct {
-	url       string
+type PluginTransfer struct {
+	url       *url.URL
 	localFile string
 }
 
@@ -92,19 +92,12 @@ func stashPluginMain(args []string) {
 			log.Warningln("Panic caused by the following", string(debug.Stack()))
 			ret := fmt.Sprintf("Unrecoverable error (panic) captured in stashPluginMain(): %v", r)
 
-			debugStack := strings.ReplaceAll(string(debug.Stack()), "\n", ";")
-			client.AddError(errors.New(debugStack))
-
-			// Attempt to add the panic to the error accumulator
-			client.AddError(errors.New(ret))
-
-			// Write our important classAds
 			resultAd := classads.NewClassAd()
 			var resultAds []*classads.ClassAd
 
 			// Set as failure and add errors
 			resultAd.Set("TransferSuccess", false)
-			resultAd.Set("TransferError", client.GetErrors())
+			resultAd.Set("TransferError", ret+";"+strings.ReplaceAll(string(debug.Stack()), "\n", ";"))
 			resultAds = append(resultAds, resultAd)
 
 			// Attempt to write our file and bail
@@ -120,18 +113,12 @@ func stashPluginMain(args []string) {
 	if err != nil {
 		log.Errorf("Problem initializing the Pelican client config: %v", err)
 		err = errors.Wrap(err, "Problem initializing the Pelican Client configuration")
-		client.AddError(err)
 		isConfigErr = true
 	}
 
 	// Parse command line arguments
 	var upload bool = false
 	// Set the options
-	client.ObjectClientOptions.Recursive = false
-	client.ObjectClientOptions.ProgressBars = false
-	client.ObjectClientOptions.Version = version
-	client.ObjectClientOptions.Plugin = true
-	methods := []string{"http"}
 	var infile, testCachePath string
 	var getCaches bool = false
 
@@ -140,12 +127,12 @@ func stashPluginMain(args []string) {
 		if args[0] == "-classad" {
 			// Print classad and exit
 			fmt.Println("MultipleFileSupport = true")
-			fmt.Println("PluginVersion = \"" + version + "\"")
+			fmt.Println("PluginVersion = \"" + config.GetVersion() + "\"")
 			fmt.Println("PluginType = \"FileTransfer\"")
 			fmt.Println("SupportedMethods = \"stash, osdf\"")
 			os.Exit(0)
 		} else if args[0] == "-version" || args[0] == "-v" {
-			fmt.Println("Version:", version)
+			fmt.Println("Version:", config.GetVersion())
 			fmt.Println("Build Date:", date)
 			fmt.Println("Build Commit:", commit)
 			fmt.Println("Built By:", builtBy)
@@ -191,7 +178,7 @@ func stashPluginMain(args []string) {
 
 		// Set as failure and add errors
 		resultAd.Set("TransferSuccess", false)
-		resultAd.Set("TransferError", client.GetErrors())
+		resultAd.Set("TransferError", err.Error())
 		resultAds = append(resultAds, resultAd)
 
 		// Attempt to write our file and bail
@@ -220,13 +207,14 @@ func stashPluginMain(args []string) {
 
 	var source []string
 	var dest string
-	var transfers []Transfer
+	var transfers []PluginTransfer
 
 	if len(args) == 0 && (infile == "" || outfile == "") {
 		fmt.Fprint(os.Stderr, "No source or destination specified\n")
 		os.Exit(1)
 	}
 
+	var workChan chan PluginTransfer
 	if len(args) == 0 {
 		// Open the input and output files
 		infileFile, err := os.Open(infile)
@@ -241,13 +229,26 @@ func stashPluginMain(args []string) {
 			log.Errorln("Failed to read in from stdin:", err)
 			os.Exit(1)
 		}
-	} else {
+		workChan = make(chan PluginTransfer, len(transfers))
+		for _, transfer := range transfers {
+			workChan <- transfer
+		}
+	} else if len(args) > 1 {
 		source = args[:len(args)-1]
 		dest = args[len(args)-1]
+		workChan = make(chan PluginTransfer, len(args)-1)
 		for _, src := range source {
-			transfers = append(transfers, Transfer{url: src, localFile: dest})
+			srcUrl, err := url.Parse(src)
+			if err != nil {
+				log.Errorf("Failed to parse input URL (%s): %s", src, err)
+			}
+			workChan <- PluginTransfer{url: srcUrl, localFile: dest}
 		}
+	} else {
+		log.Errorln("Must provide both source and destination as argument")
+		os.Exit(1)
 	}
+	close(workChan)
 
 	// NOTE: HTCondor 23.3.0 and before would reuse the outfile names for multiple
 	// transfers, meaning the results of prior plugin invocations would be present
@@ -269,33 +270,34 @@ func stashPluginMain(args []string) {
 		defer outputFile.Close()
 	}
 
-	var wg sync.WaitGroup
+	ctx, cancel := context.WithCancel(context.Background())
+	egrp, _ := errgroup.WithContext(ctx)
+	defer func() {
+		err = egrp.Wait()
+		if err != context.Canceled {
+			log.Errorln("Error when shutting down worker:", err)
+		}
+	}()
+	defer cancel()
 
-	workChan := make(chan Transfer, len(transfers))
-	results := make(chan *classads.ClassAd, len(transfers))
+	results := make(chan *classads.ClassAd, 5)
 
-	// Start workers
-	for i := 1; i <= 5; i++ {
-		wg.Add(1)
-		go moveObjects(source, methods, upload, &wg, workChan, results)
-	}
+	egrp.Go(func() error {
+		return runPluginWorker(ctx, upload, workChan, results)
+	})
 
 	success := true
 	var resultAds []*classads.ClassAd
-	counter := 0
 	done := false
 	for !done {
-		// Send to work channel the amount of transfers we have
-		if counter < len(transfers) {
-			workChan <- transfers[counter]
-			counter++
-		} else if counter == len(transfers) { // Once we sent all the work, close the channel
-			close(workChan)
-			// Increment counter so we no longer hit this case
-			counter++
-		}
 		select {
-		case resultAd := <-results:
+		case <-ctx.Done():
+			done = true
+		case resultAd, ok := <-results:
+			if !ok {
+				done = true
+				break
+			}
 			// Process results as soon as we get them
 			transferSuccess, err := resultAd.Get("TransferSuccess")
 			if err != nil {
@@ -308,28 +310,22 @@ func stashPluginMain(args []string) {
 				// Add the final (failed) result to the resultAds
 				resultAds = append(resultAds, resultAd)
 				done = true
-				break
 			} else { // Otherwise, we add to end result ads
 				resultAds = append(resultAds, resultAd)
-			}
-		default:
-			// We are either done or still downloading/uploading
-			if len(resultAds) == len(transfers) {
-				log.Debugln("Finished transfering objects! :)")
-				done = true
-				break
 			}
 		}
 	}
 
-	// Wait for transfers only if successful
-	if success {
-		wg.Wait()
+	// Ensure all our workers are shut down.
+	cancel()
+	if waitErr := egrp.Wait(); waitErr != nil && waitErr != context.Canceled {
+		log.Errorln("Error when shutting down worker:", waitErr)
+		success = false
+		err = waitErr
 	}
 
-	close(results)
-
-	success, retryable := writeOutfile(resultAds, outputFile)
+	tmpSuccess, retryable := writeOutfile(err, resultAds, outputFile)
+	success = tmpSuccess && success
 
 	if success {
 		os.Exit(0)
@@ -358,49 +354,81 @@ func writeClassadOutputAndBail(exitCode int, resultAds []*classads.ClassAd) {
 	}
 
 	// We'll exit 3 in here if anything fails to write the file
-	writeOutfile(resultAds, outputFile)
+	writeOutfile(nil, resultAds, outputFile)
 
 	log.Errorln("Failure with pelican plugin. Exiting...")
 	os.Exit(exitCode)
 }
 
-// moveObjects performs the appropriate download or upload functions for the plugin as well as
+// runPluginWorker performs the appropriate download or upload functions for the plugin as well as
 // writes the resultAds for each transfer
 // Returns: resultAds and if an error given is retryable
-func moveObjects(source []string, methods []string, upload bool, wg *sync.WaitGroup, workChan <-chan Transfer, results chan<- *classads.ClassAd) {
-	defer wg.Done()
-	var result error
-	for transfer := range workChan {
-		var transferResults []client.TransferResults
-		if upload {
-			source = append(source, transfer.localFile)
-			log.Debugln("Uploading:", transfer.localFile, "to", transfer.url)
-			transferResults, result = client.DoStashCPSingle(transfer.localFile, transfer.url, methods, false)
-		} else {
-			source = append(source, transfer.url)
-			log.Debugln("Downloading:", transfer.url, "to", transfer.localFile)
-
-			// When we want to auto-unpack files, we should do this to the containing directory, not the destination
-			// file which HTCondor prepares
-			url, err := url.Parse(transfer.url)
-			if err != nil {
-				result = errors.Wrap(err, "Unable to parse transfer source as a URL")
-			} else {
-				localFile := transfer.localFile
-				if url.Query().Get("pack") != "" {
-					localFile = filepath.Dir(localFile)
-				}
-				transferResults, result = client.DoStashCPSingle(transfer.url, localFile, methods, false)
-			}
+func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTransfer, results chan<- *classads.ClassAd) (err error) {
+	te := client.NewTransferEngine(ctx)
+	defer func() {
+		if shutdownErr := te.Shutdown(); shutdownErr != nil && err == nil {
+			err = shutdownErr
 		}
-		startTime := time.Now().Unix()
-		resultAd := classads.NewClassAd()
-		// Set our DeveloperData:
-		developerData := make(map[string]interface{})
-		developerData["PelicanClientVersion"] = version
-		if len(transferResults) != 0 && !upload {
-			developerData["Attempts"] = len(transferResults[0].Attempts)
-			for _, attempt := range transferResults[0].Attempts {
+	}()
+	tc, err := te.NewClient(client.WithAcquireToken(false))
+	if err != nil {
+		return
+	}
+	defer func() {
+		if err != nil {
+			tc.Cancel()
+		}
+	}()
+	defer close(results)
+
+	jobMap := make(map[string]PluginTransfer)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case transfer, ok := <-workChan:
+			if !ok {
+				tc.Close()
+				workChan = nil
+				break
+			}
+			if upload {
+				log.Debugln("Uploading:", transfer.localFile, "to", transfer.url)
+			} else {
+				log.Debugln("Downloading:", transfer.url, "to", transfer.localFile)
+
+				// When we want to auto-unpack files, we should do this to the containing directory, not the destination
+				// file which HTCondor prepares
+				if transfer.url.Query().Get("pack") != "" {
+					transfer.localFile = filepath.Dir(transfer.localFile)
+				}
+			}
+
+			var tj *client.TransferJob
+			urlCopy := *transfer.url
+			tj, err = tc.NewTransferJob(&urlCopy, transfer.localFile, upload, false, client.WithAcquireToken(false))
+			jobMap[tj.ID()] = transfer
+			if err != nil {
+				return errors.Wrap(err, "Failed to create new transfer job")
+			}
+
+			if err = tc.Submit(tj); err != nil {
+				return err
+			}
+		case result, ok := <-tc.Results():
+			if !ok {
+				log.Debugln("Client has no more results")
+				return
+			}
+			log.Debugln("Got result from transfer client")
+			startTime := time.Now().Unix()
+			resultAd := classads.NewClassAd()
+			// Set our DeveloperData:
+			developerData := make(map[string]interface{})
+			developerData["PelicanClientVersion"] = config.GetVersion()
+			developerData["Attempts"] = len(result.Attempts)
+			for _, attempt := range result.Attempts {
 				developerData[fmt.Sprintf("TransferFileBytes%d", attempt.Number)] = attempt.TransferFileBytes
 				developerData[fmt.Sprintf("TimeToFirstByte%d", attempt.Number)] = attempt.TimeToFirstByte
 				developerData[fmt.Sprintf("Endpoint%d", attempt.Number)] = attempt.Endpoint
@@ -410,61 +438,51 @@ func moveObjects(source []string, methods []string, upload bool, wg *sync.WaitGr
 					developerData[fmt.Sprintf("TransferError%d", attempt.Number)] = attempt.Error
 				}
 			}
-		} else if len(transferResults) != 0 && upload { // For uploads, we only care about idx 0 since there is only 1 Attempt and 1 TransferResult
-			developerData["TransferFileBytes"] = transferResults[0].TransferredBytes
-			if len(transferResults[0].Attempts) != 0 { // Should be fine but check to be sure so we don't go out of bounds
-				developerData["Endpoint"] = transferResults[0].Attempts[0].Endpoint
-				developerData["TransferEndTime"] = transferResults[0].Attempts[0].TransferEndTime
-				developerData["ServerVersion"] = transferResults[0].Attempts[0].ServerVersion
-				developerData["TimeToFirstByte"] = transferResults[0].Attempts[0].TimeToFirstByte
-			}
-			if transferResults[0].Error != nil {
-				developerData["TransferError"] = transferResults[0].Error
-			}
-		}
 
-		resultAd.Set("DeveloperData", developerData)
+			resultAd.Set("DeveloperData", developerData)
 
-		resultAd.Set("TransferStartTime", startTime)
-		resultAd.Set("TransferEndTime", time.Now().Unix())
-		hostname, _ := os.Hostname()
-		resultAd.Set("TransferLocalMachineName", hostname)
-		resultAd.Set("TransferProtocol", "stash")
-		resultAd.Set("TransferUrl", transfer.url)
-		resultAd.Set("TransferFileName", transfer.localFile)
-		if upload {
-			resultAd.Set("TransferType", "upload")
-		} else {
-			resultAd.Set("TransferType", "download")
-		}
-		if result == nil {
-			resultAd.Set("TransferSuccess", true)
-			resultAd.Set("TransferFileBytes", transferResults[0].TransferredBytes)
-			resultAd.Set("TransferTotalBytes", transferResults[0].TransferredBytes) // idx 0 since we are not using recursive uploads/downloads
-		} else {
-			resultAd.Set("TransferSuccess", false)
-			if client.GetErrors() == "" {
-				resultAd.Set("TransferError", result.Error())
+			resultAd.Set("TransferStartTime", startTime)
+			resultAd.Set("TransferEndTime", time.Now().Unix())
+			hostname, _ := os.Hostname()
+			resultAd.Set("TransferLocalMachineName", hostname)
+			resultAd.Set("TransferProtocol", "stash")
+			transfer := jobMap[result.JobId.String()]
+			resultAd.Set("TransferUrl", transfer.url.String())
+			resultAd.Set("TransferFileName", transfer.localFile)
+			if upload {
+				resultAd.Set("TransferType", "upload")
 			} else {
+				resultAd.Set("TransferType", "download")
+			}
+			if result.Error == nil {
+				resultAd.Set("TransferSuccess", true)
+				resultAd.Set("TransferFileBytes", result.Attempts[len(result.Attempts)-1].TransferFileBytes)
+				resultAd.Set("TransferTotalBytes", result.Attempts[len(result.Attempts)-1].TransferFileBytes)
+			} else {
+				resultAd.Set("TransferSuccess", false)
+				var te *client.TransferErrors
+				errMsgInternal := result.Error.Error()
+				if errors.As(result.Error, &te) {
+					errMsgInternal = te.UserError()
+				}
 				errMsg := " Failure "
 				if upload {
 					errMsg += "uploading "
 				} else {
 					errMsg += "downloading "
 				}
-				errMsg += transfer.url + ": " + client.GetErrors()
+				errMsg += transfer.url.String() + ": " + errMsgInternal
 				resultAd.Set("TransferError", errMsg)
+				resultAd.Set("TransferFileBytes", 0)
+				resultAd.Set("TransferTotalBytes", 0)
+				if client.ShouldRetry(result.Error) {
+					resultAd.Set("TransferRetryable", true)
+				} else {
+					resultAd.Set("TransferRetryable", false)
+				}
 			}
-			resultAd.Set("TransferFileBytes", 0)
-			resultAd.Set("TransferTotalBytes", 0)
-			if client.ErrorsRetryable() {
-				resultAd.Set("TransferRetryable", true)
-			} else {
-				resultAd.Set("TransferRetryable", false)
-			}
-			client.ClearErrors()
+			results <- resultAd
 		}
-		results <- resultAd
 	}
 }
 
@@ -472,7 +490,24 @@ func moveObjects(source []string, methods []string, upload bool, wg *sync.WaitGr
 // true: all result ads indicate transfer success
 // false: at least one result ad has failed
 // As well as a boolean letting us know if errors are retryable
-func writeOutfile(resultAds []*classads.ClassAd, outputFile *os.File) (bool, bool) {
+func writeOutfile(err error, resultAds []*classads.ClassAd, outputFile *os.File) (bool, bool) {
+
+	if err != nil {
+		alreadyFailed := false
+		for _, ad := range resultAds {
+			failed, getErr := ad.Get("TransferSuccess")
+			if getErr != nil || failed.(bool) {
+				alreadyFailed = true
+				break
+			}
+		}
+		if !alreadyFailed {
+			resultAd := classads.NewClassAd()
+			resultAd.Set("TransferSuccess", false)
+			resultAd.Set("TransferError", err.Error())
+			resultAds = append(resultAds, resultAd)
+		}
+	}
 	success := true
 	retryable := false
 	for _, resultAd := range resultAds {
@@ -503,14 +538,14 @@ func writeOutfile(resultAds []*classads.ClassAd, outputFile *os.File) (bool, boo
 		var serr syscall.Errno
 		// Error code 1 (serr) is ERROR_INVALID_FUNCTION, the expected Windows syscall error
 		// Error code EINVAL is returned on Linux
-		// Error code ENODEV is returned on Mac OS X
-		if errors.As(err, &perr) && errors.As(perr.Unwrap(), &serr) && (int(serr) == 1 || serr == syscall.EINVAL || serr == syscall.ENODEV) {
+		// Error code ENODEV (/dev/null) or ENOTTY (/dev/stdout) is returned on Mac OS X
+		if errors.As(err, &perr) && errors.As(perr.Unwrap(), &serr) && (int(serr) == 1 || serr == syscall.EINVAL || serr == syscall.ENODEV || serr == syscall.ENOTTY) {
 			log.Debugf("Error when syncing: %s; can be ignored\n", perr)
 		} else {
 			if errors.As(err, &perr) && errors.As(perr.Unwrap(), &serr) {
-				log.Errorf("Failed to sync output file: %s (errno %d)", serr, int(serr))
+				log.Errorf("Failed to sync output file (%s): %s (errno %d)", outputFile.Name(), serr, int(serr))
 			} else {
-				log.Errorln("Failed to sync output file:", err)
+				log.Errorf("Failed to sync output file (%s): %s", outputFile.Name(), err)
 			}
 			os.Exit(FailedOutfile) // Unique error code to let us know the outfile could not be created
 		}
@@ -519,7 +554,7 @@ func writeOutfile(resultAds []*classads.ClassAd, outputFile *os.File) (bool, boo
 }
 
 // readMultiTransfers reads the transfers from a Reader, such as stdin
-func readMultiTransfers(stdin bufio.Reader) (transfers []Transfer, err error) {
+func readMultiTransfers(stdin bufio.Reader) (transfers []PluginTransfer, err error) {
 	// Check stdin for a list of transfers
 	ads, err := classads.ReadClassAd(&stdin)
 	if err != nil {
@@ -529,7 +564,11 @@ func readMultiTransfers(stdin bufio.Reader) (transfers []Transfer, err error) {
 		return nil, errors.New("No transfers found")
 	}
 	for _, ad := range ads {
-		adUrl, err := ad.Get("Url")
+		adUrlStr, err := ad.Get("Url")
+		if err != nil {
+			return nil, err
+		}
+		adUrl, err := url.Parse(adUrlStr.(string))
 		if err != nil {
 			return nil, err
 		}
@@ -538,7 +577,7 @@ func readMultiTransfers(stdin bufio.Reader) (transfers []Transfer, err error) {
 		if err != nil {
 			return nil, err
 		}
-		transfers = append(transfers, Transfer{url: adUrl.(string), localFile: destination.(string)})
+		transfers = append(transfers, PluginTransfer{url: adUrl, localFile: destination.(string)})
 	}
 
 	return transfers, nil
