@@ -351,7 +351,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		for idx, ad := range originAds {
 			if ad.EnableWrite {
 				redirectURL = getRedirectURL(reqPath, originAds[idx], !namespaceAd.PublicRead)
-				if brokerUrl := originAds[idx].BrokerURL; brokerUrl != nil {
+				if brokerUrl := originAds[idx].BrokerURL; brokerUrl.String() != "" {
 					ginCtx.Header("X-Pelican-Broker", brokerUrl.String())
 				}
 				ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, authzBearerEscaped))
@@ -362,7 +362,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		return
 	} else { // Otherwise, we are doing a GET
 		redirectURL := getRedirectURL(reqPath, originAds[0], !namespaceAd.PublicRead)
-		if brokerUrl := originAds[0].BrokerURL; brokerUrl != nil {
+		if brokerUrl := originAds[0].BrokerURL; brokerUrl.String() != "" {
 			ginCtx.Header("X-Pelican-Broker", brokerUrl.String())
 		}
 
@@ -555,7 +555,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType common.S
 		AuthURL:            *ad_url,
 		URL:                *ad_url,
 		WebURL:             *adWebUrl,
-		BrokerURL:          brokerUrl,
+		BrokerURL:          *brokerUrl,
 		Type:               sType,
 		EnableWrite:        adV2.Caps.Write,
 		EnableFallbackRead: adV2.Caps.FallBackRead,
