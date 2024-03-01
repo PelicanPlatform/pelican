@@ -306,4 +306,17 @@ func TestDiscoverFederation(t *testing.T) {
 		assert.Equal(t, "broker", param.Federation_BrokerUrl.GetString(), "Unexpected BrokerEndpoint")
 		viper.Reset()
 	})
+
+	t.Run("testOsgHtcUrl", func(t *testing.T) {
+		viper.Set("tlsskipverify", true)
+		viper.Set("Federation.DiscoveryUrl", "osg-htc.org")
+		err := DiscoverFederation()
+		assert.NoError(t, err)
+		// Assert that the metadata matches expectations
+		assert.Equal(t, "https://osdf-director.osg-htc.org", param.Federation_DirectorUrl.GetString(), "Unexpected DirectorEndpoint")
+		assert.Equal(t, "https://osdf-registry.osg-htc.org", param.Federation_RegistryUrl.GetString(), "Unexpected NamespaceRegistrationEndpoint")
+		assert.Equal(t, "https://osg-htc.org/osdf/public_signing_key.jwks", param.Federation_JwkUrl.GetString(), "Unexpected JwksUri")
+		assert.Equal(t, "", param.Federation_BrokerUrl.GetString(), "Unexpected BrokerEndpoint")
+		viper.Reset()
+	})
 }
