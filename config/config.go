@@ -88,6 +88,11 @@ type (
 	ServerType int // ServerType is a bit mask indicating which Pelican server(s) are running in the current process
 
 	ContextKey string
+
+	MetadataErr struct {
+		msg      string
+		innerErr error
+	}
 )
 
 const (
@@ -136,7 +141,44 @@ var (
 
 	// Pelican version
 	version string = "dev"
+
+	MetadataTimeoutErr *MetadataErr = &MetadataErr{msg: "Timeout when querying metadata"}
 )
+
+// This function creates a new MetadataError by wrapping the previous error
+func NewMetadataError(err error, msg string) *MetadataErr {
+	return &MetadataErr{
+		msg: msg,
+	}
+}
+
+func (e *MetadataErr) Error() string {
+	// If the inner error is nil, we don't want to print out "<nil>"
+	if e.innerErr != nil {
+		return fmt.Sprintf("%s: %v", e.msg, e.innerErr)
+	} else {
+		return e.msg
+	}
+}
+
+func (e *MetadataErr) Is(target error) bool {
+	// We want to verify we have a timeout error
+	if target, ok := target.(*MetadataErr); ok {
+		return e.msg == target.msg
+	}
+	return false
+}
+
+func (e *MetadataErr) Wrap(err error) error {
+	return &MetadataErr{
+		innerErr: err,
+		msg:      e.msg,
+	}
+}
+
+func (e *MetadataErr) Unwrap() error {
+	return e.innerErr
+}
 
 func init() {
 	validate = validator.New(validator.WithRequiredStructEnabled())
@@ -381,7 +423,12 @@ func DiscoverFederation() error {
 
 	result, err := httpClient.Do(req)
 	if err != nil {
-		return errors.Wrapf(err, "Failure when doing federation metadata lookup to %s", discoveryUrl)
+		var netErr net.Error
+		if errors.As(err, &netErr) && netErr.Timeout() {
+			return MetadataTimeoutErr.Wrap(err)
+		} else {
+			return NewMetadataError(err, "Error occured when querying for metadata")
+		}
 	}
 
 	if result.Body != nil {
