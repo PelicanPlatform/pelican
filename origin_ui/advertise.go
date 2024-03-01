@@ -19,7 +19,6 @@
 package origin_ui
 
 import (
-	"fmt"
 	"net/url"
 
 	"github.com/pelicanplatform/pelican/common"
@@ -45,12 +44,20 @@ func (server *OriginServer) GetNamespaceAdsFromDirector() error {
 
 func (server *OriginServer) CreateAdvertisement(name string, originUrlStr string, originWebUrl string) (ad common.OriginAdvertiseV2, err error) {
 	// Here we instantiate the namespaceAd slice, but we still need to define the namespace
-	issuerUrl := url.URL{}
-	issuerUrl.Scheme = "https"
-	issuerUrl.Host = fmt.Sprintf("%v:%v", param.Server_Hostname.GetString(), param.Origin_Port.GetInt())
+	issuerUrlStr, err := config.GetServerIssuerURL()
+	if err != nil {
+		err = errors.Wrap(err, "Unable to get server issuer URL for the origin")
+		return
+	}
 
-	if issuerUrl.String() == "" {
+	if issuerUrlStr == "" {
 		err = errors.New("No IssuerUrl is set")
+		return
+	}
+
+	issuerUrl, err := url.Parse(issuerUrlStr)
+	if err != nil {
+		err = errors.Wrap(err, "Unable to parse issuer url")
 		return
 	}
 
@@ -79,7 +86,7 @@ func (server *OriginServer) CreateAdvertisement(name string, originUrlStr string
 		}},
 		Issuer: []common.TokenIssuer{{
 			BasePaths: []string{prefix},
-			IssuerUrl: issuerUrl,
+			IssuerUrl: *issuerUrl,
 		}},
 	}
 	ad = common.OriginAdvertiseV2{
@@ -95,7 +102,7 @@ func (server *OriginServer) CreateAdvertisement(name string, originUrlStr string
 		},
 		Issuer: []common.TokenIssuer{{
 			BasePaths: []string{prefix},
-			IssuerUrl: issuerUrl,
+			IssuerUrl: *issuerUrl,
 		}},
 	}
 	if param.Origin_EnableBroker.GetBool() {

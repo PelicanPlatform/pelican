@@ -34,7 +34,7 @@ import (
 
 // Configure XrootD directory for both self-based and director-based file transfer tests
 func ConfigureXrootdMonitoringDir() error {
-	pelicanMonitoringPath := filepath.Join(param.Xrootd_RunLocation.GetString(),
+	pelicanMonitoringPath := filepath.Join(param.Origin_RunLocation.GetString(),
 		"export", "pelican", "monitoring")
 
 	uid, err := config.GetDaemonUID()

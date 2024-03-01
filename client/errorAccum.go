@@ -26,6 +26,7 @@ import (
 	"time"
 
 	grab "github.com/opensaucerer/grab/v3"
+	"github.com/pelicanplatform/pelican/config"
 )
 
 type (
@@ -125,6 +126,9 @@ func IsRetryable(err error) bool {
 	}
 	if errors.Is(err, grab.ErrBadLength) {
 		return false
+	}
+	if errors.Is(err, config.MetadataTimeoutErr) {
+		return true
 	}
 	var cse *ConnectionSetupError
 	if errors.As(err, &cse) {

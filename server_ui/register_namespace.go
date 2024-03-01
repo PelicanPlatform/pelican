@@ -196,10 +196,9 @@ func keyIsRegistered(privkey jwk.Key, registryUrlStr string, prefix string) (key
 	}
 }
 
-func registerNamespacePrep() (key jwk.Key, prefix string, registrationEndpointURL string, isRegistered bool, err error) {
+func registerNamespacePrep(prefix string) (key jwk.Key, registrationEndpointURL string, isRegistered bool, err error) {
 	// TODO: We eventually want to be able to export multiple prefixes; at that point, we'll
 	// refactor to loop around all the namespaces
-	prefix = param.Origin_NamespacePrefix.GetString()
 	if prefix == "" {
 		err = errors.New("Invalid empty prefix for registration")
 		return
@@ -256,7 +255,7 @@ func registerNamespaceImpl(key jwk.Key, prefix string, registrationEndpointURL s
 	return nil
 }
 
-func RegisterNamespaceWithRetry(ctx context.Context, egrp *errgroup.Group) error {
+func RegisterNamespaceWithRetry(ctx context.Context, egrp *errgroup.Group, prefix string) error {
 	metrics.SetComponentHealthStatus(metrics.OriginCache_Federation, metrics.StatusCritical, "Origin not registered with federation")
 	retryInterval := param.Server_RegistrationRetryInterval.GetDuration()
 	if retryInterval == 0 {
@@ -264,7 +263,7 @@ func RegisterNamespaceWithRetry(ctx context.Context, egrp *errgroup.Group) error
 		retryInterval = 10 * time.Second
 	}
 
-	key, prefix, url, isRegistered, err := registerNamespacePrep()
+	key, url, isRegistered, err := registerNamespacePrep(prefix)
 	if err != nil {
 		return err
 	}
