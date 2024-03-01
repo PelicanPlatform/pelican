@@ -238,5 +238,21 @@ func TestS3OriginConfig(t *testing.T) {
 
 	// One other quick check to do is that the namespace was correctly parsed:
 	require.Equal(t, fmt.Sprintf("/%s/%s/%s", serviceName, regionName, bucketName), param.Origin_NamespacePrefix.GetString())
+	cancel()
+	mockupCancel()
+
+	// Test virtual-style hosting
+	viper.Set("Origin.S3UrlStyle", "virtual")
+	ctx, cancel, egrp = test_utils.TestContext(context.Background(), t)
+	mockupCancel = originMockup(ctx, egrp, t)
+	defer cancel()
+	defer mockupCancel()
+
+	err = server_utils.WaitUntilWorking(ctx, "GET", originEndpoint, "xrootd", 403)
+	if err != nil {
+		t.Fatalf("Unsucessful test: Server encountered an error: %v", err)
+	}
+
+	require.Equal(t, fmt.Sprintf("/%s/%s/%s", serviceName, regionName, bucketName), param.Origin_NamespacePrefix.GetString())
 	viper.Reset()
 }
