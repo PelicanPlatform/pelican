@@ -38,10 +38,13 @@ WORKDIR /pelican
 COPY . .
 COPY --from=website-build /webapp/out ./web_ui/frontend/out
 
+ENV GOOS="linux"
+ENV GOARCH="amd64"
+
 RUN\
     if $IS_NONRELEASE_BUILD;\
-        then goreleaser build --clean --snapshot;\
-    else goreleaser build --clean;\
+        then goreleaser build --clean --snapshot --single-target;\
+    else goreleaser build --clean --single-target;\
     fi
 
 FROM --platform=linux/amd64 hub.opensciencegrid.org/sciauth/scitokens-oauth2-server:release-20231118-1823 AS scitokens-oauth2-server
@@ -102,16 +105,6 @@ RUN \
 FROM dependency-build AS final-stage
 
 WORKDIR /pelican
-
-# Copy over needed files
-COPY --from=pelican-build /pelican/dist/pelican_linux_amd64_v1/pelican /pelican/osdf-client
-COPY images/supervisord/supervisord.conf /etc/supervisord.conf
-
-# Eventually add more entrypoint commands and corresponding supervisor
-# daemons here
-COPY images/supervisord/* /etc/supervisord.d/
-COPY images/entrypoint.sh /entrypoint.sh
-
 
 ####
 # Now, start installing the SciTokens OA4MP server from
@@ -183,6 +176,17 @@ COPY --from=xrootd-plugin-builder /usr/lib64/libXrdS3-5.so /usr/lib64/libXrdHTTP
 COPY --from=xrootd-plugin-builder /usr/include/nlohmann /usr/include/nlohmann
 # Copy the JSON schema validator library
 COPY --from=xrootd-plugin-builder /usr/lib64/libnlohmann_json_schema_validator.a /usr/lib64
+
+# Install tini
+RUN curl -o tini https://github.com/krallin/tini/releases/download/v0.19.0/tini-static-amd64 &&\
+    cp tini /bin/tini &&\
+    rm -f tini
+
+# Copy over needed files
+COPY --from=pelican-build /pelican/dist/pelican_linux_amd64_v1/pelican /pelican/osdf-client
+
+# Eventually add more entrypoint commands here
+COPY images/entrypoint.sh /entrypoint.sh
 
 RUN chmod +x /pelican/osdf-client \
     && chmod +x /entrypoint.sh

@@ -18,7 +18,7 @@
 #
 # ***************************************************************
 
-supervisord -c /etc/supervisord.conf
+echo "Initializing run environment for Pelican..."
 
 ####
 # Setup the OA4MP configuration.  Items are taken from https://github.com/scitokens/scitokens-oauth2-server/blob/master/start.sh
@@ -98,15 +98,14 @@ if [ ! -e /opt/tomcat/conf/chain.pem ]; then
     popd > /dev/null
 fi
 
+echo "Starting Pelican..."
 
 # grab whatever arg is passed to container run command
-# and use it to launch the corresponding pelican_X daemon
-# (eg running the container with the arg director_serve will
-# launch the pelican_director_serve daemon through supervisord)
-if [ "$1" ]; then
-  supervisorctl start "pelican_$1"
-  # Keep the container running
-  tail -f /dev/null
+# and use it to launch the corresponding pelican daemon
+# (eg running the container with the arg director serve will
+# launch the ./pelican director serve daemon)
+if [ $# -ne 0 ]; then
+  /pelican/osdf-client "$@"
 else
   echo "A command must be provided"
 fi
