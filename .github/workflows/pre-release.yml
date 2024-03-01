@@ -57,7 +57,7 @@ jobs:
 
   release-container:
     needs: [pre-release]
-    uses: PelicanPlatform/pelican/.github/workflows/build-release-container.yml@main
+    uses: PelicanPlatform/pelican/.github/workflows/build-prod-container.yml@main
     secrets: inherit
 
   release:

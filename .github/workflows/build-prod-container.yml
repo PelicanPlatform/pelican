@@ -9,6 +9,12 @@ on:
     types:
       - dispatch-build
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      from_workflow_call:
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -63,7 +69,22 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Set Branch
+        id: set_branch
+        if: ${{ inputs.from_workflow_call }}
+        run: |
+          echo "branch=${GITHUB_REF_NAME%.*}.x" >> $GITHUB_OUTPUT
+
+      - name: Checkout for release
+        uses: actions/checkout@v4
+        if: ${{ inputs.from_workflow_call }}
+        with:
+          fetch-depth: 0
+          ref: ${{ steps.set_branch.outputs.branch }}
+
+      - name: Checkout for push to main
+        uses: actions/checkout@v4
+        if: ${{ !inputs.from_workflow_call }}
 
       - name: Generate tag list
         id: generate-tag-list
