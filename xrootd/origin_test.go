@@ -52,7 +52,7 @@ func originMockup(ctx context.Context, egrp *errgroup.Group, t *testing.T) conte
 	originServer := &origin_ui.OriginServer{}
 
 	// Create our own temp directory (for some reason t.TempDir() does not play well with xrootd)
-	tmpPathPattern := "XRootD-Test_Origin*"
+	tmpPathPattern := "XRD-Tst_Orgn*"
 	tmpPath, err := os.MkdirTemp("", tmpPathPattern)
 	require.NoError(t, err)
 
@@ -62,7 +62,7 @@ func originMockup(ctx context.Context, egrp *errgroup.Group, t *testing.T) conte
 	require.NoError(t, err)
 
 	viper.Set("ConfigDir", tmpPath)
-	viper.Set("Xrootd.RunLocation", filepath.Join(tmpPath, "xrootd"))
+	viper.Set("Origin.RunLocation", filepath.Join(tmpPath, "xorigin"))
 	t.Cleanup(func() {
 		os.RemoveAll(tmpPath)
 	})

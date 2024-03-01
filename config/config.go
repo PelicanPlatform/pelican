@@ -719,6 +719,48 @@ func initConfigDir() error {
 	return nil
 }
 
+// XRootD RunLocation usage logic:
+//   - Origin.RunLocation and Cache.RunLocation take precedence for their respective types
+//   - If neither keys are set and Xrootd.RunLocation is, then use that and emit a warning
+//   - If neither key is set, Xrootd.Runlocation is, and both modules are enabled, then we don't
+//     know the next steps -- throw an error
+func setXrootdRunLocations(currentServers ServerType, dir string) error {
+	cacheLocation := viper.GetString("Cache.RunLocation")
+	originLocation := viper.GetString("Origin.RunLocation")
+	xrootdLocation := viper.GetString("Xrootd.RunLocation")
+	xrootdLocationIsSet := viper.IsSet("Xrootd.Location")
+	cacheLocFallbackToXrootd := false
+	originLocFallbackToXrootd := false
+	if currentServers.IsEnabled(CacheType) {
+		if !viper.IsSet("Cache.RunLocation") {
+			if xrootdLocationIsSet {
+				cacheLocFallbackToXrootd = true
+				cacheLocation = xrootdLocation
+			} else {
+				cacheLocation = filepath.Join(dir, "cache")
+			}
+		}
+	}
+	if currentServers.IsEnabled(OriginType) && !viper.IsSet("Origin.RunLocation") {
+		if xrootdLocationIsSet {
+			originLocFallbackToXrootd = true
+			originLocation = xrootdLocation
+		} else {
+			originLocation = filepath.Join(dir, "origin")
+		}
+	}
+	if cacheLocFallbackToXrootd && originLocFallbackToXrootd {
+		return errors.New("Xrootd.RunLocation is set, but both modules are enabled.  Please set Cache.RunLocation and Origin.RunLocation or disable Xrootd.RunLocation so the default location can be used.")
+	}
+	if currentServers.IsEnabled(OriginType) {
+		viper.SetDefault("Origin.RunLocation", originLocation)
+	}
+	if currentServers.IsEnabled(CacheType) {
+		viper.SetDefault("Cache.RunLocation", cacheLocation)
+	}
+	return nil
+}
+
 // Initialize Pelican server instance. Pass a bit mask of `currentServers` if you want to enable multiple services.
 // Note not all configurations are supported: currently, if you enable both cache and origin then an error
 // is thrown
@@ -726,18 +768,9 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 	if err := initConfigDir(); err != nil {
 		return errors.Wrap(err, "Failed to initialize the server configuration")
 	}
-	if currentServers.IsEnabled(OriginType) && currentServers.IsEnabled(CacheType) {
-		return errors.New("A cache and origin cannot both be enabled in the same instance")
-	}
 
 	setEnabledServer(currentServers)
 
-	xrootdPrefix := ""
-	if currentServers.IsEnabled(OriginType) {
-		xrootdPrefix = "origin"
-	} else if currentServers.IsEnabled(CacheType) {
-		xrootdPrefix = "cache"
-	}
 	configDir := viper.GetString("ConfigDir")
 	viper.SetConfigType("yaml")
 	viper.SetDefault("Server.TLSCertificate", filepath.Join(configDir, "certificates", "tls.crt"))
@@ -775,7 +808,12 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 	}
 
 	if IsRootExecution() {
-		viper.SetDefault("Xrootd.RunLocation", filepath.Join("/run", "pelican", "xrootd", xrootdPrefix))
+		if currentServers.IsEnabled(OriginType) {
+			viper.SetDefault("Origin.RunLocation", filepath.Join("/run", "pelican", "xrootd", "origin"))
+		}
+		if currentServers.IsEnabled(CacheType) {
+			viper.SetDefault("Cache.RunLocation", filepath.Join("/run", "pelican", "xrootd", "cache"))
+		}
 		viper.SetDefault("Cache.DataLocation", "/run/pelican/xcache")
 		viper.SetDefault("Origin.Multiuser", true)
 		viper.SetDefault("Director.GeoIPLocation", "/var/cache/pelican/maxmind/GeoLite2-City.mmdb")
@@ -791,19 +829,26 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 		viper.SetDefault("Shoveler.AMQPTokenLocation", filepath.Join(configDir, "shoveler-token"))
 
 		if userRuntimeDir := os.Getenv("XDG_RUNTIME_DIR"); userRuntimeDir != "" {
-			runtimeDir := filepath.Join(userRuntimeDir, "pelican", xrootdPrefix)
+			runtimeDir := filepath.Join(userRuntimeDir, "pelican")
 			err := os.MkdirAll(runtimeDir, 0750)
 			if err != nil {
 				return err
 			}
-			viper.SetDefault("Xrootd.RunLocation", runtimeDir)
+
+			err = setXrootdRunLocations(currentServers, runtimeDir)
+			if err != nil {
+				return err
+			}
 			viper.SetDefault("Cache.DataLocation", path.Join(runtimeDir, "xcache"))
 		} else {
 			dir, err := os.MkdirTemp("", "pelican-xrootd-*")
 			if err != nil {
 				return err
 			}
-			viper.SetDefault("Xrootd.RunLocation", filepath.Join(dir, xrootdPrefix))
+			err = setXrootdRunLocations(currentServers, dir)
+			if err != nil {
+				return err
+			}
 			viper.SetDefault("Cache.DataLocation", path.Join(dir, "xcache"))
 			cleanupDirOnShutdown(ctx, dir)
 		}
@@ -866,19 +911,13 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 	}
 	if cacheFallbackToXrootd && originFallbackToXrootd {
 		return errors.New("neither Cache.Port nor Origin.Port is set but both modules are enabled.  Please set both variables")
-	} else if cacheFallbackToXrootd {
-		log.Warningln("Cache.Port is not set but the Cache module is enabled; falling back to the deprecated Xrootd.Port")
-		cachePort = xrootdPort
-	} else if originFallbackToXrootd {
-		log.Warningln("Origin.Port is not set but the Origin module is enabled; falling back to the deprecated Xrootd.Port")
-		originPort = xrootdPort
 	}
 
 	viper.Set("Origin.CalculatedPort", strconv.Itoa(originPort))
 	if originPort == 0 {
 		viper.Set("Origin.CalculatedPort", "any")
 	}
-	viper.Set("Cache.CalculatedPort", strconv.Itoa(originPort))
+	viper.Set("Cache.CalculatedPort", strconv.Itoa(cachePort))
 	if cachePort == 0 {
 		viper.Set("Cache.CalculatedPort", "any")
 	}
@@ -889,6 +928,12 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 		viper.SetDefault("Origin.Url", fmt.Sprintf("https://%v:%v", param.Server_Hostname.GetString(), originPort))
 	} else {
 		viper.SetDefault("Origin.Url", fmt.Sprintf("https://%v", param.Server_Hostname.GetString()))
+	}
+
+	if cachePort != 443 {
+		viper.SetDefault("Cache.Url", fmt.Sprintf("https://%v:%v", param.Server_Hostname.GetString(), cachePort))
+	} else {
+		viper.SetDefault("Cache.Url", fmt.Sprintf("https://%v", param.Server_Hostname.GetString()))
 	}
 
 	webPort := param.Server_WebPort.GetInt()

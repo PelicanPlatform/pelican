@@ -52,6 +52,9 @@ func WaitUntilWorking(ctx context.Context, method, reqUrl, server string, expect
 			httpClient := http.Client{
 				Transport: config.GetTransport(),
 				Timeout:   50 * time.Millisecond,
+				CheckRedirect: func(req *http.Request, via []*http.Request) error {
+					return http.ErrUseLastResponse
+				},
 			}
 			resp, err := httpClient.Do(req)
 			if err != nil {
