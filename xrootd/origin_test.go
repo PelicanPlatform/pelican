@@ -210,6 +210,7 @@ func TestS3OriginConfig(t *testing.T) {
 	viper.Set("Origin.S3Bucket", bucketName)
 	viper.Set("Origin.S3ServiceName", serviceName)
 	viper.Set("Origin.S3ServiceUrl", fmt.Sprintf("http://%s", endpoint))
+	viper.Set("Origin.S3UrlStyle", "path")
 	// Disable functionality we're not using (and is difficult to make work on Mac)
 	viper.Set("Origin.EnableCmsd", false)
 	viper.Set("Origin.EnableMacaroons", false)
