@@ -42,6 +42,7 @@ jobs:
           target: final-stage
           build-args: |
             IS_PR_BUILD=${{ github.event_name == 'pull_request' }}
+          cache-from: type=local,src=/tmp/.base-buildx-cache
           cache-to: type=local,dest=/tmp/.base-buildx-cache,mode=max
 
   make-date-tag:
@@ -119,7 +120,7 @@ jobs:
 
       - name: Log in to OSG Harbor
         uses: docker/login-action@v3
-        if: github.event_name != 'pull_request'
+        if: github.repository == 'PelicanPlatform/pelican' && github.event_name != 'pull_request'
         with:
           registry: hub.opensciencegrid.org
           username: ${{ secrets.PELICAN_HARBOR_ROBOT_USER }}
@@ -130,10 +131,10 @@ jobs:
         with:
           context: .
           file: ./images/Dockerfile
-          push: ${{ github.event_name != 'pull_request' }}
+          push: ${{ github.repository == 'PelicanPlatform/pelican' && github.event_name != 'pull_request' }}
           tags: "${{ steps.generate-tag-list.outputs.taglist }}"
           target: ${{ matrix.image }}
           build-args: |
             IS_PR_BUILD=${{ github.event_name == 'pull_request' }}
-          cache-from: type=registry,ref=hub.opensciencegrid.org/pelican_platform/${ matrix.image }:buildcache
-          cache-to: type=registry,ref=hub.opensciencegrid.org/pelican_platform/${ matrix.image }:buildcache,mode=max,image-manifest=true,oci-mediatypes=true,ignore-error=true
+          cache-from: type=local,src=/tmp/.base-buildx-cache
+          cache-to: type=local,dest=/tmp/.${{ matrix.image }}-buildx-cache,mode=max
