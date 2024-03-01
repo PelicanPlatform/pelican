@@ -179,16 +179,109 @@ COPY --from=xrootd-plugin-builder /usr/lib64/libnlohmann_json_schema_validator.a
 
 # Install tini
 RUN curl -o tini https://github.com/krallin/tini/releases/download/v0.19.0/tini-static-amd64 &&\
-    cp tini /bin/tini &&\
-    rm -f tini
-
-# Copy over needed files
-COPY --from=pelican-build /pelican/dist/pelican_linux_amd64_v1/pelican /pelican/osdf-client
+    chmod +x tini &&\
+    mv tini /bin/tini
 
 # Eventually add more entrypoint commands here
 COPY images/entrypoint.sh /entrypoint.sh
 
-RUN chmod +x /pelican/osdf-client \
+######################
+# Pelican base stage #
+######################
+FROM final-stage AS pelican-base
+
+WORKDIR /pelican
+
+# Copy over needed files
+COPY --from=pelican-build /pelican/dist/pelican_linux_amd64_v1/pelican /pelican/pelican
+RUN chmod +x /pelican/pelican \
     && chmod +x /entrypoint.sh
 
-ENTRYPOINT ["/entrypoint.sh"]
+######################
+# OSDF base stage #
+######################
+FROM final-stage AS osdf-base
+
+WORKDIR /pelican
+
+# Copy over needed files
+COPY --from=pelican-build /pelican/dist/pelican_linux_amd64_v1/pelican /pelican/osdf
+RUN chmod +x /pelican/osdf \
+    && chmod +x /entrypoint.sh
+
+####################
+# pelican/cache    #
+####################
+
+FROM pelican-base AS cache
+
+WORKDIR /pelican
+ENTRYPOINT ["/entrypoint.sh", "pelican", "cache"]
+
+####################
+# pelican/origin    #
+####################
+
+FROM pelican-base AS origin
+
+WORKDIR /pelican
+ENTRYPOINT ["/entrypoint.sh", "pelican", "origin"]
+
+####################
+# pelican/director #
+####################
+
+FROM pelican-base AS director
+
+WORKDIR /pelican
+ENTRYPOINT ["/entrypoint.sh", "pelican", "director"]
+
+####################
+# pelican/registry #
+####################
+
+FROM pelican-base AS registry
+
+WORKDIR /pelican
+ENTRYPOINT ["/entrypoint.sh", "pelican", "registry"]
+
+####################################
+# OSDF                             #
+####################################
+
+####################
+# osdf/cache    #
+####################
+
+FROM osdf-base AS osdf-cache
+
+WORKDIR /pelican
+ENTRYPOINT ["/entrypoint.sh", "osdf", "cache"]
+
+####################
+# osdf/origin    #
+####################
+
+FROM osdf-base AS osdf-origin
+
+WORKDIR /pelican
+ENTRYPOINT ["/entrypoint.sh", "osdf", "origin"]
+
+####################
+# osdf/director    #
+####################
+
+FROM osdf-base AS osdf-director
+
+WORKDIR /pelican
+ENTRYPOINT ["/entrypoint.sh", "osdf", "director"]
+
+
+####################
+# osdf/registry    #
+####################
+
+FROM osdf-base AS osdf-registry
+
+WORKDIR /pelican
+ENTRYPOINT ["/entrypoint.sh", "osdf", "registry"]
