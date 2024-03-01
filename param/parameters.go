@@ -126,6 +126,7 @@ var (
 	Origin_S3SecretKeyfile = StringParam{"Origin.S3SecretKeyfile"}
 	Origin_S3ServiceName = StringParam{"Origin.S3ServiceName"}
 	Origin_S3ServiceUrl = StringParam{"Origin.S3ServiceUrl"}
+	Origin_S3UrlStyle = StringParam{"Origin.S3UrlStyle"}
 	Origin_ScitokensDefaultUser = StringParam{"Origin.ScitokensDefaultUser"}
 	Origin_ScitokensNameMapFile = StringParam{"Origin.ScitokensNameMapFile"}
 	Origin_ScitokensUsernameClaim = StringParam{"Origin.ScitokensUsernameClaim"}
