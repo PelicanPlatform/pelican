@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2023, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -155,8 +155,7 @@ func queryDirector(verb, source, directorUrl string) (resp *http.Response, err e
 	// Include the Client's version as a User-Agent header. The Director will decide
 	// if it supports the version, and provide an error message in the case that it
 	// cannot.
-	userAgent := "pelican-client/" + ObjectClientOptions.Version
-	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("User-Agent", getUserAgent(""))
 
 	// Perform the HTTP request
 	resp, err = client.Do(req)
@@ -235,8 +234,8 @@ func GetCachesFromDirectorResponse(resp *http.Response, needsToken bool) (caches
 }
 
 // NewTransferDetails creates the TransferDetails struct with the given cache
-func NewTransferDetailsUsingDirector(cache namespaces.DirectorCache, opts TransferDetailsOptions) []TransferDetails {
-	details := make([]TransferDetails, 0)
+func NewTransferDetailsUsingDirector(cache namespaces.DirectorCache, opts transferDetailsOptions) []transferAttemptDetails {
+	details := make([]transferAttemptDetails, 0)
 	cacheEndpoint := cache.EndpointUrl
 
 	// Form the URL
@@ -252,40 +251,41 @@ func NewTransferDetailsUsingDirector(cache namespaces.DirectorCache, opts Transf
 		cacheURL.Scheme = ""
 		cacheURL.Opaque = ""
 	}
-	log.Debugf("Parsed Cache: %s\n", cacheURL.String())
+	log.Debugf("Parsed Cache: %s", cacheURL.String())
 	if opts.NeedsToken {
 		cacheURL.Scheme = "https"
-		if !HasPort(cacheURL.Host) {
+		if !hasPort(cacheURL.Host) {
 			// Add port 8444 and 8443
-			cacheURL.Host += ":8444"
-			details = append(details, TransferDetails{
-				Url:        *cacheURL,
+			urlCopy := *cacheURL
+			urlCopy.Host += ":8444"
+			details = append(details, transferAttemptDetails{
+				Url:        &urlCopy,
 				Proxy:      false,
 				PackOption: opts.PackOption,
 			})
 			// Strip the port off and add 8443
-			cacheURL.Host = cacheURL.Host[:len(cacheURL.Host)-5] + ":8443"
+			cacheURL.Host = cacheURL.Host + ":8443"
 		}
 		// Whether port is specified or not, add a transfer without proxy
-		details = append(details, TransferDetails{
-			Url:        *cacheURL,
+		details = append(details, transferAttemptDetails{
+			Url:        cacheURL,
 			Proxy:      false,
 			PackOption: opts.PackOption,
 		})
 	} else {
 		cacheURL.Scheme = "http"
-		if !HasPort(cacheURL.Host) {
+		if !hasPort(cacheURL.Host) {
 			cacheURL.Host += ":8000"
 		}
-		isProxyEnabled := IsProxyEnabled()
-		details = append(details, TransferDetails{
-			Url:        *cacheURL,
+		isProxyEnabled := isProxyEnabled()
+		details = append(details, transferAttemptDetails{
+			Url:        cacheURL,
 			Proxy:      isProxyEnabled,
 			PackOption: opts.PackOption,
 		})
 		if isProxyEnabled && CanDisableProxy() {
-			details = append(details, TransferDetails{
-				Url:        *cacheURL,
+			details = append(details, transferAttemptDetails{
+				Url:        cacheURL,
 				Proxy:      false,
 				PackOption: opts.PackOption,
 			})

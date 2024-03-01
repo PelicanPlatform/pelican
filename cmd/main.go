@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2023, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -23,6 +23,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/pelicanplatform/pelican/config"
 )
 
 func main() {
@@ -54,7 +56,7 @@ func handleCLI(args []string) error {
 		// version info regardless of the commands and whether they are defined
 		// * Remove the -v shorthand since in "origin serve" flagset it's already used for "volume" flag
 		if args[len(args)-1] == "--version" {
-			fmt.Println("Version:", version)
+			fmt.Println("Version:", config.GetVersion())
 			fmt.Println("Build Date:", date)
 			fmt.Println("Build Commit:", commit)
 			fmt.Println("Built By:", builtBy)

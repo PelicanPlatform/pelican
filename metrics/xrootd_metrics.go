@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2023, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -751,7 +751,6 @@ func HandlePacket(packet []byte) error {
 	case 'i':
 		log.Debug("MonPacket: Received an appinfo packet")
 		infoSize := uint32(header.Plen - 12)
-		log.Warn("Dictid in appinfo is ", dictid)
 		if xrdUserId, appinfo, err := GetSIDRest(packet[12 : 12+infoSize]); err == nil {
 			if userids.Has(xrdUserId) {
 				userId := userids.Get(xrdUserId).Value()
@@ -768,7 +767,6 @@ func HandlePacket(packet []byte) error {
 		}
 	case 'u':
 		log.Debug("MonPacket: Received a user login packet")
-		log.Warn("Dictid in login is ", dictid)
 		infoSize := uint32(header.Plen - 12)
 		if xrdUserId, auth, err := GetSIDRest(packet[12 : 12+infoSize]); err == nil {
 			var record UserRecord
@@ -801,7 +799,6 @@ func HandlePacket(packet []byte) error {
 	case 'T':
 		log.Debug("MonPacket: Received a token info packet")
 		infoSize := uint32(header.Plen - 12)
-		log.Warn("Dictid in token is ", dictid)
 		if _, tokenauth, err := GetSIDRest(packet[12 : 12+infoSize]); err == nil {
 			userId, userRecord, err := ParseTokenAuth(tokenauth)
 			if err != nil {

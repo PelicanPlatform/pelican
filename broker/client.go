@@ -203,7 +203,7 @@ func ConnectToOrigin(ctx context.Context, brokerUrl, prefix, originName string) 
 	// Send a request to the broker for a connection reversal
 	req, err := http.NewRequestWithContext(ctx, "POST", brokerUrl, reqReader)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "pelican-cache/"+config.PelicanVersion)
+	req.Header.Set("User-Agent", "pelican-cache/"+config.GetVersion())
 
 	brokerAud, err := url.Parse(brokerUrl)
 	if err != nil {
@@ -404,7 +404,7 @@ func doCallback(ctx context.Context, brokerResp reversalRequest) (listener net.L
 	dur := time.Duration(5*time.Second - time.Duration(mrand.Intn(500))*time.Millisecond)
 	req.Header.Set("X-Pelican-Timeout", dur.String())
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "pelican-origin/"+config.PelicanVersion)
+	req.Header.Set("User-Agent", "pelican-origin/"+config.GetVersion())
 
 	cacheAud, err := url.Parse(brokerResp.CallbackUrl)
 	if err != nil {
@@ -585,7 +585,7 @@ func LaunchRequestMonitor(ctx context.Context, egrp *errgroup.Group, resultChan 
 				dur := param.Transport_ResponseHeaderTimeout.GetDuration() - time.Duration(mrand.Intn(500))*time.Millisecond
 				req.Header.Set("X-Pelican-Timeout", dur.String())
 				req.Header.Set("Content-Type", "application/json")
-				req.Header.Set("User-Agent", "pelican-origin/"+config.PelicanVersion)
+				req.Header.Set("User-Agent", "pelican-origin/"+config.GetVersion())
 
 				brokerAud, err := url.Parse(param.Federation_BrokerUrl.GetString())
 				if err != nil {
