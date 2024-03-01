@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build linux
 
 /***************************************************************
  *
@@ -22,9 +22,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
-	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
@@ -34,13 +31,14 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
+	"github.com/pelicanplatform/pelican/utils"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestFedServePosixOrigin(t *testing.T) {
+func TestFedServeCache(t *testing.T) {
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -48,12 +46,13 @@ func TestFedServePosixOrigin(t *testing.T) {
 	viper.Reset()
 
 	modules := config.ServerType(0)
+	modules.Set(config.CacheType)
 	modules.Set(config.OriginType)
 	modules.Set(config.DirectorType)
 	modules.Set(config.RegistryType)
 
 	// Create our own temp directory (for some reason t.TempDir() does not play well with xrootd)
-	tmpPathPattern := "XRootD-Test_Origin*"
+	tmpPathPattern := "XRootD-Test_Whole_Fed*"
 	tmpPath, err := os.MkdirTemp("", tmpPathPattern)
 	require.NoError(t, err)
 
@@ -62,11 +61,29 @@ func TestFedServePosixOrigin(t *testing.T) {
 	err = os.Chmod(tmpPath, permissions)
 	require.NoError(t, err)
 
+	nsTmpPattern := "Orig_NS*"
+	origPath, err := os.MkdirTemp("", nsTmpPattern)
+	require.NoError(t, err)
+
+	err = os.Chmod(origPath, permissions)
+	require.NoError(t, err)
+
+	err = os.Mkdir(filepath.Join(origPath, "ns"), 0755)
+	require.NoError(t, err)
+
 	viper.Set("ConfigDir", tmpPath)
-	viper.Set("Origin.RunLocation", filepath.Join(tmpPath, "xrootd"))
+	viper.Set("Origin.RunLocation", filepath.Join(tmpPath, "xOrigin"))
+	viper.Set("Cache.RunLocation", filepath.Join(tmpPath, "xCache"))
+	viper.Set("Origin.ExportVolume", filepath.Join(origPath, "ns")+":/test")
+	testFilePath := filepath.Join(origPath, "ns", "test-file.txt")
+	content := []byte("This is the content of the test file.")
+	err = os.WriteFile(testFilePath, content, 0755)
 	t.Cleanup(func() {
 		if err := os.RemoveAll(tmpPath); err != nil {
 			t.Fatal("Failed to clean up temp path")
+		}
+		if err := os.RemoveAll(origPath); err != nil {
+			t.Fatal("Failed to clean up temp origin path")
 		}
 	})
 
@@ -74,7 +91,6 @@ func TestFedServePosixOrigin(t *testing.T) {
 	viper.Set("Logging.Level", "Debug")
 	config.InitConfig()
 
-	viper.Set("Origin.ExportVolume", t.TempDir()+":/test")
 	viper.Set("Origin.Mode", "posix")
 	// Disable functionality we're not using (and is difficult to make work on Mac)
 	viper.Set("Origin.EnableCmsd", false)
@@ -85,37 +101,28 @@ func TestFedServePosixOrigin(t *testing.T) {
 	viper.Set("Registry.DbLocation", filepath.Join(t.TempDir(), "ns-registry.sqlite"))
 	viper.Set("Registry.RequireOriginApproval", false)
 	viper.Set("Registry.RequireCacheApproval", false)
-	defer cancel()
+	viper.Set("Origin.EnablePublicReads", false)
+
+	require.NoError(t, err)
 
 	fedCancel, err := launchers.LaunchModules(ctx, modules)
-
 	defer fedCancel()
 	if err != nil {
 		log.Errorln("Failure in fedServeInternal:", err)
 		require.NoError(t, err)
 	}
 
-	desiredURL := param.Server_ExternalWebUrl.GetString() + "/.well-known/openid-configuration"
-	err = server_utils.WaitUntilWorking(ctx, "GET", desiredURL, "director", 200)
+	// In this case 403 means the cache is running
+	err = server_utils.WaitUntilWorking(ctx, "GET", param.Cache_Url.GetString(), "xrootd", 403)
 	require.NoError(t, err)
 
-	httpc := http.Client{
-		Transport: config.GetTransport(),
-	}
-	resp, err := httpc.Get(desiredURL)
+	fileTests := utils.TestFileTransferImpl{}
+	issuerUrl, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
 
-	assert.Equal(t, resp.StatusCode, http.StatusOK)
-
-	responseBody, err := io.ReadAll(resp.Body)
+	ok, err := fileTests.RunTestsCache(ctx, param.Cache_Url.GetString(), issuerUrl, "/test/test-file.txt", "This is the content of the test file.")
 	require.NoError(t, err)
-	expectedResponse := struct {
-		JwksUri string `json:"jwks_uri"`
-	}{}
-	err = json.Unmarshal(responseBody, &expectedResponse)
-	require.NoError(t, err)
-
-	assert.NotEmpty(t, expectedResponse.JwksUri)
+	require.True(t, ok)
 
 	cancel()
 	fedCancel()

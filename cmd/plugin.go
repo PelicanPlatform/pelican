@@ -109,10 +109,10 @@ func stashPluginMain(args []string) {
 
 	var isConfigErr = false
 	config.InitConfig()
-	err := config.InitClient()
-	if err != nil {
-		log.Errorf("Problem initializing the Pelican client config: %v", err)
-		err = errors.Wrap(err, "Problem initializing the Pelican Client configuration")
+	configErr := config.InitClient()
+	if configErr != nil {
+		log.Errorf("Problem initializing the Pelican client config: %v", configErr)
+		configErr = errors.Wrap(configErr, "Problem initializing the Pelican Client configuration")
 		isConfigErr = true
 	}
 
@@ -178,7 +178,12 @@ func stashPluginMain(args []string) {
 
 		// Set as failure and add errors
 		resultAd.Set("TransferSuccess", false)
-		resultAd.Set("TransferError", err.Error())
+		resultAd.Set("TransferError", configErr.Error())
+		if client.ShouldRetry(configErr) {
+			resultAd.Set("TransferRetryable", true)
+		} else {
+			resultAd.Set("TransferRetryable", false)
+		}
 		resultAds = append(resultAds, resultAd)
 
 		// Attempt to write our file and bail
@@ -273,7 +278,7 @@ func stashPluginMain(args []string) {
 	ctx, cancel := context.WithCancel(context.Background())
 	egrp, _ := errgroup.WithContext(ctx)
 	defer func() {
-		err = egrp.Wait()
+		err := egrp.Wait()
 		if err != context.Canceled {
 			log.Errorln("Error when shutting down worker:", err)
 		}
@@ -318,6 +323,7 @@ func stashPluginMain(args []string) {
 
 	// Ensure all our workers are shut down.
 	cancel()
+	var err error
 	if waitErr := egrp.Wait(); waitErr != nil && waitErr != context.Canceled {
 		log.Errorln("Error when shutting down worker:", waitErr)
 		success = false
@@ -354,7 +360,11 @@ func writeClassadOutputAndBail(exitCode int, resultAds []*classads.ClassAd) {
 	}
 
 	// We'll exit 3 in here if anything fails to write the file
-	writeOutfile(nil, resultAds, outputFile)
+	_, retryable := writeOutfile(nil, resultAds, outputFile)
+
+	if retryable {
+		exitCode = 11
+	}
 
 	log.Errorln("Failure with pelican plugin. Exiting...")
 	os.Exit(exitCode)

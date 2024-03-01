@@ -54,6 +54,7 @@ type (
 const (
 	OriginSelfFileTest TestType = "self-test"
 	DirectorFileTest   TestType = "director-test"
+	CacheTest          TestType = "cache-test"
 )
 
 const (
@@ -96,7 +97,7 @@ func (t TestFileTransferImpl) generateFileTestScitoken() (string, error) {
 
 // Private function to upload a test file to the `baseUrl` of an exported xrootd file direcotry
 // the test file content is based on the `testType` attribute
-func (t TestFileTransferImpl) uploadTestfile(ctx context.Context, baseUrl string) (string, error) {
+func (t TestFileTransferImpl) uploadTestfile(ctx context.Context, baseUrl string, namespace string) (string, error) {
 	tkn, err := t.generateFileTestScitoken()
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to create a token for test file transfer")
@@ -106,7 +107,7 @@ func (t TestFileTransferImpl) uploadTestfile(ctx context.Context, baseUrl string
 	if err != nil {
 		return "", errors.Wrap(err, "The baseUrl is not parseable as a URL")
 	}
-	uploadURL.Path = "/pelican/monitoring/" + t.testType.String() + "-" + time.Now().Format(time.RFC3339) + ".txt"
+	uploadURL.Path = namespace + t.testType.String() + "-" + time.Now().Format(time.RFC3339) + ".txt"
 
 	req, err := http.NewRequestWithContext(ctx, "PUT", uploadURL.String(), bytes.NewBuffer([]byte(t.testBody)))
 	if err != nil {
@@ -157,7 +158,7 @@ func (t TestFileTransferImpl) downloadTestfile(ctx context.Context, downloadUrl 
 		return errors.Wrap(err, "Failed to get response body from test file transfer download")
 	}
 	if string(body) != t.testBody {
-		return errors.Errorf("Contents of test file transfer body do not match upload: %v", body)
+		return errors.Errorf("Contents of test file transfer body do not match upload: %v", string(body))
 	}
 
 	if resp.StatusCode > 299 {
@@ -217,7 +218,7 @@ func (t TestFileTransferImpl) RunTests(ctx context.Context, baseUrl, audienceUrl
 		return false, errors.New("Unsupported testType: " + testType.String())
 	}
 
-	downloadUrl, err := t.uploadTestfile(ctx, baseUrl)
+	downloadUrl, err := t.uploadTestfile(ctx, baseUrl, "/pelican/monitoring/")
 	if err != nil {
 		return false, errors.Wrap(err, "Test file transfer failed during upload")
 	}
@@ -229,5 +230,33 @@ func (t TestFileTransferImpl) RunTests(ctx context.Context, baseUrl, audienceUrl
 	if err != nil {
 		return false, errors.Wrap(err, "Test file transfer failed during delete")
 	}
+	return true, nil
+}
+
+// Run a file transfer test to download a test file from
+// the server and a xrootd service. It expects `cacheUrl` to be the url to the xrootd cache,
+// `issuerUrl` be the url to issue  a scitoken for file transfer, `filePath“ to be the namespace
+// and file name of the test file, and the test file to contain the string `body`
+//
+// Note that for this test to work, you need to have the `issuerUrl` registered in
+// your xrootd as a list of trusted token issuers and the issuer is expected to follow
+// WLCG rules for issuer metadata discovery and public key access
+//
+// Read more: https://github.com/WLCG-AuthZ-WG/common-jwt-profile/blob/master/profile.md#token-verification
+func (t TestFileTransferImpl) RunTestsCache(ctx context.Context, cacheUrl, issuerUrl string, filePath string, body string) (bool, error) {
+	t.audiences = []string{"https://wlcg.cern.ch/jwt/v1/any"}
+	t.issuerUrl = issuerUrl
+	t.testBody = body
+
+	downloadUrl, err := url.JoinPath(cacheUrl, filePath)
+	if err != nil {
+		return false, errors.Wrap(err, "Unable to crete download URL")
+	}
+
+	err = t.downloadTestfile(ctx, downloadUrl)
+	if err != nil {
+		return false, errors.Wrap(err, "Test file transfer failed during download")
+	}
+
 	return true, nil
 }

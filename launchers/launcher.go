@@ -132,8 +132,8 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 	config.UpdateConfigFromListener(ln)
 
 	servers := make([]server_utils.XRootDServer, 0)
-	if modules.IsEnabled(config.OriginType) {
 
+	if modules.IsEnabled(config.OriginType) {
 		mode := param.Origin_Mode.GetString()
 		switch mode {
 		case "posix":
@@ -205,10 +205,44 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		}
 	}
 
-	// Include cache here just in case, although we currently don't use launcher to launch cache
+	// Origin needs to advertise once before the cache starts
+	if modules.IsEnabled(config.CacheType) && modules.IsEnabled(config.OriginType) {
+		log.Debug("Advertise Origin")
+		if err = server_ui.Advertise(ctx, servers); err != nil {
+			return shutdownCancel, err
+		}
+		desiredURL := param.Server_ExternalWebUrl.GetString() + "/api/v1.0/director/origin" + param.Origin_NamespacePrefix.GetString()
+		if err = server_utils.WaitUntilWorking(ctx, "GET", desiredURL, "director", 307); err != nil {
+			log.Errorln("Origin does not seem to have advertised correctly:", err)
+			return shutdownCancel, err
+		}
+	}
+
+	if modules.IsEnabled(config.CacheType) {
+		// Give five seconds for the origin to finish advertising to the director
+		desiredURL := param.Server_ExternalWebUrl.GetString() + "/.well-known/openid-configuration"
+		if err = server_utils.WaitUntilWorking(ctx, "GET", desiredURL, "director", 200); err != nil {
+			log.Errorln("Director does not seem to be working:", err)
+			return shutdownCancel, err
+		}
+		server, err := CacheServe(ctx, engine, egrp)
+		if err != nil {
+			return shutdownCancel, err
+		}
+
+		servers = append(servers, server)
+	}
+
 	if modules.IsEnabled(config.OriginType) || modules.IsEnabled(config.CacheType) {
 		log.Debug("Launching periodic advertise")
 		if err := server_ui.LaunchPeriodicAdvertise(ctx, egrp, servers); err != nil {
+			return shutdownCancel, err
+		}
+	}
+
+	if modules.IsEnabled(config.CacheType) {
+		log.Debug("Finishing cache server configuration")
+		if err = CacheServeFinish(ctx, egrp); err != nil {
 			return shutdownCancel, err
 		}
 	}

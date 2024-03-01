@@ -172,7 +172,11 @@ func writeScitokensConfiguration(modules config.ServerType, cfg *ScitokensCfg) e
 		return err
 	}
 
-	xrootdRun := param.Xrootd_RunLocation.GetString()
+	xrootdRun := param.Origin_RunLocation.GetString()
+	if modules.IsEnabled(config.CacheType) {
+		xrootdRun = param.Cache_RunLocation.GetString()
+	}
+
 	configPath := filepath.Join(xrootdRun, "scitokens-generated.cfg.tmp")
 	file, err := os.OpenFile(configPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0640)
 	if err != nil {
@@ -343,7 +347,12 @@ func EmitAuthfile(server server_utils.XRootDServer) error {
 		return err
 	}
 
-	xrootdRun := param.Xrootd_RunLocation.GetString()
+	xrootdRun := param.Origin_RunLocation.GetString()
+
+	if server.GetServerType().IsEnabled(config.CacheType) {
+		xrootdRun = param.Cache_RunLocation.GetString()
+	}
+
 	finalAuthPath := filepath.Join(xrootdRun, "authfile-origin-generated")
 	if server.GetServerType().IsEnabled(config.CacheType) {
 		finalAuthPath = filepath.Join(xrootdRun, "authfile-cache-generated")
@@ -578,7 +587,7 @@ func WriteCacheScitokensConfig(nsAds []common.NamespaceAdV2) error {
 	return writeScitokensConfiguration(config.CacheType, &cfg)
 }
 
-func EmitIssuerMetadata(exportPath string) error {
+func EmitIssuerMetadata(exportPath string, xServeUrl string) error {
 	gid, err := config.GetDaemonGID()
 	if err != nil {
 		return err
@@ -615,15 +624,14 @@ func EmitIssuerMetadata(exportPath string) error {
 	}
 	defer openidFile.Close()
 
-	originUrlStr := param.Origin_Url.GetString()
-	jwksUrl, err := url.Parse(originUrlStr)
+	jwksUrl, err := url.Parse(xServeUrl)
 	if err != nil {
 		return err
 	}
 	jwksUrl.Path = "/.well-known/issuer.jwks"
 
 	cfg := openIdConfig{
-		Issuer:  param.Origin_Url.GetString(),
+		Issuer:  xServeUrl,
 		JWKSURI: jwksUrl.String(),
 	}
 

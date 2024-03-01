@@ -23,6 +23,7 @@ import (
 	"net/url"
 	"os"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -44,13 +45,25 @@ func checkConfigFileReadable(fileName string, errMsg string) error {
 }
 
 func CheckDefaults(server server_utils.XRootDServer) error {
-	requiredConfigs := []param.StringParam{param.Server_TLSCertificate, param.Server_TLSKey, param.Xrootd_RunLocation, param.Xrootd_RobotsTxtFile}
+	requiredConfigs := []param.StringParam{param.Server_TLSCertificate, param.Server_TLSKey, param.Xrootd_RobotsTxtFile}
 	for _, configName := range requiredConfigs {
 		mgr := configName.GetString()
 		if mgr == "" {
 			return errors.New(fmt.Sprintf("Required value of '%v' is not set in config",
 				configName))
 		}
+	}
+
+	runDir := param.Origin_RunLocation.GetString()
+	paramName := "param.Origin_RunLocation"
+	if server.GetServerType().IsEnabled(config.CacheType) {
+		runDir = param.Cache_RunLocation.GetString()
+		paramName = "param.Cache_RunLocation"
+	}
+
+	if runDir == "" {
+		return errors.New(fmt.Sprintf("Required value of '%v' is not set in config",
+			paramName))
 	}
 
 	if managerHost := param.Xrootd_ManagerHost.GetString(); managerHost == "" {
@@ -78,13 +91,24 @@ func CheckDefaults(server server_utils.XRootDServer) error {
 	// Check that OriginUrl is defined in the config file. Make sure it parses.
 	// Fail if either condition isn't met, although note that url.Parse doesn't
 	// generate errors for many things that are not recognizable urls.
-	originUrlStr := param.Origin_Url.GetString()
-	if originUrlStr == "" {
-		return errors.New("OriginUrl must be configured to serve an origin")
-	}
 
-	if _, err := url.Parse(originUrlStr); err != nil {
-		return errors.Wrapf(err, "Could not parse the provided OriginUrl (%v)", originUrlStr)
+	if server.GetServerType().IsEnabled(config.CacheType) {
+		cacheUrlStr := param.Cache_Url.GetString()
+		if cacheUrlStr == "" {
+			return errors.New("CacheUrl must be configured to serve a cache")
+		}
+
+		if _, err := url.Parse(cacheUrlStr); err != nil {
+			return errors.Wrapf(err, "Could not parse the provided CacheUrl (%v)", cacheUrlStr)
+		}
+	} else {
+		originUrlStr := param.Origin_Url.GetString()
+		if originUrlStr == "" {
+			return errors.New("OriginUrl must be configured to serve an origin")
+		}
+		if _, err := url.Parse(originUrlStr); err != nil {
+			return errors.Wrapf(err, "Could not parse the provided OriginUrl (%v)", originUrlStr)
+		}
 	}
 
 	return nil

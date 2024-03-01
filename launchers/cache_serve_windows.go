@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build windows
 
 /***************************************************************
  *
@@ -18,32 +18,21 @@
  *
  ***************************************************************/
 
-package main
+package launchers
 
 import (
-	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/launchers"
-	"github.com/pelicanplatform/pelican/param"
+	"context"
+
+	"github.com/gin-gonic/gin"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pkg/errors"
-	"github.com/spf13/cobra"
+	"golang.org/x/sync/errgroup"
 )
 
-func fedServeStart(cmd *cobra.Command, args []string) error {
-	moduleSlice := param.Server_Modules.GetStringSlice()
-	if len(moduleSlice) == 0 {
-		return errors.New("No modules are enabled; pass the --module flag or set the Server.Modules parameter")
-	}
-	modules := config.NewServerType()
-	for _, module := range moduleSlice {
-		if !modules.SetString(module) {
-			return errors.Errorf("Unknown module name: %s", module)
-		}
-	}
+func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) (server_utils.XRootDServer, error) {
+	return nil, errors.New("Cache module is not supported on Windows")
+}
 
-	cancel, err := launchers.LaunchModules(cmd.Context(), modules)
-	if err != nil {
-		cancel()
-	}
-
-	return err
+func CacheServeFinish(ctx context.Context, egrp *errgroup.Group) error {
+	return errors.New("Cache module is not supported on Windows")
 }

@@ -76,6 +76,8 @@ func (bP ObjectParam) Unmarshal(rawVal any) error {
 var (
 	Cache_DataLocation = StringParam{"Cache.DataLocation"}
 	Cache_ExportLocation = StringParam{"Cache.ExportLocation"}
+	Cache_RunLocation = StringParam{"Cache.RunLocation"}
+	Cache_Url = StringParam{"Cache.Url"}
 	Cache_XRootDPrefix = StringParam{"Cache.XRootDPrefix"}
 	Director_DefaultResponse = StringParam{"Director.DefaultResponse"}
 	Director_GeoIPLocation = StringParam{"Director.GeoIPLocation"}
@@ -120,6 +122,7 @@ var (
 	Origin_ExportVolume = StringParam{"Origin.ExportVolume"}
 	Origin_Mode = StringParam{"Origin.Mode"}
 	Origin_NamespacePrefix = StringParam{"Origin.NamespacePrefix"}
+	Origin_RunLocation = StringParam{"Origin.RunLocation"}
 	Origin_S3AccessKeyfile = StringParam{"Origin.S3AccessKeyfile"}
 	Origin_S3Bucket = StringParam{"Origin.S3Bucket"}
 	Origin_S3Region = StringParam{"Origin.S3Region"}

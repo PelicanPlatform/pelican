@@ -231,7 +231,14 @@ func TestOSDFAuthCreation(t *testing.T) {
 			viper.Set("Xrootd.Authfile", filepath.Join(dirName, "authfile"))
 			viper.Set("Federation.TopologyUrl", ts.URL)
 			viper.Set("Server.Hostname", testInput.hostname)
-			viper.Set("Xrootd.RunLocation", dirName)
+			var xrootdRun string
+			if strings.Contains(testInput.hostname, "cache") {
+				viper.Set("Cache.RunLocation", dirName)
+				xrootdRun = param.Cache_RunLocation.GetString()
+			} else {
+				viper.Set("Origin.RunLocation", dirName)
+				xrootdRun = param.Origin_RunLocation.GetString()
+			}
 			oldPrefix := config.SetPreferredPrefix("OSDF")
 			defer config.SetPreferredPrefix(oldPrefix)
 
@@ -240,8 +247,6 @@ func TestOSDFAuthCreation(t *testing.T) {
 
 			err = EmitAuthfile(testInput.server)
 			require.NoError(t, err, "Failure generating authfile")
-
-			xrootdRun := param.Xrootd_RunLocation.GetString()
 
 			finalAuthPath := filepath.Join(xrootdRun, "authfile-origin-generated")
 			if testInput.server.GetServerType().IsEnabled(config.CacheType) {
@@ -291,7 +296,7 @@ func TestEmitAuthfile(t *testing.T) {
 			dirName := t.TempDir()
 			viper.Reset()
 			viper.Set("Xrootd.Authfile", filepath.Join(dirName, "authfile"))
-			viper.Set("Xrootd.RunLocation", dirName)
+			viper.Set("Origin.RunLocation", dirName)
 			server := &origin_ui.OriginServer{}
 
 			err := os.WriteFile(filepath.Join(dirName, "authfile"), []byte(testInput.authIn), fs.FileMode(0600))
@@ -311,7 +316,7 @@ func TestEmitAuthfile(t *testing.T) {
 func TestEmitCfg(t *testing.T) {
 	dirname := t.TempDir()
 	viper.Reset()
-	viper.Set("Xrootd.RunLocation", dirname)
+	viper.Set("Origin.RunLocation", dirname)
 	err := config.InitClient()
 	assert.Nil(t, err)
 
@@ -339,7 +344,7 @@ func TestEmitCfg(t *testing.T) {
 func TestLoadScitokensConfig(t *testing.T) {
 	dirname := t.TempDir()
 	viper.Reset()
-	viper.Set("Xrootd.RunLocation", dirname)
+	viper.Set("Origin.RunLocation", dirname)
 	err := config.InitClient()
 	assert.Nil(t, err)
 
@@ -371,7 +376,7 @@ func TestLoadScitokensConfig(t *testing.T) {
 func TestMergeConfig(t *testing.T) {
 	dirname := t.TempDir()
 	viper.Reset()
-	viper.Set("Xrootd.RunLocation", dirname)
+	viper.Set("Origin.RunLocation", dirname)
 	viper.Set("Origin.Port", 8443)
 	scitokensConfigFile := filepath.Join(dirname, "scitokens-input.cfg")
 	viper.Set("Xrootd.ScitokensConfig", scitokensConfigFile)
@@ -452,10 +457,10 @@ func TestWriteOriginAuthFiles(t *testing.T) {
 		return func(t *testing.T) {
 			defer viper.Reset()
 			dirname := t.TempDir()
-			viper.Set("Xrootd.RunLocation", dirname)
+			viper.Set("Origin.RunLocation", dirname)
 			viper.Set("Xrootd.ScitokensConfig", filepath.Join(dirname, "scitokens-generated.cfg"))
 			viper.Set("Xrootd.Authfile", filepath.Join(dirname, "authfile"))
-			xAuthFile := filepath.Join(param.Xrootd_RunLocation.GetString(), "authfile-origin-generated")
+			xAuthFile := filepath.Join(param.Origin_RunLocation.GetString(), "authfile-origin-generated")
 
 			authfileProvided := param.Xrootd_Authfile.GetString()
 
@@ -494,7 +499,7 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 
 			dirname := t.TempDir()
 			viper.Reset()
-			viper.Set("Xrootd.RunLocation", dirname)
+			viper.Set("Cache.RunLocation", dirname)
 			if server.GetServerType().IsEnabled(config.OriginType) {
 				viper.Set("Xrootd.ScitokensConfig", filepath.Join(dirname, "scitokens-origin-generated.cfg"))
 				viper.Set("Xrootd.Authfile", filepath.Join(dirname, "authfile-origin-generated"))
@@ -614,12 +619,12 @@ func TestWriteOriginScitokensConfig(t *testing.T) {
 
 	viper.Reset()
 	dirname := t.TempDir()
-	os.Setenv("PELICAN_XROOTD_RUNLOCATION", dirname)
-	defer os.Unsetenv("PELICAN_XROOTD_RUNLOCATION")
+	os.Setenv("PELICAN_ORIGIN_RUNLOCATION", dirname)
+	defer os.Unsetenv("PELICAN_ORIGIN_RUNLOCATION")
 	config_dirname := t.TempDir()
 	viper.Set("Origin.SelfTest", true)
 	viper.Set("ConfigDir", config_dirname)
-	viper.Set("Xrootd.RunLocation", dirname)
+	viper.Set("Origin.RunLocation", dirname)
 	viper.Set("Origin.Port", 8443)
 	viper.Set("Server.WebPort", 8444)
 	viper.Set("Server.Hostname", "origin.example.com")
