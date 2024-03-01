@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -24,6 +25,7 @@ const (
 	selfTestDir  string = "/pelican/monitoring"
 )
 
+// Add self-test directories to xrootd data location of the cache
 func InitSelfTestDir() error {
 	uid, err := config.GetDaemonUID()
 	if err != nil {
@@ -36,8 +38,8 @@ func InitSelfTestDir() error {
 	}
 
 	basePath := param.Cache_DataLocation.GetString()
-	pelicanMonPath := path.Join(basePath, "/pelican")
-	monitoringPath := path.Join(pelicanMonPath, "/monitoring")
+	pelicanMonPath := filepath.Join(basePath, "/pelican")
+	monitoringPath := filepath.Join(pelicanMonPath, "/monitoring")
 	err = os.MkdirAll(monitoringPath, 0700)
 	if err != nil {
 		return errors.Wrap(err, "Fail to create directory for the self-test")
@@ -53,7 +55,7 @@ func InitSelfTestDir() error {
 
 func generateTestFile() (string, error) {
 	basePath := param.Cache_DataLocation.GetString()
-	monitoringPath := path.Join(basePath, selfTestDir)
+	monitoringPath := filepath.Join(basePath, selfTestDir)
 	_, err := os.Stat(monitoringPath)
 	if err != nil {
 		return "", errors.Wrap(err, "Self-test directory does not exist")
@@ -82,38 +84,60 @@ func generateTestFile() (string, error) {
 	if err != nil {
 		return "", err
 	}
+
+	// Create a temp dir for creating and writing the test file
+	// to avoid racing condition in xrootd
+	tmpDir := os.TempDir()
+	monTempDir := filepath.Join(tmpDir, "/pelican/monitoring")
+	// TempDir returns the constant value of where the temp dir is on an OS
+	// it didn't guarantee it exists or not
+	if err = os.MkdirAll(monTempDir, 0700); err != nil {
+		return "", errors.Wrapf(err, "Failed to create temp dir for self-test file %s", monTempDir)
+	}
+
 	testFileName := "self-test-" + now.Format(time.RFC3339) + ".txt"
 	testFileCinfoName := "self-test-" + now.Format(time.RFC3339) + ".txt.cinfo"
 
-	filePath := path.Join(monitoringPath, testFileName)
-	extFilePath := path.Join(selfTestDir, testFileName)
-	fileCinfoPath := path.Join(monitoringPath, testFileCinfoName)
+	tmpFilePath := filepath.Join(monTempDir, testFileName)
+	finalFilePath := filepath.Join(monitoringPath, testFileName)
 
-	file, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE, 0600)
+	tmpFileCinfoPath := filepath.Join(monTempDir, testFileCinfoName)
+	finalFileCinfoPath := filepath.Join(monitoringPath, testFileCinfoName)
+
+	// This is for web URL path, do not use filepath
+	extFilePath := path.Join(selfTestDir, testFileName)
+
+	file, err := os.OpenFile(tmpFilePath, os.O_WRONLY|os.O_CREATE, 0600)
 	if err != nil {
-		return "", errors.Wrapf(err, "Failed to create self-test file %s", filePath)
+		return "", errors.Wrapf(err, "Failed to create self-test file %s", tmpFilePath)
 	}
 	defer file.Close()
 
-	cinfoFile, err := os.OpenFile(fileCinfoPath, os.O_WRONLY|os.O_CREATE, 0600)
+	cinfoFile, err := os.OpenFile(tmpFileCinfoPath, os.O_WRONLY|os.O_CREATE, 0600)
 	if err != nil {
-		return "", errors.Wrapf(err, "Failed to create self-test cinfo file %s", fileCinfoPath)
+		return "", errors.Wrapf(err, "Failed to create self-test cinfo file %s", tmpFileCinfoPath)
 	}
 	defer cinfoFile.Close()
 
 	if _, err := file.Write(testFileBytes); err != nil {
-		return "", errors.Wrapf(err, "Failed to write test content to self-test file %s", filePath)
+		return "", errors.Wrapf(err, "Failed to write test content to self-test file %s", tmpFilePath)
 	}
-
 	if _, err := cinfoFile.Write(cinfoBytes); err != nil {
-		return "", errors.Wrapf(err, "Failed to write cinfo content to self-test cinfo file %s", fileCinfoPath)
+		return "", errors.Wrapf(err, "Failed to write cinfo content to self-test cinfo file %s", tmpFileCinfoPath)
 	}
 
-	if err = os.Chown(filePath, uid, gid); err != nil {
+	if err = file.Chown(uid, gid); err != nil {
 		return "", errors.Wrapf(err, "Unable to change ownership of self-test file %v to desired daemon gid %v", file, gid)
 	}
-	if err = os.Chown(fileCinfoPath, uid, gid); err != nil {
+	if err = cinfoFile.Chown(uid, gid); err != nil {
 		return "", errors.Wrapf(err, "Unable to change ownership of self-test cinfo file %v to desired daemon gid %v", file, gid)
+	}
+
+	if err := os.Rename(tmpFilePath, finalFilePath); err != nil {
+		return "", errors.Wrapf(err, "Unable to move self-test file from temp dir %q to desired location %q", tmpFilePath, finalFilePath)
+	}
+	if err := os.Rename(tmpFileCinfoPath, finalFileCinfoPath); err != nil {
+		return "", errors.Wrapf(err, "Unable to move self-test cinfo file from temp dir %q to desired location %q", tmpFilePath, finalFilePath)
 	}
 
 	cachePort := param.Cache_Port.GetInt()
@@ -132,7 +156,9 @@ func downloadTestFile(ctx context.Context, fileUrl string) error {
 	if err != nil {
 		return errors.Wrap(err, "Failed to create GET request for test file transfer download")
 	}
-	// req.Header.Set("Authorization", "Bearer "+tkn)
+
+	// TODO: add auth for self-test and remove the public export in Authfile
+	// once we have a local issuer up for cache (should be doable once #816 is merged)
 
 	client := http.Client{Transport: config.GetTransport()}
 
@@ -199,6 +225,7 @@ func runSelfTest(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
+// Run a cache self-test and log/record metrics with the test result
 func doSelfMonitor(ctx context.Context) {
 	log.Debug("Starting a new self-test monitoring cycle")
 
