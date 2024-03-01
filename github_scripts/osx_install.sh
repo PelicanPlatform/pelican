@@ -173,6 +173,7 @@ xrootd.async off
 s3.region test-region
 s3.service_name test-name
 s3.service_url http://localhost:9000
+s3.url_style path
 xrootd.seclib libXrdSec.so
 sec.protocol ztn
 ofs.authorize 1
