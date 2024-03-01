@@ -138,7 +138,7 @@ func stagePluginMain(cmd *cobra.Command, args []string) {
 			log.Errorln("Failed to read ClassAd from stdin:", err)
 			os.Exit(1)
 		}
-		classad, err := classads.ParseClassAd(string(buffer[:bytesread]))
+		classad, err := classads.ParseShadowClassAd(string(buffer[:bytesread]))
 		if err != nil {
 			log.Errorln("Failed to parse ClassAd from stdin: ", err)
 			os.Exit(1)
@@ -146,6 +146,7 @@ func stagePluginMain(cmd *cobra.Command, args []string) {
 		inputList, err := classad.Get("TransferInput")
 		if err != nil || inputList == nil {
 			// No TransferInput, no need to transform...
+			log.Debugln("No transfer input found in classad, no need to transform.")
 			os.Exit(0)
 		}
 		inputListStr, ok := inputList.(string)
