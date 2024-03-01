@@ -52,6 +52,9 @@ Origin:
   EnablePublicRead: false
   EnableWrite: true
   SelfTest: true
+  Port: 8443
+  SelfTestInterval: 15s
+  S3UrlStyle: "path"
 Registry:
   InstitutionsUrlReloadMinutes: 15m
   CacheApprovedOnly: false

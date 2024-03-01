@@ -549,6 +549,14 @@ type: filename
 default: none
 components: ["origin"]
 ---
+name: Origin.S3UrlStyle
+description: >-
+  The style of S3 urls used by the service URL host. This can be either "path" if objects are fetched at <service-url>/<bucket>/<object>
+  or "virtual" if objects are fetched at <bucket>.<service-url>/<object>
+type: string
+default: path
+components: ["origin"]
+---
 ############################
 #   Cache-level configs    #
 ############################
