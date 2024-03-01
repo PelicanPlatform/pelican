@@ -107,7 +107,7 @@ else
     to_exit=1
 fi
 
-./pelican object get pelican:///test/input.txt -d -t tmp_jwt -l getOutput.txt
+./pelican object get pelican:///test/input.txt output.txt -d -t tmp_jwt -l getOutput.txt
 
 # Check output of command
 if grep -q "Downloaded bytes: 47" getOutput.txt; then
