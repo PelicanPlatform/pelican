@@ -71,8 +71,8 @@ func generateTestFile() (string, error) {
 	now := time.Now()
 	testFileBytes := []byte(selfTestBody)
 	fileSize := len(testFileBytes)
-	cinfo := CInfo{
-		Store: Store{
+	cinfo := cInfo{
+		Store: store{
 			FileSize:     int64(fileSize),
 			CreationTime: now.Unix(),
 			Status:       2, // CSChk_None = 0
