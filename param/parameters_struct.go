@@ -145,6 +145,7 @@ type Config struct {
 		S3SecretKeyfile string
 		S3ServiceName string
 		S3ServiceUrl string
+		S3UrlStyle string
 		ScitokensDefaultUser string
 		ScitokensMapSubject bool
 		ScitokensNameMapFile string
@@ -365,6 +366,7 @@ type configWithType struct {
 		S3SecretKeyfile struct { Type string; Value string }
 		S3ServiceName struct { Type string; Value string }
 		S3ServiceUrl struct { Type string; Value string }
+		S3UrlStyle struct { Type string; Value string }
 		ScitokensDefaultUser struct { Type string; Value string }
 		ScitokensMapSubject struct { Type string; Value bool }
 		ScitokensNameMapFile struct { Type string; Value string }
