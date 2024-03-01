@@ -477,3 +477,34 @@ func TestInitServerUrl(t *testing.T) {
 		assert.Equal(t, "https://example-registry.com", param.Federation_BrokerUrl.GetString())
 	})
 }
+func TestDiscoverUrlFederation(t *testing.T) {
+	// Server to be a "mock" federation
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// make our response:
+		response := FederationDiscovery{
+			DirectorEndpoint:              "director",
+			NamespaceRegistrationEndpoint: "registry",
+			JwksUri:                       "jwks",
+			BrokerEndpoint:                "broker",
+		}
+
+		responseJSON, err := json.Marshal(response)
+		if err != nil {
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_, err = w.Write(responseJSON)
+		assert.NoError(t, err)
+	}))
+	defer server.Close()
+	metadata, err := DiscoverUrlFederation(server.URL)
+	assert.NoError(t, err)
+
+	// Assert that the metadata matches expectations
+	assert.Equal(t, "director", metadata.DirectorEndpoint, "Unexpected DirectorEndpoint")
+	assert.Equal(t, "registry", metadata.NamespaceRegistrationEndpoint, "Unexpected NamespaceRegistrationEndpoint")
+	assert.Equal(t, "jwks", metadata.JwksUri, "Unexpected JwksUri")
+	assert.Equal(t, "broker", metadata.BrokerEndpoint, "Unexpected BrokerEndpoint")
+}

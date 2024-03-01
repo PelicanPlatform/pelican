@@ -115,6 +115,10 @@ func getMain(cmd *cobra.Command, args []string) {
 		}
 	}
 
+	// Start our cache for url metadata
+	go client.PelicanURLCache.Start()
+	defer client.PelicanURLCache.Stop()
+
 	var result error
 	lastSrc := ""
 	for _, src := range source {

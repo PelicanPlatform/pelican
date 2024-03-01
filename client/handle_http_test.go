@@ -23,6 +23,7 @@ package client
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -514,4 +515,124 @@ func TestProjInUserAgent(t *testing.T) {
 
 	// Test the user-agent header is what we expect it to be
 	assert.Equal(t, "pelican-client/"+config.GetVersion()+" project/test", *server_test.user_agent)
+}
+
+func TestNewPelicanURL(t *testing.T) {
+	t.Run("TestOsdfOrStashSchemeWithOSDFPrefixNoError", func(t *testing.T) {
+		viper.Reset()
+		config.SetPreferredPrefix("OSDF")
+		remoteObject := "osdf:///something/somewhere/thatdoesnotexist.txt"
+		remoteObjectURL, err := url.Parse(remoteObject)
+		assert.NoError(t, err)
+
+		// Instead of relying on osdf, let's just set our global metadata (osdf prefix does this for us)
+		viper.Set("Federation.DirectorUrl", "someDirectorUrl")
+		viper.Set("Federation.DiscoveryUrl", "someDiscoveryUrl")
+		viper.Set("Federation.RegistryUrl", "someRegistryUrl")
+
+		pelicanURL, err := NewPelicanURL(remoteObjectURL, "osdf")
+		assert.NoError(t, err)
+
+		// Check pelicanURL properly filled out
+		assert.Equal(t, "someDirectorUrl", pelicanURL.DirectorUrl)
+		assert.Equal(t, "someDiscoveryUrl", pelicanURL.DiscoveryUrl)
+		assert.Equal(t, "someRegistryUrl", pelicanURL.RegistryUrl)
+		assert.Equal(t, remoteObjectURL, pelicanURL.ObjectUrl)
+		viper.Reset()
+	})
+
+	t.Run("TestOsdfOrStashSchemeWithOSDFPrefixWithError", func(t *testing.T) {
+		viper.Reset()
+		config.SetPreferredPrefix("OSDF")
+		remoteObject := "osdf:///something/somewhere/thatdoesnotexist.txt"
+		remoteObjectURL, err := url.Parse(remoteObject)
+		assert.NoError(t, err)
+
+		// Instead of relying on osdf, let's just set our global metadata but don't set one piece
+		viper.Set("Federation.DirectorUrl", "someDirectorUrl")
+		viper.Set("Federation.DiscoveryUrl", "someDiscoveryUrl")
+
+		_, err = NewPelicanURL(remoteObjectURL, "osdf")
+		// Make sure we get an error
+		assert.Error(t, err)
+		viper.Reset()
+	})
+
+	t.Run("TestOsdfOrStashSchemeWithPelicanPrefixNoError", func(t *testing.T) {
+		viper.Reset()
+		config.SetPreferredPrefix("PELICAN")
+		remoteObject := "osdf:///something/somewhere/thatdoesnotexist.txt"
+		remoteObjectURL, err := url.Parse(remoteObject)
+		assert.NoError(t, err)
+
+		pelicanURL, err := NewPelicanURL(remoteObjectURL, "osdf")
+		assert.NoError(t, err)
+
+		// Check pelicanURL properly filled out
+		assert.Equal(t, "https://osdf-director.osg-htc.org", pelicanURL.DirectorUrl)
+		assert.Equal(t, "osg-htc.org", pelicanURL.DiscoveryUrl)
+		assert.Equal(t, "https://osdf-registry.osg-htc.org", pelicanURL.RegistryUrl)
+		assert.Equal(t, remoteObjectURL, pelicanURL.ObjectUrl)
+		viper.Reset()
+		// Note: can't really test this for an error since that would require osg-htc.org to be down
+	})
+
+	t.Run("TestPelicanSchemeNoError", func(t *testing.T) {
+		viper.Reset()
+		viper.Set("TLSSkipVerify", true)
+		err := config.InitClient()
+		assert.NoError(t, err)
+		// Create a server that gives us a mock response
+		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// make our response:
+			response := config.FederationDiscovery{
+				DirectorEndpoint:              "director",
+				NamespaceRegistrationEndpoint: "registry",
+				JwksUri:                       "jwks",
+				BrokerEndpoint:                "broker",
+			}
+
+			responseJSON, err := json.Marshal(response)
+			if err != nil {
+				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+				return
+			}
+
+			w.WriteHeader(http.StatusOK)
+			_, err = w.Write(responseJSON)
+			assert.NoError(t, err)
+		}))
+		defer server.Close()
+
+		serverURL, err := url.Parse(server.URL)
+		assert.NoError(t, err)
+
+		remoteObject := "pelican://" + serverURL.Host + "/something/somewhere/thatdoesnotexist.txt"
+		remoteObjectURL, err := url.Parse(remoteObject)
+		assert.NoError(t, err)
+
+		pelicanURL, err := NewPelicanURL(remoteObjectURL, "pelican")
+		assert.NoError(t, err)
+
+		// Check pelicanURL properly filled out
+		assert.Equal(t, "director", pelicanURL.DirectorUrl)
+		assert.Equal(t, server.URL, pelicanURL.DiscoveryUrl)
+		assert.Equal(t, "registry", pelicanURL.RegistryUrl)
+		assert.Equal(t, remoteObjectURL, pelicanURL.ObjectUrl)
+		// Check to make sure it was populated in our cache
+		assert.True(t, PelicanURLCache.Has(pelicanURL.DiscoveryUrl))
+		viper.Reset()
+	})
+
+	t.Run("TestPelicanSchemeWithError", func(t *testing.T) {
+		viper.Reset()
+
+		remoteObject := "pelican://some-host/something/somewhere/thatdoesnotexist.txt"
+		remoteObjectURL, err := url.Parse(remoteObject)
+		assert.NoError(t, err)
+
+		_, err = NewPelicanURL(remoteObjectURL, "pelican")
+		assert.Error(t, err)
+		viper.Reset()
+	})
 }
