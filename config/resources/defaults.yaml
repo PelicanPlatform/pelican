@@ -18,17 +18,16 @@ Logging:
   Level: "Error"
   Origin:
     Cms: "error"
-    Pfc: "info"
-    Pss: "error"
     Scitokens: "fatal"
     Xrd: "error"
     Xrootd: "info"
   Cache:
-    Ofs: error
-    Pss: error
-    Scitokens: fatal
-    Xrd: error
-    Xrootd: error
+    Ofs: "error"
+    Pfc: "info"
+    Pss: "error"
+    Scitokens: "fatal"
+    Xrd: "error"
+    Xrootd: "error"
 Client:
   WorkerCount: 5
 Server:

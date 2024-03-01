@@ -113,89 +113,6 @@ func TestXrootDOriginConfig(t *testing.T) {
 		viper.Reset()
 	})
 
-	t.Run("TestOriginPfcCorrectConfig", func(t *testing.T) {
-		xrootd := xrootdTest{T: t}
-		xrootd.setup()
-
-		// Set our config
-		viper.Set("Logging.Origin.Pfc", "debug")
-		dirname := t.TempDir()
-		viper.Set("Xrootd.RunLocation", dirname)
-
-		// Generate the xrootd config
-		configPath, err := ConfigXrootd(ctx, true)
-		require.NoError(t, err)
-		assert.NotNil(t, configPath)
-
-		// Verify the output
-		file, err := os.Open(configPath)
-		assert.NoError(t, err)
-		defer file.Close()
-
-		content, err := io.ReadAll(file)
-		assert.NoError(t, err)
-		assert.Contains(t, string(content), "pfc.trace debug")
-		viper.Reset()
-	})
-
-	t.Run("TestOriginPfcIncorrectConfig", func(t *testing.T) {
-		xrootd := xrootdTest{T: t}
-		xrootd.setup()
-
-		// Set our config
-		viper.Set("Logging.Origin.Pfc", "degub")
-		dirname := t.TempDir()
-		viper.Set("Xrootd.RunLocation", dirname)
-
-		// Generate the xrootd config
-		configPath, err := ConfigXrootd(ctx, true)
-		require.Error(t, err)
-		assert.NotNil(t, configPath)
-		viper.Reset()
-	})
-
-	t.Run("TestOriginPssCorrectConfig", func(t *testing.T) {
-		xrootd := xrootdTest{T: t}
-		xrootd.setup()
-
-		// Set our config
-		viper.Set("Logging.Origin.Pss", "debug")
-		dirname := t.TempDir()
-		viper.Set("Xrootd.RunLocation", dirname)
-
-		// Generate the xrootd config
-		configPath, err := ConfigXrootd(ctx, true)
-		require.NoError(t, err)
-		assert.NotNil(t, configPath)
-
-		// Verify the output
-		file, err := os.Open(configPath)
-		assert.NoError(t, err)
-		defer file.Close()
-
-		content, err := io.ReadAll(file)
-		assert.NoError(t, err)
-		assert.Contains(t, string(content), "pss.trace all")
-		assert.Contains(t, string(content), "pss.setopt DebugLevel 4")
-		viper.Reset()
-	})
-
-	t.Run("TestOriginPssIncorrectConfig", func(t *testing.T) {
-		xrootd := xrootdTest{T: t}
-		xrootd.setup()
-
-		// Set our config
-		viper.Set("Logging.Origin.Pfc", "degub")
-		dirname := t.TempDir()
-		viper.Set("Xrootd.RunLocation", dirname)
-
-		// Generate the xrootd config
-		configPath, err := ConfigXrootd(ctx, true)
-		require.Error(t, err)
-		assert.NotNil(t, configPath)
-		viper.Reset()
-	})
-
 	t.Run("TestOriginScitokensCorrectConfig", func(t *testing.T) {
 		xrootd := xrootdTest{T: t}
 		xrootd.setup()
@@ -424,6 +341,47 @@ func TestXrootDCacheConfig(t *testing.T) {
 		configPath, err := ConfigXrootd(ctx, false)
 		require.Error(t, err)
 		assert.NotNil(t, configPath)
+	})
+
+	t.Run("TestCachePfcCorrectConfig", func(t *testing.T) {
+		xrootd := xrootdTest{T: t}
+		xrootd.setup()
+
+		// Set our config
+		viper.Set("Logging.Cache.Pfc", "debug")
+		dirname := t.TempDir()
+		viper.Set("Xrootd.RunLocation", dirname)
+
+		// Generate the xrootd config
+		configPath, err := ConfigXrootd(ctx, false)
+		require.NoError(t, err)
+		assert.NotNil(t, configPath)
+
+		// Verify the output
+		file, err := os.Open(configPath)
+		assert.NoError(t, err)
+		defer file.Close()
+
+		content, err := io.ReadAll(file)
+		assert.NoError(t, err)
+		assert.Contains(t, string(content), "pfc.trace debug")
+		viper.Reset()
+	})
+
+	t.Run("TestCachePfcIncorrectConfig", func(t *testing.T) {
+		xrootd := xrootdTest{T: t}
+		xrootd.setup()
+
+		// Set our config
+		viper.Set("Logging.Cache.Pfc", "degub")
+		dirname := t.TempDir()
+		viper.Set("Xrootd.RunLocation", dirname)
+
+		// Generate the xrootd config
+		configPath, err := ConfigXrootd(ctx, true)
+		require.Error(t, err)
+		assert.NotNil(t, configPath)
+		viper.Reset()
 	})
 
 	t.Run("TestCachePssCorrectConfig", func(t *testing.T) {

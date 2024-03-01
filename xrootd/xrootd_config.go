@@ -135,13 +135,12 @@ type (
 
 	LoggingConfig struct {
 		OriginCms       string
-		OriginPfc       string
-		OriginPss       string
 		PssSetOptOrigin string
 		OriginScitokens string
 		OriginXrd       string
 		OriginXrootd    string
 		CacheOfs        string
+		CachePfc        string
 		CachePss        string
 		PssSetOptCache  string
 		CacheScitokens  string
@@ -825,49 +824,6 @@ func mapXrootdLogLevels(xrdConfig *XrootdConfig) error {
 		return errors.Wrap(err, "Error parsing specified log level for Origin_Cms")
 	}
 
-	// Origin Pfc
-	// https://xrootd.slac.stanford.edu/doc/dev56/pss_config.htm
-	xrdConfig.Logging.OriginPfc, err = genLoggingConfig("pfc", xrdConfig, param.Logging_Origin_Pfc.GetString(), loggingMap{
-		Trace: "dump",
-		Debug: "debug",
-		Info:  "info",
-		Warn:  "warning",
-		Error: "error",
-		Fatal: "none",
-	})
-	if err != nil {
-		return errors.Wrap(err, "Error parsing specified log level for Origin_Pfc")
-	}
-
-	// pssSetOptOrigin and pssOrigin
-	// https://xrootd.slac.stanford.edu/doc/dev56/pss_config.htm
-	// Note: pss has interesting config options:
-	// all     informational events.
-	// on      warning events.
-	// debug   error events.
-	// Therefore the following pss.trace I came up with is what follows:
-	xrdConfig.Logging.OriginPss, err = genLoggingConfig("pss", xrdConfig, param.Logging_Origin_Pss.GetString(), loggingMap{
-		Trace: "all",
-		Info:  "on",
-		Warn:  "debug",
-		Error: "off",
-	})
-	if err != nil {
-		return errors.Wrap(err, "Error parsing specified log level for Origin_Pss")
-	}
-
-	// Setopt:
-	xrdConfig.Logging.PssSetOptOrigin, err = genLoggingConfig("pss", xrdConfig, param.Logging_Origin_Pss.GetString(), loggingMap{
-		Trace: "DebugLevel 4",
-		Info:  "DebugLevel 3",
-		Warn:  "DebugLevel 2",
-		Error: "DebugLevel 1",
-		Fatal: "DebugLevel 0",
-	})
-	if err != nil {
-		return errors.Wrap(err, "Error parsing specified log level for Origin_Pss")
-	}
-
 	// Origin Scitokens
 	// https://github.com/xrootd/xrootd/blob/8f8498d66aa583c54c0875bb1cfe432f4be040f4/src/XrdSciTokens/XrdSciTokensAccess.cc#L951-L963
 	xrdConfig.Logging.OriginScitokens, err = genLoggingConfig("scitokens", xrdConfig, param.Logging_Origin_Scitokens.GetString(), loggingMap{
@@ -918,6 +874,20 @@ func mapXrootdLogLevels(xrdConfig *XrootdConfig) error {
 	})
 	if err != nil {
 		return errors.Wrap(err, "Error parsing specified log level for Cache_Ofs")
+	}
+
+	// Cache Pfc
+	// https://xrootd.slac.stanford.edu/doc/dev56/pss_config.htm
+	xrdConfig.Logging.CachePfc, err = genLoggingConfig("pfc", xrdConfig, param.Logging_Cache_Pfc.GetString(), loggingMap{
+		Trace: "dump",
+		Debug: "debug",
+		Info:  "info",
+		Warn:  "warning",
+		Error: "error",
+		Fatal: "none",
+	})
+	if err != nil {
+		return errors.Wrap(err, "Error parsing specified log level for Cache_Pfc")
 	}
 
 	// Cache PssSetOptCache and Cache Pss

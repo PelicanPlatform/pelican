@@ -165,23 +165,6 @@ type: string
 default: error
 components: ["origin"]
 ---
-name: Logging.Origin.Pfc
-description: >-
-  Trace level of Xrootd Proxy File Cache (XCache), the caching mechanism used by Xrootd. This component
-  entails information for caches/caching within Xrootd. This component instantiates its own Open Storage
-  System (OSS) to write local files to.
-type: string
-default: info
-components: ["origin"]
----
-name: Logging.Origin.Pss
-description: >-
-  Trace level of Xrootd Proxy System Service. Variables this component reports include: number of remotes file opens,
-  number of opens that failed, number of remote file closes, and number of closes that failed.
-type: string
-default: error
-components: ["origin"]
----
 name: Logging.Origin.Scitokens
 description: >-
   Trace level of scitokens debug output within Xrootd configuration. This entails token management
@@ -214,6 +197,15 @@ description: >-
   writes for files and directories.
 type: string
 default: error
+components: ["cache"]
+---
+name: Logging.Cache.Pfc
+description: >-
+  Trace level of Xrootd Proxy File Cache (XCache), the caching mechanism used by Xrootd. This component
+  entails information for caches/caching within Xrootd. This component instantiates its own Open Storage
+  System (OSS) to write local files to.
+type: string
+default: info
 components: ["cache"]
 ---
 name: Logging.Cache.Pss
