@@ -1,4 +1,4 @@
-name: Release, Build, and Push
+name: Build and Push Prod Image
 
 on:
   pull_request:
