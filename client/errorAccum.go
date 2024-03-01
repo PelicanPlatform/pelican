@@ -27,7 +27,6 @@ import (
 
 	grab "github.com/opensaucerer/grab/v3"
 	"github.com/pelicanplatform/pelican/config"
-	log "github.com/sirupsen/logrus"
 )
 
 type (
@@ -171,10 +170,6 @@ func (te *TransferErrors) AllErrorsRetryable() bool {
 		if !IsRetryable(err) {
 			return false
 		}
-	}
-	if len(bunchOfErrors) == 0 {
-		log.Debugln("No errors sent to client for checking")
-		return false
 	}
 	return true
 }
