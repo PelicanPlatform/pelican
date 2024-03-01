@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2023, University of Nebraska-Lincoln
+ * Copyright (C) 2024, University of Nebraska-Lincoln
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -19,6 +19,7 @@
 package client
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"path"
@@ -39,7 +40,7 @@ func version_status(filePath string) (string, uint64, error) {
 	return path.Join(dir, fmt.Sprintf("%s.%s", base, hash)), localSize, nil
 }
 
-func generate_destination(filePath string, originPrefix string, shadowOriginPrefix string) (string, uint64, error) {
+func generateDestination(filePath string, originPrefix string, shadowOriginPrefix string) (string, uint64, error) {
 	hashRaw, localSize, err := version_status(filePath)
 	if err != nil {
 		return "", 0, err
@@ -52,22 +53,21 @@ func generate_destination(filePath string, originPrefix string, shadowOriginPref
 	return "", 0, errors.New("File path must have the origin prefix")
 }
 
-func DoShadowIngest(sourceFile string, originPrefix string, shadowOriginPrefix string) (int64, string, error) {
+func DoShadowIngest(ctx context.Context, sourceFile string, originPrefix string, shadowOriginPrefix string, options ...TransferOption) (int64, string, error) {
 	// After each transfer attempt, we'll check to see if the local file was modified.  If so, we'll re-upload.
 	for idx := 0; idx < 10; idx++ {
-		shadowFile, localSize, err := generate_destination(sourceFile, originPrefix, shadowOriginPrefix)
+		shadowFile, localSize, err := generateDestination(sourceFile, originPrefix, shadowOriginPrefix)
 		log.Debugln("Resulting shadow URL:", shadowFile)
 		if err != nil {
 			return 0, "", err
 		}
-		methods := []string{"http"}
 
 		lastRemoteSize := uint64(0)
 		lastUpdateTime := time.Now()
 		startTime := lastUpdateTime
 		maxRuntime := float64(localSize/10*1024*1024) + 300
 		for {
-			remoteSize, err := CheckOSDF(shadowFile, methods)
+			remoteSize, err := DoStat(ctx, shadowFile, options...)
 			if httpErr, ok := err.(*HttpErrResp); ok {
 				if httpErr.Code == 404 {
 					break
@@ -103,13 +103,13 @@ func DoShadowIngest(sourceFile string, originPrefix string, shadowOriginPrefix s
 			time.Sleep(5 * time.Second)
 		}
 
-		transferResults, err := DoStashCPSingle(sourceFile, shadowFile, methods, false)
+		transferResults, err := DoCopy(ctx, sourceFile, shadowFile, false, options...)
 		if err != nil {
 			return 0, "", err
 		}
 
 		// See if the file was modified while we were uploading; if not, we'll return success
-		shadowFilePost, _, err := generate_destination(sourceFile, originPrefix, shadowOriginPrefix)
+		shadowFilePost, _, err := generateDestination(sourceFile, originPrefix, shadowOriginPrefix)
 		if err != nil {
 			return 0, "", err
 		}

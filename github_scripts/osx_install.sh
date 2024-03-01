@@ -1,5 +1,5 @@
 #!/bin/sh -ex
-# Copyright (C) 2023, Pelican Project, Morgridge Institute for Research
+# Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you
 # may not use this file except in compliance with the License.  You may
@@ -173,6 +173,7 @@ xrootd.async off
 s3.region test-region
 s3.service_name test-name
 s3.service_url http://localhost:9000
+s3.url_style path
 xrootd.seclib libXrdSec.so
 sec.protocol ztn
 ofs.authorize 1

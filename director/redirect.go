@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2023, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -43,6 +43,7 @@ import (
 )
 
 type (
+	HealthTestStatus  string
 	PromDiscoveryItem struct {
 		Targets []string          `json:"targets"`
 		Labels  map[string]string `json:"labels"`
@@ -52,14 +53,21 @@ type (
 		ErrGrp        *errgroup.Group
 		ErrGrpContext context.Context
 		Cancel        context.CancelFunc
+		Status        HealthTestStatus
+	}
+	originStatUtil struct {
+		Context  context.Context
+		Cancel   context.CancelFunc
+		Errgroup *errgroup.Group
 	}
 )
 
-type originStatUtil struct {
-	Context  context.Context
-	Cancel   context.CancelFunc
-	Errgroup *errgroup.Group
-}
+const (
+	HealthStatusUnknown HealthTestStatus = "Unknown"
+	HealthStatusInit    HealthTestStatus = "Initializing"
+	HealthStatusOK      HealthTestStatus = "OK"
+	HealthStatusError   HealthTestStatus = "Error"
+)
 
 var (
 	minClientVersion, _  = version.NewVersion("7.0.0")
@@ -343,7 +351,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		for idx, ad := range originAds {
 			if ad.EnableWrite {
 				redirectURL = getRedirectURL(reqPath, originAds[idx], !namespaceAd.PublicRead)
-				if brokerUrl := originAds[idx].BrokerURL; brokerUrl != nil {
+				if brokerUrl := originAds[idx].BrokerURL; brokerUrl.String() != "" {
 					ginCtx.Header("X-Pelican-Broker", brokerUrl.String())
 				}
 				ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, authzBearerEscaped))
@@ -354,7 +362,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		return
 	} else { // Otherwise, we are doing a GET
 		redirectURL := getRedirectURL(reqPath, originAds[0], !namespaceAd.PublicRead)
-		if brokerUrl := originAds[0].BrokerURL; brokerUrl != nil {
+		if brokerUrl := originAds[0].BrokerURL; brokerUrl.String() != "" {
 			ginCtx.Header("X-Pelican-Broker", brokerUrl.String())
 		}
 
@@ -547,7 +555,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType common.S
 		AuthURL:            *ad_url,
 		URL:                *ad_url,
 		WebURL:             *adWebUrl,
-		BrokerURL:          brokerUrl,
+		BrokerURL:          *brokerUrl,
 		Type:               sType,
 		EnableWrite:        adV2.Caps.Write,
 		EnableFallbackRead: adV2.Caps.FallBackRead,
@@ -574,6 +582,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType common.S
 							Cancel:        cancel,
 							ErrGrp:        errgrp,
 							ErrGrpContext: errgrpCtx,
+							Status:        HealthStatusInit,
 						}
 						errgrp.Go(func() error {
 							LaunchPeriodicDirectorTest(cancelCtx, sAd)
@@ -610,6 +619,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType common.S
 				Cancel:        cancel,
 				ErrGrp:        errgrp,
 				ErrGrpContext: errgrpCtx,
+				Status:        HealthStatusUnknown,
 			}
 			errgrp.Go(func() error {
 				LaunchPeriodicDirectorTest(cancelCtx, sAd)

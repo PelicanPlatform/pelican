@@ -2,7 +2,7 @@
 
 /***************************************************************
  *
- * Copyright (C) 2023, University of Nebraska-Lincoln
+ * Copyright (C) 2024, University of Nebraska-Lincoln
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -32,6 +32,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -64,15 +65,15 @@ func TestMain(m *testing.M) {
 // for a valid return value.
 func TestIsPort(t *testing.T) {
 
-	if HasPort("blah.not.port:") {
+	if hasPort("blah.not.port:") {
 		t.Fatal("Failed to parse port when : at end")
 	}
 
-	if !HasPort("host:1") {
+	if !hasPort("host:1") {
 		t.Fatal("Failed to parse with port = 1")
 	}
 
-	if HasPort("https://example.com") {
+	if hasPort("https://example.com") {
 		t.Fatal("Failed when scheme is specified")
 	}
 }
@@ -87,7 +88,7 @@ func TestNewTransferDetails(t *testing.T) {
 		Endpoint:     "cache.edu:8000",
 		Resource:     "Cache",
 	}
-	transfers := NewTransferDetails(testCache, TransferDetailsOptions{false, ""})
+	transfers := newTransferDetails(testCache, transferDetailsOptions{false, ""})
 	assert.Equal(t, 2, len(transfers))
 	assert.Equal(t, "cache.edu:8000", transfers[0].Url.Host)
 	assert.Equal(t, "http", transfers[0].Url.Scheme)
@@ -97,7 +98,7 @@ func TestNewTransferDetails(t *testing.T) {
 	assert.Equal(t, false, transfers[1].Proxy)
 
 	// Case 2: cache with https
-	transfers = NewTransferDetails(testCache, TransferDetailsOptions{true, ""})
+	transfers = newTransferDetails(testCache, transferDetailsOptions{true, ""})
 	assert.Equal(t, 1, len(transfers))
 	assert.Equal(t, "cache.edu:8443", transfers[0].Url.Host)
 	assert.Equal(t, "https", transfers[0].Url.Scheme)
@@ -105,7 +106,7 @@ func TestNewTransferDetails(t *testing.T) {
 
 	testCache.Endpoint = "cache.edu"
 	// Case 3: cache without port with http
-	transfers = NewTransferDetails(testCache, TransferDetailsOptions{false, ""})
+	transfers = newTransferDetails(testCache, transferDetailsOptions{false, ""})
 	assert.Equal(t, 2, len(transfers))
 	assert.Equal(t, "cache.edu:8000", transfers[0].Url.Host)
 	assert.Equal(t, "http", transfers[0].Url.Scheme)
@@ -116,7 +117,7 @@ func TestNewTransferDetails(t *testing.T) {
 
 	// Case 4. cache without port with https
 	testCache.AuthEndpoint = "cache.edu"
-	transfers = NewTransferDetails(testCache, TransferDetailsOptions{true, ""})
+	transfers = newTransferDetails(testCache, transferDetailsOptions{true, ""})
 	assert.Equal(t, 2, len(transfers))
 	assert.Equal(t, "cache.edu:8444", transfers[0].Url.Host)
 	assert.Equal(t, "https", transfers[0].Url.Scheme)
@@ -137,11 +138,11 @@ func TestNewTransferDetailsEnv(t *testing.T) {
 	os.Setenv("OSG_DISABLE_PROXY_FALLBACK", "")
 	err := config.InitClient()
 	assert.Nil(t, err)
-	transfers := NewTransferDetails(testCache, TransferDetailsOptions{false, ""})
+	transfers := newTransferDetails(testCache, transferDetailsOptions{false, ""})
 	assert.Equal(t, 1, len(transfers))
 	assert.Equal(t, true, transfers[0].Proxy)
 
-	transfers = NewTransferDetails(testCache, TransferDetailsOptions{true, ""})
+	transfers = newTransferDetails(testCache, transferDetailsOptions{true, ""})
 	assert.Equal(t, 1, len(transfers))
 	assert.Equal(t, "https", transfers[0].Url.Scheme)
 	assert.Equal(t, false, transfers[0].Proxy)
@@ -152,6 +153,8 @@ func TestNewTransferDetailsEnv(t *testing.T) {
 }
 
 func TestSlowTransfers(t *testing.T) {
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+
 	// Adjust down some timeouts to speed up the test
 	viper.Set("Client.SlowTransferWindow", 5)
 	viper.Set("Client.SlowTransferRampupTime", 10)
@@ -159,6 +162,11 @@ func TestSlowTransfers(t *testing.T) {
 	channel := make(chan bool)
 	slowDownload := 1024 * 10 // 10 KiB/s < 100 KiB/s
 	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "HEAD" {
+			w.Header().Add("Content-Length", "1024000")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
 		buffer := make([]byte, slowDownload)
 		for {
 			select {
@@ -183,7 +191,7 @@ func TestSlowTransfers(t *testing.T) {
 		Endpoint:     svr.URL,
 		Resource:     "Cache",
 	}
-	transfers := NewTransferDetails(testCache, TransferDetailsOptions{false, ""})
+	transfers := newTransferDetails(testCache, transferDetailsOptions{false, ""})
 	assert.Equal(t, 2, len(transfers))
 	assert.Equal(t, svr.URL, transfers[0].Url.String())
 
@@ -191,7 +199,7 @@ func TestSlowTransfers(t *testing.T) {
 	var err error
 	// Do a quick timeout
 	go func() {
-		_, _, _, err = DownloadHTTP(transfers[0], filepath.Join(t.TempDir(), "test.txt"), "", nil)
+		_, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], filepath.Join(t.TempDir(), "test.txt"), "", nil)
 		finishedChannel <- true
 	}()
 
@@ -215,12 +223,20 @@ func TestSlowTransfers(t *testing.T) {
 
 // Test stopped transfer
 func TestStoppedTransfer(t *testing.T) {
+	os.Setenv("http_proxy", "http://proxy.edu:3128")
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+
 	// Adjust down the timeouts
 	viper.Set("Client.StoppedTransferTimeout", 3)
 	viper.Set("Client.SlowTransferRampupTime", 100)
 
 	channel := make(chan bool)
 	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "HEAD" {
+			w.Header().Add("Content-Length", "102400")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
 		buffer := make([]byte, 1024*100)
 		for {
 			select {
@@ -246,7 +262,7 @@ func TestStoppedTransfer(t *testing.T) {
 		Endpoint:     svr.URL,
 		Resource:     "Cache",
 	}
-	transfers := NewTransferDetails(testCache, TransferDetailsOptions{false, ""})
+	transfers := newTransferDetails(testCache, transferDetailsOptions{false, ""})
 	assert.Equal(t, 2, len(transfers))
 	assert.Equal(t, svr.URL, transfers[0].Url.String())
 
@@ -254,7 +270,7 @@ func TestStoppedTransfer(t *testing.T) {
 	var err error
 
 	go func() {
-		_, _, _, err = DownloadHTTP(transfers[0], filepath.Join(t.TempDir(), "test.txt"), "", nil)
+		_, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], filepath.Join(t.TempDir(), "test.txt"), "", nil)
 		finishedChannel <- true
 	}()
 
@@ -277,6 +293,8 @@ func TestStoppedTransfer(t *testing.T) {
 
 // Test connection error
 func TestConnectionError(t *testing.T) {
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("dialClosedPort: Listen failed: %v", err)
@@ -284,13 +302,15 @@ func TestConnectionError(t *testing.T) {
 	addr := l.Addr().String()
 	l.Close()
 
-	_, _, _, err = DownloadHTTP(TransferDetails{Url: url.URL{Host: addr, Scheme: "http"}, Proxy: false}, filepath.Join(t.TempDir(), "test.txt"), "", nil)
+	_, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: &url.URL{Host: addr, Scheme: "http"}, Proxy: false}, filepath.Join(t.TempDir(), "test.txt"), "", nil)
 
 	assert.IsType(t, &ConnectionSetupError{}, err)
 
 }
 
 func TestTrailerError(t *testing.T) {
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+
 	// Set up an HTTP server that returns an error trailer
 	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Trailer", "X-Transfer-Status")
@@ -312,12 +332,12 @@ func TestTrailerError(t *testing.T) {
 		Endpoint:     svr.URL,
 		Resource:     "Cache",
 	}
-	transfers := NewTransferDetails(testCache, TransferDetailsOptions{false, ""})
+	transfers := newTransferDetails(testCache, transferDetailsOptions{false, ""})
 	assert.Equal(t, 2, len(transfers))
 	assert.Equal(t, svr.URL, transfers[0].Url.String())
 
 	// Call DownloadHTTP and check if the error is returned correctly
-	_, _, _, err := DownloadHTTP(transfers[0], filepath.Join(t.TempDir(), "test.txt"), "", nil)
+	_, _, _, err := downloadHTTP(ctx, nil, nil, transfers[0], filepath.Join(t.TempDir(), "test.txt"), "", nil)
 
 	assert.NotNil(t, err)
 	assert.EqualError(t, err, "transfer error: Unable to read test.txt; input/output error")
@@ -340,7 +360,7 @@ func TestUploadZeroLengthFile(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer test")
 	errorChan := make(chan error, 1)
 	responseChan := make(chan *http.Response)
-	go doPut(request, responseChan, errorChan)
+	go runPut(request, responseChan, errorChan)
 	select {
 	case err := <-errorChan:
 		assert.NoError(t, err)
@@ -370,7 +390,7 @@ func TestFailedUpload(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer test")
 	errorChan := make(chan error, 1)
 	responseChan := make(chan *http.Response)
-	go doPut(request, responseChan, errorChan)
+	go runPut(request, responseChan, errorChan)
 	select {
 	case err := <-errorChan:
 		assert.Error(t, err)
@@ -407,7 +427,7 @@ func generateFileTestScitoken() (string, error) {
 		TokenProfile: utils.WLCG,
 		Lifetime:     time.Minute,
 		Issuer:       issuerUrl,
-		Audience:     []string{param.Origin_Url.GetString()},
+		Audience:     []string{config.GetServerAudience()},
 		Version:      "1.0",
 		Subject:      "origin",
 	}
@@ -473,6 +493,7 @@ func TestFullUpload(t *testing.T) {
 	viper.Set("Registry.RequireOriginApproval", false)
 	viper.Set("Registry.RequireCacheApproval", false)
 	viper.Set("Logging.Origin.Scitokens", "debug")
+	viper.Set("Origin.Port", 0)
 
 	err = config.InitServer(ctx, modules)
 	require.NoError(t, err)
@@ -526,27 +547,24 @@ func TestFullUpload(t *testing.T) {
 		_, err = tempToken.WriteString(token)
 		assert.NoError(t, err, "Error writing to temp token file")
 		tempToken.Close()
-		ObjectClientOptions.Token = tempToken.Name()
 
 		// Upload the file
 		tempPath := tempFile.Name()
 		fileName := filepath.Base(tempPath)
 		uploadURL := "stash:///test/" + fileName
 
-		methods := []string{"http"}
-		transferResults, err := DoStashCPSingle(tempFile.Name(), uploadURL, methods, false)
+		transferResults, err := DoCopy(ctx, tempFile.Name(), uploadURL, false, WithTokenLocation(tempToken.Name()))
 		assert.NoError(t, err, "Error uploading file")
 		assert.Equal(t, int64(len(testFileContent)), transferResults[0].TransferredBytes, "Uploaded file size does not match")
 
 		// Upload an osdf file
-		uploadURL = "osdf:///test/stuff/blah.txt"
+		uploadURL = "pelican:///test/stuff/blah.txt"
 		assert.NoError(t, err, "Error parsing upload URL")
-		transferResults, err = DoStashCPSingle(tempFile.Name(), uploadURL, methods, false)
+		transferResults, err = DoCopy(ctx, tempFile.Name(), uploadURL, false, WithTokenLocation(tempToken.Name()))
 		assert.NoError(t, err, "Error uploading file")
 		assert.Equal(t, int64(len(testFileContent)), transferResults[0].TransferredBytes, "Uploaded file size does not match")
 	})
 	t.Cleanup(func() {
-		ObjectClientOptions.Token = ""
 		os.RemoveAll(tmpPath)
 		os.RemoveAll(originDir)
 	})
@@ -667,6 +685,8 @@ func (f *FedTest) Teardown() {
 // A test that spins up a federation, and tests object get and put
 func TestGetAndPutAuth(t *testing.T) {
 	// Create instance of test federation
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+
 	viper.Reset()
 	fed := FedTest{T: t}
 	fed.Spinup()
@@ -723,20 +743,18 @@ func TestGetAndPutAuth(t *testing.T) {
 		uploadURL := "pelican:///test/" + fileName
 
 		// Upload the file with PUT
-		ObjectClientOptions.Token = tempToken.Name()
-		transferResultsUpload, err := DoPut(tempFile.Name(), uploadURL, false)
+		transferResultsUpload, err := DoPut(ctx, tempFile.Name(), uploadURL, false, WithTokenLocation(tempToken.Name()))
 		assert.NoError(t, err)
 		if err == nil {
 			assert.Equal(t, transferResultsUpload[0].TransferredBytes, int64(17))
 		}
 
 		// Download that same file with GET
-		transferResultsDownload, err := DoGet(uploadURL, t.TempDir(), false)
+		transferResultsDownload, err := DoGet(ctx, uploadURL, t.TempDir(), false, WithTokenLocation(tempToken.Name()))
 		assert.NoError(t, err)
 		if err == nil {
 			assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
 		}
-		ObjectClientOptions.Token = ""
 	})
 
 	// This tests pelican object get/put with an osdf url
@@ -745,23 +763,22 @@ func TestGetAndPutAuth(t *testing.T) {
 		// Set path for object to upload/download
 		tempPath := tempFile.Name()
 		fileName := filepath.Base(tempPath)
-		uploadURL := "osdf:///test/" + fileName
+		// Minimal fix of test as it is soon to be replaced
+		uploadURL := "pelican:///test/" + fileName
 
 		// Upload the file with PUT
-		ObjectClientOptions.Token = tempToken.Name()
-		transferResultsUpload, err := DoPut(tempFile.Name(), uploadURL, false)
+		transferResultsUpload, err := DoPut(ctx, tempFile.Name(), uploadURL, false, WithTokenLocation(tempToken.Name()))
 		assert.NoError(t, err)
 		if err == nil {
 			assert.Equal(t, transferResultsUpload[0].TransferredBytes, int64(17))
 		}
 
 		// Download that same file with GET
-		transferResultsDownload, err := DoGet(uploadURL, t.TempDir(), false)
+		transferResultsDownload, err := DoGet(ctx, uploadURL, t.TempDir(), false, WithTokenLocation(tempToken.Name()))
 		assert.NoError(t, err)
 		if err == nil {
 			assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
 		}
-		ObjectClientOptions.Token = ""
 	})
 
 	// This tests object get/put with a pelican:// url
@@ -773,20 +790,18 @@ func TestGetAndPutAuth(t *testing.T) {
 		uploadURL := "pelican:///test/" + fileName
 
 		// Upload the file with PUT
-		ObjectClientOptions.Token = tempToken.Name()
-		transferResultsUpload, err := DoPut(tempFile.Name(), uploadURL, false)
+		transferResultsUpload, err := DoPut(ctx, tempFile.Name(), uploadURL, false, WithTokenLocation(tempToken.Name()))
 		assert.NoError(t, err)
 		if err == nil {
 			assert.Equal(t, transferResultsUpload[0].TransferredBytes, int64(17))
 		}
 
 		// Download that same file with GET
-		transferResultsDownload, err := DoGet(uploadURL, t.TempDir(), false)
+		transferResultsDownload, err := DoGet(ctx, uploadURL, t.TempDir(), false, WithTokenLocation(tempToken.Name()))
 		assert.NoError(t, err)
 		if err == nil {
 			assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
 		}
-		ObjectClientOptions.Token = ""
 	})
 
 	// This tests pelican object get/put with an osdf url
@@ -795,28 +810,28 @@ func TestGetAndPutAuth(t *testing.T) {
 		// Set path for object to upload/download
 		tempPath := tempFile.Name()
 		fileName := filepath.Base(tempPath)
-		uploadURL := "osdf:///test/" + fileName
+		// Minimal fix of test as it is soon to be replaced
+		uploadURL := "pelican:///test/" + fileName
 
 		// Upload the file with PUT
-		ObjectClientOptions.Token = tempToken.Name()
-		transferResultsUpload, err := DoPut(tempFile.Name(), uploadURL, false)
+		transferResultsUpload, err := DoPut(ctx, tempFile.Name(), uploadURL, false, WithTokenLocation(tempToken.Name()))
 		assert.NoError(t, err)
 		if err == nil {
 			assert.Equal(t, transferResultsUpload[0].TransferredBytes, int64(17))
 		}
 
 		// Download that same file with GET
-		transferResultsDownload, err := DoGet(uploadURL, t.TempDir(), false)
+		transferResultsDownload, err := DoGet(ctx, uploadURL, t.TempDir(), false, WithTokenLocation(tempToken.Name()))
 		assert.NoError(t, err)
 		if err == nil {
 			assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
 		}
-		ObjectClientOptions.Token = ""
 	})
 }
 
 // A test that spins up the federation, where the origin is in EnablePublicReads mode. Then GET a file from the origin without a token
 func TestGetPublicRead(t *testing.T) {
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 	viper.Reset()
 	viper.Set("Origin.EnablePublicReads", true)
 	fed := FedTest{T: t}
@@ -837,10 +852,10 @@ func TestGetPublicRead(t *testing.T) {
 		// Set path for object to upload/download
 		tempPath := tempFile.Name()
 		fileName := filepath.Base(tempPath)
-		uploadURL := "osdf:///test/" + fileName
+		uploadURL := "pelican:///test/" + fileName
 
 		// Download the file with GET. Shouldn't need a token to succeed
-		transferResults, err := DoGet(uploadURL, t.TempDir(), false)
+		transferResults, err := DoGet(ctx, uploadURL, t.TempDir(), false)
 		assert.NoError(t, err)
 		if err == nil {
 			assert.Equal(t, transferResults[0].TransferredBytes, int64(17))
@@ -850,6 +865,8 @@ func TestGetPublicRead(t *testing.T) {
 
 func TestRecursiveUploadsAndDownloads(t *testing.T) {
 	// Create instance of test federation
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+
 	viper.Reset()
 	fed := FedTest{T: t}
 	fed.Spinup()
@@ -912,18 +929,18 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 	tempFile2.Close()
 
 	t.Run("testPelicanRecursiveGetAndPutOsdfURL", func(t *testing.T) {
-		ObjectClientOptions.Token = tempToken.Name()
 		config.SetPreferredPrefix("pelican")
 		// Set path for object to upload/download
 		tempPath := tempDir
 		dirName := filepath.Base(tempPath)
-		uploadURL := "osdf:///test/" + dirName
+		// Note: minimally fixing this test as it is soon to be replaced
+		uploadURL := "pelican://" + param.Server_Hostname.GetString() + ":" + strconv.Itoa(param.Server_WebPort.GetInt()) + "/test/" + dirName
 
 		//////////////////////////////////////////////////////////
 
 		// Upload the file with PUT
-		transferDetailsUpload, err := DoPut(tempDir, uploadURL, true)
-		assert.NoError(t, err)
+		transferDetailsUpload, err := DoPut(ctx, tempDir, uploadURL, true, WithTokenLocation(tempToken.Name()))
+		require.NoError(t, err)
 		if err == nil && len(transferDetailsUpload) == 2 {
 			countBytes17 := 0
 			countBytes23 := 0
@@ -951,7 +968,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 		}
 
 		// Download the files we just uploaded
-		transferDetailsDownload, err := DoGet(uploadURL, t.TempDir(), true)
+		transferDetailsDownload, err := DoGet(ctx, uploadURL, t.TempDir(), true, WithTokenLocation(tempToken.Name()))
 		assert.NoError(t, err)
 		if err == nil && len(transferDetailsUpload) == 2 {
 			countBytesUploadIdx0 := 0
@@ -979,11 +996,9 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 				t.Fatalf("Amount of transfers results returned for download was not correct. Transfer details returned: %d", len(transferDetailsDownload))
 			}
 		}
-		ObjectClientOptions.Token = ""
 	})
 
 	t.Run("testPelicanRecursiveGetAndPutPelicanURL", func(t *testing.T) {
-		ObjectClientOptions.Token = tempToken.Name()
 		config.SetPreferredPrefix("pelican")
 		// Set path for object to upload/download
 		tempPath := tempDir
@@ -993,7 +1008,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 		//////////////////////////////////////////////////////////
 
 		// Upload the file with PUT
-		transferDetailsUpload, err := DoPut(tempDir, uploadURL, true)
+		transferDetailsUpload, err := DoPut(ctx, tempDir, uploadURL, true, WithTokenLocation(tempToken.Name()))
 		assert.NoError(t, err)
 		if err == nil && len(transferDetailsUpload) == 2 {
 			countBytes17 := 0
@@ -1022,7 +1037,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 		}
 
 		// Download the files we just uploaded
-		transferDetailsDownload, err := DoGet(uploadURL, t.TempDir(), true)
+		transferDetailsDownload, err := DoGet(ctx, uploadURL, t.TempDir(), true, WithTokenLocation(tempToken.Name()))
 		assert.NoError(t, err)
 		if err == nil && len(transferDetailsUpload) == 2 {
 			countBytesUploadIdx0 := 0
@@ -1050,21 +1065,20 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 				t.Fatalf("Amount of transfers results returned for download was not correct. Transfer details returned: %d", len(transferDetailsDownload))
 			}
 		}
-		ObjectClientOptions.Token = ""
 	})
 
 	t.Run("testOsdfRecursiveGetAndPutOsdfURL", func(t *testing.T) {
-		ObjectClientOptions.Token = tempToken.Name()
 		config.SetPreferredPrefix("osdf")
 		// Set path for object to upload/download
 		tempPath := tempDir
 		dirName := filepath.Base(tempPath)
-		uploadURL := "osdf:///test/" + dirName
+		// Note: minimally fixing this test as it is soon to be replaced
+		uploadURL := "pelican://" + param.Server_Hostname.GetString() + ":" + strconv.Itoa(param.Server_WebPort.GetInt()) + "/test/" + dirName
 
 		//////////////////////////////////////////////////////////
 
 		// Upload the file with PUT
-		transferDetailsUpload, err := DoPut(tempDir, uploadURL, true)
+		transferDetailsUpload, err := DoPut(ctx, tempDir, uploadURL, true, WithTokenLocation(tempToken.Name()))
 		assert.NoError(t, err)
 		if err == nil && len(transferDetailsUpload) == 2 {
 			countBytes17 := 0
@@ -1093,7 +1107,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 		}
 
 		// Download the files we just uploaded
-		transferDetailsDownload, err := DoGet(uploadURL, t.TempDir(), true)
+		transferDetailsDownload, err := DoGet(ctx, uploadURL, t.TempDir(), true, WithTokenLocation(tempToken.Name()))
 		assert.NoError(t, err)
 		if err == nil && len(transferDetailsUpload) == 2 {
 			countBytesUploadIdx0 := 0
@@ -1121,11 +1135,9 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 				t.Fatalf("Amount of transfers results returned for download was not correct. Transfer details returned: %d", len(transferDetailsDownload))
 			}
 		}
-		ObjectClientOptions.Token = ""
 	})
 
 	t.Run("testOsdfRecursiveGetAndPutPelicanURL", func(t *testing.T) {
-		ObjectClientOptions.Token = tempToken.Name()
 		config.SetPreferredPrefix("osdf")
 		// Set path for object to upload/download
 		tempPath := tempDir
@@ -1135,7 +1147,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 		//////////////////////////////////////////////////////////
 
 		// Upload the file with PUT
-		transferDetailsUpload, err := DoPut(tempDir, uploadURL, true)
+		transferDetailsUpload, err := DoPut(ctx, tempDir, uploadURL, true, WithTokenLocation(tempToken.Name()))
 		assert.NoError(t, err)
 		if err == nil && len(transferDetailsUpload) == 2 {
 			countBytes17 := 0
@@ -1164,7 +1176,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 		}
 
 		// Download the files we just uploaded
-		transferDetailsDownload, err := DoGet(uploadURL, t.TempDir(), true)
+		transferDetailsDownload, err := DoGet(ctx, uploadURL, t.TempDir(), true, WithTokenLocation(tempToken.Name()))
 		assert.NoError(t, err)
 		if err == nil && len(transferDetailsUpload) == 2 {
 			countBytesUploadIdx0 := 0
@@ -1192,7 +1204,6 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 				t.Fatalf("Amount of transfers results returned for download was not correct. Transfer details returned: %d", len(transferDetailsDownload))
 			}
 		}
-		ObjectClientOptions.Token = ""
 	})
 
 }

@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2023, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -93,6 +93,7 @@ type (
 		S3ServiceUrl     string
 		S3AccessKeyfile  string
 		S3SecretKeyfile  string
+		S3UrlStyle       string
 	}
 
 	CacheConfig struct {
@@ -609,6 +610,13 @@ func ConfigXrootd(ctx context.Context, origin bool) (string, error) {
 	xrdConfig.Xrootd.LocalMonitoringPort = -1
 	if err := viper.Unmarshal(&xrdConfig); err != nil {
 		return "", err
+	}
+
+	// If the S3 URL style is configured via yaml, the CLI check in cmd/origin.go won't catch invalid values.
+	if urlStyle := xrdConfig.Origin.S3UrlStyle; urlStyle != "" {
+		if urlStyle != "path" && urlStyle != "virtual" {
+			return "", errors.Errorf("Invalid S3UrlStyle: %v. Must be either 'path' or 'virtual'", urlStyle)
+		}
 	}
 
 	// Map out xrootd logs

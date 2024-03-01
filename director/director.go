@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2023, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -41,6 +41,7 @@ type (
 		Type      common.ServerType `json:"type"`
 		Latitude  float64           `json:"latitude"`
 		Longitude float64           `json:"longitude"`
+		Status    HealthTestStatus  `json:"status"`
 	}
 
 	statResponse struct {
@@ -80,10 +81,16 @@ func listServers(ctx *gin.Context) {
 		servers = listServerAds([]common.ServerType{common.ServerType(queryParams.ToInternalServerType())})
 	} else {
 		servers = listServerAds([]common.ServerType{common.OriginType, common.CacheType})
-
 	}
+	healthTestUtilsMutex.RLock()
+	defer healthTestUtilsMutex.RUnlock()
 	resList := make([]listServerResponse, 0)
 	for _, server := range servers {
+		healthStatus := HealthStatusUnknown
+		healthUtil, ok := healthTestUtils[server]
+		if ok {
+			healthStatus = healthUtil.Status
+		}
 		res := listServerResponse{
 			Name:      server.Name,
 			AuthURL:   server.AuthURL.String(),
@@ -92,6 +99,7 @@ func listServers(ctx *gin.Context) {
 			Type:      server.Type,
 			Latitude:  server.Latitude,
 			Longitude: server.Longitude,
+			Status:    healthStatus,
 		}
 		resList = append(resList, res)
 	}

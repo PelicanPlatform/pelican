@@ -24,7 +24,7 @@ which should output a path to the executable. If there is no output to this comm
 Objects in Pelican belong to *federations*, which are aggregations of data that are exposed to other individuals in the federation. Each Pelican federation constitutes its own global namespace of objects and each object within a federation has its own path, much like files on a computer. Fetching any object from a federation requires at minimum two pieces of information; a URL indicating the object's federation and the path to the object within that federation (there is the potential that some objects require access tokens as well, but more on that later). For example, the Open Science Data Federation's (OSDF) central URL is https://osg-htc.org and an example object from the federation can be found at
 
 ```console
-/osgconnect/public/osg/testfile.txt
+/ospool/uc-shared/public/OSG-Staff/validation/test.txt
 ```
 
 **Note:** All object paths in a federation begin with a preceding `/`, and no relative paths are allowed.
@@ -50,7 +50,7 @@ pelican object copy -f <federation url> </federation/path/to/file> </local/path/
 You can try this yourself by getting the public file that was mentioned earlier from the OSDF. Using the `object copy` sub command, and indicating to pelican that you're pulling from the OSDF by passing the federation URL with the `-f` flag, run:
 
 ```console
-pelican object copy -f https://osg-htc.org /osgconnect/public/osg/testfile.txt downloaded-testfile.txt
+pelican object copy -f https://osg-htc.org /ospool/uc-shared/public/OSG-Staff/validation/test.txt downloaded-testfile.txt
 ```
 
 This command will download the object `/osg/testfile.txt` from the OSDF's `/osgconnect/public` namespace and save it in your local directory with the name `downloaded-testfile.txt`.
@@ -123,7 +123,7 @@ The Pelican binary can change its behavior depending on what it is named. This f
 When the name of the Pelican binary begins with `osdf`, Pelican will assume that all objects are coming from the OSDF which allows it to make several assumptions. The most immediate effect for users is that the `-f` flag no longer needs to be populated. The command to download a public file from above can then be simplified to:
 
 ```console
-./osdf object copy /osgconnect/public/osg/testfile.txt downloaded-testfile.txt
+./osdf object copy /ospool/uc-shared/public/OSG-Staff/validation/test.txt downloaded-testfile.txt
 ```
 
 ### Naming The Binary `stashcp` Or `stash_plugin`

@@ -139,7 +139,7 @@ func doRetrieveRequest(t *testing.T, ctx context.Context, dur time.Duration) (*h
 
 	req.Header.Set("X-Pelican-Timeout", dur.String())
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "pelican-origin/"+config.PelicanVersion)
+	req.Header.Set("User-Agent", "pelican-origin/"+config.GetVersion())
 
 	req.Header.Set("Authorization", "Bearer "+token)
 

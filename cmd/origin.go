@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2023, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -133,6 +133,7 @@ func init() {
 	originServeCmd.Flags().String("service-url", "", "Specify the S3 service-url. Only used when an origin is launched in S3 mode.")
 	originServeCmd.Flags().String("bucket-access-keyfile", "", "Specify a filepath to use for configuring the bucket's access key.")
 	originServeCmd.Flags().String("bucket-secret-keyfile", "", "Specify a filepath to use for configuring the bucket's access key.")
+	originServeCmd.Flags().String("url-style", "", "Specify the S3 url-style. Only used when an origin is launched in S3 mode, and can be either 'path' (default) or 'virtual.")
 	if err := viper.BindPFlag("Origin.S3ServiceName", originServeCmd.Flags().Lookup("service-name")); err != nil {
 		panic(err)
 	}
@@ -151,6 +152,12 @@ func init() {
 	if err := viper.BindPFlag("Origin.S3SecretKeyfile", originServeCmd.Flags().Lookup("bucket-secret-keyfile")); err != nil {
 		panic(err)
 	}
+	if err := viper.BindPFlag("Origin.S3UrlStyle", originServeCmd.Flags().Lookup("url-style")); err != nil {
+		panic(err)
+	}
+	if viper.IsSet("Origin.S3UrlStyle") && viper.GetString("Origin.S3UrlStyle") != "path" && viper.GetString("Origin.S3UrlStyle") != "virtual" {
+		panic("The --url-style flag must be either 'path' or 'virtual'")
+	}
 
 	// Would be nice to make these mutually exclusive to mode=posix instead of to --volume, but cobra
 	// doesn't seem to have something that can make the value of a flag exclusive to other flags
@@ -161,6 +168,7 @@ func init() {
 	originServeCmd.MarkFlagsMutuallyExclusive("volume", "service-url")
 	originServeCmd.MarkFlagsMutuallyExclusive("volume", "bucket-access-keyfile")
 	originServeCmd.MarkFlagsMutuallyExclusive("volume", "bucket-secret-keyfile")
+	originServeCmd.MarkFlagsMutuallyExclusive("volume", "url-style")
 	// We don't require the bucket access and secret keyfiles as they're not needed for unauthenticated buckets
 	originServeCmd.MarkFlagsRequiredTogether("service-name", "region", "service-url")
 	originServeCmd.MarkFlagsRequiredTogether("bucket-access-keyfile", "bucket-secret-keyfile")

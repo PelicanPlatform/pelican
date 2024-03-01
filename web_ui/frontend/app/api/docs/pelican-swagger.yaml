@@ -299,6 +299,41 @@ definitions:
         type: string
         description: The URL to get the object
         example: "https://example-origin.com:8443/foo/bar/test.txt"
+  DirectorServerResponse:
+    type: object
+    properties:
+      name:
+        type: string
+        example: "Test Origin"
+      auth_url:
+        type: string
+        description: The URL of the issuer on the server to check token validity
+        example: "https://example-origin.com:8443"
+      url:
+        type: string
+        description: The URL of XrootD service on the server to access objects
+        example: "https://example-origin.com:8443"
+      web_url:
+        type: string
+        description: The URL of the web engine running on the server to visit the web interface and send API requests
+        example: "https://example-origin.com:8444"
+      type:
+        type: string
+        description: Type of the server. Origin|Cache
+        example: Origin
+      latitute:
+        type: number
+        description: The latitute of the server based on its IP address
+        default: 0
+      longitude:
+        type: number
+        description: The longitude of the server based on its IP address
+        default: 0
+      status:
+        type: string
+        description: The status of director file transfer test against the server. Can be Initializing|Unknown|OK|Error
+        default: Unknown
+
 tags:
   - name: auth
     description: Authentication APIs for all servers
@@ -1129,6 +1164,29 @@ paths:
           schema:
             type: object
             $ref: "#/definitions/ErrorModel"
+  /director_ui/servers:
+    get:
+      tags:
+        - "director_ui"
+      summary: Get a list of storage servers advertised to the director
+      produces:
+        - application/json
+      parameters:
+        - in: query
+          name: server_type
+          type: string
+          description: The server type to filter the list. Can be origin|cache
+      responses:
+        "200":
+          description: "OK"
+          schema:
+            type: array
+            items:
+              type: object
+              $ref: "#/definitions/DirectorServerResponse"
+              minimum: 0
+        "400":
+          description: "Bad request, query parameter is invalid"
   /director_ui/servers/origins/stat:
     get:
       tags:

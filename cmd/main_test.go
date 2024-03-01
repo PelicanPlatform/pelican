@@ -1,3 +1,21 @@
+/***************************************************************
+ *
+ * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you
+ * may not use this file except in compliance with the License.  You may
+ * obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ ***************************************************************/
+
 package main
 
 import (
@@ -12,13 +30,14 @@ import (
 
 	"testing"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestHandleCLIVersionFlag(t *testing.T) {
 	// Save the current version to reset this variable
-	var currentVersion = version
-	version = "0.0.1"
+	var currentVersion = config.GetVersion()
+	config.SetVersion("0.0.1")
 	date = "2023-10-06T15:26:50Z"
 	commit = "f0f94a3edf6641c2472345819a0d5453fc9e68d1"
 	builtBy = "goreleaser"
@@ -29,7 +48,7 @@ func TestHandleCLIVersionFlag(t *testing.T) {
 
 	mockVersionOutput := fmt.Sprintf(
 		"Version: %s\nBuild Date: %s\nBuild Commit: %s\nBuilt By: %s",
-		version, date, commit, builtBy,
+		config.GetVersion(), date, commit, builtBy,
 	)
 
 	testCases := []struct {
@@ -106,7 +125,7 @@ func TestHandleCLIVersionFlag(t *testing.T) {
 	os.Args = oldArgs
 
 	// Set the version back to what it was
-	version = currentVersion
+	config.SetVersion(currentVersion)
 }
 
 func TestHandleCLIExecutableAlias(t *testing.T) {
