@@ -14,6 +14,36 @@ permissions:
   contents: write
 
 jobs:
+  build-base-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache base image
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.base-buildx-cache
+          key: base-buildx-${{ github.sha }}-${{ github.run_id }}
+          # allow cache hits from previous runs of the current branch,
+          # parent branch, then upstream branches, in that order
+          restore-keys: |
+            base-buildx-
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          buildkitd-flags: --debug
+
+      - name: Build and push Docker images
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./images/Dockerfile
+          target: final-stage
+          build-args: |
+            IS_PR_BUILD=${{ github.event_name == 'pull_request' }}
+          cache-to: type=local,dest=/tmp/.base-buildx-cache,mode=max
+
   make-date-tag:
     runs-on: ubuntu-latest
     outputs:
@@ -23,11 +53,14 @@ jobs:
         id: mkdatetag
         run: echo "dtag=$(date +%Y%m%d-%H%M)" >> $GITHUB_OUTPUT
 
-  build:
-    runs-on: ubuntu-latest
-    needs: [make-date-tag]
+  build-server-images:
+    needs: [build-base-image, make-date-tag]
     strategy:
       fail-fast: False
+      matrix:
+        image: [cache, origin, director, registry, osdf-cache, osdf-origin, osdf-director, osdf-registry]
+    runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -73,6 +106,12 @@ jobs:
           IFS=,
           echo "::set-output name=taglist::${tag_list[*]}"
 
+      - name: Load cached base image
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.base-buildx-cache
+          key: base-buildx-${{ github.sha }}-${{ github.run_id }}
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
         with:
@@ -93,7 +132,8 @@ jobs:
           file: ./images/Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
           tags: "${{ steps.generate-tag-list.outputs.taglist }}"
+          target: ${{ matrix.image }}
           build-args: |
             IS_PR_BUILD=${{ github.event_name == 'pull_request' }}
-          cache-from: type=registry,ref=hub.opensciencegrid.org/pelican_platform/pelican:buildcache
-          cache-to: type=registry,ref=hub.opensciencegrid.org/pelican_platform/pelican:buildcache,mode=max,image-manifest=true,oci-mediatypes=true,ignore-error=true
+          cache-from: type=registry,ref=hub.opensciencegrid.org/pelican_platform/${ matrix.image }:buildcache
+          cache-to: type=registry,ref=hub.opensciencegrid.org/pelican_platform/${ matrix.image }:buildcache,mode=max,image-manifest=true,oci-mediatypes=true,ignore-error=true
