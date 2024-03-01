@@ -364,6 +364,76 @@ func GetAllPrefixes() []string {
 	return prefixes
 }
 
+// This function is for discovering federations as specified by a url during a pelican:// transfer.
+// this does not populate global fields and is more temporary per url
+func DiscoverUrlFederation(federationDiscoveryUrl string) (metadata FederationDiscovery, err error) {
+	log.Debugln("Performing federation service discovery for specified url against endpoint", federationDiscoveryUrl)
+	federationUrl, err := url.Parse(federationDiscoveryUrl)
+	if err != nil {
+		return FederationDiscovery{}, errors.Wrapf(err, "Invalid federation value %s:", federationDiscoveryUrl)
+	}
+	federationUrl.Scheme = "https"
+	if len(federationUrl.Path) > 0 && len(federationUrl.Host) == 0 {
+		federationUrl.Host = federationUrl.Path
+		federationUrl.Path = ""
+	}
+
+	discoveryUrl, err := url.Parse(federationUrl.String())
+	if err != nil {
+		return FederationDiscovery{}, errors.Wrap(err, "unable to parse federation discovery URL")
+	}
+	discoveryUrl.Path, err = url.JoinPath(federationUrl.Path, ".well-known/pelican-configuration")
+	if err != nil {
+		return FederationDiscovery{}, errors.Wrap(err, "Unable to parse federation url because of invalid path")
+	}
+
+	httpClient := http.Client{
+		Transport: GetTransport(),
+		Timeout:   time.Second * 5,
+	}
+	req, err := http.NewRequest(http.MethodGet, discoveryUrl.String(), nil)
+	if err != nil {
+		return FederationDiscovery{}, errors.Wrapf(err, "Failure when doing federation metadata request creation for %s", discoveryUrl)
+	}
+	req.Header.Set("User-Agent", "pelican/"+version)
+
+	result, err := httpClient.Do(req)
+	if err != nil {
+		return FederationDiscovery{}, errors.Wrapf(err, "Failure when doing federation metadata lookup to %s", discoveryUrl)
+	}
+
+	if result.Body != nil {
+		defer result.Body.Close()
+	}
+
+	body, err := io.ReadAll(result.Body)
+	if err != nil {
+		return FederationDiscovery{}, errors.Wrapf(err, "Failure when doing federation metadata read to %s", discoveryUrl)
+	}
+
+	if result.StatusCode != http.StatusOK {
+		truncatedMessage := string(body)
+		if len(body) > 1000 {
+			truncatedMessage = string(body[:1000])
+			truncatedMessage += " [... remainder truncated ...]"
+		}
+		return FederationDiscovery{}, errors.Errorf("Federation metadata discovery failed with HTTP status %d.  Error message: %s", result.StatusCode, truncatedMessage)
+	}
+
+	metadata = FederationDiscovery{}
+	err = json.Unmarshal(body, &metadata)
+	if err != nil {
+		return FederationDiscovery{}, errors.Wrapf(err, "Failure when parsing federation metadata at %s", discoveryUrl)
+	}
+
+	log.Debugln("Federation service discovery resulted in director URL", metadata.DirectorEndpoint)
+	log.Debugln("Federation service discovery resulted in registry URL", metadata.NamespaceRegistrationEndpoint)
+	log.Debugln("Federation service discovery resulted in JWKS URL", metadata.JwksUri)
+	log.Debugln("Federation service discovery resulted in broker URL", metadata.BrokerEndpoint)
+
+	return metadata, nil
+}
+
 func DiscoverFederation() error {
 	federationStr := param.Federation_DiscoveryUrl.GetString()
 	externalUrlStr := param.Server_ExternalWebUrl.GetString()
@@ -396,93 +466,47 @@ func DiscoverFederation() error {
 	curRegistryURL := param.Federation_RegistryUrl.GetString()
 	curFederationJwkURL := param.Federation_JwkUrl.GetString()
 	curBrokerURL := param.Federation_BrokerUrl.GetString()
-	if len(curDirectorURL) != 0 && len(curRegistryURL) != 0 && len(curFederationJwkURL) != 0 {
+	if curDirectorURL != "" && curRegistryURL != "" && curFederationJwkURL != "" && curBrokerURL != "" {
 		return nil
 	}
 
-	log.Debugln("Performing federation service discovery against endpoint", federationStr)
 	federationUrl, err := url.Parse(federationStr)
 	if err != nil {
 		return errors.Wrapf(err, "Invalid federation value %s:", federationStr)
 	}
+
 	if federationUrl.Path != "" && federationUrl.Host != "" {
 		// If the host is nothing, then the url is fine, but if we have a host and a path then there is a problem
 		return errors.New("Invalid federation discovery url is set. No path allowed for federation discovery url. Provided url: " + federationStr)
 	}
+
 	federationUrl.Scheme = "https"
 	if len(federationUrl.Path) > 0 && len(federationUrl.Host) == 0 {
 		federationUrl.Host = federationUrl.Path
 		federationUrl.Path = ""
+		return errors.Wrap(err, "Error discovering the federation with given discovery url")
 	}
 
-	discoveryUrl, err := url.Parse(federationUrl.String())
+	metadata, err := DiscoverUrlFederation(federationStr)
 	if err != nil {
-		return errors.Wrap(err, "unable to parse federation discovery URL")
-	}
-	discoveryUrl.Path, err = url.JoinPath(federationUrl.Path, ".well-known/pelican-configuration")
-	if err != nil {
-		return errors.Wrap(err, "Unable to parse federation url because of invalid path")
+		return errors.Wrapf(err, "Invalid federation value %s:", federationStr)
 	}
 
-	httpClient := http.Client{
-		Transport: GetTransport(),
-		Timeout:   time.Second * 5,
-	}
-	req, err := http.NewRequest(http.MethodGet, discoveryUrl.String(), nil)
-	if err != nil {
-		return errors.Wrapf(err, "Failure when doing federation metadata request creation for %s", discoveryUrl)
-	}
-	req.Header.Set("User-Agent", "pelican/"+version)
-
-	result, err := httpClient.Do(req)
-	if err != nil {
-		var netErr net.Error
-		if errors.As(err, &netErr) && netErr.Timeout() {
-			return MetadataTimeoutErr.Wrap(err)
-		} else {
-			return NewMetadataError(err, "Error occured when querying for metadata")
-		}
-	}
-
-	if result.Body != nil {
-		defer result.Body.Close()
-	}
-
-	body, err := io.ReadAll(result.Body)
-	if err != nil {
-		return errors.Wrapf(err, "Failure when doing federation metadata read to %s", discoveryUrl)
-	}
-
-	if result.StatusCode != http.StatusOK {
-		truncatedMessage := string(body)
-		if len(body) > 1000 {
-			truncatedMessage = string(body[:1000])
-			truncatedMessage += " [... remainder truncated ...]"
-		}
-		return errors.Errorf("Federation metadata discovery failed with HTTP status %d.  Error message: %s", result.StatusCode, truncatedMessage)
-	}
-
-	metadata := FederationDiscovery{}
-	err = json.Unmarshal(body, &metadata)
-	if err != nil {
-		return errors.Wrapf(err, "Failure when parsing federation metadata at %s", discoveryUrl)
-	}
+	// Set our globals
 	if curDirectorURL == "" {
-		log.Debugln("Federation service discovery resulted in director URL", metadata.DirectorEndpoint)
+		log.Debugln("Setting global director url to", metadata.DirectorEndpoint)
 		viper.Set("Federation.DirectorUrl", metadata.DirectorEndpoint)
 	}
 	if curRegistryURL == "" {
-		log.Debugln("Federation service discovery resulted in registry URL",
-			metadata.NamespaceRegistrationEndpoint)
+		log.Debugln("Setting global registry url to", metadata.NamespaceRegistrationEndpoint)
 		viper.Set("Federation.RegistryUrl", metadata.NamespaceRegistrationEndpoint)
 	}
 	if curFederationJwkURL == "" {
-		log.Debugln("Federation service discovery resulted in JWKS URL",
-			metadata.JwksUri)
+		log.Debugln("Setting global jwks url to", metadata.JwksUri)
 		viper.Set("Federation.JwkUrl", metadata.JwksUri)
 	}
 	if curBrokerURL == "" && metadata.BrokerEndpoint != "" {
-		log.Debugln("Federation service discovery resulted in broker URL", metadata.BrokerEndpoint)
+		log.Debugln("Setting global broker url to", metadata.BrokerEndpoint)
 		viper.Set("Federation.BrokerUrl", metadata.BrokerEndpoint)
 	}
 

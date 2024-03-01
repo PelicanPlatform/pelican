@@ -28,6 +28,7 @@ chmod 777 get_put_tmp/origin
 
 # Setup env variables needed
 export PELICAN_FEDERATION_DIRECTORURL="https://$HOSTNAME:8444"
+export PELICAN_DIRECTOR_DEFAULTRESPONSE="origins"
 export PELICAN_FEDERATION_REGISTRYURL="https://$HOSTNAME:8444"
 export PELICAN_TLSSKIPVERIFY=true
 export PELICAN_ORIGIN_ENABLEDIRECTREADS=true
@@ -123,7 +124,7 @@ do
 done
 
 # Run pelican object put
-./pelican object put ./get_put_tmp/input.txt pelican:///test/input.txt -d -t get_put_tmp/test-token.jwt -l get_put_tmp/putOutput.txt
+./pelican object put input.txt pelican://$HOSTNAME:8444/test/input.txt -d -t token -l putOutput.txt
 
 # Check output of command
 if grep -q "Dumping response: HTTP/1.1 200 OK" get_put_tmp/putOutput.txt; then
@@ -134,7 +135,7 @@ else
     exit 1
 fi
 
-./pelican object get pelican:///test/input.txt get_put_tmp/output.txt -d -t get_put_tmp/test-token.jwt -l get_put_tmp/getOutput.txt
+./pelican object get pelican://$HOSTNAME:8444/test/input.txt output.txt -d -t token -l getOutput.txt
 
 # Check output of command
 if grep -q "HTTP Transfer was successful" get_put_tmp/getOutput.txt; then
