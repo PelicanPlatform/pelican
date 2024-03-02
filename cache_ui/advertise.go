@@ -19,6 +19,7 @@
 package cache_ui
 
 import (
+	"context"
 	"encoding/json"
 	"net/url"
 	"strings"
@@ -76,14 +77,14 @@ func (server *CacheServer) GetNamespaceAdsFromDirector() error {
 	// Attempt to get data from the 2.0 endpoint, if that returns a 404 error, then attempt to get data
 	// from the 1.0 endpoint and convert from V1 to V2
 
-	respData, err := utils.MakeRequest(directorNSListEndpointURL, "GET", nil, nil)
+	respData, err := utils.MakeRequest(context.Background(), directorNSListEndpointURL, "GET", nil, nil)
 	if err != nil {
 		if strings.Contains(err.Error(), "404") {
 			directorNSListEndpointURL, err = url.JoinPath(directorEndpoint, "api", "v1.0", "director", "listNamespaces")
 			if err != nil {
 				return err
 			}
-			respData, err = utils.MakeRequest(directorNSListEndpointURL, "GET", nil, nil)
+			respData, err = utils.MakeRequest(context.Background(), directorNSListEndpointURL, "GET", nil, nil)
 			var respNSV1 []common.NamespaceAdV1
 			if err != nil {
 				return errors.Wrap(err, "Failed to make request")
