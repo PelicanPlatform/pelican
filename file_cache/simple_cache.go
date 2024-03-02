@@ -21,6 +21,7 @@ package simple_cache
 import (
 	"container/heap"
 	"context"
+	"encoding/json"
 	"io"
 	"net/url"
 	"os"
@@ -36,7 +37,10 @@ import (
 	"github.com/alecthomas/units"
 	"github.com/google/uuid"
 	"github.com/pelicanplatform/pelican/client"
+	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/token_scopes"
+	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
@@ -54,6 +58,7 @@ type (
 		mutex       sync.RWMutex
 		downloads   map[string]*activeDownload
 		directorURL *url.URL
+		ac          *authConfig
 
 		// Cache static configuration
 		highWater uint64
@@ -126,6 +131,10 @@ type (
 		size    int64
 		results chan *downloadStatus
 	}
+)
+
+var (
+	authorizationDenied error = errors.New("authorization denied")
 )
 
 const (
@@ -238,6 +247,7 @@ func NewSimpleCache(ctx context.Context, egrp *errgroup.Group) (sc *SimpleCache,
 		lowWater:  (cacheSize / 100) * uint64(lowWaterPercentage),
 		cacheSize: cacheSize,
 		basePath:  cacheDir,
+		ac:        newAuthConfig(ctx, egrp),
 	}
 
 	sc.tc, err = sc.te.NewClient(client.WithAcquireToken(false), client.WithCallback(sc.callback))
@@ -248,8 +258,12 @@ func NewSimpleCache(ctx context.Context, egrp *errgroup.Group) (sc *SimpleCache,
 		}
 		return
 	}
+	if err = sc.updateConfig(); err != nil {
+		log.Warningln("First attempt to update cache's authorization failed:", err)
+	}
 
 	egrp.Go(sc.runMux)
+	egrp.Go(sc.periodicUpdateConfig)
 
 	return
 }
@@ -324,10 +338,10 @@ func (sc *SimpleCache) runMux() error {
 
 		if chosen < lenResults {
 			// Sent a result to the waiter
-			slices.Delete(tmpResults, chosen, chosen+1)
+			tmpResults = slices.Delete(tmpResults, chosen, chosen+1)
 		} else if chosen < lenChan {
 			// Acknowledged a cancellation
-			slices.Delete(cancelRequest, chosen-lenResults, chosen-lenResults+1)
+			cancelRequest = slices.Delete(cancelRequest, chosen-lenResults, chosen-lenResults+1)
 		} else if chosen == lenChan {
 			// Cancellation; shut down
 			return nil
@@ -520,12 +534,65 @@ func (sc *SimpleCache) newCacheReader(path, token string) (reader *cacheReader, 
 
 // Get path from the cache
 func (sc *SimpleCache) Get(path, token string) (io.ReadCloser, error) {
+	if !sc.ac.authorize(token_scopes.Storage_Read, path, token) {
+		return nil, authorizationDenied
+	}
+
 	if fp := sc.getFromDisk(path); fp != nil {
 		return fp, nil
 	}
 
 	return sc.newCacheReader(path, token)
 
+}
+
+func (sc *SimpleCache) updateConfig() error {
+	// Get the endpoint of the director
+	var respNS []common.NamespaceAdV2
+
+	directorEndpoint := param.Federation_DirectorUrl.GetString()
+	if directorEndpoint == "" {
+		return errors.New("No director specified; give the federation name (-f)")
+	}
+
+	directorEndpointURL, err := url.Parse(directorEndpoint)
+	if err != nil {
+		return errors.Wrap(err, "Unable to parse director url")
+	}
+
+	// Create the listNamespaces url
+	directorNSListEndpointURL, err := url.JoinPath(directorEndpointURL.String(), "api", "v2.0", "director", "listNamespaces")
+	if err != nil {
+		return errors.Wrap(err, "Unable to generate the director's listNamespaces endpoint")
+	}
+
+	respData, err := utils.MakeRequest(sc.ctx, directorNSListEndpointURL, "GET", nil, nil)
+	if err != nil {
+		return err
+	} else {
+		err = json.Unmarshal(respData, &respNS)
+		if err != nil {
+			return errors.Wrapf(err, "Failed to marshal response in to JSON: %v", err)
+		}
+	}
+
+	return sc.ac.updateConfig(respNS)
+}
+
+// Periodically update the cache configuration from the registry
+func (sc *SimpleCache) periodicUpdateConfig() error {
+	ticker := time.NewTicker(time.Minute)
+	for {
+		select {
+		case <-sc.ctx.Done():
+			return nil
+		case <-ticker.C:
+			err := sc.updateConfig()
+			if err != nil {
+				log.Warningln("Failed to update the file cache config:", err)
+			}
+		}
+	}
 }
 
 // Read bytes from a file in the cache

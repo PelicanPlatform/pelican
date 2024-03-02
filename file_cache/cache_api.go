@@ -20,6 +20,7 @@ package simple_cache
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -59,12 +60,24 @@ func LaunchListener(ctx context.Context, egrp *errgroup.Group) error {
 			}
 		}
 
-		bearerToken := r.Header.Get("Authorization")
-		bearerToken = strings.TrimPrefix(bearerToken, "Bearer ")
+		authzHeader := r.Header.Get("Authorization")
+		bearerToken := ""
+		if strings.HasPrefix(bearerToken, "Bearer ") {
+			bearerToken = authzHeader[7:] // len("Bearer ") == 7
+		}
 		reader, err := sc.Get(r.URL.Path, bearerToken)
-		if err != nil {
+		if errors.Is(err, authorizationDenied) {
+			w.WriteHeader(http.StatusForbidden)
+			if _, err = w.Write([]byte("Authorization Denied")); err != nil {
+				log.Errorln("Failed to write authorization denied to client")
+			}
+			return
+		} else if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
-			log.Errorln("Failed to get file from cache")
+			if _, err = w.Write([]byte("Unexpected internal error")); err != nil {
+				log.Errorln("Failed to write internal error message to client")
+			}
+			log.Errorln("Failed to get file from cache:", err)
 			return
 		}
 		w.WriteHeader(http.StatusOK)

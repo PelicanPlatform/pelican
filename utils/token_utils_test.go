@@ -274,7 +274,8 @@ func TestLookupIssuerJwksUrl(t *testing.T) {
 				return
 			}
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(*resp))
+			_, err := w.Write([]byte(*resp))
+			require.NoError(t, err)
 		}
 	}))
 

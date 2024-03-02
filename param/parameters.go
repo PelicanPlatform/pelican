@@ -206,7 +206,7 @@ var (
 	Director_MinStatResponse = IntParam{"Director.MinStatResponse"}
 	Director_StatConcurrencyLimit = IntParam{"Director.StatConcurrencyLimit"}
 	FileCache_HighWaterMarkPercentage = IntParam{"FileCache.HighWaterMarkPercentage"}
-	FileCache_LowWaterMarkPercentage = IntParam{"FileCcache.LowWaterMarkPercentage"}
+	FileCache_LowWaterMarkPercentage = IntParam{"FileCache.LowWaterMarkPercentage"}
 	MinimumDownloadSpeed = IntParam{"MinimumDownloadSpeed"}
 	Monitoring_PortHigher = IntParam{"Monitoring.PortHigher"}
 	Monitoring_PortLower = IntParam{"Monitoring.PortLower"}

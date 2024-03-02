@@ -75,12 +75,10 @@ type Config struct {
 	FileCache struct {
 		DataLocation string
 		HighWaterMarkPercentage int
+		LowWaterMarkPercentage int
 		RunLocation string
 		Size string
 		Socket string
-	}
-	FileCcache struct {
-		LowWaterMarkPercentage int
 	}
 	GeoIPOverrides interface{}
 	Issuer struct {
@@ -309,12 +307,10 @@ type configWithType struct {
 	FileCache struct {
 		DataLocation struct { Type string; Value string }
 		HighWaterMarkPercentage struct { Type string; Value int }
+		LowWaterMarkPercentage struct { Type string; Value int }
 		RunLocation struct { Type string; Value string }
 		Size struct { Type string; Value string }
 		Socket struct { Type string; Value string }
-	}
-	FileCcache struct {
-		LowWaterMarkPercentage struct { Type string; Value int }
 	}
 	GeoIPOverrides struct { Type string; Value interface{} }
 	Issuer struct {
