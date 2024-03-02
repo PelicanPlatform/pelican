@@ -38,10 +38,10 @@ const (
 	Broker_Callback TokenScope = "broker.callback"
 
 	// Storage Scopes
-	Storage_Read TokenScope = "storage.read:"
-	Storage_Create TokenScope = "storage.create:"
-	Storage_Modify TokenScope = "storage.modify:"
-	Storage_Stage TokenScope = "storage.stage:"
+	Storage_Read TokenScope = "storage.read"
+	Storage_Create TokenScope = "storage.create"
+	Storage_Modify TokenScope = "storage.modify"
+	Storage_Stage TokenScope = "storage.stage"
 )
 
 func (s TokenScope) String() string {
@@ -55,5 +55,5 @@ func (s TokenScope) Path(path string) (TokenScope, error) {
 		return "", errors.New("cannot assign path to non-storage token scope")
 	}
 
-	return TokenScope(s.String() + path), nil
+	return TokenScope(s.String() + ":" + path), nil
 }

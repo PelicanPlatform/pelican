@@ -96,25 +96,25 @@ acceptedBy: [cache"]
 ############################
 #      Storage Scopes      #
 ############################
-name: "storage.read:"
+name: "storage.read"
 description: >-
   For granting object read permissions to the bearer of the token. This scope must also posses a path to be valid, eg `storage.read:/foo/bar`
 issuedBy: ["origin"]
 acceptedBy: ["origin", "cache"]
 ---
-name: "storage.create:"
+name: "storage.create"
 description: >-
   For granting object creation permissions to the bearer of token. This scope must also posses a path to be valid, eg `storage.create:/foo/bar`
 issuedBy: ["origin"]
 acceptedBy: ["origin", "cache"]
 ---
-name: "storage.modify:"
+name: "storage.modify"
 description: >-
   For granting object modification permissions to the bearer of the token. This scope must also posses a path to be valid, eg `storage.modify:/foo/bar`
 issuedBy: ["origin"]
 acceptedBy: ["origin", "cache"]
 ---
-name: "storage.stage:"
+name: "storage.stage"
 description: >-
   For granting object staging permissions to the bearer of the token. This scope must also posses a path to be valid, eg `storage.stage:/foo/bar`
 issuedBy: ["origin"]
