@@ -19,10 +19,15 @@
 package utils
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
+	"path"
 	"regexp"
 	"time"
 
@@ -47,6 +52,11 @@ type (
 		Subject      string            // Subject is 'sub' claim
 		Claims       map[string]string // Additional claims
 		scope        string            // scope is a string with space-delimited list of scopes. To enforce type check, use AddRawScope or AddScopes to add scopes to your token
+	}
+
+	openIdConfiguration struct {
+		Issuer  string `json:"issuer"`
+		JwksUri string `json:"jwks_uri"`
 	}
 )
 
@@ -262,4 +272,56 @@ func (tokenConfig *TokenConfig) CreateTokenWithKey(key jwk.Key) (string, error) 
 	}
 
 	return string(signed), nil
+}
+
+// Given an issuer URL, lookup the corresponding JWKS URL using OAuth2 metadata discovery
+func LookupIssuerJwksUrl(ctx context.Context, issuerUrlStr string) (jwksUrl *url.URL, err error) {
+	issuerUrl, err := url.Parse(issuerUrlStr)
+	if err != nil {
+		err = errors.Wrap(err, "failed to parse issuer as URL")
+		return
+	}
+	wellKnownUrl := *issuerUrl
+	wellKnownUrl.Path = path.Join(wellKnownUrl.Path, ".well-known/openid-configuration")
+
+	client := &http.Client{Transport: config.GetTransport()}
+
+	req, err := http.NewRequestWithContext(ctx, "GET", wellKnownUrl.String(), nil)
+	if err != nil {
+		err = errors.Wrap(err, "failed to generate new request to the remote issuer")
+		return
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		err = errors.Wrapf(err, "failed to get metadata from %s", issuerUrlStr)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode > 299 {
+		err = errors.Errorf("issuer %s returned error %s (HTTP %d) for its OpenID auto-discovery configuration", issuerUrlStr, resp.Status, resp.StatusCode)
+		return
+	}
+
+	respBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		err = errors.Wrapf(err, "failed to read HTTP response when looking up OpenID auto-discovery configuration for issuer %s", issuerUrlStr)
+		return
+	}
+
+	var conf openIdConfiguration
+	if err = json.Unmarshal(respBytes, &conf); err != nil {
+		err = errors.Wrapf(err, "failed to parse the OpenID auto-discovery configuration for issuer %s", issuerUrl)
+		return
+	}
+	if conf.JwksUri == "" {
+		err = errors.Errorf("issuer %s provided no JWKS URL in its OpenID auto-discovery configuration", issuerUrl)
+		return
+	}
+	jwksUrl, err = url.Parse(conf.JwksUri)
+	if err != nil {
+		err = errors.Wrapf(err, "issuer %s provided an invalid JWKS URL in its OpenID auto-discovery configuration", issuerUrl)
+		return
+	}
+	return
 }

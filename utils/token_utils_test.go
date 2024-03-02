@@ -21,6 +21,9 @@ package utils
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"testing"
 	"time"
@@ -260,4 +263,72 @@ func TestCreateToken(t *testing.T) {
 	_, err = tokenConfig.CreateToken()
 	assert.EqualError(t, err, "No issuer was found in the configuration file, "+
 		"and none was provided as a claim")
+}
+
+func TestLookupIssuerJwksUrl(t *testing.T) {
+	var resp *string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/issuer/.well-known/openid-configuration" {
+			if resp == nil || *resp == "" {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(*resp))
+		}
+	}))
+
+	issuerURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	issuerURL.Path = "/issuer"
+
+	tests := []struct {
+		resp   string
+		result string
+		errStr string
+	}{
+		{
+			resp:   `{"jwks_uri": "https://osdf.org"}`,
+			result: "https://osdf.org",
+			errStr: "",
+		},
+		{
+			resp:   "",
+			result: "",
+			errStr: fmt.Sprintf("issuer %s returned error 500 Internal Server Error (HTTP 500) for its OpenID auto-discovery configuration", issuerURL),
+		},
+		{
+			resp:   `{}`,
+			result: "",
+			errStr: fmt.Sprintf("issuer %s provided no JWKS URL in its OpenID auto-discovery configuration", issuerURL),
+		},
+		{
+			resp:   `{{`,
+			result: "",
+			errStr: fmt.Sprintf("failed to parse the OpenID auto-discovery configuration for issuer %s: invalid character '{' looking for beginning of object key string", issuerURL),
+		},
+		{
+			resp:   `{"jwks_uri": "http_blah://foo"}`,
+			result: "",
+			errStr: fmt.Sprintf("issuer %s provided an invalid JWKS URL in its OpenID auto-discovery configuration: parse \"http_blah://foo\": first path segment in URL cannot contain colon", issuerURL),
+		},
+	}
+
+	ctx := context.Background()
+	for _, tt := range tests {
+		resp = &tt.resp
+		result, err := LookupIssuerJwksUrl(ctx, issuerURL.String())
+		if tt.errStr == "" {
+			assert.NoError(t, err)
+		} else {
+			assert.Error(t, err)
+			if err != nil {
+				assert.Equal(t, tt.errStr, err.Error())
+			}
+		}
+		if tt.result != "" {
+			assert.NoError(t, err)
+			assert.Equal(t, tt.result, result.String())
+		}
+	}
 }
