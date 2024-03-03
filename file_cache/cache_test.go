@@ -106,7 +106,9 @@ func spinup(t *testing.T, ctx context.Context, egrp *errgroup.Group) {
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		cancel()
-		egrp.Wait()
+		if err = egrp.Wait(); err != nil && err != context.Canceled {
+			require.NoError(t, err)
+		}
 	})
 
 	err = os.WriteFile(filepath.Join(originDir, "hello_world.txt"), []byte("Hello, World!"), os.FileMode(0644))
