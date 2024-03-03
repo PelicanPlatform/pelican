@@ -291,10 +291,8 @@ func getCachesFromNamespace(namespace namespaces.Namespace, useDirector bool, pr
 			return
 		}
 		log.Debugf("Using the cache (%s) from the config override\n", preferredCaches[0])
-		cache := namespaces.Cache{
-			Endpoint:     preferredCaches[0].String(),
-			AuthEndpoint: preferredCaches[0].String(),
-			Resource:     preferredCaches[0].String(),
+		cache := namespaces.DirectorCache{
+			EndpointUrl: preferredCaches[0].String(),
 		}
 		caches = []CacheInterface{cache}
 		return

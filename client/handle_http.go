@@ -113,6 +113,9 @@ type (
 		// Proxy specifies if a proxy should be used
 		Proxy bool
 
+		// If the Url scheme is unix, this is the path to connect to
+		UnixSocket string
+
 		// Specifies the pack option in the transfer URL
 		PackOption string
 	}
@@ -748,6 +751,7 @@ func (tc *TransferClient) NewTransferJob(remoteUrl *url.URL, localPath string, u
 		tokenLocation: tc.tokenLocation,
 		upload:        upload,
 		uuid:          id,
+		token:         tc.token,
 	}
 	tj.ctx, tj.cancel = context.WithCancel(tc.ctx)
 
@@ -927,7 +931,10 @@ func newTransferDetails(cache namespaces.Cache, opts transferDetailsOptions) []t
 		log.Errorln("Failed to parse cache:", cache, "error:", err)
 		return nil
 	}
-	if cacheURL.Host == "" {
+	if cacheURL.Scheme == "unix" && cacheURL.Host != "" {
+		cacheURL.Path = path.Clean("/" + cacheURL.Host + "/" + cacheURL.Path)
+		cacheURL.Host = ""
+	} else if cacheURL.Scheme != "unix" && cacheURL.Host == "" {
 		// Assume the cache is just a hostname
 		cacheURL.Host = cacheEndpoint
 		cacheURL.Path = ""
@@ -936,26 +943,32 @@ func newTransferDetails(cache namespaces.Cache, opts transferDetailsOptions) []t
 	}
 	log.Debugf("Parsed Cache: %s", cacheURL.String())
 	if opts.NeedsToken {
-		cacheURL.Scheme = "https"
-		if !hasPort(cacheURL.Host) {
-			// Add port 8444 and 8443
-			urlCopy := *cacheURL
-			urlCopy.Host += ":8444"
-			details = append(details, transferAttemptDetails{
-				Url:        &urlCopy,
-				Proxy:      false,
-				PackOption: opts.PackOption,
-			})
-			// Strip the port off and add 8443
-			cacheURL.Host = cacheURL.Host + ":8443"
+		if cacheURL.Scheme != "unix" {
+			cacheURL.Scheme = "https"
+			if !hasPort(cacheURL.Host) {
+				// Add port 8444 and 8443
+				urlCopy := *cacheURL
+				urlCopy.Host += ":8444"
+				details = append(details, transferAttemptDetails{
+					Url:        &urlCopy,
+					Proxy:      false,
+					PackOption: opts.PackOption,
+				})
+				// Strip the port off and add 8443
+				cacheURL.Host = cacheURL.Host + ":8443"
+			}
 		}
-		// Whether port is specified or not, add a transfer without proxy
-		details = append(details, transferAttemptDetails{
+		det := transferAttemptDetails{
 			Url:        cacheURL,
 			Proxy:      false,
 			PackOption: opts.PackOption,
-		})
-	} else {
+		}
+		if cacheURL.Scheme == "unix" {
+			det.UnixSocket = cacheURL.Path
+		}
+		// Whether port is specified or not, add a transfer without proxy
+		details = append(details, det)
+	} else if cacheURL.Scheme == "" || cacheURL.Scheme == "http" {
 		cacheURL.Scheme = "http"
 		if !hasPort(cacheURL.Host) {
 			cacheURL.Host += ":8000"
@@ -973,6 +986,16 @@ func newTransferDetails(cache namespaces.Cache, opts transferDetailsOptions) []t
 				PackOption: opts.PackOption,
 			})
 		}
+	} else {
+		det := transferAttemptDetails{
+			Url:        cacheURL,
+			Proxy:      false,
+			PackOption: opts.PackOption,
+		}
+		if cacheURL.Scheme == "unix" {
+			det.UnixSocket = cacheURL.Path
+		}
+		details = append(details, det)
 	}
 
 	return details
@@ -980,9 +1003,9 @@ func newTransferDetails(cache namespaces.Cache, opts transferDetailsOptions) []t
 
 type CacheInterface interface{}
 
-func GenerateTransferDetailsUsingCache(cache CacheInterface, opts transferDetailsOptions) []transferAttemptDetails {
+func generateTransferDetailsUsingCache(cache CacheInterface, opts transferDetailsOptions) []transferAttemptDetails {
 	if directorCache, ok := cache.(namespaces.DirectorCache); ok {
-		return NewTransferDetailsUsingDirector(directorCache, opts)
+		return newTransferDetailsUsingDirector(directorCache, opts)
 	} else if cache, ok := cache.(namespaces.Cache); ok {
 		return newTransferDetails(cache, opts)
 	}
@@ -1042,7 +1065,7 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 				NeedsToken: job.job.namespace.ReadHTTPS || job.job.namespace.UseTokenOnRead,
 				PackOption: packOption,
 			}
-			transfers = append(transfers, GenerateTransferDetailsUsingCache(cache, td)...)
+			transfers = append(transfers, generateTransferDetailsUsingCache(cache, td)...)
 		}
 
 		if len(transfers) > 0 {
@@ -1271,13 +1294,16 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	if !transfer.Proxy {
 		transport.Proxy = nil
 	}
+	transferUrl := *transfer.Url
 	if transfer.Url.Scheme == "unix" {
 		transport.Proxy = nil // Proxies make no sense when reading via a Unix socket
 		transport = transport.Clone()
 		transport.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
 			dialer := net.Dialer{}
-			return dialer.DialContext(ctx, "unix", transfer.Url.Path)
+			return dialer.DialContext(ctx, "unix", transfer.UnixSocket)
 		}
+		transferUrl.Scheme = "http"
+		transferUrl.Host = "localhost"
 	}
 	httpClient, ok := client.HTTPClient.(*http.Client)
 	if !ok {
@@ -1287,7 +1313,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	log.Debugln("Transfer URL String:", transfer.Url.String())
+	log.Debugln("Transfer URL String:", transferUrl.String())
 	var req *grab.Request
 	var unpacker *autoUnpacker
 	if transfer.PackOption != "" {
@@ -1302,10 +1328,10 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 			}
 		}
 		unpacker = newAutoUnpacker(dest, behavior)
-		if req, err = grab.NewRequestToWriter(unpacker, transfer.Url.String()); err != nil {
+		if req, err = grab.NewRequestToWriter(unpacker, transferUrl.String()); err != nil {
 			return 0, 0, "", errors.Wrap(err, "Failed to create new download request")
 		}
-	} else if req, err = grab.NewRequest(dest, transfer.Url.String()); err != nil {
+	} else if req, err = grab.NewRequest(dest, transferUrl.String()); err != nil {
 		return 0, 0, "", errors.Wrap(err, "Failed to create new download request")
 	}
 

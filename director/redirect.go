@@ -261,9 +261,8 @@ func redirectToCache(ginCtx *gin.Context) {
 	if len(namespaceAd.Generation) != 0 {
 		tokenGen := ""
 		first := true
-		hdrVals := []string{namespaceAd.Generation[0].CredentialIssuer.String(), fmt.Sprint(namespaceAd.Generation[0].MaxScopeDepth), string(namespaceAd.Generation[0].Strategy),
-			string(namespaceAd.Generation[0].Strategy)}
-		for idx, hdrKey := range []string{"issuer", "max-scope-depth", "strategy", "vault-server"} {
+		hdrVals := []string{namespaceAd.Generation[0].CredentialIssuer.String(), fmt.Sprint(namespaceAd.Generation[0].MaxScopeDepth), string(namespaceAd.Generation[0].Strategy)}
+		for idx, hdrKey := range []string{"issuer", "max-scope-depth", "strategy"} {
 			hdrVal := hdrVals[idx]
 			if hdrVal == "" {
 				continue

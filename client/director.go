@@ -235,7 +235,7 @@ func GetCachesFromDirectorResponse(resp *http.Response, needsToken bool) (caches
 }
 
 // NewTransferDetails creates the TransferDetails struct with the given cache
-func NewTransferDetailsUsingDirector(cache namespaces.DirectorCache, opts transferDetailsOptions) []transferAttemptDetails {
+func newTransferDetailsUsingDirector(cache namespaces.DirectorCache, opts transferDetailsOptions) []transferAttemptDetails {
 	details := make([]transferAttemptDetails, 0)
 	cacheEndpoint := cache.EndpointUrl
 
@@ -247,7 +247,7 @@ func NewTransferDetailsUsingDirector(cache namespaces.DirectorCache, opts transf
 	}
 	if cacheURL.Scheme == "unix" && cacheURL.Host != "" {
 		cacheURL.Path = path.Clean("/" + path.Join(cacheURL.Host, cacheURL.Path))
-	} else if cacheURL.Host == "" {
+	} else if cacheURL.Scheme != "unix" && cacheURL.Host == "" {
 		// Assume the cache is just a hostname
 		cacheURL.Host = cacheEndpoint
 		cacheURL.Path = ""
@@ -272,12 +272,16 @@ func NewTransferDetailsUsingDirector(cache namespaces.DirectorCache, opts transf
 				cacheURL.Host = cacheURL.Host + ":8443"
 			}
 		}
-		// Whether port is specified or not, add a transfer without proxy
-		details = append(details, transferAttemptDetails{
+		det := transferAttemptDetails{
 			Url:        cacheURL,
 			Proxy:      false,
 			PackOption: opts.PackOption,
-		})
+		}
+		if cacheURL.Scheme == "unix" {
+			det.UnixSocket = cacheURL.Path
+		}
+		// Whether port is specified or not, add a transfer without proxy
+		details = append(details, det)
 	} else if cacheURL.Scheme == "" || cacheURL.Scheme == "http" {
 		// Assume a transfer not needing a token and not specifying a scheme is HTTP
 		// WARNING: This is legacy code; we should always specify a scheme
@@ -301,11 +305,15 @@ func NewTransferDetailsUsingDirector(cache namespaces.DirectorCache, opts transf
 	} else {
 		// A non-HTTP scheme is specified and a token is not needed; this wasn't possible
 		// in the legacy cases.  Simply use the provided config
-		details = append(details, transferAttemptDetails{
+		det := transferAttemptDetails{
 			Url:        cacheURL,
 			Proxy:      false,
 			PackOption: opts.PackOption,
-		})
+		}
+		if cacheURL.Scheme == "unix" {
+			det.UnixSocket = cacheURL.Path
+		}
+		details = append(details, det)
 	}
 
 	return details
