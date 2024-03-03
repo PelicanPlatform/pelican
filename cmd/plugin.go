@@ -456,7 +456,7 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 			hostname, _ := os.Hostname()
 			resultAd.Set("TransferLocalMachineName", hostname)
 			resultAd.Set("TransferProtocol", "stash")
-			transfer := jobMap[result.JobId.String()]
+			transfer := jobMap[result.ID()]
 			resultAd.Set("TransferUrl", transfer.url.String())
 			resultAd.Set("TransferFileName", transfer.localFile)
 			if upload {

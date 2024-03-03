@@ -83,7 +83,7 @@ type (
 	// Represents the results of a single object transfer,
 	// potentially across multiple attempts / retries.
 	TransferResults struct {
-		JobId            uuid.UUID // The job ID this result corresponds to
+		jobId            uuid.UUID // The job ID this result corresponds to
 		job              *TransferJob
 		Error            error
 		TransferredBytes int64
@@ -319,9 +319,13 @@ func hasPort(host string) bool {
 func newTransferResults(job *TransferJob) TransferResults {
 	return TransferResults{
 		job:      job,
-		JobId:    job.uuid,
+		jobId:    job.uuid,
 		Attempts: make([]TransferResult, 0),
 	}
+}
+
+func (tr TransferResults) ID() string {
+	return tr.jobId.String()
 }
 
 // Returns a new transfer engine object whose lifetime is tied
@@ -797,6 +801,19 @@ func (tc *TransferClient) NewTransferJob(remoteUrl *url.URL, localPath string, u
 			return nil, fmt.Errorf("failed to get token for transfer: %v", err)
 		}
 	}
+
+	log.Debugf("Created new transfer job, ID %s client %s, for URL %s", tj.uuid.String(), tc.id.String(), remoteUrl.String())
+	return
+}
+
+// Returns the status of the transfer job-to-file(s) lookup
+//
+// ok is true if the lookup has completed.
+func (tj *TransferJob) GetLookupStatus() (ok bool, err error) {
+	ok = tj.lookupDone.Load()
+	if ok {
+		err = tj.lookupErr
+	}
 	return
 }
 
@@ -1084,7 +1101,7 @@ func runTransferWorker(ctx context.Context, workChan <-chan *clientTransferFile,
 				results <- &clientTransferResults{
 					id: file.uuid,
 					results: TransferResults{
-						JobId: file.jobId,
+						jobId: file.jobId,
 						Error: file.file.ctx.Err(),
 					},
 				}
@@ -1094,7 +1111,7 @@ func runTransferWorker(ctx context.Context, workChan <-chan *clientTransferFile,
 				results <- &clientTransferResults{
 					id: file.uuid,
 					results: TransferResults{
-						JobId: file.jobId,
+						jobId: file.jobId,
 						Error: file.file.err,
 					},
 				}
@@ -1107,7 +1124,7 @@ func runTransferWorker(ctx context.Context, workChan <-chan *clientTransferFile,
 			} else {
 				transferResults, err = downloadObject(file.file)
 			}
-			transferResults.JobId = file.jobId
+			transferResults.jobId = file.jobId
 			if err != nil {
 				log.Errorf("Error when attempting to transfer object %s for client %s", file.file.remoteURL, file.uuid.String())
 				transferResults = newTransferResults(file.file.job)
