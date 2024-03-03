@@ -39,6 +39,12 @@ type (
 		Authorization TokenScope
 		Resource      string
 	}
+
+	Scope interface {
+		TokenScope | ResourceScope
+
+		String() string
+	}
 )
 
 func NewResourceScope(authz TokenScope, resource string) ResourceScope {
@@ -73,19 +79,14 @@ func (rc ResourceScope) Contains(other ResourceScope) bool {
 
 // Get a string representation of a list of scopes, which can then be passed
 // to the Claim builder of JWT constructor
-func GetScopeString(scopes []TokenScope) (scopeString string) {
-	scopeString = ""
+func GetScopeString[Scopes ~[]Sc, Sc Scope](scopes Scopes) (scopeString string) {
 	if len(scopes) == 0 {
 		return
 	}
-	if len(scopes) == 1 {
-		scopeString = string(scopes[0])
-		return
+	scopeString = scopes[0].String()
+	for _, scope := range scopes[1:] {
+		scopeString += " " + scope.String()
 	}
-	for _, scope := range scopes {
-		scopeString += scope.String() + " "
-	}
-	scopeString = strings.TrimRight(scopeString, " ")
 	return
 }
 

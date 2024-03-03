@@ -240,7 +240,7 @@ func TestListNamespaces(t *testing.T) {
 			req, _ := http.NewRequest("GET", requestURL, nil)
 			if tc.authUser {
 				tokenCfg := utils.TokenConfig{Issuer: "https://mock-server.com", Lifetime: time.Minute, Subject: "admin", TokenProfile: utils.None}
-				tokenCfg.AddScopes([]token_scopes.TokenScope{token_scopes.WebUi_Access})
+				tokenCfg.AddScopes(token_scopes.WebUi_Access)
 				token, err := tokenCfg.CreateToken()
 				require.NoError(t, err)
 				req.AddCookie(&http.Cookie{Name: "login", Value: token, Path: "/"})

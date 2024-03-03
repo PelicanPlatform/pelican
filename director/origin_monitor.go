@@ -63,7 +63,7 @@ func reportStatusToOrigin(ctx context.Context, originWebUrl string, status strin
 		Audience:     []string{originWebUrl},
 		Subject:      "director",
 	}
-	testTokenCfg.AddScopes([]token_scopes.TokenScope{token_scopes.Pelican_DirectorTestReport})
+	testTokenCfg.AddScopes(token_scopes.Pelican_DirectorTestReport)
 
 	tok, err := testTokenCfg.CreateToken()
 	if err != nil {

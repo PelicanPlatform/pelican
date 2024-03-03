@@ -136,7 +136,7 @@ func TestAddScopes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			config := &TokenConfig{scope: tt.initialScope}
-			config.AddScopes(tt.additionalScopes)
+			config.AddScopes(tt.additionalScopes...)
 			assert.Equal(t, tt.expectedScope, config.GetScope(), fmt.Sprintf("AddScopes() = %v, want %v", config.scope, tt.expectedScope))
 		})
 	}
@@ -258,11 +258,9 @@ func TestCreateToken(t *testing.T) {
 	_, err = tokenConfig.CreateToken()
 	assert.NoError(t, err)
 
-	// Test without configured issuer
-	tokenConfig = TokenConfig{TokenProfile: WLCG, Audience: []string{"foo"}, Subject: "bar", Lifetime: time.Minute * 10}
-	_, err = tokenConfig.CreateToken()
-	assert.EqualError(t, err, "No issuer was found in the configuration file, "+
-		"and none was provided as a claim")
+	// Note: we used to test what occurred when no issuer was set (assuming it should fail).  However, we switched to a new
+	// helper function in the `config` module which falls back to an auto-constructed IssuerUrl, meaning the
+	// test condition was no longer valid; the test was deleted.
 }
 
 func TestLookupIssuerJwksUrl(t *testing.T) {

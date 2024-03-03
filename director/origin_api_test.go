@@ -137,7 +137,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 		Audience:     []string{"https://director-url.org"},
 		Subject:      "origin",
 	}
-	advTokenCfg.AddScopes([]token_scopes.TokenScope{token_scopes.Pelican_Advertise})
+	advTokenCfg.AddScopes(token_scopes.Pelican_Advertise)
 
 	// CreateToken also handles validation for us
 	tok, err := advTokenCfg.CreateToken()

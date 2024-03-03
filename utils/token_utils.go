@@ -35,7 +35,6 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pkg/errors"
-	"github.com/spf13/viper"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/token_scopes"
@@ -64,6 +63,9 @@ const (
 	WLCG       TokenProfile = "wlcg"
 	Scitokens2 TokenProfile = "scitokens2"
 	None       TokenProfile = "none"
+
+	WLCGAny      string = "https://wlcg.cern.ch/jwt/v1/any"
+	ScitokensAny string = "ANY"
 )
 
 func (p TokenProfile) String() string {
@@ -150,16 +152,14 @@ func (config *TokenConfig) verifyCreateWLCG() error {
 	return nil
 }
 
-// AddScopes appends a list of token_scopes.TokenScope to the Scope field.
-func (config *TokenConfig) AddScopes(scopes []token_scopes.TokenScope) {
-	if config.scope == "" {
-		config.scope = token_scopes.GetScopeString(scopes)
-	} else {
-		scopeStr := token_scopes.GetScopeString(scopes)
-		if scopeStr != "" {
-			config.scope += " " + scopeStr
-		}
-	}
+// AddScopes appends multiple token_scopes.TokenScope to the Scope field.
+func (config *TokenConfig) AddScopes(scopes ...token_scopes.TokenScope) {
+	config.AddRawScope(token_scopes.GetScopeString(scopes))
+}
+
+// AddResourceScopes appends multiple token_scopes.TokenScope to the Scope field.
+func (config *TokenConfig) AddResourceScopes(scopes ...token_scopes.ResourceScope) {
+	config.AddRawScope(token_scopes.GetScopeString(scopes))
 }
 
 // AddRawScope appends a space-delimited, case-sensitive scope string to the Scope field.
@@ -170,10 +170,8 @@ func (config *TokenConfig) AddScopes(scopes []token_scopes.TokenScope) {
 func (config *TokenConfig) AddRawScope(scope string) {
 	if config.scope == "" {
 		config.scope = scope
-	} else {
-		if scope != "" {
-			config.scope += " " + scope
-		}
+	} else if scope != "" {
+		config.scope += " " + scope
 	}
 }
 
@@ -217,7 +215,10 @@ func (tokenConfig *TokenConfig) CreateTokenWithKey(key jwk.Key) (string, error) 
 		}
 		issuerUrl = url.String()
 	} else {
-		issuerUrlStr := viper.GetString("IssuerUrl")
+		issuerUrlStr, err := config.GetServerIssuerURL()
+		if err != nil {
+			return "", errors.Wrap(err, "unable to generate token issuer URL")
+		}
 		url, err := url.Parse(issuerUrlStr)
 		if err != nil {
 			return "", errors.Wrap(err, "Failed to parse the configured IssuerUrl")

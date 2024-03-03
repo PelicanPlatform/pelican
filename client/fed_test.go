@@ -58,18 +58,6 @@ func generateFileTestScitoken() (string, error) {
 		return "", errors.New("Failed to create token: Invalid iss, Server_ExternalWebUrl is empty")
 	}
 
-	scopes := []token_scopes.TokenScope{}
-	readScope, err := token_scopes.Storage_Read.Path("/")
-	if err != nil {
-		return "", errors.Wrap(err, "failed to create 'read' scope for file test token:")
-	}
-	scopes = append(scopes, readScope)
-	modScope, err := token_scopes.Storage_Modify.Path("/")
-	if err != nil {
-		return "", errors.Wrap(err, "failed to create 'modify' scope for file test token:")
-	}
-	scopes = append(scopes, modScope)
-
 	fTestTokenCfg := utils.TokenConfig{
 		TokenProfile: utils.WLCG,
 		Lifetime:     time.Minute,
@@ -78,7 +66,8 @@ func generateFileTestScitoken() (string, error) {
 		Version:      "1.0",
 		Subject:      "origin",
 	}
-	fTestTokenCfg.AddScopes(scopes)
+	fTestTokenCfg.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Storage_Read, "/"),
+		token_scopes.NewResourceScope(token_scopes.Storage_Modify, "/"))
 
 	// CreateToken also handles validation for us
 	tok, err := fTestTokenCfg.CreateToken()
@@ -369,7 +358,7 @@ func TestGetAndPutAuth(t *testing.T) {
 	modScope, err := token_scopes.Storage_Modify.Path("/")
 	assert.NoError(t, err)
 	scopes = append(scopes, modScope)
-	tokenConfig.AddScopes(scopes)
+	tokenConfig.AddScopes(scopes...)
 	token, err := tokenConfig.CreateToken()
 	assert.NoError(t, err)
 	tempToken, err := os.CreateTemp(t.TempDir(), "token")
@@ -532,14 +521,8 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 		Audience:     []string{audience},
 		Subject:      "origin",
 	}
-	scopes := []token_scopes.TokenScope{}
-	readScope, err := token_scopes.Storage_Read.Path("/")
-	assert.NoError(t, err)
-	scopes = append(scopes, readScope)
-	modScope, err := token_scopes.Storage_Modify.Path("/")
-	assert.NoError(t, err)
-	scopes = append(scopes, modScope)
-	tokenConfig.AddScopes(scopes)
+	tokenConfig.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Storage_Read, "/"),
+		token_scopes.NewResourceScope(token_scopes.Storage_Modify, "/"))
 	token, err := tokenConfig.CreateToken()
 	assert.NoError(t, err)
 	tempToken, err := os.CreateTemp(t.TempDir(), "token")

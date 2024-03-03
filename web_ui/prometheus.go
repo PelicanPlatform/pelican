@@ -159,7 +159,7 @@ func configDirectorPromScraper(ctx context.Context) (*config.ScrapeConfig, error
 		Version:      "1.0",
 		Subject:      "director",
 	}
-	promTokenCfg.AddScopes([]token_scopes.TokenScope{token_scopes.Pelican_DirectorServiceDiscovery})
+	promTokenCfg.AddScopes(token_scopes.Pelican_DirectorServiceDiscovery)
 
 	// CreateToken also handles validation for us
 	sdToken, err := promTokenCfg.CreateToken()
@@ -175,7 +175,7 @@ func configDirectorPromScraper(ctx context.Context) (*config.ScrapeConfig, error
 		Audience:     []string{"prometheus"},
 		Subject:      "director",
 	}
-	scrapeTokenCfg.AddScopes([]token_scopes.TokenScope{token_scopes.Monitoring_Scrape})
+	scrapeTokenCfg.AddScopes(token_scopes.Monitoring_Scrape)
 
 	scraperToken, err := scrapeTokenCfg.CreateToken()
 	if err != nil {

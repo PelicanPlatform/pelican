@@ -150,7 +150,7 @@ func advertiseInternal(ctx context.Context, server server_utils.XRootDServer) er
 		Audience:     []string{param.Federation_DirectorUrl.GetString()},
 		Subject:      "origin",
 	}
-	advTokenCfg.AddScopes([]token_scopes.TokenScope{token_scopes.Pelican_Advertise})
+	advTokenCfg.AddScopes(token_scopes.Pelican_Advertise)
 
 	// CreateToken also handles validation for us
 	tok, err := advTokenCfg.CreateToken()
