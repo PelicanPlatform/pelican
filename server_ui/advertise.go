@@ -47,17 +47,22 @@ type directorResponse struct {
 	ApprovalError bool   `json:"approval_error"`
 }
 
+func doAdvertise(ctx context.Context, servers []server_utils.XRootDServer) {
+	log.Debugf("About to advertise %d XRootD servers", len(servers))
+	err := Advertise(ctx, servers)
+	if err != nil {
+		log.Warningln("XRootD server advertise failed:", err)
+		metrics.SetComponentHealthStatus(metrics.OriginCache_Federation, metrics.StatusCritical, fmt.Sprintf("XRootD server advertise failed: %v", err))
+	} else {
+		metrics.SetComponentHealthStatus(metrics.OriginCache_Federation, metrics.StatusOK, "")
+	}
+}
+
 func LaunchPeriodicAdvertise(ctx context.Context, egrp *errgroup.Group, servers []server_utils.XRootDServer) error {
+	doAdvertise(ctx, servers)
+
 	ticker := time.NewTicker(1 * time.Minute)
 	egrp.Go(func() error {
-		log.Debugf("About to advertise %d XRootD servers", len(servers))
-		err := Advertise(ctx, servers)
-		if err != nil {
-			log.Warningln("XRootD server advertise failed:", err)
-			metrics.SetComponentHealthStatus(metrics.OriginCache_Federation, metrics.StatusCritical, fmt.Sprintf("XRootD server advertise failed: %v", err))
-		} else {
-			metrics.SetComponentHealthStatus(metrics.OriginCache_Federation, metrics.StatusOK, "")
-		}
 
 		for {
 			select {
@@ -73,6 +78,8 @@ func LaunchPeriodicAdvertise(ctx context.Context, egrp *errgroup.Group, servers 
 				log.Infoln("Periodic advertisement loop has been terminated")
 				return nil
 			}
+
+			doAdvertise(ctx, servers)
 		}
 	})
 

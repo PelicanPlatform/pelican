@@ -22,6 +22,7 @@ import (
 	"container/heap"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/url"
 	"os"
@@ -199,6 +200,15 @@ func (lru *lru) Pop() any {
 	return x
 }
 
+func (ds *downloadStatus) String() string {
+	errP := ds.err.Load()
+	if errP == nil {
+		return fmt.Sprintf("{size=%d,total=%d,done=%v}", ds.curSize.Load(), ds.size.Load(), ds.done.Load())
+	} else {
+		return fmt.Sprintf("{size=%d,total=%d,err=%s,done=%v}", ds.curSize.Load(), ds.size.Load(), *errP, ds.done.Load())
+	}
+}
+
 // Create a simple cache object
 //
 // Launches background goroutines associated with the cache
@@ -210,10 +220,10 @@ func NewSimpleCache(ctx context.Context, egrp *errgroup.Group) (sc *SimpleCache,
 		err = errors.New("FileCache.DataLocation is not set; cannot determine where to place file cache's data")
 		return
 	}
-	if err = os.MkdirAll(cacheDir, os.FileMode(0700)); err != nil {
+	if err = os.RemoveAll(cacheDir); err != nil {
 		return
 	}
-	if err = os.RemoveAll(cacheDir); err != nil {
+	if err = os.MkdirAll(cacheDir, os.FileMode(0700)); err != nil {
 		return
 	}
 
@@ -222,7 +232,7 @@ func NewSimpleCache(ctx context.Context, egrp *errgroup.Group) (sc *SimpleCache,
 	if sizeStr == "" || sizeStr == "0" {
 		var stat syscall.Statfs_t
 		if err = syscall.Statfs(cacheDir, &stat); err != nil {
-			err = errors.Wrap(err, "Unable to determine free space for cache directory")
+			err = errors.Wrapf(err, "unable to determine free space for cache directory %s", cacheDir)
 			return
 		}
 		cacheSize = stat.Bavail * uint64(stat.Bsize)
@@ -237,17 +247,25 @@ func NewSimpleCache(ctx context.Context, egrp *errgroup.Group) (sc *SimpleCache,
 	highWaterPercentage := param.FileCache_HighWaterMarkPercentage.GetInt()
 	lowWaterPercentage := param.FileCache_LowWaterMarkPercentage.GetInt()
 
+	directorUrl, err := url.Parse(param.Federation_DirectorUrl.GetString())
+	if err != nil {
+		return
+	}
+
 	sc = &SimpleCache{
-		ctx:       ctx,
-		egrp:      egrp,
-		te:        client.NewTransferEngine(ctx),
-		downloads: make(map[string]*activeDownload),
-		hitChan:   make(chan lruEntry, 64),
-		highWater: (cacheSize / 100) * uint64(highWaterPercentage),
-		lowWater:  (cacheSize / 100) * uint64(lowWaterPercentage),
-		cacheSize: cacheSize,
-		basePath:  cacheDir,
-		ac:        newAuthConfig(ctx, egrp),
+		ctx:         ctx,
+		egrp:        egrp,
+		te:          client.NewTransferEngine(ctx),
+		downloads:   make(map[string]*activeDownload),
+		hitChan:     make(chan lruEntry, 64),
+		highWater:   (cacheSize / 100) * uint64(highWaterPercentage),
+		lowWater:    (cacheSize / 100) * uint64(lowWaterPercentage),
+		cacheSize:   cacheSize,
+		basePath:    cacheDir,
+		ac:          newAuthConfig(ctx, egrp),
+		sizeReq:     make(chan availSizeReq),
+		directorURL: directorUrl,
+		lruLookup:   make(map[string]*lruEntry),
 	}
 
 	sc.tc, err = sc.te.NewClient(client.WithAcquireToken(false), client.WithCallback(sc.callback))
@@ -265,6 +283,7 @@ func NewSimpleCache(ctx context.Context, egrp *errgroup.Group) (sc *SimpleCache,
 	egrp.Go(sc.runMux)
 	egrp.Go(sc.periodicUpdateConfig)
 
+	log.Debugln("Successfully created a new local cache object")
 	return
 }
 
@@ -275,7 +294,7 @@ func NewSimpleCache(ctx context.Context, egrp *errgroup.Group) (sc *SimpleCache,
 func (sc *SimpleCache) callback(path string, downloaded int64, size int64, completed bool) {
 	ds := func() (ds *downloadStatus) {
 		sc.mutex.RLock()
-		defer sc.mutex.Unlock()
+		defer sc.mutex.RUnlock()
 		dl := sc.downloads[path]
 		if dl != nil {
 			ds = dl.status
@@ -301,6 +320,7 @@ func (sc *SimpleCache) runMux() error {
 	tmpResults := make([]result, 0)
 	cancelRequest := make([]chan bool, 0)
 	activeJobs := make(map[string]*activeDownload)
+	jobPath := make(map[string]string)
 	ticker := time.NewTicker(100 * time.Millisecond)
 	clientClosed := false
 	for {
@@ -308,11 +328,10 @@ func (sc *SimpleCache) runMux() error {
 		lenCancel := len(cancelRequest)
 		lenChan := lenResults + lenCancel
 		cases := make([]reflect.SelectCase, lenResults+6)
-		jobPath := make(map[uuid.UUID]string)
 		for idx, info := range tmpResults {
 			cases[idx].Dir = reflect.SelectSend
-			cases[idx].Chan = reflect.ValueOf(tmpResults[idx])
-			cases[idx].Send = reflect.ValueOf(&activeJobs[info.path].status)
+			cases[idx].Chan = reflect.ValueOf(info.channel)
+			cases[idx].Send = reflect.ValueOf(info.ds)
 		}
 		for idx, channel := range cancelRequest {
 			cases[lenResults+idx].Dir = reflect.SelectSend
@@ -358,19 +377,34 @@ func (sc *SimpleCache) runMux() error {
 				clientClosed = true
 				continue
 			}
-			results := recv.Interface().(*client.TransferResults)
-			path := jobPath[results.JobId]
-			delete(jobPath, results.JobId)
+			results := recv.Interface().(client.TransferResults)
+			path := jobPath[results.ID()]
+			if path == "" {
+				log.Errorf("Transfer results from job %s but no corresponding path known", results.ID())
+				continue
+			}
+			delete(jobPath, results.ID())
 			ad := activeJobs[path]
+			if ad == nil {
+				log.Errorf("Transfer results from job %s returned for path %s but no active job known", results.ID(), path)
+				continue
+			}
 			delete(activeJobs, path)
-			ad.status.err.Store(&results.Error)
+			if results.Error != nil {
+				ad.status.err.Store(&results.Error)
+			}
 			ad.status.curSize.Store(results.TransferredBytes)
 			ad.status.size.Store(results.TransferredBytes)
 			ad.status.done.Store(true)
 			for _, waiter := range ad.waiterList {
-				tmpResults = append(tmpResults, result{path: path, channel: waiter.notify})
+				tmpResults = append(tmpResults, result{ds: ad.status, path: path, channel: waiter.notify})
 			}
 			if results.Error == nil {
+				if fp, err := os.OpenFile(filepath.Join(sc.basePath, path)+".DONE", os.O_CREATE|os.O_WRONLY, os.FileMode(0600)); err != nil {
+					log.Debugln("Unable to save a DONE file for cache path", path)
+				} else {
+					fp.Close()
+				}
 				entry := sc.lruLookup[path]
 				if entry == nil {
 					entry = &lruEntry{}
@@ -384,14 +418,30 @@ func (sc *SimpleCache) runMux() error {
 			}
 		} else if chosen == lenChan+2 {
 			// Ticker has fired - update progress
+			jobsToDelete := make([]string, 0)
 			for path, dl := range activeJobs {
+				if _, err := dl.tj.GetLookupStatus(); err != nil {
+					dl.status.err.Store(&err)
+					for _, waiter := range dl.waiterList {
+						tmpResults = append(tmpResults, result{path: path, channel: waiter.notify, ds: dl.status})
+					}
+					jobsToDelete = append(jobsToDelete, path)
+					delete(jobPath, dl.tj.ID())
+					continue
+				}
+
 				curSize := dl.status.curSize.Load()
 				for {
 					if dl.waiterList.Len() > 0 && dl.waiterList[0].size <= curSize {
 						waiter := heap.Pop(&dl.waiterList).(waiterInfo)
 						tmpResults = append(tmpResults, result{path: path, channel: waiter.notify, ds: dl.status})
+					} else {
+						break
 					}
 				}
+			}
+			for _, path := range jobsToDelete {
+				delete(activeJobs, path)
 			}
 		} else if chosen == lenChan+3 {
 			// New request
@@ -446,7 +496,17 @@ func (sc *SimpleCache) runMux() error {
 				size:   req.size,
 				notify: req.results,
 			})
+			if err := sc.tc.Submit(tj); err != nil {
+				ds := &downloadStatus{}
+				ds.err.Store(&err)
+				tmpResults = append(tmpResults, result{
+					path:    req.request.path,
+					channel: req.results,
+					ds:      ds,
+				})
+			}
 			activeJobs[req.request.path] = ad
+			jobPath[tj.ID()] = req.request.path
 		} else if chosen == lenChan+4 {
 			// Cancel a given request.
 			req := recv.Interface().(cancelReq)
@@ -636,8 +696,14 @@ func (cr *cacheReader) Read(p []byte) (n int, err error) {
 			sizeReq := availSizeReq{
 				request: req,
 				size:    neededSize,
+				results: cr.status,
 			}
-			cr.sc.sizeReq <- sizeReq
+			select {
+			case <-cr.sc.ctx.Done():
+				err = cr.sc.ctx.Err()
+				return
+			case cr.sc.sizeReq <- sizeReq:
+			}
 		}
 		select {
 		case <-cr.sc.ctx.Done():
@@ -646,6 +712,10 @@ func (cr *cacheReader) Read(p []byte) (n int, err error) {
 			cr.status = nil
 			if !ok {
 				err = errors.New("unable to get response from cache engine")
+				return
+			}
+			if availSize == nil {
+				err = errors.New("internal error - cache sent a nil result")
 				return
 			}
 			dlErr := availSize.err.Load()

@@ -20,9 +20,11 @@ package simple_cache_test
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/pelicanplatform/pelican/config"
@@ -41,7 +43,11 @@ func spinup(t *testing.T, ctx context.Context, egrp *errgroup.Group) string {
 	modules.Set(config.OriginType)
 	modules.Set(config.DirectorType)
 	modules.Set(config.RegistryType)
-	modules.Set(config.CacheType)
+	if runtime.GOOS == "darwin" {
+		viper.Set("Origin.EnableFallbackRead", true)
+	} else {
+		modules.Set(config.CacheType)
+	}
 	modules.Set(config.LocalCacheType)
 
 	tmpPathPattern := "XRootD-Test_Origin*"
@@ -104,6 +110,7 @@ func TestFileCacheSimpleGet(t *testing.T) {
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer cancel()
 
+	viper.Set("Origin.EnablePublicReads", true)
 	originDir := spinup(t, ctx, egrp)
 
 	err := os.WriteFile(filepath.Join(originDir, "hello_world.txt"), []byte("Hello, World!"), os.FileMode(0644))
@@ -116,6 +123,15 @@ func TestFileCacheSimpleGet(t *testing.T) {
 	require.NoError(t, err)
 
 	byteBuff, err := io.ReadAll(reader)
+	assert.NoError(t, err)
+	assert.Equal(t, "Hello, World!", string(byteBuff))
+
+	// Query again -- cache hit case
+	reader, err = sc.Get("/test/hello_world.txt", "")
+	require.NoError(t, err)
+
+	assert.Equal(t, "*os.File", fmt.Sprintf("%T", reader))
+	byteBuff, err = io.ReadAll(reader)
 	assert.NoError(t, err)
 	assert.Equal(t, "Hello, World!", string(byteBuff))
 }

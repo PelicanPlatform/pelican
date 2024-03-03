@@ -442,8 +442,13 @@ func (te *TransferEngine) NewClient(options ...TransferOption) (client *Transfer
 		te.resultsMap[id] = client.results
 		te.workMap[id] = client.work
 	}()
-	log.Debugln("Inserted work map for client", id.String())
-	te.notifyChan <- true
+	log.Debugln("Created new client", id.String())
+	select {
+	case <-te.ctx.Done():
+		log.Debugln("New client unable to start; transfer engine has been canceled")
+		err = te.ctx.Err()
+	case te.notifyChan <- true:
+	}
 	return
 }
 
@@ -465,7 +470,10 @@ func (te *TransferEngine) Shutdown() error {
 // Closes the TransferEngine.  No new work may
 // be submitted.  Any ongoing work will continue
 func (te *TransferEngine) Close() {
-	te.closeChan <- true
+	select {
+	case <-te.ctx.Done():
+	case te.closeChan <- true:
+	}
 }
 
 // Launches a helper goroutine that ensures completed

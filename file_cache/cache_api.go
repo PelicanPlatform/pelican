@@ -20,21 +20,28 @@ package simple_cache
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 )
 
 // Launch the unix socket listener as a separate goroutine
 func LaunchListener(ctx context.Context, egrp *errgroup.Group) error {
-	socketName := param.FileCache_DataLocation.GetString()
+	socketName := param.FileCache_Socket.GetString()
+	if err := os.MkdirAll(filepath.Dir(socketName), fs.FileMode(0755)); err != nil {
+		return errors.Wrap(err, "failed to create socket directory")
+	}
+
 	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: socketName, Net: "unix"})
 	if err != nil {
 		return err
@@ -95,6 +102,7 @@ func LaunchListener(ctx context.Context, egrp *errgroup.Group) error {
 		return srv.Serve(listener)
 	})
 	egrp.Go(func() error {
+		<-ctx.Done()
 		return srv.Shutdown(ctx)
 	})
 	return nil

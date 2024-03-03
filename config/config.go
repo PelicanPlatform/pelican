@@ -850,15 +850,16 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 				return err
 			}
 		} else {
-			dir, err := os.MkdirTemp("", "pelican-xrootd-*")
+			var err error
+			runtimeDir, err = os.MkdirTemp("", "pelican-xrootd-*")
 			if err != nil {
 				return err
 			}
-			err = setXrootdRunLocations(currentServers, dir)
+			err = setXrootdRunLocations(currentServers, runtimeDir)
 			if err != nil {
 				return err
 			}
-			cleanupDirOnShutdown(ctx, dir)
+			cleanupDirOnShutdown(ctx, runtimeDir)
 		}
 		viper.SetDefault("Cache.DataLocation", filepath.Join(runtimeDir, "xcache"))
 		viper.SetDefault("FileCache.RunLocation", filepath.Join(runtimeDir, "cache"))

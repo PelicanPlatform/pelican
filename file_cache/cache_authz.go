@@ -21,7 +21,6 @@ package simple_cache
 import (
 	"context"
 	"net/http"
-	"net/url"
 	"path"
 	"slices"
 	"sync/atomic"
@@ -52,22 +51,7 @@ type (
 		err error
 	}
 
-	prefixConfig struct {
-		public  bool
-		issuers []issuerConfig
-	}
-
-	issuerConfig struct {
-		url      *url.URL
-		basePath string
-	}
-
 	acls []token_scopes.ResourceScope
-
-	aclsItem struct {
-		acls acls
-		err  error
-	}
 )
 
 func newAuthConfig(ctx context.Context, egrp *errgroup.Group) (ac *authConfig) {
@@ -131,7 +115,11 @@ func (ac *authConfig) updateConfig(nsAds []common.NamespaceAdV2) error {
 }
 
 func (ac *authConfig) getResourceScopes(token string) (scopes []token_scopes.ResourceScope, issuer string, err error) {
-	tok, err := jwt.Parse([]byte(token))
+	if token == "" {
+		return
+	}
+
+	tok, err := jwt.Parse([]byte(token), jwt.WithVerify(false))
 	if err != nil {
 		err = errors.Wrap(err, "failed to parse incoming JWT when authorizing request")
 		return
@@ -141,6 +129,7 @@ func (ac *authConfig) getResourceScopes(token string) (scopes []token_scopes.Res
 	issuers := ac.issuers.Load()
 	if !(*issuers)[issuer] {
 		err = errors.Errorf("token issuer %s is not one of the trusted issuers", issuer)
+		return
 	}
 
 	issuerConfItem := ac.issuerKeys.Get(issuer)
