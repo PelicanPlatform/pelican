@@ -64,10 +64,6 @@ func (server *CacheServer) GetNamespaceAdsFromDirector() error {
 		return errors.Wrap(err, "Unable to parse director url")
 	}
 
-	if err != nil {
-		return errors.Wrapf(err, "Failed to get DirectorURL from config: %v", err)
-	}
-
 	// Create the listNamespaces url
 	directorNSListEndpointURL, err := url.JoinPath(directorEndpointURL.String(), "api", "v2.0", "director", "listNamespaces")
 	if err != nil {
