@@ -64,7 +64,7 @@ func newAuthConfig(ctx context.Context, egrp *errgroup.Group) (ac *authConfig) {
 			if err != nil {
 				log.Errorln("Failed to lookup JWKS URL:", err)
 			} else {
-				ar := jwk.NewCache(ctx)
+				ar = jwk.NewCache(ctx)
 				client := &http.Client{Transport: config.GetTransport()}
 				if err = ar.Register(jwksUrl.String(), jwk.WithMinRefreshInterval(15*time.Minute), jwk.WithHTTPClient(client)); err != nil {
 					log.Errorln("Failed to register JWKS URL with cache: ", err)
@@ -74,10 +74,13 @@ func newAuthConfig(ctx context.Context, egrp *errgroup.Group) (ac *authConfig) {
 			}
 
 			ttl := ttlcache.DefaultTTL
-			if err != nil {
+			var item *ttlcache.Item[string, authConfigItem]
+			if ar != nil {
+				item = cache.Set(issuerUrl, authConfigItem{set: jwk.NewCachedSet(ar, jwksUrl.String()), err: nil}, ttl)
+			} else {
 				ttl = time.Duration(5 * time.Minute)
+				item = cache.Set(issuerUrl, authConfigItem{set: nil, err: err}, ttl)
 			}
-			item := cache.Set(issuerUrl, authConfigItem{set: jwk.NewCachedSet(ar, jwksUrl.String()), err: nil}, ttl)
 			return item
 		},
 	)
@@ -144,12 +147,23 @@ func (ac *authConfig) getResourceScopes(token string) (scopes []token_scopes.Res
 		return
 	}
 
-	tok, err = jwt.Parse([]byte(token), jwt.WithKeySet(issuerConfItem.Value().set))
+	item := issuerConfItem.Value()
+	if item.set == nil {
+		if item.err == nil {
+			err = item.err
+		} else {
+			err = errors.Errorf("failed to fetch public key set")
+		}
+		return
+	}
+	tok, err = jwt.Parse([]byte(token), jwt.WithKeySet(item.set))
 	if err != nil {
 		return
 	}
+
 	err = jwt.Validate(tok)
 	if err != nil {
+		err = errors.Wrap(err, "unable to get resource scopes because validation failed")
 		return
 	}
 

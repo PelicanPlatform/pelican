@@ -22,22 +22,28 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 
 	"github.com/pelicanplatform/pelican/config"
 	simple_cache "github.com/pelicanplatform/pelican/file_cache"
 	"github.com/pelicanplatform/pelican/launchers"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/test_utils"
+	"github.com/pelicanplatform/pelican/token_scopes"
+	"github.com/pelicanplatform/pelican/utils"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 )
 
-func spinup(t *testing.T, ctx context.Context, egrp *errgroup.Group) string {
+func spinup(t *testing.T, ctx context.Context, egrp *errgroup.Group) {
 
 	modules := config.ServerType(0)
 	modules.Set(config.OriginType)
@@ -103,18 +109,20 @@ func spinup(t *testing.T, ctx context.Context, egrp *errgroup.Group) string {
 		egrp.Wait()
 	})
 
-	return originDir
+	err = os.WriteFile(filepath.Join(originDir, "hello_world.txt"), []byte("Hello, World!"), os.FileMode(0644))
+	require.NoError(t, err)
 }
 
-func TestFileCacheSimpleGet(t *testing.T) {
+// Setup a federation, invoke "get" through the local cache module
+//
+// The download is done twice -- once to verify functionality and once
+// as a cache hit.
+func TestFedPublicGet(t *testing.T) {
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer cancel()
 
 	viper.Set("Origin.EnablePublicReads", true)
-	originDir := spinup(t, ctx, egrp)
-
-	err := os.WriteFile(filepath.Join(originDir, "hello_world.txt"), []byte("Hello, World!"), os.FileMode(0644))
-	require.NoError(t, err)
+	spinup(t, ctx, egrp)
 
 	sc, err := simple_cache.NewSimpleCache(ctx, egrp)
 	require.NoError(t, err)
@@ -134,4 +142,90 @@ func TestFileCacheSimpleGet(t *testing.T) {
 	byteBuff, err = io.ReadAll(reader)
 	assert.NoError(t, err)
 	assert.Equal(t, "Hello, World!", string(byteBuff))
+}
+
+func TestFedAuthGet(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer cancel()
+
+	viper.Set("Origin.EnablePublicReads", false)
+	spinup(t, ctx, egrp)
+
+	lc, err := simple_cache.NewSimpleCache(ctx, egrp)
+	require.NoError(t, err)
+
+	issuer, err := config.GetServerIssuerURL()
+	require.NoError(t, err)
+	tokConf := utils.TokenConfig{
+		TokenProfile: utils.WLCG,
+		Lifetime:     time.Duration(time.Minute),
+		Issuer:       issuer,
+		Subject:      "test",
+		Audience:     []string{utils.WLCGAny},
+	}
+	tokConf.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Storage_Read, "/hello_world.txt"))
+
+	tok, err := tokConf.CreateToken()
+	require.NoError(t, err)
+
+	reader, err := lc.Get("/test/hello_world.txt", tok)
+	require.NoError(t, err)
+
+	byteBuff, err := io.ReadAll(reader)
+	assert.NoError(t, err)
+	assert.Equal(t, "Hello, World!", string(byteBuff))
+
+	tokConf = utils.TokenConfig{
+		TokenProfile: utils.WLCG,
+		Lifetime:     time.Duration(time.Minute),
+		Issuer:       issuer,
+		Subject:      "test",
+		Audience:     []string{utils.WLCGAny},
+	}
+	tokConf.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Storage_Read, "/not_correct"))
+
+	tok, err = tokConf.CreateToken()
+	require.NoError(t, err)
+
+	_, err = lc.Get("/test/hello_world.txt", tok)
+	assert.Error(t, err)
+	assert.Equal(t, "authorization denied", err.Error())
+}
+
+func TestHttpReq(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer cancel()
+
+	viper.Set("Origin.EnablePublicReads", false)
+	spinup(t, ctx, egrp)
+
+	issuer, err := config.GetServerIssuerURL()
+	require.NoError(t, err)
+	tokConf := utils.TokenConfig{
+		TokenProfile: utils.WLCG,
+		Lifetime:     time.Duration(time.Minute),
+		Issuer:       issuer,
+		Subject:      "test",
+		Audience:     []string{utils.WLCGAny},
+	}
+	tokConf.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Storage_Read, "/hello_world.txt"))
+	tok, err := tokConf.CreateToken()
+	require.NoError(t, err)
+
+	transport := config.GetTransport().Clone()
+	transport.DialContext = func(_ context.Context, _, _ string) (net.Conn, error) {
+		return net.Dial("unix", param.FileCache_Socket.GetString())
+	}
+
+	client := &http.Client{Transport: transport}
+	req, err := http.NewRequest("GET", "http://localhost/test/hello_world.txt", nil)
+	require.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	body, err := io.ReadAll(resp.Body)
+	assert.NoError(t, err)
+	assert.Equal(t, "Hello, World!", string(body))
 }
