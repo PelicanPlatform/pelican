@@ -113,7 +113,7 @@ export default function Home() {
                     {
                         pendingData && pendingData.length > 0 &&
                         <Grid item xs={12}>
-                            <Paper sx={{p:2, bgcolor: "primary.light"}} elevation={3}>
+                            <Paper sx={{p:2, borderColor: "primary.main", borderWidth: "3px", borderType: "solid"}} elevation={3}>
                                 <Typography variant={"h5"} pb={2}>Pending Registrations</Typography>
                                 <Typography variant={"subtitle1"} pb={2}>
                                     {authenticated !== undefined && authenticated?.role == "admin" && "Awaiting approval from you."}
