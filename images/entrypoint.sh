@@ -118,12 +118,18 @@ if [ $# -ne 0 ]; then
         pelican)
             # Run pelican with the rest of the arguments
             echo "Running pelican with arguments: $@"
-            /pelican/pelican "$@"
+            exec tini /pelican/pelican "$@"
+            # we shouldn't get here
+            echo >&2 "Exec of tini failed!"
+            exit 1
             ;;
         osdf)
             # Run osdf with the rest of the arguments
             echo "Running osdf with arguments: $@"
-            /pelican/osdf "$@"
+            exec tini /pelican/osdf "$@"
+            # we shouldn't get here
+            echo >&2 "Exec of tini failed!"
+            exit 1
             ;;
         *)
             # Default case if the program selector does not match
@@ -132,6 +138,6 @@ if [ $# -ne 0 ]; then
             ;;
     esac
 else
-  echo "usage [command] [args...]"
-  echo "example: docker run --init pelican_platform/cache serve -p 8443"
+  echo "usage: [command] [args...]"
+  echo "example: docker run pelican_platform/cache serve -p 8443"
 fi

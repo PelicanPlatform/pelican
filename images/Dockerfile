@@ -57,7 +57,7 @@ RUN useradd -o -u 10940 -g 10940 -s /bin/sh xrootd
 
 # Install dependencies
 RUN yum -y update \
-    && yum -y install xrootd xrootd-client xrdcl-http xrootd-server xrootd-scitokens xrootd-voms curl java-17-openjdk-headless \
+    && yum -y install tini xrootd xrootd-client xrdcl-http xrootd-server xrootd-scitokens xrootd-voms curl java-17-openjdk-headless \
     && yum clean all \
     && rm -rf /var/cache/yum/
 
@@ -176,11 +176,6 @@ COPY --from=xrootd-plugin-builder /usr/lib64/libXrdS3-5.so /usr/lib64/libXrdHTTP
 COPY --from=xrootd-plugin-builder /usr/include/nlohmann /usr/include/nlohmann
 # Copy the JSON schema validator library
 COPY --from=xrootd-plugin-builder /usr/lib64/libnlohmann_json_schema_validator.a /usr/lib64
-
-# Install tini
-RUN curl -o tini https://github.com/krallin/tini/releases/download/v0.19.0/tini-static-amd64 &&\
-    chmod +x tini &&\
-    mv tini /bin/tini
 
 # Eventually add more entrypoint commands here
 COPY images/entrypoint.sh /entrypoint.sh
