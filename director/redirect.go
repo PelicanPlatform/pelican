@@ -139,18 +139,18 @@ func getLinkDepth(filepath, prefix string) (int, error) {
 	return pathDepth, nil
 }
 
-func getAuthzEscaped(req *http.Request) (authzEscaped string) {
-	if authzQuery := req.URL.Query()["authz"]; len(authzQuery) > 0 {
-		authzEscaped = authzQuery[0]
-		// if the authz URL query is coming from XRootD, it probably has a "Bearer " tacked in front
-		// even though it's coming via a URL
-		authzEscaped = strings.TrimPrefix(authzEscaped, "Bearer ")
-	} else if authzHeader := req.Header["Authorization"]; len(authzHeader) > 0 {
-		authzEscaped = strings.TrimPrefix(authzHeader[0], "Bearer ")
-		authzEscaped = url.QueryEscape(authzEscaped)
-	}
-	return
-}
+// func getAuthzEscaped(req *http.Request) (authzEscaped string) {
+// 	if authzQuery := req.URL.Query()["authz"]; len(authzQuery) > 0 {
+// 		authzEscaped = authzQuery[0]
+// 		// if the authz URL query is coming from XRootD, it probably has a "Bearer " tacked in front
+// 		// even though it's coming via a URL
+// 		authzEscaped = strings.TrimPrefix(authzEscaped, "Bearer ")
+// 	} else if authzHeader := req.Header["Authorization"]; len(authzHeader) > 0 {
+// 		authzEscaped = strings.TrimPrefix(authzHeader[0], "Bearer ")
+// 		authzEscaped = url.QueryEscape(authzEscaped)
+// 	}
+// 	return
+// }
 
 func getFinalRedirectURL(rurl url.URL, authzEscaped string) string {
 	if len(authzEscaped) > 0 {
@@ -229,7 +229,7 @@ func redirectToCache(ginCtx *gin.Context) {
 		return
 	}
 
-	authzBearerEscaped := getAuthzEscaped(ginCtx.Request)
+	authzBearerEscaped := utils.GetAuthzEscaped(ginCtx)
 
 	namespaceAd, originAds, cacheAds := getAdsForPath(reqPath)
 	// if GetAdsForPath doesn't find any ads because the prefix doesn't exist, we should
@@ -342,7 +342,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		return
 	}
 
-	authzBearerEscaped := getAuthzEscaped(ginCtx.Request)
+	authzBearerEscaped := utils.GetAuthzEscaped(ginCtx)
 
 	namespaceAd, originAds, _ := getAdsForPath(reqPath)
 	// if GetAdsForPath doesn't find any ads because the prefix doesn't exist, we should

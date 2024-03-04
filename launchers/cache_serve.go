@@ -26,15 +26,18 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/pelicanplatform/pelican/broker"
 	"github.com/pelicanplatform/pelican/cache_ui"
 	"github.com/pelicanplatform/pelican/daemon"
+	"github.com/pelicanplatform/pelican/lotman"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_ui"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/xrootd"
-	log "github.com/sirupsen/logrus"
-	"golang.org/x/sync/errgroup"
 )
 
 func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) (server_utils.XRootDServer, error) {
@@ -52,6 +55,15 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) (
 	err = server_ui.CheckDefaults(cacheServer)
 	if err != nil {
 		return nil, err
+	}
+
+	// Register Lotman
+	if param.Cache_EnableLotman.GetBool() {
+		lotman.RegisterLotman(ctx, engine.Group("/"))
+		success := lotman.InitLotman()
+		if !success {
+			return nil, errors.New("Failed to initialize lotman")
+		}
 	}
 
 	broker.RegisterBrokerCallback(ctx, engine.Group("/"))
