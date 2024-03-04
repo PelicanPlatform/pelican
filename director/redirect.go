@@ -364,8 +364,20 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		return
 	}
 
-	var colUrl string
+	linkHeader := ""
+	first := true
+	for idx, ad := range originAds {
+		if first {
+			first = false
+		} else {
+			linkHeader += ", "
+		}
+		redirectURL := getRedirectURL(reqPath, ad, !namespaceAd.PublicRead)
+		linkHeader += fmt.Sprintf(`<%s>; rel="duplicate"; pri=%d`, redirectURL.String(), idx+1)
+	}
+	ginCtx.Writer.Header()["Link"] = []string{linkHeader}
 
+	var colUrl string
 	if namespaceAd.PublicRead {
 		colUrl = originAds[0].URL.String()
 	} else {
