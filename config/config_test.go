@@ -291,6 +291,8 @@ func TestDiscoverFederation(t *testing.T) {
 		viper.Set("Federation.DiscoveryUrl", server.URL+"/this/is/some/path")
 		err := DiscoverFederation()
 		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "Invalid federation discovery url is set. No path allowed for federation discovery url. Provided url: ",
+			"Error returned does not contain the correct error")
 		viper.Reset()
 	})
 
