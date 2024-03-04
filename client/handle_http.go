@@ -92,14 +92,14 @@ type (
 	}
 
 	TransferResult struct {
-		Number            int      // indicates which attempt this is
-		TransferFileBytes int64    // how much each attempt downloaded
-		TimeToFirstByte   float64  // how long it took to download the first byte
-		TransferEndTime   int64    // when the transfer ends
-		TransferTime      int64    // amount of time we were transferring per attempt (in seconds)
-		Endpoint          string   // which origin did it use
-		ServerVersion     string   // version of the server
-		Error             error    // what error the attempt returned (if any)
+		Number            int     // indicates which attempt this is
+		TransferFileBytes int64   // how much each attempt downloaded
+		TimeToFirstByte   float64 // how long it took to download the first byte
+		TransferEndTime   int64   // when the transfer ends
+		TransferTime      int64   // amount of time we were transferring per attempt (in seconds)
+		Endpoint          string  // which origin did it use
+		ServerVersion     string  // version of the server
+		Error             error   // what error the attempt returned (if any)
 	}
 
 	clientTransferResults struct {
