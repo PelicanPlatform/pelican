@@ -21,6 +21,7 @@ package token
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -232,4 +233,136 @@ func Verify(ctx *gin.Context, authOption AuthOption) (status int, verified bool,
 	// If the function reaches here, it means no token check passed
 	log.Debug("Cannot verify token:\n", errMsg)
 	return http.StatusForbidden, false, errors.New("Cannot verify token: " + errMsg)
+}
+
+// Given a request, try to get a token from its "authz" query parameter or "Authorization" header
+func GetAuthzEscaped(ctx *gin.Context) (authzEscaped string) {
+	if authzQuery := ctx.Request.URL.Query()["authz"]; len(authzQuery) > 0 {
+		authzEscaped = authzQuery[0]
+		// if the authz URL query is coming from XRootD, it probably has a "Bearer " tacked in front
+		// even though it's coming via a URL
+		authzEscaped = strings.TrimPrefix(authzEscaped, "Bearer ")
+	} else if authzHeader := ctx.Request.Header["Authorization"]; len(authzHeader) > 0 {
+		authzEscaped = strings.TrimPrefix(authzHeader[0], "Bearer ")
+		authzEscaped = url.QueryEscape(authzEscaped)
+	} else if authzCookie, err := ctx.Cookie("login"); err == nil && len(authzCookie) > 0 {
+		authzEscaped = url.QueryEscape(authzCookie)
+	}
+	return
+}
+
+// For a given prefix, get the prefix's issuer URL, where we consider that the openid endpoint
+// we use to look up a key location. Note that this is NOT the same as the issuer key -- to
+// find that, follow openid-style discovery using the issuer URL as a base.
+func GetNSIssuerURL(prefix string) (string, error) {
+	if prefix == "" || !strings.HasPrefix(prefix, "/") {
+		return "", errors.New(fmt.Sprintf("the prefix \"%s\" is invalid", prefix))
+	}
+	registryUrlStr := param.Federation_RegistryUrl.GetString()
+	if registryUrlStr == "" {
+		return "", errors.New("federation registry URL is not set and was not discovered")
+	}
+	registryUrl, err := url.Parse(registryUrlStr)
+	if err != nil {
+		return "", err
+	}
+
+	registryUrl.Path, err = url.JoinPath(registryUrl.Path, "api", "v1.0", "registry", prefix)
+
+	if err != nil {
+		return "", errors.Wrapf(err, "failed to construct openid-configuration lookup URL for prefix %s", prefix)
+	}
+	return registryUrl.String(), nil
+}
+
+// Given an issuer url, lookup the JWKS URL from the openid-configuration
+// For example, if the issuer URL is https://registry.com:8446/api/v1.0/registry/test-namespace,
+// this function will return the key indicated by the openid-configuration JSON hosted at
+// https://registry.com:8446/api/v1.0/registry/test-namespace/.well-known/openid-configuration.
+func GetJWKSURLFromIssuerURL(issuerUrl string) (string, error) {
+	// Get/parse the openid-configuration JSON to lookup key location
+	issOpenIDUrl, err := url.Parse(issuerUrl)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to parse issuer URL")
+	}
+	issOpenIDUrl.Path, _ = url.JoinPath(issOpenIDUrl.Path, ".well-known", "openid-configuration")
+
+	client := &http.Client{Transport: config.GetTransport()}
+	openIDCfg, err := client.Get(issOpenIDUrl.String())
+	if err != nil {
+		return "", errors.Wrapf(err, "failed to lookup openid-configuration for issuer %s", issuerUrl)
+	}
+	defer openIDCfg.Body.Close()
+
+	// If we hit an old registry, it may not have the openid-configuration. In that case, we fallback to the old
+	// behavior of looking for the key directly at the issuer URL.
+	if openIDCfg.StatusCode == http.StatusNotFound {
+		oldKeyLoc, err := url.JoinPath(issuerUrl, ".well-known", "issuer.jwks")
+		if err != nil {
+			return "", errors.Wrapf(err, "failed to construct key lookup URL for issuer %s", issuerUrl)
+		}
+		return oldKeyLoc, nil
+	}
+
+	body, err := io.ReadAll(openIDCfg.Body)
+	if err != nil {
+		return "", errors.Wrapf(err, "failed to read response body from %s", issuerUrl)
+	}
+
+	var openIDCfgMap map[string]string
+	err = json.Unmarshal(body, &openIDCfgMap)
+	if err != nil {
+		return "", errors.Wrapf(err, "failed to unmarshal openid-configuration for issuer %s", issuerUrl)
+	}
+
+	if keyLoc, ok := openIDCfgMap["jwks_uri"]; ok {
+		return keyLoc, nil
+	} else {
+		return "", errors.New(fmt.Sprintf("no key found in openid-configuration for issuer %s", issuerUrl))
+	}
+}
+
+func GetJWKSFromIssUrl(issuer string) (*jwk.Set, error) {
+	// Make sure our URL is solid
+	issuerUrl, err := url.Parse(issuer)
+	if err != nil {
+		return nil, errors.Wrap(err, fmt.Sprintln("Invalid issuer URL: ", issuerUrl))
+	}
+
+	// Discover the JWKS URL from the issuer
+	pubkeyUrlStr, err := GetJWKSURLFromIssuerURL(issuerUrl.String())
+	if err != nil {
+		return nil, errors.Wrap(err, "Error getting JWKS URL from issuer URL")
+	}
+
+	fmt.Printf("\n\n\nPUBKEY URL: %s\n\n\n", pubkeyUrlStr)
+
+	// Query the JWKS URL for the public keys
+	httpClient := &http.Client{Transport: config.GetTransport()}
+	req, err := http.NewRequest("GET", pubkeyUrlStr, nil)
+	if err != nil {
+		return nil, errors.Wrap(err, "Error creating request to issuer's JWKS URL")
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, errors.Wrapf(err, "Error querying issuer's key endpoint (%s)", pubkeyUrlStr)
+	}
+	defer resp.Body.Close()
+	// Check the response code, make sure it's not in the error ranges (400-500)
+	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
+		return nil, errors.Errorf("The issuer's JWKS endpoint returned an unexpected status: %s", resp.Status)
+	}
+
+	// Read the response body and parse the JWKs from it
+	jwksStr, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, errors.Wrapf(err, "Error reading response body from %s", pubkeyUrlStr)
+	}
+	fmt.Printf("\n\n\nJWKS STRING: %s\n\n\n", string(jwksStr))
+	kSet, err := jwk.ParseString(string(jwksStr))
+	if err != nil {
+		return nil, errors.Wrapf(err, "Error parsing JWKs from %s", pubkeyUrlStr)
+	}
+
+	return &kSet, nil
 }

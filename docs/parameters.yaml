@@ -874,6 +874,12 @@ description: >-
   number of connections to this value.
 type: int
 default: none
+---
+name: Cache.EnableLotman
+description: >-
+  LotMan is a library that provides management of storage space in the cache.
+type: bool
+default: false
 components: ["cache"]
 ---
 name: Cache.PermittedNamespaces
@@ -1916,3 +1922,21 @@ description: >-
 type: string
 default: none
 components: ["plugin"]
+---
+############################
+#   LotMan-level configs   #
+############################
+name: Lotman.DbLocation
+description: >-
+  The prefix indicating where LotMan should store its lot database. For the provided path, the database
+  will be stored at <path>/.lot/lotman_cpp.sqlite
+type: filename
+root_default: /var/run/pelican
+default: $ConfigBase
+---
+name: Lotman.Lots
+description: >-
+  Declarative configuration for LotMan.  This is a list of objects, each of which describes a "lot".
+type: object
+default: none
+components: ["cache"]
