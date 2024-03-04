@@ -1382,8 +1382,8 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	totalSize = resp.Size()
 	// Do a head request for content length if resp.Size is unknown
 	if totalSize <= 0 {
-		headClient := &http.Client{Transport: config.GetTransport()}
-		headRequest, _ := http.NewRequest("HEAD", transfer.Url.String(), nil)
+		headClient := &http.Client{Transport: transport}
+		headRequest, _ := http.NewRequest("HEAD", transferUrl.String(), nil)
 		var headResponse *http.Response
 		headResponse, err = headClient.Do(headRequest)
 		if err != nil {

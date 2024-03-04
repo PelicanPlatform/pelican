@@ -45,7 +45,14 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-func spinup(t *testing.T, ctx context.Context, egrp *errgroup.Group) (token string) {
+type (
+	fedTest struct {
+		originDir string
+		token     string
+	}
+)
+
+func (ft *fedTest) spinup(t *testing.T, ctx context.Context, egrp *errgroup.Group) {
 
 	modules := config.ServerType(0)
 	modules.Set(config.OriginType)
@@ -127,10 +134,11 @@ func spinup(t *testing.T, ctx context.Context, egrp *errgroup.Group) (token stri
 	}
 	tokConf.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Storage_Read, "/hello_world.txt"))
 
-	token, err = tokConf.CreateToken()
+	token, err := tokConf.CreateToken()
 	require.NoError(t, err)
 
-	return
+	ft.originDir = originDir
+	ft.token = token
 }
 
 // Setup a federation, invoke "get" through the local cache module
@@ -141,8 +149,10 @@ func TestFedPublicGet(t *testing.T) {
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer cancel()
 
+	viper.Reset()
 	viper.Set("Origin.EnablePublicReads", true)
-	spinup(t, ctx, egrp)
+	ft := fedTest{}
+	ft.spinup(t, ctx, egrp)
 
 	sc, err := simple_cache.NewSimpleCache(ctx, egrp)
 	require.NoError(t, err)
@@ -168,13 +178,15 @@ func TestFedAuthGet(t *testing.T) {
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer cancel()
 
+	viper.Reset()
 	viper.Set("Origin.EnablePublicReads", false)
-	token := spinup(t, ctx, egrp)
+	ft := fedTest{}
+	ft.spinup(t, ctx, egrp)
 
 	lc, err := simple_cache.NewSimpleCache(ctx, egrp)
 	require.NoError(t, err)
 
-	reader, err := lc.Get("/test/hello_world.txt", token)
+	reader, err := lc.Get("/test/hello_world.txt", ft.token)
 	require.NoError(t, err)
 
 	byteBuff, err := io.ReadAll(reader)
@@ -192,7 +204,7 @@ func TestFedAuthGet(t *testing.T) {
 	}
 	tokConf.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Storage_Read, "/not_correct"))
 
-	token, err = tokConf.CreateToken()
+	token, err := tokConf.CreateToken()
 	require.NoError(t, err)
 
 	_, err = lc.Get("/test/hello_world.txt", token)
@@ -204,8 +216,10 @@ func TestHttpReq(t *testing.T) {
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer cancel()
 
+	viper.Reset()
 	viper.Set("Origin.EnablePublicReads", false)
-	token := spinup(t, ctx, egrp)
+	ft := fedTest{}
+	ft.spinup(t, ctx, egrp)
 
 	transport := config.GetTransport().Clone()
 	transport.DialContext = func(_ context.Context, _, _ string) (net.Conn, error) {
@@ -215,7 +229,7 @@ func TestHttpReq(t *testing.T) {
 	client := &http.Client{Transport: transport}
 	req, err := http.NewRequest("GET", "http://localhost/test/hello_world.txt", nil)
 	require.NoError(t, err)
-	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Authorization", "Bearer "+ft.token)
 	resp, err := client.Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close()
@@ -230,8 +244,10 @@ func TestClient(t *testing.T) {
 	defer cancel()
 	tmpDir := t.TempDir()
 
+	viper.Reset()
 	viper.Set("Origin.EnablePublicReads", false)
-	token := spinup(t, ctx, egrp)
+	ft := fedTest{}
+	ft.spinup(t, ctx, egrp)
 
 	cacheUrl := &url.URL{
 		Scheme: "unix",
@@ -241,7 +257,8 @@ func TestClient(t *testing.T) {
 	discoveryHost := param.Federation_DiscoveryUrl.GetString()
 	discoveryUrl, err := url.Parse(discoveryHost)
 	require.NoError(t, err)
-	tr, err := client.DoGet(ctx, "pelican://"+discoveryUrl.Host+"/test/hello_world.txt", filepath.Join(tmpDir, "hello_world.txt"), false, client.WithToken(token), client.WithCaches(cacheUrl), client.WithAcquireToken(false))
+	tr, err := client.DoGet(ctx, "pelican://"+discoveryUrl.Host+"/test/hello_world.txt", filepath.Join(tmpDir, "hello_world.txt"), false,
+		client.WithToken(ft.token), client.WithCaches(cacheUrl), client.WithAcquireToken(false))
 	assert.NoError(t, err)
 	require.Equal(t, 1, len(tr))
 	assert.Equal(t, int64(13), tr[0].TransferredBytes)
@@ -250,4 +267,80 @@ func TestClient(t *testing.T) {
 	byteBuff, err := os.ReadFile(filepath.Join(tmpDir, "hello_world.txt"))
 	assert.NoError(t, err)
 	assert.Equal(t, "Hello, World!", string(byteBuff))
+}
+
+func TestStat(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer cancel()
+
+	viper.Reset()
+	viper.Set("Origin.EnablePublicReads", true)
+	ft := fedTest{}
+	ft.spinup(t, ctx, egrp)
+
+	lc, err := simple_cache.NewSimpleCache(ctx, egrp)
+	require.NoError(t, err)
+
+	size, err := lc.Stat("/test/hello_world.txt", "")
+	require.NoError(t, err)
+	assert.Equal(t, uint64(13), size)
+
+	reader, err := lc.Get("/test/hello_world.txt", "")
+	require.NoError(t, err)
+	byteBuff, err := io.ReadAll(reader)
+	assert.NoError(t, err)
+	assert.Equal(t, 13, len(byteBuff))
+
+	size, err = lc.Stat("/test/hello_world.txt", "")
+	assert.NoError(t, err)
+	assert.Equal(t, uint64(13), size)
+}
+
+func TestLargeFile(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer cancel()
+	tmpDir := t.TempDir()
+
+	viper.Reset()
+	viper.Set("Origin.EnablePublicReads", true)
+	viper.Set("Client.MaximumDownloadSpeed", 40*1024*1024)
+	ft := fedTest{}
+	ft.spinup(t, ctx, egrp)
+
+	cacheUrl := &url.URL{
+		Scheme: "unix",
+		Path:   param.FileCache_Socket.GetString(),
+	}
+
+	fp, err := os.OpenFile(filepath.Join(ft.originDir, "hello_world.txt"), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
+	require.NoError(t, err)
+
+	byteBuff := []byte("Hello, World!")
+	for {
+		byteBuff = append(byteBuff, []byte("Hello, World!")...)
+		if len(byteBuff) > 4096 {
+			break
+		}
+	}
+	size := 0
+	for {
+		n, err := fp.Write(byteBuff)
+		require.NoError(t, err)
+		size += n
+		if size > 100*1024*1024 {
+			break
+		}
+	}
+	fp.Close()
+
+	discoveryHost := param.Federation_DiscoveryUrl.GetString()
+	discoveryUrl, err := url.Parse(discoveryHost)
+	require.NoError(t, err)
+	tr, err := client.DoGet(ctx, "pelican://"+discoveryUrl.Host+"/test/hello_world.txt", filepath.Join(tmpDir, "hello_world.txt"), false,
+		client.WithCaches(cacheUrl))
+	assert.NoError(t, err)
+	require.Equal(t, 1, len(tr))
+	assert.Equal(t, int64(size), tr[0].TransferredBytes)
+	assert.NoError(t, tr[0].Error)
+
 }

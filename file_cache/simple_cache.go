@@ -378,18 +378,24 @@ func (sc *SimpleCache) runMux() error {
 				continue
 			}
 			results := recv.Interface().(client.TransferResults)
-			path := jobPath[results.ID()]
-			if path == "" {
+			reqPath := jobPath[results.ID()]
+			if reqPath == "" {
 				log.Errorf("Transfer results from job %s but no corresponding path known", results.ID())
 				continue
 			}
 			delete(jobPath, results.ID())
-			ad := activeJobs[path]
+			ad := activeJobs[reqPath]
 			if ad == nil {
-				log.Errorf("Transfer results from job %s returned for path %s but no active job known", results.ID(), path)
+				log.Errorf("Transfer results from job %s returned for path %s but no active job known", results.ID(), reqPath)
 				continue
 			}
-			delete(activeJobs, path)
+			delete(activeJobs, reqPath)
+			func() {
+				localPath := filepath.Join(sc.basePath, path.Clean(reqPath))
+				sc.mutex.Lock()
+				defer sc.mutex.Unlock()
+				delete(sc.downloads, localPath)
+			}()
 			if results.Error != nil {
 				ad.status.err.Store(&results.Error)
 			}
@@ -397,18 +403,18 @@ func (sc *SimpleCache) runMux() error {
 			ad.status.size.Store(results.TransferredBytes)
 			ad.status.done.Store(true)
 			for _, waiter := range ad.waiterList {
-				tmpResults = append(tmpResults, result{ds: ad.status, path: path, channel: waiter.notify})
+				tmpResults = append(tmpResults, result{ds: ad.status, path: reqPath, channel: waiter.notify})
 			}
 			if results.Error == nil {
-				if fp, err := os.OpenFile(filepath.Join(sc.basePath, path)+".DONE", os.O_CREATE|os.O_WRONLY, os.FileMode(0600)); err != nil {
-					log.Debugln("Unable to save a DONE file for cache path", path)
+				if fp, err := os.OpenFile(filepath.Join(sc.basePath, reqPath)+".DONE", os.O_CREATE|os.O_WRONLY, os.FileMode(0600)); err != nil {
+					log.Debugln("Unable to save a DONE file for cache path", reqPath)
 				} else {
 					fp.Close()
 				}
-				entry := sc.lruLookup[path]
+				entry := sc.lruLookup[reqPath]
 				if entry == nil {
 					entry = &lruEntry{}
-					sc.lruLookup[path] = entry
+					sc.lruLookup[reqPath] = entry
 					entry.size = results.TransferredBytes
 					sc.cacheSize += uint64(entry.size)
 					sc.lru = append(sc.lru, entry)
@@ -443,6 +449,14 @@ func (sc *SimpleCache) runMux() error {
 			for _, path := range jobsToDelete {
 				delete(activeJobs, path)
 			}
+			func() {
+				sc.mutex.Lock()
+				defer sc.mutex.Unlock()
+				for _, lpath := range jobsToDelete {
+					localPath := filepath.Join(sc.basePath, path.Clean(lpath))
+					delete(sc.downloads, localPath)
+				}
+			}()
 		} else if chosen == lenChan+3 {
 			// New request
 			req := recv.Interface().(availSizeReq)
@@ -507,6 +521,11 @@ func (sc *SimpleCache) runMux() error {
 			}
 			activeJobs[req.request.path] = ad
 			jobPath[tj.ID()] = req.request.path
+			func() {
+				sc.mutex.Lock()
+				defer sc.mutex.Unlock()
+				sc.downloads[localPath] = ad
+			}()
 		} else if chosen == lenChan+4 {
 			// Cancel a given request.
 			req := recv.Interface().(cancelReq)
@@ -693,6 +712,14 @@ func (cr *cacheReader) Read(p []byte) (n int, err error) {
 	neededSize := cr.offset + int64(len(p))
 	if cr.size >= 0 && neededSize > cr.size {
 		neededSize = cr.size
+	}
+	if neededSize > cr.avail && cr.fd != nil {
+		finfo, err := cr.fd.Stat()
+		if err == nil {
+			cr.avail = finfo.Size()
+		} else {
+			log.Warningln("Unable to stat open file handle:", err)
+		}
 	}
 	if neededSize > cr.avail {
 		// Insufficient available data; request more from the cache

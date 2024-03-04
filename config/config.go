@@ -148,7 +148,8 @@ var (
 // This function creates a new MetadataError by wrapping the previous error
 func NewMetadataError(err error, msg string) *MetadataErr {
 	return &MetadataErr{
-		msg: msg,
+		msg:      msg,
+		innerErr: err,
 	}
 }
 
