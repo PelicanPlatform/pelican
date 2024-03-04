@@ -568,7 +568,7 @@ func (sc *SimpleCache) purge() {
 // Given a URL, return a reader from the disk cache
 //
 // If there is no sentinal $NAME.DONE file, then returns nil
-func (sc *SimpleCache) getFromDisk(localPath string) io.ReadCloser {
+func (sc *SimpleCache) getFromDisk(localPath string) *os.File {
 	localPath = filepath.Join(sc.basePath, path.Clean(localPath))
 	fp, err := os.Open(localPath + ".DONE")
 	if err != nil {
@@ -604,6 +604,26 @@ func (sc *SimpleCache) Get(path, token string) (io.ReadCloser, error) {
 
 	return sc.newCacheReader(path, token)
 
+}
+
+func (lc *SimpleCache) Stat(path, token string) (uint64, error) {
+	if !lc.ac.authorize(token_scopes.Storage_Read, path, token) {
+		return 0, authorizationDenied
+	}
+
+	if fp := lc.getFromDisk(path); fp != nil {
+		finfo, err := fp.Stat()
+		if err != nil {
+			return 0, errors.New("Failed to determine cached file size for object")
+		}
+		return uint64(finfo.Size()), nil
+	}
+
+	dUrl := *lc.directorURL
+	dUrl.Path = path
+	dUrl.Scheme = "pelican"
+	log.Debugln("LocalCache doing Stat:", dUrl.String())
+	return client.DoStat(context.Background(), dUrl.String(), client.WithToken(token))
 }
 
 func (sc *SimpleCache) updateConfig() error {

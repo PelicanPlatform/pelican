@@ -189,7 +189,7 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 		}
 	}()
 
-	dest_uri, err := url.Parse(destination)
+	destUri, err := url.Parse(destination)
 	if err != nil {
 		log.Errorln("Failed to parse destination URL")
 		return 0, err
@@ -197,21 +197,21 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 
 	understoodSchemes := []string{"osdf", "pelican", ""}
 
-	_, foundSource := Find(understoodSchemes, dest_uri.Scheme)
+	_, foundSource := Find(understoodSchemes, destUri.Scheme)
 	if !foundSource {
-		log.Errorln("Unknown schema provided:", dest_uri.Scheme)
+		log.Errorln("Unknown schema provided:", destUri.Scheme)
 		return 0, errors.New("Unsupported scheme requested")
 	}
 
-	origScheme := dest_uri.Scheme
+	origScheme := destUri.Scheme
 	if config.GetPreferredPrefix() != "PELICAN" && origScheme == "" {
-		dest_uri.Scheme = "osdf"
+		destUri.Scheme = "osdf"
 	}
-	if (dest_uri.Scheme == "osdf" || dest_uri.Scheme == "stash") && dest_uri.Host != "" {
-		dest_uri.Path = path.Clean("/" + dest_uri.Host + "/" + dest_uri.Path)
-		dest_uri.Host = ""
-	} else if dest_uri.Scheme == "pelican" {
-		federationUrl, _ := url.Parse(dest_uri.String())
+	if (destUri.Scheme == "osdf" || destUri.Scheme == "stash") && destUri.Host != "" {
+		destUri.Path = path.Clean("/" + destUri.Host + "/" + destUri.Path)
+		destUri.Host = ""
+	} else if destUri.Scheme == "pelican" {
+		federationUrl, _ := url.Parse(destUri.String())
 		federationUrl.Scheme = "https"
 		federationUrl.Path = ""
 		viper.Set("Federation.DiscoveryUrl", federationUrl.String())
@@ -221,23 +221,33 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 		}
 	}
 
-	ns, err := namespaces.MatchNamespace(dest_uri.Path)
+	ns, err := getNamespaceInfo(destUri.Path, param.Federation_DirectorUrl.GetString(), false)
 	if err != nil {
 		return 0, err
 	}
 
 	tokenLocation := ""
 	acquire := true
+	token := ""
 	for _, option := range options {
 		switch option.Ident() {
 		case identTransferOptionTokenLocation{}:
 			tokenLocation = option.Value().(string)
 		case identTransferOptionAcquireToken{}:
 			acquire = option.Value().(bool)
+		case identTransferOptionToken{}:
+			token = option.Value().(string)
 		}
 	}
 
-	if remoteSize, err = statHttp(ctx, dest_uri, ns, tokenLocation, acquire); err == nil {
+	if ns.UseTokenOnRead && token == "" {
+		token, err = getToken(destUri, ns, true, "", tokenLocation, acquire)
+		if err != nil {
+			return 0, fmt.Errorf("failed to get token for transfer: %v", err)
+		}
+	}
+
+	if remoteSize, err = statHttp(ctx, destUri, ns, token); err == nil {
 		return remoteSize, nil
 	}
 	return 0, err

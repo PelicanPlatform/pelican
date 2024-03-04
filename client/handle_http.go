@@ -1913,15 +1913,13 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 	return err
 }
 
-func statHttp(ctx context.Context, dest *url.URL, namespace namespaces.Namespace, tokenLocation string, acquire bool) (size uint64, err error) {
-
-	token, err := getToken(dest, namespace, false, "", tokenLocation, acquire)
-	if err != nil {
-		return
-	}
-
+func statHttp(ctx context.Context, dest *url.URL, namespace namespaces.Namespace, token string) (size uint64, err error) {
 	// Parse the writeback host as a URL
-	writebackhostUrl, err := url.Parse(namespace.WriteBackHost)
+	statHost := namespace.WriteBackHost
+	if statHost == "" {
+		statHost = namespace.DirListHost
+	}
+	writebackhostUrl, err := url.Parse(statHost)
 	if err != nil {
 		return
 	}
