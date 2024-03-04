@@ -853,6 +853,7 @@ func checkNamespaceExistsHandler(ctx *gin.Context) {
 	// Just to check if the key matches. We don't care about approval status
 	jwksDb, _, err := getNamespaceJwksByPrefix(req.Prefix)
 	if err != nil {
+		log.Errorf("Error in getNamespaceJwksByPrefix with prefix %s. %v", req.Prefix, err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -886,6 +887,7 @@ func checkNamespaceStatusHandler(ctx *gin.Context) {
 	}
 	ns, err := getNamespaceByPrefix(req.Prefix)
 	if err != nil || ns == nil {
+		log.Errorf("Error in getNamespaceByPrefix with prefix %s. %v", req.Prefix, err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Error getting namespace"})
 		return
 	}

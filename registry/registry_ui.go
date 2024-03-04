@@ -303,13 +303,14 @@ func listNamespaces(ctx *gin.Context) {
 	// Directly call GetUser as we want this endpoint to also be able to serve unauthed users
 	user, err := web_ui.GetUser(ctx)
 	if err != nil {
+		log.Error("Failed to check user login status: ", err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check user login status"})
 		return
 	}
 	ctx.Set("User", user)
 	isAuthed := user != ""
 	queryParams := listNamespaceRequest{}
-	if ctx.ShouldBindQuery(&queryParams) != nil {
+	if err := ctx.ShouldBindQuery(&queryParams); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid query parameters"})
 		return
 	}
@@ -422,7 +423,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 
 	ns := Namespace{}
 	if ctx.ShouldBindJSON(&ns) != nil {
-		ctx.JSON(400, gin.H{"error": "Invalid create or update namespace request"})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid create or update namespace request"})
 		return
 	}
 	// Assign ID from path param because the request data doesn't have ID set
@@ -464,12 +465,12 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 	// Check if the parent or child path along the prefix has been registered
 	valErr, sysErr := validateKeyChaining(ns.Prefix, pubkey)
 	if valErr != nil {
-		log.Errorln(valErr)
+		log.Errorln("Bad prefix when validating key chaining", valErr)
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": valErr})
 		return
 	}
 	if sysErr != nil {
-		log.Errorln(sysErr)
+		log.Errorln("Error validating keycahing", sysErr)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": sysErr})
 		return
 	}
@@ -639,6 +640,7 @@ func getNamespaceJWKS(ctx *gin.Context) {
 	}
 	found, err := namespaceExistsById(id)
 	if err != nil {
+		log.Errorf("Failed to check if namespace exists with id %d. %v", id, err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprint("Error checking id:", err)})
 		return
 	}
@@ -648,11 +650,13 @@ func getNamespaceJWKS(ctx *gin.Context) {
 	}
 	jwks, err := getNamespaceJwksById(id)
 	if err != nil {
+		log.Errorf("Failed to get namespace jwks by id %d. %v", id, err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprint("Error getting jwks by id:", err)})
 		return
 	}
 	jsonData, err := json.MarshalIndent(jwks, "", "  ")
 	if err != nil {
+		log.Errorf("Failed to marshall jwks. %v", err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to marshal JWKS"})
 		return
 	}
