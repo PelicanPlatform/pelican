@@ -303,6 +303,7 @@ func (sType *ServerType) SetString(name string) bool {
 		return true
 	case "localcache":
 		*sType |= LocalCacheType
+		return true
 	case "origin":
 		*sType |= OriginType
 		return true

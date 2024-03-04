@@ -380,6 +380,19 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 			err = shutdownErr
 		}
 	}()
+
+	caches := make([]*url.URL, 0, 1)
+	if nearestCache, ok := os.LookupEnv("NEAREST_CACHE"); ok && nearestCache != "" {
+		var nearestCacheURL *url.URL
+		if nearestCacheURL, err = url.Parse(nearestCache); err != nil {
+			err = errors.Wrapf(err, "unable to parse preferred cache (%s) as URL", nearestCacheURL)
+			return
+		} else {
+			caches = append(caches, nearestCacheURL)
+			log.Debugln("Setting nearest cache to", nearestCacheURL.String())
+		}
+	}
+
 	tc, err := te.NewClient(client.WithAcquireToken(false))
 	if err != nil {
 		return
@@ -417,7 +430,7 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 
 			var tj *client.TransferJob
 			urlCopy := *transfer.url
-			tj, err = tc.NewTransferJob(&urlCopy, transfer.localFile, upload, false, client.WithAcquireToken(false))
+			tj, err = tc.NewTransferJob(&urlCopy, transfer.localFile, upload, false, client.WithAcquireToken(false), client.WithCaches(caches...))
 			jobMap[tj.ID()] = transfer
 			if err != nil {
 				return errors.Wrap(err, "Failed to create new transfer job")
@@ -549,7 +562,8 @@ func writeOutfile(err error, resultAds []*classads.ClassAd, outputFile *os.File)
 		// Error code 1 (serr) is ERROR_INVALID_FUNCTION, the expected Windows syscall error
 		// Error code EINVAL is returned on Linux
 		// Error code ENODEV (/dev/null) or ENOTTY (/dev/stdout) is returned on Mac OS X
-		if errors.As(err, &perr) && errors.As(perr.Unwrap(), &serr) && (int(serr) == 1 || serr == syscall.EINVAL || serr == syscall.ENODEV || serr == syscall.ENOTTY) {
+		// Error code EBADF is returned on Mac OS X if /dev/stdout is redirected to a pipe in the shell
+		if errors.As(err, &perr) && errors.As(perr.Unwrap(), &serr) && (int(serr) == 1 || serr == syscall.EINVAL || serr == syscall.ENODEV || serr == syscall.ENOTTY || serr == syscall.EBADF) {
 			log.Debugf("Error when syncing: %s; can be ignored\n", perr)
 		} else {
 			if errors.As(err, &perr) && errors.As(perr.Unwrap(), &serr) {

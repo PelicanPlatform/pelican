@@ -759,13 +759,13 @@ func (tc *TransferClient) NewTransferJob(remoteUrl *url.URL, localPath string, u
 	for _, option := range options {
 		switch option.Ident() {
 		case identTransferOptionCaches{}:
-			tc.caches = option.Value().([]*url.URL)
+			tj.caches = option.Value().([]*url.URL)
 		case identTransferOptionCallback{}:
-			tc.callback = option.Value().(TransferCallbackFunc)
+			tj.callback = option.Value().(TransferCallbackFunc)
 		case identTransferOptionTokenLocation{}:
-			tc.tokenLocation = option.Value().(string)
+			tj.tokenLocation = option.Value().(string)
 		case identTransferOptionAcquireToken{}:
-			tc.skipAcquire = !option.Value().(bool)
+			tj.skipAcquire = !option.Value().(bool)
 		case identTransferOptionToken{}:
 			tj.token = option.Value().(string)
 		}
@@ -1922,6 +1922,9 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 func statHttp(ctx context.Context, dest *url.URL, namespace namespaces.Namespace, token string) (size uint64, err error) {
 	// Parse the writeback host as a URL
 	statHost := namespace.WriteBackHost
+	if len(namespace.SortedDirectorCaches) > 0 {
+		statHost = namespace.SortedDirectorCaches[0].EndpointUrl
+	}
 	if statHost == "" {
 		statHost = namespace.DirListHost
 	}

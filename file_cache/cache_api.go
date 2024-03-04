@@ -28,6 +28,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/pelicanplatform/pelican/param"
@@ -53,7 +54,7 @@ func LaunchListener(ctx context.Context, egrp *errgroup.Group) error {
 	}
 
 	handler := func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != "GET" {
+		if r.Method != "GET" && r.Method != "HEAD" {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
@@ -74,7 +75,17 @@ func LaunchListener(ctx context.Context, egrp *errgroup.Group) error {
 			bearerToken = authzHeader[7:] // len("Bearer ") == 7
 		}
 		path := path.Clean(r.URL.Path)
-		reader, err := sc.Get(path, bearerToken)
+
+		var size uint64
+		var reader io.ReadCloser
+		if r.Method == "HEAD" {
+			size, err = sc.Stat(path, bearerToken)
+			if err == nil {
+				w.Header().Set("Content-Length", strconv.FormatUint(size, 10))
+			}
+		} else {
+			reader, err = sc.Get(path, bearerToken)
+		}
 		if errors.Is(err, authorizationDenied) {
 			w.WriteHeader(http.StatusForbidden)
 			if _, err = w.Write([]byte("Authorization Denied")); err != nil {
@@ -90,6 +101,9 @@ func LaunchListener(ctx context.Context, egrp *errgroup.Group) error {
 			return
 		}
 		w.WriteHeader(http.StatusOK)
+		if r.Method == "HEAD" {
+			return
+		}
 		if _, err = io.Copy(w, reader); err != nil && sendTrailer {
 			// TODO: Enumerate more error values
 			w.Header().Set("X-Transfer-Status", fmt.Sprintf("%d: %s", 500, err))

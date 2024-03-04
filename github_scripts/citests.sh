@@ -54,7 +54,42 @@ EOF
 
 ./stash_plugin -infile $PWD/infile -outfile $PWD/outfile
 
+
+#####################################
+## Test LocalCache in front of OSDF
+#####################################
+SOCKET_DIR="`mktemp -d -t pelican-citest`"
+export PELICAN_FILECACHE_SOCKET=$SOCKET_DIR/socket
+export PELICAN_FILECACHE_DATALOCATION=$SOCKET_DIR/data
+
+./pelican serve -d -f osg-htc.org --module localcache &
+PELICAN_PID=$!
+
+cleanup() {
+    rm -rf -- "$SOCKET_DIR"
+    kill $PELICAN_PID
+    wait $PELICAN_PID || :
+}
+trap cleanup EXIT
+
+sleep 1
+
+NEAREST_CACHE="unix://$SOCKET_DIR/socket" ./stash_plugin -d osdf:///ospool/uc-shared/public/OSG-Staff/validation/test.txt /dev/null
+exit_status=$?
+
+if ! [[ "$exit_status" = 0 ]]; then
+  echo "Cache plugin download failed"
+  exit 1
+fi
+
+if [ ! -e "$SOCKET_DIR/data/ospool/uc-shared/public/OSG-Staff/validation/test.txt.DONE" ]; then
+  echo "Test file not in local cache"
+  exit 1
+fi
+
+########################################
 # Test we return 0 when HOME is not set
+########################################
 OLDHOME=$HOME
 unset HOME
 ./stash_plugin -classad
