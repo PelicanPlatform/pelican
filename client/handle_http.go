@@ -49,6 +49,7 @@ import (
 	"github.com/studio-b12/gowebdav"
 	"github.com/vbauerster/mpb/v8"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/time/rate"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/namespaces"
@@ -1333,6 +1334,11 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 		}
 	} else if req, err = grab.NewRequest(dest, transferUrl.String()); err != nil {
 		return 0, 0, "", errors.Wrap(err, "Failed to create new download request")
+	}
+
+	rateLimit := param.Client_MaximumDownloadSpeed.GetInt()
+	if rateLimit > 0 {
+		req.RateLimiter = rate.NewLimiter(rate.Limit(rateLimit), 64*1024)
 	}
 
 	if token != "" {

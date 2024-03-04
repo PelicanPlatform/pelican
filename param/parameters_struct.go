@@ -37,6 +37,7 @@ type Config struct {
 	Client struct {
 		DisableHttpProxy bool
 		DisableProxyFallback bool
+		MaximumDownloadSpeed int
 		MinimumDownloadSpeed int
 		SlowTransferRampupTime int
 		SlowTransferWindow int
@@ -269,6 +270,7 @@ type configWithType struct {
 	Client struct {
 		DisableHttpProxy struct { Type string; Value bool }
 		DisableProxyFallback struct { Type string; Value bool }
+		MaximumDownloadSpeed struct { Type string; Value int }
 		MinimumDownloadSpeed struct { Type string; Value int }
 		SlowTransferRampupTime struct { Type string; Value int }
 		SlowTransferWindow struct { Type string; Value int }

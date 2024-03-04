@@ -372,6 +372,15 @@ type: int
 default: 102400
 components: ["client"]
 ---
+name: Client.MaximumDownloadSpeed
+description: >-
+  The maximum speed allowed for a client to download a given file (enforced via rate limits).
+  This is not intended for use by production clients but rather for unit tests; 0 disables the rate limit
+type: int
+default: 0
+components: ["client"]
+deprecated: true
+---
 ############################
 #   Origin-level Configs   #
 ############################
