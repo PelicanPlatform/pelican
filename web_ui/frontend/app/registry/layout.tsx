@@ -16,15 +16,17 @@
  *
  ***************************************************************/
 
-import {Box, Tooltip} from "@mui/material";
 
-import {Sidebar} from "@/components/layout/Sidebar";
+import {Box, Tooltip} from "@mui/material";
 import Link from "next/link";
 import Image from "next/image";
+import {Add, Build, TripOrigin, Storage} from "@mui/icons-material";
+
+import {Sidebar} from "@/components/layout/Sidebar";
 import PelicanLogo from "@/public/static/images/PelicanPlatformLogo_Icon.png";
 import IconButton from "@mui/material/IconButton";
-import {Add, Build} from "@mui/icons-material";
-import {Main} from "@/components/layout/Main";
+import {Main} from "@/components/layout/Main"
+import SpeedDial, {SpeedButtonControlledProps} from "@/components/layout/SidebarSpeedDial";
 
 export const metadata = {
     title: 'Pelican Registry',
@@ -36,6 +38,22 @@ export default function RootLayout({
                                    }: {
     children: React.ReactNode
 }) {
+
+    const actions: SpeedButtonControlledProps[] = [
+        {
+            href: "/registry/origin/register/",
+            icon: <TripOrigin/>,
+            text: "Origin",
+            title: "Register a new Origin"
+        },
+        {
+            href: "/registry/cache/register/",
+            icon: <Storage/>,
+            text: "Cache",
+            title: "Register a new Cache"
+        }
+    ]
+
     return (
         <Box display={"flex"} flexDirection={"row"}>
             <Sidebar>
@@ -48,13 +66,7 @@ export default function RootLayout({
                     />
                 </Link>
                 <Box pt={1}>
-                    <Tooltip title={"Register Namespace"} placement={"right"}>
-                        <Link href={"/registry/namespace/register/"}>
-                            <IconButton>
-                                <Add/>
-                            </IconButton>
-                        </Link>
-                    </Tooltip>
+                    <SpeedDial actions={actions}/>
                 </Box>
                 <Box pt={1}>
                     <Tooltip title={"Config"} placement={"right"}>
