@@ -25,6 +25,7 @@ import (
 	"io/fs"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime/debug"
 	"strings"
@@ -459,11 +460,12 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 			resultAd.Set("TransferProtocol", result.Scheme)
 			transfer := jobMap[result.JobId.String()]
 			resultAd.Set("TransferUrl", transfer.url.String())
-			resultAd.Set("TransferFileName", transfer.localFile)
 			if upload {
 				resultAd.Set("TransferType", "upload")
+				resultAd.Set("TransferFileName", path.Base(transfer.localFile))
 			} else {
 				resultAd.Set("TransferType", "download")
+				resultAd.Set("TransferFileName", path.Base(transfer.url.String()))
 			}
 			if result.Error == nil {
 				resultAd.Set("TransferSuccess", true)

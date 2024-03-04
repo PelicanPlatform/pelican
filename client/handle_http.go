@@ -969,7 +969,7 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 	if packOption != "" {
 		log.Debugln("Will use unpack option value", packOption)
 	}
-	remoteUrl := &url.URL{Path: job.job.remoteURL.Path}
+	remoteUrl := &url.URL{Path: job.job.remoteURL.Path, Scheme: job.job.remoteURL.Scheme}
 
 	var transfers []transferAttemptDetails
 	if job.job.upload { // Uploads use the redirected endpoint directly
@@ -1095,9 +1095,11 @@ func runTransferWorker(ctx context.Context, workChan <-chan *clientTransferFile,
 				transferResults, err = downloadObject(file.file)
 			}
 			transferResults.JobId = file.jobId
+			transferResults.Scheme = file.file.remoteURL.Scheme
 			if err != nil {
 				log.Errorf("Error when attempting to transfer object %s for client %s", file.file.remoteURL, file.uuid.String())
 				transferResults = newTransferResults(file.file.job)
+				transferResults.Scheme = file.file.remoteURL.Scheme
 				transferResults.Error = err
 			} else if transferResults.Error == nil {
 				xferErrors := NewTransferErrors()
