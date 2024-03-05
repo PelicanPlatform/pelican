@@ -46,6 +46,7 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) (
 
 	cacheServer := &cache_ui.CacheServer{}
 	err = cacheServer.GetNamespaceAdsFromDirector()
+	cacheServer.SetFilters()
 	if err != nil {
 		return nil, err
 	}

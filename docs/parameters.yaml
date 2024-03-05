@@ -681,6 +681,15 @@ type: int
 default: none
 components: ["cache"]
 ---
+name: Cache.AcceptedNamespaces
+description: >-
+  A list of namespaces the cache is allowed to pull from. If the list is empty, it's assumed that
+  the cache is allowed to access any namespace that's advertised to the director. Otherwise, it will
+  only be allowed to access the listed namespaces.
+type: stringSlice
+default: none
+components: ["cache"]
+---
 ############################
 #  Director-level configs  #
 ############################

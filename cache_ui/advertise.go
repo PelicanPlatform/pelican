@@ -30,11 +30,13 @@ import (
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
+	"github.com/spf13/viper"
 )
 
 type (
 	CacheServer struct {
 		server_utils.NamespaceHolder
+		namespaceFilter map[string]struct{}
 	}
 )
 
@@ -47,6 +49,41 @@ func (server *CacheServer) CreateAdvertisement(name string, originUrl string, or
 	}
 
 	return ad, nil
+}
+
+func (server *CacheServer) SetFilters() {
+	server.namespaceFilter = make(map[string]struct{})
+	if viper.IsSet("Cache.AcceptedNamespaces") {
+		nsList := param.Cache_AcceptedNamespaces.GetStringSlice()
+		for _, ns := range nsList {
+			server.namespaceFilter[ns] = struct{}{}
+		}
+	}
+}
+
+func (server *CacheServer) filterAdsBasedOnNamespace(nsAds []common.NamespaceAdV2) []common.NamespaceAdV2 {
+	filteredAds := []common.NamespaceAdV2{}
+	if len(server.namespaceFilter) > 0 {
+		for _, ad := range nsAds {
+			ns := ad.Path
+			sentinel := true
+			for sentinel {
+				_, exists := server.namespaceFilter[ns]
+				if exists {
+					filteredAds = append(filteredAds, ad)
+					break
+				}
+
+				splitIndex := strings.LastIndex(ns, "/")
+				if splitIndex != -1 && splitIndex != 0 {
+					ns = ns[:splitIndex]
+				} else {
+					sentinel = false
+				}
+			}
+		}
+	}
+	return filteredAds
 }
 
 func (server *CacheServer) GetNamespaceAdsFromDirector() error {
@@ -101,6 +138,10 @@ func (server *CacheServer) GetNamespaceAdsFromDirector() error {
 		if err != nil {
 			return errors.Wrapf(err, "Failed to marshal response in to JSON: %v", err)
 		}
+	}
+
+	if viper.IsSet("Cache.AcceptedNamespaces") {
+		respNS = server.filterAdsBasedOnNamespace(respNS)
 	}
 
 	server.SetNamespaceAds(respNS)

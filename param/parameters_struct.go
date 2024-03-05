@@ -25,6 +25,7 @@ import (
 
 type Config struct {
 	Cache struct {
+		AcceptedNamespaces []string
 		Concurrency int
 		DataLocation string
 		EnableVoms bool
@@ -249,6 +250,7 @@ type Config struct {
 
 type configWithType struct {
 	Cache struct {
+		AcceptedNamespaces struct { Type string; Value []string }
 		Concurrency struct { Type string; Value int }
 		DataLocation struct { Type string; Value string }
 		EnableVoms struct { Type string; Value bool }
