@@ -132,12 +132,12 @@ type (
 		LotName string `json:"lot_name" mapstructure:"LotName"`
 		Owner   string `json:"owner,omitempty" mapstructure:"Owner"`
 		// We don't expose Owners via map structure because that's not something we can configure. It's a derived value
-		Owners         []string        `json:"owners,omitempty"`
-		Parents        []string        `json:"parents" mapstructure:"Parents"`
+		Owners  []string `json:"owners,omitempty"`
+		Parents []string `json:"parents" mapstructure:"Parents"`
 		// While we _could_ expose Children, that complicates things so for now we keep it hidden from the config
-		Children       *[]string       `json:"children,omitempty"`
-		Paths          []LotPaths      `json:"paths,omitempty" mapstructure:"Paths"`
-		MPA            *MPA            `json:"management_policy_attrs,omitempty" mapstructure:"ManagementPolicyAttrs"`
+		Children *[]string  `json:"children,omitempty"`
+		Paths    []LotPaths `json:"paths,omitempty" mapstructure:"Paths"`
+		MPA      *MPA       `json:"management_policy_attrs,omitempty" mapstructure:"ManagementPolicyAttrs"`
 		// Again, these are derived
 		RestrictiveMPA *RestrictiveMPA `json:"restrictive_management_policy_attrs,omitempty"`
 		Usage          *LotUsage       `json:"usage,omitempty"`
@@ -519,7 +519,6 @@ func InitLotman() bool {
 		}
 		log.Infof("Created root lot")
 	}
-
 
 	// Now instantiate any other lots that are in the config
 	for _, lot := range initializedLots {
