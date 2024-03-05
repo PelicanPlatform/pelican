@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/lestrrat-go/httprc"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
@@ -68,10 +67,8 @@ const (
 )
 
 var (
-	federationJWK    *jwk.Cache
-	directorJWK      *jwk.Cache
-	directorMetadata *httprc.Cache
-	authChecker      AuthChecker
+	federationJWK *jwk.Cache
+	authChecker   AuthChecker
 )
 
 func init() {
