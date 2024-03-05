@@ -24,6 +24,7 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -38,9 +39,6 @@ import (
 var yamlMockup string
 
 func setupLotmanFromConf(t *testing.T, readConfig bool, name string) (bool, func()) {
-	lotmanInitSuccess = false
-	lotmanInitTried = false
-
 	// Load in our config
 	if readConfig {
 		viper.Set("Federation.DiscoveryUrl", "https://fake-federation.com")
@@ -68,60 +66,67 @@ func setupLotmanFromConf(t *testing.T, readConfig bool, name string) (bool, func
 // Test the library initializer. NOTE: this also tests CreateLot, which is a part of initialization.
 func TestLotmanInit(t *testing.T) {
 	viper.Reset()
-	defer func() {
-		lotmanInitTried = false
+
+	t.Run("TestBadInit", func(t *testing.T) {
+		// We haven't set various bits needed to create the lots, like discovery URL
+		success, cleanup := setupLotmanFromConf(t, false, "LotmanBadInit")
+		defer cleanup()
+		require.False(t, success)
+	})
+
+	t.Run("TestAlreadyTried", func(t *testing.T) {
+		// Now a test that should pass, except we fail because we only try init once per session
+		lotmanInitTried = true
 		lotmanInitSuccess = false
-		viper.Reset()
-	}()
+		viper.Set("Federation.DiscoveryUrl", "https://fake-federation.com")
+		success, cleanup := setupLotmanFromConf(t, false, "LotmanAlreadyTried")
+		defer cleanup()
+		require.False(t, success)
+	})
 
-	success, cleanup := setupLotmanFromConf(t, false, "LotmanInit")
-	defer cleanup()
-	require.False(t, success)
+	t.Run("TestGoodInit", func(t *testing.T) {
+		// Re-run the test that should pass
+		viper.Set("Log.Level", "debug")
+		viper.Set("Federation.DiscoveryUrl", "https://fake-federation.com")
+		success, cleanup := setupLotmanFromConf(t, false, "LotmanGoodInit")
+		defer cleanup()
+		require.True(t, success)
 
-	// Now a test that should pass, except we fail because we only try init once per session
-	viper.Set("Federation.DiscoveryUrl", "https://fake-federation.com")
-	success = InitLotman()
-	require.False(t, success)
+		// Now that we've initialized (without config) test that we have default/root
+		defaultOutput := make([]byte, 4096)
+		errMsg := make([]byte, 2048)
 
-	// Re-run the test that should pass
-	success, cleanup = setupLotmanFromConf(t, false, "LotmanInit")
-	defer cleanup()
-	require.True(t, success)
+		ret := LotmanGetLotJSON("default", false, &defaultOutput, &errMsg)
+		if ret != 0 {
+			trimBuf(&errMsg)
+			t.Fatalf("Error getting lot JSON: %s", string(errMsg))
+		}
+		trimBuf(&defaultOutput)
+		var defaultLot Lot
+		err := json.Unmarshal(defaultOutput, &defaultLot)
+		require.NoError(t, err, fmt.Sprintf("Error unmarshalling default lot JSON: %s", string(defaultOutput)))
+		require.Equal(t, "default", defaultLot.LotName)
+		require.Equal(t, "https://fake-federation.com", defaultLot.Owner)
+		require.Equal(t, "default", defaultLot.Parents[0])
+		require.Equal(t, 0.0, *(defaultLot.MPA.DedicatedGB))
+		require.Equal(t, int64(0), (defaultLot.MPA.MaxNumObjects.Value))
 
-	// Now that we've initialized (without config) test that we have default/root
-	defaultOutput := make([]byte, 4096)
-	errMsg := make([]byte, 2048)
-
-	ret := LotmanGetLotJSON("default", false, &defaultOutput, &errMsg)
-	if ret != 0 {
-		trimBuf(&errMsg)
-		t.Fatalf("Error getting lot JSON: %s", string(errMsg))
-	}
-	trimBuf(&defaultOutput)
-	var defaultLot Lot
-	err := json.Unmarshal(defaultOutput, &defaultLot)
-	require.NoError(t, err, "Error unmarshalling default lot JSON")
-	require.Equal(t, "default", defaultLot.LotName)
-	require.Equal(t, "https://fake-federation.com", defaultLot.Owner)
-	require.Equal(t, "default", defaultLot.Parents[0])
-	require.Equal(t, 0.0, *(defaultLot.MPA.DedicatedGB))
-	require.Equal(t, int64(0), (defaultLot.MPA.MaxNumObjects.Value))
-
-	rootOutput := make([]byte, 4096)
-	ret = LotmanGetLotJSON("root", false, &rootOutput, &errMsg)
-	if ret != 0 {
-		trimBuf(&errMsg)
-		t.Fatalf("Error getting lot JSON: %s", string(errMsg))
-	}
-	trimBuf(&rootOutput)
-	var rootLot Lot
-	err = json.Unmarshal(rootOutput, &rootLot)
-	require.NoError(t, err, "Error unmarshalling default lot JSON")
-	require.Equal(t, "root", rootLot.LotName)
-	require.Equal(t, "https://fake-federation.com", rootLot.Owner)
-	require.Equal(t, "root", rootLot.Parents[0])
-	require.Equal(t, 0.0, *(rootLot.MPA.DedicatedGB))
-	require.Equal(t, int64(0), (rootLot.MPA.MaxNumObjects.Value))
+		rootOutput := make([]byte, 4096)
+		ret = LotmanGetLotJSON("root", false, &rootOutput, &errMsg)
+		if ret != 0 {
+			trimBuf(&errMsg)
+			t.Fatalf("Error getting lot JSON: %s", string(errMsg))
+		}
+		trimBuf(&rootOutput)
+		var rootLot Lot
+		err = json.Unmarshal(rootOutput, &rootLot)
+		require.NoError(t, err, fmt.Sprintf("Error unmarshalling root lot JSON: %s", string(rootOutput)))
+		require.Equal(t, "root", rootLot.LotName)
+		require.Equal(t, "https://fake-federation.com", rootLot.Owner)
+		require.Equal(t, "root", rootLot.Parents[0])
+		require.Equal(t, 0.0, *(rootLot.MPA.DedicatedGB))
+		require.Equal(t, int64(0), (rootLot.MPA.MaxNumObjects.Value))
+	})
 }
 
 func TestLotmanInitFromConfig(t *testing.T) {
@@ -144,7 +149,7 @@ func TestLotmanInitFromConfig(t *testing.T) {
 	trimBuf(&defaultOutput)
 	var defaultLot Lot
 	err := json.Unmarshal(defaultOutput, &defaultLot)
-	require.NoError(t, err, "Error unmarshalling default lot JSON")
+	require.NoError(t, err, fmt.Sprintf("Error unmarshalling default lot JSON: %s", string(defaultOutput)))
 	require.Equal(t, "default", defaultLot.LotName)
 	require.Equal(t, "https://fake-federation.com", defaultLot.Owner)
 	require.Equal(t, "default", defaultLot.Parents[0])
@@ -161,7 +166,7 @@ func TestLotmanInitFromConfig(t *testing.T) {
 	trimBuf(&rootOutput)
 	var rootLot Lot
 	err = json.Unmarshal(rootOutput, &rootLot)
-	require.NoError(t, err, "Error unmarshalling root lot JSON")
+	require.NoError(t, err, fmt.Sprintf("Error unmarshalling root lot JSON: %s", string(rootOutput)))
 	require.Equal(t, "root", rootLot.LotName)
 	require.Equal(t, "https://fake-federation.com", rootLot.Owner)
 	require.Equal(t, "root", rootLot.Parents[0])
@@ -180,7 +185,7 @@ func TestLotmanInitFromConfig(t *testing.T) {
 	trimBuf(&test1Output)
 	var test1Lot Lot
 	err = json.Unmarshal(test1Output, &test1Lot)
-	require.NoError(t, err, "Error unmarshalling test lot JSON")
+	require.NoError(t, err, fmt.Sprintf("Error unmarshalling test-1 lot JSON: %s", string(test1Output)))
 	require.Equal(t, "test-1", test1Lot.LotName)
 	require.Equal(t, "https://different-fake-federation.com", test1Lot.Owner)
 	require.Equal(t, "root", test1Lot.Parents[0])
@@ -199,7 +204,7 @@ func TestLotmanInitFromConfig(t *testing.T) {
 	trimBuf(&test2Output)
 	var test2Lot Lot
 	err = json.Unmarshal(test2Output, &test2Lot)
-	require.NoError(t, err, "Error unmarshalling test lot JSON")
+	require.NoError(t, err, fmt.Sprintf("Error unmarshalling test-2 lot JSON: %s", string(test2Output)))
 	require.Equal(t, "test-2", test2Lot.LotName)
 	require.Equal(t, "https://another-fake-federation.com", test2Lot.Owner)
 	require.Equal(t, "test-1", test2Lot.Parents[0])
