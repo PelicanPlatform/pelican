@@ -259,6 +259,7 @@ func TestS3OriginConfig(t *testing.T) {
 	viper.Set("Origin.EnableVoms", false)
 	viper.Set("Origin.SelfTest", false)
 	viper.Set("Origin.Port", 0)
+	viper.Set("Server.WebPort", 0)
 	viper.Set("TLSSkipVerify", true)
 
 	mockupCancel := originMockup(ctx, egrp, t)
