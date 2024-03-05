@@ -824,7 +824,7 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 			viper.SetDefault("Cache.RunLocation", filepath.Join("/run", "pelican", "xrootd", "cache"))
 		}
 		viper.SetDefault("Cache.DataLocation", "/run/pelican/xcache")
-		viper.SetDefault("FileCache.RunLocation", filepath.Join("/run", "pelican", "filecache"))
+		viper.SetDefault("LocalCache.RunLocation", filepath.Join("/run", "pelican", "localcache"))
 
 		viper.SetDefault("Origin.Multiuser", true)
 		viper.SetDefault("Director.GeoIPLocation", "/var/cache/pelican/maxmind/GeoLite2-City.mmdb")
@@ -864,12 +864,12 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 			cleanupDirOnShutdown(ctx, runtimeDir)
 		}
 		viper.SetDefault("Cache.DataLocation", filepath.Join(runtimeDir, "xcache"))
-		viper.SetDefault("FileCache.RunLocation", filepath.Join(runtimeDir, "cache"))
+		viper.SetDefault("LocalCache.RunLocation", filepath.Join(runtimeDir, "cache"))
 		viper.SetDefault("Origin.Multiuser", false)
 	}
-	fcRunLocation := viper.GetString("FileCache.RunLocation")
-	viper.SetDefault("FileCache.Socket", filepath.Join(fcRunLocation, "cache.sock"))
-	viper.SetDefault("FileCache.DataLocation", filepath.Join(fcRunLocation, "cache"))
+	fcRunLocation := viper.GetString("LocalCache.RunLocation")
+	viper.SetDefault("LocalCache.Socket", filepath.Join(fcRunLocation, "cache.sock"))
+	viper.SetDefault("LocalCache.DataLocation", filepath.Join(fcRunLocation, "cache"))
 
 	// Any platform-specific paths should go here
 	err := InitServerOSDefaults()

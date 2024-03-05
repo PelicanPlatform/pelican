@@ -16,7 +16,7 @@
  *
  ***************************************************************/
 
-package simple_cache
+package local_cache
 
 import (
 	"context"
@@ -39,7 +39,7 @@ import (
 
 // Launch the unix socket listener as a separate goroutine
 func LaunchListener(ctx context.Context, egrp *errgroup.Group) error {
-	socketName := param.FileCache_Socket.GetString()
+	socketName := param.LocalCache_Socket.GetString()
 	if err := os.MkdirAll(filepath.Dir(socketName), fs.FileMode(0755)); err != nil {
 		return errors.Wrap(err, "failed to create socket directory")
 	}
@@ -48,7 +48,7 @@ func LaunchListener(ctx context.Context, egrp *errgroup.Group) error {
 	if err != nil {
 		return err
 	}
-	sc, err := NewSimpleCache(ctx, egrp)
+	sc, err := NewLocalCache(ctx, egrp)
 	if err != nil {
 		return err
 	}

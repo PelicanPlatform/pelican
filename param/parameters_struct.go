@@ -73,14 +73,6 @@ type Config struct {
 		TopologyReloadInterval time.Duration
 		TopologyUrl string
 	}
-	FileCache struct {
-		DataLocation string
-		HighWaterMarkPercentage int
-		LowWaterMarkPercentage int
-		RunLocation string
-		Size string
-		Socket string
-	}
 	GeoIPOverrides interface{}
 	Issuer struct {
 		AuthenticationSource string
@@ -95,6 +87,14 @@ type Config struct {
 		TomcatLocation string
 	}
 	IssuerKey string
+	LocalCache struct {
+		DataLocation string
+		HighWaterMarkPercentage int
+		LowWaterMarkPercentage int
+		RunLocation string
+		Size string
+		Socket string
+	}
 	Logging struct {
 		Cache struct {
 			Ofs string
@@ -306,14 +306,6 @@ type configWithType struct {
 		TopologyReloadInterval struct { Type string; Value time.Duration }
 		TopologyUrl struct { Type string; Value string }
 	}
-	FileCache struct {
-		DataLocation struct { Type string; Value string }
-		HighWaterMarkPercentage struct { Type string; Value int }
-		LowWaterMarkPercentage struct { Type string; Value int }
-		RunLocation struct { Type string; Value string }
-		Size struct { Type string; Value string }
-		Socket struct { Type string; Value string }
-	}
 	GeoIPOverrides struct { Type string; Value interface{} }
 	Issuer struct {
 		AuthenticationSource struct { Type string; Value string }
@@ -328,6 +320,14 @@ type configWithType struct {
 		TomcatLocation struct { Type string; Value string }
 	}
 	IssuerKey struct { Type string; Value string }
+	LocalCache struct {
+		DataLocation struct { Type string; Value string }
+		HighWaterMarkPercentage struct { Type string; Value int }
+		LowWaterMarkPercentage struct { Type string; Value int }
+		RunLocation struct { Type string; Value string }
+		Size struct { Type string; Value string }
+		Socket struct { Type string; Value string }
+	}
 	Logging struct {
 		Cache struct {
 			Ofs struct { Type string; Value string }

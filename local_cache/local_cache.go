@@ -16,7 +16,7 @@
  *
  ***************************************************************/
 
-package simple_cache
+package local_cache
 
 import (
 	"container/heap"
@@ -48,7 +48,7 @@ import (
 )
 
 type (
-	SimpleCache struct {
+	LocalCache struct {
 		ctx         context.Context
 		egrp        *errgroup.Group
 		te          *client.TransferEngine
@@ -104,7 +104,7 @@ type (
 	}
 
 	cacheReader struct {
-		sc      *SimpleCache
+		sc      *LocalCache
 		offset  int64
 		path    string
 		token   string
@@ -209,15 +209,15 @@ func (ds *downloadStatus) String() string {
 	}
 }
 
-// Create a simple cache object
+// Create a local cache object
 //
 // Launches background goroutines associated with the cache
-func NewSimpleCache(ctx context.Context, egrp *errgroup.Group) (sc *SimpleCache, err error) {
+func NewLocalCache(ctx context.Context, egrp *errgroup.Group) (sc *LocalCache, err error) {
 
 	// Setup cache on disk
-	cacheDir := param.FileCache_DataLocation.GetString()
+	cacheDir := param.LocalCache_DataLocation.GetString()
 	if cacheDir == "" {
-		err = errors.New("FileCache.DataLocation is not set; cannot determine where to place file cache's data")
+		err = errors.New("LocalCache.DataLocation is not set; cannot determine where to place file cache's data")
 		return
 	}
 	if err = os.RemoveAll(cacheDir); err != nil {
@@ -227,7 +227,7 @@ func NewSimpleCache(ctx context.Context, egrp *errgroup.Group) (sc *SimpleCache,
 		return
 	}
 
-	sizeStr := param.FileCache_Size.GetString()
+	sizeStr := param.LocalCache_Size.GetString()
 	var cacheSize uint64
 	if sizeStr == "" || sizeStr == "0" {
 		var stat syscall.Statfs_t
@@ -238,21 +238,21 @@ func NewSimpleCache(ctx context.Context, egrp *errgroup.Group) (sc *SimpleCache,
 		cacheSize = stat.Bavail * uint64(stat.Bsize)
 	} else {
 		var signedCacheSize int64
-		signedCacheSize, err = units.ParseStrictBytes(param.FileCache_Size.GetString())
+		signedCacheSize, err = units.ParseStrictBytes(param.LocalCache_Size.GetString())
 		if err != nil {
 			return
 		}
 		cacheSize = uint64(signedCacheSize)
 	}
-	highWaterPercentage := param.FileCache_HighWaterMarkPercentage.GetInt()
-	lowWaterPercentage := param.FileCache_LowWaterMarkPercentage.GetInt()
+	highWaterPercentage := param.LocalCache_HighWaterMarkPercentage.GetInt()
+	lowWaterPercentage := param.LocalCache_LowWaterMarkPercentage.GetInt()
 
 	directorUrl, err := url.Parse(param.Federation_DirectorUrl.GetString())
 	if err != nil {
 		return
 	}
 
-	sc = &SimpleCache{
+	sc = &LocalCache{
 		ctx:         ctx,
 		egrp:        egrp,
 		te:          client.NewTransferEngine(ctx),
@@ -291,7 +291,7 @@ func NewSimpleCache(ctx context.Context, egrp *errgroup.Group) (sc *SimpleCache,
 //
 // The TransferClient will invoke the callback as it progresses;
 // the callback info will be used to help the waiters progress.
-func (sc *SimpleCache) callback(path string, downloaded int64, size int64, completed bool) {
+func (sc *LocalCache) callback(path string, downloaded int64, size int64, completed bool) {
 	ds := func() (ds *downloadStatus) {
 		sc.mutex.RLock()
 		defer sc.mutex.RUnlock()
@@ -309,7 +309,7 @@ func (sc *SimpleCache) callback(path string, downloaded int64, size int64, compl
 }
 
 // The main goroutine for managing the cache and its requests
-func (sc *SimpleCache) runMux() error {
+func (sc *LocalCache) runMux() error {
 	results := sc.tc.Results()
 
 	type result struct {
@@ -563,7 +563,7 @@ func (sc *SimpleCache) runMux() error {
 	}
 }
 
-func (sc *SimpleCache) purge() {
+func (sc *LocalCache) purge() {
 	heap.Init(&sc.lru)
 	start := time.Now()
 	for sc.cacheSize > sc.lowWater {
@@ -587,7 +587,7 @@ func (sc *SimpleCache) purge() {
 // Given a URL, return a reader from the disk cache
 //
 // If there is no sentinal $NAME.DONE file, then returns nil
-func (sc *SimpleCache) getFromDisk(localPath string) *os.File {
+func (sc *LocalCache) getFromDisk(localPath string) *os.File {
 	localPath = filepath.Join(sc.basePath, path.Clean(localPath))
 	fp, err := os.Open(localPath + ".DONE")
 	if err != nil {
@@ -600,7 +600,7 @@ func (sc *SimpleCache) getFromDisk(localPath string) *os.File {
 	return nil
 }
 
-func (sc *SimpleCache) newCacheReader(path, token string) (reader *cacheReader, err error) {
+func (sc *LocalCache) newCacheReader(path, token string) (reader *cacheReader, err error) {
 	reader = &cacheReader{
 		path:   path,
 		token:  token,
@@ -612,7 +612,7 @@ func (sc *SimpleCache) newCacheReader(path, token string) (reader *cacheReader, 
 }
 
 // Get path from the cache
-func (sc *SimpleCache) Get(path, token string) (io.ReadCloser, error) {
+func (sc *LocalCache) Get(path, token string) (io.ReadCloser, error) {
 	if !sc.ac.authorize(token_scopes.Storage_Read, path, token) {
 		return nil, authorizationDenied
 	}
@@ -625,7 +625,7 @@ func (sc *SimpleCache) Get(path, token string) (io.ReadCloser, error) {
 
 }
 
-func (lc *SimpleCache) Stat(path, token string) (uint64, error) {
+func (lc *LocalCache) Stat(path, token string) (uint64, error) {
 	if !lc.ac.authorize(token_scopes.Storage_Read, path, token) {
 		return 0, authorizationDenied
 	}
@@ -645,7 +645,7 @@ func (lc *SimpleCache) Stat(path, token string) (uint64, error) {
 	return client.DoStat(context.Background(), dUrl.String(), client.WithToken(token))
 }
 
-func (sc *SimpleCache) updateConfig() error {
+func (sc *LocalCache) updateConfig() error {
 	// Get the endpoint of the director
 	var respNS []common.NamespaceAdV2
 
@@ -679,7 +679,7 @@ func (sc *SimpleCache) updateConfig() error {
 }
 
 // Periodically update the cache configuration from the registry
-func (sc *SimpleCache) periodicUpdateConfig() error {
+func (sc *LocalCache) periodicUpdateConfig() error {
 	ticker := time.NewTicker(time.Minute)
 	for {
 		select {

@@ -16,7 +16,7 @@
  *
  ***************************************************************/
 
-package simple_cache
+package local_cache
 
 import (
 	"context"

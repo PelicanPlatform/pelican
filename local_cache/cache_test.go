@@ -16,7 +16,7 @@
  *
  ***************************************************************/
 
-package simple_cache_test
+package local_cache_test
 
 import (
 	"context"
@@ -33,8 +33,8 @@ import (
 
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
-	simple_cache "github.com/pelicanplatform/pelican/file_cache"
 	"github.com/pelicanplatform/pelican/launchers"
+	local_cache "github.com/pelicanplatform/pelican/local_cache"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/token_scopes"
@@ -154,10 +154,10 @@ func TestFedPublicGet(t *testing.T) {
 	ft := fedTest{}
 	ft.spinup(t, ctx, egrp)
 
-	sc, err := simple_cache.NewSimpleCache(ctx, egrp)
+	lc, err := local_cache.NewLocalCache(ctx, egrp)
 	require.NoError(t, err)
 
-	reader, err := sc.Get("/test/hello_world.txt", "")
+	reader, err := lc.Get("/test/hello_world.txt", "")
 	require.NoError(t, err)
 
 	byteBuff, err := io.ReadAll(reader)
@@ -165,7 +165,7 @@ func TestFedPublicGet(t *testing.T) {
 	assert.Equal(t, "Hello, World!", string(byteBuff))
 
 	// Query again -- cache hit case
-	reader, err = sc.Get("/test/hello_world.txt", "")
+	reader, err = lc.Get("/test/hello_world.txt", "")
 	require.NoError(t, err)
 
 	assert.Equal(t, "*os.File", fmt.Sprintf("%T", reader))
@@ -183,7 +183,7 @@ func TestFedAuthGet(t *testing.T) {
 	ft := fedTest{}
 	ft.spinup(t, ctx, egrp)
 
-	lc, err := simple_cache.NewSimpleCache(ctx, egrp)
+	lc, err := local_cache.NewLocalCache(ctx, egrp)
 	require.NoError(t, err)
 
 	reader, err := lc.Get("/test/hello_world.txt", ft.token)
@@ -223,7 +223,7 @@ func TestHttpReq(t *testing.T) {
 
 	transport := config.GetTransport().Clone()
 	transport.DialContext = func(_ context.Context, _, _ string) (net.Conn, error) {
-		return net.Dial("unix", param.FileCache_Socket.GetString())
+		return net.Dial("unix", param.LocalCache_Socket.GetString())
 	}
 
 	client := &http.Client{Transport: transport}
@@ -251,7 +251,7 @@ func TestClient(t *testing.T) {
 
 	cacheUrl := &url.URL{
 		Scheme: "unix",
-		Path:   param.FileCache_Socket.GetString(),
+		Path:   param.LocalCache_Socket.GetString(),
 	}
 
 	discoveryHost := param.Federation_DiscoveryUrl.GetString()
@@ -278,7 +278,7 @@ func TestStat(t *testing.T) {
 	ft := fedTest{}
 	ft.spinup(t, ctx, egrp)
 
-	lc, err := simple_cache.NewSimpleCache(ctx, egrp)
+	lc, err := local_cache.NewLocalCache(ctx, egrp)
 	require.NoError(t, err)
 
 	size, err := lc.Stat("/test/hello_world.txt", "")
@@ -309,7 +309,7 @@ func TestLargeFile(t *testing.T) {
 
 	cacheUrl := &url.URL{
 		Scheme: "unix",
-		Path:   param.FileCache_Socket.GetString(),
+		Path:   param.LocalCache_Socket.GetString(),
 	}
 
 	fp, err := os.OpenFile(filepath.Join(ft.originDir, "hello_world.txt"), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)

@@ -618,49 +618,55 @@ default: path
 components: ["origin"]
 ---
 ############################
-#   File-cache configs     #
+#   Local cache configs    #
 ############################
-name: FileCache.RunLocation
+name: LocalCache.RunLocation
 description: >-
-  The directory for the runtime files of the file cache
-type: string
-root_default: /run/pelican/filecache
-default: $XDG_RUNTIME_DIR/pelican/filecache
+  The directory for the runtime files of the local cache
+type: filename
+root_default: /run/pelican/localcache
+default: $XDG_RUNTIME_DIR/pelican/localcache
+components: ["localcache"]
 ---
-name: FileCache.DataLocation
+name: LocalCache.DataLocation
 description: >-
   The directory for the location of the cache data files - this is where the actual data in the cache is stored
-  for the file cache.
-type: string
-default: $PELICAN_FILECACHE_RUNLOCATION/cache
+  for the local cache.
+type: filename
+default: $PELICAN_LOCALCACHE_RUNLOCATION/cache
+components: ["localcache"]
 ---
-name: FileCache.Socket
+name: LocalCache.Socket
 description: >-
-  The location of the socket used for client communication for the file cache
-type: string
-default: $PELICAN_FILECACHE_RUNLOCATION/cache.sock
+  The location of the socket used for client communication for the local cache
+type: filename
+default: $PELICAN_LOCALCACHE_RUNLOCATION/cache.sock
+components: ["localcache"]
 ---
-name: FileCache.Size
+name: LocalCache.Size
 description: >-
-  The maximum size of the file cache.  If not set, it is assumed the entire device can be used.
+  The maximum size of the local cache.  If not set, it is assumed the entire device can be used.
 type: string
 default: 0
+components: ["localcache"]
 ---
-name: FileCache.HighWaterMarkPercentage
+name: LocalCache.HighWaterMarkPercentage
 description: >-
   A percentage value where the cache cleanup routines will triggered.  Once the cache usage
   of completed files hits the high water mark, files will be deleted until the usage hits the
   low water mark.
 type: int
 default: 95
+components: ["localcache"]
 ---
-name: FileCache.LowWaterMarkPercentage
+name: LocalCache.LowWaterMarkPercentage
 description: >-
   A percentage value where the cache cleanup routines will complete.  Once the cache usage
   of completed files hits the high water mark, files will be deleted until the usage hits the
   low water mark.
 type: int
 default: 85
+components: ["localcache"]
 ---
 ############################
 #   Cache-level configs    #
