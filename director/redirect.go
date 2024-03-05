@@ -29,17 +29,17 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/pelicanplatform/pelican/common"
-	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/token"
-	"github.com/pelicanplatform/pelican/token_scopes"
-	"golang.org/x/sync/errgroup"
-
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
 	"github.com/hashicorp/go-version"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
+
+	"github.com/pelicanplatform/pelican/common"
+	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/token"
+	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
 type (
@@ -216,7 +216,7 @@ func redirectToCache(ginCtx *gin.Context) {
 		return
 	}
 
-	authzBearerEscaped := utils.GetAuthzEscaped(ginCtx)
+	authzBearerEscaped := token.GetAuthzEscaped(ginCtx)
 
 	namespaceAd, originAds, cacheAds := getAdsForPath(reqPath)
 	// if GetAdsForPath doesn't find any ads because the prefix doesn't exist, we should
@@ -329,7 +329,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		return
 	}
 
-	authzBearerEscaped := utils.GetAuthzEscaped(ginCtx)
+	authzBearerEscaped := token.GetAuthzEscaped(ginCtx)
 
 	namespaceAd, originAds, _ := getAdsForPath(reqPath)
 	// if GetAdsForPath doesn't find any ads because the prefix doesn't exist, we should
