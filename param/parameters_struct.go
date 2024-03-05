@@ -120,6 +120,7 @@ type Config struct {
 	}
 	Lotman struct {
 		DbLocation string
+		EnableAPI bool
 		LibLocation string
 		Lots interface{}
 	}
@@ -372,6 +373,7 @@ type configWithType struct {
 	}
 	Lotman struct {
 		DbLocation struct { Type string; Value string }
+		EnableAPI struct { Type string; Value bool }
 		LibLocation struct { Type string; Value string }
 		Lots struct { Type string; Value interface{} }
 	}

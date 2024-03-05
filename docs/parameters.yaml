@@ -1946,6 +1946,14 @@ type: filename
 default: none
 components: ["cache"]
 ---
+name: Lotman.EnableAPI
+description: >-
+  Whether Lotman should enable its CRUD web endpoints. If true, administrators with an appropriately signed token interface
+  with Lotman via HTTP. Otherwise, lots are only configurable via the Pelican configuration file at the cache.
+type: bool
+default: false
+components: ["cache"]
+---
 name: Lotman.Lots
 description: >-
   Declarative configuration for LotMan.  This is a list of objects, each of which describes a "lot". Every lot
