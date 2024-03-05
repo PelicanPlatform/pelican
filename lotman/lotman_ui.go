@@ -35,12 +35,12 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 // Given a token and a list of authorized callers, check that the token is signed by one of the authorized callers. Return
@@ -244,7 +244,7 @@ func VerifyNewLotToken(lot *Lot, strToken string) (bool, error) {
 
 	// Get the namespace from the X-Pelican-Namespace header
 	namespaceHeader := resp.Header.Values("X-Pelican-Namespace")
-	xPelicanNamespaceMap := client.HeaderParser(namespaceHeader[0])
+	xPelicanNamespaceMap := utils.HeaderParser(namespaceHeader[0])
 	namespace := xPelicanNamespaceMap["namespace"]
 
 	// Get the issuer URL for that namespace
