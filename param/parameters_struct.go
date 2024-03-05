@@ -66,7 +66,6 @@ type Config struct {
 		DirectorUrl string
 		DiscoveryUrl string
 		JwkUrl string
-		NamespaceUrl string
 		RegistryUrl string
 		TopologyNamespaceUrl string
 		TopologyReloadInterval time.Duration
@@ -291,7 +290,6 @@ type configWithType struct {
 		DirectorUrl struct { Type string; Value string }
 		DiscoveryUrl struct { Type string; Value string }
 		JwkUrl struct { Type string; Value string }
-		NamespaceUrl struct { Type string; Value string }
 		RegistryUrl struct { Type string; Value string }
 		TopologyNamespaceUrl struct { Type string; Value string }
 		TopologyReloadInterval struct { Type string; Value time.Duration }

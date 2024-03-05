@@ -86,7 +86,6 @@ var (
 	Federation_DirectorUrl = StringParam{"Federation.DirectorUrl"}
 	Federation_DiscoveryUrl = StringParam{"Federation.DiscoveryUrl"}
 	Federation_JwkUrl = StringParam{"Federation.JwkUrl"}
-	Federation_NamespaceUrl = StringParam{"Federation.NamespaceUrl"}
 	Federation_RegistryUrl = StringParam{"Federation.RegistryUrl"}
 	Federation_TopologyNamespaceUrl = StringParam{"Federation.TopologyNamespaceUrl"}
 	Federation_TopologyUrl = StringParam{"Federation.TopologyUrl"}
