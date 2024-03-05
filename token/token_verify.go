@@ -358,7 +358,6 @@ func GetJWKSFromIssUrl(issuer string) (*jwk.Set, error) {
 	if err != nil {
 		return nil, errors.Wrapf(err, "Error reading response body from %s", pubkeyUrlStr)
 	}
-	fmt.Printf("\n\n\nJWKS STRING: %s\n\n\n", string(jwksStr))
 	kSet, err := jwk.ParseString(string(jwksStr))
 	if err != nil {
 		return nil, errors.Wrapf(err, "Error parsing JWKs from %s", pubkeyUrlStr)

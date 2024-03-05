@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build darwin || (linux && ppc64le)
 
 /***************************************************************
  *
@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 
@@ -59,15 +58,6 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 	err = launcher_utils.CheckDefaults(cacheServer)
 	if err != nil {
 		return nil, err
-	}
-
-	// Register Lotman
-	if param.Cache_EnableLotman.GetBool() {
-		lotman.RegisterLotman(ctx, engine.Group("/"))
-		success := lotman.InitLotman()
-		if !success {
-			return nil, errors.New("Failed to initialize lotman")
-		}
 	}
 
 	broker.RegisterBrokerCallback(ctx, engine.Group("/"))

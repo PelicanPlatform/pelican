@@ -1933,6 +1933,18 @@ description: >-
 type: filename
 root_default: /var/run/pelican
 default: $ConfigBase
+components: ["cache"]
+---
+name: Lotman.LibLocation
+description: >-
+  The location of the system's installed LotMan library (libLotMan.so). When unset, the system will attempt to find Lotman
+  at these fallback paths:
+  - /usr/lib64/libLotMan.so
+  - /usr/local/lib64/libLotMan.so
+  - /opt/local/lib64/libLotMan.so
+type: filename
+default: none
+components: ["cache"]
 ---
 name: Lotman.Lots
 description: >-
