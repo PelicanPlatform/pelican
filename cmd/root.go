@@ -103,7 +103,6 @@ func Execute() error {
 		log.Errorln("Fatal error occurred that lead to the shutdown of the process:", egrpErr)
 		return egrpErr
 	} else {
-		fmt.Println("Pelican clean up finished")
 		return exeErr
 	}
 }
