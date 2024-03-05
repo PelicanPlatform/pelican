@@ -51,6 +51,14 @@ type xrootdTest struct {
 func (x *xrootdTest) setup() {
 	viper.Reset()
 	config.InitConfig()
+	dirname, err := os.MkdirTemp("", "tmpDir")
+	require.NoError(x.T, err)
+	x.T.Cleanup(func() {
+		os.RemoveAll(dirname)
+	})
+	viper.Set("Xrootd.RunLocation", dirname)
+	viper.Set("Cache.RunLocation", dirname)
+	viper.Set("Origin.RunLocation", dirname)
 	var cancel context.CancelFunc
 	var egrp *errgroup.Group
 	x.ctx, cancel, egrp = test_utils.TestContext(context.Background(), x.T)
@@ -63,7 +71,11 @@ func TestXrootDOriginConfig(t *testing.T) {
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
 
-	dirname := t.TempDir()
+	dirname, err := os.MkdirTemp("", "tmpDir")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		os.RemoveAll(dirname)
+	})
 	viper.Reset()
 	viper.Set("Origin.RunLocation", dirname)
 	viper.Set("Xrootd.RunLocation", dirname)
@@ -78,8 +90,6 @@ func TestXrootDOriginConfig(t *testing.T) {
 
 		// Set our config
 		viper.Set("Logging.Origin.Cms", "debug")
-		dirname := t.TempDir()
-		viper.Set("Xrootd.RunLocation", dirname)
 
 		// Generate the xrootd config
 		configPath, err := ConfigXrootd(ctx, true)
@@ -103,8 +113,6 @@ func TestXrootDOriginConfig(t *testing.T) {
 
 		// Set our config
 		viper.Set("Logging.Origin.Cms", "degub")
-		dirname := t.TempDir()
-		viper.Set("Xrootd.RunLocation", dirname)
 
 		// Generate the xrootd config
 		configPath, err := ConfigXrootd(ctx, true)
@@ -119,8 +127,6 @@ func TestXrootDOriginConfig(t *testing.T) {
 
 		// Set our config
 		viper.Set("Logging.Origin.Scitokens", "debug")
-		dirname := t.TempDir()
-		viper.Set("Xrootd.RunLocation", dirname)
 
 		// Generate the xrootd config
 		configPath, err := ConfigXrootd(ctx, true)
@@ -144,8 +150,6 @@ func TestXrootDOriginConfig(t *testing.T) {
 
 		// Set our config
 		viper.Set("Logging.Origin.Scitokens", "degub")
-		dirname := t.TempDir()
-		viper.Set("Xrootd.RunLocation", dirname)
 
 		// Generate the xrootd config
 		configPath, err := ConfigXrootd(ctx, true)
@@ -160,8 +164,6 @@ func TestXrootDOriginConfig(t *testing.T) {
 
 		// Set our config
 		viper.Set("Logging.Origin.Xrd", "debug")
-		dirname := t.TempDir()
-		viper.Set("Xrootd.RunLocation", dirname)
 
 		// Generate the xrootd config
 		configPath, err := ConfigXrootd(ctx, true)
@@ -185,8 +187,6 @@ func TestXrootDOriginConfig(t *testing.T) {
 
 		// Set our config
 		viper.Set("Logging.Origin.Xrd", "degub")
-		dirname := t.TempDir()
-		viper.Set("Xrootd.RunLocation", dirname)
 
 		// Generate the xrootd config
 		configPath, err := ConfigXrootd(ctx, true)
@@ -201,8 +201,6 @@ func TestXrootDOriginConfig(t *testing.T) {
 
 		// Set our config
 		viper.Set("Logging.Origin.Xrootd", "debug")
-		dirname := t.TempDir()
-		viper.Set("Xrootd.RunLocation", dirname)
 
 		// Generate the xrootd config
 		configPath, err := ConfigXrootd(ctx, true)
@@ -226,8 +224,6 @@ func TestXrootDOriginConfig(t *testing.T) {
 
 		// Set our config
 		viper.Set("Logging.Origin.Xrootd", "degub")
-		dirname := t.TempDir()
-		viper.Set("Xrootd.RunLocation", dirname)
 
 		// Generate the xrootd config
 		configPath, err := ConfigXrootd(ctx, true)
@@ -242,10 +238,14 @@ func TestXrootDCacheConfig(t *testing.T) {
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
 
-	dirname := t.TempDir()
+	dirname, err := os.MkdirTemp("", "tmpDir")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		os.RemoveAll(dirname)
+	})
 	viper.Reset()
-	config.InitConfig()
 	viper.Set("Cache.RunLocation", dirname)
+	config.InitConfig()
 	configPath, err := ConfigXrootd(ctx, false)
 	require.NoError(t, err)
 	assert.NotNil(t, configPath)
@@ -256,8 +256,6 @@ func TestXrootDCacheConfig(t *testing.T) {
 
 		// Set our config
 		viper.Set("Cache.Concurrency", 10)
-		dirname := t.TempDir()
-		viper.Set("Cache.RunLocation", dirname)
 
 		// Generate the xrootd config
 		configPath, err := ConfigXrootd(ctx, false)
@@ -279,10 +277,6 @@ func TestXrootDCacheConfig(t *testing.T) {
 	t.Run("TestCacheThrottlePluginDisabled", func(t *testing.T) {
 		xrootd := xrootdTest{T: t}
 		xrootd.setup()
-
-		// Set our config
-		dirname := t.TempDir()
-		viper.Set("Cache.RunLocation", dirname)
 
 		// Generate the xrootd config
 		configPath, err := ConfigXrootd(ctx, false)
@@ -307,10 +301,7 @@ func TestXrootDCacheConfig(t *testing.T) {
 		xrootd.setup()
 
 		// Set our config
-		viper.Set("Cache.Concurrency", 10)
 		viper.Set("Logging.Cache.Ofs", "debug")
-		dirname := t.TempDir()
-		viper.Set("Xrootd.RunLocation", dirname)
 
 		// Generate the xrootd config
 		configPath, err := ConfigXrootd(ctx, false)
@@ -334,8 +325,6 @@ func TestXrootDCacheConfig(t *testing.T) {
 
 		// Set our config
 		viper.Set("Logging.Cache.Ofs", "degub")
-		dirname := t.TempDir()
-		viper.Set("Xrootd.RunLocation", dirname)
 
 		// Generate the xrootd config
 		configPath, err := ConfigXrootd(ctx, false)
@@ -349,8 +338,6 @@ func TestXrootDCacheConfig(t *testing.T) {
 
 		// Set our config
 		viper.Set("Logging.Cache.Pfc", "debug")
-		dirname := t.TempDir()
-		viper.Set("Xrootd.RunLocation", dirname)
 
 		// Generate the xrootd config
 		configPath, err := ConfigXrootd(ctx, false)
@@ -374,8 +361,6 @@ func TestXrootDCacheConfig(t *testing.T) {
 
 		// Set our config
 		viper.Set("Logging.Cache.Pfc", "degub")
-		dirname := t.TempDir()
-		viper.Set("Xrootd.RunLocation", dirname)
 
 		// Generate the xrootd config
 		configPath, err := ConfigXrootd(ctx, true)
@@ -390,8 +375,6 @@ func TestXrootDCacheConfig(t *testing.T) {
 
 		// Set our config
 		viper.Set("Logging.Cache.Pss", "debug")
-		dirname := t.TempDir()
-		viper.Set("Xrootd.RunLocation", dirname)
 
 		// Generate the xrootd config
 		configPath, err := ConfigXrootd(ctx, false)
@@ -415,8 +398,6 @@ func TestXrootDCacheConfig(t *testing.T) {
 
 		// Set our config
 		viper.Set("Logging.Cache.Pss", "degub")
-		dirname := t.TempDir()
-		viper.Set("Xrootd.RunLocation", dirname)
 
 		// Generate the xrootd config
 		configPath, err := ConfigXrootd(ctx, false)
@@ -430,8 +411,6 @@ func TestXrootDCacheConfig(t *testing.T) {
 
 		// Set our config
 		viper.Set("Logging.Cache.Scitokens", "debug")
-		dirname := t.TempDir()
-		viper.Set("Xrootd.RunLocation", dirname)
 
 		// Generate the xrootd config
 		configPath, err := ConfigXrootd(ctx, false)
@@ -455,8 +434,6 @@ func TestXrootDCacheConfig(t *testing.T) {
 
 		// Set our config
 		viper.Set("Logging.Cache.Scitokens", "degub")
-		dirname := t.TempDir()
-		viper.Set("Xrootd.RunLocation", dirname)
 
 		// Generate the xrootd config
 		configPath, err := ConfigXrootd(ctx, false)
@@ -470,8 +447,6 @@ func TestXrootDCacheConfig(t *testing.T) {
 
 		// Set our config
 		viper.Set("Logging.Cache.Xrd", "debug")
-		dirname := t.TempDir()
-		viper.Set("Xrootd.RunLocation", dirname)
 
 		// Generate the xrootd config
 		configPath, err := ConfigXrootd(ctx, false)
@@ -495,8 +470,6 @@ func TestXrootDCacheConfig(t *testing.T) {
 
 		// Set our config
 		viper.Set("Logging.Cache.Xrd", "degub")
-		dirname := t.TempDir()
-		viper.Set("Xrootd.RunLocation", dirname)
 
 		// Generate the xrootd config
 		configPath, err := ConfigXrootd(ctx, false)
@@ -510,8 +483,6 @@ func TestXrootDCacheConfig(t *testing.T) {
 
 		// Set our config
 		viper.Set("Logging.Cache.Xrootd", "debug")
-		dirname := t.TempDir()
-		viper.Set("Xrootd.RunLocation", dirname)
 
 		// Generate the xrootd config
 		configPath, err := ConfigXrootd(ctx, false)
@@ -535,8 +506,6 @@ func TestXrootDCacheConfig(t *testing.T) {
 
 		// Set our config
 		viper.Set("Logging.Cache.Xrootd", "degub")
-		dirname := t.TempDir()
-		viper.Set("Xrootd.RunLocation", dirname)
 
 		// Generate the xrootd config
 		configPath, err := ConfigXrootd(ctx, false)
