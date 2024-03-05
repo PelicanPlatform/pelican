@@ -107,6 +107,8 @@ type Config struct {
 	}
 	Lotman struct {
 		DbLocation string
+		LibLocation string
+		Lots interface{}
 	}
 	MinimumDownloadSpeed int
 	Monitoring struct {
@@ -335,6 +337,8 @@ type configWithType struct {
 	}
 	Lotman struct {
 		DbLocation struct { Type string; Value string }
+		LibLocation struct { Type string; Value string }
+		Lots struct { Type string; Value interface{} }
 	}
 	MinimumDownloadSpeed struct { Type string; Value int }
 	Monitoring struct {

@@ -1,4 +1,4 @@
-//go:build !windows && !darwin
+//go:build linux && !ppc64le
 
 /***************************************************************
 *
@@ -24,26 +24,16 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-
-	"net/http"
-	"net/url"
+	"os"
 	"runtime"
-	"strings"
 	"sync"
 	"unsafe"
 
 	"github.com/ebitengine/purego"
-	// "github.com/lestrrat-go/jwx/v2/jwa"
-	// "github.com/lestrrat-go/jwx/v2/jwk"
-	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/pelicanplatform/pelican/client"
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/token_scopes"
-	"github.com/pelicanplatform/pelican/utils"
 )
 
 var (
@@ -53,6 +43,8 @@ var (
 	// Global vars used for one-time Lotman lib initialization
 	lotmanInitTried   = false
 	lotmanInitSuccess = false
+
+	initializedLots []Lot
 
 	// Lotman func signatures we'll bind to the underlying C headers
 	LotmanVersion func() string
@@ -82,8 +74,8 @@ type (
 	}
 
 	LotPaths struct {
-		Path      string `json:"path"`
-		Recursive bool   `json:"recursive"`
+		Path      string `json:"path" mapstructure:"Path"`
+		Recursive bool   `json:"recursive" mapstructure:"Recursive"`
 		LotName   string `json:"lot_name,omitempty"`
 	}
 
@@ -98,12 +90,12 @@ type (
 	}
 
 	MPA struct {
-		DedicatedGB     *float64        `json:"dedicated_GB,omitempty"`
-		OpportunisticGB *float64        `json:"opportunistic_GB,omitempty"`
-		MaxNumObjects   *Int64FromFloat `json:"max_num_objects,omitempty"`
-		CreationTime    *Int64FromFloat `json:"creation_time,omitempty"`
-		ExpirationTime  *Int64FromFloat `json:"expiration_time,omitempty"`
-		DeletionTime    *Int64FromFloat `json:"deletion_time,omitempty"`
+		DedicatedGB     *float64        `json:"dedicated_GB,omitempty" mapstructure:"DedicatedGB"`
+		OpportunisticGB *float64        `json:"opportunistic_GB,omitempty" mapstructure:"OpportunisticGB"`
+		MaxNumObjects   *Int64FromFloat `json:"max_num_objects,omitempty" mapstructure:"MaxNumObjects"`
+		CreationTime    *Int64FromFloat `json:"creation_time,omitempty" mapstructure:"CreationTime"`
+		ExpirationTime  *Int64FromFloat `json:"expiration_time,omitempty" mapstructure:"ExpirationTime"`
+		DeletionTime    *Int64FromFloat `json:"deletion_time,omitempty" mapstructure:"DeletionTime"`
 	}
 
 	RestrictiveMPA struct {
@@ -137,13 +129,16 @@ type (
 	}
 
 	Lot struct {
-		LotName        string          `json:"lot_name"`
-		Owner          string          `json:"owner,omitempty"`
+		LotName string `json:"lot_name" mapstructure:"LotName"`
+		Owner   string `json:"owner,omitempty" mapstructure:"Owner"`
+		// We don't expose Owners via map structure because that's not something we can configure. It's a derived value
 		Owners         []string        `json:"owners,omitempty"`
-		Parents        []string        `json:"parents"`
+		Parents        []string        `json:"parents" mapstructure:"Parents"`
+		// While we _could_ expose Children, that complicates things so for now we keep it hidden from the config
 		Children       *[]string       `json:"children,omitempty"`
-		Paths          []LotPaths      `json:"paths,omitempty"`
-		MPA            *MPA            `json:"management_policy_attrs,omitempty"`
+		Paths          []LotPaths      `json:"paths,omitempty" mapstructure:"Paths"`
+		MPA            *MPA            `json:"management_policy_attrs,omitempty" mapstructure:"ManagementPolicyAttrs"`
+		// Again, these are derived
 		RestrictiveMPA *RestrictiveMPA `json:"restrictive_management_policy_attrs,omitempty"`
 		Usage          *LotUsage       `json:"usage,omitempty"`
 	}
@@ -233,17 +228,34 @@ func trimBuf(buf *[]byte) {
 
 // Use the detected runtime to predict the location of the LotMan library.
 func getLotmanLib() string {
+	fallbackPaths := []string{
+		"/usr/lib64/libLotMan.so",
+		"/usr/local/lib64/libLotMan.so",
+		"/opt/local/lib64/libLotMan.so",
+	}
+
 	switch runtime.GOOS {
-	// case "darwin":
-	// 	return "calc.dylib"
 	case "linux":
-		return "/usr/lib64/libLotMan.so"
+		configuredPath := param.Lotman_LibLocation.GetString()
+		if configuredPath != "" {
+			if _, err := os.Stat(configuredPath); err == nil {
+				return configuredPath
+			}
+			log.Errorln("libLotMan.so not found in configured path, attempting to find using known fallbacks")
+		}
+
+		for _, path := range fallbackPaths {
+			if _, err := os.Stat(path); err == nil {
+				return path
+			}
+		}
+		panic("libLotMan.so not found in any of the known paths")
 	default:
 		panic(fmt.Errorf("GOOS=%s is not supported", runtime.GOOS))
 	}
 }
 
-func getAuthorizedCallers(lotName string) (*[]string, error) {
+func GetAuthorizedCallers(lotName string) (*[]string, error) {
 	// A caller is authorized if they own a parent of the lot. In the case of self-parenting lots, the owner is authorized.
 	errMsg := make([]byte, 2048)
 	cParents := unsafe.Pointer(nil)
@@ -261,8 +273,6 @@ func getAuthorizedCallers(lotName string) (*[]string, error) {
 	owners := []string{}
 	internalOwners := []string{}
 	for _, parent := range parents {
-		fmt.Printf("Parent: %s\n", string(parent))
-
 		cOwners := unsafe.Pointer(nil)
 		LotmanGetLotOwners(parent, true, &cOwners, &errMsg)
 		if ret != 0 {
@@ -283,308 +293,6 @@ func getAuthorizedCallers(lotName string) (*[]string, error) {
 	}
 
 	return &owners, nil
-}
-
-// Given a token and a list of authorized callers, check that the token is signed by one of the authorized callers. Return
-// a pointer to the parsed token.
-func tokenSignedByAuthorizedCaller(strToken string, authorizedCallers *[]string) (bool, *jwt.Token, error) {
-	ownerFound := false
-	var tok jwt.Token
-	for _, owner := range *authorizedCallers {
-		kSet, err := utils.GetJWKSFromIssUrl(owner)
-		if err != nil {
-			log.Debugf("Error getting JWKS for owner %s: %v", owner, err)
-			continue
-		}
-		tok, err = jwt.Parse([]byte(strToken), jwt.WithKeySet(*kSet), jwt.WithValidate(true))
-		if err != nil {
-			log.Debugf("Token verification failed with owner %s: %v -- skipping", owner, err)
-			continue
-		}
-		ownerFound = true
-		break
-	}
-
-	if !ownerFound {
-		return false, nil, errors.New("token not signed by any of the owners of any parent lot")
-	}
-
-	return true, &tok, nil
-}
-
-// Verify that a token received is a valid token. Upon verification, we set the lot's parents/owner to the
-// appropriate values. Returns true if the token is valid, false otherwise.
-func VerifyNewLotToken(lot *Lot, strToken string) (bool, error) {
-	tokenApproved := false
-
-	// Get the path associated with the lot (right now we assume/enforce a single path) and try
-	// to deduce a namespace prefix from that. We'll use that namespace prefix's issuer as the
-	// owner of the lot. If there is no associated isuer, we assign ownership to the federation
-
-	path := ((lot.Paths)[0]).Path
-	log.Debugf("Attempting to add lot for path: %s", path)
-	errMsg := make([]byte, 2048)
-	lots := unsafe.Pointer(nil)
-	// Pass a pointer to the first element of the slice to the C++ function.
-	ret := LotmanGetLotsFromDir(path, false, &lots, &errMsg)
-	if ret != 0 {
-		trimBuf(&errMsg)
-		return false, errors.Errorf("Error getting lot JSON: %s", string(errMsg))
-	}
-
-	goLots := cArrToGoArr(&lots)
-
-	// Check if goOut[0] is "default". Lotman should ALWAYS put something in this array. If it's empty, we have a problem.
-	if goLots[0] == "default" {
-		// We'll assign to the root lot. However, be careful here because we make an assumption -- under the hood,
-		// Lotman will return "default" if there's no other lot, or if the actual path is in some way assigned to
-		// the default lot. When we assign to parent to root here, we're assuming the former. This implies we should stay
-		// away from assigning paths to the default lot.
-		lot.Parents = []string{"root"}
-	} else {
-		// We found a different logical parent
-		lot.Parents = goLots
-	}
-
-	var tok jwt.Token
-	if len(lot.Parents) == 0 && lot.Parents[0] == "root" {
-		// We check that the token is signed by the federation
-		// First check for discovery URL and then for director URL, both of which should host the federation's pubkey
-		issuerUrl := param.Federation_DiscoveryUrl.GetString()
-		if issuerUrl == "" {
-			issuerUrl = param.Federation_DirectorUrl.GetString()
-			if issuerUrl == "" {
-				return false, errors.New("Federation discovery URL and director URL are not set")
-			}
-			log.Debugln("Federation discovery URL is not set, using director URL as lot token issuer")
-		}
-
-		kSet, err := utils.GetJWKSFromIssUrl(issuerUrl)
-		if err != nil {
-			return false, errors.Wrap(err, "Error getting JWKS from issuer URL")
-		}
-
-		tok, err = jwt.Parse([]byte(strToken), jwt.WithKeySet(*kSet), jwt.WithValidate(true))
-		if err != nil {
-			return false, errors.Wrap(err, "Error parsing token")
-		}
-	} else {
-
-		// For each parent that might be here, get all owners and check that the token is signed by one of them
-		owners := []string{}
-		internalOwners := []string{}
-		for _, parent := range lot.Parents {
-			cOwners := unsafe.Pointer(nil)
-			LotmanGetLotOwners(parent, true, &cOwners, &errMsg)
-			if ret != 0 {
-				trimBuf(&errMsg)
-				return false, errors.Errorf("Error getting lot JSON: %s", string(errMsg))
-			}
-			internalOwners = append(internalOwners, cArrToGoArr(&cOwners)...)
-		}
-
-		// Handle possible duplicates
-		occurred := map[string]bool{}
-		for e := range internalOwners {
-			if !occurred[internalOwners[e]] {
-				occurred[internalOwners[e]] = true
-				owners = append(owners, internalOwners[e])
-			}
-		}
-
-		ownerFound := false
-		for _, owner := range owners {
-			kSet, err := utils.GetJWKSFromIssUrl(owner)
-
-			// Print the kSet as a string for debugging
-			kSetStr, _ := json.Marshal(kSet)
-			log.Debugf("JWKS for owner %s: %s", owner, string(kSetStr))
-			if err != nil {
-				log.Debugf("Error getting JWKS for owner %s: %v", owner, err)
-				continue
-			}
-			tok, err = jwt.Parse([]byte(strToken), jwt.WithKeySet(*kSet), jwt.WithValidate(true))
-			if err != nil {
-				log.Debugf("Token verification failed with owner %s: %v -- skipping", owner, err)
-				continue
-			}
-			ownerFound = true
-			break
-		}
-
-		if !ownerFound {
-			return false, errors.New("token not signed by any of the owners of any parent lot")
-		}
-	}
-
-	// We've determined the token is signed by someone we like, now to check that it has the correct lot.create permission!
-	scope_any, present := tok.Get("scope")
-	if !present {
-		return false, errors.New("No scope claim in token")
-	}
-	scope, ok := scope_any.(string)
-	if !ok {
-		return false, errors.New("scope claim in token is not string-valued")
-	}
-	scopes := strings.Split(scope, " ")
-	for _, scope := range scopes {
-		if scope == token_scopes.Lot_Create.String() {
-			tokenApproved = true
-			break
-		}
-	}
-
-	if !tokenApproved {
-		return false, errors.New("The token was correctly signed but did not possess the necessary lot.create scope")
-	}
-
-	// At this point, we have a good token, now we need to get the appropriate owner for the lot.
-	// To do this, we get a namespace from the path and then get the issuer for that namespace. If no
-	// namespace exists, we'll assign ownership to the federation.
-
-	// TODO: Once we have the new Director endpoint that returns a namespace for a given path, we'll use that
-	// and cut out a lot of this cruft
-
-	// Get the namespace by querying the director and checking the headers
-	errMsgPrefix := "the provided token is acceptible, but no owner could be determined because "
-	directorUrlStr := param.Federation_DirectorUrl.GetString()
-	if directorUrlStr == "" {
-		return false, errors.New(errMsgPrefix + "the federation director URL is not set")
-	}
-	directorUrl, err := url.Parse(directorUrlStr)
-	if err != nil {
-		return false, errors.Wrap(err, errMsgPrefix+"the federation director URL is not a valid URL")
-	}
-
-	directorUrl.Path, err = url.JoinPath("/api/v1.0/director/object", path)
-	if err != nil {
-		return false, errors.Wrap(err, errMsgPrefix+"the director URL could not be joined with the path")
-	}
-
-	// Get the namespace by querying the director and checking the headers. The client should NOT
-	// follow the redirect
-	httpClient := &http.Client{
-		Transport: config.GetTransport(),
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
-
-	req, err := http.NewRequest("GET", directorUrl.String(), nil)
-	if err != nil {
-		return false, errors.Wrap(err, errMsgPrefix+"the director request could not be created")
-	}
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return false, errors.Wrapf(err, errMsgPrefix+"the director couldn't be queried for path %s", path)
-	}
-
-	// Check the response code, make sure it's not in the error ranges (400-500)
-	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
-		return false, errors.Errorf(errMsgPrefix+"the director returned a bad status for path %s: %s", path, resp.Status)
-	}
-
-	// Get the namespace from the X-Pelican-Namespace header
-	namespaceHeader := resp.Header.Values("X-Pelican-Namespace")
-	xPelicanNamespaceMap := client.HeaderParser(namespaceHeader[0])
-	namespace := xPelicanNamespaceMap["namespace"]
-
-	// Get the issuer URL for that namespace
-	nsIssuerUrl, err := utils.GetNSIssuerURL(namespace)
-	if err != nil {
-		return false, errors.Wrapf(err, errMsgPrefix+"no issuer could be found for namespace %s", namespace)
-	}
-	lot.Owner = nsIssuerUrl
-
-	return true, nil
-}
-
-func VerifyDeleteLotToken(lotName string, strToken string) (bool, error) {
-	// Get all parents of the lot, which we use to determine owners who can modify the lot itself (as opposed
-	// to the data in the lot).
-	tokenApproved := false
-
-	log.Debugf("Attempting to delete lot %s", lotName)
-	authzCallers, err := getAuthorizedCallers(lotName)
-	if err != nil {
-		return false, errors.Wrap(err, "Error getting authorized callers")
-	}
-
-	ownerSigned, tok, err := tokenSignedByAuthorizedCaller(strToken, authzCallers)
-	if err != nil {
-		return false, errors.Wrap(err, "Error verifying token is appropriately signed")
-	}
-	if !ownerSigned {
-		return false, errors.New("Token not signed by any of the owners of any parent lot")
-	}
-
-	// We've determined the token is signed by someone we like, now to check that it has the correct lot.delete permission!
-	scope_any, present := (*tok).Get("scope")
-	if !present {
-		return false, errors.New("no scope claim in token")
-	}
-	scope, ok := scope_any.(string)
-	if !ok {
-		return false, errors.New("scope claim in token is not string-valued")
-	}
-	scopes := strings.Split(scope, " ")
-	for _, scope := range scopes {
-		if scope == token_scopes.Lot_Delete.String() {
-			tokenApproved = true
-			break
-		}
-	}
-
-	if !tokenApproved {
-		return false, errors.New("The token was correctly signed but did not possess the necessary lot.create scope")
-	}
-
-	return true, nil
-}
-
-func VerifyUpdateLotToken(lot *LotUpdate, strToken string) (bool, error) {
-	tokenApproved := false
-	log.Debugf("Attempting to update lot %s", lot.LotName)
-
-	// Since we're updating the lot, assume it already exists (lotman will yell if it doesn't).
-	// Then we can make sure the token is signed by any owners of the lot's parents
-
-	authzCallers, err := getAuthorizedCallers(lot.LotName)
-	if err != nil {
-		return false, errors.Wrap(err, "Error getting authorized callers")
-	}
-
-	// Now we have a list of owners who can modify the lot. We need to check that the token is signed by one of them
-	ownerSigned, tok, err := tokenSignedByAuthorizedCaller(strToken, authzCallers)
-	if err != nil {
-		return false, errors.Wrap(err, "Error verifying token is appropriately signed")
-	}
-	if !ownerSigned {
-		return false, errors.New("Token not signed by any of the owners of any parent lot")
-	}
-
-	// We've determined the token is signed by someone we like, now to check that it has the correct lot.modify permission!
-	scope_any, present := (*tok).Get("scope")
-	if !present {
-		return false, errors.New("no scope claim in token")
-	}
-	scope, ok := scope_any.(string)
-	if !ok {
-		return false, errors.New("scope claim in token is not string-valued")
-	}
-	scopes := strings.Split(scope, " ")
-	for _, scope := range scopes {
-		if scope == token_scopes.Lot_Modify.String() {
-			tokenApproved = true
-			break
-		}
-	}
-
-	if !tokenApproved {
-		return false, errors.New("The token was correctly signed but did not possess the necessary lot.create scope")
-	}
-
-	return true, nil
 }
 
 // Initialize the LotMan library and bind its functions to the global vars
@@ -624,6 +332,7 @@ func InitLotman() bool {
 
 	// Set the lot_home context -- where the db lives
 	lotHome := param.Lotman_DbLocation.GetString()
+
 	errMsg := make([]byte, 2048)
 
 	log.Infof("Setting lot_home context to %s", lotHome)
@@ -634,6 +343,19 @@ func InitLotman() bool {
 		return false
 	}
 
+	defaultInitialized := false
+	rootInitialized := false
+
+	err = param.Lotman_Lots.Unmarshal(&initializedLots)
+	if err != nil {
+		log.Warningf("Error while unmarshaling Lots from config: %v", err)
+	}
+
+	federationIssuer := param.Federation_DiscoveryUrl.GetString()
+	if federationIssuer == "" {
+		federationIssuer = param.Federation_DirectorUrl.GetString()
+	}
+
 	// Create the basic lots if they don't already exist. We'll make one for default
 	// and one for the root namespace
 	ret = LotmanLotExists("default", &errMsg)
@@ -642,42 +364,56 @@ func InitLotman() bool {
 		log.Errorf("Error checking if default lot exists: %s", string(errMsg))
 		return false
 	} else if ret == 0 {
-		// Create the default lot
-		fmt.Printf("\n\n\nCreating default lot\n\n\n")
-		fmt.Printf("\n\n\nFEDERATION DISCOVERY URL: %s\n\n\n", param.Federation_DiscoveryUrl.GetString())
-		// Under our model, we set owner to the issuer. Since this is owned by the federation, we set it in order of preference:
-		// 1. The federation's discovery url
-		// 2. The federation's director url
-		// TODO: Consider what happens to the lot if either of these values change in the future after the lot is created?
-		owner := param.Federation_DiscoveryUrl.GetString()
-		if owner == "" {
-			owner = param.Federation_DirectorUrl.GetString()
+		// First we try to create the lots that might be configured via Pelican.yaml. If there are none, we'll use
+		// a few default values
+		for _, lot := range initializedLots {
+			if lot.LotName == "default" {
+				err := CreateLot(&lot, federationIssuer)
+				if err != nil {
+					log.Errorf("Error creating default lot: %v", err)
+					return false
+				}
+				defaultInitialized = true
+			}
 		}
 
-		initDedicatedGB := float64(0)
-		initOpportunisticGB := float64(0)
-		defaultLot := Lot{
-			LotName: "default",
-			// Set the owner to the Federation's discovery url -- under this model, we can treat it like an issuer
-			Owner: owner,
-			// A self-parent lot indicates superuser status
-			Parents: []string{"default"},
-			MPA: &MPA{
-				DedicatedGB:     &initDedicatedGB,
-				OpportunisticGB: &initOpportunisticGB,
-				MaxNumObjects:   &Int64FromFloat{Value: 0},
-				CreationTime:    &Int64FromFloat{Value: 0},
-				ExpirationTime:  &Int64FromFloat{Value: 0},
-				DeletionTime:    &Int64FromFloat{Value: 0},
-			},
-		}
+		if !defaultInitialized {
+			// Create the default lot
 
-		fmt.Printf("\n DEFAULT LOT: %v\n\n\n", defaultLot)
+			// Under our model, we set owner to the issuer. Since this is owned by the federation, we set it in order of preference:
+			// 1. The federation's discovery url
+			// 2. The federation's director url
+			// TODO: Consider what happens to the lot if either of these values change in the future after the lot is created?
 
-		err := CreateLot(&defaultLot, "foobar")
-		if err != nil {
-			log.Errorf("Error creating default lot: %v", err)
-			return false
+			if federationIssuer == "" {
+				log.Errorf("no federation issuer set in config")
+				return false
+			}
+
+			initDedicatedGB := float64(0)
+			initOpportunisticGB := float64(0)
+			defaultLot := Lot{
+				LotName: "default",
+				// Set the owner to the Federation's discovery url -- under this model, we can treat it like an issuer
+				Owner: federationIssuer,
+				// A self-parent lot indicates superuser status
+				Parents: []string{"default"},
+				MPA: &MPA{
+					DedicatedGB:     &initDedicatedGB,
+					OpportunisticGB: &initOpportunisticGB,
+					MaxNumObjects:   &Int64FromFloat{Value: 0},
+					CreationTime:    &Int64FromFloat{Value: 0},
+					ExpirationTime:  &Int64FromFloat{Value: 0},
+					DeletionTime:    &Int64FromFloat{Value: 0},
+				},
+			}
+
+			log.Debugf("Creating the default lot defined by %v", defaultLot)
+			err = CreateLot(&defaultLot, federationIssuer)
+			if err != nil {
+				log.Errorf("Error creating default lot: %v", err)
+				return false
+			}
 		}
 
 		log.Infof("Created default lot")
@@ -689,39 +425,67 @@ func InitLotman() bool {
 		log.Errorf("Error checking if root lot exists: %s", string(errMsg))
 		return false
 	} else if ret == 0 {
-		// Create the root lot
-		owner := param.Federation_DiscoveryUrl.GetString()
-		if owner == "" {
-			owner = param.Federation_DirectorUrl.GetString()
+		// Try to create the root lot based on what we have in the config
+		for _, lot := range initializedLots {
+			if lot.LotName == "root" {
+				err := CreateLot(&lot, federationIssuer)
+				if err != nil {
+					log.Errorf("error creating root lot: %v", err)
+					return false
+				}
+				rootInitialized = true
+			}
 		}
 
-		initDedicatedGB := float64(0)
-		initOpportunisticGB := float64(0)
-		rootLot := Lot{
-			LotName: "root",
-			Owner:   owner,
-			// A self-parent lot indicates superuser status
-			Parents: []string{"root"},
-			Paths: []LotPaths{
-				{
-					Path:      "/",
-					Recursive: false,
+		if !rootInitialized {
+			// Create the root lot based on predefined setup
+			if federationIssuer == "" {
+				log.Errorf("no federation issuer set in config")
+				return false
+			}
+
+			initDedicatedGB := float64(0)
+			initOpportunisticGB := float64(0)
+			rootLot := Lot{
+				LotName: "root",
+				Owner:   federationIssuer,
+				// A self-parent lot indicates superuser status
+				Parents: []string{"root"},
+				Paths: []LotPaths{
+					{
+						Path:      "/",
+						Recursive: false,
+					},
 				},
-			},
-			MPA: &MPA{
-				DedicatedGB:     &initDedicatedGB,
-				OpportunisticGB: &initOpportunisticGB,
-				MaxNumObjects:   &Int64FromFloat{Value: 0},
-				CreationTime:    &Int64FromFloat{Value: 0},
-				ExpirationTime:  &Int64FromFloat{Value: 0},
-				DeletionTime:    &Int64FromFloat{Value: 0},
-			},
-		}
+				MPA: &MPA{
+					DedicatedGB:     &initDedicatedGB,
+					OpportunisticGB: &initOpportunisticGB,
+					MaxNumObjects:   &Int64FromFloat{Value: 0},
+					CreationTime:    &Int64FromFloat{Value: 0},
+					ExpirationTime:  &Int64FromFloat{Value: 0},
+					DeletionTime:    &Int64FromFloat{Value: 0},
+				},
+			}
 
-		err := CreateLot(&rootLot, "foobar")
-		if err != nil {
-			log.Errorf("Error creating root lot: %v", err)
-			return false
+			log.Debugf("Creating the root lot defined by %v", rootLot)
+			err := CreateLot(&rootLot, federationIssuer)
+			if err != nil {
+				log.Errorf("error creating root lot: %v", err)
+				return false
+			}
+		}
+		log.Infof("Created root lot")
+	}
+
+
+	// Now instantiate any other lots that are in the config
+	for _, lot := range initializedLots {
+		if lot.LotName != "default" && lot.LotName != "root" {
+			err := CreateLot(&lot, federationIssuer)
+			if err != nil {
+				log.Errorf("error creating  lot: %v", err)
+				return false
+			}
 		}
 	}
 
@@ -736,7 +500,6 @@ func CreateLot(newLot *Lot, caller string) error {
 	if err != nil {
 		return errors.Wrapf(err, "Error marshalling lot JSON: %v", err)
 	}
-	fmt.Printf("\n\n\nLot JSON: %s\n\n\n", string(lotJSON))
 
 	// Set the context to the incoming lot's owner:
 	errMsg := make([]byte, 2048)
@@ -758,25 +521,23 @@ func CreateLot(newLot *Lot, caller string) error {
 	return nil
 }
 
-func GetLot(lotName string, recursive bool) (Lot, error) {
+func GetLot(lotName string, recursive bool) (*Lot, error) {
 	// Haven't given much thought to these buff sizes yet
 	outputBuf := make([]byte, 4096)
 	errMsg := make([]byte, 2048)
 
 	ret := LotmanGetLotJSON(lotName, recursive, &outputBuf, &errMsg)
 	if ret != 0 {
-		fmt.Printf("\n\n\n WE HIT AN ERROR: %s\n\n\n", string(errMsg))
 		trimBuf(&errMsg)
-		return Lot{}, errors.Errorf("Error getting lot JSON: %s", string(errMsg))
+		return nil, errors.Errorf("Error getting lot JSON: %s", string(errMsg))
 	}
 	trimBuf(&outputBuf)
-	fmt.Printf("\n\n\nRAW OUTPUT: %s\n\n\n", string(outputBuf))
 	var lot Lot
 	err := json.Unmarshal(outputBuf, &lot)
 	if err != nil {
-		return Lot{}, errors.Wrapf(err, "Error unmarshalling lot JSON: %v", err)
+		return nil, errors.Wrapf(err, "Error unmarshalling lot JSON: %v", err)
 	}
-	return lot, nil
+	return &lot, nil
 }
 
 func UpdateLot(lotUpdate *LotUpdate, caller string) error {
@@ -785,12 +546,10 @@ func UpdateLot(lotUpdate *LotUpdate, caller string) error {
 	if err != nil {
 		return errors.Wrapf(err, "Error marshalling lot JSON: %v", err)
 	}
-	fmt.Printf("\n\n\nLot JSON: %s\n\n\n", string(updateJSON))
 
 	errMsg := make([]byte, 2048)
 	callerMutex.Lock()
 	defer callerMutex.Unlock()
-	fmt.Printf("\n\n\nSetting caller to %s\n\n\n", caller)
 	ret := LotmanSetContextStr("caller", caller, &errMsg)
 	if ret != 0 {
 		trimBuf(&errMsg)

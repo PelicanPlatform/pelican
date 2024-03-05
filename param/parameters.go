@@ -110,6 +110,7 @@ var (
 	Logging_Origin_Xrd = StringParam{"Logging.Origin.Xrd"}
 	Logging_Origin_Xrootd = StringParam{"Logging.Origin.Xrootd"}
 	Lotman_DbLocation = StringParam{"Lotman.DbLocation"}
+	Lotman_LibLocation = StringParam{"Lotman.LibLocation"}
 	Monitoring_DataLocation = StringParam{"Monitoring.DataLocation"}
 	OIDC_AuthorizationEndpoint = StringParam{"OIDC.AuthorizationEndpoint"}
 	OIDC_ClientID = StringParam{"OIDC.ClientID"}
@@ -271,6 +272,7 @@ var (
 	GeoIPOverrides = ObjectParam{"GeoIPOverrides"}
 	Issuer_AuthorizationTemplates = ObjectParam{"Issuer.AuthorizationTemplates"}
 	Issuer_OIDCAuthenticationRequirements = ObjectParam{"Issuer.OIDCAuthenticationRequirements"}
+	Lotman_Lots = ObjectParam{"Lotman.Lots"}
 	Registry_CustomRegistrationFields = ObjectParam{"Registry.CustomRegistrationFields"}
 	Registry_Institutions = ObjectParam{"Registry.Institutions"}
 	Shoveler_IPMapping = ObjectParam{"Shoveler.IPMapping"}
