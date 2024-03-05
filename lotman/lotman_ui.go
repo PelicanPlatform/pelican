@@ -38,8 +38,9 @@ import (
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
-	"github.com/pelicanplatform/pelican/utils"
 )
 
 // Given a token and a list of authorized callers, check that the token is signed by one of the authorized callers. Return
@@ -48,7 +49,7 @@ func tokenSignedByAuthorizedCaller(strToken string, authorizedCallers *[]string)
 	ownerFound := false
 	var tok jwt.Token
 	for _, owner := range *authorizedCallers {
-		kSet, err := utils.GetJWKSFromIssUrl(owner)
+		kSet, err := server_utils.GetJWKSFromIssUrl(owner)
 		if err != nil {
 			log.Debugf("Error getting JWKS for owner %s: %v", owner, err)
 			continue
@@ -116,7 +117,7 @@ func VerifyNewLotToken(lot *Lot, strToken string) (bool, error) {
 			log.Debugln("Federation discovery URL is not set, using director URL as lot token issuer")
 		}
 
-		kSet, err := utils.GetJWKSFromIssUrl(issuerUrl)
+		kSet, err := server_utils.GetJWKSFromIssUrl(issuerUrl)
 		if err != nil {
 			return false, errors.Wrap(err, "Error getting JWKS from issuer URL")
 		}
@@ -151,7 +152,7 @@ func VerifyNewLotToken(lot *Lot, strToken string) (bool, error) {
 
 		ownerFound := false
 		for _, owner := range owners {
-			kSet, err := utils.GetJWKSFromIssUrl(owner)
+			kSet, err := server_utils.GetJWKSFromIssUrl(owner)
 
 			// Print the kSet as a string for debugging
 			kSetStr, _ := json.Marshal(kSet)
@@ -247,7 +248,7 @@ func VerifyNewLotToken(lot *Lot, strToken string) (bool, error) {
 	namespace := xPelicanNamespaceMap["namespace"]
 
 	// Get the issuer URL for that namespace
-	nsIssuerUrl, err := utils.GetNSIssuerURL(namespace)
+	nsIssuerUrl, err := server_utils.GetNSIssuerURL(namespace)
 	if err != nil {
 		return false, errors.Wrapf(err, errMsgPrefix+"no issuer could be found for namespace %s", namespace)
 	}
@@ -370,7 +371,7 @@ func uiCreateLot(ctx *gin.Context) {
 
 	// TODO: Figure out the best way to inform the user that we ignore any owner or parent they set, because we handle that internally.
 
-	token := utils.GetAuthzEscaped(ctx)
+	token := token.GetAuthzEscaped(ctx)
 	if token == "" {
 		log.Debugln("No token provided in request")
 		ctx.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "No token provided in request"})
@@ -476,7 +477,7 @@ func uiUpdateLot(ctx *gin.Context) {
 		lotUpdate.Paths = nil
 	}
 
-	token := utils.GetAuthzEscaped(ctx)
+	token := token.GetAuthzEscaped(ctx)
 	if token == "" {
 		log.Debugln("No token provided in request")
 		ctx.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "No token provided in request"})
@@ -524,7 +525,7 @@ func uiDeleteLot(ctx *gin.Context) {
 		return
 	}
 
-	token := utils.GetAuthzEscaped(ctx)
+	token := token.GetAuthzEscaped(ctx)
 	if token == "" {
 		log.Debugln("No token provided in request")
 		ctx.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "No token provided in request"})
