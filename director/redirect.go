@@ -136,9 +136,6 @@ func getLinkDepth(filepath, prefix string) (int, error) {
 	}
 	commonPath := strings.TrimPrefix(filepath, prefix)
 	pathDepth := len(strings.Split(commonPath, "/"))
-	if pathDepth < 0 {
-		return 0, errors.New("negative depth is not allowed")
-	}
 	return pathDepth, nil
 }
 
