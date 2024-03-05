@@ -94,6 +94,15 @@ issuedBy: ["origin"]
 acceptedBy: [cache"]
 ---
 ############################
+#    LocalCache Scopes     #
+############################
+name: localcache.purge
+description: >-
+  Permits invocation of the purge routine in a local cache
+issuedBy: ["localcache"]
+acceptedBy: ["localcache"]
+---
+############################
 #      Storage Scopes      #
 ############################
 name: "storage.read"

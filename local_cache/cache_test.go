@@ -20,6 +20,7 @@ package local_cache_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -39,6 +40,7 @@ import (
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/utils"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -174,6 +176,7 @@ func TestFedPublicGet(t *testing.T) {
 	assert.Equal(t, "Hello, World!", string(byteBuff))
 }
 
+// Test the local cache library on an authenticated GET.
 func TestFedAuthGet(t *testing.T) {
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer cancel()
@@ -212,6 +215,7 @@ func TestFedAuthGet(t *testing.T) {
 	assert.Equal(t, "authorization denied", err.Error())
 }
 
+// Test a raw HTTP request (no Pelican client) works with the local cache
 func TestHttpReq(t *testing.T) {
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer cancel()
@@ -239,6 +243,7 @@ func TestHttpReq(t *testing.T) {
 	assert.Equal(t, "Hello, World!", string(body))
 }
 
+// Test that the client library (with authentication) works with the local cache
 func TestClient(t *testing.T) {
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer cancel()
@@ -254,21 +259,54 @@ func TestClient(t *testing.T) {
 		Path:   param.LocalCache_Socket.GetString(),
 	}
 
-	discoveryHost := param.Federation_DiscoveryUrl.GetString()
-	discoveryUrl, err := url.Parse(discoveryHost)
-	require.NoError(t, err)
-	tr, err := client.DoGet(ctx, "pelican://"+discoveryUrl.Host+"/test/hello_world.txt", filepath.Join(tmpDir, "hello_world.txt"), false,
-		client.WithToken(ft.token), client.WithCaches(cacheUrl), client.WithAcquireToken(false))
-	assert.NoError(t, err)
-	require.Equal(t, 1, len(tr))
-	assert.Equal(t, int64(13), tr[0].TransferredBytes)
-	assert.NoError(t, tr[0].Error)
+	t.Run("correct-auth", func(t *testing.T) {
+		discoveryHost := param.Federation_DiscoveryUrl.GetString()
+		discoveryUrl, err := url.Parse(discoveryHost)
+		require.NoError(t, err)
+		tr, err := client.DoGet(ctx, "pelican://"+discoveryUrl.Host+"/test/hello_world.txt", filepath.Join(tmpDir, "hello_world.txt"), false,
+			client.WithToken(ft.token), client.WithCaches(cacheUrl), client.WithAcquireToken(false))
+		assert.NoError(t, err)
+		require.Equal(t, 1, len(tr))
+		assert.Equal(t, int64(13), tr[0].TransferredBytes)
+		assert.NoError(t, tr[0].Error)
 
-	byteBuff, err := os.ReadFile(filepath.Join(tmpDir, "hello_world.txt"))
-	assert.NoError(t, err)
-	assert.Equal(t, "Hello, World!", string(byteBuff))
+		byteBuff, err := os.ReadFile(filepath.Join(tmpDir, "hello_world.txt"))
+		assert.NoError(t, err)
+		assert.Equal(t, "Hello, World!", string(byteBuff))
+	})
+	t.Run("incorrect-auth", func(t *testing.T) {
+		_, err := client.DoGet(ctx, "pelican:///test/hello_world.txt", filepath.Join(tmpDir, "hello_world.txt"), false,
+			client.WithToken("badtoken"), client.WithCaches(cacheUrl), client.WithAcquireToken(false))
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, &client.ConnectionSetupError{})
+		var cse *client.ConnectionSetupError
+		assert.True(t, errors.As(err, &cse))
+		assert.Equal(t, "failed connection setup: server returned 403 Forbidden", cse.Error())
+	})
+
+	t.Run("file-not-found", func(t *testing.T) {
+		issuer, err := config.GetServerIssuerURL()
+		require.NoError(t, err)
+		tokConf := utils.TokenConfig{
+			TokenProfile: utils.WLCG,
+			Lifetime:     time.Duration(time.Minute),
+			Issuer:       issuer,
+			Subject:      "test",
+			Audience:     []string{utils.WLCGAny},
+		}
+		tokConf.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Storage_Read, "/hello_world.txt.1"))
+
+		token, err := tokConf.CreateToken()
+		require.NoError(t, err)
+
+		_, err = client.DoGet(ctx, "pelican:///test/hello_world.txt.1", filepath.Join(tmpDir, "hello_world.txt.1"), false,
+			client.WithToken(token), client.WithCaches(cacheUrl), client.WithAcquireToken(false))
+		assert.Error(t, err)
+		assert.Equal(t, "failed to download file: transfer error: failed connection setup: server returned 404 Not Found", err.Error())
+	})
 }
 
+// Test that HEAD requests to the local cache return the correct result
 func TestStat(t *testing.T) {
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer cancel()
@@ -296,6 +334,37 @@ func TestStat(t *testing.T) {
 	assert.Equal(t, uint64(13), size)
 }
 
+// Creates a buffer of at least 1MB
+func makeBigBuffer() []byte {
+	byteBuff := []byte("Hello, World!")
+	for {
+		byteBuff = append(byteBuff, []byte("Hello, World!")...)
+		if len(byteBuff) > 1024*1024 {
+			break
+		}
+	}
+	return byteBuff
+}
+
+// Writes a file at least the specified size in MB
+func writeBigBuffer(t *testing.T, fp io.WriteCloser, sizeMB int) (size int) {
+	defer fp.Close()
+	byteBuff := makeBigBuffer()
+	size = 0
+	for {
+		n, err := fp.Write(byteBuff)
+		require.NoError(t, err)
+		size += n
+		if size > sizeMB*1024*1024 {
+			break
+		}
+	}
+	return
+}
+
+// Create a 100MB file in the origin.  Download it (slowly) via the local cache.
+//
+// This triggers multiple internal requests to wait on the slow download
 func TestLargeFile(t *testing.T) {
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer cancel()
@@ -314,24 +383,7 @@ func TestLargeFile(t *testing.T) {
 
 	fp, err := os.OpenFile(filepath.Join(ft.originDir, "hello_world.txt"), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
 	require.NoError(t, err)
-
-	byteBuff := []byte("Hello, World!")
-	for {
-		byteBuff = append(byteBuff, []byte("Hello, World!")...)
-		if len(byteBuff) > 4096 {
-			break
-		}
-	}
-	size := 0
-	for {
-		n, err := fp.Write(byteBuff)
-		require.NoError(t, err)
-		size += n
-		if size > 100*1024*1024 {
-			break
-		}
-	}
-	fp.Close()
+	size := writeBigBuffer(t, fp, 100)
 
 	discoveryHost := param.Federation_DiscoveryUrl.GetString()
 	discoveryUrl, err := url.Parse(discoveryHost)
@@ -343,4 +395,134 @@ func TestLargeFile(t *testing.T) {
 	assert.Equal(t, int64(size), tr[0].TransferredBytes)
 	assert.NoError(t, tr[0].Error)
 
+}
+
+// Create five 1MB files.  Trigger a purge, ensuring that the cleanup is
+// done according to LRU
+func TestPurge(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer cancel()
+	tmpDir := t.TempDir()
+
+	viper.Reset()
+	viper.Set("Origin.EnablePublicReads", true)
+	viper.Set("LocalCache.Size", "5MB")
+	ft := fedTest{}
+	ft.spinup(t, ctx, egrp)
+
+	cacheUrl := &url.URL{
+		Scheme: "unix",
+		Path:   param.LocalCache_Socket.GetString(),
+	}
+
+	size := 0
+	for idx := 0; idx < 5; idx++ {
+		log.Debugln("Will write origin file", filepath.Join(ft.originDir, fmt.Sprintf("hello_world.txt.%d", idx)))
+		fp, err := os.OpenFile(filepath.Join(ft.originDir, fmt.Sprintf("hello_world.txt.%d", idx)), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
+		require.NoError(t, err)
+		size = writeBigBuffer(t, fp, 1)
+	}
+	require.NotEqual(t, 0, size)
+
+	for idx := 0; idx < 5; idx++ {
+		tr, err := client.DoGet(ctx, fmt.Sprintf("pelican:///test/hello_world.txt.%d", idx), filepath.Join(tmpDir, fmt.Sprintf("hello_world.txt.%d", idx)), false,
+			client.WithCaches(cacheUrl))
+		assert.NoError(t, err)
+		require.Equal(t, 1, len(tr))
+		assert.Equal(t, int64(size), tr[0].TransferredBytes)
+		assert.NoError(t, tr[0].Error)
+	}
+
+	// Size of the cache should be just small enough that the 5th file triggers LRU deletion of the first.
+	for idx := 0; idx < 5; idx++ {
+		func() {
+			fp, err := os.Open(filepath.Join(param.LocalCache_DataLocation.GetString(), "test", fmt.Sprintf("hello_world.txt.%d.DONE", idx)))
+			if idx == 0 {
+				log.Errorln("Error:", err)
+				assert.ErrorIs(t, err, os.ErrNotExist)
+			} else {
+				assert.NoError(t, err)
+			}
+			defer fp.Close()
+		}()
+	}
+}
+
+// Create four 1MB files (above low-water mark).  Force a purge, ensuring that the cleanup is
+// done according to LRU
+func TestForcePurge(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer cancel()
+	tmpDir := t.TempDir()
+
+	viper.Reset()
+	viper.Set("Origin.EnablePublicReads", true)
+	viper.Set("LocalCache.Size", "5MB")
+	// Decrease the low water mark so invoking purge will result in 3 files in the cache.
+	viper.Set("LocalCache.LowWaterMarkPercentage", "80")
+	ft := fedTest{}
+	ft.spinup(t, ctx, egrp)
+
+	issuer, err := config.GetServerIssuerURL()
+	require.NoError(t, err)
+	tokConf := utils.TokenConfig{
+		TokenProfile: utils.WLCG,
+		Lifetime:     time.Duration(time.Minute),
+		Issuer:       issuer,
+		Subject:      "test",
+		Audience:     []string{utils.WLCGAny},
+	}
+	tokConf.AddScopes(token_scopes.Localcache_Purge)
+
+	token, err := tokConf.CreateToken()
+	require.NoError(t, err)
+
+	cacheUrl := &url.URL{
+		Scheme: "unix",
+		Path:   param.LocalCache_Socket.GetString(),
+	}
+
+	// Populate the cache with our test files
+	size := 0
+	for idx := 0; idx < 4; idx++ {
+		log.Debugln("Will write origin file", filepath.Join(ft.originDir, fmt.Sprintf("hello_world.txt.%d", idx)))
+		fp, err := os.OpenFile(filepath.Join(ft.originDir, fmt.Sprintf("hello_world.txt.%d", idx)), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
+		require.NoError(t, err)
+		size = writeBigBuffer(t, fp, 1)
+	}
+	require.NotEqual(t, 0, size)
+
+	for idx := 0; idx < 4; idx++ {
+		tr, err := client.DoGet(ctx, fmt.Sprintf("pelican:///test/hello_world.txt.%d", idx), filepath.Join(tmpDir, fmt.Sprintf("hello_world.txt.%d", idx)), false,
+			client.WithCaches(cacheUrl))
+		assert.NoError(t, err)
+		require.Equal(t, 1, len(tr))
+		assert.Equal(t, int64(size), tr[0].TransferredBytes)
+		assert.NoError(t, tr[0].Error)
+	}
+
+	// Size of the cache should be large enough that purge hasn't fired yet.
+	for idx := 0; idx < 4; idx++ {
+		func() {
+			fp, err := os.Open(filepath.Join(param.LocalCache_DataLocation.GetString(), "test", fmt.Sprintf("hello_world.txt.%d.DONE", idx)))
+			assert.NoError(t, err)
+			defer fp.Close()
+		}()
+	}
+
+	_, err = utils.MakeRequest(ctx, param.Server_ExternalWebUrl.GetString()+"/api/v1.0/localcache/purge", "POST", nil, map[string]string{"Authorization": "Bearer " + token})
+	require.NoError(t, err)
+
+	// Low water mark is small enough that a force purge will delete a file.
+	for idx := 0; idx < 4; idx++ {
+		func() {
+			fp, err := os.Open(filepath.Join(param.LocalCache_DataLocation.GetString(), "test", fmt.Sprintf("hello_world.txt.%d.DONE", idx)))
+			if idx == 0 {
+				assert.ErrorIs(t, err, os.ErrNotExist)
+			} else {
+				assert.NoError(t, err)
+			}
+			defer fp.Close()
+		}()
+	}
 }

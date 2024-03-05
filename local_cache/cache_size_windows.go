@@ -8,7 +8,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-func getCacheSize(cacheDir string) (cacheSize uint64, err error) {
+func getCacheSize(string) (cacheSize uint64, err error) {
 	sizeStr := param.LocalCache_Size.GetString()
 	if sizeStr == "" || sizeStr == "0" {
 		log.Warningln("Cache size is unset and Pelican is unable to determine filesystem size; using 10GB as the default")

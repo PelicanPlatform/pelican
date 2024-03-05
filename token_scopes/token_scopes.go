@@ -36,6 +36,7 @@ const (
 	Broker_Reverse TokenScope = "broker.reverse"
 	Broker_Retrieve TokenScope = "broker.retrieve"
 	Broker_Callback TokenScope = "broker.callback"
+	Localcache_Purge TokenScope = "localcache.purge"
 
 	// Storage Scopes
 	Storage_Read TokenScope = "storage.read"

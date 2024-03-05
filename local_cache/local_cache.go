@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lestrrat-go/option"
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/param"
@@ -47,17 +48,19 @@ import (
 
 type (
 	LocalCache struct {
-		ctx         context.Context
-		egrp        *errgroup.Group
-		te          *client.TransferEngine
-		tc          *client.TransferClient
-		cancelReq   chan cancelReq
-		basePath    string
-		sizeReq     chan availSizeReq
-		mutex       sync.RWMutex
-		downloads   map[string]*activeDownload
-		directorURL *url.URL
-		ac          *authConfig
+		ctx           context.Context
+		egrp          *errgroup.Group
+		te            *client.TransferEngine
+		tc            *client.TransferClient
+		cancelReq     chan cancelReq
+		basePath      string
+		sizeReq       chan availSizeReq
+		mutex         sync.RWMutex
+		purgeMutex    sync.Mutex
+		downloads     map[string]*activeDownload
+		directorURL   *url.URL
+		ac            *authConfig
+		wasConfigured bool
 
 		// Cache static configuration
 		highWater uint64
@@ -130,6 +133,9 @@ type (
 		size    int64
 		results chan *downloadStatus
 	}
+
+	LocalCacheOption                 = option.Interface
+	identLocalCacheOptionDeferConfig struct{}
 )
 
 var (
@@ -207,10 +213,25 @@ func (ds *downloadStatus) String() string {
 	}
 }
 
+// Create an option to defer the configuration of the local cache
+//
+// Useful in cases where the cache should be created before the web interface
+// is up -- but the web interface is needed to complete configuration.
+func WithDeferConfig(deferConfig bool) LocalCacheOption {
+	return option.New(identLocalCacheOptionDeferConfig{}, deferConfig)
+}
+
 // Create a local cache object
 //
 // Launches background goroutines associated with the cache
-func NewLocalCache(ctx context.Context, egrp *errgroup.Group) (sc *LocalCache, err error) {
+func NewLocalCache(ctx context.Context, egrp *errgroup.Group, options ...LocalCacheOption) (lc *LocalCache, err error) {
+	deferConfig := false
+	for _, option := range options {
+		switch option.Ident() {
+		case identLocalCacheOptionDeferConfig{}:
+			deferConfig = option.Value().(bool)
+		}
+	}
 
 	// Setup cache on disk
 	cacheDir := param.LocalCache_DataLocation.GetString()
@@ -231,13 +252,16 @@ func NewLocalCache(ctx context.Context, egrp *errgroup.Group) (sc *LocalCache, e
 	}
 	highWaterPercentage := param.LocalCache_HighWaterMarkPercentage.GetInt()
 	lowWaterPercentage := param.LocalCache_LowWaterMarkPercentage.GetInt()
+	highWater := (cacheSize / 100) * uint64(highWaterPercentage)
+	lowWater := (cacheSize / 100) * uint64(lowWaterPercentage)
+	log.Infof("Cache size is %d bytes; for purge, high water mark is %d bytes, low water mark is %d bytes", cacheSize, highWater, lowWater)
 
 	directorUrl, err := url.Parse(param.Federation_DirectorUrl.GetString())
 	if err != nil {
 		return
 	}
 
-	sc = &LocalCache{
+	lc = &LocalCache{
 		ctx:         ctx,
 		egrp:        egrp,
 		te:          client.NewTransferEngine(ctx),
@@ -245,7 +269,7 @@ func NewLocalCache(ctx context.Context, egrp *errgroup.Group) (sc *LocalCache, e
 		hitChan:     make(chan lruEntry, 64),
 		highWater:   (cacheSize / 100) * uint64(highWaterPercentage),
 		lowWater:    (cacheSize / 100) * uint64(lowWaterPercentage),
-		cacheSize:   cacheSize,
+		cacheSize:   0,
 		basePath:    cacheDir,
 		ac:          newAuthConfig(ctx, egrp),
 		sizeReq:     make(chan availSizeReq),
@@ -253,22 +277,36 @@ func NewLocalCache(ctx context.Context, egrp *errgroup.Group) (sc *LocalCache, e
 		lruLookup:   make(map[string]*lruEntry),
 	}
 
-	sc.tc, err = sc.te.NewClient(client.WithAcquireToken(false), client.WithCallback(sc.callback))
+	lc.tc, err = lc.te.NewClient(client.WithAcquireToken(false), client.WithCallback(lc.callback))
 	if err != nil {
-		shutdownErr := sc.te.Shutdown()
+		shutdownErr := lc.te.Shutdown()
 		if shutdownErr != nil {
 			log.Errorln("Failed to shutdown transfer engine")
 		}
 		return
 	}
-	if err = sc.updateConfig(); err != nil {
-		log.Warningln("First attempt to update cache's authorization failed:", err)
+	if !deferConfig {
+		if err = lc.Config(egrp); err != nil {
+			log.Warningln("First attempt to update cache's authorization failed:", err)
+		}
 	}
 
-	egrp.Go(sc.runMux)
-	egrp.Go(sc.periodicUpdateConfig)
+	egrp.Go(lc.runMux)
 
 	log.Debugln("Successfully created a new local cache object")
+	return
+}
+
+// Try to configure the local cache and launch the reconfigure goroutine
+func (lc *LocalCache) Config(egrp *errgroup.Group) (err error) {
+	if lc.wasConfigured {
+		return
+	}
+	lc.wasConfigured = true
+	if err = lc.updateConfig(); err != nil {
+		log.Warningln("First attempt to update cache's authorization failed:", err)
+	}
+	egrp.Go(lc.periodicUpdateConfig)
 	return
 }
 
@@ -396,16 +434,7 @@ func (sc *LocalCache) runMux() error {
 				} else {
 					fp.Close()
 				}
-				entry := sc.lruLookup[reqPath]
-				if entry == nil {
-					entry = &lruEntry{}
-					sc.lruLookup[reqPath] = entry
-					entry.size = results.TransferredBytes
-					sc.cacheSize += uint64(entry.size)
-					sc.lru = append(sc.lru, entry)
-				} else {
-					entry.lastUse = time.Now()
-				}
+				sc.lruHit(lruEntry{lastUse: time.Now(), path: reqPath, size: results.TransferredBytes})
 			}
 		} else if chosen == lenChan+2 {
 			// Ticker has fired - update progress
@@ -470,6 +499,7 @@ func (sc *LocalCache) runMux() error {
 						channel: req.results,
 						ds:      ds,
 					})
+					sc.lruHit(lruEntry{lastUse: time.Now(), path: req.request.path, size: fi.Size()})
 				}
 			}
 
@@ -532,35 +562,56 @@ func (sc *LocalCache) runMux() error {
 		} else if chosen == lenChan+5 {
 			// Notification there was a cache hit.
 			hit := recv.Interface().(lruEntry)
-			entry := sc.lruLookup[hit.path]
-			if entry == nil {
-				entry = &lruEntry{}
-				sc.lruLookup[hit.path] = entry
-				entry.size = hit.size
-				sc.lru = append(sc.lru, entry)
-				sc.cacheSize += uint64(hit.size)
-				if sc.cacheSize > sc.highWater {
-					sc.purge()
-				}
-			}
-			entry.lastUse = hit.lastUse
+			sc.lruHit(hit)
 		}
 	}
 }
 
-func (sc *LocalCache) purge() {
-	heap.Init(&sc.lru)
+func (lc *LocalCache) lruHit(hit lruEntry) {
+	entry := lc.lruLookup[hit.path]
+	if entry == nil {
+		entry = &hit
+		lc.lruLookup[hit.path] = entry
+		lc.lru = append(lc.lru, entry)
+		lc.cacheSize += uint64(hit.size)
+		if lc.cacheSize > lc.highWater {
+			lc.purge()
+		}
+	}
+	entry.lastUse = hit.lastUse
+	if hit.size > entry.size {
+		entry.size = hit.size
+	}
+}
+
+func (lc *LocalCache) purge() {
+	log.Debugln("Starting purge routine")
+	lc.purgeMutex.Lock()
+	defer lc.purgeMutex.Unlock()
+	heap.Init(&lc.lru)
 	start := time.Now()
-	for sc.cacheSize > sc.lowWater {
-		entry := heap.Pop(&sc.lru).(*lruEntry)
-		localPath := path.Join(sc.basePath, path.Clean(entry.path))
+	for lc.cacheSize > lc.lowWater {
+		if len(lc.lru) == 0 {
+			log.Warningln("Potential consistency error: purge ran until cache was empty")
+			break
+		}
+		entry := heap.Pop(&lc.lru).(*lruEntry)
+		if entry == nil {
+			log.Warningln("Consistency error: purge run but no entry provided")
+			continue
+		}
+		if entry.path == "" {
+			log.Warningln("Consistency error: purge ran on an empty path")
+			continue
+		}
+		localPath := path.Join(lc.basePath, path.Clean(entry.path))
 		if err := os.Remove(localPath + ".DONE"); err != nil {
 			log.Warningln("Failed to purge DONE file:", err)
 		}
 		if err := os.Remove(localPath); err != nil {
 			log.Warningln("Failed to purge file:", err)
 		}
-		sc.cacheSize -= uint64(entry.size)
+		lc.cacheSize -= uint64(entry.size)
 		// Since purge is called from the mux thread, blocking can cause
 		// other failures; do a time-based break even if we've not hit the low-water
 		if time.Since(start) > 3*time.Second {
@@ -603,6 +654,11 @@ func (sc *LocalCache) Get(path, token string) (io.ReadCloser, error) {
 	}
 
 	if fp := sc.getFromDisk(path); fp != nil {
+		finfo, err := fp.Stat()
+		if err != nil {
+			log.Warningf("Able to open %s in cache but unable to stat it: %v", path, err)
+		}
+		sc.hitChan <- lruEntry{lastUse: time.Now(), path: path, size: finfo.Size()}
 		return fp, nil
 	}
 
@@ -626,8 +682,8 @@ func (lc *LocalCache) Stat(path, token string) (uint64, error) {
 	dUrl := *lc.directorURL
 	dUrl.Path = path
 	dUrl.Scheme = "pelican"
-	log.Debugln("LocalCache doing Stat:", dUrl.String())
-	return client.DoStat(context.Background(), dUrl.String(), client.WithToken(token))
+	size, err := client.DoStat(context.Background(), dUrl.String(), client.WithToken(token))
+	return size, err
 }
 
 func (sc *LocalCache) updateConfig() error {

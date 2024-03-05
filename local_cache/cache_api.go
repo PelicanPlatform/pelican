@@ -31,26 +31,41 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/gin-gonic/gin"
+	"github.com/lestrrat-go/jwx/v2/jwt"
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 )
 
+type (
+	localCacheResp struct {
+		Status localCacheResponseStatus `json:"status"`
+		Msg    string                   `json:"msg,omitempty"`
+	}
+
+	localCacheResponseStatus string
+)
+
+const (
+	responseOk     localCacheResponseStatus = "success"
+	responseFailed localCacheResponseStatus = "error"
+)
+
 // Launch the unix socket listener as a separate goroutine
-func LaunchListener(ctx context.Context, egrp *errgroup.Group) error {
+func (lc *LocalCache) LaunchListener(ctx context.Context, egrp *errgroup.Group) (err error) {
 	socketName := param.LocalCache_Socket.GetString()
-	if err := os.MkdirAll(filepath.Dir(socketName), fs.FileMode(0755)); err != nil {
-		return errors.Wrap(err, "failed to create socket directory")
+	if err = os.MkdirAll(filepath.Dir(socketName), fs.FileMode(0755)); err != nil {
+		err = errors.Wrap(err, "failed to create socket directory")
+		return
 	}
 
 	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: socketName, Net: "unix"})
 	if err != nil {
-		return err
-	}
-	sc, err := NewLocalCache(ctx, egrp)
-	if err != nil {
-		return err
+		return
 	}
 
 	handler := func(w http.ResponseWriter, r *http.Request) {
@@ -64,6 +79,7 @@ func LaunchListener(ctx context.Context, egrp *errgroup.Group) error {
 			for _, encoding := range r.Header.Values("TE") {
 				if encoding == "trailers" {
 					sendTrailer = true
+					w.Header().Set("Trailer", "X-Transfer-Status")
 					break
 				}
 			}
@@ -79,12 +95,12 @@ func LaunchListener(ctx context.Context, egrp *errgroup.Group) error {
 		var size uint64
 		var reader io.ReadCloser
 		if r.Method == "HEAD" {
-			size, err = sc.Stat(path, bearerToken)
+			size, err = lc.Stat(path, bearerToken)
 			if err == nil {
 				w.Header().Set("Content-Length", strconv.FormatUint(size, 10))
 			}
 		} else {
-			reader, err = sc.Get(path, bearerToken)
+			reader, err = lc.Get(path, bearerToken)
 		}
 		if errors.Is(err, authorizationDenied) {
 			w.WriteHeader(http.StatusForbidden)
@@ -121,5 +137,36 @@ func LaunchListener(ctx context.Context, egrp *errgroup.Group) error {
 		<-ctx.Done()
 		return srv.Shutdown(ctx)
 	})
-	return nil
+	return
+}
+
+// Register the control & monitoring routines with Gin
+func (lc *LocalCache) Register(ctx context.Context, router *gin.RouterGroup) {
+	router.POST("/api/v1.0/localcache/purge", func(ginCtx *gin.Context) { lc.purgeCmd(ginCtx) })
+}
+
+// Authorize the request then trigger the purge routine
+func (lc *LocalCache) purgeCmd(ginCtx *gin.Context) {
+	token := ginCtx.GetHeader("Authorization")
+	var hasPrefix bool
+	if token, hasPrefix = strings.CutPrefix(token, "Bearer "); !hasPrefix {
+		ginCtx.AbortWithStatusJSON(http.StatusUnauthorized, localCacheResp{responseFailed, "Bearer token required to authenticate"})
+		return
+	}
+
+	jwks, err := config.GetIssuerPublicJWKS()
+	if err != nil {
+		ginCtx.AbortWithStatusJSON(http.StatusInternalServerError, localCacheResp{responseFailed, "Unable to get local server token issuer"})
+		return
+	}
+	tok, err := jwt.Parse([]byte(token), jwt.WithKeySet(jwks))
+	if err != nil {
+		ginCtx.AbortWithStatusJSON(http.StatusUnauthorized, localCacheResp{responseFailed, "Authorization token cannot be verified"})
+	}
+	scopeValidator := token_scopes.CreateScopeValidator([]token_scopes.TokenScope{token_scopes.Localcache_Purge}, true)
+	if err = jwt.Validate(tok, jwt.WithValidator(scopeValidator)); err != nil {
+		ginCtx.AbortWithStatusJSON(http.StatusUnauthorized, localCacheResp{responseFailed, "Authorization token is not valid: " + err.Error()})
+		return
+	}
+	lc.purge()
 }

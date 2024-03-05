@@ -46,7 +46,7 @@ Director:
   EnableBroker: true
 Cache:
   Port: 8442
-FileCache:
+LocalCache:
   HighWaterMarkPercentage: 95
   LowWaterMarkPercentage: 85
 Origin:
