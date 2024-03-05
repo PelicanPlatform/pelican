@@ -494,6 +494,7 @@ func TestFullUpload(t *testing.T) {
 	viper.Set("Registry.RequireCacheApproval", false)
 	viper.Set("Logging.Origin.Scitokens", "debug")
 	viper.Set("Origin.Port", 0)
+	viper.Set("Server.WebPort", 0)
 
 	err = config.InitServer(ctx, modules)
 	require.NoError(t, err)

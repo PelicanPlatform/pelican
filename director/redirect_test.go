@@ -25,6 +25,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -73,6 +74,78 @@ func NamespaceAdContainsPath(ns []common.NamespaceAdV2, path string) bool {
 		}
 	}
 	return false
+}
+
+func TestGetLinkDepth(t *testing.T) {
+	tests := []struct {
+		name     string
+		filepath string
+		prefix   string
+		err      error
+		depth    int
+	}{
+		{
+			name: "empty-file-prefix",
+			err:  errors.New("either filepath or prefix is an empty path"),
+		}, {
+			name: "empty-file",
+			err:  errors.New("either filepath or prefix is an empty path"),
+		}, {
+			name: "empty-prefix",
+			err:  errors.New("either filepath or prefix is an empty path"),
+		}, {
+			name:     "no-match",
+			filepath: "/foo/bar/barz.txt",
+			prefix:   "/bar",
+			err:      errors.New("filepath does not contain the prefix"),
+		}, {
+			name:     "depth-1-case",
+			filepath: "/foo/bar/barz.txt",
+			prefix:   "/foo/bar",
+			depth:    1,
+		}, {
+			name:     "depth-1-w-trailing-slash",
+			filepath: "/foo/bar/barz.txt",
+			prefix:   "/foo/bar/",
+			depth:    1,
+		}, {
+			name:     "depth-2-case",
+			filepath: "/foo/bar/barz.txt",
+			prefix:   "/foo",
+			depth:    2,
+		},
+		{
+			name:     "depth-2-w-trailing-slash",
+			filepath: "/foo/bar/barz.txt",
+			prefix:   "/foo/",
+			depth:    2,
+		},
+		{
+			name:     "depth-3-case",
+			filepath: "/foo/bar/barz.txt",
+			prefix:   "/",
+			depth:    3,
+		},
+		{
+			name:     "short-path",
+			filepath: "/foo/barz.txt",
+			prefix:   "/foo",
+			depth:    1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			depth, err := getLinkDepth(tt.filepath, tt.prefix)
+			if tt.err == nil {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				assert.Equal(t, tt.err.Error(), err.Error())
+			}
+			assert.Equal(t, tt.depth, depth)
+		})
+	}
 }
 
 func TestDirectorRegistration(t *testing.T) {
