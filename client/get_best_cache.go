@@ -74,7 +74,7 @@ func GetBestCache(cacheListName string) ([]string, error) {
 		headers.Host = cur_site
 		log.Debugf("Trying server site of %s", cur_site)
 
-		for _, ip := range get_ips(cur_site) {
+		for _, ip := range getIPs(cur_site) {
 			GeoIpUrl.Host = ip
 			GeoIpUrl.Scheme = "http"
 

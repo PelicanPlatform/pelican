@@ -1158,7 +1158,7 @@ func runTransferWorker(ctx context.Context, workChan <-chan *clientTransferFile,
 			}
 			transferResults.jobId = file.jobId
 			if err != nil {
-				log.Errorf("Error when attempting to transfer object %s for client %s", file.file.remoteURL, file.uuid.String())
+				log.Errorf("Error when attempting to transfer object %s for client %s: %v", file.file.remoteURL, file.uuid.String(), err)
 				transferResults = newTransferResults(file.file.job)
 				transferResults.Error = err
 			} else if transferResults.Error == nil {

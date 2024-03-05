@@ -197,7 +197,7 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 
 	understoodSchemes := []string{"osdf", "pelican", ""}
 
-	_, foundSource := Find(understoodSchemes, destUri.Scheme)
+	_, foundSource := find(understoodSchemes, destUri.Scheme)
 	if !foundSource {
 		log.Errorln("Unknown schema provided:", destUri.Scheme)
 		return 0, errors.New("Unsupported scheme requested")
@@ -490,7 +490,7 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 
 	understoodSchemes := []string{"file", "osdf", "pelican", ""}
 
-	_, foundDest := Find(understoodSchemes, remoteDestScheme)
+	_, foundDest := find(understoodSchemes, remoteDestScheme)
 	if !foundDest {
 		return nil, fmt.Errorf("Do not understand the destination scheme: %s. Permitted values are %s",
 			remoteDestUrl.Scheme, strings.Join(understoodSchemes, ", "))
@@ -516,6 +516,11 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 	transferResults, err = client.Shutdown()
 	if tj.lookupErr != nil {
 		err = tj.lookupErr
+	}
+	for _, result := range transferResults {
+		if err == nil && result.Error != nil {
+			err = result.Error
+		}
 	}
 	return
 }
@@ -575,7 +580,7 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 
 	understoodSchemes := []string{"file", "osdf", "pelican", ""}
 
-	_, foundSource := Find(understoodSchemes, remoteObjectScheme)
+	_, foundSource := find(understoodSchemes, remoteObjectScheme)
 	if !foundSource {
 		return nil, fmt.Errorf("Do not understand the source scheme: %s. Permitted values are %s",
 			remoteObjectUrl.Scheme, strings.Join(understoodSchemes, ", "))
@@ -646,6 +651,10 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 	var downloaded int64 = 0
 	for _, result := range transferResults {
 		downloaded += result.TransferredBytes
+		if err == nil && result.Error != nil {
+			success = false
+			err = result.Error
+		}
 	}
 
 	payload.end1 = end.Unix()
@@ -741,13 +750,13 @@ func DoCopy(ctx context.Context, sourceFile string, destination string, recursiv
 
 	understoodSchemes := []string{"stash", "file", "osdf", "pelican", ""}
 
-	_, foundSource := Find(understoodSchemes, sourceScheme)
+	_, foundSource := find(understoodSchemes, sourceScheme)
 	if !foundSource {
 		log.Errorln("Do not understand source scheme:", sourceURL.Scheme)
 		return nil, errors.New("Do not understand source scheme")
 	}
 
-	_, foundDest := Find(understoodSchemes, destScheme)
+	_, foundDest := find(understoodSchemes, destScheme)
 	if !foundDest {
 		log.Errorln("Do not understand destination scheme:", sourceURL.Scheme)
 		return nil, errors.New("Do not understand destination scheme")
@@ -827,13 +836,21 @@ func DoCopy(ctx context.Context, sourceFile string, destination string, recursiv
 	}
 	transferResults, err = tc.Shutdown()
 	if err == nil {
-		success = true
+		if tj.lookupErr == nil {
+			success = true
+		} else {
+			err = tj.lookupErr
+		}
 	}
 
 	end := time.Now()
 
 	for _, result := range transferResults {
 		downloaded += result.TransferredBytes
+		if err == nil && result.Error != nil {
+			success = false
+			err = result.Error
+		}
 	}
 
 	payload.end1 = end.Unix()
@@ -854,10 +871,10 @@ func DoCopy(ctx context.Context, sourceFile string, destination string, recursiv
 	}
 }
 
-// Find takes a slice and looks for an element in it. If found it will
+// find takes a slice and looks for an element in it. If found it will
 // return it's key, otherwise it will return -1 and a bool of false.
 // From https://golangcode.com/check-if-element-exists-in-slice/
-func Find(slice []string, val string) (int, bool) {
+func find(slice []string, val string) (int, bool) {
 	for i, item := range slice {
 		if item == val {
 			return i, true
@@ -866,10 +883,10 @@ func Find(slice []string, val string) (int, bool) {
 	return -1, false
 }
 
-// get_ips will resolve a hostname and return all corresponding IP addresses
+// getIPs will resolve a hostname and return all corresponding IP addresses
 // in DNS.  This can be used to randomly pick an IP when DNS round robin
 // is used
-func get_ips(name string) []string {
+func getIPs(name string) []string {
 	var ipv4s []string
 	var ipv6s []string
 
