@@ -139,19 +139,6 @@ func getLinkDepth(filepath, prefix string) (int, error) {
 	return pathDepth, nil
 }
 
-// func getAuthzEscaped(req *http.Request) (authzEscaped string) {
-// 	if authzQuery := req.URL.Query()["authz"]; len(authzQuery) > 0 {
-// 		authzEscaped = authzQuery[0]
-// 		// if the authz URL query is coming from XRootD, it probably has a "Bearer " tacked in front
-// 		// even though it's coming via a URL
-// 		authzEscaped = strings.TrimPrefix(authzEscaped, "Bearer ")
-// 	} else if authzHeader := req.Header["Authorization"]; len(authzHeader) > 0 {
-// 		authzEscaped = strings.TrimPrefix(authzHeader[0], "Bearer ")
-// 		authzEscaped = url.QueryEscape(authzEscaped)
-// 	}
-// 	return
-// }
-
 func getFinalRedirectURL(rurl url.URL, authzEscaped string) string {
 	if len(authzEscaped) > 0 {
 		if len(rurl.RawQuery) > 0 {
