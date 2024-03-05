@@ -293,7 +293,7 @@ func VerifyDeleteLotToken(lotName string, strToken string) (bool, error) {
 	}
 
 	if !tokenApproved {
-		return false, errors.New("The token was correctly signed but did not possess the necessary lot.create scope")
+		return false, errors.New("The token was correctly signed but did not possess the necessary lot.delete scope")
 	}
 
 	return true, nil
@@ -338,7 +338,7 @@ func VerifyUpdateLotToken(lot *LotUpdate, strToken string) (bool, error) {
 	}
 
 	if !tokenApproved {
-		return false, errors.New("The token was correctly signed but did not possess the necessary lot.create scope")
+		return false, errors.New("The token was correctly signed but did not possess the necessary lot.modify scope")
 	}
 
 	return true, nil

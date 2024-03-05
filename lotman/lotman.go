@@ -256,6 +256,11 @@ func getLotmanLib() string {
 }
 
 func GetAuthorizedCallers(lotName string) (*[]string, error) {
+	success := InitLotman()
+	if !success {
+		return nil, errors.New("Failed to initialize LotMan")
+	}
+
 	// A caller is authorized if they own a parent of the lot. In the case of self-parenting lots, the owner is authorized.
 	errMsg := make([]byte, 2048)
 	cParents := unsafe.Pointer(nil)
@@ -356,6 +361,15 @@ func InitLotman() bool {
 		federationIssuer = param.Federation_DirectorUrl.GetString()
 	}
 
+	callerMutex.Lock()
+	defer callerMutex.Unlock()
+	ret = LotmanSetContextStr("caller", federationIssuer, &errMsg)
+	if ret != 0 {
+		trimBuf(&errMsg)
+		log.Errorf("Error setting context for default lot: %s", string(errMsg))
+		return false
+	}
+
 	// Create the basic lots if they don't already exist. We'll make one for default
 	// and one for the root namespace
 	ret = LotmanLotExists("default", &errMsg)
@@ -368,9 +382,17 @@ func InitLotman() bool {
 		// a few default values
 		for _, lot := range initializedLots {
 			if lot.LotName == "default" {
-				err := CreateLot(&lot, federationIssuer)
+				log.Debugf("Creating the default lot defined by %v", lot)
+				lotJSON, err := json.Marshal(lot)
 				if err != nil {
-					log.Errorf("Error creating default lot: %v", err)
+					log.Errorf("Error marshalling default lot JSON: %v", err)
+					return false
+				}
+
+				ret = LotmanAddLot(string(lotJSON), &errMsg)
+				if ret != 0 {
+					trimBuf(&errMsg)
+					log.Errorf("Error creating default lot: %s", string(errMsg))
 					return false
 				}
 				defaultInitialized = true
@@ -409,9 +431,16 @@ func InitLotman() bool {
 			}
 
 			log.Debugf("Creating the default lot defined by %v", defaultLot)
-			err = CreateLot(&defaultLot, federationIssuer)
+			lotJSON, err := json.Marshal(defaultLot)
 			if err != nil {
-				log.Errorf("Error creating default lot: %v", err)
+				log.Errorf("Error marshalling default lot JSON: %v", err)
+				return false
+			}
+
+			ret = LotmanAddLot(string(lotJSON), &errMsg)
+			if ret != 0 {
+				trimBuf(&errMsg)
+				log.Errorf("Error creating default lot: %s", string(errMsg))
 				return false
 			}
 		}
@@ -428,9 +457,16 @@ func InitLotman() bool {
 		// Try to create the root lot based on what we have in the config
 		for _, lot := range initializedLots {
 			if lot.LotName == "root" {
-				err := CreateLot(&lot, federationIssuer)
+				lotJSON, err := json.Marshal(lot)
 				if err != nil {
-					log.Errorf("error creating root lot: %v", err)
+					log.Errorf("Error marshalling root lot JSON: %v", err)
+					return false
+				}
+
+				ret = LotmanAddLot(string(lotJSON), &errMsg)
+				if ret != 0 {
+					trimBuf(&errMsg)
+					log.Errorf("Error creating root lot: %s", string(errMsg))
 					return false
 				}
 				rootInitialized = true
@@ -468,9 +504,16 @@ func InitLotman() bool {
 			}
 
 			log.Debugf("Creating the root lot defined by %v", rootLot)
-			err := CreateLot(&rootLot, federationIssuer)
+			lotJSON, err := json.Marshal(rootLot)
 			if err != nil {
-				log.Errorf("error creating root lot: %v", err)
+				log.Errorf("Error marshalling root lot JSON: %v", err)
+				return false
+			}
+
+			ret = LotmanAddLot(string(lotJSON), &errMsg)
+			if ret != 0 {
+				trimBuf(&errMsg)
+				log.Errorf("Error creating root lot: %s", string(errMsg))
 				return false
 			}
 		}
@@ -481,9 +524,16 @@ func InitLotman() bool {
 	// Now instantiate any other lots that are in the config
 	for _, lot := range initializedLots {
 		if lot.LotName != "default" && lot.LotName != "root" {
-			err := CreateLot(&lot, federationIssuer)
+			lotJSON, err := json.Marshal(lot)
 			if err != nil {
-				log.Errorf("error creating  lot: %v", err)
+				log.Errorf("Error marshalling lot JSON for %s: %v", lot.LotName, err)
+				return false
+			}
+
+			ret = LotmanAddLot(string(lotJSON), &errMsg)
+			if ret != 0 {
+				trimBuf(&errMsg)
+				log.Errorf("Error creating lot %s: %s", lot.LotName, string(errMsg))
 				return false
 			}
 		}
@@ -495,6 +545,11 @@ func InitLotman() bool {
 }
 
 func CreateLot(newLot *Lot, caller string) error {
+	success := InitLotman()
+	if !success {
+		return errors.New("Failed to initialize LotMan")
+	}
+
 	// Marshal the JSON into a string for the C function
 	lotJSON, err := json.Marshal(*newLot)
 	if err != nil {
@@ -522,6 +577,11 @@ func CreateLot(newLot *Lot, caller string) error {
 }
 
 func GetLot(lotName string, recursive bool) (*Lot, error) {
+	success := InitLotman()
+	if !success {
+		return nil, errors.New("Failed to initialize LotMan")
+	}
+
 	// Haven't given much thought to these buff sizes yet
 	outputBuf := make([]byte, 4096)
 	errMsg := make([]byte, 2048)
@@ -541,6 +601,11 @@ func GetLot(lotName string, recursive bool) (*Lot, error) {
 }
 
 func UpdateLot(lotUpdate *LotUpdate, caller string) error {
+	success := InitLotman()
+	if !success {
+		return errors.New("Failed to initialize LotMan")
+	}
+
 	// Marshal the JSON into a string for the C function
 	updateJSON, err := json.Marshal(*lotUpdate)
 	if err != nil {
@@ -566,6 +631,11 @@ func UpdateLot(lotUpdate *LotUpdate, caller string) error {
 }
 
 func DeleteLotsRecursive(lotName string, caller string) error {
+	success := InitLotman()
+	if !success {
+		return errors.New("Failed to initialize LotMan")
+	}
+
 	errMsg := make([]byte, 2048)
 	callerMutex.Lock()
 	defer callerMutex.Unlock()
