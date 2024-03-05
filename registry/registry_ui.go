@@ -470,7 +470,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 		return
 	}
 	if sysErr != nil {
-		log.Errorln("Error validating keycahing", sysErr)
+		log.Errorln("Error validating key chaining", sysErr)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": sysErr})
 		return
 	}
