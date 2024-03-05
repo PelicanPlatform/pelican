@@ -200,10 +200,9 @@ func TestStashPluginMain(t *testing.T) {
 		// Drop the testFileContent into the origin directory
 		tempFile, err := os.Create(filepath.Join(fed.OriginDir, "test.txt"))
 		assert.NoError(t, err, "Error creating temp file")
-		defer os.Remove(tempFile.Name())
 		_, err = tempFile.WriteString(testFileContent)
 		assert.NoError(t, err, "Error writing to temp file")
-		tempFile.Close()
+		defer tempFile.Close()
 
 		viper.Set("Logging.DisableProgressBars", true)
 
