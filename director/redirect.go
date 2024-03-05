@@ -357,6 +357,12 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		ginCtx.String(http.StatusNotFound, "There are currently no origins exporting the provided namespace prefix\n")
 		return
 	}
+	// if err != nil, depth == 0, which is the default value for depth
+	// so we can use it as the value for the header even with err
+	depth, err := getLinkDepth(reqPath, namespaceAd.Path)
+	if err != nil {
+		log.Errorf("Failed to get depth attribute for the redirecting request to %q, with best match namespace prefix %q", reqPath, namespaceAd.Path)
+	}
 
 	originAds, err = sortServers(ipAddr, originAds)
 	if err != nil {
@@ -373,7 +379,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 			linkHeader += ", "
 		}
 		redirectURL := getRedirectURL(reqPath, ad, !namespaceAd.PublicRead)
-		linkHeader += fmt.Sprintf(`<%s>; rel="duplicate"; pri=%d`, redirectURL.String(), idx+1)
+		linkHeader += fmt.Sprintf(`<%s>; rel="duplicate"; pri=%d; depth=%d`, redirectURL.String(), idx+1, depth)
 	}
 	ginCtx.Writer.Header()["Link"] = []string{linkHeader}
 
