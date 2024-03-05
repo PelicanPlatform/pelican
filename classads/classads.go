@@ -25,6 +25,7 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type ClassAd struct {
@@ -61,18 +62,32 @@ func (c *ClassAd) String() string {
 		buffer.WriteString(" = ")
 		switch v := value.(type) {
 		case string:
-			buffer.WriteString("\"")
-			newVal := strings.Replace(v, "\"", "\\\"", -1)
-			buffer.WriteString(newVal)
-			buffer.WriteString("\"")
+			buffer.WriteString(strconv.QuoteToASCII(v))
 		case map[string]interface{}:
 			buffer.WriteString("[")
 			for key, value := range v {
 				buffer.WriteString(key)
 				buffer.WriteString(" = ")
-				buffer.WriteString("\"")
-				buffer.WriteString(fmt.Sprintf("%v", value))
-				buffer.WriteString("\"; ")
+				switch valueType := value.(type) {
+				case int, int64:
+					fmt.Fprintf(&buffer, "%v; ", valueType)
+				case string:
+					fmt.Fprintf(&buffer, "%s; ", strconv.QuoteToASCII(valueType))
+				case bool:
+					fmt.Fprintf(&buffer, "%t; ", valueType)
+				case float64:
+					fmt.Fprintf(&buffer, "%.3f; ", valueType)
+				case time.Duration:
+					// convert to seconds rounded to nearest millisecond, get 3 significant figures
+					valueTypeFloat := float64(valueType.Round(time.Millisecond).Milliseconds()) / 1000.0
+					fmt.Fprintf(&buffer, "%.3f; ", valueTypeFloat)
+				default:
+					if str, ok := valueType.(string); ok {
+						fmt.Fprintf(&buffer, "%s; ", strconv.QuoteToASCII(str))
+					} else {
+						fmt.Fprintf(&buffer, "%v; ", valueType)
+					}
+				}
 			}
 			buffer.WriteString("]")
 		default:
