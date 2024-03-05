@@ -1948,7 +1948,29 @@ components: ["cache"]
 ---
 name: Lotman.Lots
 description: >-
-  Declarative configuration for LotMan.  This is a list of objects, each of which describes a "lot".
+  Declarative configuration for LotMan.  This is a list of objects, each of which describes a "lot". Every lot
+  can be defined with the following:
+  - `LotName`: REQUIRED. The name of the lot.  This is used to identify the lot in the LotMan database.
+  - `Owner`: REQUIRED. A string identifying the owner of the lot's data (as opposed to someone who can modify the lot itself).
+    The Owner field should generally be set to the issue for the lot's namespace path. For example, if the lot
+    tracks namespace `/foo/bar`, the owner might be set to `https://registry.com/api/v1.0/registry/foo/bar`.
+  - `Paths`: OPTIONAL. A list of path objects, each of which describes a path that should be managed by the lot.
+      - `Path`: REQUIRED. The path to be managed by the lot.
+      - `Recursive`: REQUIRED. A boolean indicating whether the path should be managed recursively. If true, the lot will
+        manage all files and directories under the specified path.
+  - `ManagementPolicyAttrs`: REQUIRED. The lot's management policy attributes object. This contains information about resources the lot should
+    be allocated, and how it should be managed.
+      - `DedicatedGB`: REQUIRED. The amount of storage, in GB, that should be dedicated to the lot. This means the lot can assume it
+        always has access to this quantity.
+      - `OpportunisticGB`: REQUIRED. The amount of opportunistic storage, in GB, the lot should have access to, when storage is available.
+      - `MaxNumObjects`: REQUIRED. The maximum number of objects a lot is allowed to store.
+      - `CreationTime`: REQUIRED. A unix timestamp indicating when the lot should begin being considered valid. Times in the future indicate
+        the lot should not be considered valid until that time.
+      - `ExpirationTime`: REQUIRED. A unix timestamp indicating when the lot expires. Lots may continue to function after expiration, but lot
+        data owners should recognize the storage is at-will and may be pre-empted at any time.
+      - `DeletionTime`: REQUIRED. A unix timestamp indicating when the lot and its associated data should be deleted.
+
+  Note that example configurations can be found in lotman/resources/lots-config.yaml
 type: object
 default: none
 components: ["cache"]
