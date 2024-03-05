@@ -59,7 +59,10 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) (
 
 	// Register Lotman
 	if param.Cache_EnableLotman.GetBool() {
-		lotman.RegisterLotman(ctx, engine.Group("/"))
+		if param.Lotman_EnableAPI.GetBool() {
+			log.Debugln("Registering Lotman API")
+			lotman.RegisterLotman(ctx, engine.Group("/"))
+		}
 		success := lotman.InitLotman()
 		if !success {
 			return nil, errors.New("Failed to initialize lotman")
