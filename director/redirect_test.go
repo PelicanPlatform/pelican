@@ -46,8 +46,8 @@ import (
 	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/test_utils"
+	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
-	"github.com/pelicanplatform/pelican/utils"
 )
 
 type MockCache struct {
@@ -90,7 +90,7 @@ func TestDirectorRegistration(t *testing.T) {
 	// Mock registry server
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if req.Method == "POST" && req.URL.Path == "/api/v1.0/registry/checkNamespaceStatus" {
-			res := checkStatusRes{Approved: true}
+			res := common.CheckNamespaceStatusRes{Approved: true}
 			resByte, err := json.Marshal(res)
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
@@ -155,8 +155,8 @@ func TestDirectorRegistration(t *testing.T) {
 	}
 
 	generateReadToken := func(key jwk.Key, object, issuer string) string {
-		tc := utils.TokenConfig{
-			TokenProfile: utils.WLCG,
+		tc := token.TokenConfig{
+			TokenProfile: token.WLCG,
 			Version:      "1.0",
 			Lifetime:     time.Minute,
 			Issuer:       issuer,
