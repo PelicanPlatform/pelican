@@ -335,8 +335,6 @@ func GetJWKSFromIssUrl(issuer string) (*jwk.Set, error) {
 		return nil, errors.Wrap(err, "Error getting JWKS URL from issuer URL")
 	}
 
-	fmt.Printf("\n\n\nPUBKEY URL: %s\n\n\n", pubkeyUrlStr)
-
 	// Query the JWKS URL for the public keys
 	httpClient := &http.Client{Transport: config.GetTransport()}
 	req, err := http.NewRequest("GET", pubkeyUrlStr, nil)
