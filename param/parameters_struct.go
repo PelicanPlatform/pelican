@@ -68,7 +68,6 @@ type Config struct {
 		DirectorUrl string
 		DiscoveryUrl string
 		JwkUrl string
-		NamespaceUrl string
 		RegistryUrl string
 		TopologyNamespaceUrl string
 		TopologyReloadInterval time.Duration
@@ -91,18 +90,19 @@ type Config struct {
 	Logging struct {
 		Cache struct {
 			Ofs string
+			Pfc string
 			Pss string
 			Scitokens string
 			Xrd string
+			Xrootd string
 		}
 		DisableProgressBars bool
 		Level string
 		LogLocation string
 		Origin struct {
 			Cms string
-			Pfc string
-			Pss string
 			Scitokens string
+			Xrd string
 			Xrootd string
 		}
 	}
@@ -294,7 +294,6 @@ type configWithType struct {
 		DirectorUrl struct { Type string; Value string }
 		DiscoveryUrl struct { Type string; Value string }
 		JwkUrl struct { Type string; Value string }
-		NamespaceUrl struct { Type string; Value string }
 		RegistryUrl struct { Type string; Value string }
 		TopologyNamespaceUrl struct { Type string; Value string }
 		TopologyReloadInterval struct { Type string; Value time.Duration }
@@ -317,18 +316,19 @@ type configWithType struct {
 	Logging struct {
 		Cache struct {
 			Ofs struct { Type string; Value string }
+			Pfc struct { Type string; Value string }
 			Pss struct { Type string; Value string }
 			Scitokens struct { Type string; Value string }
 			Xrd struct { Type string; Value string }
+			Xrootd struct { Type string; Value string }
 		}
 		DisableProgressBars struct { Type string; Value bool }
 		Level struct { Type string; Value string }
 		LogLocation struct { Type string; Value string }
 		Origin struct {
 			Cms struct { Type string; Value string }
-			Pfc struct { Type string; Value string }
-			Pss struct { Type string; Value string }
 			Scitokens struct { Type string; Value string }
+			Xrd struct { Type string; Value string }
 			Xrootd struct { Type string; Value string }
 		}
 	}

@@ -12,3 +12,8 @@ export interface Namespace {
     type: "origin" | "cache";
     admin_metadata: NamespaceAdminMetadata;
 }
+
+interface Institution {
+    id: string;
+    name: string;
+}

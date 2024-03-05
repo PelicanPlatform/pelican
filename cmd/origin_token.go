@@ -28,7 +28,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/utils"
+	"github.com/pelicanplatform/pelican/token"
 )
 
 // Take an input slice and append its claim name
@@ -46,8 +46,8 @@ func parseInputSlice(rawSlice *[]string, claimPrefix string) []string {
 
 // Parse claims to tokenConfig, excluding "sub". `claims` should be in the form of
 // <claim_key>=<claim=value>
-func parseClaimsToTokenConfig(claims []string) (*utils.TokenConfig, error) {
-	tokenConfig := utils.TokenConfig{}
+func parseClaimsToTokenConfig(claims []string) (*token.TokenConfig, error) {
+	tokenConfig := token.TokenConfig{}
 	for _, claim := range claims {
 		// Split by the first "=" delimiter
 		parts := strings.SplitN(claim, "=", 2)
@@ -134,7 +134,7 @@ func cliTokenCreate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return errors.Wrapf(err, "Failed to get profile '%s' from input", profile)
 	}
-	tokenConfig.TokenProfile = utils.TokenProfile(profile)
+	tokenConfig.TokenProfile = token.TokenProfile(profile)
 
 	lifetime, err := cmd.Flags().GetInt("lifetime")
 	if err != nil {

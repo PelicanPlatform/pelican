@@ -697,8 +697,8 @@ func InitConfig() {
 	}
 
 	if oldNsUrl := viper.GetString("Federation.NamespaceUrl"); oldNsUrl != "" {
-		log.Warningln("Federation.NamespaceUrl is deprecated and will be removed in future release. Please migrate to use Federation.RegistryUrl instead")
-		viper.SetDefault("Federation.RegistryUrl", oldNsUrl)
+		log.Errorln("Federation.NamespaceUrl is deprecated and removed from parameters. Please use Federation.RegistryUrl instead")
+		os.Exit(1)
 	}
 }
 

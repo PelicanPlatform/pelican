@@ -40,7 +40,7 @@ export PELICAN_ORIGIN_EXPORTVOLUME="origin:/test"
 echo "This is some random content in the random file" > input.txt
 
 # Make a token to be used
-./pelican origin token create --audience "https://wlcg.cern.ch/jwt/v1/any" --issuer "https://`hostname`:8444" --scope "storage.read:/ storage.modify:/" --subject "bar" --lifetime 60 --private-key get_put_config/issuer.jwk > token
+./pelican origin token create --audience "https://wlcg.cern.ch/jwt/v1/any" --issuer "https://`hostname`:8444" --scope "storage.read:/ storage.modify:/" --subject "bar" --lifetime 60 --private-key get_put_config/issuer.jwk > tmp_jwt
 
 # Run federation in the background
 federationServe="./pelican serve --module director --module registry --module origin -d"
@@ -81,7 +81,7 @@ do
 
         # Test failed, we need to clean up
         rm -rf origin get_put_config xrootdRunLocation
-        rm -f input.txt token
+        rm -f input.txt tmp_jwt
 
         unset PELICAN_FEDERATION_DIRECTORURL
         unset PELICAN_FEDERATION_REGISTRYURL
@@ -96,7 +96,7 @@ do
 done
 
 # Run pelican object put
-./pelican object put input.txt pelican:///test/input.txt -d -t token -l putOutput.txt
+./pelican object put input.txt pelican:///test/input.txt -d -t tmp_jwt -l putOutput.txt
 
 # Check output of command
 if grep -q "Uploaded bytes: 47" putOutput.txt; then
@@ -107,7 +107,7 @@ else
     to_exit=1
 fi
 
-./pelican object get pelican:///test/input.txt output.txt -d -t token -l getOutput.txt
+./pelican object get pelican:///test/input.txt output.txt -d -t tmp_jwt -l getOutput.txt
 
 # Check output of command
 if grep -q "Downloaded bytes: 47" getOutput.txt; then
@@ -133,7 +133,7 @@ fi
 kill $pid_federationServe
 
 # Clean up temporary files
-rm -f input.txt token putOutput.txt getOutput.txt output.txt
+rm -f input.txt tmp_jwt putOutput.txt getOutput.txt output.txt
 
 # cleanup
 rm -rf origin get_put_config xrootdRunLocation
