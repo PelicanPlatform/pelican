@@ -26,6 +26,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"testing"
@@ -738,7 +739,8 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 		}
 
 		// Download the files we just uploaded
-		transferDetailsDownload, err := client.DoGet(ctx, uploadURL, t.TempDir(), true, client.WithTokenLocation(tempToken.Name()))
+		tmpDir := t.TempDir()
+		transferDetailsDownload, err := client.DoGet(ctx, uploadURL, tmpDir, true, client.WithTokenLocation(tempToken.Name()))
 		assert.NoError(t, err)
 		if err == nil && len(transferDetailsUpload) == 2 {
 			countBytesUploadIdx0 := 0
@@ -762,9 +764,12 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 			if countBytesUploadIdx0 != 1 || countBytesUploadIdx1 != 1 {
 				// We would hit this case if 1 counter got hit twice for some reason
 				t.Fatal("One of the files was not downloaded correctly")
-			} else if len(transferDetailsDownload) != 2 {
-				t.Fatalf("Amount of transfers results returned for download was not correct. Transfer details returned: %d", len(transferDetailsDownload))
 			}
+			contents, err := os.ReadFile(filepath.Join(tmpDir, path.Join(dirName, path.Base(tempFile2.Name()))))
+			assert.NoError(t, err)
+			assert.Equal(t, testFileContent2, string(contents))
+		} else if err == nil && len(transferDetailsDownload) != 2 {
+			t.Fatalf("Amount of transfers results returned for download was not correct. Transfer details returned: %d", len(transferDetailsDownload))
 		}
 	})
 

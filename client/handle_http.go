@@ -1185,7 +1185,7 @@ func runTransferWorker(ctx context.Context, workChan <-chan *clientTransferFile,
 }
 
 func downloadObject(transfer *transferFile) (transferResults TransferResults, err error) {
-	log.Debugln("Downloading file from", transfer.remoteURL)
+	log.Debugln("Downloading file from", transfer.remoteURL, "to", transfer.localPath)
 	// Remove the source from the file path
 	directory := path.Dir(transfer.localPath)
 	var downloaded int64
@@ -1849,18 +1849,18 @@ func (te *TransferEngine) walkDirDownload(job *clientTransferJob, transfers []tr
 //
 // Recursively walks through the remote server directory, emitting transfer files
 // for the engine to process.
-func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfers []transferAttemptDetails, files chan *clientTransferFile, path string, client *gowebdav.Client) error {
-	log.Debugln("Reading directory: ", path)
+func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfers []transferAttemptDetails, files chan *clientTransferFile, remotePath string, client *gowebdav.Client) error {
 	// Check for cancelation since the client does not respect the context
 	if err := job.job.ctx.Err(); err != nil {
 		return err
 	}
-	infos, err := client.ReadDir(path)
+	infos, err := client.ReadDir(remotePath)
 	if err != nil {
 		return err
 	}
+	localBase := strings.TrimPrefix(remotePath, job.job.remoteURL.Path)
 	for _, info := range infos {
-		newPath := path + "/" + info.Name()
+		newPath := remotePath + "/" + info.Name()
 		if info.IsDir() {
 			err := te.walkDirDownloadHelper(job, transfers, files, newPath, client)
 			if err != nil {
@@ -1881,7 +1881,7 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 					engine:     te,
 					remoteURL:  &url.URL{Path: newPath},
 					packOption: transfers[0].PackOption,
-					localPath:  job.job.localPath,
+					localPath:  path.Join(job.job.localPath, localBase, info.Name()),
 					upload:     job.job.upload,
 					token:      job.job.token,
 					attempts:   transfers,
