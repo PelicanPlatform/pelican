@@ -694,6 +694,20 @@ type: int
 default: none
 components: ["cache"]
 ---
+name: Cache.SelfTest
+description: >-
+  A bool indicating whether the cache should perform self health checks.
+type: bool
+default: true
+components: ["cache"]
+---
+name: Cache.SelfTestInterval
+description: >-
+  The interval of which the cache starts a new file transfer test to itself.
+type: duration
+default: 15s
+components: ["cache"]
+---
 ############################
 #  Director-level configs  #
 ############################
