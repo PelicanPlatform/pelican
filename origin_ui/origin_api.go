@@ -92,7 +92,7 @@ func LaunchPeriodicDirectorTimeout(ctx context.Context, egrp *errgroup.Group) {
 func directorTestResponse(ctx *gin.Context) {
 	status, ok, err := token.Verify(ctx, token.AuthOption{
 		Sources: []token.TokenSource{token.Header},
-		Issuers: []token.TokenIssuer{token.Federation},
+		Issuers: []token.TokenIssuer{token.FederationIssuer},
 		Scopes:  []token_scopes.TokenScope{token_scopes.Pelican_DirectorTestReport},
 	})
 	if !ok {
@@ -101,8 +101,8 @@ func directorTestResponse(ctx *gin.Context) {
 
 	dt := common.DirectorTestResult{}
 	if err := ctx.ShouldBind(&dt); err != nil {
-		log.Errorf("Invalid director test response")
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid director test response"})
+		log.Errorf("Invalid director test response: %v", err)
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid director test response: " + err.Error()})
 		return
 	}
 	// We will let the timer go timeout if director didn't send a valid json request

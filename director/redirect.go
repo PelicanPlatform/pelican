@@ -654,14 +654,14 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType common.S
 func discoverOriginCache(ctx *gin.Context) {
 	authOption := token.AuthOption{
 		Sources: []token.TokenSource{token.Header},
-		Issuers: []token.TokenIssuer{token.Issuer},
+		Issuers: []token.TokenIssuer{token.LocalIssuer},
 		Scopes:  []token_scopes.TokenScope{token_scopes.Pelican_DirectorServiceDiscovery},
 	}
 
-	status, ok, error := token.Verify(ctx, authOption)
+	status, ok, err := token.Verify(ctx, authOption)
 	if !ok {
-		log.Warningf("Cannot verify token for accessing director's sevice discovery")
-		ctx.JSON(status, gin.H{"error": error.Error()})
+		log.Warningf("Cannot verify token for accessing director's service discovery: %v", err)
+		ctx.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
 

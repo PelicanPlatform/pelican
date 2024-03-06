@@ -703,10 +703,10 @@ func TestDiscoverOriginCache(t *testing.T) {
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
 
-		assert.Equal(t, 401, w.Code)
+		assert.Equal(t, 403, w.Code)
 		assert.Equal(t, `{"error":"Authentication is required but no token is present."}`, w.Body.String())
 	})
-	t.Run("token-present-with-wrong-issuer-should-give-401", func(t *testing.T) {
+	t.Run("token-present-with-wrong-issuer-should-give-403", func(t *testing.T) {
 		req, err := http.NewRequest(http.MethodGet, "/test", nil)
 		if err != nil {
 			t.Fatalf("Could not make a GET request: %v", err)
@@ -718,7 +718,7 @@ func TestDiscoverOriginCache(t *testing.T) {
 		r.ServeHTTP(w, req)
 
 		assert.Equal(t, 403, w.Code)
-		assert.Equal(t, `{"error":"Cannot verify token: Cannot verify token with server issuer:  Issuer is not server itself: https://wrong-issuer.org\n"}`, w.Body.String())
+		assert.Equal(t, `{"error":"Cannot verify token: Cannot verify token with server issuer:  Token issuer https://wrong-issuer.org does not match the local issuer on the current server. Expecting https://fake-director.org:8888\n"}`, w.Body.String())
 	})
 	t.Run("token-present-valid-should-give-200-and-empty-array", func(t *testing.T) {
 		req, err := http.NewRequest(http.MethodGet, "/test", nil)

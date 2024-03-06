@@ -37,11 +37,11 @@ type MockAuthChecker struct {
 	IssuerCheckFunc     func(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScope bool) error
 }
 
-func (m *MockAuthChecker) federationCheck(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScope bool) error {
+func (m *MockAuthChecker) federationIssuerCheck(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScope bool) error {
 	return m.FederationCheckFunc(ctx, token, expectedScopes, allScope)
 }
 
-func (m *MockAuthChecker) issuerCheck(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScope bool) error {
+func (m *MockAuthChecker) localIssuerCheck(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScope bool) error {
 	return m.IssuerCheckFunc(ctx, token, expectedScopes, allScope)
 }
 
@@ -109,7 +109,7 @@ func TestVerify(t *testing.T) {
 			name: "valid-token-from-cookie-source",
 			authOption: AuthOption{
 				Sources: []TokenSource{Cookie},
-				Issuers: []TokenIssuer{Federation},
+				Issuers: []TokenIssuer{FederationIssuer},
 			},
 			tokenSetup: func() *gin.Context {
 				return createContextWithToken("valid-cookie-token", "", "")
@@ -120,7 +120,7 @@ func TestVerify(t *testing.T) {
 			name: "valid-token-from-header-source",
 			authOption: AuthOption{
 				Sources: []TokenSource{Header},
-				Issuers: []TokenIssuer{Federation},
+				Issuers: []TokenIssuer{FederationIssuer},
 			},
 			tokenSetup: func() *gin.Context {
 				return createContextWithToken("", "valid-header-token", "")
@@ -131,7 +131,7 @@ func TestVerify(t *testing.T) {
 			name: "valid-token-from-authz-query-parameter",
 			authOption: AuthOption{
 				Sources: []TokenSource{Authz},
-				Issuers: []TokenIssuer{Federation},
+				Issuers: []TokenIssuer{FederationIssuer},
 			},
 			tokenSetup: func() *gin.Context {
 				return createContextWithToken("", "", "valid-query-token")
@@ -148,13 +148,13 @@ func TestVerify(t *testing.T) {
 				return createContextWithToken("", "", "")
 			},
 			expectedResult: false,
-			expectedStatus: 401,
+			expectedStatus: 403, // Return 403 as RFC requires returning 401 with WWW-Authenticate response header and we don't have it
 		},
 		{
 			name: "get-first-available-token-from-multiple-sources",
 			authOption: AuthOption{
 				Sources: []TokenSource{Cookie, Header, Authz},
-				Issuers: []TokenIssuer{Federation},
+				Issuers: []TokenIssuer{FederationIssuer},
 			},
 			setupMock: func() {
 				mock.FederationCheckFunc = func(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScope bool) error {
@@ -175,7 +175,7 @@ func TestVerify(t *testing.T) {
 			name: "valid-token-with-single-issuer",
 			authOption: AuthOption{
 				Sources: []TokenSource{Cookie},
-				Issuers: []TokenIssuer{Federation},
+				Issuers: []TokenIssuer{FederationIssuer},
 			},
 			setupMock: func() {
 				mock.FederationCheckFunc = func(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScope bool) error {
@@ -196,7 +196,7 @@ func TestVerify(t *testing.T) {
 			name: "invalid-token-with-single-issuer",
 			authOption: AuthOption{
 				Sources: []TokenSource{Cookie},
-				Issuers: []TokenIssuer{Federation},
+				Issuers: []TokenIssuer{FederationIssuer},
 			},
 			setupMock: func() {
 				mock.FederationCheckFunc = func(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScope bool) error {
@@ -218,7 +218,7 @@ func TestVerify(t *testing.T) {
 			name: "valid-token-with-multiple-issuer",
 			authOption: AuthOption{
 				Sources: []TokenSource{Cookie},
-				Issuers: []TokenIssuer{Federation, Issuer},
+				Issuers: []TokenIssuer{FederationIssuer, LocalIssuer},
 			},
 			setupMock: func() {
 				mock.FederationCheckFunc = func(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScope bool) error {
@@ -246,7 +246,7 @@ func TestVerify(t *testing.T) {
 			name: "invalid-token-with-multiple-issuer",
 			authOption: AuthOption{
 				Sources: []TokenSource{Cookie},
-				Issuers: []TokenIssuer{Federation, Issuer},
+				Issuers: []TokenIssuer{FederationIssuer, LocalIssuer},
 			},
 			setupMock: func() {
 				mock.FederationCheckFunc = func(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScope bool) error {

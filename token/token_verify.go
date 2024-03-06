@@ -36,8 +36,8 @@ import (
 )
 
 type (
-	TokenSource int
-	TokenIssuer int
+	TokenSource string
+	TokenIssuer string
 	AuthOption  struct {
 		Sources   []TokenSource
 		Issuers   []TokenIssuer
@@ -45,8 +45,8 @@ type (
 		AllScopes bool
 	}
 	AuthChecker interface {
-		federationCheck(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScopes bool) error
-		issuerCheck(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScopes bool) error
+		federationIssuerCheck(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScopes bool) error
+		localIssuerCheck(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScopes bool) error
 	}
 	AuthCheckImpl     struct{}
 	DiscoveryResponse struct { // This is a duplicate from director/authentication to ensure we don't have cyclic import
@@ -56,14 +56,14 @@ type (
 )
 
 const (
-	Header TokenSource = iota // "Authorization" header
-	Cookie                    // "login" cookie
-	Authz                     // "authz" query parameter
+	Header TokenSource = "AuthorizationHeader" // "Authorization" header
+	Cookie TokenSource = "Cookie"              // "login" cookie
+	Authz  TokenSource = "AuthzQueryParameter" // "authz" query parameter
 )
 
 const (
-	Federation TokenIssuer = iota
-	Issuer
+	FederationIssuer TokenIssuer = "FederationIssuer"
+	LocalIssuer      TokenIssuer = "LocalIssuer"
 )
 
 var (
@@ -76,7 +76,7 @@ func init() {
 }
 
 // Checks that the given token was signed by the federation jwk and also checks that the token has the expected scope
-func (a AuthCheckImpl) federationCheck(c *gin.Context, strToken string, expectedScopes []token_scopes.TokenScope, allScopes bool) error {
+func (a AuthCheckImpl) federationIssuerCheck(c *gin.Context, strToken string, expectedScopes []token_scopes.TokenScope, allScopes bool) error {
 	fedURL := param.Federation_DiscoveryUrl.GetString()
 	token, err := jwt.Parse([]byte(strToken), jwt.WithVerify(false))
 
@@ -85,7 +85,7 @@ func (a AuthCheckImpl) federationCheck(c *gin.Context, strToken string, expected
 	}
 
 	if fedURL != token.Issuer() {
-		return errors.New(fmt.Sprint("Issuer is not a federation: ", token.Issuer()))
+		return errors.New(fmt.Sprintf("Token issuer %s does not match the issuer from the federation. Expecting the issuer to be %s", token.Issuer(), fedURL))
 	}
 
 	fedURIFile := param.Federation_JwkUrl.GetString()
@@ -111,19 +111,15 @@ func (a AuthCheckImpl) federationCheck(c *gin.Context, strToken string, expected
 
 	scopeValidator := token_scopes.CreateScopeValidator(expectedScopes, allScopes)
 	if err = jwt.Validate(parsed, jwt.WithValidator(scopeValidator)); err != nil {
-		return errors.Wrap(err, "Failed to verify the scope of the token")
+		return errors.Wrap(err, fmt.Sprintf("Failed to verify the scope of the token. Require %v", expectedScopes))
 	}
 
 	c.Set("User", "Federation")
 	return nil
 }
 
-// Checks that the given token was signed by the issuer jwk (the one from the server itself) and also checks that
-// the token has the expected scope
-//
-// Note that this means the issuer jwk MUST be the one server created. It can't be provided by
-// the user if they want to use a different issuer than the server. This can be changed in the future.
-func (a AuthCheckImpl) issuerCheck(c *gin.Context, strToken string, expectedScopes []token_scopes.TokenScope, allScopes bool) error {
+// Checks that the given token was signed by the local issuer on the server
+func (a AuthCheckImpl) localIssuerCheck(c *gin.Context, strToken string, expectedScopes []token_scopes.TokenScope, allScopes bool) error {
 	token, err := jwt.Parse([]byte(strToken), jwt.WithVerify(false))
 	if err != nil {
 		return errors.Wrap(err, "Invalid JWT")
@@ -132,13 +128,13 @@ func (a AuthCheckImpl) issuerCheck(c *gin.Context, strToken string, expectedScop
 	serverURL := param.Server_ExternalWebUrl.GetString()
 	if serverURL != token.Issuer() {
 		if param.Origin_Url.GetString() == token.Issuer() {
-			return errors.New(fmt.Sprint("Wrong issuer; expect the issuer to be the server's web address but got Origin.URL, " + token.Issuer()))
+			return errors.New(fmt.Sprintf("Wrong issuer %s; expect the issuer to be the server's web address but got Origin.URL", token.Issuer()))
 		} else {
-			return errors.New(fmt.Sprint("Issuer is not server itself: ", token.Issuer()))
+			return errors.New(fmt.Sprintf("Token issuer %s does not match the local issuer on the current server. Expecting %s", token.Issuer(), serverURL))
 		}
 	}
 
-	// Since whenever this function is called, the IssuerCheck is checking token signature
+	// Since whenever this function is called, the localIssuerCheck is checking token signature
 	// against the server's public key, we can directly get the public key
 	jwks, err := config.GetIssuerPublicJWKS()
 	if err != nil {
@@ -153,7 +149,7 @@ func (a AuthCheckImpl) issuerCheck(c *gin.Context, strToken string, expectedScop
 
 	scopeValidator := token_scopes.CreateScopeValidator(expectedScopes, allScopes)
 	if err = jwt.Validate(parsed, jwt.WithValidator(scopeValidator)); err != nil {
-		return errors.Wrap(err, "Failed to verify the scope of the token")
+		return errors.Wrap(err, fmt.Sprintf("Failed to verify the scope of the token. Require %v", expectedScopes))
 	}
 
 	c.Set("User", "Origin")
@@ -208,22 +204,22 @@ func Verify(ctx *gin.Context, authOption AuthOption) (status int, verfied bool, 
 	}
 
 	if token == "" {
-		log.Debug("Unauthorized. No token is present from the list of potential token positions")
-		return http.StatusUnauthorized, false, errors.New("Authentication is required but no token is present.")
+		log.Debugf("Unauthorized. No token is present from the list of potential token positions: %v", authOption.Sources)
+		return http.StatusForbidden, false, errors.New("Authentication is required but no token is present.")
 	}
 
 	errMsg := ""
 	for _, iss := range authOption.Issuers {
 		switch iss {
-		case Federation:
-			if err := authChecker.federationCheck(ctx, token, authOption.Scopes, authOption.AllScopes); err != nil {
+		case FederationIssuer:
+			if err := authChecker.federationIssuerCheck(ctx, token, authOption.Scopes, authOption.AllScopes); err != nil {
 				errMsg += fmt.Sprintln("Cannot verify token with federation issuer: ", err)
 				break
 			} else {
 				return http.StatusOK, true, nil
 			}
-		case Issuer:
-			if err := authChecker.issuerCheck(ctx, token, authOption.Scopes, authOption.AllScopes); err != nil {
+		case LocalIssuer:
+			if err := authChecker.localIssuerCheck(ctx, token, authOption.Scopes, authOption.AllScopes); err != nil {
 				errMsg += fmt.Sprintln("Cannot verify token with server issuer: ", err)
 				break
 			} else {

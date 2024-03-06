@@ -66,7 +66,7 @@ func promMetricAuthHandler(ctx *gin.Context) {
 		// 1.director scraper 2.server (self) scraper 3.authenticated web user (via cookie)
 		authOption := token.AuthOption{
 			Sources: []token.TokenSource{token.Header, token.Cookie},
-			Issuers: []token.TokenIssuer{token.Federation, token.Issuer},
+			Issuers: []token.TokenIssuer{token.FederationIssuer, token.LocalIssuer},
 			Scopes:  []token_scopes.TokenScope{token_scopes.Monitoring_Scrape}}
 
 		status, ok, err := token.Verify(ctx, authOption)
@@ -87,7 +87,7 @@ func promQueryEngineAuthHandler(av1 *route.Router) gin.HandlerFunc {
 			authOption := token.AuthOption{
 				// Cookie for web user access and header for external service like Grafana to access
 				Sources: []token.TokenSource{token.Cookie, token.Header},
-				Issuers: []token.TokenIssuer{token.Issuer},
+				Issuers: []token.TokenIssuer{token.LocalIssuer},
 				Scopes:  []token_scopes.TokenScope{token_scopes.Monitoring_Query}}
 
 			status, ok, err := token.Verify(c, authOption)
