@@ -195,7 +195,7 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 		return 0, err
 	}
 
-	understoodSchemes := []string{"osdf", "pelican", ""}
+	understoodSchemes := []string{"osdf", "pelican", "stash", ""}
 
 	_, foundSource := find(understoodSchemes, destUri.Scheme)
 	if !foundSource {
