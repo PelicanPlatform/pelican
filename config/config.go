@@ -732,7 +732,7 @@ func setXrootdRunLocations(currentServers ServerType, dir string) error {
 	cacheLocation := viper.GetString("Cache.RunLocation")
 	originLocation := viper.GetString("Origin.RunLocation")
 	xrootdLocation := viper.GetString("Xrootd.RunLocation")
-	xrootdLocationIsSet := viper.IsSet("Xrootd.Location")
+	xrootdLocationIsSet := viper.IsSet("Xrootd.RunLocation")
 	cacheLocFallbackToXrootd := false
 	originLocFallbackToXrootd := false
 	if currentServers.IsEnabled(CacheType) {
