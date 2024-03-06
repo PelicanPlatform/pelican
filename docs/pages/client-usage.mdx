@@ -23,6 +23,8 @@ which should output a path to the executable. If there is no output to this comm
 **Federations:**
 Objects in Pelican belong to *federations*, which are aggregations of data that are exposed to other individuals in the federation. Each Pelican federation constitutes its own global namespace of objects and each object within a federation has its own path, much like files on a computer. Fetching any object from a federation requires at minimum two pieces of information; a URL indicating the object's federation and the path to the object within that federation (there is the potential that some objects require access tokens as well, but more on that later). For example, the Open Science Data Federation's (OSDF) central URL is https://osg-htc.org and an example object from the federation can be found at
 
+**Note:** When you set a federation discovery url within a `pelican://` url, within configuration files, or with the `-f` flag, do not expect the client to work if the disovery url contains a path (e.g. `osg-htc.org/PathToMyFederation`). The client will assume that the path provided is the namespace prefix for the object which will end in failure.
+
 ```console
 /ospool/uc-shared/public/OSG-Staff/validation/test.txt
 ```

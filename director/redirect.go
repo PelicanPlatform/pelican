@@ -102,18 +102,11 @@ func getRealIP(ginCtx *gin.Context) (ipAddr netip.Addr, err error) {
 	ip_addr_list := ginCtx.Request.Header["X-Real-Ip"]
 	if len(ip_addr_list) == 0 {
 		ipAddr, err = netip.ParseAddr(ginCtx.RemoteIP())
-		if err != nil {
-			ginCtx.String(500, "Failed to parse IP address: %s", err.Error())
-		}
 		return
 	} else {
 		ipAddr, err = netip.ParseAddr(ip_addr_list[0])
-		if err != nil {
-			ginCtx.String(500, "Failed to parse X-Real-Ip header: %s", err.Error())
-		}
 		return
 	}
-
 }
 
 // Calculate the depth attribute of Link header given the path to the file
@@ -216,8 +209,8 @@ func versionCompatCheck(ginCtx *gin.Context) error {
 func redirectToCache(ginCtx *gin.Context) {
 	err := versionCompatCheck(ginCtx)
 	if err != nil {
-		log.Debugf("A version incompatibility was encountered while redirecting to a cache and no response was served: %v", err)
-		ginCtx.JSON(500, gin.H{"error": "Incompatible versions detected: " + fmt.Sprintf("%v", err)})
+		log.Warningf("A version incompatibility was encountered while redirecting to a cache and no response was served: %v", err)
+		ginCtx.JSON(http.StatusInternalServerError, gin.H{"error": "Incompatible versions detected: " + fmt.Sprintf("%v", err)})
 		return
 	}
 
@@ -225,7 +218,8 @@ func redirectToCache(ginCtx *gin.Context) {
 	reqPath = strings.TrimPrefix(reqPath, "/api/v1.0/director/object")
 	ipAddr, err := getRealIP(ginCtx)
 	if err != nil {
-		ginCtx.String(500, "Internal error: Unable to determine client IP")
+		log.Errorln("Error in getRealIP:", err)
+		ginCtx.String(http.StatusInternalServerError, "Internal error: Unable to determine client IP")
 		return
 	}
 
@@ -260,6 +254,7 @@ func redirectToCache(ginCtx *gin.Context) {
 	} else {
 		cacheAds, err = sortServers(ipAddr, cacheAds)
 		if err != nil {
+			log.Error("Error determining server ordering for cacheAds: ", err)
 			ginCtx.String(http.StatusInternalServerError, "Failed to determine server ordering")
 			return
 		}
@@ -326,8 +321,8 @@ func redirectToCache(ginCtx *gin.Context) {
 func redirectToOrigin(ginCtx *gin.Context) {
 	err := versionCompatCheck(ginCtx)
 	if err != nil {
-		log.Debugf("A version incompatibility was encountered while redirecting to an origin and no response was served: %v", err)
-		ginCtx.JSON(500, gin.H{"error": "Incompatible versions detected: " + fmt.Sprintf("%v", err)})
+		log.Warningf("A version incompatibility was encountered while redirecting to an origin and no response was served: %v", err)
+		ginCtx.JSON(http.StatusInternalServerError, gin.H{"error": "Incompatible versions detected: " + fmt.Sprintf("%v", err)})
 		return
 	}
 
@@ -356,15 +351,34 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		ginCtx.String(http.StatusNotFound, "There are currently no origins exporting the provided namespace prefix\n")
 		return
 	}
+	// if err != nil, depth == 0, which is the default value for depth
+	// so we can use it as the value for the header even with err
+	depth, err := getLinkDepth(reqPath, namespaceAd.Path)
+	if err != nil {
+		log.Errorf("Failed to get depth attribute for the redirecting request to %q, with best match namespace prefix %q", reqPath, namespaceAd.Path)
+	}
 
 	originAds, err = sortServers(ipAddr, originAds)
 	if err != nil {
+		log.Error("Error determining server ordering for originAds: ", err)
 		ginCtx.String(http.StatusInternalServerError, "Failed to determine origin ordering")
 		return
 	}
 
-	var colUrl string
+	linkHeader := ""
+	first := true
+	for idx, ad := range originAds {
+		if first {
+			first = false
+		} else {
+			linkHeader += ", "
+		}
+		redirectURL := getRedirectURL(reqPath, ad, !namespaceAd.PublicRead)
+		linkHeader += fmt.Sprintf(`<%s>; rel="duplicate"; pri=%d; depth=%d`, redirectURL.String(), idx+1, depth)
+	}
+	ginCtx.Writer.Header()["Link"] = []string{linkHeader}
 
+	var colUrl string
 	if namespaceAd.PublicRead {
 		colUrl = originAds[0].URL.String()
 	} else {
@@ -492,7 +506,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType common.S
 
 	err := versionCompatCheck(ctx)
 	if err != nil {
-		log.Debugf("A version incompatibility was encountered while registering %s and no response was served: %v", sType, err)
+		log.Warningf("A version incompatibility was encountered while registering %s and no response was served: %v", sType, err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Incompatible versions detected: " + fmt.Sprintf("%v", err)})
 		return
 	}

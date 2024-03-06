@@ -248,6 +248,7 @@ components: ["cache"]
 name: Federation.DiscoveryUrl
 description: >-
   A URL pointing to the federation's metadata discovery host.
+  NOTE: this does not work if the url contains a path!
 type: url
 default: none
 components: ["*"]
@@ -751,6 +752,20 @@ description: >-
   number of connections to this value.
 type: int
 default: none
+components: ["cache"]
+---
+name: Cache.SelfTest
+description: >-
+  A bool indicating whether the cache should perform self health checks.
+type: bool
+default: true
+components: ["cache"]
+---
+name: Cache.SelfTestInterval
+description: >-
+  The interval of which the cache starts a new file transfer test to itself.
+type: duration
+default: 15s
 components: ["cache"]
 ---
 ############################

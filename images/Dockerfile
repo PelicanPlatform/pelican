@@ -38,10 +38,13 @@ WORKDIR /pelican
 COPY . .
 COPY --from=website-build /webapp/out ./web_ui/frontend/out
 
+ENV GOOS="linux"
+ENV GOARCH="amd64"
+
 RUN\
     if $IS_NONRELEASE_BUILD;\
-        then goreleaser build --clean --snapshot;\
-    else goreleaser build --clean;\
+        then goreleaser build --clean --snapshot --single-target;\
+    else goreleaser build --clean --single-target;\
     fi
 
 FROM --platform=linux/amd64 hub.opensciencegrid.org/sciauth/scitokens-oauth2-server:release-20231118-1823 AS scitokens-oauth2-server
@@ -54,7 +57,7 @@ RUN useradd -o -u 10940 -g 10940 -s /bin/sh xrootd
 
 # Install dependencies
 RUN yum -y update \
-    && yum -y install xrootd xrootd-client xrdcl-http xrootd-server xrootd-scitokens xrootd-voms curl java-17-openjdk-headless \
+    && yum -y install tini xrootd xrootd-client xrdcl-http xrootd-server xrootd-scitokens xrootd-voms curl java-17-openjdk-headless \
     && yum clean all \
     && rm -rf /var/cache/yum/
 
@@ -102,16 +105,6 @@ RUN \
 FROM dependency-build AS final-stage
 
 WORKDIR /pelican
-
-# Copy over needed files
-COPY --from=pelican-build /pelican/dist/pelican_linux_amd64_v1/pelican /pelican/osdf-client
-COPY images/supervisord/supervisord.conf /etc/supervisord.conf
-
-# Eventually add more entrypoint commands and corresponding supervisor
-# daemons here
-COPY images/supervisord/* /etc/supervisord.d/
-COPY images/entrypoint.sh /entrypoint.sh
-
 
 ####
 # Now, start installing the SciTokens OA4MP server from
@@ -184,7 +177,106 @@ COPY --from=xrootd-plugin-builder /usr/include/nlohmann /usr/include/nlohmann
 # Copy the JSON schema validator library
 COPY --from=xrootd-plugin-builder /usr/lib64/libnlohmann_json_schema_validator.a /usr/lib64/
 
-RUN chmod +x /pelican/osdf-client \
+# Eventually add more entrypoint commands here
+COPY images/entrypoint.sh /entrypoint.sh
+
+######################
+# Pelican base stage #
+######################
+FROM final-stage AS pelican-base
+
+WORKDIR /pelican
+
+# Copy over needed files
+COPY --from=pelican-build /pelican/dist/pelican_linux_amd64_v1/pelican /pelican/pelican
+RUN chmod +x /pelican/pelican \
     && chmod +x /entrypoint.sh
 
-ENTRYPOINT ["/entrypoint.sh"]
+######################
+# OSDF base stage #
+######################
+FROM final-stage AS osdf-base
+
+WORKDIR /pelican
+
+# Copy over needed files
+COPY --from=pelican-build /pelican/dist/pelican_linux_amd64_v1/pelican /pelican/osdf
+RUN chmod +x /pelican/osdf \
+    && chmod +x /entrypoint.sh
+
+####################
+# pelican/cache    #
+####################
+
+FROM pelican-base AS cache
+
+WORKDIR /pelican
+ENTRYPOINT ["/entrypoint.sh", "pelican", "cache"]
+
+####################
+# pelican/origin    #
+####################
+
+FROM pelican-base AS origin
+
+WORKDIR /pelican
+ENTRYPOINT ["/entrypoint.sh", "pelican", "origin"]
+
+####################
+# pelican/director #
+####################
+
+FROM pelican-base AS director
+
+WORKDIR /pelican
+ENTRYPOINT ["/entrypoint.sh", "pelican", "director"]
+
+####################
+# pelican/registry #
+####################
+
+FROM pelican-base AS registry
+
+WORKDIR /pelican
+ENTRYPOINT ["/entrypoint.sh", "pelican", "registry"]
+
+####################################
+# OSDF                             #
+####################################
+
+####################
+# osdf/cache    #
+####################
+
+FROM osdf-base AS osdf-cache
+
+WORKDIR /pelican
+ENTRYPOINT ["/entrypoint.sh", "osdf", "cache"]
+
+####################
+# osdf/origin    #
+####################
+
+FROM osdf-base AS osdf-origin
+
+WORKDIR /pelican
+ENTRYPOINT ["/entrypoint.sh", "osdf", "origin"]
+
+####################
+# osdf/director    #
+####################
+
+FROM osdf-base AS osdf-director
+
+WORKDIR /pelican
+ENTRYPOINT ["/entrypoint.sh", "osdf", "director"]
+
+
+####################
+# osdf/registry    #
+####################
+
+FROM osdf-base AS osdf-registry
+
+WORKDIR /pelican
+ENTRYPOINT ["/entrypoint.sh", "osdf", "registry"]

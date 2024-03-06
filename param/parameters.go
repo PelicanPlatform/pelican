@@ -223,6 +223,7 @@ var (
 
 var (
 	Cache_EnableVoms = BoolParam{"Cache.EnableVoms"}
+	Cache_SelfTest = BoolParam{"Cache.SelfTest"}
 	Client_DisableHttpProxy = BoolParam{"Client.DisableHttpProxy"}
 	Client_DisableProxyFallback = BoolParam{"Client.DisableProxyFallback"}
 	Debug = BoolParam{"Debug"}
@@ -255,6 +256,7 @@ var (
 )
 
 var (
+	Cache_SelfTestInterval = DurationParam{"Cache.SelfTestInterval"}
 	Director_AdvertisementTTL = DurationParam{"Director.AdvertisementTTL"}
 	Director_OriginCacheHealthTestInterval = DurationParam{"Director.OriginCacheHealthTestInterval"}
 	Director_StatTimeout = DurationParam{"Director.StatTimeout"}

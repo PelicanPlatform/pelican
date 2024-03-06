@@ -47,6 +47,8 @@ Director:
   EnableBroker: true
 Cache:
   Port: 8442
+  SelfTest: true
+  SelfTestInterval: 15s
 LocalCache:
   HighWaterMarkPercentage: 95
   LowWaterMarkPercentage: 85

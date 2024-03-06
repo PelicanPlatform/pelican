@@ -48,6 +48,19 @@ type (
 	}
 )
 
+func checkPIDExists(pid int) bool {
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		// On Unix, FindProcess always succeeds and returns a Process for the given pid, regardless of whether the process exists.
+		return false
+	}
+
+	// Sending signal 0 to a process is a way to check if the process exists.
+	// An error indicates that the process does not exist or you do not have permission to signal it.
+	err = process.Signal(syscall.Signal(0))
+	return err == nil
+}
+
 func ForwardCommandToLogger(ctx context.Context, daemonName string, cmdStdout io.ReadCloser, cmdStderr io.ReadCloser) {
 	cmd_logger := log.WithFields(log.Fields{"daemon": daemonName})
 	stdout_scanner := bufio.NewScanner(cmdStdout)
@@ -183,6 +196,7 @@ func LaunchDaemons(ctx context.Context, launchers []Launcher, egrp *errgroup.Gro
 			cases[len(daemons)+1].Chan = reflect.ValueOf(timer.C)
 
 			chosen, recv, _ := reflect.Select(cases)
+			// <-sigs received system call to terminate
 			if chosen == len(daemons) {
 				sys_sig, ok := recv.Interface().(syscall.Signal)
 				if !ok {
@@ -201,7 +215,19 @@ func LaunchDaemons(ctx context.Context, launchers []Launcher, egrp *errgroup.Gro
 					log.Errorln("Last error when killing launched daemons:", lastErr)
 					return lastErr
 				}
+				// <-ctx.Done() from daemons. Either parent ctx is cancelled or there's error in running the daemon
 			} else if chosen < len(daemons) {
+				// Kill the daemon if it's still alive
+				exists := checkPIDExists(daemons[chosen].pid)
+				if exists {
+					if err = syscall.Kill(daemons[chosen].pid, syscall.SIGTERM); err != nil {
+						err = errors.Wrapf(err, "Failed to kill %s with pid %d", daemons[chosen].name, daemons[chosen].pid)
+						log.Errorln(err)
+						return err
+					}
+					daemons[chosen].expiry = time.Now().Add(10 * time.Second)
+					log.Infof("Daemon %q with pid %d was killed", daemons[chosen].name, daemons[chosen].pid)
+				}
 				if waitResult := context.Cause(daemons[chosen].ctx); waitResult != nil {
 					if !daemons[chosen].expiry.IsZero() {
 						return nil
@@ -216,8 +242,9 @@ func LaunchDaemons(ctx context.Context, launchers []Launcher, egrp *errgroup.Gro
 				}
 				log.Debugln("Daemons have been shut down successfully")
 				return nil
-			} else {
+			} else { // <-timer.C
 				for idx, daemon := range daemons {
+					// Daemon is expired, clean up
 					if !daemon.expiry.IsZero() && time.Now().After(daemon.expiry) {
 						if err = syscall.Kill(daemon.pid, syscall.SIGKILL); err != nil {
 							err = errors.Wrapf(err, "Failed to SIGKILL the %s process", launchers[idx].Name())

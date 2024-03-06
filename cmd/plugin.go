@@ -516,7 +516,7 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 // true: all result ads indicate transfer success
 // false: at least one result ad has failed
 // As well as a boolean letting us know if errors are retryable
-func writeOutfile(err error, resultAds []*classads.ClassAd, outputFile *os.File) (bool, bool) {
+func writeOutfile(err error, resultAds []*classads.ClassAd, outputFile *os.File) (success bool, retryable bool) {
 
 	if err != nil {
 		alreadyFailed := false
@@ -534,8 +534,8 @@ func writeOutfile(err error, resultAds []*classads.ClassAd, outputFile *os.File)
 			resultAds = append(resultAds, resultAd)
 		}
 	}
-	success := true
-	retryable := false
+	success = true
+	retryable = false
 	for _, resultAd := range resultAds {
 		_, err := outputFile.WriteString(resultAd.String() + "\n")
 		if err != nil {
