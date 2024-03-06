@@ -5,5 +5,6 @@
   "client-usage": "Client Usage",
   "serving_an_origin":"Serving an Origin",
   "serving_a_federation":"Serving a Federation",
-  "prometheus": "Prometheus"
+  "prometheus": "Prometheus",
+  "grafana": "Grafana"
 }
