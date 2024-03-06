@@ -493,7 +493,7 @@ func TestForcePurge(t *testing.T) {
 	size := 0
 	for idx := 0; idx < 4; idx++ {
 		log.Debugln("Will write origin file", filepath.Join(ft.originDir, fmt.Sprintf("hello_world.txt.%d", idx)))
-		fp, err := os.OpenFile(filepath.Join(ft.originDir, fmt.Sprintf("hello_world.txt.%d", idx)), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
+		fp, err := os.OpenFile(filepath.Join(ft.originDir, fmt.Sprintf("hello_world.txt.%d", idx)), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
 		require.NoError(t, err)
 		size = writeBigBuffer(t, fp, 1)
 	}
