@@ -72,8 +72,17 @@ This section describes how to connect Grafana to the Pelican Prometheus instance
 ## Add a data source
 
 1. Click **Connections** in the left-side menu. If there is no menu on the left-side, click the icon of stacked bars to toggle the menu. This is located on the top-left side of the page next to **Home**
+
+<ExportedImage src={"/pelican/grafana-menu-location.png"} alt={"Screenshot of Grafana page to locate the menu"} />
+
 2. Enter **Prometheus** in the search dialog
+
+<ExportedImage src={"/pelican/grafana-search-prometheus.png"} alt={"Screenshot of Grafana page to search for Prometheus"} />
+
 3. Click Prometheus and click **Add new data source**
+
+<ExportedImage src={"/pelican/grafana-add-data-source.png"} alt={"Screenshot of Grafana page to add Prometheus data source"} />
+
 4. Configure the data source following instructions in the next section
 
 ## Configure the data source
@@ -93,11 +102,15 @@ Follow the instructions below to configure your Prometheus data source to work w
 
 * **TLS settings**: Check "Skip TLS certificate validation" if you don't have a TLS certificate for your *Pelican* server, or if you are in local development environment
 
+<ExportedImage src={"/pelican/grafana-data-source-configuration.png"} alt={"Screenshot of Grafana page to configure the data source"} />
+
 #### Advanced settings
 
 * **Other**: Select `GET` for "HTTP Method"
 
 Before finishing the configuration, you need to set up authentication credentials for Grafana to access Prometheus instance on Pelican or change Pelican configuration to disable authentication. Follow the next section for instructions.
+
+<ExportedImage src={"/pelican/grafana-data-source-configuration-advanced.png"} alt={"Screenshot of Grafana page to configure advanced settings of the data source"} />
 
 ## Configure authentication
 
