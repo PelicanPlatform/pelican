@@ -1,0 +1,84 @@
+# Run Pelican Server using Docker image
+
+This document explains how to run a Pelican server using Pelican docker image. If you are installing Pelican to use its client functionalities (download or upload a file), refer to previous sections to download and install a Pelican binary instead.
+
+## Before starting
+
+Pelican builds separate images for each Pelican server components, e.g. origin, cache, director, and registry. Depending on which Pelican server you want to run, you need to select a different docker image from the list below.
+
+* Pelican origin server: `hub.opensciencegrid.org/pelican_platform/origin:latest`
+* Pelican cache server: `hub.opensciencegrid.org/pelican_platform/cache:latest`
+* Pelican director server: `hub.opensciencegrid.org/pelican_platform/director:latest`
+* Pelican registry server: `hub.opensciencegrid.org/pelican_platform/registry:latest`
+
+## Run Pelican server via Docker CLI
+
+This section shows you how to run various Pelican server images using the Docker CLI. If you haven't installed Docker engine, follow the [documentation from Docker](https://docs.docker.com/get-docker/) to install the Docker engine.
+
+
+### Run Pelican origin server
+
+To run the latest pelican origin server, run the following command:
+
+```bash
+docker run -it -p 8444:8444 -p 8443:8443 -v /path/to/your/data/:/tmp/pelican --name=pelican-origin hub.opensciencegrid.org/pelican_platform/origin:latest serve -v /tmp/pelican:/foo/bar
+```
+
+Where:
+
+* `docker run` is a Docker CLI command that runs a new container from an image
+* `-it` (`--interactive --tty`) runs the container in interactive mode and uses a tty terminal
+* `-p <host-port>:<container-port>` (`--publish`) publishes a container’s port(s) to the host, allowing you to reach the container’s port via a host port. In this case, we can reach the container’s port `8444` via the host’s port `8444`. Note that the web engine of the Pelican server runs on port `8444` by default, and the file transfer endpoint of the Pelican server runs on port `8443` by default.
+* `-v <host-location>:<container-location>` (`--volume`) binds mount a volume from the host location(s) to the containter's location(s). This allow you to share files in your host machine to the container. In this case, we bind `/path/to/your/data/` on your host machine to `/tmp/pelican` in the container. You need to replace `/path/to/your/data/` to the directory where your data to publish is located.
+* `--name` assigns a logical name to the container (e.g. pelican-origin). This allows you to refer to the container by name instead of by ID.
+* `hub.opensciencegrid.org/pelican_platform/origin:latest` is the image to run
+* `serve` is the command to pass to pelican binary. You can also pass arguments to Pelican by appending the argument after `serve` command. Equivalent of running `pelican origin serve`
+* `-v /tmp/pelican:/foo/bar` is the Pelican argument to bind `/tmp/pelican` directory in the container as namespace `/foo/bar` in Pelican. You need to change `/foo/bar` to a meaningful path that can represent your data, e.g. `/chtc/public-data`.
+
+
+### Run Pelican cache server
+
+To run the latest pelican cache server, run the following command:
+
+```bash
+docker run -it -p 8444:8444 -p 8442:8442 --name=pelican-cache hub.opensciencegrid.org/pelican_platform/cache:latest serve
+```
+
+### Run Pelican director server
+
+To run the latest pelican director server, run the following command:
+
+```bash
+docker run -it -p 8444:8444 --name=pelican-director hub.opensciencegrid.org/pelican_platform/director:latest serve
+```
+
+> Note that to successfully run a Pelican director server, additional configuration is required. Follow [Serve a Pelican Federation](https://docs.pelicanplatform.org/serving_a_federation) for instructions.
+
+### Run Pelican registry server
+
+To run the latest pelican registry server, run the following command:
+
+```bash
+docker run -it -p 8444:8444 --name=pelican-registry hub.opensciencegrid.org/pelican_platform/registry:latest serve
+```
+
+> Note that to successfully run a Pelican registry server, additional configuration is required. Follow [Serve a Pelican Federation](https://docs.pelicanplatform.org/serving_a_federation) for instructions.
+
+
+## Stop Pelican container
+
+To stop the Pelican container, run the following command:
+
+```bash
+# The `docker ps` command shows the processes running in Docker
+docker ps
+
+# This will display a list of containers that looks like the following:
+CONTAINER ID   IMAGE  COMMAND   CREATED  STATUS   PORTS    NAMES
+0be1a304b5d7   hub.opensciencegrid.org/pelican_platform/director:latest   "/bin/sh"   1 hour ago   Up 1 hour   0.0.0.0:8444->8444/tcp   pelican-director
+
+# To stop the pelican container run the command
+# docker stop <container-ID> or use
+# docker stop <container-name>, which is `pelican-director` as previously defined
+docker stop pelican-director
+```

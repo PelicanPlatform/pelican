@@ -1,6 +1,6 @@
 {
   "index": "About Pelican",
-  "install": "Install",
+  "install": "Install Pelican",
   "parameters": "Configuration",
   "client-usage": "Client Usage",
   "serving_an_origin":"Serving an Origin",
