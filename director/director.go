@@ -26,6 +26,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/web_ui"
+	log "github.com/sirupsen/logrus"
 )
 
 type (
@@ -135,6 +136,7 @@ func queryOrigins(ctx *gin.Context) {
 			res := statResponse{Message: msg, Metadata: meta, OK: false}
 			ctx.JSON(http.StatusOK, res)
 		} else {
+			log.Errorf("Error in NewObjectStat with path: %s, min responses: %d, max responses: %d. %v", path, queryParams.MinResponses, queryParams.MaxResponses, err)
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
