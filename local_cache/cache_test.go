@@ -1,3 +1,5 @@
+//go:build !windows
+
 /***************************************************************
  *
  * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
@@ -96,7 +98,7 @@ func (ft *fedTest) spinup(t *testing.T, ctx context.Context, egrp *errgroup.Grou
 	})
 
 	// Change the permissions of the temporary origin directory
-	permissions = os.FileMode(0777)
+	permissions = os.FileMode(0755)
 	err = os.Chmod(originDir, permissions)
 	require.NoError(t, err)
 
@@ -386,7 +388,7 @@ func TestLargeFile(t *testing.T) {
 		Path:   param.LocalCache_Socket.GetString(),
 	}
 
-	fp, err := os.OpenFile(filepath.Join(ft.originDir, "hello_world.txt"), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
+	fp, err := os.OpenFile(filepath.Join(ft.originDir, "hello_world.txt"), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
 	require.NoError(t, err)
 	size := writeBigBuffer(t, fp, 100)
 
@@ -423,7 +425,7 @@ func TestPurge(t *testing.T) {
 	size := 0
 	for idx := 0; idx < 5; idx++ {
 		log.Debugln("Will write origin file", filepath.Join(ft.originDir, fmt.Sprintf("hello_world.txt.%d", idx)))
-		fp, err := os.OpenFile(filepath.Join(ft.originDir, fmt.Sprintf("hello_world.txt.%d", idx)), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
+		fp, err := os.OpenFile(filepath.Join(ft.originDir, fmt.Sprintf("hello_world.txt.%d", idx)), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
 		require.NoError(t, err)
 		size = writeBigBuffer(t, fp, 1)
 	}
