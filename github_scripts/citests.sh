@@ -58,7 +58,7 @@ EOF
 #####################################
 ## Test LocalCache in front of OSDF
 #####################################
-SOCKET_DIR="`mktemp -d -t pelican-citest`"
+SOCKET_DIR="`mktemp -d -t pelican-citest-XXXXXX`"
 export PELICAN_FILECACHE_SOCKET=$SOCKET_DIR/socket
 export PELICAN_FILECACHE_DATALOCATION=$SOCKET_DIR/data
 
