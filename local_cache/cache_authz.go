@@ -31,8 +31,8 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
-	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
@@ -60,7 +60,7 @@ func newAuthConfig(ctx context.Context, egrp *errgroup.Group) (ac *authConfig) {
 	loader := ttlcache.LoaderFunc[string, authConfigItem](
 		func(cache *ttlcache.Cache[string, authConfigItem], issuerUrl string) *ttlcache.Item[string, authConfigItem] {
 			var ar *jwk.Cache
-			jwksUrl, err := utils.LookupIssuerJwksUrl(ctx, issuerUrl)
+			jwksUrl, err := token.LookupIssuerJwksUrl(ctx, issuerUrl)
 			if err != nil {
 				log.Errorln("Failed to lookup JWKS URL:", err)
 			} else {

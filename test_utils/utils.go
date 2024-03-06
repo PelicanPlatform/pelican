@@ -23,6 +23,9 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"github.com/lestrrat-go/jwx/v2/jwk"
@@ -77,4 +80,24 @@ func GenerateJWK() (jwk.Key, jwk.Set, string, error) {
 	}
 
 	return jwkKey, jwks, string(jwksBytes), nil
+}
+
+// For these tests, we only need to lookup key locations. Create a dummy registry that only returns
+// the jwks_uri location for the given key. Once a server is instantiated, it will only return
+// locations for the provided prefix. To change prefixes, create a new registry mockup.
+func RegistryMockup(t *testing.T, prefix string) *httptest.Server {
+	registryUrl, _ := url.Parse("https://registry.com:8446")
+	path, err := url.JoinPath("/api/v1.0/registry", prefix, ".well-known/issuer.jwks")
+	if err != nil {
+		t.Fatalf("Failed to parse key path for prefix %s", prefix)
+	}
+	registryUrl.Path = path
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		jsonResponse := `{"jwks_uri": "` + registryUrl.String() + `"}`
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(jsonResponse))
+	}))
+	return server
 }

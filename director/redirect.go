@@ -31,8 +31,8 @@ import (
 
 	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
-	"github.com/pelicanplatform/pelican/utils"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/gin-gonic/gin"
@@ -114,6 +114,29 @@ func getRealIP(ginCtx *gin.Context) (ipAddr netip.Addr, err error) {
 		return
 	}
 
+}
+
+// Calculate the depth attribute of Link header given the path to the file
+// and the prefix of the namespace that can serve the file
+//
+// Ref: https://www.rfc-editor.org/rfc/rfc6249.html#section-3.4
+func getLinkDepth(filepath, prefix string) (int, error) {
+	if filepath == "" || prefix == "" {
+		return 0, errors.New("either filepath or prefix is an empty path")
+	}
+	if !strings.HasPrefix(filepath, prefix) {
+		return 0, errors.New("filepath does not contain the prefix")
+	}
+	// We want to remove shared prefix between filepath and prefix, then split the remaining string by slash.
+	// To make the final calculation easier, we also remove the head slash from the file path.
+	// e.g. filepath = /foo/bar/barz.txt   prefix = /foo
+	// we want commonPath = bar/barz.txt
+	if !strings.HasSuffix(prefix, "/") && prefix != "/" {
+		prefix += "/"
+	}
+	commonPath := strings.TrimPrefix(filepath, prefix)
+	pathDepth := len(strings.Split(commonPath, "/"))
+	return pathDepth, nil
 }
 
 func getAuthzEscaped(req *http.Request) (authzEscaped string) {
@@ -216,6 +239,12 @@ func redirectToCache(ginCtx *gin.Context) {
 		ginCtx.String(404, "No namespace found for path. Either it doesn't exist, or the Director is experiencing problems\n")
 		return
 	}
+	// if err != nil, depth == 0, which is the default value for depth
+	// so we can use it as the value for the header even with err
+	depth, err := getLinkDepth(reqPath, namespaceAd.Path)
+	if err != nil {
+		log.Errorf("Failed to get depth attribute for the redirecting request to %q, with best match namespace prefix %q", reqPath, namespaceAd.Path)
+	}
 	// If the namespace prefix DOES exist, then it makes sense to say we couldn't find a valid cache.
 	if len(cacheAds) == 0 {
 		for _, originAd := range originAds {
@@ -246,7 +275,7 @@ func redirectToCache(ginCtx *gin.Context) {
 			linkHeader += ", "
 		}
 		redirectURL := getRedirectURL(reqPath, ad, !namespaceAd.Caps.PublicRead)
-		linkHeader += fmt.Sprintf(`<%s>; rel="duplicate"; pri=%d`, redirectURL.String(), idx+1)
+		linkHeader += fmt.Sprintf(`<%s>; rel="duplicate"; pri=%d; depth=%d`, redirectURL.String(), idx+1, depth)
 	}
 	ginCtx.Writer.Header()["Link"] = []string{linkHeader}
 	if len(namespaceAd.Issuer) != 0 {
@@ -651,13 +680,13 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType common.S
 // Return a list of registered origins and caches in Prometheus HTTP SD format
 // for director's Prometheus service discovery
 func discoverOriginCache(ctx *gin.Context) {
-	authOption := utils.AuthOption{
-		Sources: []utils.TokenSource{utils.Header},
-		Issuers: []utils.TokenIssuer{utils.Issuer},
+	authOption := token.AuthOption{
+		Sources: []token.TokenSource{token.Header},
+		Issuers: []token.TokenIssuer{token.Issuer},
 		Scopes:  []token_scopes.TokenScope{token_scopes.Pelican_DirectorServiceDiscovery},
 	}
 
-	ok := utils.CheckAnyAuth(ctx, authOption)
+	ok := token.CheckAnyAuth(ctx, authOption)
 	if !ok {
 		log.Warningf("Invalid token for accessing director's sevice discovery")
 		ctx.JSON(401, gin.H{"error": "Invalid token for accessing director's sevice discovery"})

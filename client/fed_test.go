@@ -44,8 +44,8 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
+	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
-	"github.com/pelicanplatform/pelican/utils"
 )
 
 func generateFileTestScitoken() (string, error) {
@@ -58,8 +58,8 @@ func generateFileTestScitoken() (string, error) {
 		return "", errors.New("Failed to create token: Invalid iss, Server_ExternalWebUrl is empty")
 	}
 
-	fTestTokenCfg := utils.TokenConfig{
-		TokenProfile: utils.WLCG,
+	fTestTokenCfg := token.TokenConfig{
+		TokenProfile: token.WLCG,
 		Lifetime:     time.Minute,
 		Issuer:       issuerUrl,
 		Audience:     []string{config.GetServerAudience()},
@@ -130,6 +130,7 @@ func TestFullUpload(t *testing.T) {
 	viper.Set("Registry.RequireCacheApproval", false)
 	viper.Set("Logging.Origin.Scitokens", "debug")
 	viper.Set("Origin.Port", 0)
+	viper.Set("Server.WebPort", 0)
 
 	err = config.InitServer(ctx, modules)
 	require.NoError(t, err)
@@ -343,8 +344,8 @@ func TestGetAndPutAuth(t *testing.T) {
 	audience := config.GetServerAudience()
 
 	// Create a token file
-	tokenConfig := utils.TokenConfig{
-		TokenProfile: utils.WLCG,
+	tokenConfig := token.TokenConfig{
+		TokenProfile: token.WLCG,
 		Lifetime:     time.Minute,
 		Issuer:       issuer,
 		Audience:     []string{audience},
@@ -514,8 +515,8 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 	require.NoError(t, err)
 	audience := config.GetServerAudience()
 
-	tokenConfig := utils.TokenConfig{
-		TokenProfile: utils.WLCG,
+	tokenConfig := token.TokenConfig{
+		TokenProfile: token.WLCG,
 		Lifetime:     time.Minute,
 		Issuer:       issuer,
 		Audience:     []string{audience},

@@ -39,8 +39,8 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
-	"github.com/pelicanplatform/pelican/utils"
 )
 
 type (
@@ -153,8 +153,8 @@ func GetUser(ctx *gin.Context) (string, error) {
 
 // Create a JWT and set the "login" cookie to store that JWT
 func setLoginCookie(ctx *gin.Context, user string) {
-	loginCookieTokenCfg := utils.TokenConfig{
-		TokenProfile: utils.WLCG,
+	loginCookieTokenCfg := token.TokenConfig{
+		TokenProfile: token.WLCG,
 		Lifetime:     30 * time.Minute,
 		Issuer:       param.Server_ExternalWebUrl.GetString(),
 		Audience:     []string{param.Server_ExternalWebUrl.GetString()},

@@ -34,12 +34,11 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
-	"github.com/pelicanplatform/pelican/utils"
 )
 
 type directorResponse struct {
@@ -137,13 +136,13 @@ func advertiseInternal(ctx context.Context, server server_utils.XRootDServer) er
 
 	directorUrl.Path = "/api/v1.0/director/register" + server.GetServerType().String()
 
-	issuerUrl, err := director.GetNSIssuerURL(prefix)
+	issuerUrl, err := server_utils.GetNSIssuerURL(prefix)
 	if err != nil {
 		return err
 	}
 
-	advTokenCfg := utils.TokenConfig{
-		TokenProfile: utils.WLCG,
+	advTokenCfg := token.TokenConfig{
+		TokenProfile: token.WLCG,
 		Version:      "1.0",
 		Lifetime:     time.Minute,
 		Issuer:       issuerUrl,

@@ -88,17 +88,19 @@ type (
 		job              *TransferJob
 		Error            error
 		TransferredBytes int64
+		Scheme           string
 		Attempts         []TransferResult
 	}
 
 	TransferResult struct {
-		Number            int    // indicates which attempt this is
-		TransferFileBytes int64  // how much each attempt downloaded
-		TimeToFirstByte   int64  // how long it took to download the first byte
-		TransferEndTime   int64  // when the transfer ends
-		Endpoint          string // which origin did it use
-		ServerVersion     string // TODO: figure out how to get this???
-		Error             error  // what error the attempt returned (if any)
+		Number            int     // indicates which attempt this is
+		TransferFileBytes int64   // how much each attempt downloaded
+		TimeToFirstByte   float64 // how long it took to download the first byte
+		TransferEndTime   int64   // when the transfer ends
+		TransferTime      int64   // amount of time we were transferring per attempt (in seconds)
+		Endpoint          string  // which origin did it use
+		ServerVersion     string  // version of the server
+		Error             error   // what error the attempt returned (if any)
 	}
 
 	clientTransferResults struct {
@@ -1031,7 +1033,7 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 	if packOption != "" {
 		log.Debugln("Will use unpack option value", packOption)
 	}
-	remoteUrl := &url.URL{Path: job.job.remoteURL.Path}
+	remoteUrl := &url.URL{Path: job.job.remoteURL.Path, Scheme: job.job.remoteURL.Scheme}
 
 	var transfers []transferAttemptDetails
 	if job.job.upload { // Uploads use the redirected endpoint directly
@@ -1157,9 +1159,11 @@ func runTransferWorker(ctx context.Context, workChan <-chan *clientTransferFile,
 				transferResults, err = downloadObject(file.file)
 			}
 			transferResults.jobId = file.jobId
+			transferResults.Scheme = file.file.remoteURL.Scheme
 			if err != nil {
 				log.Errorf("Error when attempting to transfer object %s for client %s: %v", file.file.remoteURL, file.uuid.String(), err)
 				transferResults = newTransferResults(file.file.job)
+				transferResults.Scheme = file.file.remoteURL.Scheme
 				transferResults.Error = err
 			} else if transferResults.Error == nil {
 				xferErrors := NewTransferErrors()
@@ -1192,14 +1196,17 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 	success := false
 	for idx, transferEndpoint := range transfer.attempts { // For each transfer (usually 3), populate each attempt given
 		var attempt TransferResult
-		var timeToFirstByte int64
+		var timeToFirstByte float64
 		var serverVersion string
 		attempt.Number = idx // Start with 0
 		attempt.Endpoint = transferEndpoint.Url.Host
 		transferEndpoint.Url.Path = transfer.remoteURL.Path
+		transferStartTime := time.Now()
 		if downloaded, timeToFirstByte, serverVersion, err = downloadHTTP(transfer.ctx, transfer.engine, transfer.callback, transferEndpoint, transfer.localPath, transfer.token, &transfer.accounting); err != nil {
 			log.Debugln("Failed to download:", err)
-			transferEndTime := time.Now().Unix()
+			transferEndTime := time.Now()
+			transferTime := transferEndTime.Unix() - transferStartTime.Unix()
+			attempt.TransferTime = transferTime
 			var ope *net.OpError
 			var cse *ConnectionSetupError
 			errorString := "Failed to download from " + transferEndpoint.Url.Hostname() + ":" +
@@ -1225,12 +1232,14 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 			attempt.TransferFileBytes = downloaded
 			attempt.TimeToFirstByte = timeToFirstByte
 			attempt.Error = errors.New(errorString)
-			attempt.TransferEndTime = int64(transferEndTime)
+			attempt.TransferEndTime = transferEndTime.Unix()
 			attempt.ServerVersion = serverVersion
 			transferResults.Attempts = append(transferResults.Attempts, attempt)
 		} else { // Success
-			transferEndTime := time.Now().Unix()
-			attempt.TransferEndTime = int64(transferEndTime)
+			transferEndTime := time.Now()
+			transferTime := transferEndTime.Unix() - transferStartTime.Unix()
+			attempt.TransferEndTime = transferEndTime.Unix()
+			attempt.TransferTime = transferTime
 			attempt.TimeToFirstByte = timeToFirstByte
 			attempt.TransferFileBytes = downloaded
 			attempt.ServerVersion = serverVersion
@@ -1265,7 +1274,7 @@ func parseTransferStatus(status string) (int, string) {
 // Perform the actual download of the file
 //
 // Returns the downloaded size, time to 1st byte downloaded, serverVersion and an error if there is one
-func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCallbackFunc, transfer transferAttemptDetails, dest string, token string, payload *payloadStruct) (downloaded int64, timeToFirstByte int64, serverVersion string, err error) {
+func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCallbackFunc, transfer transferAttemptDetails, dest string, token string, payload *payloadStruct) (downloaded int64, timeToFirstByte float64, serverVersion string, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Errorln("Panic occurred in downloadHTTP:", r)
@@ -1363,8 +1372,8 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 
 	// Start the transfer
 	log.Debugln("Starting the HTTP transfer...")
-	resp := client.Do(req)
 	downloadStart := time.Now()
+	resp := client.Do(req)
 	// Check the error real quick
 	if resp.IsComplete() {
 		if err = resp.Err(); err != nil {
@@ -1415,12 +1424,16 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	// Loop of the download
 Loop:
 	for {
+		if !timeToFirstByteRecorded && resp.BytesComplete() > 1 {
+			// We get the time since in nanoseconds:
+			timeToFirstByteNs := time.Since(downloadStart)
+			// Convert to seconds
+			timeToFirstByte = float64(timeToFirstByteNs.Round(time.Millisecond).Milliseconds()) / 1000.0
+			timeToFirstByteRecorded = true
+		}
 		select {
 		case <-progressTicker.C:
 			downloaded = resp.BytesComplete()
-			if !timeToFirstByteRecorded && downloaded > 1 {
-				timeToFirstByte = int64(time.Since(downloadStart))
-			}
 			currentTime := time.Now()
 			if te != nil {
 				te.ewmaCtr.Add(int64(currentTime.Sub(lastUpdate)))
@@ -1608,6 +1621,7 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	var attempt TransferResult
 	// Stat the file to get the size (for progress bar)
 	fileInfo, err := os.Stat(transfer.localPath)
+	transferResult.Scheme = transfer.remoteURL.Scheme
 	if err != nil {
 		log.Errorln("Error checking local file ", transfer.localPath, ":", err)
 		transferResult.Error = err
@@ -1665,6 +1679,7 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	responseChan := make(chan *http.Response)
 	reader := &ProgressReader{ioreader, sizer, closed}
 	putContext, cancel := context.WithCancel(transfer.ctx)
+	transferStartTime := time.Now()
 	defer cancel()
 	log.Debugln("Full destination URL:", dest.String())
 	var request *http.Request
@@ -1685,8 +1700,9 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	var lastKnownWritten int64
 	t := time.NewTicker(20 * time.Second)
 	defer t.Stop()
-	go runPut(request, responseChan, errorChan)
 	uploadStart := time.Now()
+
+	go runPut(request, responseChan, errorChan)
 	var lastError error = nil
 
 	tickerDuration := 100 * time.Millisecond
@@ -1697,14 +1713,17 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	// Do the select on a ticker, and the writeChan
 Loop:
 	for {
+		if !firstByteRecorded && reader.BytesComplete() > 1 {
+			// We get the time since in nanoseconds:
+			timeToFirstByteNs := time.Since(uploadStart)
+			// Convert to seconds
+			attempt.TimeToFirstByte = float64(timeToFirstByteNs.Round(time.Millisecond).Milliseconds()) / 1000.0
+			firstByteRecorded = true
+		}
 		select {
 		case <-progressTicker.C:
 			if transfer.callback != nil {
 				transfer.callback(transfer.localPath, reader.BytesComplete(), sizer.Size(), false)
-			}
-			if !firstByteRecorded && reader.BytesComplete() > 0 {
-				attempt.TimeToFirstByte = int64(time.Since(uploadStart))
-				firstByteRecorded = true
 			}
 
 		case <-t.C:
@@ -1745,7 +1764,9 @@ Loop:
 
 	if fileInfo.Size() == 0 {
 		transferResult.Error = lastError
-		attempt.TransferEndTime = time.Now().Unix()
+		transferEndTime := time.Now()
+		attempt.TransferEndTime = transferEndTime.Unix()
+		attempt.TransferTime = attempt.TransferEndTime - transferStartTime.Unix()
 
 		// Add our attempt fields
 		transferResult.Attempts = append(transferResult.Attempts, attempt)
@@ -1753,7 +1774,9 @@ Loop:
 	} else {
 		log.Debugln("Uploaded bytes:", reader.BytesComplete())
 		transferResult.TransferredBytes = reader.BytesComplete()
-		attempt.TransferEndTime = time.Now().Unix()
+		transferEndTime := time.Now()
+		attempt.TransferEndTime = transferEndTime.Unix()
+		attempt.TransferTime = attempt.TransferEndTime - transferStartTime.Unix()
 
 		// Add our attempt fields
 		transferResult.Attempts = append(transferResult.Attempts, attempt)

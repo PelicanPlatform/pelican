@@ -17,31 +17,62 @@
 
 # This tests the functionality of director's stat call to query origins for the availability of an object
 
-# Setup env variables needed
-to_exit=0
-export PELICAN_FEDERATION_DIRECTORURL="https://$HOSTNAME:8444"
-export PELICAN_FEDERATION_REGISTRYURL="https://$HOSTNAME:8444"
-export PELICAN_TLSSKIPVERIFY=true
-export PELICAN_SERVER_ENABLEUI=false
-export PELICAN_XROOTD_RUNLOCATION=/tmp/pelican-test/stat_test/xrootdRunLocation
+set -e
 
 mkdir -p /tmp/pelican-test/stat_test
-export PELICAN_CONFIGDIR=/tmp/pelican-test/stat_test
-export PELICAN_REGISTRY_DBLOCATION=/tmp/pelican-test/stat_test/test.sql
-export PELICAN_OIDC_CLIENTID="sometexthere"
 
 mkdir -p /tmp/pelican-test/stat_test/origin
 chmod 777 /tmp/pelican-test/stat_test/origin
 
+# Setup env variables needed
+export PELICAN_FEDERATION_DIRECTORURL="https://$HOSTNAME:8444"
+export PELICAN_FEDERATION_REGISTRYURL="https://$HOSTNAME:8444"
+export PELICAN_TLSSKIPVERIFY=true
+export PELICAN_SERVER_ENABLEUI=false
+export PELICAN_ORIGIN_RUNLOCATION=/tmp/pelican-test/stat_test/xrootdRunLocation
+
+export PELICAN_CONFIGDIR=/tmp/pelican-test/stat_test
+export PELICAN_REGISTRY_DBLOCATION=/tmp/pelican-test/stat_test/test.sql
+export PELICAN_OIDC_CLIENTID="sometexthere"
+export PELICAN_OIDC_CLIENTSECRETFILE=/tmp/pelican-test/stat_test/oidc-secret
+echo "Placeholder OIDC secret" > /tmp/pelican-test/stat_test/oidc-secret
+
 export PELICAN_ORIGIN_EXPORTVOLUME="/tmp/pelican-test/stat_test/origin:/test"
 export PELICAN_ORIGIN_ENABLEPUBLICREADS=true
-
 export PELICAN_DIRECTOR_STATTIMEOUT=1s
 export PELICAN_LOGGING_LEVEL=debug
 
+# Function to cleanup after test ends
+cleanup() {
+    local pid=$1  # Get the PID from the function argument
+    echo "Cleaning up..."
+    if [ ! -z "$pid" ]; then
+    echo "Sending SIGINT to PID $pid"
+    kill -SIGINT "$pid"
+    else
+    echo "No PID provided for cleanup."
+    fi
+
+    # Clean up temporary files
+    rm -rf /tmp/pelican-test/stat_test
+
+    unset PELICAN_CONFIGDIR
+    unset PELICAN_FEDERATION_DIRECTORURL
+    unset PELICAN_FEDERATION_REGISTRYURL
+    unset PELICAN_TLSSKIPVERIFY
+    unset PELICAN_REGISTRY_DBLOCATION
+    unset PELICAN_SERVER_ENABLEUI
+    unset PELICAN_OIDC_CLIENTID
+    unset PELICAN_OIDC_CLIENTSECRETFILE
+    unset PELICAN_ORIGIN_ENABLEFALLBACKREAD
+    unset PELICAN_ORIGIN_ENABLEPUBLICREADS
+    unset PELICAN_ORIGIN_RUNLOCATION
+    unset PELICAN_ORIGIN_EXPORTVOLUME
+    unset PELICAN_DIRECTOR_STATTIMEOUT
+    unset PELICAN_LOGGING_LEVEL
+}
+
 echo "This is some random content in the random file" > /tmp/pelican-test/stat_test/origin/input.txt
-export PELICAN_OIDC_CLIENTSECRETFILE=/tmp/pelican-test/stat_test/oidc-secret
-echo "placeholder OIDC secret" > /tmp/pelican-test/stat_test/oidc-secret
 
 # Prepare token for calling stat
 TOKEN=$(./pelican origin token create --audience "https://wlcg.cern.ch/jwt/v1/any" --issuer "https://`hostname`:8444" --scope "web_ui.access" --subject "bar" --lifetime 3600 --private-key /tmp/pelican-test/stat_test/issuer.jwk)
@@ -50,6 +81,9 @@ TOKEN=$(./pelican origin token create --audience "https://wlcg.cern.ch/jwt/v1/an
 federationServe="./pelican serve --module director --module registry --module origin"
 $federationServe &
 pid_federationServe=$!
+
+# Setup trap with the PID as an argument to the cleanup function
+trap 'cleanup $pid_federationServe' EXIT
 
 # Give the federation time to spin up:
 API_URL="https://$HOSTNAME:8444/api/v1.0/health"
@@ -82,24 +116,6 @@ do
     # Break loop if we sleep for more than 10 seconds
     if [ "$TOTAL_SLEEP_TIME" -gt 20 ]; then
         echo "Total sleep time exceeded, exiting..."
-
-        # Kill the federation
-        kill -SIGINT  $pid_federationServe
-
-        # Test failed, we need to clean up
-        rm -rf /tmp/pelican-test/stat_test
-
-        unset PELICAN_FEDERATION_DIRECTORURL
-        unset PELICAN_FEDERATION_REGISTRYURL
-        unset PELICAN_TLSSKIPVERIFY
-        unset PELICAN_SERVER_ENABLEUI
-        unset PELICAN_XROOTD_RUNLOCATION
-        unset PELICAN_CONFIGDIR
-        unset PELICAN_REGISTRY_DBLOCATION
-        unset PELICAN_OIDC_CLIENTID
-        unset PELICAN_ORIGIN_EXPORTVOLUME
-        unset PELICAN_OIDC_CLIENTSECRETFILE
-        unset PELICAN_ORIGIN_ENABLEPUBLICREADS
         echo "TEST FAILED"
         exit 1
     fi
@@ -111,33 +127,10 @@ RESPONSE=$(curl -k -H "Cookie: login=$TOKEN" -H "Content-Type: application/json"
 
 if echo "$RESPONSE" | grep -q "\"ok\":true"; then
     echo "Desired response received: $RESPONSE"
-    to_exit=0
-else
-    echo "Waiting for desired response..."
-    to_exit=1
-fi
-
-# Kill the federation
-kill -SIGINT $pid_federationServe
-
-rm -rf /tmp/pelican-test/stat_test
-
-unset PELICAN_FEDERATION_DIRECTORURL
-unset PELICAN_FEDERATION_REGISTRYURL
-unset PELICAN_TLSSKIPVERIFY
-unset PELICAN_SERVER_ENABLEUI
-unset PELICAN_XROOTD_RUNLOCATION
-unset PELICAN_CONFIGDIR
-unset PELICAN_REGISTRY_DBLOCATION
-unset PELICAN_OIDC_CLIENTID
-unset PELICAN_ORIGIN_EXPORTVOLUME
-unset PELICAN_OIDC_CLIENTSECRETFILE
-unset PELICAN_ORIGIN_ENABLEPUBLICREADS
-
-if  [ "$to_exit" -eq 1 ]; then
-    echo "Test Failed"
-else
     echo "Test Succeeded"
+    exit 0
+else
+    echo "Stat response returns error: $RESPONSE"
+    echo "Test Failed"
+    exit 1
 fi
-
-exit $to_exit

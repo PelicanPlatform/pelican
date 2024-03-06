@@ -28,7 +28,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 
@@ -38,6 +37,7 @@ import (
 	local_cache "github.com/pelicanplatform/pelican/local_cache"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/test_utils"
+	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/utils"
 	log "github.com/sirupsen/logrus"
@@ -64,11 +64,11 @@ func (ft *fedTest) spinup(t *testing.T, ctx context.Context, egrp *errgroup.Grou
 	// to immediately work through the cache.  For now, unit tests will just use the origin.
 	viper.Set("Origin.EnableFallbackRead", true)
 	/*
-	if runtime.GOOS == "darwin" {
-		viper.Set("Origin.EnableFallbackRead", true)
-	} else {
-		modules.Set(config.CacheType)
-	}
+		if runtime.GOOS == "darwin" {
+			viper.Set("Origin.EnableFallbackRead", true)
+		} else {
+			modules.Set(config.CacheType)
+		}
 	*/
 	modules.Set(config.LocalCacheType)
 
@@ -132,12 +132,12 @@ func (ft *fedTest) spinup(t *testing.T, ctx context.Context, egrp *errgroup.Grou
 
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
-	tokConf := utils.TokenConfig{
-		TokenProfile: utils.WLCG,
+	tokConf := token.TokenConfig{
+		TokenProfile: token.WLCG,
 		Lifetime:     time.Duration(time.Minute),
 		Issuer:       issuer,
 		Subject:      "test",
-		Audience:     []string{utils.WLCGAny},
+		Audience:     []string{token.WLCGAny},
 	}
 	tokConf.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Storage_Read, "/hello_world.txt"))
 
@@ -203,12 +203,12 @@ func TestFedAuthGet(t *testing.T) {
 
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
-	tokConf := utils.TokenConfig{
-		TokenProfile: utils.WLCG,
+	tokConf := token.TokenConfig{
+		TokenProfile: token.WLCG,
 		Lifetime:     time.Duration(time.Minute),
 		Issuer:       issuer,
 		Subject:      "test",
-		Audience:     []string{utils.WLCGAny},
+		Audience:     []string{token.WLCGAny},
 	}
 	tokConf.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Storage_Read, "/not_correct"))
 
@@ -292,12 +292,12 @@ func TestClient(t *testing.T) {
 	t.Run("file-not-found", func(t *testing.T) {
 		issuer, err := config.GetServerIssuerURL()
 		require.NoError(t, err)
-		tokConf := utils.TokenConfig{
-			TokenProfile: utils.WLCG,
+		tokConf := token.TokenConfig{
+			TokenProfile: token.WLCG,
 			Lifetime:     time.Duration(time.Minute),
 			Issuer:       issuer,
 			Subject:      "test",
-			Audience:     []string{utils.WLCGAny},
+			Audience:     []string{token.WLCGAny},
 		}
 		tokConf.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Storage_Read, "/hello_world.txt.1"))
 
@@ -470,12 +470,12 @@ func TestForcePurge(t *testing.T) {
 
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
-	tokConf := utils.TokenConfig{
-		TokenProfile: utils.WLCG,
+	tokConf := token.TokenConfig{
+		TokenProfile: token.WLCG,
 		Lifetime:     time.Duration(time.Minute),
 		Issuer:       issuer,
 		Subject:      "test",
-		Audience:     []string{utils.WLCGAny},
+		Audience:     []string{token.WLCGAny},
 	}
 	tokConf.AddScopes(token_scopes.Localcache_Purge)
 

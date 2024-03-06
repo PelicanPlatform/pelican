@@ -18,34 +18,71 @@
 # This tests the functionality of `pelican object get` and `pelican object put` with the
 # "federation in a box"
 
+set -e
+
+mkdir -p get_put_tmp/config
+chmod 777 get_put_tmp/config
+
+mkdir -p get_put_tmp/origin
+chmod 777 get_put_tmp/origin
+
 # Setup env variables needed
-to_exit=0
 export PELICAN_FEDERATION_DIRECTORURL="https://$HOSTNAME:8444"
 export PELICAN_FEDERATION_REGISTRYURL="https://$HOSTNAME:8444"
 export PELICAN_TLSSKIPVERIFY=true
 export PELICAN_ORIGIN_ENABLEFALLBACKREAD=true
 export PELICAN_SERVER_ENABLEUI=false
-export PELICAN_XROOTD_ORIGINRUNLOCATION=$PWD/xrootdRunLocation
-mkdir get_put_config
-export PELICAN_CONFIGDIR=$PWD/get_put_config
-export PELICAN_REGISTRY_DBLOCATION=$PWD/get_put_config/test.sql
-
+export PELICAN_ORIGIN_RUNLOCATION=$PWD/xrootdRunLocation
+export PELICAN_CONFIGDIR=$PWD/get_put_tmp/config
+export PELICAN_REGISTRY_DBLOCATION=$PWD/get_put_tmp/config/test.sql
 export PELICAN_OIDC_CLIENTID="sometexthere"
+export PELICAN_ORIGIN_EXPORTVOLUME="$PWD/get_put_tmp/origin:/test"
 
-mkdir origin
-chmod 777 origin
-export PELICAN_ORIGIN_EXPORTVOLUME="origin:/test"
+# Function to cleanup after test ends
+cleanup() {
+    local pid=$1  # Get the PID from the function argument
+    echo "Cleaning up..."
+    if [ ! -z "$pid" ]; then
+    echo "Sending SIGINT to PID $pid"
+    kill -SIGINT "$pid"
+    else
+    echo "No PID provided for cleanup."
+    fi
+
+    # Clean up temporary files
+    rm -rf get_put_tmp
+    rm -rf xrootdRunLocation
+
+    unset PELICAN_FEDERATION_DIRECTORURL
+    unset PELICAN_FEDERATION_REGISTRYURL
+    unset PELICAN_TLSSKIPVERIFY
+    unset PELICAN_ORIGIN_EXPORTVOLUME
+    unset PELICAN_SERVER_ENABLEUI
+    unset PELICAN_OIDC_CLIENTID
+    unset PELICAN_ORIGIN_ENABLEFALLBACKREAD
+}
 
 # Make a file to use for testing
-echo "This is some random content in the random file" > input.txt
+echo "This is some random content in the random file" > ./get_put_tmp/input.txt
+
+if [ ! -f ./pelican ]; then
+  echo "Pelican executable does not exist in PWD. Exiting.."
+  exit 1
+fi
 
 # Make a token to be used
-./pelican origin token create --audience "https://wlcg.cern.ch/jwt/v1/any" --issuer "https://`hostname`:8444" --scope "storage.read:/ storage.modify:/" --subject "bar" --lifetime 60 --private-key get_put_config/issuer.jwk > token
+./pelican origin token create --audience "https://wlcg.cern.ch/jwt/v1/any" --issuer "https://`hostname`:8444" --scope "storage.read:/ storage.modify:/" --subject "origin"  --claim wlcg.ver=1.0 --lifetime 60 --private-key get_put_tmp/config/issuer.jwk > get_put_tmp/test-token.jwt
+
+echo "Token created"
+cat get_put_tmp/test-token.jwt
 
 # Run federation in the background
 federationServe="./pelican serve --module director --module registry --module origin -d"
 $federationServe &
 pid_federationServe=$!
+
+# Setup trap with the PID as an argument to the cleanup function
+trap 'cleanup $pid_federationServe' EXIT
 
 # Give the federation time to spin up:
 API_URL="https://$HOSTNAME:8444/api/v1.0/health"
@@ -78,71 +115,43 @@ do
     # Break loop if we sleep for more than 10 seconds
     if [ "$TOTAL_SLEEP_TIME" -gt 20 ]; then
         echo "Total sleep time exceeded, exiting..."
-
-        # Test failed, we need to clean up
-        rm -rf origin get_put_config xrootdRunLocation
-        rm -f input.txt token
-
-        unset PELICAN_FEDERATION_DIRECTORURL
-        unset PELICAN_FEDERATION_REGISTRYURL
-        unset PELICAN_TLSSKIPVERIFY
-        unset PELICAN_ORIGIN_EXPORTVOLUME
-        unset PELICAN_SERVER_ENABLEUI
-        unset PELICAN_OIDC_CLIENTID
-        unset PELICAN_ORIGIN_ENABLEFALLBACKREAD
         echo "TEST FAILED"
         exit 1
     fi
 done
 
 # Run pelican object put
-./pelican object put input.txt pelican:///test/input.txt -d -t token -l putOutput.txt
+./pelican object put ./get_put_tmp/input.txt pelican:///test/input.txt -d -t get_put_tmp/test-token.jwt -l get_put_tmp/putOutput.txt
 
 # Check output of command
-if grep -q "Uploaded bytes: 47" putOutput.txt; then
+if grep -q "Dumping response: HTTP/1.1 200 OK" get_put_tmp/putOutput.txt; then
     echo "Uploaded bytes successfully!"
 else
     echo "Did not upload correctly"
-    cat putOutput.txt
-    to_exit=1
+    cat get_put_tmp/putOutput.txt
+    exit 1
 fi
 
-./pelican object get pelican:///test/input.txt output.txt -d -t token -l getOutput.txt
+./pelican object get pelican:///test/input.txt get_put_tmp/output.txt -d -t get_put_tmp/test-token.jwt -l get_put_tmp/getOutput.txt
 
 # Check output of command
-if grep -q "Downloaded bytes: 47" getOutput.txt; then
+if grep -q "HTTP Transfer was successful" get_put_tmp/getOutput.txt; then
     echo "Downloaded bytes successfully!"
 else
     echo "Did not download correctly"
-    cat getOutput.txt
-    to_exit=1
+    cat get_put_tmp/getOutput.txt
+    exit 1
 fi
 
-if grep -q "This is some random content in the random file" output.txt; then
+if grep -q "This is some random content in the random file" get_put_tmp/output.txt; then
     echo "Content matches the uploaded file!"
 else
     echo "Did not download correctly, content in downloaded file is different from the uploaded file"
     echo "Contents of the downloaded file:"
-    cat output.txt
+    cat get_put_tmp/output.txt
     echo "Contents of uploaded file:"
-    cat input.txt
-    to_exit=1
+    cat get_put_tmp/input.txt
+    exit 1
 fi
 
-# Kill the federation
-kill $pid_federationServe
-
-# Clean up temporary files
-rm -f input.txt token putOutput.txt getOutput.txt output.txt
-
-# cleanup
-rm -rf origin get_put_config xrootdRunLocation
-
-unset PELICAN_FEDERATION_DIRECTORURL
-unset PELICAN_FEDERATION_REGISTRYURL
-unset PELICAN_TLSSKIPVERIFY
-unset PELICAN_ORIGIN_EXPORTVOLUME
-unset PELICAN_SERVER_ENABLEUI
-unset PELICAN_OIDC_CLIENTID
-unset PELICAN_ORIGIN_ENABLEFALLBACKREAD
-exit $to_exit
+exit 0
