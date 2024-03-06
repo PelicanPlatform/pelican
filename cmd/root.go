@@ -87,7 +87,7 @@ func Execute() error {
 	ctx := context.WithValue(egrpCtx, config.EgrpKey, egrp)
 	exeErr := rootCmd.ExecuteContext(ctx)
 	if exeErr != nil {
-		log.Errorln("Fatal error occurred at the start of the program. Chean up started:", exeErr)
+		log.Errorln("Fatal error occurred at the start of the program. Cheanup started:", exeErr)
 	}
 	// Wait until all goroutines in errgroup finish their clean up
 	egrpErr := egrp.Wait()
@@ -98,7 +98,7 @@ func Execute() error {
 		fmt.Println("Restarting server...")
 		return restartProgram()
 	}
-	// Other errors we from the errogroup
+	// Other errors we got from the errogroup
 	if egrpErr != nil {
 		log.Errorln("Fatal error occurred that lead to the shutdown of the process:", egrpErr)
 		return egrpErr
