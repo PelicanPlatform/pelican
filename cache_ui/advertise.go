@@ -30,7 +30,6 @@ import (
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
-	"github.com/spf13/viper"
 )
 
 type (
@@ -52,21 +51,37 @@ func (server *CacheServer) CreateAdvertisement(name string, originUrl string, or
 }
 
 func (server *CacheServer) SetFilters() {
+	/*
+	* Converts the list of permitted namespaces to a set and stores it for the serve
+	* This is based on the assumption that the cache server could potentially be filtering once
+	* every minute, so to save speed, we use a map to an empty struct to allow for O(1) lookup time
+	 */
 	server.namespaceFilter = make(map[string]struct{})
-	if viper.IsSet("Cache.AcceptedNamespaces") {
-		nsList := param.Cache_AcceptedNamespaces.GetStringSlice()
-		for _, ns := range nsList {
-			server.namespaceFilter[ns] = struct{}{}
+	nsList := param.Cache_PermittedNamespaces.GetStringSlice()
+	// Ensure that each permitted namespace starts with a "/"
+	for _, ns := range nsList {
+		if ns[0] != '/' {
+			ns = "/" + ns
 		}
+		server.namespaceFilter[ns] = struct{}{}
 	}
 }
 
 func (server *CacheServer) filterAdsBasedOnNamespace(nsAds []common.NamespaceAdV2) []common.NamespaceAdV2 {
+	/*
+	* Filters out ads based on the namespaces listed in server.NamespaceFiler
+	* Note that this does a few checks for trailing and non-trailing "/" as it's assumed that the namespaces
+	* from the director and the ones provided might differ.
+	 */
 	filteredAds := []common.NamespaceAdV2{}
 	if len(server.namespaceFilter) > 0 {
 		for _, ad := range nsAds {
 			ns := ad.Path
 			sentinel := true
+			//If the final character isn't a '/', add it to the string
+			if ns[len(ns)-1] != '/' {
+				ns = ns + "/"
+			}
 			for sentinel {
 				_, exists := server.namespaceFilter[ns]
 				if exists {
@@ -75,8 +90,15 @@ func (server *CacheServer) filterAdsBasedOnNamespace(nsAds []common.NamespaceAdV
 				}
 
 				splitIndex := strings.LastIndex(ns, "/")
+
+				//If ns isn't the root the start of the path, either remove the trailing /
+				//or check one director higher
 				if splitIndex != -1 && splitIndex != 0 {
-					ns = ns[:splitIndex]
+					if splitIndex != len(ns)-1 {
+						ns = ns[:splitIndex+1]
+					} else {
+						ns = ns[:splitIndex]
+					}
 				} else {
 					sentinel = false
 				}
@@ -140,7 +162,7 @@ func (server *CacheServer) GetNamespaceAdsFromDirector() error {
 		}
 	}
 
-	if viper.IsSet("Cache.AcceptedNamespaces") {
+	if len(server.namespaceFilter) > 0 {
 		respNS = server.filterAdsBasedOnNamespace(respNS)
 	}
 

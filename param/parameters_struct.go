@@ -25,11 +25,11 @@ import (
 
 type Config struct {
 	Cache struct {
-		AcceptedNamespaces []string
 		Concurrency int
 		DataLocation string
 		EnableVoms bool
 		ExportLocation string
+		PermittedNamespaces []string
 		Port int
 		RunLocation string
 		Url string
@@ -250,11 +250,11 @@ type Config struct {
 
 type configWithType struct {
 	Cache struct {
-		AcceptedNamespaces struct { Type string; Value []string }
 		Concurrency struct { Type string; Value int }
 		DataLocation struct { Type string; Value string }
 		EnableVoms struct { Type string; Value bool }
 		ExportLocation struct { Type string; Value string }
+		PermittedNamespaces struct { Type string; Value []string }
 		Port struct { Type string; Value int }
 		RunLocation struct { Type string; Value string }
 		Url struct { Type string; Value string }

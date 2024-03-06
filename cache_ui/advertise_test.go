@@ -32,32 +32,52 @@ import (
 func TestFilterNsAdsForCache(t *testing.T) {
 	tests := []struct {
 		desc          string
-		acceptedNS    []string
+		permittedNS   []string
 		expectedNumNS int
 	}{
 		{
 			desc:          "no-matching-namespaces",
-			acceptedNS:    []string{"noexist", "bad"},
+			permittedNS:   []string{"/noexist", "/bad"},
 			expectedNumNS: 0,
 		},
 		{
 			desc:          "matching-namespaces",
-			acceptedNS:    []string{"ns1", "ns2"},
+			permittedNS:   []string{"/ns1", "/ns2"},
 			expectedNumNS: 2,
 		},
 		{
 			desc:          "mix-matching-namespaces",
-			acceptedNS:    []string{"ns3/foo", "noexist", "ns1"},
+			permittedNS:   []string{"/ns3/foo", "/noexist", "/ns1"},
 			expectedNumNS: 2,
 		},
 		{
 			desc:          "matching-prefix",
-			acceptedNS:    []string{"ns3", "ns4/foo"},
+			permittedNS:   []string{"/ns3", "/ns4/foo"},
 			expectedNumNS: 3,
 		},
 		{
 			desc:          "no-filters-set",
-			expectedNumNS: 6,
+			expectedNumNS: 7,
+		},
+		{
+			desc:          "empty-filter-list",
+			permittedNS:   []string{},
+			expectedNumNS: 7,
+		},
+		{
+			desc:          "trailing-/",
+			permittedNS:   []string{"/ns1/", "/ns4/"},
+			expectedNumNS: 3,
+		},
+		{
+			desc:          "no-trailing-/",
+			permittedNS:   []string{"/ns5", "/ns3"},
+			expectedNumNS: 3,
+		},
+		{
+			desc:          "no-starting/",
+			permittedNS:   []string{"ns4/foo/bar", "ns5"},
+			expectedNumNS: 2,
 		},
 	}
 	viper.Reset()
@@ -65,22 +85,25 @@ func TestFilterNsAdsForCache(t *testing.T) {
 
 	nsAds := []common.NamespaceAdV2{
 		{
-			Path: "ns1",
+			Path: "/ns1",
 		},
 		{
-			Path: "ns2",
+			Path: "/ns2",
 		},
 		{
-			Path: "ns3/foo",
+			Path: "/ns3/foo",
 		},
 		{
-			Path: "ns3",
+			Path: "/ns3/",
 		},
 		{
-			Path: "ns4/foo/bar",
+			Path: "/ns4/foo/bar/",
 		},
 		{
-			Path: "ns4",
+			Path: "/ns4",
+		},
+		{
+			Path: "/ns5/",
 		},
 	}
 
@@ -101,8 +124,8 @@ func TestFilterNsAdsForCache(t *testing.T) {
 		t.Run(testInput.desc, func(t *testing.T) {
 
 			viper.Set("Federation.DirectorURL", ts.URL)
-			if testInput.acceptedNS != nil {
-				viper.Set("Cache.AcceptedNamespaces", testInput.acceptedNS)
+			if testInput.permittedNS != nil {
+				viper.Set("Cache.PermittedNamespaces", testInput.permittedNS)
 			}
 			defer viper.Reset()
 
