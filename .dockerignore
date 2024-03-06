@@ -1,0 +1,11 @@
+.github/
+dist/
+docs/pages/
+docs/public
+docs/parameters.json
+web_ui/frontend/node_modules/
+web_ui/frontend/out/
+web_ui/frontend/.next/
+README.md
+SECURITY.md
+LICENSE

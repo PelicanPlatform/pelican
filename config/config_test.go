@@ -19,6 +19,7 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -29,11 +30,8 @@ import (
 	"time"
 
 	"github.com/pelicanplatform/pelican/param"
-	"github.com/sirupsen/logrus"
-	"github.com/sirupsen/logrus/hooks/test"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 var server *httptest.Server
@@ -158,38 +156,6 @@ func TestInitConfig(t *testing.T) {
 	assert.Equal(t, "", param.Federation_DiscoveryUrl.GetString())
 }
 
-func TestDeprecateLogMessage(t *testing.T) {
-	t.Run("expect-deprecated-message-if-namespace-url-is-set", func(t *testing.T) {
-		hook := test.NewGlobal()
-		viper.Reset()
-		// The default value is set to Error, but this is a warning message
-		viper.Set("Logging.Level", "Warning")
-		viper.Set("Federation.NamespaceUrl", "https://dont-use.com")
-		InitConfig()
-
-		require.Equal(t, 1, len(hook.Entries))
-		assert.Equal(t, logrus.WarnLevel, hook.LastEntry().Level)
-		assert.Equal(t, "Federation.NamespaceUrl is deprecated and will be removed in future release. Please migrate to use Federation.RegistryUrl instead", hook.LastEntry().Message)
-		// We expect the default value of Federation.RegistryUrl is set to Federation.NamespaceUrl
-		// if Federation.NamespaceUrl is not empty for backward compatibility
-		assert.Equal(t, "https://dont-use.com", viper.GetString("Federation.RegistryUrl"))
-		hook.Reset()
-	})
-
-	t.Run("no-deprecated-message-if-namespace-url-unset", func(t *testing.T) {
-		hook := test.NewGlobal()
-		viper.Reset()
-		viper.Set("Logging.Level", "Warning")
-		viper.Set("Federation.RegistryUrl", "https://dont-use.com")
-		InitConfig()
-
-		assert.Equal(t, 0, len(hook.Entries))
-		assert.Equal(t, "https://dont-use.com", viper.GetString("Federation.RegistryUrl"))
-		assert.Equal(t, "", viper.GetString("Federation.NamespaceUrl"))
-		hook.Reset()
-	})
-}
-
 func TestEnabledServers(t *testing.T) {
 	allServerTypes := []ServerType{OriginType, CacheType, DirectorType, RegistryType}
 	allServerStrs := make([]string, 0)
@@ -259,5 +225,65 @@ func TestEnabledServers(t *testing.T) {
 		assert.True(t, IsServerEnabled(CacheType))
 		assert.False(t, IsServerEnabled(DirectorType))
 		assert.False(t, IsServerEnabled(RegistryType))
+	})
+}
+
+func TestDiscoverFederation(t *testing.T) {
+	viper.Reset()
+	// Server to be a "mock" federation
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// make our response:
+		response := FederationDiscovery{
+			DirectorEndpoint:              "director",
+			NamespaceRegistrationEndpoint: "registry",
+			JwksUri:                       "jwks",
+			BrokerEndpoint:                "broker",
+		}
+
+		responseJSON, err := json.Marshal(response)
+		if err != nil {
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_, err = w.Write(responseJSON)
+		assert.NoError(t, err)
+	}))
+	defer server.Close()
+	t.Run("testInvalidDiscoveryUrlWithPath", func(t *testing.T) {
+		viper.Set("tlsskipverify", true)
+		viper.Set("Federation.DiscoveryUrl", server.URL+"/this/is/some/path")
+		err := DiscoverFederation()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "Invalid federation discovery url is set. No path allowed for federation discovery url. Provided url: ",
+			"Error returned does not contain the correct error")
+		viper.Reset()
+	})
+
+	t.Run("testValidDiscoveryUrl", func(t *testing.T) {
+		viper.Set("tlsskipverify", true)
+		viper.Set("Federation.DiscoveryUrl", server.URL)
+		err := DiscoverFederation()
+		assert.NoError(t, err)
+		// Assert that the metadata matches expectations
+		assert.Equal(t, "director", param.Federation_DirectorUrl.GetString(), "Unexpected DirectorEndpoint")
+		assert.Equal(t, "registry", param.Federation_RegistryUrl.GetString(), "Unexpected NamespaceRegistrationEndpoint")
+		assert.Equal(t, "jwks", param.Federation_JwkUrl.GetString(), "Unexpected JwksUri")
+		assert.Equal(t, "broker", param.Federation_BrokerUrl.GetString(), "Unexpected BrokerEndpoint")
+		viper.Reset()
+	})
+
+	t.Run("testOsgHtcUrl", func(t *testing.T) {
+		viper.Set("tlsskipverify", true)
+		viper.Set("Federation.DiscoveryUrl", "osg-htc.org")
+		err := DiscoverFederation()
+		assert.NoError(t, err)
+		// Assert that the metadata matches expectations
+		assert.Equal(t, "https://osdf-director.osg-htc.org", param.Federation_DirectorUrl.GetString(), "Unexpected DirectorEndpoint")
+		assert.Equal(t, "https://osdf-registry.osg-htc.org", param.Federation_RegistryUrl.GetString(), "Unexpected NamespaceRegistrationEndpoint")
+		assert.Equal(t, "https://osg-htc.org/osdf/public_signing_key.jwks", param.Federation_JwkUrl.GetString(), "Unexpected JwksUri")
+		assert.Equal(t, "", param.Federation_BrokerUrl.GetString(), "Unexpected BrokerEndpoint")
+		viper.Reset()
 	})
 }

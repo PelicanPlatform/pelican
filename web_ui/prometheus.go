@@ -36,6 +36,7 @@ import (
 	"github.com/oklog/run"
 	pelican_config "github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
@@ -151,8 +152,8 @@ func configDirectorPromScraper(ctx context.Context) (*config.ScrapeConfig, error
 		return nil, fmt.Errorf("parse external URL %v: %w", param.Server_ExternalWebUrl.GetString(), err)
 	}
 
-	promTokenCfg := utils.TokenConfig{
-		TokenProfile: utils.WLCG,
+	promTokenCfg := token.TokenConfig{
+		TokenProfile: token.WLCG,
 		Lifetime:     param.Monitoring_TokenExpiresIn.GetDuration(),
 		Issuer:       directorBaseUrl.String(),
 		Audience:     []string{directorBaseUrl.String()},
@@ -167,8 +168,8 @@ func configDirectorPromScraper(ctx context.Context) (*config.ScrapeConfig, error
 		return nil, errors.Wrap(err, "failed to create director prometheus token")
 	}
 
-	scrapeTokenCfg := utils.TokenConfig{
-		TokenProfile: utils.WLCG,
+	scrapeTokenCfg := token.TokenConfig{
+		TokenProfile: token.WLCG,
 		Version:      "1.0",
 		Lifetime:     param.Monitoring_TokenExpiresIn.GetDuration(),
 		Issuer:       directorBaseUrl.String(),

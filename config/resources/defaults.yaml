@@ -16,17 +16,18 @@
 
 Logging:
   Level: "Error"
-  Cache:
-    Scitokens: error
-    Pss: error
-    Ofs: error
-    Xrd: error
   Origin:
-    Scitokens: error
-    Pss: error
-    Cms: error
-    Pfc: info
-    Xrootd: emsg login stall redirect
+    Cms: "error"
+    Scitokens: "fatal"
+    Xrd: "error"
+    Xrootd: "info"
+  Cache:
+    Ofs: "error"
+    Pfc: "info"
+    Pss: "error"
+    Scitokens: "fatal"
+    Xrd: "error"
+    Xrootd: "error"
 Client:
   WorkerCount: 5
 Server:
@@ -46,6 +47,8 @@ Director:
   EnableBroker: true
 Cache:
   Port: 8442
+  SelfTest: true
+  SelfTestInterval: 15s
 Origin:
   NamespacePrefix: ""
   Multiuser: false

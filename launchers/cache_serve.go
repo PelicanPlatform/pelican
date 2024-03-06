@@ -64,6 +64,15 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) (
 
 	xrootd.LaunchXrootdMaintenance(ctx, cacheServer, 2*time.Minute)
 
+	if param.Cache_SelfTest.GetBool() {
+		err = cache_ui.InitSelfTestDir()
+		if err != nil {
+			return nil, err
+		}
+
+		cache_ui.PeriodicCacheSelfTest(ctx, egrp)
+	}
+
 	log.Info("Launching cache")
 	launchers, err := xrootd.ConfigureLaunchers(false, configPath, false, true)
 	if err != nil {

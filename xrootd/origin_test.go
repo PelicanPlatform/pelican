@@ -37,7 +37,6 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
-	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pelicanplatform/pelican/web_ui"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
@@ -158,11 +157,11 @@ func TestOrigin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Unsuccessful test: Server encountered an error: %v", err)
 	}
-	fileTests := utils.TestFileTransferImpl{}
+	fileTests := server_utils.TestFileTransferImpl{}
 	issuerUrl, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
 
-	ok, err := fileTests.RunTests(ctx, param.Origin_Url.GetString(), config.GetServerAudience(), issuerUrl, utils.OriginSelfFileTest)
+	ok, err := fileTests.RunTests(ctx, param.Origin_Url.GetString(), config.GetServerAudience(), issuerUrl, server_utils.OriginSelfFileTest)
 	require.NoError(t, err)
 	require.True(t, ok)
 
@@ -260,6 +259,7 @@ func TestS3OriginConfig(t *testing.T) {
 	viper.Set("Origin.EnableVoms", false)
 	viper.Set("Origin.SelfTest", false)
 	viper.Set("Origin.Port", 0)
+	viper.Set("Server.WebPort", 0)
 	viper.Set("TLSSkipVerify", true)
 
 	mockupCancel := originMockup(ctx, egrp, t)

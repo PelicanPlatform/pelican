@@ -30,8 +30,8 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
-	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
@@ -117,22 +117,22 @@ func getRegistryIssuerInfo(ctx context.Context, prefix string) (iss string, keys
 }
 
 // Create a signed JWT appropriate for retrieving requests from the connection broker
-func createToken(namespace, subject, audience string, desiredScope token_scopes.TokenScope) (token string, err error) {
+func createToken(namespace, subject, audience string, desiredScope token_scopes.TokenScope) (tokenStr string, err error) {
 	issuerUrl, err := getRegistryIssValue(namespace)
 	if err != nil {
 		return
 	}
 
-	tokenCfg := utils.TokenConfig{
+	tokenCfg := token.TokenConfig{
 		Lifetime:     time.Minute,
-		TokenProfile: utils.WLCG,
+		TokenProfile: token.WLCG,
 		Audience:     []string{audience},
 		Issuer:       issuerUrl,
 		Version:      "1.0",
 		Subject:      subject,
 	}
 	tokenCfg.AddScopes([]token_scopes.TokenScope{desiredScope})
-	token, err = tokenCfg.CreateToken()
+	tokenStr, err = tokenCfg.CreateToken()
 
 	return
 }

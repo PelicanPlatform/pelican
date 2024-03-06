@@ -31,7 +31,6 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
-	"github.com/pelicanplatform/pelican/utils"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
@@ -116,7 +115,7 @@ func TestFedServeCache(t *testing.T) {
 	err = server_utils.WaitUntilWorking(ctx, "GET", param.Cache_Url.GetString(), "xrootd", 403)
 	require.NoError(t, err)
 
-	fileTests := utils.TestFileTransferImpl{}
+	fileTests := server_utils.TestFileTransferImpl{}
 	issuerUrl, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
 

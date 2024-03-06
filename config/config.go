@@ -396,6 +396,10 @@ func DiscoverFederation() error {
 	if err != nil {
 		return errors.Wrapf(err, "Invalid federation value %s:", federationStr)
 	}
+	if federationUrl.Path != "" && federationUrl.Host != "" {
+		// If the host is nothing, then the url is fine, but if we have a host and a path then there is a problem
+		return errors.New("Invalid federation discovery url is set. No path allowed for federation discovery url. Provided url: " + federationStr)
+	}
 	federationUrl.Scheme = "https"
 	if len(federationUrl.Path) > 0 && len(federationUrl.Host) == 0 {
 		federationUrl.Host = federationUrl.Path
@@ -697,8 +701,8 @@ func InitConfig() {
 	}
 
 	if oldNsUrl := viper.GetString("Federation.NamespaceUrl"); oldNsUrl != "" {
-		log.Warningln("Federation.NamespaceUrl is deprecated and will be removed in future release. Please migrate to use Federation.RegistryUrl instead")
-		viper.SetDefault("Federation.RegistryUrl", oldNsUrl)
+		log.Errorln("Federation.NamespaceUrl is deprecated and removed from parameters. Please use Federation.RegistryUrl instead")
+		os.Exit(1)
 	}
 }
 
@@ -728,7 +732,7 @@ func setXrootdRunLocations(currentServers ServerType, dir string) error {
 	cacheLocation := viper.GetString("Cache.RunLocation")
 	originLocation := viper.GetString("Origin.RunLocation")
 	xrootdLocation := viper.GetString("Xrootd.RunLocation")
-	xrootdLocationIsSet := viper.IsSet("Xrootd.Location")
+	xrootdLocationIsSet := viper.IsSet("Xrootd.RunLocation")
 	cacheLocFallbackToXrootd := false
 	originLocFallbackToXrootd := false
 	if currentServers.IsEnabled(CacheType) {

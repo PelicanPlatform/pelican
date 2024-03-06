@@ -100,6 +100,11 @@ type (
 		EnableFallbackRead bool            `json:"enable-fallback-read"` // True if the origin will allow direct client reads when no caches are available
 	}
 
+	DirectorTestResult struct {
+		Status    string `json:"status"`
+		Message   string `json:"message"`
+		Timestamp int64  `json:"timestamp"`
+	}
 	GetPrefixByPathRes struct {
 		Prefix string `json:"prefix"`
 	}

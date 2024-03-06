@@ -155,69 +155,92 @@ type: bool
 default: false
 components: ["Client"]
 ---
-name: Logging.Cache.Scitokens
+name: Logging.Origin.Cms
 description: >-
-  Trace level of scitokens debug output within Xrootd configuration. Values include: debug, info, error (default of error/none)
+  Trace level of Xrootd cluster management service, one of the main xrootd executables.
+  Cms basically is a file (or asset) discovery service. Each server has a cmsd daemon which
+  connect to a master one informing it if a server is available. Xrootd asks cms where a file
+  could be found and cms works to report back the server for where the file is located.
 type: string
 default: error
+components: ["origin"]
+---
+name: Logging.Origin.Scitokens
+description: >-
+  Trace level of scitokens debug output within Xrootd configuration. This entails token management
+  and security credentials within Xrootd.
+type: string
+default: error
+components: ["origin"]
+---
+name: Logging.Origin.Xrd
+description: >-
+  Trace level of the eXtended Request Daemon within Xrootd, another main xrootd executable. This reports information
+  the xrootd protocol and works with cms.
+type: string
+default: error
+components: ["origin"]
+---
+name: Logging.Origin.Xrootd
+description: >-
+  Trace options for Xrootd debug output within Xrootd configuration. This prefix is reserved for the xroot protocol,
+  which is the component that sits on sockets and talks to clients as they query file-system info, open files, and read data.
+  This is the protocol for xrootd (like http) and handles connections and requests.
+type: string
+default: info
+components: ["origin"]
+---
+name: Logging.Cache.Ofs
+description: >-
+  Trace level of Xrootd's Open File System. This component cares about files and directories from the administrative perspective.
+  This component is build on top of the Open Storage System component, which deals with things like file creation and reads and
+  writes for files and directories.
+type: string
+default: error
+components: ["cache"]
+---
+name: Logging.Cache.Pfc
+description: >-
+  Trace level of Xrootd Proxy File Cache (XCache), the caching mechanism used by Xrootd. This component
+  entails information for caches/caching within Xrootd. This component instantiates its own Open Storage
+  System (OSS) to write local files to.
+type: string
+default: info
 components: ["cache"]
 ---
 name: Logging.Cache.Pss
 description: >-
-  Logging level of pss and pssSetOptCache within Xrootd configuration values include: debug, info, error (default of error/off/Debug Level 1)
+  Trace level of Xrootd Proxy System Service. Variables this component reports include: number of remotes file opens,
+  number of opens that failed, number of remote file closes, and number of closes that failed.
 type: string
 default: error
 components: ["cache"]
 ---
-name: Logging.Cache.Ofs
+name: Logging.Cache.Scitokens
 description: >-
-  Trace level of ofs debug output within Xrootd configuration. Values include: debug, info, error (default of error/-all)
+  Trace level of scitokens debug output within Xrootd configuration. This entails token management
+  and security credentials within Xrootd.
 type: string
 default: error
 components: ["cache"]
 ---
 name: Logging.Cache.Xrd
 description: >-
-  Trace options for Xrootd debug output (xrd) within Xrootd configuration. Values include: debug, info, error (default of error/-all)
+  Trace level of the eXtended Request Daemon within Xrootd, another main xrootd executable. This reports information
+  the xrootd protocol and works with cms.
 type: string
 default: error
 components: ["cache"]
 ---
-name: Logging.Origin.Scitokens
+name: Logging.Cache.Xrootd
 description: >-
-  Trace level of scitokens debug output within Xrootd configuration. Values include: debug, info, error (default of error/none)
+  Trace options for Xrootd debug output within Xrootd configuration. This prefix is reserved for the xroot protocol,
+  which is the component that sits on sockets and talks to clients as they query file-system info, open files, and read data.
+  This is the protocol for xrootd (like http) and handles connections and requests
+
 type: string
 default: error
-components: ["origin"]
----
-name: Logging.Origin.Pss
-description: >-
-  Logging level of pss and pssSetOptOrigin within Xrootd configuration values include: debug, info, error (default of error/off/Debug Level 1)
-type: string
-default: error
-components: ["origin"]
----
-name: Logging.Origin.Cms
-description: >-
-  Trace level of cms debug output within Xrootd configuration. Values include: debug, info, error (default of error/-all)
-type: string
-default: error
-components: ["origin"]
----
-name: Logging.Origin.Pfc
-description: >-
-  Trace level of pfc debug output within Xrootd configuration. Values include: debug, info, error (default of info/info)
-type: string
-default: info
-components: ["origin"]
----
-name: Logging.Origin.Xrootd
-description: >-
-  Trace options for Xrootd debug output within Xrootd configuration. Values include: all, auth, debug, emsg, fs, fsaio, fsio, login, mem, off,
-  pgcserr, redirect, request, response, stall
-type: string
-default: emsg login stall redirect # Not sure how to do defaults for this one since ours/osg's are so specific
-components: ["origin"]
+components: ["cache"]
 ---
 ############################
 # Federation-Level Configs #
@@ -225,6 +248,7 @@ components: ["origin"]
 name: Federation.DiscoveryUrl
 description: >-
   A URL pointing to the federation's metadata discovery host.
+  NOTE: this does not work if the url contains a path!
 type: url
 default: none
 components: ["*"]
@@ -236,17 +260,6 @@ type: url
 osdf_default: Default is determined dynamically through metadata at <Federation.DiscoveryUrl>/.well-known/pelican-configuration
 default: none
 components: ["client", "origin", "cache"]
----
-name: Federation.NamespaceUrl
-description: >-
-  [Deprecated] `Federation.NamespaceUrl` is deprecated and will be removed in the future release. Please migrate to use
-  `Federation.RegistryUrl` instead.
-
-  A URL indicating where the namespace registry service is hosted.
-type: url
-osdf_default: Default is determined dynamically through metadata at <Federation.DiscoveryUrl>/.well-known/pelican-configuration
-default: none
-components: ["client", "director", "origin", "cache"]
 ---
 name: Federation.RegistryUrl
 description: >-
@@ -688,6 +701,20 @@ description: >-
   only be allowed to access the listed namespaces.
 type: stringSlice
 default: none
+components: ["cache"]
+---
+name: Cache.SelfTest
+description: >-
+  A bool indicating whether the cache should perform self health checks.
+type: bool
+default: true
+components: ["cache"]
+---
+name: Cache.SelfTestInterval
+description: >-
+  The interval of which the cache starts a new file transfer test to itself.
+type: duration
+default: 15s
 components: ["cache"]
 ---
 ############################

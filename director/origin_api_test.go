@@ -23,7 +23,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"path/filepath"
 	"testing"
 	"time"
@@ -35,31 +34,13 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
+	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
-	"github.com/pelicanplatform/pelican/utils"
 )
-
-// For these tests, we only need to lookup key locations. Create a dummy registry that only returns
-// the jwks_uri location for the given key. Once a server is instantiated, it will only return
-// locations for the provided prefix. To change prefixes, create a new registry mockup.
-func registryMockup(t *testing.T, prefix string) *httptest.Server {
-	registryUrl, _ := url.Parse("https://registry.com:8446")
-	path, err := url.JoinPath("/api/v1.0/registry", prefix, ".well-known/issuer.jwks")
-	if err != nil {
-		t.Fatalf("Failed to parse key path for prefix %s", prefix)
-	}
-	registryUrl.Path = path
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		jsonResponse := `{"jwks_uri": "` + registryUrl.String() + `"}`
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(jsonResponse))
-	}))
-	return server
-}
 
 func TestVerifyAdvertiseToken(t *testing.T) {
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
@@ -82,7 +63,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 	// Mock registry server
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if req.Method == "POST" && req.URL.Path == "/api/v1.0/registry/checkNamespaceStatus" {
-			res := checkStatusRes{Approved: true}
+			res := common.CheckNamespaceStatusRes{Approved: true}
 			resByte, err := json.Marshal(res)
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
@@ -126,11 +107,11 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 		namespaceKeys.Set("/test-namespace", &ar, ttlcache.DefaultTTL)
 	}()
 
-	issuerUrl, err := GetNSIssuerURL("/test-namespace")
+	issuerUrl, err := server_utils.GetNSIssuerURL("/test-namespace")
 	assert.NoError(t, err)
 
-	advTokenCfg := utils.TokenConfig{
-		TokenProfile: utils.WLCG,
+	advTokenCfg := token.TokenConfig{
+		TokenProfile: token.WLCG,
 		Version:      "1.0",
 		Lifetime:     time.Minute,
 		Issuer:       issuerUrl,
@@ -148,8 +129,8 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 	assert.Equal(t, true, ok, "Expected scope to be 'pelican.advertise'")
 
 	//Create token without a scope - should return an error upon validation
-	scopelessTokCfg := utils.TokenConfig{
-		TokenProfile: utils.WLCG,
+	scopelessTokCfg := token.TokenConfig{
+		TokenProfile: token.WLCG,
 		Lifetime:     time.Minute,
 		Issuer:       "https://get-your-tokens.org",
 		Audience:     []string{"director.test"},
@@ -165,8 +146,8 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 	assert.Equal(t, "No scope is present; required to advertise to director", err.Error())
 
 	// Create a token with a bad scope - should return an error upon validation
-	wrongScopeTokenCfg := utils.TokenConfig{
-		TokenProfile: utils.WLCG,
+	wrongScopeTokenCfg := token.TokenConfig{
+		TokenProfile: token.WLCG,
 		Lifetime:     time.Minute,
 		Issuer:       "https://get-your-tokens.org",
 		Audience:     []string{"director.test"},
@@ -181,30 +162,6 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 	ok, err = VerifyAdvertiseToken(ctx, tok, "/test-namespace")
 	assert.Equal(t, false, ok, "Should fail due to incorrect scope name")
 	assert.NoError(t, err, "Incorrect scope name should not throw and error")
-}
-
-func TestGetNSIssuerURL(t *testing.T) {
-	viper.Reset()
-	viper.Set("Federation.RegistryUrl", "https://registry.com:8446")
-	url, err := GetNSIssuerURL("/test-prefix")
-	assert.Equal(t, nil, err)
-	assert.Equal(t, "https://registry.com:8446/api/v1.0/registry/test-prefix", url)
-	viper.Reset()
-}
-
-func TestGetJWKSURLFromIssuerURL(t *testing.T) {
-	viper.Reset()
-	registry := registryMockup(t, "/test-prefix")
-	defer registry.Close()
-	viper.Set("Federation.RegistryUrl", registry.URL)
-	expectedIssuerUrl := registry.URL + "/api/v1.0/registry/test-prefix"
-	url, err := GetNSIssuerURL("/test-prefix")
-	assert.Equal(t, nil, err)
-	assert.Equal(t, expectedIssuerUrl, url)
-
-	keyLoc, err := GetJWKSURLFromIssuerURL(url)
-	assert.Equal(t, nil, err)
-	assert.Equal(t, "https://registry.com:8446/api/v1.0/registry/test-prefix/.well-known/issuer.jwks", keyLoc)
 }
 
 func TestNamespaceKeysCacheEviction(t *testing.T) {

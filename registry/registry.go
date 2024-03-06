@@ -44,6 +44,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
+	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/oauth2"
 	"github.com/pelicanplatform/pelican/param"
@@ -77,26 +78,6 @@ type Response struct {
 type TokenResponse struct {
 	AccessToken string `json:"access_token"`
 	Error       string `json:"error"`
-}
-
-type checkNamespaceExistsReq struct {
-	Prefix string `json:"prefix"`
-	PubKey string `json:"pubkey"`
-}
-
-type checkNamespaceExistsRes struct {
-	PrefixExists bool   `json:"prefix_exists"`
-	KeyMatch     bool   `json:"key_match"`
-	Message      string `json:"message"`
-	Error        string `json:"error"`
-}
-
-type checkStatusReq struct {
-	Prefix string `json:"prefix"`
-}
-
-type checkStatusRes struct {
-	Approved bool `json:"approved"`
 }
 
 // Various auxiliary functions used for client-server security handshakes
@@ -807,7 +788,7 @@ func wildcardHandler(ctx *gin.Context) {
 
 // Check if a namespace prefix exists and its public key matches the registry record
 func checkNamespaceExistsHandler(ctx *gin.Context) {
-	req := checkNamespaceExistsReq{}
+	req := common.CheckNamespaceExistsReq{}
 	if err := ctx.ShouldBind(&req); err != nil {
 		log.Debug("Failed to parse request body for namespace exits check: ", err)
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse request body"})
@@ -846,35 +827,36 @@ func checkNamespaceExistsHandler(ctx *gin.Context) {
 	if !found {
 		// We return 200 even with prefix not found so that 404 can be used to check if the route exists (OSDF)
 		// and fallback to OSDF way of checking if we do get 404
-		res := checkNamespaceExistsRes{PrefixExists: false, Message: "Prefix was not found in database"}
+		res := common.CheckNamespaceExistsRes{PrefixExists: false, Message: "Prefix was not found in database"}
 		ctx.JSON(http.StatusOK, res)
 		return
 	}
 	// Just to check if the key matches. We don't care about approval status
 	jwksDb, _, err := getNamespaceJwksByPrefix(req.Prefix)
 	if err != nil {
+		log.Errorf("Error in getNamespaceJwksByPrefix with prefix %s. %v", req.Prefix, err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	registryKey, isPresent := jwksDb.LookupKeyID(jwkReq.KeyID())
 	if !isPresent {
-		res := checkNamespaceExistsRes{PrefixExists: true, KeyMatch: false, Message: "Given JWK is not present in the JWKS from database"}
+		res := common.CheckNamespaceExistsRes{PrefixExists: true, KeyMatch: false, Message: "Given JWK is not present in the JWKS from database"}
 		ctx.JSON(http.StatusOK, res)
 		return
 	} else if jwk.Equal(registryKey, jwkReq) {
-		res := checkNamespaceExistsRes{PrefixExists: true, KeyMatch: true}
+		res := common.CheckNamespaceExistsRes{PrefixExists: true, KeyMatch: true}
 		ctx.JSON(http.StatusOK, res)
 		return
 	} else {
-		res := checkNamespaceExistsRes{PrefixExists: true, KeyMatch: false, Message: "Given JWK does not equal to the JWK from database"}
+		res := common.CheckNamespaceExistsRes{PrefixExists: true, KeyMatch: false, Message: "Given JWK does not equal to the JWK from database"}
 		ctx.JSON(http.StatusOK, res)
 		return
 	}
 }
 
 func checkNamespaceStatusHandler(ctx *gin.Context) {
-	req := checkStatusReq{}
+	req := common.CheckNamespaceStatusReq{}
 	if err := ctx.ShouldBind(&req); err != nil {
 		log.Debug("Failed to parse request body for namespace status check: ", err)
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse request body"})
@@ -886,6 +868,7 @@ func checkNamespaceStatusHandler(ctx *gin.Context) {
 	}
 	ns, err := getNamespaceByPrefix(req.Prefix)
 	if err != nil || ns == nil {
+		log.Errorf("Error in getNamespaceByPrefix with prefix %s. %v", req.Prefix, err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Error getting namespace"})
 		return
 	}
@@ -895,28 +878,28 @@ func checkNamespaceStatusHandler(ctx *gin.Context) {
 	if ns.AdminMetadata != emptyMetadata {
 		// Caches
 		if strings.HasPrefix(req.Prefix, "/caches") && param.Registry_RequireCacheApproval.GetBool() {
-			res := checkStatusRes{Approved: ns.AdminMetadata.Status == Approved}
+			res := common.CheckNamespaceStatusRes{Approved: ns.AdminMetadata.Status == Approved}
 			ctx.JSON(http.StatusOK, res)
 			return
 		} else if !param.Registry_RequireCacheApproval.GetBool() {
-			res := checkStatusRes{Approved: true}
+			res := common.CheckNamespaceStatusRes{Approved: true}
 			ctx.JSON(http.StatusOK, res)
 			return
 		} else {
 			// Origins
 			if param.Registry_RequireOriginApproval.GetBool() {
-				res := checkStatusRes{Approved: ns.AdminMetadata.Status == Approved}
+				res := common.CheckNamespaceStatusRes{Approved: ns.AdminMetadata.Status == Approved}
 				ctx.JSON(http.StatusOK, res)
 				return
 			} else {
-				res := checkStatusRes{Approved: true}
+				res := common.CheckNamespaceStatusRes{Approved: true}
 				ctx.JSON(http.StatusOK, res)
 				return
 			}
 		}
 	} else {
 		// For legacy Pelican (<=7.3.0) registry schema without Admin_Metadata
-		res := checkStatusRes{Approved: true}
+		res := common.CheckNamespaceStatusRes{Approved: true}
 		ctx.JSON(http.StatusOK, res)
 	}
 }

@@ -85,25 +85,26 @@ func (i *uint16Value) String() string { return strconv.FormatUint(uint64(*i), 10
 func Execute() error {
 	egrp, egrpCtx := errgroup.WithContext(context.Background())
 	ctx := context.WithValue(egrpCtx, config.EgrpKey, egrp)
-	err := rootCmd.ExecuteContext(ctx)
-	if err != nil {
-		log.Errorln("Fatal error occurred at the start of the program:", err)
-		return err
+	exeErr := rootCmd.ExecuteContext(ctx)
+	if exeErr != nil {
+		log.Errorln("Fatal error occurred at the start of the program. Cleanup started:", exeErr)
 	}
-	// Wait until all goroutines in errgroup return
-	err = egrp.Wait()
-	if err == launchers.ErrExitOnSignal {
+	// Wait until all goroutines in errgroup finish their clean up
+	egrpErr := egrp.Wait()
+	if egrpErr == launchers.ErrExitOnSignal {
 		fmt.Println("Pelican is safely exited")
 		return nil
-	} else if err == launchers.ErrRestart {
+	} else if egrpErr == launchers.ErrRestart {
 		fmt.Println("Restarting server...")
 		return restartProgram()
 	}
-	if err != nil {
-		log.Errorln("Fatal error occurred that lead to the shutdown of the process:", err)
-		return err
+	// Other errors we got from the errogroup
+	if egrpErr != nil {
+		log.Errorln("Fatal error occurred that lead to the shutdown of the process:", egrpErr)
+		return egrpErr
+	} else {
+		return exeErr
 	}
-	return nil
 }
 
 func restartProgram() error {
