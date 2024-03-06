@@ -65,7 +65,15 @@ jobs:
     strategy:
       fail-fast: False
       matrix:
-        image: [cache, origin, director, registry, osdf-cache, osdf-origin, osdf-director, osdf-registry]
+        image:
+          - cache
+          - origin
+          - director
+          - registry
+          - osdf-cache
+          - osdf-origin
+          - osdf-director
+          - osdf-registry
     runs-on: ubuntu-latest
 
     steps:
