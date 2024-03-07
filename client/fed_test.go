@@ -742,12 +742,12 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 		tmpDir := t.TempDir()
 		transferDetailsDownload, err := client.DoGet(ctx, uploadURL, tmpDir, true, client.WithTokenLocation(tempToken.Name()))
 		assert.NoError(t, err)
-		if err == nil && len(transferDetailsUpload) == 2 {
+		if err == nil && len(transferDetailsDownload) == 2 {
 			countBytesUploadIdx0 := 0
 			countBytesUploadIdx1 := 0
 			// Verify we got the correct files back (have to do this since files upload in different orders at times)
 			// In this case, we want to match them to the sizes of the uploaded files
-			for _, transfer := range transferDetailsUpload {
+			for _, transfer := range transferDetailsDownload {
 				transferredBytes := transfer.TransferredBytes
 				switch transferredBytes {
 				case transferDetailsUpload[0].TransferredBytes:
@@ -768,8 +768,11 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 			contents, err := os.ReadFile(filepath.Join(tmpDir, path.Join(dirName, path.Base(tempFile2.Name()))))
 			assert.NoError(t, err)
 			assert.Equal(t, testFileContent2, string(contents))
+			contents, err = os.ReadFile(filepath.Join(tmpDir, path.Join(dirName, path.Base(tempFile1.Name()))))
+			assert.NoError(t, err)
+			assert.Equal(t, testFileContent1, string(contents))
 		} else if err == nil && len(transferDetailsDownload) != 2 {
-			t.Fatalf("Amount of transfers results returned for download was not correct. Transfer details returned: %d", len(transferDetailsDownload))
+			t.Fatalf("Number of transfers results returned for download was not correct. Transfer details returned: %d", len(transferDetailsDownload))
 		}
 	})
 

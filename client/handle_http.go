@@ -1200,7 +1200,11 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 		var serverVersion string
 		attempt.Number = idx // Start with 0
 		attempt.Endpoint = transferEndpoint.Url.Host
-		transferEndpoint.Url.Path = transfer.remoteURL.Path
+		// Make a copy of the transfer endpoint URL; otherwise, when we mutate the pointer, other parallel
+		// workers might download from the wrong path.
+		transferEndpointUrl := *transferEndpoint.Url
+		transferEndpointUrl.Path = transfer.remoteURL.Path
+		transferEndpoint.Url = &transferEndpointUrl
 		transferStartTime := time.Now()
 		if downloaded, timeToFirstByte, serverVersion, err = downloadHTTP(transfer.ctx, transfer.engine, transfer.callback, transferEndpoint, transfer.localPath, transfer.token, &transfer.accounting); err != nil {
 			log.Debugln("Failed to download:", err)
