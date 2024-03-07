@@ -44,6 +44,8 @@ To run the latest pelican cache server, run the following command:
 docker run -it -p 8444:8444 -p 8442:8442 --name=pelican-cache hub.opensciencegrid.org/pelican_platform/cache:latest serve
 ```
 
+> Note that Pelican docker image currently does not support binding a directory on your host machine as the directory for Pelican cache to store cache files, i.e. using `-v /host/machine:/run/pelican/cache/location`. We will have an update once we officialy support this flow.
+
 ### Run Pelican director server
 
 To run the latest pelican director server, run the following command:
