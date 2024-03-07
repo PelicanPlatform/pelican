@@ -8,9 +8,9 @@ federation, direct client requests to the proper storage server, and manage name
 A Pelican federation requires both a *director* and a *registry* to be set up first before any origin or cache server can join
 the federation or any client can access objects in the federaiton.
 
-## Install Pelican
+## Before Starting
 
-Grab the appropriate binary for your system from the [pelican repository](https://github.com/PelicanPlatform/pelican/releases). For more details, see [the installation instructions](/install.mdx).
+If you haven't install Pelican, follow the instructions to [install pelican](/install.mdx).
 
 ## Prepare TLS Credentials
 
@@ -109,7 +109,7 @@ The homepage of the registry web UI is also publicly accessible, meaning users c
 
 ### Useful Configurations for the Registry
 
-There are a couple of configuration parameters you could use to customize the behavior of your registry. Here we highlight the ones that are most frequently set for an admin. You may refer to the full set of registry parameters in the [Parameters page](https://docs.pelicanplatform.org/parameters#Registry-DbLocation).
+There are a couple of configuration parameters you could use to customize the behavior of your registry. Here we highlight the ones that are most frequently set for an admin. You may refer to the full set of registry parameters in the [Parameters page](./parameters.mdx#Registry-DbLocation).
 
 #### `Registry.AdminUsers`
 
@@ -198,7 +198,7 @@ The "Origins" table and "Caches" table show the *active* origins and caches in t
 
 ### Useful Configurations for Director
 
-There are a couple of configuration parameters you could use to customize the behavior of your registry. Here we highlight the ones that are most frequently set for an admin. You may refer to the full set of director parameters in the [Parameters page](https://docs.pelicanplatform.org/parameters#Director-DefaultResponse).
+There are a couple of configuration parameters you could use to customize the behavior of your registry. Here we highlight the ones that are most frequently set for an admin. You may refer to the full set of director parameters in the [Parameters page](../parameters.mdx#Director-DefaultResponse).
 
 #### `Director.DefaultResponse`
 
