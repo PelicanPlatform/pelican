@@ -2,83 +2,178 @@ import ExportedImage from "next-image-export-optimizer";
 
 # Serve a Pelican Origin
 
-The [Pelican](http://pelicanplatform.org/) *Origin* is the service to connect your data to the data federation. It acts like an adapter plug to your data store, which means it does **NOT** hold any data itself. Rather, it takes your storage backend, such as a POSIX file system or S3 buckets, does the dirty work of communicating with Pelican federation, and exposes your data to federation memebers.
+The [Pelican](http://pelicanplatform.org/) *Origin* connects your data to a Pelican data federation to allow data sharing. It acts like an adapter plug to your data store, which means it does **NOT** hold any data itself. Rather, it takes your storage backend, such as a POSIX file system or S3 buckets, does the dirty work of communicating with a Pelican federation, and exposes your data to federation memebers. You will have fine-grind control of how your data can be accessed with Pelican.
 
-To achieve high performance data transfer in-and-out-of your data store, Pelican depends on [XRootD (eXtended ROOT Daemon)](https://github.com/xrootd/xrootd), a software initiated from High Energy Physics (HEP) community and widely used by the larger science community to handle massive data distribution. Pelican uses XRootD as the tool to transfer your data.
+This document contains instructions on how to serve a Pelican origin.
 
-Follow these steps to install and run a Pelican Origin.
+## Before Starting
 
-## Installing XRootD
+### Install Pelican
 
-Before starting the installation process, consider the following points:
+If you haven't install Pelican, follow the instructions to [install pelican](/install.mdx).
 
--   **User IDs:** If it does not exist already, the installation will create the Linux user ID `xrootd`
--   **Service certificate:** The XRootD service uses a host certificate and key pair at
-    `/etc/grid-security/xrd/xrdcert.pem` and `/etc/grid-security/xrd/xrdkey.pem` that must be owned by the `xrootd` user
--   **Networking:** The XRootD service uses port 8443 by default
+For _Linux_ users, it is recommended to install Pelican using one of the package managers (RPM, APK, Deb, etc.) so that Pelican dependecies are automatically handled. You may run a [Pelican docker image](./install/docker.mdx) to serve a Pelican origin.
+If you prefer to install Pelican as a standalone binary, you need to follow [additional instructions](https://osg-htc.org/docs/data/xrootd/install-standalone/#install-xrootd-standalone) to install dependencies for the Pelican origin server.
 
-### OSG Specific Tips
+> Note that serving a Pelican origin with a standalone Pelican binary is possible, but not recommended or supported.
 
-The following tips are optional and are specific to OSG installation. If you do not install Pelican Origin for OSG, skip to [Installing XRootD](https://docs.pelicanplatform.org/serving_an_origin#installing-xrootd)
+For _macOS_ and _Windows_ users who want to serve a Pelican origin, please use [Pelican docker image](./install/docker.mdx).
 
-As with all OSG software installations, there are some one-time (per host) steps to prepare in advance:
+### Open Firewall Port for Pelican Origin
 
--   Ensure the host has [a supported operating system](https://osg-htc.org/docs/release/supported_platforms/)
--   Obtain root access to the host
--   Prepare [the required Yum repositories](https://osg-htc.org/docs/common/yum/)
--   Install [CA certificates](https://osg-htc.org/docs/common/ca/)
+Pelican origin server listens to two TCP ports for file transfers and Web UI. By default, the file transfer port is at `8443` and the Web UI and APIs port is at `8444`. If your server has firewall policy in place, please open the two ports for both incoming the outgoing TCP requests to allow Pelican origin functions as expected.
 
-**Enabling multi-user support**
+You may change the port numbers through the [configuration file](./parameters.mdx) with parameter [`Origin.Port`](./parameters.mdx#Origin-Port) and [`Server.WebPort`](./parameters.mdx#Server-WebPort) respectively.
 
-> Using XRootD-Multiuser with a VOMS FQAN requires mapping the FQAN to a username, which requires a `voms-mapfile`.
-Support is available in `xrootd-voms 5.4.2-1.1`, in the OSG 3.6 repos, though it is expected in XRootD 5.5.0.
-If you want to use multiuser, ensure you are getting `xrootd-voms` from the OSG repos.
+> If it is not possible for you to expose any port through the firewall, Pelican has a special feature called _Connection Broker_, where it allows you to serve a Pelican origin without a public-accessible port and any TLS credential files in place. However, this is an experimental feature and requires the Pelican federation you are joining to be compatible. If you are interested in learning more about _Connection Broker_, please contact help@pelicanplatform.org for further instructions.
 
+### Prepare TLS Credentials
 
-### Installing XRootD
+Pelican servers use `https` for serving its web UI and handling internal http requests. `https` requires a set of credential files in place to work, including:
 
-Run the following command:
+- A valid TLS certificate
+- The private key associated with the certificate
+- The Intermediate Certificate or the chain file, that establishes the trust chain to a root certificate
 
-```console
-root@xrootd-standalone # yum install osg-xrootd-standalone
-```
+> For local development and testing, you may skip setting up TLS credentials by setting configuration parameter `TLSSkipVerify` to `true`. You should **NOT** set this for production.
 
-## Installing Pelican
+You need to contact a Certificate Authority (CA) who owns the root certificate for getting these credentials. One popular CA that provides free TLS certificates is [Let's Encrypt](https://letsencrypt.org/). You may follow [their guide](https://letsencrypt.org/getting-started/) to obtain the credentials listed above. **Note that you need to have a valid domain before proceeding.**
 
-Grab the appropriate binary for your system from the [pelican repository](https://github.com/PelicanPlatform/pelican/releases). For more details, see [the client installation instructions](/install.mdx)
+Once you go through the process, locate your credential files and set the following parameters to the file locations, or copy the credential files to the default locations of the parameters:
 
-## Serving an Origin
+- `Server.TLSCertificate`
+  - The certicate file from Let's Encrypt (or another CA), usually named as `example.com.crt` or `example.com.pem`
+  - Default location: `~/.config/pelican/certificates/tls.crt` for non-root users or `/etc/pelican/certificates/tls.crt` for root users.
 
-### Register the origin with the namespace-registry
+- `Server.TLSKey`
+  - The private key corresponding to the TLS certificate, usually named as `example.com.key`.
+  - Default location: `~/.config/pelican/certificates/tls.key` for non-root users or `/etc/pelican/certificates/tls.key` for root users.
 
-Before serving an origin, you need to register the origin with the namespace-registry. This can be done by running
+- `Server.TLSCACertificateFile`
+  - The intermediate certificate from Let's Encrypt to establish the trust chain to a root certificate, usually named as `letsencrypt-intermediate.pem` or `chain.pem`
+  - Default location: `~/.config/pelican/certificates/tlsca.pem` for non-root users or `/etc/pelican/certificates/tlsca.pem` for root users.
 
-```pelican namespace register --prefix <namespace prefix> --namespace-url <registry url>```
+Since your TLS certificate is associated with your domain name, you will need to change the default hostname of Pelican server to be consistent. Set `Server.Hostname` to your domain name (e.g. `example.com`).
 
-Where `<namespace_prefix>` is a namespace prefix associated with the origin and `<registry url>` is the url of the namespace registry. This gives the registry the public key for the origin, and makes that public key available to all of the other services in the federation for verifying tokens
+## Serve an Origin
 
+> If you are running Pelican docker image to serve an origin, please refer to the [docker image documentation](./install/docker.mdx#run-pelican-origin-server).
 
-### Running Origin Serve
+### Find the federation to join in
+
+Before serving an origin, you need to find a Pelican federation to join in. If you are unfamiliar with the term **federation**, refer to [Useful Terminology](./client-usage.mdx#useful-terminology) before proceeding.
+
+If you don't have a federation in mind, Open Science Data Federation (OSDF) is an example Pelican federation that you can join in for testing purposes. If you are interesting in serving an OSDF origin, refer to the [OSDF website](https://osg-htc.org/) for details.
+
+The federation discovery URL for OSDF is `osg-htc.org`. You may use this as your `<federation>` argument in the next section when launching your origin.
+
+### Launch the Origin
 
 To launch a pelican origin, run:
 
-```./pelican origin serve -f <federation> -v <local_directory>:<namespace_prefix>```
+```pelican origin serve -f <federation> -v <local_directory>:<namespace_prefix>```
 
-Where `<federation>` is the address of the federation the origin will be a part of, `<local directory>` is the directory containing objects to be exported to the federation, and `<namespace prefix>` is the namespace at which files from `<local directory>` will be made available in the federation.
+Where:
+
+* `<federation>` is the URL to the federation the origin will be joining in
+* `<local_directory>` is the directory containing objects to be exported to the federation
+* `<namespace_prefix>` is the namespace at which files from `<local directory>` will be made available in the federation.
+
+This will start Pelican origin as a daemon process.
 
 The first time the origin is started, you will see something that looks like the following:
 
+```console
+$ pelican origin serve -f osg-htc.org -v $PWD:/demo
 
-<ExportedImage width={1000} height={1000} src={"/pelican/origin_start.png"} alt={"Image of an origin startup terminal prompt with the initializaiton code"} />
+Pelican admin interface is not initialized
+To initialize, login at https://localhost:8444/view/initialization/code/ with the following code:
+551220
+```
 
-To initialize the admin interface (to see the metrics), go to the website specified (in this example replace `977d77de9b9d` with `localhost`).
+## Login to Admin Website
 
-You will see a warning that looks like the following (with some differences with respect to the browser):
+The next step is to initialize the website for admin to management the origin. Go to the URL specified in the terminal above. By default, it should point to https://localhost:8444/view/initialization/code/
+
+You will be directed to the page to activate the website with a one-time passcode. Copy the passcode from the terminal where you launch Pelican origin and paste to the website to finish activation.
+
+<ExportedImage src={"/pelican/origin-otp.png"} alt={"Screenshot of Pelican website activation page"} />
+
+In our case, it's `551220` from the example terminal above.
+
+> Note that your one-time passcode will be different from the example.
+
+> Also note that the one-time passcode will be refreshed every one minute. Find the latest passcode in the terminal before proceeding.
+
+### Set up password for the admin
+
+After activating the website, you will be redirected to set up the password for the admin account. Type your password and re-type again to confirm.
+
+<ExportedImage src={"/pelican/origin-setup-password.png"} alt={"Screenshot of Pelican website reset password page"} />
+
+### Visit origin dashboard page
+
+Once confirming the new password, you will be redirected to the dashboard page of the origin website.
+
+<ExportedImage src={"/pelican/origin-dashboard.png"} alt={"Screenshot of Pelican origin website dashboard page"} />
+
+Where the graph on the right-side visualizes the file transfer metrics that records the transfer **speed** for both receiving (rx) and transmitting (tx) data. You may change the time range of the graph by changing the **Reporting Period** and **Gragh Settings**.
+
+> Note that the graph can be empty at the server start, as it takes a couple of minutes to collect the first data. Refresh the page after the origin server runs for 5 minutes and you should start to see data points coming.
+
+The **Status** panel shows the health status of the origin by different components.
+
+* **Director** status indicates if the origin can advertise itself to the director, so that the direct can redirect file access from the client to the origin server.
+* **Federation** status indicates if the origin can fetch metadata from the federation URL endpoint to know where each federation server is located (director and registry)
+* **Web UI** status indicates if the admin website is successfully launched.
+* **XRootD** status indicates if the underlying file transfer software that Pelican uses is functioning.
+
+The **Data Exports** panel lists the currently exported directory on the host machine and their corresponding namespace prefix for Pelican.
+
+The **Federation Overview** panel lists the links to various federation services (director, registry, etc.). Note that the link to **Discovery** item is the endpoint where the metadata of a federation is located.
+
+### For local deployment
+
+When you hit the URL at https://localhost:8444/view/initialization/code/, You will see a warning that looks like the following (with some differences with respect to the browser):
 
 <ExportedImage width={1000} height={1000} src={"/pelican/invalid_certificate.png"} alt={"Image of a safari browser invalid certificate warning"} />
 
-Proceed despite the warning to get to the code entry page. Enter the code specified in the terminal and create a root metrics password. You should now see a webpage that looks like so:
+The warning is due to the fact that Pelican servers by default use `https` for network requests, which requires a set of TLS certificates to secure the connection between the server and the browser. If you don't have TLS certifacates configured and turned on `TLSSkipVerify` configuration parameter. Pelican origin will generate a set of self-signed TLS certifacates that are not trusted by the browser. However, it's OK to proceed with the warning for local deployment.
 
-<ExportedImage width={1000} height={1000} src={"/pelican/metrics_view.png"} alt={"Image of prometheus metrics graphs for a Pelican origin"} />
+## Test Origin Functionality
 
-This will refresh every 10 minutes with the xrootd health metrics so that, as an admin, you can check the status of your origin.
+Once you have your origin set up, follow the steps below to test if your origin can serve a file through a Pelican federation.
+
+1. Create a test file under the directory on your host machine that binds to a Pelican namespace. This the `<local_directory>` in `-v <local_directory>:<namespace_prefix>` argument when you run the Pelican origin. Assuming your directory is `/tmp/demo`, run the following command to create a test file named `testfile.txt` under `/tmp/demo`
+
+    ```bash
+    echo "This is a test file.\n" > /tmp/demo/testfile.txt
+    ```
+
+2. In a **seprate terminal**, run the following command to get the data from your origin through the Pelican federation
+
+    ```
+    $ cd ~
+    $ pelican object get -f <federation> <namespace_prefix>/testfile.txt .
+    ```
+
+      Where:
+      * `cd ~` switches the working directory to your `home` direcotry
+      * `<federation>` is the same URL you pass to `-f` argument when running the origin
+      * `<namespace_prefix>` is the `-v <local_directory>:<namespace_prefix>` argument when running the origin.
+
+    You should see the output like the following:
+
+    ```console
+    $ pelican object get -f <federation> /demo/testfile.txt .
+    testfile.txt 36.00 b / 36.00 b [=============================================================================================] Done!
+    ```
+
+3. Confirm the file content by running:
+
+    ```bash
+    $ cat testfile.txt
+    This is a test file.
+    ```
+
+Congratulations! Your have finished setting up and running your origin.

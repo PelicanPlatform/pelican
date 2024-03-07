@@ -10,35 +10,13 @@ the federation or any client can access objects in the federaiton.
 
 ## Before Starting
 
+### Install Pelican
+
 If you haven't install Pelican, follow the instructions to [install pelican](/install.mdx).
 
-## Prepare TLS Credentials
+### Prepare TLS Credentials
 
-Pelican servers use `https` for serving its web UI and handling internal http requests. `https` requires a set of credential files in place to work, including:
-
-- A valid TLS certificate
-- The private key associated with the certificate
-- The Intermediate Certificate or the chain file, that establishes the trust chain to a root certificate
-
-> For local development and testing, you may skip setting up TLS credentials by setting configuration parameter `TLSSkipVerify` to `true`. You should **NOT** set this for production.
-
-You need to contact a Certificate Authority (CA) who owns the root certificate for getting these credentials. One popular CA that provides free TLS certificates is [Let's Encrypt](https://letsencrypt.org/). You may follow [their guide](https://letsencrypt.org/getting-started/) to obtain the credentials listed above. **Note that you need to have a valid domain before proceeding.**
-
-Once you go through the process, locate your credential files and set the following parameters to the file locations, or copy the credential files to the default locations of the parameters:
-
-- `Server.TLSCertificate`
-  - The certicate file from Let's Encrypt (or another CA), usually named as `example.com.crt` or `example.com.pem`
-  - Default location: `~/.config/pelican/certificates/tls.crt` for non-root users or `/etc/pelican/certificates/tls.crt` for root users.
-
-- `Server.TLSKey`
-  - The private key corresponding to the TLS certificate, usually named as `example.com.key`.
-  - Default location: `~/.config/pelican/certificates/tls.key` for non-root users or `/etc/pelican/certificates/tls.key` for root users.
-
-- `Server.TLSCACertificateFile`
-  - The intermediate certificate from Let's Encrypt to establish the trust chain to a root certificate, usually named as `letsencrypt-intermediate.pem` or `chain.pem`
-  - Default location: `~/.config/pelican/certificates/tlsca.pem` for non-root users or `/etc/pelican/certificates/tlsca.pem` for root users.
-
-Since your TLS certificate is associated with your domain name, you will need to change the default hostname of Pelican server to be consistent. Set `Server.Hostname` to your domain name (e.g. `example.com`).
+Pelican servers use `https` for serving its web UI, handling file transfer requests and internal http requests. `https` requires a set of credential files in place to work. For details to set up the TLS credentials, refer to the [documentation in Serve an Origin](./serving_an_origin.mdx#prepare-tls-credentials).
 
 ## Serve a Registry
 
@@ -72,9 +50,9 @@ To run the registry without CILogon credentials, create two files named `/etc/pe
 Note that, by doing this, when users attempt to use `CILogon` to login to the registry they will get an error page from `CILogon` and it's only possible to login using admin password.
 
 
-### Finish Setup
+### Launch the Registry
 
-That's it! Now you can serve the registry by running the following command:
+That's it! Now you can launch the registry by running the following command:
 
 ```bash
 pelican registry serve
@@ -93,7 +71,7 @@ To initialize, login at https://<hostname>:8444/view/initialization/code/ with t
 By default, a registry runs on port `8444`. You may change the port number by passing `-p <port>` when serving
 the registry or by setting `Server.WebPort` in the configuration file.
 
-Now you want to initialize the admin account for your registry web UI. You may refer to https://docs.pelicanplatform.org/serving_an_origin#running-origin-serve for details.
+Now you want to initialize the admin account for your registry web UI. You may refer to [Login to Admin Website](./serving_an_origin.mdx#login-to-admin-website) for details.
 
 Once you finish the initialization, you should be able to see the following page as an admin user (lists are expected to be empty at a fresh start):
 
@@ -171,9 +149,9 @@ You may supply your own endpoint to provide such information or the Pelican dire
 
 This can be done by setting `Federation.DiscoveryUrl` of your *origins* and *caches* to the public url of your director, i.e. `https://<your-director-hostname>:<director-web-port>`. Make sure your director is up and running before starting your origins and caches.
 
-### Finish Setup
+### Launch the Director
 
-That's it! Now you can serve the director by running the following command:
+That's it! Now you can launch the director by running the following command:
 
 ```bash
 pelican director serve
@@ -190,7 +168,7 @@ To initialize, login at https://<hostname>:8444/view/initialization/code/ with t
 By default, a director runs on port `8444`. You may change the port number by passing `-p <port>` when serving
 the director or by setting `Server.WebPort` in the configuration file.
 
-To finish setting up the web UI for the director, please refer to the previous section in the registry. Once finished the initialization and login with your admin password, you should be able to see the following page as an admin user (lists are expected to be empty at a fresh start):
+To finish setting up the web UI for the director, please refer to [Login to Admin Website](./serving_an_origin.mdx#login-to-admin-website) for details. Once finished the initialization and login with your admin password, you should be able to see the following page as an admin user (lists are expected to be empty at a fresh start):
 
 <ExportedImage src={"/pelican/director-homepage.png"} alt={"Image of director homepage in admin view"} />
 
