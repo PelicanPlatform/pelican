@@ -6,6 +6,16 @@ import {FormProps} from "@/components/Config/ObjectField/ObjectField";
 import {StringField, SelectField, BooleanField} from "@/components/Config";
 import {ObjectField, OptionForm} from "@/components/Config/ObjectField";
 
+const verifyForm = (x: CustomRegistrationField) => {
+    return (
+        x.name != "" &&
+        x.type as string != "" &&
+        x.description != "" &&
+        x.validationurl != "" &&
+        (x.type != "enum" || x.optionurl != "" || ( x.options && x.options.length > 0 ))
+    )
+}
+
 const CustomRegistrationFieldForm = ({ onSubmit, value }: FormProps<CustomRegistrationField>) => {
 
     const [name, setName] = React.useState<string>(value?.name || "")
@@ -13,8 +23,8 @@ const CustomRegistrationFieldForm = ({ onSubmit, value }: FormProps<CustomRegist
     const [required, setRequired] = React.useState<boolean>(value?.required || false)
     const [options, setOptions] = React.useState<Option[]>(value?.options || [])
     const [description, setDescription] = React.useState<string>(value?.description || "")
-    const [validationUrl, setValidationUrl] = React.useState<string>(value?.validationUrl || "")
-    const [optionUrl, setOptionUrl] = React.useState<string>(value?.optionUrl || "")
+    const [validationUrl, setValidationUrl] = React.useState<string>(value?.validationurl || "")
+    const [optionUrl, setOptionUrl] = React.useState<string>(value?.optionurl || "")
 
     const submitHandler = (event: React.FormEvent<HTMLFormElement>) => {
         event.preventDefault();
@@ -27,6 +37,11 @@ const CustomRegistrationFieldForm = ({ onSubmit, value }: FormProps<CustomRegist
             validationUrl: validationUrl,
             optionUrl: optionUrl
         }
+
+        if(!verifyForm(value)) {
+            return
+        }
+
         onSubmit(value);
     }
 

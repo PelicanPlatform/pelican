@@ -4,6 +4,11 @@ import {Box, Button, TextField} from "@mui/material";
 
 import {FormProps, ModalProps} from "@/components/Config/ObjectField/ObjectField";
 import {StringField} from "@/components/Config";
+
+const verifyForm = (x: Option) => {
+    return x.id != "" && x.name != ""
+}
+
 const OptionForm = ({ onSubmit, value }: FormProps<Option>) => {
 
     const [id, setId] = React.useState<string>(value?.id || "")
@@ -14,6 +19,11 @@ const OptionForm = ({ onSubmit, value }: FormProps<Option>) => {
             id: id,
             name: name
         }
+
+        if(!verifyForm(option)) {
+            return
+        }
+
         onSubmit(option);
     }
 

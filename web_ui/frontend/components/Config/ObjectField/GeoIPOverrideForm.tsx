@@ -4,14 +4,16 @@ import {Box, Button, TextField, Typography} from "@mui/material";
 
 import {FormProps, ModalProps} from "@/components/Config/ObjectField/ObjectField";
 import {StringField} from "@/components/Config";
+import {verifyIpAddress, verifyLongitude} from "@/components/Config/util";
 
-const verify = (x: GeoIPOverride) => {
-
+const verifyForm = (x: GeoIPOverride) => {
+    if(verifyIpAddress(x.ip) || verifyLongitude(x.coordinate.lat) || verifyLongitude(x.coordinate.long)) {
+        return false
+    }
+    return true
 }
 
 const GeoIPOverrideForm = ({ onSubmit, value }: FormProps<GeoIPOverride>) => {
-
-    const [error, setError] = React.useState<string | undefined>(undefined)
 
     const submitHandler = (event: React.FormEvent<HTMLFormElement>) => {
         event.preventDefault();
@@ -24,23 +26,22 @@ const GeoIPOverrideForm = ({ onSubmit, value }: FormProps<GeoIPOverride>) => {
                 long: formData.get("longitude") as string
             }
         }
+
+        if(!verifyForm(value)) {
+            return
+        }
+
         onSubmit(value);
     }
 
     return (
         <form onSubmit={submitHandler}>
-            { error != undefined &&
-                <Typography variant={"subtitle2"}>{error}</Typography>
-            }
             <Box my={2}>
                 <StringField
                     onChange={() => {}}
                     name={"IP"}
                     value={value?.ip}
-                    verify={(x: string) => {
-                        const isValid = /^(?:(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\.(?!$)|$)){4}$/.test(x)
-                        return isValid ? undefined : "Invalid IP Address"
-                    }}
+                    verify={verifyIpAddress}
                 />
             </Box>
             <Box mb={2}>
@@ -48,10 +49,7 @@ const GeoIPOverrideForm = ({ onSubmit, value }: FormProps<GeoIPOverride>) => {
                     onChange={() => {}}
                     name={"Latitude"}
                     value={value?.coordinate?.lat}
-                    verify={(x: string) => {
-                        const isValid = /^(\+|-)?(?:90(?:(?:\.0{1,6})?)|(?:[0-9]|[1-8][0-9])(?:(?:\.[0-9]{1,6})?))$/.test(x)
-                        return isValid ? undefined : "Invalid Latitude"
-                    }}
+                    verify={verifyLongitude}
                 />
             </Box>
             <Box mb={2}>
@@ -59,10 +57,7 @@ const GeoIPOverrideForm = ({ onSubmit, value }: FormProps<GeoIPOverride>) => {
                     onChange={() => {}}
                     name={"Longitude"}
                     value={value?.coordinate?.long}
-                    verify={(x: string) => {
-                        const isValid = /^(\+|-)?(?:180(?:(?:\.0{1,6})?)|(?:[0-9]|[1-9][0-9]|1[0-7][0-9])(?:(?:\.[0-9]{1,6})?))$/.test(x)
-                        return isValid ? undefined : "Invalid Longitude"
-                    }}
+                    verify={verifyLongitude}
                 />
             </Box>
             <Button type={"submit"}>Submit</Button>

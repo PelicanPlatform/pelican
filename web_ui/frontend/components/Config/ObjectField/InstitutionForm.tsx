@@ -3,6 +3,11 @@ import React from "react";
 import {Box, Button, TextField} from "@mui/material";
 
 import {FormProps, ModalProps} from "@/components/Config/ObjectField/ObjectField";
+
+const verifyForm = (x: Institution) => {
+    return x.id != "" && x.name != ""
+}
+
 const InstitutionForm = ({ onSubmit, value }: FormProps<Institution>) => {
 
     const submitHandler = (event: React.FormEvent<HTMLFormElement>) => {
@@ -13,6 +18,11 @@ const InstitutionForm = ({ onSubmit, value }: FormProps<Institution>) => {
             id: formData.get("id") as string,
             name: formData.get("name") as string
         }
+
+        if(!verifyForm(institution)) {
+            return
+        }
+
         onSubmit(institution);
     }
 

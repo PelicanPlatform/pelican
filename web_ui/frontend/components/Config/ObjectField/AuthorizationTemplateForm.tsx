@@ -6,16 +6,27 @@ import {FormProps} from "@/components/Config/ObjectField/ObjectField";
 import {StringField} from "@/components/Config";
 import MultiSelectField from "@/components/Config/MultiSelectField";
 
+const verifyForm = (x: AuthorizationTemplate) => {
+    return x.prefix != "" && x.actions.length > 0
+}
+
 const AuthorizationTemplateForm = ({ onSubmit, value }: FormProps<AuthorizationTemplate>) => {
 
     const [actions, setActions] = React.useState<Action[]>(value?.actions || [])
     const [prefix, setPrefix] = React.useState<string>(value?.prefix || "")
 
-    const submitHandler = () => {
+    const submitHandler = (event: React.FormEvent<HTMLFormElement>) => {
+        event.preventDefault();
+
         const value = {
             actions: actions,
             prefix: prefix
         }
+
+        if(!verifyForm(value)) {
+            return
+        }
+
         onSubmit(value);
     }
 

@@ -1,9 +1,22 @@
-import {Action, IPMapping} from "@/components/Config/index.d";
+import {Action, IPMapping, IPMappingFine} from "@/components/Config/index.d";
 import React from "react";
 import {Box, Button, TextField} from "@mui/material";
 
 import {FormProps} from "@/components/Config/ObjectField/ObjectField";
 import {StringField} from "@/components/Config";
+import {verifyIpAddress} from "@/components/Config/util";
+
+
+const verifySourceIp = (x: string) => {
+    const isValidIp = /^(?:(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\.(?!$)|$)){4}$/.test(x)
+    const isValidAll = x.toLowerCase() == "all"
+    return isValidIp || isValidAll ? undefined : "Must provide IP or 'all'"
+}
+
+const verifyForm = (x: IPMappingFine) => {
+    return verifySourceIp(x.source) == undefined && verifyIpAddress(x.dest) == undefined;
+}
+
 
 const IPMappingForm = ({ onSubmit, value }: FormProps<IPMapping>) => {
 
@@ -27,6 +40,13 @@ const IPMappingForm = ({ onSubmit, value }: FormProps<IPMapping>) => {
             }
         }
 
+        if(!verifyForm({
+            source: source,
+            dest: destination
+        })) {
+            return
+        }
+
         onSubmit(ipMapping);
     }
 
@@ -37,22 +57,15 @@ const IPMappingForm = ({ onSubmit, value }: FormProps<IPMapping>) => {
                     onChange={() => {}}
                     name={"Source"}
                     value={"all" in value ? "all" : value?.source}
-                    verify={(x: string) => {
-                        const isValidIp = /^(?:(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\.(?!$)|$)){4}$/.test(x)
-                        const isValidAll = x.toLowerCase() == "all"
-                        return isValidIp || isValidAll ? undefined : "Must provide IP or 'all'"
-                    }}
+                    verify={verifySourceIp}
                 />
             </Box>
             <Box mb={2}>
                 <StringField
                     onChange={() => {}}
-                    name={"Source"}
+                    name={"Destination"}
                     value={"all" in value ? value.all : value?.dest}
-                    verify={(x: string) => {
-                        const isValid = /^(?:(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\.(?!$)|$)){4}$/.test(x)
-                        return isValid ? undefined : "Invalid IP Address"
-                    }}
+                    verify={verifyIpAddress}
                 />
             </Box>
             <Button type={"submit"}>Submit</Button>

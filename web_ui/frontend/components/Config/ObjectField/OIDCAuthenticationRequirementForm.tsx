@@ -3,6 +3,11 @@ import React from "react";
 import {Box, Button, TextField} from "@mui/material";
 
 import {FormProps} from "@/components/Config/ObjectField/ObjectField";
+
+const verifyForm = (x: OIDCAuthenticationRequirement) => {
+    return x.claim != "" && x.value != ""
+}
+
 const OIDCAuthenticationRequirementForm = ({ onSubmit, value }: FormProps<OIDCAuthenticationRequirement>) => {
 
     const submitHandler = (event: React.FormEvent<HTMLFormElement>) => {
@@ -13,6 +18,11 @@ const OIDCAuthenticationRequirementForm = ({ onSubmit, value }: FormProps<OIDCAu
             claim: formData.get("claim") as string,
             value: formData.get("value") as string
         }
+
+        if(!verifyForm(value)) {
+            return
+        }
+
         onSubmit(value);
     }
 

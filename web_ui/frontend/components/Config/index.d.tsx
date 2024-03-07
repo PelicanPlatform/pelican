@@ -48,9 +48,9 @@ export interface CustomRegistrationField {
     type: FieldType;
     description: string;
     required: boolean;
-    validationUrl?: string;
+    validationurl?: string;
     options?: Option[];
-    optionUrl?: string;
+    optionurl?: string;
 }
 
 export interface OIDCAuthenticationRequirement {

@@ -44,3 +44,18 @@ export const submitConfigChange = async (data: any) => {
     // Throw the server provided error
     throw new Error(`${response.status}: ${responseData['error']}`)
 }
+
+export const verifyIpAddress = (ip: string) => {
+    const isValid = /^(?:(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\.(?!$)|$)){4}$/.test(ip)
+    return isValid ? undefined : "Invalid IP Address"
+}
+
+export const verifyLatitude = (latitude: string) => {
+    const isValid = /^(\+|-)?(?:90(?:(?:\.0{1,6})?)|(?:[0-9]|[1-8][0-9])(?:(?:\.[0-9]{1,6})?))$/.test(latitude)
+    return isValid ? undefined : "Invalid Latitude"
+}
+
+export const verifyLongitude = (longitude: string) => {
+    const isValid = /^(\+|-)?(?:180(?:(?:\.0{1,6})?)|(?:[0-9]|[1-9][0-9]|1[0-7][0-9])(?:(?:\.[0-9]{1,6})?))$/.test(longitude)
+    return isValid ? undefined : "Invalid Longitude"
+}
