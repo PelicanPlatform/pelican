@@ -59,8 +59,9 @@ EOF
 ## Test LocalCache in front of OSDF
 #####################################
 SOCKET_DIR="`mktemp -d -t pelican-citest-XXXXXX`"
-export PELICAN_FILECACHE_SOCKET=$SOCKET_DIR/socket
-export PELICAN_FILECACHE_DATALOCATION=$SOCKET_DIR/data
+export PELICAN_LOCALCACHE_SOCKET=$SOCKET_DIR/socket
+export PELICAN_LOCALCACHE_DATALOCATION=$SOCKET_DIR/data
+export PELICAN_SERVER_ENABLEUI=false
 
 ./pelican serve -d -f osg-htc.org --module localcache &
 PELICAN_PID=$!
@@ -72,7 +73,17 @@ cleanup() {
 }
 trap cleanup EXIT
 
-sleep 1
+for idx in {1..20}; do
+  if [ -e "$SOCKET_DIR/socket" ]; then
+    break
+  fi
+  sleep 0.3
+done
+if [ ! -e "$SOCKET_DIR/socket" ]; then
+  echo "pelican serve never dropped localcache socket"
+  exit 1
+fi
+
 
 NEAREST_CACHE="unix://$SOCKET_DIR/socket" ./stash_plugin -d osdf:///ospool/uc-shared/public/OSG-Staff/validation/test.txt /dev/null
 exit_status=$?
