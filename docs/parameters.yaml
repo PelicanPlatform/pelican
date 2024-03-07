@@ -867,7 +867,7 @@ description: >-
   - "description" will show up in the web UI as helper text to help user understand the field
 type: object
 default: none
-components: ["nsregistry"]
+components: ["registry"]
 ---
 name: Registry.InstitutionsUrl
 description: >-
@@ -897,14 +897,14 @@ description: >-
   Also note that Registry.Institutions will take precedence over this value if both are set.
 type: url
 default: none
-components: ["nsregistry"]
+components: ["registry"]
 ---
 name: Registry.InstitutionsUrlReloadMinutes
 description: >-
   Number of minutes that the Registry.InstitutionsUrl will be reloaded into the TTL cache.
 type: duration
 default: 15m
-components: ["nsregistry"]
+components: ["registry"]
 ---
 name: Registry.RequireCacheApproval
 description: >-
@@ -913,7 +913,7 @@ description: >-
 type: bool
 default: false
 osdf_default: true
-components: ["nsregistry"]
+components: ["registry"]
 ---
 name: Registry.RequireOriginApproval
 description: >-
@@ -923,7 +923,7 @@ description: >-
 type: bool
 default: false
 osdf_default: true
-components: ["nsregistry"]
+components: ["registry"]
 ---
 ############################
 #   Server-level configs   #
