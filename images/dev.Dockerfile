@@ -81,6 +81,9 @@ RUN yum install -y goreleaser npm xrootd-devel xrootd-server-devel xrootd-client
     xrootd-voms xrdcl-http jq procps docker make curl-devel java-17-openjdk-headless git cmake3 gcc-c++ openssl-devel sqlite-devel \
     && yum clean all
 
+# The ADD command with a api.github.com URL in the next couple of sections
+# are for cache-hashing of the external repository that we rely on to build
+# the image
 ADD https://api.github.com/repos/PelicanPlatform/xrdcl-pelican/git/refs/heads/main /tmp/hash-xrdcl-pelican
 
 # Install xrdcl-pelican plugin and replace the xrdcl-http plugin
