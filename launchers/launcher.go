@@ -211,7 +211,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		if err = server_ui.Advertise(ctx, servers); err != nil {
 			return shutdownCancel, err
 		}
-		desiredURL := param.Server_ExternalWebUrl.GetString() + "/api/v1.0/director/origin" + param.Origin_NamespacePrefix.GetString()
+		desiredURL := param.Federation_DirectorUrl.GetString() + "/api/v1.0/director/origin" + param.Origin_NamespacePrefix.GetString()
 		if err = server_utils.WaitUntilWorking(ctx, "GET", desiredURL, "director", 307); err != nil {
 			log.Errorln("Origin does not seem to have advertised correctly:", err)
 			return shutdownCancel, err
