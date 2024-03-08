@@ -71,7 +71,9 @@ The federation discovery URL for OSDF is `osg-htc.org`. You may use this as your
 
 To launch a pelican origin, run:
 
-```pelican origin serve -f <federation> -v <local_directory>:<namespace_prefix>```
+```bash
+pelican origin serve -f <federation> -v <local_directory>:<namespace_prefix>
+```
 
 Where:
 
@@ -90,6 +92,21 @@ Pelican admin interface is not initialized
 To initialize, login at https://localhost:8444/view/initialization/code/ with the following code:
 551220
 ```
+
+### Additional arguments to launch the Origin
+
+This section documents the additional arguments you can pass to the command above to run the origin.
+
+* **-h or --help**: Output documentation on the `serve` command and its arguments.
+* **-m or --mode**: Set the mode for the origin service ('posix'|'s3, default to 'posix').
+* **-p or --port**: Set the port at which the Pelican admin website should be accessible.
+* **--writeable**: A boolean value to allow or disable writting to the origin (default is true).
+
+* **--config**: Set the location of the configuration file.
+* **-d or --debug**: Enable the debugging mode, allowing for more verbose log
+* **-l or --log**: Set the location of the file where log messages should be redirected to and not outputing the the console.
+
+There are other configurations available to modify via the configuration file. Refer to the [Parameters page](./parameters.mdx) for details.
 
 ## Login to Admin Website
 
