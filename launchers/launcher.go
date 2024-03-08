@@ -220,7 +220,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 
 	if modules.IsEnabled(config.CacheType) {
 		// Give five seconds for the origin to finish advertising to the director
-		desiredURL := param.Server_ExternalWebUrl.GetString() + "/.well-known/openid-configuration"
+		desiredURL := param.Federation_DirectorUrl.GetString() + "/.well-known/openid-configuration"
 		if err = server_utils.WaitUntilWorking(ctx, "GET", desiredURL, "director", 200); err != nil {
 			log.Errorln("Director does not seem to be working:", err)
 			return shutdownCancel, err
