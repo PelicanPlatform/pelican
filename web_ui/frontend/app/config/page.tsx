@@ -280,7 +280,10 @@ function Config() {
     const [enabledServers, setEnabledServers] = useState<string[]>([])
     const [configMetadata, setConfigMetadata] = useState<ConfigMetadata|undefined>(undefined)
     const [status, setStatus] = useState<string|undefined>(undefined)
+
+    // Config state managers
     const [toggleRefresh, setToggleRefresh] = useState<boolean>(false)
+    const [configKey, setConfigKey] = useState<number>(0)
 
     const [patch, setPatch] = useState<any>({})
 
@@ -343,6 +346,8 @@ function Config() {
             let success = await getConfig()
             if(!success) {
                 setTimeout(loadConfig, 5000)
+            } else {
+                setConfigKey(configKey + 1)
             }
         }
 
@@ -435,7 +440,7 @@ function Config() {
                                     {
                                         filteredConfig === undefined ?
                                             <Skeleton  variant="rectangular" animation="wave" height={"1000px"}/> :
-                                            <ConfigDisplay id={[]} name={""} value={filteredConfig} level={4} onChange={onChange}/>
+                                            <ConfigDisplay key={configKey.toString()} id={[]} name={""} value={filteredConfig} level={4} onChange={onChange}/>
                                     }
                                 </form>
                                 <Snackbar
@@ -443,20 +448,30 @@ function Config() {
                                     open={!isMatch(config === undefined ? {} : config, patch)}
                                     message="Save Changes"
                                     action={
-                                        <Button
-                                            onClick={async () => {
-                                                try {
-                                                    await submitConfigChange(patch)
+                                        <Box>
+                                            <Button
+                                                onClick={async () => {
+                                                    try {
+                                                        await submitConfigChange(patch)
+                                                        setPatch({})
+                                                        setStatus("Changes Saved, Restarting Server")
+                                                        setTimeout(() => setToggleRefresh(!toggleRefresh), 3000)
+                                                    } catch (e) {
+                                                        setStatus((e as string).toString())
+                                                    }
+                                                }}
+                                            >
+                                                Save
+                                            </Button>
+                                            <Button
+                                                onClick={() => {
                                                     setPatch({})
-                                                    setStatus("Changes Saved, Restarting Server")
-                                                    setTimeout(() => setToggleRefresh(!toggleRefresh), 3000)
-                                                } catch (e) {
-                                                    setStatus((e as string).toString())
-                                                }
-                                            }}
-                                        >
-                                            Save
-                                        </Button>
+                                                    setToggleRefresh(!toggleRefresh)
+                                                }}
+                                            >
+                                                Clear
+                                            </Button>
+                                        </Box>
                                     }
                                 />
                                 {
