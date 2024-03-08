@@ -81,6 +81,8 @@ RUN yum install -y goreleaser npm xrootd-devel xrootd-server-devel xrootd-client
     xrootd-voms xrdcl-http jq procps docker make curl-devel java-17-openjdk-headless git cmake3 gcc-c++ openssl-devel sqlite-devel \
     && yum clean all
 
+ADD https://api.github.com/repos/PelicanPlatform/xrdcl-pelican/git/refs/heads/main /tmp/hash-xrdcl-pelican
+
 # Install xrdcl-pelican plugin and replace the xrdcl-http plugin
 RUN \
     git clone https://github.com/PelicanPlatform/xrdcl-pelican.git && \
@@ -88,6 +90,9 @@ RUN \
     mkdir build && cd build && \
     cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
     make && make install
+
+ADD https://api.github.com/repos/PelicanPlatform/xrootd-s3-http/git/refs/heads/main /tmp/hash-xrootd-s3-http
+
 # Install the S3 and HTTP server plugins for XRootD. For now we do this from source
 # until we can sort out the RPMs.
 RUN \
@@ -96,6 +101,10 @@ RUN \
     mkdir build && cd build && \
     cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
     make install
+
+ADD https://api.github.com/repos/nlohmann/json/git/refs/heads/master /tmp/hash-json
+ADD https://api.github.com/repos/pboettch/json-schema-validator/git/refs/heads/master /tmp/hash-json
+ADD https://api.github.com/repos/PelicanPlatform/lotman/git/refs/heads/main /tmp/hash-json
 
 # LotMan Installation
 # First install dependencies
