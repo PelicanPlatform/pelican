@@ -12,11 +12,11 @@ the federation or any client can access objects in the federaiton.
 
 ### Install Pelican
 
-If you haven't install Pelican, follow the instructions to [install pelican](/install.mdx).
+If you haven't installed Pelican, follow the instructions to [install pelican](/install.mdx).
 
 ### Prepare TLS Credentials
 
-Pelican servers use `https` for serving its web UI, handling file transfer requests and internal http requests. `https` requires a set of credential files in place to work. For details to set up the TLS credentials, refer to the [documentation in Serve an Origin](./serving_an_origin.mdx#prepare-tls-credentials).
+Pelican servers use `https` for serving its web UI, handling file transfer requests and internal http requests. `https` requires a set of credential files in place to work. For details on how to set up the TLS credentials, refer to the [documentation in Serve an Origin](./serving_an_origin.mdx#prepare-tls-credentials).
 
 ## Serve a Registry
 
@@ -168,7 +168,7 @@ To initialize, login at https://<hostname>:8444/view/initialization/code/ with t
 By default, a director runs on port `8444`. You may change the port number by passing `-p <port>` when serving
 the director or by setting `Server.WebPort` in the configuration file.
 
-To finish setting up the web UI for the director, please refer to [Login to Admin Website](./serving_an_origin.mdx#login-to-admin-website) for details. Once finished the initialization and login with your admin password, you should be able to see the following page as an admin user (lists are expected to be empty at a fresh start):
+To finish setting up the web UI for the director, please refer to [Login to Admin Website](./serving_an_origin.mdx#login-to-admin-website) for details. Once you have finished the initialization and login with your admin password, you should be able to see the following page as an admin user (lists are expected to be empty at a fresh start):
 
 <ExportedImage src={"/pelican/director-homepage.png"} alt={"Image of director homepage in admin view"} />
 

@@ -2,7 +2,7 @@ import ExportedImage from "next-image-export-optimizer";
 
 # Serve a Pelican Origin
 
-The [Pelican](http://pelicanplatform.org/) *Origin* connects your data to a Pelican data federation to allow data sharing. It acts like an adapter plug to your data store, which means it does **NOT** hold any data itself. Rather, it takes your storage backend, such as a POSIX file system or S3 buckets, does the dirty work of communicating with a Pelican federation, and exposes your data to federation memebers. You will have fine-grind control of how your data can be accessed with Pelican.
+The [Pelican](http://pelicanplatform.org/) *Origin* connects your data to a Pelican data federation to allow data sharing. It acts like an adapter plug to your data store, which means it does **NOT** hold any data itself. Rather, it takes your storage backend, such as a POSIX file system or S3 buckets, does the dirty work of communicating with a Pelican federation, and exposes your data to federation memebers. You will have fine-grain control of how your data can be accessed with Pelican.
 
 This document contains instructions on how to serve a Pelican origin.
 
@@ -10,9 +10,9 @@ This document contains instructions on how to serve a Pelican origin.
 
 ### Install Pelican
 
-If you haven't install Pelican, follow the instructions to [install pelican](/install.mdx).
+If you haven't installed Pelican, follow the instructions to [install pelican](/install.mdx).
 
-For _Linux_ users, it is recommended to install Pelican using one of the package managers (RPM, APK, Deb, etc.) so that Pelican dependecies are automatically handled. You may run a [Pelican docker image](./install/docker.mdx) to serve a Pelican origin.
+For _Linux_ users, it is recommended to install Pelican using one of the package managers (RPM, APK, Deb, etc.) so that Pelican dependecies are automatically handled. You may also run a [Pelican docker image](./install/docker.mdx) to serve a Pelican origin.
 If you prefer to install Pelican as a standalone binary, you need to follow [additional instructions](https://osg-htc.org/docs/data/xrootd/install-standalone/#install-xrootd-standalone) to install dependencies for the Pelican origin server.
 
 > Note that serving a Pelican origin with a standalone Pelican binary is possible, but not recommended or supported.
@@ -39,7 +39,7 @@ Pelican servers use `https` for serving its web UI and handling internal http re
 
 You need to contact a Certificate Authority (CA) who owns the root certificate for getting these credentials. One popular CA that provides free TLS certificates is [Let's Encrypt](https://letsencrypt.org/). You may follow [their guide](https://letsencrypt.org/getting-started/) to obtain the credentials listed above. **Note that you need to have a valid domain before proceeding.**
 
-Once you go through the process, locate your credential files and set the following parameters to the file locations, or copy the credential files to the default locations of the parameters:
+Once you go through the process, locate your credential files and set the following parameters to the file locations or copy the credential files to the default locations of the parameters:
 
 - `Server.TLSCertificate`
   - The certicate file from Let's Encrypt (or another CA), usually named as `example.com.crt` or `example.com.pem`
@@ -59,11 +59,11 @@ Since your TLS certificate is associated with your domain name, you will need to
 
 > If you are running Pelican docker image to serve an origin, please refer to the [docker image documentation](./install/docker.mdx#run-pelican-origin-server).
 
-### Find the federation to join in
+### Find a federation to join
 
 Before serving an origin, you need to find a Pelican federation to join in. If you are unfamiliar with the term **federation**, refer to [Useful Terminology](./client-usage.mdx#useful-terminology) before proceeding.
 
-If you don't have a federation in mind, Open Science Data Federation (OSDF) is an example Pelican federation that you can join in for testing purposes. If you are interesting in serving an OSDF origin, refer to the [OSDF website](https://osg-htc.org/) for details.
+If you don't have a federation in mind, the Open Science Data Federation (OSDF) is an example Pelican federation that you can join in for testing purposes. If you are interesting in serving an OSDF origin, refer to the [OSDF website](https://osg-htc.org/) for details.
 
 The federation discovery URL for OSDF is `osg-htc.org`. You may use this as your `<federation>` argument in the next section when launching your origin.
 
@@ -79,7 +79,7 @@ Where:
 
 * `<federation>` is the URL to the federation the origin will be joining in
 * `<local_directory>` is the directory containing objects to be exported to the federation
-* `<namespace_prefix>` is the namespace at which files from `<local directory>` will be made available in the federation.
+* `<namespace_prefix>` is the namespace at which files from `<local directory>` will be made available in the federation. Note that a namespace prefix must start with `/`
 
 This will start Pelican origin as a daemon process.
 
@@ -108,6 +108,10 @@ This section documents the additional arguments you can pass to the command abov
 
 There are other configurations available to modify via the configuration file. Refer to the [Parameters page](./parameters.mdx) for details.
 
+### Launch the Origin with an S3 storage backend
+
+Pelican by default launches an origin server with a POSIX storage backend, which accesses files through your operating system. Pelican origin also supports S3 as the storage backend. We are working hard to document how to configure and launch a Pelican origin with an S3 storage backend. If you are currently interested in this approach, please contact help@pelicanplatform.org for further instructions.
+
 ## Login to Admin Website
 
 The next step is to initialize the website for admin to management the origin. Go to the URL specified in the terminal above. By default, it should point to https://localhost:8444/view/initialization/code/
@@ -120,7 +124,7 @@ In our case, it's `551220` from the example terminal above.
 
 > Note that your one-time passcode will be different from the example.
 
-> Also note that the one-time passcode will be refreshed every one minute. Find the latest passcode in the terminal before proceeding.
+> Also note that the one-time passcode will be refreshed every minute. Find the latest passcode in the terminal before proceeding.
 
 ### Set up password for the admin
 
@@ -147,15 +151,15 @@ The **Status** panel shows the health status of the origin by different componen
 
 The **Data Exports** panel lists the currently exported directory on the host machine and their corresponding namespace prefix for Pelican.
 
-The **Federation Overview** panel lists the links to various federation services (director, registry, etc.). Note that the link to **Discovery** item is the endpoint where the metadata of a federation is located.
+The **Federation Overview** panel lists the links to various federation services (director, registry, etc.). Note that the link to the **Discovery** item is the endpoint where the metadata of a federation is located.
 
 ### For local deployment
 
-When you hit the URL at https://localhost:8444/view/initialization/code/, You will see a warning that looks like the following (with some differences with respect to the browser):
+When you hit the URL at https://localhost:8444/view/initialization/code/, You may see a warning that looks like the following (with some differences with respect to the browser):
 
 <ExportedImage width={1000} height={1000} src={"/pelican/invalid_certificate.png"} alt={"Image of a safari browser invalid certificate warning"} />
 
-The warning is due to the fact that Pelican servers by default use `https` for network requests, which requires a set of TLS certificates to secure the connection between the server and the browser. If you don't have TLS certifacates configured and turned on `TLSSkipVerify` configuration parameter. Pelican origin will generate a set of self-signed TLS certifacates that are not trusted by the browser. However, it's OK to proceed with the warning for local deployment.
+The warning is due to the fact that Pelican servers by default use `https` for network requests, which requires a set of TLS certificates to secure the connection between the server and the browser. If you don't have TLS certifacates configured and turned on `TLSSkipVerify` configuration parameter, then the Pelican origin will generate a set of self-signed TLS certifacates that are not trusted by the browser. However, it's OK to proceed with the warning for local deployment.
 
 ## Test Origin Functionality
 
@@ -167,7 +171,7 @@ Once you have your origin set up, follow the steps below to test if your origin 
     echo "This is a test file.\n" > /tmp/demo/testfile.txt
     ```
 
-2. In a **seprate terminal**, run the following command to get the data from your origin through the Pelican federation
+2. In a **seperate terminal**, run the following command to get the data from your origin through the Pelican federation
 
     ```
     $ cd ~
