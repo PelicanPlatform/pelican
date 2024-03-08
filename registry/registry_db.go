@@ -513,7 +513,11 @@ func updateNamespaceStatusById(id int, status RegistrationStatus, approverId str
 	return db.Model(ns).Where("id = ?", id).Update("admin_metadata", string(adminMetadataByte)).Error
 }
 
-func deleteNamespace(prefix string) error {
+func deleteNamespaceByID(id int) error {
+	return db.Delete(&Namespace{}, id).Error
+}
+
+func deleteNamespaceByPrefix(prefix string) error {
 	// GORM by default uses transaction for write operations
 	return db.Where("prefix = ?", prefix).Delete(&Namespace{}).Error
 }
