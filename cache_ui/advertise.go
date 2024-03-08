@@ -60,7 +60,7 @@ func (server *CacheServer) SetFilters() {
 	nsList := param.Cache_PermittedNamespaces.GetStringSlice()
 	// Ensure that each permitted namespace starts with a "/"
 	for _, ns := range nsList {
-		if ns[0] != '/' {
+		if !strings.HasPrefix(ns, "/") {
 			ns = "/" + ns
 		}
 		server.namespaceFilter[ns] = struct{}{}
@@ -69,7 +69,7 @@ func (server *CacheServer) SetFilters() {
 
 func (server *CacheServer) filterAdsBasedOnNamespace(nsAds []common.NamespaceAdV2) []common.NamespaceAdV2 {
 	/*
-	* Filters out ads based on the namespaces listed in server.NamespaceFiler
+	* Filters out ads based on the namespaces listed in server.NamespaceFilter
 	* Note that this does a few checks for trailing and non-trailing "/" as it's assumed that the namespaces
 	* from the director and the ones provided might differ.
 	 */
@@ -79,7 +79,7 @@ func (server *CacheServer) filterAdsBasedOnNamespace(nsAds []common.NamespaceAdV
 			ns := ad.Path
 			sentinel := true
 			//If the final character isn't a '/', add it to the string
-			if ns[len(ns)-1] != '/' {
+			if !strings.HasSuffix(ns, "/") {
 				ns = ns + "/"
 			}
 			for sentinel {
