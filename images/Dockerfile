@@ -57,6 +57,7 @@ RUN useradd -o -u 10940 -g 10940 -s /bin/sh xrootd
 
 # Install dependencies
 RUN yum -y update \
+    && yum -y install https://repo.opensciencegrid.org/osg/23-main/osg-23-main-el8-release-latest.rpm\
     && yum -y install tini xrootd xrootd-client xrdcl-http xrootd-server xrootd-scitokens xrootd-voms curl java-17-openjdk-headless \
     && yum clean all \
     && rm -rf /var/cache/yum/
