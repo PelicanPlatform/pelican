@@ -988,6 +988,44 @@ paths:
           schema:
             type: object
             $ref: "#/definitions/ErrorModel"
+    delete:
+      summary: Delete a namespace registration by ID
+      description: "`Authentication Required` `Admin`
+
+        Only admin users have privilege to this action.
+        "
+      tags:
+        - "registry_ui"
+      produces:
+        - "application/json"
+      parameters:
+        - name: id
+          in: path
+          description: ID of the namespace to update
+          required: true
+          type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+            $ref: "#/definitions/SuccessModel"
+        "400":
+          description: Invalid namespace ID
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "403":
+          description: The user does not have previlege to update the namespace
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "500":
+          description: Internal server error
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+
   /registry_ui/namespaces/{id}/pubkey:
     get:
       tags:
