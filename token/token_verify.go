@@ -20,15 +20,12 @@ package token
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/lestrrat-go/httprc"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
@@ -39,8 +36,8 @@ import (
 )
 
 type (
-	TokenSource int
-	TokenIssuer int
+	TokenSource string
+	TokenIssuer string
 	AuthOption  struct {
 		Sources   []TokenSource
 		Issuers   []TokenIssuer
@@ -48,8 +45,8 @@ type (
 		AllScopes bool
 	}
 	AuthChecker interface {
-		FederationCheck(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScopes bool) error
-		IssuerCheck(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScopes bool) error
+		federationIssuerCheck(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScopes bool) error
+		localIssuerCheck(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScopes bool) error
 	}
 	AuthCheckImpl     struct{}
 	DiscoveryResponse struct { // This is a duplicate from director/authentication to ensure we don't have cyclic import
@@ -59,93 +56,27 @@ type (
 )
 
 const (
-	Header TokenSource = iota // "Authorization" header
-	Cookie                    // "login" cookie
-	Authz                     // "authz" query parameter
+	Header TokenSource = "AuthorizationHeader" // "Authorization" header
+	Cookie TokenSource = "Cookie"              // "login" cookie
+	Authz  TokenSource = "AuthzQueryParameter" // "authz" query parameter
 )
 
 const (
-	Federation TokenIssuer = iota
-	Issuer
+	FederationIssuer TokenIssuer = "FederationIssuer"
+	LocalIssuer      TokenIssuer = "LocalIssuer"
 )
 
 var (
-	federationJWK    *jwk.Cache
-	directorJWK      *jwk.Cache
-	directorMetadata *httprc.Cache
-	authChecker      AuthChecker
+	federationJWK *jwk.Cache
+	authChecker   AuthChecker
 )
 
 func init() {
 	authChecker = &AuthCheckImpl{}
 }
 
-// [Deprecated] This function is expected to be removed very soon, after
-// https://github.com/PelicanPlatform/pelican/issues/559 is implemented
-//
-// Return director's public JWK for token verification. This function can be called
-// on any server (director/origin/registry) as long as the Federation_DirectorUrl is set
-//
-// The director's metadata discovery endpoint and JWKS endpoint are cached
-func LoadDirectorPublicKey() (jwk.Key, error) {
-	directorUrlStr := param.Federation_DirectorUrl.GetString()
-	if len(directorUrlStr) == 0 {
-		return nil, errors.Errorf("Director URL is unset; Can't load director's public key")
-	}
-	log.Debugln("Director's discovery URL:", directorUrlStr)
-	directorUrl, err := url.Parse(directorUrlStr)
-	if err != nil {
-		return nil, errors.Wrap(err, fmt.Sprintln("Invalid director URL:", directorUrlStr))
-	}
-	directorUrl.Scheme = "https"
-	directorUrl.Path = directorUrl.Path + "/.well-known/openid-configuration"
-
-	directorMetadataCtx := context.Background()
-	if directorMetadata == nil {
-		client := &http.Client{Transport: config.GetTransport()}
-		directorMetadata = httprc.NewCache(directorMetadataCtx)
-		if err := directorMetadata.Register(directorUrl.String(), httprc.WithMinRefreshInterval(15*time.Minute), httprc.WithHTTPClient(client)); err != nil {
-			return nil, errors.Wrap(err, "Failed to register httprc cache for director's metadata")
-		}
-	}
-
-	payload, err := directorMetadata.Get(directorMetadataCtx, directorUrl.String())
-	if err != nil {
-		return nil, errors.Wrap(err, "Failed to get director's metadata")
-	}
-
-	metadata := DiscoveryResponse{}
-
-	err = json.Unmarshal(payload.([]byte), &metadata)
-	if err != nil {
-		return nil, errors.Wrap(err, fmt.Sprintln("Failure when parsing director metadata at: ", directorUrl))
-	}
-
-	jwksUri := metadata.JwksUri
-
-	directorJwkCtx := context.Background()
-	if directorJWK == nil {
-		client := &http.Client{Transport: config.GetTransport()}
-		directorJWK = jwk.NewCache(directorJwkCtx)
-		if err := directorJWK.Register(jwksUri, jwk.WithRefreshInterval(15*time.Minute), jwk.WithHTTPClient(client)); err != nil {
-			return nil, errors.Wrap(err, "Failed to register internal JWKS cache for director's public JWKS")
-		}
-	}
-
-	jwks, err := directorJWK.Get(directorJwkCtx, jwksUri)
-	if err != nil {
-		return nil, errors.Wrap(err, "Failed to get director's public JWKS")
-	}
-	key, ok := jwks.Key(0)
-	if !ok {
-		return nil, errors.Wrap(err, fmt.Sprintln("Failure when getting director's first public key: ", jwksUri))
-	}
-
-	return key, nil
-}
-
 // Checks that the given token was signed by the federation jwk and also checks that the token has the expected scope
-func (a AuthCheckImpl) FederationCheck(c *gin.Context, strToken string, expectedScopes []token_scopes.TokenScope, allScopes bool) error {
+func (a AuthCheckImpl) federationIssuerCheck(c *gin.Context, strToken string, expectedScopes []token_scopes.TokenScope, allScopes bool) error {
 	fedURL := param.Federation_DiscoveryUrl.GetString()
 	token, err := jwt.Parse([]byte(strToken), jwt.WithVerify(false))
 
@@ -154,7 +85,7 @@ func (a AuthCheckImpl) FederationCheck(c *gin.Context, strToken string, expected
 	}
 
 	if fedURL != token.Issuer() {
-		return errors.New(fmt.Sprint("Issuer is not a federation: ", token.Issuer()))
+		return errors.New(fmt.Sprintf("Token issuer %s does not match the issuer from the federation. Expecting the issuer to be %s", token.Issuer(), fedURL))
 	}
 
 	fedURIFile := param.Federation_JwkUrl.GetString()
@@ -180,19 +111,15 @@ func (a AuthCheckImpl) FederationCheck(c *gin.Context, strToken string, expected
 
 	scopeValidator := token_scopes.CreateScopeValidator(expectedScopes, allScopes)
 	if err = jwt.Validate(parsed, jwt.WithValidator(scopeValidator)); err != nil {
-		return errors.Wrap(err, "Failed to verify the scope of the token")
+		return errors.Wrap(err, fmt.Sprintf("Failed to verify the scope of the token. Require %v", expectedScopes))
 	}
 
 	c.Set("User", "Federation")
 	return nil
 }
 
-// Checks that the given token was signed by the issuer jwk (the one from the server itself) and also checks that
-// the token has the expected scope
-//
-// Note that this means the issuer jwk MUST be the one server created. It can't be provided by
-// the user if they want to use a different issuer than the server. This can be changed in the future.
-func (a AuthCheckImpl) IssuerCheck(c *gin.Context, strToken string, expectedScopes []token_scopes.TokenScope, allScopes bool) error {
+// Checks that the given token was signed by the local issuer on the server
+func (a AuthCheckImpl) localIssuerCheck(c *gin.Context, strToken string, expectedScopes []token_scopes.TokenScope, allScopes bool) error {
 	token, err := jwt.Parse([]byte(strToken), jwt.WithVerify(false))
 	if err != nil {
 		return errors.Wrap(err, "Invalid JWT")
@@ -201,13 +128,13 @@ func (a AuthCheckImpl) IssuerCheck(c *gin.Context, strToken string, expectedScop
 	serverURL := param.Server_ExternalWebUrl.GetString()
 	if serverURL != token.Issuer() {
 		if param.Origin_Url.GetString() == token.Issuer() {
-			return errors.New(fmt.Sprint("Wrong issuer; expect the issuer to be the server's web address but got Origin.URL, " + token.Issuer()))
+			return errors.New(fmt.Sprintf("Wrong issuer %s; expect the issuer to be the server's web address but got Origin.URL", token.Issuer()))
 		} else {
-			return errors.New(fmt.Sprint("Issuer is not server itself: ", token.Issuer()))
+			return errors.New(fmt.Sprintf("Token issuer %s does not match the local issuer on the current server. Expecting %s", token.Issuer(), serverURL))
 		}
 	}
 
-	// Since whenever this function is called, the IssuerCheck is checking token signature
+	// Since whenever this function is called, the localIssuerCheck is checking token signature
 	// against the server's public key, we can directly get the public key
 	jwks, err := config.GetIssuerPublicJWKS()
 	if err != nil {
@@ -222,7 +149,7 @@ func (a AuthCheckImpl) IssuerCheck(c *gin.Context, strToken string, expectedScop
 
 	scopeValidator := token_scopes.CreateScopeValidator(expectedScopes, allScopes)
 	if err = jwt.Validate(parsed, jwt.WithValidator(scopeValidator)); err != nil {
-		return errors.Wrap(err, "Failed to verify the scope of the token")
+		return errors.Wrap(err, fmt.Sprintf("Failed to verify the scope of the token. Require %v", expectedScopes))
 	}
 
 	c.Set("User", "Origin")
@@ -234,9 +161,8 @@ func (a AuthCheckImpl) IssuerCheck(c *gin.Context, strToken string, expectedScop
 // authOption.Scopes, return true and set "User" context to the issuer if any of the issuer check succeed
 //
 // Scope check will pass if your token has ANY of the scopes in authOption.Scopes
-func CheckAnyAuth(ctx *gin.Context, authOption AuthOption) bool {
+func Verify(ctx *gin.Context, authOption AuthOption) (status int, verfied bool, err error) {
 	token := ""
-	errMsg := ""
 	// Find token from the provided sources list, stop when found the first token
 	tokenFound := false
 	for _, opt := range authOption.Sources {
@@ -247,7 +173,6 @@ func CheckAnyAuth(ctx *gin.Context, authOption AuthOption) bool {
 		case Cookie:
 			cookieToken, err := ctx.Cookie("login")
 			if err != nil || cookieToken == "" {
-				errMsg += fmt.Sprintln("No 'login' cookie present: ", err)
 				continue
 			} else {
 				token = cookieToken
@@ -257,7 +182,6 @@ func CheckAnyAuth(ctx *gin.Context, authOption AuthOption) bool {
 		case Header:
 			headerToken := ctx.Request.Header["Authorization"]
 			if len(headerToken) <= 0 {
-				errMsg += fmt.Sprintln("No Authorization header present")
 				continue
 			} else {
 				token = strings.TrimPrefix(headerToken[0], "Bearer ")
@@ -267,7 +191,6 @@ func CheckAnyAuth(ctx *gin.Context, authOption AuthOption) bool {
 		case Authz:
 			authzToken := ctx.Request.URL.Query()["authz"]
 			if len(authzToken) <= 0 {
-				errMsg += fmt.Sprintln("No Authz query parameter present")
 				continue
 			} else {
 				token = authzToken[0]
@@ -275,45 +198,40 @@ func CheckAnyAuth(ctx *gin.Context, authOption AuthOption) bool {
 				break
 			}
 		default:
-			log.Info("Authentication failed. Invalid/unsupported token source")
-			return false
+			log.Error("Invalid/unsupported token source")
+			return http.StatusInternalServerError, false, errors.New("Cannot verify token due to bad server configuration. Invalid/unsupported token source")
 		}
 	}
 
 	if token == "" {
-		log.Info("Authentication failed. No token is present from the list of potential token positions")
-		return false
+		log.Debugf("Unauthorized. No token is present from the list of potential token positions: %v", authOption.Sources)
+		return http.StatusForbidden, false, errors.New("Authentication is required but no token is present.")
 	}
 
+	errMsg := ""
 	for _, iss := range authOption.Issuers {
 		switch iss {
-		case Federation:
-			err := authChecker.FederationCheck(ctx, token, authOption.Scopes, authOption.AllScopes)
-			if _, exists := ctx.Get("User"); err != nil || !exists {
-				errMsg += fmt.Sprintln("Token validation failed with federation issuer: ", err)
-				log.Debug("Token validation failed with federation issuer: ", err)
+		case FederationIssuer:
+			if err := authChecker.federationIssuerCheck(ctx, token, authOption.Scopes, authOption.AllScopes); err != nil {
+				errMsg += fmt.Sprintln("Cannot verify token with federation issuer: ", err)
 				break
 			} else {
-				log.Debug("Token validation succeeded with federation issuer")
-				return exists
+				return http.StatusOK, true, nil
 			}
-		case Issuer:
-			err := authChecker.IssuerCheck(ctx, token, authOption.Scopes, authOption.AllScopes)
-			if _, exists := ctx.Get("User"); err != nil || !exists {
-				errMsg += fmt.Sprintln("Token validation failed with server issuer: ", err)
-				log.Debug("Token validation failed with server issuer: ", err)
+		case LocalIssuer:
+			if err := authChecker.localIssuerCheck(ctx, token, authOption.Scopes, authOption.AllScopes); err != nil {
+				errMsg += fmt.Sprintln("Cannot verify token with server issuer: ", err)
 				break
 			} else {
-				log.Debug("Token validation succeeded with server issuer")
-				return exists
+				return http.StatusOK, true, nil
 			}
 		default:
-			log.Info("Authentication failed. Invalid/unsupported token issuer")
-			return false
+			log.Error("Invalid/unsupported token issuer")
+			return http.StatusInternalServerError, false, errors.New("Cannot verify token due to bad server configuration. Invalid/unsupported token issuer")
 		}
 	}
 
 	// If the function reaches here, it means no token check passed
-	log.Info("Authentication failed. Didn't pass the chain of checking:\n", errMsg)
-	return false
+	log.Debug("Cannot verify token:\n", errMsg)
+	return http.StatusForbidden, false, errors.New("Cannot verify token: " + errMsg)
 }

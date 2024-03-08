@@ -19,7 +19,6 @@
 package web_ui
 
 import (
-	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -67,12 +66,12 @@ func promMetricAuthHandler(ctx *gin.Context) {
 		// 1.director scraper 2.server (self) scraper 3.authenticated web user (via cookie)
 		authOption := token.AuthOption{
 			Sources: []token.TokenSource{token.Header, token.Cookie},
-			Issuers: []token.TokenIssuer{token.Federation, token.Issuer},
+			Issuers: []token.TokenIssuer{token.FederationIssuer, token.LocalIssuer},
 			Scopes:  []token_scopes.TokenScope{token_scopes.Monitoring_Scrape}}
 
-		valid := token.CheckAnyAuth(ctx, authOption)
-		if !valid {
-			ctx.AbortWithStatusJSON(403, gin.H{"error": "Authentication required to access this endpoint."})
+		status, ok, err := token.Verify(ctx, authOption)
+		if !ok {
+			ctx.AbortWithStatusJSON(status, gin.H{"error": err.Error()})
 		}
 		// Valid director/self request, pass to the next handler
 		ctx.Next()
@@ -88,17 +87,15 @@ func promQueryEngineAuthHandler(av1 *route.Router) gin.HandlerFunc {
 			authOption := token.AuthOption{
 				// Cookie for web user access and header for external service like Grafana to access
 				Sources: []token.TokenSource{token.Cookie, token.Header},
-				Issuers: []token.TokenIssuer{token.Issuer},
+				Issuers: []token.TokenIssuer{token.LocalIssuer},
 				Scopes:  []token_scopes.TokenScope{token_scopes.Monitoring_Query}}
 
-			exists := token.CheckAnyAuth(c, authOption)
-			if exists {
+			status, ok, err := token.Verify(c, authOption)
+			if ok {
 				av1.ServeHTTP(c.Writer, c.Request)
 			} else {
-				c.JSON(http.StatusForbidden, gin.H{"error": "Correct authorization required to access Prometheus query engine APIs"})
+				c.JSON(status, gin.H{"error": "Correct authorization required to access Prometheus query engine APIs. " + err.Error()})
 			}
-		} else {
-			av1.ServeHTTP(c.Writer, c.Request)
 		}
 	}
 }

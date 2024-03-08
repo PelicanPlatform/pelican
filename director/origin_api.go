@@ -31,7 +31,6 @@ import (
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
-	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pkg/errors"
@@ -41,7 +40,6 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
-	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
@@ -185,47 +183,6 @@ func VerifyAdvertiseToken(ctx context.Context, token, namespace string) (bool, e
 
 	for _, scope := range scopes {
 		if scope == token_scopes.Pelican_Advertise.String() {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
-// Verify that a token received is a valid token from director
-func VerifyDirectorTestReportToken(strToken string) (bool, error) {
-	directorURL := param.Federation_DirectorUrl.GetString()
-	parsedToken, err := jwt.Parse([]byte(strToken), jwt.WithVerify(false))
-	if err != nil {
-		return false, err
-	}
-
-	if directorURL != parsedToken.Issuer() {
-		return false, errors.Errorf("Token issuer is not a director")
-	}
-
-	key, err := token.LoadDirectorPublicKey()
-	if err != nil {
-		return false, err
-	}
-
-	tok, err := jwt.Parse([]byte(strToken), jwt.WithKey(jwa.ES256, key), jwt.WithValidate(true))
-	if err != nil {
-		return false, err
-	}
-
-	scope_any, present := tok.Get("scope")
-	if !present {
-		return false, errors.New("No scope is present; required to advertise to director")
-	}
-	scope, ok := scope_any.(string)
-	if !ok {
-		return false, errors.New("scope claim in token is not string-valued")
-	}
-
-	scopes := strings.Split(scope, " ")
-
-	for _, scope := range scopes {
-		if scope == token_scopes.Pelican_DirectorTestReport.String() {
 			return true, nil
 		}
 	}
