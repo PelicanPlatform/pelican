@@ -32,10 +32,9 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/common"
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -134,27 +133,23 @@ func (lc *LocalCache) Register(ctx context.Context, router *gin.RouterGroup) {
 
 // Authorize the request then trigger the purge routine
 func (lc *LocalCache) purgeCmd(ginCtx *gin.Context) {
-	token := ginCtx.GetHeader("Authorization")
-	var hasPrefix bool
-	if token, hasPrefix = strings.CutPrefix(token, "Bearer "); !hasPrefix {
-		ginCtx.AbortWithStatusJSON(http.StatusUnauthorized, common.SimpleApiResp{Status: common.RespFailed, Msg: "Bearer token required to authenticate"})
+
+	status, verified, err := token.Verify(ginCtx, token.AuthOption{
+		Sources: []token.TokenSource{token.Header},
+		Issuers: []token.TokenIssuer{token.LocalIssuer},
+		Scopes:  []token_scopes.TokenScope{token_scopes.Localcache_Purge},
+	})
+	if err != nil {
+		if status == http.StatusOK {
+			status = http.StatusInternalServerError
+		}
+		ginCtx.AbortWithStatusJSON(status, common.SimpleApiResp{Status: common.RespFailed, Msg: err.Error()})
+		return
+	} else if !verified {
+		ginCtx.AbortWithStatusJSON(http.StatusInternalServerError, common.SimpleApiResp{Status: common.RespFailed, Msg: "Unknown verification error"})
 		return
 	}
 
-	jwks, err := config.GetIssuerPublicJWKS()
-	if err != nil {
-		ginCtx.AbortWithStatusJSON(http.StatusInternalServerError, common.SimpleApiResp{Status: common.RespFailed, Msg: "Unable to get local server token issuer"})
-		return
-	}
-	tok, err := jwt.Parse([]byte(token), jwt.WithKeySet(jwks))
-	if err != nil {
-		ginCtx.AbortWithStatusJSON(http.StatusUnauthorized, common.SimpleApiResp{Status: common.RespFailed, Msg: "Authorization token cannot be verified"})
-	}
-	scopeValidator := token_scopes.CreateScopeValidator([]token_scopes.TokenScope{token_scopes.Localcache_Purge}, true)
-	if err = jwt.Validate(tok, jwt.WithValidator(scopeValidator)); err != nil {
-		ginCtx.AbortWithStatusJSON(http.StatusUnauthorized, common.SimpleApiResp{Status: common.RespFailed, Msg: "Authorization token is not valid: " + err.Error()})
-		return
-	}
 	err = lc.purge()
 	if err != nil {
 		if err == purgeTimeout {

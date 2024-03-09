@@ -353,6 +353,10 @@ func TestForcePurge(t *testing.T) {
 		Path:   param.LocalCache_Socket.GetString(),
 	}
 
+	_, err = utils.MakeRequest(ft.Ctx, param.Server_ExternalWebUrl.GetString()+"/api/v1.0/localcache/purge", "POST", nil, map[string]string{"Authorization": "Bearer abcd"})
+	assert.Error(t, err)
+	require.Equal(t, fmt.Sprintf("The POST attempt to %s/api/v1.0/localcache/purge resulted in status code 403", param.Server_ExternalWebUrl.GetString()), err.Error())
+
 	// Populate the cache with our test files
 	size := 0
 	for idx := 0; idx < 4; idx++ {
