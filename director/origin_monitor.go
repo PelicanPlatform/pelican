@@ -48,14 +48,11 @@ func reportStatusToOrigin(ctx context.Context, originWebUrl string, status strin
 		return errors.Wrapf(err, "failed to parse external URL %v", param.Server_ExternalWebUrl.GetString())
 	}
 
-	testTokenCfg := token.TokenConfig{
-		TokenProfile: token.WLCG,
-		Version:      "1.0",
-		Lifetime:     time.Minute,
-		Issuer:       directorUrl.String(),
-		Audience:     []string{originWebUrl},
-		Subject:      "director",
-	}
+	testTokenCfg := token.NewWLCGToken()
+	testTokenCfg.Lifetime = time.Minute
+	testTokenCfg.Issuer = directorUrl.String()
+	testTokenCfg.AddAudiences(originWebUrl)
+	testTokenCfg.Subject = "director"
 	testTokenCfg.AddScopes(token_scopes.Pelican_DirectorTestReport)
 
 	tok, err := testTokenCfg.CreateToken()

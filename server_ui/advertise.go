@@ -141,14 +141,11 @@ func advertiseInternal(ctx context.Context, server server_utils.XRootDServer) er
 		return err
 	}
 
-	advTokenCfg := token.TokenConfig{
-		TokenProfile: token.WLCG,
-		Version:      "1.0",
-		Lifetime:     time.Minute,
-		Issuer:       issuerUrl,
-		Audience:     []string{param.Federation_DirectorUrl.GetString()},
-		Subject:      "origin",
-	}
+	advTokenCfg := token.NewWLCGToken()
+	advTokenCfg.Lifetime = time.Minute
+	advTokenCfg.Issuer = issuerUrl
+	advTokenCfg.AddAudiences(param.Federation_DirectorUrl.GetString())
+	advTokenCfg.Subject = "origin"
 	advTokenCfg.AddScopes(token_scopes.Pelican_Advertise)
 
 	// CreateToken also handles validation for us

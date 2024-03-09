@@ -59,14 +59,11 @@ func generateFileTestScitoken() (string, error) {
 		return "", errors.New("Failed to create token: Invalid iss, Server_ExternalWebUrl is empty")
 	}
 
-	fTestTokenCfg := token.TokenConfig{
-		TokenProfile: token.WLCG,
-		Lifetime:     time.Minute,
-		Issuer:       issuerUrl,
-		Audience:     []string{config.GetServerAudience()},
-		Version:      "1.0",
-		Subject:      "origin",
-	}
+	fTestTokenCfg := token.NewWLCGToken()
+	fTestTokenCfg.Lifetime = time.Minute
+	fTestTokenCfg.Issuer = issuerUrl
+	fTestTokenCfg.Subject = "origin"
+	fTestTokenCfg.AddAudiences(config.GetServerAudience())
 	fTestTokenCfg.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Storage_Read, "/"),
 		token_scopes.NewResourceScope(token_scopes.Storage_Modify, "/"))
 
@@ -345,13 +342,11 @@ func TestGetAndPutAuth(t *testing.T) {
 	audience := config.GetServerAudience()
 
 	// Create a token file
-	tokenConfig := token.TokenConfig{
-		TokenProfile: token.WLCG,
-		Lifetime:     time.Minute,
-		Issuer:       issuer,
-		Audience:     []string{audience},
-		Subject:      "origin",
-	}
+	tokenConfig := token.NewWLCGToken()
+	tokenConfig.Lifetime = time.Minute
+	tokenConfig.Issuer = issuer
+	tokenConfig.Subject = "origin"
+	tokenConfig.AddAudiences(audience)
 
 	scopes := []token_scopes.TokenScope{}
 	readScope, err := token_scopes.Storage_Read.Path("/")
@@ -516,13 +511,11 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 	require.NoError(t, err)
 	audience := config.GetServerAudience()
 
-	tokenConfig := token.TokenConfig{
-		TokenProfile: token.WLCG,
-		Lifetime:     time.Minute,
-		Issuer:       issuer,
-		Audience:     []string{audience},
-		Subject:      "origin",
-	}
+	tokenConfig := token.NewWLCGToken()
+	tokenConfig.Lifetime = time.Minute
+	tokenConfig.Issuer = issuer
+	tokenConfig.Subject = "origin"
+	tokenConfig.AddAudiences(audience)
 	tokenConfig.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Storage_Read, "/"),
 		token_scopes.NewResourceScope(token_scopes.Storage_Modify, "/"))
 	token, err := tokenConfig.CreateToken()

@@ -123,14 +123,11 @@ func createToken(namespace, subject, audience string, desiredScope token_scopes.
 		return
 	}
 
-	tokenCfg := token.TokenConfig{
-		Lifetime:     time.Minute,
-		TokenProfile: token.WLCG,
-		Audience:     []string{audience},
-		Issuer:       issuerUrl,
-		Version:      "1.0",
-		Subject:      subject,
-	}
+	tokenCfg := token.NewWLCGToken()
+	tokenCfg.Lifetime = time.Minute
+	tokenCfg.Issuer = issuerUrl
+	tokenCfg.Subject = subject
+	tokenCfg.AddAudiences(audience)
 	tokenCfg.AddScopes(desiredScope)
 	tokenStr, err = tokenCfg.CreateToken()
 

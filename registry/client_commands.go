@@ -238,15 +238,12 @@ func NamespaceDelete(endpoint string, prefix string) error {
 	//       including an audience with these tokens.
 	// TODO: Investigate whether 1 min is a good expiration interval
 	//       or whether this should be altered.
-	delTokenCfg := token.TokenConfig{
-		TokenProfile: token.WLCG,
-		Lifetime:     time.Minute,
-		Issuer:       issuerURL,
-		Audience:     []string{"registry"},
-		Version:      "1.0",
-		Subject:      "origin",
-		Claims:       map[string]string{"scope": token_scopes.Pelican_NamespaceDelete.String()},
-	}
+	delTokenCfg := token.NewWLCGToken()
+	delTokenCfg.Lifetime = time.Minute
+	delTokenCfg.Issuer = issuerURL
+	delTokenCfg.AddAudiences("registry")
+	delTokenCfg.Subject = "origin"
+	delTokenCfg.AddScopes(token_scopes.Pelican_NamespaceDelete)
 
 	// CreateToken also handles validation for us
 	tok, err := delTokenCfg.CreateToken()

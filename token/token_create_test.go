@@ -39,58 +39,58 @@ import (
 
 func TestVerifyCreateSciTokens2(t *testing.T) {
 	// Start by feeding it a valid claims map
-	tokenConfig := TokenConfig{TokenProfile: Scitokens2, Audience: []string{"foo"}, Version: "scitokens:2.0", scope: "read:/storage"}
+	tokenConfig := TokenConfig{tokenProfile: TokenProfileScitokens2, audience: []string{"foo"}, version: "scitokens:2.0", scope: "read:/storage"}
 	err := tokenConfig.verifyCreateSciTokens2()
 	assert.NoError(t, err)
 
 	// Fail to give it audience
-	tokenConfig = TokenConfig{TokenProfile: Scitokens2, Version: "scitokens:2.0", scope: "read:/storage"}
+	tokenConfig = TokenConfig{tokenProfile: TokenProfileScitokens2, version: "scitokens:2.0", scope: "read:/storage"}
 	err = tokenConfig.verifyCreateSciTokens2()
-	assert.EqualError(t, err, "The 'audience' claim is required for the scitokens2 profile, but it could not be found.")
+	assert.EqualError(t, err, "the 'audience' claim is required for the scitokens2 profile, but it could not be found")
 
 	// Fail to give it scope
-	tokenConfig = TokenConfig{TokenProfile: Scitokens2, Audience: []string{"foo"}, Version: "scitokens:2.0"}
+	tokenConfig = TokenConfig{tokenProfile: TokenProfileScitokens2, audience: []string{"foo"}, version: "scitokens:2.0"}
 	err = tokenConfig.verifyCreateSciTokens2()
-	assert.EqualError(t, err, "The 'scope' claim is required for the scitokens2 profile, but it could not be found.")
+	assert.EqualError(t, err, "the 'scope' claim is required for the scitokens2 profile, but it could not be found")
 
 	// Give it bad version
-	tokenConfig = TokenConfig{TokenProfile: Scitokens2, Audience: []string{"foo"}, Version: "scitokens:2.xxxx", scope: "read:/storage"}
+	tokenConfig = TokenConfig{tokenProfile: TokenProfileScitokens2, audience: []string{"foo"}, version: "scitokens:2.xxxx", scope: "read:/storage"}
 	err = tokenConfig.verifyCreateSciTokens2()
-	assert.EqualError(t, err, "The provided version 'scitokens:2.xxxx' is not valid. It must match 'scitokens:<version>', where version is of the form 2.x")
+	assert.EqualError(t, err, "the provided version 'scitokens:2.xxxx' is not valid. It must match 'scitokens:<version>', where version is of the form 2.x")
 
 	// Don't give it a version and make sure it gets set correctly
-	tokenConfig = TokenConfig{TokenProfile: Scitokens2, Audience: []string{"foo"}, scope: "read:/storage"}
+	tokenConfig = TokenConfig{tokenProfile: TokenProfileScitokens2, audience: []string{"foo"}, scope: "read:/storage"}
 	err = tokenConfig.verifyCreateSciTokens2()
 	assert.NoError(t, err)
-	assert.Equal(t, tokenConfig.Version, "scitokens:2.0")
+	assert.Equal(t, tokenConfig.version, "scitokens:2.0")
 }
 
 func TestVerifyCreateWLCG(t *testing.T) {
 	// Start by feeding it a valid claims map
-	tokenConfig := TokenConfig{TokenProfile: WLCG, Audience: []string{"director"}, Version: "1.0", Subject: "foo"}
+	tokenConfig := TokenConfig{tokenProfile: TokenProfileWLCG, audience: []string{"director"}, version: "1.0", Subject: "foo"}
 	err := tokenConfig.verifyCreateWLCG()
 	assert.NoError(t, err)
 
 	// Fail to give it a sub
-	tokenConfig = TokenConfig{TokenProfile: WLCG, Audience: []string{"director"}, Version: "1.0"}
+	tokenConfig = TokenConfig{tokenProfile: TokenProfileWLCG, audience: []string{"director"}, version: "1.0"}
 	err = tokenConfig.verifyCreateWLCG()
-	assert.EqualError(t, err, "The 'subject' claim is required for the scitokens2 profile, but it could not be found.")
+	assert.EqualError(t, err, "the 'subject' claim is required for the WLCG profile, but it could not be found")
 
 	// Fail to give it an aud
-	tokenConfig = TokenConfig{TokenProfile: WLCG, Version: "1.0", Subject: "foo"}
+	tokenConfig = TokenConfig{tokenProfile: TokenProfileWLCG, version: "1.0", Subject: "foo"}
 	err = tokenConfig.verifyCreateWLCG()
-	assert.EqualError(t, err, "The 'audience' claim is required for the scitokens2 profile, but it could not be found.")
+	assert.EqualError(t, err, "the 'audience' claim is required for the WLCG profile, but it could not be found")
 
 	// Give it bad version
-	tokenConfig = TokenConfig{TokenProfile: WLCG, Audience: []string{"director"}, Version: "1.xxxx", Subject: "foo"}
+	tokenConfig = TokenConfig{tokenProfile: TokenProfileWLCG, audience: []string{"director"}, version: "1.xxxx", Subject: "foo"}
 	err = tokenConfig.verifyCreateWLCG()
-	assert.EqualError(t, err, "The provided version '1.xxxx' is not valid. It must be of the form '1.x'")
+	assert.EqualError(t, err, "the provided version '1.xxxx' is not valid. It must be of the form '1.x'")
 
 	// Don't give it a version and make sure it gets set correctly
-	tokenConfig = TokenConfig{TokenProfile: WLCG, Audience: []string{"director"}, Subject: "foo"}
+	tokenConfig = TokenConfig{tokenProfile: TokenProfileWLCG, audience: []string{"director"}, Subject: "foo"}
 	err = tokenConfig.verifyCreateWLCG()
 	assert.NoError(t, err)
-	assert.Equal(t, tokenConfig.Version, "1.0")
+	assert.Equal(t, tokenConfig.version, "1.0")
 }
 
 // TestAddScopes tests the AddScopes method of TokenConfig
@@ -217,33 +217,33 @@ func TestCreateToken(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Test that the wlcg profile works
-	tokenConfig := TokenConfig{TokenProfile: WLCG, Audience: []string{"foo"}, Subject: "bar", Lifetime: time.Minute * 10}
+	tokenConfig := TokenConfig{tokenProfile: TokenProfileWLCG, audience: []string{"foo"}, Subject: "bar", Lifetime: time.Minute * 10}
 	_, err = tokenConfig.CreateToken()
 
 	assert.NoError(t, err)
 
 	// Test that the wlcg profile fails if neither sub or aud not found
-	tokenConfig = TokenConfig{TokenProfile: WLCG, Lifetime: time.Minute * 10}
+	tokenConfig = TokenConfig{tokenProfile: TokenProfileWLCG, Lifetime: time.Minute * 10}
 	_, err = tokenConfig.CreateToken()
-	assert.EqualError(t, err, "Invalid tokenConfig: The 'audience' claim is required for the scitokens2 profile, but it could not be found.")
+	assert.EqualError(t, err, "invalid tokenConfig: the 'audience' claim is required for the WLCG profile, but it could not be found")
 
 	// Test that the scitokens2 profile works
-	tokenConfig = TokenConfig{TokenProfile: Scitokens2, Audience: []string{"foo"}, scope: "bar", Lifetime: time.Minute * 10}
+	tokenConfig = TokenConfig{tokenProfile: TokenProfileScitokens2, audience: []string{"foo"}, scope: "bar", Lifetime: time.Minute * 10}
 	_, err = tokenConfig.CreateToken()
 	assert.NoError(t, err)
 
 	// Test that the scitokens2 profile fails if claims not found
-	tokenConfig = TokenConfig{TokenProfile: Scitokens2, Lifetime: time.Minute * 10}
+	tokenConfig = TokenConfig{tokenProfile: TokenProfileScitokens2, Lifetime: time.Minute * 10}
 	_, err = tokenConfig.CreateToken()
-	assert.EqualError(t, err, "Invalid tokenConfig: The 'audience' claim is required for the scitokens2 profile, but it could not be found.")
+	assert.EqualError(t, err, "invalid tokenConfig: the 'audience' claim is required for the scitokens2 profile, but it could not be found")
 
 	// Test an unrecognized profile
-	tokenConfig = TokenConfig{TokenProfile: TokenProfile("unknown"), Lifetime: time.Minute * 10}
+	tokenConfig = TokenConfig{tokenProfile: TokenProfile("unknown"), Lifetime: time.Minute * 10}
 	_, err = tokenConfig.CreateToken()
-	assert.EqualError(t, err, "Invalid tokenConfig: Unsupported token profile: unknown")
+	assert.EqualError(t, err, "invalid tokenConfig: unsupported token profile: unknown")
 
 	// Test that additional claims can be passed into the token
-	tokenConfig = TokenConfig{TokenProfile: WLCG, Audience: []string{"foo"}, Subject: "bar", Lifetime: time.Minute * 10, Claims: map[string]string{"foo": "bar"}}
+	tokenConfig = TokenConfig{tokenProfile: TokenProfileWLCG, audience: []string{"foo"}, Subject: "bar", Lifetime: time.Minute * 10, Claims: map[string]string{"foo": "bar"}}
 	token, err := tokenConfig.CreateToken()
 	require.NoError(t, err)
 	jwt, err := jwt.ParseString(token, jwt.WithVerify(false))
@@ -254,7 +254,7 @@ func TestCreateToken(t *testing.T) {
 
 	// Test providing issuer via claim
 	viper.Set("IssuerUrl", "")
-	tokenConfig = TokenConfig{TokenProfile: WLCG, Audience: []string{"foo"}, Subject: "bar", Issuer: "https://localhost:9999", Lifetime: time.Minute * 10}
+	tokenConfig = TokenConfig{tokenProfile: TokenProfileWLCG, audience: []string{"foo"}, Subject: "bar", Issuer: "https://localhost:9999", Lifetime: time.Minute * 10}
 	_, err = tokenConfig.CreateToken()
 	assert.NoError(t, err)
 

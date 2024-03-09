@@ -239,7 +239,10 @@ func TestListNamespaces(t *testing.T) {
 			requestURL := "/namespaces?server_type=" + tc.serverType + "&status=" + tc.status
 			req, _ := http.NewRequest("GET", requestURL, nil)
 			if tc.authUser {
-				tokenCfg := token.TokenConfig{Issuer: "https://mock-server.com", Lifetime: time.Minute, Subject: "admin", TokenProfile: token.None}
+				tokenCfg := token.NewWLCGToken()
+				tokenCfg.Issuer = "https://mock-server.com"
+				tokenCfg.Lifetime = time.Minute
+				tokenCfg.Subject = "admin"
 				tokenCfg.AddScopes(token_scopes.WebUi_Access)
 				token, err := tokenCfg.CreateToken()
 				require.NoError(t, err)

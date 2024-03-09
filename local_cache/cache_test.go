@@ -127,13 +127,11 @@ func (ft *fedTest) spinup(t *testing.T, ctx context.Context, egrp *errgroup.Grou
 
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
-	tokConf := token.TokenConfig{
-		TokenProfile: token.WLCG,
-		Lifetime:     time.Duration(time.Minute),
-		Issuer:       issuer,
-		Subject:      "test",
-		Audience:     []string{token.WLCGAny},
-	}
+	tokConf := token.NewWLCGToken()
+	tokConf.Lifetime = time.Duration(time.Minute)
+	tokConf.Issuer = issuer
+	tokConf.Subject = "test"
+	tokConf.AddAudienceAny()
 	tokConf.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Storage_Read, "/hello_world.txt"))
 
 	token, err := tokConf.CreateToken()
@@ -198,13 +196,11 @@ func TestFedAuthGet(t *testing.T) {
 
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
-	tokConf := token.TokenConfig{
-		TokenProfile: token.WLCG,
-		Lifetime:     time.Duration(time.Minute),
-		Issuer:       issuer,
-		Subject:      "test",
-		Audience:     []string{token.WLCGAny},
-	}
+	tokConf := token.NewWLCGToken()
+	tokConf.Lifetime = time.Duration(time.Minute)
+	tokConf.Issuer = issuer
+	tokConf.Subject = "test"
+	tokConf.AddAudienceAny()
 	tokConf.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Storage_Read, "/not_correct"))
 
 	token, err := tokConf.CreateToken()
@@ -287,13 +283,12 @@ func TestClient(t *testing.T) {
 	t.Run("file-not-found", func(t *testing.T) {
 		issuer, err := config.GetServerIssuerURL()
 		require.NoError(t, err)
-		tokConf := token.TokenConfig{
-			TokenProfile: token.WLCG,
-			Lifetime:     time.Duration(time.Minute),
-			Issuer:       issuer,
-			Subject:      "test",
-			Audience:     []string{token.WLCGAny},
-		}
+		tokConf := token.NewWLCGToken()
+
+		tokConf.Lifetime = time.Duration(time.Minute)
+		tokConf.Issuer = issuer
+		tokConf.Subject = "test"
+		tokConf.AddAudienceAny()
 		tokConf.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Storage_Read, "/hello_world.txt.1"))
 
 		token, err := tokConf.CreateToken()
@@ -465,13 +460,11 @@ func TestForcePurge(t *testing.T) {
 
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
-	tokConf := token.TokenConfig{
-		TokenProfile: token.WLCG,
-		Lifetime:     time.Duration(time.Minute),
-		Issuer:       issuer,
-		Subject:      "test",
-		Audience:     []string{token.WLCGAny},
-	}
+	tokConf := token.NewWLCGToken()
+	tokConf.Lifetime = time.Duration(time.Minute)
+	tokConf.Issuer = issuer
+	tokConf.Subject = "test"
+	tokConf.AddAudienceAny()
 	tokConf.AddScopes(token_scopes.Localcache_Purge)
 
 	token, err := tokConf.CreateToken()

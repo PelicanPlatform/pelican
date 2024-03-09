@@ -576,7 +576,9 @@ func (lc *LocalCache) lruHit(hit lruEntry) {
 		lc.lru = append(lc.lru, entry)
 		lc.cacheSize += uint64(hit.size)
 		if lc.cacheSize > lc.highWater {
-			lc.purge()
+			if err := lc.purge(); err != nil {
+				log.Warningln("Failure when purging cache:", err)
+			}
 		}
 	}
 	entry.lastUse = hit.lastUse

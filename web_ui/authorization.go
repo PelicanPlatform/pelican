@@ -35,15 +35,12 @@ import (
 // the server itself
 func createPromMetricToken() (string, error) {
 	serverUrl := param.Server_ExternalWebUrl.GetString()
-	promMetricTokCfg := token.TokenConfig{
-		TokenProfile: token.WLCG,
-		Lifetime:     param.Monitoring_TokenExpiresIn.GetDuration(),
-		Issuer:       serverUrl,
-		Audience:     []string{serverUrl},
-		Version:      "1.0",
-		Subject:      serverUrl,
-		Claims:       map[string]string{"scope": token_scopes.Monitoring_Scrape.String()},
-	}
+	promMetricTokCfg := token.NewWLCGToken()
+	promMetricTokCfg.Lifetime = param.Monitoring_TokenExpiresIn.GetDuration()
+	promMetricTokCfg.Issuer = serverUrl
+	promMetricTokCfg.AddAudiences(serverUrl)
+	promMetricTokCfg.Subject = serverUrl
+	promMetricTokCfg.Claims = map[string]string{"scope": token_scopes.Monitoring_Scrape.String()}
 
 	// CreateToken also handles validation for us
 	tok, err := promMetricTokCfg.CreateToken()
