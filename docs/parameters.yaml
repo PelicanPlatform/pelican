@@ -392,7 +392,7 @@ description: >-
 type: int
 default: 0
 components: ["client"]
-deprecated: true
+hidden: true
 ---
 ############################
 #   Origin-level Configs   #
@@ -659,6 +659,8 @@ components: ["localcache"]
 name: LocalCache.Size
 description: >-
   The maximum size of the local cache.  If not set, it is assumed the entire device can be used.
+  This parameter can be provided with units (e.g., 20GB, 150MB); if no unit is provided, then
+  it is assumed to be in bytes.
 type: string
 default: 0
 components: ["localcache"]

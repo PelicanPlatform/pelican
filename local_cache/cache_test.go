@@ -65,13 +65,6 @@ func (ft *fedTest) spinup(t *testing.T, ctx context.Context, egrp *errgroup.Grou
 	// TODO: the cache startup routines not sequenced correctly for the downloads
 	// to immediately work through the cache.  For now, unit tests will just use the origin.
 	viper.Set("Origin.EnableFallbackRead", true)
-	/*
-		if runtime.GOOS == "darwin" {
-			viper.Set("Origin.EnableFallbackRead", true)
-		} else {
-			modules.Set(config.CacheType)
-		}
-	*/
 	modules.Set(config.LocalCacheType)
 
 	tmpPathPattern := "XRootD-Test_Origin*"

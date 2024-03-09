@@ -94,11 +94,20 @@ func newAuthConfig(ctx context.Context, egrp *errgroup.Group) (ac *authConfig) {
 		ttlcache.WithLoader[string, acls](ttlcache.LoaderFunc[string, acls](ac.loader)),
 	)
 
-	go ac.issuerKeys.Start()
+	egrp.Go(func() error {
+		ac.issuerKeys.Start()
+		return nil
+	})
+	egrp.Go(func() error {
+		ac.tokenAuthz.Start()
+		return nil
+	})
 	egrp.Go(func() error {
 		<-ctx.Done()
 		ac.issuerKeys.Stop()
 		ac.issuerKeys.DeleteAll()
+		ac.tokenAuthz.Stop()
+		ac.tokenAuthz.DeleteAll()
 		return nil
 	})
 
@@ -193,6 +202,15 @@ func calcResourceScopes(rs token_scopes.ResourceScope, basePaths []string, restr
 	return
 }
 
+// Given a token, calculate the corresponding access control list
+//
+// The returned ACLs indicate what the bearer of the token is authorized (read, write)
+// to do with respect to the root of the cache.  For example, if /foo is
+// labeled as a public prefix by the director, then one ACL returned will
+// be read:/foo.
+//
+// If the token verification fails then an error will be returned; no authorization
+// should be given.
 func (ac *authConfig) getAcls(token string) (newAcls acls, err error) {
 	namespaces := ac.ns.Load()
 	if namespaces == nil {

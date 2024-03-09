@@ -155,7 +155,16 @@ func (lc *LocalCache) purgeCmd(ginCtx *gin.Context) {
 		ginCtx.AbortWithStatusJSON(http.StatusUnauthorized, common.SimpleApiResp{Status: common.RespFailed, Msg: "Authorization token is not valid: " + err.Error()})
 		return
 	}
+	err = lc.purge()
+	if err != nil {
+		if err == purgeTimeout {
+			// Note we don't use common.RespTimeout here; that is reserved for a long-poll timeout.
+			ginCtx.AbortWithStatusJSON(http.StatusRequestTimeout, common.SimpleApiResp{Status: common.RespFailed, Msg: err.Error()})
+		} else {
+			// Note we don't pass uncategorized errors to the user to avoid leaking potentially sensitive information.
+			ginCtx.AbortWithStatusJSON(http.StatusInternalServerError, common.SimpleApiResp{Status: common.RespFailed, Msg: "Failed to successfully run purge"})
+		}
 		return
 	}
-	lc.purge()
+	ginCtx.JSON(http.StatusOK, common.SimpleApiResp{Status: common.RespOK})
 }

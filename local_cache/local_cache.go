@@ -140,6 +140,7 @@ type (
 
 var (
 	authorizationDenied error = errors.New("authorization denied")
+	purgeTimeout        error = errors.New("purge attempt has timed out")
 )
 
 const (
@@ -584,14 +585,16 @@ func (lc *LocalCache) lruHit(hit lruEntry) {
 	}
 }
 
-func (lc *LocalCache) purge() {
+func (lc *LocalCache) purge() (err error) {
 	log.Debugln("Starting purge routine")
 	lc.purgeMutex.Lock()
 	defer lc.purgeMutex.Unlock()
 	heap.Init(&lc.lru)
 	start := time.Now()
+	log.Debugf("Purge running with cache size %d and low watermark of %d", lc.cacheSize, lc.lowWater)
 	for lc.cacheSize > lc.lowWater {
 		if len(lc.lru) == 0 {
+			err = errors.New("purge ran until cache was empty")
 			log.Warningln("Potential consistency error: purge ran until cache was empty")
 			break
 		}
@@ -605,19 +608,27 @@ func (lc *LocalCache) purge() {
 			continue
 		}
 		localPath := path.Join(lc.basePath, path.Clean(entry.path))
-		if err := os.Remove(localPath + ".DONE"); err != nil {
-			log.Warningln("Failed to purge DONE file:", err)
+		if rmErr := os.Remove(localPath + ".DONE"); rmErr != nil {
+			log.Warningln("Failed to purge DONE file:", rmErr)
+			if err == nil {
+				err = rmErr
+			}
 		}
-		if err := os.Remove(localPath); err != nil {
-			log.Warningln("Failed to purge file:", err)
+		if rmErr := os.Remove(localPath); rmErr != nil {
+			log.Warningln("Failed to purge file:", rmErr)
+			if err == nil {
+				err = rmErr
+			}
 		}
 		lc.cacheSize -= uint64(entry.size)
 		// Since purge is called from the mux thread, blocking can cause
 		// other failures; do a time-based break even if we've not hit the low-water
 		if time.Since(start) > 3*time.Second {
+			err = purgeTimeout
 			break
 		}
 	}
+	return
 }
 
 // Given a URL, return a reader from the disk cache

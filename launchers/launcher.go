@@ -261,7 +261,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 	}
 
 	if modules.IsEnabled(config.LocalCacheType) {
-		log.Debugln("Starting local cache listener")
+		log.Debugln("Starting local cache listener at", param.LocalCache_Socket.GetString())
 		if err := lc.Config(egrp); err != nil {
 			log.Warning("Failure when configuring the local cache; cache may incorrectly generate 403 errors until reconfiguration runs")
 		}

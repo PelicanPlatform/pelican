@@ -1317,6 +1317,8 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 			return dialer.DialContext(ctx, "unix", transfer.UnixSocket)
 		}
 		transferUrl.Scheme = "http"
+		// The host is ignored since we override the dial function; however, I find it useful
+		// in debug messages to see that this went to the local cache.
 		transferUrl.Host = "localhost"
 	}
 	httpClient, ok := client.HTTPClient.(*http.Client)
