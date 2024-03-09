@@ -124,11 +124,12 @@ jobs:
 
           echo $GITHUB_TAG
 
-          docker_repo="pelican_platform/pelican"
+          docker_repo="pelican_platform"
+          image_name=${{ matrix.image }}
           tag_list=()
           for registry in hub.opensciencegrid.org; do
             for image_tag in "$GITHUB_TAG"; do
-              tag_list+=("$registry/$docker_repo":"$image_tag")
+              tag_list+=("$registry/$docker_repo/$image_name":"$image_tag")
             done
           done
           # This causes the tag_list array to be comma-separated below,

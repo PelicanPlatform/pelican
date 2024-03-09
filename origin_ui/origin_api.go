@@ -21,14 +21,15 @@ package origin_ui
 import (
 	"context"
 	"fmt"
-	"strings"
+	"net/http"
 	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pelicanplatform/pelican/common"
-	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/metrics"
+	"github.com/pelicanplatform/pelican/token"
+	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
@@ -62,42 +63,6 @@ func getNotifyChannel() chan bool {
 	return notifyChannel
 }
 
-// Check the Bearer token from requests sent from the director to ensure
-// it's has correct authorization
-func directorRequestAuthHandler(ctx *gin.Context) {
-	authHeader := ctx.Request.Header.Get("Authorization")
-
-	// Check if the Authorization header was provided
-	if authHeader == "" {
-		// Use AbortWithStatusJSON to stop invoking the next chain
-		ctx.AbortWithStatusJSON(401, gin.H{"error": "Authorization header is missing"})
-		return
-	}
-
-	// Check if the Authorization type is Bearer
-	if !strings.HasPrefix(authHeader, "Bearer ") {
-		ctx.AbortWithStatusJSON(401, gin.H{"error": "Authorization header is not Bearer type"})
-		return
-	}
-
-	// Extract the token from the Authorization header
-	token := strings.TrimPrefix(authHeader, "Bearer ")
-	valid, err := director.VerifyDirectorTestReportToken(token)
-
-	if err != nil {
-		log.Warningln(fmt.Sprintf("Error when verifying Bearer token: %s", err))
-		ctx.AbortWithStatusJSON(401, gin.H{"error": fmt.Sprintf("Error when verifying Bearer token: %s", err)})
-		return
-	}
-
-	if !valid {
-		log.Warningln("Can't validate Bearer token")
-		ctx.AbortWithStatusJSON(401, gin.H{"error": "Can't validate Bearer token"})
-		return
-	}
-	ctx.Next()
-}
-
 // Reset the timer safely
 func LaunchPeriodicDirectorTimeout(ctx context.Context, egrp *errgroup.Group) {
 	directorTimeoutTicker := time.NewTicker(directorTimeoutDuration)
@@ -121,28 +86,36 @@ func LaunchPeriodicDirectorTimeout(ctx context.Context, egrp *errgroup.Group) {
 	})
 }
 
-// Director will periodically upload/download files to/from all connected
-// origins and test the health status of origins. It will send a request
-// reporting such status to this endpoint, and we will update origin internal
-// health status metric to reflect the director connection status.
+// The director periodically uploads/downloads files to/from all online
+// origins for testing. It sends a request reporting the status of the test result to this endpoint,
+// and we will update origin internal health status metric by what director returns.
 func directorTestResponse(ctx *gin.Context) {
+	status, ok, err := token.Verify(ctx, token.AuthOption{
+		Sources: []token.TokenSource{token.Header},
+		Issuers: []token.TokenIssuer{token.FederationIssuer},
+		Scopes:  []token_scopes.TokenScope{token_scopes.Pelican_DirectorTestReport},
+	})
+	if !ok {
+		ctx.JSON(status, gin.H{"error": err.Error()})
+	}
+
 	dt := common.DirectorTestResult{}
 	if err := ctx.ShouldBind(&dt); err != nil {
-		log.Errorf("Invalid director test response")
-		ctx.JSON(400, gin.H{"error": "Invalid director test response"})
+		log.Errorf("Invalid director test response: %v", err)
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid director test response: " + err.Error()})
 		return
 	}
 	// We will let the timer go timeout if director didn't send a valid json request
 	notifyNewDirectorResponse(ctx)
 	if dt.Status == "ok" {
 		metrics.SetComponentHealthStatus(metrics.OriginCache_Director, metrics.StatusOK, fmt.Sprintf("Director timestamp: %v", dt.Timestamp))
-		ctx.JSON(200, gin.H{"msg": "Success"})
+		ctx.JSON(http.StatusOK, gin.H{"msg": "Success"})
 	} else if dt.Status == "error" {
 		metrics.SetComponentHealthStatus(metrics.OriginCache_Director, metrics.StatusCritical, dt.Message)
-		ctx.JSON(200, gin.H{"msg": "Success"})
+		ctx.JSON(http.StatusOK, gin.H{"msg": "Success"})
 	} else {
 		log.Errorf("Invalid director test response, status: %s", dt.Status)
-		ctx.JSON(400, gin.H{"error": fmt.Sprintf("Invalid director test response status: %s", dt.Status)})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Invalid director test response status: %s", dt.Status)})
 	}
 }
 
@@ -157,7 +130,7 @@ func ConfigureOriginAPI(router *gin.Engine, ctx context.Context, egrp *errgroup.
 	LaunchPeriodicDirectorTimeout(ctx, egrp)
 
 	group := router.Group("/api/v1.0/origin-api")
-	group.POST("/directorTest", directorRequestAuthHandler, directorTestResponse)
+	group.POST("/directorTest", directorTestResponse)
 
 	return nil
 }

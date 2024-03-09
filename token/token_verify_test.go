@@ -27,6 +27,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pkg/errors"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -36,11 +37,11 @@ type MockAuthChecker struct {
 	IssuerCheckFunc     func(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScope bool) error
 }
 
-func (m *MockAuthChecker) FederationCheck(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScope bool) error {
+func (m *MockAuthChecker) federationIssuerCheck(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScope bool) error {
 	return m.FederationCheckFunc(ctx, token, expectedScopes, allScope)
 }
 
-func (m *MockAuthChecker) IssuerCheck(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScope bool) error {
+func (m *MockAuthChecker) localIssuerCheck(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScope bool) error {
 	return m.IssuerCheckFunc(ctx, token, expectedScopes, allScope)
 }
 
@@ -67,7 +68,7 @@ func createContextWithToken(cookieToken, headerToken, queryToken string) *gin.Co
 	return ctx
 }
 
-func TestCheckAnyAuth(t *testing.T) {
+func TestVerify(t *testing.T) {
 	// Use a mock instance of authChecker to simplify testing
 	originalAuthChecker := authChecker
 	defer func() { authChecker = originalAuthChecker }()
@@ -96,44 +97,46 @@ func TestCheckAnyAuth(t *testing.T) {
 
 	// Batch-create test cases, see "name" section for the purpose of each test case
 	tests := []struct {
-		name       string
-		setupMock  func()
-		tokenSetup func() *gin.Context
-		authOption AuthOption
-		want       bool
+		name           string
+		setupMock      func()
+		tokenSetup     func() *gin.Context
+		authOption     AuthOption
+		expectedResult bool
+		expectedStatus int
+		expectedErr    error
 	}{
 		{
 			name: "valid-token-from-cookie-source",
 			authOption: AuthOption{
 				Sources: []TokenSource{Cookie},
-				Issuers: []TokenIssuer{Federation},
+				Issuers: []TokenIssuer{FederationIssuer},
 			},
 			tokenSetup: func() *gin.Context {
 				return createContextWithToken("valid-cookie-token", "", "")
 			},
-			want: true,
+			expectedResult: true,
 		},
 		{
 			name: "valid-token-from-header-source",
 			authOption: AuthOption{
 				Sources: []TokenSource{Header},
-				Issuers: []TokenIssuer{Federation},
+				Issuers: []TokenIssuer{FederationIssuer},
 			},
 			tokenSetup: func() *gin.Context {
 				return createContextWithToken("", "valid-header-token", "")
 			},
-			want: true,
+			expectedResult: true,
 		},
 		{
 			name: "valid-token-from-authz-query-parameter",
 			authOption: AuthOption{
 				Sources: []TokenSource{Authz},
-				Issuers: []TokenIssuer{Federation},
+				Issuers: []TokenIssuer{FederationIssuer},
 			},
 			tokenSetup: func() *gin.Context {
 				return createContextWithToken("", "", "valid-query-token")
 			},
-			want: true,
+			expectedResult: true,
 		},
 		{
 			name: "no-token-present",
@@ -144,13 +147,14 @@ func TestCheckAnyAuth(t *testing.T) {
 			tokenSetup: func() *gin.Context {
 				return createContextWithToken("", "", "")
 			},
-			want: false,
+			expectedResult: false,
+			expectedStatus: 403, // Return 403 as RFC requires returning 401 with WWW-Authenticate response header and we don't have it
 		},
 		{
 			name: "get-first-available-token-from-multiple-sources",
 			authOption: AuthOption{
 				Sources: []TokenSource{Cookie, Header, Authz},
-				Issuers: []TokenIssuer{Federation},
+				Issuers: []TokenIssuer{FederationIssuer},
 			},
 			setupMock: func() {
 				mock.FederationCheckFunc = func(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScope bool) error {
@@ -165,13 +169,13 @@ func TestCheckAnyAuth(t *testing.T) {
 				// Set token in both cookie and header, but function should stop at the first valid source
 				return createContextWithToken("valid-cookie", "valid-header", "valid-authz")
 			},
-			want: true,
+			expectedResult: true,
 		},
 		{
 			name: "valid-token-with-single-issuer",
 			authOption: AuthOption{
 				Sources: []TokenSource{Cookie},
-				Issuers: []TokenIssuer{Federation},
+				Issuers: []TokenIssuer{FederationIssuer},
 			},
 			setupMock: func() {
 				mock.FederationCheckFunc = func(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScope bool) error {
@@ -186,13 +190,13 @@ func TestCheckAnyAuth(t *testing.T) {
 				// Set token in both cookie and header, but function should stop at the first valid source
 				return createContextWithToken("valid-cookie", "", "")
 			},
-			want: true,
+			expectedResult: true,
 		},
 		{
 			name: "invalid-token-with-single-issuer",
 			authOption: AuthOption{
 				Sources: []TokenSource{Cookie},
-				Issuers: []TokenIssuer{Federation},
+				Issuers: []TokenIssuer{FederationIssuer},
 			},
 			setupMock: func() {
 				mock.FederationCheckFunc = func(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScope bool) error {
@@ -207,13 +211,14 @@ func TestCheckAnyAuth(t *testing.T) {
 				// Set token in both cookie and header, but function should stop at the first valid source
 				return createContextWithToken("invalid-cookie", "", "")
 			},
-			want: false,
+			expectedResult: false,
+			expectedStatus: 403,
 		},
 		{
 			name: "valid-token-with-multiple-issuer",
 			authOption: AuthOption{
 				Sources: []TokenSource{Cookie},
-				Issuers: []TokenIssuer{Federation, Issuer},
+				Issuers: []TokenIssuer{FederationIssuer, LocalIssuer},
 			},
 			setupMock: func() {
 				mock.FederationCheckFunc = func(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScope bool) error {
@@ -235,13 +240,13 @@ func TestCheckAnyAuth(t *testing.T) {
 				// Set token in both cookie and header, but function should stop at the first valid source
 				return createContextWithToken("for-issuer", "", "")
 			},
-			want: true,
+			expectedResult: true,
 		},
 		{
 			name: "invalid-token-with-multiple-issuer",
 			authOption: AuthOption{
 				Sources: []TokenSource{Cookie},
-				Issuers: []TokenIssuer{Federation, Issuer},
+				Issuers: []TokenIssuer{FederationIssuer, LocalIssuer},
 			},
 			setupMock: func() {
 				mock.FederationCheckFunc = func(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScope bool) error {
@@ -263,7 +268,8 @@ func TestCheckAnyAuth(t *testing.T) {
 				// Set token in both cookie and header, but function should stop at the first valid source
 				return createContextWithToken("for-nobody", "", "")
 			},
-			want: false,
+			expectedResult: false,
+			expectedStatus: 403,
 		},
 	}
 
@@ -279,8 +285,11 @@ func TestCheckAnyAuth(t *testing.T) {
 
 			ctx := tc.tokenSetup()
 
-			if got := CheckAnyAuth(ctx, tc.authOption); got != tc.want {
-				t.Errorf("CheckAnyAuth() = %v, want %v", got, tc.want)
+			status, ok, err := Verify(ctx, tc.authOption)
+			assert.Equal(t, ok, tc.expectedResult)
+			if !ok {
+				assert.Equal(t, tc.expectedStatus, status, "status code does not match expected")
+				assert.NotNil(t, err)
 			}
 		})
 	}

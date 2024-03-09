@@ -25,24 +25,29 @@ import {TimeDuration} from "@/components/graphs/prometheus";
 
 import {
     Box,
-    FormControl,
     Grid,
-    InputLabel,
-    MenuItem,
-    Select,
     Typography,
     Skeleton,
     Link,
     Container,
-    Tooltip
+    Tooltip, Snackbar, Button
 } from "@mui/material";
 import React, {useEffect, useMemo, useState} from "react";
 import {OverridableStringUnion} from "@mui/types";
 import {Variant} from "@mui/material/styles/createTypography";
 import {TypographyPropsVariantOverrides} from "@mui/material/Typography";
 import TextField from "@mui/material/TextField";
-import {AppRegistration, ArrowDropDown, ArrowDropUp, AssistantDirection, TripOrigin} from '@mui/icons-material';
+import {
+    AppRegistration,
+    ArrowDropDown,
+    ArrowDropUp,
+    AssistantDirection,
+    QuestionMark,
+    TripOrigin
+} from '@mui/icons-material';
 import {default as NextLink} from "next/link";
+import {merge, isEmpty, isMatch} from "lodash"
+
 import {isLoggedIn} from "@/helpers/login";
 import {Sidebar} from "@/components/layout/Sidebar";
 import Image from "next/image";
@@ -50,7 +55,10 @@ import PelicanLogo from "@/public/static/images/PelicanPlatformLogo_Icon.png";
 import IconButton from "@mui/material/IconButton";
 import {Main} from "@/components/layout/Main";
 
-type duration = number | `${number}${"ns" | "us" | "µs" | "ms" |"s" | "m" | "h"}`;
+import {BooleanField, StringField, DurationField, StringSliceField, IntegerField, Field} from "@/components/Config";
+import {config} from "react-transition-group";
+import {submitConfigChange} from "@/components/Config/util";
+import {ParameterInputProps} from "@/components/Config/index.d";
 
 interface ConfigMetadata {
     [key: string]: ConfigMetadataValue
@@ -65,20 +73,16 @@ interface ConfigMetadataValue {
 }
 
 export type Config = {
-    [key: string]: ConfigValue | Config
+    [key: string]: ParameterInputProps | Config
 }
 
-interface ConfigValue {
-    Type: "bool" | "time.Duration" | "[]string" | "int" | "string"
-    Value: Config | string | number | boolean | null | string[] | number[] | duration
-}
-
-const isConfig = (value: ConfigValue | Config): boolean => {
-    return (value as Config)?.Type === undefined
+const isConfig = (value: ParameterInputProps | Config): boolean => {
+    const isConfig = (value as Config)?.Type === undefined
+    return isConfig
 }
 
 
-function sortConfig (a: [string, ConfigValue | Config], b: [string, ConfigValue | Config]) {
+function sortConfig (a: [string, ParameterInputProps | Config], b: [string, ParameterInputProps | Config]) {
 
     if(isConfig(a[1]) && !isConfig(b[1])){
         return 1
@@ -105,78 +109,24 @@ function deleteKey (obj: StringObject, key: string[]) {
     }
 }
 
-const ConfigDisplayFormElement = ({name, id, configValue}:{name: string, id: string[], configValue: ConfigValue}) : JSX.Element => {
-
-    // If the value needs to be represented as a list in a text field
-    if(configValue.Type && configValue.Type.includes("[]")){
-
-        // Check for null list value
-        if(configValue.Value === null){
-            configValue.Value = []
-        }
-
-        return <TextField
-            fullWidth
-            disabled
-            size="small"
-            id={`${id.join("-")}-text-input`}
-            label={name}
-            variant={"outlined"}
-            value={(configValue.Value as Array<string>).join(", ")}
-        />
-
-    // If the value needs to be represented as a select box
-    } else if(configValue.Type === "bool"){
-
-        return (
-            <FormControl fullWidth>
-                <InputLabel id={`${id.join("-")}-number-input-label`}>{name}</InputLabel>
-                <Select
-                    disabled
-                    size="small"
-                    labelId={`${id.join("-")}-number-input-label`}
-                    id={`${id.join("-")}-number-input`}
-                    label={name}
-                    value={configValue ? 1 : 0}
-                >
-                    <MenuItem value={1}>True</MenuItem>
-                    <MenuItem value={0}>False</MenuItem>
-                </Select>
-            </FormControl>
-        )
-
-    // Catch all for other types and potentially undefined values
+function updateValue (obj: StringObject, key: string[], value: any) {
+    if(key.length === 1) {
+        obj[key[0]] = {...value, ...obj[key[0]]}
+        return
     } else {
-
-        // Convert empty configValues to a space so that the text field is not collapsed
-        switch (configValue.Value){
-            case "":
-                configValue.Value = " "
-                break
-            case null:
-                configValue.Value = "None"
-        }
-
-        return <TextField
-            fullWidth
-            disabled
-            size="small"
-            id={`${id.join("-")}-text-input`}
-            label={name}
-            variant={"outlined"}
-            value={configValue.Value}
-        />
+        updateValue(obj[key[0]], key.slice(1), value)
     }
 }
 
 interface ConfigDisplayProps {
     id: string[]
     name: string
-    value: Config | ConfigValue
+    value: Config | ParameterInputProps
     level: number
+    onChange: (patch: any) => void
 }
 
-function ConfigDisplay({id, name, value, level = 1}: ConfigDisplayProps) {
+function ConfigDisplay({id, name, value, level = 1, onChange}: ConfigDisplayProps) {
 
     if(name != "") {
         id = [...id, name]
@@ -185,17 +135,28 @@ function ConfigDisplay({id, name, value, level = 1}: ConfigDisplayProps) {
     // If this is a ConfigValue then display it
     if(!isConfig(value)){
         return (
-            <Box pt={2} id={id.join("-")}>
-                <ConfigDisplayFormElement id={id} name={name} configValue={value as ConfigValue}/>
+            <Box pt={2} display={"flex"} id={id.join("-")}>
+                <Box flexGrow={1} minWidth={0}>
+                    <Field {...value as ParameterInputProps} onChange={onChange} />
+                </Box>
+
+                <Button
+                    size={"small"}
+                    href={`https://docs.pelicanplatform.org/parameters#${id.join("-")}`}
+                    target={"_blank"}
+                >
+                    <QuestionMark/>
+                </Button>
+
             </Box>
         )
     }
 
     // If this is a Config then display all of its values
-    let subValues = Object.entries(value as Config)
+    let subValues = Object.entries(value)
     subValues.sort(sortConfig)
 
-    let configDisplays = subValues.map(([k, v]) => {return <ConfigDisplay id={id} key={k} name={k} value={v} level={level+1}/>})
+    let configDisplays = subValues.map(([k, v]) => {return <ConfigDisplay id={id} key={k} name={k} value={v} level={level+1} onChange={onChange}/>})
 
     let variant:  OverridableStringUnion<"inherit" | Variant, TypographyPropsVariantOverrides>
     switch (level) {
@@ -233,7 +194,7 @@ function ConfigDisplay({id, name, value, level = 1}: ConfigDisplayProps) {
 interface TableOfContentsProps {
     id: string[]
     name: string
-    value: Config | ConfigValue
+    value: Config | ParameterInputProps
     level: number
 }
 
@@ -318,7 +279,18 @@ function Config() {
     const [config, setConfig] = useState<Config|undefined>(undefined)
     const [enabledServers, setEnabledServers] = useState<string[]>([])
     const [configMetadata, setConfigMetadata] = useState<ConfigMetadata|undefined>(undefined)
-    const [error, setError] = useState<string|undefined>(undefined)
+    const [status, setStatus] = useState<string|undefined>(undefined)
+
+    // Config state managers
+    const [toggleRefresh, setToggleRefresh] = useState<boolean>(false)
+    const [configKey, setConfigKey] = useState<number>(0)
+
+    const [patch, setPatch] = useState<any>({})
+
+    let onChange = (fieldPatch: any) => {
+        const newPatch = merge(patch, fieldPatch)
+        setPatch(structuredClone(newPatch))
+    }
 
     let getConfig = async () => {
 
@@ -330,8 +302,11 @@ function Config() {
         let response = await fetch("/api/v1.0/config")
         if(response.ok) {
             setConfig(await response.json())
+            setStatus(undefined)
+            return true
         } else {
-            setError("Failed to fetch config, response status: " + response.status)
+            setStatus("Failed Fetch Config, Retry in 5 seconds")
+            return false
         }
     }
 
@@ -362,10 +337,22 @@ function Config() {
     }
 
     useEffect(() => {
-        getConfig()
         getEnabledServers()
         getConfigMetadata()
     }, [])
+
+    useEffect(() => {
+        let loadConfig = async () => {
+            let success = await getConfig()
+            if(!success) {
+                setTimeout(loadConfig, 5000)
+            } else {
+                setConfigKey(configKey + 1)
+            }
+        }
+
+        loadConfig()
+    }, [toggleRefresh])
 
     const filteredConfig = useMemo(() => {
 
@@ -383,22 +370,17 @@ function Config() {
 
             if([...enabledServers, "*"].filter(i => value.components.includes(i)).length === 0) {
                 deleteKey(filteredConfig, key.split("."))
+            } else {
+                updateValue(filteredConfig, key.split("."), configMetadata[key])
             }
         })
+
+        // Filter out read-only values
+        deleteKey(filteredConfig, ["ConfigDir"])
 
         return filteredConfig
 
     }, [config, enabledServers, configMetadata])
-
-
-    if(error){
-        return (
-            <Box width={"100%"}>
-                <Typography variant={"h4"} component={"h2"} mb={1}>Configuration</Typography>
-                <Typography color={"error"} variant={"body1"} component={"p"} mb={1}>Error: {error}</Typography>
-            </Box>
-        )
-    }
 
     return (
         <>
@@ -446,23 +428,69 @@ function Config() {
                 }
             </Sidebar>
             <Main>
-                <Container maxWidth={"xl"} sx={{"mt": 2 }}>
+                <Container maxWidth={"xl"}>
                     <Box width={"100%"}>
                         <Grid container spacing={2}>
                             <Grid item xs={7} md={8} lg={6}>
                                 <Typography variant={"h4"} component={"h2"} mb={1}>Configuration</Typography>
                             </Grid>
                             <Grid  item xs={5} md={4} lg={3}></Grid>
-                            <Grid item xs={7} md={8} lg={6}>
+                            <Grid item xs={12} md={8} lg={6}>
                                 <form>
                                     {
                                         filteredConfig === undefined ?
                                             <Skeleton  variant="rectangular" animation="wave" height={"1000px"}/> :
-                                            <ConfigDisplay id={[]} name={""} value={filteredConfig} level={4}/>
+                                            <ConfigDisplay key={configKey.toString()} id={[]} name={""} value={filteredConfig} level={4} onChange={onChange}/>
                                     }
                                 </form>
+                                <Snackbar
+                                    anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+                                    open={!isMatch(config === undefined ? {} : config, patch)}
+                                    message="Save Changes"
+                                    action={
+                                        <Box>
+                                            <Button
+                                                onClick={async () => {
+                                                    try {
+                                                        await submitConfigChange(patch)
+                                                        setPatch({})
+                                                        setStatus("Changes Saved, Restarting Server")
+                                                        setTimeout(() => setToggleRefresh(!toggleRefresh), 3000)
+                                                    } catch (e) {
+                                                        setStatus((e as string).toString())
+                                                    }
+                                                }}
+                                            >
+                                                Save
+                                            </Button>
+                                            <Button
+                                                onClick={() => {
+                                                    setPatch({})
+                                                    setToggleRefresh(!toggleRefresh)
+                                                }}
+                                            >
+                                                Clear
+                                            </Button>
+                                        </Box>
+                                    }
+                                />
+                                {
+                                    status &&
+                                    <Snackbar
+                                        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+                                        open={true}
+                                        message={status}
+                                        action={
+                                            <Button
+                                                onClick={() => setStatus(undefined)}
+                                            >
+                                                Dismiss
+                                            </Button>
+                                        }
+                                    />
+                                }
                             </Grid>
-                            <Grid item xs={5} md={4} lg={3}>
+                            <Grid item xs={12} md={4} lg={3} display={{ xs: "none", md: "block"}}>
                                 {
                                     filteredConfig === undefined ?
                                         <Skeleton  variant="rectangular" animation="wave" height={"1000px"}/> :

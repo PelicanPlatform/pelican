@@ -18,16 +18,16 @@
 
 "use client"
 
-import Image from 'next/image'
 import { useRouter } from 'next/navigation'
-import {Typography, Box, Button, Snackbar, Alert, Tooltip, IconButton, Grow, Paper, BoxProps} from "@mui/material";
+import {Avatar, Box, Button, Snackbar, Alert, Tooltip, IconButton, Grow, Paper, BoxProps} from "@mui/material";
 import { ClickAwayListener } from '@mui/base';
-import {Help, HelpOutline, Description, BugReport} from "@mui/icons-material";
+import {AssignmentInd, Person, HelpOutline, Description, BugReport} from "@mui/icons-material";
 import LogoutIcon from '@mui/icons-material/Logout';
+import { grey, green } from '@mui/material/colors';
 
 import styles from "../../app/page.module.css"
 import GitHubIcon from '@mui/icons-material/GitHub';
-import React, {ReactNode, useState} from "react";
+import React, {ReactNode, useState, useEffect} from "react";
 import Link from 'next/link';
 
 interface SpeedButtonProps {
@@ -160,6 +160,7 @@ export const Sidebar = ({children}: {children: ReactNode}) => {
     const router = useRouter()
 
     const [error, setError] = useState("")
+    const [role, setRole] = useState("")
 
     const handleLogout = async (e: React.MouseEvent<HTMLElement>) => {
         try {
@@ -189,6 +190,31 @@ export const Sidebar = ({children}: {children: ReactNode}) => {
         }
     }
 
+    const getWhoami = async () => {
+        try {
+            let response = await fetch("/api/v1.0/auth/whoami", {
+                method: "GET",
+                headers: {
+                    "Content-Type": "application/json"
+                }
+            })
+
+            if(response.ok){
+                let data = await response.json()
+                setRole(data?.role)
+            } else {
+                setError("Server error with status code " + response.status)
+            }
+        } catch {
+            setError("Could not connect to server")
+        }
+    }
+
+    useEffect(() => {
+        getWhoami()
+    }, [])
+
+
     return (
         <Box>
             <Snackbar
@@ -214,6 +240,11 @@ export const Sidebar = ({children}: {children: ReactNode}) => {
                             {children}
                         </Box>
                         <Box display={"flex"} flexDirection={"column"} justifyContent={"center"} textAlign={"center"}>
+                            <Tooltip title={role === "admin" ? "Admin User" : "General User"} placement="right" arrow>
+                                <Avatar sx={{ bgcolor: role === "admin" ? green[500] : grey[500], width: 32, height: 32 }} alt="User icon" style={{margin: "0 auto 10px auto"}}>
+                                    { role === "admin" ? <AssignmentInd/>:<Person />}
+                                </Avatar>
+                            </Tooltip>
                             <Tooltip title="Logout" placement="right" arrow>
                                 <IconButton aria-label='logout' onClick={handleLogout} style={{marginBottom: 10}}>
                                     <LogoutIcon/>

@@ -30,9 +30,9 @@ type Config struct {
 		EnableVoms bool
 		ExportLocation string
 		Port int
+		RunLocation string
 		SelfTest bool
 		SelfTestInterval time.Duration
-		RunLocation string
 		Url string
 		XRootDPrefix string
 	}
@@ -265,9 +265,9 @@ type configWithType struct {
 		EnableVoms struct { Type string; Value bool }
 		ExportLocation struct { Type string; Value string }
 		Port struct { Type string; Value int }
+		RunLocation struct { Type string; Value string }
 		SelfTest struct { Type string; Value bool }
 		SelfTestInterval struct { Type string; Value time.Duration }
-		RunLocation struct { Type string; Value string }
 		Url struct { Type string; Value string }
 		XRootDPrefix struct { Type string; Value string }
 	}
