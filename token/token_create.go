@@ -141,14 +141,14 @@ func (config *TokenConfig) SetVersion(ver string) error {
 		if ver == "" {
 			ver = "scitokens:2.0"
 		} else if !scitokensVerPattern.MatchString(ver) {
-			return errors.New("the provided version '" + config.version +
+			return errors.New("the provided version '" + ver +
 				"' is not valid. It must match 'scitokens:<version>', where version is of the form 2.x")
 		}
 	} else if config.tokenProfile == TokenProfileWLCG {
 		if ver == "" {
 			ver = "1.0"
-		} else if !wlcgVerPattern.MatchString(config.version) {
-			return errors.New("the provided version '" + config.version + "' is not valid. It must be of the form '1.x'")
+		} else if !wlcgVerPattern.MatchString(ver) {
+			return errors.New("the provided version '" + ver + "' is not valid. It must be of the form '1.x'")
 		}
 	}
 	config.version = ver
