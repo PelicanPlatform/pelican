@@ -244,6 +244,7 @@ func TestListNamespaces(t *testing.T) {
 				tokenCfg.Lifetime = time.Minute
 				tokenCfg.Subject = "admin"
 				tokenCfg.AddScopes(token_scopes.WebUi_Access)
+				tokenCfg.AddAudienceAny()
 				token, err := tokenCfg.CreateToken()
 				require.NoError(t, err)
 				req.AddCookie(&http.Cookie{Name: "login", Value: token, Path: "/"})
