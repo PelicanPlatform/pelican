@@ -194,7 +194,13 @@ func downloadNamespace() ([]byte, error) {
 		return nil, errors.New("Federation.TopologyNamespaceUrl is not set; unable to locate valid caches")
 	}
 	log.Debugln("Downloading namespaces information from", topoNamespaceUrl)
-	resp, err := http.Get(topoNamespaceUrl)
+
+	req, err := http.NewRequest("GET", topoNamespaceUrl, nil)
+	if err != nil {
+		return nil, err
+	}
+	client := http.Client{Transport: config.GetTransport()}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}

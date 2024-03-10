@@ -26,6 +26,7 @@ import (
 	_ "embed"
 	"fmt"
 	"io/fs"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -71,6 +72,9 @@ var (
 
 	//go:embed resources/test-scitokens-cache-empty.cfg
 	cacheEmptyOutput string
+
+	//go:embed resources/osdf-authfile
+	authfileOutput string
 
 	sampleMultilineOutput = `foo \
 	bar
@@ -129,6 +133,36 @@ u eeccb14b.0 /nrp/protected/xenon-biggrid-nl/ rl
 )
 
 func TestOSDFAuthRetrieval(t *testing.T) {
+	svr := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "GET" {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		if r.URL.Path == "/origin/Authfile" && r.URL.RawQuery == "fqdn=sc-origin.chtc.wisc.edu" {
+			w.Header().Set("Content-Type", "text/plain")
+			w.WriteHeader(http.StatusOK)
+			_, err := w.Write([]byte(authfileOutput))
+			require.NoError(t, err)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+
+	// Hijack the common transport used by Pelican, forcing all connections to go to our test server
+	transport := config.GetTransport()
+	oldDial := transport.DialContext
+	transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		dialer := net.Dialer{}
+		return dialer.DialContext(ctx, svr.Listener.Addr().Network(), svr.Listener.Addr().String())
+	}
+	oldConfig := transport.TLSClientConfig
+	transport.TLSClientConfig = svr.TLS.Clone()
+	transport.TLSClientConfig.InsecureSkipVerify = true
+	t.Cleanup(func() {
+		transport.DialContext = oldDial
+		transport.TLSClientConfig = oldConfig
+	})
+
 	viper.Reset()
 	viper.Set("Federation.TopologyUrl", "https://topology.opensciencegrid.org/")
 	viper.Set("Server.Hostname", "sc-origin.chtc.wisc.edu")
