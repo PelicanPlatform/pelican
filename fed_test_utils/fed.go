@@ -103,6 +103,11 @@ func NewFedTest(t *testing.T) (ft *FedTest) {
 	err = os.Chmod(originDir, permissions)
 	require.NoError(t, err)
 
+	// Change ownership on the temporary origin directory so files can be uploaded
+	uinfo, err := config.GetDaemonUserInfo()
+	require.NoError(t, err)
+	require.NoError(t, os.Chown(originDir, uinfo.Uid, uinfo.Gid))
+
 	viper.Set("Origin.ExportVolume", originDir+":/test")
 	viper.Set("Origin.Mode", "posix")
 	viper.Set("Origin.EnableFallbackRead", true)
