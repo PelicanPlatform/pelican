@@ -123,15 +123,12 @@ func createToken(namespace, subject, audience string, desiredScope token_scopes.
 		return
 	}
 
-	tokenCfg := token.TokenConfig{
-		Lifetime:     time.Minute,
-		TokenProfile: token.WLCG,
-		Audience:     []string{audience},
-		Issuer:       issuerUrl,
-		Version:      "1.0",
-		Subject:      subject,
-	}
-	tokenCfg.AddScopes([]token_scopes.TokenScope{desiredScope})
+	tokenCfg := token.NewWLCGToken()
+	tokenCfg.Lifetime = time.Minute
+	tokenCfg.Issuer = issuerUrl
+	tokenCfg.Subject = subject
+	tokenCfg.AddAudiences(audience)
+	tokenCfg.AddScopes(desiredScope)
 	tokenStr, err = tokenCfg.CreateToken()
 
 	return
@@ -170,7 +167,7 @@ func verifyToken(ctx context.Context, token, namespace, audience string, require
 
 	scopeValidator := token_scopes.CreateScopeValidator([]token_scopes.TokenScope{requiredScope}, false)
 	err = jwt.Validate(tok,
-		jwt.WithAudience(param.Server_ExternalWebUrl.GetString()),
+		jwt.WithAudience(audience),
 		jwt.WithValidator(scopeValidator),
 		jwt.WithClaimValue("iss", issuerUrl),
 	)

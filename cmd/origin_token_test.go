@@ -21,22 +21,24 @@ package main
 import (
 	"testing"
 
+	"github.com/pelicanplatform/pelican/token"
+
 	"github.com/stretchr/testify/assert"
 )
 
 func TestParseClaimsToTokenConfig(t *testing.T) {
 	// Should parse basic fields correctly
 	claims := []string{"aud=foo", "scope=baz", "ver=1.0", "iss=http://random.org"}
-	tokenConfig, err := parseClaimsToTokenConfig(claims)
+	tokenConfig, err := parseClaimsToTokenConfig(token.TokenProfileWLCG.String(), claims)
 	assert.NoError(t, err)
 	assert.Equal(t, "http://random.org", tokenConfig.Issuer)
-	assert.Equal(t, []string{"foo"}, tokenConfig.Audience)
+	assert.Equal(t, []string{"foo"}, tokenConfig.GetAudiences())
 	assert.Equal(t, "baz", tokenConfig.GetScope())
-	assert.Equal(t, "1.0", tokenConfig.Version)
+	assert.Equal(t, "1.0", tokenConfig.GetVersion())
 
 	// Give it something valid
 	claims = []string{"foo=boo", "bar=baz"}
-	tokenConfig, err = parseClaimsToTokenConfig(claims)
+	tokenConfig, err = parseClaimsToTokenConfig(token.TokenProfileWLCG.String(), claims)
 	assert.NoError(t, err)
 	assert.Equal(t, "boo", tokenConfig.Claims["foo"])
 	assert.Equal(t, "baz", tokenConfig.Claims["bar"])
@@ -44,14 +46,14 @@ func TestParseClaimsToTokenConfig(t *testing.T) {
 
 	// Give it something with multiple of the same claim key
 	claims = []string{"foo=boo", "foo=baz"}
-	tokenConfig, err = parseClaimsToTokenConfig(claims)
+	tokenConfig, err = parseClaimsToTokenConfig(token.TokenProfileWLCG.String(), claims)
 	assert.NoError(t, err)
 	assert.Equal(t, "boo baz", tokenConfig.Claims["foo"])
 	assert.Equal(t, 1, len(tokenConfig.Claims))
 
 	// Give it something without = delimiter
 	claims = []string{"foo=boo", "barbaz"}
-	_, err = parseClaimsToTokenConfig(claims)
+	_, err = parseClaimsToTokenConfig(token.TokenProfileWLCG.String(), claims)
 	assert.EqualError(t, err, "The claim 'barbaz' is invalid. Did you forget an '='?")
 }
 

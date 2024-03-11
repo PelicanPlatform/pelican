@@ -77,15 +77,12 @@ func (t TestFileTransferImpl) generateFileTestScitoken() (string, error) {
 		return "", errors.New("Failed to create token: Invalid iss, Server_ExternalWebUrl is empty")
 	}
 
-	fTestTokenCfg := token.TokenConfig{
-		TokenProfile: token.WLCG,
-		Lifetime:     time.Minute,
-		Issuer:       issuerUrl,
-		Audience:     t.audiences,
-		Version:      "1.0",
-		Subject:      "origin",
-		Claims:       map[string]string{"scope": "storage.read:/ storage.modify:/"},
-	}
+	fTestTokenCfg := token.NewWLCGToken()
+	fTestTokenCfg.Lifetime = time.Minute
+	fTestTokenCfg.Issuer = issuerUrl
+	fTestTokenCfg.Subject = "origin"
+	fTestTokenCfg.Claims = map[string]string{"scope": "storage.read:/ storage.modify:/"}
+	fTestTokenCfg.AddAudiences(t.audiences...)
 
 	// CreateToken also handles validation for us
 	tok, err := fTestTokenCfg.CreateToken()

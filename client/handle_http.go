@@ -49,6 +49,7 @@ import (
 	"github.com/studio-b12/gowebdav"
 	"github.com/vbauerster/mpb/v8"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/time/rate"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/namespaces"
@@ -83,7 +84,7 @@ type (
 	// Represents the results of a single object transfer,
 	// potentially across multiple attempts / retries.
 	TransferResults struct {
-		JobId            uuid.UUID // The job ID this result corresponds to
+		jobId            uuid.UUID // The job ID this result corresponds to
 		job              *TransferJob
 		Error            error
 		TransferredBytes int64
@@ -114,6 +115,9 @@ type (
 
 		// Proxy specifies if a proxy should be used
 		Proxy bool
+
+		// If the Url scheme is unix, this is the path to connect to
+		UnixSocket string
 
 		// Specifies the pack option in the transfer URL
 		PackOption string
@@ -207,8 +211,9 @@ type (
 		ctx           context.Context
 		cancel        context.CancelFunc
 		callback      TransferCallbackFunc
-		skipAcquire   bool // Enable/disable the token acquisition logic.  Defaults to acquiring a token
-		tokenLocation string
+		skipAcquire   bool   // Enable/disable the token acquisition logic.  Defaults to acquiring a token
+		tokenLocation string // Location of a token file to use for transfers
+		token         string // Token that should be used for transfers
 		work          chan *TransferJob
 		closed        bool
 		caches        []*url.URL
@@ -222,6 +227,7 @@ type (
 	identTransferOptionCallback      struct{}
 	identTransferOptionTokenLocation struct{}
 	identTransferOptionAcquireToken  struct{}
+	identTransferOptionToken         struct{}
 
 	transferDetailsOptions struct {
 		NeedsToken bool
@@ -319,9 +325,13 @@ func hasPort(host string) bool {
 func newTransferResults(job *TransferJob) TransferResults {
 	return TransferResults{
 		job:      job,
-		JobId:    job.uuid,
+		jobId:    job.uuid,
 		Attempts: make([]TransferResult, 0),
 	}
+}
+
+func (tr TransferResults) ID() string {
+	return tr.jobId.String()
 }
 
 // Returns a new transfer engine object whose lifetime is tied
@@ -387,6 +397,13 @@ func WithTokenLocation(location string) TransferOption {
 	return option.New(identTransferOptionTokenLocation{}, location)
 }
 
+// Create an option to provide a specific token to the transfer
+//
+// The contents of the token will be used as part of the HTTP request
+func WithToken(token string) TransferOption {
+	return option.New(identTransferOptionToken{}, token)
+}
+
 // Create an option to specify the token acquisition logic
 //
 // Token acquisition (e.g., using OAuth2 to get a token when one
@@ -421,6 +438,8 @@ func (te *TransferEngine) NewClient(options ...TransferOption) (client *Transfer
 			client.tokenLocation = option.Value().(string)
 		case identTransferOptionAcquireToken{}:
 			client.skipAcquire = !option.Value().(bool)
+		case identTransferOptionToken{}:
+			client.token = option.Value().(string)
 		}
 	}
 	func() {
@@ -429,8 +448,13 @@ func (te *TransferEngine) NewClient(options ...TransferOption) (client *Transfer
 		te.resultsMap[id] = client.results
 		te.workMap[id] = client.work
 	}()
-	log.Debugln("Inserted work map for client", id.String())
-	te.notifyChan <- true
+	log.Debugln("Created new client", id.String())
+	select {
+	case <-te.ctx.Done():
+		log.Debugln("New client unable to start; transfer engine has been canceled")
+		err = te.ctx.Err()
+	case te.notifyChan <- true:
+	}
 	return
 }
 
@@ -452,7 +476,10 @@ func (te *TransferEngine) Shutdown() error {
 // Closes the TransferEngine.  No new work may
 // be submitted.  Any ongoing work will continue
 func (te *TransferEngine) Close() {
-	te.closeChan <- true
+	select {
+	case <-te.ctx.Done():
+	case te.closeChan <- true:
+	}
 }
 
 // Launches a helper goroutine that ensures completed
@@ -727,19 +754,22 @@ func (tc *TransferClient) NewTransferJob(remoteUrl *url.URL, localPath string, u
 		tokenLocation: tc.tokenLocation,
 		upload:        upload,
 		uuid:          id,
+		token:         tc.token,
 	}
 	tj.ctx, tj.cancel = context.WithCancel(tc.ctx)
 
 	for _, option := range options {
 		switch option.Ident() {
 		case identTransferOptionCaches{}:
-			tc.caches = option.Value().([]*url.URL)
+			tj.caches = option.Value().([]*url.URL)
 		case identTransferOptionCallback{}:
-			tc.callback = option.Value().(TransferCallbackFunc)
+			tj.callback = option.Value().(TransferCallbackFunc)
 		case identTransferOptionTokenLocation{}:
-			tc.tokenLocation = option.Value().(string)
+			tj.tokenLocation = option.Value().(string)
 		case identTransferOptionAcquireToken{}:
-			tc.skipAcquire = !option.Value().(bool)
+			tj.skipAcquire = !option.Value().(bool)
+		case identTransferOptionToken{}:
+			tj.token = option.Value().(string)
 		}
 	}
 
@@ -780,11 +810,24 @@ func (tc *TransferClient) NewTransferJob(remoteUrl *url.URL, localPath string, u
 	}
 	tj.namespace = ns
 
-	if upload || ns.UseTokenOnRead {
+	if upload || ns.UseTokenOnRead && tj.token == "" {
 		tj.token, err = getToken(remoteUrl, ns, true, "", tc.tokenLocation, !tj.skipAcquire)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get token for transfer: %v", err)
 		}
+	}
+
+	log.Debugf("Created new transfer job, ID %s client %s, for URL %s", tj.uuid.String(), tc.id.String(), remoteUrl.String())
+	return
+}
+
+// Returns the status of the transfer job-to-file(s) lookup
+//
+// ok is true if the lookup has completed.
+func (tj *TransferJob) GetLookupStatus() (ok bool, err error) {
+	ok = tj.lookupDone.Load()
+	if ok {
+		err = tj.lookupErr
 	}
 	return
 }
@@ -891,7 +934,10 @@ func newTransferDetails(cache namespaces.Cache, opts transferDetailsOptions) []t
 		log.Errorln("Failed to parse cache:", cache, "error:", err)
 		return nil
 	}
-	if cacheURL.Host == "" {
+	if cacheURL.Scheme == "unix" && cacheURL.Host != "" {
+		cacheURL.Path = path.Clean("/" + cacheURL.Host + "/" + cacheURL.Path)
+		cacheURL.Host = ""
+	} else if cacheURL.Scheme != "unix" && cacheURL.Host == "" {
 		// Assume the cache is just a hostname
 		cacheURL.Host = cacheEndpoint
 		cacheURL.Path = ""
@@ -900,26 +946,32 @@ func newTransferDetails(cache namespaces.Cache, opts transferDetailsOptions) []t
 	}
 	log.Debugf("Parsed Cache: %s", cacheURL.String())
 	if opts.NeedsToken {
-		cacheURL.Scheme = "https"
-		if !hasPort(cacheURL.Host) {
-			// Add port 8444 and 8443
-			urlCopy := *cacheURL
-			urlCopy.Host += ":8444"
-			details = append(details, transferAttemptDetails{
-				Url:        &urlCopy,
-				Proxy:      false,
-				PackOption: opts.PackOption,
-			})
-			// Strip the port off and add 8443
-			cacheURL.Host = cacheURL.Host + ":8443"
+		if cacheURL.Scheme != "unix" {
+			cacheURL.Scheme = "https"
+			if !hasPort(cacheURL.Host) {
+				// Add port 8444 and 8443
+				urlCopy := *cacheURL
+				urlCopy.Host += ":8444"
+				details = append(details, transferAttemptDetails{
+					Url:        &urlCopy,
+					Proxy:      false,
+					PackOption: opts.PackOption,
+				})
+				// Strip the port off and add 8443
+				cacheURL.Host = cacheURL.Host + ":8443"
+			}
 		}
-		// Whether port is specified or not, add a transfer without proxy
-		details = append(details, transferAttemptDetails{
+		det := transferAttemptDetails{
 			Url:        cacheURL,
 			Proxy:      false,
 			PackOption: opts.PackOption,
-		})
-	} else {
+		}
+		if cacheURL.Scheme == "unix" {
+			det.UnixSocket = cacheURL.Path
+		}
+		// Whether port is specified or not, add a transfer without proxy
+		details = append(details, det)
+	} else if cacheURL.Scheme == "" || cacheURL.Scheme == "http" {
 		cacheURL.Scheme = "http"
 		if !hasPort(cacheURL.Host) {
 			cacheURL.Host += ":8000"
@@ -937,6 +989,16 @@ func newTransferDetails(cache namespaces.Cache, opts transferDetailsOptions) []t
 				PackOption: opts.PackOption,
 			})
 		}
+	} else {
+		det := transferAttemptDetails{
+			Url:        cacheURL,
+			Proxy:      false,
+			PackOption: opts.PackOption,
+		}
+		if cacheURL.Scheme == "unix" {
+			det.UnixSocket = cacheURL.Path
+		}
+		details = append(details, det)
 	}
 
 	return details
@@ -944,9 +1006,9 @@ func newTransferDetails(cache namespaces.Cache, opts transferDetailsOptions) []t
 
 type CacheInterface interface{}
 
-func GenerateTransferDetailsUsingCache(cache CacheInterface, opts transferDetailsOptions) []transferAttemptDetails {
+func generateTransferDetailsUsingCache(cache CacheInterface, opts transferDetailsOptions) []transferAttemptDetails {
 	if directorCache, ok := cache.(namespaces.DirectorCache); ok {
-		return NewTransferDetailsUsingDirector(directorCache, opts)
+		return newTransferDetailsUsingDirector(directorCache, opts)
 	} else if cache, ok := cache.(namespaces.Cache); ok {
 		return newTransferDetails(cache, opts)
 	}
@@ -964,6 +1026,8 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 			err = errors.New(ret)
 		}
 	}()
+
+	log.Debugln("Processing transfer job for URL", job.job.remoteURL.String())
 
 	packOption := job.job.remoteURL.Query().Get("pack")
 	if packOption != "" {
@@ -1004,7 +1068,7 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 				NeedsToken: job.job.namespace.ReadHTTPS || job.job.namespace.UseTokenOnRead,
 				PackOption: packOption,
 			}
-			transfers = append(transfers, GenerateTransferDetailsUsingCache(cache, td)...)
+			transfers = append(transfers, generateTransferDetailsUsingCache(cache, td)...)
 		}
 
 		if len(transfers) > 0 {
@@ -1071,7 +1135,7 @@ func runTransferWorker(ctx context.Context, workChan <-chan *clientTransferFile,
 				results <- &clientTransferResults{
 					id: file.uuid,
 					results: TransferResults{
-						JobId: file.jobId,
+						jobId: file.jobId,
 						Error: file.file.ctx.Err(),
 					},
 				}
@@ -1081,7 +1145,7 @@ func runTransferWorker(ctx context.Context, workChan <-chan *clientTransferFile,
 				results <- &clientTransferResults{
 					id: file.uuid,
 					results: TransferResults{
-						JobId: file.jobId,
+						jobId: file.jobId,
 						Error: file.file.err,
 					},
 				}
@@ -1094,10 +1158,10 @@ func runTransferWorker(ctx context.Context, workChan <-chan *clientTransferFile,
 			} else {
 				transferResults, err = downloadObject(file.file)
 			}
-			transferResults.JobId = file.jobId
+			transferResults.jobId = file.jobId
 			transferResults.Scheme = file.file.remoteURL.Scheme
 			if err != nil {
-				log.Errorf("Error when attempting to transfer object %s for client %s", file.file.remoteURL, file.uuid.String())
+				log.Errorf("Error when attempting to transfer object %s for client %s: %v", file.file.remoteURL, file.uuid.String(), err)
 				transferResults = newTransferResults(file.file.job)
 				transferResults.Scheme = file.file.remoteURL.Scheme
 				transferResults.Error = err
@@ -1120,25 +1184,137 @@ func runTransferWorker(ctx context.Context, workChan <-chan *clientTransferFile,
 	}
 }
 
+// If there are multiple potential attempts, try to see if we can quickly eliminate some of them
+//
+// Attempts a HEAD against all the endpoints simultaneously.  Put any that don't respond within
+// a second behind those that do respond.
+func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDetails) (size int64, results []transferAttemptDetails) {
+	size = -1
+	if len(attempts) < 2 {
+		results = attempts
+		return
+	}
+	transport := config.GetTransport()
+	headChan := make(chan struct {
+		idx  int
+		size uint64
+		err  error
+	})
+	defer close(headChan)
+	ctx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	for idx, transferEndpoint := range attempts {
+		tUrl := *transferEndpoint.Url
+		tUrl.Path = path
+
+		go func(idx int, tUrl string) {
+			headClient := &http.Client{Transport: transport}
+			headRequest, _ := http.NewRequestWithContext(ctx, "HEAD", tUrl, nil)
+			var headResponse *http.Response
+			headResponse, err := headClient.Do(headRequest)
+			if err != nil {
+				headChan <- struct {
+					idx  int
+					size uint64
+					err  error
+				}{idx, 0, err}
+				return
+			}
+			headResponse.Body.Close()
+			contentLengthStr := headResponse.Header.Get("Content-Length")
+			size := int64(0)
+			if contentLengthStr != "" {
+				size, err = strconv.ParseInt(contentLengthStr, 10, 64)
+				if err != nil {
+					err = errors.Wrap(err, "problem converting Content-Length in response to an int")
+					log.Errorln(err.Error())
+
+				}
+			}
+			headChan <- struct {
+				idx  int
+				size uint64
+				err  error
+			}{idx, uint64(size), err}
+		}(idx, tUrl.String())
+	}
+	// 1 -> success.
+	// 0 -> pending.
+	// -1 -> error.
+	finished := make(map[int]int)
+	for ctr := 0; ctr != len(attempts); ctr++ {
+		result := <-headChan
+		if result.err != nil {
+			if result.err != context.Canceled {
+				log.Debugf("Failure when doing a HEAD request against %s: %s", attempts[result.idx].Url.String(), result.err.Error())
+				finished[result.idx] = -1
+			}
+		} else {
+			finished[result.idx] = 1
+			if result.idx == 0 {
+				cancel()
+				// If the first responds successfully, we want to return immediately instead of giving
+				// the other caches time to respond - the result is "good enough".
+				// - Any cache with confirmed errors (-1) is sorted to the back.
+				// - Any cache which is still pending (0) is kept in place.
+				for ctr := 0; ctr < len(attempts); ctr++ {
+					finished[ctr] = 1
+				}
+			}
+			if size <= int64(result.size) {
+				size = int64(result.size)
+			}
+		}
+	}
+	// Sort all the successful attempts first; use stable sort so the original ordering
+	// is preserved if the two entries are both successful or both unsuccessful.
+	type sorter struct {
+		good    int
+		attempt transferAttemptDetails
+	}
+	tmpResults := make([]sorter, len(attempts))
+	for idx, attempt := range attempts {
+		tmpResults[idx] = sorter{finished[idx], attempt}
+	}
+	results = make([]transferAttemptDetails, len(attempts))
+	slices.SortStableFunc(tmpResults, func(left sorter, right sorter) int {
+		if left.good > right.good {
+			return -1
+		}
+		return 0
+	})
+	for idx, val := range tmpResults {
+		results[idx] = val.attempt
+	}
+	return
+}
+
 func downloadObject(transfer *transferFile) (transferResults TransferResults, err error) {
-	log.Debugln("Downloading file from", transfer.remoteURL)
+	log.Debugln("Downloading file from", transfer.remoteURL, "to", transfer.localPath)
 	// Remove the source from the file path
 	directory := path.Dir(transfer.localPath)
 	var downloaded int64
 	if err = os.MkdirAll(directory, 0700); err != nil {
 		return
 	}
+
+	size, attempts := sortAttempts(transfer.job.ctx, transfer.remoteURL.Path, transfer.attempts)
+
 	transferResults = newTransferResults(transfer.job)
 	success := false
-	for idx, transferEndpoint := range transfer.attempts { // For each transfer (usually 3), populate each attempt given
+	for idx, transferEndpoint := range attempts { // For each transfer attempt (usually 3), try to download via HTTP
 		var attempt TransferResult
 		var timeToFirstByte float64
 		var serverVersion string
 		attempt.Number = idx // Start with 0
 		attempt.Endpoint = transferEndpoint.Url.Host
-		transferEndpoint.Url.Path = transfer.remoteURL.Path
+		// Make a copy of the transfer endpoint URL; otherwise, when we mutate the pointer, other parallel
+		// workers might download from the wrong path.
+		transferEndpointUrl := *transferEndpoint.Url
+		transferEndpointUrl.Path = transfer.remoteURL.Path
+		transferEndpoint.Url = &transferEndpointUrl
 		transferStartTime := time.Now()
-		if downloaded, timeToFirstByte, serverVersion, err = downloadHTTP(transfer.ctx, transfer.engine, transfer.callback, transferEndpoint, transfer.localPath, transfer.token, &transfer.accounting); err != nil {
+		if downloaded, timeToFirstByte, serverVersion, err = downloadHTTP(transfer.ctx, transfer.engine, transfer.callback, transferEndpoint, transfer.localPath, size, transfer.token, &transfer.accounting); err != nil {
 			log.Debugln("Failed to download:", err)
 			transferEndTime := time.Now()
 			transferTime := transferEndTime.Unix() - transferStartTime.Unix()
@@ -1210,7 +1386,7 @@ func parseTransferStatus(status string) (int, string) {
 // Perform the actual download of the file
 //
 // Returns the downloaded size, time to 1st byte downloaded, serverVersion and an error if there is one
-func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCallbackFunc, transfer transferAttemptDetails, dest string, token string, payload *payloadStruct) (downloaded int64, timeToFirstByte float64, serverVersion string, err error) {
+func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCallbackFunc, transfer transferAttemptDetails, dest string, totalSize int64, token string, payload *payloadStruct) (downloaded int64, timeToFirstByte float64, serverVersion string, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Errorln("Panic occurred in downloadHTTP:", r)
@@ -1219,15 +1395,17 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 		}
 	}()
 
-	var totalSize int64 = 0
-
 	lastUpdate := time.Now()
 	if callback != nil {
 		callback(dest, 0, 0, false)
 	}
 	defer func() {
 		if callback != nil {
-			callback(dest, downloaded, totalSize, true)
+			finalSize := int64(0)
+			if totalSize >= 0 {
+				finalSize = totalSize
+			}
+			callback(dest, downloaded, finalSize, true)
 		}
 		if te != nil {
 			te.ewmaCtr.Add(int64(time.Since(lastUpdate)))
@@ -1240,6 +1418,19 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	if !transfer.Proxy {
 		transport.Proxy = nil
 	}
+	transferUrl := *transfer.Url
+	if transfer.Url.Scheme == "unix" {
+		transport.Proxy = nil // Proxies make no sense when reading via a Unix socket
+		transport = transport.Clone()
+		transport.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
+			dialer := net.Dialer{}
+			return dialer.DialContext(ctx, "unix", transfer.UnixSocket)
+		}
+		transferUrl.Scheme = "http"
+		// The host is ignored since we override the dial function; however, I find it useful
+		// in debug messages to see that this went to the local cache.
+		transferUrl.Host = "localhost"
+	}
 	httpClient, ok := client.HTTPClient.(*http.Client)
 	if !ok {
 		return 0, 0, "", errors.New("Internal error: implementation is not a http.Client type")
@@ -1248,7 +1439,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	log.Debugln("Transfer URL String:", transfer.Url.String())
+	log.Debugln("Transfer URL String:", transferUrl.String())
 	var req *grab.Request
 	var unpacker *autoUnpacker
 	if transfer.PackOption != "" {
@@ -1263,11 +1454,16 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 			}
 		}
 		unpacker = newAutoUnpacker(dest, behavior)
-		if req, err = grab.NewRequestToWriter(unpacker, transfer.Url.String()); err != nil {
+		if req, err = grab.NewRequestToWriter(unpacker, transferUrl.String()); err != nil {
 			return 0, 0, "", errors.Wrap(err, "Failed to create new download request")
 		}
-	} else if req, err = grab.NewRequest(dest, transfer.Url.String()); err != nil {
+	} else if req, err = grab.NewRequest(dest, transferUrl.String()); err != nil {
 		return 0, 0, "", errors.Wrap(err, "Failed to create new download request")
+	}
+
+	rateLimit := param.Client_MaximumDownloadSpeed.GetInt()
+	if rateLimit > 0 {
+		req.RateLimiter = rate.NewLimiter(rate.Limit(rateLimit), 64*1024)
 	}
 
 	if token != "" {
@@ -1310,9 +1506,9 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	// Size of the download
 	totalSize = resp.Size()
 	// Do a head request for content length if resp.Size is unknown
-	if totalSize <= 0 {
-		headClient := &http.Client{Transport: config.GetTransport()}
-		headRequest, _ := http.NewRequest("HEAD", transfer.Url.String(), nil)
+	if totalSize <= 0 && !resp.IsComplete() {
+		headClient := &http.Client{Transport: transport}
+		headRequest, _ := http.NewRequest("HEAD", transferUrl.String(), nil)
 		var headResponse *http.Response
 		headResponse, err = headClient.Do(headRequest)
 		if err != nil {
@@ -1769,18 +1965,18 @@ func (te *TransferEngine) walkDirDownload(job *clientTransferJob, transfers []tr
 //
 // Recursively walks through the remote server directory, emitting transfer files
 // for the engine to process.
-func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfers []transferAttemptDetails, files chan *clientTransferFile, path string, client *gowebdav.Client) error {
-	log.Debugln("Reading directory: ", path)
+func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfers []transferAttemptDetails, files chan *clientTransferFile, remotePath string, client *gowebdav.Client) error {
 	// Check for cancelation since the client does not respect the context
 	if err := job.job.ctx.Err(); err != nil {
 		return err
 	}
-	infos, err := client.ReadDir(path)
+	infos, err := client.ReadDir(remotePath)
 	if err != nil {
 		return err
 	}
+	localBase := strings.TrimPrefix(remotePath, job.job.remoteURL.Path)
 	for _, info := range infos {
-		newPath := path + "/" + info.Name()
+		newPath := remotePath + "/" + info.Name()
 		if info.IsDir() {
 			err := te.walkDirDownloadHelper(job, transfers, files, newPath, client)
 			if err != nil {
@@ -1801,7 +1997,7 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 					engine:     te,
 					remoteURL:  &url.URL{Path: newPath},
 					packOption: transfers[0].PackOption,
-					localPath:  job.job.localPath,
+					localPath:  path.Join(job.job.localPath, localBase, info.Name()),
 					upload:     job.job.upload,
 					token:      job.job.token,
 					attempts:   transfers,
@@ -1862,85 +2058,142 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 	return err
 }
 
-func statHttp(ctx context.Context, dest *url.URL, namespace namespaces.Namespace, tokenLocation string, acquire bool) (size uint64, err error) {
-
-	token, err := getToken(dest, namespace, false, "", tokenLocation, acquire)
-	if err != nil {
-		return
-	}
-
-	// Parse the writeback host as a URL
-	writebackhostUrl, err := url.Parse(namespace.WriteBackHost)
-	if err != nil {
-		return
-	}
-	dest.Host = writebackhostUrl.Host
-	dest.Scheme = "https"
-
-	canDisableProxy := CanDisableProxy()
-	disableProxy := !isProxyEnabled()
-
-	var resp *http.Response
-	for {
-		transport := config.GetTransport()
-		if disableProxy {
-			log.Debugln("Performing HEAD (without proxy)", dest.String())
-			transport.Proxy = nil
-		} else {
-			log.Debugln("Performing HEAD", dest.String())
-		}
-
-		client := &http.Client{Transport: transport}
-		var req *http.Request
-		req, err = http.NewRequestWithContext(ctx, "HEAD", dest.String(), nil)
+// Invoke HEAD against a remote URL, using the provided namespace information
+//
+// If a "dirlist host" is given, then that is used for the namespace info.
+// Otherwise, the first three caches are queried simultaneously.
+// For any of the queries, if the attempt with the proxy fails, a second attempt
+// is made without.
+func statHttp(ctx context.Context, dest *url.URL, namespace namespaces.Namespace, token string) (size uint64, err error) {
+	statHosts := make([]url.URL, 0, 3)
+	if namespace.DirListHost != "" {
+		var endpoint *url.URL
+		endpoint, err = url.Parse(namespace.DirListHost)
 		if err != nil {
-			log.Errorln("Failed to create HTTP request:", err)
 			return
 		}
-
-		if token != "" {
-			req.Header.Set("Authorization", "Bearer "+token)
-		}
-
-		resp, err = client.Do(req)
-		if err == nil {
-			break
-		}
-		if urle, ok := err.(*url.Error); canDisableProxy && !disableProxy && ok && urle.Unwrap() != nil {
-			if ope, ok := urle.Unwrap().(*net.OpError); ok && ope.Op == "proxyconnect" {
-				log.Warnln("Failed to connect to proxy; will retry without:", ope)
-				disableProxy = true
-				continue
+		statHosts = append(statHosts, *endpoint)
+	} else if len(namespace.SortedDirectorCaches) > 0 {
+		for idx, cache := range namespace.SortedDirectorCaches {
+			if idx > 2 {
+				break
 			}
+			var endpoint *url.URL
+			endpoint, err = url.Parse(cache.EndpointUrl)
+			if err != nil {
+				return
+			}
+			statHosts = append(statHosts, *endpoint)
 		}
-		log.Errorln("Failed to get HTTP response:", err)
-		return
+	} else if namespace.WriteBackHost != "" {
+		var endpoint *url.URL
+		endpoint, err = url.Parse(namespace.WriteBackHost)
+		if err != nil {
+			return
+		}
+		statHosts = append(statHosts, *endpoint)
 	}
 
-	if resp.StatusCode == 200 {
-		defer resp.Body.Close()
-		contentLengthStr := resp.Header.Get("Content-Length")
-		if len(contentLengthStr) == 0 {
-			log.Errorln("HEAD response did not include Content-Length header")
-			err = errors.New("HEAD response did not include Content-Length header")
-			return
-		}
-		var contentLength int64
-		contentLength, err = strconv.ParseInt(contentLengthStr, 10, 64)
-		if err != nil {
-			log.Errorf("Unable to parse Content-Length header value (%s) as integer: %s", contentLengthStr, err)
-			return
-		}
-		return uint64(contentLength), nil
-	} else {
-		var respB []byte
-		respB, err = io.ReadAll(resp.Body)
-		if err != nil {
-			log.Errorln("Failed to read error message:", err)
-			return
-		}
-		defer resp.Body.Close()
-		err = &HttpErrResp{resp.StatusCode, fmt.Sprintf("Request failed (HTTP status %d): %s", resp.StatusCode, string(respB))}
-		return
+	type statResults struct {
+		size uint64
+		err  error
 	}
+	resultsChan := make(chan statResults)
+	transport := config.GetTransport()
+	client := &http.Client{Transport: transport}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	for _, statUrl := range statHosts {
+		destCopy := *dest
+		destCopy.Host = statUrl.Host
+		destCopy.Scheme = statUrl.Scheme
+
+		go func(endpoint *url.URL) {
+			canDisableProxy := CanDisableProxy()
+			disableProxy := !isProxyEnabled()
+
+			var resp *http.Response
+			for {
+				if disableProxy {
+					log.Debugln("Performing HEAD (without proxy)", endpoint.String())
+					transport.Proxy = nil
+				} else {
+					log.Debugln("Performing HEAD", endpoint.String())
+				}
+
+				var req *http.Request
+				req, err = http.NewRequestWithContext(ctx, "HEAD", endpoint.String(), nil)
+				if err != nil {
+					log.Errorln("Failed to create HTTP request:", err)
+					resultsChan <- statResults{0, err}
+					return
+				}
+
+				if token != "" {
+					req.Header.Set("Authorization", "Bearer "+token)
+				}
+
+				resp, err = client.Do(req)
+				if err == nil {
+					break
+				}
+				if urle, ok := err.(*url.Error); canDisableProxy && !disableProxy && ok && urle.Unwrap() != nil {
+					if ope, ok := urle.Unwrap().(*net.OpError); ok && ope.Op == "proxyconnect" {
+						log.Warnln("Failed to connect to proxy; will retry without:", ope)
+						disableProxy = true
+						continue
+					}
+				}
+				log.Errorln("Failed to get HTTP response:", err)
+				resultsChan <- statResults{0, err}
+				return
+			}
+
+			defer resp.Body.Close()
+			if resp.StatusCode == 200 {
+				contentLengthStr := resp.Header.Get("Content-Length")
+				if len(contentLengthStr) == 0 {
+					log.Errorln("HEAD response did not include Content-Length header")
+					err = errors.New("HEAD response did not include Content-Length header")
+					resultsChan <- statResults{0, err}
+					return
+				}
+				var contentLength int64
+				contentLength, err = strconv.ParseInt(contentLengthStr, 10, 64)
+				if err != nil {
+					log.Errorf("Unable to parse Content-Length header value (%s) as integer: %s", contentLengthStr, err)
+					resultsChan <- statResults{0, err}
+					return
+				}
+				resultsChan <- statResults{uint64(contentLength), nil}
+			} else {
+				var respB []byte
+				respB, err = io.ReadAll(resp.Body)
+				if err != nil {
+					log.Errorln("Failed to read error message:", err)
+					return
+				}
+				err = &HttpErrResp{resp.StatusCode, fmt.Sprintf("Request failed (HTTP status %d): %s", resp.StatusCode, string(respB))}
+				resultsChan <- statResults{0, err}
+			}
+		}(&destCopy)
+	}
+	success := false
+	for ctr := 0; ctr < len(statHosts); ctr++ {
+		result := <-resultsChan
+		if result.err == nil {
+			if !success {
+				cancel()
+				success = true
+				size = result.size
+			}
+		} else if err == nil && result.err != context.Canceled {
+			err = result.err
+		}
+	}
+	if success {
+		err = nil
+	}
+	return
 }

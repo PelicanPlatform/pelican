@@ -21,6 +21,7 @@ package web_ui
 import (
 	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -41,6 +42,56 @@ import (
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
+func TestPrometheusUnprotected(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
+	viper.Reset()
+
+	av1 := route.New().WithPrefix("/api/v1.0/prometheus")
+	av1.Get("/query", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, err := w.Write([]byte("Prometheus response"))
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	})
+
+	// Create temp dir for the origin key file
+	tDir := t.TempDir()
+	kfile := filepath.Join(tDir, "testKey")
+	//Setup a private key
+	viper.Set("IssuerKey", kfile)
+	config.InitConfig()
+	err := config.InitServer(ctx, config.OriginType)
+	require.NoError(t, err)
+
+	w := httptest.NewRecorder()
+	c, r := gin.CreateTestContext(w)
+
+	viper.Set("Monitoring.PromQLAuthorization", false)
+
+	// Set ExternalWebUrl so that IssuerCheck can pass
+	viper.Set("Server.ExternalWebUrl", "https://test-origin.org:8444")
+
+	c.Request = &http.Request{
+		URL: &url.URL{},
+	}
+
+	// Set the request to run through the promQueryEngineAuthHandler function
+	r.GET("/api/v1.0/prometheus/*any", promQueryEngineAuthHandler(av1))
+	c.Request, _ = http.NewRequest(http.MethodGet, "/api/v1.0/prometheus/query", bytes.NewBuffer([]byte(`{}`)))
+	r.ServeHTTP(w, c.Request)
+
+	assert.Equal(t, 200, w.Result().StatusCode)
+	resultBytes, err := io.ReadAll(w.Result().Body)
+	require.NoError(t, err, "Error reading the response body")
+
+	assert.NotEmpty(t, string(resultBytes), "Response is 200 but with an empty body. Potentially Prometheus handler is not called in promQueryEngineAuthHandler")
+	assert.Contains(t, string(resultBytes), `Prometheus response`)
+}
+
 // Test the Prometheus query engine endpoint auth check with an server issuer token
 // set in cookie
 func TestPrometheusProtectionCookieAuth(t *testing.T) {
@@ -49,7 +100,6 @@ func TestPrometheusProtectionCookieAuth(t *testing.T) {
 	defer cancel()
 
 	viper.Reset()
-	viper.Set("Monitoring.PromQLAuthorization", true)
 
 	av1 := route.New().WithPrefix("/api/v1.0/prometheus")
 
@@ -65,6 +115,8 @@ func TestPrometheusProtectionCookieAuth(t *testing.T) {
 	w := httptest.NewRecorder()
 	c, r := gin.CreateTestContext(w)
 
+	viper.Set("Monitoring.PromQLAuthorization", true)
+
 	// Set ExternalWebUrl so that IssuerCheck can pass
 	viper.Set("Server.ExternalWebUrl", "https://test-origin.org:8444")
 
@@ -73,15 +125,13 @@ func TestPrometheusProtectionCookieAuth(t *testing.T) {
 	}
 
 	issuerUrl := param.Server_ExternalWebUrl.GetString()
-	promTokenCfg := token.TokenConfig{
-		TokenProfile: token.WLCG,
-		Lifetime:     10 * time.Minute,
-		Issuer:       issuerUrl,
-		Audience:     []string{issuerUrl},
-		Version:      "1.0",
-		Subject:      "sub",
-		Claims:       map[string]string{"scope": token_scopes.Monitoring_Query.String()},
-	}
+	promTokenCfg := token.NewWLCGToken()
+
+	promTokenCfg.Lifetime = 10 * time.Minute
+	promTokenCfg.Issuer = issuerUrl
+	promTokenCfg.AddAudiences(issuerUrl)
+	promTokenCfg.Subject = "sub"
+	promTokenCfg.Claims = map[string]string{"scope": token_scopes.Monitoring_Query.String()}
 
 	tok, err := promTokenCfg.CreateToken()
 	assert.NoError(t, err, "failed to create prometheus token")
@@ -128,15 +178,12 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 
 	// Shared function to create a token
 	createToken := func(scope, aud string) string {
-		tokenCfg := token.TokenConfig{
-			TokenProfile: token.WLCG,
-			Lifetime:     param.Monitoring_TokenExpiresIn.GetDuration(),
-			Issuer:       issuerUrl,
-			Audience:     []string{aud},
-			Version:      "1.0",
-			Subject:      "sub",
-			Claims:       map[string]string{"scope": scope},
-		}
+		tokenCfg := token.NewWLCGToken()
+		tokenCfg.Lifetime = param.Monitoring_TokenExpiresIn.GetDuration()
+		tokenCfg.Issuer = issuerUrl
+		tokenCfg.AddAudiences(aud)
+		tokenCfg.Subject = "sub"
+		tokenCfg.Claims = map[string]string{"scope": scope}
 
 		tok, err := tokenCfg.CreateToken()
 		assert.NoError(t, err, "failed to create prometheus test token")

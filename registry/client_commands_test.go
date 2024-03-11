@@ -131,6 +131,11 @@ func TestRegistryKeyChainingOSDF(t *testing.T) {
 
 	viper.Reset()
 	_ = config.SetPreferredPrefix("OSDF")
+	viper.Set("Federation.DirectorUrl", "https://osdf-director.osg-htc.org")
+	viper.Set("Federation.RegistryUrl", "https://osdf-registry.osg-htc.org")
+	viper.Set("Federation.JwkUrl", "https://osg-htc.org/osdf/public_signing_key.jwks")
+	viper.Set("Federation.BrokerUrl", "https://osdf-director.osg-htc.org")
+
 	// On by default, but just to make things explicit
 	viper.Set("Registry.RequireKeyChaining", true)
 

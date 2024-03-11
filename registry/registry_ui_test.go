@@ -27,6 +27,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -239,8 +240,12 @@ func TestListNamespaces(t *testing.T) {
 			requestURL := "/namespaces?server_type=" + tc.serverType + "&status=" + tc.status
 			req, _ := http.NewRequest("GET", requestURL, nil)
 			if tc.authUser {
-				tokenCfg := token.TokenConfig{Issuer: "https://mock-server.com", Lifetime: time.Minute, Subject: "admin", TokenProfile: token.None}
-				tokenCfg.AddScopes([]token_scopes.TokenScope{token_scopes.WebUi_Access})
+				tokenCfg := token.NewWLCGToken()
+				tokenCfg.Issuer = "https://mock-server.com"
+				tokenCfg.Lifetime = time.Minute
+				tokenCfg.Subject = "admin"
+				tokenCfg.AddScopes(token_scopes.WebUi_Access)
+				tokenCfg.AddAudienceAny()
 				token, err := tokenCfg.CreateToken()
 				require.NoError(t, err)
 				req.AddCookie(&http.Cookie{Name: "login", Value: token, Path: "/"})
@@ -1241,6 +1246,36 @@ func TestPopulateRegistrationFields(t *testing.T) {
 }
 
 func TestGetCachedInstitutions(t *testing.T) {
+	svr := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "GET" {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		if r.URL.Path == "/institution_ids" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, err := w.Write([]byte(`[{"id": "https://osg-htc.org/iid/05ejpqr48", "name": "Worcester Polytechnic Institute", "ror_id": "https://ror.org/05ejpqr48"}, {"id": "https://osg-htc.org/iid/017t4sb47", "name": "Wright Institute", "ror_id": "https://ror.org/017t4sb47"}, {"id": "https://osg-htc.org/iid/03v76x132", "name": "Yale University", "ror_id": "https://ror.org/03v76x132"}]`))
+			require.NoError(t, err)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+
+	// Hijack the common transport used by Pelican, forcing all connections to go to our test server
+	transport := config.GetTransport()
+	oldDial := transport.DialContext
+	transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		dialer := net.Dialer{}
+		return dialer.DialContext(ctx, svr.Listener.Addr().Network(), svr.Listener.Addr().String())
+	}
+	oldConfig := transport.TLSClientConfig
+	transport.TLSClientConfig = svr.TLS.Clone()
+	transport.TLSClientConfig.InsecureSkipVerify = true
+	t.Cleanup(func() {
+		transport.DialContext = oldDial
+		transport.TLSClientConfig = oldConfig
+	})
+
 	t.Run("nil-cache-returns-error", func(t *testing.T) {
 		func() {
 			institutionsCacheMutex.Lock()

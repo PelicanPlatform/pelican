@@ -21,6 +21,10 @@ package token_scopes
 import (
 	"strconv"
 	"testing"
+
+	"github.com/lestrrat-go/jwx/v2/jwt"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestGetScopeString(t *testing.T) {
@@ -88,4 +92,45 @@ func TestScopeContains(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestResourceScopes(t *testing.T) {
+	tests := []struct {
+		name       string
+		myScope    ResourceScope
+		otherScope ResourceScope
+		expected   bool
+	}{
+		{"diffScope", NewResourceScope(Storage_Create, "/"), NewResourceScope(Storage_Modify, "/"), false},
+		{"same", NewResourceScope(Storage_Create, ""), NewResourceScope(Storage_Create, ""), true},
+		{"default", NewResourceScope(Storage_Create, ""), NewResourceScope(Storage_Create, "/"), true},
+		{"sub", NewResourceScope(Storage_Create, ""), NewResourceScope(Storage_Create, "/foo"), true},
+		{"subDeep", NewResourceScope(Storage_Create, "/foo"), NewResourceScope(Storage_Create, "/foo/bar"), true},
+		{"subClean", NewResourceScope(Storage_Create, "/foo"), NewResourceScope(Storage_Create, "/foo/"), true},
+		{"noPath", NewResourceScope(Storage_Create, "/foo"), NewResourceScope(Storage_Create, "/foobar"), false},
+		{"sameDeep", NewResourceScope(Storage_Create, "/foo/bar"), NewResourceScope(Storage_Create, "/foo/bar"), true},
+		{"sameDeep", NewResourceScope(Storage_Create, "/foo/bar"), NewResourceScope(Storage_Create, "/foo/barbaz"), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, tt.myScope.Contains(tt.otherScope))
+		})
+	}
+}
+
+func TestParseResources(t *testing.T) {
+	tok := jwt.New()
+
+	require.NoError(t, tok.Set("scope", "blah"))
+	assert.Equal(t, []ResourceScope{{Authorization: TokenScope("blah"), Resource: "/"}}, ParseResourceScopeString(tok))
+
+	require.NoError(t, tok.Set("scope", 5))
+	assert.Equal(t, []ResourceScope{}, ParseResourceScopeString(tok))
+
+	require.NoError(t, tok.Set("scope", "foo bar"))
+	assert.Equal(t, []ResourceScope{{Authorization: TokenScope("foo"), Resource: "/"}, {Authorization: TokenScope("bar"), Resource: "/"}}, ParseResourceScopeString(tok))
+
+	require.NoError(t, tok.Set("scope", "storage.create:/foo"))
+	assert.Equal(t, []ResourceScope{{Authorization: Storage_Create, Resource: "/foo"}}, ParseResourceScopeString(tok))
 }

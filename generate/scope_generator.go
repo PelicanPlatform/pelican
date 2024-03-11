@@ -184,6 +184,6 @@ func (s TokenScope) Path(path string) (TokenScope, error) {
 		return "", errors.New("cannot assign path to non-storage token scope")
 	}
 
-	return TokenScope(s.String() + path), nil
+	return TokenScope(s.String() + ":" + path), nil
 }
 `))

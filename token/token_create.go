@@ -19,10 +19,15 @@
 package token
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
+	"path"
 	"regexp"
 	"time"
 
@@ -30,7 +35,6 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pkg/errors"
-	"github.com/spf13/viper"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/token_scopes"
@@ -39,21 +43,35 @@ import (
 type (
 	TokenProfile string
 	TokenConfig  struct {
-		TokenProfile TokenProfile
+		tokenProfile TokenProfile
 		Lifetime     time.Duration     // Lifetime is used to set 'exp' claim from now
 		Issuer       string            // Issuer is 'iss' claim
-		Audience     []string          // Audience is 'aud' claim
-		Version      string            // Version is the version for different profiles. 'wlcg.ver' for WLCG profile and 'ver' for scitokens2
+		audience     []string          // Audience is 'aud' claim
+		version      string            // Version is the version for different profiles. 'wlcg.ver' for WLCG profile and 'ver' for scitokens2
 		Subject      string            // Subject is 'sub' claim
 		Claims       map[string]string // Additional claims
 		scope        string            // scope is a string with space-delimited list of scopes. To enforce type check, use AddRawScope or AddScopes to add scopes to your token
 	}
+
+	openIdConfiguration struct {
+		Issuer  string `json:"issuer"`
+		JwksUri string `json:"jwks_uri"`
+	}
+)
+
+var (
+	scitokensVerPattern *regexp.Regexp = regexp.MustCompile(`^scitokens:2\.[0-9]+$`)
+	wlcgVerPattern      *regexp.Regexp = regexp.MustCompile(`^1\.[0-9]+$`)
 )
 
 const (
-	WLCG       TokenProfile = "wlcg"
-	Scitokens2 TokenProfile = "scitokens2"
-	None       TokenProfile = "none"
+	TokenProfileWLCG       TokenProfile = "wlcg"
+	TokenProfileScitokens2 TokenProfile = "scitokens2"
+	TokenProfileNone       TokenProfile = "none"
+	tokenProfileEmpty      TokenProfile = ""
+
+	wlcgAny      string = "https://wlcg.cern.ch/jwt/v1/any"
+	scitokensAny string = "ANY"
 )
 
 func (p TokenProfile) String() string {
@@ -69,47 +87,115 @@ func (config *TokenConfig) Validate() (bool, error) {
 	if _, err := url.Parse(config.Issuer); err != nil {
 		return false, errors.Wrap(err, "Invalid issuer, issuer is not a valid Url")
 	}
-	switch config.TokenProfile {
-	case Scitokens2:
+	switch config.tokenProfile {
+	case TokenProfileScitokens2:
 		if err := config.verifyCreateSciTokens2(); err != nil {
 			return false, err
 		}
-	case WLCG:
+	case TokenProfileWLCG:
 		if err := config.verifyCreateWLCG(); err != nil {
 			return false, err
 		}
-	case None:
+	case TokenProfileNone:
 		return true, nil // we don't have profile specific check for None type
+	case tokenProfileEmpty:
+		return false, errors.New("token profile is not set")
 	default:
-		return false, errors.New(fmt.Sprint("Unsupported token profile: ", config.TokenProfile.String()))
+		return false, errors.Errorf("unsupported token profile: %s", config.tokenProfile.String())
 	}
 	return true, nil
+}
+
+func NewTokenConfig(tokenProfile TokenProfile) (tc TokenConfig, err error) {
+	switch tokenProfile {
+	case TokenProfileScitokens2:
+		fallthrough
+	case TokenProfileWLCG:
+		fallthrough
+	case TokenProfileNone:
+		tc.tokenProfile = tokenProfile
+	case tokenProfileEmpty:
+		err = errors.New("token profile is not set")
+	default:
+		err = errors.Errorf("unsupported token profile: %s", tokenProfile.String())
+	}
+	return
+}
+
+func NewWLCGToken() (tc TokenConfig) {
+	tc.tokenProfile = TokenProfileWLCG
+	return
+}
+
+func NewScitoken() (tc TokenConfig) {
+	tc.tokenProfile = TokenProfileScitokens2
+	return
+}
+
+func (config *TokenConfig) GetVersion() string {
+	return config.version
+}
+
+func (config *TokenConfig) SetVersion(ver string) error {
+	if config.tokenProfile == TokenProfileScitokens2 {
+		if ver == "" {
+			ver = "scitokens:2.0"
+		} else if !scitokensVerPattern.MatchString(ver) {
+			return errors.New("the provided version '" + ver +
+				"' is not valid. It must match 'scitokens:<version>', where version is of the form 2.x")
+		}
+	} else if config.tokenProfile == TokenProfileWLCG {
+		if ver == "" {
+			ver = "1.0"
+		} else if !wlcgVerPattern.MatchString(ver) {
+			return errors.New("the provided version '" + ver + "' is not valid. It must be of the form '1.x'")
+		}
+	}
+	config.version = ver
+	return nil
+}
+
+// Add audience="any" to the config based on the token profile.
+//
+// For WLCG profile, it will be "https://wlcg.cern.ch/jwt/v1/any".
+// For Scitokens profile, it will be "ANY"
+func (config *TokenConfig) AddAudienceAny() {
+	newAud := ""
+	switch config.tokenProfile {
+	case TokenProfileScitokens2:
+		newAud = string(scitokensAny)
+	case TokenProfileWLCG:
+		newAud = string(wlcgAny)
+	}
+	if newAud != "" {
+		config.audience = append(config.audience, newAud)
+	}
+}
+
+func (config *TokenConfig) AddAudiences(audiences ...string) {
+	config.audience = append(config.audience, audiences...)
+}
+
+func (config *TokenConfig) GetAudiences() []string {
+	return config.audience
 }
 
 // Verify if the token matches scitoken2 profile requirement
 func (config *TokenConfig) verifyCreateSciTokens2() error {
 	// required fields: aud, ver, scope
-	if len(config.Audience) == 0 {
-		errMsg := "The 'audience' claim is required for the scitokens2 profile, but it could not be found."
-		return errors.New(errMsg)
+	if len(config.audience) == 0 {
+		return errors.New("the 'audience' claim is required for the scitokens2 profile, but it could not be found")
 	}
 
 	if config.scope == "" {
-		errMsg := "The 'scope' claim is required for the scitokens2 profile, but it could not be found."
-		return errors.New(errMsg)
+		return errors.New("the 'scope' claim is required for the scitokens2 profile, but it could not be found")
 	}
 
-	if config.Version == "" {
-		config.Version = "scitokens:2.0"
-	} else {
-		verPattern := `^scitokens:2\.[0-9]+$`
-		re := regexp.MustCompile(verPattern)
-
-		if !re.MatchString(config.Version) {
-			errMsg := "The provided version '" + config.Version +
-				"' is not valid. It must match 'scitokens:<version>', where version is of the form 2.x"
-			return errors.New(errMsg)
-		}
+	if config.version == "" {
+		config.version = "scitokens:2.0"
+	} else if !scitokensVerPattern.MatchString(config.version) {
+		return errors.New("the provided version '" + config.version +
+			"' is not valid. It must match 'scitokens:<version>', where version is of the form 2.x")
 	}
 	return nil
 }
@@ -117,39 +203,32 @@ func (config *TokenConfig) verifyCreateSciTokens2() error {
 // Verify if the token matches WLCG profile requirement
 func (config *TokenConfig) verifyCreateWLCG() error {
 	// required fields: sub, wlcg.ver, aud
-	if len(config.Audience) == 0 {
-		errMsg := "The 'audience' claim is required for the scitokens2 profile, but it could not be found."
+	if len(config.audience) == 0 {
+		errMsg := "the 'audience' claim is required for the WLCG profile, but it could not be found"
 		return errors.New(errMsg)
 	}
 
 	if config.Subject == "" {
-		errMsg := "The 'subject' claim is required for the scitokens2 profile, but it could not be found."
+		errMsg := "the 'subject' claim is required for the WLCG profile, but it could not be found"
 		return errors.New(errMsg)
 	}
 
-	if config.Version == "" {
-		config.Version = "1.0"
-	} else {
-		verPattern := `^1\.[0-9]+$`
-		re := regexp.MustCompile(verPattern)
-		if !re.MatchString(config.Version) {
-			errMsg := "The provided version '" + config.Version + "' is not valid. It must be of the form '1.x'"
-			return errors.New(errMsg)
-		}
+	if config.version == "" {
+		config.version = "1.0"
+	} else if !wlcgVerPattern.MatchString(config.version) {
+		return errors.New("the provided version '" + config.version + "' is not valid. It must be of the form '1.x'")
 	}
 	return nil
 }
 
-// AddScopes appends a list of token_scopes.TokenScope to the Scope field.
-func (config *TokenConfig) AddScopes(scopes []token_scopes.TokenScope) {
-	if config.scope == "" {
-		config.scope = token_scopes.GetScopeString(scopes)
-	} else {
-		scopeStr := token_scopes.GetScopeString(scopes)
-		if scopeStr != "" {
-			config.scope += " " + scopeStr
-		}
-	}
+// AddScopes appends multiple token_scopes.TokenScope to the Scope field.
+func (config *TokenConfig) AddScopes(scopes ...token_scopes.TokenScope) {
+	config.AddRawScope(token_scopes.GetScopeString(scopes))
+}
+
+// AddResourceScopes appends multiple token_scopes.TokenScope to the Scope field.
+func (config *TokenConfig) AddResourceScopes(scopes ...token_scopes.ResourceScope) {
+	config.AddRawScope(token_scopes.GetScopeString(scopes))
 }
 
 // AddRawScope appends a space-delimited, case-sensitive scope string to the Scope field.
@@ -160,10 +239,8 @@ func (config *TokenConfig) AddScopes(scopes []token_scopes.TokenScope) {
 func (config *TokenConfig) AddRawScope(scope string) {
 	if config.scope == "" {
 		config.scope = scope
-	} else {
-		if scope != "" {
-			config.scope += " " + scope
-		}
+	} else if scope != "" {
+		config.scope += " " + scope
 	}
 }
 
@@ -190,7 +267,7 @@ func (tokenConfig *TokenConfig) CreateToken() (string, error) {
 // Variant of CreateToken with a JWT provided by the caller
 func (tokenConfig *TokenConfig) CreateTokenWithKey(key jwk.Key) (string, error) {
 	if ok, err := tokenConfig.Validate(); !ok || err != nil {
-		return "", errors.Wrap(err, "Invalid tokenConfig")
+		return "", errors.Wrap(err, "invalid tokenConfig")
 	}
 
 	jti_bytes := make([]byte, 16)
@@ -207,7 +284,10 @@ func (tokenConfig *TokenConfig) CreateTokenWithKey(key jwk.Key) (string, error) 
 		}
 		issuerUrl = url.String()
 	} else {
-		issuerUrlStr := viper.GetString("IssuerUrl")
+		issuerUrlStr, err := config.GetServerIssuerURL()
+		if err != nil {
+			return "", errors.Wrap(err, "unable to generate token issuer URL")
+		}
 		url, err := url.Parse(issuerUrlStr)
 		if err != nil {
 			return "", errors.Wrap(err, "Failed to parse the configured IssuerUrl")
@@ -225,7 +305,7 @@ func (tokenConfig *TokenConfig) CreateTokenWithKey(key jwk.Key) (string, error) 
 		IssuedAt(now).
 		Expiration(now.Add(tokenConfig.Lifetime)).
 		NotBefore(now).
-		Audience(tokenConfig.Audience).
+		Audience(tokenConfig.audience).
 		Subject(tokenConfig.Subject).
 		JwtID(jti)
 
@@ -233,10 +313,10 @@ func (tokenConfig *TokenConfig) CreateTokenWithKey(key jwk.Key) (string, error) 
 		builder.Claim("scope", tokenConfig.scope)
 	}
 
-	if tokenConfig.TokenProfile == Scitokens2 {
-		builder.Claim("ver", tokenConfig.Version)
-	} else if tokenConfig.TokenProfile == WLCG {
-		builder.Claim("wlcg.ver", tokenConfig.Version)
+	if tokenConfig.tokenProfile == TokenProfileScitokens2 {
+		builder.Claim("ver", tokenConfig.version)
+	} else if tokenConfig.tokenProfile == TokenProfileWLCG {
+		builder.Claim("wlcg.ver", tokenConfig.version)
 	}
 
 	if tokenConfig.Claims != nil {
@@ -262,4 +342,56 @@ func (tokenConfig *TokenConfig) CreateTokenWithKey(key jwk.Key) (string, error) 
 	}
 
 	return string(signed), nil
+}
+
+// Given an issuer URL, lookup the corresponding JWKS URL using OAuth2 metadata discovery
+func LookupIssuerJwksUrl(ctx context.Context, issuerUrlStr string) (jwksUrl *url.URL, err error) {
+	issuerUrl, err := url.Parse(issuerUrlStr)
+	if err != nil {
+		err = errors.Wrap(err, "failed to parse issuer as URL")
+		return
+	}
+	wellKnownUrl := *issuerUrl
+	wellKnownUrl.Path = path.Join(wellKnownUrl.Path, ".well-known/openid-configuration")
+
+	client := &http.Client{Transport: config.GetTransport()}
+
+	req, err := http.NewRequestWithContext(ctx, "GET", wellKnownUrl.String(), nil)
+	if err != nil {
+		err = errors.Wrap(err, "failed to generate new request to the remote issuer")
+		return
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		err = errors.Wrapf(err, "failed to get metadata from %s", issuerUrlStr)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode > 299 {
+		err = errors.Errorf("issuer %s returned error %s (HTTP %d) for its OpenID auto-discovery configuration", issuerUrlStr, resp.Status, resp.StatusCode)
+		return
+	}
+
+	respBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		err = errors.Wrapf(err, "failed to read HTTP response when looking up OpenID auto-discovery configuration for issuer %s", issuerUrlStr)
+		return
+	}
+
+	var conf openIdConfiguration
+	if err = json.Unmarshal(respBytes, &conf); err != nil {
+		err = errors.Wrapf(err, "failed to parse the OpenID auto-discovery configuration for issuer %s", issuerUrl)
+		return
+	}
+	if conf.JwksUri == "" {
+		err = errors.Errorf("issuer %s provided no JWKS URL in its OpenID auto-discovery configuration", issuerUrl)
+		return
+	}
+	jwksUrl, err = url.Parse(conf.JwksUri)
+	if err != nil {
+		err = errors.Wrapf(err, "issuer %s provided an invalid JWKS URL in its OpenID auto-discovery configuration", issuerUrl)
+		return
+	}
+	return
 }

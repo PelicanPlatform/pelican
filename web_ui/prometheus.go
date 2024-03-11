@@ -152,15 +152,12 @@ func configDirectorPromScraper(ctx context.Context) (*config.ScrapeConfig, error
 		return nil, fmt.Errorf("parse external URL %v: %w", param.Server_ExternalWebUrl.GetString(), err)
 	}
 
-	promTokenCfg := token.TokenConfig{
-		TokenProfile: token.WLCG,
-		Lifetime:     param.Monitoring_TokenExpiresIn.GetDuration(),
-		Issuer:       directorBaseUrl.String(),
-		Audience:     []string{directorBaseUrl.String()},
-		Version:      "1.0",
-		Subject:      "director",
-	}
-	promTokenCfg.AddScopes([]token_scopes.TokenScope{token_scopes.Pelican_DirectorServiceDiscovery})
+	promTokenCfg := token.NewWLCGToken()
+	promTokenCfg.Lifetime = param.Monitoring_TokenExpiresIn.GetDuration()
+	promTokenCfg.Issuer = directorBaseUrl.String()
+	promTokenCfg.AddAudiences(directorBaseUrl.String())
+	promTokenCfg.Subject = "director"
+	promTokenCfg.AddScopes(token_scopes.Pelican_DirectorServiceDiscovery)
 
 	// CreateToken also handles validation for us
 	sdToken, err := promTokenCfg.CreateToken()
@@ -168,15 +165,12 @@ func configDirectorPromScraper(ctx context.Context) (*config.ScrapeConfig, error
 		return nil, errors.Wrap(err, "failed to create director prometheus token")
 	}
 
-	scrapeTokenCfg := token.TokenConfig{
-		TokenProfile: token.WLCG,
-		Version:      "1.0",
-		Lifetime:     param.Monitoring_TokenExpiresIn.GetDuration(),
-		Issuer:       directorBaseUrl.String(),
-		Audience:     []string{"prometheus"},
-		Subject:      "director",
-	}
-	scrapeTokenCfg.AddScopes([]token_scopes.TokenScope{token_scopes.Monitoring_Scrape})
+	scrapeTokenCfg := token.NewWLCGToken()
+	scrapeTokenCfg.Lifetime = param.Monitoring_TokenExpiresIn.GetDuration()
+	scrapeTokenCfg.Issuer = directorBaseUrl.String()
+	scrapeTokenCfg.AddAudiences("prometheus")
+	scrapeTokenCfg.Subject = "director"
+	scrapeTokenCfg.AddScopes(token_scopes.Monitoring_Scrape)
 
 	scraperToken, err := scrapeTokenCfg.CreateToken()
 	if err != nil {

@@ -40,6 +40,7 @@ type Config struct {
 	Client struct {
 		DisableHttpProxy bool
 		DisableProxyFallback bool
+		MaximumDownloadSpeed int
 		MinimumDownloadSpeed int
 		SlowTransferRampupTime int
 		SlowTransferWindow int
@@ -89,6 +90,14 @@ type Config struct {
 		TomcatLocation string
 	}
 	IssuerKey string
+	LocalCache struct {
+		DataLocation string
+		HighWaterMarkPercentage int
+		LowWaterMarkPercentage int
+		RunLocation string
+		Size string
+		Socket string
+	}
 	Logging struct {
 		Cache struct {
 			Ofs string
@@ -268,6 +277,7 @@ type configWithType struct {
 	Client struct {
 		DisableHttpProxy struct { Type string; Value bool }
 		DisableProxyFallback struct { Type string; Value bool }
+		MaximumDownloadSpeed struct { Type string; Value int }
 		MinimumDownloadSpeed struct { Type string; Value int }
 		SlowTransferRampupTime struct { Type string; Value int }
 		SlowTransferWindow struct { Type string; Value int }
@@ -317,6 +327,14 @@ type configWithType struct {
 		TomcatLocation struct { Type string; Value string }
 	}
 	IssuerKey struct { Type string; Value string }
+	LocalCache struct {
+		DataLocation struct { Type string; Value string }
+		HighWaterMarkPercentage struct { Type string; Value int }
+		LowWaterMarkPercentage struct { Type string; Value int }
+		RunLocation struct { Type string; Value string }
+		Size struct { Type string; Value string }
+		Socket struct { Type string; Value string }
+	}
 	Logging struct {
 		Cache struct {
 			Ofs struct { Type string; Value string }

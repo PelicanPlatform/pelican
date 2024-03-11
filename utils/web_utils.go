@@ -20,6 +20,7 @@ package utils
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -74,9 +75,9 @@ type (
 
 // MakeRequest makes an http request with our custom http client. It acts similarly to the http.NewRequest but
 // it only takes json as the request data.
-func MakeRequest(url string, method string, data map[string]interface{}, headers map[string]string) ([]byte, error) {
+func MakeRequest(ctx context.Context, url string, method string, data map[string]interface{}, headers map[string]string) ([]byte, error) {
 	payload, _ := json.Marshal(data)
-	req, err := http.NewRequest(method, url, bytes.NewBuffer(payload))
+	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewBuffer(payload))
 	if err != nil {
 		return nil, err
 	}

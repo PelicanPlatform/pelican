@@ -19,7 +19,8 @@ require (
 	github.com/hashicorp/go-version v1.6.0
 	github.com/jellydator/ttlcache/v3 v3.1.0
 	github.com/jsipprell/keyctl v1.0.4-0.20211208153515-36ca02672b6c
-	github.com/lestrrat-go/jwx/v2 v2.0.16
+	github.com/lestrrat-go/httprc v1.0.4
+	github.com/lestrrat-go/jwx/v2 v2.0.20
 	github.com/minio/minio-go/v7 v7.0.65
 	github.com/mwitkow/go-conntrack v0.0.0-20190716064945-2f068394615f
 	github.com/oklog/run v1.1.0
@@ -43,10 +44,10 @@ require (
 	github.com/youmark/pkcs8 v0.0.0-20201027041543-1326539a0a0a
 	github.com/zsais/go-gin-prometheus v0.1.0
 	go.uber.org/atomic v1.11.0
-	golang.org/x/crypto v0.17.0
+	golang.org/x/crypto v0.19.0
 	golang.org/x/net v0.19.0
 	golang.org/x/oauth2 v0.15.0
-	golang.org/x/term v0.15.0
+	golang.org/x/term v0.17.0
 	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/gorm v1.25.7
 	kernel.org/pub/linux/libs/security/libcap/cap v1.2.69
@@ -75,6 +76,7 @@ require (
 	go.opentelemetry.io/collector/pdata v1.0.0-rcv0016 // indirect
 	go.opentelemetry.io/collector/semconv v0.87.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
+	golang.org/x/sys v0.17.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20231120223509-83a465c0220f // indirect
 	google.golang.org/grpc v1.59.0 // indirect
 	modernc.org/sqlite v1.28.0 // indirect
@@ -181,7 +183,6 @@ require (
 	golang.org/x/arch v0.3.0 // indirect
 	golang.org/x/exp v0.0.0-20231006140011-7918f672742d // indirect
 	golang.org/x/sync v0.6.0
-	golang.org/x/sys v0.15.0 // indirect
 	golang.org/x/text v0.14.0
 	golang.org/x/time v0.5.0
 	google.golang.org/appengine v1.6.7 // indirect

@@ -161,7 +161,7 @@ func (a AuthCheckImpl) localIssuerCheck(c *gin.Context, strToken string, expecte
 // authOption.Scopes, return true and set "User" context to the issuer if any of the issuer check succeed
 //
 // Scope check will pass if your token has ANY of the scopes in authOption.Scopes
-func Verify(ctx *gin.Context, authOption AuthOption) (status int, verfied bool, err error) {
+func Verify(ctx *gin.Context, authOption AuthOption) (status int, verified bool, err error) {
 	token := ""
 	// Find token from the provided sources list, stop when found the first token
 	tokenFound := false
@@ -177,16 +177,17 @@ func Verify(ctx *gin.Context, authOption AuthOption) (status int, verfied bool, 
 			} else {
 				token = cookieToken
 				tokenFound = true
-				break
 			}
 		case Header:
 			headerToken := ctx.Request.Header["Authorization"]
 			if len(headerToken) <= 0 {
 				continue
 			} else {
-				token = strings.TrimPrefix(headerToken[0], "Bearer ")
-				tokenFound = true
-				break
+				var found bool
+				token, found = strings.CutPrefix(headerToken[0], "Bearer ")
+				if found {
+					tokenFound = true
+				}
 			}
 		case Authz:
 			authzToken := ctx.Request.URL.Query()["authz"]
@@ -195,7 +196,6 @@ func Verify(ctx *gin.Context, authOption AuthOption) (status int, verfied bool, 
 			} else {
 				token = authzToken[0]
 				tokenFound = true
-				break
 			}
 		default:
 			log.Error("Invalid/unsupported token source")
@@ -214,14 +214,12 @@ func Verify(ctx *gin.Context, authOption AuthOption) (status int, verfied bool, 
 		case FederationIssuer:
 			if err := authChecker.federationIssuerCheck(ctx, token, authOption.Scopes, authOption.AllScopes); err != nil {
 				errMsg += fmt.Sprintln("Cannot verify token with federation issuer: ", err)
-				break
 			} else {
 				return http.StatusOK, true, nil
 			}
 		case LocalIssuer:
 			if err := authChecker.localIssuerCheck(ctx, token, authOption.Scopes, authOption.AllScopes); err != nil {
 				errMsg += fmt.Sprintln("Cannot verify token with server issuer: ", err)
-				break
 			} else {
 				return http.StatusOK, true, nil
 			}

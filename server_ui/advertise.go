@@ -46,17 +46,22 @@ type directorResponse struct {
 	ApprovalError bool   `json:"approval_error"`
 }
 
+func doAdvertise(ctx context.Context, servers []server_utils.XRootDServer) {
+	log.Debugf("About to advertise %d XRootD servers", len(servers))
+	err := Advertise(ctx, servers)
+	if err != nil {
+		log.Warningln("XRootD server advertise failed:", err)
+		metrics.SetComponentHealthStatus(metrics.OriginCache_Federation, metrics.StatusCritical, fmt.Sprintf("XRootD server advertise failed: %v", err))
+	} else {
+		metrics.SetComponentHealthStatus(metrics.OriginCache_Federation, metrics.StatusOK, "")
+	}
+}
+
 func LaunchPeriodicAdvertise(ctx context.Context, egrp *errgroup.Group, servers []server_utils.XRootDServer) error {
+	doAdvertise(ctx, servers)
+
 	ticker := time.NewTicker(1 * time.Minute)
 	egrp.Go(func() error {
-		log.Debugf("About to advertise %d XRootD servers", len(servers))
-		err := Advertise(ctx, servers)
-		if err != nil {
-			log.Warningln("XRootD server advertise failed:", err)
-			metrics.SetComponentHealthStatus(metrics.OriginCache_Federation, metrics.StatusCritical, fmt.Sprintf("XRootD server advertise failed: %v", err))
-		} else {
-			metrics.SetComponentHealthStatus(metrics.OriginCache_Federation, metrics.StatusOK, "")
-		}
 
 		for {
 			select {
@@ -72,6 +77,8 @@ func LaunchPeriodicAdvertise(ctx context.Context, egrp *errgroup.Group, servers 
 				log.Infoln("Periodic advertisement loop has been terminated")
 				return nil
 			}
+
+			doAdvertise(ctx, servers)
 		}
 	})
 
@@ -134,15 +141,12 @@ func advertiseInternal(ctx context.Context, server server_utils.XRootDServer) er
 		return err
 	}
 
-	advTokenCfg := token.TokenConfig{
-		TokenProfile: token.WLCG,
-		Version:      "1.0",
-		Lifetime:     time.Minute,
-		Issuer:       issuerUrl,
-		Audience:     []string{param.Federation_DirectorUrl.GetString()},
-		Subject:      "origin",
-	}
-	advTokenCfg.AddScopes([]token_scopes.TokenScope{token_scopes.Pelican_Advertise})
+	advTokenCfg := token.NewWLCGToken()
+	advTokenCfg.Lifetime = time.Minute
+	advTokenCfg.Issuer = issuerUrl
+	advTokenCfg.AddAudiences(param.Federation_DirectorUrl.GetString())
+	advTokenCfg.Subject = "origin"
+	advTokenCfg.AddScopes(token_scopes.Pelican_Advertise)
 
 	// CreateToken also handles validation for us
 	tok, err := advTokenCfg.CreateToken()

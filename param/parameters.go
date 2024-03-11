@@ -97,6 +97,10 @@ var (
 	Issuer_QDLLocation = StringParam{"Issuer.QDLLocation"}
 	Issuer_ScitokensServerLocation = StringParam{"Issuer.ScitokensServerLocation"}
 	Issuer_TomcatLocation = StringParam{"Issuer.TomcatLocation"}
+	LocalCache_DataLocation = StringParam{"LocalCache.DataLocation"}
+	LocalCache_RunLocation = StringParam{"LocalCache.RunLocation"}
+	LocalCache_Size = StringParam{"LocalCache.Size"}
+	LocalCache_Socket = StringParam{"LocalCache.Socket"}
 	Logging_Cache_Ofs = StringParam{"Logging.Cache.Ofs"}
 	Logging_Cache_Pfc = StringParam{"Logging.Cache.Pfc"}
 	Logging_Cache_Pss = StringParam{"Logging.Cache.Pss"}
@@ -195,6 +199,7 @@ var (
 var (
 	Cache_Concurrency = IntParam{"Cache.Concurrency"}
 	Cache_Port = IntParam{"Cache.Port"}
+	Client_MaximumDownloadSpeed = IntParam{"Client.MaximumDownloadSpeed"}
 	Client_MinimumDownloadSpeed = IntParam{"Client.MinimumDownloadSpeed"}
 	Client_SlowTransferRampupTime = IntParam{"Client.SlowTransferRampupTime"}
 	Client_SlowTransferWindow = IntParam{"Client.SlowTransferWindow"}
@@ -203,6 +208,8 @@ var (
 	Director_MaxStatResponse = IntParam{"Director.MaxStatResponse"}
 	Director_MinStatResponse = IntParam{"Director.MinStatResponse"}
 	Director_StatConcurrencyLimit = IntParam{"Director.StatConcurrencyLimit"}
+	LocalCache_HighWaterMarkPercentage = IntParam{"LocalCache.HighWaterMarkPercentage"}
+	LocalCache_LowWaterMarkPercentage = IntParam{"LocalCache.LowWaterMarkPercentage"}
 	MinimumDownloadSpeed = IntParam{"MinimumDownloadSpeed"}
 	Monitoring_PortHigher = IntParam{"Monitoring.PortHigher"}
 	Monitoring_PortLower = IntParam{"Monitoring.PortLower"}
