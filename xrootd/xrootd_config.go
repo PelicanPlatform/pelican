@@ -80,26 +80,6 @@ enable = true
 
 type (
 	OriginConfig struct {
-<<<<<<< HEAD
-		Multiuser         bool
-		EnableCmsd        bool
-		EnableMacaroons   bool
-		EnableVoms        bool
-		EnablePublicReads bool
-		EnableDirListing  bool
-		SelfTest          bool
-		CalculatedPort    string
-		NamespacePrefix   string
-		RunLocation       string
-		Mode              string
-		S3Bucket          string
-		S3Region          string
-		S3ServiceName     string
-		S3ServiceUrl      string
-		S3AccessKeyfile   string
-		S3SecretKeyfile   string
-		S3UrlStyle        string
-=======
 		Multiuser        bool
 		EnableCmsd       bool
 		EnableMacaroons  bool
@@ -118,7 +98,6 @@ type (
 		S3SecretKeyfile  string
 		S3UrlStyle       string
 		Exports 		 []common.OriginExports
->>>>>>> 4bf9949 (Allow posix origins to export multiple prefixes)
 	}
 
 	CacheConfig struct {
