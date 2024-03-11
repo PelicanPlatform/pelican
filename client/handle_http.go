@@ -1226,27 +1226,40 @@ func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDe
 			if contentLengthStr != "" {
 				size, err = strconv.ParseInt(contentLengthStr, 10, 64)
 				if err != nil {
-					log.Errorln("problem converting content-length to an int:", err)
+					err = errors.Wrap(err, "problem converting Content-Length in response to an int")
+					log.Errorln(err.Error())
+
 				}
 			}
 			headChan <- struct {
 				idx  int
 				size uint64
 				err  error
-			}{idx, uint64(size), nil}
+			}{idx, uint64(size), err}
 		}(idx, tUrl.String())
 	}
-	finished := make(map[int]bool)
+	// 1 -> success.
+	// 0 -> pending.
+	// -1 -> error.
+	finished := make(map[int]int)
 	for ctr := 0; ctr != len(attempts); ctr++ {
 		result := <-headChan
 		if result.err != nil {
 			if result.err != context.Canceled {
 				log.Debugf("Failure when doing a HEAD request against %s: %s", attempts[result.idx].Url.String(), result.err.Error())
+				finished[result.idx] = -1
 			}
 		} else {
-			finished[result.idx] = true
+			finished[result.idx] = 1
 			if result.idx == 0 {
 				cancel()
+				// If the first responds successfully, we want to return immediately instead of giving
+				// the other caches time to respond - the result is "good enough".
+				// - Any cache with confirmed errors (-1) is sorted to the back.
+				// - Any cache which is still pending (0) is kept in place.
+				for ctr := 0; ctr < len(attempts); ctr++ {
+					finished[ctr] = 1
+				}
 			}
 			if size <= int64(result.size) {
 				size = int64(result.size)
@@ -1256,7 +1269,7 @@ func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDe
 	// Sort all the successful attempts first; use stable sort so the original ordering
 	// is preserved if the two entries are both successful or both unsuccessful.
 	type sorter struct {
-		good    bool
+		good    int
 		attempt transferAttemptDetails
 	}
 	tmpResults := make([]sorter, len(attempts))
@@ -1265,7 +1278,7 @@ func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDe
 	}
 	results = make([]transferAttemptDetails, len(attempts))
 	slices.SortStableFunc(tmpResults, func(left sorter, right sorter) int {
-		if left.good && !right.good {
+		if left.good > right.good {
 			return -1
 		}
 		return 0
