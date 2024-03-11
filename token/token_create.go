@@ -155,6 +155,10 @@ func (config *TokenConfig) SetVersion(ver string) error {
 	return nil
 }
 
+// Add audience="any" to the config based on the token profile.
+//
+// For WLCG profile, it will be "https://wlcg.cern.ch/jwt/v1/any".
+// For Scitokens profile, it will be "ANY"
 func (config *TokenConfig) AddAudienceAny() {
 	newAud := ""
 	switch config.tokenProfile {
