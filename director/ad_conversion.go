@@ -36,7 +36,7 @@ func convertNamespaceAdsV2ToV1(nsV2 []common.NamespaceAdV2) []common.NamespaceAd
 				for _, bp := range iss.BasePaths {
 					v1Ad := common.NamespaceAdV1{
 						Path:          nsAd.Path,
-						RequireToken:  !nsAd.Caps.PublicRead,
+						RequireToken:  !nsAd.Caps.PublicReads,
 						Issuer:        iss.IssuerUrl,
 						BasePath:      bp,
 						Strategy:      nsAd.Generation[0].Strategy,
@@ -144,11 +144,11 @@ func ConvertNamespaceAdsV1ToV2(nsAdsV1 []common.NamespaceAdV1, oAd *common.Origi
 			}
 
 			caps := common.Capabilities{
-				PublicRead:   !nsAd.RequireToken,
-				Read:         true,
-				Write:        wr,
-				Listing:      true,
-				FallBackRead: fallback,
+				PublicReads: !nsAd.RequireToken,
+				Reads:       true,
+				Writes:      wr,
+				Listings:    true,
+				DirectReads: fallback,
 			}
 
 			newNS := common.NamespaceAdV2{
@@ -193,11 +193,11 @@ func convertOriginAd(oAd1 common.OriginAdvertiseV1) common.OriginAdvertiseV2 {
 	//origin didn't contain capabilities, these are currently the defaults - we might want to potentially
 	//change this in the future
 	caps := common.Capabilities{
-		PublicRead:   true,
-		Read:         true,
-		Write:        oAd1.EnableWrite,
-		Listing:      true,
-		FallBackRead: oAd1.EnableFallbackRead,
+		PublicReads: true,
+		Reads:       true,
+		Writes:      oAd1.EnableWrite,
+		Listings:    true,
+		DirectReads: oAd1.EnableFallbackRead,
 	}
 
 	oAd2 := common.OriginAdvertiseV2{

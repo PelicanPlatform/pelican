@@ -39,7 +39,7 @@ func TestConversion(t *testing.T) {
 
 	v2Ads := []common.NamespaceAdV2{{
 		PublicRead: false,
-		Caps:       common.Capabilities{PublicRead: false, Read: true, Write: true, FallBackRead: false, Listing: true},
+		Caps:       common.Capabilities{PublicReads: false, Reads: true, Writes: true, DirectReads: false, Listings: true},
 		Path:       "/foo/bar",
 		Generation: []common.TokenGen{{
 			Strategy:         "OAuth2",
@@ -61,11 +61,11 @@ func TestConversion(t *testing.T) {
 		{
 			PublicRead: true,
 			Caps: common.Capabilities{
-				PublicRead:   true,
-				Read:         true,
-				Write:        true,
-				Listing:      true,
-				FallBackRead: false},
+				PublicReads: true,
+				Reads:       true,
+				Writes:      true,
+				Listings:    true,
+				DirectReads: false},
 			Path: "/baz/bar",
 		},
 	}
@@ -120,11 +120,11 @@ func TestConversion(t *testing.T) {
 		WebURL:     "https://WebUrl.org",
 		Namespaces: v2Ads,
 		Caps: common.Capabilities{
-			PublicRead:   true,
-			Write:        true,
-			FallBackRead: false,
-			Listing:      true,
-			Read:         true,
+			PublicReads: true,
+			Writes:      true,
+			DirectReads: false,
+			Listings:    true,
+			Reads:       true,
 		},
 		Issuer: []common.TokenIssuer{
 			{

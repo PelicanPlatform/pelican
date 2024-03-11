@@ -109,20 +109,20 @@ func init() {
 	originCmd.AddCommand(originServeCmd)
 
 	// The -m flag is used to specify what kind of backend we plan to use for the origin.
-	originServeCmd.Flags().StringP("mode", "m", "posix", "Set the mode for the origin service (default is 'posix')")
-	if err := viper.BindPFlag("Origin.Mode", originServeCmd.Flags().Lookup("mode")); err != nil {
+	originServeCmd.Flags().StringP("mode", "m", "posix", "Set the mode for the origin service (default is 'posix'). Supported modes are 'posix' and 's3'.")
+	if err := viper.BindPFlag("Origin.StorageType", originServeCmd.Flags().Lookup("mode")); err != nil {
 		panic(err)
 	}
 
 	// The -v flag is used when an origin is served in POSIX mode
-	originServeCmd.Flags().StringP("volume", "v", "", "Setting the volume to /SRC:/DEST will export the contents of /SRC as /DEST in the Pelican federation")
-	if err := viper.BindPFlag("Origin.ExportVolume", originServeCmd.Flags().Lookup("volume")); err != nil {
+	originServeCmd.Flags().StringSliceP("volume", "v", []string{}, "Setting the volume to /SRC:/DEST will export the contents of /SRC as /DEST in the Pelican federation")
+	if err := viper.BindPFlag("Origin.ExportVolumes", originServeCmd.Flags().Lookup("volume")); err != nil {
 		panic(err)
 	}
 
 	// The -w flag is used if we want the origin to be writeable.
 	originServeCmd.Flags().BoolP("writeable", "", true, "Allow/disable writting to the origin")
-	if err := viper.BindPFlag("Origin.EnableWrite", originServeCmd.Flags().Lookup("writeable")); err != nil {
+	if err := viper.BindPFlag("Origin.EnableWrites", originServeCmd.Flags().Lookup("writeable")); err != nil {
 		panic(err)
 	}
 

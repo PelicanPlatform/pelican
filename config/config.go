@@ -633,6 +633,32 @@ func GetValidate() *validator.Validate {
 	return validate
 }
 
+func handleDeprecatedConfig() {
+	deprecatedMap := param.GetDeprecated()
+	for deprecated, replacement := range deprecatedMap {
+		if viper.IsSet(deprecated) {
+			if len(replacement) == 1 {
+				if replacement[0] == "none" {
+					log.Warningf("Deprecated configuration key %s is set. This is being removed in future release", deprecated)
+				} else {
+					log.Warningf("Deprecated configuration key %s is set. Please migrate to use %s instead", deprecated, replacement[0])
+					log.Warningf("Will attempt to use the value of %s as default for %s", deprecated, replacement[0])
+					value := viper.Get(deprecated)
+					viper.SetDefault(replacement[0], value)
+				}
+			} else {
+				log.Warningf("Deprecated configuration key %s is set. This is being replaced by %s instead", deprecated, replacement)
+				log.Warningf("Setting default values of '%s' to the value of %s.", replacement, deprecated)
+
+				value := viper.Get(deprecated)
+				for _, rep := range replacement {
+					viper.SetDefault(rep, value)
+				}
+			}
+		}
+	}
+}
+
 func InitConfig() {
 	viper.SetConfigType("yaml")
 	// 1) Set up defaults.yaml
@@ -713,6 +739,7 @@ func InitConfig() {
 		log.Errorln("Federation.NamespaceUrl is deprecated and removed from parameters. Please use Federation.RegistryUrl instead")
 		os.Exit(1)
 	}
+	handleDeprecatedConfig()
 }
 
 func initConfigDir() error {

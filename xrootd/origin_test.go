@@ -24,6 +24,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/elliptic"
+	_ "embed"
 	"fmt"
 	"net"
 	"os"
@@ -32,19 +33,25 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
+	log "github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
+	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
+
+	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/origin_ui"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/web_ui"
-	log "github.com/sirupsen/logrus"
-	"golang.org/x/sync/errgroup"
+)
 
-	"github.com/minio/minio-go/v7"
-	"github.com/minio/minio-go/v7/pkg/credentials"
-	"github.com/spf13/viper"
-	"github.com/stretchr/testify/require"
+var (
+	//go:embed resources/multi-export-origin.yml
+	multiExportOriginConfig string
 )
 
 func originMockup(ctx context.Context, egrp *errgroup.Group, t *testing.T) context.CancelFunc {
@@ -137,9 +144,13 @@ func TestOrigin(t *testing.T) {
 	defer cancel()
 
 	viper.Reset()
+	common.ResetOriginExports()
+	defer viper.Reset()
+	defer common.ResetOriginExports()
 
-	viper.Set("Origin.ExportVolume", t.TempDir()+":/test")
-	viper.Set("Origin.Mode", "posix")
+	viper.Set("Origin.StoragePrefix", t.TempDir())
+	viper.Set("Origin.FederationPrefix", "/test")
+	viper.Set("Origin.StorageType", "posix")
 	// Disable functionality we're not using (and is difficult to make work on Mac)
 	viper.Set("Origin.EnableCmsd", false)
 	viper.Set("Origin.EnableMacaroons", false)
@@ -164,8 +175,54 @@ func TestOrigin(t *testing.T) {
 	ok, err := fileTests.RunTests(ctx, param.Origin_Url.GetString(), config.GetServerAudience(), issuerUrl, server_utils.OriginSelfFileTest)
 	require.NoError(t, err)
 	require.True(t, ok)
+}
+
+func TestMultiExportOrigin(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
 
 	viper.Reset()
+	defer viper.Reset()
+	common.ResetOriginExports()
+	defer common.ResetOriginExports()
+
+	viper.SetConfigType("yaml")
+	// Use viper to read in the embedded config
+	err := viper.ReadConfig(strings.NewReader(multiExportOriginConfig))
+	require.NoError(t, err, "error reading config")
+
+	exports, err := common.GetOriginExports()
+	require.NoError(t, err)
+	require.Len(t, *exports, 2)
+	// Override the object store prefix to a temp directory
+	(*exports)[0].StoragePrefix = t.TempDir()
+	(*exports)[1].StoragePrefix = t.TempDir()
+
+	// Disable functionality we're not using (and is difficult to make work on Mac)
+	viper.Set("Origin.EnableCmsd", false)
+	viper.Set("Origin.EnableMacaroons", false)
+	viper.Set("Origin.EnableVoms", false)
+	viper.Set("Origin.Port", 0)
+	viper.Set("Server.WebPort", 0)
+	viper.Set("TLSSkipVerify", true)
+	viper.Set("Logging.Origin.Scitokens", "debug")
+
+	mockupCancel := originMockup(ctx, egrp, t)
+	defer mockupCancel()
+
+	// In this case a 403 means its running
+	err = server_utils.WaitUntilWorking(ctx, "GET", param.Origin_Url.GetString(), "xrootd", 403)
+	if err != nil {
+		t.Fatalf("Unsuccessful test: Server encountered an error: %v", err)
+	}
+	fileTests := utils.TestFileTransferImpl{}
+	issuerUrl, err := config.GetServerIssuerURL()
+	require.NoError(t, err)
+
+	ok, err := fileTests.RunTests(ctx, param.Origin_Url.GetString(), config.GetServerAudience(), issuerUrl, utils.OriginSelfFileTest)
+	require.NoError(t, err)
+	require.True(t, ok)
 }
 
 func TestS3OriginConfig(t *testing.T) {
@@ -174,6 +231,9 @@ func TestS3OriginConfig(t *testing.T) {
 	defer cancel()
 
 	viper.Reset()
+	common.ResetOriginExports()
+	defer viper.Reset()
+	defer common.ResetOriginExports()
 	tmpDir := t.TempDir()
 
 	// We need to start up a minio server, which is how we emulate S3. Open to better ways to do this!
@@ -246,7 +306,7 @@ func TestS3OriginConfig(t *testing.T) {
 
 	// All the setup to create the S3 server, add a bucket with a publicly-readable object is done. Now onto Pelican stuff
 	// Set up the origin and try to pull a file
-	viper.Set("Origin.Mode", "s3")
+	viper.Set("Origin.StorageType", "s3")
 	viper.Set("Origin.S3Region", regionName)
 	viper.Set("Origin.S3Bucket", bucketName)
 	viper.Set("Origin.S3ServiceName", serviceName)
@@ -280,7 +340,7 @@ func TestS3OriginConfig(t *testing.T) {
 	}
 
 	// One other quick check to do is that the namespace was correctly parsed:
-	require.Equal(t, fmt.Sprintf("/%s/%s/%s", serviceName, regionName, bucketName), param.Origin_NamespacePrefix.GetString())
+	require.Equal(t, fmt.Sprintf("/%s/%s/%s", serviceName, regionName, bucketName), param.Origin_FederationPrefix.GetString())
 	cancel()
 	mockupCancel()
 
@@ -296,6 +356,5 @@ func TestS3OriginConfig(t *testing.T) {
 		t.Fatalf("Unsucessful test: Server encountered an error: %v", err)
 	}
 
-	require.Equal(t, fmt.Sprintf("/%s/%s/%s", serviceName, regionName, bucketName), param.Origin_NamespacePrefix.GetString())
-	viper.Reset()
+	require.Equal(t, fmt.Sprintf("/%s/%s/%s", serviceName, regionName, bucketName), param.Origin_FederationPrefix.GetString())
 }

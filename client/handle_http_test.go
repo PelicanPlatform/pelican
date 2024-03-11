@@ -117,7 +117,6 @@ func TestNewTransferDetails(t *testing.T) {
 }
 
 func TestNewTransferDetailsEnv(t *testing.T) {
-
 	testCache := namespaces.Cache{
 		AuthEndpoint: "cache.edu:8443",
 		Endpoint:     "cache.edu:8000",

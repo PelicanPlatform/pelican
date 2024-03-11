@@ -242,7 +242,7 @@ func redirectToCache(ginCtx *gin.Context) {
 	// If the namespace prefix DOES exist, then it makes sense to say we couldn't find a valid cache.
 	if len(cacheAds) == 0 {
 		for _, originAd := range originAds {
-			if originAd.EnableFallbackRead {
+			if originAd.DirectReads {
 				cacheAds = append(cacheAds, originAd)
 				break
 			}
@@ -259,7 +259,7 @@ func redirectToCache(ginCtx *gin.Context) {
 			return
 		}
 	}
-	redirectURL := getRedirectURL(reqPath, cacheAds[0], !namespaceAd.Caps.PublicRead)
+	redirectURL := getRedirectURL(reqPath, cacheAds[0], !namespaceAd.Caps.PublicReads)
 
 	linkHeader := ""
 	first := true
@@ -269,7 +269,7 @@ func redirectToCache(ginCtx *gin.Context) {
 		} else {
 			linkHeader += ", "
 		}
-		redirectURL := getRedirectURL(reqPath, ad, !namespaceAd.Caps.PublicRead)
+		redirectURL := getRedirectURL(reqPath, ad, !namespaceAd.Caps.PublicReads)
 		linkHeader += fmt.Sprintf(`<%s>; rel="duplicate"; pri=%d; depth=%d`, redirectURL.String(), idx+1, depth)
 	}
 	ginCtx.Writer.Header()["Link"] = []string{linkHeader}
@@ -391,7 +391,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	// If we are doing a PUT, check to see if any origins are writeable
 	if ginCtx.Request.Method == "PUT" {
 		for idx, ad := range originAds {
-			if ad.EnableWrite {
+			if ad.Writes {
 				redirectURL = getRedirectURL(reqPath, originAds[idx], !namespaceAd.PublicRead)
 				if brokerUrl := originAds[idx].BrokerURL; brokerUrl.String() != "" {
 					ginCtx.Header("X-Pelican-Broker", brokerUrl.String())
@@ -599,8 +599,8 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType common.S
 		WebURL:             *adWebUrl,
 		BrokerURL:          *brokerUrl,
 		Type:               sType,
-		EnableWrite:        adV2.Caps.Write,
-		EnableFallbackRead: adV2.Caps.FallBackRead,
+		Writes:             adV2.Caps.Writes,
+		DirectReads:        adV2.Caps.DirectReads,
 	}
 
 	recordAd(sAd, &adV2.Namespaces)

@@ -26,6 +26,9 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"golang.org/x/sync/errgroup"
+
+	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/oa4mp"
 	"github.com/pelicanplatform/pelican/origin_ui"
@@ -33,7 +36,6 @@ import (
 	"github.com/pelicanplatform/pelican/server_ui"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/xrootd"
-	"golang.org/x/sync/errgroup"
 )
 
 func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, modules config.ServerType) (server_utils.XRootDServer, error) {
@@ -104,5 +106,16 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 // Finish configuration of the origin server.  To be invoked after the web UI components
 // have been launched.
 func OriginServeFinish(ctx context.Context, egrp *errgroup.Group) error {
-	return server_ui.RegisterNamespaceWithRetry(ctx, egrp, param.Origin_NamespacePrefix.GetString())
+	originExports, err := common.GetOriginExports()
+	if err != nil {
+		return err
+	}
+
+	for _, export := range *originExports {
+		if err := server_ui.RegisterNamespaceWithRetry(ctx, egrp, export.FederationPrefix); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

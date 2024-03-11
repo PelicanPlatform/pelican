@@ -53,13 +53,15 @@ LocalCache:
   HighWaterMarkPercentage: 95
   LowWaterMarkPercentage: 85
 Origin:
-  NamespacePrefix: ""
   Multiuser: false
   EnableMacaroons: false
   EnableVoms: true
   EnableUI: true
-  EnablePublicRead: false
-  EnableWrite: true
+  EnablePublicReads: false
+  EnableReads: true
+  EnableWrites: true
+  EnableListings: false
+  EnableDirectReads: false
   SelfTest: true
   Port: 8443
   SelfTestInterval: 15s

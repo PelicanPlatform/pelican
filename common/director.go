@@ -39,11 +39,11 @@ type (
 	}
 
 	Capabilities struct {
-		PublicRead   bool
-		Read         bool
-		Write        bool
-		Listing      bool
-		FallBackRead bool
+		PublicReads bool
+		Reads       bool
+		Writes      bool
+		Listings    bool
+		DirectReads bool
 	}
 
 	NamespaceAdV2 struct {
@@ -74,8 +74,8 @@ type (
 		Type               ServerType
 		Latitude           float64
 		Longitude          float64
-		EnableWrite        bool
-		EnableFallbackRead bool // True if reads from the origin are permitted when no cache is available
+		Writes             bool
+		DirectReads        bool // True if reads from the origin are permitted when no cache is available
 	}
 
 	ServerType   string
@@ -129,8 +129,8 @@ func (ad ServerAd) MarshalJSON() ([]byte, error) {
 		Type               ServerType `json:"type"`
 		Latitude           float64    `json:"latitude"`
 		Longitude          float64    `json:"longitude"`
-		EnableWrite        bool       `json:"enable_write"`
-		EnableFallbackRead bool       `json:"enable_fallback_read"`
+		Writes             bool       `json:"enable_write"`
+		DirectReads        bool       `json:"enable_fallback_read"`
 	}{
 		Name:               ad.Name,
 		AuthURL:            ad.AuthURL.String(),
@@ -139,8 +139,8 @@ func (ad ServerAd) MarshalJSON() ([]byte, error) {
 		Type:               ad.Type,
 		Latitude:           ad.Latitude,
 		Longitude:          ad.Longitude,
-		EnableWrite:        ad.EnableWrite,
-		EnableFallbackRead: ad.EnableFallbackRead,
+		Writes:             ad.Writes,
+		DirectReads:        ad.DirectReads,
 	}
 	return json.Marshal(baseAd)
 }

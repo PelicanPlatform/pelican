@@ -412,11 +412,134 @@ default: 8443
 type: int
 components: ["origin"]
 ---
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+name: Origin.Exports
+description: >-
+  A list describing the origin's exports. Each item in the list describes a single namespace the origin exports:
+
+    - StoragePrefix: <the relevant path from the object store, eg for posix /my/dir>
+      FederationPrefix: <the namespace prefix that data from StoragePrefix is made available under within the federation>
+      Capabilities: A list of the capabilities the origin is willing to support for the given export. Capabilities include:
+        ["Reads", "PublicReads", "Writes", "Listings"]
+
+      If "PublicReads" is included, "Reads" is inferred.
+type: object
+default: none
+components: ["origin"]
+---
+name: Origin.StorageType
+description: >-
+  The type of storage underpinning the origin. Currently supported types are "posix" and "s3".
+type: string
+default: "posix"
+components: ["origin"]
+---
+name: Origin.FederationPrefix
+description: >-
+  The namespace prefix of the origin's contents within the federation.
+
+  NOTE: This config option is incompatible with multiple exports defined via `Origin.Exports` and requires that the origin exports
+  only a single path.
+type: string
+default: none
+components: ["origin"]
+---
+name: Origin.StoragePrefix
+description: >-
+  A string indicating the path to the volume exported by an origin's underlying storage. For example, if the origin is configured in posix
+  mode, this constitutes the path on disk exported by the origin for the federation.
+
+  NOTE: This config option is incompatible with multiple exports defined via `Origin.Exports` and requires that the origin exports
+  only a single path.
+type: string
+default: none
+components: ["origin"]
+---
+name: Origin.ExportVolumes
+description: >-
+  A list of docker-style export volumes for the origin. Each item in the list describes a single volume the origin exports.
+  This configuration is meant mostly to be used by passing the -v flag from the command line. Paths exported with this
+  configuration will inherit the origin's abilities, so individual export configurations are not possible.
+type: stringSlice
+default: none
+components: ["origin"]
+---
+name: Origin.EnablePublicReads
+description: >-
+  A boolean indicating whether the origin permits reads without valid authorization. When false, reads from the origin will require a
+  properly-scoped authorization token signed by the origin's issuer.
+
+  NOTE: This config option is incompatible with multiple exports defined via `Origin.Exports` and requires that the origin exports
+  only a single path.
+type: bool
+default: false
+components: ["origin"]
+---
+name: Origin.EnableReads
+description: >-
+  A boolean indicating whether the origin permits any reads. When false, the origin may still allow writes.
+
+  NOTE: This config option is incompatible with multiple exports defined via `Origin.Exports` and requires that the origin exports
+  only a single path.
+type: bool
+default: true
+components: ["origin"]
+---
+name: Origin.EnableWrites
+description: >-
+  A boolean indicating whether the origin permits writes. All writes require authorization.
+
+  NOTE: This config option is incompatible with multiple exports defined via `Origin.Exports` and requires that the origin exports
+  only a single path.type: bool
+type: bool
+default: true
+components: ["origin"]
+---
+name: Origin.EnableListings
+description: >-
+  A boolean indicating whether the origin permits object listings. When true, clients can list the contents of the origin.
+
+  NOTE: This config option is incompatible with multiple exports defined via `Origin.Exports` and requires that the origin exports
+  only a single path.
+type: bool
+default: true
+components: ["origin"]
+---
+name: Origin.EnableDirectReads
+description: >-
+  A boolean indicating whether the origin permits direct reads. When true, the origin indicates that it is willing to interact directly with clients.
+  When false, the origin is indicating it is only willing to interact with clients via a cache service.
+
+  NOTE: This config option is incompatible with multiple exports defined via `Origin.Exports` and requires that the origin exports
+  only a single path.
+type: bool
+default: true
+components: ["origin"]
+---
 name: Origin.ExportVolume
 description: >-
+  [Deprecated] Origin.ExportVolume is being deprecated and will be removed in a future release. It is replaced by Origin.ExportVolumes.
   A path to the volume exported by an origin.
 type: string
 default: none
+deprecated: true
+replacedby: "Origin.ExportVolumes"
 components: ["origin"]
 ---
 name: Origin.RunLocation
@@ -433,32 +556,38 @@ components: ["origin"]
 ---
 name: Origin.NamespacePrefix
 description: >-
+  [Deprecated] Origin.NamespacePrefix is being deprecated and will be removed in a future release. It's configuration is being replaced by either
+  Origin.Exports.FederationPrefix or by Origin.FederationPrefix. Note that Origin.FederationPrefix is incompatible with multiple exports and requires
+  that the origin exports only a single path.
+
   The filepath prefix at which an origin's contents are made globally available, eg /pelican/PUBLIC.
 type: string
 default: none
-components: ["origin"]
----
-name: Origin.EnablePublicReads
-description: >-
-  A boolean indicating whether an origin allows public read access. When false, reads from the origin will require a properly-scoped authorization
-  token signed by the origin's issuer.
-type: bool
-default: false
+deprecated: true
+replacedby: "Origin.FederationPrefix"
 components: ["origin"]
 ---
 name: Origin.EnableWrite
 description: >-
+  [Deprecated] Origin.EnableWrite is being deprecated and will be removed in a future release. It is replaced by Origin.EnableWrites.
+
   A boolean indicating if an origin allows write access
 type: bool
 default: true
+deprecated: true
+replacedby: "Origin.EnableWrites"
 components: ["origin"]
 ---
 name: Origin.EnableFallbackRead
 description: >-
+  [Deprecated] Origin.EnableFallbackRead is being deprecated and will be removed in a future release. It is replaced by Origin.EnableDirectReads.
+
   Set to `true` if the origin permits clients to directly read from it
   when no cache service is available
 type: bool
 default: false
+deprecated: true
+replacedby: "Origin.EnableDirectReads"
 components: ["origin"]
 ---
 name: Origin.Multiuser
@@ -566,18 +695,26 @@ components: ["origin"]
 ---
 name: Origin.EnableDirListing
 description: >-
+  [Deprecated] Origin.EnableDirListing is being deprecated and will be removed in a future release. It is replaced by Origin.EnableListings.
+
   Allows the origin to enable directory listings. Needs to be enabled for recursive
   downloads to work properly and for directories to be visable.
 type: bool
 default: false
+deprecated: true
+replacedby: "Origin.EnableListings"
 components: ["origin"]
 ---
 name: Origin.Mode
 description: >-
+  [Deprecated] Origin.Mode is being deprecated and will be removed in a future release. It is replaced by Origin.StorageType.
+
   The backend mode to be used by an origin. Current values that can be selected from
   are either "posix" or "s3".
 type: string
 default: posix
+deprecated: true
+replacedby: "Origin.StorageType"
 components: ["origin"]
 ---
 name: Origin.S3ServiceName
@@ -1407,6 +1544,7 @@ description: >-
 type: int
 default: 8443
 deprecated: true
+replacedby: ["Origin.Port", "Cache.Port"]
 components: ["origin", "cache"]
 ---
 name: Xrootd.RunLocation
@@ -1424,6 +1562,7 @@ type: filename
 root_default: /run/pelican/xrootd
 default: $XDG_RUNTIME_DIR/pelican
 deprecated: true
+replacedby: ["Cache.RunLocation", "Origin.RunLocation"]
 components: ["origin", "cache"]
 ---
 name: Xrootd.RobotsTxtFile

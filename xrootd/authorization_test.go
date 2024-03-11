@@ -227,6 +227,9 @@ func TestOSDFAuthCreation(t *testing.T) {
 		t.Run(testInput.desc, func(t *testing.T) {
 			dirName := t.TempDir()
 			viper.Reset()
+			common.ResetOriginExports()
+			defer viper.Reset()
+			defer common.ResetOriginExports()
 
 			viper.Set("Xrootd.Authfile", filepath.Join(dirName, "authfile"))
 			viper.Set("Federation.TopologyUrl", ts.URL)
@@ -295,6 +298,7 @@ func TestEmitAuthfile(t *testing.T) {
 		t.Run(testInput.desc, func(t *testing.T) {
 			dirName := t.TempDir()
 			viper.Reset()
+			common.ResetOriginExports()
 			viper.Set("Xrootd.Authfile", filepath.Join(dirName, "authfile"))
 			viper.Set("Origin.RunLocation", dirName)
 			server := &origin_ui.OriginServer{}
@@ -316,6 +320,7 @@ func TestEmitAuthfile(t *testing.T) {
 func TestEmitCfg(t *testing.T) {
 	dirname := t.TempDir()
 	viper.Reset()
+	common.ResetOriginExports()
 	viper.Set("Origin.RunLocation", dirname)
 	err := config.InitClient()
 	assert.Nil(t, err)
@@ -344,6 +349,7 @@ func TestEmitCfg(t *testing.T) {
 func TestLoadScitokensConfig(t *testing.T) {
 	dirname := t.TempDir()
 	viper.Reset()
+	common.ResetOriginExports()
 	viper.Set("Origin.RunLocation", dirname)
 	err := config.InitClient()
 	assert.Nil(t, err)
@@ -376,6 +382,7 @@ func TestLoadScitokensConfig(t *testing.T) {
 func TestMergeConfig(t *testing.T) {
 	dirname := t.TempDir()
 	viper.Reset()
+	common.ResetOriginExports()
 	viper.Set("Origin.RunLocation", dirname)
 	viper.Set("Origin.Port", 8443)
 	scitokensConfigFile := filepath.Join(dirname, "scitokens-input.cfg")
@@ -414,6 +421,7 @@ func TestGenerateConfig(t *testing.T) {
 	defer cancel()
 
 	viper.Reset()
+	common.ResetOriginExports()
 	viper.Set("Origin.SelfTest", false)
 	issuer, err := GenerateMonitoringIssuer()
 	require.NoError(t, err)
@@ -453,9 +461,12 @@ func TestGenerateConfig(t *testing.T) {
 
 func TestWriteOriginAuthFiles(t *testing.T) {
 	viper.Reset()
+	common.ResetOriginExports()
 	originAuthTester := func(server server_utils.XRootDServer, authStart string, authResult string) func(t *testing.T) {
 		return func(t *testing.T) {
 			defer viper.Reset()
+			defer common.ResetOriginExports()
+			viper.Set("Origin.StorageType", "posix")
 			dirname := t.TempDir()
 			viper.Set("Origin.RunLocation", dirname)
 			viper.Set("Xrootd.ScitokensConfig", filepath.Join(dirname, "scitokens-generated.cfg"))
@@ -488,7 +499,7 @@ func TestWriteOriginAuthFiles(t *testing.T) {
 	t.Run("EmptyAuth", originAuthTester(originServer, "", "u * /.well-known lr\n"))
 
 	viper.Set("Origin.EnablePublicReads", true)
-	viper.Set("Origin.NamespacePrefix", "/foo/bar")
+	viper.Set("Origin.FederationPrefix", "/foo/bar")
 	t.Run("PublicAuth", originAuthTester(originServer, "", "u * /.well-known lr /foo/bar lr\n"))
 }
 
@@ -546,14 +557,14 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 	issuer4URL.Host = "issuer4.com"
 
 	PublicCaps := common.Capabilities{
-		PublicRead: true,
-		Read:       true,
-		Write:      true,
+		PublicReads: true,
+		Reads:       true,
+		Writes:      true,
 	}
 	PrivateCaps := common.Capabilities{
-		PublicRead: false,
-		Read:       true,
-		Write:      true,
+		PublicReads: false,
+		Reads:       true,
+		Writes:      true,
 	}
 
 	nsAds := []common.NamespaceAdV2{

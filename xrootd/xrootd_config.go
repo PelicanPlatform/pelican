@@ -26,7 +26,6 @@ import (
 	_ "embed"
 	"encoding/base64"
 	builtin_errors "errors"
-	"fmt"
 	"io"
 	"io/fs"
 	"net/url"
@@ -39,17 +38,19 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/pelicanplatform/pelican/cache_ui"
+	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/origin_ui"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/utils"
-	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
-	"golang.org/x/sync/errgroup"
 )
 
 var (
@@ -79,6 +80,7 @@ enable = true
 
 type (
 	OriginConfig struct {
+<<<<<<< HEAD
 		Multiuser         bool
 		EnableCmsd        bool
 		EnableMacaroons   bool
@@ -97,6 +99,26 @@ type (
 		S3AccessKeyfile   string
 		S3SecretKeyfile   string
 		S3UrlStyle        string
+=======
+		Multiuser        bool
+		EnableCmsd       bool
+		EnableMacaroons  bool
+		EnableVoms       bool
+		EnablePublicReads bool
+		EnableListings   bool
+		SelfTest         bool
+		CalculatedPort   string
+		RunLocation      string
+		StorageType      string
+		S3Bucket         string
+		S3Region         string
+		S3ServiceName    string
+		S3ServiceUrl     string
+		S3AccessKeyfile  string
+		S3SecretKeyfile  string
+		S3UrlStyle       string
+		Exports 		 []common.OriginExports
+>>>>>>> 4bf9949 (Allow posix origins to export multiple prefixes)
 	}
 
 	CacheConfig struct {
@@ -168,98 +190,46 @@ type (
 	}
 )
 
-func CheckOriginXrootdEnv(exportPath string, server server_utils.XRootDServer, uid int, gid int, groupname string) (string, error) {
-	originMode := param.Origin_Mode.GetString()
-	if originMode == "posix" {
-		// If we use "volume mount" style options, configure the export directories.
-		volumeMount := param.Origin_ExportVolume.GetString()
-		if volumeMount != "" {
-			volumeMount, err := filepath.Abs(volumeMount)
+// CheckOriginXrootdEnv is almost a misnomer -- it does both checking and configuring. In partcicular,
+// it is responsible for setting up the exports and handling all the symlinking we use
+// to export our directories.
+func CheckOriginXrootdEnv(exportPath string, server server_utils.XRootDServer, uid int, gid int, groupname string) error {
+	// First we check if our config yaml contains the Exports block. If it does, we use that instead of the older legacy
+	// options for all this configuration
+	originExports, err := common.GetOriginExports()
+	if err != nil {
+		return err
+	}
+
+	backendType := param.Origin_StorageType.GetString()
+	switch backendType {
+	case "posix":
+		// For each export, we symlink the exported directory, currently at /var/run/pelican/export/<export.FederationPrefix>,
+		// to the actual data source, which is what we get from the Export object's StoragePrefix
+		for _, export := range *originExports {
+			destPath := path.Clean(filepath.Join(exportPath, export.FederationPrefix))
+			err := config.MkdirAll(filepath.Dir(destPath), 0755, uid, gid)
 			if err != nil {
-				return exportPath, err
-			}
-			volumeMountSrc := volumeMount
-			volumeMountDst := volumeMount
-			volumeMountInfo := strings.SplitN(volumeMount, ":", 2)
-			if len(volumeMountInfo) == 2 {
-				volumeMountSrc = volumeMountInfo[0]
-				volumeMountDst = volumeMountInfo[1]
-			}
-			volumeMountDst = filepath.Clean(volumeMountDst)
-			if volumeMountDst == "" {
-				return exportPath, fmt.Errorf("export volume %v has empty destination path", volumeMount)
-			}
-			if volumeMountDst[0:1] != "/" {
-				return "", fmt.Errorf("export volume %v has a relative destination path",
-					volumeMountDst)
-			}
-			destPath := path.Clean(filepath.Join(exportPath, volumeMountDst[1:]))
-			err = config.MkdirAll(filepath.Dir(destPath), 0755, uid, gid)
-			if err != nil {
-				return exportPath, errors.Wrapf(err, "Unable to create export directory %v",
+				return errors.Wrapf(err, "Unable to create export directory %v",
 					filepath.Dir(destPath))
 			}
-			err = os.Symlink(volumeMountSrc, destPath)
-			if err != nil {
-				return exportPath, errors.Wrapf(err, "Failed to create export symlink")
-			}
-			viper.Set("Origin.NamespacePrefix", volumeMountDst)
-		} else {
-			mountPath := param.Xrootd_Mount.GetString()
-			namespacePrefix := param.Origin_NamespacePrefix.GetString()
-			if mountPath == "" || namespacePrefix == "" {
-				return exportPath, errors.New(`
-	The origin should have parsed export information prior to this point, but has failed to do so.
-	Was the mount passed via the command line flag:
 
-		-v /mnt/foo:/bar
-
-	or via the parameters.yaml file:
-
-		# Option 1
-		Origin.ExportVolume: /mnt/foo:/bar
-
-		# Option 2
-		Xrootd
-			Mount: /mnt/foo
-		Origin:
-			NamespacePrefix: /bar
-				`)
-			}
-			mountPath, err := filepath.Abs(mountPath)
+			err = os.Symlink(export.StoragePrefix, destPath)
 			if err != nil {
-				return exportPath, err
-			}
-			mountPath = filepath.Clean(mountPath)
-			namespacePrefix = filepath.Clean(namespacePrefix)
-			if namespacePrefix[0:1] != "/" {
-				return exportPath, fmt.Errorf("namespace prefix %v must have an absolute path",
-					namespacePrefix)
-			}
-			destPath := path.Clean(filepath.Join(exportPath, namespacePrefix[1:]))
-			err = config.MkdirAll(filepath.Dir(destPath), 0755, uid, gid)
-			if err != nil {
-				return exportPath, errors.Wrapf(err, "Unable to create export directory %v",
-					filepath.Dir(destPath))
-			}
-			srcPath := filepath.Join(mountPath, namespacePrefix[1:])
-			err = os.Symlink(srcPath, destPath)
-			if err != nil {
-				return exportPath, errors.Wrapf(err, "Failed to create export symlink")
+				return errors.Wrapf(err, "Failed to create export symlink of %v to %v", export.StoragePrefix, destPath)
 			}
 		}
+		// Set the mount to our export path now that everything is symlinked
 		viper.Set("Xrootd.Mount", exportPath)
-	} else if originMode == "s3" {
-		// Our "namespace prefix" is actually just
-		// /<Origin.S3ServiceName>/<Origin.S3Region>/<Origin.S3Bucket>
-		nsPrefix := filepath.Join("/", param.Origin_S3ServiceName.GetString(),
-			param.Origin_S3Region.GetString(), param.Origin_S3Bucket.GetString())
-		viper.Set("Origin.NamespacePrefix", nsPrefix)
+	case "s3":
+		if len(*originExports) > 1 {
+			return errors.New("Multi exports for s3 backends not yet implemented")
+		}
 	}
 
 	if param.Origin_SelfTest.GetBool() {
 		if err := origin_ui.ConfigureXrootdMonitoringDir(); err != nil {
-			return exportPath, err
+			return err
 		}
 	}
 	// If macaroons secret does not exist, create one
@@ -268,43 +238,47 @@ func CheckOriginXrootdEnv(exportPath string, server server_utils.XRootDServer, u
 		if errors.Is(err, os.ErrNotExist) {
 			err = config.MkdirAll(path.Dir(macaroonsSecret), 0755, -1, gid)
 			if err != nil {
-				return exportPath, errors.Wrapf(err, "Unable to create directory %v",
+				return errors.Wrapf(err, "Unable to create directory %v",
 					path.Dir(macaroonsSecret))
 			}
 			file, err := os.OpenFile(macaroonsSecret, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0640)
 			if err != nil {
-				return exportPath, errors.Wrap(err, "Failed to create a new macaroons key")
+				return errors.Wrap(err, "Failed to create a new macaroons key")
 			}
 			defer file.Close()
 			buf := make([]byte, 64)
 			_, err = rand.Read(buf)
 			if err != nil {
-				return exportPath, err
+				return err
 			}
 			encoded := base64.StdEncoding.EncodeToString(buf) + "\n"
 			if _, err = file.WriteString(encoded); err != nil {
-				return exportPath, errors.Wrap(err, "Failed to write out a macaroons key")
+				return errors.Wrap(err, "Failed to write out a macaroons key")
 			}
 		} else {
-			return exportPath, err
+			return err
 		}
 	}
 	if err := os.Chown(macaroonsSecret, -1, gid); err != nil {
-		return exportPath, errors.Wrapf(err, "Unable to change ownership of macaroons secret %v"+
+		return errors.Wrapf(err, "Unable to change ownership of macaroons secret %v"+
 			" to desired daemon group %v", macaroonsSecret, groupname)
 	}
 	// If the scitokens.cfg does not exist, create one
 	if originServer, ok := server.(*origin_ui.OriginServer); ok {
-		err := WriteOriginScitokensConfig(originServer.GetAuthorizedPrefixes())
+		authedPrefixes, err := originServer.GetAuthorizedPrefixes()
 		if err != nil {
-			return exportPath, err
+			return err
+		}
+		err = WriteOriginScitokensConfig(authedPrefixes)
+		if err != nil {
+			return err
 		}
 	}
 	if err := origin_ui.ConfigureXrootdMonitoringDir(); err != nil {
-		return exportPath, err
+		return err
 	}
 
-	return exportPath, nil
+	return nil
 }
 
 func CheckCacheXrootdEnv(exportPath string, server server_utils.XRootDServer, uid int, gid int) (string, error) {
@@ -458,7 +432,7 @@ func CheckXrootdEnv(server server_utils.XRootDServer) error {
 	}
 
 	if server.GetServerType().IsEnabled(config.OriginType) {
-		exportPath, err = CheckOriginXrootdEnv(exportPath, server, uid, gid, groupname)
+		err = CheckOriginXrootdEnv(exportPath, server, uid, gid, groupname)
 	} else {
 		exportPath, err = CheckCacheXrootdEnv(exportPath, server, uid, gid)
 	}
@@ -633,9 +607,18 @@ func ConfigXrootd(ctx context.Context, origin bool) (string, error) {
 
 	var xrdConfig XrootdConfig
 	xrdConfig.Xrootd.LocalMonitoringPort = -1
-	if err := viper.Unmarshal(&xrdConfig); err != nil {
-		return "", err
+	if err := viper.Unmarshal(&xrdConfig, viper.DecodeHook(common.StringListToCapsHookFunc())); err != nil {
+		return "", errors.Wrap(err, "failed to unmarshal xrootd config")
 	}
+
+	// To make sure we get the correct exports, we overwrite the exports in the xrdConfig struct with the exports
+	// we get from the common.GetOriginExports() function. Failure to do so will cause us to hit viper again,
+	// which in the case of tests prevents us from overwriting some exports with temp dirs.
+	originExports, err := common.GetOriginExports()
+	if err != nil {
+		return "", errors.Wrap(err, "failed to generate Origin export list for xrootd config")
+	}
+	xrdConfig.Origin.Exports = *originExports
 
 	// If the S3 URL style is configured via yaml, the CLI check in cmd/origin.go won't catch invalid values.
 	if urlStyle := xrdConfig.Origin.S3UrlStyle; urlStyle != "" {

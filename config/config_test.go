@@ -29,9 +29,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pelicanplatform/pelican/param"
+	"github.com/sirupsen/logrus"
+	"github.com/sirupsen/logrus/hooks/test"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/pelicanplatform/pelican/param"
+
 )
 
 var server *httptest.Server
@@ -154,6 +159,57 @@ func TestInitConfig(t *testing.T) {
 	}
 	InitConfig()
 	assert.Equal(t, "", param.Federation_DiscoveryUrl.GetString())
+}
+
+func TestDeprecateLogMessage(t *testing.T) {
+	tmpPathPattern := "TestOrigin*"
+	tmpPath, err := os.MkdirTemp("", tmpPathPattern)
+	require.NoError(t, err)
+
+	// Need to set permissions or the xrootd process we spawn won't be able to write PID/UID files
+	permissions := os.FileMode(0755)
+	err = os.Chmod(tmpPath, permissions)
+	require.NoError(t, err)
+
+	viper.Set("ConfigDir", tmpPath)
+	viper.Reset()
+	t.Run("expect-deprecated-message-if-namespace-is-set", func(t *testing.T) {
+		hook := test.NewGlobal()
+		viper.Reset()
+		defer viper.Reset()
+		// The default value is set to Error, but this is a warning message
+		viper.Set("Logging.Level", "Warning")
+		viper.Set("Origin.NamespacePrefix", "/a/prefix")
+		viper.Set("ConfigDir", tmpPath)
+
+		// NOTE: When we run InitConfig(), which runs handleDeprecatedConfig(), we're making the assumption that our
+		// parameters struct is fully built. Since this doesn't happen when we run tests, we need to manually build
+		// for any updates to get picked up.
+		InitConfig()
+
+		require.Equal(t, 2, len(hook.Entries))
+		assert.Equal(t, logrus.WarnLevel, hook.LastEntry().Level)
+		assert.Equal(t, "Deprecated configuration key Origin.NamespacePrefix is set. Please migrate to use Origin.FederationPrefix instead", hook.Entries[len(hook.Entries)-2].Message)
+		assert.Equal(t, "Will attempt to use the value of Origin.NamespacePrefix as default for Origin.FederationPrefix", hook.LastEntry().Message)
+		// We expect the default value of Federation.RegistryUrl is set to Federation.NamespaceUrl
+		// if Federation.NamespaceUrl is not empty for backward compatibility
+		assert.Equal(t, "/a/prefix", viper.GetString("Origin.FederationPrefix"))
+		hook.Reset()
+	})
+
+	t.Run("no-deprecated-message-if-namespace-url-unset", func(t *testing.T) {
+		hook := test.NewGlobal()
+		viper.Reset()
+		viper.Set("Logging.Level", "Warning")
+		viper.Set("Federation.RegistryUrl", "https://dont-use.com")
+		viper.Set("ConfigDir", tmpPath)
+		InitConfig()
+
+		assert.Equal(t, 0, len(hook.Entries))
+		assert.Equal(t, "https://dont-use.com", viper.GetString("Federation.RegistryUrl"))
+		assert.Equal(t, "", viper.GetString("Federation.NamespaceUrl"))
+		hook.Reset()
+	})
 }
 
 func TestEnabledServers(t *testing.T) {
