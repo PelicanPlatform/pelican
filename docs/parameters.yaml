@@ -419,9 +419,9 @@ description: >-
     - StoragePrefix: <the relevant path from the object store, eg for posix /my/dir>
       FederationPrefix: <the namespace prefix that data from StoragePrefix is made available under within the federation>
       Capabilities: A list of the capabilities the origin is willing to support for the given export. Capabilities include:
-        ["Reads", "PublicReads", "Writes", "Listings"]
-
-      If "PublicReads" is included, "Reads" is inferred.
+        ["Reads", "PublicReads", "Writes", "Listings", "DirectReads"]
+      where each of these has the same effect as the corresponding "Origin.Enable*" configuration, except scoped to the
+      given export. If "PublicReads" is included, "Reads" is inferred.
 type: object
 default: none
 components: ["origin"]
