@@ -77,11 +77,13 @@ func (server *OriginServer) CreateAdvertisement(name string, originUrlStr string
 	}
 
 	for _, export := range *originExports {
+		// PublicReads implies reads
+		reads := export.Capabilities.PublicReads || export.Capabilities.Reads
 		nsAds = append(nsAds, common.NamespaceAdV2{
 			PublicRead: export.Capabilities.PublicReads,
 			Caps: common.Capabilities{
 				PublicReads: export.Capabilities.PublicReads,
-				Reads:       true,
+				Reads:       reads,
 				Writes:      export.Capabilities.Writes,
 			},
 			Path: export.FederationPrefix,
@@ -98,6 +100,8 @@ func (server *OriginServer) CreateAdvertisement(name string, originUrlStr string
 		prefixes = append(prefixes, export.FederationPrefix)
 	}
 
+	// PublicReads implies reads
+	reads := param.Origin_EnableReads.GetBool() || param.Origin_EnablePublicReads.GetBool()
 	ad := common.OriginAdvertiseV2{
 		Name:       name,
 		DataURL:    originUrlStr,
@@ -105,7 +109,7 @@ func (server *OriginServer) CreateAdvertisement(name string, originUrlStr string
 		Namespaces: nsAds,
 		Caps: common.Capabilities{
 			PublicReads: param.Origin_EnablePublicReads.GetBool(),
-			Reads:       true,
+			Reads:       reads,
 			Writes:      param.Origin_EnableWrites.GetBool(),
 			DirectReads: param.Origin_EnableDirectReads.GetBool(),
 		},
@@ -147,7 +151,7 @@ func (server *OriginServer) GetAuthorizedPrefixes() ([]string, error) {
 	}
 
 	for _, export := range *originExports {
-		if !export.Capabilities.PublicReads || export.Capabilities.Writes {
+		if (export.Capabilities.Reads && !export.Capabilities.PublicReads) || export.Capabilities.Writes {
 			prefixes = append(prefixes, export.FederationPrefix)
 		}
 	}

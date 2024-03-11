@@ -106,12 +106,12 @@ func TestConversion(t *testing.T) {
 	require.Equal(t, v1Ads, v1Conv)
 
 	oAdV1 := common.OriginAdvertiseV1{
-		Name:               "OriginTest",
-		URL:                "https://origin-url.org",
-		WebURL:             "https://WebUrl.org",
-		Namespaces:         v1Ads,
-		EnableWrite:        true,
-		EnableFallbackRead: false,
+		Name:        "OriginTest",
+		URL:         "https://origin-url.org",
+		WebURL:      "https://WebUrl.org",
+		Namespaces:  v1Ads,
+		Writes:      true,
+		DirectReads: false,
 	}
 
 	oAdV2 := common.OriginAdvertiseV2{

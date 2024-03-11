@@ -171,7 +171,6 @@ func GetOriginExports() (*[]OriginExports, error) {
 				viper.Set("Origin.FederationPrefix", (*originExports)[0].FederationPrefix)
 				viper.Set("Origin.StoragePrefix", (*originExports)[0].StoragePrefix)
 				viper.Set("Origin.EnableReads", (*originExports)[0].Capabilities.Reads)
-
 			}
 
 			log.Warningln("Passing export volumes via -v at the command line causes Pelican to ignore exports configured via the yaml file")
@@ -216,6 +215,7 @@ func GetOriginExports() (*[]OriginExports, error) {
 					DirectReads: param.Origin_EnableDirectReads.GetBool(),
 				},
 			}
+			viper.Set("Origin.EnableReads", reads)
 			*originExports = append(*originExports, originExport)
 		}
 

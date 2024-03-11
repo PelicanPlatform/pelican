@@ -412,23 +412,6 @@ default: 8443
 type: int
 components: ["origin"]
 ---
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 name: Origin.Exports
 description: >-
   A list describing the origin's exports. Each item in the list describes a single namespace the origin exports:

@@ -68,8 +68,8 @@ func ConvertNamespaceAdsV1ToV2(nsAdsV1 []common.NamespaceAdV1, oAd *common.Origi
 	var credurl url.URL
 
 	if oAd != nil {
-		fallback = oAd.EnableFallbackRead
-		wr = oAd.EnableWrite
+		fallback = oAd.DirectReads
+		wr = oAd.Writes
 	} else {
 		fallback = true
 		wr = false
@@ -195,9 +195,9 @@ func convertOriginAd(oAd1 common.OriginAdvertiseV1) common.OriginAdvertiseV2 {
 	caps := common.Capabilities{
 		PublicReads: true,
 		Reads:       true,
-		Writes:      oAd1.EnableWrite,
+		Writes:      oAd1.Writes,
 		Listings:    true,
-		DirectReads: oAd1.EnableFallbackRead,
+		DirectReads: oAd1.DirectReads,
 	}
 
 	oAd2 := common.OriginAdvertiseV2{
