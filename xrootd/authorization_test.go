@@ -393,6 +393,10 @@ func TestMergeConfig(t *testing.T) {
 	defer common.ResetOriginExports()
 	viper.Set("Origin.RunLocation", dirname)
 	viper.Set("Origin.Port", 8443)
+	// We don't inherit any defaults at this level of code -- in order to recognize
+	// that this is an authorized prefix, we must set either EnableReads && !EnablePublicReads
+	// or EnableWrites
+	viper.Set("Origin.EnableReads", true)
 	scitokensConfigFile := filepath.Join(dirname, "scitokens-input.cfg")
 	viper.Set("Xrootd.ScitokensConfig", scitokensConfigFile)
 
