@@ -593,14 +593,14 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType common.S
 	}
 
 	sAd := common.ServerAd{
-		Name:               adV2.Name,
-		AuthURL:            *ad_url,
-		URL:                *ad_url,
-		WebURL:             *adWebUrl,
-		BrokerURL:          *brokerUrl,
-		Type:               sType,
-		Writes:             adV2.Caps.Writes,
-		DirectReads:        adV2.Caps.DirectReads,
+		Name:        adV2.Name,
+		AuthURL:     *ad_url,
+		URL:         *ad_url,
+		WebURL:      *adWebUrl,
+		BrokerURL:   *brokerUrl,
+		Type:        sType,
+		Writes:      adV2.Caps.Writes,
+		DirectReads: adV2.Caps.DirectReads,
 	}
 
 	recordAd(sAd, &adV2.Namespaces)

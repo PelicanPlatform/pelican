@@ -66,16 +66,16 @@ type (
 	}
 
 	ServerAd struct {
-		Name               string
-		AuthURL            url.URL
-		BrokerURL          url.URL // The URL of the broker service to use for this host.
-		URL                url.URL // This is server's XRootD URL for file transfer
-		WebURL             url.URL // This is server's Web interface and API
-		Type               ServerType
-		Latitude           float64
-		Longitude          float64
-		Writes             bool
-		DirectReads        bool // True if reads from the origin are permitted when no cache is available
+		Name        string
+		AuthURL     url.URL
+		BrokerURL   url.URL // The URL of the broker service to use for this host.
+		URL         url.URL // This is server's XRootD URL for file transfer
+		WebURL      url.URL // This is server's Web interface and API
+		Type        ServerType
+		Latitude    float64
+		Longitude   float64
+		Writes      bool
+		DirectReads bool // True if reads from the origin are permitted when no cache is available
 	}
 
 	ServerType   string
@@ -122,25 +122,25 @@ const (
 
 func (ad ServerAd) MarshalJSON() ([]byte, error) {
 	baseAd := struct {
-		Name               string     `json:"name"`
-		AuthURL            string     `json:"auth_url"`
-		URL                string     `json:"url"`
-		WebURL             string     `json:"web_url"`
-		Type               ServerType `json:"type"`
-		Latitude           float64    `json:"latitude"`
-		Longitude          float64    `json:"longitude"`
-		Writes             bool       `json:"enable_write"`
-		DirectReads        bool       `json:"enable_fallback_read"`
+		Name        string     `json:"name"`
+		AuthURL     string     `json:"auth_url"`
+		URL         string     `json:"url"`
+		WebURL      string     `json:"web_url"`
+		Type        ServerType `json:"type"`
+		Latitude    float64    `json:"latitude"`
+		Longitude   float64    `json:"longitude"`
+		Writes      bool       `json:"enable_write"`
+		DirectReads bool       `json:"enable_fallback_read"`
 	}{
-		Name:               ad.Name,
-		AuthURL:            ad.AuthURL.String(),
-		URL:                ad.URL.String(),
-		WebURL:             ad.WebURL.String(),
-		Type:               ad.Type,
-		Latitude:           ad.Latitude,
-		Longitude:          ad.Longitude,
-		Writes:             ad.Writes,
-		DirectReads:        ad.DirectReads,
+		Name:        ad.Name,
+		AuthURL:     ad.AuthURL.String(),
+		URL:         ad.URL.String(),
+		WebURL:      ad.WebURL.String(),
+		Type:        ad.Type,
+		Latitude:    ad.Latitude,
+		Longitude:   ad.Longitude,
+		Writes:      ad.Writes,
+		DirectReads: ad.DirectReads,
 	}
 	return json.Marshal(baseAd)
 }
