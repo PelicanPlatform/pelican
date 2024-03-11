@@ -138,7 +138,7 @@ func GetOriginExports() (*[]OriginExports, error) {
 				volumeMountInfo := strings.SplitN(volume, ":", 2)
 				if len(volumeMountInfo) != 2 {
 					// We detected more than one `:` in the volume mount
-					return nil, errors.New("Invalid volume mount format. Must be in the form of /mnt/foo:/bar")
+					return nil, errors.New("Invalid volume mount/ExportVolume format. Each entry must be in the form of /mnt/foo:/bar")
 				}
 				storagePrefix := filepath.Clean(volumeMountInfo[0])
 				federationPrefix := filepath.Clean(volumeMountInfo[1])
