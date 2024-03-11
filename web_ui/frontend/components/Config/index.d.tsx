@@ -10,7 +10,7 @@ export interface ParameterMetadata {
 
 export interface ParameterValue {
     Type: string;
-    Value: string | number | boolean | string[] | undefined | Coordinate[] | Institution[] | CustomRegistrationField[] | OIDCAuthenticationRequirement[] | AuthorizationTemplate[] | IPMapping[] | GeoIPOverride[];
+    Value: string | number | boolean | string[] | undefined | Coordinate[] | Institution[] | CustomRegistrationField[] | OIDCAuthenticationRequirement[] | AuthorizationTemplate[] | IPMapping[] | GeoIPOverride[] | Export[];
 }
 
 export type ParameterInputProps = Parameter & {
@@ -75,3 +75,12 @@ export interface IPMappingFine {
 }
 
 export type IPMapping = IPMappingAll | IPMappingFine;
+
+
+export type Capability = "PublicReads" | "DirectReads" | "Writes" | "Listings" | "Reads";
+
+export interface Export {
+    storageprefix: string;
+    federationprefix: string;
+    capabilities: Capability[];
+}

@@ -14,7 +14,8 @@ VERIFIED_OBJECT_STRUCTURES = [
     "CustomRegistrationFields",
     "OIDCAuthenticationRequirements",
     "AuthorizationTemplates",
-    "IPMapping"
+    "IPMapping",
+    "Exports"
 ]
 
 

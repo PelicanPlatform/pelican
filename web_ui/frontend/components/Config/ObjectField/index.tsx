@@ -5,5 +5,6 @@ import OIDCAuthenticationRequirementForm from "./OIDCAuthenticationRequirementFo
 import IPMappingForm from "./IPMappingForm";
 import CustomRegistrationFieldForm from "./CustomRegistrationFieldForm";
 import OptionForm from "./OptionForm";
+import ExportForm from "./ExportForm";
 
-export {ObjectField, InstitutionForm, GeoIPOverrideForm, OIDCAuthenticationRequirementForm, IPMappingForm, OptionForm, CustomRegistrationFieldForm}
+export {ObjectField, InstitutionForm, GeoIPOverrideForm, OIDCAuthenticationRequirementForm, IPMappingForm, OptionForm, CustomRegistrationFieldForm, ExportForm}
