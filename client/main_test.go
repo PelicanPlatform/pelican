@@ -39,7 +39,7 @@ import (
 func TestGetIps(t *testing.T) {
 	t.Parallel()
 
-	ips := get_ips("wlcg-wpad.fnal.gov")
+	ips := getIPs("wlcg-wpad.fnal.gov")
 	for _, ip := range ips {
 		parsedIP := net.ParseIP(ip)
 		if parsedIP.To4() != nil {

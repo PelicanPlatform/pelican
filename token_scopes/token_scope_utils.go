@@ -22,6 +22,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path"
 	"slices"
 	"sort"
 	"strings"
@@ -29,21 +30,88 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwt"
 )
 
+type (
+	// A resourced scope is a scope whose privileges
+	// are narrowed to a specific resource.  If there's
+	// the authorization for foo, then the ResourceScope of
+	// foo:/bar also contains foo:/bar/baz.
+	ResourceScope struct {
+		Authorization TokenScope
+		Resource      string
+	}
+
+	Scope interface {
+		TokenScope | ResourceScope
+
+		String() string
+	}
+)
+
+func NewResourceScope(authz TokenScope, resource string) ResourceScope {
+	return ResourceScope{
+		Authorization: authz,
+		Resource:      path.Clean("/" + resource),
+	}
+}
+
+func (rc ResourceScope) String() string {
+	if rc.Resource == "/" {
+		return string(rc.Authorization)
+	}
+	return rc.Authorization.String() + ":" + rc.Resource
+}
+
+func (rc ResourceScope) Contains(other ResourceScope) bool {
+	if rc.Authorization != other.Authorization {
+		return false
+	}
+	if strings.HasPrefix(other.Resource, rc.Resource) {
+		if len(rc.Resource) == 1 {
+			return true
+		}
+		if len(other.Resource) > len(rc.Resource) {
+			return other.Resource[len(rc.Resource)] == '/'
+		}
+		return true
+	}
+	return false
+}
+
 // Get a string representation of a list of scopes, which can then be passed
 // to the Claim builder of JWT constructor
-func GetScopeString(scopes []TokenScope) (scopeString string) {
-	scopeString = ""
+func GetScopeString[Scopes ~[]Sc, Sc Scope](scopes Scopes) (scopeString string) {
 	if len(scopes) == 0 {
 		return
 	}
-	if len(scopes) == 1 {
-		scopeString = string(scopes[0])
+	scopeString = scopes[0].String()
+	for _, scope := range scopes[1:] {
+		scopeString += " " + scope.String()
+	}
+	return
+}
+
+// Get a list of resource-style scopes from the token
+func ParseResourceScopeString(tok jwt.Token) (scopes []ResourceScope) {
+	scopes = make([]ResourceScope, 0)
+	scopeAny, ok := tok.Get("scope")
+	if !ok {
 		return
 	}
-	for _, scope := range scopes {
-		scopeString += scope.String() + " "
+	scopeString, ok := scopeAny.(string)
+	if !ok {
+		return
 	}
-	scopeString = strings.TrimRight(scopeString, " ")
+	for _, scope := range strings.Split(scopeString, " ") {
+		if scope == "" {
+			continue
+		}
+		info := strings.SplitN(scope, ":", 2)
+		if len(info) == 1 {
+			scopes = append(scopes, NewResourceScope(TokenScope(info[0]), "/"))
+		} else {
+			scopes = append(scopes, NewResourceScope(TokenScope(info[0]), info[1]))
+		}
+	}
 	return
 }
 
@@ -86,7 +154,7 @@ func CreateScopeValidator(expectedScopes []TokenScope, all bool) jwt.ValidatorFu
 		}
 		scope_any, present := tok.Get("scope")
 		if !present {
-			return jwt.NewValidationError(errors.New("No scope is present; required for authorization"))
+			return jwt.NewValidationError(errors.New("no scope is present; required for authorization"))
 		}
 		scope, ok := scope_any.(string)
 		if !ok {

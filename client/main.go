@@ -189,29 +189,29 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 		}
 	}()
 
-	dest_uri, err := url.Parse(destination)
+	destUri, err := url.Parse(destination)
 	if err != nil {
 		log.Errorln("Failed to parse destination URL")
 		return 0, err
 	}
 
-	understoodSchemes := []string{"osdf", "pelican", ""}
+	understoodSchemes := []string{"osdf", "pelican", "stash", ""}
 
-	_, foundSource := Find(understoodSchemes, dest_uri.Scheme)
+	_, foundSource := find(understoodSchemes, destUri.Scheme)
 	if !foundSource {
-		log.Errorln("Unknown schema provided:", dest_uri.Scheme)
+		log.Errorln("Unknown schema provided:", destUri.Scheme)
 		return 0, errors.New("Unsupported scheme requested")
 	}
 
-	origScheme := dest_uri.Scheme
+	origScheme := destUri.Scheme
 	if config.GetPreferredPrefix() != "PELICAN" && origScheme == "" {
-		dest_uri.Scheme = "osdf"
+		destUri.Scheme = "osdf"
 	}
-	if (dest_uri.Scheme == "osdf" || dest_uri.Scheme == "stash") && dest_uri.Host != "" {
-		dest_uri.Path = path.Clean("/" + dest_uri.Host + "/" + dest_uri.Path)
-		dest_uri.Host = ""
-	} else if dest_uri.Scheme == "pelican" {
-		federationUrl, _ := url.Parse(dest_uri.String())
+	if (destUri.Scheme == "osdf" || destUri.Scheme == "stash") && destUri.Host != "" {
+		destUri.Path = path.Clean("/" + destUri.Host + "/" + destUri.Path)
+		destUri.Host = ""
+	} else if destUri.Scheme == "pelican" {
+		federationUrl, _ := url.Parse(destUri.String())
 		federationUrl.Scheme = "https"
 		federationUrl.Path = ""
 		viper.Set("Federation.DiscoveryUrl", federationUrl.String())
@@ -221,23 +221,33 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 		}
 	}
 
-	ns, err := namespaces.MatchNamespace(dest_uri.Path)
+	ns, err := getNamespaceInfo(destUri.Path, param.Federation_DirectorUrl.GetString(), false)
 	if err != nil {
 		return 0, err
 	}
 
 	tokenLocation := ""
 	acquire := true
+	token := ""
 	for _, option := range options {
 		switch option.Ident() {
 		case identTransferOptionTokenLocation{}:
 			tokenLocation = option.Value().(string)
 		case identTransferOptionAcquireToken{}:
 			acquire = option.Value().(bool)
+		case identTransferOptionToken{}:
+			token = option.Value().(string)
 		}
 	}
 
-	if remoteSize, err = statHttp(ctx, dest_uri, ns, tokenLocation, acquire); err == nil {
+	if ns.UseTokenOnRead && token == "" {
+		token, err = getToken(destUri, ns, true, "", tokenLocation, acquire)
+		if err != nil {
+			return 0, fmt.Errorf("failed to get token for transfer: %v", err)
+		}
+	}
+
+	if remoteSize, err = statHttp(ctx, destUri, ns, token); err == nil {
 		return remoteSize, nil
 	}
 	return 0, err
@@ -291,10 +301,8 @@ func getCachesFromNamespace(namespace namespaces.Namespace, useDirector bool, pr
 			return
 		}
 		log.Debugf("Using the cache (%s) from the config override\n", preferredCaches[0])
-		cache := namespaces.Cache{
-			Endpoint:     preferredCaches[0].String(),
-			AuthEndpoint: preferredCaches[0].String(),
-			Resource:     preferredCaches[0].String(),
+		cache := namespaces.DirectorCache{
+			EndpointUrl: preferredCaches[0].String(),
 		}
 		caches = []CacheInterface{cache}
 		return
@@ -482,7 +490,7 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 
 	understoodSchemes := []string{"file", "osdf", "pelican", ""}
 
-	_, foundDest := Find(understoodSchemes, remoteDestScheme)
+	_, foundDest := find(understoodSchemes, remoteDestScheme)
 	if !foundDest {
 		return nil, fmt.Errorf("Do not understand the destination scheme: %s. Permitted values are %s",
 			remoteDestUrl.Scheme, strings.Join(understoodSchemes, ", "))
@@ -508,6 +516,11 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 	transferResults, err = client.Shutdown()
 	if tj.lookupErr != nil {
 		err = tj.lookupErr
+	}
+	for _, result := range transferResults {
+		if err == nil && result.Error != nil {
+			err = result.Error
+		}
 	}
 	return
 }
@@ -567,7 +580,7 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 
 	understoodSchemes := []string{"file", "osdf", "pelican", ""}
 
-	_, foundSource := Find(understoodSchemes, remoteObjectScheme)
+	_, foundSource := find(understoodSchemes, remoteObjectScheme)
 	if !foundSource {
 		return nil, fmt.Errorf("Do not understand the source scheme: %s. Permitted values are %s",
 			remoteObjectUrl.Scheme, strings.Join(understoodSchemes, ", "))
@@ -638,6 +651,10 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 	var downloaded int64 = 0
 	for _, result := range transferResults {
 		downloaded += result.TransferredBytes
+		if err == nil && result.Error != nil {
+			success = false
+			err = result.Error
+		}
 	}
 
 	payload.end1 = end.Unix()
@@ -733,13 +750,13 @@ func DoCopy(ctx context.Context, sourceFile string, destination string, recursiv
 
 	understoodSchemes := []string{"stash", "file", "osdf", "pelican", ""}
 
-	_, foundSource := Find(understoodSchemes, sourceScheme)
+	_, foundSource := find(understoodSchemes, sourceScheme)
 	if !foundSource {
 		log.Errorln("Do not understand source scheme:", sourceURL.Scheme)
 		return nil, errors.New("Do not understand source scheme")
 	}
 
-	_, foundDest := Find(understoodSchemes, destScheme)
+	_, foundDest := find(understoodSchemes, destScheme)
 	if !foundDest {
 		log.Errorln("Do not understand destination scheme:", sourceURL.Scheme)
 		return nil, errors.New("Do not understand destination scheme")
@@ -819,13 +836,21 @@ func DoCopy(ctx context.Context, sourceFile string, destination string, recursiv
 	}
 	transferResults, err = tc.Shutdown()
 	if err == nil {
-		success = true
+		if tj.lookupErr == nil {
+			success = true
+		} else {
+			err = tj.lookupErr
+		}
 	}
 
 	end := time.Now()
 
 	for _, result := range transferResults {
 		downloaded += result.TransferredBytes
+		if err == nil && result.Error != nil {
+			success = false
+			err = result.Error
+		}
 	}
 
 	payload.end1 = end.Unix()
@@ -846,10 +871,10 @@ func DoCopy(ctx context.Context, sourceFile string, destination string, recursiv
 	}
 }
 
-// Find takes a slice and looks for an element in it. If found it will
+// find takes a slice and looks for an element in it. If found it will
 // return it's key, otherwise it will return -1 and a bool of false.
 // From https://golangcode.com/check-if-element-exists-in-slice/
-func Find(slice []string, val string) (int, bool) {
+func find(slice []string, val string) (int, bool) {
 	for i, item := range slice {
 		if item == val {
 			return i, true
@@ -858,10 +883,10 @@ func Find(slice []string, val string) (int, bool) {
 	return -1, false
 }
 
-// get_ips will resolve a hostname and return all corresponding IP addresses
+// getIPs will resolve a hostname and return all corresponding IP addresses
 // in DNS.  This can be used to randomly pick an IP when DNS round robin
 // is used
-func get_ips(name string) []string {
+func getIPs(name string) []string {
 	var ipv4s []string
 	var ipv6s []string
 

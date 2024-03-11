@@ -46,8 +46,11 @@ func parseInputSlice(rawSlice *[]string, claimPrefix string) []string {
 
 // Parse claims to tokenConfig, excluding "sub". `claims` should be in the form of
 // <claim_key>=<claim=value>
-func parseClaimsToTokenConfig(claims []string) (*token.TokenConfig, error) {
-	tokenConfig := token.TokenConfig{}
+func parseClaimsToTokenConfig(profile string, claims []string) (*token.TokenConfig, error) {
+	tokenConfig, err := token.NewTokenConfig(token.TokenProfile(profile))
+	if err != nil {
+		return nil, err
+	}
 	for _, claim := range claims {
 		// Split by the first "=" delimiter
 		parts := strings.SplitN(claim, "=", 2)
@@ -60,13 +63,15 @@ func parseClaimsToTokenConfig(claims []string) (*token.TokenConfig, error) {
 
 		switch key {
 		case "aud":
-			tokenConfig.Audience = append(tokenConfig.Audience, val)
+			tokenConfig.AddAudiences(val)
 		case "scope":
 			tokenConfig.AddRawScope(val)
 		case "ver":
-			tokenConfig.Version = val
+			fallthrough
 		case "wlcg.ver":
-			tokenConfig.Version = val
+			if err = tokenConfig.SetVersion(val); err != nil {
+				return nil, err
+			}
 		case "iss":
 			tokenConfig.Issuer = val
 		default:
@@ -124,17 +129,16 @@ func cliTokenCreate(cmd *cobra.Command, args []string) error {
 		args = append(args, audSlice...)
 	}
 
-	tokenConfig, err := parseClaimsToTokenConfig(args)
-	if err != nil {
-		return errors.Wrap(err, "Failed to parse token claims")
-	}
-
 	// Get flags used for auxiliary parts of token creation that can't be fed directly to claimsMap
 	profile, err := cmd.Flags().GetString("profile")
 	if err != nil {
 		return errors.Wrapf(err, "Failed to get profile '%s' from input", profile)
 	}
-	tokenConfig.TokenProfile = token.TokenProfile(profile)
+
+	tokenConfig, err := parseClaimsToTokenConfig(profile, args)
+	if err != nil {
+		return errors.Wrap(err, "Failed to parse token claims")
+	}
 
 	lifetime, err := cmd.Flags().GetInt("lifetime")
 	if err != nil {

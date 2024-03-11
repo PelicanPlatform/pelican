@@ -125,15 +125,13 @@ func TestPrometheusProtectionCookieAuth(t *testing.T) {
 	}
 
 	issuerUrl := param.Server_ExternalWebUrl.GetString()
-	promTokenCfg := token.TokenConfig{
-		TokenProfile: token.WLCG,
-		Lifetime:     10 * time.Minute,
-		Issuer:       issuerUrl,
-		Audience:     []string{issuerUrl},
-		Version:      "1.0",
-		Subject:      "sub",
-		Claims:       map[string]string{"scope": token_scopes.Monitoring_Query.String()},
-	}
+	promTokenCfg := token.NewWLCGToken()
+
+	promTokenCfg.Lifetime = 10 * time.Minute
+	promTokenCfg.Issuer = issuerUrl
+	promTokenCfg.AddAudiences(issuerUrl)
+	promTokenCfg.Subject = "sub"
+	promTokenCfg.Claims = map[string]string{"scope": token_scopes.Monitoring_Query.String()}
 
 	tok, err := promTokenCfg.CreateToken()
 	assert.NoError(t, err, "failed to create prometheus token")
@@ -180,15 +178,12 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 
 	// Shared function to create a token
 	createToken := func(scope, aud string) string {
-		tokenCfg := token.TokenConfig{
-			TokenProfile: token.WLCG,
-			Lifetime:     param.Monitoring_TokenExpiresIn.GetDuration(),
-			Issuer:       issuerUrl,
-			Audience:     []string{aud},
-			Version:      "1.0",
-			Subject:      "sub",
-			Claims:       map[string]string{"scope": scope},
-		}
+		tokenCfg := token.NewWLCGToken()
+		tokenCfg.Lifetime = param.Monitoring_TokenExpiresIn.GetDuration()
+		tokenCfg.Issuer = issuerUrl
+		tokenCfg.AddAudiences(aud)
+		tokenCfg.Subject = "sub"
+		tokenCfg.Claims = map[string]string{"scope": scope}
 
 		tok, err := tokenCfg.CreateToken()
 		assert.NoError(t, err, "failed to create prometheus test token")

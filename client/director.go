@@ -23,6 +23,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path"
 	"sort"
 	"strconv"
 	"strings"
@@ -234,7 +235,7 @@ func GetCachesFromDirectorResponse(resp *http.Response, needsToken bool) (caches
 }
 
 // NewTransferDetails creates the TransferDetails struct with the given cache
-func NewTransferDetailsUsingDirector(cache namespaces.DirectorCache, opts transferDetailsOptions) []transferAttemptDetails {
+func newTransferDetailsUsingDirector(cache namespaces.DirectorCache, opts transferDetailsOptions) []transferAttemptDetails {
 	details := make([]transferAttemptDetails, 0)
 	cacheEndpoint := cache.EndpointUrl
 
@@ -244,7 +245,9 @@ func NewTransferDetailsUsingDirector(cache namespaces.DirectorCache, opts transf
 		log.Errorln("Failed to parse cache:", cache, "error:", err)
 		return nil
 	}
-	if cacheURL.Host == "" {
+	if cacheURL.Scheme == "unix" && cacheURL.Host != "" {
+		cacheURL.Path = path.Clean("/" + path.Join(cacheURL.Host, cacheURL.Path))
+	} else if cacheURL.Scheme != "unix" && cacheURL.Host == "" {
 		// Assume the cache is just a hostname
 		cacheURL.Host = cacheEndpoint
 		cacheURL.Path = ""
@@ -253,26 +256,35 @@ func NewTransferDetailsUsingDirector(cache namespaces.DirectorCache, opts transf
 	}
 	log.Debugf("Parsed Cache: %s", cacheURL.String())
 	if opts.NeedsToken {
-		cacheURL.Scheme = "https"
-		if !hasPort(cacheURL.Host) {
-			// Add port 8444 and 8443
-			urlCopy := *cacheURL
-			urlCopy.Host += ":8444"
-			details = append(details, transferAttemptDetails{
-				Url:        &urlCopy,
-				Proxy:      false,
-				PackOption: opts.PackOption,
-			})
-			// Strip the port off and add 8443
-			cacheURL.Host = cacheURL.Host + ":8443"
+		// Unless we're using the local Unix domain socket cache, force HTTPS
+		if cacheURL.Scheme != "unix" {
+			cacheURL.Scheme = "https"
+			if !hasPort(cacheURL.Host) {
+				// Add port 8444 and 8443
+				urlCopy := *cacheURL
+				urlCopy.Host += ":8444"
+				details = append(details, transferAttemptDetails{
+					Url:        &urlCopy,
+					Proxy:      false,
+					PackOption: opts.PackOption,
+				})
+				// Strip the port off and add 8443
+				cacheURL.Host = cacheURL.Host + ":8443"
+			}
 		}
-		// Whether port is specified or not, add a transfer without proxy
-		details = append(details, transferAttemptDetails{
+		det := transferAttemptDetails{
 			Url:        cacheURL,
 			Proxy:      false,
 			PackOption: opts.PackOption,
-		})
-	} else {
+		}
+		if cacheURL.Scheme == "unix" {
+			det.UnixSocket = cacheURL.Path
+		}
+		// Whether port is specified or not, add a transfer without proxy
+		details = append(details, det)
+	} else if cacheURL.Scheme == "" || cacheURL.Scheme == "http" {
+		// Assume a transfer not needing a token and not specifying a scheme is HTTP
+		// WARNING: This is legacy code; we should always specify a scheme
 		cacheURL.Scheme = "http"
 		if !hasPort(cacheURL.Host) {
 			cacheURL.Host += ":8000"
@@ -290,6 +302,18 @@ func NewTransferDetailsUsingDirector(cache namespaces.DirectorCache, opts transf
 				PackOption: opts.PackOption,
 			})
 		}
+	} else {
+		// A non-HTTP scheme is specified and a token is not needed; this wasn't possible
+		// in the legacy cases.  Simply use the provided config
+		det := transferAttemptDetails{
+			Url:        cacheURL,
+			Proxy:      false,
+			PackOption: opts.PackOption,
+		}
+		if cacheURL.Scheme == "unix" {
+			det.UnixSocket = cacheURL.Path
+		}
+		details = append(details, det)
 	}
 
 	return details

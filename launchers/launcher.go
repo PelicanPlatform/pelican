@@ -34,6 +34,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/broker"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/local_cache"
 	"github.com/pelicanplatform/pelican/origin_ui"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_ui"
@@ -181,6 +182,18 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 			}
 		}
 	}
+
+	var lc *local_cache.LocalCache
+	if modules.IsEnabled(config.LocalCacheType) {
+		// Create and register the cache routines before the web interface is up
+		lc, err = local_cache.NewLocalCache(ctx, egrp, local_cache.WithDeferConfig(true))
+		if err != nil {
+			return shutdownCancel, err
+		}
+		rootGroup := engine.Group("/")
+		lc.Register(ctx, rootGroup)
+	}
+
 	log.Info("Starting web engine...")
 	lnReference = nil
 	egrp.Go(func() error {
@@ -245,6 +258,18 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		if err = CacheServeFinish(ctx, egrp); err != nil {
 			return shutdownCancel, err
 		}
+	}
+
+	if modules.IsEnabled(config.LocalCacheType) {
+		log.Debugln("Starting local cache listener at", param.LocalCache_Socket.GetString())
+		if err := lc.Config(egrp); err != nil {
+			log.Warning("Failure when configuring the local cache; cache may incorrectly generate 403 errors until reconfiguration runs")
+		}
+		if err := lc.LaunchListener(ctx, egrp); err != nil {
+			log.Errorln("Failure when starting the local cache listener:", err)
+			return shutdownCancel, err
+		}
+
 	}
 
 	if param.Server_EnableUI.GetBool() {

@@ -31,6 +31,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/token"
+	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
@@ -99,15 +100,13 @@ func NewObjectStat() *ObjectStat {
 
 // Implementation of sending a HEAD request to an origin for an object
 func (stat *ObjectStat) sendHeadReqToOrigin(objectName string, dataUrl url.URL, timeout time.Duration, ctx context.Context) (*objectMetadata, error) {
-	tokenConf := token.TokenConfig{
-		Lifetime:     time.Minute,
-		TokenProfile: token.WLCG,
-		Audience:     []string{dataUrl.String()},
-		Subject:      dataUrl.String(),
-		// Federation as the issuer
-		Issuer: param.Server_ExternalWebUrl.GetString(),
-	}
-	tokenConf.AddRawScope("storage.read:/")
+	tokenConf := token.NewWLCGToken()
+	tokenConf.Lifetime = time.Minute
+	tokenConf.AddAudiences(dataUrl.String())
+	tokenConf.Subject = dataUrl.String()
+	// Federation as the issuer
+	tokenConf.Issuer = param.Server_ExternalWebUrl.GetString()
+	tokenConf.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Storage_Read, "/"))
 	token, err := tokenConf.CreateToken()
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to create token")

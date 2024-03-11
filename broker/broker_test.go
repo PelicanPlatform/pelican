@@ -32,6 +32,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/registry"
@@ -307,7 +308,7 @@ func TestRetrieveTimeout(t *testing.T) {
 	err = json.Unmarshal(responseBytes, &brokerResp)
 	require.NoError(t, err)
 
-	assert.Equal(t, brokerReponseStatusTimeout, brokerResp.Status)
+	assert.Equal(t, common.RespPollTimeout, brokerResp.Status)
 
 	ctx, cancelFunc := context.WithTimeout(ctx, 50*time.Millisecond)
 	defer cancelFunc()

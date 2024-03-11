@@ -30,7 +30,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -101,6 +100,7 @@ const (
 	DirectorType
 	RegistryType
 	BrokerType
+	LocalCacheType
 
 	EgrpKey ContextKey = "egrp"
 )
@@ -148,7 +148,8 @@ var (
 // This function creates a new MetadataError by wrapping the previous error
 func NewMetadataError(err error, msg string) *MetadataErr {
 	return &MetadataErr{
-		msg: msg,
+		msg:      msg,
+		innerErr: err,
 	}
 }
 
@@ -246,6 +247,9 @@ func GetEnabledServerString(lowerCase bool) []string {
 	if enabledServers.IsEnabled(CacheType) {
 		servers = append(servers, CacheType.String())
 	}
+	if enabledServers.IsEnabled(LocalCacheType) {
+		servers = append(servers, LocalCacheType.String())
+	}
 	if enabledServers.IsEnabled(OriginType) {
 		servers = append(servers, OriginType.String())
 	}
@@ -278,6 +282,8 @@ func (sType ServerType) String() string {
 	switch sType {
 	case CacheType:
 		return "Cache"
+	case LocalCacheType:
+		return "LocalCache"
 	case OriginType:
 		return "Origin"
 	case DirectorType:
@@ -294,6 +300,9 @@ func (sType *ServerType) SetString(name string) bool {
 	switch strings.ToLower(name) {
 	case "cache":
 		*sType |= CacheType
+		return true
+	case "localcache":
+		*sType |= LocalCacheType
 		return true
 	case "origin":
 		*sType |= OriginType
@@ -819,6 +828,8 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 			viper.SetDefault("Cache.RunLocation", filepath.Join("/run", "pelican", "xrootd", "cache"))
 		}
 		viper.SetDefault("Cache.DataLocation", "/run/pelican/xcache")
+		viper.SetDefault("LocalCache.RunLocation", filepath.Join("/run", "pelican", "localcache"))
+
 		viper.SetDefault("Origin.Multiuser", true)
 		viper.SetDefault("Director.GeoIPLocation", "/var/cache/pelican/maxmind/GeoLite2-City.mmdb")
 		viper.SetDefault("Registry.DbLocation", "/var/lib/pelican/registry.sqlite")
@@ -832,8 +843,9 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 		viper.SetDefault("Shoveler.QueueDirectory", filepath.Join(configDir, "shoveler/queue"))
 		viper.SetDefault("Shoveler.AMQPTokenLocation", filepath.Join(configDir, "shoveler-token"))
 
+		var runtimeDir string
 		if userRuntimeDir := os.Getenv("XDG_RUNTIME_DIR"); userRuntimeDir != "" {
-			runtimeDir := filepath.Join(userRuntimeDir, "pelican")
+			runtimeDir = filepath.Join(userRuntimeDir, "pelican")
 			err := os.MkdirAll(runtimeDir, 0750)
 			if err != nil {
 				return err
@@ -843,21 +855,26 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 			if err != nil {
 				return err
 			}
-			viper.SetDefault("Cache.DataLocation", path.Join(runtimeDir, "xcache"))
 		} else {
-			dir, err := os.MkdirTemp("", "pelican-xrootd-*")
+			var err error
+			runtimeDir, err = os.MkdirTemp("", "pelican-xrootd-*")
 			if err != nil {
 				return err
 			}
-			err = setXrootdRunLocations(currentServers, dir)
+			err = setXrootdRunLocations(currentServers, runtimeDir)
 			if err != nil {
 				return err
 			}
-			viper.SetDefault("Cache.DataLocation", path.Join(dir, "xcache"))
-			cleanupDirOnShutdown(ctx, dir)
+			cleanupDirOnShutdown(ctx, runtimeDir)
 		}
+		viper.SetDefault("Cache.DataLocation", filepath.Join(runtimeDir, "xcache"))
+		viper.SetDefault("LocalCache.RunLocation", filepath.Join(runtimeDir, "cache"))
 		viper.SetDefault("Origin.Multiuser", false)
 	}
+	fcRunLocation := viper.GetString("LocalCache.RunLocation")
+	viper.SetDefault("LocalCache.Socket", filepath.Join(fcRunLocation, "cache.sock"))
+	viper.SetDefault("LocalCache.DataLocation", filepath.Join(fcRunLocation, "cache"))
+
 	// Any platform-specific paths should go here
 	err := InitServerOSDefaults()
 	if err != nil {

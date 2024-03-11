@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pkg/errors"
@@ -39,17 +40,9 @@ type (
 		Prefix string `json:"prefix"`
 	}
 
-	brokerResponseStatus string
-
-	// Base response for a request or retrieval
-	brokerMsgResp struct {
-		Status brokerResponseStatus `json:"status"`
-		Msg    string               `json:"msg,omitempty"`
-	}
-
 	// Response for a successful retrieval
 	brokerRetrievalResp struct {
-		brokerMsgResp
+		common.SimpleApiResp
 		Request reversalRequest `json:"req"`
 	}
 
@@ -59,27 +52,21 @@ type (
 	}
 )
 
-const (
-	brokerResponseStatusOK     brokerResponseStatus = "success"
-	brokerReponseStatusFailed  brokerResponseStatus = "error"
-	brokerReponseStatusTimeout brokerResponseStatus = "timeout"
-)
-
 func newBrokerReqResp(req reversalRequest) (result brokerRetrievalResp) {
 	result.Request = req
-	result.brokerMsgResp.Status = brokerResponseStatusOK
+	result.SimpleApiResp.Status = common.RespOK
 	return
 }
 
-func newBrokerRespFail(msg string) brokerMsgResp {
-	return brokerMsgResp{
-		Status: brokerReponseStatusFailed,
+func newBrokerRespFail(msg string) common.SimpleApiResp {
+	return common.SimpleApiResp{
+		Status: common.RespFailed,
 		Msg:    msg,
 	}
 }
 
 func newBrokerRespTimeout() (result brokerRetrievalResp) {
-	result.brokerMsgResp.Status = brokerReponseStatusTimeout
+	result.SimpleApiResp.Status = common.RespPollTimeout
 	return
 }
 

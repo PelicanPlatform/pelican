@@ -153,16 +153,12 @@ func GetUser(ctx *gin.Context) (string, error) {
 
 // Create a JWT and set the "login" cookie to store that JWT
 func setLoginCookie(ctx *gin.Context, user string) {
-	scopes := []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Monitoring_Query, token_scopes.Monitoring_Scrape}
-	loginCookieTokenCfg := token.TokenConfig{
-		TokenProfile: token.WLCG,
-		Lifetime:     30 * time.Minute,
-		Issuer:       param.Server_ExternalWebUrl.GetString(),
-		Audience:     []string{param.Server_ExternalWebUrl.GetString()},
-		Version:      "1.0",
-		Subject:      user,
-	}
-	loginCookieTokenCfg.AddScopes(scopes)
+	loginCookieTokenCfg := token.NewWLCGToken()
+	loginCookieTokenCfg.Lifetime = 30 * time.Minute
+	loginCookieTokenCfg.Issuer = param.Server_ExternalWebUrl.GetString()
+	loginCookieTokenCfg.AddAudiences(param.Server_ExternalWebUrl.GetString())
+	loginCookieTokenCfg.Subject = user
+	loginCookieTokenCfg.AddScopes(token_scopes.WebUi_Access, token_scopes.Monitoring_Query, token_scopes.Monitoring_Scrape)
 
 	// CreateToken also handles validation for us
 	tok, err := loginCookieTokenCfg.CreateToken()

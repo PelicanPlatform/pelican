@@ -228,15 +228,12 @@ func TestDirectorRegistration(t *testing.T) {
 	}
 
 	generateReadToken := func(key jwk.Key, object, issuer string) string {
-		tc := token.TokenConfig{
-			TokenProfile: token.WLCG,
-			Version:      "1.0",
-			Lifetime:     time.Minute,
-			Issuer:       issuer,
-			Audience:     []string{"director"},
-			Subject:      "test",
-			Claims:       map[string]string{"scope": "storage.read:" + object},
-		}
+		tc := token.NewWLCGToken()
+		tc.Lifetime = time.Minute
+		tc.Issuer = issuer
+		tc.AddAudiences("director")
+		tc.Subject = "test"
+		tc.Claims = map[string]string{"scope": "storage.read:" + object}
 		tok, err := tc.CreateTokenWithKey(key)
 		require.NoError(t, err)
 		return tok

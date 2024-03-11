@@ -110,15 +110,12 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 	issuerUrl, err := server_utils.GetNSIssuerURL("/test-namespace")
 	assert.NoError(t, err)
 
-	advTokenCfg := token.TokenConfig{
-		TokenProfile: token.WLCG,
-		Version:      "1.0",
-		Lifetime:     time.Minute,
-		Issuer:       issuerUrl,
-		Audience:     []string{"https://director-url.org"},
-		Subject:      "origin",
-	}
-	advTokenCfg.AddScopes([]token_scopes.TokenScope{token_scopes.Pelican_Advertise})
+	advTokenCfg := token.NewWLCGToken()
+	advTokenCfg.Lifetime = time.Minute
+	advTokenCfg.Issuer = issuerUrl
+	advTokenCfg.Subject = "origin"
+	advTokenCfg.AddAudiences("https://director-url.org")
+	advTokenCfg.AddScopes(token_scopes.Pelican_Advertise)
 
 	// CreateToken also handles validation for us
 	tok, err := advTokenCfg.CreateToken()
@@ -129,14 +126,11 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 	assert.Equal(t, true, ok, "Expected scope to be 'pelican.advertise'")
 
 	//Create token without a scope - should return an error upon validation
-	scopelessTokCfg := token.TokenConfig{
-		TokenProfile: token.WLCG,
-		Lifetime:     time.Minute,
-		Issuer:       "https://get-your-tokens.org",
-		Audience:     []string{"director.test"},
-		Version:      "1.0",
-		Subject:      "origin",
-	}
+	scopelessTokCfg := token.NewWLCGToken()
+	scopelessTokCfg.Lifetime = time.Minute
+	scopelessTokCfg.Issuer = "https://get-your-tokens.org"
+	scopelessTokCfg.Subject = "origin"
+	scopelessTokCfg.AddAudiences("director.test")
 
 	tok, err = scopelessTokCfg.CreateToken()
 	assert.NoError(t, err, "error creating scopeless token. Should have succeeded")
@@ -146,15 +140,12 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 	assert.Equal(t, "No scope is present; required to advertise to director", err.Error())
 
 	// Create a token with a bad scope - should return an error upon validation
-	wrongScopeTokenCfg := token.TokenConfig{
-		TokenProfile: token.WLCG,
-		Lifetime:     time.Minute,
-		Issuer:       "https://get-your-tokens.org",
-		Audience:     []string{"director.test"},
-		Version:      "1.0",
-		Subject:      "origin",
-		Claims:       map[string]string{"scope": "wrong.scope"},
-	}
+	wrongScopeTokenCfg := token.NewWLCGToken()
+	wrongScopeTokenCfg.Lifetime = time.Minute
+	wrongScopeTokenCfg.Issuer = "https://get-your-tokens.org"
+	wrongScopeTokenCfg.AddAudiences("director.test")
+	wrongScopeTokenCfg.Subject = "origin"
+	wrongScopeTokenCfg.Claims = map[string]string{"scope": "wrong.scope"}
 
 	tok, err = wrongScopeTokenCfg.CreateToken()
 	assert.NoError(t, err, "error creating wrong-scope token. Should have succeeded")
