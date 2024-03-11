@@ -95,7 +95,10 @@ func promQueryEngineAuthHandler(av1 *route.Router) gin.HandlerFunc {
 				av1.ServeHTTP(c.Writer, c.Request)
 			} else {
 				c.JSON(status, gin.H{"error": "Correct authorization required to access Prometheus query engine APIs. " + err.Error()})
+				return
 			}
+		} else {
+			av1.ServeHTTP(c.Writer, c.Request)
 		}
 	}
 }

@@ -251,7 +251,7 @@ func configureCommonEndpoints(engine *gin.Engine) error {
 }
 
 // Configure metrics related endpoints, including Prometheus and /health API
-func configureMetrics(ctx context.Context, engine *gin.Engine) error {
+func configureMetrics(engine *gin.Engine) error {
 	// Add authorization to /metric endpoint
 	engine.Use(promMetricAuthHandler)
 
@@ -333,7 +333,7 @@ func ConfigureServerWebAPI(ctx context.Context, engine *gin.Engine, egrp *errgro
 	if err := configureCommonEndpoints(engine); err != nil {
 		return err
 	}
-	if err := configureMetrics(ctx, engine); err != nil {
+	if err := configureMetrics(engine); err != nil {
 		return err
 	}
 	if param.Server_EnableUI.GetBool() {
