@@ -1,3 +1,5 @@
+//go:build !windows
+
 /***************************************************************
 *
 * Copyright (C) 2024, University of Nebraska-Lincoln

@@ -51,7 +51,6 @@ type ObjectParam struct {
 
 func GetDeprecated() map[string][]string {
     return map[string][]string{
-        "Federation.NamespaceUrl": []string{"Federation.RegistryUrl"},
         "Origin.EnableDirListing": []string{"Origin.EnableListings"},
         "Origin.EnableFallbackRead": []string{"Origin.EnableDirectReads"},
         "Origin.EnableWrite": []string{"Origin.EnableWrites"},
