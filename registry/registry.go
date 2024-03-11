@@ -190,7 +190,7 @@ func verifySignature(payload []byte, signature []byte, publicKey *ecdsa.PublicKe
 }
 
 // Generate server nonce for key-sign challenge
-func keySignChallengeInit(ctx *gin.Context, data *registrationData) (map[string]interface{}, error) {
+func keySignChallengeInit(data *registrationData) (map[string]interface{}, error) {
 	serverNonce, err := generateNonce()
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to generate nonce for key-sign challenge")
@@ -359,7 +359,7 @@ func keySignChallenge(ctx *gin.Context, data *registrationData) (bool, map[strin
 			return created, res, nil
 		}
 	} else if data.ClientNonce != "" {
-		res, err := keySignChallengeInit(ctx, data)
+		res, err := keySignChallengeInit(data)
 		if err != nil {
 			return false, nil, err
 		} else {
