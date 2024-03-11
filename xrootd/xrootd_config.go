@@ -80,24 +80,24 @@ enable = true
 
 type (
 	OriginConfig struct {
-		Multiuser        bool
-		EnableCmsd       bool
-		EnableMacaroons  bool
-		EnableVoms       bool
+		Multiuser         bool
+		EnableCmsd        bool
+		EnableMacaroons   bool
+		EnableVoms        bool
 		EnablePublicReads bool
-		EnableListings   bool
-		SelfTest         bool
-		CalculatedPort   string
-		RunLocation      string
-		StorageType      string
-		S3Bucket         string
-		S3Region         string
-		S3ServiceName    string
-		S3ServiceUrl     string
-		S3AccessKeyfile  string
-		S3SecretKeyfile  string
-		S3UrlStyle       string
-		Exports 		 []common.OriginExports
+		EnableListings    bool
+		SelfTest          bool
+		CalculatedPort    string
+		RunLocation       string
+		StorageType       string
+		S3Bucket          string
+		S3Region          string
+		S3ServiceName     string
+		S3ServiceUrl      string
+		S3AccessKeyfile   string
+		S3SecretKeyfile   string
+		S3UrlStyle        string
+		Exports           []common.OriginExports
 	}
 
 	CacheConfig struct {
