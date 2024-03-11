@@ -144,11 +144,11 @@ func GetOriginExports() (*[]OriginExports, error) {
 				federationPrefix := filepath.Clean(volumeMountInfo[1])
 
 				if !strings.HasPrefix(storagePrefix, "/") || !strings.HasPrefix(federationPrefix, "/") {
-					return nil, errors.New(fmt.Sprintf("Volume mount paths must be absolute and begin with '/', but you provided %s:%s", storagePrefix, federationPrefix))
+					return nil, errors.New(fmt.Sprintf("Volume mount/ExportVolume paths must be absolute and begin with '/', but you provided %s:%s", storagePrefix, federationPrefix))
 				}
 
 				if storagePrefix == "" || federationPrefix == "" {
-					return nil, errors.New("Volume mount paths cannot be empty")
+					return nil, errors.New("Volume mount/ExportVolume paths cannot be empty")
 				}
 
 				reads := param.Origin_EnableReads.GetBool() || param.Origin_EnablePublicReads.GetBool()
