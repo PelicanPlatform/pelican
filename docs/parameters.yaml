@@ -822,6 +822,15 @@ type: bool
 default: true
 components: ["director"]
 ---
+name: Director.FilteredServers
+description: >-
+  A list of server names to not to redirect client requests to. This is mutual exclusive with
+  pausing redirect to a server using the web UI. If this is a non-empty list, the web UI
+  can't pause or resume redirect to a server.
+type: stringSlice
+default: none
+components: ["director"]
+---
 ############################
 #  Registry-level configs  #
 ############################
