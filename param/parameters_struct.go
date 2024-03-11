@@ -29,6 +29,7 @@ type Config struct {
 		DataLocation string
 		EnableVoms bool
 		ExportLocation string
+		PermittedNamespaces []string
 		Port int
 		RunLocation string
 		SelfTest bool
@@ -255,6 +256,7 @@ type configWithType struct {
 		DataLocation struct { Type string; Value string }
 		EnableVoms struct { Type string; Value bool }
 		ExportLocation struct { Type string; Value string }
+		PermittedNamespaces struct { Type string; Value []string }
 		Port struct { Type string; Value int }
 		RunLocation struct { Type string; Value string }
 		SelfTest struct { Type string; Value bool }

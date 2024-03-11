@@ -35,6 +35,7 @@ import (
 type (
 	CacheServer struct {
 		server_utils.NamespaceHolder
+		namespaceFilter map[string]struct{}
 	}
 )
 
@@ -47,6 +48,64 @@ func (server *CacheServer) CreateAdvertisement(name string, originUrl string, or
 	}
 
 	return ad, nil
+}
+
+func (server *CacheServer) SetFilters() {
+	/*
+	* Converts the list of permitted namespaces to a set and stores it for the serve
+	* This is based on the assumption that the cache server could potentially be filtering once
+	* every minute, so to save speed, we use a map to an empty struct to allow for O(1) lookup time
+	 */
+	server.namespaceFilter = make(map[string]struct{})
+	nsList := param.Cache_PermittedNamespaces.GetStringSlice()
+	// Ensure that each permitted namespace starts with a "/"
+	for _, ns := range nsList {
+		if !strings.HasPrefix(ns, "/") {
+			ns = "/" + ns
+		}
+		server.namespaceFilter[ns] = struct{}{}
+	}
+}
+
+func (server *CacheServer) filterAdsBasedOnNamespace(nsAds []common.NamespaceAdV2) []common.NamespaceAdV2 {
+	/*
+	* Filters out ads based on the namespaces listed in server.NamespaceFilter
+	* Note that this does a few checks for trailing and non-trailing "/" as it's assumed that the namespaces
+	* from the director and the ones provided might differ.
+	 */
+	filteredAds := []common.NamespaceAdV2{}
+	if len(server.namespaceFilter) > 0 {
+		for _, ad := range nsAds {
+			ns := ad.Path
+			sentinel := true
+			//If the final character isn't a '/', add it to the string
+			if !strings.HasSuffix(ns, "/") {
+				ns = ns + "/"
+			}
+			for sentinel {
+				_, exists := server.namespaceFilter[ns]
+				if exists {
+					filteredAds = append(filteredAds, ad)
+					break
+				}
+
+				splitIndex := strings.LastIndex(ns, "/")
+
+				//If ns isn't the root the start of the path, either remove the trailing /
+				//or check one director higher
+				if splitIndex != -1 && splitIndex != 0 {
+					if splitIndex != len(ns)-1 {
+						ns = ns[:splitIndex+1]
+					} else {
+						ns = ns[:splitIndex]
+					}
+				} else {
+					sentinel = false
+				}
+			}
+		}
+	}
+	return filteredAds
 }
 
 func (server *CacheServer) GetNamespaceAdsFromDirector() error {
@@ -101,6 +160,10 @@ func (server *CacheServer) GetNamespaceAdsFromDirector() error {
 		if err != nil {
 			return errors.Wrapf(err, "Failed to marshal response in to JSON: %v", err)
 		}
+	}
+
+	if len(server.namespaceFilter) > 0 {
+		respNS = server.filterAdsBasedOnNamespace(respNS)
 	}
 
 	server.SetNamespaceAds(respNS)

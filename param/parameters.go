@@ -180,6 +180,7 @@ var (
 )
 
 var (
+	Cache_PermittedNamespaces = StringSliceParam{"Cache.PermittedNamespaces"}
 	Director_CacheResponseHostnames = StringSliceParam{"Director.CacheResponseHostnames"}
 	Director_OriginResponseHostnames = StringSliceParam{"Director.OriginResponseHostnames"}
 	Issuer_GroupRequirements = StringSliceParam{"Issuer.GroupRequirements"}
