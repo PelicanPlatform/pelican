@@ -8,6 +8,7 @@ go 1.21
 require (
 	github.com/JGLTechnologies/gin-rate-limit v1.5.4
 	github.com/alecthomas/units v0.0.0-20211218093645-b94a6e3cc137
+	github.com/ebitengine/purego v0.6.0
 	github.com/gin-gonic/gin v1.9.1
 	github.com/glebarez/sqlite v1.10.0
 	github.com/go-ini/ini v1.67.0

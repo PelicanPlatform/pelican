@@ -29,20 +29,8 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	namespaces "github.com/pelicanplatform/pelican/namespaces"
+	"github.com/pelicanplatform/pelican/utils"
 )
-
-func TestHeaderParser(t *testing.T) {
-	header1 := "namespace=/foo/bar, issuer = https://get-your-tokens.org, readhttps=False"
-	newMap1 := HeaderParser(header1)
-
-	assert.Equal(t, "/foo/bar", newMap1["namespace"])
-	assert.Equal(t, "https://get-your-tokens.org", newMap1["issuer"])
-	assert.Equal(t, "False", newMap1["readhttps"])
-
-	header2 := ""
-	newMap2 := HeaderParser(header2)
-	assert.Equal(t, map[string]string{}, newMap2)
-}
 
 func TestGetCachesFromDirectorResponse(t *testing.T) {
 	// Construct the Director's Response, comprising headers and a body
@@ -125,7 +113,7 @@ func TestCreateNsFromDirectorResp(t *testing.T) {
 	var xPelicanAuthorization map[string]string
 	var issuer string
 	if len(directorResponse.Header.Values("X-Pelican-Authorization")) > 0 {
-		xPelicanAuthorization = HeaderParser(directorResponse.Header.Values("X-Pelican-Authorization")[0])
+		xPelicanAuthorization = utils.HeaderParser(directorResponse.Header.Values("X-Pelican-Authorization")[0])
 		issuer = xPelicanAuthorization["issuer"]
 	}
 
