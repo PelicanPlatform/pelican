@@ -303,30 +303,6 @@ func GenParamStruct() {
 		entry := values[i].(map[string]interface{})
 
 		// Skip required YAML field check as has been done in GenParamEnum
-
-		// // Handle deprecated parameters
-		// if deprecated, ok := entry["deprecated"].(bool); ok && deprecated {
-		// 	if entry["replacedby"] == nil {
-		// 		panic(fmt.Sprintf("Parameter entry '%s' is deprecated but missing 'replacedby' key. If there is no replacement, use 'none'", entry["name"]))
-		// 	}
-		// 	var replacedBySlice []string
-		// 	// If the replaced by entry is a string, convert it to a slice
-		// 	if replacedBy, ok := entry["replacedby"].(string); ok {
-		// 		replacedBySlice = []string{replacedBy}
-		// 	} else if replacedBy, ok := entry["replacedby"].([]interface{}); ok {
-		// 		// Convert each element to a string
-		// 		for _, v := range replacedBy {
-		// 			if vStr, ok := v.(string); ok {
-		// 				replacedBySlice = append(replacedBySlice, vStr)
-		// 			}
-		// 		}
-		// 	} else {
-		// 		panic(fmt.Sprintf("Parameter entry '%s' has invalid 'replacedby' key. It should be a string or a slice of strings", entry["name"]))
-		// 	}
-
-		// 	deprecatedMap[entry["name"].(string)] = replacedBySlice
-		// }
-
 		pName := entry["name"].(string)
 		pType := entry["type"].(string)
 		goType := ""
