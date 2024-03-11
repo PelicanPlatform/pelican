@@ -309,6 +309,10 @@ definitions:
         type: string
         description: The URL of the issuer on the server to check token validity
         example: "https://example-origin.com:8443"
+      broker_url:
+        type: string
+        description: The URL to the connection broker
+        example: "https://example-origin.com:8447"
       url:
         type: string
         description: The URL of XrootD service on the server to access objects
@@ -329,6 +333,31 @@ definitions:
         type: number
         description: The longitude of the server based on its IP address
         default: 0
+      enableWrite:
+        type: boolean
+        description: If the origin server enables write access. Only valid for type=Origin
+        default: false
+      enableFallbackRead:
+        type: boolean
+        description: If fall back to read from the origin when there's no cache to serve the file
+        default: false
+      filtered:
+        type: boolean
+        description: |
+          If the server is excluded from serving client object requests.
+          No traffic will be redirect to the server if the value is true
+        default: false
+      filteredType:
+        type: string
+        description: |
+          The type of filtering/allowance of the server. Can be permFilter|tempFilter|tempAllow
+
+          * **permFilter** when the server is filtered by configuration parameter `Director.FilteredServers`
+          * **tempFilter** when the server is filtered by web API request at `/servers/filter/*name`. The filter
+            rule lives in-memory and will be reset at the server restart
+          * **tempAllow** when the  server is filtered by configuration parameter but _allowed_ by the web API at `/servers/allow/*name`,
+            the change lives in-memory and will be overwritten by config parameter at the server restart
+        default: ""
       status:
         type: string
         description: The status of director file transfer test against the server. Can be Initializing|Unknown|OK|Error
@@ -1187,6 +1216,83 @@ paths:
               minimum: 0
         "400":
           description: "Bad request, query parameter is invalid"
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+  /director_ui/servers/filter/{name}:
+    patch:
+      summary: Filter a server from director redirecting
+      description: |
+        `Authentication Required` `Admin`
+
+
+        **The filter rules registered by this endpoint are in-memory and will be reset at the server restart.**
+
+        If `Director.FilteredServers` is set, you may add additional, in-memory filter rules.
+
+        If you want to persist the filtering rules, set `Director.FilteredServers` in your server config instead.
+      tags:
+        - "director_ui"
+      parameters:
+        - in: path
+          name: name
+          type: string
+          required: true
+          description: The server name to filter
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: "OK"
+          schema:
+            type: object
+            $ref: "#/definitions/SuccessModel"
+        "400":
+          description: "Bad request. Either `name` is invalid or the server has been filtered"
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "403":
+          description: "Forbidden. Admin privilege required"
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+  /director_ui/servers/allow/{name}:
+    patch:
+      summary: Reset filtering rule for a server from director redirecting
+      description: |
+        `Authentication Required` `Admin`
+
+
+        **The reset of filter rules registered by this endpoint are in-memory and will be removed at the server restart.**
+
+        You may reset the rules defined in `Director.FilteredServers` in-memory but they will be overwritten at the server restart
+      tags:
+        - "director_ui"
+      parameters:
+        - in: path
+          name: name
+          type: string
+          required: true
+          description: The server name to reset filtering
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: "OK"
+          schema:
+            type: object
+            $ref: "#/definitions/SuccessModel"
+        "400":
+          description: "Bad request. Either `name` is invalid or the server is not being filtered"
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "403":
+          description: "Forbidden. Admin privilege required"
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
   /director_ui/servers/origins/stat:
     get:
       tags:
