@@ -53,6 +53,7 @@ type Config struct {
 		CacheResponseHostnames []string
 		DefaultResponse string
 		EnableBroker bool
+		FilteredServers []string
 		GeoIPLocation string
 		MaxMindKeyFile string
 		MaxStatResponse int
@@ -280,6 +281,7 @@ type configWithType struct {
 		CacheResponseHostnames struct { Type string; Value []string }
 		DefaultResponse struct { Type string; Value string }
 		EnableBroker struct { Type string; Value bool }
+		FilteredServers struct { Type string; Value []string }
 		GeoIPLocation struct { Type string; Value string }
 		MaxMindKeyFile struct { Type string; Value string }
 		MaxStatResponse struct { Type string; Value int }

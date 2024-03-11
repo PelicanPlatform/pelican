@@ -24,6 +24,7 @@ import (
 
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/pelicanplatform/pelican/common"
+	"github.com/pelicanplatform/pelican/param"
 
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
@@ -58,6 +59,32 @@ func listServerAds(serverTypes []common.ServerType) []common.ServerAd {
 		}
 	}
 	return ads
+}
+
+// Check if a server is filtered from "production" servers by
+// checking if a serverName is in the filteredServers map
+func checkFilter(serverName string) (bool, filterType) {
+	filteredServersMutex.RLock()
+	defer filteredServersMutex.RUnlock()
+
+	status, ok := filteredServers[serverName]
+	// No filter entry
+	if !ok {
+		return false, ""
+	} else {
+		// Has filter entry
+		switch status {
+		case permFiltered:
+			return true, permFiltered
+		case tempFiltered:
+			return true, tempFiltered
+		case tempAllowed:
+			return false, tempAllowed
+		default:
+			log.Error("Unknown filterType: ", status)
+			return false, ""
+		}
+	}
 }
 
 // Configure TTL caches to enable cache eviction and other additional cache events handling logic
@@ -117,4 +144,18 @@ func ConfigTTLCache(ctx context.Context, egrp *errgroup.Group) {
 		log.Info("Director TTL cache eviction has been stopped")
 		return nil
 	})
+}
+
+// Populate internal filteredServers map by Director.FilteredServers
+func ConfigFilterdServers() {
+	filteredServersMutex.Lock()
+	defer filteredServersMutex.Unlock()
+
+	if len(param.Director_FilteredServers.GetStringSlice()) == 0 {
+		return
+	}
+
+	for _, sn := range param.Director_FilteredServers.GetStringSlice() {
+		filteredServers[sn] = permFiltered
+	}
 }

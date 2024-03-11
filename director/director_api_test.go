@@ -170,3 +170,66 @@ func TestListServerAds(t *testing.T) {
 		assert.True(t, adsCache[0] == mockCacheServerAd)
 	})
 }
+
+func TestCheckFilter(t *testing.T) {
+	testCases := []struct {
+		name         string
+		mapItems     map[string]filterType
+		serverToTest string
+		filtered     bool
+		ft           filterType
+	}{
+		{
+			name:         "empty-list-return-false",
+			serverToTest: "mock",
+			filtered:     false,
+		},
+		{
+			name:         "dne-return-false",
+			serverToTest: "mock",
+			mapItems:     map[string]filterType{"no-your-server": permFiltered},
+			filtered:     false,
+		},
+		{
+			name:         "perm-return-true",
+			serverToTest: "mock",
+			mapItems:     map[string]filterType{"mock": permFiltered, "no-your-server": tempFiltered},
+			filtered:     true,
+			ft:           permFiltered,
+		},
+		{
+			name:         "temp-filter-return-true",
+			serverToTest: "mock",
+			mapItems:     map[string]filterType{"mock": tempFiltered, "no-your-server": permFiltered},
+			filtered:     true,
+			ft:           tempFiltered,
+		},
+		{
+			name:         "temp-allow-return-false",
+			serverToTest: "mock",
+			mapItems:     map[string]filterType{"mock": tempAllowed, "no-your-server": permFiltered},
+			filtered:     false,
+			ft:           tempAllowed,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			filteredServersMutex.Lock()
+			tmpMap := filteredServers
+			filteredServers = tc.mapItems
+			filteredServersMutex.Unlock()
+
+			defer func() {
+				filteredServersMutex.Lock()
+				filteredServers = tmpMap
+				filteredServersMutex.Unlock()
+			}()
+
+			getFilter, getType := checkFilter(tc.serverToTest)
+			assert.Equal(t, tc.filtered, getFilter)
+			assert.Equal(t, tc.ft, getType)
+
+		})
+	}
+}

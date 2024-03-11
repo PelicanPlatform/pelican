@@ -34,9 +34,19 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+type filterType string
+
+const (
+	permFiltered filterType = "permFiltered" // Read from Director.FilteredServers
+	tempFiltered filterType = "tempFiltered" // Filtered by web UI
+	tempAllowed  filterType = "tempAllowed"  // Read from Director.FilteredServers but mutated by web UI
+)
+
 var (
-	serverAds     = ttlcache.New[common.ServerAd, []common.NamespaceAdV2](ttlcache.WithTTL[common.ServerAd, []common.NamespaceAdV2](15 * time.Minute))
-	serverAdMutex = sync.RWMutex{}
+	serverAds            = ttlcache.New(ttlcache.WithTTL[common.ServerAd, []common.NamespaceAdV2](15 * time.Minute))
+	serverAdMutex        = sync.RWMutex{}
+	filteredServers      = map[string]filterType{}
+	filteredServersMutex = sync.RWMutex{}
 )
 
 func recordAd(ad common.ServerAd, namespaceAds *[]common.NamespaceAdV2) {
@@ -117,6 +127,7 @@ func matchesPrefix(reqPath string, namespaceAds []common.NamespaceAdV2) *common.
 	return best
 }
 
+// Get the longest matches namespace prefix with corresponding serverAds and namespace Ads given a path to an object
 func getAdsForPath(reqPath string) (originNamespace common.NamespaceAdV2, originAds []common.ServerAd, cacheAds []common.ServerAd) {
 	serverAdMutex.RLock()
 	defer serverAdMutex.RUnlock()
@@ -135,6 +146,10 @@ func getAdsForPath(reqPath string) (originNamespace common.NamespaceAdV2, origin
 			continue
 		}
 		serverAd := item.Key()
+		if filtered, ft := checkFilter(serverAd.Name); filtered {
+			log.Debugf("Skipping %s server %s as it's in the filtered server list with type %s", serverAd.Type, serverAd.Name, ft)
+			continue
+		}
 		if serverAd.Type == common.OriginType {
 			if ns := matchesPrefix(reqPath, item.Value()); ns != nil {
 				if best == nil || len(ns.Path) > len(best.Path) {
