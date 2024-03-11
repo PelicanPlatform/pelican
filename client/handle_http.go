@@ -1184,6 +1184,98 @@ func runTransferWorker(ctx context.Context, workChan <-chan *clientTransferFile,
 	}
 }
 
+// If there are multiple potential attempts, try to see if we can quickly eliminate some of them
+//
+// Attempts a HEAD against all the endpoints simultaneously.  Put any that don't respond within
+// a second behind those that do respond.
+func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDetails) (size int64, results []transferAttemptDetails) {
+	size = -1
+	if len(attempts) < 2 {
+		results = attempts
+		return
+	}
+	transport := config.GetTransport()
+	headChan := make(chan struct {
+		idx  int
+		size uint64
+		err  error
+	})
+	defer close(headChan)
+	ctx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	for idx, transferEndpoint := range attempts {
+		tUrl := *transferEndpoint.Url
+		tUrl.Path = path
+
+		go func(idx int, tUrl string) {
+			headClient := &http.Client{Transport: transport}
+			headRequest, _ := http.NewRequestWithContext(ctx, "HEAD", tUrl, nil)
+			var headResponse *http.Response
+			headResponse, err := headClient.Do(headRequest)
+			if err != nil {
+				headChan <- struct {
+					idx  int
+					size uint64
+					err  error
+				}{idx, 0, err}
+				return
+			}
+			headResponse.Body.Close()
+			contentLengthStr := headResponse.Header.Get("Content-Length")
+			size := int64(0)
+			if contentLengthStr != "" {
+				size, err = strconv.ParseInt(contentLengthStr, 10, 64)
+				if err != nil {
+					log.Errorln("problem converting content-length to an int:", err)
+				}
+			}
+			headChan <- struct {
+				idx  int
+				size uint64
+				err  error
+			}{idx, uint64(size), nil}
+		}(idx, tUrl.String())
+	}
+	finished := make(map[int]bool)
+	for ctr := 0; ctr != len(attempts); ctr++ {
+		result := <-headChan
+		if result.err != nil {
+			if result.err != context.Canceled {
+				log.Debugf("Failure when doing a HEAD request against %s: %s", attempts[result.idx].Url.String(), result.err.Error())
+			}
+		} else {
+			finished[result.idx] = true
+			if result.idx == 0 {
+				cancel()
+			}
+			if size <= int64(result.size) {
+				size = int64(result.size)
+			}
+		}
+	}
+	// Sort all the successful attempts first; use stable sort so the original ordering
+	// is preserved if the two entries are both successful or both unsuccessful.
+	type sorter struct {
+		good    bool
+		attempt transferAttemptDetails
+	}
+	tmpResults := make([]sorter, len(attempts))
+	for idx, attempt := range attempts {
+		tmpResults[idx] = sorter{finished[idx], attempt}
+	}
+	results = make([]transferAttemptDetails, len(attempts))
+	slices.SortStableFunc(tmpResults, func(left sorter, right sorter) int {
+		if left.good && !right.good {
+			return -1
+		}
+		return 0
+	})
+	for idx, val := range tmpResults {
+		results[idx] = val.attempt
+	}
+	return
+}
+
 func downloadObject(transfer *transferFile) (transferResults TransferResults, err error) {
 	log.Debugln("Downloading file from", transfer.remoteURL, "to", transfer.localPath)
 	// Remove the source from the file path
@@ -1192,9 +1284,12 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 	if err = os.MkdirAll(directory, 0700); err != nil {
 		return
 	}
+
+	size, attempts := sortAttempts(transfer.job.ctx, transfer.remoteURL.Path, transfer.attempts)
+
 	transferResults = newTransferResults(transfer.job)
 	success := false
-	for idx, transferEndpoint := range transfer.attempts { // For each transfer (usually 3), populate each attempt given
+	for idx, transferEndpoint := range attempts { // For each transfer attempt (usually 3), try to download via HTTP
 		var attempt TransferResult
 		var timeToFirstByte float64
 		var serverVersion string
@@ -1206,7 +1301,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 		transferEndpointUrl.Path = transfer.remoteURL.Path
 		transferEndpoint.Url = &transferEndpointUrl
 		transferStartTime := time.Now()
-		if downloaded, timeToFirstByte, serverVersion, err = downloadHTTP(transfer.ctx, transfer.engine, transfer.callback, transferEndpoint, transfer.localPath, transfer.token, &transfer.accounting); err != nil {
+		if downloaded, timeToFirstByte, serverVersion, err = downloadHTTP(transfer.ctx, transfer.engine, transfer.callback, transferEndpoint, transfer.localPath, size, transfer.token, &transfer.accounting); err != nil {
 			log.Debugln("Failed to download:", err)
 			transferEndTime := time.Now()
 			transferTime := transferEndTime.Unix() - transferStartTime.Unix()
@@ -1278,7 +1373,7 @@ func parseTransferStatus(status string) (int, string) {
 // Perform the actual download of the file
 //
 // Returns the downloaded size, time to 1st byte downloaded, serverVersion and an error if there is one
-func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCallbackFunc, transfer transferAttemptDetails, dest string, token string, payload *payloadStruct) (downloaded int64, timeToFirstByte float64, serverVersion string, err error) {
+func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCallbackFunc, transfer transferAttemptDetails, dest string, totalSize int64, token string, payload *payloadStruct) (downloaded int64, timeToFirstByte float64, serverVersion string, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Errorln("Panic occurred in downloadHTTP:", r)
@@ -1287,15 +1382,17 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 		}
 	}()
 
-	var totalSize int64 = 0
-
 	lastUpdate := time.Now()
 	if callback != nil {
 		callback(dest, 0, 0, false)
 	}
 	defer func() {
 		if callback != nil {
-			callback(dest, downloaded, totalSize, true)
+			finalSize := int64(0)
+			if totalSize >= 0 {
+				finalSize = totalSize
+			}
+			callback(dest, downloaded, finalSize, true)
 		}
 		if te != nil {
 			te.ewmaCtr.Add(int64(time.Since(lastUpdate)))
@@ -1396,7 +1493,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	// Size of the download
 	totalSize = resp.Size()
 	// Do a head request for content length if resp.Size is unknown
-	if totalSize <= 0 {
+	if totalSize <= 0 && !resp.IsComplete() {
 		headClient := &http.Client{Transport: transport}
 		headRequest, _ := http.NewRequest("HEAD", transferUrl.String(), nil)
 		var headResponse *http.Response

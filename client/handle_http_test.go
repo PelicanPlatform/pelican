@@ -36,6 +36,7 @@ import (
 
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/namespaces"
@@ -187,7 +188,7 @@ func TestSlowTransfers(t *testing.T) {
 	var err error
 	// Do a quick timeout
 	go func() {
-		_, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], filepath.Join(t.TempDir(), "test.txt"), "", nil)
+		_, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], filepath.Join(t.TempDir(), "test.txt"), -1, "", nil)
 		finishedChannel <- true
 	}()
 
@@ -258,7 +259,7 @@ func TestStoppedTransfer(t *testing.T) {
 	var err error
 
 	go func() {
-		_, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], filepath.Join(t.TempDir(), "test.txt"), "", nil)
+		_, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], filepath.Join(t.TempDir(), "test.txt"), -1, "", nil)
 		finishedChannel <- true
 	}()
 
@@ -290,7 +291,7 @@ func TestConnectionError(t *testing.T) {
 	addr := l.Addr().String()
 	l.Close()
 
-	_, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: &url.URL{Host: addr, Scheme: "http"}, Proxy: false}, filepath.Join(t.TempDir(), "test.txt"), "", nil)
+	_, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: &url.URL{Host: addr, Scheme: "http"}, Proxy: false}, filepath.Join(t.TempDir(), "test.txt"), -1, "", nil)
 
 	assert.IsType(t, &ConnectionSetupError{}, err)
 
@@ -325,7 +326,7 @@ func TestTrailerError(t *testing.T) {
 	assert.Equal(t, svr.URL, transfers[0].Url.String())
 
 	// Call DownloadHTTP and check if the error is returned correctly
-	_, _, _, err := downloadHTTP(ctx, nil, nil, transfers[0], filepath.Join(t.TempDir(), "test.txt"), "", nil)
+	_, _, _, err := downloadHTTP(ctx, nil, nil, transfers[0], filepath.Join(t.TempDir(), "test.txt"), -1, "", nil)
 
 	assert.NotNil(t, err)
 	assert.EqualError(t, err, "transfer error: Unable to read test.txt; input/output error")
@@ -387,4 +388,66 @@ func TestFailedUpload(t *testing.T) {
 	case <-time.After(time.Second * 2):
 		assert.Fail(t, "Timeout while waiting for response")
 	}
+}
+
+func TestSortAttempts(t *testing.T) {
+	ctx, cancel, _ := test_utils.TestContext(context.Background(), t)
+
+	neverRespond := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		select {
+		case <-ctx.Done():
+		case <-ticker.C:
+		}
+	})
+	alwaysRespond := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "HEAD" {
+			w.Header().Set("Content-Length", "42")
+			w.WriteHeader(http.StatusOK)
+		} else {
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	})
+	svr1 := httptest.NewServer(neverRespond)
+	defer svr1.Close()
+	url1, err := url.Parse(svr1.URL)
+	require.NoError(t, err)
+	attempt1 := transferAttemptDetails{Url: url1}
+
+	svr2 := httptest.NewServer(alwaysRespond)
+	defer svr2.Close()
+	url2, err := url.Parse(svr2.URL)
+	require.NoError(t, err)
+	attempt2 := transferAttemptDetails{Url: url2}
+
+	svr3 := httptest.NewServer(alwaysRespond)
+	defer svr3.Close()
+	url3, err := url.Parse(svr3.URL)
+	require.NoError(t, err)
+	attempt3 := transferAttemptDetails{Url: url3}
+
+	defer cancel()
+
+	size, results := sortAttempts(ctx, "/path", []transferAttemptDetails{attempt1, attempt2, attempt3})
+	assert.Equal(t, int64(42), size)
+	assert.Equal(t, svr2.URL, results[0].Url.String())
+	assert.Equal(t, svr3.URL, results[1].Url.String())
+	assert.Equal(t, svr1.URL, results[2].Url.String())
+
+	size, results = sortAttempts(ctx, "/path", []transferAttemptDetails{attempt2, attempt3, attempt1})
+	assert.Equal(t, int64(42), size)
+	assert.Equal(t, svr2.URL, results[0].Url.String())
+	assert.Equal(t, svr3.URL, results[1].Url.String())
+	assert.Equal(t, svr1.URL, results[2].Url.String())
+
+	size, results = sortAttempts(ctx, "/path", []transferAttemptDetails{attempt1, attempt1})
+	assert.Equal(t, int64(-1), size)
+	assert.Equal(t, svr1.URL, results[0].Url.String())
+	assert.Equal(t, svr1.URL, results[1].Url.String())
+
+	size, results = sortAttempts(ctx, "/path", []transferAttemptDetails{attempt2, attempt3})
+	assert.Equal(t, int64(42), size)
+	assert.Equal(t, svr2.URL, results[0].Url.String())
+	assert.Equal(t, svr3.URL, results[1].Url.String())
 }
