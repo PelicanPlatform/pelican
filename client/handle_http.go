@@ -2045,86 +2045,142 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 	return err
 }
 
+// Invoke HEAD against a remote URL, using the provided namespace information
+//
+// If a "dirlist host" is given, then that is used for the namespace info.
+// Otherwise, the first three caches are queried simultaneously.
+// For any of the queries, if the attempt with the proxy fails, a second attempt
+// is made without.
 func statHttp(ctx context.Context, dest *url.URL, namespace namespaces.Namespace, token string) (size uint64, err error) {
-	// Parse the writeback host as a URL
-	statHost := namespace.WriteBackHost
-	if len(namespace.SortedDirectorCaches) > 0 {
-		statHost = namespace.SortedDirectorCaches[0].EndpointUrl
-	}
-	if statHost == "" {
-		statHost = namespace.DirListHost
-	}
-	writebackhostUrl, err := url.Parse(statHost)
-	if err != nil {
-		return
-	}
-	dest.Host = writebackhostUrl.Host
-	dest.Scheme = "https"
-
-	canDisableProxy := CanDisableProxy()
-	disableProxy := !isProxyEnabled()
-
-	var resp *http.Response
-	for {
-		transport := config.GetTransport()
-		if disableProxy {
-			log.Debugln("Performing HEAD (without proxy)", dest.String())
-			transport.Proxy = nil
-		} else {
-			log.Debugln("Performing HEAD", dest.String())
-		}
-
-		client := &http.Client{Transport: transport}
-		var req *http.Request
-		req, err = http.NewRequestWithContext(ctx, "HEAD", dest.String(), nil)
+	statHosts := make([]url.URL, 0, 3)
+	if namespace.DirListHost != "" {
+		var endpoint *url.URL
+		endpoint, err = url.Parse(namespace.DirListHost)
 		if err != nil {
-			log.Errorln("Failed to create HTTP request:", err)
 			return
 		}
-
-		if token != "" {
-			req.Header.Set("Authorization", "Bearer "+token)
-		}
-
-		resp, err = client.Do(req)
-		if err == nil {
-			break
-		}
-		if urle, ok := err.(*url.Error); canDisableProxy && !disableProxy && ok && urle.Unwrap() != nil {
-			if ope, ok := urle.Unwrap().(*net.OpError); ok && ope.Op == "proxyconnect" {
-				log.Warnln("Failed to connect to proxy; will retry without:", ope)
-				disableProxy = true
-				continue
+		statHosts = append(statHosts, *endpoint)
+	} else if len(namespace.SortedDirectorCaches) > 0 {
+		for idx, cache := range namespace.SortedDirectorCaches {
+			if idx > 2 {
+				break
 			}
+			var endpoint *url.URL
+			endpoint, err = url.Parse(cache.EndpointUrl)
+			if err != nil {
+				return
+			}
+			statHosts = append(statHosts, *endpoint)
 		}
-		log.Errorln("Failed to get HTTP response:", err)
-		return
+	} else if namespace.WriteBackHost != "" {
+		var endpoint *url.URL
+		endpoint, err = url.Parse(namespace.WriteBackHost)
+		if err != nil {
+			return
+		}
+		statHosts = append(statHosts, *endpoint)
 	}
 
-	if resp.StatusCode == 200 {
-		defer resp.Body.Close()
-		contentLengthStr := resp.Header.Get("Content-Length")
-		if len(contentLengthStr) == 0 {
-			log.Errorln("HEAD response did not include Content-Length header")
-			err = errors.New("HEAD response did not include Content-Length header")
-			return
-		}
-		var contentLength int64
-		contentLength, err = strconv.ParseInt(contentLengthStr, 10, 64)
-		if err != nil {
-			log.Errorf("Unable to parse Content-Length header value (%s) as integer: %s", contentLengthStr, err)
-			return
-		}
-		return uint64(contentLength), nil
-	} else {
-		var respB []byte
-		respB, err = io.ReadAll(resp.Body)
-		if err != nil {
-			log.Errorln("Failed to read error message:", err)
-			return
-		}
-		defer resp.Body.Close()
-		err = &HttpErrResp{resp.StatusCode, fmt.Sprintf("Request failed (HTTP status %d): %s", resp.StatusCode, string(respB))}
-		return
+	type statResults struct {
+		size uint64
+		err  error
 	}
+	resultsChan := make(chan statResults)
+	transport := config.GetTransport()
+	client := &http.Client{Transport: transport}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	for _, statUrl := range statHosts {
+		destCopy := *dest
+		destCopy.Host = statUrl.Host
+		destCopy.Scheme = statUrl.Scheme
+
+		go func(endpoint *url.URL) {
+			canDisableProxy := CanDisableProxy()
+			disableProxy := !isProxyEnabled()
+
+			var resp *http.Response
+			for {
+				if disableProxy {
+					log.Debugln("Performing HEAD (without proxy)", endpoint.String())
+					transport.Proxy = nil
+				} else {
+					log.Debugln("Performing HEAD", endpoint.String())
+				}
+
+				var req *http.Request
+				req, err = http.NewRequestWithContext(ctx, "HEAD", endpoint.String(), nil)
+				if err != nil {
+					log.Errorln("Failed to create HTTP request:", err)
+					resultsChan <- statResults{0, err}
+					return
+				}
+
+				if token != "" {
+					req.Header.Set("Authorization", "Bearer "+token)
+				}
+
+				resp, err = client.Do(req)
+				if err == nil {
+					break
+				}
+				if urle, ok := err.(*url.Error); canDisableProxy && !disableProxy && ok && urle.Unwrap() != nil {
+					if ope, ok := urle.Unwrap().(*net.OpError); ok && ope.Op == "proxyconnect" {
+						log.Warnln("Failed to connect to proxy; will retry without:", ope)
+						disableProxy = true
+						continue
+					}
+				}
+				log.Errorln("Failed to get HTTP response:", err)
+				resultsChan <- statResults{0, err}
+				return
+			}
+
+			defer resp.Body.Close()
+			if resp.StatusCode == 200 {
+				contentLengthStr := resp.Header.Get("Content-Length")
+				if len(contentLengthStr) == 0 {
+					log.Errorln("HEAD response did not include Content-Length header")
+					err = errors.New("HEAD response did not include Content-Length header")
+					resultsChan <- statResults{0, err}
+					return
+				}
+				var contentLength int64
+				contentLength, err = strconv.ParseInt(contentLengthStr, 10, 64)
+				if err != nil {
+					log.Errorf("Unable to parse Content-Length header value (%s) as integer: %s", contentLengthStr, err)
+					resultsChan <- statResults{0, err}
+					return
+				}
+				resultsChan <- statResults{uint64(contentLength), nil}
+			} else {
+				var respB []byte
+				respB, err = io.ReadAll(resp.Body)
+				if err != nil {
+					log.Errorln("Failed to read error message:", err)
+					return
+				}
+				err = &HttpErrResp{resp.StatusCode, fmt.Sprintf("Request failed (HTTP status %d): %s", resp.StatusCode, string(respB))}
+				resultsChan <- statResults{0, err}
+			}
+		}(&destCopy)
+	}
+	success := false
+	for ctr := 0; ctr < len(statHosts); ctr++ {
+		result := <-resultsChan
+		if result.err == nil {
+			if !success {
+				cancel()
+				success = true
+				size = result.size
+			}
+		} else if err == nil && result.err != context.Canceled {
+			err = result.err
+		}
+	}
+	if success {
+		err = nil
+	}
+	return
 }
