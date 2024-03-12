@@ -78,6 +78,7 @@ func TestFedServeCache(t *testing.T) {
 	viper.Set("ConfigDir", tmpPath)
 	viper.Set("Origin.RunLocation", filepath.Join(tmpPath, "xOrigin"))
 	viper.Set("Cache.RunLocation", filepath.Join(tmpPath, "xCache"))
+	viper.Set("Cache.DataLocation", filepath.Join(tmpPath, "data"))
 	viper.Set("Origin.StoragePrefix", filepath.Join(origPath, "ns"))
 	viper.Set("Origin.FederationPrefix", "/test")
 	testFilePath := filepath.Join(origPath, "ns", "test-file.txt")
