@@ -68,7 +68,6 @@ func (sP StringParam) GetString() string {
 
 func (sP StringParam) IsSet() bool {
 	return viper.IsSet(sP.name)
-
 }
 
 func (slP StringSliceParam) GetStringSlice() []string {

@@ -23,13 +23,21 @@ package fed_test_utils
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/spf13/viper"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
+
+	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/launchers"
 	"github.com/pelicanplatform/pelican/param"
@@ -37,32 +45,21 @@ import (
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
-	"github.com/spf13/viper"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	"golang.org/x/sync/errgroup"
 )
 
 type (
 	FedTest struct {
-		OriginDir string
-		Token     string
-		Ctx       context.Context
-		Egrp      *errgroup.Group
+		Exports *[]common.OriginExports
+		Token   string
+		Ctx     context.Context
+		Egrp    *errgroup.Group
 	}
 )
 
-func NewFedTest(t *testing.T) (ft *FedTest) {
+func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	ft = &FedTest{}
 
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
-	t.Cleanup(func() {
-		cancel()
-		if err := egrp.Wait(); err != nil && err != context.Canceled && err != http.ErrServerClosed {
-			require.NoError(t, err)
-		}
-	})
-
 	ft.Ctx = ctx
 	ft.Egrp = egrp
 
@@ -72,7 +69,6 @@ func NewFedTest(t *testing.T) (ft *FedTest) {
 	modules.Set(config.RegistryType)
 	// TODO: the cache startup routines not sequenced correctly for the downloads
 	// to immediately work through the cache.  For now, unit tests will just use the origin.
-	viper.Set("Origin.EnableFallbackRead", true)
 	modules.Set(config.LocalCacheType)
 
 	tmpPathPattern := "PelicanOrigin-FedTest*"
@@ -82,35 +78,53 @@ func NewFedTest(t *testing.T) (ft *FedTest) {
 	permissions := os.FileMode(0755)
 	err = os.Chmod(tmpPath, permissions)
 	require.NoError(t, err)
-	t.Cleanup(func() {
-		err := os.RemoveAll(tmpPath)
-		require.NoError(t, err)
-	})
 
 	viper.Set("ConfigDir", tmpPath)
 
 	config.InitConfig()
 
-	originDir, err := os.MkdirTemp("", "Origin")
-	assert.NoError(t, err)
-	t.Cleanup(func() {
-		err := os.RemoveAll(originDir)
+	// Read in any config we may have set
+	if originConfig != "" {
+		viper.SetConfigType("yaml")
+		err = viper.MergeConfig(strings.NewReader(originConfig))
+		require.NoError(t, err, "error reading config")
+	}
+	// Now call GetOriginExports and check the struct
+	exports, err := common.GetOriginExports()
+	require.NoError(t, err, "error getting origin exports")
+	ft.Exports = exports
+
+	// Override the test directory from the config file with our temp directory
+	for i := 0; i < len(*ft.Exports); i++ {
+		originDir, err := os.MkdirTemp("", fmt.Sprintf("Export%d", i))
+		assert.NoError(t, err)
+		t.Cleanup(func() {
+			err := os.RemoveAll(originDir)
+			require.NoError(t, err)
+		})
+
+		// Set the storage prefix to the temporary origin directory
+		((*ft.Exports)[i]).StoragePrefix = originDir
+		// Our exports object becomes global -- we must reset in between each fed test
+		t.Cleanup(func() {
+			common.ResetOriginExports()
+		})
+
+		// Change the permissions of the temporary origin directory
+		permissions = os.FileMode(0755)
+		err = os.Chmod(originDir, permissions)
 		require.NoError(t, err)
-	})
 
-	// Change the permissions of the temporary origin directory
-	permissions = os.FileMode(0755)
-	err = os.Chmod(originDir, permissions)
-	require.NoError(t, err)
+		// Change ownership on the temporary origin directory so files can be uploaded
+		uinfo, err := config.GetDaemonUserInfo()
+		require.NoError(t, err)
+		require.NoError(t, os.Chown(originDir, uinfo.Uid, uinfo.Gid))
 
-	// Change ownership on the temporary origin directory so files can be uploaded
-	uinfo, err := config.GetDaemonUserInfo()
-	require.NoError(t, err)
-	require.NoError(t, os.Chown(originDir, uinfo.Uid, uinfo.Gid))
+		// Start off with a Hello World file we can use for testing in each of our exports
+		err = os.WriteFile(filepath.Join(originDir, "hello_world.txt"), []byte("Hello, World!"), os.FileMode(0644))
+		require.NoError(t, err)
+	}
 
-	viper.Set("Origin.ExportVolume", originDir+":/test")
-	viper.Set("Origin.Mode", "posix")
-	viper.Set("Origin.EnableFallbackRead", true)
 	// Disable functionality we're not using (and is difficult to make work on Mac)
 	viper.Set("Origin.EnableCmsd", false)
 	viper.Set("Origin.EnableMacaroons", false)
@@ -150,9 +164,6 @@ func NewFedTest(t *testing.T) (ft *FedTest) {
 	require.NoError(t, err)
 	assert.NotEmpty(t, expectedResponse.Msg)
 
-	err = os.WriteFile(filepath.Join(originDir, "hello_world.txt"), []byte("Hello, World!"), os.FileMode(0644))
-	require.NoError(t, err)
-
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
 	tokConf := token.NewWLCGToken()
@@ -165,8 +176,21 @@ func NewFedTest(t *testing.T) (ft *FedTest) {
 	token, err := tokConf.CreateToken()
 	require.NoError(t, err)
 
-	ft.OriginDir = originDir
 	ft.Token = token
+
+	// Explicitly run tmpPath cleanup AFTER cancel and egrp are done -- otherwise we end up
+	// with a race condition where removing tmpPath might happen while the server is still
+	// using it, resulting in "error: unlinkat <tmpPath>: directory not empty"
+	t.Cleanup(func() {
+		cancel()
+		if err := egrp.Wait(); err != nil && err != context.Canceled && err != http.ErrServerClosed {
+			require.NoError(t, err)
+		}
+		err := os.RemoveAll(tmpPath)
+		require.NoError(t, err)
+		// Throw in a viper.Reset for good measure. Keeps our env squeaky clean!
+		viper.Reset()
+	})
 
 	return
 }

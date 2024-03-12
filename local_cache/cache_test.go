@@ -22,6 +22,7 @@ package local_cache_test
 
 import (
 	"context"
+	_ "embed"
 	"errors"
 	"fmt"
 	"io"
@@ -47,14 +48,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+var (
+	//go:embed resources/public-origin-cfg.yml
+	pubOriginCfg string
+
+	//go:embed resources/auth-origin-cfg.yml
+	authOriginCfg string
+)
+
 // Setup a federation, invoke "get" through the local cache module
 //
 // The download is done twice -- once to verify functionality and once
 // as a cache hit.
 func TestFedPublicGet(t *testing.T) {
 	viper.Reset()
-	viper.Set("Origin.EnablePublicReads", true)
-	ft := fed_test_utils.NewFedTest(t)
+	ft := fed_test_utils.NewFedTest(t, pubOriginCfg)
 
 	lc, err := local_cache.NewLocalCache(ft.Ctx, ft.Egrp)
 	require.NoError(t, err)
@@ -79,8 +87,7 @@ func TestFedPublicGet(t *testing.T) {
 // Test the local cache library on an authenticated GET.
 func TestFedAuthGet(t *testing.T) {
 	viper.Reset()
-	viper.Set("Origin.EnablePublicReads", false)
-	ft := fed_test_utils.NewFedTest(t)
+	ft := fed_test_utils.NewFedTest(t, authOriginCfg)
 
 	lc, err := local_cache.NewLocalCache(ft.Ctx, ft.Egrp)
 	require.NoError(t, err)
@@ -112,8 +119,7 @@ func TestFedAuthGet(t *testing.T) {
 // Test a raw HTTP request (no Pelican client) works with the local cache
 func TestHttpReq(t *testing.T) {
 	viper.Reset()
-	viper.Set("Origin.EnablePublicReads", false)
-	ft := fed_test_utils.NewFedTest(t)
+	ft := fed_test_utils.NewFedTest(t, authOriginCfg)
 
 	transport := config.GetTransport().Clone()
 	transport.DialContext = func(_ context.Context, _, _ string) (net.Conn, error) {
@@ -138,8 +144,7 @@ func TestClient(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	viper.Reset()
-	viper.Set("Origin.EnablePublicReads", false)
-	ft := fed_test_utils.NewFedTest(t)
+	ft := fed_test_utils.NewFedTest(t, authOriginCfg)
 
 	cacheUrl := &url.URL{
 		Scheme: "unix",
@@ -195,8 +200,7 @@ func TestClient(t *testing.T) {
 // Test that HEAD requests to the local cache return the correct result
 func TestStat(t *testing.T) {
 	viper.Reset()
-	viper.Set("Origin.EnablePublicReads", true)
-	ft := fed_test_utils.NewFedTest(t)
+	ft := fed_test_utils.NewFedTest(t, pubOriginCfg)
 
 	lc, err := local_cache.NewLocalCache(ft.Ctx, ft.Egrp)
 	require.NoError(t, err)
@@ -251,16 +255,15 @@ func TestLargeFile(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	viper.Reset()
-	viper.Set("Origin.EnablePublicReads", true)
 	viper.Set("Client.MaximumDownloadSpeed", 40*1024*1024)
-	ft := fed_test_utils.NewFedTest(t)
+	ft := fed_test_utils.NewFedTest(t, pubOriginCfg)
 
 	cacheUrl := &url.URL{
 		Scheme: "unix",
 		Path:   param.LocalCache_Socket.GetString(),
 	}
 
-	fp, err := os.OpenFile(filepath.Join(ft.OriginDir, "hello_world.txt"), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+	fp, err := os.OpenFile(filepath.Join((*ft.Exports)[0].StoragePrefix, "hello_world.txt"), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
 	require.NoError(t, err)
 	size := writeBigBuffer(t, fp, 100)
 
@@ -282,9 +285,8 @@ func TestPurge(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	viper.Reset()
-	viper.Set("Origin.EnablePublicReads", true)
 	viper.Set("LocalCache.Size", "5MB")
-	ft := fed_test_utils.NewFedTest(t)
+	ft := fed_test_utils.NewFedTest(t, pubOriginCfg)
 
 	cacheUrl := &url.URL{
 		Scheme: "unix",
@@ -293,8 +295,8 @@ func TestPurge(t *testing.T) {
 
 	size := 0
 	for idx := 0; idx < 5; idx++ {
-		log.Debugln("Will write origin file", filepath.Join(ft.OriginDir, fmt.Sprintf("hello_world.txt.%d", idx)))
-		fp, err := os.OpenFile(filepath.Join(ft.OriginDir, fmt.Sprintf("hello_world.txt.%d", idx)), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+		log.Debugln("Will write origin file", filepath.Join((*ft.Exports)[0].StoragePrefix, fmt.Sprintf("hello_world.txt.%d", idx)))
+		fp, err := os.OpenFile(filepath.Join((*ft.Exports)[0].StoragePrefix, fmt.Sprintf("hello_world.txt.%d", idx)), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
 		require.NoError(t, err)
 		size = writeBigBuffer(t, fp, 1)
 	}
@@ -330,11 +332,10 @@ func TestForcePurge(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	viper.Reset()
-	viper.Set("Origin.EnablePublicReads", true)
 	viper.Set("LocalCache.Size", "5MB")
 	// Decrease the low water mark so invoking purge will result in 3 files in the cache.
 	viper.Set("LocalCache.LowWaterMarkPercentage", "80")
-	ft := fed_test_utils.NewFedTest(t)
+	ft := fed_test_utils.NewFedTest(t, pubOriginCfg)
 
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
@@ -360,8 +361,8 @@ func TestForcePurge(t *testing.T) {
 	// Populate the cache with our test files
 	size := 0
 	for idx := 0; idx < 4; idx++ {
-		log.Debugln("Will write origin file", filepath.Join(ft.OriginDir, fmt.Sprintf("hello_world.txt.%d", idx)))
-		fp, err := os.OpenFile(filepath.Join(ft.OriginDir, fmt.Sprintf("hello_world.txt.%d", idx)), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+		log.Debugln("Will write origin file", filepath.Join((*ft.Exports)[0].StoragePrefix, fmt.Sprintf("hello_world.txt.%d", idx)))
+		fp, err := os.OpenFile(filepath.Join((*ft.Exports)[0].StoragePrefix, fmt.Sprintf("hello_world.txt.%d", idx)), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
 		require.NoError(t, err)
 		size = writeBigBuffer(t, fp, 1)
 	}
