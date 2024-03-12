@@ -19,13 +19,10 @@
 package config
 
 import (
-	"io"
-	"os"
 	"regexp"
 	"sync/atomic"
 
 	log "github.com/sirupsen/logrus"
-	"github.com/sirupsen/logrus/hooks/writer"
 )
 
 type (
@@ -50,7 +47,6 @@ type (
 	// Intended to be used to censor or transform logs
 	regexpTransformHook struct {
 		replacements []replacement
-		hook         *writer.Hook
 	}
 
 	replacement struct {
@@ -64,10 +60,6 @@ var (
 	addedGlobalFilters bool
 
 	globalTransform *regexpTransformHook = &regexpTransformHook{
-		hook: &writer.Hook{
-			Writer:    os.Stderr,
-			LogLevels: log.AllLevels,
-		},
 		replacements: []replacement{
 			{
 				regex:    regexp.MustCompile(`(?P<prefix>Bearer%20)?(?P<header>ey[A-Za-z0-9_=-]{18,})[.](?P<payload>ey[A-Za-z0-9_=-]{18,})[.]([A-Za-z0-9_=-]{64,})`),
@@ -77,6 +69,7 @@ var (
 	}
 )
 
+// This ensures that our hooks will be fired on all log levels
 func (fh *RegexpFilterHook) Levels() []log.Level {
 	return log.AllLevels
 }
@@ -106,33 +99,18 @@ func (rt *regexpTransformHook) Fire(entry *log.Entry) (err error) {
 	for _, replace := range rt.replacements {
 		entry.Message = replace.regex.ReplaceAllString(entry.Message, replace.template)
 	}
-	return rt.hook.Fire(entry)
+	return nil
 }
 
 func initFilterLogging() {
-	// Our filters may want to see every log message, even those that
-	// are not otherwise printed.  Have the log levels printed via a hook
-	// (instead of the typical output mechanism) so we can crank up the
-	// global log.
 	filters := make([]*RegexpFilter, 0)
 	globalFilters.filters.Store(&filters)
-
-	configLevel := log.GetLevel()
-	log.SetLevel(log.DebugLevel)
-	hookLevel := make([]log.Level, 0)
-	for _, lvl := range log.AllLevels {
-		if lvl <= configLevel {
-			hookLevel = append(hookLevel, lvl)
-		}
-	}
 
 	// Unit tests may initialize the server multiple times; avoid configuring
 	// the global logging multiple times
 	if !addedGlobalFilters {
 		log.AddHook(&globalFilters)
 		addedGlobalFilters = true
-		log.SetOutput(io.Discard)
-		globalTransform.hook.LogLevels = hookLevel
 		log.AddHook(globalTransform)
 	}
 }
