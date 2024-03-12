@@ -39,11 +39,11 @@ type (
 	}
 
 	Capabilities struct {
-		PublicReads bool
-		Reads       bool
-		Writes      bool
-		Listings    bool
-		DirectReads bool
+		PublicReads bool `json:"PublicRead"`
+		Reads       bool `json:"Read"`
+		Writes      bool `json:"Write"`
+		Listings    bool `json:"Listing"`
+		DirectReads bool `json:"FallBackRead"`
 	}
 
 	NamespaceAdV2 struct {
