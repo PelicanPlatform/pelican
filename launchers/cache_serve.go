@@ -27,7 +27,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/pelicanplatform/pelican/broker"
-	"github.com/pelicanplatform/pelican/cache_ui"
+	"github.com/pelicanplatform/pelican/cache"
 	"github.com/pelicanplatform/pelican/daemon"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_ui"
@@ -44,7 +44,7 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) (
 		return nil, err
 	}
 
-	cacheServer := &cache_ui.CacheServer{}
+	cacheServer := &cache.CacheServer{}
 	err = cacheServer.GetNamespaceAdsFromDirector()
 	cacheServer.SetFilters()
 	if err != nil {
@@ -65,12 +65,12 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) (
 	xrootd.LaunchXrootdMaintenance(ctx, cacheServer, 2*time.Minute)
 
 	if param.Cache_SelfTest.GetBool() {
-		err = cache_ui.InitSelfTestDir()
+		err = cache.InitSelfTestDir()
 		if err != nil {
 			return nil, err
 		}
 
-		cache_ui.PeriodicCacheSelfTest(ctx, egrp)
+		cache.PeriodicCacheSelfTest(ctx, egrp)
 	}
 
 	log.Info("Launching cache")

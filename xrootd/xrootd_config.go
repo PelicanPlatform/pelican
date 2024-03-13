@@ -43,7 +43,7 @@ import (
 	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/pelicanplatform/pelican/cache_ui"
+	"github.com/pelicanplatform/pelican/cache"
 	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
@@ -325,7 +325,7 @@ func CheckCacheXrootdEnv(exportPath string, server server_utils.XRootDServer, ui
 		return "", errors.New("One of Federation.DiscoveryUrl or Federation.DirectorUrl must be set to configure a cache")
 	}
 
-	if cacheServer, ok := server.(*cache_ui.CacheServer); ok {
+	if cacheServer, ok := server.(*cache.CacheServer); ok {
 		err := WriteCacheScitokensConfig(cacheServer.GetNamespaceAds())
 		if err != nil {
 			return "", errors.Wrap(err, "Failed to create scitokens configuration for the cache")

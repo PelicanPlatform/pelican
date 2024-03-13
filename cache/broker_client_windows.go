@@ -18,7 +18,7 @@
  *
  ***************************************************************/
 
-package cache_ui
+package cache
 
 import (
 	"context"

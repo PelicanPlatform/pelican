@@ -35,7 +35,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pelicanplatform/pelican/cache_ui"
+	"github.com/pelicanplatform/pelican/cache"
 	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/origin_ui"
@@ -166,14 +166,14 @@ func TestOSDFAuthCreation(t *testing.T) {
 			desc:     "osdf-cache-auth-no-merge",
 			authIn:   "",
 			authOut:  cacheAuthfileEntries,
-			server:   &cache_ui.CacheServer{},
+			server:   &cache.CacheServer{},
 			hostname: "cache-test",
 		},
 		{
 			desc:     "osdf-cach-auth-merge",
 			authIn:   cacheAuthfileMultilineInput,
 			authOut:  cacheMergedAuthfileEntries,
-			server:   &cache_ui.CacheServer{},
+			server:   &cache.CacheServer{},
 			hostname: "cache-test",
 		},
 		{
@@ -187,7 +187,7 @@ func TestOSDFAuthCreation(t *testing.T) {
 			desc:     "osdf-cache-no-authfile",
 			authIn:   "",
 			authOut:  "",
-			server:   &cache_ui.CacheServer{},
+			server:   &cache.CacheServer{},
 			hostname: "cache-test-empty",
 		},
 	}
@@ -626,7 +626,7 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 		},
 	}
 
-	cacheServer := &cache_ui.CacheServer{}
+	cacheServer := &cache.CacheServer{}
 	cacheServer.SetNamespaceAds(nsAds)
 
 	t.Run("MultiIssuer", cacheAuthTester(cacheServer, cacheSciOutput, "u * /p3 lr /p4/depth lr /p2_noauth lr \n"))

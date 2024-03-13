@@ -16,7 +16,7 @@
  *
  ***************************************************************/
 
-package cache_ui
+package cache
 
 import (
 	"encoding/json"

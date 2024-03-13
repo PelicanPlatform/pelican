@@ -42,7 +42,7 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/pelicanplatform/pelican/cache_ui"
+	"github.com/pelicanplatform/pelican/cache"
 	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/origin_ui"
@@ -544,7 +544,7 @@ func EmitScitokensConfig(server server_utils.XRootDServer) error {
 			return err
 		}
 		return WriteOriginScitokensConfig(authedPrefixes)
-	} else if cacheServer, ok := server.(*cache_ui.CacheServer); ok {
+	} else if cacheServer, ok := server.(*cache.CacheServer); ok {
 		return WriteCacheScitokensConfig(cacheServer.GetNamespaceAds())
 	} else {
 		return errors.New("Internal error: server object is neither cache nor origin")
