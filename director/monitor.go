@@ -41,8 +41,8 @@ import (
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
-// Report the health status of test file transfer to origin
-func reportStatusToOrigin(ctx context.Context, originWebUrl string, status string, message string) error {
+// Report the health status of test file transfer to storage server
+func reportStatusToServer(ctx context.Context, serverWebUrl string, status string, message string, serverType common.ServerType) error {
 	directorUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
 	if err != nil {
 		return errors.Wrapf(err, "failed to parse external URL %v", param.Server_ExternalWebUrl.GetString())
@@ -51,7 +51,7 @@ func reportStatusToOrigin(ctx context.Context, originWebUrl string, status strin
 	testTokenCfg := token.NewWLCGToken()
 	testTokenCfg.Lifetime = time.Minute
 	testTokenCfg.Issuer = directorUrl.String()
-	testTokenCfg.AddAudiences(originWebUrl)
+	testTokenCfg.AddAudiences(serverWebUrl)
 	testTokenCfg.Subject = "director"
 	testTokenCfg.AddScopes(token_scopes.Pelican_DirectorTestReport)
 
@@ -60,16 +60,20 @@ func reportStatusToOrigin(ctx context.Context, originWebUrl string, status strin
 		return errors.Wrap(err, "failed to create director test report token")
 	}
 
-	reportUrl, err := url.Parse(originWebUrl)
+	reportUrl, err := url.Parse(serverWebUrl)
 	if err != nil {
-		return errors.Wrap(err, "The origin URL is not parseable as a URL")
+		return errors.Wrap(err, "The server URL is not parseable as an URL")
 	}
 
 	if status != "ok" && status != "error" {
 		return errors.Errorf("Bad status for reporting director test")
 	}
 
-	reportUrl.Path = "/api/v1.0/origin-api/directorTest"
+	if serverType == common.OriginType {
+		reportUrl.Path = "/api/v1.0/origin-api/directorTest"
+	} else if serverType == common.CacheType {
+		reportUrl.Path = "/api/v1.0/cache/directorTest"
+	}
 
 	dt := common.DirectorTestResult{
 		Status:    status,
@@ -107,8 +111,14 @@ func reportStatusToOrigin(ctx context.Context, originWebUrl string, status strin
 		return errors.Wrap(err, "Failed to read response body for reporting director test")
 	}
 
-	if resp.StatusCode > 299 {
+	if resp.StatusCode > 404 { // For all servers, >404 is a failure
 		return errors.Errorf("Error response %v from reporting director test: %v", resp.StatusCode, string(body))
+	}
+	if serverType == common.OriginType && resp.StatusCode != 200 {
+		return errors.Errorf("Error response %v from reporting director test: %v", resp.StatusCode, string(body))
+	}
+	if serverType == common.CacheType && resp.StatusCode == 404 {
+		return errors.Errorf("Cache reports a 404 error. For cache version < v7.7.0, director-based test is not supported")
 	}
 
 	return nil
@@ -116,21 +126,21 @@ func reportStatusToOrigin(ctx context.Context, originWebUrl string, status strin
 
 // Run a periodic test file transfer against an origin to ensure
 // it's talking to the director
-func LaunchPeriodicDirectorTest(ctx context.Context, originAd common.ServerAd) {
-	originName := originAd.Name
-	originUrl := originAd.URL.String()
-	originWebUrl := originAd.WebURL.String()
+func LaunchPeriodicDirectorTest(ctx context.Context, serverAd common.ServerAd) {
+	serverName := serverAd.Name
+	serverUrl := serverAd.URL.String()
+	serverWebUrl := serverAd.WebURL.String()
 
-	log.Debug(fmt.Sprintf("Starting a new director test suite for origin %s at %s", originName, originUrl))
+	log.Debug(fmt.Sprintf("Starting a new director test suite for %s server %s at %s", serverAd.Type, serverName, serverUrl))
 
 	metrics.PelicanDirectorFileTransferTestSuite.With(
 		prometheus.Labels{
-			"server_name": originName, "server_web_url": originWebUrl, "server_type": string(originAd.Type),
+			"server_name": serverName, "server_web_url": serverWebUrl, "server_type": string(serverAd.Type),
 		}).Inc()
 
 	metrics.PelicanDirectorActiveFileTransferTestSuite.With(
 		prometheus.Labels{
-			"server_name": originName, "server_web_url": originWebUrl, "server_type": string(originAd.Type),
+			"server_name": serverName, "server_web_url": serverWebUrl, "server_type": string(serverAd.Type),
 		}).Inc()
 
 	customInterval := param.Director_OriginCacheHealthTestInterval.GetDuration()
@@ -148,65 +158,71 @@ func LaunchPeriodicDirectorTest(ctx context.Context, originAd common.ServerAd) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Debug(fmt.Sprintf("End director test suite for origin: %s at %s", originName, originUrl))
+			log.Debug(fmt.Sprintf("End director test suite for %s server %s at %s", serverAd.Type, serverName, serverUrl))
 
 			metrics.PelicanDirectorActiveFileTransferTestSuite.With(
 				prometheus.Labels{
-					"server_name": originName, "server_web_url": originWebUrl, "server_type": string(originAd.Type),
+					"server_name": serverName, "server_web_url": serverWebUrl, "server_type": string(serverAd.Type),
 				}).Dec()
 
 			return
 		case <-ticker.C:
-			log.Debug(fmt.Sprintf("Starting a director test cycle for origin: %s at %s", originName, originUrl))
-			fileTests := server_utils.TestFileTransferImpl{}
-			ok, err := fileTests.RunTests(ctx, originUrl, originUrl, "", server_utils.DirectorFileTest)
+			log.Debug(fmt.Sprintf("Starting a director test cycle for %s server %s at %s", serverAd.Type, serverName, serverUrl))
+			ok := true
+			var err error
+			if serverAd.Type == common.OriginType {
+				fileTests := server_utils.TestFileTransferImpl{}
+				ok, err = fileTests.RunTests(ctx, serverUrl, serverUrl, "", server_utils.DirectorFileTest)
+			} else if serverAd.Type == common.CacheType {
+				err = runCacheTest(ctx, serverAd.URL)
+			}
 			if ok && err == nil {
-				log.Debugln("Director file transfer test cycle succeeded at", time.Now().Format(time.UnixDate), " for origin: ", originUrl)
+				log.Debugln("Director file transfer test cycle succeeded at", time.Now().Format(time.RFC3339), " for %s server: ", serverAd.Type, serverUrl)
 				func() {
 					healthTestUtilsMutex.Lock()
 					defer healthTestUtilsMutex.Unlock()
-					if existingUtil, ok := healthTestUtils[originAd]; ok {
+					if existingUtil, ok := healthTestUtils[serverAd]; ok {
 						existingUtil.Status = HealthStatusOK
 					} else {
-						log.Debugln("HealthTestUtil missing for origin: ", originUrl, " Failed to update internal status")
+						log.Debugln("HealthTestUtil missing for ", serverAd.Type, " server: ", serverUrl, " Failed to update internal status")
 					}
 				}()
-				if err := reportStatusToOrigin(ctx, originWebUrl, "ok", "Director test cycle succeeded at "+time.Now().Format(time.RFC3339)); err != nil {
+				if err := reportStatusToServer(ctx, serverWebUrl, "ok", "Director test cycle succeeded at "+time.Now().Format(time.RFC3339), serverAd.Type); err != nil {
 					log.Warningln("Failed to report director test result to origin:", err)
 					metrics.PelicanDirectorFileTransferTestsRuns.With(
 						prometheus.Labels{
-							"server_name": originName, "server_web_url": originWebUrl, "server_type": string(originAd.Type), "status": string(metrics.FTXTestSucceeded), "report_status": string(metrics.FTXTestFailed),
+							"server_name": serverName, "server_web_url": serverWebUrl, "server_type": string(serverAd.Type), "status": string(metrics.FTXTestSucceeded), "report_status": string(metrics.FTXTestFailed),
 						},
 					).Inc()
 				} else {
 					metrics.PelicanDirectorFileTransferTestsRuns.With(
 						prometheus.Labels{
-							"server_name": originName, "server_web_url": originWebUrl, "server_type": string(originAd.Type), "status": string(metrics.FTXTestSucceeded), "report_status": string(metrics.FTXTestSucceeded),
+							"server_name": serverName, "server_web_url": serverWebUrl, "server_type": string(serverAd.Type), "status": string(metrics.FTXTestSucceeded), "report_status": string(metrics.FTXTestSucceeded),
 						},
 					).Inc()
 				}
 			} else {
-				log.Warningln("Director file transfer test cycle failed for origin: ", originUrl, " ", err)
+				log.Warningln("Director file transfer test cycle failed for ", serverAd.Type, " server: ", serverUrl, " ", err)
 				func() {
 					healthTestUtilsMutex.Lock()
 					defer healthTestUtilsMutex.Unlock()
-					if existingUtil, ok := healthTestUtils[originAd]; ok {
+					if existingUtil, ok := healthTestUtils[serverAd]; ok {
 						existingUtil.Status = HealthStatusError
 					} else {
-						log.Debugln("HealthTestUtil missing for origin: ", originUrl, " Failed to update internal status")
+						log.Debugln("HealthTestUtil missing for", serverAd.Type, " server: ", serverUrl, " Failed to update internal status")
 					}
 				}()
-				if err := reportStatusToOrigin(ctx, originWebUrl, "error", "Director file transfer test cycle failed for origin: "+originUrl+" "+err.Error()); err != nil {
-					log.Warningln("Failed to report director test result to origin: ", err)
+				if err := reportStatusToServer(ctx, serverWebUrl, "error", "Director file transfer test cycle failed for origin: "+serverUrl+" "+err.Error(), serverAd.Type); err != nil {
+					log.Warningln("Failed to report director test result to ", serverAd.Type, " server with web url at ", serverWebUrl, err)
 					metrics.PelicanDirectorFileTransferTestsRuns.With(
 						prometheus.Labels{
-							"server_name": originName, "server_web_url": originWebUrl, "server_type": string(originAd.Type), "status": string(metrics.FTXTestFailed), "report_status": string(metrics.FTXTestFailed),
+							"server_name": serverName, "server_web_url": serverWebUrl, "server_type": string(serverAd.Type), "status": string(metrics.FTXTestFailed), "report_status": string(metrics.FTXTestFailed),
 						},
 					).Inc()
 				} else {
 					metrics.PelicanDirectorFileTransferTestsRuns.With(
 						prometheus.Labels{
-							"server_name": originName, "server_web_url": originWebUrl, "server_type": string(originAd.Type), "status": string(metrics.FTXTestFailed), "report_status": string(metrics.FTXTestSucceeded),
+							"server_name": serverName, "server_web_url": serverWebUrl, "server_type": string(serverAd.Type), "status": string(metrics.FTXTestFailed), "report_status": string(metrics.FTXTestSucceeded),
 						},
 					).Inc()
 				}

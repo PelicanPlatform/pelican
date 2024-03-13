@@ -26,6 +26,7 @@ import (
 	"net/url"
 	"path"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -329,6 +330,13 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	reqPath := path.Clean("/" + ginCtx.Request.URL.Path)
 	reqPath = strings.TrimPrefix(reqPath, "/api/v1.0/director/origin")
 
+	// /pelican/monitoring is the path for director-based health test
+	// where we have /director/healthTest API to mock a file for the cache to get
+	if strings.HasPrefix(reqPath, "/pelican/monitoring") {
+		ginCtx.Redirect(http.StatusTemporaryRedirect, param.Server_ExternalWebUrl.GetString()+"/api/v1.0/director/healthTest/"+reqPath)
+		return
+	}
+
 	// Each namespace may be exported by several origins, so we must still
 	// do the geolocation song and dance if we want to get the closest origin...
 	ipAddr, err := getRealIP(ginCtx)
@@ -609,7 +617,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType common.S
 	// has WebURL field AND it's not already been registered
 	healthTestUtilsMutex.Lock()
 	defer healthTestUtilsMutex.Unlock()
-	if sAd.Type == common.OriginType && adV2.WebURL != "" {
+	if adV2.WebURL != "" {
 		if existingUtil, ok := healthTestUtils[sAd]; ok {
 			// Existing registration
 			if existingUtil != nil {
@@ -733,14 +741,6 @@ func discoverOriginCache(ctx *gin.Context) {
 	ctx.JSON(200, promDiscoveryRes)
 }
 
-func registerOrigin(ctx context.Context, gctx *gin.Context) {
-	registerServeAd(ctx, gctx, common.OriginType)
-}
-
-func registerCache(ctx context.Context, gctx *gin.Context) {
-	registerServeAd(ctx, gctx, common.CacheType)
-}
-
 func listNamespacesV1(ctx *gin.Context) {
 	namespaceAdsV2 := listNamespacesFromOrigins()
 
@@ -751,6 +751,14 @@ func listNamespacesV1(ctx *gin.Context) {
 
 func listNamespacesV2(ctx *gin.Context) {
 	namespacesAdsV2 := listNamespacesFromOrigins()
+	namespacesAdsV2 = append(namespacesAdsV2, common.NamespaceAdV2{
+		PublicRead: true,
+		Caps: common.Capabilities{
+			PublicReads: true,
+			Reads:       true,
+		},
+		Path: "/pelican/monitoring",
+	})
 	ctx.JSON(http.StatusOK, namespacesAdsV2)
 }
 
@@ -775,6 +783,38 @@ func getPrefixByPath(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, res)
 }
 
+func getHealthTestFile(ctx *gin.Context) {
+	// Expected path: /pelican/monitoring/2006-01-02T15:04:05Z07:00.txt
+	pathParam := ctx.Param("path")
+	cleanedPath := path.Clean(pathParam)
+	if cleanedPath == "" || !strings.HasPrefix(cleanedPath, cacheMonitroingBasePath+"/") {
+		ctx.JSON(http.StatusBadRequest, common.SimpleApiResp{Status: common.RespFailed, Msg: "Path parameter is not a valid health test path: " + cleanedPath})
+		return
+	}
+	fileName := strings.TrimPrefix(cleanedPath, cacheMonitroingBasePath+"/")
+	if fileName == "" {
+		ctx.JSON(http.StatusBadRequest, common.SimpleApiResp{Status: common.RespFailed, Msg: "Path parameter is not a valid health test path: " + cleanedPath})
+		return
+	}
+
+	fileNameSplit := strings.SplitN(fileName, ".", 2)
+
+	if len(fileNameSplit) != 2 {
+		ctx.JSON(http.StatusBadRequest, common.SimpleApiResp{Status: common.RespFailed, Msg: "Test file name is missing file extension: " + cleanedPath})
+		return
+	}
+
+	filenameWoExt := fileNameSplit[0]
+
+	fileContent := fmt.Sprintf("%s%s\n", testFileContent, filenameWoExt)
+
+	if ctx.Request.Method == "HEAD" {
+		ctx.Header("Content-Length", strconv.Itoa(len(fileContent)))
+	} else {
+		ctx.String(http.StatusOK, fileContent)
+	}
+}
+
 func RegisterDirector(ctx context.Context, router *gin.RouterGroup) {
 	directorAPIV1 := router.Group("/api/v1.0/director")
 	{
@@ -782,10 +822,12 @@ func RegisterDirector(ctx context.Context, router *gin.RouterGroup) {
 		directorAPIV1.GET("/object/*any", redirectToCache)
 		directorAPIV1.GET("/origin/*any", redirectToOrigin)
 		directorAPIV1.PUT("/origin/*any", redirectToOrigin)
-		directorAPIV1.POST("/registerOrigin", func(gctx *gin.Context) { registerOrigin(ctx, gctx) })
-		directorAPIV1.POST("/registerCache", func(gctx *gin.Context) { registerCache(ctx, gctx) })
+		directorAPIV1.POST("/registerOrigin", func(gctx *gin.Context) { registerServeAd(ctx, gctx, common.OriginType) })
+		directorAPIV1.POST("/registerCache", func(gctx *gin.Context) { registerServeAd(ctx, gctx, common.CacheType) })
 		directorAPIV1.GET("/listNamespaces", listNamespacesV1)
 		directorAPIV1.GET("/namespaces/prefix/*path", getPrefixByPath)
+		directorAPIV1.GET("/healthTest/*path", getHealthTestFile)
+		directorAPIV1.HEAD("/healthTest/*path", getHealthTestFile)
 
 		// In the foreseeable feature, director will scrape all servers in Pelican ecosystem (including registry)
 		// so that director can be our point of contact for collecting system-level metrics.

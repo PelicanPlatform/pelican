@@ -126,7 +126,7 @@ func TestFedServeCache(t *testing.T) {
 	issuerUrl, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
 
-	ok, err := fileTests.RunTestsCache(ctx, param.Cache_Url.GetString(), issuerUrl, "/test/test-file.txt", "This is the content of the test file.")
+	ok, err := fileTests.TestCacheDownload(ctx, param.Cache_Url.GetString(), issuerUrl, "/test/test-file.txt", "This is the content of the test file.")
 	require.NoError(t, err)
 	require.True(t, ok)
 
