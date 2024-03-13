@@ -121,7 +121,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 	tok, err := advTokenCfg.CreateToken()
 	assert.NoError(t, err, "failed to create director prometheus token")
 
-	ok, err := VerifyAdvertiseToken(ctx, tok, "/test-namespace")
+	ok, err := verifyAdvertiseToken(ctx, tok, "/test-namespace")
 	assert.NoError(t, err)
 	assert.Equal(t, true, ok, "Expected scope to be 'pelican.advertise'")
 
@@ -135,7 +135,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 	tok, err = scopelessTokCfg.CreateToken()
 	assert.NoError(t, err, "error creating scopeless token. Should have succeeded")
 
-	ok, err = VerifyAdvertiseToken(ctx, tok, "/test-namespace")
+	ok, err = verifyAdvertiseToken(ctx, tok, "/test-namespace")
 	assert.Equal(t, false, ok)
 	assert.Equal(t, "No scope is present; required to advertise to director", err.Error())
 
@@ -150,7 +150,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 	tok, err = wrongScopeTokenCfg.CreateToken()
 	assert.NoError(t, err, "error creating wrong-scope token. Should have succeeded")
 
-	ok, err = VerifyAdvertiseToken(ctx, tok, "/test-namespace")
+	ok, err = verifyAdvertiseToken(ctx, tok, "/test-namespace")
 	assert.Equal(t, false, ok, "Should fail due to incorrect scope name")
 	assert.NoError(t, err, "Incorrect scope name should not throw and error")
 }

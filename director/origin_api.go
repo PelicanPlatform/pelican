@@ -107,7 +107,7 @@ func checkNamespaceStatus(prefix string, registryWebUrlStr string) (bool, error)
 // Given a token and a location in the namespace to advertise in,
 // see if the entity is authorized to advertise an origin for the
 // namespace
-func VerifyAdvertiseToken(ctx context.Context, token, namespace string) (bool, error) {
+func verifyAdvertiseToken(ctx context.Context, token, namespace string) (bool, error) {
 	issuerUrl, err := server_utils.GetNSIssuerURL(namespace)
 	if err != nil {
 		return false, err
