@@ -38,7 +38,7 @@ import (
 	"github.com/pelicanplatform/pelican/cache"
 	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/origin_ui"
+	"github.com/pelicanplatform/pelican/origin"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
@@ -133,7 +133,7 @@ func TestOSDFAuthRetrieval(t *testing.T) {
 	viper.Set("Federation.TopologyUrl", "https://topology.opensciencegrid.org/")
 	viper.Set("Server.Hostname", "sc-origin.chtc.wisc.edu")
 
-	originServer := &origin_ui.OriginServer{}
+	originServer := &origin.OriginServer{}
 	_, err := getOSDFAuthFiles(originServer)
 
 	require.NoError(t, err, "error")
@@ -152,14 +152,14 @@ func TestOSDFAuthCreation(t *testing.T) {
 			desc:     "osdf-origin-auth-no-merge",
 			authIn:   "",
 			authOut:  mergedAuthfileEntries,
-			server:   &origin_ui.OriginServer{},
+			server:   &origin.OriginServer{},
 			hostname: "origin-test",
 		},
 		{
 			desc:     "osdf-origin-auth-merge",
 			authIn:   cacheAuthfileMultilineInput,
 			authOut:  otherMergedAuthfileEntries,
-			server:   &origin_ui.OriginServer{},
+			server:   &origin.OriginServer{},
 			hostname: "origin-test",
 		},
 		{
@@ -180,7 +180,7 @@ func TestOSDFAuthCreation(t *testing.T) {
 			desc:     "osdf-origin-no-authfile",
 			authIn:   "",
 			authOut:  "u * /.well-known lr\n",
-			server:   &origin_ui.OriginServer{},
+			server:   &origin.OriginServer{},
 			hostname: "origin-test-empty",
 		},
 		{
@@ -303,7 +303,7 @@ func TestEmitAuthfile(t *testing.T) {
 			defer common.ResetOriginExports()
 			viper.Set("Xrootd.Authfile", filepath.Join(dirName, "authfile"))
 			viper.Set("Origin.RunLocation", dirName)
-			server := &origin_ui.OriginServer{}
+			server := &origin.OriginServer{}
 
 			err := os.WriteFile(filepath.Join(dirName, "authfile"), []byte(testInput.authIn), fs.FileMode(0600))
 			require.NoError(t, err)
@@ -412,7 +412,7 @@ func TestMergeConfig(t *testing.T) {
 			err = config.InitServer(ctx, config.OriginType)
 			require.NoError(t, err)
 
-			err = EmitScitokensConfig(&origin_ui.OriginServer{})
+			err = EmitScitokensConfig(&origin.OriginServer{})
 			require.NoError(t, err)
 
 			cfg, err := LoadScitokensConfig(filepath.Join(dirname, "scitokens-origin-generated.cfg"))
@@ -502,7 +502,7 @@ func TestWriteOriginAuthFiles(t *testing.T) {
 	}
 	nsAds := []common.NamespaceAdV2{}
 
-	originServer := &origin_ui.OriginServer{}
+	originServer := &origin.OriginServer{}
 	originServer.SetNamespaceAds(nsAds)
 
 	t.Run("MultiIssuer", originAuthTester(originServer, "u * t1 lr t2 lr t3 lr", "u * /.well-known lr t1 lr t2 lr t3 lr\n"))

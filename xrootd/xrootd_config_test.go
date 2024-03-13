@@ -40,7 +40,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/origin_ui"
+	"github.com/pelicanplatform/pelican/origin"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
@@ -568,7 +568,7 @@ default_user = user2
 	err = os.WriteFile(authfileName, []byte(authfileDemo), fs.FileMode(0600))
 	require.NoError(t, err)
 
-	server := &origin_ui.OriginServer{}
+	server := &origin.OriginServer{}
 	err = EmitScitokensConfig(server)
 	require.NoError(t, err)
 
@@ -632,14 +632,14 @@ func TestCopyCertificates(t *testing.T) {
 	config.InitConfig()
 
 	// First, invoke CopyXrootdCertificates directly, ensure it works.
-	err := CopyXrootdCertificates(&origin_ui.OriginServer{})
+	err := CopyXrootdCertificates(&origin.OriginServer{})
 	assert.ErrorIs(t, err, errBadKeyPair)
 
 	err = config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
 	err = config.MkdirAll(path.Dir(param.Xrootd_Authfile.GetString()), 0755, -1, -1)
 	require.NoError(t, err)
-	err = CopyXrootdCertificates(&origin_ui.OriginServer{})
+	err = CopyXrootdCertificates(&origin.OriginServer{})
 	require.NoError(t, err)
 	destKeyPairName := filepath.Join(param.Origin_RunLocation.GetString(), "copied-tls-creds.crt")
 	assert.FileExists(t, destKeyPairName)
@@ -659,7 +659,7 @@ func TestCopyCertificates(t *testing.T) {
 	err = os.Rename(certName, certName+".orig")
 	require.NoError(t, err)
 
-	err = CopyXrootdCertificates(&origin_ui.OriginServer{})
+	err = CopyXrootdCertificates(&origin.OriginServer{})
 	assert.ErrorIs(t, err, errBadKeyPair)
 
 	err = os.Rename(keyName, keyName+".orig")
@@ -668,14 +668,14 @@ func TestCopyCertificates(t *testing.T) {
 	err = config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
 
-	err = CopyXrootdCertificates(&origin_ui.OriginServer{})
+	err = CopyXrootdCertificates(&origin.OriginServer{})
 	require.NoError(t, err)
 
 	secondKeyPairContents, err := os.ReadFile(destKeyPairName)
 	require.NoError(t, err)
 	assert.False(t, bytes.Equal(firstKeyPairContents, secondKeyPairContents))
 
-	originServer := &origin_ui.OriginServer{}
+	originServer := &origin.OriginServer{}
 	LaunchXrootdMaintenance(ctx, originServer, 2*time.Hour)
 
 	// Helper function to wait for a copy of the first cert to show up

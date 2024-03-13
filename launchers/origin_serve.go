@@ -31,7 +31,7 @@ import (
 	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/oa4mp"
-	"github.com/pelicanplatform/pelican/origin_ui"
+	"github.com/pelicanplatform/pelican/origin"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_ui"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -45,20 +45,20 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		return nil, err
 	}
 
-	originServer := &origin_ui.OriginServer{}
+	originServer := &origin.OriginServer{}
 	err = server_ui.CheckDefaults(originServer)
 	if err != nil {
 		return nil, err
 	}
 
 	// Set up the APIs unrelated to UI, which only contains director-based health test reporting endpoint for now
-	if err = origin_ui.ConfigureOriginAPI(engine, ctx, egrp); err != nil {
+	if err = origin.ConfigureOriginAPI(engine, ctx, egrp); err != nil {
 		return nil, err
 	}
 
 	// Director also registers this metadata URL; avoid registering twice.
 	if !modules.IsEnabled(config.DirectorType) {
-		if err = origin_ui.ConfigIssJWKS(engine.Group("/.well-known")); err != nil {
+		if err = origin.ConfigIssJWKS(engine.Group("/.well-known")); err != nil {
 			return nil, err
 		}
 	}
@@ -75,7 +75,7 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 	}
 
 	if param.Origin_SelfTest.GetBool() {
-		egrp.Go(func() error { return origin_ui.PeriodicSelfTest(ctx) })
+		egrp.Go(func() error { return origin.PeriodicSelfTest(ctx) })
 	}
 
 	privileged := param.Origin_Multiuser.GetBool()

@@ -47,7 +47,7 @@ import (
 	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
-	"github.com/pelicanplatform/pelican/origin_ui"
+	"github.com/pelicanplatform/pelican/origin"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/utils"
@@ -207,7 +207,7 @@ func CheckOriginXrootdEnv(exportPath string, server server_utils.XRootDServer, u
 	}
 
 	if param.Origin_SelfTest.GetBool() {
-		if err := origin_ui.ConfigureXrootdMonitoringDir(); err != nil {
+		if err := origin.ConfigureXrootdMonitoringDir(); err != nil {
 			return err
 		}
 	}
@@ -243,7 +243,7 @@ func CheckOriginXrootdEnv(exportPath string, server server_utils.XRootDServer, u
 			" to desired daemon group %v", macaroonsSecret, groupname)
 	}
 	// If the scitokens.cfg does not exist, create one
-	if originServer, ok := server.(*origin_ui.OriginServer); ok {
+	if originServer, ok := server.(*origin.OriginServer); ok {
 		authedPrefixes, err := originServer.GetAuthorizedPrefixes()
 		if err != nil {
 			return err
@@ -253,7 +253,7 @@ func CheckOriginXrootdEnv(exportPath string, server server_utils.XRootDServer, u
 			return err
 		}
 	}
-	if err := origin_ui.ConfigureXrootdMonitoringDir(); err != nil {
+	if err := origin.ConfigureXrootdMonitoringDir(); err != nil {
 		return err
 	}
 

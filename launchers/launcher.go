@@ -38,7 +38,7 @@ import (
 	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/local_cache"
-	"github.com/pelicanplatform/pelican/origin_ui"
+	"github.com/pelicanplatform/pelican/origin"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_ui"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -192,7 +192,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		// NOTE: Until the Broker supports multi-export origins, we've made the assumption that there
 		// is only one namespace prefix available here and that it lives in Origin.FederationPrefix
 		if param.Origin_EnableBroker.GetBool() {
-			if err = origin_ui.LaunchBrokerListener(ctx, egrp); err != nil {
+			if err = origin.LaunchBrokerListener(ctx, egrp); err != nil {
 				return shutdownCancel, err
 			}
 		}

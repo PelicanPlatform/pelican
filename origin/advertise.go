@@ -16,7 +16,7 @@
  *
  ***************************************************************/
 
-package origin_ui
+package origin
 
 import (
 	"net/url"

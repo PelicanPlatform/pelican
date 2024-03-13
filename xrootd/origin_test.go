@@ -42,7 +42,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/origin_ui"
+	"github.com/pelicanplatform/pelican/origin"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
@@ -55,7 +55,7 @@ var (
 )
 
 func originMockup(ctx context.Context, egrp *errgroup.Group, t *testing.T) context.CancelFunc {
-	originServer := &origin_ui.OriginServer{}
+	originServer := &origin.OriginServer{}
 
 	// Create our own temp directory (for some reason t.TempDir() does not play well with xrootd)
 	tmpPathPattern := "XRD-Tst_Orgn*"
@@ -87,7 +87,7 @@ func originMockup(ctx context.Context, egrp *errgroup.Group, t *testing.T) conte
 	engine, err := web_ui.GetEngine()
 	require.NoError(t, err)
 
-	err = origin_ui.ConfigIssJWKS(engine.Group("/.well-known"))
+	err = origin.ConfigIssJWKS(engine.Group("/.well-known"))
 	require.NoError(t, err)
 
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())

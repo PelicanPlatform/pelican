@@ -45,7 +45,7 @@ import (
 	"github.com/pelicanplatform/pelican/cache"
 	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/origin_ui"
+	"github.com/pelicanplatform/pelican/origin"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 )
@@ -538,7 +538,7 @@ func makeSciTokensCfg() (cfg ScitokensCfg, err error) {
 
 // Writes out the server's scitokens.cfg configuration
 func EmitScitokensConfig(server server_utils.XRootDServer) error {
-	if originServer, ok := server.(*origin_ui.OriginServer); ok {
+	if originServer, ok := server.(*origin.OriginServer); ok {
 		authedPrefixes, err := originServer.GetAuthorizedPrefixes()
 		if err != nil {
 			return err
