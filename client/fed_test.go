@@ -473,8 +473,8 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 			tempPath := tempDir
 			dirName := filepath.Base(tempPath)
 			// Note: minimally fixing this test as it is soon to be replaced
-			uploadURL := fmt.Sprintf("pelican://%s:%s%s/%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
-				export.FederationPrefix, dirName)
+			uploadURL := fmt.Sprintf("pelican://%s:%s%s/%s/%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
+				export.FederationPrefix, "pel_osdf", dirName)
 
 			//////////////////////////////////////////////////////////
 
@@ -552,7 +552,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 			// Set path for object to upload/download
 			tempPath := tempDir
 			dirName := filepath.Base(tempPath)
-			uploadURL := fmt.Sprintf("pelican://%s/%s", export.FederationPrefix, dirName)
+			uploadURL := fmt.Sprintf("pelican://%s/%s/%s", export.FederationPrefix, "pel_pel", dirName)
 
 			//////////////////////////////////////////////////////////
 
@@ -629,8 +629,8 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 			tempPath := tempDir
 			dirName := filepath.Base(tempPath)
 			// Note: minimally fixing this test as it is soon to be replaced
-			uploadURL := fmt.Sprintf("pelican://%s:%s%s/%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
-				export.FederationPrefix, dirName)
+			uploadURL := fmt.Sprintf("pelican://%s:%s%s/%s/%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
+				export.FederationPrefix, "osdf_osdf", dirName)
 
 			//////////////////////////////////////////////////////////
 
@@ -713,7 +713,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 			// Set path for object to upload/download
 			tempPath := tempDir
 			dirName := filepath.Base(tempPath)
-			uploadURL := fmt.Sprintf("pelican://%s/%s", export.FederationPrefix, dirName)
+			uploadURL := fmt.Sprintf("pelican://%s/%s/%s", export.FederationPrefix, "osdf_pel", dirName)
 
 			//////////////////////////////////////////////////////////
 
