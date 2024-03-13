@@ -142,13 +142,20 @@ type Config struct {
 		EnableBroker bool
 		EnableCmsd bool
 		EnableDirListing bool
+		EnableDirectReads bool
 		EnableFallbackRead bool
 		EnableIssuer bool
+		EnableListings bool
 		EnablePublicReads bool
+		EnableReads bool
 		EnableUI bool
 		EnableVoms bool
 		EnableWrite bool
+		EnableWrites bool
 		ExportVolume string
+		ExportVolumes []string
+		Exports interface{}
+		FederationPrefix string
 		Mode string
 		Multiuser bool
 		NamespacePrefix string
@@ -168,6 +175,8 @@ type Config struct {
 		ScitokensUsernameClaim string
 		SelfTest bool
 		SelfTestInterval time.Duration
+		StoragePrefix string
+		StorageType string
 		Url string
 		XRootDPrefix string
 	}
@@ -378,13 +387,20 @@ type configWithType struct {
 		EnableBroker struct { Type string; Value bool }
 		EnableCmsd struct { Type string; Value bool }
 		EnableDirListing struct { Type string; Value bool }
+		EnableDirectReads struct { Type string; Value bool }
 		EnableFallbackRead struct { Type string; Value bool }
 		EnableIssuer struct { Type string; Value bool }
+		EnableListings struct { Type string; Value bool }
 		EnablePublicReads struct { Type string; Value bool }
+		EnableReads struct { Type string; Value bool }
 		EnableUI struct { Type string; Value bool }
 		EnableVoms struct { Type string; Value bool }
 		EnableWrite struct { Type string; Value bool }
+		EnableWrites struct { Type string; Value bool }
 		ExportVolume struct { Type string; Value string }
+		ExportVolumes struct { Type string; Value []string }
+		Exports struct { Type string; Value interface{} }
+		FederationPrefix struct { Type string; Value string }
 		Mode struct { Type string; Value string }
 		Multiuser struct { Type string; Value bool }
 		NamespacePrefix struct { Type string; Value string }
@@ -404,6 +420,8 @@ type configWithType struct {
 		ScitokensUsernameClaim struct { Type string; Value string }
 		SelfTest struct { Type string; Value bool }
 		SelfTestInterval struct { Type string; Value time.Duration }
+		StoragePrefix struct { Type string; Value string }
+		StorageType struct { Type string; Value string }
 		Url struct { Type string; Value string }
 		XRootDPrefix struct { Type string; Value string }
 	}

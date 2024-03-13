@@ -1,0 +1,10 @@
+# When we only get a single export volume, we should set a few other viper variables
+# that are made use by a few things that only support single exports.
+
+Origin:
+  # Things that configure the origin, and thus the exports
+  StorageType: "posix"
+  EnableWrites: true
+  EnablePublicReads: true
+  ExportVolumes:
+    - "/test1:/first/namespace"

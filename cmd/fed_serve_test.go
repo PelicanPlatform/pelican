@@ -29,15 +29,17 @@ import (
 	"path/filepath"
 	"testing"
 
+	log "github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/launchers"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
-	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestFedServePosixOrigin(t *testing.T) {
@@ -46,6 +48,9 @@ func TestFedServePosixOrigin(t *testing.T) {
 	defer cancel()
 
 	viper.Reset()
+	common.ResetOriginExports()
+	defer viper.Reset()
+	defer common.ResetOriginExports()
 
 	modules := config.ServerType(0)
 	modules.Set(config.OriginType)
@@ -74,8 +79,9 @@ func TestFedServePosixOrigin(t *testing.T) {
 	viper.Set("Logging.Level", "Debug")
 	config.InitConfig()
 
-	viper.Set("Origin.ExportVolume", t.TempDir()+":/test")
-	viper.Set("Origin.Mode", "posix")
+	viper.Set("Origin.StoragePrefix", t.TempDir())
+	viper.Set("Origin.FederationPrefix", "/test")
+	viper.Set("Origin.StorageType", "posix")
 	// Disable functionality we're not using (and is difficult to make work on Mac)
 	viper.Set("Origin.EnableCmsd", false)
 	viper.Set("Origin.EnableMacaroons", false)

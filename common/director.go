@@ -39,11 +39,11 @@ type (
 	}
 
 	Capabilities struct {
-		PublicRead   bool
-		Read         bool
-		Write        bool
-		Listing      bool
-		FallBackRead bool
+		PublicReads bool `json:"PublicRead"`
+		Reads       bool `json:"Read"`
+		Writes      bool `json:"Write"`
+		Listings    bool `json:"Listing"`
+		DirectReads bool `json:"FallBackRead"`
 	}
 
 	NamespaceAdV2 struct {
@@ -66,16 +66,16 @@ type (
 	}
 
 	ServerAd struct {
-		Name               string
-		AuthURL            url.URL
-		BrokerURL          url.URL // The URL of the broker service to use for this host.
-		URL                url.URL // This is server's XRootD URL for file transfer
-		WebURL             url.URL // This is server's Web interface and API
-		Type               ServerType
-		Latitude           float64
-		Longitude          float64
-		EnableWrite        bool
-		EnableFallbackRead bool // True if reads from the origin are permitted when no cache is available
+		Name        string
+		AuthURL     url.URL
+		BrokerURL   url.URL // The URL of the broker service to use for this host.
+		URL         url.URL // This is server's XRootD URL for file transfer
+		WebURL      url.URL // This is server's Web interface and API
+		Type        ServerType
+		Latitude    float64
+		Longitude   float64
+		Writes      bool
+		DirectReads bool // True if reads from the origin are permitted when no cache is available
 	}
 
 	ServerType   string
@@ -92,12 +92,12 @@ type (
 	}
 
 	OriginAdvertiseV1 struct {
-		Name               string          `json:"name"`
-		URL                string          `json:"url" binding:"required"` // This is the url for origin's XRootD service and file transfer
-		WebURL             string          `json:"web_url,omitempty"`      // This is the url for origin's web engine and APIs
-		Namespaces         []NamespaceAdV1 `json:"namespaces"`
-		EnableWrite        bool            `json:"enablewrite"`
-		EnableFallbackRead bool            `json:"enable-fallback-read"` // True if the origin will allow direct client reads when no caches are available
+		Name        string          `json:"name"`
+		URL         string          `json:"url" binding:"required"` // This is the url for origin's XRootD service and file transfer
+		WebURL      string          `json:"web_url,omitempty"`      // This is the url for origin's web engine and APIs
+		Namespaces  []NamespaceAdV1 `json:"namespaces"`
+		Writes      bool            `json:"enablewrite"`
+		DirectReads bool            `json:"enable-fallback-read"` // True if the origin will allow direct client reads when no caches are available
 	}
 
 	DirectorTestResult struct {
@@ -122,25 +122,25 @@ const (
 
 func (ad ServerAd) MarshalJSON() ([]byte, error) {
 	baseAd := struct {
-		Name               string     `json:"name"`
-		AuthURL            string     `json:"auth_url"`
-		URL                string     `json:"url"`
-		WebURL             string     `json:"web_url"`
-		Type               ServerType `json:"type"`
-		Latitude           float64    `json:"latitude"`
-		Longitude          float64    `json:"longitude"`
-		EnableWrite        bool       `json:"enable_write"`
-		EnableFallbackRead bool       `json:"enable_fallback_read"`
+		Name        string     `json:"name"`
+		AuthURL     string     `json:"auth_url"`
+		URL         string     `json:"url"`
+		WebURL      string     `json:"web_url"`
+		Type        ServerType `json:"type"`
+		Latitude    float64    `json:"latitude"`
+		Longitude   float64    `json:"longitude"`
+		Writes      bool       `json:"enable_write"`
+		DirectReads bool       `json:"enable_fallback_read"`
 	}{
-		Name:               ad.Name,
-		AuthURL:            ad.AuthURL.String(),
-		URL:                ad.URL.String(),
-		WebURL:             ad.WebURL.String(),
-		Type:               ad.Type,
-		Latitude:           ad.Latitude,
-		Longitude:          ad.Longitude,
-		EnableWrite:        ad.EnableWrite,
-		EnableFallbackRead: ad.EnableFallbackRead,
+		Name:        ad.Name,
+		AuthURL:     ad.AuthURL.String(),
+		URL:         ad.URL.String(),
+		WebURL:      ad.WebURL.String(),
+		Type:        ad.Type,
+		Latitude:    ad.Latitude,
+		Longitude:   ad.Longitude,
+		Writes:      ad.Writes,
+		DirectReads: ad.DirectReads,
 	}
 	return json.Marshal(baseAd)
 }

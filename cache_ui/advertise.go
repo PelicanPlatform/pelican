@@ -40,7 +40,7 @@ type (
 	}
 )
 
-func (server *CacheServer) CreateAdvertisement(name string, originUrl string, originWebUrl string) (common.OriginAdvertiseV2, error) {
+func (server *CacheServer) CreateAdvertisement(name string, originUrl string, originWebUrl string) (*common.OriginAdvertiseV2, error) {
 	ad := common.OriginAdvertiseV2{
 		Name:       name,
 		DataURL:    originUrl,
@@ -48,7 +48,7 @@ func (server *CacheServer) CreateAdvertisement(name string, originUrl string, or
 		Namespaces: server.GetNamespaceAds(),
 	}
 
-	return ad, nil
+	return &ad, nil
 }
 
 func (server *CacheServer) SetFilters() {

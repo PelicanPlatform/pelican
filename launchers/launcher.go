@@ -23,8 +23,10 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 
 	"github.com/pkg/errors"
@@ -33,6 +35,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/broker"
+	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/local_cache"
 	"github.com/pelicanplatform/pelican/origin_ui"
@@ -135,27 +138,37 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 	servers := make([]server_utils.XRootDServer, 0)
 
 	if modules.IsEnabled(config.OriginType) {
-		mode := param.Origin_Mode.GetString()
+
+		mode := param.Origin_StorageType.GetString()
+		originExports, err := common.GetOriginExports()
+		if err != nil {
+			return shutdownCancel, err
+		}
+
 		switch mode {
 		case "posix":
-			if param.Origin_ExportVolume.GetString() == "" && (param.Xrootd_Mount.GetString() == "" || param.Origin_NamespacePrefix.GetString() == "") {
+			if len(*originExports) == 0 {
 				return shutdownCancel, errors.Errorf(`
 	Export information was not provided.
-	Add the command line flag:
+	To specify exports via the command line, use:
 
-		-v /mnt/foo:/bar
+				-v /mnt/foo:/bar -v /mnt/test:/baz
 
-	to export the directory /mnt/foo to the namespace prefix /bar in the data federation. Alternatively, specify Origin.ExportVolume in the parameters.yaml file:
+	to export the directories /mnt/foo and /mnt/test under the namespace prefixes /bar and /baz, respectively.
 
-		Origin:
-			ExportVolume: /mnt/foo:/bar
+	Alternatively, specify Origin.Exports in the parameters.yaml file:
 
-	Or, specify Xrootd.Mount and Origin.NamespacePrefix in the parameters.yaml file:
+	Origin:
+		Exports:
+		- StoragePrefix: /mnt/foo
+		  FederationPrefix: /bar
+		  Capabilities: ["PublicReads", "Writes", "Listings"]
+		- StoragePrefix: /mnt/test
+		  FederationPrefix: /baz
+		  Capabilities: ["Writes"]
 
-		Xrootd:
-			Mount: /mnt/foo
-		Origin:
-			NamespacePrefix: /bar`)
+	to export the directories /mnt/foo and /mnt/test under the namespace prefixes /bar and /baz, respectively (with listed permissions).
+	`)
 			}
 		case "s3":
 			if param.Origin_S3Region.GetString() == "" || param.Origin_S3ServiceName.GetString() == "" ||
@@ -174,8 +187,10 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		}
 		servers = append(servers, server)
 
-		// Ordering: `LaunchBrokerListener` depends on the "right" value of Origin.NamespacePrefix
+		// Ordering: `LaunchBrokerListener` depends on the "right" value of Origin.FederationPrefix
 		// which is possibly not set until `OriginServe` is called.
+		// NOTE: Until the Broker supports multi-export origins, we've made the assumption that there
+		// is only one namespace prefix available here and that it lives in Origin.FederationPrefix
 		if param.Origin_EnableBroker.GetBool() {
 			if err = origin_ui.LaunchBrokerListener(ctx, egrp); err != nil {
 				return shutdownCancel, err
@@ -224,10 +239,58 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		if err = server_ui.Advertise(ctx, servers); err != nil {
 			return shutdownCancel, err
 		}
-		desiredURL := param.Federation_DirectorUrl.GetString() + "/api/v1.0/director/origin" + param.Origin_NamespacePrefix.GetString()
-		if err = server_utils.WaitUntilWorking(ctx, "GET", desiredURL, "director", 307); err != nil {
-			log.Errorln("Origin does not seem to have advertised correctly:", err)
+
+		// We may have arbitrarily many exports, so we should make sure they're all advertised before
+		// starting the cache up. This guarantees that when the cache starts, it is immediately aware
+		// of the namespaces and doesn't have to wait an entire cycle to learn about them from the director
+
+		// To check all of the advertisements, we'll launch a WaitUntilWorking concurrently for each of them.
+		originExports, err := common.GetOriginExports()
+		if err != nil {
 			return shutdownCancel, err
+		}
+		errCh := make(chan error, len(*originExports))
+		var wg sync.WaitGroup
+		wg.Add(len(*originExports))
+		// NOTE: A previous version of this functionality (in the days of assuming only one export) used
+		// use param.Server_ExternalWebUrl as the endpoint to check. Justin thinks the assumption here
+		// was that it only made sense to serve an origin and a cache at the same time if a local director
+		// was being fired up, but that may be a pigeonhole. The new assumption here is that we're religious
+		// about setting Federation.DirectorUrl.
+		directorUrl, err := url.Parse(param.Federation_DirectorUrl.GetString())
+		if err != nil {
+			return shutdownCancel, errors.Wrap(err, "Failed to parse director URL when checking origin advertisements before cache launch")
+		}
+		for _, export := range *originExports {
+			go func(prefix string) {
+				defer wg.Done()
+				// Probably no need to incur another err check since we already checked the director URL.
+				urlToCheck, _ := url.Parse(directorUrl.String())
+				urlToCheck.Path, err = url.JoinPath("/api/v1.0/director/origin", prefix)
+				if err != nil {
+					errCh <- errors.Wrapf(err, "Failed to join path %s for origin advertisement check", prefix)
+					return
+				}
+				if err = server_utils.WaitUntilWorking(ctx, "GET", urlToCheck.String(), "director", 307); err != nil {
+					errCh <- errors.Wrapf(err, "The prefix %s does not seem to have advertised correctly", prefix)
+				}
+
+			}(export.FederationPrefix)
+
+		}
+		wg.Wait()
+
+		close(errCh)
+		errFound := false
+		for err := range errCh {
+			if err != nil {
+				log.Errorln("No result from waiting for prefix advertisement:", err)
+				errFound = true
+			}
+
+		}
+		if errFound {
+			return shutdownCancel, errors.New("Failed to advertise all origin exports before cache launch")
 		}
 	}
 

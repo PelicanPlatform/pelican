@@ -1,0 +1,16 @@
+# Origins can still be configured via the command line -v option
+# However, unlike when we only supported single-export origins, the -v option
+# now creates a list of exports. Using the -v option doesn't provide a mechanism
+# to configure each export's capabilities, so we assume each export inherits
+# whatever capabilities are set for the origin as a whole.
+
+Origin:
+  # Things that configure the origin, and thus the exports
+  StorageType: "posix"
+  EnableDirectReads: true
+  EnableListings: true
+  EnableReads: true
+  # Omit EnableListings so we can verify it defaults to false
+  ExportVolumes:
+    - "/test1:/first/namespace"
+    - "/test2:/second/namespace"

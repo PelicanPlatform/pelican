@@ -37,7 +37,7 @@ func parseServerAd(server utils.Server, serverType common.ServerType) common.Ser
 	serverAd.Type = serverType
 	serverAd.Name = server.Resource
 
-	serverAd.EnableWrite = param.Origin_EnableWrite.GetBool()
+	serverAd.Writes = param.Origin_EnableWrites.GetBool()
 	// url.Parse requires that the scheme be present before the hostname,
 	// but endpoints do not have a scheme. As such, we need to add one for the.
 	// correct parsing. Luckily, we don't use this anywhere else (it's just to
@@ -122,9 +122,9 @@ func AdvertiseOSDF() error {
 		}
 
 		caps := common.Capabilities{
-			PublicRead: !ns.UseTokenOnRead,
-			Read:       ns.ReadHTTPS,
-			Write:      write,
+			PublicReads: !ns.UseTokenOnRead,
+			Reads:       ns.ReadHTTPS,
+			Writes:      write,
 		}
 		nsAd := common.NamespaceAdV2{
 			Path:       ns.Path,

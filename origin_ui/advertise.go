@@ -21,11 +21,13 @@ package origin_ui
 import (
 	"net/url"
 
+	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
+
 	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
-	"github.com/pkg/errors"
 )
 
 type (
@@ -42,96 +44,117 @@ func (server *OriginServer) GetNamespaceAdsFromDirector() error {
 	return nil
 }
 
-func (server *OriginServer) CreateAdvertisement(name string, originUrlStr string, originWebUrl string) (ad common.OriginAdvertiseV2, err error) {
+func (server *OriginServer) CreateAdvertisement(name string, originUrlStr string, originWebUrl string) (*common.OriginAdvertiseV2, error) {
 	// Here we instantiate the namespaceAd slice, but we still need to define the namespace
 	issuerUrlStr, err := config.GetServerIssuerURL()
 	if err != nil {
 		err = errors.Wrap(err, "Unable to get server issuer URL for the origin")
-		return
+		return nil, err
 	}
 
 	if issuerUrlStr == "" {
 		err = errors.New("No IssuerUrl is set")
-		return
+		return nil, err
 	}
 
 	issuerUrl, err := url.Parse(issuerUrlStr)
 	if err != nil {
 		err = errors.Wrap(err, "Unable to parse issuer url")
-		return
+		return nil, err
 	}
-
-	prefix := param.Origin_NamespacePrefix.GetString()
 
 	originUrlURL, err := url.Parse(originUrlStr)
 	if err != nil {
 		err = errors.Wrap(err, "Invalid Origin Url")
-		return
+		return nil, err
 	}
-	// TODO: Need to figure out where to get some of these values
-	// 		 so that they aren't hardcoded...
 
-	nsAd := common.NamespaceAdV2{
-		PublicRead: param.Origin_EnablePublicReads.GetBool(),
-		Caps: common.Capabilities{
-			PublicRead: param.Origin_EnablePublicReads.GetBool(),
-			Read:       true,
-			Write:      param.Origin_EnableWrite.GetBool(),
-		},
-		Path: prefix,
-		Generation: []common.TokenGen{{
-			Strategy:         common.StrategyType("OAuth2"),
-			MaxScopeDepth:    3,
-			CredentialIssuer: *originUrlURL,
-		}},
-		Issuer: []common.TokenIssuer{{
-			BasePaths: []string{prefix},
-			IssuerUrl: *issuerUrl,
-		}},
+	var nsAds []common.NamespaceAdV2
+	var prefixes []string
+	originExports, err := common.GetOriginExports()
+	if err != nil {
+		return nil, err
 	}
-	ad = common.OriginAdvertiseV2{
+
+	for _, export := range *originExports {
+		// PublicReads implies reads
+		reads := export.Capabilities.PublicReads || export.Capabilities.Reads
+		nsAds = append(nsAds, common.NamespaceAdV2{
+			PublicRead: export.Capabilities.PublicReads,
+			Caps: common.Capabilities{
+				PublicReads: export.Capabilities.PublicReads,
+				Reads:       reads,
+				Writes:      export.Capabilities.Writes,
+			},
+			Path: export.FederationPrefix,
+			Generation: []common.TokenGen{{
+				Strategy:         common.StrategyType("OAuth2"),
+				MaxScopeDepth:    3,
+				CredentialIssuer: *originUrlURL,
+			}},
+			Issuer: []common.TokenIssuer{{
+				BasePaths: []string{export.FederationPrefix},
+				IssuerUrl: *issuerUrl,
+			}},
+		})
+		prefixes = append(prefixes, export.FederationPrefix)
+	}
+
+	// PublicReads implies reads
+	reads := param.Origin_EnableReads.GetBool() || param.Origin_EnablePublicReads.GetBool()
+	ad := common.OriginAdvertiseV2{
 		Name:       name,
 		DataURL:    originUrlStr,
 		WebURL:     originWebUrl,
-		Namespaces: []common.NamespaceAdV2{nsAd},
+		Namespaces: nsAds,
 		Caps: common.Capabilities{
-			PublicRead:   param.Origin_EnablePublicReads.GetBool(),
-			Read:         true,
-			Write:        param.Origin_EnableWrite.GetBool(),
-			FallBackRead: param.Origin_EnableFallbackRead.GetBool(),
+			PublicReads: param.Origin_EnablePublicReads.GetBool(),
+			Reads:       reads,
+			Writes:      param.Origin_EnableWrites.GetBool(),
+			DirectReads: param.Origin_EnableDirectReads.GetBool(),
 		},
 		Issuer: []common.TokenIssuer{{
-			BasePaths: []string{prefix},
+			BasePaths: prefixes,
 			IssuerUrl: *issuerUrl,
 		}},
 	}
-	if param.Origin_EnableBroker.GetBool() {
-		var brokerUrl *url.URL
-		brokerUrl, err = url.Parse(param.Federation_BrokerUrl.GetString())
-		if err != nil {
-			err = errors.Wrap(err, "Invalid Broker URL")
-			return
-		}
-		brokerUrl.Path = "/api/v1.0/broker/reverse"
-		values := brokerUrl.Query()
-		values.Set("origin", param.Server_Hostname.GetString())
-		values.Set("prefix", prefix)
-		brokerUrl.RawQuery = values.Encode()
-		ad.BrokerURL = brokerUrl.String()
-	}
 
-	return
+	if len(prefixes) == 1 {
+		if param.Origin_EnableBroker.GetBool() {
+			var brokerUrl *url.URL
+			brokerUrl, err = url.Parse(param.Federation_BrokerUrl.GetString())
+			if err != nil {
+				err = errors.Wrap(err, "Invalid Broker URL")
+				return nil, err
+			}
+			brokerUrl.Path = "/api/v1.0/broker/reverse"
+			values := brokerUrl.Query()
+			values.Set("origin", param.Server_Hostname.GetString())
+			values.Set("prefix", prefixes[0])
+			brokerUrl.RawQuery = values.Encode()
+			ad.BrokerURL = brokerUrl.String()
+		}
+	} else {
+		log.Warningf("Multiple prefixes are not yet supported with the broker. Skipping broker configuration")
+	}
+	return &ad, nil
 }
 
 // Return a list of paths where the origin's issuer is authoritative.
 //
 // Used to calculate the base_paths in the scitokens.cfg, for eaxmple
-func (server *OriginServer) GetAuthorizedPrefixes() []string {
-	// For now, just a single path.  In the future, we will allow
-	// multiple.
-	if param.Origin_EnablePublicReads.GetBool() {
-		return []string{}
+func (server *OriginServer) GetAuthorizedPrefixes() ([]string, error) {
+	var prefixes []string
+	originExports, err := common.GetOriginExports()
+	if err != nil {
+		return nil, err
 	}
 
-	return []string{param.Origin_NamespacePrefix.GetString()}
+	for _, export := range *originExports {
+		if (export.Capabilities.Reads && !export.Capabilities.PublicReads) || export.Capabilities.Writes {
+			prefixes = append(prefixes, export.FederationPrefix)
+		}
+	}
+
+	return prefixes, nil
 }
