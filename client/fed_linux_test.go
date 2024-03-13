@@ -135,7 +135,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 			tempPath := tempDir
 			dirName := filepath.Base(tempPath)
 			uploadURL := fmt.Sprintf("pelican://%s:%s%s/%s/%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
-				export.FederationPrefix, "osdf_osdf", dirName)		
+				export.FederationPrefix, "osdf_osdf", dirName)
 
 			// Upload the file with PUT
 			transferDetailsUpload, err := client.DoPut(fed.Ctx, tempDir, uploadURL, true, client.WithTokenLocation(tempToken.Name()))
@@ -274,7 +274,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 				countBytesDownloadIdx0 := 0
 				countBytesDownloadIdx1 := 0
 				countBytesDownloadIdx2 := 0
-	
+
 				// Verify we got the correct files back (have to do this since files upload in different orders at times)
 				// In this case, we want to match them to the sizes of the uploaded files
 				for _, transfer := range transferDetailsDownload {
