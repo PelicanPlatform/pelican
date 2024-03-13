@@ -194,6 +194,13 @@ COPY --from=xrootd-plugin-builder /usr/lib64/libnlohmann_json_schema_validator.a
 # Eventually add more entrypoint commands here
 COPY images/entrypoint.sh /entrypoint.sh
 
+# Copy here to reduce dependency on the pelican-build stage in the final-stage and x-base stage
+COPY --from=pelican-build /pelican/dist/pelican_linux_amd64_v1/pelican /pelican/pelican
+COPY --from=pelican-build /pelican/dist/pelican_linux_amd64_v1/pelican /pelican/osdf
+RUN chmod +x /pelican/pelican \
+    && chmod +x /pelican/osdf \
+    && chmod +x /entrypoint.sh
+
 ######################
 # Pelican base stage #
 ######################
@@ -201,10 +208,7 @@ FROM final-stage AS pelican-base
 
 WORKDIR /pelican
 
-# Copy over needed files
-COPY --from=pelican-build /pelican/dist/pelican_linux_amd64_v1/pelican /pelican/pelican
-RUN chmod +x /pelican/pelican \
-    && chmod +x /entrypoint.sh
+RUN rm -rf /pelican/osdf
 
 ######################
 # OSDF base stage #
@@ -213,10 +217,7 @@ FROM final-stage AS osdf-base
 
 WORKDIR /pelican
 
-# Copy over needed files
-COPY --from=pelican-build /pelican/dist/pelican_linux_amd64_v1/pelican /pelican/osdf
-RUN chmod +x /pelican/osdf \
-    && chmod +x /entrypoint.sh
+RUN rm -rf /pelican/pelican
 
 ####################
 # pelican/cache    #
