@@ -1,0 +1,11 @@
+# Origin export configuration to test single export from config block
+
+Origin:
+  # Things that configure the origin itself
+  StorageType: "posix"
+
+  # The actual namespaces we export
+  Exports:
+    - StoragePrefix: /test1
+      FederationPrefix: /first/namespace
+      Capabilities: ["PublicReads", "DirectReads"]

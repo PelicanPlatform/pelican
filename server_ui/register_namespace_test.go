@@ -95,10 +95,10 @@ func TestRegistration(t *testing.T) {
 	defer svr.Close()
 
 	viper.Set("Federation.RegistryUrl", svr.URL)
-	viper.Set("Origin.NamespacePrefix", "/test123")
+	viper.Set("Origin.FederationPrefix", "/test123")
 
 	// Test registration succeeds
-	prefix := param.Origin_NamespacePrefix.GetString()
+	prefix := param.Origin_FederationPrefix.GetString()
 	key, registerURL, isRegistered, err := registerNamespacePrep(prefix)
 	require.NoError(t, err)
 	assert.False(t, isRegistered)
@@ -156,7 +156,7 @@ func TestRegistration(t *testing.T) {
 	assert.Equal(t, keyStatus, noKeyPresent)
 
 	// Redo the namespace prep, ensure that isPresent is true
-	prefix = param.Origin_NamespacePrefix.GetString()
+	prefix = param.Origin_FederationPrefix.GetString()
 	_, registerURL, isRegistered, err = registerNamespacePrep(prefix)
 	assert.Equal(t, svr.URL+"/api/v1.0/registry", registerURL)
 	assert.NoError(t, err)

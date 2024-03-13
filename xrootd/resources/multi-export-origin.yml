@@ -1,0 +1,14 @@
+# Origin export configuration to test full multi-export capabilities
+
+Origin:
+  # Things that configure the origin itself
+  StorageType: "posix"
+
+  # The actual namespaces we export
+  Exports:
+    - StoragePrefix: /<WILL BE REPLACED IN TEST>
+      FederationPrefix: /first/namespace
+      Capabilities: ["PublicReads", "Writes", "Listings", "DirectReads"]
+    - StoragePrefix: /<WILL BE REPLACED IN TEST>
+      FederationPrefix: /second/namespace
+      Capabilities: ["Reads", "Writes"]

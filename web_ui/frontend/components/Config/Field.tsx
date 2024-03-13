@@ -1,6 +1,6 @@
 import {
     AuthorizationTemplate, CustomRegistrationField,
-    Duration,
+    Duration, Export,
     GeoIPOverride,
     Institution, IPMapping,
     OIDCAuthenticationRequirement,
@@ -9,18 +9,14 @@ import {
 } from "@/components/Config/index.d";
 import {BooleanField, DurationField, IntegerField, StringField, StringSliceField} from "../Config";
 import React from "react";
-import {IntegerFieldProps} from "./IntegerField";
-import {StringFieldProps} from "./StringField";
-import {DurationFieldProps} from "./DurationField";
-import {BooleanFieldProps} from "./BooleanField";
-import {StringSliceFieldProps} from "./StringSliceField";
-import {CustomRegistrationFieldForm, ObjectField} from "./ObjectField";
-import {ObjectFieldProps} from "@/components/Config/ObjectField/ObjectField";
 import {
+    CustomRegistrationFieldForm,
+    ExportForm,
+    ObjectField,
     GeoIPOverrideForm,
     InstitutionForm,
     OIDCAuthenticationRequirementForm
-} from "@/components/Config/ObjectField";
+} from "./ObjectField";
 import {buildPatch} from "@/components/Config/util";
 import IPMappingForm from "@/components/Config/ObjectField/IPMappingForm";
 import AuthorizationTemplateForm from "@/components/Config/ObjectField/AuthorizationTemplateForm";
@@ -61,6 +57,8 @@ const Field = ({ onChange, ...props}: ParameterInputProps) => {
                     return <ObjectField onChange={handleChange<IPMapping[]>}  name={props.name} value={props.Value as IPMapping[]} Form={IPMappingForm} keyGetter={v => "all" in v ? v.all : v.source}/>
                 case "CustomRegistrationFields":
                     return <ObjectField onChange={handleChange<CustomRegistrationField[]>}  name={props.name} value={props.Value as CustomRegistrationField[]} Form={CustomRegistrationFieldForm} keyGetter={v => v.name}/>
+                case "Exports":
+                    return <ObjectField onChange={handleChange<Export[]>} name={props.name}  value={props.Value as Export[]} Form={ExportForm} keyGetter={v => v.federationprefix}/>
                 default:
                     console.log("Unknown type: " + props.type)
             }
