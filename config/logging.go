@@ -83,7 +83,7 @@ func (fh *RegexpFilterHook) Levels() []log.Level {
 }
 
 func (rt *regexpTransformHook) Levels() []log.Level {
-	return log.AllLevels
+	return rt.hook.LogLevels
 }
 
 // Process a single log entry coming from logrus; iterate through the
