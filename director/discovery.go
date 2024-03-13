@@ -111,7 +111,7 @@ func jwksHandler(ctx *gin.Context) {
 	}
 }
 
-func RegisterDirectorAuth(router *gin.RouterGroup) {
+func RegisterDirectorOpenIDAPI(router *gin.RouterGroup) {
 	router.GET(federationDiscoveryPath, federationDiscoveryHandler)
 	router.GET(openIdDiscoveryPath, openIdDiscoveryHandler)
 	router.GET(directorJWKSPath, jwksHandler)

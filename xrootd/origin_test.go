@@ -87,7 +87,7 @@ func originMockup(ctx context.Context, egrp *errgroup.Group, t *testing.T) conte
 	engine, err := web_ui.GetEngine()
 	require.NoError(t, err)
 
-	err = origin.ConfigIssJWKS(engine.Group("/.well-known"))
+	err = origin.RegisterOriginOpenIDAPI(engine.Group("/.well-known"))
 	require.NoError(t, err)
 
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())

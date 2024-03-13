@@ -815,7 +815,7 @@ func getHealthTestFile(ctx *gin.Context) {
 	}
 }
 
-func RegisterDirector(ctx context.Context, router *gin.RouterGroup) {
+func RegisterDirectorAPI(ctx context.Context, router *gin.RouterGroup) {
 	directorAPIV1 := router.Group("/api/v1.0/director")
 	{
 		// Establish the routes used for cache/origin redirection

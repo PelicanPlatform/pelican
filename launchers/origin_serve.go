@@ -52,13 +52,13 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 	}
 
 	// Set up the APIs unrelated to UI, which only contains director-based health test reporting endpoint for now
-	if err = origin.ConfigureOriginAPI(engine, ctx, egrp); err != nil {
+	if err = origin.RegisterOriginAPI(engine, ctx, egrp); err != nil {
 		return nil, err
 	}
 
 	// Director also registers this metadata URL; avoid registering twice.
 	if !modules.IsEnabled(config.DirectorType) {
-		if err = origin.ConfigIssJWKS(engine.Group("/.well-known")); err != nil {
+		if err = origin.RegisterOriginOpenIDAPI(engine.Group("/.well-known")); err != nil {
 			return nil, err
 		}
 	}
