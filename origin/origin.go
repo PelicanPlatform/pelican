@@ -68,12 +68,12 @@ func ConfigIssJWKS(router *gin.RouterGroup) error {
 		return errors.New("Origin configuration passed a nil pointer")
 	}
 
-	router.GET("/openid-configuration", ExportOpenIDConfig)
-	router.GET("/issuer.jwks", ExportIssuerJWKS)
+	router.GET("/openid-configuration", exportOpenIDConfig)
+	router.GET("/issuer.jwks", exportIssuerJWKS)
 	return nil
 }
 
-func ExportOpenIDConfig(c *gin.Context) {
+func exportOpenIDConfig(c *gin.Context) {
 	issuerURL, _ := url.Parse(param.Server_ExternalWebUrl.GetString())
 	jwksUri, _ := url.JoinPath(issuerURL.String(), "/.well-known/issuer.jwks")
 	jsonData := gin.H{
@@ -84,7 +84,7 @@ func ExportOpenIDConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, jsonData)
 }
 
-func ExportIssuerJWKS(c *gin.Context) {
+func exportIssuerJWKS(c *gin.Context) {
 	keys, _ := config.GetIssuerPublicJWKS()
 	buf, _ := json.MarshalIndent(keys, "", " ")
 
