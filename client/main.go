@@ -461,7 +461,6 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 
 	remoteDestScheme, _ = getTokenName(remoteDestUrl)
 
-
 	// Check if we understand the found url scheme
 	err = schemeUnderstood(remoteDestScheme)
 	if err != nil {
