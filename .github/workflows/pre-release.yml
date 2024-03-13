@@ -73,5 +73,3 @@ jobs:
     needs: [pre-release]
     uses: PelicanPlatform/pelican/.github/workflows/release.yml@main
     secrets: inherit
-    with:
-      tag: ${{ needs.pre-release.outputs.tag }}
