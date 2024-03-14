@@ -191,7 +191,6 @@ COPY --from=xrootd-plugin-builder /usr/include/nlohmann /usr/include/nlohmann
 # Copy the JSON schema validator library
 COPY --from=xrootd-plugin-builder /usr/lib64/libnlohmann_json_schema_validator.a /usr/lib64/
 
-# Eventually add more entrypoint commands here
 COPY images/entrypoint.sh /entrypoint.sh
 
 # Copy here to reduce dependency on the pelican-build stage in the final-stage and x-base stage
@@ -226,7 +225,9 @@ RUN rm -rf /pelican/pelican
 FROM pelican-base AS cache
 
 WORKDIR /pelican
-ENTRYPOINT ["/entrypoint.sh", "pelican", "cache", "serve"]
+
+ENTRYPOINT [ "/entrypoint.sh", "pelican", "cache"]
+CMD ["serve"]
 
 ####################
 # pelican/origin    #
@@ -235,7 +236,9 @@ ENTRYPOINT ["/entrypoint.sh", "pelican", "cache", "serve"]
 FROM pelican-base AS origin
 
 WORKDIR /pelican
-ENTRYPOINT ["/entrypoint.sh", "pelican", "origin", "serve"]
+
+ENTRYPOINT [ "/entrypoint.sh" ,"pelican", "origin"]
+CMD ["serve"]
 
 ####################
 # pelican/director #
@@ -244,7 +247,9 @@ ENTRYPOINT ["/entrypoint.sh", "pelican", "origin", "serve"]
 FROM pelican-base AS director
 
 WORKDIR /pelican
-ENTRYPOINT ["/entrypoint.sh", "pelican", "director", "serve"]
+
+ENTRYPOINT [ "/entrypoint.sh" ,"pelican", "director"]
+CMD ["serve"]
 
 ####################
 # pelican/registry #
@@ -253,7 +258,9 @@ ENTRYPOINT ["/entrypoint.sh", "pelican", "director", "serve"]
 FROM pelican-base AS registry
 
 WORKDIR /pelican
-ENTRYPOINT ["/entrypoint.sh", "pelican", "registry", "serve"]
+
+ENTRYPOINT [ "/entrypoint.sh" ,"pelican", "registry"]
+CMD ["serve"]
 
 ####################################
 # OSDF                             #
@@ -266,7 +273,9 @@ ENTRYPOINT ["/entrypoint.sh", "pelican", "registry", "serve"]
 FROM osdf-base AS osdf-cache
 
 WORKDIR /pelican
-ENTRYPOINT ["/entrypoint.sh", "osdf", "cache", "serve"]
+
+ENTRYPOINT [ "/entrypoint.sh" ,"osdf", "cache"]
+CMD ["serve"]
 
 ####################
 # osdf/origin    #
@@ -275,7 +284,9 @@ ENTRYPOINT ["/entrypoint.sh", "osdf", "cache", "serve"]
 FROM osdf-base AS osdf-origin
 
 WORKDIR /pelican
-ENTRYPOINT ["/entrypoint.sh", "osdf", "origin", "serve"]
+
+ENTRYPOINT [ "/entrypoint.sh" ,"osdf", "origin"]
+CMD ["serve"]
 
 ####################
 # osdf/director    #
@@ -284,7 +295,9 @@ ENTRYPOINT ["/entrypoint.sh", "osdf", "origin", "serve"]
 FROM osdf-base AS osdf-director
 
 WORKDIR /pelican
-ENTRYPOINT ["/entrypoint.sh", "osdf", "director", "serve"]
+
+ENTRYPOINT [ "/entrypoint.sh" ,"osdf", "director"]
+CMD ["serve"]
 
 
 ####################
@@ -294,4 +307,6 @@ ENTRYPOINT ["/entrypoint.sh", "osdf", "director", "serve"]
 FROM osdf-base AS osdf-registry
 
 WORKDIR /pelican
-ENTRYPOINT ["/entrypoint.sh", "osdf", "registry", "serve"]
+
+ENTRYPOINT [ "/entrypoint.sh" ,"osdf", "registry"]
+CMD ["serve"]
