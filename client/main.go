@@ -41,7 +41,6 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/namespaces"
 	"github.com/pelicanplatform/pelican/param"
-	"github.com/spf13/viper"
 )
 
 // Number of caches to attempt to use in any invocation
@@ -178,33 +177,19 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 		return 0, err
 	}
 
-	understoodSchemes := []string{"osdf", "pelican", "stash", ""}
-
-	_, foundSource := find(understoodSchemes, destUri.Scheme)
-	if !foundSource {
-		log.Errorln("Unknown schema provided:", destUri.Scheme)
-		return 0, errors.New("Unsupported scheme requested")
+	// Check if we understand the found url scheme
+	err = schemeUnderstood(destUri.Scheme)
+	if err != nil {
+		return 0, err
 	}
 
 	origScheme := destUri.Scheme
-	if config.GetPreferredPrefix() != "PELICAN" && origScheme == "" {
-		destUri.Scheme = "osdf"
-	}
-	if (destUri.Scheme == "osdf" || destUri.Scheme == "stash") && destUri.Host != "" {
-		destUri.Path = path.Clean("/" + destUri.Host + "/" + destUri.Path)
-		destUri.Host = ""
-	} else if destUri.Scheme == "pelican" {
-		federationUrl, _ := url.Parse(destUri.String())
-		federationUrl.Scheme = "https"
-		federationUrl.Path = ""
-		viper.Set("Federation.DiscoveryUrl", federationUrl.String())
-		err = config.DiscoverFederation()
-		if err != nil {
-			return 0, err
-		}
+	pelicanURL, err := NewPelicanURL(destUri, origScheme)
+	if err != nil {
+		return 0, errors.Wrap(err, "Failed to generate pelicanURL object")
 	}
 
-	ns, err := getNamespaceInfo(destUri.Path, param.Federation_DirectorUrl.GetString(), false)
+	ns, err := getNamespaceInfo(destUri.Path, pelicanURL.DirectorUrl, false)
 	if err != nil {
 		return 0, err
 	}

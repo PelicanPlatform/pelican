@@ -31,6 +31,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -152,11 +153,8 @@ func TestClient(t *testing.T) {
 	}
 
 	t.Run("correct-auth", func(t *testing.T) {
-		discoveryHost := param.Federation_DiscoveryUrl.GetString()
-		discoveryUrl, err := url.Parse(discoveryHost)
-		require.NoError(t, err)
-		tr, err := client.DoGet(ft.Ctx, "pelican://"+discoveryUrl.Host+"/test/hello_world.txt", filepath.Join(tmpDir, "hello_world.txt"), false,
-			client.WithToken(ft.Token), client.WithCaches(cacheUrl), client.WithAcquireToken(false))
+		tr, err := client.DoGet(ft.Ctx, "pelican://"+param.Server_Hostname.GetString()+":"+strconv.Itoa(param.Server_WebPort.GetInt())+"/test/hello_world.txt",
+			filepath.Join(tmpDir, "hello_world.txt"), false, client.WithToken(ft.Token), client.WithCaches(cacheUrl), client.WithAcquireToken(false))
 		assert.NoError(t, err)
 		require.Equal(t, 1, len(tr))
 		assert.Equal(t, int64(13), tr[0].TransferredBytes)
@@ -167,8 +165,8 @@ func TestClient(t *testing.T) {
 		assert.Equal(t, "Hello, World!", string(byteBuff))
 	})
 	t.Run("incorrect-auth", func(t *testing.T) {
-		_, err := client.DoGet(ft.Ctx, "pelican:///test/hello_world.txt", filepath.Join(tmpDir, "hello_world.txt"), false,
-			client.WithToken("badtoken"), client.WithCaches(cacheUrl), client.WithAcquireToken(false))
+		_, err := client.DoGet(ft.Ctx, "pelican://"+param.Server_Hostname.GetString()+":"+strconv.Itoa(param.Server_WebPort.GetInt())+"/test/hello_world.txt",
+			filepath.Join(tmpDir, "hello_world.txt"), false, client.WithToken("badtoken"), client.WithCaches(cacheUrl), client.WithAcquireToken(false))
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, &client.ConnectionSetupError{})
 		var cse *client.ConnectionSetupError
@@ -190,8 +188,8 @@ func TestClient(t *testing.T) {
 		token, err := tokConf.CreateToken()
 		require.NoError(t, err)
 
-		_, err = client.DoGet(ft.Ctx, "pelican:///test/hello_world.txt.1", filepath.Join(tmpDir, "hello_world.txt.1"), false,
-			client.WithToken(token), client.WithCaches(cacheUrl), client.WithAcquireToken(false))
+		_, err = client.DoGet(ft.Ctx, "pelican://"+param.Server_Hostname.GetString()+":"+strconv.Itoa(param.Server_WebPort.GetInt())+"/test/hello_world.txt.1",
+			filepath.Join(tmpDir, "hello_world.txt.1"), false, client.WithToken(token), client.WithCaches(cacheUrl), client.WithAcquireToken(false))
 		assert.Error(t, err)
 		assert.Equal(t, "failed to download file: transfer error: failed connection setup: server returned 404 Not Found", err.Error())
 	})
@@ -267,11 +265,9 @@ func TestLargeFile(t *testing.T) {
 	require.NoError(t, err)
 	size := writeBigBuffer(t, fp, 100)
 
-	discoveryHost := param.Federation_DiscoveryUrl.GetString()
-	discoveryUrl, err := url.Parse(discoveryHost)
 	require.NoError(t, err)
-	tr, err := client.DoGet(ft.Ctx, "pelican://"+discoveryUrl.Host+"/test/hello_world.txt", filepath.Join(tmpDir, "hello_world.txt"), false,
-		client.WithCaches(cacheUrl))
+	tr, err := client.DoGet(ft.Ctx, "pelican://"+param.Server_Hostname.GetString()+":"+strconv.Itoa(param.Server_WebPort.GetInt())+"/test/hello_world.txt",
+		filepath.Join(tmpDir, "hello_world.txt"), false, client.WithCaches(cacheUrl))
 	assert.NoError(t, err)
 	require.Equal(t, 1, len(tr))
 	assert.Equal(t, int64(size), tr[0].TransferredBytes)
@@ -303,8 +299,8 @@ func TestPurge(t *testing.T) {
 	require.NotEqual(t, 0, size)
 
 	for idx := 0; idx < 5; idx++ {
-		tr, err := client.DoGet(ft.Ctx, fmt.Sprintf("pelican:///test/hello_world.txt.%d", idx), filepath.Join(tmpDir, fmt.Sprintf("hello_world.txt.%d", idx)), false,
-			client.WithCaches(cacheUrl))
+		tr, err := client.DoGet(ft.Ctx, fmt.Sprintf("pelican://"+param.Server_Hostname.GetString()+":"+strconv.Itoa(param.Server_WebPort.GetInt())+"/test/hello_world.txt.%d", idx),
+			filepath.Join(tmpDir, fmt.Sprintf("hello_world.txt.%d", idx)), false, client.WithCaches(cacheUrl))
 		assert.NoError(t, err)
 		require.Equal(t, 1, len(tr))
 		assert.Equal(t, int64(size), tr[0].TransferredBytes)
@@ -369,8 +365,8 @@ func TestForcePurge(t *testing.T) {
 	require.NotEqual(t, 0, size)
 
 	for idx := 0; idx < 4; idx++ {
-		tr, err := client.DoGet(ft.Ctx, fmt.Sprintf("pelican:///test/hello_world.txt.%d", idx), filepath.Join(tmpDir, fmt.Sprintf("hello_world.txt.%d", idx)), false,
-			client.WithCaches(cacheUrl))
+		tr, err := client.DoGet(ft.Ctx, fmt.Sprintf("pelican://"+param.Server_Hostname.GetString()+":"+strconv.Itoa(param.Server_WebPort.GetInt())+"/test/hello_world.txt.%d", idx),
+			filepath.Join(tmpDir, fmt.Sprintf("hello_world.txt.%d", idx)), false, client.WithCaches(cacheUrl))
 		assert.NoError(t, err)
 		require.Equal(t, 1, len(tr))
 		assert.Equal(t, int64(size), tr[0].TransferredBytes)

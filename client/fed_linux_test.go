@@ -94,6 +94,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 	tempFile2, err := os.CreateTemp(tempDir, "test1")
 	assert.NoError(t, err, "Error creating temp2 file")
 	innerTempFile, err := os.CreateTemp(innerTempDir, "testInner")
+	assert.NoError(t, err, "Error creating inner test file")
 	defer os.Remove(tempFile1.Name())
 	defer os.Remove(tempFile2.Name())
 	defer os.Remove(innerTempFile.Name())
