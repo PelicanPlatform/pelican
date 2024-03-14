@@ -205,16 +205,12 @@ RUN chmod +x /pelican/pelican \
 ######################
 FROM final-stage AS pelican-base
 
-WORKDIR /pelican
-
 RUN rm -rf /pelican/osdf
 
 ######################
 # OSDF base stage #
 ######################
 FROM final-stage AS osdf-base
-
-WORKDIR /pelican
 
 RUN rm -rf /pelican/pelican
 
@@ -224,21 +220,17 @@ RUN rm -rf /pelican/pelican
 
 FROM pelican-base AS cache
 
-WORKDIR /pelican
-
 ENTRYPOINT [ "/entrypoint.sh", "pelican", "cache"]
-CMD ["serve"]
+CMD [ "serve" ]
 
 ####################
-# pelican/origin    #
+# pelican/origin   #
 ####################
 
 FROM pelican-base AS origin
 
-WORKDIR /pelican
-
 ENTRYPOINT [ "/entrypoint.sh" ,"pelican", "origin"]
-CMD ["serve"]
+CMD [ "serve" ]
 
 ####################
 # pelican/director #
@@ -246,10 +238,8 @@ CMD ["serve"]
 
 FROM pelican-base AS director
 
-WORKDIR /pelican
-
 ENTRYPOINT [ "/entrypoint.sh" ,"pelican", "director"]
-CMD ["serve"]
+CMD [ "serve" ]
 
 ####################
 # pelican/registry #
@@ -257,36 +247,30 @@ CMD ["serve"]
 
 FROM pelican-base AS registry
 
-WORKDIR /pelican
-
 ENTRYPOINT [ "/entrypoint.sh" ,"pelican", "registry"]
-CMD ["serve"]
+CMD [ "serve" ]
 
 ####################################
 # OSDF                             #
 ####################################
 
 ####################
-# osdf/cache    #
+# osdf/cache       #
 ####################
 
 FROM osdf-base AS osdf-cache
 
-WORKDIR /pelican
-
 ENTRYPOINT [ "/entrypoint.sh" ,"osdf", "cache"]
-CMD ["serve"]
+CMD [ "serve" ]
 
 ####################
-# osdf/origin    #
+# osdf/origin      #
 ####################
 
 FROM osdf-base AS osdf-origin
 
-WORKDIR /pelican
-
 ENTRYPOINT [ "/entrypoint.sh" ,"osdf", "origin"]
-CMD ["serve"]
+CMD [ "serve" ]
 
 ####################
 # osdf/director    #
@@ -294,10 +278,8 @@ CMD ["serve"]
 
 FROM osdf-base AS osdf-director
 
-WORKDIR /pelican
-
 ENTRYPOINT [ "/entrypoint.sh" ,"osdf", "director"]
-CMD ["serve"]
+CMD [ "serve" ]
 
 
 ####################
@@ -306,7 +288,5 @@ CMD ["serve"]
 
 FROM osdf-base AS osdf-registry
 
-WORKDIR /pelican
-
 ENTRYPOINT [ "/entrypoint.sh" ,"osdf", "registry"]
-CMD ["serve"]
+CMD [ "serve" ]
