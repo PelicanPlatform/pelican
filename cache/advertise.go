@@ -26,7 +26,6 @@ import (
 
 	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/utils"
@@ -147,7 +146,7 @@ func (server *CacheServer) GetNamespaceAdsFromDirector() error {
 				if jsonErr := json.Unmarshal(respData, &respNSV1); jsonErr == nil { // Error creating json
 					return errors.Wrapf(err, "Failed to make request: %v", err)
 				}
-				respNS = director.ConvertNamespaceAdsV1ToV2(respNSV1, nil)
+				respNS = common.ConvertNamespaceAdsV1ToV2(respNSV1, nil)
 			}
 		} else {
 			return errors.Wrap(err, "Failed to make request")

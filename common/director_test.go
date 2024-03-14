@@ -16,13 +16,12 @@
  *
  ***************************************************************/
 
-package director
+package common
 
 import (
 	"net/url"
 	"testing"
 
-	"github.com/pelicanplatform/pelican/common"
 	"github.com/stretchr/testify/require"
 )
 
@@ -37,16 +36,16 @@ func TestConversion(t *testing.T) {
 	issUrl2, err := url.Parse("https://issuer2.org")
 	require.NoError(t, err, "error parsing test issuer url")
 
-	v2Ads := []common.NamespaceAdV2{{
+	v2Ads := []NamespaceAdV2{{
 		PublicRead: false,
-		Caps:       common.Capabilities{PublicReads: false, Reads: true, Writes: true, DirectReads: false, Listings: true},
+		Caps:       Capabilities{PublicReads: false, Reads: true, Writes: true, DirectReads: false, Listings: true},
 		Path:       "/foo/bar",
-		Generation: []common.TokenGen{{
+		Generation: []TokenGen{{
 			Strategy:         "OAuth2",
 			MaxScopeDepth:    3,
 			CredentialIssuer: *credUrl,
 		}},
-		Issuer: []common.TokenIssuer{
+		Issuer: []TokenIssuer{
 			{
 				BasePaths:       []string{"/foo/bar/baz", "/foo/bar/wazzit"},
 				IssuerUrl:       *issUrl1,
@@ -60,7 +59,7 @@ func TestConversion(t *testing.T) {
 	},
 		{
 			PublicRead: true,
-			Caps: common.Capabilities{
+			Caps: Capabilities{
 				PublicReads: true,
 				Reads:       true,
 				Writes:      true,
@@ -70,7 +69,7 @@ func TestConversion(t *testing.T) {
 		},
 	}
 
-	v1Ads := []common.NamespaceAdV1{
+	v1Ads := []NamespaceAdV1{
 		{
 			RequireToken:  true,
 			Path:          "/foo/bar",
@@ -101,11 +100,11 @@ func TestConversion(t *testing.T) {
 		},
 	}
 
-	v1Conv := convertNamespaceAdsV2ToV1(v2Ads)
+	v1Conv := ConvertNamespaceAdsV2ToV1(v2Ads)
 
 	require.Equal(t, v1Ads, v1Conv)
 
-	oAdV1 := common.OriginAdvertiseV1{
+	oAdV1 := OriginAdvertiseV1{
 		Name:        "OriginTest",
 		URL:         "https://origin-url.org",
 		WebURL:      "https://WebUrl.org",
@@ -114,19 +113,19 @@ func TestConversion(t *testing.T) {
 		DirectReads: false,
 	}
 
-	oAdV2 := common.OriginAdvertiseV2{
+	oAdV2 := OriginAdvertiseV2{
 		Name:       "OriginTest",
 		DataURL:    "https://origin-url.org",
 		WebURL:     "https://WebUrl.org",
 		Namespaces: v2Ads,
-		Caps: common.Capabilities{
+		Caps: Capabilities{
 			PublicReads: true,
 			Writes:      true,
 			DirectReads: false,
 			Listings:    true,
 			Reads:       true,
 		},
-		Issuer: []common.TokenIssuer{
+		Issuer: []TokenIssuer{
 			{
 				BasePaths:       []string{"/foo/bar/baz", "/foo/bar/wazzit"},
 				IssuerUrl:       *issUrl1,
@@ -140,7 +139,7 @@ func TestConversion(t *testing.T) {
 		},
 	}
 
-	OAdConv := convertOriginAd(oAdV1)
+	OAdConv := ConvertOriginAdV1ToV2(oAdV1)
 
 	require.Equal(t, oAdV2, OAdConv)
 

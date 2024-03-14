@@ -532,7 +532,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType common.S
 		}
 	} else {
 		// If the OriginAdvertisement is a V1 type, convert to a V2 type
-		adV2 = convertOriginAd(ad)
+		adV2 = common.ConvertOriginAdV1ToV2(ad)
 	}
 
 	if sType == common.OriginType {
@@ -744,7 +744,7 @@ func discoverOriginCache(ctx *gin.Context) {
 func listNamespacesV1(ctx *gin.Context) {
 	namespaceAdsV2 := listNamespacesFromOrigins()
 
-	namespaceAdsV1 := convertNamespaceAdsV2ToV1(namespaceAdsV2)
+	namespaceAdsV1 := common.ConvertNamespaceAdsV2ToV1(namespaceAdsV2)
 
 	ctx.JSON(http.StatusOK, namespaceAdsV1)
 }
