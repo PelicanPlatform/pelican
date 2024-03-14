@@ -1,6 +1,6 @@
 # Run Pelican Server using Docker image
 
-This document explains how to run a Pelican server using Pelican docker image. If you are installing Pelican to use its client functionalities (download or upload a file), refer to previous sections to download and install a Pelican binary instead.
+This document explains how to run a Pelican server using Pelican docker image. If you are installing Pelican to use its client functionalities (download or upload an object), refer to previous sections to download and install a Pelican binary instead.
 
 ## Before starting
 
@@ -21,7 +21,7 @@ This section shows you how to run various Pelican server images using the Docker
 To run the latest pelican origin server, run the following command:
 
 ```bash
-docker run -it -p 8444:8444 -p 8443:8443 -v /path/to/your/data/:/tmp/pelican --name=pelican-origin hub.opensciencegrid.org/pelican_platform/origin:latest serve -v /tmp/pelican:/foo/bar
+docker run -it -p 8444:8444 -p 8443:8443 -v /path/to/your/data/:/tmp/pelican --name=pelican-origin hub.opensciencegrid.org/pelican_platform/origin:latest -v /tmp/pelican:/foo/bar
 ```
 
 Where:
@@ -32,16 +32,14 @@ Where:
 * `-v <host-location>:<container-location>` (`--volume`) binds mount a volume from the host location(s) to the containter's location(s). This allow you to share files in your host machine to the container. In this case, we bind `/path/to/your/data/` on your host machine to `/tmp/pelican` in the container. You need to replace `/path/to/your/data/` to the directory where your data to publish is located.
 * `--name` assigns a logical name to the container (e.g. pelican-origin). This allows you to refer to the container by name instead of by ID.
 * `hub.opensciencegrid.org/pelican_platform/origin:latest` is the image to run
-* `serve` is the command to pass to pelican binary. You can also pass arguments to Pelican by appending the argument after `serve` command. Equivalent of running `pelican origin serve`
-* `-v /tmp/pelican:/foo/bar` is the Pelican argument to bind `/tmp/pelican` directory in the container as namespace `/foo/bar` in Pelican. You need to change `/foo/bar` to a meaningful path that can represent your data, e.g. `/chtc/public-data`.
-
+* `-v /tmp/pelican:/foo/bar` is the Pelican argument to bind `/tmp/pelican` directory in the container as namespace `/foo/bar` in Pelican. You need to change `/foo/bar` to a meaningful path that can represent your data, e.g. `/chtc/public-data`. You may pass additional arguments to Pelican server by appending them after this argument.
 
 ### Run Pelican cache server
 
 To run the latest pelican cache server, run the following command:
 
 ```bash
-docker run -it -p 8444:8444 -p 8442:8442 --name=pelican-cache hub.opensciencegrid.org/pelican_platform/cache:latest serve
+docker run -it -p 8444:8444 -p 8442:8442 --name=pelican-cache hub.opensciencegrid.org/pelican_platform/cache:latest
 ```
 
 > Note that Pelican docker image currently does not support binding a directory on your host machine as the directory for Pelican cache to store cache files, i.e. using `-v /host/machine:/run/pelican/cache/location`. We will have an update once we officialy support this flow.
@@ -51,7 +49,7 @@ docker run -it -p 8444:8444 -p 8442:8442 --name=pelican-cache hub.opensciencegri
 To run the latest pelican director server, run the following command:
 
 ```bash
-docker run -it -p 8444:8444 --name=pelican-director hub.opensciencegrid.org/pelican_platform/director:latest serve
+docker run -it -p 8444:8444 --name=pelican-director hub.opensciencegrid.org/pelican_platform/director:latest
 ```
 
 > Note that to successfully run a Pelican director server, additional configuration is required. Follow [Serve a Pelican Federation](../serving_a_federation.mdx) for instructions.
@@ -61,7 +59,7 @@ docker run -it -p 8444:8444 --name=pelican-director hub.opensciencegrid.org/peli
 To run the latest pelican registry server, run the following command:
 
 ```bash
-docker run -it -p 8444:8444 --name=pelican-registry hub.opensciencegrid.org/pelican_platform/registry:latest serve
+docker run -it -p 8444:8444 --name=pelican-registry hub.opensciencegrid.org/pelican_platform/registry:latest
 ```
 
 > Note that to successfully run a Pelican registry server, additional configuration is required. Follow [Serve a Pelican Federation](../serving_a_federation.mdx) for instructions.
