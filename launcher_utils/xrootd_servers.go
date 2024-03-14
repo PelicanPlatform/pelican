@@ -16,7 +16,7 @@
  *
  ***************************************************************/
 
-package server_ui
+package launcher_utils
 
 import (
 	"fmt"
@@ -26,7 +26,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/xrootd"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -44,7 +44,7 @@ func checkConfigFileReadable(fileName string, errMsg string) error {
 	return nil
 }
 
-func CheckDefaults(server server_utils.XRootDServer) error {
+func CheckDefaults(server server_structs.XRootDServer) error {
 	requiredConfigs := []param.StringParam{param.Server_TLSCertificate, param.Server_TLSKey, param.Xrootd_RobotsTxtFile}
 	for _, configName := range requiredConfigs {
 		mgr := configName.GetString()

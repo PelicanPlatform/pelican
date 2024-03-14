@@ -16,8 +16,7 @@
 *
 ***************************************************************/
 
-// Common pacakge contains shared structs and methods between different Pelican pacakges.
-package common
+package server_utils
 
 import (
 	"fmt"
@@ -31,6 +30,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 var originExports *[]OriginExports
@@ -39,7 +39,7 @@ type (
 	OriginExports struct {
 		StoragePrefix    string
 		FederationPrefix string
-		Capabilities     Capabilities
+		Capabilities     server_structs.Capabilities
 	}
 )
 
@@ -73,7 +73,7 @@ func StringListToCapsHookFunc() mapstructure.DecodeHookFuncType {
 		}
 
 		// Check that we're decoding to the appropriate struct type
-		if to != reflect.TypeOf(Capabilities{}) {
+		if to != reflect.TypeOf(server_structs.Capabilities{}) {
 			return data, nil
 		}
 
@@ -85,7 +85,7 @@ func StringListToCapsHookFunc() mapstructure.DecodeHookFuncType {
 		}
 
 		// Convert the string slice to ExportCapabilities struct
-		exportCaps := Capabilities{}
+		exportCaps := server_structs.Capabilities{}
 		for _, cap := range caps {
 			switch cap {
 			case "PublicReads":
@@ -155,7 +155,7 @@ func GetOriginExports() (*[]OriginExports, error) {
 				originExport := OriginExports{
 					FederationPrefix: federationPrefix,
 					StoragePrefix:    storagePrefix,
-					Capabilities: Capabilities{
+					Capabilities: server_structs.Capabilities{
 						PublicReads: param.Origin_EnablePublicReads.GetBool(),
 						Writes:      param.Origin_EnableWrites.GetBool(),
 						Listings:    param.Origin_EnableListings.GetBool(),
@@ -207,7 +207,7 @@ func GetOriginExports() (*[]OriginExports, error) {
 			originExport := OriginExports{
 				FederationPrefix: param.Origin_FederationPrefix.GetString(),
 				StoragePrefix:    param.Origin_StoragePrefix.GetString(),
-				Capabilities: Capabilities{
+				Capabilities: server_structs.Capabilities{
 					PublicReads: param.Origin_EnablePublicReads.GetBool(),
 					Writes:      param.Origin_EnableWrites.GetBool(),
 					Listings:    param.Origin_EnableListings.GetBool(),
@@ -230,7 +230,7 @@ func GetOriginExports() (*[]OriginExports, error) {
 		originExport := OriginExports{
 			FederationPrefix: federationPrefix,
 			StoragePrefix:    "",
-			Capabilities: Capabilities{
+			Capabilities: server_structs.Capabilities{
 				PublicReads: param.Origin_EnablePublicReads.GetBool(),
 				Writes:      param.Origin_EnableWrites.GetBool(),
 				Listings:    param.Origin_EnableListings.GetBool(),

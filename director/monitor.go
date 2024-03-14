@@ -32,17 +32,17 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
 // Report the health status of test file transfer to storage server
-func reportStatusToServer(ctx context.Context, serverWebUrl string, status string, message string, serverType common.ServerType) error {
+func reportStatusToServer(ctx context.Context, serverWebUrl string, status string, message string, serverType server_structs.ServerType) error {
 	directorUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
 	if err != nil {
 		return errors.Wrapf(err, "failed to parse external URL %v", param.Server_ExternalWebUrl.GetString())
@@ -69,13 +69,13 @@ func reportStatusToServer(ctx context.Context, serverWebUrl string, status strin
 		return errors.Errorf("Bad status for reporting director test")
 	}
 
-	if serverType == common.OriginType {
+	if serverType == server_structs.OriginType {
 		reportUrl.Path = "/api/v1.0/origin-api/directorTest"
-	} else if serverType == common.CacheType {
+	} else if serverType == server_structs.CacheType {
 		reportUrl.Path = "/api/v1.0/cache/directorTest"
 	}
 
-	dt := common.DirectorTestResult{
+	dt := server_structs.DirectorTestResult{
 		Status:    status,
 		Message:   message,
 		Timestamp: time.Now().Unix(),
@@ -114,10 +114,10 @@ func reportStatusToServer(ctx context.Context, serverWebUrl string, status strin
 	if resp.StatusCode > 404 { // For all servers, >404 is a failure
 		return errors.Errorf("Error response %v from reporting director test: %v", resp.StatusCode, string(body))
 	}
-	if serverType == common.OriginType && resp.StatusCode != 200 {
+	if serverType == server_structs.OriginType && resp.StatusCode != 200 {
 		return errors.Errorf("Error response %v from reporting director test: %v", resp.StatusCode, string(body))
 	}
-	if serverType == common.CacheType && resp.StatusCode == 404 {
+	if serverType == server_structs.CacheType && resp.StatusCode == 404 {
 		return errors.Errorf("Cache reports a 404 error. For cache version < v7.7.0, director-based test is not supported")
 	}
 
@@ -126,7 +126,7 @@ func reportStatusToServer(ctx context.Context, serverWebUrl string, status strin
 
 // Run a periodic test file transfer against an origin to ensure
 // it's talking to the director
-func LaunchPeriodicDirectorTest(ctx context.Context, serverAd common.ServerAd) {
+func LaunchPeriodicDirectorTest(ctx context.Context, serverAd server_structs.ServerAd) {
 	serverName := serverAd.Name
 	serverUrl := serverAd.URL.String()
 	serverWebUrl := serverAd.WebURL.String()
@@ -170,10 +170,10 @@ func LaunchPeriodicDirectorTest(ctx context.Context, serverAd common.ServerAd) {
 			log.Debug(fmt.Sprintf("Starting a director test cycle for %s server %s at %s", serverAd.Type, serverName, serverUrl))
 			ok := true
 			var err error
-			if serverAd.Type == common.OriginType {
+			if serverAd.Type == server_structs.OriginType {
 				fileTests := server_utils.TestFileTransferImpl{}
 				ok, err = fileTests.RunTests(ctx, serverUrl, serverUrl, "", server_utils.DirectorFileTest)
-			} else if serverAd.Type == common.CacheType {
+			} else if serverAd.Type == server_structs.CacheType {
 				err = runCacheTest(ctx, serverAd.URL)
 			}
 			if ok && err == nil {

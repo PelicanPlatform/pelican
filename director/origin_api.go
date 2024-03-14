@@ -36,9 +36,9 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
@@ -64,7 +64,7 @@ func checkNamespaceStatus(prefix string, registryWebUrlStr string) (bool, error)
 	}
 	reqUrl := registryUrl.JoinPath("/api/v1.0/registry/checkNamespaceStatus")
 
-	reqBody := common.CheckNamespaceStatusReq{Prefix: prefix}
+	reqBody := server_structs.CheckNamespaceStatusReq{Prefix: prefix}
 	reqByte, err := json.Marshal(reqBody)
 	if err != nil {
 		return false, err
@@ -91,7 +91,7 @@ func checkNamespaceStatus(prefix string, registryWebUrlStr string) (bool, error)
 		}
 	}
 
-	resBody := common.CheckNamespaceStatusRes{}
+	resBody := server_structs.CheckNamespaceStatusRes{}
 	bodyByte, err := io.ReadAll(res.Body)
 	if err != nil {
 		return false, err

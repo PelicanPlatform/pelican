@@ -40,7 +40,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/origin"
 	"github.com/pelicanplatform/pelican/param"
@@ -144,9 +143,9 @@ func TestOrigin(t *testing.T) {
 	defer cancel()
 
 	viper.Reset()
-	common.ResetOriginExports()
+	server_utils.ResetOriginExports()
 	defer viper.Reset()
-	defer common.ResetOriginExports()
+	defer server_utils.ResetOriginExports()
 
 	viper.Set("Origin.StoragePrefix", t.TempDir())
 	viper.Set("Origin.FederationPrefix", "/test")
@@ -184,15 +183,15 @@ func TestMultiExportOrigin(t *testing.T) {
 
 	viper.Reset()
 	defer viper.Reset()
-	common.ResetOriginExports()
-	defer common.ResetOriginExports()
+	server_utils.ResetOriginExports()
+	defer server_utils.ResetOriginExports()
 
 	viper.SetConfigType("yaml")
 	// Use viper to read in the embedded config
 	err := viper.ReadConfig(strings.NewReader(multiExportOriginConfig))
 	require.NoError(t, err, "error reading config")
 
-	exports, err := common.GetOriginExports()
+	exports, err := server_utils.GetOriginExports()
 	require.NoError(t, err)
 	require.Len(t, *exports, 2)
 	// Override the object store prefix to a temp directory
@@ -231,9 +230,9 @@ func TestS3OriginConfig(t *testing.T) {
 	defer cancel()
 
 	viper.Reset()
-	common.ResetOriginExports()
+	server_utils.ResetOriginExports()
 	defer viper.Reset()
-	defer common.ResetOriginExports()
+	defer server_utils.ResetOriginExports()
 	tmpDir := t.TempDir()
 
 	// We need to start up a minio server, which is how we emulate S3. Open to better ways to do this!

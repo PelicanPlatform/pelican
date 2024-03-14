@@ -24,7 +24,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/pelicanplatform/pelican/common"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/web_ui"
 	log "github.com/sirupsen/logrus"
 )
@@ -35,14 +35,14 @@ type (
 	}
 
 	listServerResponse struct {
-		Name      string            `json:"name"`
-		AuthURL   string            `json:"authUrl"`
-		URL       string            `json:"url"`    // This is server's XRootD URL for file transfer
-		WebURL    string            `json:"webUrl"` // This is server's Web interface and API
-		Type      common.ServerType `json:"type"`
-		Latitude  float64           `json:"latitude"`
-		Longitude float64           `json:"longitude"`
-		Status    HealthTestStatus  `json:"status"`
+		Name      string                    `json:"name"`
+		AuthURL   string                    `json:"authUrl"`
+		URL       string                    `json:"url"`    // This is server's XRootD URL for file transfer
+		WebURL    string                    `json:"webUrl"` // This is server's Web interface and API
+		Type      server_structs.ServerType `json:"type"`
+		Latitude  float64                   `json:"latitude"`
+		Longitude float64                   `json:"longitude"`
+		Status    HealthTestStatus          `json:"status"`
 	}
 
 	statResponse struct {
@@ -57,12 +57,12 @@ type (
 	}
 )
 
-func (req listServerRequest) ToInternalServerType() common.ServerType {
+func (req listServerRequest) ToInternalServerType() server_structs.ServerType {
 	if req.ServerType == "cache" {
-		return common.CacheType
+		return server_structs.CacheType
 	}
 	if req.ServerType == "origin" {
-		return common.OriginType
+		return server_structs.OriginType
 	}
 	return ""
 }
@@ -73,15 +73,15 @@ func listServers(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid query parameters"})
 		return
 	}
-	var servers []common.ServerAd
+	var servers []server_structs.ServerAd
 	if queryParams.ServerType != "" {
-		if !strings.EqualFold(queryParams.ServerType, string(common.OriginType)) && !strings.EqualFold(queryParams.ServerType, string(common.CacheType)) {
+		if !strings.EqualFold(queryParams.ServerType, string(server_structs.OriginType)) && !strings.EqualFold(queryParams.ServerType, string(server_structs.CacheType)) {
 			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid server type"})
 			return
 		}
-		servers = listServerAds([]common.ServerType{common.ServerType(queryParams.ToInternalServerType())})
+		servers = listServerAds([]server_structs.ServerType{server_structs.ServerType(queryParams.ToInternalServerType())})
 	} else {
-		servers = listServerAds([]common.ServerType{common.OriginType, common.CacheType})
+		servers = listServerAds([]server_structs.ServerType{server_structs.OriginType, server_structs.CacheType})
 	}
 	healthTestUtilsMutex.RLock()
 	defer healthTestUtilsMutex.RUnlock()

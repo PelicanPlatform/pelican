@@ -24,15 +24,15 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 type (
 	OriginServer struct {
-		server_utils.NamespaceHolder
+		server_structs.NamespaceHolder
 	}
 )
 
@@ -44,7 +44,7 @@ func (server *OriginServer) GetNamespaceAdsFromDirector() error {
 	return nil
 }
 
-func (server *OriginServer) CreateAdvertisement(name string, originUrlStr string, originWebUrl string) (*common.OriginAdvertiseV2, error) {
+func (server *OriginServer) CreateAdvertisement(name string, originUrlStr string, originWebUrl string) (*server_structs.OriginAdvertiseV2, error) {
 	// Here we instantiate the namespaceAd slice, but we still need to define the namespace
 	issuerUrlStr, err := config.GetServerIssuerURL()
 	if err != nil {
@@ -69,9 +69,9 @@ func (server *OriginServer) CreateAdvertisement(name string, originUrlStr string
 		return nil, err
 	}
 
-	var nsAds []common.NamespaceAdV2
+	var nsAds []server_structs.NamespaceAdV2
 	var prefixes []string
-	originExports, err := common.GetOriginExports()
+	originExports, err := server_utils.GetOriginExports()
 	if err != nil {
 		return nil, err
 	}
@@ -79,20 +79,20 @@ func (server *OriginServer) CreateAdvertisement(name string, originUrlStr string
 	for _, export := range *originExports {
 		// PublicReads implies reads
 		reads := export.Capabilities.PublicReads || export.Capabilities.Reads
-		nsAds = append(nsAds, common.NamespaceAdV2{
+		nsAds = append(nsAds, server_structs.NamespaceAdV2{
 			PublicRead: export.Capabilities.PublicReads,
-			Caps: common.Capabilities{
+			Caps: server_structs.Capabilities{
 				PublicReads: export.Capabilities.PublicReads,
 				Reads:       reads,
 				Writes:      export.Capabilities.Writes,
 			},
 			Path: export.FederationPrefix,
-			Generation: []common.TokenGen{{
-				Strategy:         common.StrategyType("OAuth2"),
+			Generation: []server_structs.TokenGen{{
+				Strategy:         server_structs.StrategyType("OAuth2"),
 				MaxScopeDepth:    3,
 				CredentialIssuer: *originUrlURL,
 			}},
-			Issuer: []common.TokenIssuer{{
+			Issuer: []server_structs.TokenIssuer{{
 				BasePaths: []string{export.FederationPrefix},
 				IssuerUrl: *issuerUrl,
 			}},
@@ -102,18 +102,18 @@ func (server *OriginServer) CreateAdvertisement(name string, originUrlStr string
 
 	// PublicReads implies reads
 	reads := param.Origin_EnableReads.GetBool() || param.Origin_EnablePublicReads.GetBool()
-	ad := common.OriginAdvertiseV2{
+	ad := server_structs.OriginAdvertiseV2{
 		Name:       name,
 		DataURL:    originUrlStr,
 		WebURL:     originWebUrl,
 		Namespaces: nsAds,
-		Caps: common.Capabilities{
+		Caps: server_structs.Capabilities{
 			PublicReads: param.Origin_EnablePublicReads.GetBool(),
 			Reads:       reads,
 			Writes:      param.Origin_EnableWrites.GetBool(),
 			DirectReads: param.Origin_EnableDirectReads.GetBool(),
 		},
-		Issuer: []common.TokenIssuer{{
+		Issuer: []server_structs.TokenIssuer{{
 			BasePaths: prefixes,
 			IssuerUrl: *issuerUrl,
 		}},
@@ -145,7 +145,7 @@ func (server *OriginServer) CreateAdvertisement(name string, originUrlStr string
 // Used to calculate the base_paths in the scitokens.cfg, for eaxmple
 func (server *OriginServer) GetAuthorizedPrefixes() ([]string, error) {
 	var prefixes []string
-	originExports, err := common.GetOriginExports()
+	originExports, err := server_utils.GetOriginExports()
 	if err != nil {
 		return nil, err
 	}

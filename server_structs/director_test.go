@@ -16,7 +16,7 @@
  *
  ***************************************************************/
 
-package common
+package server_structs
 
 import (
 	"net/url"

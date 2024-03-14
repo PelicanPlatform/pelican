@@ -36,10 +36,10 @@ import (
 	"testing"
 
 	"github.com/pelicanplatform/pelican/cache"
-	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/origin"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/spf13/viper"
@@ -145,7 +145,7 @@ func TestOSDFAuthCreation(t *testing.T) {
 		desc     string
 		authIn   string
 		authOut  string
-		server   server_utils.XRootDServer
+		server   server_structs.XRootDServer
 		hostname string
 	}{
 		{
@@ -227,9 +227,9 @@ func TestOSDFAuthCreation(t *testing.T) {
 		t.Run(testInput.desc, func(t *testing.T) {
 			dirName := t.TempDir()
 			viper.Reset()
-			common.ResetOriginExports()
+			server_utils.ResetOriginExports()
 			defer viper.Reset()
-			defer common.ResetOriginExports()
+			defer server_utils.ResetOriginExports()
 
 			viper.Set("Xrootd.Authfile", filepath.Join(dirName, "authfile"))
 			viper.Set("Federation.TopologyUrl", ts.URL)
@@ -298,9 +298,9 @@ func TestEmitAuthfile(t *testing.T) {
 		t.Run(testInput.desc, func(t *testing.T) {
 			dirName := t.TempDir()
 			viper.Reset()
-			common.ResetOriginExports()
+			server_utils.ResetOriginExports()
 			defer viper.Reset()
-			defer common.ResetOriginExports()
+			defer server_utils.ResetOriginExports()
 			viper.Set("Xrootd.Authfile", filepath.Join(dirName, "authfile"))
 			viper.Set("Origin.RunLocation", dirName)
 			server := &origin.OriginServer{}
@@ -322,9 +322,9 @@ func TestEmitAuthfile(t *testing.T) {
 func TestEmitCfg(t *testing.T) {
 	dirname := t.TempDir()
 	viper.Reset()
-	common.ResetOriginExports()
+	server_utils.ResetOriginExports()
 	defer viper.Reset()
-	defer common.ResetOriginExports()
+	defer server_utils.ResetOriginExports()
 	viper.Set("Origin.RunLocation", dirname)
 	err := config.InitClient()
 	assert.Nil(t, err)
@@ -353,9 +353,9 @@ func TestEmitCfg(t *testing.T) {
 func TestLoadScitokensConfig(t *testing.T) {
 	dirname := t.TempDir()
 	viper.Reset()
-	common.ResetOriginExports()
+	server_utils.ResetOriginExports()
 	defer viper.Reset()
-	defer common.ResetOriginExports()
+	defer server_utils.ResetOriginExports()
 	viper.Set("Origin.RunLocation", dirname)
 	err := config.InitClient()
 	assert.Nil(t, err)
@@ -388,9 +388,9 @@ func TestLoadScitokensConfig(t *testing.T) {
 func TestMergeConfig(t *testing.T) {
 	dirname := t.TempDir()
 	viper.Reset()
-	common.ResetOriginExports()
+	server_utils.ResetOriginExports()
 	defer viper.Reset()
-	defer common.ResetOriginExports()
+	defer server_utils.ResetOriginExports()
 	viper.Set("Origin.RunLocation", dirname)
 	viper.Set("Origin.Port", 8443)
 	// We don't inherit any defaults at this level of code -- in order to recognize
@@ -433,9 +433,9 @@ func TestGenerateConfig(t *testing.T) {
 	defer cancel()
 
 	viper.Reset()
-	common.ResetOriginExports()
+	server_utils.ResetOriginExports()
 	defer viper.Reset()
-	defer common.ResetOriginExports()
+	defer server_utils.ResetOriginExports()
 	viper.Set("Origin.SelfTest", false)
 	issuer, err := GenerateMonitoringIssuer()
 	require.NoError(t, err)
@@ -475,11 +475,11 @@ func TestGenerateConfig(t *testing.T) {
 
 func TestWriteOriginAuthFiles(t *testing.T) {
 	viper.Reset()
-	common.ResetOriginExports()
-	originAuthTester := func(server server_utils.XRootDServer, authStart string, authResult string) func(t *testing.T) {
+	server_utils.ResetOriginExports()
+	originAuthTester := func(server server_structs.XRootDServer, authStart string, authResult string) func(t *testing.T) {
 		return func(t *testing.T) {
 			defer viper.Reset()
-			defer common.ResetOriginExports()
+			defer server_utils.ResetOriginExports()
 			viper.Set("Origin.StorageType", "posix")
 			dirname := t.TempDir()
 			viper.Set("Origin.RunLocation", dirname)
@@ -500,14 +500,14 @@ func TestWriteOriginAuthFiles(t *testing.T) {
 			assert.Equal(t, authResult, string(authGen))
 		}
 	}
-	nsAds := []common.NamespaceAdV2{}
+	nsAds := []server_structs.NamespaceAdV2{}
 
 	originServer := &origin.OriginServer{}
 	originServer.SetNamespaceAds(nsAds)
 
 	t.Run("MultiIssuer", originAuthTester(originServer, "u * t1 lr t2 lr t3 lr", "u * /.well-known lr t1 lr t2 lr t3 lr\n"))
 
-	nsAds = []common.NamespaceAdV2{}
+	nsAds = []server_structs.NamespaceAdV2{}
 	originServer.SetNamespaceAds(nsAds)
 
 	t.Run("EmptyAuth", originAuthTester(originServer, "", "u * /.well-known lr\n"))
@@ -519,7 +519,7 @@ func TestWriteOriginAuthFiles(t *testing.T) {
 
 func TestWriteCacheAuthFiles(t *testing.T) {
 
-	cacheAuthTester := func(server server_utils.XRootDServer, sciTokenResult string, authResult string) func(t *testing.T) {
+	cacheAuthTester := func(server server_structs.XRootDServer, sciTokenResult string, authResult string) func(t *testing.T) {
 		return func(t *testing.T) {
 
 			dirname := t.TempDir()
@@ -570,22 +570,22 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 	issuer4URL.Scheme = "https"
 	issuer4URL.Host = "issuer4.com"
 
-	PublicCaps := common.Capabilities{
+	PublicCaps := server_structs.Capabilities{
 		PublicReads: true,
 		Reads:       true,
 		Writes:      true,
 	}
-	PrivateCaps := common.Capabilities{
+	PrivateCaps := server_structs.Capabilities{
 		PublicReads: false,
 		Reads:       true,
 		Writes:      true,
 	}
 
-	nsAds := []common.NamespaceAdV2{
+	nsAds := []server_structs.NamespaceAdV2{
 		{
 			PublicRead: false,
 			Caps:       PrivateCaps,
-			Issuer: []common.TokenIssuer{{
+			Issuer: []server_structs.TokenIssuer{{
 				IssuerUrl:       issuer1URL,
 				BasePaths:       []string{"/p1"},
 				RestrictedPaths: []string{"/p1/nope", "p1/still_nope"}}},
@@ -593,7 +593,7 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 		{
 			PublicRead: false,
 			Caps:       PrivateCaps,
-			Issuer: []common.TokenIssuer{{
+			Issuer: []server_structs.TokenIssuer{{
 				IssuerUrl: issuer2URL,
 				BasePaths: []string{"/p2/path", "/p2/foo", "/p2/baz"},
 			}},
@@ -606,7 +606,7 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 		{
 			PublicRead: false,
 			Caps:       PrivateCaps,
-			Issuer: []common.TokenIssuer{{
+			Issuer: []server_structs.TokenIssuer{{
 				IssuerUrl: issuer1URL,
 				BasePaths: []string{"/p1_again"},
 			}, {
@@ -631,7 +631,7 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 
 	t.Run("MultiIssuer", cacheAuthTester(cacheServer, cacheSciOutput, "u * /p3 lr /p4/depth lr /p2_noauth lr \n"))
 
-	nsAds = []common.NamespaceAdV2{}
+	nsAds = []server_structs.NamespaceAdV2{}
 	cacheServer.SetNamespaceAds(nsAds)
 
 	t.Run("EmptyNS", cacheAuthTester(cacheServer, cacheEmptyOutput, ""))

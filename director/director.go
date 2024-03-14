@@ -30,8 +30,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"golang.org/x/sync/errgroup"
@@ -74,14 +74,14 @@ var (
 	minClientVersion, _  = version.NewVersion("7.0.0")
 	minOriginVersion, _  = version.NewVersion("7.0.0")
 	minCacheVersion, _   = version.NewVersion("7.3.0")
-	healthTestUtils      = make(map[common.ServerAd]*healthTestUtil)
+	healthTestUtils      = make(map[server_structs.ServerAd]*healthTestUtil)
 	healthTestUtilsMutex = sync.RWMutex{}
 
 	originStatUtils      = make(map[url.URL]originStatUtil)
 	originStatUtilsMutex = sync.RWMutex{}
 )
 
-func getRedirectURL(reqPath string, ad common.ServerAd, requiresAuth bool) (redirectURL url.URL) {
+func getRedirectURL(reqPath string, ad server_structs.ServerAd, requiresAuth bool) (redirectURL url.URL) {
 	var serverURL url.URL
 	if requiresAuth {
 		serverURL = ad.AuthURL
@@ -505,7 +505,7 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 	}
 }
 
-func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType common.ServerType) {
+func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_structs.ServerType) {
 	tokens, present := ctx.Request.Header["Authorization"]
 	if !present || len(tokens) == 0 {
 		ctx.JSON(http.StatusForbidden, gin.H{"error": "Bearer token not present in the 'Authorization' header"})
@@ -519,12 +519,12 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType common.S
 		return
 	}
 
-	ad := common.OriginAdvertiseV1{}
-	adV2 := common.OriginAdvertiseV2{}
+	ad := server_structs.OriginAdvertiseV1{}
+	adV2 := server_structs.OriginAdvertiseV2{}
 	err = ctx.ShouldBindBodyWith(&ad, binding.JSON)
 	if err != nil {
 		// Failed binding to a V1 type, so should now check to see if it's a V2 type
-		adV2 = common.OriginAdvertiseV2{}
+		adV2 = server_structs.OriginAdvertiseV2{}
 		err = ctx.ShouldBindBodyWith(&adV2, binding.JSON)
 		if err != nil {
 			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid " + sType + " registration"})
@@ -532,10 +532,10 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType common.S
 		}
 	} else {
 		// If the OriginAdvertisement is a V1 type, convert to a V2 type
-		adV2 = common.ConvertOriginAdV1ToV2(ad)
+		adV2 = server_structs.ConvertOriginAdV1ToV2(ad)
 	}
 
-	if sType == common.OriginType {
+	if sType == server_structs.OriginType {
 		for _, namespace := range adV2.Namespaces {
 			// We're assuming there's only one token in the slice
 			token := strings.TrimPrefix(tokens[0], "Bearer ")
@@ -600,7 +600,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType common.S
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid broker URL"})
 	}
 
-	sAd := common.ServerAd{
+	sAd := server_structs.ServerAd{
 		Name:        adV2.Name,
 		AuthURL:     *ad_url,
 		URL:         *ad_url,
@@ -678,7 +678,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType common.S
 		}
 	}
 
-	if sType == common.OriginType {
+	if sType == server_structs.OriginType {
 		originStatUtilsMutex.Lock()
 		defer originStatUtilsMutex.Unlock()
 		statUtil, ok := originStatUtils[sAd.URL]
@@ -744,16 +744,16 @@ func discoverOriginCache(ctx *gin.Context) {
 func listNamespacesV1(ctx *gin.Context) {
 	namespaceAdsV2 := listNamespacesFromOrigins()
 
-	namespaceAdsV1 := common.ConvertNamespaceAdsV2ToV1(namespaceAdsV2)
+	namespaceAdsV1 := server_structs.ConvertNamespaceAdsV2ToV1(namespaceAdsV2)
 
 	ctx.JSON(http.StatusOK, namespaceAdsV1)
 }
 
 func listNamespacesV2(ctx *gin.Context) {
 	namespacesAdsV2 := listNamespacesFromOrigins()
-	namespacesAdsV2 = append(namespacesAdsV2, common.NamespaceAdV2{
+	namespacesAdsV2 = append(namespacesAdsV2, server_structs.NamespaceAdV2{
 		PublicRead: true,
-		Caps: common.Capabilities{
+		Caps: server_structs.Capabilities{
 			PublicReads: true,
 			Reads:       true,
 		},
@@ -779,7 +779,7 @@ func getPrefixByPath(ctx *gin.Context) {
 		return
 	}
 
-	res := common.GetPrefixByPathRes{Prefix: originNs.Path}
+	res := server_structs.GetPrefixByPathRes{Prefix: originNs.Path}
 	ctx.JSON(http.StatusOK, res)
 }
 
@@ -788,19 +788,19 @@ func getHealthTestFile(ctx *gin.Context) {
 	pathParam := ctx.Param("path")
 	cleanedPath := path.Clean(pathParam)
 	if cleanedPath == "" || !strings.HasPrefix(cleanedPath, cacheMonitroingBasePath+"/") {
-		ctx.JSON(http.StatusBadRequest, common.SimpleApiResp{Status: common.RespFailed, Msg: "Path parameter is not a valid health test path: " + cleanedPath})
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Path parameter is not a valid health test path: " + cleanedPath})
 		return
 	}
 	fileName := strings.TrimPrefix(cleanedPath, cacheMonitroingBasePath+"/")
 	if fileName == "" {
-		ctx.JSON(http.StatusBadRequest, common.SimpleApiResp{Status: common.RespFailed, Msg: "Path parameter is not a valid health test path: " + cleanedPath})
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Path parameter is not a valid health test path: " + cleanedPath})
 		return
 	}
 
 	fileNameSplit := strings.SplitN(fileName, ".", 2)
 
 	if len(fileNameSplit) != 2 {
-		ctx.JSON(http.StatusBadRequest, common.SimpleApiResp{Status: common.RespFailed, Msg: "Test file name is missing file extension: " + cleanedPath})
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Test file name is missing file extension: " + cleanedPath})
 		return
 	}
 
@@ -822,8 +822,8 @@ func RegisterDirectorAPI(ctx context.Context, router *gin.RouterGroup) {
 		directorAPIV1.GET("/object/*any", redirectToCache)
 		directorAPIV1.GET("/origin/*any", redirectToOrigin)
 		directorAPIV1.PUT("/origin/*any", redirectToOrigin)
-		directorAPIV1.POST("/registerOrigin", func(gctx *gin.Context) { registerServeAd(ctx, gctx, common.OriginType) })
-		directorAPIV1.POST("/registerCache", func(gctx *gin.Context) { registerServeAd(ctx, gctx, common.CacheType) })
+		directorAPIV1.POST("/registerOrigin", func(gctx *gin.Context) { registerServeAd(ctx, gctx, server_structs.OriginType) })
+		directorAPIV1.POST("/registerCache", func(gctx *gin.Context) { registerServeAd(ctx, gctx, server_structs.CacheType) })
 		directorAPIV1.GET("/listNamespaces", listNamespacesV1)
 		directorAPIV1.GET("/namespaces/prefix/*path", getPrefixByPath)
 		directorAPIV1.GET("/healthTest/*path", getHealthTestFile)

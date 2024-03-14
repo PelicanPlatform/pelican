@@ -23,22 +23,22 @@ import (
 	"fmt"
 
 	"github.com/jellydator/ttlcache/v3"
-	"github.com/pelicanplatform/pelican/common"
+	"github.com/pelicanplatform/pelican/server_structs"
 
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 )
 
 // List all namespaces from origins registered at the director
-func listNamespacesFromOrigins() []common.NamespaceAdV2 {
+func listNamespacesFromOrigins() []server_structs.NamespaceAdV2 {
 
 	serverAdMutex.RLock()
 	defer serverAdMutex.RUnlock()
 
 	serverAdItems := serverAds.Items()
-	namespaces := make([]common.NamespaceAdV2, 0, len(serverAdItems))
+	namespaces := make([]server_structs.NamespaceAdV2, 0, len(serverAdItems))
 	for _, item := range serverAdItems {
-		if item.Key().Type == common.OriginType {
+		if item.Key().Type == server_structs.OriginType {
 			namespaces = append(namespaces, item.Value()...)
 		}
 	}
@@ -46,10 +46,10 @@ func listNamespacesFromOrigins() []common.NamespaceAdV2 {
 }
 
 // List all serverAds in the cache that matches the serverType array
-func listServerAds(serverTypes []common.ServerType) []common.ServerAd {
+func listServerAds(serverTypes []server_structs.ServerType) []server_structs.ServerAd {
 	serverAdMutex.RLock()
 	defer serverAdMutex.RUnlock()
-	ads := make([]common.ServerAd, 0)
+	ads := make([]server_structs.ServerAd, 0)
 	for _, ad := range serverAds.Keys() {
 		for _, serverType := range serverTypes {
 			if ad.Type == serverType {
@@ -69,7 +69,7 @@ func ConfigTTLCache(ctx context.Context, egrp *errgroup.Group) {
 	go serverAds.Start()
 	go namespaceKeys.Start()
 
-	serverAds.OnEviction(func(ctx context.Context, er ttlcache.EvictionReason, i *ttlcache.Item[common.ServerAd, []common.NamespaceAdV2]) {
+	serverAds.OnEviction(func(ctx context.Context, er ttlcache.EvictionReason, i *ttlcache.Item[server_structs.ServerAd, []server_structs.NamespaceAdV2]) {
 		healthTestUtilsMutex.RLock()
 		defer healthTestUtilsMutex.RUnlock()
 		if util, exists := healthTestUtils[i.Key()]; exists {
@@ -88,7 +88,7 @@ func ConfigTTLCache(ctx context.Context, egrp *errgroup.Group) {
 			log.Debugf("healthTestUtil not found for %s when evicting TTL cache item", i.Key().Name)
 		}
 
-		if i.Key().Type == common.OriginType {
+		if i.Key().Type == server_structs.OriginType {
 			originStatUtilsMutex.Lock()
 			defer originStatUtilsMutex.Unlock()
 			statUtil, ok := originStatUtils[i.Key().URL]

@@ -25,10 +25,10 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	log "github.com/sirupsen/logrus"
@@ -69,7 +69,7 @@ func handleDirectorTestResponse(ctx *gin.Context) {
 		ctx.JSON(status, gin.H{"error": err.Error()})
 	}
 
-	dt := common.DirectorTestResult{}
+	dt := server_structs.DirectorTestResult{}
 	if err := ctx.ShouldBind(&dt); err != nil {
 		log.Errorf("Invalid director test response: %v", err)
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid director test response: " + err.Error()})

@@ -39,7 +39,6 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/classads"
-	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/launchers"
 	"github.com/pelicanplatform/pelican/param"
@@ -174,7 +173,7 @@ func (f *FedTest) Spinup() {
 func (f *FedTest) Teardown() {
 	os.RemoveAll(f.TmpPath)
 	os.RemoveAll(f.OriginDir)
-	common.ResetOriginExports()
+	server_utils.ResetOriginExports()
 	f.Cancel()
 	f.FedCancel()
 	assert.NoError(f.T, f.ErrGroup.Wait())
@@ -184,7 +183,7 @@ func (f *FedTest) Teardown() {
 // Test the main function for the pelican plugin
 func TestStashPluginMain(t *testing.T) {
 	viper.Reset()
-	common.ResetOriginExports()
+	server_utils.ResetOriginExports()
 
 	config.SetPreferredPrefix("STASH")
 

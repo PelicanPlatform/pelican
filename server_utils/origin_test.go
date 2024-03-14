@@ -18,13 +18,14 @@
 *
 ***************************************************************/
 
-package common
+package server_utils
 
 import (
 	_ "embed"
 	"strings"
 	"testing"
 
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -95,7 +96,7 @@ func TestGetExports(t *testing.T) {
 		expectedExport1 := OriginExports{
 			StoragePrefix:    "/test1",
 			FederationPrefix: "/first/namespace",
-			Capabilities: Capabilities{
+			Capabilities: server_structs.Capabilities{
 				Writes:      true,
 				PublicReads: true,
 				Listings:    true,
@@ -108,7 +109,7 @@ func TestGetExports(t *testing.T) {
 		expectedExport2 := OriginExports{
 			StoragePrefix:    "/test2",
 			FederationPrefix: "/second/namespace",
-			Capabilities: Capabilities{
+			Capabilities: server_structs.Capabilities{
 				Writes:      true,
 				PublicReads: false,
 				Listings:    false,
@@ -128,7 +129,7 @@ func TestGetExports(t *testing.T) {
 		expectedExport1 := OriginExports{
 			StoragePrefix:    "/test1",
 			FederationPrefix: "/first/namespace",
-			Capabilities: Capabilities{
+			Capabilities: server_structs.Capabilities{
 				Writes:      false,
 				PublicReads: false,
 				Listings:    true,
@@ -141,7 +142,7 @@ func TestGetExports(t *testing.T) {
 		expectedExport2 := OriginExports{
 			StoragePrefix:    "/test2",
 			FederationPrefix: "/second/namespace",
-			Capabilities: Capabilities{
+			Capabilities: server_structs.Capabilities{
 				Writes:      false,
 				PublicReads: false,
 				Listings:    true,
@@ -163,7 +164,7 @@ func TestGetExports(t *testing.T) {
 		expectedExport := OriginExports{
 			StoragePrefix:    "/test1",
 			FederationPrefix: "/first/namespace",
-			Capabilities: Capabilities{
+			Capabilities: server_structs.Capabilities{
 				Writes:      true,
 				PublicReads: true,
 				Listings:    false,
@@ -192,7 +193,7 @@ func TestGetExports(t *testing.T) {
 		expectedExport := OriginExports{
 			StoragePrefix:    "/test1",
 			FederationPrefix: "/first/namespace",
-			Capabilities: Capabilities{
+			Capabilities: server_structs.Capabilities{
 				Writes:      false,
 				PublicReads: true,
 				Listings:    false,

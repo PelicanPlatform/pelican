@@ -16,8 +16,7 @@
  *
  ***************************************************************/
 
-// Common pacakge contains shared structs and methods between different Pelican pacakges.
-package common
+package server_structs
 
 import (
 	"encoding/json"

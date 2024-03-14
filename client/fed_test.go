@@ -41,7 +41,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/client"
-	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/fed_test_utils"
 	"github.com/pelicanplatform/pelican/launchers"
@@ -97,9 +96,9 @@ func TestFullUpload(t *testing.T) {
 	defer cancel()
 
 	viper.Reset()
-	common.ResetOriginExports()
+	server_utils.ResetOriginExports()
 	defer viper.Reset()
-	defer common.ResetOriginExports()
+	defer server_utils.ResetOriginExports()
 
 	modules := config.ServerType(0)
 	modules.Set(config.OriginType)
@@ -228,7 +227,7 @@ func TestFullUpload(t *testing.T) {
 // A test that spins up a federation, and tests object get and put
 func TestGetAndPutAuth(t *testing.T) {
 	viper.Reset()
-	common.ResetOriginExports()
+	server_utils.ResetOriginExports()
 	fed := fed_test_utils.NewFedTest(t, bothAuthOriginCfg)
 
 	// Other set-up items:
@@ -378,7 +377,7 @@ func TestGetAndPutAuth(t *testing.T) {
 func TestGetPublicRead(t *testing.T) {
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 	viper.Reset()
-	common.ResetOriginExports()
+	server_utils.ResetOriginExports()
 
 	fed := fed_test_utils.NewFedTest(t, bothPublicOriginCfg)
 
@@ -414,7 +413,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 	// Create instance of test federation
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 	viper.Reset()
-	common.ResetOriginExports()
+	server_utils.ResetOriginExports()
 
 	fed := fed_test_utils.NewFedTest(t, mixedAuthOriginCfg)
 

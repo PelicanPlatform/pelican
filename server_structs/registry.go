@@ -16,7 +16,7 @@
  *
  ***************************************************************/
 
-package common
+package server_structs
 
 type CheckNamespaceExistsReq struct {
 	Prefix string `json:"prefix"`

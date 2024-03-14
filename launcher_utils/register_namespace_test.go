@@ -16,7 +16,7 @@
  *
  ***************************************************************/
 
-package server_ui
+package launcher_utils
 
 import (
 	"context"

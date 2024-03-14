@@ -16,31 +16,30 @@
  *
  ***************************************************************/
 
-package server_utils
+package server_structs
 
 import (
-	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 )
 
 type (
 	XRootDServer interface {
 		GetServerType() config.ServerType
-		SetNamespaceAds([]common.NamespaceAdV2)
-		GetNamespaceAds() []common.NamespaceAdV2
-		CreateAdvertisement(name string, serverUrl string, serverWebUrl string) (*common.OriginAdvertiseV2, error)
+		SetNamespaceAds([]NamespaceAdV2)
+		GetNamespaceAds() []NamespaceAdV2
+		CreateAdvertisement(name string, serverUrl string, serverWebUrl string) (*OriginAdvertiseV2, error)
 		GetNamespaceAdsFromDirector() error
 	}
 
 	NamespaceHolder struct {
-		namespaceAds []common.NamespaceAdV2
+		namespaceAds []NamespaceAdV2
 	}
 )
 
-func (ns *NamespaceHolder) SetNamespaceAds(ads []common.NamespaceAdV2) {
+func (ns *NamespaceHolder) SetNamespaceAds(ads []NamespaceAdV2) {
 	ns.namespaceAds = ads
 }
 
-func (ns *NamespaceHolder) GetNamespaceAds() []common.NamespaceAdV2 {
+func (ns *NamespaceHolder) GetNamespaceAds() []NamespaceAdV2 {
 	return ns.namespaceAds
 }

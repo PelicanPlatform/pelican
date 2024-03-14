@@ -16,7 +16,10 @@
  *
  ***************************************************************/
 
-package server_ui
+// launcher_utils are utility functions for laucnhers package.
+// It should only be imported by the launchers package
+// It should NOT be imported to any server pacakges (origin/cache/registry) or other lower level packages (config/utils/etc)
+package launcher_utils
 
 import (
 	"bytes"
@@ -36,7 +39,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
@@ -46,7 +49,7 @@ type directorResponse struct {
 	ApprovalError bool   `json:"approval_error"`
 }
 
-func doAdvertise(ctx context.Context, servers []server_utils.XRootDServer) {
+func doAdvertise(ctx context.Context, servers []server_structs.XRootDServer) {
 	log.Debugf("About to advertise %d XRootD servers", len(servers))
 	err := Advertise(ctx, servers)
 	if err != nil {
@@ -57,7 +60,8 @@ func doAdvertise(ctx context.Context, servers []server_utils.XRootDServer) {
 	}
 }
 
-func LaunchPeriodicAdvertise(ctx context.Context, egrp *errgroup.Group, servers []server_utils.XRootDServer) error {
+// Launch periodic advertise of xrootd servers (origin and cache) to the director, in the errogroup
+func LaunchPeriodicAdvertise(ctx context.Context, egrp *errgroup.Group, servers []server_structs.XRootDServer) error {
 	doAdvertise(ctx, servers)
 
 	ticker := time.NewTicker(1 * time.Minute)
@@ -85,7 +89,8 @@ func LaunchPeriodicAdvertise(ctx context.Context, egrp *errgroup.Group, servers 
 	return nil
 }
 
-func Advertise(ctx context.Context, servers []server_utils.XRootDServer) error {
+// Advertise ONCE the xrootd servers (origin and cache) to the director
+func Advertise(ctx context.Context, servers []server_structs.XRootDServer) error {
 	var firstErr error
 	for _, server := range servers {
 		err := advertiseInternal(ctx, server)
@@ -96,7 +101,7 @@ func Advertise(ctx context.Context, servers []server_utils.XRootDServer) error {
 	return firstErr
 }
 
-func advertiseInternal(ctx context.Context, server server_utils.XRootDServer) error {
+func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) error {
 	name := param.Xrootd_Sitename.GetString()
 	if name == "" {
 		return errors.New(fmt.Sprintf("%s name isn't set", server.GetServerType()))

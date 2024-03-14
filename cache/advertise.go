@@ -24,23 +24,22 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
 )
 
 type (
 	CacheServer struct {
-		server_utils.NamespaceHolder
+		server_structs.NamespaceHolder
 		namespaceFilter map[string]struct{}
 	}
 )
 
-func (server *CacheServer) CreateAdvertisement(name string, originUrl string, originWebUrl string) (*common.OriginAdvertiseV2, error) {
-	ad := common.OriginAdvertiseV2{
+func (server *CacheServer) CreateAdvertisement(name string, originUrl string, originWebUrl string) (*server_structs.OriginAdvertiseV2, error) {
+	ad := server_structs.OriginAdvertiseV2{
 		Name:       name,
 		DataURL:    originUrl,
 		WebURL:     originWebUrl,
@@ -67,13 +66,13 @@ func (server *CacheServer) SetFilters() {
 	}
 }
 
-func (server *CacheServer) filterAdsBasedOnNamespace(nsAds []common.NamespaceAdV2) []common.NamespaceAdV2 {
+func (server *CacheServer) filterAdsBasedOnNamespace(nsAds []server_structs.NamespaceAdV2) []server_structs.NamespaceAdV2 {
 	/*
 	* Filters out ads based on the namespaces listed in server.NamespaceFilter
 	* Note that this does a few checks for trailing and non-trailing "/" as it's assumed that the namespaces
 	* from the director and the ones provided might differ.
 	 */
-	filteredAds := []common.NamespaceAdV2{}
+	filteredAds := []server_structs.NamespaceAdV2{}
 	if len(server.namespaceFilter) > 0 {
 		for _, ad := range nsAds {
 			ns := ad.Path
@@ -110,7 +109,7 @@ func (server *CacheServer) filterAdsBasedOnNamespace(nsAds []common.NamespaceAdV
 
 func (server *CacheServer) GetNamespaceAdsFromDirector() error {
 	// Get the endpoint of the director
-	var respNS []common.NamespaceAdV2
+	var respNS []server_structs.NamespaceAdV2
 
 	directorEndpoint := param.Federation_DirectorUrl.GetString()
 	if directorEndpoint == "" {
@@ -139,14 +138,14 @@ func (server *CacheServer) GetNamespaceAdsFromDirector() error {
 				return err
 			}
 			respData, err = utils.MakeRequest(context.Background(), directorNSListEndpointURL, "GET", nil, nil)
-			var respNSV1 []common.NamespaceAdV1
+			var respNSV1 []server_structs.NamespaceAdV1
 			if err != nil {
 				return errors.Wrap(err, "Failed to make request")
 			} else {
 				if jsonErr := json.Unmarshal(respData, &respNSV1); jsonErr == nil { // Error creating json
 					return errors.Wrapf(err, "Failed to make request: %v", err)
 				}
-				respNS = common.ConvertNamespaceAdsV1ToV2(respNSV1, nil)
+				respNS = server_structs.ConvertNamespaceAdsV1ToV2(respNSV1, nil)
 			}
 		} else {
 			return errors.Wrap(err, "Failed to make request")

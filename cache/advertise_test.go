@@ -24,7 +24,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/pelicanplatform/pelican/common"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/require"
 )
@@ -83,7 +83,7 @@ func TestFilterNsAdsForCache(t *testing.T) {
 	viper.Reset()
 	defer viper.Reset()
 
-	nsAds := []common.NamespaceAdV2{
+	nsAds := []server_structs.NamespaceAdV2{
 		{
 			Path: "/ns1",
 		},
