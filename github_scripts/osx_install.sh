@@ -66,8 +66,11 @@ patch -p1 $scriptdir/pelican_protocol.patch
 mkdir build
 cd build
 cmake .. -GNinja
-ninja libXrdAccSciTokens-5.so libXrdPss-5.so
+ninja libXrdAccSciTokens-5.so libXrdPss-5.so XrdUtils
 sudo ln -s $PWD/src/libXrdAccSciTokens-5.so $xrootd_libdir
+sudo ln -fs $PWD/src/libXrdUtils.3.0.0.dylib $xrootd_libdir
+sudo ln -fs $PWD/src/libXrdUtils.3.dylib $xrootd_libdir
+sudo ln -fs $PWD/src/libXrdUtils.dylib $xrootd_libdir
 sudo ln -sf $PWD/src/libXrdPss-5.so $xrootd_libdir
 popd
 
