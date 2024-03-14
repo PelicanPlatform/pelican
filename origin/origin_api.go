@@ -19,18 +19,14 @@
 package origin
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
-	"golang.org/x/sync/errgroup"
 )
 
 var (
@@ -70,47 +66,4 @@ func ConfigureXrootdMonitoringDir() error {
 	}
 
 	return nil
-}
-
-// Notify the periodic ticker that we have received a new response and it
-// should reset
-func notifyNewDirectorResponse(ctx context.Context) {
-	nChan := getNotifyChannel()
-	select {
-	case <-ctx.Done():
-		return
-	case nChan <- true:
-		return
-	}
-}
-
-// Get the notification channel in a thread-safe manner
-func getNotifyChannel() chan bool {
-	notifyResponseOnce.Do(func() {
-		notifyChannel = make(chan bool)
-	})
-	return notifyChannel
-}
-
-// Reset the timer safely
-func LaunchPeriodicDirectorTimeout(ctx context.Context, egrp *errgroup.Group) {
-	directorTimeoutTicker := time.NewTicker(directorTimeoutDuration)
-	nChan := getNotifyChannel()
-
-	egrp.Go(func() error {
-		for {
-			select {
-			case <-directorTimeoutTicker.C:
-				// Timer fired because no message was received in time.
-				log.Warningln("No director test report received within the time limit")
-				metrics.SetComponentHealthStatus(metrics.OriginCache_Director, metrics.StatusCritical, "No director test report received within the time limit")
-			case <-nChan:
-				log.Debugln("Got notification from director")
-				directorTimeoutTicker.Reset(directorTimeoutDuration)
-			case <-ctx.Done():
-				log.Infoln("Director health test timeout loop has been terminated")
-				return nil
-			}
-		}
-	})
 }

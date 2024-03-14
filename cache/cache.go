@@ -18,11 +18,24 @@
 
 package cache
 
-import "github.com/gin-gonic/gin"
+import (
+	"context"
 
-func RegisterCacheAPI(router *gin.Engine) {
+	"github.com/gin-gonic/gin"
+	"github.com/pelicanplatform/pelican/server_utils"
+	"golang.org/x/sync/errgroup"
+)
+
+var (
+	notificationChan = make(chan bool)
+)
+
+func RegisterCacheAPI(router *gin.Engine, ctx context.Context, egrp *errgroup.Group) {
+	// start the timer for the director test report timeout
+	server_utils.LaunchPeriodicDirectorTimeout(ctx, egrp, notificationChan)
+
 	group := router.Group("/api/v1.0/cache")
 	{
-		group.POST("/directorTest", func(ctx *gin.Context) {})
+		group.POST("/directorTest", func(ctx *gin.Context) { server_utils.HandleDirectorTestResponse(ctx, notificationChan) })
 	}
 }
