@@ -707,15 +707,6 @@ func InitConfig() {
 			cobra.CheckErr(err)
 		}
 	}
-	if param.Debug.GetBool() {
-		SetLogging(log.DebugLevel)
-		log.Warnln("Debug is set as a flag or in config, this will override anything set for Logging.Level within your configuration")
-	} else {
-		logLevel := param.Logging_Level.GetString()
-		level, err := log.ParseLevel(logLevel)
-		cobra.CheckErr(err)
-		SetLogging(level)
-	}
 
 	logLocation := param.Logging_LogLocation.GetString()
 	if logLocation != "" {
@@ -732,7 +723,18 @@ func InitConfig() {
 			log.Errorf("Failed to access specified log file. Error: %v", err)
 			os.Exit(1)
 		}
+		fmt.Printf("Logging.LogLocation is set to %s. All logs are redirected to the log file.\n", logLocation)
 		log.SetOutput(f)
+	}
+
+	if param.Debug.GetBool() {
+		SetLogging(log.DebugLevel)
+		log.Warnln("Debug is set as a flag or in config, this will override anything set for Logging.Level within your configuration")
+	} else {
+		logLevel := param.Logging_Level.GetString()
+		level, err := log.ParseLevel(logLevel)
+		cobra.CheckErr(err)
+		SetLogging(level)
 	}
 
 	if oldNsUrl := viper.GetString("Federation.NamespaceUrl"); oldNsUrl != "" {
@@ -1190,12 +1192,4 @@ func InitClient() error {
 	}
 
 	return DiscoverFederation()
-}
-
-func SetLogging(logLevel log.Level) {
-	textFormatter := log.TextFormatter{}
-	textFormatter.DisableLevelTruncation = true
-	textFormatter.FullTimestamp = true
-	log.SetFormatter(&textFormatter)
-	log.SetLevel(logLevel)
 }
