@@ -229,7 +229,7 @@ func TestDirectorRegistration(t *testing.T) {
 
 	generateReadToken := func(key jwk.Key, object, issuer string) string {
 		tc := token.NewWLCGToken()
-		tc.Lifetime = time.Minute
+		tc.Lifetime = time.Second * 10
 		tc.Issuer = issuer
 		tc.AddAudiences("director")
 		tc.Subject = "test"
