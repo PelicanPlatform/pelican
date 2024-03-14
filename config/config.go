@@ -484,7 +484,6 @@ func DiscoverFederation() error {
 	if len(federationUrl.Path) > 0 && len(federationUrl.Host) == 0 {
 		federationUrl.Host = federationUrl.Path
 		federationUrl.Path = ""
-		return errors.Wrap(err, "Error discovering the federation with given discovery url")
 	}
 
 	metadata, err := DiscoverUrlFederation(federationStr)
