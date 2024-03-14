@@ -317,7 +317,15 @@ func TestDirectorRegistration(t *testing.T) {
 		r.ServeHTTP(w, c.Request)
 
 		// Check to see that the code exits with status code 200 after given it a good token
-		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
+		assert.Equal(t, 200, w.Result().StatusCode, w.Result().Status)
+
+		resp := w.Result()
+
+		defer resp.Body.Close()
+
+		data, err := io.ReadAll(resp.Body)
+		assert.NoError(t, err, "err reading body")
+		assert.Equal(t, 200, w.Result().StatusCode, string(data))
 
 		namaspaceADs := listNamespacesFromOrigins()
 		// If the origin was successfully registed at director, we should be able to find it in director's originAds
