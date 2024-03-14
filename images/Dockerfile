@@ -226,7 +226,7 @@ RUN rm -rf /pelican/pelican
 FROM pelican-base AS cache
 
 WORKDIR /pelican
-ENTRYPOINT ["/entrypoint.sh", "pelican", "cache"]
+ENTRYPOINT ["/entrypoint.sh", "pelican", "cache", "serve"]
 
 ####################
 # pelican/origin    #
@@ -235,7 +235,7 @@ ENTRYPOINT ["/entrypoint.sh", "pelican", "cache"]
 FROM pelican-base AS origin
 
 WORKDIR /pelican
-ENTRYPOINT ["/entrypoint.sh", "pelican", "origin"]
+ENTRYPOINT ["/entrypoint.sh", "pelican", "origin", "serve"]
 
 ####################
 # pelican/director #
@@ -244,7 +244,7 @@ ENTRYPOINT ["/entrypoint.sh", "pelican", "origin"]
 FROM pelican-base AS director
 
 WORKDIR /pelican
-ENTRYPOINT ["/entrypoint.sh", "pelican", "director"]
+ENTRYPOINT ["/entrypoint.sh", "pelican", "director", "serve"]
 
 ####################
 # pelican/registry #
@@ -253,7 +253,7 @@ ENTRYPOINT ["/entrypoint.sh", "pelican", "director"]
 FROM pelican-base AS registry
 
 WORKDIR /pelican
-ENTRYPOINT ["/entrypoint.sh", "pelican", "registry"]
+ENTRYPOINT ["/entrypoint.sh", "pelican", "registry", "serve"]
 
 ####################################
 # OSDF                             #
@@ -266,7 +266,7 @@ ENTRYPOINT ["/entrypoint.sh", "pelican", "registry"]
 FROM osdf-base AS osdf-cache
 
 WORKDIR /pelican
-ENTRYPOINT ["/entrypoint.sh", "osdf", "cache"]
+ENTRYPOINT ["/entrypoint.sh", "osdf", "cache", "serve"]
 
 ####################
 # osdf/origin    #
@@ -275,7 +275,7 @@ ENTRYPOINT ["/entrypoint.sh", "osdf", "cache"]
 FROM osdf-base AS osdf-origin
 
 WORKDIR /pelican
-ENTRYPOINT ["/entrypoint.sh", "osdf", "origin"]
+ENTRYPOINT ["/entrypoint.sh", "osdf", "origin", "serve"]
 
 ####################
 # osdf/director    #
@@ -284,7 +284,7 @@ ENTRYPOINT ["/entrypoint.sh", "osdf", "origin"]
 FROM osdf-base AS osdf-director
 
 WORKDIR /pelican
-ENTRYPOINT ["/entrypoint.sh", "osdf", "director"]
+ENTRYPOINT ["/entrypoint.sh", "osdf", "director", "serve"]
 
 
 ####################
@@ -294,4 +294,4 @@ ENTRYPOINT ["/entrypoint.sh", "osdf", "director"]
 FROM osdf-base AS osdf-registry
 
 WORKDIR /pelican
-ENTRYPOINT ["/entrypoint.sh", "osdf", "registry"]
+ENTRYPOINT ["/entrypoint.sh", "osdf", "registry", "serve"]
