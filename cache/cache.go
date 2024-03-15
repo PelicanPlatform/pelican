@@ -41,7 +41,7 @@ func RegisterCacheAPI(router *gin.Engine, ctx context.Context, egrp *errgroup.Gr
 
 	group := router.Group("/api/v1.0/cache")
 	{
-		group.POST("/directorTest", func(ctx *gin.Context) { server_utils.HandleDirectorTestResponse(ctx, notificationChan) })
+		group.POST("/directorTest", func(ginCtx *gin.Context) { server_utils.HandleDirectorTestResponse(ginCtx, notificationChan) })
 	}
 }
 

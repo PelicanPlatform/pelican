@@ -44,6 +44,8 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) (
 		return nil, err
 	}
 
+	cache.RegisterCacheAPI(engine, ctx, egrp)
+
 	cacheServer := &cache.CacheServer{}
 	err = cacheServer.GetNamespaceAdsFromDirector()
 	cacheServer.SetFilters()
