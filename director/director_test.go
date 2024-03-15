@@ -903,6 +903,10 @@ func TestDiscoverOriginCache(t *testing.T) {
 }
 
 func TestRedirects(t *testing.T) {
+
+	router := gin.Default()
+	router.GET("/api/v1.0/director/origin/*any", redirectToOrigin)
+
 	// Check that the checkkHostnameRedirects uses the pre-configured hostnames to redirect
 	// requests that come in at the default paths, but not if the request is made
 	// specifically for an object or a cache via the API.
@@ -1023,5 +1027,67 @@ func TestRedirects(t *testing.T) {
 		assert.Equal(t, expectedPath, c.Request.URL.Path)
 
 		viper.Reset()
+	})
+
+	t.Run("cache-test-file-redirect", func(t *testing.T) {
+		viper.Set("Server.ExternalWebUrl", "https://example.com")
+		// Create a request to the endpoint
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/api/v1.0/director/origin/pelican/monitoring/test.txt", nil)
+		req.Header.Add("User-Agent", "pelican-v7.6.1")
+		router.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusTemporaryRedirect, w.Code)
+		assert.NotEmpty(t, w.Header().Get("Location"))
+		assert.Equal(t, "https://example.com/api/v1.0/director/healthTest/pelican/monitoring/test.txt", w.Header().Get("Location"))
+	})
+}
+
+func TestGetHealthTestFile(t *testing.T) {
+	router := gin.Default()
+	router.GET("/api/v1.0/director/healthTest/*path", getHealthTestFile)
+
+	t.Run("400-on-empty-path", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/api/v1.0/director/healthTest/", nil)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("400-on-random-path", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/api/v1.0/director/healthTest/foo/bar", nil)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("400-on-dir", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/api/v1.0/director/healthTest/pelican/monitoring", nil)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("400-on-missing-file-ext", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/api/v1.0/director/healthTest/pelican/monitoring/testfile", nil)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("200-on-correct-request-file", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/api/v1.0/director/healthTest/pelican/monitoring/testfile.txt", nil)
+		router.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+
+		bytes, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		assert.Equal(t, testFileContent+"testfile\n", string(bytes))
 	})
 }

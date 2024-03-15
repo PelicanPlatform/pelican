@@ -332,8 +332,8 @@ func redirectToOrigin(ginCtx *gin.Context) {
 
 	// /pelican/monitoring is the path for director-based health test
 	// where we have /director/healthTest API to mock a file for the cache to get
-	if strings.HasPrefix(reqPath, "/pelican/monitoring") {
-		ginCtx.Redirect(http.StatusTemporaryRedirect, param.Server_ExternalWebUrl.GetString()+"/api/v1.0/director/healthTest/"+reqPath)
+	if strings.HasPrefix(reqPath, "/pelican/monitoring/") {
+		ginCtx.Redirect(http.StatusTemporaryRedirect, param.Server_ExternalWebUrl.GetString()+"/api/v1.0/director/healthTest"+reqPath)
 		return
 	}
 
@@ -783,6 +783,8 @@ func getPrefixByPath(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, res)
 }
 
+// Generate a mock file for caches to fetch. This is for director-based health tests for caches
+// So that we don't require an origin to feed the test file to the cache
 func getHealthTestFile(ctx *gin.Context) {
 	// Expected path: /pelican/monitoring/2006-01-02T15:04:05Z07:00.txt
 	pathParam := ctx.Param("path")
