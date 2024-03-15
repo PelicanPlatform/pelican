@@ -24,6 +24,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/pelicanplatform/pelican/config"
@@ -61,7 +62,7 @@ func runCacheTest(ctx context.Context, cacheUrl url.URL) error {
 	}
 	strBody := string(byteBody)
 
-	if strBody == testFileContent+nowStr {
+	if strings.TrimSuffix(strBody, "\n") == testFileContent+nowStr {
 		return nil
 	} else {
 		return fmt.Errorf("cache response file does not match expectation. Expected:%s, Got:%s", testFileContent+nowStr, strBody)

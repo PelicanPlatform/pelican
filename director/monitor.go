@@ -95,7 +95,7 @@ func reportStatusToServer(ctx context.Context, serverWebUrl string, status strin
 
 	reqBody := bytes.NewBuffer(jsonData)
 
-	log.Debugln("Director is uploading origin test results to", reportUrl.String())
+	log.Debugf("Director is sending %s server test result to %s", string(serverType), reportUrl.String())
 	req, err := http.NewRequestWithContext(ctx, "POST", reportUrl.String(), reqBody)
 	if err != nil {
 		return errors.Wrap(err, "Failed to create POST request for reporting director test")
@@ -186,7 +186,7 @@ func LaunchPeriodicDirectorTest(ctx context.Context, serverAd server_structs.Ser
 				err = runCacheTest(ctx, serverAd.URL)
 			}
 			if ok && err == nil {
-				log.Debugln("Director file transfer test cycle succeeded at", time.Now().Format(time.RFC3339), " for %s server: ", serverAd.Type, serverUrl)
+				log.Debugf("Director file transfer test cycle succeeded at %s for %s server with URL at %s", time.Now().Format(time.RFC3339), serverAd.Type, serverUrl)
 				func() {
 					healthTestUtilsMutex.Lock()
 					defer healthTestUtilsMutex.Unlock()
@@ -200,7 +200,7 @@ func LaunchPeriodicDirectorTest(ctx context.Context, serverAd server_structs.Ser
 					if err == originReportNotFoundError {
 						newErr := reportStatusToServer(ctx, serverWebUrl, "ok", "Director test cycle succeeded at "+time.Now().Format(time.RFC3339), serverAd.Type, true)
 						if newErr != nil {
-							log.Warningln("Failed to report director test result to origin:", err)
+							log.Warningf("Failed to report director test result to %s server at %s: %v", serverAd.Type, serverAd.WebURL.String(), err)
 							metrics.PelicanDirectorFileTransferTestsRuns.With(
 								prometheus.Labels{
 									"server_name": serverName, "server_web_url": serverWebUrl, "server_type": string(serverAd.Type), "status": string(metrics.FTXTestSucceeded), "report_status": string(metrics.FTXTestFailed),
@@ -214,7 +214,7 @@ func LaunchPeriodicDirectorTest(ctx context.Context, serverAd server_structs.Ser
 							).Inc()
 						}
 					} else {
-						log.Warningln("Failed to report director test result to origin:", err)
+						log.Warningf("Failed to report director test result to %s server at %s: %v", serverAd.Type, serverAd.WebURL.String(), err)
 						metrics.PelicanDirectorFileTransferTestsRuns.With(
 							prometheus.Labels{
 								"server_name": serverName, "server_web_url": serverWebUrl, "server_type": string(serverAd.Type), "status": string(metrics.FTXTestSucceeded), "report_status": string(metrics.FTXTestFailed),
@@ -244,7 +244,7 @@ func LaunchPeriodicDirectorTest(ctx context.Context, serverAd server_structs.Ser
 					if err == originReportNotFoundError {
 						newErr := reportStatusToServer(ctx, serverWebUrl, "ok", "Director test cycle succeeded at "+time.Now().Format(time.RFC3339), serverAd.Type, true)
 						if newErr != nil {
-							log.Warningln("Failed to report director test result to origin:", err)
+							log.Warningf("Failed to report director test result to %s server at %s: %v", serverAd.Type, serverAd.WebURL.String(), err)
 							metrics.PelicanDirectorFileTransferTestsRuns.With(
 								prometheus.Labels{
 									"server_name": serverName, "server_web_url": serverWebUrl, "server_type": string(serverAd.Type), "status": string(metrics.FTXTestFailed), "report_status": string(metrics.FTXTestFailed),
@@ -258,7 +258,7 @@ func LaunchPeriodicDirectorTest(ctx context.Context, serverAd server_structs.Ser
 							).Inc()
 						}
 					} else {
-						log.Warningln("Failed to report director test result to ", serverAd.Type, " server with web url at ", serverWebUrl, err)
+						log.Warningf("Failed to report director test result to %s server at %s: %v", serverAd.Type, serverAd.WebURL.String(), err)
 						metrics.PelicanDirectorFileTransferTestsRuns.With(
 							prometheus.Labels{
 								"server_name": serverName, "server_web_url": serverWebUrl, "server_type": string(serverAd.Type), "status": string(metrics.FTXTestFailed), "report_status": string(metrics.FTXTestFailed),
