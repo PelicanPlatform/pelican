@@ -45,6 +45,7 @@ func RegisterCacheAPI(router *gin.Engine, ctx context.Context, egrp *errgroup.Gr
 	}
 }
 
+// Periodically scan the /<runLocation>/pelican/monitoring directory to clean up test files
 func LaunchDirectorTestFileCleanup(ctx context.Context) {
 	server_utils.LaunchWatcherMaintenance(ctx,
 		[]string{filepath.Join(param.Cache_DataLocation.GetString(), "pelican", "monitoring")},

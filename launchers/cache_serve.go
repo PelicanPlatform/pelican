@@ -66,6 +66,8 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) (
 
 	xrootd.LaunchXrootdMaintenance(ctx, cacheServer, 2*time.Minute)
 
+	cache.LaunchDirectorTestFileCleanup(ctx)
+
 	if param.Cache_SelfTest.GetBool() {
 		err = cache.InitSelfTestDir()
 		if err != nil {
