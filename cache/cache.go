@@ -20,8 +20,13 @@ package cache
 
 import (
 	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"golang.org/x/sync/errgroup"
 )
@@ -38,4 +43,43 @@ func RegisterCacheAPI(router *gin.Engine, ctx context.Context, egrp *errgroup.Gr
 	{
 		group.POST("/directorTest", func(ctx *gin.Context) { server_utils.HandleDirectorTestResponse(ctx, notificationChan) })
 	}
+}
+
+func LaunchDirectorTestFileCleanup(ctx context.Context) {
+	server_utils.LaunchWatcherMaintenance(ctx,
+		[]string{filepath.Join(param.Cache_DataLocation.GetString(), "pelican", "monitoring")},
+		"cache director-based health test clean up",
+		time.Minute,
+		func(notifyEvent bool) error {
+			if !notifyEvent {
+				return nil
+			} else {
+				dirPath := filepath.Join(param.Cache_DataLocation.GetString(), "pelican", "monitoring")
+				dirInfo, err := os.Stat(dirPath)
+				if err != nil {
+					return nil
+				} else {
+					if !dirInfo.IsDir() {
+						return errors.New("monitoring path is not a directory: " + dirPath)
+					}
+				}
+				dirItems, err := os.ReadDir(dirPath)
+				if err != nil {
+					return err
+				}
+				if len(dirItems) <= 2 { // At mininum there are the test file and .cinfo file, and we don't want to remove the last two
+					return nil
+				}
+				for idx, item := range dirItems {
+					if idx <= len(dirItems)-1-2 { // For all but the latest two files (test file and its .cinfo file)
+						err := os.Remove(filepath.Join(dirPath, item.Name()))
+						if err != nil {
+							return err
+						}
+					}
+				}
+				return nil
+			}
+		},
+	)
 }
