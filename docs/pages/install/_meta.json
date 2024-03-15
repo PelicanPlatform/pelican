@@ -3,5 +3,5 @@
   "debian": "Debian and Ubuntu",
   "alpine": "Alpine Linux",
   "macos": "macOS",
-  "dockder": "Pelican Docker Image"
+  "docker": "Pelican Docker Image"
 }
