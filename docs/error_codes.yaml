@@ -1,0 +1,147 @@
+#
+# Copyright (C) 2023, Pelican Project, Morgridge Institute for Research
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you
+# may not use this file except in compliance with the License.  You may
+# obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+# This file contains structured documentation about the Pelican parameters.
+# While it is somewhat human-readable, it is meant to help with the documentation
+# generation.
+
+############################
+#    Client Error Codes    #
+############################
+
+############################
+#     Parameter Errors     #
+############################
+---
+type: Parameter
+code: 100
+clientExitCode: 4
+description: >-
+  If the client failed to start, or was started with invalid parameters, or otherwise believes what it
+  was asked to do is impossible or the request itself is malformed.
+retryable: false
+
+############################
+#    Resolution Errors     #
+############################
+---
+type: Resolution
+code: 200
+clientExitCode: 5
+description: >-
+  Indicates that the client failed to even attempt to contact the server
+retryable: false
+
+############################
+#      Contact Errors      #
+############################
+---
+type: Contact
+code: 300
+clientExitCode: 6
+description: >-
+  The client attempted to contact the server at its resolved address and failed to do so
+retryable: false
+---
+type: Contact.Director
+code: 301
+clientExitCode: 6
+description: >-
+  The client attempted to contact the director at its found address but failed to do so
+retryable: false
+---
+type: Contact.Cache
+code: 302
+clientExitCode: 11
+description: >-
+  The client attempted to contact the cache but failed to do so
+retryable: true
+---
+type: Contact.Origin
+code: 303
+clientExitCode: 6
+description: >-
+  The client attempted to contact the origin but failed to do so
+retryable: false
+
+############################
+#   Authorization Errors   #
+############################
+---
+type: Authorization
+code: 400
+clientExitCode: 7
+description: >-
+  The client contacted the server but failed to authenticate, or failed to authorize, or if
+  the server replied with an authorization error when the file was requested or sent.
+  Basically a HTTP/403 error
+retryable: false
+
+############################
+#   Specification Errors   #
+############################
+---
+type: Specification
+code: 500
+clientExitCode: 8
+description: >-
+  If the client successfully contacted the server and received a definitive response that the
+  desired file was not present or could not be created. Basically an HTTP/404 error. Usually
+  the submitters fault
+retryable: false
+---
+type: Specification.FileNotFound
+code: 501
+clientExitCode: 8
+description: >-
+  If the client successfully contacted the server but the desired file does not exist for download.
+  Basically an HTTP/404 error.
+retryable: false
+---
+type: Specification.FileNotCreated # TODO: this might not be needed
+code: 502
+clientExitCode: 8
+description: >-
+  If the client successfully contacted the server but the desired file for upload could not be created
+  for some reason
+retryable: false
+
+############################
+#     Transfer Errors      #
+############################
+---
+type: Transfer
+code: 600
+clientExitCode: 9
+description: >-
+  The client started transferring the file but did not complete it for some reason, or if the file
+  failed post-transfer validation
+retryable: true
+---
+type: Transfer.StoppedTransferError
+code: 601
+clientExitCode: 11
+description: >-
+  The client started transferring file(s) but it got cancelled by Pelican as it seemed to have stopped
+  transferring data
+retryable: true
+---
+type: Transfer.SlowTransferError
+code: 602
+clientExitCode: 11
+description: >-
+  The client started transferring data but the transfer takes longer than the configured timeout
+retryable: true
