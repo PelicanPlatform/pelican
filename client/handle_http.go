@@ -53,6 +53,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/error_codes"
 	"github.com/pelicanplatform/pelican/namespaces"
 	"github.com/pelicanplatform/pelican/param"
 )
@@ -85,6 +86,8 @@ var (
 			return item
 		},
 	)
+
+	PelicanError    error_codes.PelicanError
 )
 
 type (
@@ -1941,6 +1944,7 @@ Loop:
 					Duration:         resp.Duration(),
 					BytesTotal:       totalSize,
 				}
+				err = error_codes.NewTransfer_SlowTransferErrorError(err)
 				return
 
 			} else {

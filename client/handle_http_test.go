@@ -42,6 +42,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/mock"
+	"github.com/pelicanplatform/pelican/error_codes"
 	"github.com/pelicanplatform/pelican/namespaces"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
@@ -225,7 +226,8 @@ func TestSlowTransfers(t *testing.T) {
 
 	// Make sure the errors are correct
 	assert.NotNil(t, err)
-	assert.IsType(t, &SlowTransferError{}, err)
+	require.IsType(t, &error_codes.PelicanError{}, err)
+	assert.Contains(t, err.Error(), "Transfer.SlowTransferError Error: Error code 602:")
 }
 
 // Test stopped transfer
