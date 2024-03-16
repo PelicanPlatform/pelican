@@ -45,8 +45,8 @@ type (
 )
 
 var (
-	ErrUnknownOriginStorageType = errors.New("Unknown origin storage type")
-	ErrInvalidOriginFormat      = errors.New("invalid volume mount or ExportVolume format")
+	ErrUnknownOriginStorageType = errors.New("unknown origin storage type")
+	ErrInvalidOriginConfig      = errors.New("invalid origin configuration")
 )
 
 const (
@@ -137,12 +137,12 @@ func StringListToCapsHookFunc() mapstructure.DecodeHookFuncType {
 }
 
 func validateExportPaths(storagePrefix string, federationPrefix string) error {
-	if !strings.HasPrefix(storagePrefix, "/") || !strings.HasPrefix(federationPrefix, "/") {
-		return errors.Wrapf(ErrInvalidOriginFormat, "volume mount/ExportVolume paths must be absolute and begin with '/', but %s:%s was provided", storagePrefix, federationPrefix)
+	if storagePrefix == "" || federationPrefix == "" {
+		return errors.Wrap(ErrInvalidOriginConfig, "volume mount/ExportVolume paths cannot be empty")
 	}
 
-	if storagePrefix == "" || federationPrefix == "" {
-		return errors.Wrap(ErrInvalidOriginFormat, "volume mount/ExportVolume paths cannot be empty")
+	if !strings.HasPrefix(storagePrefix, "/") || !strings.HasPrefix(federationPrefix, "/") {
+		return errors.Wrapf(ErrInvalidOriginConfig, "volume mount/ExportVolume paths must be absolute and begin with '/', but %s:%s was provided", storagePrefix, federationPrefix)
 	}
 	return nil
 }
@@ -278,6 +278,13 @@ func GetOriginExports() ([]OriginExports, error) {
 			FederationPrefix: federationPrefix,
 			StoragePrefix:    "",
 			Capabilities:     capabilities,
+		}
+
+		if param.Origin_S3Region.GetString() == "" || param.Origin_S3ServiceName.GetString() == "" ||
+			param.Origin_S3ServiceUrl.GetString() == "" {
+			return nil, errors.Wrap(ErrInvalidOriginConfig, "The S3 backend is missing configuration options to run properly."+
+				" You must specify a region (Origin.S3Region), a service name (Origin.S3ServiceName), and a service URL (S3ServiceUrl)"+
+				" via the command line or via your configuration file.")
 		}
 
 		viper.Set("Origin.FederationPrefix", federationPrefix)

@@ -220,14 +220,14 @@ func TestGetExports(t *testing.T) {
 		viper.Set("Origin.ExportVolumes", "")
 		_, err := GetOriginExports()
 		assert.Error(t, err)
-		assert.ErrorIs(t, err, ErrInvalidOriginFormat)
+		assert.ErrorIs(t, err, ErrInvalidOriginConfig)
 
 		viper.Reset()
 		viper.Set("Origin.StorageType", "posix")
 		viper.Set("Origin.ExportVolumes", "foo")
 		_, err = GetOriginExports()
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrInvalidOriginFormat)
+		assert.ErrorIs(t, err, ErrInvalidOriginConfig)
 
 		viper.Reset()
 		viper.Set("Origin.StorageType", "blah")
