@@ -194,10 +194,10 @@ func TestMultiExportOrigin(t *testing.T) {
 
 	exports, err := common.GetOriginExports()
 	require.NoError(t, err)
-	require.Len(t, *exports, 2)
+	require.Len(t, exports, 2)
 	// Override the object store prefix to a temp directory
-	(*exports)[0].StoragePrefix = t.TempDir()
-	(*exports)[1].StoragePrefix = t.TempDir()
+	exports[0].StoragePrefix = t.TempDir()
+	exports[1].StoragePrefix = t.TempDir()
 
 	// Disable functionality we're not using (and is difficult to make work on Mac)
 	viper.Set("Origin.EnableCmsd", false)

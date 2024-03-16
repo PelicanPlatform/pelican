@@ -147,7 +147,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 
 		switch mode {
 		case "posix":
-			if len(*originExports) == 0 {
+			if len(originExports) == 0 {
 				return shutdownCancel, errors.Errorf(`
 	Export information was not provided.
 	To specify exports via the command line, use:
@@ -249,9 +249,9 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		if err != nil {
 			return shutdownCancel, err
 		}
-		errCh := make(chan error, len(*originExports))
+		errCh := make(chan error, len(originExports))
 		var wg sync.WaitGroup
-		wg.Add(len(*originExports))
+		wg.Add(len(originExports))
 		// NOTE: A previous version of this functionality (in the days of assuming only one export) used
 		// use param.Server_ExternalWebUrl as the endpoint to check. Justin thinks the assumption here
 		// was that it only made sense to serve an origin and a cache at the same time if a local director
@@ -261,7 +261,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		if err != nil {
 			return shutdownCancel, errors.Wrap(err, "Failed to parse director URL when checking origin advertisements before cache launch")
 		}
-		for _, export := range *originExports {
+		for _, export := range originExports {
 			go func(prefix string) {
 				defer wg.Done()
 				// Probably no need to incur another err check since we already checked the director URL.
