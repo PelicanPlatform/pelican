@@ -156,6 +156,7 @@ type Config struct {
 		ExportVolumes []string
 		Exports interface{}
 		FederationPrefix string
+		HttpServiceUrl string
 		Mode string
 		Multiuser bool
 		NamespacePrefix string
@@ -401,6 +402,7 @@ type configWithType struct {
 		ExportVolumes struct { Type string; Value []string }
 		Exports struct { Type string; Value interface{} }
 		FederationPrefix struct { Type string; Value string }
+		HttpServiceUrl struct { Type string; Value string }
 		Mode struct { Type string; Value string }
 		Multiuser struct { Type string; Value bool }
 		NamespacePrefix struct { Type string; Value string }

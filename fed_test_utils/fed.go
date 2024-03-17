@@ -49,7 +49,7 @@ import (
 
 type (
 	FedTest struct {
-		Exports *[]common.OriginExports
+		Exports []common.OriginExports
 		Token   string
 		Ctx     context.Context
 		Egrp    *errgroup.Group
@@ -95,7 +95,7 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	ft.Exports = exports
 
 	// Override the test directory from the config file with our temp directory
-	for i := 0; i < len(*ft.Exports); i++ {
+	for i := 0; i < len(ft.Exports); i++ {
 		originDir, err := os.MkdirTemp("", fmt.Sprintf("Export%d", i))
 		assert.NoError(t, err)
 		t.Cleanup(func() {
@@ -104,7 +104,7 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 		})
 
 		// Set the storage prefix to the temporary origin directory
-		((*ft.Exports)[i]).StoragePrefix = originDir
+		(ft.Exports[i]).StoragePrefix = originDir
 		// Our exports object becomes global -- we must reset in between each fed test
 		t.Cleanup(func() {
 			common.ResetOriginExports()

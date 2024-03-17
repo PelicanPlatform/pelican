@@ -263,7 +263,7 @@ func TestLargeFile(t *testing.T) {
 		Path:   param.LocalCache_Socket.GetString(),
 	}
 
-	fp, err := os.OpenFile(filepath.Join((*ft.Exports)[0].StoragePrefix, "hello_world.txt"), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+	fp, err := os.OpenFile(filepath.Join(ft.Exports[0].StoragePrefix, "hello_world.txt"), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
 	require.NoError(t, err)
 	size := writeBigBuffer(t, fp, 100)
 
@@ -295,8 +295,8 @@ func TestPurge(t *testing.T) {
 
 	size := 0
 	for idx := 0; idx < 5; idx++ {
-		log.Debugln("Will write origin file", filepath.Join((*ft.Exports)[0].StoragePrefix, fmt.Sprintf("hello_world.txt.%d", idx)))
-		fp, err := os.OpenFile(filepath.Join((*ft.Exports)[0].StoragePrefix, fmt.Sprintf("hello_world.txt.%d", idx)), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+		log.Debugln("Will write origin file", filepath.Join(ft.Exports[0].StoragePrefix, fmt.Sprintf("hello_world.txt.%d", idx)))
+		fp, err := os.OpenFile(filepath.Join(ft.Exports[0].StoragePrefix, fmt.Sprintf("hello_world.txt.%d", idx)), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
 		require.NoError(t, err)
 		size = writeBigBuffer(t, fp, 1)
 	}
@@ -361,8 +361,8 @@ func TestForcePurge(t *testing.T) {
 	// Populate the cache with our test files
 	size := 0
 	for idx := 0; idx < 4; idx++ {
-		log.Debugln("Will write origin file", filepath.Join((*ft.Exports)[0].StoragePrefix, fmt.Sprintf("hello_world.txt.%d", idx)))
-		fp, err := os.OpenFile(filepath.Join((*ft.Exports)[0].StoragePrefix, fmt.Sprintf("hello_world.txt.%d", idx)), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+		log.Debugln("Will write origin file", filepath.Join(ft.Exports[0].StoragePrefix, fmt.Sprintf("hello_world.txt.%d", idx)))
+		fp, err := os.OpenFile(filepath.Join(ft.Exports[0].StoragePrefix, fmt.Sprintf("hello_world.txt.%d", idx)), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
 		require.NoError(t, err)
 		size = writeBigBuffer(t, fp, 1)
 	}

@@ -139,46 +139,9 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 
 	if modules.IsEnabled(config.OriginType) {
 
-		mode := param.Origin_StorageType.GetString()
-		originExports, err := common.GetOriginExports()
+		_, err := common.GetOriginExports()
 		if err != nil {
 			return shutdownCancel, err
-		}
-
-		switch mode {
-		case "posix":
-			if len(*originExports) == 0 {
-				return shutdownCancel, errors.Errorf(`
-	Export information was not provided.
-	To specify exports via the command line, use:
-
-				-v /mnt/foo:/bar -v /mnt/test:/baz
-
-	to export the directories /mnt/foo and /mnt/test under the namespace prefixes /bar and /baz, respectively.
-
-	Alternatively, specify Origin.Exports in the parameters.yaml file:
-
-	Origin:
-		Exports:
-		- StoragePrefix: /mnt/foo
-		  FederationPrefix: /bar
-		  Capabilities: ["PublicReads", "Writes", "Listings"]
-		- StoragePrefix: /mnt/test
-		  FederationPrefix: /baz
-		  Capabilities: ["Writes"]
-
-	to export the directories /mnt/foo and /mnt/test under the namespace prefixes /bar and /baz, respectively (with listed permissions).
-	`)
-			}
-		case "s3":
-			if param.Origin_S3Region.GetString() == "" || param.Origin_S3ServiceName.GetString() == "" ||
-				param.Origin_S3ServiceUrl.GetString() == "" {
-				return shutdownCancel, errors.Errorf("The S3 origin is missing configuration options to run properly." +
-					" You must specify a region, a service name and a service URL via the command line or via" +
-					" your configuration file.")
-			}
-		default:
-			return shutdownCancel, errors.Errorf("Currently-supported origin modes include posix and s3.")
 		}
 
 		server, err := OriginServe(ctx, engine, egrp, modules)
@@ -249,9 +212,9 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		if err != nil {
 			return shutdownCancel, err
 		}
-		errCh := make(chan error, len(*originExports))
+		errCh := make(chan error, len(originExports))
 		var wg sync.WaitGroup
-		wg.Add(len(*originExports))
+		wg.Add(len(originExports))
 		// NOTE: A previous version of this functionality (in the days of assuming only one export) used
 		// use param.Server_ExternalWebUrl as the endpoint to check. Justin thinks the assumption here
 		// was that it only made sense to serve an origin and a cache at the same time if a local director
@@ -261,7 +224,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		if err != nil {
 			return shutdownCancel, errors.Wrap(err, "Failed to parse director URL when checking origin advertisements before cache launch")
 		}
-		for _, export := range *originExports {
+		for _, export := range originExports {
 			go func(prefix string) {
 				defer wg.Done()
 				// Probably no need to incur another err check since we already checked the director URL.

@@ -111,7 +111,7 @@ func OriginServeFinish(ctx context.Context, egrp *errgroup.Group) error {
 		return err
 	}
 
-	for _, export := range *originExports {
+	for _, export := range originExports {
 		if err := server_ui.RegisterNamespaceWithRetry(ctx, egrp, export.FederationPrefix); err != nil {
 			return err
 		}

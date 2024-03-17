@@ -19,11 +19,13 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 )
 
@@ -63,6 +65,30 @@ func handleCLI(args []string) error {
 			return nil
 		}
 		err := Execute()
+		if errors.Is(err, common.ErrInvalidOriginConfig) {
+			fmt.Fprintf(os.Stderr, `
+Export information was not correct.
+For POSIX, to specify exports via the command line, use:
+
+	-v /mnt/foo:/bar -v /mnt/test:/baz
+
+to export the directories /mnt/foo and /mnt/test under the namespace prefixes /bar and /baz, respectively.
+
+Alternatively, specify Origin.Exports in the parameters.yaml file:
+
+	Origin:
+		Exports:
+		- StoragePrefix: /mnt/foo
+		  FederationPrefix: /bar
+		  Capabilities: ["PublicReads", "Writes", "Listings"]
+		- StoragePrefix: /mnt/test
+		  FederationPrefix: /baz
+		  Capabilities: ["Writes"]
+
+to export the directories /mnt/foo and /mnt/test under the namespace prefixes /bar and /baz, respectively (with listed permissions).
+`)
+
+		}
 		if err != nil {
 			os.Exit(1)
 		}

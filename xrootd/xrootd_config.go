@@ -88,6 +88,8 @@ type (
 		EnableListings    bool
 		SelfTest          bool
 		CalculatedPort    string
+		FederationPrefix  string
+		HttpServiceUrl    string
 		RunLocation       string
 		StorageType       string
 		S3Bucket          string
@@ -180,12 +182,15 @@ func CheckOriginXrootdEnv(exportPath string, server server_utils.XRootDServer, u
 		return err
 	}
 
-	backendType := param.Origin_StorageType.GetString()
+	backendType, err := common.ParseOriginStorageType(param.Origin_StorageType.GetString())
+	if err != nil {
+		return err
+	}
 	switch backendType {
-	case "posix":
+	case common.OriginStoragePosix:
 		// For each export, we symlink the exported directory, currently at /var/run/pelican/export/<export.FederationPrefix>,
 		// to the actual data source, which is what we get from the Export object's StoragePrefix
-		for _, export := range *originExports {
+		for _, export := range originExports {
 			destPath := path.Clean(filepath.Join(exportPath, export.FederationPrefix))
 			err := config.MkdirAll(filepath.Dir(destPath), 0755, uid, gid)
 			if err != nil {
@@ -200,8 +205,8 @@ func CheckOriginXrootdEnv(exportPath string, server server_utils.XRootDServer, u
 		}
 		// Set the mount to our export path now that everything is symlinked
 		viper.Set("Xrootd.Mount", exportPath)
-	case "s3":
-		if len(*originExports) > 1 {
+	case common.OriginStorageS3:
+		if len(originExports) > 1 {
 			return errors.New("Multi exports for s3 backends not yet implemented")
 		}
 	}
@@ -597,7 +602,16 @@ func ConfigXrootd(ctx context.Context, origin bool) (string, error) {
 	if err != nil {
 		return "", errors.Wrap(err, "failed to generate Origin export list for xrootd config")
 	}
-	xrdConfig.Origin.Exports = *originExports
+	xrdConfig.Origin.Exports = originExports
+
+	if xrdConfig.Origin.StorageType == "https" {
+		if xrdConfig.Origin.HttpServiceUrl == "" {
+			xrdConfig.Origin.HttpServiceUrl = param.Origin_HttpServiceUrl.GetString()
+		}
+		if xrdConfig.Origin.FederationPrefix == "" {
+			xrdConfig.Origin.FederationPrefix = param.Origin_FederationPrefix.GetString()
+		}
+	}
 
 	// If the S3 URL style is configured via yaml, the CLI check in cmd/origin.go won't catch invalid values.
 	if urlStyle := xrdConfig.Origin.S3UrlStyle; urlStyle != "" {

@@ -275,7 +275,7 @@ func TestGetAndPutAuth(t *testing.T) {
 	t.Run("testPelicanObjectPutAndGetWithPelicanUrl", func(t *testing.T) {
 		config.SetPreferredPrefix("pelican")
 		// Set path for object to upload/download
-		for _, export := range *fed.Exports {
+		for _, export := range fed.Exports {
 			tempPath := tempFile.Name()
 			fileName := filepath.Base(tempPath)
 			uploadURL := fmt.Sprintf("pelican://%s/%s", export.FederationPrefix, fileName)
@@ -299,7 +299,7 @@ func TestGetAndPutAuth(t *testing.T) {
 	// This tests pelican object get/put with an osdf url
 	t.Run("testPelicanObjectPutAndGetWithOSDFUrl", func(t *testing.T) {
 		config.SetPreferredPrefix("pelican")
-		for _, export := range *fed.Exports {
+		for _, export := range fed.Exports {
 			// Set path for object to upload/download
 			tempPath := tempFile.Name()
 			fileName := filepath.Base(tempPath)
@@ -325,7 +325,7 @@ func TestGetAndPutAuth(t *testing.T) {
 	// This tests object get/put with a pelican:// url
 	t.Run("testOsdfObjectPutAndGetWithPelicanUrl", func(t *testing.T) {
 		config.SetPreferredPrefix("osdf")
-		for _, export := range *fed.Exports {
+		for _, export := range fed.Exports {
 			// Set path for object to upload/download
 			tempPath := tempFile.Name()
 			fileName := filepath.Base(tempPath)
@@ -350,7 +350,7 @@ func TestGetAndPutAuth(t *testing.T) {
 	// This tests pelican object get/put with an osdf url
 	t.Run("testOsdfObjectPutAndGetWithOSDFUrl", func(t *testing.T) {
 		config.SetPreferredPrefix("osdf")
-		for _, export := range *fed.Exports {
+		for _, export := range fed.Exports {
 			// Set path for object to upload/download
 			tempPath := tempFile.Name()
 			fileName := filepath.Base(tempPath)
@@ -383,7 +383,7 @@ func TestGetPublicRead(t *testing.T) {
 	fed := fed_test_utils.NewFedTest(t, bothPublicOriginCfg)
 
 	t.Run("testPubObjGet", func(t *testing.T) {
-		for _, export := range *fed.Exports {
+		for _, export := range fed.Exports {
 			testFileContent := "test file content"
 			// Drop the testFileContent into the origin directory
 			tempFile, err := os.Create(filepath.Join(export.StoragePrefix, "test.txt"))
@@ -468,7 +468,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 
 	t.Run("testPelicanRecursiveGetAndPutOsdfURL", func(t *testing.T) {
 		config.SetPreferredPrefix("pelican")
-		for _, export := range *fed.Exports {
+		for idx, export := range fed.Exports {
 			// Set path for object to upload/download
 			tempPath := tempDir
 			dirName := filepath.Base(tempPath)
@@ -548,7 +548,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 	t.Run("testPelicanRecursiveGetAndPutPelicanURL", func(t *testing.T) {
 		config.SetPreferredPrefix("pelican")
 
-		for _, export := range *fed.Exports {
+		for idx, export := range fed.Exports {
 			// Set path for object to upload/download
 			tempPath := tempDir
 			dirName := filepath.Base(tempPath)
@@ -624,7 +624,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 
 	t.Run("testOsdfRecursiveGetAndPutOsdfURL", func(t *testing.T) {
 		config.SetPreferredPrefix("osdf")
-		for _, export := range *fed.Exports {
+		for _, export := range fed.Exports {
 			// Set path for object to upload/download
 			tempPath := tempDir
 			dirName := filepath.Base(tempPath)
@@ -709,7 +709,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 
 	t.Run("testOsdfRecursiveGetAndPutPelicanURL", func(t *testing.T) {
 		config.SetPreferredPrefix("osdf")
-		for _, export := range *fed.Exports {
+		for _, export := range fed.Exports {
 			// Set path for object to upload/download
 			tempPath := tempDir
 			dirName := filepath.Base(tempPath)

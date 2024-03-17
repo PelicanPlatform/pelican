@@ -986,6 +986,16 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 		viper.SetDefault("Cache.Url", fmt.Sprintf("https://%v", param.Server_Hostname.GetString()))
 	}
 
+	if viper.GetString("Origin.StorageType") == "https" {
+		if viper.GetString("Origin.HTTPServiceUrl") == "" {
+			return errors.New("Origin.HTTPServiceUrl may not be empty")
+		}
+		_, err := url.Parse(viper.GetString("Origin.HTTPServiceUrl"))
+		if err != nil {
+			return errors.Wrap(err, "unable to parse Origin.HTTPServiceUrl as a URL")
+		}
+	}
+
 	webPort := param.Server_WebPort.GetInt()
 	if webPort < 0 {
 		return errors.Errorf("the Server.WebPort setting of %d is invalid; TCP ports must be greater than 0", webPort)

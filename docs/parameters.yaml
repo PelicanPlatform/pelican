@@ -428,7 +428,7 @@ components: ["origin"]
 ---
 name: Origin.StorageType
 description: >-
-  The type of storage underpinning the origin. Currently supported types are "posix" and "s3".
+  The type of storage underpinning the origin. Currently supported types are "posix", "https", and "s3".
 type: string
 default: "posix"
 components: ["origin"]
@@ -748,6 +748,16 @@ description: >-
   or "virtual" if objects are fetched at <bucket>.<service-url>/<object>
 type: string
 default: path
+components: ["origin"]
+---
+name: Origin.HttpServiceUrl
+description: >-
+  If Origin.StorageType is set to `https`, the service URL is used as the base for requests to the backend.  To generate the
+  request, the Origin.FederationPrefix is removed from the object name, then the result is joined with the service URL.
+  For example, if one sets `Origin.HTTPServiceUrl=https://example.com/testfiles` and `Origin.FederationPrefix=/foo`, then a request
+  for an object named `/foo/bar` will generate a request to https://example.com/testfiles/bar.
+type: string
+default: none
 components: ["origin"]
 ---
 ############################
