@@ -162,6 +162,7 @@ var (
 	OIDC_UserInfoEndpoint = StringParam{"OIDC.UserInfoEndpoint"}
 	Origin_ExportVolume = StringParam{"Origin.ExportVolume"}
 	Origin_FederationPrefix = StringParam{"Origin.FederationPrefix"}
+	Origin_HttpServiceUrl = StringParam{"Origin.HttpServiceUrl"}
 	Origin_Mode = StringParam{"Origin.Mode"}
 	Origin_NamespacePrefix = StringParam{"Origin.NamespacePrefix"}
 	Origin_RunLocation = StringParam{"Origin.RunLocation"}

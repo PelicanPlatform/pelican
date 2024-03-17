@@ -289,10 +289,15 @@ func GetOriginExports() ([]OriginExports, error) {
 
 		viper.Set("Origin.FederationPrefix", federationPrefix)
 	case OriginStorageHTTPS:
+		// Storage prefix is unused by HTTPS so we put in a dummy value of /
 		originExport = OriginExports{
 			FederationPrefix: param.Origin_FederationPrefix.GetString(),
-			StoragePrefix:    param.Origin_StoragePrefix.GetString(),
+			StoragePrefix:    "/",
 			Capabilities:     capabilities,
+		}
+
+		if err = validateExportPaths("/", originExport.FederationPrefix); err != nil {
+			return nil, err
 		}
 	}
 
