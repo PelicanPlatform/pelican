@@ -37,6 +37,8 @@ WORKDIR /pelican
 
 COPY . .
 COPY --from=website-build /webapp/out ./web_ui/frontend/out
+# Remove generate package as we already had generated structs in the repo
+RUN rm -rf ./generate
 
 ENV GOOS="linux"
 ENV GOARCH="amd64"
