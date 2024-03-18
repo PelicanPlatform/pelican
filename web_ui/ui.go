@@ -36,7 +36,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/spf13/viper"
@@ -247,12 +246,13 @@ func handleWebUIAuth(ctx *gin.Context) {
 				ctx.Next()
 				return
 			}
-			isAdmin, msg := CheckAdmin(user)
+			isAdmin, _ := CheckAdmin(user)
 			if isAdmin {
 				ctx.Next()
 				return
 			} else {
-				ctx.AbortWithStatusJSON(http.StatusForbidden, common.SimpleApiResp{Status: common.RespFailed, Msg: msg})
+				ctx.String(http.StatusForbidden, "You don't have the permission to view this page. If you think this is wrong, please contact your server admin.")
+				ctx.Abort()
 				return
 			}
 		} else {

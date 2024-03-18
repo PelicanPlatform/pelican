@@ -128,6 +128,7 @@ type Config struct {
 		TokenRefreshInterval time.Duration
 	}
 	OIDC struct {
+		AdminUsers []string
 		AuthorizationEndpoint string
 		ClientID string
 		ClientIDFile string
@@ -139,7 +140,6 @@ type Config struct {
 		UserInfoEndpoint string
 	}
 	Origin struct {
-		AdminUsers []string
 		EnableBroker bool
 		EnableCmsd bool
 		EnableDirListing bool
@@ -375,6 +375,7 @@ type configWithType struct {
 		TokenRefreshInterval struct { Type string; Value time.Duration }
 	}
 	OIDC struct {
+		AdminUsers struct { Type string; Value []string }
 		AuthorizationEndpoint struct { Type string; Value string }
 		ClientID struct { Type string; Value string }
 		ClientIDFile struct { Type string; Value string }
@@ -386,7 +387,6 @@ type configWithType struct {
 		UserInfoEndpoint struct { Type string; Value string }
 	}
 	Origin struct {
-		AdminUsers struct { Type string; Value []string }
 		EnableBroker struct { Type string; Value bool }
 		EnableCmsd struct { Type string; Value bool }
 		EnableDirListing struct { Type string; Value bool }

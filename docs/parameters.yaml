@@ -613,21 +613,13 @@ name: Origin.EnableOAuth
 description: >-
   Indicate whether the origin should allow user login via OAuth2/OIDC with third-party
   authentication providers such as CILogon.
+
+  If set to true, it is recommended that you also set `OIDC.AdminUsers` to a list of users
+  to give admin privilege. This is because origin web UI doesn't have a public, non-admin view,
+  and an empty AdminUsers list will lead to "permission denied" error
+  for all users logged into origin web UI via OAuth.
 type: bool
 default: false
-components: ["origin"]
----
-name: Origin.AdminUsers
-description: >-
-  A string slice of "subject" claim of users to give admin permission for the origin web UI when they are
-  logged in via OAuth.
-
-  The "subject" claim should be the "CILogon User Identifier" from CILogon user page: https://cilogon.org/
-
-  Note that the origin web UI doesn't have a public, non-admin view, and an empty AdminUsers list
-  will lead to "permission denied" error for all users logged into origin web UI via OAuth.
-type: stringSlice
-default: none
 components: ["origin"]
 ---
 name: Origin.EnableBroker
@@ -1047,10 +1039,14 @@ components: ["registry"]
 ---
 name: Registry.AdminUsers
 description: >-
+  [Deprecated] `Registry.AdminUsers` is deprecated and will be removed in the future releases. Please migrate to use `OIDC.AdminUsers` instead.
+
   A string slice of "subject" claim of users to give admin permission for registry UI.
 
   The "subject" claim should be the "CILogon User Identifier" from CILogon user page: https://cilogon.org/
 type: stringSlice
+deprecated: true
+replacedby: ["OIDC.AdminUsers"]
 default: []
 components: ["registry"]
 ---
@@ -1551,6 +1547,16 @@ description: >-
 type: string
 default: none
 components: ["registry", "director"]
+---
+name: OIDC.AdminUsers
+description: >-
+  A string slice of "subject" claim of users to give admin permission for the server web UI,
+  who are authenticated through OAuth/OIDC.
+
+  The "subject" claim should be the "CILogon User Identifier" from CILogon user page: https://cilogon.org/
+type: stringSlice
+default: []
+components: ["origin", "registry"]
 ---
 ############################
 #   XRootD-level Configs   #

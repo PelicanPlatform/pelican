@@ -57,6 +57,7 @@ func GetDeprecated() map[string][]string {
         "Origin.ExportVolume": []string{"Origin.ExportVolumes"},
         "Origin.Mode": []string{"Origin.StorageType"},
         "Origin.NamespacePrefix": []string{"Origin.FederationPrefix"},
+        "Registry.AdminUsers": []string{"OIDC.AdminUsers"},
         "Xrootd.Port": []string{"Origin.Port", "Cache.Port"},
         "Xrootd.RunLocation": []string{"Cache.RunLocation", "Origin.RunLocation"},
     }
@@ -229,7 +230,7 @@ var (
 	Director_OriginResponseHostnames = StringSliceParam{"Director.OriginResponseHostnames"}
 	Issuer_GroupRequirements = StringSliceParam{"Issuer.GroupRequirements"}
 	Monitoring_AggregatePrefixes = StringSliceParam{"Monitoring.AggregatePrefixes"}
-	Origin_AdminUsers = StringSliceParam{"Origin.AdminUsers"}
+	OIDC_AdminUsers = StringSliceParam{"OIDC.AdminUsers"}
 	Origin_ExportVolumes = StringSliceParam{"Origin.ExportVolumes"}
 	Origin_ScitokensRestrictedPaths = StringSliceParam{"Origin.ScitokensRestrictedPaths"}
 	Registry_AdminUsers = StringSliceParam{"Registry.AdminUsers"}
