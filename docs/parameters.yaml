@@ -1006,7 +1006,8 @@ components: ["director"]
 ---
 name: Director.FilteredServers
 description: >-
-  A list of server names to not to redirect client requests to.
+  A list of server host names to not to redirect client requests to. This is for admins to put a list of
+  servers in the federation into downtime.
 type: stringSlice
 default: none
 components: ["director"]

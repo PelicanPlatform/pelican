@@ -67,9 +67,9 @@ func checkFilter(serverName string) (bool, filterType) {
 	filteredServersMutex.RLock()
 	defer filteredServersMutex.RUnlock()
 
-	status, ok := filteredServers[serverName]
+	status, exists := filteredServers[serverName]
 	// No filter entry
-	if !ok {
+	if !exists {
 		return false, ""
 	} else {
 		// Has filter entry
@@ -151,7 +151,7 @@ func ConfigFilterdServers() {
 	filteredServersMutex.Lock()
 	defer filteredServersMutex.Unlock()
 
-	if len(param.Director_FilteredServers.GetStringSlice()) == 0 {
+	if !param.Director_FilteredServers.IsSet() {
 		return
 	}
 

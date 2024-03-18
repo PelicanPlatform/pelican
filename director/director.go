@@ -35,19 +35,19 @@ type (
 	}
 
 	listServerResponse struct {
-		Name               string            `json:"name"`
-		AuthURL            string            `json:"authUrl"`
-		BrokerURL          string            `json:"brokerUrl"`
-		URL                string            `json:"url"`    // This is server's XRootD URL for file transfer
-		WebURL             string            `json:"webUrl"` // This is server's Web interface and API
-		Type               common.ServerType `json:"type"`
-		Latitude           float64           `json:"latitude"`
-		Longitude          float64           `json:"longitude"`
-		EnableWrite        bool              `json:"enableWrite"`
-		EnableFallbackRead bool              `json:"enableFallbackRead"`
-		Filtered           bool              `json:"filtered"`
-		FilteredType       filterType        `json:"filteredType"`
-		Status             HealthTestStatus  `json:"status"`
+		Name         string            `json:"name"`
+		AuthURL      string            `json:"authUrl"`
+		BrokerURL    string            `json:"brokerUrl"`
+		URL          string            `json:"url"`    // This is server's XRootD URL for file transfer
+		WebURL       string            `json:"webUrl"` // This is server's Web interface and API
+		Type         common.ServerType `json:"type"`
+		Latitude     float64           `json:"latitude"`
+		Longitude    float64           `json:"longitude"`
+		Writes       bool              `json:"enableWrite"`
+		DirectReads  bool              `json:"enableFallbackRead"`
+		Filtered     bool              `json:"filtered"`
+		FilteredType filterType        `json:"filteredType"`
+		Status       HealthTestStatus  `json:"status"`
 	}
 
 	statResponse struct {
@@ -99,19 +99,19 @@ func listServers(ctx *gin.Context) {
 		}
 		filtered, ft := checkFilter(server.Name)
 		res := listServerResponse{
-			Name:               server.Name,
-			BrokerURL:          server.BrokerURL.String(),
-			AuthURL:            server.AuthURL.String(),
-			URL:                server.URL.String(),
-			WebURL:             server.WebURL.String(),
-			Type:               server.Type,
-			Latitude:           server.Latitude,
-			Longitude:          server.Longitude,
-			EnableWrite:        server.EnableWrite,
-			EnableFallbackRead: server.EnableFallbackRead,
-			Filtered:           filtered,
-			FilteredType:       ft,
-			Status:             healthStatus,
+			Name:         server.Name,
+			BrokerURL:    server.BrokerURL.String(),
+			AuthURL:      server.AuthURL.String(),
+			URL:          server.URL.String(),
+			WebURL:       server.WebURL.String(),
+			Type:         server.Type,
+			Latitude:     server.Latitude,
+			Longitude:    server.Longitude,
+			Writes:       server.Writes,
+			DirectReads:  server.DirectReads,
+			Filtered:     filtered,
+			FilteredType: ft,
+			Status:       healthStatus,
 		}
 		resList = append(resList, res)
 	}
@@ -159,22 +159,25 @@ func queryOrigins(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, res)
 }
 
+// A gin route handler that given a server hostname through path variable `name`,
+// checks and adds the server to a list of servers to be bypassed when the director redirects
+// object requests from the client
 func handleFilterServer(ctx *gin.Context) {
 	sn := strings.TrimPrefix(ctx.Param("name"), "/")
 	if sn == "" {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "name is a required path parameter"})
 		return
 	}
-	filtered, ft := checkFilter(sn)
+	filtered, filterType := checkFilter(sn)
 	if filtered {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Can't filter a server that already has been fitlered with type " + ft})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Can't filter a server that already has been fitlered with type " + filterType})
 		return
 	}
 	filteredServersMutex.Lock()
 	defer filteredServersMutex.Unlock()
 
 	// If we previously temporarily allowed a server, we switch to permFiltered (reset)
-	if ft == tempAllowed {
+	if filterType == tempAllowed {
 		filteredServers[sn] = permFiltered
 	} else {
 		filteredServers[sn] = tempFiltered
@@ -182,6 +185,9 @@ func handleFilterServer(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"message": "success"})
 }
 
+// A gin route handler that given a server hostname through path variable `name`,
+// checks and removes the server from a list of servers to be bypassed when the director redirects
+// object requests from the client
 func handleAllowServer(ctx *gin.Context) {
 	sn := strings.TrimPrefix(ctx.Param("name"), "/")
 	if sn == "" {
