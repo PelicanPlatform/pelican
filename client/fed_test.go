@@ -436,7 +436,7 @@ func TestStatHttp(t *testing.T) {
 		objectSize, err := client.DoStat(ctx, uploadURL)
 		assert.NoError(t, err)
 		if err == nil {
-				assert.Equal(t, int64(17), int64(objectSize))
+			assert.Equal(t, int64(17), int64(objectSize))
 		}
 	})
 
@@ -462,7 +462,7 @@ func TestStatHttp(t *testing.T) {
 		objectSize, err := client.DoStat(ctx, uploadURL)
 		assert.NoError(t, err)
 		if err == nil {
-				assert.Equal(t, int64(17), int64(objectSize))
+			assert.Equal(t, int64(17), int64(objectSize))
 		}
 	})
 
