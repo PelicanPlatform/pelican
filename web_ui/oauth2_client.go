@@ -245,5 +245,10 @@ func ConfigOAuthClientAPIs(engine *gin.Engine) error {
 		ciLogonGroup.GET("/login", handleOAuthLogin)
 		ciLogonGroup.GET("/callback", handleOAuthCallback)
 	}
+	oauthGroup := engine.Group("/api/v1.0/auth/oauth", sessionHandler)
+	{
+		oauthGroup.GET("/login", handleOAuthLogin)
+		oauthGroup.GET("/callback", handleOAuthCallback)
+	}
 	return nil
 }
