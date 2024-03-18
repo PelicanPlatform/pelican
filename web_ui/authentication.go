@@ -195,7 +195,7 @@ func CheckAdmin(user string) (isAdmin bool, message string) {
 		return true, ""
 	}
 	adminList := param.Registry_AdminUsers.GetStringSlice()
-	if adminList == nil {
+	if !param.Registry_AdminUsers.IsSet() {
 		return false, "Registry.AdminUsers is not set, and user is not root user. Admin check returns false"
 	}
 	for _, admin := range adminList {

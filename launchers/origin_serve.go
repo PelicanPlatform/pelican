@@ -64,7 +64,8 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		}
 	}
 
-	if param.Origin_EnableOAuth.GetBool() {
+	// Only register origin OAuth endpoint if registry is not enabled
+	if param.Origin_EnableOAuth.GetBool() && !config.IsServerEnabled(config.RegistryType) {
 		if err := web_ui.ConfigOAuthClientAPIs(engine); err != nil {
 			return nil, err
 		}
