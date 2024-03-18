@@ -123,7 +123,7 @@ func generateTestFile() (string, error) {
 	}
 
 	if err := os.Rename(tmpFileCinfoPath, finalFileCinfoPath); err != nil {
-		return "", errors.Wrapf(err, "Unable to move self-test cinfo file from temp dir %q to desired location %q", tmpFileCinfoPath, finalFileCinfoPath)
+		return "", errors.Wrapf(err, "Unable to move self-test cinfo file from temp location %q to desired location %q", tmpFileCinfoPath, finalFileCinfoPath)
 	}
 
 	cachePort := param.Cache_Port.GetInt()
