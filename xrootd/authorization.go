@@ -292,10 +292,18 @@ func EmitAuthfile(server server_utils.XRootDServer) error {
 			// There exists a public access already in the authfile
 			if server.GetServerType().IsEnabled(config.OriginType) {
 				outStr := "u * /.well-known lr "
-				// Set up public reads if the origin is configured for it
-				if param.Origin_EnablePublicReads.GetBool() {
-					outStr += param.Origin_NamespacePrefix.GetString() + " lr "
+				// Set up public reads only for the namespaces that are public
+				originExports, err := common.GetOriginExports()
+				if err != nil {
+					return errors.Wrapf(err, "Failed to get origin exports")
 				}
+
+				for _, export := range *originExports {
+					if export.Capabilities.PublicReads {
+						outStr += export.FederationPrefix + " lr "
+					}
+				}
+
 				output.Write([]byte(outStr + strings.Join(words[2:], " ") + "\n"))
 			} else if server.GetServerType().IsEnabled(config.CacheType) && param.Cache_SelfTest.GetBool() {
 				// Set up cache self-test public read
@@ -313,9 +321,19 @@ func EmitAuthfile(server server_utils.XRootDServer) error {
 	// If Origin has no authfile already exists, add the ./well-known to the authfile
 	if !foundPublicLine && server.GetServerType().IsEnabled(config.OriginType) {
 		outStr := "u * /.well-known lr"
-		if param.Origin_EnablePublicReads.GetBool() {
-			outStr += " " + param.Origin_NamespacePrefix.GetString() + " lr"
+
+		// Configure the Authfile for each of the public exports we have in the origin
+		originExports, err := common.GetOriginExports()
+		if err != nil {
+			return errors.Wrapf(err, "Failed to get origin exports")
 		}
+
+		for _, export := range *originExports {
+			if export.Capabilities.PublicReads {
+				outStr += " " + export.FederationPrefix + " lr"
+			}
+		}
+
 		outStr += "\n"
 		output.Write([]byte(outStr))
 	}
@@ -521,7 +539,11 @@ func makeSciTokensCfg() (cfg ScitokensCfg, err error) {
 // Writes out the server's scitokens.cfg configuration
 func EmitScitokensConfig(server server_utils.XRootDServer) error {
 	if originServer, ok := server.(*origin_ui.OriginServer); ok {
-		return WriteOriginScitokensConfig(originServer.GetAuthorizedPrefixes())
+		authedPrefixes, err := originServer.GetAuthorizedPrefixes()
+		if err != nil {
+			return err
+		}
+		return WriteOriginScitokensConfig(authedPrefixes)
 	} else if cacheServer, ok := server.(*cache_ui.CacheServer); ok {
 		return WriteCacheScitokensConfig(cacheServer.GetNamespaceAds())
 	} else {

@@ -1,96 +1,50 @@
 import DownloadsComponent from "/components/DownloadsComponent";
 
-# Installing the Pelican Platform
+# Install Pelican
 
-This document explains how a user can download and install Pelican client or Pelican server components.
+This document lists the operating system requirements to install Pelican and explains how a user can download Pelican client or Pelican server components.
 
-## Installation Steps:
+> Pelican also has Docker images for users who want to serve **Pelican servers**. Refer to [Run Pelican Server using Docker image](./install/docker.mdx) for instructions.
 
+## Supported Operating Sytems
 
-### 1. Install the Pelican Platform Binary
+Pelican supports the following operating systems:
+
+* [Red Hat Enterprise Linux (CentOS, Fedora, Alma, Rocky, or openSUSE)](./install/rhel.mdx)
+* [Debian or Ubuntu](./install/debian.mdx)
+* [Alpine Linux](./install/alpine.mdx)
+* [macOS](./install/macos.mdx) [*]
+* Windows [*]
+
+> Note that for macOS and Windows, Pelican only supports the _client_ functionality but not the _server_ functionality. To launch a Pelican server on macOS or Windows, use [Pelican Docker image](./install/docker.mdx) instead.
+
+> Note that installation of Pelican on other operating systems is possible, but not recommended or supported.
+
+## Download Pelican Binary
+
 Download the proper binary for the system you are running on and select which version you would like to install. If you do not know which binary to install, below is a chart that may help:
 
 <DownloadsComponent />
 
-##### RPM, APK, or DEB?
-###### RPM (Red Hat Package Manager):
+### RPM, APK, or DEB?
+
+#### RPM (Red Hat Package Manager):
 You want to install a `.rpm` package if you are using a Red Hat-based Linux distribution system such as: Red Hat Enterprise Linux, CentOS, Fedora, or openSUSE.
 
-###### APK (Alpine Package Keeper):
+#### APK (Alpine Package Keeper):
 You want to install a `.apk` package if you are using an Alpine Linux system.
 
-###### DEB (Debian Package):
+#### DEB (Debian Package):
 You want to install a `.deb` package if you are using a Linux distribution system such as: Debian, Ubuntu, or something similar.
 
-##### What about tar and zip?
+#### What about tar and zip?
 If you want a more manual setup, you can download the `.tar.gz` or `.zip` files and extract the binary where you need it. However, the above packages are recommended for more inexperienced users.
 
-##### What version should I download?
+### What version should I download?
 Our versions are built like so:
 For example: 7.1.2
 - 7 represents the major version release
 - 1 represents feature releases
 - 2 represents a bug fix/patch release
 
-We recommend you to use the latest feature or major release version so it includes the latest bug fixes and features.
-
-### 2. Extract the Binary
-Once the package has finished downloading, place it in your workspace
-
-##### RPM:
-To install RPM packages, you can use the dnf or yum package manager. Just make sure you have sudo access if you are not root:
-```console
-sudo yum install pelican-7.1.2-1.x86_64.rpm
-```
-Replace 'yum' with 'dnf' for dnf install
-
-##### DEB:
-To install Debian packages, you can use apt or dpkg package manager:
-```console
-sudo dpkg -i pelican-7.1.2-1_amd64.deb
-sudo apt-get install -f
-```
-Or
-```console
-sudo apt install ./pelican-7.1.2-1_amd64.deb
-```
-
-##### APK:
-To install APK packages on Alpine Linux, you can use the apk package manager:
-```console
-apk add pelican_amd64.apk
-```
-
-##### Tarballs*:
-To install `.tar.gz` packages, you can extract with tar:
-```console
-tar -xzf pelican_Darwin_x86_64.tar.gz
-```
-
-##### Zip*:
-To install `.zip` packages, you can use [7zip](https://www.7-zip.org/) or other programs to unzip your file. Simply right click on the `.zip` file and extract all contents to a directory of your choice
-
-
->**\*Note:** If you install a tarball or zipfile, you don't actually *install* Pelican, you just extract the binary. It's covered below how you can still use Pelican with the binary, but if you would like to have similar functionality as the other packages, you need to add Pelican to your PATH manually.
-
-### 3. Test Functionality of the Pelican Platform
-##### For rpm, deb, and apk
-If you downloaded this way, Pelican should automatically be added to the path. You can check this by:
-```console
-which pelican
-```
-and make sure you get an output. You can then check functionality by running a simple **object copy** command:
-```console
-pelican -f osg-htc.org object copy /ospool/uc-shared/public/OSG-Staff/validation/test.txt .
-testfile.txt 36.00 b / 36.00 b [=============================================================================================] Done!
-```
-
-##### For tarballs and zip, using the binary itself:
-Once extracted, make sure you are in the same directory as the **Pelican** executable. To test if everything works, we can do a simple **object copy** command:
-
-```console
-./pelican -f osg-htc.org object copy /ospool/uc-shared/public/OSG-Staff/validation/test.txt .
-testfile.txt 36.00 b / 36.00 b [=============================================================================================] Done!
-```
-
-You should now notice a file **testfile.txt** now in your directory. Congrats on making your first Pelican Object Copy!
+The download section above always shows the latest released version of Pelican and we recommend you to use the latest feature or major release version so it includes the latest bug fixes and features. If you would like to download a previous version, please refer to our [GitHub release page](https://github.com/PelicanPlatform/pelican/releases).

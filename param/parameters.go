@@ -49,28 +49,65 @@ type ObjectParam struct {
 	name string
 }
 
+func GetDeprecated() map[string][]string {
+    return map[string][]string{
+        "Origin.EnableDirListing": []string{"Origin.EnableListings"},
+        "Origin.EnableFallbackRead": []string{"Origin.EnableDirectReads"},
+        "Origin.EnableWrite": []string{"Origin.EnableWrites"},
+        "Origin.ExportVolume": []string{"Origin.ExportVolumes"},
+        "Origin.Mode": []string{"Origin.StorageType"},
+        "Origin.NamespacePrefix": []string{"Origin.FederationPrefix"},
+        "Xrootd.Port": []string{"Origin.Port", "Cache.Port"},
+        "Xrootd.RunLocation": []string{"Cache.RunLocation", "Origin.RunLocation"},
+    }
+}
+
 func (sP StringParam) GetString() string {
 	return viper.GetString(sP.name)
+}
+
+func (sP StringParam) IsSet() bool {
+	return viper.IsSet(sP.name)
 }
 
 func (slP StringSliceParam) GetStringSlice() []string {
 	return viper.GetStringSlice(slP.name)
 }
 
+func (slP StringSliceParam) IsSet() bool {
+	return viper.IsSet(slP.name)
+}
+
 func (iP IntParam) GetInt() int {
 	return viper.GetInt(iP.name)
+}
+
+func (iP IntParam) IsSet() bool {
+	return viper.IsSet(iP.name)
 }
 
 func (bP BoolParam) GetBool() bool {
 	return viper.GetBool(bP.name)
 }
 
+func (bP BoolParam) IsSet() bool {
+	return viper.IsSet(bP.name)
+}
+
 func (bP DurationParam) GetDuration() time.Duration {
 	return viper.GetDuration(bP.name)
 }
 
+func (bP DurationParam) IsSet() bool {
+	return viper.IsSet(bP.name)
+}
+
 func (bP ObjectParam) Unmarshal(rawVal any) error {
 	return viper.UnmarshalKey(bP.name, rawVal)
+}
+
+func (bP ObjectParam) IsSet() bool {
+	return viper.IsSet(bP.name)
 }
 
 var (
@@ -124,6 +161,7 @@ var (
 	OIDC_TokenEndpoint = StringParam{"OIDC.TokenEndpoint"}
 	OIDC_UserInfoEndpoint = StringParam{"OIDC.UserInfoEndpoint"}
 	Origin_ExportVolume = StringParam{"Origin.ExportVolume"}
+	Origin_FederationPrefix = StringParam{"Origin.FederationPrefix"}
 	Origin_Mode = StringParam{"Origin.Mode"}
 	Origin_NamespacePrefix = StringParam{"Origin.NamespacePrefix"}
 	Origin_RunLocation = StringParam{"Origin.RunLocation"}
@@ -137,6 +175,8 @@ var (
 	Origin_ScitokensDefaultUser = StringParam{"Origin.ScitokensDefaultUser"}
 	Origin_ScitokensNameMapFile = StringParam{"Origin.ScitokensNameMapFile"}
 	Origin_ScitokensUsernameClaim = StringParam{"Origin.ScitokensUsernameClaim"}
+	Origin_StoragePrefix = StringParam{"Origin.StoragePrefix"}
+	Origin_StorageType = StringParam{"Origin.StorageType"}
 	Origin_Url = StringParam{"Origin.Url"}
 	Origin_XRootDPrefix = StringParam{"Origin.XRootDPrefix"}
 	Plugin_Token = StringParam{"Plugin.Token"}
@@ -190,6 +230,7 @@ var (
 	Director_OriginResponseHostnames = StringSliceParam{"Director.OriginResponseHostnames"}
 	Issuer_GroupRequirements = StringSliceParam{"Issuer.GroupRequirements"}
 	Monitoring_AggregatePrefixes = StringSliceParam{"Monitoring.AggregatePrefixes"}
+	Origin_ExportVolumes = StringSliceParam{"Origin.ExportVolumes"}
 	Origin_ScitokensRestrictedPaths = StringSliceParam{"Origin.ScitokensRestrictedPaths"}
 	Registry_AdminUsers = StringSliceParam{"Registry.AdminUsers"}
 	Server_Modules = StringSliceParam{"Server.Modules"}
@@ -238,12 +279,16 @@ var (
 	Origin_EnableBroker = BoolParam{"Origin.EnableBroker"}
 	Origin_EnableCmsd = BoolParam{"Origin.EnableCmsd"}
 	Origin_EnableDirListing = BoolParam{"Origin.EnableDirListing"}
+	Origin_EnableDirectReads = BoolParam{"Origin.EnableDirectReads"}
 	Origin_EnableFallbackRead = BoolParam{"Origin.EnableFallbackRead"}
 	Origin_EnableIssuer = BoolParam{"Origin.EnableIssuer"}
+	Origin_EnableListings = BoolParam{"Origin.EnableListings"}
 	Origin_EnablePublicReads = BoolParam{"Origin.EnablePublicReads"}
+	Origin_EnableReads = BoolParam{"Origin.EnableReads"}
 	Origin_EnableUI = BoolParam{"Origin.EnableUI"}
 	Origin_EnableVoms = BoolParam{"Origin.EnableVoms"}
 	Origin_EnableWrite = BoolParam{"Origin.EnableWrite"}
+	Origin_EnableWrites = BoolParam{"Origin.EnableWrites"}
 	Origin_Multiuser = BoolParam{"Origin.Multiuser"}
 	Origin_ScitokensMapSubject = BoolParam{"Origin.ScitokensMapSubject"}
 	Origin_SelfTest = BoolParam{"Origin.SelfTest"}
@@ -280,6 +325,7 @@ var (
 	GeoIPOverrides = ObjectParam{"GeoIPOverrides"}
 	Issuer_AuthorizationTemplates = ObjectParam{"Issuer.AuthorizationTemplates"}
 	Issuer_OIDCAuthenticationRequirements = ObjectParam{"Issuer.OIDCAuthenticationRequirements"}
+	Origin_Exports = ObjectParam{"Origin.Exports"}
 	Registry_CustomRegistrationFields = ObjectParam{"Registry.CustomRegistrationFields"}
 	Registry_Institutions = ObjectParam{"Registry.Institutions"}
 	Shoveler_IPMapping = ObjectParam{"Shoveler.IPMapping"}

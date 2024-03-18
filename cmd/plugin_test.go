@@ -33,17 +33,18 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/viper"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/pelicanplatform/pelican/classads"
+	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/launchers"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
-	"golang.org/x/sync/errgroup"
-
-	"github.com/spf13/viper"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // TestReadMultiTransfer test if we can read multiple transfers from stdin
@@ -119,14 +120,15 @@ func (f *FedTest) Spinup() {
 	err = os.Chmod(originDir, permissions)
 	require.NoError(f.T, err)
 
-	viper.Set("Origin.ExportVolume", originDir+":/test")
-	viper.Set("Origin.Mode", "posix")
-	viper.Set("Origin.EnableFallbackRead", true)
+	viper.Set("Origin.FederationPrefix", "/test")
+	viper.Set("Origin.StoragePrefix", originDir)
+	viper.Set("Origin.StorageType", "posix")
+	viper.Set("Origin.EnableDirectReads", true)
 	// Disable functionality we're not using (and is difficult to make work on Mac)
 	viper.Set("Origin.EnableCmsd", false)
 	viper.Set("Origin.EnableMacaroons", false)
 	viper.Set("Origin.EnableVoms", false)
-	viper.Set("Origin.EnableWrite", true)
+	viper.Set("Origin.EnableWrites", true)
 	viper.Set("TLSSkipVerify", true)
 	viper.Set("Server.EnableUI", false)
 	viper.Set("Registry.DbLocation", filepath.Join(f.T.TempDir(), "ns-registry.sqlite"))
@@ -172,6 +174,7 @@ func (f *FedTest) Spinup() {
 func (f *FedTest) Teardown() {
 	os.RemoveAll(f.TmpPath)
 	os.RemoveAll(f.OriginDir)
+	common.ResetOriginExports()
 	f.Cancel()
 	f.FedCancel()
 	assert.NoError(f.T, f.ErrGroup.Wait())
@@ -181,6 +184,8 @@ func (f *FedTest) Teardown() {
 // Test the main function for the pelican plugin
 func TestStashPluginMain(t *testing.T) {
 	viper.Reset()
+	common.ResetOriginExports()
+
 	config.SetPreferredPrefix("STASH")
 
 	// Temp dir for downloads
@@ -240,7 +245,6 @@ func TestStashPluginMain(t *testing.T) {
 	assert.Contains(t, output, successfulDownloadMsg)
 	amountDownloaded := "Downloaded bytes: 17"
 	assert.Contains(t, output, amountDownloaded)
-	viper.Reset()
 }
 
 func TestWriteOutfile(t *testing.T) {

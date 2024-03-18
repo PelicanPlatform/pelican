@@ -1,0 +1,12 @@
+# Origin configuration to mimic older single-export style origins.
+# Note that this stands in place of an Env Var config because this can be
+# directly mimicked with env vars due to lack of yaml lists.
+
+Origin:
+  StorageType: "posix"
+  StoragePrefix: /foo
+  FederationPrefix: /my/namespace
+  EnableWrites: false
+  EnablePublicReads: true
+  EnableListings: false
+  EnableDirectReads: true

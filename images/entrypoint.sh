@@ -138,6 +138,6 @@ if [ $# -ne 0 ]; then
             ;;
     esac
 else
-  echo "usage: [command] [args...]"
-  echo "example: docker run pelican_platform/cache serve -p 8443"
+  echo "Usage: [args...]"
+  echo "example: docker run pelican_platform/cache -p 8443"
 fi

@@ -1,0 +1,7 @@
+{
+  "rhel": "CentOS, Fedora, or openSUSE",
+  "debian": "Debian and Ubuntu",
+  "alpine": "Alpine Linux",
+  "macos": "macOS",
+  "docker": "Pelican Docker Image"
+}

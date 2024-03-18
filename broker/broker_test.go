@@ -32,6 +32,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
@@ -40,12 +47,6 @@ import (
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/web_ui"
-	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	"golang.org/x/sync/errgroup"
 )
 
 type (
@@ -81,7 +82,7 @@ func Setup(t *testing.T, ctx context.Context, egrp *errgroup.Group) {
 	config.InitConfig()
 	viper.Set("Server.WebPort", "0")
 	viper.Set("Registry.DbLocation", filepath.Join(dirpath, "ns-registry.sqlite"))
-	viper.Set("Origin.NamespacePrefix", "/foo")
+	viper.Set("Origin.FederationPrefix", "/foo")
 
 	err := config.InitServer(ctx, config.BrokerType)
 	require.NoError(t, err)
@@ -121,7 +122,7 @@ func doRetrieveRequest(t *testing.T, ctx context.Context, dur time.Duration) (*h
 
 	oReq := originRequest{
 		Origin: originUrl.Hostname(),
-		Prefix: param.Origin_NamespacePrefix.GetString(),
+		Prefix: param.Origin_FederationPrefix.GetString(),
 	}
 	reqBytes, err := json.Marshal(&oReq)
 	require.NoError(t, err)
@@ -132,7 +133,7 @@ func doRetrieveRequest(t *testing.T, ctx context.Context, dur time.Duration) (*h
 	require.NoError(t, err)
 	brokerAud.Path = ""
 
-	token, err := createToken(param.Origin_NamespacePrefix.GetString(), param.Server_Hostname.GetString(), brokerAud.String(), token_scopes.Broker_Retrieve)
+	token, err := createToken(param.Origin_FederationPrefix.GetString(), param.Server_Hostname.GetString(), brokerAud.String(), token_scopes.Broker_Retrieve)
 	require.NoError(t, err)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", brokerEndpoint, reqReader)

@@ -28,7 +28,7 @@ type (
 		GetServerType() config.ServerType
 		SetNamespaceAds([]common.NamespaceAdV2)
 		GetNamespaceAds() []common.NamespaceAdV2
-		CreateAdvertisement(name string, serverUrl string, serverWebUrl string) (common.OriginAdvertiseV2, error)
+		CreateAdvertisement(name string, serverUrl string, serverWebUrl string) (*common.OriginAdvertiseV2, error)
 		GetNamespaceAdsFromDirector() error
 	}
 

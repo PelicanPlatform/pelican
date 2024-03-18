@@ -55,7 +55,7 @@ func mockNamespaceAds(size int, serverPrefix string) []common.NamespaceAdV2 {
 		namespaceAds[i] = common.NamespaceAdV2{
 			PublicRead: false,
 			Caps: common.Capabilities{
-				PublicRead: false,
+				PublicReads: false,
 			},
 			Path: mockPathPreix + serverPrefix + "/" + fmt.Sprint(i),
 			Issuer: []common.TokenIssuer{{

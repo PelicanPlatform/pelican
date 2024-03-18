@@ -1,0 +1,9 @@
+Origin:
+  # Things that configure the origin itself
+  StorageType: "posix"
+  # The actual namespaces we export
+  Exports:
+    - StoragePrefix: /<SHOULD BE OVERRIDDEN>
+      FederationPrefix: /test
+      # Don't set Reads -- it should be toggled true by setting PublicReads
+      Capabilities: ["PublicReads", "Writes", "DirectReads"]

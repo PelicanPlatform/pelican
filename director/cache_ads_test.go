@@ -52,7 +52,7 @@ func TestGetAdsForPath(t *testing.T) {
 	*/
 	nsAd1 := common.NamespaceAdV2{
 		PublicRead: false,
-		Caps:       common.Capabilities{PublicRead: false},
+		Caps:       common.Capabilities{PublicReads: false},
 		Path:       "/chtc",
 		Issuer: []common.TokenIssuer{{
 			IssuerUrl: url.URL{
@@ -65,7 +65,7 @@ func TestGetAdsForPath(t *testing.T) {
 
 	nsAd2 := common.NamespaceAdV2{
 		PublicRead: true,
-		Caps:       common.Capabilities{PublicRead: true},
+		Caps:       common.Capabilities{PublicReads: true},
 		Path:       "/chtc/PUBLIC",
 		Issuer: []common.TokenIssuer{{
 			IssuerUrl: url.URL{
@@ -78,7 +78,7 @@ func TestGetAdsForPath(t *testing.T) {
 
 	nsAd3 := common.NamespaceAdV2{
 		PublicRead: true,
-		Caps:       common.Capabilities{PublicRead: true},
+		Caps:       common.Capabilities{PublicReads: true},
 		Path:       "/chtc/PUBLIC2/",
 		Issuer: []common.TokenIssuer{{
 			IssuerUrl: url.URL{
@@ -232,7 +232,7 @@ func TestConfigCacheEviction(t *testing.T) {
 	}
 	mockNamespaceAd := common.NamespaceAdV2{
 		PublicRead: false,
-		Caps:       common.Capabilities{PublicRead: false},
+		Caps:       common.Capabilities{PublicReads: false},
 		Path:       "/foo/bar/",
 		Issuer:     []common.TokenIssuer{{IssuerUrl: url.URL{}}},
 		Generation: []common.TokenGen{{

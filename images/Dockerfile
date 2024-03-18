@@ -37,6 +37,8 @@ WORKDIR /pelican
 
 COPY . .
 COPY --from=website-build /webapp/out ./web_ui/frontend/out
+# Remove generate package as we already had generated structs in the repo
+RUN rm -rf ./generate
 
 ENV GOOS="linux"
 ENV GOARCH="amd64"
@@ -68,6 +70,12 @@ RUN yum -y update \
 FROM dependency-build AS xrootd-plugin-builder
 # Install necessary build dependencies
 RUN  yum install -y xrootd-devel xrootd-server-devel xrootd-client-devel curl-devel openssl-devel git cmake3 gcc-c++ sqlite-devel
+
+# The ADD command with a api.github.com URL in the next couple of sections
+# are for cache-hashing of the external repository that we rely on to build
+# the image
+ADD https://api.github.com/repos/PelicanPlatform/xrdcl-pelican/git/refs/heads/main /tmp/hash-xrdcl-pelican
+
 # Install xrdcl-pelican plugin and replace the xrdcl-http plugin
 RUN \
     git clone https://github.com/PelicanPlatform/xrdcl-pelican.git && \
@@ -75,6 +83,9 @@ RUN \
     mkdir build && cd build && \
     cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
     make && make install
+
+ADD https://api.github.com/repos/PelicanPlatform/xrootd-s3-http/git/refs/heads/main /tmp/hash-xrootd-s3-http
+
 # Install the S3 and HTTP server plugins for XRootD. For now we do this from source
 # until we can sort out the RPMs.
 RUN \
@@ -83,6 +94,10 @@ RUN \
     mkdir build && cd build && \
     cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
     make install
+
+ADD https://api.github.com/repos/nlohmann/json/git/refs/heads/master /tmp/hash-json
+ADD https://api.github.com/repos/pboettch/json-schema-validator/git/refs/heads/master /tmp/hash-json
+ADD https://api.github.com/repos/PelicanPlatform/lotman/git/refs/heads/main /tmp/hash-json
 
 # LotMan Installation
 # First install dependencies
@@ -178,32 +193,28 @@ COPY --from=xrootd-plugin-builder /usr/include/nlohmann /usr/include/nlohmann
 # Copy the JSON schema validator library
 COPY --from=xrootd-plugin-builder /usr/lib64/libnlohmann_json_schema_validator.a /usr/lib64/
 
-# Eventually add more entrypoint commands here
 COPY images/entrypoint.sh /entrypoint.sh
+
+# Copy here to reduce dependency on the pelican-build stage in the final-stage and x-base stage
+COPY --from=pelican-build /pelican/dist/pelican_linux_amd64_v1/pelican /pelican/pelican
+COPY --from=pelican-build /pelican/dist/pelican_linux_amd64_v1/pelican /pelican/osdf
+RUN chmod +x /pelican/pelican \
+    && chmod +x /pelican/osdf \
+    && chmod +x /entrypoint.sh
 
 ######################
 # Pelican base stage #
 ######################
 FROM final-stage AS pelican-base
 
-WORKDIR /pelican
-
-# Copy over needed files
-COPY --from=pelican-build /pelican/dist/pelican_linux_amd64_v1/pelican /pelican/pelican
-RUN chmod +x /pelican/pelican \
-    && chmod +x /entrypoint.sh
+RUN rm -rf /pelican/osdf
 
 ######################
 # OSDF base stage #
 ######################
 FROM final-stage AS osdf-base
 
-WORKDIR /pelican
-
-# Copy over needed files
-COPY --from=pelican-build /pelican/dist/pelican_linux_amd64_v1/pelican /pelican/osdf
-RUN chmod +x /pelican/osdf \
-    && chmod +x /entrypoint.sh
+RUN rm -rf /pelican/pelican
 
 ####################
 # pelican/cache    #
@@ -211,17 +222,17 @@ RUN chmod +x /pelican/osdf \
 
 FROM pelican-base AS cache
 
-WORKDIR /pelican
-ENTRYPOINT ["/entrypoint.sh", "pelican", "cache"]
+ENTRYPOINT [ "/entrypoint.sh", "pelican", "cache"]
+CMD [ "serve" ]
 
 ####################
-# pelican/origin    #
+# pelican/origin   #
 ####################
 
 FROM pelican-base AS origin
 
-WORKDIR /pelican
-ENTRYPOINT ["/entrypoint.sh", "pelican", "origin"]
+ENTRYPOINT [ "/entrypoint.sh" ,"pelican", "origin"]
+CMD [ "serve" ]
 
 ####################
 # pelican/director #
@@ -229,8 +240,8 @@ ENTRYPOINT ["/entrypoint.sh", "pelican", "origin"]
 
 FROM pelican-base AS director
 
-WORKDIR /pelican
-ENTRYPOINT ["/entrypoint.sh", "pelican", "director"]
+ENTRYPOINT [ "/entrypoint.sh" ,"pelican", "director"]
+CMD [ "serve" ]
 
 ####################
 # pelican/registry #
@@ -238,30 +249,30 @@ ENTRYPOINT ["/entrypoint.sh", "pelican", "director"]
 
 FROM pelican-base AS registry
 
-WORKDIR /pelican
-ENTRYPOINT ["/entrypoint.sh", "pelican", "registry"]
+ENTRYPOINT [ "/entrypoint.sh" ,"pelican", "registry"]
+CMD [ "serve" ]
 
 ####################################
 # OSDF                             #
 ####################################
 
 ####################
-# osdf/cache    #
+# osdf/cache       #
 ####################
 
 FROM osdf-base AS osdf-cache
 
-WORKDIR /pelican
-ENTRYPOINT ["/entrypoint.sh", "osdf", "cache"]
+ENTRYPOINT [ "/entrypoint.sh" ,"osdf", "cache"]
+CMD [ "serve" ]
 
 ####################
-# osdf/origin    #
+# osdf/origin      #
 ####################
 
 FROM osdf-base AS osdf-origin
 
-WORKDIR /pelican
-ENTRYPOINT ["/entrypoint.sh", "osdf", "origin"]
+ENTRYPOINT [ "/entrypoint.sh" ,"osdf", "origin"]
+CMD [ "serve" ]
 
 ####################
 # osdf/director    #
@@ -269,8 +280,8 @@ ENTRYPOINT ["/entrypoint.sh", "osdf", "origin"]
 
 FROM osdf-base AS osdf-director
 
-WORKDIR /pelican
-ENTRYPOINT ["/entrypoint.sh", "osdf", "director"]
+ENTRYPOINT [ "/entrypoint.sh" ,"osdf", "director"]
+CMD [ "serve" ]
 
 
 ####################
@@ -279,5 +290,5 @@ ENTRYPOINT ["/entrypoint.sh", "osdf", "director"]
 
 FROM osdf-base AS osdf-registry
 
-WORKDIR /pelican
-ENTRYPOINT ["/entrypoint.sh", "osdf", "registry"]
+ENTRYPOINT [ "/entrypoint.sh" ,"osdf", "registry"]
+CMD [ "serve" ]

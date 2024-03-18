@@ -24,6 +24,7 @@ import (
 	"regexp"
 	"sync/atomic"
 
+	"github.com/go-kit/log/term"
 	log "github.com/sirupsen/logrus"
 	"github.com/sirupsen/logrus/hooks/writer"
 )
@@ -82,7 +83,7 @@ func (fh *RegexpFilterHook) Levels() []log.Level {
 }
 
 func (rt *regexpTransformHook) Levels() []log.Level {
-	return log.AllLevels
+	return rt.hook.LogLevels
 }
 
 // Process a single log entry coming from logrus; iterate through the
@@ -131,8 +132,10 @@ func initFilterLogging() {
 	if !addedGlobalFilters {
 		log.AddHook(&globalFilters)
 		addedGlobalFilters = true
-		log.SetOutput(io.Discard)
+		// Set the writer to what logrus has
+		globalTransform.hook.Writer = log.StandardLogger().Out
 		globalTransform.hook.LogLevels = hookLevel
+		log.SetOutput(io.Discard)
 		log.AddHook(globalTransform)
 	}
 }
@@ -158,4 +161,16 @@ func RemoveFilter(name string) {
 		}
 	}
 	globalFilters.filters.Store(&result)
+}
+
+func SetLogging(logLevel log.Level) {
+	textFormatter := log.TextFormatter{}
+	textFormatter.DisableLevelTruncation = true
+	textFormatter.FullTimestamp = true
+	// Since we redirect log.Out to io.Discard, logrus will treat the output as non-terminal
+	// and won't format logs with color. Here we bypass logrus check by forcing the color
+	// and provide our check. Note that when calling SetLogging, io.Out hasn't been changed yet.
+	textFormatter.ForceColors = term.IsTerminal(log.StandardLogger().Out)
+	log.SetFormatter(&textFormatter)
+	log.SetLevel(logLevel)
 }

@@ -46,6 +46,7 @@ type TemplateData struct {
 }
 
 var requiredKeys = [3]string{"description", "default", "type"}
+var deprecatedMap = make(map[string][]string)
 
 func GenParamEnum() {
 	/*
@@ -114,6 +115,29 @@ func GenParamEnum() {
 		j2 := map[string]interface{}{entry["name"].(string): j}
 		fullJsonInt = append(fullJsonInt, j2)
 
+		// Handle deprecated parameters
+		if deprecated, ok := entry["deprecated"].(bool); ok && deprecated {
+			if entry["replacedby"] == nil {
+				panic(fmt.Sprintf("Parameter entry '%s' is deprecated but missing 'replacedby' key. If there is no replacement, use 'none'", entry["name"]))
+			}
+			var replacedBySlice []string
+			// If the replaced by entry is a string, convert it to a slice
+			if replacedBy, ok := entry["replacedby"].(string); ok {
+				replacedBySlice = []string{replacedBy}
+			} else if replacedBy, ok := entry["replacedby"].([]interface{}); ok {
+				// Convert each element to a string
+				for _, v := range replacedBy {
+					if vStr, ok := v.(string); ok {
+						replacedBySlice = append(replacedBySlice, vStr)
+					}
+				}
+			} else {
+				panic(fmt.Sprintf("Parameter entry '%s' has invalid 'replacedby' key. It should be a string or a slice of strings", entry["name"]))
+			}
+
+			deprecatedMap[entry["name"].(string)] = replacedBySlice
+		}
+
 		rawName := entry["name"].(string)
 		name := strings.ReplaceAll(rawName, ".", "_")
 		pType := entry["type"].(string)
@@ -156,7 +180,8 @@ func GenParamEnum() {
 		BoolMap        map[string]string
 		DurationMap    map[string]string
 		ObjectMap      map[string]string
-	}{StringMap: stringParamMap, StringSliceMap: stringSliceParamMap, IntMap: intParamMap, BoolMap: boolParamMap, DurationMap: durationParamMap, ObjectMap: objectParamMap})
+		DeprecatedMap  map[string][]string
+	}{StringMap: stringParamMap, StringSliceMap: stringSliceParamMap, IntMap: intParamMap, BoolMap: boolParamMap, DurationMap: durationParamMap, ObjectMap: objectParamMap, DeprecatedMap: deprecatedMap})
 
 	if err != nil {
 		panic(err)
@@ -278,7 +303,6 @@ func GenParamStruct() {
 		entry := values[i].(map[string]interface{})
 
 		// Skip required YAML field check as has been done in GenParamEnum
-
 		pName := entry["name"].(string)
 		pType := entry["type"].(string)
 		goType := ""
@@ -401,28 +425,60 @@ type ObjectParam struct {
 	name string
 }
 
+func GetDeprecated() map[string][]string {
+    return map[string][]string{
+        {{- range $key, $value := .DeprecatedMap}}
+        "{{$key}}": []string{{"{"}}{{range $i, $v := $value}}{{if $i}}, {{end}}"{{$v}}"{{end}}},
+        {{- end}}
+    }
+}
+
 func (sP StringParam) GetString() string {
 	return viper.GetString(sP.name)
+}
+
+func (sP StringParam) IsSet() bool {
+	return viper.IsSet(sP.name)
 }
 
 func (slP StringSliceParam) GetStringSlice() []string {
 	return viper.GetStringSlice(slP.name)
 }
 
+func (slP StringSliceParam) IsSet() bool {
+	return viper.IsSet(slP.name)
+}
+
 func (iP IntParam) GetInt() int {
 	return viper.GetInt(iP.name)
+}
+
+func (iP IntParam) IsSet() bool {
+	return viper.IsSet(iP.name)
 }
 
 func (bP BoolParam) GetBool() bool {
 	return viper.GetBool(bP.name)
 }
 
+func (bP BoolParam) IsSet() bool {
+	return viper.IsSet(bP.name)
+}
+
 func (bP DurationParam) GetDuration() time.Duration {
 	return viper.GetDuration(bP.name)
 }
 
+func (bP DurationParam) IsSet() bool {
+	return viper.IsSet(bP.name)
+}
+
 func (bP ObjectParam) Unmarshal(rawVal any) error {
 	return viper.UnmarshalKey(bP.name, rawVal)
+}
+
+func (bP ObjectParam) IsSet() bool {
+	return viper.IsSet(bP.name)
 }
 
 var ({{range $key, $value := .StringMap}}

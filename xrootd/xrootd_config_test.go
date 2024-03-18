@@ -32,15 +32,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/origin_ui"
-	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/test_utils"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/pelicanplatform/pelican/common"
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/origin_ui"
+	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 type xrootdTest struct {
@@ -50,6 +52,7 @@ type xrootdTest struct {
 
 func (x *xrootdTest) setup() {
 	viper.Reset()
+	common.ResetOriginExports()
 	config.InitConfig()
 	dirname, err := os.MkdirTemp("", "tmpDir")
 	require.NoError(x.T, err)
@@ -77,6 +80,9 @@ func TestXrootDOriginConfig(t *testing.T) {
 		os.RemoveAll(dirname)
 	})
 	viper.Reset()
+	common.ResetOriginExports()
+	defer viper.Reset()
+	defer common.ResetOriginExports()
 	viper.Set("Origin.RunLocation", dirname)
 	viper.Set("Xrootd.RunLocation", dirname)
 	config.InitConfig()
@@ -244,6 +250,7 @@ func TestXrootDCacheConfig(t *testing.T) {
 		os.RemoveAll(dirname)
 	})
 	viper.Reset()
+	common.ResetOriginExports()
 	viper.Set("Cache.RunLocation", dirname)
 	config.InitConfig()
 	configPath, err := ConfigXrootd(ctx, false)
@@ -251,6 +258,8 @@ func TestXrootDCacheConfig(t *testing.T) {
 	assert.NotNil(t, configPath)
 
 	t.Run("TestCacheThrottlePluginEnabled", func(t *testing.T) {
+		defer viper.Reset()
+		defer common.ResetOriginExports()
 		xrootd := xrootdTest{T: t}
 		xrootd.setup()
 
@@ -271,10 +280,11 @@ func TestXrootDCacheConfig(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Contains(t, string(content), "xrootd.fslib throttle default")
 		assert.Contains(t, string(content), "throttle.throttle concurrency 10")
-		viper.Reset()
 	})
 
 	t.Run("TestCacheThrottlePluginDisabled", func(t *testing.T) {
+		defer viper.Reset()
+		defer common.ResetOriginExports()
 		xrootd := xrootdTest{T: t}
 		xrootd.setup()
 
@@ -292,8 +302,6 @@ func TestXrootDCacheConfig(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotContains(t, string(content), "xrootd.fslib throttle default")
 		assert.NotContains(t, string(content), "throttle.throttle concurrency")
-		viper.Reset()
-
 	})
 
 	t.Run("TestCacheOfsCorrectConfig", func(t *testing.T) {
@@ -522,6 +530,9 @@ func TestUpdateAuth(t *testing.T) {
 	runDirname := t.TempDir()
 	configDirname := t.TempDir()
 	viper.Reset()
+	common.ResetOriginExports()
+	defer viper.Reset()
+	defer common.ResetOriginExports()
 	viper.Set("Logging.Level", "Debug")
 	viper.Set("Origin.RunLocation", runDirname)
 	viper.Set("ConfigDir", configDirname)
@@ -529,7 +540,7 @@ func TestUpdateAuth(t *testing.T) {
 	viper.Set("Xrootd.Authfile", authfileName)
 	scitokensName := filepath.Join(configDirname, "scitokens.cfg")
 	viper.Set("Xrootd.ScitokensConfig", scitokensName)
-	viper.Set("Origin.NamespacePrefix", "/test")
+	viper.Set("Origin.FederationPrefix", "/test")
 	config.InitConfig()
 
 	err := config.InitServer(ctx, config.OriginType)

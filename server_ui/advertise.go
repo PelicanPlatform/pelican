@@ -108,11 +108,14 @@ func advertiseInternal(ctx context.Context, server server_utils.XRootDServer) er
 	}
 	serverUrl := param.Origin_Url.GetString()
 	webUrl := param.Server_ExternalWebUrl.GetString()
-	prefix := param.Origin_NamespacePrefix.GetString()
+	serverIssuer, err := config.GetServerIssuerURL()
+	if err != nil {
+		return errors.Wrap(err, "Failed to get server issuer URL")
+	}
+
 	if server.GetServerType().IsEnabled(config.CacheType) {
 		serverUrl = param.Cache_Url.GetString()
 		webUrl = param.Server_ExternalWebUrl.GetString()
-		prefix = "/caches/" + param.Xrootd_Sitename.GetString()
 	}
 
 	ad, err := server.CreateAdvertisement(name, serverUrl, webUrl)
@@ -120,7 +123,7 @@ func advertiseInternal(ctx context.Context, server server_utils.XRootDServer) er
 		return err
 	}
 
-	body, err := json.Marshal(ad)
+	body, err := json.Marshal(*ad)
 	if err != nil {
 		return errors.Wrap(err, fmt.Sprintf("Failed to generate JSON description of %s", server.GetServerType()))
 	}
@@ -136,14 +139,9 @@ func advertiseInternal(ctx context.Context, server server_utils.XRootDServer) er
 
 	directorUrl.Path = "/api/v1.0/director/register" + server.GetServerType().String()
 
-	issuerUrl, err := server_utils.GetNSIssuerURL(prefix)
-	if err != nil {
-		return err
-	}
-
 	advTokenCfg := token.NewWLCGToken()
 	advTokenCfg.Lifetime = time.Minute
-	advTokenCfg.Issuer = issuerUrl
+	advTokenCfg.Issuer = serverIssuer
 	advTokenCfg.AddAudiences(param.Federation_DirectorUrl.GetString())
 	advTokenCfg.Subject = "origin"
 	advTokenCfg.AddScopes(token_scopes.Pelican_Advertise)
@@ -182,7 +180,7 @@ func advertiseInternal(ctx context.Context, server server_utils.XRootDServer) er
 			return errors.Wrapf(unmarshalErr, "Could not unmarshal the director's response, which responded %v from director registration: %v", resp.StatusCode, resp.Status)
 		}
 		if respErr.ApprovalError {
-			return fmt.Errorf("The namespace %q requires administrator approval. Please contact the administrators of %s for more information.", param.Origin_NamespacePrefix.GetString(), param.Federation_RegistryUrl.GetString())
+			return fmt.Errorf("The namespace %q requires administrator approval. Please contact the administrators of %s for more information.", param.Origin_FederationPrefix.GetString(), param.Federation_RegistryUrl.GetString())
 		}
 		return errors.Errorf("Error during director registration: %v\n", respErr.Error)
 	}
