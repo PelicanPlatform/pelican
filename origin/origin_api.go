@@ -21,20 +21,10 @@ package origin
 import (
 	"os"
 	"path/filepath"
-	"sync"
-	"time"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
-)
-
-var (
-	// Duration to wait before timeout
-	directorTimeoutDuration = 30 * time.Second
-
-	notifyResponseOnce sync.Once
-	notifyChannel      chan bool
 )
 
 // Configure XrootD directory for both self-based and director-based file transfer tests
