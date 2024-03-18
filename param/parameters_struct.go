@@ -139,6 +139,7 @@ type Config struct {
 		UserInfoEndpoint string
 	}
 	Origin struct {
+		AdminUsers []string
 		EnableBroker bool
 		EnableCmsd bool
 		EnableDirListing bool
@@ -146,6 +147,7 @@ type Config struct {
 		EnableFallbackRead bool
 		EnableIssuer bool
 		EnableListings bool
+		EnableOAuth bool
 		EnablePublicReads bool
 		EnableReads bool
 		EnableUI bool
@@ -384,6 +386,7 @@ type configWithType struct {
 		UserInfoEndpoint struct { Type string; Value string }
 	}
 	Origin struct {
+		AdminUsers struct { Type string; Value []string }
 		EnableBroker struct { Type string; Value bool }
 		EnableCmsd struct { Type string; Value bool }
 		EnableDirListing struct { Type string; Value bool }
@@ -391,6 +394,7 @@ type configWithType struct {
 		EnableFallbackRead struct { Type string; Value bool }
 		EnableIssuer struct { Type string; Value bool }
 		EnableListings struct { Type string; Value bool }
+		EnableOAuth struct { Type string; Value bool }
 		EnablePublicReads struct { Type string; Value bool }
 		EnableReads struct { Type string; Value bool }
 		EnableUI struct { Type string; Value bool }

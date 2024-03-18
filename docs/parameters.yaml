@@ -609,6 +609,27 @@ type: bool
 default: true
 components: ["origin"]
 ---
+name: Origin.EnableOAuth
+description: >-
+  Indicate whether the origin should allow user login via OAuth2/OIDC with third-party
+  authentication providers such as CILogon.
+type: bool
+default: false
+components: ["origin"]
+---
+name: Origin.AdminUsers
+description: >-
+  A string slice of "subject" claim of users to give admin permission for the origin web UI when they are
+  logged in via OAuth.
+
+  The "subject" claim should be the "CILogon User Identifier" from CILogon user page: https://cilogon.org/
+
+  Note that the origin web UI doesn't have a public, non-admin view, and an empty AdminUsers list
+  will lead to "permission denied" error for all users logged into origin web UI via OAuth.
+type: stringSlice
+default: none
+components: ["origin"]
+---
 name: Origin.EnableBroker
 description: >-
   Indicate whether the origin should utilize the broker service to avoid
@@ -1441,8 +1462,19 @@ components: ["origin"]
 ###################################
 name: OIDC.ClientIDFile
 description: >-
-  A filepath to a file containing an OIDC Client ID. This is used by the namespace registry to establish OIDC information
-  for authenticated registration.
+  A filepath to a file containing an OIDC Client ID.
+
+  This is used by the namespace registry to allow OAuth2/OIDC login and authenticated namespace registration.
+  By default, Pelican uses [CILogon](www.cilogon.org) as the authentication provider. You need to first register an OIDC at CILogon:
+  https://cilogon.org/oauth2/register. If you'd like to use other authentication provider, you need to change
+  other endpoint parameters under OIDC configuration to the endpoints of your provider,
+  such as OIDC.AuthorizationEndpoint, OIDC.UserInfoEndpoint, etc.
+
+  `OIDC.ClientIDFile` is mutually exclusive with `OIDC.ClientID`. The value of `OIDC.ClientID` will
+  override the value of OIDC.ClientIDFile if both are set.
+
+  This is a required parameter for the registry server.
+  This is a required parameter for the origin server if `Origin.EnableOAuth` is set to `true`.
 type: filename
 root_default: /etc/pelican/oidc-client-id
 default: $ConfigBase/oidc-client-id
@@ -1450,7 +1482,11 @@ components: ["registry", "origin"]
 ---
 name: OIDC.ClientID
 description: >-
-  The OIDC ClientID to use for the server.
+  The OIDC ClientID to use for the server. This is mutually exclusive with `OIDC.ClientIDFile`. The value of `OIDC.ClientID` will
+  override the value of OIDC.ClientIDFile if both are set.
+
+  This is a required parameter for the registry server.
+  This is also a required parameter for the origin server if `Origin.EnableOAuth` is set to `true`.
 type: string
 default: none
 components: ["registry", "origin"]
@@ -1459,6 +1495,9 @@ name: OIDC.ClientSecretFile
 description: >-
   A filepath to a file containing an OIDC Client Secret. This is used by the namespace registry to establish OIDC information
   for authenticated registration.
+
+  This is a required parameter for the registry server.
+  This is also a required parameter for the origin server if `Origin.EnableOAuth` is set to `true`.
 type: filename
 root_default: /etc/pelican/oidc-client-secret
 default: $ConfigBase/oidc-client-secret
@@ -1467,32 +1506,32 @@ components: ["registry", "origin"]
 name: OIDC.DeviceAuthEndpoint
 description: >-
   A URL describing an OIDC Device Auth Endpoint. This is used by the namespace registry to establish OIDC information
-  for authenticated registration.
+  for authenticated registration. The default value is set to the URL from CILogon.
 type: url
-default: none
+default: "https://cilogon.org/oauth2/device_authorization"
 components: ["registry", "origin"]
 ---
 name: OIDC.TokenEndpoint
 description: >-
   A URL describing an OIDC Token Endpoint. This is used by the namespace registry to establish OIDC information
-  for authenticated registration.
+  for authenticated registration. The default value is set to the URL from CILogon.
 type: url
-default: none
+default: "https://cilogon.org/oauth2/token"
 components: ["registry", "origin"]
 ---
 name: OIDC.UserInfoEndpoint
 description: >-
   A URL describing an OIDC User Info Endpoint. This is used by the namespace registry to establish OIDC information
-  for authenticated registration.
+  for authenticated registration. The default value is set to the URL from CILogon.
 type: url
-default: none
+default: "https://cilogon.org/oauth2/userinfo"
 components: ["registry", "origin"]
 ---
 name: OIDC.AuthorizationEndpoint
 description: >-
-  A URL containing the OIDC authorization endpoint.
+  A URL containing the OIDC authorization endpoint. The default value is set to the URL from CILogon.
 type: url
-default: none
+default: "https://cilogon.org/authorize"
 components: ["origin"]
 ---
 name: OIDC.Issuer
