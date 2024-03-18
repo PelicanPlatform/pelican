@@ -14,7 +14,8 @@ xrdcp (primarily for testing) and XCache.
  src/XrdApps/XrdCpFile.cc   | 1 +
  src/XrdApps/XrdCpFile.hh   | 2 +-
  src/XrdPss/XrdPssUtils.cc  | 3 ++-
- 4 files changed, 6 insertions(+), 2 deletions(-)
+ src/Xrd/XrdPollPoll.icc    | 3 ++-
+ 5 files changed, 8 insertions(+), 3 deletions(-)
 
 diff --git a/src/XrdApps/XrdCpConfig.cc b/src/XrdApps/XrdCpConfig.cc
 index 890f80198cc..7f8e8702efa 100644
@@ -75,3 +76,17 @@ index be14fa55c9a..42f37534f14 100644
                 };
     int pTNum = sizeof(pTab)/sizeof(pEnt);
     int xrBeg = 2;
+diff --git a/src/Xrd/XrdPollPoll.icc b/src/Xrd/XrdPollPoll.icc
+index da6e03ef1..f7a3d71c4 100644
+--- a/src/Xrd/XrdPollPoll.icc
++++ b/src/Xrd/XrdPollPoll.icc
+@@ -390,7 +390,8 @@ void XrdPollPoll::doRequests(int maxreq)
+                   piP->isEnabled = false;
+                  }
+          else if (ReqBuff.req == PipeData::RmFD)
+-                 {PollTab[pti].fd     = -1;
++                 {
++                  PollTab[pti].fd     = -2;
+                   doDetach(pti);
+                   act = " detached fd ";
+                   piP->isEnabled = false;
