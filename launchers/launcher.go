@@ -140,7 +140,9 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 	if modules.IsEnabled(config.OriginType) {
 
 		mode := param.Origin_StorageType.GetString()
+
 		originExports, err := server_utils.GetOriginExports()
+
 		if err != nil {
 			return shutdownCancel, err
 		}
