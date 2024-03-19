@@ -38,6 +38,7 @@ import (
 	pelican_oauth2 "github.com/pelicanplatform/pelican/oauth2"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 	"golang.org/x/oauth2"
 )
 
@@ -102,6 +103,7 @@ func handleOAuthLogin(ctx *gin.Context) {
 	csrfState, err := generateCSRFCookie(ctx, req.NextUrl)
 
 	if err != nil {
+		log.Errorf("Failed to generate CSRF token: %v", err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate CSRF token"})
 		return
 	}
@@ -149,6 +151,7 @@ func handleOAuthCallback(ctx *gin.Context) {
 	// for user access
 	token, err := ciLogonOAuthConfig.Load().Exchange(c, req.Code)
 	if err != nil {
+		log.Errorf("Error in exchanging code for token:  %v", err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprint("Error in exchanging code for token: ", ctx.Request.URL)})
 		return
 	}
@@ -161,25 +164,29 @@ func handleOAuthCallback(ctx *gin.Context) {
 	// Use access_token to get user info from CILogon
 	resp, err := client.PostForm(cilogonUserInfoUrl, data)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprint("Error requesting user info from CILogon: ", err)})
+		log.Errorf("Error requesting user info from auth provider at %s. %v", cilogonUserInfoUrl, err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprint("Error requesting user info from auth provider: ", err)})
 		return
 	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprint("Failed to get OAuth2 user info response: ", err)})
+		log.Errorf("Error getting user info response from auth provider at %s. %v", cilogonUserInfoUrl, err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprint("Error getting user info response from auth provider: ", err)})
 		return
 	}
 
 	userInfo := cilogonUserInfo{}
 
 	if err := json.Unmarshal(body, &userInfo); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprint("Error parsing user info from CILogon: ", err)})
+		log.Errorf("Error parsing user info from auth provider at %s. %v", cilogonUserInfoUrl, err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprint("Error parsing user info from auth provider: ", err)})
 		return
 	}
 
 	userIdentifier := userInfo.Sub
 	if userIdentifier == "" {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Error setting login cookie: can't find valid user id from CILogon"})
+		log.Errorf("sub field of user info response from auth provider is empty. Can't determine user identity")
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Error setting login cookie: can't find valid user id from auth provider"})
 		return
 	}
 
