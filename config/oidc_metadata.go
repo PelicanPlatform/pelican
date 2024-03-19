@@ -19,6 +19,8 @@
 package config
 
 import (
+	"fmt"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -47,53 +49,72 @@ func getMetadata() {
 		metadataError = errors.New("OIDC.Issuer is not set; unable to do metadata discovery")
 		return
 	}
+	if _, err := url.Parse(issuerUrl); err != nil {
+		metadataError = errors.Wrap(err, "OIDC.Issuer is not a valid URL; unable to do metadata discovery")
+		return
+	}
 	log.Debugln("Getting OIDC issuer metadata via URL", issuerUrl)
 	metadata, err := GetIssuerMetadata(issuerUrl)
 	if err != nil {
+		log.Warningf("Failed to get OIDC issuer metadata with error %v. Fall back to CILogon endpoints for OIDC authentication if individual OIDC endpoints are not set.", err)
 		metadataError = err
 		return
 	}
 	oidcMetadata = metadata
 
-	if param.OIDC_DeviceAuthEndpoint.GetString() == "" {
-		viper.Set("OIDC.DeviceAuthEndpoint", metadata.DeviceAuthURL)
-	}
-	if param.OIDC_TokenEndpoint.GetString() == "" {
-		viper.Set("OIDC.TokenEndpoint", metadata.TokenURL)
-	}
-	if param.OIDC_UserInfoEndpoint.GetString() == "" {
-		viper.Set("OIDC.UserInfoEndpoint", metadata.UserInfoURL)
-	}
-	if param.OIDC_AuthorizationEndpoint.GetString() == "" {
-		viper.Set("OIDC.AuthorizationEndpoint", metadata.AuthURL)
-	}
+	// We don't check if the endpoint(s) are set. Just overwrite to ensure
+	// our default values are not being used if the issuer is not CILogon
+	viper.Set("OIDC.DeviceAuthEndpoint", metadata.DeviceAuthURL)
+	viper.Set("OIDC.TokenEndpoint", metadata.TokenURL)
+	viper.Set("OIDC.UserInfoEndpoint", metadata.UserInfoURL)
+	viper.Set("OIDC.AuthorizationEndpoint", metadata.AuthURL)
 }
 
-func getMetadataValue(metadataFunc func() string) (result string, err error) {
+func getMetadataValue(stringParam param.StringParam) (result string, err error) {
 	onceMetadata.Do(getMetadata)
-	result = metadataFunc()
+	result = stringParam.GetString()
 	// Assume if the OIDC value is set then that was from the config file
 	// so we skip any errors
 	if result == "" {
-		err = metadataError
+		// A hacky way to allow Globus as an auth server
+		if param.OIDC_Issuer.IsSet() {
+			issuerUrl, _ := url.Parse(param.OIDC_Issuer.GetString())
+			if issuerUrl != nil && issuerUrl.Hostname() == "auth.globus.org" && stringParam.GetName() == param.OIDC_DeviceAuthEndpoint.GetName() {
+				log.Warning("You are using Globus as the auth privider. Although it does not support OAuth device flow used by Pelican registry, you may use it for other Pelican servers. OIDC.DeviceAuthEndpoint is set to https://auth.globus.org/")
+				result = "https://auth.globus.org/"
+				return
+			}
+		}
+
+		if metadataError == nil {
+			err = fmt.Errorf("Required OIDC endpoint %s is not set and OIDC discovery at %s doesn't have the endpoint in the metadata. Your authentication server may not support OAuth2 authorization flow that is required by Pelican.",
+				stringParam.GetName(),
+				param.OIDC_Issuer.GetString(),
+			)
+		} else {
+			err = errors.Wrap(metadataError,
+				fmt.Sprintf("Required OIDC endpoint %s is not set and OIDC discovery failed to request metadata from OIDC.Issuer",
+					stringParam.GetName(),
+				))
+		}
 	}
 	return
 }
 
 func GetOIDCDeviceAuthEndpoint() (result string, err error) {
-	return getMetadataValue(param.OIDC_DeviceAuthEndpoint.GetString)
+	return getMetadataValue(param.OIDC_DeviceAuthEndpoint)
 }
 
 func GetOIDCTokenEndpoint() (result string, err error) {
-	return getMetadataValue(param.OIDC_TokenEndpoint.GetString)
+	return getMetadataValue(param.OIDC_TokenEndpoint)
 }
 
 func GetOIDCUserInfoEndpoint() (result string, err error) {
-	return getMetadataValue(param.OIDC_UserInfoEndpoint.GetString)
+	return getMetadataValue(param.OIDC_UserInfoEndpoint)
 }
 
 func GetOIDCAuthorizationEndpoint() (result string, err error) {
-	return getMetadataValue(param.OIDC_AuthorizationEndpoint.GetString)
+	return getMetadataValue(param.OIDC_AuthorizationEndpoint)
 }
 
 func GetOIDCSupportedScopes() (results []string, err error) {

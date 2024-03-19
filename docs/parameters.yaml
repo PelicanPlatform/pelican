@@ -1528,12 +1528,18 @@ description: >-
   A URL containing the OIDC authorization endpoint. The default value is set to the URL from CILogon.
 type: url
 default: "https://cilogon.org/authorize"
-components: ["origin"]
+components: ["registry", "origin"]
 ---
 name: OIDC.Issuer
 description: >-
-  The URL of the OIDC issuer.  If set, OIDC auto-discovery may be used to find other endpoints (token, user info,
-  device auth).
+  The URL of the OIDC issuer. If set, OIDC auto-discovery may be used to find other endpoints (token, user info,
+  device auth). The URL should not contain a path unless your authentication server enables multi-tenant support.
+
+  If the OIDC auto-discovery failed, Pelican will fall back to use individual endpoints set in the configuration. For
+  any unset endpoints, Pelican will use default values, which are from CILogon.
+
+  For CILogon, it's https://cilogon.org
+  For Globus, it's https://auth.globus.org
 type: url
 default: none
 components: ["registry", "origin"]
