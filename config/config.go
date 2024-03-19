@@ -139,7 +139,7 @@ var (
 
 	RestartFlag = make(chan any) // A channel flag to restart the server instance that launcher listens to (including cache)
 
-	// Pelican version
+	// Pelican version, this is overwritten at build time
 	version string = "dev"
 
 	MetadataTimeoutErr *MetadataErr = &MetadataErr{msg: "Timeout when querying metadata"}
