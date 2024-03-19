@@ -39,7 +39,7 @@ var requiredScopeKeys = [3]string{"description", "issuedBy", "acceptedBy"}
 
 func handleCaseConversion(s string) string {
 	var camelCase string
-	nextCap := false
+	nextCap := true // default as true so we capitalize the first letter
 
 	for _, r := range s {
 		if r == '_' || r == '.' {
