@@ -41,7 +41,7 @@ builds:
     tags:
       - forceposix
     ldflags:
-      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}} -X main.builtBy=goreleaser -X config.version={{.Version}}
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}} -X main.builtBy=goreleaser -X github.com/pelicanplatform/pelican/config.version={{.Version}}
     ignore:
       - goos: windows
         goarch: arm64
