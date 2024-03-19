@@ -56,7 +56,7 @@ description: >-
   The client attempted to contact the server at its resolved address and failed to do so
 retryable: false
 ---
-type: Contact.Director
+type: contact.director
 code: 301
 clientExitCode: 6
 description: >-
@@ -75,6 +75,13 @@ code: 303
 clientExitCode: 6
 description: >-
   The client attempted to contact the origin but failed to do so
+retryable: false
+---
+type: Contact.Registry
+code: 304
+clientExitCode: 6
+description: >-
+  The client attempted to contact the registry (usually through the director) but failed to do so
 retryable: false
 
 ############################
@@ -131,7 +138,7 @@ description: >-
   failed post-transfer validation
 retryable: true
 ---
-type: Transfer.StoppedTransferError
+type: Transfer.StoppedTransfer
 code: 601
 clientExitCode: 11
 description: >-
@@ -139,7 +146,7 @@ description: >-
   transferring data
 retryable: true
 ---
-type: Transfer.SlowTransferError
+type: Transfer.SlowTransfer
 code: 602
 clientExitCode: 11
 description: >-

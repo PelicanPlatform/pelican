@@ -1617,7 +1617,7 @@ Loop:
 					Duration:         resp.Duration(),
 					BytesTotal:       totalSize,
 				}
-				err = error_codes.NewTransfer_SlowTransferErrorError(err)
+				err = error_codes.NewTransfer_SlowTransferError(err)
 				return
 
 			} else {

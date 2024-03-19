@@ -34,7 +34,6 @@ import (
 	"testing"
 	"time"
 
-	//"github.com/pkg/errors"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -208,8 +207,16 @@ func TestSlowTransfers(t *testing.T) {
 
 	// Make sure the errors are correct
 	assert.NotNil(t, err)
-	require.IsType(t, &error_codes.PelicanError{}, err)
-	assert.Contains(t, err.Error(), "Transfer.SlowTransferError Error: Error code 602:")
+	// Check we have an overlapping PelicanError type
+	pelicanError, ok := err.(*error_codes.PelicanError)
+	if ok {
+		assert.Contains(t, err.Error(), "Transfer.SlowTransfer Error: Error code 602:")
+		// Check we successfully wrapped an already defined SlowTransferError
+		unwrappedErr := pelicanError.Unwrap()
+		assert.IsType(t, &SlowTransferError{}, unwrappedErr)
+	} else {
+		t.Fatal("Error is not of type PelicanError")
+	}
 }
 
 // Test stopped transfer
