@@ -27,6 +27,7 @@ import (
 	"math"
 	"net"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -189,6 +190,13 @@ type (
 		Wq   int `xml:"wq"`
 	}
 
+	SummaryCacheRead struct {
+		In   int `xml:"in"`
+		Out  int `xml:"out"`
+		Hits int `xml:"hits"`
+		Miss int `xml:"miss"`
+	}
+
 	SummaryStat struct {
 		Id      SummaryStatType    `xml:"id,attr"`
 		Total   int                `xml:"tot"`
@@ -199,6 +207,7 @@ type (
 		Paths   SummaryPath        `xml:"paths"` // For Oss Summary Data
 		Store   SummaryCacheStore  `xml:"store"`
 		Memory  SummaryCacheMemory `xml:"mem"`
+		Read    SummaryCacheRead   `xml:"rd"`
 	}
 
 	SummaryStatistics struct {
@@ -266,6 +275,11 @@ var (
 		Name: "xrootd_storage_volume_bytes",
 		Help: "Storage volume usage on the server",
 	}, []string{"ns", "type", "server_type"}) // type: total/free; server_type: origin/cache
+
+	CacheAccess = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "xrootd_cache_access",
+		Help: "Number of times the data requested is in the cache or not",
+	}, []string{"type"}) // type: hit/miss
 
 	lastStats SummaryStat
 
@@ -943,8 +957,19 @@ func HandlePacket(packet []byte) error {
 
 func HandleSummaryPacket(packet []byte) error {
 	summaryStats := SummaryStatistics{}
-	if err := xml.Unmarshal(packet, &summaryStats); err != nil {
-		return err
+
+	// The cache summary data has a typo where the <hit> tag contains a trailing bracet
+	// the causes parsing error. This is a temp fix to correct it. Xrootd v5.7.0 will fix
+	// this issue
+	re, err := regexp.Compile(`></hits>`)
+	if err != nil {
+		return errors.Wrap(err, "error compiling regex")
+	}
+
+	correctedData := re.ReplaceAll(packet, []byte(`</hits>`))
+
+	if err := xml.Unmarshal(correctedData, &summaryStats); err != nil {
+		return errors.Wrap(err, "error unmarshaling summary pacaket")
 	}
 	log.Debug("Received a summary statistics packet")
 	if summaryStats.Program != "xrootd" {
@@ -997,10 +1022,13 @@ func HandleSummaryPacket(packet []byte) error {
 			}
 		case CacheStat:
 			cacheStore := stat.Store
+			cacheRead := stat.Read
 			StorageVolume.With(prometheus.Labels{"ns": "/cache", "type": "total", "server_type": "cache"}).
 				Set(float64(cacheStore.Size))
 			StorageVolume.With(prometheus.Labels{"ns": "/cache", "type": "free", "server_type": "cache"}).
 				Set(float64(cacheStore.Size - cacheStore.Used))
+			CacheAccess.With(prometheus.Labels{"type": "hit"}).Set(float64(cacheRead.Hits))
+			CacheAccess.With(prometheus.Labels{"type": "miss"}).Set(float64(cacheRead.Miss))
 		}
 	}
 	return nil
