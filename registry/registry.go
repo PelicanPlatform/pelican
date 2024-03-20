@@ -640,7 +640,7 @@ func deleteNamespaceHandler(ctx *gin.Context) {
 	}
 
 	// If we get to this point in the code, we've passed all the security checks and we're ready to delete
-	err = deleteNamespace(prefix)
+	err = deleteNamespaceByPrefix(prefix)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error deleting namespace from database"})
 		log.Errorf("Failed to delete namespace from database: %v", err)
