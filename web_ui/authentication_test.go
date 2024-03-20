@@ -102,7 +102,7 @@ func TestCodeBasedLogin(t *testing.T) {
 	config.InitConfig()
 	err := config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
-	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256())
+	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256(), false)
 	require.NoError(t, err)
 
 	//Invoke the code login API with the correct code, ensure we get a valid code back
@@ -159,7 +159,7 @@ func TestPasswordResetAPI(t *testing.T) {
 	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
 	err := config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
-	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256())
+	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256(), false)
 	require.NoError(t, err)
 	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
 
@@ -384,7 +384,7 @@ func TestWhoamiAPI(t *testing.T) {
 	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
 	err := config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
-	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256())
+	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256(), false)
 	require.NoError(t, err)
 	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
 
@@ -556,7 +556,7 @@ func TestLogoutAPI(t *testing.T) {
 	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
 	err := config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
-	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256())
+	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256(), false)
 	require.NoError(t, err)
 	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
 
