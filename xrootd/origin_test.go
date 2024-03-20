@@ -79,7 +79,7 @@ func originMockup(ctx context.Context, egrp *errgroup.Group, t *testing.T) conte
 	err = config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
 
-	err = config.GeneratePrivateKey(param.Server_TLSKey.GetString(), elliptic.P256())
+	err = config.GeneratePrivateKey(param.Server_TLSKey.GetString(), elliptic.P256(), false)
 	require.NoError(t, err)
 	err = config.GenerateCert()
 	require.NoError(t, err)

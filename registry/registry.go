@@ -170,8 +170,17 @@ func loadServerKeys() (*ecdsa.PrivateKey, error) {
 	// TODO: Reimplement the function once we switch to a minimum of 1.21
 	serverCredsLoad.Do(func() {
 		issuerFileName := param.IssuerKey.GetString()
-		serverCredsPrivKey, serverCredsErr = config.LoadPrivateKey(issuerFileName)
+		var privateKey crypto.PrivateKey
+		privateKey, serverCredsErr = config.LoadPrivateKey(issuerFileName, false)
+
+		switch key := privateKey.(type) {
+		case *ecdsa.PrivateKey:
+			serverCredsPrivKey = key
+		default:
+			serverCredsErr = errors.Errorf("unsupported key type for server issuer key: %T", key)
+		}
 	})
+
 	return serverCredsPrivKey, serverCredsErr
 }
 
