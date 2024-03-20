@@ -86,7 +86,7 @@ func generatePrivateKey(keyLocation string, encrypt string, keyFormat string) er
 }
 
 func TestLoadPrivateKey(t *testing.T) {
-	t.Run("ecdsa-key-no-error", func(t *testing.T) {
+	t.Run("ecdsa-key", func(t *testing.T) {
 		tempDir := t.TempDir()
 		keyLocation := filepath.Join(tempDir, "ecdsa.key")
 		err := generatePrivateKey(keyLocation, "ecdsa", "pkcs8")
@@ -100,7 +100,7 @@ func TestLoadPrivateKey(t *testing.T) {
 		}
 	})
 
-	t.Run("rsa-pkcs8-allow-no-error", func(t *testing.T) {
+	t.Run("rsa-pkcs8-key-allowed", func(t *testing.T) {
 		tempDir := t.TempDir()
 		keyLocation := filepath.Join(tempDir, "rsa.key")
 		err := generatePrivateKey(keyLocation, "rsa", "pkcs8")
@@ -114,7 +114,7 @@ func TestLoadPrivateKey(t *testing.T) {
 		}
 	})
 
-	t.Run("rsa-pkcs1-allow-no-error", func(t *testing.T) {
+	t.Run("rsa-pkcs1-key-allowed", func(t *testing.T) {
 		tempDir := t.TempDir()
 		keyLocation := filepath.Join(tempDir, "rsa.key")
 		err := generatePrivateKey(keyLocation, "rsa", "pkcs1")
@@ -128,7 +128,7 @@ func TestLoadPrivateKey(t *testing.T) {
 		}
 	})
 
-	t.Run("rsa-pkcs1-not-allow-error", func(t *testing.T) {
+	t.Run("rsa-pkcs1-key-not-allowed", func(t *testing.T) {
 		tempDir := t.TempDir()
 		keyLocation := filepath.Join(tempDir, "rsa.key")
 		err := generatePrivateKey(keyLocation, "rsa", "pkcs1")
@@ -139,7 +139,7 @@ func TestLoadPrivateKey(t *testing.T) {
 		require.Nil(t, privateKey)
 	})
 
-	t.Run("rsa-pkcs8-not-allow-error", func(t *testing.T) {
+	t.Run("rsa-pkcs8-key-not-allowed", func(t *testing.T) {
 		tempDir := t.TempDir()
 		keyLocation := filepath.Join(tempDir, "rsa.key")
 		err := generatePrivateKey(keyLocation, "rsa", "pkcs8")
