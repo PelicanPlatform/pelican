@@ -123,7 +123,7 @@ func TestListNamespaces(t *testing.T) {
 	viper.Set("Origin.Port", 0)
 	err := config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
-	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256())
+	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256(), false)
 	require.NoError(t, err)
 
 	router := gin.Default()
