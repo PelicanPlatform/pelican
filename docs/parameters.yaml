@@ -1548,6 +1548,20 @@ deprecated: true
 replacedby: ["Cache.RunLocation", "Origin.RunLocation"]
 components: ["origin", "cache"]
 ---
+name: Xrootd.ConfigFile
+description: >-
+  The path to an XRootD configuration file for customized XRootD configuration. This should only be used by admins with
+  experience in configuring XRootD directly.
+
+  `Xrootd.ConfigFile` will be used as the continuation of the Pelican generated XRootD configuration, via the `continue` directive.
+  Existing configuration values may be overwritten or appended.
+
+  Refer to [Configuration File Continuation](https://xrootd.slac.stanford.edu/doc/dev55/Syntax_config.htm#_Toc520499864)
+  for details
+type: filename
+default: none
+components: ["origin", "cache"]
+---
 name: Xrootd.RobotsTxtFile
 description: >-
   Origins may be indexed by web search engines; to control the behavior of search
@@ -1569,7 +1583,7 @@ description: >-
 type: filename
 root_default: /etc/pelican/xrootd/scitokens.cfg
 default: $ConfigBase/xrootd/scitokens.cfg
-components: ["*"]
+components: ["origin", "cache"]
 ---
 name: Xrootd.Mount
 description: >-

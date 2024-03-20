@@ -253,6 +253,7 @@ type Config struct {
 	}
 	Xrootd struct {
 		Authfile string
+		ConfigFile string
 		DetailedMonitoringHost string
 		LocalMonitoringHost string
 		MacaroonsKeyFile string
@@ -498,6 +499,7 @@ type configWithType struct {
 	}
 	Xrootd struct {
 		Authfile struct { Type string; Value string }
+		ConfigFile struct { Type string; Value string }
 		DetailedMonitoringHost struct { Type string; Value string }
 		LocalMonitoringHost struct { Type string; Value string }
 		MacaroonsKeyFile struct { Type string; Value string }
