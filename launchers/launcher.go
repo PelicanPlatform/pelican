@@ -112,7 +112,10 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 
 		viper.Set("Director.DefaultResponse", "cache")
 
-		viper.Set("Federation.DirectorURL", param.Server_ExternalWebUrl.GetString())
+		// Only set director URL to Server_ExternalWebUrl if it's not set
+		if !param.Federation_DirectorUrl.IsSet() {
+			viper.Set("Federation.DirectorURL", param.Server_ExternalWebUrl.GetString())
+		}
 
 		if err = DirectorServe(ctx, engine, egrp); err != nil {
 			return shutdownCancel, err
