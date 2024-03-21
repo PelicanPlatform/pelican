@@ -342,3 +342,91 @@ func TestDiscoverFederation(t *testing.T) {
 		viper.Reset()
 	})
 }
+
+func TestCheckWatermark(t *testing.T) {
+	t.Parallel()
+
+	t.Run("empty-value", func(t *testing.T) {
+		ok, err := checkWatermark("")
+		assert.False(t, ok)
+		assert.Error(t, err)
+	})
+
+	t.Run("string-value", func(t *testing.T) {
+		ok, err := checkWatermark("random")
+		assert.False(t, ok)
+		assert.Error(t, err)
+	})
+
+	t.Run("integer-greater-than-1", func(t *testing.T) {
+		ok, err := checkWatermark("2")
+		assert.False(t, ok)
+		assert.Error(t, err)
+	})
+
+	t.Run("integer-less-than-0", func(t *testing.T) {
+		ok, err := checkWatermark("-1")
+		assert.False(t, ok)
+		assert.Error(t, err)
+	})
+
+	t.Run("float-value-single-decimal", func(t *testing.T) {
+		ok, err := checkWatermark("0.5")
+		assert.True(t, ok)
+		assert.NoError(t, err)
+	})
+
+	t.Run("float-value-two-decimals", func(t *testing.T) {
+		ok, err := checkWatermark("0.55")
+		assert.True(t, ok)
+		assert.NoError(t, err)
+	})
+
+	t.Run("byte-value-no-unit", func(t *testing.T) {
+		ok, err := checkWatermark("100")
+		assert.False(t, ok)
+		assert.Error(t, err)
+	})
+
+	t.Run("byte-value-no-value", func(t *testing.T) {
+		ok, err := checkWatermark("k")
+		assert.False(t, ok)
+		assert.Error(t, err)
+	})
+
+	t.Run("byte-value-wrong-unit", func(t *testing.T) {
+		ok, err := checkWatermark("100K") // Only lower case is accepted
+		assert.False(t, ok)
+		assert.Error(t, err)
+
+		ok, err = checkWatermark("100p")
+		assert.False(t, ok)
+		assert.Error(t, err)
+
+		ok, err = checkWatermark("100byte")
+		assert.False(t, ok)
+		assert.Error(t, err)
+
+		ok, err = checkWatermark("100bits")
+		assert.False(t, ok)
+		assert.Error(t, err)
+	})
+
+	t.Run("byte-value-correct-unit", func(t *testing.T) {
+		ok, err := checkWatermark("1000k")
+		assert.True(t, ok)
+		assert.NoError(t, err)
+
+		ok, err = checkWatermark("1000m")
+		assert.True(t, ok)
+		assert.NoError(t, err)
+
+		ok, err = checkWatermark("1000g")
+		assert.True(t, ok)
+		assert.NoError(t, err)
+
+		ok, err = checkWatermark("1000t")
+		assert.True(t, ok)
+		assert.NoError(t, err)
+	})
+}

@@ -31,6 +31,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -143,6 +144,8 @@ var (
 	version string = "dev"
 
 	MetadataTimeoutErr *MetadataErr = &MetadataErr{msg: "Timeout when querying metadata"}
+
+	watermarkUnits = []byte{'k', 'm', 'g', 't'}
 )
 
 // This function creates a new MetadataError by wrapping the previous error
@@ -659,6 +662,33 @@ func handleDeprecatedConfig() {
 	}
 }
 
+func checkWatermark(wmStr string) (bool, error) {
+	wmNum, err := strconv.ParseFloat(wmStr, 64)
+	// Not a float number, check if it's in form of <int>k|m|g|t
+	if err != nil {
+		if len(wmStr) < 1 {
+			return false, errors.Errorf("watermark value %s is empty.", wmStr)
+		}
+		if slices.Contains(watermarkUnits, wmStr[len(wmStr)-1]) {
+			_, err := strconv.Atoi(wmStr[:len(wmStr)-1])
+			// Bytes portion is not an integer
+			if err != nil {
+				return false, errors.Errorf("watermark value %s is neither a decimal fraction of a percentage number (e.g. 0.95) or a valid bytes. Refer to parameter page for details: https://docs.pelicanplatform.org/parameters#Cache-HighWatermark", wmStr)
+			} else {
+				return true, nil
+			}
+		} else {
+			// Doesn't contain k|m|g|t suffix
+			return false, errors.Errorf("watermark value %s is neither a decimal fraction of a percentage number (e.g. 0.95) or a valid bytes. Bytes representation is missing unit (k|m|g|t). Refer to parameter page for details: https://docs.pelicanplatform.org/parameters#Cache-HighWatermark", wmStr)
+		}
+	} else {
+		if wmNum > 1 || wmNum < 0 {
+			return false, errors.Errorf("watermark value %s must be a float number in range [0.0, 1.0]. Refer to parameter page for details: https://docs.pelicanplatform.org/parameters#Cache-HighWatermark", wmStr)
+		}
+		return true, nil
+	}
+}
+
 func InitConfig() {
 	viper.SetConfigType("yaml")
 	// 1) Set up defaults.yaml
@@ -984,6 +1014,19 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 		viper.SetDefault("Cache.Url", fmt.Sprintf("https://%v:%v", param.Server_Hostname.GetString(), cachePort))
 	} else {
 		viper.SetDefault("Cache.Url", fmt.Sprintf("https://%v", param.Server_Hostname.GetString()))
+	}
+
+	if param.Cache_HighWaterMark.IsSet() && param.Cache_LowWatermark.IsSet() {
+		highWmStr := param.Cache_HighWaterMark.GetString()
+		lowWmStr := param.Cache_LowWatermark.GetString()
+		ok, err := checkWatermark(highWmStr)
+		if !ok && err != nil {
+			return errors.Wrap(err, "invalid Cache.HighWaterMark value")
+		}
+		ok, err = checkWatermark(lowWmStr)
+		if !ok && err != nil {
+			return errors.Wrap(err, "invalid Cache.LowWatermark value")
+		}
 	}
 
 	webPort := param.Server_WebPort.GetInt()

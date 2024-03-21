@@ -49,6 +49,8 @@ Cache:
   Port: 8442
   SelfTest: true
   SelfTestInterval: 15s
+  LowWatermark: 0.90
+  HighWaterMark: 0.95
 LocalCache:
   HighWaterMarkPercentage: 95
   LowWaterMarkPercentage: 85

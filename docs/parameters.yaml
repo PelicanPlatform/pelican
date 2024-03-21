@@ -857,26 +857,26 @@ type: int
 default: 8442
 components: ["cache"]
 ---
-name: Cache.HighWaterMark
-description: >-
-  A value of cache disk usage that triggers the purging of cached files.
-
-  The value should be either a percentage number (in string) of total avaibale disk space (default is 95),
-  or a number suffixed by k, m, g, or t. In which case, they must be absolute sizes in k (kilo-),
-  m (mega-), g (giga-), or t (tera-) bytes, respectively.
-type: string
-default: "95"
-components: ["cache"]
----
 name: Cache.LowWatermark
 description: >-
   A value of cache disk usage that stops the purging of cached files.
 
-  The value should be either a percentage number (in string) of total avaibale disk space (default is 90),
+  The value should be either a decimal fraction of a percentage number of total avaibale disk space (default is 0.90),
   or a number suffixed by k, m, g, or t. In which case, they must be absolute sizes in k (kilo-),
   m (mega-), g (giga-), or t (tera-) bytes, respectively.
 type: string
-default: "90"
+default: 0.90
+components: ["cache"]
+---
+name: Cache.HighWaterMark
+description: >-
+  A value of cache disk usage that triggers the purging of cached files.
+
+  The value should be either a decimal fraction of a percentage number of total avaibale disk space (default is 0.95),
+  or a number suffixed by k, m, g, or t. In which case, they must be absolute sizes in k (kilo-),
+  m (mega-), g (giga-), or t (tera-) bytes, respectively.
+type: string
+default: 0.95
 components: ["cache"]
 ---
 name: Cache.EnableVoms

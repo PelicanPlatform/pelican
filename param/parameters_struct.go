@@ -29,6 +29,8 @@ type Config struct {
 		DataLocation string
 		EnableVoms bool
 		ExportLocation string
+		HighWaterMark string
+		LowWatermark string
 		PermittedNamespaces []string
 		Port int
 		RunLocation string
@@ -274,6 +276,8 @@ type configWithType struct {
 		DataLocation struct { Type string; Value string }
 		EnableVoms struct { Type string; Value bool }
 		ExportLocation struct { Type string; Value string }
+		HighWaterMark struct { Type string; Value string }
+		LowWatermark struct { Type string; Value string }
 		PermittedNamespaces struct { Type string; Value []string }
 		Port struct { Type string; Value int }
 		RunLocation struct { Type string; Value string }

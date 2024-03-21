@@ -104,6 +104,8 @@ type (
 		UseCmsd        bool
 		EnableVoms     bool
 		CalculatedPort string
+		HighWaterMark  string
+		LowWatermark   string
 		ExportLocation string
 		RunLocation    string
 		DataLocation   string
