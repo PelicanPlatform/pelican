@@ -79,7 +79,13 @@ pelican object get pelican://osg-htc.org/ospool/uc-shared/public/OSG-Staff/valid
 ```
 Or:
 ```console
-pelican object get -f https://osg-htc.org pelican:///ospool/uc-shared/public/OSG-Staff/validation/test.txt downloaded-testfile.txt
+pelican object get -f https://osg-htc.org /osgconnect/public/osg/testfile.txt downloaded-testfile.txt
+```
+
+or:
+
+```console
+pelican object get pelican://osg-htc.org/osgconnect/public/osg/testfile.txt downloaded-testfile.txt
 ```
 
 This command will download the object `/OSG-Staff/validation/test.txt` from the OSDF's `/ospool/uc-shared/public/` namespace and save it in your local directory with the name `downloaded-testfile.txt`.
@@ -174,12 +180,15 @@ Pelican clients support a variety of command line flags that modify the client's
 - **-d or --debug:** Takes no argument, but runs Pelican in debug mode, which, when enabled, provides verbose output.
 - **--config:** Takes a filepath and indicates to Pelican the location of a configuration file Pelican should use.
 - **--json:** Takes no argument and outputs results in JSON format.
-- **-l or --log**: Takes a string that specifies a file location to output the pelican logs to rather than stderr
+- **-l or --log:** Takes a file path to specify where Pelican logs will write to instead of stdout.
+- **--version:** Prints the version of Pelican and exits
 
 ### Flags For `object get/put/copy`:
 
 - **-c or --cache:** Takes a cache URL and indicates to Pelican that only the specified cache should be used. When used, Pelican will not attempt to use other caches if the provided cache cannot provide the file.
 - **--caches:** Takes the path to a JSON file containing a list of caches. Similar to the `-c` flag, Pelican will attempt to use only these caches in the order they are listed.
+- **-h or --help:** Gives additional information on how to use the command as well as lists these flags with short descriptions for the `object copy` command.
+- **--methods:** Takes a comma seperated list of methods to try for downloads/uploads, the default is just http.
 - **-r or --recursive:** Takes no argument and indicates to Pelican that all sub paths at the level of the provided namespace should be copied recursively. This option is only supported if the origin supports the WebDav protocol.
 - **-t or --token:** Takes a path to a file containing a signed JWT, and is used to download protected objects.
 
