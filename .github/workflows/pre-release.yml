@@ -64,12 +64,12 @@ jobs:
 
   release-container:
     needs: [pre-release]
-    uses: PelicanPlatform/pelican/.github/workflows/build-prod-container.yml@main
+    uses: ./.github/workflows/build-prod-container.yml
     secrets: inherit
     with:
       tag: ${{ needs.pre-release.outputs.tag }}
 
   release:
     needs: [pre-release]
-    uses: PelicanPlatform/pelican/.github/workflows/release.yml@main
+    uses: ./.github/workflows/release.yml
     secrets: inherit
