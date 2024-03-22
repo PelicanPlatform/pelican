@@ -28,7 +28,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/pelicanplatform/pelican/broker"
 	"github.com/pelicanplatform/pelican/cache_ui"
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/daemon"
+	"github.com/pelicanplatform/pelican/origin_ui"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_ui"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -37,7 +39,7 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) (server_utils.XRootDServer, error) {
+func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, modules config.ServerType) (server_utils.XRootDServer, error) {
 
 	err := xrootd.SetUpMonitoring(ctx, egrp)
 	if err != nil {
@@ -71,6 +73,13 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) (
 		}
 
 		cache_ui.PeriodicCacheSelfTest(ctx, egrp)
+	}
+
+	// Director and origin also registers this metadata URL; avoid registering twice.
+	if !modules.IsEnabled(config.DirectorType) && !modules.IsEnabled(config.OriginType) {
+		if err = origin_ui.ConfigIssJWKS(engine.Group("/.well-known")); err != nil {
+			return nil, err
+		}
 	}
 
 	log.Info("Launching cache")

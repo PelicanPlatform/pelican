@@ -301,7 +301,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 			log.Errorln("Director does not seem to be working:", err)
 			return shutdownCancel, err
 		}
-		server, err := CacheServe(ctx, engine, egrp)
+		server, err := CacheServe(ctx, engine, egrp, modules)
 		if err != nil {
 			return shutdownCancel, err
 		}

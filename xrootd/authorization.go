@@ -305,10 +305,6 @@ func EmitAuthfile(server server_utils.XRootDServer) error {
 				}
 
 				output.Write([]byte(outStr + strings.Join(words[2:], " ") + "\n"))
-			} else if server.GetServerType().IsEnabled(config.CacheType) && param.Cache_SelfTest.GetBool() {
-				// Set up cache self-test public read
-				outStr := "u * /pelican/monitoring lr "
-				output.Write([]byte(outStr + strings.Join(words[2:], " ") + "\n"))
 			} else {
 				output.Write([]byte(lineContents + " "))
 			}
@@ -343,11 +339,7 @@ func EmitAuthfile(server server_utils.XRootDServer) error {
 		// If nothing has been written to the output yet
 		var outStr string
 		if !foundPublicLine {
-			if param.Cache_SelfTest.GetBool() {
-				outStr = "u * /pelican/monitoring lr "
-			} else {
-				outStr = "u * "
-			}
+			outStr = "u * "
 		}
 		for _, ad := range server.GetNamespaceAds() {
 			if ad.PublicRead && ad.Path != "" {
@@ -545,7 +537,27 @@ func EmitScitokensConfig(server server_utils.XRootDServer) error {
 		}
 		return WriteOriginScitokensConfig(authedPrefixes)
 	} else if cacheServer, ok := server.(*cache_ui.CacheServer); ok {
-		return WriteCacheScitokensConfig(cacheServer.GetNamespaceAds())
+		directorAds := cacheServer.GetNamespaceAds()
+		if param.Cache_SelfTest.GetBool() {
+			localIssuer, err := url.Parse(param.Server_ExternalWebUrl.GetString())
+			if err != nil {
+				log.Error("Can't parse Server_ExternalWebUrl when generating scitokens config: ", err)
+				return errors.Wrap(err, "can't parse Server_ExternalWebUrl when generating scitokens config")
+			}
+			cacheIssuer := common.NamespaceAdV2{
+				PublicRead: false,
+				Caps:       common.Capabilities{PublicReads: false, Reads: true, Writes: true},
+				Path:       "/pelican/monitoring",
+				Issuer: []common.TokenIssuer{
+					{
+						BasePaths: []string{"/pelican/monitoring"},
+						IssuerUrl: *localIssuer,
+					},
+				},
+			}
+			directorAds = append(directorAds, cacheIssuer)
+		}
+		return WriteCacheScitokensConfig(directorAds)
 	} else {
 		return errors.New("Internal error: server object is neither cache nor origin")
 	}

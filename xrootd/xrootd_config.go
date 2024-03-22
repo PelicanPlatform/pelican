@@ -43,7 +43,6 @@ import (
 	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/pelicanplatform/pelican/cache_ui"
 	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
@@ -242,16 +241,8 @@ func CheckOriginXrootdEnv(exportPath string, server server_utils.XRootDServer, u
 		return errors.Wrapf(err, "Unable to change ownership of macaroons secret %v"+
 			" to desired daemon group %v", macaroonsSecret, groupname)
 	}
-	// If the scitokens.cfg does not exist, create one
-	if originServer, ok := server.(*origin_ui.OriginServer); ok {
-		authedPrefixes, err := originServer.GetAuthorizedPrefixes()
-		if err != nil {
-			return err
-		}
-		err = WriteOriginScitokensConfig(authedPrefixes)
-		if err != nil {
-			return err
-		}
+	if err := EmitScitokensConfig(server); err != nil {
+		return err
 	}
 	if err := origin_ui.ConfigureXrootdMonitoringDir(); err != nil {
 		return err
@@ -325,12 +316,10 @@ func CheckCacheXrootdEnv(exportPath string, server server_utils.XRootDServer, ui
 		return "", errors.New("One of Federation.DiscoveryUrl or Federation.DirectorUrl must be set to configure a cache")
 	}
 
-	if cacheServer, ok := server.(*cache_ui.CacheServer); ok {
-		err := WriteCacheScitokensConfig(cacheServer.GetNamespaceAds())
-		if err != nil {
-			return "", errors.Wrap(err, "Failed to create scitokens configuration for the cache")
-		}
+	if err := EmitScitokensConfig(server); err != nil {
+		return "", err
 	}
+
 	return exportPath, nil
 }
 

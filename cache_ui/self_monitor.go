@@ -15,6 +15,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/token"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
@@ -58,7 +59,7 @@ func generateTestFile() (string, error) {
 	monitoringPath := filepath.Join(basePath, selfTestDir)
 	_, err := os.Stat(monitoringPath)
 	if err != nil {
-		return "", errors.Wrap(err, "Self-test directory does not exist")
+		return "", errors.Wrap(err, "self-test directory does not exist at "+monitoringPath)
 	}
 	uid, err := config.GetDaemonUID()
 	if err != nil {
@@ -98,71 +99,97 @@ func generateTestFile() (string, error) {
 
 	file, err := os.OpenFile(finalFilePath, os.O_WRONLY|os.O_CREATE, 0600)
 	if err != nil {
-		return "", errors.Wrapf(err, "Failed to create self-test file %s", finalFilePath)
+		return "", errors.Wrapf(err, "failed to create self-test file %s", finalFilePath)
 	}
 	defer file.Close()
 
 	cinfoFile, err := os.OpenFile(tmpFileCinfoPath, os.O_WRONLY|os.O_CREATE, 0600)
 	if err != nil {
-		return "", errors.Wrapf(err, "Failed to create self-test cinfo file %s", tmpFileCinfoPath)
+		return "", errors.Wrapf(err, "failed to create self-test cinfo file %s", tmpFileCinfoPath)
 	}
 	defer cinfoFile.Close()
 
 	if _, err := file.Write(testFileBytes); err != nil {
-		return "", errors.Wrapf(err, "Failed to write test content to self-test file %s", finalFilePath)
+		return "", errors.Wrapf(err, "failed to write test content to self-test file %s", finalFilePath)
 	}
 	if _, err := cinfoFile.Write(cinfoBytes); err != nil {
-		return "", errors.Wrapf(err, "Failed to write cinfo content to self-test cinfo file %s", tmpFileCinfoPath)
+		return "", errors.Wrapf(err, "failed to write cinfo content to self-test cinfo file %s", tmpFileCinfoPath)
 	}
 
 	if err = file.Chown(uid, gid); err != nil {
-		return "", errors.Wrapf(err, "Unable to change ownership of self-test file %v to desired daemon gid %v", file, gid)
+		return "", errors.Wrapf(err, "unable to change ownership of self-test file %v to desired daemon gid %v", file, gid)
 	}
 	if err = cinfoFile.Chown(uid, gid); err != nil {
-		return "", errors.Wrapf(err, "Unable to change ownership of self-test cinfo file %v to desired daemon gid %v", file, gid)
+		return "", errors.Wrapf(err, "unable to change ownership of self-test cinfo file %v to desired daemon gid %v", file, gid)
 	}
 
 	if err := os.Rename(tmpFileCinfoPath, finalFileCinfoPath); err != nil {
-		return "", errors.Wrapf(err, "Unable to move self-test cinfo file from temp location %q to desired location %q", tmpFileCinfoPath, finalFileCinfoPath)
+		return "", errors.Wrapf(err, "unable to move self-test cinfo file from temp location %q to desired location %q", tmpFileCinfoPath, finalFileCinfoPath)
 	}
 
 	cachePort := param.Cache_Port.GetInt()
 	baseUrlStr := fmt.Sprintf("https://%s:%d", param.Server_Hostname.GetString(), cachePort)
 	baseUrl, err := url.Parse(baseUrlStr)
 	if err != nil {
-		return "", errors.Wrap(err, "Failed to validate the base url for self-test download")
+		return "", errors.Wrap(err, "failed to validate the base url for self-test download")
 	}
 	baseUrl.Path = extFilePath
 
 	return baseUrl.String(), nil
 }
 
-func downloadTestFile(ctx context.Context, fileUrl string) error {
-	req, err := http.NewRequestWithContext(ctx, "GET", fileUrl, nil)
+func generateFileTestScitoken() (string, error) {
+	issuerUrl := param.Server_ExternalWebUrl.GetString()
+	if issuerUrl == "" { // if both are empty, then error
+		return "", errors.New("failed to create token: invalid iss, Server_ExternalWebUrl is empty")
+	}
+	fTestTokenCfg := token.NewWLCGToken()
+	fTestTokenCfg.Lifetime = time.Minute
+	fTestTokenCfg.Issuer = issuerUrl
+	fTestTokenCfg.Subject = "cache"
+	fTestTokenCfg.Claims = map[string]string{"scope": "storage.read:/pelican/monitoring"}
+	// For self-tests, the audience is the server itself
+	fTestTokenCfg.AddAudienceAny()
+
+	// CreateToken also handles validation for us
+	tok, err := fTestTokenCfg.CreateToken()
 	if err != nil {
-		return errors.Wrap(err, "Failed to create GET request for test file transfer download")
+		return "", errors.Wrap(err, "failed to create file test token")
 	}
 
-	// TODO: add auth for self-test and remove the public export in Authfile
-	// once we have a local issuer up for cache (should be doable once #816 is merged)
+	return tok, nil
+}
+
+func downloadTestFile(ctx context.Context, fileUrl string) error {
+	tkn, err := generateFileTestScitoken()
+	if err != nil {
+		return errors.Wrap(err, "failed to create a token for cache self-test download")
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "GET", fileUrl, nil)
+	if err != nil {
+		return errors.Wrap(err, "failed to create GET request for cache self-test download")
+	}
+
+	req.Header.Set("Authorization", "Bearer "+tkn)
 
 	client := http.Client{Transport: config.GetTransport()}
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return errors.Wrap(err, "Failed to start request for test file transfer download")
+		return errors.Wrap(err, "failed to start request for cache self-test download")
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode > 299 {
-		return errors.Errorf("Error response %v from test file transfer download: %v", resp.StatusCode, resp.Status)
+		return errors.Errorf("error response %v from cache self-test download: %v", resp.StatusCode, resp.Status)
 	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return errors.Wrap(err, "Failed to get response body from test file transfer download")
+		return errors.Wrap(err, "failed to get response body from cache self-test download")
 	}
 	if string(body) != selfTestBody {
-		return errors.Errorf("Contents of test file transfer body do not match upload: %v", body)
+		return errors.Errorf("contents of cache self-test file do not match the one uploaded: %v", body)
 	}
 
 	return nil
@@ -198,11 +225,11 @@ func runSelfTest(ctx context.Context) (bool, error) {
 	}
 	err = downloadTestFile(ctx, fileUrl)
 	if err != nil {
-		err = deleteTestFile(fileUrl)
-		if err != nil {
-			return false, errors.Wrap(err, "self-test failed during delete")
+		errDel := deleteTestFile(fileUrl)
+		if errDel != nil {
+			return false, errors.Wrap(errDel, "self-test failed during delete")
 		}
-		return false, errors.Wrap(err, "self-test failed during download")
+		return false, errors.Wrap(err, "self-test failed during download. File is cleaned up at "+fileUrl)
 	}
 	err = deleteTestFile(fileUrl)
 	if err != nil {
@@ -219,6 +246,9 @@ func doSelfMonitor(ctx context.Context) {
 	if ok && err == nil {
 		log.Debugln("Self-test monitoring cycle succeeded at", time.Now().Format(time.UnixDate))
 		metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusOK, "Self-test monitoring cycle succeeded at "+time.Now().Format(time.RFC3339))
+	} else if !ok && err == nil {
+		log.Warningln("Self-test monitoring cycle failed with unknown error")
+		metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusCritical, "Self-test monitoring cycle failed with unknown err")
 	} else {
 		log.Warningln("Self-test monitoring cycle failed: ", err)
 		metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusCritical, "Self-test monitoring cycle failed: "+err.Error())
