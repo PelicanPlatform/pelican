@@ -26,6 +26,11 @@ jobs:
         with:
           node-version: 20
 
+      - name: Set Branch
+        id: set_branch
+        run: |
+          echo "branch=${GITHUB_REF_NAME%.*}.x" >> $GITHUB_OUTPUT
+
       - name: Update npm version
         run: |
           cd web_ui/frontend
@@ -35,11 +40,6 @@ jobs:
 
           # Add some verbosity
           echo "NPM version is now $(npm version)"
-
-      - name: Set Branch
-        id: set_branch
-        run: |
-          echo "branch=${GITHUB_REF_NAME%.*}.x" >> $GITHUB_OUTPUT
 
       - uses: stefanzweifel/git-auto-commit-action@v5
         with:
