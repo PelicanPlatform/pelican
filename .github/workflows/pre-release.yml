@@ -18,10 +18,18 @@ jobs:
     outputs:
       tag: ${{ steps.extract_tag.outputs.tag }}
     steps:
+
+      - name: Set Branch
+        id: set_branch
+        run: |
+          echo "branch=${GITHUB_REF_NAME%.*}.x" >> $GITHUB_OUTPUT
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ steps.set_branch.outputs.branch }}
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -35,11 +43,6 @@ jobs:
 
           # Add some verbosity
           echo "NPM version is now $(npm version)"
-
-      - name: Set Branch
-        id: set_branch
-        run: |
-          echo "branch=${GITHUB_REF_NAME%.*}.x" >> $GITHUB_OUTPUT
 
       - uses: stefanzweifel/git-auto-commit-action@v5
         with:
@@ -64,12 +67,12 @@ jobs:
 
   release-container:
     needs: [pre-release]
-    uses: PelicanPlatform/pelican/.github/workflows/build-prod-container.yml@main
+    uses: ./.github/workflows/build-prod-container.yml
     secrets: inherit
     with:
       tag: ${{ needs.pre-release.outputs.tag }}
 
   release:
     needs: [pre-release]
-    uses: PelicanPlatform/pelican/.github/workflows/release.yml@main
+    uses: ./.github/workflows/release.yml
     secrets: inherit
