@@ -103,14 +103,33 @@ func federationDiscoveryHandler(ctx *gin.Context) {
 // Director metadata discovery endpoint for OpenID style
 // token authentication, providing issuer endpoint and director's jwks endpoint
 func oidcDiscoveryHandler(ctx *gin.Context) {
-	directorUrl := param.Federation_DirectorUrl.GetString()
-	if len(directorUrl) == 0 {
+	directorUrlStr := param.Federation_DirectorUrl.GetString()
+	if !param.Federation_DirectorUrl.IsSet() || len(directorUrlStr) == 0 {
+		log.Error("Bad server configuration: Federation.DirectorUrl is not set")
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Bad server configuration: director URL is not set"})
 		return
 	}
+	directorUrl, err := url.Parse(directorUrlStr)
+	if err != nil {
+		log.Error("Bad server configuration: invalid URL from Federation.DirectorUrl: ", err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Bad server configuration: director URL is not valid"})
+		return
+	}
+	if directorUrl.Scheme != "https" {
+		directorUrl.Scheme = "https"
+	}
+	if directorUrl.Port() == "443" {
+		directorUrl.Host = strings.TrimSuffix(directorUrl.Host, ":443")
+	}
+	jwskUrl, err := url.JoinPath(directorUrl.String(), directorJWKSPath)
+	if err != nil {
+		log.Errorf("Bad server configuration: cannot join %s to Federation.DirectorUrl: %s for jwks URL: %v", directorJWKSPath, directorUrl.String(), err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Bad server configuration: cannot generate JWKs URL"})
+		return
+	}
 	rs := OpenIdDiscoveryResponse{
-		Issuer:  directorUrl,
-		JwksUri: directorUrl + directorJWKSPath,
+		Issuer:  directorUrl.String(),
+		JwksUri: jwskUrl,
 	}
 	jsonData, err := json.MarshalIndent(rs, "", "  ")
 	if err != nil {

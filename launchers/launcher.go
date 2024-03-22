@@ -93,7 +93,9 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 
 	if modules.IsEnabled(config.RegistryType) {
 
-		viper.Set("Federation.RegistryURL", param.Server_ExternalWebUrl.GetString())
+		if param.Federation_RegistryUrl.GetString() == "" {
+			viper.Set("Federation.RegistryURL", param.Server_ExternalWebUrl.GetString())
+		}
 
 		if err = RegistryServe(ctx, engine, egrp); err != nil {
 			return shutdownCancel, err

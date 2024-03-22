@@ -32,19 +32,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const (
+	mockDirUrlWoPort = "https://example.director.com"
+	mockDirUrlWPort  = "https://example.director.com:8444"
+
+	mockRawDirUrlHTTP = "http://example.director.com"
+	mockRawDirUrl443  = "https://example.director.com:443"
+
+	mockRegUrlWoPort = "https://example.registry.com"
+	mockRegUrlWPort  = "https://example.registry.com:8444"
+
+	mockRawRegUrlHTTP = "http://example.registry.com"
+	mockRawRegUrl443  = "https://example.registry.com:443"
+)
+
 func TestFederationDiscoveryHandler(t *testing.T) {
-	mockDirUrlWoPort := "https://example.director.com"
-	mockDirUrlWPort := "https://example.director.com:8444"
-
-	mockRawDirUrlHTTP := "http://example.director.com"
-	mockRawDirUrl443 := "https://example.director.com:443"
-
-	mockRegUrlWoPort := "https://example.registry.com"
-	mockRegUrlWPort := "https://example.registry.com:8444"
-
-	mockRawRegUrlHTTP := "http://example.registry.com"
-	mockRawRegUrl443 := "https://example.registry.com:443"
-
 	router := gin.Default()
 	router.GET("/test", federationDiscoveryHandler)
 
@@ -149,6 +151,75 @@ func TestFederationDiscoveryHandler(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, tc.expectedDir, dis.DirectorEndpoint)
 			assert.Equal(t, tc.expectedReg, dis.NamespaceRegistrationEndpoint)
+		})
+	}
+}
+
+func TestOidcDiscoveryHandler(t *testing.T) {
+	router := gin.Default()
+	router.GET("/test", oidcDiscoveryHandler)
+
+	tests := []struct {
+		name           string
+		dirUrl         string
+		expectedIssuer string
+		expectedJwks   string
+		statusCode     int
+	}{
+		{
+			name:           "dir-without-port",
+			dirUrl:         mockDirUrlWoPort,
+			expectedIssuer: mockDirUrlWoPort,
+			expectedJwks:   mockDirUrlWoPort + directorJWKSPath,
+			statusCode:     200,
+		},
+		{
+			name:           "dir-with-443-port",
+			dirUrl:         mockRawDirUrl443,
+			expectedIssuer: mockDirUrlWoPort,
+			expectedJwks:   mockDirUrlWoPort + directorJWKSPath,
+			statusCode:     200,
+		},
+		{
+			name:           "dir-with-non-443-port",
+			dirUrl:         mockDirUrlWPort,
+			expectedIssuer: mockDirUrlWPort,
+			expectedJwks:   mockDirUrlWPort + directorJWKSPath,
+			statusCode:     200,
+		},
+		{
+			name:           "dir-with-http",
+			dirUrl:         mockRawDirUrlHTTP,
+			expectedIssuer: mockDirUrlWoPort,
+			expectedJwks:   mockDirUrlWoPort + directorJWKSPath,
+			statusCode:     200,
+		},
+		{
+			name:           "empty-dir",
+			dirUrl:         "",
+			expectedIssuer: "",
+			expectedJwks:   "",
+			statusCode:     500,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			viper.Reset()
+			viper.Set("Federation.DirectorUrl", tc.dirUrl)
+
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest("GET", "/test", nil)
+			router.ServeHTTP(w, req)
+
+			require.Equal(t, tc.statusCode, w.Result().StatusCode)
+			body, err := io.ReadAll(w.Result().Body)
+			require.NoError(t, err)
+			dis := OpenIdDiscoveryResponse{}
+			err = json.Unmarshal(body, &dis)
+			require.NoError(t, err)
+			assert.Equal(t, tc.expectedIssuer, dis.Issuer)
+			assert.Equal(t, tc.expectedJwks, dis.JwksUri)
 		})
 	}
 }
