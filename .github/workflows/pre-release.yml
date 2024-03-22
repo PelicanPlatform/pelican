@@ -46,8 +46,8 @@ jobs:
 
   build-website:
     needs: [pre-release]
-    uses: ./.github/workflows/publish-container.yml@main
+    uses: ./.github/workflows/publish-container.yml
 
   goreleaser:
     needs: [pre-release]
-    uses: ./.github/workflows/release.yml@main
+    uses: ./.github/workflows/release.yml
