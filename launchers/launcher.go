@@ -31,7 +31,6 @@ import (
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/broker"
@@ -92,33 +91,22 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 	}
 
 	if modules.IsEnabled(config.RegistryType) {
-
-		if param.Federation_RegistryUrl.GetString() == "" {
-			viper.Set("Federation.RegistryURL", param.Server_ExternalWebUrl.GetString())
-		}
-
+		// Federation.RegistryUrl defaults to Server.ExternalUrl in InitServer()
 		if err = RegistryServe(ctx, engine, egrp); err != nil {
 			return shutdownCancel, err
 		}
 	}
 
 	if modules.IsEnabled(config.BrokerType) {
-		viper.Set("Federation.BrokerURL", param.Server_ExternalWebUrl.GetString())
-
 		rootGroup := engine.Group("/")
 		broker.RegisterBroker(ctx, rootGroup)
 		broker.LaunchNamespaceKeyMaintenance(ctx, egrp)
 	}
 
 	if modules.IsEnabled(config.DirectorType) {
-
-		viper.Set("Director.DefaultResponse", "cache")
-
-		// Only set director URL to Server_ExternalWebUrl if it's not set
-		if !param.Federation_DirectorUrl.IsSet() {
-			viper.Set("Federation.DirectorURL", param.Server_ExternalWebUrl.GetString())
-		}
-
+		// Director.DefaultResponse defaults to false through default.yaml
+		// Federation.DirectorUrl defaults to Server.ExternalUrl in InitServer()
+		// Duplicated set are removed
 		if err = DirectorServe(ctx, engine, egrp); err != nil {
 			return shutdownCancel, err
 		}

@@ -19,6 +19,7 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -340,5 +341,137 @@ func TestDiscoverFederation(t *testing.T) {
 		assert.Equal(t, "https://osg-htc.org/osdf/public_signing_key.jwks", param.Federation_JwkUrl.GetString(), "Unexpected JwksUri")
 		assert.Equal(t, "", param.Federation_BrokerUrl.GetString(), "Unexpected BrokerEndpoint")
 		viper.Reset()
+	})
+}
+
+func TestInitServerUrl(t *testing.T) {
+	mockHostname := "example.com"
+	mockNon443Port := 8444
+	mock443Port := 443
+
+	mockWebUrlWoPort := "https://example.com"
+	mockWebUrlW443Port := "https://example.com:443"
+	mockWebUrlWNon443Port := "https://example.com:8444"
+
+	viper.Reset()
+
+	initConfig := func() {
+		viper.Reset()
+		tempDir := t.TempDir()
+		viper.Set("ConfigDir", tempDir)
+	}
+
+	initDirectoryConfig := func() {
+		initConfig()
+		viper.Set("Director.MinStatResponse", 1)
+		viper.Set("Director.MaxStatResponse", 4)
+	}
+
+	t.Run("web-url-defaults-to-hostname-port", func(t *testing.T) {
+		viper.Reset()
+		viper.Set("Server.Hostname", mockHostname)
+		viper.Set("Server.WebPort", mockNon443Port)
+		err := InitServer(context.Background(), 0)
+		require.NoError(t, err)
+		assert.Equal(t, mockWebUrlWNon443Port, param.Server_ExternalWebUrl.GetString())
+	})
+
+	t.Run("default-web-url-removes-443-port", func(t *testing.T) {
+		viper.Reset()
+		viper.Set("Server.Hostname", mockHostname)
+		viper.Set("Server.WebPort", mock443Port)
+		err := InitServer(context.Background(), 0)
+		require.NoError(t, err)
+		assert.Equal(t, mockWebUrlWoPort, param.Server_ExternalWebUrl.GetString())
+	})
+
+	t.Run("remove-443-port-for-set-web-url", func(t *testing.T) {
+		// We respect the URL value set directly by others. Won't remove 443 port
+		viper.Reset()
+		viper.Set("Server.ExternalWebUrl", mockWebUrlW443Port)
+		err := InitServer(context.Background(), 0)
+		require.NoError(t, err)
+		assert.Equal(t, mockWebUrlWoPort, param.Server_ExternalWebUrl.GetString())
+	})
+
+	t.Run("dir-url-default-to-web-url", func(t *testing.T) {
+		// We respect the URL value set directly by others. Won't remove 443 port
+		initDirectoryConfig()
+		// If Server_ExternalWebUrl is not set, Federation_DirectorUrl defaults to https://<hostname>:<non-443-port>
+		// In this case, the port is 443, so Federation_DirectorUrl = https://example.com
+		viper.Set("Server.Hostname", mockHostname)
+		viper.Set("Server.WebPort", mock443Port)
+		err := InitServer(context.Background(), DirectorType)
+		require.NoError(t, err)
+		assert.Equal(t, mockWebUrlWoPort, param.Federation_DirectorUrl.GetString())
+
+		// If Server_ExternalWebUrl is explicitly set, Federation_DirectorUrl defaults to whatever it is
+		// But 443 port is stripped if provided
+		initDirectoryConfig()
+		viper.Set("Server.ExternalWebUrl", mockWebUrlW443Port)
+		err = InitServer(context.Background(), DirectorType)
+		require.NoError(t, err)
+		assert.Equal(t, mockWebUrlWoPort, param.Federation_DirectorUrl.GetString())
+
+		initDirectoryConfig()
+		viper.Set("Server.ExternalWebUrl", mockWebUrlWoPort)
+		viper.Set("Federation.DirectorUrl", "https://example-director.com")
+		err = InitServer(context.Background(), DirectorType)
+		require.NoError(t, err)
+		assert.Equal(t, "https://example-director.com", param.Federation_DirectorUrl.GetString())
+	})
+
+	t.Run("reg-url-default-to-web-url", func(t *testing.T) {
+		// We respect the URL value set directly by others. Won't remove 443 port
+		initConfig()
+		// If Server_ExternalWebUrl is not set, Federation_RegistryUrl defaults to https://<hostname>:<non-443-port>
+		// In this case, the port is 443, so Federation_RegistryUrl = https://example.com
+		viper.Set("Server.Hostname", mockHostname)
+		viper.Set("Server.WebPort", mock443Port)
+		err := InitServer(context.Background(), RegistryType)
+		require.NoError(t, err)
+		assert.Equal(t, mockWebUrlWoPort, param.Federation_RegistryUrl.GetString())
+
+		// If Server_ExternalWebUrl is explicitly set, Federation_RegistryUrl defaults to whatever it is
+		// But 443 port is stripped if provided
+		initConfig()
+		viper.Set("Server.ExternalWebUrl", mockWebUrlW443Port)
+		err = InitServer(context.Background(), RegistryType)
+		require.NoError(t, err)
+		assert.Equal(t, mockWebUrlWoPort, param.Federation_RegistryUrl.GetString())
+
+		initConfig()
+		viper.Set("Server.ExternalWebUrl", mockWebUrlWoPort)
+		viper.Set("Federation.RegistryUrl", "https://example-registry.com")
+		err = InitServer(context.Background(), RegistryType)
+		require.NoError(t, err)
+		assert.Equal(t, "https://example-registry.com", param.Federation_RegistryUrl.GetString())
+	})
+
+	t.Run("broker-url-default-to-web-url", func(t *testing.T) {
+		// We respect the URL value set directly by others. Won't remove 443 port
+		initConfig()
+		// If Server_ExternalWebUrl is not set, Federation_BrokerUrl defaults to https://<hostname>:<non-443-port>
+		// In this case, the port is 443, so Federation_BrokerUrl = https://example.com
+		viper.Set("Server.Hostname", mockHostname)
+		viper.Set("Server.WebPort", mock443Port)
+		err := InitServer(context.Background(), BrokerType)
+		require.NoError(t, err)
+		assert.Equal(t, mockWebUrlWoPort, param.Federation_BrokerUrl.GetString())
+
+		// If Server_ExternalWebUrl is explicitly set, Federation_BrokerUrl defaults to whatever it is
+		// But 443 port is stripped if provided
+		initConfig()
+		viper.Set("Server.ExternalWebUrl", mockWebUrlW443Port)
+		err = InitServer(context.Background(), BrokerType)
+		require.NoError(t, err)
+		assert.Equal(t, mockWebUrlWoPort, param.Federation_BrokerUrl.GetString())
+
+		initConfig()
+		viper.Set("Server.ExternalWebUrl", mockWebUrlWoPort)
+		viper.Set("Federation.BrokerUrl", "https://example-registry.com")
+		err = InitServer(context.Background(), BrokerType)
+		require.NoError(t, err)
+		assert.Equal(t, "https://example-registry.com", param.Federation_BrokerUrl.GetString())
 	})
 }
