@@ -1,0 +1,64 @@
+# Users' Quick Start Guide
+
+Pelican in its heart is a way to transfer data. As a user, you will be interacting mostly with the Pelican Client which has many useful commands at your disposal.
+
+## Before Starting
+
+### Assumptions
+
+Before using the Pelican client to interact with objects from your federation, this guide makes several assumptions:
+
+- You are on a computer where you have access to a terminal. The Pelican client is a command line tool.
+- You've already installed the version of Pelican appropriate for your system, and Pelican is accessible via your path. To test this on Linux, you can run
+```console
+which pelican
+```
+which should output a path to the executable. If there is no output to this command, refer to the Pelican installation docs to acquire a working installation.
+
+## Downloading your first file from a federation
+
+To download a file from a federation we will be using the `pelican object get` command. This is how we will run the command:
+
+```console
+pelican object get pelican://osg-htc.org/osgconnect/public/osg/testfile.txt .
+```
+
+Go ahead and give that command a run. If all goes well, you should see a progress bar pop up, complete, and a file named `testfile.txt` within your current directory. Congradulations on downloading your first object using the Pelican Client!
+
+Let's break down that url that we used to download the file, as it contains some important pieces used for accessing data within a Pelican federation.
+
+### pelican://
+
+This piece is the `scheme` for which we want to download the file. Other supported schemes from pelican include `osdf://`, `stash://`, and `http://`. More information can be found here.
+
+### osg-htc.org
+
+This is the federation-url for where we are getting our data. When using a pelican:// scheme, this is necessary. In any other scheme, we do not specify this url.
+
+### osgconnect/public
+
+This is called the namespace-prefix which acts sort of like a directory path but within the federation, it is key for finding where your data lives.
+
+### osg/testfile.txt
+
+This is the name of the object (or file in this case) that we want to download with its location.
+
+## A More In-Depth example
+
+This example will show you more client commands and a more in-depth example of how we can move data around.
+
+Say that I belong to a federation called science-world. This federation is made up of an origin, a cache, a director, and a registry (see docs for more details on these pieces). As a user, I am most interested in the origin and cache pieces because that is where my data might live. Let's say my federation has a url of `science-world.org`. The namespace prefix is `/sw/PROTECTED` and my objects are located at `/JSmith/important_research/`. Also, since my data is `PROTECTED`, I was issued a token that I used to access my data which is in a file called `token.txt`
+
+Now, say I did some important research and would like to add this data to the federation. My data file is called `data.csv` and I can upload using my token like so:
+
+```console
+pelican object put data.csv pelican://science-world.org/sw/PROTECTED/JSmith/important_research/data.csv -t token.txt
+```
+
+However, say I have a lot more data than one `.csv` file, say I need to upload a whole directory full of `data.csv` files. Say that directory is named `data_dir` and I can upload the whole directory like so:
+
+```console
+pelican object put data_dir pelican://science-world.org/sw/PROTECTED/JSmith/important_research/data_dir -t token.txt -r
+```
+
+The `-r` flag here is used to specify that we are uploading a directory.
