@@ -34,7 +34,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"time"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -43,22 +42,6 @@ import (
 	"github.com/pelicanplatform/pelican/namespaces"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/spf13/viper"
-)
-
-type (
-	payloadStruct struct {
-		filename     string
-		status       string
-		Owner        string
-		ProjectName  string
-		version      string
-		start1       int64
-		end1         int64
-		timestamp    int64
-		downloadTime int64
-		fileSize     int64
-		downloadSize int64
-	}
 )
 
 // Number of caches to attempt to use in any invocation
@@ -496,6 +479,8 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 			remoteDestUrl.Scheme, strings.Join(understoodSchemes, ", "))
 	}
 
+	project := GetProjectName()
+
 	te := NewTransferEngine(ctx)
 	defer func() {
 		if err := te.Shutdown(); err != nil {
@@ -506,7 +491,7 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 	if err != nil {
 		return
 	}
-	tj, err := client.NewTransferJob(remoteDestUrl, localObject, true, recursive)
+	tj, err := client.NewTransferJob(remoteDestUrl, localObject, true, recursive, project)
 	if err != nil {
 		return
 	}
@@ -607,17 +592,7 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 		localDestination = path.Join(localDestPath, remoteObjectFilename)
 	}
 
-	payload := payloadStruct{}
-	payload.version = config.GetVersion()
-
-	//Fill out the payload as much as possible
-	payload.filename = remoteObjectUrl.Path
-
-	parseJobAd(&payload)
-
-	start := time.Now()
-	payload.start1 = start.Unix()
-
+	project := GetProjectName()
 	success := false
 
 	te := NewTransferEngine(ctx)
@@ -630,7 +605,7 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 	if err != nil {
 		return
 	}
-	tj, err := tc.NewTransferJob(remoteObjectUrl, localDestination, false, recursive)
+	tj, err := tc.NewTransferJob(remoteObjectUrl, localDestination, false, recursive, project)
 	if err != nil {
 		return
 	}
@@ -640,7 +615,6 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 	}
 
 	transferResults, err = tc.Shutdown()
-	end := time.Now()
 	if err == nil {
 		if tj.lookupErr == nil {
 			success = true
@@ -657,20 +631,10 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 		}
 	}
 
-	payload.end1 = end.Unix()
-
-	payload.timestamp = payload.end1
-	payload.downloadTime = int64(end.Sub(start).Seconds())
-
 	if success {
-		payload.status = "Success"
-
 		// Get the final size of the download file
-		payload.fileSize = downloaded
-		payload.downloadSize = downloaded
 	} else {
 		log.Error("Http GET failed! Unable to download file:", err)
-		payload.status = "Fail"
 	}
 
 	if !success {
@@ -762,8 +726,7 @@ func DoCopy(ctx context.Context, sourceFile string, destination string, recursiv
 		return nil, errors.New("Do not understand destination scheme")
 	}
 
-	payload := payloadStruct{}
-	parseJobAd(&payload)
+	project := GetProjectName()
 
 	isPut := destScheme == "stash" || destScheme == "osdf" || destScheme == "pelican"
 
@@ -803,18 +766,7 @@ func DoCopy(ctx context.Context, sourceFile string, destination string, recursiv
 		remoteURL = sourceURL
 	}
 
-	payload.version = config.GetVersion()
-
-	//Fill out the payload as much as possible
-	payload.filename = sourceURL.Path
-
-	start := time.Now()
-	payload.start1 = start.Unix()
-
-	// Go thru the download methods
 	success := false
-
-	// switch statement?
 	var downloaded int64 = 0
 
 	te := NewTransferEngine(ctx)
@@ -827,7 +779,7 @@ func DoCopy(ctx context.Context, sourceFile string, destination string, recursiv
 	if err != nil {
 		return
 	}
-	tj, err := tc.NewTransferJob(remoteURL, localPath, isPut, recursive)
+	tj, err := tc.NewTransferJob(remoteURL, localPath, isPut, recursive, project)
 	if err != nil {
 		return
 	}
@@ -843,8 +795,6 @@ func DoCopy(ctx context.Context, sourceFile string, destination string, recursiv
 		}
 	}
 
-	end := time.Now()
-
 	for _, result := range transferResults {
 		downloaded += result.TransferredBytes
 		if err == nil && result.Error != nil {
@@ -853,20 +803,9 @@ func DoCopy(ctx context.Context, sourceFile string, destination string, recursiv
 		}
 	}
 
-	payload.end1 = end.Unix()
-
-	payload.timestamp = payload.end1
-	payload.downloadTime = int64(end.Sub(start).Seconds())
-
 	if success {
-		payload.status = "Success"
-
-		// Get the final size of the download file
-		payload.fileSize = downloaded
-		payload.downloadSize = downloaded
 		return transferResults, nil
 	} else {
-		payload.status = "Fail"
 		return transferResults, err
 	}
 }
@@ -917,8 +856,8 @@ func getIPs(name string) []string {
 
 }
 
-func parseJobAd(payload *payloadStruct) {
-
+// This function parses a condor job ad and returns the project name if defined
+func GetProjectName() string {
 	//Parse the .job.ad file for the Owner (username) and ProjectName of the callee.
 
 	condorJobAd, isPresent := os.LookupEnv("_CONDOR_JOB_AD")
@@ -928,7 +867,7 @@ func parseJobAd(payload *payloadStruct) {
 	} else if _, err := os.Stat(".job.ad"); err == nil {
 		filename = ".job.ad"
 	} else {
-		return
+		return ""
 	}
 
 	// https://stackoverflow.com/questions/28574609/how-to-apply-regexp-to-content-in-file-go
@@ -940,7 +879,7 @@ func parseJobAd(payload *payloadStruct) {
 
 	// Get all matches from file
 	// Note: This appears to be invalid regex but is the only thing that appears to work. This way it successfully finds our matches
-	classadRegex, e := regexp.Compile(`^*\s*(Owner|ProjectName)\s=\s"(.*)"`)
+	classadRegex, e := regexp.Compile(`^*\s*(ProjectName)\s=\s"(.*)"`)
 	if e != nil {
 		log.Fatal(e)
 	}
@@ -948,26 +887,15 @@ func parseJobAd(payload *payloadStruct) {
 	matches := classadRegex.FindAll(b, -1)
 	for _, match := range matches {
 		matchString := strings.TrimSpace(string(match))
-
-		if strings.HasPrefix(matchString, "Owner") {
-			matchParts := strings.Split(strings.TrimSpace(matchString), "=")
-
-			if len(matchParts) == 2 { // just confirm we get 2 parts of the string
-				matchValue := strings.TrimSpace(matchParts[1])
-				matchValue = strings.Trim(matchValue, "\"") //trim any "" around the match if present
-				payload.Owner = matchValue
-			}
-		}
-
 		if strings.HasPrefix(matchString, "ProjectName") {
 			matchParts := strings.Split(strings.TrimSpace(matchString), "=")
 
 			if len(matchParts) == 2 { // just confirm we get 2 parts of the string
 				matchValue := strings.TrimSpace(matchParts[1])
 				matchValue = strings.Trim(matchValue, "\"") //trim any "" around the match if present
-				payload.ProjectName = matchValue
+				return matchValue
 			}
 		}
 	}
-
+	return ""
 }
