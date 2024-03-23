@@ -593,18 +593,18 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 				transferDetailsDownload, err = client.DoGet(ctx, uploadURL, t.TempDir(), true, client.WithTokenLocation(tempToken.Name()))
 			}
 			assert.NoError(t, err)
-			if err == nil && len(transferDetailsUpload) == 2 {
+			if err == nil && len(transferDetailsDownload) == 2 {
 				countBytesUploadIdx0 := 0
 				countBytesUploadIdx1 := 0
 				// Verify we got the correct files back (have to do this since files upload in different orders at times)
 				// In this case, we want to match them to the sizes of the uploaded files
-				for _, transfer := range transferDetailsUpload {
+				for _, transfer := range transferDetailsDownload {
 					transferredBytes := transfer.TransferredBytes
 					switch transferredBytes {
-					case transferDetailsUpload[0].TransferredBytes:
+					case transferDetailsDownload[0].TransferredBytes:
 						countBytesUploadIdx0++
 						continue
-					case transferDetailsUpload[1].TransferredBytes:
+					case transferDetailsDownload[1].TransferredBytes:
 						countBytesUploadIdx1++
 						continue
 					default:
