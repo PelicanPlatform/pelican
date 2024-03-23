@@ -468,7 +468,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 
 	t.Run("testPelicanRecursiveGetAndPutOsdfURL", func(t *testing.T) {
 		config.SetPreferredPrefix("pelican")
-		for idx, export := range fed.Exports {
+		for _, export := range fed.Exports {
 			// Set path for object to upload/download
 			tempPath := tempDir
 			dirName := filepath.Base(tempPath)
@@ -548,7 +548,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 	t.Run("testPelicanRecursiveGetAndPutPelicanURL", func(t *testing.T) {
 		config.SetPreferredPrefix("pelican")
 
-		for idx, export := range fed.Exports {
+		for _, export := range fed.Exports {
 			// Set path for object to upload/download
 			tempPath := tempDir
 			dirName := filepath.Base(tempPath)
