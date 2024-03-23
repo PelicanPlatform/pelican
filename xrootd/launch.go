@@ -55,7 +55,10 @@ func (launcher PrivilegedXrootdLauncher) Name() string {
 }
 
 func makeUnprivilegedXrootdLauncher(daemonName string, configPath string, isCache bool) (result UnprivilegedXrootdLauncher, err error) {
-	result.DaemonName = daemonName
+	result.DaemonName = daemonName + ".origin"
+	if isCache {
+		result.DaemonName = daemonName + ".cache"
+	}
 	result.Uid = -1
 	result.Gid = -1
 	result.isCache = isCache
@@ -156,7 +159,7 @@ func LaunchOriginDaemons(ctx context.Context, launchers []daemon.Launcher, egrp 
 		return err
 	}
 
-	ticker := time.NewTicker(10 * time.Second)
+	ticker := time.NewTicker(40 * time.Second)
 	defer ticker.Stop()
 	select {
 	case <-ctx.Done():
