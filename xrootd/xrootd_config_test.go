@@ -62,6 +62,8 @@ func (x *xrootdTest) setup() {
 	viper.Set("Xrootd.RunLocation", dirname)
 	viper.Set("Cache.RunLocation", dirname)
 	viper.Set("Origin.RunLocation", dirname)
+	viper.Set("Origin.StoragePrefix", "/")
+	viper.Set("Origin.FederationPrefix", "/")
 	var cancel context.CancelFunc
 	var egrp *errgroup.Group
 	x.ctx, cancel, egrp = test_utils.TestContext(context.Background(), x.T)
@@ -85,6 +87,8 @@ func TestXrootDOriginConfig(t *testing.T) {
 	defer common.ResetOriginExports()
 	viper.Set("Origin.RunLocation", dirname)
 	viper.Set("Xrootd.RunLocation", dirname)
+	viper.Set("Origin.StoragePrefix", "/")
+	viper.Set("Origin.FederationPrefix", "/")
 	config.InitConfig()
 	configPath, err := ConfigXrootd(ctx, true)
 	require.NoError(t, err)
@@ -541,6 +545,7 @@ func TestUpdateAuth(t *testing.T) {
 	scitokensName := filepath.Join(configDirname, "scitokens.cfg")
 	viper.Set("Xrootd.ScitokensConfig", scitokensName)
 	viper.Set("Origin.FederationPrefix", "/test")
+	viper.Set("Origin.StoragePrefix", "/")
 	config.InitConfig()
 
 	err := config.InitServer(ctx, config.OriginType)

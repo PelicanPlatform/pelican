@@ -598,11 +598,13 @@ func ConfigXrootd(ctx context.Context, origin bool) (string, error) {
 	// To make sure we get the correct exports, we overwrite the exports in the xrdConfig struct with the exports
 	// we get from the common.GetOriginExports() function. Failure to do so will cause us to hit viper again,
 	// which in the case of tests prevents us from overwriting some exports with temp dirs.
-	originExports, err := common.GetOriginExports()
-	if err != nil {
-		return "", errors.Wrap(err, "failed to generate Origin export list for xrootd config")
+	if origin {
+		originExports, err := common.GetOriginExports()
+		if err != nil {
+			return "", errors.Wrap(err, "failed to generate Origin export list for xrootd config")
+		}
+		xrdConfig.Origin.Exports = originExports
 	}
-	xrdConfig.Origin.Exports = originExports
 
 	if xrdConfig.Origin.StorageType == "https" {
 		if xrdConfig.Origin.HttpServiceUrl == "" {

@@ -64,6 +64,7 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	ft.Egrp = egrp
 
 	modules := config.ServerType(0)
+	modules.Set(config.CacheType)
 	modules.Set(config.OriginType)
 	modules.Set(config.DirectorType)
 	modules.Set(config.RegistryType)

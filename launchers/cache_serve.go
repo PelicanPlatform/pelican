@@ -87,6 +87,14 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) (
 }
 
 // Finish configuration of the cache server.
-func CacheServeFinish(ctx context.Context, egrp *errgroup.Group) error {
-	return server_ui.RegisterNamespaceWithRetry(ctx, egrp, "/caches/"+param.Xrootd_Sitename.GetString())
+func CacheServeFinish(ctx context.Context, egrp *errgroup.Group, cacheServer server_utils.XRootDServer) error {
+	log.Debug("Register Cache")
+	if err := server_ui.RegisterNamespaceWithRetry(ctx, egrp, "/caches/"+param.Xrootd_Sitename.GetString()); err != nil {
+		return err
+	}
+
+	log.Debug("Advertise Cache")
+	servers := make([]server_utils.XRootDServer, 1)
+	servers[0] = cacheServer
+	return server_ui.Advertise(ctx, servers)
 }

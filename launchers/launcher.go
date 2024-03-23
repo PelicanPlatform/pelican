@@ -257,6 +257,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		}
 	}
 
+	var cacheServer server_utils.XRootDServer
 	if modules.IsEnabled(config.CacheType) {
 		// Give five seconds for the origin to finish advertising to the director
 		desiredURL := param.Federation_DirectorUrl.GetString() + "/.well-known/openid-configuration"
@@ -264,12 +265,12 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 			log.Errorln("Director does not seem to be working:", err)
 			return shutdownCancel, err
 		}
-		server, err := CacheServe(ctx, engine, egrp)
+		cacheServer, err = CacheServe(ctx, engine, egrp)
 		if err != nil {
 			return shutdownCancel, err
 		}
 
-		servers = append(servers, server)
+		servers = append(servers, cacheServer)
 	}
 
 	if modules.IsEnabled(config.OriginType) || modules.IsEnabled(config.CacheType) {
@@ -281,7 +282,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 
 	if modules.IsEnabled(config.CacheType) {
 		log.Debug("Finishing cache server configuration")
-		if err = CacheServeFinish(ctx, egrp); err != nil {
+		if err = CacheServeFinish(ctx, egrp, cacheServer); err != nil {
 			return shutdownCancel, err
 		}
 	}
