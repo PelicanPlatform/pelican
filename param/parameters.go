@@ -138,6 +138,7 @@ var (
 	LocalCache_RunLocation = StringParam{"LocalCache.RunLocation"}
 	LocalCache_Size = StringParam{"LocalCache.Size"}
 	LocalCache_Socket = StringParam{"LocalCache.Socket"}
+	Logging_Cache_Http = StringParam{"Logging.Cache.Http"}
 	Logging_Cache_Ofs = StringParam{"Logging.Cache.Ofs"}
 	Logging_Cache_Pfc = StringParam{"Logging.Cache.Pfc"}
 	Logging_Cache_Pss = StringParam{"Logging.Cache.Pss"}
@@ -147,6 +148,9 @@ var (
 	Logging_Level = StringParam{"Logging.Level"}
 	Logging_LogLocation = StringParam{"Logging.LogLocation"}
 	Logging_Origin_Cms = StringParam{"Logging.Origin.Cms"}
+	Logging_Origin_Http = StringParam{"Logging.Origin.Http"}
+	Logging_Origin_Ofs = StringParam{"Logging.Origin.Ofs"}
+	Logging_Origin_Oss = StringParam{"Logging.Origin.Oss"}
 	Logging_Origin_Scitokens = StringParam{"Logging.Origin.Scitokens"}
 	Logging_Origin_Xrd = StringParam{"Logging.Origin.Xrd"}
 	Logging_Origin_Xrootd = StringParam{"Logging.Origin.Xrootd"}

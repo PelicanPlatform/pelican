@@ -190,6 +190,38 @@ type: string
 default: info
 components: ["origin"]
 ---
+name: Logging.Origin.Http
+description: >-
+  Logging level for the HTTP component of the origin.  Increasing to debug will cause the Xrootd daemon to log
+  all headers and requests.
+type: string
+default: error
+components: ["origin"]
+---
+name: Logging.Origin.Ofs
+description: >-
+  Logging level of Xrootd's "Open File System" (ofs) subsystem.  The OFS manages the file descriptor table and redirection/
+  error handling.
+type: string
+default: error
+components: ["origin"]
+---
+name: Logging.Origin.Oss
+description: >-
+  Logging level of Xrootd's "Open Storage System" (oss) subsystem.  The OSS manages the interaction with the underlying
+  POSIX storage (open, read, write, close, etc).
+type: string
+default: error
+components: ["origin"]
+---
+name: Logging.Cache.Http
+description: >-
+  Logging level for the HTTP component of the cache.  Increasing to debug will cause the Xrootd daemon to log
+  all headers and requests.
+type: string
+default: error
+components: ["cache"]
+---
 name: Logging.Cache.Ofs
 description: >-
   Trace level of Xrootd's Open File System. This component cares about files and directories from the administrative perspective.

@@ -99,6 +99,7 @@ type Config struct {
 	}
 	Logging struct {
 		Cache struct {
+			Http string
 			Ofs string
 			Pfc string
 			Pss string
@@ -111,6 +112,9 @@ type Config struct {
 		LogLocation string
 		Origin struct {
 			Cms string
+			Http string
+			Ofs string
+			Oss string
 			Scitokens string
 			Xrd string
 			Xrootd string
@@ -345,6 +349,7 @@ type configWithType struct {
 	}
 	Logging struct {
 		Cache struct {
+			Http struct { Type string; Value string }
 			Ofs struct { Type string; Value string }
 			Pfc struct { Type string; Value string }
 			Pss struct { Type string; Value string }
@@ -357,6 +362,9 @@ type configWithType struct {
 		LogLocation struct { Type string; Value string }
 		Origin struct {
 			Cms struct { Type string; Value string }
+			Http struct { Type string; Value string }
+			Ofs struct { Type string; Value string }
+			Oss struct { Type string; Value string }
 			Scitokens struct { Type string; Value string }
 			Xrd struct { Type string; Value string }
 			Xrootd struct { Type string; Value string }

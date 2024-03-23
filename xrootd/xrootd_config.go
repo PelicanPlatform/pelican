@@ -139,10 +139,13 @@ type (
 
 	LoggingConfig struct {
 		OriginCms       string
-		PssSetOptOrigin string
+		OriginHttp      string
+		OriginOfs       string
+		OriginOss       string
 		OriginScitokens string
 		OriginXrd       string
 		OriginXrootd    string
+		CacheHttp       string
 		CacheOfs        string
 		CachePfc        string
 		CachePss        string
@@ -841,6 +844,37 @@ func mapXrootdLogLevels(xrdConfig *XrootdConfig) error {
 		return errors.Wrap(err, "Error parsing specified log level for Origin_Xrootd")
 	}
 
+	// Origin Ofs
+	// https://xrootd.slac.stanford.edu/doc/dev56/ofs_config.htm
+	xrdConfig.Logging.OriginOfs, err = genLoggingConfig("ofs", xrdConfig, param.Logging_Origin_Ofs.GetString(), loggingMap{
+		Trace: "all",
+		Debug: "debug",
+		Info:  "info",
+		Warn:  "most",
+		Error: "-all",
+	})
+	if err != nil {
+		return errors.Wrap(err, "Error parsing specified log level for Logging.Origin.Ofs")
+	}
+
+	// Origin Oss
+	xrdConfig.Logging.OriginOss, err = genLoggingConfig("oss", xrdConfig, param.Logging_Origin_Oss.GetString(), loggingMap{
+		Trace: "all",
+		Info:  "-all",
+	})
+	if err != nil {
+		return errors.Wrap(err, "Error parsing specified log level for Logging.Origin.Oss")
+	}
+
+	// Origin HTTP
+	xrdConfig.Logging.OriginHttp, err = genLoggingConfig("http", xrdConfig, param.Logging_Origin_Http.GetString(), loggingMap{
+		Debug: "all",
+		Info:  "none",
+	})
+	if err != nil {
+		return errors.Wrap(err, "Error parsing specified log level for Logging.Origin.Http")
+	}
+
 	//////////////////////////CACHE/////////////////////////////
 	// Cache Ofs
 	// https://xrootd.slac.stanford.edu/doc/dev56/ofs_config.htm
@@ -896,6 +930,15 @@ func mapXrootdLogLevels(xrdConfig *XrootdConfig) error {
 	})
 	if err != nil {
 		return errors.Wrap(err, "Error parsing specified log level for Cache_Pss")
+	}
+
+	// Cache HTTP
+	xrdConfig.Logging.CacheHttp, err = genLoggingConfig("http", xrdConfig, param.Logging_Cache_Http.GetString(), loggingMap{
+		Debug: "all",
+		Info:  "none",
+	})
+	if err != nil {
+		return errors.Wrap(err, "Error parsing specified log level for Logging.Cache.Http")
 	}
 
 	// Cache Scitokens
