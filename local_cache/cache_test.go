@@ -31,6 +31,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 
@@ -445,4 +446,36 @@ func TestForcePurge(t *testing.T) {
 			defer fp.Close()
 		}()
 	}
+}
+
+// Create a federation then SIGSTOP the origin to prevent it from responding.
+// Ensure the various client timeouts are reported correctly up to the user
+func TestOriginUnresponsive(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	viper.Reset()
+	viper.Set("Logging.Level", "debug")
+	ft := fed_test_utils.NewFedTest(t, pubOriginCfg)
+
+	cacheUrl := &url.URL{
+		Scheme: "unix",
+		Path:   param.LocalCache_Socket.GetString(),
+	}
+
+	// SIGSTOP the xrootd process so it doesn't respond to the client
+	for _, pid := range ft.Pids {
+		err := syscall.Kill(pid, syscall.SIGSTOP)
+		require.NoError(t, err)
+	}
+
+	fp, err := os.OpenFile(filepath.Join((*ft.Exports)[0].StoragePrefix, "hello_world.txt"), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+	require.NoError(t, err)
+	writeBigBuffer(t, fp, 1)
+
+	tr, err := client.DoGet(ft.Ctx, "pelican:///test/hello_world.txt", filepath.Join(tmpDir, "hello_world.txt"), false,
+		client.WithCaches(cacheUrl))
+	assert.Error(t, err)
+	var cse *client.ConnectionSetupError
+	assert.True(t, errors.As(err, &cse))
+	require.Equal(t, 0, len(tr))
 }

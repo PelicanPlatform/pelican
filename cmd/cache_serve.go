@@ -27,7 +27,7 @@ import (
 )
 
 func serveCache(cmd *cobra.Command, _ []string) error {
-	cancel, err := launchers.LaunchModules(cmd.Context(), config.CacheType)
+	_, cancel, err := launchers.LaunchModules(cmd.Context(), config.CacheType)
 	if err != nil {
 		cancel()
 	}

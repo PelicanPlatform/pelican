@@ -33,6 +33,7 @@ import (
 type (
 	OriginServer struct {
 		server_utils.NamespaceHolder
+		pids []int
 	}
 )
 
@@ -42,6 +43,17 @@ func (server *OriginServer) GetServerType() config.ServerType {
 
 func (server *OriginServer) GetNamespaceAdsFromDirector() error {
 	return nil
+}
+
+func (server *OriginServer) SetPids(pids []int) {
+	server.pids = make([]int, len(pids))
+	copy(server.pids, pids)
+}
+
+func (server *OriginServer) GetPids() (pids []int) {
+	pids = make([]int, len(server.pids))
+	copy(pids, server.pids)
+	return
 }
 
 func (server *OriginServer) CreateAdvertisement(name string, originUrlStr string, originWebUrl string) (*common.OriginAdvertiseV2, error) {

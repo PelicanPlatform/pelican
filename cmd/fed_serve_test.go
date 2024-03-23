@@ -93,7 +93,7 @@ func TestFedServePosixOrigin(t *testing.T) {
 	viper.Set("Registry.RequireCacheApproval", false)
 	defer cancel()
 
-	fedCancel, err := launchers.LaunchModules(ctx, modules)
+	_, fedCancel, err := launchers.LaunchModules(ctx, modules)
 
 	defer fedCancel()
 	if err != nil {

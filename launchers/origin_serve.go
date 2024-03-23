@@ -92,9 +92,11 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		launchers = append(launchers, oa4mp_launcher)
 	}
 
-	if err = xrootd.LaunchOriginDaemons(ctx, launchers, egrp); err != nil {
+	pids, err := xrootd.LaunchOriginDaemons(ctx, launchers, egrp)
+	if err != nil {
 		return nil, err
 	}
+	originServer.SetPids(pids)
 
 	// LaunchOriginDaemons may edit the viper config; these launched goroutines are purposely
 	// delayed until after the viper config is done.

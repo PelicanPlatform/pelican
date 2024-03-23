@@ -120,7 +120,7 @@ func originMockup(ctx context.Context, egrp *errgroup.Group, t *testing.T) conte
 	launchers, err := ConfigureLaunchers(false, configPath, false, false)
 	require.NoError(t, err)
 
-	err = LaunchOriginDaemons(shutdownCtx, launchers, egrp)
+	_, err = LaunchOriginDaemons(shutdownCtx, launchers, egrp)
 	require.NoError(t, err)
 
 	log.Info("Starting web engine...")

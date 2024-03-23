@@ -79,10 +79,11 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) (
 		return nil, err
 	}
 
-	if err = daemon.LaunchDaemons(ctx, launchers, egrp); err != nil {
+	pids, err := daemon.LaunchDaemons(ctx, launchers, egrp)
+	if err != nil {
 		return nil, err
 	}
-
+	cacheServer.SetPids(pids)
 	return cacheServer, nil
 }
 
