@@ -139,6 +139,50 @@ func TestHttpReq(t *testing.T) {
 	assert.Equal(t, "Hello, World!", string(body))
 }
 
+// Test a raw HTTP request (no Pelican client) returns a 404 for an unknown object
+func TestHttpFailures(t *testing.T) {
+	viper.Reset()
+	fed_test_utils.NewFedTest(t, authOriginCfg)
+
+	transport := config.GetTransport().Clone()
+	transport.DialContext = func(_ context.Context, _, _ string) (net.Conn, error) {
+		return net.Dial("unix", param.LocalCache_Socket.GetString())
+	}
+
+	issuer, err := config.GetServerIssuerURL()
+	require.NoError(t, err)
+	tokConf := token.NewWLCGToken()
+	tokConf.Lifetime = time.Duration(time.Minute)
+	tokConf.Issuer = issuer
+	tokConf.Subject = "test"
+	tokConf.AddAudienceAny()
+	tokConf.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Storage_Read, "/no_such_file"))
+	token, err := tokConf.CreateToken()
+	require.NoError(t, err)
+
+	client := &http.Client{Transport: transport}
+
+	t.Run("Test404", func(t *testing.T) {
+		req, err := http.NewRequest("GET", "http://localhost/test/no_such_file", nil)
+		require.NoError(t, err)
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp, err := client.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	})
+
+	t.Run("Test403", func(t *testing.T) {
+		req, err := http.NewRequest("GET", "http://localhost/test/no_permission", nil)
+		require.NoError(t, err)
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp, err := client.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+	})
+}
+
 // Test that the client library (with authentication) works with the local cache
 func TestClient(t *testing.T) {
 	tmpDir := t.TempDir()

@@ -81,6 +81,13 @@ type (
 		Err error
 	}
 
+	// StatusCodeError is a wrapper around grab.StatusCodeErorr that indicates the server returned
+	// a non-200 code.
+	//
+	// The wrapper is done to provide a Pelican-based error hierarchy in case we ever decide to have
+	// a different underlying download package.
+	StatusCodeError grab.StatusCodeError
+
 	// Represents the results of a single object transfer,
 	// potentially across multiple attempts / retries.
 	TransferResults struct {
@@ -313,6 +320,18 @@ func (e *ConnectionSetupError) Unwrap() error {
 func (e *ConnectionSetupError) Is(target error) bool {
 	_, ok := target.(*ConnectionSetupError)
 	return ok
+}
+
+func (e *StatusCodeError) Error() string {
+	return (*grab.StatusCodeError)(e).Error()
+}
+
+func (e *StatusCodeError) Is(target error) bool {
+	sce, ok := target.(*StatusCodeError)
+	if !ok {
+		return false
+	}
+	return int(*sce) == int(*e)
 }
 
 // hasPort test the host if it includes a port
@@ -1332,7 +1351,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 				errorString += "due to proxy " + AddrString + " error: " + ope.Unwrap().Error()
 			} else if errors.As(err, &cse) {
 				errorString += "+ proxy=" + strconv.FormatBool(transferEndpoint.Proxy) + ": "
-				if sce, ok := cse.Unwrap().(grab.StatusCodeError); ok {
+				if sce, ok := cse.Unwrap().(*StatusCodeError); ok {
 					errorString += sce.Error()
 				} else {
 					errorString += err.Error()
@@ -1493,11 +1512,18 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	// Check the error real quick
 	if resp.IsComplete() {
 		if err = resp.Err(); err != nil {
+			var sce grab.StatusCodeError
 			if errors.Is(err, grab.ErrBadLength) {
-				err = fmt.Errorf("Local copy of file is larger than remote copy %w", grab.ErrBadLength)
+				err = fmt.Errorf("local copy of file is larger than remote copy %w", grab.ErrBadLength)
+			} else if errors.As(err, &sce) {
+				log.Debugln("Creating a client status code error")
+				sce2 := StatusCodeError(sce)
+				err = &sce2
+			} else {
+				log.Debugf("Got an error: %T", err)
+				err = &ConnectionSetupError{Err: err}
 			}
 			log.Errorln("Failed to download:", err)
-			err = &ConnectionSetupError{Err: err}
 			return
 		}
 	}

@@ -115,6 +115,7 @@ type (
 		fd      *os.File
 		openErr error
 		status  chan *downloadStatus
+		buf     []byte
 	}
 
 	req struct {
@@ -657,6 +658,7 @@ func (sc *LocalCache) newCacheReader(path, token string) (reader *cacheReader, e
 		size:   -1,
 		status: nil,
 	}
+	err = reader.peekError()
 	return
 }
 
@@ -762,7 +764,34 @@ func (cr *cacheReader) readFromFile(p []byte, off int64) (n int, err error) {
 	return cr.fd.ReadAt(p, off)
 }
 
+// Peek at the contents of the upstream of the cache reader; if there's
+// an error, return that.  Otherwise, return nil
+func (cr *cacheReader) peekError() (err error) {
+	cr.buf = make([]byte, 4096)
+	n, err := cr.readRaw(cr.buf)
+	if n >= 0 {
+		cr.buf = cr.buf[:n]
+	}
+	if err == io.EOF {
+		return nil
+	}
+	return err
+}
+
 func (cr *cacheReader) Read(p []byte) (n int, err error) {
+	if cr.buf != nil && len(cr.buf) > 0 {
+		bytesCopied := copy(p, cr.buf)
+		if len(cr.buf) > bytesCopied {
+			cr.buf = cr.buf[bytesCopied:]
+		} else {
+			cr.buf = nil
+		}
+		return bytesCopied, nil
+	}
+	return cr.readRaw(p)
+}
+
+func (cr *cacheReader) readRaw(p []byte) (n int, err error) {
 	neededSize := cr.offset + int64(len(p))
 	if cr.size >= 0 && neededSize > cr.size {
 		neededSize = cr.size

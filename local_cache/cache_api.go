@@ -32,6 +32,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/token"
@@ -95,11 +96,16 @@ func (lc *LocalCache) LaunchListener(ctx context.Context, egrp *errgroup.Group) 
 			}
 			return
 		} else if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			if _, err = w.Write([]byte("Unexpected internal error")); err != nil {
-				log.Errorln("Failed to write internal error message to client")
-			}
 			log.Errorln("Failed to get file from cache:", err)
+			var sce *client.StatusCodeError
+			if errors.As(err, &sce) {
+				w.WriteHeader(int(*sce))
+			} else {
+				w.WriteHeader(http.StatusInternalServerError)
+				if _, err = w.Write([]byte("Unexpected internal error")); err != nil {
+					log.Errorln("Failed to write internal error message to client")
+				}
+			}
 			return
 		}
 		w.WriteHeader(http.StatusOK)
