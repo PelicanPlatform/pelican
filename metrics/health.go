@@ -19,6 +19,7 @@
 package metrics
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -50,6 +51,7 @@ type (
 	HealthStatusComponent string
 )
 
+// HealthStatusEnum are stored as Prometheus values and internal struct
 const (
 	StatusCritical HealthStatusEnum = iota + 1
 	StatusWarning
@@ -75,7 +77,7 @@ const (
 )
 
 var (
-	healthStatus = sync.Map{}
+	healthStatus = sync.Map{} // In-memory map of component health status, key is HealthStatusComponent, value is componentStatusInternal
 
 	PelicanHealthStatus = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "pelican_component_health_status",
@@ -110,7 +112,7 @@ func (component HealthStatusComponent) String() string {
 // use only, please try to avoid setting this as your component status
 func SetComponentHealthStatus(name HealthStatusComponent, state HealthStatusEnum, msg string) {
 	now := time.Now()
-	healthStatus.Store(name.String(), componentStatusInternal{state, msg, now})
+	healthStatus.Store(name, componentStatusInternal{state, msg, now})
 
 	PelicanHealthStatus.With(
 		prometheus.Labels{"component": name.String()}).
@@ -121,7 +123,7 @@ func SetComponentHealthStatus(name HealthStatusComponent, state HealthStatusEnum
 }
 
 func DeleteComponentHealthStatus(name HealthStatusComponent) {
-	healthStatus.Delete(name.String())
+	healthStatus.Delete(name)
 }
 
 func GetHealthStatus() HealthStatus {
@@ -152,4 +154,18 @@ func GetHealthStatus() HealthStatus {
 	})
 	status.OverallStatus = overallStatus.String()
 	return status
+}
+
+// Get the current health status of a component.
+// Status can be critical|warning|ok|unknown
+func GetComponentStatus(comp HealthStatusComponent) (status string, err error) {
+	component, ok := healthStatus.Load(comp)
+	if !ok {
+		return "", fmt.Errorf("component %s does not exist", comp.String())
+	}
+	statusInt, ok := component.(componentStatusInternal)
+	if !ok {
+		return "", fmt.Errorf("wrong format of component status for component %s", comp.String())
+	}
+	return statusInt.Status.String(), nil
 }

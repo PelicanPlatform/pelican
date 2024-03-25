@@ -73,10 +73,15 @@ func LaunchPeriodicDirectorTimeout(ctx context.Context, egrp *errgroup.Group) {
 			select {
 			case <-directorTimeoutTicker.C:
 				// Timer fired because no message was received in time.
-				log.Warningln("No director test report received within the time limit")
-				metrics.SetComponentHealthStatus(metrics.OriginCache_Director, metrics.StatusCritical, "No director test report received within the time limit")
+				status, err := metrics.GetComponentStatus(metrics.OriginCache_Federation)
+				if err == nil && status == "critical" {
+					metrics.SetComponentHealthStatus(metrics.OriginCache_Director, metrics.StatusCritical, "Failed to advertise to the director. Tests are not expected")
+				} else {
+					log.Warningln("No director test report received within the time limit")
+					metrics.SetComponentHealthStatus(metrics.OriginCache_Director, metrics.StatusCritical, "No director test report received within the time limit")
+				}
 			case <-nChan:
-				log.Debugln("Got notification from director")
+				log.Debugln("Received director report of health test result")
 				directorTimeoutTicker.Reset(directorTimeoutDuration)
 			case <-ctx.Done():
 				log.Infoln("Director health test timeout loop has been terminated")
