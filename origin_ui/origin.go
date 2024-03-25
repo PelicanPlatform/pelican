@@ -19,14 +19,18 @@
 package origin_ui
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_utils"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
@@ -89,4 +93,55 @@ func ExportIssuerJWKS(c *gin.Context) {
 	buf, _ := json.MarshalIndent(keys, "", " ")
 
 	c.Data(http.StatusOK, "application/json; charset=utf-8", buf)
+}
+
+// Remove tmp files under ${Origin_RunLocation}/export/pelican/monitoring
+// from diector-based/self tests. There could be dangling files due to
+// error in testing
+func LaunchOriginFileTestMaintenance(ctx context.Context) {
+	monitoringDir := filepath.Join(param.Origin_RunLocation.GetString(), "export", "pelican", "monitoring")
+
+	server_utils.LaunchWatcherMaintenance(
+		ctx,
+		[]string{monitoringDir},
+		"director-based origin tests clean up",
+		1*time.Minute,
+		func(notifyEvent bool) error {
+			entries, err := os.ReadDir(monitoringDir)
+			dirPrevFile := ""
+			selfPrevFile := ""
+			if err != nil {
+				return err
+			}
+			for _, entry := range entries {
+				if !entry.IsDir() {
+					fn := entry.Name()
+					if strings.HasPrefix(fn, "director") {
+						// Always leave the first item
+						if dirPrevFile != "" {
+							err := os.Remove(filepath.Join(monitoringDir, dirPrevFile))
+							if err != nil {
+								return err
+							}
+						}
+						dirPrevFile = fn
+					} else if strings.HasPrefix(fn, "self") {
+						if selfPrevFile != "" {
+							err := os.Remove(filepath.Join(monitoringDir, fn))
+							if err != nil {
+								return err
+							}
+						}
+						selfPrevFile = fn
+					} else {
+						err := os.Remove(filepath.Join(monitoringDir, fn))
+						if err != nil {
+							return err
+						}
+					}
+				}
+			}
+			return nil
+		},
+	)
 }
