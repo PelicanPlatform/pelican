@@ -193,6 +193,25 @@ func TestGetAdsForPath(t *testing.T) {
 	assert.Equal(t, nsAd.Path, "")
 	assert.Equal(t, len(oAds), 0)
 	assert.Equal(t, len(cAds), 0)
+
+	// Filtered server should not be included
+	filteredServersMutex.Lock()
+	tmp := filteredServers
+	filteredServers = map[string]filterType{"origin1": permFiltered, "cache1": tempFiltered}
+	filteredServersMutex.Unlock()
+	defer func() {
+		filteredServersMutex.Lock()
+		filteredServers = tmp
+		filteredServersMutex.Unlock()
+	}()
+
+	nsAd, oAds, cAds = getAdsForPath("/chtc")
+	assert.Equal(t, nsAd.Path, "/chtc")
+	assert.Equal(t, len(oAds), 0)
+	assert.Equal(t, len(cAds), 1)
+	assert.False(t, hasServerAdWithName(oAds, "origin1"))
+	assert.False(t, hasServerAdWithName(cAds, "cache1"))
+	assert.True(t, hasServerAdWithName(cAds, "cache2"))
 }
 
 func TestConfigCacheEviction(t *testing.T) {
