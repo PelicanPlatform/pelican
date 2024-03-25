@@ -22,7 +22,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
-	"path"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -82,10 +81,17 @@ func federationDiscoveryHandler(ctx *gin.Context) {
 
 	brokerUrl := param.Federation_BrokerUrl.GetString()
 
+	jwksUri, err := url.JoinPath(directorUrl.String(), directorJWKSPath)
+	if err != nil {
+		log.Error("Bad server configuration: fail to generate JwksUri: ", err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Bad server configuration: JwksUri is not valid"})
+		return
+	}
+
 	rs := config.FederationDiscovery{
 		DirectorEndpoint:              directorUrl.String(),
 		NamespaceRegistrationEndpoint: registryUrl.String(),
-		JwksUri:                       path.Join(directorUrl.String(), directorJWKSPath),
+		JwksUri:                       jwksUri,
 		BrokerEndpoint:                brokerUrl,
 	}
 

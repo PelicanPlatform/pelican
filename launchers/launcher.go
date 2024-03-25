@@ -104,7 +104,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 	}
 
 	if modules.IsEnabled(config.DirectorType) {
-		// Director.DefaultResponse defaults to false through default.yaml
+		// Director.DefaultResponse defaults to "cache" through default.yaml
 		// Federation.DirectorUrl defaults to Server.ExternalUrl in InitServer()
 		// Duplicated set are removed
 		if err = DirectorServe(ctx, engine, egrp); err != nil {

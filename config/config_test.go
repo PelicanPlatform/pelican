@@ -353,7 +353,9 @@ func TestInitServerUrl(t *testing.T) {
 	mockWebUrlW443Port := "https://example.com:443"
 	mockWebUrlWNon443Port := "https://example.com:8444"
 
-	viper.Reset()
+	t.Cleanup(func() {
+		viper.Reset()
+	})
 
 	initConfig := func() {
 		viper.Reset()
