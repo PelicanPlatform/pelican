@@ -1020,6 +1020,15 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 		}
 	}
 
+	if currentServers.IsEnabled(OriginType) || currentServers.IsEnabled(CacheType) {
+		if param.Xrootd_ConfigFile.IsSet() {
+			_, err := os.Stat(param.Xrootd_ConfigFile.GetString())
+			if err != nil {
+				return fmt.Errorf("fail to open the file Xrootd.ConfigFile at %s: %v", param.Xrootd_ConfigFile.GetString(), err)
+			}
+		}
+	}
+
 	// Unmarshal Viper config into a Go struct
 	unmarshalledConfig, err := param.UnmarshalConfig()
 	if err != nil || unmarshalledConfig == nil {
