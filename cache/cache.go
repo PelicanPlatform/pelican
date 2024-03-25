@@ -52,35 +52,35 @@ func LaunchDirectorTestFileCleanup(ctx context.Context) {
 		"cache director-based health test clean up",
 		time.Minute,
 		func(notifyEvent bool) error {
-			if !notifyEvent {
-				return nil
+			// We run this function regardless of notifyEvent to do the cleanup
+			dirPath := filepath.Join(param.Cache_DataLocation.GetString(), "pelican", "monitoring")
+			dirInfo, err := os.Stat(dirPath)
+			if err != nil {
+				return err
 			} else {
-				dirPath := filepath.Join(param.Cache_DataLocation.GetString(), "pelican", "monitoring")
-				dirInfo, err := os.Stat(dirPath)
-				if err != nil {
-					return nil
-				} else {
-					if !dirInfo.IsDir() {
-						return errors.New("monitoring path is not a directory: " + dirPath)
-					}
+				if !dirInfo.IsDir() {
+					return errors.New("monitoring path is not a directory: " + dirPath)
 				}
-				dirItems, err := os.ReadDir(dirPath)
-				if err != nil {
-					return err
-				}
-				if len(dirItems) <= 2 { // At mininum there are the test file and .cinfo file, and we don't want to remove the last two
-					return nil
-				}
-				for idx, item := range dirItems {
-					if idx <= len(dirItems)-1-2 { // For all but the latest two files (test file and its .cinfo file)
-						err := os.Remove(filepath.Join(dirPath, item.Name()))
-						if err != nil {
-							return err
-						}
-					}
-				}
+			}
+			dirItems, err := os.ReadDir(dirPath)
+			if err != nil {
+				return err
+			}
+			if len(dirItems) <= 2 { // At mininum there are the test file and .cinfo file, and we don't want to remove the last two
 				return nil
 			}
+			for idx, item := range dirItems {
+				// For all but the latest two files (test file and its .cinfo file)
+				// os.ReadDir sorts dirEntries in order of file names. Since our test file names are timestamped and is string comparable,
+				// the last two files should be the latest test files, which we want to keep
+				if idx < len(dirItems)-2 {
+					err := os.Remove(filepath.Join(dirPath, item.Name()))
+					if err != nil {
+						return err
+					}
+				}
+			}
+			return nil
 		},
 	)
 }

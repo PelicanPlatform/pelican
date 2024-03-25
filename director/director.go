@@ -30,32 +30,39 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/server_structs"
-	"github.com/pelicanplatform/pelican/token"
-	"github.com/pelicanplatform/pelican/token_scopes"
-	"golang.org/x/sync/errgroup"
-
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
 	"github.com/hashicorp/go-version"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
+
+	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/token"
+	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
 type (
-	HealthTestStatus  string
+	// status of director-based health tests to origins and caches
+	HealthTestStatus string
+
+	// Prometheus HTTP discovery endpoint struct, used by director
+	// to dynamically return available origin/cache servers for Prometheus to scrape
 	PromDiscoveryItem struct {
 		Targets []string          `json:"targets"`
 		Labels  map[string]string `json:"labels"`
 	}
 
+	// Util struct to keep track of director-based health tests it created
 	healthTestUtil struct {
 		ErrGrp        *errgroup.Group
 		ErrGrpContext context.Context
 		Cancel        context.CancelFunc
 		Status        HealthTestStatus
 	}
+
+	// Util struct to keep track of `stat` call the director made to the origins
 	originStatUtil struct {
 		Context  context.Context
 		Cancel   context.CancelFunc

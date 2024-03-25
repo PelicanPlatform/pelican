@@ -58,7 +58,7 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 
 	// Director also registers this metadata URL; avoid registering twice.
 	if !modules.IsEnabled(config.DirectorType) {
-		if err = origin.RegisterOriginOpenIDAPI(engine.Group("/.well-known")); err != nil {
+		if err = origin.RegisterOriginOIDCAPI(engine.Group("/.well-known")); err != nil {
 			return nil, err
 		}
 	}

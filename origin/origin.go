@@ -24,14 +24,14 @@ import (
 	"net/http"
 	"net/url"
 
+	"github.com/gin-gonic/gin"
+	"github.com/pkg/errors"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
-	"golang.org/x/sync/errgroup"
-
-	"github.com/gin-gonic/gin"
-	"github.com/pkg/errors"
 )
 
 var (
@@ -56,7 +56,7 @@ func exportIssuerJWKS(c *gin.Context) {
 	c.Data(http.StatusOK, "application/json; charset=utf-8", buf)
 }
 
-func RegisterOriginOpenIDAPI(router *gin.RouterGroup) error {
+func RegisterOriginOIDCAPI(router *gin.RouterGroup) error {
 	if router == nil {
 		return errors.New("Origin configuration passed a nil pointer")
 	}

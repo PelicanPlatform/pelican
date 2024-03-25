@@ -64,11 +64,11 @@ func reportStatusToServer(ctx context.Context, serverWebUrl string, status strin
 
 	reportUrl, err := url.Parse(serverWebUrl)
 	if err != nil {
-		return errors.Wrap(err, "The server URL is not parseable as an URL")
+		return errors.Wrap(err, "the server URL is not parseable as an URL")
 	}
 
 	if status != "ok" && status != "error" {
-		return errors.Errorf("Bad status for reporting director test")
+		return errors.Errorf("bad status for reporting director test %s", status)
 	}
 
 	if serverType == server_structs.OriginType {
@@ -89,8 +89,7 @@ func reportStatusToServer(ctx context.Context, serverWebUrl string, status strin
 
 	jsonData, err := json.Marshal(dt)
 	if err != nil {
-		// handle error
-		return errors.Wrap(err, "Failed to parse request body for reporting director test")
+		return errors.Wrap(err, "failed to parse request body for reporting director test")
 	}
 
 	reqBody := bytes.NewBuffer(jsonData)
@@ -98,7 +97,7 @@ func reportStatusToServer(ctx context.Context, serverWebUrl string, status strin
 	log.Debugf("Director is sending %s server test result to %s", string(serverType), reportUrl.String())
 	req, err := http.NewRequestWithContext(ctx, "POST", reportUrl.String(), reqBody)
 	if err != nil {
-		return errors.Wrap(err, "Failed to create POST request for reporting director test")
+		return errors.Wrap(err, "failed to create POST request for reporting director test")
 	}
 
 	req.Header.Set("Authorization", "Bearer "+tok)
@@ -118,13 +117,13 @@ func reportStatusToServer(ctx context.Context, serverWebUrl string, status strin
 	}
 
 	if resp.StatusCode > 404 { // For all servers, >404 is a failure
-		return errors.Errorf("Error response %v from reporting director test: %v", resp.StatusCode, string(body))
+		return errors.Errorf("error response %v from reporting director test: %v", resp.StatusCode, string(body))
 	}
 	if serverType == server_structs.OriginType && resp.StatusCode != 200 {
-		return errors.Errorf("Error response %v from reporting director test: %v", resp.StatusCode, string(body))
+		return errors.Errorf("error response %v from reporting director test: %v", resp.StatusCode, string(body))
 	}
 	if serverType == server_structs.CacheType && resp.StatusCode == 404 {
-		return errors.New("Cache reports a 404 error. For cache version < v7.7.0, director-based test is not supported")
+		return errors.New("cache reports a 404 error. For cache version < v7.7.0, director-based test is not supported")
 	}
 	if serverType == server_structs.OriginType && resp.StatusCode == 404 {
 		return originReportNotFoundError
@@ -185,6 +184,8 @@ func LaunchPeriodicDirectorTest(ctx context.Context, serverAd server_structs.Ser
 			} else if serverAd.Type == server_structs.CacheType {
 				err = runCacheTest(ctx, serverAd.URL)
 			}
+
+			// Successfully run a test, no error
 			if ok && err == nil {
 				log.Debugf("Director file transfer test cycle succeeded at %s for %s server with URL at %s", time.Now().Format(time.RFC3339), serverAd.Type, serverUrl)
 				func() {
@@ -196,39 +197,74 @@ func LaunchPeriodicDirectorTest(ctx context.Context, serverAd server_structs.Ser
 						log.Debugln("HealthTestUtil missing for ", serverAd.Type, " server: ", serverUrl, " Failed to update internal status")
 					}
 				}()
-				if err := reportStatusToServer(ctx, serverWebUrl, "ok", "Director test cycle succeeded at "+time.Now().Format(time.RFC3339), serverAd.Type, false); err != nil {
+
+				// Report error back to origin/server
+				if err := reportStatusToServer(
+					ctx,
+					serverWebUrl,
+					"ok", "Director test cycle succeeded at "+time.Now().Format(time.RFC3339),
+					serverAd.Type,
+					false,
+				); err != nil {
+					// origin <7.7 only supports legacy report endpoint. Fallback to the legacy one
 					if err == originReportNotFoundError {
-						newErr := reportStatusToServer(ctx, serverWebUrl, "ok", "Director test cycle succeeded at "+time.Now().Format(time.RFC3339), serverAd.Type, true)
+						newErr := reportStatusToServer(
+							ctx,
+							serverWebUrl,
+							"ok", "Director test cycle succeeded at "+time.Now().Format(time.RFC3339),
+							serverAd.Type,
+							true, // Fallback to legacy endpoint
+						)
+						// If legacy endpoint still reports error
 						if newErr != nil {
 							log.Warningf("Failed to report director test result to %s server at %s: %v", serverAd.Type, serverAd.WebURL.String(), err)
 							metrics.PelicanDirectorFileTransferTestsRuns.With(
 								prometheus.Labels{
-									"server_name": serverName, "server_web_url": serverWebUrl, "server_type": string(serverAd.Type), "status": string(metrics.FTXTestSucceeded), "report_status": string(metrics.FTXTestFailed),
+									"server_name":    serverName,
+									"server_web_url": serverWebUrl,
+									"server_type":    string(serverAd.Type),
+									"status":         string(metrics.FTXTestSucceeded),
+									"report_status":  string(metrics.FTXTestFailed),
 								},
 							).Inc()
+							// Successfully report to the origin/cache via the legacy endpoint
 						} else {
 							metrics.PelicanDirectorFileTransferTestsRuns.With(
 								prometheus.Labels{
-									"server_name": serverName, "server_web_url": serverWebUrl, "server_type": string(serverAd.Type), "status": string(metrics.FTXTestSucceeded), "report_status": string(metrics.FTXTestSucceeded),
+									"server_name":    serverName,
+									"server_web_url": serverWebUrl,
+									"server_type":    string(serverAd.Type),
+									"status":         string(metrics.FTXTestSucceeded),
+									"report_status":  string(metrics.FTXTestSucceeded),
 								},
 							).Inc()
 						}
+						// If the error is not originReportNotFoundError, then we record the error right away
 					} else {
 						log.Warningf("Failed to report director test result to %s server at %s: %v", serverAd.Type, serverAd.WebURL.String(), err)
 						metrics.PelicanDirectorFileTransferTestsRuns.With(
 							prometheus.Labels{
-								"server_name": serverName, "server_web_url": serverWebUrl, "server_type": string(serverAd.Type), "status": string(metrics.FTXTestSucceeded), "report_status": string(metrics.FTXTestFailed),
+								"server_name":    serverName,
+								"server_web_url": serverWebUrl,
+								"server_type":    string(serverAd.Type),
+								"status":         string(metrics.FTXTestSucceeded),
+								"report_status":  string(metrics.FTXTestFailed),
 							},
 						).Inc()
 					}
-
+					// No error when reporting the result, we are good
 				} else {
 					metrics.PelicanDirectorFileTransferTestsRuns.With(
 						prometheus.Labels{
-							"server_name": serverName, "server_web_url": serverWebUrl, "server_type": string(serverAd.Type), "status": string(metrics.FTXTestSucceeded), "report_status": string(metrics.FTXTestSucceeded),
+							"server_name":    serverName,
+							"server_web_url": serverWebUrl,
+							"server_type":    string(serverAd.Type),
+							"status":         string(metrics.FTXTestSucceeded),
+							"report_status":  string(metrics.FTXTestSucceeded),
 						},
 					).Inc()
 				}
+				// The file tests failed. Report failure back to origin/cache
 			} else {
 				log.Warningln("Director file transfer test cycle failed for ", serverAd.Type, " server: ", serverUrl, " ", err)
 				func() {
@@ -240,35 +276,70 @@ func LaunchPeriodicDirectorTest(ctx context.Context, serverAd server_structs.Ser
 						log.Debugln("HealthTestUtil missing for", serverAd.Type, " server: ", serverUrl, " Failed to update internal status")
 					}
 				}()
-				if err := reportStatusToServer(ctx, serverWebUrl, "error", "Director file transfer test cycle failed for origin: "+serverUrl+" "+err.Error(), serverAd.Type, false); err != nil {
+
+				if err := reportStatusToServer(
+					ctx,
+					serverWebUrl,
+					"error", "Director file transfer test cycle failed for origin: "+serverUrl+" "+err.Error(),
+					serverAd.Type,
+					false,
+				); err != nil {
+					// origin <7.7 only supports legacy report endpoint. Fallback to the legacy one
 					if err == originReportNotFoundError {
-						newErr := reportStatusToServer(ctx, serverWebUrl, "ok", "Director test cycle succeeded at "+time.Now().Format(time.RFC3339), serverAd.Type, true)
+						newErr := reportStatusToServer(
+							ctx,
+							serverWebUrl,
+							"ok", "Director test cycle succeeded at "+time.Now().Format(time.RFC3339),
+							serverAd.Type,
+							true, // Fallback to legacy endpoint
+						)
+						// If legacy endpoint still reports error
 						if newErr != nil {
 							log.Warningf("Failed to report director test result to %s server at %s: %v", serverAd.Type, serverAd.WebURL.String(), err)
 							metrics.PelicanDirectorFileTransferTestsRuns.With(
 								prometheus.Labels{
-									"server_name": serverName, "server_web_url": serverWebUrl, "server_type": string(serverAd.Type), "status": string(metrics.FTXTestFailed), "report_status": string(metrics.FTXTestFailed),
+									"server_name":    serverName,
+									"server_web_url": serverWebUrl,
+									"server_type":    string(serverAd.Type),
+									"status":         string(metrics.FTXTestFailed),
+									"report_status":  string(metrics.FTXTestFailed),
 								},
 							).Inc()
+							// Successfully report to the origin/cache via the legacy endpoint
 						} else {
 							metrics.PelicanDirectorFileTransferTestsRuns.With(
 								prometheus.Labels{
-									"server_name": serverName, "server_web_url": serverWebUrl, "server_type": string(serverAd.Type), "status": string(metrics.FTXTestFailed), "report_status": string(metrics.FTXTestSucceeded),
+									"server_name":    serverName,
+									"server_web_url": serverWebUrl,
+									"server_type":    string(serverAd.Type),
+									"status":         string(metrics.FTXTestFailed),
+									"report_status":  string(metrics.FTXTestSucceeded),
 								},
 							).Inc()
 						}
+						// If the error is not originReportNotFoundError, then we record the error right away
 					} else {
 						log.Warningf("Failed to report director test result to %s server at %s: %v", serverAd.Type, serverAd.WebURL.String(), err)
 						metrics.PelicanDirectorFileTransferTestsRuns.With(
 							prometheus.Labels{
-								"server_name": serverName, "server_web_url": serverWebUrl, "server_type": string(serverAd.Type), "status": string(metrics.FTXTestFailed), "report_status": string(metrics.FTXTestFailed),
+								"server_name":    serverName,
+								"server_web_url": serverWebUrl,
+								"server_type":    string(serverAd.Type),
+								"status":         string(metrics.FTXTestFailed),
+								"report_status":  string(metrics.FTXTestFailed),
 							},
 						).Inc()
 					}
+
 				} else {
+					// No error when reporting the result, we are good
 					metrics.PelicanDirectorFileTransferTestsRuns.With(
 						prometheus.Labels{
-							"server_name": serverName, "server_web_url": serverWebUrl, "server_type": string(serverAd.Type), "status": string(metrics.FTXTestFailed), "report_status": string(metrics.FTXTestSucceeded),
+							"server_name":    serverName,
+							"server_web_url": serverWebUrl,
+							"server_type":    string(serverAd.Type),
+							"status":         string(metrics.FTXTestFailed),
+							"report_status":  string(metrics.FTXTestSucceeded),
 						},
 					).Inc()
 				}

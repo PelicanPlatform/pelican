@@ -59,7 +59,7 @@ func DirectorServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 	}
 	log.Debugf("The director will redirect to %ss by default", defaultResponse)
 	rootGroup := engine.Group("/")
-	director.RegisterDirectorOpenIDAPI(rootGroup)
+	director.RegisterDirectorOIDCAPI(rootGroup)
 	director.RegisterDirectorWebAPI(rootGroup)
 	engine.Use(director.ShortcutMiddleware(defaultResponse))
 	director.RegisterDirectorAPI(ctx, rootGroup)

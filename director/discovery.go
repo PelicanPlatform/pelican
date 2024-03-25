@@ -38,6 +38,8 @@ const (
 	directorJWKSPath        string = "/.well-known/issuer.jwks"
 )
 
+// Director hosts a discovery endpoint at federationDiscoveryPath to provide URLs to various
+// Pelican central servers in a federation.
 func federationDiscoveryHandler(ctx *gin.Context) {
 	directorUrl := param.Federation_DirectorUrl.GetString()
 	if len(directorUrl) == 0 {
@@ -71,7 +73,7 @@ func federationDiscoveryHandler(ctx *gin.Context) {
 
 // Director metadata discovery endpoint for OpenID style
 // token authentication, providing issuer endpoint and director's jwks endpoint
-func openIdDiscoveryHandler(ctx *gin.Context) {
+func oidcDiscoveryHandler(ctx *gin.Context) {
 	directorUrl := param.Federation_DirectorUrl.GetString()
 	if len(directorUrl) == 0 {
 		ctx.JSON(500, gin.H{"error": "Bad server configuration: Director URL is not set"})
@@ -111,8 +113,8 @@ func jwksHandler(ctx *gin.Context) {
 	}
 }
 
-func RegisterDirectorOpenIDAPI(router *gin.RouterGroup) {
+func RegisterDirectorOIDCAPI(router *gin.RouterGroup) {
 	router.GET(federationDiscoveryPath, federationDiscoveryHandler)
-	router.GET(openIdDiscoveryPath, openIdDiscoveryHandler)
+	router.GET(openIdDiscoveryPath, oidcDiscoveryHandler)
 	router.GET(directorJWKSPath, jwksHandler)
 }
