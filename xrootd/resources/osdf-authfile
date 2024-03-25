@@ -1,0 +1,64 @@
+# DN: /CN=sc-origin.chtc.wisc.edu
+u 5a42185a.0 /chtc/PROTECTED/sc-origin lr
+# DN: /DC=org/DC=incommon/C=US/ST=California/O=University of California, San Diego/CN=osg-stash-sfu-computecanada-ca.nationalresearchplatform.org
+u 4ff08838.0 /chtc/PROTECTED/sc-origin lr
+# DN: /DC=org/DC=incommon/C=US/ST=Georgia/O=Georgia Institute of Technology/OU=Office of Information Technology/CN=osg-gftp2.pace.gatech.edu
+u 3af6a420.0 /chtc/PROTECTED/sc-origin lr
+# DN: /DC=org/DC=incommon/C=US/ST=New York/O=Syracuse University/CN=its-condor-xrootd1.syr.edu
+u 7ab87a8c.0 /chtc/PROTECTED/sc-origin lr
+# DN: /DC=org/DC=incommon/C=US/ST=California/O=University of California, San Diego/CN=singapore.nationalresearchplatform.org
+u 02e98885.0 /chtc/PROTECTED/sc-origin lr
+# DN: /DC=org/DC=incommon/C=US/ST=Michigan/O=University Corporation For Advanced Internet Development/CN=dtn-pas.denv.nrp.internet2.edu
+u 928e74af.0 /chtc/PROTECTED/sc-origin lr
+# DN: /DC=org/DC=incommon/C=US/ST=Michigan/O=University Corporation For Advanced Internet Development/CN=osg-sunnyvale-stashcache.nrp.internet2.edu
+u 7d8e84d2.0 /chtc/PROTECTED/sc-origin lr
+# DN: /DC=org/DC=incommon/C=US/ST=Michigan/O=University Corporation For Advanced Internet Development/CN=dtn-pas.jack.nrp.internet2.edu
+u 1a1427b3.0 /chtc/PROTECTED/sc-origin lr
+# DN: /DC=org/DC=incommon/C=US/ST=Michigan/O=University Corporation For Advanced Internet Development/CN=dtn-pas.bois.nrp.internet2.edu
+u a7782506.0 /chtc/PROTECTED/sc-origin lr
+# DN: /DC=org/DC=incommon/C=US/ST=Michigan/O=University Corporation For Advanced Internet Development/CN=osg-kansas-city-stashcache.nrp.internet2.edu
+u 3b97dd83.0 /chtc/PROTECTED/sc-origin lr
+# DN: /DC=org/DC=incommon/C=US/ST=Michigan/O=University Corporation For Advanced Internet Development/CN=dtn-pas.cinc.nrp.internet2.edu
+u 3ac5a773.0 /chtc/PROTECTED/sc-origin lr
+# DN: /DC=org/DC=incommon/C=US/ST=Michigan/O=University Corporation For Advanced Internet Development/CN=dtn-pas.hous.nrp.internet2.edu
+u 166c0815.0 /chtc/PROTECTED/sc-origin lr
+# DN: /DC=org/DC=incommon/C=US/ST=Michigan/O=University Corporation For Advanced Internet Development/CN=osg-houston-stashcache.nrp.internet2.edu
+u 991ea93a.0 /chtc/PROTECTED/sc-origin lr
+# DN: /DC=org/DC=incommon/C=US/ST=Michigan/O=University Corporation For Advanced Internet Development/CN=osg-new-york-stashcache.nrp.internet2.edu
+u f0784a1e.0 /chtc/PROTECTED/sc-origin lr
+# DN: /DC=org/DC=incommon/C=US/ST=Michigan/O=University Corporation For Advanced Internet Development/CN=osg-chicago-stashcache.nrp.internet2.edu
+u e4071f68.0 /chtc/PROTECTED/sc-origin lr
+# DN: /DC=org/DC=incommon/C=US/ST=California/O=University of California, San Diego/CN=fiu-cache.nationalresearchplatform.org
+u f10e4089.0 /chtc/PROTECTED/sc-origin lr
+# DN: /CN=stash-cache-shoveler.osgdev.chtc.io
+u 62331102.0 /chtc/PROTECTED/sc-origin lr
+# DN: /CN=osdf-uw-cache.svc.osg-htc.org
+u c20245ba.0 /chtc/PROTECTED/sc-origin lr
+# DN: /CN=sc-cache.chtc.wisc.edu
+u 982fa4db.0 /chtc/PROTECTED/sc-origin lr
+# DN: /CN=stash-cache.osg.chtc.io
+u 6bc6dd48.0 /chtc/PROTECTED/sc-origin lr
+# DN: /CN=helm-cache1.osgdev.chtc.io
+u 1686f446.0 /chtc/PROTECTED/sc-origin lr
+# DN: /DC=org/DC=incommon/C=US/ST=California/O=University of California, San Diego/CN=unl-cache.nationalresearchplatform.org
+u 813984ea.0 /chtc/PROTECTED/sc-origin lr
+# DN: /C=BR/O=ANSP/OU=ANSPGrid CA/OU=Services/CN=osdf-cache.sprace.org.br
+u b163034a.0 /chtc/PROTECTED/sc-origin lr
+# DN: /DC=org/DC=terena/DC=tcs/C=NL/ST=Noord-Holland/O=Universiteit van Amsterdam/CN=fiona-r-uva.vlan7.uvalight.net
+u 5f8f9687.0 /chtc/PROTECTED/sc-origin lr
+# DN: /DC=org/DC=incommon/C=US/ST=California/O=University of California, San Diego/CN=daejeon-kreonet-net.nationalresearchplatform.org
+u bf58a4be.0 /chtc/PROTECTED/sc-origin lr
+# DN: /C=UK/O=eScience/OU=Edinburgh/L=NeSC/CN=stashcache.edi.scotgrid.ac.uk
+u 42e8d112.0 /chtc/PROTECTED/sc-origin lr
+# DN: /DC=org/DC=incommon/C=US/ST=California/O=University of California, San Diego/CN=mghpcc-cache.nationalresearchplatform.org
+u 8691ee72.0 /chtc/PROTECTED/sc-origin lr
+# DN: /DC=org/DC=terena/DC=tcs/C=CZ/L=Prague/O=Institute of Physics AS CR/CN=stash.farm.particle.cz
+u d01e159b.0 /chtc/PROTECTED/sc-origin lr
+# DN: /C=RU/O=RDIG/OU=hosts/OU=jinr.ru/CN=stashcache.jinr.ru
+u 2030bc60.0 /chtc/PROTECTED/sc-origin lr
+# DN: /DC=org/DC=incommon/C=US/ST=California/O=University of California, San Diego/CN=stashcache.t2.ucsd.edu
+u c90bccda.0 /chtc/PROTECTED/sc-origin lr
+# DN: /DC=org/DC=incommon/C=US/ST=California/O=University of California, San Diego/CN=sdsc-cache.nationalresearchplatform.org
+u 985a8fbc.0 /chtc/PROTECTED/sc-origin lr
+# DN: /DC=org/DC=terena/DC=tcs/C=ES/ST=Barcelona/O=Institut de Fisica d. Altes Energies/CN=xcachevirgo.pic.es
+u bb7d6bc8.0 /chtc/PROTECTED/sc-origin lr
