@@ -1028,18 +1028,20 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 		viper.SetDefault("Cache.Url", fmt.Sprintf("https://%v", param.Server_Hostname.GetString()))
 	}
 
-	highWmStr := param.Cache_HighWaterMark.GetString()
-	lowWmStr := param.Cache_LowWatermark.GetString()
-	ok, highWmNum, err := checkWatermark(highWmStr)
-	if !ok && err != nil {
-		return errors.Wrap(err, "invalid Cache.HighWaterMark value")
-	}
-	ok, lowWmNum, err := checkWatermark(lowWmStr)
-	if !ok && err != nil {
-		return errors.Wrap(err, "invalid Cache.LowWatermark value")
-	}
-	if lowWmNum >= highWmNum {
-		return fmt.Errorf("invalid Cache.HighWaterMark and  Cache.LowWatermark values. Cache.HighWaterMark must be greater than Cache.LowWaterMark. Got %s, %s", highWmStr, lowWmStr)
+	if param.Cache_LowWatermark.IsSet() || param.Cache_HighWaterMark.IsSet() {
+		lowWmStr := param.Cache_LowWatermark.GetString()
+		highWmStr := param.Cache_HighWaterMark.GetString()
+		ok, highWmNum, err := checkWatermark(highWmStr)
+		if !ok && err != nil {
+			return errors.Wrap(err, "invalid Cache.HighWaterMark value")
+		}
+		ok, lowWmNum, err := checkWatermark(lowWmStr)
+		if !ok && err != nil {
+			return errors.Wrap(err, "invalid Cache.LowWatermark value")
+		}
+		if lowWmNum >= highWmNum {
+			return fmt.Errorf("invalid Cache.HighWaterMark and  Cache.LowWatermark values. Cache.HighWaterMark must be greater than Cache.LowWaterMark. Got %s, %s", highWmStr, lowWmStr)
+		}
 	}
 
 	webPort := param.Server_WebPort.GetInt()
