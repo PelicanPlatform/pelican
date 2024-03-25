@@ -267,7 +267,7 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 		log.Debug("Registering namespace ", data.Prefix)
 
 		// Check if prefix exists before doing anything else
-		exists, err := namespaceExists(data.Prefix)
+		exists, err := namespaceExistsByPrefix(data.Prefix)
 		if err != nil {
 			log.Errorf("Failed to check if namespace already exists: %v", err)
 			return false, nil, errors.Wrap(err, "Server encountered an error checking if namespace already exists")
@@ -605,7 +605,7 @@ func deleteNamespaceHandler(ctx *gin.Context) {
 	}
 
 	// Check if prefix exists before trying to delete it
-	exists, err := namespaceExists(prefix)
+	exists, err := namespaceExistsByPrefix(prefix)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error checking if namespace already exists"})
 		log.Errorf("Failed to check if the namespace already exists: %v", err)
@@ -737,7 +737,7 @@ func wildcardHandler(ctx *gin.Context) {
 	} else if strings.HasSuffix(path, "/.well-known/openid-configuration") {
 		// Check that the namespace exists before constructing config JSON
 		prefix := strings.TrimSuffix(path, "/.well-known/openid-configuration")
-		exists, err := namespaceExists(prefix)
+		exists, err := namespaceExistsByPrefix(prefix)
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Server encountered an error while checking if the prefix exists"})
 			log.Errorf("Error while checking for existence of prefix %s: %v", prefix, err)
