@@ -24,12 +24,13 @@ import (
 	"context"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
 )
 
-func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) (server_utils.XRootDServer, error) {
+func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, modules config.ServerType) (server_utils.XRootDServer, error) {
 	return nil, errors.New("Cache module is not supported on Windows")
 }
 
