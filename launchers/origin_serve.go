@@ -99,7 +99,7 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 	// LaunchOriginDaemons may edit the viper config; these launched goroutines are purposely
 	// delayed until after the viper config is done.
 	xrootd.LaunchXrootdMaintenance(ctx, originServer, 2*time.Minute)
-	origin_ui.LaunchOriginFileTestMaintenance(ctx)
+	origin.LaunchOriginFileTestMaintenance(ctx)
 
 	return originServer, nil
 }
