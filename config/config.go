@@ -803,6 +803,24 @@ func setXrootdRunLocations(currentServers ServerType, dir string) error {
 	return nil
 }
 
+// Print Pelican configuration to stderr
+func PrintConfig() error {
+	rawConfig, err := param.UnmarshalConfig()
+	if err != nil {
+		return err
+	}
+	bytes, err := json.MarshalIndent(*rawConfig, "", "  ")
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(os.Stderr,
+		"================ Pelican Configuration ================\n",
+		string(bytes),
+		"\n",
+		"============= End of Pelican Configuration ============")
+	return nil
+}
+
 // Initialize Pelican server instance. Pass a bit mask of `currentServers` if you want to enable multiple services.
 // Note not all configurations are supported: currently, if you enable both cache and origin then an error
 // is thrown
