@@ -37,7 +37,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/launchers"
 	"github.com/pelicanplatform/pelican/param"
@@ -49,7 +48,7 @@ import (
 
 type (
 	FedTest struct {
-		Exports *[]common.OriginExports
+		Exports *[]server_utils.OriginExports
 		Token   string
 		Ctx     context.Context
 		Egrp    *errgroup.Group
@@ -90,7 +89,7 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 		require.NoError(t, err, "error reading config")
 	}
 	// Now call GetOriginExports and check the struct
-	exports, err := common.GetOriginExports()
+	exports, err := server_utils.GetOriginExports()
 	require.NoError(t, err, "error getting origin exports")
 	ft.Exports = exports
 
@@ -107,7 +106,7 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 		((*ft.Exports)[i]).StoragePrefix = originDir
 		// Our exports object becomes global -- we must reset in between each fed test
 		t.Cleanup(func() {
-			common.ResetOriginExports()
+			server_utils.ResetOriginExports()
 		})
 
 		// Change the permissions of the temporary origin directory
