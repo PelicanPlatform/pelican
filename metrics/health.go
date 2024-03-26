@@ -42,8 +42,8 @@ type (
 	}
 
 	HealthStatus struct {
-		OverallStatus   string                     `json:"status"`
-		ComponentStatus map[string]ComponentStatus `json:"components"`
+		OverallStatus   string                                    `json:"status"`
+		ComponentStatus map[HealthStatusComponent]ComponentStatus `json:"components"`
 	}
 
 	HealthStatusEnum int
@@ -135,12 +135,12 @@ func GetHealthStatus() HealthStatus {
 		if !ok {
 			return true
 		}
-		componentString, ok := component.(string)
+		componentString, ok := component.(HealthStatusComponent)
 		if !ok {
 			return true
 		}
 		if status.ComponentStatus == nil {
-			status.ComponentStatus = make(map[string]ComponentStatus)
+			status.ComponentStatus = make(map[HealthStatusComponent]ComponentStatus)
 		}
 		status.ComponentStatus[componentString] = ComponentStatus{
 			componentStatus.Status.String(),

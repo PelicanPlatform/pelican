@@ -72,11 +72,12 @@ func LaunchPeriodicDirectorTimeout(ctx context.Context, egrp *errgroup.Group) {
 		for {
 			select {
 			case <-directorTimeoutTicker.C:
-				// Timer fired because no message was received in time.
+				// If origin can't contact the director, record the error without warning
 				status, err := metrics.GetComponentStatus(metrics.OriginCache_Federation)
 				if err == nil && status == "critical" {
 					metrics.SetComponentHealthStatus(metrics.OriginCache_Director, metrics.StatusCritical, "Failed to advertise to the director. Tests are not expected")
 				} else {
+					// Timer fired because no message was received in time.
 					log.Warningln("No director test report received within the time limit")
 					metrics.SetComponentHealthStatus(metrics.OriginCache_Director, metrics.StatusCritical, "No director test report received within the time limit")
 				}
