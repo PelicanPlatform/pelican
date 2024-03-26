@@ -187,7 +187,8 @@ func TestStashPluginMain(t *testing.T) {
 	viper.Reset()
 	server_utils.ResetOriginExports()
 
-	config.SetPreferredPrefix("STASH")
+	_, err := config.SetPreferredPrefix("STASH")
+	assert.NoError(t, err)
 
 	// Temp dir for downloads
 	tempDir := os.TempDir()
@@ -233,7 +234,7 @@ func TestStashPluginMain(t *testing.T) {
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
-	err := cmd.Run()
+	err = cmd.Run()
 	assert.NoError(t, err, stderr.String())
 
 	// changing output for "\\" since in windows there are excess "\" printed in debug logs

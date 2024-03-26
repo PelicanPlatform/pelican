@@ -183,8 +183,14 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 		return 0, err
 	}
 
-	origScheme := destUri.Scheme
-	pelicanURL, err := NewPelicanURL(destUri, origScheme)
+	te := NewTransferEngine(ctx)
+	defer func() {
+		if err := te.Shutdown(); err != nil {
+			log.Errorln("Failure when shutting down transfer engine:", err)
+		}
+	}()
+
+	pelicanURL, err := te.NewPelicanURL(destUri)
 	if err != nil {
 		return 0, errors.Wrap(err, "Failed to generate pelicanURL object")
 	}
@@ -425,7 +431,7 @@ localObject: the source file/directory you would like to upload
 remoteDestination: the end location of the upload
 recursive: a boolean indicating if the source is a directory or not
 */
-func DoPut(ctx context.Context, localObject string, remoteDestination string, recursive bool, options ...TransferOption) (transferResults []TransferResults, err error) {
+func DoPut(te *TransferEngine, localObject string, remoteDestination string, recursive bool, options ...TransferOption) (transferResults []TransferResults, err error) {
 	// First, create a handler for any panics that occur
 	defer func() {
 		if r := recover(); r != nil {
@@ -454,17 +460,11 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 
 	project := GetProjectName()
 
-	te := NewTransferEngine(ctx)
-	defer func() {
-		if err := te.Shutdown(); err != nil {
-			log.Errorln("Failure when shutting down transfer engine:", err)
-		}
-	}()
 	client, err := te.NewClient(options...)
 	if err != nil {
 		return
 	}
-	tj, err := client.NewTransferJob(remoteDestUrl, localObject, true, recursive, project)
+	tj, err := client.NewTransferJob(remoteDestUrl, localObject, te, true, recursive, project)
 	if err != nil {
 		return
 	}
@@ -490,7 +490,7 @@ remoteObject: the source file/directory you would like to upload
 localDestination: the end location of the upload
 recursive: a boolean indicating if the source is a directory or not
 */
-func DoGet(ctx context.Context, remoteObject string, localDestination string, recursive bool, options ...TransferOption) (transferResults []TransferResults, err error) {
+func DoGet(te *TransferEngine, remoteObject string, localDestination string, recursive bool, options ...TransferOption) (transferResults []TransferResults, err error) {
 	// First, create a handler for any panics that occur
 	defer func() {
 		if r := recover(); r != nil {
@@ -543,17 +543,11 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 	project := GetProjectName()
 	success := false
 
-	te := NewTransferEngine(ctx)
-	defer func() {
-		if err := te.Shutdown(); err != nil {
-			log.Errorln("Failure when shutting down transfer engine:", err)
-		}
-	}()
 	tc, err := te.NewClient(options...)
 	if err != nil {
 		return
 	}
-	tj, err := tc.NewTransferJob(remoteObjectUrl, localDestination, false, recursive, project)
+	tj, err := tc.NewTransferJob(remoteObjectUrl, localDestination, te, false, recursive, project)
 	if err != nil {
 		return
 	}
@@ -593,7 +587,7 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 }
 
 // Start the transfer, whether read or write back. Primarily used for backwards compatibility
-func DoCopy(ctx context.Context, sourceFile string, destination string, recursive bool, options ...TransferOption) (transferResults []TransferResults, err error) {
+func DoCopy(te *TransferEngine, sourceFile string, destination string, recursive bool, options ...TransferOption) (transferResults []TransferResults, err error) {
 
 	// First, create a handler for any panics that occur
 	defer func() {
@@ -680,17 +674,11 @@ func DoCopy(ctx context.Context, sourceFile string, destination string, recursiv
 	success := false
 	var downloaded int64 = 0
 
-	te := NewTransferEngine(ctx)
-	defer func() {
-		if err := te.Shutdown(); err != nil {
-			log.Errorln("Failure when shutting down transfer engine:", err)
-		}
-	}()
 	tc, err := te.NewClient(options...)
 	if err != nil {
 		return
 	}
-	tj, err := tc.NewTransferJob(remoteURL, localPath, isPut, recursive, project)
+	tj, err := tc.NewTransferJob(remoteURL, localPath, te, isPut, recursive, project)
 	if err != nil {
 		return
 	}

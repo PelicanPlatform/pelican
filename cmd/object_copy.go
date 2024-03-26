@@ -200,15 +200,19 @@ func copyMain(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	// Start our cache for url metadata
-	go client.PelicanURLCache.Start()
-	defer client.PelicanURLCache.Stop()
-
 	var result error
 	lastSrc := ""
+
+	te := client.NewTransferEngine(ctx)
+	defer func() {
+		if err := te.Shutdown(); err != nil {
+			log.Errorln("Failure when shutting down transfer engine:", err)
+		}
+	}()
+
 	for _, src := range source {
 		isRecursive, _ := cmd.Flags().GetBool("recursive")
-		_, result = client.DoCopy(ctx, src, dest, isRecursive, client.WithCallback(pb.callback), client.WithTokenLocation(tokenLocation), client.WithCaches(caches...))
+		_, result = client.DoCopy(te, src, dest, isRecursive, client.WithCallback(pb.callback), client.WithTokenLocation(tokenLocation), client.WithCaches(caches...))
 		if result != nil {
 			lastSrc = src
 			break

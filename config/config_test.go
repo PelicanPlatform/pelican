@@ -30,6 +30,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/sirupsen/logrus/hooks/test"
 	"github.com/spf13/viper"
@@ -284,6 +285,47 @@ func TestEnabledServers(t *testing.T) {
 	})
 }
 
+// Tests the function setPreferredPrefix: ensures case-insensitivity and invalid values are handled correctly
+func TestSetPreferredPrefix(t *testing.T) {
+	t.Run("TestPelicanPreferredPrefix", func(t *testing.T) {
+		oldPref, err := SetPreferredPrefix("pelican")
+		assert.NoError(t, err)
+		if GetPreferredPrefix() != "PELICAN" {
+			t.Errorf("Expected preferred prefix to be 'PELICAN', got '%s'", GetPreferredPrefix())
+		}
+		if oldPref != "" {
+			t.Errorf("Expected old preferred prefix to be empty, got '%s'", oldPref)
+		}
+	})
+
+	t.Run("TestOSDFPreferredPrefix", func(t *testing.T) {
+		oldPref, err := SetPreferredPrefix("osdf")
+		assert.NoError(t, err)
+		if GetPreferredPrefix() != "OSDF" {
+			t.Errorf("Expected preferred prefix to be 'OSDF', got '%s'", GetPreferredPrefix())
+		}
+		if oldPref != "PELICAN" {
+			t.Errorf("Expected old preferred prefix to be 'PELICAN', got '%s'", oldPref)
+		}
+	})
+
+	t.Run("TestStashPreferredPrefix", func(t *testing.T) {
+		oldPref, err := SetPreferredPrefix("stash")
+		assert.NoError(t, err)
+		if GetPreferredPrefix() != "STASH" {
+			t.Errorf("Expected preferred prefix to be 'STASH', got '%s'", GetPreferredPrefix())
+		}
+		if oldPref != "OSDF" {
+			t.Errorf("Expected old preferred prefix to be 'osdf', got '%s'", oldPref)
+		}
+	})
+
+	t.Run("TestInvalidPreferredPrefix", func(t *testing.T) {
+		_, err := SetPreferredPrefix("invalid")
+		assert.Error(t, err)
+	})
+}
+
 func TestDiscoverFederation(t *testing.T) {
 	viper.Reset()
 	// Server to be a "mock" federation
@@ -478,33 +520,79 @@ func TestInitServerUrl(t *testing.T) {
 	})
 }
 func TestDiscoverUrlFederation(t *testing.T) {
-	// Server to be a "mock" federation
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// make our response:
-		response := FederationDiscovery{
-			DirectorEndpoint:              "director",
-			NamespaceRegistrationEndpoint: "registry",
-			JwksUri:                       "jwks",
-			BrokerEndpoint:                "broker",
-		}
+	t.Run("TestMetadataDiscoveryTimeout", func(t *testing.T) {
+		// Create a server that sleeps for a longer duration than the timeout
+		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			time.Sleep(2 * time.Second)
+		}))
+		defer server.Close()
 
-		responseJSON, err := json.Marshal(response)
-		if err != nil {
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-			return
-		}
+		// Set a short timeout for the test
+		timeout := 1 * time.Second
 
-		w.WriteHeader(http.StatusOK)
-		_, err = w.Write(responseJSON)
+		// Create a context with the timeout
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+
+		// Call the function with the server URL and the context
+		_, err := DiscoverUrlFederation(ctx, server.URL)
+
+		// Assert that the error is the expected metadata timeout error
+		assert.Error(t, err)
+		assert.True(t, errors.Is(err, MetadataTimeoutErr))
+	})
+
+	t.Run("TestCanceledContext", func(t *testing.T) {
+		// Create a server that waits for the context to be canceled
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			<-r.Context().Done()
+		}))
+		defer server.Close()
+
+		// Create a context and cancel it immediately
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		// Call the function with the server URL and the canceled context
+		_, err := DiscoverUrlFederation(ctx, server.URL)
+
+		// Assert that the error is the expected context cancel error
+		assert.Error(t, err)
+		assert.True(t, errors.Is(err, context.Canceled))
+	})
+
+	t.Run("TestValidDiscovery", func(t *testing.T) {
+		// Server to be a "mock" federation
+		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// make our response:
+			response := FederationDiscovery{
+				DirectorEndpoint:              "director",
+				NamespaceRegistrationEndpoint: "registry",
+				JwksUri:                       "jwks",
+				BrokerEndpoint:                "broker",
+			}
+
+			responseJSON, err := json.Marshal(response)
+			if err != nil {
+				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+				return
+			}
+
+			w.WriteHeader(http.StatusOK)
+			_, err = w.Write(responseJSON)
+			assert.NoError(t, err)
+		}))
+		defer server.Close()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		metadata, err := DiscoverUrlFederation(ctx, server.URL)
 		assert.NoError(t, err)
-	}))
-	defer server.Close()
-	metadata, err := DiscoverUrlFederation(server.URL)
-	assert.NoError(t, err)
 
-	// Assert that the metadata matches expectations
-	assert.Equal(t, "director", metadata.DirectorEndpoint, "Unexpected DirectorEndpoint")
-	assert.Equal(t, "registry", metadata.NamespaceRegistrationEndpoint, "Unexpected NamespaceRegistrationEndpoint")
-	assert.Equal(t, "jwks", metadata.JwksUri, "Unexpected JwksUri")
-	assert.Equal(t, "broker", metadata.BrokerEndpoint, "Unexpected BrokerEndpoint")
+		// Assert that the metadata matches expectations
+		assert.Equal(t, "director", metadata.DirectorEndpoint, "Unexpected DirectorEndpoint")
+		assert.Equal(t, "registry", metadata.NamespaceRegistrationEndpoint, "Unexpected NamespaceRegistrationEndpoint")
+		assert.Equal(t, "jwks", metadata.JwksUri, "Unexpected JwksUri")
+		assert.Equal(t, "broker", metadata.BrokerEndpoint, "Unexpected BrokerEndpoint")
+	})
 }

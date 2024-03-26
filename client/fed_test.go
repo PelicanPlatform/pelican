@@ -30,6 +30,7 @@ import (
 	"testing"
 	"time"
 
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -59,6 +60,8 @@ func TestGetAndPutAuth(t *testing.T) {
 	viper.Reset()
 	server_utils.ResetOriginExports()
 	fed := fed_test_utils.NewFedTest(t, bothAuthOriginCfg)
+
+	te := client.NewTransferEngine(fed.Ctx)
 
 	// Other set-up items:
 	testFileContent := "test file content"
@@ -102,7 +105,9 @@ func TestGetAndPutAuth(t *testing.T) {
 
 	// This tests object get/put with a pelican:// url
 	t.Run("testPelicanObjectPutAndGetWithPelicanUrl", func(t *testing.T) {
-		config.SetPreferredPrefix("PELICAN")
+		_, err := config.SetPreferredPrefix("PELICAN")
+		assert.NoError(t, err)
+
 		// Set path for object to upload/download
 		for _, export := range *fed.Exports {
 			tempPath := tempFile.Name()
@@ -111,14 +116,14 @@ func TestGetAndPutAuth(t *testing.T) {
 				export.FederationPrefix, "osdf_osdf", fileName)
 
 			// Upload the file with PUT
-			transferResultsUpload, err := client.DoPut(fed.Ctx, tempFile.Name(), uploadURL, false, client.WithTokenLocation(tempToken.Name()))
+			transferResultsUpload, err := client.DoPut(te, tempFile.Name(), uploadURL, false, client.WithTokenLocation(tempToken.Name()))
 			assert.NoError(t, err)
 			if err == nil {
 				assert.Equal(t, transferResultsUpload[0].TransferredBytes, int64(17))
 			}
 
 			// Download that same file with GET
-			transferResultsDownload, err := client.DoGet(fed.Ctx, uploadURL, t.TempDir(), false, client.WithTokenLocation(tempToken.Name()))
+			transferResultsDownload, err := client.DoGet(te, uploadURL, t.TempDir(), false, client.WithTokenLocation(tempToken.Name()))
 			assert.NoError(t, err)
 			if err == nil {
 				assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
@@ -128,7 +133,9 @@ func TestGetAndPutAuth(t *testing.T) {
 
 	// This tests pelican object get/put with an osdf url
 	t.Run("testPelicanObjectPutAndGetWithOSDFUrl", func(t *testing.T) {
-		config.SetPreferredPrefix("PELICAN")
+		_, err := config.SetPreferredPrefix("PELICAN")
+		assert.NoError(t, err)
+
 		// Set path for object to upload/download
 		tempPath := tempFile.Name()
 		fileName := filepath.Base(tempPath)
@@ -137,18 +144,18 @@ func TestGetAndPutAuth(t *testing.T) {
 		assert.NoError(t, err)
 
 		// For OSDF url's, we don't want to rely on osdf metadata to be running since we manually discover "osg-htc.org" therefore, just ensure we get correct metadata for the url:
-		pelicanURL, err := client.NewPelicanURL(uploadURL, "osdf")
+		pelicanURL, err := te.NewPelicanURL(uploadURL)
 		assert.NoError(t, err)
 
 		// Check valid metadata:
 		assert.Equal(t, "https://osdf-director.osg-htc.org", pelicanURL.DirectorUrl)
-		assert.Equal(t, "https://osdf-registry.osg-htc.org", pelicanURL.RegistryUrl)
-		assert.Equal(t, "osg-htc.org", pelicanURL.DiscoveryUrl)
 	})
 
 	// This tests object get/put with a pelican:// url
 	t.Run("testOsdfObjectPutAndGetWithPelicanUrl", func(t *testing.T) {
-		config.SetPreferredPrefix("OSDF")
+		_, err := config.SetPreferredPrefix("OSDF")
+		assert.NoError(t, err)
+
 		for _, export := range *fed.Exports {
 			// Set path for object to upload/download
 			tempPath := tempFile.Name()
@@ -157,14 +164,14 @@ func TestGetAndPutAuth(t *testing.T) {
 				export.FederationPrefix, "osdf_osdf", fileName)
 
 			// Upload the file with PUT
-			transferResultsUpload, err := client.DoPut(fed.Ctx, tempFile.Name(), uploadURL, false, client.WithTokenLocation(tempToken.Name()))
+			transferResultsUpload, err := client.DoPut(te, tempFile.Name(), uploadURL, false, client.WithTokenLocation(tempToken.Name()))
 			assert.NoError(t, err)
 			if err == nil {
 				assert.Equal(t, transferResultsUpload[0].TransferredBytes, int64(17))
 			}
 
 			// Download that same file with GET
-			transferResultsDownload, err := client.DoGet(fed.Ctx, uploadURL, t.TempDir(), false, client.WithTokenLocation(tempToken.Name()))
+			transferResultsDownload, err := client.DoGet(te, uploadURL, t.TempDir(), false, client.WithTokenLocation(tempToken.Name()))
 			assert.NoError(t, err)
 			if err == nil {
 				assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
@@ -174,7 +181,9 @@ func TestGetAndPutAuth(t *testing.T) {
 
 	// This tests pelican object get/put with an osdf url
 	t.Run("testOsdfObjectPutAndGetWithOSDFUrl", func(t *testing.T) {
-		config.SetPreferredPrefix("OSDF")
+		_, err := config.SetPreferredPrefix("OSDF")
+		assert.NoError(t, err)
+
 		for _, export := range *fed.Exports {
 			// Set path for object to upload/download
 			tempPath := tempFile.Name()
@@ -184,26 +193,33 @@ func TestGetAndPutAuth(t *testing.T) {
 			hostname := fmt.Sprintf("%v:%v", param.Server_WebHost.GetString(), param.Server_WebPort.GetInt())
 
 			// Set our metadata values in config since that is what this url scheme - prefix combo does in handle_http
-			metadata, err := config.DiscoverUrlFederation("https://" + hostname)
+			metadata, err := config.DiscoverUrlFederation(fed.Ctx, "https://"+hostname)
 			assert.NoError(t, err)
 			viper.Set("Federation.DirectorUrl", metadata.DirectorEndpoint)
 			viper.Set("Federation.RegistryUrl", metadata.NamespaceRegistrationEndpoint)
 			viper.Set("Federation.DiscoveryUrl", hostname)
 
 			// Upload the file with PUT
-			transferResultsUpload, err := client.DoPut(fed.Ctx, tempFile.Name(), uploadURL, false, client.WithTokenLocation(tempToken.Name()))
+			transferResultsUpload, err := client.DoPut(te, tempFile.Name(), uploadURL, false, client.WithTokenLocation(tempToken.Name()))
 			assert.NoError(t, err)
 			if err == nil {
 				assert.Equal(t, transferResultsUpload[0].TransferredBytes, int64(17))
 			}
 
 			// Download that same file with GET
-			transferResultsDownload, err := client.DoGet(fed.Ctx, uploadURL, t.TempDir(), false, client.WithTokenLocation(tempToken.Name()))
+			transferResultsDownload, err := client.DoGet(te, uploadURL, t.TempDir(), false, client.WithTokenLocation(tempToken.Name()))
 			assert.NoError(t, err)
 			if err == nil {
 				assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
 			}
 		}
+	})
+	t.Cleanup(func() {
+		if err := te.Shutdown(); err != nil {
+			log.Errorln("Failure when shutting down transfer engine:", err)
+		}
+		// Throw in a viper.Reset for good measure. Keeps our env squeaky clean!
+		viper.Reset()
 	})
 }
 
@@ -212,6 +228,8 @@ func TestCopyAuth(t *testing.T) {
 	viper.Reset()
 	server_utils.ResetOriginExports()
 	fed := fed_test_utils.NewFedTest(t, bothAuthOriginCfg)
+
+	te := client.NewTransferEngine(fed.Ctx)
 
 	// Other set-up items:
 	testFileContent := "test file content"
@@ -255,7 +273,9 @@ func TestCopyAuth(t *testing.T) {
 
 	// This tests object get/put with a pelican:// url
 	t.Run("testPelicanObjectCopyWithPelicanUrl", func(t *testing.T) {
-		config.SetPreferredPrefix("PELICAN")
+		_, err := config.SetPreferredPrefix("PELICAN")
+		assert.NoError(t, err)
+
 		// Set path for object to upload/download
 		for _, export := range *fed.Exports {
 			tempPath := tempFile.Name()
@@ -264,14 +284,14 @@ func TestCopyAuth(t *testing.T) {
 				export.FederationPrefix, "osdf_osdf", fileName)
 
 			// Upload the file with PUT
-			transferResultsUpload, err := client.DoCopy(fed.Ctx, tempFile.Name(), uploadURL, false, client.WithTokenLocation(tempToken.Name()))
+			transferResultsUpload, err := client.DoCopy(te, tempFile.Name(), uploadURL, false, client.WithTokenLocation(tempToken.Name()))
 			assert.NoError(t, err)
 			if err == nil {
 				assert.Equal(t, transferResultsUpload[0].TransferredBytes, int64(17))
 			}
 
 			// Download that same file with GET
-			transferResultsDownload, err := client.DoCopy(fed.Ctx, uploadURL, t.TempDir(), false, client.WithTokenLocation(tempToken.Name()))
+			transferResultsDownload, err := client.DoCopy(te, uploadURL, t.TempDir(), false, client.WithTokenLocation(tempToken.Name()))
 			assert.NoError(t, err)
 			if err == nil {
 				assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
@@ -281,7 +301,9 @@ func TestCopyAuth(t *testing.T) {
 
 	// This tests pelican object get/put with an osdf url
 	t.Run("testPelicanObjectCopyWithOSDFUrl", func(t *testing.T) {
-		config.SetPreferredPrefix("PELICAN")
+		_, err := config.SetPreferredPrefix("PELICAN")
+		assert.NoError(t, err)
+
 		// Set path for object to upload/download
 		tempPath := tempFile.Name()
 		fileName := filepath.Base(tempPath)
@@ -290,18 +312,18 @@ func TestCopyAuth(t *testing.T) {
 		assert.NoError(t, err)
 
 		// For OSDF url's, we don't want to rely on osdf metadata to be running since we manually discover "osg-htc.org" therefore, just ensure we get correct metadata for the url:
-		pelicanURL, err := client.NewPelicanURL(uploadURL, "osdf")
+		pelicanURL, err := te.NewPelicanURL(uploadURL)
 		assert.NoError(t, err)
 
 		// Check valid metadata:
 		assert.Equal(t, "https://osdf-director.osg-htc.org", pelicanURL.DirectorUrl)
-		assert.Equal(t, "https://osdf-registry.osg-htc.org", pelicanURL.RegistryUrl)
-		assert.Equal(t, "osg-htc.org", pelicanURL.DiscoveryUrl)
 	})
 
 	// This tests object get/put with a pelican:// url
 	t.Run("testOsdfObjectCopyWithPelicanUrl", func(t *testing.T) {
-		config.SetPreferredPrefix("OSDF")
+		_, err := config.SetPreferredPrefix("OSDF")
+		assert.NoError(t, err)
+
 		for _, export := range *fed.Exports {
 			// Set path for object to upload/download
 			tempPath := tempFile.Name()
@@ -310,14 +332,14 @@ func TestCopyAuth(t *testing.T) {
 				export.FederationPrefix, "osdf_osdf", fileName)
 
 			// Upload the file with PUT
-			transferResultsUpload, err := client.DoCopy(fed.Ctx, tempFile.Name(), uploadURL, false, client.WithTokenLocation(tempToken.Name()))
+			transferResultsUpload, err := client.DoCopy(te, tempFile.Name(), uploadURL, false, client.WithTokenLocation(tempToken.Name()))
 			assert.NoError(t, err)
 			if err == nil {
 				assert.Equal(t, transferResultsUpload[0].TransferredBytes, int64(17))
 			}
 
 			// Download that same file with GET
-			transferResultsDownload, err := client.DoCopy(fed.Ctx, uploadURL, t.TempDir(), false, client.WithTokenLocation(tempToken.Name()))
+			transferResultsDownload, err := client.DoCopy(te, uploadURL, t.TempDir(), false, client.WithTokenLocation(tempToken.Name()))
 			assert.NoError(t, err)
 			if err == nil {
 				assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
@@ -327,7 +349,9 @@ func TestCopyAuth(t *testing.T) {
 
 	// This tests pelican object get/put with an osdf url
 	t.Run("testOsdfObjectCopyWithOSDFUrl", func(t *testing.T) {
-		config.SetPreferredPrefix("OSDF")
+		_, err := config.SetPreferredPrefix("OSDF")
+		assert.NoError(t, err)
+
 		for _, export := range *fed.Exports {
 			// Set path for object to upload/download
 			tempPath := tempFile.Name()
@@ -337,26 +361,33 @@ func TestCopyAuth(t *testing.T) {
 			hostname := fmt.Sprintf("%v:%v", param.Server_WebHost.GetString(), param.Server_WebPort.GetInt())
 
 			// Set our metadata values in config since that is what this url scheme - prefix combo does in handle_http
-			metadata, err := config.DiscoverUrlFederation("https://" + hostname)
+			metadata, err := config.DiscoverUrlFederation(fed.Ctx, "https://"+hostname)
 			assert.NoError(t, err)
 			viper.Set("Federation.DirectorUrl", metadata.DirectorEndpoint)
 			viper.Set("Federation.RegistryUrl", metadata.NamespaceRegistrationEndpoint)
 			viper.Set("Federation.DiscoveryUrl", hostname)
 
 			// Upload the file with PUT
-			transferResultsUpload, err := client.DoCopy(fed.Ctx, tempFile.Name(), uploadURL, false, client.WithTokenLocation(tempToken.Name()))
+			transferResultsUpload, err := client.DoCopy(te, tempFile.Name(), uploadURL, false, client.WithTokenLocation(tempToken.Name()))
 			assert.NoError(t, err)
 			if err == nil {
 				assert.Equal(t, transferResultsUpload[0].TransferredBytes, int64(17))
 			}
 
 			// Download that same file with GET
-			transferResultsDownload, err := client.DoCopy(fed.Ctx, uploadURL, t.TempDir(), false, client.WithTokenLocation(tempToken.Name()))
+			transferResultsDownload, err := client.DoCopy(te, uploadURL, t.TempDir(), false, client.WithTokenLocation(tempToken.Name()))
 			assert.NoError(t, err)
 			if err == nil {
 				assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
 			}
 		}
+	})
+	t.Cleanup(func() {
+		if err := te.Shutdown(); err != nil {
+			log.Errorln("Failure when shutting down transfer engine:", err)
+		}
+		// Throw in a viper.Reset for good measure. Keeps our env squeaky clean!
+		viper.Reset()
 	})
 }
 
@@ -366,6 +397,7 @@ func TestGetPublicRead(t *testing.T) {
 	server_utils.ResetOriginExports()
 
 	fed := fed_test_utils.NewFedTest(t, bothPublicOriginCfg)
+	te := client.NewTransferEngine(fed.Ctx)
 
 	t.Run("testPubObjGet", func(t *testing.T) {
 		for _, export := range *fed.Exports {
@@ -387,12 +419,19 @@ func TestGetPublicRead(t *testing.T) {
 				export.FederationPrefix, fileName)
 
 			// Download the file with GET. Shouldn't need a token to succeed
-			transferResults, err := client.DoGet(fed.Ctx, uploadURL, t.TempDir(), false)
+			transferResults, err := client.DoGet(te, uploadURL, t.TempDir(), false)
 			assert.NoError(t, err)
 			if err == nil {
 				assert.Equal(t, transferResults[0].TransferredBytes, int64(17))
 			}
 		}
+	})
+	t.Cleanup(func() {
+		if err := te.Shutdown(); err != nil {
+			log.Errorln("Failure when shutting down transfer engine:", err)
+		}
+		// Throw in a viper.Reset for good measure. Keeps our env squeaky clean!
+		viper.Reset()
 	})
 }
 
