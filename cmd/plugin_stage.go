@@ -188,7 +188,8 @@ func stagePluginMain(cmd *cobra.Command, args []string) {
 	var result error
 	var xformSources []string
 	for _, src := range sources {
-		_, newSource, result := client.DoShadowIngest(context.Background(), src, mountPrefixStr, shadowOriginPrefixStr, client.WithTokenLocation(tokenLocation), client.WithAcquireToken(false))
+		newSource := ""
+		_, newSource, result = client.DoShadowIngest(context.Background(), src, mountPrefixStr, shadowOriginPrefixStr, client.WithTokenLocation(tokenLocation), client.WithAcquireToken(false))
 		if result != nil {
 			// What's the correct behavior on failure?  For now, we silently put the transfer
 			// back on the original list.  This is arguably the wrong approach as it might

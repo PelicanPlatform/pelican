@@ -25,12 +25,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
 )
 
-func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, modules config.ServerType) (server_utils.XRootDServer, error) {
+func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, modules config.ServerType) (server_structs.XRootDServer, error) {
 	return nil, errors.New("Origin module is not supported on Windows")
 }
 

@@ -25,8 +25,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -42,7 +42,7 @@ type (
 
 	// Response for a successful retrieval
 	brokerRetrievalResp struct {
-		common.SimpleApiResp
+		server_structs.SimpleApiResp
 		Request reversalRequest `json:"req"`
 	}
 
@@ -54,19 +54,19 @@ type (
 
 func newBrokerReqResp(req reversalRequest) (result brokerRetrievalResp) {
 	result.Request = req
-	result.SimpleApiResp.Status = common.RespOK
+	result.SimpleApiResp.Status = server_structs.RespOK
 	return
 }
 
-func newBrokerRespFail(msg string) common.SimpleApiResp {
-	return common.SimpleApiResp{
-		Status: common.RespFailed,
+func newBrokerRespFail(msg string) server_structs.SimpleApiResp {
+	return server_structs.SimpleApiResp{
+		Status: server_structs.RespFailed,
 		Msg:    msg,
 	}
 }
 
 func newBrokerRespTimeout() (result brokerRetrievalResp) {
-	result.SimpleApiResp.Status = common.RespPollTimeout
+	result.SimpleApiResp.Status = server_structs.RespPollTimeout
 	return
 }
 

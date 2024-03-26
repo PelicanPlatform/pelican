@@ -31,10 +31,10 @@ import (
 	"time"
 
 	"github.com/pelicanplatform/pelican/client"
-	"github.com/pelicanplatform/pelican/common"
 	config "github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/fed_test_utils"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
@@ -47,7 +47,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 	// Create instance of test federation
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 	viper.Reset()
-	common.ResetOriginExports()
+	server_utils.ResetOriginExports()
 
 	fed := fed_test_utils.NewFedTest(t, mixedAuthOriginCfg)
 
