@@ -25,9 +25,10 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	log "github.com/sirupsen/logrus"
+
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
-	log "github.com/sirupsen/logrus"
 )
 
 type OpenIdDiscoveryResponse struct {
@@ -41,6 +42,8 @@ const (
 	directorJWKSPath        string = "/.well-known/issuer.jwks"
 )
 
+// Director hosts a discovery endpoint at federationDiscoveryPath to provide URLs to various
+// Pelican central servers in a federation.
 func federationDiscoveryHandler(ctx *gin.Context) {
 	directorUrlStr := param.Federation_DirectorUrl.GetString()
 	if !param.Federation_DirectorUrl.IsSet() || len(directorUrlStr) == 0 {
@@ -167,7 +170,7 @@ func jwksHandler(ctx *gin.Context) {
 	}
 }
 
-func RegisterDirectorAuth(router *gin.RouterGroup) {
+func RegisterDirectorOIDCAPI(router *gin.RouterGroup) {
 	router.GET(federationDiscoveryPath, federationDiscoveryHandler)
 	router.GET(oidcDiscoveryPath, oidcDiscoveryHandler)
 	router.GET(directorJWKSPath, jwksHandler)

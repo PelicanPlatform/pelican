@@ -50,6 +50,8 @@ func DirectorServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 
 	director.ConfigTTLCache(ctx, egrp)
 
+	director.ConfigFilterdServers()
+
 	// Configure the shortcut middleware to either redirect to a cache
 	// or to an origin
 	defaultResponse := param.Director_DefaultResponse.GetString()
@@ -59,10 +61,10 @@ func DirectorServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 	}
 	log.Debugf("The director will redirect to %ss by default", defaultResponse)
 	rootGroup := engine.Group("/")
-	director.RegisterDirectorAuth(rootGroup)
+	director.RegisterDirectorOIDCAPI(rootGroup)
 	director.RegisterDirectorWebAPI(rootGroup)
 	engine.Use(director.ShortcutMiddleware(defaultResponse))
-	director.RegisterDirector(ctx, rootGroup)
+	director.RegisterDirectorAPI(ctx, rootGroup)
 
 	return nil
 }

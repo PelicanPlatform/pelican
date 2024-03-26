@@ -42,11 +42,11 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/pelicanplatform/pelican/cache_ui"
-	"github.com/pelicanplatform/pelican/common"
+	"github.com/pelicanplatform/pelican/cache"
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/origin_ui"
+	"github.com/pelicanplatform/pelican/origin"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 )
 
@@ -210,7 +210,7 @@ func writeScitokensConfiguration(modules config.ServerType, cfg *ScitokensCfg) e
 // This function queries the topology url for the specific authfiles for the cache and origin
 // and returns a pointer to a byte buffer containing the file contents, returns nil if the
 // authfile doesn't exist - considering it an empty file
-func getOSDFAuthFiles(server server_utils.XRootDServer) ([]byte, error) {
+func getOSDFAuthFiles(server server_structs.XRootDServer) ([]byte, error) {
 	var stype string
 	if server.GetServerType().IsEnabled(config.OriginType) {
 		stype = "origin"
@@ -259,7 +259,7 @@ func getOSDFAuthFiles(server server_utils.XRootDServer) ([]byte, error) {
 
 // Parse the input xrootd authfile, add any default configurations, and then save it
 // into the xrootd runtime directory
-func EmitAuthfile(server server_utils.XRootDServer) error {
+func EmitAuthfile(server server_structs.XRootDServer) error {
 	authfile := param.Xrootd_Authfile.GetString()
 	log.Debugln("Location of input authfile:", authfile)
 	contents, err := os.ReadFile(authfile)
@@ -293,7 +293,7 @@ func EmitAuthfile(server server_utils.XRootDServer) error {
 			if server.GetServerType().IsEnabled(config.OriginType) {
 				outStr := "u * /.well-known lr "
 				// Set up public reads only for the namespaces that are public
-				originExports, err := common.GetOriginExports()
+				originExports, err := server_utils.GetOriginExports()
 				if err != nil {
 					return errors.Wrapf(err, "Failed to get origin exports")
 				}
@@ -323,7 +323,7 @@ func EmitAuthfile(server server_utils.XRootDServer) error {
 		outStr := "u * /.well-known lr"
 
 		// Configure the Authfile for each of the public exports we have in the origin
-		originExports, err := common.GetOriginExports()
+		originExports, err := server_utils.GetOriginExports()
 		if err != nil {
 			return errors.Wrapf(err, "Failed to get origin exports")
 		}
@@ -537,14 +537,14 @@ func makeSciTokensCfg() (cfg ScitokensCfg, err error) {
 }
 
 // Writes out the server's scitokens.cfg configuration
-func EmitScitokensConfig(server server_utils.XRootDServer) error {
-	if originServer, ok := server.(*origin_ui.OriginServer); ok {
+func EmitScitokensConfig(server server_structs.XRootDServer) error {
+	if originServer, ok := server.(*origin.OriginServer); ok {
 		authedPrefixes, err := originServer.GetAuthorizedPrefixes()
 		if err != nil {
 			return err
 		}
 		return WriteOriginScitokensConfig(authedPrefixes)
-	} else if cacheServer, ok := server.(*cache_ui.CacheServer); ok {
+	} else if cacheServer, ok := server.(*cache.CacheServer); ok {
 		return WriteCacheScitokensConfig(cacheServer.GetNamespaceAds())
 	} else {
 		return errors.New("Internal error: server object is neither cache nor origin")
@@ -588,7 +588,7 @@ func WriteOriginScitokensConfig(exportedPaths []string) error {
 }
 
 // Writes out the cache's scitokens.cfg configuration
-func WriteCacheScitokensConfig(nsAds []common.NamespaceAdV2) error {
+func WriteCacheScitokensConfig(nsAds []server_structs.NamespaceAdV2) error {
 	cfg, err := makeSciTokensCfg()
 	if err != nil {
 		return err
