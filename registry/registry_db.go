@@ -168,7 +168,7 @@ func createTopologyTable() error {
 }
 
 // Check if a namespace exists in either Topology or Pelican registry
-func namespaceExists(prefix string) (bool, error) {
+func namespaceExistsByPrefix(prefix string) (bool, error) {
 	var count int64
 
 	err := db.Model(&Namespace{}).Where("prefix = ?", prefix).Count(&count).Error
@@ -237,17 +237,6 @@ func namespaceSupSubChecks(prefix string) (superspaces []string, subspaces []str
 func namespaceExistsById(id int) (bool, error) {
 	var namespaces []Namespace
 	result := db.Limit(1).Find(&namespaces, id)
-	if result.Error != nil {
-		return false, result.Error
-	} else {
-		return result.RowsAffected > 0, nil
-	}
-}
-
-func namespaceExistsByPrefix(prefix string) (bool, error) {
-	var namespaces []Namespace
-	result := db.Where("prefix = ?", prefix).Limit(1).Find(&namespaces)
-
 	if result.Error != nil {
 		return false, result.Error
 	} else {
@@ -513,7 +502,11 @@ func updateNamespaceStatusById(id int, status RegistrationStatus, approverId str
 	return db.Model(ns).Where("id = ?", id).Update("admin_metadata", string(adminMetadataByte)).Error
 }
 
-func deleteNamespace(prefix string) error {
+func deleteNamespaceByID(id int) error {
+	return db.Delete(&Namespace{}, id).Error
+}
+
+func deleteNamespaceByPrefix(prefix string) error {
 	// GORM by default uses transaction for write operations
 	return db.Where("prefix = ?", prefix).Delete(&Namespace{}).Error
 }

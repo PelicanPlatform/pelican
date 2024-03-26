@@ -170,8 +170,17 @@ func loadServerKeys() (*ecdsa.PrivateKey, error) {
 	// TODO: Reimplement the function once we switch to a minimum of 1.21
 	serverCredsLoad.Do(func() {
 		issuerFileName := param.IssuerKey.GetString()
-		serverCredsPrivKey, serverCredsErr = config.LoadPrivateKey(issuerFileName)
+		var privateKey crypto.PrivateKey
+		privateKey, serverCredsErr = config.LoadPrivateKey(issuerFileName, false)
+
+		switch key := privateKey.(type) {
+		case *ecdsa.PrivateKey:
+			serverCredsPrivKey = key
+		default:
+			serverCredsErr = errors.Errorf("unsupported key type for server issuer key: %T", key)
+		}
 	})
+
 	return serverCredsPrivKey, serverCredsErr
 }
 
@@ -190,7 +199,7 @@ func verifySignature(payload []byte, signature []byte, publicKey *ecdsa.PublicKe
 }
 
 // Generate server nonce for key-sign challenge
-func keySignChallengeInit(ctx *gin.Context, data *registrationData) (map[string]interface{}, error) {
+func keySignChallengeInit(data *registrationData) (map[string]interface{}, error) {
 	serverNonce, err := generateNonce()
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to generate nonce for key-sign challenge")
@@ -258,7 +267,7 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 		log.Debug("Registering namespace ", data.Prefix)
 
 		// Check if prefix exists before doing anything else
-		exists, err := namespaceExists(data.Prefix)
+		exists, err := namespaceExistsByPrefix(data.Prefix)
 		if err != nil {
 			log.Errorf("Failed to check if namespace already exists: %v", err)
 			return false, nil, errors.Wrap(err, "Server encountered an error checking if namespace already exists")
@@ -359,7 +368,7 @@ func keySignChallenge(ctx *gin.Context, data *registrationData) (bool, map[strin
 			return created, res, nil
 		}
 	} else if data.ClientNonce != "" {
-		res, err := keySignChallengeInit(ctx, data)
+		res, err := keySignChallengeInit(data)
 		if err != nil {
 			return false, nil, err
 		} else {
@@ -596,7 +605,7 @@ func deleteNamespaceHandler(ctx *gin.Context) {
 	}
 
 	// Check if prefix exists before trying to delete it
-	exists, err := namespaceExists(prefix)
+	exists, err := namespaceExistsByPrefix(prefix)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error checking if namespace already exists"})
 		log.Errorf("Failed to check if the namespace already exists: %v", err)
@@ -640,7 +649,7 @@ func deleteNamespaceHandler(ctx *gin.Context) {
 	}
 
 	// If we get to this point in the code, we've passed all the security checks and we're ready to delete
-	err = deleteNamespace(prefix)
+	err = deleteNamespaceByPrefix(prefix)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error deleting namespace from database"})
 		log.Errorf("Failed to delete namespace from database: %v", err)
@@ -728,7 +737,7 @@ func wildcardHandler(ctx *gin.Context) {
 	} else if strings.HasSuffix(path, "/.well-known/openid-configuration") {
 		// Check that the namespace exists before constructing config JSON
 		prefix := strings.TrimSuffix(path, "/.well-known/openid-configuration")
-		exists, err := namespaceExists(prefix)
+		exists, err := namespaceExistsByPrefix(prefix)
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Server encountered an error while checking if the prefix exists"})
 			log.Errorf("Error while checking for existence of prefix %s: %v", prefix, err)

@@ -444,7 +444,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 
 	if !isUpdate {
 		// Check if prefix exists before doing anything else. Skip check if it's update operation
-		exists, err := namespaceExists(ns.Prefix)
+		exists, err := namespaceExistsByPrefix(ns.Prefix)
 		if err != nil {
 			log.Errorf("Failed to check if namespace already exists: %v", err)
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Server encountered an error checking if namespace already exists"})
@@ -484,12 +484,9 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 		return
 	}
 
-	if validCF, err := validateCustomFields(ns.CustomFields, true); !validCF {
-		if err != nil {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Error validating custom fields: %v", err)})
-			return
-		}
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Invalid custom field: %s", err.Error())})
+	validCF, err := validateCustomFields(ns.CustomFields, true)
+	if !validCF && err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Invalid custom fields: %s", err.Error())})
 		return
 	}
 
@@ -666,6 +663,33 @@ func getNamespaceJWKS(ctx *gin.Context) {
 	ctx.Data(200, "application/json", jsonData)
 }
 
+func deleteNamespace(ctx *gin.Context) {
+	idStr := ctx.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil || id <= 0 {
+		// Handle the error if id is not a valid integer
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID format. ID must a non-zero integer"})
+		return
+	}
+	exists, err := namespaceExistsById(id)
+	if err != nil {
+		log.Error("Error checking if namespace exists: ", err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Error checking if namespace exists"})
+		return
+	}
+	if !exists {
+		log.Errorf("Namespace not found for id: %d", id)
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "Namespace not found"})
+		return
+	}
+	err = deleteNamespaceByID(id)
+	if err != nil {
+		log.Errorf("Error deleting the namespace: %v", err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Error deleting the namespace"})
+	}
+	ctx.JSON(http.StatusOK, gin.H{"msg": "success"})
+}
+
 func listInstitutions(ctx *gin.Context) {
 	// When Registry.Institutions is set
 	institutions := []Institution{}
@@ -762,6 +786,7 @@ func RegisterRegistryWebAPI(router *gin.RouterGroup) error {
 		registryWebAPI.PUT("/namespaces/:id", web_ui.AuthHandler, func(ctx *gin.Context) {
 			createUpdateNamespace(ctx, true)
 		})
+		registryWebAPI.DELETE("/namespaces/:id", web_ui.AuthHandler, web_ui.AdminAuthHandler, deleteNamespace)
 		registryWebAPI.GET("/namespaces/:id/pubkey", getNamespaceJWKS)
 		registryWebAPI.PATCH("/namespaces/:id/approve", web_ui.AuthHandler, web_ui.AdminAuthHandler, func(ctx *gin.Context) {
 			updateNamespaceStatus(ctx, Approved)

@@ -19,9 +19,11 @@
 package config
 
 import (
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -48,18 +50,23 @@ var (
 	issuerPrivateJWK atomic.Pointer[jwk.Key]
 )
 
-// Return a pointer to an ECDSA private key read from keyLocation.
+// Return a pointer to an ECDSA private key or RSA private key read from keyLocation.
 //
-// This can be used to load any ECDSA private key we generated for
-// various purposes including IssuerKey, TLSKey, and TLSCAKey
-func LoadPrivateKey(keyLocation string) (*ecdsa.PrivateKey, error) {
+// This can be used to load ECDSA or RSA private key for various purposes,
+// including IssuerKey, TLSKey, and TLSCAKey
+//
+// If allowRSA is false, an RSA key in the keyLocation gives error
+func LoadPrivateKey(keyLocation string, allowRSA bool) (crypto.PrivateKey, error) {
 	rest, err := os.ReadFile(keyLocation)
 	if err != nil {
 		return nil, nil
 	}
 
-	var privateKey *ecdsa.PrivateKey
+	var privateKey crypto.PrivateKey
 	var block *pem.Block
+
+	keyExists := false
+
 	for {
 		block, rest = pem.Decode(rest)
 		if block == nil {
@@ -72,14 +79,36 @@ func LoadPrivateKey(keyLocation string) (*ecdsa.PrivateKey, error) {
 			switch key := genericPrivateKey.(type) {
 			case *ecdsa.PrivateKey:
 				privateKey = key
+			case *rsa.PrivateKey:
+				if allowRSA {
+					privateKey = key
+				} else {
+					return nil, fmt.Errorf("RSA type private key in PKCS #8 form is not allowed for %s. Use an ECDSA key instead.", keyLocation)
+				}
 			default:
-				return nil, fmt.Errorf("Unsupported private key type: %T", key)
+				return nil, fmt.Errorf("Unsupported private key type: %T in the private key file %s with PEM block type as PRIVATE KEY", key, keyLocation)
 			}
 			break
+		} else if block.Type == "RSA PRIVATE KEY" {
+			if !allowRSA {
+				return nil, fmt.Errorf("RSA type private key is not allowed for %s. Use an ECDSA key instead.", keyLocation)
+			} else {
+				rsaPrivateKey, err := x509.ParsePKCS1PrivateKey(block.Bytes)
+				if err != nil {
+					return nil, err
+				}
+				privateKey = rsaPrivateKey
+			}
+		} else {
+			keyExists = true
 		}
 	}
 	if privateKey == nil {
-		return nil, fmt.Errorf("Private key file, %v, contains no private key", keyLocation)
+		if keyExists {
+			return nil, fmt.Errorf("Private key file, %v, contains unsupported key type", keyLocation)
+		} else {
+			return nil, fmt.Errorf("Private key file, %v, contains no private key", keyLocation)
+		}
 	}
 	return privateKey, nil
 }
@@ -87,7 +116,7 @@ func LoadPrivateKey(keyLocation string) (*ecdsa.PrivateKey, error) {
 // Check if a file exists at keyLocation, return the file if so; otherwise, generate
 // and writes a PEM-encoded ECDSA-encrypted private key with elliptic curve assigned
 // by curve
-func GeneratePrivateKey(keyLocation string, curve elliptic.Curve) error {
+func GeneratePrivateKey(keyLocation string, curve elliptic.Curve, allowRSA bool) error {
 	uid, err := GetDaemonUID()
 	if err != nil {
 		return err
@@ -109,7 +138,7 @@ func GeneratePrivateKey(keyLocation string, curve elliptic.Curve) error {
 	if file, err := os.Open(keyLocation); err == nil {
 		defer file.Close()
 		// Make sure key is valid if there is one
-		if _, err := LoadPrivateKey(keyLocation); err != nil {
+		if _, err := LoadPrivateKey(keyLocation, allowRSA); err != nil {
 			return err
 		}
 		return nil
@@ -199,15 +228,25 @@ func GenerateCACert() error {
 	}
 
 	tlsCAKey := param.Server_TLSCAKey.GetString()
-	if err := GeneratePrivateKey(tlsCAKey, elliptic.P256()); err != nil {
+	// We allow RSA type key but if the key DNE, we will still generate an ECDSA key
+	if err := GeneratePrivateKey(tlsCAKey, elliptic.P256(), true); err != nil {
 		return err
 	}
-	privateKey, err := LoadPrivateKey(tlsCAKey)
+	privateKey, err := LoadPrivateKey(tlsCAKey, true)
 	if err != nil {
 		return err
 	}
+	var pubKey any
+	switch key := privateKey.(type) {
+	case *rsa.PrivateKey:
+		pubKey = &(key.PublicKey)
+	case *ecdsa.PrivateKey:
+		pubKey = &(key.PublicKey)
+	default:
+		return errors.Errorf("unsupported private key type: %T", key)
+	}
 
-	log.Debugln("Will generate a new CA certificate for the server")
+	log.Debugln("Server.TLSCACertificateFile does not exist. Will generate a new CA certificate for the server")
 	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
 	serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
 	if err != nil {
@@ -228,10 +267,10 @@ func GenerateCACert() error {
 		IsCA:                  true,
 	}
 	template.DNSNames = []string{hostname}
-	derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, &(privateKey.PublicKey),
+	derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, pubKey,
 		privateKey)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "error creating a CA cert")
 	}
 	file, err := os.OpenFile(tlsCACert, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0640)
 	if err != nil {
@@ -307,6 +346,8 @@ func GenerateCert() error {
 		return err
 	}
 
+	tlsCertPrivateKeyExists := false
+
 	tlsCert := param.Server_TLSCertificate.GetString()
 	if file, err := os.Open(tlsCert); err == nil {
 		file.Close()
@@ -314,6 +355,7 @@ func GenerateCert() error {
 		tlsKey := param.Server_TLSKey.GetString()
 		if file, err := os.Open(tlsKey); err == nil {
 			file.Close()
+			tlsCertPrivateKeyExists = true
 			// Check that CA is also present
 			caCert := param.Server_TLSCACertificateFile.GetString()
 			if _, err := os.Open(caCert); err == nil {
@@ -350,6 +392,13 @@ func GenerateCert() error {
 		return err
 	}
 
+	// However, if only CA is missing but TLS cert and private key are present, we simply
+	// generate the CA and return
+	if tlsCertPrivateKeyExists {
+		log.Debug("TLS Certficiate and its private key are present. Generated a CA and returns.")
+		return nil
+	}
+
 	tlsCertDir := filepath.Dir(tlsCert)
 	if err := MkdirAll(tlsCertDir, 0755, -1, gid); err != nil {
 		return err
@@ -358,21 +407,31 @@ func GenerateCert() error {
 	tlsKey := param.Server_TLSKey.GetString()
 
 	// In case we didn't generate TLS private key
-	if err := GeneratePrivateKey(tlsKey, elliptic.P256()); err != nil {
+	if err := GeneratePrivateKey(tlsKey, elliptic.P256(), true); err != nil {
 		return err
 	}
-	privateKey, err := LoadPrivateKey(tlsKey)
+	privateKey, err := LoadPrivateKey(tlsKey, true)
 	if err != nil {
 		return err
 	}
 
 	// The private key of CA will always be present
-	caPrivateKey, err := LoadPrivateKey(param.Server_TLSCAKey.GetString())
+	caPrivateKey, err := LoadPrivateKey(param.Server_TLSCAKey.GetString(), true)
 	if err != nil {
 		return err
 	}
 
-	log.Debugln("Will generate a new host certificate for the server")
+	var caPubKey any
+	switch key := privateKey.(type) {
+	case *rsa.PrivateKey:
+		caPubKey = &(key.PublicKey)
+	case *ecdsa.PrivateKey:
+		caPubKey = &(key.PublicKey)
+	default:
+		return errors.Errorf("unsupported private key type: %T", key)
+	}
+
+	log.Debugln("Server.TLSCertificate and/or Server.TLSKey do not exist. Will generate a new host certificate and its private key for the server")
 	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
 	serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
 	if err != nil {
@@ -398,10 +457,10 @@ func GenerateCert() error {
 	signingCert := caCert
 	signingKey := caPrivateKey
 
-	derBytes, err := x509.CreateCertificate(rand.Reader, &template, signingCert, &(privateKey.PublicKey),
+	derBytes, err := x509.CreateCertificate(rand.Reader, &template, signingCert, caPubKey,
 		signingKey)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "error creating a TLS cert")
 	}
 	file, err := os.OpenFile(tlsCert, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0640)
 	if err != nil {
@@ -436,7 +495,7 @@ func GenerateCert() error {
 // Only intended to be called internally
 func loadIssuerPrivateJWK(issuerKeyFile string) (jwk.Key, error) {
 	// Check to see if we already had an IssuerKey or generate one
-	if err := GeneratePrivateKey(issuerKeyFile, elliptic.P256()); err != nil {
+	if err := GeneratePrivateKey(issuerKeyFile, elliptic.P256(), false); err != nil {
 		return nil, errors.Wrap(err, "Failed to generate new private key")
 	}
 	contents, err := os.ReadFile(issuerKeyFile)
@@ -603,7 +662,7 @@ func GenerateSessionSecret() error {
 
 	// Use issuer private key as the source to generate the secret
 	issuerKeyFile := param.IssuerKey.GetString()
-	privateKey, err := LoadPrivateKey(issuerKeyFile)
+	privateKey, err := LoadPrivateKey(issuerKeyFile, false)
 	if err != nil {
 		return err
 	}

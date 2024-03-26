@@ -61,7 +61,6 @@ type (
 		Cancel        context.CancelFunc
 		Status        HealthTestStatus
 	}
-
 	// Util struct to keep track of `stat` call the director made to the origins
 	originStatUtil struct {
 		Context  context.Context

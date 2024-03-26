@@ -38,7 +38,6 @@ func TestListServers(t *testing.T) {
 	func() {
 		serverAdMutex.Lock()
 		defer serverAdMutex.Unlock()
-		serverAds.DeleteAll()
 		serverAds.Set(mockOriginServerAd, mockNamespaceAds(5, "origin1"), ttlcache.DefaultTTL)
 		serverAds.Set(mockCacheServerAd, mockNamespaceAds(4, "cache1"), ttlcache.DefaultTTL)
 		require.True(t, serverAds.Has(mockOriginServerAd))
@@ -46,24 +45,30 @@ func TestListServers(t *testing.T) {
 	}()
 
 	mocklistOriginRes := listServerResponse{
-		Name:      mockOriginServerAd.Name,
-		AuthURL:   mockOriginServerAd.AuthURL.String(),
-		URL:       mockOriginServerAd.URL.String(),
-		WebURL:    mockOriginServerAd.WebURL.String(),
-		Type:      mockOriginServerAd.Type,
-		Latitude:  mockOriginServerAd.Latitude,
-		Longitude: mockOriginServerAd.Longitude,
-		Status:    HealthStatusUnknown,
+		Name:        mockOriginServerAd.Name,
+		BrokerURL:   mockOriginServerAd.BrokerURL.String(),
+		AuthURL:     mockOriginServerAd.AuthURL.String(),
+		URL:         mockOriginServerAd.URL.String(),
+		WebURL:      mockOriginServerAd.WebURL.String(),
+		Type:        mockOriginServerAd.Type,
+		Latitude:    mockOriginServerAd.Latitude,
+		Longitude:   mockOriginServerAd.Longitude,
+		Writes:      mockOriginServerAd.Writes,
+		DirectReads: mockOriginServerAd.DirectReads,
+		Status:      HealthStatusUnknown,
 	}
 	mocklistCacheRes := listServerResponse{
-		Name:      mockCacheServerAd.Name,
-		AuthURL:   mockCacheServerAd.AuthURL.String(),
-		URL:       mockCacheServerAd.URL.String(),
-		WebURL:    mockCacheServerAd.WebURL.String(),
-		Type:      mockCacheServerAd.Type,
-		Latitude:  mockCacheServerAd.Latitude,
-		Longitude: mockCacheServerAd.Longitude,
-		Status:    HealthStatusUnknown,
+		Name:        mockCacheServerAd.Name,
+		BrokerURL:   mockCacheServerAd.BrokerURL.String(),
+		AuthURL:     mockCacheServerAd.AuthURL.String(),
+		URL:         mockCacheServerAd.URL.String(),
+		WebURL:      mockCacheServerAd.WebURL.String(),
+		Type:        mockCacheServerAd.Type,
+		Latitude:    mockCacheServerAd.Latitude,
+		Longitude:   mockCacheServerAd.Longitude,
+		Writes:      mockCacheServerAd.Writes,
+		DirectReads: mockCacheServerAd.DirectReads,
+		Status:      HealthStatusUnknown,
 	}
 
 	t.Run("query-origin", func(t *testing.T) {

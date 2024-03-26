@@ -19,7 +19,6 @@
 package director
 
 import (
-	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -29,14 +28,26 @@ import (
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
+	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
+
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
-	log "github.com/sirupsen/logrus"
+)
+
+type filterType string
+
+const (
+	permFiltered filterType = "permFiltered" // Read from Director.FilteredServers
+	tempFiltered filterType = "tempFiltered" // Filtered by web UI
+	tempAllowed  filterType = "tempAllowed"  // Read from Director.FilteredServers but mutated by web UI
 )
 
 var (
-	serverAds     = ttlcache.New[server_structs.ServerAd, []server_structs.NamespaceAdV2](ttlcache.WithTTL[server_structs.ServerAd, []server_structs.NamespaceAdV2](15 * time.Minute))
-	serverAdMutex = sync.RWMutex{}
+	serverAds            = ttlcache.New(ttlcache.WithTTL[server_structs.ServerAd, []server_structs.NamespaceAdV2](15 * time.Minute))
+	serverAdMutex        = sync.RWMutex{}
+	filteredServers      = map[string]filterType{}
+	filteredServersMutex = sync.RWMutex{}
 )
 
 func recordAd(ad server_structs.ServerAd, namespaceAds *[]server_structs.NamespaceAdV2) {
@@ -135,6 +146,10 @@ func getAdsForPath(reqPath string) (originNamespace server_structs.NamespaceAdV2
 			continue
 		}
 		serverAd := item.Key()
+		if filtered, ft := checkFilter(serverAd.Name); filtered {
+			log.Debugf("Skipping %s server %s as it's in the filtered server list with type %s", serverAd.Type, serverAd.Name, ft)
+			continue
+		}
 		if serverAd.Type == server_structs.OriginType {
 			if ns := matchesPrefix(reqPath, item.Value()); ns != nil {
 				if best == nil || len(ns.Path) > len(best.Path) {

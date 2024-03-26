@@ -166,7 +166,7 @@ func ConnectToOrigin(ctx context.Context, brokerUrl, prefix, originName string) 
 	if err != nil {
 		return
 	}
-	caPrivateKey, err := config.LoadPrivateKey(param.Server_TLSCAKey.GetString())
+	caPrivateKey, err := config.LoadPrivateKey(param.Server_TLSCAKey.GetString(), true)
 	if err != nil {
 		return
 	}
