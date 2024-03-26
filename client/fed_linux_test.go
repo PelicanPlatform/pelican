@@ -36,6 +36,7 @@ import (
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -48,7 +49,8 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 
 	fed := fed_test_utils.NewFedTest(t, mixedAuthOriginCfg)
 
-	//////////////////////////SETUP///////////////////////////
+	te := client.NewTransferEngine(fed.Ctx)
+
 	// Create a token file
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
@@ -80,7 +82,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 	assert.NoError(t, err)
 	defer os.RemoveAll(tempDir)
 	defer os.RemoveAll(tempDir)
-	permissions := os.FileMode(0777)
+	permissions := os.FileMode(0755)
 	err = os.Chmod(tempDir, permissions)
 	require.NoError(t, err)
 	err = os.Chmod(innerTempDir, permissions)
@@ -110,7 +112,8 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 	innerTempFile.Close()
 
 	t.Run("testPelicanRecursiveGetAndPutOsdfURL", func(t *testing.T) {
-		config.SetPreferredPrefix("PELICAN")
+		_, err := config.SetPreferredPrefix("PELICAN")
+		assert.NoError(t, err)
 		// Set path for object to upload/download
 		tempPath := tempDir
 		dirName := filepath.Base(tempPath)
@@ -119,17 +122,16 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 		assert.NoError(t, err)
 
 		// For OSDF url's, we don't want to rely on osdf metadata to be running therefore, just ensure we get correct metadata for the url:
-		pelicanURL, err := client.NewPelicanURL(uploadURL, "osdf")
+		pelicanUrl, err := te.NewPelicanURL(uploadURL)
 		assert.NoError(t, err)
 
 		// Check valid metadata:
-		assert.Equal(t, "https://osdf-director.osg-htc.org", pelicanURL.DirectorUrl)
-		assert.Equal(t, "https://osdf-registry.osg-htc.org", pelicanURL.RegistryUrl)
-		assert.Equal(t, "osg-htc.org", pelicanURL.DiscoveryUrl)
+		assert.Equal(t, "https://osdf-director.osg-htc.org", pelicanUrl.DirectorUrl)
 	})
 
 	t.Run("testPelicanRecursiveGetAndPutPelicanURL", func(t *testing.T) {
-		config.SetPreferredPrefix("PELICAN")
+		_, err := config.SetPreferredPrefix("PELICAN")
+		assert.NoError(t, err)
 
 		for _, export := range *fed.Exports {
 			// Set path for object to upload/download
@@ -139,7 +141,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 				export.FederationPrefix, "osdf_osdf", dirName)
 
 			// Upload the file with PUT
-			transferDetailsUpload, err := client.DoPut(fed.Ctx, tempDir, uploadURL, true, client.WithTokenLocation(tempToken.Name()))
+			transferDetailsUpload, err := client.DoPut(te, tempDir, uploadURL, true, client.WithTokenLocation(tempToken.Name()))
 			assert.NoError(t, err)
 			if err == nil && len(transferDetailsUpload) == 3 {
 				countBytes17 := 0
@@ -174,9 +176,9 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 			// Download the files we just uploaded
 			var transferDetailsDownload []client.TransferResults
 			if export.Capabilities.PublicReads {
-				transferDetailsDownload, err = client.DoGet(fed.Ctx, uploadURL, t.TempDir(), true)
+				transferDetailsDownload, err = client.DoGet(te, uploadURL, t.TempDir(), true)
 			} else {
-				transferDetailsDownload, err = client.DoGet(fed.Ctx, uploadURL, t.TempDir(), true, client.WithTokenLocation(tempToken.Name()))
+				transferDetailsDownload, err = client.DoGet(te, uploadURL, t.TempDir(), true, client.WithTokenLocation(tempToken.Name()))
 			}
 			assert.NoError(t, err)
 			if err == nil && len(transferDetailsDownload) == 3 {
@@ -214,7 +216,8 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 	})
 
 	t.Run("testOsdfRecursiveGetAndPutOsdfURL", func(t *testing.T) {
-		config.SetPreferredPrefix("OSDF")
+		_, err := config.SetPreferredPrefix("OSDF")
+		assert.NoError(t, err)
 		for _, export := range *fed.Exports {
 			// Set path for object to upload/download
 			tempPath := tempDir
@@ -223,14 +226,14 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 			hostname := fmt.Sprintf("%v:%v", param.Server_WebHost.GetString(), param.Server_WebPort.GetInt())
 
 			// Set our metadata values in config since that is what this url scheme - prefix combo does in handle_http
-			metadata, err := config.DiscoverUrlFederation("https://" + hostname)
+			metadata, err := config.DiscoverUrlFederation(fed.Ctx, "https://"+hostname)
 			assert.NoError(t, err)
 			viper.Set("Federation.DirectorUrl", metadata.DirectorEndpoint)
 			viper.Set("Federation.RegistryUrl", metadata.NamespaceRegistrationEndpoint)
 			viper.Set("Federation.DiscoveryUrl", hostname)
 
 			// Upload the file with PUT
-			transferDetailsUpload, err := client.DoPut(fed.Ctx, tempDir, uploadURL, true, client.WithTokenLocation(tempToken.Name()))
+			transferDetailsUpload, err := client.DoPut(te, tempDir, uploadURL, true, client.WithTokenLocation(tempToken.Name()))
 			assert.NoError(t, err)
 			if err == nil && len(transferDetailsUpload) == 3 {
 				countBytes17 := 0
@@ -266,9 +269,9 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 			tmpDir := t.TempDir()
 			var transferDetailsDownload []client.TransferResults
 			if export.Capabilities.PublicReads {
-				transferDetailsDownload, err = client.DoGet(fed.Ctx, uploadURL, tmpDir, true)
+				transferDetailsDownload, err = client.DoGet(te, uploadURL, tmpDir, true)
 			} else {
-				transferDetailsDownload, err = client.DoGet(fed.Ctx, uploadURL, tmpDir, true, client.WithTokenLocation(tempToken.Name()))
+				transferDetailsDownload, err = client.DoGet(te, uploadURL, tmpDir, true, client.WithTokenLocation(tempToken.Name()))
 			}
 			assert.NoError(t, err)
 			if err == nil && len(transferDetailsDownload) == 3 {
@@ -306,7 +309,9 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 	})
 
 	t.Run("testOsdfRecursiveGetAndPutPelicanURL", func(t *testing.T) {
-		config.SetPreferredPrefix("OSDF")
+		_, err := config.SetPreferredPrefix("OSDF")
+		assert.NoError(t, err)
+
 		for _, export := range *fed.Exports {
 			// Set path for object to upload/download
 			tempPath := tempDir
@@ -314,7 +319,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 			uploadURL := fmt.Sprintf("pelican://%s:%s%s/%s/%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
 				export.FederationPrefix, "osdf_osdf", dirName)
 			// Upload the file with PUT
-			transferDetailsUpload, err := client.DoPut(fed.Ctx, tempDir, uploadURL, true, client.WithTokenLocation(tempToken.Name()))
+			transferDetailsUpload, err := client.DoPut(te, tempDir, uploadURL, true, client.WithTokenLocation(tempToken.Name()))
 			assert.NoError(t, err)
 			if err == nil && len(transferDetailsUpload) == 3 {
 				countBytes17 := 0
@@ -348,9 +353,9 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 			// Download the files we just uploaded
 			var transferDetailsDownload []client.TransferResults
 			if export.Capabilities.PublicReads {
-				transferDetailsDownload, err = client.DoGet(fed.Ctx, uploadURL, t.TempDir(), true)
+				transferDetailsDownload, err = client.DoGet(te, uploadURL, t.TempDir(), true)
 			} else {
-				transferDetailsDownload, err = client.DoGet(fed.Ctx, uploadURL, t.TempDir(), true, client.WithTokenLocation(tempToken.Name()))
+				transferDetailsDownload, err = client.DoGet(te, uploadURL, t.TempDir(), true, client.WithTokenLocation(tempToken.Name()))
 			}
 			assert.NoError(t, err)
 			if err == nil && len(transferDetailsDownload) == 3 {
@@ -385,5 +390,13 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 				}
 			}
 		}
+	})
+
+	t.Cleanup(func() {
+		if err := te.Shutdown(); err != nil {
+			log.Errorln("Failure when shutting down transfer engine:", err)
+		}
+		// Throw in a viper.Reset for good measure. Keeps our env squeaky clean!
+		viper.Reset()
 	})
 }

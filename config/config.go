@@ -48,6 +48,8 @@ import (
 
 // Structs holding the OAuth2 state (and any other OSDF config needed)
 type (
+	prefix string
+
 	TokenEntry struct {
 		Expiration   int64  `yaml:"expiration"`
 		AccessToken  string `yaml:"access_token"`
@@ -92,6 +94,12 @@ type (
 		msg      string
 		innerErr error
 	}
+)
+
+const (
+	Pelican prefix = "PELICAN"
+	OSDF    prefix = "OSDF"
+	Stash   prefix = "STASH"
 )
 
 const (
@@ -143,6 +151,12 @@ var (
 	version string = "dev"
 
 	MetadataTimeoutErr *MetadataErr = &MetadataErr{msg: "Timeout when querying metadata"}
+
+	validPrefixes = map[string]bool{
+		string(Pelican): true,
+		string(OSDF):    true,
+		string(Stash):   true,
+	}
 )
 
 // This function creates a new MetadataError by wrapping the previous error
@@ -327,12 +341,12 @@ func (sType *ServerType) SetString(name string) bool {
 func GetPreferredPrefix() string {
 	// Testing override to programmatically force different behaviors.
 	if testingPreferredPrefix != "" {
-		return testingPreferredPrefix
+		return string(prefix(testingPreferredPrefix))
 	}
 	arg0 := strings.ToUpper(filepath.Base(os.Args[0]))
 	underscore_idx := strings.Index(arg0, "_")
 	if underscore_idx != -1 {
-		return arg0[0:underscore_idx]
+		return string(prefix(arg0[0:underscore_idx]))
 	}
 	if strings.HasPrefix(arg0, "STASH") {
 		return "STASH"
@@ -344,10 +358,14 @@ func GetPreferredPrefix() string {
 
 // Override the auto-detected preferred prefix; mostly meant for unittests.
 // Returns the old preferred prefix.
-func SetPreferredPrefix(newPref string) string {
-	oldPref := testingPreferredPrefix
+func SetPreferredPrefix(newPref string) (oldPref string, err error) {
+	newPref = strings.ToUpper(newPref)
+	if _, ok := validPrefixes[newPref]; !ok {
+		return "", errors.New("Invalid prefix provided")
+	}
+	oldPrefix := prefix(testingPreferredPrefix)
 	testingPreferredPrefix = newPref
-	return oldPref
+	return string(oldPrefix), nil
 }
 
 // Get the list of valid prefixes for this binary.  Given there's been so
@@ -366,11 +384,12 @@ func GetAllPrefixes() []string {
 
 // This function is for discovering federations as specified by a url during a pelican:// transfer.
 // this does not populate global fields and is more temporary per url
-func DiscoverUrlFederation(federationDiscoveryUrl string) (metadata FederationDiscovery, err error) {
+func DiscoverUrlFederation(ctx context.Context, federationDiscoveryUrl string) (metadata FederationDiscovery, err error) {
 	log.Debugln("Performing federation service discovery for specified url against endpoint", federationDiscoveryUrl)
 	federationUrl, err := url.Parse(federationDiscoveryUrl)
 	if err != nil {
-		return FederationDiscovery{}, errors.Wrapf(err, "Invalid federation value %s:", federationDiscoveryUrl)
+		err = errors.Wrapf(err, "Invalid federation value %s:", federationDiscoveryUrl)
+		return
 	}
 	federationUrl.Scheme = "https"
 	if len(federationUrl.Path) > 0 && len(federationUrl.Host) == 0 {
@@ -380,26 +399,36 @@ func DiscoverUrlFederation(federationDiscoveryUrl string) (metadata FederationDi
 
 	discoveryUrl, err := url.Parse(federationUrl.String())
 	if err != nil {
-		return FederationDiscovery{}, errors.Wrap(err, "unable to parse federation discovery URL")
+		err = errors.Wrap(err, "unable to parse federation discovery URL")
+		return
 	}
 	discoveryUrl.Path, err = url.JoinPath(federationUrl.Path, ".well-known/pelican-configuration")
 	if err != nil {
-		return FederationDiscovery{}, errors.Wrap(err, "Unable to parse federation url because of invalid path")
+		err = errors.Wrap(err, "Unable to parse federation url because of invalid path")
+		return
 	}
 
 	httpClient := http.Client{
 		Transport: GetTransport(),
 		Timeout:   time.Second * 5,
 	}
-	req, err := http.NewRequest(http.MethodGet, discoveryUrl.String(), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, discoveryUrl.String(), nil)
 	if err != nil {
-		return FederationDiscovery{}, errors.Wrapf(err, "Failure when doing federation metadata request creation for %s", discoveryUrl)
+		err = errors.Wrapf(err, "Failure when doing federation metadata request creation for %s", discoveryUrl)
+		return
 	}
 	req.Header.Set("User-Agent", "pelican/"+version)
 
 	result, err := httpClient.Do(req)
 	if err != nil {
-		return FederationDiscovery{}, errors.Wrapf(err, "Failure when doing federation metadata lookup to %s", discoveryUrl)
+		var netErr net.Error
+		if errors.As(err, &netErr) && netErr.Timeout() {
+			err = MetadataTimeoutErr.Wrap(err)
+			return
+		} else {
+			err = NewMetadataError(err, "Error occured when querying for metadata")
+			return
+		}
 	}
 
 	if result.Body != nil {
@@ -486,7 +515,10 @@ func DiscoverFederation() error {
 		federationUrl.Path = ""
 	}
 
-	metadata, err := DiscoverUrlFederation(federationStr)
+	ctx := context.Background()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	metadata, err := DiscoverUrlFederation(ctx, federationStr)
 	if err != nil {
 		return errors.Wrapf(err, "Invalid federation value %s:", federationStr)
 	}
