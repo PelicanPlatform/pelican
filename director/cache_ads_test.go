@@ -25,13 +25,13 @@ import (
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
-	"github.com/pelicanplatform/pelican/common"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 )
 
-func hasServerAdWithName(serverAds []common.ServerAd, name string) bool {
+func hasServerAdWithName(serverAds []server_structs.ServerAd, name string) bool {
 	for _, serverAd := range serverAds {
 		if serverAd.Name == name {
 			return true
@@ -50,11 +50,11 @@ func TestGetAdsForPath(t *testing.T) {
 			- Record the ads
 			- Query for a few paths and make sure the correct ads are returned
 	*/
-	nsAd1 := common.NamespaceAdV2{
+	nsAd1 := server_structs.NamespaceAdV2{
 		PublicRead: false,
-		Caps:       common.Capabilities{PublicReads: false},
+		Caps:       server_structs.Capabilities{PublicReads: false},
 		Path:       "/chtc",
-		Issuer: []common.TokenIssuer{{
+		Issuer: []server_structs.TokenIssuer{{
 			IssuerUrl: url.URL{
 				Scheme: "https",
 				Host:   "wisc.edu",
@@ -63,11 +63,11 @@ func TestGetAdsForPath(t *testing.T) {
 		},
 	}
 
-	nsAd2 := common.NamespaceAdV2{
+	nsAd2 := server_structs.NamespaceAdV2{
 		PublicRead: true,
-		Caps:       common.Capabilities{PublicReads: true},
+		Caps:       server_structs.Capabilities{PublicReads: true},
 		Path:       "/chtc/PUBLIC",
-		Issuer: []common.TokenIssuer{{
+		Issuer: []server_structs.TokenIssuer{{
 			IssuerUrl: url.URL{
 				Scheme: "https",
 				Host:   "wisc.edu",
@@ -76,11 +76,11 @@ func TestGetAdsForPath(t *testing.T) {
 		},
 	}
 
-	nsAd3 := common.NamespaceAdV2{
+	nsAd3 := server_structs.NamespaceAdV2{
 		PublicRead: true,
-		Caps:       common.Capabilities{PublicReads: true},
+		Caps:       server_structs.Capabilities{PublicReads: true},
 		Path:       "/chtc/PUBLIC2/",
-		Issuer: []common.TokenIssuer{{
+		Issuer: []server_structs.TokenIssuer{{
 			IssuerUrl: url.URL{
 				Scheme: "https",
 				Host:   "wisc.edu",
@@ -89,7 +89,7 @@ func TestGetAdsForPath(t *testing.T) {
 		},
 	}
 
-	cacheAd1 := common.ServerAd{
+	cacheAd1 := server_structs.ServerAd{
 		Name: "cache1",
 		AuthURL: url.URL{
 			Scheme: "https",
@@ -99,10 +99,10 @@ func TestGetAdsForPath(t *testing.T) {
 			Scheme: "https",
 			Host:   "wisc.edu",
 		},
-		Type: common.CacheType,
+		Type: server_structs.CacheType,
 	}
 
-	cacheAd2 := common.ServerAd{
+	cacheAd2 := server_structs.ServerAd{
 		Name: "cache2",
 		AuthURL: url.URL{
 			Scheme: "https",
@@ -112,10 +112,10 @@ func TestGetAdsForPath(t *testing.T) {
 			Scheme: "https",
 			Host:   "wisc.edu",
 		},
-		Type: common.CacheType,
+		Type: server_structs.CacheType,
 	}
 
-	originAd1 := common.ServerAd{
+	originAd1 := server_structs.ServerAd{
 		Name: "origin1",
 		AuthURL: url.URL{
 			Scheme: "https",
@@ -125,10 +125,10 @@ func TestGetAdsForPath(t *testing.T) {
 			Scheme: "https",
 			Host:   "wisc.edu",
 		},
-		Type: common.OriginType,
+		Type: server_structs.OriginType,
 	}
 
-	originAd2 := common.ServerAd{
+	originAd2 := server_structs.ServerAd{
 		Name: "origin2",
 		AuthURL: url.URL{
 			Scheme: "https",
@@ -138,12 +138,12 @@ func TestGetAdsForPath(t *testing.T) {
 			Scheme: "https",
 			Host:   "wisc.edu",
 		},
-		Type: common.OriginType,
+		Type: server_structs.OriginType,
 	}
 
-	o1Slice := []common.NamespaceAdV2{nsAd1}
-	o2Slice := []common.NamespaceAdV2{nsAd2, nsAd3}
-	c1Slice := []common.NamespaceAdV2{nsAd1, nsAd2}
+	o1Slice := []server_structs.NamespaceAdV2{nsAd1}
+	o2Slice := []server_structs.NamespaceAdV2{nsAd2, nsAd3}
+	c1Slice := []server_structs.NamespaceAdV2{nsAd1, nsAd2}
 	recordAd(originAd2, &o2Slice)
 	recordAd(originAd1, &o1Slice)
 	recordAd(cacheAd1, &c1Slice)
@@ -215,7 +215,7 @@ func TestGetAdsForPath(t *testing.T) {
 }
 
 func TestConfigCacheEviction(t *testing.T) {
-	mockPelicanOriginServerAd := common.ServerAd{
+	mockPelicanOriginServerAd := server_structs.ServerAd{
 		Name:    "test-origin-server",
 		AuthURL: url.URL{},
 		URL: url.URL{
@@ -226,16 +226,16 @@ func TestConfigCacheEviction(t *testing.T) {
 			Scheme: "https",
 			Host:   "fake-origin.org:8444",
 		},
-		Type:      common.OriginType,
+		Type:      server_structs.OriginType,
 		Latitude:  123.05,
 		Longitude: 456.78,
 	}
-	mockNamespaceAd := common.NamespaceAdV2{
+	mockNamespaceAd := server_structs.NamespaceAdV2{
 		PublicRead: false,
-		Caps:       common.Capabilities{PublicReads: false},
+		Caps:       server_structs.Capabilities{PublicReads: false},
 		Path:       "/foo/bar/",
-		Issuer:     []common.TokenIssuer{{IssuerUrl: url.URL{}}},
-		Generation: []common.TokenGen{{
+		Issuer:     []server_structs.TokenIssuer{{IssuerUrl: url.URL{}}},
+		Generation: []server_structs.TokenGen{{
 			MaxScopeDepth: 1,
 			Strategy:      "",
 			VaultServer:   "",
@@ -261,11 +261,11 @@ func TestConfigCacheEviction(t *testing.T) {
 			serverAdMutex.Lock()
 			defer serverAdMutex.Unlock()
 			serverAds.DeleteAll()
-			serverAds.Set(mockPelicanOriginServerAd, []common.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
+			serverAds.Set(mockPelicanOriginServerAd, []server_structs.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
 			healthTestUtilsMutex.Lock()
 			defer healthTestUtilsMutex.Unlock()
 			// Clear the map for the new test
-			healthTestUtils = make(map[common.ServerAd]*healthTestUtil)
+			healthTestUtils = make(map[server_structs.ServerAd]*healthTestUtil)
 			healthTestUtils[mockPelicanOriginServerAd] = &healthTestUtil{
 				Cancel:        cancelFunc,
 				ErrGrp:        errgrp,
@@ -304,7 +304,7 @@ func TestConfigCacheEviction(t *testing.T) {
 }
 
 func TestServerAdsCacheEviction(t *testing.T) {
-	mockServerAd := common.ServerAd{Name: "foo", Type: common.OriginType, URL: url.URL{}}
+	mockServerAd := server_structs.ServerAd{Name: "foo", Type: server_structs.OriginType, URL: url.URL{}}
 
 	t.Run("evict-after-expire-time", func(t *testing.T) {
 		// Start cache eviction
@@ -325,7 +325,7 @@ func TestServerAdsCacheEviction(t *testing.T) {
 			defer serverAdMutex.Unlock()
 			serverAds.DeleteAll()
 
-			serverAds.Set(mockServerAd, []common.NamespaceAdV2{}, time.Second*2)
+			serverAds.Set(mockServerAd, []server_structs.NamespaceAdV2{}, time.Second*2)
 			require.True(t, serverAds.Has(mockServerAd), "Failed to register server Ad")
 		}()
 
