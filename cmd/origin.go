@@ -19,7 +19,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"os"
 
@@ -33,7 +32,7 @@ var (
 		Use:   "origin",
 		Short: "Operate a Pelican origin service",
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			err := initOrigin(cmd.Context())
+			err := initOrigin()
 			return err
 		},
 	}
@@ -98,7 +97,7 @@ func configOrigin( /*cmd*/ *cobra.Command /*args*/, []string) {
 	os.Exit(1)
 }
 
-func initOrigin(ctx context.Context) error {
+func initOrigin() error {
 	metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusCritical, "xrootd has not been started")
 	metrics.SetComponentHealthStatus(metrics.OriginCache_CMSD, metrics.StatusCritical, "cmsd has not been started")
 	return nil

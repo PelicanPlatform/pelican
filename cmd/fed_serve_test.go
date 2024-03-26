@@ -34,7 +34,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/launchers"
 	"github.com/pelicanplatform/pelican/param"
@@ -48,9 +47,9 @@ func TestFedServePosixOrigin(t *testing.T) {
 	defer cancel()
 
 	viper.Reset()
-	common.ResetOriginExports()
+	server_utils.ResetOriginExports()
 	defer viper.Reset()
-	defer common.ResetOriginExports()
+	defer server_utils.ResetOriginExports()
 
 	modules := config.ServerType(0)
 	modules.Set(config.OriginType)

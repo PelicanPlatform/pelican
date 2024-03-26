@@ -19,7 +19,6 @@
 package director
 
 import (
-	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -29,9 +28,11 @@ import (
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
-	"github.com/pelicanplatform/pelican/common"
-	"github.com/pelicanplatform/pelican/param"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 type filterType string
@@ -43,13 +44,13 @@ const (
 )
 
 var (
-	serverAds            = ttlcache.New(ttlcache.WithTTL[common.ServerAd, []common.NamespaceAdV2](15 * time.Minute))
+	serverAds            = ttlcache.New(ttlcache.WithTTL[server_structs.ServerAd, []server_structs.NamespaceAdV2](15 * time.Minute))
 	serverAdMutex        = sync.RWMutex{}
 	filteredServers      = map[string]filterType{}
 	filteredServersMutex = sync.RWMutex{}
 )
 
-func recordAd(ad common.ServerAd, namespaceAds *[]common.NamespaceAdV2) {
+func recordAd(ad server_structs.ServerAd, namespaceAds *[]server_structs.NamespaceAdV2) {
 	if err := updateLatLong(&ad); err != nil {
 		log.Debugln("Failed to lookup GeoIP coordinates for host", ad.URL.Host)
 	}
@@ -64,7 +65,7 @@ func recordAd(ad common.ServerAd, namespaceAds *[]common.NamespaceAdV2) {
 	}
 }
 
-func updateLatLong(ad *common.ServerAd) error {
+func updateLatLong(ad *server_structs.ServerAd) error {
 	if ad == nil {
 		return errors.New("Cannot provide a nil ad to UpdateLatLong")
 	}
@@ -89,8 +90,8 @@ func updateLatLong(ad *common.ServerAd) error {
 	return nil
 }
 
-func matchesPrefix(reqPath string, namespaceAds []common.NamespaceAdV2) *common.NamespaceAdV2 {
-	var best *common.NamespaceAdV2
+func matchesPrefix(reqPath string, namespaceAds []server_structs.NamespaceAdV2) *server_structs.NamespaceAdV2 {
+	var best *server_structs.NamespaceAdV2
 
 	for _, namespace := range namespaceAds {
 		serverPath := namespace.Path
@@ -119,7 +120,7 @@ func matchesPrefix(reqPath string, namespaceAds []common.NamespaceAdV2) *common.
 		// Make the len comparison with tmpBest, because serverPath is one char longer now
 		if strings.HasPrefix(reqPath, serverPath) && len(serverPath) > len(tmpBest) {
 			if best == nil {
-				best = new(common.NamespaceAdV2)
+				best = new(server_structs.NamespaceAdV2)
 			}
 			*best = namespace
 		}
@@ -127,8 +128,7 @@ func matchesPrefix(reqPath string, namespaceAds []common.NamespaceAdV2) *common.
 	return best
 }
 
-// Get the longest matches namespace prefix with corresponding serverAds and namespace Ads given a path to an object
-func getAdsForPath(reqPath string) (originNamespace common.NamespaceAdV2, originAds []common.ServerAd, cacheAds []common.ServerAd) {
+func getAdsForPath(reqPath string) (originNamespace server_structs.NamespaceAdV2, originAds []server_structs.ServerAd, cacheAds []server_structs.ServerAd) {
 	serverAdMutex.RLock()
 	defer serverAdMutex.RUnlock()
 
@@ -140,7 +140,7 @@ func getAdsForPath(reqPath string) (originNamespace common.NamespaceAdV2, origin
 	// Iterate through all of the server ads. For each "item", the key
 	// is the server ad itself (either cache or origin), and the value
 	// is a slice of namespace prefixes are supported by that server
-	var best *common.NamespaceAdV2
+	var best *server_structs.NamespaceAdV2
 	for _, item := range serverAds.Items() {
 		if item == nil {
 			continue
@@ -150,7 +150,7 @@ func getAdsForPath(reqPath string) (originNamespace common.NamespaceAdV2, origin
 			log.Debugf("Skipping %s server %s as it's in the filtered server list with type %s", serverAd.Type, serverAd.Name, ft)
 			continue
 		}
-		if serverAd.Type == common.OriginType {
+		if serverAd.Type == server_structs.OriginType {
 			if ns := matchesPrefix(reqPath, item.Value()); ns != nil {
 				if best == nil || len(ns.Path) > len(best.Path) {
 					best = ns
@@ -158,18 +158,18 @@ func getAdsForPath(reqPath string) (originNamespace common.NamespaceAdV2, origin
 					// prefix, we overwrite that here because we found a better ns. We also clear
 					// the other slice of server ads, because we know those aren't good anymore
 					originAds = append(originAds[:0], serverAd)
-					cacheAds = []common.ServerAd{}
+					cacheAds = []server_structs.ServerAd{}
 				} else if ns.Path == best.Path {
 					originAds = append(originAds, serverAd)
 				}
 			}
 			continue
-		} else if serverAd.Type == common.CacheType {
+		} else if serverAd.Type == server_structs.CacheType {
 			if ns := matchesPrefix(reqPath, item.Value()); ns != nil {
 				if best == nil || len(ns.Path) > len(best.Path) {
 					best = ns
 					cacheAds = append(cacheAds[:0], serverAd)
-					originAds = []common.ServerAd{}
+					originAds = []server_structs.ServerAd{}
 				} else if ns.Path == best.Path {
 					cacheAds = append(cacheAds, serverAd)
 				}
