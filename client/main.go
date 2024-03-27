@@ -42,7 +42,6 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/namespaces"
 	"github.com/pelicanplatform/pelican/param"
-	"github.com/spf13/viper"
 )
 
 type (
@@ -195,33 +194,25 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 		return 0, err
 	}
 
-	understoodSchemes := []string{"osdf", "pelican", "stash", ""}
-
-	_, foundSource := find(understoodSchemes, destUri.Scheme)
-	if !foundSource {
-		log.Errorln("Unknown schema provided:", destUri.Scheme)
-		return 0, errors.New("Unsupported scheme requested")
+	// Check if we understand the found url scheme
+	err = schemeUnderstood(destUri.Scheme)
+	if err != nil {
+		return 0, err
 	}
 
-	origScheme := destUri.Scheme
-	if config.GetPreferredPrefix() != "PELICAN" && origScheme == "" {
-		destUri.Scheme = "osdf"
-	}
-	if (destUri.Scheme == "osdf" || destUri.Scheme == "stash") && destUri.Host != "" {
-		destUri.Path = path.Clean("/" + destUri.Host + "/" + destUri.Path)
-		destUri.Host = ""
-	} else if destUri.Scheme == "pelican" {
-		federationUrl, _ := url.Parse(destUri.String())
-		federationUrl.Scheme = "https"
-		federationUrl.Path = ""
-		viper.Set("Federation.DiscoveryUrl", federationUrl.String())
-		err = config.DiscoverFederation()
-		if err != nil {
-			return 0, err
+	te := NewTransferEngine(ctx)
+	defer func() {
+		if err := te.Shutdown(); err != nil {
+			log.Errorln("Failure when shutting down transfer engine:", err)
 		}
+	}()
+
+	pelicanURL, err := te.NewPelicanURL(destUri)
+	if err != nil {
+		return 0, errors.Wrap(err, "Failed to generate pelicanURL object")
 	}
 
-	ns, err := getNamespaceInfo(destUri.Path, param.Federation_DirectorUrl.GetString(), false)
+	ns, err := getNamespaceInfo(destUri.Path, pelicanURL.DirectorUrl, false)
 	if err != nil {
 		return 0, err
 	}
@@ -430,12 +421,24 @@ func getNamespaceInfo(resourcePath, OSDFDirectorUrl string, isPut bool) (ns name
 		}
 		return
 	} else {
+		log.Debugln("Director URL not found, searching in topology")
 		ns, err = namespaces.MatchNamespace(resourcePath)
 		if err != nil {
 			return
 		}
 		return
 	}
+}
+
+func schemeUnderstood(scheme string) error {
+	understoodSchemes := []string{"file", "osdf", "pelican", "stash", ""}
+
+	_, foundDest := find(understoodSchemes, scheme)
+	if !foundDest {
+		return fmt.Errorf("Do not understand the destination scheme: %s. Permitted values are %s",
+			scheme, strings.Join(understoodSchemes, ", "))
+	}
+	return nil
 }
 
 /*
@@ -445,7 +448,7 @@ localObject: the source file/directory you would like to upload
 remoteDestination: the end location of the upload
 recursive: a boolean indicating if the source is a directory or not
 */
-func DoPut(ctx context.Context, localObject string, remoteDestination string, recursive bool, options ...TransferOption) (transferResults []TransferResults, err error) {
+func DoPut(te *TransferEngine, localObject string, remoteDestination string, recursive bool, options ...TransferOption) (transferResults []TransferResults, err error) {
 	// First, create a handler for any panics that occur
 	defer func() {
 		if r := recover(); r != nil {
@@ -463,50 +466,20 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 		return nil, err
 	}
 	remoteDestUrl.Scheme = remoteDestScheme
-	fd := config.GetFederation()
-	defer config.SetFederation(fd)
 
-	if remoteDestUrl.Host != "" {
-		if remoteDestUrl.Scheme == "osdf" || remoteDestUrl.Scheme == "stash" {
-			remoteDestUrl.Path, err = url.JoinPath(remoteDestUrl.Host, remoteDestUrl.Path)
-			if err != nil {
-				log.Errorln("Failed to join remote destination url path:", err)
-				return nil, err
-			}
-		} else if remoteDestUrl.Scheme == "pelican" {
-
-			config.SetFederation(config.FederationDiscovery{})
-			federationUrl, _ := url.Parse(remoteDestUrl.String())
-			federationUrl.Scheme = "https"
-			federationUrl.Path = ""
-			viper.Set("Federation.DiscoveryUrl", federationUrl.String())
-			err = config.DiscoverFederation()
-			if err != nil {
-				return nil, err
-			}
-		}
-	}
 	remoteDestScheme, _ = getTokenName(remoteDestUrl)
 
-	understoodSchemes := []string{"file", "osdf", "pelican", ""}
-
-	_, foundDest := find(understoodSchemes, remoteDestScheme)
-	if !foundDest {
-		return nil, fmt.Errorf("Do not understand the destination scheme: %s. Permitted values are %s",
-			remoteDestUrl.Scheme, strings.Join(understoodSchemes, ", "))
+	// Check if we understand the found url scheme
+	err = schemeUnderstood(remoteDestScheme)
+	if err != nil {
+		return nil, err
 	}
 
-	te := NewTransferEngine(ctx)
-	defer func() {
-		if err := te.Shutdown(); err != nil {
-			log.Errorln("Failure when shutting down transfer engine:", err)
-		}
-	}()
 	client, err := te.NewClient(options...)
 	if err != nil {
 		return
 	}
-	tj, err := client.NewTransferJob(remoteDestUrl, localObject, true, recursive)
+	tj, err := client.NewTransferJob(remoteDestUrl, localObject, te, true, recursive)
 	if err != nil {
 		return
 	}
@@ -532,7 +505,7 @@ remoteObject: the source file/directory you would like to upload
 localDestination: the end location of the upload
 recursive: a boolean indicating if the source is a directory or not
 */
-func DoGet(ctx context.Context, remoteObject string, localDestination string, recursive bool, options ...TransferOption) (transferResults []TransferResults, err error) {
+func DoGet(te *TransferEngine, remoteObject string, localDestination string, recursive bool, options ...TransferOption) (transferResults []TransferResults, err error) {
 	// First, create a handler for any panics that occur
 	defer func() {
 		if r := recover(); r != nil {
@@ -551,39 +524,14 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 		return nil, err
 	}
 	remoteObjectUrl.Scheme = remoteObjectScheme
-	fd := config.GetFederation()
-	defer config.SetFederation(fd)
 
-	// If there is a host specified, prepend it to the path in the osdf case
-	if remoteObjectUrl.Host != "" {
-		if remoteObjectUrl.Scheme == "osdf" {
-			remoteObjectUrl.Path, err = url.JoinPath(remoteObjectUrl.Host, remoteObjectUrl.Path)
-			if err != nil {
-				log.Errorln("Failed to join source url path:", err)
-				return nil, err
-			}
-		} else if remoteObjectUrl.Scheme == "pelican" {
-
-			config.SetFederation(config.FederationDiscovery{})
-			federationUrl, _ := url.Parse(remoteObjectUrl.String())
-			federationUrl.Scheme = "https"
-			federationUrl.Path = ""
-			viper.Set("Federation.DiscoveryUrl", federationUrl.String())
-			err = config.DiscoverFederation()
-			if err != nil {
-				return nil, err
-			}
-		}
-	}
-
+	// This is for condor cases:
 	remoteObjectScheme, _ = getTokenName(remoteObjectUrl)
 
-	understoodSchemes := []string{"file", "osdf", "pelican", ""}
-
-	_, foundSource := find(understoodSchemes, remoteObjectScheme)
-	if !foundSource {
-		return nil, fmt.Errorf("Do not understand the source scheme: %s. Permitted values are %s",
-			remoteObjectUrl.Scheme, strings.Join(understoodSchemes, ", "))
+	// Check if we understand the found url scheme
+	err = schemeUnderstood(remoteObjectScheme)
+	if err != nil {
+		return nil, err
 	}
 
 	if remoteObjectScheme == "osdf" || remoteObjectScheme == "pelican" {
@@ -620,17 +568,11 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 
 	success := false
 
-	te := NewTransferEngine(ctx)
-	defer func() {
-		if err := te.Shutdown(); err != nil {
-			log.Errorln("Failure when shutting down transfer engine:", err)
-		}
-	}()
 	tc, err := te.NewClient(options...)
 	if err != nil {
 		return
 	}
-	tj, err := tc.NewTransferJob(remoteObjectUrl, localDestination, false, recursive)
+	tj, err := tc.NewTransferJob(remoteObjectUrl, localDestination, te, false, recursive)
 	if err != nil {
 		return
 	}
@@ -681,7 +623,7 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 }
 
 // Start the transfer, whether read or write back. Primarily used for backwards compatibility
-func DoCopy(ctx context.Context, sourceFile string, destination string, recursive bool, options ...TransferOption) (transferResults []TransferResults, err error) {
+func DoCopy(te *TransferEngine, sourceFile string, destination string, recursive bool, options ...TransferOption) (transferResults []TransferResults, err error) {
 
 	// First, create a handler for any panics that occur
 	defer func() {
@@ -703,64 +645,16 @@ func DoCopy(ctx context.Context, sourceFile string, destination string, recursiv
 	sourceURL.Scheme = source_scheme
 
 	destination, dest_scheme := correctURLWithUnderscore(destination)
-	dest_url, err := url.Parse(destination)
+	destURL, err := url.Parse(destination)
 	if err != nil {
 		log.Errorln("Failed to parse destination URL:", err)
 		return nil, err
 	}
-	dest_url.Scheme = dest_scheme
-	fd := config.GetFederation()
-	defer config.SetFederation(fd)
+	destURL.Scheme = dest_scheme
 
-	// If there is a host specified, prepend it to the path in the osdf case
-	if sourceURL.Host != "" {
-		if sourceURL.Scheme == "osdf" || sourceURL.Scheme == "stash" {
-			sourceURL.Path = "/" + path.Join(sourceURL.Host, sourceURL.Path)
-		} else if sourceURL.Scheme == "pelican" {
-			config.SetFederation(config.FederationDiscovery{})
-			federationUrl, _ := url.Parse(sourceURL.String())
-			federationUrl.Scheme = "https"
-			federationUrl.Path = ""
-			viper.Set("Federation.DiscoveryUrl", federationUrl.String())
-			err = config.DiscoverFederation()
-			if err != nil {
-				return nil, err
-			}
-		}
-	}
-
-	if dest_url.Host != "" {
-		if dest_url.Scheme == "osdf" || dest_url.Scheme == "stash" {
-			dest_url.Path = "/" + path.Join(dest_url.Host, dest_url.Path)
-		} else if dest_url.Scheme == "pelican" {
-			config.SetFederation(config.FederationDiscovery{})
-			federationUrl, _ := url.Parse(dest_url.String())
-			federationUrl.Scheme = "https"
-			federationUrl.Path = ""
-			viper.Set("Federation.DiscoveryUrl", federationUrl.String())
-			err = config.DiscoverFederation()
-			if err != nil {
-				return nil, err
-			}
-		}
-	}
-
+	// Check for scheme here for when using condor
 	sourceScheme, _ := getTokenName(sourceURL)
-	destScheme, _ := getTokenName(dest_url)
-
-	understoodSchemes := []string{"stash", "file", "osdf", "pelican", ""}
-
-	_, foundSource := find(understoodSchemes, sourceScheme)
-	if !foundSource {
-		log.Errorln("Do not understand source scheme:", sourceURL.Scheme)
-		return nil, errors.New("Do not understand source scheme")
-	}
-
-	_, foundDest := find(understoodSchemes, destScheme)
-	if !foundDest {
-		log.Errorln("Do not understand destination scheme:", sourceURL.Scheme)
-		return nil, errors.New("Do not understand destination scheme")
-	}
+	destScheme, _ := getTokenName(destURL)
 
 	payload := payloadStruct{}
 	parseJobAd(&payload)
@@ -770,13 +664,24 @@ func DoCopy(ctx context.Context, sourceFile string, destination string, recursiv
 	var localPath string
 	var remoteURL *url.URL
 	if isPut {
-		log.Debugln("Detected object write to remote federation object", dest_url.Path)
-		localPath = sourceFile
-		remoteURL = dest_url
-	} else {
+		// Verify valid scheme
+		err = schemeUnderstood(destScheme)
+		if err != nil {
+			return nil, err
+		}
 
-		if dest_url.Scheme == "file" {
-			destination = dest_url.Path
+		log.Debugln("Detected object write to remote federation object", destURL.Path)
+		localPath = sourceFile
+		remoteURL = destURL
+	} else {
+		// Verify valid scheme
+		err = schemeUnderstood(sourceScheme)
+		if err != nil {
+			return nil, err
+		}
+
+		if destURL.Scheme == "file" {
+			destination = destURL.Path
 		}
 
 		if sourceScheme == "stash" || sourceScheme == "osdf" || sourceScheme == "pelican" {
@@ -817,17 +722,11 @@ func DoCopy(ctx context.Context, sourceFile string, destination string, recursiv
 	// switch statement?
 	var downloaded int64 = 0
 
-	te := NewTransferEngine(ctx)
-	defer func() {
-		if err := te.Shutdown(); err != nil {
-			log.Errorln("Failure when shutting down transfer engine:", err)
-		}
-	}()
 	tc, err := te.NewClient(options...)
 	if err != nil {
 		return
 	}
-	tj, err := tc.NewTransferJob(remoteURL, localPath, isPut, recursive)
+	tj, err := tc.NewTransferJob(remoteURL, localPath, te, isPut, recursive)
 	if err != nil {
 		return
 	}

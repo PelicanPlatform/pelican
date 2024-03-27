@@ -43,6 +43,7 @@ import (
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -276,10 +277,16 @@ func TestOSDFAuthCreation(t *testing.T) {
 				viper.Set("Origin.RunLocation", dirName)
 				xrootdRun = param.Origin_RunLocation.GetString()
 			}
-			oldPrefix := config.SetPreferredPrefix("OSDF")
-			defer config.SetPreferredPrefix(oldPrefix)
+			oldPrefix, err := config.SetPreferredPrefix("OSDF")
+			assert.NoError(t, err)
+			defer func() {
+				_, err := config.SetPreferredPrefix(oldPrefix)
+				if err != nil {
+					log.Errorln(err)
+				}
+			}()
 
-			err := os.WriteFile(filepath.Join(dirName, "authfile"), []byte(testInput.authIn), fs.FileMode(0600))
+			err = os.WriteFile(filepath.Join(dirName, "authfile"), []byte(testInput.authIn), fs.FileMode(0600))
 			require.NoError(t, err, "Failure writing test input authfile")
 
 			err = EmitAuthfile(testInput.server)

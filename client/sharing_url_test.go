@@ -153,7 +153,8 @@ func TestSharingUrl(t *testing.T) {
 	defer server.Close()
 	myUrl = server.URL
 
-	config.SetPreferredPrefix("PELICAN")
+	_, err := config.SetPreferredPrefix("PELICAN")
+	assert.NoError(t, err)
 	viper.Set("ConfigDir", t.TempDir())
 	viper.Set("Logging.Level", "debug")
 	config.InitConfig()
@@ -162,7 +163,7 @@ func TestSharingUrl(t *testing.T) {
 	defer os.Unsetenv("PELICAN_SKIP_TERMINAL_CHECK")
 	viper.Set("Federation.DirectorURL", myUrl)
 	viper.Set("ConfigDir", t.TempDir())
-	err := config.InitClient()
+	err = config.InitClient()
 	assert.NoError(t, err)
 
 	// Call QueryDirector with the test server URL and a source path

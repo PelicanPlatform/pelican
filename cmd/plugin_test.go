@@ -25,11 +25,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -185,7 +187,8 @@ func TestStashPluginMain(t *testing.T) {
 	viper.Reset()
 	server_utils.ResetOriginExports()
 
-	config.SetPreferredPrefix("STASH")
+	_, err := config.SetPreferredPrefix("STASH")
+	assert.NoError(t, err)
 
 	// Temp dir for downloads
 	tempDir := os.TempDir()
@@ -213,7 +216,7 @@ func TestStashPluginMain(t *testing.T) {
 		// Set path for object to upload/download
 		tempPath := tempFile.Name()
 		fileName := filepath.Base(tempPath)
-		uploadURL := "pelican:///test/" + fileName
+		uploadURL := fmt.Sprintf("pelican://%s:%s/test/%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()), fileName)
 
 		// Download a test file
 		args := []string{uploadURL, tempDir}
@@ -231,14 +234,14 @@ func TestStashPluginMain(t *testing.T) {
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
-	err := cmd.Run()
+	err = cmd.Run()
 	assert.NoError(t, err, stderr.String())
 
 	// changing output for "\\" since in windows there are excess "\" printed in debug logs
 	output := strings.Replace(stderr.String(), "\\\\", "\\", -1)
 
 	// Check captured output for successful download
-	expectedOutput := "Downloading: pelican:///test/test.txt to " + tempDir
+	expectedOutput := "Downloading file from pelican:///test/test.txt to " + tempDir
 	assert.Contains(t, output, expectedOutput)
 	successfulDownloadMsg := "HTTP Transfer was successful"
 	assert.Contains(t, output, successfulDownloadMsg)

@@ -27,6 +27,7 @@ import (
 	"os"
 	"testing"
 
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -101,8 +102,14 @@ func TestMatchNamespace(t *testing.T) {
 		t.Error(err)
 	}
 	// Reset the prefix to get old OSDF fallback behavior.
-	oldPrefix := config.SetPreferredPrefix("OSDF")
-	defer config.SetPreferredPrefix(oldPrefix)
+	oldPrefix, err := config.SetPreferredPrefix("OSDF")
+	assert.NoError(t, err)
+	defer func() {
+		_, err := config.SetPreferredPrefix(oldPrefix)
+		if err != nil {
+			log.Errorln(err)
+		}
+	}()
 
 	viper.Reset()
 	err = config.InitClient()
@@ -248,10 +255,16 @@ func TestDownloadNamespacesFail(t *testing.T) {
 func TestGetNamespaces(t *testing.T) {
 	// Set the environment to an invalid URL, so it is forced to use the "built-in" namespaces.json
 	os.Setenv("OSDF_TOPOLOGY_NAMESPACE_URL", "https://doesnotexist.org.blah/namespaces.json")
-	oldPrefix := config.SetPreferredPrefix("OSDF")
-	defer config.SetPreferredPrefix(oldPrefix)
+	oldPrefix, err := config.SetPreferredPrefix("OSDF")
+	assert.NoError(t, err)
+	defer func() {
+		_, err := config.SetPreferredPrefix(oldPrefix)
+		if err != nil {
+			log.Errorln(err)
+		}
+	}()
 	viper.Reset()
-	err := config.InitClient()
+	err = config.InitClient()
 	assert.Nil(t, err)
 	defer os.Unsetenv("OSDF_TOPOLOGY_NAMESPACE_URL")
 	namespaces, err := GetNamespaces()
