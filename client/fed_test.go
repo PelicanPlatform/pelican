@@ -411,7 +411,7 @@ func TestGetPublicRead(t *testing.T) {
 func TestStatHttp(t *testing.T) {
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 	viper.Reset()
-	common.ResetOriginExports()
+	server_utils.ResetOriginExports()
 
 	fed := fed_test_utils.NewFedTest(t, bothPublicOriginCfg)
 
@@ -420,7 +420,6 @@ func TestStatHttp(t *testing.T) {
 		// Drop the testFileContent into the origin directory
 		tempFile, err := os.Create(filepath.Join(((*fed.Exports)[0]).StoragePrefix, "test.txt"))
 		assert.NoError(t, err, "Error creating temp file")
-		defer os.Remove(tempFile.Name())
 		_, err = tempFile.WriteString(testFileContent)
 		assert.NoError(t, err, "Error writing to temp file")
 		tempFile.Close()
@@ -445,7 +444,6 @@ func TestStatHttp(t *testing.T) {
 		// Drop the testFileContent into the origin directory
 		tempFile, err := os.Create(filepath.Join(((*fed.Exports)[0]).StoragePrefix, "test.txt"))
 		assert.NoError(t, err, "Error creating temp file")
-		defer os.Remove(tempFile.Name())
 		_, err = tempFile.WriteString(testFileContent)
 		assert.NoError(t, err, "Error writing to temp file")
 		tempFile.Close()
@@ -471,7 +469,6 @@ func TestStatHttp(t *testing.T) {
 		// Drop the testFileContent into the origin directory
 		tempFile, err := os.Create(filepath.Join(((*fed.Exports)[0]).StoragePrefix, "test.txt"))
 		assert.NoError(t, err, "Error creating temp file")
-		defer os.Remove(tempFile.Name())
 		_, err = tempFile.WriteString(testFileContent)
 		assert.NoError(t, err, "Error writing to temp file")
 		tempFile.Close()
