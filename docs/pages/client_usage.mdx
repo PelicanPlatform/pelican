@@ -24,16 +24,17 @@ Below are some notes on federations on top of their terminology. Here is the exa
 ```console
 /ospool/uc-shared/public/OSG-Staff/validation/test.txt
 ```
-
-**Note:** When you set a federation discovery URL within a `pelican://` URL, within configuration files, or with the `-f` flag, do not expect the client to work if the discovery URL contains a path (e.g. `osg-htc.org/PathToMyFederation`). The client will assume that the path provided is the namespace prefix for the object which will end in failure.
-
 **Note:** All object paths in a federation begin with a preceding `/`, and no relative paths are allowed.
 
 **Origins:**
+<<<<<<< HEAD
 All objects in a federation live in some *origin*. Origins act like a flexible plugin mechanism that exposes different type of storage backends to the federation. For example, the POSIX filesystem on most Linux computers is one type of storage backend an origin can expose to the federation. Other types of backends include S3 or HTTP servers, and Pelican plans to add many more. In most cases, a user does not need to know the particular backend used to store the object to download it from the federation.
+=======
+Objects in a Pelican federation are made accessible by *origins*, which act like a flexible plugin mechanism to expose different types of storage backends to the federation. For example, the POSIX filesystem on most Linux computers is one type of storage backend an origin can expose to the federation. Other types of backends include S3 or HTTP servers, and Pelican plans to add many more. In most cases, a user does not need to know the particular backend used to store the object to download it from the federation.
+>>>>>>> d5312b91 (Updated documentation based on feedback)
 
 **Tokens and JWT:**
-Some namespace prefixes are public, like `/ospool/uc-shared/public`, while others are protected (i.e. they require authentication). Objects in public namespaces can be downloaded by anybody, but downloading objects from protected namespaces requires you prove to the origin supporting that namespace that you are allowed to access the object. In Pelican, this is done using signed JSON Web Tokens, or *JWT*s for short. In many cases, these tokens can be generated automatically.
+Some namespace prefixes are public, like `/ospool/uc-shared/public`, while others are protected (i.e. they require authorization). Objects in public namespaces can be downloaded by anybody, but downloading objects from protected namespaces requires you prove to the origin supporting that namespace that you are allowed to access the object. In Pelican, this is done using signed JSON Web Tokens, or *JWT*s for short. In many cases, these tokens can be generated automatically.
 
 ## The Different Pelican URL Schemes
 When running client commands with a request URL, there are three different URL schemes a user can use: `pelican`, `osdf`, and `stash`. This page uses examples with the `pelican://` URL scheme. Below is a description of the three URL schemes and what to expect when they are used:
@@ -41,12 +42,14 @@ When running client commands with a request URL, there are three different URL s
 ### The `pelican://` URL Scheme:
 When using the `pelican://` scheme, pelican does not know what federation to communicate with and therefore, the user must specify their federation URL either as the host-name in the URL itself or within the `-f` flag. The examples below show how you can format your request URLs in both of these ways.
 
+>**Note:** When you set a federation discovery URL within a `pelican://` URL, within configuration files, or with the `-f` flag, do not expect the client to work if the discovery URL contains a path (e.g. `osg-htc.org/PathToMyFederation`). The client will assume that the path provided is the namespace prefix for the object which will end in failure.
+
 ### The` osdf:///` URL Scheme:
 When using the `osdf:///` scheme, pelican will load in the federation metadata automatically with the Open Science Data Federation (OSDF)  defaults. This scheme should only be used if your federation or data can be accessed through the OSDF. When using this scheme, you should not specify the federation URL at all, as Pelican will handle this automatically. For example:
 ```bash
 pelican object get osdf:///<namespace-prefix></path/to/file> <local/path/to/file>
 ```
-This scheme has three slashes (`///`) after the `osdf` because the hostname is left empty to be automatically populated therefore, just start the URL with the namespace prefix. Pelican also supports the `osdf://` scheme (with two slashes) in case the user forgets to pass the third slash, but this is not recommended.
+>This scheme has three slashes (`///`) after the `osdf` because the hostname is left empty to be automatically populated therefore, just start the URL with the namespace prefix. Pelican also supports the `osdf://` scheme (with two slashes) in case the user forgets to pass the third slash, but this is not recommended.
 
 ### The `stash:///` URL Scheme:
 This URL scheme comes from legacy code called `stashcp` that Pelican was built off of and is still accepted for backwards compatibility. This URL scheme functions identically to the `osdf:///` URL scheme, loading in OSDF defaults. Here is an example:
@@ -101,7 +104,7 @@ Or:
 pelican object get -f <federation-url> pelican:///</federation/path/to/file> </local/path/to/file>
 ```
 
-If you're doing this for the very first time, Pelican will create an encrypted token wallet on your system which stores  you will be required to provide Pelican with a password for the wallet. If this isn't your first time, you will be asked to provide your already-configured password to unlock the token wallet.
+If you're doing this for the very first time, Pelican will create an encrypted token wallet on your system and you will be required to provide Pelican with a password for the wallet. If this isn't your first time, you will be asked to provide your already-configured password to unlock the token wallet.
 The output looks like so:
 ```bash
 The client is able to save the authorization in a local file.
@@ -116,7 +119,7 @@ To approve credentials for this operation, please navigate to the following URL 
 <https://some/link/here>
 ```
 Pelican will display a URL in your terminal and indicate that you should visit the URL in your browser. After copying/pasting the URL to your browser, follow all the instructions there for logging in with CILogon. Once everything is successful, you should see a page like this:
-<ExportedImage src={"/pelican/cilogon.png"} alt={"Screenshot cilogon success page"} />
+
 
 Finally, if the login is successful, Pelican will automatically fetch the token from the CILogon service and continue with the download.
 
@@ -124,7 +127,7 @@ Finally, if the login is successful, Pelican will automatically fetch the token 
 
 Some origins do not support authentication though CILogon. In this case, users must supply their own JWT that's signed by the origin.
 
-> We are working hard to document how to generate a token from protected origins, before it’s ready. If you have any questions or need help getting a token from the origin, please email us at [help@pelicanplatform.com](mailto:help@pelicanplatform.com) and we are happy to assist you.
+> We are working hard to document how to generate a token from protected origins, before it’s ready. If you have any questions or need help getting a token from the origin, please email us at [help@pelicanplatform.com](mailto:help@pelicanplatform.com) or open a discussion on our [GitHub discussions page](https://github.com/PelicanPlatform/pelican/discussions) and we are happy to assist you.
 
 Contact your federation administrator to get a token for downloading a protected object. For OSDF users, contact [support@osg-htc.org](mailto:support@osg-htc.org) for help.
 
