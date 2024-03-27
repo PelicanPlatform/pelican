@@ -453,7 +453,7 @@ func TestSortAttempts(t *testing.T) {
 
 func TestTimeoutHeaderSetForDownload(t *testing.T) {
 	viper.Reset()
-	viper.Set("Transport.ResponseHeaderTimeout", 10 * time.Second)
+	viper.Set("Transport.ResponseHeaderTimeout", 10*time.Second)
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
 	// We have this flag because our server will get a few requests throughout its lifetime and the other
