@@ -1414,6 +1414,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 
 	// Create the client, request, and context
 	client := grab.NewClient()
+	client.UserAgent = getUserAgent(project)
 	transport := config.GetTransport()
 	if !transfer.Proxy {
 		transport.Proxy = nil
