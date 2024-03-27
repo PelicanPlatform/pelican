@@ -99,13 +99,7 @@ func stashPluginMain(args []string) {
 
 			// Set as failure and add errors
 			resultAd.Set("TransferSuccess", false)
-			errMsg := "PELICAN CLIENT ERROR: " + ret + ";" + strings.ReplaceAll(string(debug.Stack()), "\n", ";")
-			hostname, _ := os.Hostname()
-			errMsg += " HOSTNAME: " + hostname
-			siteName := parseMachineAd()
-			if siteName != "" {
-				errMsg += " GLIDEIN_SITE: " + siteName
-			}
+			errMsg := writeTransferErrorMessage(ret+";"+strings.ReplaceAll(string(debug.Stack()), "\n", ";"), "", false)
 			resultAd.Set("TransferError", errMsg)
 			resultAds = append(resultAds, resultAd)
 
@@ -187,13 +181,7 @@ func stashPluginMain(args []string) {
 
 		// Set as failure and add errors
 		resultAd.Set("TransferSuccess", false)
-		errMsg := "PELICAN CLIENT ERROR: " + configErr.Error()
-		hostname, _ := os.Hostname()
-		errMsg += " HOSTNAME: " + hostname
-		siteName := parseMachineAd()
-		if siteName != "" {
-			errMsg += " GLIDEIN_SITE: " + siteName
-		}
+		errMsg := writeTransferErrorMessage(configErr.Error(), "", upload)
 		resultAd.Set("TransferError", errMsg)
 		if client.ShouldRetry(configErr) {
 			resultAd.Set("TransferRetryable", true)
@@ -507,18 +495,7 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 				if errors.As(result.Error, &te) {
 					errMsgInternal = te.UserError()
 				}
-				errMsg := " PELICAN CLIENT ERROR "
-				if upload {
-					errMsg += "uploading "
-				} else {
-					errMsg += "downloading "
-				}
-				errMsg += transfer.url.String() + ": " + errMsgInternal
-				errMsg += " HOSTNAME: " + hostname
-				siteName := parseMachineAd()
-				if siteName != "" {
-					errMsg += " GLIDEIN_SITE: " + siteName
-				}
+				errMsg := writeTransferErrorMessage(errMsgInternal, transfer.url.String(), upload)
 				resultAd.Set("TransferError", errMsg)
 				resultAd.Set("TransferFileBytes", 0)
 				resultAd.Set("TransferTotalBytes", 0)
@@ -631,6 +608,34 @@ func readMultiTransfers(stdin bufio.Reader) (transfers []PluginTransfer, err err
 	return transfers, nil
 }
 
+// This function wraps the transfer error message into a more readable and user-friendly format.
+func writeTransferErrorMessage(currentError string, transferUrl string, upload bool) (errMsg string) {
+	errMsg = "PELICAN CLIENT ERROR: " + currentError
+
+	// TransferUrl will be blank if this occurs before transfer has started.
+	if transferUrl != "" {
+		if upload {
+			errMsg += " uploading "
+		} else {
+			errMsg += " downloading "
+		}
+		errMsg += transferUrl
+	}
+	hostname, err := os.Hostname()
+	if err != nil {
+		log.Warningln("Could not get hostname", err)
+	}
+	errMsg += " HOSTNAME: " + hostname
+	siteName := parseMachineAd()
+	if siteName != "" {
+		errMsg += " GLIDEIN_SITE: " + siteName
+	}
+
+	return
+}
+
+// This function parses the machine ad present with a condor job to get the site name.
+// Only really needed on the ospool, otherwise this will return ""
 func parseMachineAd() string {
 	var filename string
 	//Parse the .job.ad file for the Owner (username) and ProjectName of the callee.
