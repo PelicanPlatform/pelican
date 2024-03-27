@@ -444,7 +444,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 
 	if !isUpdate {
 		// Check if prefix exists before doing anything else. Skip check if it's update operation
-		exists, err := namespaceExists(ns.Prefix)
+		exists, err := namespaceExistsByPrefix(ns.Prefix)
 		if err != nil {
 			log.Errorf("Failed to check if namespace already exists: %v", err)
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Server encountered an error checking if namespace already exists"})
@@ -484,12 +484,9 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 		return
 	}
 
-	if validCF, err := validateCustomFields(ns.CustomFields, true); !validCF {
-		if err != nil {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Error validating custom fields: %v", err)})
-			return
-		}
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Invalid custom field: %s", err.Error())})
+	validCF, err := validateCustomFields(ns.CustomFields, true)
+	if !validCF && err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Invalid custom fields: %s", err.Error())})
 		return
 	}
 

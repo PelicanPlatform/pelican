@@ -19,8 +19,6 @@
 package main
 
 import (
-	"context"
-
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/spf13/cobra"
 )
@@ -30,7 +28,7 @@ var (
 		Use:   "cache",
 		Short: "Operate a Pelican cache service",
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			err := initCache(cmd.Context())
+			err := initCache()
 			return err
 		},
 	}
@@ -43,9 +41,8 @@ var (
 	}
 )
 
-func initCache(ctx context.Context) error {
+func initCache() error {
 	metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusCritical, "xrootd has not been started")
-	metrics.SetComponentHealthStatus(metrics.OriginCache_CMSD, metrics.StatusCritical, "cmsd has not been started")
 	return nil
 }
 

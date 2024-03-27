@@ -27,32 +27,33 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/pelicanplatform/pelican/broker"
-	"github.com/pelicanplatform/pelican/cache_ui"
+	"github.com/pelicanplatform/pelican/cache"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/daemon"
-	"github.com/pelicanplatform/pelican/origin_ui"
+	"github.com/pelicanplatform/pelican/launcher_utils"
 	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/server_ui"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/xrootd"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 )
 
-func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, modules config.ServerType) (server_utils.XRootDServer, error) {
-
+func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, modules config.ServerType) (server_structs.XRootDServer, error) {
 	err := xrootd.SetUpMonitoring(ctx, egrp)
 	if err != nil {
 		return nil, err
 	}
 
-	cacheServer := &cache_ui.CacheServer{}
+	cache.RegisterCacheAPI(engine, ctx, egrp)
+
+	cacheServer := &cache.CacheServer{}
 	err = cacheServer.GetNamespaceAdsFromDirector()
 	cacheServer.SetFilters()
 	if err != nil {
 		return nil, err
 	}
-	err = server_ui.CheckDefaults(cacheServer)
+	err = launcher_utils.CheckDefaults(cacheServer)
 	if err != nil {
 		return nil, err
 	}
@@ -66,20 +67,20 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 
 	xrootd.LaunchXrootdMaintenance(ctx, cacheServer, 2*time.Minute)
 
+	cache.LaunchDirectorTestFileCleanup(ctx)
+
 	if param.Cache_SelfTest.GetBool() {
-		err = cache_ui.InitSelfTestDir()
+		err = cache.InitSelfTestDir()
 		if err != nil {
 			return nil, err
 		}
 
-		cache_ui.PeriodicCacheSelfTest(ctx, egrp)
+		cache.PeriodicCacheSelfTest(ctx, egrp)
 	}
 
 	// Director and origin also registers this metadata URL; avoid registering twice.
 	if !modules.IsEnabled(config.DirectorType) && !modules.IsEnabled(config.OriginType) {
-		if err = origin_ui.ConfigIssJWKS(engine.Group("/.well-known")); err != nil {
-			return nil, err
-		}
+		server_utils.RegisterOIDCAPI(engine)
 	}
 
 	log.Info("Launching cache")
@@ -97,5 +98,5 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 
 // Finish configuration of the cache server.
 func CacheServeFinish(ctx context.Context, egrp *errgroup.Group) error {
-	return server_ui.RegisterNamespaceWithRetry(ctx, egrp, "/caches/"+param.Xrootd_Sitename.GetString())
+	return launcher_utils.RegisterNamespaceWithRetry(ctx, egrp, "/caches/"+param.Xrootd_Sitename.GetString())
 }

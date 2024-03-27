@@ -34,8 +34,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/token"
@@ -63,7 +63,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 	// Mock registry server
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if req.Method == "POST" && req.URL.Path == "/api/v1.0/registry/checkNamespaceStatus" {
-			res := common.CheckNamespaceStatusRes{Approved: true}
+			res := server_structs.CheckNamespaceStatusRes{Approved: true}
 			resByte, err := json.Marshal(res)
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
@@ -121,7 +121,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 	tok, err := advTokenCfg.CreateToken()
 	assert.NoError(t, err, "failed to create director prometheus token")
 
-	ok, err := VerifyAdvertiseToken(ctx, tok, "/test-namespace")
+	ok, err := verifyAdvertiseToken(ctx, tok, "/test-namespace")
 	assert.NoError(t, err)
 	assert.Equal(t, true, ok, "Expected scope to be 'pelican.advertise'")
 
@@ -135,7 +135,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 	tok, err = scopelessTokCfg.CreateToken()
 	assert.NoError(t, err, "error creating scopeless token. Should have succeeded")
 
-	ok, err = VerifyAdvertiseToken(ctx, tok, "/test-namespace")
+	ok, err = verifyAdvertiseToken(ctx, tok, "/test-namespace")
 	assert.Equal(t, false, ok)
 	assert.Equal(t, "No scope is present; required to advertise to director", err.Error())
 
@@ -150,7 +150,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 	tok, err = wrongScopeTokenCfg.CreateToken()
 	assert.NoError(t, err, "error creating wrong-scope token. Should have succeeded")
 
-	ok, err = VerifyAdvertiseToken(ctx, tok, "/test-namespace")
+	ok, err = verifyAdvertiseToken(ctx, tok, "/test-namespace")
 	assert.Equal(t, false, ok, "Should fail due to incorrect scope name")
 	assert.NoError(t, err, "Incorrect scope name should not throw and error")
 }

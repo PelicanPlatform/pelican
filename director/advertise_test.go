@@ -26,7 +26,7 @@ import (
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/pelicanplatform/pelican/common"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/utils"
 )
 
@@ -40,16 +40,16 @@ func TestParseServerAd(t *testing.T) {
 
 	// Check that we populate all of the fields correctly -- note that lat/long don't get updated
 	// until right before the ad is recorded, so we don't check for that here.
-	ad := parseServerAd(server, common.OriginType)
+	ad := parseServerAd(server, server_structs.OriginType)
 	assert.Equal(t, ad.AuthURL.String(), "https://my-auth-endpoint.com")
 	assert.Equal(t, ad.URL.String(), "http://my-endpoint.com")
 	assert.Equal(t, ad.WebURL.String(), "")
 	assert.Equal(t, ad.Name, "MY_SERVER")
-	assert.True(t, ad.Type == common.OriginType)
+	assert.True(t, ad.Type == server_structs.OriginType)
 
 	// A quick check that type is set correctly
-	ad = parseServerAd(server, common.CacheType)
-	assert.True(t, ad.Type == common.CacheType)
+	ad = parseServerAd(server, server_structs.CacheType)
+	assert.True(t, ad.Type == server_structs.CacheType)
 }
 
 func JSONHandler(w http.ResponseWriter, r *http.Request) {

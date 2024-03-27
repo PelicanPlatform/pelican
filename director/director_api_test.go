@@ -24,44 +24,44 @@ import (
 	"testing"
 
 	"github.com/jellydator/ttlcache/v3"
-	"github.com/pelicanplatform/pelican/common"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-var mockOriginServerAd common.ServerAd = common.ServerAd{
+var mockOriginServerAd server_structs.ServerAd = server_structs.ServerAd{
 	Name:      "test-origin-server",
 	AuthURL:   url.URL{},
 	URL:       url.URL{},
-	Type:      common.OriginType,
+	Type:      server_structs.OriginType,
 	Latitude:  123.05,
 	Longitude: 456.78,
 }
 
-var mockCacheServerAd common.ServerAd = common.ServerAd{
+var mockCacheServerAd server_structs.ServerAd = server_structs.ServerAd{
 	Name:      "test-cache-server",
 	AuthURL:   url.URL{},
 	URL:       url.URL{},
-	Type:      common.CacheType,
+	Type:      server_structs.CacheType,
 	Latitude:  45.67,
 	Longitude: 123.05,
 }
 
 const mockPathPreix string = "/foo/bar/"
 
-func mockNamespaceAds(size int, serverPrefix string) []common.NamespaceAdV2 {
-	namespaceAds := make([]common.NamespaceAdV2, size)
+func mockNamespaceAds(size int, serverPrefix string) []server_structs.NamespaceAdV2 {
+	namespaceAds := make([]server_structs.NamespaceAdV2, size)
 	for i := 0; i < size; i++ {
-		namespaceAds[i] = common.NamespaceAdV2{
+		namespaceAds[i] = server_structs.NamespaceAdV2{
 			PublicRead: false,
-			Caps: common.Capabilities{
+			Caps: server_structs.Capabilities{
 				PublicReads: false,
 			},
 			Path: mockPathPreix + serverPrefix + "/" + fmt.Sprint(i),
-			Issuer: []common.TokenIssuer{{
+			Issuer: []server_structs.TokenIssuer{{
 				IssuerUrl: url.URL{},
 			}},
-			Generation: []common.TokenGen{{
+			Generation: []server_structs.TokenGen{{
 				MaxScopeDepth: 1,
 				Strategy:      "",
 				VaultServer:   "",
@@ -71,7 +71,7 @@ func mockNamespaceAds(size int, serverPrefix string) []common.NamespaceAdV2 {
 	return namespaceAds
 }
 
-func namespaceAdContainsPath(ns []common.NamespaceAdV2, path string) bool {
+func namespaceAdContainsPath(ns []server_structs.NamespaceAdV2, path string) bool {
 	for _, v := range ns {
 		if v.Path == path {
 			return true
@@ -146,7 +146,7 @@ func TestListServerAds(t *testing.T) {
 			defer serverAdMutex.Unlock()
 			serverAds.DeleteAll()
 		}()
-		ads := listServerAds([]common.ServerType{common.OriginType, common.CacheType})
+		ads := listServerAds([]server_structs.ServerType{server_structs.OriginType, server_structs.CacheType})
 		assert.Equal(t, 0, len(ads))
 	})
 
@@ -156,17 +156,80 @@ func TestListServerAds(t *testing.T) {
 			defer serverAdMutex.Unlock()
 			serverAds.DeleteAll()
 		}()
-		serverAds.Set(mockOriginServerAd, []common.NamespaceAdV2{}, ttlcache.DefaultTTL)
-		serverAds.Set(mockCacheServerAd, []common.NamespaceAdV2{}, ttlcache.DefaultTTL)
-		adsAll := listServerAds([]common.ServerType{common.OriginType, common.CacheType})
+		serverAds.Set(mockOriginServerAd, []server_structs.NamespaceAdV2{}, ttlcache.DefaultTTL)
+		serverAds.Set(mockCacheServerAd, []server_structs.NamespaceAdV2{}, ttlcache.DefaultTTL)
+		adsAll := listServerAds([]server_structs.ServerType{server_structs.OriginType, server_structs.CacheType})
 		assert.Equal(t, 2, len(adsAll))
 
-		adsOrigin := listServerAds([]common.ServerType{common.OriginType})
+		adsOrigin := listServerAds([]server_structs.ServerType{server_structs.OriginType})
 		require.Equal(t, 1, len(adsOrigin))
 		assert.True(t, adsOrigin[0] == mockOriginServerAd)
 
-		adsCache := listServerAds([]common.ServerType{common.CacheType})
+		adsCache := listServerAds([]server_structs.ServerType{server_structs.CacheType})
 		require.Equal(t, 1, len(adsCache))
 		assert.True(t, adsCache[0] == mockCacheServerAd)
 	})
+}
+
+func TestCheckFilter(t *testing.T) {
+	testCases := []struct {
+		name         string
+		mapItems     map[string]filterType
+		serverToTest string
+		filtered     bool
+		ft           filterType
+	}{
+		{
+			name:         "empty-list-return-false",
+			serverToTest: "mock",
+			filtered:     false,
+		},
+		{
+			name:         "dne-return-false",
+			serverToTest: "mock",
+			mapItems:     map[string]filterType{"no-your-server": permFiltered},
+			filtered:     false,
+		},
+		{
+			name:         "perm-return-true",
+			serverToTest: "mock",
+			mapItems:     map[string]filterType{"mock": permFiltered, "no-your-server": tempFiltered},
+			filtered:     true,
+			ft:           permFiltered,
+		},
+		{
+			name:         "temp-filter-return-true",
+			serverToTest: "mock",
+			mapItems:     map[string]filterType{"mock": tempFiltered, "no-your-server": permFiltered},
+			filtered:     true,
+			ft:           tempFiltered,
+		},
+		{
+			name:         "temp-allow-return-false",
+			serverToTest: "mock",
+			mapItems:     map[string]filterType{"mock": tempAllowed, "no-your-server": permFiltered},
+			filtered:     false,
+			ft:           tempAllowed,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			filteredServersMutex.Lock()
+			tmpMap := filteredServers
+			filteredServers = tc.mapItems
+			filteredServersMutex.Unlock()
+
+			defer func() {
+				filteredServersMutex.Lock()
+				filteredServers = tmpMap
+				filteredServersMutex.Unlock()
+			}()
+
+			getFilter, getType := checkFilter(tc.serverToTest)
+			assert.Equal(t, tc.filtered, getFilter)
+			assert.Equal(t, tc.ft, getType)
+
+		})
+	}
 }

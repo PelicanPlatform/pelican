@@ -31,7 +31,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/launchers"
 	"github.com/pelicanplatform/pelican/param"
@@ -45,9 +44,9 @@ func TestFedServeCache(t *testing.T) {
 	defer cancel()
 
 	viper.Reset()
-	common.ResetOriginExports()
+	server_utils.ResetOriginExports()
 	defer viper.Reset()
-	defer common.ResetOriginExports()
+	defer server_utils.ResetOriginExports()
 
 	modules := config.ServerType(0)
 	modules.Set(config.CacheType)
@@ -126,7 +125,7 @@ func TestFedServeCache(t *testing.T) {
 	issuerUrl, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
 
-	ok, err := fileTests.RunTestsCache(ctx, param.Cache_Url.GetString(), issuerUrl, "/test/test-file.txt", "This is the content of the test file.")
+	ok, err := fileTests.TestCacheDownload(ctx, param.Cache_Url.GetString(), issuerUrl, "/test/test-file.txt", "This is the content of the test file.")
 	require.NoError(t, err)
 	require.True(t, ok)
 
