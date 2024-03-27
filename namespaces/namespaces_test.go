@@ -27,6 +27,7 @@ import (
 	"os"
 	"testing"
 
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -103,7 +104,12 @@ func TestMatchNamespace(t *testing.T) {
 	// Reset the prefix to get old OSDF fallback behavior.
 	oldPrefix, err := config.SetPreferredPrefix("OSDF")
 	assert.NoError(t, err)
-	defer config.SetPreferredPrefix(oldPrefix)
+	defer func() {
+		_, err := config.SetPreferredPrefix(oldPrefix)
+		if err != nil {
+			log.Errorln(err)
+		}
+	}()
 
 	viper.Reset()
 	err = config.InitClient()
@@ -251,7 +257,12 @@ func TestGetNamespaces(t *testing.T) {
 	os.Setenv("OSDF_TOPOLOGY_NAMESPACE_URL", "https://doesnotexist.org.blah/namespaces.json")
 	oldPrefix, err := config.SetPreferredPrefix("OSDF")
 	assert.NoError(t, err)
-	defer config.SetPreferredPrefix(oldPrefix)
+	defer func() {
+		_, err := config.SetPreferredPrefix(oldPrefix)
+		if err != nil {
+			log.Errorln(err)
+		}
+	}()
 	viper.Reset()
 	err = config.InitClient()
 	assert.Nil(t, err)

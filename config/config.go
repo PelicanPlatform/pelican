@@ -156,6 +156,7 @@ var (
 		string(Pelican): true,
 		string(OSDF):    true,
 		string(Stash):   true,
+		"":              true,
 	}
 )
 
