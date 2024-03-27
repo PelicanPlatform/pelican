@@ -29,4 +29,5 @@ func main() {
 	GenParamStruct()
 	GenPlaceholderPathForNext()
 	GenTokenScope()
+	GenErrorCodes()
 }

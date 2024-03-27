@@ -52,6 +52,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/error_codes"
 	"github.com/pelicanplatform/pelican/namespaces"
 	"github.com/pelicanplatform/pelican/param"
 )
@@ -59,6 +60,7 @@ import (
 var (
 	progressCtrOnce sync.Once
 	progressCtr     *mpb.Progress
+	PelicanError    error_codes.PelicanError
 )
 
 type (
@@ -1615,6 +1617,7 @@ Loop:
 					Duration:         resp.Duration(),
 					BytesTotal:       totalSize,
 				}
+				err = error_codes.NewTransfer_SlowTransferError(err)
 				return
 
 			} else {
