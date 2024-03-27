@@ -147,6 +147,11 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 			return shutdownCancel, err
 		}
 
+		ok, err := server_utils.CheckSentinelFile(originExports)
+		if err != nil && !ok {
+			return shutdownCancel, err
+		}
+
 		switch mode {
 		case "posix":
 			if len(*originExports) == 0 {
