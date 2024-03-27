@@ -553,7 +553,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 					return
 				} else {
 					log.Warningln("Failed to verify token:", err)
-					ctx.JSON(http.StatusForbidden, gin.H{"error": "Authorization token verification failed"})
+					ctx.JSON(http.StatusForbidden, gin.H{"error": fmt.Sprintf("Authorization token verification failed %v", err)})
 					return
 				}
 			}
@@ -575,7 +575,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 				return
 			} else {
 				log.Warningln("Failed to verify token:", err)
-				ctx.JSON(http.StatusForbidden, gin.H{"error": "Authorization token verification failed."})
+				ctx.JSON(http.StatusForbidden, gin.H{"error": fmt.Sprintf("Authorization token verification failed %v", err)})
 				return
 			}
 		}

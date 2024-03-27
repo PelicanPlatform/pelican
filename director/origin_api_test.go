@@ -137,7 +137,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 
 	ok, err = verifyAdvertiseToken(ctx, tok, "/test-namespace")
 	assert.Equal(t, false, ok)
-	assert.Equal(t, "No scope is present; required to advertise to director", err.Error())
+	assert.Equal(t, "no scope is present; required to advertise to director", err.Error())
 
 	// Create a token with a bad scope - should return an error upon validation
 	wrongScopeTokenCfg := token.NewWLCGToken()

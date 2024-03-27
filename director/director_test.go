@@ -389,7 +389,7 @@ func TestDirectorRegistration(t *testing.T) {
 
 		assert.Equal(t, http.StatusForbidden, w.Result().StatusCode, "Expected failing status code of 403")
 		body, _ := io.ReadAll(w.Result().Body)
-		assert.Equal(t, `{"error":"Authorization token verification failed"}`, string(body), "Failure wasn't because token verification failed")
+		assert.Contains(t, string(body), "Authorization token verification failed", "Failure wasn't because token verification failed")
 
 		namaspaceADs := listNamespacesFromOrigins()
 		assert.False(t, NamespaceAdContainsPath(namaspaceADs, "/foo/bar"), "Found namespace in the director cache even if the token validation failed.")
@@ -424,7 +424,7 @@ func TestDirectorRegistration(t *testing.T) {
 
 		assert.Equal(t, http.StatusForbidden, w.Result().StatusCode, "Expected failing status code of 403")
 		body, _ := io.ReadAll(w.Result().Body)
-		assert.Equal(t, `{"error":"Authorization token verification failed"}`, string(body), "Failure wasn't because token verification failed")
+		assert.Contains(t, string(body), "Authorization token verification failed", "Failure wasn't because token verification failed")
 
 		namaspaceADs := listNamespacesFromOrigins()
 		assert.False(t, NamespaceAdContainsPath(namaspaceADs, "/foo/bar"), "Found namespace in the director cache even if the token validation failed.")
