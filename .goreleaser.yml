@@ -24,6 +24,7 @@ before:
   hooks:
     - go mod tidy
     - go generate ./...
+    - make web-build
 builds:
   - env:
       - CGO_ENABLED=0
