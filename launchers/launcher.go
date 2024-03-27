@@ -110,7 +110,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 
 	if modules.IsEnabled(config.DirectorType) {
 
-		viper.Set("Director.DefaultResponse", "cache")
+		viper.Set("Director.DefaultResponse", param.Director_DefaultResponse.GetString())
 
 		viper.Set("Federation.DirectorURL", param.Server_ExternalWebUrl.GetString())
 

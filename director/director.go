@@ -490,7 +490,7 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 		// If we're configured for cache mode or we haven't set the flag,
 		// we should use cache middleware
 		if defaultResponse == "cache" {
-			if !strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/director/") {
+			if !strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/director/") && (c.Request.Method == "GET" || c.Request.Method == "HEAD") {
 				c.Request.URL.Path = "/api/v1.0/director/object" + c.Request.URL.Path
 				redirectToCache(c)
 				c.Abort()
@@ -500,7 +500,7 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 			// If the path starts with the correct prefix, continue with the next handler
 			c.Next()
 		} else if defaultResponse == "origin" {
-			if !strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/director/") {
+			if !strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/director/") && (c.Request.Method == "GET" || c.Request.Method == "HEAD") {
 				c.Request.URL.Path = "/api/v1.0/director/origin" + c.Request.URL.Path
 				redirectToOrigin(c)
 				c.Abort()
@@ -828,7 +828,9 @@ func RegisterDirectorAPI(ctx context.Context, router *gin.RouterGroup) {
 	{
 		// Establish the routes used for cache/origin redirection
 		directorAPIV1.GET("/object/*any", redirectToCache)
+		directorAPIV1.HEAD("/object/*any", redirectToCache)
 		directorAPIV1.GET("/origin/*any", redirectToOrigin)
+		directorAPIV1.HEAD("/origin/*any", redirectToOrigin)
 		directorAPIV1.PUT("/origin/*any", redirectToOrigin)
 		directorAPIV1.POST("/registerOrigin", func(gctx *gin.Context) { registerServeAd(ctx, gctx, server_structs.OriginType) })
 		directorAPIV1.POST("/registerCache", func(gctx *gin.Context) { registerServeAd(ctx, gctx, server_structs.CacheType) })
