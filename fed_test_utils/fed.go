@@ -48,7 +48,7 @@ import (
 
 type (
 	FedTest struct {
-		Exports *[]server_utils.OriginExports
+		Exports *[]server_utils.OriginExport
 		Token   string
 		Ctx     context.Context
 		Egrp    *errgroup.Group
