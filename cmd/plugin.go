@@ -610,25 +610,25 @@ func readMultiTransfers(stdin bufio.Reader) (transfers []PluginTransfer, err err
 
 // This function wraps the transfer error message into a more readable and user-friendly format.
 func writeTransferErrorMessage(currentError string, transferUrl string, upload bool) (errMsg string) {
-	errMsg = "PELICAN CLIENT ERROR: " + currentError
+	errMsg = "PELICAN CLIENT ERROR: "
 
 	// TransferUrl will be blank if this occurs before transfer has started.
 	if transferUrl != "" {
 		if upload {
-			errMsg += " uploading "
+			errMsg += "failure uploading "
 		} else {
-			errMsg += " downloading "
+			errMsg += "failure downloading "
 		}
-		errMsg += transferUrl
+		errMsg += transferUrl + ": "
 	}
-	hostname, err := os.Hostname()
-	if err != nil {
-		log.Warningln("Could not get hostname", err)
-	}
-	errMsg += " HOSTNAME: " + hostname
+	errMsg += currentError
+	errMsg += (" (PELICAN VERSION: " + config.GetVersion())
+
 	siteName := parseMachineAd()
 	if siteName != "" {
-		errMsg += " GLIDEIN_SITE: " + siteName
+		errMsg += " SITE: " + siteName + ")"
+	} else {
+		errMsg += ")"
 	}
 
 	return
