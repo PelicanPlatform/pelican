@@ -1471,6 +1471,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	}
 	// Set the headers
 	req.HTTPRequest.Header.Set("X-Transfer-Status", "true")
+	req.HTTPRequest.Header.Set("X-Pelican-Timeout", param.Transport_ResponseHeaderTimeout.GetDuration().String())
 	req.HTTPRequest.Header.Set("TE", "trailers")
 	if payload != nil && payload.ProjectName != "" {
 		req.HTTPRequest.Header.Set("User-Agent", getUserAgent(payload.ProjectName))
