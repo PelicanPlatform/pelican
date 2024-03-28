@@ -19,26 +19,14 @@
 ARG BASE_YUM_REPO=release
 ARG BASE_OSG_SERIES=3.6
 
-FROM node:20 AS website-build
-
-WORKDIR /webapp
-
-COPY web_ui/frontend/package.json package.json
-
-RUN npm install
-COPY web_ui/frontend ./
-
-RUN npm run build
-
 FROM goreleaser/goreleaser:v1.21.0 AS pelican-build
 ARG IS_NONRELEASE_BUILD="true"
+
+RUN apk add --update nodejs-current npm
 
 WORKDIR /pelican
 
 COPY . .
-COPY --from=website-build /webapp/out ./web_ui/frontend/out
-# Remove generate package as we already had generated structs in the repo
-RUN rm -rf ./generate
 
 ENV GOOS="linux"
 ENV GOARCH="amd64"

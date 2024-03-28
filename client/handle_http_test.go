@@ -450,3 +450,32 @@ func TestSortAttempts(t *testing.T) {
 	assert.Equal(t, svr2.URL, results[0].Url.String())
 	assert.Equal(t, svr3.URL, results[1].Url.String())
 }
+
+func TestTimeoutHeaderSetForDownload(t *testing.T) {
+	viper.Reset()
+	viper.Set("Transport.ResponseHeaderTimeout", 10*time.Second)
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+
+	// We have this flag because our server will get a few requests throughout its lifetime and the other
+	// requests do not contain the X-Pelican-Timeout header
+	timeoutHeaderFound := false
+
+	// Create a mock server to download from
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Check if the "X-Pelican-Timeout" header is set
+		if !timeoutHeaderFound {
+			if r.Header.Get("X-Pelican-Timeout") == "" {
+				t.Error("X-Pelican-Timeout header is not set")
+			}
+			assert.Equal(t, "10s", r.Header.Get("X-Pelican-Timeout"))
+			timeoutHeaderFound = true
+		}
+	}))
+	defer server.Close()
+
+	serverURL, err := url.Parse(server.URL)
+	assert.NoError(t, err)
+	_, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: serverURL, Proxy: false}, filepath.Join(t.TempDir(), "test.txt"), -1, "", nil)
+	assert.NoError(t, err)
+	viper.Reset()
+}
