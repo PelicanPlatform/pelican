@@ -113,6 +113,8 @@ func (bP ObjectParam) IsSet() bool {
 var (
 	Cache_DataLocation = StringParam{"Cache.DataLocation"}
 	Cache_ExportLocation = StringParam{"Cache.ExportLocation"}
+	Cache_HighWaterMark = StringParam{"Cache.HighWaterMark"}
+	Cache_LowWatermark = StringParam{"Cache.LowWatermark"}
 	Cache_RunLocation = StringParam{"Cache.RunLocation"}
 	Cache_Url = StringParam{"Cache.Url"}
 	Cache_XRootDPrefix = StringParam{"Cache.XRootDPrefix"}

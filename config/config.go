@@ -31,6 +31,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -143,6 +144,8 @@ var (
 	version string = "dev"
 
 	MetadataTimeoutErr *MetadataErr = &MetadataErr{msg: "Timeout when querying metadata"}
+
+	watermarkUnits = []byte{'k', 'm', 'g', 't'}
 )
 
 // This function creates a new MetadataError by wrapping the previous error
@@ -659,6 +662,45 @@ func handleDeprecatedConfig() {
 	}
 }
 
+func checkWatermark(wmStr string) (bool, int64, error) {
+	wmNum, err := strconv.Atoi(wmStr)
+	if err == nil {
+		if wmNum > 100 || wmNum < 0 {
+			return false, 0, errors.Errorf("watermark value %s must be a integer number in range [0, 100]. Refer to parameter page for details: https://docs.pelicanplatform.org/parameters#Cache-HighWatermark", wmStr)
+		}
+		return true, int64(wmNum), nil
+		// Not an integer number, check if it's in form of <int>k|m|g|t
+	} else {
+		if len(wmStr) < 1 {
+			return false, 0, errors.Errorf("watermark value %s is empty.", wmStr)
+		}
+		unit := wmStr[len(wmStr)-1]
+		if slices.Contains(watermarkUnits, unit) {
+			byteNum, err := strconv.Atoi(wmStr[:len(wmStr)-1])
+			// Bytes portion is not an integer
+			if err != nil {
+				return false, 0, errors.Errorf("watermark value %s is neither a percentage integer (e.g. 95) or a valid bytes. Refer to parameter page for details: https://docs.pelicanplatform.org/parameters#Cache-HighWatermark", wmStr)
+			} else {
+				switch unit {
+				case 'k':
+					return true, int64(byteNum) * 1024, nil
+				case 'm':
+					return true, int64(byteNum) * 1024 * 1024, nil
+				case 'g':
+					return true, int64(byteNum) * 1024 * 1024 * 1024, nil
+				case 't':
+					return true, int64(byteNum) * 1024 * 1024 * 1024 * 1024, nil
+				default:
+					return false, 0, errors.Errorf("watermark value %s is neither a percentage integer (e.g. 95) or a valid byte. Bytes representation is missing unit (k|m|g|t). Refer to parameter page for details: https://docs.pelicanplatform.org/parameters#Cache-HighWatermark", wmStr)
+				}
+			}
+		} else {
+			// Doesn't contain k|m|g|t suffix
+			return false, 0, errors.Errorf("watermark value %s is neither a percentage integer (e.g. 95) or a valid byte. Bytes representation is missing unit (k|m|g|t). Refer to parameter page for details: https://docs.pelicanplatform.org/parameters#Cache-HighWatermark", wmStr)
+		}
+	}
+}
+
 func InitConfig() {
 	viper.SetConfigType("yaml")
 	// 1) Set up defaults.yaml
@@ -984,6 +1026,22 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 		viper.SetDefault("Cache.Url", fmt.Sprintf("https://%v:%v", param.Server_Hostname.GetString(), cachePort))
 	} else {
 		viper.SetDefault("Cache.Url", fmt.Sprintf("https://%v", param.Server_Hostname.GetString()))
+	}
+
+	if param.Cache_LowWatermark.IsSet() || param.Cache_HighWaterMark.IsSet() {
+		lowWmStr := param.Cache_LowWatermark.GetString()
+		highWmStr := param.Cache_HighWaterMark.GetString()
+		ok, highWmNum, err := checkWatermark(highWmStr)
+		if !ok && err != nil {
+			return errors.Wrap(err, "invalid Cache.HighWaterMark value")
+		}
+		ok, lowWmNum, err := checkWatermark(lowWmStr)
+		if !ok && err != nil {
+			return errors.Wrap(err, "invalid Cache.LowWatermark value")
+		}
+		if lowWmNum >= highWmNum {
+			return fmt.Errorf("invalid Cache.HighWaterMark and  Cache.LowWatermark values. Cache.HighWaterMark must be greater than Cache.LowWaterMark. Got %s, %s", highWmStr, lowWmStr)
+		}
 	}
 
 	webPort := param.Server_WebPort.GetInt()
