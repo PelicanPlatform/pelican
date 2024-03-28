@@ -450,6 +450,10 @@ func (sP StringParam) GetString() string {
 	return viper.GetString(sP.name)
 }
 
+func (sP StringParam) GetName() string {
+	return sP.name
+}
+
 func (sP StringParam) IsSet() bool {
 	return viper.IsSet(sP.name)
 }

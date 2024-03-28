@@ -57,6 +57,7 @@ func GetDeprecated() map[string][]string {
         "Origin.ExportVolume": []string{"Origin.ExportVolumes"},
         "Origin.Mode": []string{"Origin.StorageType"},
         "Origin.NamespacePrefix": []string{"Origin.FederationPrefix"},
+        "Registry.AdminUsers": []string{"OIDC.AdminUsers"},
         "Xrootd.Port": []string{"Origin.Port", "Cache.Port"},
         "Xrootd.RunLocation": []string{"Cache.RunLocation", "Origin.RunLocation"},
     }
@@ -64,6 +65,10 @@ func GetDeprecated() map[string][]string {
 
 func (sP StringParam) GetString() string {
 	return viper.GetString(sP.name)
+}
+
+func (sP StringParam) GetName() string {
+	return sP.name
 }
 
 func (sP StringParam) IsSet() bool {
@@ -230,6 +235,7 @@ var (
 	Director_OriginResponseHostnames = StringSliceParam{"Director.OriginResponseHostnames"}
 	Issuer_GroupRequirements = StringSliceParam{"Issuer.GroupRequirements"}
 	Monitoring_AggregatePrefixes = StringSliceParam{"Monitoring.AggregatePrefixes"}
+	OIDC_AdminUsers = StringSliceParam{"OIDC.AdminUsers"}
 	Origin_ExportVolumes = StringSliceParam{"Origin.ExportVolumes"}
 	Origin_ScitokensRestrictedPaths = StringSliceParam{"Origin.ScitokensRestrictedPaths"}
 	Registry_AdminUsers = StringSliceParam{"Registry.AdminUsers"}
@@ -283,6 +289,7 @@ var (
 	Origin_EnableFallbackRead = BoolParam{"Origin.EnableFallbackRead"}
 	Origin_EnableIssuer = BoolParam{"Origin.EnableIssuer"}
 	Origin_EnableListings = BoolParam{"Origin.EnableListings"}
+	Origin_EnableOAuth = BoolParam{"Origin.EnableOAuth"}
 	Origin_EnablePublicReads = BoolParam{"Origin.EnablePublicReads"}
 	Origin_EnableReads = BoolParam{"Origin.EnableReads"}
 	Origin_EnableUI = BoolParam{"Origin.EnableUI"}

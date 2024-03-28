@@ -25,9 +25,18 @@ import (
 	"github.com/pkg/errors"
 )
 
+type OIDCProvider string
+
+const (
+	CILogon         OIDCProvider = "CILogon"
+	Globus          OIDCProvider = "Globus"
+	UnknownProvider OIDCProvider = "Unknown"
+)
+
 // ServerOIDCClient loads the OIDC client configuration for
 // the pelican server
-func ServerOIDCClient() (result Config, err error) {
+func ServerOIDCClient() (result Config, provider OIDCProvider, err error) {
+	provider = UnknownProvider
 	// Load OIDC.ClientID
 	if result.ClientID, err = config.GetOIDCClientID(); err != nil {
 		return
@@ -64,6 +73,13 @@ func ServerOIDCClient() (result Config, err error) {
 		return
 	}
 	result.Endpoint.AuthURL = authorizationEndpointURL.String()
+
+	// We get the provider based on the hostname of the authorization endpoint
+	if authorizationEndpointURL.Hostname() == "auth.globus.org" {
+		provider = Globus
+	} else if authorizationEndpointURL.Hostname() == "cilogon.org" {
+		provider = CILogon
+	}
 
 	// Load OIDC.DeviceAuthEndpoint
 	deviceAuthEndpoint, err := config.GetOIDCDeviceAuthEndpoint()
@@ -117,7 +133,10 @@ func ServerOIDCClient() (result Config, err error) {
 	result.Endpoint.UserInfoURL = userInfoEndpointURL.String()
 
 	// Set the scope
-	result.Scopes = []string{"openid", "profile", "email", "org.cilogon.userinfo"}
-
+	result.Scopes = []string{"openid", "profile", "email"}
+	// Add extra scope only for CILogon user info endpoint
+	if provider == CILogon {
+		result.Scopes = append(result.Scopes, "org.cilogon.userinfo")
+	}
 	return
 }

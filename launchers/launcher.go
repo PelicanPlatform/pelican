@@ -91,6 +91,18 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		return shutdownCancel, err
 	}
 
+	// Register OIDC endpoint
+	if param.Server_EnableUI.GetBool() {
+		if modules.IsEnabled(config.RegistryType) ||
+			modules.IsEnabled(config.OriginType) ||
+			modules.IsEnabled(config.CacheType) {
+			err := web_ui.ConfigOAuthClientAPIs(engine)
+			if err != nil {
+				return shutdownCancel, err
+			}
+		}
+	}
+
 	if modules.IsEnabled(config.RegistryType) {
 
 		viper.Set("Federation.RegistryURL", param.Server_ExternalWebUrl.GetString())

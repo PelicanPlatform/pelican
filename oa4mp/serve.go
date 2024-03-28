@@ -132,7 +132,7 @@ func writeOA4MPConfig(oconf oa4mpConfig, fname, templateInput string) error {
 
 func ConfigureOA4MP() (launcher daemon.Launcher, err error) {
 	var oauth2Client oauth2.Config
-	oauth2Client, err = oauth2.ServerOIDCClient()
+	oauth2Client, _, err = oauth2.ServerOIDCClient()
 	if err != nil {
 		err = errors.Wrap(err, "Unable to launch token issuer component because OIDC is not configured")
 		return

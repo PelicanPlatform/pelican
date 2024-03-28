@@ -477,7 +477,7 @@ func TestAdminAuthHandler(t *testing.T) {
 		{
 			name: "user-not-logged-in",
 			setupUserFunc: func(ctx *gin.Context) {
-				viper.Set("Registry.AdminUsers", []string{"admin1", "admin2"})
+				viper.Set("OIDC.AdminUsers", []string{"admin1", "admin2"})
 				ctx.Set("User", "")
 			},
 			expectedCode:  http.StatusUnauthorized,
@@ -486,7 +486,7 @@ func TestAdminAuthHandler(t *testing.T) {
 		{
 			name: "general-admin-access",
 			setupUserFunc: func(ctx *gin.Context) {
-				viper.Set("Registry.AdminUsers", []string{})
+				viper.Set("OIDC.AdminUsers", []string{})
 				ctx.Set("User", "admin")
 			},
 			expectedCode: http.StatusOK,
@@ -494,7 +494,7 @@ func TestAdminAuthHandler(t *testing.T) {
 		{
 			name: "specific-admin-user-access",
 			setupUserFunc: func(ctx *gin.Context) {
-				viper.Set("Registry.AdminUsers", []string{"admin1", "admin2"})
+				viper.Set("OIDC.AdminUsers", []string{"admin1", "admin2"})
 				ctx.Set("User", "admin1")
 			},
 			expectedCode: http.StatusOK,
@@ -502,7 +502,7 @@ func TestAdminAuthHandler(t *testing.T) {
 		{
 			name: "non-admin-user-access",
 			setupUserFunc: func(ctx *gin.Context) {
-				viper.Set("Registry.AdminUsers", []string{"admin1", "admin2"})
+				viper.Set("OIDC.AdminUsers", []string{"admin1", "admin2"})
 				ctx.Set("User", "user")
 			},
 			expectedCode:  http.StatusForbidden,
@@ -511,7 +511,7 @@ func TestAdminAuthHandler(t *testing.T) {
 		{
 			name: "admin-list-empty",
 			setupUserFunc: func(ctx *gin.Context) {
-				viper.Set("Registry.AdminUsers", []string{})
+				viper.Set("OIDC.AdminUsers", []string{})
 				ctx.Set("User", "user")
 			},
 			expectedCode:  http.StatusForbidden,
@@ -520,7 +520,7 @@ func TestAdminAuthHandler(t *testing.T) {
 		{
 			name: "admin-list-multiple-users",
 			setupUserFunc: func(ctx *gin.Context) {
-				viper.Set("Registry.AdminUsers", []string{"admin1", "admin2", "admin3"})
+				viper.Set("OIDC.AdminUsers", []string{"admin1", "admin2", "admin3"})
 				ctx.Set("User", "admin2")
 			},
 			expectedCode: http.StatusOK,

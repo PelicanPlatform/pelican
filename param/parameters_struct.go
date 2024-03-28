@@ -129,6 +129,7 @@ type Config struct {
 		TokenRefreshInterval time.Duration
 	}
 	OIDC struct {
+		AdminUsers []string
 		AuthorizationEndpoint string
 		ClientID string
 		ClientIDFile string
@@ -147,6 +148,7 @@ type Config struct {
 		EnableFallbackRead bool
 		EnableIssuer bool
 		EnableListings bool
+		EnableOAuth bool
 		EnablePublicReads bool
 		EnableReads bool
 		EnableUI bool
@@ -375,6 +377,7 @@ type configWithType struct {
 		TokenRefreshInterval struct { Type string; Value time.Duration }
 	}
 	OIDC struct {
+		AdminUsers struct { Type string; Value []string }
 		AuthorizationEndpoint struct { Type string; Value string }
 		ClientID struct { Type string; Value string }
 		ClientIDFile struct { Type string; Value string }
@@ -393,6 +396,7 @@ type configWithType struct {
 		EnableFallbackRead struct { Type string; Value bool }
 		EnableIssuer struct { Type string; Value bool }
 		EnableListings struct { Type string; Value bool }
+		EnableOAuth struct { Type string; Value bool }
 		EnablePublicReads struct { Type string; Value bool }
 		EnableReads struct { Type string; Value bool }
 		EnableUI struct { Type string; Value bool }
