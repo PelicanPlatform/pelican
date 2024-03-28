@@ -331,6 +331,7 @@ func CheckCacheXrootdEnv(exportPath string, server server_structs.XRootDServer, 
 			return "", errors.Wrap(err, "Failed to create scitokens configuration for the cache")
 		}
 	}
+
 	return exportPath, nil
 }
 
