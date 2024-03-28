@@ -222,16 +222,16 @@ func handleOAuthCallback(ctx *gin.Context) {
 func ConfigOAuthClientAPIs(engine *gin.Engine) error {
 	sessionSecretByte, err := config.LoadSessionSecret()
 	if err != nil {
-		return errors.Wrap(err, "Failed to configure OAuth client")
+		return errors.Wrap(err, "failed to configure OAuth client")
 	}
 	oauthCommonConfig, provider, err := pelican_oauth2.ServerOIDCClient()
 	if err != nil {
-		return errors.Wrap(err, "Failed to load server OIDC client config")
+		return errors.Wrap(err, "failed to load server OIDC client config")
 	}
 	// Pelican registry relies on OAuth2 device flow for CLI-based registration
 	// and Globus does not support such flow. So users should not use Globus for the registry
 	if config.IsServerEnabled(config.RegistryType) && provider == pelican_oauth2.Globus {
-		return errors.New("You are using Globus as the OIDC auth server. However, Pelican registry server does not support Globus. Please use CILogon as the auth server instead.")
+		return errors.New("you are using Globus as the OIDC auth server. However, Pelican registry server does not support Globus. Please use CILogon as the auth server instead.")
 	}
 
 	oauthUserInfoUrl = oauthCommonConfig.Endpoint.UserInfoURL

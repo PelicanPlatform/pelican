@@ -35,7 +35,6 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_ui"
 	"github.com/pelicanplatform/pelican/server_utils"
-	"github.com/pelicanplatform/pelican/web_ui"
 	"github.com/pelicanplatform/pelican/xrootd"
 )
 
@@ -60,13 +59,6 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 	// Director also registers this metadata URL; avoid registering twice.
 	if !modules.IsEnabled(config.DirectorType) {
 		if err = origin_ui.ConfigIssJWKS(engine.Group("/.well-known")); err != nil {
-			return nil, err
-		}
-	}
-
-	// Only register origin OAuth endpoint if registry is not enabled
-	if param.Origin_EnableOAuth.GetBool() && !config.IsServerEnabled(config.RegistryType) {
-		if err := web_ui.ConfigOAuthClientAPIs(engine); err != nil {
 			return nil, err
 		}
 	}
