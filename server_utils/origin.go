@@ -20,6 +20,8 @@ package server_utils
 
 import (
 	"fmt"
+	"os"
+	"path"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -33,13 +35,14 @@ import (
 	"github.com/pelicanplatform/pelican/server_structs"
 )
 
-var originExports *[]OriginExports
+var originExports *[]OriginExport
 
 type (
-	OriginExports struct {
+	OriginExport struct {
 		StoragePrefix    string
 		FederationPrefix string
 		Capabilities     server_structs.Capabilities
+		SentinelFile     string
 	}
 )
 
@@ -115,12 +118,12 @@ func StringListToCapsHookFunc() mapstructure.DecodeHookFuncType {
 // convert those values (such as Origin.FederationPrefix, Origin.StoragePrefix, etc.) into the OriginExports
 // struct and return a list of one. Otherwise, we'll base things off the list of exports and ignore the single-prefix
 // style of configuration.
-func GetOriginExports() (*[]OriginExports, error) {
+func GetOriginExports() (*[]OriginExport, error) {
 	if originExports != nil {
 		return originExports, nil
 	}
 
-	originExports = &[]OriginExports{}
+	originExports = &[]OriginExport{}
 
 	viper.SetDefault("Origin.StorageType", "posix")
 	StorageType := param.Origin_StorageType.GetString()
@@ -152,7 +155,7 @@ func GetOriginExports() (*[]OriginExports, error) {
 				}
 
 				reads := param.Origin_EnableReads.GetBool() || param.Origin_EnablePublicReads.GetBool()
-				originExport := OriginExports{
+				originExport := OriginExport{
 					FederationPrefix: federationPrefix,
 					StoragePrefix:    storagePrefix,
 					Capabilities: server_structs.Capabilities{
@@ -175,7 +178,7 @@ func GetOriginExports() (*[]OriginExports, error) {
 
 			log.Warningln("Passing export volumes via -v at the command line causes Pelican to ignore exports configured via the yaml file")
 			log.Warningln("However, namespaces exported this way will inherit the Origin.Enable* settings from your configuration")
-			log.Warningln("For finer-grained control of each export, please configure them in your pelican.yaml file")
+			log.Warningln("For finer-grained control of each export, please configure them in your pelican.yaml file via Origin.Exports")
 			return originExports, nil
 		}
 
@@ -204,7 +207,7 @@ func GetOriginExports() (*[]OriginExports, error) {
 			log.Infoln("Configuring single-export origin")
 
 			reads := (param.Origin_EnableReads.GetBool() || param.Origin_EnablePublicReads.GetBool())
-			originExport := OriginExports{
+			originExport := OriginExport{
 				FederationPrefix: param.Origin_FederationPrefix.GetString(),
 				StoragePrefix:    param.Origin_StoragePrefix.GetString(),
 				Capabilities: server_structs.Capabilities{
@@ -227,7 +230,7 @@ func GetOriginExports() (*[]OriginExports, error) {
 
 		federationPrefix := filepath.Join("/", param.Origin_S3ServiceName.GetString(),
 			param.Origin_S3Region.GetString(), param.Origin_S3Bucket.GetString())
-		originExport := OriginExports{
+		originExport := OriginExport{
 			FederationPrefix: federationPrefix,
 			StoragePrefix:    "",
 			Capabilities: server_structs.Capabilities{
@@ -244,6 +247,23 @@ func GetOriginExports() (*[]OriginExports, error) {
 	}
 
 	return originExports, nil
+}
+
+func CheckSentinelFile(exports *[]OriginExport) (ok bool, err error) {
+	for _, export := range *exports {
+		if export.SentinelFile != "" {
+			sentinelPath := path.Clean(export.SentinelFile)
+			if path.Base(sentinelPath) != sentinelPath {
+				return false, fmt.Errorf("invalid SentinelFile path for StoragePrefix %s, file must not contain a directory. Got %s", export.StoragePrefix, export.SentinelFile)
+			}
+			fullPath := filepath.Join(export.StoragePrefix, sentinelPath)
+			_, err := os.Stat(fullPath)
+			if err != nil {
+				return false, errors.Wrap(err, fmt.Sprintf("fail to open SentinelFile %s for StoragePrefix %s. Directory check failed", export.SentinelFile, export.StoragePrefix))
+			}
+		}
+	}
+	return true, nil
 }
 
 func ResetOriginExports() {

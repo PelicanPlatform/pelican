@@ -97,7 +97,7 @@ type (
 		S3AccessKeyfile   string
 		S3SecretKeyfile   string
 		S3UrlStyle        string
-		Exports           []server_utils.OriginExports
+		Exports           []server_utils.OriginExport
 	}
 
 	CacheConfig struct {
