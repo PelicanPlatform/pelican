@@ -27,6 +27,7 @@ import (
 	"math"
 	"net"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -943,9 +944,20 @@ func HandlePacket(packet []byte) error {
 
 func HandleSummaryPacket(packet []byte) error {
 	summaryStats := SummaryStatistics{}
-	if err := xml.Unmarshal(packet, &summaryStats); err != nil {
-		return err
+	// The cache summary data has a typo where the <hit> tag contains a trailing bracet
+	// the causes parsing error. This is a temp fix to correct it. Xrootd v5.7.0 will fix
+	// this issue
+	re, err := regexp.Compile(`></hits>`)
+	if err != nil {
+		return errors.Wrap(err, "error compiling regex")
 	}
+
+	correctedData := re.ReplaceAll(packet, []byte(`</hits>`))
+
+	if err := xml.Unmarshal(correctedData, &summaryStats); err != nil {
+		return errors.Wrap(err, "error unmarshaling summary pacaket")
+	}
+
 	log.Debug("Received a summary statistics packet")
 	if summaryStats.Program != "xrootd" {
 		// We only care about the xrootd summary packets
