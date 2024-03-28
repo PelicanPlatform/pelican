@@ -406,3 +406,84 @@ func TestGetPublicRead(t *testing.T) {
 		}
 	})
 }
+
+// A test that tests the statHttp function
+func TestStatHttp(t *testing.T) {
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+	viper.Reset()
+	server_utils.ResetOriginExports()
+
+	fed := fed_test_utils.NewFedTest(t, bothPublicOriginCfg)
+
+	t.Run("testStatHttpPelicanScheme", func(t *testing.T) {
+		testFileContent := "test file content"
+		// Drop the testFileContent into the origin directory
+		tempFile, err := os.Create(filepath.Join(((*fed.Exports)[0]).StoragePrefix, "test.txt"))
+		assert.NoError(t, err, "Error creating temp file")
+		_, err = tempFile.WriteString(testFileContent)
+		assert.NoError(t, err, "Error writing to temp file")
+		tempFile.Close()
+
+		viper.Set("Logging.DisableProgressBars", true)
+
+		// Set path for object to upload/download
+		tempPath := tempFile.Name()
+		fileName := filepath.Base(tempPath)
+		uploadURL := fmt.Sprintf("pelican://%s/%s", ((*fed.Exports)[0]).FederationPrefix, fileName)
+
+		// Download the file with GET. Shouldn't need a token to succeed
+		objectSize, err := client.DoStat(ctx, uploadURL)
+		assert.NoError(t, err)
+		if err == nil {
+			assert.Equal(t, int64(17), int64(objectSize))
+		}
+	})
+
+	t.Run("testStatHttpOSDFScheme", func(t *testing.T) {
+		testFileContent := "test file content"
+		// Drop the testFileContent into the origin directory
+		tempFile, err := os.Create(filepath.Join(((*fed.Exports)[0]).StoragePrefix, "test.txt"))
+		assert.NoError(t, err, "Error creating temp file")
+		_, err = tempFile.WriteString(testFileContent)
+		assert.NoError(t, err, "Error writing to temp file")
+		tempFile.Close()
+
+		viper.Set("Logging.DisableProgressBars", true)
+
+		// Set path for object to upload/download
+		tempPath := tempFile.Name()
+		fileName := filepath.Base(tempPath)
+		// Minimal fix of test as it is soon to be replaced
+		uploadURL := fmt.Sprintf("pelican://%s/%s", ((*fed.Exports)[0]).FederationPrefix, fileName)
+
+		// Download the file with GET. Shouldn't need a token to succeed
+		objectSize, err := client.DoStat(ctx, uploadURL)
+		assert.NoError(t, err)
+		if err == nil {
+			assert.Equal(t, int64(17), int64(objectSize))
+		}
+	})
+
+	t.Run("testStatHttpIncorrectScheme", func(t *testing.T) {
+		testFileContent := "test file content"
+		// Drop the testFileContent into the origin directory
+		tempFile, err := os.Create(filepath.Join(((*fed.Exports)[0]).StoragePrefix, "test.txt"))
+		assert.NoError(t, err, "Error creating temp file")
+		_, err = tempFile.WriteString(testFileContent)
+		assert.NoError(t, err, "Error writing to temp file")
+		tempFile.Close()
+
+		viper.Set("Logging.DisableProgressBars", true)
+
+		// Set path for object to upload/download
+		tempPath := tempFile.Name()
+		fileName := filepath.Base(tempPath)
+		uploadURL := fmt.Sprintf("some://incorrect/scheme/%s", fileName)
+
+		// Download the file with GET. Shouldn't need a token to succeed
+		objectSize, err := client.DoStat(ctx, uploadURL)
+		assert.Error(t, err)
+		assert.Equal(t, uint64(0), objectSize)
+		assert.Contains(t, err.Error(), "Unsupported scheme requested")
+	})
+}
