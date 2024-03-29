@@ -213,6 +213,16 @@ func handleAllowServer(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"message": "success"})
 }
 
+func handleDirectorContact(ctx *gin.Context) {
+	dc, err := getDirectorSupportContact()
+	if err != nil {
+		log.Error("Bad server configuration. Invalid format of director contact information configured: ", err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Bad server configuration. Invalid format of director contact information configured."})
+		return
+	}
+	ctx.JSON(http.StatusOK, dc)
+}
+
 func RegisterDirectorWebAPI(router *gin.RouterGroup) {
 	directorWebAPI := router.Group("/api/v1.0/director_ui")
 	// Follow RESTful schema
@@ -222,5 +232,6 @@ func RegisterDirectorWebAPI(router *gin.RouterGroup) {
 		directorWebAPI.PATCH("/servers/allow/*name", web_ui.AuthHandler, web_ui.AdminAuthHandler, handleAllowServer)
 		directorWebAPI.GET("/servers/origins/stat/*path", web_ui.AuthHandler, queryOrigins)
 		directorWebAPI.HEAD("/servers/origins/stat/*path", web_ui.AuthHandler, queryOrigins)
+		directorWebAPI.GET("/contact", handleDirectorContact)
 	}
 }

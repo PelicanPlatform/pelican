@@ -322,6 +322,7 @@ var (
 )
 
 var (
+	Director_SupportContact = ObjectParam{"Director.SupportContact"}
 	GeoIPOverrides = ObjectParam{"GeoIPOverrides"}
 	Issuer_AuthorizationTemplates = ObjectParam{"Issuer.AuthorizationTemplates"}
 	Issuer_OIDCAuthenticationRequirements = ObjectParam{"Issuer.OIDCAuthenticationRequirements"}

@@ -1012,6 +1012,27 @@ type: stringSlice
 default: none
 components: ["director"]
 ---
+name: Director.SupportContact
+description: >-
+  An object describing the admin contact information of the federation the director is hosting. The values will
+  be displayed on the director web interface if provided. We highly recommend director admin to fill out this field.
+
+  The object has following fields:
+  - `Email`: Email address to receive issues and help request
+  - `Url`: A URL where user can find support information. Can be your website, GitHub discussion, or third-party support portal
+
+  Example:
+
+  ```yaml
+    Director:
+      SupportContact:
+        Email: help@example.com
+        Url: help.example.com
+  ```
+type: object
+default: none
+components: ["director"]
+---
 ############################
 #  Registry-level configs  #
 ############################
