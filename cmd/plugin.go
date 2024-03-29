@@ -399,6 +399,7 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 	defer close(results)
 
 	jobMap := make(map[string]PluginTransfer)
+	var recursive bool
 
 	for {
 		select {
@@ -410,6 +411,12 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 				workChan = nil
 				break
 			}
+			if transfer.url.Query().Get("recursive") != "" {
+				recursive = true
+			} else {
+				recursive = false
+			}
+
 			if upload {
 				log.Debugln("Uploading:", transfer.localFile, "to", transfer.url)
 			} else {
@@ -420,12 +427,26 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 				if transfer.url.Query().Get("pack") != "" {
 					transfer.localFile = filepath.Dir(transfer.localFile)
 				}
+
+				// get absolute path
+				destPath, _ := filepath.Abs(transfer.localFile)
+				//Check if path exists or if its in a folder
+				if destStat, err := os.Stat(destPath); os.IsNotExist(err) {
+					transfer.localFile = destPath
+				} else if destStat.IsDir() {
+					sourceFilename := path.Base(transfer.url.Path)
+					transfer.localFile = path.Join(destPath, sourceFilename)
+				}
 			}
 
 			var tj *client.TransferJob
 			urlCopy := *transfer.url
+<<<<<<< HEAD
 			project := client.GetProjectName()
-			tj, err = tc.NewTransferJob(&urlCopy, transfer.localFile, upload, false, project, client.WithAcquireToken(false), client.WithCaches(caches...))
+			tj, err = tc.NewTransferJob(&urlCopy, transfer.localFile, upload, recursive, project, client.WithAcquireToken(false), client.WithCaches(caches...))
+=======
+			tj, err = tc.NewTransferJob(&urlCopy, transfer.localFile, upload, recursive, project, client.WithAcquireToken(false), client.WithCaches(caches...))
+>>>>>>> e1ae5de7 (Allow recursive uploads/downloads in plugin)
 			if err != nil {
 				return errors.Wrap(err, "Failed to create new transfer job")
 			}
