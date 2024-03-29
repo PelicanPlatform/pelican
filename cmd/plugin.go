@@ -583,7 +583,6 @@ func writeOutfile(err error, resultAds []*classads.ClassAd, outputFile *os.File)
 	return success, retryable
 }
 
-
 // readMultiTransfers reads the transfers from a Reader, such as stdin
 func readMultiTransfers(stdin bufio.Reader) (transfers []PluginTransfer, err error) {
 	// Check stdin for a list of transfers
