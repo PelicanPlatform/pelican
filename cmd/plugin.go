@@ -37,7 +37,6 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/sirupsen/logrus/hooks/writer"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 )
@@ -117,12 +116,9 @@ func stashPluginMain(args []string) {
 		configErr = errors.Wrap(configErr, "Problem initializing the Pelican Client configuration")
 		isConfigErr = true
 	}
-	loggingErr := setPluginLogging()
-	if loggingErr != nil {
-		// Note: not exiting here because logs should have default output of os.Stderr which is what we mainly want anyway.
-		// Therefore, just warn the user and continue
-		log.Warningf("Problem setting logging for the pelican plugin: %v", loggingErr)
-	}
+
+	// Want to try to force logging to stderr because that is how we can see logging in condor starter log
+	log.SetOutput(os.Stderr)
 
 	// Parse command line arguments
 	var upload bool = false
@@ -587,29 +583,6 @@ func writeOutfile(err error, resultAds []*classads.ClassAd, outputFile *os.File)
 	return success, retryable
 }
 
-func setPluginLogging() (err error) {
-	file, err := os.OpenFile(".PelicanPlugin.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
-	if err != nil {
-		err = errors.New("Failed to open log file for writing.")
-	} else {
-		// Add file output to log
-		log.AddHook(&writer.Hook{
-			Writer: file,
-			LogLevels: []log.Level{
-				log.DebugLevel,
-				log.InfoLevel,
-				log.WarnLevel,
-				log.ErrorLevel,
-				log.FatalLevel,
-				log.PanicLevel,
-			},
-		})
-	}
-	// Default is stderr, but want to ensure it remains for the plugin
-	log.SetOutput(os.Stderr)
-
-	return err
-}
 
 // readMultiTransfers reads the transfers from a Reader, such as stdin
 func readMultiTransfers(stdin bufio.Reader) (transfers []PluginTransfer, err error) {
