@@ -1474,9 +1474,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	req.HTTPRequest.Header.Set("X-Transfer-Status", "true")
 	req.HTTPRequest.Header.Set("X-Pelican-Timeout", param.Transport_ResponseHeaderTimeout.GetDuration().String())
 	req.HTTPRequest.Header.Set("TE", "trailers")
-	if project != "" {
-		req.HTTPRequest.Header.Set("User-Agent", getUserAgent(project))
-	}
+	req.HTTPRequest.Header.Set("User-Agent", getUserAgent(project))
 	req = req.WithContext(ctx)
 
 	// Test the transfer speed every 5 seconds
