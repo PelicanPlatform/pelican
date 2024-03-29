@@ -362,6 +362,15 @@ definitions:
         type: string
         description: The status of director file transfer test against the server. Can be Initializing|Unknown|OK|Error
         default: Unknown
+  DirectorContact:
+    type: object
+    properties:
+      email:
+        type: string
+        default: ""
+      url:
+        type: string
+        default: ""
 
 tags:
   - name: auth
@@ -1460,6 +1469,24 @@ paths:
           schema:
             type: object
             $ref: "#/definitions/ErrorModel"
+  /director_ui/contact:
+    get:
+      summary: Get the support contact information of the federation the director hostnames
+      description: "Note that the response value (if successful) `email` and `url` can be either or both empty strings"
+      tags:
+        - "director_ui"
+      responses:
+        "200":
+          description: "OK"
+          schema:
+            type: object
+            $ref: "#/definitions/DirectorContact"
+        "500":
+          description: "Bad server configuration. Failed to get the director contact information from the server configuration"
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+
   /director/namespaces/prefix/{path}:
     get:
       summary: "Get the longest matched namespace prefix of a path"
