@@ -14,6 +14,8 @@ info:
     The cookie is issued after a successful call to `/api/v1.0/auth/login`. However, OpenAPI 2.0 does not support specifying cookie-based security check.
     Therefore, as an alternative, we will add `Authentication Required` to the API description where needed.
 
+    For endpoint that is only accesible by users with admin privilege, we mark the endpoint as `Admin privilege Required`.
+
 
     For how to set up Pelican servers, please refer to the documentation at [docs.pelicanplatform.org](https://docs.pelicanplatform.org/)"
   license:
@@ -398,7 +400,8 @@ paths:
       tags:
         - common
       summary: Return the configuration values of the server and their type
-      description: "`Authentication Required`"
+      description: >-
+        `Authentication Required` `Admin privilege Required`
       produces:
         - application/json
       responses:
@@ -446,7 +449,7 @@ paths:
         - "common"
       summary: Update the server configuration with user-provided changes
       description:
-        "`Authentication Required` `Admin Previlege Required`
+        "`Authentication Required` `Admin privilege Required`
 
 
         The server will restart promptly after a  successful request. You may query against
@@ -531,7 +534,7 @@ paths:
       tags:
         - metrics
       summary: Returns the health status of server components
-      description: "`Authentication Required`"
+      description: "`Authentication Required` `Admin Privilege Required"
       produces:
         - application/json
       responses:
@@ -638,7 +641,7 @@ paths:
       tags:
         - auth
       summary: Reset the password for the user
-      description: "`Authentication Required`"
+      description: "`Authentication Required` `Admin Privilege Required`"
       consumes:
         - application/json
       produces:
@@ -912,7 +915,7 @@ paths:
       description: "`Authentication Required`
 
 
-        For user with admin previlege, it returns for all valid namespace request.
+        For user with admin privilege, it returns for all valid namespace request.
 
 
         For general users, it only returns namespace belonging to the user, or it returns 404
@@ -943,7 +946,7 @@ paths:
             type: object
             $ref: "#/definitions/ErrorModel"
         "404":
-          description: Namespace not found, either does not exists or the user doesn't have previlege to get it
+          description: Namespace not found, either does not exists or the user doesn't have privilege to get it
           schema:
             type: object
             $ref: "#/definitions/ErrorModel"
@@ -959,7 +962,7 @@ paths:
       description: "`Authentication Required`
 
 
-        For user with admin previlege, they can update any valid namespace.
+        For user with admin privilege, they can update any valid namespace.
 
 
         Non-admin users can update only namespaces they own and only if the approval status is `admin_metadata.status == approved`, otherwise the endpoint returns 404.
@@ -1003,7 +1006,7 @@ paths:
             type: object
             $ref: "#/definitions/ErrorModel"
         "403":
-          description: The user does not have previlege to update the namespace
+          description: The user does not have privilege to update the namespace
           schema:
             type: object
             $ref: "#/definitions/ErrorModel"
@@ -1019,7 +1022,7 @@ paths:
             $ref: "#/definitions/ErrorModel"
     delete:
       summary: Delete a namespace registration by ID
-      description: "`Authentication Required` `Admin`
+      description: "`Authentication Required` `Admin privilege Required`
 
         Only admin users have privilege to this action.
         "
@@ -1045,7 +1048,7 @@ paths:
             type: object
             $ref: "#/definitions/ErrorModel"
         "403":
-          description: The user does not have previlege to update the namespace
+          description: The user does not have privilege to update the namespace
           schema:
             type: object
             $ref: "#/definitions/ErrorModel"
@@ -1081,7 +1084,7 @@ paths:
             type: object
             $ref: "#/definitions/ErrorModel"
         "404":
-          description: Namespace not found, either does not exist or the user doesn't have previlege to get it
+          description: Namespace not found, either does not exist or the user doesn't have privilege to get it
           schema:
             type: object
             $ref: "#/definitions/ErrorModel"
@@ -1101,7 +1104,7 @@ paths:
         Update namespace status to `approved` by namespace `id`.
 
 
-        This action requires admin previlege to perform.
+        This action requires admin privilege to perform.
         "
       parameters:
         - name: id
@@ -1133,7 +1136,7 @@ paths:
             type: object
             $ref: "#/definitions/ErrorModel"
         "403":
-          description: The user does not have previlege to update the namespace status
+          description: The user does not have privilege to update the namespace status
           schema:
             type: object
             $ref: "#/definitions/ErrorModel"
@@ -1158,7 +1161,7 @@ paths:
         Update namespace status to `denied` by namespace `id`.
 
 
-        This action requires admin previlege to perform.
+        This action requires admin privilege to perform.
         "
       parameters:
         - name: id
@@ -1190,7 +1193,7 @@ paths:
             type: object
             $ref: "#/definitions/ErrorModel"
         "403":
-          description: The user does not have previlege to update the namespace status
+          description: The user does not have privilege to update the namespace status
           schema:
             type: object
             $ref: "#/definitions/ErrorModel"
@@ -1261,7 +1264,7 @@ paths:
     patch:
       summary: Filter a server from director redirecting
       description: |
-        `Authentication Required` `Admin`
+        `Authentication Required` `Admin privilege Required`
 
 
         **The filter rules registered by this endpoint are in-memory and will be reset at the server restart.**
