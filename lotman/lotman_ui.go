@@ -272,7 +272,7 @@ func VerifyLotModTokens(lotName string, strToken string, action LotAction) (bool
 		return false, errors.New("Token not signed by any of the owners of any parent lot")
 	}
 
-	// We've determined the token is signed by someone we like, now to check that it has the correct lot.delete permission!
+	// We've determined the token is signed by someone we like, now to check that it has the correct scope!
 	scope_any, present := (*tok).Get("scope")
 	if !present {
 		return false, errors.New("no scope claim in token")
@@ -300,7 +300,7 @@ func VerifyLotModTokens(lotName string, strToken string, action LotAction) (bool
 	}
 
 	if !tokenApproved {
-		return false, errors.New("The token was correctly signed but did not possess the necessary scope")
+		return false, errors.New(fmt.Sprintf("The token was correctly signed, but does not have permission to %s the lot", action))
 	}
 
 	return true, nil
