@@ -307,6 +307,7 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 		}
 		ns.Pubkey = string(pubkeyData)
 		ns.Identity = data.Identity
+		ns.Topology = false
 
 		if data.Identity != "" {
 			idMap := map[string]interface{}{}
@@ -855,6 +856,11 @@ func checkNamespaceStatusHandler(ctx *gin.Context) {
 		return
 	}
 	ns, err := getNamespaceByPrefix(req.Prefix)
+	if ns.Topology {
+		res := server_structs.CheckNamespaceStatusRes{Approved: true}
+		ctx.JSON(http.StatusOK, res)
+		return
+	}
 	if err != nil || ns == nil {
 		log.Errorf("Error in getNamespaceByPrefix with prefix %s. %v", req.Prefix, err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Error getting namespace"})

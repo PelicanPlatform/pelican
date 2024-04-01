@@ -6,7 +6,8 @@ CREATE TABLE IF NOT EXISTS namespace (
   pubkey TEXT NOT NULL,
   identity TEXT,
   admin_metadata TEXT CHECK (length("admin_metadata") <= 4000),
-  custom_fields TEXT CHECK (length("custom_fields") <= 4000) DEFAULT ''
+  custom_fields TEXT CHECK (length("custom_fields") <= 4000) DEFAULT '',
+  topology boolean
 );
 
 CREATE TABLE IF NOT EXISTS topology (
