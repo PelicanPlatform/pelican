@@ -507,7 +507,7 @@ func (sc *LocalCache) runMux() error {
 			sourceURL := *sc.directorURL
 			sourceURL.Path = path.Join(sourceURL.Path, path.Clean(req.request.path))
 			sourceURL.Scheme = "pelican"
-			tj, err := sc.tc.NewTransferJob(&sourceURL, localPath, false, false, "localcache", client.WithToken(req.request.token))
+			tj, err := sc.tc.NewTransferJob(&sourceURL, localPath, sc.te, false, false, "localcache", client.WithToken(req.request.token))
 			if err != nil {
 				ds := &downloadStatus{}
 				ds.err.Store(&err)

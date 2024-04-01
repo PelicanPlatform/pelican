@@ -521,6 +521,9 @@ func TestInitServerUrl(t *testing.T) {
 }
 func TestDiscoverUrlFederation(t *testing.T) {
 	t.Run("TestMetadataDiscoveryTimeout", func(t *testing.T) {
+		viper.Set("tlsskipverify", true)
+		err := InitClient()
+		assert.NoError(t, err)
 		// Create a server that sleeps for a longer duration than the timeout
 		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			time.Sleep(2 * time.Second)
@@ -535,11 +538,12 @@ func TestDiscoverUrlFederation(t *testing.T) {
 		defer cancel()
 
 		// Call the function with the server URL and the context
-		_, err := DiscoverUrlFederation(ctx, server.URL)
+		_, err = DiscoverUrlFederation(ctx, server.URL)
 
 		// Assert that the error is the expected metadata timeout error
 		assert.Error(t, err)
 		assert.True(t, errors.Is(err, MetadataTimeoutErr))
+		viper.Reset()
 	})
 
 	t.Run("TestCanceledContext", func(t *testing.T) {
@@ -562,6 +566,9 @@ func TestDiscoverUrlFederation(t *testing.T) {
 	})
 
 	t.Run("TestValidDiscovery", func(t *testing.T) {
+		viper.Set("tlsskipverify", true)
+		err := InitClient()
+		assert.NoError(t, err)
 		// Server to be a "mock" federation
 		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// make our response:
@@ -594,5 +601,6 @@ func TestDiscoverUrlFederation(t *testing.T) {
 		assert.Equal(t, "registry", metadata.NamespaceRegistrationEndpoint, "Unexpected NamespaceRegistrationEndpoint")
 		assert.Equal(t, "jwks", metadata.JwksUri, "Unexpected JwksUri")
 		assert.Equal(t, "broker", metadata.BrokerEndpoint, "Unexpected BrokerEndpoint")
+		viper.Reset()
 	})
 }

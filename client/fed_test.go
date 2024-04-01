@@ -21,6 +21,7 @@
 package client_test
 
 import (
+	"context"
 	_ "embed"
 	"fmt"
 	"net/url"
@@ -40,6 +41,7 @@ import (
 	"github.com/pelicanplatform/pelican/fed_test_utils"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
@@ -457,7 +459,10 @@ func TestStatHttp(t *testing.T) {
 		// Set path for object to upload/download
 		tempPath := tempFile.Name()
 		fileName := filepath.Base(tempPath)
-		uploadURL := fmt.Sprintf("pelican://%s/%s", ((*fed.Exports)[0]).FederationPrefix, fileName)
+		uploadURL := fmt.Sprintf("pelican://%s:%s%s/%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
+			((*fed.Exports)[0]).FederationPrefix, fileName)
+
+		log.Errorln(uploadURL)
 
 		// Download the file with GET. Shouldn't need a token to succeed
 		objectSize, err := client.DoStat(ctx, uploadURL)
@@ -468,6 +473,8 @@ func TestStatHttp(t *testing.T) {
 	})
 
 	t.Run("testStatHttpOSDFScheme", func(t *testing.T) {
+		_, err := config.SetPreferredPrefix("OSDF")
+		assert.NoError(t, err)
 		testFileContent := "test file content"
 		// Drop the testFileContent into the origin directory
 		tempFile, err := os.Create(filepath.Join(((*fed.Exports)[0]).StoragePrefix, "test.txt"))
@@ -478,11 +485,19 @@ func TestStatHttp(t *testing.T) {
 
 		viper.Set("Logging.DisableProgressBars", true)
 
-		// Set path for object to upload/download
 		tempPath := tempFile.Name()
 		fileName := filepath.Base(tempPath)
-		// Minimal fix of test as it is soon to be replaced
-		uploadURL := fmt.Sprintf("pelican://%s/%s", ((*fed.Exports)[0]).FederationPrefix, fileName)
+
+		uploadURL := fmt.Sprintf("osdf://%s/%s", ((*fed.Exports)[0]).FederationPrefix, fileName)
+		hostname := fmt.Sprintf("%v:%v", param.Server_WebHost.GetString(), param.Server_WebPort.GetInt())
+
+		// Set our metadata values in config since that is what this url scheme - prefix combo does in handle_http
+		metadata, err := config.DiscoverUrlFederation(fed.Ctx, "https://"+hostname)
+		assert.NoError(t, err)
+		viper.Set("Federation.DirectorUrl", metadata.DirectorEndpoint)
+		viper.Set("Federation.RegistryUrl", metadata.NamespaceRegistrationEndpoint)
+		viper.Set("Federation.DiscoveryUrl", hostname)
+		log.Errorln(uploadURL)
 
 		// Download the file with GET. Shouldn't need a token to succeed
 		objectSize, err := client.DoStat(ctx, uploadURL)
@@ -512,6 +527,6 @@ func TestStatHttp(t *testing.T) {
 		objectSize, err := client.DoStat(ctx, uploadURL)
 		assert.Error(t, err)
 		assert.Equal(t, uint64(0), objectSize)
-		assert.Contains(t, err.Error(), "Unsupported scheme requested")
+		assert.Contains(t, err.Error(), "Do not understand the destination scheme: some. Permitted values are file, osdf, pelican, stash, ")
 	})
 }

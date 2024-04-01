@@ -66,7 +66,6 @@ var (
 
 	loader = ttlcache.LoaderFunc[string, cacheItem](
 		func(c *ttlcache.Cache[string, cacheItem], key string) *ttlcache.Item[string, cacheItem] {
-			log.Errorf("Cache miss: %v+", key)
 			ctx := context.Background()
 			// Note: setting this timeout mostly for unit tests
 			ctx, cancel := context.WithTimeout(ctx, param.Transport_ResponseHeaderTimeout.GetDuration())
