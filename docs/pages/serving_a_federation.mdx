@@ -153,16 +153,15 @@ Make sure your director is up and running before starting your origins and cache
 ### Set Support Contact Information (Recommended)
 > `Director.SupportContact` is only available for Pelican >=7.7.0
 
-Since the director is the entrypoint of your federation, and client users uses director's public URL as the `Federation.DiscoveryUrl`, it is convenient for users to look up information related to a federation or seek help at the director's web UI. Therefore, we recommend director admin to setup contact information at the director by `Director.SupportContact` configuration parameter. If set, the information will be displayed in the director's web UI. See [Configuration](./parameters.mdx#Director-SupportContact) page for details.
+Since the director is the entrypoint of your federation, and client users uses director's public URL as the `Federation.DiscoveryUrl`, it is convenient for users to look up information related to a federation or seek help at the director's web UI. Therefore, we recommend director admin to setup contact information at the director by `Director.SupportContactEmail` and `Director.SupportContactUrl` configuration parameters. If set, the information will be displayed in the director's web UI. See [Configuration](./parameters.mdx#Director-SupportContact) page for details.
 
 ```yaml filename="pelican.yaml"
 Director:
-  SupportContact:
-    Email: <your support email>
-    Url: <url to other support resources>
+  SupportContactEmail: <your support email>
+  SupportContactUrl: <url to other support resources>
 ```
 
-Note that either `Email` or `Url` are optional. You may leave any of them empty is not needed.
+Note that either `SupportContactEmail` or `SupportContactUrl` are optional. You may leave any of them empty is not needed.
 
 ### Launch the Director
 

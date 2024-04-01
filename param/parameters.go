@@ -119,6 +119,8 @@ var (
 	Director_DefaultResponse = StringParam{"Director.DefaultResponse"}
 	Director_GeoIPLocation = StringParam{"Director.GeoIPLocation"}
 	Director_MaxMindKeyFile = StringParam{"Director.MaxMindKeyFile"}
+	Director_SupportContactEmail = StringParam{"Director.SupportContactEmail"}
+	Director_SupportContactUrl = StringParam{"Director.SupportContactUrl"}
 	Federation_BrokerUrl = StringParam{"Federation.BrokerUrl"}
 	Federation_DirectorUrl = StringParam{"Federation.DirectorUrl"}
 	Federation_DiscoveryUrl = StringParam{"Federation.DiscoveryUrl"}
@@ -322,7 +324,6 @@ var (
 )
 
 var (
-	Director_SupportContact = ObjectParam{"Director.SupportContact"}
 	GeoIPOverrides = ObjectParam{"GeoIPOverrides"}
 	Issuer_AuthorizationTemplates = ObjectParam{"Issuer.AuthorizationTemplates"}
 	Issuer_OIDCAuthenticationRequirements = ObjectParam{"Issuer.OIDCAuthenticationRequirements"}

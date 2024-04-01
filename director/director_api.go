@@ -24,17 +24,11 @@ import (
 
 	"github.com/jellydator/ttlcache/v3"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 )
-
-type DirectorContact struct {
-	Email string `json:"email"`
-	Url   string `json:"url"`
-}
 
 // List all namespaces from origins registered at the director
 func listNamespacesFromOrigins() []server_structs.NamespaceAdV2 {
@@ -91,16 +85,6 @@ func checkFilter(serverName string) (bool, filterType) {
 			return false, ""
 		}
 	}
-}
-
-// Unmarshal director support contact from the configuration. Return a pointer to an empty
-// DirectorContact if Director.SupportContact is not set
-func getDirectorSupportContact() (dc DirectorContact, err error) {
-	dc = DirectorContact{}
-	if param.Director_SupportContact.IsSet() {
-		err = viper.UnmarshalKey("Director.SupportContact", &dc)
-	}
-	return
 }
 
 // Configure TTL caches to enable cache eviction and other additional cache events handling logic

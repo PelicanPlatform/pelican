@@ -21,13 +21,10 @@ package director
 import (
 	"fmt"
 	"net/url"
-	"strings"
 	"testing"
 
 	"github.com/jellydator/ttlcache/v3"
-	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -235,71 +232,4 @@ func TestCheckFilter(t *testing.T) {
 
 		})
 	}
-}
-
-func TestGetDirectorSupportContact(t *testing.T) {
-	mockEmailOnly := `
-Director:
-  SupportContact:
-    Email: help@example.org
-`
-	mockUrlOnly := `
-Director:
-  SupportContact:
-    Url: example.org/help
-`
-	mockAllPresent := `
-Director:
-  SupportContact:
-    Email: help@example.org
-    Url: example.org/help
-`
-	mockUnset := `Director:`
-
-	t.Cleanup(func() {
-		viper.Reset()
-	})
-	t.Run("unset-return-empty", func(t *testing.T) {
-		viper.Reset()
-		viper.SetConfigType("yaml")
-		err := viper.ReadConfig(strings.NewReader(mockUnset))
-		require.NoError(t, err)
-		require.False(t, param.Director_SupportContact.IsSet())
-		ds, err := getDirectorSupportContact()
-		require.NoError(t, err)
-		assert.Equal(t, DirectorContact{}, ds)
-	})
-
-	t.Run("email-only", func(t *testing.T) {
-		viper.Reset()
-		viper.SetConfigType("yaml")
-		err := viper.ReadConfig(strings.NewReader(mockEmailOnly))
-		require.NoError(t, err)
-		require.True(t, param.Director_SupportContact.IsSet())
-		ds, err := getDirectorSupportContact()
-		require.NoError(t, err)
-		assert.Equal(t, DirectorContact{Email: "help@example.org"}, ds)
-	})
-
-	t.Run("url-only", func(t *testing.T) {
-		viper.Reset()
-		viper.SetConfigType("yaml")
-		err := viper.ReadConfig(strings.NewReader(mockUrlOnly))
-		require.NoError(t, err)
-		require.True(t, param.Director_SupportContact.IsSet())
-		ds, err := getDirectorSupportContact()
-		require.NoError(t, err)
-		assert.Equal(t, DirectorContact{Url: "example.org/help"}, ds)
-	})
-
-	t.Run("both-value-set", func(t *testing.T) {
-		viper.Reset()
-		viper.SetConfigType("yaml")
-		err := viper.ReadConfig(strings.NewReader(mockAllPresent))
-		require.NoError(t, err)
-		require.True(t, param.Director_SupportContact.IsSet())
-		ds, err := getDirectorSupportContact()
-		require.NoError(t, err)
-		assert.Equal(t, DirectorContact{Email: "help@example.org", Url: "example.org/help"}, ds)
-	})
 }

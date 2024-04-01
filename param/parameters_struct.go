@@ -63,7 +63,8 @@ type Config struct {
 		OriginResponseHostnames []string
 		StatConcurrencyLimit int
 		StatTimeout time.Duration
-		SupportContact interface{}
+		SupportContactEmail string
+		SupportContactUrl string
 	}
 	DisableHttpProxy bool
 	DisableProxyFallback bool
@@ -310,7 +311,8 @@ type configWithType struct {
 		OriginResponseHostnames struct { Type string; Value []string }
 		StatConcurrencyLimit struct { Type string; Value int }
 		StatTimeout struct { Type string; Value time.Duration }
-		SupportContact struct { Type string; Value interface{} }
+		SupportContactEmail struct { Type string; Value string }
+		SupportContactUrl struct { Type string; Value string }
 	}
 	DisableHttpProxy struct { Type string; Value bool }
 	DisableProxyFallback struct { Type string; Value bool }

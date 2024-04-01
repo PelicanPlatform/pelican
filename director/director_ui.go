@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/web_ui"
 	log "github.com/sirupsen/logrus"
@@ -59,6 +60,11 @@ type (
 	statRequest struct {
 		MinResponses int `form:"min_responses"`
 		MaxResponses int `form:"max_responses"`
+	}
+
+	supportContactRes struct {
+		Email string `json:"email"`
+		Url   string `json:"url"`
 	}
 )
 
@@ -213,14 +219,12 @@ func handleAllowServer(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"message": "success"})
 }
 
+// Endpoint for director support contact information
 func handleDirectorContact(ctx *gin.Context) {
-	dc, err := getDirectorSupportContact()
-	if err != nil {
-		log.Error("Bad server configuration. Invalid format of director contact information configured: ", err)
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Bad server configuration. Invalid format of director contact information configured."})
-		return
-	}
-	ctx.JSON(http.StatusOK, dc)
+	email := param.Director_SupportContactEmail.GetString()
+	url := param.Director_SupportContactUrl.GetString()
+
+	ctx.JSON(http.StatusOK, supportContactRes{Email: email, Url: url})
 }
 
 func RegisterDirectorWebAPI(router *gin.RouterGroup) {
