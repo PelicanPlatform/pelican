@@ -85,7 +85,9 @@ func LaunchOriginFileTestMaintenance(ctx context.Context) {
 				if !entry.IsDir() {
 					fn := entry.Name()
 					if strings.HasPrefix(fn, "director") {
-						// Always leave the first item
+						// Rolling basis to remove the previous item and leave the last item,
+						// since the last item is the latest test file (by timestamp in the file name)
+						// and that os.ReadDir sorted file name in the directory
 						if dirPrevFile != "" {
 							err := os.Remove(filepath.Join(monitoringDir, dirPrevFile))
 							if err != nil {
