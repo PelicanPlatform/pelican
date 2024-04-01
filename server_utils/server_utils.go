@@ -25,6 +25,7 @@ package server_utils
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -72,8 +73,19 @@ func WaitUntilWorking(ctx context.Context, method, reqUrl, server string, expect
 					log.Debugln(server + " server appears to be functioning")
 					return nil
 				}
-				// We didn't get the expected status
-				return errors.Errorf("Received bad status code in reply to server ping: %d. Expected %d,", resp.StatusCode, expectedStatus)
+				bytes, err := io.ReadAll(resp.Body)
+				if err != nil {
+					// We didn't get the expected status
+					return errors.Errorf("Received bad status code in reply to server ping: %d. Expected %d.Can't read response body with error %v.", resp.StatusCode, expectedStatus, err)
+				} else {
+					if len(bytes) != 0 {
+						// We didn't get the expected status
+						return errors.Errorf("Received bad status code in reply to server ping: %d. Expected %d. Response body: %s", resp.StatusCode, expectedStatus, string(bytes))
+					} else {
+						return errors.Errorf("Received bad status code in reply to server ping: %d. Expected %d. Response body is empty.", resp.StatusCode, expectedStatus)
+					}
+				}
+
 			}
 		case <-ctx.Done():
 			return ctx.Err()
