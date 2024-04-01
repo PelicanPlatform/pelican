@@ -216,7 +216,7 @@ func TestGetExports(t *testing.T) {
 	})
 }
 
-func TestCheckSentinelFile(t *testing.T) {
+func TestCheckSentinelLocation(t *testing.T) {
 	tmpDir := t.TempDir()
 	tempStn := filepath.Join(tmpDir, "mock_sentinel")
 	file, err := os.Create(tempStn)
@@ -233,13 +233,13 @@ func TestCheckSentinelFile(t *testing.T) {
 		StoragePrefix:    tmpDir,
 		FederationPrefix: "/demo/foo/bar",
 		Capabilities:     server_structs.Capabilities{Reads: true},
-		SentinelFile:     "mock_sentinel",
+		SentinelLocation: "mock_sentinel",
 	}
 	mockExportInvalidStn := OriginExport{
 		StoragePrefix:    tmpDir,
 		FederationPrefix: "/demo/foo/bar",
 		Capabilities:     server_structs.Capabilities{Reads: true},
-		SentinelFile:     "sentinel_dne",
+		SentinelLocation: "sentinel_dne",
 	}
 
 	t.Run("empty-sentinel-return-ok", func(t *testing.T) {
@@ -247,7 +247,7 @@ func TestCheckSentinelFile(t *testing.T) {
 		exports = append(exports, mockExportNoStn)
 		exports = append(exports, mockExportNoStn)
 
-		ok, err := CheckSentinelFile(&exports)
+		ok, err := CheckSentinelLocation(&exports)
 		assert.NoError(t, err)
 		assert.True(t, ok)
 	})
@@ -257,7 +257,7 @@ func TestCheckSentinelFile(t *testing.T) {
 		exports = append(exports, mockExportNoStn)
 		exports = append(exports, mockExportValidStn)
 
-		ok, err := CheckSentinelFile(&exports)
+		ok, err := CheckSentinelLocation(&exports)
 		assert.NoError(t, err)
 		assert.True(t, ok)
 	})
@@ -268,7 +268,7 @@ func TestCheckSentinelFile(t *testing.T) {
 		exports = append(exports, mockExportValidStn)
 		exports = append(exports, mockExportInvalidStn)
 
-		ok, err := CheckSentinelFile(&exports)
+		ok, err := CheckSentinelLocation(&exports)
 		assert.Error(t, err)
 		assert.False(t, ok)
 	})

@@ -140,7 +140,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 			return shutdownCancel, err
 		}
 
-		ok, err := server_utils.CheckSentinelFile(originExports)
+		ok, err := server_utils.CheckSentinelLocation(originExports)
 		if err != nil && !ok {
 			return shutdownCancel, err
 		}

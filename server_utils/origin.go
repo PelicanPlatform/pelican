@@ -42,7 +42,7 @@ type (
 		StoragePrefix    string
 		FederationPrefix string
 		Capabilities     server_structs.Capabilities
-		SentinelFile     string
+		SentinelLocation string
 	}
 )
 
@@ -249,17 +249,17 @@ func GetOriginExports() (*[]OriginExport, error) {
 	return originExports, nil
 }
 
-func CheckSentinelFile(exports *[]OriginExport) (ok bool, err error) {
+func CheckSentinelLocation(exports *[]OriginExport) (ok bool, err error) {
 	for _, export := range *exports {
-		if export.SentinelFile != "" {
-			sentinelPath := path.Clean(export.SentinelFile)
+		if export.SentinelLocation != "" {
+			sentinelPath := path.Clean(export.SentinelLocation)
 			if path.Base(sentinelPath) != sentinelPath {
-				return false, fmt.Errorf("invalid SentinelFile path for StoragePrefix %s, file must not contain a directory. Got %s", export.StoragePrefix, export.SentinelFile)
+				return false, fmt.Errorf("invalid SentinelLocation path for StoragePrefix %s, file must not contain a directory. Got %s", export.StoragePrefix, export.SentinelLocation)
 			}
 			fullPath := filepath.Join(export.StoragePrefix, sentinelPath)
 			_, err := os.Stat(fullPath)
 			if err != nil {
-				return false, errors.Wrap(err, fmt.Sprintf("fail to open SentinelFile %s for StoragePrefix %s. Directory check failed", export.SentinelFile, export.StoragePrefix))
+				return false, errors.Wrap(err, fmt.Sprintf("fail to open SentinelLocation %s for StoragePrefix %s. Directory check failed", export.SentinelLocation, export.StoragePrefix))
 			}
 		}
 	}
