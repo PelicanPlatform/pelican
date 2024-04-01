@@ -1,5 +1,3 @@
-//go:build windows
-
 /***************************************************************
  *
  * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
@@ -18,24 +16,41 @@
  *
  ***************************************************************/
 
-package launchers
+package server_utils
 
 import (
-	"context"
+	"encoding/json"
+	"net/http"
+	"net/url"
 
 	"github.com/gin-gonic/gin"
-	"github.com/pkg/errors"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/param"
 )
 
+func exportOpenIDConfig(c *gin.Context) {
+	issuerURL, _ := url.Parse(param.Server_ExternalWebUrl.GetString())
+	jwksUri, _ := url.JoinPath(issuerURL.String(), "/.well-known/issuer.jwks")
+	jsonData := gin.H{
+		"issuer":   issuerURL.String(),
+		"jwks_uri": jwksUri,
+	}
 
-func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, modules config.ServerType) (server_structs.XRootDServer, error) {
-	return nil, errors.New("Cache module is not supported on Windows")
+	c.JSON(http.StatusOK, jsonData)
 }
 
-func CacheServeFinish(ctx context.Context, egrp *errgroup.Group) error {
-	return errors.New("Cache module is not supported on Windows")
+func exportIssuerJWKS(c *gin.Context) {
+	keys, _ := config.GetIssuerPublicJWKS()
+	buf, _ := json.MarshalIndent(keys, "", " ")
+
+	c.Data(http.StatusOK, "application/json; charset=utf-8", buf)
+}
+
+func RegisterOIDCAPI(engine *gin.Engine) {
+	group := engine.Group("/.well-known")
+	{
+		group.GET("/openid-configuration", exportOpenIDConfig)
+		group.GET("/issuer.jwks", exportIssuerJWKS)
+	}
 }
