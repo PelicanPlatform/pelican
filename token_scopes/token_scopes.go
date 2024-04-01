@@ -44,7 +44,7 @@ const (
 	Storage_Create TokenScope = "storage.create"
 	Storage_Modify TokenScope = "storage.modify"
 	Storage_Stage TokenScope = "storage.stage"
-	
+
 	// Lotman Scopes
 	Lot_Create TokenScope = "lot.create"
 	Lot_Read TokenScope = "lot.read"

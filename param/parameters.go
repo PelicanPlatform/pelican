@@ -329,8 +329,8 @@ var (
 	GeoIPOverrides = ObjectParam{"GeoIPOverrides"}
 	Issuer_AuthorizationTemplates = ObjectParam{"Issuer.AuthorizationTemplates"}
 	Issuer_OIDCAuthenticationRequirements = ObjectParam{"Issuer.OIDCAuthenticationRequirements"}
-	Origin_Exports = ObjectParam{"Origin.Exports"}
 	Lotman_Lots = ObjectParam{"Lotman.Lots"}
+	Origin_Exports = ObjectParam{"Origin.Exports"}
 	Registry_CustomRegistrationFields = ObjectParam{"Registry.CustomRegistrationFields"}
 	Registry_Institutions = ObjectParam{"Registry.Institutions"}
 	Shoveler_IPMapping = ObjectParam{"Shoveler.IPMapping"}
