@@ -321,12 +321,32 @@ func TestCorrectURLWithUnderscore(t *testing.T) {
 	}
 }
 
-func TestParseNoJobAd(t *testing.T) {
-	// Job ad file does not exist
-	tempDir := t.TempDir()
-	path := filepath.Join(tempDir, ".job.ad")
-	os.Setenv("_CONDOR_JOB_AD", path)
+// Test that the project name is correctly extracted from the job ad file
+func TestGetProjectName(t *testing.T) {
+	// Create a temporary file
+	tempFile, err := os.CreateTemp("", "test")
+	assert.NoError(t, err)
+	defer os.Remove(tempFile.Name())
 
-	payload := payloadStruct{}
-	parseJobAd(&payload)
+	// Write a project name to the file
+	_, err = tempFile.WriteString("ProjectName = \"testProject\"")
+	assert.NoError(t, err)
+	tempFile.Close()
+	t.Run("TestNoJobAd", func(t *testing.T) {
+		// Unset this environment var
+		os.Unsetenv("_CONDOR_JOB_AD")
+		// Call GetProjectName and check the result
+		projectName := GetProjectName()
+		assert.Equal(t, "", projectName)
+	})
+
+	t.Run("TestJobAd", func(t *testing.T) {
+		// Set the _CONDOR_JOB_AD environment variable to the temp file's name
+		os.Setenv("_CONDOR_JOB_AD", tempFile.Name())
+		defer os.Unsetenv("_CONDOR_JOB_AD")
+
+		// Call GetProjectName and check the result
+		projectName := GetProjectName()
+		assert.Equal(t, "testProject", projectName)
+	})
 }

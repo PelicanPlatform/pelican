@@ -765,7 +765,7 @@ func InitConfig() {
 			log.Errorf("Failed to access specified log file. Error: %v", err)
 			os.Exit(1)
 		}
-		fmt.Printf("Logging.LogLocation is set to %s. All logs are redirected to the log file.\n", logLocation)
+		fmt.Fprintf(os.Stderr, "Logging.LogLocation is set to %s. All logs are redirected to the log file.\n", logLocation)
 		log.SetOutput(f)
 	}
 
@@ -1048,14 +1048,43 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 	if webPort < 0 {
 		return errors.Errorf("the Server.WebPort setting of %d is invalid; TCP ports must be greater than 0", webPort)
 	}
-	viper.SetDefault("Server.ExternalWebUrl", fmt.Sprint("https://", hostname, ":", webPort))
+	if webPort != 443 {
+		viper.SetDefault("Server.ExternalWebUrl", fmt.Sprintf("https://%s:%d", hostname, webPort))
+	} else {
+		viper.SetDefault("Server.ExternalWebUrl", fmt.Sprintf("https://%s", hostname))
+	}
 	externalAddressStr := param.Server_ExternalWebUrl.GetString()
-	if _, err = url.Parse(externalAddressStr); err != nil {
-		return errors.Wrap(err, fmt.Sprint("Invalid Server.ExternalWebUrl: ", externalAddressStr))
+	parsedExtAdd, err := url.Parse(externalAddressStr)
+	if err != nil {
+		return errors.Wrap(err, fmt.Sprint("invalid Server.ExternalWebUrl: ", externalAddressStr))
+	} else {
+		// We get rid of any 443 port if present to be consistent
+		if parsedExtAdd.Port() == "443" {
+			parsedExtAdd.Host = parsedExtAdd.Hostname()
+			viper.Set("Server.ExternalWebUrl", parsedExtAdd.String())
+		}
 	}
 
-	if currentServers.IsEnabled(DirectorType) && param.Federation_DirectorUrl.GetString() == "" {
-		viper.SetDefault("Federation.DirectorUrl", viper.GetString("Server.ExternalWebUrl"))
+	if currentServers.IsEnabled(DirectorType) {
+		// Default to Server.ExternalWebUrl. Provided Federation.DirectorUrl will overwrite this if any
+		viper.SetDefault("Federation.DirectorUrl", param.Server_ExternalWebUrl.GetString())
+
+		minStatRes := param.Director_MinStatResponse.GetInt()
+		maxStatRes := param.Director_MaxStatResponse.GetInt()
+		if minStatRes <= 0 || maxStatRes <= 0 {
+			return errors.New("Invalid Director.MinStatResponse and Director.MaxStatResponse. MaxStatResponse and MinStatResponse must be positive integers")
+		}
+		if maxStatRes < minStatRes {
+			return errors.New("Invalid Director.MinStatResponse and Director.MaxStatResponse. MaxStatResponse is less than MinStatResponse")
+		}
+	}
+
+	if currentServers.IsEnabled(RegistryType) {
+		viper.SetDefault("Federation.RegistryUrl", param.Server_ExternalWebUrl.GetString())
+	}
+
+	if currentServers.IsEnabled(BrokerType) {
+		viper.SetDefault("Federation.BrokerURL", param.Server_ExternalWebUrl.GetString())
 	}
 
 	tokenRefreshInterval := param.Monitoring_TokenRefreshInterval.GetDuration()
@@ -1065,17 +1094,6 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 		viper.Set("Monitoring.TokenRefreshInterval", time.Minute*5)
 		viper.Set("Monitoring.TokenExpiresIn", time.Hour*1)
 		log.Warningln("Invalid Monitoring.TokenRefreshInterval or Monitoring.TokenExpiresIn. Fallback to 5m for refresh interval and 1h for valid interval")
-	}
-
-	if currentServers.IsEnabled(DirectorType) {
-		minStatRes := param.Director_MinStatResponse.GetInt()
-		maxStatRes := param.Director_MaxStatResponse.GetInt()
-		if minStatRes <= 0 || maxStatRes <= 0 {
-			return errors.New("Invalid Director.MinStatResponse and Director.MaxStatResponse. MaxStatResponse and MinStatResponse must be positive integers")
-		}
-		if maxStatRes < minStatRes {
-			return errors.New("Invalid Director.MinStatResponse and Director.MaxStatResponse. MaxStatResponse is less than MinStatResponse")
-		}
 	}
 
 	// Unmarshal Viper config into a Go struct

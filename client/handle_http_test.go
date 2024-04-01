@@ -187,7 +187,7 @@ func TestSlowTransfers(t *testing.T) {
 	var err error
 	// Do a quick timeout
 	go func() {
-		_, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], filepath.Join(t.TempDir(), "test.txt"), -1, "", nil)
+		_, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], filepath.Join(t.TempDir(), "test.txt"), -1, "", "")
 		finishedChannel <- true
 	}()
 
@@ -258,7 +258,7 @@ func TestStoppedTransfer(t *testing.T) {
 	var err error
 
 	go func() {
-		_, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], filepath.Join(t.TempDir(), "test.txt"), -1, "", nil)
+		_, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], filepath.Join(t.TempDir(), "test.txt"), -1, "", "")
 		finishedChannel <- true
 	}()
 
@@ -290,7 +290,7 @@ func TestConnectionError(t *testing.T) {
 	addr := l.Addr().String()
 	l.Close()
 
-	_, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: &url.URL{Host: addr, Scheme: "http"}, Proxy: false}, filepath.Join(t.TempDir(), "test.txt"), -1, "", nil)
+	_, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: &url.URL{Host: addr, Scheme: "http"}, Proxy: false}, filepath.Join(t.TempDir(), "test.txt"), -1, "", "")
 
 	assert.IsType(t, &ConnectionSetupError{}, err)
 
@@ -325,7 +325,7 @@ func TestTrailerError(t *testing.T) {
 	assert.Equal(t, svr.URL, transfers[0].Url.String())
 
 	// Call DownloadHTTP and check if the error is returned correctly
-	_, _, _, err := downloadHTTP(ctx, nil, nil, transfers[0], filepath.Join(t.TempDir(), "test.txt"), -1, "", nil)
+	_, _, _, err := downloadHTTP(ctx, nil, nil, transfers[0], filepath.Join(t.TempDir(), "test.txt"), -1, "", "")
 
 	assert.NotNil(t, err)
 	assert.EqualError(t, err, "transfer error: Unable to read test.txt; input/output error")
@@ -449,4 +449,69 @@ func TestSortAttempts(t *testing.T) {
 	assert.Equal(t, int64(42), size)
 	assert.Equal(t, svr2.URL, results[0].Url.String())
 	assert.Equal(t, svr3.URL, results[1].Url.String())
+}
+
+func TestTimeoutHeaderSetForDownload(t *testing.T) {
+	viper.Reset()
+	viper.Set("Transport.ResponseHeaderTimeout", 10*time.Second)
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+
+	// We have this flag because our server will get a few requests throughout its lifetime and the other
+	// requests do not contain the X-Pelican-Timeout header
+	timeoutHeaderFound := false
+
+	// Create a mock server to download from
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Check if the "X-Pelican-Timeout" header is set
+		if !timeoutHeaderFound {
+			if r.Header.Get("X-Pelican-Timeout") == "" {
+				t.Error("X-Pelican-Timeout header is not set")
+			}
+			assert.Equal(t, "10s", r.Header.Get("X-Pelican-Timeout"))
+			timeoutHeaderFound = true
+		}
+	}))
+	defer server.Close()
+
+	serverURL, err := url.Parse(server.URL)
+	assert.NoError(t, err)
+	_, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: serverURL, Proxy: false}, filepath.Join(t.TempDir(), "test.txt"), -1, "", "")
+	assert.NoError(t, err)
+	viper.Reset()
+}
+
+// Server test object for testing user agent
+type (
+	server_test struct {
+		server     *httptest.Server
+		user_agent *string
+	}
+)
+
+// Test to ensure the user-agent header is being updating in the request made within DownloadHTTP()
+func TestProjInUserAgent(t *testing.T) {
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+
+	server_test := server_test{}
+	// Create a mock server to download from
+	server_test.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Note: we check for this HEAD request because within DownloadHTTP() we make a HEAD request to get the content length
+		// This request is a different user-agent header (and different request) so we need to ignore it so server_test.user_agent is not overwritten
+		if r.Method == "HEAD" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		userAgent := r.UserAgent()
+		server_test.user_agent = &userAgent
+	}))
+	defer server_test.server.Close()
+	defer server_test.server.CloseClientConnections()
+
+	serverURL, err := url.Parse(server_test.server.URL)
+	assert.NoError(t, err)
+	_, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: serverURL, Proxy: false}, filepath.Join(t.TempDir(), "test.txt"), -1, "", "test")
+	assert.NoError(t, err)
+
+	// Test the user-agent header is what we expect it to be
+	assert.Equal(t, "pelican-client/"+config.GetVersion()+" project/test", *server_test.user_agent)
 }

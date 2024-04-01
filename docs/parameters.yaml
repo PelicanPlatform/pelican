@@ -1026,6 +1026,14 @@ type: bool
 default: true
 components: ["director"]
 ---
+name: Director.FilteredServers
+description: >-
+  A list of server host names to not to redirect client requests to. This is for admins to put a list of
+  servers in the federation into downtime.
+type: stringSlice
+default: none
+components: ["director"]
+---
 ############################
 #  Registry-level configs  #
 ############################
@@ -1244,8 +1252,10 @@ components: ["origin", "director", "registry"]
 name: Server.ExternalWebUrl
 description: >-
   A URL indicating the Pelican web interface and internal web APIs address as it appears externally.
+
+  Port number will be stripped if it's 443, from `Server.WebPort` or directly set through `Server.ExternalWebUrl`
 type: url
-default: https://${Server.Hostname}:${Server.WebPort}
+default: https://${Server.Hostname}:${Server.WebPort} (for ${Server.WebPort} != 443)
 components: ["origin", "director", "registry"]
 ---
 name: Server.Hostname

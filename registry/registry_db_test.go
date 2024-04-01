@@ -159,26 +159,6 @@ var (
 	}
 )
 
-func TestNamespaceExistsByPrefix(t *testing.T) {
-	setupMockRegistryDB(t)
-	defer teardownMockNamespaceDB(t)
-
-	t.Run("return-false-for-prefix-dne", func(t *testing.T) {
-		found, err := namespaceExistsByPrefix("/non-existed-namespace")
-		require.NoError(t, err)
-		assert.False(t, found)
-	})
-
-	t.Run("return-true-for-existing-ns", func(t *testing.T) {
-		resetNamespaceDB(t)
-		err := insertMockDBData([]Namespace{{Prefix: "/foo"}})
-		require.NoError(t, err)
-		found, err := namespaceExistsByPrefix("/foo")
-		require.NoError(t, err)
-		assert.True(t, found)
-	})
-}
-
 func TestGetNamespaceById(t *testing.T) {
 	setupMockRegistryDB(t)
 	defer teardownMockNamespaceDB(t)
@@ -785,12 +765,12 @@ func TestRegistryTopology(t *testing.T) {
 	require.NoError(t, err)
 
 	// Check that topology namespace exists
-	exists, err := namespaceExists("/topo/foo")
+	exists, err := namespaceExistsByPrefix("/topo/foo")
 	require.NoError(t, err)
 	require.True(t, exists)
 
 	// Check that topology namespace exists
-	exists, err = namespaceExists("/topo/bar")
+	exists, err = namespaceExistsByPrefix("/topo/bar")
 	require.NoError(t, err)
 	require.True(t, exists)
 
@@ -806,12 +786,12 @@ func TestRegistryTopology(t *testing.T) {
 	require.NoError(t, err)
 
 	// Check that the regular namespace exists
-	exists, err = namespaceExists("/regular/foo")
+	exists, err = namespaceExistsByPrefix("/regular/foo")
 	require.NoError(t, err)
 	require.True(t, exists)
 
 	// Check that a bad namespace doesn't exist
-	exists, err = namespaceExists("/bad/namespace")
+	exists, err = namespaceExistsByPrefix("/bad/namespace")
 	require.NoError(t, err)
 	require.False(t, exists)
 
@@ -830,22 +810,22 @@ func TestRegistryTopology(t *testing.T) {
 	require.NoError(t, err)
 
 	// Check that /topo/foo still exists
-	exists, err = namespaceExists("/topo/foo")
+	exists, err = namespaceExistsByPrefix("/topo/foo")
 	require.NoError(t, err)
 	require.True(t, exists)
 
 	// And that /topo/baz was added
-	exists, err = namespaceExists("/topo/baz")
+	exists, err = namespaceExistsByPrefix("/topo/baz")
 	require.NoError(t, err)
 	require.True(t, exists)
 
 	// Check that /topo/bar is gone
-	exists, err = namespaceExists("/topo/bar")
+	exists, err = namespaceExistsByPrefix("/topo/bar")
 	require.NoError(t, err)
 	require.False(t, exists)
 
 	// Finally, check that /regular/foo survived
-	exists, err = namespaceExists("/regular/foo")
+	exists, err = namespaceExistsByPrefix("/regular/foo")
 	require.NoError(t, err)
 	require.True(t, exists)
 
