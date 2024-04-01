@@ -87,9 +87,11 @@ RUN yum install -y goreleaser npm xrootd-devel xrootd-server-devel xrootd-client
 ADD https://api.github.com/repos/PelicanPlatform/xrdcl-pelican/git/refs/heads/main /tmp/hash-xrdcl-pelican
 
 # Install xrdcl-pelican plugin and replace the xrdcl-http plugin
+# Ping the xrdcl-pelican plugin at a specific commit
 RUN \
     git clone https://github.com/PelicanPlatform/xrdcl-pelican.git && \
     cd xrdcl-pelican && \
+    git reset 9562795 --hard && \
     mkdir build && cd build && \
     cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
     make && make install
@@ -98,9 +100,11 @@ ADD https://api.github.com/repos/PelicanPlatform/xrootd-s3-http/git/refs/heads/m
 
 # Install the S3 and HTTP server plugins for XRootD. For now we do this from source
 # until we can sort out the RPMs.
+# Ping the http plugin at a specific commit
 RUN \
     git clone https://github.com/PelicanPlatform/xrootd-s3-http.git && \
     cd xrootd-s3-http && \
+    git reset a0eb944 --hard && \
     mkdir build && cd build && \
     cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
     make install
@@ -120,9 +124,11 @@ RUN git clone https://github.com/pboettch/json-schema-validator.git && \
     cd build && cmake -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_INSTALL_PREFIX=/usr .. && \
     make -j`nproc` install
 #Finally LotMan proper. For now we do this from source until we can sort out the RPMs.
+#Ping LotMan at a specific commit
 RUN \
     git clone https://github.com/PelicanPlatform/lotman.git && \
     cd lotman && \
+    git reset 2dd3738 --hard && \
     mkdir build && cd build && \
     # LotMan CMakeLists.txt needs to be updated to use -DLIB_INSTALL_DIR. Issue #6
     cmake -DCMAKE_INSTALL_PREFIX=/usr .. && \
