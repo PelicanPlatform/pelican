@@ -807,7 +807,7 @@ func HandlePacket(packet []byte) error {
 			for _, js := range strJsons {
 				cacheStat := CacheGS{}
 				if err := json.Unmarshal([]byte(js), &cacheStat); err != nil {
-					return errors.Wrap(err, "fail to parse cache stat json. Raw data is "+string(js))
+					return errors.Wrap(err, "failed to parse cache stat json. Raw data is "+string(js))
 				}
 
 				prefix := computePrefix(cacheStat.Lfn, monitorPaths)
