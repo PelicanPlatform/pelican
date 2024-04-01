@@ -57,8 +57,6 @@ func setupLotmanFromConf(t *testing.T, readConfig bool, name string) (bool, func
 	success := InitLotman()
 	//reset func
 	return success, func() {
-		lotmanInitTried = false
-		lotmanInitSuccess = false
 		viper.Reset()
 	}
 }
@@ -74,18 +72,7 @@ func TestLotmanInit(t *testing.T) {
 		require.False(t, success)
 	})
 
-	t.Run("TestAlreadyTried", func(t *testing.T) {
-		// Now a test that should pass, except we fail because we only try init once per session
-		lotmanInitTried = true
-		lotmanInitSuccess = false
-		viper.Set("Federation.DiscoveryUrl", "https://fake-federation.com")
-		success, cleanup := setupLotmanFromConf(t, false, "LotmanAlreadyTried")
-		defer cleanup()
-		require.False(t, success)
-	})
-
 	t.Run("TestGoodInit", func(t *testing.T) {
-		// Re-run the test that should pass
 		viper.Set("Log.Level", "debug")
 		viper.Set("Federation.DiscoveryUrl", "https://fake-federation.com")
 		success, cleanup := setupLotmanFromConf(t, false, "LotmanGoodInit")

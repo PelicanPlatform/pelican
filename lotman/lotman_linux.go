@@ -18,6 +18,8 @@
 *
 ***************************************************************/
 
+// The LotMan library is used for managing storage in Pelican caches. For more information, see:
+// https://github.com/pelicanplatform/lotman
 package lotman
 
 import (
@@ -39,10 +41,6 @@ import (
 var (
 	// A mutex for the Lotman caller context -- make sure we're calling lotman functions with the appropriate caller
 	callerMutex = sync.RWMutex{}
-
-	// Global vars used for one-time Lotman lib initialization
-	lotmanInitTried   = false
-	lotmanInitSuccess = false
 
 	initializedLots []Lot
 
@@ -178,6 +176,8 @@ func (i Int64FromFloat) MarshalJSON() ([]byte, error) {
 	return json.Marshal(i.Value)
 }
 
+// Convert a cArray to a Go slice of strings. The cArray is a null-terminated
+// array of null-terminated strings.
 func cArrToGoArr(cArr *unsafe.Pointer) []string {
 	ptr := uintptr(*cArr)
 	var goArr []string
@@ -256,11 +256,6 @@ func getLotmanLib() string {
 }
 
 func GetAuthorizedCallers(lotName string) (*[]string, error) {
-	success := InitLotman()
-	if !success {
-		return nil, errors.New("Failed to initialize LotMan")
-	}
-
 	// A caller is authorized if they own a parent of the lot. In the case of self-parenting lots, the owner is authorized.
 	errMsg := make([]byte, 2048)
 	cParents := unsafe.Pointer(nil)
@@ -300,15 +295,23 @@ func GetAuthorizedCallers(lotName string) (*[]string, error) {
 	return &owners, nil
 }
 
+// Under our model, we set owner to the issuer. Since this is owned by the federation, we set it in order of preference:
+// 1. The federation's discovery url
+// 2. The federation's director url
+// TODO: Consider what happens to the lot if either of these values change in the future after the lot is created?
+func getFederationIssuer() string {
+	federationIssuer := param.Federation_DiscoveryUrl.GetString()
+	if federationIssuer == "" {
+		federationIssuer = param.Federation_DirectorUrl.GetString()
+	}
+
+	return federationIssuer
+}
+
 // Initialize the LotMan library and bind its functions to the global vars
 // We also perform a bit of extra setup such as setting the lotman db location
 func InitLotman() bool {
-	// If we've already tried to init the library, return the result of that attempt
-	if lotmanInitTried {
-		return lotmanInitSuccess
-	}
 	log.Infof("Initializing LotMan...")
-	lotmanInitTried = true
 
 	// dlopen the LotMan library
 	lotmanLib, err := purego.Dlopen(getLotmanLib(), purego.RTLD_NOW|purego.RTLD_GLOBAL)
@@ -356,10 +359,7 @@ func InitLotman() bool {
 		log.Warningf("Error while unmarshaling Lots from config: %v", err)
 	}
 
-	federationIssuer := param.Federation_DiscoveryUrl.GetString()
-	if federationIssuer == "" {
-		federationIssuer = param.Federation_DirectorUrl.GetString()
-	}
+	federationIssuer := getFederationIssuer()
 
 	callerMutex.Lock()
 	defer callerMutex.Unlock()
@@ -401,14 +401,8 @@ func InitLotman() bool {
 
 		if !defaultInitialized {
 			// Create the default lot
-
-			// Under our model, we set owner to the issuer. Since this is owned by the federation, we set it in order of preference:
-			// 1. The federation's discovery url
-			// 2. The federation's director url
-			// TODO: Consider what happens to the lot if either of these values change in the future after the lot is created?
-
 			if federationIssuer == "" {
-				log.Errorf("no federation issuer set in config")
+				log.Errorf("your federation's issuer could not be deduced from your config's federation discovery URL or director URL")
 				return false
 			}
 
@@ -476,7 +470,7 @@ func InitLotman() bool {
 		if !rootInitialized {
 			// Create the root lot based on predefined setup
 			if federationIssuer == "" {
-				log.Errorf("no federation issuer set in config")
+				log.Errorf("your federation's issuer could not be deduced from your config's federation discovery URL or director URL")
 				return false
 			}
 
@@ -539,16 +533,34 @@ func InitLotman() bool {
 	}
 
 	log.Infof("LotMan initialization complete")
-	lotmanInitSuccess = true
 	return true
 }
 
+// Create a lot in the lot database with the given lot struct. The caller is the entity that
+// is creating the lot, and is used to determine whether we want to allow the creation to go through.
+// Here, caller is used to determine whether this lot is allowed to create any sublots of an indicated
+// parent lot. The lot struct has the form:
+//
+//	{
+//	  "lot_name": "lot_name", (REQUIRED)
+//	  "owner": "owner", (REQUIRED)
+//	  "parents": ["parent1", "parent2"], (REQUIRED)
+//	  "paths": [
+//	    {
+//	      "path": "path",
+//	      "recursive": true/false
+//	    }
+//	  ], (OPTIONAL)
+//	  "management_policy_attrs": {
+//	    "dedicated_GB": 0.0,
+//	    "opportunistic_GB": 0.0,
+//	    "max_num_objects": 0,
+//	    "creation_time": 0,
+//	    "expiration_time": 0,
+//	    "deletion_time": 0
+//	  } (REQUIRED)
+//	}
 func CreateLot(newLot *Lot, caller string) error {
-	success := InitLotman()
-	if !success {
-		return errors.New("Failed to initialize LotMan")
-	}
-
 	// Marshal the JSON into a string for the C function
 	lotJSON, err := json.Marshal(*newLot)
 	if err != nil {
@@ -575,12 +587,11 @@ func CreateLot(newLot *Lot, caller string) error {
 	return nil
 }
 
+// Given a lot name, get the lot from the lot database. If recursive is true, we'll also
+// determine all hierarchical restrictions on the lot. For example, if the lot "foo" has
+// dedicated_GB = 2.0 but its parent lot "bar" has dedicated_GB = 1.0, then calling this
+// with recusrive = true will indicate the restricting value and the lot it comes from.
 func GetLot(lotName string, recursive bool) (*Lot, error) {
-	success := InitLotman()
-	if !success {
-		return nil, errors.New("Failed to initialize LotMan")
-	}
-
 	// Haven't given much thought to these buff sizes yet
 	outputBuf := make([]byte, 4096)
 	errMsg := make([]byte, 2048)
@@ -599,12 +610,37 @@ func GetLot(lotName string, recursive bool) (*Lot, error) {
 	return &lot, nil
 }
 
+// Update a lot in the lot database with the given lotUpdate struct. The caller is the entity that
+// is updating the lot, and is used to determine whether we want to allow the update to go through.
+// In general, a valid caller is one that matches the owner of any of the lot's parents.
+// The lot update struct has the form:
+//
+//	{
+//	  "lot_name": "lot_name", (REQUIRED)
+//	  "owner": "new_owner", (OPTIONAL)
+//	  "parents": [
+//	    {
+//	      "current": "current_parent",
+//	      "new": "new_parent"
+//	    }
+//	  ], (OPTIONAL)
+//	  "paths": [
+//	    {
+//	      "current": "current_path",
+//	      "new": "new_path",
+//	      "recursive": true/false
+//	    }
+//	  ], (OPTIONAL)
+//	  "management_policy_attrs": {
+//	    "dedicated_GB": 0.0,
+//	    "opportunistic_GB": 0.0,
+//	    "max_num_objects": 0,
+//	    "creation_time": 0,
+//	    "expiration_time": 0,
+//	    "deletion_time": 0
+//	  } (OPTIONAL)
+//	}
 func UpdateLot(lotUpdate *LotUpdate, caller string) error {
-	success := InitLotman()
-	if !success {
-		return errors.New("Failed to initialize LotMan")
-	}
-
 	// Marshal the JSON into a string for the C function
 	updateJSON, err := json.Marshal(*lotUpdate)
 	if err != nil {
@@ -629,12 +665,10 @@ func UpdateLot(lotUpdate *LotUpdate, caller string) error {
 	return nil
 }
 
+// Delete a lot from the lot database. The caller is the entity that is deleting the lot, and is used to determine
+// whether we want to allow the deletion to go through. In general, a valid caller is one that matches an owner from
+// any of the lot's recursive parents. This function deletes the lot and all of its children.
 func DeleteLotsRecursive(lotName string, caller string) error {
-	success := InitLotman()
-	if !success {
-		return errors.New("Failed to initialize LotMan")
-	}
-
 	errMsg := make([]byte, 2048)
 	callerMutex.Lock()
 	defer callerMutex.Unlock()
