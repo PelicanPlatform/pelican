@@ -100,6 +100,7 @@ func Setup(t *testing.T, ctx context.Context, egrp *errgroup.Group) {
 		Prefix:   "/caches/" + param.Server_Hostname.GetString(),
 		Pubkey:   string(keysetBytes),
 		Identity: "test_data",
+		Topology: false,
 	})
 	require.NoError(t, err)
 	err = registry.AddNamespace(&registry.Namespace{
@@ -107,6 +108,7 @@ func Setup(t *testing.T, ctx context.Context, egrp *errgroup.Group) {
 		Prefix:   "/foo",
 		Pubkey:   string(keysetBytes),
 		Identity: "test_data",
+		Topology: false,
 	})
 	require.NoError(t, err)
 

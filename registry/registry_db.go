@@ -80,6 +80,7 @@ type Namespace struct {
 	Identity      string                 `json:"identity" post:"exclude"`
 	AdminMetadata AdminMetadata          `json:"admin_metadata" gorm:"serializer:json"`
 	CustomFields  map[string]interface{} `json:"custom_fields" gorm:"serializer:json"`
+	Topology      bool                   `json:"topology" post:"exclude"`
 }
 
 type NamespaceWOPubkey struct {
@@ -162,7 +163,7 @@ func IsValidRegStatus(s string) bool {
 func createTopologyTable() error {
 	err := db.AutoMigrate(&Topology{})
 	if err != nil {
-		return fmt.Errorf("Failed to migrate topology table: %v", err)
+		return fmt.Errorf("failed to migrate topology table: %v", err)
 	}
 	return nil
 }
@@ -171,23 +172,19 @@ func createTopologyTable() error {
 func namespaceExistsByPrefix(prefix string) (bool, error) {
 	var count int64
 
-	err := db.Model(&Namespace{}).Where("prefix = ?", prefix).Count(&count).Error
+	err := db.Model(&Topology{}).Where("prefix = ?", prefix).Count(&count).Error
 	if err != nil {
 		return false, err
 	}
 	if count > 0 {
 		return true, nil
 	} else {
-		if config.GetPreferredPrefix() == "OSDF" {
-			// Perform a count across both 'namespace' and 'topology' tables
-			err := db.Model(&Topology{}).Where("prefix = ?", prefix).Count(&count).Error
-			if err != nil {
-				return false, err
-			}
-			return count > 0, nil
+		err = db.Model(&Namespace{}).Where("prefix = ?", prefix).Count(&count).Error
+		if err != nil {
+			return false, err
 		}
+		return count > 0, nil
 	}
-	return false, nil
 }
 
 func namespaceSupSubChecks(prefix string) (superspaces []string, subspaces []string, inTopo bool, err error) {
@@ -336,12 +333,23 @@ func getNamespaceByPrefix(prefix string) (*Namespace, error) {
 	if prefix == "" {
 		return nil, errors.New("Invalid prefix. Prefix must not be empty")
 	}
-	ns := Namespace{}
-	err := db.Where("prefix = ? ", prefix).Last(&ns).Error
+	tp := Topology{}
+	err := db.Where("prefix = ?", prefix).Last(&tp).Error
+	var ns = Namespace{}
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, fmt.Errorf("namespace with id %q not found in database", prefix)
+		err := db.Where("prefix = ? ", prefix).Last(&ns).Error
+		ns.Topology = false
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("namespace with id %q not found in database", prefix)
+		} else if err != nil {
+			return nil, errors.Wrap(err, "error retrieving pubkey")
+		}
 	} else if err != nil {
 		return nil, errors.Wrap(err, "error retrieving pubkey")
+	} else {
+		ns.ID = tp.ID
+		ns.Prefix = tp.Prefix
+		ns.Topology = true
 	}
 
 	// By default, JSON unmarshal will convert any generic number to float
