@@ -270,8 +270,8 @@ func GetAuthorizedCallers(lotName string) (*[]string, error) {
 
 	parents := cArrToGoArr(&cParents)
 
-	owners := []string{}
-	internalOwners := []string{}
+	// Use a map to handle deduplication of owners list
+	ownersSet := make(map[string]struct{})
 	for _, parent := range parents {
 		cOwners := unsafe.Pointer(nil)
 		LotmanGetLotOwners(parent, true, &cOwners, &errMsg)
@@ -280,16 +280,15 @@ func GetAuthorizedCallers(lotName string) (*[]string, error) {
 			return nil, errors.Errorf("Failed to determine appropriate owners of %s's parents: %s", lotName, string(errMsg))
 		}
 
-		internalOwners = append(internalOwners, cArrToGoArr(&cOwners)...)
+		for _, owner := range cArrToGoArr(&cOwners) {
+			ownersSet[owner] = struct{}{}
+		}
 	}
 
-	// Deduplicate the owners
-	occurred := map[string]bool{}
-	for e := range internalOwners {
-		if !occurred[internalOwners[e]] {
-			occurred[internalOwners[e]] = true
-			owners = append(owners, internalOwners[e])
-		}
+	// Convert the keys of the map to a slice
+	owners := make([]string, 0, len(ownersSet))
+	for owner := range ownersSet {
+		owners = append(owners, owner)
 	}
 
 	return &owners, nil

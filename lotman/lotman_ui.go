@@ -43,6 +43,13 @@ import (
 	"github.com/pelicanplatform/pelican/utils"
 )
 
+type LotAction string
+
+var (
+	LotUpdateAction LotAction = "modify"
+	LotDeleteAction LotAction = "delete"
+)
+
 // Given a token and a list of authorized callers, check that the token is signed by one of the authorized callers. Return
 // a pointer to the parsed token.
 func tokenSignedByAuthorizedCaller(strToken string, authorizedCallers *[]string) (bool, *jwt.Token, error) {
@@ -77,7 +84,8 @@ func VerifyNewLotToken(lot *Lot, strToken string) (bool, error) {
 
 	// Get the path associated with the lot (right now we assume/enforce a single path) and try
 	// to deduce a namespace prefix from that. We'll use that namespace prefix's issuer as the
-	// owner of the lot. If there is no associated isuer, we assign ownership to the federation
+	// lot's owner field (which is the data owner). If there is no associated isuer, we assign
+	// ownership to the federation
 
 	path := ((lot.Paths)[0]).Path
 	log.Debugf("Attempting to add lot for path: %s", path)
@@ -105,17 +113,10 @@ func VerifyNewLotToken(lot *Lot, strToken string) (bool, error) {
 	}
 
 	var tok jwt.Token
-	if len(lot.Parents) == 0 && lot.Parents[0] == "root" {
+	if len(lot.Parents) != 0 && lot.Parents[0] == "root" {
 		// We check that the token is signed by the federation
 		// First check for discovery URL and then for director URL, both of which should host the federation's pubkey
-		issuerUrl := param.Federation_DiscoveryUrl.GetString()
-		if issuerUrl == "" {
-			issuerUrl = param.Federation_DirectorUrl.GetString()
-			if issuerUrl == "" {
-				return false, errors.New("Federation discovery URL and director URL are not set")
-			}
-			log.Debugln("Federation discovery URL is not set, using director URL as lot token issuer")
-		}
+		issuerUrl := getFederationIssuer()
 
 		kSet, err := server_utils.GetJWKSFromIssUrl(issuerUrl)
 		if err != nil {
@@ -128,9 +129,8 @@ func VerifyNewLotToken(lot *Lot, strToken string) (bool, error) {
 		}
 	} else {
 
-		// For each parent that might be here, get all owners and check that the token is signed by one of them
-		owners := []string{}
-		internalOwners := []string{}
+		// Use a map to handle deduplication of owners list
+		ownersSet := make(map[string]struct{})
 		for _, parent := range lot.Parents {
 			cOwners := unsafe.Pointer(nil)
 			LotmanGetLotOwners(parent, true, &cOwners, &errMsg)
@@ -138,20 +138,14 @@ func VerifyNewLotToken(lot *Lot, strToken string) (bool, error) {
 				trimBuf(&errMsg)
 				return false, errors.Errorf("Error getting lot JSON: %s", string(errMsg))
 			}
-			internalOwners = append(internalOwners, cArrToGoArr(&cOwners)...)
-		}
 
-		// Handle possible duplicates
-		occurred := map[string]bool{}
-		for e := range internalOwners {
-			if !occurred[internalOwners[e]] {
-				occurred[internalOwners[e]] = true
-				owners = append(owners, internalOwners[e])
+			for _, owner := range cArrToGoArr(&cOwners) {
+				ownersSet[owner] = struct{}{}
 			}
 		}
 
 		ownerFound := false
-		for _, owner := range owners {
+		for owner := range ownersSet {
 			kSet, err := server_utils.GetJWKSFromIssUrl(owner)
 
 			// Print the kSet as a string for debugging
@@ -257,12 +251,14 @@ func VerifyNewLotToken(lot *Lot, strToken string) (bool, error) {
 	return true, nil
 }
 
-func VerifyDeleteLotToken(lotName string, strToken string) (bool, error) {
+// Actions that modify lots themselves (be it delete or modify) require the same authorization. This function
+// verifies the token against the requested action.
+func VerifyLotModTokens(lotName string, strToken string, action LotAction) (bool, error) {
 	// Get all parents of the lot, which we use to determine owners who can modify the lot itself (as opposed
 	// to the data in the lot).
 	tokenApproved := false
 
-	log.Debugf("Attempting to delete lot %s", lotName)
+	log.Debugf("Attempting to %s lot %s", action, lotName)
 	authzCallers, err := GetAuthorizedCallers(lotName)
 	if err != nil {
 		return false, errors.Wrap(err, "Error getting authorized callers")
@@ -287,64 +283,31 @@ func VerifyDeleteLotToken(lotName string, strToken string) (bool, error) {
 	}
 	scopes := strings.Split(scope, " ")
 	for _, scope := range scopes {
-		if scope == token_scopes.Lot_Delete.String() {
-			tokenApproved = true
-			break
+		switch action {
+		case LotUpdateAction:
+			if scope == token_scopes.Lot_Modify.String() {
+				tokenApproved = true
+				break
+			}
+		case LotDeleteAction:
+			if scope == token_scopes.Lot_Delete.String() {
+				tokenApproved = true
+				break
+			}
+		default:
+			return false, errors.New(fmt.Sprintf("invalid lot action: %s", action))
 		}
 	}
 
 	if !tokenApproved {
-		return false, errors.New("The token was correctly signed but did not possess the necessary lot.delete scope")
+		return false, errors.New("The token was correctly signed but did not possess the necessary scope")
 	}
 
 	return true, nil
+
 }
 
-func VerifyUpdateLotToken(lot *LotUpdate, strToken string) (bool, error) {
-	tokenApproved := false
-	log.Debugf("Attempting to update lot %s", lot.LotName)
-
-	// Since we're updating the lot, assume it already exists (lotman will yell if it doesn't).
-	// Then we can make sure the token is signed by any owners of the lot's parents
-
-	authzCallers, err := GetAuthorizedCallers(lot.LotName)
-	if err != nil {
-		return false, errors.Wrap(err, "Error getting authorized callers")
-	}
-
-	// Now we have a list of owners who can modify the lot. We need to check that the token is signed by one of them
-	ownerSigned, tok, err := tokenSignedByAuthorizedCaller(strToken, authzCallers)
-	if err != nil {
-		return false, errors.Wrap(err, "Error verifying token is appropriately signed")
-	}
-	if !ownerSigned {
-		return false, errors.New("Token not signed by any of the owners of any parent lot")
-	}
-
-	// We've determined the token is signed by someone we like, now to check that it has the correct lot.modify permission!
-	scope_any, present := (*tok).Get("scope")
-	if !present {
-		return false, errors.New("no scope claim in token")
-	}
-	scope, ok := scope_any.(string)
-	if !ok {
-		return false, errors.New("scope claim in token is not string-valued")
-	}
-	scopes := strings.Split(scope, " ")
-	for _, scope := range scopes {
-		if scope == token_scopes.Lot_Modify.String() {
-			tokenApproved = true
-			break
-		}
-	}
-
-	if !tokenApproved {
-		return false, errors.New("The token was correctly signed but did not possess the necessary lot.modify scope")
-	}
-
-	return true, nil
-}
-
+// The function Gin routes to when the CreateLot endpoint is hit.
 func uiCreateLot(ctx *gin.Context) {
 	// Unmarshal the lot JSON from the incoming context
 	extraInfo := ""
@@ -416,6 +379,7 @@ func uiCreateLot(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"status": "success" + extraInfo})
 }
 
+// The function Gin routes to when the GetLotJSON endpoint is hit.
 func uiGetLotJSON(ctx *gin.Context) {
 	lotName := ctx.Query("lotName")
 	recursiveStr := ctx.Query("recursive")
@@ -484,7 +448,7 @@ func uiUpdateLot(ctx *gin.Context) {
 		return
 	}
 
-	ok, err := VerifyUpdateLotToken(&lotUpdate, token)
+	ok, err := VerifyLotModTokens(lotUpdate.LotName, token, LotUpdateAction)
 
 	// TODO: Distinguish between true errors and unauthorized errors
 	if err != nil {
@@ -518,6 +482,7 @@ func uiUpdateLot(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"status": "success" + extraInfo})
 }
 
+// The function Gin routes to when the DeleteLotsRecursive endpoint is hit.
 func uiDeleteLot(ctx *gin.Context) {
 	lotName := ctx.Query("lotName")
 	if lotName == "" {
@@ -531,7 +496,8 @@ func uiDeleteLot(ctx *gin.Context) {
 		ctx.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "No token provided in request"})
 		return
 	}
-	ok, err := VerifyDeleteLotToken(lotName, token)
+
+	ok, err := VerifyLotModTokens(lotName, token, LotDeleteAction)
 
 	// TODO: Distinguish between true errors and unauthorized errors
 	if err != nil {
