@@ -833,6 +833,13 @@ func setXrootdRunLocations(currentServers ServerType, dir string) error {
 	return nil
 }
 
+func PrintPelicanVersion() {
+	fmt.Fprintln(os.Stderr, "Version:", GetVersion())
+	fmt.Fprintln(os.Stderr, "Build Date:", GetBuiltDate())
+	fmt.Fprintln(os.Stderr, "Build Commit:", GetBuiltCommit())
+	fmt.Fprintln(os.Stderr, "Built By:", GetBuiltBy())
+}
+
 // Print Pelican configuration to stderr
 func PrintConfig() error {
 	rawConfig, err := param.UnmarshalConfig()
