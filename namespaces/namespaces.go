@@ -87,7 +87,6 @@ type Namespace struct {
 	ReadHTTPS            bool                  `json:"readhttps"`
 	UseTokenOnRead       bool                  `json:"usetokenonread"`
 	WriteBackHost        string                `json:"writebackhost"`
-	DirListHost          string                `json:"dirlisthost"`
 }
 
 // GetCaches returns the list of caches for the namespace

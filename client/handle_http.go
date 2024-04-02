@@ -2123,13 +2123,20 @@ func runPut(request *http.Request, responseChan chan<- *http.Response, errorChan
 
 // Walk a remote directory in a WebDAV server, emitting the files discovered
 func (te *TransferEngine) walkDirDownload(job *clientTransferJob, transfers []transferAttemptDetails, files chan *clientTransferFile, url *url.URL) error {
+	// Do a PROPFIND to get our location (removes dir list host)
+	resp, err := queryDirector("PROPFIND", job.job.remoteURL.Path, param.Federation_DirectorUrl.GetString()) //DONT DO THE DIRECTOR DO IT TO THE ORIGIN!
+	if err != nil {
+		return err
+	}
+
+	collectionsUrl := resp.Header.Get("Location")
 	// Create the client to walk the filesystem
 	rootUrl := *url
-	if job.job.namespace.DirListHost != "" {
+	if collectionsUrl != "" {
 		// Parse the dir list host
-		dirListURL, err := url.Parse(job.job.namespace.DirListHost)
+		dirListURL, err := url.Parse(collectionsUrl)
 		if err != nil {
-			log.Errorln("Failed to parse dirlisthost from namespaces into URL:", err)
+			log.Errorln("Failed to parse collectionsUrl from namespaces into URL:", err)
 			return err
 		}
 		rootUrl = *dirListURL
@@ -2138,10 +2145,12 @@ func (te *TransferEngine) walkDirDownload(job *clientTransferJob, transfers []tr
 		log.Errorln("Host for directory listings is unknown")
 		return errors.New("Host for directory listings is unknown")
 	}
-	log.Debugln("Dir list host: ", rootUrl.String())
+
+	// This collectionsUrl contains more than the origin, therefore we need to extract the host and scheme
+	log.Debugln("Dir list host: ", rootUrl.Scheme+"://"+rootUrl.Host)
 
 	auth := &bearerAuth{token: job.job.token}
-	client := gowebdav.NewAuthClient(rootUrl.String(), auth)
+	client := gowebdav.NewAuthClient(rootUrl.Scheme+"://"+rootUrl.Host, auth)
 
 	// XRootD does not like keep alives and kills things, so turn them off.
 	transport := config.GetTransport()
@@ -2254,12 +2263,25 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 // is made without.
 func statHttp(ctx context.Context, dest *url.URL, namespace namespaces.Namespace, token string) (size uint64, err error) {
 	statHosts := make([]url.URL, 0, 3)
-	if namespace.DirListHost != "" {
-		var endpoint *url.URL
-		endpoint, err = url.Parse(namespace.DirListHost)
+	// Do a PROPFIND to get our location
+	resp, err := queryDirector("PROPFIND", dest.Path, param.Federation_DirectorUrl.GetString())
+	if err != nil {
+		return
+	}
+
+	// This collections contains more than the origin, therefore we need to extract the host and scheme
+	collections := resp.Header.Get("Location")
+	if collections != "" {
+		endpoint := &url.URL{}
+		var collectionsUrl *url.URL
+		collectionsUrl, err = url.Parse(collections)
 		if err != nil {
 			return
 		}
+
+		endpoint.Host = collectionsUrl.Host
+		endpoint.Scheme = collectionsUrl.Scheme
+
 		statHosts = append(statHosts, *endpoint)
 	} else if len(namespace.SortedDirectorCaches) > 0 {
 		for idx, cache := range namespace.SortedDirectorCaches {
