@@ -323,7 +323,7 @@ func listNamespaces(ctx *gin.Context) {
 
 	// Filter ns by server type
 	if queryParams.ServerType != "" && queryParams.ServerType != string(OriginType) && queryParams.ServerType != string(CacheType) {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid server type"})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Invalid server type: %s", queryParams.ServerType)})
 		return
 	}
 
@@ -336,7 +336,7 @@ func listNamespaces(ctx *gin.Context) {
 			if IsValidRegStatus(queryParams.Status) {
 				filterNs.AdminMetadata.Status = RegistrationStatus(queryParams.Status)
 			} else {
-				ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid query parameters: status must be one of  'Pending', 'Approved', 'Denied', 'Unknown'"})
+				ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Invalid query parameters %s: status must be one of  'Pending', 'Approved', 'Denied', 'Unknown'", queryParams.Status)})
 			}
 		}
 	} else {
@@ -365,8 +365,8 @@ func listNamespacesForUser(ctx *gin.Context) {
 		return
 	}
 	queryParams := listNamespacesForUserRequest{}
-	if ctx.ShouldBindQuery(&queryParams) != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid query parameters"})
+	if err := ctx.ShouldBindQuery(&queryParams); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Invalid query parameters: %v", err)})
 		return
 	}
 
@@ -376,7 +376,7 @@ func listNamespacesForUser(ctx *gin.Context) {
 		if IsValidRegStatus(queryParams.Status) {
 			filterNs.AdminMetadata.Status = RegistrationStatus(queryParams.Status)
 		} else {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid query parameters: status must be one of  'Pending', 'Approved', 'Denied', 'Unknown'"})
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Invalid query parameters %s: status must be one of  'Pending', 'Approved', 'Denied', 'Unknown'", queryParams.Status)})
 		}
 	}
 
@@ -431,13 +431,13 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 	// Basic validation (type, required, etc)
 	errs := config.GetValidate().Struct(ns)
 	if errs != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprint(errs)})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": errs.Error()})
 		return
 	}
 	// Check that Prefix is a valid prefix
 	updated_prefix, err := validatePrefix(ns.Prefix)
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprint("Error: Field validation for prefix failed:", err)})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Error: Field validation for prefix failed: %v", err)})
 		return
 	}
 	ns.Prefix = updated_prefix
@@ -458,7 +458,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 	// Check if pubKey is a valid JWK
 	pubkey, err := validateJwks(ns.Pubkey)
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprint("Error: Field validation for pubkey failed:", err)})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Error: Field validation for pubkey failed: %v", err)})
 		return
 	}
 
@@ -466,12 +466,12 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 	valErr, sysErr := validateKeyChaining(ns.Prefix, pubkey)
 	if valErr != nil {
 		log.Errorln("Bad prefix when validating key chaining", valErr)
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": valErr})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": valErr.Error()})
 		return
 	}
 	if sysErr != nil {
 		log.Errorln("Error validating key chaining", sysErr)
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": sysErr})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": sysErr.Error()})
 		return
 	}
 
@@ -486,7 +486,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 
 	validCF, err := validateCustomFields(ns.CustomFields, true)
 	if !validCF && err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Invalid custom fields: %s", err.Error())})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Invalid custom fields: %v", err)})
 		return
 	}
 
