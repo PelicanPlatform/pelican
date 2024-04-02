@@ -1,6 +1,6 @@
 # Serve a Pelican Cache
 
-A [Pelican](http://pelicanplatform.org/) *Cache* creates a cache that connects to a Pelican data federation to allow faster data access. It stores data that is accessed via a pelican origin in a cache until it gets evicted. The cache has the potential to both be faster and physically closer to your location than your origin. This allows for faster data access when running complex workflows.
+A [Pelican](http://pelicanplatform.org/) *Cache* creates a cache that connects to a Pelican data federation to allow faster data access. It stores data that is accessed via a Pelican origin until it gets evicted. The cache has the potential to both be faster and physically closer to your location than the Pelican origin you access the data from. This allows for faster data access when running complex workflows.
 
 This document contains instructions on how to serve a Pelican cache.
 
@@ -23,35 +23,9 @@ The Pelican cache listens to two TCP ports for file transfers and Web UI. By def
 
 You may change the port numbers through the [configuration file](./parameters.mdx) with parameter [`Cache.Port`](./parameters.mdx#Cache-Port) and [`Server.WebPort`](./parameters.mdx#Server-WebPort) respectively.
 
-> If it is not possible for you to expose any port through the firewall, Pelican has a special feature called _Connection Broker_, where it allows you to serve a Pelican cache without a public-accessible port and any TLS credential files in place. However, this is an experimental feature and requires the Pelican federation you are joining to be compatible. If you are interested in learning more about _Connection Broker_, please contact help@pelicanplatform.org for further instructions.
-
 ### Prepare TLS Credentials
 
-Pelican servers use `https` for serving its web UI and handling internal http requests. `https` requires a set of credential files in place to work, including:
-
-- A valid TLS certificate
-- The private key associated with the certificate
-- The Intermediate Certificate or the chain file, that establishes the trust chain to a root certificate
-
-> For local development and testing, you may skip setting up TLS credentials by setting configuration parameter `TLSSkipVerify` to `true`. You should **NOT** set this for production.
-
-You need to contact a Certificate Authority (CA) who owns the root certificate for getting these credentials. One popular CA that provides free TLS certificates is [Let's Encrypt](https://letsencrypt.org/). You may follow [their guide](https://letsencrypt.org/getting-started/) to obtain the credentials listed above. **Note that you need to have a valid domain before proceeding.**
-
-Once you go through the process, locate your credential files and set the following parameters to the file locations or copy the credential files to the default locations of the parameters:
-
-- `Server.TLSCertificate`
-  - The certicate file from Let's Encrypt (or another CA), usually named as `example.com.crt` or `example.com.pem`
-  - Default location: `~/.config/pelican/certificates/tls.crt` for non-root users or `/etc/pelican/certificates/tls.crt` for root users.
-
-- `Server.TLSKey`
-  - The private key corresponding to the TLS certificate, usually named as `example.com.key`.
-  - Default location: `~/.config/pelican/certificates/tls.key` for non-root users or `/etc/pelican/certificates/tls.key` for root users.
-
-- `Server.TLSCACertificateFile`
-  - The intermediate certificate from Let's Encrypt to establish the trust chain to a root certificate, usually named as `letsencrypt-intermediate.pem` or `chain.pem`
-  - Default location: `~/.config/pelican/certificates/tlsca.pem` for non-root users or `/etc/pelican/certificates/tlsca.pem` for root users.
-
-Since your TLS certificate is associated with your domain name, you will need to change the default hostname of Pelican server to be consistent. Set `Server.Hostname` to your domain name (e.g. `example.com`).
+Pelican servers use `https` for serving its web UI and handling internal http requests. `https` requires a set of credential files in place to work. For details on how to set up the TLS credentials, refer to the [documentation in Serve an Origin](./serving_an_origin.mdx#prepare-tls-credentials)
 
 ## Serve a Cache
 
@@ -63,14 +37,14 @@ Before serving a cache, you need to find a Pelican federation to join in. If you
 
 If you don't have a federation in mind, the Open Science Data Federation (OSDF) is an example Pelican federation that you can join in for testing purposes. If you are interesting in serving an OSDF cache, refer to the [OSDF website](https://osg-htc.org/) for details.
 
-The federation discovery URL for OSDF is `osg-htc.org`. You may use this as your `<federation>` argument in the next section when launching your origin.
+The federation discovery URL for OSDF is `osg-htc.org`. You may use this as your `<federation>` argument in the next section when launching your cache.
 
 ### Launch the Cache
 
 To launch a pelican cache, run:
 
 ```bash
-pelican cache serve -f <federation> 
+pelican cache serve -f <federation>
 ```
 
 Where:
@@ -94,14 +68,17 @@ There are other configurations available to modify via the configuration file. R
 
 ## Test CacheFunctionality
 
-Once you have your cache set up, follow the steps below to test if your cache can access a file through a Pelican federation. 
+Once you have your cache set up, follow the steps below to test if your cache can access a file through a Pelican federation.
 
-1. Have data available that is accessible via an origin. Since a cache only works with data available via an origin that’s in the same data federation, the following assumes that you have a an accessible namespace within the same data federation. For more information on how to set that up, refer to [Serving an Origin](./serving_an_origin.mdx). Ensure there is some public file available.
-2. Curl the director for the test file and ensure that the url used is the cache that you set up. Assuming your directory is `/tmp/demo`, run the following command to curl your known public file from the cache. 
-``` $ curl -v https://<cache-url>/<namespace/path-to-public-file> ```  Where: 
+1. Have data available and accessible via an origin. Since a cache only works with data available via an origin that’s in the same Pelican federation, the following assumes that you have a an accessible namespace within the same Pelican federation. For more information on how to set that up, refer to [Serving an Origin](./serving_an_origin.mdx). The following also assume that the object to test is public file. To set up a public file through a Pelican origin, refer to the [Configuration documentation](./parameters.mdx#Origin-Exports).
+2. Curl the director for the test file and ensure that the url used is the cache that you set up. Assuming your directory is `/tmp/demo`, run the following command to curl your known public file from the cache.
+
+```$ curl -v https://<cache-url>/<namespace/path-to-public-file>```
+
+Where:
 * `<cache-url>` is the of your cache
-* `<namespace/path-to-public-file> is the namespace and the path of the known public file  
-Check that the curl output contains the data from the public file.
+* `<namespace/path-to-public-file>` is the namespace and the path of the known public file
+* Check that the curl output contains the data from the public file.
 
 
 Congratulations! You have finished setting up and running your cache.
