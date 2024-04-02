@@ -106,4 +106,3 @@ export const getUser = async (): Promise<User> => {
         return {authenticated: false}
     }
 }
-

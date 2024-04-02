@@ -130,5 +130,3 @@ export interface ConfigMetadataValue {
 export type Config = {
     [key: string]: ParameterInputProps | Config
 }
-
-
