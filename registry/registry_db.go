@@ -80,7 +80,7 @@ type Namespace struct {
 	Identity      string                 `json:"identity" post:"exclude"`
 	AdminMetadata AdminMetadata          `json:"admin_metadata" gorm:"serializer:json"`
 	CustomFields  map[string]interface{} `json:"custom_fields" gorm:"serializer:json"`
-	Topology      bool                   `json:"topology" post:"exclude"`
+	Topology      bool                   `json:"topology" gorm:"-:all" post:"exclude"` //This field is an extra field that's not included in the db
 }
 
 type NamespaceWOPubkey struct {
@@ -281,6 +281,11 @@ func getNamespaceJwksById(id int) (jwk.Set, error) {
 }
 
 func getNamespaceJwksByPrefix(prefix string) (jwk.Set, *AdminMetadata, error) {
+	// Note that this cannot retrieve public keys from topology as the topology table
+	// doesn't contain that information.
+	if prefix == "" {
+		return nil, nil, errors.New("Invalid prefix. Prefix must not be empty")
+	}
 	var result Namespace
 	err := db.Select("pubkey", "admin_metadata").Where("prefix = ?", prefix).Last(&result).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -341,6 +346,10 @@ func getNamespaceById(id int) (*Namespace, error) {
 }
 
 func getNamespaceByPrefix(prefix string) (*Namespace, error) {
+	// This function will check the topology table first to see if the
+	// namespace exists there before checking the namespace table
+	// If the namespace exists in the topology table, it will be wrapped
+	// as a pelican namespace before being returned
 	if prefix == "" {
 		return nil, errors.New("Invalid prefix. Prefix must not be empty")
 	}
@@ -351,12 +360,12 @@ func getNamespaceByPrefix(prefix string) (*Namespace, error) {
 		err := db.Where("prefix = ? ", prefix).Last(&ns).Error
 		ns.Topology = false
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, fmt.Errorf("namespace with id %q not found in database", prefix)
+			return nil, fmt.Errorf("namespace with prefix %q not found in database", prefix)
 		} else if err != nil {
-			return nil, errors.Wrap(err, "error retrieving pubkey")
+			return nil, errors.Wrap(err, "error retrieving the namespace by its prefix")
 		}
 	} else if err != nil {
-		return nil, errors.Wrap(err, "error retrieving pubkey")
+		return nil, errors.Wrap(err, "error retrieving the namespace by its prefix")
 	} else {
 		ns.ID = tp.ID
 		ns.Prefix = tp.Prefix

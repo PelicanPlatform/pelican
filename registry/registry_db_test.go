@@ -118,7 +118,6 @@ func mockNamespace(prefix, pubkey, identity string, adminMetadata AdminMetadata)
 		Pubkey:        pubkey,
 		Identity:      identity,
 		AdminMetadata: adminMetadata,
-		Topology:      false,
 	}
 }
 
