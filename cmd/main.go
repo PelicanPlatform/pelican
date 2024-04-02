@@ -57,9 +57,9 @@ func handleCLI(args []string) error {
 		// * Remove the -v shorthand since in "origin serve" flagset it's already used for "volume" flag
 		if args[len(args)-1] == "--version" {
 			fmt.Println("Version:", config.GetVersion())
-			fmt.Println("Build Date:", date)
-			fmt.Println("Build Commit:", commit)
-			fmt.Println("Built By:", builtBy)
+			fmt.Println("Build Date:", config.GetBuiltDate())
+			fmt.Println("Build Commit:", config.GetBuiltCommit())
+			fmt.Println("Built By:", config.GetBuiltBy())
 			return nil
 		}
 		err := Execute()

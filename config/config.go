@@ -112,6 +112,15 @@ const (
 	TokenSharedRead
 )
 
+// This block of variables will be overwritten at build time
+var (
+	commit  = "none"
+	date    = "unknown"
+	builtBy = "unknown"
+	// Pelican version
+	version = "dev"
+)
+
 var (
 	// Some of the unit tests probe behavior specific to OSDF vs Pelican.  Hence,
 	// we need a way to override the preferred prefix.
@@ -138,9 +147,6 @@ var (
 	setServerOnce  sync.Once
 
 	RestartFlag = make(chan any) // A channel flag to restart the server instance that launcher listens to (including cache)
-
-	// Pelican version, this is overwritten at build time
-	version string = "dev"
 
 	MetadataTimeoutErr *MetadataErr = &MetadataErr{msg: "Timeout when querying metadata"}
 )
@@ -237,6 +243,30 @@ func GetVersion() string {
 // Intended mainly for use in unit tests
 func SetVersion(newVersion string) {
 	version = newVersion
+}
+
+func GetBuiltCommit() string {
+	return commit
+}
+
+func SetBuiltCommit(newCommit string) {
+	commit = newCommit
+}
+
+func GetBuiltDate() string {
+	return date
+}
+
+func SetBuiltDate(builtDate string) {
+	date = builtDate
+}
+
+func GetBuiltBy() string {
+	return builtBy
+}
+
+func SetBuiltBy(newBuiltBy string) {
+	builtBy = newBuiltBy
 }
 
 // Get a string slice of currently enabled servers, sorted by alphabetical order.
