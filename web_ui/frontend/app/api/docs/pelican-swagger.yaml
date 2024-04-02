@@ -84,6 +84,19 @@ definitions:
         type: string
         description: The detail error message
         example: Bad request
+  ErrorModelV2:
+    type: object
+    description: The error response of a request
+    properties:
+      status:
+        type: string
+        default: ""
+        example: "error"
+        description: The response status. It's one of success|error|timeout
+      msg:
+        type: string
+        default: ""
+        description: The response message
   SuccessModel:
     type: object
     description: The successful reponse of a request
@@ -229,6 +242,14 @@ definitions:
       custom_fields:
         type: object
         description: The custom fields to register, configurable by setting Registry.CustomRegistrationFields.
+  TopologyNamespace:
+    type: object
+    properties:
+      id:
+        type: integer
+      prefix:
+        type: string
+        default: ""
   RegistrationFieldType:
     type: string
     enum:
@@ -1231,6 +1252,28 @@ paths:
           schema:
             type: object
             $ref: "#/definitions/ErrorModel"
+  /registry_ui/topology:
+    get:
+      tags:
+        - "registry_ui"
+      summary: Returns a list of namespaces from the OSDF namespace topology
+      description: "The endpoint is only available when Pelican binary is running in OSDF mode. Otherwise, the endpoint returns an empty list."
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: array
+            items:
+              type: object
+              $ref: "#/definitions/TopologyNamespace"
+              minItems: 0
+        "500":
+          description: Error retrieving namespaces from the topology
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
   /director_ui/servers:
     get:
       tags:
