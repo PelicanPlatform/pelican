@@ -26,17 +26,20 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/pelicanplatform/pelican/broker"
 	"github.com/pelicanplatform/pelican/cache"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/daemon"
 	"github.com/pelicanplatform/pelican/launcher_utils"
+	"github.com/pelicanplatform/pelican/lotman"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/xrootd"
-	log "github.com/sirupsen/logrus"
-	"golang.org/x/sync/errgroup"
 )
 
 func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, modules config.ServerType) (server_structs.XRootDServer, error) {
@@ -56,6 +59,19 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 	err = launcher_utils.CheckDefaults(cacheServer)
 	if err != nil {
 		return nil, err
+	}
+
+	// Register Lotman
+	if param.Cache_EnableLotman.GetBool() {
+		// Register the web endpoints
+		if param.Lotman_EnableAPI.GetBool() {
+			log.Debugln("Registering Lotman API")
+			lotman.RegisterLotman(ctx, engine.Group("/"))
+		}
+		// Bind the c library funcs to Go
+		if success := lotman.InitLotman(); !success {
+			return nil, errors.New("Failed to initialize lotman")
+		}
 	}
 
 	broker.RegisterBrokerCallback(ctx, engine.Group("/"))

@@ -27,6 +27,7 @@ type Config struct {
 	Cache struct {
 		Concurrency int
 		DataLocation string
+		EnableLotman bool
 		EnableVoms bool
 		ExportLocation string
 		PermittedNamespaces []string
@@ -116,6 +117,12 @@ type Config struct {
 			Xrd string
 			Xrootd string
 		}
+	}
+	Lotman struct {
+		DbLocation string
+		EnableAPI bool
+		LibLocation string
+		Lots interface{}
 	}
 	MinimumDownloadSpeed int
 	Monitoring struct {
@@ -273,6 +280,7 @@ type configWithType struct {
 	Cache struct {
 		Concurrency struct { Type string; Value int }
 		DataLocation struct { Type string; Value string }
+		EnableLotman struct { Type string; Value bool }
 		EnableVoms struct { Type string; Value bool }
 		ExportLocation struct { Type string; Value string }
 		PermittedNamespaces struct { Type string; Value []string }
@@ -362,6 +370,12 @@ type configWithType struct {
 			Xrd struct { Type string; Value string }
 			Xrootd struct { Type string; Value string }
 		}
+	}
+	Lotman struct {
+		DbLocation struct { Type string; Value string }
+		EnableAPI struct { Type string; Value bool }
+		LibLocation struct { Type string; Value string }
+		Lots struct { Type string; Value interface{} }
 	}
 	MinimumDownloadSpeed struct { Type string; Value int }
 	Monitoring struct {

@@ -368,7 +368,7 @@ function Config() {
         const filteredConfig: Config = structuredClone(config)
         Object.entries(configMetadata).forEach(([key, value]) => {
 
-            if([...enabledServers, "*"].filter(i => value.components.includes(i)).length === 0) {
+            if([...enabledServers, "*", "cache"].filter(i => value.components.includes(i)).length === 0) {
                 deleteKey(filteredConfig, key.split("."))
             } else {
                 updateValue(filteredConfig, key.split("."), configMetadata[key])

@@ -880,12 +880,16 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 		viper.SetDefault("Origin.Multiuser", true)
 		viper.SetDefault("Director.GeoIPLocation", "/var/cache/pelican/maxmind/GeoLite2-City.mmdb")
 		viper.SetDefault("Registry.DbLocation", "/var/lib/pelican/registry.sqlite")
+		// The lotman db will actually take this path and create the lot at /path/.lot/lotman_cpp.sqlite
+		viper.SetDefault("Lotman.DbLocation", "/var/lib/pelican")
 		viper.SetDefault("Monitoring.DataLocation", "/var/lib/pelican/monitoring/data")
 		viper.SetDefault("Shoveler.QueueDirectory", "/var/spool/pelican/shoveler/queue")
 		viper.SetDefault("Shoveler.AMQPTokenLocation", "/etc/pelican/shoveler-token")
 	} else {
 		viper.SetDefault("Director.GeoIPLocation", filepath.Join(configDir, "maxmind", "GeoLite2-City.mmdb"))
 		viper.SetDefault("Registry.DbLocation", filepath.Join(configDir, "ns-registry.sqlite"))
+		// Lotdb will live at <configDir>/.lot/lotman_cpp.sqlite
+		viper.SetDefault("Lotman.DbLocation", configDir)
 		viper.SetDefault("Monitoring.DataLocation", filepath.Join(configDir, "monitoring/data"))
 		viper.SetDefault("Shoveler.QueueDirectory", filepath.Join(configDir, "shoveler/queue"))
 		viper.SetDefault("Shoveler.AMQPTokenLocation", filepath.Join(configDir, "shoveler-token"))
