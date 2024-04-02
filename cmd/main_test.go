@@ -32,6 +32,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestHandleCLIVersionFlag(t *testing.T) {
@@ -107,20 +108,40 @@ func TestHandleCLIVersionFlag(t *testing.T) {
 	}
 
 	batchTest := func(t *testing.T, arguments []string, expected string) {
-		// Redirect output to a pip
-		oldStdout := os.Stdout
-		r, w, _ := os.Pipe()
-		os.Stdout = w
+		got := ""
 
-		err := handleCLI(arguments)
+		if expected == mockVersionOutput {
+			// Redirect output to a pip
+			oldStderr := os.Stderr
+			r, w, _ := os.Pipe()
+			os.Stderr = w
 
-		// Close the write of pip and redirect output back to stdout
-		w.Close()
-		out, _ := io.ReadAll(r)
-		os.Stdout = oldStdout
+			err := handleCLI(arguments)
+			require.NoError(t, err)
 
-		got := strings.TrimSpace(string(out))
-		assert.NoError(t, err, "Should not have error running the function")
+			// Close the write of pip and redirect output back to Stderr
+			w.Close()
+			out, _ := io.ReadAll(r)
+			os.Stderr = oldStderr
+
+			got = strings.TrimSpace(string(out))
+		} else {
+			// Redirect output to a pip
+			oldStdout := os.Stdout
+			r, w, _ := os.Pipe()
+			os.Stdout = w
+
+			err := handleCLI(arguments)
+			require.NoError(t, err)
+
+			// Close the write of pip and redirect output back to Stderr
+			w.Close()
+			out, _ := io.ReadAll(r)
+			os.Stdout = oldStdout
+
+			got = strings.TrimSpace(string(out))
+		}
+
 		if expected != mockVersionOutput {
 			// If the expected string is not the version output, use Contains to check
 			// This is mainly for checking against command help output
