@@ -732,6 +732,59 @@ func topologyMockup(t *testing.T, namespaces []string) *httptest.Server {
 	return svr
 }
 
+func TestGetNamespaceByPrefix(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
+	viper.Reset()
+
+	topoNamespaces := []string{"/topo/foo"}
+	svr := topologyMockup(t, topoNamespaces)
+	defer svr.Close()
+
+	registryDB := t.TempDir()
+	viper.Set("Registry.DbLocation", filepath.Join(registryDB, "test.sqlite"))
+	viper.Set("Federation.TopologyNamespaceURL", svr.URL)
+	config.InitConfig()
+
+	err := InitializeDB(ctx)
+	require.NoError(t, err)
+	defer func() {
+		err := ShutdownDB()
+		assert.NoError(t, err)
+	}()
+
+	//Test topology table population
+	err = createTopologyTable()
+	require.NoError(t, err)
+	err = PopulateTopology()
+	require.NoError(t, err)
+
+	//Test that getNamespaceByPrefix wraps a pelican namespace around a topology one
+	ns, err := getNamespaceByPrefix("/topo/foo")
+	require.NoError(t, err)
+	require.True(t, ns.Topology)
+
+	// Add a test namespace so we can test that checkExists still works
+	new_ns := Namespace{
+		ID:            0,
+		Prefix:        "/regular/foo",
+		Pubkey:        "",
+		Identity:      "",
+		AdminMetadata: AdminMetadata{},
+	}
+	err = AddNamespace(&new_ns)
+	require.NoError(t, err)
+
+	//Test that getNamespaceByPrefix returns namespace with a false topology variable
+	ns_reg, err := getNamespaceByPrefix("/regular/foo")
+	require.NoError(t, err)
+	require.False(t, ns_reg.Topology)
+
+	viper.Reset()
+}
+
 func TestRegistryTopology(t *testing.T) {
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
