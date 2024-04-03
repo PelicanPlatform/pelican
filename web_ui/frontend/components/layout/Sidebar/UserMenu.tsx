@@ -3,10 +3,9 @@
 import useSWR from "swr";
 import {useRouter} from "next/navigation";
 import React, {useContext, useState} from "react";
-import {IconButton, Menu, MenuItem} from "@mui/material";
-import {Login} from "@mui/icons-material";
+import {IconButton, Menu, MenuItem, Tooltip} from "@mui/material";
+import {Login, Face2, CloudSync, AdminPanelSettings} from "@mui/icons-material";
 import StatusSnackBar from "@/components/StatusSnackBar";
-import {RandomUserIcon} from "@/components/layout/Sidebar/RandomUserIcon";
 import {getUser} from "@/helpers/login";
 
 const UserMenu = () => {
@@ -55,18 +54,26 @@ const UserMenu = () => {
         }
     }
 
+    if(isLoading){
+        return <IconButton>
+            <CloudSync />
+        </IconButton>
+    }
+
     if(!user.authenticated){
         return (
-            <IconButton
-                id={"user-menu-button"}
-                ref={userMenuRef}
-                sx={{
-                    bgcolor: "#767adb4a"
-                }}
-                onClick={() => router.push("/login" + "?returnURL=" + window.location.pathname)}
-            >
-                <Login/>
-            </IconButton>
+            <Tooltip title={"Login"} placement={"right"}>
+                <IconButton
+                    id={"user-menu-button"}
+                    ref={userMenuRef}
+                    sx={{
+                        bgcolor: "#767adb4a"
+                    }}
+                    onClick={() => router.push("/login" + "?returnURL=" + window.location.pathname)}
+                >
+                    <Login/>
+                </IconButton>
+            </Tooltip>
         )
     }
 
@@ -80,7 +87,7 @@ const UserMenu = () => {
                 }}
                 onClick={() => setMenuOpen(!menuOpen)}
             >
-                <RandomUserIcon/>
+                { user.role === "admin" ? <AdminPanelSettings/>: <Face2 /> }
             </IconButton>
             <Menu
                 id={"user-menu"}
@@ -98,7 +105,8 @@ const UserMenu = () => {
                     horizontal: 'left',
                 }}
             >
-                { user.role === "admin" ? <MenuItem disabled={true}>Admin</MenuItem> : null }
+                { user.role === "admin" ? <MenuItem disabled={true}>Admin User</MenuItem> : null }
+                { user.role !== "admin" ? <MenuItem disabled={true}>User</MenuItem> : null }
                 <MenuItem onClick={handleLogout}>Logout</MenuItem>
             </Menu>
             {error && <StatusSnackBar message={error} severity={"error"} />}

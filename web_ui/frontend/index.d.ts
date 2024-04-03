@@ -5,4 +5,4 @@ export interface User {
     csrfToken?: string;
 }
 
-export type ServerType = "registry" | "director" | "origin"
+export type ServerType = "registry" | "director" | "origin" | "cache"

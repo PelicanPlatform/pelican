@@ -124,13 +124,13 @@ const AdminLogin = () => {
                     type={"submit"}
                     loading={loading}
                 >
-                    <span>Confirm</span>
+                    <span>Login</span>
                 </LoadingButton>
             </Box>
         </form>
     )
 
-    if(enabledServers && enabledServers.includes("registry")) {
+    if(enabledServers && (enabledServers.includes("registry") || enabledServers.includes("origin") || enabledServers.includes("cache"))) {
         return (
             <Box display={"flex"} flexDirection={"column"} justifyContent={"center"}>
                 <Box m={"auto"}>
@@ -150,7 +150,15 @@ const AdminLogin = () => {
 
 export default function Home() {
 
+    const [returnUrl, setReturnUrl] = useState<string | undefined>(undefined)
     const {data: enabledServers} = useSWR<ServerType[]>("getEnabledServers", getEnabledServers)
+
+    useEffect(() => {
+        const url = new URL(window.location.href)
+        let returnUrl = url.searchParams.get("returnURL") || ""
+        returnUrl = returnUrl.replace(`/view`, "")
+        setReturnUrl(returnUrl)
+    }, [])
 
     return (
         <>
@@ -171,7 +179,7 @@ export default function Home() {
                             <Box display={"flex"} justifyContent={"center"} mb={1}>
                                 <Button
                                     size={"large"}
-                                    href={"/api/v1.0/auth/cilogon/login?next_url=/view/registry/"}
+                                    href={`/api/v1.0/auth/oauth/login?next_url=${returnUrl ? returnUrl : "/"}`}
                                     variant={"contained"}
                                 >
                                     Login with OAuth

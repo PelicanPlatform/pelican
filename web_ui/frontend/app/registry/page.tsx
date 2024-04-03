@@ -109,7 +109,7 @@ export default function Home() {
                         <Alert severity="info">
                             <Typography variant={"body1"}>
                                 Login to register new namespaces.
-                                <Link href={"/login/"}>
+                                <Link href={"/login/?returnURL=/registry"}>
                                     <Button sx={{ml:2}} variant={"contained"} size={"small"} color={"primary"}>Login</Button>
                                 </Link>
                             </Typography>
