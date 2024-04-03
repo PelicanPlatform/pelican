@@ -798,7 +798,7 @@ func TestCreateNamespace(t *testing.T) {
 		assert.Contains(t, string(body), "Error: Field validation for pubkey failed:")
 	})
 
-	t.Run("keychain-failure-returns-400", func(t *testing.T) {
+	t.Run("duplicated-key-returns-400", func(t *testing.T) {
 		resetNamespaceDB(t)
 
 		pubKeyStr, err := GenerateMockJWKS()
@@ -824,6 +824,37 @@ func TestCreateNamespace(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
 		assert.Contains(t, string(body), "The prefix /foo is already registered")
+	})
+
+	t.Run("key-chaining-failure-returns-400", func(t *testing.T) {
+		viper.Reset()
+		viper.Set("Registry.RequireKeyChaining", true)
+		resetNamespaceDB(t)
+
+		pubKeyStr, err := GenerateMockJWKS()
+		require.NoError(t, err)
+
+		err = insertMockDBData([]Namespace{{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: AdminMetadata{Status: Pending}}})
+		require.NoError(t, err)
+		defer resetNamespaceDB(t)
+
+		diffPubKeyStr, err := GenerateMockJWKS()
+		require.NoError(t, err)
+
+		mockNs := Namespace{Prefix: "/foo/bar", Pubkey: diffPubKeyStr, AdminMetadata: AdminMetadata{Institution: "001"}}
+		mockNsBytes, err := json.Marshal(mockNs)
+		require.NoError(t, err)
+		// Create a request to the endpoint
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/namespaces", bytes.NewReader(mockNsBytes))
+		req.Header.Set("Context-Type", "application/json")
+		router.ServeHTTP(w, req)
+
+		body, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+		assert.Contains(t, string(body), "Cannot register a namespace that is suffixed or prefixed by an already-registered namespace unless the incoming public key matches a registered key")
+		viper.Reset()
 	})
 
 	t.Run("inst-failure-returns-400", func(t *testing.T) {
@@ -878,6 +909,88 @@ func TestCreateNamespace(t *testing.T) {
 		assert.Equal(t, "admin", nss[0].AdminMetadata.UserID)
 		assert.Equal(t, Pending, nss[0].AdminMetadata.Status)
 		assert.NotEqual(t, time.Time{}, nss[0].AdminMetadata.CreatedAt)
+	})
+
+	t.Run("osdf-topology-subspace-request-gives-200", func(t *testing.T) {
+		resetNamespaceDB(t)
+
+		config.SetPreferredPrefix("OSDF")
+		topoNamespaces := []string{"/topo/foo", "/topo/bar"}
+		svr := topologyMockup(t, topoNamespaces)
+		defer svr.Close()
+		viper.Set("Federation.TopologyNamespaceURL", svr.URL)
+		err := PopulateTopology()
+		require.NoError(t, err)
+
+		mockInsts := []Institution{{ID: "1000"}}
+		viper.Set("Registry.Institutions", mockInsts)
+
+		pubKeyStr, err := GenerateMockJWKS()
+		require.NoError(t, err)
+
+		mockNs := Namespace{Prefix: "/topo/foo/bar", Pubkey: pubKeyStr, AdminMetadata: AdminMetadata{Institution: "1000"}}
+		mockNsBytes, err := json.Marshal(mockNs)
+		require.NoError(t, err)
+		// Create a request to the endpoint
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/namespaces", bytes.NewReader(mockNsBytes))
+		req.Header.Set("Context-Type", "application/json")
+		router.ServeHTTP(w, req)
+
+		body, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+		assert.JSONEq(t, `{"msg":"Prefix is successfully registered. Note that there is an existing namespace prefix in the OSDF topology. The registry admin will review your request and approve your namespace if this is expected."}`, string(body))
+
+		nss, err := getAllNamespaces()
+		require.NoError(t, err)
+		require.Equal(t, 1, len(nss))
+		assert.Equal(t, "/topo/foo/bar", nss[0].Prefix)
+		assert.Equal(t, "admin", nss[0].AdminMetadata.UserID)
+		assert.Equal(t, Pending, nss[0].AdminMetadata.Status)
+		assert.NotEqual(t, time.Time{}, nss[0].AdminMetadata.CreatedAt)
+		viper.Reset()
+	})
+
+	t.Run("osdf-topology-same-prefix-request-gives-200", func(t *testing.T) {
+		resetNamespaceDB(t)
+
+		config.SetPreferredPrefix("OSDF")
+		topoNamespaces := []string{"/topo/foo", "/topo/bar"}
+		svr := topologyMockup(t, topoNamespaces)
+		defer svr.Close()
+		viper.Set("Federation.TopologyNamespaceURL", svr.URL)
+		err := PopulateTopology()
+		require.NoError(t, err)
+
+		mockInsts := []Institution{{ID: "1000"}}
+		viper.Set("Registry.Institutions", mockInsts)
+
+		pubKeyStr, err := GenerateMockJWKS()
+		require.NoError(t, err)
+
+		mockNs := Namespace{Prefix: "/topo/foo", Pubkey: pubKeyStr, AdminMetadata: AdminMetadata{Institution: "1000"}}
+		mockNsBytes, err := json.Marshal(mockNs)
+		require.NoError(t, err)
+		// Create a request to the endpoint
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/namespaces", bytes.NewReader(mockNsBytes))
+		req.Header.Set("Context-Type", "application/json")
+		router.ServeHTTP(w, req)
+
+		body, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+		assert.JSONEq(t, `{"msg":"Prefix is successfully registered. Note that there is an existing namespace prefix in the OSDF topology. The registry admin will review your request and approve your namespace if this is expected."}`, string(body))
+
+		nss, err := getAllNamespaces()
+		require.NoError(t, err)
+		require.Equal(t, 1, len(nss))
+		assert.Equal(t, "/topo/foo", nss[0].Prefix)
+		assert.Equal(t, "admin", nss[0].AdminMetadata.UserID)
+		assert.Equal(t, Pending, nss[0].AdminMetadata.Status)
+		assert.NotEqual(t, time.Time{}, nss[0].AdminMetadata.CreatedAt)
+		viper.Reset()
 	})
 }
 
