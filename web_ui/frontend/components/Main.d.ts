@@ -17,3 +17,19 @@ interface Institution {
     id: string;
     name: string;
 }
+
+export interface Server {
+    "name": string;
+    "authUrl": string;
+    "brokerUrl": string;
+    "url": string;
+    "webUrl": string;
+    "type": "Origin" | "Cache";
+    "latitude": number;
+    "longitude": number;
+    "enableWrite": boolean;
+    "enableFallbackRead": boolean;
+    "filtered": boolean;
+    "filteredType": string;
+    "status": string;
+}
