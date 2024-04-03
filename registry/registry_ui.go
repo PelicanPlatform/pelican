@@ -422,7 +422,6 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 	}
 
 	ns := Namespace{}
-	ns.Topology = false
 	if ctx.ShouldBindJSON(&ns) != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid create or update namespace request"})
 		return
@@ -442,7 +441,6 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 		return
 	}
 	ns.Prefix = updated_prefix
-	ns.Topology = false
 
 	if !isUpdate {
 		// Check if prefix exists before doing anything else. Skip check if it's update operation
