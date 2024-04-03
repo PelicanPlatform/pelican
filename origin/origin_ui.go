@@ -22,20 +22,27 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/web_ui"
 	"github.com/sirupsen/logrus"
 )
 
+type exportsRes struct {
+	Type    string                        `json:"type"` // either "posix" or "s3"
+	Exports *[]server_utils.OriginExports `json:"exports"`
+}
+
 func handleExports(ctx *gin.Context) {
+	storageType := param.Origin_StorageType.GetString()
 	exports, err := server_utils.GetOriginExports()
 	if err != nil {
 		logrus.Errorf("Failed to get the origin exports: %v", err)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Server encountered error when getting the origin exports: " + err.Error()})
 		return
 	}
-	ctx.JSON(http.StatusOK, exports)
+	ctx.JSON(http.StatusOK, exportsRes{Type: storageType, Exports: exports})
 }
 
 func RegisterOriginWebAPI(engine *gin.Engine) {

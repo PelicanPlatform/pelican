@@ -416,6 +416,18 @@ definitions:
       capabilities:
         type: object
         $ref: "#/definitions/OriginExportCapabilities"
+  OriginExportRes:
+    type: object
+    properties:
+      type:
+        type: string
+        example: "posix"
+        description: "The storage type of the origin server. Is either \"posix\" or \"s3\""
+      exports:
+        type: array
+        items:
+           $ref: "#/definitions/OriginExport"
+        minItems: 0
 
 tags:
   - name: auth
@@ -1583,10 +1595,8 @@ paths:
         "200":
           description: OK
           schema:
-            type: array
-            items:
-              $ref: "#/definitions/OriginExport"
-            minItems: 0
+            type: object
+            $ref: "#/definitions/OriginExportRes"
         "401":
           description: Authentication required to perform this action
           schema:

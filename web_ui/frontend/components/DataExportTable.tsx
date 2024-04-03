@@ -2,16 +2,23 @@ import {Table, TableCell, TableBody, TableContainer, TableHead, TableRow, Paper,
 import React, {FunctionComponent, ReactElement, useEffect, useMemo, useRef, useState} from "react";
 import {Skeleton} from "@mui/material";
 
+interface Capabilities {
+    PublicReads: boolean;
+    Reads: boolean;
+    Writes: boolean;
+    Listings: boolean;
+    DirectReads: boolean;
+  }
 
-
-interface Record {
-    [key: string]: string | number | boolean | null
+interface ExportEntry {
+    storage_prefix: string;
+    federation_prefix: string;
+    capabilities: Capabilities;
 }
 
-interface ExportData extends Record {
-    "Type": string
-    "Local Path": string
-    "Namespace Prefix": string
+interface ExportRes {
+    type: string;
+    exports: ExportEntry[];
 }
 
 export const TableCellOverflow: FunctionComponent<any> = ({ children, ...props }) => {
@@ -39,23 +46,23 @@ export const TableCellOverflow: FunctionComponent<any> = ({ children, ...props }
     )
 }
 
-export const RecordTable = ({ data }: { data: Record[] }): ReactElement  => {
+export const RecordTable = ({ data }: { data: ExportRes }): ReactElement  => {
     return (
         <TableContainer>
             <Table sx={{tableLayout: "fixed"}}>
                 <TableHead>
                     <TableRow>
-                        {Object.keys(data[0]).map((key, index) => (
-                            <TableCell key={index} sx={{width: index == 0 ? "20%" : "40%"}}>{key}</TableCell>
-                        ))}
+                        <TableCell sx={{width: "20%"}}>Type</TableCell>
+                        <TableCell sx={{width: "40%"}}>Local Path</TableCell>
+                        <TableCell sx={{width: "40%"}}>Federation Path</TableCell>
                     </TableRow>
                 </TableHead>
                 <TableBody>
-                    {data.map((record, index) => (
-                        <TableRow key={index}>
-                            {Object.values(record).map((value, index) => (
-                                <TableCellOverflow key={index} sx={{width: index == 0 ? "20%" : "40%"}}>{value == null ? "NULL" : value}</TableCellOverflow>
-                            ))}
+                    {data?.exports.map((record, index) => (
+                        <TableRow key={record?.federation_prefix}>
+                            <TableCellOverflow key={record.federation_prefix} sx={{width: "20%"}}>{data.type == null ? "NULL" : data.type.toUpperCase()}</TableCellOverflow>
+                            <TableCellOverflow key={record.federation_prefix} sx={{width: "40%"}}>{record?.storage_prefix == null ? "NULL" : record?.storage_prefix}</TableCellOverflow>
+                            <TableCellOverflow key={record.federation_prefix} sx={{width: "40%"}}>{record?.federation_prefix == null ? "NULL" : record?.federation_prefix}</TableCellOverflow>
                         </TableRow>
                     ))}
                 </TableBody>
@@ -67,21 +74,15 @@ export const RecordTable = ({ data }: { data: Record[] }): ReactElement  => {
 
 export const DataExportTable = () => {
 
-    const [data, setData] = useState<ExportData[] | undefined>(undefined);
+    const [data, setData] = useState<ExportRes | undefined>(undefined);
     const [error, setError] = useState<string | undefined>(undefined);
 
 
     const getData = async () => {
-        let response = await fetch("/api/v1.0/config")
+        let response = await fetch("/api/v1.0/origin_ui/exports")
         if (response.ok) {
             const responseData = await response.json()
-
-            setData([{
-                "Type": "POSIX",
-                "Local Path": ["", undefined].includes(responseData?.Xrootd?.Mount?.Value) ? "NULL" : responseData?.Xrootd?.Mount?.Value,
-                "Namespace Prefix": ["", undefined].includes(responseData?.Origin?.NamespacePrefix?.Value) ? "NULL" : responseData?.Origin?.NamespacePrefix?.Value
-            }])
-
+            setData(responseData)
         } else {
             setError("Failed to fetch config, response status: " + response.status)
         }
