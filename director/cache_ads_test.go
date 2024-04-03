@@ -91,10 +91,6 @@ func TestGetAdsForPath(t *testing.T) {
 
 	cacheAd1 := server_structs.ServerAd{
 		Name: "cache1",
-		AuthURL: url.URL{
-			Scheme: "https",
-			Host:   "wisc.edu",
-		},
 		URL: url.URL{
 			Scheme: "https",
 			Host:   "wisc.edu",
@@ -104,10 +100,6 @@ func TestGetAdsForPath(t *testing.T) {
 
 	cacheAd2 := server_structs.ServerAd{
 		Name: "cache2",
-		AuthURL: url.URL{
-			Scheme: "https",
-			Host:   "wisc.edu",
-		},
 		URL: url.URL{
 			Scheme: "https",
 			Host:   "wisc.edu",
@@ -117,10 +109,6 @@ func TestGetAdsForPath(t *testing.T) {
 
 	originAd1 := server_structs.ServerAd{
 		Name: "origin1",
-		AuthURL: url.URL{
-			Scheme: "https",
-			Host:   "wisc.edu",
-		},
 		URL: url.URL{
 			Scheme: "https",
 			Host:   "wisc.edu",
@@ -130,10 +118,6 @@ func TestGetAdsForPath(t *testing.T) {
 
 	originAd2 := server_structs.ServerAd{
 		Name: "origin2",
-		AuthURL: url.URL{
-			Scheme: "https",
-			Host:   "wisc.edu",
-		},
 		URL: url.URL{
 			Scheme: "https",
 			Host:   "wisc.edu",

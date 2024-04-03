@@ -21,6 +21,7 @@ package director
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"github.com/spf13/viper"
@@ -33,23 +34,33 @@ import (
 func TestParseServerAd(t *testing.T) {
 
 	server := utils.Server{
-		AuthEndpoint: "https://my-auth-endpoint.com",
+		Endpoint: "http://my-endpoint.com",
+		Resource: "MY_SERVER",
+	}
+
+	osdf_server := utils.Server{
 		Endpoint:     "http://my-endpoint.com",
 		Resource:     "MY_SERVER",
+		AuthEndpoint: "https://my-auth-endpoint.com",
 	}
 
 	// Check that we populate all of the fields correctly -- note that lat/long don't get updated
 	// until right before the ad is recorded, so we don't check for that here.
 	ad := parseServerAd(server, server_structs.OriginType)
-	assert.Equal(t, ad.AuthURL.String(), "https://my-auth-endpoint.com")
 	assert.Equal(t, ad.URL.String(), "http://my-endpoint.com")
 	assert.Equal(t, ad.WebURL.String(), "")
 	assert.Equal(t, ad.Name, "MY_SERVER")
+	assert.Equal(t, ad.AuthURL, url.URL{})
 	assert.True(t, ad.Type == server_structs.OriginType)
 
 	// A quick check that type is set correctly
 	ad = parseServerAd(server, server_structs.CacheType)
 	assert.True(t, ad.Type == server_structs.CacheType)
+
+	// A check that the authurl is set correctly for parsing a server ad from topology
+	ad = parseServerAd(osdf_server, server_structs.OriginType)
+	assert.Equal(t, ad.URL.String(), "http://my-endpoint.com")
+	assert.Equal(t, ad.AuthURL.String(), "https://my-auth-endpoint.com")
 }
 
 func JSONHandler(w http.ResponseWriter, r *http.Request) {

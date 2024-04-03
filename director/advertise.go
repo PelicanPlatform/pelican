@@ -42,18 +42,20 @@ func parseServerAd(server utils.Server, serverType server_structs.ServerType) se
 	// but endpoints do not have a scheme. As such, we need to add one for the.
 	// correct parsing. Luckily, we don't use this anywhere else (it's just to
 	// make the url.Parse function behave as expected)
-	if !strings.HasPrefix(server.AuthEndpoint, "http") { // just in case there's already an http(s) tacked in front
-		server.AuthEndpoint = "https://" + server.AuthEndpoint
-	}
 	if !strings.HasPrefix(server.Endpoint, "http") { // just in case there's already an http(s) tacked in front
 		server.Endpoint = "http://" + server.Endpoint
 	}
-	serverAuthUrl, err := url.Parse(server.AuthEndpoint)
-	if err != nil {
-		log.Warningf("Namespace JSON returned server %s with invalid authenticated URL %s",
-			server.Resource, server.AuthEndpoint)
+	if server.AuthEndpoint != "" {
+		if !strings.HasPrefix(server.AuthEndpoint, "http") { // just in case there's already an http(s) tacked in front
+			server.AuthEndpoint = "https://" + server.AuthEndpoint
+		}
+		serverAuthUrl, err := url.Parse(server.AuthEndpoint)
+		if err != nil {
+			log.Warningf("Namespace JSON returned server %s with invalid authenticated URL %s",
+				server.Resource, server.AuthEndpoint)
+		}
+		serverAd.AuthURL = *serverAuthUrl
 	}
-	serverAd.AuthURL = *serverAuthUrl
 
 	serverUrl, err := url.Parse(server.Endpoint)
 	if err != nil {
