@@ -58,8 +58,6 @@ const FederationOverview = () => {
         return
     }
 
-    console.log(config)
-
     return (
 
         <Box>
