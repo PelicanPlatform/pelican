@@ -254,12 +254,12 @@ func CheckSentinelLocation(exports *[]OriginExport) (ok bool, err error) {
 		if export.SentinelLocation != "" {
 			sentinelPath := path.Clean(export.SentinelLocation)
 			if path.Base(sentinelPath) != sentinelPath {
-				return false, fmt.Errorf("invalid SentinelLocation path for StoragePrefix %s, file must not contain a directory. Got %s", export.StoragePrefix, export.SentinelLocation)
+				return false, errors.Errorf("invalid SentinelLocation path for StoragePrefix %s, file must not contain a directory. Got %s", export.StoragePrefix, export.SentinelLocation)
 			}
 			fullPath := filepath.Join(export.StoragePrefix, sentinelPath)
 			_, err := os.Stat(fullPath)
 			if err != nil {
-				return false, errors.Wrap(err, fmt.Sprintf("fail to open SentinelLocation %s for StoragePrefix %s. Directory check failed", export.SentinelLocation, export.StoragePrefix))
+				return false, errors.Wrapf(err, "fail to open SentinelLocation %s for StoragePrefix %s. Directory check failed", export.SentinelLocation, export.StoragePrefix)
 			}
 		}
 	}
