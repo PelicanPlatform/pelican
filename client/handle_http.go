@@ -142,7 +142,6 @@ type (
 		upload     bool
 		packOption string
 		attempts   []transferAttemptDetails
-		accounting payloadStruct
 		project    string
 		err        error
 	}
@@ -755,7 +754,7 @@ func (te *TransferEngine) runJobHandler() error {
 //
 // The returned object can be further customized as desired.
 // This function does not "submit" the job for execution.
-func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL, localPath string, upload bool, recursive bool, options ...TransferOption) (tj *TransferJob, err error) {
+func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL, localPath string, upload bool, recursive bool, project string, options ...TransferOption) (tj *TransferJob, err error) {
 
 	id, err := uuid.NewV7()
 	if err != nil {
@@ -774,6 +773,7 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		upload:        upload,
 		uuid:          id,
 		token:         tc.token,
+		project:       project,
 	}
 
 	mergeCancel := func(ctx1, ctx2 context.Context) (context.Context, context.CancelFunc) {
@@ -1345,7 +1345,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 		transferEndpointUrl.Path = transfer.remoteURL.Path
 		transferEndpoint.Url = &transferEndpointUrl
 		transferStartTime := time.Now()
-		if downloaded, timeToFirstByte, serverVersion, err = downloadHTTP(transfer.ctx, transfer.engine, transfer.callback, transferEndpoint, transfer.localPath, size, transfer.token, &transfer.accounting); err != nil {
+		if downloaded, timeToFirstByte, serverVersion, err = downloadHTTP(transfer.ctx, transfer.engine, transfer.callback, transferEndpoint, transfer.localPath, size, transfer.token, transfer.project); err != nil {
 			log.Debugln("Failed to download:", err)
 			transferEndTime := time.Now()
 			transferTime := transferEndTime.Unix() - transferStartTime.Unix()
@@ -1417,7 +1417,7 @@ func parseTransferStatus(status string) (int, string) {
 // Perform the actual download of the file
 //
 // Returns the downloaded size, time to 1st byte downloaded, serverVersion and an error if there is one
-func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCallbackFunc, transfer transferAttemptDetails, dest string, totalSize int64, token string, payload *payloadStruct) (downloaded int64, timeToFirstByte float64, serverVersion string, err error) {
+func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCallbackFunc, transfer transferAttemptDetails, dest string, totalSize int64, token string, project string) (downloaded int64, timeToFirstByte float64, serverVersion string, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Errorln("Panic occurred in downloadHTTP:", r)
@@ -1445,6 +1445,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 
 	// Create the client, request, and context
 	client := grab.NewClient()
+	client.UserAgent = getUserAgent(project)
 	transport := config.GetTransport()
 	if !transfer.Proxy {
 		transport.Proxy = nil
@@ -1510,9 +1511,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	req.HTTPRequest.Header.Set("X-Transfer-Status", "true")
 	req.HTTPRequest.Header.Set("X-Pelican-Timeout", headerTimeout.Round(time.Millisecond).String())
 	req.HTTPRequest.Header.Set("TE", "trailers")
-	if payload != nil && payload.ProjectName != "" {
-		req.HTTPRequest.Header.Set("User-Agent", getUserAgent(payload.ProjectName))
-	}
+	req.HTTPRequest.Header.Set("User-Agent", getUserAgent(project))
 	req = req.WithContext(ctx)
 
 	// Test the transfer speed every 5 seconds

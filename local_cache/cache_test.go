@@ -215,10 +215,11 @@ func TestClient(t *testing.T) {
 		_, err := client.DoGet(ft.Ctx, "pelican:///test/hello_world.txt", filepath.Join(tmpDir, "hello_world.txt"), false,
 			client.WithToken("badtoken"), client.WithCaches(cacheUrl), client.WithAcquireToken(false))
 		assert.Error(t, err)
-		assert.ErrorIs(t, err, &client.ConnectionSetupError{})
-		var cse *client.ConnectionSetupError
-		assert.True(t, errors.As(err, &cse))
-		assert.Equal(t, "failed connection setup: server returned 403 Forbidden", cse.Error())
+		var sce *client.StatusCodeError
+		assert.True(t, errors.As(err, &sce))
+		if sce != nil {
+			assert.Equal(t, int(*sce), http.StatusForbidden)
+		}
 	})
 
 	t.Run("file-not-found", func(t *testing.T) {
@@ -238,7 +239,7 @@ func TestClient(t *testing.T) {
 		_, err = client.DoGet(ft.Ctx, "pelican:///test/hello_world.txt.1", filepath.Join(tmpDir, "hello_world.txt.1"), false,
 			client.WithToken(token), client.WithCaches(cacheUrl), client.WithAcquireToken(false))
 		assert.Error(t, err)
-		assert.Equal(t, "failed to download file: transfer error: failed connection setup: server returned 404 Not Found", err.Error())
+		assert.Equal(t, "failed to download file: server returned 404 Not Found", err.Error())
 	})
 }
 

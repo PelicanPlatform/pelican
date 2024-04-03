@@ -31,16 +31,15 @@ import (
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/broker"
-	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/launcher_utils"
 	"github.com/pelicanplatform/pelican/local_cache"
-	"github.com/pelicanplatform/pelican/origin_ui"
+	"github.com/pelicanplatform/pelican/origin"
 	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/server_ui"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/web_ui"
 )
@@ -50,13 +49,20 @@ var (
 	ErrRestart      error = errors.New("Restart program")
 )
 
-func LaunchModules(ctx context.Context, modules config.ServerType) (servers []server_utils.XRootDServer, shutdownCancel context.CancelFunc, err error) {
+func LaunchModules(ctx context.Context, modules config.ServerType) (servers []server_structs.XRootDServer, shutdownCancel context.CancelFunc, err error) {
 	egrp, ok := ctx.Value(config.EgrpKey).(*errgroup.Group)
 	if !ok {
 		egrp = &errgroup.Group{}
 	}
 
 	ctx, shutdownCancel = context.WithCancel(ctx)
+
+	// Print Pelican config at server start if it's in debug or info level
+	if log.GetLevel() >= log.InfoLevel {
+		if err = config.PrintConfig(); err != nil {
+			return
+		}
+	}
 
 	egrp.Go(func() error {
 		_ = config.RestartFlag
@@ -93,28 +99,22 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 	}
 
 	if modules.IsEnabled(config.RegistryType) {
-
-		viper.Set("Federation.RegistryURL", param.Server_ExternalWebUrl.GetString())
-
+		// Federation.RegistryUrl defaults to Server.ExternalUrl in InitServer()
 		if err = RegistryServe(ctx, engine, egrp); err != nil {
 			return
 		}
 	}
 
 	if modules.IsEnabled(config.BrokerType) {
-		viper.Set("Federation.BrokerURL", param.Server_ExternalWebUrl.GetString())
-
 		rootGroup := engine.Group("/")
 		broker.RegisterBroker(ctx, rootGroup)
 		broker.LaunchNamespaceKeyMaintenance(ctx, egrp)
 	}
 
 	if modules.IsEnabled(config.DirectorType) {
-
-		viper.Set("Director.DefaultResponse", "cache")
-
-		viper.Set("Federation.DirectorURL", param.Server_ExternalWebUrl.GetString())
-
+		// Director.DefaultResponse defaults to "cache" through default.yaml
+		// Federation.DirectorUrl defaults to Server.ExternalUrl in InitServer()
+		// Duplicated set are removed
 		if err = DirectorServe(ctx, engine, egrp); err != nil {
 			return
 		}
@@ -136,13 +136,13 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 	}()
 	config.UpdateConfigFromListener(ln)
 
-	servers = make([]server_utils.XRootDServer, 0)
+	servers = make([]server_structs.XRootDServer, 0)
 
 	if modules.IsEnabled(config.OriginType) {
 
 		mode := param.Origin_StorageType.GetString()
-		var originExports *[]common.OriginExports
-		originExports, err = common.GetOriginExports()
+		var originExports *[]server_utils.OriginExports
+		originExports, err = server_utils.GetOriginExports()
 		if err != nil {
 			return
 		}
@@ -186,7 +186,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 			return
 		}
 
-		var server server_utils.XRootDServer
+		var server server_structs.XRootDServer
 		server, err = OriginServe(ctx, engine, egrp, modules)
 		if err != nil {
 			return
@@ -198,7 +198,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 		// NOTE: Until the Broker supports multi-export origins, we've made the assumption that there
 		// is only one namespace prefix available here and that it lives in Origin.FederationPrefix
 		if param.Origin_EnableBroker.GetBool() {
-			if err = origin_ui.LaunchBrokerListener(ctx, egrp); err != nil {
+			if err = origin.LaunchBrokerListener(ctx, egrp); err != nil {
 				return
 			}
 		}
@@ -242,7 +242,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 	// Origin needs to advertise once before the cache starts
 	if modules.IsEnabled(config.CacheType) && modules.IsEnabled(config.OriginType) {
 		log.Debug("Advertise Origin")
-		if err = server_ui.Advertise(ctx, servers); err != nil {
+		if err = launcher_utils.Advertise(ctx, servers); err != nil {
 			return
 		}
 
@@ -251,8 +251,8 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 		// of the namespaces and doesn't have to wait an entire cycle to learn about them from the director
 
 		// To check all of the advertisements, we'll launch a WaitUntilWorking concurrently for each of them.
-		var originExports *[]common.OriginExports
-		originExports, err = common.GetOriginExports()
+		var originExports *[]server_utils.OriginExports
+		originExports, err = server_utils.GetOriginExports()
 		if err != nil {
 			return
 		}
@@ -311,8 +311,8 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 			log.Errorln("Director does not seem to be working:", err)
 			return
 		}
-		var server server_utils.XRootDServer
-		server, err = CacheServe(ctx, engine, egrp)
+		var server server_structs.XRootDServer
+		server, err = CacheServe(ctx, engine, egrp, modules)
 		if err != nil {
 			return
 		}
@@ -322,7 +322,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 
 	if modules.IsEnabled(config.OriginType) || modules.IsEnabled(config.CacheType) {
 		log.Debug("Launching periodic advertise")
-		if err = server_ui.LaunchPeriodicAdvertise(ctx, egrp, servers); err != nil {
+		if err = launcher_utils.LaunchPeriodicAdvertise(ctx, egrp, servers); err != nil {
 			return
 		}
 	}

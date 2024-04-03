@@ -37,8 +37,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/lestrrat-go/option"
 	"github.com/pelicanplatform/pelican/client"
-	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
@@ -508,7 +508,7 @@ func (sc *LocalCache) runMux() error {
 
 			sourceURL := *sc.directorURL
 			sourceURL.Path = path.Join(sourceURL.Path, path.Clean(req.request.path))
-			tj, err := sc.tc.NewTransferJob(req.ctx, &sourceURL, localPath, false, false, client.WithToken(req.request.token))
+			tj, err := sc.tc.NewTransferJob(req.ctx, &sourceURL, localPath, false, false, "localcache", client.WithToken(req.request.token))
 			if err != nil {
 				ds := &downloadStatus{}
 				ds.err.Store(&err)
@@ -704,7 +704,7 @@ func (lc *LocalCache) Stat(path, token string) (uint64, error) {
 
 func (sc *LocalCache) updateConfig() error {
 	// Get the endpoint of the director
-	var respNS []common.NamespaceAdV2
+	var respNS []server_structs.NamespaceAdV2
 
 	directorEndpoint := param.Federation_DirectorUrl.GetString()
 	if directorEndpoint == "" {

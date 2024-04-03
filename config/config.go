@@ -139,7 +139,7 @@ var (
 
 	RestartFlag = make(chan any) // A channel flag to restart the server instance that launcher listens to (including cache)
 
-	// Pelican version
+	// Pelican version, this is overwritten at build time
 	version string = "dev"
 
 	MetadataTimeoutErr *MetadataErr = &MetadataErr{msg: "Timeout when querying metadata"}
@@ -723,7 +723,7 @@ func InitConfig() {
 			log.Errorf("Failed to access specified log file. Error: %v", err)
 			os.Exit(1)
 		}
-		fmt.Printf("Logging.LogLocation is set to %s. All logs are redirected to the log file.\n", logLocation)
+		fmt.Fprintf(os.Stderr, "Logging.LogLocation is set to %s. All logs are redirected to the log file.\n", logLocation)
 		log.SetOutput(f)
 	}
 
@@ -803,6 +803,24 @@ func setXrootdRunLocations(currentServers ServerType, dir string) error {
 	return nil
 }
 
+// Print Pelican configuration to stderr
+func PrintConfig() error {
+	rawConfig, err := param.UnmarshalConfig()
+	if err != nil {
+		return err
+	}
+	bytes, err := json.MarshalIndent(*rawConfig, "", "  ")
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(os.Stderr,
+		"================ Pelican Configuration ================\n",
+		string(bytes),
+		"\n",
+		"============= End of Pelican Configuration ============")
+	return nil
+}
+
 // Initialize Pelican server instance. Pass a bit mask of `currentServers` if you want to enable multiple services.
 // Note not all configurations are supported: currently, if you enable both cache and origin then an error
 // is thrown
@@ -862,12 +880,16 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 		viper.SetDefault("Origin.Multiuser", true)
 		viper.SetDefault("Director.GeoIPLocation", "/var/cache/pelican/maxmind/GeoLite2-City.mmdb")
 		viper.SetDefault("Registry.DbLocation", "/var/lib/pelican/registry.sqlite")
+		// The lotman db will actually take this path and create the lot at /path/.lot/lotman_cpp.sqlite
+		viper.SetDefault("Lotman.DbLocation", "/var/lib/pelican")
 		viper.SetDefault("Monitoring.DataLocation", "/var/lib/pelican/monitoring/data")
 		viper.SetDefault("Shoveler.QueueDirectory", "/var/spool/pelican/shoveler/queue")
 		viper.SetDefault("Shoveler.AMQPTokenLocation", "/etc/pelican/shoveler-token")
 	} else {
 		viper.SetDefault("Director.GeoIPLocation", filepath.Join(configDir, "maxmind", "GeoLite2-City.mmdb"))
 		viper.SetDefault("Registry.DbLocation", filepath.Join(configDir, "ns-registry.sqlite"))
+		// Lotdb will live at <configDir>/.lot/lotman_cpp.sqlite
+		viper.SetDefault("Lotman.DbLocation", configDir)
 		viper.SetDefault("Monitoring.DataLocation", filepath.Join(configDir, "monitoring/data"))
 		viper.SetDefault("Shoveler.QueueDirectory", filepath.Join(configDir, "shoveler/queue"))
 		viper.SetDefault("Shoveler.AMQPTokenLocation", filepath.Join(configDir, "shoveler-token"))
@@ -990,14 +1012,43 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 	if webPort < 0 {
 		return errors.Errorf("the Server.WebPort setting of %d is invalid; TCP ports must be greater than 0", webPort)
 	}
-	viper.SetDefault("Server.ExternalWebUrl", fmt.Sprint("https://", hostname, ":", webPort))
+	if webPort != 443 {
+		viper.SetDefault("Server.ExternalWebUrl", fmt.Sprintf("https://%s:%d", hostname, webPort))
+	} else {
+		viper.SetDefault("Server.ExternalWebUrl", fmt.Sprintf("https://%s", hostname))
+	}
 	externalAddressStr := param.Server_ExternalWebUrl.GetString()
-	if _, err = url.Parse(externalAddressStr); err != nil {
-		return errors.Wrap(err, fmt.Sprint("Invalid Server.ExternalWebUrl: ", externalAddressStr))
+	parsedExtAdd, err := url.Parse(externalAddressStr)
+	if err != nil {
+		return errors.Wrap(err, fmt.Sprint("invalid Server.ExternalWebUrl: ", externalAddressStr))
+	} else {
+		// We get rid of any 443 port if present to be consistent
+		if parsedExtAdd.Port() == "443" {
+			parsedExtAdd.Host = parsedExtAdd.Hostname()
+			viper.Set("Server.ExternalWebUrl", parsedExtAdd.String())
+		}
 	}
 
-	if currentServers.IsEnabled(DirectorType) && param.Federation_DirectorUrl.GetString() == "" {
-		viper.SetDefault("Federation.DirectorUrl", viper.GetString("Server.ExternalWebUrl"))
+	if currentServers.IsEnabled(DirectorType) {
+		// Default to Server.ExternalWebUrl. Provided Federation.DirectorUrl will overwrite this if any
+		viper.SetDefault("Federation.DirectorUrl", param.Server_ExternalWebUrl.GetString())
+
+		minStatRes := param.Director_MinStatResponse.GetInt()
+		maxStatRes := param.Director_MaxStatResponse.GetInt()
+		if minStatRes <= 0 || maxStatRes <= 0 {
+			return errors.New("Invalid Director.MinStatResponse and Director.MaxStatResponse. MaxStatResponse and MinStatResponse must be positive integers")
+		}
+		if maxStatRes < minStatRes {
+			return errors.New("Invalid Director.MinStatResponse and Director.MaxStatResponse. MaxStatResponse is less than MinStatResponse")
+		}
+	}
+
+	if currentServers.IsEnabled(RegistryType) {
+		viper.SetDefault("Federation.RegistryUrl", param.Server_ExternalWebUrl.GetString())
+	}
+
+	if currentServers.IsEnabled(BrokerType) {
+		viper.SetDefault("Federation.BrokerURL", param.Server_ExternalWebUrl.GetString())
 	}
 
 	tokenRefreshInterval := param.Monitoring_TokenRefreshInterval.GetDuration()
@@ -1007,17 +1058,6 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 		viper.Set("Monitoring.TokenRefreshInterval", time.Minute*5)
 		viper.Set("Monitoring.TokenExpiresIn", time.Hour*1)
 		log.Warningln("Invalid Monitoring.TokenRefreshInterval or Monitoring.TokenExpiresIn. Fallback to 5m for refresh interval and 1h for valid interval")
-	}
-
-	if currentServers.IsEnabled(DirectorType) {
-		minStatRes := param.Director_MinStatResponse.GetInt()
-		maxStatRes := param.Director_MaxStatResponse.GetInt()
-		if minStatRes <= 0 || maxStatRes <= 0 {
-			return errors.New("Invalid Director.MinStatResponse and Director.MaxStatResponse. MaxStatResponse and MinStatResponse must be positive integers")
-		}
-		if maxStatRes < minStatRes {
-			return errors.New("Invalid Director.MinStatResponse and Director.MaxStatResponse. MaxStatResponse is less than MinStatResponse")
-		}
 	}
 
 	// Unmarshal Viper config into a Go struct

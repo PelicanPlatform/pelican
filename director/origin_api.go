@@ -36,9 +36,9 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
@@ -64,7 +64,7 @@ func checkNamespaceStatus(prefix string, registryWebUrlStr string) (bool, error)
 	}
 	reqUrl := registryUrl.JoinPath("/api/v1.0/registry/checkNamespaceStatus")
 
-	reqBody := common.CheckNamespaceStatusReq{Prefix: prefix}
+	reqBody := server_structs.CheckNamespaceStatusReq{Prefix: prefix}
 	reqByte, err := json.Marshal(reqBody)
 	if err != nil {
 		return false, err
@@ -91,7 +91,7 @@ func checkNamespaceStatus(prefix string, registryWebUrlStr string) (bool, error)
 		}
 	}
 
-	resBody := common.CheckNamespaceStatusRes{}
+	resBody := server_structs.CheckNamespaceStatusRes{}
 	bodyByte, err := io.ReadAll(res.Body)
 	if err != nil {
 		return false, err
@@ -107,15 +107,15 @@ func checkNamespaceStatus(prefix string, registryWebUrlStr string) (bool, error)
 // Given a token and a location in the namespace to advertise in,
 // see if the entity is authorized to advertise an origin for the
 // namespace
-func VerifyAdvertiseToken(ctx context.Context, token, namespace string) (bool, error) {
+func verifyAdvertiseToken(ctx context.Context, token, namespace string) (bool, error) {
 	issuerUrl, err := server_utils.GetNSIssuerURL(namespace)
 	if err != nil {
-		return false, err
+		return false, errors.Wrap(err, "failed to get issuer for namespace "+namespace)
 	}
 
 	keyLoc, err := server_utils.GetJWKSURLFromIssuerURL(issuerUrl)
 	if err != nil {
-		return false, err
+		return false, errors.Wrap(err, "failed to get JWKS URL from the issuer URL at "+issuerUrl)
 	}
 
 	var ar NamespaceCache
@@ -135,17 +135,17 @@ func VerifyAdvertiseToken(ctx context.Context, token, namespace string) (bool, e
 	regUrlStr := param.Federation_RegistryUrl.GetString()
 	approved, err := checkNamespaceStatus(namespace, regUrlStr)
 	if err != nil {
-		return false, errors.Wrap(err, "Failed to check namespace approval status")
+		return false, errors.Wrap(err, "failed to check namespace approval status")
 	}
 	if !approved {
-		adminApprovalErr = errors.New(namespace + " has not been approved by an administrator.")
+		adminApprovalErr = errors.New(namespace + " has not been approved by an administrator")
 		return false, adminApprovalErr
 	}
 	if ar == nil {
 		ar = jwk.NewCache(ctx)
 		client := &http.Client{Transport: config.GetTransport()}
 		if err = ar.Register(keyLoc, jwk.WithMinRefreshInterval(15*time.Minute), jwk.WithHTTPClient(client)); err != nil {
-			return false, err
+			return false, errors.Wrap(err, fmt.Sprintf("failed to register JWKS URL %s at the JWKS cache", keyLoc))
 		}
 		namespaceKeysMutex.Lock()
 		defer namespaceKeysMutex.Unlock()
@@ -162,7 +162,7 @@ func VerifyAdvertiseToken(ctx context.Context, token, namespace string) (bool, e
 	keyset, err := ar.Get(ctx, keyLoc)
 
 	if err != nil {
-		return false, err
+		return false, errors.Wrap(err, "failed to fetch JWKS from JWKS cache for "+keyLoc)
 	}
 
 	tok, err := jwt.Parse([]byte(token), jwt.WithKeySet(keyset), jwt.WithValidate(true))
@@ -172,7 +172,7 @@ func VerifyAdvertiseToken(ctx context.Context, token, namespace string) (bool, e
 
 	scope_any, present := tok.Get("scope")
 	if !present {
-		return false, errors.New("No scope is present; required to advertise to director")
+		return false, errors.New("no scope is present; required to advertise to director")
 	}
 	scope, ok := scope_any.(string)
 	if !ok {
