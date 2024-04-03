@@ -83,4 +83,5 @@ export interface Export {
     storageprefix: string;
     federationprefix: string;
     capabilities: Capability[];
+    sentinellocation: string;
 }
