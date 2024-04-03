@@ -35,6 +35,7 @@ import (
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pelicanplatform/pelican/web_ui"
 	"github.com/pkg/errors"
@@ -730,6 +731,16 @@ func listInstitutions(ctx *gin.Context) {
 	}
 }
 
+func listTopologyNamespaces(ctx *gin.Context) {
+	nss, err := getTopologyNamespaces()
+	if err != nil {
+		log.Errorf("failed to get all namespaces from the topology: %v", err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Failed to get namespaces from topology"})
+		return
+	}
+	ctx.JSON(http.StatusOK, nss)
+}
+
 // Initialize custom registration fields provided via Registry.CustomRegistrationFields
 func InitCustomRegistrationFields() error {
 	configFields := []customRegFieldsConfig{}
@@ -796,6 +807,9 @@ func RegisterRegistryWebAPI(router *gin.RouterGroup) error {
 		registryWebAPI.PATCH("/namespaces/:id/deny", web_ui.AuthHandler, web_ui.AdminAuthHandler, func(ctx *gin.Context) {
 			updateNamespaceStatus(ctx, Denied)
 		})
+	}
+	{
+		registryWebAPI.GET("/topology", listTopologyNamespaces)
 	}
 	{
 		registryWebAPI.GET("/institutions", web_ui.AuthHandler, listInstitutions)

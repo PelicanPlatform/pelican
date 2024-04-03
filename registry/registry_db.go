@@ -548,6 +548,15 @@ func getAllNamespaces() ([]*Namespace, error) {
 	return namespaces, nil
 }
 
+// Get all namespaces from the topology
+func getTopologyNamespaces() ([]*Topology, error) {
+	var topology []*Topology
+	if result := db.Order("id ASC").Find(&topology); result.Error != nil {
+		return nil, result.Error
+	}
+	return topology, nil
+}
+
 // Update database schema based on migration files under /migrations folder
 func MigrateDB(sqldb *sql.DB) error {
 	goose.SetBaseFS(embedMigrations)
