@@ -30,6 +30,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pelicanplatform/pelican/client"
@@ -79,6 +80,15 @@ func (lc *LocalCache) LaunchListener(ctx context.Context, egrp *errgroup.Group) 
 		}
 		path := path.Clean(r.URL.Path)
 
+		var headerTimeout time.Duration = 0
+		timeoutStr := r.Header.Get("X-Pelican-Timeout")
+		if timeoutStr != "" {
+			if headerTimeout, err = time.ParseDuration(timeoutStr); err != nil {
+				log.Debugln("Invalid X-Pelican-Timeout value:", timeoutStr)
+			}
+		}
+		log.Debugln("Setting header timeout:", timeoutStr)
+
 		var size uint64
 		var reader io.ReadCloser
 		if r.Method == "HEAD" {
@@ -87,12 +97,24 @@ func (lc *LocalCache) LaunchListener(ctx context.Context, egrp *errgroup.Group) 
 				w.Header().Set("Content-Length", strconv.FormatUint(size, 10))
 			}
 		} else {
-			reader, err = lc.Get(path, bearerToken)
+			ctx = context.Background()
+			if headerTimeout > 0 {
+				var cancelReqFunc context.CancelFunc
+				ctx, cancelReqFunc = context.WithTimeout(ctx, headerTimeout)
+				defer cancelReqFunc()
+			}
+			reader, err = lc.Get(ctx, path, bearerToken)
 		}
 		if errors.Is(err, authorizationDenied) {
 			w.WriteHeader(http.StatusForbidden)
 			if _, err = w.Write([]byte("Authorization Denied")); err != nil {
 				log.Errorln("Failed to write authorization denied to client")
+			}
+			return
+		} else if errors.Is(err, context.DeadlineExceeded) {
+			w.WriteHeader(http.StatusGatewayTimeout)
+			if _, err = w.Write([]byte("Upstream response timeout")); err != nil {
+				log.Errorln("Failed to write gateway timeout to client")
 			}
 			return
 		} else if err != nil {

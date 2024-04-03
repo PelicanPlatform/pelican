@@ -755,7 +755,7 @@ func (te *TransferEngine) runJobHandler() error {
 //
 // The returned object can be further customized as desired.
 // This function does not "submit" the job for execution.
-func (tc *TransferClient) NewTransferJob(remoteUrl *url.URL, localPath string, upload bool, recursive bool, options ...TransferOption) (tj *TransferJob, err error) {
+func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL, localPath string, upload bool, recursive bool, options ...TransferOption) (tj *TransferJob, err error) {
 
 	id, err := uuid.NewV7()
 	if err != nil {
@@ -775,7 +775,19 @@ func (tc *TransferClient) NewTransferJob(remoteUrl *url.URL, localPath string, u
 		uuid:          id,
 		token:         tc.token,
 	}
-	tj.ctx, tj.cancel = context.WithCancel(tc.ctx)
+
+	mergeCancel := func(ctx1, ctx2 context.Context) (context.Context, context.CancelFunc) {
+		newCtx, cancel := context.WithCancel(ctx1)
+		stop := context.AfterFunc(ctx2, func() {
+			cancel()
+		})
+		return newCtx, func() {
+			stop()
+			cancel()
+		}
+	}
+
+	tj.ctx, tj.cancel = mergeCancel(ctx, tc.ctx)
 
 	for _, option := range options {
 		switch option.Ident() {
@@ -1455,6 +1467,12 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 		return 0, 0, "", errors.New("Internal error: implementation is not a http.Client type")
 	}
 	httpClient.Transport = transport
+	headerTimeout := transport.ResponseHeaderTimeout
+	if headerTimeout > time.Second {
+		headerTimeout -= 500 * time.Millisecond
+	} else {
+		headerTimeout /= 2
+	}
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -1490,6 +1508,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	}
 	// Set the headers
 	req.HTTPRequest.Header.Set("X-Transfer-Status", "true")
+	req.HTTPRequest.Header.Set("X-Pelican-Timeout", headerTimeout.Round(time.Millisecond).String())
 	req.HTTPRequest.Header.Set("TE", "trailers")
 	if payload != nil && payload.ProjectName != "" {
 		req.HTTPRequest.Header.Set("User-Agent", getUserAgent(payload.ProjectName))
@@ -1520,7 +1539,6 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 				sce2 := StatusCodeError(sce)
 				err = &sce2
 			} else {
-				log.Debugf("Got an error: %T", err)
 				err = &ConnectionSetupError{Err: err}
 			}
 			log.Errorln("Failed to download:", err)

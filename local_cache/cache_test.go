@@ -68,7 +68,7 @@ func TestFedPublicGet(t *testing.T) {
 	lc, err := local_cache.NewLocalCache(ft.Ctx, ft.Egrp)
 	require.NoError(t, err)
 
-	reader, err := lc.Get("/test/hello_world.txt", "")
+	reader, err := lc.Get(context.Background(), "/test/hello_world.txt", "")
 	require.NoError(t, err)
 
 	byteBuff, err := io.ReadAll(reader)
@@ -76,7 +76,7 @@ func TestFedPublicGet(t *testing.T) {
 	assert.Equal(t, "Hello, World!", string(byteBuff))
 
 	// Query again -- cache hit case
-	reader, err = lc.Get("/test/hello_world.txt", "")
+	reader, err = lc.Get(context.Background(), "/test/hello_world.txt", "")
 	require.NoError(t, err)
 
 	assert.Equal(t, "*os.File", fmt.Sprintf("%T", reader))
@@ -93,7 +93,7 @@ func TestFedAuthGet(t *testing.T) {
 	lc, err := local_cache.NewLocalCache(ft.Ctx, ft.Egrp)
 	require.NoError(t, err)
 
-	reader, err := lc.Get("/test/hello_world.txt", ft.Token)
+	reader, err := lc.Get(context.Background(), "/test/hello_world.txt", ft.Token)
 	require.NoError(t, err)
 
 	byteBuff, err := io.ReadAll(reader)
@@ -112,7 +112,7 @@ func TestFedAuthGet(t *testing.T) {
 	token, err := tokConf.CreateToken()
 	require.NoError(t, err)
 
-	_, err = lc.Get("/test/hello_world.txt", token)
+	_, err = lc.Get(context.Background(), "/test/hello_world.txt", token)
 	assert.Error(t, err)
 	assert.Equal(t, "authorization denied", err.Error())
 }
@@ -254,7 +254,7 @@ func TestStat(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, uint64(13), size)
 
-	reader, err := lc.Get("/test/hello_world.txt", "")
+	reader, err := lc.Get(context.Background(), "/test/hello_world.txt", "")
 	require.NoError(t, err)
 	byteBuff, err := io.ReadAll(reader)
 	assert.NoError(t, err)
@@ -454,6 +454,7 @@ func TestOriginUnresponsive(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	viper.Reset()
+	viper.Set("Transport.ResponseHeaderTimeout", "2s")
 	viper.Set("Logging.Level", "debug")
 	ft := fed_test_utils.NewFedTest(t, pubOriginCfg)
 
@@ -475,7 +476,10 @@ func TestOriginUnresponsive(t *testing.T) {
 	tr, err := client.DoGet(ft.Ctx, "pelican:///test/hello_world.txt", filepath.Join(tmpDir, "hello_world.txt"), false,
 		client.WithCaches(cacheUrl))
 	assert.Error(t, err)
-	var cse *client.ConnectionSetupError
-	assert.True(t, errors.As(err, &cse))
+	var sce *client.StatusCodeError
+	assert.True(t, errors.As(err, &sce))
+	if sce != nil {
+		assert.Equal(t, int(*sce), 504)
+	}
 	require.Equal(t, 0, len(tr))
 }
