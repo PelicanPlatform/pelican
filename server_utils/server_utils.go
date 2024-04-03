@@ -65,24 +65,24 @@ func WaitUntilWorking(ctx context.Context, method, reqUrl, server string, expect
 			resp, err := httpClient.Do(req)
 			if err != nil {
 				if !logged {
-					log.Infoln("Failed to send request to "+server+"; likely server is not up (will retry in 50ms):", err)
+					log.Infof("Failed to send request to %s at %s; likely server is not up (will retry in 50ms): %v", server, reqUrl, err)
 					logged = true
 				}
 			} else {
 				if resp.StatusCode == expectedStatus {
-					log.Debugln(server + " server appears to be functioning")
+					log.Debugf("%s server appears to be functioning at %s", server, reqUrl)
 					return nil
 				}
 				bytes, err := io.ReadAll(resp.Body)
 				if err != nil {
 					// We didn't get the expected status
-					return errors.Errorf("Received bad status code in reply to server ping: %d. Expected %d.Can't read response body with error %v.", resp.StatusCode, expectedStatus, err)
+					return errors.Errorf("Received bad status code in reply to server ping at %s: %d. Expected %d. Can't read response body with error %v.", reqUrl, resp.StatusCode, expectedStatus, err)
 				} else {
 					if len(bytes) != 0 {
 						// We didn't get the expected status
-						return errors.Errorf("Received bad status code in reply to server ping: %d. Expected %d. Response body: %s", resp.StatusCode, expectedStatus, string(bytes))
+						return errors.Errorf("Received bad status code in reply to server ping at %s: %d. Expected %d. Response body: %s", reqUrl, resp.StatusCode, expectedStatus, string(bytes))
 					} else {
-						return errors.Errorf("Received bad status code in reply to server ping: %d. Expected %d. Response body is empty.", resp.StatusCode, expectedStatus)
+						return errors.Errorf("Received bad status code in reply to server ping at %s: %d. Expected %d. Response body is empty.", reqUrl, resp.StatusCode, expectedStatus)
 					}
 				}
 
