@@ -20,7 +20,7 @@ which should output a path to the executable. If there is no output to this comm
 ### Useful Terminology
 
 **Notes on Federations:**
-Below are some notes on federations on top of their terminology. Here is the example URL we used previously:
+Below are some notes on federations on top of their terminology. Here is the example URL we used previously in the quick start guide:
 ```console
 /ospool/uc-shared/public/OSG-Staff/validation/test.txt
 ```
@@ -49,7 +49,7 @@ When using the `osdf:///` scheme, pelican will load in the federation metadata a
 ```bash
 pelican object get osdf:///<namespace-prefix></path/to/file> <local/path/to/file>
 ```
->This scheme has three slashes (`///`) after the `osdf` because the hostname is left empty to be automatically populated therefore, just start the URL with the namespace prefix. Pelican also supports the `osdf://` scheme (with two slashes) in case the user forgets to pass the third slash, but this is not recommended.
+>This scheme has three slashes (`///`) after the `osdf` because the hostname is left empty to be automatically populated. Therefore, just start the URL with the namespace prefix. Pelican also supports the `osdf://` scheme (with two slashes) in case the user forgets to pass the third slash, but this is not recommended.
 
 ### The `stash:///` URL Scheme:
 This URL scheme comes from legacy code called `stashcp` that Pelican was built off of and is still accepted for backwards compatibility. This URL scheme functions identically to the `osdf:///` URL scheme, loading in OSDF defaults. Here is an example:
