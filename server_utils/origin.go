@@ -37,9 +37,9 @@ var originExports *[]OriginExports
 
 type (
 	OriginExports struct {
-		StoragePrefix    string
-		FederationPrefix string
-		Capabilities     server_structs.Capabilities
+		StoragePrefix    string                      `json:"storage_prefix"`
+		FederationPrefix string                      `json:"federation_prefix"`
+		Capabilities     server_structs.Capabilities `json:"capabilities"`
 	}
 )
 
