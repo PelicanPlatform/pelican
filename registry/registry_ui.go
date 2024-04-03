@@ -495,6 +495,9 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 		ns.AdminMetadata.UserID = user
 		// Overwrite status to Pending to filter malicious request
 		ns.AdminMetadata.Status = Pending
+		if inTopo {
+			ns.AdminMetadata.Description = "[ Attention: Prefix exists in OSDF topology ] " + ns.AdminMetadata.Description
+		}
 		if err := AddNamespace(&ns); err != nil {
 			log.Errorf("Failed to insert namespace with id %d. %v", ns.ID, err)
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Fail to insert namespace"})
@@ -502,7 +505,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 		}
 		msg := "success"
 		if inTopo {
-			msg = "Prefix is successfully registered. Note that there is an existing namespace prefix in the OSDF topology. The register admin will review your request and approve your namespace if this is expected."
+			msg = "Prefix is successfully registered. Note that there is an existing namespace prefix in the OSDF topology. The registry admin will review your request and approve your namespace if this is expected."
 		}
 		ctx.JSON(http.StatusOK, gin.H{"msg": msg})
 	} else { // Update

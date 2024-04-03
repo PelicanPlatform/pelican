@@ -323,11 +323,14 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 					ns.AdminMetadata.UserID = val
 				}
 			}
+			if inTopo {
+				ns.AdminMetadata.Description = "[ Attention: Prefix exists in OSDF topology ] "
+			}
 			userName, ok := idMap["name"]
 			if ok {
 				val, ok := userName.(string)
 				if ok {
-					ns.AdminMetadata.Description = "User name: " + val + " "
+					ns.AdminMetadata.Description += "User name: " + val + " "
 				}
 			}
 			email, ok := idMap["email"]
@@ -370,7 +373,7 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 		} else {
 			msg := fmt.Sprintf("Prefix %s successfully registered", ns.Prefix)
 			if inTopo {
-				msg = fmt.Sprintf("Prefix %s successfully registered. Note that there is an existing namespace prefix in the OSDF topology. The register admin will review your request and approve your namespace if this is expected.", ns.Prefix)
+				msg = fmt.Sprintf("Prefix %s successfully registered. Note that there is an existing namespace prefix in the OSDF topology. The registry admin will review your request and approve your namespace if this is expected.", ns.Prefix)
 			}
 			return true, map[string]interface{}{
 				"message": msg,
