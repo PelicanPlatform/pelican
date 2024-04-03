@@ -28,6 +28,7 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -223,8 +224,33 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		return nil
 	})
 
-	if err = server_utils.WaitUntilWorking(ctx, "GET", param.Server_ExternalWebUrl.GetString()+"/api/v1.0/health", "Web UI", http.StatusOK); err != nil {
-		log.Errorln("Web engine startup appears to have failed:", err)
+	// A block of code to check the web engine works
+	const retryLimit = 3
+	const timeoutDuration = 1 * time.Second // we don't want to wait 10s before the next attempt
+	var serverUrl = param.Server_ExternalWebUrl.GetString() + "/api/v1.0/health"
+
+	for i := 0; i < retryLimit; i++ {
+		timeoutCtx, cancel := context.WithTimeout(ctx, timeoutDuration)
+		defer cancel()
+
+		if i == retryLimit-1 { // For last attempt, we don't force the timeout but allow the WaitUntilWorking timeout by itself
+			err = server_utils.WaitUntilWorking(ctx, "GET", serverUrl, "Web UI", http.StatusOK)
+		} else {
+			err = server_utils.WaitUntilWorking(timeoutCtx, "GET", serverUrl, "Web UI", http.StatusOK)
+		}
+
+		if ctx.Err() == context.DeadlineExceeded {
+			log.Infoln("Web engine startup appears to have failed. Attempt", i+1, "failed due to timeout:", err)
+		} else if err != nil {
+			log.Errorln("Web engine startup appears to have failed. Retrying...:", err)
+		} else {
+			break // if no error returns, simply break the loop
+		}
+		<-time.After(1 * time.Second) // Wait for a bit before the next retry
+	}
+	if err != nil {
+		// After all retries, return the last error
+		log.Errorln("All attempts to check the web engine failed:", err)
 		return shutdownCancel, err
 	}
 
