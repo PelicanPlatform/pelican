@@ -104,10 +104,7 @@ func copyMain(cmd *cobra.Command, args []string) {
 	}
 
 	if val, err := cmd.Flags().GetBool("version"); err == nil && val {
-		fmt.Println("Version:", config.GetVersion())
-		fmt.Println("Build Date:", date)
-		fmt.Println("Build Commit:", commit)
-		fmt.Println("Built By:", builtBy)
+		config.PrintPelicanVersion()
 		os.Exit(0)
 	}
 
