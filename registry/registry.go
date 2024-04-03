@@ -234,6 +234,7 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 	if err != nil {
 		return false, nil, badRequestError{Message: err.Error()}
 	}
+	registryUrl := param.Federation_RegistryUrl.GetString()
 
 	var rawkey interface{} // This is the raw key, like *rsa.PrivateKey or *ecdsa.PrivateKey
 	if err := key.Raw(&rawkey); err != nil {
@@ -288,7 +289,7 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 		}
 		data.Prefix = reqPrefix
 
-		valErr, sysErr := validateKeyChaining(reqPrefix, key)
+		inTopo, valErr, sysErr := validateKeyChaining(reqPrefix, key)
 		if valErr != nil {
 			log.Errorln(err)
 			return false, nil, permissionDeniedError{Message: valErr.Error()}
@@ -322,17 +323,38 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 					ns.AdminMetadata.UserID = val
 				}
 			}
+			userName, ok := idMap["name"]
+			if ok {
+				val, ok := userName.(string)
+				if ok {
+					ns.AdminMetadata.Description = "User name: " + val + " "
+				}
+			}
 			email, ok := idMap["email"]
 			if ok {
 				val, ok := email.(string)
 				if ok {
-					ns.AdminMetadata.Description = "User email: " + val + " This is a namespace registration from Pelican CLI with OIDC authentication. Certain fields may not be populated"
+					ns.AdminMetadata.Description += "User email: " + val + " This is a namespace registration from Pelican CLI with OIDC authentication. Certain fields may not be populated"
 				}
 			}
 		} else {
 			// This is either a registration from CLI without --with-identity flag or
 			// an automated registration from origin or cache
 			ns.AdminMetadata.Description = "This is a namespace registration from Pelican CLI or an automated registration. Certain fields may not be populated"
+
+			// If the namespace is in the topology, we require identity information to register a Pelican namespace
+			// for verification purpose
+			if inTopo {
+				return false,
+					nil,
+					fmt.Errorf("The namespace %s already exists in the OSDF topology. "+
+						"To register a Pelican equivalence, you need to present your identity. "+
+						"If you are registering through Pelican CLI, try again with the flag '--with-identity' enabled. "+
+						"If this is an auto-registration from a Pelican origin or cache server, "+
+						"register your namespace or server through the Pelican registry website at %s instead.",
+						ns.Prefix,
+						registryUrl)
+			}
 		}
 
 		// Since CLI/auto-registered namespace did not have site name as part of their registration
@@ -346,8 +368,12 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 		if err != nil {
 			return false, nil, errors.Wrapf(err, "Failed to add the prefix %q to the database", ns.Prefix)
 		} else {
+			msg := fmt.Sprintf("Prefix %s successfully registered", ns.Prefix)
+			if inTopo {
+				msg = fmt.Sprintf("Prefix %s successfully registered. Note that there is an existing namespace prefix in the OSDF topology. The register admin will review your request and approve your namespace if this is expected.", ns.Prefix)
+			}
 			return true, map[string]interface{}{
-				"message": "Prefix successfully registered",
+				"message": msg,
 			}, nil
 		}
 	} else {

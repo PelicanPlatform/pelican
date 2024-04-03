@@ -178,7 +178,7 @@ func namespaceExistsByPrefix(prefix string) (bool, error) {
 	return count > 0, nil
 }
 
-// Check if a namespace exists in the Namespace table
+// Check if a namespace exists in the Topology table
 func topologyNamespaceExistsByPrefix(prefix string) (bool, error) {
 	var count int64
 
@@ -190,9 +190,7 @@ func topologyNamespaceExistsByPrefix(prefix string) (bool, error) {
 }
 
 func namespaceSupSubChecks(prefix string) (superspaces []string, subspaces []string, inTopo bool, err error) {
-	// The very first thing we do is check if there's a match in topo -- if there is, for now
-	// we simply refuse to allow registration of a superspace or a subspace, assuming the registrant
-	// has to go through topology
+	// The very first thing we do is check if there's a match in topo. We simply flag it's in topology if so
 	if config.GetPreferredPrefix() == "OSDF" {
 		topoSuperSubQuery := `
 		SELECT prefix FROM topology WHERE (? || '/') LIKE (prefix || '/%')
@@ -206,9 +204,7 @@ func namespaceSupSubChecks(prefix string) (superspaces []string, subspaces []str
 		}
 
 		if len(results) > 0 {
-			// If we get here, there was a match -- it's a trap!
 			inTopo = true
-			return
 		}
 	}
 
