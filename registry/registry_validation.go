@@ -70,17 +70,21 @@ func validatePrefix(nspath string) (string, error) {
 }
 
 func validateKeyChaining(prefix string, pubkey jwk.Key) (inTopo bool, validationError error, serverError error) {
-	if !param.Registry_RequireKeyChaining.GetBool() {
-		return
-	}
 	// We don't check keyChaining for caches
 	if strings.HasPrefix(prefix, "/caches/") {
 		return
 	}
+	// Here, we do the check anyway but only returns error (if any)
+	// we the flag is on. This is to make sure the topology check is independent
+	// of key chaining check
 	superspaces, subspaces, inTopo, err := namespaceSupSubChecks(prefix)
-	if err != nil {
-		serverError = errors.Wrap(err, "Server encountered an error checking if namespace already exists")
+	if !param.Registry_RequireKeyChaining.GetBool() {
 		return
+	} else {
+		if err != nil {
+			serverError = errors.Wrap(err, "Server encountered an error checking if namespace already exists")
+			return
+		}
 	}
 
 	// If we make the assumption that namespace prefixes are hierarchical, eg that the owner of /foo should own
