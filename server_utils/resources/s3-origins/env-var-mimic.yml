@@ -1,0 +1,17 @@
+# Origin configuration to mimic older single-export style origins.
+# Note that this stands in place of an Env Var config because this can be
+# directly mimicked with env vars due to lack of yaml lists.
+
+# NOTE: This is an incomplete configuration, and is only meant to test correct consrtuction
+# of origin exports
+Origin:
+  StorageType: "s3"
+  FederationPrefix: /my/namespace
+  S3Bucket: "my-bucket"
+  S3AccessKeyfile: "/path/to/access.key"
+  S3SecretKeyfile: "/path/to/secret.key"
+
+  EnableWrites: false
+  EnablePublicReads: true
+  EnableListings: false
+  EnableDirectReads: true

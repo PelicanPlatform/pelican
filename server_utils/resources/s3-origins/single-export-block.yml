@@ -1,0 +1,13 @@
+# Origin export configuration to test single export from config block
+
+Origin:
+  # Things that configure the origin itself
+  StorageType: "s3"
+
+  # The actual namespaces we export
+  Exports:
+    - S3Bucket: my-bucket
+      S3AccessKeyfile: /path/to/access.key
+      S3SecretKeyfile: /path/to/secret.key
+      FederationPrefix: /first/namespace
+      Capabilities: ["PublicReads", "DirectReads"]

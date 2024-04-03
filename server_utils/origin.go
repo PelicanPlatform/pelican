@@ -41,6 +41,14 @@ type (
 	OriginExport struct {
 		StoragePrefix    string
 		FederationPrefix string
+
+		// Export fields specific to S3. Other things like
+		// S3ServiceUrl, S3Region, etc are kept top-level in the config
+		S3Bucket        string
+		S3AccessKeyfile string
+		S3SecretKeyfile string
+
+		// Capabilities for the export
 		Capabilities     server_structs.Capabilities
 		SentinelLocation string
 	}
@@ -48,7 +56,7 @@ type (
 
 /*
 A decoder hook we can pass to viper.Unmarshal to convert a list of strings to a struct
-with boolean fields. In this case, we're a string slice (flow) from yaml:
+with boolean fields. In this case, we're converting a string slice (flow) from yaml:
 
 	Exports:
 	  Capabilities: ["PublicReads", "Writes"]
@@ -223,27 +231,102 @@ func GetOriginExports() (*[]OriginExport, error) {
 		}
 
 	case "s3":
-		// For now we're only supporting a single export for S3
-		// Our "federation prefix" is actually just
-		// /<Origin.S3ServiceName>/<Origin.S3Region>/<Origin.S3Bucket>
-		reads := (param.Origin_EnableReads.GetBool() || param.Origin_EnablePublicReads.GetBool())
+		// Handle exports configured via -v or potentially env vars
+		if len(param.Origin_ExportVolumes.GetStringSlice()) > 0 {
+			log.Infoln("Configuring exports from export volumes passed via command line or via yaml")
+			for _, volume := range param.Origin_ExportVolumes.GetStringSlice() {
+				// Perform validation of the namespace
+				volumeMountInfo := strings.SplitN(volume, ":", 2)
+				if len(volumeMountInfo) != 2 {
+					// We detected more than one `:` in the volume mount
+					return nil, errors.New("Invalid volume mount/ExportVolume format. Each entry must be in the form of my-bucket:/my/prefix")
+				}
 
-		federationPrefix := filepath.Join("/", param.Origin_S3ServiceName.GetString(),
-			param.Origin_S3Region.GetString(), param.Origin_S3Bucket.GetString())
-		originExport := OriginExport{
-			FederationPrefix: federationPrefix,
-			StoragePrefix:    "",
-			Capabilities: server_structs.Capabilities{
-				PublicReads: param.Origin_EnablePublicReads.GetBool(),
-				Writes:      param.Origin_EnableWrites.GetBool(),
-				Listings:    param.Origin_EnableListings.GetBool(),
-				Reads:       reads,
-				DirectReads: param.Origin_EnableDirectReads.GetBool(),
-			},
+				bucket := volumeMountInfo[0]
+				federationPrefix := filepath.Clean(volumeMountInfo[1])
+
+				if federationPrefix == "" {
+					return nil, errors.New(fmt.Sprintf("Volume mounts for S3 origins require a federation prefix, but none was provided: %s", volume))
+				}
+
+				if bucket == "" {
+					log.Warningf(`The volume mount %s does not contain a bucket. Pelican will interpret this as intending to export all buckets
+from S3 service URL. In this configuration, objects can be accessed at /federation/prefix/bucket/object`, volume)
+				}
+
+				reads := param.Origin_EnableReads.GetBool() || param.Origin_EnablePublicReads.GetBool()
+				originExport := OriginExport{
+					FederationPrefix: federationPrefix,
+					StoragePrefix:    "/", // TODO: This is a placeholder for now, eventually we want storage prefix to mean something in S3
+					S3Bucket:         bucket,
+					S3AccessKeyfile:  param.Origin_S3AccessKeyfile.GetString(),
+					S3SecretKeyfile:  param.Origin_S3SecretKeyfile.GetString(),
+					Capabilities: server_structs.Capabilities{
+						PublicReads: param.Origin_EnablePublicReads.GetBool(),
+						Writes:      param.Origin_EnableWrites.GetBool(),
+						Listings:    param.Origin_EnableListings.GetBool(),
+						Reads:       reads,
+						DirectReads: param.Origin_EnableDirectReads.GetBool(),
+					},
+				}
+				*originExports = append(*originExports, originExport)
+			}
+
+			// If we're only exporting one namespace, we can set the internal Origin.FederationPrefix and Origin.StoragePrefix
+			if len(param.Origin_ExportVolumes.GetStringSlice()) == 1 {
+				viper.Set("Origin.FederationPrefix", (*originExports)[0].FederationPrefix)
+				viper.Set("Origin.S3Bucket", (*originExports)[0].S3Bucket)
+				viper.Set("Origin.EnableReads", (*originExports)[0].Capabilities.Reads)
+			}
+
+			log.Warningln("Passing export volumes via -v at the command line causes Pelican to ignore exports configured via the yaml file")
+			log.Warningln("However, namespaces exported this way will inherit the Origin.Enable* settings from your configuration")
+			log.Warningln("For finer-grained control of each export, please configure them in your pelican.yaml file")
+			return originExports, nil
 		}
 
-		viper.Set("Origin.FederationPrefix", federationPrefix)
-		*originExports = append(*originExports, originExport)
+		if param.Origin_Exports.IsSet() {
+			log.Infoln("Configuring multiple S3 exports from origin Exports block in config file")
+			if err := viper.UnmarshalKey("Origin.Exports", originExports, viper.DecodeHook(StringListToCapsHookFunc())); err != nil {
+				return nil, err
+			}
+			if len(*originExports) == 0 {
+				err := errors.New("Origin.Exports is defined, but no exports were found")
+				return nil, err
+			} else if len(*originExports) == 1 {
+				reads := (*originExports)[0].Capabilities.Reads || (*originExports)[0].Capabilities.PublicReads
+				viper.Set("Origin.FederationPrefix", (*originExports)[0].FederationPrefix)
+				viper.Set("Origin.StoragePrefix", (*originExports)[0].StoragePrefix)
+				viper.Set("Origin.S3Bucket", (*originExports)[0].S3Bucket)
+				viper.Set("Origin.S3AccessKeyfile", (*originExports)[0].S3AccessKeyfile)
+				viper.Set("Origin.S3SecretKeyfile", (*originExports)[0].S3SecretKeyfile)
+				viper.Set("Origin.EnableReads", reads)
+				viper.Set("Origin.EnablePublicReads", (*originExports)[0].Capabilities.PublicReads)
+				viper.Set("Origin.EnableWrites", (*originExports)[0].Capabilities.Writes)
+				viper.Set("Origin.EnableListings", (*originExports)[0].Capabilities.Listings)
+				viper.Set("Origin.EnableDirectReads", (*originExports)[0].Capabilities.DirectReads)
+			}
+		} else { // we're using the simple Origin.FederationPrefix
+			log.Infoln("Configuring single-export S3 origin")
+
+			reads := (param.Origin_EnableReads.GetBool() || param.Origin_EnablePublicReads.GetBool())
+			originExport := OriginExport{
+				FederationPrefix: param.Origin_FederationPrefix.GetString(),
+				StoragePrefix:    param.Origin_StoragePrefix.GetString(),
+				S3Bucket:         param.Origin_S3Bucket.GetString(),
+				S3AccessKeyfile:  param.Origin_S3AccessKeyfile.GetString(),
+				S3SecretKeyfile:  param.Origin_S3SecretKeyfile.GetString(),
+				Capabilities: server_structs.Capabilities{
+					PublicReads: param.Origin_EnablePublicReads.GetBool(),
+					Writes:      param.Origin_EnableWrites.GetBool(),
+					Listings:    param.Origin_EnableListings.GetBool(),
+					Reads:       reads,
+					DirectReads: param.Origin_EnableDirectReads.GetBool(),
+				},
+			}
+			viper.Set("Origin.EnableReads", reads)
+			*originExports = append(*originExports, originExport)
+		}
 	}
 
 	return originExports, nil
