@@ -73,7 +73,9 @@ Once you have your cache set up, follow the steps below to test if your cache ca
 1. Have data available and accessible via an origin. Since a cache only works with data available via an origin that’s in the same Pelican federation, the following assumes that you have a an accessible namespace within the same Pelican federation. For more information on how to set that up, refer to [Serving an Origin](./serving_an_origin.mdx). The following also assume that the object to test is public file. To set up a public file through a Pelican origin, refer to the [Configuration documentation](./parameters.mdx#Origin-Exports).
 2. Curl the director for the test file and ensure that the url used is the cache that you set up. Assuming your directory is `/tmp/demo`, run the following command to curl your known public file from the cache.
 
-```$ curl -v https://<cache-url>/<namespace/path-to-public-file>```
+```
+$ curl -v https://<cache-url>/<namespace/path-to-public-file>
+```
 
 Where:
 * `<cache-url>` is the of your cache
