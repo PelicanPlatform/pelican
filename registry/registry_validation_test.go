@@ -206,19 +206,19 @@ func TestValidateKeyChaining(t *testing.T) {
 
 	t.Run("off-param-no-check", func(t *testing.T) {
 		viper.Set("Registry.RequireKeyChaining", false)
-		validErr, serverErr := validateKeyChaining("/foo/barz", jwkFoo)
+		_, validErr, serverErr := validateKeyChaining("/foo/barz", jwkFoo)
 		assert.NoError(t, serverErr)
 		assert.NoError(t, validErr)
 	})
 
 	t.Run("on-param-does-check", func(t *testing.T) {
 		viper.Set("Registry.RequireKeyChaining", true)
-		validErr, serverErr := validateKeyChaining("/foo/barz", jwkFoo)
+		_, validErr, serverErr := validateKeyChaining("/foo/barz", jwkFoo)
 		// Same public key as /foo shouldn't give error
 		assert.NoError(t, serverErr)
 		assert.NoError(t, validErr)
 
-		validErr, serverErr = validateKeyChaining("/foo/barz", jwkMockNew)
+		_, validErr, serverErr = validateKeyChaining("/foo/barz", jwkMockNew)
 		// Same public key as /foo shouldn't give error
 		assert.NoError(t, serverErr)
 		assert.Error(t, validErr)
@@ -227,12 +227,12 @@ func TestValidateKeyChaining(t *testing.T) {
 
 	t.Run("on-param-ignore-cache", func(t *testing.T) {
 		viper.Set("Registry.RequireKeyChaining", true)
-		validErr, serverErr := validateKeyChaining("/cache/newCache", jwkCache)
+		_, validErr, serverErr := validateKeyChaining("/cache/newCache", jwkCache)
 		// Same public key as /cache/randomCache shouldn't give error
 		assert.NoError(t, serverErr)
 		assert.NoError(t, validErr)
 
-		validErr, serverErr = validateKeyChaining("/cache/newKey", jwkMockNew)
+		_, validErr, serverErr = validateKeyChaining("/cache/newKey", jwkMockNew)
 		// Different public key as /cache/randomCache shouldn't give error
 		assert.NoError(t, serverErr)
 		assert.NoError(t, validErr)

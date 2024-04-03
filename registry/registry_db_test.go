@@ -785,12 +785,12 @@ func TestRegistryTopology(t *testing.T) {
 	require.NoError(t, err)
 
 	// Check that topology namespace exists
-	exists, err := namespaceExists("/topo/foo")
+	exists, err := topologyNamespaceExistsByPrefix("/topo/foo")
 	require.NoError(t, err)
 	require.True(t, exists)
 
 	// Check that topology namespace exists
-	exists, err = namespaceExists("/topo/bar")
+	exists, err = topologyNamespaceExistsByPrefix("/topo/bar")
 	require.NoError(t, err)
 	require.True(t, exists)
 
@@ -806,12 +806,12 @@ func TestRegistryTopology(t *testing.T) {
 	require.NoError(t, err)
 
 	// Check that the regular namespace exists
-	exists, err = namespaceExists("/regular/foo")
+	exists, err = topologyNamespaceExistsByPrefix("/regular/foo")
 	require.NoError(t, err)
-	require.True(t, exists)
+	require.False(t, exists)
 
 	// Check that a bad namespace doesn't exist
-	exists, err = namespaceExists("/bad/namespace")
+	exists, err = namespaceExistsByPrefix("/bad/namespace")
 	require.NoError(t, err)
 	require.False(t, exists)
 
@@ -830,24 +830,19 @@ func TestRegistryTopology(t *testing.T) {
 	require.NoError(t, err)
 
 	// Check that /topo/foo still exists
-	exists, err = namespaceExists("/topo/foo")
+	exists, err = topologyNamespaceExistsByPrefix("/topo/foo")
 	require.NoError(t, err)
 	require.True(t, exists)
 
 	// And that /topo/baz was added
-	exists, err = namespaceExists("/topo/baz")
+	exists, err = topologyNamespaceExistsByPrefix("/topo/baz")
 	require.NoError(t, err)
 	require.True(t, exists)
 
 	// Check that /topo/bar is gone
-	exists, err = namespaceExists("/topo/bar")
+	exists, err = topologyNamespaceExistsByPrefix("/topo/bar")
 	require.NoError(t, err)
 	require.False(t, exists)
-
-	// Finally, check that /regular/foo survived
-	exists, err = namespaceExists("/regular/foo")
-	require.NoError(t, err)
-	require.True(t, exists)
 
 	viper.Reset()
 }

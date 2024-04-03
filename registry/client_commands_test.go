@@ -169,8 +169,8 @@ func TestRegistryKeyChainingOSDF(t *testing.T) {
 	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v1.0/registry", "", "/foo/bar/test")
 	require.NoError(t, err)
 
-	// For now, we simply don't allow further super/sub spacing of namespaces from topo, because how
-	// can we validate via a key if there is none?
+	// If the namespace is a subspace from the topology and is registered without the identity
+	// we deny it
 	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v1.0/registry", "", "/topo/foo/bar")
 	require.Error(t, err)
 

@@ -463,7 +463,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 	}
 
 	// Check if the parent or child path along the prefix has been registered
-	valErr, sysErr := validateKeyChaining(ns.Prefix, pubkey)
+	inTopo, valErr, sysErr := validateKeyChaining(ns.Prefix, pubkey)
 	if valErr != nil {
 		log.Errorln("Bad prefix when validating key chaining", valErr)
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": valErr})
@@ -502,7 +502,11 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Fail to insert namespace"})
 			return
 		}
-		ctx.JSON(http.StatusOK, gin.H{"msg": "success"})
+		msg := "success"
+		if inTopo {
+			msg = "Prefix is successfully registered. Note that there is an existing namespace prefix in the OSDF topology. The register admin will review your request and approve your namespace if this is expected."
+		}
+		ctx.JSON(http.StatusOK, gin.H{"msg": msg})
 	} else { // Update
 		// First check if the namespace exists
 		exists, err := namespaceExistsById(ns.ID)

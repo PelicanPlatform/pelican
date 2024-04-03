@@ -821,7 +821,10 @@ paths:
           required: true
       responses:
         "200":
-          description: OK
+          description: >
+            OK.
+            Note that if the registry runs in the OSDF mode,
+            the `"message"` will reflect if there's an existing namespace in the OSDF topology.
           schema:
             type: object
             $ref: "#/definitions/SuccessModel"
