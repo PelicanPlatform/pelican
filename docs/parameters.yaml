@@ -874,6 +874,7 @@ description: >-
   number of connections to this value.
 type: int
 default: none
+components: ["cache"]
 ---
 name: Cache.EnableLotman
 description: >-
