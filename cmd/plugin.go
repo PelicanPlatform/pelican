@@ -27,6 +27,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"runtime/debug"
 	"strings"
 	"syscall"
@@ -42,10 +43,6 @@ import (
 )
 
 var (
-	commit  = "none"
-	date    = "unknown"
-	builtBy = "unknown"
-
 	// Holds the various plugin commands
 	rootPluginCmd = &cobra.Command{
 		Use:   "plugin",
@@ -98,7 +95,8 @@ func stashPluginMain(args []string) {
 
 			// Set as failure and add errors
 			resultAd.Set("TransferSuccess", false)
-			resultAd.Set("TransferError", ret+";"+strings.ReplaceAll(string(debug.Stack()), "\n", ";"))
+			errMsg := writeTransferErrorMessage(ret+";"+strings.ReplaceAll(string(debug.Stack()), "\n", ";"), "", false)
+			resultAd.Set("TransferError", errMsg)
 			resultAds = append(resultAds, resultAd)
 
 			// Attempt to write our file and bail
@@ -133,10 +131,7 @@ func stashPluginMain(args []string) {
 			fmt.Println("SupportedMethods = \"stash, osdf\"")
 			os.Exit(0)
 		} else if args[0] == "-version" || args[0] == "-v" {
-			fmt.Println("Version:", config.GetVersion())
-			fmt.Println("Build Date:", date)
-			fmt.Println("Build Commit:", commit)
-			fmt.Println("Built By:", builtBy)
+			config.PrintPelicanVersion()
 			os.Exit(0)
 		} else if args[0] == "-upload" {
 			log.Debugln("Upload detected")
@@ -179,7 +174,8 @@ func stashPluginMain(args []string) {
 
 		// Set as failure and add errors
 		resultAd.Set("TransferSuccess", false)
-		resultAd.Set("TransferError", configErr.Error())
+		errMsg := writeTransferErrorMessage(configErr.Error(), "", upload)
+		resultAd.Set("TransferError", errMsg)
 		if client.ShouldRetry(configErr) {
 			resultAd.Set("TransferRetryable", true)
 		} else {
@@ -492,13 +488,7 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 				if errors.As(result.Error, &te) {
 					errMsgInternal = te.UserError()
 				}
-				errMsg := " Failure "
-				if upload {
-					errMsg += "uploading "
-				} else {
-					errMsg += "downloading "
-				}
-				errMsg += transfer.url.String() + ": " + errMsgInternal
+				errMsg := writeTransferErrorMessage(errMsgInternal, transfer.url.String(), upload)
 				resultAd.Set("TransferError", errMsg)
 				resultAd.Set("TransferFileBytes", 0)
 				resultAd.Set("TransferTotalBytes", 0)
@@ -609,4 +599,73 @@ func readMultiTransfers(stdin bufio.Reader) (transfers []PluginTransfer, err err
 	}
 
 	return transfers, nil
+}
+
+// This function wraps the transfer error message into a more readable and user-friendly format.
+func writeTransferErrorMessage(currentError string, transferUrl string, upload bool) (errMsg string) {
+	errMsg = "Pelican Client Error: "
+
+	// TransferUrl will be blank if this occurs before transfer has started.
+	if transferUrl != "" {
+		if upload {
+			errMsg += "uploading "
+		} else {
+			errMsg += "downloading "
+		}
+		errMsg += transferUrl + ": "
+	}
+	errMsg += currentError
+	errMsg += (" (Pelican Version: " + config.GetVersion())
+
+	siteName := parseMachineAd()
+	if siteName != "" {
+		errMsg += "; Site: " + siteName + ")"
+	} else {
+		errMsg += ")"
+	}
+
+	return
+}
+
+// This function parses the machine ad present with a condor job to get the site name.
+// Only really needed on the ospool, otherwise this will return ""
+func parseMachineAd() string {
+	var filename string
+	//Parse the .job.ad file for the Owner (username) and ProjectName of the callee.
+	if _, err := os.Stat(".machine.ad"); err == nil {
+		filename = ".machine.ad"
+	} else {
+		return ""
+	}
+
+	// https://stackoverflow.com/questions/28574609/how-to-apply-regexp-to-content-in-file-go
+
+	b, err := os.ReadFile(filename)
+	if err != nil {
+		log.Warningln("Can not read .machine.ad file", err)
+		return ""
+	}
+
+	// Get all matches from file
+	// Note: This appears to be invalid regex but is the only thing that appears to work. This way it successfully finds our matches
+	classadRegex, e := regexp.Compile(`^*\s*(GLIDEIN_Site)\s=\s"(.*)"`)
+	if e != nil {
+		log.Fatal(e)
+	}
+
+	matches := classadRegex.FindAll(b, -1)
+	for _, match := range matches {
+		matchString := strings.TrimSpace(string(match))
+
+		if strings.HasPrefix(matchString, "GLIDEIN_Site") {
+			matchParts := strings.Split(strings.TrimSpace(matchString), "=")
+
+			if len(matchParts) == 2 { // just confirm we get 2 parts of the string
+				matchValue := strings.TrimSpace(matchParts[1])
+				matchValue = strings.Trim(matchValue, "\"") //trim any "" around the match if present
+				return matchValue
+			}
+		}
+	}
+	return ""
 }

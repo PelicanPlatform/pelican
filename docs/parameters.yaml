@@ -416,12 +416,27 @@ name: Origin.Exports
 description: >-
   A list describing the origin's exports. Each item in the list describes a single namespace the origin exports:
 
-    - StoragePrefix: <the relevant path from the object store, eg for posix /my/dir>
-      FederationPrefix: <the namespace prefix that data from StoragePrefix is made available under within the federation>
+    - StoragePrefix: The relevant path from the object store, e.g. for posix /my/dir
+      FederationPrefix: The namespace prefix that data from StoragePrefix is made available under within the federation
       Capabilities: A list of the capabilities the origin is willing to support for the given export. Capabilities include:
         ["Reads", "PublicReads", "Writes", "Listings", "DirectReads"]
-      where each of these has the same effect as the corresponding "Origin.Enable*" configuration, except scoped to the
-      given export. If "PublicReads" is included, "Reads" is inferred.
+        where each of these has the same effect as the corresponding "Origin.Enable*" configuration, except scoped to the
+        given export. If "PublicReads" is included, "Reads" is inferred.
+      SentinelLocation: A filename under `StoragePrefix` path for Pelican to check the storage directory exists and is correctly mounted.
+        Leave it empty to skip the check. You should always choose a distinguished name for `SentinelLocation`. It should not be reused for other servers.
+        If running in a containerized environment it should not be the name of the underlying physical host as that may change and lead to confusion.
+        You need to manually create a file under path to `StoragePrefix` with the same name as `SentinelLocation`. Note that this parameter will be ignored
+        if the origin StorageType is S3.
+
+    Example:
+
+    ```yaml
+    Origin.Exports
+      - StoragePrefix: /home/foo/bar
+        FederationPrefix: /demo/project
+        Capabilities: ["Reads", "PublicReads", "Writes", "Listings", "DirectReads"]
+        SentinelLocation: demoproject_origin_A
+    ```
 type: object
 default: none
 components: ["origin"]
@@ -874,6 +889,7 @@ description: >-
   number of connections to this value.
 type: int
 default: none
+components: ["cache"]
 ---
 name: Cache.EnableLotman
 description: >-

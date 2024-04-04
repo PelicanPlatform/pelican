@@ -19,6 +19,7 @@
 package client
 
 import (
+	"context"
 	"net/url"
 	"strings"
 
@@ -45,7 +46,7 @@ func getDirectorFromUrl(objectUrl *url.URL) (string, error) {
 			}
 			viper.Set("Federation.DirectorUrl", "")
 			viper.Set("Federation.DiscoveryUrl", discoveryUrl.String())
-			if err := config.DiscoverFederation(); err != nil {
+			if err := config.DiscoverFederation(context.Background()); err != nil {
 				return "", errors.Wrapf(err, "Failed to discover location of the director for the federation %s", objectUrl.Host)
 			}
 			if directorUrl = param.Federation_DirectorUrl.GetString(); directorUrl == "" {
@@ -58,7 +59,7 @@ func getDirectorFromUrl(objectUrl *url.URL) (string, error) {
 			objectUrl.Host = ""
 		}
 		viper.Set("Federation.DiscoveryUrl", "https://osg-htc.org")
-		if err := config.DiscoverFederation(); err != nil {
+		if err := config.DiscoverFederation(context.Background()); err != nil {
 			return "", errors.Wrap(err, "Failed to discover director for the OSDF")
 		}
 		if directorUrl = param.Federation_DirectorUrl.GetString(); directorUrl == "" {

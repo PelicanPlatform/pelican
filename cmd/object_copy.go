@@ -104,10 +104,7 @@ func copyMain(cmd *cobra.Command, args []string) {
 	}
 
 	if val, err := cmd.Flags().GetBool("version"); err == nil && val {
-		fmt.Println("Version:", config.GetVersion())
-		fmt.Println("Build Date:", date)
-		fmt.Println("Build Commit:", commit)
-		fmt.Println("Built By:", builtBy)
+		config.PrintPelicanVersion()
 		os.Exit(0)
 	}
 
@@ -202,6 +199,7 @@ func copyMain(cmd *cobra.Command, args []string) {
 
 	var result error
 	lastSrc := ""
+
 	for _, src := range source {
 		isRecursive, _ := cmd.Flags().GetBool("recursive")
 		_, result = client.DoCopy(ctx, src, dest, isRecursive, client.WithCallback(pb.callback), client.WithTokenLocation(tokenLocation), client.WithCaches(caches...))

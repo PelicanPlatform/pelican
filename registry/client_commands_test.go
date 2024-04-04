@@ -130,7 +130,8 @@ func TestRegistryKeyChainingOSDF(t *testing.T) {
 	defer cancel()
 
 	viper.Reset()
-	_ = config.SetPreferredPrefix("OSDF")
+	_, err := config.SetPreferredPrefix("OSDF")
+	assert.NoError(t, err)
 	viper.Set("Federation.DirectorUrl", "https://osdf-director.osg-htc.org")
 	viper.Set("Federation.RegistryUrl", "https://osdf-registry.osg-htc.org")
 	viper.Set("Federation.JwkUrl", "https://osg-htc.org/osdf/public_signing_key.jwks")
@@ -142,7 +143,7 @@ func TestRegistryKeyChainingOSDF(t *testing.T) {
 	registrySvr := registryMockup(ctx, t, "OSDFkeychaining")
 	topoSvr := topologyMockup(t, []string{"/topo/foo"})
 	viper.Set("Federation.TopologyNamespaceURL", topoSvr.URL)
-	err := createTopologyTable()
+	err = createTopologyTable()
 	require.NoError(t, err)
 	err = PopulateTopology()
 	require.NoError(t, err)
@@ -215,7 +216,8 @@ func TestRegistryKeyChainingOSDF(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "The namespace /topo already exists in the OSDF topology. To register a Pelican equivalence, you need to present your identity.")
 
-	config.SetPreferredPrefix("pelican")
+	_, err = config.SetPreferredPrefix("pelican")
+	assert.NoError(t, err)
 	viper.Reset()
 }
 
