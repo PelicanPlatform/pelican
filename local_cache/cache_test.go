@@ -32,6 +32,7 @@ import (
 	"os"
 	"path/filepath"
 	"syscall"
+	"strconv"
 	"testing"
 	"time"
 
@@ -40,6 +41,7 @@ import (
 	"github.com/pelicanplatform/pelican/fed_test_utils"
 	local_cache "github.com/pelicanplatform/pelican/local_cache"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/utils"
@@ -191,17 +193,16 @@ func TestClient(t *testing.T) {
 	viper.Reset()
 	ft := fed_test_utils.NewFedTest(t, authOriginCfg)
 
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+
 	cacheUrl := &url.URL{
 		Scheme: "unix",
 		Path:   param.LocalCache_Socket.GetString(),
 	}
 
 	t.Run("correct-auth", func(t *testing.T) {
-		discoveryHost := param.Federation_DiscoveryUrl.GetString()
-		discoveryUrl, err := url.Parse(discoveryHost)
-		require.NoError(t, err)
-		tr, err := client.DoGet(ft.Ctx, "pelican://"+discoveryUrl.Host+"/test/hello_world.txt", filepath.Join(tmpDir, "hello_world.txt"), false,
-			client.WithToken(ft.Token), client.WithCaches(cacheUrl), client.WithAcquireToken(false))
+		tr, err := client.DoGet(ctx, "pelican://"+param.Server_Hostname.GetString()+":"+strconv.Itoa(param.Server_WebPort.GetInt())+"/test/hello_world.txt",
+			filepath.Join(tmpDir, "hello_world.txt"), false, client.WithToken(ft.Token), client.WithCaches(cacheUrl), client.WithAcquireToken(false))
 		assert.NoError(t, err)
 		require.Equal(t, 1, len(tr))
 		assert.Equal(t, int64(13), tr[0].TransferredBytes)
@@ -212,8 +213,8 @@ func TestClient(t *testing.T) {
 		assert.Equal(t, "Hello, World!", string(byteBuff))
 	})
 	t.Run("incorrect-auth", func(t *testing.T) {
-		_, err := client.DoGet(ft.Ctx, "pelican:///test/hello_world.txt", filepath.Join(tmpDir, "hello_world.txt"), false,
-			client.WithToken("badtoken"), client.WithCaches(cacheUrl), client.WithAcquireToken(false))
+		_, err := client.DoGet(ctx, "pelican://"+param.Server_Hostname.GetString()+":"+strconv.Itoa(param.Server_WebPort.GetInt())+"/test/hello_world.txt",
+			filepath.Join(tmpDir, "hello_world.txt"), false, client.WithToken("badtoken"), client.WithCaches(cacheUrl), client.WithAcquireToken(false))
 		assert.Error(t, err)
 		var sce *client.StatusCodeError
 		assert.True(t, errors.As(err, &sce))
@@ -236,10 +237,18 @@ func TestClient(t *testing.T) {
 		token, err := tokConf.CreateToken()
 		require.NoError(t, err)
 
-		_, err = client.DoGet(ft.Ctx, "pelican:///test/hello_world.txt.1", filepath.Join(tmpDir, "hello_world.txt.1"), false,
-			client.WithToken(token), client.WithCaches(cacheUrl), client.WithAcquireToken(false))
+		_, err = client.DoGet(ctx, "pelican://"+param.Server_Hostname.GetString()+":"+strconv.Itoa(param.Server_WebPort.GetInt())+"/test/hello_world.txt.1",
+			filepath.Join(tmpDir, "hello_world.txt.1"), false, client.WithToken(token), client.WithCaches(cacheUrl), client.WithAcquireToken(false))
 		assert.Error(t, err)
 		assert.Equal(t, "failed to download file: server returned 404 Not Found", err.Error())
+	})
+	t.Cleanup(func() {
+		cancel()
+		if err := egrp.Wait(); err != nil && err != context.Canceled && err != http.ErrServerClosed {
+			require.NoError(t, err)
+		}
+		// Throw in a viper.Reset for good measure. Keeps our env squeaky clean!
+		viper.Reset()
 	})
 }
 
@@ -304,6 +313,9 @@ func TestLargeFile(t *testing.T) {
 	viper.Set("Client.MaximumDownloadSpeed", 40*1024*1024)
 	ft := fed_test_utils.NewFedTest(t, pubOriginCfg)
 
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	te := client.NewTransferEngine(ctx)
+
 	cacheUrl := &url.URL{
 		Scheme: "unix",
 		Path:   param.LocalCache_Socket.GetString(),
@@ -313,15 +325,25 @@ func TestLargeFile(t *testing.T) {
 	require.NoError(t, err)
 	size := writeBigBuffer(t, fp, 100)
 
-	discoveryHost := param.Federation_DiscoveryUrl.GetString()
-	discoveryUrl, err := url.Parse(discoveryHost)
 	require.NoError(t, err)
-	tr, err := client.DoGet(ft.Ctx, "pelican://"+discoveryUrl.Host+"/test/hello_world.txt", filepath.Join(tmpDir, "hello_world.txt"), false,
-		client.WithCaches(cacheUrl))
+	tr, err := client.DoGet(ctx, "pelican://"+param.Server_Hostname.GetString()+":"+strconv.Itoa(param.Server_WebPort.GetInt())+"/test/hello_world.txt",
+		filepath.Join(tmpDir, "hello_world.txt"), false, client.WithCaches(cacheUrl))
 	assert.NoError(t, err)
 	require.Equal(t, 1, len(tr))
 	assert.Equal(t, int64(size), tr[0].TransferredBytes)
 	assert.NoError(t, tr[0].Error)
+
+	t.Cleanup(func() {
+		cancel()
+		if err := egrp.Wait(); err != nil && err != context.Canceled && err != http.ErrServerClosed {
+			require.NoError(t, err)
+		}
+		if err := te.Shutdown(); err != nil {
+			log.Errorln("Failure when shutting down transfer engine:", err)
+		}
+		// Throw in a viper.Reset for good measure. Keeps our env squeaky clean!
+		viper.Reset()
+	})
 
 }
 
@@ -333,6 +355,9 @@ func TestPurge(t *testing.T) {
 	viper.Reset()
 	viper.Set("LocalCache.Size", "5MB")
 	ft := fed_test_utils.NewFedTest(t, pubOriginCfg)
+
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	te := client.NewTransferEngine(ctx)
 
 	cacheUrl := &url.URL{
 		Scheme: "unix",
@@ -349,8 +374,8 @@ func TestPurge(t *testing.T) {
 	require.NotEqual(t, 0, size)
 
 	for idx := 0; idx < 5; idx++ {
-		tr, err := client.DoGet(ft.Ctx, fmt.Sprintf("pelican:///test/hello_world.txt.%d", idx), filepath.Join(tmpDir, fmt.Sprintf("hello_world.txt.%d", idx)), false,
-			client.WithCaches(cacheUrl))
+		tr, err := client.DoGet(ctx, fmt.Sprintf("pelican://"+param.Server_Hostname.GetString()+":"+strconv.Itoa(param.Server_WebPort.GetInt())+"/test/hello_world.txt.%d", idx),
+			filepath.Join(tmpDir, fmt.Sprintf("hello_world.txt.%d", idx)), false, client.WithCaches(cacheUrl))
 		assert.NoError(t, err)
 		require.Equal(t, 1, len(tr))
 		assert.Equal(t, int64(size), tr[0].TransferredBytes)
@@ -370,6 +395,17 @@ func TestPurge(t *testing.T) {
 			defer fp.Close()
 		}()
 	}
+	t.Cleanup(func() {
+		cancel()
+		if err := egrp.Wait(); err != nil && err != context.Canceled && err != http.ErrServerClosed {
+			require.NoError(t, err)
+		}
+		if err := te.Shutdown(); err != nil {
+			log.Errorln("Failure when shutting down transfer engine:", err)
+		}
+		// Throw in a viper.Reset for good measure. Keeps our env squeaky clean!
+		viper.Reset()
+	})
 }
 
 // Create four 1MB files (above low-water mark).  Force a purge, ensuring that the cleanup is
@@ -382,6 +418,9 @@ func TestForcePurge(t *testing.T) {
 	// Decrease the low water mark so invoking purge will result in 3 files in the cache.
 	viper.Set("LocalCache.LowWaterMarkPercentage", "80")
 	ft := fed_test_utils.NewFedTest(t, pubOriginCfg)
+
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	te := client.NewTransferEngine(ctx)
 
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
@@ -415,8 +454,8 @@ func TestForcePurge(t *testing.T) {
 	require.NotEqual(t, 0, size)
 
 	for idx := 0; idx < 4; idx++ {
-		tr, err := client.DoGet(ft.Ctx, fmt.Sprintf("pelican:///test/hello_world.txt.%d", idx), filepath.Join(tmpDir, fmt.Sprintf("hello_world.txt.%d", idx)), false,
-			client.WithCaches(cacheUrl))
+		tr, err := client.DoGet(ctx, fmt.Sprintf("pelican://"+param.Server_Hostname.GetString()+":"+strconv.Itoa(param.Server_WebPort.GetInt())+"/test/hello_world.txt.%d", idx),
+			filepath.Join(tmpDir, fmt.Sprintf("hello_world.txt.%d", idx)), false, client.WithCaches(cacheUrl))
 		assert.NoError(t, err)
 		require.Equal(t, 1, len(tr))
 		assert.Equal(t, int64(size), tr[0].TransferredBytes)
@@ -447,6 +486,17 @@ func TestForcePurge(t *testing.T) {
 			defer fp.Close()
 		}()
 	}
+	t.Cleanup(func() {
+		cancel()
+		if err := egrp.Wait(); err != nil && err != context.Canceled && err != http.ErrServerClosed {
+			require.NoError(t, err)
+		}
+		if err := te.Shutdown(); err != nil {
+			log.Errorln("Failure when shutting down transfer engine:", err)
+		}
+		// Throw in a viper.Reset for good measure. Keeps our env squeaky clean!
+		viper.Reset()
+	})
 }
 
 // Create a federation then SIGSTOP the origin to prevent it from responding.

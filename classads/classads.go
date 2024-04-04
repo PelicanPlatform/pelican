@@ -222,3 +222,72 @@ func attributeSplitFunc(data []byte, atEOF bool) (advance int, token []byte, err
 	}
 	return 0, nil, nil
 }
+
+func ParseShadowClassAd(line string) (ClassAd, error) {
+	var ad ClassAd
+	ad.attributes = make(map[string]interface{})
+
+	// Trim the spaces and "[" "]"
+	line = strings.TrimSpace(line)
+	line = strings.TrimPrefix(line, "[")
+	line = strings.TrimSuffix(line, "]")
+
+	attributeScanner := bufio.NewScanner(strings.NewReader(line))
+	attributeScanner.Split(attributeShadowSplitFunc)
+	for attributeScanner.Scan() {
+		attrStr := attributeScanner.Text()
+		attrStr = strings.TrimSpace(attrStr)
+		if attrStr == "" {
+			continue
+		}
+
+		// Split on the first "="
+		attrSplit := strings.SplitN(attrStr, "=", 2)
+		name := strings.TrimSpace(attrSplit[0])
+
+		// Check for quoted attribute and remove it
+		value := strings.TrimSpace(attrSplit[1])
+
+		// If the value is quoted, remove the quotes
+		if strings.HasPrefix(value, "\"") && strings.HasSuffix(value, "\"") {
+			value = strings.Trim(value, "\"")
+		}
+
+		// Convert the value based on its type
+		if intValue, err := strconv.Atoi(value); err == nil {
+			// If the value is a number, we know it's an integer
+			ad.Set(name, intValue)
+		} else if floatValue, err := strconv.ParseFloat(value, 64); err == nil {
+			// If the value is a float, we know it's a float
+			ad.Set(name, floatValue)
+		} else if value == "true" || value == "false" {
+			// If the value is a boolean, we know it's a boolean
+			ad.Set(name, value == "true")
+		} else {
+			// Otherwise, we assume it's a string
+			ad.Set(name, value)
+		}
+	}
+	return ad, nil
+}
+
+// Split the classad by attribute, at the first semi-colon not in quotes
+func attributeShadowSplitFunc(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	if atEOF && len(data) == 0 {
+		return 0, nil, nil
+	}
+
+	// Look for the next newline character in the input data
+	if i := strings.Index(string(data), "\n"); i >= 0 {
+		// Found a newline character, return the split point
+		return i + 1, data[0:i], nil
+	}
+
+	// If at end of file and no newline character is found, return the entire remaining data
+	if atEOF {
+		return len(data), data, nil
+	}
+
+	// Need more data to find a newline character
+	return 0, nil, nil
+}
