@@ -252,6 +252,7 @@ func GetOriginExports() (*[]OriginExport, error) {
 				if bucket == "" {
 					log.Warningf(`The volume mount %s does not contain a bucket. Pelican will interpret this as intending to export all buckets
 from S3 service URL. In this configuration, objects can be accessed at /federation/prefix/bucket/object`, volume)
+					log.Warningf(`This feature is only compatible with path-style URLs.`)
 				}
 
 				reads := param.Origin_EnableReads.GetBool() || param.Origin_EnablePublicReads.GetBool()
