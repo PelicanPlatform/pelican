@@ -57,6 +57,15 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 
 	ctx, shutdownCancel := context.WithCancel(ctx)
 
+	config.PrintPelicanVersion()
+
+	// Print Pelican config at server start if it's in debug or info level
+	if log.GetLevel() >= log.InfoLevel {
+		if err := config.PrintConfig(); err != nil {
+			return shutdownCancel, err
+		}
+	}
+
 	egrp.Go(func() error {
 		_ = config.RestartFlag
 		log.Debug("Will shutdown process on signal")
@@ -137,6 +146,11 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		originExports, err := server_utils.GetOriginExports()
 
 		if err != nil {
+			return shutdownCancel, err
+		}
+
+		ok, err := server_utils.CheckSentinelLocation(originExports)
+		if err != nil && !ok {
 			return shutdownCancel, err
 		}
 

@@ -26,9 +26,11 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/pkg/errors"
+
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
-	"github.com/pkg/errors"
 )
 
 // For a given prefix, get the prefix's issuer URL, where we consider that the openid endpoint
@@ -100,4 +102,47 @@ func GetJWKSURLFromIssuerURL(issuerUrl string) (string, error) {
 	} else {
 		return "", errors.New(fmt.Sprintf("no key found in openid-configuration for issuer %s", issuerUrl))
 	}
+}
+
+// Given an issuer URL, get the JWKS from the issuer's JWKS URL
+func GetJWKSFromIssUrl(issuer string) (*jwk.Set, error) {
+	// Make sure our URL is solid
+	issuerUrl, err := url.Parse(issuer)
+	if err != nil {
+		return nil, errors.Wrap(err, fmt.Sprintln("Invalid issuer URL: ", issuerUrl))
+	}
+
+	// Discover the JWKS URL from the issuer
+	pubkeyUrlStr, err := GetJWKSURLFromIssuerURL(issuerUrl.String())
+	if err != nil {
+		return nil, errors.Wrap(err, "Error getting JWKS URL from issuer URL")
+	}
+
+	// Query the JWKS URL for the public keys
+	httpClient := &http.Client{Transport: config.GetTransport()}
+	req, err := http.NewRequest("GET", pubkeyUrlStr, nil)
+	if err != nil {
+		return nil, errors.Wrap(err, "Error creating request to issuer's JWKS URL")
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, errors.Wrapf(err, "Error querying issuer's key endpoint (%s)", pubkeyUrlStr)
+	}
+	defer resp.Body.Close()
+	// Check the response code, make sure it's not in the error ranges (400-500)
+	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
+		return nil, errors.Errorf("The issuer's JWKS endpoint returned an unexpected status: %s", resp.Status)
+	}
+
+	// Read the response body and parse the JWKs from it
+	jwksStr, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, errors.Wrapf(err, "Error reading response body from %s", pubkeyUrlStr)
+	}
+	kSet, err := jwk.ParseString(string(jwksStr))
+	if err != nil {
+		return nil, errors.Wrapf(err, "Error parsing JWKs from %s", pubkeyUrlStr)
+	}
+
+	return &kSet, nil
 }

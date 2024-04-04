@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/pkg/errors"
 
@@ -173,4 +174,28 @@ func CopyHeader(dst, src http.Header) {
 			dst.Add(headerName, value)
 		}
 	}
+}
+
+// Simple parser to that takes a "values" string from a header and turns it
+// into a map of key/value pairs
+func HeaderParser(values string) (retMap map[string]string) {
+	retMap = map[string]string{}
+
+	// Some headers might not have values, such as the
+	// X-OSDF-Authorization header when the resource is public
+	if values == "" {
+		return
+	}
+
+	mapPairs := strings.Split(values, ",")
+	for _, pair := range mapPairs {
+		// Remove any unwanted spaces
+		pair = strings.ReplaceAll(pair, " ", "")
+
+		// Break out key/value pairs and put in the map
+		split := strings.Split(pair, "=")
+		retMap[split[0]] = split[1]
+	}
+
+	return retMap
 }

@@ -1,0 +1,100 @@
+# ***************************************************************
+#
+#  Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+#
+#  Licensed under the Apache License, Version 2.0 (the "License"); you
+#  may not use this file except in compliance with the License.  You may
+#  obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+#  limitations under the License.
+#
+# ***************************************************************
+
+# Configuration options used to test Lot declarations
+Lotman:
+  Lots:
+    - LotName: "default"
+      Owner: "https://fake-federation.com"
+      Parents:
+        - "default"
+      ManagementPolicyAttrs:
+        DedicatedGB: 100
+        OpportunisticGB: 200
+        # Wrapping these in a map is an unfortunate side effect of the
+        # way we need to handle the float-->int conversion.
+        MaxNumObjects:
+          Value: 1000
+        CreationTime:
+          Value: 1234
+        ExpirationTime:
+          Value: 12345
+        DeletionTime:
+          Value: 123456
+
+    - LotName: "root"
+      Owner: "https://fake-federation.com"
+      Parents:
+        - "root"
+      Paths:
+        - Path: "/"
+          Recursive: false
+      ManagementPolicyAttrs:
+        DedicatedGB: 1
+        OpportunisticGB: 2
+        # Wrapping these in a map is an unfortunate side effect of the
+        # way we need to handle the float-->int conversion.
+        MaxNumObjects:
+          Value: 10
+        CreationTime:
+          Value: 1234
+        ExpirationTime:
+          Value: 12345
+        DeletionTime:
+          Value: 123456
+
+    - LotName: "test-1"
+      Owner: "https://different-fake-federation.com"
+      Parents:
+        - "root"
+      Paths:
+        - Path: "/test-1"
+          Recursive: false
+      ManagementPolicyAttrs:
+        DedicatedGB: 1.11
+        OpportunisticGB: 2.22
+        # Wrapping these in a map is an unfortunate side effect of the
+        # way we need to handle the float-->int conversion.
+        MaxNumObjects:
+          Value: 42
+        CreationTime:
+          Value: 1234
+        ExpirationTime:
+          Value: 12345
+        DeletionTime:
+          Value: 123456
+    - LotName: "test-2"
+      Owner: "https://another-fake-federation.com"
+      Parents:
+        - "test-1"
+      Paths:
+        - Path: "/test-1/test-2"
+          Recursive: true
+      ManagementPolicyAttrs:
+        DedicatedGB: 1.11
+        OpportunisticGB: 2.22
+        # Wrapping these in a map is an unfortunate side effect of the
+        # way we need to handle the float-->int conversion.
+        MaxNumObjects:
+          Value: 42
+        CreationTime:
+          Value: 1234
+        ExpirationTime:
+          Value: 12345
+        DeletionTime:
+          Value: 123456

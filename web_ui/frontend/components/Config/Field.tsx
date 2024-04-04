@@ -2,7 +2,7 @@ import {
     AuthorizationTemplate, CustomRegistrationField,
     Duration, Export,
     GeoIPOverride,
-    Institution, IPMapping,
+    Institution, IPMapping, Lot,
     OIDCAuthenticationRequirement,
     Parameter,
     ParameterInputProps
@@ -15,7 +15,8 @@ import {
     ObjectField,
     GeoIPOverrideForm,
     InstitutionForm,
-    OIDCAuthenticationRequirementForm
+    OIDCAuthenticationRequirementForm,
+    LotForm
 } from "./ObjectField";
 import {buildPatch} from "@/components/Config/util";
 import IPMappingForm from "@/components/Config/ObjectField/IPMappingForm";
@@ -59,6 +60,8 @@ const Field = ({ onChange, ...props}: ParameterInputProps) => {
                     return <ObjectField onChange={handleChange<CustomRegistrationField[]>}  name={props.name} value={props.Value as CustomRegistrationField[]} Form={CustomRegistrationFieldForm} keyGetter={v => v.name}/>
                 case "Exports":
                     return <ObjectField onChange={handleChange<Export[]>} name={props.name}  value={props.Value as Export[]} Form={ExportForm} keyGetter={v => v.federationprefix}/>
+                case "Lots":
+                    return <ObjectField onChange={handleChange<Lot[]>} name={props.name} value={props.Value as Lot[]} Form={LotForm} keyGetter={v => v.lotname}/>
                 default:
                     console.log("Unknown type: " + props.type)
             }
