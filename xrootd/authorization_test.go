@@ -43,7 +43,6 @@ import (
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -281,9 +280,7 @@ func TestOSDFAuthCreation(t *testing.T) {
 			assert.NoError(t, err)
 			defer func() {
 				_, err := config.SetPreferredPrefix(oldPrefix)
-				if err != nil {
-					log.Errorln(err)
-				}
+				require.NoError(t, err)
 			}()
 
 			err = os.WriteFile(filepath.Join(dirName, "authfile"), []byte(testInput.authIn), fs.FileMode(0600))

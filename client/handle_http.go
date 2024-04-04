@@ -79,14 +79,12 @@ var (
 			// Set a longer TTL for successes
 			item := c.Set(key, cacheItem{
 				url: pelicanUrl{
-					DirectorUrl: urlFederation.DirectorEndpoint,
+					directorUrl: urlFederation.DirectorEndpoint,
 				},
 			}, successTTL)
 			return item
 		},
 	)
-
-	suppressedLoader = ttlcache.NewSuppressedLoader(loader, new(singleflight.Group))
 )
 
 type (
@@ -244,6 +242,7 @@ type (
 		ctx           context.Context
 		cancel        context.CancelFunc
 		callback      TransferCallbackFunc
+		engine        *TransferEngine
 		skipAcquire   bool   // Enable/disable the token acquisition logic.  Defaults to acquiring a token
 		tokenLocation string // Location of a token file to use for transfers
 		token         string // Token that should be used for transfers
@@ -268,7 +267,7 @@ type (
 	}
 
 	pelicanUrl struct {
-		DirectorUrl string // Note: needs to be public because of tests being outside of the package
+		directorUrl string
 	}
 )
 
@@ -371,7 +370,7 @@ func (tr TransferResults) ID() string {
 	return tr.jobId.String()
 }
 
-func (te *TransferEngine) NewPelicanURL(remoteUrl *url.URL) (pelicanURL pelicanUrl, err error) {
+func (te *TransferEngine) newPelicanURL(remoteUrl *url.URL) (pelicanURL pelicanUrl, err error) {
 	scheme := remoteUrl.Scheme
 	if remoteUrl.Host != "" {
 		if scheme == "osdf" || scheme == "stash" {
@@ -410,7 +409,7 @@ func (te *TransferEngine) NewPelicanURL(remoteUrl *url.URL) (pelicanURL pelicanU
 			if param.Federation_DirectorUrl.GetString() == "" || param.Federation_DiscoveryUrl.GetString() == "" || param.Federation_RegistryUrl.GetString() == "" {
 				return pelicanUrl{}, fmt.Errorf("OSDF default metadata is not populated in config")
 			} else {
-				pelicanURL.DirectorUrl = param.Federation_DirectorUrl.GetString()
+				pelicanURL.directorUrl = param.Federation_DirectorUrl.GetString()
 			}
 		} else if config.GetPreferredPrefix() == "PELICAN" {
 			// We hit this case when we are using a pelican binary but an osdf:// url, therefore we need to disover the osdf federation
@@ -441,10 +440,10 @@ func (te *TransferEngine) NewPelicanURL(remoteUrl *url.URL) (pelicanURL pelicanU
 	} else if scheme == "" {
 		// If we don't have a url scheme, then our metadata information should be in the config
 		log.Debugln("No url scheme detected, getting metadata information from configuration")
-		pelicanURL.DirectorUrl = param.Federation_DirectorUrl.GetString()
+		pelicanURL.directorUrl = param.Federation_DirectorUrl.GetString()
 
 		// If the values do not exist, exit with failure
-		if pelicanURL.DirectorUrl == "" {
+		if pelicanURL.directorUrl == "" {
 			return pelicanUrl{}, fmt.Errorf("Missing metadata information in config, ensure Federation DirectorUrl, RegistryUrl, and DiscoverUrl are all set")
 		}
 	}
@@ -460,6 +459,7 @@ func NewTransferEngine(ctx context.Context) *TransferEngine {
 	work := make(chan *clientTransferJob)
 	files := make(chan *clientTransferFile)
 	results := make(chan *clientTransferResults, 5)
+	suppressedLoader := ttlcache.NewSuppressedLoader(loader, new(singleflight.Group))
 	pelicanURLCache := ttlcache.New(
 		ttlcache.WithTTL[string, cacheItem](30*time.Minute),
 		ttlcache.WithLoader(suppressedLoader),
@@ -548,6 +548,7 @@ func (te *TransferEngine) NewClient(options ...TransferOption) (client *Transfer
 		return
 	}
 	client = &TransferClient{
+		engine:  te,
 		id:      id,
 		results: make(chan *TransferResults),
 		work:    make(chan *TransferJob),
@@ -587,10 +588,10 @@ func (te *TransferEngine) NewClient(options ...TransferOption) (client *Transfer
 // Initiates a shutdown of the transfer engine.
 // Waits until all workers have finished
 func (te *TransferEngine) Shutdown() error {
-	te.pelicanURLCache.Stop()
 	te.Close()
 	<-te.closeDoneChan
 	te.ewmaTick.Stop()
+	te.pelicanURLCache.Stop()
 	te.cancel()
 
 	err := te.egrp.Wait()
@@ -863,14 +864,14 @@ func (te *TransferEngine) runJobHandler() error {
 //
 // The returned object can be further customized as desired.
 // This function does not "submit" the job for execution.
-func (tc *TransferClient) NewTransferJob(remoteUrl *url.URL, localPath string, engine *TransferEngine, upload bool, recursive bool, project string, options ...TransferOption) (tj *TransferJob, err error) {
+func (tc *TransferClient) NewTransferJob(remoteUrl *url.URL, localPath string, upload bool, recursive bool, project string, options ...TransferOption) (tj *TransferJob, err error) {
 
 	id, err := uuid.NewV7()
 	if err != nil {
 		return
 	}
 
-	pelicanURL, err := engine.NewPelicanURL(remoteUrl)
+	pelicanURL, err := tc.engine.newPelicanURL(remoteUrl)
 	if err != nil {
 		err = errors.Wrap(err, "error generating metadata for specified url")
 		return
@@ -907,8 +908,8 @@ func (tc *TransferClient) NewTransferJob(remoteUrl *url.URL, localPath string, e
 		}
 	}
 
-	tj.useDirector = pelicanURL.DirectorUrl != ""
-	ns, err := getNamespaceInfo(remoteUrl.Path, pelicanURL.DirectorUrl, upload)
+	tj.useDirector = pelicanURL.directorUrl != ""
+	ns, err := getNamespaceInfo(remoteUrl.Path, pelicanURL.directorUrl, upload)
 	if err != nil {
 		log.Errorln(err)
 		err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", remoteUrl.String())
@@ -1395,7 +1396,7 @@ func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDe
 }
 
 func downloadObject(transfer *transferFile) (transferResults TransferResults, err error) {
-	log.Debugln("Downloading file from", transfer.remoteURL, "to", transfer.localPath)
+	log.Debugln("Downloading object from", transfer.remoteURL, "to", transfer.localPath)
 	// Remove the source from the file path
 	directory := path.Dir(transfer.localPath)
 	var downloaded int64

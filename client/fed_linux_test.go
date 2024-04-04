@@ -22,7 +22,6 @@ package client_test
 
 import (
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -111,24 +110,6 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 	assert.NoError(t, err, "Error writing to inner test file")
 	innerTempFile.Close()
 
-	t.Run("testPelicanRecursiveGetAndPutOsdfURL", func(t *testing.T) {
-		_, err := config.SetPreferredPrefix("PELICAN")
-		assert.NoError(t, err)
-		// Set path for object to upload/download
-		tempPath := tempDir
-		dirName := filepath.Base(tempPath)
-		uploadStr := "osdf:///test/" + dirName
-		uploadURL, err := url.Parse(uploadStr)
-		assert.NoError(t, err)
-
-		// For OSDF url's, we don't want to rely on osdf metadata to be running therefore, just ensure we get correct metadata for the url:
-		pelicanUrl, err := te.NewPelicanURL(uploadURL)
-		assert.NoError(t, err)
-
-		// Check valid metadata:
-		assert.Equal(t, "https://osdf-director.osg-htc.org", pelicanUrl.DirectorUrl)
-	})
-
 	t.Run("testPelicanRecursiveGetAndPutPelicanURL", func(t *testing.T) {
 		_, err := config.SetPreferredPrefix("PELICAN")
 		assert.NoError(t, err)
@@ -176,9 +157,9 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 			// Download the files we just uploaded
 			var transferDetailsDownload []client.TransferResults
 			if export.Capabilities.PublicReads {
-				transferDetailsDownload, err = client.DoGet(te, uploadURL, t.TempDir(), true)
+				transferDetailsDownload, err = client.DoGet(fed.Ctx, uploadURL, t.TempDir(), true)
 			} else {
-				transferDetailsDownload, err = client.DoGet(te, uploadURL, t.TempDir(), true, client.WithTokenLocation(tempToken.Name()))
+				transferDetailsDownload, err = client.DoGet(fed.Ctx, uploadURL, t.TempDir(), true, client.WithTokenLocation(tempToken.Name()))
 			}
 			assert.NoError(t, err)
 			if err == nil && len(transferDetailsDownload) == 3 {
@@ -233,7 +214,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 			viper.Set("Federation.DiscoveryUrl", hostname)
 
 			// Upload the file with PUT
-			transferDetailsUpload, err := client.DoPut(te, tempDir, uploadURL, true, client.WithTokenLocation(tempToken.Name()))
+			transferDetailsUpload, err := client.DoPut(fed.Ctx, tempDir, uploadURL, true, client.WithTokenLocation(tempToken.Name()))
 			assert.NoError(t, err)
 			if err == nil && len(transferDetailsUpload) == 3 {
 				countBytes17 := 0
@@ -269,9 +250,9 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 			tmpDir := t.TempDir()
 			var transferDetailsDownload []client.TransferResults
 			if export.Capabilities.PublicReads {
-				transferDetailsDownload, err = client.DoGet(te, uploadURL, tmpDir, true)
+				transferDetailsDownload, err = client.DoGet(fed.Ctx, uploadURL, tmpDir, true)
 			} else {
-				transferDetailsDownload, err = client.DoGet(te, uploadURL, tmpDir, true, client.WithTokenLocation(tempToken.Name()))
+				transferDetailsDownload, err = client.DoGet(fed.Ctx, uploadURL, tmpDir, true, client.WithTokenLocation(tempToken.Name()))
 			}
 			assert.NoError(t, err)
 			if err == nil && len(transferDetailsDownload) == 3 {

@@ -327,6 +327,7 @@ func TestSetPreferredPrefix(t *testing.T) {
 }
 
 func TestDiscoverFederation(t *testing.T) {
+
 	viper.Reset()
 	// Server to be a "mock" federation
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -350,9 +351,8 @@ func TestDiscoverFederation(t *testing.T) {
 	}))
 	defer server.Close()
 	t.Run("testInvalidDiscoveryUrlWithPath", func(t *testing.T) {
-		viper.Set("tlsskipverify", true)
 		viper.Set("Federation.DiscoveryUrl", server.URL+"/this/is/some/path")
-		err := DiscoverFederation()
+		err := DiscoverFederation(context.Background())
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "Invalid federation discovery url is set. No path allowed for federation discovery url. Provided url: ",
 			"Error returned does not contain the correct error")
@@ -360,9 +360,8 @@ func TestDiscoverFederation(t *testing.T) {
 	})
 
 	t.Run("testValidDiscoveryUrl", func(t *testing.T) {
-		viper.Set("tlsskipverify", true)
 		viper.Set("Federation.DiscoveryUrl", server.URL)
-		err := DiscoverFederation()
+		err := DiscoverFederation(context.Background())
 		assert.NoError(t, err)
 		// Assert that the metadata matches expectations
 		assert.Equal(t, "director", param.Federation_DirectorUrl.GetString(), "Unexpected DirectorEndpoint")
@@ -373,9 +372,8 @@ func TestDiscoverFederation(t *testing.T) {
 	})
 
 	t.Run("testOsgHtcUrl", func(t *testing.T) {
-		viper.Set("tlsskipverify", true)
 		viper.Set("Federation.DiscoveryUrl", "osg-htc.org")
-		err := DiscoverFederation()
+		err := DiscoverFederation(context.Background())
 		assert.NoError(t, err)
 		// Assert that the metadata matches expectations
 		assert.Equal(t, "https://osdf-director.osg-htc.org", param.Federation_DirectorUrl.GetString(), "Unexpected DirectorEndpoint")

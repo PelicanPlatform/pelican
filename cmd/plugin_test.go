@@ -31,7 +31,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -216,7 +215,7 @@ func TestStashPluginMain(t *testing.T) {
 		// Set path for object to upload/download
 		tempPath := tempFile.Name()
 		fileName := filepath.Base(tempPath)
-		uploadURL := fmt.Sprintf("pelican://%s:%s/test/%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()), fileName)
+		uploadURL := fmt.Sprintf("pelican://%s:%d/test/%s", param.Server_Hostname.GetString(), param.Server_WebPort.GetInt(), fileName)
 
 		// Download a test file
 		args := []string{uploadURL, tempDir}
@@ -241,7 +240,7 @@ func TestStashPluginMain(t *testing.T) {
 	output := strings.Replace(stderr.String(), "\\\\", "\\", -1)
 
 	// Check captured output for successful download
-	expectedOutput := "Downloading file from pelican:///test/test.txt to " + tempDir
+	expectedOutput := "Downloading object from pelican:///test/test.txt to " + tempDir
 	assert.Contains(t, output, expectedOutput)
 	successfulDownloadMsg := "HTTP Transfer was successful"
 	assert.Contains(t, output, successfulDownloadMsg)

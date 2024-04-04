@@ -149,7 +149,6 @@ func TestClient(t *testing.T) {
 	ft := fed_test_utils.NewFedTest(t, authOriginCfg)
 
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
-	te := client.NewTransferEngine(ctx)
 
 	cacheUrl := &url.URL{
 		Scheme: "unix",
@@ -157,7 +156,7 @@ func TestClient(t *testing.T) {
 	}
 
 	t.Run("correct-auth", func(t *testing.T) {
-		tr, err := client.DoGet(te, "pelican://"+param.Server_Hostname.GetString()+":"+strconv.Itoa(param.Server_WebPort.GetInt())+"/test/hello_world.txt",
+		tr, err := client.DoGet(ctx, "pelican://"+param.Server_Hostname.GetString()+":"+strconv.Itoa(param.Server_WebPort.GetInt())+"/test/hello_world.txt",
 			filepath.Join(tmpDir, "hello_world.txt"), false, client.WithToken(ft.Token), client.WithCaches(cacheUrl), client.WithAcquireToken(false))
 		assert.NoError(t, err)
 		require.Equal(t, 1, len(tr))
@@ -169,7 +168,7 @@ func TestClient(t *testing.T) {
 		assert.Equal(t, "Hello, World!", string(byteBuff))
 	})
 	t.Run("incorrect-auth", func(t *testing.T) {
-		_, err := client.DoGet(te, "pelican://"+param.Server_Hostname.GetString()+":"+strconv.Itoa(param.Server_WebPort.GetInt())+"/test/hello_world.txt",
+		_, err := client.DoGet(ctx, "pelican://"+param.Server_Hostname.GetString()+":"+strconv.Itoa(param.Server_WebPort.GetInt())+"/test/hello_world.txt",
 			filepath.Join(tmpDir, "hello_world.txt"), false, client.WithToken("badtoken"), client.WithCaches(cacheUrl), client.WithAcquireToken(false))
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, &client.ConnectionSetupError{})
@@ -192,7 +191,7 @@ func TestClient(t *testing.T) {
 		token, err := tokConf.CreateToken()
 		require.NoError(t, err)
 
-		_, err = client.DoGet(te, "pelican://"+param.Server_Hostname.GetString()+":"+strconv.Itoa(param.Server_WebPort.GetInt())+"/test/hello_world.txt.1",
+		_, err = client.DoGet(ctx, "pelican://"+param.Server_Hostname.GetString()+":"+strconv.Itoa(param.Server_WebPort.GetInt())+"/test/hello_world.txt.1",
 			filepath.Join(tmpDir, "hello_world.txt.1"), false, client.WithToken(token), client.WithCaches(cacheUrl), client.WithAcquireToken(false))
 		assert.Error(t, err)
 		assert.Equal(t, "failed to download file: transfer error: failed connection setup: server returned 404 Not Found", err.Error())
@@ -201,9 +200,6 @@ func TestClient(t *testing.T) {
 		cancel()
 		if err := egrp.Wait(); err != nil && err != context.Canceled && err != http.ErrServerClosed {
 			require.NoError(t, err)
-		}
-		if err := te.Shutdown(); err != nil {
-			log.Errorln("Failure when shutting down transfer engine:", err)
 		}
 		// Throw in a viper.Reset for good measure. Keeps our env squeaky clean!
 		viper.Reset()
@@ -284,7 +280,7 @@ func TestLargeFile(t *testing.T) {
 	size := writeBigBuffer(t, fp, 100)
 
 	require.NoError(t, err)
-	tr, err := client.DoGet(te, "pelican://"+param.Server_Hostname.GetString()+":"+strconv.Itoa(param.Server_WebPort.GetInt())+"/test/hello_world.txt",
+	tr, err := client.DoGet(ctx, "pelican://"+param.Server_Hostname.GetString()+":"+strconv.Itoa(param.Server_WebPort.GetInt())+"/test/hello_world.txt",
 		filepath.Join(tmpDir, "hello_world.txt"), false, client.WithCaches(cacheUrl))
 	assert.NoError(t, err)
 	require.Equal(t, 1, len(tr))
@@ -332,7 +328,7 @@ func TestPurge(t *testing.T) {
 	require.NotEqual(t, 0, size)
 
 	for idx := 0; idx < 5; idx++ {
-		tr, err := client.DoGet(te, fmt.Sprintf("pelican://"+param.Server_Hostname.GetString()+":"+strconv.Itoa(param.Server_WebPort.GetInt())+"/test/hello_world.txt.%d", idx),
+		tr, err := client.DoGet(ctx, fmt.Sprintf("pelican://"+param.Server_Hostname.GetString()+":"+strconv.Itoa(param.Server_WebPort.GetInt())+"/test/hello_world.txt.%d", idx),
 			filepath.Join(tmpDir, fmt.Sprintf("hello_world.txt.%d", idx)), false, client.WithCaches(cacheUrl))
 		assert.NoError(t, err)
 		require.Equal(t, 1, len(tr))
@@ -412,7 +408,7 @@ func TestForcePurge(t *testing.T) {
 	require.NotEqual(t, 0, size)
 
 	for idx := 0; idx < 4; idx++ {
-		tr, err := client.DoGet(te, fmt.Sprintf("pelican://"+param.Server_Hostname.GetString()+":"+strconv.Itoa(param.Server_WebPort.GetInt())+"/test/hello_world.txt.%d", idx),
+		tr, err := client.DoGet(ctx, fmt.Sprintf("pelican://"+param.Server_Hostname.GetString()+":"+strconv.Itoa(param.Server_WebPort.GetInt())+"/test/hello_world.txt.%d", idx),
 			filepath.Join(tmpDir, fmt.Sprintf("hello_world.txt.%d", idx)), false, client.WithCaches(cacheUrl))
 		assert.NoError(t, err)
 		require.Equal(t, 1, len(tr))

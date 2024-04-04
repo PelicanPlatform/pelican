@@ -190,12 +190,12 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 		}
 	}()
 
-	pelicanURL, err := te.NewPelicanURL(destUri)
+	pelicanURL, err := te.newPelicanURL(destUri)
 	if err != nil {
 		return 0, errors.Wrap(err, "Failed to generate pelicanURL object")
 	}
 
-	ns, err := getNamespaceInfo(destUri.Path, pelicanURL.DirectorUrl, false)
+	ns, err := getNamespaceInfo(destUri.Path, pelicanURL.directorUrl, false)
 	if err != nil {
 		return 0, err
 	}
@@ -418,7 +418,7 @@ func schemeUnderstood(scheme string) error {
 
 	_, foundDest := find(understoodSchemes, scheme)
 	if !foundDest {
-		return fmt.Errorf("Do not understand the destination scheme: %s. Permitted values are %s",
+		return errors.Errorf("Do not understand the destination scheme: %s. Permitted values are %s",
 			scheme, strings.Join(understoodSchemes, ", "))
 	}
 	return nil
@@ -431,7 +431,7 @@ localObject: the source file/directory you would like to upload
 remoteDestination: the end location of the upload
 recursive: a boolean indicating if the source is a directory or not
 */
-func DoPut(te *TransferEngine, localObject string, remoteDestination string, recursive bool, options ...TransferOption) (transferResults []TransferResults, err error) {
+func DoPut(ctx context.Context, localObject string, remoteDestination string, recursive bool, options ...TransferOption) (transferResults []TransferResults, err error) {
 	// First, create a handler for any panics that occur
 	defer func() {
 		if r := recover(); r != nil {
@@ -460,11 +460,17 @@ func DoPut(te *TransferEngine, localObject string, remoteDestination string, rec
 
 	project := GetProjectName()
 
+	te := NewTransferEngine(ctx)
+	defer func() {
+		if err := te.Shutdown(); err != nil {
+			log.Errorln("Failure when shutting down transfer engine:", err)
+		}
+	}()
 	client, err := te.NewClient(options...)
 	if err != nil {
 		return
 	}
-	tj, err := client.NewTransferJob(remoteDestUrl, localObject, te, true, recursive, project)
+	tj, err := client.NewTransferJob(remoteDestUrl, localObject, true, recursive, project)
 	if err != nil {
 		return
 	}
@@ -490,7 +496,7 @@ remoteObject: the source file/directory you would like to upload
 localDestination: the end location of the upload
 recursive: a boolean indicating if the source is a directory or not
 */
-func DoGet(te *TransferEngine, remoteObject string, localDestination string, recursive bool, options ...TransferOption) (transferResults []TransferResults, err error) {
+func DoGet(ctx context.Context, remoteObject string, localDestination string, recursive bool, options ...TransferOption) (transferResults []TransferResults, err error) {
 	// First, create a handler for any panics that occur
 	defer func() {
 		if r := recover(); r != nil {
@@ -543,11 +549,17 @@ func DoGet(te *TransferEngine, remoteObject string, localDestination string, rec
 	project := GetProjectName()
 	success := false
 
+	te := NewTransferEngine(ctx)
+	defer func() {
+		if err := te.Shutdown(); err != nil {
+			log.Errorln("Failure when shutting down transfer engine:", err)
+		}
+	}()
 	tc, err := te.NewClient(options...)
 	if err != nil {
 		return
 	}
-	tj, err := tc.NewTransferJob(remoteObjectUrl, localDestination, te, false, recursive, project)
+	tj, err := tc.NewTransferJob(remoteObjectUrl, localDestination, false, recursive, project)
 	if err != nil {
 		return
 	}
@@ -587,7 +599,7 @@ func DoGet(te *TransferEngine, remoteObject string, localDestination string, rec
 }
 
 // Start the transfer, whether read or write back. Primarily used for backwards compatibility
-func DoCopy(te *TransferEngine, sourceFile string, destination string, recursive bool, options ...TransferOption) (transferResults []TransferResults, err error) {
+func DoCopy(ctx context.Context, sourceFile string, destination string, recursive bool, options ...TransferOption) (transferResults []TransferResults, err error) {
 
 	// First, create a handler for any panics that occur
 	defer func() {
@@ -628,8 +640,7 @@ func DoCopy(te *TransferEngine, sourceFile string, destination string, recursive
 	var remoteURL *url.URL
 	if isPut {
 		// Verify valid scheme
-		err = schemeUnderstood(destScheme)
-		if err != nil {
+		if err = schemeUnderstood(destScheme); err != nil {
 			return nil, err
 		}
 
@@ -638,8 +649,7 @@ func DoCopy(te *TransferEngine, sourceFile string, destination string, recursive
 		remoteURL = destURL
 	} else {
 		// Verify valid scheme
-		err = schemeUnderstood(sourceScheme)
-		if err != nil {
+		if err = schemeUnderstood(sourceScheme); err != nil {
 			return nil, err
 		}
 
@@ -674,11 +684,17 @@ func DoCopy(te *TransferEngine, sourceFile string, destination string, recursive
 	success := false
 	var downloaded int64 = 0
 
+	te := NewTransferEngine(ctx)
+	defer func() {
+		if err := te.Shutdown(); err != nil {
+			log.Errorln("Failure when shutting down transfer engine:", err)
+		}
+	}()
 	tc, err := te.NewClient(options...)
 	if err != nil {
 		return
 	}
-	tj, err := tc.NewTransferJob(remoteURL, localPath, te, isPut, recursive, project)
+	tj, err := tc.NewTransferJob(remoteURL, localPath, isPut, recursive, project)
 	if err != nil {
 		return
 	}

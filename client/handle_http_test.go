@@ -542,11 +542,11 @@ func TestNewPelicanURL(t *testing.T) {
 		viper.Set("Federation.DiscoveryUrl", "someDiscoveryUrl")
 		viper.Set("Federation.RegistryUrl", "someRegistryUrl")
 
-		pelicanURL, err := te.NewPelicanURL(remoteObjectURL)
+		pelicanURL, err := te.newPelicanURL(remoteObjectURL)
 		assert.NoError(t, err)
 
 		// Check pelicanURL properly filled out
-		assert.Equal(t, "someDirectorUrl", pelicanURL.DirectorUrl)
+		assert.Equal(t, "someDirectorUrl", pelicanURL.directorUrl)
 		viper.Reset()
 	})
 
@@ -564,7 +564,7 @@ func TestNewPelicanURL(t *testing.T) {
 		viper.Set("Federation.DirectorUrl", "someDirectorUrl")
 		viper.Set("Federation.DiscoveryUrl", "someDiscoveryUrl")
 
-		_, err = te.NewPelicanURL(remoteObjectURL)
+		_, err = te.newPelicanURL(remoteObjectURL)
 		// Make sure we get an error
 		assert.Error(t, err)
 		viper.Reset()
@@ -579,11 +579,11 @@ func TestNewPelicanURL(t *testing.T) {
 		remoteObjectURL, err := url.Parse(remoteObject)
 		assert.NoError(t, err)
 
-		pelicanURL, err := te.NewPelicanURL(remoteObjectURL)
+		pelicanURL, err := te.newPelicanURL(remoteObjectURL)
 		assert.NoError(t, err)
 
 		// Check pelicanURL properly filled out
-		assert.Equal(t, "https://osdf-director.osg-htc.org", pelicanURL.DirectorUrl)
+		assert.Equal(t, "https://osdf-director.osg-htc.org", pelicanURL.directorUrl)
 		viper.Reset()
 		// Note: can't really test this for an error since that would require osg-htc.org to be down
 	})
@@ -623,11 +623,11 @@ func TestNewPelicanURL(t *testing.T) {
 		remoteObjectURL, err := url.Parse(remoteObject)
 		assert.NoError(t, err)
 
-		pelicanURL, err := te.NewPelicanURL(remoteObjectURL)
+		pelicanURL, err := te.newPelicanURL(remoteObjectURL)
 		assert.NoError(t, err)
 
 		// Check pelicanURL properly filled out
-		assert.Equal(t, "director", pelicanURL.DirectorUrl)
+		assert.Equal(t, "director", pelicanURL.directorUrl)
 		// Check to make sure it was populated in our cache
 		assert.True(t, te.pelicanURLCache.Has("https://"+serverURL.Host))
 		viper.Reset()
@@ -641,7 +641,7 @@ func TestNewPelicanURL(t *testing.T) {
 		remoteObjectURL, err := url.Parse(remoteObject)
 		assert.NoError(t, err)
 
-		_, err = te.NewPelicanURL(remoteObjectURL)
+		_, err = te.newPelicanURL(remoteObjectURL)
 		assert.Error(t, err)
 		viper.Reset()
 	})
@@ -683,7 +683,7 @@ func TestNewPelicanURL(t *testing.T) {
 		remoteObjectURL, err := url.Parse(remoteObject)
 		assert.NoError(t, err)
 
-		_, err = te.NewPelicanURL(remoteObjectURL)
+		_, err = te.newPelicanURL(remoteObjectURL)
 		assert.Error(t, err)
 		assert.True(t, errors.Is(err, config.MetadataTimeoutErr))
 		viper.Set("transport.ResponseHeaderTimeout", oldResponseHeaderTimeout)

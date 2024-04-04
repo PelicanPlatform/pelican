@@ -88,16 +88,9 @@ func putMain(cmd *cobra.Command, args []string) {
 	var result error
 	lastSrc := ""
 
-	te := client.NewTransferEngine(ctx)
-	defer func() {
-		if err := te.Shutdown(); err != nil {
-			log.Errorln("Failure when shutting down transfer engine:", err)
-		}
-	}()
-
 	for _, src := range source {
 		isRecursive, _ := cmd.Flags().GetBool("recursive")
-		_, result = client.DoPut(te, src, dest, isRecursive, client.WithCallback(pb.callback), client.WithTokenLocation(tokenLocation))
+		_, result = client.DoPut(ctx, src, dest, isRecursive, client.WithCallback(pb.callback), client.WithTokenLocation(tokenLocation))
 		if result != nil {
 			lastSrc = src
 			break

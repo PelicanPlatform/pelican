@@ -27,7 +27,6 @@ import (
 	"os"
 	"testing"
 
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -106,9 +105,7 @@ func TestMatchNamespace(t *testing.T) {
 	assert.NoError(t, err)
 	defer func() {
 		_, err := config.SetPreferredPrefix(oldPrefix)
-		if err != nil {
-			log.Errorln(err)
-		}
+		assert.NoError(t, err)
 	}()
 
 	viper.Reset()
@@ -259,9 +256,7 @@ func TestGetNamespaces(t *testing.T) {
 	assert.NoError(t, err)
 	defer func() {
 		_, err := config.SetPreferredPrefix(oldPrefix)
-		if err != nil {
-			log.Errorln(err)
-		}
+		assert.NoError(t, err)
 	}()
 	viper.Reset()
 	err = config.InitClient()

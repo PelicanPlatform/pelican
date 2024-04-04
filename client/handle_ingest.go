@@ -103,14 +103,7 @@ func DoShadowIngest(ctx context.Context, sourceFile string, originPrefix string,
 			time.Sleep(5 * time.Second)
 		}
 
-		te := NewTransferEngine(ctx)
-		defer func() {
-			if err := te.Shutdown(); err != nil {
-				log.Errorln("Failure when shutting down transfer engine:", err)
-			}
-		}()
-
-		transferResults, err := DoCopy(te, sourceFile, shadowFile, false, options...)
+		transferResults, err := DoCopy(ctx, sourceFile, shadowFile, false, options...)
 		if err != nil {
 			return 0, "", err
 		}

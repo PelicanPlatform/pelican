@@ -48,7 +48,7 @@ import (
 
 // Structs holding the OAuth2 state (and any other OSDF config needed)
 type (
-	prefix string
+	ConfigPrefix string
 
 	TokenEntry struct {
 		Expiration   int64  `yaml:"expiration"`
@@ -97,9 +97,9 @@ type (
 )
 
 const (
-	Pelican prefix = "PELICAN"
-	OSDF    prefix = "OSDF"
-	Stash   prefix = "STASH"
+	Pelican ConfigPrefix = "PELICAN"
+	OSDF    ConfigPrefix = "OSDF"
+	Stash   ConfigPrefix = "STASH"
 )
 
 const (
@@ -342,12 +342,12 @@ func (sType *ServerType) SetString(name string) bool {
 func GetPreferredPrefix() string {
 	// Testing override to programmatically force different behaviors.
 	if testingPreferredPrefix != "" {
-		return string(prefix(testingPreferredPrefix))
+		return string(ConfigPrefix(testingPreferredPrefix))
 	}
 	arg0 := strings.ToUpper(filepath.Base(os.Args[0]))
 	underscore_idx := strings.Index(arg0, "_")
 	if underscore_idx != -1 {
-		return string(prefix(arg0[0:underscore_idx]))
+		return string(ConfigPrefix(arg0[0:underscore_idx]))
 	}
 	if strings.HasPrefix(arg0, "STASH") {
 		return "STASH"
@@ -364,7 +364,7 @@ func SetPreferredPrefix(newPref string) (oldPref string, err error) {
 	if _, ok := validPrefixes[newPref]; !ok {
 		return "", errors.New("Invalid prefix provided")
 	}
-	oldPrefix := prefix(testingPreferredPrefix)
+	oldPrefix := ConfigPrefix(testingPreferredPrefix)
 	testingPreferredPrefix = newPref
 	return string(oldPrefix), nil
 }
@@ -464,7 +464,7 @@ func DiscoverUrlFederation(ctx context.Context, federationDiscoveryUrl string) (
 	return metadata, nil
 }
 
-func DiscoverFederation() error {
+func DiscoverFederation(ctx context.Context) error {
 	federationStr := param.Federation_DiscoveryUrl.GetString()
 	externalUrlStr := param.Server_ExternalWebUrl.GetString()
 	defer func() {
@@ -516,9 +516,6 @@ func DiscoverFederation() error {
 		federationUrl.Path = ""
 	}
 
-	ctx := context.Background()
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
 	metadata, err := DiscoverUrlFederation(ctx, federationStr)
 	if err != nil {
 		return errors.Wrapf(err, "Invalid federation value %s:", federationStr)
@@ -1157,7 +1154,7 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 	// Sets up the server log filter mechanism
 	initFilterLogging()
 
-	return DiscoverFederation()
+	return DiscoverFederation(ctx)
 }
 
 func InitClient() error {
@@ -1283,5 +1280,5 @@ func InitClient() error {
 		return err
 	}
 
-	return DiscoverFederation()
+	return DiscoverFederation(context.Background())
 }
