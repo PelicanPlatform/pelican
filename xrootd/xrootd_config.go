@@ -183,7 +183,7 @@ func CheckOriginXrootdEnv(exportPath string, server server_structs.XRootDServer,
 		return err
 	}
 
-	if ost := param.Origin_StorageType.GetString(); ost == "s3" {
+	if ost := param.Origin_StorageType.GetString(); ost == "posix" {
 		// For each export, we symlink the exported directory, currently at /var/run/pelican/export/<export.FederationPrefix>,
 		// to the actual data source, which is what we get from the Export object's StoragePrefix
 		for _, export := range *originExports {
