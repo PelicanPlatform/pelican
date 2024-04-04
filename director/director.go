@@ -89,7 +89,7 @@ var (
 
 func getRedirectURL(reqPath string, ad server_structs.ServerAd, requiresAuth bool) (redirectURL url.URL) {
 	var serverURL url.URL
-	if requiresAuth {
+	if requiresAuth && ad.AuthURL.String() != "" {
 		serverURL = ad.AuthURL
 		if ad.AuthURL == (url.URL{}) {
 			serverURL = ad.URL
