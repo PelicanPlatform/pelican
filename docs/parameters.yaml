@@ -1014,7 +1014,7 @@ components: ["director"]
 ---
 name: Director.SupportContactEmail
 description: >-
-  An Email address to receive issues and help request for the federation the director is hosting. The values will
+  An Email address to receive issues and help requests for the federation the director is hosting. The values will
   be displayed on the director web interface if provided. We highly recommend director admin to fill out this field.
 type: string
 default: none

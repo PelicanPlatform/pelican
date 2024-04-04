@@ -16,7 +16,7 @@ If you haven't installed Pelican, follow the instructions to [install pelican](/
 
 ### Prepare TLS Credentials
 
-Pelican servers use `https` for serving its web UI, handling file transfer requests and internal http requests. `https` requires a set of credential files in place to work. For details on how to set up the TLS credentials, refer to the [documentation in Serve an Origin](./serving_an_origin.mdx#prepare-tls-credentials).
+Pelican servers use `https` for serving its web UI, handling objects transfer requests and internal http requests. `https` requires a set of credential files in place to work. For details on how to set up the TLS credentials, refer to the [documentation in Serve an Origin](./serving_an_origin.mdx#prepare-tls-credentials).
 
 ## Serve a Registry
 
@@ -142,18 +142,17 @@ for your Pelican director to work. An example value looks like `https://your-reg
 
 ### Director as a Federation
 
-For Pelican origin, cache, and client, they need to know where the *federation* is so that they can
-attempt to join it or a access a file from it. This can be done by either manually passing configuration values (e.g. `Federation.DirectorUrl`, `Federation.RegistryUrl`, etc) or by setting the
-`Federation.DiscoveryUrl` and Pelican will fetch the metadata from the endpoint automatically. `Federation.DiscoveryUrl` contains various URLs to a federation's central services including registry and director.
+For Pelican origin, cache, and client, they need to know where the *federation* they belong to so that they can make themselves known to other services or a access objects. This can be done by either manually passing configuration values (e.g. `Federation.DirectorUrl`, `Federation.RegistryUrl`, etc) or by setting the
+`Federation.DiscoveryUrl` and Pelican will fetch the metadata from the endpoint automatically. Pelican uses `Federation.DiscoveryUrl` to discover where a federation's central services live, including the registry and director.
 
-By default, Pelican director hosts the federation discovery endpoint. Therefore, for origins and caches in your federation, as well as Pelican clients that want to access files in your federation, their `Federation.DiscoveryUrl` value can be set to the director's public URL, i.e. `https://<your-director-hostname>:<director-web-port>` or `https://<your-director-hostname>` if the port number is simply `443`.
+By default, Pelican director hosts the federation discovery endpoint. Therefore, for origins and caches in your federation, as well as Pelican clients that want to access objects in your federation, their `Federation.DiscoveryUrl` value can be set to the director's public URL, i.e. `https://<your-director-hostname>:<director-web-port>` or `https://<your-director-hostname>` if the port number is simply `443`.
 
 Make sure your director is up and running before starting your origins and caches.
 
 ### Set Support Contact Information (Recommended)
 > `Director.SupportContact` is only available for Pelican >=7.7.0
 
-Since the director is the entrypoint of your federation, and client users uses director's public URL as the `Federation.DiscoveryUrl`, it is convenient for users to look up information related to a federation or seek help at the director's web UI. Therefore, we recommend director admin to setup contact information at the director by `Director.SupportContactEmail` and `Director.SupportContactUrl` configuration parameters. If set, the information will be displayed in the director's web UI. See [Configuration](./parameters.mdx#Director-SupportContact) page for details.
+The Pelican director is your federation's entrypoint, and it is where other services in the federation can learn about each other. Because of this, it is also used to host the contact information for federation administrators. Setting values for the configuration options `Director.SupportContactEmail` and `Director.SupportContactUrl` causes the director to display the information through its website so that users know who and how to contact you for support. See [Configuration](./parameters.mdx#Director-SupportContact) page for details.
 
 ```yaml filename="pelican.yaml"
 Director:
