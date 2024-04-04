@@ -64,6 +64,7 @@ interface LineGraphProps {
     resolution?: TimeDuration;
     options?: ChartOptions<"line">
     datasetOptions?: Partial<ChartDataset<"line">> | Partial<ChartDataset<"line">>[];
+    datasetTransform?: (x: ChartDataset<"line">) => ChartDataset<"line">
 }
 
 async function getData(
@@ -71,7 +72,8 @@ async function getData(
     duration: TimeDuration,
     resolution: TimeDuration,
     time: DateTime,
-    datasetOptions: Partial<ChartDataset<"line">> | Partial<ChartDataset<"line">>[]
+    datasetOptions: Partial<ChartDataset<"line">> | Partial<ChartDataset<"line">>[],
+    datasetTranform?: (x: ChartDataset<"line">) => ChartDataset<"line">
 ) {
     let chartData: ChartData<"line", any, any> = {
         datasets: await Promise.all(metrics.map(async (metric, index) => {
@@ -92,17 +94,23 @@ async function getData(
                 updatedTime = DateTime.now()
             }
 
-            return {
+            let dataset = {
                 data: (await query_basic({metric, duration:duration, resolution:resolution, time:updatedTime})),
                 ...datasetOption
             }
+
+            if(datasetTranform){
+                return datasetTranform(dataset)
+            }
+
+            return dataset
         }))
     }
 
     return chartData
 }
 
-export default function LineGraph({ boxProps, metrics, duration=new TimeDuration(31, "d"), resolution=new TimeDuration(1, "h"), options, datasetOptions = {}}: LineGraphProps) {
+export default function LineGraph({ boxProps, metrics, duration=new TimeDuration(31, "d"), resolution=new TimeDuration(1, "h"), options, datasetOptions = {}, datasetTransform}: LineGraphProps) {
 
     let reset = useCallback(() => {
         setDuration(duration.copy())
@@ -116,7 +124,7 @@ export default function LineGraph({ boxProps, metrics, duration=new TimeDuration
 
     return (
         <Graph
-            getData={() => getData(metrics, _duration, _resolution, _time, datasetOptions)}
+            getData={() => getData(metrics, _duration, _resolution, _time, datasetOptions, datasetTransform)}
             options={options}
             drawer={<LineGraphDrawer
                 reset={reset}

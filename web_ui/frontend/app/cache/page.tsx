@@ -23,7 +23,7 @@ import {Box, Grid, Typography} from "@mui/material";
 import RateGraph from "@/components/graphs/RateGraph";
 import StatusBox from "@/components/StatusBox";
 import {DataExportTable} from "@/components/DataExportTable";
-import {TimeDuration} from "@/components/graphs/prometheus";
+import {DataPoint, TimeDuration} from "@/components/graphs/prometheus";
 import FederationOverview from "@/components/FederationOverview";
 import LineGraph from "@/components/graphs/LineGraph";
 
@@ -33,7 +33,7 @@ export default function Home() {
         <Box width={"100%"}>
             <Grid container spacing={2}>
                 <Grid item xs={12} lg={4}>
-                    <Typography variant="h4">Status</Typography>
+                    <Typography variant="h4" mb={2}>Status</Typography>
                     <StatusBox/>
                 </Grid>
                 <Grid item xs={12} lg={4}>
@@ -52,7 +52,7 @@ export default function Home() {
                             <LineGraph
                                 duration={TimeDuration.fromString("7d")}
                                 resolution={TimeDuration.fromString("3h")}
-                                metrics={['xrootd_storage_volume_bytes{ns="/cache",server_type="cache",type="total"}', 'xrootd_storage_volume_bytes{ns="/cache",server_type="cache",type="free"}', ]}
+                                metrics={['xrootd_storage_volume_bytes{ns="/cache",server_type="cache",type="total"}', 'xrootd_storage_volume_bytes{ns="/cache",server_type="cache",type="free"}']}
                                 boxProps={{
                                     maxHeight:"400px",
                                     flexGrow:1,
@@ -67,6 +67,7 @@ export default function Home() {
                                             type: 'time',
                                             time: {
                                                 round: 'second',
+                                                minUnit: 'minute'
                                             }
                                         }
                                     },
@@ -83,16 +84,25 @@ export default function Home() {
                                     },
                                 }}
                                 datasetOptions={[
-                                    {label: "Total Storage (Bytes)", borderColor: "#000000"},
-                                    {label: "Free Storage (Bytes)", borderColor: "#54ff80"}
+                                    {label: "Total Storage (Gigabytes)", borderColor: "#000000"},
+                                    {label: "Free Storage (Gigabytes)", borderColor: "#54ff80"}
                                 ]}
+                                datasetTransform={(dataset) => {
+                                    dataset.data = dataset.data.map(p => {
+                                        let {x, y} = p as DataPoint
+                                        y = y / (10**9)
+                                        return {x: x, y: y}
+                                    })
+
+                                    return dataset
+                                }}
                             />
                         </Box>
                     </Box>
                 </Grid>
                 <Grid item xs={12} lg={6}>
                     <Box sx={{backgroundColor: "#F6F6F6", borderRadius: "1rem"}} p={2}>
-                        <Typography variant="h4" mb={1}>Transfer</Typography>
+                        <Typography variant="h4" mb={1}>Transfer Rate</Typography>
                         <Box minHeight={"200px"}>
                             <RateGraph
                                 rate={TimeDuration.fromString("3h")}
@@ -113,6 +123,7 @@ export default function Home() {
                                             type: 'time',
                                             time: {
                                                 round: 'second',
+                                                minUnit: 'minute'
                                             }
                                         }
                                     },
@@ -129,8 +140,8 @@ export default function Home() {
                                     },
                                 }}
                                 datasetOptions={[
-                                    {label: "Bytes Received", borderColor: "#0071ff"},
-                                    {label: "Bytes Sent", borderColor: "#54ff80"}
+                                    {label: "Bytes Received (Bps)", borderColor: "#0071ff"},
+                                    {label: "Bytes Sent (Bps)", borderColor: "#54ff80"}
                                 ]}
                             />
                         </Box>

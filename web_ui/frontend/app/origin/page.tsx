@@ -43,7 +43,7 @@ export default function Home() {
                 </Grid>
                 <Grid item xs={12} lg={6}>
                     <Box sx={{backgroundColor: "#F6F6F6", borderRadius: "1rem"}} p={2}>
-                        <Typography variant="h4" mb={1}>Transfer</Typography>
+                        <Typography variant="h4" mb={1}>Transfer Rate</Typography>
                         <Box minHeight={"200px"}>
                             <RateGraph
                                 rate={TimeDuration.fromString("3h")}
@@ -64,6 +64,7 @@ export default function Home() {
                                             type: 'time',
                                             time: {
                                                 round: 'second',
+                                                minUnit: 'minute'
                                             }
                                         }
                                     },
@@ -80,8 +81,8 @@ export default function Home() {
                                     },
                                 }}
                                 datasetOptions={[
-                                    {label: "Bytes Received", borderColor: "#0071ff"},
-                                    {label: "Bytes Sent", borderColor: "#54ff80"}
+                                    {label: "Bytes Received (Bps)", borderColor: "#0071ff"},
+                                    {label: "Bytes Sent (Bps)", borderColor: "#54ff80"}
                                 ]}
                             />
                         </Box>

@@ -74,8 +74,8 @@ export interface getDataFunction {
 }
 
 export interface DataPoint {
-    x: any;
-    y: any;
+    x: number;
+    y: number;
 }
 
 export async function query_raw(query: string, time?: Number): Promise<DataPoint[]> {
@@ -113,7 +113,7 @@ export async function query_raw(query: string, time?: Number): Promise<DataPoint
     let prometheusTuples = json.data.result[0].values
 
     // Chart.js expects milliseconds since epoch
-    let data: DataPoint[] = prometheusTuples.map((tuple: any) => { return {x: tuple[0] * 1000, y: tuple[1]}})
+    let data: DataPoint[] = prometheusTuples.map((tuple: any) => { return {x: tuple[0] * 1000, y: parseFloat(tuple[1])}})
 
     return data
 }
