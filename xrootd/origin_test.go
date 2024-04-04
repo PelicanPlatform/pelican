@@ -162,7 +162,7 @@ func TestOrigin(t *testing.T) {
 	defer mockupCancel()
 
 	// In this case a 403 means its running
-	err := server_utils.WaitUntilWorking(ctx, "GET", param.Origin_Url.GetString(), "xrootd", 403)
+	err := server_utils.WaitUntilWorking(ctx, "GET", param.Origin_Url.GetString(), "xrootd", 403, false)
 	if err != nil {
 		t.Fatalf("Unsuccessful test: Server encountered an error: %v", err)
 	}
@@ -210,7 +210,7 @@ func TestMultiExportOrigin(t *testing.T) {
 	defer mockupCancel()
 
 	// In this case a 403 means its running
-	err = server_utils.WaitUntilWorking(ctx, "GET", param.Origin_Url.GetString(), "xrootd", 403)
+	err = server_utils.WaitUntilWorking(ctx, "GET", param.Origin_Url.GetString(), "xrootd", 403, false)
 	if err != nil {
 		t.Fatalf("Unsuccessful test: Server encountered an error: %v", err)
 	}
@@ -255,7 +255,7 @@ func TestS3OriginConfig(t *testing.T) {
 	// Check if MinIO is running (by default at localhost:9000)
 	endpoint := "localhost:9000"
 	// Expect a 403 from this endpoint -- that means it's running
-	err = server_utils.WaitUntilWorking(ctx, "GET", fmt.Sprintf("http://%s", endpoint), "xrootd", 403)
+	err = server_utils.WaitUntilWorking(ctx, "GET", fmt.Sprintf("http://%s", endpoint), "xrootd", 403, false)
 	if err != nil {
 		t.Fatalf("Unsuccessful test: Server encountered an error: %v", err)
 	}
@@ -332,7 +332,7 @@ func TestS3OriginConfig(t *testing.T) {
 	originEndpoint := fmt.Sprintf("%s/%s/%s/%s/%s", param.Origin_Url.GetString(), serviceName, regionName, bucketName, objectName)
 	// Until we sort out the things we mentioned above, we should expect a 403 because we don't try to pass tokens
 	// and we don't actually export any keys for token validation.
-	err = server_utils.WaitUntilWorking(ctx, "GET", originEndpoint, "xrootd", 403)
+	err = server_utils.WaitUntilWorking(ctx, "GET", originEndpoint, "xrootd", 403, false)
 	if err != nil {
 		t.Fatalf("Unsucessful test: Server encountered an error: %v", err)
 	}
@@ -349,7 +349,7 @@ func TestS3OriginConfig(t *testing.T) {
 	defer cancel()
 	defer mockupCancel()
 
-	err = server_utils.WaitUntilWorking(ctx, "GET", originEndpoint, "xrootd", 403)
+	err = server_utils.WaitUntilWorking(ctx, "GET", originEndpoint, "xrootd", 403, false)
 	if err != nil {
 		t.Fatalf("Unsucessful test: Server encountered an error: %v", err)
 	}

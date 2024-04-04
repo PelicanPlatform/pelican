@@ -156,7 +156,7 @@ func TestFullUpload(t *testing.T) {
 	}
 
 	desiredURL := param.Server_ExternalWebUrl.GetString() + "/api/v1.0/health"
-	err = server_utils.WaitUntilWorking(ctx, "GET", desiredURL, "director", 200)
+	err = server_utils.WaitUntilWorking(ctx, "GET", desiredURL, "director", 200, false)
 	require.NoError(t, err)
 
 	httpc := http.Client{

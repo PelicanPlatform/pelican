@@ -118,7 +118,7 @@ func TestFedServeCache(t *testing.T) {
 	}
 
 	// In this case 403 means the cache is running
-	err = server_utils.WaitUntilWorking(ctx, "GET", param.Cache_Url.GetString(), "xrootd", 403)
+	err = server_utils.WaitUntilWorking(ctx, "GET", param.Cache_Url.GetString(), "xrootd", 403, false)
 	require.NoError(t, err)
 
 	fileTests := server_utils.TestFileTransferImpl{}
