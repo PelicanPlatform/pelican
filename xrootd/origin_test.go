@@ -282,7 +282,8 @@ func TestS3OriginConfig(t *testing.T) {
 	// and do a PUT
 	bucketName := "test-bucket"
 	regionName := "test-region"
-	serviceName := "test-name"
+	federationPrefix := "/test"
+
 	err = minioClient.MakeBucket(context.Background(), bucketName, minio.MakeBucketOptions{})
 	require.NoError(t, err)
 
@@ -307,9 +308,9 @@ func TestS3OriginConfig(t *testing.T) {
 	viper.Set("Origin.StorageType", "s3")
 	viper.Set("Origin.S3Region", regionName)
 	viper.Set("Origin.S3Bucket", bucketName)
-	viper.Set("Origin.S3ServiceName", serviceName)
 	viper.Set("Origin.S3ServiceUrl", fmt.Sprintf("http://%s", endpoint))
 	viper.Set("Origin.S3UrlStyle", "path")
+	viper.Set("Origin.FederationPrefix", federationPrefix)
 
 	// Disable functionality we're not using (and is difficult to make work on Mac)
 	viper.Set("Origin.EnableCmsd", false)
@@ -329,7 +330,7 @@ func TestS3OriginConfig(t *testing.T) {
 	// of the web_ui stuff initialized to export the public signing keys (as we can't export via XRootD) and we
 	// need a real token. These become much easier when we have an internally workable set of commands to do so.
 
-	originEndpoint := fmt.Sprintf("%s/%s/%s/%s/%s", param.Origin_Url.GetString(), serviceName, regionName, bucketName, objectName)
+	originEndpoint := fmt.Sprintf("%s/%s/%s", param.Origin_Url.GetString(), federationPrefix, objectName)
 	// Until we sort out the things we mentioned above, we should expect a 403 because we don't try to pass tokens
 	// and we don't actually export any keys for token validation.
 	err = server_utils.WaitUntilWorking(ctx, "GET", originEndpoint, "xrootd", 403, false)
@@ -337,8 +338,6 @@ func TestS3OriginConfig(t *testing.T) {
 		t.Fatalf("Unsucessful test: Server encountered an error: %v", err)
 	}
 
-	// One other quick check to do is that the namespace was correctly parsed:
-	require.Equal(t, fmt.Sprintf("/%s/%s/%s", serviceName, regionName, bucketName), param.Origin_FederationPrefix.GetString())
 	cancel()
 	mockupCancel()
 
@@ -353,6 +352,4 @@ func TestS3OriginConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Unsucessful test: Server encountered an error: %v", err)
 	}
-
-	require.Equal(t, fmt.Sprintf("/%s/%s/%s", serviceName, regionName, bucketName), param.Origin_FederationPrefix.GetString())
 }
