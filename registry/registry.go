@@ -350,13 +350,13 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 			if inTopo {
 				return false,
 					nil,
-					fmt.Errorf("The namespace %s already exists in the OSDF topology. "+
+					permissionDeniedError{Message: fmt.Sprintf("The namespace %s already exists in the OSDF topology. "+
 						"To register a Pelican equivalence, you need to present your identity. "+
 						"If you are registering through Pelican CLI, try again with the flag '--with-identity' enabled. "+
 						"If this is an auto-registration from a Pelican origin or cache server, "+
 						"register your namespace or server through the Pelican registry website at %s instead.",
 						ns.Prefix,
-						registryUrl)
+						registryUrl)}
 			}
 		}
 
@@ -883,10 +883,23 @@ func checkNamespaceStatusHandler(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "prefix is required"})
 		return
 	}
+	exists, err := namespaceExistsByPrefix(req.Prefix)
+	if err != nil {
+		log.Errorf("Error in namespaceExistsByPrefix with prefix %s. %v", req.Prefix, err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error checking if namespace %s already exists", req.Prefix)})
+		return
+	}
+	// Return 400 if the namespace doesn't exist to spare 404 for the legacy OSDF registry endpoint, which doesn't have this route
+	// and we relies on 404 to check for backward compatibility
+	if !exists {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("The namespace %s does not exist in the registry", req.Prefix)})
+		return
+	}
+
 	ns, err := getNamespaceByPrefix(req.Prefix)
 	if err != nil || ns == nil {
 		log.Errorf("Error in getNamespaceByPrefix with prefix %s. %v", req.Prefix, err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Error getting namespace"})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error getting namespace %s: %s", req.Prefix, err.Error())})
 		return
 	}
 	emptyMetadata := AdminMetadata{}

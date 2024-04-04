@@ -87,7 +87,12 @@ func checkNamespaceStatus(prefix string, registryWebUrlStr string) (bool, error)
 			log.Warningf("Request %q hit 404, either it's an OSDF registry or Pelican registry <= 7.4.0. Fallback to return true for approval status check", reqUrl.String())
 			return true, nil
 		} else {
-			return false, errors.New(fmt.Sprintf("Server error with status code %d", res.StatusCode))
+			body, err := io.ReadAll(res.Body)
+			if err != nil {
+				return false, errors.New(fmt.Sprintf("Registry returns error when checkNamespaceStatus %d and can't get the response body %v", res.StatusCode, err))
+			} else {
+				return false, errors.New(fmt.Sprintf("Registry returns error when checkNamespaceStatus %d with body %s", res.StatusCode, string(body)))
+			}
 		}
 	}
 

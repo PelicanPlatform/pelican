@@ -538,8 +538,8 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType common.S
 					ctx.JSON(http.StatusForbidden, gin.H{"approval_error": true, "error": fmt.Sprintf("The namespace %q was not approved by an administrator", namespace.Path)})
 					return
 				} else {
-					log.Warningln("Failed to verify token:", err)
-					ctx.JSON(http.StatusForbidden, gin.H{"error": "Authorization token verification failed"})
+					log.Warningln("Failed to verify token: ", err)
+					ctx.JSON(http.StatusForbidden, gin.H{"error": fmt.Sprintf("Authorization token verification failed: %v", err)})
 					return
 				}
 			}
