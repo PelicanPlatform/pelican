@@ -4,7 +4,7 @@ import useSWR from "swr";
 import {useRouter} from "next/navigation";
 import React, {useContext, useState} from "react";
 import {IconButton, Menu, MenuItem, Tooltip} from "@mui/material";
-import {Login, Face2, CloudSync, AdminPanelSettings} from "@mui/icons-material";
+import {Login, AccountCircleIcon, CloudSync, AdminPanelSettings} from "@mui/icons-material";
 import StatusSnackBar from "@/components/StatusSnackBar";
 import {getUser} from "@/helpers/login";
 
@@ -87,7 +87,7 @@ const UserMenu = () => {
                 }}
                 onClick={() => setMenuOpen(!menuOpen)}
             >
-                { user.role === "admin" ? <AdminPanelSettings/>: <Face2 /> }
+                { user.role === "admin" ? <AdminPanelSettings/>: < AccountCircleIcon /> }
             </IconButton>
             <Menu
                 id={"user-menu"}
