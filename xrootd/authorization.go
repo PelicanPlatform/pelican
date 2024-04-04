@@ -308,7 +308,7 @@ func EmitAuthfile(server server_utils.XRootDServer) error {
 			} else if server.GetServerType().IsEnabled(config.CacheType) && param.Cache_SelfTest.GetBool() {
 				// Set up cache self-test public read
 				outStr := "u * /pelican/monitoring lr "
-				output.Write([]byte(outStr + strings.Join(words[2:], " ") + "\n"))
+				output.Write([]byte(outStr + strings.Join(words[2:], " ")))
 			} else {
 				output.Write([]byte(lineContents + " "))
 			}
