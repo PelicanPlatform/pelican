@@ -249,7 +249,7 @@ func TestGetExportsPosix(t *testing.T) {
 		exports := setup(t, s3multiExportValidConfig)
 		assert.Len(t, *exports, 2, "expected 2 exports")
 
-		expectedExport1 := OriginExports{
+		expectedExport1 := OriginExport{
 			S3Bucket:         "first-bucket",
 			FederationPrefix: "/first/namespace",
 			Capabilities: server_structs.Capabilities{
@@ -262,7 +262,7 @@ func TestGetExportsPosix(t *testing.T) {
 		}
 		assert.Equal(t, expectedExport1, (*exports)[0])
 
-		expectedExport2 := OriginExports{
+		expectedExport2 := OriginExport{
 			S3Bucket:         "second-bucket",
 			S3AccessKeyfile:  "/path/to/second/access.key",
 			S3SecretKeyfile:  "/path/to/second/secret.key",
@@ -284,7 +284,7 @@ func TestGetExportsPosix(t *testing.T) {
 		exports := setup(t, s3exportVolumesValidConfig)
 		assert.Len(t, *exports, 2, "expected 2 exports")
 
-		expectedExport1 := OriginExports{
+		expectedExport1 := OriginExport{
 			StoragePrefix:    "/",
 			S3Bucket:         "",
 			FederationPrefix: "/first/namespace",
@@ -298,7 +298,7 @@ func TestGetExportsPosix(t *testing.T) {
 		}
 		assert.Equal(t, expectedExport1, (*exports)[0])
 
-		expectedExport2 := OriginExports{
+		expectedExport2 := OriginExport{
 			StoragePrefix:    "/",
 			S3Bucket:         "my-bucket",
 			FederationPrefix: "/second/namespace",
@@ -319,7 +319,7 @@ func TestGetExportsPosix(t *testing.T) {
 		exports := setup(t, s3exportSingleVolumeConfig)
 		assert.Len(t, *exports, 1, "expected 1 export")
 
-		expectedExport := OriginExports{
+		expectedExport := OriginExport{
 			StoragePrefix:    "/",
 			S3Bucket:         "my-bucket",
 			S3AccessKeyfile:  "/path/to/access.key",
@@ -353,7 +353,7 @@ func TestGetExportsPosix(t *testing.T) {
 		exports := setup(t, s3singleExportBlockConfig)
 		assert.Len(t, *exports, 1, "expected 1 export")
 
-		expectedExport := OriginExports{
+		expectedExport := OriginExport{
 			S3Bucket:         "my-bucket",
 			S3AccessKeyfile:  "/path/to/access.key",
 			S3SecretKeyfile:  "/path/to/secret.key",
