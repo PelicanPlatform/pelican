@@ -174,7 +174,7 @@ export default function Home() {
                     </Box>
                 </Box>
                 <Box mx={"auto"}>
-                    { enabledServers && enabledServers.includes("registry") &&
+                    { enabledServers && (enabledServers.includes("registry") || enabledServers.includes("origin") || enabledServers.includes("cache")) &&
                         <>
                             <Box display={"flex"} justifyContent={"center"} mb={1}>
                                 <Button
