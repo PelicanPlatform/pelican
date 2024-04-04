@@ -283,7 +283,7 @@ func CheckCacheXrootdEnv(exportPath string, server server_structs.XRootDServer, 
 			filepath.Dir(metaPath))
 	}
 
-	err = config.DiscoverFederation()
+	err = config.DiscoverFederation(context.Background())
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to pull information from the federation")
 	}
