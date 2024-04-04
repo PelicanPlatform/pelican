@@ -806,6 +806,7 @@ func InitConfig() {
 			log.Errorf("Failed to access specified log file. Error: %v", err)
 			os.Exit(1)
 		}
+
 		fmt.Fprintf(os.Stderr, "Logging.LogLocation is set to %s. All logs are redirected to the log file.\n", logLocation)
 		log.SetOutput(f)
 	}

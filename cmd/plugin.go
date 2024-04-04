@@ -115,6 +115,9 @@ func stashPluginMain(args []string) {
 		isConfigErr = true
 	}
 
+	// Want to try to force logging to stderr because that is how we can see logging in condor starter log
+	log.SetOutput(os.Stderr)
+
 	// Parse command line arguments
 	var upload bool = false
 	// Set the options
