@@ -23,22 +23,81 @@ import {Box, Grid, Typography} from "@mui/material";
 import RateGraph from "@/components/graphs/RateGraph";
 import StatusBox from "@/components/StatusBox";
 import {DataExportTable} from "@/components/DataExportTable";
-import {TimeDuration} from "@/components/graphs/prometheus";
+import {DataPoint, TimeDuration} from "@/components/graphs/prometheus";
 import FederationOverview from "@/components/FederationOverview";
+import LineGraph from "@/components/graphs/LineGraph";
 
 export default function Home() {
 
     return (
         <Box width={"100%"}>
             <Grid container spacing={2}>
-                <Grid item xs={12} lg={6}>
+                <Grid item xs={12} lg={4}>
                     <Typography variant="h4" mb={2}>Status</Typography>
                     <StatusBox/>
                 </Grid>
-                <Grid item xs={12} lg={6}>
+                <Grid item xs={12} lg={4}>
                     <Typography variant={"h4"} component={"h2"} mb={2}>Data Exports</Typography>
                     <Box sx={{borderRadius: 2, overflow: "hidden"}}>
                         <DataExportTable/>
+                    </Box>
+                </Grid>
+                <Grid item xs={12} lg={4}>
+                    <FederationOverview/>
+                </Grid>
+                <Grid item xs={12} lg={6}>
+                    <Box sx={{backgroundColor: "#F6F6F6", borderRadius: "1rem"}} p={2}>
+                        <Typography variant="h4" mb={1}>Storage</Typography>
+                        <Box minHeight={"200px"}>
+                            <LineGraph
+                                duration={TimeDuration.fromString("7d")}
+                                resolution={TimeDuration.fromString("3h")}
+                                metrics={['xrootd_storage_volume_bytes{ns="/cache",server_type="cache",type="total"}', 'xrootd_storage_volume_bytes{ns="/cache",server_type="cache",type="free"}']}
+                                boxProps={{
+                                    maxHeight:"400px",
+                                    flexGrow:1,
+                                    justifyContent:"center",
+                                    display:"flex",
+                                    bgcolor:"white",
+                                    borderRadius:2
+                                }}
+                                options={{
+                                    scales: {
+                                        x: {
+                                            type: 'time',
+                                            time: {
+                                                round: 'second',
+                                                minUnit: 'minute'
+                                            }
+                                        }
+                                    },
+                                    plugins: {
+                                        zoom: {
+                                            zoom: {
+                                                drag: {
+                                                    enabled: true,
+                                                },
+                                                mode: 'x',
+                                                // TODO - Implement smart update on zoom: onZoom: (chart) => console.log(chart)
+                                            },
+                                        },
+                                    },
+                                }}
+                                datasetOptions={[
+                                    {label: "Total Storage (Gigabytes)", borderColor: "#000000"},
+                                    {label: "Free Storage (Gigabytes)", borderColor: "#54ff80"}
+                                ]}
+                                datasetTransform={(dataset) => {
+                                    dataset.data = dataset.data.map(p => {
+                                        let {x, y} = p as DataPoint
+                                        y = y / (10**9)
+                                        return {x: x, y: y}
+                                    })
+
+                                    return dataset
+                                }}
+                            />
+                        </Box>
                     </Box>
                 </Grid>
                 <Grid item xs={12} lg={6}>
@@ -88,11 +147,7 @@ export default function Home() {
                         </Box>
                     </Box>
                 </Grid>
-                <Grid item xs={12} lg={6}>
-                    <FederationOverview/>
-                </Grid>
             </Grid>
-
         </Box>
     )
 }
