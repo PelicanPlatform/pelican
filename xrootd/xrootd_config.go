@@ -97,7 +97,7 @@ type (
 		S3AccessKeyfile   string
 		S3SecretKeyfile   string
 		S3UrlStyle        string
-		Exports           []server_utils.OriginExports
+		Exports           []server_utils.OriginExport
 	}
 
 	CacheConfig struct {
@@ -283,7 +283,7 @@ func CheckCacheXrootdEnv(exportPath string, server server_structs.XRootDServer, 
 			filepath.Dir(metaPath))
 	}
 
-	err = config.DiscoverFederation()
+	err = config.DiscoverFederation(context.Background())
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to pull information from the federation")
 	}
@@ -331,6 +331,7 @@ func CheckCacheXrootdEnv(exportPath string, server server_structs.XRootDServer, 
 			return "", errors.Wrap(err, "Failed to create scitokens configuration for the cache")
 		}
 	}
+
 	return exportPath, nil
 }
 

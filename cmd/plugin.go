@@ -42,10 +42,6 @@ import (
 )
 
 var (
-	commit  = "none"
-	date    = "unknown"
-	builtBy = "unknown"
-
 	// Holds the various plugin commands
 	rootPluginCmd = &cobra.Command{
 		Use:   "plugin",
@@ -136,10 +132,7 @@ func stashPluginMain(args []string) {
 			fmt.Println("SupportedMethods = \"stash, osdf\"")
 			os.Exit(0)
 		} else if args[0] == "-version" || args[0] == "-v" {
-			fmt.Println("Version:", config.GetVersion())
-			fmt.Println("Build Date:", date)
-			fmt.Println("Build Commit:", commit)
-			fmt.Println("Built By:", builtBy)
+			config.PrintPelicanVersion()
 			os.Exit(0)
 		} else if args[0] == "-upload" {
 			log.Debugln("Upload detected")
@@ -434,7 +427,8 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 
 			var tj *client.TransferJob
 			urlCopy := *transfer.url
-			tj, err = tc.NewTransferJob(&urlCopy, transfer.localFile, upload, false, client.WithAcquireToken(false), client.WithCaches(caches...))
+			project := client.GetProjectName()
+			tj, err = tc.NewTransferJob(&urlCopy, transfer.localFile, upload, false, project, client.WithAcquireToken(false), client.WithCaches(caches...))
 			if err != nil {
 				return errors.Wrap(err, "Failed to create new transfer job")
 			}

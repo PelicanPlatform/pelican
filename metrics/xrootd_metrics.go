@@ -22,11 +22,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"math"
 	"net"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -86,10 +88,10 @@ type (
 	}
 
 	XrdXrootdMonHeader struct {
-		Code byte
-		Pseq byte
-		Plen uint16
-		Stod int32
+		Code byte   // = | d | f | g | i | p | r | t | u | x
+		Pseq byte   // packet sequence
+		Plen uint16 // packet length
+		Stod int32  // Unix time at Server start
 	}
 
 	XrdXrootdMonMap struct {
@@ -164,6 +166,35 @@ type (
 		// Ssq XrdXrootdMonStatSSQ // OPTIONAL, not implemented here yet
 	}
 
+	XrdXrootdMonGS struct {
+		Hdr  XrdXrootdMonHeader
+		TBeg int   // UNIX time of first entry
+		TEnd int   // UNIX time of last entry
+		SID  int64 // Provider identification
+	}
+
+	CacheGS struct {
+		AccessCnt   uint32 `json:"access_cnt"`
+		AttachT     int64  `json:"attach_t"`
+		ByteBypass  int64  `json:"b_bypass"`
+		ByteHit     int64  `json:"b_hit"`
+		ByteMiss    int64  `json:"b_miss"`
+		BlkSize     int    `json:"blk_size"`
+		DetachT     int64  `json:"detach_t"`
+		Event       string `json:"event"`
+		Lfn         string `json:"lfn"`
+		NBlocks     int    `json:"n_blks"`
+		NBlocksDone int    `json:"n_blks_done"`
+		NCksErrs    int    `json:"n_cks_errs"`
+		Size        int64  `json:"size"`
+	}
+
+	CacheAccessStat struct {
+		Hit    int64
+		Miss   int64
+		Bypass int64
+	}
+
 	SummaryPathStat struct {
 		Id    string `xml:"id,attr"`
 		Lp    string `xml:"lp"`   // The minimally reduced logical file system path i.e. top-level namespace
@@ -218,6 +249,11 @@ const (
 	isDisc
 )
 
+const (
+	XROOTD_MON_PIDSHFT = int64(56)
+	XROOTD_MON_PIDMASK = int64(0xff)
+)
+
 // Summary data types
 const (
 	LinkStat  SummaryStatType = "link"  // https://xrootd.slac.stanford.edu/doc/dev55/xrd_monitoring.htm#_Toc99653739
@@ -267,6 +303,11 @@ var (
 		Help: "Storage volume usage on the server",
 	}, []string{"ns", "type", "server_type"}) // type: total/free; server_type: origin/cache
 
+	CacheAccess = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "xrootd_cache_access_bytes",
+		Help: "Number of bytes the data requested is in the cache or not",
+	}, []string{"path", "type"}) // type: hit/miss/bypass
+
 	lastStats SummaryStat
 
 	// Maps the connection identifier with a user record
@@ -282,7 +323,6 @@ var (
 // Set up listening and parsing xrootd monitoring UDP packets into prometheus
 //
 // The `ctx` is the context for listening to server shutdown event in order to cleanup internal cache eviction
-// goroutine and `wg` is the wait group to notify when the clean up goroutine finishes
 func ConfigureMonitoring(ctx context.Context, egrp *errgroup.Group) (int, error) {
 	monitorPaths = make([]PathList, 0)
 	for _, monpath := range param.Monitoring_AggregatePrefixes.GetStringSlice() {
@@ -747,9 +787,53 @@ func HandlePacket(packet []byte) error {
 			offset += uint32(fileHdr.RecSize)
 		}
 	case 'g':
-		log.Debug("MonPacket: Received a g-stream packet")
+		log.Debug("HandlePacket: Received a g-stream packet")
+		if len(packet) < 8+16 {
+			return errors.New("Packet is too small to be a valid g-stream packet")
+		}
+		gs := XrdXrootdMonGS{
+			Hdr:  header,
+			TBeg: int(binary.BigEndian.Uint32(packet[8:12])),
+			TEnd: int(binary.BigEndian.Uint32(packet[12:16])),
+			SID:  int64(binary.BigEndian.Uint64(packet[16:24])),
+		}
+		// Extract the provider’s identifier
+		providerID := (gs.SID >> XROOTD_MON_PIDSHFT) & XROOTD_MON_PIDMASK
+		detail := NullTermToString(packet[24:])
+		if providerID == 'C' { // pfc: Cache monitoring  info
+			log.Debug("HandlePacket: Received g-stream packet is from cache")
+			strJsons := strings.Split(detail, "\n")
+			aggCacheStat := make(map[string]*CacheAccessStat)
+			for _, js := range strJsons {
+				cacheStat := CacheGS{}
+				if err := json.Unmarshal([]byte(js), &cacheStat); err != nil {
+					return errors.Wrap(err, "failed to parse cache stat json. Raw data is "+string(js))
+				}
+
+				prefix := computePrefix(cacheStat.Lfn, monitorPaths)
+				if aggCacheStat[prefix] == nil {
+					aggCacheStat[prefix] = &CacheAccessStat{
+						Hit:    cacheStat.ByteHit,
+						Miss:   cacheStat.ByteMiss,
+						Bypass: cacheStat.ByteBypass,
+					}
+				} else {
+					aggCacheStat[prefix].Hit += cacheStat.ByteHit
+					aggCacheStat[prefix].Miss += cacheStat.ByteMiss
+					aggCacheStat[prefix].Bypass += cacheStat.ByteBypass
+				}
+			}
+			for prefix, stat := range aggCacheStat {
+				// For hit, miss, bypass, each packet only records the buffer
+				// between last sent and now, so we need to add them
+				CacheAccess.WithLabelValues(prefix, "hit").Add(float64(stat.Hit))
+				CacheAccess.WithLabelValues(prefix, "miss").Add(float64(stat.Miss))
+				CacheAccess.WithLabelValues(prefix, "bypass").Add(float64(stat.Bypass))
+			}
+		}
+
 	case 'i':
-		log.Debug("MonPacket: Received an appinfo packet")
+		log.Debug("HandlePacket: Received an appinfo packet")
 		infoSize := uint32(header.Plen - 12)
 		if xrdUserId, appinfo, err := GetSIDRest(packet[12 : 12+infoSize]); err == nil {
 			if userids.Has(xrdUserId) {
@@ -766,7 +850,7 @@ func HandlePacket(packet []byte) error {
 			return err
 		}
 	case 'u':
-		log.Debug("MonPacket: Received a user login packet")
+		log.Debug("HandlePacket: Received a user login packet")
 		infoSize := uint32(header.Plen - 12)
 		if xrdUserId, auth, err := GetSIDRest(packet[12 : 12+infoSize]); err == nil {
 			var record UserRecord
@@ -797,7 +881,7 @@ func HandlePacket(packet []byte) error {
 			return err
 		}
 	case 'T':
-		log.Debug("MonPacket: Received a token info packet")
+		log.Debug("HandlePacket: Received a token info packet")
 		infoSize := uint32(header.Plen - 12)
 		if _, tokenauth, err := GetSIDRest(packet[12 : 12+infoSize]); err == nil {
 			userId, userRecord, err := ParseTokenAuth(tokenauth)
@@ -809,7 +893,7 @@ func HandlePacket(packet []byte) error {
 			return err
 		}
 	default:
-		log.Debugf("MonPacket: Received an unhandled monitoring packet of type %v", header.Code)
+		log.Debugf("HandlePacket: Received an unhandled monitoring packet of type %v", header.Code)
 	}
 
 	return nil
@@ -943,9 +1027,20 @@ func HandlePacket(packet []byte) error {
 
 func HandleSummaryPacket(packet []byte) error {
 	summaryStats := SummaryStatistics{}
-	if err := xml.Unmarshal(packet, &summaryStats); err != nil {
-		return err
+	// The cache summary data has a typo where the <hit> tag contains a trailing bracet
+	// the causes parsing error. This is a temp fix to correct it. Xrootd v5.7.0 will fix
+	// this issue
+	re, err := regexp.Compile(`></hits>`)
+	if err != nil {
+		return errors.Wrap(err, "error compiling regex")
 	}
+
+	correctedData := re.ReplaceAll(packet, []byte(`</hits>`))
+
+	if err := xml.Unmarshal(correctedData, &summaryStats); err != nil {
+		return errors.Wrap(err, "error unmarshaling summary pacaket")
+	}
+
 	log.Debug("Received a summary statistics packet")
 	if summaryStats.Program != "xrootd" {
 		// We only care about the xrootd summary packets

@@ -20,51 +20,18 @@ package origin
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
-	"net/url"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
-	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 var (
 	notificationChan = make(chan bool)
 )
-
-func exportOpenIDConfig(c *gin.Context) {
-	issuerURL, _ := url.Parse(param.Server_ExternalWebUrl.GetString())
-	jwksUri, _ := url.JoinPath(issuerURL.String(), "/.well-known/issuer.jwks")
-	jsonData := gin.H{
-		"issuer":   issuerURL.String(),
-		"jwks_uri": jwksUri,
-	}
-
-	c.JSON(http.StatusOK, jsonData)
-}
-
-func exportIssuerJWKS(c *gin.Context) {
-	keys, _ := config.GetIssuerPublicJWKS()
-	buf, _ := json.MarshalIndent(keys, "", " ")
-
-	c.Data(http.StatusOK, "application/json; charset=utf-8", buf)
-}
-
-func RegisterOriginOIDCAPI(router *gin.RouterGroup) error {
-	if router == nil {
-		return errors.New("Origin configuration passed a nil pointer")
-	}
-
-	router.GET("/openid-configuration", exportOpenIDConfig)
-	router.GET("/issuer.jwks", exportIssuerJWKS)
-	return nil
-}
 
 // Configure API endpoints for origin that are not tied to UI
 func RegisterOriginAPI(router *gin.Engine, ctx context.Context, egrp *errgroup.Group) error {

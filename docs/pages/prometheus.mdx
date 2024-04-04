@@ -161,7 +161,7 @@ All of the Pelican servers have the following metrics:
 
 ### `up`
 
-  Although a Prometheus built-in metric, Pelican uses this metric to record number of origin/cache servers in the federation, as Pelican director scrape all the storage servers in the federation and get their Promtheus metrics.
+  The Pelican director scrapes Prometheus metrics from all origins and cache servers that successfully advertise to the director. This metric reflects the Pelican origin or cache servers that are scraped by the director.
 
   #### Label: `server_name`
 
@@ -194,6 +194,11 @@ All of the Pelican servers have the following metrics:
   #### Label: `server_long`
 
   The storage server longitute.
+
+
+### `# of Active Origins and Caches`
+
+With the `up` metric, it is possible to count number of active origin and cache servers in the federation by a simple Promtheus query: `count(up{server_type=<"Origin">})` for counting origin servers, or `count(up{server_type=<"Cache">})` for counting cache servers.
 
 ### `pelican_director_total_ftx_test_suite`
 

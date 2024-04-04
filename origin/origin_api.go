@@ -19,12 +19,17 @@
 package origin
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/pkg/errors"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
-	"github.com/pkg/errors"
+	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 // Configure XrootD directory for both self-based and director-based file transfer tests
@@ -56,4 +61,57 @@ func ConfigureXrootdMonitoringDir() error {
 	}
 
 	return nil
+}
+
+// Remove tmp files under ${Origin_RunLocation}/export/pelican/monitoring
+// from diector-based/self tests. There could be dangling files due to
+// error in testing
+func LaunchOriginFileTestMaintenance(ctx context.Context) {
+	monitoringDir := filepath.Join(param.Origin_RunLocation.GetString(), "export", "pelican", "monitoring")
+
+	server_utils.LaunchWatcherMaintenance(
+		ctx,
+		[]string{monitoringDir},
+		"director-based origin tests clean up",
+		1*time.Minute,
+		func(notifyEvent bool) error {
+			entries, err := os.ReadDir(monitoringDir)
+			dirPrevFile := ""
+			selfPrevFile := ""
+			if err != nil {
+				return err
+			}
+			for _, entry := range entries {
+				if !entry.IsDir() {
+					fn := entry.Name()
+					if strings.HasPrefix(fn, "director") {
+						// Rolling basis to remove the previous item and leave the last item,
+						// since the last item is the latest test file (by timestamp in the file name)
+						// and that os.ReadDir sorted file name in the directory
+						if dirPrevFile != "" {
+							err := os.Remove(filepath.Join(monitoringDir, dirPrevFile))
+							if err != nil {
+								return err
+							}
+						}
+						dirPrevFile = fn
+					} else if strings.HasPrefix(fn, "self") {
+						if selfPrevFile != "" {
+							err := os.Remove(filepath.Join(monitoringDir, fn))
+							if err != nil {
+								return err
+							}
+						}
+						selfPrevFile = fn
+					} else {
+						err := os.Remove(filepath.Join(monitoringDir, fn))
+						if err != nil {
+							return err
+						}
+					}
+				}
+			}
+			return nil
+		},
+	)
 }

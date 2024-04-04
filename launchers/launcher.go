@@ -31,7 +31,6 @@ import (
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/broker"
@@ -57,6 +56,15 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 	}
 
 	ctx, shutdownCancel := context.WithCancel(ctx)
+
+	config.PrintPelicanVersion()
+
+	// Print Pelican config at server start if it's in debug or info level
+	if log.GetLevel() >= log.InfoLevel {
+		if err := config.PrintConfig(); err != nil {
+			return shutdownCancel, err
+		}
+	}
 
 	egrp.Go(func() error {
 		_ = config.RestartFlag
@@ -92,26 +100,22 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 	}
 
 	if modules.IsEnabled(config.RegistryType) {
-
-		viper.Set("Federation.RegistryURL", param.Server_ExternalWebUrl.GetString())
-
+		// Federation.RegistryUrl defaults to Server.ExternalUrl in InitServer()
 		if err = RegistryServe(ctx, engine, egrp); err != nil {
 			return shutdownCancel, err
 		}
 	}
 
 	if modules.IsEnabled(config.BrokerType) {
-		viper.Set("Federation.BrokerURL", param.Server_ExternalWebUrl.GetString())
-
 		rootGroup := engine.Group("/")
 		broker.RegisterBroker(ctx, rootGroup)
 		broker.LaunchNamespaceKeyMaintenance(ctx, egrp)
 	}
 
 	if modules.IsEnabled(config.DirectorType) {
-		viper.SetDefault("Director.DefaultResponse", "cache")
-		viper.Set("Federation.DirectorURL", param.Server_ExternalWebUrl.GetString())
-
+		// Director.DefaultResponse defaults to "cache" through default.yaml
+		// Federation.DirectorUrl defaults to Server.ExternalUrl in InitServer()
+		// Duplicated set are removed
 		if err = DirectorServe(ctx, engine, egrp); err != nil {
 			return shutdownCancel, err
 		}
@@ -142,6 +146,11 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		originExports, err := server_utils.GetOriginExports()
 
 		if err != nil {
+			return shutdownCancel, err
+		}
+
+		ok, err := server_utils.CheckSentinelLocation(originExports)
+		if err != nil && !ok {
 			return shutdownCancel, err
 		}
 
@@ -301,7 +310,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 			log.Errorln("Director does not seem to be working:", err)
 			return shutdownCancel, err
 		}
-		server, err := CacheServe(ctx, engine, egrp)
+		server, err := CacheServe(ctx, engine, egrp, modules)
 		if err != nil {
 			return shutdownCancel, err
 		}
