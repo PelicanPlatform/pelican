@@ -1056,6 +1056,23 @@ type: stringSlice
 default: none
 components: ["director"]
 ---
+name: Director.SupportContactEmail
+description: >-
+  An Email address to receive issues and help requests for the federation the director is hosting. The values will
+  be displayed on the director web interface if provided. We highly recommend director admin to fill out this field.
+type: string
+default: none
+components: ["director"]
+---
+name: Director.SupportContactUrl
+description: >-
+  A URL where user can find support information. Can be your website, GitHub discussion, or third-party support portal
+  for the federation the director is hosting. The values will be displayed on the director web interface if provided.
+  We highly recommend director admin to fill out this field.
+type: string
+default: none
+components: ["director"]
+---
 ############################
 #  Registry-level configs  #
 ############################

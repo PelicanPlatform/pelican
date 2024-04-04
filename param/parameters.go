@@ -121,6 +121,8 @@ var (
 	Director_DefaultResponse = StringParam{"Director.DefaultResponse"}
 	Director_GeoIPLocation = StringParam{"Director.GeoIPLocation"}
 	Director_MaxMindKeyFile = StringParam{"Director.MaxMindKeyFile"}
+	Director_SupportContactEmail = StringParam{"Director.SupportContactEmail"}
+	Director_SupportContactUrl = StringParam{"Director.SupportContactUrl"}
 	Federation_BrokerUrl = StringParam{"Federation.BrokerUrl"}
 	Federation_DirectorUrl = StringParam{"Federation.DirectorUrl"}
 	Federation_DiscoveryUrl = StringParam{"Federation.DiscoveryUrl"}
