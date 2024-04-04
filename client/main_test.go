@@ -350,3 +350,36 @@ func TestGetProjectName(t *testing.T) {
 		assert.Equal(t, "testProject", projectName)
 	})
 }
+
+func TestSchemeUnderstood(t *testing.T) {
+	t.Run("TestProperSchemeOsdf", func(t *testing.T) {
+		scheme := "osdf"
+		err := schemeUnderstood(scheme)
+		assert.NoError(t, err)
+	})
+	t.Run("TestProperSchemeStash", func(t *testing.T) {
+		scheme := "stash"
+		err := schemeUnderstood(scheme)
+		assert.NoError(t, err)
+	})
+	t.Run("TestProperSchemePelican", func(t *testing.T) {
+		scheme := "pelican"
+		err := schemeUnderstood(scheme)
+		assert.NoError(t, err)
+	})
+	t.Run("TestProperSchemeFile", func(t *testing.T) {
+		scheme := "file"
+		err := schemeUnderstood(scheme)
+		assert.NoError(t, err)
+	})
+	t.Run("TestProperSchemeEmpty", func(t *testing.T) {
+		scheme := ""
+		err := schemeUnderstood(scheme)
+		assert.NoError(t, err)
+	})
+	t.Run("TestImproperScheme", func(t *testing.T) {
+		scheme := "ThisSchemeDoesNotExistAndHopefullyNeverWill"
+		err := schemeUnderstood(scheme)
+		assert.Error(t, err)
+	})
+}

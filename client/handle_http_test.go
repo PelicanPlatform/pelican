@@ -23,6 +23,7 @@ package client
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -34,6 +35,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -514,4 +517,187 @@ func TestProjInUserAgent(t *testing.T) {
 
 	// Test the user-agent header is what we expect it to be
 	assert.Equal(t, "pelican-client/"+config.GetVersion()+" project/test", *server_test.user_agent)
+}
+
+func TestNewPelicanURL(t *testing.T) {
+	// Set up our federation and context
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	viper.Set("Client.WorkerCount", 5)
+	te := NewTransferEngine(ctx)
+	config.InitConfig()
+
+	t.Run("TestOsdfOrStashSchemeWithOSDFPrefixNoError", func(t *testing.T) {
+		viper.Reset()
+		_, err := config.SetPreferredPrefix("OSDF")
+		assert.NoError(t, err)
+		// Init config to get proper timeouts
+		config.InitConfig()
+
+		remoteObject := "osdf:///something/somewhere/thatdoesnotexist.txt"
+		remoteObjectURL, err := url.Parse(remoteObject)
+		assert.NoError(t, err)
+
+		// Instead of relying on osdf, let's just set our global metadata (osdf prefix does this for us)
+		viper.Set("Federation.DirectorUrl", "someDirectorUrl")
+		viper.Set("Federation.DiscoveryUrl", "someDiscoveryUrl")
+		viper.Set("Federation.RegistryUrl", "someRegistryUrl")
+
+		pelicanURL, err := te.newPelicanURL(remoteObjectURL)
+		assert.NoError(t, err)
+
+		// Check pelicanURL properly filled out
+		assert.Equal(t, "someDirectorUrl", pelicanURL.directorUrl)
+		viper.Reset()
+	})
+
+	t.Run("TestOsdfOrStashSchemeWithOSDFPrefixWithError", func(t *testing.T) {
+		viper.Reset()
+		_, err := config.SetPreferredPrefix("OSDF")
+		assert.NoError(t, err)
+		config.InitConfig()
+
+		remoteObject := "osdf:///something/somewhere/thatdoesnotexist.txt"
+		remoteObjectURL, err := url.Parse(remoteObject)
+		assert.NoError(t, err)
+
+		// Instead of relying on osdf, let's just set our global metadata but don't set one piece
+		viper.Set("Federation.DirectorUrl", "someDirectorUrl")
+		viper.Set("Federation.DiscoveryUrl", "someDiscoveryUrl")
+
+		_, err = te.newPelicanURL(remoteObjectURL)
+		// Make sure we get an error
+		assert.Error(t, err)
+		viper.Reset()
+	})
+
+	t.Run("TestOsdfOrStashSchemeWithPelicanPrefixNoError", func(t *testing.T) {
+		viper.Reset()
+		_, err := config.SetPreferredPrefix("PELICAN")
+		config.InitConfig()
+		assert.NoError(t, err)
+		remoteObject := "osdf:///something/somewhere/thatdoesnotexist.txt"
+		remoteObjectURL, err := url.Parse(remoteObject)
+		assert.NoError(t, err)
+
+		pelicanURL, err := te.newPelicanURL(remoteObjectURL)
+		assert.NoError(t, err)
+
+		// Check pelicanURL properly filled out
+		assert.Equal(t, "https://osdf-director.osg-htc.org", pelicanURL.directorUrl)
+		viper.Reset()
+		// Note: can't really test this for an error since that would require osg-htc.org to be down
+	})
+
+	t.Run("TestPelicanSchemeNoError", func(t *testing.T) {
+		viper.Reset()
+		viper.Set("TLSSkipVerify", true)
+		config.InitConfig()
+		err := config.InitClient()
+		assert.NoError(t, err)
+		// Create a server that gives us a mock response
+		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// make our response:
+			response := config.FederationDiscovery{
+				DirectorEndpoint:              "director",
+				NamespaceRegistrationEndpoint: "registry",
+				JwksUri:                       "jwks",
+				BrokerEndpoint:                "broker",
+			}
+
+			responseJSON, err := json.Marshal(response)
+			if err != nil {
+				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+				return
+			}
+
+			w.WriteHeader(http.StatusOK)
+			_, err = w.Write(responseJSON)
+			assert.NoError(t, err)
+		}))
+		defer server.Close()
+
+		serverURL, err := url.Parse(server.URL)
+		assert.NoError(t, err)
+
+		remoteObject := "pelican://" + serverURL.Host + "/something/somewhere/thatdoesnotexist.txt"
+		remoteObjectURL, err := url.Parse(remoteObject)
+		assert.NoError(t, err)
+
+		pelicanURL, err := te.newPelicanURL(remoteObjectURL)
+		assert.NoError(t, err)
+
+		// Check pelicanURL properly filled out
+		assert.Equal(t, "director", pelicanURL.directorUrl)
+		// Check to make sure it was populated in our cache
+		assert.True(t, te.pelicanURLCache.Has("https://"+serverURL.Host))
+		viper.Reset()
+	})
+
+	t.Run("TestPelicanSchemeWithError", func(t *testing.T) {
+		viper.Reset()
+		config.InitConfig()
+
+		remoteObject := "pelican://some-host/something/somewhere/thatdoesnotexist.txt"
+		remoteObjectURL, err := url.Parse(remoteObject)
+		assert.NoError(t, err)
+
+		_, err = te.newPelicanURL(remoteObjectURL)
+		assert.Error(t, err)
+		viper.Reset()
+	})
+
+	t.Run("TestPelicanSchemeMetadataTimeoutError", func(t *testing.T) {
+		viper.Reset()
+		viper.Set("TLSSkipVerify", true)
+		oldResponseHeaderTimeout := viper.Get("transport.ResponseHeaderTimeout")
+		viper.Set("transport.ResponseHeaderTimeout", 0.1*float64(time.Millisecond))
+		viper.Set("Client.WorkerCount", 5)
+		err := config.InitClient()
+		assert.NoError(t, err)
+		// Create a server that gives us a mock response
+		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// make our response:
+			response := config.FederationDiscovery{
+				DirectorEndpoint:              "director",
+				NamespaceRegistrationEndpoint: "registry",
+				JwksUri:                       "jwks",
+				BrokerEndpoint:                "broker",
+			}
+
+			responseJSON, err := json.Marshal(response)
+			if err != nil {
+				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+				return
+			}
+
+			w.WriteHeader(http.StatusOK)
+			_, err = w.Write(responseJSON)
+			assert.NoError(t, err)
+		}))
+		defer server.Close()
+
+		serverURL, err := url.Parse(server.URL)
+		assert.NoError(t, err)
+
+		remoteObject := "pelican://" + serverURL.Host + "/something/somewhere/thatdoesnotexist.txt"
+		remoteObjectURL, err := url.Parse(remoteObject)
+		assert.NoError(t, err)
+
+		_, err = te.newPelicanURL(remoteObjectURL)
+		assert.Error(t, err)
+		assert.True(t, errors.Is(err, config.MetadataTimeoutErr))
+		viper.Set("transport.ResponseHeaderTimeout", oldResponseHeaderTimeout)
+	})
+
+	t.Cleanup(func() {
+		cancel()
+		if err := egrp.Wait(); err != nil && err != context.Canceled && err != http.ErrServerClosed {
+			require.NoError(t, err)
+		}
+		if err := te.Shutdown(); err != nil {
+			log.Errorln("Failure when shutting down transfer engine:")
+		}
+		// Throw in a viper.Reset for good measure. Keeps our env squeaky clean!
+		viper.Reset()
+	})
 }
