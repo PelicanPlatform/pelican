@@ -342,7 +342,7 @@ func getNamespaceByPrefix(prefix string) (*Namespace, error) {
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, fmt.Errorf("namespace with id %q not found in database", prefix)
 	} else if err != nil {
-		return nil, errors.Wrap(err, "error retrieving pubkey")
+		return nil, errors.Wrap(err, "error retrieving namespace registration by its prefix")
 	}
 
 	// By default, JSON unmarshal will convert any generic number to float
