@@ -94,10 +94,10 @@ type (
 
 		// S3 specific options that are kept top-level because
 		// they aren't specific to each export
-		S3Region          string
-		S3ServiceUrl      string
-		S3UrlStyle        string
-		Exports           []server_utils.OriginExport
+		S3Region     string
+		S3ServiceUrl string
+		S3UrlStyle   string
+		Exports      []server_utils.OriginExport
 	}
 
 	CacheConfig struct {
