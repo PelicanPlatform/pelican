@@ -64,7 +64,12 @@ function StatusDisplay({component, status, message}: StatusDisplayProps) {
         case "director":
             component = "Director"
             break
+        case "registry":
+            component = "Registry"
+            break
         default:
+            // Capitalize the component name by default if it has more than 1 letters
+            component = component.length > 1 ? component.charAt(0).toUpperCase() + component.slice(1) : component
     }
 
     return (

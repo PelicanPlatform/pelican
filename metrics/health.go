@@ -69,7 +69,8 @@ const (
 	OriginCache_XRootD        HealthStatusComponent = "xrootd"
 	OriginCache_CMSD          HealthStatusComponent = "cmsd"
 	OriginCache_Federation    HealthStatusComponent = "federation" // Advertise to the director
-	OriginCache_Director      HealthStatusComponent = "director"   // File transfer with director
+	OriginCache_Director      HealthStatusComponent = "director"   // File transfer tests with director
+	OriginCache_Registry      HealthStatusComponent = "registry"   // Register namespace at the registry
 	DirectorRegistry_Topology HealthStatusComponent = "topology"   // Fetch data from OSDF topology
 	Server_WebUI              HealthStatusComponent = "web-ui"
 )

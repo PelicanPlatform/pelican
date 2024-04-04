@@ -29,6 +29,7 @@ import (
 	"github.com/pelicanplatform/pelican/broker"
 	"github.com/pelicanplatform/pelican/cache_ui"
 	"github.com/pelicanplatform/pelican/daemon"
+	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_ui"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -88,5 +89,6 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) (
 
 // Finish configuration of the cache server.
 func CacheServeFinish(ctx context.Context, egrp *errgroup.Group) error {
+	metrics.SetComponentHealthStatus(metrics.OriginCache_Registry, metrics.StatusWarning, "Start to register namespaces for the cache server")
 	return server_ui.RegisterNamespaceWithRetry(ctx, egrp, "/caches/"+param.Xrootd_Sitename.GetString())
 }

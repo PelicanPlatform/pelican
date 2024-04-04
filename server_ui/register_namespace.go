@@ -250,13 +250,14 @@ func registerNamespacePrep(prefix string) (key jwk.Key, registrationEndpointURL 
 
 func registerNamespaceImpl(key jwk.Key, prefix string, registrationEndpointURL string) error {
 	if err := registry.NamespaceRegister(key, registrationEndpointURL, "", prefix); err != nil {
+		metrics.SetComponentHealthStatus(metrics.OriginCache_Registry, metrics.StatusCritical, fmt.Sprintf("XRootD server failed to register its namespace %s at the registry: %v", prefix, err))
 		return errors.Wrapf(err, "Failed to register prefix %s", prefix)
 	}
+	metrics.SetComponentHealthStatus(metrics.OriginCache_Registry, metrics.StatusOK, "")
 	return nil
 }
 
 func RegisterNamespaceWithRetry(ctx context.Context, egrp *errgroup.Group, prefix string) error {
-	metrics.SetComponentHealthStatus(metrics.OriginCache_Federation, metrics.StatusCritical, "Origin not registered with federation")
 	retryInterval := param.Server_RegistrationRetryInterval.GetDuration()
 	if retryInterval == 0 {
 		log.Warning("Server.RegistrationRetryInterval is 0. Fall back to 10s")
@@ -268,6 +269,7 @@ func RegisterNamespaceWithRetry(ctx context.Context, egrp *errgroup.Group, prefi
 		return err
 	}
 	if isRegistered {
+		metrics.SetComponentHealthStatus(metrics.OriginCache_Registry, metrics.StatusOK, "")
 		log.Debugf("Origin already has prefix %v registered\n", prefix)
 		return nil
 	}
