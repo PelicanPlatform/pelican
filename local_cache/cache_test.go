@@ -31,8 +31,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"syscall"
 	"strconv"
+	"syscall"
 	"testing"
 	"time"
 
@@ -524,7 +524,10 @@ func TestOriginUnresponsive(t *testing.T) {
 	require.NoError(t, err)
 	writeBigBuffer(t, fp, 1)
 
-	tr, err := client.DoGet(ft.Ctx, "pelican:///test/hello_world.txt", filepath.Join(tmpDir, "hello_world.txt"), false,
+	downloadUrl := fmt.Sprintf("pelican://%s:%s%s/%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
+		((*ft.Exports)[0]).FederationPrefix, "hello_world.txt")
+
+	tr, err := client.DoGet(ft.Ctx, downloadUrl, filepath.Join(tmpDir, "hello_world.txt"), false,
 		client.WithCaches(cacheUrl))
 	assert.Error(t, err)
 	var sce *client.StatusCodeError

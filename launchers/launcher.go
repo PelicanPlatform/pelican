@@ -29,6 +29,7 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
@@ -85,7 +86,8 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 		}
 	})
 
-	engine, err := web_ui.GetEngine()
+	var engine *gin.Engine
+	engine, err = web_ui.GetEngine()
 	if err != nil {
 		return
 	}
@@ -143,15 +145,15 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 	if modules.IsEnabled(config.OriginType) {
 
 		mode := param.Origin_StorageType.GetString()
-		var originExports *[]server_utils.OriginExports
+		var originExports *[]server_utils.OriginExport
 		originExports, err = server_utils.GetOriginExports()
 		if err != nil {
 			return
 		}
 
-		ok, err := server_utils.CheckSentinelLocation(originExports)
+		ok, err = server_utils.CheckSentinelLocation(originExports)
 		if err != nil && !ok {
-			return shutdownCancel, err
+			return
 		}
 
 		switch mode {
@@ -258,7 +260,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 		// of the namespaces and doesn't have to wait an entire cycle to learn about them from the director
 
 		// To check all of the advertisements, we'll launch a WaitUntilWorking concurrently for each of them.
-		var originExports *[]server_utils.OriginExports
+		var originExports *[]server_utils.OriginExport
 		originExports, err = server_utils.GetOriginExports()
 		if err != nil {
 			return
