@@ -4,7 +4,7 @@ import useSWR from "swr";
 import {useRouter} from "next/navigation";
 import React, {useContext, useState} from "react";
 import {IconButton, Menu, MenuItem, Tooltip} from "@mui/material";
-import {Login, AccountCircleIcon, CloudSync, AdminPanelSettings} from "@mui/icons-material";
+import {Login, AccountCircle, CloudSync, AdminPanelSettings} from "@mui/icons-material";
 import StatusSnackBar from "@/components/StatusSnackBar";
 import {getUser} from "@/helpers/login";
 
