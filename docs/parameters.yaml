@@ -40,7 +40,7 @@ components: ["*"]
 ---
 name: TLSSkipVerify
 description: |+
-  When set to true, Pelican will skip TLS verification.  This allows a "man in the middle" attack on the connection but can simplify testing.  Intended for developers.
+  When set to true, Pelican will skip TLS verification. This allows a "man in the middle" attack on the connection but can simplify testing.  Intended for developers.
 type: bool
 default: false
 components: ["origin", "registry", "director"]
@@ -48,9 +48,9 @@ components: ["origin", "registry", "director"]
 name: IssuerKey
 description: |+
   A filepath to the file containing a PEM-encoded ecdsa private key which later will be parsed
-  into a JWK and serves as the private key to sign various JWTs issued by this server
+  into a JWK and serves as the private key to sign various JWTs issued by this server.
 
-  A public JWK will be derived from this private key and used as the key for token verification
+  A public JWK will be derived from this private key and used as the key for token verification.
 type: filename
 root_default: /etc/pelican/issuer.jwk
 default: $ConfigBase/issuer.jwk
@@ -86,7 +86,7 @@ components: ["client", "registry", "origin"]
 ---
 name: Transport.TLSHandshakeTimeout
 description: |+
-  Maximum time allowed for the TLS handshake to complete when making an HTTPS connection
+  Maximum time allowed for the TLS handshake to complete when making an HTTPS connection.
 type: duration
 default: 15s
 components: ["client", "registry", "origin"]
@@ -101,7 +101,7 @@ components: ["client", "registry", "origin"]
 ---
 name: Transport.ResponseHeaderTimeout
 description: |+
-  Maximum time the client should wait for the response headers to be received from the server
+  Maximum time the client should wait for the response headers to be received from the server.
 type: duration
 default: 10s
 components: ["client", "registry", "origin"]
@@ -113,6 +113,7 @@ description: |+
   coming from).
 
   Configuration takes an IP address (both regular and CIDR) and a Coordinate made up of a lat/long pair in decimal format. For example:
+  
   ```
   GeoIPOverrides:
     - IP: "123.234.123.234"
@@ -125,7 +126,7 @@ description: |+
         Long: -98.5795
   ```
 
-  will result in the IP address "123.234.123.234" being mapped to Madison, WI, and IP addresses in the range ABCD::0000-FFFF will be mapped
+  Will result in the IP address "123.234.123.234" being mapped to Madison, WI, and IP addresses in the range ABCD::0000-FFFF will be mapped
   to a field in Kansas.
 type: object
 default: none
@@ -236,8 +237,7 @@ name: Logging.Cache.Xrootd
 description: |+
   Trace options for XRootD debug output within XRootD configuration. This prefix is reserved for the xroot protocol,
   which is the component that sits on sockets and talks to clients as they query file-system info, open files, and read data.
-  This is the protocol for XRootD (like http) and handles connections and requests
-
+  This is the protocol for XRootD (like http) and handles connections and requests.
 type: string
 default: error
 components: ["cache"]
@@ -323,7 +323,7 @@ components: ["client"]
 ---
 name: Client.SlowTransferRampupTime
 description: |+
-  A duration indicating the rampup period for a slow transfer.
+  A duration indicating the ramp up period for a slow transfer.
 type: int
 default: 30
 components: ["client"]
@@ -345,7 +345,7 @@ components: ["client"]
 name: Client.WorkerCount
 description: |+
   An integer indicating the number of file transfer tasks that should be
-  executed in parallel
+  executed in parallel.
 type: int
 default: 5
 components: ["client"]
@@ -388,7 +388,7 @@ components: ["client"]
 name: Client.MaximumDownloadSpeed
 description: |+
   The maximum speed allowed for a client to download a given file (enforced via rate limits).
-  This is not intended for use by production clients but rather for unit tests; 0 disables the rate limit
+  This is not intended for use by production clients but rather for unit tests; 0 disables the rate limit.
 type: int
 default: 0
 components: ["client"]
@@ -416,17 +416,17 @@ name: Origin.Exports
 description: |+
   A list describing the origin's exports. Each item in the list describes a single namespace the origin exports:
 
-    - StoragePrefix: The relevant path from the object store, e.g. for posix /my/dir
-      FederationPrefix: The namespace prefix that data from StoragePrefix is made available under within the federation
-      Capabilities: A list of the capabilities the origin is willing to support for the given export. Capabilities include:
-        ["Reads", "PublicReads", "Writes", "Listings", "DirectReads"]
-        where each of these has the same effect as the corresponding "Origin.Enable*" configuration, except scoped to the
-        given export. If "PublicReads" is included, "Reads" is inferred.
-      SentinelLocation: A filename under `StoragePrefix` path for Pelican to check the storage directory exists and is correctly mounted.
-        Leave it empty to skip the check. You should always choose a distinguished name for `SentinelLocation`. It should not be reused for other servers.
-        If running in a containerized environment it should not be the name of the underlying physical host as that may change and lead to confusion.
-        You need to manually create a file under path to `StoragePrefix` with the same name as `SentinelLocation`. Note that this parameter will be ignored
-        if the origin StorageType is S3.
+  - StoragePrefix: The relevant path from the object store, e.g. for posix /my/dir
+  - FederationPrefix: The namespace prefix that data from StoragePrefix is made available under within the federation
+  - Capabilities: A list of the capabilities the origin is willing to support for the given export. Capabilities include:
+      ["Reads", "PublicReads", "Writes", "Listings", "DirectReads"]
+      where each of these has the same effect as the corresponding "Origin.Enable*" configuration, except scoped to the
+      given export. If "PublicReads" is included, "Reads" is inferred.
+  - SentinelLocation: A filename under `StoragePrefix` path for Pelican to check the storage directory exists and is correctly mounted.
+      Leave it empty to skip the check. You should always choose a distinguished name for `SentinelLocation`. It should not be reused for other servers.
+      If running in a containerized environment it should not be the name of the underlying physical host as that may change and lead to confusion.
+      You need to manually create a file under path to `StoragePrefix` with the same name as `SentinelLocation`. Note that this parameter will be ignored
+      if the origin StorageType is S3.
 
     Example:
 
@@ -504,7 +504,7 @@ description: |+
   A boolean indicating whether the origin permits writes. All writes require authorization.
 
   NOTE: This config option is incompatible with multiple exports defined via `Origin.Exports` and requires that the origin exports
-  only a single path.type: bool
+  only a single path.type: bool.
 type: bool
 default: true
 components: ["origin"]
@@ -546,7 +546,7 @@ description: |+
   started by the origin.
 
   For non-root servers, if $XDG_RUNTIME_DIR is not set, a temporary directory will
-  be created (and removed on shutdown)
+  be created (and removed on shutdown).
 type: filename
 root_default: /run/pelican/xrootd/origin
 default: $XDG_RUNTIME_DIR/pelican/origin
@@ -569,7 +569,7 @@ name: Origin.EnableWrite
 description: |+
   [Deprecated] Origin.EnableWrite is being deprecated and will be removed in a future release. It is replaced by Origin.EnableWrites.
 
-  A boolean indicating if an origin allows write access
+  A boolean indicating if an origin allows write access.
 type: bool
 default: true
 deprecated: true
@@ -581,7 +581,7 @@ description: |+
   [Deprecated] Origin.EnableFallbackRead is being deprecated and will be removed in a future release. It is replaced by Origin.EnableDirectReads.
 
   Set to `true` if the origin permits clients to directly read from it
-  when no cache service is available
+  when no cache service is available.
 type: bool
 default: false
 deprecated: true
@@ -696,7 +696,7 @@ description: |+
   [Deprecated] Origin.EnableDirListing is being deprecated and will be removed in a future release. It is replaced by Origin.EnableListings.
 
   Allows the origin to enable directory listings. Needs to be enabled for recursive
-  downloads to work properly and for directories to be visable.
+  downloads to work properly and for directories to be visible.
 type: bool
 default: false
 deprecated: true
@@ -760,7 +760,7 @@ components: ["origin"]
 name: Origin.S3UrlStyle
 description: |+
   The style of S3 urls used by the service URL host. This can be either "path" if objects are fetched at <service-url>/<bucket>/<object>
-  or "virtual" if objects are fetched at <bucket>.<service-url>/<object>
+  or "virtual" if objects are fetched at <bucket>.<service-url>/<object>.
 type: string
 default: path
 components: ["origin"]
@@ -770,7 +770,7 @@ components: ["origin"]
 ############################
 name: LocalCache.RunLocation
 description: |+
-  The directory for the runtime files of the local cache
+  The directory for the runtime files of the local cache.
 type: filename
 root_default: /run/pelican/localcache
 default: $XDG_RUNTIME_DIR/pelican/localcache
@@ -786,7 +786,7 @@ components: ["localcache"]
 ---
 name: LocalCache.Socket
 description: |+
-  The location of the socket used for client communication for the local cache
+  The location of the socket used for client communication for the local cache.
 type: filename
 default: $PELICAN_LOCALCACHE_RUNLOCATION/cache.sock
 components: ["localcache"]
@@ -844,7 +844,7 @@ description: |+
   started by the cache.
 
   For non-root servers, if $XDG_RUNTIME_DIR is not set, a temporary directory will
-  be created (and removed on shutdown)
+  be created (and removed on shutdown).
 type: filename
 root_default: /run/pelican/xrootd/cache
 default: $XDG_RUNTIME_DIR/pelican/cache
@@ -996,7 +996,7 @@ components: ["director"]
 ---
 name: Director.MinStatResponse
 description: |+
-  A positive integer indicating minimum number of origin's responses required for a `stat` call
+  A positive integer indicating minimum number of origin's responses required for a `stat` call.
 type: int
 default: 1
 components: ["director"]
@@ -1004,7 +1004,7 @@ components: ["director"]
 name: Director.MaxStatResponse
 description: |+
   A positive integer indicating maximum number of origin's responses required for a `stat` call.
-  `stat` call will cancel the rest of the ongoing query if max reponse is hit.
+  `stat` call will cancel the rest of the ongoing query if max response is hit.
 type: int
 default: 1
 components: ["director"]
@@ -1097,7 +1097,7 @@ name: Registry.AdminUsers
 description: |+
   A string slice of "subject" claim of users to give admin permission for registry UI.
 
-  The "subject" claim should be the "CILogon User Identifier" from CILogon user page: https://cilogon.org/
+  The "subject" claim should be the "CILogon User Identifier" from CILogon user page: [https://cilogon.org/](https://cilogon.org/)
 type: stringSlice
 default: []
 components: ["registry"]
@@ -1116,7 +1116,7 @@ description: |+
     id: https://osg-htc.org/iid/01y2jtd41
   ```
 
-  Note that this value will take precedence over Registry.InstitutionsUrl if both are set
+  Note that this value will take precedence over Registry.InstitutionsUrl if both are set.
 type: object
 default: none
 components: ["registry"]
@@ -1144,7 +1144,8 @@ description: |+
   - "name" must be snake case with underline connecting words, i.e. site_name.
   - "type" must be one of "string", "int", "bool", "datetime" (Unix time in seconds), or "enum".
   - "options" must be a non-empty yaml array for field with type "enum". "optionsUrl" will be ignored if "options" is set.
-    example:
+  
+    Example:
 
       ```yaml
       options:
@@ -1162,7 +1163,7 @@ description: |+
   The url must accept a GET request with 200 response in JSON/YAML content with the following format:
 
   JSON:
-  ```JSON
+  ```json
     [
       {
         "name": "University of Wisconsin - Madison",
@@ -1178,7 +1179,7 @@ description: |+
       id: " https://osg-htc.org/iid/01y2jtd41"
   ```
 
-  where the id field will be stored in registry database and must be unique, and name field will be displayed in UI as the option.
+  Where the id field will be stored in registry database and must be unique, and name field will be displayed in UI as the option.
 
   Note that Pelican will cache the response of the url in a TTL cache with default refresh time of 15 minutes.
   Also note that Registry.Institutions will take precedence over this value if both are set.
@@ -1221,7 +1222,7 @@ description: |+
   authentication when running server components of Pelican.
 
   If you override this filepath, you need to provide the matched-pair private key
-  via Server.TLSKey and a Certificate Authority (CA) certificate via Server.TLSCACertificateFile
+  via Server.TLSKey and a Certificate Authority (CA) certificate via Server.TLSCACertificateFile.
 type: filename
 root_default: /etc/pelican/certificates/tls.crt
 default: "$ConfigBase/certificates/tls.crt"
@@ -1232,7 +1233,7 @@ description: |+
   A filepath to the TLS Certificate Authority (CA) certificate file, to be used by XRootD
   and internal HTTP client requests.
 
-  Do not override this filepath unless you want to provide your TLS host certifacte
+  Do not override this filepath unless you want to provide your TLS host certificate
 type: filename
 root_default: /etc/pelican/certificates/tlsca.pem
 default: "$ConfigBase/certificates/tlsca.pem"
@@ -1244,7 +1245,7 @@ description: |+
   to be used by XRootD only.
 
   This is exclusive with Server.TLSCACertificateFile for XRootD and this value takes priority
-  over Server.TLSCACertificateFile
+  over Server.TLSCACertificateFile.
 type: string
 default: none
 components: ["origin", "registry", "director"]
@@ -1292,7 +1293,7 @@ name: Server.ExternalWebUrl
 description: |+
   A URL indicating the Pelican web interface and internal web APIs address as it appears externally.
 
-  Port number will be stripped if it's 443, from `Server.WebPort` or directly set through `Server.ExternalWebUrl`
+  Port number will be stripped if it's 443, from `Server.WebPort` or directly set through `Server.ExternalWebUrl`.
 type: url
 default: https://${Server.Hostname}:${Server.WebPort} (for ${Server.WebPort} != 443)
 components: ["origin", "director", "registry"]
@@ -1359,7 +1360,7 @@ components: ["origin", "cache", "registry", "director"]
 ---
 name: Server.SessionSecretFile
 description: |+
-  The filepath to the secret for encrypt/decrypt session data for Pelican web UI to initiate a session cookie
+  The filepath to the secret for encrypt/decrypt session data for Pelican web UI to initiate a session cookie.
 
   This is used for sending redirect request for OAuth2 authentication follow.
   This is also used for CSRF auth key.
@@ -1428,21 +1429,22 @@ components: ["origin"]
 name: Issuer.OIDCAuthenticationRequirements
 description: |+
   A list of claim-value pairs that indicate required values from the OIDC ID token to authenticate.
-  For example, the following setting:
+  
+  Example:
 
   ```
   - claim: idp_name
     value: University of Wisconsin-Madison
   ```
 
-  would only allow tokens with `"idp_name": "University of Wisconsin-Madison"` set to authenticate.
+  Would only allow tokens with `"idp_name": "University of Wisconsin-Madison"` set to authenticate.
 type: object
 default: []
 components: ["origin"]
 ---
 name: Issuer.OIDCAuthenticationUserClaim
 description: |+
-  The claim in the OIDC ID token to be used as the "username" for the issuer
+  The claim in the OIDC ID token to be used as the "username" for the issuer.
 type: string
 default: sub
 components: ["origin"]
@@ -1452,7 +1454,7 @@ description: |+
   How the issuer should determine group information based on the authenticated identity.  Valid values are:
   - `none` (default): No group information should be used.
   - `file`: Read groups from an external, JSON-formatted file.  The file should contain a single JSON object
-    with keys corresponding to the "user" name and the value a list of strings that are interpretted as the
+    with keys corresponding to the "user" name and the value a list of strings that are interpreted as the
     user's groups.
 type: string
 default: none
@@ -1461,7 +1463,7 @@ components: ["origin"]
 name: Issuer.GroupFile
 description: |+
   The location of a file containing group information.  The file should contain a single JSON object with
-  keys corresponding to the "user" name and the value a list of strings that are interpretted as the user's
+  keys corresponding to the "user" name and the value a list of strings that are interpreted as the user's
   groups.
 type: string
 default: none
@@ -1576,10 +1578,10 @@ components: ["registry", "origin"]
 ---
 name: OIDC.ClientRedirectHostname
 description: |+
-  The hostname for the OIDC client redirect URL that the OIDC provider will redirect to after the user is authenticated
+  The hostname for the OIDC client redirect URL that the OIDC provider will redirect to after the user is authenticated.
 
   For development use only. Useful when developing in a container and you want to expose localhost
-  instead of container hostname to your OAuth provider
+  instead of container hostname to your OAuth provider.
 type: string
 default: none
 components: ["registry", "director"]
@@ -1604,12 +1606,12 @@ components: ["origin", "cache"]
 name: Xrootd.RunLocation
 description: |+
   [Deprecated] `Xrootd.RunLocation` is deprecated and will be removed in a future release. Please migrate to
-  use `Cache.RunLocation` or `Origin.RunLocation` instread.
+  use `Cache.RunLocation` or `Origin.RunLocation` instead.
 
   A directory where temporary configurations will be stored for the XRootD daemon
   started by the origin or cache.
   For non-root servers, if $XDG_RUNTIME_DIR is not set, a temporary directory will
-  be created (and removed on shutdown)
+  be created (and removed on shutdown).
   This setting is deprecated; please use the Cache.RunLocation or Origin.RunLocation, as appropriate,
   for the server.
 type: filename
@@ -1738,7 +1740,7 @@ description: |+
   The duration of which the tokens for various Prometheus endpoints expire.
 
   This includes tokens for director's Prometheus origin discovery endpoint,
-  director's origin scraper, and server's self-scraper
+  director's origin scraper, and server's self-scraper.
 type: duration
 default: 1h
 components: ["origin", "director", "registry"]
@@ -1756,14 +1758,14 @@ components: ["origin", "director", "registry"]
 ---
 name: Monitoring.MetricAuthorization
 description: |+
-  If authorization (Bearer token) is required for accesing /metrics endpoint
+  If authorization (Bearer token) is required for accessing /metrics endpoint.
 type: bool
 default: true
 components: ["origin", "cache", "director", "registry"]
 ---
 name: Monitoring.PromQLAuthorization
 description: |+
-  If authorization (Bearer token or cookie) is required for accesing /prometheus/query endpoint
+  If authorization (Bearer token or cookie) is required for accessing /prometheus/query endpoint.
 type: bool
 default: true
 components: ["origin", "cache", "director", "registry"]
@@ -1773,14 +1775,14 @@ components: ["origin", "cache", "director", "registry"]
 ############################
 name: Shoveler.Enable
 description: |+
-  Enable XRootD monitoring shoveler: https://github.com/opensciencegrid/xrootd-monitoring-shoveler
+  Enable XRootD monitoring shoveler: https://github.com/opensciencegrid/xrootd-monitoring-shoveler.
 type: bool
 default: false
 components: ["origin", "cache"]
 ---
 name: Shoveler.MessageQueueProtocol
 description: |+
-  Select which protocol to use in order to connect to the MQ. Options are amqp, stomp
+  Select which protocol to use in order to connect to the MQ. Options are amqp, stomp.
 
   For amqp, the following configurations are required:
    - URL: amqps://username:password@example.com/vhost
@@ -1803,7 +1805,7 @@ name: Shoveler.URL
 description: |+
   For amqp and stomp.
 
-  The URL to connect to the shoveler
+  The URL to connect to the shoveler.
 type: url
 default: none
 components: ["origin", "cache"]
@@ -1812,7 +1814,7 @@ name: Shoveler.Topic
 description: |+
   For amqp and stomp.
 
-  The topic of the messages. For stomp, it defaults to xrootd.shoveler
+  The topic of the messages. For stomp, it defaults to xrootd.shoveler.
 type: string
 default: none
 components: ["origin", "cache"]
@@ -1821,7 +1823,7 @@ name: Shoveler.AMQPExchange
 description: |+
   For amqp only.
 
-  The exchange to shovel messages
+  The exchange to shovel messages.
 type: string
 default: "shoveled-xrd"
 components: ["origin", "cache"]
@@ -1830,7 +1832,7 @@ name: Shoveler.AMQPTokenLocation
 description: |+
   For amqp only.
 
-  A filepath to the location of the JWT used for authenticating amqp connection
+  A filepath to the location of the JWT used for authenticating amqp connection.
 type: filename
 default: $ConfigBase/shoveler-token
 root_default: /etc/pelican/shoveler-token
@@ -1840,7 +1842,7 @@ name: Shoveler.StompUsername
 description: |+
   For stomp only.
 
-  Username for authentication
+  Username for authentication.
 type: string
 default: none
 components: ["origin", "cache"]
@@ -1849,7 +1851,7 @@ name: Shoveler.StompPassword
 description: |+
   For stomp only.
 
-  Password for authentication
+  Password for authentication.
 type: string
 default: none
 components: ["origin", "cache"]
@@ -1858,7 +1860,7 @@ name: Shoveler.StompCert
 description: |+
   For stomp only.
 
-  A filepath to the location of the TLS certifcate
+  A filepath to the location of the TLS certifcate.
 type: filename
 default: none
 components: ["origin", "cache"]
@@ -1867,35 +1869,35 @@ name: Shoveler.StompCertKey
 description: |+
   For stomp only.
 
-  A filepath to the location of the private key associated with the certifacte
+  A filepath to the location of the private key associated with the certificate.
 type: filename
 default: none
 components: ["origin", "cache"]
 ---
 name: Shoveler.PortLower
 description: |+
-  The lower end of a range of Shoveler ports for Shoveler to set up UDP server
+  The lower end of a range of Shoveler ports for Shoveler to set up UDP server.
 type: int
 default: 9930
 components: ["origin"]
 ---
 name: Shoveler.PortHigher
 description: |+
-  The lower end of a range of Shoveler ports for Shoveler to set up UDP server
+  The lower end of a range of Shoveler ports for Shoveler to set up UDP server.
 type: int
 default: 9999
 components: ["origin"]
 ---
 name: Shoveler.OutputDestinations
 description: |+
-  A list of <IP:Port> destinations to forward XRootD monitoring packet to
+  A list of <IP:Port> destinations to forward XRootD monitoring packet to.
 type: stringSlice
 default: none
 components: ["origin", "cache"]
 ---
 name: Shoveler.VerifyHeader
 description: |+
-  Whether to verify the header of the packet matches XRootD's monitoring packet format
+  Whether to verify the header of the packet matches XRootD's monitoring packet format.
 type: bool
 default: false
 components: ["origin", "cache"]
@@ -1945,35 +1947,35 @@ components: ["origin", "cache"]
 ############################
 name: Plugin.Token
 description: |+
-  The specified token for pelican plugin staging
+  The specified token for pelican plugin staging.
 type: string
 default: none
 components: ["plugin"]
 ---
 name: StagePlugin.Hook
 description: |+
-  Flag to specify HTCondor hook behavior
+  Flag to specify HTCondor hook behavior.
 type: bool
 default: false
 components: ["plugin"]
 ---
 name: StagePlugin.MountPrefix
 description: |+
-  Prefix corresponding to the local mount point of the origin
+  Prefix corresponding to the local mount point of the origin.
 type: string
 default: none
 components: ["plugin"]
 ---
 name: StagePlugin.OriginPrefix
 description: |+
-  Prefix corresponding to the local origin
+  Prefix corresponding to the local origin.
 type: string
 default: none
 components: ["plugin"]
 ---
 name: StagePlugin.ShadowOriginPrefix
 description: |+
-  Prefix corresponding to the shadow origin
+  Prefix corresponding to the shadow origin.
 type: string
 default: none
 components: ["plugin"]
@@ -1984,7 +1986,7 @@ components: ["plugin"]
 name: Lotman.DbLocation
 description: |+
   The prefix indicating where LotMan should store its lot database. For the provided path, the database
-  will be stored at <path>/.lot/lotman_cpp.sqlite
+  will be stored at <path>/.lot/lotman_cpp.sqlite.
 type: filename
 root_default: /var/run/pelican
 default: $ConfigBase
@@ -2035,7 +2037,7 @@ description: |+
 
   Note that example configurations can be found in lotman/resources/lots-config.yaml
   For more information about LotMan configuration, see:
-  https://github.com/pelicanplatform/lotman
+  [https://github.com/pelicanplatform/lotman](https://github.com/pelicanplatform/lotman)
 type: object
 default: none
 components: ["cache"]
