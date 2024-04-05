@@ -37,6 +37,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	pelican_oauth2 "github.com/pelicanplatform/pelican/oauth2"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pkg/errors"
 	"golang.org/x/oauth2"
 )
@@ -95,14 +96,22 @@ func generateCSRFCookie(ctx *gin.Context, nextUrl string) (string, error) {
 func handleOAuthLogin(ctx *gin.Context) {
 	req := oauthLoginRequest{}
 	if ctx.ShouldBindQuery(&req) != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Failed to bind next url"})
+		ctx.JSON(http.StatusBadRequest,
+			server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Failed to bind next url",
+			})
 	}
 
 	// CSRF token is required, embed next URL to the state
 	csrfState, err := generateCSRFCookie(ctx, req.NextUrl)
 
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate CSRF token"})
+		ctx.JSON(http.StatusInternalServerError,
+			server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Failed to generate CSRF token",
+			})
 		return
 	}
 
@@ -118,29 +127,49 @@ func handleOAuthCallback(ctx *gin.Context) {
 	c := context.Background()
 	csrfFromSession := session.Get("oauthstate")
 	if csrfFromSession == nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid OAuth callback: CSRF token from cookie is missing"})
+		ctx.JSON(http.StatusBadRequest,
+			server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Invalid OAuth callback: CSRF token from cookie is missing",
+			})
 		return
 	}
 
 	req := oauthCallbackRequest{}
 	if ctx.ShouldBindQuery(&req) != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprint("Invalid OAuth callback: fail to bind CSRF token from state query: ", ctx.Request.URL)})
+		ctx.JSON(http.StatusBadRequest,
+			server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprint("Invalid OAuth callback: fail to bind CSRF token from state query: ", ctx.Request.URL),
+			})
 		return
 	}
 
 	// Format of state: <[16]byte>:<nextURL>
 	parts := strings.SplitN(req.State, ":", 2)
 	if len(parts) != 2 {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprint("Invalid OAuth callback: fail to split state param: ", ctx.Request.URL)})
+		ctx.JSON(http.StatusBadRequest,
+			server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprint("Invalid OAuth callback: fail to split state param: ", ctx.Request.URL),
+			})
 		return
 	}
 	nextURL, err := url.QueryUnescape(parts[1])
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprint("Invalid OAuth callback: fail to parse next_url: ", ctx.Request.URL)})
+		ctx.JSON(http.StatusBadRequest,
+			server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprint("Invalid OAuth callback: fail to parse next_url: ", ctx.Request.URL),
+			})
 	}
 
 	if parts[0] != csrfFromSession {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprint("Invalid OAuth callback: CSRF token doesn't match: ", ctx.Request.URL)})
+		ctx.JSON(http.StatusBadRequest,
+			server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprint("Invalid OAuth callback: CSRF token doesn't match: ", ctx.Request.URL),
+			})
 		return
 	}
 
@@ -149,7 +178,11 @@ func handleOAuthCallback(ctx *gin.Context) {
 	// for user access
 	token, err := ciLogonOAuthConfig.Load().Exchange(c, req.Code)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprint("Error in exchanging code for token: ", ctx.Request.URL)})
+		ctx.JSON(http.StatusInternalServerError,
+			server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprint("Error in exchanging code for token: ", ctx.Request.URL),
+			})
 		return
 	}
 
@@ -161,25 +194,41 @@ func handleOAuthCallback(ctx *gin.Context) {
 	// Use access_token to get user info from CILogon
 	resp, err := client.PostForm(cilogonUserInfoUrl, data)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprint("Error requesting user info from CILogon: ", err)})
+		ctx.JSON(http.StatusInternalServerError,
+			server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprint("Error requesting user info from CILogon: ", err),
+			})
 		return
 	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprint("Failed to get OAuth2 user info response: ", err)})
+		ctx.JSON(http.StatusInternalServerError,
+			server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprint("Failed to get OAuth2 user info response: ", err),
+			})
 		return
 	}
 
 	userInfo := cilogonUserInfo{}
 
 	if err := json.Unmarshal(body, &userInfo); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprint("Error parsing user info from CILogon: ", err)})
+		ctx.JSON(http.StatusInternalServerError,
+			server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprint("Error parsing user info from CILogon: ", err),
+			})
 		return
 	}
 
 	userIdentifier := userInfo.Sub
 	if userIdentifier == "" {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Error setting login cookie: can't find valid user id from CILogon"})
+		ctx.JSON(http.StatusInternalServerError,
+			server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Error setting login cookie: can't find valid user id from CILogon",
+			})
 		return
 	}
 

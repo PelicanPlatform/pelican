@@ -36,6 +36,7 @@ import (
 	"time"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/spf13/viper"
 
@@ -60,12 +61,18 @@ var (
 func getConfigValues(ctx *gin.Context) {
 	user := ctx.GetString("User")
 	if user == "" {
-		ctx.JSON(401, gin.H{"error": "Authentication required to visit this API"})
+		ctx.JSON(401, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Authentication required to visit this API",
+		})
 		return
 	}
 	rawConfig, err := param.UnmarshalConfig()
 	if err != nil {
-		ctx.JSON(500, gin.H{"error": "Failed to get the unmarshaled rawConfig"})
+		ctx.JSON(500, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to get the unmarshaled rawConfig",
+		})
 		return
 	}
 	configWithType := param.ConvertToConfigWithType(rawConfig)
@@ -79,17 +86,26 @@ func updateConfigValues(ctx *gin.Context) {
 
 	// Check if the request data is a valid config
 	if err := ctx.ShouldBindBodyWith(&updatedConfig, binding.JSON); err != nil {
-		ctx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Failed to bind the request. Invalid request data format: " + err.Error()})
+		ctx.AbortWithStatusJSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to bind the request. Invalid request data format: " + err.Error(),
+		})
 		return
 	}
 	if err := ctx.ShouldBindBodyWith(&updatedConfigMap, binding.JSON); err != nil {
-		ctx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Failed to bind the request into a map: " + err.Error()})
+		ctx.AbortWithStatusJSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to bind the request into a map: " + err.Error(),
+		})
 		return
 	}
 
 	webConfigPath := param.Server_WebConfigFile.GetString()
 	if webConfigPath == "" {
-		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Bad server configuration: Server.WebConfigFile value is empty"})
+		ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Bad server configuration: Server.WebConfigFile value is empty",
+		})
 		return
 	}
 
@@ -99,30 +115,46 @@ func updateConfigValues(ctx *gin.Context) {
 
 	if err := webCfgViper.ReadInConfig(); err != nil {
 		log.Error("Failed to read existing web-based config into internal config struct: ", err.Error())
-		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to read existing web-based config into internal config struct"})
+		ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to read existing web-based config into internal config struct",
+		})
 		return
 	}
 
 	if err := webCfgViper.MergeConfigMap(updatedConfigMap); err != nil {
 		log.Error("Failed to update web-based config with requested changes: ", err.Error())
-		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to update web-based config with requested changes"})
+		ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to update web-based config with requested changes",
+		})
 		return
 	}
 
 	if err := webCfgViper.WriteConfig(); err != nil {
 		log.Error("Failed to write back the updated config: ", err.Error())
-		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to write back the updated config"})
+		ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to write back the updated config",
+		})
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"message": "success"})
+	ctx.JSON(http.StatusOK,
+		server_structs.SimpleApiResp{
+			Status: server_structs.RespOK,
+			Msg:    "success",
+		})
 	config.RestartFlag <- true
 }
 
 func getEnabledServers(ctx *gin.Context) {
 	enabledServers := config.GetEnabledServerString(true)
 	if len(enabledServers) == 0 {
-		ctx.JSON(500, gin.H{"error": "No enabled servers found"})
+		ctx.JSON(500, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "No enabled servers found",
+		})
 		return
 	}
 

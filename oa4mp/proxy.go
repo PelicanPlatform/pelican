@@ -30,6 +30,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -70,7 +71,10 @@ func oa4mpProxy(ctx *gin.Context) {
 	resp, err := transport.RoundTrip(ctx.Request)
 	if err != nil {
 		log.Infoln("Failed to talk to OA4MP service:", err)
-		ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": "Unable to contact token issuer"})
+		ctx.JSON(http.StatusServiceUnavailable, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Unable to contact token issuer",
+		})
 		return
 	}
 	defer resp.Body.Close()

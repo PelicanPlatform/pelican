@@ -220,7 +220,10 @@ func redirectToCache(ginCtx *gin.Context) {
 	err := versionCompatCheck(ginCtx)
 	if err != nil {
 		log.Warningf("A version incompatibility was encountered while redirecting to a cache and no response was served: %v", err)
-		ginCtx.JSON(http.StatusInternalServerError, gin.H{"error": "Incompatible versions detected: " + fmt.Sprintf("%v", err)})
+		ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Incompatible versions detected: " + fmt.Sprintf("%v", err),
+		})
 		return
 	}
 
@@ -332,7 +335,10 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	err := versionCompatCheck(ginCtx)
 	if err != nil {
 		log.Warningf("A version incompatibility was encountered while redirecting to an origin and no response was served: %v", err)
-		ginCtx.JSON(http.StatusInternalServerError, gin.H{"error": "Incompatible versions detected: " + fmt.Sprintf("%v", err)})
+		ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Incompatible versions detected: " + fmt.Sprintf("%v", err),
+		})
 		return
 	}
 
@@ -517,14 +523,20 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_structs.ServerType) {
 	tokens, present := ctx.Request.Header["Authorization"]
 	if !present || len(tokens) == 0 {
-		ctx.JSON(http.StatusForbidden, gin.H{"error": "Bearer token not present in the 'Authorization' header"})
+		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Bearer token not present in the 'Authorization' header",
+		})
 		return
 	}
 
 	err := versionCompatCheck(ctx)
 	if err != nil {
 		log.Warningf("A version incompatibility was encountered while registering %s and no response was served: %v", sType, err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Incompatible versions detected: " + fmt.Sprintf("%v", err)})
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Incompatible versions detected: " + fmt.Sprintf("%v", err),
+		})
 		return
 	}
 
@@ -536,7 +548,10 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		adV2 = server_structs.OriginAdvertiseV2{}
 		err = ctx.ShouldBindBodyWith(&adV2, binding.JSON)
 		if err != nil {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid " + sType + " registration"})
+			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Invalid %s registration", sType),
+			})
 			return
 		}
 	} else {
@@ -556,14 +571,20 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 					return
 				} else {
 					log.Warningln("Failed to verify token:", err)
-					ctx.JSON(http.StatusForbidden, gin.H{"error": fmt.Sprintf("Authorization token verification failed %v", err)})
+					ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+						Status: server_structs.RespFailed,
+						Msg:    fmt.Sprintf("Authorization token verification failed %v", err),
+					})
 					return
 				}
 			}
 			if !ok {
 				log.Warningf("%s %v advertised to namespace %v without valid token scope\n",
 					sType, adV2.Name, namespace.Path)
-				ctx.JSON(http.StatusForbidden, gin.H{"error": "Authorization token verification failed. Token missing required scope"})
+				ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    "Authorization token verification failed. Token missing required scope",
+				})
 				return
 			}
 		}
@@ -578,13 +599,19 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 				return
 			} else {
 				log.Warningln("Failed to verify token:", err)
-				ctx.JSON(http.StatusForbidden, gin.H{"error": fmt.Sprintf("Authorization token verification failed %v", err)})
+				ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    fmt.Sprintf("Authorization token verification failed %v", err),
+				})
 				return
 			}
 		}
 		if !ok {
 			log.Warningf("%s %v advertised without valid token scope\n", sType, adV2.Name)
-			ctx.JSON(http.StatusForbidden, gin.H{"error": "Authorization token verification failed. Token missing required scope"})
+			ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Authorization token verification failed. Token missing required scope",
+			})
 			return
 		}
 	}
@@ -592,21 +619,30 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 	ad_url, err := url.Parse(adV2.DataURL)
 	if err != nil {
 		log.Warningf("Failed to parse %s URL %v: %v\n", sType, adV2.DataURL, err)
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid " + sType + " URL"})
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Invalid %s registration", sType),
+		})
 		return
 	}
 
 	adWebUrl, err := url.Parse(adV2.WebURL)
 	if err != nil && adV2.WebURL != "" { // We allow empty WebURL string for backward compatibility
 		log.Warningf("Failed to parse server Web URL %v: %v\n", adV2.WebURL, err)
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid server Web URL"})
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Invalid server Web URL",
+		})
 		return
 	}
 
 	brokerUrl, err := url.Parse(adV2.BrokerURL)
 	if err != nil {
 		log.Warningf("Failed to parse broker URL %s: %s", adV2.BrokerURL, err)
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid broker URL"})
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Invalid broker URL",
+		})
 	}
 
 	sAd := server_structs.ServerAd{
@@ -704,7 +740,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		}
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"msg": "Successful registration"})
+	ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{Status: server_structs.RespOK, Msg: "Successful registration"})
 }
 
 // Return a list of registered origins and caches in Prometheus HTTP SD format
@@ -719,7 +755,10 @@ func discoverOriginCache(ctx *gin.Context) {
 	status, ok, err := token.Verify(ctx, authOption)
 	if !ok {
 		log.Warningf("Cannot verify token for accessing director's service discovery: %v", err)
-		ctx.JSON(status, gin.H{"error": err.Error()})
+		ctx.JSON(status, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    err.Error(),
+		})
 		return
 	}
 
@@ -779,7 +818,10 @@ func listNamespacesV2(ctx *gin.Context) {
 func getPrefixByPath(ctx *gin.Context) {
 	pathParam := ctx.Param("path")
 	if pathParam == "" || pathParam == "/" {
-		ctx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Bad request. Path is empty or '/' "})
+		ctx.AbortWithStatusJSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Bad request. Path is empty or '/' ",
+		})
 		return
 	}
 	namespaceKeysMutex.Lock()
@@ -789,7 +831,10 @@ func getPrefixByPath(ctx *gin.Context) {
 
 	// If originNs.Path is an empty value, then the namespace is not found
 	if originNs.Path == "" {
-		ctx.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "Namespace prefix not found for " + pathParam})
+		ctx.AbortWithStatusJSON(http.StatusNotFound, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Namespace prefix not found for " + pathParam,
+		})
 		return
 	}
 
@@ -804,12 +849,16 @@ func getHealthTestFile(ctx *gin.Context) {
 	pathParam := ctx.Param("path")
 	cleanedPath := path.Clean(pathParam)
 	if cleanedPath == "" || !strings.HasPrefix(cleanedPath, cacheMonitroingBasePath+"/") {
-		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Path parameter is not a valid health test path: " + cleanedPath})
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Path parameter is not a valid health test path: " + cleanedPath})
 		return
 	}
 	fileName := strings.TrimPrefix(cleanedPath, cacheMonitroingBasePath+"/")
 	if fileName == "" {
-		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Path parameter is not a valid health test path: " + cleanedPath})
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Path parameter is not a valid health test path: " + cleanedPath})
 		return
 	}
 

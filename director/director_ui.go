@@ -19,6 +19,7 @@
 package director
 
 import (
+	"fmt"
 	"net/http"
 	"net/url"
 	"path"
@@ -82,13 +83,19 @@ func (req listServerRequest) ToInternalServerType() server_structs.ServerType {
 func listServers(ctx *gin.Context) {
 	queryParams := listServerRequest{}
 	if ctx.ShouldBindQuery(&queryParams) != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid query parameters"})
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Invalid query parameters",
+		})
 		return
 	}
 	var servers []server_structs.ServerAd
 	if queryParams.ServerType != "" {
 		if !strings.EqualFold(queryParams.ServerType, string(server_structs.OriginType)) && !strings.EqualFold(queryParams.ServerType, string(server_structs.CacheType)) {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid server type"})
+			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Invalid server type",
+			})
 			return
 		}
 		servers = listServerAds([]server_structs.ServerType{server_structs.ServerType(queryParams.ToInternalServerType())})
@@ -135,38 +142,59 @@ func queryOrigins(ctx *gin.Context) {
 	pathParam := ctx.Param("path")
 	path := path.Clean(pathParam)
 	if path == "" || strings.HasSuffix(path, "/") {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Path should not be empty or ended with slash '/'"})
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Path should not be empty or ended with slash '/'",
+		})
 		return
 	}
 	queryParams := statRequest{}
 	if ctx.ShouldBindQuery(&queryParams) != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid query parameters"})
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Invalid query parameters",
+		})
 		return
 	}
 	meta, msg, err := NewObjectStat().Query(path, ctx, queryParams.MinResponses, queryParams.MaxResponses)
 	if err != nil {
 		if err == NoPrefixMatchError {
-			ctx.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    err.Error(),
+			})
 			return
 		} else if err == ParameterError {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    err.Error(),
+			})
 			return
 		} else if err == InsufficientResError {
 			// Insufficient response does not cause a 500 error, but OK field in reponse is false
 			if len(meta) < 1 {
-				ctx.JSON(http.StatusNotFound, gin.H{"error": msg + " If no object is available, please check if the object is in a public namespace."})
+				ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    msg + " If no object is available, please check if the object is in a public namespace.",
+				})
 				return
 			}
 			res := statResponse{Message: msg, Metadata: meta, OK: false}
 			ctx.JSON(http.StatusOK, res)
 		} else {
 			log.Errorf("Error in NewObjectStat with path: %s, min responses: %d, max responses: %d. %v", path, queryParams.MinResponses, queryParams.MaxResponses, err)
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    err.Error(),
+			})
 			return
 		}
 	}
 	if len(meta) < 1 {
-		ctx.JSON(http.StatusNotFound, gin.H{"error": err.Error() + " If no object is available, please check if the object is in a public namespace."})
+		ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    err.Error() + " If no object is available, please check if the object is in a public namespace.",
+		})
 	}
 	res := statResponse{Message: msg, Metadata: meta, OK: true}
 	ctx.JSON(http.StatusOK, res)
@@ -178,12 +206,18 @@ func queryOrigins(ctx *gin.Context) {
 func handleFilterServer(ctx *gin.Context) {
 	sn := strings.TrimPrefix(ctx.Param("name"), "/")
 	if sn == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "name is a required path parameter"})
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "name is a required path parameter",
+		})
 		return
 	}
 	filtered, filterType := checkFilter(sn)
 	if filtered {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Can't filter a server that already has been fitlered with type " + filterType})
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprint("Can't filter a server that already has been fitlered with type ", filterType),
+		})
 		return
 	}
 	filteredServersMutex.Lock()
@@ -195,7 +229,7 @@ func handleFilterServer(ctx *gin.Context) {
 	} else {
 		filteredServers[sn] = tempFiltered
 	}
-	ctx.JSON(http.StatusOK, gin.H{"message": "success"})
+	ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{Status: server_structs.RespOK, Msg: "success"})
 }
 
 // A gin route handler that given a server hostname through path variable `name`,
@@ -204,12 +238,18 @@ func handleFilterServer(ctx *gin.Context) {
 func handleAllowServer(ctx *gin.Context) {
 	sn := strings.TrimPrefix(ctx.Param("name"), "/")
 	if sn == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "name is a required path parameter"})
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "name is a required path parameter",
+		})
 		return
 	}
 	filtered, ft := checkFilter(sn)
 	if !filtered {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Can't allow a server that is not being filtered. " + ft})
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprint("Can't allow a server that is not being filtered: ", ft),
+		})
 		return
 	}
 
@@ -223,7 +263,7 @@ func handleAllowServer(ctx *gin.Context) {
 		// For servers to filter from the config, temporarily allow the server
 		filteredServers[sn] = tempAllowed
 	}
-	ctx.JSON(http.StatusOK, gin.H{"message": "success"})
+	ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{Status: server_structs.RespOK, Msg: "success"})
 }
 
 // Endpoint for director support contact information

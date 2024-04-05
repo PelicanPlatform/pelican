@@ -39,6 +39,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
@@ -164,7 +165,11 @@ func setLoginCookie(ctx *gin.Context, user string) {
 	tok, err := loginCookieTokenCfg.CreateToken()
 	if err != nil {
 		log.Errorln("Failed to create login cookie token:", err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Unable to create login cookies"})
+		ctx.JSON(http.StatusInternalServerError,
+			server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Unable to create login cookies",
+			})
 		return
 	}
 
@@ -178,7 +183,11 @@ func AuthHandler(ctx *gin.Context) {
 	user, err := GetUser(ctx)
 	if err != nil || user == "" {
 		log.Errorln("Invalid user cookie or unable to parse user cookie:", err)
-		ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Authentication required to perform this operation"})
+		ctx.AbortWithStatusJSON(http.StatusUnauthorized,
+			server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Authentication required to perform this operation",
+			})
 	} else {
 		ctx.Set("User", user)
 		ctx.Next()
@@ -212,7 +221,11 @@ func AdminAuthHandler(ctx *gin.Context) {
 	user := ctx.GetString("User")
 	// This should be done by a regular auth handler from the upstream, but we check here just in case
 	if user == "" {
-		ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Login required to view this page"})
+		ctx.AbortWithStatusJSON(http.StatusUnauthorized,
+			server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Login required to view this page",
+			})
 		return
 	}
 	isAdmin, msg := CheckAdmin(user)
@@ -220,7 +233,11 @@ func AdminAuthHandler(ctx *gin.Context) {
 		ctx.Next()
 		return
 	} else {
-		ctx.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": msg})
+		ctx.AbortWithStatusJSON(http.StatusForbidden,
+			server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    msg,
+			})
 	}
 }
 
@@ -237,48 +254,84 @@ func loginHandler(ctx *gin.Context) {
 
 	login := Login{}
 	if ctx.ShouldBind(&login) != nil {
-		ctx.JSON(400, gin.H{"error": "Missing user/password in form data"})
+		ctx.JSON(400,
+			server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Missing user/password in form data",
+			})
 		return
 	}
 	if strings.TrimSpace(login.User) == "" {
-		ctx.JSON(400, gin.H{"error": "User is required"})
+		ctx.JSON(400,
+			server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "User is required",
+			})
 		return
 	}
 	if strings.TrimSpace(login.Password) == "" {
-		ctx.JSON(400, gin.H{"error": "Password is required"})
+		ctx.JSON(400,
+			server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Password is required",
+			})
 		return
 	}
 	if !db.Match(login.User, login.Password) {
-		ctx.JSON(401, gin.H{"error": "Password and user didn't match"})
+		ctx.JSON(401,
+			server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Password and user didn't match",
+			})
 		return
 	}
 
 	setLoginCookie(ctx, login.User)
-	ctx.JSON(200, gin.H{"msg": "Success"})
+	ctx.JSON(http.StatusOK,
+		server_structs.SimpleApiResp{
+			Status: server_structs.RespOK,
+			Msg:    "success",
+		})
 }
 
 // Handle initial code-based login for admin
 func initLoginHandler(ctx *gin.Context) {
 	db := authDB.Load()
 	if db != nil {
-		ctx.JSON(400, gin.H{"error": "Authentication is already initialized"})
+		ctx.JSON(400,
+			server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Authentication is already initialized",
+			})
 		return
 	}
 	curCode := currentCode.Load()
 	if curCode == nil {
-		ctx.JSON(400, gin.H{"error": "Code-based login is not available"})
+		ctx.JSON(400,
+			server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Code-based login is not available",
+			})
 		return
 	}
 	prevCode := previousCode.Load()
 
 	code := InitLogin{}
 	if ctx.ShouldBind(&code) != nil {
-		ctx.JSON(400, gin.H{"error": "Login code not provided"})
+		ctx.JSON(400,
+			server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Login code not provided",
+			})
 		return
 	}
 
 	if code.Code != *curCode && (prevCode == nil || code.Code != *prevCode) {
-		ctx.JSON(401, gin.H{"error": "Invalid login code"})
+		ctx.JSON(401,
+			server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Invalid login code",
+			})
 		return
 	}
 
@@ -289,7 +342,11 @@ func initLoginHandler(ctx *gin.Context) {
 func resetLoginHandler(ctx *gin.Context) {
 	passwordReset := PasswordReset{}
 	if ctx.ShouldBind(&passwordReset) != nil {
-		ctx.JSON(400, gin.H{"error": "Invalid password reset request"})
+		ctx.JSON(400,
+			server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Invalid password reset request",
+			})
 		return
 	}
 
@@ -297,10 +354,18 @@ func resetLoginHandler(ctx *gin.Context) {
 
 	if err := WritePasswordEntry(user, passwordReset.Password); err != nil {
 		log.Errorf("Password reset for user %s failed: %s", user, err)
-		ctx.JSON(500, gin.H{"error": "Failed to reset password"})
+		ctx.JSON(500,
+			server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Failed to reset password",
+			})
 	} else {
 		log.Infof("Password reset for user %s was successful", user)
-		ctx.JSON(200, gin.H{"msg": "Success"})
+		ctx.JSON(http.StatusOK,
+			server_structs.SimpleApiResp{
+				Status: server_structs.RespOK,
+				Msg:    "success",
+			})
 	}
 	if err := configureAuthDB(); err != nil {
 		log.Errorln("Error in reloading authDB:", err)
@@ -311,7 +376,11 @@ func logoutHandler(ctx *gin.Context) {
 	ctx.SetCookie("login", "", -1, "/", ctx.Request.URL.Host, true, true)
 	ctx.SetSameSite(http.SameSiteStrictMode)
 	ctx.Set("User", "")
-	ctx.JSON(http.StatusOK, gin.H{"message": "Success"})
+	ctx.JSON(http.StatusOK,
+		server_structs.SimpleApiResp{
+			Status: server_structs.RespOK,
+			Msg:    "success",
+		})
 }
 
 // Returns the authentication status of the current user, including user id and role
@@ -362,7 +431,11 @@ func configureAuthEndpoints(ctx context.Context, router *gin.Engine, egrp *errgr
 	})
 	mw := ratelimit.RateLimiter(store, &ratelimit.Options{
 		ErrorHandler: func(ctx *gin.Context, info ratelimit.Info) {
-			ctx.JSON(http.StatusTooManyRequests, gin.H{"error": "Too many requests. Try again in " + time.Until(info.ResetTime).String()})
+			ctx.JSON(http.StatusTooManyRequests,
+				server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    "Too many requests. Try again in " + time.Until(info.ResetTime).String(),
+				})
 		},
 		KeyFunc: func(ctx *gin.Context) string { return ctx.ClientIP() },
 	})
