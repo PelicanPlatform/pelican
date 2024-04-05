@@ -110,7 +110,7 @@ func TestFedServeCache(t *testing.T) {
 
 	require.NoError(t, err)
 
-	fedCancel, err := launchers.LaunchModules(ctx, modules)
+	_, fedCancel, err := launchers.LaunchModules(ctx, modules)
 	defer fedCancel()
 	if err != nil {
 		log.Errorln("Failure in fedServeInternal:", err)

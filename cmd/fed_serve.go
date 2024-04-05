@@ -40,7 +40,7 @@ func fedServeStart(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	cancel, err := launchers.LaunchModules(cmd.Context(), modules)
+	_, cancel, err := launchers.LaunchModules(cmd.Context(), modules)
 	if err != nil {
 		cancel()
 	}

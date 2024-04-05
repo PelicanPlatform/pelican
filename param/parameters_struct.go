@@ -30,6 +30,8 @@ type Config struct {
 		EnableLotman bool
 		EnableVoms bool
 		ExportLocation string
+		HighWaterMark string
+		LowWatermark string
 		PermittedNamespaces []string
 		Port int
 		RunLocation string
@@ -64,6 +66,8 @@ type Config struct {
 		OriginResponseHostnames []string
 		StatConcurrencyLimit int
 		StatTimeout time.Duration
+		SupportContactEmail string
+		SupportContactUrl string
 	}
 	DisableHttpProxy bool
 	DisableProxyFallback bool
@@ -283,6 +287,8 @@ type configWithType struct {
 		EnableLotman struct { Type string; Value bool }
 		EnableVoms struct { Type string; Value bool }
 		ExportLocation struct { Type string; Value string }
+		HighWaterMark struct { Type string; Value string }
+		LowWatermark struct { Type string; Value string }
 		PermittedNamespaces struct { Type string; Value []string }
 		Port struct { Type string; Value int }
 		RunLocation struct { Type string; Value string }
@@ -317,6 +323,8 @@ type configWithType struct {
 		OriginResponseHostnames struct { Type string; Value []string }
 		StatConcurrencyLimit struct { Type string; Value int }
 		StatTimeout struct { Type string; Value time.Duration }
+		SupportContactEmail struct { Type string; Value string }
+		SupportContactUrl struct { Type string; Value string }
 	}
 	DisableHttpProxy struct { Type string; Value bool }
 	DisableProxyFallback struct { Type string; Value bool }

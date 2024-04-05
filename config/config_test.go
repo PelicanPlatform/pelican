@@ -384,6 +384,117 @@ func TestDiscoverFederation(t *testing.T) {
 	})
 }
 
+func TestCheckWatermark(t *testing.T) {
+	t.Parallel()
+
+	t.Run("empty-value", func(t *testing.T) {
+		ok, num, err := checkWatermark("")
+		assert.False(t, ok)
+		assert.Equal(t, int64(0), num)
+		assert.Error(t, err)
+	})
+
+	t.Run("string-value", func(t *testing.T) {
+		ok, num, err := checkWatermark("random")
+		assert.False(t, ok)
+		assert.Equal(t, int64(0), num)
+		assert.Error(t, err)
+	})
+
+	t.Run("integer-greater-than-100", func(t *testing.T) {
+		ok, num, err := checkWatermark("101")
+		assert.False(t, ok)
+		assert.Equal(t, int64(0), num)
+		assert.Error(t, err)
+	})
+
+	t.Run("integer-less-than-0", func(t *testing.T) {
+		ok, num, err := checkWatermark("-1")
+		assert.False(t, ok)
+		assert.Equal(t, int64(0), num)
+		assert.Error(t, err)
+	})
+
+	t.Run("decimal-fraction-value", func(t *testing.T) {
+		ok, num, err := checkWatermark("0.55")
+		assert.False(t, ok)
+		assert.Equal(t, int64(0), num)
+		assert.Error(t, err)
+	})
+
+	t.Run("decimal-int-value", func(t *testing.T) {
+		ok, num, err := checkWatermark("15.55")
+		assert.False(t, ok)
+		assert.Equal(t, int64(0), num)
+		assert.Error(t, err)
+	})
+
+	t.Run("int-value", func(t *testing.T) {
+		ok, num, err := checkWatermark("55")
+		assert.True(t, ok)
+		assert.Equal(t, int64(55), num)
+		assert.NoError(t, err)
+	})
+
+	t.Run("byte-value-no-unit", func(t *testing.T) {
+		ok, num, err := checkWatermark("105")
+		assert.False(t, ok)
+		assert.Equal(t, int64(0), num)
+		assert.Error(t, err)
+	})
+
+	t.Run("byte-value-no-value", func(t *testing.T) {
+		ok, num, err := checkWatermark("k")
+		assert.False(t, ok)
+		assert.Equal(t, int64(0), num)
+		assert.Error(t, err)
+	})
+
+	t.Run("byte-value-wrong-unit", func(t *testing.T) {
+		ok, num, err := checkWatermark("100K") // Only lower case is accepted
+		assert.False(t, ok)
+		assert.Equal(t, int64(0), num)
+		assert.Error(t, err)
+
+		ok, num, err = checkWatermark("100p")
+		assert.False(t, ok)
+		assert.Equal(t, int64(0), num)
+		assert.Error(t, err)
+
+		ok, num, err = checkWatermark("100byte")
+		assert.False(t, ok)
+		assert.Equal(t, int64(0), num)
+		assert.Error(t, err)
+
+		ok, num, err = checkWatermark("100bits")
+		assert.False(t, ok)
+		assert.Equal(t, int64(0), num)
+		assert.Error(t, err)
+	})
+
+	t.Run("byte-value-correct-unit", func(t *testing.T) {
+		ok, num, err := checkWatermark("1000k")
+		assert.True(t, ok)
+		assert.Equal(t, int64(1000*1024), num)
+		assert.NoError(t, err)
+
+		ok, num, err = checkWatermark("1000m")
+		assert.True(t, ok)
+		assert.Equal(t, int64(1000*1024*1024), num)
+		assert.NoError(t, err)
+
+		ok, num, err = checkWatermark("1000g")
+		assert.True(t, ok)
+		assert.Equal(t, int64(1000*1024*1024*1024), num)
+		assert.NoError(t, err)
+
+		ok, num, err = checkWatermark("1000t")
+		assert.True(t, ok)
+		assert.Equal(t, int64(1000*1024*1024*1024*1024), num)
+		assert.NoError(t, err)
+	})
+}
+
 func TestInitServerUrl(t *testing.T) {
 	mockHostname := "example.com"
 	mockNon443Port := 8444

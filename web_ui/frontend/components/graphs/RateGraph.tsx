@@ -20,7 +20,7 @@
 
 import dynamic from "next/dynamic";
 
-import {useEffect, useState} from "react";
+import React, {useEffect, useState} from "react";
 import {
     ChartOptions,
     ChartDataset,
@@ -36,34 +36,13 @@ import {BoxProps, Button, FormControl, Grid, IconButton, InputLabel, MenuItem, P
 import {Box} from "@mui/material";
 
 import {query_rate, TimeDuration, DurationType} from "@/components/graphs/prometheus";
-import {AutoGraphOutlined, CalendarMonth, QuestionMark, ReplayOutlined} from "@mui/icons-material";
-import {DatePicker, LocalizationProvider} from "@mui/x-date-pickers";
-import {AdapterLuxon} from "@mui/x-date-pickers/AdapterLuxon";
-import TextField from "@mui/material/TextField";
+
+import {GraphDrawer, ResolutionInput, RateInput} from "./Drawer"
 
 const Graph = dynamic(
     () => import('@/components/graphs/Graph'),
     { ssr: false }
 )
-
-function DrawerBox({children, hidden=false}: {children: any, hidden: boolean}) {
-
-    return (
-        <Box
-            sx={{
-                display: "flex",
-                overflow: "hidden",
-                maxHeight: hidden ? 0 : "200px",
-                m: hidden ? 0 : 2,
-                pt: hidden ? 0 : 2,
-                flexDirection: "column",
-                transition: "all 0.2s ease",
-            }}>
-            {children}
-        </Box>
-    )
-}
-
 
 interface RateGraphDrawerProps {
     reset: Function;
@@ -78,144 +57,17 @@ interface RateGraphDrawerProps {
 }
 
 function RateGraphDrawer({reset, rate, resolution, duration, time, setRate, setResolution, setDuration, setTime}: RateGraphDrawerProps) {
-
-    const [reportPeriodHidden, setReportPeriodHidden] = useState<boolean>(true)
-    const [graphSettingsHidden, setGraphSettingsHidden] = useState<boolean>(true)
-
-    const [drawerOpen, setDrawerOpen] = useState<boolean>(false)
-
-    useEffect(() => {
-        setDrawerOpen(!reportPeriodHidden || !graphSettingsHidden)
-    }, [reportPeriodHidden, graphSettingsHidden])
-
     return (
-        <Paper elevation={drawerOpen ? 1 : 0} sx={{display: "flex", flexGrow: 1, flexDirection: "column", transition: "all 0.5s ease", backgroundColor: drawerOpen ? "#fff" : "#fff0" }}>
-            <Box display={"flex"} flexGrow={1} m={1} mb={0}>
-                <IconButton size={"small"} onClick={() => reset()}><ReplayOutlined /></IconButton>
-                <Button
-                    size={"small"}
-                    variant="outlined"
-                    startIcon={<CalendarMonth />}
-                    onClick={() => {
-                        setReportPeriodHidden(!reportPeriodHidden);
-                        setGraphSettingsHidden(true)
-                    }}
-                >
-                    Report Period
-                </Button>
-                <Button
-                    size={"small"}
-                    variant="outlined"
-                    startIcon={<AutoGraphOutlined />}
-                    onClick={() => {
-                        setGraphSettingsHidden(!graphSettingsHidden);
-                        setReportPeriodHidden(true)
-                    }}
-                    sx={{marginLeft: 1}}
-                >
-                    Graph Settings
-                </Button>
-            </Box>
-            <Box>
-                <DrawerBox hidden={reportPeriodHidden}>
-                    <Grid container spacing={2}>
-                        <Grid item xs={12} md={6}>
-                            <FormControl fullWidth>
-                                <InputLabel id="select-report-length-label">Report Length</InputLabel>
-                                <Select
-                                    labelId="select-report-length-label"
-                                    id="select-report-length"
-                                    label="Report Length"
-                                    value={duration.value}
-                                    onChange={(e) => setDuration(new TimeDuration(e.target.value as number, duration.type))}
-                                >
-                                    <MenuItem value={1}>Day</MenuItem>
-                                    <MenuItem value={7}>Week</MenuItem>
-                                    <MenuItem value={31}>Month</MenuItem>
-                                </Select>
-                            </FormControl>
-                        </Grid>
-                        <Grid item xs={12} md={6}>
-                            <LocalizationProvider dateAdapter={AdapterLuxon}>
-                                <DatePicker sx={{width: "100%"}} label={"Report End"} value={time} onChange={d => {console.log(d); setTime(d)}} />
-                            </LocalizationProvider>
-                        </Grid>
-                    </Grid>
-                </DrawerBox>
-                <DrawerBox hidden={graphSettingsHidden}>
-                    <Grid container spacing={2}>
-                        <Grid item xs={12}>
-                            <Grid container spacing={1}>
-                                <Grid item xs={6}>
-                                    <FormControl fullWidth>
-                                        <TextField
-                                            label={"Rate Time Range"}
-                                            type={"number"}
-                                            inputProps={{min:0}}
-                                            value={rate.value}
-                                            onChange={(e) => setRate(new TimeDuration(parseInt(e.target.value), rate.type))}
-                                        ></TextField>
-                                    </FormControl>
-                                </Grid>
-                                <Grid item xs={5}>
-                                    <FormControl fullWidth>
-                                        <InputLabel id="select-report-length-label">Unit</InputLabel>
-                                        <Select
-                                            labelId="select-report-length-label"
-                                            id="select-report-length"
-                                            label="Report Length"
-                                            value={rate.type}
-                                            onChange={(e) => setRate(new TimeDuration(rate.value, e.target.value as DurationType))}
-                                        >
-                                            <MenuItem value={"m"}>Minute</MenuItem>
-                                            <MenuItem value={"h"}>Hour</MenuItem>
-                                            <MenuItem value={"d"}>Day</MenuItem>
-                                        </Select>
-                                    </FormControl>
-                                </Grid>
-                                <Grid item xs={1} m={"auto"}>
-                                    <IconButton href={"https://prometheus.io/docs/prometheus/latest/querying/functions/#rate"} size={"small"} target="_blank" rel="noopener noreferrer"><QuestionMark/></IconButton>
-                                </Grid>
-                            </Grid>
-                        </Grid>
-                        <Grid item xs={12}>
-                            <Grid container spacing={1}>
-                                <Grid item xs={6}>
-                                    <FormControl fullWidth>
-                                        <TextField
-                                            label={"Resolution"}
-                                            type={"number"}
-                                            inputProps={{min:0}}
-                                            value={resolution.value}
-                                            onChange={(e) => setResolution(new TimeDuration(parseInt(e.target.value), resolution.type))}
-                                        ></TextField>
-                                    </FormControl>
-                                </Grid>
-                                <Grid item xs={5}>
-                                    <FormControl fullWidth>
-                                        <InputLabel id="select-report-length-label">Unit</InputLabel>
-                                        <Select
-                                            labelId="select-report-length-label"
-                                            id="select-report-length"
-                                            label="Report Length"
-                                            value={resolution.type}
-                                            onChange={(e) => setResolution(new TimeDuration(resolution.value, e.target.value as DurationType))}
-                                        >
-                                            <MenuItem value={"m"}>Minute</MenuItem>
-                                            <MenuItem value={"h"}>Hour</MenuItem>
-                                            <MenuItem value={"d"}>Day</MenuItem>
-                                        </Select>
-                                    </FormControl>
-                                </Grid>
-                                <Grid item xs={1} m={"auto"}>
-                                    <IconButton href={"https://prometheus.io/docs/prometheus/latest/querying/examples/#subquery"} size={"small"} target="_blank" rel="noopener noreferrer"><QuestionMark/></IconButton>
-                                </Grid>
-                            </Grid>
-                        </Grid>
-                    </Grid>
-                </DrawerBox>
-            </Box>
-        </Paper>
+        <GraphDrawer duration={duration} time={time} setDuration={setDuration} setTime={setTime} reset={reset}>
+            <Grid container spacing={2}>
+                <Grid item xs={12}>
+                    <RateInput rate={rate} setRate={setRate} />
+                </Grid>
+                <Grid item xs={12}>
+                    <ResolutionInput resolution={resolution} setResolution={setResolution} />
+                </Grid>
+            </Grid>
+        </GraphDrawer>
     )
 }
 

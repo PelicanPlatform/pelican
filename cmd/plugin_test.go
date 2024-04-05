@@ -142,7 +142,7 @@ func (f *FedTest) Spinup() {
 	viper.Set("Registry.RequireOriginApproval", false)
 	viper.Set("Registry.RequireCacheApproval", false)
 
-	f.FedCancel, err = launchers.LaunchModules(ctx, modules)
+	_, f.FedCancel, err = launchers.LaunchModules(ctx, modules)
 	if err != nil {
 		f.T.Fatalf("Failure in fedServeInternal: %v", err)
 	}

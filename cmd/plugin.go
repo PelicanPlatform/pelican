@@ -131,6 +131,7 @@ func stashPluginMain(args []string) {
 			fmt.Println("MultipleFileSupport = true")
 			fmt.Println("PluginVersion = \"" + config.GetVersion() + "\"")
 			fmt.Println("PluginType = \"FileTransfer\"")
+			fmt.Println("ProtocolVersion = 2")
 			fmt.Println("SupportedMethods = \"stash, osdf\"")
 			os.Exit(0)
 		} else if args[0] == "-version" || args[0] == "-v" {
@@ -431,7 +432,7 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 			var tj *client.TransferJob
 			urlCopy := *transfer.url
 			project := client.GetProjectName()
-			tj, err = tc.NewTransferJob(&urlCopy, transfer.localFile, upload, false, project, client.WithAcquireToken(false), client.WithCaches(caches...))
+			tj, err = tc.NewTransferJob(context.Background(), &urlCopy, transfer.localFile, upload, false, project, client.WithAcquireToken(false), client.WithCaches(caches...))
 			if err != nil {
 				return errors.Wrap(err, "Failed to create new transfer job")
 			}
