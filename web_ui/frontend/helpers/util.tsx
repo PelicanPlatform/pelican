@@ -31,4 +31,3 @@ export const getOauthEnabledServers = async () => {
         return servers
     }
 }
-
