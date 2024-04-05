@@ -31,11 +31,10 @@ import (
 	"github.com/pelicanplatform/pelican/server_structs"
 )
 
-
 func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, modules config.ServerType) (server_structs.XRootDServer, error) {
 	return nil, errors.New("Cache module is not supported on Windows")
 }
 
-func CacheServeFinish(ctx context.Context, egrp *errgroup.Group) error {
+func CacheServeFinish(ctx context.Context, egrp *errgroup.Group, cacheServer server_structs.XRootDServer) error {
 	return errors.New("Cache module is not supported on Windows")
 }

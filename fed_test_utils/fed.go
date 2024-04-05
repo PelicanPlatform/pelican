@@ -104,7 +104,7 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 		})
 
 		// Set the storage prefix to the temporary origin directory
-		(ft.Exports[i]).StoragePrefix = originDir
+		ft.Exports[i].StoragePrefix = originDir
 		// Our exports object becomes global -- we must reset in between each fed test
 		t.Cleanup(func() {
 			server_utils.ResetOriginExports()

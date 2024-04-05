@@ -398,7 +398,7 @@ func TestStatHttp(t *testing.T) {
 	t.Run("testStatHttpPelicanScheme", func(t *testing.T) {
 		testFileContent := "test file content"
 		// Drop the testFileContent into the origin directory
-		tempFile, err := os.Create(filepath.Join((fed.Exports[0]).StoragePrefix, "test.txt"))
+		tempFile, err := os.Create(filepath.Join(fed.Exports[0].StoragePrefix, "test.txt"))
 		assert.NoError(t, err, "Error creating temp file")
 		_, err = tempFile.WriteString(testFileContent)
 		assert.NoError(t, err, "Error writing to temp file")
@@ -410,7 +410,7 @@ func TestStatHttp(t *testing.T) {
 		tempPath := tempFile.Name()
 		fileName := filepath.Base(tempPath)
 		uploadURL := fmt.Sprintf("pelican://%s:%s%s/%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
-			(fed.Exports[0]).FederationPrefix, fileName)
+			fed.Exports[0].FederationPrefix, fileName)
 
 		log.Errorln(uploadURL)
 
@@ -427,7 +427,7 @@ func TestStatHttp(t *testing.T) {
 		assert.NoError(t, err)
 		testFileContent := "test file content"
 		// Drop the testFileContent into the origin directory
-		tempFile, err := os.Create(filepath.Join((fed.Exports[0]).StoragePrefix, "test.txt"))
+		tempFile, err := os.Create(filepath.Join(fed.Exports[0].StoragePrefix, "test.txt"))
 		assert.NoError(t, err, "Error creating temp file")
 		_, err = tempFile.WriteString(testFileContent)
 		assert.NoError(t, err, "Error writing to temp file")
