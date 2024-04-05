@@ -89,8 +89,11 @@ var (
 
 func getRedirectURL(reqPath string, ad server_structs.ServerAd, requiresAuth bool) (redirectURL url.URL) {
 	var serverURL url.URL
-	if requiresAuth {
+	if requiresAuth && ad.AuthURL.String() != "" {
 		serverURL = ad.AuthURL
+		if ad.AuthURL == (url.URL{}) {
+			serverURL = ad.URL
+		}
 	} else {
 		serverURL = ad.URL
 	}
@@ -310,10 +313,10 @@ func redirectToCache(ginCtx *gin.Context) {
 	}
 
 	var colUrl string
-	if namespaceAd.PublicRead {
-		colUrl = originAds[0].URL.String()
-	} else {
+	if !namespaceAd.PublicRead && originAds[0].AuthURL != (url.URL{}) {
 		colUrl = originAds[0].AuthURL.String()
+	} else {
+		colUrl = originAds[0].URL.String()
 	}
 	ginCtx.Writer.Header()["X-Pelican-Namespace"] = []string{fmt.Sprintf("namespace=%s, require-token=%v, collections-url=%s",
 		namespaceAd.Path, !namespaceAd.PublicRead, colUrl)}
@@ -393,10 +396,10 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	ginCtx.Writer.Header()["Link"] = []string{linkHeader}
 
 	var colUrl string
-	if namespaceAd.PublicRead {
-		colUrl = originAds[0].URL.String()
-	} else {
+	if !namespaceAd.PublicRead && originAds[0].AuthURL != (url.URL{}) {
 		colUrl = originAds[0].AuthURL.String()
+	} else {
+		colUrl = originAds[0].URL.String()
 	}
 	ginCtx.Writer.Header()["X-Pelican-Namespace"] = []string{fmt.Sprintf("namespace=%s, require-token=%v, collections-url=%s",
 		namespaceAd.Path, !namespaceAd.PublicRead, colUrl)}
@@ -608,7 +611,6 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 
 	sAd := server_structs.ServerAd{
 		Name:        adV2.Name,
-		AuthURL:     *ad_url,
 		URL:         *ad_url,
 		WebURL:      *adWebUrl,
 		BrokerURL:   *brokerUrl,
@@ -731,12 +733,18 @@ func discoverOriginCache(ctx *gin.Context) {
 			// don't have a WebURL
 			continue
 		}
+		var auth_url string
+		if ad.AuthURL == (url.URL{}) {
+			auth_url = ad.URL.String()
+		} else {
+			auth_url = ad.AuthURL.String()
+		}
 		promDiscoveryRes = append(promDiscoveryRes, PromDiscoveryItem{
 			Targets: []string{ad.WebURL.Hostname() + ":" + ad.WebURL.Port()},
 			Labels: map[string]string{
 				"server_type":     string(ad.Type),
 				"server_name":     ad.Name,
-				"server_auth_url": ad.AuthURL.String(),
+				"server_auth_url": auth_url,
 				"server_url":      ad.URL.String(),
 				"server_web_url":  ad.WebURL.String(),
 				"server_lat":      fmt.Sprintf("%.4f", ad.Latitude),

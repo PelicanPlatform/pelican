@@ -48,7 +48,7 @@ func TestListServers(t *testing.T) {
 	mocklistOriginRes := listServerResponse{
 		Name:        mockOriginServerAd.Name,
 		BrokerURL:   mockOriginServerAd.BrokerURL.String(),
-		AuthURL:     mockOriginServerAd.AuthURL.String(),
+		AuthURL:     mockOriginServerAd.URL.String(),
 		URL:         mockOriginServerAd.URL.String(),
 		WebURL:      mockOriginServerAd.WebURL.String(),
 		Type:        mockOriginServerAd.Type,
@@ -61,7 +61,7 @@ func TestListServers(t *testing.T) {
 	mocklistCacheRes := listServerResponse{
 		Name:        mockCacheServerAd.Name,
 		BrokerURL:   mockCacheServerAd.BrokerURL.String(),
-		AuthURL:     mockCacheServerAd.AuthURL.String(),
+		AuthURL:     mockCacheServerAd.URL.String(),
 		URL:         mockCacheServerAd.URL.String(),
 		WebURL:      mockCacheServerAd.WebURL.String(),
 		Type:        mockCacheServerAd.Type,

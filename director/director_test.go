@@ -628,8 +628,7 @@ func TestGetAuthzEscaped(t *testing.T) {
 
 func TestDiscoverOriginCache(t *testing.T) {
 	mockPelicanOriginServerAd := server_structs.ServerAd{
-		Name:    "1-test-origin-server",
-		AuthURL: url.URL{},
+		Name: "1-test-origin-server",
 		URL: url.URL{
 			Scheme: "https",
 			Host:   "fake-origin.org:8443",
@@ -644,8 +643,7 @@ func TestDiscoverOriginCache(t *testing.T) {
 	}
 
 	mockTopoOriginServerAd := server_structs.ServerAd{
-		Name:    "test-topology-origin-server",
-		AuthURL: url.URL{},
+		Name: "test-topology-origin-server",
 		URL: url.URL{
 			Scheme: "https",
 			Host:   "fake-topology-origin.org:8443",
@@ -656,8 +654,7 @@ func TestDiscoverOriginCache(t *testing.T) {
 	}
 
 	mockCacheServerAd := server_structs.ServerAd{
-		Name:    "2-test-cache-server",
-		AuthURL: url.URL{},
+		Name: "2-test-cache-server",
 		URL: url.URL{
 			Scheme: "https",
 			Host:   "fake-cache.org:8443",
@@ -825,7 +822,7 @@ func TestDiscoverOriginCache(t *testing.T) {
 			Labels: map[string]string{
 				"server_type":     string(mockCacheServerAd.Type),
 				"server_name":     mockCacheServerAd.Name,
-				"server_auth_url": mockCacheServerAd.AuthURL.String(),
+				"server_auth_url": mockCacheServerAd.URL.String(),
 				"server_url":      mockCacheServerAd.URL.String(),
 				"server_web_url":  mockCacheServerAd.WebURL.String(),
 				"server_lat":      fmt.Sprintf("%.4f", mockCacheServerAd.Latitude),
@@ -836,7 +833,7 @@ func TestDiscoverOriginCache(t *testing.T) {
 			Labels: map[string]string{
 				"server_type":     string(mockPelicanOriginServerAd.Type),
 				"server_name":     mockPelicanOriginServerAd.Name,
-				"server_auth_url": mockPelicanOriginServerAd.AuthURL.String(),
+				"server_auth_url": mockPelicanOriginServerAd.URL.String(),
 				"server_url":      mockPelicanOriginServerAd.URL.String(),
 				"server_web_url":  mockPelicanOriginServerAd.WebURL.String(),
 				"server_lat":      fmt.Sprintf("%.4f", mockPelicanOriginServerAd.Latitude),
@@ -881,7 +878,7 @@ func TestDiscoverOriginCache(t *testing.T) {
 			Labels: map[string]string{
 				"server_type":     string(mockPelicanOriginServerAd.Type),
 				"server_name":     mockPelicanOriginServerAd.Name,
-				"server_auth_url": mockPelicanOriginServerAd.AuthURL.String(),
+				"server_auth_url": mockPelicanOriginServerAd.URL.String(),
 				"server_url":      mockPelicanOriginServerAd.URL.String(),
 				"server_web_url":  mockPelicanOriginServerAd.WebURL.String(),
 				"server_lat":      fmt.Sprintf("%.4f", mockPelicanOriginServerAd.Latitude),
