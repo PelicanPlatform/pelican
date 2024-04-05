@@ -208,7 +208,7 @@ func TestMultiExportOrigin(t *testing.T) {
 	defer mockupCancel()
 
 	// In this case a 403 means its running
-	err = server_utils.WaitUntilWorking(ctx, "GET", param.Origin_Url.GetString(), "xrootd", 403, false)
+	err = server_utils.WaitUntilWorking(ctx, "GET", param.Origin_Url.GetString(), "xrootd", 403, true)
 	if err != nil {
 		t.Fatalf("Unsuccessful test: Server encountered an error: %v", err)
 	}
