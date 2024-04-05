@@ -1550,7 +1550,7 @@ components: ["origin", "cache"]
 ---
 name: Xrootd.ConfigFile
 description: >-
-  The path to an XRootD configuration file for customized XRootD configuration. This should only be used by admins with
+  The _absolute_ path to an XRootD configuration file for customized XRootD configuration. This should only be used by admins with
   experience in configuring XRootD directly.
 
   `Xrootd.ConfigFile` will be used as the continuation of the Pelican generated XRootD configuration, via the `continue` directive.
