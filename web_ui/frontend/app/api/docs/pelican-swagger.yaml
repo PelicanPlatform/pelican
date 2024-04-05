@@ -737,6 +737,23 @@ paths:
           schema:
             type: object
             $ref: "#/definitions/ErrorModel"
+  /auth/oauth:
+    get:
+      tags:
+        - "auth"
+      summary: List servers with OAuth2/OIDC login enabled
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+            properties:
+              oidc_enabled_servers:
+                type: array
+                items:
+                  type: string
+                  default: "registry"
+                minItems: 1
   /auth/oauth/login:
     get:
       tags:

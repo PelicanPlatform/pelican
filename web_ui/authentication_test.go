@@ -25,6 +25,7 @@ import (
 	"crypto/elliptic"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
@@ -477,7 +478,7 @@ func TestAdminAuthHandler(t *testing.T) {
 		{
 			name: "user-not-logged-in",
 			setupUserFunc: func(ctx *gin.Context) {
-				viper.Set("OIDC.AdminUsers", []string{"admin1", "admin2"})
+				viper.Set("Server.UIAdminUsers", []string{"admin1", "admin2"})
 				ctx.Set("User", "")
 			},
 			expectedCode:  http.StatusUnauthorized,
@@ -486,7 +487,7 @@ func TestAdminAuthHandler(t *testing.T) {
 		{
 			name: "general-admin-access",
 			setupUserFunc: func(ctx *gin.Context) {
-				viper.Set("OIDC.AdminUsers", []string{})
+				viper.Set("Server.UIAdminUsers", []string{})
 				ctx.Set("User", "admin")
 			},
 			expectedCode: http.StatusOK,
@@ -494,7 +495,7 @@ func TestAdminAuthHandler(t *testing.T) {
 		{
 			name: "specific-admin-user-access",
 			setupUserFunc: func(ctx *gin.Context) {
-				viper.Set("OIDC.AdminUsers", []string{"admin1", "admin2"})
+				viper.Set("Server.UIAdminUsers", []string{"admin1", "admin2"})
 				ctx.Set("User", "admin1")
 			},
 			expectedCode: http.StatusOK,
@@ -502,7 +503,7 @@ func TestAdminAuthHandler(t *testing.T) {
 		{
 			name: "non-admin-user-access",
 			setupUserFunc: func(ctx *gin.Context) {
-				viper.Set("OIDC.AdminUsers", []string{"admin1", "admin2"})
+				viper.Set("Server.UIAdminUsers", []string{"admin1", "admin2"})
 				ctx.Set("User", "user")
 			},
 			expectedCode:  http.StatusForbidden,
@@ -511,7 +512,7 @@ func TestAdminAuthHandler(t *testing.T) {
 		{
 			name: "admin-list-empty",
 			setupUserFunc: func(ctx *gin.Context) {
-				viper.Set("OIDC.AdminUsers", []string{})
+				viper.Set("Server.UIAdminUsers", []string{})
 				ctx.Set("User", "user")
 			},
 			expectedCode:  http.StatusForbidden,
@@ -520,7 +521,7 @@ func TestAdminAuthHandler(t *testing.T) {
 		{
 			name: "admin-list-multiple-users",
 			setupUserFunc: func(ctx *gin.Context) {
-				viper.Set("OIDC.AdminUsers", []string{"admin1", "admin2", "admin3"})
+				viper.Set("Server.UIAdminUsers", []string{"admin1", "admin2", "admin3"})
 				ctx.Set("User", "admin2")
 			},
 			expectedCode: http.StatusOK,
@@ -624,5 +625,100 @@ func TestLogoutAPI(t *testing.T) {
 
 		//Check for http reponse code 200
 		assert.Equal(t, 401, recorder.Code)
+	})
+}
+
+func TestListOIDCEnabledServersHandler(t *testing.T) {
+	router := gin.New()
+	router.GET("/oauth", listOIDCEnabledServersHandler)
+	t.Cleanup(func() {
+		viper.Reset()
+	})
+	t.Run("registry-included-by-default", func(t *testing.T) {
+		viper.Reset()
+		expected := OIDCEnabledServerRes{ODICEnabledServers: []string{"registry"}}
+		req, err := http.NewRequest("GET", "/oauth", nil)
+		assert.NoError(t, err)
+
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusOK, recorder.Result().StatusCode)
+
+		body, err := io.ReadAll(recorder.Result().Body)
+		require.NoError(t, err)
+
+		getResult := OIDCEnabledServerRes{}
+		err = json.Unmarshal(body, &getResult)
+		require.NoError(t, err)
+
+		assert.Equal(t, expected, getResult)
+	})
+
+	t.Run("origin-included-if-flag-is-on", func(t *testing.T) {
+		viper.Reset()
+		viper.Set("Origin.EnableOIDC", true)
+		expected := OIDCEnabledServerRes{ODICEnabledServers: []string{"registry", "origin"}}
+		req, err := http.NewRequest("GET", "/oauth", nil)
+		assert.NoError(t, err)
+
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusOK, recorder.Result().StatusCode)
+
+		body, err := io.ReadAll(recorder.Result().Body)
+		require.NoError(t, err)
+
+		getResult := OIDCEnabledServerRes{}
+		err = json.Unmarshal(body, &getResult)
+		require.NoError(t, err)
+
+		assert.Equal(t, expected, getResult)
+	})
+
+	t.Run("cache-included-if-flag-is-on", func(t *testing.T) {
+		viper.Reset()
+		viper.Set("Cache.EnableOIDC", true)
+		expected := OIDCEnabledServerRes{ODICEnabledServers: []string{"registry", "cache"}}
+		req, err := http.NewRequest("GET", "/oauth", nil)
+		assert.NoError(t, err)
+
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusOK, recorder.Result().StatusCode)
+
+		body, err := io.ReadAll(recorder.Result().Body)
+		require.NoError(t, err)
+
+		getResult := OIDCEnabledServerRes{}
+		err = json.Unmarshal(body, &getResult)
+		require.NoError(t, err)
+
+		assert.Equal(t, expected, getResult)
+	})
+
+	t.Run("origin-cache-both-included-if-flags-are-on", func(t *testing.T) {
+		viper.Reset()
+		viper.Set("Origin.EnableOIDC", true)
+		viper.Set("Cache.EnableOIDC", true)
+		expected := OIDCEnabledServerRes{ODICEnabledServers: []string{"registry", "origin", "cache"}}
+		req, err := http.NewRequest("GET", "/oauth", nil)
+		assert.NoError(t, err)
+
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusOK, recorder.Result().StatusCode)
+
+		body, err := io.ReadAll(recorder.Result().Body)
+		require.NoError(t, err)
+
+		getResult := OIDCEnabledServerRes{}
+		err = json.Unmarshal(body, &getResult)
+		require.NoError(t, err)
+
+		assert.Equal(t, expected, getResult)
 	})
 }

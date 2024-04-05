@@ -63,6 +63,10 @@ type (
 		Role          UserRole `json:"role"`
 		User          string   `json:"user"`
 	}
+
+	OIDCEnabledServerRes struct {
+		ODICEnabledServers []string `json:"oidc_enabled_servers"`
+	}
 )
 
 var (
@@ -335,6 +339,18 @@ func whoamiHandler(ctx *gin.Context) {
 	}
 }
 
+func listOIDCEnabledServersHandler(ctx *gin.Context) {
+	// Registry has OIDC enabled by default
+	res := OIDCEnabledServerRes{ODICEnabledServers: []string{strings.ToLower(config.RegistryType.String())}}
+	if param.Origin_EnableOIDC.GetBool() {
+		res.ODICEnabledServers = append(res.ODICEnabledServers, strings.ToLower(config.OriginType.String()))
+	}
+	if param.Cache_EnableOIDC.GetBool() {
+		res.ODICEnabledServers = append(res.ODICEnabledServers, strings.ToLower(config.CacheType.String()))
+	}
+	ctx.JSON(http.StatusOK, res)
+}
+
 // Configure the authentication endpoints for the server web UI
 func configureAuthEndpoints(ctx context.Context, router *gin.Engine, egrp *errgroup.Group) error {
 	if router == nil {
@@ -382,6 +398,7 @@ func configureAuthEndpoints(ctx context.Context, router *gin.Engine, egrp *errgr
 			ctx.JSON(200, gin.H{"initialized": true})
 		}
 	})
+	group.GET("/oauth", listOIDCEnabledServersHandler)
 
 	egrp.Go(func() error { return periodicAuthDBReload(ctx) })
 
