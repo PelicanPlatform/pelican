@@ -37,15 +37,12 @@ func parseServerAd(server utils.Server, serverType server_structs.ServerType) se
 	serverAd.Name = server.Resource
 
 	serverAd.Writes = param.Origin_EnableWrites.GetBool()
-	// url.Parse requires that the scheme be present before the hostname,
-	// but endpoints do not have a scheme. As such, we need to add one for the.
-	// correct parsing. Luckily, we don't use this anywhere else (it's just to
-	// make the url.Parse function behave as expected)
 	serverUrl, err := url.Parse(server.Endpoint)
 	if err != nil {
 		log.Warningf("Namespace JSON returned server %s with invalid unauthenticated URL %s",
 			server.Resource, server.Endpoint)
 	}
+	// Setting the scheme to http (and not https) in order to work with topology public caches and origins
 	serverUrl.Scheme = "http"
 	serverAd.URL = *serverUrl
 
