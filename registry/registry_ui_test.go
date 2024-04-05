@@ -661,7 +661,7 @@ func TestUpdateNamespaceStatus(t *testing.T) {
 			if tc.expectedCode == 200 {
 				bytes, err := io.ReadAll(wApprove.Body)
 				require.NoError(t, err)
-				assert.JSONEq(t, `{"msg":"ok"}`, string(bytes))
+				assert.JSONEq(t, `{"msg":"success", "status":"success"}`, string(bytes))
 
 				if tc.validID {
 					intId, err := strconv.Atoi(finalId)
@@ -718,7 +718,7 @@ func TestCreateNamespace(t *testing.T) {
 		body, err := io.ReadAll(w.Result().Body)
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
-		assert.JSONEq(t, `{"error":"Invalid create or update namespace request"}`, string(body))
+		assert.JSONEq(t, `{"msg":"Invalid create or update namespace request", "status":"error"}`, string(body))
 	})
 
 	t.Run("missing-required-fields-returns-400", func(t *testing.T) {
@@ -869,7 +869,7 @@ func TestCreateNamespace(t *testing.T) {
 		body, err := io.ReadAll(w.Result().Body)
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
-		assert.JSONEq(t, `{"msg": "success"}`, string(body))
+		assert.JSONEq(t, `{"msg":"success", "status":"success"}`, string(body))
 
 		nss, err := getAllNamespaces()
 		require.NoError(t, err)
@@ -913,7 +913,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 		body, err := io.ReadAll(w.Result().Body)
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
-		assert.JSONEq(t, `{"error": "Invalid ID format. ID must a positive integer"}`, string(body))
+		assert.JSONEq(t, `{"msg":"Invalid ID format. ID must a positive integer", "status":"error"}`, string(body))
 	})
 
 	t.Run("ng-id-returns-400", func(t *testing.T) {
@@ -924,7 +924,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 		body, err := io.ReadAll(w.Result().Body)
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
-		assert.JSONEq(t, `{"error": "Invalid ID format. ID must a positive integer"}`, string(body))
+		assert.JSONEq(t, `{"msg":"Invalid ID format. ID must a positive integer", "status":"error"}`, string(body))
 	})
 
 	t.Run("zero-id-returns-400", func(t *testing.T) {
@@ -935,7 +935,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 		body, err := io.ReadAll(w.Result().Body)
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
-		assert.JSONEq(t, `{"error": "Invalid ID format. ID must a positive integer"}`, string(body))
+		assert.JSONEq(t, `{"msg":"Invalid ID format. ID must a positive integer", "status":"error"}`, string(body))
 	})
 
 	t.Run("valid-request-but-ns-dne-returns-404", func(t *testing.T) {
@@ -958,7 +958,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 		body, err := io.ReadAll(w.Result().Body)
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusNotFound, w.Result().StatusCode)
-		assert.JSONEq(t, `{"error": "Can't update namespace: namespace not found"}`, string(body))
+		assert.JSONEq(t, `{"msg":"Can't update namespace: namespace not found", "status":"error"}`, string(body))
 	})
 
 	t.Run("valid-request-not-owner-gives-404", func(t *testing.T) {
@@ -988,7 +988,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 		body, err := io.ReadAll(w.Result().Body)
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusNotFound, w.Result().StatusCode)
-		assert.JSONEq(t, `{"error": "Namespace not found. Check the id or if you own the namespace"}`, string(body))
+		assert.JSONEq(t, `{"msg":"Namespace not found. Check the id or if you own the namespace", "status":"error"}`, string(body))
 	})
 
 	t.Run("reg-user-cant-change-after-approv", func(t *testing.T) {
@@ -1026,7 +1026,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 		body, err := io.ReadAll(w.Result().Body)
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusForbidden, w.Result().StatusCode)
-		assert.JSONEq(t, `{"error": "You don't have permission to modify an approved registration. Please contact your federation administrator"}`, string(body))
+		assert.JSONEq(t, `{"msg":"You don't have permission to modify an approved registration. Please contact your federation administrator", "status":"error"}`, string(body))
 	})
 
 	t.Run("reg-user-success-change", func(t *testing.T) {
@@ -1146,7 +1146,7 @@ func TestListInsitutions(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.Equal(t, http.StatusInternalServerError, w.Result().StatusCode)
-		assert.JSONEq(t, `{"error": "Server didn't configure Registry.Institutions"}`, string(bytes))
+		assert.JSONEq(t, `{"msg":"Server didn't configure Registry.Institutions", "status":"error"}`, string(bytes))
 	})
 
 	t.Run("cache-hit-returns", func(t *testing.T) {

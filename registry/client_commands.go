@@ -46,7 +46,7 @@ type clientResponseData struct {
 	ServerNonce     string `json:"server_nonce"`
 	ServerPayload   string `json:"server_payload"`
 	ServerSignature string `json:"server_signature"`
-	Message         string `json:"message"`
+	Message         string `json:"msg"`
 	Error           string `json:"error"`
 }
 
@@ -142,15 +142,15 @@ func NamespaceRegister(privateKey jwk.Key, namespaceRegistryEndpoint string, acc
 	var respData clientResponseData
 	// Handle case where there was an error encoded in the body
 	if err != nil {
-		if unmarshalErr := json.Unmarshal(resp, &respData); unmarshalErr == nil { // Error creating json
-			return errors.Wrapf(err, "Failed to make request (server message is '%v')", respData.Error)
+		if unmarshalErr := json.Unmarshal(resp, &respData); unmarshalErr == nil {
+			return errors.Wrapf(err, "Server responses with an error: %s. %s", respData.Message, respData.Error)
 		}
-		return errors.Wrap(err, "Failed to make request")
+		return errors.Wrapf(err, "Server responses with an error and fail to parse JSON response from the server. Raw server response is %s", resp)
 	}
 
 	// No error
 	if err = json.Unmarshal(resp, &respData); err != nil {
-		return errors.Wrap(err, "Failure when parsing JSON response from client")
+		return errors.Wrapf(err, "Failure when parsing JSON response from the server with a success request. Raw server response is %s", resp)
 	}
 
 	// Create client payload by concatenating client_nonce and server_nonce
@@ -186,14 +186,14 @@ func NamespaceRegister(privateKey jwk.Key, namespaceRegistryEndpoint string, acc
 	// Handle case where there was an error encoded in the body
 	if unmarshalErr := json.Unmarshal(resp, &respData); unmarshalErr == nil {
 		if err != nil {
-			return errors.Wrapf(err, "Failed to make request: %v", respData.Error)
+			return errors.Wrapf(err, "Server responses with an error: %s. %s", respData.Message, respData.Error)
 		}
-		fmt.Println(respData.Message)
-	} else {
+		log.Errorf("Server responses with an error: %v. %s. %s", respData.Message, respData.Error, err)
+	} else { // Error decoding JSON
 		if err != nil {
-			return errors.Wrapf(err, "Failed to make request: %s", resp)
+			return errors.Wrapf(err, "Server responses with an error and fail to parse JSON response from the server. Raw response is %s", resp)
 		}
-		return errors.Wrapf(unmarshalErr, "Failed to unmarshall request response: %v", respData.Error)
+		return errors.Wrapf(unmarshalErr, "Failure when parsing JSON response from the server with a success request. Raw server response is %s", resp)
 	}
 
 	return nil

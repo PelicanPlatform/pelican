@@ -248,7 +248,7 @@ func handleAllowServer(ctx *gin.Context) {
 	if !filtered {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprint("Can't allow a server that is not being filtered: ", ft),
+			Msg:    fmt.Sprint("Can't allow a server that is not being filtered: ", sn),
 		})
 		return
 	}
