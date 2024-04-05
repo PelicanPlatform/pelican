@@ -804,6 +804,9 @@ paths:
       tags:
         - "auth"
       summary: List servers with OAuth2/OIDC login enabled
+      description: >-
+        By default, the "registry" item is included in the response array, as we turned on OIDC/OAuth
+        for registry by default. The other two possible items in the array are `origin` and `cache`
       responses:
         "200":
           description: OK
