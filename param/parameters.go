@@ -217,6 +217,7 @@ var (
 	StagePlugin_OriginPrefix = StringParam{"StagePlugin.OriginPrefix"}
 	StagePlugin_ShadowOriginPrefix = StringParam{"StagePlugin.ShadowOriginPrefix"}
 	Xrootd_Authfile = StringParam{"Xrootd.Authfile"}
+	Xrootd_ConfigFile = StringParam{"Xrootd.ConfigFile"}
 	Xrootd_DetailedMonitoringHost = StringParam{"Xrootd.DetailedMonitoringHost"}
 	Xrootd_LocalMonitoringHost = StringParam{"Xrootd.LocalMonitoringHost"}
 	Xrootd_MacaroonsKeyFile = StringParam{"Xrootd.MacaroonsKeyFile"}

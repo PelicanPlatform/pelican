@@ -118,6 +118,7 @@ type (
 		Port                   int
 		ManagerHost            string
 		ManagerPort            string
+		ConfigFile             string
 		MacaroonsKeyFile       string
 		RobotsTxtFile          string
 		Sitename               string
