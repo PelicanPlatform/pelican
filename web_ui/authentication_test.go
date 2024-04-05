@@ -37,6 +37,8 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/test_utils"
+	"github.com/pelicanplatform/pelican/token"
+	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -102,7 +104,7 @@ func TestCodeBasedLogin(t *testing.T) {
 	config.InitConfig()
 	err := config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
-	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256())
+	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256(), false)
 	require.NoError(t, err)
 
 	//Invoke the code login API with the correct code, ensure we get a valid code back
@@ -159,7 +161,7 @@ func TestPasswordResetAPI(t *testing.T) {
 	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
 	err := config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
-	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256())
+	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256(), false)
 	require.NoError(t, err)
 	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
 
@@ -174,10 +176,10 @@ func TestPasswordResetAPI(t *testing.T) {
 	assert.NoError(t, err)
 
 	//Create a user for testing
-	err = WritePasswordEntry("user", "password")
+	user := "admin" // With admin privilege
+	err = WritePasswordEntry(user, "password")
 	assert.NoError(t, err, "error writing a user")
 	password := "password"
-	user := "user"
 	payload := fmt.Sprintf(`{"user": "%s", "password": "%s"}`, user, password)
 
 	//Create a request
@@ -220,7 +222,7 @@ func TestPasswordResetAPI(t *testing.T) {
 		assert.JSONEq(t, `{"msg":"Success"}`, recorderReset.Body.String())
 
 		//After password reset, test authorization with newly generated password
-		loginWithNewPasswordPayload := `{"user": "user", "password": "newpassword"}`
+		loginWithNewPasswordPayload := `{"user": "admin", "password": "newpassword"}`
 
 		reqLoginWithNewPassword, err := http.NewRequest("POST", "/api/v1.0/auth/login", strings.NewReader(loginWithNewPasswordPayload))
 		assert.NoError(t, err)
@@ -235,6 +237,39 @@ func TestPasswordResetAPI(t *testing.T) {
 
 		//Check that the response body contains the success message
 		assert.JSONEq(t, `{"msg":"Success"}`, recorderLoginWithNewPassword.Body.String())
+	})
+
+	//Invoking password reset without a cookie should result in failure
+	t.Run("Without admin privilege", func(t *testing.T) {
+		resetPayload := `{"password": "newpassword"}`
+		reqReset, err := http.NewRequest("POST", "/api/v1.0/auth/resetLogin", strings.NewReader(resetPayload))
+		assert.NoError(t, err)
+
+		reqReset.Header.Set("Content-Type", "application/json")
+
+		loginCookieTokenCfg := token.NewWLCGToken()
+		loginCookieTokenCfg.Lifetime = 30 * time.Minute
+		loginCookieTokenCfg.Issuer = param.Server_ExternalWebUrl.GetString()
+		loginCookieTokenCfg.AddAudiences(param.Server_ExternalWebUrl.GetString())
+		loginCookieTokenCfg.Subject = "user" // general user
+		loginCookieTokenCfg.AddScopes(token_scopes.WebUi_Access, token_scopes.Monitoring_Query, token_scopes.Monitoring_Scrape)
+
+		// CreateToken also handles validation for us
+		tok, err := loginCookieTokenCfg.CreateToken()
+		require.NoError(t, err)
+
+		reqReset.AddCookie(&http.Cookie{
+			Name:  "login",
+			Value: tok,
+		})
+
+		recorderReset := httptest.NewRecorder()
+		router.ServeHTTP(recorderReset, reqReset)
+
+		//Check ok http reponse
+		assert.Equal(t, 403, recorderReset.Code)
+		//Check that success message returned
+		assert.JSONEq(t, `{"error":"Registry.AdminUsers is not set, and user is not root user. Admin check returns false"}`, recorderReset.Body.String())
 	})
 
 	//Invoking password reset without a cookie should result in failure
@@ -384,7 +419,7 @@ func TestWhoamiAPI(t *testing.T) {
 	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
 	err := config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
-	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256())
+	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256(), false)
 	require.NoError(t, err)
 	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
 
@@ -464,9 +499,6 @@ func TestWhoamiAPI(t *testing.T) {
 }
 
 func TestAdminAuthHandler(t *testing.T) {
-	// Initialize Gin and set it to test mode
-	gin.SetMode(gin.TestMode)
-
 	// Define test cases
 	testCases := []struct {
 		name          string
@@ -527,13 +559,22 @@ func TestAdminAuthHandler(t *testing.T) {
 		},
 	}
 
+	// Initialize Gin and set it to test mode
+	gin.SetMode(gin.TestMode)
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
-			ctx, _ := gin.CreateTestContext(w)
-			tc.setupUserFunc(ctx)
-
-			AdminAuthHandler(ctx)
+			router := gin.Default()
+			// If admin middleware didn't abort, the response will have status code == 200
+			router.GET("/test",
+				func(ctx *gin.Context) { tc.setupUserFunc(ctx) },
+				AdminAuthHandler,
+				func(ctx *gin.Context) { ctx.AbortWithStatus(http.StatusOK) },
+			)
+			req, err := http.NewRequest("GET", "/test", nil)
+			require.NoError(t, err)
+			router.ServeHTTP(w, req)
 
 			assert.Equal(t, tc.expectedCode, w.Code)
 			if tc.expectedError != "" {
@@ -556,7 +597,7 @@ func TestLogoutAPI(t *testing.T) {
 	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
 	err := config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
-	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256())
+	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256(), false)
 	require.NoError(t, err)
 	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
 

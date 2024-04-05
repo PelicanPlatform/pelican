@@ -448,12 +448,27 @@ name: Origin.Exports
 description: >-
   A list describing the origin's exports. Each item in the list describes a single namespace the origin exports:
 
-    - StoragePrefix: <the relevant path from the object store, eg for posix /my/dir>
-      FederationPrefix: <the namespace prefix that data from StoragePrefix is made available under within the federation>
+    - StoragePrefix: The relevant path from the object store, e.g. for posix /my/dir
+      FederationPrefix: The namespace prefix that data from StoragePrefix is made available under within the federation
       Capabilities: A list of the capabilities the origin is willing to support for the given export. Capabilities include:
         ["Reads", "PublicReads", "Writes", "Listings", "DirectReads"]
-      where each of these has the same effect as the corresponding "Origin.Enable*" configuration, except scoped to the
-      given export. If "PublicReads" is included, "Reads" is inferred.
+        where each of these has the same effect as the corresponding "Origin.Enable*" configuration, except scoped to the
+        given export. If "PublicReads" is included, "Reads" is inferred.
+      SentinelLocation: A filename under `StoragePrefix` path for Pelican to check the storage directory exists and is correctly mounted.
+        Leave it empty to skip the check. You should always choose a distinguished name for `SentinelLocation`. It should not be reused for other servers.
+        If running in a containerized environment it should not be the name of the underlying physical host as that may change and lead to confusion.
+        You need to manually create a file under path to `StoragePrefix` with the same name as `SentinelLocation`. Note that this parameter will be ignored
+        if the origin StorageType is S3.
+
+    Example:
+
+    ```yaml
+    Origin.Exports
+      - StoragePrefix: /home/foo/bar
+        FederationPrefix: /demo/project
+        Capabilities: ["Reads", "PublicReads", "Writes", "Listings", "DirectReads"]
+        SentinelLocation: demoproject_origin_A
+    ```
 type: object
 default: none
 components: ["origin"]
@@ -899,6 +914,28 @@ type: int
 default: 8442
 components: ["cache"]
 ---
+name: Cache.LowWatermark
+description: >-
+  A value of cache disk usage that stops the purging of cached files.
+
+  The value should be either a percentage integer of total available disk space (default is 90),
+  or a number suffixed by k, m, g, or t. In which case, they must be absolute sizes in k (kilo-),
+  m (mega-), g (giga-), or t (tera-) bytes, respectively.
+type: string
+default: 90
+components: ["cache"]
+---
+name: Cache.HighWaterMark
+description: >-
+  A value of cache disk usage that triggers the purging of cached files.
+
+  The value should be either a percentage integer of total available disk space (default is 95),
+  or a number suffixed by k, m, g, or t. In which case, they must be absolute sizes in k (kilo-),
+  m (mega-), g (giga-), or t (tera-) bytes, respectively.
+type: string
+default: 95
+components: ["cache"]
+---
 name: Cache.EnableVoms
 description: >-
   Enable X.509 / VOMS-based authentication for the cache.  This allows HTTP clients
@@ -916,6 +953,13 @@ description: >-
   number of connections to this value.
 type: int
 default: none
+components: ["cache"]
+---
+name: Cache.EnableLotman
+description: >-
+  LotMan is a library that provides management of storage space in the cache.
+type: bool
+default: false
 components: ["cache"]
 ---
 name: Cache.PermittedNamespaces
@@ -1044,6 +1088,31 @@ description: >-
   service.
 type: bool
 default: true
+components: ["director"]
+---
+name: Director.FilteredServers
+description: >-
+  A list of server host names to not to redirect client requests to. This is for admins to put a list of
+  servers in the federation into downtime.
+type: stringSlice
+default: none
+components: ["director"]
+---
+name: Director.SupportContactEmail
+description: >-
+  An Email address to receive issues and help requests for the federation the director is hosting. The values will
+  be displayed on the director web interface if provided. We highly recommend director admin to fill out this field.
+type: string
+default: none
+components: ["director"]
+---
+name: Director.SupportContactUrl
+description: >-
+  A URL where user can find support information. Can be your website, GitHub discussion, or third-party support portal
+  for the federation the director is hosting. The values will be displayed on the director web interface if provided.
+  We highly recommend director admin to fill out this field.
+type: string
+default: none
 components: ["director"]
 ---
 ############################
@@ -1264,8 +1333,10 @@ components: ["origin", "director", "registry"]
 name: Server.ExternalWebUrl
 description: >-
   A URL indicating the Pelican web interface and internal web APIs address as it appears externally.
+
+  Port number will be stripped if it's 443, from `Server.WebPort` or directly set through `Server.ExternalWebUrl`
 type: url
-default: https://${Server.Hostname}:${Server.WebPort}
+default: https://${Server.Hostname}:${Server.WebPort} (for ${Server.WebPort} != 443)
 components: ["origin", "director", "registry"]
 ---
 name: Server.Hostname
@@ -1948,3 +2019,65 @@ description: >-
 type: string
 default: none
 components: ["plugin"]
+---
+############################
+#   LotMan-level configs   #
+############################
+name: Lotman.DbLocation
+description: >-
+  The prefix indicating where LotMan should store its lot database. For the provided path, the database
+  will be stored at <path>/.lot/lotman_cpp.sqlite
+type: filename
+root_default: /var/run/pelican
+default: $ConfigBase
+components: ["cache"]
+---
+name: Lotman.LibLocation
+description: >-
+  The location of the system's installed LotMan library (libLotMan.so). When unset, the system will attempt to find Lotman
+  at these fallback paths:
+  - /usr/lib64/libLotMan.so
+  - /usr/local/lib64/libLotMan.so
+  - /opt/local/lib64/libLotMan.so
+type: filename
+default: none
+components: ["cache"]
+---
+name: Lotman.EnableAPI
+description: >-
+  Whether Lotman should enable its CRUD web endpoints. If true, administrators with an appropriately-signed token can interface
+  with Lotman via HTTP. Otherwise, lots are only configurable via the Pelican configuration file at the cache.
+type: bool
+default: false
+components: ["cache"]
+---
+name: Lotman.Lots
+description: >-
+  Declarative configuration for LotMan.  This is a list of objects, each of which describes a "lot". Every lot
+  can be defined with the following:
+  - `LotName`: REQUIRED. The name of the lot.  This is used to identify the lot in the LotMan database.
+  - `Owner`: REQUIRED. A string identifying the owner of the lot's data (as opposed to someone who can modify the lot itself).
+    The Owner field should generally be set to the issue for the lot's namespace path. For example, if the lot
+    tracks namespace `/foo/bar`, the owner might be set to `https://registry.com/api/v1.0/registry/foo/bar`.
+  - `Paths`: OPTIONAL. A list of path objects, each of which describes a path that should be managed by the lot.
+      - `Path`: REQUIRED. The path to be managed by the lot.
+      - `Recursive`: REQUIRED. A boolean indicating whether the path should be managed recursively. If true, the lot will
+        manage all files and directories under the specified path.
+  - `ManagementPolicyAttrs`: REQUIRED. The lot's management policy attributes object. This contains information about resources the lot should
+    be allocated, and how it should be managed.
+      - `DedicatedGB`: REQUIRED. The amount of storage, in GB, that should be dedicated to the lot. This means the lot can assume it
+        always has access to this quantity.
+      - `OpportunisticGB`: REQUIRED. The amount of opportunistic storage, in GB, the lot should have access to, when storage is available.
+      - `MaxNumObjects`: REQUIRED. The maximum number of objects a lot is allowed to store.
+      - `CreationTime`: REQUIRED. A unix timestamp indicating when the lot should begin being considered valid. Times in the future indicate
+        the lot should not be considered valid until that time.
+      - `ExpirationTime`: REQUIRED. A unix timestamp indicating when the lot expires. Lots may continue to function after expiration, but lot
+        data owners should recognize the storage is at-will and may be pre-empted at any time.
+      - `DeletionTime`: REQUIRED. A unix timestamp indicating when the lot and its associated data should be deleted.
+
+  Note that example configurations can be found in lotman/resources/lots-config.yaml
+  For more information about LotMan configuration, see:
+  https://github.com/pelicanplatform/lotman
+type: object
+default: none
+components: ["cache"]

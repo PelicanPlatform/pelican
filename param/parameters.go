@@ -113,12 +113,16 @@ func (bP ObjectParam) IsSet() bool {
 var (
 	Cache_DataLocation = StringParam{"Cache.DataLocation"}
 	Cache_ExportLocation = StringParam{"Cache.ExportLocation"}
+	Cache_HighWaterMark = StringParam{"Cache.HighWaterMark"}
+	Cache_LowWatermark = StringParam{"Cache.LowWatermark"}
 	Cache_RunLocation = StringParam{"Cache.RunLocation"}
 	Cache_Url = StringParam{"Cache.Url"}
 	Cache_XRootDPrefix = StringParam{"Cache.XRootDPrefix"}
 	Director_DefaultResponse = StringParam{"Director.DefaultResponse"}
 	Director_GeoIPLocation = StringParam{"Director.GeoIPLocation"}
 	Director_MaxMindKeyFile = StringParam{"Director.MaxMindKeyFile"}
+	Director_SupportContactEmail = StringParam{"Director.SupportContactEmail"}
+	Director_SupportContactUrl = StringParam{"Director.SupportContactUrl"}
 	Federation_BrokerUrl = StringParam{"Federation.BrokerUrl"}
 	Federation_DirectorUrl = StringParam{"Federation.DirectorUrl"}
 	Federation_DiscoveryUrl = StringParam{"Federation.DiscoveryUrl"}
@@ -154,6 +158,8 @@ var (
 	Logging_Origin_Scitokens = StringParam{"Logging.Origin.Scitokens"}
 	Logging_Origin_Xrd = StringParam{"Logging.Origin.Xrd"}
 	Logging_Origin_Xrootd = StringParam{"Logging.Origin.Xrootd"}
+	Lotman_DbLocation = StringParam{"Lotman.DbLocation"}
+	Lotman_LibLocation = StringParam{"Lotman.LibLocation"}
 	Monitoring_DataLocation = StringParam{"Monitoring.DataLocation"}
 	OIDC_AuthorizationEndpoint = StringParam{"OIDC.AuthorizationEndpoint"}
 	OIDC_ClientID = StringParam{"OIDC.ClientID"}
@@ -231,6 +237,7 @@ var (
 var (
 	Cache_PermittedNamespaces = StringSliceParam{"Cache.PermittedNamespaces"}
 	Director_CacheResponseHostnames = StringSliceParam{"Director.CacheResponseHostnames"}
+	Director_FilteredServers = StringSliceParam{"Director.FilteredServers"}
 	Director_OriginResponseHostnames = StringSliceParam{"Director.OriginResponseHostnames"}
 	Issuer_GroupRequirements = StringSliceParam{"Issuer.GroupRequirements"}
 	Monitoring_AggregatePrefixes = StringSliceParam{"Monitoring.AggregatePrefixes"}
@@ -269,6 +276,7 @@ var (
 )
 
 var (
+	Cache_EnableLotman = BoolParam{"Cache.EnableLotman"}
 	Cache_EnableVoms = BoolParam{"Cache.EnableVoms"}
 	Cache_SelfTest = BoolParam{"Cache.SelfTest"}
 	Client_DisableHttpProxy = BoolParam{"Client.DisableHttpProxy"}
@@ -278,6 +286,7 @@ var (
 	DisableHttpProxy = BoolParam{"DisableHttpProxy"}
 	DisableProxyFallback = BoolParam{"DisableProxyFallback"}
 	Logging_DisableProgressBars = BoolParam{"Logging.DisableProgressBars"}
+	Lotman_EnableAPI = BoolParam{"Lotman.EnableAPI"}
 	Monitoring_MetricAuthorization = BoolParam{"Monitoring.MetricAuthorization"}
 	Monitoring_PromQLAuthorization = BoolParam{"Monitoring.PromQLAuthorization"}
 	Origin_EnableBroker = BoolParam{"Origin.EnableBroker"}
@@ -329,6 +338,7 @@ var (
 	GeoIPOverrides = ObjectParam{"GeoIPOverrides"}
 	Issuer_AuthorizationTemplates = ObjectParam{"Issuer.AuthorizationTemplates"}
 	Issuer_OIDCAuthenticationRequirements = ObjectParam{"Issuer.OIDCAuthenticationRequirements"}
+	Lotman_Lots = ObjectParam{"Lotman.Lots"}
 	Origin_Exports = ObjectParam{"Origin.Exports"}
 	Registry_CustomRegistrationFields = ObjectParam{"Registry.CustomRegistrationFields"}
 	Registry_Institutions = ObjectParam{"Registry.Institutions"}

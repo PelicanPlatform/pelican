@@ -43,9 +43,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -166,7 +166,7 @@ func ConnectToOrigin(ctx context.Context, brokerUrl, prefix, originName string) 
 	if err != nil {
 		return
 	}
-	caPrivateKey, err := config.LoadPrivateKey(param.Server_TLSCAKey.GetString())
+	caPrivateKey, err := config.LoadPrivateKey(param.Server_TLSCAKey.GetString(), true)
 	if err != nil {
 		return
 	}
@@ -240,7 +240,7 @@ func ConnectToOrigin(ctx context.Context, brokerUrl, prefix, originName string) 
 		err = errors.Wrap(err, "Failure when reading response from broker response")
 	}
 	if resp.StatusCode >= 400 {
-		errResp := common.SimpleApiResp{}
+		errResp := server_structs.SimpleApiResp{}
 		log.Errorf("Failure (status code %d) when invoking the broker: %s", resp.StatusCode, string(responseBytes))
 		if err = json.Unmarshal(responseBytes, &errResp); err != nil {
 			err = errors.Errorf("Failure when invoking the broker (status code %d); unable to parse error message", resp.StatusCode)
@@ -299,7 +299,7 @@ func ConnectToOrigin(ctx context.Context, brokerUrl, prefix, originName string) 
 		hj, ok := writer.(http.Hijacker)
 		if !ok {
 			log.Debug("Not able to hijack underlying TCP connection from server")
-			resp := common.SimpleApiResp{
+			resp := server_structs.SimpleApiResp{
 				Msg:    "Unable to reverse TCP connection; HTTP/2 in use",
 				Status: "error",
 			}
@@ -470,7 +470,7 @@ func doCallback(ctx context.Context, brokerResp reversalRequest) (listener net.L
 	}
 
 	if resp.StatusCode >= 400 {
-		errResp := common.SimpleApiResp{}
+		errResp := server_structs.SimpleApiResp{}
 		if err = json.Unmarshal(responseBytes, &errResp); err != nil {
 			err = errors.Errorf("Failure when invoking cache %s callback (status code %d); unable to parse error message", brokerResp.CallbackUrl, resp.StatusCode)
 		} else {
@@ -617,7 +617,7 @@ func LaunchRequestMonitor(ctx context.Context, egrp *errgroup.Group, resultChan 
 					break
 				}
 				if resp.StatusCode >= 400 {
-					errResp := common.SimpleApiResp{}
+					errResp := server_structs.SimpleApiResp{}
 					if err = json.Unmarshal(responseBytes, &errResp); err != nil {
 						log.Errorf("Failure when invoking the broker (status code %d); unable to parse error message", resp.StatusCode)
 					} else {
@@ -634,7 +634,7 @@ func LaunchRequestMonitor(ctx context.Context, egrp *errgroup.Group, resultChan 
 					break
 				}
 
-				if brokerResp.Status == common.RespOK {
+				if brokerResp.Status == server_structs.RespOK {
 					listener, err := doCallback(ctx, brokerResp.Request)
 					if err != nil {
 						log.Errorln("Failed to callback to the cache:", err)
@@ -642,9 +642,9 @@ func LaunchRequestMonitor(ctx context.Context, egrp *errgroup.Group, resultChan 
 						break
 					}
 					resultChan <- listener
-				} else if brokerResp.Status == common.RespFailed {
+				} else if brokerResp.Status == server_structs.RespFailed {
 					log.Errorln("Broker responded to origin retrieve with an error:", brokerResp.Msg)
-				} else if brokerResp.Status != common.RespPollTimeout { // We expect timeouts; do not log them.
+				} else if brokerResp.Status != server_structs.RespPollTimeout { // We expect timeouts; do not log them.
 					if brokerResp.Msg != "" {
 						log.Errorf("Broker responded with unknown status (%s); msg: %s", brokerResp.Status, brokerResp.Msg)
 					} else {

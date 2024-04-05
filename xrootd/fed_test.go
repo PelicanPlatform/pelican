@@ -24,6 +24,7 @@ import (
 	_ "embed"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -31,9 +32,9 @@ import (
 	"time"
 
 	"github.com/pelicanplatform/pelican/client"
-	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/fed_test_utils"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/spf13/viper"
@@ -48,9 +49,9 @@ var (
 
 func TestHttpOriginConfig(t *testing.T) {
 	viper.Reset()
-	common.ResetOriginExports()
+	server_utils.ResetOriginExports()
 	defer viper.Reset()
-	defer common.ResetOriginExports()
+	defer server_utils.ResetOriginExports()
 
 	body := "Hello, World!"
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -109,10 +110,14 @@ func TestHttpOriginConfig(t *testing.T) {
 	_, err = tempToken.WriteString(token)
 	assert.NoError(t, err, "Error writing to temp token file")
 
+	fedStr := config.GetFederation().DirectorEndpoint
+	fedUrl, err := url.Parse(fedStr)
+	require.NoError(t, err)
+
 	// Download the test file
 	transferResults, err := client.DoGet(
 		fed.Ctx,
-		"pelican:///test/hello_world",
+		"pelican://"+fedUrl.Host+"/test/hello_world",
 		filepath.Join(tmpPath, "hw"),
 		false,
 		client.WithTokenLocation(tempToken.Name()),

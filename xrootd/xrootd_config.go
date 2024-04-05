@@ -34,6 +34,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"text/template"
 	"time"
@@ -43,12 +44,12 @@ import (
 	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/pelicanplatform/pelican/cache_ui"
-	"github.com/pelicanplatform/pelican/common"
+	"github.com/pelicanplatform/pelican/cache"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
-	"github.com/pelicanplatform/pelican/origin_ui"
+	"github.com/pelicanplatform/pelican/origin"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/utils"
 )
@@ -99,13 +100,15 @@ type (
 		S3AccessKeyfile   string
 		S3SecretKeyfile   string
 		S3UrlStyle        string
-		Exports           []common.OriginExports
+		Exports           []server_utils.OriginExport
 	}
 
 	CacheConfig struct {
 		UseCmsd        bool
 		EnableVoms     bool
 		CalculatedPort string
+		HighWaterMark  string
+		LowWatermark   string
 		ExportLocation string
 		RunLocation    string
 		DataLocation   string
@@ -177,20 +180,20 @@ type (
 // CheckOriginXrootdEnv is almost a misnomer -- it does both checking and configuring. In partcicular,
 // it is responsible for setting up the exports and handling all the symlinking we use
 // to export our directories.
-func CheckOriginXrootdEnv(exportPath string, server server_utils.XRootDServer, uid int, gid int, groupname string) error {
+func CheckOriginXrootdEnv(exportPath string, server server_structs.XRootDServer, uid int, gid int, groupname string) error {
 	// First we check if our config yaml contains the Exports block. If it does, we use that instead of the older legacy
 	// options for all this configuration
-	originExports, err := common.GetOriginExports()
+	originExports, err := server_utils.GetOriginExports()
 	if err != nil {
 		return err
 	}
 
-	backendType, err := common.ParseOriginStorageType(param.Origin_StorageType.GetString())
+	backendType, err := server_utils.ParseOriginStorageType(param.Origin_StorageType.GetString())
 	if err != nil {
 		return err
 	}
 	switch backendType {
-	case common.OriginStoragePosix:
+	case server_utils.OriginStoragePosix:
 		// For each export, we symlink the exported directory, currently at /var/run/pelican/export/<export.FederationPrefix>,
 		// to the actual data source, which is what we get from the Export object's StoragePrefix
 		for _, export := range originExports {
@@ -208,14 +211,14 @@ func CheckOriginXrootdEnv(exportPath string, server server_utils.XRootDServer, u
 		}
 		// Set the mount to our export path now that everything is symlinked
 		viper.Set("Xrootd.Mount", exportPath)
-	case common.OriginStorageS3:
+	case server_utils.OriginStorageS3:
 		if len(originExports) > 1 {
 			return errors.New("Multi exports for s3 backends not yet implemented")
 		}
 	}
 
 	if param.Origin_SelfTest.GetBool() {
-		if err := origin_ui.ConfigureXrootdMonitoringDir(); err != nil {
+		if err := origin.ConfigureXrootdMonitoringDir(); err != nil {
 			return err
 		}
 	}
@@ -251,7 +254,7 @@ func CheckOriginXrootdEnv(exportPath string, server server_utils.XRootDServer, u
 			" to desired daemon group %v", macaroonsSecret, groupname)
 	}
 	// If the scitokens.cfg does not exist, create one
-	if originServer, ok := server.(*origin_ui.OriginServer); ok {
+	if originServer, ok := server.(*origin.OriginServer); ok {
 		authedPrefixes, err := originServer.GetAuthorizedPrefixes()
 		if err != nil {
 			return err
@@ -261,14 +264,14 @@ func CheckOriginXrootdEnv(exportPath string, server server_utils.XRootDServer, u
 			return err
 		}
 	}
-	if err := origin_ui.ConfigureXrootdMonitoringDir(); err != nil {
+	if err := origin.ConfigureXrootdMonitoringDir(); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func CheckCacheXrootdEnv(exportPath string, server server_utils.XRootDServer, uid int, gid int) (string, error) {
+func CheckCacheXrootdEnv(exportPath string, server server_structs.XRootDServer, uid int, gid int) (string, error) {
 	viper.Set("Xrootd.Mount", exportPath)
 	filepath.Join(exportPath, "/")
 	err := config.MkdirAll(exportPath, 0775, uid, gid)
@@ -291,7 +294,7 @@ func CheckCacheXrootdEnv(exportPath string, server server_utils.XRootDServer, ui
 			filepath.Dir(metaPath))
 	}
 
-	err = config.DiscoverFederation()
+	err = config.DiscoverFederation(context.Background())
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to pull information from the federation")
 	}
@@ -333,16 +336,17 @@ func CheckCacheXrootdEnv(exportPath string, server server_utils.XRootDServer, ui
 		return "", errors.New("One of Federation.DiscoveryUrl or Federation.DirectorUrl must be set to configure a cache")
 	}
 
-	if cacheServer, ok := server.(*cache_ui.CacheServer); ok {
+	if cacheServer, ok := server.(*cache.CacheServer); ok {
 		err := WriteCacheScitokensConfig(cacheServer.GetNamespaceAds())
 		if err != nil {
 			return "", errors.Wrap(err, "Failed to create scitokens configuration for the cache")
 		}
 	}
+
 	return exportPath, nil
 }
 
-func CheckXrootdEnv(server server_utils.XRootDServer) error {
+func CheckXrootdEnv(server server_structs.XRootDServer) error {
 	uid, err := config.GetDaemonUID()
 	if err != nil {
 		return err
@@ -485,7 +489,7 @@ func CheckXrootdEnv(server server_utils.XRootDServer) error {
 // certificate shows up atomically from XRootD's perspective.
 // Adjusts the ownership and mode to match that expected
 // by the XRootD framework.
-func CopyXrootdCertificates(server server_utils.XRootDServer) error {
+func CopyXrootdCertificates(server server_structs.XRootDServer) error {
 	user, err := config.GetDaemonUserInfo()
 	if err != nil {
 		return errors.Wrap(err, "Unable to copy certificates to xrootd runtime directory; failed xrootd user lookup")
@@ -545,7 +549,7 @@ func CopyXrootdCertificates(server server_utils.XRootDServer) error {
 
 // Launch a separate goroutine that performs the XRootD maintenance tasks.
 // For maintenance that is periodic, `sleepTime` is the maintenance period.
-func LaunchXrootdMaintenance(ctx context.Context, server server_utils.XRootDServer, sleepTime time.Duration) {
+func LaunchXrootdMaintenance(ctx context.Context, server server_structs.XRootDServer, sleepTime time.Duration) {
 	server_utils.LaunchWatcherMaintenance(
 		ctx,
 		[]string{
@@ -594,15 +598,29 @@ func ConfigXrootd(ctx context.Context, origin bool) (string, error) {
 
 	var xrdConfig XrootdConfig
 	xrdConfig.Xrootd.LocalMonitoringPort = -1
-	if err := viper.Unmarshal(&xrdConfig, viper.DecodeHook(common.StringListToCapsHookFunc())); err != nil {
+	if err := viper.Unmarshal(&xrdConfig, viper.DecodeHook(server_utils.StringListToCapsHookFunc())); err != nil {
 		return "", errors.Wrap(err, "failed to unmarshal xrootd config")
 	}
 
+	// For cache. convert integer percentage value [0,100] to decimal fraction [0.00, 1.00]
+	if !origin {
+		if num, err := strconv.Atoi(xrdConfig.Cache.HighWaterMark); err == nil {
+			if num <= 100 && num > 0 {
+				xrdConfig.Cache.HighWaterMark = strconv.FormatFloat(float64(num)/100, 'f', 2, 64)
+			}
+		}
+		if num, err := strconv.Atoi(xrdConfig.Cache.LowWatermark); err == nil {
+			if num <= 100 && num > 0 {
+				xrdConfig.Cache.LowWatermark = strconv.FormatFloat(float64(num)/100, 'f', 2, 64)
+			}
+		}
+	}
+
 	// To make sure we get the correct exports, we overwrite the exports in the xrdConfig struct with the exports
-	// we get from the common.GetOriginExports() function. Failure to do so will cause us to hit viper again,
+	// we get from the server_structs.GetOriginExports() function. Failure to do so will cause us to hit viper again,
 	// which in the case of tests prevents us from overwriting some exports with temp dirs.
 	if origin {
-		originExports, err := common.GetOriginExports()
+		originExports, err := server_utils.GetOriginExports()
 		if err != nil {
 			return "", errors.Wrap(err, "failed to generate Origin export list for xrootd config")
 		}

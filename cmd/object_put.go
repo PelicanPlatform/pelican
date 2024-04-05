@@ -87,6 +87,7 @@ func putMain(cmd *cobra.Command, args []string) {
 
 	var result error
 	lastSrc := ""
+
 	for _, src := range source {
 		isRecursive, _ := cmd.Flags().GetBool("recursive")
 		_, result = client.DoPut(ctx, src, dest, isRecursive, client.WithCallback(pb.callback), client.WithTokenLocation(tokenLocation))

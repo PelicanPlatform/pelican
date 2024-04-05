@@ -31,16 +31,15 @@ import (
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/broker"
-	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/launcher_utils"
 	"github.com/pelicanplatform/pelican/local_cache"
-	"github.com/pelicanplatform/pelican/origin_ui"
+	"github.com/pelicanplatform/pelican/origin"
 	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/server_ui"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/web_ui"
 )
@@ -57,6 +56,15 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 	}
 
 	ctx, shutdownCancel := context.WithCancel(ctx)
+
+	config.PrintPelicanVersion()
+
+	// Print Pelican config at server start if it's in debug or info level
+	if log.GetLevel() >= log.InfoLevel {
+		if err := config.PrintConfig(); err != nil {
+			return shutdownCancel, err
+		}
+	}
 
 	egrp.Go(func() error {
 		_ = config.RestartFlag
@@ -92,28 +100,22 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 	}
 
 	if modules.IsEnabled(config.RegistryType) {
-
-		viper.Set("Federation.RegistryURL", param.Server_ExternalWebUrl.GetString())
-
+		// Federation.RegistryUrl defaults to Server.ExternalUrl in InitServer()
 		if err = RegistryServe(ctx, engine, egrp); err != nil {
 			return shutdownCancel, err
 		}
 	}
 
 	if modules.IsEnabled(config.BrokerType) {
-		viper.Set("Federation.BrokerURL", param.Server_ExternalWebUrl.GetString())
-
 		rootGroup := engine.Group("/")
 		broker.RegisterBroker(ctx, rootGroup)
 		broker.LaunchNamespaceKeyMaintenance(ctx, egrp)
 	}
 
 	if modules.IsEnabled(config.DirectorType) {
-
-		viper.Set("Director.DefaultResponse", "cache")
-
-		viper.Set("Federation.DirectorURL", param.Server_ExternalWebUrl.GetString())
-
+		// Director.DefaultResponse defaults to "cache" through default.yaml
+		// Federation.DirectorUrl defaults to Server.ExternalUrl in InitServer()
+		// Duplicated set are removed
 		if err = DirectorServe(ctx, engine, egrp); err != nil {
 			return shutdownCancel, err
 		}
@@ -135,12 +137,17 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 	}()
 	config.UpdateConfigFromListener(ln)
 
-	servers := make([]server_utils.XRootDServer, 0)
+	servers := make([]server_structs.XRootDServer, 0)
 
 	if modules.IsEnabled(config.OriginType) {
 
-		_, err := common.GetOriginExports()
+		originExports, err := server_utils.GetOriginExports()
 		if err != nil {
+			return shutdownCancel, err
+		}
+
+		ok, err := server_utils.CheckSentinelLocation(originExports)
+		if err != nil && !ok {
 			return shutdownCancel, err
 		}
 
@@ -155,7 +162,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		// NOTE: Until the Broker supports multi-export origins, we've made the assumption that there
 		// is only one namespace prefix available here and that it lives in Origin.FederationPrefix
 		if param.Origin_EnableBroker.GetBool() {
-			if err = origin_ui.LaunchBrokerListener(ctx, egrp); err != nil {
+			if err = origin.LaunchBrokerListener(ctx, egrp); err != nil {
 				return shutdownCancel, err
 			}
 		}
@@ -199,7 +206,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 	// Origin needs to advertise once before the cache starts
 	if modules.IsEnabled(config.CacheType) && modules.IsEnabled(config.OriginType) {
 		log.Debug("Advertise Origin")
-		if err = server_ui.Advertise(ctx, servers); err != nil {
+		if err = launcher_utils.Advertise(ctx, servers); err != nil {
 			return shutdownCancel, err
 		}
 
@@ -208,7 +215,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		// of the namespaces and doesn't have to wait an entire cycle to learn about them from the director
 
 		// To check all of the advertisements, we'll launch a WaitUntilWorking concurrently for each of them.
-		originExports, err := common.GetOriginExports()
+		originExports, err := server_utils.GetOriginExports()
 		if err != nil {
 			return shutdownCancel, err
 		}
@@ -257,7 +264,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		}
 	}
 
-	var cacheServer server_utils.XRootDServer
+	var cacheServer server_structs.XRootDServer
 	if modules.IsEnabled(config.CacheType) {
 		// Give five seconds for the origin to finish advertising to the director
 		desiredURL := param.Federation_DirectorUrl.GetString() + "/.well-known/openid-configuration"
@@ -265,7 +272,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 			log.Errorln("Director does not seem to be working:", err)
 			return shutdownCancel, err
 		}
-		cacheServer, err = CacheServe(ctx, engine, egrp)
+		cacheServer, err = CacheServe(ctx, engine, egrp, modules)
 		if err != nil {
 			return shutdownCancel, err
 		}
@@ -275,7 +282,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 
 	if modules.IsEnabled(config.OriginType) || modules.IsEnabled(config.CacheType) {
 		log.Debug("Launching periodic advertise")
-		if err := server_ui.LaunchPeriodicAdvertise(ctx, egrp, servers); err != nil {
+		if err := launcher_utils.LaunchPeriodicAdvertise(ctx, egrp, servers); err != nil {
 			return shutdownCancel, err
 		}
 	}

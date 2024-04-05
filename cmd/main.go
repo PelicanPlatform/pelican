@@ -25,8 +25,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 func main() {
@@ -58,14 +58,11 @@ func handleCLI(args []string) error {
 		// version info regardless of the commands and whether they are defined
 		// * Remove the -v shorthand since in "origin serve" flagset it's already used for "volume" flag
 		if args[len(args)-1] == "--version" {
-			fmt.Println("Version:", config.GetVersion())
-			fmt.Println("Build Date:", date)
-			fmt.Println("Build Commit:", commit)
-			fmt.Println("Built By:", builtBy)
+			config.PrintPelicanVersion()
 			return nil
 		}
 		err := Execute()
-		if errors.Is(err, common.ErrInvalidOriginConfig) {
+		if errors.Is(err, server_utils.ErrInvalidOriginConfig) {
 			fmt.Fprintf(os.Stderr, `
 Export information was not correct.
 For POSIX, to specify exports via the command line, use:

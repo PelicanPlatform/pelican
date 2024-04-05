@@ -15,6 +15,7 @@ const ExportForm = ({ onSubmit, value }: FormProps<Export>) => {
     const [storagePrefix, setStoragePrefix] = React.useState<string>(value?.storageprefix || "")
     const [federationPrefix, setFederationPrefix] = React.useState<string>(value?.federationprefix || "")
     const [capabilities, setCapabilities] = React.useState<Capability[]>(value?.capabilities || [])
+    const [sentinelLocation, setSentinelLocation] = React.useState<string>(value?.sentinellocation || "")
 
     const submitHandler = (event: React.FormEvent<HTMLFormElement>) => {
         event.preventDefault();
@@ -22,7 +23,8 @@ const ExportForm = ({ onSubmit, value }: FormProps<Export>) => {
         const exportValue = {
             storageprefix: storagePrefix,
             federationprefix: federationPrefix,
-            capabilities: capabilities
+            capabilities: capabilities,
+            sentinellocation: sentinelLocation
         }
 
 
@@ -43,6 +45,9 @@ const ExportForm = ({ onSubmit, value }: FormProps<Export>) => {
             </Box>
             <Box mb={2}>
                 <MultiSelectField<Capability> name={"Capabilities"} value={capabilities} onChange={setCapabilities} possibleValues={["PublicReads", "DirectReads", "Writes", "Listings", "Reads"]}/>
+            </Box>
+            <Box mb={2}>
+                <StringField name={"SentinelLocation"} value={sentinelLocation} onChange={setSentinelLocation} />
             </Box>
             <Button type={"submit"}>Submit</Button>
         </form>

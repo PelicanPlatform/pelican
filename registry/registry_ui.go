@@ -35,6 +35,7 @@ import (
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pelicanplatform/pelican/web_ui"
 	"github.com/pkg/errors"
@@ -323,7 +324,7 @@ func listNamespaces(ctx *gin.Context) {
 
 	// Filter ns by server type
 	if queryParams.ServerType != "" && queryParams.ServerType != string(OriginType) && queryParams.ServerType != string(CacheType) {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid server type"})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Invalid server type: %s", queryParams.ServerType)})
 		return
 	}
 
@@ -336,7 +337,7 @@ func listNamespaces(ctx *gin.Context) {
 			if IsValidRegStatus(queryParams.Status) {
 				filterNs.AdminMetadata.Status = RegistrationStatus(queryParams.Status)
 			} else {
-				ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid query parameters: status must be one of  'Pending', 'Approved', 'Denied', 'Unknown'"})
+				ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Invalid query parameters %s: status must be one of  'Pending', 'Approved', 'Denied', 'Unknown'", queryParams.Status)})
 			}
 		}
 	} else {
@@ -365,8 +366,8 @@ func listNamespacesForUser(ctx *gin.Context) {
 		return
 	}
 	queryParams := listNamespacesForUserRequest{}
-	if ctx.ShouldBindQuery(&queryParams) != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid query parameters"})
+	if err := ctx.ShouldBindQuery(&queryParams); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Invalid query parameters: %v", err)})
 		return
 	}
 
@@ -376,7 +377,7 @@ func listNamespacesForUser(ctx *gin.Context) {
 		if IsValidRegStatus(queryParams.Status) {
 			filterNs.AdminMetadata.Status = RegistrationStatus(queryParams.Status)
 		} else {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid query parameters: status must be one of  'Pending', 'Approved', 'Denied', 'Unknown'"})
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Invalid query parameters %s: status must be one of  'Pending', 'Approved', 'Denied', 'Unknown'", queryParams.Status)})
 		}
 	}
 
@@ -422,6 +423,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 	}
 
 	ns := Namespace{}
+	ns.Topology = false
 	if ctx.ShouldBindJSON(&ns) != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid create or update namespace request"})
 		return
@@ -431,20 +433,21 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 	// Basic validation (type, required, etc)
 	errs := config.GetValidate().Struct(ns)
 	if errs != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprint(errs)})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": errs.Error()})
 		return
 	}
 	// Check that Prefix is a valid prefix
 	updated_prefix, err := validatePrefix(ns.Prefix)
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprint("Error: Field validation for prefix failed:", err)})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Error: Field validation for prefix failed: %v", err)})
 		return
 	}
 	ns.Prefix = updated_prefix
+	ns.Topology = false
 
 	if !isUpdate {
 		// Check if prefix exists before doing anything else. Skip check if it's update operation
-		exists, err := namespaceExists(ns.Prefix)
+		exists, err := namespaceExistsByPrefix(ns.Prefix)
 		if err != nil {
 			log.Errorf("Failed to check if namespace already exists: %v", err)
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Server encountered an error checking if namespace already exists"})
@@ -458,7 +461,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 	// Check if pubKey is a valid JWK
 	pubkey, err := validateJwks(ns.Pubkey)
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprint("Error: Field validation for pubkey failed:", err)})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Error: Field validation for pubkey failed: %v", err)})
 		return
 	}
 
@@ -466,12 +469,12 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 	valErr, sysErr := validateKeyChaining(ns.Prefix, pubkey)
 	if valErr != nil {
 		log.Errorln("Bad prefix when validating key chaining", valErr)
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": valErr})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": valErr.Error()})
 		return
 	}
 	if sysErr != nil {
 		log.Errorln("Error validating key chaining", sysErr)
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": sysErr})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": sysErr.Error()})
 		return
 	}
 
@@ -484,12 +487,9 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 		return
 	}
 
-	if validCF, err := validateCustomFields(ns.CustomFields, true); !validCF {
-		if err != nil {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Error validating custom fields: %v", err)})
-			return
-		}
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Invalid custom field: %s", err.Error())})
+	validCF, err := validateCustomFields(ns.CustomFields, true)
+	if !validCF && err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Invalid custom fields: %v", err)})
 		return
 	}
 
@@ -666,6 +666,33 @@ func getNamespaceJWKS(ctx *gin.Context) {
 	ctx.Data(200, "application/json", jsonData)
 }
 
+func deleteNamespace(ctx *gin.Context) {
+	idStr := ctx.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil || id <= 0 {
+		// Handle the error if id is not a valid integer
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID format. ID must a non-zero integer"})
+		return
+	}
+	exists, err := namespaceExistsById(id)
+	if err != nil {
+		log.Error("Error checking if namespace exists: ", err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Error checking if namespace exists"})
+		return
+	}
+	if !exists {
+		log.Errorf("Namespace not found for id: %d", id)
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "Namespace not found"})
+		return
+	}
+	err = deleteNamespaceByID(id)
+	if err != nil {
+		log.Errorf("Error deleting the namespace: %v", err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Error deleting the namespace"})
+	}
+	ctx.JSON(http.StatusOK, gin.H{"msg": "success"})
+}
+
 func listInstitutions(ctx *gin.Context) {
 	// When Registry.Institutions is set
 	institutions := []Institution{}
@@ -702,6 +729,16 @@ func listInstitutions(ctx *gin.Context) {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Server didn't configure Registry.Institutions"})
 		return
 	}
+}
+
+func listTopologyNamespaces(ctx *gin.Context) {
+	nss, err := getTopologyNamespaces()
+	if err != nil {
+		log.Errorf("failed to get all namespaces from the topology: %v", err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Failed to get namespaces from topology"})
+		return
+	}
+	ctx.JSON(http.StatusOK, nss)
 }
 
 // Initialize custom registration fields provided via Registry.CustomRegistrationFields
@@ -762,6 +799,7 @@ func RegisterRegistryWebAPI(router *gin.RouterGroup) error {
 		registryWebAPI.PUT("/namespaces/:id", web_ui.AuthHandler, func(ctx *gin.Context) {
 			createUpdateNamespace(ctx, true)
 		})
+		registryWebAPI.DELETE("/namespaces/:id", web_ui.AuthHandler, web_ui.AdminAuthHandler, deleteNamespace)
 		registryWebAPI.GET("/namespaces/:id/pubkey", getNamespaceJWKS)
 		registryWebAPI.PATCH("/namespaces/:id/approve", web_ui.AuthHandler, web_ui.AdminAuthHandler, func(ctx *gin.Context) {
 			updateNamespaceStatus(ctx, Approved)
@@ -769,6 +807,9 @@ func RegisterRegistryWebAPI(router *gin.RouterGroup) error {
 		registryWebAPI.PATCH("/namespaces/:id/deny", web_ui.AuthHandler, web_ui.AdminAuthHandler, func(ctx *gin.Context) {
 			updateNamespaceStatus(ctx, Denied)
 		})
+	}
+	{
+		registryWebAPI.GET("/topology", listTopologyNamespaces)
 	}
 	{
 		registryWebAPI.GET("/institutions", web_ui.AuthHandler, listInstitutions)
