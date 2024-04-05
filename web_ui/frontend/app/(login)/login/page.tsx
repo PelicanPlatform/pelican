@@ -20,14 +20,14 @@
 
 import {Box, Grow, Typography, Button, Collapse, Skeleton} from "@mui/material";
 import { useRouter } from 'next/navigation'
-import {useContext, useEffect, useState} from "react";
+import {useContext, useEffect, useMemo, useState} from "react";
 
 import LoadingButton from "../components/LoadingButton";
 import PasswordInput from "../components/PasswordInput";
 import useSWR from "swr";
 import {getUser} from "@/helpers/login";
 import {ServerType} from "@/index";
-import {getEnabledServers} from "@/helpers/util";
+import {getEnabledServers, getOauthEnabledServers} from "@/helpers/util";
 
 const AdminLogin = () => {
 
@@ -40,6 +40,13 @@ const AdminLogin = () => {
     const [toggled, setToggled] = useState(false)
 
     const {data: enabledServers} = useSWR<ServerType[]>("getEnabledServers", getEnabledServers)
+    const {data: oauthServers} = useSWR<ServerType[]>("getOauthEnabledServers", getOauthEnabledServers, {fallbackData: []})
+
+    const serverIntersect = useMemo(() => {
+        if(enabledServers && oauthServers) {
+            return enabledServers.filter((server) => oauthServers.includes(server))
+        }
+    }, [enabledServers, oauthServers])
 
     async function submit(password: string) {
 
@@ -130,7 +137,7 @@ const AdminLogin = () => {
         </form>
     )
 
-    if(enabledServers && (enabledServers.includes("registry") || enabledServers.includes("origin") || enabledServers.includes("cache"))) {
+    if(serverIntersect && (serverIntersect.includes("registry") || serverIntersect.includes("origin") || serverIntersect.includes("cache"))) {
         return (
             <Box display={"flex"} flexDirection={"column"} justifyContent={"center"}>
                 <Box m={"auto"}>
@@ -152,6 +159,7 @@ export default function Home() {
 
     const [returnUrl, setReturnUrl] = useState<string | undefined>(undefined)
     const {data: enabledServers} = useSWR<ServerType[]>("getEnabledServers", getEnabledServers)
+    const {data: oauthServers} = useSWR<ServerType[]>("getOauthEnabledServers", getOauthEnabledServers, {fallbackData: []})
 
     useEffect(() => {
         const url = new URL(window.location.href)
@@ -159,6 +167,12 @@ export default function Home() {
         returnUrl = returnUrl.replace(`/view`, "")
         setReturnUrl(returnUrl)
     }, [])
+
+    const serverIntersect = useMemo(() => {
+        if(enabledServers && oauthServers) {
+            return enabledServers.filter((server) => oauthServers.includes(server))
+        }
+    }, [enabledServers, oauthServers])
 
     return (
         <>
@@ -174,7 +188,7 @@ export default function Home() {
                     </Box>
                 </Box>
                 <Box mx={"auto"}>
-                    { enabledServers && (enabledServers.includes("registry") || enabledServers.includes("origin") || enabledServers.includes("cache")) &&
+                    { serverIntersect && (serverIntersect.includes("registry") || serverIntersect.includes("origin") || serverIntersect.includes("cache")) &&
                         <>
                             <Box display={"flex"} justifyContent={"center"} mb={1}>
                                 <Button
@@ -187,8 +201,8 @@ export default function Home() {
                             </Box>
                         </>
                     }
-                    { enabledServers && <AdminLogin/>}
-                    { !enabledServers && <Skeleton variant={"rectangular"} height={90} width={400} sx={{borderRadius: 2}}/> }
+                    { serverIntersect && <AdminLogin/>}
+                    { !serverIntersect && <Skeleton variant={"rectangular"} height={90} width={400} sx={{borderRadius: 2}}/> }
                 </Box>
             </Box>
         </>

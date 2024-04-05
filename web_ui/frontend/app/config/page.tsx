@@ -370,7 +370,7 @@ function Config() {
                         </NextLink>
                     </Box>
                 }
-                { enabledServers.includes("cache") &&
+                {enabledServers && enabledServers.includes("cache") &&
                     <Box pt={1}>
                         <NextLink href={"/cache/"}>
                             <Tooltip title={"Cache"} placement={"right"}>
