@@ -27,13 +27,13 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/utils"
 )
 
-func parseServerAd(server utils.Server, serverType common.ServerType) common.ServerAd {
-	serverAd := common.ServerAd{}
+func parseServerAd(server utils.Server, serverType server_structs.ServerType) server_structs.ServerAd {
+	serverAd := server_structs.ServerAd{}
 	serverAd.Type = serverType
 	serverAd.Name = server.Resource
 
@@ -74,13 +74,13 @@ func AdvertiseOSDF() error {
 		return errors.Wrapf(err, "Failed to get topology JSON")
 	}
 
-	cacheAdMap := make(map[common.ServerAd][]common.NamespaceAdV2)
-	originAdMap := make(map[common.ServerAd][]common.NamespaceAdV2)
-	tGen := common.TokenGen{}
+	cacheAdMap := make(map[server_structs.ServerAd][]server_structs.NamespaceAdV2)
+	originAdMap := make(map[server_structs.ServerAd][]server_structs.NamespaceAdV2)
+	tGen := server_structs.TokenGen{}
 	for _, ns := range namespaces.Namespaces {
 		requireToken := ns.UseTokenOnRead
 
-		tokenIssuers := []common.TokenIssuer{}
+		tokenIssuers := []server_structs.TokenIssuer{}
 		// A token is required on read, so scitokens will be populated
 		if requireToken {
 			credUrl, err := url.Parse(ns.CredentialGeneration.Issuer)
@@ -90,7 +90,7 @@ func AdvertiseOSDF() error {
 			}
 
 			credIssuer := *credUrl
-			tGen.Strategy = common.StrategyType(ns.CredentialGeneration.Strategy)
+			tGen.Strategy = server_structs.StrategyType(ns.CredentialGeneration.Strategy)
 			tGen.VaultServer = ns.CredentialGeneration.VaultServer
 			tGen.MaxScopeDepth = uint(ns.CredentialGeneration.MaxScopeDepth)
 			tGen.CredentialIssuer = credIssuer
@@ -104,7 +104,7 @@ func AdvertiseOSDF() error {
 					continue
 				}
 				issuer := *issuerURL
-				tIssuer := common.TokenIssuer{
+				tIssuer := server_structs.TokenIssuer{
 					BasePaths:       scitok.BasePath,
 					RestrictedPaths: scitok.Restricted,
 					IssuerUrl:       issuer,
@@ -121,16 +121,16 @@ func AdvertiseOSDF() error {
 			write = false
 		}
 
-		caps := common.Capabilities{
+		caps := server_structs.Capabilities{
 			PublicReads: !ns.UseTokenOnRead,
 			Reads:       ns.ReadHTTPS,
 			Writes:      write,
 		}
-		nsAd := common.NamespaceAdV2{
+		nsAd := server_structs.NamespaceAdV2{
 			Path:       ns.Path,
 			PublicRead: !ns.UseTokenOnRead,
 			Caps:       caps,
-			Generation: []common.TokenGen{tGen},
+			Generation: []server_structs.TokenGen{tGen},
 			Issuer:     tokenIssuers,
 		}
 
@@ -139,12 +139,12 @@ func AdvertiseOSDF() error {
 		// they're listed as inactive by topology). These namespaces will all be mapped to the
 		// same useless origin ad, resulting in a 404 for queries to those namespaces
 		for _, origin := range ns.Origins {
-			originAd := parseServerAd(origin, common.OriginType)
+			originAd := parseServerAd(origin, server_structs.OriginType)
 			originAdMap[originAd] = append(originAdMap[originAd], nsAd)
 		}
 
 		for _, cache := range ns.Caches {
-			cacheAd := parseServerAd(cache, common.CacheType)
+			cacheAd := parseServerAd(cache, server_structs.CacheType)
 			cacheAdMap[cacheAd] = append(cacheAdMap[cacheAd], nsAd)
 		}
 	}

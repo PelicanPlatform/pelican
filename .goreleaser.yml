@@ -24,6 +24,7 @@ before:
   hooks:
     - go mod tidy
     - go generate ./...
+    - make web-build
 builds:
   - env:
       - CGO_ENABLED=0
@@ -41,7 +42,7 @@ builds:
     tags:
       - forceposix
     ldflags:
-      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}} -X main.builtBy=goreleaser -X config.version={{.Version}}
+      - -s -w -X github.com/pelicanplatform/pelican/config.commit={{.Commit}} -X github.com/pelicanplatform/pelican/config.date={{.Date}} -X github.com/pelicanplatform/pelican/config.builtBy=goreleaser -X github.com/pelicanplatform/pelican/config.version={{.Version}}
     ignore:
       - goos: windows
         goarch: arm64

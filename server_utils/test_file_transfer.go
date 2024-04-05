@@ -241,7 +241,7 @@ func (t TestFileTransferImpl) RunTests(ctx context.Context, baseUrl, audienceUrl
 // WLCG rules for issuer metadata discovery and public key access
 //
 // Read more: https://github.com/WLCG-AuthZ-WG/common-jwt-profile/blob/master/profile.md#token-verification
-func (t TestFileTransferImpl) RunTestsCache(ctx context.Context, cacheUrl, issuerUrl string, filePath string, body string) (bool, error) {
+func (t TestFileTransferImpl) TestCacheDownload(ctx context.Context, cacheUrl, issuerUrl string, filePath string, body string) (bool, error) {
 	t.audiences = []string{"https://wlcg.cern.ch/jwt/v1/any"}
 	t.issuerUrl = issuerUrl
 	t.testBody = body

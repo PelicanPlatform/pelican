@@ -27,9 +27,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pkg/errors"
@@ -38,7 +38,7 @@ import (
 
 type (
 	objectMetadata struct {
-		// ServerAd      common.ServerAd `json:"server_ad"`
+		// ServerAd      server_structs.ServerAd `json:"server_ad"`
 		URL           url.URL `json:"url"`
 		Checksum      string  `json:"checksum"`
 		ContentLength int     `json:"content_length"`
@@ -196,7 +196,7 @@ func (stat *ObjectStat) queryOriginsForObject(objectName string, cancelContext c
 		}
 		// Have to use an anonymous func to wrap the egrp call to pass loop variable safely
 		// to goroutine
-		func(intOriginAd common.ServerAd) {
+		func(intOriginAd server_structs.ServerAd) {
 			originUtil.Errgroup.Go(func() error {
 				metadata, err := stat.ReqHandler(objectName, intOriginAd.URL, timeout, maxCancelCtx)
 

@@ -31,12 +31,19 @@ export default function Home() {
     return (
         <Box width={"100%"}>
             <Grid container spacing={2}>
-                <Grid item xs={12} lg={4}>
-                    <Typography variant="h4">Status</Typography>
+                <Grid item xs={12} lg={6}>
+                    <Typography variant="h4" mb={2}>Status</Typography>
                     <StatusBox/>
                 </Grid>
-                <Grid item xs={12} lg={8}>
+                <Grid item xs={12} lg={6}>
+                    <Typography variant={"h4"} component={"h2"} mb={2}>Data Exports</Typography>
+                    <Box sx={{borderRadius: 2, overflow: "hidden"}}>
+                        <DataExportTable/>
+                    </Box>
+                </Grid>
+                <Grid item xs={12} lg={6}>
                     <Box sx={{backgroundColor: "#F6F6F6", borderRadius: "1rem"}} p={2}>
+                        <Typography variant="h4" mb={1}>Transfer Rate</Typography>
                         <Box minHeight={"200px"}>
                             <RateGraph
                                 rate={TimeDuration.fromString("3h")}
@@ -47,7 +54,9 @@ export default function Home() {
                                     maxHeight:"400px",
                                     flexGrow:1,
                                     justifyContent:"center",
-                                    display:"flex"
+                                    display:"flex",
+                                    bgcolor:"white",
+                                    borderRadius:2
                                 }}
                                 options={{
                                     scales: {
@@ -55,6 +64,7 @@ export default function Home() {
                                             type: 'time',
                                             time: {
                                                 round: 'second',
+                                                minUnit: 'minute'
                                             }
                                         }
                                     },
@@ -71,20 +81,14 @@ export default function Home() {
                                     },
                                 }}
                                 datasetOptions={[
-                                    {label: "xrootd_server_bytes{direction=\"rx\"}", borderColor: "#0071ff"},
-                                    {label: "xrootd_server_bytes{direction=\"tx\"}", borderColor: "#54ff80"}
+                                    {label: "Bytes Received (Bps)", borderColor: "#0071ff"},
+                                    {label: "Bytes Sent (Bps)", borderColor: "#54ff80"}
                                 ]}
                             />
                         </Box>
                     </Box>
                 </Grid>
-                <Grid item xs={12} lg={4}>
-                    <Typography variant={"h4"} component={"h2"} mb={2}>Data Exports</Typography>
-                    <Box sx={{backgroundColor: "#F6F6F6", borderRadius: "1rem", overflow: "hidden"}}>
-                        <DataExportTable/>
-                    </Box>
-                </Grid>
-                <Grid item xs={12} lg={4}>
+                <Grid item xs={12} lg={6}>
                     <FederationOverview/>
                 </Grid>
             </Grid>

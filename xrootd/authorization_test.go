@@ -26,6 +26,7 @@ import (
 	_ "embed"
 	"fmt"
 	"io/fs"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -35,11 +36,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pelicanplatform/pelican/cache_ui"
-	"github.com/pelicanplatform/pelican/common"
+	"github.com/pelicanplatform/pelican/cache"
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/origin_ui"
+	"github.com/pelicanplatform/pelican/origin"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/spf13/viper"
@@ -71,6 +72,9 @@ var (
 
 	//go:embed resources/test-scitokens-cache-empty.cfg
 	cacheEmptyOutput string
+
+	//go:embed resources/osdf-authfile
+	authfileOutput string
 
 	sampleMultilineOutput = `foo \
 	bar
@@ -129,11 +133,41 @@ u eeccb14b.0 /nrp/protected/xenon-biggrid-nl/ rl
 )
 
 func TestOSDFAuthRetrieval(t *testing.T) {
+	svr := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "GET" {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		if r.URL.Path == "/origin/Authfile" && r.URL.RawQuery == "fqdn=sc-origin.chtc.wisc.edu" {
+			w.Header().Set("Content-Type", "text/plain")
+			w.WriteHeader(http.StatusOK)
+			_, err := w.Write([]byte(authfileOutput))
+			require.NoError(t, err)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+
+	// Hijack the common transport used by Pelican, forcing all connections to go to our test server
+	transport := config.GetTransport()
+	oldDial := transport.DialContext
+	transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		dialer := net.Dialer{}
+		return dialer.DialContext(ctx, svr.Listener.Addr().Network(), svr.Listener.Addr().String())
+	}
+	oldConfig := transport.TLSClientConfig
+	transport.TLSClientConfig = svr.TLS.Clone()
+	transport.TLSClientConfig.InsecureSkipVerify = true
+	t.Cleanup(func() {
+		transport.DialContext = oldDial
+		transport.TLSClientConfig = oldConfig
+	})
+
 	viper.Reset()
 	viper.Set("Federation.TopologyUrl", "https://topology.opensciencegrid.org/")
 	viper.Set("Server.Hostname", "sc-origin.chtc.wisc.edu")
 
-	originServer := &origin_ui.OriginServer{}
+	originServer := &origin.OriginServer{}
 	_, err := getOSDFAuthFiles(originServer)
 
 	require.NoError(t, err, "error")
@@ -145,49 +179,49 @@ func TestOSDFAuthCreation(t *testing.T) {
 		desc     string
 		authIn   string
 		authOut  string
-		server   server_utils.XRootDServer
+		server   server_structs.XRootDServer
 		hostname string
 	}{
 		{
 			desc:     "osdf-origin-auth-no-merge",
 			authIn:   "",
 			authOut:  mergedAuthfileEntries,
-			server:   &origin_ui.OriginServer{},
+			server:   &origin.OriginServer{},
 			hostname: "origin-test",
 		},
 		{
 			desc:     "osdf-origin-auth-merge",
 			authIn:   cacheAuthfileMultilineInput,
 			authOut:  otherMergedAuthfileEntries,
-			server:   &origin_ui.OriginServer{},
+			server:   &origin.OriginServer{},
 			hostname: "origin-test",
 		},
 		{
 			desc:     "osdf-cache-auth-no-merge",
 			authIn:   "",
 			authOut:  cacheAuthfileEntries,
-			server:   &cache_ui.CacheServer{},
+			server:   &cache.CacheServer{},
 			hostname: "cache-test",
 		},
 		{
 			desc:     "osdf-cach-auth-merge",
 			authIn:   cacheAuthfileMultilineInput,
 			authOut:  cacheMergedAuthfileEntries,
-			server:   &cache_ui.CacheServer{},
+			server:   &cache.CacheServer{},
 			hostname: "cache-test",
 		},
 		{
 			desc:     "osdf-origin-no-authfile",
 			authIn:   "",
 			authOut:  "u * /.well-known lr\n",
-			server:   &origin_ui.OriginServer{},
+			server:   &origin.OriginServer{},
 			hostname: "origin-test-empty",
 		},
 		{
 			desc:     "osdf-cache-no-authfile",
 			authIn:   "",
 			authOut:  "",
-			server:   &cache_ui.CacheServer{},
+			server:   &cache.CacheServer{},
 			hostname: "cache-test-empty",
 		},
 	}
@@ -227,9 +261,9 @@ func TestOSDFAuthCreation(t *testing.T) {
 		t.Run(testInput.desc, func(t *testing.T) {
 			dirName := t.TempDir()
 			viper.Reset()
-			common.ResetOriginExports()
+			server_utils.ResetOriginExports()
 			defer viper.Reset()
-			defer common.ResetOriginExports()
+			defer server_utils.ResetOriginExports()
 
 			viper.Set("Xrootd.Authfile", filepath.Join(dirName, "authfile"))
 			viper.Set("Federation.TopologyUrl", ts.URL)
@@ -242,10 +276,14 @@ func TestOSDFAuthCreation(t *testing.T) {
 				viper.Set("Origin.RunLocation", dirName)
 				xrootdRun = param.Origin_RunLocation.GetString()
 			}
-			oldPrefix := config.SetPreferredPrefix("OSDF")
-			defer config.SetPreferredPrefix(oldPrefix)
+			oldPrefix, err := config.SetPreferredPrefix("OSDF")
+			assert.NoError(t, err)
+			defer func() {
+				_, err := config.SetPreferredPrefix(oldPrefix)
+				require.NoError(t, err)
+			}()
 
-			err := os.WriteFile(filepath.Join(dirName, "authfile"), []byte(testInput.authIn), fs.FileMode(0600))
+			err = os.WriteFile(filepath.Join(dirName, "authfile"), []byte(testInput.authIn), fs.FileMode(0600))
 			require.NoError(t, err, "Failure writing test input authfile")
 
 			err = EmitAuthfile(testInput.server)
@@ -298,12 +336,12 @@ func TestEmitAuthfile(t *testing.T) {
 		t.Run(testInput.desc, func(t *testing.T) {
 			dirName := t.TempDir()
 			viper.Reset()
-			common.ResetOriginExports()
+			server_utils.ResetOriginExports()
 			defer viper.Reset()
-			defer common.ResetOriginExports()
+			defer server_utils.ResetOriginExports()
 			viper.Set("Xrootd.Authfile", filepath.Join(dirName, "authfile"))
 			viper.Set("Origin.RunLocation", dirName)
-			server := &origin_ui.OriginServer{}
+			server := &origin.OriginServer{}
 
 			err := os.WriteFile(filepath.Join(dirName, "authfile"), []byte(testInput.authIn), fs.FileMode(0600))
 			require.NoError(t, err)
@@ -322,9 +360,9 @@ func TestEmitAuthfile(t *testing.T) {
 func TestEmitCfg(t *testing.T) {
 	dirname := t.TempDir()
 	viper.Reset()
-	common.ResetOriginExports()
+	server_utils.ResetOriginExports()
 	defer viper.Reset()
-	defer common.ResetOriginExports()
+	defer server_utils.ResetOriginExports()
 	viper.Set("Origin.RunLocation", dirname)
 	err := config.InitClient()
 	assert.Nil(t, err)
@@ -353,9 +391,9 @@ func TestEmitCfg(t *testing.T) {
 func TestLoadScitokensConfig(t *testing.T) {
 	dirname := t.TempDir()
 	viper.Reset()
-	common.ResetOriginExports()
+	server_utils.ResetOriginExports()
 	defer viper.Reset()
-	defer common.ResetOriginExports()
+	defer server_utils.ResetOriginExports()
 	viper.Set("Origin.RunLocation", dirname)
 	err := config.InitClient()
 	assert.Nil(t, err)
@@ -388,9 +426,9 @@ func TestLoadScitokensConfig(t *testing.T) {
 func TestMergeConfig(t *testing.T) {
 	dirname := t.TempDir()
 	viper.Reset()
-	common.ResetOriginExports()
+	server_utils.ResetOriginExports()
 	defer viper.Reset()
-	defer common.ResetOriginExports()
+	defer server_utils.ResetOriginExports()
 	viper.Set("Origin.RunLocation", dirname)
 	viper.Set("Origin.Port", 8443)
 	// We don't inherit any defaults at this level of code -- in order to recognize
@@ -412,7 +450,7 @@ func TestMergeConfig(t *testing.T) {
 			err = config.InitServer(ctx, config.OriginType)
 			require.NoError(t, err)
 
-			err = EmitScitokensConfig(&origin_ui.OriginServer{})
+			err = EmitScitokensConfig(&origin.OriginServer{})
 			require.NoError(t, err)
 
 			cfg, err := LoadScitokensConfig(filepath.Join(dirname, "scitokens-origin-generated.cfg"))
@@ -433,9 +471,9 @@ func TestGenerateConfig(t *testing.T) {
 	defer cancel()
 
 	viper.Reset()
-	common.ResetOriginExports()
+	server_utils.ResetOriginExports()
 	defer viper.Reset()
-	defer common.ResetOriginExports()
+	defer server_utils.ResetOriginExports()
 	viper.Set("Origin.SelfTest", false)
 	issuer, err := GenerateMonitoringIssuer()
 	require.NoError(t, err)
@@ -475,11 +513,11 @@ func TestGenerateConfig(t *testing.T) {
 
 func TestWriteOriginAuthFiles(t *testing.T) {
 	viper.Reset()
-	common.ResetOriginExports()
-	originAuthTester := func(server server_utils.XRootDServer, authStart string, authResult string) func(t *testing.T) {
+	server_utils.ResetOriginExports()
+	originAuthTester := func(server server_structs.XRootDServer, authStart string, authResult string) func(t *testing.T) {
 		return func(t *testing.T) {
 			defer viper.Reset()
-			defer common.ResetOriginExports()
+			defer server_utils.ResetOriginExports()
 			viper.Set("Origin.StorageType", "posix")
 			dirname := t.TempDir()
 			viper.Set("Origin.RunLocation", dirname)
@@ -500,14 +538,14 @@ func TestWriteOriginAuthFiles(t *testing.T) {
 			assert.Equal(t, authResult, string(authGen))
 		}
 	}
-	nsAds := []common.NamespaceAdV2{}
+	nsAds := []server_structs.NamespaceAdV2{}
 
-	originServer := &origin_ui.OriginServer{}
+	originServer := &origin.OriginServer{}
 	originServer.SetNamespaceAds(nsAds)
 
 	t.Run("MultiIssuer", originAuthTester(originServer, "u * t1 lr t2 lr t3 lr", "u * /.well-known lr t1 lr t2 lr t3 lr\n"))
 
-	nsAds = []common.NamespaceAdV2{}
+	nsAds = []server_structs.NamespaceAdV2{}
 	originServer.SetNamespaceAds(nsAds)
 
 	t.Run("EmptyAuth", originAuthTester(originServer, "", "u * /.well-known lr\n"))
@@ -519,7 +557,7 @@ func TestWriteOriginAuthFiles(t *testing.T) {
 
 func TestWriteCacheAuthFiles(t *testing.T) {
 
-	cacheAuthTester := func(server server_utils.XRootDServer, sciTokenResult string, authResult string) func(t *testing.T) {
+	cacheAuthTester := func(server server_structs.XRootDServer, sciTokenResult string, authResult string) func(t *testing.T) {
 		return func(t *testing.T) {
 
 			dirname := t.TempDir()
@@ -570,22 +608,22 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 	issuer4URL.Scheme = "https"
 	issuer4URL.Host = "issuer4.com"
 
-	PublicCaps := common.Capabilities{
+	PublicCaps := server_structs.Capabilities{
 		PublicReads: true,
 		Reads:       true,
 		Writes:      true,
 	}
-	PrivateCaps := common.Capabilities{
+	PrivateCaps := server_structs.Capabilities{
 		PublicReads: false,
 		Reads:       true,
 		Writes:      true,
 	}
 
-	nsAds := []common.NamespaceAdV2{
+	nsAds := []server_structs.NamespaceAdV2{
 		{
 			PublicRead: false,
 			Caps:       PrivateCaps,
-			Issuer: []common.TokenIssuer{{
+			Issuer: []server_structs.TokenIssuer{{
 				IssuerUrl:       issuer1URL,
 				BasePaths:       []string{"/p1"},
 				RestrictedPaths: []string{"/p1/nope", "p1/still_nope"}}},
@@ -593,7 +631,7 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 		{
 			PublicRead: false,
 			Caps:       PrivateCaps,
-			Issuer: []common.TokenIssuer{{
+			Issuer: []server_structs.TokenIssuer{{
 				IssuerUrl: issuer2URL,
 				BasePaths: []string{"/p2/path", "/p2/foo", "/p2/baz"},
 			}},
@@ -606,7 +644,7 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 		{
 			PublicRead: false,
 			Caps:       PrivateCaps,
-			Issuer: []common.TokenIssuer{{
+			Issuer: []server_structs.TokenIssuer{{
 				IssuerUrl: issuer1URL,
 				BasePaths: []string{"/p1_again"},
 			}, {
@@ -626,12 +664,12 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 		},
 	}
 
-	cacheServer := &cache_ui.CacheServer{}
+	cacheServer := &cache.CacheServer{}
 	cacheServer.SetNamespaceAds(nsAds)
 
 	t.Run("MultiIssuer", cacheAuthTester(cacheServer, cacheSciOutput, "u * /p3 lr /p4/depth lr /p2_noauth lr \n"))
 
-	nsAds = []common.NamespaceAdV2{}
+	nsAds = []server_structs.NamespaceAdV2{}
 	cacheServer.SetNamespaceAds(nsAds)
 
 	t.Run("EmptyNS", cacheAuthTester(cacheServer, cacheEmptyOutput, ""))

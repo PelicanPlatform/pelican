@@ -103,7 +103,7 @@ func registerANamespace(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	privateKeyRaw, err := config.LoadPrivateKey(param.IssuerKey.GetString())
+	privateKeyRaw, err := config.LoadPrivateKey(param.IssuerKey.GetString(), false)
 	if err != nil {
 		log.Error("Failed to load private key", err)
 		os.Exit(1)

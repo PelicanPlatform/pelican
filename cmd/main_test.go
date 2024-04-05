@@ -32,23 +32,39 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestHandleCLIVersionFlag(t *testing.T) {
 	// Save the current version to reset this variable
-	var currentVersion = config.GetVersion()
-	config.SetVersion("0.0.1")
-	date = "2023-10-06T15:26:50Z"
-	commit = "f0f94a3edf6641c2472345819a0d5453fc9e68d1"
-	builtBy = "goreleaser"
-
+	currentVersion := config.GetVersion()
+	currentDate := config.GetBuiltDate()
+	currentCommit := config.GetBuiltCommit()
+	currentBuiltBy := config.GetBuiltBy()
 	// Reset os.Args to ensure Windows doesn't do weird things to the test
 	oldArgs := os.Args
+
+	config.SetVersion("0.0.1")
+	config.SetBuiltDate("2023-10-06T15:26:50Z")
+	config.SetBuiltCommit("f0f94a3edf6641c2472345819a0d5453fc9e68d1")
+	config.SetBuiltBy("goreleaser")
+
+	t.Cleanup(func() {
+		// Restore the args back when test finished
+		os.Args = oldArgs
+
+		// Set the version back to what it was
+		config.SetVersion(currentVersion)
+		config.SetBuiltDate(currentDate)
+		config.SetBuiltCommit(currentCommit)
+		config.SetBuiltBy(currentBuiltBy)
+	})
+
 	os.Args = []string{os.Args[0]}
 
 	mockVersionOutput := fmt.Sprintf(
 		"Version: %s\nBuild Date: %s\nBuild Commit: %s\nBuilt By: %s",
-		config.GetVersion(), date, commit, builtBy,
+		config.GetVersion(), config.GetBuiltDate(), config.GetBuiltCommit(), config.GetBuiltBy(),
 	)
 
 	testCases := []struct {
@@ -92,20 +108,40 @@ func TestHandleCLIVersionFlag(t *testing.T) {
 	}
 
 	batchTest := func(t *testing.T, arguments []string, expected string) {
-		// Redirect output to a pip
-		oldStdout := os.Stdout
-		r, w, _ := os.Pipe()
-		os.Stdout = w
+		got := ""
 
-		err := handleCLI(arguments)
+		if expected == mockVersionOutput {
+			// Redirect output to a pip
+			oldStderr := os.Stderr
+			r, w, _ := os.Pipe()
+			os.Stderr = w
 
-		// Close the write of pip and redirect output back to stdout
-		w.Close()
-		out, _ := io.ReadAll(r)
-		os.Stdout = oldStdout
+			err := handleCLI(arguments)
+			require.NoError(t, err)
 
-		got := strings.TrimSpace(string(out))
-		assert.NoError(t, err, "Should not have error running the function")
+			// Close the write of pip and redirect output back to Stderr
+			w.Close()
+			out, _ := io.ReadAll(r)
+			os.Stderr = oldStderr
+
+			got = strings.TrimSpace(string(out))
+		} else {
+			// Redirect output to a pip
+			oldStdout := os.Stdout
+			r, w, _ := os.Pipe()
+			os.Stdout = w
+
+			err := handleCLI(arguments)
+			require.NoError(t, err)
+
+			// Close the write of pip and redirect output back to Stderr
+			w.Close()
+			out, _ := io.ReadAll(r)
+			os.Stdout = oldStdout
+
+			got = strings.TrimSpace(string(out))
+		}
+
 		if expected != mockVersionOutput {
 			// If the expected string is not the version output, use Contains to check
 			// This is mainly for checking against command help output
@@ -120,12 +156,6 @@ func TestHandleCLIVersionFlag(t *testing.T) {
 			batchTest(t, tc.args, tc.expected)
 		})
 	}
-
-	// Restore the args back when test finished
-	os.Args = oldArgs
-
-	// Set the version back to what it was
-	config.SetVersion(currentVersion)
 }
 
 func TestHandleCLIExecutableAlias(t *testing.T) {

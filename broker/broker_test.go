@@ -39,10 +39,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/registry"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/token_scopes"
@@ -309,7 +309,7 @@ func TestRetrieveTimeout(t *testing.T) {
 	err = json.Unmarshal(responseBytes, &brokerResp)
 	require.NoError(t, err)
 
-	assert.Equal(t, common.RespPollTimeout, brokerResp.Status)
+	assert.Equal(t, server_structs.RespPollTimeout, brokerResp.Status)
 
 	ctx, cancelFunc := context.WithTimeout(ctx, 50*time.Millisecond)
 	defer cancelFunc()

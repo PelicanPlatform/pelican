@@ -15,7 +15,8 @@ VERIFIED_OBJECT_STRUCTURES = [
     "OIDCAuthenticationRequirements",
     "AuthorizationTemplates",
     "IPMapping",
-    "Exports"
+    "Exports",
+    "Lots"
 ]
 
 

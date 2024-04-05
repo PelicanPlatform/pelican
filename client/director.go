@@ -28,38 +28,16 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/pelicanplatform/pelican/config"
-	namespaces "github.com/pelicanplatform/pelican/namespaces"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/pelicanplatform/pelican/config"
+	namespaces "github.com/pelicanplatform/pelican/namespaces"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 type directorResponse struct {
 	Error string `json:"error"`
-}
-
-// Simple parser to that takes a "values" string from a header and turns it
-// into a map of key/value pairs
-func HeaderParser(values string) (retMap map[string]string) {
-	retMap = map[string]string{}
-
-	// Some headers might not have values, such as the
-	// X-OSDF-Authorization header when the resource is public
-	if values == "" {
-		return
-	}
-
-	mapPairs := strings.Split(values, ",")
-	for _, pair := range mapPairs {
-		// Remove any unwanted spaces
-		pair = strings.ReplaceAll(pair, " ", "")
-
-		// Break out key/value pairs and put in the map
-		split := strings.Split(pair, "=")
-		retMap[split[0]] = split[1]
-	}
-
-	return retMap
 }
 
 // Given the Director response, create the ordered list of caches
@@ -70,7 +48,7 @@ func CreateNsFromDirectorResp(dirResp *http.Response) (namespace namespaces.Name
 		err = errors.New("Pelican director did not include mandatory X-Pelican-Namespace header in response")
 		return
 	}
-	xPelicanNamespace := HeaderParser(pelicanNamespaceHdr[0])
+	xPelicanNamespace := utils.HeaderParser(pelicanNamespaceHdr[0])
 	namespace.Path = xPelicanNamespace["namespace"]
 	namespace.UseTokenOnRead, _ = strconv.ParseBool(xPelicanNamespace["require-token"])
 	namespace.ReadHTTPS, _ = strconv.ParseBool(xPelicanNamespace["readhttps"])
@@ -82,7 +60,7 @@ func CreateNsFromDirectorResp(dirResp *http.Response) (namespace namespaces.Name
 		//So it's a map entry - HeaderParser returns a max entry
 		//We want to appen the value
 		for _, authEntry := range dirResp.Header.Values("X-Pelican-Authorization") {
-			parsedEntry := HeaderParser(authEntry)
+			parsedEntry := utils.HeaderParser(authEntry)
 			xPelicanAuthorization = append(xPelicanAuthorization, parsedEntry["issuer"])
 		}
 		namespace.Issuer = xPelicanAuthorization
@@ -90,7 +68,7 @@ func CreateNsFromDirectorResp(dirResp *http.Response) (namespace namespaces.Name
 
 	var xPelicanTokenGeneration map[string]string
 	if len(dirResp.Header.Values("X-Pelican-Token-Generation")) > 0 {
-		xPelicanTokenGeneration = HeaderParser(dirResp.Header.Values("X-Pelican-Token-Generation")[0])
+		xPelicanTokenGeneration = utils.HeaderParser(dirResp.Header.Values("X-Pelican-Token-Generation")[0])
 
 		// Instantiate the cred gen struct
 		namespace.CredentialGen = &namespaces.CredentialGeneration{}

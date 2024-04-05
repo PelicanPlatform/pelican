@@ -19,13 +19,24 @@
 package namespaces
 
 import (
+	"context"
+	_ "embed"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/config"
+)
+
+var (
+	//go:embed resources/itb-namespaces.json
+	itbNamespaces string
 )
 
 // TestMatchNamespace calls MatchNamespace with a hostname, checking
@@ -90,8 +101,12 @@ func TestMatchNamespace(t *testing.T) {
 		t.Error(err)
 	}
 	// Reset the prefix to get old OSDF fallback behavior.
-	oldPrefix := config.SetPreferredPrefix("OSDF")
-	defer config.SetPreferredPrefix(oldPrefix)
+	oldPrefix, err := config.SetPreferredPrefix("OSDF")
+	assert.NoError(t, err)
+	defer func() {
+		_, err := config.SetPreferredPrefix(oldPrefix)
+		assert.NoError(t, err)
+	}()
 
 	viper.Reset()
 	err = config.InitClient()
@@ -181,10 +196,41 @@ func TestFullNamespace(t *testing.T) {
 
 // TestDownloadNamespaces tests the download of the namespaces JSON
 func TestDownloadNamespaces(t *testing.T) {
+	svr := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "GET" {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		if r.URL.Path == "/stashcache/namespaces" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, err := w.Write([]byte(itbNamespaces))
+			require.NoError(t, err)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+
 	os.Setenv("PELICAN_TOPOLOGY_NAMESPACE_URL", "https://topology-itb.opensciencegrid.org/stashcache/namespaces")
 	viper.Reset()
 	err := config.InitClient()
 	assert.Nil(t, err)
+
+	// Hijack the common transport used by Pelican, forcing all connections to go to our test server
+	transport := config.GetTransport()
+	oldDial := transport.DialContext
+	transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		dialer := net.Dialer{}
+		return dialer.DialContext(ctx, svr.Listener.Addr().Network(), svr.Listener.Addr().String())
+	}
+	oldConfig := transport.TLSClientConfig
+	transport.TLSClientConfig = svr.TLS.Clone()
+	transport.TLSClientConfig.InsecureSkipVerify = true
+	t.Cleanup(func() {
+		transport.DialContext = oldDial
+		transport.TLSClientConfig = oldConfig
+	})
+
 	defer os.Unsetenv("PELICAN_TOPOLOGY_NAMESPACE_URL")
 	namespaceBytes, err := downloadNamespace()
 	assert.NoError(t, err, "Failed to download namespaces")
@@ -206,10 +252,14 @@ func TestDownloadNamespacesFail(t *testing.T) {
 func TestGetNamespaces(t *testing.T) {
 	// Set the environment to an invalid URL, so it is forced to use the "built-in" namespaces.json
 	os.Setenv("OSDF_TOPOLOGY_NAMESPACE_URL", "https://doesnotexist.org.blah/namespaces.json")
-	oldPrefix := config.SetPreferredPrefix("OSDF")
-	defer config.SetPreferredPrefix(oldPrefix)
+	oldPrefix, err := config.SetPreferredPrefix("OSDF")
+	assert.NoError(t, err)
+	defer func() {
+		_, err := config.SetPreferredPrefix(oldPrefix)
+		assert.NoError(t, err)
+	}()
 	viper.Reset()
-	err := config.InitClient()
+	err = config.InitClient()
 	assert.Nil(t, err)
 	defer os.Unsetenv("OSDF_TOPOLOGY_NAMESPACE_URL")
 	namespaces, err := GetNamespaces()

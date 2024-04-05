@@ -21,14 +21,17 @@ package launchers
 import (
 	"context"
 	"fmt"
+	"net/url"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
-	log "github.com/sirupsen/logrus"
-	"golang.org/x/sync/errgroup"
 )
 
 func DirectorServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) error {
@@ -50,6 +53,8 @@ func DirectorServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 
 	director.ConfigTTLCache(ctx, egrp)
 
+	director.ConfigFilterdServers()
+
 	// Configure the shortcut middleware to either redirect to a cache
 	// or to an origin
 	defaultResponse := param.Director_DefaultResponse.GetString()
@@ -58,11 +63,17 @@ func DirectorServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 			" but you provided %q. Was there a typo?", defaultResponse)
 	}
 	log.Debugf("The director will redirect to %ss by default", defaultResponse)
+	if param.Director_SupportContactUrl.IsSet() {
+		_, err := url.Parse(param.Director_SupportContactUrl.GetString())
+		if err != nil {
+			return errors.Wrap(err, "invalid URL for Director.SupportContactUrl")
+		}
+	}
 	rootGroup := engine.Group("/")
-	director.RegisterDirectorAuth(rootGroup)
+	director.RegisterDirectorOIDCAPI(rootGroup)
 	director.RegisterDirectorWebAPI(rootGroup)
 	engine.Use(director.ShortcutMiddleware(defaultResponse))
-	director.RegisterDirector(ctx, rootGroup)
+	director.RegisterDirectorAPI(ctx, rootGroup)
 
 	return nil
 }

@@ -197,6 +197,19 @@ func GenParamEnum() {
 	if err != nil {
 		panic(err)
 	}
+
+	// Skip writing the file if it is the same as the existing file
+	// This is so that the file is not updated if it is not changed making builds faster
+	if _, err := os.Stat("../docs/parameters.json"); err == nil {
+		existingJsonBytes, err := os.ReadFile("../docs/parameters.json")
+		if err != nil {
+			panic(err)
+		}
+		if bytes.Equal(existingJsonBytes, prettyJSON.Bytes()) {
+			return
+		}
+	}
+
 	// Create the json file to be generated (for the documentation website)
 	fJSON, err := os.Create("../docs/parameters.json")
 	if err != nil {

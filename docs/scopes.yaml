@@ -128,3 +128,30 @@ description: >-
   For granting object staging permissions to the bearer of the token. This scope must also posses a path to be valid, eg `storage.stage:/foo/bar`
 issuedBy: ["origin"]
 acceptedBy: ["origin", "cache"]
+---
+############################
+#      Lotman Scopes       #
+############################
+name: "lot.create"
+description: >-
+  For creating a new lot
+issuedBy: ["origin"]
+acceptedBy: ["cache"]
+---
+name: "lot.read"
+description: >-
+  For getting/reading the contents of a lot from a cache
+issuedBy: ["origin"]
+acceptedBy: ["cache"]
+---
+name: "lot.modify"
+description: >-
+  For modifying the contents of a lot in a cache
+issuedBy: ["origin"]
+acceptedBy: ["cache"]
+---
+name: "lot.delete"
+description: >-
+  For deleting a lot from a cache
+issuedBy: ["origin"]
+acceptedBy: ["cache"]

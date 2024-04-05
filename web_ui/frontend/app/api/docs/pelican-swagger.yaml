@@ -14,6 +14,8 @@ info:
     The cookie is issued after a successful call to `/api/v1.0/auth/login`. However, OpenAPI 2.0 does not support specifying cookie-based security check.
     Therefore, as an alternative, we will add `Authentication Required` to the API description where needed.
 
+    For endpoint that is only accesible by users with admin privilege, we mark the endpoint as `Admin privilege Required`.
+
 
     For how to set up Pelican servers, please refer to the documentation at [docs.pelicanplatform.org](https://docs.pelicanplatform.org/)"
   license:
@@ -84,6 +86,19 @@ definitions:
         type: string
         description: The detail error message
         example: Bad request
+  ErrorModelV2:
+    type: object
+    description: The error response of a request
+    properties:
+      status:
+        type: string
+        default: ""
+        example: "error"
+        description: The response status. It's one of success|error|timeout
+      msg:
+        type: string
+        default: ""
+        description: The response message
   SuccessModel:
     type: object
     description: The successful reponse of a request
@@ -229,6 +244,14 @@ definitions:
       custom_fields:
         type: object
         description: The custom fields to register, configurable by setting Registry.CustomRegistrationFields.
+  TopologyNamespace:
+    type: object
+    properties:
+      id:
+        type: integer
+      prefix:
+        type: string
+        default: ""
   RegistrationFieldType:
     type: string
     enum:
@@ -309,6 +332,10 @@ definitions:
         type: string
         description: The URL of the issuer on the server to check token validity
         example: "https://example-origin.com:8443"
+      broker_url:
+        type: string
+        description: The URL to the connection broker
+        example: "https://example-origin.com:8447"
       url:
         type: string
         description: The URL of XrootD service on the server to access objects
@@ -329,10 +356,44 @@ definitions:
         type: number
         description: The longitude of the server based on its IP address
         default: 0
+      enableWrite:
+        type: boolean
+        description: If the origin server enables write access. Only valid for type=Origin
+        default: false
+      enableFallbackRead:
+        type: boolean
+        description: If fall back to read from the origin when there's no cache to serve the file
+        default: false
+      filtered:
+        type: boolean
+        description: |
+          If the server is excluded from serving client object requests.
+          No traffic will be redirect to the server if the value is true
+        default: false
+      filteredType:
+        type: string
+        description: |
+          The type of filtering/allowance of the server. Can be permFilter|tempFilter|tempAllow
+
+          * **permFilter** when the server is filtered by configuration parameter `Director.FilteredServers`
+          * **tempFilter** when the server is filtered by web API request at `/servers/filter/*name`. The filter
+            rule lives in-memory and will be reset at the server restart
+          * **tempAllow** when the  server is filtered by configuration parameter but _allowed_ by the web API at `/servers/allow/*name`,
+            the change lives in-memory and will be overwritten by config parameter at the server restart
+        default: ""
       status:
         type: string
         description: The status of director file transfer test against the server. Can be Initializing|Unknown|OK|Error
         default: Unknown
+  DirectorContact:
+    type: object
+    properties:
+      email:
+        type: string
+        default: ""
+      url:
+        type: string
+        default: ""
 
 tags:
   - name: auth
@@ -369,7 +430,8 @@ paths:
       tags:
         - common
       summary: Return the configuration values of the server and their type
-      description: "`Authentication Required`"
+      description: >-
+        `Authentication Required` `Admin privilege Required`
       produces:
         - application/json
       responses:
@@ -417,7 +479,7 @@ paths:
         - "common"
       summary: Update the server configuration with user-provided changes
       description:
-        "`Authentication Required` `Admin Previlege Required`
+        "`Authentication Required` `Admin privilege Required`
 
 
         The server will restart promptly after a  successful request. You may query against
@@ -502,7 +564,7 @@ paths:
       tags:
         - metrics
       summary: Returns the health status of server components
-      description: "`Authentication Required`"
+      description: "`Authentication Required` `Admin Privilege Required"
       produces:
         - application/json
       responses:
@@ -609,7 +671,7 @@ paths:
       tags:
         - auth
       summary: Reset the password for the user
-      description: "`Authentication Required`"
+      description: "`Authentication Required` `Admin Privilege Required`"
       consumes:
         - application/json
       produces:
@@ -952,7 +1014,7 @@ paths:
       description: "`Authentication Required`
 
 
-        For user with admin previlege, it returns for all valid namespace request.
+        For user with admin privilege, it returns for all valid namespace request.
 
 
         For general users, it only returns namespace belonging to the user, or it returns 404
@@ -983,7 +1045,7 @@ paths:
             type: object
             $ref: "#/definitions/ErrorModel"
         "404":
-          description: Namespace not found, either does not exists or the user doesn't have previlege to get it
+          description: Namespace not found, either does not exists or the user doesn't have privilege to get it
           schema:
             type: object
             $ref: "#/definitions/ErrorModel"
@@ -999,7 +1061,7 @@ paths:
       description: "`Authentication Required`
 
 
-        For user with admin previlege, they can update any valid namespace.
+        For user with admin privilege, they can update any valid namespace.
 
 
         Non-admin users can update only namespaces they own and only if the approval status is `admin_metadata.status == approved`, otherwise the endpoint returns 404.
@@ -1043,7 +1105,7 @@ paths:
             type: object
             $ref: "#/definitions/ErrorModel"
         "403":
-          description: The user does not have previlege to update the namespace
+          description: The user does not have privilege to update the namespace
           schema:
             type: object
             $ref: "#/definitions/ErrorModel"
@@ -1057,6 +1119,44 @@ paths:
           schema:
             type: object
             $ref: "#/definitions/ErrorModel"
+    delete:
+      summary: Delete a namespace registration by ID
+      description: "`Authentication Required` `Admin privilege Required`
+
+        Only admin users have privilege to this action.
+        "
+      tags:
+        - "registry_ui"
+      produces:
+        - "application/json"
+      parameters:
+        - name: id
+          in: path
+          description: ID of the namespace to update
+          required: true
+          type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+            $ref: "#/definitions/SuccessModel"
+        "400":
+          description: Invalid namespace ID
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "403":
+          description: The user does not have privilege to update the namespace
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "500":
+          description: Internal server error
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+
   /registry_ui/namespaces/{id}/pubkey:
     get:
       tags:
@@ -1083,7 +1183,7 @@ paths:
             type: object
             $ref: "#/definitions/ErrorModel"
         "404":
-          description: Namespace not found, either does not exist or the user doesn't have previlege to get it
+          description: Namespace not found, either does not exist or the user doesn't have privilege to get it
           schema:
             type: object
             $ref: "#/definitions/ErrorModel"
@@ -1103,7 +1203,7 @@ paths:
         Update namespace status to `approved` by namespace `id`.
 
 
-        This action requires admin previlege to perform.
+        This action requires admin privilege to perform.
         "
       parameters:
         - name: id
@@ -1135,7 +1235,7 @@ paths:
             type: object
             $ref: "#/definitions/ErrorModel"
         "403":
-          description: The user does not have previlege to update the namespace status
+          description: The user does not have privilege to update the namespace status
           schema:
             type: object
             $ref: "#/definitions/ErrorModel"
@@ -1160,7 +1260,7 @@ paths:
         Update namespace status to `denied` by namespace `id`.
 
 
-        This action requires admin previlege to perform.
+        This action requires admin privilege to perform.
         "
       parameters:
         - name: id
@@ -1192,7 +1292,7 @@ paths:
             type: object
             $ref: "#/definitions/ErrorModel"
         "403":
-          description: The user does not have previlege to update the namespace status
+          description: The user does not have privilege to update the namespace status
           schema:
             type: object
             $ref: "#/definitions/ErrorModel"
@@ -1233,6 +1333,28 @@ paths:
           schema:
             type: object
             $ref: "#/definitions/ErrorModel"
+  /registry_ui/topology:
+    get:
+      tags:
+        - "registry_ui"
+      summary: Returns a list of namespaces from the OSDF namespace topology
+      description: "The endpoint is only available when Pelican binary is running in OSDF mode. Otherwise, the endpoint returns an empty list."
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: array
+            items:
+              type: object
+              $ref: "#/definitions/TopologyNamespace"
+              minItems: 0
+        "500":
+          description: Error retrieving namespaces from the topology
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
   /director_ui/servers:
     get:
       tags:
@@ -1256,6 +1378,83 @@ paths:
               minimum: 0
         "400":
           description: "Bad request, query parameter is invalid"
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+  /director_ui/servers/filter/{name}:
+    patch:
+      summary: Filter a server from director redirecting
+      description: |
+        `Authentication Required` `Admin privilege Required`
+
+
+        **The filter rules registered by this endpoint are in-memory and will be reset at the server restart.**
+
+        If `Director.FilteredServers` is set, you may add additional, in-memory filter rules.
+
+        If you want to persist the filtering rules, set `Director.FilteredServers` in your server config instead.
+      tags:
+        - "director_ui"
+      parameters:
+        - in: path
+          name: name
+          type: string
+          required: true
+          description: The server name to filter
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: "OK"
+          schema:
+            type: object
+            $ref: "#/definitions/SuccessModel"
+        "400":
+          description: "Bad request. Either `name` is invalid or the server has been filtered"
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "403":
+          description: "Forbidden. Admin privilege required"
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+  /director_ui/servers/allow/{name}:
+    patch:
+      summary: Reset filtering rule for a server from director redirecting
+      description: |
+        `Authentication Required` `Admin`
+
+
+        **The reset of filter rules registered by this endpoint are in-memory and will be removed at the server restart.**
+
+        You may reset the rules defined in `Director.FilteredServers` in-memory but they will be overwritten at the server restart
+      tags:
+        - "director_ui"
+      parameters:
+        - in: path
+          name: name
+          type: string
+          required: true
+          description: The server name to reset filtering
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: "OK"
+          schema:
+            type: object
+            $ref: "#/definitions/SuccessModel"
+        "400":
+          description: "Bad request. Either `name` is invalid or the server is not being filtered"
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "403":
+          description: "Forbidden. Admin privilege required"
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
   /director_ui/servers/origins/stat:
     get:
       tags:
@@ -1385,6 +1584,24 @@ paths:
           schema:
             type: object
             $ref: "#/definitions/ErrorModel"
+  /director_ui/contact:
+    get:
+      summary: Get the support contact information of the federation the director hostnames
+      description: "Note that the response value (if successful) `email` and `url` can be either or both empty strings"
+      tags:
+        - "director_ui"
+      responses:
+        "200":
+          description: "OK"
+          schema:
+            type: object
+            $ref: "#/definitions/DirectorContact"
+        "500":
+          description: "Bad server configuration. Failed to get the director contact information from the server configuration"
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+
   /director/namespaces/prefix/{path}:
     get:
       summary: "Get the longest matched namespace prefix of a path"
