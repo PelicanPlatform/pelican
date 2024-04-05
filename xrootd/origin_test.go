@@ -221,7 +221,11 @@ func TestMultiExportOrigin(t *testing.T) {
 	require.True(t, ok)
 }
 
-func runS3Test(t *testing.T, ctx context.Context, egrp *errgroup.Group, bucketName, urlStyle, objectName string) {
+func runS3Test(t *testing.T, bucketName, urlStyle, objectName string) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
 	viper.Reset()
 	server_utils.ResetOriginExports()
 	defer viper.Reset()
@@ -249,9 +253,9 @@ func runS3Test(t *testing.T, ctx context.Context, egrp *errgroup.Group, bucketNa
 	mockupCancel := originMockup(ctx, egrp, t)
 	defer mockupCancel()
 
-	originEndpoint := fmt.Sprintf("%s/%s", param.Origin_Url.GetString(), federationPrefix)
-	// At this point, a 404 means the server is running, which means its ready to grab objects from
-	err := server_utils.WaitUntilWorking(ctx, "GET", originEndpoint, "xrootd", 404, true)
+	originEndpoint := param.Origin_Url.GetString()
+	// At this point, a 403 means the server is running, which means its ready to grab objects from
+	err := server_utils.WaitUntilWorking(ctx, "GET", originEndpoint, "xrootd", 403, true)
 	if err != nil {
 		t.Fatalf("Unsucessful test: Server encountered an error: %v", err)
 	}
@@ -278,19 +282,15 @@ func runS3Test(t *testing.T, ctx context.Context, egrp *errgroup.Group, bucketNa
 }
 
 func TestS3OriginConfig(t *testing.T) {
-	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
-	defer func() { require.NoError(t, egrp.Wait()) }()
-	defer cancel()
-
 	t.Run("S3OriginPathBucket", func(t *testing.T) {
-		runS3Test(t, ctx, egrp, "noaa-wod-pds", "path", "MD5SUMS")
+		runS3Test(t, "noaa-wod-pds", "path", "MD5SUMS")
 	})
 
 	t.Run("S3OriginVirtualBucket", func(t *testing.T) {
-		runS3Test(t, ctx, egrp, "noaa-wod-pds", "virtual", "MD5SUMS")
+		runS3Test(t, "noaa-wod-pds", "virtual", "MD5SUMS")
 	})
 
 	t.Run("S3OriginNoBucket", func(t *testing.T) {
-		runS3Test(t, ctx, egrp, "", "path", "noaa-wod-pds/MD5SUMS")
+		runS3Test(t, "", "path", "noaa-wod-pds/MD5SUMS")
 	})
 }

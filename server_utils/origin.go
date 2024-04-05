@@ -19,7 +19,6 @@
 package server_utils
 
 import (
-	"fmt"
 	"os"
 	"path"
 	"path/filepath"
@@ -120,6 +119,94 @@ func StringListToCapsHookFunc() mapstructure.DecodeHookFuncType {
 	}
 }
 
+// Since Federation Prefixes get treated like POSIX filepaths by XRootD and other services, we need to
+// validate them to ensure funky things don't ensue
+func validateFederationPrefix(prefix string) error {
+	if len(prefix) == 0 {
+		return errors.Errorf("prefix %s is empty", prefix)
+	}
+
+	if !strings.HasPrefix(prefix, "/") {
+		return errors.Errorf("prefix %s must begin with '/'", prefix)
+	}
+	if strings.Contains(prefix, "//") {
+		return errors.Errorf("prefix %s contains invalid '//' characters", prefix)
+	}
+
+	if strings.Contains(prefix, "./") {
+		return errors.Errorf("prefix %s contains invalid './' characters", prefix)
+	}
+
+	if strings.Contains(prefix, "..") {
+		return errors.Errorf("prefix %s contains invalid '..' characters", prefix)
+	}
+
+	if strings.HasPrefix(prefix, "~") {
+		return errors.Errorf("prefix %s contains begins with invalid '~' character", prefix)
+	}
+
+	if strings.Contains(prefix, "$") {
+		return errors.Errorf("prefix %s contains invalid '$' characters", prefix)
+	}
+
+	if strings.Contains(prefix, "*") {
+		return errors.Errorf("prefix %s contains invalid '*' characters", prefix)
+	}
+
+	if strings.Contains(prefix, `\`) {
+		return errors.Errorf("prefix %s contains invalid '\\' characters", prefix)
+	}
+
+	return nil
+}
+
+// https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucketnamingrules.html
+func validateBucketName(bucket string) error {
+	if len(bucket) == 0 { // We treat 0-length bucket names as a special case
+		return nil
+	} else {
+		// However, if there _is_ a bucket name, it must be between 3 and 63 characters
+		if len(bucket) < 3 || len(bucket) > 63 {
+			return errors.Errorf("Bucket name %s is not between 3 and 63 characters", bucket)
+		}
+	}
+
+	// Buckets cannot contain ..
+	if strings.Contains(bucket, "..") {
+		return errors.Errorf("Bucket name %s contains invalid '..'", bucket)
+	}
+
+	// Buckets must only contain letters, numbers, '.' and '-'
+	for _, char := range bucket {
+		if !((char >= 'a' && char <= 'z') || (char >= '0' && char <= '9') || char == '.' || char == '-') {
+			return errors.Errorf("Bucket name %s contains invalid character %c", bucket, char)
+		}
+	}
+
+	// Buckets cannot have capital letters
+	if strings.ToLower(bucket) != bucket {
+		return errors.Errorf("Bucket name %s contains capital letters", bucket)
+	}
+
+	// Buckets must begin with letter or number and end with letter or number
+	if !((bucket[0] >= 'a' && bucket[0] <= 'z') || (bucket[0] >= '0' && bucket[0] <= '9')) ||
+		!((bucket[len(bucket)-1] >= 'a' && bucket[len(bucket)-1] <= 'z') || (bucket[len(bucket)-1] >= '0' && bucket[len(bucket)-1] <= '9')) {
+		return errors.Errorf("Bucket name %s must begin and end with a letter or number", bucket)
+	}
+
+	// Buckets cannot begin with sthree- or sthree-configurator or xn--
+	if strings.HasPrefix(bucket, "sthree-") || strings.HasPrefix(bucket, "xn--") {
+		return errors.Errorf("Bucket name %s cannot begin with 'sthree-' or 'sthree-configurator'", bucket)
+	}
+
+	// Bucket names cannot end in -s3alias or --ol-s3
+	if strings.HasSuffix(bucket, "-s3alias") || strings.HasSuffix(bucket, "--ol-s3") {
+		return errors.Errorf("Bucket name %s cannot end with '-s3alias' or '--ol-s3'", bucket)
+	}
+
+	return nil
+}
+
 // GetOriginExports is used to parse the config yaml and return a list of OriginExports. It should only touch
 // the yaml the first time it's called, and then return the cached value on subsequent calls.
 // When the configuration is set up using the older single-prefix style of configuration, the function will
@@ -154,12 +241,12 @@ func GetOriginExports() (*[]OriginExport, error) {
 				storagePrefix := filepath.Clean(volumeMountInfo[0])
 				federationPrefix := filepath.Clean(volumeMountInfo[1])
 
-				if !strings.HasPrefix(storagePrefix, "/") || !strings.HasPrefix(federationPrefix, "/") {
-					return nil, errors.New(fmt.Sprintf("Volume mount/ExportVolume paths must be absolute and begin with '/', but you provided %s:%s", storagePrefix, federationPrefix))
+				// StoragePrefix and FederationPrefix validation follow the same POSIX rules
+				if err := validateFederationPrefix(federationPrefix); err != nil {
+					return nil, errors.Wrapf(err, "invalid federation prefix for volume %s", volume)
 				}
-
-				if storagePrefix == "" || federationPrefix == "" {
-					return nil, errors.New("Volume mount/ExportVolume paths cannot be empty")
+				if err := validateFederationPrefix(storagePrefix); err != nil {
+					return nil, errors.Wrapf(err, "invalid storage prefix for volume %s", volume)
 				}
 
 				reads := param.Origin_EnableReads.GetBool() || param.Origin_EnablePublicReads.GetBool()
@@ -245,8 +332,11 @@ func GetOriginExports() (*[]OriginExport, error) {
 				bucket := volumeMountInfo[0]
 				federationPrefix := filepath.Clean(volumeMountInfo[1])
 
-				if federationPrefix == "" {
-					return nil, errors.New(fmt.Sprintf("Volume mounts for S3 origins require a federation prefix, but none was provided: %s", volume))
+				if err := validateFederationPrefix(federationPrefix); err != nil {
+					return nil, errors.Wrapf(err, "invalid federation prefix for volume %s", volume)
+				}
+				if err := validateBucketName(bucket); err != nil {
+					return nil, errors.Wrapf(err, "invalid bucket name for volume %s", volume)
 				}
 
 				if bucket == "" {
@@ -307,8 +397,26 @@ from S3 service URL. In this configuration, objects can be accessed at /federati
 				viper.Set("Origin.EnableListings", (*originExports)[0].Capabilities.Listings)
 				viper.Set("Origin.EnableDirectReads", (*originExports)[0].Capabilities.DirectReads)
 			}
+
+			// Validate each bucket name and federation prefix in the exports
+			for _, export := range *originExports {
+				if err := validateFederationPrefix(export.FederationPrefix); err != nil {
+					return nil, errors.Wrapf(err, "invalid federation prefix for export %s", export.FederationPrefix)
+				}
+				if err := validateBucketName(export.S3Bucket); err != nil {
+					return nil, errors.Wrapf(err, "invalid bucket name for export %s", export.S3Bucket)
+				}
+			}
 		} else { // we're using the simple Origin.FederationPrefix
 			log.Infoln("Configuring single-export S3 origin")
+
+			// Validate the federation prefix and bucket names
+			if err := validateFederationPrefix(param.Origin_FederationPrefix.GetString()); err != nil {
+				return nil, errors.Wrapf(err, "invalid federation prefix for export %s", param.Origin_FederationPrefix.GetString())
+			}
+			if err := validateBucketName(param.Origin_S3Bucket.GetString()); err != nil {
+				return nil, errors.Wrapf(err, "invalid bucket name for export %s", param.Origin_S3Bucket.GetString())
+			}
 
 			reads := (param.Origin_EnableReads.GetBool() || param.Origin_EnablePublicReads.GetBool())
 			originExport := OriginExport{

@@ -22,6 +22,7 @@ package server_utils
 
 import (
 	_ "embed"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -437,4 +438,58 @@ func TestCheckSentinelLocation(t *testing.T) {
 		assert.Error(t, err)
 		assert.False(t, ok)
 	})
+}
+
+func runBucketNameTest(t *testing.T, name string, valid bool) {
+	t.Run(fmt.Sprintf("testBucketNameValidation-%s", name), func(t *testing.T) {
+		err := validateBucketName(name)
+		if valid {
+			assert.NoError(t, err)
+		} else {
+			assert.Error(t, err)
+		}
+	})
+}
+func TestBucketNameValidation(t *testing.T) {
+	// Valid bucket names
+	valid := true
+	runBucketNameTest(t, "my-bucket", valid)
+	runBucketNameTest(t, "my-bucket-123", valid)
+	runBucketNameTest(t, "my.bucket", valid)
+	runBucketNameTest(t, "my-bucket-123.456", valid)
+
+	// Invalid bucket names
+	valid = false
+	runBucketNameTest(t, "my_bucket", valid)
+	runBucketNameTest(t, "my..bucket", valid)
+	runBucketNameTest(t, "my-bucket-123-", valid)
+	runBucketNameTest(t, "my-bucket-123.", valid)
+	runBucketNameTest(t, "My-BUCKET", valid)
+	runBucketNameTest(t, "sthree-bucket", valid)
+	runBucketNameTest(t, "my-bucket-123456789012345678901234567890123456789012345678901234567890123412341234123412341234", valid)
+	runBucketNameTest(t, "my-bucket-s3alias", valid)
+	runBucketNameTest(t, "my-bucket--ol-s3", valid)
+}
+
+func runFedPrefixTest(t *testing.T, name string, valid bool) {
+	t.Run(fmt.Sprintf("testFedPrefixValidation-%s", name), func(t *testing.T) {
+		err := validateFederationPrefix(name)
+		if valid {
+			assert.NoError(t, err)
+		} else {
+			assert.Error(t, err)
+		}
+	})
+}
+func TestFederationPrefixValidation(t *testing.T) {
+	runFedPrefixTest(t, "", false)                 // Test empty prefix
+	runFedPrefixTest(t, "noSlashPrefix", false)    // Test prefix without leading '/'
+	runFedPrefixTest(t, "/double//slash", false)   // Test prefix with '//'
+	runFedPrefixTest(t, "/dotSlash./test", false)  // Test prefix with './'
+	runFedPrefixTest(t, "/dotDot..test", false)    // Test prefix with '..'
+	runFedPrefixTest(t, "~tilde/test", false)      // Test prefix with leading '~'
+	runFedPrefixTest(t, "/dollar$test", false)     // Test prefix with '$'
+	runFedPrefixTest(t, "/star*test", false)       // Test prefix with '*'
+	runFedPrefixTest(t, "/backslash\\test", false) // Test prefix with '\'
+	runFedPrefixTest(t, "/valid/prefix", true)     // Test valid prefix
 }
