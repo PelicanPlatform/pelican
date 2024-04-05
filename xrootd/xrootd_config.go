@@ -34,6 +34,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"text/template"
 	"time"
@@ -104,6 +105,8 @@ type (
 		UseCmsd        bool
 		EnableVoms     bool
 		CalculatedPort string
+		HighWaterMark  string
+		LowWatermark   string
 		ExportLocation string
 		RunLocation    string
 		DataLocation   string
@@ -589,6 +592,20 @@ func ConfigXrootd(ctx context.Context, origin bool) (string, error) {
 	xrdConfig.Xrootd.LocalMonitoringPort = -1
 	if err := viper.Unmarshal(&xrdConfig, viper.DecodeHook(server_utils.StringListToCapsHookFunc())); err != nil {
 		return "", errors.Wrap(err, "failed to unmarshal xrootd config")
+	}
+
+	// For cache. convert integer percentage value [0,100] to decimal fraction [0.00, 1.00]
+	if !origin {
+		if num, err := strconv.Atoi(xrdConfig.Cache.HighWaterMark); err == nil {
+			if num <= 100 && num > 0 {
+				xrdConfig.Cache.HighWaterMark = strconv.FormatFloat(float64(num)/100, 'f', 2, 64)
+			}
+		}
+		if num, err := strconv.Atoi(xrdConfig.Cache.LowWatermark); err == nil {
+			if num <= 100 && num > 0 {
+				xrdConfig.Cache.LowWatermark = strconv.FormatFloat(float64(num)/100, 'f', 2, 64)
+			}
+		}
 	}
 
 	// To make sure we get the correct exports, we overwrite the exports in the xrdConfig struct with the exports

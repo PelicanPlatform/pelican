@@ -872,6 +872,28 @@ type: int
 default: 8442
 components: ["cache"]
 ---
+name: Cache.LowWatermark
+description: >-
+  A value of cache disk usage that stops the purging of cached files.
+
+  The value should be either a percentage integer of total available disk space (default is 90),
+  or a number suffixed by k, m, g, or t. In which case, they must be absolute sizes in k (kilo-),
+  m (mega-), g (giga-), or t (tera-) bytes, respectively.
+type: string
+default: 90
+components: ["cache"]
+---
+name: Cache.HighWaterMark
+description: >-
+  A value of cache disk usage that triggers the purging of cached files.
+
+  The value should be either a percentage integer of total available disk space (default is 95),
+  or a number suffixed by k, m, g, or t. In which case, they must be absolute sizes in k (kilo-),
+  m (mega-), g (giga-), or t (tera-) bytes, respectively.
+type: string
+default: 95
+components: ["cache"]
+---
 name: Cache.EnableVoms
 description: >-
   Enable X.509 / VOMS-based authentication for the cache.  This allows HTTP clients
@@ -1031,6 +1053,23 @@ description: >-
   A list of server host names to not to redirect client requests to. This is for admins to put a list of
   servers in the federation into downtime.
 type: stringSlice
+default: none
+components: ["director"]
+---
+name: Director.SupportContactEmail
+description: >-
+  An Email address to receive issues and help requests for the federation the director is hosting. The values will
+  be displayed on the director web interface if provided. We highly recommend director admin to fill out this field.
+type: string
+default: none
+components: ["director"]
+---
+name: Director.SupportContactUrl
+description: >-
+  A URL where user can find support information. Can be your website, GitHub discussion, or third-party support portal
+  for the federation the director is hosting. The values will be displayed on the director web interface if provided.
+  We highly recommend director admin to fill out this field.
+type: string
 default: none
 components: ["director"]
 ---

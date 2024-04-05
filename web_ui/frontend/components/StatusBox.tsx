@@ -16,8 +16,10 @@
  *
  ***************************************************************/
 
+"use client"
+
 import {Box, Grid, Skeleton, Typography} from "@mui/material";
-import {useEffect, useState} from "react";
+import React, {useEffect, useState} from "react";
 import {DateTime} from "luxon";
 import { alpha, useTheme } from "@mui/material";
 
@@ -125,7 +127,7 @@ export default function StatusBox() {
                     {
                         error ?
                             <Typography sx={{color: "red"}} variant={"subtitle2"}>{error}</Typography> :
-                            <Skeleton variant="rectangular" height={250} />
+                            <Box sx={{borderRadius: 2, overflow: "hidden"}}><Skeleton variant={"rectangular"} height={200} width={"100%"} /></Box>
                     }
                 </Box>
             </Box>

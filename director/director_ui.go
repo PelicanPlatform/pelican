@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/web_ui"
 	log "github.com/sirupsen/logrus"
@@ -59,6 +60,11 @@ type (
 	statRequest struct {
 		MinResponses int `form:"min_responses"`
 		MaxResponses int `form:"max_responses"`
+	}
+
+	supportContactRes struct {
+		Email string `json:"email"`
+		Url   string `json:"url"`
 	}
 )
 
@@ -213,6 +219,14 @@ func handleAllowServer(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"message": "success"})
 }
 
+// Endpoint for director support contact information
+func handleDirectorContact(ctx *gin.Context) {
+	email := param.Director_SupportContactEmail.GetString()
+	url := param.Director_SupportContactUrl.GetString()
+
+	ctx.JSON(http.StatusOK, supportContactRes{Email: email, Url: url})
+}
+
 func RegisterDirectorWebAPI(router *gin.RouterGroup) {
 	directorWebAPI := router.Group("/api/v1.0/director_ui")
 	// Follow RESTful schema
@@ -222,5 +236,6 @@ func RegisterDirectorWebAPI(router *gin.RouterGroup) {
 		directorWebAPI.PATCH("/servers/allow/*name", web_ui.AuthHandler, web_ui.AdminAuthHandler, handleAllowServer)
 		directorWebAPI.GET("/servers/origins/stat/*path", web_ui.AuthHandler, queryOrigins)
 		directorWebAPI.HEAD("/servers/origins/stat/*path", web_ui.AuthHandler, queryOrigins)
+		directorWebAPI.GET("/contact", handleDirectorContact)
 	}
 }

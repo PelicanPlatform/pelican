@@ -21,8 +21,10 @@ package launchers
 import (
 	"context"
 	"fmt"
+	"net/url"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 
@@ -61,6 +63,12 @@ func DirectorServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 			" but you provided %q. Was there a typo?", defaultResponse)
 	}
 	log.Debugf("The director will redirect to %ss by default", defaultResponse)
+	if param.Director_SupportContactUrl.IsSet() {
+		_, err := url.Parse(param.Director_SupportContactUrl.GetString())
+		if err != nil {
+			return errors.Wrap(err, "invalid URL for Director.SupportContactUrl")
+		}
+	}
 	rootGroup := engine.Group("/")
 	director.RegisterDirectorOIDCAPI(rootGroup)
 	director.RegisterDirectorWebAPI(rootGroup)

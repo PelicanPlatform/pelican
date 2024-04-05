@@ -35,6 +35,7 @@ type (
 	CacheServer struct {
 		server_structs.NamespaceHolder
 		namespaceFilter map[string]struct{}
+		pids            []int
 	}
 )
 
@@ -47,6 +48,17 @@ func (server *CacheServer) CreateAdvertisement(name string, originUrl string, or
 	}
 
 	return &ad, nil
+}
+
+func (server *CacheServer) SetPids(pids []int) {
+	server.pids = make([]int, len(pids))
+	copy(server.pids, pids)
+}
+
+func (server *CacheServer) GetPids() (pids []int) {
+	pids = make([]int, len(server.pids))
+	copy(pids, server.pids)
+	return
 }
 
 func (server *CacheServer) SetFilters() {
