@@ -122,7 +122,8 @@ func GetTopologyJSON() (*TopologyNamespacesJSON, error) {
 
 	req.Header.Set("Accept", "application/json")
 
-	client := http.Client{}
+	// Use the transport to include timeouts
+	client := http.Client{Transport: config.GetTransport()}
 	resp, err := client.Do(req)
 	if err != nil {
 		metrics.SetComponentHealthStatus(metrics.DirectorRegistry_Topology, metrics.StatusCritical, "Failure when getting response for OSDF namespace data")
@@ -132,7 +133,7 @@ func GetTopologyJSON() (*TopologyNamespacesJSON, error) {
 
 	if resp.StatusCode > 299 {
 		metrics.SetComponentHealthStatus(metrics.DirectorRegistry_Topology, metrics.StatusCritical, fmt.Sprintf("Error response %v from OSDF namespace endpoint: %v", resp.StatusCode, resp.Status))
-		return nil, fmt.Errorf("Error response %v from OSDF namespace endpoint: %v", resp.StatusCode, resp.Status)
+		return nil, fmt.Errorf("error response %v from OSDF namespace endpoint: %v", resp.StatusCode, resp.Status)
 	}
 
 	respBytes, err := io.ReadAll(resp.Body)
