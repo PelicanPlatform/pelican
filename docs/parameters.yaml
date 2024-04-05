@@ -113,7 +113,7 @@ description: |+
   coming from).
 
   Configuration takes an IP address (both regular and CIDR) and a Coordinate made up of a lat/long pair in decimal format. For example:
-  
+
   ```
   GeoIPOverrides:
     - IP: "123.234.123.234"
@@ -1144,7 +1144,7 @@ description: |+
   - "name" must be snake case with underline connecting words, i.e. site_name.
   - "type" must be one of "string", "int", "bool", "datetime" (Unix time in seconds), or "enum".
   - "options" must be a non-empty yaml array for field with type "enum". "optionsUrl" will be ignored if "options" is set.
-  
+
     Example:
 
       ```yaml
@@ -1429,7 +1429,7 @@ components: ["origin"]
 name: Issuer.OIDCAuthenticationRequirements
 description: |+
   A list of claim-value pairs that indicate required values from the OIDC ID token to authenticate.
-  
+
   Example:
 
   ```
