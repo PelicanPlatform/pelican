@@ -69,25 +69,24 @@ func validatePrefix(nspath string) (string, error) {
 	return result, nil
 }
 
-func validateKeyChaining(prefix string, pubkey jwk.Key) (validationError error, serverError error) {
-	if !param.Registry_RequireKeyChaining.GetBool() {
-		return
-	}
+func validateKeyChaining(prefix string, pubkey jwk.Key) (inTopo bool, topoNss []Topology, validationError error, serverError error) {
 	// We don't check keyChaining for caches
 	if strings.HasPrefix(prefix, "/caches/") {
 		return
 	}
-	superspaces, subspaces, inTopo, err := namespaceSupSubChecks(prefix)
-	if err != nil {
-		serverError = errors.Wrap(err, "Server encountered an error checking if namespace already exists")
+	// Here, we do the namespaceSupSubChecks anyway but only returns error (if any)
+	// when the Registry.RequireKeyChaining flag is on. This is to make sure the topology check is independent
+	// of key chaining check
+	superspaces, subspaces, inTopo, topoNss, err := namespaceSupSubChecks(prefix)
+	if !param.Registry_RequireKeyChaining.GetBool() {
 		return
+	} else {
+		if err != nil {
+			serverError = errors.Wrap(err, "Server encountered an error checking if namespace already exists")
+			return
+		}
 	}
 
-	// if not in OSDF mode, this will be false
-	if inTopo {
-		validationError = errors.New("Cannot register a super or subspace of a namespace already registered in topology")
-		return
-	}
 	// If we make the assumption that namespace prefixes are hierarchical, eg that the owner of /foo should own
 	// everything under /foo (/foo/bar, /foo/baz, etc), then it makes sense to check for superspaces first. If any
 	// superspace is found, they logically "own" the incoming namespace.

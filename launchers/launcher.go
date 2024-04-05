@@ -250,7 +250,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 
 	// Origin needs to advertise once before the cache starts
 	if modules.IsEnabled(config.CacheType) && modules.IsEnabled(config.OriginType) {
-		log.Debug("Advertise Origin")
+		log.Debug("Advertise Origin and Cache to the Director")
 		if err = launcher_utils.Advertise(ctx, servers); err != nil {
 			return
 		}
@@ -330,7 +330,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 	}
 
 	if modules.IsEnabled(config.OriginType) || modules.IsEnabled(config.CacheType) {
-		log.Debug("Launching periodic advertise")
+		log.Debug("Launching periodic advertise of origin/cache server to the director")
 		if err = launcher_utils.LaunchPeriodicAdvertise(ctx, egrp, servers); err != nil {
 			return
 		}
