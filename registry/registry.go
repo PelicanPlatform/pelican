@@ -234,6 +234,7 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 	if err != nil {
 		return false, nil, badRequestError{Message: err.Error()}
 	}
+	registryUrl := param.Federation_RegistryUrl.GetString()
 
 	var rawkey interface{} // This is the raw key, like *rsa.PrivateKey or *ecdsa.PrivateKey
 	if err := key.Raw(&rawkey); err != nil {
@@ -288,7 +289,7 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 		}
 		data.Prefix = reqPrefix
 
-		valErr, sysErr := validateKeyChaining(reqPrefix, key)
+		inTopo, topoNss, valErr, sysErr := validateKeyChaining(reqPrefix, key)
 		if valErr != nil {
 			log.Errorln(err)
 			return false, nil, permissionDeniedError{Message: valErr.Error()}
@@ -307,7 +308,6 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 		}
 		ns.Pubkey = string(pubkeyData)
 		ns.Identity = data.Identity
-		ns.Topology = false
 
 		if data.Identity != "" {
 			idMap := map[string]interface{}{}
@@ -323,17 +323,43 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 					ns.AdminMetadata.UserID = val
 				}
 			}
+			if inTopo {
+				topoNssStr := GetTopoPrefixString(topoNss)
+				ns.AdminMetadata.Description = fmt.Sprintf("[ Attention: A superspace or subspace of this prefix exists in OSDF topology: %s ] ", topoNssStr)
+			}
+			userName, ok := idMap["name"]
+			if ok {
+				val, ok := userName.(string)
+				if ok {
+					ns.AdminMetadata.Description += "User name: " + val + " "
+				}
+			}
 			email, ok := idMap["email"]
 			if ok {
 				val, ok := email.(string)
 				if ok {
-					ns.AdminMetadata.Description = "User email: " + val + " This is a namespace registration from Pelican CLI with OIDC authentication. Certain fields may not be populated"
+					ns.AdminMetadata.Description += "User email: " + val + " This is a namespace registration from Pelican CLI with OIDC authentication. Certain fields may not be populated"
 				}
 			}
 		} else {
 			// This is either a registration from CLI without --with-identity flag or
 			// an automated registration from origin or cache
 			ns.AdminMetadata.Description = "This is a namespace registration from Pelican CLI or an automated registration. Certain fields may not be populated"
+
+			// If the namespace is in the topology, we require identity information to register a Pelican namespace
+			// for verification purpose
+			if inTopo {
+				return false,
+					nil,
+					permissionDeniedError{Message: fmt.Sprintf("A superspace or subspace of this namespace %s already exists in the OSDF topology: %s. "+
+						"To register a Pelican equivalence, you need to present your identity. "+
+						"If you are registering through Pelican CLI, try again with the flag '--with-identity' enabled. "+
+						"If this is an auto-registration from a Pelican origin or cache server, "+
+						"register your namespace or server through the Pelican registry website at %s instead.",
+						ns.Prefix,
+						GetTopoPrefixString(topoNss),
+						registryUrl)}
+			}
 		}
 
 		// Since CLI/auto-registered namespace did not have site name as part of their registration
@@ -347,8 +373,12 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 		if err != nil {
 			return false, nil, errors.Wrapf(err, "Failed to add the prefix %q to the database", ns.Prefix)
 		} else {
+			msg := fmt.Sprintf("Prefix %s successfully registered", ns.Prefix)
+			if inTopo {
+				msg = fmt.Sprintf("Prefix %s successfully registered. Note that there is an existing superspace or subspace of the namespace in the OSDF topology: %s. The registry admin will review your request and approve your namespace if this is expected.", ns.Prefix, GetTopoPrefixString(topoNss))
+			}
 			return true, map[string]interface{}{
-				"message": "Prefix successfully registered",
+				"message": msg,
 			}, nil
 		}
 	} else {
@@ -855,15 +885,23 @@ func checkNamespaceStatusHandler(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "prefix is required"})
 		return
 	}
-	ns, err := getNamespaceByPrefix(req.Prefix)
-	if ns.Topology {
-		res := server_structs.CheckNamespaceStatusRes{Approved: true}
-		ctx.JSON(http.StatusOK, res)
+	exists, err := namespaceExistsByPrefix(req.Prefix)
+	if err != nil {
+		log.Errorf("Error in namespaceExistsByPrefix with prefix %s. %v", req.Prefix, err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error checking if namespace %s already exists", req.Prefix)})
 		return
 	}
+	// Return 400 if the namespace doesn't exist to spare 404 for the legacy OSDF registry endpoint, which doesn't have this route
+	// and we relies on 404 to check for backward compatibility
+	if !exists {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("The namespace %s does not exist in the registry", req.Prefix)})
+		return
+	}
+
+	ns, err := getNamespaceByPrefix(req.Prefix)
 	if err != nil || ns == nil {
 		log.Errorf("Error in getNamespaceByPrefix with prefix %s. %v", req.Prefix, err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Error getting namespace"})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error getting namespace %s: %s", req.Prefix, err.Error())})
 		return
 	}
 	emptyMetadata := AdminMetadata{}

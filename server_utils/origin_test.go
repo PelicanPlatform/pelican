@@ -22,6 +22,9 @@ package server_utils
 
 import (
 	_ "embed"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -32,23 +35,38 @@ import (
 )
 
 var (
-	//go:embed resources/env-var-mimic.yml
+	//go:embed resources/posix-origins/env-var-mimic.yml
 	envVarMimicConfig string
 
-	//go:embed resources/multi-export-valid.yml
+	//go:embed resources/posix-origins/multi-export-valid.yml
 	multiExportValidConfig string
 
-	//go:embed resources/single-export-block.yml
+	//go:embed resources/posix-origins/single-export-block.yml
 	singleExportBlockConfig string
 
-	//go:embed resources/export-volumes-valid.yml
+	//go:embed resources/posix-origins/export-volumes-valid.yml
 	exportVolumesValidConfig string
 
-	//go:embed resources/single-export-volume.yml
+	//go:embed resources/posix-origins/single-export-volume.yml
 	exportSingleVolumeConfig string
+
+	//go:embed resources/s3-origins/env-var-mimic.yml
+	s3envVarMimicConfig string
+
+	//go:embed resources/s3-origins/multi-export-valid.yml
+	s3multiExportValidConfig string
+
+	//go:embed resources/s3-origins/single-export-block.yml
+	s3singleExportBlockConfig string
+
+	//go:embed resources/s3-origins/export-volumes-valid.yml
+	s3exportVolumesValidConfig string
+
+	//go:embed resources/s3-origins/single-export-volume.yml
+	s3exportSingleVolumeConfig string
 )
 
-func setup(t *testing.T, config string) *[]OriginExports {
+func setup(t *testing.T, config string) *[]OriginExport {
 	viper.SetConfigType("yaml")
 	// Use viper to read in the embedded config
 	err := viper.ReadConfig(strings.NewReader(config))
@@ -66,16 +84,10 @@ func TestGetExports(t *testing.T) {
 	viper.Reset()
 	ResetOriginExports()
 
+	// Posix tests
 	t.Run("testSingleExportValid", func(t *testing.T) {
 		defer viper.Reset()
 		defer ResetOriginExports()
-		// viper.SetConfigType("yaml")
-		// // Use viper to read in the embedded config
-		// err := viper.ReadConfig(strings.NewReader(singleExportValidConfig))
-		// require.NoError(t, err, "error reading config")
-		// // Now call GetOriginExports and check the struct
-		// exports, err := GetOriginExports()
-		// require.NoError(t, err, "error getting origin exports")
 		exports := setup(t, envVarMimicConfig)
 
 		assert.Len(t, *exports, 1, "expected 1 export")
@@ -93,7 +105,7 @@ func TestGetExports(t *testing.T) {
 		exports := setup(t, multiExportValidConfig)
 		assert.Len(t, *exports, 2, "expected 2 exports")
 
-		expectedExport1 := OriginExports{
+		expectedExport1 := OriginExport{
 			StoragePrefix:    "/test1",
 			FederationPrefix: "/first/namespace",
 			Capabilities: server_structs.Capabilities{
@@ -106,7 +118,7 @@ func TestGetExports(t *testing.T) {
 		}
 		assert.Equal(t, expectedExport1, (*exports)[0])
 
-		expectedExport2 := OriginExports{
+		expectedExport2 := OriginExport{
 			StoragePrefix:    "/test2",
 			FederationPrefix: "/second/namespace",
 			Capabilities: server_structs.Capabilities{
@@ -126,7 +138,7 @@ func TestGetExports(t *testing.T) {
 		exports := setup(t, exportVolumesValidConfig)
 		assert.Len(t, *exports, 2, "expected 2 exports")
 
-		expectedExport1 := OriginExports{
+		expectedExport1 := OriginExport{
 			StoragePrefix:    "/test1",
 			FederationPrefix: "/first/namespace",
 			Capabilities: server_structs.Capabilities{
@@ -139,7 +151,7 @@ func TestGetExports(t *testing.T) {
 		}
 		assert.Equal(t, expectedExport1, (*exports)[0])
 
-		expectedExport2 := OriginExports{
+		expectedExport2 := OriginExport{
 			StoragePrefix:    "/test2",
 			FederationPrefix: "/second/namespace",
 			Capabilities: server_structs.Capabilities{
@@ -161,7 +173,7 @@ func TestGetExports(t *testing.T) {
 		exports := setup(t, exportSingleVolumeConfig)
 		assert.Len(t, *exports, 1, "expected 1 export")
 
-		expectedExport := OriginExports{
+		expectedExport := OriginExport{
 			StoragePrefix:    "/test1",
 			FederationPrefix: "/first/namespace",
 			Capabilities: server_structs.Capabilities{
@@ -190,7 +202,7 @@ func TestGetExports(t *testing.T) {
 		exports := setup(t, singleExportBlockConfig)
 		assert.Len(t, *exports, 1, "expected 1 export")
 
-		expectedExport := OriginExports{
+		expectedExport := OriginExport{
 			StoragePrefix:    "/test1",
 			FederationPrefix: "/first/namespace",
 			Capabilities: server_structs.Capabilities{
@@ -212,4 +224,272 @@ func TestGetExports(t *testing.T) {
 		assert.False(t, viper.GetBool("Origin.EnableListings"))
 		assert.True(t, viper.GetBool("Origin.EnableDirectReads"))
 	})
+
+	// S3 tests
+	t.Run("testSingleExportValidS3", func(t *testing.T) {
+		defer viper.Reset()
+		defer ResetOriginExports()
+
+		exports := setup(t, s3envVarMimicConfig)
+
+		assert.Len(t, *exports, 1, "expected 1 export")
+		assert.Equal(t, "/my/namespace", (*exports)[0].FederationPrefix, "expected /my/namespace")
+		assert.Equal(t, "my-bucket", (*exports)[0].S3Bucket, "expected my-bucket")
+		assert.Equal(t, "/path/to/access.key", (*exports)[0].S3AccessKeyfile, "expected /path/to/access.key")
+		assert.Equal(t, "/path/to/secret.key", (*exports)[0].S3SecretKeyfile, "expected /path/to/secret.key")
+
+		assert.False(t, (*exports)[0].Capabilities.Writes, "expected no writes")
+		assert.True(t, (*exports)[0].Capabilities.PublicReads, "expected public reads")
+		assert.False(t, (*exports)[0].Capabilities.Listings, "expected no listings")
+		assert.True(t, (*exports)[0].Capabilities.DirectReads, "expected direct reads")
+	})
+
+	t.Run("testMultiExportValidS3", func(t *testing.T) {
+		defer viper.Reset()
+		defer ResetOriginExports()
+		exports := setup(t, s3multiExportValidConfig)
+		assert.Len(t, *exports, 2, "expected 2 exports")
+
+		expectedExport1 := OriginExport{
+			S3Bucket:         "first-bucket",
+			FederationPrefix: "/first/namespace",
+			Capabilities: server_structs.Capabilities{
+				Writes:      true,
+				PublicReads: true,
+				Listings:    true,
+				Reads:       true,
+				DirectReads: true,
+			},
+		}
+		assert.Equal(t, expectedExport1, (*exports)[0])
+
+		expectedExport2 := OriginExport{
+			S3Bucket:         "second-bucket",
+			S3AccessKeyfile:  "/path/to/second/access.key",
+			S3SecretKeyfile:  "/path/to/second/secret.key",
+			FederationPrefix: "/second/namespace",
+			Capabilities: server_structs.Capabilities{
+				Writes:      true,
+				PublicReads: false,
+				Listings:    false,
+				Reads:       false,
+				DirectReads: false,
+			},
+		}
+		assert.Equal(t, expectedExport2, (*exports)[1])
+	})
+
+	t.Run("testExportVolumesValidS3", func(t *testing.T) {
+		defer viper.Reset()
+		defer ResetOriginExports()
+		exports := setup(t, s3exportVolumesValidConfig)
+		assert.Len(t, *exports, 2, "expected 2 exports")
+
+		expectedExport1 := OriginExport{
+			StoragePrefix:    "/",
+			S3Bucket:         "",
+			FederationPrefix: "/first/namespace",
+			Capabilities: server_structs.Capabilities{
+				Writes:      false,
+				PublicReads: false,
+				Listings:    true,
+				Reads:       true,
+				DirectReads: true,
+			},
+		}
+		assert.Equal(t, expectedExport1, (*exports)[0])
+
+		expectedExport2 := OriginExport{
+			StoragePrefix:    "/",
+			S3Bucket:         "my-bucket",
+			FederationPrefix: "/second/namespace",
+			Capabilities: server_structs.Capabilities{
+				Writes:      false,
+				PublicReads: false,
+				Listings:    true,
+				Reads:       true,
+				DirectReads: true,
+			},
+		}
+		assert.Equal(t, expectedExport2, (*exports)[1])
+	})
+
+	t.Run("testExportVolumesSingleS3", func(t *testing.T) {
+		defer viper.Reset()
+		defer ResetOriginExports()
+		exports := setup(t, s3exportSingleVolumeConfig)
+		assert.Len(t, *exports, 1, "expected 1 export")
+
+		expectedExport := OriginExport{
+			StoragePrefix:    "/",
+			S3Bucket:         "my-bucket",
+			S3AccessKeyfile:  "/path/to/access.key",
+			S3SecretKeyfile:  "/path/to/secret.key",
+			FederationPrefix: "/first/namespace",
+			Capabilities: server_structs.Capabilities{
+				Writes:      true,
+				PublicReads: true,
+				Listings:    false,
+				Reads:       true,
+				DirectReads: false,
+			},
+		}
+		assert.Equal(t, expectedExport, (*exports)[0])
+
+		// Now check that we properly set the other viper vars we should have
+		assert.Equal(t, "my-bucket", viper.GetString("Origin.S3Bucket"))
+		assert.Equal(t, "/path/to/access.key", viper.GetString("Origin.S3AccessKeyfile"))
+		assert.Equal(t, "/path/to/secret.key", viper.GetString("Origin.S3SecretKeyfile"))
+		assert.Equal(t, "/first/namespace", viper.GetString("Origin.FederationPrefix"))
+		assert.True(t, viper.GetBool("Origin.EnableReads"))
+		assert.True(t, viper.GetBool("Origin.EnableWrites"))
+		assert.True(t, viper.GetBool("Origin.EnablePublicReads"))
+		assert.False(t, viper.GetBool("Origin.EnableListings"))
+		assert.False(t, viper.GetBool("Origin.EnableDirectReads"))
+	})
+
+	t.Run("testSingleExportBlockS3", func(t *testing.T) {
+		defer viper.Reset()
+		defer ResetOriginExports()
+		exports := setup(t, s3singleExportBlockConfig)
+		assert.Len(t, *exports, 1, "expected 1 export")
+
+		expectedExport := OriginExport{
+			S3Bucket:         "my-bucket",
+			S3AccessKeyfile:  "/path/to/access.key",
+			S3SecretKeyfile:  "/path/to/secret.key",
+			FederationPrefix: "/first/namespace",
+			Capabilities: server_structs.Capabilities{
+				Writes:      false,
+				PublicReads: true,
+				Listings:    false,
+				Reads:       true,
+				DirectReads: true,
+			},
+		}
+		assert.Equal(t, expectedExport, (*exports)[0])
+
+		// Now check that we properly set the other viper vars we should have
+		assert.Equal(t, "my-bucket", viper.GetString("Origin.S3Bucket"))
+		assert.Equal(t, "/path/to/access.key", viper.GetString("Origin.S3AccessKeyfile"))
+		assert.Equal(t, "/path/to/secret.key", viper.GetString("Origin.S3SecretKeyfile"))
+		assert.Equal(t, "/first/namespace", viper.GetString("Origin.FederationPrefix"))
+		assert.True(t, viper.GetBool("Origin.EnableReads"))
+		assert.False(t, viper.GetBool("Origin.EnableWrites"))
+		assert.True(t, viper.GetBool("Origin.EnablePublicReads"))
+		assert.False(t, viper.GetBool("Origin.EnableListings"))
+		assert.True(t, viper.GetBool("Origin.EnableDirectReads"))
+	})
+}
+
+func TestCheckSentinelLocation(t *testing.T) {
+	tmpDir := t.TempDir()
+	tempStn := filepath.Join(tmpDir, "mock_sentinel")
+	file, err := os.Create(tempStn)
+	require.NoError(t, err)
+	err = file.Close()
+	require.NoError(t, err)
+
+	mockExportNoStn := OriginExport{
+		StoragePrefix:    "/foo/bar",
+		FederationPrefix: "/demo/foo/bar",
+		Capabilities:     server_structs.Capabilities{Reads: true},
+	}
+	mockExportValidStn := OriginExport{
+		StoragePrefix:    tmpDir,
+		FederationPrefix: "/demo/foo/bar",
+		Capabilities:     server_structs.Capabilities{Reads: true},
+		SentinelLocation: "mock_sentinel",
+	}
+	mockExportInvalidStn := OriginExport{
+		StoragePrefix:    tmpDir,
+		FederationPrefix: "/demo/foo/bar",
+		Capabilities:     server_structs.Capabilities{Reads: true},
+		SentinelLocation: "sentinel_dne",
+	}
+
+	t.Run("empty-sentinel-return-ok", func(t *testing.T) {
+		exports := make([]OriginExport, 0)
+		exports = append(exports, mockExportNoStn)
+		exports = append(exports, mockExportNoStn)
+
+		ok, err := CheckSentinelLocation(&exports)
+		assert.NoError(t, err)
+		assert.True(t, ok)
+	})
+
+	t.Run("valid-sentinel-return-ok", func(t *testing.T) {
+		exports := make([]OriginExport, 0)
+		exports = append(exports, mockExportNoStn)
+		exports = append(exports, mockExportValidStn)
+
+		ok, err := CheckSentinelLocation(&exports)
+		assert.NoError(t, err)
+		assert.True(t, ok)
+	})
+
+	t.Run("invalid-sentinel-return-error", func(t *testing.T) {
+		exports := make([]OriginExport, 0)
+		exports = append(exports, mockExportNoStn)
+		exports = append(exports, mockExportValidStn)
+		exports = append(exports, mockExportInvalidStn)
+
+		ok, err := CheckSentinelLocation(&exports)
+		assert.Error(t, err)
+		assert.False(t, ok)
+	})
+}
+
+func runBucketNameTest(t *testing.T, name string, valid bool) {
+	t.Run(fmt.Sprintf("testBucketNameValidation-%s", name), func(t *testing.T) {
+		err := validateBucketName(name)
+		if valid {
+			assert.NoError(t, err)
+		} else {
+			assert.Error(t, err)
+		}
+	})
+}
+func TestBucketNameValidation(t *testing.T) {
+	// Valid bucket names
+	valid := true
+	runBucketNameTest(t, "my-bucket", valid)
+	runBucketNameTest(t, "my-bucket-123", valid)
+	runBucketNameTest(t, "my.bucket", valid)
+	runBucketNameTest(t, "my-bucket-123.456", valid)
+
+	// Invalid bucket names
+	valid = false
+	runBucketNameTest(t, "my_bucket", valid)
+	runBucketNameTest(t, "my..bucket", valid)
+	runBucketNameTest(t, "my-bucket-123-", valid)
+	runBucketNameTest(t, "my-bucket-123.", valid)
+	runBucketNameTest(t, "My-BUCKET", valid)
+	runBucketNameTest(t, "sthree-bucket", valid)
+	runBucketNameTest(t, "my-bucket-123456789012345678901234567890123456789012345678901234567890123412341234123412341234", valid)
+	runBucketNameTest(t, "my-bucket-s3alias", valid)
+	runBucketNameTest(t, "my-bucket--ol-s3", valid)
+}
+
+func runFedPrefixTest(t *testing.T, name string, valid bool) {
+	t.Run(fmt.Sprintf("testFedPrefixValidation-%s", name), func(t *testing.T) {
+		err := validateFederationPrefix(name)
+		if valid {
+			assert.NoError(t, err)
+		} else {
+			assert.Error(t, err)
+		}
+	})
+}
+func TestFederationPrefixValidation(t *testing.T) {
+	runFedPrefixTest(t, "", false)                 // Test empty prefix
+	runFedPrefixTest(t, "noSlashPrefix", false)    // Test prefix without leading '/'
+	runFedPrefixTest(t, "/double//slash", false)   // Test prefix with '//'
+	runFedPrefixTest(t, "/dotSlash./test", false)  // Test prefix with './'
+	runFedPrefixTest(t, "/dotDot..test", false)    // Test prefix with '..'
+	runFedPrefixTest(t, "~tilde/test", false)      // Test prefix with leading '~'
+	runFedPrefixTest(t, "/dollar$test", false)     // Test prefix with '$'
+	runFedPrefixTest(t, "/star*test", false)       // Test prefix with '*'
+	runFedPrefixTest(t, "/backslash\\test", false) // Test prefix with '\'
+	runFedPrefixTest(t, "/valid/prefix", true)     // Test valid prefix
 }

@@ -30,6 +30,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/sirupsen/logrus/hooks/test"
 	"github.com/spf13/viper"
@@ -284,7 +285,49 @@ func TestEnabledServers(t *testing.T) {
 	})
 }
 
+// Tests the function setPreferredPrefix: ensures case-insensitivity and invalid values are handled correctly
+func TestSetPreferredPrefix(t *testing.T) {
+	t.Run("TestPelicanPreferredPrefix", func(t *testing.T) {
+		oldPref, err := SetPreferredPrefix("pelican")
+		assert.NoError(t, err)
+		if GetPreferredPrefix() != "PELICAN" {
+			t.Errorf("Expected preferred prefix to be 'PELICAN', got '%s'", GetPreferredPrefix())
+		}
+		if oldPref != "" {
+			t.Errorf("Expected old preferred prefix to be empty, got '%s'", oldPref)
+		}
+	})
+
+	t.Run("TestOSDFPreferredPrefix", func(t *testing.T) {
+		oldPref, err := SetPreferredPrefix("osdf")
+		assert.NoError(t, err)
+		if GetPreferredPrefix() != "OSDF" {
+			t.Errorf("Expected preferred prefix to be 'OSDF', got '%s'", GetPreferredPrefix())
+		}
+		if oldPref != "PELICAN" {
+			t.Errorf("Expected old preferred prefix to be 'PELICAN', got '%s'", oldPref)
+		}
+	})
+
+	t.Run("TestStashPreferredPrefix", func(t *testing.T) {
+		oldPref, err := SetPreferredPrefix("stash")
+		assert.NoError(t, err)
+		if GetPreferredPrefix() != "STASH" {
+			t.Errorf("Expected preferred prefix to be 'STASH', got '%s'", GetPreferredPrefix())
+		}
+		if oldPref != "OSDF" {
+			t.Errorf("Expected old preferred prefix to be 'osdf', got '%s'", oldPref)
+		}
+	})
+
+	t.Run("TestInvalidPreferredPrefix", func(t *testing.T) {
+		_, err := SetPreferredPrefix("invalid")
+		assert.Error(t, err)
+	})
+}
+
 func TestDiscoverFederation(t *testing.T) {
+
 	viper.Reset()
 	// Server to be a "mock" federation
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -308,9 +351,8 @@ func TestDiscoverFederation(t *testing.T) {
 	}))
 	defer server.Close()
 	t.Run("testInvalidDiscoveryUrlWithPath", func(t *testing.T) {
-		viper.Set("tlsskipverify", true)
 		viper.Set("Federation.DiscoveryUrl", server.URL+"/this/is/some/path")
-		err := DiscoverFederation()
+		err := DiscoverFederation(context.Background())
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "Invalid federation discovery url is set. No path allowed for federation discovery url. Provided url: ",
 			"Error returned does not contain the correct error")
@@ -318,9 +360,8 @@ func TestDiscoverFederation(t *testing.T) {
 	})
 
 	t.Run("testValidDiscoveryUrl", func(t *testing.T) {
-		viper.Set("tlsskipverify", true)
 		viper.Set("Federation.DiscoveryUrl", server.URL)
-		err := DiscoverFederation()
+		err := DiscoverFederation(context.Background())
 		assert.NoError(t, err)
 		// Assert that the metadata matches expectations
 		assert.Equal(t, "director", param.Federation_DirectorUrl.GetString(), "Unexpected DirectorEndpoint")
@@ -331,9 +372,8 @@ func TestDiscoverFederation(t *testing.T) {
 	})
 
 	t.Run("testOsgHtcUrl", func(t *testing.T) {
-		viper.Set("tlsskipverify", true)
 		viper.Set("Federation.DiscoveryUrl", "osg-htc.org")
-		err := DiscoverFederation()
+		err := DiscoverFederation(context.Background())
 		assert.NoError(t, err)
 		// Assert that the metadata matches expectations
 		assert.Equal(t, "https://osdf-director.osg-htc.org", param.Federation_DirectorUrl.GetString(), "Unexpected DirectorEndpoint")
@@ -341,6 +381,117 @@ func TestDiscoverFederation(t *testing.T) {
 		assert.Equal(t, "https://osg-htc.org/osdf/public_signing_key.jwks", param.Federation_JwkUrl.GetString(), "Unexpected JwksUri")
 		assert.Equal(t, "", param.Federation_BrokerUrl.GetString(), "Unexpected BrokerEndpoint")
 		viper.Reset()
+	})
+}
+
+func TestCheckWatermark(t *testing.T) {
+	t.Parallel()
+
+	t.Run("empty-value", func(t *testing.T) {
+		ok, num, err := checkWatermark("")
+		assert.False(t, ok)
+		assert.Equal(t, int64(0), num)
+		assert.Error(t, err)
+	})
+
+	t.Run("string-value", func(t *testing.T) {
+		ok, num, err := checkWatermark("random")
+		assert.False(t, ok)
+		assert.Equal(t, int64(0), num)
+		assert.Error(t, err)
+	})
+
+	t.Run("integer-greater-than-100", func(t *testing.T) {
+		ok, num, err := checkWatermark("101")
+		assert.False(t, ok)
+		assert.Equal(t, int64(0), num)
+		assert.Error(t, err)
+	})
+
+	t.Run("integer-less-than-0", func(t *testing.T) {
+		ok, num, err := checkWatermark("-1")
+		assert.False(t, ok)
+		assert.Equal(t, int64(0), num)
+		assert.Error(t, err)
+	})
+
+	t.Run("decimal-fraction-value", func(t *testing.T) {
+		ok, num, err := checkWatermark("0.55")
+		assert.False(t, ok)
+		assert.Equal(t, int64(0), num)
+		assert.Error(t, err)
+	})
+
+	t.Run("decimal-int-value", func(t *testing.T) {
+		ok, num, err := checkWatermark("15.55")
+		assert.False(t, ok)
+		assert.Equal(t, int64(0), num)
+		assert.Error(t, err)
+	})
+
+	t.Run("int-value", func(t *testing.T) {
+		ok, num, err := checkWatermark("55")
+		assert.True(t, ok)
+		assert.Equal(t, int64(55), num)
+		assert.NoError(t, err)
+	})
+
+	t.Run("byte-value-no-unit", func(t *testing.T) {
+		ok, num, err := checkWatermark("105")
+		assert.False(t, ok)
+		assert.Equal(t, int64(0), num)
+		assert.Error(t, err)
+	})
+
+	t.Run("byte-value-no-value", func(t *testing.T) {
+		ok, num, err := checkWatermark("k")
+		assert.False(t, ok)
+		assert.Equal(t, int64(0), num)
+		assert.Error(t, err)
+	})
+
+	t.Run("byte-value-wrong-unit", func(t *testing.T) {
+		ok, num, err := checkWatermark("100K") // Only lower case is accepted
+		assert.False(t, ok)
+		assert.Equal(t, int64(0), num)
+		assert.Error(t, err)
+
+		ok, num, err = checkWatermark("100p")
+		assert.False(t, ok)
+		assert.Equal(t, int64(0), num)
+		assert.Error(t, err)
+
+		ok, num, err = checkWatermark("100byte")
+		assert.False(t, ok)
+		assert.Equal(t, int64(0), num)
+		assert.Error(t, err)
+
+		ok, num, err = checkWatermark("100bits")
+		assert.False(t, ok)
+		assert.Equal(t, int64(0), num)
+		assert.Error(t, err)
+	})
+
+	t.Run("byte-value-correct-unit", func(t *testing.T) {
+		ok, num, err := checkWatermark("1000k")
+		assert.True(t, ok)
+		assert.Equal(t, int64(1000*1024), num)
+		assert.NoError(t, err)
+
+		ok, num, err = checkWatermark("1000m")
+		assert.True(t, ok)
+		assert.Equal(t, int64(1000*1024*1024), num)
+		assert.NoError(t, err)
+
+		ok, num, err = checkWatermark("1000g")
+		assert.True(t, ok)
+		assert.Equal(t, int64(1000*1024*1024*1024), num)
+		assert.NoError(t, err)
+
+		ok, num, err = checkWatermark("1000t")
+		assert.True(t, ok)
+		assert.Equal(t, int64(1000*1024*1024*1024*1024), num)
+		assert.NoError(t, err)
 	})
 }
 
@@ -475,5 +626,90 @@ func TestInitServerUrl(t *testing.T) {
 		err = InitServer(context.Background(), BrokerType)
 		require.NoError(t, err)
 		assert.Equal(t, "https://example-registry.com", param.Federation_BrokerUrl.GetString())
+	})
+}
+func TestDiscoverUrlFederation(t *testing.T) {
+	t.Run("TestMetadataDiscoveryTimeout", func(t *testing.T) {
+		viper.Set("tlsskipverify", true)
+		err := InitClient()
+		assert.NoError(t, err)
+		// Create a server that sleeps for a longer duration than the timeout
+		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			time.Sleep(2 * time.Second)
+		}))
+		defer server.Close()
+
+		// Set a short timeout for the test
+		timeout := 1 * time.Second
+
+		// Create a context with the timeout
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+
+		// Call the function with the server URL and the context
+		_, err = DiscoverUrlFederation(ctx, server.URL)
+
+		// Assert that the error is the expected metadata timeout error
+		assert.Error(t, err)
+		assert.True(t, errors.Is(err, MetadataTimeoutErr))
+		viper.Reset()
+	})
+
+	t.Run("TestCanceledContext", func(t *testing.T) {
+		// Create a server that waits for the context to be canceled
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			<-r.Context().Done()
+		}))
+		defer server.Close()
+
+		// Create a context and cancel it immediately
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		// Call the function with the server URL and the canceled context
+		_, err := DiscoverUrlFederation(ctx, server.URL)
+
+		// Assert that the error is the expected context cancel error
+		assert.Error(t, err)
+		assert.True(t, errors.Is(err, context.Canceled))
+	})
+
+	t.Run("TestValidDiscovery", func(t *testing.T) {
+		viper.Set("tlsskipverify", true)
+		err := InitClient()
+		assert.NoError(t, err)
+		// Server to be a "mock" federation
+		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// make our response:
+			response := FederationDiscovery{
+				DirectorEndpoint:              "director",
+				NamespaceRegistrationEndpoint: "registry",
+				JwksUri:                       "jwks",
+				BrokerEndpoint:                "broker",
+			}
+
+			responseJSON, err := json.Marshal(response)
+			if err != nil {
+				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+				return
+			}
+
+			w.WriteHeader(http.StatusOK)
+			_, err = w.Write(responseJSON)
+			assert.NoError(t, err)
+		}))
+		defer server.Close()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		metadata, err := DiscoverUrlFederation(ctx, server.URL)
+		assert.NoError(t, err)
+
+		// Assert that the metadata matches expectations
+		assert.Equal(t, "director", metadata.DirectorEndpoint, "Unexpected DirectorEndpoint")
+		assert.Equal(t, "registry", metadata.NamespaceRegistrationEndpoint, "Unexpected NamespaceRegistrationEndpoint")
+		assert.Equal(t, "jwks", metadata.JwksUri, "Unexpected JwksUri")
+		assert.Equal(t, "broker", metadata.BrokerEndpoint, "Unexpected BrokerEndpoint")
+		viper.Reset()
 	})
 }

@@ -21,7 +21,6 @@ package director
 import (
 	"context"
 	"net/url"
-	"strings"
 	"time"
 
 	"github.com/pkg/errors"
@@ -38,29 +37,26 @@ func parseServerAd(server utils.Server, serverType server_structs.ServerType) se
 	serverAd.Name = server.Resource
 
 	serverAd.Writes = param.Origin_EnableWrites.GetBool()
-	// url.Parse requires that the scheme be present before the hostname,
-	// but endpoints do not have a scheme. As such, we need to add one for the.
-	// correct parsing. Luckily, we don't use this anywhere else (it's just to
-	// make the url.Parse function behave as expected)
-	if !strings.HasPrefix(server.AuthEndpoint, "http") { // just in case there's already an http(s) tacked in front
-		server.AuthEndpoint = "https://" + server.AuthEndpoint
-	}
-	if !strings.HasPrefix(server.Endpoint, "http") { // just in case there's already an http(s) tacked in front
-		server.Endpoint = "http://" + server.Endpoint
-	}
-	serverAuthUrl, err := url.Parse(server.AuthEndpoint)
-	if err != nil {
-		log.Warningf("Namespace JSON returned server %s with invalid authenticated URL %s",
-			server.Resource, server.AuthEndpoint)
-	}
-	serverAd.AuthURL = *serverAuthUrl
-
 	serverUrl, err := url.Parse(server.Endpoint)
 	if err != nil {
 		log.Warningf("Namespace JSON returned server %s with invalid unauthenticated URL %s",
 			server.Resource, server.Endpoint)
 	}
+	// Setting the scheme to http (and not https) in order to work with topology public caches and origins
+	serverUrl.Scheme = "http"
 	serverAd.URL = *serverUrl
+
+	if server.AuthEndpoint != "" {
+		serverAuthUrl, err := url.Parse(server.AuthEndpoint)
+		if err != nil {
+			log.Warningf("Namespace JSON returned server %s with invalid authenticated URL %s",
+				server.Resource, server.AuthEndpoint)
+		}
+
+		serverAuthUrl.Scheme = "https"
+
+		serverAd.AuthURL = *serverAuthUrl
+	}
 
 	// We will leave serverAd.WebURL as empty when fetched from topology
 

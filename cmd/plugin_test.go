@@ -25,6 +25,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -141,13 +142,13 @@ func (f *FedTest) Spinup() {
 	viper.Set("Registry.RequireOriginApproval", false)
 	viper.Set("Registry.RequireCacheApproval", false)
 
-	f.FedCancel, err = launchers.LaunchModules(ctx, modules)
+	_, f.FedCancel, err = launchers.LaunchModules(ctx, modules)
 	if err != nil {
 		f.T.Fatalf("Failure in fedServeInternal: %v", err)
 	}
 
 	desiredURL := param.Server_ExternalWebUrl.GetString() + "/.well-known/openid-configuration"
-	err = server_utils.WaitUntilWorking(ctx, "GET", desiredURL, "director", 200)
+	err = server_utils.WaitUntilWorking(ctx, "GET", desiredURL, "director", 200, false)
 	require.NoError(f.T, err)
 
 	httpc := http.Client{
@@ -185,7 +186,8 @@ func TestStashPluginMain(t *testing.T) {
 	viper.Reset()
 	server_utils.ResetOriginExports()
 
-	config.SetPreferredPrefix("STASH")
+	_, err := config.SetPreferredPrefix("STASH")
+	assert.NoError(t, err)
 
 	// Temp dir for downloads
 	tempDir := os.TempDir()
@@ -213,7 +215,7 @@ func TestStashPluginMain(t *testing.T) {
 		// Set path for object to upload/download
 		tempPath := tempFile.Name()
 		fileName := filepath.Base(tempPath)
-		uploadURL := "pelican:///test/" + fileName
+		uploadURL := fmt.Sprintf("pelican://%s:%d/test/%s", param.Server_Hostname.GetString(), param.Server_WebPort.GetInt(), fileName)
 
 		// Download a test file
 		args := []string{uploadURL, tempDir}
@@ -231,14 +233,14 @@ func TestStashPluginMain(t *testing.T) {
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
-	err := cmd.Run()
+	err = cmd.Run()
 	assert.NoError(t, err, stderr.String())
 
 	// changing output for "\\" since in windows there are excess "\" printed in debug logs
 	output := strings.Replace(stderr.String(), "\\\\", "\\", -1)
 
 	// Check captured output for successful download
-	expectedOutput := "Downloading: pelican:///test/test.txt to " + tempDir
+	expectedOutput := "Downloading object from pelican:///test/test.txt to " + tempDir
 	assert.Contains(t, output, expectedOutput)
 	successfulDownloadMsg := "HTTP Transfer was successful"
 	assert.Contains(t, output, successfulDownloadMsg)

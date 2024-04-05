@@ -30,6 +30,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/launcher_utils"
+	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/oa4mp"
 	"github.com/pelicanplatform/pelican/origin"
 	"github.com/pelicanplatform/pelican/param"
@@ -93,9 +94,11 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		launchers = append(launchers, oa4mp_launcher)
 	}
 
-	if err = xrootd.LaunchOriginDaemons(ctx, launchers, egrp); err != nil {
+	pids, err := xrootd.LaunchOriginDaemons(ctx, launchers, egrp)
+	if err != nil {
 		return nil, err
 	}
+	originServer.SetPids(pids)
 
 	// LaunchOriginDaemons may edit the viper config; these launched goroutines are purposely
 	// delayed until after the viper config is done.
@@ -113,6 +116,7 @@ func OriginServeFinish(ctx context.Context, egrp *errgroup.Group) error {
 		return err
 	}
 
+	metrics.SetComponentHealthStatus(metrics.OriginCache_Registry, metrics.StatusWarning, "Start to register namespaces for the origin server")
 	for _, export := range *originExports {
 		if err := launcher_utils.RegisterNamespaceWithRetry(ctx, egrp, export.FederationPrefix); err != nil {
 			return err

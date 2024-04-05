@@ -57,6 +57,7 @@ func GetDeprecated() map[string][]string {
         "Origin.ExportVolume": []string{"Origin.ExportVolumes"},
         "Origin.Mode": []string{"Origin.StorageType"},
         "Origin.NamespacePrefix": []string{"Origin.FederationPrefix"},
+        "Origin.S3ServiceName": []string{"none"},
         "Xrootd.Port": []string{"Origin.Port", "Cache.Port"},
         "Xrootd.RunLocation": []string{"Cache.RunLocation", "Origin.RunLocation"},
     }
@@ -113,12 +114,16 @@ func (bP ObjectParam) IsSet() bool {
 var (
 	Cache_DataLocation = StringParam{"Cache.DataLocation"}
 	Cache_ExportLocation = StringParam{"Cache.ExportLocation"}
+	Cache_HighWaterMark = StringParam{"Cache.HighWaterMark"}
+	Cache_LowWatermark = StringParam{"Cache.LowWatermark"}
 	Cache_RunLocation = StringParam{"Cache.RunLocation"}
 	Cache_Url = StringParam{"Cache.Url"}
 	Cache_XRootDPrefix = StringParam{"Cache.XRootDPrefix"}
 	Director_DefaultResponse = StringParam{"Director.DefaultResponse"}
 	Director_GeoIPLocation = StringParam{"Director.GeoIPLocation"}
 	Director_MaxMindKeyFile = StringParam{"Director.MaxMindKeyFile"}
+	Director_SupportContactEmail = StringParam{"Director.SupportContactEmail"}
+	Director_SupportContactUrl = StringParam{"Director.SupportContactUrl"}
 	Federation_BrokerUrl = StringParam{"Federation.BrokerUrl"}
 	Federation_DirectorUrl = StringParam{"Federation.DirectorUrl"}
 	Federation_DiscoveryUrl = StringParam{"Federation.DiscoveryUrl"}
@@ -213,6 +218,7 @@ var (
 	StagePlugin_OriginPrefix = StringParam{"StagePlugin.OriginPrefix"}
 	StagePlugin_ShadowOriginPrefix = StringParam{"StagePlugin.ShadowOriginPrefix"}
 	Xrootd_Authfile = StringParam{"Xrootd.Authfile"}
+	Xrootd_ConfigFile = StringParam{"Xrootd.ConfigFile"}
 	Xrootd_DetailedMonitoringHost = StringParam{"Xrootd.DetailedMonitoringHost"}
 	Xrootd_LocalMonitoringHost = StringParam{"Xrootd.LocalMonitoringHost"}
 	Xrootd_MacaroonsKeyFile = StringParam{"Xrootd.MacaroonsKeyFile"}

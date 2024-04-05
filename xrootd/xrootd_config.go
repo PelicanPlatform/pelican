@@ -34,6 +34,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"text/template"
 	"time"
@@ -90,20 +91,21 @@ type (
 		CalculatedPort    string
 		RunLocation       string
 		StorageType       string
-		S3Bucket          string
-		S3Region          string
-		S3ServiceName     string
-		S3ServiceUrl      string
-		S3AccessKeyfile   string
-		S3SecretKeyfile   string
-		S3UrlStyle        string
-		Exports           []server_utils.OriginExports
+
+		// S3 specific options that are kept top-level because
+		// they aren't specific to each export
+		S3Region     string
+		S3ServiceUrl string
+		S3UrlStyle   string
+		Exports      []server_utils.OriginExport
 	}
 
 	CacheConfig struct {
 		UseCmsd        bool
 		EnableVoms     bool
 		CalculatedPort string
+		HighWaterMark  string
+		LowWatermark   string
 		ExportLocation string
 		RunLocation    string
 		DataLocation   string
@@ -115,6 +117,7 @@ type (
 		Port                   int
 		ManagerHost            string
 		ManagerPort            string
+		ConfigFile             string
 		MacaroonsKeyFile       string
 		RobotsTxtFile          string
 		Sitename               string
@@ -180,9 +183,7 @@ func CheckOriginXrootdEnv(exportPath string, server server_structs.XRootDServer,
 		return err
 	}
 
-	backendType := param.Origin_StorageType.GetString()
-	switch backendType {
-	case "posix":
+	if ost := param.Origin_StorageType.GetString(); ost == "posix" {
 		// For each export, we symlink the exported directory, currently at /var/run/pelican/export/<export.FederationPrefix>,
 		// to the actual data source, which is what we get from the Export object's StoragePrefix
 		for _, export := range *originExports {
@@ -200,10 +201,6 @@ func CheckOriginXrootdEnv(exportPath string, server server_structs.XRootDServer,
 		}
 		// Set the mount to our export path now that everything is symlinked
 		viper.Set("Xrootd.Mount", exportPath)
-	case "s3":
-		if len(*originExports) > 1 {
-			return errors.New("Multi exports for s3 backends not yet implemented")
-		}
 	}
 
 	if param.Origin_SelfTest.GetBool() {
@@ -283,7 +280,7 @@ func CheckCacheXrootdEnv(exportPath string, server server_structs.XRootDServer, 
 			filepath.Dir(metaPath))
 	}
 
-	err = config.DiscoverFederation()
+	err = config.DiscoverFederation(context.Background())
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to pull information from the federation")
 	}
@@ -591,6 +588,20 @@ func ConfigXrootd(ctx context.Context, origin bool) (string, error) {
 		return "", errors.Wrap(err, "failed to unmarshal xrootd config")
 	}
 
+	// For cache. convert integer percentage value [0,100] to decimal fraction [0.00, 1.00]
+	if !origin {
+		if num, err := strconv.Atoi(xrdConfig.Cache.HighWaterMark); err == nil {
+			if num <= 100 && num > 0 {
+				xrdConfig.Cache.HighWaterMark = strconv.FormatFloat(float64(num)/100, 'f', 2, 64)
+			}
+		}
+		if num, err := strconv.Atoi(xrdConfig.Cache.LowWatermark); err == nil {
+			if num <= 100 && num > 0 {
+				xrdConfig.Cache.LowWatermark = strconv.FormatFloat(float64(num)/100, 'f', 2, 64)
+			}
+		}
+	}
+
 	// To make sure we get the correct exports, we overwrite the exports in the xrdConfig struct with the exports
 	// we get from the server_structs.GetOriginExports() function. Failure to do so will cause us to hit viper again,
 	// which in the case of tests prevents us from overwriting some exports with temp dirs.
@@ -599,13 +610,6 @@ func ConfigXrootd(ctx context.Context, origin bool) (string, error) {
 		return "", errors.Wrap(err, "failed to generate Origin export list for xrootd config")
 	}
 	xrdConfig.Origin.Exports = *originExports
-
-	// If the S3 URL style is configured via yaml, the CLI check in cmd/origin.go won't catch invalid values.
-	if urlStyle := xrdConfig.Origin.S3UrlStyle; urlStyle != "" {
-		if urlStyle != "path" && urlStyle != "virtual" {
-			return "", errors.Errorf("Invalid S3UrlStyle: %v. Must be either 'path' or 'virtual'", urlStyle)
-		}
-	}
 
 	// Map out xrootd logs
 	err = mapXrootdLogLevels(&xrdConfig)

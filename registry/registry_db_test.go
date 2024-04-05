@@ -732,59 +732,6 @@ func topologyMockup(t *testing.T, namespaces []string) *httptest.Server {
 	return svr
 }
 
-func TestGetNamespaceByPrefix(t *testing.T) {
-	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
-	defer func() { require.NoError(t, egrp.Wait()) }()
-	defer cancel()
-
-	viper.Reset()
-
-	topoNamespaces := []string{"/topo/foo"}
-	svr := topologyMockup(t, topoNamespaces)
-	defer svr.Close()
-
-	registryDB := t.TempDir()
-	viper.Set("Registry.DbLocation", filepath.Join(registryDB, "test.sqlite"))
-	viper.Set("Federation.TopologyNamespaceURL", svr.URL)
-	config.InitConfig()
-
-	err := InitializeDB(ctx)
-	require.NoError(t, err)
-	defer func() {
-		err := ShutdownDB()
-		assert.NoError(t, err)
-	}()
-
-	//Test topology table population
-	err = createTopologyTable()
-	require.NoError(t, err)
-	err = PopulateTopology()
-	require.NoError(t, err)
-
-	//Test that getNamespaceByPrefix wraps a pelican namespace around a topology one
-	ns, err := getNamespaceByPrefix("/topo/foo")
-	require.NoError(t, err)
-	require.True(t, ns.Topology)
-
-	// Add a test namespace so we can test that checkExists still works
-	new_ns := Namespace{
-		ID:            0,
-		Prefix:        "/regular/foo",
-		Pubkey:        "",
-		Identity:      "",
-		AdminMetadata: AdminMetadata{},
-	}
-	err = AddNamespace(&new_ns)
-	require.NoError(t, err)
-
-	//Test that getNamespaceByPrefix returns namespace with a false topology variable
-	ns_reg, err := getNamespaceByPrefix("/regular/foo")
-	require.NoError(t, err)
-	require.False(t, ns_reg.Topology)
-
-	viper.Reset()
-}
-
 func TestRegistryTopology(t *testing.T) {
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
@@ -809,7 +756,8 @@ func TestRegistryTopology(t *testing.T) {
 	}()
 
 	// Set value so that config.GetPreferredPrefix() returns "OSDF"
-	config.SetPreferredPrefix("OSDF")
+	_, err = config.SetPreferredPrefix("OSDF")
+	assert.NoError(t, err)
 
 	//Test topology table population
 	err = createTopologyTable()
@@ -818,12 +766,12 @@ func TestRegistryTopology(t *testing.T) {
 	require.NoError(t, err)
 
 	// Check that topology namespace exists
-	exists, err := namespaceExistsByPrefix("/topo/foo")
+	exists, err := topologyNamespaceExistsByPrefix("/topo/foo")
 	require.NoError(t, err)
 	require.True(t, exists)
 
 	// Check that topology namespace exists
-	exists, err = namespaceExistsByPrefix("/topo/bar")
+	exists, err = topologyNamespaceExistsByPrefix("/topo/bar")
 	require.NoError(t, err)
 	require.True(t, exists)
 
@@ -839,9 +787,9 @@ func TestRegistryTopology(t *testing.T) {
 	require.NoError(t, err)
 
 	// Check that the regular namespace exists
-	exists, err = namespaceExistsByPrefix("/regular/foo")
+	exists, err = topologyNamespaceExistsByPrefix("/regular/foo")
 	require.NoError(t, err)
-	require.True(t, exists)
+	require.False(t, exists)
 
 	// Check that a bad namespace doesn't exist
 	exists, err = namespaceExistsByPrefix("/bad/namespace")
@@ -863,24 +811,36 @@ func TestRegistryTopology(t *testing.T) {
 	require.NoError(t, err)
 
 	// Check that /topo/foo still exists
-	exists, err = namespaceExistsByPrefix("/topo/foo")
+	exists, err = topologyNamespaceExistsByPrefix("/topo/foo")
 	require.NoError(t, err)
 	require.True(t, exists)
 
 	// And that /topo/baz was added
-	exists, err = namespaceExistsByPrefix("/topo/baz")
+	exists, err = topologyNamespaceExistsByPrefix("/topo/baz")
 	require.NoError(t, err)
 	require.True(t, exists)
 
 	// Check that /topo/bar is gone
-	exists, err = namespaceExistsByPrefix("/topo/bar")
+	exists, err = topologyNamespaceExistsByPrefix("/topo/bar")
 	require.NoError(t, err)
 	require.False(t, exists)
 
-	// Finally, check that /regular/foo survived
-	exists, err = namespaceExistsByPrefix("/regular/foo")
-	require.NoError(t, err)
-	require.True(t, exists)
-
 	viper.Reset()
+}
+
+func TestGetTopoPrefixString(t *testing.T) {
+	t.Run("empty-arr", func(t *testing.T) {
+		re := GetTopoPrefixString([]Topology{})
+		assert.Empty(t, re)
+	})
+
+	t.Run("one-item", func(t *testing.T) {
+		re := GetTopoPrefixString([]Topology{{Prefix: "/foo"}})
+		assert.Equal(t, "/foo", re)
+	})
+
+	t.Run("multiple-items", func(t *testing.T) {
+		re := GetTopoPrefixString([]Topology{{Prefix: "/foo"}, {Prefix: "/bar"}, {Prefix: "/barz"}})
+		assert.Equal(t, "/foo, /bar, /barz", re)
+	})
 }

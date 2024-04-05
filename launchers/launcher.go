@@ -29,6 +29,7 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
@@ -49,18 +50,20 @@ var (
 	ErrRestart      error = errors.New("Restart program")
 )
 
-func LaunchModules(ctx context.Context, modules config.ServerType) (context.CancelFunc, error) {
+func LaunchModules(ctx context.Context, modules config.ServerType) (servers []server_structs.XRootDServer, shutdownCancel context.CancelFunc, err error) {
 	egrp, ok := ctx.Value(config.EgrpKey).(*errgroup.Group)
 	if !ok {
 		egrp = &errgroup.Group{}
 	}
 
-	ctx, shutdownCancel := context.WithCancel(ctx)
+	ctx, shutdownCancel = context.WithCancel(ctx)
+
+	config.PrintPelicanVersion()
 
 	// Print Pelican config at server start if it's in debug or info level
 	if log.GetLevel() >= log.InfoLevel {
-		if err := config.PrintConfig(); err != nil {
-			return shutdownCancel, err
+		if err = config.PrintConfig(); err != nil {
+			return
 		}
 	}
 
@@ -83,24 +86,26 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		}
 	})
 
-	engine, err := web_ui.GetEngine()
+	var engine *gin.Engine
+	engine, err = web_ui.GetEngine()
 	if err != nil {
-		return shutdownCancel, err
+		return
 	}
 
 	if err = config.InitServer(ctx, modules); err != nil {
-		return shutdownCancel, errors.Wrap(err, "Failure when configuring the server")
+		err = errors.Wrap(err, "Failure when configuring the server")
+		return
 	}
 
 	// Set up necessary APIs to support Web UI, including auth and metrics
-	if err := web_ui.ConfigureServerWebAPI(ctx, engine, egrp); err != nil {
-		return shutdownCancel, err
+	if err = web_ui.ConfigureServerWebAPI(ctx, engine, egrp); err != nil {
+		return
 	}
 
 	if modules.IsEnabled(config.RegistryType) {
 		// Federation.RegistryUrl defaults to Server.ExternalUrl in InitServer()
 		if err = RegistryServe(ctx, engine, egrp); err != nil {
-			return shutdownCancel, err
+			return
 		}
 	}
 
@@ -115,7 +120,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		// Federation.DirectorUrl defaults to Server.ExternalUrl in InitServer()
 		// Duplicated set are removed
 		if err = DirectorServe(ctx, engine, egrp); err != nil {
-			return shutdownCancel, err
+			return
 		}
 	}
 
@@ -125,7 +130,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 	addr := fmt.Sprintf("%v:%v", param.Server_WebHost.GetString(), param.Server_WebPort.GetInt())
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
-		return shutdownCancel, err
+		return
 	}
 	lnReference := ln
 	defer func() {
@@ -135,22 +140,26 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 	}()
 	config.UpdateConfigFromListener(ln)
 
-	servers := make([]server_structs.XRootDServer, 0)
+	servers = make([]server_structs.XRootDServer, 0)
 
 	if modules.IsEnabled(config.OriginType) {
 
 		mode := param.Origin_StorageType.GetString()
-
-		originExports, err := server_utils.GetOriginExports()
-
+		var originExports *[]server_utils.OriginExport
+		originExports, err = server_utils.GetOriginExports()
 		if err != nil {
-			return shutdownCancel, err
+			return
+		}
+
+		ok, err = server_utils.CheckSentinelLocation(originExports)
+		if err != nil && !ok {
+			return
 		}
 
 		switch mode {
 		case "posix":
 			if len(*originExports) == 0 {
-				return shutdownCancel, errors.Errorf(`
+				err = errors.Errorf(`
 	Export information was not provided.
 	To specify exports via the command line, use:
 
@@ -162,30 +171,57 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 
 	Origin:
 		Exports:
-		- StoragePrefix: /mnt/foo
-		  FederationPrefix: /bar
-		  Capabilities: ["PublicReads", "Writes", "Listings"]
-		- StoragePrefix: /mnt/test
-		  FederationPrefix: /baz
-		  Capabilities: ["Writes"]
+		  - StoragePrefix: /mnt/foo
+		    FederationPrefix: /bar
+		    Capabilities: ["PublicReads", "Writes", "Listings"]
+		  - StoragePrefix: /mnt/test
+		    FederationPrefix: /baz
+		    Capabilities: ["Writes"]
 
 	to export the directories /mnt/foo and /mnt/test under the namespace prefixes /bar and /baz, respectively (with listed permissions).
 	`)
+				return
 			}
 		case "s3":
-			if param.Origin_S3Region.GetString() == "" || param.Origin_S3ServiceName.GetString() == "" ||
-				param.Origin_S3ServiceUrl.GetString() == "" {
-				return shutdownCancel, errors.Errorf("The S3 origin is missing configuration options to run properly." +
-					" You must specify a region, a service name and a service URL via the command line or via" +
-					" your configuration file.")
+			if len(*originExports) == 0 {
+				err = errors.Errorf(`
+	Export information was not provided.
+	To specify exports via the command line, use:
+
+				-v my-bucket:/my/prefix (REQUIRED --service-url https://my-s3-url.com) (REQUIRED --url-style <path or virtual>) \
+						(REQUIRED --region "my-region") (OPTIONAL --bucket-access-keyfile /path/to/access.key) \
+						(OPTIONAL --bucket-secret-keyfile /path/to/secret.key)
+
+
+	to export the S3 bucket under the namespace prefix /my/prefix.
+
+	Alternatively, specify Origin.Exports in the parameters.yaml file:
+
+	Origin:
+		StorageType: s3
+		S3UrlStyle: <path or virtual>
+		S3ServiceUrl: https://my-s3-url.com
+		S3Region: my-region
+		Exports:
+		  - FederationPrefix: /my/prefix
+			S3Bucket: my-bucket
+			S3AccessKeyfile: /path/to/access.key
+			S3SecretKeyfile: /path/to/secret.key
+			Capabilities: ["PublicReads", "Writes", "Listings"]
+
+	to export the S3 bucket my-bucket from https://my-s3-url.com under the namespace prefix /my/prefix (with listed permissions).
+				`)
+				return
 			}
 		default:
-			return shutdownCancel, errors.Errorf("Currently-supported origin modes include posix and s3.")
+			err = errors.Errorf("Currently-supported origin modes include posix and s3, but you provided %s.", mode)
+			return
 		}
 
-		server, err := OriginServe(ctx, engine, egrp, modules)
+		var server server_structs.XRootDServer
+		server, err = OriginServe(ctx, engine, egrp, modules)
 		if err != nil {
-			return shutdownCancel, err
+			return
 		}
 		servers = append(servers, server)
 
@@ -195,7 +231,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		// is only one namespace prefix available here and that it lives in Origin.FederationPrefix
 		if param.Origin_EnableBroker.GetBool() {
 			if err = origin.LaunchBrokerListener(ctx, egrp); err != nil {
-				return shutdownCancel, err
+				return
 			}
 		}
 	}
@@ -205,7 +241,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		// Create and register the cache routines before the web interface is up
 		lc, err = local_cache.NewLocalCache(ctx, egrp, local_cache.WithDeferConfig(true))
 		if err != nil {
-			return shutdownCancel, err
+			return
 		}
 		rootGroup := engine.Group("/")
 		lc.Register(ctx, rootGroup)
@@ -223,23 +259,24 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		return nil
 	})
 
-	if err = server_utils.WaitUntilWorking(ctx, "GET", param.Server_ExternalWebUrl.GetString()+"/api/v1.0/health", "Web UI", http.StatusOK); err != nil {
-		log.Errorln("Web engine startup appears to have failed:", err)
-		return shutdownCancel, err
+	healthCheckUrl := param.Server_ExternalWebUrl.GetString() + "/api/v1.0/health"
+	if err = server_utils.WaitUntilWorking(ctx, "GET", healthCheckUrl, "Web UI", http.StatusOK, true); err != nil {
+		log.Errorln("Web engine check failed: ", err)
+		return
 	}
 
 	if modules.IsEnabled(config.OriginType) {
 		log.Debug("Finishing origin server configuration")
 		if err = OriginServeFinish(ctx, egrp); err != nil {
-			return shutdownCancel, err
+			return
 		}
 	}
 
 	// Origin needs to advertise once before the cache starts
 	if modules.IsEnabled(config.CacheType) && modules.IsEnabled(config.OriginType) {
-		log.Debug("Advertise Origin")
+		log.Debug("Advertise Origin and Cache to the Director")
 		if err = launcher_utils.Advertise(ctx, servers); err != nil {
-			return shutdownCancel, err
+			return
 		}
 
 		// We may have arbitrarily many exports, so we should make sure they're all advertised before
@@ -247,9 +284,10 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		// of the namespaces and doesn't have to wait an entire cycle to learn about them from the director
 
 		// To check all of the advertisements, we'll launch a WaitUntilWorking concurrently for each of them.
-		originExports, err := server_utils.GetOriginExports()
+		var originExports *[]server_utils.OriginExport
+		originExports, err = server_utils.GetOriginExports()
 		if err != nil {
-			return shutdownCancel, err
+			return
 		}
 		errCh := make(chan error, len(*originExports))
 		var wg sync.WaitGroup
@@ -259,9 +297,11 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		// was that it only made sense to serve an origin and a cache at the same time if a local director
 		// was being fired up, but that may be a pigeonhole. The new assumption here is that we're religious
 		// about setting Federation.DirectorUrl.
-		directorUrl, err := url.Parse(param.Federation_DirectorUrl.GetString())
+		var directorUrl *url.URL
+		directorUrl, err = url.Parse(param.Federation_DirectorUrl.GetString())
 		if err != nil {
-			return shutdownCancel, errors.Wrap(err, "Failed to parse director URL when checking origin advertisements before cache launch")
+			err = errors.Wrap(err, "Failed to parse director URL when checking origin advertisements before cache launch")
+			return
 		}
 		for _, export := range *originExports {
 			go func(prefix string) {
@@ -273,7 +313,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 					errCh <- errors.Wrapf(err, "Failed to join path %s for origin advertisement check", prefix)
 					return
 				}
-				if err = server_utils.WaitUntilWorking(ctx, "GET", urlToCheck.String(), "director", 307); err != nil {
+				if err = server_utils.WaitUntilWorking(ctx, "GET", urlToCheck.String(), "director", 307, false); err != nil {
 					errCh <- errors.Wrapf(err, "The prefix %s does not seem to have advertised correctly", prefix)
 				}
 
@@ -292,36 +332,38 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 
 		}
 		if errFound {
-			return shutdownCancel, errors.New("Failed to advertise all origin exports before cache launch")
+			err = errors.New("Failed to advertise all origin exports before cache launch")
+			return
 		}
 	}
 
 	if modules.IsEnabled(config.CacheType) {
 		// Give five seconds for the origin to finish advertising to the director
 		desiredURL := param.Federation_DirectorUrl.GetString() + "/.well-known/openid-configuration"
-		if err = server_utils.WaitUntilWorking(ctx, "GET", desiredURL, "director", 200); err != nil {
+		if err = server_utils.WaitUntilWorking(ctx, "GET", desiredURL, "director", 200, false); err != nil {
 			log.Errorln("Director does not seem to be working:", err)
-			return shutdownCancel, err
+			return
 		}
-		server, err := CacheServe(ctx, engine, egrp, modules)
+		var server server_structs.XRootDServer
+		server, err = CacheServe(ctx, engine, egrp, modules)
 		if err != nil {
-			return shutdownCancel, err
+			return
 		}
 
 		servers = append(servers, server)
 	}
 
 	if modules.IsEnabled(config.OriginType) || modules.IsEnabled(config.CacheType) {
-		log.Debug("Launching periodic advertise")
-		if err := launcher_utils.LaunchPeriodicAdvertise(ctx, egrp, servers); err != nil {
-			return shutdownCancel, err
+		log.Debug("Launching periodic advertise of origin/cache server to the director")
+		if err = launcher_utils.LaunchPeriodicAdvertise(ctx, egrp, servers); err != nil {
+			return
 		}
 	}
 
 	if modules.IsEnabled(config.CacheType) {
 		log.Debug("Finishing cache server configuration")
 		if err = CacheServeFinish(ctx, egrp); err != nil {
-			return shutdownCancel, err
+			return
 		}
 	}
 
@@ -330,21 +372,22 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		if err := lc.Config(egrp); err != nil {
 			log.Warning("Failure when configuring the local cache; cache may incorrectly generate 403 errors until reconfiguration runs")
 		}
-		if err := lc.LaunchListener(ctx, egrp); err != nil {
+		if err = lc.LaunchListener(ctx, egrp); err != nil {
 			log.Errorln("Failure when starting the local cache listener:", err)
-			return shutdownCancel, err
+			return
 		}
 
 	}
 
 	if param.Server_EnableUI.GetBool() {
 		if err = web_ui.ConfigureEmbeddedPrometheus(ctx, engine); err != nil {
-			return shutdownCancel, errors.Wrap(err, "Failed to configure embedded prometheus instance")
+			err = errors.Wrap(err, "Failed to configure embedded prometheus instance")
+			return
 		}
 
 		log.Info("Starting web login...")
 		egrp.Go(func() error { return web_ui.InitServerWebLogin(ctx) })
 	}
 
-	return shutdownCancel, nil
+	return
 }

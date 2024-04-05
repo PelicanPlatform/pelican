@@ -18,11 +18,6 @@
 
 "use client"
 
-import RateGraph from "@/components/graphs/RateGraph";
-import StatusBox from "@/components/StatusBox";
-
-import {TimeDuration} from "@/components/graphs/prometheus";
-
 import {
     Box,
     Grid,
@@ -30,20 +25,22 @@ import {
     Skeleton,
     Link,
     Container,
-    Tooltip, Snackbar, Button
+    Tooltip,
+    Snackbar,
+    Button
 } from "@mui/material";
 import React, {useEffect, useMemo, useState} from "react";
 import {OverridableStringUnion} from "@mui/types";
 import {Variant} from "@mui/material/styles/createTypography";
 import {TypographyPropsVariantOverrides} from "@mui/material/Typography";
-import TextField from "@mui/material/TextField";
 import {
     AppRegistration,
     ArrowDropDown,
     ArrowDropUp,
     AssistantDirection,
     QuestionMark,
-    TripOrigin
+    TripOrigin,
+    Cached
 } from '@mui/icons-material';
 import {default as NextLink} from "next/link";
 import {merge, isEmpty, isMatch} from "lodash"
@@ -421,6 +418,17 @@ function Config() {
                             <Tooltip title={"Registry"} placement={"right"}>
                                 <IconButton>
                                     <AppRegistration/>
+                                </IconButton>
+                            </Tooltip>
+                        </NextLink>
+                    </Box>
+                }
+                { enabledServers.includes("cache") &&
+                    <Box pt={1}>
+                        <NextLink href={"/cache/"}>
+                            <Tooltip title={"Cache"} placement={"right"}>
+                                <IconButton>
+                                    <Cached/>
                                 </IconButton>
                             </Tooltip>
                         </NextLink>

@@ -130,7 +130,8 @@ func TestRegistryKeyChainingOSDF(t *testing.T) {
 	defer cancel()
 
 	viper.Reset()
-	_ = config.SetPreferredPrefix("OSDF")
+	_, err := config.SetPreferredPrefix("OSDF")
+	assert.NoError(t, err)
 	viper.Set("Federation.DirectorUrl", "https://osdf-director.osg-htc.org")
 	viper.Set("Federation.RegistryUrl", "https://osdf-registry.osg-htc.org")
 	viper.Set("Federation.JwkUrl", "https://osg-htc.org/osdf/public_signing_key.jwks")
@@ -142,7 +143,7 @@ func TestRegistryKeyChainingOSDF(t *testing.T) {
 	registrySvr := registryMockup(ctx, t, "OSDFkeychaining")
 	topoSvr := topologyMockup(t, []string{"/topo/foo"})
 	viper.Set("Federation.TopologyNamespaceURL", topoSvr.URL)
-	err := createTopologyTable()
+	err = createTopologyTable()
 	require.NoError(t, err)
 	err = PopulateTopology()
 	require.NoError(t, err)
@@ -169,13 +170,15 @@ func TestRegistryKeyChainingOSDF(t *testing.T) {
 	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v1.0/registry", "", "/foo/bar/test")
 	require.NoError(t, err)
 
-	// For now, we simply don't allow further super/sub spacing of namespaces from topo, because how
-	// can we validate via a key if there is none?
+	// If the namespace is a subspace from the topology and is registered without the identity
+	// we deny it
 	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v1.0/registry", "", "/topo/foo/bar")
 	require.Error(t, err)
+	assert.Contains(t, err.Error(), "A superspace or subspace of this namespace /topo/foo/bar already exists in the OSDF topology: /topo/foo. To register a Pelican equivalence, you need to present your identity.")
 
-	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v1.0/registry", "", "/topo")
+	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v1.0/registry", "", "/topo/foo")
 	require.Error(t, err)
+	assert.Contains(t, err.Error(), "A superspace or subspace of this namespace /topo/foo already exists in the OSDF topology: /topo/foo. To register a Pelican equivalence, you need to present your identity.")
 
 	// Now we create a new key and try to use it to register a super/sub space. These shouldn't succeed
 	viper.Set("IssuerKey", t.TempDir()+"/keychaining")
@@ -208,11 +211,13 @@ func TestRegistryKeyChainingOSDF(t *testing.T) {
 	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v1.0/registry", "", "/foo")
 	require.NoError(t, err)
 
-	// Finally, test with one value for topo
+	// However, topology check should be independent of key chaining check
 	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v1.0/registry", "", "/topo")
-	require.NoError(t, err)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "A superspace or subspace of this namespace /topo already exists in the OSDF topology: /topo/foo. To register a Pelican equivalence, you need to present your identity.")
 
-	config.SetPreferredPrefix("pelican")
+	_, err = config.SetPreferredPrefix("pelican")
+	assert.NoError(t, err)
 	viper.Reset()
 }
 

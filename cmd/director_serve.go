@@ -31,7 +31,7 @@ func serveDirector(cmd *cobra.Command, args []string) error {
 		modules.Set(config.BrokerType)
 	}
 
-	cancel, err := launchers.LaunchModules(cmd.Context(), config.DirectorType)
+	_, cancel, err := launchers.LaunchModules(cmd.Context(), config.DirectorType)
 	if err != nil {
 		cancel()
 	}
