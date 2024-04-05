@@ -19,7 +19,6 @@
 package config
 
 import (
-	"fmt"
 	"net/url"
 	"os"
 	"strings"
@@ -87,15 +86,15 @@ func getMetadataValue(stringParam param.StringParam) (result string, err error) 
 		}
 
 		if metadataError == nil {
-			err = fmt.Errorf("Required OIDC endpoint %s is not set and OIDC discovery at %s doesn't have the endpoint in the metadata. Your authentication server may not support OAuth2 authorization flow that is required by Pelican.",
+			err = errors.Errorf("Required OIDC endpoint %s is not set and OIDC discovery at %s doesn't have the endpoint in the metadata. Your authentication server may not support OAuth2 authorization flow that is required by Pelican.",
 				stringParam.GetName(),
 				param.OIDC_Issuer.GetString(),
 			)
 		} else {
-			err = errors.Wrap(metadataError,
-				fmt.Sprintf("Required OIDC endpoint %s is not set and OIDC discovery failed to request metadata from OIDC.Issuer",
-					stringParam.GetName(),
-				))
+			err = errors.Wrapf(metadataError,
+				"Required OIDC endpoint %s is not set and OIDC discovery failed to request metadata from OIDC.Issuer",
+				stringParam.GetName(),
+			)
 		}
 	}
 	return

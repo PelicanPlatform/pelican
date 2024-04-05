@@ -20,10 +20,11 @@ package config
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
+
+	"github.com/pkg/errors"
 )
 
 type OauthIssuer struct {
@@ -59,7 +60,7 @@ func GetIssuerMetadata(issuer_url string) (*OauthIssuer, error) {
 	}
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("Failed to retrieve issuer metadata at %s with status code %d", wellKnownUrl, resp.StatusCode)
+		return nil, errors.Errorf("Failed to retrieve issuer metadata at %s with status code %d", wellKnownUrl, resp.StatusCode)
 	}
 
 	issuer := &OauthIssuer{}

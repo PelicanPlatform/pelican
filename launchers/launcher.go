@@ -96,8 +96,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 		if modules.IsEnabled(config.RegistryType) ||
 			modules.IsEnabled(config.OriginType) ||
 			modules.IsEnabled(config.CacheType) {
-			err := web_ui.ConfigOAuthClientAPIs(engine)
-			if err != nil {
+			if err := web_ui.ConfigOAuthClientAPIs(engine); err != nil {
 				return shutdownCancel, err
 			}
 		}
