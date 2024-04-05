@@ -74,14 +74,13 @@ func TestGetAndPutAuth(t *testing.T) {
 
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
-	audience := config.GetServerAudience()
 
 	// Create a token file
 	tokenConfig := token.NewWLCGToken()
 	tokenConfig.Lifetime = time.Minute
 	tokenConfig.Issuer = issuer
 	tokenConfig.Subject = "origin"
-	tokenConfig.AddAudiences(audience)
+	tokenConfig.AddAudienceAny()
 
 	scopes := []token_scopes.TokenScope{}
 	readScope, err := token_scopes.Storage_Read.Path("/")
@@ -219,14 +218,13 @@ func TestCopyAuth(t *testing.T) {
 
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
-	audience := config.GetServerAudience()
 
 	// Create a token file
 	tokenConfig := token.NewWLCGToken()
 	tokenConfig.Lifetime = time.Minute
 	tokenConfig.Issuer = issuer
 	tokenConfig.Subject = "origin"
-	tokenConfig.AddAudiences(audience)
+	tokenConfig.AddAudienceAny()
 
 	scopes := []token_scopes.TokenScope{}
 	readScope, err := token_scopes.Storage_Read.Path("/")
@@ -351,7 +349,6 @@ func TestCopyAuth(t *testing.T) {
 func TestGetPublicRead(t *testing.T) {
 	viper.Reset()
 	server_utils.ResetOriginExports()
-
 	fed := fed_test_utils.NewFedTest(t, bothPublicOriginCfg)
 
 	t.Run("testPubObjGet", func(t *testing.T) {
