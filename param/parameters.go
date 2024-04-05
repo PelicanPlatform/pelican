@@ -57,6 +57,7 @@ func GetDeprecated() map[string][]string {
         "Origin.ExportVolume": []string{"Origin.ExportVolumes"},
         "Origin.Mode": []string{"Origin.StorageType"},
         "Origin.NamespacePrefix": []string{"Origin.FederationPrefix"},
+        "Origin.S3ServiceName": []string{"none"},
         "Xrootd.Port": []string{"Origin.Port", "Cache.Port"},
         "Xrootd.RunLocation": []string{"Cache.RunLocation", "Origin.RunLocation"},
     }

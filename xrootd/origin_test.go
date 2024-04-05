@@ -21,20 +21,18 @@
 package xrootd
 
 import (
-	"bytes"
 	"context"
 	"crypto/elliptic"
 	_ "embed"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/minio/minio-go/v7"
-	"github.com/minio/minio-go/v7/pkg/credentials"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/require"
@@ -210,7 +208,7 @@ func TestMultiExportOrigin(t *testing.T) {
 	defer mockupCancel()
 
 	// In this case a 403 means its running
-	err = server_utils.WaitUntilWorking(ctx, "GET", param.Origin_Url.GetString(), "xrootd", 403, false)
+	err = server_utils.WaitUntilWorking(ctx, "GET", param.Origin_Url.GetString(), "xrootd", 403, true)
 	if err != nil {
 		t.Fatalf("Unsuccessful test: Server encountered an error: %v", err)
 	}
@@ -223,7 +221,7 @@ func TestMultiExportOrigin(t *testing.T) {
 	require.True(t, ok)
 }
 
-func TestS3OriginConfig(t *testing.T) {
+func runS3Test(t *testing.T, bucketName, urlStyle, objectName string) {
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -232,84 +230,16 @@ func TestS3OriginConfig(t *testing.T) {
 	server_utils.ResetOriginExports()
 	defer viper.Reset()
 	defer server_utils.ResetOriginExports()
-	tmpDir := t.TempDir()
-
-	// We need to start up a minio server, which is how we emulate S3. Open to better ways to do this!
-	minIOServerCmd := exec.CommandContext(ctx, "minio", "server", "--quiet", tmpDir)
-	minIOServerCmd.Env = []string{fmt.Sprintf("HOME=%s", tmpDir)}
-
-	// Create a few buffers to grab outputs
-	var outb, errb bytes.Buffer
-	minIOServerCmd.Stdout = &outb
-	minIOServerCmd.Stderr = &errb
-
-	err := minIOServerCmd.Start()
-	require.NoError(t, err)
-	// Check for any other errors in the outputs
-	if strings.Contains(strings.ToLower(outb.String()), "error") {
-		t.Fatalf("Could not start the MinIO server: %s", outb.String())
-	} else if errb.String() != "" {
-		t.Fatalf("Could not start the MinIO server: %s", errb.String())
-	}
-
-	// Check if MinIO is running (by default at localhost:9000)
-	endpoint := "localhost:9000"
-	// Expect a 403 from this endpoint -- that means it's running
-	err = server_utils.WaitUntilWorking(ctx, "GET", fmt.Sprintf("http://%s", endpoint), "xrootd", 403, false)
-	if err != nil {
-		t.Fatalf("Unsuccessful test: Server encountered an error: %v", err)
-	}
-
-	defer func() {
-		err = minIOServerCmd.Process.Kill()
-		require.NoError(t, err)
-	}()
-
-	// Let's create an unauthenticated bucket. First we set up a client instance
-	// By default, the endpoint will require access/secret key with these values. Note that this doesn't
-	// necessarily mean the bucket we create needs those keys, as the bucket will have its own IAM
-	accessKey := "minioadmin"
-	secretKey := "minioadmin"
-	useSSL := false
-
-	minioClient, err := minio.New(endpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""),
-		Secure: useSSL,
-	})
-	require.NoError(t, err)
-
-	// Create a new unauthenticated bucket. Under the hood, this will access the minio server endpoint
-	// and do a PUT
-	bucketName := "test-bucket"
-	regionName := "test-region"
-	serviceName := "test-name"
-	err = minioClient.MakeBucket(context.Background(), bucketName, minio.MakeBucketOptions{})
-	require.NoError(t, err)
-
-	// Set bucket policy for public read access
-	policy := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":["s3:GetObject"],"Resource":["arn:aws:s3:::` + bucketName + `/*"]}]}`
-	err = minioClient.SetBucketPolicy(context.Background(), bucketName, policy)
-	require.NoError(t, err)
-
-	// Upload a test file to the bucket
-	testFilePath := filepath.Join(tmpDir, "test-file.txt")
-	content := []byte("This is the content of the test file.")
-	err = os.WriteFile(testFilePath, content, 0644)
-	require.NoError(t, err)
-
-	objectName := "test-file.txt"
-	contentType := "application/octet-stream"
-	_, err = minioClient.FPutObject(context.Background(), bucketName, objectName, testFilePath, minio.PutObjectOptions{ContentType: contentType})
-	require.NoError(t, err)
-
-	// All the setup to create the S3 server, add a bucket with a publicly-readable object is done. Now onto Pelican stuff
-	// Set up the origin and try to pull a file
-	viper.Set("Origin.StorageType", "s3")
-	viper.Set("Origin.S3Region", regionName)
+	federationPrefix := "/test"
+	regionName := "us-east-1"
+	serviceUrl := "https://s3.amazonaws.com"
+	viper.Set("Origin.FederationPrefix", federationPrefix)
 	viper.Set("Origin.S3Bucket", bucketName)
-	viper.Set("Origin.S3ServiceName", serviceName)
-	viper.Set("Origin.S3ServiceUrl", fmt.Sprintf("http://%s", endpoint))
-	viper.Set("Origin.S3UrlStyle", "path")
+	viper.Set("Origin.S3Region", regionName)
+	viper.Set("Origin.S3ServiceUrl", serviceUrl)
+	viper.Set("Origin.S3UrlStyle", urlStyle)
+	viper.Set("Origin.StorageType", "s3")
+	viper.Set("Origin.EnablePublicReads", true)
 
 	// Disable functionality we're not using (and is difficult to make work on Mac)
 	viper.Set("Origin.EnableCmsd", false)
@@ -323,36 +253,44 @@ func TestS3OriginConfig(t *testing.T) {
 	mockupCancel := originMockup(ctx, egrp, t)
 	defer mockupCancel()
 
-	// FOR NOW, we consider the test a success if the origin's xrootd server boots.
-	// TODO: When we've made it easier to come back and test whole pieces of this process by disentangling our
-	// *serve* commands, come back and make this e2e. The reason I'm punting is that in S3 mode, we also need all
-	// of the web_ui stuff initialized to export the public signing keys (as we can't export via XRootD) and we
-	// need a real token. These become much easier when we have an internally workable set of commands to do so.
-
-	originEndpoint := fmt.Sprintf("%s/%s/%s/%s/%s", param.Origin_Url.GetString(), serviceName, regionName, bucketName, objectName)
-	// Until we sort out the things we mentioned above, we should expect a 403 because we don't try to pass tokens
-	// and we don't actually export any keys for token validation.
-	err = server_utils.WaitUntilWorking(ctx, "GET", originEndpoint, "xrootd", 403, false)
+	originEndpoint := param.Origin_Url.GetString()
+	// At this point, a 403 means the server is running, which means its ready to grab objects from
+	err := server_utils.WaitUntilWorking(ctx, "GET", originEndpoint, "xrootd", 403, true)
 	if err != nil {
 		t.Fatalf("Unsucessful test: Server encountered an error: %v", err)
 	}
 
-	// One other quick check to do is that the namespace was correctly parsed:
-	require.Equal(t, fmt.Sprintf("/%s/%s/%s", serviceName, regionName, bucketName), param.Origin_FederationPrefix.GetString())
-	cancel()
-	mockupCancel()
+	// Now try to get the object
+	originEndpoint = fmt.Sprintf("%s%s/%s", param.Origin_Url.GetString(), federationPrefix, objectName)
+	// Set up an HTTP client to request the object from originEndpoint
+	transport := config.GetTransport()
+	client := &http.Client{Transport: transport}
+	req, err := http.NewRequest("GET", originEndpoint, nil)
+	require.NoError(t, err)
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, 200, resp.StatusCode)
 
-	// Test virtual-style hosting
-	viper.Set("Origin.S3UrlStyle", "virtual")
-	ctx, cancel, egrp = test_utils.TestContext(context.Background(), t)
-	mockupCancel = originMockup(ctx, egrp, t)
-	defer cancel()
-	defer mockupCancel()
+	// Luckily, this is historic data and there's no reason to believe it will change, so we can
+	// grab the body and check for a known value indicating the file correctly downloaded (there is a
+	// time travel paradox baked into this -- if someone goes back to 1800 and alters the measurement,
+	// will this code be updated automatically?)
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Contains(t, string(body), "36e5f1edfe5d403b2da163bd50669f66  1800/wod_osd_1800.nc")
+}
 
-	err = server_utils.WaitUntilWorking(ctx, "GET", originEndpoint, "xrootd", 403, false)
-	if err != nil {
-		t.Fatalf("Unsucessful test: Server encountered an error: %v", err)
-	}
+func TestS3OriginConfig(t *testing.T) {
+	t.Run("S3OriginPathBucket", func(t *testing.T) {
+		runS3Test(t, "noaa-wod-pds", "path", "MD5SUMS")
+	})
 
-	require.Equal(t, fmt.Sprintf("/%s/%s/%s", serviceName, regionName, bucketName), param.Origin_FederationPrefix.GetString())
+	t.Run("S3OriginVirtualBucket", func(t *testing.T) {
+		runS3Test(t, "noaa-wod-pds", "virtual", "MD5SUMS")
+	})
+
+	t.Run("S3OriginNoBucket", func(t *testing.T) {
+		runS3Test(t, "", "path", "noaa-wod-pds/MD5SUMS")
+	})
 }

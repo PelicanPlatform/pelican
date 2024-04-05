@@ -460,8 +460,9 @@ components: ["origin"]
 ---
 name: Origin.StoragePrefix
 description: |+
-  A string indicating the path to the volume exported by an origin's underlying storage. For example, if the origin is configured in posix
-  mode, this constitutes the path on disk exported by the origin for the federation.
+  A string indicating the path to the volume exported by an origin's underlying storage. For example, if the origin has a StorageType
+  of "posix", this constitutes the path on disk exported by the origin for the federation. If the origin has a StorageType of "s3",
+  this value is not currently used.
 
   NOTE: This config option is incompatible with multiple exports defined via `Origin.Exports` and requires that the origin exports
   only a single path.
@@ -717,35 +718,59 @@ components: ["origin"]
 ---
 name: Origin.S3ServiceName
 description: |+
-  The S3 Service Name to be used by the XRootD plugin.
+  [Deprecated] Origin.S3ServiceName was previously used in part to determine an export's FederationPrefix, but
+  upstream changes no longer rely on this value. As of Pelican 7.7.0, setting this value no longer has any effect.
+  AWSv4 signatures used by S3 servers to handle authentication now hardcode "s3" as their service name.
+
+  When constructing signed URLs for S3, this value is used as a part of the signature. It is almost always "s3". For more
+  information about S3 service names, see https://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-auth-using-authorization-header.html
 type: string
+deprecated: true
+replacedby: none
 default: none
 components: ["origin"]
 ---
 name: Origin.S3Region
 description: |+
-  The S3 region to be used by the XRootD plugin.
+  Objects in S3 are associated with a "region", which is specifically a part of AWS's infrastructure. Often, S3 endpoints that are not
+  provided by Amazon use "us-east-1" as their region. This value is used when constructing signed URLs for getting authenticated objects
+  from a bucket.
+
+  For more information about how Amazon uses regions, see https://docs.aws.amazon.com/general/latest/gr/s3.html
+
+  This value is REQUIRED for S3 origins.
 type: string
 default: none
 components: ["origin"]
 ---
 name: Origin.S3Bucket
 description: |+
-  The S3 bucket to be used by the XRootD plugin.
+  Objects in S3 are stored in "buckets", which have unique names at each S3 service URL (ie the URL that provides access to your objects).
+  Setting a bucket restricts the origin to only serving objects from that bucket.
+
+  However, if the origin is meant to export all of the buckets associated with a given service URL, this value can be left unset *IF* all
+  of those buckets are public and the origin is using path-style URLS. When this is the case, objects can be fetched from the origin at the
+  path `/federation/prefix/bucket-name/object-name`.
 type: string
 default: none
 components: ["origin"]
 ---
 name: Origin.S3ServiceUrl
 description: |+
-  The S3 service URL to be used by the XRootD plugin.
+  The URL that provides API access your objects. When the S3 instance is hosted by Amazon, this is often "https://s3.us-east-1.amazonaws.com".
+
+  This value is REQUIRED for S3 origins.
 type: string
 default: none
 components: ["origin"]
 ---
 name: Origin.S3AccessKeyfile
 description: |+
-  A path to a file containing an S3 access keyfile for authenticated buckets when an origin is run in S3 mode.
+  A path to a file containing an S3 access keyfile (also sometimes called an API key) for authenticated buckets when an origin
+  is run in S3 mode.
+
+  This value is OPTIONAL for S3 origins, and only applies when an exported bucket requires authentication. It should not be used
+  if the bucket is public or if the origin is meant to export all public buckets from the S3 service URL.
 type: filename
 default: none
 components: ["origin"]
@@ -753,6 +778,9 @@ components: ["origin"]
 name: Origin.S3SecretKeyfile
 description: |+
   A path to a file containing an S3 secret keyfile for authenticated buckets when an origin is run in S3 mode.
+
+  This value is OPTIONAL for S3 origins, and only applies when an exported bucket requires authentication. It should not be used
+  if the bucket is public or if the origin is meant to export all public buckets from the S3 service URL.
 type: filename
 default: none
 components: ["origin"]
@@ -761,6 +789,8 @@ name: Origin.S3UrlStyle
 description: |+
   The style of S3 urls used by the service URL host. This can be either "path" if objects are fetched at <service-url>/<bucket>/<object>
   or "virtual" if objects are fetched at <bucket>.<service-url>/<object>.
+
+  This value is REQUIRED for S3 origins, but defaults to "path" if not set.
 type: string
 default: path
 components: ["origin"]

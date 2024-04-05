@@ -171,27 +171,50 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 
 	Origin:
 		Exports:
-		- StoragePrefix: /mnt/foo
-		  FederationPrefix: /bar
-		  Capabilities: ["PublicReads", "Writes", "Listings"]
-		- StoragePrefix: /mnt/test
-		  FederationPrefix: /baz
-		  Capabilities: ["Writes"]
+		  - StoragePrefix: /mnt/foo
+		    FederationPrefix: /bar
+		    Capabilities: ["PublicReads", "Writes", "Listings"]
+		  - StoragePrefix: /mnt/test
+		    FederationPrefix: /baz
+		    Capabilities: ["Writes"]
 
 	to export the directories /mnt/foo and /mnt/test under the namespace prefixes /bar and /baz, respectively (with listed permissions).
 	`)
 				return
 			}
 		case "s3":
-			if param.Origin_S3Region.GetString() == "" || param.Origin_S3ServiceName.GetString() == "" ||
-				param.Origin_S3ServiceUrl.GetString() == "" {
-				err = errors.Errorf("The S3 origin is missing configuration options to run properly." +
-					" You must specify a region, a service name and a service URL via the command line or via" +
-					" your configuration file.")
+			if len(*originExports) == 0 {
+				err = errors.Errorf(`
+	Export information was not provided.
+	To specify exports via the command line, use:
+
+				-v my-bucket:/my/prefix (REQUIRED --service-url https://my-s3-url.com) (REQUIRED --url-style <path or virtual>) \
+						(REQUIRED --region "my-region") (OPTIONAL --bucket-access-keyfile /path/to/access.key) \
+						(OPTIONAL --bucket-secret-keyfile /path/to/secret.key)
+
+
+	to export the S3 bucket under the namespace prefix /my/prefix.
+
+	Alternatively, specify Origin.Exports in the parameters.yaml file:
+
+	Origin:
+		StorageType: s3
+		S3UrlStyle: <path or virtual>
+		S3ServiceUrl: https://my-s3-url.com
+		S3Region: my-region
+		Exports:
+		  - FederationPrefix: /my/prefix
+			S3Bucket: my-bucket
+			S3AccessKeyfile: /path/to/access.key
+			S3SecretKeyfile: /path/to/secret.key
+			Capabilities: ["PublicReads", "Writes", "Listings"]
+
+	to export the S3 bucket my-bucket from https://my-s3-url.com under the namespace prefix /my/prefix (with listed permissions).
+				`)
 				return
 			}
 		default:
-			err = errors.Errorf("Currently-supported origin modes include posix and s3.")
+			err = errors.Errorf("Currently-supported origin modes include posix and s3, but you provided %s.", mode)
 			return
 		}
 
