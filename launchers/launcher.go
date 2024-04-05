@@ -236,8 +236,9 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 		return nil
 	})
 
-	if err = server_utils.WaitUntilWorking(ctx, "GET", param.Server_ExternalWebUrl.GetString()+"/api/v1.0/health", "Web UI", http.StatusOK); err != nil {
-		log.Errorln("Web engine startup appears to have failed:", err)
+	healthCheckUrl := param.Server_ExternalWebUrl.GetString() + "/api/v1.0/health"
+	if err = server_utils.WaitUntilWorking(ctx, "GET", healthCheckUrl, "Web UI", http.StatusOK, true); err != nil {
+		log.Errorln("Web engine check failed: ", err)
 		return
 	}
 
@@ -289,7 +290,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 					errCh <- errors.Wrapf(err, "Failed to join path %s for origin advertisement check", prefix)
 					return
 				}
-				if err = server_utils.WaitUntilWorking(ctx, "GET", urlToCheck.String(), "director", 307); err != nil {
+				if err = server_utils.WaitUntilWorking(ctx, "GET", urlToCheck.String(), "director", 307, false); err != nil {
 					errCh <- errors.Wrapf(err, "The prefix %s does not seem to have advertised correctly", prefix)
 				}
 
@@ -316,7 +317,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 	if modules.IsEnabled(config.CacheType) {
 		// Give five seconds for the origin to finish advertising to the director
 		desiredURL := param.Federation_DirectorUrl.GetString() + "/.well-known/openid-configuration"
-		if err = server_utils.WaitUntilWorking(ctx, "GET", desiredURL, "director", 200); err != nil {
+		if err = server_utils.WaitUntilWorking(ctx, "GET", desiredURL, "director", 200, false); err != nil {
 			log.Errorln("Director does not seem to be working:", err)
 			return
 		}

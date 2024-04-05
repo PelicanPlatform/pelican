@@ -148,7 +148,7 @@ func (f *FedTest) Spinup() {
 	}
 
 	desiredURL := param.Server_ExternalWebUrl.GetString() + "/.well-known/openid-configuration"
-	err = server_utils.WaitUntilWorking(ctx, "GET", desiredURL, "director", 200)
+	err = server_utils.WaitUntilWorking(ctx, "GET", desiredURL, "director", 200, false)
 	require.NoError(f.T, err)
 
 	httpc := http.Client{

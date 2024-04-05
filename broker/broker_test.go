@@ -178,7 +178,7 @@ func TestBroker(t *testing.T) {
 	// Run the web engine, wait for it to be online.
 	err = web_ui.RunEngineRoutine(ctx, engine, egrp, false)
 	require.NoError(t, err)
-	err = server_utils.WaitUntilWorking(ctx, "GET", param.Server_ExternalWebUrl.GetString()+"/", "Web UI", http.StatusNotFound)
+	err = server_utils.WaitUntilWorking(ctx, "GET", param.Server_ExternalWebUrl.GetString()+"/", "Web UI", http.StatusNotFound, false)
 	require.NoError(t, err)
 
 	// Create a HTTP server we'll use to serve up the reversed connection
@@ -291,7 +291,7 @@ func TestRetrieveTimeout(t *testing.T) {
 	// Run the web engine, wait for it to be online.
 	err = web_ui.RunEngineRoutine(ctx, engine, egrp, false)
 	require.NoError(t, err)
-	err = server_utils.WaitUntilWorking(ctx, "GET", param.Server_ExternalWebUrl.GetString()+"/", "Web UI", http.StatusNotFound)
+	err = server_utils.WaitUntilWorking(ctx, "GET", param.Server_ExternalWebUrl.GetString()+"/", "Web UI", http.StatusNotFound, false)
 	require.NoError(t, err)
 
 	viper.Set("Federation.BrokerUrl", param.Server_ExternalWebUrl.GetString())
