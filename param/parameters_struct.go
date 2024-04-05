@@ -27,6 +27,7 @@ type Config struct {
 	Cache struct {
 		Concurrency int
 		DataLocation string
+		EnableOIDC bool
 		EnableVoms bool
 		ExportLocation string
 		PermittedNamespaces []string
@@ -128,7 +129,6 @@ type Config struct {
 		TokenRefreshInterval time.Duration
 	}
 	OIDC struct {
-		AdminUsers []string
 		AuthorizationEndpoint string
 		ClientID string
 		ClientIDFile string
@@ -147,7 +147,7 @@ type Config struct {
 		EnableFallbackRead bool
 		EnableIssuer bool
 		EnableListings bool
-		EnableOAuth bool
+		EnableOIDC bool
 		EnablePublicReads bool
 		EnableReads bool
 		EnableUI bool
@@ -213,6 +213,7 @@ type Config struct {
 		TLSCertificate string
 		TLSKey string
 		UIActivationCodeFile string
+		UIAdminUsers []string
 		UILoginRateLimit int
 		UIPasswordFile string
 		WebConfigFile string
@@ -274,6 +275,7 @@ type configWithType struct {
 	Cache struct {
 		Concurrency struct { Type string; Value int }
 		DataLocation struct { Type string; Value string }
+		EnableOIDC struct { Type string; Value bool }
 		EnableVoms struct { Type string; Value bool }
 		ExportLocation struct { Type string; Value string }
 		PermittedNamespaces struct { Type string; Value []string }
@@ -375,7 +377,6 @@ type configWithType struct {
 		TokenRefreshInterval struct { Type string; Value time.Duration }
 	}
 	OIDC struct {
-		AdminUsers struct { Type string; Value []string }
 		AuthorizationEndpoint struct { Type string; Value string }
 		ClientID struct { Type string; Value string }
 		ClientIDFile struct { Type string; Value string }
@@ -394,7 +395,7 @@ type configWithType struct {
 		EnableFallbackRead struct { Type string; Value bool }
 		EnableIssuer struct { Type string; Value bool }
 		EnableListings struct { Type string; Value bool }
-		EnableOAuth struct { Type string; Value bool }
+		EnableOIDC struct { Type string; Value bool }
 		EnablePublicReads struct { Type string; Value bool }
 		EnableReads struct { Type string; Value bool }
 		EnableUI struct { Type string; Value bool }
@@ -460,6 +461,7 @@ type configWithType struct {
 		TLSCertificate struct { Type string; Value string }
 		TLSKey struct { Type string; Value string }
 		UIActivationCodeFile struct { Type string; Value string }
+		UIAdminUsers struct { Type string; Value []string }
 		UILoginRateLimit struct { Type string; Value int }
 		UIPasswordFile struct { Type string; Value string }
 		WebConfigFile struct { Type string; Value string }

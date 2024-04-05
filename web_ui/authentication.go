@@ -189,14 +189,14 @@ func AuthHandler(ctx *gin.Context) {
 // indicating the error message.
 //
 // Note that by default it only checks if user == "admin". If you have a custom list of admin identifiers
-// to check, you should set OIDC.AdminUsers. See parameters.yaml for details.
+// to check, you should set Server.UIAdminUsers. See parameters.yaml for details.
 func CheckAdmin(user string) (isAdmin bool, message string) {
 	if user == "admin" {
 		return true, ""
 	}
-	adminList := param.OIDC_AdminUsers.GetStringSlice()
-	if !param.OIDC_AdminUsers.IsSet() {
-		return false, "OIDC.AdminUsers is not set, and user is not root user. Admin check returns false"
+	adminList := param.Server_UIAdminUsers.GetStringSlice()
+	if !param.Server_UIAdminUsers.IsSet() {
+		return false, "Server.UIAdminUsers is not set, and user is not root user. Admin check returns false"
 	}
 	for _, admin := range adminList {
 		if user == admin {

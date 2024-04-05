@@ -94,8 +94,8 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (context.Canc
 	// Register OIDC endpoint
 	if param.Server_EnableUI.GetBool() {
 		if modules.IsEnabled(config.RegistryType) ||
-			modules.IsEnabled(config.OriginType) ||
-			modules.IsEnabled(config.CacheType) {
+			(modules.IsEnabled(config.OriginType) && param.Origin_EnableOIDC.GetBool()) ||
+			(modules.IsEnabled(config.CacheType) && param.Cache_EnableOIDC.GetBool()) {
 			if err := web_ui.ConfigOAuthClientAPIs(engine); err != nil {
 				return shutdownCancel, err
 			}

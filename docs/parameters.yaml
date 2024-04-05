@@ -609,15 +609,15 @@ type: bool
 default: true
 components: ["origin"]
 ---
-name: Origin.EnableOAuth
+name: Origin.EnableOIDC
 description: >-
-  Indicate whether the origin should allow user login via OAuth2/OIDC with third-party
+  Indicate whether the origin should allow user login to the admin website via OAuth2/OIDC with third-party
   authentication providers such as CILogon.
 
-  If set to true, it is recommended that you also set `OIDC.AdminUsers` to a list of users
-  to give admin privilege. This is because origin web UI doesn't have a public, non-admin view,
+  If set to true, it is recommended that you also set `Server.UIAdminUsers` to a list of users
+  to give admin privilege. This is because origin admin website doesn't have a public, non-admin view,
   and an empty AdminUsers list will lead to "permission denied" error
-  for all users logged into origin web UI via OAuth.
+  for all users logged into origin admin website via OAuth.
 type: bool
 default: false
 components: ["origin"]
@@ -912,6 +912,19 @@ type: duration
 default: 15s
 components: ["cache"]
 ---
+name: Cache.EnableOIDC
+description: >-
+  Indicate whether the cache should allow user login to the admin website via OAuth2/OIDC with third-party
+  authentication providers such as CILogon.
+
+  If set to true, it is recommended that you also set `Server.UIAdminUsers` to a list of users
+  to give admin privilege. This is because cache admin website doesn't have a public, non-admin view,
+  and an empty AdminUsers list will lead to "permission denied" error
+  for all users logged into cache admin website via OAuth.
+type: bool
+default: false
+components: ["cache"]
+---
 ############################
 #  Director-level configs  #
 ############################
@@ -1039,14 +1052,14 @@ components: ["registry"]
 ---
 name: Registry.AdminUsers
 description: >-
-  [Deprecated] `Registry.AdminUsers` is deprecated and will be removed in the future releases. Please migrate to use `OIDC.AdminUsers` instead.
+  [Deprecated] `Registry.AdminUsers` is deprecated and will be removed in the future releases. Please migrate to use `Server.UIAdminUsers` instead.
 
   A string slice of "subject" claim of users to give admin permission for registry UI.
 
   The "subject" claim should be the "CILogon User Identifier" from CILogon user page: https://cilogon.org/
 type: stringSlice
 deprecated: true
-replacedby: ["OIDC.AdminUsers"]
+replacedby: ["Server.UIAdminUsers"]
 default: []
 components: ["registry"]
 ---
@@ -1337,6 +1350,16 @@ root_default: /etc/pelican/web-config.yaml
 default: "$ConfigBase/web-config.yaml"
 components: ["*"]
 ---
+name: Server.UIAdminUsers
+description: >-
+  A string slice of "subject" claim of users to give admin permission for the server admin website,
+  who are authenticated through OAuth/OIDC.
+
+  The "subject" claim should be the "CILogon User Identifier" from CILogon user page: https://cilogon.org/
+type: stringSlice
+default: none
+components: ["registry","origin","cache"]
+---
 ################################
 #   Issuer's Configurations    #
 ################################
@@ -1461,16 +1484,16 @@ description: >-
   A filepath to a file containing an OIDC Client ID.
 
   This is used by the namespace registry to allow OAuth2/OIDC login and authenticated namespace registration.
-  By default, Pelican uses [CILogon](www.cilogon.org) as the authentication provider. You need to first register an OIDC at CILogon:
-  https://cilogon.org/oauth2/register. If you'd like to use other authentication provider, you need to change
+  By default, Pelican uses [CILogon](www.cilogon.org) as the authentication provider. You need to first register an OIDC _client_ at CILogon:
+  https://cilogon.org/oauth2/register. If you'd like to use other authentication providers, you need to change
   other endpoint parameters under OIDC configuration to the endpoints of your provider,
-  such as OIDC.AuthorizationEndpoint, OIDC.UserInfoEndpoint, etc.
+  such as `OIDC.AuthorizationEndpoint`, `OIDC.UserInfoEndpoint`, etc.
 
   `OIDC.ClientIDFile` is mutually exclusive with `OIDC.ClientID`. The value of `OIDC.ClientID` will
-  override the value of OIDC.ClientIDFile if both are set.
+  override the value of `OIDC.ClientIDFile` if both are set.
 
   This is a required parameter for the registry server.
-  This is a required parameter for the origin server if `Origin.EnableOAuth` is set to `true`.
+  This is a required parameter for the origin server if `Origin.EnableOIDC` is set to `true`.
 type: filename
 root_default: /etc/pelican/oidc-client-id
 default: $ConfigBase/oidc-client-id
@@ -1482,7 +1505,7 @@ description: >-
   override the value of OIDC.ClientIDFile if both are set.
 
   This is a required parameter for the registry server.
-  This is also a required parameter for the origin server if `Origin.EnableOAuth` is set to `true`.
+  This is also a required parameter for the origin server if `Origin.EnableOIDC` is set to `true`.
 type: string
 default: none
 components: ["registry", "origin"]
@@ -1493,7 +1516,7 @@ description: >-
   for authenticated registration.
 
   This is a required parameter for the registry server.
-  This is also a required parameter for the origin server if `Origin.EnableOAuth` is set to `true`.
+  This is also a required parameter for the origin server if `Origin.EnableOIDC` is set to `true`.
 type: filename
 root_default: /etc/pelican/oidc-client-secret
 default: $ConfigBase/oidc-client-secret
@@ -1553,16 +1576,6 @@ description: >-
 type: string
 default: none
 components: ["registry", "director"]
----
-name: OIDC.AdminUsers
-description: >-
-  A string slice of "subject" claim of users to give admin permission for the server web UI,
-  who are authenticated through OAuth/OIDC.
-
-  The "subject" claim should be the "CILogon User Identifier" from CILogon user page: https://cilogon.org/
-type: stringSlice
-default: []
-components: ["origin", "registry"]
 ---
 ############################
 #   XRootD-level Configs   #
