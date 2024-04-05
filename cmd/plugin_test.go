@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -341,4 +342,98 @@ func TestWriteOutfile(t *testing.T) {
 		assert.Contains(t, string(tempFileContent), "TransferRetryable = true;")
 	})
 
+}
+
+// This test checks if query parameters in the url are correct
+// We want invalid or > 1 query to cause an error
+func TestQuery(t *testing.T) {
+	t.Run("TestValidRecursive", func(t *testing.T) {
+		transferStr := "pelican://something/here?recursive=true"
+		transferUrl, err := url.Parse(transferStr)
+		assert.NoError(t, err)
+
+		err = checkValidQuery(transferUrl)
+		assert.NoError(t, err)
+	})
+
+	t.Run("TestValidPack", func(t *testing.T) {
+		transferStr := "pelican://something/here?pack=tar.gz"
+		transferUrl, err := url.Parse(transferStr)
+		assert.NoError(t, err)
+
+		err = checkValidQuery(transferUrl)
+		assert.NoError(t, err)
+	})
+
+	t.Run("TestInvalidQuery", func(t *testing.T) {
+		transferStr := "pelican://something/here?recrustive=true"
+		transferUrl, err := url.Parse(transferStr)
+		assert.NoError(t, err)
+
+		err = checkValidQuery(transferUrl)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "Invalid query parameters procided in url: pelican://something/here?recrustive=true")
+	})
+
+	t.Run("TestBothQueryCheckFailure", func(t *testing.T) {
+		transferStr := "pelican://something/here?pack=tar.gz&recursive=true"
+		transferUrl, err := url.Parse(transferStr)
+		assert.NoError(t, err)
+
+		err = checkValidQuery(transferUrl)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "Cannot have both recursive and pack query parameters")
+	})
+}
+
+// This test checks if the destination (local file) is parsed correctly
+// and we get the direct path to the file or source added to the destination for directories
+func TestParseDestination(t *testing.T) {
+	// Create a temporary directory for testing
+	tempDir, err := os.MkdirTemp("", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// clean up
+	defer os.RemoveAll(tempDir)
+
+	// Create a temporary file in the temporary directory
+	tempFile, err := os.CreateTemp(tempDir, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tempFile.Close()
+
+	tests := []struct {
+		name     string
+		transfer PluginTransfer
+		want     string
+	}{
+		{
+			name: "destination is a directory",
+			transfer: PluginTransfer{
+				localFile: tempDir,
+				url:       &url.URL{Path: "/path/to/source"},
+			},
+			want: filepath.Join(tempDir, "source"),
+		},
+		{
+			name: "destination is a file",
+			transfer: PluginTransfer{
+				localFile: tempFile.Name(),
+				url:       &url.URL{Path: "/path/to/source"},
+			},
+			want: tempFile.Name(),
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := parseDestination(test.transfer)
+			assert.NoError(t, err)
+			if got != test.want {
+				t.Errorf("parseDestination() = %v, want %v", got, test.want)
+			}
+		})
+	}
 }
