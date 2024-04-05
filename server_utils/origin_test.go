@@ -79,7 +79,7 @@ func setup(t *testing.T, config string) *[]OriginExport {
 // Note that this test really doesn't actually test env var configuration. Rather, it
 // tests an origin configuration that mimics what you could do with env vars due to the
 // fact that we don't use a yaml list
-func TestGetExportsPosix(t *testing.T) {
+func TestGetExports(t *testing.T) {
 	viper.Reset()
 	ResetOriginExports()
 
