@@ -87,7 +87,7 @@ const UserMenu = () => {
                 }}
                 onClick={() => setMenuOpen(!menuOpen)}
             >
-                { user.role === "admin" ? <AdminPanelSettings/>: < AccountCircleIcon /> }
+                { user.role === "admin" ? <AdminPanelSettings/>: < AccountCircle /> }
             </IconButton>
             <Menu
                 id={"user-menu"}
