@@ -1,4 +1,17 @@
-import {Table, TableCell, TableBody, TableContainer, TableHead, TableRow, Paper, Typography, Box} from '@mui/material';
+"use client"
+
+import {
+    Table,
+    TableCell,
+    TableBody,
+    TableContainer,
+    TableHead,
+    TableRow,
+    Paper,
+    Typography,
+    Box,
+    BoxProps
+} from '@mui/material';
 import React, {FunctionComponent, ReactElement, useEffect, useMemo, useRef, useState} from "react";
 import {Skeleton} from "@mui/material";
 
@@ -64,8 +77,7 @@ export const RecordTable = ({ data }: { data: Record[] }): ReactElement  => {
     )
 }
 
-
-export const DataExportTable = () => {
+export const DataExportTable = ({boxProps}: {boxProps?: BoxProps}) => {
 
     const [data, setData] = useState<ExportData[] | undefined>(undefined);
     const [error, setError] = useState<string | undefined>(undefined);
@@ -100,8 +112,8 @@ export const DataExportTable = () => {
     }
 
     return (
-        <>
+        <Box sx={{backgroundColor: "#F6F6F6"}} {...boxProps}>
             {data ? <RecordTable data={data} /> : <Skeleton variant={"rectangular"} height={200} width={"100%"} />}
-        </>
+        </Box>
     )
 }

@@ -212,14 +212,15 @@ func AdminAuthHandler(ctx *gin.Context) {
 	user := ctx.GetString("User")
 	// This should be done by a regular auth handler from the upstream, but we check here just in case
 	if user == "" {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Login required to view this page"})
+		ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Login required to view this page"})
+		return
 	}
 	isAdmin, msg := CheckAdmin(user)
 	if isAdmin {
 		ctx.Next()
 		return
 	} else {
-		ctx.JSON(http.StatusForbidden, gin.H{"error": msg})
+		ctx.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": msg})
 	}
 }
 
@@ -370,7 +371,7 @@ func configureAuthEndpoints(ctx context.Context, router *gin.Engine, egrp *errgr
 	group.POST("/login", mw, loginHandler)
 	group.POST("/logout", AuthHandler, logoutHandler)
 	group.POST("/initLogin", initLoginHandler)
-	group.POST("/resetLogin", AuthHandler, resetLoginHandler)
+	group.POST("/resetLogin", AuthHandler, AdminAuthHandler, resetLoginHandler)
 	// Pass csrfhanlder only to the whoami route to generate CSRF token
 	// while leaving other routes free of CSRF check (we might want to do it some time in the future)
 	group.GET("/whoami", csrfHandler, whoamiHandler)

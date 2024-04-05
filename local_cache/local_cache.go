@@ -37,8 +37,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/lestrrat-go/option"
 	"github.com/pelicanplatform/pelican/client"
-	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
@@ -115,6 +115,7 @@ type (
 		fd      *os.File
 		openErr error
 		status  chan *downloadStatus
+		buf     []byte
 	}
 
 	req struct {
@@ -129,6 +130,7 @@ type (
 	}
 
 	availSizeReq struct {
+		ctx     context.Context
 		request req
 		size    int64
 		results chan *downloadStatus
@@ -506,7 +508,8 @@ func (sc *LocalCache) runMux() error {
 
 			sourceURL := *sc.directorURL
 			sourceURL.Path = path.Join(sourceURL.Path, path.Clean(req.request.path))
-			tj, err := sc.tc.NewTransferJob(&sourceURL, localPath, false, false, client.WithToken(req.request.token))
+			sourceURL.Scheme = "pelican"
+			tj, err := sc.tc.NewTransferJob(req.ctx, &sourceURL, localPath, false, false, "localcache", client.WithToken(req.request.token))
 			if err != nil {
 				ds := &downloadStatus{}
 				ds.err.Store(&err)
@@ -649,7 +652,7 @@ func (sc *LocalCache) getFromDisk(localPath string) *os.File {
 	return nil
 }
 
-func (sc *LocalCache) newCacheReader(path, token string) (reader *cacheReader, err error) {
+func (sc *LocalCache) newCacheReader(ctx context.Context, path, token string) (reader *cacheReader, err error) {
 	reader = &cacheReader{
 		path:   path,
 		token:  token,
@@ -657,11 +660,12 @@ func (sc *LocalCache) newCacheReader(path, token string) (reader *cacheReader, e
 		size:   -1,
 		status: nil,
 	}
+	err = reader.peekError(ctx)
 	return
 }
 
 // Get path from the cache
-func (sc *LocalCache) Get(path, token string) (io.ReadCloser, error) {
+func (sc *LocalCache) Get(ctx context.Context, path, token string) (io.ReadCloser, error) {
 	if !sc.ac.authorize(token_scopes.Storage_Read, path, token) {
 		return nil, authorizationDenied
 	}
@@ -675,7 +679,7 @@ func (sc *LocalCache) Get(path, token string) (io.ReadCloser, error) {
 		return fp, nil
 	}
 
-	return sc.newCacheReader(path, token)
+	return sc.newCacheReader(ctx, path, token)
 
 }
 
@@ -701,7 +705,7 @@ func (lc *LocalCache) Stat(path, token string) (uint64, error) {
 
 func (sc *LocalCache) updateConfig() error {
 	// Get the endpoint of the director
-	var respNS []common.NamespaceAdV2
+	var respNS []server_structs.NamespaceAdV2
 
 	directorEndpoint := param.Federation_DirectorUrl.GetString()
 	if directorEndpoint == "" {
@@ -762,7 +766,34 @@ func (cr *cacheReader) readFromFile(p []byte, off int64) (n int, err error) {
 	return cr.fd.ReadAt(p, off)
 }
 
+// Peek at the contents of the upstream of the cache reader; if there's
+// an error, return that.  Otherwise, return nil
+func (cr *cacheReader) peekError(ctx context.Context) (err error) {
+	cr.buf = make([]byte, 4096)
+	n, err := cr.readRaw(ctx, cr.buf)
+	if n >= 0 {
+		cr.buf = cr.buf[:n]
+	}
+	if err == io.EOF {
+		return nil
+	}
+	return err
+}
+
 func (cr *cacheReader) Read(p []byte) (n int, err error) {
+	if cr.buf != nil && len(cr.buf) > 0 {
+		bytesCopied := copy(p, cr.buf)
+		if len(cr.buf) > bytesCopied {
+			cr.buf = cr.buf[bytesCopied:]
+		} else {
+			cr.buf = nil
+		}
+		return bytesCopied, nil
+	}
+	return cr.readRaw(context.Background(), p)
+}
+
+func (cr *cacheReader) readRaw(ctx context.Context, p []byte) (n int, err error) {
 	neededSize := cr.offset + int64(len(p))
 	if cr.size >= 0 && neededSize > cr.size {
 		neededSize = cr.size
@@ -795,6 +826,7 @@ func (cr *cacheReader) Read(p []byte) (n int, err error) {
 			}
 			cr.status = make(chan *downloadStatus)
 			sizeReq := availSizeReq{
+				ctx:     ctx,
 				request: req,
 				size:    neededSize,
 				results: cr.status,

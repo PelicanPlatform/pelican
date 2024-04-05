@@ -159,26 +159,6 @@ var (
 	}
 )
 
-func TestNamespaceExistsByPrefix(t *testing.T) {
-	setupMockRegistryDB(t)
-	defer teardownMockNamespaceDB(t)
-
-	t.Run("return-false-for-prefix-dne", func(t *testing.T) {
-		found, err := namespaceExistsByPrefix("/non-existed-namespace")
-		require.NoError(t, err)
-		assert.False(t, found)
-	})
-
-	t.Run("return-true-for-existing-ns", func(t *testing.T) {
-		resetNamespaceDB(t)
-		err := insertMockDBData([]Namespace{{Prefix: "/foo"}})
-		require.NoError(t, err)
-		found, err := namespaceExistsByPrefix("/foo")
-		require.NoError(t, err)
-		assert.True(t, found)
-	})
-}
-
 func TestGetNamespaceById(t *testing.T) {
 	setupMockRegistryDB(t)
 	defer teardownMockNamespaceDB(t)
@@ -752,6 +732,59 @@ func topologyMockup(t *testing.T, namespaces []string) *httptest.Server {
 	return svr
 }
 
+func TestGetNamespaceByPrefix(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
+	viper.Reset()
+
+	topoNamespaces := []string{"/topo/foo"}
+	svr := topologyMockup(t, topoNamespaces)
+	defer svr.Close()
+
+	registryDB := t.TempDir()
+	viper.Set("Registry.DbLocation", filepath.Join(registryDB, "test.sqlite"))
+	viper.Set("Federation.TopologyNamespaceURL", svr.URL)
+	config.InitConfig()
+
+	err := InitializeDB(ctx)
+	require.NoError(t, err)
+	defer func() {
+		err := ShutdownDB()
+		assert.NoError(t, err)
+	}()
+
+	//Test topology table population
+	err = createTopologyTable()
+	require.NoError(t, err)
+	err = PopulateTopology()
+	require.NoError(t, err)
+
+	//Test that getNamespaceByPrefix wraps a pelican namespace around a topology one
+	ns, err := getNamespaceByPrefix("/topo/foo")
+	require.NoError(t, err)
+	require.True(t, ns.Topology)
+
+	// Add a test namespace so we can test that checkExists still works
+	new_ns := Namespace{
+		ID:            0,
+		Prefix:        "/regular/foo",
+		Pubkey:        "",
+		Identity:      "",
+		AdminMetadata: AdminMetadata{},
+	}
+	err = AddNamespace(&new_ns)
+	require.NoError(t, err)
+
+	//Test that getNamespaceByPrefix returns namespace with a false topology variable
+	ns_reg, err := getNamespaceByPrefix("/regular/foo")
+	require.NoError(t, err)
+	require.False(t, ns_reg.Topology)
+
+	viper.Reset()
+}
+
 func TestRegistryTopology(t *testing.T) {
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
@@ -776,7 +809,8 @@ func TestRegistryTopology(t *testing.T) {
 	}()
 
 	// Set value so that config.GetPreferredPrefix() returns "OSDF"
-	config.SetPreferredPrefix("OSDF")
+	_, err = config.SetPreferredPrefix("OSDF")
+	assert.NoError(t, err)
 
 	//Test topology table population
 	err = createTopologyTable()
@@ -785,12 +819,12 @@ func TestRegistryTopology(t *testing.T) {
 	require.NoError(t, err)
 
 	// Check that topology namespace exists
-	exists, err := namespaceExists("/topo/foo")
+	exists, err := namespaceExistsByPrefix("/topo/foo")
 	require.NoError(t, err)
 	require.True(t, exists)
 
 	// Check that topology namespace exists
-	exists, err = namespaceExists("/topo/bar")
+	exists, err = namespaceExistsByPrefix("/topo/bar")
 	require.NoError(t, err)
 	require.True(t, exists)
 
@@ -806,12 +840,12 @@ func TestRegistryTopology(t *testing.T) {
 	require.NoError(t, err)
 
 	// Check that the regular namespace exists
-	exists, err = namespaceExists("/regular/foo")
+	exists, err = namespaceExistsByPrefix("/regular/foo")
 	require.NoError(t, err)
 	require.True(t, exists)
 
 	// Check that a bad namespace doesn't exist
-	exists, err = namespaceExists("/bad/namespace")
+	exists, err = namespaceExistsByPrefix("/bad/namespace")
 	require.NoError(t, err)
 	require.False(t, exists)
 
@@ -830,22 +864,22 @@ func TestRegistryTopology(t *testing.T) {
 	require.NoError(t, err)
 
 	// Check that /topo/foo still exists
-	exists, err = namespaceExists("/topo/foo")
+	exists, err = namespaceExistsByPrefix("/topo/foo")
 	require.NoError(t, err)
 	require.True(t, exists)
 
 	// And that /topo/baz was added
-	exists, err = namespaceExists("/topo/baz")
+	exists, err = namespaceExistsByPrefix("/topo/baz")
 	require.NoError(t, err)
 	require.True(t, exists)
 
 	// Check that /topo/bar is gone
-	exists, err = namespaceExists("/topo/bar")
+	exists, err = namespaceExistsByPrefix("/topo/bar")
 	require.NoError(t, err)
 	require.False(t, exists)
 
 	// Finally, check that /regular/foo survived
-	exists, err = namespaceExists("/regular/foo")
+	exists, err = namespaceExistsByPrefix("/regular/foo")
 	require.NoError(t, err)
 	require.True(t, exists)
 

@@ -29,8 +29,8 @@ import (
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
-	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pkg/errors"
@@ -40,7 +40,7 @@ import (
 
 type (
 	authConfig struct {
-		ns         atomic.Pointer[[]common.NamespaceAdV2]
+		ns         atomic.Pointer[[]server_structs.NamespaceAdV2]
 		issuers    atomic.Pointer[map[string]bool]
 		issuerKeys *ttlcache.Cache[string, authConfigItem]
 		tokenAuthz *ttlcache.Cache[string, acls]
@@ -114,7 +114,7 @@ func newAuthConfig(ctx context.Context, egrp *errgroup.Group) (ac *authConfig) {
 	return
 }
 
-func (ac *authConfig) updateConfig(nsAds []common.NamespaceAdV2) error {
+func (ac *authConfig) updateConfig(nsAds []server_structs.NamespaceAdV2) error {
 	issuers := make(map[string]bool)
 	for _, nsAd := range nsAds {
 		for _, issuer := range nsAd.Issuer {

@@ -10,7 +10,7 @@ export interface ParameterMetadata {
 
 export interface ParameterValue {
     Type: string;
-    Value: string | number | boolean | string[] | undefined | Coordinate[] | Institution[] | CustomRegistrationField[] | OIDCAuthenticationRequirement[] | AuthorizationTemplate[] | IPMapping[] | GeoIPOverride[] | Export[];
+    Value: string | number | boolean | string[] | undefined | Coordinate[] | Institution[] | CustomRegistrationField[] | OIDCAuthenticationRequirement[] | AuthorizationTemplate[] | IPMapping[] | GeoIPOverride[] | Export[] | Lot[];
 }
 
 export type ParameterInputProps = Parameter & {
@@ -83,4 +83,34 @@ export interface Export {
     storageprefix: string;
     federationprefix: string;
     capabilities: Capability[];
+    sentinellocation: string;
+}
+
+export interface Path {
+    path: string;
+    recursive: boolean;
+}
+
+export interface ManagementPolicyAttrs {
+    dedicatedgb: number;
+    opportunisticgb: number;
+    maxnumberobjects: {
+        value: number;
+    };
+    creationtime: {
+        value: number;
+    };
+    expirationtime: {
+        value: number;
+    };
+    deletiontime: {
+        value: number;
+    };
+}
+
+export interface Lot {
+    lotname: string;
+    owner: string;
+    paths: Path[];
+    managementpolicyattrs: ManagementPolicyAttrs;
 }

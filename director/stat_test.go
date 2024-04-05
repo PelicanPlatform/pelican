@@ -29,8 +29,8 @@ import (
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
-	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -57,28 +57,28 @@ func TestQueryOriginsForObject(t *testing.T) {
 	func() {
 		serverAdMutex.Lock()
 		defer serverAdMutex.Unlock()
-		serverAds = ttlcache.New[common.ServerAd, []common.NamespaceAdV2](ttlcache.WithTTL[common.ServerAd, []common.NamespaceAdV2](15 * time.Minute))
+		serverAds = ttlcache.New[server_structs.ServerAd, []server_structs.NamespaceAdV2](ttlcache.WithTTL[server_structs.ServerAd, []server_structs.NamespaceAdV2](15 * time.Minute))
 	}()
 
 	mockTTLCache := func() {
 		serverAdMutex.Lock()
 		defer serverAdMutex.Unlock()
-		mockServerAd1 := common.ServerAd{Name: "origin1", URL: url.URL{Host: "example1.com", Scheme: "https"}, Type: common.OriginType}
-		mockServerAd2 := common.ServerAd{Name: "origin2", URL: url.URL{Host: "example2.com", Scheme: "https"}, Type: common.OriginType}
-		mockServerAd3 := common.ServerAd{Name: "origin3", URL: url.URL{Host: "example3.com", Scheme: "https"}, Type: common.OriginType}
-		mockServerAd4 := common.ServerAd{Name: "origin4", URL: url.URL{Host: "example4.com", Scheme: "https"}, Type: common.OriginType}
-		mockServerAd5 := common.ServerAd{Name: "cache1", URL: url.URL{Host: "cache1.com", Scheme: "https"}, Type: common.OriginType}
-		mockNsAd0 := common.NamespaceAdV2{Path: "/foo"}
-		mockNsAd1 := common.NamespaceAdV2{Path: "/foo/bar"}
-		mockNsAd2 := common.NamespaceAdV2{Path: "/foo/x"}
-		mockNsAd3 := common.NamespaceAdV2{Path: "/foo/bar/barz"}
-		mockNsAd4 := common.NamespaceAdV2{Path: "/unrelated"}
-		mockNsAd5 := common.NamespaceAdV2{Path: "/caches/hostname"}
-		serverAds.Set(mockServerAd1, []common.NamespaceAdV2{mockNsAd0}, ttlcache.DefaultTTL)
-		serverAds.Set(mockServerAd2, []common.NamespaceAdV2{mockNsAd1}, ttlcache.DefaultTTL)
-		serverAds.Set(mockServerAd3, []common.NamespaceAdV2{mockNsAd1, mockNsAd4}, ttlcache.DefaultTTL)
-		serverAds.Set(mockServerAd4, []common.NamespaceAdV2{mockNsAd2, mockNsAd3}, ttlcache.DefaultTTL)
-		serverAds.Set(mockServerAd5, []common.NamespaceAdV2{mockNsAd5}, ttlcache.DefaultTTL)
+		mockServerAd1 := server_structs.ServerAd{Name: "origin1", URL: url.URL{Host: "example1.com", Scheme: "https"}, Type: server_structs.OriginType}
+		mockServerAd2 := server_structs.ServerAd{Name: "origin2", URL: url.URL{Host: "example2.com", Scheme: "https"}, Type: server_structs.OriginType}
+		mockServerAd3 := server_structs.ServerAd{Name: "origin3", URL: url.URL{Host: "example3.com", Scheme: "https"}, Type: server_structs.OriginType}
+		mockServerAd4 := server_structs.ServerAd{Name: "origin4", URL: url.URL{Host: "example4.com", Scheme: "https"}, Type: server_structs.OriginType}
+		mockServerAd5 := server_structs.ServerAd{Name: "cache1", URL: url.URL{Host: "cache1.com", Scheme: "https"}, Type: server_structs.OriginType}
+		mockNsAd0 := server_structs.NamespaceAdV2{Path: "/foo"}
+		mockNsAd1 := server_structs.NamespaceAdV2{Path: "/foo/bar"}
+		mockNsAd2 := server_structs.NamespaceAdV2{Path: "/foo/x"}
+		mockNsAd3 := server_structs.NamespaceAdV2{Path: "/foo/bar/barz"}
+		mockNsAd4 := server_structs.NamespaceAdV2{Path: "/unrelated"}
+		mockNsAd5 := server_structs.NamespaceAdV2{Path: "/caches/hostname"}
+		serverAds.Set(mockServerAd1, []server_structs.NamespaceAdV2{mockNsAd0}, ttlcache.DefaultTTL)
+		serverAds.Set(mockServerAd2, []server_structs.NamespaceAdV2{mockNsAd1}, ttlcache.DefaultTTL)
+		serverAds.Set(mockServerAd3, []server_structs.NamespaceAdV2{mockNsAd1, mockNsAd4}, ttlcache.DefaultTTL)
+		serverAds.Set(mockServerAd4, []server_structs.NamespaceAdV2{mockNsAd2, mockNsAd3}, ttlcache.DefaultTTL)
+		serverAds.Set(mockServerAd5, []server_structs.NamespaceAdV2{mockNsAd5}, ttlcache.DefaultTTL)
 	}
 
 	cleanupMock := func() {
@@ -382,7 +382,7 @@ func TestSendHeadReqToOrigin(t *testing.T) {
 	realServerUrl, err := url.Parse(server.URL)
 	require.NoError(t, err)
 
-	mockOriginAd := common.ServerAd{Type: common.OriginType}
+	mockOriginAd := server_structs.ServerAd{Type: server_structs.OriginType}
 	mockOriginAd.URL = *realServerUrl
 
 	tDir := t.TempDir()

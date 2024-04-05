@@ -15,6 +15,7 @@
  * limitations under the License.
  *
  ***************************************************************/
+
 "use client"
 
 import {useEffect, useState} from "react";
@@ -130,9 +131,11 @@ export default function Graph({getData, options, boxProps, drawer}: GraphProps) 
                     </Box>
                 </>
             }
-            <Box display={"flex"} flexDirection={"column"} pt={1}>
-                <Typography m={"auto"} color={"red"} variant={"body2"} textAlign={"center"}>{error}</Typography>
-            </Box>
+            { error &&
+                <Box display={"flex"} flexDirection={"column"} pt={1}>
+                    <Typography m={"auto"} color={"red"} variant={"body2"} textAlign={"center"}>{error}</Typography>
+                </Box>
+            }
         </Box>
     )
 

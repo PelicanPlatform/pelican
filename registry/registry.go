@@ -44,10 +44,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
-	"github.com/pelicanplatform/pelican/common"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/oauth2"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -199,7 +199,7 @@ func verifySignature(payload []byte, signature []byte, publicKey *ecdsa.PublicKe
 }
 
 // Generate server nonce for key-sign challenge
-func keySignChallengeInit(ctx *gin.Context, data *registrationData) (map[string]interface{}, error) {
+func keySignChallengeInit(data *registrationData) (map[string]interface{}, error) {
 	serverNonce, err := generateNonce()
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to generate nonce for key-sign challenge")
@@ -267,7 +267,7 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 		log.Debug("Registering namespace ", data.Prefix)
 
 		// Check if prefix exists before doing anything else
-		exists, err := namespaceExists(data.Prefix)
+		exists, err := namespaceExistsByPrefix(data.Prefix)
 		if err != nil {
 			log.Errorf("Failed to check if namespace already exists: %v", err)
 			return false, nil, errors.Wrap(err, "Server encountered an error checking if namespace already exists")
@@ -307,6 +307,7 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 		}
 		ns.Pubkey = string(pubkeyData)
 		ns.Identity = data.Identity
+		ns.Topology = false
 
 		if data.Identity != "" {
 			idMap := map[string]interface{}{}
@@ -368,7 +369,7 @@ func keySignChallenge(ctx *gin.Context, data *registrationData) (bool, map[strin
 			return created, res, nil
 		}
 	} else if data.ClientNonce != "" {
-		res, err := keySignChallengeInit(ctx, data)
+		res, err := keySignChallengeInit(data)
 		if err != nil {
 			return false, nil, err
 		} else {
@@ -605,7 +606,7 @@ func deleteNamespaceHandler(ctx *gin.Context) {
 	}
 
 	// Check if prefix exists before trying to delete it
-	exists, err := namespaceExists(prefix)
+	exists, err := namespaceExistsByPrefix(prefix)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error checking if namespace already exists"})
 		log.Errorf("Failed to check if the namespace already exists: %v", err)
@@ -737,7 +738,7 @@ func wildcardHandler(ctx *gin.Context) {
 	} else if strings.HasSuffix(path, "/.well-known/openid-configuration") {
 		// Check that the namespace exists before constructing config JSON
 		prefix := strings.TrimSuffix(path, "/.well-known/openid-configuration")
-		exists, err := namespaceExists(prefix)
+		exists, err := namespaceExistsByPrefix(prefix)
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Server encountered an error while checking if the prefix exists"})
 			log.Errorf("Error while checking for existence of prefix %s: %v", prefix, err)
@@ -776,7 +777,7 @@ func wildcardHandler(ctx *gin.Context) {
 
 // Check if a namespace prefix exists and its public key matches the registry record
 func checkNamespaceExistsHandler(ctx *gin.Context) {
-	req := common.CheckNamespaceExistsReq{}
+	req := server_structs.CheckNamespaceExistsReq{}
 	if err := ctx.ShouldBind(&req); err != nil {
 		log.Debug("Failed to parse request body for namespace exits check: ", err)
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse request body"})
@@ -815,7 +816,7 @@ func checkNamespaceExistsHandler(ctx *gin.Context) {
 	if !found {
 		// We return 200 even with prefix not found so that 404 can be used to check if the route exists (OSDF)
 		// and fallback to OSDF way of checking if we do get 404
-		res := common.CheckNamespaceExistsRes{PrefixExists: false, Message: "Prefix was not found in database"}
+		res := server_structs.CheckNamespaceExistsRes{PrefixExists: false, Message: "Prefix was not found in database"}
 		ctx.JSON(http.StatusOK, res)
 		return
 	}
@@ -829,22 +830,22 @@ func checkNamespaceExistsHandler(ctx *gin.Context) {
 
 	registryKey, isPresent := jwksDb.LookupKeyID(jwkReq.KeyID())
 	if !isPresent {
-		res := common.CheckNamespaceExistsRes{PrefixExists: true, KeyMatch: false, Message: "Given JWK is not present in the JWKS from database"}
+		res := server_structs.CheckNamespaceExistsRes{PrefixExists: true, KeyMatch: false, Message: "Given JWK is not present in the JWKS from database"}
 		ctx.JSON(http.StatusOK, res)
 		return
 	} else if jwk.Equal(registryKey, jwkReq) {
-		res := common.CheckNamespaceExistsRes{PrefixExists: true, KeyMatch: true}
+		res := server_structs.CheckNamespaceExistsRes{PrefixExists: true, KeyMatch: true}
 		ctx.JSON(http.StatusOK, res)
 		return
 	} else {
-		res := common.CheckNamespaceExistsRes{PrefixExists: true, KeyMatch: false, Message: "Given JWK does not equal to the JWK from database"}
+		res := server_structs.CheckNamespaceExistsRes{PrefixExists: true, KeyMatch: false, Message: "Given JWK does not equal to the JWK from database"}
 		ctx.JSON(http.StatusOK, res)
 		return
 	}
 }
 
 func checkNamespaceStatusHandler(ctx *gin.Context) {
-	req := common.CheckNamespaceStatusReq{}
+	req := server_structs.CheckNamespaceStatusReq{}
 	if err := ctx.ShouldBind(&req); err != nil {
 		log.Debug("Failed to parse request body for namespace status check: ", err)
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse request body"})
@@ -855,6 +856,11 @@ func checkNamespaceStatusHandler(ctx *gin.Context) {
 		return
 	}
 	ns, err := getNamespaceByPrefix(req.Prefix)
+	if ns.Topology {
+		res := server_structs.CheckNamespaceStatusRes{Approved: true}
+		ctx.JSON(http.StatusOK, res)
+		return
+	}
 	if err != nil || ns == nil {
 		log.Errorf("Error in getNamespaceByPrefix with prefix %s. %v", req.Prefix, err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Error getting namespace"})
@@ -866,28 +872,28 @@ func checkNamespaceStatusHandler(ctx *gin.Context) {
 	if ns.AdminMetadata != emptyMetadata {
 		// Caches
 		if strings.HasPrefix(req.Prefix, "/caches") && param.Registry_RequireCacheApproval.GetBool() {
-			res := common.CheckNamespaceStatusRes{Approved: ns.AdminMetadata.Status == Approved}
+			res := server_structs.CheckNamespaceStatusRes{Approved: ns.AdminMetadata.Status == Approved}
 			ctx.JSON(http.StatusOK, res)
 			return
 		} else if !param.Registry_RequireCacheApproval.GetBool() {
-			res := common.CheckNamespaceStatusRes{Approved: true}
+			res := server_structs.CheckNamespaceStatusRes{Approved: true}
 			ctx.JSON(http.StatusOK, res)
 			return
 		} else {
 			// Origins
 			if param.Registry_RequireOriginApproval.GetBool() {
-				res := common.CheckNamespaceStatusRes{Approved: ns.AdminMetadata.Status == Approved}
+				res := server_structs.CheckNamespaceStatusRes{Approved: ns.AdminMetadata.Status == Approved}
 				ctx.JSON(http.StatusOK, res)
 				return
 			} else {
-				res := common.CheckNamespaceStatusRes{Approved: true}
+				res := server_structs.CheckNamespaceStatusRes{Approved: true}
 				ctx.JSON(http.StatusOK, res)
 				return
 			}
 		}
 	} else {
 		// For legacy Pelican (<=7.3.0) registry schema without Admin_Metadata
-		res := common.CheckNamespaceStatusRes{Approved: true}
+		res := server_structs.CheckNamespaceStatusRes{Approved: true}
 		ctx.JSON(http.StatusOK, res)
 	}
 }

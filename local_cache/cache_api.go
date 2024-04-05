@@ -30,10 +30,12 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/pelicanplatform/pelican/common"
+	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pkg/errors"
@@ -78,6 +80,15 @@ func (lc *LocalCache) LaunchListener(ctx context.Context, egrp *errgroup.Group) 
 		}
 		path := path.Clean(r.URL.Path)
 
+		var headerTimeout time.Duration = 0
+		timeoutStr := r.Header.Get("X-Pelican-Timeout")
+		if timeoutStr != "" {
+			if headerTimeout, err = time.ParseDuration(timeoutStr); err != nil {
+				log.Debugln("Invalid X-Pelican-Timeout value:", timeoutStr)
+			}
+		}
+		log.Debugln("Setting header timeout:", timeoutStr)
+
 		var size uint64
 		var reader io.ReadCloser
 		if r.Method == "HEAD" {
@@ -86,7 +97,13 @@ func (lc *LocalCache) LaunchListener(ctx context.Context, egrp *errgroup.Group) 
 				w.Header().Set("Content-Length", strconv.FormatUint(size, 10))
 			}
 		} else {
-			reader, err = lc.Get(path, bearerToken)
+			ctx = context.Background()
+			if headerTimeout > 0 {
+				var cancelReqFunc context.CancelFunc
+				ctx, cancelReqFunc = context.WithTimeout(ctx, headerTimeout)
+				defer cancelReqFunc()
+			}
+			reader, err = lc.Get(ctx, path, bearerToken)
 		}
 		if errors.Is(err, authorizationDenied) {
 			w.WriteHeader(http.StatusForbidden)
@@ -94,12 +111,23 @@ func (lc *LocalCache) LaunchListener(ctx context.Context, egrp *errgroup.Group) 
 				log.Errorln("Failed to write authorization denied to client")
 			}
 			return
-		} else if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			if _, err = w.Write([]byte("Unexpected internal error")); err != nil {
-				log.Errorln("Failed to write internal error message to client")
+		} else if errors.Is(err, context.DeadlineExceeded) {
+			w.WriteHeader(http.StatusGatewayTimeout)
+			if _, err = w.Write([]byte("Upstream response timeout")); err != nil {
+				log.Errorln("Failed to write gateway timeout to client")
 			}
+			return
+		} else if err != nil {
 			log.Errorln("Failed to get file from cache:", err)
+			var sce *client.StatusCodeError
+			if errors.As(err, &sce) {
+				w.WriteHeader(int(*sce))
+			} else {
+				w.WriteHeader(http.StatusInternalServerError)
+				if _, err = w.Write([]byte("Unexpected internal error")); err != nil {
+					log.Errorln("Failed to write internal error message to client")
+				}
+			}
 			return
 		}
 		w.WriteHeader(http.StatusOK)
@@ -143,23 +171,23 @@ func (lc *LocalCache) purgeCmd(ginCtx *gin.Context) {
 		if status == http.StatusOK {
 			status = http.StatusInternalServerError
 		}
-		ginCtx.AbortWithStatusJSON(status, common.SimpleApiResp{Status: common.RespFailed, Msg: err.Error()})
+		ginCtx.AbortWithStatusJSON(status, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: err.Error()})
 		return
 	} else if !verified {
-		ginCtx.AbortWithStatusJSON(http.StatusInternalServerError, common.SimpleApiResp{Status: common.RespFailed, Msg: "Unknown verification error"})
+		ginCtx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Unknown verification error"})
 		return
 	}
 
 	err = lc.purge()
 	if err != nil {
 		if err == purgeTimeout {
-			// Note we don't use common.RespTimeout here; that is reserved for a long-poll timeout.
-			ginCtx.AbortWithStatusJSON(http.StatusRequestTimeout, common.SimpleApiResp{Status: common.RespFailed, Msg: err.Error()})
+			// Note we don't use server_structs.RespTimeout here; that is reserved for a long-poll timeout.
+			ginCtx.AbortWithStatusJSON(http.StatusRequestTimeout, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: err.Error()})
 		} else {
 			// Note we don't pass uncategorized errors to the user to avoid leaking potentially sensitive information.
-			ginCtx.AbortWithStatusJSON(http.StatusInternalServerError, common.SimpleApiResp{Status: common.RespFailed, Msg: "Failed to successfully run purge"})
+			ginCtx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Failed to successfully run purge"})
 		}
 		return
 	}
-	ginCtx.JSON(http.StatusOK, common.SimpleApiResp{Status: common.RespOK})
+	ginCtx.JSON(http.StatusOK, server_structs.SimpleApiResp{Status: server_structs.RespOK})
 }

@@ -80,6 +80,7 @@ type Namespace struct {
 	Identity      string                 `json:"identity" post:"exclude"`
 	AdminMetadata AdminMetadata          `json:"admin_metadata" gorm:"serializer:json"`
 	CustomFields  map[string]interface{} `json:"custom_fields" gorm:"serializer:json"`
+	Topology      bool                   `json:"topology" gorm:"-:all" post:"exclude"` //This field is an extra field that's not included in the db
 }
 
 type NamespaceWOPubkey struct {
@@ -162,32 +163,28 @@ func IsValidRegStatus(s string) bool {
 func createTopologyTable() error {
 	err := db.AutoMigrate(&Topology{})
 	if err != nil {
-		return fmt.Errorf("Failed to migrate topology table: %v", err)
+		return fmt.Errorf("failed to migrate topology table: %v", err)
 	}
 	return nil
 }
 
 // Check if a namespace exists in either Topology or Pelican registry
-func namespaceExists(prefix string) (bool, error) {
+func namespaceExistsByPrefix(prefix string) (bool, error) {
 	var count int64
 
-	err := db.Model(&Namespace{}).Where("prefix = ?", prefix).Count(&count).Error
+	err := db.Model(&Topology{}).Where("prefix = ?", prefix).Count(&count).Error
 	if err != nil {
 		return false, err
 	}
 	if count > 0 {
 		return true, nil
 	} else {
-		if config.GetPreferredPrefix() == "OSDF" {
-			// Perform a count across both 'namespace' and 'topology' tables
-			err := db.Model(&Topology{}).Where("prefix = ?", prefix).Count(&count).Error
-			if err != nil {
-				return false, err
-			}
-			return count > 0, nil
+		err = db.Model(&Namespace{}).Where("prefix = ?", prefix).Count(&count).Error
+		if err != nil {
+			return false, err
 		}
+		return count > 0, nil
 	}
-	return false, nil
 }
 
 func namespaceSupSubChecks(prefix string) (superspaces []string, subspaces []string, inTopo bool, err error) {
@@ -244,17 +241,6 @@ func namespaceExistsById(id int) (bool, error) {
 	}
 }
 
-func namespaceExistsByPrefix(prefix string) (bool, error) {
-	var namespaces []Namespace
-	result := db.Where("prefix = ?", prefix).Limit(1).Find(&namespaces)
-
-	if result.Error != nil {
-		return false, result.Error
-	} else {
-		return result.RowsAffected > 0, nil
-	}
-}
-
 func namespaceBelongsToUserId(id int, userId string) (bool, error) {
 	var result Namespace
 	err := db.First(&result, "id = ?", id).Error
@@ -284,6 +270,11 @@ func getNamespaceJwksById(id int) (jwk.Set, error) {
 }
 
 func getNamespaceJwksByPrefix(prefix string) (jwk.Set, *AdminMetadata, error) {
+	// Note that this cannot retrieve public keys from topology as the topology table
+	// doesn't contain that information.
+	if prefix == "" {
+		return nil, nil, errors.New("Invalid prefix. Prefix must not be empty")
+	}
 	var result Namespace
 	err := db.Select("pubkey", "admin_metadata").Where("prefix = ?", prefix).Last(&result).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -344,15 +335,30 @@ func getNamespaceById(id int) (*Namespace, error) {
 }
 
 func getNamespaceByPrefix(prefix string) (*Namespace, error) {
+	// This function will check the topology table first to see if the
+	// namespace exists there before checking the namespace table
+	// If the namespace exists in the topology table, it will be wrapped
+	// as a pelican namespace before being returned
 	if prefix == "" {
 		return nil, errors.New("Invalid prefix. Prefix must not be empty")
 	}
-	ns := Namespace{}
-	err := db.Where("prefix = ? ", prefix).Last(&ns).Error
+	tp := Topology{}
+	err := db.Where("prefix = ?", prefix).Last(&tp).Error
+	var ns = Namespace{}
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, fmt.Errorf("namespace with id %q not found in database", prefix)
+		err := db.Where("prefix = ? ", prefix).Last(&ns).Error
+		ns.Topology = false
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("namespace with prefix %q not found in database", prefix)
+		} else if err != nil {
+			return nil, errors.Wrap(err, "error retrieving the namespace by its prefix")
+		}
 	} else if err != nil {
-		return nil, errors.Wrap(err, "error retrieving pubkey")
+		return nil, errors.Wrap(err, "error retrieving the namespace by its prefix")
+	} else {
+		ns.ID = tp.ID
+		ns.Prefix = tp.Prefix
+		ns.Topology = true
 	}
 
 	// By default, JSON unmarshal will convert any generic number to float
@@ -540,6 +546,15 @@ func getAllNamespaces() ([]*Namespace, error) {
 	}
 
 	return namespaces, nil
+}
+
+// Get all namespaces from the topology
+func getTopologyNamespaces() ([]*Topology, error) {
+	var topology []*Topology
+	if result := db.Order("id ASC").Find(&topology); result.Error != nil {
+		return nil, result.Error
+	}
+	return topology, nil
 }
 
 // Update database schema based on migration files under /migrations folder
