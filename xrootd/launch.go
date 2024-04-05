@@ -111,7 +111,7 @@ func ConfigureLaunchers(privileged bool, configPath string, useCMSD bool, enable
 	return
 }
 
-func LaunchOriginDaemons(ctx context.Context, launchers []daemon.Launcher, egrp *errgroup.Group) (err error) {
+func LaunchOriginDaemons(ctx context.Context, launchers []daemon.Launcher, egrp *errgroup.Group) (pids []int, err error) {
 	startupChan := make(chan int)
 	readyChan := make(chan bool)
 	defer close(readyChan)
@@ -152,19 +152,22 @@ func LaunchOriginDaemons(ctx context.Context, launchers []daemon.Launcher, egrp 
 		close(startupChan)
 	}()
 
-	if err = daemon.LaunchDaemons(ctx, launchers, egrp); err != nil {
-		return err
+	pids, err = daemon.LaunchDaemons(ctx, launchers, egrp)
+	if err != nil {
+		return
 	}
 
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 	select {
 	case <-ctx.Done():
-		return ctx.Err()
+		err = ctx.Err()
+		return
 	case readyChan <- true:
 		port := <-startupChan
 		if port == -1 {
-			return errors.New("Xrootd initialization failed")
+			err = errors.New("Xrootd initialization failed")
+			return
 		} else {
 			viper.Set("Origin.Port", port)
 			if originUrl, err := url.Parse(param.Origin_Url.GetString()); err == nil {
@@ -176,8 +179,9 @@ func LaunchOriginDaemons(ctx context.Context, launchers []daemon.Launcher, egrp 
 		}
 	case <-ticker.C:
 		log.Errorln("XRootD did not startup after 10s of waiting")
-		return errors.New("XRootD did not startup after 10s of waiting")
+		err = errors.New("XRootD did not startup after 10s of waiting")
+		return
 	}
 
-	return nil
+	return
 }

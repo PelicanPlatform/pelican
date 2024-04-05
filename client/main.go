@@ -470,7 +470,7 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 	if err != nil {
 		return
 	}
-	tj, err := client.NewTransferJob(remoteDestUrl, localObject, true, recursive, project)
+	tj, err := client.NewTransferJob(context.Background(), remoteDestUrl, localObject, true, recursive, project)
 	if err != nil {
 		return
 	}
@@ -559,7 +559,7 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 	if err != nil {
 		return
 	}
-	tj, err := tc.NewTransferJob(remoteObjectUrl, localDestination, false, recursive, project)
+	tj, err := tc.NewTransferJob(context.Background(), remoteObjectUrl, localDestination, false, recursive, project)
 	if err != nil {
 		return
 	}
@@ -694,7 +694,7 @@ func DoCopy(ctx context.Context, sourceFile string, destination string, recursiv
 	if err != nil {
 		return
 	}
-	tj, err := tc.NewTransferJob(remoteURL, localPath, isPut, recursive, project)
+	tj, err := tc.NewTransferJob(context.Background(), remoteURL, localPath, isPut, recursive, project)
 	if err != nil {
 		return
 	}

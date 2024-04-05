@@ -161,20 +161,24 @@ func (launcher DaemonLauncher) Launch(ctx context.Context) (context.Context, int
 	return ctx_result, cmd.Process.Pid, nil
 }
 
-func LaunchDaemons(ctx context.Context, launchers []Launcher, egrp *errgroup.Group) (err error) {
+func LaunchDaemons(ctx context.Context, launchers []Launcher, egrp *errgroup.Group) (pids []int, err error) {
 
 	daemons := make([]launchInfo, len(launchers))
+	pids = make([]int, len(launchers))
 	for idx, daemon := range launchers {
-		ctx, pid, err := daemon.Launch(ctx)
+		var newCtx context.Context
+		var pid int
+		newCtx, pid, err = daemon.Launch(ctx)
 		if err != nil {
 			err = errors.Wrapf(err, "Failed to launch %s daemon", daemon.Name())
 			// This is secure as long as deamon.Name() is either "xrootd" or "cmsd"
 			metrics.SetComponentHealthStatus(metrics.HealthStatusComponent(daemon.Name()), metrics.StatusCritical, err.Error())
-			return err
+			return
 		}
-		daemons[idx].ctx = ctx
+		daemons[idx].ctx = newCtx
 		daemons[idx].pid = pid
 		daemons[idx].name = daemon.Name()
+		pids[idx] = pid
 		log.Infoln("Successfully launched", daemon.Name())
 		metrics.SetComponentHealthStatus(metrics.HealthStatusComponent(daemon.Name()), metrics.StatusOK, "")
 	}
@@ -257,5 +261,5 @@ func LaunchDaemons(ctx context.Context, launchers []Launcher, egrp *errgroup.Gro
 		}
 	})
 
-	return nil
+	return
 }
