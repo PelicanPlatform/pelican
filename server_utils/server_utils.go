@@ -41,7 +41,7 @@ import (
 
 // Wait until given `reqUrl` returns a HTTP 200.
 // Logging messages emitted will refer to `server` (e.g., origin, cache, director)
-// Pass true to statusMismatch to allow a mismatch of expected status code and what's returned not fail immediatelys
+// Pass true to statusMismatch to allow a mismatch of expected status code and what's returned not fail immediately
 func WaitUntilWorking(ctx context.Context, method, reqUrl, server string, expectedStatus int, statusMismatch bool) error {
 	expiry := time.Now().Add(10 * time.Second)
 	ctx, cancel := context.WithDeadline(ctx, expiry)
@@ -82,7 +82,7 @@ func WaitUntilWorking(ctx context.Context, method, reqUrl, server string, expect
 					statusError = errors.Errorf("Received bad status code in reply to server ping at %s: %d. Expected %d. Can't read response body with error %v.", reqUrl, resp.StatusCode, expectedStatus, err)
 					if statusMismatch {
 						if !statusErrLogged {
-							log.Info(statusError, "Will retry until timeedout")
+							log.Info(statusError, "Will retry until timeout")
 							statusErrLogged = true
 						}
 					} else {
@@ -94,7 +94,7 @@ func WaitUntilWorking(ctx context.Context, method, reqUrl, server string, expect
 						statusError = errors.Errorf("Received bad status code in reply to server ping at %s: %d. Expected %d. Response body: %s", reqUrl, resp.StatusCode, expectedStatus, string(bytes))
 						if statusMismatch {
 							if !statusErrLogged {
-								log.Info(statusError, "Will retry until timeedout")
+								log.Info(statusError, "Will retry until timeout")
 								statusErrLogged = true
 							}
 						} else {
@@ -105,7 +105,7 @@ func WaitUntilWorking(ctx context.Context, method, reqUrl, server string, expect
 						statusError = errors.Errorf("Received bad status code in reply to server ping at %s: %d. Expected %d. Response body is empty.", reqUrl, resp.StatusCode, expectedStatus)
 						if statusMismatch {
 							if !statusErrLogged {
-								log.Info(statusError, "Will retry until timeedout")
+								log.Info(statusError, "Will retry until timeout")
 								statusErrLogged = true
 							}
 						} else {
