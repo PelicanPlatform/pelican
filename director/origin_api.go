@@ -70,7 +70,7 @@ func checkNamespaceStatus(prefix string, registryWebUrlStr string) (bool, error)
 		return false, err
 	}
 	client := http.Client{Transport: config.GetTransport()}
-	req, err := http.NewRequest("POST", reqUrl.String(), bytes.NewBuffer(reqByte))
+	req, err := http.NewRequest(http.MethodPost, reqUrl.String(), bytes.NewBuffer(reqByte))
 	req.Header.Add("Content-Type", "application/json")
 	if err != nil {
 		return false, err

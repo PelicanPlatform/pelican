@@ -90,7 +90,7 @@ func keyIsRegistered(privkey jwk.Key, registryUrlStr string, prefix string) (key
 		return noKeyPresent, errors.Wrap(err, "Error marshaling request to json string")
 	}
 
-	req, err := http.NewRequest("POST", pelicanReqURL.String(), bytes.NewBuffer(jsonData))
+	req, err := http.NewRequest(http.MethodPost, pelicanReqURL.String(), bytes.NewBuffer(jsonData))
 
 	if err != nil {
 		return noKeyPresent, err
@@ -141,7 +141,7 @@ func keyIsRegistered(privkey jwk.Key, registryUrlStr string, prefix string) (key
 
 	OSDFReqUrl := registryUrl.JoinPath(prefix, ".well-known", "issuer.jwks")
 
-	OSDFReq, err := http.NewRequest("GET", OSDFReqUrl.String(), nil)
+	OSDFReq, err := http.NewRequest(http.MethodGet, OSDFReqUrl.String(), nil)
 
 	if err != nil {
 		return noKeyPresent, err

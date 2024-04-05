@@ -202,7 +202,7 @@ func ConnectToOrigin(ctx context.Context, brokerUrl, prefix, originName string) 
 	}()
 
 	// Send a request to the broker for a connection reversal
-	req, err := http.NewRequestWithContext(ctx, "POST", brokerUrl, reqReader)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, brokerUrl, reqReader)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "pelican-cache/"+config.GetVersion())
 
@@ -397,7 +397,7 @@ func doCallback(ctx context.Context, brokerResp reversalRequest) (listener net.L
 	}
 	reqReader := bytes.NewReader(reqBytes)
 	var req *http.Request
-	req, err = http.NewRequestWithContext(ctx, "POST", brokerResp.CallbackUrl, reqReader)
+	req, err = http.NewRequestWithContext(ctx, http.MethodPost, brokerResp.CallbackUrl, reqReader)
 	if err != nil {
 		return
 	}
@@ -577,7 +577,7 @@ func LaunchRequestMonitor(ctx context.Context, egrp *errgroup.Group, resultChan 
 			default:
 				// Send a request to the broker for a connection reversal
 				reqReader.Reset(req)
-				req, err := http.NewRequestWithContext(ctx, "POST", brokerEndpoint, reqReader)
+				req, err := http.NewRequestWithContext(ctx, http.MethodPost, brokerEndpoint, reqReader)
 				if err != nil {
 					log.Errorln("Failure when creating new broker URL request:", err)
 					break

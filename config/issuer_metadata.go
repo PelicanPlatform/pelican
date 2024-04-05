@@ -44,7 +44,7 @@ func GetIssuerMetadata(issuer_url string) (*OauthIssuer, error) {
 	wellKnownUrl := strings.TrimSuffix(issuer_url, "/") + "/.well-known/openid-configuration"
 
 	client := http.Client{Transport: GetTransport()}
-	req, err := http.NewRequest("GET", wellKnownUrl, nil)
+	req, err := http.NewRequest(http.MethodGet, wellKnownUrl, nil)
 	if err != nil {
 		return nil, err
 	}

@@ -1209,7 +1209,7 @@ func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDe
 
 		go func(idx int, tUrl string) {
 			headClient := &http.Client{Transport: transport}
-			headRequest, _ := http.NewRequestWithContext(ctx, "HEAD", tUrl, nil)
+			headRequest, _ := http.NewRequestWithContext(ctx, http.MethodHead, tUrl, nil)
 			var headResponse *http.Response
 			headResponse, err := headClient.Do(headRequest)
 			if err != nil {
@@ -1508,7 +1508,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	// Do a head request for content length if resp.Size is unknown
 	if totalSize <= 0 && !resp.IsComplete() {
 		headClient := &http.Client{Transport: transport}
-		headRequest, _ := http.NewRequest("HEAD", transferUrl.String(), nil)
+		headRequest, _ := http.NewRequest(http.MethodHead, transferUrl.String(), nil)
 		var headResponse *http.Response
 		headResponse, err = headClient.Do(headRequest)
 		if err != nil {
@@ -1801,9 +1801,9 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	var request *http.Request
 	// For files that are 0 length, we need to send a PUT request with an nil body
 	if nonZeroSize {
-		request, err = http.NewRequestWithContext(putContext, "PUT", dest.String(), reader)
+		request, err = http.NewRequestWithContext(putContext, http.MethodPut, dest.String(), reader)
 	} else {
-		request, err = http.NewRequestWithContext(putContext, "PUT", dest.String(), http.NoBody)
+		request, err = http.NewRequestWithContext(putContext, http.MethodPut, dest.String(), http.NoBody)
 	}
 	if err != nil {
 		log.Errorln("Error creating request:", err)
@@ -2123,7 +2123,7 @@ func statHttp(ctx context.Context, dest *url.URL, namespace namespaces.Namespace
 				}
 
 				var req *http.Request
-				req, err = http.NewRequestWithContext(ctx, "HEAD", endpoint.String(), nil)
+				req, err = http.NewRequestWithContext(ctx, http.MethodHead, endpoint.String(), nil)
 				if err != nil {
 					log.Errorln("Failed to create HTTP request:", err)
 					resultsChan <- statResults{0, err}

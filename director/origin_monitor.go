@@ -86,7 +86,7 @@ func reportStatusToOrigin(ctx context.Context, originWebUrl string, status strin
 	reqBody := bytes.NewBuffer(jsonData)
 
 	log.Debugln("Director is uploading origin test results to", reportUrl.String())
-	req, err := http.NewRequestWithContext(ctx, "POST", reportUrl.String(), reqBody)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reportUrl.String(), reqBody)
 	if err != nil {
 		return errors.Wrap(err, "Failed to create POST request for reporting director test")
 	}

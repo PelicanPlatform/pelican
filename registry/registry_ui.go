@@ -245,7 +245,7 @@ func getCachedInstitutions() (inst []Institution, intError error, extError error
 	if !institutionsCache.Has(instUrl.String()) {
 		log.Info("Cache miss for institutions TTL cache. Will fetch from source.")
 		client := &http.Client{Transport: config.GetTransport()}
-		req, err := http.NewRequest("GET", instUrl.String(), nil)
+		req, err := http.NewRequest(http.MethodGet, instUrl.String(), nil)
 		if err != nil {
 			intError = errors.Wrap(err, "Error making a request when fetching institution list")
 			extError = errors.New("Error when creating a request to fetch institution from remote url.")

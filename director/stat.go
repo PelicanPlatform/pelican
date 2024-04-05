@@ -114,7 +114,7 @@ func (stat *ObjectStat) sendHeadReqToOrigin(objectName string, dataUrl url.URL, 
 
 	client := http.Client{Transport: config.GetTransport(), Timeout: timeout}
 	reqUrl := dataUrl.JoinPath(objectName)
-	req, err := http.NewRequestWithContext(ctx, "HEAD", reqUrl.String(), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, reqUrl.String(), nil)
 	if err != nil {
 		return nil, errors.Wrap(err, "Error creating request")
 	}

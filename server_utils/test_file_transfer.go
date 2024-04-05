@@ -107,7 +107,7 @@ func (t TestFileTransferImpl) uploadTestfile(ctx context.Context, baseUrl string
 	}
 	uploadURL.Path = namespace + t.testType.String() + "-" + time.Now().Format(time.RFC3339) + ".txt"
 
-	req, err := http.NewRequestWithContext(ctx, "PUT", uploadURL.String(), bytes.NewBuffer([]byte(t.testBody)))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, uploadURL.String(), bytes.NewBuffer([]byte(t.testBody)))
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to create POST request for monitoring upload")
 	}
@@ -137,7 +137,7 @@ func (t TestFileTransferImpl) downloadTestfile(ctx context.Context, downloadUrl 
 		return errors.Wrap(err, "Failed to create a token for test file transfer download")
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", downloadUrl, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadUrl, nil)
 	if err != nil {
 		return errors.Wrap(err, "Failed to create GET request for test file transfer download")
 	}
@@ -173,7 +173,7 @@ func (t TestFileTransferImpl) deleteTestfile(ctx context.Context, fileUrl string
 		return errors.Wrap(err, "Failed to create a token for the test file transfer deletion")
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "DELETE", fileUrl, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, fileUrl, nil)
 	if err != nil {
 		return errors.Wrap(err, "Failed to create DELETE request for test file transfer deletion")
 	}

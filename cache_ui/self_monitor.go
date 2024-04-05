@@ -152,7 +152,7 @@ func generateTestFile() (string, error) {
 }
 
 func downloadTestFile(ctx context.Context, fileUrl string) error {
-	req, err := http.NewRequestWithContext(ctx, "GET", fileUrl, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fileUrl, nil)
 	if err != nil {
 		return errors.Wrap(err, "Failed to create GET request for test file transfer download")
 	}

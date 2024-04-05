@@ -161,7 +161,7 @@ func handleOAuthCallback(ctx *gin.Context) {
 	data.Add("access_token", token.AccessToken)
 
 	// Use access_token to get user info from CILogon
-	userInfoReq, err := http.NewRequest("POST", oauthUserInfoUrl, strings.NewReader(data.Encode()))
+	userInfoReq, err := http.NewRequest(http.MethodPost, oauthUserInfoUrl, strings.NewReader(data.Encode()))
 	if err != nil {
 		log.Errorf("Error creating a new request for user info from auth provider at %s. %v", oauthUserInfoUrl, err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprint("Error  creating a new request for user info from auth provider: ", err)})
