@@ -69,15 +69,15 @@ func validatePrefix(nspath string) (string, error) {
 	return result, nil
 }
 
-func validateKeyChaining(prefix string, pubkey jwk.Key) (inTopo bool, validationError error, serverError error) {
+func validateKeyChaining(prefix string, pubkey jwk.Key) (inTopo bool, topoNss []Topology, validationError error, serverError error) {
 	// We don't check keyChaining for caches
 	if strings.HasPrefix(prefix, "/caches/") {
 		return
 	}
-	// Here, we do the check anyway but only returns error (if any)
-	// we the flag is on. This is to make sure the topology check is independent
+	// Here, we do the namespaceSupSubChecks anyway but only returns error (if any)
+	// when the Registry.RequireKeyChaining flag is on. This is to make sure the topology check is independent
 	// of key chaining check
-	superspaces, subspaces, inTopo, err := namespaceSupSubChecks(prefix)
+	superspaces, subspaces, inTopo, topoNss, err := namespaceSupSubChecks(prefix)
 	if !param.Registry_RequireKeyChaining.GetBool() {
 		return
 	} else {

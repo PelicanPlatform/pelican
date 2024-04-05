@@ -464,7 +464,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 	}
 
 	// Check if the parent or child path along the prefix has been registered
-	inTopo, valErr, sysErr := validateKeyChaining(ns.Prefix, pubkey)
+	inTopo, topoNss, valErr, sysErr := validateKeyChaining(ns.Prefix, pubkey)
 	if valErr != nil {
 		log.Errorln("Bad prefix when validating key chaining", valErr)
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": valErr.Error()})
@@ -496,7 +496,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 		// Overwrite status to Pending to filter malicious request
 		ns.AdminMetadata.Status = Pending
 		if inTopo {
-			ns.AdminMetadata.Description = "[ Attention: Prefix exists in OSDF topology ] " + ns.AdminMetadata.Description
+			ns.AdminMetadata.Description = fmt.Sprintf("[ Attention: A superspace or subspace of this prefix exists in OSDF topology: %s ] ", GetTopoPrefixString(topoNss))
 		}
 		if err := AddNamespace(&ns); err != nil {
 			log.Errorf("Failed to insert namespace with id %d. %v", ns.ID, err)
@@ -505,7 +505,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 		}
 		msg := "success"
 		if inTopo {
-			msg = "Prefix is successfully registered. Note that there is an existing namespace prefix in the OSDF topology. The registry admin will review your request and approve your namespace if this is expected."
+			msg = fmt.Sprintf("Prefix %s successfully registered. Note that there is an existing superspace or subspace of the namespace in the OSDF topology: %s. The registry admin will review your request and approve your namespace if this is expected.", ns.Prefix, GetTopoPrefixString(topoNss))
 		}
 		ctx.JSON(http.StatusOK, gin.H{"msg": msg})
 	} else { // Update
