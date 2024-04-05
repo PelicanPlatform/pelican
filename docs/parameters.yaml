@@ -459,16 +459,10 @@ default: none
 components: ["origin"]
 ---
 name: Origin.StoragePrefix
-<<<<<<< HEAD
-description: |+
-  A string indicating the path to the volume exported by an origin's underlying storage. For example, if the origin is configured in posix
-  mode, this constitutes the path on disk exported by the origin for the federation.
-=======
 description: |+
   A string indicating the path to the volume exported by an origin's underlying storage. For example, if the origin has a StorageType
   of "posix", this constitutes the path on disk exported by the origin for the federation. If the origin has a StorageType of "s3",
   this value is not currently used.
->>>>>>> cf205f27 (Plug S3 plugin changes into multi-export S3 origins)
 
   NOTE: This config option is incompatible with multiple exports defined via `Origin.Exports` and requires that the origin exports
   only a single path.
