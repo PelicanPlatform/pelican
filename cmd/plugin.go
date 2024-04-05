@@ -440,10 +440,7 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 				if transfer.url.Query().Get("pack") != "" {
 					transfer.localFile = filepath.Dir(transfer.localFile)
 				}
-				transfer.localFile, err = parseDestination(transfer)
-				if err != nil {
-					return err
-				}
+				transfer.localFile = parseDestination(transfer)
 			}
 
 			var tj *client.TransferJob
@@ -527,20 +524,19 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 // Gets the absolute path for the local destination. This is important
 // especially for downloaded directories so that the downloaded files end up
 // in the directory specified for download.
-func parseDestination(transfer PluginTransfer) (parsedDest string, err error) {
-	var destStat fs.FileInfo
+func parseDestination(transfer PluginTransfer) (parsedDest string) {
 	// get absolute path
 	destPath, _ := filepath.Abs(transfer.localFile)
 	// Check if path exists or if its in a folder
-	if destStat, err = os.Stat(destPath); os.IsNotExist(err) {
-		return destPath, err
+	if destStat, err := os.Stat(destPath); os.IsNotExist(err) {
+		return destPath
 	} else if destStat.IsDir() {
 		// If we are a directory, add the source filename to the destination dir
 		sourceFilename := path.Base(transfer.url.Path)
 		parsedDest = path.Join(destPath, sourceFilename)
-		return parsedDest, nil
+		return parsedDest
 	}
-	return transfer.localFile, nil
+	return transfer.localFile
 }
 
 // This function checks if we have a valid query (or no query) for the transfer URL

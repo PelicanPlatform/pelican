@@ -429,8 +429,7 @@ func TestParseDestination(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got, err := parseDestination(test.transfer)
-			assert.NoError(t, err)
+			got := parseDestination(test.transfer)
 			if got != test.want {
 				t.Errorf("parseDestination() = %v, want %v", got, test.want)
 			}
