@@ -21,7 +21,6 @@ require (
 	github.com/jellydator/ttlcache/v3 v3.1.0
 	github.com/jsipprell/keyctl v1.0.4-0.20211208153515-36ca02672b6c
 	github.com/lestrrat-go/jwx/v2 v2.0.21
-	github.com/minio/minio-go/v7 v7.0.65
 	github.com/mwitkow/go-conntrack v0.0.0-20190716064945-2f068394615f
 	github.com/oklog/run v1.1.0
 	github.com/opensaucerer/grab/v3 v3.0.1
@@ -147,8 +146,6 @@ require (
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-runewidth v0.0.15 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.4 // indirect
-	github.com/minio/md5-simd v1.1.2 // indirect
-	github.com/minio/sha256-simd v1.0.1 // indirect
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
@@ -166,7 +163,6 @@ require (
 	github.com/prometheus/procfs v0.12.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rivo/uniseg v0.4.4 // indirect
-	github.com/rs/xid v1.5.0 // indirect
 	github.com/segmentio/asm v1.2.0 // indirect
 	github.com/shurcooL/httpfs v0.0.0-20230704072500-f1e31cf0ba5c // indirect
 	github.com/spf13/afero v1.11.0 // indirect
