@@ -132,6 +132,7 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	viper.Set("Server.EnableUI", false)
 	viper.Set("Registry.DbLocation", filepath.Join(t.TempDir(), "ns-registry.sqlite"))
 	viper.Set("Origin.Port", 0)
+	viper.Set("Cache.Port", 0)
 	viper.Set("Server.WebPort", 0)
 	viper.Set("Origin.RunLocation", tmpPath)
 	viper.Set("Registry.RequireOriginApproval", false)

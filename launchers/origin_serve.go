@@ -23,9 +23,13 @@ package launchers
 import (
 	"context"
 	_ "embed"
+	"net/url"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	log "github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/config"
@@ -90,7 +94,17 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		launchers = append(launchers, oa4mp_launcher)
 	}
 
-	if err = xrootd.LaunchOriginDaemons(ctx, launchers, egrp); err != nil {
+	portStartCallback := func(port int) {
+		viper.Set("Origin.Port", port)
+		if originUrl, err := url.Parse(param.Origin_Url.GetString()); err == nil {
+			originUrl.Host = originUrl.Hostname() + ":" + strconv.Itoa(port)
+			viper.Set("Origin.Url", originUrl.String())
+			log.Debugln("Resetting Origin.Url to", originUrl.String())
+		}
+		log.Infoln("Origin startup complete on port", port)
+	}
+
+	if err = xrootd.LaunchDaemons(ctx, launchers, egrp, portStartCallback); err != nil {
 		return nil, err
 	}
 

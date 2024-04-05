@@ -27,9 +27,11 @@ import (
 	_ "embed"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -118,7 +120,17 @@ func originMockup(ctx context.Context, egrp *errgroup.Group, t *testing.T) conte
 	launchers, err := ConfigureLaunchers(false, configPath, false, false)
 	require.NoError(t, err)
 
-	err = LaunchOriginDaemons(shutdownCtx, launchers, egrp)
+	portStartCallback := func(port int) {
+		viper.Set("Origin.Port", port)
+		if originUrl, err := url.Parse(param.Origin_Url.GetString()); err == nil {
+			originUrl.Host = originUrl.Hostname() + ":" + strconv.Itoa(port)
+			viper.Set("Origin.Url", originUrl.String())
+			log.Debugln("Resetting Origin.Url to", originUrl.String())
+		}
+		log.Infoln("Origin startup complete on port", port)
+	}
+
+	err = LaunchDaemons(shutdownCtx, launchers, egrp, portStartCallback)
 	require.NoError(t, err)
 
 	log.Info("Starting web engine...")

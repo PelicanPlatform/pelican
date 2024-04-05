@@ -23,17 +23,19 @@ package launchers
 import (
 	"context"
 	_ "embed"
+	"net/url"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/broker"
 	"github.com/pelicanplatform/pelican/cache"
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/daemon"
 	"github.com/pelicanplatform/pelican/launcher_utils"
 	"github.com/pelicanplatform/pelican/lotman"
 	"github.com/pelicanplatform/pelican/param"
@@ -105,7 +107,17 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 		return nil, err
 	}
 
-	if err = daemon.LaunchDaemons(ctx, launchers, egrp); err != nil {
+	portStartCallback := func(port int) {
+		viper.Set("Cache.Port", port)
+		if cacheUrl, err := url.Parse(param.Origin_Url.GetString()); err == nil {
+			cacheUrl.Host = cacheUrl.Hostname() + ":" + strconv.Itoa(port)
+			viper.Set("Cache.Url", cacheUrl.String())
+			log.Debugln("Resetting Cache.Url to", cacheUrl.String())
+		}
+		log.Infoln("Cache startup complete on port", port)
+	}
+
+	if err = xrootd.LaunchDaemons(ctx, launchers, egrp, portStartCallback); err != nil {
 		return nil, err
 	}
 
