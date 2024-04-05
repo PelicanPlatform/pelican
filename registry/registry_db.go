@@ -167,6 +167,17 @@ func createTopologyTable() error {
 	return nil
 }
 
+func GetTopoPrefixString(topoNss []Topology) (result string) {
+	for i, topoNs := range topoNss {
+		if i != len(topoNss)-1 {
+			result += (topoNs.Prefix + ", ")
+		} else {
+			result += topoNs.Prefix
+		}
+	}
+	return
+}
+
 // Check if a namespace exists in the Namespace table
 func namespaceExistsByPrefix(prefix string) (bool, error) {
 	var count int64
@@ -189,7 +200,7 @@ func topologyNamespaceExistsByPrefix(prefix string) (bool, error) {
 	return count > 0, nil
 }
 
-func namespaceSupSubChecks(prefix string) (superspaces []string, subspaces []string, inTopo bool, err error) {
+func namespaceSupSubChecks(prefix string) (superspaces []string, subspaces []string, inTopo bool, topoNss []Topology, err error) {
 	// The very first thing we do is check if there's a match in topo. We simply flag it's in topology if so
 	if config.GetPreferredPrefix() == "OSDF" {
 		topoSuperSubQuery := `
@@ -197,13 +208,12 @@ func namespaceSupSubChecks(prefix string) (superspaces []string, subspaces []str
 		UNION
 		SELECT prefix FROM topology WHERE (prefix || '/') LIKE (? || '/%')
 		`
-		var results []Topology
-		err = db.Raw(topoSuperSubQuery, prefix, prefix).Scan(&results).Error
+		err = db.Raw(topoSuperSubQuery, prefix, prefix).Scan(&topoNss).Error
 		if err != nil {
 			return
 		}
 
-		if len(results) > 0 {
+		if len(topoNss) > 0 {
 			inTopo = true
 		}
 	}

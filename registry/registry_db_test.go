@@ -846,3 +846,20 @@ func TestRegistryTopology(t *testing.T) {
 
 	viper.Reset()
 }
+
+func TestGetTopoPrefixString(t *testing.T) {
+	t.Run("empty-arr", func(t *testing.T) {
+		re := GetTopoPrefixString([]Topology{})
+		assert.Empty(t, re)
+	})
+
+	t.Run("one-item", func(t *testing.T) {
+		re := GetTopoPrefixString([]Topology{{Prefix: "/foo"}})
+		assert.Equal(t, "/foo", re)
+	})
+
+	t.Run("multiple-items", func(t *testing.T) {
+		re := GetTopoPrefixString([]Topology{{Prefix: "/foo"}, {Prefix: "/bar"}, {Prefix: "/barz"}})
+		assert.Equal(t, "/foo, /bar, /barz", re)
+	})
+}

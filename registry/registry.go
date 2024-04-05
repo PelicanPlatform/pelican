@@ -289,7 +289,7 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 		}
 		data.Prefix = reqPrefix
 
-		inTopo, valErr, sysErr := validateKeyChaining(reqPrefix, key)
+		inTopo, topoNss, valErr, sysErr := validateKeyChaining(reqPrefix, key)
 		if valErr != nil {
 			log.Errorln(err)
 			return false, nil, permissionDeniedError{Message: valErr.Error()}
@@ -324,7 +324,8 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 				}
 			}
 			if inTopo {
-				ns.AdminMetadata.Description = "[ Attention: Prefix exists in OSDF topology ] "
+				topoNssStr := GetTopoPrefixString(topoNss)
+				ns.AdminMetadata.Description = fmt.Sprintf("[ Attention: A superspace or subspace of this prefix exists in OSDF topology: %s ] ", topoNssStr)
 			}
 			userName, ok := idMap["name"]
 			if ok {
@@ -350,12 +351,13 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 			if inTopo {
 				return false,
 					nil,
-					permissionDeniedError{Message: fmt.Sprintf("The namespace %s already exists in the OSDF topology. "+
+					permissionDeniedError{Message: fmt.Sprintf("A superspace or subspace of this namespace %s already exists in the OSDF topology: %s. "+
 						"To register a Pelican equivalence, you need to present your identity. "+
 						"If you are registering through Pelican CLI, try again with the flag '--with-identity' enabled. "+
 						"If this is an auto-registration from a Pelican origin or cache server, "+
 						"register your namespace or server through the Pelican registry website at %s instead.",
 						ns.Prefix,
+						GetTopoPrefixString(topoNss),
 						registryUrl)}
 			}
 		}
@@ -373,7 +375,7 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 		} else {
 			msg := fmt.Sprintf("Prefix %s successfully registered", ns.Prefix)
 			if inTopo {
-				msg = fmt.Sprintf("Prefix %s successfully registered. Note that there is an existing namespace prefix in the OSDF topology. The registry admin will review your request and approve your namespace if this is expected.", ns.Prefix)
+				msg = fmt.Sprintf("Prefix %s successfully registered. Note that there is an existing superspace or subspace of the namespace in the OSDF topology: %s. The registry admin will review your request and approve your namespace if this is expected.", ns.Prefix, GetTopoPrefixString(topoNss))
 			}
 			return true, map[string]interface{}{
 				"message": msg,
