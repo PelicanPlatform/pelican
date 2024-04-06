@@ -455,11 +455,11 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 			developerData["Attempts"] = len(result.Attempts)
 			for _, attempt := range result.Attempts {
 				developerData[fmt.Sprintf("TransferFileBytes%d", attempt.Number)] = attempt.TransferFileBytes
-				developerData[fmt.Sprintf("TimeToFirstByte%d", attempt.Number)] = attempt.TimeToFirstByte
+				developerData[fmt.Sprintf("TimeToFirstByte%d", attempt.Number)] = attempt.TimeToFirstByte.Round(time.Millisecond).Seconds()
 				developerData[fmt.Sprintf("Endpoint%d", attempt.Number)] = attempt.Endpoint
-				developerData[fmt.Sprintf("TransferEndTime%d", attempt.Number)] = attempt.TransferEndTime
+				developerData[fmt.Sprintf("TransferEndTime%d", attempt.Number)] = attempt.TransferEndTime.Unix()
 				developerData[fmt.Sprintf("ServerVersion%d", attempt.Number)] = attempt.ServerVersion
-				developerData[fmt.Sprintf("TransferTime%d", attempt.Number)] = attempt.TransferTime
+				developerData[fmt.Sprintf("TransferTime%d", attempt.Number)] = attempt.TransferTime.Round(time.Millisecond).Seconds()
 				if attempt.Error != nil {
 					developerData[fmt.Sprintf("TransferError%d", attempt.Number)] = attempt.Error.Error()
 				}
@@ -607,19 +607,17 @@ func readMultiTransfers(stdin bufio.Reader) (transfers []PluginTransfer, err err
 
 // This function wraps the transfer error message into a more readable and user-friendly format.
 func writeTransferErrorMessage(currentError string, transferUrl string, upload bool) (errMsg string) {
+
 	errMsg = "Pelican Client Error: "
 
-	// TransferUrl will be blank if this occurs before transfer has started.
-	if transferUrl != "" {
-		if upload {
-			errMsg += "uploading "
-		} else {
-			errMsg += "downloading "
-		}
-		errMsg += transferUrl + ": "
-	}
 	errMsg += currentError
-	errMsg += (" (Pelican Version: " + config.GetVersion())
+	if tUrl, err := url.Parse(transferUrl); err == nil {
+		prefix = tUrl.Scheme + "://" + tUrl.Host
+		urlRemainder := strings.TrimPrefix(transferUrl, prefix)
+		errMsg = strings.ReplaceAll(errMsg, urlRemainder, "(...Path...)")
+	}
+
+	errMsg += (" (Version: " + config.GetVersion())
 
 	siteName := parseMachineAd()
 	if siteName != "" {
