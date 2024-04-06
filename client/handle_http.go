@@ -1479,12 +1479,14 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 			}
 			attempt.Error = errors.New(errorString)
 			xferErrors.AddPastError(attempt.Error, endTime)
-		} else { // Success
+		}
+		transferResults.Attempts = append(transferResults.Attempts, attempt)
+
+		if err == nil { // Success
 			log.Debugln("Downloaded bytes:", downloaded)
 			success = true
 			break
 		}
-		transferResults.Attempts = append(transferResults.Attempts, attempt)
 	}
 	transferResults.TransferredBytes = downloaded
 	if !success {
