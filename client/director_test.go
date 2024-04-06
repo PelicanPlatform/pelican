@@ -27,6 +27,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	namespaces "github.com/pelicanplatform/pelican/namespaces"
 	"github.com/pelicanplatform/pelican/utils"
@@ -123,6 +124,9 @@ func TestCreateNsFromDirectorResp(t *testing.T) {
 
 func TestNewTransferDetailsUsingDirector(t *testing.T) {
 	os.Setenv("http_proxy", "http://proxy.edu:3128")
+	t.Cleanup(func() {
+		require.NoError(t, os.Unsetenv("http_proxy"))
+	})
 
 	// Construct the input caches
 	// Cache with http
