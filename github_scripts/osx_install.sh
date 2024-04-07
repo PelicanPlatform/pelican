@@ -19,7 +19,7 @@
 # Mac OS X instance in GitHub.
 #
 
-scriptdir=$(realpath `dirname $0`)
+scriptdir=$PWD/`dirname $0`
 
 brew install minio xrootd ninja
 
