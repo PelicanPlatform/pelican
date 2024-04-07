@@ -72,7 +72,7 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	// to immediately work through the cache.  For now, unit tests will just use the origin.
 	modules.Set(config.LocalCacheType)
 
-	tmpPathPattern := "PelicanOrigin-FedTest*"
+	tmpPathPattern := "Pelican-FedTest*"
 	tmpPath, err := os.MkdirTemp("", tmpPathPattern)
 	require.NoError(t, err)
 
@@ -136,7 +136,8 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	viper.Set("Origin.Port", 0)
 	viper.Set("Cache.Port", 0)
 	viper.Set("Server.WebPort", 0)
-	viper.Set("Origin.RunLocation", tmpPath)
+	viper.Set("Origin.RunLocation", filepath.Join(tmpPath, "origin"))
+	viper.Set("Cache.RunLocation", filepath.Join(tmpPath, "cache"))
 	viper.Set("Registry.RequireOriginApproval", false)
 	viper.Set("Registry.RequireCacheApproval", false)
 
