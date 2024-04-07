@@ -81,6 +81,7 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	require.NoError(t, err)
 
 	viper.Set("ConfigDir", tmpPath)
+	viper.Set("Logging.Level", "debug")
 
 	config.InitConfig()
 
