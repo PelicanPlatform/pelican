@@ -112,6 +112,13 @@ type (
 		Err error
 	}
 
+	// StatusCodeError is a wrapper around grab.StatusCodeErorr that indicates the server returned
+	// a non-200 code.
+	//
+	// The wrapper is done to provide a Pelican-based error hierarchy in case we ever decide to have
+	// a different underlying download package.
+	StatusCodeError grab.StatusCodeError
+
 	// Represents the results of a single object transfer,
 	// potentially across multiple attempts / retries.
 	TransferResults struct {
@@ -349,6 +356,18 @@ func (e *ConnectionSetupError) Unwrap() error {
 func (e *ConnectionSetupError) Is(target error) bool {
 	_, ok := target.(*ConnectionSetupError)
 	return ok
+}
+
+func (e *StatusCodeError) Error() string {
+	return (*grab.StatusCodeError)(e).Error()
+}
+
+func (e *StatusCodeError) Is(target error) bool {
+	sce, ok := target.(*StatusCodeError)
+	if !ok {
+		return false
+	}
+	return int(*sce) == int(*e)
 }
 
 // hasPort test the host if it includes a port
@@ -864,7 +883,7 @@ func (te *TransferEngine) runJobHandler() error {
 //
 // The returned object can be further customized as desired.
 // This function does not "submit" the job for execution.
-func (tc *TransferClient) NewTransferJob(remoteUrl *url.URL, localPath string, upload bool, recursive bool, project string, options ...TransferOption) (tj *TransferJob, err error) {
+func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL, localPath string, upload bool, recursive bool, project string, options ...TransferOption) (tj *TransferJob, err error) {
 
 	id, err := uuid.NewV7()
 	if err != nil {
@@ -891,7 +910,19 @@ func (tc *TransferClient) NewTransferJob(remoteUrl *url.URL, localPath string, u
 		token:         tc.token,
 		project:       project,
 	}
-	tj.ctx, tj.cancel = context.WithCancel(tc.ctx)
+
+	mergeCancel := func(ctx1, ctx2 context.Context) (context.Context, context.CancelFunc) {
+		newCtx, cancel := context.WithCancel(ctx1)
+		stop := context.AfterFunc(ctx2, func() {
+			cancel()
+		})
+		return newCtx, func() {
+			stop()
+			cancel()
+		}
+	}
+
+	tj.ctx, tj.cancel = mergeCancel(ctx, tc.ctx)
 
 	for _, option := range options {
 		switch option.Ident() {
@@ -1438,7 +1469,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 				errorString += "due to proxy " + AddrString + " error: " + ope.Unwrap().Error()
 			} else if errors.As(err, &cse) {
 				errorString += "+ proxy=" + strconv.FormatBool(transferEndpoint.Proxy) + ": "
-				if sce, ok := cse.Unwrap().(grab.StatusCodeError); ok {
+				if sce, ok := cse.Unwrap().(*StatusCodeError); ok {
 					errorString += sce.Error()
 				} else {
 					errorString += err.Error()
@@ -1543,6 +1574,12 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 		return 0, 0, "", errors.New("Internal error: implementation is not a http.Client type")
 	}
 	httpClient.Transport = transport
+	headerTimeout := transport.ResponseHeaderTimeout
+	if headerTimeout > time.Second {
+		headerTimeout -= 500 * time.Millisecond
+	} else {
+		headerTimeout /= 2
+	}
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -1578,7 +1615,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	}
 	// Set the headers
 	req.HTTPRequest.Header.Set("X-Transfer-Status", "true")
-	req.HTTPRequest.Header.Set("X-Pelican-Timeout", param.Transport_ResponseHeaderTimeout.GetDuration().String())
+	req.HTTPRequest.Header.Set("X-Pelican-Timeout", headerTimeout.Round(time.Millisecond).String())
 	req.HTTPRequest.Header.Set("TE", "trailers")
 	req.HTTPRequest.Header.Set("User-Agent", getUserAgent(project))
 	req = req.WithContext(ctx)
@@ -1599,11 +1636,17 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	// Check the error real quick
 	if resp.IsComplete() {
 		if err = resp.Err(); err != nil {
+			var sce grab.StatusCodeError
 			if errors.Is(err, grab.ErrBadLength) {
-				err = fmt.Errorf("Local copy of file is larger than remote copy %w", grab.ErrBadLength)
+				err = fmt.Errorf("local copy of file is larger than remote copy %w", grab.ErrBadLength)
+			} else if errors.As(err, &sce) {
+				log.Debugln("Creating a client status code error")
+				sce2 := StatusCodeError(sce)
+				err = &sce2
+			} else {
+				err = &ConnectionSetupError{Err: err}
 			}
 			log.Errorln("Failed to download:", err)
-			err = &ConnectionSetupError{Err: err}
 			return
 		}
 	}

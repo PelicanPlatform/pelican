@@ -38,6 +38,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/launcher_utils"
 	"github.com/pelicanplatform/pelican/lotman"
+	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -117,16 +118,18 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 		log.Infoln("Cache startup complete on port", port)
 	}
 
-	if err = xrootd.LaunchDaemons(ctx, launchers, egrp, portStartCallback); err != nil {
+	pids, err := xrootd.LaunchDaemons(ctx, launchers, egrp, portStartCallback)
+	if err != nil {
 		return nil, err
 	}
-
+	cacheServer.SetPids(pids)
 	return cacheServer, nil
 }
 
 // Finish configuration of the cache server.
 func CacheServeFinish(ctx context.Context, egrp *errgroup.Group, cacheServer server_structs.XRootDServer) error {
 	log.Debug("Register Cache")
+	metrics.SetComponentHealthStatus(metrics.OriginCache_Registry, metrics.StatusWarning, "Start to register namespaces for the cache server")
 	if err := launcher_utils.RegisterNamespaceWithRetry(ctx, egrp, "/caches/"+param.Xrootd_Sitename.GetString()); err != nil {
 		return err
 	}

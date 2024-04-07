@@ -142,13 +142,13 @@ func (f *FedTest) Spinup() {
 	viper.Set("Registry.RequireOriginApproval", false)
 	viper.Set("Registry.RequireCacheApproval", false)
 
-	f.FedCancel, err = launchers.LaunchModules(ctx, modules)
+	_, f.FedCancel, err = launchers.LaunchModules(ctx, modules)
 	if err != nil {
 		f.T.Fatalf("Failure in fedServeInternal: %v", err)
 	}
 
 	desiredURL := param.Server_ExternalWebUrl.GetString() + "/.well-known/openid-configuration"
-	err = server_utils.WaitUntilWorking(ctx, "GET", desiredURL, "director", 200)
+	err = server_utils.WaitUntilWorking(ctx, "GET", desiredURL, "director", 200, false)
 	require.NoError(f.T, err)
 
 	httpc := http.Client{

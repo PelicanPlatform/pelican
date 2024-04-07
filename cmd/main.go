@@ -26,6 +26,7 @@ import (
 	"strings"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 )
 
@@ -63,7 +64,11 @@ func handleCLI(args []string) error {
 		}
 		err := Execute()
 		if errors.Is(err, server_utils.ErrInvalidOriginConfig) {
-			fmt.Fprintf(os.Stderr, `
+			mode := param.Origin_StorageType.GetString()
+			backendType, _ := server_utils.ParseOriginStorageType(mode)
+			switch backendType {
+			case server_utils.OriginStoragePosix:
+				fmt.Fprintf(os.Stderr, `
 Export information was not correct.
 For POSIX, to specify exports via the command line, use:
 
@@ -84,7 +89,48 @@ Alternatively, specify Origin.Exports in the parameters.yaml file:
 
 to export the directories /mnt/foo and /mnt/test under the namespace prefixes /bar and /baz, respectively (with listed permissions).
 `)
+			case server_utils.OriginStorageS3:
+				fmt.Fprintf(os.Stderr, `
+Export information was not correct.
+To specify exports via the command line, use:
 
+		-v my-bucket:/my/prefix (REQUIRED --service-url https://my-s3-url.com) (REQUIRED --url-style <path or virtual>) \
+				(REQUIRED --region "my-region") (OPTIONAL --bucket-access-keyfile /path/to/access.key) \
+				(OPTIONAL --bucket-secret-keyfile /path/to/secret.key)
+
+
+to export the S3 bucket under the namespace prefix /my/prefix.
+
+Alternatively, specify Origin.Exports in the parameters.yaml file:
+
+Origin:
+	StorageType: s3
+	S3UrlStyle: <path or virtual>
+	S3ServiceUrl: https://my-s3-url.com
+	S3Region: my-region
+	Exports:
+	  - FederationPrefix: /my/prefix
+		S3Bucket: my-bucket
+		S3AccessKeyfile: /path/to/access.key
+		S3SecretKeyfile: /path/to/secret.key
+		Capabilities: ["PublicReads", "Writes", "Listings"]
+
+to export the S3 bucket my-bucket from https://my-s3-url.com under the namespace prefix /my/prefix (with listed permissions).
+`)
+			case server_utils.OriginStorageHTTPS:
+				fmt.Fprintf(os.Stderr, `
+Export information was not correct.
+HTTPS exports must be specified via configuration file.  Example:
+
+Origin:
+	StorageType: https
+	FederationPrefix: /my/prefix
+	HttpServiceUrl: "https://example.com/testfiles"
+	Capabilities: ["PublicReads", "Writes", "Listings"]
+`)
+			default:
+				fmt.Fprintf(os.Stderr, "Currently-supported origin modes include posix, https, and s3, but you provided %s.", mode)
+			}
 		}
 		if err != nil {
 			os.Exit(1)

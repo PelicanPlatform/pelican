@@ -20,6 +20,7 @@ package director
 
 import (
 	"net/http"
+	"net/url"
 	"path"
 	"strings"
 
@@ -104,10 +105,16 @@ func listServers(ctx *gin.Context) {
 			healthStatus = healthUtil.Status
 		}
 		filtered, ft := checkFilter(server.Name)
+		var auth_url string
+		if server.AuthURL == (url.URL{}) {
+			auth_url = server.URL.String()
+		} else {
+			auth_url = server.AuthURL.String()
+		}
 		res := listServerResponse{
 			Name:         server.Name,
 			BrokerURL:    server.BrokerURL.String(),
-			AuthURL:      server.AuthURL.String(),
+			AuthURL:      auth_url,
 			URL:          server.URL.String(),
 			WebURL:       server.WebURL.String(),
 			Type:         server.Type,

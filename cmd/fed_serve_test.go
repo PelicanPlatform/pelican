@@ -92,7 +92,7 @@ func TestFedServePosixOrigin(t *testing.T) {
 	viper.Set("Registry.RequireCacheApproval", false)
 	defer cancel()
 
-	fedCancel, err := launchers.LaunchModules(ctx, modules)
+	_, fedCancel, err := launchers.LaunchModules(ctx, modules)
 
 	defer fedCancel()
 	if err != nil {
@@ -101,7 +101,7 @@ func TestFedServePosixOrigin(t *testing.T) {
 	}
 
 	desiredURL := param.Server_ExternalWebUrl.GetString() + "/.well-known/openid-configuration"
-	err = server_utils.WaitUntilWorking(ctx, "GET", desiredURL, "director", 200)
+	err = server_utils.WaitUntilWorking(ctx, "GET", desiredURL, "director", 200, false)
 	require.NoError(t, err)
 
 	httpc := http.Client{

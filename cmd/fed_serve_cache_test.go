@@ -110,7 +110,7 @@ func TestFedServeCache(t *testing.T) {
 
 	require.NoError(t, err)
 
-	fedCancel, err := launchers.LaunchModules(ctx, modules)
+	_, fedCancel, err := launchers.LaunchModules(ctx, modules)
 	defer fedCancel()
 	if err != nil {
 		log.Errorln("Failure in fedServeInternal:", err)
@@ -118,7 +118,7 @@ func TestFedServeCache(t *testing.T) {
 	}
 
 	// In this case 403 means the cache is running
-	err = server_utils.WaitUntilWorking(ctx, "GET", param.Cache_Url.GetString(), "xrootd", 403)
+	err = server_utils.WaitUntilWorking(ctx, "GET", param.Cache_Url.GetString(), "xrootd", 403, false)
 	require.NoError(t, err)
 
 	fileTests := server_utils.TestFileTransferImpl{}

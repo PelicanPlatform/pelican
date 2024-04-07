@@ -62,6 +62,7 @@ func doAdvertise(ctx context.Context, servers []server_structs.XRootDServer) {
 
 // Launch periodic advertise of xrootd servers (origin and cache) to the director, in the errogroup
 func LaunchPeriodicAdvertise(ctx context.Context, egrp *errgroup.Group, servers []server_structs.XRootDServer) error {
+	metrics.SetComponentHealthStatus(metrics.OriginCache_Federation, metrics.StatusWarning, "First attempt to advertise to the director...")
 	doAdvertise(ctx, servers)
 
 	ticker := time.NewTicker(1 * time.Minute)
@@ -73,7 +74,7 @@ func LaunchPeriodicAdvertise(ctx context.Context, egrp *errgroup.Group, servers 
 				err := Advertise(ctx, servers)
 				if err != nil {
 					log.Warningln("XRootD server advertise failed:", err)
-					metrics.SetComponentHealthStatus(metrics.OriginCache_Federation, metrics.StatusCritical, fmt.Sprintf("XRootD server advertise failed: %v", err))
+					metrics.SetComponentHealthStatus(metrics.OriginCache_Federation, metrics.StatusCritical, fmt.Sprintf("XRootD server failed to advertise to the director: %v", err))
 				} else {
 					metrics.SetComponentHealthStatus(metrics.OriginCache_Federation, metrics.StatusOK, "")
 				}

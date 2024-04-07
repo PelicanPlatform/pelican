@@ -57,6 +57,7 @@ func GetDeprecated() map[string][]string {
         "Origin.ExportVolume": []string{"Origin.ExportVolumes"},
         "Origin.Mode": []string{"Origin.StorageType"},
         "Origin.NamespacePrefix": []string{"Origin.FederationPrefix"},
+        "Origin.S3ServiceName": []string{"none"},
         "Xrootd.Port": []string{"Origin.Port", "Cache.Port"},
         "Xrootd.RunLocation": []string{"Cache.RunLocation", "Origin.RunLocation"},
     }
@@ -222,6 +223,7 @@ var (
 	StagePlugin_OriginPrefix = StringParam{"StagePlugin.OriginPrefix"}
 	StagePlugin_ShadowOriginPrefix = StringParam{"StagePlugin.ShadowOriginPrefix"}
 	Xrootd_Authfile = StringParam{"Xrootd.Authfile"}
+	Xrootd_ConfigFile = StringParam{"Xrootd.ConfigFile"}
 	Xrootd_DetailedMonitoringHost = StringParam{"Xrootd.DetailedMonitoringHost"}
 	Xrootd_LocalMonitoringHost = StringParam{"Xrootd.LocalMonitoringHost"}
 	Xrootd_MacaroonsKeyFile = StringParam{"Xrootd.MacaroonsKeyFile"}

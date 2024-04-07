@@ -52,6 +52,7 @@ type (
 		Token   string
 		Ctx     context.Context
 		Egrp    *errgroup.Group
+		Pids    []int
 	}
 )
 
@@ -141,11 +142,16 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	err = config.InitServer(ctx, modules)
 	require.NoError(t, err)
 
-	_, err = launchers.LaunchModules(ctx, modules)
+	servers, _, err := launchers.LaunchModules(ctx, modules)
 	require.NoError(t, err)
 
+	ft.Pids = make([]int, 0, 2)
+	for _, server := range servers {
+		ft.Pids = append(ft.Pids, server.GetPids()...)
+	}
+
 	desiredURL := param.Server_ExternalWebUrl.GetString() + "/api/v1.0/health"
-	err = server_utils.WaitUntilWorking(ctx, "GET", desiredURL, "director", 200)
+	err = server_utils.WaitUntilWorking(ctx, "GET", desiredURL, "director", 200, false)
 	require.NoError(t, err)
 
 	httpc := http.Client{

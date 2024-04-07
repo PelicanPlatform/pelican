@@ -481,7 +481,9 @@ func TestSortAttempts(t *testing.T) {
 
 func TestTimeoutHeaderSetForDownload(t *testing.T) {
 	viper.Reset()
+	config.InitConfig()
 	viper.Set("Transport.ResponseHeaderTimeout", 10*time.Second)
+	require.NoError(t, config.InitClient())
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
 	// We have this flag because our server will get a few requests throughout its lifetime and the other
@@ -495,7 +497,7 @@ func TestTimeoutHeaderSetForDownload(t *testing.T) {
 			if r.Header.Get("X-Pelican-Timeout") == "" {
 				t.Error("X-Pelican-Timeout header is not set")
 			}
-			assert.Equal(t, "10s", r.Header.Get("X-Pelican-Timeout"))
+			assert.Equal(t, "9.5s", r.Header.Get("X-Pelican-Timeout"))
 			timeoutHeaderFound = true
 		}
 	}))
