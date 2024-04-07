@@ -53,13 +53,12 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 	// Create a token file
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
-	audience := config.GetServerAudience()
 
 	tokenConfig := token.NewWLCGToken()
 	tokenConfig.Lifetime = time.Minute
 	tokenConfig.Issuer = issuer
 	tokenConfig.Subject = "origin"
-	tokenConfig.AddAudiences(audience)
+	tokenConfig.AddAudienceAny()
 	tokenConfig.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Storage_Read, "/"),
 		token_scopes.NewResourceScope(token_scopes.Storage_Modify, "/"))
 	token, err := tokenConfig.CreateToken()
