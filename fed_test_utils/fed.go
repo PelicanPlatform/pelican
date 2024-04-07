@@ -82,6 +82,7 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 
 	viper.Set("ConfigDir", tmpPath)
 	viper.Set("Logging.Level", "debug")
+	viper.Set("Logging.Cache.Pss", "debug")
 
 	config.InitConfig()
 
