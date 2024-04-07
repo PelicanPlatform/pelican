@@ -138,6 +138,7 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	viper.Set("Server.WebPort", 0)
 	viper.Set("Origin.RunLocation", filepath.Join(tmpPath, "origin"))
 	viper.Set("Cache.RunLocation", filepath.Join(tmpPath, "cache"))
+	viper.Set("Cache.DataLocation", filepath.Join(tmpPath, "xcache-data"))
 	viper.Set("Registry.RequireOriginApproval", false)
 	viper.Set("Registry.RequireCacheApproval", false)
 
