@@ -112,6 +112,15 @@ type (
 		Err error
 	}
 
+	// Transfer attempt error wraps an error with information about the service/proxy used
+	TransferAttemptError struct {
+		serviceHost string
+		proxyHost   string
+		isUpload    bool
+		isProxyErr  bool
+		err         error
+	}
+
 	// StatusCodeError is a wrapper around grab.StatusCodeErorr that indicates the server returned
 	// a non-200 code.
 	//
@@ -368,6 +377,54 @@ func (e *StatusCodeError) Is(target error) bool {
 		return false
 	}
 	return int(*sce) == int(*e)
+}
+
+func (tae *TransferAttemptError) Error() (errMsg string) {
+	errMsg = "failed download from "
+	if tae.isUpload {
+		errMsg = "failed upload to "
+	}
+	if tae.serviceHost == "" {
+		errMsg += "unknown host"
+	} else {
+		errMsg += tae.serviceHost
+	}
+	if tae.isProxyErr {
+		if tae.proxyHost == "" {
+			errMsg += " due to unknown proxy"
+		} else {
+			errMsg += " due to proxy " + tae.proxyHost
+		}
+	} else if tae.proxyHost != "" {
+		errMsg += "+proxy=" + tae.proxyHost
+	}
+	if tae.err != nil {
+		errMsg += ": " + tae.err.Error()
+	}
+	return
+}
+
+func (tae *TransferAttemptError) Unwrap() error {
+	return tae.err
+}
+
+func (tae *TransferAttemptError) Is(target error) bool {
+	other, ok := target.(*TransferAttemptError)
+	if !ok {
+		return false
+	}
+	return tae.isUpload == other.isUpload && tae.serviceHost == other.serviceHost && tae.isProxyErr == other.isProxyErr && tae.proxyHost == other.proxyHost
+}
+
+func newTransferAttemptError(service string, proxy string, isProxyErr bool, isUpload bool, err error) (tae *TransferAttemptError) {
+	tae = &TransferAttemptError{
+		serviceHost: service,
+		proxyHost:   proxy,
+		isProxyErr:  isProxyErr,
+		isUpload:    isUpload,
+		err:         err,
+	}
+	return
 }
 
 // hasPort test the host if it includes a port
@@ -1454,30 +1511,31 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 		downloaded += attemptDownloaded
 
 		if err != nil {
-			log.Debugln("Failed to download:", err)
+			log.Debugln("Failed to download from", transferEndpoint.Url, ":", err)
 			var ope *net.OpError
 			var cse *ConnectionSetupError
-			errorString := "Failed to download from " + transferEndpoint.Url.Hostname() + ":" +
-				transferEndpoint.Url.Port() + " "
+			proxyStr, _ := os.LookupEnv("http_proxy")
+			if !transferEndpoint.Proxy {
+				proxyStr = ""
+			}
+			serviceStr := attempt.Endpoint
+			if transferEndpointUrl.Scheme == "unix" {
+				serviceStr = "local-cache"
+			}
 			if errors.As(err, &ope) && ope.Op == "proxyconnect" {
-				log.Debugln(ope)
-				AddrString, _ := os.LookupEnv("http_proxy")
 				if ope.Addr != nil {
-					AddrString = " " + ope.Addr.String()
+					proxyStr += "(" + ope.Addr.String() + ")"
 				}
-				errorString += "due to proxy " + AddrString + " error: " + ope.Unwrap().Error()
+				attempt.Error = newTransferAttemptError(serviceStr, proxyStr, true, false, err)
 			} else if errors.As(err, &cse) {
-				errorString += "+ proxy=" + strconv.FormatBool(transferEndpoint.Proxy) + ": "
 				if sce, ok := cse.Unwrap().(*StatusCodeError); ok {
-					errorString += sce.Error()
+					attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, sce)
 				} else {
-					errorString += err.Error()
+					attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, err)
 				}
 			} else {
-				errorString += "+ proxy=" + strconv.FormatBool(transferEndpoint.Proxy) +
-					": " + err.Error()
+				attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, err)
 			}
-			attempt.Error = errors.New(errorString)
 			xferErrors.AddPastError(attempt.Error, endTime)
 		}
 		transferResults.Attempts = append(transferResults.Attempts, attempt)
@@ -2015,7 +2073,7 @@ Loop:
 
 	transferEndTime := time.Now()
 	if fileInfo.Size() == 0 {
-		xferErrors.AddPastError(lastError, transferEndTime)
+		xferErrors.AddPastError(newTransferAttemptError(dest.Host, "", false, true, lastError), transferEndTime)
 		transferResult.Error = xferErrors
 		attempt.Error = lastError
 	} else {

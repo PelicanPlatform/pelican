@@ -616,6 +616,9 @@ func writeTransferErrorMessage(currentError string, transferUrl string, upload b
 		urlRemainder := strings.TrimPrefix(transferUrl, prefix)
 		errMsg = strings.ReplaceAll(errMsg, urlRemainder, "(...Path...)")
 	}
+	// HTCondor will already say whether it's an upload/download in its generated string;
+	// save a few characters here
+	errMsg = strings.ReplaceAll(errMsg, "failed download from", "from")
 
 	errMsg += (" (Version: " + config.GetVersion())
 
