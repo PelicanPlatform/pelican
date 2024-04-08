@@ -240,7 +240,7 @@ func TestClient(t *testing.T) {
 		_, err = client.DoGet(ctx, "pelican://"+param.Server_Hostname.GetString()+":"+strconv.Itoa(param.Server_WebPort.GetInt())+"/test/hello_world.txt.1",
 			filepath.Join(tmpDir, "hello_world.txt.1"), false, client.WithToken(token), client.WithCaches(cacheUrl), client.WithAcquireToken(false))
 		assert.Error(t, err)
-		assert.Equal(t, "failed to download file: server returned 404 Not Found", err.Error())
+		assert.Equal(t, "failed download from local-cache: server returned 404 Not Found", err.Error())
 	})
 	t.Cleanup(func() {
 		cancel()
