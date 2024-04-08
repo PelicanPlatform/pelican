@@ -406,6 +406,7 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 	defer close(results)
 
 	jobMap := make(map[string]PluginTransfer)
+	var recursive bool
 
 	for {
 		select {
@@ -417,6 +418,18 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 				workChan = nil
 				break
 			}
+			// Check we have valid query parameters
+			err := checkValidQuery(transfer.url)
+			if err != nil {
+				return err
+			}
+
+			if transfer.url.Query().Get("recursive") != "" {
+				recursive = true
+			} else {
+				recursive = false
+			}
+
 			if upload {
 				log.Debugln("Uploading:", transfer.localFile, "to", transfer.url)
 			} else {
@@ -427,12 +440,13 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 				if transfer.url.Query().Get("pack") != "" {
 					transfer.localFile = filepath.Dir(transfer.localFile)
 				}
+				transfer.localFile = parseDestination(transfer)
 			}
 
 			var tj *client.TransferJob
 			urlCopy := *transfer.url
 			project := client.GetProjectName()
-			tj, err = tc.NewTransferJob(context.Background(), &urlCopy, transfer.localFile, upload, false, project, client.WithAcquireToken(false), client.WithCaches(caches...))
+			tj, err = tc.NewTransferJob(context.Background(), &urlCopy, transfer.localFile, upload, recursive, project, client.WithAcquireToken(false), client.WithCaches(caches...))
 			if err != nil {
 				return errors.Wrap(err, "Failed to create new transfer job")
 			}
@@ -505,6 +519,43 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 			results <- resultAd
 		}
 	}
+}
+
+// Gets the absolute path for the local destination. This is important
+// especially for downloaded directories so that the downloaded files end up
+// in the directory specified for download.
+func parseDestination(transfer PluginTransfer) (parsedDest string) {
+	// get absolute path
+	destPath, _ := filepath.Abs(transfer.localFile)
+	// Check if path exists or if its in a folder
+	if destStat, err := os.Stat(destPath); os.IsNotExist(err) {
+		return destPath
+	} else if destStat.IsDir() {
+		// If we are a directory, add the source filename to the destination dir
+		sourceFilename := path.Base(transfer.url.Path)
+		parsedDest = path.Join(destPath, sourceFilename)
+		return parsedDest
+	}
+	return transfer.localFile
+}
+
+// This function checks if we have a valid query (or no query) for the transfer URL
+func checkValidQuery(transferUrl *url.URL) (err error) {
+	query := transferUrl.Query()
+	_, hasRecursive := query["recursive"]
+	_, hasPack := query["pack"]
+
+	// If we have both recursive and pack, we should return a failure
+	if hasRecursive && hasPack {
+		return fmt.Errorf("Cannot have both recursive and pack query parameters")
+	}
+
+	// If we have no query, or we have recursive or pack, we are good
+	if len(query) == 0 || hasRecursive || hasPack {
+		return nil
+	}
+
+	return fmt.Errorf("Invalid query parameters procided in url: %s", transferUrl)
 }
 
 // WriteOutfile takes in the result ads from the job and the file to be outputted, it returns a boolean indicating:
