@@ -551,11 +551,19 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 				Msg:    "Fail to insert namespace"})
 			return
 		}
-		ctx.JSON(http.StatusOK,
-			server_structs.SimpleApiResp{
-				Status: server_structs.RespOK,
-				Msg:    fmt.Sprintf("Prefix %s successfully registered. Note that there is an existing superspace or subspace of the namespace in the OSDF topology: %s. The registry admin will review your request and approve your namespace if this is expected.", ns.Prefix, GetTopoPrefixString(topoNss)),
-			})
+		if inTopo {
+			ctx.JSON(http.StatusOK,
+				server_structs.SimpleApiResp{
+					Status: server_structs.RespOK,
+					Msg:    fmt.Sprintf("Prefix %s successfully registered. Note that there is an existing superspace or subspace of the namespace in the OSDF topology: %s. The registry admin will review your request and approve your namespace if this is expected.", ns.Prefix, GetTopoPrefixString(topoNss)),
+				})
+		} else {
+			ctx.JSON(http.StatusOK,
+				server_structs.SimpleApiResp{
+					Status: server_structs.RespOK,
+					Msg:    fmt.Sprintf("Prefix %s successfully registered", ns.Prefix),
+				})
+		}
 	} else { // Update
 		// First check if the namespace exists
 		exists, err := namespaceExistsById(ns.ID)

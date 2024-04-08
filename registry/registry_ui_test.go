@@ -900,7 +900,7 @@ func TestCreateNamespace(t *testing.T) {
 		body, err := io.ReadAll(w.Result().Body)
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
-		assert.JSONEq(t, `{"msg":"success", "status":"success"}`, string(body))
+		assert.JSONEq(t, `{"msg":"Prefix /foo successfully registered", "status":"success"}`, string(body))
 
 		nss, err := getAllNamespaces()
 		require.NoError(t, err)
@@ -941,7 +941,7 @@ func TestCreateNamespace(t *testing.T) {
 		body, err := io.ReadAll(w.Result().Body)
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
-		assert.JSONEq(t, `{"msg":"Prefix /topo/foo/bar successfully registered. Note that there is an existing superspace or subspace of the namespace in the OSDF topology: /topo/foo. The registry admin will review your request and approve your namespace if this is expected."}`, string(body))
+		assert.JSONEq(t, `{"msg":"Prefix /topo/foo/bar successfully registered. Note that there is an existing superspace or subspace of the namespace in the OSDF topology: /topo/foo. The registry admin will review your request and approve your namespace if this is expected.", "status":"success"}`, string(body))
 
 		nss, err := getAllNamespaces()
 		require.NoError(t, err)
@@ -983,7 +983,7 @@ func TestCreateNamespace(t *testing.T) {
 		body, err := io.ReadAll(w.Result().Body)
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
-		assert.JSONEq(t, `{"msg":"Prefix /topo/foo successfully registered. Note that there is an existing superspace or subspace of the namespace in the OSDF topology: /topo/foo. The registry admin will review your request and approve your namespace if this is expected."}`, string(body))
+		assert.JSONEq(t, `{"msg":"Prefix /topo/foo successfully registered. Note that there is an existing superspace or subspace of the namespace in the OSDF topology: /topo/foo. The registry admin will review your request and approve your namespace if this is expected.", "status":"success"}`, string(body))
 
 		nss, err := getAllNamespaces()
 		require.NoError(t, err)
