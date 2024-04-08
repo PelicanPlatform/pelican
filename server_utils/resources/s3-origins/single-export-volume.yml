@@ -1,0 +1,12 @@
+# When we only get a single export volume, we should set a few other viper variables
+# that are made use by a few things that only support single exports.
+
+Origin:
+  # Things that configure the origin, and thus the exports
+  StorageType: "s3"
+  EnableWrites: true
+  EnablePublicReads: true
+  S3AccessKeyFile: "/path/to/access.key"
+  S3SecretKeyFile: "/path/to/secret.key"
+  ExportVolumes:
+    - "my-bucket:/first/namespace"

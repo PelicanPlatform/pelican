@@ -48,7 +48,7 @@ func TestWaitUntilWorking(t *testing.T) {
 		}))
 		defer server.Close()
 
-		err := WaitUntilWorking(ctx, "GET", server.URL, "testServer", http.StatusOK)
+		err := WaitUntilWorking(ctx, "GET", server.URL, "testServer", http.StatusOK, false)
 		require.NoError(t, err)
 
 		assert.Equal(t, logrus.DebugLevel, hook.LastEntry().Level)
@@ -62,7 +62,7 @@ func TestWaitUntilWorking(t *testing.T) {
 		}))
 		defer server.Close()
 
-		err := WaitUntilWorking(ctx, "GET", server.URL, "testServer", http.StatusOK)
+		err := WaitUntilWorking(ctx, "GET", server.URL, "testServer", http.StatusOK, false)
 		require.Error(t, err)
 		expectedErrorMsg := fmt.Sprintf("Received bad status code in reply to server ping at %s: %d. Expected %d. Response body is empty.", server.URL, 500, 200)
 		assert.Contains(t, err.Error(), expectedErrorMsg)
@@ -76,7 +76,7 @@ func TestWaitUntilWorking(t *testing.T) {
 		}))
 		defer server.Close()
 
-		err := WaitUntilWorking(ctx, "GET", server.URL, "testServer", http.StatusOK)
+		err := WaitUntilWorking(ctx, "GET", server.URL, "testServer", http.StatusOK, false)
 		require.Error(t, err)
 		expectedErrorMsg := fmt.Sprintf("Received bad status code in reply to server ping at %s: %d. Expected %d. Response body: %s", server.URL, 404, 200, "404 page not found")
 		assert.Equal(t, expectedErrorMsg, err.Error())
@@ -94,7 +94,7 @@ func TestWaitUntilWorking(t *testing.T) {
 		}))
 		defer server.Close()
 
-		err = WaitUntilWorking(ctx, "GET", server.URL, "testServer", http.StatusOK)
+		err = WaitUntilWorking(ctx, "GET", server.URL, "testServer", http.StatusOK, false)
 		require.Error(t, err)
 		expectedErrorMsg := fmt.Sprintf("Received bad status code in reply to server ping at %s: %d. Expected %d. Response body: %s", server.URL, 400, 200, string(jsonBytes))
 		assert.Equal(t, expectedErrorMsg, err.Error())
@@ -107,7 +107,7 @@ func TestWaitUntilWorking(t *testing.T) {
 			<-time.After(200 * time.Millisecond)
 			earlyCancel()
 		}()
-		err := WaitUntilWorking(earlyCancelCtx, "GET", "https://noserverexists.com", "testServer", http.StatusOK)
+		err := WaitUntilWorking(earlyCancelCtx, "GET", "https://noserverexists.com", "testServer", http.StatusOK, false)
 		require.Error(t, err)
 		expectedErrorMsg := fmt.Sprintf("Failed to send request to testServer at %s; likely server is not up (will retry in 50ms):", "https://noserverexists.com")
 		assert.Equal(t, logrus.InfoLevel, hook.LastEntry().Level)
@@ -128,7 +128,7 @@ func TestWaitUntilWorking(t *testing.T) {
 		}))
 		defer server.Close()
 
-		err := WaitUntilWorking(earlyCancelCtx, "GET", server.URL, "testServer", http.StatusOK)
+		err := WaitUntilWorking(earlyCancelCtx, "GET", server.URL, "testServer", http.StatusOK, false)
 		require.Error(t, err)
 		expectedErrorMsg := fmt.Sprintf("Failed to send request to testServer at %s; likely server is not up (will retry in 50ms):", server.URL)
 		assert.Equal(t, logrus.InfoLevel, hook.LastEntry().Level)

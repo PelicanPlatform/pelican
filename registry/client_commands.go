@@ -104,18 +104,18 @@ func NamespaceRegisterWithIdentity(privateKey jwk.Key, namespaceRegistryEndpoint
 func NamespaceRegister(privateKey jwk.Key, namespaceRegistryEndpoint string, accessToken string, prefix string) error {
 	publicKey, err := privateKey.PublicKey()
 	if err != nil {
-		return errors.Wrapf(err, "Failed to generate public key for namespace registration")
+		return errors.Wrapf(err, "failed to generate public key for namespace registration")
 	}
 	err = jwk.AssignKeyID(publicKey)
 	if err != nil {
-		return errors.Wrap(err, "Failed to assign key ID to public key")
+		return errors.Wrap(err, "failed to assign key ID to public key")
 	}
 	if err = publicKey.Set("alg", "ES256"); err != nil {
-		return errors.Wrap(err, "Failed to assign signature algorithm to public key")
+		return errors.Wrap(err, "failed to assign signature algorithm to public key")
 	}
 	keySet := jwk.NewSet()
 	if err = keySet.AddKey(publicKey); err != nil {
-		return errors.Wrap(err, "Failed to add public key to new JWKS")
+		return errors.Wrap(err, "failed to add public key to new JWKS")
 	}
 
 	if log.IsLevelEnabled(log.DebugLevel) {
@@ -129,7 +129,7 @@ func NamespaceRegister(privateKey jwk.Key, namespaceRegistryEndpoint string, acc
 
 	clientNonce, err := generateNonce()
 	if err != nil {
-		return errors.Wrap(err, "Failed to generate client nonce")
+		return errors.Wrap(err, "failed to generate client nonce")
 	}
 
 	data := map[string]interface{}{
@@ -159,11 +159,11 @@ func NamespaceRegister(privateKey jwk.Key, namespaceRegistryEndpoint string, acc
 	// Sign the payload
 	privateKeyRaw := &ecdsa.PrivateKey{}
 	if err = privateKey.Raw(privateKeyRaw); err != nil {
-		return errors.Wrap(err, "Failed to get an ECDSA private key")
+		return errors.Wrap(err, "failed to get an ECDSA private key")
 	}
 	signature, err := signPayload([]byte(clientPayload), privateKeyRaw)
 	if err != nil {
-		return errors.Wrap(err, "Failed to sign payload")
+		return errors.Wrap(err, "failed to sign payload")
 	}
 
 	// // Create data for the second POST request

@@ -171,27 +171,50 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 
 	Origin:
 		Exports:
-		- StoragePrefix: /mnt/foo
-		  FederationPrefix: /bar
-		  Capabilities: ["PublicReads", "Writes", "Listings"]
-		- StoragePrefix: /mnt/test
-		  FederationPrefix: /baz
-		  Capabilities: ["Writes"]
+		  - StoragePrefix: /mnt/foo
+		    FederationPrefix: /bar
+		    Capabilities: ["PublicReads", "Writes", "Listings"]
+		  - StoragePrefix: /mnt/test
+		    FederationPrefix: /baz
+		    Capabilities: ["Writes"]
 
 	to export the directories /mnt/foo and /mnt/test under the namespace prefixes /bar and /baz, respectively (with listed permissions).
 	`)
 				return
 			}
 		case "s3":
-			if param.Origin_S3Region.GetString() == "" || param.Origin_S3ServiceName.GetString() == "" ||
-				param.Origin_S3ServiceUrl.GetString() == "" {
-				err = errors.Errorf("The S3 origin is missing configuration options to run properly." +
-					" You must specify a region, a service name and a service URL via the command line or via" +
-					" your configuration file.")
+			if len(*originExports) == 0 {
+				err = errors.Errorf(`
+	Export information was not provided.
+	To specify exports via the command line, use:
+
+				-v my-bucket:/my/prefix (REQUIRED --service-url https://my-s3-url.com) (REQUIRED --url-style <path or virtual>) \
+						(REQUIRED --region "my-region") (OPTIONAL --bucket-access-keyfile /path/to/access.key) \
+						(OPTIONAL --bucket-secret-keyfile /path/to/secret.key)
+
+
+	to export the S3 bucket under the namespace prefix /my/prefix.
+
+	Alternatively, specify Origin.Exports in the parameters.yaml file:
+
+	Origin:
+		StorageType: s3
+		S3UrlStyle: <path or virtual>
+		S3ServiceUrl: https://my-s3-url.com
+		S3Region: my-region
+		Exports:
+		  - FederationPrefix: /my/prefix
+			S3Bucket: my-bucket
+			S3AccessKeyfile: /path/to/access.key
+			S3SecretKeyfile: /path/to/secret.key
+			Capabilities: ["PublicReads", "Writes", "Listings"]
+
+	to export the S3 bucket my-bucket from https://my-s3-url.com under the namespace prefix /my/prefix (with listed permissions).
+				`)
 				return
 			}
 		default:
-			err = errors.Errorf("Currently-supported origin modes include posix and s3.")
+			err = errors.Errorf("Currently-supported origin modes include posix and s3, but you provided %s.", mode)
 			return
 		}
 
@@ -236,8 +259,9 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 		return nil
 	})
 
-	if err = server_utils.WaitUntilWorking(ctx, "GET", param.Server_ExternalWebUrl.GetString()+"/api/v1.0/health", "Web UI", http.StatusOK); err != nil {
-		log.Errorln("Web engine startup appears to have failed:", err)
+	healthCheckUrl := param.Server_ExternalWebUrl.GetString() + "/api/v1.0/health"
+	if err = server_utils.WaitUntilWorking(ctx, "GET", healthCheckUrl, "Web UI", http.StatusOK, true); err != nil {
+		log.Errorln("Web engine check failed: ", err)
 		return
 	}
 
@@ -250,7 +274,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 
 	// Origin needs to advertise once before the cache starts
 	if modules.IsEnabled(config.CacheType) && modules.IsEnabled(config.OriginType) {
-		log.Debug("Advertise Origin")
+		log.Debug("Advertise Origin and Cache to the Director")
 		if err = launcher_utils.Advertise(ctx, servers); err != nil {
 			return
 		}
@@ -289,7 +313,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 					errCh <- errors.Wrapf(err, "Failed to join path %s for origin advertisement check", prefix)
 					return
 				}
-				if err = server_utils.WaitUntilWorking(ctx, "GET", urlToCheck.String(), "director", 307); err != nil {
+				if err = server_utils.WaitUntilWorking(ctx, "GET", urlToCheck.String(), "director", 307, false); err != nil {
 					errCh <- errors.Wrapf(err, "The prefix %s does not seem to have advertised correctly", prefix)
 				}
 
@@ -316,7 +340,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 	if modules.IsEnabled(config.CacheType) {
 		// Give five seconds for the origin to finish advertising to the director
 		desiredURL := param.Federation_DirectorUrl.GetString() + "/.well-known/openid-configuration"
-		if err = server_utils.WaitUntilWorking(ctx, "GET", desiredURL, "director", 200); err != nil {
+		if err = server_utils.WaitUntilWorking(ctx, "GET", desiredURL, "director", 200, false); err != nil {
 			log.Errorln("Director does not seem to be working:", err)
 			return
 		}
@@ -330,7 +354,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 	}
 
 	if modules.IsEnabled(config.OriginType) || modules.IsEnabled(config.CacheType) {
-		log.Debug("Launching periodic advertise")
+		log.Debug("Launching periodic advertise of origin/cache server to the director")
 		if err = launcher_utils.LaunchPeriodicAdvertise(ctx, egrp, servers); err != nil {
 			return
 		}

@@ -39,7 +39,7 @@ func RegisterOriginAPI(router *gin.Engine, ctx context.Context, egrp *errgroup.G
 		return errors.New("Origin configuration passed a nil pointer")
 	}
 
-	metrics.SetComponentHealthStatus(metrics.OriginCache_Director, metrics.StatusWarning, "Initializing origin, unknown status for director")
+	metrics.SetComponentHealthStatus(metrics.OriginCache_Director, metrics.StatusWarning, "Initializing the server, unknown status from the director file transfer test")
 	// start the timer for the director test report timeout
 	server_utils.LaunchPeriodicDirectorTimeout(ctx, egrp, notificationChan)
 

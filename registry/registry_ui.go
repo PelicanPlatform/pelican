@@ -447,7 +447,6 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 	}
 
 	ns := Namespace{}
-	ns.Topology = false
 	if ctx.ShouldBindJSON(&ns) != nil {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -473,7 +472,6 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 		return
 	}
 	ns.Prefix = updated_prefix
-	ns.Topology = false
 
 	if !isUpdate {
 		// Check if prefix exists before doing anything else. Skip check if it's update operation
@@ -502,7 +500,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 	}
 
 	// Check if the parent or child path along the prefix has been registered
-	valErr, sysErr := validateKeyChaining(ns.Prefix, pubkey)
+	inTopo, topoNss, valErr, sysErr := validateKeyChaining(ns.Prefix, pubkey)
 	if valErr != nil {
 		log.Errorln("Bad prefix when validating key chaining", valErr)
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
@@ -543,6 +541,9 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 		ns.AdminMetadata.UserID = user
 		// Overwrite status to Pending to filter malicious request
 		ns.AdminMetadata.Status = Pending
+		if inTopo {
+			ns.AdminMetadata.Description = fmt.Sprintf("[ Attention: A superspace or subspace of this prefix exists in OSDF topology: %s ] ", GetTopoPrefixString(topoNss))
+		}
 		if err := AddNamespace(&ns); err != nil {
 			log.Errorf("Failed to insert namespace with id %d. %v", ns.ID, err)
 			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -553,7 +554,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 		ctx.JSON(http.StatusOK,
 			server_structs.SimpleApiResp{
 				Status: server_structs.RespOK,
-				Msg:    "success",
+				Msg:    fmt.Sprintf("Prefix %s successfully registered. Note that there is an existing superspace or subspace of the namespace in the OSDF topology: %s. The registry admin will review your request and approve your namespace if this is expected.", ns.Prefix, GetTopoPrefixString(topoNss)),
 			})
 	} else { // Update
 		// First check if the namespace exists

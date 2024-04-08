@@ -48,6 +48,25 @@ var (
 		Short:        "Start the origin service",
 		RunE:         serveOrigin,
 		SilenceUsage: true,
+		PreRun: func(cmd *cobra.Command, args []string) {
+			// Checking these values has to happen here and not in init() because init
+			// doesn't have access to the actual values passed on the command line.
+			if ost := viper.GetString("Origin.StorageType"); ost == "s3" {
+				if !viper.IsSet("Origin.S3Region") || !viper.IsSet("Origin.S3ServiceUrl") {
+					cmd.PrintErrln("The --region, --service-url flags or equivalent config file entries are required when the origin is launched in S3 mode.")
+					os.Exit(1)
+				}
+			} else if ost == "posix" {
+				// We specifically DON'T want the region, service-url, and url-style flags if the mode is posix
+				if viper.IsSet("Origin.S3Region") || viper.IsSet("Origin.S3ServiceUrl") || viper.IsSet("Origin.S3UrlStyle") {
+					cmd.PrintErrln("The --region, --service-url, and --url-style flags are only used when the origin is launched in S3 mode.")
+					os.Exit(1)
+				}
+			} else {
+				cmd.PrintErrln(fmt.Sprintf("The --mode flag must be either 'posix' or 's3', but you provided '%s'", ost))
+				os.Exit(1)
+			}
+		},
 	}
 
 	originUiCmd = &cobra.Command{
@@ -127,19 +146,18 @@ func init() {
 
 	// A variety of flags we add for S3 mode. These are ultimately required for configuring the S3 xrootd plugin
 	originServeCmd.Flags().String("service-name", "", "Specify the S3 service-name. Only used when an origin is launched in S3 mode.")
+	_ = originServeCmd.Flags().MarkDeprecated("service-name", "It no longer has any effect and will be removed in a future version.")
 	originServeCmd.Flags().String("region", "", "Specify the S3 region. Only used when an origin is launched in S3 mode.")
 	originServeCmd.Flags().String("bucket", "", "Specify the S3 bucket. Only used when an origin is launched in S3 mode.")
+	_ = originServeCmd.Flags().MarkDeprecated("bucket", `It no longer has any effect and will be removed in a future version. To set an S3 export use
+	-v bucket:/federation/prefix
+instead.
+	`)
 	originServeCmd.Flags().String("service-url", "", "Specify the S3 service-url. Only used when an origin is launched in S3 mode.")
 	originServeCmd.Flags().String("bucket-access-keyfile", "", "Specify a filepath to use for configuring the bucket's access key.")
 	originServeCmd.Flags().String("bucket-secret-keyfile", "", "Specify a filepath to use for configuring the bucket's access key.")
 	originServeCmd.Flags().String("url-style", "", "Specify the S3 url-style. Only used when an origin is launched in S3 mode, and can be either 'path' (default) or 'virtual.")
-	if err := viper.BindPFlag("Origin.S3ServiceName", originServeCmd.Flags().Lookup("service-name")); err != nil {
-		panic(err)
-	}
 	if err := viper.BindPFlag("Origin.S3Region", originServeCmd.Flags().Lookup("region")); err != nil {
-		panic(err)
-	}
-	if err := viper.BindPFlag("Origin.S3Bucket", originServeCmd.Flags().Lookup("bucket")); err != nil {
 		panic(err)
 	}
 	if err := viper.BindPFlag("Origin.S3ServiceUrl", originServeCmd.Flags().Lookup("service-url")); err != nil {
@@ -158,18 +176,8 @@ func init() {
 		panic("The --url-style flag must be either 'path' or 'virtual'")
 	}
 
-	// Would be nice to make these mutually exclusive to mode=posix instead of to --volume, but cobra
-	// doesn't seem to have something that can make the value of a flag exclusive to other flags
-	// Anyway, we never want to run the S3 flags with the -v flag.
-	originServeCmd.MarkFlagsMutuallyExclusive("volume", "service-name")
-	originServeCmd.MarkFlagsMutuallyExclusive("volume", "region")
-	originServeCmd.MarkFlagsMutuallyExclusive("volume", "bucket")
-	originServeCmd.MarkFlagsMutuallyExclusive("volume", "service-url")
-	originServeCmd.MarkFlagsMutuallyExclusive("volume", "bucket-access-keyfile")
-	originServeCmd.MarkFlagsMutuallyExclusive("volume", "bucket-secret-keyfile")
-	originServeCmd.MarkFlagsMutuallyExclusive("volume", "url-style")
-	// We don't require the bucket access and secret keyfiles as they're not needed for unauthenticated buckets
-	originServeCmd.MarkFlagsRequiredTogether("service-name", "region", "service-url")
+	// We don't require the bucket access and secret keyfiles as they're not needed for unauthenticated buckets.
+	// However, if you give us one, you've got to give us both.
 	originServeCmd.MarkFlagsRequiredTogether("bucket-access-keyfile", "bucket-secret-keyfile")
 
 	// The port any web UI stuff will be served on

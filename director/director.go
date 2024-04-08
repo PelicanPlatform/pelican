@@ -573,7 +573,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 					log.Warningln("Failed to verify token:", err)
 					ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
 						Status: server_structs.RespFailed,
-						Msg:    fmt.Sprintf("Authorization token verification failed %v", err),
+						Msg:    fmt.Sprintf("Authorization token verification failed: %v", err),
 					})
 					return
 				}
