@@ -385,6 +385,63 @@ definitions:
         type: string
         description: The status of director file transfer test against the server. Can be Initializing|Unknown|OK|Error
         default: Unknown
+  OriginExportCapabilities:
+    type: object
+    description: The access control of an origin exported namespace
+    properties:
+      PublicReads:
+        type: boolean
+        default: false
+      Reads:
+        type: boolean
+        default: false
+      Writes:
+        type: boolean
+        default: false
+      Listings:
+        type: boolean
+        default: false
+      DirectReads:
+        type: boolean
+        default: false
+  OriginExport:
+    type: object
+    properties:
+      storage_prefix:
+        type: string
+        example: "/tmp/pelican"
+        description: The path to the directory to be exported on the host server
+      federation_prefix:
+        type: string
+        example: "/demo"
+        description: The prefix to access the file through the Pelican federation
+      s3_bucket:
+        type: string
+        example: "demo-bucket"
+        description: "The bucket name of the origin if it's using the S3 storage backend"
+      s3_access_keyfile:
+        type: string
+        example: "/path/to/key"
+        description: "The path to the file that contains the access key or API key for S3 storage backend"
+      s3_secret_keyfile:
+        type: string
+        example: "/path/to/secret"
+        description: "The path to the file that contains the secret for S3 storage backend"
+      capabilities:
+        type: object
+        $ref: "#/definitions/OriginExportCapabilities"
+  OriginExportRes:
+    type: object
+    properties:
+      type:
+        type: string
+        example: "posix"
+        description: "The storage type of the origin server. Is either \"posix\" or \"s3\""
+      exports:
+        type: array
+        items:
+           $ref: "#/definitions/OriginExport"
+        minItems: 0
   DirectorContact:
     type: object
     properties:
@@ -408,6 +465,8 @@ tags:
     description: APIs for the Director server Web UI
   - name: director
     description: Non-UI facing APIs for the Director server
+  - name: origin_ui
+    description: APIs for the Origin server Web UI
 paths:
   /health:
     get:
@@ -1568,3 +1627,33 @@ paths:
           schema:
             type: object
             $ref: "#/definitions/ErrorModel"
+  /origin_ui/exports:
+    get:
+      summary: Returns the data exports of the origin server
+      description: >-
+        `Authentication Required` `Admin Previlege Required`
+      tags:
+        - "origin_ui"
+      produces:
+        - "application/json"
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+            $ref: "#/definitions/OriginExportRes"
+        "401":
+          description: Authentication required to perform this action
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "403":
+          description: You need to have admin privilege to access this endpoint
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModel"
+        "500":
+          description: Error when fetching the origin exports
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
