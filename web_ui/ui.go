@@ -61,7 +61,7 @@ var (
 func getConfigValues(ctx *gin.Context) {
 	user := ctx.GetString("User")
 	if user == "" {
-		ctx.JSON(401, server_structs.SimpleApiResp{
+		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    "Authentication required to visit this API",
 		})
@@ -69,7 +69,7 @@ func getConfigValues(ctx *gin.Context) {
 	}
 	rawConfig, err := param.UnmarshalConfig()
 	if err != nil {
-		ctx.JSON(500, server_structs.SimpleApiResp{
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    "Failed to get the unmarshaled rawConfig",
 		})
@@ -77,7 +77,7 @@ func getConfigValues(ctx *gin.Context) {
 	}
 	configWithType := param.ConvertToConfigWithType(rawConfig)
 
-	ctx.JSON(200, configWithType)
+	ctx.JSON(http.StatusOK, configWithType)
 }
 
 func updateConfigValues(ctx *gin.Context) {
