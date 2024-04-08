@@ -983,6 +983,10 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 	viper.SetDefault("Cache.ExportLocation", "/")
 	viper.SetDefault("Registry.RequireKeyChaining", true)
 
+	// Set up the default S3 URL style to be path-style here as opposed to in the defaults.yaml becase
+	// we want to be able to check if this is user-provided (which we can't do for defaults.yaml)
+	viper.SetDefault("S3UrlStyle", "path")
+
 	if webConfigPath := param.Server_WebConfigFile.GetString(); webConfigPath != "" {
 		err := os.MkdirAll(filepath.Dir(webConfigPath), 0700)
 		if err != nil {
