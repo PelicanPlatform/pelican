@@ -26,6 +26,9 @@ interface Capabilities {
 interface ExportEntry {
     storage_prefix: string;
     federation_prefix: string;
+    s3_bucket: string;
+    s3_access_keyfile: string;
+    s3_secret_keyfile: string;
     capabilities: Capabilities;
 }
 
@@ -66,7 +69,7 @@ export const RecordTable = ({ data }: { data: ExportRes }): ReactElement  => {
                 <TableHead>
                     <TableRow>
                         <TableCell sx={{width: "20%"}}>Type</TableCell>
-                        <TableCell sx={{width: "40%"}}>Local Path</TableCell>
+                        <TableCell sx={{width: "40%"}}>{data.type == "s3" ? "S3 Bucket Name" : "Local Path"}</TableCell>
                         <TableCell sx={{width: "40%"}}>Federation Path</TableCell>
                     </TableRow>
                 </TableHead>
@@ -74,7 +77,7 @@ export const RecordTable = ({ data }: { data: ExportRes }): ReactElement  => {
                     {data?.exports.map((record, index) => (
                         <TableRow key={record?.federation_prefix}>
                             <TableCellOverflow key={record.federation_prefix} sx={{width: "20%"}}>{data.type == null ? "NULL" : data.type.toUpperCase()}</TableCellOverflow>
-                            <TableCellOverflow key={record.federation_prefix} sx={{width: "40%"}}>{record?.storage_prefix == null ? "NULL" : record?.storage_prefix}</TableCellOverflow>
+                            <TableCellOverflow key={record.federation_prefix} sx={{width: "40%"}}>{data.type == "s3" ? (record.s3_bucket || "NULL") : (record?.storage_prefix || "NULL")}</TableCellOverflow>
                             <TableCellOverflow key={record.federation_prefix} sx={{width: "40%"}}>{record?.federation_prefix == null ? "NULL" : record?.federation_prefix}</TableCellOverflow>
                         </TableRow>
                     ))}
