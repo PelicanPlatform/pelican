@@ -1,44 +1,35 @@
-import React, {ComponentType, useEffect, useMemo, useState} from "react";
+import React, {ComponentType, FunctionComponent, useMemo, useState, JSX} from "react";
 import {Box, Pagination, TextField} from "@mui/material";
 
-import {Namespace} from "@/components/Main";
-import {NamespaceCardProps} from "@/components/Namespace/index.d";
-import {PendingCardProps} from "@/components/Namespace/PendingCard";
-import card, {CardProps} from "@/components/Namespace/Card";
-
-const searchNamespace = (namespace: Namespace, search: string) => {
-    const namespaceString = JSON.stringify(namespace)
-    return namespaceString.includes(search)
+function searchObject<T>(o: T, search: string){
+    const objectString = JSON.stringify(o).toLowerCase()
+    return objectString.includes(search.toLowerCase())
 }
 
-interface CardListProps<T extends PendingCardProps | CardProps> {
-    namespaces: Namespace[];
-    Card: ComponentType<T>;
-    cardProps: Omit<T, "namespace">;
+interface CardListProps<T> {
+    data: Partial<T>[];
+    Card: ComponentType<any>;
+    cardProps: Partial<T>;
 }
 
-function CardList<T extends PendingCardProps | CardProps>({ namespaces, Card, cardProps }: CardListProps<T>) {
+function CardList<T>({ data, Card, cardProps }: CardListProps<T>) {
 
     const PAGE_SIZE = 5
 
     const [search, setSearch] = useState<string>("")
     const [page, setPage] = useState<number>(1)
 
-    const filteredNamespaces = useMemo(() => {
-        return namespaces.filter((namespace) => searchNamespace(namespace, search))
-    }, [namespaces, search])
+    const filteredObjects = useMemo(() => {
+        return data.filter((d) => searchObject<Partial<T>>(d, search))
+    }, [data, search])
 
     const count = useMemo(() => {
-        return Math.ceil(filteredNamespaces.length / PAGE_SIZE)
-    }, [namespaces])
+        return Math.ceil(filteredObjects.length / PAGE_SIZE)
+    }, [filteredObjects])
 
-    const slicedNamespaces = useMemo(() => {
-        return filteredNamespaces.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
-    }, [filteredNamespaces, page])
-
-    if (namespaces.length === 0) {
-        return null
-    }
+    const slicedObjects = useMemo(() => {
+        return filteredObjects.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+    }, [filteredObjects, page])
 
     return (
         <Box>
@@ -48,25 +39,31 @@ function CardList<T extends PendingCardProps | CardProps>({ namespaces, Card, ca
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                     label="Search"
+                    color={slicedObjects.length == 0 ? "warning" : "primary"}
+                    helperText={slicedObjects.length == 0 ? "No results found" : undefined}
                 />
             </Box>
-            <Box>
-                {slicedNamespaces.map((namespace) => {
+            { slicedObjects.length != 0 &&
+                <>
+                    <Box>
+                        {slicedObjects.map((o, i) => {
 
-                    const props = {
-                        namespace: namespace,
-                        ...cardProps
-                    } as T
+                            const props = {
+                                ...cardProps,
+                                ...o
+                            } as T
 
-                    return <Box pb={1} key={namespace.id}>
-                        <Card {...props} />
+                            return <Box pb={1} key={JSON.stringify(o)}>
+                                <Card {...props} />
+                            </Box>
+                        })}
                     </Box>
-                })}
-            </Box>
-            {   count > 1 &&
-                <Box display={"flex"} justifyContent={"center"}>
-                    <Pagination count={count} page={page} onChange={(e, p) => setPage(p)} />
-                </Box>
+                    {   count > 1 &&
+                        <Box display={"flex"} justifyContent={"center"}>
+                            <Pagination count={count} page={page} onChange={(e, p) => setPage(p)} />
+                        </Box>
+                    }
+                </>
             }
         </Box>
     )

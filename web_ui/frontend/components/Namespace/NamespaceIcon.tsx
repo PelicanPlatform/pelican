@@ -3,9 +3,9 @@ import {Person, Storage, TripOrigin} from "@mui/icons-material";
 import React from "react";
 import {Namespace} from "@/components/Main";
 
-const NamespaceIcon = ({ namespace }: { namespace: Namespace }) => {
+const NamespaceIcon = ({ serverType }: { serverType: "origin" | "cache" }) => {
 
-    if (namespace.type == "origin") {
+    if (serverType == "origin") {
         return (
             <Box>
                 <Tooltip title={"Origin"} placement={"left"}>
@@ -17,7 +17,7 @@ const NamespaceIcon = ({ namespace }: { namespace: Namespace }) => {
         )
     }
 
-    if (namespace.type == "cache") {
+    if (serverType == "cache") {
         return (
             <Box>
                 <Tooltip title={"Cache"} placement={"left"}>

@@ -16,4 +16,8 @@ export interface NamespaceAdminMetadata {
     updated_at: string;
 }
 
+export interface FlatObject {
+    [key: string]: Exclude<any, object>;
+}
+
 export type NamespaceCardProps = CardProps & PendingCardProps
