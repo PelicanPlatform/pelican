@@ -30,8 +30,8 @@ import (
 )
 
 type exportsRes struct {
-	Type    string                        `json:"type"` // either "posix" or "s3"
-	Exports *[]server_utils.OriginExports `json:"exports"`
+	Type    string                       `json:"type"` // either "posix" or "s3"
+	Exports *[]server_utils.OriginExport `json:"exports"`
 }
 
 func handleExports(ctx *gin.Context) {
