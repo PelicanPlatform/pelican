@@ -23,18 +23,21 @@ interface Capabilities {
     DirectReads: boolean;
   }
 
+type ExportRes = { type: "s3", exports: S3ExportEntry[] } | { type: "posix", exports: PosixExportEntry[]};
+
 interface ExportEntry {
-    storage_prefix: string;
     federation_prefix: string;
-    s3_bucket: string;
-    s3_access_keyfile: string;
-    s3_secret_keyfile: string;
     capabilities: Capabilities;
 }
 
-interface ExportRes {
-    type: string;
-    exports: ExportEntry[];
+interface S3ExportEntry extends ExportEntry {
+    s3_access_keyfile: string;
+    s3_secret_keyfile: string;
+    s3_bucket: string;
+}
+
+interface PosixExportEntry extends ExportEntry {
+    storage_prefix: string;
 }
 
 export const TableCellOverflow: FunctionComponent<any> = ({ children, ...props }) => {
@@ -77,7 +80,7 @@ export const RecordTable = ({ data }: { data: ExportRes }): ReactElement  => {
                     {data?.exports.map((record, index) => (
                         <TableRow key={record?.federation_prefix}>
                             <TableCellOverflow key={record.federation_prefix} sx={{width: "20%"}}>{data.type == null ? "NULL" : data.type.toUpperCase()}</TableCellOverflow>
-                            <TableCellOverflow key={record.federation_prefix} sx={{width: "40%"}}>{data.type == "s3" ? (record.s3_bucket || "NULL") : (record?.storage_prefix || "NULL")}</TableCellOverflow>
+                            <TableCellOverflow key={record.federation_prefix} sx={{width: "40%"}}>{data.type == "s3" ? ((record as S3ExportEntry).s3_bucket || "NULL") : ((record as PosixExportEntry)?.storage_prefix || "NULL")}</TableCellOverflow>
                             <TableCellOverflow key={record.federation_prefix} sx={{width: "40%"}}>{record?.federation_prefix == null ? "NULL" : record?.federation_prefix}</TableCellOverflow>
                         </TableRow>
                     ))}
