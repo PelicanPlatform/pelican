@@ -179,9 +179,11 @@ jobs:
         with:
           buildkitd-flags: --debug
 
+        # We only login to OSG harbor and push the image
+        # if the workflow was for the release
       - name: Log in to OSG Harbor
         uses: docker/login-action@v3
-        if: github.repository == 'PelicanPlatform/pelican' && github.event_name != 'pull_request'
+        if: github.repository == 'PelicanPlatform/pelican' && inputs.from_workflow_call
         with:
           registry: hub.opensciencegrid.org
           username: ${{ secrets.PELICAN_HARBOR_ROBOT_USER }}
@@ -192,7 +194,7 @@ jobs:
         with:
           context: .
           file: ./images/Dockerfile
-          push: ${{ github.repository == 'PelicanPlatform/pelican' && github.event_name != 'pull_request' }}
+          push: ${{ github.repository == 'PelicanPlatform/pelican' && inputs.from_workflow_call }}
           tags: "${{ steps.generate-tag-list.outputs.taglist }}"
           target: ${{ matrix.image }}
           build-args: |
