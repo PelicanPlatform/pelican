@@ -38,6 +38,7 @@ interface S3ExportEntry extends ExportEntry {
 
 interface PosixExportEntry extends ExportEntry {
     storage_prefix: string;
+    sentinel_location: string;
 }
 
 export const TableCellOverflow: FunctionComponent<any> = ({ children, ...props }) => {
