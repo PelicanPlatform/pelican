@@ -60,7 +60,6 @@ var (
 				// We specifically DON'T want the region, service-url, and url-style flags if the mode is posix
 				if viper.IsSet("Origin.S3Region") || viper.IsSet("Origin.S3ServiceUrl") || viper.IsSet("Origin.S3UrlStyle") {
 					cmd.PrintErrln("The --region, --service-url, and --url-style flags are only used when the origin is launched in S3 mode.")
-					os.Exit(1)
 				}
 			} else {
 				cmd.PrintErrln(fmt.Sprintf("The --mode flag must be either 'posix' or 's3', but you provided '%s'", ost))
