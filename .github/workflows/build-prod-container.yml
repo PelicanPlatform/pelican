@@ -125,6 +125,19 @@ jobs:
         uses: actions/checkout@v4
         if: ${{ !inputs.release_workflow }}
 
+      - name: Determine Latest Version Tag
+        id: latest_version
+        run: |
+          git fetch --tags
+          tags=$(git tag -l 'v*.*.*' | sort -V)
+          highest_tag=$(echo "${tags}" | tail -n1)
+          echo "Highest version tag is ${highest_tag}"
+          if [[ "${GITHUB_REF##*/}" == "${highest_tag}" ]]; then
+            echo "::set-output name=IS_LATEST::true"
+          else
+            echo "::set-output name=IS_LATEST::false"
+          fi
+
       - name: Generate tag list
         id: generate-tag-list
         env:
@@ -133,6 +146,7 @@ jobs:
         # the commit that triggered this action doesn't have a tag,
         # or we tag it with the commit's tag if one exists
         run: |
+          IS_LATEST=${{ steps.latest_version.outputs.IS_LATEST }}
           # Check if we're working with a tagged version
           if [ -z "${{ inputs.tag }}" ]
           then
@@ -141,7 +155,7 @@ jobs:
             then
               GITHUB_TAG=${GITHUB_REF##*/}
             else
-              GITHUB_TAG="latest"
+              GITHUB_TAG="latest-dev"
             fi
           else
             GITHUB_TAG=${{ inputs.tag }}
@@ -163,6 +177,9 @@ jobs:
               tag_list+=("$registry/$docker_repo/$image_name":"$image_tag")
             done
           done
+          if [[ "$IS_LATEST" == "true" ]]; then
+            tag_list+=("$registry/$docker_repo/$image_name:latest")
+          fi
           # This causes the tag_list array to be comma-separated below,
           # which is required for build-push-action
           IFS=,
