@@ -133,6 +133,7 @@ func init() {
 	rootCmd.AddCommand(rootConfigCmd)
 	rootCmd.AddCommand(rootPluginCmd)
 	rootCmd.AddCommand(serveCmd)
+	rootCmd.AddCommand(keygenCmd)
 	preferredPrefix := config.GetPreferredPrefix()
 	rootCmd.Use = strings.ToLower(preferredPrefix)
 
