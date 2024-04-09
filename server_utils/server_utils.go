@@ -41,13 +41,17 @@ import (
 
 // Wait until given `reqUrl` returns a HTTP 200.
 // Logging messages emitted will refer to `server` (e.g., origin, cache, director)
-func WaitUntilWorking(ctx context.Context, method, reqUrl, server string, expectedStatus int) error {
+// Pass true to statusMismatch to allow a mismatch of expected status code and what's returned not fail immediately
+func WaitUntilWorking(ctx context.Context, method, reqUrl, server string, expectedStatus int, statusMismatch bool) error {
 	expiry := time.Now().Add(10 * time.Second)
 	ctx, cancel := context.WithDeadline(ctx, expiry)
 	defer cancel()
 	ticker := time.NewTicker(50 * time.Millisecond)
 	success := false
 	logged := false
+	var statusError error
+	statusErrLogged := false
+
 	for !(success || time.Now().After(expiry)) {
 		select {
 		case <-ticker.C:
@@ -75,24 +79,55 @@ func WaitUntilWorking(ctx context.Context, method, reqUrl, server string, expect
 				}
 				bytes, err := io.ReadAll(resp.Body)
 				if err != nil {
-					// We didn't get the expected status
-					return errors.Errorf("Received bad status code in reply to server ping at %s: %d. Expected %d. Can't read response body with error %v.", reqUrl, resp.StatusCode, expectedStatus, err)
+					statusError = errors.Errorf("Received bad status code in reply to server ping at %s: %d. Expected %d. Can't read response body with error %v.", reqUrl, resp.StatusCode, expectedStatus, err)
+					if statusMismatch {
+						if !statusErrLogged {
+							log.Info(statusError, "Will retry until timeout")
+							statusErrLogged = true
+						}
+					} else {
+						// We didn't get the expected status
+						return statusError
+					}
 				} else {
 					if len(bytes) != 0 {
-						// We didn't get the expected status
-						return errors.Errorf("Received bad status code in reply to server ping at %s: %d. Expected %d. Response body: %s", reqUrl, resp.StatusCode, expectedStatus, string(bytes))
+						statusError = errors.Errorf("Received bad status code in reply to server ping at %s: %d. Expected %d. Response body: %s", reqUrl, resp.StatusCode, expectedStatus, string(bytes))
+						if statusMismatch {
+							if !statusErrLogged {
+								log.Info(statusError, "Will retry until timeout")
+								statusErrLogged = true
+							}
+						} else {
+							// We didn't get the expected status
+							return statusError
+						}
 					} else {
-						return errors.Errorf("Received bad status code in reply to server ping at %s: %d. Expected %d. Response body is empty.", reqUrl, resp.StatusCode, expectedStatus)
+						statusError = errors.Errorf("Received bad status code in reply to server ping at %s: %d. Expected %d. Response body is empty.", reqUrl, resp.StatusCode, expectedStatus)
+						if statusMismatch {
+							if !statusErrLogged {
+								log.Info(statusError, "Will retry until timeout")
+								statusErrLogged = true
+							}
+						} else {
+							return statusError
+						}
 					}
 				}
 
 			}
 		case <-ctx.Done():
+			if statusError != nil {
+				return errors.Wrapf(statusError, "url %s didn't respond with the expected status code %d within 10s", reqUrl, expectedStatus)
+			}
 			return ctx.Err()
 		}
 	}
 
-	return errors.Errorf("Server %s at %s did not startup after 10s of waiting", server, reqUrl)
+	if statusError != nil {
+		return errors.Wrapf(statusError, "url %s didn't respond with the expected status code %d within 10s", reqUrl, expectedStatus)
+	} else {
+		return errors.Errorf("Server %s at %s did not startup after 10s of waiting", server, reqUrl)
+	}
 }
 
 // For calling from within the server. Returns the server's issuer URL/port

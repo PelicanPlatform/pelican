@@ -134,6 +134,8 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	viper.Set("Origin.Port", 0)
 	viper.Set("Server.WebPort", 0)
 	viper.Set("Origin.RunLocation", tmpPath)
+	viper.Set("Origin.RunLocation", filepath.Join(tmpPath, "origin"))
+	viper.Set("LocalCache.RunLocation", filepath.Join(tmpPath, "local-cache"))
 	viper.Set("Registry.RequireOriginApproval", false)
 	viper.Set("Registry.RequireCacheApproval", false)
 
@@ -149,7 +151,7 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	}
 
 	desiredURL := param.Server_ExternalWebUrl.GetString() + "/api/v1.0/health"
-	err = server_utils.WaitUntilWorking(ctx, "GET", desiredURL, "director", 200)
+	err = server_utils.WaitUntilWorking(ctx, "GET", desiredURL, "director", 200, false)
 	require.NoError(t, err)
 
 	httpc := http.Client{

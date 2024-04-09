@@ -59,11 +59,15 @@ func NewTransferErrors() *TransferErrors {
 }
 
 func (te *TransferErrors) AddError(err error) {
+	te.AddPastError(err, time.Now())
+}
+
+func (te *TransferErrors) AddPastError(err error, timestamp time.Time) {
 	if te.errors == nil {
 		te.errors = make([]error, 0)
 	}
 	if err != nil {
-		te.errors = append(te.errors, &TimestampedError{err: err, timestamp: time.Now()})
+		te.errors = append(te.errors, &TimestampedError{err: err, timestamp: timestamp})
 	}
 }
 

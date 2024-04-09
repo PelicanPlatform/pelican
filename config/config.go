@@ -983,6 +983,10 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 	viper.SetDefault("Cache.ExportLocation", "/")
 	viper.SetDefault("Registry.RequireKeyChaining", true)
 
+	// Set up the default S3 URL style to be path-style here as opposed to in the defaults.yaml becase
+	// we want to be able to check if this is user-provided (which we can't do for defaults.yaml)
+	viper.SetDefault("Origin.S3UrlStyle", "path")
+
 	if webConfigPath := param.Server_WebConfigFile.GetString(); webConfigPath != "" {
 		err := os.MkdirAll(filepath.Dir(webConfigPath), 0700)
 		if err != nil {
@@ -1206,6 +1210,15 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 		viper.Set("Monitoring.TokenRefreshInterval", time.Minute*5)
 		viper.Set("Monitoring.TokenExpiresIn", time.Hour*1)
 		log.Warningln("Invalid Monitoring.TokenRefreshInterval or Monitoring.TokenExpiresIn. Fallback to 5m for refresh interval and 1h for valid interval")
+	}
+
+	if currentServers.IsEnabled(OriginType) || currentServers.IsEnabled(CacheType) {
+		if param.Xrootd_ConfigFile.IsSet() {
+			_, err := os.Stat(param.Xrootd_ConfigFile.GetString())
+			if err != nil {
+				return fmt.Errorf("fail to open the file Xrootd.ConfigFile at %s: %v", param.Xrootd_ConfigFile.GetString(), err)
+			}
+		}
 	}
 
 	// Unmarshal Viper config into a Go struct

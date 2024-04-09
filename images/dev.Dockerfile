@@ -91,7 +91,7 @@ ADD https://api.github.com/repos/PelicanPlatform/xrdcl-pelican/git/refs/heads/ma
 RUN \
     git clone https://github.com/PelicanPlatform/xrdcl-pelican.git && \
     cd xrdcl-pelican && \
-    git reset 9562795 --hard && \
+    git reset cbd6850 --hard && \
     mkdir build && cd build && \
     cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
     make && make install
@@ -104,7 +104,7 @@ ADD https://api.github.com/repos/PelicanPlatform/xrootd-s3-http/git/refs/heads/m
 RUN \
     git clone https://github.com/PelicanPlatform/xrootd-s3-http.git && \
     cd xrootd-s3-http && \
-    git reset a0eb944 --hard && \
+    git checkout v0.1.1 && \
     mkdir build && cd build && \
     cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
     make install

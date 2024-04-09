@@ -39,6 +39,7 @@ popd
 
 git clone --depth=1 https://github.com/PelicanPlatform/xrootd-s3-http.git
 pushd xrootd-s3-http
+git checkout v0.1.1
 mkdir build
 cd build
 cmake .. -GNinja -DCMAKE_INSTALL_PREFIX=$PWD/release_dir

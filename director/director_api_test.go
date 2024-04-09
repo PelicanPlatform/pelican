@@ -31,7 +31,6 @@ import (
 
 var mockOriginServerAd server_structs.ServerAd = server_structs.ServerAd{
 	Name:      "test-origin-server",
-	AuthURL:   url.URL{},
 	URL:       url.URL{},
 	Type:      server_structs.OriginType,
 	Latitude:  123.05,
@@ -40,7 +39,6 @@ var mockOriginServerAd server_structs.ServerAd = server_structs.ServerAd{
 
 var mockCacheServerAd server_structs.ServerAd = server_structs.ServerAd{
 	Name:      "test-cache-server",
-	AuthURL:   url.URL{},
 	URL:       url.URL{},
 	Type:      server_structs.CacheType,
 	Latitude:  45.67,

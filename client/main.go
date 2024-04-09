@@ -592,6 +592,23 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 	}
 
 	if !success {
+		// If there's only a single transfer error, remove the wrapping to provide
+		// a simpler error message.  Results in:
+		//    failed download from local-cache: server returned 404 Not Found
+		// versus:
+		//    failed to download file: transfer error: failed download from local-cache: server returned 404 Not Found
+		var te *TransferErrors
+		if errors.As(err, &te) {
+			if len(te.Unwrap()) == 1 {
+				var tae *TransferAttemptError
+				if errors.As(te.Unwrap()[0], &tae) {
+					return nil, tae
+				} else {
+					return nil, errors.Wrap(err, "failed to download file")
+				}
+			}
+			return nil, te
+		}
 		return nil, errors.Wrap(err, "failed to download file")
 	} else {
 		return transferResults, err
