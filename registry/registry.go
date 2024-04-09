@@ -427,19 +427,47 @@ func cliRegisterNamespace(ctx *gin.Context) {
 
 	client := http.Client{Transport: config.GetTransport()}
 
+	// For no-auth registration, it calls keySignChallenge to verify nonce and register the namespace
+	if reqData.IdentityRequired == "false" || reqData.IdentityRequired == "" {
+		created, res, err := keySignChallenge(ctx, &reqData)
+		if err != nil {
+			if errors.As(err, &permissionDeniedError{}) {
+				ctx.JSON(http.StatusForbidden, gin.H{"error": "You don't have permission to register the prefix: " + err.Error()})
+			} else if errors.As(err, &badRequestError{}) {
+				ctx.JSON(http.StatusBadRequest, gin.H{"error": "Bad request for key-sign challenge: " + err.Error()})
+			} else {
+				ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Server encountered an error during key-sign challenge: " + err.Error()})
+				log.Warningf("Failed to complete key sign challenge without identity requirement: %v", err)
+			}
+		} else {
+			if created {
+				ctx.JSON(http.StatusCreated, res)
+			} else {
+				ctx.JSON(http.StatusOK, res)
+			}
+		}
+		return
+	}
+
+	// Load OIDC client for the following steps as they both require OIDC to set up
+	oidcConfig, provider, err := oauth2.ServerOIDCClient()
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server has malformed OIDC configuration"})
+		log.Errorf("Failed to load OIDC information for registration with identity: %v", err)
+		return
+	}
+	if provider == oauth2.Globus {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server has malformed OIDC configuration. It's using Globus as the authentication server which is not supported by Pelican registry"})
+		log.Errorf("Failed to load OIDC, authentication server is Globus which is not supported by Pelican registry")
+		return
+	}
+
 	// Last step in OIDC device authorization flow. Given the AccessToken
 	// this server sent in previous step, and other request data (prefix, etc)
 	// It will validate the request, verify nonce, and register the namespace prefix
 	if reqData.AccessToken != "" {
 		payload := url.Values{}
 		payload.Set("access_token", reqData.AccessToken)
-
-		oidcConfig, err := oauth2.ServerOIDCClient()
-		if err != nil {
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server has malformed OIDC configuration"})
-			log.Errorf("Failed to load OIDC information for registration with identity: %v", err)
-			return
-		}
 
 		resp, err := client.PostForm(oidcConfig.Endpoint.UserInfoURL, payload)
 		if err != nil {
@@ -481,35 +509,6 @@ func cliRegisterNamespace(ctx *gin.Context) {
 				ctx.JSON(http.StatusOK, res)
 			}
 		}
-		return
-	}
-
-	// For no-auth registration, it calls keySignChallenge to verify nonce and register the namespace
-	if reqData.IdentityRequired == "false" || reqData.IdentityRequired == "" {
-		created, res, err := keySignChallenge(ctx, &reqData)
-		if err != nil {
-			if errors.As(err, &permissionDeniedError{}) {
-				ctx.JSON(http.StatusForbidden, gin.H{"error": "You don't have permission to register the prefix: " + err.Error()})
-			} else if errors.As(err, &badRequestError{}) {
-				ctx.JSON(http.StatusBadRequest, gin.H{"error": "Bad request for key-sign challenge: " + err.Error()})
-			} else {
-				ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Server encountered an error during key-sign challenge: " + err.Error()})
-				log.Warningf("Failed to complete key sign challenge without identity requirement: %v", err)
-			}
-		} else {
-			if created {
-				ctx.JSON(http.StatusCreated, res)
-			} else {
-				ctx.JSON(http.StatusOK, res)
-			}
-		}
-		return
-	}
-
-	oidcConfig, err := oauth2.ServerOIDCClient()
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server has malformed OIDC configuration"})
-		log.Errorf("Failed to load OIDC information for registration with identity: %v", err)
 		return
 	}
 

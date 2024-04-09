@@ -356,7 +356,7 @@ func LookupIssuerJwksUrl(ctx context.Context, issuerUrlStr string) (jwksUrl *url
 
 	client := &http.Client{Transport: config.GetTransport()}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", wellKnownUrl.String(), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, wellKnownUrl.String(), nil)
 	if err != nil {
 		err = errors.Wrap(err, "failed to generate new request to the remote issuer")
 		return

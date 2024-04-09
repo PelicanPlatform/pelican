@@ -58,6 +58,7 @@ func GetDeprecated() map[string][]string {
         "Origin.Mode": []string{"Origin.StorageType"},
         "Origin.NamespacePrefix": []string{"Origin.FederationPrefix"},
         "Origin.S3ServiceName": []string{"none"},
+        "Registry.AdminUsers": []string{"Server.UIAdminUsers"},
         "Xrootd.Port": []string{"Origin.Port", "Cache.Port"},
         "Xrootd.RunLocation": []string{"Cache.RunLocation", "Origin.RunLocation"},
     }
@@ -65,6 +66,10 @@ func GetDeprecated() map[string][]string {
 
 func (sP StringParam) GetString() string {
 	return viper.GetString(sP.name)
+}
+
+func (sP StringParam) GetName() string {
+	return sP.name
 }
 
 func (sP StringParam) IsSet() bool {
@@ -242,6 +247,7 @@ var (
 	Origin_ScitokensRestrictedPaths = StringSliceParam{"Origin.ScitokensRestrictedPaths"}
 	Registry_AdminUsers = StringSliceParam{"Registry.AdminUsers"}
 	Server_Modules = StringSliceParam{"Server.Modules"}
+	Server_UIAdminUsers = StringSliceParam{"Server.UIAdminUsers"}
 	Shoveler_OutputDestinations = StringSliceParam{"Shoveler.OutputDestinations"}
 )
 
@@ -274,6 +280,7 @@ var (
 
 var (
 	Cache_EnableLotman = BoolParam{"Cache.EnableLotman"}
+	Cache_EnableOIDC = BoolParam{"Cache.EnableOIDC"}
 	Cache_EnableVoms = BoolParam{"Cache.EnableVoms"}
 	Cache_SelfTest = BoolParam{"Cache.SelfTest"}
 	Client_DisableHttpProxy = BoolParam{"Client.DisableHttpProxy"}
@@ -293,6 +300,7 @@ var (
 	Origin_EnableFallbackRead = BoolParam{"Origin.EnableFallbackRead"}
 	Origin_EnableIssuer = BoolParam{"Origin.EnableIssuer"}
 	Origin_EnableListings = BoolParam{"Origin.EnableListings"}
+	Origin_EnableOIDC = BoolParam{"Origin.EnableOIDC"}
 	Origin_EnablePublicReads = BoolParam{"Origin.EnablePublicReads"}
 	Origin_EnableReads = BoolParam{"Origin.EnableReads"}
 	Origin_EnableUI = BoolParam{"Origin.EnableUI"}

@@ -246,7 +246,7 @@ func getCachedInstitutions() (inst []Institution, intError error, extError error
 	if !institutionsCache.Has(instUrl.String()) {
 		log.Info("Cache miss for institutions TTL cache. Will fetch from source.")
 		client := &http.Client{Transport: config.GetTransport()}
-		req, err := http.NewRequest("GET", instUrl.String(), nil)
+		req, err := http.NewRequest(http.MethodGet, instUrl.String(), nil)
 		if err != nil {
 			intError = errors.Wrap(err, "Error making a request when fetching institution list")
 			extError = errors.New("Error when creating a request to fetch institution from remote url.")
@@ -485,10 +485,14 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 		return
 	}
 
-	validCF, err := validateCustomFields(ns.CustomFields, true)
-	if !validCF && err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Invalid custom fields: %v", err)})
-		return
+	if validCF, err := validateCustomFields(ns.CustomFields, true); !validCF {
+		if !validCF && err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Invalid custom fields: %v", err)})
+			return
+		} else if !validCF {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid custom fields without a validation error returned"})
+			return
+		}
 	}
 
 	if !isUpdate { // Create

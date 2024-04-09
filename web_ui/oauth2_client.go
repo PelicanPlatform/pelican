@@ -29,7 +29,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync/atomic"
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-contrib/sessions/cookie"
@@ -38,6 +37,7 @@ import (
 	pelican_oauth2 "github.com/pelicanplatform/pelican/oauth2"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 	"golang.org/x/oauth2"
 )
 
@@ -59,12 +59,12 @@ type (
 )
 
 const (
-	oauthCallbackPath = "/api/v1.0/auth/cilogon/callback"
+	oauthCallbackPath = "/api/v1.0/auth/oauth/callback"
 )
 
 var (
-	ciLogonOAuthConfig atomic.Pointer[oauth2.Config]
-	cilogonUserInfoUrl = "" // Value will be set at ConfigOAuthClientAPIs
+	oauthConfig      *oauth2.Config
+	oauthUserInfoUrl = "" // Value will be set at ConfigOAuthClientAPIs
 )
 
 // Generate a 16B random string and set ctx session key oauthstate as the random string
@@ -88,10 +88,10 @@ func generateCSRFCookie(ctx *gin.Context, nextUrl string) (string, error) {
 	return fmt.Sprintf("%s:%s", state, url.QueryEscape(nextUrl)), nil
 }
 
-// Handler to redirect user to the login page of OAuth2 provider (CILogon)
+// Handler to redirect user to the login page of OAuth2 provider
 // You can pass an optional next_url as query param if you want the user
 // to be redirected back to where they were before hitting the login when
-// the user is successfully authenticated against CILogon
+// the user is successfully authenticated against the OAuth2 provider
 func handleOAuthLogin(ctx *gin.Context) {
 	req := oauthLoginRequest{}
 	if ctx.ShouldBindQuery(&req) != nil {
@@ -102,12 +102,12 @@ func handleOAuthLogin(ctx *gin.Context) {
 	csrfState, err := generateCSRFCookie(ctx, req.NextUrl)
 
 	if err != nil {
+		log.Errorf("Failed to generate CSRF token: %v", err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate CSRF token"})
 		return
 	}
 
-	redirectUrl := ciLogonOAuthConfig.Load().AuthCodeURL(csrfState)
-
+	redirectUrl := oauthConfig.AuthCodeURL(csrfState)
 	ctx.Redirect(http.StatusTemporaryRedirect, redirectUrl)
 }
 
@@ -147,39 +147,62 @@ func handleOAuthCallback(ctx *gin.Context) {
 	// We only need this token to grab user id from cilogon
 	// and we won't store it anywhere. We will later issue our own token
 	// for user access
-	token, err := ciLogonOAuthConfig.Load().Exchange(c, req.Code)
+	token, err := oauthConfig.Exchange(c, req.Code)
 	if err != nil {
+		log.Errorf("Error in exchanging code for token:  %v", err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprint("Error in exchanging code for token: ", ctx.Request.URL)})
 		return
 	}
 
-	client := ciLogonOAuthConfig.Load().Client(c, token)
+	client := oauthConfig.Client(c, token)
 	client.Transport = config.GetTransport()
+	// CILogon requires token to be set as part of post form
 	data := url.Values{}
 	data.Add("access_token", token.AccessToken)
 
 	// Use access_token to get user info from CILogon
-	resp, err := client.PostForm(cilogonUserInfoUrl, data)
+	userInfoReq, err := http.NewRequest(http.MethodPost, oauthUserInfoUrl, strings.NewReader(data.Encode()))
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprint("Error requesting user info from CILogon: ", err)})
+		log.Errorf("Error creating a new request for user info from auth provider at %s. %v", oauthUserInfoUrl, err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprint("Error  creating a new request for user info from auth provider: ", err)})
 		return
 	}
+	userInfoReq.Header.Add("Authorization", token.TokenType+" "+token.AccessToken)
+	userInfoReq.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := client.Do(userInfoReq)
+	if err != nil {
+		log.Errorf("Error requesting user info from auth provider at %s. %v", oauthUserInfoUrl, err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprint("Error requesting user info from auth provider: ", err)})
+		return
+	}
+	defer resp.Body.Close()
+
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprint("Failed to get OAuth2 user info response: ", err)})
+		log.Errorf("Error getting user info response from auth provider at %s. %v", oauthUserInfoUrl, err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprint("Error getting user info response from auth provider: ", err)})
+		return
+	}
+
+	if resp.StatusCode != 200 {
+		log.Errorf("Error requesting user info from auth provider at %s with status code %d and body %s", oauthUserInfoUrl, resp.StatusCode, string(body))
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprint("Error requesting user info from auth provider with status code ", resp.StatusCode)})
 		return
 	}
 
 	userInfo := cilogonUserInfo{}
 
 	if err := json.Unmarshal(body, &userInfo); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprint("Error parsing user info from CILogon: ", err)})
+		log.Errorf("Error parsing user info from auth provider at %s. %v", oauthUserInfoUrl, err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprint("Error parsing user info from auth provider: ", err)})
 		return
 	}
 
 	userIdentifier := userInfo.Sub
 	if userIdentifier == "" {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Error setting login cookie: can't find valid user id from CILogon"})
+		log.Errorf("sub field of user info response from auth provider is empty. Can't determine user identity")
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Error setting login cookie: can't find valid user id from auth provider"})
 		return
 	}
 
@@ -199,14 +222,19 @@ func handleOAuthCallback(ctx *gin.Context) {
 func ConfigOAuthClientAPIs(engine *gin.Engine) error {
 	sessionSecretByte, err := config.LoadSessionSecret()
 	if err != nil {
-		return errors.Wrap(err, "Failed to configure OAuth client")
+		return errors.Wrap(err, "failed to configure OAuth client")
 	}
-	oauthCommonConfig, err := pelican_oauth2.ServerOIDCClient()
+	oauthCommonConfig, provider, err := pelican_oauth2.ServerOIDCClient()
 	if err != nil {
-		return errors.Wrap(err, "Failed to load server OIDC client config")
+		return errors.Wrap(err, "failed to load server OIDC client config")
+	}
+	// Pelican registry relies on OAuth2 device flow for CLI-based registration
+	// and Globus does not support such flow. So users should not use Globus for the registry
+	if config.IsServerEnabled(config.RegistryType) && provider == pelican_oauth2.Globus {
+		return errors.New("you are using Globus as the OIDC auth server. However, Pelican registry server does not support Globus. Please use CILogon as the auth server instead.")
 	}
 
-	cilogonUserInfoUrl = oauthCommonConfig.Endpoint.UserInfoURL
+	oauthUserInfoUrl = oauthCommonConfig.Endpoint.UserInfoURL
 
 	redirectUrlStr := param.Server_ExternalWebUrl.GetString()
 	redirectUrl, err := url.Parse(redirectUrlStr)
@@ -225,7 +253,7 @@ func ConfigOAuthClientAPIs(engine *gin.Engine) error {
 			redirectUrl.Host = redirectHostname
 		}
 	}
-	config := &oauth2.Config{
+	oauthConfig = &oauth2.Config{
 		RedirectURL:  redirectUrl.String(),
 		ClientID:     oauthCommonConfig.ClientID,
 		ClientSecret: oauthCommonConfig.ClientSecret,
@@ -235,15 +263,14 @@ func ConfigOAuthClientAPIs(engine *gin.Engine) error {
 			TokenURL: oauthCommonConfig.Endpoint.TokenURL,
 		},
 	}
-	ciLogonOAuthConfig.Store(config)
 
 	store := cookie.NewStore(sessionSecretByte)
 	sessionHandler := sessions.Sessions("pelican-session", store)
 
-	ciLogonGroup := engine.Group("/api/v1.0/auth/cilogon", sessionHandler)
+	oauthGroup := engine.Group("/api/v1.0/auth/oauth", sessionHandler)
 	{
-		ciLogonGroup.GET("/login", handleOAuthLogin)
-		ciLogonGroup.GET("/callback", handleOAuthCallback)
+		oauthGroup.GET("/login", handleOAuthLogin)
+		oauthGroup.GET("/callback", handleOAuthCallback)
 	}
 	return nil
 }

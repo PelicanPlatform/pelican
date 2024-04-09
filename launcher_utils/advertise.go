@@ -158,7 +158,7 @@ func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) 
 		return errors.Wrap(err, "failed to create director advertisement token")
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", directorUrl.String(), bytes.NewBuffer(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, directorUrl.String(), bytes.NewBuffer(body))
 	if err != nil {
 		return errors.Wrap(err, "Failed to create POST request for director registration")
 	}

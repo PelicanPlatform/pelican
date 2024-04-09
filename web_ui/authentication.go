@@ -63,6 +63,10 @@ type (
 		Role          UserRole `json:"role"`
 		User          string   `json:"user"`
 	}
+
+	OIDCEnabledServerRes struct {
+		ODICEnabledServers []string `json:"oidc_enabled_servers"`
+	}
 )
 
 var (
@@ -176,8 +180,10 @@ func setLoginCookie(ctx *gin.Context, user string) {
 // Check if user is authenticated by checking if the "login" cookie is present and set the user identity to ctx
 func AuthHandler(ctx *gin.Context) {
 	user, err := GetUser(ctx)
-	if err != nil || user == "" {
-		log.Errorln("Invalid user cookie or unable to parse user cookie:", err)
+	if user == "" {
+		if err != nil {
+			log.Errorln("Invalid user cookie or unable to parse user cookie:", err)
+		}
 		ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Authentication required to perform this operation"})
 	} else {
 		ctx.Set("User", user)
@@ -189,14 +195,14 @@ func AuthHandler(ctx *gin.Context) {
 // indicating the error message.
 //
 // Note that by default it only checks if user == "admin". If you have a custom list of admin identifiers
-// to check, you should set Registry.AdminUsers. See parameters.yaml for details.
+// to check, you should set Server.UIAdminUsers. See parameters.yaml for details.
 func CheckAdmin(user string) (isAdmin bool, message string) {
 	if user == "admin" {
 		return true, ""
 	}
-	adminList := param.Registry_AdminUsers.GetStringSlice()
-	if adminList == nil {
-		return false, "Registry.AdminUsers is not set, and user is not root user. Admin check returns false"
+	adminList := param.Server_UIAdminUsers.GetStringSlice()
+	if !param.Server_UIAdminUsers.IsSet() {
+		return false, "Server.UIAdminUsers is not set, and user is not root user. Admin check returns false"
 	}
 	for _, admin := range adminList {
 		if user == admin {
@@ -336,6 +342,18 @@ func whoamiHandler(ctx *gin.Context) {
 	}
 }
 
+func listOIDCEnabledServersHandler(ctx *gin.Context) {
+	// Registry has OIDC enabled by default
+	res := OIDCEnabledServerRes{ODICEnabledServers: []string{strings.ToLower(config.RegistryType.String())}}
+	if param.Origin_EnableOIDC.GetBool() {
+		res.ODICEnabledServers = append(res.ODICEnabledServers, strings.ToLower(config.OriginType.String()))
+	}
+	if param.Cache_EnableOIDC.GetBool() {
+		res.ODICEnabledServers = append(res.ODICEnabledServers, strings.ToLower(config.CacheType.String()))
+	}
+	ctx.JSON(http.StatusOK, res)
+}
+
 // Configure the authentication endpoints for the server web UI
 func configureAuthEndpoints(ctx context.Context, router *gin.Engine, egrp *errgroup.Group) error {
 	if router == nil {
@@ -383,6 +401,7 @@ func configureAuthEndpoints(ctx context.Context, router *gin.Engine, egrp *errgr
 			ctx.JSON(200, gin.H{"initialized": true})
 		}
 	})
+	group.GET("/oauth", listOIDCEnabledServersHandler)
 
 	egrp.Go(func() error { return periodicAuthDBReload(ctx) })
 

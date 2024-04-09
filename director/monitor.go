@@ -95,7 +95,7 @@ func reportStatusToServer(ctx context.Context, serverWebUrl string, status strin
 	reqBody := bytes.NewBuffer(jsonData)
 
 	log.Debugf("Director is sending %s server test result to %s", string(serverType), reportUrl.String())
-	req, err := http.NewRequestWithContext(ctx, "POST", reportUrl.String(), reqBody)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reportUrl.String(), reqBody)
 	if err != nil {
 		return errors.Wrap(err, "failed to create POST request for reporting director test")
 	}

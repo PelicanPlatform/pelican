@@ -30,7 +30,6 @@ import (
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/registry"
-	"github.com/pelicanplatform/pelican/web_ui"
 )
 
 func RegistryServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) error {
@@ -59,9 +58,6 @@ func RegistryServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 	}
 
 	if param.Server_EnableUI.GetBool() {
-		if err := web_ui.ConfigOAuthClientAPIs(engine); err != nil {
-			return err
-		}
 		if err := registry.InitInstConfig(ctx, egrp); err != nil {
 			return err
 		}

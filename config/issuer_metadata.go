@@ -20,10 +20,11 @@ package config
 
 import (
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"strings"
+
+	"github.com/pkg/errors"
 )
 
 type OauthIssuer struct {
@@ -37,10 +38,17 @@ type OauthIssuer struct {
 	ScopesSupported []string `json:"scopes_supported"`
 }
 
+// Get OIDC issuer metadata from an OIDC issuer URL.
+// The URL should not contain the path to /.well-known/openid-configuration
 func GetIssuerMetadata(issuer_url string) (*OauthIssuer, error) {
 	wellKnownUrl := strings.TrimSuffix(issuer_url, "/") + "/.well-known/openid-configuration"
 
-	resp, err := http.Get(wellKnownUrl)
+	client := http.Client{Transport: GetTransport()}
+	req, err := http.NewRequest(http.MethodGet, wellKnownUrl, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -52,7 +60,7 @@ func GetIssuerMetadata(issuer_url string) (*OauthIssuer, error) {
 	}
 
 	if resp.StatusCode != 200 {
-		return nil, errors.New("Failed to retrieve issuer metadata")
+		return nil, errors.Errorf("Failed to retrieve issuer metadata at %s with status code %d", wellKnownUrl, resp.StatusCode)
 	}
 
 	issuer := &OauthIssuer{}

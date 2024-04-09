@@ -28,6 +28,7 @@ type Config struct {
 		Concurrency int
 		DataLocation string
 		EnableLotman bool
+		EnableOIDC bool
 		EnableVoms bool
 		ExportLocation string
 		HighWaterMark string
@@ -158,6 +159,7 @@ type Config struct {
 		EnableFallbackRead bool
 		EnableIssuer bool
 		EnableListings bool
+		EnableOIDC bool
 		EnablePublicReads bool
 		EnableReads bool
 		EnableUI bool
@@ -223,6 +225,7 @@ type Config struct {
 		TLSCertificate string
 		TLSKey string
 		UIActivationCodeFile string
+		UIAdminUsers []string
 		UILoginRateLimit int
 		UIPasswordFile string
 		WebConfigFile string
@@ -286,6 +289,7 @@ type configWithType struct {
 		Concurrency struct { Type string; Value int }
 		DataLocation struct { Type string; Value string }
 		EnableLotman struct { Type string; Value bool }
+		EnableOIDC struct { Type string; Value bool }
 		EnableVoms struct { Type string; Value bool }
 		ExportLocation struct { Type string; Value string }
 		HighWaterMark struct { Type string; Value string }
@@ -416,6 +420,7 @@ type configWithType struct {
 		EnableFallbackRead struct { Type string; Value bool }
 		EnableIssuer struct { Type string; Value bool }
 		EnableListings struct { Type string; Value bool }
+		EnableOIDC struct { Type string; Value bool }
 		EnablePublicReads struct { Type string; Value bool }
 		EnableReads struct { Type string; Value bool }
 		EnableUI struct { Type string; Value bool }
@@ -481,6 +486,7 @@ type configWithType struct {
 		TLSCertificate struct { Type string; Value string }
 		TLSKey struct { Type string; Value string }
 		UIActivationCodeFile struct { Type string; Value string }
+		UIAdminUsers struct { Type string; Value []string }
 		UILoginRateLimit struct { Type string; Value int }
 		UIPasswordFile struct { Type string; Value string }
 		WebConfigFile struct { Type string; Value string }
