@@ -39,14 +39,6 @@ export default function RootLayout({
     return (
         <Box display={"flex"} flexDirection={"row"}>
             <Sidebar>
-                <Link href={"/"}>
-                    <Image
-                        src={PelicanLogo}
-                        alt={"Pelican Logo"}
-                        width={36}
-                        height={36}
-                    />
-                </Link>
                 <Box pt={1}>
                     <Tooltip title={"Config"} placement={"right"}>
                         <Link href={"/config/"}>

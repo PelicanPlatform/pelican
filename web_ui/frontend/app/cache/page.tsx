@@ -32,17 +32,11 @@ export default function Home() {
     return (
         <Box width={"100%"}>
             <Grid container spacing={2}>
-                <Grid item xs={12} lg={4}>
+                <Grid item xs={12} lg={6}>
                     <Typography variant="h4" mb={2}>Status</Typography>
                     <StatusBox/>
                 </Grid>
-                <Grid item xs={12} lg={4}>
-                    <Typography variant={"h4"} component={"h2"} mb={2}>Data Exports</Typography>
-                    <Box sx={{borderRadius: 2, overflow: "hidden"}}>
-                        <DataExportTable/>
-                    </Box>
-                </Grid>
-                <Grid item xs={12} lg={4}>
+                <Grid item xs={12} lg={6}>
                     <FederationOverview/>
                 </Grid>
                 <Grid item xs={12} lg={6}>
