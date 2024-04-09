@@ -88,7 +88,7 @@ func (server *OriginServer) CreateAdvertisement(name string, originUrlStr string
 		return nil, err
 	}
 
-	for _, export := range *originExports {
+	for _, export := range originExports {
 		// PublicReads implies reads
 		reads := export.Capabilities.PublicReads || export.Capabilities.Reads
 		nsAds = append(nsAds, server_structs.NamespaceAdV2{
@@ -162,7 +162,7 @@ func (server *OriginServer) GetAuthorizedPrefixes() ([]string, error) {
 		return nil, err
 	}
 
-	for _, export := range *originExports {
+	for _, export := range originExports {
 		if (export.Capabilities.Reads && !export.Capabilities.PublicReads) || export.Capabilities.Writes {
 			prefixes = append(prefixes, export.FederationPrefix)
 		}

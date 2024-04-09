@@ -19,9 +19,9 @@
 # Mac OS X instance in GitHub.
 #
 
-scriptdir=`dirname $0`
+scriptdir=$PWD/`dirname $0`
 
-brew install minio xrootd ninja
+brew install minio xrootd ninja coreutils
 
 mkdir dependencies
 pushd dependencies
@@ -44,8 +44,8 @@ mkdir build
 cd build
 cmake .. -GNinja -DCMAKE_INSTALL_PREFIX=$PWD/release_dir
 ninja install
-echo "Will install into: `which xrootd`"
-xrootd_libdir=$(dirname `which xrootd`)/../lib/
+xrootd_libdir=$(grealpath $(dirname $(grealpath `which xrootd`))/../lib/)
+echo "Will install into: $xrootd_libdir"
 sudo mkdir -p $xrootd_libdir
 sudo ln -s $PWD/release_dir/lib/libXrdHTTPServer-5.so $xrootd_libdir
 sudo ln -s $PWD/release_dir/lib/libXrdS3-5.so $xrootd_libdir
@@ -63,7 +63,7 @@ popd
 
 git clone --depth=1 https://github.com/xrootd/xrootd.git
 pushd xrootd
-patch -p1 $scriptdir/pelican_protocol.patch
+patch -p1 < $scriptdir/pelican_protocol.patch
 mkdir build
 cd build
 cmake .. -GNinja

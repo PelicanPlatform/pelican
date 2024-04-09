@@ -276,6 +276,8 @@ func TestOSDFAuthCreation(t *testing.T) {
 				viper.Set("Origin.RunLocation", dirName)
 				xrootdRun = param.Origin_RunLocation.GetString()
 			}
+			viper.Set("Origin.FederationPrefix", "/")
+			viper.Set("Origin.StoragePrefix", "/")
 			oldPrefix, err := config.SetPreferredPrefix("OSDF")
 			assert.NoError(t, err)
 			defer func() {
@@ -341,6 +343,8 @@ func TestEmitAuthfile(t *testing.T) {
 			defer server_utils.ResetOriginExports()
 			viper.Set("Xrootd.Authfile", filepath.Join(dirName, "authfile"))
 			viper.Set("Origin.RunLocation", dirName)
+			viper.Set("Origin.FederationPrefix", "/")
+			viper.Set("Origin.StoragePrefix", "/")
 			server := &origin.OriginServer{}
 
 			err := os.WriteFile(filepath.Join(dirName, "authfile"), []byte(testInput.authIn), fs.FileMode(0600))
@@ -431,6 +435,8 @@ func TestMergeConfig(t *testing.T) {
 	defer server_utils.ResetOriginExports()
 	viper.Set("Origin.RunLocation", dirname)
 	viper.Set("Origin.Port", 8443)
+	viper.Set("Origin.StoragePrefix", "/")
+	viper.Set("Origin.FederationPrefix", "/")
 	// We don't inherit any defaults at this level of code -- in order to recognize
 	// that this is an authorized prefix, we must set either EnableReads && !EnablePublicReads
 	// or EnableWrites
@@ -521,6 +527,8 @@ func TestWriteOriginAuthFiles(t *testing.T) {
 			viper.Set("Origin.StorageType", "posix")
 			dirname := t.TempDir()
 			viper.Set("Origin.RunLocation", dirname)
+			viper.Set("Origin.StoragePrefix", "/")
+			viper.SetDefault("Origin.FederationPrefix", "/")
 			viper.Set("Xrootd.ScitokensConfig", filepath.Join(dirname, "scitokens-generated.cfg"))
 			viper.Set("Xrootd.Authfile", filepath.Join(dirname, "authfile"))
 			xAuthFile := filepath.Join(param.Origin_RunLocation.GetString(), "authfile-origin-generated")

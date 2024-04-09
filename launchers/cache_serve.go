@@ -23,17 +23,19 @@ package launchers
 import (
 	"context"
 	_ "embed"
+	"net/url"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/broker"
 	"github.com/pelicanplatform/pelican/cache"
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/daemon"
 	"github.com/pelicanplatform/pelican/launcher_utils"
 	"github.com/pelicanplatform/pelican/lotman"
 	"github.com/pelicanplatform/pelican/metrics"
@@ -106,7 +108,17 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 		return nil, err
 	}
 
-	pids, err := daemon.LaunchDaemons(ctx, launchers, egrp)
+	portStartCallback := func(port int) {
+		viper.Set("Cache.Port", port)
+		if cacheUrl, err := url.Parse(param.Origin_Url.GetString()); err == nil {
+			cacheUrl.Host = cacheUrl.Hostname() + ":" + strconv.Itoa(port)
+			viper.Set("Cache.Url", cacheUrl.String())
+			log.Debugln("Resetting Cache.Url to", cacheUrl.String())
+		}
+		log.Infoln("Cache startup complete on port", port)
+	}
+
+	pids, err := xrootd.LaunchDaemons(ctx, launchers, egrp, portStartCallback)
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +127,15 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 }
 
 // Finish configuration of the cache server.
-func CacheServeFinish(ctx context.Context, egrp *errgroup.Group) error {
+func CacheServeFinish(ctx context.Context, egrp *errgroup.Group, cacheServer server_structs.XRootDServer) error {
+	log.Debug("Register Cache")
 	metrics.SetComponentHealthStatus(metrics.OriginCache_Registry, metrics.StatusWarning, "Start to register namespaces for the cache server")
-	return launcher_utils.RegisterNamespaceWithRetry(ctx, egrp, "/caches/"+param.Xrootd_Sitename.GetString())
+	if err := launcher_utils.RegisterNamespaceWithRetry(ctx, egrp, "/caches/"+param.Xrootd_Sitename.GetString()); err != nil {
+		return err
+	}
+
+	log.Debug("Advertise Cache")
+	servers := make([]server_structs.XRootDServer, 1)
+	servers[0] = cacheServer
+	return launcher_utils.Advertise(ctx, servers)
 }

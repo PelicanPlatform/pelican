@@ -48,7 +48,7 @@ import (
 
 type (
 	FedTest struct {
-		Exports *[]server_utils.OriginExport
+		Exports []server_utils.OriginExport
 		Token   string
 		Ctx     context.Context
 		Egrp    *errgroup.Group
@@ -64,6 +64,7 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	ft.Egrp = egrp
 
 	modules := config.ServerType(0)
+	modules.Set(config.CacheType)
 	modules.Set(config.OriginType)
 	modules.Set(config.DirectorType)
 	modules.Set(config.RegistryType)
@@ -71,7 +72,7 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	// to immediately work through the cache.  For now, unit tests will just use the origin.
 	modules.Set(config.LocalCacheType)
 
-	tmpPathPattern := "PelicanOrigin-FedTest*"
+	tmpPathPattern := "Pelican-FedTest*"
 	tmpPath, err := os.MkdirTemp("", tmpPathPattern)
 	require.NoError(t, err)
 
@@ -80,6 +81,8 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	require.NoError(t, err)
 
 	viper.Set("ConfigDir", tmpPath)
+	viper.Set("Logging.Level", "debug")
+	viper.Set("Logging.Cache.Pss", "debug")
 
 	config.InitConfig()
 
@@ -95,7 +98,7 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	ft.Exports = exports
 
 	// Override the test directory from the config file with our temp directory
-	for i := 0; i < len(*ft.Exports); i++ {
+	for i := 0; i < len(ft.Exports); i++ {
 		originDir, err := os.MkdirTemp("", fmt.Sprintf("Export%d", i))
 		assert.NoError(t, err)
 		t.Cleanup(func() {
@@ -104,7 +107,7 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 		})
 
 		// Set the storage prefix to the temporary origin directory
-		((*ft.Exports)[i]).StoragePrefix = originDir
+		ft.Exports[i].StoragePrefix = originDir
 		// Our exports object becomes global -- we must reset in between each fed test
 		t.Cleanup(func() {
 			server_utils.ResetOriginExports()
@@ -132,9 +135,11 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	viper.Set("Server.EnableUI", false)
 	viper.Set("Registry.DbLocation", filepath.Join(t.TempDir(), "ns-registry.sqlite"))
 	viper.Set("Origin.Port", 0)
+	viper.Set("Cache.Port", 0)
 	viper.Set("Server.WebPort", 0)
-	viper.Set("Origin.RunLocation", tmpPath)
 	viper.Set("Origin.RunLocation", filepath.Join(tmpPath, "origin"))
+	viper.Set("Cache.RunLocation", filepath.Join(tmpPath, "cache"))
+	viper.Set("Cache.DataLocation", filepath.Join(tmpPath, "xcache-data"))
 	viper.Set("LocalCache.RunLocation", filepath.Join(tmpPath, "local-cache"))
 	viper.Set("Registry.RequireOriginApproval", false)
 	viper.Set("Registry.RequireCacheApproval", false)

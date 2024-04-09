@@ -53,13 +53,12 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 	// Create a token file
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
-	audience := config.GetServerAudience()
 
 	tokenConfig := token.NewWLCGToken()
 	tokenConfig.Lifetime = time.Minute
 	tokenConfig.Issuer = issuer
 	tokenConfig.Subject = "origin"
-	tokenConfig.AddAudiences(audience)
+	tokenConfig.AddAudienceAny()
 	tokenConfig.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Storage_Read, "/"),
 		token_scopes.NewResourceScope(token_scopes.Storage_Modify, "/"))
 	token, err := tokenConfig.CreateToken()
@@ -114,7 +113,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 		_, err := config.SetPreferredPrefix("PELICAN")
 		assert.NoError(t, err)
 
-		for _, export := range *fed.Exports {
+		for _, export := range fed.Exports {
 			// Set path for object to upload/download
 			tempPath := tempDir
 			dirName := filepath.Base(tempPath)
@@ -199,7 +198,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 	t.Run("testOsdfRecursiveGetAndPutOsdfURL", func(t *testing.T) {
 		_, err := config.SetPreferredPrefix("OSDF")
 		assert.NoError(t, err)
-		for _, export := range *fed.Exports {
+		for _, export := range fed.Exports {
 			// Set path for object to upload/download
 			tempPath := tempDir
 			dirName := filepath.Base(tempPath)
@@ -293,7 +292,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 		_, err := config.SetPreferredPrefix("OSDF")
 		assert.NoError(t, err)
 
-		for _, export := range *fed.Exports {
+		for _, export := range fed.Exports {
 			// Set path for object to upload/download
 			tempPath := tempDir
 			dirName := filepath.Base(tempPath)

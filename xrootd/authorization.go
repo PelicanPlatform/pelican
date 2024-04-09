@@ -298,7 +298,7 @@ func EmitAuthfile(server server_structs.XRootDServer) error {
 					return errors.Wrapf(err, "Failed to get origin exports")
 				}
 
-				for _, export := range *originExports {
+				for _, export := range originExports {
 					if export.Capabilities.PublicReads {
 						outStr += export.FederationPrefix + " lr "
 					}
@@ -324,7 +324,7 @@ func EmitAuthfile(server server_structs.XRootDServer) error {
 			return errors.Wrapf(err, "Failed to get origin exports")
 		}
 
-		for _, export := range *originExports {
+		for _, export := range originExports {
 			if export.Capabilities.PublicReads {
 				outStr += " " + export.FederationPrefix + " lr"
 			}
