@@ -270,7 +270,7 @@ func TestPasswordResetAPI(t *testing.T) {
 		//Check ok http reponse
 		assert.Equal(t, 403, recorderReset.Code)
 		//Check that success message returned
-		assert.JSONEq(t, `{"error":"Server.UIAdminUsers is not set, and user is not root user. Admin check returns false"}`, recorderReset.Body.String())
+		assert.JSONEq(t, `{"msg":"Server.UIAdminUsers is not set, and user is not root user. Admin check returns false", "status":"error"}`, recorderReset.Body.String())
 	})
 
 	//Invoking password reset without a cookie should result in failure
