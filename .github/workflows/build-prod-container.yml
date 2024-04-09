@@ -194,7 +194,7 @@ jobs:
         with:
           context: .
           file: ./images/Dockerfile
-          push: ${{ github.repository == 'PelicanPlatform/pelican' && inputs.from_workflow_call }}
+          push: ${{ github.repository == 'PelicanPlatform/pelican' && (inputs.from_workflow_call || false) }}
           tags: "${{ steps.generate-tag-list.outputs.taglist }}"
           target: ${{ matrix.image }}
           build-args: |
