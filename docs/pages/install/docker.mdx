@@ -11,6 +11,8 @@ Pelican builds separate images for each Pelican server components, e.g. origin, 
 * Pelican director server: `hub.opensciencegrid.org/pelican_platform/director:latest`
 * Pelican registry server: `hub.opensciencegrid.org/pelican_platform/registry:latest`
 
+> Note: the `latest` tag will pull the Pelican server image with the latest released version. You may pull an image with explicit Pelican version by passing the version as the tag (e.g. `v7.6.4`) instead. For a list of available tags, refer to [Pelican Harbor repository](https://hub.opensciencegrid.org/harbor/projects/883/repositories/origin/artifacts-tab?publicAndNotLogged=yes).
+
 ## Run Pelican server via Docker CLI
 
 This section shows you how to run various Pelican server images using the Docker CLI. If you haven't installed Docker engine, follow the [documentation from Docker](https://docs.docker.com/get-docker/) to install the Docker engine.
