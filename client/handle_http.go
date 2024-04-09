@@ -21,6 +21,7 @@ package client
 import (
 	"bytes"
 	"context"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"net"
@@ -29,6 +30,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"slices"
@@ -46,7 +48,6 @@ import (
 	"github.com/opensaucerer/grab/v3"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/studio-b12/gowebdav"
 	"github.com/vbauerster/mpb/v8"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
@@ -208,6 +209,7 @@ type (
 		skipAcquire   bool
 		caches        []*url.URL
 		useDirector   bool
+		directorUrl   string
 		tokenLocation string
 		token         string
 		project       string
@@ -996,7 +998,11 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		}
 	}
 
-	tj.useDirector = pelicanURL.directorUrl != ""
+	if pelicanURL.directorUrl != "" {
+		tj.useDirector = true
+		tj.directorUrl = pelicanURL.directorUrl
+	}
+
 	ns, err := getNamespaceInfo(remoteUrl.Path, pelicanURL.directorUrl, upload)
 	if err != nil {
 		log.Errorln(err)
@@ -1278,7 +1284,7 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 		if job.job.upload {
 			return te.walkDirUpload(job, transfers, te.files, job.job.localPath)
 		} else {
-			return te.walkDirDownload(job, transfers, te.files, remoteUrl)
+			return te.walkDirDownload(job, transfers, te.files, remoteUrl.Path)
 		}
 	}
 
@@ -2121,65 +2127,125 @@ func runPut(request *http.Request, responseChan chan<- *http.Response, errorChan
 
 }
 
+// Types to parse xml response from PROPFIND:
+type Prop struct {
+	GetContentLength int64  `xml:"getcontentlength"`
+	GetLastModified  string `xml:"getlastmodified"`
+	IsCollection     int    `xml:"iscollection"`
+}
+
+type Response struct {
+	Href string `xml:"href"`
+	Prop Prop   `xml:"propstat>prop"`
+}
+
+type MultiStatus struct {
+	XMLName  xml.Name   `xml:"multistatus"`
+	Response []Response `xml:"response"`
+}
+
+type FileInfo struct {
+	Name  string
+	IsDir bool
+}
+
+func parseResponse(r io.Reader) ([]FileInfo, error) {
+	var multiStatus MultiStatus
+	// Decode our XML response
+	if err := xml.NewDecoder(r).Decode(&multiStatus); err != nil {
+		return nil, err
+	}
+
+	// Go through each reponse we get and extract the information for the files/directories
+	var infos []FileInfo
+	for i, response := range multiStatus.Response {
+		// Skip the 1st entry (the root dir)
+		if i == 0 {
+			continue
+		}
+
+		// Populate the FileInfo object with info we need
+		info := FileInfo{
+			Name:  path.Base(response.Href),
+			IsDir: response.Prop.IsCollection == 1,
+		}
+		infos = append(infos, info)
+	}
+	return infos, nil
+}
+
 // Walk a remote directory in a WebDAV server, emitting the files discovered
-func (te *TransferEngine) walkDirDownload(job *clientTransferJob, transfers []transferAttemptDetails, files chan *clientTransferFile, url *url.URL) error {
-	// Do a PROPFIND to get our location (removes dir list host)
-	resp, err := queryDirector("PROPFIND", job.job.remoteURL.Path, param.Federation_DirectorUrl.GetString()) //DONT DO THE DIRECTOR DO IT TO THE ORIGIN!
+func (te *TransferEngine) walkDirDownload(job *clientTransferJob, transfers []transferAttemptDetails, files chan *clientTransferFile, remotePath string) error {
+	// Check for cancelation since the client does not respect the context
+	if err := job.job.ctx.Err(); err != nil {
+		return err
+	}
+
+	// We want to query the api specifically so this works for backwards compatibility
+	remoteEndpoint := "/api/v1.0/director/origin/" + remotePath
+	remoteEndpoint = filepath.Clean(remoteEndpoint)
+
+	// Send a PROPFIND request to through the director to the origin
+	resp, err := queryDirector("GET", remoteEndpoint, job.job.directorUrl)
 	if err != nil {
 		return err
 	}
 
-	collectionsUrl := resp.Header.Get("Location")
-	// Create the client to walk the filesystem
-	rootUrl := *url
-	if collectionsUrl != "" {
-		// Parse the dir list host
-		dirListURL, err := url.Parse(collectionsUrl)
-		if err != nil {
-			log.Errorln("Failed to parse collectionsUrl from namespaces into URL:", err)
-			return err
-		}
-		rootUrl = *dirListURL
+	// Get the location of the origin from director response
+	endpoint := resp.Header.Get("Location")
 
-	} else {
-		log.Errorln("Host for directory listings is unknown")
-		return errors.New("Host for directory listings is unknown")
+	err = te.walkDirDownloadHelper(job, transfers, files, endpoint, remotePath)
+	if err != nil {
+		return err
 	}
 
-	// This collectionsUrl contains more than the origin, therefore we need to extract the host and scheme
-	log.Debugln("Dir list host: ", rootUrl.Scheme+"://"+rootUrl.Host)
-
-	auth := &bearerAuth{token: job.job.token}
-	client := gowebdav.NewAuthClient(rootUrl.Scheme+"://"+rootUrl.Host, auth)
-
-	// XRootD does not like keep alives and kills things, so turn them off.
-	transport := config.GetTransport()
-	client.SetTransport(transport)
-	return te.walkDirDownloadHelper(job, transfers, files, url.Path, client)
+	return nil
 }
 
 // Helper function for the `walkDirDownload`.
 //
 // Recursively walks through the remote server directory, emitting transfer files
 // for the engine to process.
-func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfers []transferAttemptDetails, files chan *clientTransferFile, remotePath string, client *gowebdav.Client) error {
+func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfers []transferAttemptDetails, files chan *clientTransferFile, endpoint string, remotePath string) error {
 	// Check for cancelation since the client does not respect the context
 	if err := job.job.ctx.Err(); err != nil {
 		return err
 	}
-	infos, err := client.ReadDir(remotePath)
+
+	// Create a new client and request to PROPFIND the origin
+	client := http.Client{Transport: config.GetTransport()}
+	req, err := http.NewRequest("PROPFIND", endpoint, nil)
+	if err != nil {
+		return errors.Wrap(err, "Failed to create PROPFIND request")
+	}
+
+	req.Header.Set("Depth", "1")
+	req.Header.Set("Authorization", "Bearer "+job.job.token)
+
+	propfindResp, err := client.Do(req)
+	if err != nil {
+		return errors.Wrap(err, "Failed to perform PROPFIND request")
+	}
+
+	log.Debugln("Origin's Response:", propfindResp)
+
+	// Parse the response to get the list of files and subdirs
+	infos, err := parseResponse(propfindResp.Body)
 	if err != nil {
 		return err
 	}
 	localBase := strings.TrimPrefix(remotePath, job.job.remoteURL.Path)
 	for _, info := range infos {
-		newPath := remotePath + "/" + info.Name()
-		if info.IsDir() {
-			err := te.walkDirDownloadHelper(job, transfers, files, newPath, client)
+		newPath := remotePath + "/" + info.Name
+		newEndpoint := endpoint + "/" + info.Name
+		// If we find a nested directory, recursively call the function to get list of contents
+		if info.IsDir {
+			err := te.walkDirDownloadHelper(job, transfers, files, newEndpoint, newPath)
 			if err != nil {
 				return err
 			}
 		} else {
+			// Otherwise, add the file to the transfer list as a new clientTransferFile
 			job.job.activeXfer.Add(1)
 			select {
 			case <-job.job.ctx.Done():
@@ -2194,7 +2260,7 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 					engine:     te,
 					remoteURL:  &url.URL{Path: newPath},
 					packOption: transfers[0].PackOption,
-					localPath:  path.Join(job.job.localPath, localBase, info.Name()),
+					localPath:  path.Join(job.job.localPath, localBase, info.Name),
 					upload:     job.job.upload,
 					token:      job.job.token,
 					attempts:   transfers,
@@ -2264,7 +2330,7 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 func statHttp(ctx context.Context, dest *url.URL, namespace namespaces.Namespace, token string) (size uint64, err error) {
 	statHosts := make([]url.URL, 0, 3)
 	// Do a PROPFIND to get our location
-	resp, err := queryDirector("PROPFIND", dest.Path, param.Federation_DirectorUrl.GetString())
+	resp, err := queryDirector("GET", dest.Path, param.Federation_DirectorUrl.GetString())
 	if err != nil {
 		return
 	}
@@ -2295,9 +2361,9 @@ func statHttp(ctx context.Context, dest *url.URL, namespace namespaces.Namespace
 			}
 			statHosts = append(statHosts, *endpoint)
 		}
-	} else if namespace.WriteBackHost != "" {
+	} else if collections != "" {
 		var endpoint *url.URL
-		endpoint, err = url.Parse(namespace.WriteBackHost)
+		endpoint, err = url.Parse(collections)
 		if err != nil {
 			return
 		}

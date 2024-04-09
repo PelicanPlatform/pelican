@@ -382,6 +382,15 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		return
 	}
 
+	// This is for a PROPFIND, for now, we will assume 1 origin but we will need to revisit
+	if ginCtx.Request.Method == "PROPFIND" {
+		ginCtx.Request.Header.Set("Depth", "1")
+		// We should only have one origin here, but we'll just take the first one
+		redirectURL := getRedirectURL(reqPath, originAds[0], !namespaceAd.PublicRead)
+		ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, authzBearerEscaped))
+		return
+	}
+
 	linkHeader := ""
 	first := true
 	for idx, ad := range originAds {
