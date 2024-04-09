@@ -11,10 +11,10 @@ on:
   workflow_dispatch:
   workflow_call:
     inputs:
-      from_workflow_call:
+      release_workflow:
         required: false
         type: boolean
-        default: true
+        default: false
       tag:
           description: 'Tag to use for the Docker image'
           required: false
@@ -32,20 +32,20 @@ jobs:
       # which is the branch for a feature version
       - name: Set Branch for Release
         id: set_branch
-        if: ${{ inputs.from_workflow_call }}
+        if: ${{ inputs.release_workflow }}
         run: |
           echo "branch=${GITHUB_REF_NAME%.*}.x" >> $GITHUB_OUTPUT
 
       - name: Checkout for release with a tag
         uses: actions/checkout@v4
-        if: ${{ inputs.from_workflow_call }}
+        if: ${{ inputs.release_workflow }}
         with:
           fetch-depth: 0
           ref: ${{ steps.set_branch.outputs.branch }}
 
       - name: Checkout for push to main
         uses: actions/checkout@v4
-        if: ${{ !inputs.from_workflow_call }}
+        if: ${{ !inputs.release_workflow }}
 
       - name: Cache base image
         uses: actions/cache@v4
@@ -110,20 +110,20 @@ jobs:
       # which is the branch for a feature version
       - name: Set Branch for Release
         id: set_branch
-        if: ${{ inputs.from_workflow_call }}
+        if: ${{ inputs.release_workflow }}
         run: |
           echo "branch=${GITHUB_REF_NAME%.*}.x" >> $GITHUB_OUTPUT
 
       - name: Checkout for release with a tag
         uses: actions/checkout@v4
-        if: ${{ inputs.from_workflow_call }}
+        if: ${{ inputs.release_workflow }}
         with:
           fetch-depth: 0
           ref: ${{ steps.set_branch.outputs.branch }}
 
       - name: Checkout for push to main
         uses: actions/checkout@v4
-        if: ${{ !inputs.from_workflow_call }}
+        if: ${{ !inputs.release_workflow }}
 
       - name: Generate tag list
         id: generate-tag-list
@@ -183,7 +183,7 @@ jobs:
         # if the workflow was for the release
       - name: Log in to OSG Harbor
         uses: docker/login-action@v3
-        if: github.repository == 'PelicanPlatform/pelican' && inputs.from_workflow_call
+        if: github.repository == 'PelicanPlatform/pelican' && inputs.release_workflow
         with:
           registry: hub.opensciencegrid.org
           username: ${{ secrets.PELICAN_HARBOR_ROBOT_USER }}
@@ -194,7 +194,7 @@ jobs:
         with:
           context: .
           file: ./images/Dockerfile
-          push: ${{ github.repository == 'PelicanPlatform/pelican' && (inputs.from_workflow_call || false) }}
+          push: ${{ github.repository == 'PelicanPlatform/pelican' && (inputs.release_workflow || false) }}
           tags: "${{ steps.generate-tag-list.outputs.taglist }}"
           target: ${{ matrix.image }}
           build-args: |
