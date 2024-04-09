@@ -85,7 +85,7 @@ export const PendingCard = ({
                  onClick={() => setTransition(!transition)}
             >
                 <Box my={"auto"} ml={1} display={"flex"} flexDirection={"row"}>
-                    <NamespaceIcon namespace={namespace} />
+                    <NamespaceIcon serverType={namespace.type} />
                     <Typography sx={{pt: "2px"}}>{namespace.prefix}</Typography>
                 </Box>
                 <Box display={"flex"}>

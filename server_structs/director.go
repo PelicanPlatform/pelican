@@ -37,6 +37,7 @@ type (
 		CredentialIssuer url.URL      `json:"issuer"`
 	}
 
+	// Note that the json are kept in uppercase for backward compatibility
 	Capabilities struct {
 		PublicReads bool `json:"PublicRead"`
 		Reads       bool `json:"Read"`

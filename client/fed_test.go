@@ -261,14 +261,14 @@ func TestCopyAuth(t *testing.T) {
 			transferResultsUpload, err := client.DoCopy(fed.Ctx, tempFile.Name(), uploadURL, false, client.WithTokenLocation(tempToken.Name()))
 			assert.NoError(t, err)
 			if err == nil {
-				assert.Equal(t, transferResultsUpload[0].TransferredBytes, int64(17))
+				assert.Equal(t, int64(17), transferResultsUpload[0].TransferredBytes)
 			}
 
 			// Download that same file with GET
 			transferResultsDownload, err := client.DoCopy(fed.Ctx, uploadURL, t.TempDir(), false, client.WithTokenLocation(tempToken.Name()))
 			assert.NoError(t, err)
 			if err == nil {
-				assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
+				assert.Equal(t, int64(17), transferResultsDownload[0].TransferredBytes)
 			}
 		}
 	})
