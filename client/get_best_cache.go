@@ -92,7 +92,7 @@ func GetBestCache(cacheListName string) ([]string, error) {
 					log.Debugln("Querying", GeoIpUrl.String())
 				}
 				client := &http.Client{Transport: defaultTransport}
-				req, err := http.NewRequest("GET", GeoIpUrl.String(), nil)
+				req, err := http.NewRequest(http.MethodGet, GeoIpUrl.String(), nil)
 				if err != nil {
 					log.Errorln("Failed to create HTTP request:", err)
 					skipResponse = true

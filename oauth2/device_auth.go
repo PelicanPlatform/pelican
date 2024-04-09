@@ -102,7 +102,7 @@ type Endpoint struct {
 }
 
 func retrieveDeviceAuth(ctx context.Context, c *Config, v url.Values) (*DeviceAuth, error) {
-	req, err := http.NewRequest("POST", c.Endpoint.DeviceAuthURL, strings.NewReader(v.Encode()))
+	req, err := http.NewRequest(http.MethodPost, c.Endpoint.DeviceAuthURL, strings.NewReader(v.Encode()))
 	if err != nil {
 		return nil, err
 	}
@@ -165,7 +165,7 @@ func (c *Config) AuthDevice(ctx context.Context) (*DeviceAuth, error) {
 
 // Adopted from internal/token.go; to be removed once DeviceFlow support is upstreamed
 func newTokenRequest(tokenURL, clientID, clientSecret string, v url.Values) (*http.Request, error) {
-	req, err := http.NewRequest("POST", tokenURL, strings.NewReader(v.Encode()))
+	req, err := http.NewRequest(http.MethodPost, tokenURL, strings.NewReader(v.Encode()))
 	if err != nil {
 		return nil, err
 	}

@@ -29,13 +29,13 @@ export default function RootLayout({
                                    }: {
   children: React.ReactNode
 }) {
-  return (
+    return (
       <html lang="en">
-      <ThemeProviderClient>
-        <body>
-            {children}
-        </body>
-      </ThemeProviderClient>
+          <ThemeProviderClient>
+              <body>
+                {children}
+              </body>
+          </ThemeProviderClient>
       </html>
-  )
+    )
 }

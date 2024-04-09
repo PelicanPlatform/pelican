@@ -2,9 +2,9 @@
 
 import LaunchIcon from '@mui/icons-material/Launch';
 import {useEffect, useState} from "react";
-import {Config} from "@/app/config/page";
+import {Config} from "./Config/index.d";
 import {Box, Typography} from "@mui/material";
-import {isLoggedIn} from "@/helpers/login";
+import AuthenticatedContent from "@/components/layout/AuthenticatedContent";
 import Link from "next/link";
 
 
@@ -28,12 +28,6 @@ const FederationOverview = () => {
     const [config, setConfig] = useState<{ [key: string] : string | undefined} | undefined>(undefined)
 
     let getConfig = async () => {
-
-        //Check if the user is logged in
-        if(!(await isLoggedIn())){
-            window.location.replace("/view/login/")
-        }
-
         let response = await fetch("/api/v1.0/config")
         if(response.ok) {
             const responseData = await response.json() as Config
@@ -60,7 +54,7 @@ const FederationOverview = () => {
 
     return (
 
-        <Box>
+        <AuthenticatedContent redirect={true} checkAuthentication={(u) => u?.role == "admin"}>
             {!Object.values(config).every(x => x == undefined) ? <Typography variant={"h4"} component={"h2"}  mb={2}>Federation Overview</Typography> : null}
             {config?.NamespaceUrl ?
                 <LinkBox href={config?.NamespaceUrl} text={"Namespace Registry"}/> : null
@@ -77,8 +71,7 @@ const FederationOverview = () => {
             {config?.JwkUrl ?
                 <LinkBox href={config?.JwkUrl} text={"JWK"}/> : null
             }
-
-        </Box>
+        </AuthenticatedContent>
     )
 }
 

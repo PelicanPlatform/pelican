@@ -71,6 +71,7 @@ jobs:
     secrets: inherit
     with:
       tag: ${{ needs.pre-release.outputs.tag }}
+      release_workflow: true
 
   release:
     needs: [pre-release]

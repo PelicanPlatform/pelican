@@ -19,8 +19,11 @@
 "use client"
 
 import React, {useState, useEffect} from "react";
-import {Box, Container, Grid, Typography} from "@mui/material";
+import {Box, Container, Grid, Skeleton, Typography} from "@mui/material";
 import Link from "next/link";
+import useSWR from "swr";
+import {getEnabledServers} from "@/helpers/util";
+import {ServerType} from "@/index";
 
 function TextCenteredBox({text} : {text: string}) {
     return (
@@ -43,37 +46,30 @@ function TextCenteredBox({text} : {text: string}) {
 
 export default function Home() {
 
-    const [enabledServers, setEnabledServers] = useState<string[]>([])
-
-    useEffect(() => {
-
-        const getEnabledServers = async () => {
-            try {
-                const res = await fetch("/api/v1.0/servers")
-                const data = await res.json()
-                setEnabledServers(data?.servers)
-            } catch {
-                setEnabledServers(["origin", "director", "registry"])
-            }
-        }
-
-        getEnabledServers()
-    }, []);
+    const {data: enabledServers, isLoading} = useSWR<ServerType[]>("getEnabledServers", getEnabledServers)
 
     return (
         <Box width={"100%"} pt={5}>
             <Container maxWidth={"xl"}>
                 <Typography pb={5} textAlign={"center"} variant={"h3"}>Pelican Services</Typography>
                 <Grid container justifyContent={"center"} spacing={2}>
-                    {enabledServers.map((service) => {
-                        return (
-                            <Grid key={service} item xs={2}>
-                                <Link href={`./${service}/`}>
-                                    <TextCenteredBox text={service}/>
-                                </Link>
-                            </Grid>
-                        )
-                    })}
+                    {isLoading &&
+                        <Grid item xs={2}>
+                            <Skeleton variant={"rectangular"} width={150} height={150} sx={{borderRadius: 2}}/>
+                        </Grid>
+                    }
+                    {
+                        enabledServers &&
+                        enabledServers.map((service) => {
+                            return (
+                                <Grid key={service} item xs={2}>
+                                    <Link href={`./${service}/`}>
+                                        <TextCenteredBox text={service}/>
+                                    </Link>
+                                </Grid>
+                            )
+                        }
+                    )}
                 </Grid>
             </Container>
         </Box>

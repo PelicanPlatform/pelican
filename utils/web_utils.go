@@ -115,7 +115,7 @@ func GetTopologyJSON() (*TopologyNamespacesJSON, error) {
 		return nil, errors.New("Topology namespaces.json configuration option (`Federation.TopologyNamespaceURL`) not set")
 	}
 
-	req, err := http.NewRequest("GET", topoNamespaceUrl, nil)
+	req, err := http.NewRequest(http.MethodGet, topoNamespaceUrl, nil)
 	if err != nil {
 		metrics.SetComponentHealthStatus(metrics.DirectorRegistry_Topology, metrics.StatusCritical, "Failure when getting OSDF namespace data from topology")
 		return nil, errors.Wrap(err, "Failure when getting OSDF namespace data from topology")

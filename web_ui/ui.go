@@ -31,6 +31,7 @@ import (
 	"os/signal"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -55,8 +56,13 @@ import (
 var (
 
 	//go:embed frontend/out/*
-	webAssets embed.FS
+	webAssets           embed.FS
+	serverPages         = []string{"director", "registry", "origin", "cache"}
+	publicAccessPages   = []string{"director", "registry"} // UI pages that allow unauthenticated users to access.
+	nonAdminAccessPages = []string{"director", "registry"} // UI pages that allow non-admin users to access. Note that this is different from "publicView" where unauthenticated users can access the page
 )
+
+const notFoundFilePath = "frontend/out/404/index.html"
 
 func getConfigValues(ctx *gin.Context) {
 	user := ctx.GetString("User")
@@ -161,103 +167,173 @@ func getEnabledServers(ctx *gin.Context) {
 	ctx.JSON(200, gin.H{"servers": enabledServers})
 }
 
-func configureWebResource(engine *gin.Engine) error {
-	engine.GET("/view/*requestPath", func(ctx *gin.Context) {
-		requestPath := ctx.Param("requestPath")
+func handleWebUIRedirect(ctx *gin.Context) {
+	requestPath := ctx.Param("requestPath")
 
-		// If the requestPath is a directory indicate that we are looking for the index.html file
-		if strings.HasSuffix(requestPath, "/") {
-			requestPath += "index.html"
-		}
+	// If the requestPath is a directory indicate that we are looking for the index.html file
+	if strings.HasSuffix(requestPath, "/") {
+		requestPath += "index.html"
+	}
 
-		// Clean the request path
-		requestPath = path.Clean(requestPath)
+	// Clean the request path
+	requestPath = path.Clean(requestPath)
 
-		// If requestPath doesn't have extension, is not a directory, and has a index file, redirect to index file
-		if !strings.Contains(requestPath, ".") && !strings.HasSuffix(requestPath, "/") {
-			if _, err := webAssets.ReadFile("frontend/out" + requestPath + "/index.html"); err == nil {
-				ctx.Redirect(http.StatusMovedPermanently, "/view/"+requestPath+"/")
-				return
-			}
-		}
-
-		db := authDB.Load()
-		user, err := GetUser(ctx)
-
-		// If just one server is enabled, redirect to that server
-		if len(config.GetEnabledServerString(true)) == 1 && requestPath == "/index.html" {
-			ctx.Redirect(http.StatusFound, "/view/"+config.GetEnabledServerString(true)[0]+"/")
+	// If requestPath doesn't have extension, is not a directory, and has a index file, redirect to index file
+	if !strings.Contains(requestPath, ".") && !strings.HasSuffix(requestPath, "/") {
+		if _, err := webAssets.ReadFile("frontend/out" + requestPath + "/index.html"); err == nil {
+			ctx.Redirect(http.StatusMovedPermanently, "/view/"+requestPath+"/")
+			ctx.Abort()
 			return
 		}
+	}
 
-		// If requesting servers other than the registry or the director
-		if !strings.HasPrefix(requestPath, "/registry") && !strings.HasPrefix(requestPath, "/director") {
+	// If only one server is enabled, and user is requesting "/", redirect to that server
+	if len(config.GetEnabledServerString(true)) == 1 && requestPath == "/index.html" {
+		ctx.Redirect(http.StatusFound, "/view/"+config.GetEnabledServerString(true)[0]+"/")
+		ctx.Abort()
+		return
+	}
 
-			// Redirect initialized users from initialization pages
-			if strings.HasPrefix(requestPath, "/initialization") && strings.HasSuffix(requestPath, "index.html") {
-
-				// If the user has been initialized previously
-				if db != nil {
-					ctx.Redirect(http.StatusFound, "/view/")
-					return
-				}
-			}
-
-			// Redirect authenticated users from login pages
-			if strings.HasPrefix(requestPath, "/login") && strings.HasSuffix(requestPath, "index.html") {
-
-				// If the user has been authenticated previously
-				if err == nil && user != "" {
-					ctx.Redirect(http.StatusFound, "/view/")
-					return
-				}
-			}
-
-			// Direct uninitialized users to initialization pages
-			if !strings.HasPrefix(requestPath, "/initialization") && strings.HasSuffix(requestPath, "index.html") {
-
-				// If the user has not been initialized previously
-				if db == nil {
-					ctx.Redirect(http.StatusFound, "/view/initialization/code/")
-					return
-				}
-			}
-
-			// Direct unauthenticated initialized users to login pages
-			if !strings.HasPrefix(requestPath, "/login") && strings.HasSuffix(requestPath, "index.html") {
-
-				// If the user is not authenticated but initialized
-				if (err != nil || user == "") && db != nil {
-					ctx.Redirect(http.StatusFound, "/view/login/")
-					return
-				}
-			}
-		}
-
-		filePath := "frontend/out" + requestPath
-		file, _ := webAssets.ReadFile(filePath)
-
-		// If the file is not found, return 404
-		if file == nil {
-			notFoundFilePath := "frontend/out/404/index.html"
+	// Only attempt to serve UI for servers enabled
+	serverName := strings.Split(strings.TrimPrefix(requestPath, "/"), "/")[0]
+	if slices.Contains(serverPages, serverName) {
+		if (serverName == "director" && !config.IsServerEnabled(config.DirectorType)) ||
+			(serverName == "registry" && !config.IsServerEnabled(config.RegistryType)) ||
+			(serverName == "origin" && !config.IsServerEnabled(config.OriginType)) ||
+			(serverName == "cache" && !config.IsServerEnabled(config.CacheType)) {
 			file, _ := webAssets.ReadFile(notFoundFilePath)
 			ctx.Data(
-				http.StatusOK,
+				http.StatusNotFound,
 				mime.TypeByExtension(notFoundFilePath),
 				file,
 			)
-		} else {
-			// If the file is found, return the file
-			ctx.Data(
-				http.StatusOK,
-				mime.TypeByExtension(filePath),
-				file,
-			)
+			ctx.Abort()
+			return
 		}
-	})
+	}
+}
+
+func handleWebUIAuth(ctx *gin.Context) {
+	requestPath := ctx.Param("requestPath")
+	db := authDB.Load()
+	user, err := GetUser(ctx)
+
+	// Skip auth check for static files
+	if path.Ext(requestPath) != "" && path.Ext(requestPath) != "html" {
+		ctx.Next()
+		return
+	}
+
+	// Handle initialization. If db is nill, then redirect user to the initialization page
+	if strings.HasPrefix(requestPath, "/initialization") {
+		if db != nil {
+			ctx.Redirect(http.StatusFound, "/view/")
+			ctx.Abort()
+			return
+		}
+	} else if db == nil {
+		ctx.Redirect(http.StatusFound, "/view/initialization/code/")
+		ctx.Abort()
+		return
+	}
+
+	// Redirect authenticated users from login pages
+	if strings.HasPrefix(requestPath, "/login") && err == nil && user != "" {
+		ctx.Redirect(http.StatusFound, "/view/")
+		ctx.Abort()
+		return
+	}
+
+	// For all routes other than /login and /initialization,
+	if !strings.HasPrefix(requestPath, "/login") {
+		rootPage := strings.Split(strings.TrimPrefix(requestPath, "/"), "/")[0]
+		// If the page is a public page, pass the check
+		if slices.Contains(publicAccessPages, rootPage) {
+			ctx.Next()
+			return
+		}
+
+		// For non-public pages, redirect unauthenticated users to login page
+		if err != nil || user == "" {
+			// If director or registry server is up and user is at /view/
+			// then we allow them to choose the server without logging in
+			if (config.IsServerEnabled(config.DirectorType) ||
+				config.IsServerEnabled(config.RegistryType)) &&
+				rootPage == "" {
+				ctx.Next()
+				return
+			}
+			ctx.Redirect(http.StatusFound, "/view/login/")
+			ctx.Abort()
+			return
+		}
+
+		// If rootPage requires admin privilege
+		if !slices.Contains(nonAdminAccessPages, rootPage) {
+			// If director or registry server is up and user is at /view/
+			// then we allow them to choose the server without being an admin
+			if (config.IsServerEnabled(config.DirectorType) ||
+				config.IsServerEnabled(config.RegistryType)) &&
+				rootPage == "" {
+				ctx.Next()
+				return
+			}
+			isAdmin, _ := CheckAdmin(user)
+			if isAdmin {
+				ctx.Next()
+				return
+			} else {
+				ctx.String(http.StatusForbidden, "You don't have the permission to view this page. If you think this is wrong, please contact your server admin.")
+				ctx.Abort()
+				return
+			}
+		} else {
+			// If the page does not require admin privilege
+			ctx.Next()
+		}
+	}
+}
+
+func handleWebUIResource(ctx *gin.Context) {
+	requestPath := ctx.Param("requestPath")
+
+	// If the requestPath is a directory indicate that we are looking for the index.html file
+	if strings.HasSuffix(requestPath, "/") {
+		requestPath += "index.html"
+	}
+
+	// Clean the request path
+	requestPath = path.Clean(requestPath)
+
+	filePath := "frontend/out" + requestPath
+	file, _ := webAssets.ReadFile(filePath)
+
+	// If the file is not found, return 404
+	if file == nil {
+		file, _ := webAssets.ReadFile(notFoundFilePath)
+		ctx.Data(
+			http.StatusNotFound,
+			mime.TypeByExtension(notFoundFilePath),
+			file,
+		)
+	} else {
+		// If the file is found, return the file
+		ctx.Data(
+			http.StatusOK,
+			mime.TypeByExtension(filePath),
+			file,
+		)
+	}
+}
+
+func configureWebResource(engine *gin.Engine) {
+	engine.GET("/view/*requestPath",
+		handleWebUIRedirect,
+		handleWebUIAuth,
+		handleWebUIResource,
+	)
 
 	engine.GET("/api/v1.0/docs", func(ctx *gin.Context) {
-
 		filePath := "frontend/out/api/docs/index.html"
 		file, _ := webAssets.ReadFile(filePath)
 		ctx.Data(
@@ -266,8 +342,6 @@ func configureWebResource(engine *gin.Engine) error {
 			file,
 		)
 	})
-
-	return nil
 }
 
 // Configure common endpoint available to all server web UI which are located at /api/v1.0/*
@@ -372,9 +446,7 @@ func ConfigureServerWebAPI(ctx context.Context, engine *gin.Engine, egrp *errgro
 		if err := configureAuthEndpoints(ctx, engine, egrp); err != nil {
 			return err
 		}
-		if err := configureWebResource(engine); err != nil {
-			return err
-		}
+		configureWebResource(engine)
 	}
 
 	// Redirect root to /view for web UI

@@ -184,7 +184,7 @@ func downloadTestFile(ctx context.Context, fileUrl string) error {
 		return errors.Wrap(err, "failed to create a token for cache self-test download")
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", fileUrl, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fileUrl, nil)
 	if err != nil {
 		return errors.Wrap(err, "failed to create GET request for cache self-test download")
 	}

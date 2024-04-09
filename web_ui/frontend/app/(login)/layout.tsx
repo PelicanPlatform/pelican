@@ -32,7 +32,7 @@ export default function RootLayout({
 }) {
     return (
         <>
-            <Header text={"Pelican Software"}/>
+            <Header text={"Pelican Platform"}/>
             <Box component={"main"} pt={"75px"} display={"flex"} minHeight={"100vh"}>
                 {children}
             </Box>

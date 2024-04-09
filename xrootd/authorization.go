@@ -230,7 +230,7 @@ func getOSDFAuthFiles(server server_structs.XRootDServer) ([]byte, error) {
 	url := base.ResolveReference(endpoint)
 	log.Debugln("Querying OSDF url:", url.String())
 
-	req, err := http.NewRequest("GET", url.String(), nil)
+	req, err := http.NewRequest(http.MethodGet, url.String(), nil)
 	if err != nil {
 		return nil, err
 	}

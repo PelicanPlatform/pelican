@@ -181,7 +181,7 @@ func (r *RegistrationError) Error() string {
 // newHTTPRequest returns a new *http.Request to  be used for client registration
 // It has header fields specified
 func newHTTPRequest(registrationURL, initialAccessToken string, body []byte) (*http.Request, error) {
-	req, err := http.NewRequest("POST", registrationURL, bytes.NewBuffer(body))
+	req, err := http.NewRequest(http.MethodPost, registrationURL, bytes.NewBuffer(body))
 	if err != nil {
 		return nil, err
 	}

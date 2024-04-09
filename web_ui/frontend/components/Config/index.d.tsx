@@ -114,3 +114,19 @@ export interface Lot {
     paths: Path[];
     managementpolicyattrs: ManagementPolicyAttrs;
 }
+
+export interface ConfigMetadata {
+    [key: string]: ConfigMetadataValue
+}
+
+export interface ConfigMetadataValue {
+    components: string[]
+    default: boolean
+    description: string
+    name: string
+    type: string
+}
+
+export type Config = {
+    [key: string]: ParameterInputProps | Config
+}

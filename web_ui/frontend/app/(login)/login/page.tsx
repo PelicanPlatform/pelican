@@ -18,31 +18,35 @@
 
 "use client"
 
-import {Box, Grow, Typography, Button} from "@mui/material";
+import {Box, Grow, Typography, Button, Collapse, Skeleton} from "@mui/material";
 import { useRouter } from 'next/navigation'
-import {useEffect, useState} from "react";
+import {useContext, useEffect, useMemo, useState} from "react";
 
 import LoadingButton from "../components/LoadingButton";
-
 import PasswordInput from "../components/PasswordInput";
+import useSWR from "swr";
+import {getUser} from "@/helpers/login";
+import {ServerType} from "@/index";
+import {getEnabledServers, getOauthEnabledServers} from "@/helpers/util";
 
-export default function Home() {
+const AdminLogin = () => {
 
     const router = useRouter()
+    const {mutate} = useSWR("getUser", getUser)
+
     let [password, setPassword] = useState <string>("")
     let [loading, setLoading] = useState(false);
-    let [enabledServers, setEnabledServers] = useState<string[]>([])
     let [error, setError] = useState<string | undefined>(undefined);
+    const [toggled, setToggled] = useState(false)
 
-    useEffect(() => {
-        (async () => {
-            const response = await fetch("/api/v1.0/servers")
-            if (response.ok) {
-                const data = await response.json()
-                setEnabledServers(data?.servers)
-            }
-        })()
-    }, []);
+    const {data: enabledServers} = useSWR<ServerType[]>("getEnabledServers", getEnabledServers)
+    const {data: oauthServers} = useSWR<ServerType[]>("getOauthEnabledServers", getOauthEnabledServers, {fallbackData: []})
+
+    const serverIntersect = useMemo(() => {
+        if(enabledServers && oauthServers) {
+            return enabledServers.filter((server) => oauthServers.includes(server))
+        }
+    }, [enabledServers, oauthServers])
 
     async function submit(password: string) {
 
@@ -62,14 +66,15 @@ export default function Home() {
             })
 
             if(response.ok){
-                const url = new URL(window.location.href)
-                const returnURL = url.searchParams.get("returnURL")
+                await mutate(getUser)
 
-                router.push(returnURL ? returnURL : "../")
+                const url = new URL(window.location.href)
+                let returnUrl = url.searchParams.get("returnURL") || ""
+                returnUrl = returnUrl.replace(`/view`, "")
+                router.push(returnUrl ? returnUrl : "../")
             } else {
                 try {
                     let data = await response.json()
-
                     setLoading(false)
                     setError(response.status + ": " + data['error'])
                 } catch {
@@ -78,7 +83,8 @@ export default function Home() {
                 }
             }
 
-        } catch {
+        } catch (e) {
+            console.error(e)
             setLoading(false)
             setError("Could not connect to server")
         }
@@ -86,78 +92,117 @@ export default function Home() {
 
     function onSubmit(e: React.FormEvent<HTMLFormElement>) {
         e.preventDefault()
-
         submit(password)
     }
 
+    const LoginComponent = (
+        <form onSubmit={onSubmit} action="#">
+            <Box display={"flex"} justifyContent={"center"}>
+                <PasswordInput
+                    FormControlProps={{
+                        sx: {width: "50%"},
+                    }}
+                    TextFieldProps={{
+                        InputProps: {
+                            sx: {width: "50%"},
+                            onChange: (e) => {
+                                setPassword(e.target.value)
+                                setError(undefined)
+                            }
+                        }
+                    }}
+                />
+            </Box>
+            <Box display={"flex"} flexDirection={"column"}>
+                <Grow in={error !== undefined}>
+                    <Typography
+                        textAlign={"center"}
+                        variant={"subtitle2"}
+                        color={"error.main"}
+                        mb={1}
+                    >
+                        {error}
+                    </Typography>
+                </Grow>
+                <LoadingButton
+                    variant="outlined"
+                    sx={{margin: "auto"}}
+                    color={"primary"}
+                    type={"submit"}
+                    loading={loading}
+                >
+                    <span>Login</span>
+                </LoadingButton>
+            </Box>
+        </form>
+    )
+
+    if(serverIntersect && (serverIntersect.includes("registry") || serverIntersect.includes("origin") || serverIntersect.includes("cache"))) {
+        return (
+            <Box display={"flex"} flexDirection={"column"} justifyContent={"center"}>
+                <Box m={"auto"}>
+                    <Button size={"small"} variant={"text"} onClick={() => setToggled(!toggled)}>
+                        Server Admin Login
+                    </Button>
+                </Box>
+                <Collapse in={toggled}>
+                    {LoginComponent}
+                </Collapse>
+            </Box>
+        )
+    }
+
+    return LoginComponent
+}
+
+export default function Home() {
+
+    const [returnUrl, setReturnUrl] = useState<string | undefined>(undefined)
+    const {data: enabledServers} = useSWR<ServerType[]>("getEnabledServers", getEnabledServers)
+    const {data: oauthServers} = useSWR<ServerType[]>("getOauthEnabledServers", getOauthEnabledServers, {fallbackData: []})
+
+    useEffect(() => {
+        const url = new URL(window.location.href)
+        let returnUrl = url.searchParams.get("returnURL") || ""
+        returnUrl = returnUrl.replace(`/view`, "")
+        setReturnUrl(returnUrl)
+    }, [])
+
+    const serverIntersect = useMemo(() => {
+        if(enabledServers && oauthServers) {
+            return enabledServers.filter((server) => oauthServers.includes(server))
+        }
+    }, [enabledServers, oauthServers])
+
     return (
         <>
-            <Box m={"auto"} mt={12}  display={"flex"} flexDirection={"column"}>
+            <Box m={"auto"} mt={"20vh"}  display={"flex"} flexDirection={"column"}>
                 <Box>
                     <Typography textAlign={"center"} variant={"h3"} component={"h3"}>
                         Login
                     </Typography>
+                    <Box color={"grey"} mt={1} mb={2}>
+                        <Typography textAlign={"center"} variant={"h6"} component={"p"}>
+                            Administer your Pelican Platform
+                        </Typography>
+                    </Box>
                 </Box>
-                <Box pt={2} mx={"auto"}>
-                    { enabledServers !== undefined && enabledServers.includes("registry") &&
+                <Box mx={"auto"}>
+                    { serverIntersect && (serverIntersect.includes("registry") || serverIntersect.includes("origin") || serverIntersect.includes("cache")) &&
                         <>
-                            <Typography textAlign={"center"} variant={"h6"} component={"h2"}>
-                                For Outside Administrators
-                            </Typography>
-                            <Box display={"flex"} justifyContent={"center"} my={2} mb={3}>
+                            <Box display={"flex"} justifyContent={"center"} mb={1}>
                                 <Button
                                     size={"large"}
-                                    href={"/api/v1.0/auth/cilogon/login?next_url=/view/registry/"}
+                                    href={`/api/v1.0/auth/oauth/login?next_url=${returnUrl ? returnUrl : "/"}`}
                                     variant={"contained"}
                                 >
-                                    Login with CILogon
+                                    Login with OAuth
                                 </Button>
                             </Box>
-                            <Typography sx={{color: "#646464"}} textAlign={"center"} variant={"subtitle1"} component={"h2"}>
-                                For Registry Administrator
-                            </Typography>
                         </>
                     }
-                    <form onSubmit={onSubmit} action="#">
-                        <Box display={"flex"} justifyContent={"center"}>
-                            <PasswordInput
-                                FormControlProps={{
-                                    sx: {width: "50%"},
-                                }}
-                                TextFieldProps={{
-                                    InputProps: {
-                                        sx: {width: "50%"},
-                                        onChange: (e) => {
-                                            setPassword(e.target.value)
-                                            setError(undefined)
-                                        }
-                                    }
-                                }}
-                            />
-                        </Box>
-                        <Box display={"flex"} flexDirection={"column"}>
-                            <Grow in={error !== undefined}>
-                                <Typography
-                                    textAlign={"center"}
-                                    variant={"subtitle2"}
-                                    color={"error.main"}
-                                    mb={1}
-                                >
-                                    {error}
-                                </Typography>
-                            </Grow>
-                            <LoadingButton
-                                variant="outlined"
-                                sx={{margin: "auto"}}
-                                color={"primary"}
-                                type={"submit"}
-                                loading={loading}
-                            >
-                                <span>Confirm</span>
-                            </LoadingButton>
-                        </Box>
-                    </form>
-
+                    { serverIntersect && <AdminLogin/>}
+                    { !serverIntersect && <Skeleton variant={"rectangular"} height={90} width={400} sx={{borderRadius: 2}}/> }
                 </Box>
             </Box>
         </>

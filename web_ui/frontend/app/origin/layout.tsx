@@ -18,13 +18,15 @@
 
 import {Box, Tooltip} from "@mui/material";
 
-import {Sidebar} from "@/components/layout/Sidebar";
+
 import Link from "next/link";
-import Image from "next/image";
-import PelicanLogo from "@/public/static/images/PelicanPlatformLogo_Icon.png";
 import IconButton from "@mui/material/IconButton";
 import BuildIcon from "@mui/icons-material/Build";
+
 import Main from "@/components/layout/Main";
+import {Sidebar} from "@/components/layout/Sidebar";
+import AuthenticatedContent from "@/components/layout/AuthenticatedContent";
+import {User} from "@/index";
 
 export const metadata = {
     title: 'Pelican Origin',
@@ -39,14 +41,6 @@ export default function RootLayout({
     return (
         <Box display={"flex"} flexDirection={"row"}>
             <Sidebar>
-                <Link href={"/"}>
-                    <Image
-                        src={PelicanLogo}
-                        alt={"Pelican Logo"}
-                        width={36}
-                        height={36}
-                    />
-                </Link>
                 <Box pt={1}>
                     <Tooltip title={"Config"} placement={"right"}>
                         <Link href={"/config/"}>
