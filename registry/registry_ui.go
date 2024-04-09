@@ -444,7 +444,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 
 	if !isUpdate {
 		// Check if prefix exists before doing anything else. Skip check if it's update operation
-		exists, err := namespaceExists(ns.Prefix)
+		exists, err := namespaceExistsByPrefix(ns.Prefix)
 		if err != nil {
 			log.Errorf("Failed to check if namespace already exists: %v", err)
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Server encountered an error checking if namespace already exists"})
