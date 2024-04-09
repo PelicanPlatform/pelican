@@ -466,7 +466,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 	inTopo, topoNss, valErr, sysErr := validateKeyChaining(ns.Prefix, pubkey)
 	if valErr != nil {
 		log.Errorln("Bad prefix when validating key chaining", valErr)
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": valErr})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": valErr.Error()})
 		return
 	}
 	if sysErr != nil {
