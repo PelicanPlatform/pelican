@@ -1,3 +1,5 @@
+import {User} from "@/index";
+import React from "react";
 
 export interface Authenticated {
     authenticated: boolean
@@ -77,5 +79,30 @@ export async function isLoggedIn() : Promise<boolean> {
 
     } catch (error) {
         return false
+    }
+}
+
+export const getUser = async (): Promise<User> => {
+
+    try {
+        let response = await fetch("/api/v1.0/auth/whoami")
+        if(!response.ok){
+            return {authenticated: false}
+        }
+
+        const json = await response.json()
+
+        // If authenticated, store status and csrf token
+        const user = {
+            authenticated: json['authenticated'],
+            user: json['user'] == "" ? undefined : json['user'],
+            role: json['role'] == "" ? undefined : json['role'],
+            csrf_token: response.headers.get('X-CSRF-Token')
+        }
+
+        return user
+
+    } catch (error) {
+        return {authenticated: false}
     }
 }

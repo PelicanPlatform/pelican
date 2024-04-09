@@ -1,5 +1,4 @@
 import {Namespace} from "@/components/Main";
-import {Authenticated} from "@/helpers/login";
 import React, {useRef, useState} from "react";
 import {Avatar, Box, IconButton, Paper, Tooltip, Typography} from "@mui/material";
 import {Download, Edit, Person} from "@mui/icons-material";
@@ -7,10 +6,11 @@ import Link from "next/link";
 
 import InformationDropdown from "./InformationDropdown";
 import {NamespaceIcon} from "@/components/Namespace/index";
+import {User} from "@/index";
 
 export interface CardProps {
     namespace: Namespace
-    authenticated?: Authenticated
+    authenticated?: User
 }
 
 export const Card = ({ namespace, authenticated } : CardProps) => {

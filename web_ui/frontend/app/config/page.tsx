@@ -27,9 +27,10 @@ import {
     Container,
     Tooltip,
     Snackbar,
-    Button
+    Button,
+    IconButton
 } from "@mui/material";
-import React, {useEffect, useMemo, useState} from "react";
+import React, {useContext, useEffect, useMemo, useState} from "react";
 import {OverridableStringUnion} from "@mui/types";
 import {Variant} from "@mui/material/styles/createTypography";
 import {TypographyPropsVariantOverrides} from "@mui/material/Typography";
@@ -43,35 +44,20 @@ import {
     Cached
 } from '@mui/icons-material';
 import {default as NextLink} from "next/link";
-import {merge, isEmpty, isMatch} from "lodash"
+import useSWR from "swr";
+import {merge, isMatch} from "lodash"
 
-import {isLoggedIn} from "@/helpers/login";
 import {Sidebar} from "@/components/layout/Sidebar";
-import Image from "next/image";
-import PelicanLogo from "@/public/static/images/PelicanPlatformLogo_Icon.png";
-import IconButton from "@mui/material/IconButton";
 import {Main} from "@/components/layout/Main";
-
-import {BooleanField, StringField, DurationField, StringSliceField, IntegerField, Field} from "@/components/Config";
-import {config} from "react-transition-group";
+import {Field} from "@/components/Config";
 import {submitConfigChange} from "@/components/Config/util";
-import {ParameterInputProps} from "@/components/Config/index.d";
+import {ParameterInputProps, Config, ConfigMetadata} from "@/components/Config/index.d";
+import {getConfigMetadata} from "./util";
+import StatusSnackBar, {StatusSnackBarProps} from "@/components/StatusSnackBar";
+import {useRouter} from "next/navigation";
+import {ServerType} from "@/index";
+import {getEnabledServers} from "@/helpers/util";
 
-interface ConfigMetadata {
-    [key: string]: ConfigMetadataValue
-}
-
-interface ConfigMetadataValue {
-    components: string[]
-    default: boolean
-    description: string
-    name: string
-    type: string
-}
-
-export type Config = {
-    [key: string]: ParameterInputProps | Config
-}
 
 const isConfig = (value: ParameterInputProps | Config): boolean => {
     const isConfig = (value as Config)?.Type === undefined
@@ -115,7 +101,7 @@ function updateValue (obj: StringObject, key: string[], value: any) {
     }
 }
 
-interface ConfigDisplayProps {
+export interface ConfigDisplayProps {
     id: string[]
     name: string
     value: Config | ParameterInputProps
@@ -273,13 +259,12 @@ function TableOfContents({id, name, value, level = 1}: TableOfContentsProps) {
 
 function Config() {
 
-    const [config, setConfig] = useState<Config|undefined>(undefined)
-    const [enabledServers, setEnabledServers] = useState<string[]>([])
-    const [configMetadata, setConfigMetadata] = useState<ConfigMetadata|undefined>(undefined)
-    const [status, setStatus] = useState<string|undefined>(undefined)
+    const router = useRouter()
+
+    const [status, setStatus] = useState<StatusSnackBarProps|undefined>(undefined)
+    const [config, setConfig] = useState<Config | undefined>(undefined)
 
     // Config state managers
-    const [toggleRefresh, setToggleRefresh] = useState<boolean>(false)
     const [configKey, setConfigKey] = useState<number>(0)
 
     const [patch, setPatch] = useState<any>({})
@@ -289,67 +274,37 @@ function Config() {
         setPatch(structuredClone(newPatch))
     }
 
-    let getConfig = async () => {
+    const {data: enabledServers} = useSWR<ServerType[]>("getEnabledServers", getEnabledServers, {
+        fallbackData: ["origin", "registry", "director"]
+    })
+    const {data: configMetadata} = useSWR<ConfigMetadata | undefined>("getConfigMetadata", getConfigMetadata)
 
-        //Check if the user is logged in
-        if(!(await isLoggedIn())){
-            window.location.replace("/view/login/")
-        }
-
+    const getConfig = async () => {
         let response = await fetch("/api/v1.0/config")
-        if(response.ok) {
-            setConfig(await response.json())
+        if(response.ok){
+            const data = await response.json()
+            setConfig(data)
             setStatus(undefined)
-            return true
+            setConfigKey(configKey + 1)
         } else {
-            setStatus("Failed Fetch Config, Retry in 5 seconds")
-            return false
-        }
-    }
-
-    const getEnabledServers = async () => {
-        try {
-            const res = await fetch("/api/v1.0/servers")
-            const data = await res.json()
-            setEnabledServers(data?.servers)
-        } catch {
-            setEnabledServers(["origin", "director", "registry"])
-        }
-    }
-
-    const getConfigMetadata = async () => {
-        try {
-            const res = await fetch("/view/data/parameters.json")
-            const data = await res.json() as ConfigMetadata[]
-            const metadata = data.reduce((acc: ConfigMetadata, curr: ConfigMetadata) => {
-                const [key, value] = Object.entries(curr)[0]
-                acc[key] = value
-                return acc
-            }, {})
-
-            setConfigMetadata(metadata)
-        } catch {
-            setConfigMetadata(undefined)
-        }
-    }
-
-    useEffect(() => {
-        getEnabledServers()
-        getConfigMetadata()
-    }, [])
-
-    useEffect(() => {
-        let loadConfig = async () => {
-            let success = await getConfig()
-            if(!success) {
-                setTimeout(loadConfig, 5000)
-            } else {
-                setConfigKey(configKey + 1)
+            setConfig(undefined)
+            if(response.status === 401){
+                setStatus({
+                    severity: "error",
+                    message: "Unauthorized",
+                    action: {
+                        label: "Login",
+                        onClick: () => router.push("/login/?returnURL=/config/")
+                    }
+                })
             }
+            setTimeout(getConfig, 2000)
         }
+    }
 
-        loadConfig()
-    }, [toggleRefresh])
+    useEffect(() => {
+        getConfig()
+    }, [])
 
     const filteredConfig = useMemo(() => {
 
@@ -382,16 +337,8 @@ function Config() {
     return (
         <>
             <Sidebar>
-                <NextLink href={"/"}>
-                    <Image
-                        src={PelicanLogo}
-                        alt={"Pelican Logo"}
-                        width={36}
-                        height={36}
-                    />
-                </NextLink>
-                { enabledServers.includes("origin") &&
-                    <Box pt={3}>
+                {enabledServers && enabledServers.includes("origin") &&
+                    <Box pt={1}>
                         <NextLink href={"/origin/"}>
                             <Tooltip title={"Origin"} placement={"right"}>
                                 <IconButton>
@@ -401,7 +348,7 @@ function Config() {
                         </NextLink>
                     </Box>
                 }
-                { enabledServers.includes("director") &&
+                {enabledServers && enabledServers.includes("director") &&
                     <Box pt={1}>
                         <NextLink href={"/director/"}>
                             <Tooltip title={"Director"} placement={"right"}>
@@ -412,7 +359,7 @@ function Config() {
                         </NextLink>
                     </Box>
                 }
-                { enabledServers.includes("registry") &&
+                {enabledServers && enabledServers.includes("registry") &&
                     <Box pt={1}>
                         <NextLink href={"/registry/"}>
                             <Tooltip title={"Registry"} placement={"right"}>
@@ -423,7 +370,7 @@ function Config() {
                         </NextLink>
                     </Box>
                 }
-                { enabledServers.includes("cache") &&
+                {enabledServers && enabledServers.includes("cache") &&
                     <Box pt={1}>
                         <NextLink href={"/cache/"}>
                             <Tooltip title={"Cache"} placement={"right"}>
@@ -462,10 +409,13 @@ function Config() {
                                                     try {
                                                         await submitConfigChange(patch)
                                                         setPatch({})
-                                                        setStatus("Changes Saved, Restarting Server")
-                                                        setTimeout(() => setToggleRefresh(!toggleRefresh), 3000)
+                                                        setStatus({message: "Changes Saved, Restarting Server"})
+                                                        setTimeout(getConfig, 3000)
                                                     } catch (e) {
-                                                        setStatus((e as string).toString())
+                                                        setStatus({
+                                                            severity: "error",
+                                                            message: (e as string).toString()
+                                                        })
                                                     }
                                                 }}
                                             >
@@ -474,7 +424,7 @@ function Config() {
                                             <Button
                                                 onClick={() => {
                                                     setPatch({})
-                                                    setToggleRefresh(!toggleRefresh)
+                                                    getConfig()
                                                 }}
                                             >
                                                 Clear
@@ -484,18 +434,7 @@ function Config() {
                                 />
                                 {
                                     status &&
-                                    <Snackbar
-                                        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-                                        open={true}
-                                        message={status}
-                                        action={
-                                            <Button
-                                                onClick={() => setStatus(undefined)}
-                                            >
-                                                Dismiss
-                                            </Button>
-                                        }
-                                    />
+                                    <StatusSnackBar key={status.message} {...status} />
                                 }
                             </Grid>
                             <Grid item xs={12} md={4} lg={3} display={{ xs: "none", md: "block"}}>

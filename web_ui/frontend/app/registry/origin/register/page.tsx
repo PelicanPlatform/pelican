@@ -91,7 +91,7 @@ export default function Register() {
     }
 
     return (
-        <AuthenticatedContent width={"100%"}>
+        <AuthenticatedContent boxProps={{width:"100%"}} redirect={true}>
             <Grid container spacing={2}>
                 <Grid item xs={12} lg={7}>
                     <Typography variant={"h4"} pb={3}>Register Origin</Typography>

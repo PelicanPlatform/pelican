@@ -116,7 +116,7 @@ export default function Register() {
     }
 
     return (
-        <AuthenticatedContent width={"100%"}>
+        <AuthenticatedContent redirect={true} boxProps={{width:"100%"}}>
             <Grid container spacing={2}>
                 <Grid item xs={12}>
                     <Typography variant={"h4"} pb={2}>Edit Cache</Typography>

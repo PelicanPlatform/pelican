@@ -7,12 +7,13 @@ import Link from "next/link";
 import {Alert, Namespace} from "@/components/Main";
 import InformationDropdown from "./InformationDropdown";
 import {getServerType, NamespaceIcon} from "@/components/Namespace/index";
+import {User} from "@/index";
 
 export interface PendingCardProps {
     namespace: Namespace;
     onUpdate: () => void;
     onAlert: (alert: Alert) => void;
-    authenticated?: Authenticated
+    authenticated?: User
 }
 
 export const PendingCard = ({
