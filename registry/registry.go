@@ -857,7 +857,7 @@ func checkNamespaceStatusHandler(ctx *gin.Context) {
 	}
 	ns, err := getNamespaceByPrefix(req.Prefix)
 	if ns.Topology {
-		res := server_structs.CheckNamespaceStatusRes{Approved: true}
+		res := common.CheckNamespaceStatusRes{Approved: true}
 		ctx.JSON(http.StatusOK, res)
 		return
 	}
