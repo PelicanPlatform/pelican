@@ -19,7 +19,6 @@
 
 import {ChartData} from "chart.js";
 
-import {isLoggedIn} from "@/helpers/login";
 import {DateTime} from "luxon";
 
 let getTimeDuration = (value: string, defaultValue: number = 1) => {
@@ -79,11 +78,6 @@ export interface DataPoint {
 }
 
 export async function query_raw(query: string, time?: Number): Promise<DataPoint[]> {
-
-    //Check if the user is logged in
-    if(!(await isLoggedIn())){
-        window.location.replace("/view/login/")
-    }
 
     const url = new URL(window.location.origin + "/api/v1.0/prometheus/query")
     url.searchParams.append("query", query)

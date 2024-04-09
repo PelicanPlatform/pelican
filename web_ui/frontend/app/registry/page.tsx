@@ -24,10 +24,10 @@ import React, {useEffect, useMemo, useState} from "react";
 import {PendingCard, Card, CardSkeleton, CreateNamespaceCard} from "@/components/Namespace";
 import Link from "next/link";
 import {Namespace, Alert as AlertType} from "@/components/Main";
-import UnauthenticatedContent from "@/components/layout/UnauthenticatedContent";
-import {Authenticated, getAuthenticated, isLoggedIn} from "@/helpers/login";
+import {getUser} from "@/helpers/login";
 import {Add} from "@mui/icons-material";
 import CardList from "@/components/Namespace/CardList";
+import useSWR from "swr";
 import {CardProps} from "@/components/Namespace/Card";
 import {PendingCardProps} from "@/components/Namespace/PendingCard";
 
@@ -36,7 +36,6 @@ export default function Home() {
 
     const [data, setData] = useState<{namespace: Namespace}[] | undefined>(undefined);
     const [alert, setAlert] = useState<AlertType | undefined>(undefined)
-    const [authenticated, setAuthenticated] = useState<Authenticated | undefined>(undefined)
 
     const getData = async () => {
 
@@ -70,18 +69,16 @@ export default function Home() {
 
     useEffect(() => {
         _setData();
-        (async () => {
-            if(await isLoggedIn()){
-                setAuthenticated(getAuthenticated() as Authenticated)
-            }
-        })();
     }, [])
 
-    const pendingData = useMemo(
-        () => data?.filter(
-            ({namespace}) => namespace.admin_metadata.status === "Pending" &&
-                (authenticated?.user == namespace.admin_metadata.user_id || authenticated?.role == "admin")
-                ), [data, authenticated]
+    const {data: user, error} = useSWR("getUser", getUser)
+
+    const pendingData = useMemo(() => {
+        return data?.filter(
+                ({namespace}) => namespace.admin_metadata.status === "Pending" &&
+                    (user?.user == namespace.admin_metadata.user_id || user?.role == "admin")
+            )
+        }, [data, user]
     )
     const approvedCacheData = useMemo(
         () => data?.filter(
@@ -108,24 +105,26 @@ export default function Home() {
                     </Collapse>
                 </Grid>
                 <Grid item xs={12} lg={8} justifyContent={"space-between"}>
-                    <UnauthenticatedContent>
-                        <Box>
+                    { user == undefined || !user.authenticated &&
+                        <Alert severity="info">
                             <Typography variant={"body1"}>
                                 Login to register new namespaces.
-                                <Button sx={{ml:2}} variant={"contained"} size={"small"} color={"primary"} href={"/view/login/"}>Login</Button>
+                                <Link href={"/login/"}>
+                                    <Button sx={{ml:2}} variant={"contained"} size={"small"} color={"primary"}>Login</Button>
+                                </Link>
                             </Typography>
-                        </Box>
-                    </UnauthenticatedContent>
+                        </Alert>
+                    }
                     {
                         pendingData && pendingData.length > 0 &&
                         <Grid item xs={12}>
                             <Paper sx={{p:2, borderColor: "primary.main", borderWidth: "3px", borderType: "solid"}} elevation={3}>
                                 <Typography variant={"h5"} pb={2}>Pending Registrations</Typography>
                                 <Typography variant={"subtitle1"} pb={2}>
-                                    {authenticated !== undefined && authenticated?.role == "admin" && "Awaiting approval from you."}
-                                    {authenticated !== undefined && authenticated?.role != "admin" && "Awaiting approval from registry administrators."}
+                                    {user !== undefined && user?.role == "admin" && "Awaiting approval from you."}
+                                    {user !== undefined && user?.role != "admin" && "Awaiting approval from registry administrators."}
                                 </Typography>
-                                <CardList<PendingCardProps> data={pendingData} Card={PendingCard} cardProps={{authenticated:authenticated, onAlert: (a: AlertType) => setAlert(a), onUpdate:_setData}}/>
+                                <CardList<PendingCardProps> data={pendingData} Card={PendingCard} cardProps={{authenticated:user, onAlert: (a: AlertType) => setAlert(a), onUpdate:_setData}}/>
                             </Paper>
                         </Grid>
                     }
@@ -133,10 +132,10 @@ export default function Home() {
                     <Typography variant={"h5"} py={2} pt={4}>Public Namespaces</Typography>
 
                     <Typography variant={"subtitle1"}>
-                        {authenticated !== undefined && authenticated?.role == "admin" &&
+                        {user !== undefined && user?.role == "admin" &&
                             "As an administrator, you can edit Public Namespaces by click the pencil button"
                         }
-                        {authenticated !== undefined && authenticated?.role != "admin" &&
+                        {user !== undefined && user?.role != "admin" &&
                             "Public Namespaces are approved by the registry administrators. To edit a Namespace you own please contact the registry administrators."
                         }
                     </Typography>
@@ -151,7 +150,7 @@ export default function Home() {
                             </Link>
                         }
                     </Typography>
-                    { approvedOriginData !== undefined ? <CardList<CardProps> data={approvedOriginData} Card={Card} cardProps={{authenticated: authenticated}} /> : <CardSkeleton/> }
+                    { approvedOriginData !== undefined ? <CardList<CardProps> data={approvedOriginData} Card={Card} cardProps={{authenticated: user}} /> : <CardSkeleton/> }
                     { approvedOriginData !== undefined && approvedOriginData.length === 0 && <CreateNamespaceCard text={"Register Origin"} url={"origin/register"}/>}
 
                     <Typography variant={"h6"} py={2}>
@@ -164,7 +163,7 @@ export default function Home() {
                             </Link>
                         }
                     </Typography>
-                    { approvedCacheData !== undefined ? <CardList<CardProps> data={approvedCacheData} Card={Card} cardProps={{authenticated: authenticated}} /> : <CardSkeleton/> }
+                    { approvedCacheData !== undefined ? <CardList<CardProps> data={approvedCacheData} Card={Card} cardProps={{authenticated: user}} /> : <CardSkeleton/> }
                     { approvedCacheData !== undefined && approvedCacheData.length === 0 && <CreateNamespaceCard text={"Register Cache"} url={"cache/register"}/>}
 
                 </Grid>

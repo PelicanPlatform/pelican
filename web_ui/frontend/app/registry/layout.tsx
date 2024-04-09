@@ -57,14 +57,6 @@ export default function RootLayout({
     return (
         <Box display={"flex"} flexDirection={"row"}>
             <Sidebar>
-                <Link href={"/registry/"}>
-                    <Image
-                        src={PelicanLogo}
-                        alt={"Pelican Logo"}
-                        width={36}
-                        height={36}
-                    />
-                </Link>
                 <Box pt={1}>
                     <SpeedDial actions={actions}/>
                 </Box>
