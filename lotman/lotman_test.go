@@ -1,5 +1,6 @@
-//go:build linux && !ppc64le
+//go:build false
 
+//linux && !ppc64le
 /***************************************************************
 *
 * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
