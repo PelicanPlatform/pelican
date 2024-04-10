@@ -133,9 +133,9 @@ jobs:
           highest_tag=$(echo "${tags}" | tail -n1)
           echo "Highest version tag is ${highest_tag}"
           if [[ "${GITHUB_REF##*/}" == "${highest_tag}" ]]; then
-            echo "::set-output name=IS_LATEST::true"
+            echo "IS_LATEST=true" >> $GITHUB_OUTPUT
           else
-            echo "::set-output name=IS_LATEST::false"
+            echo "IS_LATEST=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Generate tag list
@@ -183,7 +183,7 @@ jobs:
           # This causes the tag_list array to be comma-separated below,
           # which is required for build-push-action
           IFS=,
-          echo "::set-output name=taglist::${tag_list[*]}"
+          echo "taglist=${tag_list[*]}" >> $GITHUB_OUTPUT
 
       - name: Load cached base image
         uses: actions/cache@v4
