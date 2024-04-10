@@ -1,5 +1,7 @@
-//go:build windows || darwin || (linux && ppc64le)
+//go:build windows || darwin || linux
 
+// For now we're shutting off LotMan due to weirdness with purego. When we return to this, remember
+// that purego doesn't support (linux && ppc64le), so we'll need to add that back here.
 /***************************************************************
 *
 * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
