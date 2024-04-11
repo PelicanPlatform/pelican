@@ -168,11 +168,12 @@ func LaunchDaemons(ctx context.Context, launchers []Launcher, egrp *errgroup.Gro
 	for idx, daemon := range launchers {
 		var newCtx context.Context
 		var pid int
+		// daemon.Name() is changed to xrootd.origin / xrootd.cache || cmsd.origin, but we only want to have xrootd/cmsd
+		metricName := strings.SplitN(daemon.Name(), ".", 2)[0]
 		newCtx, pid, err = daemon.Launch(ctx)
 		if err != nil {
 			err = errors.Wrapf(err, "Failed to launch %s daemon", daemon.Name())
-			// This is secure as long as deamon.Name() is either "xrootd" or "cmsd"
-			metrics.SetComponentHealthStatus(metrics.HealthStatusComponent(daemon.Name()), metrics.StatusCritical, err.Error())
+			metrics.SetComponentHealthStatus(metrics.HealthStatusComponent(metricName), metrics.StatusCritical, err.Error())
 			return
 		}
 		daemons[idx].ctx = newCtx
@@ -180,7 +181,7 @@ func LaunchDaemons(ctx context.Context, launchers []Launcher, egrp *errgroup.Gro
 		daemons[idx].name = daemon.Name()
 		pids[idx] = pid
 		log.Infoln("Successfully launched", daemon.Name())
-		metrics.SetComponentHealthStatus(metrics.HealthStatusComponent(daemon.Name()), metrics.StatusOK, "")
+		metrics.SetComponentHealthStatus(metrics.HealthStatusComponent(metricName), metrics.StatusOK, "")
 	}
 
 	sigs := make(chan os.Signal, 1)
@@ -238,8 +239,9 @@ func LaunchDaemons(ctx context.Context, launchers []Launcher, egrp *errgroup.Gro
 					} else if errors.Is(waitResult, context.Canceled) {
 						return nil
 					}
-					metrics.SetComponentHealthStatus(metrics.HealthStatusComponent(launchers[chosen].Name()), metrics.StatusCritical,
-						"process failed unexpectedly")
+					metricName := strings.SplitN(launchers[chosen].Name(), ".", 2)[0]
+					metrics.SetComponentHealthStatus(metrics.HealthStatusComponent(metricName), metrics.StatusCritical,
+						launchers[chosen].Name()+" process failed unexpectedly")
 					err = errors.Wrapf(waitResult, "%s process failed unexpectedly", launchers[chosen].Name())
 					log.Errorln(err)
 					return err
