@@ -65,8 +65,18 @@ func TestErrorsRetryableTrue(t *testing.T) {
 	// Try with a retryable error nested error
 	te.AddError(&url.Error{Err: &SlowTransferError{}})
 	assert.True(t, te.AllErrorsRetryable(), "ErrorsRetryable should be true")
+	te.ResetErrors()
 
 	te.AddError(&ConnectionSetupError{})
 	assert.True(t, te.AllErrorsRetryable(), "ErrorsRetryable should be true")
+	te.ResetErrors()
+
+	te.AddError(&StoppedTransferError{})
+	assert.True(t, te.AllErrorsRetryable(), "ErrorsRetryable should be true")
+	te.ResetErrors()
+
+	te.AddError(&AllocateMemoryError{})
+	assert.True(t, te.AllErrorsRetryable(), "ErrorsRetryable should be true")
+	te.ResetErrors()
 
 }

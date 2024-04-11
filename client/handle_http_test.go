@@ -280,6 +280,7 @@ func TestStoppedTransfer(t *testing.T) {
 	// Make sure the errors are correct
 	assert.NotNil(t, err)
 	assert.IsType(t, &StoppedTransferError{}, err, err.Error())
+	assert.True(t, IsRetryable(err))
 }
 
 // Test connection error
