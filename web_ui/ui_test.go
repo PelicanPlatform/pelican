@@ -128,6 +128,7 @@ func TestHandleWebUIAuth(t *testing.T) {
 	route.GET("/view/*requestPath", handleWebUIAuth, func(ctx *gin.Context) { ctx.Status(200) })
 
 	t.Run("html-redirect-to-init-without-db", func(t *testing.T) {
+		cleanupAuthDB()
 		r := httptest.NewRecorder()
 		req, err := http.NewRequest("GET", "/view/test.html", nil)
 		require.NoError(t, err)
@@ -151,6 +152,7 @@ func TestHandleWebUIAuth(t *testing.T) {
 	})
 
 	t.Run("skip-check-on-non-html-file", func(t *testing.T) {
+		cleanupAuthDB()
 		r := httptest.NewRecorder()
 		req, err := http.NewRequest("GET", "/view/test.js", nil)
 		require.NoError(t, err)
