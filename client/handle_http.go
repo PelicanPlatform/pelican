@@ -532,7 +532,7 @@ func (te *TransferEngine) newPelicanURL(remoteUrl *url.URL) (pelicanURL pelicanU
 func NewTransferEngine(ctx context.Context) *TransferEngine {
 	ctx, cancel := context.WithCancel(ctx)
 	egrp, _ := errgroup.WithContext(ctx)
-	work := make(chan *clientTransferJob)
+	work := make(chan *clientTransferJob, 5)
 	files := make(chan *clientTransferFile)
 	results := make(chan *clientTransferResults, 5)
 	suppressedLoader := ttlcache.NewSuppressedLoader(loader, new(singleflight.Group))
@@ -554,7 +554,7 @@ func NewTransferEngine(ctx context.Context) *TransferEngine {
 		results:         results,
 		resultsMap:      make(map[uuid.UUID]chan *TransferResults),
 		workMap:         make(map[uuid.UUID]chan *TransferJob),
-		jobLookupDone:   make(chan *clientTransferJob),
+		jobLookupDone:   make(chan *clientTransferJob, 5),
 		notifyChan:      make(chan bool),
 		closeChan:       make(chan bool),
 		closeDoneChan:   make(chan bool),
@@ -691,7 +691,6 @@ func (te *TransferEngine) Close() {
 // transfer results are routed back to their requesting
 // channels
 func (te *TransferEngine) runMux() error {
-
 	tmpResults := make(map[uuid.UUID][]*TransferResults)
 	activeJobs := make(map[uuid.UUID][]*TransferJob)
 	var clientJob *clientTransferJob
