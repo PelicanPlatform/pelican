@@ -23,13 +23,19 @@ package web_ui
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"path"
 	"path/filepath"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/spf13/viper"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"github.com/tg123/go-htpasswd"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -37,6 +43,21 @@ var (
 	tempPasswdFile *os.File
 	router         *gin.Engine
 )
+
+func setupTestAuthDB(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := path.Join(tmpDir, "authdb")
+	_, err := os.OpenFile(dbPath, os.O_CREATE|os.O_WRONLY, 0600)
+	require.NoError(t, err)
+	passFile, err := htpasswd.New(dbPath, []htpasswd.PasswdParser{htpasswd.AcceptBcrypt}, nil)
+	require.NoError(t, err)
+
+	authDB.Store(passFile)
+}
+
+func cleanupAuthDB() {
+	authDB.Store(nil)
+}
 
 func TestMain(m *testing.M) {
 	gin.SetMode(gin.TestMode)
@@ -100,4 +121,68 @@ func TestMain(m *testing.M) {
 	os.Remove(tempPasswdFile.Name())
 	os.RemoveAll(tempJWKDir)
 	os.Exit(exitCode)
+}
+
+func TestHandleWebUIAuth(t *testing.T) {
+	route := gin.New()
+	route.GET("/view/*requestPath", handleWebUIAuth, func(ctx *gin.Context) { ctx.Status(200) })
+
+	t.Run("html-redirect-to-init-without-db", func(t *testing.T) {
+		r := httptest.NewRecorder()
+		req, err := http.NewRequest("GET", "/view/test.html", nil)
+		require.NoError(t, err)
+		route.ServeHTTP(r, req)
+
+		assert.Equal(t, "/view/initialization/code/", r.Result().Header.Get("Location"))
+	})
+
+	t.Run("html-redirect-to-login-with-db", func(t *testing.T) {
+		setupTestAuthDB(t)
+		t.Cleanup(cleanupAuthDB)
+
+		r := httptest.NewRecorder()
+		req, err := http.NewRequest("GET", "/view/test.html", nil)
+		require.NoError(t, err)
+		route.ServeHTTP(r, req)
+
+		assert.Equal(t, "/view/login/", r.Result().Header.Get("Location"))
+
+		authDB.Store(nil)
+	})
+
+	t.Run("skip-check-on-non-html-file", func(t *testing.T) {
+		r := httptest.NewRecorder()
+		req, err := http.NewRequest("GET", "/view/test.js", nil)
+		require.NoError(t, err)
+		route.ServeHTTP(r, req)
+
+		assert.Equal(t, 200, r.Result().StatusCode)
+		assert.Equal(t, "", r.Result().Header.Get("Location"))
+	})
+
+	t.Run("pass-check-on-director", func(t *testing.T) {
+		setupTestAuthDB(t)
+		t.Cleanup(cleanupAuthDB)
+
+		r := httptest.NewRecorder()
+		req, err := http.NewRequest("GET", "/view/director/index.html", nil)
+		require.NoError(t, err)
+		route.ServeHTTP(r, req)
+
+		assert.Equal(t, 200, r.Result().StatusCode)
+		assert.Equal(t, "", r.Result().Header.Get("Location"))
+	})
+
+	t.Run("pass-check-on-registry", func(t *testing.T) {
+		setupTestAuthDB(t)
+		t.Cleanup(cleanupAuthDB)
+
+		r := httptest.NewRecorder()
+		req, err := http.NewRequest("GET", "/view/registry/index.html", nil)
+		require.NoError(t, err)
+		route.ServeHTTP(r, req)
+
+		assert.Equal(t, 200, r.Result().StatusCode)
+		assert.Equal(t, "", r.Result().Header.Get("Location"))
+	})
 }
