@@ -186,9 +186,9 @@ func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) 
 			return errors.Wrapf(unmarshalErr, "could not decode the director's response, which responded %v from director advertisement: %s", resp.StatusCode, string(body))
 		}
 		if respErr.ApprovalError {
-			return fmt.Errorf("the director rejects the advertisement of the server with error: %s. Please contact the administrators of %s for more information.", respErr.Error, param.Federation_RegistryUrl.GetString())
+			return fmt.Errorf("the director rejected the server advertisement with error: %s. Please contact the administrators of %s for more information.", respErr.Error, param.Federation_RegistryUrl.GetString())
 		}
-		return errors.Errorf("the director responds the advertisement request of the server with status code %d : %v\n", resp.StatusCode, respErr.Error)
+		return errors.Errorf("the director responded to the server advertisement request with status code %d : %v\n", resp.StatusCode, respErr.Error)
 	}
 
 	return nil
