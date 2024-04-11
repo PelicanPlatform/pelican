@@ -106,7 +106,7 @@ To pass environment variables to the Docker container, append `-e` flag to your 
 docker run -it -e PELICAN_LOGGING_LEVEL=debug -p 8444:8444 -p 8443:8443 -v /path/to/your/data/:/tmp/pelican --name=pelican-origin hub.opensciencegrid.org/pelican_platform/origin:latest serve -v /tmp/pelican:/foo/bar -f <federation>
 ```
 
-There are another ways to pass environment variables to a Docker container, see details in [Docker documentation](https://docs.docker.com/reference/cli/docker/container/run/#env).
+There are other ways to pass environment variables to a Docker container, see details in [Docker documentation](https://docs.docker.com/reference/cli/docker/container/run/#env).
 
 > Some of Pelican configuration parameters with the `object` type can not be passed as environment variables, such as [GeoIPOverrides](../parameters.mdx#GeoIPOverrides) and [Origin.Exports](../parameters.mdx##Origin-Exports). For these parameters, use a configuration file instead.
 
@@ -116,7 +116,7 @@ Pelican servers can also be configured via a configuration file in `yaml`. The d
 
 It is recommended that admins bind a Pelican configuration file on the host machine to the container running the Pelican server. Follow the steps below for instructions.
 
-1. Prepare an `yaml` file on the host machine:
+1. Prepare a `yaml` file on the host machine:
 
     ```bash
     touch pelican.yaml
