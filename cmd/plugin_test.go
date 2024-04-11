@@ -269,9 +269,9 @@ func TestPluginMulti(t *testing.T) {
 
 	// Drop the testFileContent into the origin directory
 	destDir := filepath.Join(fed.Exports[0].StoragePrefix, "test")
-	require.NoError(t, os.MkdirAll(destDir, os.FileMode(0700)))
+	require.NoError(t, os.MkdirAll(destDir, os.FileMode(0755)))
 	log.Debugln("Will create origin file at", destDir)
-	err := os.WriteFile(filepath.Join(destDir, "test.txt"), []byte("test file content"), fs.FileMode(0600))
+	err := os.WriteFile(filepath.Join(destDir, "test.txt"), []byte("test file content"), fs.FileMode(0644))
 	require.NoError(t, err)
 	downloadUrl1 := url.URL{
 		Scheme: "pelican",
@@ -279,7 +279,7 @@ func TestPluginMulti(t *testing.T) {
 		Path:   "/test/test/test.txt",
 	}
 	localPath1 := filepath.Join(dirName, "test.txt")
-	err = os.WriteFile(filepath.Join(destDir, "test2.txt"), []byte("second test file content"), fs.FileMode(0600))
+	err = os.WriteFile(filepath.Join(destDir, "test2.txt"), []byte("second test file content"), fs.FileMode(0644))
 	require.NoError(t, err)
 	downloadUrl2 := url.URL{
 		Scheme: "pelican",
