@@ -96,7 +96,7 @@ There are two ways to configure a Pelican server running in a container. One is 
 
 ### Configure via environment variables
 
-All Pelican configuration parameters described in [parameters page](../parameters.mdx) can be passed to a Pelican server as environment variables. For a configuration parameter, the corresponding environment variable is `PELICAN_<PARAMETER_NAME>`, where `PELICAN` is the prefix, and `<PARAMETER_NAME>` is the name of the parameter, with dots `.` replaced by underscores `_`. For example, a Pelican configuration named `Logging.Level` has a corresponding environment variable named `PELICAN_LOGGING_LEVEL`.
+Most Pelican configuration parameters described in [parameters page](../parameters.mdx) can be passed to a Pelican server as environment variables. For a configuration parameter, the corresponding environment variable is `PELICAN_<PARAMETER_NAME>`, where `PELICAN` is the prefix, and `<PARAMETER_NAME>` is the name of the parameter, with dots `.` replaced by underscores `_`. For example, a Pelican configuration named `Logging.Level` has a corresponding environment variable named `PELICAN_LOGGING_LEVEL`.
 
 > For admins that use Pelican images built for OSDF (with `osdf` prefix to the image tag, such as `osdf-origin`). The environment variables are prefixed by `OSDF` instead of `PELICAN`. The example above should then be `OSDF_LOGGING_LEVEL`.
 
@@ -107,6 +107,8 @@ docker run -it -e PELICAN_LOGGING_LEVEL=debug -p 8444:8444 -p 8443:8443 -v /path
 ```
 
 There are another ways to pass environment variables to a Docker container, see details in [Docker documentation](https://docs.docker.com/reference/cli/docker/container/run/#env).
+
+> Some of Pelican configuration parameters with the `object` type can not be passed as environment variables, such as [GeoIPOverrides](../parameters.mdx#GeoIPOverrides) and [Origin.Exports](../parameters.mdx##Origin-Exports). For these parameters, use a configuration file instead.
 
 ### Configure via the configuration file
 
