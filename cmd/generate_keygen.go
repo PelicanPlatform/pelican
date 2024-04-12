@@ -75,6 +75,16 @@ func keygenMain(cmd *cobra.Command, args []string) error {
 		publicKeyPath = filepath.Clean(strings.TrimSpace(publicKeyPath))
 	}
 
+	_, err = os.Stat(privateKeyPath)
+	if err == nil {
+		return fmt.Errorf("file exists for private key under %s", privateKeyPath)
+	}
+
+	_, err = os.Stat(publicKeyPath)
+	if err == nil {
+		return fmt.Errorf("file exists for public key under %s", publicKeyPath)
+	}
+
 	if err = os.MkdirAll(filepath.Dir(publicKeyPath), 0755); err != nil {
 		return errors.Wrapf(err, "failed to create directory for public key at %s", filepath.Dir(privateKeyPath))
 	}
