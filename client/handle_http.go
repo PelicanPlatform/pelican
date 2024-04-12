@@ -112,7 +112,7 @@ type (
 		Err error
 	}
 
-	AllocateMemoryError struct {
+	allocateMemoryError struct {
 		Err error
 	}
 
@@ -319,16 +319,16 @@ func (e *StoppedTransferError) Is(target error) bool {
 	return ok
 }
 
-func (e *AllocateMemoryError) Error() string {
+func (e *allocateMemoryError) Error() string {
 	return e.Err.Error()
 }
 
-func (e *AllocateMemoryError) Unwrap() error {
+func (e *allocateMemoryError) Unwrap() error {
 	return e.Err
 }
 
-func (e *AllocateMemoryError) Is(target error) bool {
-	_, ok := target.(*AllocateMemoryError)
+func (e *allocateMemoryError) Is(target error) bool {
+	_, ok := target.(*allocateMemoryError)
 	return ok
 }
 
@@ -1719,7 +1719,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 				err = &sce2
 			} else if errors.As(err, &cam) && cam == syscall.ENOMEM {
 				// ENOMEM is error from os for unable to allocate memory
-				err = &AllocateMemoryError{Err: err}
+				err = &allocateMemoryError{Err: err}
 			} else {
 				err = &ConnectionSetupError{Err: err}
 			}
