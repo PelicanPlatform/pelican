@@ -98,9 +98,9 @@ type (
 )
 
 const (
-	Pelican ConfigPrefix = "PELICAN"
-	OSDF    ConfigPrefix = "OSDF"
-	Stash   ConfigPrefix = "STASH"
+	PelicanPrefix ConfigPrefix = "PELICAN"
+	OsdfPrefix    ConfigPrefix = "OSDF"
+	StashPrefix   ConfigPrefix = "STASH"
 )
 
 const (
@@ -133,7 +133,7 @@ var (
 var (
 	// Some of the unit tests probe behavior specific to OSDF vs Pelican.  Hence,
 	// we need a way to override the preferred prefix.
-	testingPreferredPrefix string
+	testingPreferredPrefix ConfigPrefix
 
 	//go:embed resources/defaults.yaml
 	defaultsYaml string
@@ -160,11 +160,11 @@ var (
 	MetadataTimeoutErr *MetadataErr = &MetadataErr{msg: "Timeout when querying metadata"}
 
 	watermarkUnits = []byte{'k', 'm', 'g', 't'}
-	validPrefixes  = map[string]bool{
-		string(Pelican): true,
-		string(OSDF):    true,
-		string(Stash):   true,
-		"":              true,
+	validPrefixes  = map[ConfigPrefix]bool{
+		PelicanPrefix: true,
+		OsdfPrefix:    true,
+		StashPrefix:   true,
+		"":            true,
 	}
 )
 
@@ -286,6 +286,10 @@ func SetBuiltBy(newBuiltBy string) {
 	builtBy = newBuiltBy
 }
 
+func (cp ConfigPrefix) String() string {
+	return string(cp)
+}
+
 // Get a string slice of currently enabled servers, sorted by alphabetical order.
 // By default, it calls String method of each enabled server.
 // To get strings in lowerCase, set lowerCase = true.
@@ -371,47 +375,46 @@ func (sType *ServerType) SetString(name string) bool {
 // of behavior.  For example, a binary with the "osdf_" prefix should utilize
 // the known URLs for OSDF.  For "pelican"-style commands, the user will
 // need to manually configure the location of the director endpoint.
-func GetPreferredPrefix() string {
+func GetPreferredPrefix() ConfigPrefix {
 	// Testing override to programmatically force different behaviors.
 	if testingPreferredPrefix != "" {
-		return string(ConfigPrefix(testingPreferredPrefix))
+		return ConfigPrefix(testingPreferredPrefix)
 	}
 	arg0 := strings.ToUpper(filepath.Base(os.Args[0]))
 	underscore_idx := strings.Index(arg0, "_")
 	if underscore_idx != -1 {
 		prefix := string(ConfigPrefix(arg0[0:underscore_idx]))
 		if prefix == "STASH" {
-			return "OSDF"
+			return OsdfPrefix
 		}
 	}
 	if strings.HasPrefix(arg0, "STASH") || strings.HasPrefix(arg0, "OSDF") {
-		return "OSDF"
+		return OsdfPrefix
 	}
-	return "PELICAN"
+	return PelicanPrefix
 }
 
 // Override the auto-detected preferred prefix; mostly meant for unittests.
 // Returns the old preferred prefix.
-func SetPreferredPrefix(newPref string) (oldPref string, err error) {
-	newPref = strings.ToUpper(newPref)
+func SetPreferredPrefix(newPref ConfigPrefix) (oldPref ConfigPrefix, err error) {
 	if _, ok := validPrefixes[newPref]; !ok {
 		return "", errors.New("Invalid prefix provided")
 	}
-	oldPrefix := ConfigPrefix(testingPreferredPrefix)
+	oldPrefix := testingPreferredPrefix
 	testingPreferredPrefix = newPref
-	return string(oldPrefix), nil
+	return oldPrefix, nil
 }
 
 // Get the list of valid prefixes for this binary.  Given there's been so
 // many renames of the project (stash -> osdf -> pelican), we allow multiple
 // prefixes when searching through environment variables.
-func GetAllPrefixes() []string {
-	prefixes := []string{GetPreferredPrefix()}
+func GetAllPrefixes() []ConfigPrefix {
+	prefixes := []ConfigPrefix{GetPreferredPrefix()}
 
-	if prefixes[0] == "OSDF" {
-		prefixes = append(prefixes, "STASH", "PELICAN")
-	} else if prefixes[0] == "STASH" {
-		prefixes = append(prefixes, "OSDF", "PELICAN")
+	if prefixes[0] == OsdfPrefix {
+		prefixes = append(prefixes, StashPrefix, PelicanPrefix)
+	} else if prefixes[0] == StashPrefix {
+		prefixes = append(prefixes, OsdfPrefix, PelicanPrefix)
 	}
 	return prefixes
 }
@@ -793,7 +796,7 @@ func InitConfig() {
 	}
 	// 2) Set up osdf.yaml (if needed)
 	prefix := GetPreferredPrefix()
-	loadOSDF := prefix == "OSDF"
+	loadOSDF := prefix == OsdfPrefix
 	if os.Getenv("STASH_USE_TOPOLOGY") == "" {
 		loadOSDF = loadOSDF || (prefix == "STASH")
 	}
@@ -823,7 +826,7 @@ func InitConfig() {
 		viper.SetConfigName("pelican")
 	}
 
-	viper.SetEnvPrefix(prefix)
+	viper.SetEnvPrefix(string(prefix))
 	viper.AutomaticEnv()
 	// This line allows viper to use an env var like ORIGIN_VALUE to override the viper string "Origin.Value"
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
@@ -1295,11 +1298,11 @@ func InitClient() error {
 	viper.SetDefault("Client.SlowTransferRampupTime", 100)
 	viper.SetDefault("Client.SlowTransferWindow", 30)
 
-	if upper_prefix == "OSDF" || upper_prefix == "STASH" {
+	if upper_prefix == OsdfPrefix || upper_prefix == StashPrefix {
 		viper.SetDefault("Federation.TopologyNamespaceURL", "https://topology.opensciencegrid.org/osdf/namespaces")
 	}
 
-	viper.SetEnvPrefix(upper_prefix)
+	viper.SetEnvPrefix(string(upper_prefix))
 	viper.AutomaticEnv()
 
 	viper.SetConfigName("config")
@@ -1311,7 +1314,7 @@ func InitClient() error {
 		}
 		// Do not fail if the config file is missing
 	}
-	env_config_file := os.Getenv(upper_prefix + "_CONFIG_FILE")
+	env_config_file := os.Getenv(upper_prefix.String() + "_CONFIG_FILE")
 	if len(env_config_file) != 0 {
 		fp, err := os.Open(env_config_file)
 		if err != nil && !os.IsNotExist(err) {
@@ -1327,31 +1330,31 @@ func InitClient() error {
 	prefixes := GetAllPrefixes()
 	prefixes_with_osg := append(prefixes, "OSG")
 	for _, prefix := range prefixes_with_osg {
-		if _, isSet := os.LookupEnv(prefix + "_DISABLE_HTTP_PROXY"); isSet {
+		if _, isSet := os.LookupEnv(prefix.String() + "_DISABLE_HTTP_PROXY"); isSet {
 			viper.Set("Client.DisableHttpProxy", true)
 			break
 		}
 	}
 	for _, prefix := range prefixes_with_osg {
-		if _, isSet := os.LookupEnv(prefix + "_DISABLE_PROXY_FALLBACK"); isSet {
+		if _, isSet := os.LookupEnv(prefix.String() + "_DISABLE_PROXY_FALLBACK"); isSet {
 			viper.Set("Client.DisableProxyFallback", true)
 			break
 		}
 	}
 	for _, prefix := range prefixes {
-		if val, isSet := os.LookupEnv(prefix + "_DIRECTOR_URL"); isSet {
+		if val, isSet := os.LookupEnv(prefix.String() + "_DIRECTOR_URL"); isSet {
 			viper.Set("Federation.DirectorURL", val)
 			break
 		}
 	}
 	for _, prefix := range prefixes {
-		if val, isSet := os.LookupEnv(prefix + "_NAMESPACE_URL"); isSet {
+		if val, isSet := os.LookupEnv(prefix.String() + "_NAMESPACE_URL"); isSet {
 			viper.Set("Federation.RegistryUrl", val)
 			break
 		}
 	}
 	for _, prefix := range prefixes {
-		if val, isSet := os.LookupEnv(prefix + "_TOPOLOGY_NAMESPACE_URL"); isSet {
+		if val, isSet := os.LookupEnv(prefix.String() + "_TOPOLOGY_NAMESPACE_URL"); isSet {
 			viper.Set("Federation.TopologyNamespaceURL", val)
 			break
 		}
@@ -1359,12 +1362,12 @@ func InitClient() error {
 
 	// Check the environment variable STASHCP_MINIMUM_DOWNLOAD_SPEED (and all the prefix variants)
 	var downloadLimit int64 = 1024 * 100
-	var prefixes_with_cp []string
+	var prefixes_with_cp []ConfigPrefix
 	for _, prefix := range prefixes {
 		prefixes_with_cp = append(prefixes_with_cp, prefix+"CP")
 	}
 	for _, prefix := range append(prefixes, prefixes_with_cp...) {
-		downloadLimitStr := os.Getenv(prefix + "_MINIMUM_DOWNLOAD_SPEED")
+		downloadLimitStr := os.Getenv(prefix.String() + "_MINIMUM_DOWNLOAD_SPEED")
 		if len(downloadLimitStr) == 0 {
 			continue
 		}

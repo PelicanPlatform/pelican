@@ -278,7 +278,7 @@ func TestOSDFAuthCreation(t *testing.T) {
 			}
 			viper.Set("Origin.FederationPrefix", "/")
 			viper.Set("Origin.StoragePrefix", "/")
-			oldPrefix, err := config.SetPreferredPrefix("OSDF")
+			oldPrefix, err := config.SetPreferredPrefix(config.OsdfPrefix)
 			assert.NoError(t, err)
 			defer func() {
 				_, err := config.SetPreferredPrefix(oldPrefix)

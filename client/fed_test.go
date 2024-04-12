@@ -103,7 +103,7 @@ func TestGetAndPutAuth(t *testing.T) {
 
 	// This tests object get/put with a pelican:// url
 	t.Run("testPelicanObjectPutAndGetWithPelicanUrl", func(t *testing.T) {
-		_, err := config.SetPreferredPrefix("PELICAN")
+		_, err := config.SetPreferredPrefix(config.PelicanPrefix)
 		assert.NoError(t, err)
 
 		// Set path for object to upload/download
@@ -131,7 +131,7 @@ func TestGetAndPutAuth(t *testing.T) {
 
 	// This tests object get/put with a pelican:// url
 	t.Run("testOsdfObjectPutAndGetWithPelicanUrl", func(t *testing.T) {
-		_, err := config.SetPreferredPrefix("OSDF")
+		_, err := config.SetPreferredPrefix(config.OsdfPrefix)
 		assert.NoError(t, err)
 
 		for _, export := range fed.Exports {
@@ -159,7 +159,7 @@ func TestGetAndPutAuth(t *testing.T) {
 
 	// This tests pelican object get/put with an osdf url
 	t.Run("testOsdfObjectPutAndGetWithOSDFUrl", func(t *testing.T) {
-		_, err := config.SetPreferredPrefix("OSDF")
+		_, err := config.SetPreferredPrefix(config.OsdfPrefix)
 		assert.NoError(t, err)
 
 		for _, export := range fed.Exports {
@@ -247,7 +247,7 @@ func TestCopyAuth(t *testing.T) {
 
 	// This tests object get/put with a pelican:// url
 	t.Run("testPelicanObjectCopyWithPelicanUrl", func(t *testing.T) {
-		_, err := config.SetPreferredPrefix("PELICAN")
+		_, err := config.SetPreferredPrefix(config.PelicanPrefix)
 		assert.NoError(t, err)
 
 		// Set path for object to upload/download
@@ -275,7 +275,7 @@ func TestCopyAuth(t *testing.T) {
 
 	// This tests object get/put with a pelican:// url
 	t.Run("testOsdfObjectCopyWithPelicanUrl", func(t *testing.T) {
-		_, err := config.SetPreferredPrefix("OSDF")
+		_, err := config.SetPreferredPrefix(config.OsdfPrefix)
 		assert.NoError(t, err)
 
 		for _, export := range fed.Exports {
@@ -303,7 +303,7 @@ func TestCopyAuth(t *testing.T) {
 
 	// This tests pelican object get/put with an osdf url
 	t.Run("testOsdfObjectCopyWithOSDFUrl", func(t *testing.T) {
-		_, err := config.SetPreferredPrefix("OSDF")
+		_, err := config.SetPreferredPrefix(config.OsdfPrefix)
 		assert.NoError(t, err)
 
 		for _, export := range fed.Exports {
@@ -420,7 +420,7 @@ func TestStatHttp(t *testing.T) {
 	})
 
 	t.Run("testStatHttpOSDFScheme", func(t *testing.T) {
-		_, err := config.SetPreferredPrefix("OSDF")
+		_, err := config.SetPreferredPrefix(config.OsdfPrefix)
 		assert.NoError(t, err)
 		testFileContent := "test file content"
 		// Drop the testFileContent into the origin directory

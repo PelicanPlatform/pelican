@@ -130,7 +130,7 @@ func TestRegistryKeyChainingOSDF(t *testing.T) {
 	defer cancel()
 
 	viper.Reset()
-	_, err := config.SetPreferredPrefix("OSDF")
+	_, err := config.SetPreferredPrefix(config.OsdfPrefix)
 	assert.NoError(t, err)
 	viper.Set("Federation.DirectorUrl", "https://osdf-director.osg-htc.org")
 	viper.Set("Federation.RegistryUrl", "https://osdf-registry.osg-htc.org")
@@ -216,7 +216,7 @@ func TestRegistryKeyChainingOSDF(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "A superspace or subspace of this namespace /topo already exists in the OSDF topology: /topo/foo. To register a Pelican equivalence, you need to present your identity.")
 
-	_, err = config.SetPreferredPrefix("pelican")
+	_, err = config.SetPreferredPrefix(config.PelicanPrefix)
 	assert.NoError(t, err)
 	viper.Reset()
 }
