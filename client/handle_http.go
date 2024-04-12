@@ -214,6 +214,7 @@ type (
 		skipAcquire   bool
 		caches        []*url.URL
 		useDirector   bool
+		directorUrl   string
 		tokenLocation string
 		token         string
 		project       string
@@ -1054,7 +1055,10 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		}
 	}
 
-	tj.useDirector = pelicanURL.directorUrl != ""
+	if pelicanURL.directorUrl != "" {
+		tj.useDirector = true
+		tj.directorUrl = pelicanURL.directorUrl
+	}
 	ns, err := getNamespaceInfo(tj.ctx, remoteUrl.Path, pelicanURL.directorUrl, upload)
 	if err != nil {
 		log.Errorln(err)
@@ -2190,31 +2194,52 @@ func runPut(request *http.Request, responseChan chan<- *http.Response, errorChan
 }
 
 // Walk a remote directory in a WebDAV server, emitting the files discovered
-func (te *TransferEngine) walkDirDownload(job *clientTransferJob, transfers []transferAttemptDetails, files chan *clientTransferFile, url *url.URL) error {
-	// Create the client to walk the filesystem
-	rootUrl := *url
-	if job.job.namespace.DirListHost != "" {
-		// Parse the dir list host
-		dirListURL, err := url.Parse(job.job.namespace.DirListHost)
-		if err != nil {
-			log.Errorln("Failed to parse dirlisthost from namespaces into URL:", err)
-			return err
-		}
-		rootUrl = *dirListURL
-
-	} else {
-		log.Errorln("Host for directory listings is unknown")
-		return errors.New("Host for directory listings is unknown")
+func (te *TransferEngine) walkDirDownload(job *clientTransferJob, transfers []transferAttemptDetails, files chan *clientTransferFile, remoteURL *url.URL) error {
+	// Query the director a PROPFIND to see if we can get our directory listing
+	resp, err := queryDirector("PROPFIND", remoteURL.Path, job.job.directorUrl+"/api/v1.0/director/origin")
+	if err != nil {
+		return err
 	}
-	log.Debugln("Dir list host: ", rootUrl.String())
 
+	collectionsUrl := *remoteURL
+	// If we get a "method not allowed", we go back to the old method
+	if resp.StatusCode == http.StatusMethodNotAllowed {
+		log.Debugln("PROPFIND against director failed, trying to get collections url from namespace")
+		// Check for a dir list host in namespace
+		if job.job.namespace.DirListHost != "" {
+			dirListURL, err := url.Parse(job.job.namespace.DirListHost)
+			if err != nil {
+				log.Errorln("Failed to parse dirlisthost from namespaces into URL:", err)
+				return err
+			}
+			collectionsUrl = *dirListURL
+		} else {
+			// Both methods to get directory listings failed
+			log.Errorln("Host for directory listings is unknown")
+			return errors.New("Host for directory listings is unknown")
+		}
+	} else if resp.StatusCode == http.StatusTemporaryRedirect {
+		collectionsStr := resp.Header.Get("Location")
+		dirListURL, err := url.Parse(collectionsStr)
+		if err != nil {
+			log.Errorln("Failed to parse collections URL from director response into URL type:", err)
+			return nil
+		}
+		collectionsUrl = url.URL{
+			Scheme: dirListURL.Scheme,
+			Host:   dirListURL.Host,
+		}
+	}
+	log.Debugln("Collections URL: ", collectionsUrl.String())
+
+	// Get our webdav authenticated client
 	auth := &bearerAuth{token: job.job.token}
-	client := gowebdav.NewAuthClient(rootUrl.String(), auth)
+	client := gowebdav.NewAuthClient(collectionsUrl.String(), auth)
 
 	// XRootD does not like keep alives and kills things, so turn them off.
 	transport := config.GetTransport()
 	client.SetTransport(transport)
-	return te.walkDirDownloadHelper(job, transfers, files, url.Path, client)
+	return te.walkDirDownloadHelper(job, transfers, files, remoteURL.Path, client)
 }
 
 // Helper function for the `walkDirDownload`.
@@ -2228,7 +2253,7 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 	}
 	infos, err := client.ReadDir(remotePath)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "Failed to PROPFIND remote directory")
 	}
 	localBase := strings.TrimPrefix(remotePath, job.job.remoteURL.Path)
 	for _, info := range infos {

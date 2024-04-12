@@ -154,6 +154,9 @@ func queryDirector(ctx context.Context, verb, source, directorUrl string) (resp 
 	// If we get a 404, the director will hopefully tell us why. It might be that the namespace doesn't exist
 	if resp.StatusCode == 404 {
 		return nil, errors.New("404: " + string(body))
+	} else if resp.StatusCode == http.StatusMethodNotAllowed && verb == "PROPFIND" {
+		// If we get a 405 with a PROPFIND, the client will handle it
+		return
 	} else if resp.StatusCode != 307 {
 		var respErr directorResponse
 		if unmarshalErr := json.Unmarshal(body, &respErr); unmarshalErr != nil { // Error creating json

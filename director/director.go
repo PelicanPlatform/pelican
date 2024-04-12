@@ -501,6 +501,13 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 			checkHostnameRedirects(c, xForwardedHost[0])
 		}
 
+		// If we are doing a PROPFIND, we should always redirect to the origin
+		if c.Request.Method == "PROPFIND" {
+			redirectToOrigin(c)
+			c.Abort()
+			return
+		}
+
 		// If we're configured for cache mode or we haven't set the flag,
 		// we should use cache middleware
 		if defaultResponse == "cache" {
@@ -927,6 +934,11 @@ func RegisterDirectorAPI(ctx context.Context, router *gin.RouterGroup) {
 		directorAPIV1.GET("/namespaces/prefix/*path", getPrefixByPath)
 		directorAPIV1.GET("/healthTest/*path", getHealthTestFile)
 		directorAPIV1.HEAD("/healthTest/*path", getHealthTestFile)
+		directorAPIV1.Any("/origin", func(gctx *gin.Context) { // Need to do this for PROPFIND since gin does not support it
+			if gctx.Request.Method == "PROPFIND" {
+				redirectToOrigin(gctx)
+			}
+		})
 
 		// In the foreseeable feature, director will scrape all servers in Pelican ecosystem (including registry)
 		// so that director can be our point of contact for collecting system-level metrics.
