@@ -135,7 +135,7 @@ func getToken(destination *url.URL, namespace namespaces.Namespace, isWrite bool
 			err = errors.New("failed to find or generate a token as required for " + destination.String())
 			return "", err
 		} else {
-			log.Errorln("Credential is required, but currently mssing")
+			log.Errorln("Credential is required, but currently missing")
 			err := errors.New("Credential is required for " + destination.String() + " but is currently missing")
 			return "", err
 		}

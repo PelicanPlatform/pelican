@@ -645,10 +645,16 @@ func readMultiTransfers(stdin bufio.Reader) (transfers []PluginTransfer, err err
 		if err != nil {
 			return nil, err
 		}
+		if adUrl == nil {
+			return nil, errors.New("Url attribute not set for transfer")
+		}
 
 		destination, err := ad.Get("LocalFileName")
 		if err != nil {
 			return nil, err
+		}
+		if destination == nil {
+			return nil, errors.New("LocalFileName attribute not set for transfer")
 		}
 		transfers = append(transfers, PluginTransfer{url: adUrl, localFile: destination.(string)})
 	}

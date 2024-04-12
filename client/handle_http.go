@@ -532,7 +532,7 @@ func (te *TransferEngine) newPelicanURL(remoteUrl *url.URL) (pelicanURL pelicanU
 func NewTransferEngine(ctx context.Context) *TransferEngine {
 	ctx, cancel := context.WithCancel(ctx)
 	egrp, _ := errgroup.WithContext(ctx)
-	work := make(chan *clientTransferJob)
+	work := make(chan *clientTransferJob, 5)
 	files := make(chan *clientTransferFile)
 	results := make(chan *clientTransferResults, 5)
 	suppressedLoader := ttlcache.NewSuppressedLoader(loader, new(singleflight.Group))
@@ -542,6 +542,7 @@ func NewTransferEngine(ctx context.Context) *TransferEngine {
 	)
 
 	// Start our cache for url metadata
+	// This is stopped in the `Shutdown` method
 	go pelicanURLCache.Start()
 
 	te := &TransferEngine{
@@ -553,7 +554,7 @@ func NewTransferEngine(ctx context.Context) *TransferEngine {
 		results:         results,
 		resultsMap:      make(map[uuid.UUID]chan *TransferResults),
 		workMap:         make(map[uuid.UUID]chan *TransferJob),
-		jobLookupDone:   make(chan *clientTransferJob),
+		jobLookupDone:   make(chan *clientTransferJob, 5),
 		notifyChan:      make(chan bool),
 		closeChan:       make(chan bool),
 		closeDoneChan:   make(chan bool),
@@ -692,6 +693,7 @@ func (te *TransferEngine) Close() {
 func (te *TransferEngine) runMux() error {
 	tmpResults := make(map[uuid.UUID][]*TransferResults)
 	activeJobs := make(map[uuid.UUID][]*TransferJob)
+	var clientJob *clientTransferJob
 	closing := false
 	closedWorkChan := false
 	// The main body of the routine; continuously select on one of the channels,
@@ -716,11 +718,17 @@ func (te *TransferEngine) runMux() error {
 			sortFunc := func(a, b uuid.UUID) int {
 				return bytes.Compare(a[:], b[:])
 			}
+			// Only listen for more incoming work if we're not waiting to send a client job to the
+			// jobs-to-objects worker
 			slices.SortFunc(workKeys, sortFunc)
 			for _, key := range workKeys {
 				workMap[key] = te.workMap[key]
 				cases[ctr].Dir = reflect.SelectRecv
-				cases[ctr].Chan = reflect.ValueOf(workMap[key])
+				if clientJob == nil {
+					cases[ctr].Chan = reflect.ValueOf(workMap[key])
+				} else {
+					cases[ctr].Chan = reflect.ValueOf(nil)
+				}
 				ctr++
 			}
 			resultsMap = make(map[uuid.UUID]chan *TransferResults, len(tmpResults))
@@ -742,9 +750,15 @@ func (te *TransferEngine) runMux() error {
 			// Notification that a transfer has finished.
 			cases[ctr+1].Dir = reflect.SelectRecv
 			cases[ctr+1].Chan = reflect.ValueOf(te.results)
-			// Placeholder; never used.
-			cases[ctr+2].Dir = reflect.SelectRecv
-			cases[ctr+2].Chan = reflect.ValueOf(nil)
+			// Buffer the jobs to send to the job-to-objects worker.
+			if clientJob == nil {
+				cases[ctr+2].Dir = reflect.SelectRecv
+				cases[ctr+2].Chan = reflect.ValueOf(nil)
+			} else {
+				cases[ctr+2].Dir = reflect.SelectSend
+				cases[ctr+2].Chan = reflect.ValueOf(te.work)
+				cases[ctr+2].Send = reflect.ValueOf(clientJob)
+			}
 			// Notification that the TransferEngine has been cancelled; shutdown immediately
 			cases[ctr+3].Dir = reflect.SelectRecv
 			cases[ctr+3].Chan = reflect.ValueOf(te.ctx.Done())
@@ -787,14 +801,13 @@ func (te *TransferEngine) runMux() error {
 				continue
 			}
 			job := recv.Interface().(*TransferJob)
-			clientJob := &clientTransferJob{job: job, uuid: id}
+			clientJob = &clientTransferJob{job: job, uuid: id}
 			clientJobs := activeJobs[id]
 			if clientJobs == nil {
 				clientJobs = make([]*TransferJob, 0)
 			}
 			clientJobs = append(clientJobs, job)
 			activeJobs[id] = clientJobs
-			te.work <- clientJob
 		} else if chosen < len(workMap)+len(resultsMap) {
 			// One of the "write" channels has been sent some results.
 			id := resultsKeys[chosen-len(workMap)]
@@ -859,6 +872,10 @@ func (te *TransferEngine) runMux() error {
 				}
 				tmpResults[result.id] = append(resultBuffer, &result.results)
 			}
+		} else if chosen == len(workMap)+len(resultsMap)+2 {
+			// Sent the buffered job to the job-to-objects worker.  Clear
+			// out the buffer so that we can pull in more work.
+			clientJob = nil
 		} else if chosen == len(workMap)+len(resultsMap)+3 {
 			// Engine's context has been cancelled; immediately exit.
 			log.Debugln("Transfer engine has been cancelled")

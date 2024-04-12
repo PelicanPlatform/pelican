@@ -379,11 +379,12 @@ func GetPreferredPrefix() string {
 	arg0 := strings.ToUpper(filepath.Base(os.Args[0]))
 	underscore_idx := strings.Index(arg0, "_")
 	if underscore_idx != -1 {
-		return string(ConfigPrefix(arg0[0:underscore_idx]))
+		prefix := string(ConfigPrefix(arg0[0:underscore_idx]))
+		if prefix == "STASH" {
+			return "OSDF"
+		}
 	}
-	if strings.HasPrefix(arg0, "STASH") {
-		return "STASH"
-	} else if strings.HasPrefix(arg0, "OSDF") {
+	if strings.HasPrefix(arg0, "STASH") || strings.HasPrefix(arg0, "OSDF") {
 		return "OSDF"
 	}
 	return "PELICAN"
