@@ -335,6 +335,7 @@ func TestWriteOutfile(t *testing.T) {
 			resultAd.Set("TransferLocalMachineName", "abcdefghijk")
 			resultAd.Set("TransferFileBytes", 12)
 			resultAd.Set("TransferTotalBytes", 27538253)
+			resultAd.Set("TransferUrl", "foo.txt")
 			resultAds = append(resultAds, resultAd)
 		}
 		success, retryable := writeOutfile(nil, resultAds, tempFile)
@@ -347,6 +348,7 @@ func TestWriteOutfile(t *testing.T) {
 		assert.Contains(t, string(tempFileContent), "TransferFileBytes = 12;")
 		assert.Contains(t, string(tempFileContent), "TransferTotalBytes = 27538253;")
 		assert.Contains(t, string(tempFileContent), "TransferSuccess = true;")
+		assert.Contains(t, string(tempFileContent), "TransferUrl = \"foo.txt\";")
 	})
 
 	t.Run("TestOutfileFailureNoRetry", func(t *testing.T) {
@@ -366,6 +368,7 @@ func TestWriteOutfile(t *testing.T) {
 			resultAd.Set("TransferLocalMachineName", "abcdefghijk")
 			resultAd.Set("TransferFileBytes", 12)
 			resultAd.Set("TransferTotalBytes", 27538253)
+			resultAd.Set("TransferUrl", "foo.txt")
 			resultAds = append(resultAds, resultAd)
 		}
 		success, retryable := writeOutfile(nil, resultAds, tempFile)
@@ -378,6 +381,7 @@ func TestWriteOutfile(t *testing.T) {
 		assert.Contains(t, string(tempFileContent), "TransferFileBytes = 12;")
 		assert.Contains(t, string(tempFileContent), "TransferSuccess = false;")
 		assert.Contains(t, string(tempFileContent), "TransferRetryable = false;")
+		assert.Contains(t, string(tempFileContent), "TransferUrl = \"foo.txt\";")
 	})
 
 	t.Run("TestOutfileFailureWithRetry", func(t *testing.T) {
@@ -397,6 +401,7 @@ func TestWriteOutfile(t *testing.T) {
 			resultAd.Set("TransferLocalMachineName", "abcdefghijk")
 			resultAd.Set("TransferFileBytes", 12)
 			resultAd.Set("TransferTotalBytes", 27538253)
+			resultAd.Set("TransferUrl", "foo.txt")
 			resultAds = append(resultAds, resultAd)
 		}
 		success, retryable := writeOutfile(nil, resultAds, tempFile)
@@ -409,6 +414,7 @@ func TestWriteOutfile(t *testing.T) {
 		assert.Contains(t, string(tempFileContent), "TransferFileBytes = 12;")
 		assert.Contains(t, string(tempFileContent), "TransferSuccess = false;")
 		assert.Contains(t, string(tempFileContent), "TransferRetryable = true;")
+		assert.Contains(t, string(tempFileContent), "TransferUrl = \"foo.txt\";")
 	})
 
 }
