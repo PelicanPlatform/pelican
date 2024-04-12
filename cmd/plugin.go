@@ -133,6 +133,7 @@ func stashPluginMain(args []string) {
 			fmt.Println("PluginType = \"FileTransfer\"")
 			fmt.Println("ProtocolVersion = 2")
 			fmt.Println("SupportedMethods = \"stash, osdf\"")
+			fmt.Println("StartdAttrs = \"PluginVersion\"")
 			os.Exit(0)
 		} else if args[0] == "-version" || args[0] == "-v" {
 			config.PrintPelicanVersion()
