@@ -95,7 +95,7 @@ type (
 
 	// Error type for when the transfer started to return data then completely stopped
 	StoppedTransferError struct {
-		Err string
+		Err error
 	}
 
 	// SlowTransferError is an error that is returned when a transfer takes longer than the configured timeout
@@ -109,6 +109,10 @@ type (
 	// ConnectionSetupError is an error that is returned when a connection to the remote server fails
 	ConnectionSetupError struct {
 		URL string
+		Err error
+	}
+
+	allocateMemoryError struct {
 		Err error
 	}
 
@@ -303,7 +307,29 @@ func getProgressContainer() *mpb.Progress {
 }
 
 func (e *StoppedTransferError) Error() string {
+	return e.Err.Error()
+}
+
+func (e *StoppedTransferError) Unwrap() error {
 	return e.Err
+}
+
+func (e *StoppedTransferError) Is(target error) bool {
+	_, ok := target.(*StoppedTransferError)
+	return ok
+}
+
+func (e *allocateMemoryError) Error() string {
+	return e.Err.Error()
+}
+
+func (e *allocateMemoryError) Unwrap() error {
+	return e.Err
+}
+
+func (e *allocateMemoryError) Is(target error) bool {
+	_, ok := target.(*allocateMemoryError)
+	return ok
 }
 
 type HttpErrResp struct {
@@ -1701,12 +1727,16 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	if resp.IsComplete() {
 		if err = resp.Err(); err != nil {
 			var sce grab.StatusCodeError
+			var cam syscall.Errno
 			if errors.Is(err, grab.ErrBadLength) {
 				err = fmt.Errorf("local copy of file is larger than remote copy %w", grab.ErrBadLength)
 			} else if errors.As(err, &sce) {
 				log.Debugln("Creating a client status code error")
 				sce2 := StatusCodeError(sce)
 				err = &sce2
+			} else if errors.As(err, &cam) && cam == syscall.ENOMEM {
+				// ENOMEM is error from os for unable to allocate memory
+				err = &allocateMemoryError{Err: err}
 			} else {
 				err = &ConnectionSetupError{Err: err}
 			}
@@ -1780,7 +1810,7 @@ Loop:
 					errMsg := "No progress for more than " + time.Since(noProgressStartTime).Truncate(time.Millisecond).String()
 					log.Errorln(errMsg)
 					err = &StoppedTransferError{
-						Err: errMsg,
+						Err: errors.New(errMsg),
 					}
 					return
 				}
