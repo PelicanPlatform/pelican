@@ -102,7 +102,11 @@ func (a AuthCheckImpl) checkFederationIssuer(c *gin.Context, strToken string, ex
 		}
 	}
 
-	fedURIFile := param.Federation_JwkUrl.GetString()
+	fedInfo, err := config.GetFederation(c)
+	if err != nil {
+		return err
+	}
+	fedURIFile := fedInfo.JwksUri
 	ctx := context.Background()
 	if federationJWK == nil {
 		client := &http.Client{Transport: config.GetTransport()}
@@ -271,7 +275,11 @@ func GetNSIssuerURL(prefix string) (string, error) {
 	if prefix == "" || !strings.HasPrefix(prefix, "/") {
 		return "", errors.New(fmt.Sprintf("the prefix \"%s\" is invalid", prefix))
 	}
-	registryUrlStr := param.Federation_RegistryUrl.GetString()
+	fedInfo, err := config.GetFederation(context.Background())
+	if err != nil {
+		return "", err
+	}
+	registryUrlStr := fedInfo.NamespaceRegistrationEndpoint
 	if registryUrlStr == "" {
 		return "", errors.New("federation registry URL is not set and was not discovered")
 	}

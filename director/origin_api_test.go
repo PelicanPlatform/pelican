@@ -57,9 +57,6 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 
 	viper.Set("Federation.DirectorURL", "https://director-url.org")
 
-	config.InitConfig()
-	err := config.InitServer(ctx, config.DirectorType)
-	require.NoError(t, err)
 	// Mock registry server
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if req.Method == "POST" && req.URL.Path == "/api/v1.0/registry/checkNamespaceStatus" {
@@ -83,6 +80,11 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 
 	// Mock cached jwks
 	viper.Set("Federation.RegistryUrl", ts.URL)
+
+	config.InitConfig()
+	err := config.InitServer(ctx, config.DirectorType)
+	require.NoError(t, err)
+
 	kSet, err := config.GetIssuerPublicJWKS()
 	require.NoError(t, err)
 	namespaceKeys.Set(ts.URL+"/api/v1.0/registry/test-namespace/.well-known/issuer.jwks", kSet, ttlcache.DefaultTTL)

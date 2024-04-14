@@ -291,6 +291,7 @@ description: |+
 type: url
 osdf_default: Default is determined dynamically through metadata at <Federation.DiscoveryUrl>/.well-known/pelican-configuration
 default: none
+direct_access: false
 components: ["client", "origin", "cache"]
 ---
 name: Federation.RegistryUrl
@@ -299,6 +300,7 @@ description: |+
 type: url
 osdf_default: Default is determined dynamically through metadata at <federation URL>/.well-known/pelican-configuration
 default: none
+direct_access: false
 components: ["client", "director", "origin", "cache"]
 ---
 name: Federation.JwkUrl
@@ -307,6 +309,7 @@ description: |+
 type: url
 osdf_default: Default is determined dynamically through metadata at <Federation.DiscoveryUrl>/.well-known/pelican-configuration
 default: none
+direct_access: false
 components: ["*"]
 ---
 name: Federation.TopologyUrl
@@ -341,6 +344,7 @@ description: |+
   If left unset, it will be populated by the federation metadata discovery.
 type: url
 default: none
+direct_access: false
 components: ["origin"]
 ---
 ############################

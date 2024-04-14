@@ -20,6 +20,7 @@ package client
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -198,7 +199,7 @@ func TestQueryDirector(t *testing.T) {
 	defer server.Close()
 
 	// Call QueryDirector with the test server URL and a source path
-	actualResp, err := queryDirector("GET", "/foo/bar", server.URL)
+	actualResp, err := queryDirector(context.Background(), "GET", "/foo/bar", server.URL)
 	if err != nil {
 		t.Fatal(err)
 	}

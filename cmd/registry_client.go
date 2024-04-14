@@ -28,6 +28,7 @@
 package main
 
 import (
+	"context"
 	"net/url"
 	"os"
 
@@ -47,8 +48,12 @@ var withIdentity bool
 var prefix string
 var pubkeyPath string
 
-func getNamespaceEndpoint() (string, error) {
-	namespaceEndpoint := param.Federation_RegistryUrl.GetString()
+func getNamespaceEndpoint(ctx context.Context) (string, error) {
+	fedInfo, err := config.GetFederation(ctx)
+	if err != nil {
+		return "", err
+	}
+	namespaceEndpoint := fedInfo.NamespaceRegistrationEndpoint
 	if namespaceEndpoint == "" {
 		return "", errors.New("No namespace registry specified; either give the federation name (-f) or specify the namespace API endpoint directly (e.g., --namespace-url=https://namespace.osg-htc.org/namespaces)")
 	}
@@ -69,7 +74,7 @@ func registerANamespace(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	namespaceEndpoint, err := getNamespaceEndpoint()
+	namespaceEndpoint, err := getNamespaceEndpoint(cmd.Context())
 	if err != nil {
 		log.Errorln("Failed to get RegistryUrl from config: ", err)
 		os.Exit(1)
@@ -136,7 +141,7 @@ func deleteANamespace(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	namespaceEndpoint, err := getNamespaceEndpoint()
+	namespaceEndpoint, err := getNamespaceEndpoint(cmd.Context())
 	if err != nil {
 		log.Errorln("Failed to get RegistryUrl from config: ", err)
 		os.Exit(1)
@@ -161,7 +166,7 @@ func listAllNamespaces(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	namespaceEndpoint, err := getNamespaceEndpoint()
+	namespaceEndpoint, err := getNamespaceEndpoint(cmd.Context())
 	if err != nil {
 		log.Errorln("Failed to get RegistryUrl from config: ", err)
 		os.Exit(1)

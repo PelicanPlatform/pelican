@@ -129,11 +129,7 @@ var (
 	Director_MaxMindKeyFile = StringParam{"Director.MaxMindKeyFile"}
 	Director_SupportContactEmail = StringParam{"Director.SupportContactEmail"}
 	Director_SupportContactUrl = StringParam{"Director.SupportContactUrl"}
-	Federation_BrokerUrl = StringParam{"Federation.BrokerUrl"}
-	Federation_DirectorUrl = StringParam{"Federation.DirectorUrl"}
 	Federation_DiscoveryUrl = StringParam{"Federation.DiscoveryUrl"}
-	Federation_JwkUrl = StringParam{"Federation.JwkUrl"}
-	Federation_RegistryUrl = StringParam{"Federation.RegistryUrl"}
 	Federation_TopologyNamespaceUrl = StringParam{"Federation.TopologyNamespaceUrl"}
 	Federation_TopologyUrl = StringParam{"Federation.TopologyUrl"}
 	IssuerKey = StringParam{"IssuerKey"}

@@ -19,6 +19,7 @@
 package server_utils
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -30,7 +31,6 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/param"
 )
 
 // For a given prefix, get the prefix's issuer URL, where we consider that the openid endpoint
@@ -40,8 +40,12 @@ func GetNSIssuerURL(prefix string) (string, error) {
 	if prefix == "" || !strings.HasPrefix(prefix, "/") {
 		return "", errors.New(fmt.Sprintf("the prefix \"%s\" is invalid", prefix))
 	}
-	registryUrlStr := param.Federation_RegistryUrl.GetString()
+	fedInfo, err := config.GetFederation(context.Background())
+	registryUrlStr := fedInfo.NamespaceRegistrationEndpoint
 	if registryUrlStr == "" {
+		if err != nil {
+			return "", err
+		}
 		return "", errors.New("federation registry URL is not set and was not discovered")
 	}
 	registryUrl, err := url.Parse(registryUrlStr)
