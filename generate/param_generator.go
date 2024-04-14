@@ -104,6 +104,18 @@ func GenParamEnum() {
 			}
 		}
 
+		// If `direct_access` is set to false, then we are not allowed to access the value via the
+		// param module.  Typically, this indicates there's some other mechanism in the config module
+		// that should be used instead (such as when there's a computed value).
+		if entryDirectAccess, ok := entry["direct_access"]; ok {
+			if entryVal, ok := entryDirectAccess.(bool); ok && !entryVal {
+				// direct_access = false; do not generate parameter
+				continue
+			} else if !ok {
+				panic(fmt.Sprintf("Parameter entry '%s' has direct_access set to non-boolean", entryName))
+			}
+		}
+
 		// Each document must be converted to json on it's own and then the name
 		// must be used as a key
 		jsonBytes, _ := json.Marshal(entry)
