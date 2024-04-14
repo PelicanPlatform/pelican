@@ -1,0 +1,26 @@
+{
+  "namespaces": [
+    {
+      "caches": [
+        {
+          "auth_endpoint": "dtn-pas.bois.nrp.internet2.edu:8443",
+          "endpoint": "dtn-pas.bois.nrp.internet2.edu:8000",
+          "resource": "BOISE_INTERNET2_OSDF_CACHE"
+        },
+        {
+          "auth_endpoint": "osdf-uw-cache.svc.osg-htc.org:8443",
+          "endpoint": "osdf-uw-cache.svc.osg-htc.org:8443",
+          "resource": "CHTC_PELICAN_CACHE"
+        }
+      ],
+      "credential_generation": null,
+      "dirlisthost": null,
+      "origins": [],
+      "path": "/user",
+      "readhttps": false,
+      "scitokens": [],
+      "usetokenonread": false,
+      "writebackhost": null
+    }
+  ]
+}

@@ -37,6 +37,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/pelicanplatform/pelican/mock"
 	"github.com/pelicanplatform/pelican/param"
 )
 
@@ -350,6 +351,13 @@ func TestDiscoverFederation(t *testing.T) {
 		assert.NoError(t, err)
 	}))
 	defer server.Close()
+	transport := GetTransport()
+	origClientConfig := transport.TLSClientConfig
+	transport.TLSClientConfig = server.Client().Transport.(*http.Transport).TLSClientConfig.Clone()
+	t.Cleanup(func() {
+		transport.TLSClientConfig = origClientConfig
+	})
+
 	t.Run("testInvalidDiscoveryUrlWithPath", func(t *testing.T) {
 		viper.Set("Federation.DiscoveryUrl", server.URL+"/this/is/some/path")
 		err := DiscoverFederation(context.Background())
@@ -372,6 +380,7 @@ func TestDiscoverFederation(t *testing.T) {
 	})
 
 	t.Run("testOsgHtcUrl", func(t *testing.T) {
+		mock.MockOSDFDiscovery(t, GetTransport())
 		viper.Set("Federation.DiscoveryUrl", "osg-htc.org")
 		err := DiscoverFederation(context.Background())
 		assert.NoError(t, err)
