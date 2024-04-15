@@ -18,22 +18,38 @@
 
 package server_structs
 
-type CheckNamespaceExistsReq struct {
-	Prefix string `json:"prefix"`
-	PubKey string `json:"pubkey"`
-}
+type (
+	CheckNamespaceExistsReq struct {
+		Prefix string `json:"prefix"`
+		PubKey string `json:"pubkey"`
+	}
 
-type CheckNamespaceExistsRes struct {
-	PrefixExists bool   `json:"prefix_exists"`
-	KeyMatch     bool   `json:"key_match"`
-	Message      string `json:"message"`
-	Error        string `json:"error"`
-}
+	CheckNamespaceExistsRes struct {
+		PrefixExists bool   `json:"prefix_exists"`
+		KeyMatch     bool   `json:"key_match"`
+		Message      string `json:"message"`
+		Error        string `json:"error"`
+	}
 
-type CheckNamespaceStatusReq struct {
-	Prefix string `json:"prefix"`
-}
+	CheckNamespaceStatusReq struct {
+		Prefix string `json:"prefix"`
+	}
 
-type CheckNamespaceStatusRes struct {
-	Approved bool `json:"approved"`
-}
+	CheckNamespaceStatusRes struct {
+		Approved bool `json:"approved"`
+	}
+
+	CheckNamespaceCompleteReq struct {
+		Prefixes []string `json:"prefixes"`
+	}
+
+	NamespaceCompletenessResult struct {
+		Prefix    string `json:"prefix"`
+		Completed bool   `json:"complete"`
+		Error     error  `json:"error"`
+	}
+
+	CheckNamespaceCompleteRes struct {
+		Results []NamespaceCompletenessResult `json:"result"`
+	}
+)

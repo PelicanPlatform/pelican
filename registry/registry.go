@@ -798,7 +798,6 @@ func wildcardHandler(ctx *gin.Context) {
 		ctx.JSON(http.StatusOK, nsCfg)
 		return
 	} else {
-
 		ctx.String(http.StatusNotFound, "404 Page not found")
 		return
 	}
@@ -935,6 +934,47 @@ func checkNamespaceStatusHandler(ctx *gin.Context) {
 	}
 }
 
+func checkNamespaceCompleteHandler(ctx *gin.Context) {
+	nssReq := server_structs.CheckNamespaceCompleteReq{}
+	results := []server_structs.NamespaceCompletenessResult{}
+
+	err := ctx.BindJSON(&nssReq)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "failed to parse request body: " + err.Error()})
+	}
+	for _, prefix := range nssReq.Prefixes {
+		complete := server_structs.NamespaceCompletenessResult{Prefix: prefix}
+		exists, err := namespaceExistsByPrefix(prefix)
+		if err != nil {
+			complete.Error = errors.Wrapf(err, "Failed to check if %s exists", prefix)
+			results = append(results, complete)
+			continue
+		}
+		if !exists {
+			complete.Error = errors.Wrapf(err, "Namespace %s does not exist", prefix)
+			results = append(results, complete)
+			continue
+		}
+		ns, err := getNamespaceByPrefix(prefix)
+		if err != nil {
+			complete.Error = errors.Wrapf(err, "Failed to retrieve namespace %s", prefix)
+			results = append(results, complete)
+			continue
+		}
+		err = config.GetValidate().Struct(ns)
+		if err != nil {
+			complete.Error = errors.Wrap(err, "Incomplete registration")
+			results = append(results, complete)
+			continue
+		} else {
+			complete.Completed = true
+			results = append(results, complete)
+			continue
+		}
+	}
+	ctx.JSON(http.StatusOK, server_structs.CheckNamespaceCompleteRes{Results: results})
+}
+
 func RegisterRegistryAPI(router *gin.RouterGroup) {
 	registryAPI := router.Group("/api/v1.0/registry")
 
@@ -949,6 +989,7 @@ func RegisterRegistryAPI(router *gin.RouterGroup) {
 		registryAPI.GET("/*wildcard", wildcardHandler)
 		registryAPI.POST("/checkNamespaceExists", checkNamespaceExistsHandler)
 		registryAPI.POST("/checkNamespaceStatus", checkNamespaceStatusHandler)
+		registryAPI.POST("/checkNamespaceComplete", checkNamespaceCompleteHandler)
 		registryAPI.DELETE("/*wildcard", deleteNamespaceHandler)
 	}
 }
