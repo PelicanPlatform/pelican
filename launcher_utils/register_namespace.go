@@ -257,6 +257,7 @@ func registerNamespaceImpl(key jwk.Key, prefix string, registrationEndpointURL s
 	return nil
 }
 
+// Register the namespace. If failed, retry every 10s (default)
 func RegisterNamespaceWithRetry(ctx context.Context, egrp *errgroup.Group, prefix string) error {
 	retryInterval := param.Server_RegistrationRetryInterval.GetDuration()
 	if retryInterval == 0 {
