@@ -160,7 +160,7 @@ func GetNamespaces() ([]Namespace, error) {
 	namespacesFromUrl, err := downloadNamespace()
 	if err != nil {
 		log.Debugf("Failed to download namespaces: %s", err)
-		if config.GetPreferredPrefix() == "PELICAN" {
+		if config.GetPreferredPrefix() == config.PelicanPrefix {
 			return nil, err
 		} else {
 			log.Debug("Continuing using built-in namespace configuration")

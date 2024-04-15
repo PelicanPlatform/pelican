@@ -556,7 +556,7 @@ func TestNewPelicanURL(t *testing.T) {
 
 	t.Run("TestOsdfOrStashSchemeWithOSDFPrefixNoError", func(t *testing.T) {
 		viper.Reset()
-		_, err := config.SetPreferredPrefix("OSDF")
+		_, err := config.SetPreferredPrefix(config.OsdfPrefix)
 		assert.NoError(t, err)
 		// Init config to get proper timeouts
 		config.InitConfig()
@@ -580,7 +580,7 @@ func TestNewPelicanURL(t *testing.T) {
 
 	t.Run("TestOsdfOrStashSchemeWithOSDFPrefixWithError", func(t *testing.T) {
 		viper.Reset()
-		_, err := config.SetPreferredPrefix("OSDF")
+		_, err := config.SetPreferredPrefix(config.OsdfPrefix)
 		assert.NoError(t, err)
 		config.InitConfig()
 
@@ -600,7 +600,7 @@ func TestNewPelicanURL(t *testing.T) {
 
 	t.Run("TestOsdfOrStashSchemeWithPelicanPrefixNoError", func(t *testing.T) {
 		viper.Reset()
-		_, err := config.SetPreferredPrefix("PELICAN")
+		_, err := config.SetPreferredPrefix(config.PelicanPrefix)
 		config.InitConfig()
 		assert.NoError(t, err)
 		remoteObject := "osdf:///something/somewhere/thatdoesnotexist.txt"

@@ -914,7 +914,7 @@ func TestCreateNamespace(t *testing.T) {
 	t.Run("osdf-topology-subspace-request-gives-200", func(t *testing.T) {
 		resetNamespaceDB(t)
 
-		_, err := config.SetPreferredPrefix("OSDF")
+		_, err := config.SetPreferredPrefix(config.OsdfPrefix)
 		require.NoError(t, err)
 		topoNamespaces := []string{"/topo/foo", "/topo/bar"}
 		svr := topologyMockup(t, topoNamespaces)
@@ -956,7 +956,7 @@ func TestCreateNamespace(t *testing.T) {
 	t.Run("osdf-topology-same-prefix-request-gives-200", func(t *testing.T) {
 		resetNamespaceDB(t)
 
-		_, err := config.SetPreferredPrefix("OSDF")
+		_, err := config.SetPreferredPrefix(config.OsdfPrefix)
 		require.NoError(t, err)
 		topoNamespaces := []string{"/topo/foo", "/topo/bar"}
 		svr := topologyMockup(t, topoNamespaces)

@@ -134,7 +134,7 @@ func init() {
 	rootCmd.AddCommand(rootPluginCmd)
 	rootCmd.AddCommand(serveCmd)
 	preferredPrefix := config.GetPreferredPrefix()
-	rootCmd.Use = strings.ToLower(preferredPrefix)
+	rootCmd.Use = strings.ToLower(preferredPrefix.String())
 
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.config/pelican/pelican.yaml)")
 

@@ -756,7 +756,7 @@ func TestRegistryTopology(t *testing.T) {
 	}()
 
 	// Set value so that config.GetPreferredPrefix() returns "OSDF"
-	_, err = config.SetPreferredPrefix("OSDF")
+	_, err = config.SetPreferredPrefix(config.OsdfPrefix)
 	assert.NoError(t, err)
 
 	//Test topology table population

@@ -269,7 +269,7 @@ func EmitAuthfile(server server_structs.XRootDServer) error {
 
 	output := new(bytes.Buffer)
 	foundPublicLine := false
-	if config.GetPreferredPrefix() == "OSDF" {
+	if config.GetPreferredPrefix() == config.OsdfPrefix {
 		log.Debugln("Retrieving OSDF Authfile for server")
 		bytes, err := getOSDFAuthFiles(server)
 		if err != nil {
