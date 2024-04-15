@@ -32,28 +32,6 @@ import (
 	"github.com/spf13/viper"
 )
 
-var (
-	keygenCmd = &cobra.Command{
-		Use:   "keygen",
-		Short: "Generate a public-private key-pair for Pelican OIDC issuer",
-		Long: `Generate a public-private key-pair for a Pelican server.
-The private key is a ECDSA key with P256 curve. The corresponding public key
-is a JWKS in JSON. The public key follows OIDC protocol and can be used
-for JWT signature verification.
-		`,
-		RunE:         keygenMain,
-		SilenceUsage: true,
-	}
-
-	privateKeyPath string
-	publicKeyPath  string
-)
-
-func init() {
-	keygenCmd.Flags().StringVar(&privateKeyPath, "private-key", "", "The path to the generate private key file. Default: ./issuer.jwk")
-	keygenCmd.Flags().StringVar(&publicKeyPath, "public-key", "", "The path to the generate public key file. Default: ./issuer-pub.jwks")
-}
-
 func keygenMain(cmd *cobra.Command, args []string) error {
 	wd, err := os.Getwd()
 	if err != nil {

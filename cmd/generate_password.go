@@ -1,3 +1,5 @@
+//go:build !windows
+
 /***************************************************************
  *
  * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
@@ -33,28 +35,6 @@ import (
 	"github.com/tg123/go-htpasswd"
 	"golang.org/x/term"
 )
-
-var (
-	passwordCmd = &cobra.Command{
-		Use:   "password",
-		Short: "Generate a Pelican admin website password file (htpasswd)",
-		Long: `Given a password for the admin website, generate the htpasswd file that Pelican server
-uses to store the password and authenticate the admin user. You may put the generated file under
-/etc/pelican with name "server-web-passwd", or change Server.UIPasswordFile
-to the path to generated file to initialize the admin website.
-`,
-		RunE:         passwordMain,
-		SilenceUsage: true,
-	}
-
-	outPasswordPath string
-	inPasswordPath  string
-)
-
-func init() {
-	passwordCmd.Flags().StringVarP(&outPasswordPath, "output", "o", "", "The path to the generate htpasswd password file. Default: ./server-web-passwd")
-	passwordCmd.Flags().StringVarP(&inPasswordPath, "password", "p", "", "The path to the file containing the password. Will take from terminal input if not provided")
-}
 
 func getPassword() ([]byte, error) {
 	if fileInfo, _ := os.Stdin.Stat(); (fileInfo.Mode() & os.ModeCharDevice) == 0 {
