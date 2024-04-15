@@ -427,6 +427,9 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid create or update namespace request"})
 		return
 	}
+	if !isUpdate { // create
+		ns.AdminMetadata.UserID = user
+	}
 	// Assign ID from path param because the request data doesn't have ID set
 	ns.ID = id
 	// Basic validation (type, required, etc)
@@ -496,7 +499,6 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 	}
 
 	if !isUpdate { // Create
-		ns.AdminMetadata.UserID = user
 		// Overwrite status to Pending to filter malicious request
 		ns.AdminMetadata.Status = Pending
 		if inTopo {

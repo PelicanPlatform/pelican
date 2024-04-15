@@ -61,7 +61,7 @@ type RegistrationStatus string
 // endpoint to tell the UI if a field is required. For other validator tags,
 // visit: https://pkg.go.dev/github.com/go-playground/validator/v10
 type AdminMetadata struct {
-	UserID                string             `json:"user_id" post:"exclude"` // "sub" claim of user JWT who requested registration
+	UserID                string             `json:"user_id" post:"exclude" validate:"required"` // "sub" claim of user JWT who requested registration
 	Description           string             `json:"description"`
 	SiteName              string             `json:"site_name"`
 	Institution           string             `json:"institution" validate:"required"` // the unique identifier of the institution
