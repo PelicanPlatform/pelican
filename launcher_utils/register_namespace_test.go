@@ -52,12 +52,13 @@ type (
 )
 
 func TestRegistration(t *testing.T) {
+	tempConfigDir := t.TempDir()
+
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
 
 	viper.Reset()
-	tempConfigDir := t.TempDir()
 	viper.Set("ConfigDir", tempConfigDir)
 
 	config.InitConfig()
