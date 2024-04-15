@@ -782,8 +782,6 @@ func getPrefixByPath(ctx *gin.Context) {
 		ctx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Bad request. Path is empty or '/' "})
 		return
 	}
-	namespaceKeysMutex.Lock()
-	defer namespaceKeysMutex.Unlock()
 
 	originNs, _, _ := getAdsForPath(pathParam)
 

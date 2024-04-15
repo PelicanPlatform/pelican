@@ -102,8 +102,6 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 		if err = ar.Register("", jwk.WithMinRefreshInterval(15*time.Minute)); err != nil {
 			t.Errorf("this should never happen, should actually be impossible, including check for the linter")
 		}
-		namespaceKeysMutex.Lock()
-		defer namespaceKeysMutex.Unlock()
 		namespaceKeys.Set("/test-namespace", &ar, ttlcache.DefaultTTL)
 	}()
 
@@ -175,8 +173,6 @@ func TestNamespaceKeysCacheEviction(t *testing.T) {
 		cancelChan := make(chan int)
 
 		go func() {
-			namespaceKeysMutex.Lock()
-			defer namespaceKeysMutex.Unlock()
 			namespaceKeys.DeleteAll()
 
 			namespaceKeys.Set(mockNamespaceKey, mockAr, time.Second*2)

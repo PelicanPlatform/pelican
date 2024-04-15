@@ -27,7 +27,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
@@ -51,8 +50,8 @@ type NamespaceCache interface {
 }
 
 var (
-	namespaceKeys      = ttlcache.New[string, NamespaceCache](ttlcache.WithTTL[string, NamespaceCache](15 * time.Minute))
-	namespaceKeysMutex = sync.RWMutex{}
+	// TTL cache is thread-safe
+	namespaceKeys = ttlcache.New(ttlcache.WithTTL[string, NamespaceCache](15 * time.Minute))
 
 	adminApprovalErr error
 )
@@ -125,18 +124,12 @@ func verifyAdvertiseToken(ctx context.Context, token, namespace string) (bool, e
 
 	var ar NamespaceCache
 
-	// defer statements are scoped to function, not lexical enclosure,
-	// which is why we wrap these defer statements in anon funcs
-	func() {
-		namespaceKeysMutex.RLock()
-		defer namespaceKeysMutex.RUnlock()
-		item := namespaceKeys.Get(namespace)
-		if item != nil {
-			if !item.IsExpired() {
-				ar = item.Value()
-			}
+	item := namespaceKeys.Get(namespace)
+	if item != nil {
+		if !item.IsExpired() {
+			ar = item.Value()
 		}
-	}()
+	}
 	regUrlStr := param.Federation_RegistryUrl.GetString()
 	approved, err := checkNamespaceStatus(namespace, regUrlStr)
 	if err != nil {
@@ -152,9 +145,6 @@ func verifyAdvertiseToken(ctx context.Context, token, namespace string) (bool, e
 		if err = ar.Register(keyLoc, jwk.WithMinRefreshInterval(15*time.Minute), jwk.WithHTTPClient(client)); err != nil {
 			return false, errors.Wrap(err, fmt.Sprintf("failed to register JWKS URL %s at the JWKS cache", keyLoc))
 		}
-		namespaceKeysMutex.Lock()
-		defer namespaceKeysMutex.Unlock()
-
 		customTTL := param.Director_AdvertisementTTL.GetDuration()
 		if customTTL == 0 {
 			namespaceKeys.Set(namespace, ar, ttlcache.DefaultTTL)
