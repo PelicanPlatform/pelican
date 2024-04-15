@@ -29,12 +29,8 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 )
-
-type OpenIdDiscoveryResponse struct {
-	Issuer  string `json:"issuer"`
-	JwksUri string `json:"jwks_uri"`
-}
 
 const (
 	oidcDiscoveryPath       string = "/.well-known/openid-configuration"
@@ -136,7 +132,7 @@ func oidcDiscoveryHandler(ctx *gin.Context) {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Bad server configuration: cannot generate JWKs URL"})
 		return
 	}
-	rs := OpenIdDiscoveryResponse{
+	rs := server_structs.OpenIdDiscoveryResponse{
 		Issuer:  directorUrl.String(),
 		JwksUri: jwskUrl,
 	}
