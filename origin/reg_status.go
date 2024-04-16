@@ -75,7 +75,9 @@ func SetNamespacesStatus(key string, val RegistrationStatus, ttl time.Duration) 
 	registrationsStatus.Set(key, val, ttl)
 }
 
-func FetchNsStatus(prefixes []string) (*server_structs.CheckNamespaceCompleteRes, error) {
+// Fetch the registration status for an array of namespace prefixes
+// from the registry
+func FetchRegStatus(prefixes []string) (*server_structs.CheckNamespaceCompleteRes, error) {
 	regUrlStr := param.Federation_RegistryUrl.GetString()
 	reqUrl, err := url.JoinPath(regUrlStr, "/api/v1.0/registry/checkNamespaceComplete")
 	if err != nil {
@@ -113,8 +115,10 @@ func FetchNsStatus(prefixes []string) (*server_structs.CheckNamespaceCompleteRes
 	return &resStatus, nil
 }
 
-func FetchAndSetNsStatus(prefix string) error {
-	res, err := FetchNsStatus([]string{prefix})
+// Fetch the registration status, generate access token for editing the
+// registration at the registry, and store the status to the TTL cache
+func FetchAndSetRegStatus(prefix string) error {
+	res, err := FetchRegStatus([]string{prefix})
 	if err == RegistryNotImplErr {
 		registrationsStatus.Set(
 			prefix,
@@ -140,8 +144,8 @@ func FetchAndSetNsStatus(prefix string) error {
 	return nil
 }
 
-func wrapExportsByStatus(exports []server_utils.OriginExport) ([]exportWithStatus, error) {
-	wrappedExports := []exportWithStatus{}
+func wrapExportsByStatus(exports []server_utils.OriginExport) ([]*exportWithStatus, error) {
+	wrappedExports := []*exportWithStatus{}
 	fetchQ := []server_utils.OriginExport{}
 	prefixQ := []string{}
 
@@ -154,7 +158,7 @@ func wrapExportsByStatus(exports []server_utils.OriginExport) ([]exportWithStatu
 				StatusDescription: regStatus.Msg,
 				OriginExport:      export,
 			}
-			wrappedExports = append(wrappedExports, wrappedExport)
+			wrappedExports = append(wrappedExports, &wrappedExport)
 		} else {
 			// If DNE, attempt to fetch
 			fetchQ = append(fetchQ, export)
@@ -166,7 +170,7 @@ func wrapExportsByStatus(exports []server_utils.OriginExport) ([]exportWithStatu
 	}
 
 	// fetch and populate the cache with the result
-	resStatus, err := FetchNsStatus(prefixQ)
+	resStatus, err := FetchRegStatus(prefixQ)
 	// For registry <7.8, this function is not supported
 	if err == RegistryNotImplErr {
 		for _, export := range fetchQ {
@@ -174,7 +178,7 @@ func wrapExportsByStatus(exports []server_utils.OriginExport) ([]exportWithStatu
 				Status:       RegStatusNotSupported,
 				OriginExport: export,
 			}
-			wrappedExports = append(wrappedExports, wrappedExport)
+			wrappedExports = append(wrappedExports, &wrappedExport)
 			registrationsStatus.Set(
 				export.FederationPrefix,
 				RegistrationStatus{Status: RegStatusNotSupported, Msg: RegistryNotImplErr.Error()},
@@ -195,7 +199,7 @@ func wrapExportsByStatus(exports []server_utils.OriginExport) ([]exportWithStatu
 				StatusDescription: statusErrMsg,
 				OriginExport:      export,
 			}
-			wrappedExports = append(wrappedExports, wrappedExport)
+			wrappedExports = append(wrappedExports, &wrappedExport)
 			registrationsStatus.Set(
 				export.FederationPrefix,
 				RegistrationStatus{Status: RegStatusNotSupported, Msg: statusErrMsg},
@@ -212,7 +216,7 @@ func wrapExportsByStatus(exports []server_utils.OriginExport) ([]exportWithStatu
 				StatusDescription: status.Msg,
 				OriginExport:      export,
 			}
-			wrappedExports = append(wrappedExports, wrappedExport)
+			wrappedExports = append(wrappedExports, &wrappedExport)
 			registrationsStatus.Set(
 				export.FederationPrefix,
 				RegistrationStatus{Status: internalStatus, EditUrl: status.EditUrl, Msg: status.Msg},

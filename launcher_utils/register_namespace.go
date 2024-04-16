@@ -274,7 +274,7 @@ func RegisterNamespaceWithRetry(ctx context.Context, egrp *errgroup.Group, prefi
 	if isRegistered {
 		metrics.SetComponentHealthStatus(metrics.OriginCache_Registry, metrics.StatusOK, "")
 		log.Debugf("Origin already has prefix %v registered\n", prefix)
-		if err := origin.FetchAndSetNsStatus(prefix); err != nil {
+		if err := origin.FetchAndSetRegStatus(prefix); err != nil {
 			return errors.Wrapf(err, "failed to fetch registration status for the prefix %s", prefix)
 		}
 		return nil
@@ -293,7 +293,7 @@ func RegisterNamespaceWithRetry(ctx context.Context, egrp *errgroup.Group, prefi
 			select {
 			case <-ticker.C:
 				if err := registerNamespaceImpl(key, prefix, url); err == nil {
-					if err := origin.FetchAndSetNsStatus(prefix); err != nil {
+					if err := origin.FetchAndSetRegStatus(prefix); err != nil {
 						log.Errorf("failed to fetch registration status for the prefix %s: %v", prefix, err)
 					}
 					return nil

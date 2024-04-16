@@ -70,14 +70,14 @@ func mockRegistryCheck(t *testing.T) *httptest.Server {
 	}))
 }
 
-func TestFetchNsStatus(t *testing.T) {
+func TestFetchRegStatus(t *testing.T) {
 	t.Run("successful-fetch", func(t *testing.T) {
 		ts := mockRegistryCheck(t)
 		defer ts.Close()
 		viper.Reset()
 		viper.Set(param.Federation_RegistryUrl.GetName(), ts.URL)
 
-		result, err := FetchNsStatus([]string{"/foo", "/bar"})
+		result, err := FetchRegStatus([]string{"/foo", "/bar"})
 		require.NoError(t, err)
 
 		foo, ok := result.Results["/foo"]
@@ -98,7 +98,7 @@ func TestFetchNsStatus(t *testing.T) {
 		viper.Reset()
 		viper.Set(param.Federation_RegistryUrl.GetName(), ts.URL)
 
-		_, err := FetchNsStatus([]string{"/foo", "/bar"})
+		_, err := FetchRegStatus([]string{"/foo", "/bar"})
 		require.Error(t, err)
 		assert.Equal(t, RegistryNotImplErr, err)
 	})
@@ -115,7 +115,7 @@ func TestFetchNsStatus(t *testing.T) {
 		viper.Reset()
 		viper.Set(param.Federation_RegistryUrl.GetName(), ts.URL)
 
-		_, err := FetchNsStatus([]string{"/foo", "/bar"})
+		_, err := FetchRegStatus([]string{"/foo", "/bar"})
 		require.Error(t, err)
 		assert.Equal(t, "response returns 500 with body: ", err.Error())
 	})
