@@ -42,6 +42,13 @@ import (
 	"github.com/pelicanplatform/pelican/namespaces"
 )
 
+type classAd string
+
+const (
+	ProjectName classAd = "ProjectName"
+	JobId       classAd = "GlobalJobId"
+)
+
 // Number of caches to attempt to use in any invocation
 var CachesToTry int = 3
 
@@ -459,7 +466,7 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 		return nil, err
 	}
 
-	project := GetProjectName()
+	project := SearchJobAd(ProjectName)
 
 	te := NewTransferEngine(ctx)
 	defer func() {
@@ -547,7 +554,7 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 		localDestination = path.Join(localDestPath, remoteObjectFilename)
 	}
 
-	project := GetProjectName()
+	project := SearchJobAd(ProjectName)
 	success := false
 
 	te := NewTransferEngine(ctx)
@@ -650,7 +657,7 @@ func DoCopy(ctx context.Context, sourceFile string, destination string, recursiv
 	sourceScheme, _ := getTokenName(sourceURL)
 	destScheme, _ := getTokenName(destURL)
 
-	project := GetProjectName()
+	project := SearchJobAd(ProjectName)
 
 	isPut := destScheme == "stash" || destScheme == "osdf" || destScheme == "pelican"
 
@@ -789,8 +796,7 @@ func getIPs(name string) []string {
 
 }
 
-// This function parses a condor job ad and returns the project name if defined
-func GetProjectName() string {
+func SearchJobAd(classad classAd) string {
 	//Parse the .job.ad file for the Owner (username) and ProjectName of the callee.
 
 	condorJobAd, isPresent := os.LookupEnv("_CONDOR_JOB_AD")
@@ -810,25 +816,53 @@ func GetProjectName() string {
 		log.Warningln("Can not read .job.ad file", err)
 	}
 
-	// Get all matches from file
-	// Note: This appears to be invalid regex but is the only thing that appears to work. This way it successfully finds our matches
-	classadRegex, e := regexp.Compile(`^*\s*(ProjectName)\s=\s"*(.*)"*`)
-	if e != nil {
-		log.Fatal(e)
-	}
+	switch classad {
+	case ProjectName:
+		// Get all matches from file
+		// Note: This appears to be invalid regex but is the only thing that appears to work. This way it successfully finds our matches
+		classadRegex, e := regexp.Compile(`^*\s*(ProjectName)\s=\s"*(.*)"*`)
+		if e != nil {
+			log.Fatal(e)
+		}
 
-	matches := classadRegex.FindAll(b, -1)
-	for _, match := range matches {
-		matchString := strings.TrimSpace(string(match))
-		if strings.HasPrefix(matchString, "ProjectName") {
-			matchParts := strings.Split(strings.TrimSpace(matchString), "=")
+		matches := classadRegex.FindAll(b, -1)
+		for _, match := range matches {
+			matchString := strings.TrimSpace(string(match))
+			if strings.HasPrefix(matchString, "ProjectName") {
+				matchParts := strings.Split(strings.TrimSpace(matchString), "=")
 
-			if len(matchParts) == 2 { // just confirm we get 2 parts of the string
-				matchValue := strings.TrimSpace(matchParts[1])
-				matchValue = strings.Trim(matchValue, "\"") //trim any "" around the match if present
-				return matchValue
+				if len(matchParts) == 2 { // just confirm we get 2 parts of the string
+					matchValue := strings.TrimSpace(matchParts[1])
+					matchValue = strings.Trim(matchValue, "\"") //trim any "" around the match if present
+					return matchValue
+				}
 			}
 		}
+	case JobId:
+		// Get all matches from file
+		// Note: This appears to be invalid regex but is the only thing that appears to work. This way it successfully finds our matches
+		classadRegex, e := regexp.Compile(`^*\s*(GlobalJobId)\s=\s"*(.*)"*`)
+		if e != nil {
+			log.Fatal(e)
+		}
+
+		matches := classadRegex.FindAll(b, -1)
+		for _, match := range matches {
+			matchString := strings.TrimSpace(string(match))
+			if strings.HasPrefix(matchString, "GlobalJobId") {
+				matchParts := strings.Split(strings.TrimSpace(matchString), "=")
+
+				if len(matchParts) == 2 { // just confirm we get 2 parts of the string
+					matchValue := strings.TrimSpace(matchParts[1])
+					matchValue = strings.Trim(matchValue, "\"") //trim any "" around the match if present
+					return matchValue
+				}
+			}
+		}
+	default:
+		log.Errorln("Invalid classad requested")
+		return ""
 	}
+
 	return ""
 }

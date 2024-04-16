@@ -511,6 +511,48 @@ func TestTimeoutHeaderSetForDownload(t *testing.T) {
 	viper.Reset()
 }
 
+func TestJobIdHeaderSetForDownload(t *testing.T) {
+	viper.Reset()
+	config.InitConfig()
+	require.NoError(t, config.InitClient())
+
+	// Create a test .job.ad file
+	jobAdFile, err := os.CreateTemp("", ".job.ad")
+	assert.NoError(t, err)
+
+	// Write the job ad to the file
+	_, err = jobAdFile.WriteString("GlobalJobId = 12345")
+	assert.NoError(t, err)
+	jobAdFile.Close()
+
+	os.Setenv("_CONDOR_JOB_AD", jobAdFile.Name())
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+
+	// We have this flag because our server will get a few requests throughout its lifetime and the other
+	// requests do not contain the X-Pelican-Timeout header
+	timeoutHeaderFound := false
+
+	// Create a mock server to download from
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Check if the "X-Pelican-Timeout" header is set
+		if !timeoutHeaderFound {
+			if r.Header.Get("X-Pelican-JobId") == "" {
+				t.Error("X-Pelican-JobId header is not set")
+			}
+			assert.Equal(t, "12345", r.Header.Get("X-Pelican-JobId"))
+			timeoutHeaderFound = true
+		}
+	}))
+	defer server.Close()
+
+	serverURL, err := url.Parse(server.URL)
+	assert.NoError(t, err)
+	_, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: serverURL, Proxy: false}, filepath.Join(t.TempDir(), "test.txt"), -1, "", "")
+	assert.NoError(t, err)
+	viper.Reset()
+	os.Unsetenv("_CONDOR_JOB_AD")
+}
+
 // Server test object for testing user agent
 type (
 	server_test struct {

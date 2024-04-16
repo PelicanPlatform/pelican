@@ -1713,6 +1713,9 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	// Set the headers
 	req.HTTPRequest.Header.Set("X-Transfer-Status", "true")
 	req.HTTPRequest.Header.Set("X-Pelican-Timeout", headerTimeout.Round(time.Millisecond).String())
+	if SearchJobAd(JobId) != "" {
+		req.HTTPRequest.Header.Set("X-Pelican-JobId", SearchJobAd(JobId))
+	}
 	req.HTTPRequest.Header.Set("TE", "trailers")
 	req.HTTPRequest.Header.Set("User-Agent", getUserAgent(project))
 	req = req.WithContext(ctx)
@@ -2059,9 +2062,12 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 		transferResult.Error = err
 		return transferResult, err
 	}
-	// Set the authorization header
+	// Set the authorization header as well as other headers
 	request.Header.Set("Authorization", "Bearer "+transfer.token)
 	request.Header.Set("User-Agent", getUserAgent(transfer.project))
+	if SearchJobAd(JobId) != "" {
+		request.Header.Set("X-Pelican-JobId", SearchJobAd(JobId))
+	}
 	var lastKnownWritten int64
 	t := time.NewTicker(20 * time.Second)
 	defer t.Stop()

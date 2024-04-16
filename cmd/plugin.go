@@ -446,7 +446,7 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 
 			var tj *client.TransferJob
 			urlCopy := *transfer.url
-			project := client.GetProjectName()
+			project := client.SearchJobAd(client.ProjectName)
 			tj, err = tc.NewTransferJob(context.Background(), &urlCopy, transfer.localFile, upload, recursive, project, client.WithAcquireToken(false), client.WithCaches(caches...))
 			if err != nil {
 				return errors.Wrap(err, "Failed to create new transfer job")
