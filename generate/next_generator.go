@@ -44,3 +44,19 @@ func GenPlaceholderPathForNext() {
 	}
 	file.Close()
 }
+
+// Copy swagger document from swagger/pelican-swagger.yaml to the web_ui/frontend/app/api directory
+func GenSwaggerDoc() {
+	src := "../swagger/pelican-swagger.yaml"
+	dst := "../web_ui/frontend/app/api/docs/pelican-swagger.yaml"
+
+	swaggerDoc, err := os.ReadFile(src)
+	if err != nil {
+		log.Fatalf("error: %v", err)
+	}
+
+	err = os.WriteFile(dst, swaggerDoc, 0644)
+	if err != nil {
+		log.Fatalf("error: %v", err)
+	}
+}
