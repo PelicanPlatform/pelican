@@ -198,3 +198,27 @@ Once you have your origin set up, follow the steps below to test if your origin 
     ```
 
 Congratulations! Your have finished setting up and running your origin.
+
+## Obtain the Public Key of the Origin
+
+Pelican origins follow [OpenID Connect (OIDC)](https://openid.net/developers/how-connect-works/) protocol for authenticating users for object access. In the OIDC setup, a user's identity is encoded in a _token_ that is _signed_ by the origin, using its _private key_. The private key only lives on the origin server and is never exposed to the public. To verify the integrity the token and make sure it's not tampered by malicious attackers, a _public key_ generated from the _private key_ is available for others to use to check the signature of the token.
+
+The _public keys_ are used in a Pelican federation to facilitate user authentication and server identity verification. They are also used to register a namespace at the Pelican registry. The public key used to register a namespace at the Pelican registry should be the public key of the Pelican origin that exports and hosts the namespace. This is because the Pelican origin manages user identity verification and authorization for the namespaces it exports. To look up the public key of a Pelican origin, go to `https://<your-origin-hostname>:<origin-web-port>/.well-known/issuer.jwks`. The public key will be automatically downloaded as a `JSON` file. An example file is as following:
+
+```json filename="issuer.jwks"
+{
+   "keys":[
+      {
+         "kty":"EC",
+         "use":"sig",
+         "crv":"P-256",
+         "kid":"sig-1712605941",
+         "x":"c3BhLEMGqmO98-43pD3R5DJtUGIQf4McsNBWuVTorVI",
+         "y":"eWssaV6WrG4kVla1Ygdr_qUZeqgN7I2fDeb3K1qL0qI",
+         "alg":"ES384"
+      }
+   ]
+}
+```
+
+> Note that you need to run your Pelican origin before downloading the public key
