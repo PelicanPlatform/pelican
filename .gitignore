@@ -3,3 +3,4 @@ README.dev.md
 docs/parameters.json
 web_ui/frontend/public/data/parameters.json
 local
+web_ui/frontend/app/api/docs/pelican-swagger.yaml
