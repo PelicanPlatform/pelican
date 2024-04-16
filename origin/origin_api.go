@@ -26,6 +26,8 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
@@ -114,4 +116,17 @@ func LaunchOriginFileTestMaintenance(ctx context.Context) {
 			return nil
 		},
 	)
+}
+
+func ConfigOriginTTLCache(ctx context.Context, egrp *errgroup.Group) {
+	go registrationsStatus.Start()
+
+	egrp.Go(func() error {
+		<-ctx.Done()
+		log.Info("Gracefully stopping origin TTL cache eviction...")
+		registrationsStatus.DeleteAll()
+		registrationsStatus.Stop()
+		log.Info("Origin TTL cache eviction has been stopped")
+		return nil
+	})
 }

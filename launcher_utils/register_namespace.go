@@ -28,9 +28,11 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/jellydator/ttlcache/v3"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
+	"github.com/pelicanplatform/pelican/origin"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/registry"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -272,6 +274,9 @@ func RegisterNamespaceWithRetry(ctx context.Context, egrp *errgroup.Group, prefi
 	if isRegistered {
 		metrics.SetComponentHealthStatus(metrics.OriginCache_Registry, metrics.StatusOK, "")
 		log.Debugf("Origin already has prefix %v registered\n", prefix)
+		if err := origin.FetchAndSetNsStatus(prefix); err != nil {
+			return errors.Wrapf(err, "failed to fetch registration status for the prefix %s", prefix)
+		}
 		return nil
 	}
 
@@ -279,6 +284,8 @@ func RegisterNamespaceWithRetry(ctx context.Context, egrp *errgroup.Group, prefi
 		return nil
 	}
 	log.Errorf("Failed to register with namespace service: %v; will automatically retry in 10 seconds\n", err)
+	// For failed registration, set the status to RegError without a TTL
+	origin.SetNamespacesStatus(prefix, origin.RegistrationStatus{Status: origin.RegError}, ttlcache.NoTTL)
 
 	egrp.Go(func() error {
 		ticker := time.NewTicker(retryInterval)
@@ -286,6 +293,9 @@ func RegisterNamespaceWithRetry(ctx context.Context, egrp *errgroup.Group, prefi
 			select {
 			case <-ticker.C:
 				if err := registerNamespaceImpl(key, prefix, url); err == nil {
+					if err := origin.FetchAndSetNsStatus(prefix); err != nil {
+						log.Errorf("failed to fetch registration status for the prefix %s: %v", prefix, err)
+					}
 					return nil
 				}
 				log.Errorf("Failed to register with namespace service: %v; will automatically retry in 10 seconds\n", err)

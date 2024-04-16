@@ -872,6 +872,7 @@ func checkNamespaceExistsHandler(ctx *gin.Context) {
 	}
 }
 
+// Check the approval status of namespace registration
 func checkNamespaceStatusHandler(ctx *gin.Context) {
 	req := server_structs.CheckNamespaceStatusReq{}
 	if err := ctx.ShouldBind(&req); err != nil {
@@ -934,41 +935,51 @@ func checkNamespaceStatusHandler(ctx *gin.Context) {
 	}
 }
 
+// Check namespace registration completeness
 func checkNamespaceCompleteHandler(ctx *gin.Context) {
 	nssReq := server_structs.CheckNamespaceCompleteReq{}
-	results := []server_structs.NamespaceCompletenessResult{}
+	results := map[string]server_structs.NamespaceCompletenessResult{}
 
 	err := ctx.BindJSON(&nssReq)
 	if err != nil {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "failed to parse request body: " + err.Error()})
 	}
 	for _, prefix := range nssReq.Prefixes {
-		complete := server_structs.NamespaceCompletenessResult{Prefix: prefix}
+		isCache := false
+		if strings.HasPrefix(prefix, "/caches") {
+			isCache = true
+		}
+		complete := server_structs.NamespaceCompletenessResult{}
 		exists, err := namespaceExistsByPrefix(prefix)
 		if err != nil {
 			complete.Error = errors.Wrapf(err, "Failed to check if %s exists", prefix)
-			results = append(results, complete)
+			results[prefix] = complete
 			continue
 		}
 		if !exists {
 			complete.Error = errors.Wrapf(err, "Namespace %s does not exist", prefix)
-			results = append(results, complete)
+			results[prefix] = complete
 			continue
 		}
 		ns, err := getNamespaceByPrefix(prefix)
 		if err != nil {
 			complete.Error = errors.Wrapf(err, "Failed to retrieve namespace %s", prefix)
-			results = append(results, complete)
+			results[prefix] = complete
 			continue
+		}
+		if isCache {
+			complete.EditUrl = fmt.Sprintf("%s/view/registry/cache/edit/?id=%d", param.Federation_RegistryUrl.GetString(), ns.ID)
+		} else {
+			complete.EditUrl = fmt.Sprintf("%s/view/registry/origin/edit/?id=%d", param.Federation_RegistryUrl.GetString(), ns.ID)
 		}
 		err = config.GetValidate().Struct(ns)
 		if err != nil {
 			complete.Error = errors.Wrap(err, "Incomplete registration")
-			results = append(results, complete)
+			results[prefix] = complete
 			continue
 		} else {
 			complete.Completed = true
-			results = append(results, complete)
+			results[prefix] = complete
 			continue
 		}
 	}

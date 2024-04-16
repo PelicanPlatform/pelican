@@ -22,27 +22,37 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	log "github.com/sirupsen/logrus"
+
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/web_ui"
-	"github.com/sirupsen/logrus"
 )
 
-type exportsRes struct {
-	Type    string                      `json:"type"` // either "posix" or "s3"
-	Exports []server_utils.OriginExport `json:"exports"`
-}
+type (
+	exportsRes struct {
+		Type    string             `json:"type"` // either "posix" or "s3"
+		Exports []exportWithStatus `json:"exports"`
+	}
+)
 
 func handleExports(ctx *gin.Context) {
 	storageType := param.Origin_StorageType.GetString()
 	exports, err := server_utils.GetOriginExports()
 	if err != nil {
-		logrus.Errorf("Failed to get the origin exports: %v", err)
+		log.Errorf("Failed to get the origin exports: %v", err)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Server encountered error when getting the origin exports: " + err.Error()})
 		return
 	}
-	ctx.JSON(http.StatusOK, exportsRes{Type: storageType, Exports: exports})
+	wrappedExports, err := wrapExportsByStatus(exports)
+	if err != nil {
+		log.Errorf("Failed to get the registration status of the exported prefixes: %v", err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Server encountered error when getting the registration status for the exported prefixes: " + err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, exportsRes{Type: storageType, Exports: wrappedExports})
 }
 
 func RegisterOriginWebAPI(engine *gin.Engine) {

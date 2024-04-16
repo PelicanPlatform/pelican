@@ -44,12 +44,12 @@ type (
 	}
 
 	NamespaceCompletenessResult struct {
-		Prefix    string `json:"prefix"`
+		EditUrl   string `json:"edit_url"`
 		Completed bool   `json:"complete"`
 		Error     error  `json:"error"`
 	}
 
 	CheckNamespaceCompleteRes struct {
-		Results []NamespaceCompletenessResult `json:"result"`
+		Results map[string]NamespaceCompletenessResult `json:"results"`
 	}
 )
