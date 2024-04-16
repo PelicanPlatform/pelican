@@ -407,6 +407,20 @@ definitions:
   OriginExport:
     type: object
     properties:
+      status:
+        type: string
+        description:
+          The registration status of the federation prefix.
+          Can be "Not Supported"|"Completed"|"Incomplete"|"Registration Error"
+        example: Incomplete
+      status_description:
+        type: string
+        description: The detailed description of the status
+        example: "Incomplete Registration: UserID is required"
+      edit_url:
+        type: string
+        description: The URL to update the registration at the registry
+        example: "https://registry.org/view/registry/origin/edit/?id=1"
       storage_prefix:
         type: string
         example: "/tmp/pelican"

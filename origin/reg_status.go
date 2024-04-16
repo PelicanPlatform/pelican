@@ -49,9 +49,9 @@ type (
 
 	// For API response to embed export with the registration status
 	exportWithStatus struct {
-		Status  regStatusEnum `json:"status"`
-		EditUrl string        `json:"edit_url"`
-		Msg     string        `json:"msg"`
+		Status            regStatusEnum `json:"status"`
+		StatusDescription string        `json:"status_description"` // detailed description of the current status
+		EditUrl           string        `json:"edit_url"`
 		server_utils.OriginExport
 	}
 )
@@ -149,10 +149,10 @@ func wrapExportsByStatus(exports []server_utils.OriginExport) ([]exportWithStatu
 		if registrationsStatus.Has(export.FederationPrefix) {
 			regStatus := registrationsStatus.Get(export.FederationPrefix).Value()
 			wrappedExport := exportWithStatus{
-				Status:       regStatus.Status,
-				EditUrl:      regStatus.EditUrl,
-				Msg:          regStatus.Msg,
-				OriginExport: export,
+				Status:            regStatus.Status,
+				EditUrl:           regStatus.EditUrl,
+				StatusDescription: regStatus.Msg,
+				OriginExport:      export,
 			}
 			wrappedExports = append(wrappedExports, wrappedExport)
 		} else {
@@ -191,9 +191,9 @@ func wrapExportsByStatus(exports []server_utils.OriginExport) ([]exportWithStatu
 		if !ok {
 			statusErrMsg := fmt.Sprintf("status for the prefix %s was not found from registry response", export.FederationPrefix)
 			wrappedExport := exportWithStatus{
-				Status:       RegStatusNotSupported,
-				Msg:          statusErrMsg,
-				OriginExport: export,
+				Status:            RegStatusNotSupported,
+				StatusDescription: statusErrMsg,
+				OriginExport:      export,
 			}
 			wrappedExports = append(wrappedExports, wrappedExport)
 			registrationsStatus.Set(
@@ -207,10 +207,10 @@ func wrapExportsByStatus(exports []server_utils.OriginExport) ([]exportWithStatu
 				internalStatus = RegCompleted
 			}
 			wrappedExport := exportWithStatus{
-				Status:       internalStatus,
-				EditUrl:      status.EditUrl,
-				Msg:          status.Msg,
-				OriginExport: export,
+				Status:            internalStatus,
+				EditUrl:           status.EditUrl,
+				StatusDescription: status.Msg,
+				OriginExport:      export,
 			}
 			wrappedExports = append(wrappedExports, wrappedExport)
 			registrationsStatus.Set(
