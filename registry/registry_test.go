@@ -19,14 +19,18 @@
 package registry
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -160,4 +164,204 @@ func TestHandleWildcard(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCheckNamespaceCompleteHandler(t *testing.T) {
+	setupMockRegistryDB(t)
+	router := gin.New()
+	router.POST("/checkNamespaceComplete", checkNamespaceCompleteHandler)
+
+	t.Run("request-without-body", func(t *testing.T) {
+		r := httptest.NewRecorder()
+		req, err := http.NewRequest(http.MethodPost, "/checkNamespaceComplete", nil)
+		require.NoError(t, err)
+		router.ServeHTTP(r, req)
+		assert.Equal(t, 400, r.Result().StatusCode)
+	})
+
+	t.Run("request-without-body", func(t *testing.T) {
+		r := httptest.NewRecorder()
+		reqBody := server_structs.CheckNamespaceCompleteReq{}
+		reqBodyBytes, err := json.Marshal(reqBody)
+		require.NoError(t, err)
+
+		req, err := http.NewRequest(http.MethodPost, "/checkNamespaceComplete", bytes.NewBuffer(reqBodyBytes))
+		require.NoError(t, err)
+		router.ServeHTTP(r, req)
+		assert.Equal(t, 200, r.Result().StatusCode)
+
+		resBody, err := io.ReadAll(r.Result().Body)
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"results":[]}`, string(resBody))
+	})
+
+	t.Run("request-prefix-dne", func(t *testing.T) {
+		resetNamespaceDB(t)
+
+		r := httptest.NewRecorder()
+		reqBody := server_structs.CheckNamespaceCompleteReq{Prefixes: []string{"/prefix-dne"}}
+		reqBodyBytes, err := json.Marshal(reqBody)
+		require.NoError(t, err)
+
+		req, err := http.NewRequest(http.MethodPost, "/checkNamespaceComplete", bytes.NewBuffer(reqBodyBytes))
+		require.NoError(t, err)
+		router.ServeHTTP(r, req)
+		assert.Equal(t, 200, r.Result().StatusCode)
+
+		resBody, err := io.ReadAll(r.Result().Body)
+		resStruct := server_structs.CheckNamespaceCompleteRes{}
+		require.NoError(t, err)
+		err = json.Unmarshal(resBody, &resStruct)
+		require.NoError(t, err)
+
+		result, ok := resStruct.Results["/prefix-dne"]
+		require.True(t, ok)
+		assert.False(t, result.Completed)
+		assert.Empty(t, result.EditUrl)
+		assert.Equal(t, "Namespace /prefix-dne does not exist", result.Msg)
+	})
+
+	t.Run("incomplete-registration", func(t *testing.T) {
+		resetNamespaceDB(t)
+		viper.Reset()
+		viper.Set(param.Federation_RegistryUrl.GetName(), "https://registry.org")
+
+		mockJWKS, err := GenerateMockJWKS()
+		require.NoError(t, err)
+		// Insitution and UserId are empty
+		err = insertMockDBData([]Namespace{mockNamespace("/incomplete-prefix", mockJWKS, "", AdminMetadata{})})
+		require.NoError(t, err)
+
+		r := httptest.NewRecorder()
+		reqBody := server_structs.CheckNamespaceCompleteReq{Prefixes: []string{"/incomplete-prefix"}}
+		reqBodyBytes, err := json.Marshal(reqBody)
+		require.NoError(t, err)
+
+		req, err := http.NewRequest(http.MethodPost, "/checkNamespaceComplete", bytes.NewBuffer(reqBodyBytes))
+		require.NoError(t, err)
+		router.ServeHTTP(r, req)
+		assert.Equal(t, 200, r.Result().StatusCode)
+
+		resBody, err := io.ReadAll(r.Result().Body)
+		resStruct := server_structs.CheckNamespaceCompleteRes{}
+		require.NoError(t, err)
+		err = json.Unmarshal(resBody, &resStruct)
+		require.NoError(t, err)
+
+		result, ok := resStruct.Results["/prefix-dne"]
+		require.True(t, ok)
+		assert.False(t, result.Completed)
+		assert.Contains(t, result.EditUrl, "https://registry.org/view/registry/origin/edit/?id=")
+		assert.Contains(t, result.Msg, "Incomplete registration:")
+	})
+
+	t.Run("complete-registration", func(t *testing.T) {
+		resetNamespaceDB(t)
+		viper.Reset()
+		viper.Set(param.Federation_RegistryUrl.GetName(), "https://registry.org")
+
+		mockJWKS, err := GenerateMockJWKS()
+		require.NoError(t, err)
+		// Insitution and UserId are empty
+		err = insertMockDBData(
+			[]Namespace{
+				mockNamespace(
+					"/complete-prefix",
+					mockJWKS,
+					"",
+					AdminMetadata{UserID: "fake-user-id", Institution: "mock-institution"},
+				),
+			},
+		)
+		require.NoError(t, err)
+
+		r := httptest.NewRecorder()
+		reqBody := server_structs.CheckNamespaceCompleteReq{Prefixes: []string{"/complete-prefix"}}
+		reqBodyBytes, err := json.Marshal(reqBody)
+		require.NoError(t, err)
+
+		req, err := http.NewRequest(http.MethodPost, "/checkNamespaceComplete", bytes.NewBuffer(reqBodyBytes))
+		require.NoError(t, err)
+		router.ServeHTTP(r, req)
+		assert.Equal(t, 200, r.Result().StatusCode)
+
+		resBody, err := io.ReadAll(r.Result().Body)
+		resStruct := server_structs.CheckNamespaceCompleteRes{}
+		require.NoError(t, err)
+		err = json.Unmarshal(resBody, &resStruct)
+		require.NoError(t, err)
+
+		result, ok := resStruct.Results["/prefix-dne"]
+		require.True(t, ok)
+		assert.True(t, result.Completed)
+		assert.Contains(t, result.EditUrl, "https://registry.org/view/registry/origin/edit/?id=")
+		assert.Empty(t, result.Msg)
+	})
+
+	t.Run("multiple-complete-registrations", func(t *testing.T) {
+		resetNamespaceDB(t)
+		viper.Reset()
+		viper.Set(param.Federation_RegistryUrl.GetName(), "https://registry.org")
+
+		mockJWKS, err := GenerateMockJWKS()
+		require.NoError(t, err)
+		// Insitution and UserId are empty
+		err = insertMockDBData(
+			[]Namespace{
+				mockNamespace(
+					"/complete-prefix-1",
+					mockJWKS,
+					"",
+					AdminMetadata{UserID: "fake-user-id", Institution: "mock-institution"},
+				),
+				mockNamespace(
+					"/complete-prefix-2",
+					mockJWKS,
+					"",
+					AdminMetadata{UserID: "fake-user-id", Institution: "mock-institution"},
+				),
+				mockNamespace(
+					"/foo/bar",
+					mockJWKS,
+					"",
+					AdminMetadata{UserID: "fake-user-id", Institution: "mock-institution"},
+				),
+			},
+		)
+		require.NoError(t, err)
+
+		r := httptest.NewRecorder()
+		reqBody := server_structs.CheckNamespaceCompleteReq{Prefixes: []string{"/complete-prefix-1", "/complete-prefix-2", "/foo/bar"}}
+		reqBodyBytes, err := json.Marshal(reqBody)
+		require.NoError(t, err)
+
+		req, err := http.NewRequest(http.MethodPost, "/checkNamespaceComplete", bytes.NewBuffer(reqBodyBytes))
+		require.NoError(t, err)
+		router.ServeHTTP(r, req)
+		assert.Equal(t, 200, r.Result().StatusCode)
+
+		resBody, err := io.ReadAll(r.Result().Body)
+		resStruct := server_structs.CheckNamespaceCompleteRes{}
+		require.NoError(t, err)
+		err = json.Unmarshal(resBody, &resStruct)
+		require.NoError(t, err)
+
+		result, ok := resStruct.Results["/complete-prefix-1"]
+		require.True(t, ok)
+		assert.True(t, result.Completed)
+		assert.Contains(t, result.EditUrl, "https://registry.org/view/registry/origin/edit/?id=")
+		assert.Empty(t, result.Msg)
+
+		result, ok = resStruct.Results["/complete-prefix-2"]
+		require.True(t, ok)
+		assert.True(t, result.Completed)
+		assert.Contains(t, result.EditUrl, "https://registry.org/view/registry/origin/edit/?id=")
+		assert.Empty(t, result.Msg)
+
+		result, ok = resStruct.Results["/foo/bar"]
+		require.True(t, ok)
+		assert.True(t, result.Completed)
+		assert.Contains(t, result.EditUrl, "https://registry.org/view/registry/origin/edit/?id=")
+		assert.Empty(t, result.Msg)
+	})
 }

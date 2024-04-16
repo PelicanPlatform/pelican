@@ -46,7 +46,7 @@ type (
 	NamespaceCompletenessResult struct {
 		EditUrl   string `json:"edit_url"`
 		Completed bool   `json:"complete"`
-		Error     error  `json:"error"`
+		Msg       string `json:"msg"`
 	}
 
 	CheckNamespaceCompleteRes struct {

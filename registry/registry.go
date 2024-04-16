@@ -42,6 +42,7 @@ import (
 	"sync"
 
 	"github.com/gin-gonic/gin"
+	"github.com/go-playground/validator/v10"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
@@ -952,18 +953,18 @@ func checkNamespaceCompleteHandler(ctx *gin.Context) {
 		complete := server_structs.NamespaceCompletenessResult{}
 		exists, err := namespaceExistsByPrefix(prefix)
 		if err != nil {
-			complete.Error = errors.Wrapf(err, "Failed to check if %s exists", prefix)
+			complete.Msg = fmt.Sprintf("Failed to check if %s exists: %v", prefix, err)
 			results[prefix] = complete
 			continue
 		}
 		if !exists {
-			complete.Error = errors.Wrapf(err, "Namespace %s does not exist", prefix)
+			complete.Msg = fmt.Sprintf("Namespace %s does not exist", prefix)
 			results[prefix] = complete
 			continue
 		}
 		ns, err := getNamespaceByPrefix(prefix)
 		if err != nil {
-			complete.Error = errors.Wrapf(err, "Failed to retrieve namespace %s", prefix)
+			complete.Msg = fmt.Sprintf("Failed to retrieve namespace %s: %v", prefix, err)
 			results[prefix] = complete
 			continue
 		}
@@ -974,7 +975,12 @@ func checkNamespaceCompleteHandler(ctx *gin.Context) {
 		}
 		err = config.GetValidate().Struct(ns)
 		if err != nil {
-			complete.Error = errors.Wrap(err, "Incomplete registration")
+			// translate validation error to human readable
+			errs := err.(validator.ValidationErrors)
+			complete.Msg = "Incomplete registration: "
+			for _, err := range errs {
+				complete.Msg += err.Translate(config.GetEnTranslator()) + "\n"
+			}
 			results[prefix] = complete
 			continue
 		} else {

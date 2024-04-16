@@ -44,14 +44,14 @@ type (
 	RegistrationStatus struct {
 		Status  regStatusEnum
 		EditUrl string
-		Error   error
+		Msg     string
 	}
 
 	// For API response to embed export with the registration status
 	exportWithStatus struct {
 		Status  regStatusEnum `json:"status"`
 		EditUrl string        `json:"edit_url"`
-		Error   error         `json:"error"`
+		Msg     string        `json:"msg"`
 		server_utils.OriginExport
 	}
 )
@@ -118,7 +118,7 @@ func FetchAndSetNsStatus(prefix string) error {
 	if err == RegistryNotImplErr {
 		registrationsStatus.Set(
 			prefix,
-			RegistrationStatus{Status: RegStatusNotSupported, Error: err},
+			RegistrationStatus{Status: RegStatusNotSupported, Msg: RegistryNotImplErr.Error()},
 			ttlcache.DefaultTTL,
 		)
 	} else if err != nil {
@@ -134,7 +134,7 @@ func FetchAndSetNsStatus(prefix string) error {
 	}
 	registrationsStatus.Set(
 		prefix,
-		RegistrationStatus{Status: internalStatus, EditUrl: result.EditUrl, Error: result.Error},
+		RegistrationStatus{Status: internalStatus, EditUrl: result.EditUrl, Msg: result.Msg},
 		ttlcache.DefaultTTL,
 	)
 	return nil
@@ -147,11 +147,11 @@ func wrapExportsByStatus(exports []server_utils.OriginExport) ([]exportWithStatu
 
 	for _, export := range exports {
 		if registrationsStatus.Has(export.FederationPrefix) {
-			nsStatus := registrationsStatus.Get(export.FederationPrefix).Value()
+			regStatus := registrationsStatus.Get(export.FederationPrefix).Value()
 			wrappedExport := exportWithStatus{
-				Status:       nsStatus.Status,
-				EditUrl:      nsStatus.EditUrl,
-				Error:        nsStatus.Error,
+				Status:       regStatus.Status,
+				EditUrl:      regStatus.EditUrl,
+				Msg:          regStatus.Msg,
 				OriginExport: export,
 			}
 			wrappedExports = append(wrappedExports, wrappedExport)
@@ -161,6 +161,10 @@ func wrapExportsByStatus(exports []server_utils.OriginExport) ([]exportWithStatu
 			prefixQ = append(prefixQ, export.FederationPrefix)
 		}
 	}
+	if len(fetchQ) == 0 {
+		return wrappedExports, nil
+	}
+
 	// fetch and populate the cache with the result
 	resStatus, err := FetchNsStatus(prefixQ)
 	// For registry <7.8, this function is not supported
@@ -173,7 +177,7 @@ func wrapExportsByStatus(exports []server_utils.OriginExport) ([]exportWithStatu
 			wrappedExports = append(wrappedExports, wrappedExport)
 			registrationsStatus.Set(
 				export.FederationPrefix,
-				RegistrationStatus{Status: RegStatusNotSupported, Error: RegistryNotImplErr},
+				RegistrationStatus{Status: RegStatusNotSupported, Msg: RegistryNotImplErr.Error()},
 				ttlcache.DefaultTTL,
 			)
 		}
@@ -185,16 +189,16 @@ func wrapExportsByStatus(exports []server_utils.OriginExport) ([]exportWithStatu
 	for _, export := range fetchQ {
 		status, ok := resStatus.Results[export.FederationPrefix]
 		if !ok {
-			statusErr := fmt.Errorf("status for the prefix %s was not found from registry response", export.FederationPrefix)
+			statusErrMsg := fmt.Sprintf("status for the prefix %s was not found from registry response", export.FederationPrefix)
 			wrappedExport := exportWithStatus{
 				Status:       RegStatusNotSupported,
-				Error:        statusErr,
+				Msg:          statusErrMsg,
 				OriginExport: export,
 			}
 			wrappedExports = append(wrappedExports, wrappedExport)
 			registrationsStatus.Set(
 				export.FederationPrefix,
-				RegistrationStatus{Status: RegStatusNotSupported, Error: statusErr},
+				RegistrationStatus{Status: RegStatusNotSupported, Msg: statusErrMsg},
 				ttlcache.DefaultTTL,
 			)
 		} else {
@@ -205,13 +209,13 @@ func wrapExportsByStatus(exports []server_utils.OriginExport) ([]exportWithStatu
 			wrappedExport := exportWithStatus{
 				Status:       internalStatus,
 				EditUrl:      status.EditUrl,
-				Error:        status.Error,
+				Msg:          status.Msg,
 				OriginExport: export,
 			}
 			wrappedExports = append(wrappedExports, wrappedExport)
 			registrationsStatus.Set(
 				export.FederationPrefix,
-				RegistrationStatus{Status: internalStatus, EditUrl: status.EditUrl, Error: status.Error},
+				RegistrationStatus{Status: internalStatus, EditUrl: status.EditUrl, Msg: status.Msg},
 				ttlcache.DefaultTTL,
 			)
 		}
