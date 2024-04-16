@@ -4,7 +4,7 @@ import ExportedImage from "next-image-export-optimizer";
 
 Pelican users who want to share data within a Pelican federation do so via an *Origin*. Origins are a crucial component of Pelican's architecture for two reasons: they act as an adapter between various storage backends and Pelican federations, and they provide fine-grained access controls for that data. That is, they figure out how to take data from wherever it lives (such as a POSIX filesystem, S3 buckets, HTTPS servers, etc.) and transform it into a format that the federation can utilize while respecting your data access requirements.
 
-> An important distinction between origins and data backends is that, generally speaking, origins do **NOT** store any data themselves; their primary function is to facilitate data accessibility.
+> **NOTE:** An important distinction between origins and data backends is that, generally speaking, origins do **NOT** store any data themselves; their primary function is to facilitate data accessibility.
 
 This document contains instructions on how to serve a Pelican origin on top of a variety of storage backend types.
 
@@ -19,11 +19,11 @@ If you prefer to install Pelican as a standalone binary, you need to follow [add
 
 > **NOTE:** Serving origins with a standalone Pelican binary is possible, but not recommended.
 
-For _macOS_ and _Windows_ users who want to serve a Pelican origin, please use [Pelican docker image](./install/docker.mdx).
+_MacOS_ and _Windows_ users who want to serve a Pelican origin should use the [Pelican docker image](./install/docker.mdx).
 
 ### Open Firewall Port for Pelican Origin
 
-At their core, Pelican origins are web servers that listen to two TCP ports for file transfers and Web UI. By default, the Web UI and API interface for your origin will be at port `8444`, and the port for object transfers will be at `8443`. You may change these port numbers through the [configuration file](./parameters.mdx) with parameters [`Server.WebPort`](./parameters.mdx#Server-WebPort) and [`Origin.Port`](./parameters.mdx#Origin-Port) respectively.
+At their core, Pelican origins are web servers that listen to two TCP ports for file transfers and Web UI. By default, the Web UI and API interface for your origin will be at port `8444`, and the port for object transfers will be at `8443`. You may change these port numbers through the [configuration file](./parameters.mdx) with parameters [`Server.WebPort`](./parameters.mdx#Server-WebPort) and [`Origin.Port`](./parameters.mdx#Origin-Port), respectively.
 
 In order for Pelican origins to work properly, these ports need to be accessible by the federation, which in most cases means they need to be open to the internet. If your server host has a firewall policy in place, please open these two ports for both incoming the outgoing TCP requests.
 
@@ -69,7 +69,7 @@ By default, Pelican origins serve files from a POSIX backend, the filesystem use
 
 Before serving an origin, you need to decide which [**federation**](./client-usage.mdx#useful-terminology) your data will be accessed through. For example, the Open Science Data Federation (OSDF) is Pelican's flagship federation, and if you are interested in serving an OSDF origin, you can refer to the [OSDF website](https://osg-htc.org/services/osdf.html) for details about how to join.
 
-Federations are identified by a URL, which is used to host information your origin will need in order to discover other federation services. For example, the OSDF's federation URL is `https://osg-htc.org`, and an origin that joins the OSDF will visit `https://osg-htc.org/.well-known/pelican-configuration` to get important metadata about the federation's central services (the Director and Registry).
+Federations are identified their URL, which is used to host information that origins need for discovering other federation services. For example, the OSDF's federation URL is `https://osg-htc.org`, and an origin that joins the OSDF will visit `https://osg-htc.org/.well-known/pelican-configuration` to get important metadata about the federation's central services (the Director and Registry).
 
 To point your origin at a specific federation, you can either pass the `-f <federation URL>` flag if running from the command line, or configure `Federation.DiscoveryUrl: <federation URL>` in your config yaml.
 
@@ -122,7 +122,7 @@ Finally, origins can be configured to a limited extent with environment variable
 
 For example, you might configure the origin's storage type by setting the environment variable `PELICAN_ORIGIN_STORAGETYPE=posix`.
 
-> Environment variable configuration does not support complex structures that can be built with yaml configuration, such as `object`-type parameters.
+> **NOTE:** Environment variable configuration does not support complex structures that can be built with yaml configuration, such as `object`-type parameters.
 
 The first time the origin is started, you will see something that looks like the following:
 
@@ -137,7 +137,7 @@ See the [admin website configuration](#login-to-admin-website) documentation sec
 
 ### Origin and Namespace Capabilities
 
-Capabilities are the configuration options you can assign to origins and namespace prefixes to determine what kinds of access controls you want them to respect. In the previous yaml configuration, we configured the origin capabilities using the `Capabilities` list of the `Origin.Exports` block by specifying that the federation prefix `/your/federation/prefix` supports "Reads" and "Writes". This list of capabilities can be used for further control of what types of operations the namespace is willing to support. Available capabilities include:
+Origins and namespaces can be configured with a set of _capabilities_, which are the configuration options used to define data access controls. In the previous yaml configuration, we configured the origin capabilities using the `Capabilities` list of the `Origin.Exports` block by specifying that the federation prefix `/your/federation/prefix` supports "Reads" and "Writes". This list of capabilities can be used for further control of what types of operations the namespace is willing to support. Available capabilities include:
 
 - "Reads": When included, objects from the namespace can be read with a valid authorization token.
 - "PublicReads": When set, objects from the namespace become public and require no authorization to read.
