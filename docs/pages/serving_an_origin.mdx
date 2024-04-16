@@ -23,11 +23,11 @@ For _macOS_ and _Windows_ users who want to serve a Pelican origin, please use [
 
 ### Open Firewall Port for Pelican Origin
 
-At their core, Pelican origins are web servers that listen to two TCP ports for file transfers and Web UI. By default, the browser/API interface for your origin will be at port `8444`, and the port for object transfers will be at `8443`. You may change these port numbers through the [configuration file](./parameters.mdx) with parameters [`Origin.Port`](./parameters.mdx#Origin-Port) and [`Server.WebPort`](./parameters.mdx#Server-WebPort) respectively.
+At their core, Pelican origins are web servers that listen to two TCP ports for file transfers and Web UI. By default, the Web UI and API interface for your origin will be at port `8444`, and the port for object transfers will be at `8443`. You may change these port numbers through the [configuration file](./parameters.mdx) with parameters [`Server.WebPort`](./parameters.mdx#Server-WebPort) and [`Origin.Port`](./parameters.mdx#Origin-Port) respectively.
 
 In order for Pelican origins to work properly, these ports need to be accessible by the federation, which in most cases means they need to be open to the internet. If your server host has a firewall policy in place, please open these two ports for both incoming the outgoing TCP requests.
 
-> **NOTE:** If it is not possible for you to expose any ports through the firewall (eg you're on a local network or behind a NAT), Pelican has a special feature called a _Connection Broker_ that allows you to serve origins without publicly-accessible ports and TLS credentials. However, this is an experimental feature and requires the Pelican federation you are joining to be compatible. If you are interested in learning more about the Connection Broker, please contact help@pelicanplatform.org for further instructions.
+> **NOTE:** If it is not possible for you to expose any ports through the firewall (e.g. you're on a local network or behind a NAT), Pelican has a special feature called a _Connection Broker_ that allows you to serve origins without publicly-accessible ports and TLS credentials. However, this is an experimental feature and requires the Pelican federation you are joining to be compatible. If you are interested in learning more about the Connection Broker, please contact help@pelicanplatform.org for further instructions.
 
 ### Prepare TLS Credentials
 
@@ -61,7 +61,7 @@ Since your TLS certificate is associated with your domain name, you will need to
 
 When you've completed the aforementioned steps, you're ready to start configuring the origin that will add your data to a federation. Serving an origin is the process of taking some underlying storage repository and making its data accessible via a namespace prefix in your federation. For example, you might make files in the directory `/my/directory` available at the federation path `/my/namespace` so that anyone with access to the federation can get objects from the directory
 
-By default, Pelican origins serve files from a POSIX backend, the filesystem used by Linux computers. However, Pelican aims to support a variety of backends and we currently also support serving objects from S3. Configuration for S3 is mostly similar to configuration for POSIX filesystems, but with a few important differences. For information about S3 backends, jump to our [s3 documentation](#launch-the-origin-with-an-s3-storage-backend)
+By default, Pelican origins serve files from a POSIX backend, the filesystem used by Linux computers. However, Pelican aims to support a variety of backends and we currently also support serving objects from S3. Configuration for S3 is mostly similar to configuration for POSIX filesystems, but with a few important differences. For information about S3 backends, jump to the [S3 documentation](#launch-the-origin-with-an-s3-storage-backend) below.
 
 > If you are running Pelican docker image to serve an origin, please refer to the [docker image documentation](./install/docker.mdx#run-pelican-origin-server).
 
@@ -73,9 +73,9 @@ Federations are identified by a URL, which is used to host information your orig
 
 To point your origin at a specific federation, you can either pass the `-f <federation URL>` flag if running from the command line, or configure `Federation.DiscoveryUrl: <federation URL>` in your config yaml.
 
-### Serve the Origin
+### Starting the Origin
 
-Origins can be configured via the command line, via a config file named `pelican.yaml`, via environment variables, or through a combinations of the three. While simple origins can be run entirely from command line arguments, more complex origins will require configuration your your `pelican.yaml`.
+Origins can be configured via the command line, a config file named `pelican.yaml`, environment variables, or through a combinations of the three. While simple origins can be run entirely from command line arguments, more complex origins will require configuration your your `pelican.yaml`.
 
 To start a simple pelican origin from the command line that serves POSIX data, run:
 
@@ -89,11 +89,11 @@ Where:
 * `</path/to/data>` is the absolute path to the directory containing files you want to export as Pelican objects in your federation
 * `</your/federation/prefix>` is the federation prefix at which files in `/path/to/data` will be accessed from in the federation. Note that federation prefixes follow POSIX path conventions, and they must begin with `/` to denote an absolute path.
 
-> **NOTE:** By default, origins require authorization tokens for object access. There's currently no way to serve a public origin using only the command line, but you can find more information about various access controls by looking at [origin capabilities](#origin-and-namespace-capabilities) below.
+> **NOTE:** By default, origins require authorization tokens for object access. Pelican currently does not support serving a public origin using only the command line, but various access controls can be configured through your configuration file. For more information, see [origin capabilities](#origin-and-namespace-capabilities) below.
 
-To run the same origin using a `pelican.yaml` configuration file, save your configuration to `/etc/pelican/pelican.yaml` if you're running Pelican as root, and at `~/.config/pelican/pelican.yaml` if you're running as a non-root user. The command line origin from above could be configured accordingly:
+To run the same origin using a `pelican.yaml` configuration file, save your configuration to `/etc/pelican/pelican.yaml` if you're running Pelican as root, or at `~/.config/pelican/pelican.yaml` if you're running as a non-root user. The command line origin from above could be configured accordingly:
 
-```
+```yaml filename="pelican.yaml"
 # Tell Pelican which federation you're joining
 Federation:
   DiscoveryUrl: <federation URL>
@@ -118,11 +118,11 @@ pelican origin serve
 Pelican will read the config file and apply it to your origin.
 
 
-Finally, origins can be configured to a limited extent with environment variables. In Pelican's environment variable model, configuration options are taken from `pelican.yaml`, flattened, and prepended with either `PELICAN_` or `OSDF_`, depending on the name of the binary you're using (ie whether you run `osdf serve` or `pelican serve` commands).
+Finally, origins can be configured to a limited extent with environment variables. In Pelican's environment variable model, configuration options are taken from `pelican.yaml`, flattened, and prepended with either `PELICAN_` or `OSDF_`, depending on the name of the binary you're using (i.e. whether you run `osdf serve` or `pelican serve` commands).
 
 For example, you might configure the origin's storage type by setting the environment variable `PELICAN_ORIGIN_STORAGETYPE=posix`.
 
-> Environment variable configuration does not support the same complex structures that can be built with yaml configuration, such as lists.
+> Environment variable configuration does not support complex structures that can be built with yaml configuration, such as `object`-type parameters.
 
 The first time the origin is started, you will see something that looks like the following:
 
@@ -133,7 +133,7 @@ Pelican admin interface is not initialized
 To initialize, login at https://localhost:8444/view/initialization/code/ with the following code:
 551220
 ```
-See the [browser configuration](#login-to-admin-website) documentation section for more information about initializing your origin's web interface.
+See the [admin website configuration](#login-to-admin-website) documentation section for more information about initializing your origin's admin website.
 
 ### Origin and Namespace Capabilities
 
@@ -142,12 +142,12 @@ Capabilities are the configuration options you can assign to origins and namespa
 - "Reads": When included, objects from the namespace can be read with a valid authorization token.
 - "PublicReads": When set, objects from the namespace become public and require no authorization to read.
 - "Writes": When included, objects can be written back to the storage backend by Pelican. Write operations _always_ require a valid authorization token.
-- "DirectReads": When included, a namespace indicates that data being pulled from it should only be pulled through a cache and not directly by clients. This may be useful in cases where the origin isn't very performant or has to pay egress costs when data moves through it. Note that this is respected by federation central services, but may not be respected by all clients.
+- "DirectReads": When included, a namespace indicates that it is willing to serve clients directly and does not require data to be pulled through a cache. Disabling this feature may be useful in cases where the origin isn't very performant or has to pay egress costs when data moves through it. Note that this is respected by federation central services, but may not be respected by all clients.
 - "Listings": When included, the namespace indicates it will allow object discovery. Be careful when setting this for authorized namespaces, as this will allow anyone to discover the names of objects exported by this namespace.
 
 > **NOTE:** Most origins should have either "Reads" or "PublicReads" enabled. If neither is set, the origin won't export any data.
 
-There is an important distinction between _origin_ capabilities and _namespace_ capabilities. While it's sometimes easy to treat origins and namespaces as the same thing, Pelican must distinguish between them because two separate origins may export portions of the same namespace, and a single origin may export two disparate prefixes. The only exception to this rule is when a single origin serves a single namespace.
+There is an important distinction between _origin_ capabilities and _namespace_ capabilities. While it's sometimes easy to treat origins and namespaces as the same thing, Pelican must distinguish between them because two separate origins may export portions of the same namespace, and a single origin may export two disparate prefixes. The only exception to this rule is when a single origin serves a single namespace, or the origin exports multiple prefixes that should all have the same capabilities.
 
 To configure _origin_ capabilities, you can set top-level options for the origin:
 
@@ -163,7 +163,7 @@ If no `Origin.Exports` block is provided to Pelican, these values will also be a
 
 ### Multi-Export Origins
 
-The previous examples have shown how one might export a single namespace, but Pelican origins can export multiple paths from the same storage backend under different namespaces. For example, you have have two posix directories called `/my/data/public` and `/my/data/private`. If you want to make your public data available under the namespace `/my/prefix/public` and your private data available under `/my/prefix/private`, you'll need to configure a multi-export origin, which is accomplished through the origin's `Exports` block. Below is an example of what that looks like, along with how you could configure access control for the two namespaces:
+The previous examples have shown how one might export a single namespace, but Pelican origins can export multiple paths from the same storage backend under different namespaces. For example, assume you have have two posix directories called `/my/data/public` and `/my/data/private`. If you want to make your public data available under the namespace `/my/prefix/public` and your private data available under `/my/prefix/private`, you'll need to configure a multi-export origin, which is accomplished through the origin's `Exports` block. Below is an example of what that looks like, along with how you could configure access control for the two namespaces:
 
 ```
 Federation:
@@ -215,7 +215,7 @@ Serving S3 origins with Pelican is similar to serving POSIX origins, but with se
 
 - The URL you use to access objects from S3, also known as the _S3 Service URL_
 - The _region_ that your S3 instance is hosted out of (almost always `us-east-1` unless you're actually using S3 from Amazon)
-- The name of the bucket your objects are stored in
+- The name of the _bucket_ your objects are stored in
 - The type of bucket hosting used at the S3 service URL, which can be either _path_ or _virtual_. This determines whether objects are normally accessed like `https://<S3 service url>/<bucket name>/<object name>` (path-style hosting) or `https://<bucket name>.<S3 service url>/<object name>` (virtual-style hosting), but does not change the way you access objects through Pelican. In many cases, it's safe to assume _path_-style hosting, and this is set to Pelican's default. For more information about different hosting styles in S3, see the [AWS documentation](https://docs.aws.amazon.com/AmazonS3/latest/userguide/VirtualHosting.html).
 
 > **NOTE:** Pelican has a special mode where no bucket information is provided that allows you to export objects from all public buckets at a given service URL. This is covered in further detail [later in this section](#exporting-an-entire-s3-endpoint).
@@ -300,7 +300,7 @@ In this configuration, users who wish to fetch objects from the origin will stil
 
 ## Login to Admin Website
 
-After your origin is running, the next step is to initialize its web interface, which can be used by administrators for monitoring and further configuration. To initialize this interface, go to the URL specified in the terminal. By default, it should point to https://localhost:8444/view/initialization/code/
+After your origin is running, the next step is to initialize its admin website, which can be used by administrators for monitoring and further configuration. To initialize this interface, go to the URL specified in the terminal. By default, it should point to https://localhost:8444/view/initialization/code/
 
 You will be directed to the page to activate the website with a one-time passcode. Copy the passcode from the terminal where you launch Pelican origin and paste to the website to finish activation.
 
