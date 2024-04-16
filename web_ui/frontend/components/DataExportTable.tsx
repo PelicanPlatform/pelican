@@ -15,6 +15,8 @@ import {
 import React, {FunctionComponent, ReactElement, useEffect, useMemo, useRef, useState} from "react";
 import {Skeleton} from "@mui/material";
 
+import {TableCellOverflow} from "@/components/Cell";
+
 interface Capabilities {
     PublicReads: boolean;
     Reads: boolean;
@@ -39,31 +41,6 @@ interface S3ExportEntry extends ExportEntry {
 interface PosixExportEntry extends ExportEntry {
     storage_prefix: string;
     sentinel_location: string;
-}
-
-export const TableCellOverflow: FunctionComponent<any> = ({ children, ...props }) => {
-
-    const cellRef = useRef<HTMLTableCellElement>(null);
-    const [overflow, setOverflow] = useState<boolean>(false);
-
-    useEffect(() => {
-        if(cellRef.current) {
-            setOverflow(cellRef.current.scrollWidth > cellRef.current.clientWidth)
-        }
-    }, [])
-
-    return (
-        <TableCell
-            ref={cellRef}
-            sx={{
-                overflowX: "scroll",
-                whiteSpace: "nowrap",
-                boxShadow: overflow ? "inset -13px 0px 20px -21px rgba(0,0,0,0.75)" : "none",
-                ...props?.sx
-        }}>
-            {children}
-        </TableCell>
-    )
 }
 
 export const RecordTable = ({ data }: { data: ExportRes }): ReactElement  => {
