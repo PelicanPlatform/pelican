@@ -105,7 +105,7 @@ export default function Register() {
                 }
             } else {
                 setAlert({severity: "success", message: `Successfully edited namespace: ${formData.get("prefix")}`})
-                window.location.href = "/view/registry/"
+                setTimeout(() => {window.location.href = "/view/registry/"}, 3000)
             }
 
         } catch (e) {

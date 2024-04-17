@@ -59,7 +59,7 @@ const AuthenticatedContent = ({promptLogin = false, redirect = false, children, 
     useEffect(() => {
 
         if(!isValidating && !authenticated && redirect){
-            router.push("/login?returnURL=" + pageUrl)
+            router.push("/login/?returnURL=" + pageUrl)
         }
     }, [data, isValidating]);
 
@@ -85,7 +85,7 @@ const AuthenticatedContent = ({promptLogin = false, redirect = false, children, 
                     Admin Privileges Required
                 </Typography>
                 <Box pt={4}>
-                    <Link href={`/login?returnURL=${pageUrl}`}>
+                    <Link href={`/login/?returnURL=${pageUrl}`}>
                         <Button variant={'contained'}>Login</Button>
                     </Link>
                 </Box>

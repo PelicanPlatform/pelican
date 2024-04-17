@@ -163,8 +163,9 @@ export default function Home() {
 
     useEffect(() => {
         const url = new URL(window.location.href)
-        let returnUrl = url.searchParams.get("returnURL") || ""
-        setReturnUrl(returnUrl)
+        const returnUrl = url.searchParams.get("returnURL") || ""
+        const encodedReturnUrl = encodeURIComponent(returnUrl)
+        setReturnUrl(encodedReturnUrl)
     }, [])
 
     const serverIntersect = useMemo(() => {

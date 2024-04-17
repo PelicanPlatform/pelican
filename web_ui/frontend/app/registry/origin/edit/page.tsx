@@ -85,7 +85,7 @@ export default function Register() {
         const formData = new FormData(e.currentTarget);
 
         try {
-            const response = await secureFetch(`/api/v1.0/registry_ui/namespaces/${id}?access_token${accessToken}`, {
+            const response = await secureFetch(`/api/v1.0/registry_ui/namespaces/${id}?access_token=${accessToken}`, {
                 body: JSON.stringify({
                     prefix: formData.get("prefix"),
                     pubkey: formData.get("pubkey"),
@@ -112,7 +112,7 @@ export default function Register() {
                 }
             } else {
                 setAlert({severity: "success", message: `Successfully edited namespace: ${formData.get("prefix")}`})
-                window.location.href = "/view/registry/"
+                setTimeout(() => {window.location.href = "/view/registry/"}, 3000)
             }
 
         } catch (e) {
