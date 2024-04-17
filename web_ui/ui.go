@@ -186,8 +186,8 @@ func handleWebUIAuth(ctx *gin.Context) {
 	db := authDB.Load()
 	user, err := GetUser(ctx)
 
-	// Skip auth check for static files
-	if path.Ext(requestPath) != "" && path.Ext(requestPath) != "html" {
+	// Skip auth check for static files other than html pages
+	if path.Ext(requestPath) != ".html" {
 		ctx.Next()
 		return
 	}
