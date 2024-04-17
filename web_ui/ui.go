@@ -57,8 +57,8 @@ var (
 	//go:embed frontend/out/*
 	webAssets         embed.FS
 	serverPages       = []string{"director", "registry", "origin", "cache"}
-	publicAccessPages = []string{"director", "registry"} // UI pages that allow unauthenticated users to access.
-	adminAccessPages  = []string{"config"}               // UI pages that allow non-admin users to access. Note that this is different from "publicView" where unauthenticated users can access the page
+	publicAccessPages = []string{"director", "registry"}      // UI pages that allow unauthenticated users to access.
+	adminAccessPages  = []string{"config", "origin", "cache"} // UI pages that allow non-admin users to access. Note that this is different from "publicView" where unauthenticated users can access the page
 )
 
 const notFoundFilePath = "frontend/out/404/index.html"
