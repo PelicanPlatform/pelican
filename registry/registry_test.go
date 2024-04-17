@@ -192,7 +192,7 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 
 		resBody, err := io.ReadAll(r.Result().Body)
 		require.NoError(t, err)
-		assert.JSONEq(t, `{"results":[]}`, string(resBody))
+		assert.JSONEq(t, `{"results":{}}`, string(resBody))
 	})
 
 	t.Run("request-prefix-dne", func(t *testing.T) {
@@ -248,7 +248,7 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 		err = json.Unmarshal(resBody, &resStruct)
 		require.NoError(t, err)
 
-		result, ok := resStruct.Results["/prefix-dne"]
+		result, ok := resStruct.Results["/incomplete-prefix"]
 		require.True(t, ok)
 		assert.False(t, result.Completed)
 		assert.Contains(t, result.EditUrl, "https://registry.org/view/registry/origin/edit/?id=")
@@ -291,7 +291,7 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 		err = json.Unmarshal(resBody, &resStruct)
 		require.NoError(t, err)
 
-		result, ok := resStruct.Results["/prefix-dne"]
+		result, ok := resStruct.Results["/complete-prefix"]
 		require.True(t, ok)
 		assert.True(t, result.Completed)
 		assert.Contains(t, result.EditUrl, "https://registry.org/view/registry/origin/edit/?id=")

@@ -721,7 +721,7 @@ func TestCreateNamespace(t *testing.T) {
 		assert.JSONEq(t, `{"error":"Invalid create or update namespace request"}`, string(body))
 	})
 
-	t.Run("missing-required-fields-returns-400", func(t *testing.T) {
+	t.Run("missing-prefix-returns-400", func(t *testing.T) {
 		resetNamespaceDB(t)
 
 		mockEmptyNs := Namespace{}
@@ -736,9 +736,48 @@ func TestCreateNamespace(t *testing.T) {
 		body, err := io.ReadAll(w.Result().Body)
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
-		assert.Contains(t, string(body), "Field validation for 'Prefix' failed on the 'required' tag")
-		assert.Contains(t, string(body), "Field validation for 'Pubkey' failed on the 'required' tag")
-		assert.Contains(t, string(body), "Field validation for 'Institution' failed on the 'required' tag")
+		assert.Contains(t, string(body), "Validation for Prefix failed:")
+	})
+
+	t.Run("missing-public-key-returns-400", func(t *testing.T) {
+		resetNamespaceDB(t)
+		mockEmptyNs := Namespace{Prefix: "/test"} // Missing public key
+		mockEmptyNsBytes, err := json.Marshal(mockEmptyNs)
+		require.NoError(t, err)
+		// Create a request to the endpoint
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/namespaces", bytes.NewReader(mockEmptyNsBytes))
+		req.Header.Set("Context-Type", "application/json")
+		router.ServeHTTP(w, req)
+
+		body, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+		assert.Contains(t, string(body), "Validation for Pubkey failed:")
+	})
+
+	t.Run("missing-institution-returns-400", func(t *testing.T) {
+		viper.Reset()
+		viper.Set("Registry.Institutions", []map[string]string{{"name": "Mock School", "id": "123"}})
+		resetNamespaceDB(t)
+		jwks, err := GenerateMockJWKS()
+		require.NoError(t, err)
+
+		mockEmptyNs := Namespace{Prefix: "/test", Pubkey: jwks} // Missing institution
+		mockEmptyNsBytes, err := json.Marshal(mockEmptyNs)
+		require.NoError(t, err)
+		// Create a request to the endpoint
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/namespaces", bytes.NewReader(mockEmptyNsBytes))
+		req.Header.Set("Context-Type", "application/json")
+		router.ServeHTTP(w, req)
+		require.NoError(t, err)
+
+		body, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+		assert.Contains(t, string(body), "Validation for Institution failed:")
+		viper.Reset()
 	})
 
 	t.Run("invalid-prefix-returns-400", func(t *testing.T) {
@@ -756,7 +795,7 @@ func TestCreateNamespace(t *testing.T) {
 		body, err := io.ReadAll(w.Result().Body)
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
-		assert.Contains(t, string(body), "Error: Field validation for prefix failed:")
+		assert.Contains(t, string(body), "Validation for Prefix failed:")
 	})
 
 	t.Run("existing-prefix-returns-400", func(t *testing.T) {
@@ -795,7 +834,7 @@ func TestCreateNamespace(t *testing.T) {
 		body, err := io.ReadAll(w.Result().Body)
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
-		assert.Contains(t, string(body), "Error: Field validation for pubkey failed:")
+		assert.Contains(t, string(body), "Validation for Pubkey failed:")
 	})
 
 	t.Run("duplicated-key-returns-400", func(t *testing.T) {

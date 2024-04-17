@@ -334,7 +334,7 @@ func TestUpdateNamespace(t *testing.T) {
 		require.Equal(t, 1, len(finalNss))
 		finalNs := finalNss[0]
 		assert.Equal(t, mockNs.Prefix, finalNs.Prefix)
-		assert.Equal(t, mockNs.AdminMetadata.UserID, finalNs.AdminMetadata.UserID)
+		assert.Equal(t, initialNs.AdminMetadata.UserID, finalNs.AdminMetadata.UserID) // we now allow changes to UserID
 		assert.Equal(t, mockNs.AdminMetadata.CreatedAt.Unix(), finalNs.AdminMetadata.CreatedAt.Unix())
 		assert.Equal(t, mockNs.AdminMetadata.Status, finalNs.AdminMetadata.Status)
 		assert.Equal(t, mockNs.AdminMetadata.ApprovedAt.Unix(), finalNs.AdminMetadata.ApprovedAt.Unix())

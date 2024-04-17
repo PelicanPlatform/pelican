@@ -443,7 +443,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 	// Check that Prefix is a valid prefix
 	updated_prefix, err := validatePrefix(ns.Prefix)
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Error: Field validation for prefix failed: %v", err)})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Validation for Prefix failed: %v", err)})
 		return
 	}
 	ns.Prefix = updated_prefix
@@ -465,7 +465,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 	// Check if pubKey is a valid JWK
 	pubkey, err := validateJwks(ns.Pubkey)
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Error: Field validation for pubkey failed: %v", err)})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Validation for Pubkey failed: %v", err)})
 		return
 	}
 
@@ -482,9 +482,11 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 		return
 	}
 
-	if validInst, err := validateInstitution(ns.AdminMetadata.Institution); !validInst {
+	validInst, err := validateInstitution(ns.AdminMetadata.Institution)
+
+	if !validInst {
 		if err != nil {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Error validating institution: %v", err)})
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Validation for Institution failed: %v", err)})
 			return
 		}
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Institution \"%s\" is not in the list of available institutions to register.", ns.AdminMetadata.Institution)})
@@ -506,6 +508,17 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 		ns.AdminMetadata.Status = Pending
 		if inTopo {
 			ns.AdminMetadata.Description = fmt.Sprintf("[ Attention: A superspace or subspace of this prefix exists in OSDF topology: %s ] ", GetTopoPrefixString(topoNss))
+		}
+		// Basic validation (type, required, etc)
+		errs := config.GetValidate().Struct(ns)
+		if errs != nil {
+			validationErrs := errs.(validator.ValidationErrors)
+			errMsg := "Validation failed: "
+			for _, err := range validationErrs {
+				errMsg += err.Translate(config.GetEnTranslator()) + "\n"
+			}
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": errMsg})
+			return
 		}
 		if err := AddNamespace(&ns); err != nil {
 			log.Errorf("Failed to insert namespace with id %d. %v", ns.ID, err)
@@ -548,7 +561,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 				//  we allow them to do it so that admin can fill out the rest of the registration if the user_id is empty
 				if accessToken == "" {
 					log.Errorf("Access denied from user %s for namespace with id=%d", user, id)
-					ctx.JSON(http.StatusForbidden, gin.H{"error": "Namespace not found. Check the id or if you own the namespace"})
+					ctx.JSON(http.StatusNotFound, gin.H{"error": "Namespace not found. Check the id or if you own the namespace"})
 					return
 				}
 			}
