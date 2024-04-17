@@ -62,6 +62,11 @@ func (c *ClassAd) String() string {
 		buffer.WriteString(" = ")
 		switch v := value.(type) {
 		case string:
+			// Here, we want to ensure we remove any `\n` chars. We do this because if HTCondor ever uses
+			// the old classad mechanism (typically when the shadow talks to the schedd), \n's are special in
+			// the old syntax as they are the seperator from name/value pairs.
+			v = strings.ReplaceAll(v, "\n", "\\n")
+			v = strings.ReplaceAll(v, "\r", "\\r")
 			buffer.WriteString(strconv.QuoteToASCII(v))
 		case map[string]interface{}:
 			buffer.WriteString("[")
@@ -72,6 +77,9 @@ func (c *ClassAd) String() string {
 				case int, int64:
 					fmt.Fprintf(&buffer, "%v; ", valueType)
 				case string:
+					// See above as to why we ensure the removal of `\n`
+					valueType = strings.ReplaceAll(valueType, "\n", "\\n")
+					valueType = strings.ReplaceAll(valueType, "\r", "\\r")
 					fmt.Fprintf(&buffer, "%s; ", strconv.QuoteToASCII(valueType))
 				case bool:
 					fmt.Fprintf(&buffer, "%t; ", valueType)
