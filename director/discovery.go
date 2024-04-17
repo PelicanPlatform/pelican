@@ -81,10 +81,10 @@ func federationDiscoveryHandler(ctx *gin.Context) {
 	}
 	registryUrl, err := url.Parse(registryUrlStr)
 	if err != nil {
-		log.Error("Bad server configuration: invalid URL from Federation.RegistryUrl: ", err)
+		log.Error("Bad server configuration: Federation.RegistryUrl is an invalid URL: ", err)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "Bad server configuration: director URL is not valid",
+			Msg:    "Bad server configuration: registry URL is not valid",
 		})
 		return
 	}

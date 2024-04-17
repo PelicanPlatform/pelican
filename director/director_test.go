@@ -1153,7 +1153,7 @@ func TestHandleFilterServer(t *testing.T) {
 		require.Equal(t, 400, w.Code)
 		resB, err := io.ReadAll(w.Body)
 		require.NoError(t, err)
-		assert.Contains(t, string(resB), "name is a required path parameter")
+		assert.Contains(t, string(resB), "'name' is a required path parameter")
 	})
 }
 
@@ -1179,7 +1179,7 @@ func TestHandleAllowServer(t *testing.T) {
 		require.Equal(t, 400, w.Code)
 		resB, err := io.ReadAll(w.Body)
 		require.NoError(t, err)
-		assert.Contains(t, string(resB), "Can't allow a server that is not being filtered: mock-dne")
+		assert.Contains(t, string(resB), "Can't allow server mock-dne that is not being filtered")
 	})
 	t.Run("allow-server-w-permFiltered", func(t *testing.T) {
 		// Create a request to the endpoint
@@ -1231,7 +1231,7 @@ func TestHandleAllowServer(t *testing.T) {
 
 		resB, err := io.ReadAll(w.Body)
 		require.NoError(t, err)
-		assert.Contains(t, string(resB), "Can't allow a server that is not being filtered: mock-ta")
+		assert.Contains(t, string(resB), "Can't allow server mock-ta that is not being filtered")
 	})
 	t.Run("allow-with-invalid-name", func(t *testing.T) {
 		// Create a request to the endpoint
@@ -1243,6 +1243,6 @@ func TestHandleAllowServer(t *testing.T) {
 		require.Equal(t, 400, w.Code)
 		resB, err := io.ReadAll(w.Body)
 		require.NoError(t, err)
-		assert.Contains(t, string(resB), "name is a required path parameter")
+		assert.Contains(t, string(resB), "'name' is a required path parameter")
 	})
 }

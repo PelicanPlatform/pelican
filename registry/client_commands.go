@@ -143,9 +143,9 @@ func NamespaceRegister(privateKey jwk.Key, namespaceRegistryEndpoint string, acc
 	// Handle case where there was an error encoded in the body
 	if err != nil {
 		if unmarshalErr := json.Unmarshal(resp, &respData); unmarshalErr == nil {
-			return errors.Wrapf(err, "Server responses with an error: %s. %s", respData.Message, respData.Error)
+			return errors.Wrapf(err, "Server responded with an error: %s. %s", respData.Message, respData.Error)
 		}
-		return errors.Wrapf(err, "Server responses with an error and fail to parse JSON response from the server. Raw server response is %s", resp)
+		return errors.Wrapf(err, "Server responded with an error and failed to parse JSON response from the server. Raw server response is %s", resp)
 	}
 
 	// No error
@@ -186,12 +186,12 @@ func NamespaceRegister(privateKey jwk.Key, namespaceRegistryEndpoint string, acc
 	// Handle case where there was an error encoded in the body
 	if unmarshalErr := json.Unmarshal(resp, &respData); unmarshalErr == nil {
 		if err != nil {
-			return errors.Wrapf(err, "Server responses with an error: %s. %s", respData.Message, respData.Error)
+			return errors.Wrapf(err, "Server responded with an error: %s. %s", respData.Message, respData.Error)
 		}
-		log.Errorf("Server responses with an error: %v. %s. %s", respData.Message, respData.Error, err)
+		log.Errorf("Server responded with an error: %v. %s. %s", respData.Message, respData.Error, err)
 	} else { // Error decoding JSON
 		if err != nil {
-			return errors.Wrapf(err, "Server responses with an error and fail to parse JSON response from the server. Raw response is %s", resp)
+			return errors.Wrapf(err, "Server responded with an error and failed to parse JSON response from the server. Raw response is %s", resp)
 		}
 		return errors.Wrapf(unmarshalErr, "Failure when parsing JSON response from the server with a success request. Raw server response is %s", resp)
 	}
