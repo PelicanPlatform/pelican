@@ -144,8 +144,8 @@ func FetchAndSetRegStatus(prefix string) error {
 	return nil
 }
 
-func wrapExportsByStatus(exports []server_utils.OriginExport) ([]*exportWithStatus, error) {
-	wrappedExports := []*exportWithStatus{}
+func wrapExportsByStatus(exports []server_utils.OriginExport) ([]exportWithStatus, error) {
+	wrappedExports := []exportWithStatus{}
 	fetchQ := []server_utils.OriginExport{}
 	prefixQ := []string{}
 
@@ -158,7 +158,7 @@ func wrapExportsByStatus(exports []server_utils.OriginExport) ([]*exportWithStat
 				StatusDescription: regStatus.Msg,
 				OriginExport:      export,
 			}
-			wrappedExports = append(wrappedExports, &wrappedExport)
+			wrappedExports = append(wrappedExports, wrappedExport)
 		} else {
 			// If DNE, attempt to fetch
 			fetchQ = append(fetchQ, export)
@@ -178,7 +178,7 @@ func wrapExportsByStatus(exports []server_utils.OriginExport) ([]*exportWithStat
 				Status:       RegStatusNotSupported,
 				OriginExport: export,
 			}
-			wrappedExports = append(wrappedExports, &wrappedExport)
+			wrappedExports = append(wrappedExports, wrappedExport)
 			registrationsStatus.Set(
 				export.FederationPrefix,
 				RegistrationStatus{Status: RegStatusNotSupported, Msg: RegistryNotImplErr.Error()},
@@ -199,7 +199,7 @@ func wrapExportsByStatus(exports []server_utils.OriginExport) ([]*exportWithStat
 				StatusDescription: statusErrMsg,
 				OriginExport:      export,
 			}
-			wrappedExports = append(wrappedExports, &wrappedExport)
+			wrappedExports = append(wrappedExports, wrappedExport)
 			registrationsStatus.Set(
 				export.FederationPrefix,
 				RegistrationStatus{Status: RegStatusNotSupported, Msg: statusErrMsg},
@@ -216,7 +216,7 @@ func wrapExportsByStatus(exports []server_utils.OriginExport) ([]*exportWithStat
 				StatusDescription: status.Msg,
 				OriginExport:      export,
 			}
-			wrappedExports = append(wrappedExports, &wrappedExport)
+			wrappedExports = append(wrappedExports, wrappedExport)
 			registrationsStatus.Set(
 				export.FederationPrefix,
 				RegistrationStatus{Status: internalStatus, EditUrl: status.EditUrl, Msg: status.Msg},

@@ -37,8 +37,8 @@ import (
 
 type (
 	exportsRes struct {
-		Type    string              `json:"type"` // either "posix" or "s3"
-		Exports []*exportWithStatus `json:"exports"`
+		Type    string             `json:"type"` // either "posix" or "s3"
+		Exports []exportWithStatus `json:"exports"`
 	}
 )
 
@@ -76,18 +76,18 @@ func handleExports(ctx *gin.Context) {
 		return
 	}
 
-	for _, export := range wrappedExports {
+	for idx, export := range wrappedExports {
 		if export.EditUrl != "" {
 			parsed, err := url.Parse(export.EditUrl)
 			if err != nil {
 				// current editUrl ends with "/?id=<x>"
-				export.EditUrl += "&access_token=" + token
+				wrappedExports[idx].EditUrl += "&access_token=" + token
 				continue
 			}
 			exQuery := parsed.Query()
 			exQuery.Add("access_token", token)
 			parsed.RawQuery = exQuery.Encode()
-			export.EditUrl = parsed.String()
+			wrappedExports[idx].EditUrl = parsed.String()
 		}
 	}
 
