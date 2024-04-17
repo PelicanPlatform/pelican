@@ -23,9 +23,13 @@ package launchers
 import (
 	"context"
 	_ "embed"
+	"net/url"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	log "github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/config"
@@ -94,7 +98,17 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		launchers = append(launchers, oa4mp_launcher)
 	}
 
-	pids, err := xrootd.LaunchOriginDaemons(ctx, launchers, egrp)
+	portStartCallback := func(port int) {
+		viper.Set("Origin.Port", port)
+		if originUrl, err := url.Parse(param.Origin_Url.GetString()); err == nil {
+			originUrl.Host = originUrl.Hostname() + ":" + strconv.Itoa(port)
+			viper.Set("Origin.Url", originUrl.String())
+			log.Debugln("Resetting Origin.Url to", originUrl.String())
+		}
+		log.Infoln("Origin startup complete on port", port)
+	}
+
+	pids, err := xrootd.LaunchDaemons(ctx, launchers, egrp, portStartCallback)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +131,7 @@ func OriginServeFinish(ctx context.Context, egrp *errgroup.Group) error {
 	}
 
 	metrics.SetComponentHealthStatus(metrics.OriginCache_Registry, metrics.StatusWarning, "Start to register namespaces for the origin server")
-	for _, export := range *originExports {
+	for _, export := range originExports {
 		if err := launcher_utils.RegisterNamespaceWithRetry(ctx, egrp, export.FederationPrefix); err != nil {
 			return err
 		}

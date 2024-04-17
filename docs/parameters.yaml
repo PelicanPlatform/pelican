@@ -191,6 +191,38 @@ type: string
 default: info
 components: ["origin"]
 ---
+name: Logging.Origin.Http
+description: >-
+  Logging level for the HTTP component of the origin.  Increasing to debug will cause the Xrootd daemon to log
+  all headers and requests.
+type: string
+default: error
+components: ["origin"]
+---
+name: Logging.Origin.Ofs
+description: >-
+  Logging level of Xrootd's "Open File System" (ofs) subsystem.  The OFS manages the file descriptor table and redirection/
+  error handling.
+type: string
+default: error
+components: ["origin"]
+---
+name: Logging.Origin.Oss
+description: >-
+  Logging level of Xrootd's "Open Storage System" (oss) subsystem.  The OSS manages the interaction with the underlying
+  POSIX storage (open, read, write, close, etc).
+type: string
+default: error
+components: ["origin"]
+---
+name: Logging.Cache.Http
+description: >-
+  Logging level for the HTTP component of the cache.  Increasing to debug will cause the Xrootd daemon to log
+  all headers and requests.
+type: string
+default: error
+components: ["cache"]
+---
 name: Logging.Cache.Ofs
 description: |+
   Trace level of XRootD's Open File System. This component cares about files and directories from the administrative perspective.
@@ -443,7 +475,7 @@ components: ["origin"]
 ---
 name: Origin.StorageType
 description: |+
-  The type of storage underpinning the origin. Currently supported types are "posix" and "s3".
+  The type of storage underpinning the origin. Currently supported types are "posix", "https", and "s3".
 type: string
 default: "posix"
 components: ["origin"]
@@ -452,8 +484,8 @@ name: Origin.FederationPrefix
 description: |+
   The namespace prefix of the origin's contents within the federation.
 
-  NOTE: This config option is incompatible with multiple exports defined via `Origin.Exports` and requires that the origin exports
-  only a single path.
+  NOTE: This config option is incompatible with multiple exports defined via `Origin.Exports` and is ignored when the origin
+  exports multiple prefixes.
 type: string
 default: none
 components: ["origin"]
@@ -464,8 +496,8 @@ description: |+
   of "posix", this constitutes the path on disk exported by the origin for the federation. If the origin has a StorageType of "s3",
   this value is not currently used.
 
-  NOTE: This config option is incompatible with multiple exports defined via `Origin.Exports` and requires that the origin exports
-  only a single path.
+  NOTE: This config option is incompatible with multiple exports defined via `Origin.Exports` and is ignored when the origin
+  exports multiple prefixes.
 type: string
 default: none
 components: ["origin"]
@@ -484,8 +516,8 @@ description: |+
   A boolean indicating whether the origin permits reads without valid authorization. When false, reads from the origin will require a
   properly-scoped authorization token signed by the origin's issuer.
 
-  NOTE: This config option is incompatible with multiple exports defined via `Origin.Exports` and requires that the origin exports
-  only a single path.
+  NOTE: This config option is meant to configure an _origin's_ capabilities, but can be used to configure a namespace when the origin
+  exports only a single prefix or when every exported namespace should inherit the same configuration.
 type: bool
 default: false
 components: ["origin"]
@@ -494,8 +526,8 @@ name: Origin.EnableReads
 description: |+
   A boolean indicating whether the origin permits any reads. When false, the origin may still allow writes.
 
-  NOTE: This config option is incompatible with multiple exports defined via `Origin.Exports` and requires that the origin exports
-  only a single path.
+  NOTE: This config option is meant to configure an _origin's_ capabilities, but can be used to configure a namespace when the origin
+  exports only a single prefix or when every exported namespace should inherit the same configuration.
 type: bool
 default: true
 components: ["origin"]
@@ -504,8 +536,8 @@ name: Origin.EnableWrites
 description: |+
   A boolean indicating whether the origin permits writes. All writes require authorization.
 
-  NOTE: This config option is incompatible with multiple exports defined via `Origin.Exports` and requires that the origin exports
-  only a single path.type: bool.
+  NOTE: This config option is meant to configure an _origin's_ capabilities, but can be used to configure a namespace when the origin
+  exports only a single prefix or when every exported namespace should inherit the same configuration.
 type: bool
 default: true
 components: ["origin"]
@@ -514,8 +546,8 @@ name: Origin.EnableListings
 description: |+
   A boolean indicating whether the origin permits object listings. When true, clients can list the contents of the origin.
 
-  NOTE: This config option is incompatible with multiple exports defined via `Origin.Exports` and requires that the origin exports
-  only a single path.
+  NOTE: This config option is meant to configure an _origin's_ capabilities, but can be used to configure a namespace when the origin
+  exports only a single prefix or when every exported namespace should inherit the same configuration.
 type: bool
 default: true
 components: ["origin"]
@@ -525,8 +557,8 @@ description: |+
   A boolean indicating whether the origin permits direct reads. When true, the origin indicates that it is willing to interact directly with clients.
   When false, the origin is indicating it is only willing to interact with clients via a cache service.
 
-  NOTE: This config option is incompatible with multiple exports defined via `Origin.Exports` and requires that the origin exports
-  only a single path.
+  NOTE: This config option is meant to configure an _origin's_ capabilities, but can be used to configure a namespace when the origin
+  exports only a single prefix or when every exported namespace should inherit the same configuration.
 type: bool
 default: true
 components: ["origin"]
@@ -806,6 +838,16 @@ description: |+
   This value is REQUIRED for S3 origins, but defaults to "path" if not set.
 type: string
 default: path
+components: ["origin"]
+---
+name: Origin.HttpServiceUrl
+description: >-
+  If Origin.StorageType is set to `https`, the service URL is used as the base for requests to the backend.  To generate the
+  request, the Origin.FederationPrefix is removed from the object name, then the result is joined with the service URL.
+  For example, if one sets `Origin.HTTPServiceUrl=https://example.com/testfiles` and `Origin.FederationPrefix=/foo`, then a request
+  for an object named `/foo/bar` will generate a request to https://example.com/testfiles/bar.
+type: string
+default: none
 components: ["origin"]
 ---
 ############################

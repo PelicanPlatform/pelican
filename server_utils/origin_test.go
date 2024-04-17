@@ -66,7 +66,7 @@ var (
 	s3exportSingleVolumeConfig string
 )
 
-func setup(t *testing.T, config string) *[]OriginExport {
+func setup(t *testing.T, config string) []OriginExport {
 	viper.SetConfigType("yaml")
 	// Use viper to read in the embedded config
 	err := viper.ReadConfig(strings.NewReader(config))
@@ -90,20 +90,20 @@ func TestGetExports(t *testing.T) {
 		defer ResetOriginExports()
 		exports := setup(t, envVarMimicConfig)
 
-		assert.Len(t, *exports, 1, "expected 1 export")
-		assert.Equal(t, "/foo", (*exports)[0].StoragePrefix, "expected /foo")
+		assert.Len(t, exports, 1, "expected 1 export")
+		assert.Equal(t, "/foo", exports[0].StoragePrefix, "expected /foo")
 
-		assert.False(t, (*exports)[0].Capabilities.Writes, "expected no writes")
-		assert.True(t, (*exports)[0].Capabilities.PublicReads, "expected public reads")
-		assert.False(t, (*exports)[0].Capabilities.Listings, "expected no listings")
-		assert.True(t, (*exports)[0].Capabilities.DirectReads, "expected direct reads")
+		assert.False(t, exports[0].Capabilities.Writes, "expected no writes")
+		assert.True(t, exports[0].Capabilities.PublicReads, "expected public reads")
+		assert.False(t, exports[0].Capabilities.Listings, "expected no listings")
+		assert.True(t, exports[0].Capabilities.DirectReads, "expected direct reads")
 	})
 
 	t.Run("testMultiExportValid", func(t *testing.T) {
 		defer viper.Reset()
 		defer ResetOriginExports()
 		exports := setup(t, multiExportValidConfig)
-		assert.Len(t, *exports, 2, "expected 2 exports")
+		assert.Len(t, exports, 2, "expected 2 exports")
 
 		expectedExport1 := OriginExport{
 			StoragePrefix:    "/test1",
@@ -116,7 +116,7 @@ func TestGetExports(t *testing.T) {
 				DirectReads: true,
 			},
 		}
-		assert.Equal(t, expectedExport1, (*exports)[0])
+		assert.Equal(t, expectedExport1, exports[0])
 
 		expectedExport2 := OriginExport{
 			StoragePrefix:    "/test2",
@@ -129,14 +129,14 @@ func TestGetExports(t *testing.T) {
 				DirectReads: false,
 			},
 		}
-		assert.Equal(t, expectedExport2, (*exports)[1])
+		assert.Equal(t, expectedExport2, exports[1])
 	})
 
 	t.Run("testExportVolumesValid", func(t *testing.T) {
 		defer viper.Reset()
 		defer ResetOriginExports()
 		exports := setup(t, exportVolumesValidConfig)
-		assert.Len(t, *exports, 2, "expected 2 exports")
+		assert.Len(t, exports, 2, "expected 2 exports")
 
 		expectedExport1 := OriginExport{
 			StoragePrefix:    "/test1",
@@ -149,7 +149,7 @@ func TestGetExports(t *testing.T) {
 				DirectReads: true,
 			},
 		}
-		assert.Equal(t, expectedExport1, (*exports)[0])
+		assert.Equal(t, expectedExport1, exports[0])
 
 		expectedExport2 := OriginExport{
 			StoragePrefix:    "/test2",
@@ -162,7 +162,7 @@ func TestGetExports(t *testing.T) {
 				DirectReads: true,
 			},
 		}
-		assert.Equal(t, expectedExport2, (*exports)[1])
+		assert.Equal(t, expectedExport2, exports[1])
 	})
 
 	// When we have a single export volume, we also set a few viper variables that can be
@@ -171,7 +171,7 @@ func TestGetExports(t *testing.T) {
 		defer viper.Reset()
 		defer ResetOriginExports()
 		exports := setup(t, exportSingleVolumeConfig)
-		assert.Len(t, *exports, 1, "expected 1 export")
+		assert.Len(t, exports, 1, "expected 1 export")
 
 		expectedExport := OriginExport{
 			StoragePrefix:    "/test1",
@@ -184,7 +184,7 @@ func TestGetExports(t *testing.T) {
 				DirectReads: false,
 			},
 		}
-		assert.Equal(t, expectedExport, (*exports)[0])
+		assert.Equal(t, expectedExport, exports[0])
 
 		// Now check that we properly set the other viper vars we should have
 		assert.Equal(t, "/test1", viper.GetString("Origin.StoragePrefix"))
@@ -200,7 +200,7 @@ func TestGetExports(t *testing.T) {
 		defer viper.Reset()
 		defer ResetOriginExports()
 		exports := setup(t, singleExportBlockConfig)
-		assert.Len(t, *exports, 1, "expected 1 export")
+		assert.Len(t, exports, 1, "expected 1 export")
 
 		expectedExport := OriginExport{
 			StoragePrefix:    "/test1",
@@ -213,7 +213,7 @@ func TestGetExports(t *testing.T) {
 				DirectReads: true,
 			},
 		}
-		assert.Equal(t, expectedExport, (*exports)[0])
+		assert.Equal(t, expectedExport, exports[0])
 
 		// Now check that we properly set the other viper vars we should have
 		assert.Equal(t, "/test1", viper.GetString("Origin.StoragePrefix"))
@@ -225,6 +225,30 @@ func TestGetExports(t *testing.T) {
 		assert.True(t, viper.GetBool("Origin.EnableDirectReads"))
 	})
 
+	t.Run("testInvalidExport", func(t *testing.T) {
+		defer viper.Reset()
+		defer ResetOriginExports()
+
+		viper.Set("Origin.StorageType", "posix")
+		viper.Set("Origin.ExportVolumes", "")
+		_, err := GetOriginExports()
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, ErrInvalidOriginConfig)
+
+		viper.Reset()
+		viper.Set("Origin.StorageType", "posix")
+		viper.Set("Origin.ExportVolumes", "foo")
+		_, err = GetOriginExports()
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrInvalidOriginConfig)
+
+		viper.Reset()
+		viper.Set("Origin.StorageType", "blah")
+		_, err = GetOriginExports()
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, ErrUnknownOriginStorageType)
+	})
+
 	// S3 tests
 	t.Run("testSingleExportValidS3", func(t *testing.T) {
 		defer viper.Reset()
@@ -232,23 +256,23 @@ func TestGetExports(t *testing.T) {
 
 		exports := setup(t, s3envVarMimicConfig)
 
-		assert.Len(t, *exports, 1, "expected 1 export")
-		assert.Equal(t, "/my/namespace", (*exports)[0].FederationPrefix, "expected /my/namespace")
-		assert.Equal(t, "my-bucket", (*exports)[0].S3Bucket, "expected my-bucket")
-		assert.Equal(t, "/path/to/access.key", (*exports)[0].S3AccessKeyfile, "expected /path/to/access.key")
-		assert.Equal(t, "/path/to/secret.key", (*exports)[0].S3SecretKeyfile, "expected /path/to/secret.key")
+		assert.Len(t, exports, 1, "expected 1 export")
+		assert.Equal(t, "/my/namespace", exports[0].FederationPrefix, "expected /my/namespace")
+		assert.Equal(t, "my-bucket", exports[0].S3Bucket, "expected my-bucket")
+		assert.Equal(t, "/path/to/access.key", exports[0].S3AccessKeyfile, "expected /path/to/access.key")
+		assert.Equal(t, "/path/to/secret.key", exports[0].S3SecretKeyfile, "expected /path/to/secret.key")
 
-		assert.False(t, (*exports)[0].Capabilities.Writes, "expected no writes")
-		assert.True(t, (*exports)[0].Capabilities.PublicReads, "expected public reads")
-		assert.False(t, (*exports)[0].Capabilities.Listings, "expected no listings")
-		assert.True(t, (*exports)[0].Capabilities.DirectReads, "expected direct reads")
+		assert.False(t, exports[0].Capabilities.Writes, "expected no writes")
+		assert.True(t, exports[0].Capabilities.PublicReads, "expected public reads")
+		assert.False(t, exports[0].Capabilities.Listings, "expected no listings")
+		assert.True(t, exports[0].Capabilities.DirectReads, "expected direct reads")
 	})
 
 	t.Run("testMultiExportValidS3", func(t *testing.T) {
 		defer viper.Reset()
 		defer ResetOriginExports()
 		exports := setup(t, s3multiExportValidConfig)
-		assert.Len(t, *exports, 2, "expected 2 exports")
+		assert.Len(t, exports, 2, "expected 2 exports")
 
 		expectedExport1 := OriginExport{
 			S3Bucket:         "first-bucket",
@@ -261,7 +285,7 @@ func TestGetExports(t *testing.T) {
 				DirectReads: true,
 			},
 		}
-		assert.Equal(t, expectedExport1, (*exports)[0])
+		assert.Equal(t, expectedExport1, exports[0])
 
 		expectedExport2 := OriginExport{
 			S3Bucket:         "second-bucket",
@@ -276,14 +300,14 @@ func TestGetExports(t *testing.T) {
 				DirectReads: false,
 			},
 		}
-		assert.Equal(t, expectedExport2, (*exports)[1])
+		assert.Equal(t, expectedExport2, exports[1])
 	})
 
 	t.Run("testExportVolumesValidS3", func(t *testing.T) {
 		defer viper.Reset()
 		defer ResetOriginExports()
 		exports := setup(t, s3exportVolumesValidConfig)
-		assert.Len(t, *exports, 2, "expected 2 exports")
+		assert.Len(t, exports, 2, "expected 2 exports")
 
 		expectedExport1 := OriginExport{
 			StoragePrefix:    "/",
@@ -297,7 +321,7 @@ func TestGetExports(t *testing.T) {
 				DirectReads: true,
 			},
 		}
-		assert.Equal(t, expectedExport1, (*exports)[0])
+		assert.Equal(t, expectedExport1, exports[0])
 
 		expectedExport2 := OriginExport{
 			StoragePrefix:    "/",
@@ -311,14 +335,14 @@ func TestGetExports(t *testing.T) {
 				DirectReads: true,
 			},
 		}
-		assert.Equal(t, expectedExport2, (*exports)[1])
+		assert.Equal(t, expectedExport2, exports[1])
 	})
 
 	t.Run("testExportVolumesSingleS3", func(t *testing.T) {
 		defer viper.Reset()
 		defer ResetOriginExports()
 		exports := setup(t, s3exportSingleVolumeConfig)
-		assert.Len(t, *exports, 1, "expected 1 export")
+		assert.Len(t, exports, 1, "expected 1 export")
 
 		expectedExport := OriginExport{
 			StoragePrefix:    "/",
@@ -334,7 +358,7 @@ func TestGetExports(t *testing.T) {
 				DirectReads: false,
 			},
 		}
-		assert.Equal(t, expectedExport, (*exports)[0])
+		assert.Equal(t, expectedExport, exports[0])
 
 		// Now check that we properly set the other viper vars we should have
 		assert.Equal(t, "my-bucket", viper.GetString("Origin.S3Bucket"))
@@ -352,7 +376,7 @@ func TestGetExports(t *testing.T) {
 		defer viper.Reset()
 		defer ResetOriginExports()
 		exports := setup(t, s3singleExportBlockConfig)
-		assert.Len(t, *exports, 1, "expected 1 export")
+		assert.Len(t, exports, 1, "expected 1 export")
 
 		expectedExport := OriginExport{
 			S3Bucket:         "my-bucket",
@@ -367,7 +391,7 @@ func TestGetExports(t *testing.T) {
 				DirectReads: true,
 			},
 		}
-		assert.Equal(t, expectedExport, (*exports)[0])
+		assert.Equal(t, expectedExport, exports[0])
 
 		// Now check that we properly set the other viper vars we should have
 		assert.Equal(t, "my-bucket", viper.GetString("Origin.S3Bucket"))
@@ -413,7 +437,7 @@ func TestCheckSentinelLocation(t *testing.T) {
 		exports = append(exports, mockExportNoStn)
 		exports = append(exports, mockExportNoStn)
 
-		ok, err := CheckSentinelLocation(&exports)
+		ok, err := CheckSentinelLocation(exports)
 		assert.NoError(t, err)
 		assert.True(t, ok)
 	})
@@ -423,7 +447,7 @@ func TestCheckSentinelLocation(t *testing.T) {
 		exports = append(exports, mockExportNoStn)
 		exports = append(exports, mockExportValidStn)
 
-		ok, err := CheckSentinelLocation(&exports)
+		ok, err := CheckSentinelLocation(exports)
 		assert.NoError(t, err)
 		assert.True(t, ok)
 	})
@@ -434,7 +458,7 @@ func TestCheckSentinelLocation(t *testing.T) {
 		exports = append(exports, mockExportValidStn)
 		exports = append(exports, mockExportInvalidStn)
 
-		ok, err := CheckSentinelLocation(&exports)
+		ok, err := CheckSentinelLocation(exports)
 		assert.Error(t, err)
 		assert.False(t, ok)
 	})

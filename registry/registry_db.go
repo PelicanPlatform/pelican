@@ -202,7 +202,7 @@ func topologyNamespaceExistsByPrefix(prefix string) (bool, error) {
 
 func namespaceSupSubChecks(prefix string) (superspaces []string, subspaces []string, inTopo bool, topoNss []Topology, err error) {
 	// The very first thing we do is check if there's a match in topo. We simply flag it's in topology if so
-	if config.GetPreferredPrefix() == "OSDF" {
+	if config.GetPreferredPrefix() == config.OsdfPrefix {
 		topoSuperSubQuery := `
 		SELECT prefix FROM topology WHERE (? || '/') LIKE (prefix || '/%')
 		UNION

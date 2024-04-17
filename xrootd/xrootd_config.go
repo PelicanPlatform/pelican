@@ -89,6 +89,8 @@ type (
 		EnableListings    bool
 		SelfTest          bool
 		CalculatedPort    string
+		FederationPrefix  string
+		HttpServiceUrl    string
 		RunLocation       string
 		StorageType       string
 
@@ -140,10 +142,13 @@ type (
 
 	LoggingConfig struct {
 		OriginCms       string
-		PssSetOptOrigin string
+		OriginHttp      string
+		OriginOfs       string
+		OriginOss       string
 		OriginScitokens string
 		OriginXrd       string
 		OriginXrootd    string
+		CacheHttp       string
 		CacheOfs        string
 		CachePfc        string
 		CachePss        string
@@ -183,10 +188,14 @@ func CheckOriginXrootdEnv(exportPath string, server server_structs.XRootDServer,
 		return err
 	}
 
-	if ost := param.Origin_StorageType.GetString(); ost == "posix" {
+	backendType, err := server_utils.ParseOriginStorageType(param.Origin_StorageType.GetString())
+	if err != nil {
+		return err
+	}
+	if backendType == server_utils.OriginStoragePosix {
 		// For each export, we symlink the exported directory, currently at /var/run/pelican/export/<export.FederationPrefix>,
 		// to the actual data source, which is what we get from the Export object's StoragePrefix
-		for _, export := range *originExports {
+		for _, export := range originExports {
 			destPath := path.Clean(filepath.Join(exportPath, export.FederationPrefix))
 			err := config.MkdirAll(filepath.Dir(destPath), 0755, uid, gid)
 			if err != nil {
@@ -605,11 +614,22 @@ func ConfigXrootd(ctx context.Context, origin bool) (string, error) {
 	// To make sure we get the correct exports, we overwrite the exports in the xrdConfig struct with the exports
 	// we get from the server_structs.GetOriginExports() function. Failure to do so will cause us to hit viper again,
 	// which in the case of tests prevents us from overwriting some exports with temp dirs.
-	originExports, err := server_utils.GetOriginExports()
-	if err != nil {
-		return "", errors.Wrap(err, "failed to generate Origin export list for xrootd config")
+	if origin {
+		originExports, err := server_utils.GetOriginExports()
+		if err != nil {
+			return "", errors.Wrap(err, "failed to generate Origin export list for xrootd config")
+		}
+		xrdConfig.Origin.Exports = originExports
 	}
-	xrdConfig.Origin.Exports = *originExports
+
+	if xrdConfig.Origin.StorageType == "https" {
+		if xrdConfig.Origin.HttpServiceUrl == "" {
+			xrdConfig.Origin.HttpServiceUrl = param.Origin_HttpServiceUrl.GetString()
+		}
+		if xrdConfig.Origin.FederationPrefix == "" {
+			xrdConfig.Origin.FederationPrefix = param.Origin_FederationPrefix.GetString()
+		}
+	}
 
 	// Map out xrootd logs
 	err = mapXrootdLogLevels(&xrdConfig)
@@ -830,6 +850,37 @@ func mapXrootdLogLevels(xrdConfig *XrootdConfig) error {
 		return errors.Wrap(err, "Error parsing specified log level for Origin_Xrootd")
 	}
 
+	// Origin Ofs
+	// https://xrootd.slac.stanford.edu/doc/dev56/ofs_config.htm
+	xrdConfig.Logging.OriginOfs, err = genLoggingConfig("ofs", xrdConfig, param.Logging_Origin_Ofs.GetString(), loggingMap{
+		Trace: "all",
+		Debug: "debug",
+		Info:  "info",
+		Warn:  "most",
+		Error: "-all",
+	})
+	if err != nil {
+		return errors.Wrap(err, "Error parsing specified log level for Logging.Origin.Ofs")
+	}
+
+	// Origin Oss
+	xrdConfig.Logging.OriginOss, err = genLoggingConfig("oss", xrdConfig, param.Logging_Origin_Oss.GetString(), loggingMap{
+		Trace: "all",
+		Info:  "-all",
+	})
+	if err != nil {
+		return errors.Wrap(err, "Error parsing specified log level for Logging.Origin.Oss")
+	}
+
+	// Origin HTTP
+	xrdConfig.Logging.OriginHttp, err = genLoggingConfig("http", xrdConfig, param.Logging_Origin_Http.GetString(), loggingMap{
+		Debug: "all",
+		Info:  "none",
+	})
+	if err != nil {
+		return errors.Wrap(err, "Error parsing specified log level for Logging.Origin.Http")
+	}
+
 	//////////////////////////CACHE/////////////////////////////
 	// Cache Ofs
 	// https://xrootd.slac.stanford.edu/doc/dev56/ofs_config.htm
@@ -887,13 +938,22 @@ func mapXrootdLogLevels(xrdConfig *XrootdConfig) error {
 		return errors.Wrap(err, "Error parsing specified log level for Cache_Pss")
 	}
 
+	// Cache HTTP
+	xrdConfig.Logging.CacheHttp, err = genLoggingConfig("http", xrdConfig, param.Logging_Cache_Http.GetString(), loggingMap{
+		Debug: "all",
+		Info:  "none",
+	})
+	if err != nil {
+		return errors.Wrap(err, "Error parsing specified log level for Logging.Cache.Http")
+	}
+
 	// Cache Scitokens
 	// https://github.com/xrootd/xrootd/blob/8f8498d66aa583c54c0875bb1cfe432f4be040f4/src/XrdSciTokens/XrdSciTokensAccess.cc#L951-L963
 	xrdConfig.Logging.CacheScitokens, err = genLoggingConfig("scitokens", xrdConfig, param.Logging_Cache_Scitokens.GetString(), loggingMap{
 		Trace: "all",
-		Debug: "debug",
-		Info:  "info",
-		Warn:  "warning",
+		Debug: "debug info warning error",
+		Info:  "info warning error",
+		Warn:  "warning error",
 		Error: "error",
 		Fatal: "none",
 	})

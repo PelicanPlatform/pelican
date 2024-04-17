@@ -95,7 +95,7 @@ type (
 
 	// Error type for when the transfer started to return data then completely stopped
 	StoppedTransferError struct {
-		Err string
+		Err error
 	}
 
 	// SlowTransferError is an error that is returned when a transfer takes longer than the configured timeout
@@ -109,6 +109,10 @@ type (
 	// ConnectionSetupError is an error that is returned when a connection to the remote server fails
 	ConnectionSetupError struct {
 		URL string
+		Err error
+	}
+
+	allocateMemoryError struct {
 		Err error
 	}
 
@@ -303,7 +307,29 @@ func getProgressContainer() *mpb.Progress {
 }
 
 func (e *StoppedTransferError) Error() string {
+	return e.Err.Error()
+}
+
+func (e *StoppedTransferError) Unwrap() error {
 	return e.Err
+}
+
+func (e *StoppedTransferError) Is(target error) bool {
+	_, ok := target.(*StoppedTransferError)
+	return ok
+}
+
+func (e *allocateMemoryError) Error() string {
+	return e.Err.Error()
+}
+
+func (e *allocateMemoryError) Unwrap() error {
+	return e.Err
+}
+
+func (e *allocateMemoryError) Is(target error) bool {
+	_, ok := target.(*allocateMemoryError)
+	return ok
 }
 
 type HttpErrResp struct {
@@ -480,14 +506,14 @@ func (te *TransferEngine) newPelicanURL(remoteUrl *url.URL) (pelicanURL pelicanU
 	// With an osdf:// url scheme, we assume the user will be using the OSDF so load in our osdf metadata for our url
 	if scheme == "osdf" {
 		// If we are using an osdf/stash binary, we discovered the federation already --> load into local url metadata
-		if config.GetPreferredPrefix() == "OSDF" {
+		if config.GetPreferredPrefix() == config.OsdfPrefix {
 			log.Debugln("In OSDF mode with osdf:// url; populating metadata with OSDF defaults")
 			if param.Federation_DirectorUrl.GetString() == "" || param.Federation_DiscoveryUrl.GetString() == "" || param.Federation_RegistryUrl.GetString() == "" {
 				return pelicanUrl{}, fmt.Errorf("OSDF default metadata is not populated in config")
 			} else {
 				pelicanURL.directorUrl = param.Federation_DirectorUrl.GetString()
 			}
-		} else if config.GetPreferredPrefix() == "PELICAN" {
+		} else if config.GetPreferredPrefix() == config.PelicanPrefix {
 			// We hit this case when we are using a pelican binary but an osdf:// url, therefore we need to disover the osdf federation
 			log.Debugln("In Pelican mode with an osdf:// url, populating metadata with OSDF defaults")
 			// Check if cache has key of federationURL, if not, loader will add it:
@@ -532,7 +558,7 @@ func (te *TransferEngine) newPelicanURL(remoteUrl *url.URL) (pelicanURL pelicanU
 func NewTransferEngine(ctx context.Context) *TransferEngine {
 	ctx, cancel := context.WithCancel(ctx)
 	egrp, _ := errgroup.WithContext(ctx)
-	work := make(chan *clientTransferJob)
+	work := make(chan *clientTransferJob, 5)
 	files := make(chan *clientTransferFile)
 	results := make(chan *clientTransferResults, 5)
 	suppressedLoader := ttlcache.NewSuppressedLoader(loader, new(singleflight.Group))
@@ -542,6 +568,7 @@ func NewTransferEngine(ctx context.Context) *TransferEngine {
 	)
 
 	// Start our cache for url metadata
+	// This is stopped in the `Shutdown` method
 	go pelicanURLCache.Start()
 
 	te := &TransferEngine{
@@ -553,7 +580,7 @@ func NewTransferEngine(ctx context.Context) *TransferEngine {
 		results:         results,
 		resultsMap:      make(map[uuid.UUID]chan *TransferResults),
 		workMap:         make(map[uuid.UUID]chan *TransferJob),
-		jobLookupDone:   make(chan *clientTransferJob),
+		jobLookupDone:   make(chan *clientTransferJob, 5),
 		notifyChan:      make(chan bool),
 		closeChan:       make(chan bool),
 		closeDoneChan:   make(chan bool),
@@ -692,6 +719,7 @@ func (te *TransferEngine) Close() {
 func (te *TransferEngine) runMux() error {
 	tmpResults := make(map[uuid.UUID][]*TransferResults)
 	activeJobs := make(map[uuid.UUID][]*TransferJob)
+	var clientJob *clientTransferJob
 	closing := false
 	closedWorkChan := false
 	// The main body of the routine; continuously select on one of the channels,
@@ -716,11 +744,17 @@ func (te *TransferEngine) runMux() error {
 			sortFunc := func(a, b uuid.UUID) int {
 				return bytes.Compare(a[:], b[:])
 			}
+			// Only listen for more incoming work if we're not waiting to send a client job to the
+			// jobs-to-objects worker
 			slices.SortFunc(workKeys, sortFunc)
 			for _, key := range workKeys {
 				workMap[key] = te.workMap[key]
 				cases[ctr].Dir = reflect.SelectRecv
-				cases[ctr].Chan = reflect.ValueOf(workMap[key])
+				if clientJob == nil {
+					cases[ctr].Chan = reflect.ValueOf(workMap[key])
+				} else {
+					cases[ctr].Chan = reflect.ValueOf(nil)
+				}
 				ctr++
 			}
 			resultsMap = make(map[uuid.UUID]chan *TransferResults, len(tmpResults))
@@ -742,9 +776,15 @@ func (te *TransferEngine) runMux() error {
 			// Notification that a transfer has finished.
 			cases[ctr+1].Dir = reflect.SelectRecv
 			cases[ctr+1].Chan = reflect.ValueOf(te.results)
-			// Placeholder; never used.
-			cases[ctr+2].Dir = reflect.SelectRecv
-			cases[ctr+2].Chan = reflect.ValueOf(nil)
+			// Buffer the jobs to send to the job-to-objects worker.
+			if clientJob == nil {
+				cases[ctr+2].Dir = reflect.SelectRecv
+				cases[ctr+2].Chan = reflect.ValueOf(nil)
+			} else {
+				cases[ctr+2].Dir = reflect.SelectSend
+				cases[ctr+2].Chan = reflect.ValueOf(te.work)
+				cases[ctr+2].Send = reflect.ValueOf(clientJob)
+			}
 			// Notification that the TransferEngine has been cancelled; shutdown immediately
 			cases[ctr+3].Dir = reflect.SelectRecv
 			cases[ctr+3].Chan = reflect.ValueOf(te.ctx.Done())
@@ -787,14 +827,13 @@ func (te *TransferEngine) runMux() error {
 				continue
 			}
 			job := recv.Interface().(*TransferJob)
-			clientJob := &clientTransferJob{job: job, uuid: id}
+			clientJob = &clientTransferJob{job: job, uuid: id}
 			clientJobs := activeJobs[id]
 			if clientJobs == nil {
 				clientJobs = make([]*TransferJob, 0)
 			}
 			clientJobs = append(clientJobs, job)
 			activeJobs[id] = clientJobs
-			te.work <- clientJob
 		} else if chosen < len(workMap)+len(resultsMap) {
 			// One of the "write" channels has been sent some results.
 			id := resultsKeys[chosen-len(workMap)]
@@ -859,6 +898,10 @@ func (te *TransferEngine) runMux() error {
 				}
 				tmpResults[result.id] = append(resultBuffer, &result.results)
 			}
+		} else if chosen == len(workMap)+len(resultsMap)+2 {
+			// Sent the buffered job to the job-to-objects worker.  Clear
+			// out the buffer so that we can pull in more work.
+			clientJob = nil
 		} else if chosen == len(workMap)+len(resultsMap)+3 {
 			// Engine's context has been cancelled; immediately exit.
 			log.Debugln("Transfer engine has been cancelled")
@@ -1684,12 +1727,16 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	if resp.IsComplete() {
 		if err = resp.Err(); err != nil {
 			var sce grab.StatusCodeError
+			var cam syscall.Errno
 			if errors.Is(err, grab.ErrBadLength) {
 				err = fmt.Errorf("local copy of file is larger than remote copy %w", grab.ErrBadLength)
 			} else if errors.As(err, &sce) {
 				log.Debugln("Creating a client status code error")
 				sce2 := StatusCodeError(sce)
 				err = &sce2
+			} else if errors.As(err, &cam) && cam == syscall.ENOMEM {
+				// ENOMEM is error from os for unable to allocate memory
+				err = &allocateMemoryError{Err: err}
 			} else {
 				err = &ConnectionSetupError{Err: err}
 			}
@@ -1763,7 +1810,7 @@ Loop:
 					errMsg := "No progress for more than " + time.Since(noProgressStartTime).Truncate(time.Millisecond).String()
 					log.Errorln(errMsg)
 					err = &StoppedTransferError{
-						Err: errMsg,
+						Err: errors.New(errMsg),
 					}
 					return
 				}

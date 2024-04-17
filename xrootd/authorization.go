@@ -269,7 +269,7 @@ func EmitAuthfile(server server_structs.XRootDServer) error {
 
 	output := new(bytes.Buffer)
 	foundPublicLine := false
-	if config.GetPreferredPrefix() == "OSDF" {
+	if config.GetPreferredPrefix() == config.OsdfPrefix {
 		log.Debugln("Retrieving OSDF Authfile for server")
 		bytes, err := getOSDFAuthFiles(server)
 		if err != nil {
@@ -298,7 +298,7 @@ func EmitAuthfile(server server_structs.XRootDServer) error {
 					return errors.Wrapf(err, "Failed to get origin exports")
 				}
 
-				for _, export := range *originExports {
+				for _, export := range originExports {
 					if export.Capabilities.PublicReads {
 						outStr += export.FederationPrefix + " lr "
 					}
@@ -324,7 +324,7 @@ func EmitAuthfile(server server_structs.XRootDServer) error {
 			return errors.Wrapf(err, "Failed to get origin exports")
 		}
 
-		for _, export := range *originExports {
+		for _, export := range originExports {
 			if export.Capabilities.PublicReads {
 				outStr += " " + export.FederationPrefix + " lr"
 			}

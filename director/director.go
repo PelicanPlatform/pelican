@@ -243,7 +243,7 @@ func redirectToCache(ginCtx *gin.Context) {
 	// report the lack of path first -- this is most important for the user because it tells them
 	// they're trying to get an object that simply doesn't exist
 	if namespaceAd.Path == "" {
-		ginCtx.String(404, "No namespace found for path. Either it doesn't exist, or the Director is experiencing problems\n")
+		ginCtx.String(404, "No namespace found for path. Either it doesn't exist, or the Director is experiencing problems")
 		return
 	}
 	// if err != nil, depth == 0, which is the default value for depth
@@ -366,12 +366,12 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	// report the lack of path first -- this is most important for the user because it tells them
 	// they're trying to get an object that simply doesn't exist
 	if namespaceAd.Path == "" {
-		ginCtx.String(http.StatusNotFound, "No namespace found for path. Either it doesn't exist, or the Director is experiencing problems\n")
+		ginCtx.String(http.StatusNotFound, "No namespace found for path. Either it doesn't exist, or the Director is experiencing problems")
 		return
 	}
 	// If the namespace prefix DOES exist, then it makes sense to say we couldn't find the origin.
 	if len(originAds) == 0 {
-		ginCtx.String(http.StatusNotFound, "There are currently no origins exporting the provided namespace prefix\n")
+		ginCtx.String(http.StatusNotFound, "There are currently no origins exporting the provided namespace prefix")
 		return
 	}
 	// if err != nil, depth == 0, which is the default value for depth
@@ -423,7 +423,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 				return
 			}
 		}
-		ginCtx.String(http.StatusMethodNotAllowed, "No origins on specified endpoint are writeable\n")
+		ginCtx.String(http.StatusMethodNotAllowed, "No origins on specified endpoint are writeable")
 		return
 	} else { // Otherwise, we are doing a GET
 		redirectURL := getRedirectURL(reqPath, originAds[0], !namespaceAd.PublicRead)
@@ -824,8 +824,6 @@ func getPrefixByPath(ctx *gin.Context) {
 		})
 		return
 	}
-	namespaceKeysMutex.Lock()
-	defer namespaceKeysMutex.Unlock()
 
 	originNs, _, _ := getAdsForPath(pathParam)
 

@@ -46,7 +46,7 @@ func RegistryServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 		return err
 	}
 
-	if config.GetPreferredPrefix() == "OSDF" {
+	if config.GetPreferredPrefix() == config.OsdfPrefix {
 		metrics.SetComponentHealthStatus(metrics.DirectorRegistry_Topology, metrics.StatusWarning, "Start requesting from topology, status unknown")
 		log.Info("Populating registry with namespaces from OSG topology service...")
 		if err := registry.PopulateTopology(); err != nil {

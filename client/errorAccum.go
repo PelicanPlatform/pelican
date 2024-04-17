@@ -71,6 +71,11 @@ func (te *TransferErrors) AddPastError(err error, timestamp time.Time) {
 	}
 }
 
+// This resets the TransferErrors object for testing purposes
+func (te *TransferErrors) resetErrors() {
+	te.errors = make([]error, 0)
+}
+
 func (te *TransferErrors) Unwrap() []error {
 	return te.errors
 }
@@ -132,6 +137,12 @@ func IsRetryable(err error) bool {
 		return false
 	}
 	if errors.Is(err, config.MetadataTimeoutErr) {
+		return true
+	}
+	if errors.Is(err, &StoppedTransferError{}) {
+		return true
+	}
+	if errors.Is(err, &allocateMemoryError{}) {
 		return true
 	}
 	var cse *ConnectionSetupError

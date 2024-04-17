@@ -39,7 +39,7 @@ func DirectorServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 	log.Info("Initializing Director GeoIP database...")
 	director.InitializeDB(ctx)
 
-	if config.GetPreferredPrefix() == "OSDF" {
+	if config.GetPreferredPrefix() == config.OsdfPrefix {
 		metrics.SetComponentHealthStatus(metrics.DirectorRegistry_Topology, metrics.StatusWarning, "Start requesting from topology, status unknown")
 		log.Info("Generating/advertising server ads from OSG topology service...")
 

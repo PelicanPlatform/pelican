@@ -28,8 +28,10 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -116,7 +118,17 @@ func originMockup(ctx context.Context, egrp *errgroup.Group, t *testing.T) conte
 	launchers, err := ConfigureLaunchers(false, configPath, false, false)
 	require.NoError(t, err)
 
-	_, err = LaunchOriginDaemons(shutdownCtx, launchers, egrp)
+	portStartCallback := func(port int) {
+		viper.Set("Origin.Port", port)
+		if originUrl, err := url.Parse(param.Origin_Url.GetString()); err == nil {
+			originUrl.Host = originUrl.Hostname() + ":" + strconv.Itoa(port)
+			viper.Set("Origin.Url", originUrl.String())
+			log.Debugln("Resetting Origin.Url to", originUrl.String())
+		}
+		log.Infoln("Origin startup complete on port", port)
+	}
+
+	_, err = LaunchDaemons(shutdownCtx, launchers, egrp, portStartCallback)
 	require.NoError(t, err)
 
 	log.Info("Starting web engine...")
@@ -190,10 +202,10 @@ func TestMultiExportOrigin(t *testing.T) {
 
 	exports, err := server_utils.GetOriginExports()
 	require.NoError(t, err)
-	require.Len(t, *exports, 2)
+	require.Len(t, exports, 2)
 	// Override the object store prefix to a temp directory
-	(*exports)[0].StoragePrefix = t.TempDir()
-	(*exports)[1].StoragePrefix = t.TempDir()
+	exports[0].StoragePrefix = t.TempDir()
+	exports[1].StoragePrefix = t.TempDir()
 
 	// Disable functionality we're not using (and is difficult to make work on Mac)
 	viper.Set("Origin.EnableCmsd", false)

@@ -73,6 +73,9 @@ func TestIsPort(t *testing.T) {
 // TestNewTransferDetails checks the creation of transfer details
 func TestNewTransferDetails(t *testing.T) {
 	os.Setenv("http_proxy", "http://proxy.edu:3128")
+	t.Cleanup(func() {
+		require.NoError(t, os.Unsetenv("http_proxy"))
+	})
 
 	// Case 1: cache with http
 	testCache := namespaces.Cache{
@@ -120,6 +123,11 @@ func TestNewTransferDetails(t *testing.T) {
 }
 
 func TestNewTransferDetailsEnv(t *testing.T) {
+	os.Setenv("http_proxy", "http://proxy.edu:3128")
+	t.Cleanup(func() {
+		require.NoError(t, os.Unsetenv("http_proxy"))
+	})
+
 	testCache := namespaces.Cache{
 		AuthEndpoint: "cache.edu:8443",
 		Endpoint:     "cache.edu:8000",
@@ -129,9 +137,11 @@ func TestNewTransferDetailsEnv(t *testing.T) {
 	os.Setenv("OSG_DISABLE_PROXY_FALLBACK", "")
 	err := config.InitClient()
 	assert.Nil(t, err)
-	transfers := newTransferDetails(testCache, transferDetailsOptions{false, ""})
+	transfers := newTransferDetails(testCache, transferDetailsOptions{})
 	assert.Equal(t, 1, len(transfers))
 	assert.Equal(t, true, transfers[0].Proxy)
+
+	os.Unsetenv("http_proxy")
 
 	transfers = newTransferDetails(testCache, transferDetailsOptions{true, ""})
 	assert.Equal(t, 1, len(transfers))
@@ -182,6 +192,12 @@ func TestSlowTransfers(t *testing.T) {
 		Endpoint:     svr.URL,
 		Resource:     "Cache",
 	}
+
+	os.Setenv("http_proxy", "http://proxy.edu:3128")
+	t.Cleanup(func() {
+		require.NoError(t, os.Unsetenv("http_proxy"))
+	})
+
 	transfers := newTransferDetails(testCache, transferDetailsOptions{false, ""})
 	assert.Equal(t, 2, len(transfers))
 	assert.Equal(t, svr.URL, transfers[0].Url.String())
@@ -215,6 +231,10 @@ func TestSlowTransfers(t *testing.T) {
 // Test stopped transfer
 func TestStoppedTransfer(t *testing.T) {
 	os.Setenv("http_proxy", "http://proxy.edu:3128")
+	t.Cleanup(func() {
+		require.NoError(t, os.Unsetenv("http_proxy"))
+	})
+
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
 	// Adjust down the timeouts
@@ -280,6 +300,7 @@ func TestStoppedTransfer(t *testing.T) {
 	// Make sure the errors are correct
 	assert.NotNil(t, err)
 	assert.IsType(t, &StoppedTransferError{}, err, err.Error())
+	assert.True(t, IsRetryable(err))
 }
 
 // Test connection error
@@ -317,6 +338,11 @@ func TestTrailerError(t *testing.T) {
 	}))
 
 	defer svr.Close()
+
+	os.Setenv("http_proxy", "http://proxy.edu:3128")
+	t.Cleanup(func() {
+		require.NoError(t, os.Unsetenv("http_proxy"))
+	})
 
 	testCache := namespaces.Cache{
 		AuthEndpoint: svr.URL,
@@ -530,7 +556,7 @@ func TestNewPelicanURL(t *testing.T) {
 
 	t.Run("TestOsdfOrStashSchemeWithOSDFPrefixNoError", func(t *testing.T) {
 		viper.Reset()
-		_, err := config.SetPreferredPrefix("OSDF")
+		_, err := config.SetPreferredPrefix(config.OsdfPrefix)
 		assert.NoError(t, err)
 		// Init config to get proper timeouts
 		config.InitConfig()
@@ -554,7 +580,7 @@ func TestNewPelicanURL(t *testing.T) {
 
 	t.Run("TestOsdfOrStashSchemeWithOSDFPrefixWithError", func(t *testing.T) {
 		viper.Reset()
-		_, err := config.SetPreferredPrefix("OSDF")
+		_, err := config.SetPreferredPrefix(config.OsdfPrefix)
 		assert.NoError(t, err)
 		config.InitConfig()
 
@@ -574,7 +600,7 @@ func TestNewPelicanURL(t *testing.T) {
 
 	t.Run("TestOsdfOrStashSchemeWithPelicanPrefixNoError", func(t *testing.T) {
 		viper.Reset()
-		_, err := config.SetPreferredPrefix("PELICAN")
+		_, err := config.SetPreferredPrefix(config.PelicanPrefix)
 		config.InitConfig()
 		assert.NoError(t, err)
 		remoteObject := "osdf:///something/somewhere/thatdoesnotexist.txt"

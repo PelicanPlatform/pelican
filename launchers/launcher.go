@@ -155,8 +155,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 
 	if modules.IsEnabled(config.OriginType) {
 
-		mode := param.Origin_StorageType.GetString()
-		var originExports *[]server_utils.OriginExport
+		var originExports []server_utils.OriginExport
 		originExports, err = server_utils.GetOriginExports()
 		if err != nil {
 			return
@@ -164,68 +163,6 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 
 		ok, err = server_utils.CheckSentinelLocation(originExports)
 		if err != nil && !ok {
-			return
-		}
-
-		switch mode {
-		case "posix":
-			if len(*originExports) == 0 {
-				err = errors.Errorf(`
-	Export information was not provided.
-	To specify exports via the command line, use:
-
-				-v /mnt/foo:/bar -v /mnt/test:/baz
-
-	to export the directories /mnt/foo and /mnt/test under the namespace prefixes /bar and /baz, respectively.
-
-	Alternatively, specify Origin.Exports in the parameters.yaml file:
-
-	Origin:
-		Exports:
-		  - StoragePrefix: /mnt/foo
-		    FederationPrefix: /bar
-		    Capabilities: ["PublicReads", "Writes", "Listings"]
-		  - StoragePrefix: /mnt/test
-		    FederationPrefix: /baz
-		    Capabilities: ["Writes"]
-
-	to export the directories /mnt/foo and /mnt/test under the namespace prefixes /bar and /baz, respectively (with listed permissions).
-	`)
-				return
-			}
-		case "s3":
-			if len(*originExports) == 0 {
-				err = errors.Errorf(`
-	Export information was not provided.
-	To specify exports via the command line, use:
-
-				-v my-bucket:/my/prefix (REQUIRED --service-url https://my-s3-url.com) (REQUIRED --url-style <path or virtual>) \
-						(REQUIRED --region "my-region") (OPTIONAL --bucket-access-keyfile /path/to/access.key) \
-						(OPTIONAL --bucket-secret-keyfile /path/to/secret.key)
-
-
-	to export the S3 bucket under the namespace prefix /my/prefix.
-
-	Alternatively, specify Origin.Exports in the parameters.yaml file:
-
-	Origin:
-		StorageType: s3
-		S3UrlStyle: <path or virtual>
-		S3ServiceUrl: https://my-s3-url.com
-		S3Region: my-region
-		Exports:
-		  - FederationPrefix: /my/prefix
-			S3Bucket: my-bucket
-			S3AccessKeyfile: /path/to/access.key
-			S3SecretKeyfile: /path/to/secret.key
-			Capabilities: ["PublicReads", "Writes", "Listings"]
-
-	to export the S3 bucket my-bucket from https://my-s3-url.com under the namespace prefix /my/prefix (with listed permissions).
-				`)
-				return
-			}
-		default:
-			err = errors.Errorf("Currently-supported origin modes include posix and s3, but you provided %s.", mode)
 			return
 		}
 
@@ -295,14 +232,14 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 		// of the namespaces and doesn't have to wait an entire cycle to learn about them from the director
 
 		// To check all of the advertisements, we'll launch a WaitUntilWorking concurrently for each of them.
-		var originExports *[]server_utils.OriginExport
+		var originExports []server_utils.OriginExport
 		originExports, err = server_utils.GetOriginExports()
 		if err != nil {
 			return
 		}
-		errCh := make(chan error, len(*originExports))
+		errCh := make(chan error, len(originExports))
 		var wg sync.WaitGroup
-		wg.Add(len(*originExports))
+		wg.Add(len(originExports))
 		// NOTE: A previous version of this functionality (in the days of assuming only one export) used
 		// use param.Server_ExternalWebUrl as the endpoint to check. Justin thinks the assumption here
 		// was that it only made sense to serve an origin and a cache at the same time if a local director
@@ -314,7 +251,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 			err = errors.Wrap(err, "Failed to parse director URL when checking origin advertisements before cache launch")
 			return
 		}
-		for _, export := range *originExports {
+		for _, export := range originExports {
 			go func(prefix string) {
 				defer wg.Done()
 				// Probably no need to incur another err check since we already checked the director URL.
@@ -348,6 +285,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 		}
 	}
 
+	var cacheServer server_structs.XRootDServer
 	if modules.IsEnabled(config.CacheType) {
 		// Give five seconds for the origin to finish advertising to the director
 		desiredURL := param.Federation_DirectorUrl.GetString() + "/.well-known/openid-configuration"
@@ -355,13 +293,12 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 			log.Errorln("Director does not seem to be working:", err)
 			return
 		}
-		var server server_structs.XRootDServer
-		server, err = CacheServe(ctx, engine, egrp, modules)
+		cacheServer, err = CacheServe(ctx, engine, egrp, modules)
 		if err != nil {
 			return
 		}
 
-		servers = append(servers, server)
+		servers = append(servers, cacheServer)
 	}
 
 	if modules.IsEnabled(config.OriginType) || modules.IsEnabled(config.CacheType) {
@@ -373,7 +310,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 
 	if modules.IsEnabled(config.CacheType) {
 		log.Debug("Finishing cache server configuration")
-		if err = CacheServeFinish(ctx, egrp); err != nil {
+		if err = CacheServeFinish(ctx, egrp, cacheServer); err != nil {
 			return
 		}
 	}

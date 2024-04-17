@@ -27,14 +27,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -42,6 +45,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/classads"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/fed_test_utils"
 	"github.com/pelicanplatform/pelican/launchers"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -187,7 +191,7 @@ func TestStashPluginMain(t *testing.T) {
 	viper.Reset()
 	server_utils.ResetOriginExports()
 
-	_, err := config.SetPreferredPrefix("STASH")
+	_, err := config.SetPreferredPrefix(config.StashPrefix)
 	assert.NoError(t, err)
 
 	// Temp dir for downloads
@@ -249,6 +253,71 @@ func TestStashPluginMain(t *testing.T) {
 	assert.Contains(t, output, amountDownloaded)
 }
 
+// Test multiple downloads from the plugin
+func TestPluginMulti(t *testing.T) {
+	viper.Reset()
+	server_utils.ResetOriginExports()
+
+	dirName := t.TempDir()
+
+	viper.Set("Logging.Level", "debug")
+	viper.Set("Origin.StorageType", "posix")
+	viper.Set("Origin.ExportVolumes", "/test")
+	viper.Set("Origin.EnablePublicReads", true)
+	fed := fed_test_utils.NewFedTest(t, "")
+	host := param.Server_Hostname.GetString() + ":" + strconv.Itoa(param.Server_WebPort.GetInt())
+
+	// Drop the testFileContent into the origin directory
+	destDir := filepath.Join(fed.Exports[0].StoragePrefix, "test")
+	require.NoError(t, os.MkdirAll(destDir, os.FileMode(0755)))
+	log.Debugln("Will create origin file at", destDir)
+	err := os.WriteFile(filepath.Join(destDir, "test.txt"), []byte("test file content"), fs.FileMode(0644))
+	require.NoError(t, err)
+	downloadUrl1 := url.URL{
+		Scheme: "pelican",
+		Host:   host,
+		Path:   "/test/test/test.txt",
+	}
+	localPath1 := filepath.Join(dirName, "test.txt")
+	err = os.WriteFile(filepath.Join(destDir, "test2.txt"), []byte("second test file content"), fs.FileMode(0644))
+	require.NoError(t, err)
+	downloadUrl2 := url.URL{
+		Scheme: "pelican",
+		Host:   host,
+		Path:   "/test/test/test2.txt",
+	}
+	localPath2 := filepath.Join(dirName, "test2.txt")
+
+	workChan := make(chan PluginTransfer, 2)
+	workChan <- PluginTransfer{url: &downloadUrl1, localFile: localPath1}
+	workChan <- PluginTransfer{url: &downloadUrl2, localFile: localPath2}
+	close(workChan)
+
+	results := make(chan *classads.ClassAd, 5)
+	fed.Egrp.Go(func() error {
+		return runPluginWorker(fed.Ctx, false, workChan, results)
+	})
+
+	done := false
+	for !done {
+		select {
+		case <-fed.Ctx.Done():
+			break
+		case resultAd, ok := <-results:
+			if !ok {
+				done = true
+				break
+			}
+			// Process results as soon as we get them
+			transferSuccess, err := resultAd.Get("TransferSuccess")
+			assert.NoError(t, err)
+			boolVal, ok := transferSuccess.(bool)
+			require.True(t, ok)
+			assert.True(t, boolVal)
+		}
+	}
+}
+
 func TestWriteOutfile(t *testing.T) {
 	t.Run("TestOutfileSuccess", func(t *testing.T) {
 		// Drop the testFileContent into the origin directory
@@ -266,6 +335,7 @@ func TestWriteOutfile(t *testing.T) {
 			resultAd.Set("TransferLocalMachineName", "abcdefghijk")
 			resultAd.Set("TransferFileBytes", 12)
 			resultAd.Set("TransferTotalBytes", 27538253)
+			resultAd.Set("TransferUrl", "foo.txt")
 			resultAds = append(resultAds, resultAd)
 		}
 		success, retryable := writeOutfile(nil, resultAds, tempFile)
@@ -278,6 +348,7 @@ func TestWriteOutfile(t *testing.T) {
 		assert.Contains(t, string(tempFileContent), "TransferFileBytes = 12;")
 		assert.Contains(t, string(tempFileContent), "TransferTotalBytes = 27538253;")
 		assert.Contains(t, string(tempFileContent), "TransferSuccess = true;")
+		assert.Contains(t, string(tempFileContent), "TransferUrl = \"foo.txt\";")
 	})
 
 	t.Run("TestOutfileFailureNoRetry", func(t *testing.T) {
@@ -297,6 +368,7 @@ func TestWriteOutfile(t *testing.T) {
 			resultAd.Set("TransferLocalMachineName", "abcdefghijk")
 			resultAd.Set("TransferFileBytes", 12)
 			resultAd.Set("TransferTotalBytes", 27538253)
+			resultAd.Set("TransferUrl", "foo.txt")
 			resultAds = append(resultAds, resultAd)
 		}
 		success, retryable := writeOutfile(nil, resultAds, tempFile)
@@ -309,6 +381,7 @@ func TestWriteOutfile(t *testing.T) {
 		assert.Contains(t, string(tempFileContent), "TransferFileBytes = 12;")
 		assert.Contains(t, string(tempFileContent), "TransferSuccess = false;")
 		assert.Contains(t, string(tempFileContent), "TransferRetryable = false;")
+		assert.Contains(t, string(tempFileContent), "TransferUrl = \"foo.txt\";")
 	})
 
 	t.Run("TestOutfileFailureWithRetry", func(t *testing.T) {
@@ -328,6 +401,7 @@ func TestWriteOutfile(t *testing.T) {
 			resultAd.Set("TransferLocalMachineName", "abcdefghijk")
 			resultAd.Set("TransferFileBytes", 12)
 			resultAd.Set("TransferTotalBytes", 27538253)
+			resultAd.Set("TransferUrl", "foo.txt")
 			resultAds = append(resultAds, resultAd)
 		}
 		success, retryable := writeOutfile(nil, resultAds, tempFile)
@@ -340,6 +414,7 @@ func TestWriteOutfile(t *testing.T) {
 		assert.Contains(t, string(tempFileContent), "TransferFileBytes = 12;")
 		assert.Contains(t, string(tempFileContent), "TransferSuccess = false;")
 		assert.Contains(t, string(tempFileContent), "TransferRetryable = true;")
+		assert.Contains(t, string(tempFileContent), "TransferUrl = \"foo.txt\";")
 	})
 
 }

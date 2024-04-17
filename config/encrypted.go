@@ -44,7 +44,7 @@ var setEmptyPassword = false
 
 func GetEncryptedConfigName() (string, error) {
 	configDir := viper.GetString("ConfigDir")
-	if GetPreferredPrefix() == "PELICAN" || IsRootExecution() {
+	if GetPreferredPrefix() == PelicanPrefix || IsRootExecution() {
 		return filepath.Join(configDir, "credentials", "client-credentials.pem"), nil
 	}
 	configLocation := filepath.Join("osdf-client", "oauth2-client.pem")

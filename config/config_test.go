@@ -288,9 +288,9 @@ func TestEnabledServers(t *testing.T) {
 // Tests the function setPreferredPrefix: ensures case-insensitivity and invalid values are handled correctly
 func TestSetPreferredPrefix(t *testing.T) {
 	t.Run("TestPelicanPreferredPrefix", func(t *testing.T) {
-		oldPref, err := SetPreferredPrefix("pelican")
+		oldPref, err := SetPreferredPrefix(PelicanPrefix)
 		assert.NoError(t, err)
-		if GetPreferredPrefix() != "PELICAN" {
+		if GetPreferredPrefix() != PelicanPrefix {
 			t.Errorf("Expected preferred prefix to be 'PELICAN', got '%s'", GetPreferredPrefix())
 		}
 		if oldPref != "" {
@@ -299,23 +299,23 @@ func TestSetPreferredPrefix(t *testing.T) {
 	})
 
 	t.Run("TestOSDFPreferredPrefix", func(t *testing.T) {
-		oldPref, err := SetPreferredPrefix("osdf")
+		oldPref, err := SetPreferredPrefix(OsdfPrefix)
 		assert.NoError(t, err)
-		if GetPreferredPrefix() != "OSDF" {
+		if GetPreferredPrefix() != OsdfPrefix {
 			t.Errorf("Expected preferred prefix to be 'OSDF', got '%s'", GetPreferredPrefix())
 		}
-		if oldPref != "PELICAN" {
+		if oldPref != PelicanPrefix {
 			t.Errorf("Expected old preferred prefix to be 'PELICAN', got '%s'", oldPref)
 		}
 	})
 
 	t.Run("TestStashPreferredPrefix", func(t *testing.T) {
-		oldPref, err := SetPreferredPrefix("stash")
+		oldPref, err := SetPreferredPrefix(StashPrefix)
 		assert.NoError(t, err)
-		if GetPreferredPrefix() != "STASH" {
+		if GetPreferredPrefix() != StashPrefix {
 			t.Errorf("Expected preferred prefix to be 'STASH', got '%s'", GetPreferredPrefix())
 		}
-		if oldPref != "OSDF" {
+		if oldPref != OsdfPrefix {
 			t.Errorf("Expected old preferred prefix to be 'osdf', got '%s'", oldPref)
 		}
 	})

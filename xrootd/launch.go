@@ -23,7 +23,6 @@ package xrootd
 import (
 	"context"
 	_ "embed"
-	"net/url"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -34,7 +33,6 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -55,7 +53,10 @@ func (launcher PrivilegedXrootdLauncher) Name() string {
 }
 
 func makeUnprivilegedXrootdLauncher(daemonName string, configPath string, isCache bool) (result UnprivilegedXrootdLauncher, err error) {
-	result.DaemonName = daemonName
+	result.DaemonName = daemonName + ".origin"
+	if isCache {
+		result.DaemonName = daemonName + ".cache"
+	}
 	result.Uid = -1
 	result.Gid = -1
 	result.isCache = isCache
@@ -111,7 +112,7 @@ func ConfigureLaunchers(privileged bool, configPath string, useCMSD bool, enable
 	return
 }
 
-func LaunchOriginDaemons(ctx context.Context, launchers []daemon.Launcher, egrp *errgroup.Group) (pids []int, err error) {
+func LaunchDaemons(ctx context.Context, launchers []daemon.Launcher, egrp *errgroup.Group, portStartCallback func(int)) (pids []int, err error) {
 	startupChan := make(chan int)
 	readyChan := make(chan bool)
 	defer close(readyChan)
@@ -169,13 +170,7 @@ func LaunchOriginDaemons(ctx context.Context, launchers []daemon.Launcher, egrp 
 			err = errors.New("Xrootd initialization failed")
 			return
 		} else {
-			viper.Set("Origin.Port", port)
-			if originUrl, err := url.Parse(param.Origin_Url.GetString()); err == nil {
-				originUrl.Host = originUrl.Hostname() + ":" + strconv.Itoa(port)
-				viper.Set("Origin.Url", originUrl.String())
-				log.Debugln("Resetting Origin.Url to", originUrl.String())
-			}
-			log.Infoln("Origin startup complete on port", port)
+			portStartCallback(port)
 		}
 	case <-ticker.C:
 		log.Errorln("XRootD did not startup after 10s of waiting")

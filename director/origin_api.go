@@ -27,7 +27,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
@@ -41,18 +40,14 @@ import (
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token_scopes"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
-// Create interface
-// Add it to namespacekeys in place of jwk.cache
-type NamespaceCache interface {
-	Register(u string, options ...jwk.RegisterOption) error
-	Get(ctx context.Context, u string) (jwk.Set, error)
-}
-
 var (
-	namespaceKeys      = ttlcache.New[string, NamespaceCache](ttlcache.WithTTL[string, NamespaceCache](15 * time.Minute))
-	namespaceKeysMutex = sync.RWMutex{}
+	// namespaceKeys caches jwks from various origins.
+	// The cache key is jwks endpoint (e.g. https://example.com/path/to/issuer.jwks).
+	// TTL cache is thread-safe
+	namespaceKeys = ttlcache.New(ttlcache.WithTTL[string, jwk.Set](15 * time.Minute))
 
 	adminApprovalErr error
 )
@@ -123,20 +118,6 @@ func verifyAdvertiseToken(ctx context.Context, token, namespace string) (bool, e
 		return false, errors.Wrap(err, "failed to get JWKS URL from the issuer URL at "+issuerUrl)
 	}
 
-	var ar NamespaceCache
-
-	// defer statements are scoped to function, not lexical enclosure,
-	// which is why we wrap these defer statements in anon funcs
-	func() {
-		namespaceKeysMutex.RLock()
-		defer namespaceKeysMutex.RUnlock()
-		item := namespaceKeys.Get(namespace)
-		if item != nil {
-			if !item.IsExpired() {
-				ar = item.Value()
-			}
-		}
-	}()
 	regUrlStr := param.Federation_RegistryUrl.GetString()
 	approved, err := checkNamespaceStatus(namespace, regUrlStr)
 	if err != nil {
@@ -146,28 +127,28 @@ func verifyAdvertiseToken(ctx context.Context, token, namespace string) (bool, e
 		adminApprovalErr = errors.New(namespace + " has not been approved by an administrator")
 		return false, adminApprovalErr
 	}
-	if ar == nil {
-		ar = jwk.NewCache(ctx)
-		client := &http.Client{Transport: config.GetTransport()}
-		if err = ar.Register(keyLoc, jwk.WithMinRefreshInterval(15*time.Minute), jwk.WithHTTPClient(client)); err != nil {
-			return false, errors.Wrap(err, fmt.Sprintf("failed to register JWKS URL %s at the JWKS cache", keyLoc))
-		}
-		namespaceKeysMutex.Lock()
-		defer namespaceKeysMutex.Unlock()
 
+	log.Debugln("Attempting to fetch keys from ", keyLoc)
+	var keyset jwk.Set
+
+	item := namespaceKeys.Get(keyLoc)
+	if item != nil {
+		if !item.IsExpired() {
+			keyset = item.Value()
+		}
+	}
+
+	if keyset == nil {
+		keyset, err = utils.GetJwks(ctx, keyLoc)
+		if err != nil {
+			return false, errors.Wrapf(err, "failed to get jwks at %s", keyLoc)
+		}
 		customTTL := param.Director_AdvertisementTTL.GetDuration()
 		if customTTL == 0 {
-			namespaceKeys.Set(namespace, ar, ttlcache.DefaultTTL)
+			namespaceKeys.Set(keyLoc, keyset, ttlcache.DefaultTTL)
 		} else {
-			namespaceKeys.Set(namespace, ar, customTTL)
+			namespaceKeys.Set(keyLoc, keyset, customTTL)
 		}
-
-	}
-	log.Debugln("Attempting to fetch keys from ", keyLoc)
-	keyset, err := ar.Get(ctx, keyLoc)
-
-	if err != nil {
-		return false, errors.Wrap(err, "failed to fetch JWKS from JWKS cache for "+keyLoc)
 	}
 
 	tok, err := jwt.Parse([]byte(token), jwt.WithKeySet(keyset), jwt.WithValidate(true))

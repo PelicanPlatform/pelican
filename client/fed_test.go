@@ -74,14 +74,13 @@ func TestGetAndPutAuth(t *testing.T) {
 
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
-	audience := config.GetServerAudience()
 
 	// Create a token file
 	tokenConfig := token.NewWLCGToken()
 	tokenConfig.Lifetime = time.Minute
 	tokenConfig.Issuer = issuer
 	tokenConfig.Subject = "origin"
-	tokenConfig.AddAudiences(audience)
+	tokenConfig.AddAudienceAny()
 
 	scopes := []token_scopes.TokenScope{}
 	readScope, err := token_scopes.Storage_Read.Path("/")
@@ -104,11 +103,11 @@ func TestGetAndPutAuth(t *testing.T) {
 
 	// This tests object get/put with a pelican:// url
 	t.Run("testPelicanObjectPutAndGetWithPelicanUrl", func(t *testing.T) {
-		_, err := config.SetPreferredPrefix("PELICAN")
+		_, err := config.SetPreferredPrefix(config.PelicanPrefix)
 		assert.NoError(t, err)
 
 		// Set path for object to upload/download
-		for _, export := range *fed.Exports {
+		for _, export := range fed.Exports {
 			tempPath := tempFile.Name()
 			fileName := filepath.Base(tempPath)
 			uploadURL := fmt.Sprintf("pelican://%s:%s%s/%s/%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
@@ -132,10 +131,10 @@ func TestGetAndPutAuth(t *testing.T) {
 
 	// This tests object get/put with a pelican:// url
 	t.Run("testOsdfObjectPutAndGetWithPelicanUrl", func(t *testing.T) {
-		_, err := config.SetPreferredPrefix("OSDF")
+		_, err := config.SetPreferredPrefix(config.OsdfPrefix)
 		assert.NoError(t, err)
 
-		for _, export := range *fed.Exports {
+		for _, export := range fed.Exports {
 			// Set path for object to upload/download
 			tempPath := tempFile.Name()
 			fileName := filepath.Base(tempPath)
@@ -160,10 +159,10 @@ func TestGetAndPutAuth(t *testing.T) {
 
 	// This tests pelican object get/put with an osdf url
 	t.Run("testOsdfObjectPutAndGetWithOSDFUrl", func(t *testing.T) {
-		_, err := config.SetPreferredPrefix("OSDF")
+		_, err := config.SetPreferredPrefix(config.OsdfPrefix)
 		assert.NoError(t, err)
 
-		for _, export := range *fed.Exports {
+		for _, export := range fed.Exports {
 			// Set path for object to upload/download
 			tempPath := tempFile.Name()
 			fileName := filepath.Base(tempPath)
@@ -219,14 +218,13 @@ func TestCopyAuth(t *testing.T) {
 
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
-	audience := config.GetServerAudience()
 
 	// Create a token file
 	tokenConfig := token.NewWLCGToken()
 	tokenConfig.Lifetime = time.Minute
 	tokenConfig.Issuer = issuer
 	tokenConfig.Subject = "origin"
-	tokenConfig.AddAudiences(audience)
+	tokenConfig.AddAudienceAny()
 
 	scopes := []token_scopes.TokenScope{}
 	readScope, err := token_scopes.Storage_Read.Path("/")
@@ -249,11 +247,11 @@ func TestCopyAuth(t *testing.T) {
 
 	// This tests object get/put with a pelican:// url
 	t.Run("testPelicanObjectCopyWithPelicanUrl", func(t *testing.T) {
-		_, err := config.SetPreferredPrefix("PELICAN")
+		_, err := config.SetPreferredPrefix(config.PelicanPrefix)
 		assert.NoError(t, err)
 
 		// Set path for object to upload/download
-		for _, export := range *fed.Exports {
+		for _, export := range fed.Exports {
 			tempPath := tempFile.Name()
 			fileName := filepath.Base(tempPath)
 			uploadURL := fmt.Sprintf("pelican://%s:%s%s/%s/%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
@@ -277,10 +275,10 @@ func TestCopyAuth(t *testing.T) {
 
 	// This tests object get/put with a pelican:// url
 	t.Run("testOsdfObjectCopyWithPelicanUrl", func(t *testing.T) {
-		_, err := config.SetPreferredPrefix("OSDF")
+		_, err := config.SetPreferredPrefix(config.OsdfPrefix)
 		assert.NoError(t, err)
 
-		for _, export := range *fed.Exports {
+		for _, export := range fed.Exports {
 			// Set path for object to upload/download
 			tempPath := tempFile.Name()
 			fileName := filepath.Base(tempPath)
@@ -305,10 +303,10 @@ func TestCopyAuth(t *testing.T) {
 
 	// This tests pelican object get/put with an osdf url
 	t.Run("testOsdfObjectCopyWithOSDFUrl", func(t *testing.T) {
-		_, err := config.SetPreferredPrefix("OSDF")
+		_, err := config.SetPreferredPrefix(config.OsdfPrefix)
 		assert.NoError(t, err)
 
-		for _, export := range *fed.Exports {
+		for _, export := range fed.Exports {
 			// Set path for object to upload/download
 			tempPath := tempFile.Name()
 			fileName := filepath.Base(tempPath)
@@ -351,11 +349,10 @@ func TestCopyAuth(t *testing.T) {
 func TestGetPublicRead(t *testing.T) {
 	viper.Reset()
 	server_utils.ResetOriginExports()
-
 	fed := fed_test_utils.NewFedTest(t, bothPublicOriginCfg)
 
 	t.Run("testPubObjGet", func(t *testing.T) {
-		for _, export := range *fed.Exports {
+		for _, export := range fed.Exports {
 			testFileContent := "test file content"
 			// Drop the testFileContent into the origin directory
 			tempFile, err := os.Create(filepath.Join(export.StoragePrefix, "test.txt"))
@@ -398,7 +395,7 @@ func TestStatHttp(t *testing.T) {
 	t.Run("testStatHttpPelicanScheme", func(t *testing.T) {
 		testFileContent := "test file content"
 		// Drop the testFileContent into the origin directory
-		tempFile, err := os.Create(filepath.Join(((*fed.Exports)[0]).StoragePrefix, "test.txt"))
+		tempFile, err := os.Create(filepath.Join(fed.Exports[0].StoragePrefix, "test.txt"))
 		assert.NoError(t, err, "Error creating temp file")
 		_, err = tempFile.WriteString(testFileContent)
 		assert.NoError(t, err, "Error writing to temp file")
@@ -410,7 +407,7 @@ func TestStatHttp(t *testing.T) {
 		tempPath := tempFile.Name()
 		fileName := filepath.Base(tempPath)
 		uploadURL := fmt.Sprintf("pelican://%s:%s%s/%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
-			((*fed.Exports)[0]).FederationPrefix, fileName)
+			fed.Exports[0].FederationPrefix, fileName)
 
 		log.Errorln(uploadURL)
 
@@ -423,11 +420,11 @@ func TestStatHttp(t *testing.T) {
 	})
 
 	t.Run("testStatHttpOSDFScheme", func(t *testing.T) {
-		_, err := config.SetPreferredPrefix("OSDF")
+		_, err := config.SetPreferredPrefix(config.OsdfPrefix)
 		assert.NoError(t, err)
 		testFileContent := "test file content"
 		// Drop the testFileContent into the origin directory
-		tempFile, err := os.Create(filepath.Join(((*fed.Exports)[0]).StoragePrefix, "test.txt"))
+		tempFile, err := os.Create(filepath.Join(fed.Exports[0].StoragePrefix, "test.txt"))
 		assert.NoError(t, err, "Error creating temp file")
 		_, err = tempFile.WriteString(testFileContent)
 		assert.NoError(t, err, "Error writing to temp file")
@@ -438,7 +435,7 @@ func TestStatHttp(t *testing.T) {
 		tempPath := tempFile.Name()
 		fileName := filepath.Base(tempPath)
 
-		uploadURL := fmt.Sprintf("osdf://%s/%s", ((*fed.Exports)[0]).FederationPrefix, fileName)
+		uploadURL := fmt.Sprintf("osdf://%s/%s", fed.Exports[0].FederationPrefix, fileName)
 		hostname := fmt.Sprintf("%v:%v", param.Server_WebHost.GetString(), param.Server_WebPort.GetInt())
 
 		// Set our metadata values in config since that is what this url scheme - prefix combo does in handle_http
@@ -460,7 +457,7 @@ func TestStatHttp(t *testing.T) {
 	t.Run("testStatHttpIncorrectScheme", func(t *testing.T) {
 		testFileContent := "test file content"
 		// Drop the testFileContent into the origin directory
-		tempFile, err := os.Create(filepath.Join(((*fed.Exports)[0]).StoragePrefix, "test.txt"))
+		tempFile, err := os.Create(filepath.Join(fed.Exports[0].StoragePrefix, "test.txt"))
 		assert.NoError(t, err, "Error creating temp file")
 		_, err = tempFile.WriteString(testFileContent)
 		assert.NoError(t, err, "Error writing to temp file")

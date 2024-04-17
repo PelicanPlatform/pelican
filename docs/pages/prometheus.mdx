@@ -6,9 +6,9 @@ import ExportedImage from "next-image-export-optimizer";
 
 Pelican servers have [Prometheus](https://prometheus.io/) embedded by default and provide a handful of Prometheus metrics to monitor server status. You can access the metrics endpoint at `https://<pelican-server-host>:<server-web-port>/metrics` to see all the available metrics and their current values. By default, `/metrics` is a protected endpoint and you are required to login and get authenticated to view the page. You can change `Monitoring.MetricAuthorization` to `false` in config to turn off the authentication.
 
-Pelican also exposes Prometheus [PromQL query engine](https://prometheus.io/docs/prometheus/latest/querying/basics/) at `https://<pelican-server-host>:<server-web-port>/api/v1.0/promethues` where you can query the metrics agianst Prometheus powerful query langauge.
+Pelican also exposes Prometheus [PromQL query engine](https://prometheus.io/docs/prometheus/latest/querying/basics/) at `https://<pelican-server-host>:<server-web-port>/api/v1.0/prometheus` where you can query the metrics agianst Prometheus powerful query langauge.
 
-Example: `https://<pelican-server-host>:<server-web-port>/api/v1.0/promethues/query?query=pelican_component_health_status[10m]` queries the `pelican_component_health_status` metric and shows data collected in past 10 min.
+Example: `https://<pelican-server-host>:<server-web-port>/api/v1.0/prometheus/query?query=pelican_component_health_status[10m]` queries the `pelican_component_health_status` metric and shows data collected in past 10 min.
 
 However, Pelican does not support Prometheus native `/graph` endpoint nor other Prometheus native web services other than the two above. For custom data visualizations, [Grafana](https://grafana.com/) is one of the popular software to use.
 
