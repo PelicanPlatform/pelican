@@ -484,8 +484,8 @@ name: Origin.FederationPrefix
 description: |+
   The namespace prefix of the origin's contents within the federation.
 
-  NOTE: This config option is incompatible with multiple exports defined via `Origin.Exports` and requires that the origin exports
-  only a single path.
+  NOTE: This config option is incompatible with multiple exports defined via `Origin.Exports` and is ignored when the origin
+  exports multiple prefixes.
 type: string
 default: none
 components: ["origin"]
@@ -496,8 +496,8 @@ description: |+
   of "posix", this constitutes the path on disk exported by the origin for the federation. If the origin has a StorageType of "s3",
   this value is not currently used.
 
-  NOTE: This config option is incompatible with multiple exports defined via `Origin.Exports` and requires that the origin exports
-  only a single path.
+  NOTE: This config option is incompatible with multiple exports defined via `Origin.Exports` and is ignored when the origin
+  exports multiple prefixes.
 type: string
 default: none
 components: ["origin"]
@@ -516,8 +516,8 @@ description: |+
   A boolean indicating whether the origin permits reads without valid authorization. When false, reads from the origin will require a
   properly-scoped authorization token signed by the origin's issuer.
 
-  NOTE: This config option is incompatible with multiple exports defined via `Origin.Exports` and requires that the origin exports
-  only a single path.
+  NOTE: This config option is meant to configure an _origin's_ capabilities, but can be used to configure a namespace when the origin
+  exports only a single prefix or when every exported namespace should inherit the same configuration.
 type: bool
 default: false
 components: ["origin"]
@@ -526,8 +526,8 @@ name: Origin.EnableReads
 description: |+
   A boolean indicating whether the origin permits any reads. When false, the origin may still allow writes.
 
-  NOTE: This config option is incompatible with multiple exports defined via `Origin.Exports` and requires that the origin exports
-  only a single path.
+  NOTE: This config option is meant to configure an _origin's_ capabilities, but can be used to configure a namespace when the origin
+  exports only a single prefix or when every exported namespace should inherit the same configuration.
 type: bool
 default: true
 components: ["origin"]
@@ -536,8 +536,8 @@ name: Origin.EnableWrites
 description: |+
   A boolean indicating whether the origin permits writes. All writes require authorization.
 
-  NOTE: This config option is incompatible with multiple exports defined via `Origin.Exports` and requires that the origin exports
-  only a single path.type: bool.
+  NOTE: This config option is meant to configure an _origin's_ capabilities, but can be used to configure a namespace when the origin
+  exports only a single prefix or when every exported namespace should inherit the same configuration.
 type: bool
 default: true
 components: ["origin"]
@@ -546,8 +546,8 @@ name: Origin.EnableListings
 description: |+
   A boolean indicating whether the origin permits object listings. When true, clients can list the contents of the origin.
 
-  NOTE: This config option is incompatible with multiple exports defined via `Origin.Exports` and requires that the origin exports
-  only a single path.
+  NOTE: This config option is meant to configure an _origin's_ capabilities, but can be used to configure a namespace when the origin
+  exports only a single prefix or when every exported namespace should inherit the same configuration.
 type: bool
 default: true
 components: ["origin"]
@@ -557,8 +557,8 @@ description: |+
   A boolean indicating whether the origin permits direct reads. When true, the origin indicates that it is willing to interact directly with clients.
   When false, the origin is indicating it is only willing to interact with clients via a cache service.
 
-  NOTE: This config option is incompatible with multiple exports defined via `Origin.Exports` and requires that the origin exports
-  only a single path.
+  NOTE: This config option is meant to configure an _origin's_ capabilities, but can be used to configure a namespace when the origin
+  exports only a single prefix or when every exported namespace should inherit the same configuration.
 type: bool
 default: true
 components: ["origin"]
