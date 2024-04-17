@@ -796,9 +796,10 @@ func getIPs(name string) []string {
 
 }
 
+// This function searches the condor job ad for a specific classad and returns the value of that classad
 func SearchJobAd(classad classAd) string {
-	//Parse the .job.ad file for the Owner (username) and ProjectName of the callee.
 
+	// Look for the condor job ad file
 	condorJobAd, isPresent := os.LookupEnv("_CONDOR_JOB_AD")
 	var filename string
 	if isPresent {
@@ -809,14 +810,14 @@ func SearchJobAd(classad classAd) string {
 		return ""
 	}
 
-	// https://stackoverflow.com/questions/28574609/how-to-apply-regexp-to-content-in-file-go
-
 	b, err := os.ReadFile(filename)
 	if err != nil {
 		log.Warningln("Can not read .job.ad file", err)
 	}
 
 	switch classad {
+	// The regex sections of the code below come partially from:
+	// https://stackoverflow.com/questions/28574609/how-to-apply-regexp-to-content-in-file-go
 	case ProjectName:
 		// Get all matches from file
 		// Note: This appears to be invalid regex but is the only thing that appears to work. This way it successfully finds our matches
