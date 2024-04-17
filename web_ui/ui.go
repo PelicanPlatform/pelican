@@ -223,10 +223,10 @@ func handleWebUIAuth(ctx *gin.Context) {
 
 	// For all routes other than /login and /initialization,
 	if !strings.HasPrefix(requestPath, "/login") {
-		// /index.html -> ""
-		// /origin/index.html -> origin
-		// /registry/origin/edit/index.html -> registry/origin/edit
-		rootPage := strings.TrimPrefix(strings.TrimSuffix(requestPath, "/index.html"), "/")
+		// / -> ""
+		// /origin/ -> origin
+		// /registry/origin/edit/ -> registry/origin/edit
+		rootPage := strings.TrimPrefix(strings.TrimSuffix(requestPath, "/"), "/")
 		// If the page is a public page, pass the check
 		if slices.Contains(publicAccessPages, rootPage) {
 			ctx.Next()
