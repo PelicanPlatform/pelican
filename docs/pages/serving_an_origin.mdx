@@ -162,7 +162,8 @@ If no `Origin.Exports` block is provided to Pelican, these values will also be a
 > **NOTE:** Pelican tries to resolve differences between origin and namespace configurations by respecting the more restrictive of the two. If you serve an origin that enables public reads, but the underlying prefix it exports disables all reads, you won't be able to read from that namespace.
 
 ### Multi-Export Origins
-<details><summary>Click to see more...</summary>
+<details>
+<summary>Click to see more...</summary>
 
 The previous examples have shown how one might export a single namespace, but Pelican origins can export multiple paths from the same storage backend under different namespaces. For example, assume you have have two posix directories called `/my/data/public` and `/my/data/private`. If you want to make your public data available under the namespace `/my/prefix/public` and your private data available under `/my/prefix/private`, you'll need to configure a multi-export origin, which is accomplished through the origin's `Exports` block. Below is an example of what that looks like, along with how you could configure access control for the two namespaces:
 
@@ -204,7 +205,8 @@ This section documents additional arguments you can pass via the command line wh
 For more information about available yaml configuration options, refer to the [Parameters page](./parameters.mdx).
 
 ## Launch the Origin With an S3 Storage Backend
-<details><summary>Click to see more...</summary>
+<details>
+<summary>Click to see more...</summary>
 
 ### What is S3?
 
