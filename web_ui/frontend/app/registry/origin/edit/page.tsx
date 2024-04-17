@@ -44,6 +44,7 @@ interface Institution {
 export default function Register() {
 
     const [id, setId] = useState<string | undefined>(undefined)
+    const [accessToken, setAccessToken] = useState<string>("")
     const [namespace, setNamespace] = useState<Namespace | undefined>(undefined)
     const [alert, setAlert] = useState<AlertType | undefined>(undefined)
 
@@ -52,6 +53,8 @@ export default function Register() {
 
         const urlParams = new URLSearchParams(window.location.search);
         const id = urlParams.get('id')
+        const accessToken = urlParams.get('access_token')
+        setAccessToken(accessToken || "")
 
         if(id === null){
             setAlert({severity: "error", message: "No Namespace ID Provided"})
@@ -64,7 +67,7 @@ export default function Register() {
             const urlParams = new URLSearchParams(window.location.search);
             const id = urlParams.get('id');
 
-            const url = new URL(`/api/v1.0/registry_ui/namespaces/${id}`, window.location.origin)
+            const url = new URL(`/api/v1.0/registry_ui/namespaces/${id}?access_token=${accessToken}`, window.location.origin)
             const response = await fetch(url)
             if (response.ok) {
                 const namespace: Namespace = await response.json()
@@ -82,7 +85,7 @@ export default function Register() {
         const formData = new FormData(e.currentTarget);
 
         try {
-            const response = await secureFetch(`/api/v1.0/registry_ui/namespaces/${id}`, {
+            const response = await secureFetch(`/api/v1.0/registry_ui/namespaces/${id}?access_token${accessToken}`, {
                 body: JSON.stringify({
                     prefix: formData.get("prefix"),
                     pubkey: formData.get("pubkey"),
@@ -121,7 +124,7 @@ export default function Register() {
     }
 
     return (
-        <AuthenticatedContent boxProps={{width:"100%"}}>
+        <AuthenticatedContent redirect={true} boxProps={{width:"100%"}}>
             <Grid container spacing={2}>
                 <Grid item xs={12}>
                     <Typography variant={"h4"} pb={3}>Namespace Registry</Typography>

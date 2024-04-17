@@ -164,7 +164,6 @@ export default function Home() {
     useEffect(() => {
         const url = new URL(window.location.href)
         let returnUrl = url.searchParams.get("returnURL") || ""
-        returnUrl = returnUrl.replace(`/view`, "")
         setReturnUrl(returnUrl)
     }, [])
 
