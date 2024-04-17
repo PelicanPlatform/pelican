@@ -1,5 +1,5 @@
 import React, {FunctionComponent, useEffect, useRef, useState} from "react";
-import {Button, ButtonProps, TableCell} from "@mui/material";
+import {Box, Button, ButtonProps, TableCell} from "@mui/material";
 
 export const TableCellOverflow: FunctionComponent<any> = ({ children, ...props }) => {
 
@@ -14,15 +14,22 @@ export const TableCellOverflow: FunctionComponent<any> = ({ children, ...props }
 
     return (
         <TableCell
-            ref={cellRef}
             sx={{
-                overflowX: "scroll",
-                whiteSpace: "nowrap",
+                ...props?.sx,
                 boxShadow: overflow ? "inset -13px 0px 20px -21px rgba(0,0,0,0.75)" : "none",
-                border: "solid #ececec 1px",
-                ...props?.sx
-            }}>
-            {children}
+                pb: "0px",
+            }}
+        >
+            <Box
+                ref={cellRef}
+                sx={{
+                    overflowX: "scroll",
+                    whiteSpace: "nowrap",
+                    pb: "16px"
+                }}
+            >
+                {children}
+            </Box>
         </TableCell>
     )
 }
