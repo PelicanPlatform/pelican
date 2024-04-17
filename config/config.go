@@ -158,6 +158,8 @@ var (
 	// Global translator for the validator
 	uni *ut.UniversalTranslator
 
+	onceValidate sync.Once
+
 	// English translator
 	translator *ut.Translator
 
@@ -905,7 +907,11 @@ func InitConfig() {
 		os.Exit(1)
 	}
 	handleDeprecatedConfig()
-	if err := setupTranslation(); err != nil {
+
+	onceValidate.Do(func() {
+		err = setupTranslation()
+	})
+	if err != nil {
 		log.Errorln("Failed to set up translation for the validator: ", err.Error())
 		os.Exit(1)
 	}
