@@ -135,8 +135,6 @@ func ConfigTTLCache(ctx context.Context, egrp *errgroup.Group) {
 		log.Info("Gracefully stopping director TTL cache eviction...")
 		serverAdMutex.Lock()
 		defer serverAdMutex.Unlock()
-		namespaceKeysMutex.Lock()
-		defer namespaceKeysMutex.Unlock()
 		serverAds.DeleteAll()
 		serverAds.Stop()
 		namespaceKeys.DeleteAll()
