@@ -20,6 +20,8 @@ package registry
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -317,7 +319,7 @@ func TestGetCachedInstitutions(t *testing.T) {
 	t.Run("cache-miss-with-404-fetch", func(t *testing.T) {
 		viper.Reset()
 
-		viper.Set("Registry.InstitutionsUrl", "https://example.com/foo.bar")
+		viper.Set("Registry.InstitutionsUrl", "https://example.com/foo")
 		institutionsCache = ttlcache.New[string, []Institution]()
 
 		getInsts, intErr, extErr := getCachedInstitutions()
@@ -382,5 +384,167 @@ func TestCheckUniqueInstitutions(t *testing.T) {
 			{ID: "1"}, {ID: "2"}, {ID: "3"}, {ID: "4"}, {ID: "1"},
 		})
 		assert.False(t, unique)
+	})
+}
+
+func TestGetCachedOptions(t *testing.T) {
+	// cached item returns without fetch
+	t.Run("cached-item-returns-w/o-fetch", func(t *testing.T) {
+		optionsCache.DeleteAll()
+		optionsCache.Set("https://mock.com", []registrationFieldOption{{Name: "foo", ID: "bar"}}, ttlcache.DefaultTTL)
+		got, err := getCachedOptions("https://mock.com")
+		require.NoError(t, err)
+		require.Equal(t, 1, len(got))
+		assert.Equal(t, "foo", got[0].Name)
+		assert.Equal(t, "bar", got[0].ID)
+		optionsCache.DeleteAll()
+	})
+
+	t.Run("new-item-with-empty-key", func(t *testing.T) {
+		optionsCache.DeleteAll()
+		_, err := getCachedOptions("")
+		require.Error(t, err)
+		assert.Equal(t, "key is empty", err.Error())
+	})
+
+	t.Run("new-item-with-bad-key", func(t *testing.T) {
+		optionsCache.DeleteAll()
+		_, err := getCachedOptions("this-is-not-url")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to request the key")
+	})
+
+	t.Run("new-item-with-non-200-response", func(t *testing.T) {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+		}))
+		defer ts.Close()
+
+		optionsCache.DeleteAll()
+		_, err := getCachedOptions(ts.URL)
+		require.Error(t, err)
+		assert.Equal(t, fmt.Sprintf("fetching key %s returns status code 500 with response body ", ts.URL), err.Error())
+	})
+
+	t.Run("new-item-with-wrong-struct", func(t *testing.T) {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+
+			badResponse := `{}`
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, err := w.Write([]byte(badResponse))
+			require.NoError(t, err)
+		}))
+		defer ts.Close()
+
+		optionsCache.DeleteAll()
+		_, err := getCachedOptions(ts.URL)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to parse response from key")
+	})
+
+	t.Run("new-item-with-empty-id", func(t *testing.T) {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+
+			badResponse := `[{"name":"foo","rorid":"bar"}]`
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, err := w.Write([]byte(badResponse))
+			require.NoError(t, err)
+		}))
+		defer ts.Close()
+
+		optionsCache.DeleteAll()
+		_, err := getCachedOptions(ts.URL)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "have empty ID for option")
+	})
+
+	t.Run("new-item-with-duplicated-ids", func(t *testing.T) {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+
+			badResponse := `[{"name":"foo","id":"bar"}, {"name":"barz","id":"bar"}]`
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, err := w.Write([]byte(badResponse))
+			require.NoError(t, err)
+		}))
+		defer ts.Close()
+
+		optionsCache.DeleteAll()
+		_, err := getCachedOptions(ts.URL)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "are not unique")
+	})
+
+	t.Run("new-item-with-successful-fetch", func(t *testing.T) {
+		mockOptions := []registrationFieldOption{
+			{Name: "option A", ID: "optionA"},
+			{Name: "option B", ID: "optionB"},
+		}
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			res, err := json.Marshal(mockOptions)
+			require.NoError(t, err)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, err = w.Write([]byte(res))
+			require.NoError(t, err)
+		}))
+		defer ts.Close()
+
+		optionsCache.DeleteAll()
+		options, err := getCachedOptions(ts.URL)
+		require.NoError(t, err)
+		assert.EqualValues(t, mockOptions, options)
+	})
+}
+
+func TestConvertCustomRegFields(t *testing.T) {
+	t.Run("options-overwrites-optionsURL", func(t *testing.T) {
+		mockConfig := []customRegFieldsConfig{
+			{
+				Name: "mock1",
+				Type: string(Enum),
+				Options: []registrationFieldOption{
+					{
+						Name: "foo",
+						ID:   "bar",
+					},
+				},
+			},
+			{
+				Name: "mock1",
+				Type: string(Enum),
+				Options: []registrationFieldOption{
+					{
+						Name: "foo",
+						ID:   "bar",
+					},
+				},
+				OptionsUrl: "https://mock.com/url",
+			},
+		}
+
+		regFields := convertCustomRegFields(mockConfig)
+		require.Equal(t, 2, len(mockConfig))
+		assert.Empty(t, regFields[0].OptionsUrl)
+		assert.Empty(t, regFields[1].OptionsUrl)
+		assert.Equal(t, 1, len(regFields[0].Options))
+		assert.Equal(t, 1, len(regFields[1].Options))
+	})
+
+	t.Run("convert-names", func(t *testing.T) {
+		mockConfig := []customRegFieldsConfig{
+			{
+				Name: "department_name",
+			},
+		}
+
+		regField := convertCustomRegFields(mockConfig)
+		require.Equal(t, 1, len(regField))
+		assert.Equal(t, "Department Name", regField[0].DisplayedName)
+		assert.Equal(t, "custom_fields.department_name", regField[0].Name)
 	})
 }

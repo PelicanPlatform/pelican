@@ -41,6 +41,8 @@ func RegistryServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 		return errors.Wrap(err, "Unable to initialize the namespace registry database")
 	}
 
+	registry.InitOptionsCache(ctx, egrp)
+
 	err = registry.InitCustomRegistrationFields()
 	if err != nil {
 		return err

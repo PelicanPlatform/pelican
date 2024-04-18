@@ -106,7 +106,7 @@ func getCachedOptions(key string) ([]registrationFieldOption, error) {
 		return nil, errors.Wrapf(err, "failed to read the response body")
 	}
 	if res.StatusCode != 200 {
-		return nil, errors.Wrapf(err, "fetching key %s returns status code %d with response body %s", key, res.StatusCode, resBody)
+		return nil, fmt.Errorf("fetching key %s returns status code %d with response body %s", key, res.StatusCode, resBody)
 	}
 	options := []registrationFieldOption{}
 	err = json.Unmarshal(resBody, &options)
@@ -115,7 +115,18 @@ func getCachedOptions(key string) ([]registrationFieldOption, error) {
 	}
 	isUnique := checkUniqueOptions(options)
 	if !isUnique {
-		return nil, fmt.Errorf("returned options from key %s are not unique", key)
+		return nil, fmt.Errorf("returned options from key %s are not unique. Options: %s", key, optionsToString(options))
+	}
+	// Check IDs are not empty
+	invalidName := ""
+	for _, opt := range options {
+		if opt.ID == "" {
+			invalidName = opt.Name
+			break
+		}
+	}
+	if invalidName != "" {
+		return nil, fmt.Errorf("returned options from key %s have empty ID for option %s", key, invalidName)
 	}
 	optionsCache.Set(key, options, ttlcache.DefaultTTL)
 	return options, nil
@@ -128,15 +139,17 @@ func convertCustomRegFields(configFields []customRegFieldsConfig) []registration
 	for _, field := range configFields {
 		optionsUrl := field.OptionsUrl
 		options := field.Options
-		if len(options) != 0 { // Options overwrites OptionsUrl
-			optionsUrl = ""
-		}
-		if optionsUrl != "" { // field.Options is not set but OptionsUrl is set
-			fetchedOptions, err := getCachedOptions(optionsUrl)
-			if err != nil {
-				log.Errorf("failed to get OptionsUrl %s for custom field %s", optionsUrl, field.Name)
-			} else {
-				options = fetchedOptions
+		if field.Type == string(Enum) {
+			if len(options) != 0 { // Options overwrites OptionsUrl
+				optionsUrl = ""
+			}
+			if optionsUrl != "" { // field.Options is not set but OptionsUrl is set
+				fetchedOptions, err := getCachedOptions(optionsUrl)
+				if err != nil {
+					log.Errorf("failed to get OptionsUrl %s for custom field %s", optionsUrl, field.Name)
+				} else {
+					options = fetchedOptions
+				}
 			}
 		}
 		customRegField := registrationField{
@@ -341,8 +354,8 @@ func InitCustomRegistrationFields() error {
 			return errors.New(fmt.Sprintf("Bad custom registration field, unsupported field type: %q with %q", conf.Name, conf.Type))
 		}
 		if conf.Type == "enum" {
-			if conf.Options == nil {
-				return errors.New(fmt.Sprintf("Bad custom registration field, 'enum' type field does not have options: %q", conf.Name))
+			if (conf.Options == nil || len(conf.Options) == 0) && conf.OptionsUrl == "" {
+				return errors.New(fmt.Sprintf("Bad custom registration field, 'enum' type field does not have options or optionsUrl set: %q", conf.Name))
 			}
 		}
 	}
