@@ -129,10 +129,11 @@ func stashPluginMain(args []string) {
 		if args[0] == "-classad" {
 			// Print classad and exit
 			fmt.Println("MultipleFileSupport = true")
-			fmt.Println("PluginVersion = \"" + config.GetVersion() + "\"")
+			fmt.Println("PelicanPluginVersion = \"" + config.GetVersion() + "\"")
 			fmt.Println("PluginType = \"FileTransfer\"")
 			fmt.Println("ProtocolVersion = 2")
 			fmt.Println("SupportedMethods = \"stash, osdf\"")
+			fmt.Println("StartdAttrs = \"PelicanPluginVersion\"")
 			os.Exit(0)
 		} else if args[0] == "-version" || args[0] == "-v" {
 			config.PrintPelicanVersion()
