@@ -193,10 +193,10 @@ instead.
 	originTokenCreateCmd.Flags().StringSlice("scope", []string{}, "Scopes for granting fine-grained permissions to the token.")
 	originTokenCreateCmd.Flags().StringSlice("claim", []string{}, "Additional token claims. A claim must be of the form <claim name>=<value>")
 	originTokenCreateCmd.Flags().String("issuer", "", "The URL of the token's issuer. If not provided, the tool will attempt to find one in the configuration file.")
-	if err := viper.BindPFlag("IssuerUrl", originTokenCreateCmd.Flags().Lookup("issuer")); err != nil {
+	if err := viper.BindPFlag("Server.IssuerUrl", originTokenCreateCmd.Flags().Lookup("issuer")); err != nil {
 		panic(err)
 	}
-	originTokenCreateCmd.Flags().String("private-key", viper.GetString("IssuerKey"), "Filepath designating the location of the private key in PEM format to be used for signing, if different from the origin's default.")
+	originTokenCreateCmd.Flags().String("private-key", "", "Filepath designating the location of the private key in PEM format to be used for signing, if different from the origin's default.")
 	if err := viper.BindPFlag("IssuerKey", originTokenCreateCmd.Flags().Lookup("private-key")); err != nil {
 		panic(err)
 	}
