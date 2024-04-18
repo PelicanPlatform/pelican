@@ -1229,7 +1229,7 @@ description: |+
 
   The schema of the object is as follows:
   ```
-  - name: department
+  - name: department_name
     type: enum
     required: true
     options:
@@ -1238,12 +1238,13 @@ description: |+
       - name: Computer Science
         id: cs
     optionsUrl: https://example.com/options
-    validationUrl: https://example.com/validate
     description: The department of the organization that holds this namespace
   ```
 
   Note the following requirements:
-  - "name" must be snake case with underline connecting words, i.e. site_name.
+  - "name" must be snake case with underline connecting words, i.e. department_name.
+    The name displayed in the registration table will be converted from this field
+    into a human-readble, space-separated name with the first letter(s) capitalized. i.e. department_name -> Department Name
   - "type" must be one of "string", "int", "bool", "datetime" (Unix time in seconds), or "enum".
   - "options" must be a non-empty yaml array for field with type "enum". "optionsUrl" will be ignored if "options" is set.
 
@@ -1255,6 +1256,8 @@ description: |+
           id: "optionA"
       ```
   - "description" will show up in the web UI as helper text to help user understand the field
+  - "optionsUrl": a URL to provide a list of options for "enum" type field.
+    The URL should respond to an anonymous GET request and return JSON response in the same format as the options field above
 type: object
 default: none
 components: ["registry"]

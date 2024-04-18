@@ -25,7 +25,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"sync"
+	"time"
 
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/pelicanplatform/pelican/config"
@@ -48,27 +48,105 @@ type (
 		Required    bool                      `mapstructure:"required"`
 		Options     []registrationFieldOption `mapstructure:"options"`
 		Description string                    `mapstructure:"description"`
+		OptionsUrl  string                    `mapstructure:"optionsUrl"`
 	}
 )
 
 var (
 	customRegFieldsConfigs []customRegFieldsConfig
 	institutionsCache      *ttlcache.Cache[string, []Institution]
-	institutionsCacheMutex = sync.RWMutex{}
+	optionsCache           = ttlcache.New(
+		ttlcache.WithTTL[string, []registrationFieldOption](5 * time.Minute),
+	)
 )
+
+func InitOptionsCache(ctx context.Context, egrp *errgroup.Group) {
+	go optionsCache.Start()
+
+	egrp.Go(func() error {
+		<-ctx.Done()
+		optionsCache.DeleteAll()
+		optionsCache.Stop()
+		return nil
+	})
+}
+
+func optionsToString(options []registrationFieldOption) (result string) {
+	for _, opt := range options {
+		result += fmt.Sprintf("ID: %s | Name: %s\n", opt.ID, opt.Name)
+	}
+	return
+}
+
+// Fetch from the optionsUrl, check the returned options, and set the optionsCache
+func getCachedOptions(key string) ([]registrationFieldOption, error) {
+	if optionsCache.Has(key) {
+		return optionsCache.Get(key).Value(), nil
+	}
+	// Fetch from URL
+	if key == "" {
+		return nil, errors.New("key is empty")
+	}
+	_, err := url.Parse(key)
+	if err != nil {
+		return nil, errors.Wrap(err, "key is not a valid URL")
+	}
+	client := http.Client{Transport: config.GetTransport()}
+	req, err := http.NewRequest(http.MethodGet, key, nil)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to create a new request for fetching key %s", key)
+	}
+	req.Header.Add("Content-Type", "application/json")
+	res, err := client.Do(req)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to request the key %s", key)
+	}
+	resBody, err := io.ReadAll(res.Body)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to read the response body")
+	}
+	if res.StatusCode != 200 {
+		return nil, errors.Wrapf(err, "fetching key %s returns status code %d with response body %s", key, res.StatusCode, resBody)
+	}
+	options := []registrationFieldOption{}
+	err = json.Unmarshal(resBody, &options)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to parse response from key %s to options struct with response body: %s", key, resBody)
+	}
+	isUnique := checkUniqueOptions(options)
+	if !isUnique {
+		return nil, fmt.Errorf("returned options from key %s are not unique", key)
+	}
+	optionsCache.Set(key, options, ttlcache.DefaultTTL)
+	return options, nil
+}
 
 // Given the custom registration fields read from the config,
 // convert them to an array of registrationField for web UI
 func convertCustomRegFields(configFields []customRegFieldsConfig) []registrationField {
 	regFields := make([]registrationField, 0)
 	for _, field := range configFields {
+		optionsUrl := field.OptionsUrl
+		options := field.Options
+		if len(options) != 0 { // Options overwrites OptionsUrl
+			optionsUrl = ""
+		}
+		if optionsUrl != "" { // field.Options is not set but OptionsUrl is set
+			fetchedOptions, err := getCachedOptions(optionsUrl)
+			if err != nil {
+				log.Errorf("failed to get OptionsUrl %s for custom field %s", optionsUrl, field.Name)
+			} else {
+				options = fetchedOptions
+			}
+		}
 		customRegField := registrationField{
 			Name:          "custom_fields." + field.Name,
 			DisplayedName: utils.SnakeCaseToHumanReadable(field.Name),
 			Type:          registrationFieldType(field.Type),
-			Options:       field.Options,
+			Options:       options,
 			Required:      field.Required,
 			Description:   field.Description,
+			OptionsUrl:    optionsUrl,
 		}
 		regFields = append(regFields, customRegField)
 	}
@@ -90,6 +168,18 @@ func excludePubKey(nss []*Namespace) (nssNew []NamespaceWOPubkey) {
 	}
 
 	return
+}
+
+func checkUniqueOptions(options []registrationFieldOption) bool {
+	repeatMap := make(map[string]bool)
+	for _, options := range options {
+		if repeatMap[options.ID] {
+			return false
+		} else {
+			repeatMap[options.ID] = true
+		}
+	}
+	return true
 }
 
 func checkUniqueInstitutions(insts []Institution) bool {
@@ -154,13 +244,9 @@ func getCachedInstitutions() (inst []Institution, intError error, extError error
 			extError = errors.New("Error parsing response when fetching institution from remote url.")
 			return
 		}
-		institutionsCacheMutex.Lock()
-		defer institutionsCacheMutex.Unlock()
 		institutionsCache.Set(instUrl.String(), institutions, ttlcache.DefaultTTL)
 		return institutions, nil, nil
 	} else {
-		institutionsCacheMutex.RLock()
-		defer institutionsCacheMutex.RUnlock()
 		institutions := institutionsCache.Get(instUrl.String())
 		// institutions == nil if key DNE or item has expired
 		if institutions == nil || institutions.Value() == nil {
@@ -205,8 +291,6 @@ func InitInstConfig(ctx context.Context, egrp *errgroup.Group) error {
 
 		egrp.Go(func() error {
 			<-ctx.Done()
-			institutionsCacheMutex.Lock()
-			defer institutionsCacheMutex.Unlock()
 			log.Info("Gracefully stopping institution TTL cache eviction...")
 			if institutionsCache != nil {
 				institutionsCache.DeleteAll()

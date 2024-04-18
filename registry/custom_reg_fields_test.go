@@ -214,11 +214,7 @@ func TestGetCachedInstitutions(t *testing.T) {
 	})
 
 	t.Run("nil-cache-returns-error", func(t *testing.T) {
-		func() {
-			institutionsCacheMutex.Lock()
-			defer institutionsCacheMutex.Unlock()
-			institutionsCache = nil
-		}()
+		institutionsCache = nil
 		_, intErr, extErr := getCachedInstitutions()
 		assert.Error(t, intErr)
 		assert.Error(t, extErr)
@@ -227,11 +223,7 @@ func TestGetCachedInstitutions(t *testing.T) {
 
 	t.Run("unset-config-val-returns-error", func(t *testing.T) {
 		viper.Reset()
-		func() {
-			institutionsCacheMutex.Lock()
-			defer institutionsCacheMutex.Unlock()
-			institutionsCache = ttlcache.New[string, []Institution]()
-		}()
+		institutionsCache = ttlcache.New[string, []Institution]()
 		_, intErr, extErr := getCachedInstitutions()
 		assert.Error(t, intErr)
 		assert.Error(t, extErr)
@@ -241,11 +233,7 @@ func TestGetCachedInstitutions(t *testing.T) {
 	t.Run("random-config-val-returns-error", func(t *testing.T) {
 		viper.Reset()
 		viper.Set("Registry.InstitutionsUrl", "random-url")
-		func() {
-			institutionsCacheMutex.Lock()
-			defer institutionsCacheMutex.Unlock()
-			institutionsCache = ttlcache.New[string, []Institution]()
-		}()
+		institutionsCache = ttlcache.New[string, []Institution]()
 		_, intErr, extErr := getCachedInstitutions()
 		assert.Error(t, intErr)
 		assert.Error(t, extErr)
@@ -257,23 +245,15 @@ func TestGetCachedInstitutions(t *testing.T) {
 		viper.Reset()
 		mockUrl := url.URL{Scheme: "https", Host: "example.com"}
 		viper.Set("Registry.InstitutionsUrl", mockUrl.String())
-		func() {
-			institutionsCacheMutex.Lock()
-			defer institutionsCacheMutex.Unlock()
-			institutionsCache = ttlcache.New[string, []Institution]()
-			institutionsCache.Set(mockUrl.String(), nil, ttlcache.NoTTL)
-		}()
+		institutionsCache = ttlcache.New[string, []Institution]()
+		institutionsCache.Set(mockUrl.String(), nil, ttlcache.NoTTL)
 
 		_, intErr, extErr := getCachedInstitutions()
 		require.Error(t, intErr)
 		require.Error(t, extErr)
 		assert.Contains(t, intErr.Error(), "value is nil from key")
 
-		func() {
-			institutionsCacheMutex.Lock()
-			defer institutionsCacheMutex.Unlock()
-			institutionsCache.DeleteAll()
-		}()
+		institutionsCache.DeleteAll()
 	})
 
 	t.Run("cache-hit-with-valid-ns", func(t *testing.T) {
@@ -282,23 +262,15 @@ func TestGetCachedInstitutions(t *testing.T) {
 		viper.Set("Registry.InstitutionsUrl", mockUrl.String())
 		mockInsts := []Institution{{Name: "Foo", ID: "001"}}
 
-		func() {
-			institutionsCacheMutex.Lock()
-			defer institutionsCacheMutex.Unlock()
-			institutionsCache = ttlcache.New[string, []Institution]()
-			institutionsCache.Set(mockUrl.String(), mockInsts, ttlcache.NoTTL)
-		}()
+		institutionsCache = ttlcache.New[string, []Institution]()
+		institutionsCache.Set(mockUrl.String(), mockInsts, ttlcache.NoTTL)
 
 		getInsts, intErr, extErr := getCachedInstitutions()
 		require.NoError(t, intErr)
 		require.NoError(t, extErr)
 		assert.Equal(t, mockInsts, getInsts)
 
-		func() {
-			institutionsCacheMutex.Lock()
-			defer institutionsCacheMutex.Unlock()
-			institutionsCache.DeleteAll()
-		}()
+		institutionsCache.DeleteAll()
 	})
 
 	t.Run("cache-hit-with-expired-item", func(t *testing.T) {
@@ -307,13 +279,9 @@ func TestGetCachedInstitutions(t *testing.T) {
 		viper.Set("Registry.InstitutionsUrl", mockUrl.String())
 		mockInsts := []Institution{{Name: "Foo", ID: "001"}}
 
-		func() {
-			institutionsCacheMutex.Lock()
-			defer institutionsCacheMutex.Unlock()
-			institutionsCache = ttlcache.New[string, []Institution]()
-			// Expired but never evicted, so Has() still returns true
-			institutionsCache.Set(mockUrl.String(), mockInsts, time.Second)
-		}()
+		institutionsCache = ttlcache.New[string, []Institution]()
+		// Expired but never evicted, so Has() still returns true
+		institutionsCache.Set(mockUrl.String(), mockInsts, time.Second)
 
 		time.Sleep(2 * time.Second)
 		getInsts, intErr, extErr := getCachedInstitutions()
@@ -322,11 +290,7 @@ func TestGetCachedInstitutions(t *testing.T) {
 		assert.Equal(t, "Fail to get institutions from internal cache, key might be expired", extErr.Error())
 		assert.Equal(t, 0, len(getInsts))
 
-		func() {
-			institutionsCacheMutex.Lock()
-			defer institutionsCacheMutex.Unlock()
-			institutionsCache.DeleteAll()
-		}()
+		institutionsCache.DeleteAll()
 	})
 
 	t.Run("cache-miss-with-success-fetch", func(t *testing.T) {
@@ -347,11 +311,7 @@ func TestGetCachedInstitutions(t *testing.T) {
 		assert.Equal(t, 1, len(hook.Entries))
 		assert.Contains(t, hook.LastEntry().Message, "Cache miss for institutions TTL cache")
 
-		func() {
-			institutionsCacheMutex.Lock()
-			defer institutionsCacheMutex.Unlock()
-			institutionsCache.DeleteAll()
-		}()
+		institutionsCache.DeleteAll()
 	})
 
 	t.Run("cache-miss-with-404-fetch", func(t *testing.T) {
@@ -366,11 +326,7 @@ func TestGetCachedInstitutions(t *testing.T) {
 		assert.Equal(t, "Error response when fetching institution list with code 404", intErr.Error())
 		assert.Equal(t, len(getInsts), 0)
 
-		func() {
-			institutionsCacheMutex.Lock()
-			defer institutionsCacheMutex.Unlock()
-			institutionsCache.DeleteAll()
-		}()
+		institutionsCache.DeleteAll()
 	})
 
 	t.Run("cache-hit-with-two-success-fetch", func(t *testing.T) {
@@ -401,11 +357,7 @@ func TestGetCachedInstitutions(t *testing.T) {
 		// No cache miss
 		assert.Equal(t, 0, len(hook.Entries))
 
-		func() {
-			institutionsCacheMutex.Lock()
-			defer institutionsCacheMutex.Unlock()
-			institutionsCache.DeleteAll()
-		}()
+		institutionsCache.DeleteAll()
 	})
 }
 

@@ -1242,11 +1242,7 @@ func TestListInsitutions(t *testing.T) {
 	router.GET("/institutions", listInstitutions)
 
 	t.Run("nil-cache-with-nil-config-returns-error", func(t *testing.T) {
-		func() {
-			institutionsCacheMutex.Lock()
-			defer institutionsCacheMutex.Unlock()
-			institutionsCache = nil
-		}()
+		institutionsCache = nil
 
 		// Create a request to the endpoint
 		w := httptest.NewRecorder()
@@ -1265,13 +1261,9 @@ func TestListInsitutions(t *testing.T) {
 		mockUrl := url.URL{Scheme: "https", Host: "example.com"}
 		viper.Set("Registry.InstitutionsUrl", mockUrl.String())
 		mockInsts := []Institution{{Name: "Foo", ID: "001"}}
-		func() {
-			institutionsCacheMutex.Lock()
-			defer institutionsCacheMutex.Unlock()
-			institutionsCache = ttlcache.New[string, []Institution]()
-			// Expired but never evicted, so Has() still returns true
-			institutionsCache.Set(mockUrl.String(), mockInsts, time.Second)
-		}()
+		institutionsCache = ttlcache.New[string, []Institution]()
+		// Expired but never evicted, so Has() still returns true
+		institutionsCache.Set(mockUrl.String(), mockInsts, time.Second)
 
 		// Create a request to the endpoint
 		w := httptest.NewRecorder()
@@ -1291,11 +1283,7 @@ func TestListInsitutions(t *testing.T) {
 
 	t.Run("nil-cache-with-nonnil-config-returns", func(t *testing.T) {
 		viper.Reset()
-		func() {
-			institutionsCacheMutex.Lock()
-			defer institutionsCacheMutex.Unlock()
-			institutionsCache = nil
-		}()
+		institutionsCache = nil
 
 		mockInstsConfig := []Institution{{Name: "foo", ID: "bar"}}
 		viper.Set("Registry.Institutions", mockInstsConfig)
@@ -1322,13 +1310,9 @@ func TestListInsitutions(t *testing.T) {
 		mockUrl := url.URL{Scheme: "https", Host: "example.com"}
 		viper.Set("Registry.InstitutionsUrl", mockUrl.String())
 		mockInsts := []Institution{{Name: "Foo", ID: "001"}}
-		func() {
-			institutionsCacheMutex.Lock()
-			defer institutionsCacheMutex.Unlock()
-			institutionsCache = ttlcache.New[string, []Institution]()
-			// Expired but never evicted, so Has() still returns true
-			institutionsCache.Set(mockUrl.String(), mockInsts, time.Second)
-		}()
+		institutionsCache = ttlcache.New[string, []Institution]()
+		// Expired but never evicted, so Has() still returns true
+		institutionsCache.Set(mockUrl.String(), mockInsts, time.Second)
 
 		mockInstsConfig := []Institution{{Name: "foo", ID: "bar"}}
 		viper.Set("Registry.Institutions", mockInstsConfig)

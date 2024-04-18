@@ -245,10 +245,11 @@ func validateCustomFields(customFields map[string]interface{}, exactMatch bool) 
 				for _, item := range conf.Options {
 					if item.ID == val {
 						inOpt = true
+						break
 					}
 				}
 				if !inOpt {
-					return false, fmt.Errorf("%q is an enumeration type, but the value is not in the options. Got %v", conf.Name, val)
+					return false, fmt.Errorf("%q is an enumeration type, but the value (ID) is not in the options. Got %v. Available options are: %s", conf.Name, val, optionsToString(conf.Options))
 				}
 			default:
 				return false, errors.New(fmt.Sprintf("The type of %q is not supported", conf.Name))

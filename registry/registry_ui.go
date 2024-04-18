@@ -50,6 +50,7 @@ type (
 		Required      bool                      `json:"required"`
 		Options       []registrationFieldOption `json:"options"`
 		Description   string                    `json:"description"`
+		OptionsUrl    string                    `json:"-"` // Internal field to keep track of Urls
 	}
 
 	listNamespaceRequest struct {
@@ -253,6 +254,20 @@ func listNamespacesForUser(ctx *gin.Context) {
 }
 
 func getNamespaceRegFields(ctx *gin.Context) {
+	for idx, field := range registrationFields {
+		if field.OptionsUrl != "" {
+			options, err := getCachedOptions(field.OptionsUrl)
+			if err != nil {
+				log.Errorf("failed to get options from optionsUrl %s for key %s", field.OptionsUrl, field.Name)
+				ctx.JSON(http.StatusInternalServerError,
+					server_structs.SimpleApiResp{
+						Status: server_structs.RespFailed,
+						Msg:    fmt.Sprintf("failed to get options from optionsUrl %s for key %s", field.OptionsUrl, field.Name),
+					})
+			}
+			registrationFields[idx].Options = options
+		}
+	}
 	ctx.JSON(http.StatusOK, registrationFields)
 }
 
