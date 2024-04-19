@@ -122,7 +122,7 @@ func verifyAdvertiseToken(ctx context.Context, token, namespace string) (bool, e
 	if err != nil {
 		return false, err
 	}
-	regUrlStr := fedInfo.NamespaceRegistrationEndpoint	
+	regUrlStr := fedInfo.NamespaceRegistrationEndpoint
 
 	approved, err := checkNamespaceStatus(namespace, regUrlStr)
 	if err != nil {
