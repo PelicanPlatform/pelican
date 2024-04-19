@@ -34,9 +34,11 @@ import (
 	"github.com/gin-gonic/gin/binding"
 	"github.com/hashicorp/go-version"
 	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token"
@@ -515,6 +517,7 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 }
 
 func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_structs.ServerType) {
+	ctx.Set("serverType", string(sType))
 	tokens, present := ctx.Request.Header["Authorization"]
 	if !present || len(tokens) == 0 {
 		ctx.JSON(http.StatusForbidden, gin.H{"error": "Bearer token not present in the 'Authorization' header"})
@@ -543,6 +546,10 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		// If the OriginAdvertisement is a V1 type, convert to a V2 type
 		adV2 = server_structs.ConvertOriginAdV1ToV2(ad)
 	}
+
+	// Set to ctx for metrics handler downstream
+	ctx.Set("serverName", adV2.Name)
+	ctx.Set("serverWebUrl", adV2.WebURL)
 
 	if sType == server_structs.OriginType {
 		for _, namespace := range adV2.Namespaces {
@@ -707,6 +714,29 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 	ctx.JSON(http.StatusOK, gin.H{"msg": "Successful registration"})
 }
 
+func registerServeAdMetric(ctx *gin.Context) {
+	ctx.Next()
+
+	serverName := "Unknown"
+	serverWebUrl := ctx.ClientIP()
+	statusCode := ctx.Writer.Status()
+
+	if ctx.GetString("serverName") != "" {
+		serverName = ctx.GetString("serverName")
+	}
+	if ctx.GetString("serverWebUrl") != "" {
+		serverWebUrl = ctx.GetString("serverWebUrl")
+	}
+
+	metrics.PelicanDirectorTotalAdvertisementsReceived.With(
+		prometheus.Labels{
+			"server_name":    serverName,
+			"server_web_url": serverWebUrl,
+			"server_type":    ctx.GetString("serverType"),
+			"status_code":    strconv.Itoa(statusCode),
+		}).Inc()
+}
+
 // Return a list of registered origins and caches in Prometheus HTTP SD format
 // for director's Prometheus service discovery
 func discoverOriginCache(ctx *gin.Context) {
@@ -838,8 +868,8 @@ func RegisterDirectorAPI(ctx context.Context, router *gin.RouterGroup) {
 		directorAPIV1.GET("/origin/*any", redirectToOrigin)
 		directorAPIV1.HEAD("/origin/*any", redirectToOrigin)
 		directorAPIV1.PUT("/origin/*any", redirectToOrigin)
-		directorAPIV1.POST("/registerOrigin", func(gctx *gin.Context) { registerServeAd(ctx, gctx, server_structs.OriginType) })
-		directorAPIV1.POST("/registerCache", func(gctx *gin.Context) { registerServeAd(ctx, gctx, server_structs.CacheType) })
+		directorAPIV1.POST("/registerOrigin", registerServeAdMetric, func(gctx *gin.Context) { registerServeAd(ctx, gctx, server_structs.OriginType) })
+		directorAPIV1.POST("/registerCache", registerServeAdMetric, func(gctx *gin.Context) { registerServeAd(ctx, gctx, server_structs.CacheType) })
 		directorAPIV1.GET("/listNamespaces", listNamespacesV1)
 		directorAPIV1.GET("/namespaces/prefix/*path", getPrefixByPath)
 		directorAPIV1.GET("/healthTest/*path", getHealthTestFile)
