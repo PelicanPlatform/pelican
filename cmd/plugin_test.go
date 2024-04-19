@@ -468,6 +468,39 @@ func TestWriteOutfile(t *testing.T) {
 		assert.Contains(t, string(tempFileContent), "TransferUrl = \"foo.txt\";")
 	})
 
+	t.Run("TestOutfileAlwaysIncludeUrlAndFileName", func(t *testing.T) {
+		// Drop the testFileContent into the origin directory
+		tempFile, err := os.Create(filepath.Join(t.TempDir(), "test.txt"))
+		assert.NoError(t, err, "Error creating temp file")
+		assert.NoError(t, err, "Error writing to temp file")
+		defer tempFile.Close()
+		defer os.Remove(tempFile.Name())
+
+		// Set up test result ads
+		var resultAds []*classads.ClassAd
+		for i := 0; i < 4; i++ {
+			resultAd := classads.NewClassAd()
+			resultAd.Set("TransferSuccess", true)
+			resultAd.Set("TransferLocalMachineName", "abcdefghijk")
+			resultAd.Set("TransferFileBytes", 12)
+			resultAd.Set("TransferTotalBytes", 27538253)
+			resultAds = append(resultAds, resultAd)
+		}
+		success, retryable := writeOutfile(nil, resultAds, tempFile)
+		assert.True(t, success, "writeOutfile failed :(")
+		assert.False(t, retryable, "writeOutfile returned retryable true when it should be false")
+		tempFileContent, err := os.ReadFile(tempFile.Name())
+		assert.NoError(t, err)
+
+		// assert the output file contains some of our result ads
+		assert.Contains(t, string(tempFileContent), "TransferFileBytes = 12;")
+		assert.Contains(t, string(tempFileContent), "TransferTotalBytes = 27538253;")
+		assert.Contains(t, string(tempFileContent), "TransferSuccess = true;")
+		// Ensure we get empty strings for these classads
+		assert.Contains(t, string(tempFileContent), "TransferUrl = \"\";")
+		assert.Contains(t, string(tempFileContent), "TransferFileName = \"\";")
+	})
+
 	t.Run("TestOutfileFailureNoRetry", func(t *testing.T) {
 		// Drop the testFileContent into the origin directory
 		tempFile, err := os.Create(filepath.Join(t.TempDir(), "test.txt"))

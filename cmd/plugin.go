@@ -567,7 +567,21 @@ func writeOutfile(err error, resultAds []*classads.ClassAd, outputFile *os.File)
 	success = true
 	retryable = false
 	for _, resultAd := range resultAds {
-		_, err := outputFile.WriteString(resultAd.String() + "\n")
+		// Condor expects the plugin to always return a TransferUrl and TransferFileName. Therefore,
+		// we should populate them even if they are empty. If empty, the url/filename is most likely
+		// included in the error stack already or it is not relevant to the error
+		url, _ := resultAd.Get("TransferUrl")
+		if url == nil {
+			log.Debugln("No URL found in result ad")
+			resultAd.Set("TransferUrl", "")
+		}
+		fileName, _ := resultAd.Get("TransferFileName")
+		if fileName == nil {
+			log.Debugln("No TransferFileName found in result ad")
+			resultAd.Set("TransferFileName", "")
+		}
+
+		_, err = outputFile.WriteString(resultAd.String() + "\n")
 		if err != nil {
 			log.Errorln("Failed to write to outfile:", err)
 			os.Exit(FailedOutfile)
