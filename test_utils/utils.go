@@ -99,5 +99,6 @@ func RegistryMockup(t *testing.T, prefix string) *httptest.Server {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(jsonResponse))
 	}))
+	t.Cleanup(server.Close)
 	return server
 }

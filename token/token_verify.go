@@ -78,9 +78,15 @@ func init() {
 // Checks that the given token was signed by the federation jwk and also checks that the token has the expected scope
 func (a AuthCheckImpl) checkFederationIssuer(c *gin.Context, strToken string, expectedScopes []token_scopes.TokenScope, allScopes bool) error {
 	dirFallback := false
+
+	fedInfo, err := config.GetFederation(c)
+	if err != nil {
+		return err
+	}
+
 	fedURL := param.Federation_DiscoveryUrl.GetString()
 	if fedURL == "" {
-		dirURL := param.Federation_DirectorUrl.GetString()
+		dirURL := fedInfo.DirectorEndpoint
 		if dirURL == "" {
 			return errors.New("checkFederationIssuer: Federation.DiscoveryUrl is empty. Failed to fall back to empty Federation.DirectorUrl")
 		}
@@ -102,7 +108,7 @@ func (a AuthCheckImpl) checkFederationIssuer(c *gin.Context, strToken string, ex
 		}
 	}
 
-	fedURIFile := param.Federation_JwkUrl.GetString()
+	fedURIFile := fedInfo.JwksUri
 	ctx := context.Background()
 	if federationJWK == nil {
 		client := &http.Client{Transport: config.GetTransport()}
@@ -271,7 +277,11 @@ func GetNSIssuerURL(prefix string) (string, error) {
 	if prefix == "" || !strings.HasPrefix(prefix, "/") {
 		return "", errors.New(fmt.Sprintf("the prefix \"%s\" is invalid", prefix))
 	}
-	registryUrlStr := param.Federation_RegistryUrl.GetString()
+	fedInfo, err := config.GetFederation(context.Background())
+	if err != nil {
+		return "", err
+	}
+	registryUrlStr := fedInfo.NamespaceRegistrationEndpoint
 	if registryUrlStr == "" {
 		return "", errors.New("federation registry URL is not set and was not discovered")
 	}

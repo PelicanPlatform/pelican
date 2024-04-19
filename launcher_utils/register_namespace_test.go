@@ -27,6 +27,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -52,17 +53,23 @@ type (
 )
 
 func TestRegistration(t *testing.T) {
+	// Use a temp os directory to better control the deletion of the directory.
+	// Fixes issue on Windows where we are trying to delete a file in use so this
+	// better waits for the file/process to be shut down before deletion
+	tempConfigDir, err := os.MkdirTemp("", "test")
+	assert.NoError(t, err)
+	defer os.RemoveAll(tempConfigDir)
+
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
 
 	viper.Reset()
-	tempConfigDir := t.TempDir()
 	viper.Set("ConfigDir", tempConfigDir)
 
 	config.InitConfig()
 	viper.Set("Registry.DbLocation", filepath.Join(tempConfigDir, "test.sql"))
-	err := config.InitServer(ctx, config.OriginType)
+	err = config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
 
 	err = registry.InitializeDB(ctx)
@@ -97,9 +104,12 @@ func TestRegistration(t *testing.T) {
 	viper.Set("Federation.RegistryUrl", svr.URL)
 	viper.Set("Origin.FederationPrefix", "/test123")
 
+	// Re-run the InitServer to reflect the new RegistryUrl set above
+	require.NoError(t, config.InitServer(ctx, config.OriginType))
+
 	// Test registration succeeds
 	prefix := param.Origin_FederationPrefix.GetString()
-	key, registerURL, isRegistered, err := registerNamespacePrep(prefix)
+	key, registerURL, isRegistered, err := registerNamespacePrep(ctx, prefix)
 	require.NoError(t, err)
 	assert.False(t, isRegistered)
 	assert.Equal(t, registerURL, svr.URL+"/api/v1.0/registry")
@@ -157,7 +167,7 @@ func TestRegistration(t *testing.T) {
 
 	// Redo the namespace prep, ensure that isPresent is true
 	prefix = param.Origin_FederationPrefix.GetString()
-	_, registerURL, isRegistered, err = registerNamespacePrep(prefix)
+	_, registerURL, isRegistered, err = registerNamespacePrep(ctx, prefix)
 	assert.Equal(t, svr.URL+"/api/v1.0/registry", registerURL)
 	assert.NoError(t, err)
 	assert.True(t, isRegistered)

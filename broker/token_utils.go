@@ -29,7 +29,6 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pkg/errors"
@@ -81,8 +80,11 @@ func LaunchNamespaceKeyMaintenance(ctx context.Context, egrp *errgroup.Group) {
 // Given a namespace prefix, return the value that should be used
 // by the `iss` claim in a token for this federation's registry.
 func getRegistryIssValue(prefix string) (iss string, err error) {
-	// Calculate the correct `iss` field as part of the registry service
-	namespaceUrlStr := param.Federation_RegistryUrl.GetString()
+	fedInfo, err := config.GetFederation(context.Background())
+	if err != nil {
+		return
+	}
+	namespaceUrlStr := fedInfo.NamespaceRegistrationEndpoint
 	if namespaceUrlStr == "" {
 		err = errors.New("namespace URL is not set")
 		return

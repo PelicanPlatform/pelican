@@ -28,7 +28,6 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 )
 
@@ -41,8 +40,13 @@ const (
 // Director hosts a discovery endpoint at federationDiscoveryPath to provide URLs to various
 // Pelican central servers in a federation.
 func federationDiscoveryHandler(ctx *gin.Context) {
-	directorUrlStr := param.Federation_DirectorUrl.GetString()
-	if !param.Federation_DirectorUrl.IsSet() || len(directorUrlStr) == 0 {
+	fedInfo, err := config.GetFederation(ctx)
+	if err != nil {
+		log.Errorln("Bad server configuration: Federation discovery could not resolve:", err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Bad server configuration: Federation discovery could not resolve"})
+	}
+	directorUrlStr := fedInfo.DirectorEndpoint
+	if directorUrlStr == "" {
 		log.Error("Bad server configuration: Federation.DirectorUrl is not set")
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Bad server configuration: director URL is not set"})
 		return
@@ -59,8 +63,8 @@ func federationDiscoveryHandler(ctx *gin.Context) {
 	if directorUrl.Port() == "443" {
 		directorUrl.Host = strings.TrimSuffix(directorUrl.Host, ":443")
 	}
-	registryUrlStr := param.Federation_RegistryUrl.GetString()
-	if !param.Federation_RegistryUrl.IsSet() || len(registryUrlStr) == 0 {
+	registryUrlStr := fedInfo.NamespaceRegistrationEndpoint
+	if registryUrlStr == "" {
 		log.Error("Bad server configuration: Federation.RegistryUrl is not set")
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Bad server configuration: registry URL is not set"})
 		return
@@ -78,7 +82,7 @@ func federationDiscoveryHandler(ctx *gin.Context) {
 		registryUrl.Host = strings.TrimSuffix(registryUrl.Host, ":443")
 	}
 
-	brokerUrl := param.Federation_BrokerUrl.GetString()
+	brokerUrl := fedInfo.BrokerEndpoint
 
 	jwksUri, err := url.JoinPath(directorUrl.String(), directorJWKSPath)
 	if err != nil {
@@ -108,8 +112,14 @@ func federationDiscoveryHandler(ctx *gin.Context) {
 // Director metadata discovery endpoint for OpenID style
 // token authentication, providing issuer endpoint and director's jwks endpoint
 func oidcDiscoveryHandler(ctx *gin.Context) {
-	directorUrlStr := param.Federation_DirectorUrl.GetString()
-	if !param.Federation_DirectorUrl.IsSet() || len(directorUrlStr) == 0 {
+	fedInfo, err := config.GetFederation(ctx)
+	if err != nil {
+		log.Error("Bad server configuration: Federation discovery could not resolve:", err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Bad server configuration: Federation discovery could not resolve"})
+		return
+	}
+	directorUrlStr := fedInfo.DirectorEndpoint
+	if directorUrlStr == "" {
 		log.Error("Bad server configuration: Federation.DirectorUrl is not set")
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Bad server configuration: director URL is not set"})
 		return

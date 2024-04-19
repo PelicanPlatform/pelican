@@ -241,6 +241,12 @@ func TestStashPluginMain(t *testing.T) {
 	// and leaves xrootd running. To work with this, we wrap the test in its own command and parse the output for successful run
 	if os.Getenv("RUN_STASHPLUGIN") == "1" {
 		viper.Set("Origin.EnablePublicReads", true)
+		// Since we have the prefix as STASH, we need to unset various osg-htc.org URLs to
+		// avoid real web lookups.
+		viper.Set("Federation.DiscoveryUrl", "")
+		viper.Set("Xrootd.SummaryMonitoringHost", "")
+		viper.Set("Xrootd.DetailedMonitoringHost", "")
+		viper.Set("Logging.Level", "debug")
 		fed := FedTest{T: t}
 		fed.Spinup()
 		defer fed.Teardown()
@@ -263,8 +269,6 @@ func TestStashPluginMain(t *testing.T) {
 		// Download a test file
 		args := []string{uploadURL, tempDir}
 		stashPluginMain(args)
-		os.Unsetenv("STASH_LOGGING_LEVEL")
-		os.Unsetenv("RUN_STASHPLUGIN")
 		return
 	}
 
@@ -275,9 +279,11 @@ func TestStashPluginMain(t *testing.T) {
 	// Create buffers for stderr (the output we want for test)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
 
 	err = cmd.Run()
-	assert.NoError(t, err, stderr.String())
+	assert.NoError(t, err, stderr.String()+"\n=====\n"+stdout.String())
 
 	// changing output for "\\" since in windows there are excess "\" printed in debug logs
 	output := strings.Replace(stderr.String(), "\\\\", "\\", -1)

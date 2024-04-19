@@ -36,12 +36,12 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/mock"
 	"github.com/pelicanplatform/pelican/namespaces"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
@@ -550,8 +550,6 @@ func TestProjInUserAgent(t *testing.T) {
 func TestNewPelicanURL(t *testing.T) {
 	// Set up our federation and context
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
-	viper.Set("Client.WorkerCount", 5)
-	te := NewTransferEngine(ctx)
 	config.InitConfig()
 
 	t.Run("TestOsdfOrStashSchemeWithOSDFPrefixNoError", func(t *testing.T) {
@@ -561,6 +559,11 @@ func TestNewPelicanURL(t *testing.T) {
 		// Init config to get proper timeouts
 		config.InitConfig()
 
+		te := NewTransferEngine(ctx)
+		defer func() {
+			require.NoError(t, te.Shutdown())
+		}()
+
 		remoteObject := "osdf:///something/somewhere/thatdoesnotexist.txt"
 		remoteObjectURL, err := url.Parse(remoteObject)
 		assert.NoError(t, err)
@@ -568,7 +571,6 @@ func TestNewPelicanURL(t *testing.T) {
 		// Instead of relying on osdf, let's just set our global metadata (osdf prefix does this for us)
 		viper.Set("Federation.DirectorUrl", "someDirectorUrl")
 		viper.Set("Federation.DiscoveryUrl", "someDiscoveryUrl")
-		viper.Set("Federation.RegistryUrl", "someRegistryUrl")
 
 		pelicanURL, err := te.newPelicanURL(remoteObjectURL)
 		assert.NoError(t, err)
@@ -581,15 +583,21 @@ func TestNewPelicanURL(t *testing.T) {
 	t.Run("TestOsdfOrStashSchemeWithOSDFPrefixWithError", func(t *testing.T) {
 		viper.Reset()
 		_, err := config.SetPreferredPrefix(config.OsdfPrefix)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		config.InitConfig()
+		require.NoError(t, config.InitClient())
+
+		te := NewTransferEngine(ctx)
+		require.NotNil(t, te)
+		defer func() {
+			require.NoError(t, te.Shutdown())
+		}()
 
 		remoteObject := "osdf:///something/somewhere/thatdoesnotexist.txt"
 		remoteObjectURL, err := url.Parse(remoteObject)
 		assert.NoError(t, err)
 
 		// Instead of relying on osdf, let's just set our global metadata but don't set one piece
-		viper.Set("Federation.DirectorUrl", "someDirectorUrl")
 		viper.Set("Federation.DiscoveryUrl", "someDiscoveryUrl")
 
 		_, err = te.newPelicanURL(remoteObjectURL)
@@ -600,6 +608,16 @@ func TestNewPelicanURL(t *testing.T) {
 
 	t.Run("TestOsdfOrStashSchemeWithPelicanPrefixNoError", func(t *testing.T) {
 		viper.Reset()
+
+		config.InitConfig()
+		require.NoError(t, config.InitClient())
+		te := NewTransferEngine(ctx)
+		require.NotNil(t, te)
+		defer func() {
+			require.NoError(t, te.Shutdown())
+		}()
+
+		mock.MockOSDFDiscovery(t, config.GetTransport())
 		_, err := config.SetPreferredPrefix(config.PelicanPrefix)
 		config.InitConfig()
 		assert.NoError(t, err)
@@ -621,6 +639,14 @@ func TestNewPelicanURL(t *testing.T) {
 		viper.Set("TLSSkipVerify", true)
 		config.InitConfig()
 		err := config.InitClient()
+		require.NoError(t, err)
+
+		te := NewTransferEngine(ctx)
+		require.NotNil(t, te)
+		defer func() {
+			require.NoError(t, te.Shutdown())
+		}()
+
 		assert.NoError(t, err)
 		// Create a server that gives us a mock response
 		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -665,6 +691,12 @@ func TestNewPelicanURL(t *testing.T) {
 		viper.Reset()
 		config.InitConfig()
 
+		te := NewTransferEngine(ctx)
+		require.NotNil(t, te)
+		defer func() {
+			require.NoError(t, te.Shutdown())
+		}()
+
 		remoteObject := "pelican://some-host/something/somewhere/thatdoesnotexist.txt"
 		remoteObjectURL, err := url.Parse(remoteObject)
 		assert.NoError(t, err)
@@ -681,7 +713,13 @@ func TestNewPelicanURL(t *testing.T) {
 		viper.Set("transport.ResponseHeaderTimeout", 0.1*float64(time.Millisecond))
 		viper.Set("Client.WorkerCount", 5)
 		err := config.InitClient()
-		assert.NoError(t, err)
+		require.NoError(t, err)
+
+		te := NewTransferEngine(ctx)
+		defer func() {
+			require.NoError(t, te.Shutdown())
+		}()
+
 		// Create a server that gives us a mock response
 		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// make our response:
@@ -721,9 +759,6 @@ func TestNewPelicanURL(t *testing.T) {
 		cancel()
 		if err := egrp.Wait(); err != nil && err != context.Canceled && err != http.ErrServerClosed {
 			require.NoError(t, err)
-		}
-		if err := te.Shutdown(); err != nil {
-			log.Errorln("Failure when shutting down transfer engine:")
 		}
 		// Throw in a viper.Reset for good measure. Keeps our env squeaky clean!
 		viper.Reset()

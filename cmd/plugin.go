@@ -195,7 +195,7 @@ func stashPluginMain(args []string) {
 	}
 
 	if getCaches {
-		urls, err := client.GetCacheHostnames(testCachePath)
+		urls, err := client.GetCacheHostnames(context.Background(), testCachePath)
 		if err != nil {
 			log.Errorln("Failed to get cache URLs:", err)
 			os.Exit(1)
@@ -680,12 +680,10 @@ func writeTransferErrorMessage(currentError string, transferUrl string, upload b
 	errMsg = "Pelican Client Error: "
 
 	errMsg += currentError
-	if transferUrl != "" {
-		if tUrl, err := url.Parse(transferUrl); err == nil {
-			prefix = tUrl.Scheme + "://" + tUrl.Host
-			urlRemainder := strings.TrimPrefix(transferUrl, prefix)
-			errMsg = strings.ReplaceAll(errMsg, urlRemainder, "(...Path...)")
-		}
+	if tUrl, err := url.Parse(transferUrl); transferUrl != "" && err == nil {
+		prefix = tUrl.Scheme + "://" + tUrl.Host
+		urlRemainder := strings.TrimPrefix(transferUrl, prefix)
+		errMsg = strings.ReplaceAll(errMsg, urlRemainder, "(...Path...)")
 	}
 	// HTCondor will already say whether it's an upload/download in its generated string;
 	// save a few characters here

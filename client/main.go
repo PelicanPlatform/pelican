@@ -40,7 +40,6 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/namespaces"
-	"github.com/pelicanplatform/pelican/param"
 )
 
 // Number of caches to attempt to use in any invocation
@@ -195,7 +194,7 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 		return 0, errors.Wrap(err, "Failed to generate pelicanURL object")
 	}
 
-	ns, err := getNamespaceInfo(destUri.Path, pelicanURL.directorUrl, false)
+	ns, err := getNamespaceInfo(ctx, destUri.Path, pelicanURL.directorUrl, false)
 	if err != nil {
 		return 0, err
 	}
@@ -227,15 +226,17 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 	return 0, err
 }
 
-func GetCacheHostnames(testFile string) (urls []string, err error) {
-
-	directorUrl := param.Federation_DirectorUrl.GetString()
-	ns, err := getNamespaceInfo(testFile, directorUrl, false)
+func GetCacheHostnames(ctx context.Context, testFile string) (urls []string, err error) {
+	fedInfo, err := config.GetFederation(ctx)
+	if err != nil {
+		return
+	}
+	ns, err := getNamespaceInfo(ctx, testFile, fedInfo.DirectorEndpoint, false)
 	if err != nil {
 		return
 	}
 
-	caches, err := getCachesFromNamespace(ns, directorUrl != "", make([]*url.URL, 0))
+	caches, err := getCachesFromNamespace(ns, fedInfo.DirectorEndpoint != "", make([]*url.URL, 0))
 	if err != nil {
 		return
 	}
@@ -367,7 +368,7 @@ func discoverHTCondorToken(tokenName string) string {
 // Retrieve federation namespace information for a given URL.
 // If OSDFDirectorUrl is non-empty, then the namespace information will be pulled from the director;
 // otherwise, it is pulled from topology.
-func getNamespaceInfo(resourcePath, OSDFDirectorUrl string, isPut bool) (ns namespaces.Namespace, err error) {
+func getNamespaceInfo(ctx context.Context, resourcePath, OSDFDirectorUrl string, isPut bool) (ns namespaces.Namespace, err error) {
 	// If we have a director set, go through that for namespace info, otherwise use topology
 	if OSDFDirectorUrl != "" {
 		log.Debugln("Will query director at", OSDFDirectorUrl, "for object", resourcePath)
@@ -376,7 +377,7 @@ func getNamespaceInfo(resourcePath, OSDFDirectorUrl string, isPut bool) (ns name
 			verb = "PUT"
 		}
 		var dirResp *http.Response
-		dirResp, err = queryDirector(verb, resourcePath, OSDFDirectorUrl)
+		dirResp, err = queryDirector(ctx, verb, resourcePath, OSDFDirectorUrl)
 		if err != nil {
 			if isPut && dirResp != nil && dirResp.StatusCode == 405 {
 				err = errors.New("Error 405: No writeable origins were found")
@@ -405,7 +406,7 @@ func getNamespaceInfo(resourcePath, OSDFDirectorUrl string, isPut bool) (ns name
 		return
 	} else {
 		log.Debugln("Director URL not found, searching in topology")
-		ns, err = namespaces.MatchNamespace(resourcePath)
+		ns, err = namespaces.MatchNamespace(ctx, resourcePath)
 		if err != nil {
 			return
 		}

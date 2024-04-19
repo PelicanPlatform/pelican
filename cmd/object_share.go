@@ -64,7 +64,7 @@ func shareMain(cmd *cobra.Command, args []string) error {
 		return errors.Wrapf(err, "Failed to parse '%v' as a URL", args[0])
 	}
 
-	token, err := client.CreateSharingUrl(objectUrl, isWrite)
+	token, err := client.CreateSharingUrl(cmd.Context(), objectUrl, isWrite)
 	if err != nil {
 		return errors.Wrapf(err, "Failed to create a sharing URL for %v", objectUrl.String())
 	}

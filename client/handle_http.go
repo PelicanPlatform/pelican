@@ -508,10 +508,14 @@ func (te *TransferEngine) newPelicanURL(remoteUrl *url.URL) (pelicanURL pelicanU
 		// If we are using an osdf/stash binary, we discovered the federation already --> load into local url metadata
 		if config.GetPreferredPrefix() == config.OsdfPrefix {
 			log.Debugln("In OSDF mode with osdf:// url; populating metadata with OSDF defaults")
-			if param.Federation_DirectorUrl.GetString() == "" || param.Federation_DiscoveryUrl.GetString() == "" || param.Federation_RegistryUrl.GetString() == "" {
+			fedInfo, err := config.GetFederation(te.ctx)
+			if fedInfo.DirectorEndpoint == "" {
+				if err != nil {
+					return pelicanUrl{}, errors.Wrap(err, "no OSDF metadata available")
+				}
 				return pelicanUrl{}, fmt.Errorf("OSDF default metadata is not populated in config")
 			} else {
-				pelicanURL.directorUrl = param.Federation_DirectorUrl.GetString()
+				pelicanURL.directorUrl = fedInfo.DirectorEndpoint
 			}
 		} else if config.GetPreferredPrefix() == config.PelicanPrefix {
 			// We hit this case when we are using a pelican binary but an osdf:// url, therefore we need to disover the osdf federation
@@ -528,21 +532,24 @@ func (te *TransferEngine) newPelicanURL(remoteUrl *url.URL) (pelicanURL pelicanU
 	} else if scheme == "pelican" && remoteUrl.Host == "" {
 		// We hit this case when we do not have a hostname with a pelican:// url
 		if param.Federation_DiscoveryUrl.GetString() == "" {
-			return pelicanUrl{}, fmt.Errorf("Pelican url scheme without discovery-url detected, please provide a federation discovery-url " +
+			return pelicanUrl{}, errors.Errorf("pelican url scheme without discovery-url detected, please provide a federation discovery-url " +
 				"(e.g. pelican://<federation-url-in-hostname.org></namespace></path/to/file>) within the hostname or with the -f flag")
+		}
+		// Check if cache has key of federationURL, if not, loader will add it:
+		pelicanUrlItem := te.pelicanURLCache.Get(param.Federation_DiscoveryUrl.GetString())
+		if pelicanUrlItem != nil {
+			pelicanURL = pelicanUrlItem.Value().url
 		} else {
-			// Check if cache has key of federationURL, if not, loader will add it:
-			pelicanUrlItem := te.pelicanURLCache.Get(param.Federation_DiscoveryUrl.GetString())
-			if pelicanUrlItem != nil {
-				pelicanURL = pelicanUrlItem.Value().url
-			} else {
-				return pelicanUrl{}, fmt.Errorf("Issue getting metadata information from cache")
-			}
+			return pelicanUrl{}, errors.Errorf("issue getting metadata information from cache")
 		}
 	} else if scheme == "" {
 		// If we don't have a url scheme, then our metadata information should be in the config
 		log.Debugln("No url scheme detected, getting metadata information from configuration")
-		pelicanURL.directorUrl = param.Federation_DirectorUrl.GetString()
+		if fedInfo, err := config.GetFederation(te.ctx); err == nil {
+			pelicanURL.directorUrl = fedInfo.DirectorEndpoint
+		} else {
+			return pelicanUrl{}, errors.Wrap(err, "failed to lookup pelican metadata from configuration")
+		}
 
 		// If the values do not exist, exit with failure
 		if pelicanURL.directorUrl == "" {
@@ -1040,7 +1047,7 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 	}
 
 	tj.useDirector = pelicanURL.directorUrl != ""
-	ns, err := getNamespaceInfo(remoteUrl.Path, pelicanURL.directorUrl, upload)
+	ns, err := getNamespaceInfo(tj.ctx, remoteUrl.Path, pelicanURL.directorUrl, upload)
 	if err != nil {
 		log.Errorln(err)
 		err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", remoteUrl.String())

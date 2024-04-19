@@ -134,7 +134,11 @@ func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) 
 		return errors.Wrap(err, fmt.Sprintf("failed to generate JSON description of %s", server.GetServerType()))
 	}
 
-	directorUrlStr := param.Federation_DirectorUrl.GetString()
+	fedInfo, err := config.GetFederation(ctx)
+	if err != nil {
+		return err
+	}
+	directorUrlStr := fedInfo.DirectorEndpoint
 	if directorUrlStr == "" {
 		return errors.New("Director endpoint URL is not known")
 	}
@@ -148,7 +152,7 @@ func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) 
 	advTokenCfg := token.NewWLCGToken()
 	advTokenCfg.Lifetime = time.Minute
 	advTokenCfg.Issuer = serverIssuer
-	advTokenCfg.AddAudiences(param.Federation_DirectorUrl.GetString())
+	advTokenCfg.AddAudiences(fedInfo.DirectorEndpoint)
 	advTokenCfg.Subject = "origin"
 	advTokenCfg.AddScopes(token_scopes.Pelican_Advertise)
 
@@ -186,9 +190,9 @@ func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) 
 			return errors.Wrapf(unmarshalErr, "could not decode the director's response, which responded %v from director advertisement: %s", resp.StatusCode, string(body))
 		}
 		if respErr.ApprovalError {
-			return fmt.Errorf("the director rejected the server advertisement with error: %s. Please contact the administrators of %s for more information.", respErr.Error, param.Federation_RegistryUrl.GetString())
+			return fmt.Errorf("the director rejected the server advertisement with error: %s. Please contact the administrators of %s for more information.", respErr.Error, fedInfo.NamespaceRegistrationEndpoint)
 		}
-		return errors.Errorf("the director responded to the server advertisement request with status code %d : %v\n", resp.StatusCode, respErr.Error)
+		return errors.Errorf("error during director registration: %v", respErr.Error)
 	}
 
 	return nil

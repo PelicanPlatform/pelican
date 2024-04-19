@@ -20,10 +20,11 @@ package main
 
 import (
 	"fmt"
-	"github.com/spf13/cobra"
 	"net/url"
 	"os"
 	"path"
+
+	"github.com/spf13/cobra"
 
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
@@ -142,7 +143,7 @@ func addTokenSubcommands(tokenCmd *cobra.Command) {
 			}
 			dest := url.URL{Path: path.Clean("/" + args[1])}
 
-			namespace, err := namespaces.MatchNamespace(args[1])
+			namespace, err := namespaces.MatchNamespace(cmd.Context(), args[1])
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Failed to get namespace for path:", err)
 				os.Exit(1)

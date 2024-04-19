@@ -19,6 +19,7 @@
 package client
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -111,7 +112,7 @@ func CreateNsFromDirectorResp(dirResp *http.Response) (namespace namespaces.Name
 
 // Make a request to the director for a given verb/resource; return the
 // HTTP response object only if a 307 is returned.
-func queryDirector(verb, source, directorUrl string) (resp *http.Response, err error) {
+func queryDirector(ctx context.Context, verb, source, directorUrl string) (resp *http.Response, err error) {
 	resourceUrl := directorUrl + source
 	// Here we use http.Transport to prevent the client from following the director's
 	// redirect. We use the Location url elsewhere (plus we still need to do the token
@@ -125,7 +126,7 @@ func queryDirector(verb, source, directorUrl string) (resp *http.Response, err e
 		},
 	}
 
-	req, err := http.NewRequest(verb, resourceUrl, nil)
+	req, err := http.NewRequestWithContext(ctx, verb, resourceUrl, nil)
 	if err != nil {
 		log.Errorln("Failed to create an HTTP request:", err)
 		return nil, err
