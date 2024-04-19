@@ -236,6 +236,9 @@ func redirectToCache(ginCtx *gin.Context) {
 	authzBearerEscaped := getAuthzEscaped(ginCtx.Request)
 
 	namespaceAd, originAds, cacheAds := getAdsForPath(reqPath)
+	log.Error("Origin Ads: ", server_structs.ServerAdsToServerNameURL(originAds))
+	log.Error("Cache Ads: ", server_structs.ServerAdsToServerNameURL(cacheAds))
+	log.Error("NamespaceAds: ", namespaceAd)
 	// if GetAdsForPath doesn't find any ads because the prefix doesn't exist, we should
 	// report the lack of path first -- this is most important for the user because it tells them
 	// they're trying to get an object that simply doesn't exist
@@ -262,7 +265,7 @@ func redirectToCache(ginCtx *gin.Context) {
 			return
 		}
 	} else {
-		cacheAds, err = sortServers(ipAddr, cacheAds)
+		cacheAds, err = sortServerAdsOnIP(ipAddr, cacheAds)
 		if err != nil {
 			log.Error("Error determining server ordering for cacheAds: ", err)
 			ginCtx.String(http.StatusInternalServerError, "Failed to determine server ordering")
@@ -375,7 +378,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		log.Errorf("Failed to get depth attribute for the redirecting request to %q, with best match namespace prefix %q", reqPath, namespaceAd.Path)
 	}
 
-	originAds, err = sortServers(ipAddr, originAds)
+	originAds, err = sortServerAdsOnIP(ipAddr, originAds)
 	if err != nil {
 		log.Error("Error determining server ordering for originAds: ", err)
 		ginCtx.String(http.StatusInternalServerError, "Failed to determine origin ordering")

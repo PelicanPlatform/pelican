@@ -20,6 +20,7 @@ package director
 
 import (
 	"archive/tar"
+	"cmp"
 	"compress/gzip"
 	"context"
 	"fmt"
@@ -31,6 +32,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -163,7 +165,9 @@ func getLatLong(addr netip.Addr) (lat float64, long float64, err error) {
 	return
 }
 
-func sortServers(addr netip.Addr, ads []server_structs.ServerAd) ([]server_structs.ServerAd, error) {
+// Sort serverAds based on the IP address of the client with shorter distance between
+// server IP and client having higher priority
+func sortServerAdsOnIP(addr netip.Addr, ads []server_structs.ServerAd) ([]server_structs.ServerAd, error) {
 	distances := make(SwapMaps, len(ads))
 	lat, long, err := getLatLong(addr)
 	// If we don't get a valid coordinate set for the incoming address, either because
@@ -186,6 +190,22 @@ func sortServers(addr netip.Addr, ads []server_structs.ServerAd) ([]server_struc
 		resultAds[idx] = ads[distance.Index]
 	}
 	return resultAds, nil
+}
+
+// Sort a list of ServerAds witht the following rule:
+// * if a ServerAds has FromTopology = true, then it will be moved to the end of the list
+// * if two ServerAds has the SAME FromTopology value (both true or false), then
+func sortServerAdsOnTopo(ads []server_structs.ServerAd) []server_structs.ServerAd {
+	slices.SortStableFunc(ads, func(a, b server_structs.ServerAd) int {
+		if a.FromTopology && !b.FromTopology {
+			return 1
+		} else if !a.FromTopology && b.FromTopology {
+			return -1
+		} else {
+			return cmp.Compare(a.Name, b.Name)
+		}
+	})
+	return ads
 }
 
 func downloadDB(localFile string) error {

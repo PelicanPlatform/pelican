@@ -25,8 +25,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/pelicanplatform/pelican/server_structs"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -124,4 +126,38 @@ func TestCheckOverrides(t *testing.T) {
 	})
 
 	viper.Reset()
+}
+
+func TestSortServerAdsByTopo(t *testing.T) {
+	mock1 := server_structs.ServerAd{
+		FromTopology: true,
+		Name:         "alpha",
+	}
+	mock2 := server_structs.ServerAd{
+		FromTopology: true,
+		Name:         "bravo",
+	}
+	mock3 := server_structs.ServerAd{
+		FromTopology: true,
+		Name:         "charlie",
+	}
+	mock4 := server_structs.ServerAd{
+		FromTopology: false,
+		Name:         "alpha",
+	}
+	mock5 := server_structs.ServerAd{
+		FromTopology: false,
+		Name:         "bravo",
+	}
+	mock6 := server_structs.ServerAd{
+		FromTopology: false,
+		Name:         "charlie",
+	}
+
+	randomList := []server_structs.ServerAd{mock6, mock1, mock2, mock4, mock5, mock3}
+	expectedList := []server_structs.ServerAd{mock4, mock5, mock6, mock1, mock2, mock3}
+
+	sortedList := sortServerAdsOnTopo(randomList)
+
+	assert.EqualValues(t, expectedList, sortedList)
 }
