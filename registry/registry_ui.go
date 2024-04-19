@@ -364,7 +364,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 
 	if validCF, err := validateCustomFields(ns.CustomFields); !validCF {
 		if !validCF && err != nil {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Invalid custom fields: %v", err)})
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Validation failed: %v", err)})
 			return
 		} else if !validCF {
 			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid custom fields without a validation error returned"})
