@@ -236,9 +236,6 @@ func redirectToCache(ginCtx *gin.Context) {
 	authzBearerEscaped := getAuthzEscaped(ginCtx.Request)
 
 	namespaceAd, originAds, cacheAds := getAdsForPath(reqPath)
-	log.Error("Origin Ads: ", server_structs.ServerAdsToServerNameURL(originAds))
-	log.Error("Cache Ads: ", server_structs.ServerAdsToServerNameURL(cacheAds))
-	log.Error("NamespaceAds: ", namespaceAd)
 	// if GetAdsForPath doesn't find any ads because the prefix doesn't exist, we should
 	// report the lack of path first -- this is most important for the user because it tells them
 	// they're trying to get an object that simply doesn't exist
