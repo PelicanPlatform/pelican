@@ -27,6 +27,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -215,7 +216,7 @@ func TestOidcDiscoveryHandler(t *testing.T) {
 			require.Equal(t, tc.statusCode, w.Result().StatusCode)
 			body, err := io.ReadAll(w.Result().Body)
 			require.NoError(t, err)
-			dis := OpenIdDiscoveryResponse{}
+			dis := server_structs.OpenIdDiscoveryResponse{}
 			err = json.Unmarshal(body, &dis)
 			require.NoError(t, err)
 			assert.Equal(t, tc.expectedIssuer, dis.Issuer)
