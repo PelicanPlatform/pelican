@@ -116,7 +116,7 @@ func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) 
 	webUrl := param.Server_ExternalWebUrl.GetString()
 	serverIssuer, err := config.GetServerIssuerURL()
 	if err != nil {
-		return errors.Wrap(err, "Failed to get server issuer URL")
+		return errors.Wrap(err, "failed to get server issuer URL")
 	}
 
 	if server.GetServerType().IsEnabled(config.CacheType) {
@@ -131,7 +131,7 @@ func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) 
 
 	body, err := json.Marshal(*ad)
 	if err != nil {
-		return errors.Wrap(err, fmt.Sprintf("Failed to generate JSON description of %s", server.GetServerType()))
+		return errors.Wrap(err, fmt.Sprintf("failed to generate JSON description of %s", server.GetServerType()))
 	}
 
 	directorUrlStr := param.Federation_DirectorUrl.GetString()
@@ -140,7 +140,7 @@ func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) 
 	}
 	directorUrl, err := url.Parse(directorUrlStr)
 	if err != nil {
-		return errors.Wrap(err, "Failed to parse Federation.DirectorURL")
+		return errors.Wrap(err, "failed to parse Federation.DirectorURL")
 	}
 
 	directorUrl.Path = "/api/v1.0/director/register" + server.GetServerType().String()
@@ -160,7 +160,7 @@ func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) 
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, directorUrl.String(), bytes.NewBuffer(body))
 	if err != nil {
-		return errors.Wrap(err, "Failed to create POST request for director registration")
+		return errors.Wrap(err, "failed to create a POST request for director advertisement")
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -175,7 +175,7 @@ func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) 
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return errors.Wrap(err, "Failed to start request for director registration")
+		return errors.Wrap(err, "failed to start the request for director advertisement")
 	}
 	defer resp.Body.Close()
 
@@ -183,12 +183,12 @@ func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) 
 	if resp.StatusCode > 299 {
 		var respErr directorResponse
 		if unmarshalErr := json.Unmarshal(body, &respErr); unmarshalErr != nil { // Error creating json
-			return errors.Wrapf(unmarshalErr, "Could not unmarshal the director's response, which responded %v from director registration: %v", resp.StatusCode, resp.Status)
+			return errors.Wrapf(unmarshalErr, "could not decode the director's response, which responded %v from director advertisement: %s", resp.StatusCode, string(body))
 		}
 		if respErr.ApprovalError {
-			return fmt.Errorf("The namespace %q requires administrator approval. Please contact the administrators of %s for more information.", param.Origin_FederationPrefix.GetString(), param.Federation_RegistryUrl.GetString())
+			return fmt.Errorf("the director rejected the server advertisement with error: %s. Please contact the administrators of %s for more information.", respErr.Error, param.Federation_RegistryUrl.GetString())
 		}
-		return errors.Errorf("Error during director registration: %v\n", respErr.Error)
+		return errors.Errorf("the director responded to the server advertisement request with status code %d : %v\n", resp.StatusCode, respErr.Error)
 	}
 
 	return nil

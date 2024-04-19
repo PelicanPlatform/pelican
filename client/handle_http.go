@@ -506,14 +506,14 @@ func (te *TransferEngine) newPelicanURL(remoteUrl *url.URL) (pelicanURL pelicanU
 	// With an osdf:// url scheme, we assume the user will be using the OSDF so load in our osdf metadata for our url
 	if scheme == "osdf" {
 		// If we are using an osdf/stash binary, we discovered the federation already --> load into local url metadata
-		if config.GetPreferredPrefix() == "OSDF" {
+		if config.GetPreferredPrefix() == config.OsdfPrefix {
 			log.Debugln("In OSDF mode with osdf:// url; populating metadata with OSDF defaults")
 			if param.Federation_DirectorUrl.GetString() == "" || param.Federation_DiscoveryUrl.GetString() == "" || param.Federation_RegistryUrl.GetString() == "" {
 				return pelicanUrl{}, fmt.Errorf("OSDF default metadata is not populated in config")
 			} else {
 				pelicanURL.directorUrl = param.Federation_DirectorUrl.GetString()
 			}
-		} else if config.GetPreferredPrefix() == "PELICAN" {
+		} else if config.GetPreferredPrefix() == config.PelicanPrefix {
 			// We hit this case when we are using a pelican binary but an osdf:// url, therefore we need to disover the osdf federation
 			log.Debugln("In Pelican mode with an osdf:// url, populating metadata with OSDF defaults")
 			// Check if cache has key of federationURL, if not, loader will add it:

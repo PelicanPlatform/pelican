@@ -78,7 +78,7 @@ docs/parameters.json:
 	@touch docs/parameters.json
 
 .PHONY: generate
-generate: docs/parameters.json web_ui/frontend/public/data/parameters.json
+generate: docs/parameters.json web_ui/frontend/public/data/parameters.json swagger/pelican-swagger.yaml
 ifeq ($(USE_DOCKER),0)
 	@go generate ./...
 else
@@ -111,7 +111,7 @@ pelican-clean:
 	@rm -rf $(PELICAN_DIST_PATH)
 
 .PHONY: pelican-build
-pelican-build: web_ui/frontend/out/index.html
+pelican-build:
 	@echo PELICAN BUILD
 ifeq ($(USE_DOCKER),0)
 	@goreleaser --clean --snapshot
