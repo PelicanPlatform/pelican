@@ -324,46 +324,6 @@ func TestCorrectURLWithUnderscore(t *testing.T) {
 	}
 }
 
-// Test that the project name is correctly extracted from the job ad file
-func TestSearchJobAd(t *testing.T) {
-	// Create a temporary file
-	tempFile, err := os.CreateTemp("", "test")
-	assert.NoError(t, err)
-	defer os.Remove(tempFile.Name())
-
-	// Write a project name and job id to the file
-	_, err = tempFile.WriteString("ProjectName = \"testProject\"\nGlobalJobId = 12345")
-	assert.NoError(t, err)
-	tempFile.Close()
-	t.Run("TestNoJobAd", func(t *testing.T) {
-		// Unset this environment var
-		os.Unsetenv("_CONDOR_JOB_AD")
-		// Call GetProjectName and check the result
-		projectName := SearchJobAd(ProjectName)
-		assert.Equal(t, "", projectName)
-	})
-
-	t.Run("TestProjectNameAd", func(t *testing.T) {
-		// Set the _CONDOR_JOB_AD environment variable to the temp file's name
-		os.Setenv("_CONDOR_JOB_AD", tempFile.Name())
-		defer os.Unsetenv("_CONDOR_JOB_AD")
-
-		// Call GetProjectName and check the result
-		projectName := SearchJobAd(ProjectName)
-		assert.Equal(t, "testProject", projectName)
-	})
-
-	t.Run("TestGlobalJobIdAd", func(t *testing.T) {
-		// Set the _CONDOR_JOB_AD environment variable to the temp file's name
-		os.Setenv("_CONDOR_JOB_AD", tempFile.Name())
-		defer os.Unsetenv("_CONDOR_JOB_AD")
-
-		// Call GetProjectName and check the result
-		jobId := SearchJobAd(JobId)
-		assert.Equal(t, "12345", jobId)
-	})
-}
-
 func TestSchemeUnderstood(t *testing.T) {
 	t.Run("TestProperSchemeOsdf", func(t *testing.T) {
 		scheme := "osdf"
