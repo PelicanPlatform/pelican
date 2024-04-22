@@ -555,6 +555,7 @@ func TestNewPelicanURL(t *testing.T) {
 	t.Run("TestOsdfOrStashSchemeWithOSDFPrefixNoError", func(t *testing.T) {
 		viper.Reset()
 		_, err := config.SetPreferredPrefix(config.OsdfPrefix)
+		viper.Set("ConfigDir", t.TempDir())
 		assert.NoError(t, err)
 		// Init config to get proper timeouts
 		config.InitConfig()
@@ -583,6 +584,7 @@ func TestNewPelicanURL(t *testing.T) {
 	t.Run("TestOsdfOrStashSchemeWithOSDFPrefixWithError", func(t *testing.T) {
 		viper.Reset()
 		_, err := config.SetPreferredPrefix(config.OsdfPrefix)
+		viper.Set("ConfigDir", t.TempDir())
 		require.NoError(t, err)
 		config.InitConfig()
 		require.NoError(t, config.InitClient())
@@ -608,7 +610,7 @@ func TestNewPelicanURL(t *testing.T) {
 
 	t.Run("TestOsdfOrStashSchemeWithPelicanPrefixNoError", func(t *testing.T) {
 		viper.Reset()
-
+		viper.Set("ConfigDir", t.TempDir())
 		config.InitConfig()
 		require.NoError(t, config.InitClient())
 		te := NewTransferEngine(ctx)
@@ -637,6 +639,7 @@ func TestNewPelicanURL(t *testing.T) {
 	t.Run("TestPelicanSchemeNoError", func(t *testing.T) {
 		viper.Reset()
 		viper.Set("TLSSkipVerify", true)
+		viper.Set("ConfigDir", t.TempDir())
 		config.InitConfig()
 		err := config.InitClient()
 		require.NoError(t, err)
@@ -689,6 +692,7 @@ func TestNewPelicanURL(t *testing.T) {
 
 	t.Run("TestPelicanSchemeWithError", func(t *testing.T) {
 		viper.Reset()
+		viper.Set("ConfigDir", t.TempDir())
 		config.InitConfig()
 
 		te := NewTransferEngine(ctx)
@@ -709,6 +713,7 @@ func TestNewPelicanURL(t *testing.T) {
 	t.Run("TestPelicanSchemeMetadataTimeoutError", func(t *testing.T) {
 		viper.Reset()
 		viper.Set("TLSSkipVerify", true)
+		viper.Set("ConfigDir", t.TempDir())
 		oldResponseHeaderTimeout := viper.Get("transport.ResponseHeaderTimeout")
 		viper.Set("transport.ResponseHeaderTimeout", 0.1*float64(time.Millisecond))
 		viper.Set("Client.WorkerCount", 5)

@@ -375,6 +375,7 @@ func TestDiscoverFederation(t *testing.T) {
 
 	t.Run("testInvalidDiscoveryUrlWithPath", func(t *testing.T) {
 		viper.Reset()
+		viper.Set("ConfigDir", t.TempDir())
 		viper.Set("Federation.DiscoveryURL", server.URL+"/this/is/some/path")
 		InitConfig()
 		require.NoError(t, InitClient())
@@ -387,6 +388,7 @@ func TestDiscoverFederation(t *testing.T) {
 
 	t.Run("testValidDiscoveryUrl", func(t *testing.T) {
 		viper.Reset()
+		viper.Set("ConfigDir", t.TempDir())
 		InitConfig()
 		require.NoError(t, InitClient())
 		transport := GetTransport()
@@ -404,6 +406,7 @@ func TestDiscoverFederation(t *testing.T) {
 
 	t.Run("testOsgHtcUrl", func(t *testing.T) {
 		viper.Reset()
+		viper.Set("ConfigDir", t.TempDir())
 		InitConfig()
 		require.NoError(t, InitClient())
 		mock.MockOSDFDiscovery(t, GetTransport())
