@@ -244,6 +244,7 @@ func TestXrootDOriginConfig(t *testing.T) {
 
 	t.Run("TestOsdfWithXRDHOSTAndPort", func(t *testing.T) {
 		xrootd := xrootdTest{T: t}
+		defer os.Unsetenv("XRDHOST")
 		xrootd.setup()
 
 		_, err := config.SetPreferredPrefix(config.OsdfPrefix)
@@ -260,6 +261,7 @@ func TestXrootDOriginConfig(t *testing.T) {
 
 	t.Run("TestOsdfWithXRDHOSTAndNoPort", func(t *testing.T) {
 		xrootd := xrootdTest{T: t}
+		defer os.Unsetenv("XRDHOST")
 		xrootd.setup()
 
 		_, err := config.SetPreferredPrefix(config.OsdfPrefix)
