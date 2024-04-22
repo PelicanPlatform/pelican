@@ -1308,8 +1308,6 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 			log.Errorln("Failed to get namespaced caches (treated as non-fatal):", err)
 		}
 
-		log.Debugln("Matched caches:", closestNamespaceCaches)
-
 		// Make sure we only try as many caches as we have
 		cachesToTry := CachesToTry
 		if cachesToTry > len(closestNamespaceCaches) {
@@ -2195,16 +2193,20 @@ func runPut(request *http.Request, responseChan chan<- *http.Response, errorChan
 
 // Walk a remote directory in a WebDAV server, emitting the files discovered
 func (te *TransferEngine) walkDirDownload(job *clientTransferJob, transfers []transferAttemptDetails, files chan *clientTransferFile, remoteURL *url.URL) error {
-	// Query the director a PROPFIND to see if we can get our directory listing
-	resp, err := queryDirector("PROPFIND", remoteURL.Path, job.job.directorUrl+"/api/v1.0/director/origin")
+	directorUrl, err := url.JoinPath(job.job.directorUrl, "/api/v1.0/director/origin")
 	if err != nil {
 		return err
 	}
-
-	collectionsUrl := *remoteURL
-	// If we get a "method not allowed", we go back to the old method
+	// Query the director a PROPFIND to see if we can get our directory listing
+	resp, err := queryDirector(job.job.ctx, "PROPFIND", remoteURL.Path, directorUrl)
+	if err != nil {
+		return err
+	}
+	origins := []DirectorOrigin{}
+	// If the director responds with 405 (method not allowed), we're working with an old Director.
+	// In that event, we try to fallback and use the deprecated dirlisthost
 	if resp.StatusCode == http.StatusMethodNotAllowed {
-		log.Debugln("PROPFIND against director failed, trying to get collections url from namespace")
+		log.Debugln("Failed to find collections url from director, attempting to find directory listings host in namespace")
 		// Check for a dir list host in namespace
 		if job.job.namespace.DirListHost != "" {
 			dirListURL, err := url.Parse(job.job.namespace.DirListHost)
@@ -2212,34 +2214,50 @@ func (te *TransferEngine) walkDirDownload(job *clientTransferJob, transfers []tr
 				log.Errorln("Failed to parse dirlisthost from namespaces into URL:", err)
 				return err
 			}
-			collectionsUrl = *dirListURL
+			origin := DirectorOrigin{EndpointUrl: dirListURL}
+			origins = append(origins, origin)
 		} else {
 			// Both methods to get directory listings failed
-			log.Errorln("Host for directory listings is unknown")
 			return errors.New("Host for directory listings is unknown")
 		}
 	} else if resp.StatusCode == http.StatusTemporaryRedirect {
-		collectionsStr := resp.Header.Get("Location")
-		dirListURL, err := url.Parse(collectionsStr)
+		origins = GetOriginsFromDirectorResponse(resp)
+	}
+	for _, origin := range origins {
+		// We're only really interested in the host and scheme
+		collectionsUrl := url.URL{
+			Scheme: origin.EndpointUrl.Scheme,
+			Host:   origin.EndpointUrl.Host,
+		}
+
+		log.Debugln("Collections URL: ", collectionsUrl.String())
+
+		// Get our webdav authenticated client for origin
+		auth := &bearerAuth{token: job.job.token}
+		client := gowebdav.NewAuthClient(collectionsUrl.String(), auth)
+
+		// XRootD does not like keep alives and kills things, so turn them off.
+		transport := config.GetTransport()
+		client.SetTransport(transport)
+
+		// Basically if the error we get is a 404 from client.ReadDir, we want to keep looping, else we want to return
+		err := te.walkDirDownloadHelper(job, transfers, files, remoteURL.Path, client)
 		if err != nil {
-			log.Errorln("Failed to parse collections URL from director response into URL type:", err)
+			// If we get a 404 from gowebdav, we want to possibly try a different origin
+			if gowebdav.IsErrNotFound(err) {
+				log.Debugln("Directory not found in specified collections url:", collectionsUrl.String())
+				continue
+			} else {
+				// If we get an error that is not a 404, we want to return it
+				return errors.Wrap(err, "Failed to do HTTP PROPFIND request on the specified remote directory")
+			}
+		} else {
+			// If we got no error from the helper, we return successful
 			return nil
 		}
-		collectionsUrl = url.URL{
-			Scheme: dirListURL.Scheme,
-			Host:   dirListURL.Host,
-		}
 	}
-	log.Debugln("Collections URL: ", collectionsUrl.String())
-
-	// Get our webdav authenticated client
-	auth := &bearerAuth{token: job.job.token}
-	client := gowebdav.NewAuthClient(collectionsUrl.String(), auth)
-
-	// XRootD does not like keep alives and kills things, so turn them off.
-	transport := config.GetTransport()
-	client.SetTransport(transport)
-	return te.walkDirDownloadHelper(job, transfers, files, remoteURL.Path, client)
+	// If we get here, we failed all attempts to found origins
+	return errors.New("Failed to walk directory from found origins")
 }
 
 // Helper function for the `walkDirDownload`.
@@ -2253,7 +2271,7 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 	}
 	infos, err := client.ReadDir(remotePath)
 	if err != nil {
-		return errors.Wrap(err, "Failed to PROPFIND remote directory")
+		return err
 	}
 	localBase := strings.TrimPrefix(remotePath, job.job.remoteURL.Path)
 	for _, info := range infos {

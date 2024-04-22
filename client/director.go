@@ -37,6 +37,12 @@ import (
 	"github.com/pelicanplatform/pelican/utils"
 )
 
+// Origin information from the Director service
+type DirectorOrigin struct {
+	EndpointUrl *url.URL
+	Priority    int
+}
+
 type directorResponse struct {
 	Error string `json:"error"`
 }
@@ -166,6 +172,51 @@ func queryDirector(ctx context.Context, verb, source, directorUrl string) (resp 
 	}
 
 	return
+}
+
+func GetOriginsFromDirectorResponse(resp *http.Response) (origins []DirectorOrigin) {
+	// Get the Link header
+	linkHeader := resp.Header.Values("Link")
+	if len(linkHeader) == 0 {
+		return
+	}
+
+	for _, linksStr := range strings.Split(linkHeader[0], ",") {
+		links := strings.Split(strings.ReplaceAll(linksStr, " ", ""), ";")
+
+		var endpoint string
+
+		var pri int
+		for _, val := range links {
+			if strings.HasPrefix(val, "<") {
+				endpoint = val[1 : len(val)-1]
+			} else if strings.HasPrefix(val, "pri") {
+				pri, _ = strconv.Atoi(val[4:])
+			}
+		}
+
+		endpointUrl, err := url.Parse(endpoint)
+		if err != nil {
+			return
+		}
+
+		// Construct the origin objects, getting endpoint from director
+		var origin DirectorOrigin
+		origin.EndpointUrl = endpointUrl
+		origin.Priority = pri
+		origins = append(origins, origin)
+	}
+
+	// Making the assumption that the Link header doesn't already provide the origins
+	// in order (even though it probably does). This sorts the origins and ensures
+	// we're using the "pri" tag to order them
+	sort.Slice(origins, func(i, j int) bool {
+		val1 := origins[i].Priority
+		val2 := origins[j].Priority
+		return val1 < val2
+	})
+
+	return origins
 }
 
 func GetCachesFromDirectorResponse(resp *http.Response, needsToken bool) (caches []namespaces.DirectorCache, err error) {
