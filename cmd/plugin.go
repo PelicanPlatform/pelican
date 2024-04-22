@@ -310,7 +310,9 @@ func stashPluginMain(args []string) {
 			transferSuccess, err := resultAd.Get("TransferSuccess")
 			if err != nil {
 				log.Errorln("Failed to get TransferSuccess:", err)
+				resultAd.Set("TransferSuccess", false)
 				success = false
+				transferSuccess = false
 			}
 			// If we are not uploading and we fail, we want to abort
 			if !upload && !transferSuccess.(bool) {
@@ -417,6 +419,7 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 				workChan = nil
 				break
 			}
+
 			// Check we have valid query parameters
 			err := utils.CheckValidQuery(transfer.url, true)
 			if err != nil {
@@ -446,11 +449,13 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 			urlCopy := *transfer.url
 			tj, err = tc.NewTransferJob(context.Background(), &urlCopy, transfer.localFile, upload, recursive, client.WithAcquireToken(false), client.WithCaches(caches...))
 			if err != nil {
+				failTransfer(transfer.url.String(), transfer.localFile, results, upload, err)
 				return errors.Wrap(err, "Failed to create new transfer job")
 			}
 			jobMap[tj.ID()] = transfer
 
 			if err = tc.Submit(tj); err != nil {
+				failTransfer(transfer.url.String(), transfer.localFile, results, upload, err)
 				return err
 			}
 		case result, ok := <-tc.Results():
@@ -519,6 +524,29 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 	}
 }
 
+// This function is to be called to populate the result ads for a failed transfer
+// This ensures that the needed classads are populated and sent to the results channel
+func failTransfer(remoteUrl string, localFile string, results chan<- *classads.ClassAd, upload bool, err error) {
+	resultAd := classads.NewClassAd()
+	resultAd.Set("TransferUrl", remoteUrl)
+	if upload {
+		resultAd.Set("TransferType", "upload")
+		resultAd.Set("TransferFileName", path.Base(localFile))
+	} else {
+		resultAd.Set("TransferType", "download")
+		resultAd.Set("TransferFileName", path.Base(remoteUrl))
+	}
+	if client.IsRetryable(err) {
+		resultAd.Set("TransferRetryable", true)
+	} else {
+		resultAd.Set("TransferRetryable", false)
+	}
+	resultAd.Set("TransferSuccess", false)
+	resultAd.Set("TransferError", err.Error())
+
+	results <- resultAd
+}
+
 // Gets the absolute path for the local destination. This is important
 // especially for downloaded directories so that the downloaded files end up
 // in the directory specified for download.
@@ -546,8 +574,8 @@ func writeOutfile(err error, resultAds []*classads.ClassAd, outputFile *os.File)
 	if err != nil {
 		alreadyFailed := false
 		for _, ad := range resultAds {
-			failed, getErr := ad.Get("TransferSuccess")
-			if getErr != nil || failed.(bool) {
+			succeeded, getErr := ad.Get("TransferSuccess")
+			if getErr != nil || !(succeeded.(bool)) {
 				alreadyFailed = true
 				break
 			}
@@ -637,10 +665,6 @@ func readMultiTransfers(stdin bufio.Reader) (transfers []PluginTransfer, err err
 	for _, ad := range ads {
 		adUrlStr, err := ad.Get("Url")
 		if err != nil {
-			return nil, err
-		}
-
-		if adUrlStr == nil {
 			// If we don't find a URL, we are assuming it is a classad used for other purposes
 			// so keep searching for URL
 			log.Debugln("Url attribute not set for transfer, skipping...")
@@ -654,9 +678,6 @@ func readMultiTransfers(stdin bufio.Reader) (transfers []PluginTransfer, err err
 
 		destination, err := ad.Get("LocalFileName")
 		if err != nil {
-			return nil, err
-		}
-		if destination == nil {
 			// If we don't find a local filename, we are assuming it is a classad used for other purposes
 			// so keep searching for local filename
 			log.Debugln("LocalFileName attribute not set for transfer, skipping...")

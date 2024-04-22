@@ -21,6 +21,7 @@ package classads
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -41,11 +42,11 @@ func NewClassAd() *ClassAd {
 // Get returns the value of the attribute with the given name.
 func (c *ClassAd) Get(name string) (interface{}, error) {
 	if c.attributes == nil {
-		return nil, nil
+		return nil, errors.New("There are no attributes in the classad")
 	} else if value, ok := c.attributes[name]; ok {
 		return value, nil
 	} else {
-		return nil, nil
+		return nil, errors.New("Classad attribute not found")
 	}
 }
 
