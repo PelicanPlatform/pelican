@@ -746,6 +746,7 @@ func TestRegistryTopology(t *testing.T) {
 	registryDB := t.TempDir()
 	viper.Set("Registry.DbLocation", filepath.Join(registryDB, "test.sqlite"))
 	viper.Set("Federation.TopologyNamespaceURL", svr.URL)
+	viper.Set("ConfigDir", t.TempDir())
 	config.InitConfig()
 
 	err := InitializeDB(ctx)

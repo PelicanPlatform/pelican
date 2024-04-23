@@ -389,6 +389,7 @@ func TestSendHeadReqToOrigin(t *testing.T) {
 	kfile := filepath.Join(tDir, "testKey")
 	viper.Set("IssuerKey", kfile)
 
+	viper.Set("ConfigDir", t.TempDir())
 	config.InitConfig()
 
 	t.Run("correct-input-gives-no-error", func(t *testing.T) {
