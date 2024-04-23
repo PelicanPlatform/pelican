@@ -241,6 +241,58 @@ func TestXrootDOriginConfig(t *testing.T) {
 		assert.NotNil(t, configPath)
 		viper.Reset()
 	})
+
+	t.Run("TestOsdfWithXRDHOSTAndPort", func(t *testing.T) {
+		xrootd := xrootdTest{T: t}
+		defer os.Unsetenv("XRDHOST")
+		xrootd.setup()
+
+		_, err := config.SetPreferredPrefix(config.OsdfPrefix)
+		require.NoError(t, err, "Failed to set preferred prefix to OSDF")
+		viper.Set("Server.ExternalWebUrl", "https://my-xrootd.com:8443")
+
+		configPath, err := ConfigXrootd(ctx, true)
+		require.NoError(t, err)
+		assert.NotNil(t, configPath)
+		assert.Equal(t, "https://my-xrootd.com", os.Getenv("XRDHOST"))
+
+		viper.Reset()
+	})
+
+	t.Run("TestOsdfWithXRDHOSTAndNoPort", func(t *testing.T) {
+		xrootd := xrootdTest{T: t}
+		defer os.Unsetenv("XRDHOST")
+		xrootd.setup()
+
+		_, err := config.SetPreferredPrefix(config.OsdfPrefix)
+		require.NoError(t, err, "Failed to set preferred prefix to OSDF")
+		viper.Set("Server.ExternalWebUrl", "https://my-xrootd.com")
+
+		configPath, err := ConfigXrootd(ctx, true)
+		require.NoError(t, err)
+		assert.NotNil(t, configPath)
+		assert.Equal(t, "https://my-xrootd.com", os.Getenv("XRDHOST"))
+
+		viper.Reset()
+	})
+
+	t.Run("TestPelicanWithXRDHOST", func(t *testing.T) {
+		// We don't expect XRDHOST to be set for Pelican proper
+		xrootd := xrootdTest{T: t}
+		xrootd.setup()
+
+		_, err := config.SetPreferredPrefix(config.PelicanPrefix)
+		require.NoError(t, err, "Failed to set preferred prefix to Pelican")
+		viper.Set("Server.ExternalWebUrl", "https://my-xrootd.com:8443")
+
+		configPath, err := ConfigXrootd(ctx, true)
+		require.NoError(t, err)
+		assert.NotNil(t, configPath)
+		_, xrdhostIsSet := os.LookupEnv("XRDHOST")
+		assert.False(t, xrdhostIsSet, "XRDHOST should only be set in OSDF mode")
+
+		viper.Reset()
+	})
 }
 
 func TestXrootDCacheConfig(t *testing.T) {
