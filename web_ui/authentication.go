@@ -351,6 +351,9 @@ func listOIDCEnabledServersHandler(ctx *gin.Context) {
 	if param.Cache_EnableOIDC.GetBool() {
 		res.ODICEnabledServers = append(res.ODICEnabledServers, strings.ToLower(config.CacheType.String()))
 	}
+	if param.Director_EnableOIDC.GetBool() {
+		res.ODICEnabledServers = append(res.ODICEnabledServers, strings.ToLower(config.DirectorType.String()))
+	}
 	ctx.JSON(http.StatusOK, res)
 }
 

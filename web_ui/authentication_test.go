@@ -740,11 +740,34 @@ func TestListOIDCEnabledServersHandler(t *testing.T) {
 		assert.Equal(t, expected, getResult)
 	})
 
+	t.Run("director-included-if-flag-is-on", func(t *testing.T) {
+		viper.Reset()
+		viper.Set("Director.EnableOIDC", true)
+		expected := OIDCEnabledServerRes{ODICEnabledServers: []string{"registry", "director"}}
+		req, err := http.NewRequest("GET", "/oauth", nil)
+		assert.NoError(t, err)
+
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusOK, recorder.Result().StatusCode)
+
+		body, err := io.ReadAll(recorder.Result().Body)
+		require.NoError(t, err)
+
+		getResult := OIDCEnabledServerRes{}
+		err = json.Unmarshal(body, &getResult)
+		require.NoError(t, err)
+
+		assert.Equal(t, expected, getResult)
+	})
+
 	t.Run("origin-cache-both-included-if-flags-are-on", func(t *testing.T) {
 		viper.Reset()
 		viper.Set("Origin.EnableOIDC", true)
 		viper.Set("Cache.EnableOIDC", true)
-		expected := OIDCEnabledServerRes{ODICEnabledServers: []string{"registry", "origin", "cache"}}
+		viper.Set("Director.EnableOIDC", true)
+		expected := OIDCEnabledServerRes{ODICEnabledServers: []string{"registry", "origin", "cache", "director"}}
 		req, err := http.NewRequest("GET", "/oauth", nil)
 		assert.NoError(t, err)
 
