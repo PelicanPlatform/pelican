@@ -110,11 +110,17 @@ func populateRegistrationFields(prefix string, data interface{}) []registrationF
 				continue
 			}
 		}
+		description := ""
+		descTag := field.Tag.Get("description")
+		if descTag != "" {
+			description = descTag
+		}
 
 		regField := registrationField{
 			Name:          name + tempName,
 			DisplayedName: utils.SnakeCaseToHumanReadable(tempName),
 			Required:      strings.Contains(field.Tag.Get("validate"), "required"),
+			Description:   description,
 		}
 
 		switch field.Type.Kind() {

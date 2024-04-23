@@ -64,8 +64,8 @@ type AdminMetadata struct {
 	UserID                string             `json:"user_id" post:"exclude"` // "sub" claim of user JWT who requested registration
 	Description           string             `json:"description"`
 	SiteName              string             `json:"site_name"`
-	Institution           string             `json:"institution" validate:"required"` // the unique identifier of the institution
-	SecurityContactUserID string             `json:"security_contact_user_id"`        // "sub" claim of user who is responsible for taking security concern
+	Institution           string             `json:"institution" validate:"required"`                                                                                // the unique identifier of the institution
+	SecurityContactUserID string             `json:"security_contact_user_id" description:"User Identifier of the user responsible for the security of the service"` // "sub" claim of user who is responsible for taking security concern
 	Status                RegistrationStatus `json:"status" post:"exclude"`
 	ApproverID            string             `json:"approver_id" post:"exclude"` // "sub" claim of user JWT who approved registration
 	ApprovedAt            time.Time          `json:"approved_at" post:"exclude"`
@@ -76,7 +76,7 @@ type AdminMetadata struct {
 type Namespace struct {
 	ID            int                    `json:"id" post:"exclude" gorm:"primaryKey"`
 	Prefix        string                 `json:"prefix" validate:"required"`
-	Pubkey        string                 `json:"pubkey" validate:"required"`
+	Pubkey        string                 `json:"pubkey" validate:"required" description:"Pubkey is your origin's public key in JWKS form"`
 	Identity      string                 `json:"identity" post:"exclude"`
 	AdminMetadata AdminMetadata          `json:"admin_metadata" gorm:"serializer:json"`
 	CustomFields  map[string]interface{} `json:"custom_fields" gorm:"serializer:json"`
