@@ -48,12 +48,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Mock wrong data fields for Institution
-type mockBadInstitutionFormat struct {
-	RORID string `yaml:"ror_id"`
-	Inst  string `yaml:"institution"`
-}
-
 func GenerateMockJWKS() (string, error) {
 	// Create a private key to use for the test
 	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
