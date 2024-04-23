@@ -129,10 +129,11 @@ func stashPluginMain(args []string) {
 		if args[0] == "-classad" {
 			// Print classad and exit
 			fmt.Println("MultipleFileSupport = true")
-			fmt.Println("PluginVersion = \"" + config.GetVersion() + "\"")
+			fmt.Println("PelicanPluginVersion = \"" + config.GetVersion() + "\"")
 			fmt.Println("PluginType = \"FileTransfer\"")
 			fmt.Println("ProtocolVersion = 2")
 			fmt.Println("SupportedMethods = \"stash, osdf\"")
+			fmt.Println("StartdAttrs = \"PelicanPluginVersion\"")
 			os.Exit(0)
 		} else if args[0] == "-version" || args[0] == "-v" {
 			config.PrintPelicanVersion()
@@ -194,7 +195,7 @@ func stashPluginMain(args []string) {
 	}
 
 	if getCaches {
-		urls, err := client.GetCacheHostnames(testCachePath)
+		urls, err := client.GetCacheHostnames(context.Background(), testCachePath)
 		if err != nil {
 			log.Errorln("Failed to get cache URLs:", err)
 			os.Exit(1)
@@ -641,12 +642,17 @@ func readMultiTransfers(stdin bufio.Reader) (transfers []PluginTransfer, err err
 		if err != nil {
 			return nil, err
 		}
+
+		if adUrlStr == nil {
+			// If we don't find a URL, we are assuming it is a classad used for other purposes
+			// so keep searching for URL
+			log.Debugln("Url attribute not set for transfer, skipping...")
+			continue
+		}
+
 		adUrl, err := url.Parse(adUrlStr.(string))
 		if err != nil {
 			return nil, err
-		}
-		if adUrl == nil {
-			return nil, errors.New("Url attribute not set for transfer")
 		}
 
 		destination, err := ad.Get("LocalFileName")
@@ -654,9 +660,15 @@ func readMultiTransfers(stdin bufio.Reader) (transfers []PluginTransfer, err err
 			return nil, err
 		}
 		if destination == nil {
-			return nil, errors.New("LocalFileName attribute not set for transfer")
+			// If we don't find a local filename, we are assuming it is a classad used for other purposes
+			// so keep searching for local filename
+			log.Debugln("LocalFileName attribute not set for transfer, skipping...")
+			continue
 		}
 		transfers = append(transfers, PluginTransfer{url: adUrl, localFile: destination.(string)})
+	}
+	if len(transfers) == 0 {
+		return nil, errors.New("No transfers found in infile")
 	}
 
 	return transfers, nil
@@ -668,7 +680,7 @@ func writeTransferErrorMessage(currentError string, transferUrl string, upload b
 	errMsg = "Pelican Client Error: "
 
 	errMsg += currentError
-	if tUrl, err := url.Parse(transferUrl); err == nil {
+	if tUrl, err := url.Parse(transferUrl); transferUrl != "" && err == nil {
 		prefix = tUrl.Scheme + "://" + tUrl.Host
 		urlRemainder := strings.TrimPrefix(transferUrl, prefix)
 		errMsg = strings.ReplaceAll(errMsg, urlRemainder, "(...Path...)")

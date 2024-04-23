@@ -118,7 +118,12 @@ func verifyAdvertiseToken(ctx context.Context, token, namespace string) (bool, e
 		return false, errors.Wrap(err, "failed to get JWKS URL from the issuer URL at "+issuerUrl)
 	}
 
-	regUrlStr := param.Federation_RegistryUrl.GetString()
+	fedInfo, err := config.GetFederation(ctx)
+	if err != nil {
+		return false, err
+	}
+	regUrlStr := fedInfo.NamespaceRegistrationEndpoint
+
 	approved, err := checkNamespaceStatus(namespace, regUrlStr)
 	if err != nil {
 		return false, errors.Wrap(err, "failed to check namespace approval status")

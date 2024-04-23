@@ -24,14 +24,18 @@ import (
 	"strings"
 
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 )
 
 func getDirectorFromUrl(objectUrl *url.URL) (string, error) {
-	configDirectorUrl := param.Federation_DirectorUrl.GetString()
+	ctx := context.Background()
+
+	fedInfo, err := config.GetFederation(ctx)
+	if err != nil {
+		return "", err
+	}
+	configDirectorUrl := fedInfo.DirectorEndpoint
 	var directorUrl string
 	if objectUrl.Scheme == "pelican" {
 		if objectUrl.Host == "" {
@@ -44,12 +48,11 @@ func getDirectorFromUrl(objectUrl *url.URL) (string, error) {
 				Scheme: "https",
 				Host:   objectUrl.Host,
 			}
-			viper.Set("Federation.DirectorUrl", "")
-			viper.Set("Federation.DiscoveryUrl", discoveryUrl.String())
-			if err := config.DiscoverFederation(context.Background()); err != nil {
+			fedInfo, err := config.DiscoverUrlFederation(ctx, discoveryUrl.String())
+			if err != nil {
 				return "", errors.Wrapf(err, "Failed to discover location of the director for the federation %s", objectUrl.Host)
 			}
-			if directorUrl = param.Federation_DirectorUrl.GetString(); directorUrl == "" {
+			if directorUrl = fedInfo.DirectorEndpoint; directorUrl == "" {
 				return "", errors.Errorf("Director for the federation %s not discovered", objectUrl.Host)
 			}
 		}
@@ -58,11 +61,11 @@ func getDirectorFromUrl(objectUrl *url.URL) (string, error) {
 			objectUrl.Path = "/" + objectUrl.Host + objectUrl.Path
 			objectUrl.Host = ""
 		}
-		viper.Set("Federation.DiscoveryUrl", "https://osg-htc.org")
-		if err := config.DiscoverFederation(context.Background()); err != nil {
+		fedInfo, err := config.DiscoverUrlFederation(ctx, "https://osg-htc.org")
+		if err != nil {
 			return "", errors.Wrap(err, "Failed to discover director for the OSDF")
 		}
-		if directorUrl = param.Federation_DirectorUrl.GetString(); directorUrl == "" {
+		if directorUrl = fedInfo.DirectorEndpoint; directorUrl == "" {
 			return "", errors.Errorf("Director for the OSDF not discovered")
 		}
 	} else if objectUrl.Scheme == "" {
@@ -77,7 +80,7 @@ func getDirectorFromUrl(objectUrl *url.URL) (string, error) {
 	return directorUrl, nil
 }
 
-func CreateSharingUrl(objectUrl *url.URL, isWrite bool) (string, error) {
+func CreateSharingUrl(ctx context.Context, objectUrl *url.URL, isWrite bool) (string, error) {
 	directorUrl, err := getDirectorFromUrl(objectUrl)
 	if err != nil {
 		return "", err
@@ -85,7 +88,7 @@ func CreateSharingUrl(objectUrl *url.URL, isWrite bool) (string, error) {
 	objectUrl.Path = "/" + strings.TrimPrefix(objectUrl.Path, "/")
 
 	log.Debugln("Will query director for path", objectUrl.Path)
-	dirResp, err := queryDirector("GET", objectUrl.Path, directorUrl)
+	dirResp, err := queryDirector(ctx, "GET", objectUrl.Path, directorUrl)
 	if err != nil {
 		log.Errorln("Error while querying the Director:", err)
 		return "", errors.Wrapf(err, "Error while querying the director at %s", directorUrl)

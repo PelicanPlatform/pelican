@@ -129,7 +129,9 @@ func doRetrieveRequest(t *testing.T, ctx context.Context, dur time.Duration) (*h
 
 	reqReader := bytes.NewReader(reqBytes)
 
-	brokerAud, err := url.Parse(param.Federation_BrokerUrl.GetString())
+	fedInfo, err := config.GetFederation(ctx)
+	require.NoError(t, err)
+	brokerAud, err := url.Parse(fedInfo.BrokerEndpoint)
 	require.NoError(t, err)
 	brokerAud.Path = ""
 

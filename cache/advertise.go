@@ -123,12 +123,15 @@ func (server *CacheServer) GetNamespaceAdsFromDirector() error {
 	// Get the endpoint of the director
 	var respNS []server_structs.NamespaceAdV2
 
-	directorEndpoint := param.Federation_DirectorUrl.GetString()
-	if directorEndpoint == "" {
+	fedInfo, err := config.GetFederation(context.Background())
+	if err != nil {
+		return err
+	}
+	if fedInfo.DirectorEndpoint == "" {
 		return errors.New("No director specified; give the federation name (-f)")
 	}
 
-	directorEndpointURL, err := url.Parse(directorEndpoint)
+	directorEndpointURL, err := url.Parse(fedInfo.DirectorEndpoint)
 	if err != nil {
 		return errors.Wrap(err, "Unable to parse director url")
 	}
@@ -145,7 +148,7 @@ func (server *CacheServer) GetNamespaceAdsFromDirector() error {
 	respData, err := utils.MakeRequest(context.Background(), directorNSListEndpointURL, "GET", nil, nil)
 	if err != nil {
 		if strings.Contains(err.Error(), "404") {
-			directorNSListEndpointURL, err = url.JoinPath(directorEndpoint, "api", "v1.0", "director", "listNamespaces")
+			directorNSListEndpointURL, err = url.JoinPath(fedInfo.DirectorEndpoint, "api", "v1.0", "director", "listNamespaces")
 			if err != nil {
 				return err
 			}

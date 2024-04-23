@@ -22,6 +22,7 @@ import (
 	"net"
 	"net/url"
 	"strconv"
+	"sync"
 
 	"github.com/pelicanplatform/pelican/param"
 	log "github.com/sirupsen/logrus"
@@ -42,12 +43,13 @@ func UpdateConfigFromListener(ln net.Listener) {
 				newUrlStr := "https://" + serverUrl.Hostname() + ":" + strconv.Itoa(tcpAddr.Port)
 				viper.Set("Server.WebHost", serverUrl.Hostname())
 				viper.Set("Server.ExternalWebUrl", newUrlStr)
-				if param.Federation_DirectorUrl.GetString() == serverUrlStr {
+				if viper.GetString("Federation.DirectorUrl") == serverUrlStr {
 					viper.Set("Federation.DirectorUrl", newUrlStr)
 				}
-				if param.Federation_RegistryUrl.GetString() == serverUrlStr {
+				if viper.GetString("Federation.RegistryUrl") == serverUrlStr {
 					viper.Set("Federation.RegistryUrl", newUrlStr)
 				}
+				fedDiscoveryOnce = &sync.Once{}
 				log.Debugln("Random web port used; updated external web URL to", param.Server_ExternalWebUrl.GetString())
 			} else {
 				log.Errorln("Unable to update external web URL for random port; unable to parse existing URL:", serverUrlStr)

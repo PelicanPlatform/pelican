@@ -108,6 +108,11 @@ type (
 	GetPrefixByPathRes struct {
 		Prefix string `json:"prefix"`
 	}
+
+	OpenIdDiscoveryResponse struct {
+		Issuer  string `json:"issuer"`
+		JwksUri string `json:"jwks_uri"`
+	}
 )
 
 const (

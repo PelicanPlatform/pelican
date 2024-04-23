@@ -196,7 +196,7 @@ func keyIsRegistered(privkey jwk.Key, registryUrlStr string, prefix string) (key
 	}
 }
 
-func registerNamespacePrep(prefix string) (key jwk.Key, registrationEndpointURL string, isRegistered bool, err error) {
+func registerNamespacePrep(ctx context.Context, prefix string) (key jwk.Key, registrationEndpointURL string, isRegistered bool, err error) {
 	// TODO: We eventually want to be able to export multiple prefixes; at that point, we'll
 	// refactor to loop around all the namespaces
 	if prefix == "" {
@@ -208,7 +208,11 @@ func registerNamespacePrep(prefix string) (key jwk.Key, registrationEndpointURL 
 		return
 	}
 
-	namespaceEndpoint := param.Federation_RegistryUrl.GetString()
+	fedInfo, err := config.GetFederation(ctx)
+	if err != nil {
+		return
+	}
+	namespaceEndpoint := fedInfo.NamespaceRegistrationEndpoint
 	if namespaceEndpoint == "" {
 		err = errors.New("No namespace registry specified; try passing the `-f` flag specifying the federation name")
 		return
@@ -264,7 +268,7 @@ func RegisterNamespaceWithRetry(ctx context.Context, egrp *errgroup.Group, prefi
 		retryInterval = 10 * time.Second
 	}
 
-	key, url, isRegistered, err := registerNamespacePrep(prefix)
+	key, url, isRegistered, err := registerNamespacePrep(ctx, prefix)
 	if err != nil {
 		return err
 	}

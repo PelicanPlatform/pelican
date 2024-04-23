@@ -289,7 +289,7 @@ func CheckCacheXrootdEnv(exportPath string, server server_structs.XRootDServer, 
 			filepath.Dir(metaPath))
 	}
 
-	err = config.DiscoverFederation(context.Background())
+	fedInfo, err := config.GetFederation(context.Background())
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to pull information from the federation")
 	}
@@ -313,8 +313,8 @@ func CheckCacheXrootdEnv(exportPath string, server server_structs.XRootDServer, 
 		}
 	}
 
-	if directorUrlStr := param.Federation_DirectorUrl.GetString(); directorUrlStr != "" {
-		directorUrl, err := url.Parse(param.Federation_DirectorUrl.GetString())
+	if directorUrlStr := fedInfo.DirectorEndpoint; directorUrlStr != "" {
+		directorUrl, err := url.Parse(directorUrlStr)
 		if err == nil {
 			log.Debugln("Parsing director URL for 'pss.origin' setting:", directorUrlStr)
 			if directorUrl.Path != "" && directorUrl.Path != "/" {

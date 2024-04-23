@@ -220,6 +220,11 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 		}
 	}
 
+	fedInfo, err := config.GetFederation(ctx)
+	if err != nil {
+		return
+	}
+
 	// Origin needs to advertise once before the cache starts
 	if modules.IsEnabled(config.CacheType) && modules.IsEnabled(config.OriginType) {
 		log.Debug("Advertise Origin and Cache to the Director")
@@ -246,7 +251,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 		// was being fired up, but that may be a pigeonhole. The new assumption here is that we're religious
 		// about setting Federation.DirectorUrl.
 		var directorUrl *url.URL
-		directorUrl, err = url.Parse(param.Federation_DirectorUrl.GetString())
+		directorUrl, err = url.Parse(fedInfo.DirectorEndpoint)
 		if err != nil {
 			err = errors.Wrap(err, "Failed to parse director URL when checking origin advertisements before cache launch")
 			return
@@ -288,7 +293,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 	var cacheServer server_structs.XRootDServer
 	if modules.IsEnabled(config.CacheType) {
 		// Give five seconds for the origin to finish advertising to the director
-		desiredURL := param.Federation_DirectorUrl.GetString() + "/.well-known/openid-configuration"
+		desiredURL := fedInfo.DirectorEndpoint + "/.well-known/openid-configuration"
 		if err = server_utils.WaitUntilWorking(ctx, "GET", desiredURL, "director", 200, false); err != nil {
 			log.Errorln("Director does not seem to be working:", err)
 			return

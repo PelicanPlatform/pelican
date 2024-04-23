@@ -234,7 +234,11 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 	if err != nil {
 		return false, nil, badRequestError{Message: err.Error()}
 	}
-	registryUrl := param.Federation_RegistryUrl.GetString()
+	fedInfo, err := config.GetFederation(ctx)
+	if err != nil {
+		return false, nil, err
+	}
+	registryUrl := fedInfo.NamespaceRegistrationEndpoint
 
 	var rawkey interface{} // This is the raw key, like *rsa.PrivateKey or *ecdsa.PrivateKey
 	if err := key.Raw(&rawkey); err != nil {
