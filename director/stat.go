@@ -38,8 +38,7 @@ import (
 
 type (
 	objectMetadata struct {
-		// ServerAd      server_structs.ServerAd `json:"server_ad"`
-		URL           url.URL `json:"url"`
+		URL           url.URL `json:"url"` // The object URL
 		Checksum      string  `json:"checksum"`
 		ContentLength int     `json:"content_length"`
 	}
@@ -59,8 +58,8 @@ type (
 	// A struct to implement `object stat`, by querying against origins with namespaces match the prefix of an object name
 	// and return origins that have the object
 	ObjectStat struct {
-		ReqHandler func(objectName string, dataUrl url.URL, timeout time.Duration, maxCancelCtx context.Context) (*objectMetadata, error)
-		Query      func(objectName string, cancelContext context.Context, mininum, maximum int) ([]*objectMetadata, string, error)
+		ReqHandler func(objectName string, dataUrl url.URL, timeout time.Duration, maxCancelCtx context.Context) (*objectMetadata, error) // Handle the request to test if an object exists on a server
+		Query      func(objectName string, cancelContext context.Context, mininum, maximum int) ([]*objectMetadata, string, error)        // Manage a `stat` request to origin servers given an objectName
 	}
 )
 
