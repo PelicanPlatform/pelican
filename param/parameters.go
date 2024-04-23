@@ -288,6 +288,7 @@ var (
 	Client_DisableProxyFallback = BoolParam{"Client.DisableProxyFallback"}
 	Debug = BoolParam{"Debug"}
 	Director_EnableBroker = BoolParam{"Director.EnableBroker"}
+	Director_EnableOIDC = BoolParam{"Director.EnableOIDC"}
 	DisableHttpProxy = BoolParam{"DisableHttpProxy"}
 	DisableProxyFallback = BoolParam{"DisableProxyFallback"}
 	Logging_DisableProgressBars = BoolParam{"Logging.DisableProgressBars"}
