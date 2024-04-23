@@ -21,6 +21,7 @@ package registry
 import (
 	"testing"
 
+	"github.com/jellydator/ttlcache/v3"
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
@@ -29,21 +30,24 @@ import (
 
 func TestValidateCustomFields(t *testing.T) {
 
-	oldConfig := customRegFieldsConfigs
-
-	setMockConfig := func(config []customRegFieldsConfig) {
-		customRegFieldsConfigs = config
+	setMockConfig := func(config []registrationField) {
+		registrationFields = config
+		// This is just to get around with the testings
+		// we only check the len of customRegFieldsConfigs to make sure the custom fields are
+		// configured, but the actual registration configuration will be read from registrationFields
+		customRegFieldsConfigs = make([]customRegFieldsConfig, len(config))
 	}
 
 	t.Cleanup(func() {
-		customRegFieldsConfigs = oldConfig
+		registrationFields = nil
+		customRegFieldsConfigs = nil
 	})
 
 	t.Run("empty-configuration-and-custom-fields", func(t *testing.T) {
-		setMockConfig([]customRegFieldsConfig{})
+		setMockConfig([]registrationField{})
 		customFields := make(map[string]interface{})
 
-		valid, err := validateCustomFields(customFields, false)
+		valid, err := validateCustomFields(customFields)
 		require.NoError(t, err, "Should not have an error with empty config and custom fields")
 		assert.True(t, valid, "Validation should pass with empty config and custom fields")
 	})
@@ -51,111 +55,145 @@ func TestValidateCustomFields(t *testing.T) {
 		setMockConfig(nil)
 		customFields := map[string]interface{}{"field1": "value1"}
 
-		_, err := validateCustomFields(customFields, false)
+		_, err := validateCustomFields(customFields)
 		require.Error(t, err, "Expected an error when config is not set, but custom fields are non-empty")
+		assert.Equal(t, "Bad configuration, Registry.CustomRegistrationFields is not set while validate against custom fields", err.Error())
 	})
 	t.Run("required-field-missing-in-custom-fields", func(t *testing.T) {
-		setMockConfig([]customRegFieldsConfig{
-			{Name: "requiredField", Type: "string", Required: true},
+		setMockConfig([]registrationField{
+			{Name: "custom_fields.required_field", DisplayedName: "Required Field", Type: "string", Required: true},
 		})
-		customFields := map[string]interface{}{"otherField": "value"}
+		customFields := map[string]interface{}{"other_field": "value"}
 
-		valid, err := validateCustomFields(customFields, false)
+		valid, err := validateCustomFields(customFields)
 		require.Error(t, err, "Expected an error when a required field is missing")
+		assert.Equal(t, `"Required Field" is required`, err.Error())
 		assert.False(t, valid, "Validation should fail when a required field is missing")
 	})
 	t.Run("type-mismatch-in-custom-fields", func(t *testing.T) {
-		setMockConfig([]customRegFieldsConfig{
-			{Name: "stringField", Type: "string"},
+		setMockConfig([]registrationField{
+			{Name: "custom_fields.string_field", Type: "string", DisplayedName: "String Field"},
 		})
-		customFields := map[string]interface{}{"stringField": 123} // Incorrect type
+		customFields := map[string]interface{}{"string_field": 123} // Incorrect type
 
-		valid, err := validateCustomFields(customFields, false)
+		valid, err := validateCustomFields(customFields)
 		require.Error(t, err, "Expected an error due to type mismatch")
+		assert.Equal(t, `"String Field" is expected to be a string, but got 123`, err.Error())
 		assert.False(t, valid, "Validation should fail due to type mismatch")
 	})
 	t.Run("invalid-datetime-field-value", func(t *testing.T) {
-		setMockConfig([]customRegFieldsConfig{
-			{Name: "datetimeField", Type: "datetime"},
+		setMockConfig([]registrationField{
+			{Name: "custom_fields.datetime_field", Type: "datetime", DisplayedName: "Datetime Field"},
 		})
-		customFields := map[string]interface{}{"datetimeField": "not-a-timestamp"}
+		customFields := map[string]interface{}{"datetime_field": "not-a-timestamp"}
 
-		valid, err := validateCustomFields(customFields, false)
+		valid, err := validateCustomFields(customFields)
 		require.Error(t, err, "Expected an error due to invalid datetime value")
+		assert.Equal(t, `"Datetime Field" is expected to be a Unix timestamp, but got not-a-timestamp`, err.Error())
 		assert.False(t, valid, "Validation should fail due to invalid datetime value")
 	})
 	t.Run("enum-field-with-invalid-option", func(t *testing.T) {
-		setMockConfig([]customRegFieldsConfig{
-			{Name: "enumField", Type: "enum", Options: []registrationFieldOption{{ID: "option1"}, {ID: "option2"}}},
+		setMockConfig([]registrationField{
+			{Name: "custom_fields.enum_field", Type: "enum", DisplayedName: "Enum Field", Options: []registrationFieldOption{{ID: "option1"}, {ID: "option2"}}},
 		})
-		customFields := map[string]interface{}{"enumField": "invalidOption"}
+		customFields := map[string]interface{}{"enum_field": "invalidOption"}
 
-		valid, err := validateCustomFields(customFields, false)
+		valid, err := validateCustomFields(customFields)
 		require.Error(t, err, "Expected an error due to invalid enum value")
+		assert.Contains(t, err.Error(), `"Enum Field" is an enumeration type, but the value (ID) is not in the options.`)
 		assert.False(t, valid, "Validation should fail due to invalid enum value")
 	})
-	t.Run("additional-fields-in-custom-fields-with-exactmatch-false", func(t *testing.T) {
-		setMockConfig([]customRegFieldsConfig{
-			{Name: "field1", Type: "string"},
+	t.Run("enum-field-with-empty-options", func(t *testing.T) {
+		setMockConfig([]registrationField{
+			{Name: "custom_fields.enum_field", Type: "enum", DisplayedName: "Enum Field"},
 		})
-		customFields := map[string]interface{}{"field1": "value1", "extraField": "extraValue"}
+		customFields := map[string]interface{}{"enum_field": "random_option"}
 
-		valid, err := validateCustomFields(customFields, false)
-		require.NoError(t, err, "No error expected with extra fields when exactMatch is false")
-		assert.True(t, valid, "Validation should pass with extra fields when exactMatch is false")
-
+		valid, err := validateCustomFields(customFields)
+		require.Error(t, err, "Expected an error due to invalid enum value")
+		assert.Contains(t, err.Error(), `Bad configuration, the custom field "Enum Field" has empty options`)
+		assert.False(t, valid, "Validation should fail due to invalid enum value")
 	})
-	t.Run("additional-fields-in-custom-fields-with-exactmatch-true", func(t *testing.T) {
-		setMockConfig([]customRegFieldsConfig{
-			{Name: "field1", Type: "string"},
+	t.Run("enum-field-with-optionsUrl", func(t *testing.T) {
+		optionsCache.Set(
+			"https://mock.com/options",
+			[]registrationFieldOption{{Name: "Option 1", ID: "option1"}},
+			ttlcache.DefaultTTL,
+		)
+		setMockConfig([]registrationField{
+			{Name: "custom_fields.enum_field", Type: "enum", DisplayedName: "Enum Field", OptionsUrl: "https://mock.com/options"},
+		})
+		customFields := map[string]interface{}{"enum_field": "option1"}
+
+		valid, err := validateCustomFields(customFields)
+		require.NoError(t, err, "Expected an error due to invalid enum value")
+		assert.True(t, valid, "Validation should fail due to invalid enum value")
+	})
+	t.Run("extra-fields-in-custom-fields", func(t *testing.T) {
+		setMockConfig([]registrationField{
+			{Name: "custom_fields.field1", Type: "string"},
 		})
 		customFields := map[string]interface{}{"field1": "value1", "extraField": "extraValue"}
 
-		valid, err := validateCustomFields(customFields, true)
+		valid, err := validateCustomFields(customFields)
 		require.Error(t, err, "Expected an error due to extra fields when exactMatch is true")
+		assert.Equal(t, `"extraField" is not a valid custom field`, err.Error())
 		assert.False(t, valid, "Validation should fail with extra fields when exactMatch is true")
 	})
-	t.Run("all-valid-fields-with-exactmatch-true", func(t *testing.T) {
-		setMockConfig([]customRegFieldsConfig{
-			{Name: "field1", Type: "string"},
-			{Name: "field2", Type: "int"},
+	t.Run("all-valid-fields", func(t *testing.T) {
+		setMockConfig([]registrationField{
+			{Name: "custom_fields.field1", Type: "string"},
+			{Name: "custom_fields.field2", Type: "int"},
 		})
 		customFields := map[string]interface{}{"field1": "value1", "field2": 10}
 
-		valid, err := validateCustomFields(customFields, true)
+		valid, err := validateCustomFields(customFields)
 		require.NoError(t, err, "No error expected with all valid fields and exactMatch true")
 		assert.True(t, valid, "Validation should pass with all valid fields and exactMatch true")
 	})
 	t.Run("field-present-in-custom-fields-but-not-required-in-config", func(t *testing.T) {
-		setMockConfig([]customRegFieldsConfig{
-			{Name: "requiredField", Type: "string", Required: true},
-			{Name: "optionalField", Type: "int", Required: false},
+		setMockConfig([]registrationField{
+			{Name: "custom_fields.required_field", Type: "string", Required: true},
+			{Name: "custom_fields.optional_field", Type: "int", Required: false},
 		})
-		customFields := map[string]interface{}{"requiredField": "value", "optionalField": 5}
+		customFields := map[string]interface{}{"required_field": "value", "optional_field": 5}
 
-		valid, err := validateCustomFields(customFields, false)
+		valid, err := validateCustomFields(customFields)
 		require.NoError(t, err, "No error expected with optional field present")
 		assert.True(t, valid, "Validation should pass with optional field present")
 	})
 	t.Run("invalid-field-type-in-configuration", func(t *testing.T) {
-		setMockConfig([]customRegFieldsConfig{
-			{Name: "unsupportedField", Type: "unsupportedType"},
+		setMockConfig([]registrationField{
+			{Name: "custom_fields.unsupported_field", DisplayedName: "Unsupported Field", Type: "unsupportedType"},
 		})
-		customFields := map[string]interface{}{"unsupportedField": "value"}
+		customFields := map[string]interface{}{"unsupported_field": "value"}
 
-		valid, err := validateCustomFields(customFields, false)
+		valid, err := validateCustomFields(customFields)
 		require.Error(t, err, "Expected an error due to unsupported field type in config")
+		assert.Equal(t, `field "Unsupported Field" has unsupported type unsupportedType`, err.Error())
 		assert.False(t, valid, "Validation should fail due to unsupported field type in config")
 	})
-	t.Run("null-or-invalid-custom-fields-map", func(t *testing.T) {
-		setMockConfig([]customRegFieldsConfig{
-			{Name: "field1", Type: "string"},
+	t.Run("null-or-invalid-custom-fields-map-without-required-fields", func(t *testing.T) {
+		setMockConfig([]registrationField{
+			{Name: "custom_fields.field1", Type: "string"},
 		})
 		var customFields map[string]interface{} // Invalid (nil) map
 
-		valid, err := validateCustomFields(customFields, false)
-		require.Error(t, err, "Expected an error with invalid (nil) custom fields map")
-		assert.False(t, valid, "Validation should fail with invalid (nil) custom fields map")
+		valid, err := validateCustomFields(customFields)
+		require.NoError(t, err)
+		assert.True(t, valid)
+	})
+
+	t.Run("null-or-invalid-custom-fields-map-with-required-fields", func(t *testing.T) {
+		setMockConfig([]registrationField{
+			{Name: "custom_fields.field1", Type: "string", DisplayedName: "Field 1", Required: true},
+		})
+		var customFields map[string]interface{} // Invalid (nil) map
+
+		valid, err := validateCustomFields(customFields)
+		require.Error(t, err)
+		assert.Equal(t, `"Field 1" is required`, err.Error())
+		assert.False(t, valid)
 	})
 }
 
