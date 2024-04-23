@@ -171,10 +171,14 @@ func (lc *LocalCache) purgeCmd(ginCtx *gin.Context) {
 		if status == http.StatusOK {
 			status = http.StatusInternalServerError
 		}
-		ginCtx.AbortWithStatusJSON(status, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: err.Error()})
+		ginCtx.AbortWithStatusJSON(
+			status,
+			server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: err.Error()})
 		return
 	} else if !verified {
-		ginCtx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Unknown verification error"})
+		ginCtx.AbortWithStatusJSON(
+			http.StatusInternalServerError,
+			server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Unknown verification error"})
 		return
 	}
 
@@ -182,12 +186,18 @@ func (lc *LocalCache) purgeCmd(ginCtx *gin.Context) {
 	if err != nil {
 		if err == purgeTimeout {
 			// Note we don't use server_structs.RespTimeout here; that is reserved for a long-poll timeout.
-			ginCtx.AbortWithStatusJSON(http.StatusRequestTimeout, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: err.Error()})
+			ginCtx.AbortWithStatusJSON(
+				http.StatusRequestTimeout,
+				server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: err.Error()})
 		} else {
 			// Note we don't pass uncategorized errors to the user to avoid leaking potentially sensitive information.
-			ginCtx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Failed to successfully run purge"})
+			ginCtx.AbortWithStatusJSON(
+				http.StatusInternalServerError,
+				server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Failed to successfully run purge"})
 		}
 		return
 	}
-	ginCtx.JSON(http.StatusOK, server_structs.SimpleApiResp{Status: server_structs.RespOK})
+	ginCtx.JSON(
+		http.StatusOK,
+		server_structs.SimpleApiResp{Status: server_structs.RespOK})
 }

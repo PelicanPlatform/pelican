@@ -146,7 +146,7 @@ func TestCodeBasedLogin(t *testing.T) {
 
 		//Check the HTTP response code
 		assert.Equal(t, 401, recorder.Code)
-		assert.JSONEq(t, `{"error":"Invalid login code"}`, recorder.Body.String())
+		assert.JSONEq(t, `{"msg":"Invalid login code", "status":"error"}`, recorder.Body.String())
 	})
 }
 
@@ -195,7 +195,7 @@ func TestPasswordResetAPI(t *testing.T) {
 	//Check ok http reponse
 	assert.Equal(t, http.StatusOK, recorder.Code)
 	//Check that success message returned
-	require.JSONEq(t, `{"msg":"Success"}`, recorder.Body.String())
+	require.JSONEq(t, `{"msg":"success", "status":"success"}`, recorder.Body.String())
 	//Get the cookie to pass to password reset
 	loginCookie := recorder.Result().Cookies()
 	cookieValue := loginCookie[0].Value
@@ -220,7 +220,7 @@ func TestPasswordResetAPI(t *testing.T) {
 		//Check ok http reponse
 		assert.Equal(t, 200, recorderReset.Code)
 		//Check that success message returned
-		assert.JSONEq(t, `{"msg":"Success"}`, recorderReset.Body.String())
+		assert.JSONEq(t, `{"msg":"success", "status":"success"}`, recorderReset.Body.String())
 
 		//After password reset, test authorization with newly generated password
 		loginWithNewPasswordPayload := `{"user": "admin", "password": "newpassword"}`
@@ -237,7 +237,7 @@ func TestPasswordResetAPI(t *testing.T) {
 		assert.Equal(t, http.StatusOK, recorderLoginWithNewPassword.Code)
 
 		//Check that the response body contains the success message
-		assert.JSONEq(t, `{"msg":"Success"}`, recorderLoginWithNewPassword.Body.String())
+		assert.JSONEq(t, `{"msg":"success", "status":"success"}`, recorderLoginWithNewPassword.Body.String())
 	})
 
 	//Invoking password reset without a cookie should result in failure
@@ -270,7 +270,7 @@ func TestPasswordResetAPI(t *testing.T) {
 		//Check ok http reponse
 		assert.Equal(t, 403, recorderReset.Code)
 		//Check that success message returned
-		assert.JSONEq(t, `{"error":"Server.UIAdminUsers is not set, and user is not root user. Admin check returns false"}`, recorderReset.Body.String())
+		assert.JSONEq(t, `{"msg":"Server.UIAdminUsers is not set, and user is not root user. Admin check returns false", "status":"error"}`, recorderReset.Body.String())
 	})
 
 	//Invoking password reset without a cookie should result in failure
@@ -287,7 +287,7 @@ func TestPasswordResetAPI(t *testing.T) {
 		//Check ok http reponse
 		assert.Equal(t, 401, recorderReset.Code)
 		//Check that success message returned
-		assert.JSONEq(t, `{"error":"Authentication required to perform this operation"}`, recorderReset.Body.String())
+		assert.JSONEq(t, `{"msg":"Authentication required to perform this operation", "status":"error"}`, recorderReset.Body.String())
 	})
 
 }
@@ -335,7 +335,7 @@ func TestPasswordBasedLoginAPI(t *testing.T) {
 		//Check ok http reponse
 		assert.Equal(t, http.StatusOK, recorder.Code)
 		//Check that success message returned
-		assert.JSONEq(t, `{"msg":"Success"}`, recorder.Body.String())
+		assert.JSONEq(t, `{"msg":"success", "status":"success"}`, recorder.Body.String())
 		//Check for a cookie being returned
 		cookies := recorder.Result().Cookies()
 		foundCookie := false
@@ -359,7 +359,7 @@ func TestPasswordBasedLoginAPI(t *testing.T) {
 		router.ServeHTTP(recorder, req)
 		//Check http reponse code 400
 		assert.Equal(t, 400, recorder.Code)
-		assert.JSONEq(t, `{"error":"Password is required"}`, recorder.Body.String())
+		assert.JSONEq(t, `{"msg":"Password is required", "status":"error"}`, recorder.Body.String())
 	})
 
 	//Invoke with incorrect password should fail
@@ -374,7 +374,7 @@ func TestPasswordBasedLoginAPI(t *testing.T) {
 		router.ServeHTTP(recorder, req)
 		//Check http reponse code 401
 		assert.Equal(t, 401, recorder.Code)
-		assert.JSONEq(t, `{"error":"Password and user didn't match"}`, recorder.Body.String())
+		assert.JSONEq(t, `{"msg":"Password and user didn't match", "status":"error"}`, recorder.Body.String())
 	})
 
 	//Invoke with incorrect user should fail
@@ -389,7 +389,7 @@ func TestPasswordBasedLoginAPI(t *testing.T) {
 		router.ServeHTTP(recorder, req)
 		//Check http reponse code 401
 		assert.Equal(t, 401, recorder.Code)
-		assert.JSONEq(t, `{"error":"Password and user didn't match"}`, recorder.Body.String())
+		assert.JSONEq(t, `{"msg":"Password and user didn't match", "status":"error"}`, recorder.Body.String())
 	})
 
 	//Invoke with invalid user, should fail
@@ -404,7 +404,7 @@ func TestPasswordBasedLoginAPI(t *testing.T) {
 		router.ServeHTTP(recorder, req)
 		//Check http reponse code 400
 		assert.Equal(t, 400, recorder.Code)
-		assert.JSONEq(t, `{"error":"User is required"}`, recorder.Body.String())
+		assert.JSONEq(t, `{"msg":"User is required", "status":"error"}`, recorder.Body.String())
 	})
 }
 
@@ -452,7 +452,7 @@ func TestWhoamiAPI(t *testing.T) {
 	//Check ok http reponse
 	assert.Equal(t, http.StatusOK, recorder.Code)
 	//Check that success message returned
-	assert.JSONEq(t, `{"msg":"Success"}`, recorder.Body.String())
+	assert.JSONEq(t, `{"msg":"success", "status":"success"}`, recorder.Body.String())
 	//Get the cookie to test 'whoami'
 	loginCookie := recorder.Result().Cookies()
 	cookieValue := loginCookie[0].Value
@@ -630,7 +630,7 @@ func TestLogoutAPI(t *testing.T) {
 	//Check ok http reponse
 	assert.Equal(t, http.StatusOK, recorder.Code)
 	//Check that success message returned
-	assert.JSONEq(t, `{"msg":"Success"}`, recorder.Body.String())
+	assert.JSONEq(t, `{"msg":"success", "status":"success"}`, recorder.Body.String())
 	//Get the cookie to test 'logout'
 	loginCookie := recorder.Result().Cookies()
 	cookieValue := loginCookie[0].Value

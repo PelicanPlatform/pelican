@@ -92,9 +92,8 @@ definitions:
     properties:
       status:
         type: string
-        default: ""
-        example: "error"
-        description: The response status. It's one of success|error|timeout
+        default: "error"
+        description: The response status
       msg:
         type: string
         default: ""
@@ -107,6 +106,18 @@ definitions:
         type: string
         description: The detail success message
         example: Success
+  SuccessModelV2:
+    type: object
+    description: The success response of a request
+    properties:
+      status:
+        type: string
+        example: "success"
+        description: The response status
+      msg:
+        type: string
+        default: "success"
+        description: The response message
   AdminMetadata:
     type: object
     properties:
@@ -533,6 +544,14 @@ paths:
                   Value: ""
         "401":
           description: Unauthorized
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Permission denied. Admin privilige required.
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
     patch:
       tags:
         - "common"
@@ -572,27 +591,27 @@ paths:
           description: Successfully updated the config. Server is restarting.
           schema:
             type: object
-            $ref: "#/definitions/SuccessModel"
+            $ref: "#/definitions/SuccessModelV2"
         "400":
           description: Bad request. The requested changes of config values are invalid.
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
         "401":
           description: Unauthorized. You need to login to take this action.
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
         "403":
-          description: Forbidden. You need admin privileges to take this action.
+          description: Permission denied. Admin privilige required.
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
         "500":
           description: Server error. Can't update the config due to internal server error.
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
   /servers:
     get:
       tags:
@@ -617,7 +636,7 @@ paths:
           description: Server encountered error in reading institution configuration
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
   /metrics/health:
     get:
       tags:
@@ -675,17 +694,17 @@ paths:
           description: Login succeed
           schema:
             type: object
-            $ref: "#/definitions/SuccessModel"
+            $ref: "#/definitions/SuccessModelV2"
         "400":
           description: Invalid request, when username or password is missing
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
         "401":
           description: Login failed, when username or password doesn't match the record
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
   /auth/initLogin:
     post:
       tags:
@@ -712,19 +731,19 @@ paths:
           description: Login succeed
           schema:
             type: object
-            $ref: "#/definitions/SuccessModel"
+            $ref: "#/definitions/SuccessModelV2"
         "400":
           description:
             Invalid request, when authentication is already initialized,
             code-based login is not available, or login code is not provided
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
         "401":
           description: Login failed, when code is not valid
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
   /auth/resetLogin:
     post:
       tags:
@@ -753,22 +772,27 @@ paths:
           description: Reset succeed
           schema:
             type: object
-            $ref: "#/definitions/SuccessModel"
+            $ref: "#/definitions/SuccessModelV2"
         "400":
           description: Invalid request request, when password is missing
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Unauthorized request, when users are not logged in
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Permission denied. Admin privilege required
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
         "500":
           description: Server-side error, when failed to write the new password to auth file
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
-        "403":
-          description: Unauthorized request, when users are not logged in
-          schema:
-            type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
   /auth/whoami:
     get:
       tags:
@@ -825,7 +849,7 @@ paths:
           description: Internal server error when generating CSRF cookie for OAuth flow
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
   /auth/cilogon/callback:
     get:
       tags:
@@ -852,12 +876,12 @@ paths:
           description: Invalid request, when `state` or `token` query is invalid
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
         "500":
           description: Internal server error when processing the token and handshake with CILogon
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
   /auth/oauth:
     get:
       tags:
@@ -895,7 +919,7 @@ paths:
           description: Internal server error when generating CSRF cookie for OAuth flow
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
   /auth/oauth/callback:
     get:
       tags:
@@ -918,12 +942,12 @@ paths:
           description: Invalid request, when `state` or `token` query is invalid
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
         "500":
           description: Internal server error when processing the token and handshake with the OAuth2 authentication provider
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
   /registry_ui/namespaces:
     get:
       tags:
@@ -966,17 +990,17 @@ paths:
           description: Invalid request parameters
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
         "403":
           description: Operation forbidden, when an unauthenticated user trying to filter against `status != approval`
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
         "500":
           description: Internal server error
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
     options:
       tags:
         - "registry_ui"
@@ -1020,22 +1044,22 @@ paths:
             the `"message"` will reflect if there's an existing namespace in the OSDF topology.
           schema:
             type: object
-            $ref: "#/definitions/SuccessModel"
+            $ref: "#/definitions/SuccessModelV2"
         "400":
           description: The request data has invalid or missing field value
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
         "401":
           description: Unauthorized
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
         "500":
           description: Internal server error
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
   /registry_ui/namespaces/user:
     get:
       tags:
@@ -1065,12 +1089,17 @@ paths:
           description: Invalid request parameters
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
         "500":
           description: Internal server error
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
   /registry_ui/namespaces/{id}:
     get:
       tags:
@@ -1103,22 +1132,22 @@ paths:
           description: Invalid namespace ID
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
         "401":
           description: Authentication required to perform this action
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
         "404":
           description: Namespace not found, either does not exists or the user doesn't have privilege to get it
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
         "500":
           description: Internal server error
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
     put:
       tags:
         - "registry_ui"
@@ -1158,32 +1187,32 @@ paths:
           description: OK
           schema:
             type: object
-            $ref: "#/definitions/SuccessModel"
+            $ref: "#/definitions/SuccessModelV2"
         "400":
           description: Invalid namespace ID
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
         "401":
           description: Authentication required to perform this action
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
         "403":
           description: The user does not have privilege to update the namespace
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
         "404":
           description: Namespace not found because it does not exist
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
         "500":
           description: Internal server error
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
     delete:
       summary: Delete a namespace registration by ID
       description: "`Authentication Required` `Admin privilege Required`
@@ -1205,22 +1234,22 @@ paths:
           description: OK
           schema:
             type: object
-            $ref: "#/definitions/SuccessModel"
+            $ref: "#/definitions/SuccessModelV2"
         "400":
           description: Invalid namespace ID
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
         "403":
           description: The user does not have privilege to update the namespace
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
         "500":
           description: Internal server error
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
 
   /registry_ui/namespaces/{id}/pubkey:
     get:
@@ -1246,17 +1275,17 @@ paths:
           description: Invalid namespace ID
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
         "404":
           description: Namespace not found, either does not exist or the user doesn't have privilege to get it
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
         "500":
           description: Internal server error
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
   /registry_ui/namespaces/{id}/approve:
     patch:
       tags:
@@ -1288,32 +1317,32 @@ paths:
           description: Success
           schema:
             type: object
-            $ref: "#/definitions/SuccessModel"
+            $ref: "#/definitions/SuccessModelV2"
         "400":
           description: Invalid namespace ID
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
         "401":
           description: Authentication required to perform this action
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
         "403":
           description: The user does not have privilege to update the namespace status
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
         "404":
           description: Namespace not found because it does not exist
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
         "500":
           description: Internal server error
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
   /registry_ui/namespaces/{id}/deny:
     patch:
       tags:
@@ -1345,32 +1374,32 @@ paths:
           description: Success
           schema:
             type: object
-            $ref: "#/definitions/SuccessModel"
+            $ref: "#/definitions/SuccessModelV2"
         "400":
           description: Invalid namespace ID
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
         "401":
           description: Authentication required to perform this action
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
         "403":
           description: The user does not have privilege to update the namespace status
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
         "404":
           description: Namespace not found because it does not exist
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
         "500":
           description: Internal server error
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
   /registry_ui/institutions:
     get:
       tags:
@@ -1392,12 +1421,12 @@ paths:
           description: Authentication required to perform this action
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
         "500":
           description: Server didn't configure `Registry.Institutions` or server encountered error in reading institution configuration
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
   /registry_ui/topology:
     get:
       tags:
@@ -1445,7 +1474,7 @@ paths:
           description: "Bad request, query parameter is invalid"
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
   /director_ui/servers/filter/{name}:
     patch:
       summary: Filter a server from director redirecting
@@ -1473,17 +1502,17 @@ paths:
           description: "OK"
           schema:
             type: object
-            $ref: "#/definitions/SuccessModel"
+            $ref: "#/definitions/SuccessModelV2"
         "400":
           description: "Bad request. Either `name` is invalid or the server has been filtered"
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
         "403":
           description: "Forbidden. Admin privilege required"
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
   /director_ui/servers/allow/{name}:
     patch:
       summary: Reset filtering rule for a server from director redirecting
@@ -1509,17 +1538,17 @@ paths:
           description: "OK"
           schema:
             type: object
-            $ref: "#/definitions/SuccessModel"
+            $ref: "#/definitions/SuccessModelV2"
         "400":
           description: "Bad request. Either `name` is invalid or the server is not being filtered"
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
         "403":
           description: "Forbidden. Admin privilege required"
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
   /director_ui/servers/origins/stat:
     get:
       tags:
@@ -1569,22 +1598,22 @@ paths:
           description: Bad request. Either min_responses > max_responses, or invalid path to the object.
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
         "401":
           description: Authentication required to perform this action
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
         "404":
           description: Object namespace not found in active origins, or no origin responses successfully.
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
         "500":
           description: Server error when performing the query
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
     head:
       tags:
         - "director_ui"
@@ -1633,22 +1662,22 @@ paths:
           description: Bad request. Either min_responses > max_responses, or invalid path to the object.
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
         "404":
           description: Object namespace not found in active origins, or no origin responses successfully.
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
         "401":
           description: Authentication required to perform this action
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
         "500":
           description: Server error when performing the query
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
   /director_ui/contact:
     get:
       summary: Get the support contact information of the federation the director hostnames
@@ -1665,7 +1694,7 @@ paths:
           description: "Bad server configuration. Failed to get the director contact information from the server configuration"
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
 
   /director/namespaces/prefix/{path}:
     get:
@@ -1693,12 +1722,12 @@ paths:
           description: "Bad request. Path parameter is missing"
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
         "404":
           description: "Namespace prefix not found for the path"
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
   /origin_ui/exports:
     get:
       summary: Returns the data exports of the origin server
@@ -1718,12 +1747,12 @@ paths:
           description: Authentication required to perform this action
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
         "403":
           description: You need to have admin privilege to access this endpoint
           schema:
             type: object
-            $ref: "#/definitions/ErrorModel"
+            $ref: "#/definitions/ErrorModelV2"
         "500":
           description: Error when fetching the origin exports
           schema:
