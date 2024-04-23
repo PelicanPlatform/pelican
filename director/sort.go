@@ -167,7 +167,7 @@ func getLatLong(addr netip.Addr) (lat float64, long float64, err error) {
 
 // Sort serverAds based on the IP address of the client with shorter distance between
 // server IP and client having higher priority
-func sortServerAdsOnIP(addr netip.Addr, ads []server_structs.ServerAd) ([]server_structs.ServerAd, error) {
+func sortServerAdsByIP(addr netip.Addr, ads []server_structs.ServerAd) ([]server_structs.ServerAd, error) {
 	distances := make(SwapMaps, len(ads))
 	lat, long, err := getLatLong(addr)
 	// If we don't get a valid coordinate set for the incoming address, either because
@@ -195,7 +195,7 @@ func sortServerAdsOnIP(addr netip.Addr, ads []server_structs.ServerAd) ([]server
 // Sort a list of ServerAds witht the following rule:
 // * if a ServerAds has FromTopology = true, then it will be moved to the end of the list
 // * if two ServerAds has the SAME FromTopology value (both true or false), then
-func sortServerAdsOnTopo(ads []server_structs.ServerAd) []server_structs.ServerAd {
+func sortServerAdsByTopo(ads []server_structs.ServerAd) []server_structs.ServerAd {
 	slices.SortStableFunc(ads, func(a, b server_structs.ServerAd) int {
 		if a.FromTopology && !b.FromTopology {
 			return 1

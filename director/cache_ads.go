@@ -141,7 +141,7 @@ func getAdsForPath(reqPath string) (originNamespace server_structs.NamespaceAdV2
 	// is a slice of namespace prefixes are supported by that server
 	var best *server_structs.NamespaceAdV2
 	ads := serverAds.Keys()
-	sortedAds := sortServerAdsOnTopo(ads)
+	sortedAds := sortServerAdsByTopo(ads)
 	for _, serverAd := range sortedAds {
 		var namespaces []server_structs.NamespaceAdV2
 		if serverAds.Has(serverAd) {

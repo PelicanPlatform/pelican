@@ -262,7 +262,7 @@ func redirectToCache(ginCtx *gin.Context) {
 			return
 		}
 	} else {
-		cacheAds, err = sortServerAdsOnIP(ipAddr, cacheAds)
+		cacheAds, err = sortServerAdsByIP(ipAddr, cacheAds)
 		if err != nil {
 			log.Error("Error determining server ordering for cacheAds: ", err)
 			ginCtx.String(http.StatusInternalServerError, "Failed to determine server ordering")
@@ -375,7 +375,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		log.Errorf("Failed to get depth attribute for the redirecting request to %q, with best match namespace prefix %q", reqPath, namespaceAd.Path)
 	}
 
-	originAds, err = sortServerAdsOnIP(ipAddr, originAds)
+	originAds, err = sortServerAdsByIP(ipAddr, originAds)
 	if err != nil {
 		log.Error("Error determining server ordering for originAds: ", err)
 		ginCtx.String(http.StatusInternalServerError, "Failed to determine origin ordering")

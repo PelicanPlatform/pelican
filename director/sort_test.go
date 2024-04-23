@@ -157,7 +157,7 @@ func TestSortServerAdsByTopo(t *testing.T) {
 	randomList := []server_structs.ServerAd{mock6, mock1, mock2, mock4, mock5, mock3}
 	expectedList := []server_structs.ServerAd{mock4, mock5, mock6, mock1, mock2, mock3}
 
-	sortedList := sortServerAdsOnTopo(randomList)
+	sortedList := sortServerAdsByTopo(randomList)
 
 	assert.EqualValues(t, expectedList, sortedList)
 }
