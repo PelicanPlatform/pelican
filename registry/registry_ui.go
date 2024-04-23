@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jellydator/ttlcache/v3"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -40,8 +41,8 @@ type (
 	registrationFieldType string
 
 	registrationFieldOption struct {
-		Name string `mapstructure:"name" json:"name"`
-		ID   string `mapstructure:"id" json:"id"`
+		Name string `mapstructure:"name" json:"name" yaml:"name"`
+		ID   string `mapstructure:"id" json:"id" yaml:"id"`
 	}
 	registrationField struct {
 		Name          string                    `json:"name"`
@@ -63,7 +64,7 @@ type (
 	}
 )
 
-var registrationFields []registrationField
+var registrationFields []registrationField // A list of available registration fields
 
 const (
 	String   registrationFieldType = "string"
@@ -256,7 +257,7 @@ func listNamespacesForUser(ctx *gin.Context) {
 func getNamespaceRegFields(ctx *gin.Context) {
 	for idx, field := range registrationFields {
 		if field.OptionsUrl != "" {
-			options, err := getCachedOptions(field.OptionsUrl)
+			options, err := getCachedOptions(field.OptionsUrl, ttlcache.DefaultTTL)
 			if err != nil {
 				log.Errorf("failed to get options from optionsUrl %s for key %s", field.OptionsUrl, field.Name)
 				ctx.JSON(http.StatusInternalServerError,
@@ -580,8 +581,7 @@ func deleteNamespace(ctx *gin.Context) {
 }
 
 func listInstitutions(ctx *gin.Context) {
-	// When Registry.Institutions is set
-	institutions := []Institution{}
+	institutions := []registrationFieldOption{}
 	if err := param.Registry_Institutions.Unmarshal(&institutions); err != nil {
 		log.Error("Fail to read server configuration of institutions", err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Fail to read server configuration of institutions"})
@@ -593,27 +593,20 @@ func listInstitutions(ctx *gin.Context) {
 		return
 	}
 
-	// When Registry.InstitutionsUrl is set and Registry.Institutions is unset
-	if institutionsCache != nil {
-		insts, intErr, extErr := getCachedInstitutions()
-		if intErr != nil || extErr != nil {
-			if intErr != nil {
-				log.Error(intErr)
-			}
-			if extErr != nil {
-				ctx.JSON(http.StatusInternalServerError, gin.H{"error": extErr.Error()})
-			}
+	instUrl := param.Registry_InstitutionsUrl.GetString()
+	instUrlTTL := param.Registry_InstitutionsUrlReloadMinutes.GetDuration()
+
+	if instUrl != "" {
+		institutions, err := getCachedOptions(instUrl, instUrlTTL)
+		if err != nil {
+			log.Error(err)
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: err.Error()})
 			return
 		}
-		ctx.JSON(http.StatusOK, insts)
-		return
-	}
-
-	// When both are unset
-	if len(institutions) == 0 {
-		log.Error("Server didn't configure Registry.Institutions")
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Server didn't configure Registry.Institutions"})
-		return
+		ctx.JSON(http.StatusOK, institutions)
+	} else {
+		log.Error("Server didn't configure Registry.Institutions and Registry.InstitutionsUrl")
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Server didn't configure Registry.Institutions and Registry.InstitutionsUrl"})
 	}
 }
 
