@@ -26,6 +26,7 @@ import (
 
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/utils"
@@ -146,14 +147,25 @@ func JSONHandler(w http.ResponseWriter, r *http.Request) {
 }
 func TestAdvertiseOSDF(t *testing.T) {
 	viper.Reset()
+	serverAds.DeleteAll()
 	topoServer := httptest.NewServer(http.HandlerFunc(JSONHandler))
 	defer topoServer.Close()
 	viper.Set("Federation.TopologyNamespaceUrl", topoServer.URL)
 
 	err := AdvertiseOSDF()
-	if err != nil {
-		t.Fatal(err)
+	require.NoError(t, err)
+
+	var foundServer server_structs.ServerAd
+	for _, item := range serverAds.Items() {
+		if item.Key().URL.Host == "origin1-endpoint.com" {
+			foundServer = item.Key()
+		}
 	}
+	require.NotNil(t, foundServer)
+	assert.True(t, foundServer.FromTopology)
+	nss := serverAds.Get(foundServer)
+	require.NotNil(t, nss)
+	assert.True(t, nss.Value()[0].FromTopology)
 
 	// Test a few values. If they're correct, it indicates the whole process likely succeeded
 	nsAd, oAds, cAds := getAdsForPath("/my/server/path/to/file")
