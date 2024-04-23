@@ -38,6 +38,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
@@ -316,14 +317,20 @@ func uiCreateLot(ctx *gin.Context) {
 	err := ctx.BindJSON(&lot)
 	if err != nil {
 		log.Errorf("Error binding lot JSON: %v", err)
-		ctx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Error binding incoming lot JSON: %v", err)})
+		ctx.AbortWithStatusJSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Error binding incoming lot JSON: %v", err),
+		})
 		return
 	}
 
 	// Right now we assume a single path. The authorization scheme gets complicated quickly otherwise.
 	if len(lot.Paths) > 1 {
 		log.Errorf("error creating lot: Lot contains more than one path, which is not yet supported by Pelican")
-		ctx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Error creating lot: Lot contains more than one path, which is not yet supported by Pelican"})
+		ctx.AbortWithStatusJSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Error creating lot: Lot contains more than one path, which is not yet supported by Pelican",
+		})
 	}
 
 	if lot.Owner != "" {
@@ -338,7 +345,10 @@ func uiCreateLot(ctx *gin.Context) {
 	token := token.GetAuthzEscaped(ctx)
 	if token == "" {
 		log.Debugln("No token provided in request")
-		ctx.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "No token provided in request"})
+		ctx.AbortWithStatusJSON(http.StatusForbidden, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "No token provided in request",
+		})
 		return
 	}
 
@@ -351,12 +361,18 @@ func uiCreateLot(ctx *gin.Context) {
 	// TODO: Distinguish between true errors and unauthorized errors
 	if err != nil {
 		log.Debugln("Error verifying token: ", err)
-		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error verifying token: %v", err)})
+		ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Error verifying token: %v", err),
+		})
 		return
 	}
 	if !ok {
 		log.Debugln("Token verification failed")
-		ctx.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Token does not appear to have necessary authorization to create a lot"})
+		ctx.AbortWithStatusJSON(http.StatusForbidden, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Token does not appear to have necessary authorization to create a lot",
+		})
 		return
 	}
 
@@ -366,18 +382,27 @@ func uiCreateLot(ctx *gin.Context) {
 	tok, err := jwt.Parse([]byte(token), jwt.WithVerify(false), jwt.WithValidate(false))
 	if err != nil {
 		log.Debugf("Failed to parse token while determining Lotman Caller: %v", err)
-		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse token while determining Lotman Caller"})
+		ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to parse token while determining Lotman Caller",
+		})
 	}
 	caller := tok.Issuer()
 
 	err = CreateLot(&lot, caller)
 	if err != nil {
 		log.Errorf("Error creating lot: %v", err)
-		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error creating lot: %v", err)})
+		ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Error creating lot: %v", err),
+		})
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"status": "success" + extraInfo})
+	ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{
+		Status: server_structs.RespOK,
+		Msg:    fmt.Sprint("success: ", extraInfo),
+	})
 }
 
 // The function Gin routes to when the GetLotJSON endpoint is hit.
@@ -390,7 +415,10 @@ func uiGetLotJSON(ctx *gin.Context) {
 		recursive, err = strconv.ParseBool(recursiveStr)
 		if err != nil {
 			log.Errorf("Error parsing recursive query param: %v", err)
-			ctx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Error parsing recursive query param: %v", err)})
+			ctx.AbortWithStatusJSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Error parsing recursive query param: %v", err),
+			})
 			return
 		}
 	}
@@ -398,7 +426,10 @@ func uiGetLotJSON(ctx *gin.Context) {
 	lot, err := GetLot(lotName, recursive)
 	if err != nil {
 		log.Errorf("Error fetching lot: %v", err)
-		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error fetching lot: %v", err)})
+		ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Error fetching lot: %v", err),
+		})
 		return
 	}
 
@@ -414,14 +445,20 @@ func uiUpdateLot(ctx *gin.Context) {
 	err := ctx.BindJSON(&lotUpdate)
 	if err != nil {
 		log.Errorf("Error binding lot JSON: %v", err)
-		ctx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Error binding incoming lot JSON: %v", err)})
+		ctx.AbortWithStatusJSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Error binding incoming lot JSON: %v", err),
+		})
 		return
 	}
 
 	// Right now we assume a single path. The authorization scheme gets complicated quickly otherwise.
 	if len(*lotUpdate.Paths) > 1 {
 		log.Errorf("error updating lot: The update contains more than one path, which is not yet supported by Pelican")
-		ctx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Error updating lot: The update contains more than one path, which is not yet supported by Pelican"})
+		ctx.AbortWithStatusJSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Error updating lot: The update contains more than one path, which is not yet supported by Pelican",
+		})
 	}
 
 	if lotUpdate.Owner != nil {
@@ -445,7 +482,10 @@ func uiUpdateLot(ctx *gin.Context) {
 	token := token.GetAuthzEscaped(ctx)
 	if token == "" {
 		log.Debugln("No token provided in request")
-		ctx.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "No token provided in request"})
+		ctx.AbortWithStatusJSON(http.StatusForbidden, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "No token provided in request",
+		})
 		return
 	}
 
@@ -454,12 +494,18 @@ func uiUpdateLot(ctx *gin.Context) {
 	// TODO: Distinguish between true errors and unauthorized errors
 	if err != nil {
 		log.Debugln("Error verifying token: ", err)
-		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error verifying token: %v", err)})
+		ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Error verifying token: %v", err),
+		})
 		return
 	}
 	if !ok {
 		log.Debugln("Token verification failed")
-		ctx.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Token does not appear to have necessary authorization to delete a lot"})
+		ctx.AbortWithStatusJSON(http.StatusForbidden, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Token does not appear to have necessary authorization to delete a lot",
+		})
 		return
 	}
 
@@ -469,32 +515,47 @@ func uiUpdateLot(ctx *gin.Context) {
 	tok, err := jwt.Parse([]byte(token), jwt.WithVerify(false), jwt.WithValidate(false))
 	if err != nil {
 		log.Debugf("Failed to parse token while determining Lotman Caller: %v", err)
-		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse token while determining Lotman Caller"})
+		ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to parse token while determining Lotman Caller",
+		})
 	}
 
 	caller := tok.Issuer()
 	err = UpdateLot(&lotUpdate, caller)
 	if err != nil {
 		log.Errorf("Error updating lot: %v", err)
-		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error updating lot: %v", err)})
+		ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Error updating lot: %v", err),
+		})
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"status": "success" + extraInfo})
+	ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{
+		Status: server_structs.RespOK,
+		Msg:    fmt.Sprint("success: ", extraInfo),
+	})
 }
 
 // The function Gin routes to when the DeleteLotsRecursive endpoint is hit.
 func uiDeleteLot(ctx *gin.Context) {
 	lotName := ctx.Query("lotName")
 	if lotName == "" {
-		ctx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "No lot name provided in URL query param 'lotName'"})
+		ctx.AbortWithStatusJSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "No lot name provided in URL query param 'lotName'",
+		})
 		return
 	}
 
 	token := token.GetAuthzEscaped(ctx)
 	if token == "" {
 		log.Debugln("No token provided in request")
-		ctx.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "No token provided in request"})
+		ctx.AbortWithStatusJSON(http.StatusForbidden, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "No token provided in request",
+		})
 		return
 	}
 
@@ -503,12 +564,18 @@ func uiDeleteLot(ctx *gin.Context) {
 	// TODO: Distinguish between true errors and unauthorized errors
 	if err != nil {
 		log.Debugln("Error verifying token: ", err)
-		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error verifying token: %v", err)})
+		ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Error verifying token: %v", err),
+		})
 		return
 	}
 	if !ok {
 		log.Debugln("Token verification failed")
-		ctx.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Token does not appear to have necessary authorization to delete the lot"})
+		ctx.AbortWithStatusJSON(http.StatusForbidden, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Token does not appear to have necessary authorization to delete the lot",
+		})
 		return
 	}
 
@@ -518,18 +585,27 @@ func uiDeleteLot(ctx *gin.Context) {
 	tok, err := jwt.Parse([]byte(token), jwt.WithVerify(false), jwt.WithValidate(false))
 	if err != nil {
 		log.Debugf("Failed to parse token while determining Lotman Caller: %v", err)
-		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse token while determining Lotman Caller"})
+		ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to parse token while determining Lotman Caller",
+		})
 	}
 	caller := tok.Issuer()
 
 	err = DeleteLotsRecursive(lotName, caller)
 	if err != nil {
 		log.Errorf("Error deleting lot: %v", err)
-		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error deleting lot: %v", err)})
+		ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Error deleting lot: %v", err),
+		})
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"status": "success"})
+	ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{
+		Status: server_structs.RespOK,
+		Msg:    "success",
+	})
 }
 
 func RegisterLotman(ctx context.Context, router *gin.RouterGroup) {

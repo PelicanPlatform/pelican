@@ -744,7 +744,7 @@ func TestDiscoverOriginCache(t *testing.T) {
 		r.ServeHTTP(w, req)
 
 		assert.Equal(t, 403, w.Code)
-		assert.Equal(t, `{"error":"Authentication is required but no token is present."}`, w.Body.String())
+		assert.Equal(t, `{"status":"error","msg":"Authentication is required but no token is present."}`, w.Body.String())
 	})
 	t.Run("token-present-with-wrong-issuer-should-give-403", func(t *testing.T) {
 		req, err := http.NewRequest(http.MethodGet, "/test", nil)
@@ -758,7 +758,7 @@ func TestDiscoverOriginCache(t *testing.T) {
 		r.ServeHTTP(w, req)
 
 		assert.Equal(t, 403, w.Code)
-		assert.Equal(t, `{"error":"Cannot verify token: Cannot verify token with server issuer:  Token issuer https://wrong-issuer.org does not match the local issuer on the current server. Expecting https://fake-director.org:8888\n"}`, w.Body.String())
+		assert.Equal(t, `{"status":"error","msg":"Cannot verify token: Cannot verify token with server issuer:  Token issuer https://wrong-issuer.org does not match the local issuer on the current server. Expecting https://fake-director.org:8888\n"}`, w.Body.String())
 	})
 	t.Run("token-present-valid-should-give-200-and-empty-array", func(t *testing.T) {
 		req, err := http.NewRequest(http.MethodGet, "/test", nil)
@@ -1153,7 +1153,7 @@ func TestHandleFilterServer(t *testing.T) {
 		require.Equal(t, 400, w.Code)
 		resB, err := io.ReadAll(w.Body)
 		require.NoError(t, err)
-		assert.Contains(t, string(resB), "name is a required path parameter")
+		assert.Contains(t, string(resB), "'name' is a required path parameter")
 	})
 }
 
@@ -1179,7 +1179,7 @@ func TestHandleAllowServer(t *testing.T) {
 		require.Equal(t, 400, w.Code)
 		resB, err := io.ReadAll(w.Body)
 		require.NoError(t, err)
-		assert.Contains(t, string(resB), "Can't allow a server that is not being filtered.")
+		assert.Contains(t, string(resB), "Can't allow server mock-dne that is not being filtered")
 	})
 	t.Run("allow-server-w-permFiltered", func(t *testing.T) {
 		// Create a request to the endpoint
@@ -1231,7 +1231,7 @@ func TestHandleAllowServer(t *testing.T) {
 
 		resB, err := io.ReadAll(w.Body)
 		require.NoError(t, err)
-		assert.Contains(t, string(resB), "Can't allow a server that is not being filtered.")
+		assert.Contains(t, string(resB), "Can't allow server mock-ta that is not being filtered")
 	})
 	t.Run("allow-with-invalid-name", func(t *testing.T) {
 		// Create a request to the endpoint
@@ -1243,6 +1243,6 @@ func TestHandleAllowServer(t *testing.T) {
 		require.Equal(t, 400, w.Code)
 		resB, err := io.ReadAll(w.Body)
 		require.NoError(t, err)
-		assert.Contains(t, string(resB), "name is a required path parameter")
+		assert.Contains(t, string(resB), "'name' is a required path parameter")
 	})
 }

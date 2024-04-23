@@ -88,25 +88,40 @@ func HandleDirectorTestResponse(ctx *gin.Context, nChan chan bool) {
 		Scopes:  []token_scopes.TokenScope{token_scopes.Pelican_DirectorTestReport},
 	})
 	if !ok {
-		ctx.JSON(status, gin.H{"error": err.Error()})
+		ctx.JSON(status, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    err.Error(),
+		})
 	}
 
 	dt := server_structs.DirectorTestResult{}
 	if err := ctx.ShouldBind(&dt); err != nil {
 		log.Errorf("Invalid director test response: %v", err)
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid director test response: " + err.Error()})
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Invalid director test response: " + err.Error(),
+		})
 		return
 	}
 	// We will let the timer go timeout if director didn't send a valid json request
 	notifyNewDirectorResponse(ctx, nChan)
 	if dt.Status == "ok" {
 		metrics.SetComponentHealthStatus(metrics.OriginCache_Director, metrics.StatusOK, fmt.Sprintf("Director timestamp: %v", dt.Timestamp))
-		ctx.JSON(http.StatusOK, gin.H{"msg": "Success"})
+		ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{
+			Status: server_structs.RespOK,
+			Msg:    "Success",
+		})
 	} else if dt.Status == "error" {
 		metrics.SetComponentHealthStatus(metrics.OriginCache_Director, metrics.StatusCritical, dt.Message)
-		ctx.JSON(http.StatusOK, gin.H{"msg": "Success"})
+		ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{
+			Status: server_structs.RespOK,
+			Msg:    "Success",
+		})
 	} else {
 		log.Errorf("Invalid director test response, status: %s", dt.Status)
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Invalid director test response status: %s", dt.Status)})
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Invalid director test response status: %s", dt.Status),
+		})
 	}
 }

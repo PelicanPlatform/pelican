@@ -53,6 +53,8 @@ func setupMockRegistryDB(t *testing.T) {
 func resetNamespaceDB(t *testing.T) {
 	err := db.Where("1 = 1").Delete(&Namespace{}).Error
 	require.NoError(t, err, "Error resetting namespace DB")
+	err = db.Where("1 = 1").Delete(&Topology{}).Error
+	require.NoError(t, err, "Error resetting topology DB")
 }
 
 func teardownMockNamespaceDB(t *testing.T) {
