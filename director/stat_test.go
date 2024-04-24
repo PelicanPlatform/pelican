@@ -37,7 +37,7 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-func TestQueryOriginsForObject(t *testing.T) {
+func TestQueryServersForObject(t *testing.T) {
 	viper.Reset()
 	viper.Set("Director.MinStatResponse", 1)
 	viper.Set("Director.MaxStatResponse", 1)
@@ -67,18 +67,19 @@ func TestQueryOriginsForObject(t *testing.T) {
 		mockServerAd2 := server_structs.ServerAd{Name: "origin2", URL: url.URL{Host: "example2.com", Scheme: "https"}, Type: server_structs.OriginType}
 		mockServerAd3 := server_structs.ServerAd{Name: "origin3", URL: url.URL{Host: "example3.com", Scheme: "https"}, Type: server_structs.OriginType}
 		mockServerAd4 := server_structs.ServerAd{Name: "origin4", URL: url.URL{Host: "example4.com", Scheme: "https"}, Type: server_structs.OriginType}
-		mockServerAd5 := server_structs.ServerAd{Name: "cache1", URL: url.URL{Host: "cache1.com", Scheme: "https"}, Type: server_structs.OriginType}
+		mockServerAd5 := server_structs.ServerAd{Name: "cache1", URL: url.URL{Host: "cache1.com", Scheme: "https"}, Type: server_structs.CacheType}
 		mockNsAd0 := server_structs.NamespaceAdV2{Path: "/foo"}
 		mockNsAd1 := server_structs.NamespaceAdV2{Path: "/foo/bar"}
 		mockNsAd2 := server_structs.NamespaceAdV2{Path: "/foo/x"}
 		mockNsAd3 := server_structs.NamespaceAdV2{Path: "/foo/bar/barz"}
 		mockNsAd4 := server_structs.NamespaceAdV2{Path: "/unrelated"}
 		mockNsAd5 := server_structs.NamespaceAdV2{Path: "/caches/hostname"}
+		mockNsCacheOnly := server_structs.NamespaceAdV2{Path: "/foo/cache/only"}
 		serverAds.Set(mockServerAd1, []server_structs.NamespaceAdV2{mockNsAd0}, ttlcache.DefaultTTL)
 		serverAds.Set(mockServerAd2, []server_structs.NamespaceAdV2{mockNsAd1}, ttlcache.DefaultTTL)
 		serverAds.Set(mockServerAd3, []server_structs.NamespaceAdV2{mockNsAd1, mockNsAd4}, ttlcache.DefaultTTL)
 		serverAds.Set(mockServerAd4, []server_structs.NamespaceAdV2{mockNsAd2, mockNsAd3}, ttlcache.DefaultTTL)
-		serverAds.Set(mockServerAd5, []server_structs.NamespaceAdV2{mockNsAd5}, ttlcache.DefaultTTL)
+		serverAds.Set(mockServerAd5, []server_structs.NamespaceAdV2{mockNsAd5, mockNsAd0, mockNsAd1, mockNsCacheOnly}, ttlcache.DefaultTTL)
 	}
 
 	cleanupMock := func() {
@@ -186,6 +187,79 @@ func TestQueryOriginsForObject(t *testing.T) {
 		require.NotNil(t, result)
 		require.Equal(t, 1, len(result))
 		assert.True(t, result[0].URL.String() == "https://example2.com/foo/bar/test.txt" || result[0].URL.String() == "https://example3.com/foo/bar/test.txt", "Return value is not expected:", result[0].URL.String())
+	})
+
+	t.Run("prefix-only-in-cache-return-nil-when-only-querying-origin", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		mockTTLCache()
+		initMockStatUtils()
+		defer cleanupMock()
+
+		result, msg, err := stat.queryServersForObject(ctx, "/foo/cache/only/test.txt", config.OriginType, 0, 0)
+
+		require.Error(t, err)
+		assert.Empty(t, msg)
+		assert.Equal(t, NoPrefixMatchError, err)
+		assert.Equal(t, 0, len(result))
+	})
+
+	t.Run("prefix-only-in-origin-return-nil-when-only-querying-cache", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		mockTTLCache()
+		initMockStatUtils()
+		defer cleanupMock()
+
+		result, msg, err := stat.queryServersForObject(ctx, "/foo/bar/barz/test.txt", config.CacheType, 0, 0)
+
+		require.Error(t, err)
+		assert.Empty(t, msg)
+		assert.Equal(t, NoPrefixMatchError, err)
+		assert.Equal(t, 0, len(result))
+	})
+
+	t.Run("prefix-only-in-cache-returns-when-only-querying-cache", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		mockTTLCache()
+		initMockStatUtils()
+		defer cleanupMock()
+
+		result, msg, err := stat.queryServersForObject(ctx, "/foo/cache/only/test.txt", config.CacheType, 0, 0)
+
+		require.NoError(t, err)
+		// By default maxReq is set to 1. Therefore, although there's 2 matched prefixes,
+		// only one will be returned
+		assert.Contains(t, msg, "Maximum responses reached for stat. Return result and cancel ongoing requests.")
+		require.NotNil(t, result)
+		require.Equal(t, 1, len(result))
+		assert.True(t, result[0].URL.String() == "https://cache1.com/foo/cache/only/test.txt", "Return value is not expected:", result[0].URL.String())
+	})
+
+	t.Run("prefix-only-in-cache-returns-when-querying-both", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		mockTTLCache()
+		initMockStatUtils()
+		defer cleanupMock()
+
+		sType := config.CacheType
+		sType.Set(config.OriginType)
+
+		result, msg, err := stat.queryServersForObject(ctx, "/foo/cache/only/test.txt", sType, 0, 0)
+
+		require.NoError(t, err)
+		// By default maxReq is set to 1. Therefore, although there's 2 matched prefixes,
+		// only one will be returned
+		assert.Contains(t, msg, "Maximum responses reached for stat. Return result and cancel ongoing requests.")
+		require.NotNil(t, result)
+		require.Equal(t, 1, len(result))
+		assert.True(t, result[0].URL.String() == "https://cache1.com/foo/cache/only/test.txt", "Return value is not expected:", result[0].URL.String())
 	})
 
 	t.Run("matched-prefixes-with-max-2-returns-response", func(t *testing.T) {
@@ -349,7 +423,7 @@ func TestQueryOriginsForObject(t *testing.T) {
 	})
 }
 
-func TestSendHeadReqToOrigin(t *testing.T) {
+func TestSendHeadReq(t *testing.T) {
 	viper.Reset()
 
 	// Start a local HTTP server

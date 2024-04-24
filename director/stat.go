@@ -37,6 +37,14 @@ import (
 )
 
 type (
+	QueryConfig struct {
+		originAds         []server_structs.ServerAd
+		cacheAds          []server_structs.ServerAd
+		originAdsProvided bool // Explictly mark the originAds are provided, not based on the length of the array
+		cacheAdsProvided  bool // Explictly mark the cacheAds are provided, not based on the length of the array
+	}
+
+	QueryOption    func(*QueryConfig)
 	objectMetadata struct {
 		URL           url.URL `json:"url"` // The object URL
 		Checksum      string  `json:"checksum"`
@@ -58,8 +66,8 @@ type (
 	// A struct to implement `object stat`, by querying against origins with namespaces match the prefix of an object name
 	// and return origins that have the object
 	ObjectStat struct {
-		ReqHandler func(maxCancelCtx context.Context, objectName string, dataUrl url.URL, timeout time.Duration) (*objectMetadata, error)                   // Handle the request to test if an object exists on a server
-		Query      func(cancelContext context.Context, objectName string, sType config.ServerType, mininum, maximum int) ([]*objectMetadata, string, error) // Manage a `stat` request to origin servers given an objectName
+		ReqHandler func(maxCancelCtx context.Context, objectName string, dataUrl url.URL, timeout time.Duration) (*objectMetadata, error)                                           // Handle the request to test if an object exists on a server
+		Query      func(cancelContext context.Context, objectName string, sType config.ServerType, mininum, maximum int, options ...QueryOption) ([]*objectMetadata, string, error) // Manage a `stat` request to origin servers given an objectName
 	}
 )
 
@@ -156,20 +164,69 @@ func (stat *ObjectStat) sendHeadReq(ctx context.Context, objectName string, data
 	}
 }
 
+func WithOriginAds(ads []server_structs.ServerAd) QueryOption {
+	return func(c *QueryConfig) {
+		c.originAds = ads
+		c.originAdsProvided = true
+	}
+}
+
+func WithCacheAds(ads []server_structs.ServerAd) QueryOption {
+	return func(c *QueryConfig) {
+		c.cacheAds = ads
+		c.cacheAdsProvided = true
+	}
+}
+
 // Implementation of querying origins/cache servers for their availability of an object.
 // It blocks until max successful requests has been received, all potential origins/caches responded (or timeout), or cancelContext was closed.
+//
 // sType can be config.OriginType, config.CacheType, or both.
 //
+// You may optionally provide an array of origin and/or cache advertisment via WithOriginAds/WithCacheAds for the query to base on,
+// instead of calling getAdsForPath() internally.
+//
 // Returns the object metadata with available urls, a message indicating the stat result, and error if any.
-func (stat *ObjectStat) queryServersForObject(cancelContext context.Context, objectName string, sType config.ServerType, minimum, maximum int) ([]*objectMetadata, string, error) {
+func (stat *ObjectStat) queryServersForObject(cancelContext context.Context, objectName string, sType config.ServerType, minimum, maximum int, options ...QueryOption) ([]*objectMetadata, string, error) {
+	cfg := QueryConfig{}
+	for _, option := range options {
+		option(&cfg)
+	}
+
 	ads := []server_structs.ServerAd{}
-	_, originAds, cacheAds := getAdsForPath(objectName)
-	if sType.IsEnabled(config.OriginType) {
-		ads = append(ads, originAds...)
+
+	// Also a bit verbose, this logic make sure we only fetch origin/cacheAds if it's not provided
+	// AND the sType has the corresponding server type
+	if sType.IsEnabled(config.OriginType) && !sType.IsEnabled(config.CacheType) { // Origin only
+		if !cfg.originAdsProvided {
+			_, originAds, _ := getAdsForPath(objectName)
+			ads = append(ads, originAds...)
+		} else {
+			ads = append(ads, cfg.originAds...)
+		}
+	} else if sType.IsEnabled(config.CacheType) && !sType.IsEnabled(config.OriginType) { // Cache only
+		if !cfg.cacheAdsProvided {
+			_, _, cacheAds := getAdsForPath(objectName)
+			ads = append(ads, cacheAds...)
+		} else {
+			ads = append(ads, cfg.cacheAds...)
+		}
+	} else if sType.IsEnabled(config.CacheType) && sType.IsEnabled(config.OriginType) {
+		if !cfg.originAdsProvided {
+			_, originAds, _ := getAdsForPath(objectName)
+			ads = append(ads, originAds...)
+		} else {
+			ads = append(ads, cfg.originAds...)
+		}
+
+		if !cfg.cacheAdsProvided {
+			_, _, cacheAds := getAdsForPath(objectName)
+			ads = append(ads, cacheAds...)
+		} else {
+			ads = append(ads, cfg.cacheAds...)
+		}
 	}
-	if sType.IsEnabled(config.CacheType) {
-		ads = append(ads, cacheAds...)
-	}
+
 	minReq := param.Director_MinStatResponse.GetInt()
 	maxReq := param.Director_MaxStatResponse.GetInt()
 	if minimum > 0 {
