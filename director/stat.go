@@ -37,14 +37,14 @@ import (
 )
 
 type (
-	QueryConfig struct {
+	queryConfig struct {
 		originAds         []server_structs.ServerAd
 		cacheAds          []server_structs.ServerAd
 		originAdsProvided bool // Explictly mark the originAds are provided, not based on the length of the array
 		cacheAdsProvided  bool // Explictly mark the cacheAds are provided, not based on the length of the array
 	}
 
-	QueryOption    func(*QueryConfig)
+	queryOption    func(*queryConfig)
 	objectMetadata struct {
 		URL           url.URL `json:"url"` // The object URL
 		Checksum      string  `json:"checksum"`
@@ -67,7 +67,7 @@ type (
 	// and return origins that have the object
 	ObjectStat struct {
 		ReqHandler func(maxCancelCtx context.Context, objectName string, dataUrl url.URL, timeout time.Duration) (*objectMetadata, error)                                           // Handle the request to test if an object exists on a server
-		Query      func(cancelContext context.Context, objectName string, sType config.ServerType, mininum, maximum int, options ...QueryOption) ([]*objectMetadata, string, error) // Manage a `stat` request to origin servers given an objectName
+		Query      func(cancelContext context.Context, objectName string, sType config.ServerType, mininum, maximum int, options ...queryOption) ([]*objectMetadata, string, error) // Manage a `stat` request to origin servers given an objectName
 	}
 )
 
@@ -164,15 +164,17 @@ func (stat *ObjectStat) sendHeadReq(ctx context.Context, objectName string, data
 	}
 }
 
-func WithOriginAds(ads []server_structs.ServerAd) QueryOption {
-	return func(c *QueryConfig) {
+// For internal use only
+func withOriginAds(ads []server_structs.ServerAd) queryOption {
+	return func(c *queryConfig) {
 		c.originAds = ads
 		c.originAdsProvided = true
 	}
 }
 
-func WithCacheAds(ads []server_structs.ServerAd) QueryOption {
-	return func(c *QueryConfig) {
+// For internal use only
+func withCacheAds(ads []server_structs.ServerAd) queryOption {
+	return func(c *queryConfig) {
 		c.cacheAds = ads
 		c.cacheAdsProvided = true
 	}
@@ -183,12 +185,9 @@ func WithCacheAds(ads []server_structs.ServerAd) QueryOption {
 //
 // sType can be config.OriginType, config.CacheType, or both.
 //
-// You may optionally provide an array of origin and/or cache advertisment via WithOriginAds/WithCacheAds for the query to base on,
-// instead of calling getAdsForPath() internally.
-//
 // Returns the object metadata with available urls, a message indicating the stat result, and error if any.
-func (stat *ObjectStat) queryServersForObject(cancelContext context.Context, objectName string, sType config.ServerType, minimum, maximum int, options ...QueryOption) ([]*objectMetadata, string, error) {
-	cfg := QueryConfig{}
+func (stat *ObjectStat) queryServersForObject(cancelContext context.Context, objectName string, sType config.ServerType, minimum, maximum int, options ...queryOption) ([]*objectMetadata, string, error) {
+	cfg := queryConfig{}
 	for _, option := range options {
 		option(&cfg)
 	}

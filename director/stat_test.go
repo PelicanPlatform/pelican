@@ -57,7 +57,7 @@ func TestQueryServersForObject(t *testing.T) {
 	func() {
 		serverAdMutex.Lock()
 		defer serverAdMutex.Unlock()
-		serverAds = ttlcache.New[server_structs.ServerAd, []server_structs.NamespaceAdV2](ttlcache.WithTTL[server_structs.ServerAd, []server_structs.NamespaceAdV2](15 * time.Minute))
+		serverAds = ttlcache.New(ttlcache.WithTTL[server_structs.ServerAd, []server_structs.NamespaceAdV2](15 * time.Minute))
 	}()
 
 	mockTTLCache := func() {
@@ -237,7 +237,7 @@ func TestQueryServersForObject(t *testing.T) {
 		assert.Contains(t, msg, "Maximum responses reached for stat. Return result and cancel ongoing requests.")
 		require.NotNil(t, result)
 		require.Equal(t, 1, len(result))
-		assert.True(t, result[0].URL.String() == "https://cache1.com/foo/cache/only/test.txt", "Return value is not expected:", result[0].URL.String())
+		assert.Equal(t, "https://cache1.com/foo/cache/only/test.txt", result[0].URL.String(), "Return value is not expected:", result[0].URL.String())
 	})
 
 	t.Run("prefix-only-in-cache-returns-when-querying-both", func(t *testing.T) {
@@ -259,7 +259,65 @@ func TestQueryServersForObject(t *testing.T) {
 		assert.Contains(t, msg, "Maximum responses reached for stat. Return result and cancel ongoing requests.")
 		require.NotNil(t, result)
 		require.Equal(t, 1, len(result))
-		assert.True(t, result[0].URL.String() == "https://cache1.com/foo/cache/only/test.txt", "Return value is not expected:", result[0].URL.String())
+		assert.Equal(t, "https://cache1.com/foo/cache/only/test.txt", result[0].URL.String(), "Return value is not expected:", result[0].URL.String())
+	})
+
+	t.Run("provided-cacheAd-overwrite-cached-ads", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		mockTTLCache()
+		initMockStatUtils()
+		defer cleanupMock()
+
+		mockCacheServer := []server_structs.ServerAd{{Name: "cache-overwrite", URL: url.URL{Host: "cache-overwrites.com", Scheme: "https"}}}
+
+		originStatUtilsMutex.Lock()
+		originStatUtils[mockCacheServer[0].URL] = originStatUtil{
+			Context:  ctx,
+			Cancel:   cancel,
+			Errgroup: &errgroup.Group{},
+		}
+		originStatUtilsMutex.Unlock()
+
+		result, msg, err := stat.queryServersForObject(ctx, "/overwrites/test.txt", config.CacheType, 0, 0, withCacheAds(mockCacheServer))
+
+		require.NoError(t, err)
+		// By default maxReq is set to 1. Therefore, although there's 2 matched prefixes,
+		// only one will be returned
+		assert.Contains(t, msg, "Maximum responses reached for stat. Return result and cancel ongoing requests.")
+		require.NotNil(t, result)
+		require.Equal(t, 1, len(result))
+		assert.Equal(t, "https://cache-overwrites.com/overwrites/test.txt", result[0].URL.String(), "Return value is not expected:", result[0].URL.String())
+	})
+
+	t.Run("provided-originAds-overwrite-cached-ads", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		mockTTLCache()
+		initMockStatUtils()
+		defer cleanupMock()
+
+		mockOrigin := []server_structs.ServerAd{{Name: "origin-overwrite", URL: url.URL{Host: "origin-overwrites.com", Scheme: "https"}}}
+
+		originStatUtilsMutex.Lock()
+		originStatUtils[mockOrigin[0].URL] = originStatUtil{
+			Context:  ctx,
+			Cancel:   cancel,
+			Errgroup: &errgroup.Group{},
+		}
+		originStatUtilsMutex.Unlock()
+
+		result, msg, err := stat.queryServersForObject(ctx, "/overwrites/test.txt", config.OriginType, 0, 0, withOriginAds(mockOrigin))
+
+		require.NoError(t, err)
+		// By default maxReq is set to 1. Therefore, although there's 2 matched prefixes,
+		// only one will be returned
+		assert.Contains(t, msg, "Maximum responses reached for stat. Return result and cancel ongoing requests.")
+		require.NotNil(t, result)
+		require.Equal(t, 1, len(result))
+		assert.Equal(t, "https://origin-overwrites.com/overwrites/test.txt", result[0].URL.String(), "Return value is not expected:", result[0].URL.String())
 	})
 
 	t.Run("matched-prefixes-with-max-2-returns-response", func(t *testing.T) {
