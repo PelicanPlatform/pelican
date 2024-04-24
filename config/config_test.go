@@ -65,7 +65,7 @@ func TestMain(m *testing.M) {
 		w.WriteHeader(http.StatusOK)
 		code, err := w.Write([]byte("Success"))
 		if err != nil {
-			fmt.Printf("Error writing out reponse: %d, %v", code, err)
+			fmt.Printf("Error writing out response: %d, %v", code, err)
 			os.Exit(1)
 		}
 	}))

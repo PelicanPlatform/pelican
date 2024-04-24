@@ -338,7 +338,7 @@ func ConnectToOrigin(ctx context.Context, brokerUrl, prefix, originName string) 
 		conn, _, err = hj.Hijack()
 		tlsConn, ok := conn.(*tls.Conn)
 		if ok {
-			// Once the cache recieves the HTTP response, it'll close the TLS connection
+			// Once the cache receives the HTTP response, it'll close the TLS connection
 			// That will cause a "close notify" to be sent back to the origin (this goroutine),
 			// which indicates the last TLS record has been received.  That will cause an EOF
 			// to be read from the TLS socket.

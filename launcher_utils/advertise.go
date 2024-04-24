@@ -16,7 +16,7 @@
  *
  ***************************************************************/
 
-// launcher_utils are utility functions for laucnhers package.
+// launcher_utils are utility functions for launchers package.
 // It should only be imported by the launchers package
 // It should NOT be imported to any server pacakges (origin/cache/registry) or other lower level packages (config/utils/etc)
 package launcher_utils

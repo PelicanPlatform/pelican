@@ -93,7 +93,7 @@ func (t TestFileTransferImpl) generateFileTestScitoken() (string, error) {
 	return tok, nil
 }
 
-// Private function to upload a test file to the `baseUrl` of an exported xrootd file direcotry
+// Private function to upload a test file to the `baseUrl` of an exported xrootd file directory
 // the test file content is based on the `testType` attribute
 func (t TestFileTransferImpl) uploadTestfile(ctx context.Context, baseUrl string, namespace string) (string, error) {
 	tkn, err := t.generateFileTestScitoken()

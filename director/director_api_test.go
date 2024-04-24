@@ -138,7 +138,7 @@ func TestListNamespaces(t *testing.T) {
 
 func TestListServerAds(t *testing.T) {
 
-	t.Run("emtpy-cache", func(t *testing.T) {
+	t.Run("empty-cache", func(t *testing.T) {
 		func() {
 			serverAdMutex.Lock()
 			defer serverAdMutex.Unlock()
