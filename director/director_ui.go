@@ -158,7 +158,7 @@ func queryOrigins(ctx *gin.Context) {
 		})
 		return
 	}
-	meta, msg, err := NewObjectStat().Query(path, ctx, config.OriginType, queryParams.MinResponses, queryParams.MaxResponses)
+	meta, msg, err := NewObjectStat().Query(ctx, path, config.OriginType, queryParams.MinResponses, queryParams.MaxResponses)
 	if err != nil {
 		if err == NoPrefixMatchError {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{

@@ -58,8 +58,8 @@ type (
 	// A struct to implement `object stat`, by querying against origins with namespaces match the prefix of an object name
 	// and return origins that have the object
 	ObjectStat struct {
-		ReqHandler func(objectName string, dataUrl url.URL, timeout time.Duration, maxCancelCtx context.Context) (*objectMetadata, error)                   // Handle the request to test if an object exists on a server
-		Query      func(objectName string, cancelContext context.Context, sType config.ServerType, mininum, maximum int) ([]*objectMetadata, string, error) // Manage a `stat` request to origin servers given an objectName
+		ReqHandler func(maxCancelCtx context.Context, objectName string, dataUrl url.URL, timeout time.Duration) (*objectMetadata, error)                   // Handle the request to test if an object exists on a server
+		Query      func(cancelContext context.Context, objectName string, sType config.ServerType, mininum, maximum int) ([]*objectMetadata, string, error) // Manage a `stat` request to origin servers given an objectName
 	}
 )
 
@@ -98,7 +98,7 @@ func NewObjectStat() *ObjectStat {
 }
 
 // Implementation of sending a HEAD request to an origin for an object
-func (stat *ObjectStat) sendHeadReq(objectName string, dataUrl url.URL, timeout time.Duration, ctx context.Context) (*objectMetadata, error) {
+func (stat *ObjectStat) sendHeadReq(ctx context.Context, objectName string, dataUrl url.URL, timeout time.Duration) (*objectMetadata, error) {
 	tokenConf := token.NewWLCGToken()
 	tokenConf.Lifetime = time.Minute
 	tokenConf.AddAudiences(dataUrl.String())
@@ -157,9 +157,11 @@ func (stat *ObjectStat) sendHeadReq(objectName string, dataUrl url.URL, timeout 
 }
 
 // Implementation of querying origins/cache servers for their availability of an object.
-// It blocks until max successful requests has been received, all potential origins/caches responded (or timeout), or cancelContext was closed
-// sType can be config.OriginType, config.CacheType, or both
-func (stat *ObjectStat) queryServersForObject(objectName string, cancelContext context.Context, sType config.ServerType, minimum, maximum int) ([]*objectMetadata, string, error) {
+// It blocks until max successful requests has been received, all potential origins/caches responded (or timeout), or cancelContext was closed.
+// sType can be config.OriginType, config.CacheType, or both.
+//
+// Returns the object metadata with available urls, a message indicating the stat result, and error if any.
+func (stat *ObjectStat) queryServersForObject(cancelContext context.Context, objectName string, sType config.ServerType, minimum, maximum int) ([]*objectMetadata, string, error) {
 	ads := []server_structs.ServerAd{}
 	_, originAds, cacheAds := getAdsForPath(objectName)
 	if sType.IsEnabled(config.OriginType) {
@@ -205,7 +207,7 @@ func (stat *ObjectStat) queryServersForObject(objectName string, cancelContext c
 		// to goroutine
 		func(intOriginAd server_structs.ServerAd) {
 			originUtil.Errgroup.Go(func() error {
-				metadata, err := stat.ReqHandler(objectName, intOriginAd.URL, timeout, maxCancelCtx)
+				metadata, err := stat.ReqHandler(maxCancelCtx, objectName, intOriginAd.URL, timeout)
 
 				if err != nil {
 					switch e := err.(type) {

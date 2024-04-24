@@ -47,7 +47,7 @@ func TestQueryOriginsForObject(t *testing.T) {
 	oldAds := serverAds
 
 	stat := NewObjectStat()
-	stat.ReqHandler = func(objectName string, dataUrl url.URL, timeout time.Duration, maxCancelCtx context.Context) (*objectMetadata, error) {
+	stat.ReqHandler = func(maxCancelCtx context.Context, objectName string, dataUrl url.URL, timeout time.Duration) (*objectMetadata, error) {
 		return &objectMetadata{URL: *dataUrl.JoinPath(objectName)}, nil
 	}
 
@@ -119,7 +119,7 @@ func TestQueryOriginsForObject(t *testing.T) {
 		defer cancel()
 		cleanupMock()
 
-		result, msg, err := stat.queryServersForObject("/foo/bar/test.txt", ctx, config.OriginType, 0, 0)
+		result, msg, err := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 0, 0)
 
 		require.Error(t, err)
 		assert.Empty(t, msg)
@@ -131,7 +131,7 @@ func TestQueryOriginsForObject(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		result, msg, err := stat.queryServersForObject("/foo/bar/test.txt", ctx, config.OriginType, 3, 1)
+		result, msg, err := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 3, 1)
 
 		require.Error(t, err)
 		assert.Empty(t, msg)
@@ -146,7 +146,7 @@ func TestQueryOriginsForObject(t *testing.T) {
 		mockTTLCache()
 		defer cleanupMock()
 
-		result, msg, err := stat.queryServersForObject("/dne/random.txt", ctx, config.OriginType, 0, 0)
+		result, msg, err := stat.queryServersForObject(ctx, "/dne/random.txt", config.OriginType, 0, 0)
 
 		require.Error(t, err)
 		assert.Empty(t, msg)
@@ -161,7 +161,7 @@ func TestQueryOriginsForObject(t *testing.T) {
 		mockTTLCache()
 		defer cleanupMock()
 
-		result, msg, err := stat.queryServersForObject("/foo/bar/test.txt", ctx, config.OriginType, 0, 0)
+		result, msg, err := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 0, 0)
 
 		require.Error(t, err)
 		assert.Contains(t, msg, "Number of success response: 0 is less than MinStatRespons")
@@ -177,7 +177,7 @@ func TestQueryOriginsForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result, msg, err := stat.queryServersForObject("/foo/bar/test.txt", ctx, config.OriginType, 0, 0)
+		result, msg, err := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 0, 0)
 
 		require.NoError(t, err)
 		// By default maxReq is set to 1. Therefore, although there's 2 matched prefixes,
@@ -199,7 +199,7 @@ func TestQueryOriginsForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result, msg, err := stat.queryServersForObject("/foo/bar/test.txt", ctx, config.OriginType, 0, 0)
+		result, msg, err := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 0, 0)
 
 		require.NoError(t, err)
 		assert.Contains(t, msg, "Maximum responses reached for stat. Return result and cancel ongoing requests.")
@@ -220,7 +220,7 @@ func TestQueryOriginsForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result, msg, err := stat.queryServersForObject("/foo/bar/test.txt", ctx, config.OriginType, 0, 0)
+		result, msg, err := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 0, 0)
 
 		require.NoError(t, err)
 		// Response =2 < maxreq, so there won't be any message
@@ -244,7 +244,7 @@ func TestQueryOriginsForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result, msg, err := stat.queryServersForObject("/foo/bar/test.txt", ctx, config.OriginType, 0, 0)
+		result, msg, err := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 0, 0)
 
 		require.Error(t, err)
 		assert.Equal(t, "Number of success response: 2 is less than MinStatResponse (3) required.", msg)
@@ -265,7 +265,7 @@ func TestQueryOriginsForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result, msg, err := stat.queryServersForObject("/foo/bar/test.txt", ctx, config.OriginType, 1, 1)
+		result, msg, err := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 1, 1)
 
 		require.NoError(t, err)
 		assert.Contains(t, msg, "Maximum responses reached for stat. Return result and cancel ongoing requests.")
@@ -280,7 +280,7 @@ func TestQueryOriginsForObject(t *testing.T) {
 			stat.ReqHandler = oldHandler
 		}()
 
-		stat.ReqHandler = func(objectName string, dataUrl url.URL, timeout time.Duration, maxCancelCtx context.Context) (*objectMetadata, error) {
+		stat.ReqHandler = func(maxCancelCtx context.Context, objectName string, dataUrl url.URL, timeout time.Duration) (*objectMetadata, error) {
 			time.Sleep(time.Second * 30)
 			return &objectMetadata{URL: *dataUrl.JoinPath(objectName)}, nil
 		}
@@ -294,7 +294,7 @@ func TestQueryOriginsForObject(t *testing.T) {
 		msgChan := make(chan string)
 
 		go func() {
-			_, msg, _ := stat.queryServersForObject("/foo/bar/test.txt", ctx, config.OriginType, 0, 0)
+			_, msg, _ := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 0, 0)
 			msgChan <- msg
 		}()
 
@@ -323,7 +323,7 @@ func TestQueryOriginsForObject(t *testing.T) {
 			stat.ReqHandler = oldHandler
 		}()
 
-		stat.ReqHandler = func(objectName string, dataUrl url.URL, timeout time.Duration, maxCancelCtx context.Context) (*objectMetadata, error) {
+		stat.ReqHandler = func(maxCancelCtx context.Context, objectName string, dataUrl url.URL, timeout time.Duration) (*objectMetadata, error) {
 			if dataUrl.Host == "example2.com" {
 				return nil, timeoutError{}
 			}
@@ -340,7 +340,7 @@ func TestQueryOriginsForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result, msg, err := stat.queryServersForObject("/foo/bar/test.txt", ctx, config.OriginType, 0, 0)
+		result, msg, err := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 0, 0)
 
 		require.Error(t, err)
 		assert.Equal(t, "Number of success response: 0 is less than MinStatResponse (1) required.", msg)
@@ -396,7 +396,7 @@ func TestSendHeadReqToOrigin(t *testing.T) {
 		stat := NewObjectStat()
 
 		defer cancel()
-		meta, err := stat.sendHeadReq("/foo/bar/test.txt", mockOriginAd.URL, time.Second, ctx)
+		meta, err := stat.sendHeadReq(ctx, "/foo/bar/test.txt", mockOriginAd.URL, time.Second)
 		require.NoError(t, err)
 		assert.NotNil(t, meta)
 		assert.Equal(t, 1, meta.ContentLength)
@@ -408,7 +408,7 @@ func TestSendHeadReqToOrigin(t *testing.T) {
 		stat := NewObjectStat()
 
 		defer cancel()
-		meta, err := stat.sendHeadReq("/foo/bar/dne", mockOriginAd.URL, time.Second, ctx)
+		meta, err := stat.sendHeadReq(ctx, "/foo/bar/dne", mockOriginAd.URL, time.Second)
 		require.Error(t, err)
 		_, ok := err.(notFoundError)
 		assert.True(t, ok)
@@ -420,7 +420,7 @@ func TestSendHeadReqToOrigin(t *testing.T) {
 		stat := NewObjectStat()
 
 		defer cancel()
-		meta, err := stat.sendHeadReq("/foo/bar/timeout.txt", mockOriginAd.URL, 200*time.Millisecond, ctx)
+		meta, err := stat.sendHeadReq(ctx, "/foo/bar/timeout.txt", mockOriginAd.URL, 200*time.Millisecond)
 		require.Error(t, err)
 		_, ok := err.(timeoutError)
 		assert.True(t, ok)
@@ -436,7 +436,7 @@ func TestSendHeadReqToOrigin(t *testing.T) {
 			cancel()
 		}()
 
-		meta, err := stat.sendHeadReq("/foo/bar/timeout.txt", mockOriginAd.URL, 5*time.Second, ctx)
+		meta, err := stat.sendHeadReq(ctx, "/foo/bar/timeout.txt", mockOriginAd.URL, 5*time.Second)
 
 		require.Error(t, err)
 		_, ok := err.(cancelledError)
@@ -449,7 +449,7 @@ func TestSendHeadReqToOrigin(t *testing.T) {
 		stat := NewObjectStat()
 
 		defer cancel()
-		meta, err := stat.sendHeadReq("/foo/bar/error.txt", mockOriginAd.URL, 200*time.Millisecond, ctx)
+		meta, err := stat.sendHeadReq(ctx, "/foo/bar/error.txt", mockOriginAd.URL, 200*time.Millisecond)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "Unknown origin response with status code 500")
 		assert.Nil(t, meta)
