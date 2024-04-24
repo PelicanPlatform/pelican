@@ -944,6 +944,10 @@ func (te *TransferEngine) runMux() error {
 			// If no transfers were created and we have an error, the job is no
 			// longer active
 			if job.job.lookupErr != nil && job.job.totalXfer == 0 {
+				// Make sure we update results of this error
+				log.Errorln(job.job.lookupErr)
+				results := &TransferResults{jobId: job.job.uuid, job: job.job, Error: job.job.lookupErr, Scheme: job.job.remoteURL.Scheme}
+				te.resultsMap[job.uuid] <- results
 				// Remove this job from the list of active jobs for the client.
 				activeJobs[job.uuid] = slices.DeleteFunc(activeJobs[job.uuid], func(oldJob *TransferJob) bool {
 					return oldJob.uuid == job.job.uuid
@@ -2288,7 +2292,7 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 	}
 	infos, err := client.ReadDir(remotePath)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "failed to read remote directory")
 	}
 	localBase := strings.TrimPrefix(remotePath, job.job.remoteURL.Path)
 	for _, info := range infos {
