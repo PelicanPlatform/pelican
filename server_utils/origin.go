@@ -492,7 +492,8 @@ from S3 service URL. In this configuration, objects can be accessed at /federati
 	return originExports, nil
 }
 
-func CheckSentinelLocation(exports []OriginExport) (ok bool, err error) {
+// Check the sentinel files from Origin.Exports
+func CheckOriginSentinelLocations(exports []OriginExport) (ok bool, err error) {
 	for _, export := range exports {
 		if export.SentinelLocation != "" {
 			sentinelPath := path.Clean(export.SentinelLocation)

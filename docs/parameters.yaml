@@ -459,7 +459,9 @@ description: |+
       where each of these has the same effect as the corresponding "Origin.Enable*" configuration, except scoped to the
       given export. If "PublicReads" is included, "Reads" is inferred.
   - SentinelLocation: A filename under `StoragePrefix` path for Pelican to check the storage directory exists and is correctly mounted.
-      Leave it empty to skip the check. You should always choose a distinguished name for `SentinelLocation`. It should not be reused for other servers.
+      The value must be a file and contain no directory. Leave it empty to skip the check.
+
+      You should always choose a distinct name for `SentinelLocation`. It should not be reused for other servers.
       If running in a containerized environment it should not be the name of the underlying physical host as that may change and lead to confusion.
       You need to manually create a file under path to `StoragePrefix` with the same name as `SentinelLocation`. Note that this parameter will be ignored
       if the origin StorageType is S3.
@@ -937,6 +939,18 @@ description: |+
 type: filename
 root_default: /run/pelican/xrootd/cache
 default: $XDG_RUNTIME_DIR/pelican/cache
+components: ["cache"]
+---
+name: Cache.SentinelLocation
+description: |+
+  A filename under `Cache.DataLocation` path for Pelican to check the storage directory exists and is correctly mounted.
+  The value must be a file and contain no directory. Leave it empty to skip the check.
+
+  You should always choose a distinct name for `Cache.SentinelLocation`. It should not be reused for other servers.
+  If running in a containerized environment it should not be the name of the underlying physical host as that may change and lead to confusion.
+  You need to manually create a file under path to `Cache.DataLocation` with the same name as `Cache.SentinelLocation`.
+type: filename
+default: none
 components: ["cache"]
 ---
 name: Cache.XRootDPrefix
