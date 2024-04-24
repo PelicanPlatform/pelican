@@ -16,7 +16,8 @@
  *
  ***************************************************************/
 
-// launcher_utils are utility functions for launchers package.
+// Package launcher_utils contains utility functions for the [github.com/pelicanplatform/pelican/launcher_utils] package.
+//
 // It should only be imported by the launchers package
 // It should NOT be imported to any server pacakges (origin/cache/registry) or other lower level packages (config/utils/etc)
 package launcher_utils
