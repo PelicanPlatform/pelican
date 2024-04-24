@@ -666,6 +666,7 @@ func TestDiscoverOriginCache(t *testing.T) {
 	kfile := filepath.Join(tDir, "testKey")
 	viper.Set("IssuerKey", kfile)
 
+	viper.Set("ConfigDir", t.TempDir())
 	config.InitConfig()
 	err := config.InitServer(ctx, config.DirectorType)
 	require.NoError(t, err)

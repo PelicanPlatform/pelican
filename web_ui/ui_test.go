@@ -92,6 +92,12 @@ func TestMain(m *testing.M) {
 	viper.Set("IssuerKey", filepath.Join(tempJWKDir, "issuer.jwk"))
 
 	// Ensure we load up the default configs.
+	dirname, err := os.MkdirTemp("", "tmpDir")
+	if err != nil {
+		fmt.Println("Error making temp config dir")
+		os.Exit(1)
+	}
+	viper.Set("ConfigDir", dirname)
 	config.InitConfig()
 	viper.Set("Server.UILoginRateLimit", 100)
 

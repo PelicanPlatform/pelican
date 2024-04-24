@@ -182,6 +182,7 @@ func TestRegistryKeyChainingOSDF(t *testing.T) {
 
 	// Now we create a new key and try to use it to register a super/sub space. These shouldn't succeed
 	viper.Set("IssuerKey", t.TempDir()+"/keychaining")
+	viper.Set("ConfigDir", t.TempDir())
 	config.InitConfig()
 	err = config.InitServer(ctx, config.RegistryType)
 	require.NoError(t, err)
@@ -253,6 +254,7 @@ func TestRegistryKeyChaining(t *testing.T) {
 
 	// Now we create a new key and try to use it to register a super/sub space. These shouldn't succeed
 	viper.Set("IssuerKey", t.TempDir()+"/keychaining")
+	viper.Set("ConfigDir", t.TempDir())
 	config.InitConfig()
 	err = config.InitServer(ctx, config.RegistryType)
 	require.NoError(t, err)

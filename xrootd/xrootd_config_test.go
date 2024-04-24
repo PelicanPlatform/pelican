@@ -53,17 +53,18 @@ type xrootdTest struct {
 func (x *xrootdTest) setup() {
 	viper.Reset()
 	server_utils.ResetOriginExports()
-	config.InitConfig()
 	dirname, err := os.MkdirTemp("", "tmpDir")
 	require.NoError(x.T, err)
 	x.T.Cleanup(func() {
 		os.RemoveAll(dirname)
 	})
+	viper.Set("ConfigDir", dirname)
 	viper.Set("Xrootd.RunLocation", dirname)
 	viper.Set("Cache.RunLocation", dirname)
 	viper.Set("Origin.RunLocation", dirname)
 	viper.Set("Origin.StoragePrefix", "/")
 	viper.Set("Origin.FederationPrefix", "/")
+	config.InitConfig()
 	var cancel context.CancelFunc
 	var egrp *errgroup.Group
 	x.ctx, cancel, egrp = test_utils.TestContext(context.Background(), x.T)
@@ -85,6 +86,7 @@ func TestXrootDOriginConfig(t *testing.T) {
 	server_utils.ResetOriginExports()
 	defer viper.Reset()
 	defer server_utils.ResetOriginExports()
+	viper.Set("Configdir", dirname)
 	viper.Set("Origin.RunLocation", dirname)
 	viper.Set("Xrootd.RunLocation", dirname)
 	viper.Set("Origin.StoragePrefix", "/")
@@ -308,6 +310,7 @@ func TestXrootDCacheConfig(t *testing.T) {
 	viper.Reset()
 	server_utils.ResetOriginExports()
 	viper.Set("Cache.RunLocation", dirname)
+	viper.Set("ConfigDir", dirname)
 	config.InitConfig()
 	configPath, err := ConfigXrootd(ctx, false)
 	require.NoError(t, err)

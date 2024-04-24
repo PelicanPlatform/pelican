@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -63,6 +64,7 @@ func TestPrometheusUnprotected(t *testing.T) {
 	kfile := filepath.Join(tDir, "testKey")
 	//Setup a private key
 	viper.Set("IssuerKey", kfile)
+	viper.Set("ConfigDir", t.TempDir())
 	config.InitConfig()
 	err := config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
@@ -108,6 +110,7 @@ func TestPrometheusProtectionCookieAuth(t *testing.T) {
 	kfile := filepath.Join(tDir, "testKey")
 	//Setup a private key
 	viper.Set("IssuerKey", kfile)
+	viper.Set("ConfigDir", t.TempDir())
 	config.InitConfig()
 	err := config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
@@ -170,8 +173,16 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 	//Setup a private key and a token
 	viper.Set("IssuerKey", kfile)
 
+	// Setting the ConfigDir to t.TempDir() causes issues with this test on Windows because
+	// the process tries to clean up the directory before the test is done with it.
+	configDir, err := os.MkdirTemp("", "tmpDir")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		os.RemoveAll(configDir)
+	})
+	viper.Set("ConfigDir", configDir)
 	config.InitConfig()
-	err := config.InitServer(ctx, config.OriginType)
+	err = config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
 
 	issuerUrl := param.Server_ExternalWebUrl.GetString()
