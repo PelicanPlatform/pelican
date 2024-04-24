@@ -38,6 +38,7 @@ type Config struct {
 		RunLocation string
 		SelfTest bool
 		SelfTestInterval time.Duration
+		SentinelLocation string
 		Url string
 		XRootDPrefix string
 	}
@@ -305,6 +306,7 @@ type configWithType struct {
 		RunLocation struct { Type string; Value string }
 		SelfTest struct { Type string; Value bool }
 		SelfTestInterval struct { Type string; Value time.Duration }
+		SentinelLocation struct { Type string; Value string }
 		Url struct { Type string; Value string }
 		XRootDPrefix struct { Type string; Value string }
 	}

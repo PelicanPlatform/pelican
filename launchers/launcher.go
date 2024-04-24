@@ -162,7 +162,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 			return
 		}
 
-		ok, err = server_utils.CheckSentinelLocation(originExports)
+		ok, err = server_utils.CheckOriginSentinelLocations(originExports)
 		if err != nil && !ok {
 			return
 		}

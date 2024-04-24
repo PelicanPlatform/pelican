@@ -24,6 +24,9 @@ import (
 	"context"
 	_ "embed"
 	"net/url"
+	"os"
+	"path"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -49,6 +52,21 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 	err := xrootd.SetUpMonitoring(ctx, egrp)
 	if err != nil {
 		return nil, err
+	}
+
+	// Check for the sentinel file
+	if param.Cache_SentinelLocation.IsSet() {
+		sentinelPath := param.Cache_SentinelLocation.GetString()
+		dataLoc := param.Cache_DataLocation.GetString()
+		sentinelPath = path.Clean(sentinelPath)
+		if path.Base(sentinelPath) != sentinelPath {
+			return nil, errors.Errorf("invalid Cache.SentinelLocation path. File must not contain a directory. Got %s", sentinelPath)
+		}
+		fullPath := filepath.Join(dataLoc, sentinelPath)
+		_, err := os.Stat(fullPath)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to open Cache.SentinelLocation %s. Directory check failed", fullPath)
+		}
 	}
 
 	cache.RegisterCacheAPI(engine, ctx, egrp)
