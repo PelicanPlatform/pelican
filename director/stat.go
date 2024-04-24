@@ -63,8 +63,10 @@ type (
 		Message string
 	}
 
-	// A struct to implement `object stat`, by querying against origins with namespaces match the prefix of an object name
-	// and return origins that have the object
+	// A struct to implement `object stat`, by querying against origins/caches with namespaces match the prefix of an object name
+	// and return origins that have the object.
+	//
+	// **Note**: Currently it only returns successful result when the file is under a public namespace.
 	ObjectStat struct {
 		ReqHandler func(maxCancelCtx context.Context, objectName string, dataUrl url.URL, timeout time.Duration) (*objectMetadata, error)                                           // Handle the request to test if an object exists on a server
 		Query      func(cancelContext context.Context, objectName string, sType config.ServerType, mininum, maximum int, options ...queryOption) ([]*objectMetadata, string, error) // Manage a `stat` request to origin servers given an objectName
@@ -107,6 +109,9 @@ func NewObjectStat() *ObjectStat {
 
 // Implementation of sending a HEAD request to an origin for an object
 func (stat *ObjectStat) sendHeadReq(ctx context.Context, objectName string, dataUrl url.URL, timeout time.Duration) (*objectMetadata, error) {
+	// Although we add a token here, it's no being respected, due to the fact that director/federation issuer
+	// is not a registered issuer at origin/cache with root namespace
+	// It currently only supports public namespaces. 2024-04-24
 	tokenConf := token.NewWLCGToken()
 	tokenConf.Lifetime = time.Minute
 	tokenConf.AddAudiences(dataUrl.String())
