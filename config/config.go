@@ -844,7 +844,9 @@ func InitConfig() {
 		viper.SetConfigName("pelican")
 	}
 
-	viper.SetEnvPrefix(string(prefix))
+	osdfEnvToPelican() // Deprecate OSDF env prefix but be compatible for now
+
+	viper.SetEnvPrefix("pelican")
 	viper.AutomaticEnv()
 	// This line allows viper to use an env var like ORIGIN_VALUE to override the viper string "Origin.Value"
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
