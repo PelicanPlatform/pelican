@@ -671,9 +671,8 @@ func ConfigXrootd(ctx context.Context, origin bool) (string, error) {
 				return "", errors.Wrapf(err, "Failed to parse external web URL: %s", externalWebUrl)
 			}
 
-			// Strip the port number from the URL
-			externalWebUrl.Host = externalWebUrl.Hostname()
-			if err := os.Setenv("XRDHOST", externalWebUrl.String()); err != nil {
+			// Strip the scheme and port number from the URL and use to set XRDHOST
+			if err := os.Setenv("XRDHOST", externalWebUrl.Hostname()); err != nil {
 				return "", err
 			}
 		}

@@ -256,7 +256,7 @@ func TestXrootDOriginConfig(t *testing.T) {
 		configPath, err := ConfigXrootd(ctx, true)
 		require.NoError(t, err)
 		assert.NotNil(t, configPath)
-		assert.Equal(t, "https://my-xrootd.com", os.Getenv("XRDHOST"))
+		assert.Equal(t, "my-xrootd.com", os.Getenv("XRDHOST"))
 
 		viper.Reset()
 	})
@@ -273,7 +273,7 @@ func TestXrootDOriginConfig(t *testing.T) {
 		configPath, err := ConfigXrootd(ctx, true)
 		require.NoError(t, err)
 		assert.NotNil(t, configPath)
-		assert.Equal(t, "https://my-xrootd.com", os.Getenv("XRDHOST"))
+		assert.Equal(t, "my-xrootd.com", os.Getenv("XRDHOST"))
 
 		viper.Reset()
 	})
