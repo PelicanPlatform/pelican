@@ -58,8 +58,8 @@ type (
 	// A struct to implement `object stat`, by querying against origins with namespaces match the prefix of an object name
 	// and return origins that have the object
 	ObjectStat struct {
-		ReqHandler func(objectName string, dataUrl url.URL, timeout time.Duration, maxCancelCtx context.Context) (*objectMetadata, error) // Handle the request to test if an object exists on a server
-		Query      func(objectName string, cancelContext context.Context, mininum, maximum int) ([]*objectMetadata, string, error)        // Manage a `stat` request to origin servers given an objectName
+		ReqHandler func(objectName string, dataUrl url.URL, timeout time.Duration, maxCancelCtx context.Context) (*objectMetadata, error)                   // Handle the request to test if an object exists on a server
+		Query      func(objectName string, cancelContext context.Context, sType config.ServerType, mininum, maximum int) ([]*objectMetadata, string, error) // Manage a `stat` request to origin servers given an objectName
 	}
 )
 
@@ -92,13 +92,13 @@ func (meta objectMetadata) String() string {
 // Initialize a new stat instance and set default method implementations
 func NewObjectStat() *ObjectStat {
 	stat := &ObjectStat{}
-	stat.ReqHandler = stat.sendHeadReqToOrigin
-	stat.Query = stat.queryOriginsForObject
+	stat.ReqHandler = stat.sendHeadReq
+	stat.Query = stat.queryServersForObject
 	return stat
 }
 
 // Implementation of sending a HEAD request to an origin for an object
-func (stat *ObjectStat) sendHeadReqToOrigin(objectName string, dataUrl url.URL, timeout time.Duration, ctx context.Context) (*objectMetadata, error) {
+func (stat *ObjectStat) sendHeadReq(objectName string, dataUrl url.URL, timeout time.Duration, ctx context.Context) (*objectMetadata, error) {
 	tokenConf := token.NewWLCGToken()
 	tokenConf.Lifetime = time.Minute
 	tokenConf.AddAudiences(dataUrl.String())
@@ -156,10 +156,18 @@ func (stat *ObjectStat) sendHeadReqToOrigin(objectName string, dataUrl url.URL, 
 	}
 }
 
-// Implementation of querying origins for their availability of an object.
-// It blocks until max successful requests has been received, all potential origins responded (or timeout), or cancelContext was closed
-func (stat *ObjectStat) queryOriginsForObject(objectName string, cancelContext context.Context, minimum, maximum int) ([]*objectMetadata, string, error) {
-	_, originAds, _ := getAdsForPath(objectName)
+// Implementation of querying origins/cache servers for their availability of an object.
+// It blocks until max successful requests has been received, all potential origins/caches responded (or timeout), or cancelContext was closed
+// sType can be config.OriginType, config.CacheType, or both
+func (stat *ObjectStat) queryServersForObject(objectName string, cancelContext context.Context, sType config.ServerType, minimum, maximum int) ([]*objectMetadata, string, error) {
+	ads := []server_structs.ServerAd{}
+	_, originAds, cacheAds := getAdsForPath(objectName)
+	if sType.IsEnabled(config.OriginType) {
+		ads = append(ads, originAds...)
+	}
+	if sType.IsEnabled(config.CacheType) {
+		ads = append(ads, cacheAds...)
+	}
 	minReq := param.Director_MinStatResponse.GetInt()
 	maxReq := param.Director_MaxStatResponse.GetInt()
 	if minimum > 0 {
@@ -178,7 +186,7 @@ func (stat *ObjectStat) queryOriginsForObject(objectName string, cancelContext c
 	numTotalReq := 0
 	successResult := make([]*objectMetadata, 0)
 
-	if len(originAds) < 1 {
+	if len(ads) < 1 {
 		maxCancel()
 		return nil, "", NoPrefixMatchError
 	}
@@ -186,7 +194,7 @@ func (stat *ObjectStat) queryOriginsForObject(objectName string, cancelContext c
 	originStatUtilsMutex.RLock()
 	defer originStatUtilsMutex.RUnlock()
 
-	for _, originAd := range originAds {
+	for _, originAd := range ads {
 		originUtil, ok := originStatUtils[originAd.URL]
 		if !ok {
 			numTotalReq += 1
@@ -242,7 +250,7 @@ func (stat *ObjectStat) queryOriginsForObject(objectName string, cancelContext c
 			return successResult, fmt.Sprintf("Director stat for object %q is cancelled", objectName), nil
 		default:
 			// All requests finished
-			if numTotalReq == len(originAds) {
+			if numTotalReq == len(ads) {
 				maxCancel()
 				if len(successResult) < minReq {
 					return successResult, fmt.Sprintf("Number of success response: %d is less than MinStatResponse (%d) required.", len(successResult), minReq), InsufficientResError

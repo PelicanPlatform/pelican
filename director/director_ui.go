@@ -26,6 +26,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/web_ui"
@@ -138,6 +139,7 @@ func listServers(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, resList)
 }
 
+// Issue a stat query to origins for an object and return which origins serve the object
 func queryOrigins(ctx *gin.Context) {
 	pathParam := ctx.Param("path")
 	path := path.Clean(pathParam)
@@ -156,7 +158,7 @@ func queryOrigins(ctx *gin.Context) {
 		})
 		return
 	}
-	meta, msg, err := NewObjectStat().Query(path, ctx, queryParams.MinResponses, queryParams.MaxResponses)
+	meta, msg, err := NewObjectStat().Query(path, ctx, config.OriginType, queryParams.MinResponses, queryParams.MaxResponses)
 	if err != nil {
 		if err == NoPrefixMatchError {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
