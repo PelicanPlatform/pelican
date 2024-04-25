@@ -27,6 +27,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -61,7 +62,7 @@ func TestHandleWildcard(t *testing.T) {
 		mockJWKS := jwk.NewSet()
 		mockJWKSBytes, err := json.Marshal(mockJWKS)
 		require.NoError(t, err)
-		err = insertMockDBData([]Namespace{{Prefix: mockPrefix, Pubkey: string(mockJWKSBytes)}})
+		err = insertMockDBData([]server_structs.Namespace{{Prefix: mockPrefix, Pubkey: string(mockJWKSBytes)}})
 		require.NoError(t, err)
 		mockNs, err := getNamespaceByPrefix(mockPrefix)
 
@@ -138,11 +139,11 @@ func TestHandleWildcard(t *testing.T) {
 			mockJWKSBytes, err := json.Marshal(mockJWKS)
 			require.NoError(t, err)
 
-			mockStatus := Pending
+			mockStatus := server_structs.RegPending
 			if tc.IsApproved {
-				mockStatus = Approved
+				mockStatus = server_structs.RegApproved
 			}
-			err = insertMockDBData([]Namespace{{Prefix: mockPrefix, Pubkey: string(mockJWKSBytes), AdminMetadata: AdminMetadata{Status: mockStatus}}})
+			err = insertMockDBData([]server_structs.Namespace{{Prefix: mockPrefix, Pubkey: string(mockJWKSBytes), AdminMetadata: server_structs.AdminMetadata{Status: mockStatus}}})
 			require.NoError(t, err)
 			mockNs, err := getNamespaceByPrefix(mockPrefix)
 

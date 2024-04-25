@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/jellydator/ttlcache/v3"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
@@ -234,10 +235,10 @@ func TestValidateKeyChaining(t *testing.T) {
 	require.True(t, ok)
 	require.NotNil(t, jwkMockNew)
 
-	err = insertMockDBData([]Namespace{
-		mockNamespace("/foo", jwksStrFoo, "", AdminMetadata{}),
-		mockNamespace("/bar", jwksStrBar, "", AdminMetadata{}),
-		mockNamespace("/cache/randomCache", jwksStrCache, "", AdminMetadata{}),
+	err = insertMockDBData([]server_structs.Namespace{
+		mockNamespace("/foo", jwksStrFoo, "", server_structs.AdminMetadata{}),
+		mockNamespace("/bar", jwksStrBar, "", server_structs.AdminMetadata{}),
+		mockNamespace("/cache/randomCache", jwksStrCache, "", server_structs.AdminMetadata{}),
 	})
 
 	require.NoError(t, err)

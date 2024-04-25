@@ -34,6 +34,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/utils"
 )
 
@@ -168,7 +169,7 @@ func convertCustomRegFields(configFields []customRegFieldsConfig) []registration
 }
 
 // Helper function to exclude pubkey field from marshaling into json
-func excludePubKey(nss []*Namespace) (nssNew []NamespaceWOPubkey) {
+func excludePubKey(nss []*server_structs.Namespace) (nssNew []NamespaceWOPubkey) {
 	nssNew = make([]NamespaceWOPubkey, 0)
 	for _, ns := range nss {
 		nsNew := NamespaceWOPubkey{

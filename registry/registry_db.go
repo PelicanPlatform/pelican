@@ -40,54 +40,16 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/utils"
 )
 
-type RegistrationStatus string
-
-// The AdminMetadata is used in [Namespace] as a marshaled JSON string
-// to be stored in registry DB.
-//
-// The *UserID are meant to correspond to the "sub" claim of the user token that
-// the OAuth client issues if the user is logged in using OAuth, or it should be
-// "admin" from local password-based authentication.
-//
-// To prevent users from writing to certain fields (readonly), you may use "post" tag
-// with value "exclude". This will exclude the field from user's create/update requests
-// and the field will also be excluded from field discovery endpoint (OPTION method).
-//
-// We use validator package to validate struct fields from user requests. If a field is
-// required, add `validate:"required"` to that field. This tag will also be used by fields discovery
-// endpoint to tell the UI if a field is required. For other validator tags,
-// visit: https://pkg.go.dev/github.com/go-playground/validator/v10
-type AdminMetadata struct {
-	UserID                string             `json:"user_id" post:"exclude"` // "sub" claim of user JWT who requested registration
-	Description           string             `json:"description"`
-	SiteName              string             `json:"site_name"`
-	Institution           string             `json:"institution" validate:"required"` // the unique identifier of the institution
-	SecurityContactUserID string             `json:"security_contact_user_id"`        // "sub" claim of user who is responsible for taking security concern
-	Status                RegistrationStatus `json:"status" post:"exclude"`
-	ApproverID            string             `json:"approver_id" post:"exclude"` // "sub" claim of user JWT who approved registration
-	ApprovedAt            time.Time          `json:"approved_at" post:"exclude"`
-	CreatedAt             time.Time          `json:"created_at" post:"exclude"`
-	UpdatedAt             time.Time          `json:"updated_at" post:"exclude"`
-}
-
-type Namespace struct {
-	ID            int                    `json:"id" post:"exclude" gorm:"primaryKey"`
-	Prefix        string                 `json:"prefix" validate:"required"`
-	Pubkey        string                 `json:"pubkey" validate:"required"`
-	Identity      string                 `json:"identity" post:"exclude"`
-	AdminMetadata AdminMetadata          `json:"admin_metadata" gorm:"serializer:json"`
-	CustomFields  map[string]interface{} `json:"custom_fields" gorm:"serializer:json"`
-}
-
 type NamespaceWOPubkey struct {
-	ID            int           `json:"id"`
-	Prefix        string        `json:"prefix"`
-	Pubkey        string        `json:"-"` // Don't include pubkey in this case
-	Identity      string        `json:"identity"`
-	AdminMetadata AdminMetadata `json:"admin_metadata"`
+	ID            int                          `json:"id"`
+	Prefix        string                       `json:"prefix"`
+	Pubkey        string                       `json:"-"` // Don't include pubkey in this case
+	Identity      string                       `json:"identity"`
+	AdminMetadata server_structs.AdminMetadata `json:"admin_metadata"`
 }
 
 type Topology struct {
@@ -100,13 +62,6 @@ type ServerType string
 const (
 	OriginType ServerType = "origin"
 	CacheType  ServerType = "cache"
-)
-
-const (
-	Pending  RegistrationStatus = "Pending"
-	Approved RegistrationStatus = "Approved"
-	Denied   RegistrationStatus = "Denied"
-	Unknown  RegistrationStatus = "Unknown"
 )
 
 /*
@@ -126,37 +81,8 @@ func (st ServerType) String() string {
 	return string(st)
 }
 
-func (rs RegistrationStatus) String() string {
-	return string(rs)
-}
-
-func (rs RegistrationStatus) LowerString() string {
-	return strings.ToLower(string(rs))
-}
-
-func (a AdminMetadata) Equal(b AdminMetadata) bool {
-	return a.UserID == b.UserID &&
-		a.Description == b.Description &&
-		a.SiteName == b.SiteName &&
-		a.Institution == b.Institution &&
-		a.SecurityContactUserID == b.SecurityContactUserID &&
-		a.Status == b.Status &&
-		a.ApproverID == b.ApproverID &&
-		a.ApprovedAt.Equal(b.ApprovedAt) &&
-		a.CreatedAt.Equal(b.CreatedAt) &&
-		a.UpdatedAt.Equal(b.UpdatedAt)
-}
-
-func (Namespace) TableName() string {
-	return "namespace"
-}
-
 func (Topology) TableName() string {
 	return "topology"
-}
-
-func IsValidRegStatus(s string) bool {
-	return s == "Pending" || s == "Approved" || s == "Denied" || s == "Unknown"
 }
 
 func createTopologyTable() error {
@@ -182,7 +108,7 @@ func GetTopoPrefixString(topoNss []Topology) (result string) {
 func namespaceExistsByPrefix(prefix string) (bool, error) {
 	var count int64
 
-	err := db.Model(&Namespace{}).Where("prefix = ?", prefix).Count(&count).Error
+	err := db.Model(&server_structs.Namespace{}).Where("prefix = ?", prefix).Count(&count).Error
 	if err != nil {
 		return false, err
 	}
@@ -240,7 +166,7 @@ func namespaceSupSubChecks(prefix string) (superspaces []string, subspaces []str
 }
 
 func namespaceExistsById(id int) (bool, error) {
-	var namespaces []Namespace
+	var namespaces []server_structs.Namespace
 	result := db.Limit(1).Find(&namespaces, id)
 	if result.Error != nil {
 		return false, result.Error
@@ -250,7 +176,7 @@ func namespaceExistsById(id int) (bool, error) {
 }
 
 func namespaceBelongsToUserId(id int, userId string) (bool, error) {
-	var result Namespace
+	var result server_structs.Namespace
 	err := db.First(&result, "id = ?", id).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return false, fmt.Errorf("Namespace with id = %d does not exists", id)
@@ -261,7 +187,7 @@ func namespaceBelongsToUserId(id int, userId string) (bool, error) {
 }
 
 func getNamespaceJwksById(id int) (jwk.Set, error) {
-	var result Namespace
+	var result server_structs.Namespace
 	err := db.Select("pubkey").Where("id = ?", id).Last(&result).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, fmt.Errorf("namespace with id %d not found in database", id)
@@ -277,13 +203,13 @@ func getNamespaceJwksById(id int) (jwk.Set, error) {
 	return set, nil
 }
 
-func getNamespaceJwksByPrefix(prefix string) (jwk.Set, *AdminMetadata, error) {
+func getNamespaceJwksByPrefix(prefix string) (jwk.Set, *server_structs.AdminMetadata, error) {
 	// Note that this cannot retrieve public keys from topology as the topology table
 	// doesn't contain that information.
 	if prefix == "" {
 		return nil, nil, errors.New("Invalid prefix. Prefix must not be empty")
 	}
-	var result Namespace
+	var result server_structs.Namespace
 	err := db.Select("pubkey", "admin_metadata").Where("prefix = ?", prefix).Last(&result).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil, fmt.Errorf("namespace with prefix %q not found in database", prefix)
@@ -299,29 +225,29 @@ func getNamespaceJwksByPrefix(prefix string) (jwk.Set, *AdminMetadata, error) {
 	return set, &result.AdminMetadata, nil
 }
 
-func getNamespaceStatusById(id int) (RegistrationStatus, error) {
+func getNamespaceStatusById(id int) (server_structs.RegistrationStatus, error) {
 	if id < 1 {
 		return "", errors.New("Invalid id. id must be a positive integer")
 	}
-	var result Namespace
+	var result server_structs.Namespace
 	query := db.Select("admin_metadata").Where("id = ?", id).Last(&result)
 	err := query.Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return Unknown, fmt.Errorf("namespace with id %d not found in database", id)
+		return server_structs.RegUnknown, fmt.Errorf("namespace with id %d not found in database", id)
 	} else if err != nil {
-		return Unknown, errors.Wrap(err, "error retrieving pubkey")
+		return server_structs.RegUnknown, errors.Wrap(err, "error retrieving pubkey")
 	}
 	if result.AdminMetadata.Status == "" {
-		return Unknown, nil
+		return server_structs.RegUnknown, nil
 	}
 	return result.AdminMetadata.Status, nil
 }
 
-func getNamespaceById(id int) (*Namespace, error) {
+func getNamespaceById(id int) (*server_structs.Namespace, error) {
 	if id < 1 {
 		return nil, errors.New("Invalid id. id must be a positive number")
 	}
-	ns := Namespace{}
+	ns := server_structs.Namespace{}
 	err := db.Last(&ns, id).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, fmt.Errorf("namespace with id %d not found in database", id)
@@ -343,11 +269,11 @@ func getNamespaceById(id int) (*Namespace, error) {
 }
 
 // Get an entry from the namespace table based on the prefix
-func getNamespaceByPrefix(prefix string) (*Namespace, error) {
+func getNamespaceByPrefix(prefix string) (*server_structs.Namespace, error) {
 	if prefix == "" {
 		return nil, errors.New("invalid prefix. Prefix must not be empty")
 	}
-	ns := Namespace{}
+	ns := server_structs.Namespace{}
 	err := db.Where("prefix = ? ", prefix).Last(&ns).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, fmt.Errorf("namespace with id %q not found in database", prefix)
@@ -374,7 +300,7 @@ func getNamespaceByPrefix(prefix string) (*Namespace, error) {
 // For filterNs.AdminMetadata.Description and filterNs.AdminMetadata.SiteName,
 // the string will be matched using `strings.Contains`. This is too mimic a SQL style `like` match.
 // The rest of the AdminMetadata fields is matched by `==`
-func getNamespacesByFilter(filterNs Namespace, serverType ServerType) ([]*Namespace, error) {
+func getNamespacesByFilter(filterNs server_structs.Namespace, serverType ServerType) ([]*server_structs.Namespace, error) {
 	query := `SELECT id, prefix, pubkey, identity, admin_metadata FROM namespace WHERE 1=1 `
 	if serverType == CacheType {
 		// Refer to the cache prefix name in cmd/cache_serve
@@ -405,12 +331,12 @@ func getNamespacesByFilter(filterNs Namespace, serverType ServerType) ([]*Namesp
 	// Always sort by id by default
 	query += " ORDER BY id ASC"
 
-	namespacesIn := []Namespace{}
+	namespacesIn := []server_structs.Namespace{}
 	if err := db.Raw(query).Scan(&namespacesIn).Error; err != nil {
 		return nil, err
 	}
 
-	namespacesOut := []*Namespace{}
+	namespacesOut := []*server_structs.Namespace{}
 	for idx, ns := range namespacesIn {
 		if filterNs.AdminMetadata.UserID != "" && filterNs.AdminMetadata.UserID != ns.AdminMetadata.UserID {
 			continue
@@ -428,8 +354,8 @@ func getNamespacesByFilter(filterNs Namespace, serverType ServerType) ([]*Namesp
 			continue
 		}
 		if filterNs.AdminMetadata.Status != "" {
-			if filterNs.AdminMetadata.Status == Unknown {
-				if ns.AdminMetadata.Status != "" && ns.AdminMetadata.Status != Unknown {
+			if filterNs.AdminMetadata.Status == server_structs.RegUnknown {
+				if ns.AdminMetadata.Status != "" && ns.AdminMetadata.Status != server_structs.RegUnknown {
 					continue
 				}
 			} else if filterNs.AdminMetadata.Status != ns.AdminMetadata.Status {
@@ -445,7 +371,7 @@ func getNamespacesByFilter(filterNs Namespace, serverType ServerType) ([]*Namesp
 	return namespacesOut, nil
 }
 
-func AddNamespace(ns *Namespace) error {
+func AddNamespace(ns *server_structs.Namespace) error {
 	// Adding default values to the field. Note that you need to pass other fields
 	// including user_id before this function
 	ns.AdminMetadata.CreatedAt = time.Now()
@@ -453,13 +379,13 @@ func AddNamespace(ns *Namespace) error {
 	// We only set status to pending when it's empty to allow unit tests to add a namespace with
 	// desired status
 	if ns.AdminMetadata.Status == "" {
-		ns.AdminMetadata.Status = Pending
+		ns.AdminMetadata.Status = server_structs.RegPending
 	}
 
 	return db.Save(&ns).Error
 }
 
-func updateNamespace(ns *Namespace) error {
+func updateNamespace(ns *server_structs.Namespace) error {
 	existingNs, err := getNamespaceById(ns.ID)
 	if err != nil || existingNs == nil {
 		return errors.Wrap(err, "Failed to get namespace")
@@ -489,7 +415,7 @@ func updateNamespace(ns *Namespace) error {
 	return db.Save(ns).Error
 }
 
-func updateNamespaceStatusById(id int, status RegistrationStatus, approverId string) error {
+func updateNamespaceStatusById(id int, status server_structs.RegistrationStatus, approverId string) error {
 	ns, err := getNamespaceById(id)
 	if err != nil {
 		return errors.Wrap(err, "Error getting namespace by id")
@@ -497,7 +423,7 @@ func updateNamespaceStatusById(id int, status RegistrationStatus, approverId str
 
 	ns.AdminMetadata.Status = status
 	ns.AdminMetadata.UpdatedAt = time.Now()
-	if status == Approved {
+	if status == server_structs.RegApproved {
 		if approverId == "" {
 			return errors.New("approverId can't be empty to approve")
 		}
@@ -514,16 +440,16 @@ func updateNamespaceStatusById(id int, status RegistrationStatus, approverId str
 }
 
 func deleteNamespaceByID(id int) error {
-	return db.Delete(&Namespace{}, id).Error
+	return db.Delete(&server_structs.Namespace{}, id).Error
 }
 
 func deleteNamespaceByPrefix(prefix string) error {
 	// GORM by default uses transaction for write operations
-	return db.Where("prefix = ?", prefix).Delete(&Namespace{}).Error
+	return db.Where("prefix = ?", prefix).Delete(&server_structs.Namespace{}).Error
 }
 
-func getAllNamespaces() ([]*Namespace, error) {
-	var namespaces []*Namespace
+func getAllNamespaces() ([]*server_structs.Namespace, error) {
+	var namespaces []*server_structs.Namespace
 	if result := db.Order("id ASC").Find(&namespaces); result.Error != nil {
 		return nil, result.Error
 	}
