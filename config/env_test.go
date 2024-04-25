@@ -20,6 +20,7 @@ package config
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	log "github.com/sirupsen/logrus"
@@ -43,9 +44,8 @@ func TestOsdfEnvToPelican(t *testing.T) {
 			require.NoError(t, err)
 			validPrefixes[PelicanPrefix] = false
 		})
-		osdfEnvToPelican()
-		assert.Equal(t, "randomStr", os.Getenv("OSDF_MOCK"))
-		assert.Empty(t, os.Getenv("PELICAN_MOCK"))
+		bindNonPelicanEnv()
+		assert.False(t, viper.IsSet("MOCK"))
 	})
 
 	t.Run("one-osdf-env", func(t *testing.T) {
@@ -57,11 +57,10 @@ func TestOsdfEnvToPelican(t *testing.T) {
 		t.Cleanup(func() {
 			err := os.Unsetenv("OSDF_MOCK")
 			require.NoError(t, err)
-			err = os.Unsetenv("PELICAN_MOCK")
-			require.NoError(t, err)
 		})
-		osdfEnvToPelican()
-		assert.Equal(t, "randomStr", os.Getenv("PELICAN_MOCK"))
+		bindNonPelicanEnv()
+		assert.Equal(t, "randomStr", viper.Get("mock")) // viper key is case-insensitive
+		assert.Equal(t, "randomStr", viper.Get("MOCK"))
 		require.Equal(t, 1, len(hook.Entries))
 		assert.Equal(t, log.WarnLevel, hook.LastEntry().Level)
 		assert.Contains(t, hook.LastEntry().Message, "Environment variables with OSDF prefix will be deprecated in the next feature release. Please use PELICAN prefix instead.")
@@ -76,36 +75,82 @@ func TestOsdfEnvToPelican(t *testing.T) {
 		t.Cleanup(func() {
 			err := os.Unsetenv("STASH_MOCK")
 			require.NoError(t, err)
-			err = os.Unsetenv("PELICAN_MOCK")
-			require.NoError(t, err)
 		})
-		osdfEnvToPelican()
-		assert.Equal(t, "randomStr", os.Getenv("PELICAN_MOCK"))
+		bindNonPelicanEnv()
+		assert.Equal(t, "randomStr", viper.Get("mock")) // viper key is case-insensitive
+		assert.Equal(t, "randomStr", viper.Get("MOCK"))
 		require.Equal(t, 1, len(hook.Entries))
 		assert.Equal(t, log.WarnLevel, hook.LastEntry().Level)
 		assert.Contains(t, hook.LastEntry().Message, "Environment variables with STASH prefix will be deprecated in the next feature release. Please use PELICAN prefix instead.")
 	})
 
-	t.Run("conflict-pelican-env", func(t *testing.T) {
+	t.Run("complex-osdf-env", func(t *testing.T) {
 		viper.Reset()
 		hook.Reset()
-		log.SetLevel(log.ErrorLevel)
-
 		testingPreferredPrefix = OsdfPrefix
 
-		os.Setenv("OSDF_MOCK", "randomStr")
-		os.Setenv("PELICAN_MOCK", "existing")
+		os.Setenv("OSDF_FEDERATION_DIRECTORURL", "randomStr")
 		t.Cleanup(func() {
-			err := os.Unsetenv("OSDF_MOCK")
-			require.NoError(t, err)
-			err = os.Unsetenv("PELICAN_MOCK")
+			err := os.Unsetenv("OSDF_FEDERATION_DIRECTORURL")
 			require.NoError(t, err)
 		})
-		osdfEnvToPelican()
-		assert.Equal(t, "randomStr", os.Getenv("OSDF_MOCK"))
-		assert.Equal(t, "existing", os.Getenv("PELICAN_MOCK"))
+		bindNonPelicanEnv()
+		assert.Equal(t, "randomStr", viper.Get("Federation.DirectorUrl"))
 		require.Equal(t, 1, len(hook.Entries))
-		assert.Equal(t, log.ErrorLevel, hook.LastEntry().Level)
-		assert.Equal(t, "Converting environment variable from OSDF_MOCK to PELICAN_MOCK failed. PELICAN_MOCK already exists.", hook.LastEntry().Message)
+		assert.Equal(t, log.WarnLevel, hook.LastEntry().Level)
+		assert.Contains(t, hook.LastEntry().Message, "Environment variables with OSDF prefix will be deprecated in the next feature release. Please use PELICAN prefix instead.")
+	})
+
+	t.Run("pelican-env-still-works", func(t *testing.T) {
+		viper.Reset()
+		hook.Reset()
+		testingPreferredPrefix = OsdfPrefix
+
+		os.Setenv("OSDF_FEDERATION_DIRECTORURL", "randomStr")
+		os.Setenv("PELICAN_FEDERATION_REGISTRYURL", "registry")
+		t.Cleanup(func() {
+			err := os.Unsetenv("OSDF_FEDERATION_DIRECTORURL")
+			require.NoError(t, err)
+			err = os.Unsetenv("PELICAN_FEDERATION_REGISTRYURL")
+			require.NoError(t, err)
+		})
+
+		bindNonPelicanEnv()
+
+		viper.SetEnvPrefix("pelican")
+		viper.AutomaticEnv()
+		viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+
+		assert.Equal(t, "randomStr", viper.Get("Federation.DirectorUrl"))
+		assert.Equal(t, "registry", viper.Get("Federation.RegistryUrl"))
+		require.Equal(t, 1, len(hook.Entries))
+		assert.Equal(t, log.WarnLevel, hook.LastEntry().Level)
+		assert.Contains(t, hook.LastEntry().Message, "Environment variables with OSDF prefix will be deprecated in the next feature release. Please use PELICAN prefix instead.")
+	})
+
+	t.Run("pelican-env-overwrites-osdf", func(t *testing.T) {
+		viper.Reset()
+		hook.Reset()
+		testingPreferredPrefix = OsdfPrefix
+
+		os.Setenv("OSDF_FEDERATION_REGISTRYUR", "osdf-registry")
+		os.Setenv("PELICAN_FEDERATION_REGISTRYURL", "pelican-registry")
+		t.Cleanup(func() {
+			err := os.Unsetenv("OSDF_FEDERATION_REGISTRYUR")
+			require.NoError(t, err)
+			err = os.Unsetenv("PELICAN_FEDERATION_REGISTRYURL")
+			require.NoError(t, err)
+		})
+
+		bindNonPelicanEnv()
+
+		viper.SetEnvPrefix("pelican")
+		viper.AutomaticEnv()
+		viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+
+		assert.Equal(t, "pelican-registry", viper.Get("Federation.RegistryUrl"))
+		require.Equal(t, 1, len(hook.Entries))
+		assert.Equal(t, log.WarnLevel, hook.LastEntry().Level)
+		assert.Contains(t, hook.LastEntry().Message, "Environment variables with OSDF prefix will be deprecated in the next feature release. Please use PELICAN prefix instead.")
 	})
 }

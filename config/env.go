@@ -23,11 +23,11 @@ import (
 	"strings"
 
 	log "github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
 )
 
-// Converts adn sets environment variables with non-Pelican prefixes (i.e. OSDF/STASH) to PELICAN ones
-// It will skip the ones that have a PELICAN prefixed env already set
-func osdfEnvToPelican() {
+// Bind environment variables with non-Pelican prefixes (i.e. OSDF/STASH) to correct Pelican config keys
+func bindNonPelicanEnv() {
 	prefix := GetPreferredPrefix()
 	if prefix != PelicanPrefix {
 		found := false
@@ -38,15 +38,11 @@ func osdfEnvToPelican() {
 					log.Warningf("Environment variables with %s prefix will be deprecated in the next feature release. Please use PELICAN prefix instead.", prefix.String())
 					found = true
 				}
-				osdfKey := strings.SplitN(env, "=", 2)[0]
-				pelicanEnv := "PELICAN_" + strings.TrimPrefix(env, prefix.String()+"_")
-				pelicanKey := strings.SplitN(pelicanEnv, "=", 2)[0]
-				pelicanVal := strings.SplitN(pelicanEnv, "=", 2)[1]
-				if os.Getenv(pelicanKey) != "" {
-					log.Errorf("Converting environment variable from %s to %s failed. %s already exists.", osdfKey, pelicanKey, pelicanKey)
-					continue
+				osdfKey := strings.SplitN(env, "=", 2)[0]                                                   // OSDF_FOO_BAR
+				viperKey := strings.Replace(strings.TrimPrefix(osdfKey, prefix.String()+"_"), "_", ".", -1) // FOO.BAR
+				if err := viper.BindEnv(viperKey, osdfKey); err != nil {
+					log.Errorf("Error binding environment variable %s to configuration parameter %s: %v", osdfKey, viperKey, err)
 				}
-				os.Setenv(pelicanKey, pelicanVal)
 			}
 		}
 	}

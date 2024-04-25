@@ -844,7 +844,7 @@ func InitConfig() {
 		viper.SetConfigName("pelican")
 	}
 
-	osdfEnvToPelican() // Deprecate OSDF env prefix but be compatible for now
+	bindNonPelicanEnv() // Deprecate OSDF env prefix but be compatible for now
 
 	viper.SetEnvPrefix("pelican")
 	viper.AutomaticEnv()
