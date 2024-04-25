@@ -1104,11 +1104,12 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 	if err != nil {
 		return err
 	}
-	viper.SetDefault("Server.Hostname", hostname)
-	viper.SetDefault("Xrootd.Sitename", hostname)
+	viper.SetDefault(param.Server_Hostname.GetName(), hostname)
 	// For the rest of the function, use the hostname provided by the admin if
 	// they have overridden the defaults.
-	hostname = viper.GetString("Server.Hostname")
+	hostname = param.Server_Hostname.GetString()
+	// We default to the value of Server.Hostname, which defaults to os.Hostname but can be overwritten
+	viper.SetDefault(param.Xrootd_Sitename.GetName(), hostname)
 
 	// XRootD port usage logic:
 	// - Origin.Port and Cache.Port take precedence for their respective types
