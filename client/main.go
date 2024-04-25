@@ -401,6 +401,20 @@ func discoverHTCondorToken(tokenName string) string {
 	return tokenLocation
 }
 
+// This function checks if we have a valid query (or no query) for the transfer URL
+func checkValidQuery(transferUrl *url.URL) (err error) {
+	query := transferUrl.Query()
+	_, hasDirectRead := query["directread"]
+	_, hasPack := query["pack"]
+
+	// If we have no query, or we have recursive or pack, we are good
+	if len(query) == 0 || hasDirectRead || hasPack {
+		return nil
+	}
+
+	return fmt.Errorf("Invalid query parameters provided in url: %s", transferUrl)
+}
+
 // Retrieve federation namespace information for a given URL.
 // If OSDFDirectorUrl is non-empty, then the namespace information will be pulled from the director;
 // otherwise, it is pulled from topology.
@@ -485,6 +499,13 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 		log.Errorln("Failed to parse remote destination URL:", err)
 		return nil, err
 	}
+
+	// Check if we have a query and that it is understood
+	err = checkValidQuery(remoteDestUrl)
+	if err != nil {
+		return
+	}
+
 	remoteDestUrl.Scheme = remoteDestScheme
 
 	remoteDestScheme, _ = getTokenName(remoteDestUrl)
@@ -549,6 +570,13 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 		log.Errorln("Failed to parse source URL:", err)
 		return nil, err
 	}
+
+	// Check if we have a query and that it is understood
+	err = checkValidQuery(remoteObjectUrl)
+	if err != nil {
+		return
+	}
+
 	remoteObjectUrl.Scheme = remoteObjectScheme
 
 	// This is for condor cases:
@@ -669,6 +697,11 @@ func DoCopy(ctx context.Context, sourceFile string, destination string, recursiv
 		log.Errorln("Failed to parse source URL:", err)
 		return nil, err
 	}
+	// Check if we have a query and that it is understood
+	err = checkValidQuery(sourceURL)
+	if err != nil {
+		return
+	}
 	sourceURL.Scheme = source_scheme
 
 	destination, dest_scheme := correctURLWithUnderscore(destination)
@@ -677,6 +710,13 @@ func DoCopy(ctx context.Context, sourceFile string, destination string, recursiv
 		log.Errorln("Failed to parse destination URL:", err)
 		return nil, err
 	}
+
+	// Check if we have a query and that it is understood
+	err = checkValidQuery(destURL)
+	if err != nil {
+		return
+	}
+
 	destURL.Scheme = dest_scheme
 
 	// Check for scheme here for when using condor

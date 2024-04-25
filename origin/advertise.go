@@ -99,6 +99,7 @@ func (server *OriginServer) CreateAdvertisement(name string, originUrlStr string
 				Reads:       reads,
 				Writes:      export.Capabilities.Writes,
 				Listings:    export.Capabilities.Listings,
+				DirectReads: export.Capabilities.DirectReads,
 			},
 			Path: export.FederationPrefix,
 			Generation: []server_structs.TokenGen{{

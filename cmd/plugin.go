@@ -542,6 +542,7 @@ func checkValidQuery(transferUrl *url.URL) (err error) {
 	query := transferUrl.Query()
 	_, hasRecursive := query["recursive"]
 	_, hasPack := query["pack"]
+	_, hasDirectRead := query["directread"]
 
 	// If we have both recursive and pack, we should return a failure
 	if hasRecursive && hasPack {
@@ -549,11 +550,11 @@ func checkValidQuery(transferUrl *url.URL) (err error) {
 	}
 
 	// If we have no query, or we have recursive or pack, we are good
-	if len(query) == 0 || hasRecursive || hasPack {
+	if len(query) == 0 || hasRecursive || hasPack || hasDirectRead {
 		return nil
 	}
 
-	return fmt.Errorf("Invalid query parameters procided in url: %s", transferUrl)
+	return fmt.Errorf("Invalid query parameters provided in url: %s", transferUrl)
 }
 
 // WriteOutfile takes in the result ads from the job and the file to be outputted, it returns a boolean indicating:

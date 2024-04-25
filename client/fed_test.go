@@ -505,3 +505,78 @@ func TestStatHttp(t *testing.T) {
 		assert.Contains(t, err.Error(), "Do not understand the destination scheme: some. Permitted values are file, osdf, pelican, stash, ")
 	})
 }
+
+// Test the functionality of the direct reads feature (?DirectRead=true)
+func TestDirectReads(t *testing.T) {
+	t.Run("testDirectReadsSuccess", func(t *testing.T) {
+		viper.Reset()
+		server_utils.ResetOriginExports()
+		viper.Set("Origin.EnableDirectReads", true)
+		fed := fed_test_utils.NewFedTest(t, bothPublicOriginCfg)
+		for _, export := range fed.Exports {
+			testFileContent := "test file content"
+			// Drop the testFileContent into the origin directory
+			tempFile, err := os.Create(filepath.Join(export.StoragePrefix, "test.txt"))
+			assert.NoError(t, err, "Error creating temp file")
+			defer os.Remove(tempFile.Name())
+			_, err = tempFile.WriteString(testFileContent)
+			assert.NoError(t, err, "Error writing to temp file")
+			tempFile.Close()
+
+			viper.Set("Logging.DisableProgressBars", true)
+
+			// Set path for object to upload/download
+			tempPath := tempFile.Name()
+			fileName := filepath.Base(tempPath)
+			uploadURL := fmt.Sprintf("pelican://%s:%s%s/%s?directread", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
+				export.FederationPrefix, fileName)
+
+			// Download the file with GET. Shouldn't need a token to succeed
+			transferResults, err := client.DoGet(fed.Ctx, uploadURL, t.TempDir(), false)
+			assert.NoError(t, err)
+			if err == nil {
+				assert.Equal(t, transferResults[0].TransferredBytes, int64(17))
+			}
+			// Assert that the file was not cached
+			cacheDataLocation := param.Cache_DataLocation.GetString() + export.FederationPrefix
+			filepath := filepath.Join(cacheDataLocation, filepath.Base(tempFile.Name()))
+			_, err = os.Stat(filepath)
+			assert.True(t, os.IsNotExist(err))
+		}
+	})
+
+	// Test that direct reads fail if DirectReads=false is set for origin config
+	t.Run("testDirectReadsDirectReadFalse", func(t *testing.T) {
+		viper.Reset()
+		server_utils.ResetOriginExports()
+		viper.Set("Origin.StorageType", "posix")
+		viper.Set("Origin.ExportVolumes", "/test")
+		viper.Set("Origin.EnablePublicReads", true)
+		viper.Set("Origin.EnableDirectReads", false)
+		fed := fed_test_utils.NewFedTest(t, "")
+		for _, export := range fed.Exports {
+			export.Capabilities.DirectReads = false
+			testFileContent := "test file content"
+			// Drop the testFileContent into the origin directory
+			tempFile, err := os.Create(filepath.Join(export.StoragePrefix, "test.txt"))
+			assert.NoError(t, err, "Error creating temp file")
+			defer os.Remove(tempFile.Name())
+			_, err = tempFile.WriteString(testFileContent)
+			assert.NoError(t, err, "Error writing to temp file")
+			tempFile.Close()
+
+			viper.Set("Logging.DisableProgressBars", true)
+
+			// Set path for object to upload/download
+			tempPath := tempFile.Name()
+			fileName := filepath.Base(tempPath)
+			uploadURL := fmt.Sprintf("pelican://%s:%s%s/%s?directread", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
+				export.FederationPrefix, fileName)
+
+			// Download the file with GET. Shouldn't need a token to succeed
+			_, err = client.DoGet(fed.Ctx, uploadURL, t.TempDir(), false)
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "No origins on specified endpoint have direct reads enabled")
+		}
+	})
+}
