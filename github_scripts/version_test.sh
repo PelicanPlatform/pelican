@@ -22,8 +22,6 @@ set -e
 mkdir -p /tmp/pelican-test/version-test
 
 export PELICAN_CONFIGDIR=/tmp/pelican-test/version-test
-export OSDF_CONFIGDIR=/tmp/pelican-test/version-test
-export STASH_CONFIGDIR=/tmp/pelican-test/version-test
 
 # Function to cleanup after test ends
 cleanup() {
@@ -32,8 +30,6 @@ cleanup() {
     rm -f ./stash
     rm -f ./osdf
     unset PELICAN_CONFIGDIR
-    unset OSDF_CONFIGDIR
-    unset STASH_CONFIGDIR
 }
 
 # Setup trap with the PID as an argument to the cleanup function

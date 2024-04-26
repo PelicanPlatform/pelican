@@ -110,7 +110,7 @@ func TestHandleCLIVersionFlag(t *testing.T) {
 	batchTest := func(t *testing.T, arguments []string, expected string) {
 		got := ""
 
-		// Redirect output to a pip
+		// Redirect output to a pipe
 		oldStdout := os.Stdout
 		r, w, _ := os.Pipe()
 		os.Stdout = w
@@ -118,7 +118,7 @@ func TestHandleCLIVersionFlag(t *testing.T) {
 		err := handleCLI(arguments)
 		require.NoError(t, err)
 
-		// Close the write of pip and redirect output back to Stderr
+		// Close the write of pipe and redirect output back to Stderr
 		w.Close()
 		out, _ := io.ReadAll(r)
 		os.Stdout = oldStdout
