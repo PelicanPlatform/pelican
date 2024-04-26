@@ -104,7 +104,7 @@ func copyMain(cmd *cobra.Command, args []string) {
 	}
 
 	if val, err := cmd.Flags().GetBool("version"); err == nil && val {
-		config.PrintPelicanVersion()
+		config.PrintPelicanVersion(os.Stdout)
 		os.Exit(0)
 	}
 

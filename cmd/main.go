@@ -59,7 +59,7 @@ func handleCLI(args []string) error {
 		// version info regardless of the commands and whether they are defined
 		// * Remove the -v shorthand since in "origin serve" flagset it's already used for "volume" flag
 		if args[len(args)-1] == "--version" {
-			config.PrintPelicanVersion()
+			config.PrintPelicanVersion(os.Stdout)
 			return nil
 		}
 		err := Execute()

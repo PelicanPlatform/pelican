@@ -929,11 +929,11 @@ func setXrootdRunLocations(currentServers ServerType, dir string) error {
 	return nil
 }
 
-func PrintPelicanVersion() {
-	fmt.Fprintln(os.Stderr, "Version:", GetVersion())
-	fmt.Fprintln(os.Stderr, "Build Date:", GetBuiltDate())
-	fmt.Fprintln(os.Stderr, "Build Commit:", GetBuiltCommit())
-	fmt.Fprintln(os.Stderr, "Built By:", GetBuiltBy())
+func PrintPelicanVersion(out *os.File) {
+	fmt.Fprintln(out, "Version:", GetVersion())
+	fmt.Fprintln(out, "Build Date:", GetBuiltDate())
+	fmt.Fprintln(out, "Build Commit:", GetBuiltCommit())
+	fmt.Fprintln(out, "Built By:", GetBuiltBy())
 }
 
 // Print Pelican configuration to stderr

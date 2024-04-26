@@ -135,7 +135,7 @@ func stashPluginMain(args []string) {
 			fmt.Println("SupportedMethods = \"stash, osdf\"")
 			os.Exit(0)
 		} else if args[0] == "-version" || args[0] == "-v" {
-			config.PrintPelicanVersion()
+			config.PrintPelicanVersion(os.Stdout)
 			os.Exit(0)
 		} else if args[0] == "-upload" {
 			log.Debugln("Upload detected")
