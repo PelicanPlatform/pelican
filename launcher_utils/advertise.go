@@ -111,6 +111,10 @@ func getSitenameFromReg(ctx context.Context, prefix string) (sitename string, er
 	if err != nil {
 		return
 	}
+	if fed.NamespaceRegistrationEndpoint == "" {
+		err = fmt.Errorf("unable to fetch site name from the registry. Federation.RegistryUrl is unset")
+		return
+	}
 	requestUrl, err := url.JoinPath(fed.NamespaceRegistrationEndpoint, "api/v1.0/registry", prefix)
 	if err != nil {
 		return
@@ -131,13 +135,13 @@ func getSitenameFromReg(ctx context.Context, prefix string) (sitename string, er
 func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) error {
 	name := ""
 	var err error
-	// Fetch site name from the registy, if not, fall back to Xrootd.Sitename.
+	// Fetch site name from the registry, if not, fall back to Xrootd.Sitename.
 	// However, currently the registry only supports registering namespaces, not origins.
 	// If multiple namespaces fall under the same origin, we will use the first namespace to fetch the site name
 	if server.GetServerType().IsEnabled(config.OriginType) {
 		originExports, err := server_utils.GetOriginExports()
 		if err != nil {
-			log.Errorf("Failed to get request sitename from the registery. Failed to get exports from the origin server. Will fallback to use Xrootd.Sitename: %v", err)
+			log.Errorf("Failed to get request sitename from the registry. Failed to get exports from the origin server. Will fall back to use Xrootd.Sitename: %v", err)
 		}
 		if len(originExports) != 0 {
 			if len(originExports) > 1 {
