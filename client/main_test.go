@@ -488,7 +488,7 @@ func TestQuery(t *testing.T) {
 
 		err = checkValidQuery(transferUrl)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "Invalid query parameters procided in url: pelican://something/here?durectreeds")
+		assert.Contains(t, err.Error(), "Invalid query parameters provided in url: pelican://something/here?durectreeds")
 	})
 
 	t.Run("TestBothQueryCheckSuccess", func(t *testing.T) {

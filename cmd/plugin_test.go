@@ -373,7 +373,7 @@ func TestPluginDirectRead(t *testing.T) {
 	viper.Set("Origin.StorageType", "posix")
 	viper.Set("Origin.ExportVolumes", "/test")
 	viper.Set("Origin.EnablePublicReads", true)
-	viper.Set("Origin.DirectReads", true)
+	viper.Set("Origin.EnableDirectReads", true)
 	fed := fed_test_utils.NewFedTest(t, "")
 	host := param.Server_Hostname.GetString() + ":" + strconv.Itoa(param.Server_WebPort.GetInt())
 
@@ -564,7 +564,7 @@ func TestQuery(t *testing.T) {
 
 		err = checkValidQuery(transferUrl)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "Invalid query parameters procided in url: pelican://something/here?recrustive=true")
+		assert.Contains(t, err.Error(), "Invalid query parameters provided in url: pelican://something/here?recrustive=true")
 	})
 
 	t.Run("TestBothPackAndRecursiveFailure", func(t *testing.T) {
