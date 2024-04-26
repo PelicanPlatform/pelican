@@ -64,7 +64,7 @@ type AdminMetadata struct {
 	UserID                string             `json:"user_id" post:"exclude"` // "sub" claim of user JWT who requested registration
 	Description           string             `json:"description"`
 	SiteName              string             `json:"site_name"`
-	Institution           string             `json:"institution" validate:"required"`                                                                                // the unique identifier of the institution
+	Institution           string             `json:"institution" validate:"required"`                                                                                // the unique identifier of the institution. The type of value depends on Registry.Institutions / Registry.InstitutionsUrl
 	SecurityContactUserID string             `json:"security_contact_user_id" description:"User Identifier of the user responsible for the security of the service"` // "sub" claim of user who is responsible for taking security concern
 	Status                RegistrationStatus `json:"status" post:"exclude"`
 	ApproverID            string             `json:"approver_id" post:"exclude"` // "sub" claim of user JWT who approved registration

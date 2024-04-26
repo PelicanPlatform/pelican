@@ -44,8 +44,7 @@ func RegistryServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 	if param.Server_EnableUI.GetBool() {
 		registry.InitOptionsCache(ctx, egrp)
 
-		err = registry.InitCustomRegistrationFields()
-		if err != nil {
+		if err = registry.InitCustomRegistrationFields(); err != nil {
 			return err
 		}
 

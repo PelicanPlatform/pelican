@@ -198,13 +198,17 @@ func InitInstConfig(ctx context.Context, egrp *errgroup.Group) error {
 		return errors.Wrap(err, "Fail to read Registry.Institutions. Make sure you had the correct format")
 	}
 
-	instRegIdx := -1
+	instRegIdx := -1 // From the registrationFields, find the index of the field admin_metadata.institution
 
 	for idx, reg := range registrationFields {
 		if reg.Name == "admin_metadata.institution" {
 			instRegIdx = idx
 			registrationFields[idx].Options = institutions
 		}
+	}
+
+	if instRegIdx == -1 {
+		return errors.New("fail to populate institution options. admin_metadata.institution does not exist in the list of registrationFields")
 	}
 
 	if param.Registry_InstitutionsUrl.GetString() != "" {
