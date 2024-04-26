@@ -406,6 +406,8 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 		return
 	}
 
+	formatCustomFields(ns.CustomFields)
+
 	if validCF, err := validateCustomFields(ns.CustomFields); !validCF {
 		if !validCF && err != nil {
 			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{

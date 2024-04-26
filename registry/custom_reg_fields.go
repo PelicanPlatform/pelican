@@ -208,6 +208,18 @@ func checkUniqueInstitutions(insts []Institution) bool {
 	return true
 }
 
+// Format custom registration fields in-place, by converting any float64/32 number to int
+func formatCustomFields(customFields map[string]interface{}) {
+	for key, val := range customFields {
+		switch v := val.(type) {
+		case float64:
+			customFields[key] = int(v)
+		case float32:
+			customFields[key] = int(v)
+		}
+	}
+}
+
 // Returns the institution options that are fetched from Registry.InstitutionsUrl
 // and stored in a TTL cache
 func getCachedInstitutions() (inst []Institution, intError error, extError error) {
