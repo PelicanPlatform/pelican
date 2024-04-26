@@ -125,7 +125,7 @@ func GetBestCache(cacheListName string) ([]string, error) {
 				log.Debugf("Got OK code 200 from %s", cur_site)
 				responsetext_b, err := io.ReadAll(resp.Body)
 				if err != nil {
-					log.Errorln("Could not aquire http response text")
+					log.Errorln("Could not acquire http response text")
 				}
 				//responsetext_s := string(responsetext_b)
 				//log.Debugln("Recieved from GeoIP server:", responsetext_s)

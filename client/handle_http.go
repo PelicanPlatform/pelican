@@ -518,7 +518,7 @@ func (te *TransferEngine) newPelicanURL(remoteUrl *url.URL) (pelicanURL pelicanU
 				pelicanURL.directorUrl = fedInfo.DirectorEndpoint
 			}
 		} else if config.GetPreferredPrefix() == config.PelicanPrefix {
-			// We hit this case when we are using a pelican binary but an osdf:// url, therefore we need to disover the osdf federation
+			// We hit this case when we are using a pelican binary but an osdf:// url, therefore we need to discover the osdf federation
 			log.Debugln("In Pelican mode with an osdf:// url, populating metadata with OSDF defaults")
 			// Check if cache has key of federationURL, if not, loader will add it:
 			pelicanUrlItem := te.pelicanURLCache.Get("osg-htc.org")

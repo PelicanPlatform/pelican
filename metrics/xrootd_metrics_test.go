@@ -594,7 +594,7 @@ func TestHandlePacket(t *testing.T) {
 		err = HandlePacket(clsPacket)
 		require.NoError(t, err, "Error handling the file close packet")
 
-		// Trasnfer item should be deleted on file close
+		// Transfer item should be deleted on file close
 		require.Equal(t, 0, len(transfers.Keys()), "Transfer cache didn't update")
 
 		expectedTransferReadvSegs := `

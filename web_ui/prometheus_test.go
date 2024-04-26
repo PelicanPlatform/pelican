@@ -151,7 +151,7 @@ func TestPrometheusProtectionCookieAuth(t *testing.T) {
 	assert.Equal(t, 404, w.Result().StatusCode, "Expected status code of 404 representing failure due to minimal server setup, not token check")
 }
 
-// Tests that the prometheus protections are behind the server issuer token and tests that the token is accessable from
+// Tests that the prometheus protections are behind the server issuer token and tests that the token is accessible from
 // the header function. It signs a token with the issuer's jwks key and adds it to the header before attempting
 // to access the prometheus metrics. It then attempts to access the metrics with a token with an invalid scope.
 // It attempts to do so again with a token signed by a bad key. Both these are expected to fail.

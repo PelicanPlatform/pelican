@@ -192,7 +192,7 @@ func sortServerAdsByIP(addr netip.Addr, ads []server_structs.ServerAd) ([]server
 	return resultAds, nil
 }
 
-// Sort a list of ServerAds witht the following rule:
+// Sort a list of ServerAds with the following rule:
 // * if a ServerAds has FromTopology = true, then it will be moved to the end of the list
 // * if two ServerAds has the SAME FromTopology value (both true or false), then
 func sortServerAdsByTopo(ads []server_structs.ServerAd) []server_structs.ServerAd {

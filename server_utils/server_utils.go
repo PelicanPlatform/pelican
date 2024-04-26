@@ -16,11 +16,12 @@
  *
  ***************************************************************/
 
-// server_utils package shares utility functions used across multiple server pacakges (origin, cache, registry, director).
+// Package server_utils shares utility functions used across multiple server pacakges (origin, cache, registry, director).
+//
 // It should only import lower level packages (config, param, etc), or server_structs package.
 // It should never import any server pacakges (origin, cache, registry, director) or upeer level packages (launcher_utils, cmd, etc).
 //
-// For structs used across multiple server pacakges, put them in common pacakge instead
+// For structs used across multiple server pacakges, put them in common package instead
 package server_utils
 
 import (

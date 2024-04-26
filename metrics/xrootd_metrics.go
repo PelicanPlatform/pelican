@@ -741,7 +741,7 @@ func HandlePacket(packet []byte) error {
 				}
 
 				// We record those metrics to make sure they are properly populated with initial
-				// values, or the file close hanlder will only populate them by the difference, not
+				// values, or the file close handler will only populate them by the difference, not
 				// the total
 				labels["type"] = "read"
 				counter := TransferBytes.With(labels)

@@ -171,7 +171,7 @@ func queryOrigins(ctx *gin.Context) {
 			})
 			return
 		} else if err == InsufficientResError {
-			// Insufficient response does not cause a 500 error, but OK field in reponse is false
+			// Insufficient response does not cause a 500 error, but OK field in response is false
 			if len(meta) < 1 {
 				ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
 					Status: server_structs.RespFailed,

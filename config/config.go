@@ -241,7 +241,7 @@ func (sType *ServerType) Clear() {
 
 // setEnabledServer sets the global variable config.EnabledServers to include newServers.
 // Since this function should only be called in config package, we mark it "private" to avoid
-// reset value in other pacakge
+// reset value in other package
 //
 // This will only be called once in a single process
 func setEnabledServer(newServers ServerType) {
@@ -471,7 +471,7 @@ func DiscoverUrlFederation(ctx context.Context, federationDiscoveryUrl string) (
 			err = MetadataTimeoutErr.Wrap(err)
 			return
 		} else {
-			err = NewMetadataError(err, "Error occured when querying for metadata")
+			err = NewMetadataError(err, "Error occurred when querying for metadata")
 			return
 		}
 	}

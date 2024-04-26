@@ -285,7 +285,7 @@ func TestDirectorRegistration(t *testing.T) {
 		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
 
 		namaspaceADs := listNamespacesFromOrigins()
-		// If the origin was successfully registed at director, we should be able to find it in director's originAds
+		// If the origin was successfully registered at director, we should be able to find it in director's originAds
 		assert.True(t, NamespaceAdContainsPath(namaspaceADs, "/foo/bar"), "Coudln't find namespace in the director cache.")
 		teardown()
 	})
@@ -322,7 +322,7 @@ func TestDirectorRegistration(t *testing.T) {
 		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
 
 		namaspaceADs := listNamespacesFromOrigins()
-		// If the origin was successfully registed at director, we should be able to find it in director's originAds
+		// If the origin was successfully registered at director, we should be able to find it in director's originAds
 		assert.True(t, NamespaceAdContainsPath(namaspaceADs, "/foo/bar"), "Coudln't find namespace in the director cache.")
 		teardown()
 	})
@@ -869,7 +869,7 @@ func TestDiscoverOriginCache(t *testing.T) {
 		r.ServeHTTP(w, req)
 
 		assert.Equal(t, 200, w.Code)
-		assert.Equal(t, string(resStr), w.Body.String(), "Reponse doesn't match expected")
+		assert.Equal(t, string(resStr), w.Body.String(), "Response doesn't match expected")
 	})
 }
 

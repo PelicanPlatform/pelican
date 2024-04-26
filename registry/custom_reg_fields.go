@@ -315,7 +315,7 @@ func InitInstConfig(ctx context.Context, egrp *errgroup.Group) error {
 			return nil
 		})
 
-		// Try to populate the cache at the server start. If error occured, it's non-blocking
+		// Try to populate the cache at the server start. If error occurred, it's non-blocking
 		cachedInsts, intErr, _ := getCachedInstitutions()
 		if intErr != nil {
 			log.Warning("Failed to populate institution cache. Error: ", intErr)

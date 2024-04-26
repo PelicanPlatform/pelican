@@ -223,7 +223,7 @@ func GetJwks(ctx context.Context, location string) (jwk.Set, error) {
 		return nil, fmt.Errorf("request failed with response code %d and response body: %s", res.StatusCode, string(bodyByte))
 	}
 	if len(bodyByte) == 0 {
-		return nil, fmt.Errorf("request failed with reponse returns 200 but with empty response body")
+		return nil, fmt.Errorf("request failed with response returns 200 but with empty response body")
 	}
 	key, err := jwk.Parse(bodyByte)
 	if err != nil {

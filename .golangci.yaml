@@ -24,3 +24,4 @@ run:
 linters:
   enable:
   - gofmt
+  - misspell
