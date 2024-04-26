@@ -50,7 +50,7 @@ export interface CustomRegistrationField {
     required: boolean;
     validationurl?: string;
     options?: Option[];
-    optionurl?: string;
+    optionsurl?: string;
 }
 
 export interface OIDCAuthenticationRequirement {
