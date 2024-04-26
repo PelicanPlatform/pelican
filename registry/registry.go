@@ -660,7 +660,7 @@ func cliRegisterNamespace(ctx *gin.Context) {
 				ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 					Status: server_structs.RespFailed,
 					Msg:    "server encountered unknown error waiting for token"})
-				log.Errorf("Token endpoint did not provide a token, and responded with unkown error: %s", string(body))
+				log.Errorf("Token endpoint did not provide a token, and responded with unknown error: %s", string(body))
 				return
 			}
 		} else {

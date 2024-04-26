@@ -459,7 +459,9 @@ description: |+
       where each of these has the same effect as the corresponding "Origin.Enable*" configuration, except scoped to the
       given export. If "PublicReads" is included, "Reads" is inferred.
   - SentinelLocation: A filename under `StoragePrefix` path for Pelican to check the storage directory exists and is correctly mounted.
-      Leave it empty to skip the check. You should always choose a distinguished name for `SentinelLocation`. It should not be reused for other servers.
+      The value must be a file and contain no directory. Leave it empty to skip the check.
+
+      You should always choose a distinct name for `SentinelLocation`. It should not be reused for other servers.
       If running in a containerized environment it should not be the name of the underlying physical host as that may change and lead to confusion.
       You need to manually create a file under path to `StoragePrefix` with the same name as `SentinelLocation`. Note that this parameter will be ignored
       if the origin StorageType is S3.
@@ -663,7 +665,7 @@ components: ["origin"]
 ---
 name: Origin.EnableOIDC
 description: >-
-  Indicate whether the origin should allow user login to the admin website via OAuth2/OIDC with third-party
+  Indicate whether the origin should allow users to login to the admin website via OAuth2/OIDC with third-party
   authentication providers such as CILogon.
 
   If set to true, it is recommended that you also set `Server.UIAdminUsers` to a list of users
@@ -939,6 +941,18 @@ root_default: /run/pelican/xrootd/cache
 default: $XDG_RUNTIME_DIR/pelican/cache
 components: ["cache"]
 ---
+name: Cache.SentinelLocation
+description: |+
+  A filename under `Cache.DataLocation` path for Pelican to check the storage directory exists and is correctly mounted.
+  The value must be a file and contain no directory. Leave it empty to skip the check.
+
+  You should always choose a distinct name for `Cache.SentinelLocation`. It should not be reused for other servers.
+  If running in a containerized environment it should not be the name of the underlying physical host as that may change and lead to confusion.
+  You need to manually create a file under path to `Cache.DataLocation` with the same name as `Cache.SentinelLocation`.
+type: filename
+default: none
+components: ["cache"]
+---
 name: Cache.XRootDPrefix
 description: |+
   The directory prefix for the XRootD cache configuration files.
@@ -1034,7 +1048,7 @@ components: ["cache"]
 ---
 name: Cache.EnableOIDC
 description: >-
-  Indicate whether the cache should allow user login to the admin website via OAuth2/OIDC with third-party
+  Indicate whether the cache should allow users to login to the admin website via OAuth2/OIDC with third-party
   authentication providers such as CILogon.
 
   If set to true, it is recommended that you also set `Server.UIAdminUsers` to a list of users
@@ -1173,6 +1187,19 @@ description: |+
   We highly recommend director admin to fill out this field.
 type: string
 default: none
+components: ["director"]
+---
+name: Director.EnableOIDC
+description: >-
+  Indicate whether the director should allow users to login to the admin website via OAuth2/OIDC with third-party
+  authentication providers such as CILogon.
+
+  If set to true, it is recommended that you also set `Server.UIAdminUsers` to a list of users
+  to give admin privilege. This is because origin admin website doesn't have a public, non-admin view,
+  and an empty AdminUsers list will lead to "permission denied" error
+  for all users logged into origin admin website via OAuth.
+type: bool
+default: false
 components: ["director"]
 ---
 ############################
@@ -1645,11 +1672,12 @@ description: |+
   override the value of `OIDC.ClientIDFile` if both are set.
 
   This is a required parameter for the registry server.
-  This is a required parameter for the origin server if `Origin.EnableOIDC` is set to `true`.
+  This is a required parameter for the origin/cache/director server if
+  `Origin.EnableOIDC`/`Cache.EnableOIDC`/`Director.EnableOIDC` is set to `true`, respectively.
 type: filename
 root_default: /etc/pelican/oidc-client-id
 default: $ConfigBase/oidc-client-id
-components: ["registry", "origin"]
+components: ["registry", "origin", "cache", "director"]
 ---
 name: OIDC.ClientID
 description: |+
@@ -1657,10 +1685,11 @@ description: |+
   override the value of OIDC.ClientIDFile if both are set.
 
   This is a required parameter for the registry server.
-  This is also a required parameter for the origin server if `Origin.EnableOIDC` is set to `true`.
+  This is a required parameter for the origin/cache/director server if
+  `Origin.EnableOIDC`/`Cache.EnableOIDC`/`Director.EnableOIDC` is set to `true`, respectively.
 type: string
 default: none
-components: ["registry", "origin"]
+components: ["registry", "origin", "cache", "director"]
 ---
 name: OIDC.ClientSecretFile
 description: |+
@@ -1668,11 +1697,12 @@ description: |+
   for authenticated registration.
 
   This is a required parameter for the registry server.
-  This is also a required parameter for the origin server if `Origin.EnableOIDC` is set to `true`.
+  This is a required parameter for the origin/cache/director server if
+  `Origin.EnableOIDC`/`Cache.EnableOIDC`/`Director.EnableOIDC` is set to `true`, respectively.
 type: filename
 root_default: /etc/pelican/oidc-client-secret
 default: $ConfigBase/oidc-client-secret
-components: ["registry", "origin"]
+components: ["registry", "origin", "cache", "director"]
 ---
 name: OIDC.DeviceAuthEndpoint
 description: |+
@@ -1680,7 +1710,7 @@ description: |+
   for authenticated registration. The default value is set to the URL from CILogon.
 type: url
 default: "https://cilogon.org/oauth2/device_authorization"
-components: ["registry", "origin"]
+components: ["registry", "origin", "cache", "director"]
 ---
 name: OIDC.TokenEndpoint
 description: |+
@@ -1688,7 +1718,7 @@ description: |+
   for authenticated registration. The default value is set to the URL from CILogon.
 type: url
 default: "https://cilogon.org/oauth2/token"
-components: ["registry", "origin"]
+components: ["registry", "origin", "cache", "director"]
 ---
 name: OIDC.UserInfoEndpoint
 description: |+
@@ -1696,14 +1726,14 @@ description: |+
   for authenticated registration. The default value is set to the URL from CILogon.
 type: url
 default: "https://cilogon.org/oauth2/userinfo"
-components: ["registry", "origin"]
+components: ["registry", "origin", "cache", "director"]
 ---
 name: OIDC.AuthorizationEndpoint
 description: |+
   A URL containing the OIDC authorization endpoint. The default value is set to the URL from CILogon.
 type: url
 default: "https://cilogon.org/authorize"
-components: ["registry", "origin"]
+components: ["registry", "origin", "cache", "director"]
 ---
 name: OIDC.Issuer
 description: |+
@@ -1717,7 +1747,7 @@ description: |+
   For Globus, it's https://auth.globus.org
 type: url
 default: none
-components: ["registry", "origin"]
+components: ["registry", "origin", "cache", "director"]
 ---
 name: OIDC.ClientRedirectHostname
 description: |+
@@ -1727,7 +1757,7 @@ description: |+
   instead of container hostname to your OAuth provider.
 type: string
 default: none
-components: ["registry", "director"]
+components: ["registry", "origin", "cache", "director"]
 ---
 ############################
 #   XRootD-level Configs   #

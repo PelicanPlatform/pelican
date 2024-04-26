@@ -660,6 +660,22 @@ func ConfigXrootd(ctx context.Context, origin bool) (string, error) {
 				return "", errors.New("Origin.Multiuser is set to `true` but the command was run without sufficient privilege; was it launched as root?")
 			}
 		}
+
+		// Legacy caches may attempt to reach out to the origin using the xroot protocol, which
+		// determines the origin's host via reverse DNS. Since we don't want that, we use the
+		// XRDHOST env var at the origin to override xroot's behavior. See the following issue
+		// https://github.com/PelicanPlatform/pelican/issues/1110
+		if config.GetPreferredPrefix() == config.OsdfPrefix {
+			externalWebUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
+			if err != nil {
+				return "", errors.Wrapf(err, "Failed to parse external web URL: %s", externalWebUrl)
+			}
+
+			// Strip the scheme and port number from the URL and use to set XRDHOST
+			if err := os.Setenv("XRDHOST", externalWebUrl.Hostname()); err != nil {
+				return "", err
+			}
+		}
 	} else if xrdConfig.Cache.PSSOrigin != "" {
 		// Workaround for a bug in XRootD 5.6.3: if the director URL is missing a port number, then
 		// XRootD crashes.

@@ -64,7 +64,7 @@ func (c *ClassAd) String() string {
 		case string:
 			// Here, we want to ensure we remove any `\n` chars. We do this because if HTCondor ever uses
 			// the old classad mechanism (typically when the shadow talks to the schedd), \n's are special in
-			// the old syntax as they are the seperator from name/value pairs.
+			// the old syntax as they are the separator from name/value pairs.
 			v = strings.ReplaceAll(v, "\n", "\\n")
 			v = strings.ReplaceAll(v, "\r", "\\r")
 			buffer.WriteString(strconv.QuoteToASCII(v))

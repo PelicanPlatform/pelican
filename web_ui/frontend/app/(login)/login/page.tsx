@@ -188,7 +188,10 @@ export default function Home() {
                     </Box>
                 </Box>
                 <Box mx={"auto"}>
-                    { serverIntersect && (serverIntersect.includes("registry") || serverIntersect.includes("origin") || serverIntersect.includes("cache")) &&
+                    { serverIntersect && (serverIntersect.includes("registry") ||
+                    serverIntersect.includes("origin") ||
+                    serverIntersect.includes("cache") ||
+                    serverIntersect.includes("director")) &&
                         <>
                             <Box display={"flex"} justifyContent={"center"} mb={1}>
                                 <Button

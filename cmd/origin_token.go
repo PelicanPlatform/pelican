@@ -108,7 +108,7 @@ func cliTokenCreate(cmd *cobra.Command, args []string) error {
 	args = append(args, claimsSlice...)
 
 	// Similarly for scopes. Scopes could be passed like --scope "read:/storage write:/storage"
-	// or they could be pased like --scope read:/storage --scope write:/storage. However, because
+	// or they could be passed like --scope read:/storage --scope write:/storage. However, because
 	// we already know the name of these claims and don't expect naming via the cli, we parse the
 	// claims to name them here
 	rawScopesSlice, err := cmd.Flags().GetStringSlice("scope")

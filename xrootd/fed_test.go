@@ -49,6 +49,7 @@ var (
 
 func TestHttpOriginConfig(t *testing.T) {
 	viper.Reset()
+	viper.Set("ConfigDir", t.TempDir())
 	server_utils.ResetOriginExports()
 	defer viper.Reset()
 	defer server_utils.ResetOriginExports()

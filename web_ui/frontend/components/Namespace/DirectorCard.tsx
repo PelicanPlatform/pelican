@@ -56,7 +56,7 @@ export const DirectorCard = ({ server, authenticated } : DirectorCardProps) => {
                     </Box>
                     <Box display={"flex"} flexDirection={"row"}>
                         <Box my={"auto"} display={"flex"}>
-                            {authenticated &&
+                            {(authenticated && authenticated.role == "admin") &&
                                 <FormGroup>
                                     <FormControlLabel
                                         labelPlacement="start"

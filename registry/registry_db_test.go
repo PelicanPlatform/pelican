@@ -255,7 +255,7 @@ func TestAddNamespace(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, 1, len(got))
 		assert.Equal(t, mockNs.Prefix, got[0].Prefix)
-		// We can do this becuase we pass the pointer of mockNs to addNamespce which
+		// We can do this because we pass the pointer of mockNs to addNamespce which
 		// then modify the fields and insert into database
 		assert.Equal(t, mockNs.AdminMetadata.CreatedAt.Unix(), got[0].AdminMetadata.CreatedAt.Unix())
 		assert.Equal(t, mockNs.AdminMetadata.UpdatedAt.Unix(), got[0].AdminMetadata.UpdatedAt.Unix())
@@ -276,7 +276,7 @@ func TestAddNamespace(t *testing.T) {
 
 		assert.NotEqual(t, mockCreateAt.Unix(), mockNs.AdminMetadata.CreatedAt.Unix())
 		assert.NotEqual(t, mockUpdatedAt.Unix(), mockNs.AdminMetadata.UpdatedAt.Unix())
-		// We can do this becuase we pass the pointer of mockNs to addNamespce which
+		// We can do this because we pass the pointer of mockNs to addNamespce which
 		// then modify the fields and insert into database
 		assert.Equal(t, mockNs.AdminMetadata.CreatedAt.Unix(), got[0].AdminMetadata.CreatedAt.Unix())
 		assert.Equal(t, mockNs.AdminMetadata.UpdatedAt.Unix(), got[0].AdminMetadata.UpdatedAt.Unix())
@@ -748,6 +748,7 @@ func TestRegistryTopology(t *testing.T) {
 	registryDB := t.TempDir()
 	viper.Set("Registry.DbLocation", filepath.Join(registryDB, "test.sqlite"))
 	viper.Set("Federation.TopologyNamespaceURL", svr.URL)
+	viper.Set("ConfigDir", t.TempDir())
 	config.InitConfig()
 
 	err := InitializeDB(ctx)

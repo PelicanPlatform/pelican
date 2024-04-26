@@ -50,6 +50,6 @@ var (
 
 	PelicanDirectorTotalAdvertisementsReceived = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_director_total_advertisements_received",
-		Help: "The total number of advertisement the director received from the origin and cache servers. Labled by status_code, server_name, serve_type: Origin|Cache, server_web_url",
+		Help: "The total number of advertisement the director received from the origin and cache servers. Labelled by status_code, server_name, serve_type: Origin|Cache, server_web_url",
 	}, []string{"server_name", "server_web_url", "server_type", "status_code"})
 )

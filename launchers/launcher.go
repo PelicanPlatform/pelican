@@ -106,7 +106,8 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 	if param.Server_EnableUI.GetBool() {
 		if modules.IsEnabled(config.RegistryType) ||
 			(modules.IsEnabled(config.OriginType) && param.Origin_EnableOIDC.GetBool()) ||
-			(modules.IsEnabled(config.CacheType) && param.Cache_EnableOIDC.GetBool()) {
+			(modules.IsEnabled(config.CacheType) && param.Cache_EnableOIDC.GetBool()) ||
+			(modules.IsEnabled(config.DirectorType) && param.Director_EnableOIDC.GetBool()) {
 			if err = web_ui.ConfigOAuthClientAPIs(engine); err != nil {
 				return
 			}
@@ -161,7 +162,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 			return
 		}
 
-		ok, err = server_utils.CheckSentinelLocation(originExports)
+		ok, err = server_utils.CheckOriginSentinelLocations(originExports)
 		if err != nil && !ok {
 			return
 		}

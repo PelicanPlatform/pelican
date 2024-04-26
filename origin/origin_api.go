@@ -52,11 +52,11 @@ func ConfigureXrootdMonitoringDir() error {
 
 	err = config.MkdirAll(pelicanMonitoringPath, 0755, uid, gid)
 	if err != nil {
-		return errors.Wrapf(err, "Unable to create pelican file trasnfer monitoring directory %v",
+		return errors.Wrapf(err, "Unable to create pelican file transfer monitoring directory %v",
 			pelicanMonitoringPath)
 	}
 	if err = os.Chown(pelicanMonitoringPath, uid, -1); err != nil {
-		return errors.Wrapf(err, "Unable to change ownership of pelican file trasnfer monitoring directory %v"+
+		return errors.Wrapf(err, "Unable to change ownership of pelican file transfer monitoring directory %v"+
 			" to desired daemon user %v", pelicanMonitoringPath, username)
 	}
 

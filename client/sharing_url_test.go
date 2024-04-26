@@ -63,6 +63,7 @@ func TestDirectorGeneration(t *testing.T) {
 
 	// Discovery works to get URL
 	viper.Reset()
+	viper.Set("ConfigDir", t.TempDir())
 	config.InitConfig()
 	viper.Set("TLSSkipVerify", true)
 	require.NoError(t, config.InitClient())
@@ -74,6 +75,7 @@ func TestDirectorGeneration(t *testing.T) {
 
 	// Discovery URL overrides the federation config.
 	viper.Reset()
+	viper.Set("ConfigDir", t.TempDir())
 	config.InitConfig()
 	viper.Set("TLSSkipVerify", true)
 	require.NoError(t, config.InitClient())
@@ -84,6 +86,7 @@ func TestDirectorGeneration(t *testing.T) {
 
 	// Fallback to configuration if no discovery present
 	viper.Reset()
+	viper.Set("ConfigDir", t.TempDir())
 	config.InitConfig()
 	require.NoError(t, config.InitClient())
 	viper.Set("Federation.DirectorURL", "https://location2.example.com")
@@ -94,6 +97,7 @@ func TestDirectorGeneration(t *testing.T) {
 
 	// Error if server has an error
 	viper.Reset()
+	viper.Set("ConfigDir", t.TempDir())
 	config.InitConfig()
 	viper.Set("TLSSkipVerify", true)
 	require.NoError(t, config.InitClient())
@@ -104,6 +108,7 @@ func TestDirectorGeneration(t *testing.T) {
 
 	// Error if neither config nor hostname provided.
 	viper.Reset()
+	viper.Set("ConfigDir", t.TempDir())
 	config.InitConfig()
 	require.NoError(t, config.InitClient())
 	objectUrl.Host = ""
@@ -112,6 +117,7 @@ func TestDirectorGeneration(t *testing.T) {
 
 	// Error on unknown scheme
 	viper.Reset()
+	viper.Set("ConfigDir", t.TempDir())
 	config.InitConfig()
 	require.NoError(t, config.InitClient())
 	objectUrl.Scheme = "buzzard"
