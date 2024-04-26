@@ -11,6 +11,7 @@ export interface Namespace {
     pubkey: string;
     type: "origin" | "cache";
     admin_metadata: NamespaceAdminMetadata;
+    custom_fields?: Record<string, any>;
 }
 
 interface Institution {
