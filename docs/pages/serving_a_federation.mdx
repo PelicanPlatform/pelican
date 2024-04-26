@@ -6,7 +6,7 @@ A federation in Pelican refers to an instance of a data sharing ecosystem where 
 allow such an exchange of data to work, Pelican has two top-level *central server components* to coordinate origins and caches in the
 federation, direct client requests to the proper storage server, and manage namespace registration. They are the *director* and the *registry*.
 A Pelican federation requires both a *director* and a *registry* to be set up first before any origin or cache server can join
-the federation or any client can access objects in the federaiton.
+the federation or any client can access objects in the federation.
 
 ## Before Starting
 
@@ -30,7 +30,7 @@ For Pelican registry to work, you need to obtain a client id and associated clie
 
 * **`Client Name`**: a human-readable name of your service. For example: Pelican Data Federation
 * **`Callback URLs`**: fill in `https://<hostname>:<server_port>/api/v1.0/auth/oauth/callback` where `<hostname>:<server_port>` is your server's public endpoint. For example, `https://example-origin.org:8444/api/v1.0/auth/oauth/callback`
-* **`Client Type`**: select `Confedential`
+* **`Client Type`**: select `Confidential`
 * **`Scopes`**: select `email`, `openid`, `org.cilogon.userinfo`, and `profile`
 * **`Refresh Tokens`**: select `No`
 
