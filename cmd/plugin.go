@@ -136,7 +136,7 @@ func stashPluginMain(args []string) {
 			fmt.Println("StartdAttrs = \"PelicanPluginVersion\"")
 			os.Exit(0)
 		} else if args[0] == "-version" || args[0] == "-v" {
-			config.PrintPelicanVersion()
+			config.PrintPelicanVersion(os.Stdout)
 			os.Exit(0)
 		} else if args[0] == "-upload" {
 			log.Debugln("Upload detected")
