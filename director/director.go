@@ -566,6 +566,35 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 	ctx.Set("serverName", adV2.Name)
 	ctx.Set("serverWebUrl", adV2.WebURL)
 
+	ad_url, err := url.Parse(adV2.DataURL)
+	if err != nil {
+		log.Warningf("Failed to parse %s URL %v: %v\n", sType, adV2.DataURL, err)
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Invalid %s registration", sType),
+		})
+		return
+	}
+
+	adWebUrl, err := url.Parse(adV2.WebURL)
+	if err != nil && adV2.WebURL != "" { // We allow empty WebURL string for backward compatibility
+		log.Warningf("Failed to parse server Web URL %v: %v\n", adV2.WebURL, err)
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Invalid server Web URL",
+		})
+		return
+	}
+
+	brokerUrl, err := url.Parse(adV2.BrokerURL)
+	if err != nil {
+		log.Warningf("Failed to parse broker URL %s: %s", adV2.BrokerURL, err)
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Invalid broker URL",
+		})
+	}
+
 	if sType == server_structs.OriginType {
 		for _, namespace := range adV2.Namespaces {
 			// We're assuming there's only one token in the slice
@@ -597,7 +626,10 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		}
 	} else {
 		token := strings.TrimPrefix(tokens[0], "Bearer ")
-		prefix := path.Join("/caches", adV2.Name)
+		// Use hostname from adv2.DataUrl instead of adv2.Name as Name is the site name
+		hostname := ad_url.Hostname()
+
+		prefix := path.Join("/caches", hostname)
 		ok, err := verifyAdvertiseToken(engineCtx, token, prefix)
 		if err != nil {
 			if err == adminApprovalErr {
@@ -621,35 +653,6 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 			})
 			return
 		}
-	}
-
-	ad_url, err := url.Parse(adV2.DataURL)
-	if err != nil {
-		log.Warningf("Failed to parse %s URL %v: %v\n", sType, adV2.DataURL, err)
-		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Invalid %s registration", sType),
-		})
-		return
-	}
-
-	adWebUrl, err := url.Parse(adV2.WebURL)
-	if err != nil && adV2.WebURL != "" { // We allow empty WebURL string for backward compatibility
-		log.Warningf("Failed to parse server Web URL %v: %v\n", adV2.WebURL, err)
-		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Invalid server Web URL",
-		})
-		return
-	}
-
-	brokerUrl, err := url.Parse(adV2.BrokerURL)
-	if err != nil {
-		log.Warningf("Failed to parse broker URL %s: %s", adV2.BrokerURL, err)
-		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Invalid broker URL",
-		})
 	}
 
 	sAd := server_structs.ServerAd{
@@ -750,7 +753,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 	ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{Status: server_structs.RespOK, Msg: "Successful registration"})
 }
 
-func registerServeAdMetric(ctx *gin.Context) {
+func serverAdMetricMiddleware(ctx *gin.Context) {
 	ctx.Next()
 
 	serverName := "Unknown"
@@ -917,8 +920,8 @@ func RegisterDirectorAPI(ctx context.Context, router *gin.RouterGroup) {
 		directorAPIV1.GET("/origin/*any", redirectToOrigin)
 		directorAPIV1.HEAD("/origin/*any", redirectToOrigin)
 		directorAPIV1.PUT("/origin/*any", redirectToOrigin)
-		directorAPIV1.POST("/registerOrigin", registerServeAdMetric, func(gctx *gin.Context) { registerServeAd(ctx, gctx, server_structs.OriginType) })
-		directorAPIV1.POST("/registerCache", registerServeAdMetric, func(gctx *gin.Context) { registerServeAd(ctx, gctx, server_structs.CacheType) })
+		directorAPIV1.POST("/registerOrigin", serverAdMetricMiddleware, func(gctx *gin.Context) { registerServeAd(ctx, gctx, server_structs.OriginType) })
+		directorAPIV1.POST("/registerCache", serverAdMetricMiddleware, func(gctx *gin.Context) { registerServeAd(ctx, gctx, server_structs.CacheType) })
 		directorAPIV1.GET("/listNamespaces", listNamespacesV1)
 		directorAPIV1.GET("/namespaces/prefix/*path", getPrefixByPath)
 		directorAPIV1.GET("/healthTest/*path", getHealthTestFile)
