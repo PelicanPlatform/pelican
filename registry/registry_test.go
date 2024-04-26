@@ -21,6 +21,7 @@ package registry
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -40,16 +41,38 @@ func TestHandleWildcard(t *testing.T) {
 
 	group.GET("/*wildcard", wildcardHandler)
 
-	t.Run("return-404-for-unmatched-route", func(t *testing.T) {
-		// Create a test request
+	t.Run("match-prefix-returns-404-for-prefix-dne", func(t *testing.T) {
+		setupMockRegistryDB(t)
+		defer teardownMockNamespaceDB(t)
+
 		req, _ := http.NewRequest("GET", "/registry/no-match", nil)
 		w := httptest.NewRecorder()
 
-		// Perform the request
 		r.ServeHTTP(w, req)
 
 		// Should return 404 for an unmatched route
 		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
+
+	t.Run("match-prefix-returns-namespace-if-exists", func(t *testing.T) {
+		setupMockRegistryDB(t)
+		defer teardownMockNamespaceDB(t)
+		err := insertMockDBData([]server_structs.Namespace{{Prefix: "/foo/bar", AdminMetadata: server_structs.AdminMetadata{SiteName: "site foo"}}})
+		require.NoError(t, err)
+
+		req, _ := http.NewRequest("GET", "/registry/foo/bar", nil)
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		bytes, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		ns := server_structs.Namespace{}
+		err = json.Unmarshal(bytes, &ns)
+		require.NoError(t, err)
+		assert.Equal(t, "site foo", ns.AdminMetadata.SiteName)
 	})
 
 	t.Run("match-wildcard-metadataHandler", func(t *testing.T) {
