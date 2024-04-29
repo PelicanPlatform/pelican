@@ -371,29 +371,26 @@ func TestPluginDirectRead(t *testing.T) {
 
 	viper.Set("Logging.Level", "debug")
 	viper.Set("Origin.StorageType", "posix")
-	viper.Set("Origin.ExportVolumes", "/test")
+	viper.Set("Origin.FederationPrefix", "/test")
+	viper.Set("Origin.StoragePrefix", "/<SOMETHING THAT WILL BE OVERRIDDEN>")
 	viper.Set("Origin.EnablePublicReads", true)
 	viper.Set("Origin.EnableDirectReads", true)
 	fed := fed_test_utils.NewFedTest(t, "")
 	host := param.Server_Hostname.GetString() + ":" + strconv.Itoa(param.Server_WebPort.GetInt())
 
-	// Drop the testFileContent into the origin directory
-	destDir := filepath.Join(fed.Exports[0].StoragePrefix, "test")
-	require.NoError(t, os.MkdirAll(destDir, os.FileMode(0755)))
-	log.Debugln("Will create origin file at", destDir)
-	err := os.WriteFile(filepath.Join(destDir, "test.txt"), []byte("test file content"), fs.FileMode(0644))
+	log.Debugln("Will create origin file at", fed.Exports[0].StoragePrefix)
+	err := os.WriteFile(filepath.Join(fed.Exports[0].StoragePrefix, "test.txt"), []byte("test file content"), fs.FileMode(0644))
 	require.NoError(t, err)
-	downloadUrl1 := url.URL{
+	downloadUrl := url.URL{
 		Scheme:   "pelican",
 		Host:     host,
-		Path:     "/test/test/test.txt",
+		Path:     "/test/test.txt",
 		RawQuery: "directread",
 	}
-	localPath1 := filepath.Join(dirName, "test.txt")
+	localPath := filepath.Join(dirName, "test.txt")
 
 	workChan := make(chan PluginTransfer, 2)
-	workChan <- PluginTransfer{url: &downloadUrl1, localFile: localPath1}
-	// workChan <- PluginTransfer{url: &downloadUrl2, localFile: localPath2}
+	workChan <- PluginTransfer{url: &downloadUrl, localFile: localPath}
 	close(workChan)
 
 	results := make(chan *classads.ClassAd, 5)
@@ -525,75 +522,6 @@ func TestWriteOutfile(t *testing.T) {
 		assert.Contains(t, string(tempFileContent), "TransferUrl = \"foo.txt\";")
 	})
 
-}
-
-// This test checks if query parameters in the url are correct
-// We want invalid or > 1 query to cause an error
-func TestQuery(t *testing.T) {
-	t.Run("TestValidRecursive", func(t *testing.T) {
-		transferStr := "pelican://something/here?recursive=true"
-		transferUrl, err := url.Parse(transferStr)
-		assert.NoError(t, err)
-
-		err = checkValidQuery(transferUrl)
-		assert.NoError(t, err)
-	})
-
-	t.Run("TestValidDirectRead", func(t *testing.T) {
-		transferStr := "pelican://something/here?directread"
-		transferUrl, err := url.Parse(transferStr)
-		assert.NoError(t, err)
-
-		err = checkValidQuery(transferUrl)
-		assert.NoError(t, err)
-	})
-
-	t.Run("TestValidPack", func(t *testing.T) {
-		transferStr := "pelican://something/here?pack=tar.gz"
-		transferUrl, err := url.Parse(transferStr)
-		assert.NoError(t, err)
-
-		err = checkValidQuery(transferUrl)
-		assert.NoError(t, err)
-	})
-
-	t.Run("TestInvalidQuery", func(t *testing.T) {
-		transferStr := "pelican://something/here?recrustive=true"
-		transferUrl, err := url.Parse(transferStr)
-		assert.NoError(t, err)
-
-		err = checkValidQuery(transferUrl)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "Invalid query parameters provided in url: pelican://something/here?recrustive=true")
-	})
-
-	t.Run("TestBothPackAndRecursiveFailure", func(t *testing.T) {
-		transferStr := "pelican://something/here?pack=tar.gz&recursive=true"
-		transferUrl, err := url.Parse(transferStr)
-		assert.NoError(t, err)
-
-		err = checkValidQuery(transferUrl)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "Cannot have both recursive and pack query parameters")
-	})
-
-	t.Run("TestBothPackAndDirectReadSuccess", func(t *testing.T) {
-		transferStr := "pelican://something/here?pack=tar.gz&directread"
-		transferUrl, err := url.Parse(transferStr)
-		assert.NoError(t, err)
-
-		err = checkValidQuery(transferUrl)
-		assert.NoError(t, err)
-	})
-
-	t.Run("TestBothRecursiveAndDirectReadSuccess", func(t *testing.T) {
-		transferStr := "pelican://something/here?recursive=true&directread"
-		transferUrl, err := url.Parse(transferStr)
-		assert.NoError(t, err)
-
-		err = checkValidQuery(transferUrl)
-		assert.NoError(t, err)
-	})
 }
 
 // This test checks if the destination (local file) is parsed correctly

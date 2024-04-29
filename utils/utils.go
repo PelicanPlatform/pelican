@@ -19,6 +19,7 @@
 package utils
 
 import (
+	"fmt"
 	"net/url"
 	"strings"
 	"unicode"
@@ -69,4 +70,29 @@ func GetPreferredCaches(preferredCaches string) (caches []*url.URL, err error) {
 		}
 	}
 	return
+}
+
+// This function checks if we have a valid query (or no query) for the transfer URL
+func CheckValidQuery(transferUrl *url.URL, isPlugin bool) (err error) {
+	query := transferUrl.Query()
+	_, hasRecursive := query["recursive"]
+	_, hasPack := query["pack"]
+	_, hasDirectRead := query["directread"]
+
+	// If we are not the plugin, we should not use ?recursive (we should pass a -r flag)
+	if !isPlugin && hasRecursive {
+		return fmt.Errorf("Cannot use the recursive query parameter when not utilizing the pelican plugin")
+	}
+
+	// If we have both recursive and pack, we should return a failure
+	if hasRecursive && hasPack {
+		return fmt.Errorf("Cannot have both recursive and pack query parameters")
+	}
+
+	// If we have no query, or we have recursive or pack, we are good
+	if len(query) == 0 || hasRecursive || hasPack || hasDirectRead {
+		return nil
+	}
+
+	return fmt.Errorf("Invalid query parameters provided in url: %s", transferUrl)
 }
