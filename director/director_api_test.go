@@ -31,7 +31,7 @@ import (
 
 var mockOriginServerAd server_structs.ServerAd = server_structs.ServerAd{
 	Name:      "test-origin-server",
-	URL:       url.URL{},
+	URL:       url.URL{Host: "origin.com", Scheme: "https"},
 	Type:      server_structs.OriginType,
 	Latitude:  123.05,
 	Longitude: 456.78,
@@ -39,7 +39,7 @@ var mockOriginServerAd server_structs.ServerAd = server_structs.ServerAd{
 
 var mockCacheServerAd server_structs.ServerAd = server_structs.ServerAd{
 	Name:      "test-cache-server",
-	URL:       url.URL{},
+	URL:       url.URL{Host: "cache.com", Scheme: "https"},
 	Type:      server_structs.CacheType,
 	Latitude:  45.67,
 	Longitude: 123.05,
@@ -92,7 +92,10 @@ func TestListNamespaces(t *testing.T) {
 	})
 	t.Run("one-origin-namespace-entry", func(t *testing.T) {
 		setup()
-		serverAds.Set(mockOriginServerAd, mockNamespaceAds(1, "origin1"), ttlcache.DefaultTTL)
+		serverAds.Set(mockOriginServerAd.URL.String(), &server_structs.Advertisement{
+			ServerAd:     mockOriginServerAd,
+			NamespaceAds: mockNamespaceAds(1, "origin1"),
+		}, ttlcache.DefaultTTL)
 		ns := listNamespacesFromOrigins()
 
 		// Only one entry added
@@ -101,7 +104,10 @@ func TestListNamespaces(t *testing.T) {
 	})
 	t.Run("multiple-origin-namespace-entries-from-same-origin", func(t *testing.T) {
 		setup()
-		serverAds.Set(mockOriginServerAd, mockNamespaceAds(10, "origin1"), ttlcache.DefaultTTL)
+		serverAds.Set(mockOriginServerAd.URL.String(), &server_structs.Advertisement{
+			ServerAd:     mockOriginServerAd,
+			NamespaceAds: mockNamespaceAds(10, "origin1"),
+		}, ttlcache.DefaultTTL)
 		ns := listNamespacesFromOrigins()
 
 		assert.Equal(t, 10, len(ns), "List has length not equal to 10 for namespace cache with 10 entries.")
@@ -110,23 +116,31 @@ func TestListNamespaces(t *testing.T) {
 	t.Run("multiple-origin-namespace-entries-from-different-origins", func(t *testing.T) {
 		setup()
 
-		serverAds.Set(mockOriginServerAd, mockNamespaceAds(10, "origin1"), ttlcache.DefaultTTL)
-
+		serverAds.Set(mockOriginServerAd.URL.String(), &server_structs.Advertisement{
+			ServerAd:     mockOriginServerAd,
+			NamespaceAds: mockNamespaceAds(10, "origin1"),
+		}, ttlcache.DefaultTTL)
 		// change the name field of serverAD as same name will cause cache to merge
-		oldServerName := mockOriginServerAd.Name
-		mockOriginServerAd.Name = "test-origin-server-2"
+		oldServerUrl := mockOriginServerAd.URL
+		mockOriginServerAd.URL.Host = "origin2.com"
 
-		serverAds.Set(mockOriginServerAd, mockNamespaceAds(10, "origin2"), ttlcache.DefaultTTL)
+		serverAds.Set(mockOriginServerAd.URL.String(), &server_structs.Advertisement{
+			ServerAd:     mockOriginServerAd,
+			NamespaceAds: mockNamespaceAds(10, "origin2"),
+		}, ttlcache.DefaultTTL)
 		ns := listNamespacesFromOrigins()
 
 		assert.Equal(t, 20, len(ns), "List has length not equal to 10 for namespace cache with 10 entries.")
 		assert.True(t, namespaceAdContainsPath(ns, mockPathPreix+"origin1/"+fmt.Sprint(5)), "Returned namespace path does not match what's added")
 		assert.True(t, namespaceAdContainsPath(ns, mockPathPreix+"origin2/"+fmt.Sprint(9)), "Returned namespace path does not match what's added")
-		mockOriginServerAd.Name = oldServerName
+		mockOriginServerAd.URL = oldServerUrl
 	})
 	t.Run("one-cache-namespace-entry", func(t *testing.T) {
 		setup()
-		serverAds.Set(mockCacheServerAd, mockNamespaceAds(1, "cache1"), ttlcache.DefaultTTL)
+		serverAds.Set(mockCacheServerAd.URL.String(), &server_structs.Advertisement{
+			ServerAd:     mockCacheServerAd,
+			NamespaceAds: mockNamespaceAds(1, "cache1"),
+		}, ttlcache.DefaultTTL)
 		ns := listNamespacesFromOrigins()
 
 		// Should not show namespace from cache server
@@ -148,8 +162,16 @@ func TestListServerAds(t *testing.T) {
 		func() {
 			serverAds.DeleteAll()
 		}()
-		serverAds.Set(mockOriginServerAd, []server_structs.NamespaceAdV2{}, ttlcache.DefaultTTL)
-		serverAds.Set(mockCacheServerAd, []server_structs.NamespaceAdV2{}, ttlcache.DefaultTTL)
+		serverAds.Set(mockOriginServerAd.URL.String(),
+			&server_structs.Advertisement{
+				ServerAd:     mockOriginServerAd,
+				NamespaceAds: []server_structs.NamespaceAdV2{},
+			}, ttlcache.DefaultTTL)
+		serverAds.Set(mockCacheServerAd.URL.String(),
+			&server_structs.Advertisement{
+				ServerAd:     mockCacheServerAd,
+				NamespaceAds: []server_structs.NamespaceAdV2{}},
+			ttlcache.DefaultTTL)
 		adsAll := listServerAds([]server_structs.ServerType{server_structs.OriginType, server_structs.CacheType})
 		assert.Equal(t, 2, len(adsAll))
 

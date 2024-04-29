@@ -129,33 +129,45 @@ func TestCheckOverrides(t *testing.T) {
 }
 
 func TestSortServerAdsByTopo(t *testing.T) {
-	mock1 := server_structs.ServerAd{
-		FromTopology: true,
-		Name:         "alpha",
+	mock1 := server_structs.Advertisement{
+		ServerAd: server_structs.ServerAd{
+			FromTopology: true,
+			Name:         "alpha",
+		},
 	}
-	mock2 := server_structs.ServerAd{
-		FromTopology: true,
-		Name:         "bravo",
+	mock2 := server_structs.Advertisement{
+		ServerAd: server_structs.ServerAd{
+			FromTopology: true,
+			Name:         "bravo",
+		},
 	}
-	mock3 := server_structs.ServerAd{
-		FromTopology: true,
-		Name:         "charlie",
+	mock3 := server_structs.Advertisement{
+		ServerAd: server_structs.ServerAd{
+			FromTopology: true,
+			Name:         "charlie",
+		},
 	}
-	mock4 := server_structs.ServerAd{
-		FromTopology: false,
-		Name:         "alpha",
+	mock4 := server_structs.Advertisement{
+		ServerAd: server_structs.ServerAd{
+			FromTopology: false,
+			Name:         "alpha",
+		},
 	}
-	mock5 := server_structs.ServerAd{
-		FromTopology: false,
-		Name:         "bravo",
+	mock5 := server_structs.Advertisement{
+		ServerAd: server_structs.ServerAd{
+			FromTopology: false,
+			Name:         "bravo",
+		},
 	}
-	mock6 := server_structs.ServerAd{
-		FromTopology: false,
-		Name:         "charlie",
+	mock6 := server_structs.Advertisement{
+		ServerAd: server_structs.ServerAd{
+			FromTopology: false,
+			Name:         "charlie",
+		},
 	}
 
-	randomList := []server_structs.ServerAd{mock6, mock1, mock2, mock4, mock5, mock3}
-	expectedList := []server_structs.ServerAd{mock4, mock5, mock6, mock1, mock2, mock3}
+	randomList := []*server_structs.Advertisement{&mock6, &mock1, &mock2, &mock4, &mock5, &mock3}
+	expectedList := []*server_structs.Advertisement{&mock4, &mock5, &mock6, &mock1, &mock2, &mock3}
 
 	sortedList := sortServerAdsByTopo(randomList)
 

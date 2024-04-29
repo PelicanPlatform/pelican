@@ -54,7 +54,7 @@ func TestQueryOriginsForObject(t *testing.T) {
 	// The OnEviction function is added to serverAds, which will clear deleted cache item
 	// but will have dead-lock for our test cases. Bypass the onEviction function
 	// by re-init serverAds
-	serverAds = ttlcache.New[server_structs.ServerAd, []server_structs.NamespaceAdV2](ttlcache.WithTTL[server_structs.ServerAd, []server_structs.NamespaceAdV2](15 * time.Minute))
+	serverAds = ttlcache.New(ttlcache.WithTTL[string, *server_structs.Advertisement](15 * time.Minute))
 
 	mockTTLCache := func() {
 		mockServerAd1 := server_structs.ServerAd{Name: "origin1", URL: url.URL{Host: "example1.com", Scheme: "https"}, Type: server_structs.OriginType}
@@ -68,11 +68,31 @@ func TestQueryOriginsForObject(t *testing.T) {
 		mockNsAd3 := server_structs.NamespaceAdV2{Path: "/foo/bar/barz"}
 		mockNsAd4 := server_structs.NamespaceAdV2{Path: "/unrelated"}
 		mockNsAd5 := server_structs.NamespaceAdV2{Path: "/caches/hostname"}
-		serverAds.Set(mockServerAd1, []server_structs.NamespaceAdV2{mockNsAd0}, ttlcache.DefaultTTL)
-		serverAds.Set(mockServerAd2, []server_structs.NamespaceAdV2{mockNsAd1}, ttlcache.DefaultTTL)
-		serverAds.Set(mockServerAd3, []server_structs.NamespaceAdV2{mockNsAd1, mockNsAd4}, ttlcache.DefaultTTL)
-		serverAds.Set(mockServerAd4, []server_structs.NamespaceAdV2{mockNsAd2, mockNsAd3}, ttlcache.DefaultTTL)
-		serverAds.Set(mockServerAd5, []server_structs.NamespaceAdV2{mockNsAd5}, ttlcache.DefaultTTL)
+		serverAds.Set(mockServerAd1.URL.String(),
+			&server_structs.Advertisement{
+				ServerAd:     mockServerAd1,
+				NamespaceAds: []server_structs.NamespaceAdV2{mockNsAd0},
+			}, ttlcache.DefaultTTL)
+		serverAds.Set(mockServerAd2.URL.String(),
+			&server_structs.Advertisement{
+				ServerAd:     mockServerAd2,
+				NamespaceAds: []server_structs.NamespaceAdV2{mockNsAd1},
+			}, ttlcache.DefaultTTL)
+		serverAds.Set(mockServerAd3.URL.String(),
+			&server_structs.Advertisement{
+				ServerAd:     mockServerAd3,
+				NamespaceAds: []server_structs.NamespaceAdV2{mockNsAd1, mockNsAd4},
+			}, ttlcache.DefaultTTL)
+		serverAds.Set(mockServerAd4.URL.String(),
+			&server_structs.Advertisement{
+				ServerAd:     mockServerAd4,
+				NamespaceAds: []server_structs.NamespaceAdV2{mockNsAd2, mockNsAd3},
+			}, ttlcache.DefaultTTL)
+		serverAds.Set(mockServerAd5.URL.String(),
+			&server_structs.Advertisement{
+				ServerAd:     mockServerAd5,
+				NamespaceAds: []server_structs.NamespaceAdV2{mockNsAd5},
+			}, ttlcache.DefaultTTL)
 	}
 
 	cleanupMock := func() {
@@ -90,7 +110,7 @@ func TestQueryOriginsForObject(t *testing.T) {
 
 		for _, key := range serverAds.Keys() {
 			ctx, cancel := context.WithCancel(context.Background())
-			originStatUtils[key.URL] = originStatUtil{
+			originStatUtils[key] = originStatUtil{
 				Context:  ctx,
 				Cancel:   cancel,
 				Errgroup: &errgroup.Group{},

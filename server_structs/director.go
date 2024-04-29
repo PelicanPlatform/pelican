@@ -80,6 +80,12 @@ type (
 		FromTopology bool       `json:"from_topology"`
 	}
 
+	// The struct holding a server's advertisement (including ServerAd and NamespaceAd)
+	Advertisement struct {
+		ServerAd
+		NamespaceAds []NamespaceAdV2
+	}
+
 	ServerType   string
 	StrategyType string
 

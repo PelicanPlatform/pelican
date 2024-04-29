@@ -35,8 +35,9 @@ func listNamespacesFromOrigins() []server_structs.NamespaceAdV2 {
 	serverAdItems := serverAds.Items()
 	namespaces := make([]server_structs.NamespaceAdV2, 0, len(serverAdItems))
 	for _, item := range serverAdItems {
-		if item.Key().Type == server_structs.OriginType {
-			namespaces = append(namespaces, item.Value()...)
+		ad := item.Value()
+		if ad.Type == server_structs.OriginType {
+			namespaces = append(namespaces, ad.NamespaceAds...)
 		}
 	}
 	return namespaces
@@ -45,10 +46,11 @@ func listNamespacesFromOrigins() []server_structs.NamespaceAdV2 {
 // List all serverAds in the cache that matches the serverType array
 func listServerAds(serverTypes []server_structs.ServerType) []server_structs.ServerAd {
 	ads := make([]server_structs.ServerAd, 0)
-	for _, ad := range serverAds.Keys() {
+	for _, item := range serverAds.Items() {
+		ad := item.Value()
 		for _, serverType := range serverTypes {
 			if ad.Type == serverType {
-				ads = append(ads, ad)
+				ads = append(ads, ad.ServerAd)
 			}
 		}
 	}
@@ -90,35 +92,38 @@ func ConfigTTLCache(ctx context.Context, egrp *errgroup.Group) {
 	go serverAds.Start()
 	go namespaceKeys.Start()
 
-	serverAds.OnEviction(func(ctx context.Context, er ttlcache.EvictionReason, i *ttlcache.Item[server_structs.ServerAd, []server_structs.NamespaceAdV2]) {
+	serverAds.OnEviction(func(ctx context.Context, er ttlcache.EvictionReason, i *ttlcache.Item[string, *server_structs.Advertisement]) {
 		healthTestUtilsMutex.RLock()
 		defer healthTestUtilsMutex.RUnlock()
-		if util, exists := healthTestUtils[i.Key()]; exists {
+		serverAd := i.Value().ServerAd
+		serverUrl := i.Key()
+
+		if util, exists := healthTestUtils[serverAd]; exists {
 			util.Cancel()
 			if util.ErrGrp != nil {
 				err := util.ErrGrp.Wait()
 				if err != nil {
-					log.Debugf("Error from errgroup when evict the registration from TTL cache for %s %s %s", string(i.Key().Type), i.Key().Name, err.Error())
+					log.Debugf("Error from errgroup when evict the registration from TTL cache for %s %s %s", string(serverAd.Type), serverAd.Name, err.Error())
 				} else {
-					log.Debugf("Errgroup successfully emptied at TTL cache eviction for %s %s", string(i.Key().Type), i.Key().Name)
+					log.Debugf("Errgroup successfully emptied at TTL cache eviction for %s %s", string(serverAd.Type), serverAd.Name)
 				}
 			} else {
-				log.Debugf("errgroup is nil when evict the registration from TTL cache for %s %s", string(i.Key().Type), i.Key().Name)
+				log.Debugf("errgroup is nil when evict the registration from TTL cache for %s %s", string(serverAd.Type), serverAd.Name)
 			}
 		} else {
-			log.Debugf("healthTestUtil not found for %s when evicting TTL cache item", i.Key().Name)
+			log.Debugf("healthTestUtil not found for %s when evicting TTL cache item", serverAd.Name)
 		}
 
-		if i.Key().Type == server_structs.OriginType {
+		if serverAd.Type == server_structs.OriginType {
 			originStatUtilsMutex.Lock()
 			defer originStatUtilsMutex.Unlock()
-			statUtil, ok := originStatUtils[i.Key().URL]
+			statUtil, ok := originStatUtils[serverUrl]
 			if ok {
 				statUtil.Cancel()
 				if err := statUtil.Errgroup.Wait(); err != nil {
-					log.Info(fmt.Sprintf("Error happened when stopping origin %q stat goroutine group: %v", i.Key().Name, err))
+					log.Info(fmt.Sprintf("Error happened when stopping origin %q stat goroutine group: %v", serverAd.Name, err))
 				}
-				delete(originStatUtils, i.Key().URL)
+				delete(originStatUtils, serverUrl)
 			}
 		}
 	})

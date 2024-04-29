@@ -107,7 +107,7 @@ func TestGetAdsForPath(t *testing.T) {
 		Name: "cache1",
 		URL: url.URL{
 			Scheme: "https",
-			Host:   "wisc.edu",
+			Host:   "cache1.wisc.edu",
 		},
 		Type: server_structs.CacheType,
 	}
@@ -116,7 +116,7 @@ func TestGetAdsForPath(t *testing.T) {
 		Name: "cache2",
 		URL: url.URL{
 			Scheme: "https",
-			Host:   "wisc.edu",
+			Host:   "cache2.wisc.edu",
 		},
 		Type: server_structs.CacheType,
 	}
@@ -125,7 +125,7 @@ func TestGetAdsForPath(t *testing.T) {
 		Name: "origin1",
 		URL: url.URL{
 			Scheme: "https",
-			Host:   "wisc.edu",
+			Host:   "origin1.wisc.edu",
 		},
 		Type: server_structs.OriginType,
 	}
@@ -134,7 +134,7 @@ func TestGetAdsForPath(t *testing.T) {
 		Name: "origin2",
 		URL: url.URL{
 			Scheme: "https",
-			Host:   "wisc.edu",
+			Host:   "origin2.wisc.edu",
 		},
 		Type: server_structs.OriginType,
 	}
@@ -143,7 +143,7 @@ func TestGetAdsForPath(t *testing.T) {
 		Name: "topology origin 1",
 		URL: url.URL{
 			Scheme: "https",
-			Host:   "wisc.edu",
+			Host:   "topology.wisc.edu",
 		},
 		Type:         server_structs.OriginType,
 		FromTopology: true,
@@ -278,7 +278,10 @@ func TestConfigCacheEviction(t *testing.T) {
 
 		func() {
 			serverAds.DeleteAll()
-			serverAds.Set(mockPelicanOriginServerAd, []server_structs.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
+			serverAds.Set(mockPelicanOriginServerAd.URL.String(), &server_structs.Advertisement{
+				ServerAd:     mockPelicanOriginServerAd,
+				NamespaceAds: []server_structs.NamespaceAdV2{mockNamespaceAd},
+			}, ttlcache.DefaultTTL)
 			healthTestUtilsMutex.Lock()
 			defer healthTestUtilsMutex.Unlock()
 			// Clear the map for the new test
@@ -289,7 +292,7 @@ func TestConfigCacheEviction(t *testing.T) {
 				ErrGrpContext: errgrpCtx,
 			}
 
-			require.True(t, serverAds.Has(mockPelicanOriginServerAd), "serverAds failed to register the originAd")
+			require.True(t, serverAds.Has(mockPelicanOriginServerAd.URL.String()), "serverAds failed to register the originAd")
 		}()
 
 		cancelChan := make(chan int)
@@ -301,9 +304,9 @@ func TestConfigCacheEviction(t *testing.T) {
 		}()
 
 		func() {
-			serverAds.Delete(mockPelicanOriginServerAd) // This should call onEviction handler and close the context
+			serverAds.Delete(mockPelicanOriginServerAd.URL.String()) // This should call onEviction handler and close the context
 
-			require.False(t, serverAds.Has(mockPelicanOriginServerAd), "serverAds didn't delete originAd")
+			require.False(t, serverAds.Has(mockPelicanOriginServerAd.URL.String()), "serverAds didn't delete originAd")
 		}()
 
 		// OnEviction is handled on a different goroutine than the cache management
@@ -319,7 +322,7 @@ func TestConfigCacheEviction(t *testing.T) {
 }
 
 func TestServerAdsCacheEviction(t *testing.T) {
-	mockServerAd := server_structs.ServerAd{Name: "foo", Type: server_structs.OriginType, URL: url.URL{}}
+	mockServerAd := server_structs.ServerAd{Name: "foo", Type: server_structs.OriginType, URL: url.URL{Host: "mock.server.org"}}
 
 	t.Run("evict-after-expire-time", func(t *testing.T) {
 		// Start cache eviction
@@ -338,8 +341,11 @@ func TestServerAdsCacheEviction(t *testing.T) {
 		func() {
 			serverAds.DeleteAll()
 
-			serverAds.Set(mockServerAd, []server_structs.NamespaceAdV2{}, time.Second*2)
-			require.True(t, serverAds.Has(mockServerAd), "Failed to register server Ad")
+			serverAds.Set(mockServerAd.URL.String(), &server_structs.Advertisement{
+				ServerAd:     mockServerAd,
+				NamespaceAds: []server_structs.NamespaceAdV2{},
+			}, time.Second*2)
+			require.True(t, serverAds.Has(mockServerAd.URL.String()), "Failed to register server Ad")
 		}()
 
 		// Keep checking if the cache item is present until absent or cancelled
@@ -349,7 +355,7 @@ func TestServerAdsCacheEviction(t *testing.T) {
 				case <-cancelChan:
 					return
 				default:
-					if !serverAds.Has(mockServerAd) {
+					if !serverAds.Has(mockServerAd.URL.String()) {
 						deletedChan <- 1
 						return
 					}
