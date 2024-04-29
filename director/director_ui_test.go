@@ -60,6 +60,7 @@ func TestListServers(t *testing.T) {
 		Longitude:   mockOriginServerAd.Longitude,
 		Writes:      mockOriginServerAd.Writes,
 		DirectReads: mockOriginServerAd.DirectReads,
+		Listings:    mockOriginServerAd.Listings,
 		Status:      HealthStatusUnknown,
 	}
 	mocklistCacheRes := listServerResponse{

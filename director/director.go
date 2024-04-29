@@ -321,10 +321,15 @@ func redirectToCache(ginCtx *gin.Context) {
 	}
 
 	var colUrl string
-	if !namespaceAd.PublicRead && originAds[0].AuthURL != (url.URL{}) {
-		colUrl = originAds[0].AuthURL.String()
-	} else {
-		colUrl = originAds[0].URL.String()
+	// If the namespace or the origin does not allow directory listings, then we should not advertise a collections-url.
+	// This is because the configuration of the origin/namespace should override the inclusion of "dirlisthost" for that origin.
+	// Listings is true by default so if it is ever set to false we should accept that config over the dirlisthost.
+	if namespaceAd.Caps.Listings && originAds[0].Listings {
+		if !namespaceAd.PublicRead && originAds[0].AuthURL != (url.URL{}) {
+			colUrl = originAds[0].AuthURL.String()
+		} else {
+			colUrl = originAds[0].URL.String()
+		}
 	}
 	ginCtx.Writer.Header()["X-Pelican-Namespace"] = []string{fmt.Sprintf("namespace=%s, require-token=%v, collections-url=%s",
 		namespaceAd.Path, !namespaceAd.PublicRead, colUrl)}
@@ -407,15 +412,37 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	ginCtx.Writer.Header()["Link"] = []string{linkHeader}
 
 	var colUrl string
-	if !namespaceAd.PublicRead && originAds[0].AuthURL != (url.URL{}) {
-		colUrl = originAds[0].AuthURL.String()
-	} else {
-		colUrl = originAds[0].URL.String()
+	// If the namespace or the origin does not allow directory listings, then we should not advertise a collections-url.
+	// This is because the configuration of the origin/namespace should override the inclusion of "dirlisthost" for that origin.
+	// Listings is true by default so if it is ever set to false we should accept that config over the dirlisthost.
+	if namespaceAd.Caps.Listings && originAds[0].Listings {
+		if !namespaceAd.PublicRead && originAds[0].AuthURL != (url.URL{}) {
+			colUrl = originAds[0].AuthURL.String()
+		} else {
+			colUrl = originAds[0].URL.String()
+		}
 	}
 	ginCtx.Writer.Header()["X-Pelican-Namespace"] = []string{fmt.Sprintf("namespace=%s, require-token=%v, collections-url=%s",
 		namespaceAd.Path, !namespaceAd.PublicRead, colUrl)}
 
 	var redirectURL url.URL
+
+	// If we are doing a PROPFIND, check if origins enable dirlistings
+	if ginCtx.Request.Method == "PROPFIND" {
+		for idx, ad := range originAds {
+			if ad.Listings && namespaceAd.Caps.Listings {
+				redirectURL = getRedirectURL(reqPath, originAds[idx], !namespaceAd.PublicRead)
+				if brokerUrl := originAds[idx].BrokerURL; brokerUrl.String() != "" {
+					ginCtx.Header("X-Pelican-Broker", brokerUrl.String())
+				}
+				ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, authzBearerEscaped))
+				return
+			}
+		}
+		ginCtx.String(http.StatusMethodNotAllowed, "No origins on specified endpoint allow directory listings")
+		return
+	}
+
 	// If we are doing a PUT, check to see if any origins are writeable
 	if ginCtx.Request.Method == "PUT" {
 		for idx, ad := range originAds {
@@ -503,9 +530,12 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 
 		// If we are doing a PROPFIND, we should always redirect to the origin
 		if c.Request.Method == "PROPFIND" {
-			redirectToOrigin(c)
-			c.Abort()
-			return
+			if !strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/director/") && (c.Request.Method == "PROPFIND" || c.Request.Method == "HEAD") {
+				c.Request.URL.Path = "/api/v1.0/director/origin" + c.Request.URL.Path
+				redirectToOrigin(c)
+				c.Abort()
+				return
+			}
 		}
 
 		// If we're configured for cache mode or we haven't set the flag,
@@ -673,6 +703,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		Type:        sType,
 		Writes:      adV2.Caps.Writes,
 		DirectReads: adV2.Caps.DirectReads,
+		Listings:    adV2.Caps.Listings,
 	}
 
 	recordAd(sAd, &adV2.Namespaces)

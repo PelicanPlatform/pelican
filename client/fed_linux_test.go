@@ -22,6 +22,7 @@ package client_test
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -391,4 +392,30 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 		// Throw in a viper.Reset for good measure. Keeps our env squeaky clean!
 		viper.Reset()
 	})
+}
+
+// This tests that is origins disable listings, we should fail the download
+// Note: origins disabling listings override the existance of dirlisthost, causing a failure
+func TestFailureOnOriginDisablingListings(t *testing.T) {
+	viper.Reset()
+	server_utils.ResetOriginExports()
+
+	viper.Set("Logging.Level", "debug")
+	viper.Set("Origin.StorageType", "posix")
+	viper.Set("Origin.ExportVolumes", "/test")
+	viper.Set("Origin.EnablePublicReads", true)
+	viper.Set("Origin.EnableListings", false)
+	fed := fed_test_utils.NewFedTest(t, "")
+
+	destDir := filepath.Join(fed.Exports[0].StoragePrefix, "test")
+	require.NoError(t, os.MkdirAll(destDir, os.FileMode(0755)))
+	log.Debugln("Will create origin file at", destDir)
+	err := os.WriteFile(filepath.Join(destDir, "test.txt"), []byte("test file content"), fs.FileMode(0644))
+	require.NoError(t, err)
+	uploadURL := fmt.Sprintf("pelican://%s:%s%s/%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
+		fed.Exports[0].FederationPrefix, "test")
+
+	_, err = client.DoGet(fed.Ctx, uploadURL, t.TempDir(), true)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "Origin and/or namespace does not support directory listings")
 }

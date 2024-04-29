@@ -1073,6 +1073,45 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		}
 	}
 
+	// If we are a recursive download and using the director, we want to attempt to get directory listings from
+	// PROPFINDing the director
+	if recursive && !upload && tj.useDirector {
+		// Query the director a PROPFIND to see if we can get our directory listing
+		resp, err := queryDirector(tj.ctx, "PROPFIND", remoteUrl.Path, tj.directorUrl)
+		if err != nil {
+			return nil, err
+		}
+		// If the director responds with 405 (method not allowed), we're working with an old Director.
+		// In that event, we try to fallback and use the deprecated dirlisthost
+		if resp.StatusCode == http.StatusMethodNotAllowed {
+			log.Debugln("Failed to find collections url from director, attempting to find directory listings host in namespace")
+			// Check for a dir list host in namespace
+			if tj.namespace.DirListHost == "" {
+				// Both methods to get directory listings failed
+				return nil, errors.New("Origin and/or namespace does not support directory listings")
+			}
+		} else if resp.StatusCode == http.StatusTemporaryRedirect {
+			// If the director responds with a 307 (temporary redirect), we're working with a new Director.
+			// In that event, we can get the collections URL from our redirect
+			collections := resp.Header.Get("Location")
+			if collections == "" {
+				return nil, errors.New("Collections URL not found in director response")
+			}
+			// The resp redirect includes the full path to the object from the origin, we are only interested in the scheme and host
+			collectionsURL, err := url.Parse(collections)
+			if err != nil {
+				return nil, err
+			}
+			dirlisthost := url.URL{
+				Scheme: collectionsURL.Scheme,
+				Host:   collectionsURL.Host,
+			}
+			tj.namespace.DirListHost = dirlisthost.String()
+		} else {
+			return nil, fmt.Errorf("Unexpected response from director when requesting collections url from origin: %v", resp.Status)
+		}
+	}
+
 	log.Debugf("Created new transfer job, ID %s client %s, for URL %s", tj.uuid.String(), tc.id.String(), remoteUrl.String())
 	return
 }
@@ -2192,72 +2231,31 @@ func runPut(request *http.Request, responseChan chan<- *http.Response, errorChan
 }
 
 // Walk a remote directory in a WebDAV server, emitting the files discovered
-func (te *TransferEngine) walkDirDownload(job *clientTransferJob, transfers []transferAttemptDetails, files chan *clientTransferFile, remoteURL *url.URL) error {
-	directorUrl, err := url.JoinPath(job.job.directorUrl, "/api/v1.0/director/origin")
-	if err != nil {
-		return err
-	}
-	// Query the director a PROPFIND to see if we can get our directory listing
-	resp, err := queryDirector(job.job.ctx, "PROPFIND", remoteURL.Path, directorUrl)
-	if err != nil {
-		return err
-	}
-	origins := []DirectorOrigin{}
-	// If the director responds with 405 (method not allowed), we're working with an old Director.
-	// In that event, we try to fallback and use the deprecated dirlisthost
-	if resp.StatusCode == http.StatusMethodNotAllowed {
-		log.Debugln("Failed to find collections url from director, attempting to find directory listings host in namespace")
-		// Check for a dir list host in namespace
-		if job.job.namespace.DirListHost != "" {
-			dirListURL, err := url.Parse(job.job.namespace.DirListHost)
-			if err != nil {
-				log.Errorln("Failed to parse dirlisthost from namespaces into URL:", err)
-				return err
-			}
-			origin := DirectorOrigin{EndpointUrl: dirListURL}
-			origins = append(origins, origin)
-		} else {
-			// Both methods to get directory listings failed
-			return errors.New("Host for directory listings is unknown")
-		}
-	} else if resp.StatusCode == http.StatusTemporaryRedirect {
-		origins = GetOriginsFromDirectorResponse(resp)
-	}
-	for _, origin := range origins {
-		// We're only really interested in the host and scheme
-		collectionsUrl := url.URL{
-			Scheme: origin.EndpointUrl.Scheme,
-			Host:   origin.EndpointUrl.Host,
-		}
-
-		log.Debugln("Collections URL: ", collectionsUrl.String())
-
-		// Get our webdav authenticated client for origin
-		auth := &bearerAuth{token: job.job.token}
-		client := gowebdav.NewAuthClient(collectionsUrl.String(), auth)
-
-		// XRootD does not like keep alives and kills things, so turn them off.
-		transport := config.GetTransport()
-		client.SetTransport(transport)
-
-		// Basically if the error we get is a 404 from client.ReadDir, we want to keep looping, else we want to return
-		err := te.walkDirDownloadHelper(job, transfers, files, remoteURL.Path, client)
+func (te *TransferEngine) walkDirDownload(job *clientTransferJob, transfers []transferAttemptDetails, files chan *clientTransferFile, url *url.URL) error {
+	// Create the client to walk the filesystem
+	rootUrl := *url
+	if job.job.namespace.DirListHost != "" {
+		// Parse the dir list host
+		dirListURL, err := url.Parse(job.job.namespace.DirListHost)
 		if err != nil {
-			// If we get a 404 from gowebdav, we want to possibly try a different origin
-			if gowebdav.IsErrNotFound(err) {
-				log.Debugln("Directory not found in specified collections url:", collectionsUrl.String())
-				continue
-			} else {
-				// If we get an error that is not a 404, we want to return it
-				return errors.Wrap(err, "Failed to do HTTP PROPFIND request on the specified remote directory")
-			}
-		} else {
-			// If we got no error from the helper, we return successful
-			return nil
+			log.Errorln("Failed to parse dirlisthost from namespaces into URL:", err)
+			return err
 		}
+		rootUrl = *dirListURL
+
+	} else {
+		log.Errorln("Host for directory listings is unknown")
+		return errors.New("Host for directory listings is unknown")
 	}
-	// If we get here, we failed all attempts to found origins
-	return errors.New("Failed to walk directory from found origins")
+	log.Debugln("Dir list host: ", rootUrl.String())
+
+	auth := &bearerAuth{token: job.job.token}
+	client := gowebdav.NewAuthClient(rootUrl.String(), auth)
+
+	// XRootD does not like keep alives and kills things, so turn them off.
+	transport := config.GetTransport()
+	client.SetTransport(transport)
+	return te.walkDirDownloadHelper(job, transfers, files, url.Path, client)
 }
 
 // Helper function for the `walkDirDownload`.

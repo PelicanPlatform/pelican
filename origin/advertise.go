@@ -98,6 +98,7 @@ func (server *OriginServer) CreateAdvertisement(name string, originUrlStr string
 				PublicReads: export.Capabilities.PublicReads,
 				Reads:       reads,
 				Writes:      export.Capabilities.Writes,
+				Listings:    export.Capabilities.Listings,
 			},
 			Path: export.FederationPrefix,
 			Generation: []server_structs.TokenGen{{
@@ -125,6 +126,7 @@ func (server *OriginServer) CreateAdvertisement(name string, originUrlStr string
 			Reads:       reads,
 			Writes:      param.Origin_EnableWrites.GetBool(),
 			DirectReads: param.Origin_EnableDirectReads.GetBool(),
+			Listings:    param.Origin_EnableListings.GetBool(),
 		},
 		Issuer: []server_structs.TokenIssuer{{
 			BasePaths: prefixes,
