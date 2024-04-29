@@ -54,15 +54,9 @@ func TestQueryOriginsForObject(t *testing.T) {
 	// The OnEviction function is added to serverAds, which will clear deleted cache item
 	// but will have dead-lock for our test cases. Bypass the onEviction function
 	// by re-init serverAds
-	func() {
-		serverAdMutex.Lock()
-		defer serverAdMutex.Unlock()
-		serverAds = ttlcache.New[server_structs.ServerAd, []server_structs.NamespaceAdV2](ttlcache.WithTTL[server_structs.ServerAd, []server_structs.NamespaceAdV2](15 * time.Minute))
-	}()
+	serverAds = ttlcache.New[server_structs.ServerAd, []server_structs.NamespaceAdV2](ttlcache.WithTTL[server_structs.ServerAd, []server_structs.NamespaceAdV2](15 * time.Minute))
 
 	mockTTLCache := func() {
-		serverAdMutex.Lock()
-		defer serverAdMutex.Unlock()
 		mockServerAd1 := server_structs.ServerAd{Name: "origin1", URL: url.URL{Host: "example1.com", Scheme: "https"}, Type: server_structs.OriginType}
 		mockServerAd2 := server_structs.ServerAd{Name: "origin2", URL: url.URL{Host: "example2.com", Scheme: "https"}, Type: server_structs.OriginType}
 		mockServerAd3 := server_structs.ServerAd{Name: "origin3", URL: url.URL{Host: "example3.com", Scheme: "https"}, Type: server_structs.OriginType}
@@ -82,8 +76,6 @@ func TestQueryOriginsForObject(t *testing.T) {
 	}
 
 	cleanupMock := func() {
-		serverAdMutex.Lock()
-		defer serverAdMutex.Unlock()
 		originStatUtilsMutex.Lock()
 		defer originStatUtilsMutex.Unlock()
 		serverAds.DeleteAll()
@@ -93,8 +85,6 @@ func TestQueryOriginsForObject(t *testing.T) {
 	}
 
 	initMockStatUtils := func() {
-		serverAdMutex.RLock()
-		defer serverAdMutex.RUnlock()
 		originStatUtilsMutex.Lock()
 		defer originStatUtilsMutex.Unlock()
 

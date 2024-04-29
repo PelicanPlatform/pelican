@@ -248,8 +248,6 @@ func TestDirectorRegistration(t *testing.T) {
 	}
 
 	teardown := func() {
-		serverAdMutex.Lock()
-		defer serverAdMutex.Unlock()
 		serverAds.DeleteAll()
 		namespaceKeys.DeleteAll()
 	}
@@ -781,15 +779,11 @@ func TestDiscoverOriginCache(t *testing.T) {
 			t.Fatalf("Could not make a GET request: %v", err)
 		}
 
-		func() {
-			serverAdMutex.Lock()
-			defer serverAdMutex.Unlock()
-			serverAds.DeleteAll()
-			serverAds.Set(mockPelicanOriginServerAd, []server_structs.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
-			// Server fetched from topology should not be present in SD response
-			serverAds.Set(mockTopoOriginServerAd, []server_structs.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
-			serverAds.Set(mockCacheServerAd, []server_structs.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
-		}()
+		serverAds.DeleteAll()
+		serverAds.Set(mockPelicanOriginServerAd, []server_structs.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
+		// Server fetched from topology should not be present in SD response
+		serverAds.Set(mockTopoOriginServerAd, []server_structs.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
+		serverAds.Set(mockCacheServerAd, []server_structs.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
 
 		expectedRes := []PromDiscoveryItem{{
 			Targets: []string{mockCacheServerAd.WebURL.Hostname() + ":" + mockCacheServerAd.WebURL.Port()},
@@ -835,17 +829,13 @@ func TestDiscoverOriginCache(t *testing.T) {
 			t.Fatalf("Could not make a GET request: %v", err)
 		}
 
-		func() {
-			serverAdMutex.Lock()
-			defer serverAdMutex.Unlock()
-			serverAds.DeleteAll()
-			// Add multiple same serverAds
-			serverAds.Set(mockPelicanOriginServerAd, []server_structs.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
-			serverAds.Set(mockPelicanOriginServerAd, []server_structs.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
-			serverAds.Set(mockPelicanOriginServerAd, []server_structs.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
-			// Server fetched from topology should not be present in SD response
-			serverAds.Set(mockTopoOriginServerAd, []server_structs.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
-		}()
+		serverAds.DeleteAll()
+		// Add multiple same serverAds
+		serverAds.Set(mockPelicanOriginServerAd, []server_structs.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
+		serverAds.Set(mockPelicanOriginServerAd, []server_structs.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
+		serverAds.Set(mockPelicanOriginServerAd, []server_structs.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
+		// Server fetched from topology should not be present in SD response
+		serverAds.Set(mockTopoOriginServerAd, []server_structs.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
 
 		expectedRes := []PromDiscoveryItem{{
 			Targets: []string{mockPelicanOriginServerAd.WebURL.Hostname() + ":" + mockPelicanOriginServerAd.WebURL.Port()},

@@ -45,7 +45,6 @@ const (
 
 var (
 	serverAds            = ttlcache.New(ttlcache.WithTTL[server_structs.ServerAd, []server_structs.NamespaceAdV2](15 * time.Minute))
-	serverAdMutex        = sync.RWMutex{}
 	filteredServers      = map[string]filterType{}
 	filteredServersMutex = sync.RWMutex{}
 )
@@ -54,8 +53,6 @@ func recordAd(ad server_structs.ServerAd, namespaceAds *[]server_structs.Namespa
 	if err := updateLatLong(&ad); err != nil {
 		log.Debugln("Failed to lookup GeoIP coordinates for host", ad.URL.Host)
 	}
-	serverAdMutex.Lock()
-	defer serverAdMutex.Unlock()
 
 	customTTL := param.Director_AdvertisementTTL.GetDuration()
 	if customTTL == 0 {

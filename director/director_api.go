@@ -32,10 +32,6 @@ import (
 
 // List all namespaces from origins registered at the director
 func listNamespacesFromOrigins() []server_structs.NamespaceAdV2 {
-
-	serverAdMutex.RLock()
-	defer serverAdMutex.RUnlock()
-
 	serverAdItems := serverAds.Items()
 	namespaces := make([]server_structs.NamespaceAdV2, 0, len(serverAdItems))
 	for _, item := range serverAdItems {
@@ -48,8 +44,6 @@ func listNamespacesFromOrigins() []server_structs.NamespaceAdV2 {
 
 // List all serverAds in the cache that matches the serverType array
 func listServerAds(serverTypes []server_structs.ServerType) []server_structs.ServerAd {
-	serverAdMutex.RLock()
-	defer serverAdMutex.RUnlock()
 	ads := make([]server_structs.ServerAd, 0)
 	for _, ad := range serverAds.Keys() {
 		for _, serverType := range serverTypes {
@@ -133,8 +127,6 @@ func ConfigTTLCache(ctx context.Context, egrp *errgroup.Group) {
 	egrp.Go(func() error {
 		<-ctx.Done()
 		log.Info("Gracefully stopping director TTL cache eviction...")
-		serverAdMutex.Lock()
-		defer serverAdMutex.Unlock()
 		serverAds.DeleteAll()
 		serverAds.Stop()
 		namespaceKeys.DeleteAll()

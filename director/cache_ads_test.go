@@ -277,8 +277,6 @@ func TestConfigCacheEviction(t *testing.T) {
 		ctx, cancelFunc := context.WithDeadline(errgrpCtx, time.Now().Add(time.Second*5))
 
 		func() {
-			serverAdMutex.Lock()
-			defer serverAdMutex.Unlock()
 			serverAds.DeleteAll()
 			serverAds.Set(mockPelicanOriginServerAd, []server_structs.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
 			healthTestUtilsMutex.Lock()
@@ -303,8 +301,6 @@ func TestConfigCacheEviction(t *testing.T) {
 		}()
 
 		func() {
-			serverAdMutex.Lock()
-			defer serverAdMutex.Unlock()
 			serverAds.Delete(mockPelicanOriginServerAd) // This should call onEviction handler and close the context
 
 			require.False(t, serverAds.Has(mockPelicanOriginServerAd), "serverAds didn't delete originAd")
@@ -340,8 +336,6 @@ func TestServerAdsCacheEviction(t *testing.T) {
 		cancelChan := make(chan int)
 
 		func() {
-			serverAdMutex.Lock()
-			defer serverAdMutex.Unlock()
 			serverAds.DeleteAll()
 
 			serverAds.Set(mockServerAd, []server_structs.NamespaceAdV2{}, time.Second*2)

@@ -792,8 +792,6 @@ func discoverOriginCache(ctx *gin.Context) {
 		return
 	}
 
-	serverAdMutex.RLock()
-	defer serverAdMutex.RUnlock()
 	serverAds := serverAds.Keys()
 	promDiscoveryRes := make([]PromDiscoveryItem, 0)
 	for _, ad := range serverAds {

@@ -80,8 +80,6 @@ func namespaceAdContainsPath(ns []server_structs.NamespaceAdV2, path string) boo
 
 func TestListNamespaces(t *testing.T) {
 	setup := func() {
-		serverAdMutex.Lock()
-		defer serverAdMutex.Unlock()
 		serverAds.DeleteAll()
 	}
 
@@ -140,8 +138,6 @@ func TestListServerAds(t *testing.T) {
 
 	t.Run("empty-cache", func(t *testing.T) {
 		func() {
-			serverAdMutex.Lock()
-			defer serverAdMutex.Unlock()
 			serverAds.DeleteAll()
 		}()
 		ads := listServerAds([]server_structs.ServerType{server_structs.OriginType, server_structs.CacheType})
@@ -150,8 +146,6 @@ func TestListServerAds(t *testing.T) {
 
 	t.Run("get-by-server-type", func(t *testing.T) {
 		func() {
-			serverAdMutex.Lock()
-			defer serverAdMutex.Unlock()
 			serverAds.DeleteAll()
 		}()
 		serverAds.Set(mockOriginServerAd, []server_structs.NamespaceAdV2{}, ttlcache.DefaultTTL)

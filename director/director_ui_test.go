@@ -35,15 +35,11 @@ func TestListServers(t *testing.T) {
 
 	router.GET("/servers", listServers)
 
-	func() {
-		serverAdMutex.Lock()
-		defer serverAdMutex.Unlock()
-		serverAds.DeleteAll()
-		serverAds.Set(mockOriginServerAd, mockNamespaceAds(5, "origin1"), ttlcache.DefaultTTL)
-		serverAds.Set(mockCacheServerAd, mockNamespaceAds(4, "cache1"), ttlcache.DefaultTTL)
-		require.True(t, serverAds.Has(mockOriginServerAd))
-		require.True(t, serverAds.Has(mockCacheServerAd))
-	}()
+	serverAds.DeleteAll()
+	serverAds.Set(mockOriginServerAd, mockNamespaceAds(5, "origin1"), ttlcache.DefaultTTL)
+	serverAds.Set(mockCacheServerAd, mockNamespaceAds(4, "cache1"), ttlcache.DefaultTTL)
+	require.True(t, serverAds.Has(mockOriginServerAd))
+	require.True(t, serverAds.Has(mockCacheServerAd))
 
 	mocklistOriginRes := listServerResponse{
 		Name:        mockOriginServerAd.Name,
