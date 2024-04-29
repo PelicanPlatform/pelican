@@ -16,7 +16,7 @@
  *
  ***************************************************************/
 
-// Package launcher_utils contains utility functions for the [github.com/pelicanplatform/pelican/launcher_utils] package.
+// Package launcher_utils contains utility functions for the [github.com/pelicanplatform/pelican/launcher] package.
 //
 // It should only be imported by the launchers package
 // It should NOT be imported to any server pacakges (origin/cache/registry) or other lower level packages (config/utils/etc)
@@ -41,8 +41,10 @@ import (
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 type directorResponse struct {
@@ -103,14 +105,73 @@ func Advertise(ctx context.Context, servers []server_structs.XRootDServer) error
 	return firstErr
 }
 
+// Get the site name from the registry given a namespace prefix
+func getSitenameFromReg(ctx context.Context, prefix string) (sitename string, err error) {
+	fed, err := config.GetFederation(ctx)
+	if err != nil {
+		return
+	}
+	if fed.NamespaceRegistrationEndpoint == "" {
+		err = fmt.Errorf("unable to fetch site name from the registry. Federation.RegistryUrl or Federation.DiscoveryUrl is unset")
+		return
+	}
+	requestUrl, err := url.JoinPath(fed.NamespaceRegistrationEndpoint, "api/v1.0/registry", prefix)
+	if err != nil {
+		return
+	}
+	res, err := utils.MakeRequest(context.Background(), requestUrl, http.MethodGet, nil, nil)
+	if err != nil {
+		return
+	}
+	ns := server_structs.Namespace{}
+	err = json.Unmarshal(res, &ns)
+	if err != nil {
+		return
+	}
+	sitename = ns.AdminMetadata.SiteName
+	return
+}
+
 func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) error {
-	name := param.Xrootd_Sitename.GetString()
-	if name == "" {
-		return errors.New(fmt.Sprintf("%s name isn't set", server.GetServerType()))
+	name := ""
+	var err error
+	// Fetch site name from the registry, if not, fall back to Xrootd.Sitename.
+	// However, currently the registry only supports registering namespaces, not origins.
+	// If multiple namespaces fall under the same origin, we will use the first namespace to fetch the site name
+	if server.GetServerType().IsEnabled(config.OriginType) {
+		originExports, err := server_utils.GetOriginExports()
+		if err != nil {
+			log.Errorf("Failed to get request sitename from the registry. Failed to get exports from the origin server. Will fall back to use Xrootd.Sitename: %v", err)
+		}
+		if len(originExports) != 0 {
+			if len(originExports) > 1 {
+				log.Warningf("The origin has multiple exports. The sitename will be fetched from the registry using the FederationPrefix of the first export: %s.", originExports[0].FederationPrefix)
+			}
+			prefix := originExports[0].FederationPrefix
+			name, err = getSitenameFromReg(ctx, prefix)
+			if err != nil {
+				log.Errorf("Failed to get sitename from the registry. Will fallback to use Xrootd.Sitename: %v", err)
+			}
+		} else {
+			log.Errorf("Failed to get sitename from the registry. The namespace is empty for the %s server. Will fallback to use Xrootd.Sitename", server.GetServerType().String())
+		}
+	} else if server.GetServerType().IsEnabled(config.CacheType) {
+		cachePrefix := "/caches/" + param.Xrootd_Sitename.GetString()
+		name, err = getSitenameFromReg(ctx, cachePrefix)
+		if err != nil {
+			log.Errorf("Failed to get sitename from the registry for the cache. Will fallback to use Xrootd.Sitename: %v", err)
+		}
 	}
 
-	err := server.GetNamespaceAdsFromDirector()
-	if err != nil {
+	if name == "" {
+		log.Infof("Sitename from the registry is empty, fall back to Xrootd.Sitename: %s", param.Xrootd_Sitename.GetString())
+		name = param.Xrootd_Sitename.GetString()
+	}
+	if name == "" {
+		return errors.New(fmt.Sprintf("%s name isn't set. Please set the name via Xrootd.Sitename", server.GetServerType()))
+	}
+
+	if err = server.GetNamespaceAdsFromDirector(); err != nil {
 		return errors.Wrap(err, fmt.Sprintf("%s failed to get namespaceAds from the director", server.GetServerType()))
 	}
 	serverUrl := param.Origin_Url.GetString()

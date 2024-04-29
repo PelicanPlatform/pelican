@@ -590,6 +590,12 @@ func discoverFederationImpl(ctx context.Context) (fedInfo FederationDiscovery, e
 	return
 }
 
+// Reset the fedDiscoveryOnce to update federation metadata values for GetFederation().
+// Should only used for unit tests
+func ResetFederationForTest() {
+	fedDiscoveryOnce = &sync.Once{}
+}
+
 // Retrieve the federation service information from the configuration.
 //
 // The calculation of the federation info is delayed until needed.  As

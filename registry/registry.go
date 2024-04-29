@@ -38,6 +38,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path"
 	"strings"
 	"sync"
 
@@ -303,7 +304,7 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 			return false, nil, sysErr
 		}
 
-		var ns Namespace
+		var ns server_structs.Namespace
 		ns.Prefix = data.Prefix
 
 		pubkeyData, err := json.Marshal(data.Pubkey)
@@ -371,7 +372,7 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 		ns.AdminMetadata.SiteName = ctx.ClientIP()
 
 		// Overwrite status to Pending to filter malicious request
-		ns.AdminMetadata.Status = Pending
+		ns.AdminMetadata.Status = server_structs.RegPending
 
 		err = AddNamespace(&ns)
 		if err != nil {
@@ -823,13 +824,13 @@ func wildcardHandler(ctx *gin.Context) {
 
 		jwks, adminMetadata, err := getNamespaceJwksByPrefix(prefix)
 		if err != nil {
+			log.Errorf("Failed to load jwks for prefix %s: %v", prefix, err)
 			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
 				Msg:    "server encountered an error trying to get jwks for prefix"})
-			log.Errorf("Failed to load jwks for prefix %s: %v", prefix, err)
 			return
 		}
-		if adminMetadata != nil && adminMetadata.Status != Approved {
+		if adminMetadata != nil && adminMetadata.Status != server_structs.RegApproved {
 			if strings.HasPrefix(prefix, "/caches/") { // Caches
 				if param.Registry_RequireCacheApproval.GetBool() {
 					// Use 403 to distinguish between server error
@@ -888,10 +889,38 @@ func wildcardHandler(ctx *gin.Context) {
 		ctx.JSON(http.StatusOK, nsCfg)
 		return
 	} else {
-
-		ctx.String(http.StatusNotFound, "404 Page not found")
+		// Default to get the namespace by its prefix
+		getNamespaceHandler(ctx)
 		return
 	}
+}
+
+func getNamespaceHandler(ctx *gin.Context) {
+	param := ctx.Param("wildcard")
+	prefix := path.Clean(param)
+	exists, err := namespaceExistsByPrefix(prefix)
+	if err != nil {
+		log.Error("Error checking if prefix ", prefix, " exists: ", err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "server encountered an error when checking if the namespace exists"})
+		return
+	}
+	if !exists {
+		ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("namespace prefix '%s', was not found", prefix)})
+		return
+	}
+	ns, err := getNamespaceByPrefix(prefix)
+	if err != nil {
+		log.Errorf("Failed to load namespace for prefix %s: %v", prefix, err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "server encountered an error trying to get the namespace registration for the prefix " + prefix})
+		return
+	}
+	ctx.JSON(http.StatusOK, ns)
 }
 
 // Check if a namespace prefix exists and its public key matches the registry record
@@ -1023,13 +1052,13 @@ func checkNamespaceStatusHandler(ctx *gin.Context) {
 			Msg:    fmt.Sprintf("Error getting namespace %s: %s", req.Prefix, err.Error())})
 		return
 	}
-	emptyMetadata := AdminMetadata{}
+	emptyMetadata := server_structs.AdminMetadata{}
 	// If Registry.RequireCacheApproval or Registry.RequireOriginApproval is false
 	// we return Approved == true
 	if ns.AdminMetadata != emptyMetadata {
 		// Caches
 		if strings.HasPrefix(req.Prefix, "/caches") && param.Registry_RequireCacheApproval.GetBool() {
-			res := server_structs.CheckNamespaceStatusRes{Approved: ns.AdminMetadata.Status == Approved}
+			res := server_structs.CheckNamespaceStatusRes{Approved: ns.AdminMetadata.Status == server_structs.RegApproved}
 			ctx.JSON(http.StatusOK, res)
 			return
 		} else if !param.Registry_RequireCacheApproval.GetBool() {
@@ -1039,7 +1068,7 @@ func checkNamespaceStatusHandler(ctx *gin.Context) {
 		} else {
 			// Origins
 			if param.Registry_RequireOriginApproval.GetBool() {
-				res := server_structs.CheckNamespaceStatusRes{Approved: ns.AdminMetadata.Status == Approved}
+				res := server_structs.CheckNamespaceStatusRes{Approved: ns.AdminMetadata.Status == server_structs.RegApproved}
 				ctx.JSON(http.StatusOK, res)
 				return
 			} else {

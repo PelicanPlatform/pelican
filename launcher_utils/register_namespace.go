@@ -28,15 +28,16 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/registry"
 	"github.com/pelicanplatform/pelican/server_structs"
-	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
-	"golang.org/x/sync/errgroup"
 )
 
 type (
@@ -173,7 +174,7 @@ func keyIsRegistered(privkey jwk.Key, registryUrlStr string, prefix string) (key
 		}
 	}
 
-	var ns *registry.Namespace
+	var ns *server_structs.Namespace
 	err = json.Unmarshal(OSDFBody, &ns)
 	if err != nil {
 		log.Error(fmt.Sprintf("Failed unmarshal namespace from response: %v, body: %v, response code: %v, URL: %v", err, OSDFBody, resp.StatusCode, registryUrl))

@@ -37,15 +37,17 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
-	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/test_utils"
-	"github.com/pelicanplatform/pelican/token"
-	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/test_utils"
+	"github.com/pelicanplatform/pelican/token"
+	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
 func GenerateMockJWKS() (string, error) {
@@ -127,14 +129,14 @@ func TestListNamespaces(t *testing.T) {
 		emptyDB      bool
 		notApproved  bool
 		authUser     bool
-		expectedData []Namespace
+		expectedData []server_structs.Namespace
 	}{
 		{
 			description:  "valid-request-with-empty-db",
 			serverType:   string(OriginType),
 			expectedCode: http.StatusOK,
 			emptyDB:      true,
-			expectedData: []Namespace{},
+			expectedData: []server_structs.Namespace{},
 		},
 		{
 			description:  "valid-request-with-origin-type",
@@ -156,14 +158,14 @@ func TestListNamespaces(t *testing.T) {
 		{
 			description:  "unauthed-not-approved-without-type-returns-empty",
 			expectedCode: http.StatusOK,
-			expectedData: []Namespace{},
+			expectedData: []server_structs.Namespace{},
 			notApproved:  true,
 		},
 		{
 			description:  "unauthed-with-status-pending-returns-403",
 			expectedCode: http.StatusForbidden,
 			status:       "Pending",
-			expectedData: []Namespace{},
+			expectedData: []server_structs.Namespace{},
 			notApproved:  true,
 			authUser:     false,
 		},
@@ -178,7 +180,7 @@ func TestListNamespaces(t *testing.T) {
 			description:  "authed-returns-filtered-approved-status",
 			expectedCode: http.StatusOK,
 			status:       "Approved",
-			expectedData: []Namespace{},
+			expectedData: []server_structs.Namespace{},
 			notApproved:  true,
 			authUser:     true,
 		},
@@ -245,7 +247,7 @@ func TestListNamespaces(t *testing.T) {
 			assert.Equal(t, tc.expectedCode, w.Code)
 
 			if tc.expectedCode == http.StatusOK {
-				var got []Namespace
+				var got []server_structs.Namespace
 				err := json.Unmarshal(w.Body.Bytes(), &got)
 				if err != nil {
 					t.Fatalf("Failed to unmarshal response body: %v", err)
@@ -266,10 +268,10 @@ func TestListNamespacesForUser(t *testing.T) {
 	setupMockRegistryDB(t)
 	defer teardownMockNamespaceDB(t)
 
-	mockUserNss := func() []Namespace {
-		return []Namespace{
-			mockNamespace("/foo", "", "", AdminMetadata{UserID: "mockUser", Status: Pending}),
-			mockNamespace("/bar", "", "", AdminMetadata{UserID: "mockUser", Status: Approved}),
+	mockUserNss := func() []server_structs.Namespace {
+		return []server_structs.Namespace{
+			mockNamespace("/foo", "", "", server_structs.AdminMetadata{UserID: "mockUser", Status: server_structs.RegPending}),
+			mockNamespace("/bar", "", "", server_structs.AdminMetadata{UserID: "mockUser", Status: server_structs.RegApproved}),
 		}
 	}()
 
@@ -279,18 +281,18 @@ func TestListNamespacesForUser(t *testing.T) {
 		emptyDB      bool
 		authUser     bool
 		queryParam   string
-		expectedData []Namespace
+		expectedData []server_structs.Namespace
 	}{
 		{
 			description:  "unauthed-return-401",
 			expectedCode: http.StatusUnauthorized,
-			expectedData: []Namespace{},
+			expectedData: []server_structs.Namespace{},
 		},
 		{
 			description:  "valid-request-with-empty-db",
 			expectedCode: http.StatusOK,
 			emptyDB:      true,
-			expectedData: []Namespace{},
+			expectedData: []server_structs.Namespace{},
 			authUser:     true,
 		},
 		{
@@ -340,7 +342,7 @@ func TestListNamespacesForUser(t *testing.T) {
 			assert.Equal(t, tc.expectedCode, w.Code)
 
 			if tc.expectedCode == http.StatusOK {
-				var got []Namespace
+				var got []server_structs.Namespace
 				err := json.Unmarshal(w.Body.Bytes(), &got)
 				require.NoErrorf(t, err, "Failed to unmarshal response body: %v", err)
 				assert.True(t, compareNamespaces(tc.expectedData, got, true), "Response data does not match expected")
@@ -358,7 +360,7 @@ func TestGetNamespace(t *testing.T) {
 	setupMockRegistryDB(t)
 	defer teardownMockNamespaceDB(t)
 
-	mockUserNs := mockNamespace("/mockUser", "", "", AdminMetadata{UserID: "mockUser"})
+	mockUserNs := mockNamespace("/mockUser", "", "", server_structs.AdminMetadata{UserID: "mockUser"})
 
 	tests := []struct {
 		description  string
@@ -425,7 +427,7 @@ func TestGetNamespace(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.description, func(t *testing.T) {
 			if tc.checkAdmin {
-				err := insertMockDBData([]Namespace{mockUserNs})
+				err := insertMockDBData([]server_structs.Namespace{mockUserNs})
 				require.NoErrorf(t, err, "Failed to set up mock data: %v", err)
 			} else {
 				err := insertMockDBData(mockNssWithMixed)
@@ -461,14 +463,14 @@ func TestGetNamespace(t *testing.T) {
 			require.Equal(t, tc.expectedCode, w.Code)
 
 			if tc.expectedCode == 200 {
-				getNs := Namespace{}
+				getNs := server_structs.Namespace{}
 
 				bytes, err := io.ReadAll(w.Body)
 				require.NoError(t, err)
 				err = json.Unmarshal(bytes, &getNs)
 				require.NoError(t, err)
 
-				require.NotEqual(t, Namespace{}, getNs)
+				require.NotEqual(t, server_structs.Namespace{}, getNs)
 			}
 		})
 	}
@@ -535,7 +537,7 @@ func TestGetNamespaceJWKS(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.description, func(t *testing.T) {
 			if !tc.emptyDB {
-				err := insertMockDBData([]Namespace{
+				err := insertMockDBData([]server_structs.Namespace{
 					{
 						ID:     1,
 						Prefix: "/origin1",
@@ -574,7 +576,7 @@ func TestUpdateNamespaceStatus(t *testing.T) {
 	setupMockRegistryDB(t)
 	defer teardownMockNamespaceDB(t)
 
-	mockUserNs := mockNamespace("/mockUser", "", "", AdminMetadata{UserID: "mockUser"})
+	mockUserNs := mockNamespace("/mockUser", "", "", server_structs.AdminMetadata{UserID: "mockUser"})
 
 	tests := []struct {
 		description  string
@@ -616,18 +618,18 @@ func TestUpdateNamespaceStatus(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.description, func(t *testing.T) {
-			err := insertMockDBData([]Namespace{mockUserNs})
+			err := insertMockDBData([]server_structs.Namespace{mockUserNs})
 			require.NoErrorf(t, err, "Failed to set up mock data: %v", err)
 			defer resetNamespaceDB(t)
 
 			router := gin.Default()
 			router.PATCH("/test/:id/approve", func(ctx *gin.Context) {
 				ctx.Set("User", "admin")
-				updateNamespaceStatus(ctx, Approved)
+				updateNamespaceStatus(ctx, server_structs.RegApproved)
 			})
 			router.PATCH("/test/:id/deny", func(ctx *gin.Context) {
 				ctx.Set("User", "admin")
-				updateNamespaceStatus(ctx, Denied)
+				updateNamespaceStatus(ctx, server_structs.RegDenied)
 			})
 
 			finalId := tc.requestId
@@ -657,7 +659,7 @@ func TestUpdateNamespaceStatus(t *testing.T) {
 					require.NoError(t, err)
 					ns, err := getNamespaceById(intId)
 					require.NoError(t, err)
-					assert.True(t, ns.AdminMetadata.Status == Approved)
+					assert.True(t, ns.AdminMetadata.Status == server_structs.RegApproved)
 					assert.NotEqual(t, time.Time{}, ns.AdminMetadata.ApprovedAt)
 					assert.Equal(t, "admin", ns.AdminMetadata.ApproverID)
 				}
@@ -719,7 +721,7 @@ func TestCreateNamespace(t *testing.T) {
 	t.Run("missing-required-fields-returns-400", func(t *testing.T) {
 		resetNamespaceDB(t)
 
-		mockEmptyNs := Namespace{}
+		mockEmptyNs := server_structs.Namespace{}
 		mockEmptyNsBytes, err := json.Marshal(mockEmptyNs)
 		require.NoError(t, err)
 		// Create a request to the endpoint
@@ -739,7 +741,7 @@ func TestCreateNamespace(t *testing.T) {
 	t.Run("invalid-prefix-returns-400", func(t *testing.T) {
 		resetNamespaceDB(t)
 
-		mockEmptyNs := Namespace{Prefix: "/", Pubkey: "badKey", AdminMetadata: AdminMetadata{Institution: "001"}}
+		mockEmptyNs := server_structs.Namespace{Prefix: "/", Pubkey: "badKey", AdminMetadata: server_structs.AdminMetadata{Institution: "001"}}
 		mockEmptyNsBytes, err := json.Marshal(mockEmptyNs)
 		require.NoError(t, err)
 		// Create a request to the endpoint
@@ -756,11 +758,11 @@ func TestCreateNamespace(t *testing.T) {
 
 	t.Run("existing-prefix-returns-400", func(t *testing.T) {
 		resetNamespaceDB(t)
-		err := insertMockDBData([]Namespace{{Prefix: "/foo", Pubkey: "badKey", AdminMetadata: AdminMetadata{Status: Pending}}})
+		err := insertMockDBData([]server_structs.Namespace{{Prefix: "/foo", Pubkey: "badKey", AdminMetadata: server_structs.AdminMetadata{Status: server_structs.RegPending}}})
 		require.NoError(t, err)
 		defer resetNamespaceDB(t)
 
-		mockNs := Namespace{Prefix: "/foo", Pubkey: "badKey", AdminMetadata: AdminMetadata{Institution: "001"}}
+		mockNs := server_structs.Namespace{Prefix: "/foo", Pubkey: "badKey", AdminMetadata: server_structs.AdminMetadata{Institution: "001"}}
 		mockNsBytes, err := json.Marshal(mockNs)
 		require.NoError(t, err)
 		// Create a request to the endpoint
@@ -778,7 +780,7 @@ func TestCreateNamespace(t *testing.T) {
 	t.Run("bad-pubkey-returns-400", func(t *testing.T) {
 		resetNamespaceDB(t)
 
-		mockNs := Namespace{Prefix: "/foo", Pubkey: "badKey", AdminMetadata: AdminMetadata{Institution: "001"}}
+		mockNs := server_structs.Namespace{Prefix: "/foo", Pubkey: "badKey", AdminMetadata: server_structs.AdminMetadata{Institution: "001"}}
 		mockNsBytes, err := json.Marshal(mockNs)
 		require.NoError(t, err)
 		// Create a request to the endpoint
@@ -799,14 +801,14 @@ func TestCreateNamespace(t *testing.T) {
 		pubKeyStr, err := GenerateMockJWKS()
 		require.NoError(t, err)
 
-		err = insertMockDBData([]Namespace{{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: AdminMetadata{Status: Pending}}})
+		err = insertMockDBData([]server_structs.Namespace{{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Status: server_structs.RegPending}}})
 		require.NoError(t, err)
 		defer resetNamespaceDB(t)
 
 		diffPubKeyStr, err := GenerateMockJWKS()
 		require.NoError(t, err)
 
-		mockNs := Namespace{Prefix: "/foo", Pubkey: diffPubKeyStr, AdminMetadata: AdminMetadata{Institution: "001"}}
+		mockNs := server_structs.Namespace{Prefix: "/foo", Pubkey: diffPubKeyStr, AdminMetadata: server_structs.AdminMetadata{Institution: "001"}}
 		mockNsBytes, err := json.Marshal(mockNs)
 		require.NoError(t, err)
 		// Create a request to the endpoint
@@ -829,14 +831,14 @@ func TestCreateNamespace(t *testing.T) {
 		pubKeyStr, err := GenerateMockJWKS()
 		require.NoError(t, err)
 
-		err = insertMockDBData([]Namespace{{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: AdminMetadata{Status: Pending}}})
+		err = insertMockDBData([]server_structs.Namespace{{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Status: server_structs.RegPending}}})
 		require.NoError(t, err)
 		defer resetNamespaceDB(t)
 
 		diffPubKeyStr, err := GenerateMockJWKS()
 		require.NoError(t, err)
 
-		mockNs := Namespace{Prefix: "/foo/bar", Pubkey: diffPubKeyStr, AdminMetadata: AdminMetadata{Institution: "001"}}
+		mockNs := server_structs.Namespace{Prefix: "/foo/bar", Pubkey: diffPubKeyStr, AdminMetadata: server_structs.AdminMetadata{Institution: "001"}}
 		mockNsBytes, err := json.Marshal(mockNs)
 		require.NoError(t, err)
 		// Create a request to the endpoint
@@ -860,7 +862,7 @@ func TestCreateNamespace(t *testing.T) {
 		pubKeyStr, err := GenerateMockJWKS()
 		require.NoError(t, err)
 
-		mockNs := Namespace{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: AdminMetadata{Institution: "001"}}
+		mockNs := server_structs.Namespace{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Institution: "001"}}
 		mockNsBytes, err := json.Marshal(mockNs)
 		require.NoError(t, err)
 		// Create a request to the endpoint
@@ -883,7 +885,7 @@ func TestCreateNamespace(t *testing.T) {
 		pubKeyStr, err := GenerateMockJWKS()
 		require.NoError(t, err)
 
-		mockNs := Namespace{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: AdminMetadata{Institution: "1000"}}
+		mockNs := server_structs.Namespace{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Institution: "1000"}}
 		mockNsBytes, err := json.Marshal(mockNs)
 		require.NoError(t, err)
 		// Create a request to the endpoint
@@ -902,7 +904,7 @@ func TestCreateNamespace(t *testing.T) {
 		require.Equal(t, 1, len(nss))
 		assert.Equal(t, "/foo", nss[0].Prefix)
 		assert.Equal(t, "admin", nss[0].AdminMetadata.UserID)
-		assert.Equal(t, Pending, nss[0].AdminMetadata.Status)
+		assert.Equal(t, server_structs.RegPending, nss[0].AdminMetadata.Status)
 		assert.NotEqual(t, time.Time{}, nss[0].AdminMetadata.CreatedAt)
 	})
 
@@ -922,6 +924,9 @@ func TestCreateNamespace(t *testing.T) {
 		viper.Set("Registry.CustomRegistrationFields", customFieldsConf)
 		err := InitCustomRegistrationFields()
 		require.NoError(t, err)
+		defer func() {
+			customRegFieldsConfigs = []customRegFieldsConfig{}
+		}()
 
 		pubKeyStr, err := GenerateMockJWKS()
 		require.NoError(t, err)
@@ -932,10 +937,10 @@ func TestCreateNamespace(t *testing.T) {
 			"string_field":   "random",
 			"datetime_field": 1696255200,
 		}
-		mockNs := Namespace{
+		mockNs := server_structs.Namespace{
 			Prefix:        "/foo",
 			Pubkey:        pubKeyStr,
-			AdminMetadata: AdminMetadata{Institution: "1000"},
+			AdminMetadata: server_structs.AdminMetadata{Institution: "1000"},
 			CustomFields:  customFieldsVals,
 		}
 		mockNsBytes, err := json.Marshal(mockNs)
@@ -956,7 +961,7 @@ func TestCreateNamespace(t *testing.T) {
 		require.Equal(t, 1, len(nss))
 		assert.Equal(t, "/foo", nss[0].Prefix)
 		assert.Equal(t, "admin", nss[0].AdminMetadata.UserID)
-		assert.Equal(t, Pending, nss[0].AdminMetadata.Status)
+		assert.Equal(t, server_structs.RegPending, nss[0].AdminMetadata.Status)
 		assert.NotEqual(t, time.Time{}, nss[0].AdminMetadata.CreatedAt)
 	})
 
@@ -978,7 +983,7 @@ func TestCreateNamespace(t *testing.T) {
 		pubKeyStr, err := GenerateMockJWKS()
 		require.NoError(t, err)
 
-		mockNs := Namespace{Prefix: "/topo/foo/bar", Pubkey: pubKeyStr, AdminMetadata: AdminMetadata{Institution: "1000"}}
+		mockNs := server_structs.Namespace{Prefix: "/topo/foo/bar", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Institution: "1000"}}
 		mockNsBytes, err := json.Marshal(mockNs)
 		require.NoError(t, err)
 		// Create a request to the endpoint
@@ -997,7 +1002,7 @@ func TestCreateNamespace(t *testing.T) {
 		require.Equal(t, 1, len(nss))
 		assert.Equal(t, "/topo/foo/bar", nss[0].Prefix)
 		assert.Equal(t, "admin", nss[0].AdminMetadata.UserID)
-		assert.Equal(t, Pending, nss[0].AdminMetadata.Status)
+		assert.Equal(t, server_structs.RegPending, nss[0].AdminMetadata.Status)
 		assert.NotEqual(t, time.Time{}, nss[0].AdminMetadata.CreatedAt)
 		viper.Reset()
 	})
@@ -1020,7 +1025,7 @@ func TestCreateNamespace(t *testing.T) {
 		pubKeyStr, err := GenerateMockJWKS()
 		require.NoError(t, err)
 
-		mockNs := Namespace{Prefix: "/topo/foo", Pubkey: pubKeyStr, AdminMetadata: AdminMetadata{Institution: "1000"}}
+		mockNs := server_structs.Namespace{Prefix: "/topo/foo", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Institution: "1000"}}
 		mockNsBytes, err := json.Marshal(mockNs)
 		require.NoError(t, err)
 		// Create a request to the endpoint
@@ -1039,7 +1044,7 @@ func TestCreateNamespace(t *testing.T) {
 		require.Equal(t, 1, len(nss))
 		assert.Equal(t, "/topo/foo", nss[0].Prefix)
 		assert.Equal(t, "admin", nss[0].AdminMetadata.UserID)
-		assert.Equal(t, Pending, nss[0].AdminMetadata.Status)
+		assert.Equal(t, server_structs.RegPending, nss[0].AdminMetadata.Status)
 		assert.NotEqual(t, time.Time{}, nss[0].AdminMetadata.CreatedAt)
 		viper.Reset()
 	})
@@ -1047,6 +1052,9 @@ func TestCreateNamespace(t *testing.T) {
 
 func TestUpdateNamespaceHandler(t *testing.T) {
 	viper.Reset()
+	t.Cleanup(func() {
+		viper.Reset()
+	})
 	_, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -1110,7 +1118,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 		pubKeyStr, err := GenerateMockJWKS()
 		require.NoError(t, err)
 
-		mockNs := Namespace{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: AdminMetadata{Institution: "1000"}}
+		mockNs := server_structs.Namespace{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Institution: "1000"}}
 		mockNsBytes, err := json.Marshal(mockNs)
 		require.NoError(t, err)
 		// Create a request to the endpoint
@@ -1133,9 +1141,9 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 		pubKeyStr, err := GenerateMockJWKS()
 		require.NoError(t, err)
 
-		mockNs := Namespace{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: AdminMetadata{Institution: "1000", UserID: "notYourNs"}}
+		mockNs := server_structs.Namespace{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Institution: "1000", UserID: "notYourNs"}}
 
-		err = insertMockDBData([]Namespace{mockNs})
+		err = insertMockDBData([]server_structs.Namespace{mockNs})
 		require.NoError(t, err)
 
 		id, err := getLastNamespaceId()
@@ -1163,17 +1171,17 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 		pubKeyStr, err := GenerateMockJWKS()
 		require.NoError(t, err)
 
-		mockNs := Namespace{
+		mockNs := server_structs.Namespace{
 			Prefix: "/foo",
 			Pubkey: pubKeyStr,
-			AdminMetadata: AdminMetadata{
+			AdminMetadata: server_structs.AdminMetadata{
 				Institution: "1000",
-				UserID:      "mockUser", // same as currently sign-in user
-				Status:      Approved,   // but it's approved
+				UserID:      "mockUser",                 // same as currently sign-in user
+				Status:      server_structs.RegApproved, // but it's approved
 			},
 		}
 
-		err = insertMockDBData([]Namespace{mockNs})
+		err = insertMockDBData([]server_structs.Namespace{mockNs})
 		require.NoError(t, err)
 
 		id, err := getLastNamespaceId()
@@ -1201,18 +1209,18 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 		pubKeyStr, err := GenerateMockJWKS()
 		require.NoError(t, err)
 
-		mockNs := Namespace{
+		mockNs := server_structs.Namespace{
 			Prefix: "/foo",
 			Pubkey: pubKeyStr,
-			AdminMetadata: AdminMetadata{
+			AdminMetadata: server_structs.AdminMetadata{
 				Description: "oldDescription",
 				Institution: "1000",
-				UserID:      "mockUser", // same as currently sign-in user
-				Status:      Pending,    // but it's approved
+				UserID:      "mockUser",                // same as currently sign-in user
+				Status:      server_structs.RegPending, // but it's approved
 			},
 		}
 
-		err = insertMockDBData([]Namespace{mockNs})
+		err = insertMockDBData([]server_structs.Namespace{mockNs})
 		require.NoError(t, err)
 
 		id, err := getLastNamespaceId()
@@ -1246,18 +1254,18 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 		pubKeyStr, err := GenerateMockJWKS()
 		require.NoError(t, err)
 
-		mockNs := Namespace{
+		mockNs := server_structs.Namespace{
 			Prefix: "/foo",
 			Pubkey: pubKeyStr,
-			AdminMetadata: AdminMetadata{
+			AdminMetadata: server_structs.AdminMetadata{
 				Description: "oldDescription",
 				Institution: "1000",
-				UserID:      "mockUser", // same as currently sign-in user
-				Status:      Approved,   // but it's approved
+				UserID:      "mockUser",                 // same as currently sign-in user
+				Status:      server_structs.RegApproved, // but it's approved
 			},
 		}
 
-		err = insertMockDBData([]Namespace{mockNs})
+		err = insertMockDBData([]server_structs.Namespace{mockNs})
 		require.NoError(t, err)
 
 		id, err := getLastNamespaceId()
@@ -1387,6 +1395,6 @@ func TestListInsitutions(t *testing.T) {
 }
 
 func TestPopulateRegistrationFields(t *testing.T) {
-	result := populateRegistrationFields("", Namespace{})
+	result := populateRegistrationFields("", server_structs.Namespace{})
 	assert.NotEqual(t, 0, len(result))
 }

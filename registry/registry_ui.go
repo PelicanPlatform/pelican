@@ -76,7 +76,7 @@ const (
 
 func init() {
 	registrationFields = make([]registrationField, 0)
-	registrationFields = append(registrationFields, populateRegistrationFields("", Namespace{})...)
+	registrationFields = append(registrationFields, populateRegistrationFields("", server_structs.Namespace{})...)
 }
 
 // Populate registrationFields array to provide available namespace registration fields
@@ -138,21 +138,21 @@ func populateRegistrationFields(prefix string, data interface{}) []registrationF
 				break
 			}
 			// If it's AdminMetadata, add prefix and recursively call to parse fields
-			if field.Type == reflect.TypeOf(AdminMetadata{}) {
+			if field.Type == reflect.TypeOf(server_structs.AdminMetadata{}) {
 				existing_prefix := ""
 				if prefix != "" {
 					existing_prefix = prefix + "."
 				}
-				fields = append(fields, populateRegistrationFields(existing_prefix+"admin_metadata", AdminMetadata{})...)
+				fields = append(fields, populateRegistrationFields(existing_prefix+"admin_metadata", server_structs.AdminMetadata{})...)
 			}
 		}
 
-		if field.Type == reflect.TypeOf(RegistrationStatus("")) {
+		if field.Type == reflect.TypeOf(server_structs.RegistrationStatus("")) {
 			regField.Type = Enum
 			options := make([]registrationFieldOption, 3)
-			options[0] = registrationFieldOption{Name: Pending.String(), ID: Pending.LowerString()}
-			options[1] = registrationFieldOption{Name: Approved.String(), ID: Approved.LowerString()}
-			options[2] = registrationFieldOption{Name: Denied.String(), ID: Denied.LowerString()}
+			options[0] = registrationFieldOption{Name: server_structs.RegPending.String(), ID: server_structs.RegPending.LowerString()}
+			options[1] = registrationFieldOption{Name: server_structs.RegApproved.String(), ID: server_structs.RegApproved.LowerString()}
+			options[2] = registrationFieldOption{Name: server_structs.RegDenied.String(), ID: server_structs.RegDenied.LowerString()}
 			regField.Options = options
 			fields = append(fields, regField)
 		} else {
@@ -191,7 +191,7 @@ func listNamespaces(ctx *gin.Context) {
 	}
 
 	// For unauthed user with non-empty Status query != Approved, return 403
-	if !isAuthed && queryParams.Status != "" && queryParams.Status != Approved.String() {
+	if !isAuthed && queryParams.Status != "" && queryParams.Status != server_structs.RegApproved.String() {
 		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    "You don't have permission to filter non-approved namespace registrations"})
@@ -206,14 +206,14 @@ func listNamespaces(ctx *gin.Context) {
 		return
 	}
 
-	filterNs := Namespace{}
+	filterNs := server_structs.Namespace{}
 
 	// For authenticated users, it returns all namespaces.
 	// For unauthenticated users, it returns namespaces with AdminMetadata.Status = Approved
 	if isAuthed {
 		if queryParams.Status != "" {
-			if IsValidRegStatus(queryParams.Status) {
-				filterNs.AdminMetadata.Status = RegistrationStatus(queryParams.Status)
+			if server_structs.IsValidRegStatus(queryParams.Status) {
+				filterNs.AdminMetadata.Status = server_structs.RegistrationStatus(queryParams.Status)
 			} else {
 				ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 					Status: server_structs.RespFailed,
@@ -221,7 +221,7 @@ func listNamespaces(ctx *gin.Context) {
 			}
 		}
 	} else {
-		filterNs.AdminMetadata.Status = Approved
+		filterNs.AdminMetadata.Status = server_structs.RegApproved
 	}
 
 	namespaces, err := getNamespacesByFilter(filterNs, ServerType(queryParams.ServerType))
@@ -257,11 +257,11 @@ func listNamespacesForUser(ctx *gin.Context) {
 		return
 	}
 
-	filterNs := Namespace{AdminMetadata: AdminMetadata{UserID: user}}
+	filterNs := server_structs.Namespace{AdminMetadata: server_structs.AdminMetadata{UserID: user}}
 
 	if queryParams.Status != "" {
-		if IsValidRegStatus(queryParams.Status) {
-			filterNs.AdminMetadata.Status = RegistrationStatus(queryParams.Status)
+		if server_structs.IsValidRegStatus(queryParams.Status) {
+			filterNs.AdminMetadata.Status = server_structs.RegistrationStatus(queryParams.Status)
 		} else {
 			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
@@ -330,7 +330,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 		}
 	}
 
-	ns := Namespace{}
+	ns := server_structs.Namespace{}
 	if ctx.ShouldBindJSON(&ns) != nil {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -432,7 +432,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 	if !isUpdate { // Create
 		ns.AdminMetadata.UserID = user
 		// Overwrite status to Pending to filter malicious request
-		ns.AdminMetadata.Status = Pending
+		ns.AdminMetadata.Status = server_structs.RegPending
 		if inTopo {
 			ns.AdminMetadata.Description = fmt.Sprintf("[ Attention: A superspace or subspace of this prefix exists in OSDF topology: %s ] ", GetTopoPrefixString(topoNss))
 		}
@@ -500,7 +500,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 					Msg:    "Error checking namespace status"})
 				return
 			}
-			if existingStatus == Approved {
+			if existingStatus == server_structs.RegApproved {
 				log.Errorf("User '%s' is trying to modify approved namespace registration with id=%d", user, ns.ID)
 				ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
 					Status: server_structs.RespFailed,
@@ -580,7 +580,7 @@ func getNamespace(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, ns)
 }
 
-func updateNamespaceStatus(ctx *gin.Context, status RegistrationStatus) {
+func updateNamespaceStatus(ctx *gin.Context, status server_structs.RegistrationStatus) {
 	user := ctx.GetString("User")
 	idStr := ctx.Param("id")
 	id, err := strconv.Atoi(idStr)
@@ -784,10 +784,10 @@ func RegisterRegistryWebAPI(router *gin.RouterGroup) error {
 		registryWebAPI.DELETE("/namespaces/:id", web_ui.AuthHandler, web_ui.AdminAuthHandler, deleteNamespace)
 		registryWebAPI.GET("/namespaces/:id/pubkey", getNamespaceJWKS)
 		registryWebAPI.PATCH("/namespaces/:id/approve", web_ui.AuthHandler, web_ui.AdminAuthHandler, func(ctx *gin.Context) {
-			updateNamespaceStatus(ctx, Approved)
+			updateNamespaceStatus(ctx, server_structs.RegApproved)
 		})
 		registryWebAPI.PATCH("/namespaces/:id/deny", web_ui.AuthHandler, web_ui.AdminAuthHandler, func(ctx *gin.Context) {
-			updateNamespaceStatus(ctx, Denied)
+			updateNamespaceStatus(ctx, server_structs.RegDenied)
 		})
 	}
 	{
