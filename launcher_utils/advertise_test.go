@@ -26,21 +26,25 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 func TestGetSitenameFromReg(t *testing.T) {
-	t.Run("no-registry-url", func(t *testing.T) {
+	t.Cleanup(func() {
 		viper.Reset()
+	})
+
+	t.Run("no-registry-url", func(t *testing.T) {
 		config.ResetFederationForTest()
 		config.SetFederation(config.FederationDiscovery{})
 		sitename, err := getSitenameFromReg(context.Background(), "/foo")
 		require.Error(t, err)
-		assert.Equal(t, "unable to fetch site name from the registry. Federation.RegistryUrl is unset", err.Error())
+		assert.Equal(t, "unable to fetch site name from the registry. Federation.RegistryUrl or Federation.DiscoveryUrl is unset", err.Error())
 		assert.Empty(t, sitename)
 	})
 

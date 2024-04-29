@@ -566,12 +566,12 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 	ctx.Set("serverName", adV2.Name)
 	ctx.Set("serverWebUrl", adV2.WebURL)
 
-	ad_url, err := url.Parse(adV2.DataURL)
+	adUrl, err := url.Parse(adV2.DataURL)
 	if err != nil {
 		log.Warningf("Failed to parse %s URL %v: %v\n", sType, adV2.DataURL, err)
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Invalid %s registration", sType),
+			Msg:    fmt.Sprintf("Invalid %s registration. DataURL %s is not a valid URL", sType, adV2.DataURL),
 		})
 		return
 	}
@@ -581,7 +581,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		log.Warningf("Failed to parse server Web URL %v: %v\n", adV2.WebURL, err)
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "Invalid server Web URL",
+			Msg:    fmt.Sprintf("Invalid %s registration. WebURL %s is not a valid URL", sType, adV2.WebURL),
 		})
 		return
 	}
@@ -591,7 +591,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		log.Warningf("Failed to parse broker URL %s: %s", adV2.BrokerURL, err)
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "Invalid broker URL",
+			Msg:    fmt.Sprintf("Invalid %s registration. BrokerURL %s is not a valid URL", sType, adV2.BrokerURL),
 		})
 	}
 
@@ -627,7 +627,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 	} else {
 		token := strings.TrimPrefix(tokens[0], "Bearer ")
 		// Use hostname from adv2.DataUrl instead of adv2.Name as Name is the site name
-		hostname := ad_url.Hostname()
+		hostname := adUrl.Hostname()
 
 		prefix := path.Join("/caches", hostname)
 		ok, err := verifyAdvertiseToken(engineCtx, token, prefix)
@@ -657,7 +657,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 
 	sAd := server_structs.ServerAd{
 		Name:        adV2.Name,
-		URL:         *ad_url,
+		URL:         *adUrl,
 		WebURL:      *adWebUrl,
 		BrokerURL:   *brokerUrl,
 		Type:        sType,

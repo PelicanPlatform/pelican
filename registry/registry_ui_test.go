@@ -38,16 +38,17 @@ import (
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/pkg/errors"
+	"github.com/spf13/viper"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
-	"github.com/pkg/errors"
-	"github.com/spf13/viper"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // Mock wrong data fields for Institution
@@ -931,10 +932,10 @@ func TestCreateNamespace(t *testing.T) {
 			"string_field":   "random",
 			"datetime_field": 1696255200,
 		}
-		mockNs := Namespace{
+		mockNs := server_structs.Namespace{
 			Prefix:        "/foo",
 			Pubkey:        pubKeyStr,
-			AdminMetadata: AdminMetadata{Institution: "1000"},
+			AdminMetadata: server_structs.AdminMetadata{Institution: "1000"},
 			CustomFields:  customFieldsVals,
 		}
 		mockNsBytes, err := json.Marshal(mockNs)
@@ -955,7 +956,7 @@ func TestCreateNamespace(t *testing.T) {
 		require.Equal(t, 1, len(nss))
 		assert.Equal(t, "/foo", nss[0].Prefix)
 		assert.Equal(t, "admin", nss[0].AdminMetadata.UserID)
-		assert.Equal(t, Pending, nss[0].AdminMetadata.Status)
+		assert.Equal(t, server_structs.RegPending, nss[0].AdminMetadata.Status)
 		assert.NotEqual(t, time.Time{}, nss[0].AdminMetadata.CreatedAt)
 	})
 

@@ -16,7 +16,7 @@
  *
  ***************************************************************/
 
-// Package launcher_utils contains utility functions for the [github.com/pelicanplatform/pelican/launcher_utils] package.
+// Package launcher_utils contains utility functions for the [github.com/pelicanplatform/pelican/launcher] package.
 //
 // It should only be imported by the launchers package
 // It should NOT be imported to any server pacakges (origin/cache/registry) or other lower level packages (config/utils/etc)
@@ -112,7 +112,7 @@ func getSitenameFromReg(ctx context.Context, prefix string) (sitename string, er
 		return
 	}
 	if fed.NamespaceRegistrationEndpoint == "" {
-		err = fmt.Errorf("unable to fetch site name from the registry. Federation.RegistryUrl is unset")
+		err = fmt.Errorf("unable to fetch site name from the registry. Federation.RegistryUrl or Federation.DiscoveryUrl is unset")
 		return
 	}
 	requestUrl, err := url.JoinPath(fed.NamespaceRegistrationEndpoint, "api/v1.0/registry", prefix)
