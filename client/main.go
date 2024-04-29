@@ -25,7 +25,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"regexp"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -459,8 +458,6 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 		return nil, err
 	}
 
-	project := GetProjectName()
-
 	te := NewTransferEngine(ctx)
 	defer func() {
 		if err := te.Shutdown(); err != nil {
@@ -471,7 +468,7 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 	if err != nil {
 		return
 	}
-	tj, err := client.NewTransferJob(context.Background(), remoteDestUrl, localObject, true, recursive, project)
+	tj, err := client.NewTransferJob(context.Background(), remoteDestUrl, localObject, true, recursive)
 	if err != nil {
 		return
 	}
@@ -547,7 +544,6 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 		localDestination = path.Join(localDestPath, remoteObjectFilename)
 	}
 
-	project := GetProjectName()
 	success := false
 
 	te := NewTransferEngine(ctx)
@@ -560,7 +556,7 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 	if err != nil {
 		return
 	}
-	tj, err := tc.NewTransferJob(context.Background(), remoteObjectUrl, localDestination, false, recursive, project)
+	tj, err := tc.NewTransferJob(context.Background(), remoteObjectUrl, localDestination, false, recursive)
 	if err != nil {
 		return
 	}
@@ -650,8 +646,6 @@ func DoCopy(ctx context.Context, sourceFile string, destination string, recursiv
 	sourceScheme, _ := getTokenName(sourceURL)
 	destScheme, _ := getTokenName(destURL)
 
-	project := GetProjectName()
-
 	isPut := destScheme == "stash" || destScheme == "osdf" || destScheme == "pelican"
 
 	var localPath string
@@ -712,7 +706,7 @@ func DoCopy(ctx context.Context, sourceFile string, destination string, recursiv
 	if err != nil {
 		return
 	}
-	tj, err := tc.NewTransferJob(context.Background(), remoteURL, localPath, isPut, recursive, project)
+	tj, err := tc.NewTransferJob(context.Background(), remoteURL, localPath, isPut, recursive)
 	if err != nil {
 		return
 	}
@@ -787,48 +781,4 @@ func getIPs(name string) []string {
 	// Always prefer IPv4
 	return append(ipv4s, ipv6s...)
 
-}
-
-// This function parses a condor job ad and returns the project name if defined
-func GetProjectName() string {
-	//Parse the .job.ad file for the Owner (username) and ProjectName of the callee.
-
-	condorJobAd, isPresent := os.LookupEnv("_CONDOR_JOB_AD")
-	var filename string
-	if isPresent {
-		filename = condorJobAd
-	} else if _, err := os.Stat(".job.ad"); err == nil {
-		filename = ".job.ad"
-	} else {
-		return ""
-	}
-
-	// https://stackoverflow.com/questions/28574609/how-to-apply-regexp-to-content-in-file-go
-
-	b, err := os.ReadFile(filename)
-	if err != nil {
-		log.Warningln("Can not read .job.ad file", err)
-	}
-
-	// Get all matches from file
-	// Note: This appears to be invalid regex but is the only thing that appears to work. This way it successfully finds our matches
-	classadRegex, e := regexp.Compile(`^*\s*(ProjectName)\s=\s"*(.*)"*`)
-	if e != nil {
-		log.Fatal(e)
-	}
-
-	matches := classadRegex.FindAll(b, -1)
-	for _, match := range matches {
-		matchString := strings.TrimSpace(string(match))
-		if strings.HasPrefix(matchString, "ProjectName") {
-			matchParts := strings.Split(strings.TrimSpace(matchString), "=")
-
-			if len(matchParts) == 2 { // just confirm we get 2 parts of the string
-				matchValue := strings.TrimSpace(matchParts[1])
-				matchValue = strings.Trim(matchValue, "\"") //trim any "" around the match if present
-				return matchValue
-			}
-		}
-	}
-	return ""
 }
