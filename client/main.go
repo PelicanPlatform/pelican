@@ -267,26 +267,42 @@ func getUserAgent(project string) (agent string) {
 }
 
 func getCachesFromNamespace(namespace namespaces.Namespace, useDirector bool, preferredCaches []*url.URL) (caches []CacheInterface, err error) {
-
+	preferredCache := false
 	// The global cache override is set
 	if len(preferredCaches) > 0 {
 		if preferredCaches[0].String() == "" {
 			err = errors.New("Preferred cache was specified as an empty string")
 			return
 		}
+		preferredCache = true
+		cacheUrl := preferredCaches[0].String()
 		log.Debugf("Using the cache (%s) from the config override\n", preferredCaches[0])
 		cache := namespaces.DirectorCache{
 			EndpointUrl: preferredCaches[0].String(),
 		}
-		caches = []CacheInterface{cache}
-		return
+		// If we have a '+' at the end of the cache url, we need to append the "normal" cache list (so don't return yet)
+		if strings.HasSuffix(cacheUrl, "+") {
+			cache.EndpointUrl = strings.TrimSuffix(cacheUrl, "+")
+			caches = []CacheInterface{cache}
+		} else {
+			// else, we just want to return
+			caches = []CacheInterface{cache}
+			return
+		}
 	}
 
 	if useDirector {
 		log.Debugln("Using the returned sources from the director")
-		caches = make([]CacheInterface, len(namespace.SortedDirectorCaches))
+		directorCaches := make([]CacheInterface, len(namespace.SortedDirectorCaches))
 		for idx, val := range namespace.SortedDirectorCaches {
-			caches[idx] = val
+			directorCaches[idx] = val
+		}
+
+		// If preferredCache is set, prepend it to the list of caches and return
+		if preferredCache {
+			caches = append(caches, directorCaches...)
+		} else {
+			caches = directorCaches
 		}
 		log.Debugln("Matched caches:", caches)
 		return

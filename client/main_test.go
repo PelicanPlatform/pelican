@@ -58,6 +58,68 @@ func TestGetIps(t *testing.T) {
 
 }
 
+func TestGetCachesFromNamespace(t *testing.T) {
+	// Get our list of caches for our namespace:
+	directorCaches := make([]namespaces.DirectorCache, 3)
+	for i := 0; i < 3; i++ {
+		directorCache := namespaces.DirectorCache{
+			EndpointUrl: "https://some/cache/" + strconv.Itoa(i),
+			Priority:    0,
+			AuthedReq:   false,
+		}
+		directorCaches[i] = directorCache
+	}
+
+	// Make our namespace:
+	namespace := namespaces.Namespace{
+		SortedDirectorCaches: directorCaches,
+		ReadHTTPS:            false,
+		UseTokenOnRead:       false,
+	}
+
+	// Check getCachesFromNamespace works with a director
+	t.Run("testNoPreferredCache", func(t *testing.T) {
+		caches, err := getCachesFromNamespace(namespace, true, nil)
+		assert.NoError(t, err)
+		assert.Len(t, caches, 3)
+		assert.Equal(t, "https://some/cache/0", caches[0].(namespaces.DirectorCache).EndpointUrl)
+		assert.Equal(t, "https://some/cache/1", caches[1].(namespaces.DirectorCache).EndpointUrl)
+		assert.Equal(t, "https://some/cache/2", caches[2].(namespaces.DirectorCache).EndpointUrl)
+	})
+
+	// Test that the function fails if the preferred cache is ""
+	t.Run("testPreferredCacheEmpty", func(t *testing.T) {
+		preferredCacheURL, _ := url.Parse("")
+		someEmptyUrlList := []*url.URL{preferredCacheURL}
+		_, err := getCachesFromNamespace(namespace, true, someEmptyUrlList)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "Preferred cache was specified as an empty string")
+	})
+
+	// Test that the list of caches we get back has more than just the preferred cache when it is specified with a "+" at the end
+	t.Run("testPreferredCachePrepend", func(t *testing.T) {
+		preferredCacheURL, _ := url.Parse("https://I/Like/This/Cache/The/Most+")
+		preferredCacheList := []*url.URL{preferredCacheURL}
+		caches, err := getCachesFromNamespace(namespace, true, preferredCacheList)
+		assert.NoError(t, err)
+		assert.Len(t, caches, 4)
+		assert.Equal(t, "https://I/Like/This/Cache/The/Most", caches[0].(namespaces.DirectorCache).EndpointUrl)
+		assert.Equal(t, "https://some/cache/0", caches[1].(namespaces.DirectorCache).EndpointUrl)
+		assert.Equal(t, "https://some/cache/1", caches[2].(namespaces.DirectorCache).EndpointUrl)
+		assert.Equal(t, "https://some/cache/2", caches[3].(namespaces.DirectorCache).EndpointUrl)
+	})
+
+	// Test that we only get the preferred cache back when it is specified without a "+" at the end
+	t.Run("testPreferredCacheNoPrepend", func(t *testing.T) {
+		preferredCacheURL, _ := url.Parse("https://I/Like/This/Cache/The/Most")
+		preferredCacheList := []*url.URL{preferredCacheURL}
+		caches, err := getCachesFromNamespace(namespace, true, preferredCacheList)
+		assert.NoError(t, err)
+		assert.Len(t, caches, 1)
+		assert.Equal(t, "https://I/Like/This/Cache/The/Most", caches[0].(namespaces.DirectorCache).EndpointUrl)
+	})
+}
+
 // TestGetToken tests getToken
 func TestGetToken(t *testing.T) {
 	// Need a namespace for token acquisition
