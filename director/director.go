@@ -85,7 +85,7 @@ var (
 	healthTestUtils      = make(map[server_structs.ServerAd]*healthTestUtil)
 	healthTestUtilsMutex = sync.RWMutex{}
 
-	originStatUtils      = make(map[url.URL]originStatUtil)
+	originStatUtils      = make(map[string]originStatUtil)
 	originStatUtilsMutex = sync.RWMutex{}
 )
 
@@ -732,7 +732,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 	if sType == server_structs.OriginType {
 		originStatUtilsMutex.Lock()
 		defer originStatUtilsMutex.Unlock()
-		statUtil, ok := originStatUtils[sAd.URL]
+		statUtil, ok := originStatUtils[sAd.URL.String()]
 		if !ok || statUtil.Errgroup == nil {
 			baseCtx, cancel := context.WithCancel(engineCtx)
 			concLimit := param.Director_StatConcurrencyLimit.GetInt()
@@ -743,7 +743,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 				Cancel:   cancel,
 				Context:  baseCtx,
 			}
-			originStatUtils[sAd.URL] = newUtil
+			originStatUtils[sAd.URL.String()] = newUtil
 		}
 	}
 
@@ -792,32 +792,30 @@ func discoverOriginCache(ctx *gin.Context) {
 		return
 	}
 
-	serverAdMutex.RLock()
-	defer serverAdMutex.RUnlock()
-	serverAds := serverAds.Keys()
 	promDiscoveryRes := make([]PromDiscoveryItem, 0)
-	for _, ad := range serverAds {
-		if ad.WebURL.String() == "" {
+	for _, ad := range serverAds.Items() {
+		serverAd := ad.Value()
+		if serverAd.WebURL.String() == "" {
 			// Origins and caches fetched from topology can't be scraped as they
 			// don't have a WebURL
 			continue
 		}
 		var auth_url string
-		if ad.AuthURL == (url.URL{}) {
-			auth_url = ad.URL.String()
+		if serverAd.AuthURL == (url.URL{}) {
+			auth_url = serverAd.URL.String()
 		} else {
-			auth_url = ad.AuthURL.String()
+			auth_url = serverAd.AuthURL.String()
 		}
 		promDiscoveryRes = append(promDiscoveryRes, PromDiscoveryItem{
-			Targets: []string{ad.WebURL.Hostname() + ":" + ad.WebURL.Port()},
+			Targets: []string{serverAd.WebURL.Hostname() + ":" + serverAd.WebURL.Port()},
 			Labels: map[string]string{
-				"server_type":     string(ad.Type),
-				"server_name":     ad.Name,
+				"server_type":     string(serverAd.Type),
+				"server_name":     serverAd.Name,
 				"server_auth_url": auth_url,
-				"server_url":      ad.URL.String(),
-				"server_web_url":  ad.WebURL.String(),
-				"server_lat":      fmt.Sprintf("%.4f", ad.Latitude),
-				"server_long":     fmt.Sprintf("%.4f", ad.Longitude),
+				"server_url":      serverAd.URL.String(),
+				"server_web_url":  serverAd.WebURL.String(),
+				"server_lat":      fmt.Sprintf("%.4f", serverAd.Latitude),
+				"server_long":     fmt.Sprintf("%.4f", serverAd.Longitude),
 			},
 		})
 	}

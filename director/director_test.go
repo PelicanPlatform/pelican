@@ -248,8 +248,6 @@ func TestDirectorRegistration(t *testing.T) {
 	}
 
 	teardown := func() {
-		serverAdMutex.Lock()
-		defer serverAdMutex.Unlock()
 		serverAds.DeleteAll()
 		namespaceKeys.DeleteAll()
 	}
@@ -429,8 +427,8 @@ func TestDirectorRegistration(t *testing.T) {
 		r.ServeHTTP(w, c.Request)
 
 		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
-		assert.Equal(t, 1, len(serverAds.Keys()), "Origin fail to register at serverAds")
-		assert.Equal(t, "https://localhost:8844", serverAds.Keys()[0].WebURL.String(), "WebURL in serverAds does not match data in origin registration request")
+		assert.NotNil(t, serverAds.Get("https://or-url.org"), "Origin fail to register at serverAds")
+		assert.Equal(t, "https://localhost:8844", serverAds.Get("https://or-url.org").Value().WebURL.String(), "WebURL in serverAds does not match data in origin registration request")
 		teardown()
 	})
 
@@ -444,7 +442,7 @@ func TestDirectorRegistration(t *testing.T) {
 		isurl := url.URL{}
 		isurl.Path = ts.URL
 
-		ad := server_structs.OriginAdvertiseV2{DataURL: "https://or-url.org", WebURL: "https://localhost:8844", Namespaces: []server_structs.NamespaceAdV2{{
+		ad := server_structs.OriginAdvertiseV2{DataURL: "https://data-url.org", WebURL: "https://localhost:8844", Namespaces: []server_structs.NamespaceAdV2{{
 			Path:   "/foo/bar",
 			Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
 		}}}
@@ -457,8 +455,8 @@ func TestDirectorRegistration(t *testing.T) {
 		r.ServeHTTP(w, c.Request)
 
 		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
-		assert.Equal(t, 1, len(serverAds.Keys()), "Origin fail to register at serverAds")
-		assert.Equal(t, "https://localhost:8844", serverAds.Keys()[0].WebURL.String(), "WebURL in serverAds does not match data in origin registration request")
+		assert.NotNil(t, serverAds.Get("https://data-url.org"), "Origin fail to register at serverAds")
+		assert.Equal(t, "https://localhost:8844", serverAds.Get("https://data-url.org").Value().WebURL.String(), "WebURL in serverAds does not match data in origin registration request")
 		teardown()
 	})
 
@@ -483,8 +481,8 @@ func TestDirectorRegistration(t *testing.T) {
 		r.ServeHTTP(w, c.Request)
 
 		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
-		assert.Equal(t, 1, len(serverAds.Keys()), "Origin fail to register at serverAds")
-		assert.Equal(t, "", serverAds.Keys()[0].WebURL.String(), "WebURL in serverAds isn't empty with no WebURL provided in registration")
+		assert.NotNil(t, 1, serverAds.Get("https://or-url.org"), "Origin fail to register at serverAds")
+		assert.Equal(t, "", serverAds.Get("https://or-url.org").Value().WebURL.String(), "WebURL in serverAds isn't empty with no WebURL provided in registration")
 		teardown()
 	})
 
@@ -509,8 +507,8 @@ func TestDirectorRegistration(t *testing.T) {
 		r.ServeHTTP(w, c.Request)
 
 		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
-		assert.Equal(t, 1, len(serverAds.Keys()), "Origin fail to register at serverAds")
-		assert.Equal(t, "", serverAds.Keys()[0].WebURL.String(), "WebURL in serverAds isn't empty with no WebURL provided in registration")
+		assert.NotNil(t, serverAds.Get("https://or-url.org"), "Origin fail to register at serverAds")
+		assert.Equal(t, "", serverAds.Get("https://or-url.org").Value().WebURL.String(), "WebURL in serverAds isn't empty with no WebURL provided in registration")
 		teardown()
 	})
 
@@ -781,15 +779,20 @@ func TestDiscoverOriginCache(t *testing.T) {
 			t.Fatalf("Could not make a GET request: %v", err)
 		}
 
-		func() {
-			serverAdMutex.Lock()
-			defer serverAdMutex.Unlock()
-			serverAds.DeleteAll()
-			serverAds.Set(mockPelicanOriginServerAd, []server_structs.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
-			// Server fetched from topology should not be present in SD response
-			serverAds.Set(mockTopoOriginServerAd, []server_structs.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
-			serverAds.Set(mockCacheServerAd, []server_structs.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
-		}()
+		serverAds.DeleteAll()
+		serverAds.Set(mockPelicanOriginServerAd.URL.String(), &server_structs.Advertisement{
+			ServerAd:     mockPelicanOriginServerAd,
+			NamespaceAds: []server_structs.NamespaceAdV2{mockNamespaceAd},
+		}, ttlcache.DefaultTTL)
+		// Server fetched from topology should not be present in SD response
+		serverAds.Set(mockTopoOriginServerAd.URL.String(), &server_structs.Advertisement{
+			ServerAd:     mockTopoOriginServerAd,
+			NamespaceAds: []server_structs.NamespaceAdV2{mockNamespaceAd},
+		}, ttlcache.DefaultTTL)
+		serverAds.Set(mockCacheServerAd.URL.String(), &server_structs.Advertisement{
+			ServerAd:     mockCacheServerAd,
+			NamespaceAds: []server_structs.NamespaceAdV2{mockNamespaceAd},
+		}, ttlcache.DefaultTTL)
 
 		expectedRes := []PromDiscoveryItem{{
 			Targets: []string{mockCacheServerAd.WebURL.Hostname() + ":" + mockCacheServerAd.WebURL.Port()},
@@ -835,17 +838,25 @@ func TestDiscoverOriginCache(t *testing.T) {
 			t.Fatalf("Could not make a GET request: %v", err)
 		}
 
-		func() {
-			serverAdMutex.Lock()
-			defer serverAdMutex.Unlock()
-			serverAds.DeleteAll()
-			// Add multiple same serverAds
-			serverAds.Set(mockPelicanOriginServerAd, []server_structs.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
-			serverAds.Set(mockPelicanOriginServerAd, []server_structs.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
-			serverAds.Set(mockPelicanOriginServerAd, []server_structs.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
-			// Server fetched from topology should not be present in SD response
-			serverAds.Set(mockTopoOriginServerAd, []server_structs.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
-		}()
+		serverAds.DeleteAll()
+		// Add multiple same serverAds
+		serverAds.Set(mockPelicanOriginServerAd.URL.String(), &server_structs.Advertisement{
+			ServerAd:     mockPelicanOriginServerAd,
+			NamespaceAds: []server_structs.NamespaceAdV2{mockNamespaceAd},
+		}, ttlcache.DefaultTTL)
+		serverAds.Set(mockPelicanOriginServerAd.URL.String(), &server_structs.Advertisement{
+			ServerAd:     mockPelicanOriginServerAd,
+			NamespaceAds: []server_structs.NamespaceAdV2{mockNamespaceAd},
+		}, ttlcache.DefaultTTL)
+		serverAds.Set(mockPelicanOriginServerAd.URL.String(), &server_structs.Advertisement{
+			ServerAd:     mockPelicanOriginServerAd,
+			NamespaceAds: []server_structs.NamespaceAdV2{mockNamespaceAd},
+		}, ttlcache.DefaultTTL)
+		// Server fetched from topology should not be present in SD response
+		serverAds.Set(mockTopoOriginServerAd.URL.String(), &server_structs.Advertisement{
+			ServerAd:     mockTopoOriginServerAd,
+			NamespaceAds: []server_structs.NamespaceAdV2{mockNamespaceAd},
+		}, ttlcache.DefaultTTL)
 
 		expectedRes := []PromDiscoveryItem{{
 			Targets: []string{mockPelicanOriginServerAd.WebURL.Hostname() + ":" + mockPelicanOriginServerAd.WebURL.Port()},

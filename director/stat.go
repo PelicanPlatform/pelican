@@ -188,7 +188,7 @@ func (stat *ObjectStat) queryOriginsForObject(objectName string, cancelContext c
 	defer originStatUtilsMutex.RUnlock()
 
 	for _, originAd := range originAds {
-		originUtil, ok := originStatUtils[originAd.URL]
+		originUtil, ok := originStatUtils[originAd.URL.String()]
 		if !ok {
 			numTotalReq += 1
 			log.Warningf("Origin %q is missing data for stat call, skip querying...", originAd.Name)
