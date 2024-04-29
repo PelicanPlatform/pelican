@@ -367,6 +367,8 @@ func TestPluginMulti(t *testing.T) {
 // Test multiple downloads from the plugin
 func TestPluginDirectRead(t *testing.T) {
 	viper.Reset()
+	defer viper.Reset()
+	defer server_utils.ResetOriginExports()
 	server_utils.ResetOriginExports()
 
 	dirName := t.TempDir()
