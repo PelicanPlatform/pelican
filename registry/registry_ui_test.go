@@ -677,6 +677,10 @@ func TestUpdateNamespaceStatus(t *testing.T) {
 
 func TestCreateNamespace(t *testing.T) {
 	viper.Reset()
+
+	t.Cleanup(func() {
+		viper.Reset()
+	})
 	_, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -922,6 +926,9 @@ func TestCreateNamespace(t *testing.T) {
 		viper.Set("Registry.CustomRegistrationFields", customFieldsConf)
 		err := InitCustomRegistrationFields()
 		require.NoError(t, err)
+		defer func() {
+			customRegFieldsConfigs = []customRegFieldsConfig{}
+		}()
 
 		pubKeyStr, err := GenerateMockJWKS()
 		require.NoError(t, err)
@@ -1047,6 +1054,9 @@ func TestCreateNamespace(t *testing.T) {
 
 func TestUpdateNamespaceHandler(t *testing.T) {
 	viper.Reset()
+	t.Cleanup(func() {
+		viper.Reset()
+	})
 	_, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()

@@ -571,7 +571,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		log.Warningf("Failed to parse %s URL %v: %v\n", sType, adV2.DataURL, err)
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Invalid %s registration. DataURL %s is not a valid URL", sType, adV2.DataURL),
+			Msg:    fmt.Sprintf("Invalid %s registration. %s.URL %s is not a valid URL", sType, sType, adV2.DataURL), // Origin.URL / Cache.URL
 		})
 		return
 	}
@@ -581,7 +581,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		log.Warningf("Failed to parse server Web URL %v: %v\n", adV2.WebURL, err)
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Invalid %s registration. WebURL %s is not a valid URL", sType, adV2.WebURL),
+			Msg:    fmt.Sprintf("Invalid %s registration. Server.ExternalWebUrl %s is not a valid URL", sType, adV2.WebURL),
 		})
 		return
 	}
