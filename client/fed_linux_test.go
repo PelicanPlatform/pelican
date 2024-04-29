@@ -395,7 +395,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 }
 
 // This tests that is origins disable listings, we should fail the download
-// Note: origins disabling listings override the existance of dirlisthost, causing a failure
+// Note: origins disabling listings override the existence of dirlisthost, causing a failure
 func TestFailureOnOriginDisablingListings(t *testing.T) {
 	viper.Reset()
 	server_utils.ResetOriginExports()
