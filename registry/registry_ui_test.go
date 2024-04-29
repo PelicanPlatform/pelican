@@ -35,7 +35,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/jellydator/ttlcache/v3"
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pelicanplatform/pelican/config"
@@ -48,12 +47,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// Mock wrong data fields for Institution
-type mockBadInstitutionFormat struct {
-	RORID string `yaml:"ror_id"`
-	Inst  string `yaml:"institution"`
-}
 
 func GenerateMockJWKS() (string, error) {
 	// Create a private key to use for the test
@@ -675,6 +668,12 @@ func TestUpdateNamespaceStatus(t *testing.T) {
 
 func TestCreateNamespace(t *testing.T) {
 	viper.Reset()
+
+	t.Cleanup(func() {
+		viper.Reset()
+		customRegFieldsConfigs = []customRegFieldsConfig{}
+	})
+
 	_, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -855,7 +854,7 @@ func TestCreateNamespace(t *testing.T) {
 
 	t.Run("inst-failure-returns-400", func(t *testing.T) {
 		resetNamespaceDB(t)
-		mockInsts := []Institution{{ID: "1000"}}
+		mockInsts := []registrationFieldOption{{ID: "1000"}}
 		viper.Set("Registry.Institutions", mockInsts)
 
 		pubKeyStr, err := GenerateMockJWKS()
@@ -878,7 +877,7 @@ func TestCreateNamespace(t *testing.T) {
 
 	t.Run("valid-request-gives-200", func(t *testing.T) {
 		resetNamespaceDB(t)
-		mockInsts := []Institution{{ID: "1000"}}
+		mockInsts := []registrationFieldOption{{ID: "1000"}}
 		viper.Set("Registry.Institutions", mockInsts)
 
 		pubKeyStr, err := GenerateMockJWKS()
@@ -909,7 +908,10 @@ func TestCreateNamespace(t *testing.T) {
 
 	t.Run("valid-request-w/-custom-fields-gives-200", func(t *testing.T) {
 		resetNamespaceDB(t)
-		mockInsts := []Institution{{ID: "1000"}}
+		defer func() {
+			customRegFieldsConfigs = []customRegFieldsConfig{}
+		}()
+		mockInsts := []registrationFieldOption{{ID: "1000"}}
 		customFieldsConf := []map[string]interface{}{
 			{"name": "boolean_field", "type": "bool", "required": true},
 			{"name": "integer", "type": "int", "required": true},
@@ -970,7 +972,7 @@ func TestCreateNamespace(t *testing.T) {
 		err = PopulateTopology()
 		require.NoError(t, err)
 
-		mockInsts := []Institution{{ID: "1000"}}
+		mockInsts := []registrationFieldOption{{ID: "1000"}}
 		viper.Set("Registry.Institutions", mockInsts)
 
 		pubKeyStr, err := GenerateMockJWKS()
@@ -1012,7 +1014,7 @@ func TestCreateNamespace(t *testing.T) {
 		err = PopulateTopology()
 		require.NoError(t, err)
 
-		mockInsts := []Institution{{ID: "1000"}}
+		mockInsts := []registrationFieldOption{{ID: "1000"}}
 		viper.Set("Registry.Institutions", mockInsts)
 
 		pubKeyStr, err := GenerateMockJWKS()
@@ -1102,7 +1104,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 
 	t.Run("valid-request-but-ns-dne-returns-404", func(t *testing.T) {
 		resetNamespaceDB(t)
-		mockInsts := []Institution{{ID: "1000"}}
+		mockInsts := []registrationFieldOption{{ID: "1000"}}
 		viper.Set("Registry.Institutions", mockInsts)
 
 		pubKeyStr, err := GenerateMockJWKS()
@@ -1125,7 +1127,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 
 	t.Run("valid-request-not-owner-gives-404", func(t *testing.T) {
 		resetNamespaceDB(t)
-		mockInsts := []Institution{{ID: "1000"}}
+		mockInsts := []registrationFieldOption{{ID: "1000"}}
 		viper.Set("Registry.Institutions", mockInsts)
 
 		pubKeyStr, err := GenerateMockJWKS()
@@ -1155,7 +1157,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 
 	t.Run("reg-user-cant-change-after-approv", func(t *testing.T) {
 		resetNamespaceDB(t)
-		mockInsts := []Institution{{ID: "1000"}}
+		mockInsts := []registrationFieldOption{{ID: "1000"}}
 		viper.Set("Registry.Institutions", mockInsts)
 
 		pubKeyStr, err := GenerateMockJWKS()
@@ -1193,7 +1195,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 
 	t.Run("reg-user-success-change", func(t *testing.T) {
 		resetNamespaceDB(t)
-		mockInsts := []Institution{{ID: "1000"}}
+		mockInsts := []registrationFieldOption{{ID: "1000"}}
 		viper.Set("Registry.Institutions", mockInsts)
 
 		pubKeyStr, err := GenerateMockJWKS()
@@ -1238,7 +1240,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 
 	t.Run("admin-can-change-anybody", func(t *testing.T) {
 		resetNamespaceDB(t)
-		mockInsts := []Institution{{ID: "1000"}}
+		mockInsts := []registrationFieldOption{{ID: "1000"}}
 		viper.Set("Registry.Institutions", mockInsts)
 
 		pubKeyStr, err := GenerateMockJWKS()
@@ -1293,7 +1295,7 @@ func TestListInsitutions(t *testing.T) {
 	router.GET("/institutions", listInstitutions)
 
 	t.Run("nil-cache-with-nil-config-returns-error", func(t *testing.T) {
-		institutionsCache = nil
+		optionsCache.DeleteAll()
 
 		// Create a request to the endpoint
 		w := httptest.NewRecorder()
@@ -1304,17 +1306,16 @@ func TestListInsitutions(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.Equal(t, http.StatusInternalServerError, w.Result().StatusCode)
-		assert.JSONEq(t, `{"msg":"Server didn't configure Registry.Institutions", "status":"error"}`, string(bytes))
+		assert.JSONEq(t, `{"status":"error", "msg": "Server didn't configure Registry.Institutions and Registry.InstitutionsUrl"}`, string(bytes))
 	})
 
 	t.Run("cache-hit-returns", func(t *testing.T) {
 		viper.Reset()
 		mockUrl := url.URL{Scheme: "https", Host: "example.com"}
 		viper.Set("Registry.InstitutionsUrl", mockUrl.String())
-		mockInsts := []Institution{{Name: "Foo", ID: "001"}}
-		institutionsCache = ttlcache.New[string, []Institution]()
+		mockInsts := []registrationFieldOption{{Name: "Foo", ID: "001"}}
 		// Expired but never evicted, so Has() still returns true
-		institutionsCache.Set(mockUrl.String(), mockInsts, time.Second)
+		optionsCache.Set(mockUrl.String(), mockInsts, time.Second)
 
 		// Create a request to the endpoint
 		w := httptest.NewRecorder()
@@ -1325,7 +1326,7 @@ func TestListInsitutions(t *testing.T) {
 		bytes, err := io.ReadAll(w.Result().Body)
 		require.NoError(t, err)
 
-		getInsts := []Institution{}
+		getInsts := []registrationFieldOption{}
 		err = json.Unmarshal(bytes, &getInsts)
 		require.NoError(t, err)
 
@@ -1334,9 +1335,9 @@ func TestListInsitutions(t *testing.T) {
 
 	t.Run("nil-cache-with-nonnil-config-returns", func(t *testing.T) {
 		viper.Reset()
-		institutionsCache = nil
+		optionsCache.DeleteAll()
 
-		mockInstsConfig := []Institution{{Name: "foo", ID: "bar"}}
+		mockInstsConfig := []registrationFieldOption{{Name: "foo", ID: "bar"}}
 		viper.Set("Registry.Institutions", mockInstsConfig)
 
 		// Create a request to the endpoint
@@ -1349,7 +1350,7 @@ func TestListInsitutions(t *testing.T) {
 		bytes, err := io.ReadAll(w.Result().Body)
 		require.NoError(t, err)
 
-		getInsts := []Institution{}
+		getInsts := []registrationFieldOption{}
 		err = json.Unmarshal(bytes, &getInsts)
 		require.NoError(t, err)
 
@@ -1360,12 +1361,11 @@ func TestListInsitutions(t *testing.T) {
 		viper.Reset()
 		mockUrl := url.URL{Scheme: "https", Host: "example.com"}
 		viper.Set("Registry.InstitutionsUrl", mockUrl.String())
-		mockInsts := []Institution{{Name: "Foo", ID: "001"}}
-		institutionsCache = ttlcache.New[string, []Institution]()
+		mockInsts := []registrationFieldOption{{Name: "Foo", ID: "001"}}
 		// Expired but never evicted, so Has() still returns true
-		institutionsCache.Set(mockUrl.String(), mockInsts, time.Second)
+		optionsCache.Set(mockUrl.String(), mockInsts, time.Second)
 
-		mockInstsConfig := []Institution{{Name: "foo", ID: "bar"}}
+		mockInstsConfig := []registrationFieldOption{{Name: "foo", ID: "bar"}}
 		viper.Set("Registry.Institutions", mockInstsConfig)
 
 		// Create a request to the endpoint
@@ -1378,7 +1378,7 @@ func TestListInsitutions(t *testing.T) {
 		bytes, err := io.ReadAll(w.Result().Body)
 		require.NoError(t, err)
 
-		getInsts := []Institution{}
+		getInsts := []registrationFieldOption{}
 		err = json.Unmarshal(bytes, &getInsts)
 		require.NoError(t, err)
 
