@@ -844,7 +844,9 @@ func InitConfig() {
 		viper.SetConfigName("pelican")
 	}
 
-	viper.SetEnvPrefix(string(prefix))
+	bindNonPelicanEnv() // Deprecate OSDF env prefix but be compatible for now
+
+	viper.SetEnvPrefix("pelican")
 	viper.AutomaticEnv()
 	// This line allows viper to use an env var like ORIGIN_VALUE to override the viper string "Origin.Value"
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
@@ -950,11 +952,11 @@ func setXrootdRunLocations(currentServers ServerType, dir string) error {
 	return nil
 }
 
-func PrintPelicanVersion() {
-	fmt.Fprintln(os.Stderr, "Version:", GetVersion())
-	fmt.Fprintln(os.Stderr, "Build Date:", GetBuiltDate())
-	fmt.Fprintln(os.Stderr, "Build Commit:", GetBuiltCommit())
-	fmt.Fprintln(os.Stderr, "Built By:", GetBuiltBy())
+func PrintPelicanVersion(out *os.File) {
+	fmt.Fprintln(out, "Version:", GetVersion())
+	fmt.Fprintln(out, "Build Date:", GetBuiltDate())
+	fmt.Fprintln(out, "Build Commit:", GetBuiltCommit())
+	fmt.Fprintln(out, "Built By:", GetBuiltBy())
 }
 
 // Print Pelican configuration to stderr
@@ -1104,11 +1106,12 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 	if err != nil {
 		return err
 	}
-	viper.SetDefault("Server.Hostname", hostname)
-	viper.SetDefault("Xrootd.Sitename", hostname)
+	viper.SetDefault(param.Server_Hostname.GetName(), hostname)
 	// For the rest of the function, use the hostname provided by the admin if
 	// they have overridden the defaults.
-	hostname = viper.GetString("Server.Hostname")
+	hostname = param.Server_Hostname.GetString()
+	// We default to the value of Server.Hostname, which defaults to os.Hostname but can be overwritten
+	viper.SetDefault(param.Xrootd_Sitename.GetName(), hostname)
 
 	// XRootD port usage logic:
 	// - Origin.Port and Cache.Port take precedence for their respective types

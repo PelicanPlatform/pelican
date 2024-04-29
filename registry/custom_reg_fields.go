@@ -190,6 +190,18 @@ func checkUniqueOptions(options []registrationFieldOption) bool {
 	return true
 }
 
+// Format custom registration fields in-place, by converting any float64/32 number to int
+func formatCustomFields(customFields map[string]interface{}) {
+	for key, val := range customFields {
+		switch v := val.(type) {
+		case float64:
+			customFields[key] = int(v)
+		case float32:
+			customFields[key] = int(v)
+		}
+	}
+}
+
 // Initialize institutions list
 func InitInstConfig(ctx context.Context, egrp *errgroup.Group) error {
 	institutions := []registrationFieldOption{}
