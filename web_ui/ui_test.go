@@ -143,7 +143,9 @@ func TestHandleWebUIAuth(t *testing.T) {
 		assert.Equal(t, "/view/initialization/code/", r.Result().Header.Get("Location"))
 	})
 
-	t.Run("html-redirect-to-login-with-db", func(t *testing.T) {
+	t.Run("no-redirect-for-unauthed-users", func(t *testing.T) {
+		// We don't redirect unauthed user at the backend, so that frontend can
+		// properly handle the redirect
 		setupTestAuthDB(t)
 		t.Cleanup(cleanupAuthDB)
 
@@ -152,7 +154,7 @@ func TestHandleWebUIAuth(t *testing.T) {
 		require.NoError(t, err)
 		route.ServeHTTP(r, req)
 
-		assert.Equal(t, "/view/login/", r.Result().Header.Get("Location"))
+		assert.Equal(t, http.StatusOK, r.Result().StatusCode)
 
 		authDB.Store(nil)
 	})
