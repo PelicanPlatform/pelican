@@ -914,12 +914,21 @@ components: ["localcache"]
 ############################
 name: Cache.DataLocation
 description: |+
-  The directory for the location of the cache data files - this is where the actual data in the cache is stored.
-  This should *not* be in the same path as XRootD.Mount or else it will expose the data files as part of the files within the cache.
+  [Deprecated] Cache.DataLocation is being deprecated and will be removed in a future release. It is replaced by a combination of Cache.DataLocations and Cache.MetaLocations
 type: string
 root_default: /run/pelican/xcache
 default: $XDG_RUNTIME_DIR/pelican/xcache
+deprecated: true
+replacedby: Cache.LocalRoot
 components: ["cache"]
+---
+name: Cache.LocalRoot
+description: |+
+  The location where the filesystem namespace is actually rooted
+type: string
+root_default: /run/pelican/xcache
+default: $XDG_RUNTIME_DIR/pelican/xcache
+componenets: ["cache"]
 ---
 name: Cache.ExportLocation
 description: |+
@@ -927,6 +936,24 @@ description: |+
   relative to the mount location.
 type: string
 default: /
+components: ["cache"]
+---
+name: Cache.DataLocations
+description: |+
+  A list of directories for the locations of the cache data files - this is where the actual data in the cache is stored.
+  These paths should *not* be in same path as XrootD.Mount or else it will expose the data files as part of the files within the cache.
+type: stringSlice
+root_default: ["/run/pelican/xcache/data"]
+default: ["$XDG_RUNTIME_DIR/pelican/xcache/data"]
+components: ["cache"]
+---
+name: Cache.MetaLocations
+description: |+
+  A list of directories for the locations of the cache metadata. These paths should *not* be in the same path as XrootD.Mount or else it
+  will expose the metadata files as part of the files within the cache
+type: stringSlice
+root_default: ["/run/pelican/xcache/meta"]
+default: ["$XDG_RUNTIME_DIR/pelican/xcache/meta"]
 components: ["cache"]
 ---
 name: Cache.RunLocation

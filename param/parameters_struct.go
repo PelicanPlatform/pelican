@@ -27,12 +27,15 @@ type Config struct {
 	Cache struct {
 		Concurrency int
 		DataLocation string
+		DataLocations []string
 		EnableLotman bool
 		EnableOIDC bool
 		EnableVoms bool
 		ExportLocation string
 		HighWaterMark string
+		LocalRoot string
 		LowWatermark string
+		MetaLocations []string
 		PermittedNamespaces []string
 		Port int
 		RunLocation string
@@ -295,12 +298,15 @@ type configWithType struct {
 	Cache struct {
 		Concurrency struct { Type string; Value int }
 		DataLocation struct { Type string; Value string }
+		DataLocations struct { Type string; Value []string }
 		EnableLotman struct { Type string; Value bool }
 		EnableOIDC struct { Type string; Value bool }
 		EnableVoms struct { Type string; Value bool }
 		ExportLocation struct { Type string; Value string }
 		HighWaterMark struct { Type string; Value string }
+		LocalRoot struct { Type string; Value string }
 		LowWatermark struct { Type string; Value string }
+		MetaLocations struct { Type string; Value []string }
 		PermittedNamespaces struct { Type string; Value []string }
 		Port struct { Type string; Value int }
 		RunLocation struct { Type string; Value string }
