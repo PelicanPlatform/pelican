@@ -577,6 +577,11 @@ func writeOutfile(err error, resultAds []*classads.ClassAd, outputFile *os.File)
 			resultAd := classads.NewClassAd()
 			resultAd.Set("TransferSuccess", false)
 			resultAd.Set("TransferError", err.Error())
+			if client.ShouldRetry(err) {
+				resultAd.Set("TransferRetryable", true)
+			} else {
+				resultAd.Set("TransferRetryable", false)
+			}
 			resultAds = append(resultAds, resultAd)
 		}
 	}
