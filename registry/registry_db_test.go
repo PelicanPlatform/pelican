@@ -23,22 +23,22 @@ import (
 	"testing"
 	"time"
 
-	"github.com/glebarez/sqlite"
-	"github.com/lestrrat-go/jwx/v2/jwk"
-	"github.com/pkg/errors"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	"gorm.io/gorm"
-
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 
+	"github.com/glebarez/sqlite"
+	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/pkg/errors"
+	"github.com/spf13/viper"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
+
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/test_utils"
-	"github.com/spf13/viper"
 )
 
 func setupMockRegistryDB(t *testing.T) {

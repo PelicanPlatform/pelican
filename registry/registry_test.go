@@ -192,7 +192,7 @@ func TestHandleWildcard(t *testing.T) {
 func TestCheckNamespaceCompleteHandler(t *testing.T) {
 	setupMockRegistryDB(t)
 	router := gin.New()
-	router.POST("/checkNamespaceComplete", checkNamespaceCompleteHandler)
+	router.POST("/namespaces/check/status", checkStatusHandler)
 
 	t.Cleanup(func() {
 		viper.Reset()
@@ -201,7 +201,7 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 
 	t.Run("request-without-body", func(t *testing.T) {
 		r := httptest.NewRecorder()
-		req, err := http.NewRequest(http.MethodPost, "/checkNamespaceComplete", nil)
+		req, err := http.NewRequest(http.MethodPost, "/namespaces/check/status", nil)
 		require.NoError(t, err)
 		router.ServeHTTP(r, req)
 		assert.Equal(t, 400, r.Result().StatusCode)
@@ -213,7 +213,7 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 		reqBodyBytes, err := json.Marshal(reqBody)
 		require.NoError(t, err)
 
-		req, err := http.NewRequest(http.MethodPost, "/checkNamespaceComplete", bytes.NewBuffer(reqBodyBytes))
+		req, err := http.NewRequest(http.MethodPost, "/namespaces/check/status", bytes.NewBuffer(reqBodyBytes))
 		require.NoError(t, err)
 		router.ServeHTTP(r, req)
 		assert.Equal(t, 200, r.Result().StatusCode)
@@ -231,7 +231,7 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 		reqBodyBytes, err := json.Marshal(reqBody)
 		require.NoError(t, err)
 
-		req, err := http.NewRequest(http.MethodPost, "/checkNamespaceComplete", bytes.NewBuffer(reqBodyBytes))
+		req, err := http.NewRequest(http.MethodPost, "/namespaces/check/status", bytes.NewBuffer(reqBodyBytes))
 		require.NoError(t, err)
 		router.ServeHTTP(r, req)
 		assert.Equal(t, 200, r.Result().StatusCode)
@@ -269,7 +269,7 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 		reqBodyBytes, err := json.Marshal(reqBody)
 		require.NoError(t, err)
 
-		req, err := http.NewRequest(http.MethodPost, "/checkNamespaceComplete", bytes.NewBuffer(reqBodyBytes))
+		req, err := http.NewRequest(http.MethodPost, "/namespaces/check/status", bytes.NewBuffer(reqBodyBytes))
 		require.NoError(t, err)
 		router.ServeHTTP(r, req)
 		assert.Equal(t, 200, r.Result().StatusCode)
@@ -315,7 +315,7 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 		reqBodyBytes, err := json.Marshal(reqBody)
 		require.NoError(t, err)
 
-		req, err := http.NewRequest(http.MethodPost, "/checkNamespaceComplete", bytes.NewBuffer(reqBodyBytes))
+		req, err := http.NewRequest(http.MethodPost, "/namespaces/check/status", bytes.NewBuffer(reqBodyBytes))
 		require.NoError(t, err)
 		router.ServeHTTP(r, req)
 		assert.Equal(t, 200, r.Result().StatusCode)
@@ -373,7 +373,7 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 		reqBodyBytes, err := json.Marshal(reqBody)
 		require.NoError(t, err)
 
-		req, err := http.NewRequest(http.MethodPost, "/checkNamespaceComplete", bytes.NewBuffer(reqBodyBytes))
+		req, err := http.NewRequest(http.MethodPost, "/namespaces/check/status", bytes.NewBuffer(reqBodyBytes))
 		require.NoError(t, err)
 		router.ServeHTTP(r, req)
 		assert.Equal(t, 200, r.Result().StatusCode)

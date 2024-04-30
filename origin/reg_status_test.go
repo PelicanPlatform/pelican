@@ -42,7 +42,7 @@ func mockRegistryCheck(t *testing.T) *httptest.Server {
 			return
 		}
 
-		if req.URL.Path != "/api/v1.0/registry/checkNamespaceComplete" {
+		if req.URL.Path != "/api/v1.0/registry/namespaces/check/status" {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}

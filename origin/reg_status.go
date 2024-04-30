@@ -84,7 +84,7 @@ func FetchRegStatus(prefixes []string) (*server_structs.CheckNamespaceCompleteRe
 	}
 	regUrlStr := fed.NamespaceRegistrationEndpoint
 
-	reqUrl, err := url.JoinPath(regUrlStr, "/api/v1.0/registry/checkNamespaceComplete")
+	reqUrl, err := url.JoinPath(regUrlStr, "/api/v1.0/registry/namespaces/check/status")
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to join path to registry URL at %s", regUrlStr)
 	}

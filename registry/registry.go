@@ -1011,7 +1011,7 @@ func checkNamespaceExistsHandler(ctx *gin.Context) {
 }
 
 // Check the approval status of namespace registration
-func checkNamespaceStatusHandler(ctx *gin.Context) {
+func checkApprovalHandler(ctx *gin.Context) {
 	req := server_structs.CheckNamespaceStatusReq{}
 	if err := ctx.ShouldBind(&req); err != nil {
 		log.Debug("Failed to parse request body for namespace status check: ", err)
@@ -1088,7 +1088,7 @@ func checkNamespaceStatusHandler(ctx *gin.Context) {
 }
 
 // Check namespace registration completeness
-func checkNamespaceCompleteHandler(ctx *gin.Context) {
+func checkStatusHandler(ctx *gin.Context) {
 	nssReq := server_structs.CheckNamespaceCompleteReq{}
 	results := map[string]server_structs.NamespaceCompletenessResult{}
 
@@ -1164,8 +1164,16 @@ func RegisterRegistryAPI(router *gin.RouterGroup) {
 		// Handle everything under "/" route with GET method
 		registryAPI.GET("/*wildcard", wildcardHandler)
 		registryAPI.POST("/checkNamespaceExists", checkNamespaceExistsHandler)
-		registryAPI.POST("/checkNamespaceStatus", checkNamespaceStatusHandler)
-		registryAPI.POST("/checkNamespaceComplete", checkNamespaceCompleteHandler)
+		registryAPI.POST("/checkNamespaceStatus", checkApprovalHandler)
+
 		registryAPI.DELETE("/*wildcard", deleteNamespaceHandler)
+	}
+
+	checkApis := registryAPI.Group("/namespaces/check")
+	{
+		// We should deprecate the above /checkNamespace* routes and replace them by the following
+		// endpoints to comply to RESTful spec
+		checkApis.POST("/status", checkStatusHandler)     // registration completeness status
+		checkApis.POST("/approval", checkApprovalHandler) // approval status
 	}
 }
