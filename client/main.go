@@ -267,28 +267,42 @@ func getUserAgent(project string) (agent string) {
 }
 
 func getCachesFromNamespace(namespace namespaces.Namespace, useDirector bool, preferredCaches []*url.URL) (caches []CacheInterface, err error) {
-	preferredCache := false
+	var appendCaches bool
 	// The global cache override is set
 	if len(preferredCaches) > 0 {
-		if preferredCaches[0].String() == "" {
-			err = errors.New("Preferred cache was specified as an empty string")
+		var preferredCacheList []CacheInterface
+		for idx, preferredCache := range preferredCaches {
+			cacheUrl := preferredCache.String()
+			// If the preferred cache is empty, return an error
+			if cacheUrl == "" {
+				err = errors.New("Preferred cache was specified as an empty string")
+				return
+			} else if cacheUrl == "+" {
+				// If we have a '+' in our list, the user wants to prepend the preferred caches to the "normal" list of caches
+				// if the cache is a '+', verify it is at the end of our list, if not, return an error
+				if idx != len(preferredCaches)-1 {
+					err = errors.New("The special character '+' must be the last item in the list of preferred caches")
+					return
+				}
+				// We want to signify that we want to append the "normal" cache list
+				appendCaches = true
+			} else {
+				// We have a normal item in the preferred cache list
+				log.Debugf("Using the cache (%s) from the config override\n", preferredCache)
+				cache := namespaces.DirectorCache{
+					EndpointUrl: cacheUrl,
+				}
+				// append to our list of preferred caches
+				preferredCacheList = append(preferredCacheList, cache)
+			}
+		}
+
+		// If we are not appending any more caches, we return with the caches we have
+		if !appendCaches {
+			caches = preferredCacheList
 			return
 		}
-		preferredCache = true
-		cacheUrl := preferredCaches[0].String()
-		log.Debugf("Using the cache (%s) from the config override\n", preferredCaches[0])
-		cache := namespaces.DirectorCache{
-			EndpointUrl: preferredCaches[0].String(),
-		}
-		// If we have a '+' at the end of the cache url, we need to append the "normal" cache list (so don't return yet)
-		if strings.HasSuffix(cacheUrl, "+") {
-			cache.EndpointUrl = strings.TrimSuffix(cacheUrl, "+")
-			caches = []CacheInterface{cache}
-		} else {
-			// else, we just want to return
-			caches = []CacheInterface{cache}
-			return
-		}
+		caches = preferredCacheList
 	}
 
 	if useDirector {
@@ -298,8 +312,8 @@ func getCachesFromNamespace(namespace namespaces.Namespace, useDirector bool, pr
 			directorCaches[idx] = val
 		}
 
-		// If preferredCache is set, prepend it to the list of caches and return
-		if preferredCache {
+		// If appendCaches is set, prepend it to the list of caches and return
+		if appendCaches {
 			caches = append(caches, directorCaches...)
 		} else {
 			caches = directorCaches
@@ -326,9 +340,16 @@ func getCachesFromNamespace(namespace namespaces.Namespace, useDirector bool, pr
 
 	matchedCaches := namespace.MatchCaches(bestCaches)
 	log.Debugln("Matched caches:", matchedCaches)
-	caches = make([]CacheInterface, len(matchedCaches))
+	matchedCachesList := make([]CacheInterface, len(matchedCaches))
 	for idx, val := range matchedCaches {
-		caches[idx] = val
+		matchedCachesList[idx] = val
+	}
+
+	// If usingPreferredCache is set, prepend it to the list of caches and return
+	if appendCaches {
+		caches = append(caches, matchedCachesList...)
+	} else {
+		caches = matchedCachesList
 	}
 
 	return

@@ -384,14 +384,17 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 	}()
 
 	caches := make([]*url.URL, 0, 1)
+	var nearestCacheURL *url.URL
 	if nearestCache, ok := os.LookupEnv("NEAREST_CACHE"); ok && nearestCache != "" {
-		var nearestCacheURL *url.URL
-		if nearestCacheURL, err = url.Parse(nearestCache); err != nil {
-			err = errors.Wrapf(err, "unable to parse preferred cache (%s) as URL", nearestCacheURL)
-			return
-		} else {
-			caches = append(caches, nearestCacheURL)
-			log.Debugln("Setting nearest cache to", nearestCacheURL.String())
+		cacheList := strings.Split(nearestCache, ",")
+		for _, cache := range cacheList {
+			if nearestCacheURL, err = url.Parse(cache); err != nil {
+				err = errors.Wrapf(err, "unable to parse preferred cache (%s) as URL", nearestCacheURL)
+				return
+			} else {
+				caches = append(caches, nearestCacheURL)
+				log.Debugln("Setting nearest cache to", nearestCacheURL.String())
+			}
 		}
 	}
 

@@ -199,6 +199,11 @@ func TestClient(t *testing.T) {
 		Path:   param.LocalCache_Socket.GetString(),
 	}
 
+	cacheUrl2 := &url.URL{
+		Scheme: "unix",
+		Path:   param.LocalCache_Socket.GetString(),
+	}
+
 	t.Run("correct-auth", func(t *testing.T) {
 		tr, err := client.DoGet(ctx, "pelican://"+param.Server_Hostname.GetString()+":"+strconv.Itoa(param.Server_WebPort.GetInt())+"/test/hello_world.txt",
 			filepath.Join(tmpDir, "hello_world.txt"), false, client.WithToken(ft.Token), client.WithCaches(cacheUrl), client.WithAcquireToken(false))
@@ -220,6 +225,21 @@ func TestClient(t *testing.T) {
 		if sce != nil {
 			assert.Equal(t, int(*sce), http.StatusForbidden)
 		}
+	})
+
+	// Test the local cache works with the client when multiple are specified
+	t.Run("mutli-caches", func(t *testing.T) {
+		cacheList := []*url.URL{cacheUrl, cacheUrl2}
+		tr, err := client.DoGet(ctx, "pelican://"+param.Server_Hostname.GetString()+":"+strconv.Itoa(param.Server_WebPort.GetInt())+"/test/hello_world.txt",
+			filepath.Join(tmpDir, "hello_world.txt"), false, client.WithToken(ft.Token), client.WithCaches(cacheList...), client.WithAcquireToken(false))
+		assert.NoError(t, err)
+		require.Equal(t, 1, len(tr))
+		assert.Equal(t, int64(13), tr[0].TransferredBytes)
+		assert.NoError(t, tr[0].Error)
+
+		byteBuff, err := os.ReadFile(filepath.Join(tmpDir, "hello_world.txt"))
+		assert.NoError(t, err)
+		assert.Equal(t, "Hello, World!", string(byteBuff))
 	})
 
 	t.Run("file-not-found", func(t *testing.T) {
