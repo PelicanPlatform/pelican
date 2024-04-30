@@ -164,6 +164,7 @@ func TestDirectorRegistration(t *testing.T) {
 	defer ts.Close()
 
 	viper.Set("Federation.RegistryUrl", ts.URL)
+	viper.Set("Director.CacheSortMethod", "distance")
 
 	setupContext := func() (*gin.Context, *gin.Engine, *httptest.ResponseRecorder) {
 		// Setup httptest recorder and context for the the unit test
