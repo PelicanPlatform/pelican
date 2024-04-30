@@ -928,7 +928,7 @@ description: |+
 type: string
 root_default: /run/pelican/xcache
 default: $XDG_RUNTIME_DIR/pelican/xcache
-componenets: ["cache"]
+components: ["cache"]
 ---
 name: Cache.ExportLocation
 description: |+
