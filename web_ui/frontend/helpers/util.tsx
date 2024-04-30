@@ -31,3 +31,11 @@ export const getOauthEnabledServers = async () => {
         return servers
     }
 }
+
+export function getObjectValue<T>(obj: any, keys: string[]): T | undefined {
+    const currentValue = obj?.[keys[0]]
+    if(keys.length == 1){
+        return currentValue
+    }
+    return getObjectValue(currentValue, keys.slice(1))
+}
