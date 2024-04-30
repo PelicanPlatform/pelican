@@ -20,6 +20,7 @@ package origin
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -32,7 +33,6 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 )
@@ -78,7 +78,12 @@ func SetNamespacesStatus(key string, val RegistrationStatus, ttl time.Duration) 
 // Fetch the registration status for an array of namespace prefixes
 // from the registry
 func FetchRegStatus(prefixes []string) (*server_structs.CheckNamespaceCompleteRes, error) {
-	regUrlStr := param.Federation_RegistryUrl.GetString()
+	fed, err := config.GetFederation(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	regUrlStr := fed.NamespaceRegistrationEndpoint
+
 	reqUrl, err := url.JoinPath(regUrlStr, "/api/v1.0/registry/checkNamespaceComplete")
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to join path to registry URL at %s", regUrlStr)

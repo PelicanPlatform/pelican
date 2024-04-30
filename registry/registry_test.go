@@ -29,12 +29,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/lestrrat-go/jwx/v2/jwk"
-	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/server_structs"
 )
 
@@ -195,6 +194,11 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 	router := gin.New()
 	router.POST("/checkNamespaceComplete", checkNamespaceCompleteHandler)
 
+	t.Cleanup(func() {
+		viper.Reset()
+		config.ResetFederationForTest()
+	})
+
 	t.Run("request-without-body", func(t *testing.T) {
 		r := httptest.NewRecorder()
 		req, err := http.NewRequest(http.MethodPost, "/checkNamespaceComplete", nil)
@@ -248,12 +252,16 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 	t.Run("incomplete-registration", func(t *testing.T) {
 		resetNamespaceDB(t)
 		viper.Reset()
-		viper.Set(param.Federation_RegistryUrl.GetName(), "https://registry.org")
+		config.ResetFederationForTest()
+		config.SetFederation(config.FederationDiscovery{
+			NamespaceRegistrationEndpoint: "https://registry.org",
+		})
 
 		mockJWKS, err := GenerateMockJWKS()
 		require.NoError(t, err)
-		// Insitution and UserId are empty
-		err = insertMockDBData([]Namespace{mockNamespace("/incomplete-prefix", mockJWKS, "", AdminMetadata{})})
+
+		// Institution and UserId are empty
+		err = insertMockDBData([]server_structs.Namespace{mockNamespace("/incomplete-prefix", mockJWKS, "", server_structs.AdminMetadata{})})
 		require.NoError(t, err)
 
 		r := httptest.NewRecorder()
@@ -282,18 +290,21 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 	t.Run("complete-registration", func(t *testing.T) {
 		resetNamespaceDB(t)
 		viper.Reset()
-		viper.Set(param.Federation_RegistryUrl.GetName(), "https://registry.org")
+		config.ResetFederationForTest()
+		config.SetFederation(config.FederationDiscovery{
+			NamespaceRegistrationEndpoint: "https://registry.org",
+		})
 
 		mockJWKS, err := GenerateMockJWKS()
 		require.NoError(t, err)
-		// Insitution and UserId are empty
+		// Institution and UserId are empty
 		err = insertMockDBData(
-			[]Namespace{
+			[]server_structs.Namespace{
 				mockNamespace(
 					"/complete-prefix",
 					mockJWKS,
 					"",
-					AdminMetadata{UserID: "fake-user-id", Institution: "mock-institution"},
+					server_structs.AdminMetadata{UserID: "fake-user-id", Institution: "mock-institution"},
 				),
 			},
 		)
@@ -325,30 +336,33 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 	t.Run("multiple-complete-registrations", func(t *testing.T) {
 		resetNamespaceDB(t)
 		viper.Reset()
-		viper.Set(param.Federation_RegistryUrl.GetName(), "https://registry.org")
+		config.ResetFederationForTest()
+		config.SetFederation(config.FederationDiscovery{
+			NamespaceRegistrationEndpoint: "https://registry.org",
+		})
 
 		mockJWKS, err := GenerateMockJWKS()
 		require.NoError(t, err)
-		// Insitution and UserId are empty
+		// Institution and UserId are empty
 		err = insertMockDBData(
-			[]Namespace{
+			[]server_structs.Namespace{
 				mockNamespace(
 					"/complete-prefix-1",
 					mockJWKS,
 					"",
-					AdminMetadata{UserID: "fake-user-id", Institution: "mock-institution"},
+					server_structs.AdminMetadata{UserID: "fake-user-id", Institution: "mock-institution"},
 				),
 				mockNamespace(
 					"/complete-prefix-2",
 					mockJWKS,
 					"",
-					AdminMetadata{UserID: "fake-user-id", Institution: "mock-institution"},
+					server_structs.AdminMetadata{UserID: "fake-user-id", Institution: "mock-institution"},
 				),
 				mockNamespace(
 					"/foo/bar",
 					mockJWKS,
 					"",
-					AdminMetadata{UserID: "fake-user-id", Institution: "mock-institution"},
+					server_structs.AdminMetadata{UserID: "fake-user-id", Institution: "mock-institution"},
 				),
 			},
 		)

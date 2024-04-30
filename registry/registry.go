@@ -46,13 +46,14 @@ import (
 	"github.com/go-playground/validator/v10"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
+	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
+
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/oauth2"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token_scopes"
-	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 )
 
 var OIDC struct {
@@ -1118,10 +1119,18 @@ func checkNamespaceCompleteHandler(ctx *gin.Context) {
 			results[prefix] = complete
 			continue
 		}
+		fed, err := config.GetFederation(ctx)
+		if err != nil {
+			log.Error("checkNamespaceCompleteHandler: failed to get federaion:", err)
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Server error when getting federation information: " + err.Error(),
+			})
+		}
 		if isCache {
-			complete.EditUrl = fmt.Sprintf("%s/view/registry/cache/edit/?id=%d", param.Federation_RegistryUrl.GetString(), ns.ID)
+			complete.EditUrl = fmt.Sprintf("%s/view/registry/cache/edit/?id=%d", fed.NamespaceRegistrationEndpoint, ns.ID)
 		} else {
-			complete.EditUrl = fmt.Sprintf("%s/view/registry/origin/edit/?id=%d", param.Federation_RegistryUrl.GetString(), ns.ID)
+			complete.EditUrl = fmt.Sprintf("%s/view/registry/origin/edit/?id=%d", fed.NamespaceRegistrationEndpoint, ns.ID)
 		}
 		err = config.GetValidate().Struct(ns)
 		if err != nil {

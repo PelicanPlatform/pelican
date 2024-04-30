@@ -738,7 +738,7 @@ func TestCreateNamespace(t *testing.T) {
 
 	t.Run("missing-public-key-returns-400", func(t *testing.T) {
 		resetNamespaceDB(t)
-		mockEmptyNs := Namespace{Prefix: "/test"} // Missing public key
+		mockEmptyNs := server_structs.Namespace{Prefix: "/test"} // Missing public key
 		mockEmptyNsBytes, err := json.Marshal(mockEmptyNs)
 		require.NoError(t, err)
 		// Create a request to the endpoint
@@ -760,7 +760,7 @@ func TestCreateNamespace(t *testing.T) {
 		jwks, err := GenerateMockJWKS()
 		require.NoError(t, err)
 
-		mockEmptyNs := Namespace{Prefix: "/test", Pubkey: jwks} // Missing institution
+		mockEmptyNs := server_structs.Namespace{Prefix: "/test", Pubkey: jwks} // Missing institution
 		mockEmptyNsBytes, err := json.Marshal(mockEmptyNs)
 		require.NoError(t, err)
 		// Create a request to the endpoint

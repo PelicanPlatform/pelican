@@ -25,9 +25,10 @@ import (
 
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/lestrrat-go/jwx/v2/jwk"
-	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/pelicanplatform/pelican/param"
 )
 
 // This file has all custom validator logic for registry struct

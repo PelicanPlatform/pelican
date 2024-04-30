@@ -63,12 +63,20 @@ func handleExports(ctx *gin.Context) {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Server encountered error when getting server issuer url " + err.Error()})
 		return
 	}
+	fed, err := config.GetFederation(ctx)
+	if err != nil {
+		log.Error("handleExports: failed to get federaion:", err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Server error when getting federation information: " + err.Error(),
+		})
+	}
 	tc := token.NewWLCGToken()
 	tc.Issuer = issuerUrl
 	tc.Lifetime = 15 * time.Minute
 	tc.Subject = issuerUrl
 	tc.AddScopes(token_scopes.Registry_EditRegistration)
-	tc.AddAudiences(param.Federation_RegistryUrl.GetString())
+	tc.AddAudiences(fed.NamespaceRegistrationEndpoint)
 	token, err := tc.CreateToken()
 	if err != nil {
 		log.Errorf("Failed to create access token for editing registration %v", err)

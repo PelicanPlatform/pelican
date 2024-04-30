@@ -32,13 +32,14 @@ import (
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
+	log "github.com/sirupsen/logrus"
+
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pelicanplatform/pelican/web_ui"
-	log "github.com/sirupsen/logrus"
 )
 
 type (
