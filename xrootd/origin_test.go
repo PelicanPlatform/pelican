@@ -269,7 +269,7 @@ func runS3Test(t *testing.T, bucketName, urlStyle, objectName string) {
 	// At this point, a 403 means the server is running, which means its ready to grab objects from
 	err := server_utils.WaitUntilWorking(ctx, "GET", originEndpoint, "xrootd", 403, true)
 	if err != nil {
-		t.Fatalf("Unsucessful test: Server encountered an error: %v", err)
+		t.Fatalf("Unsuccessful test: Server encountered an error: %v", err)
 	}
 
 	// Now try to get the object

@@ -51,22 +51,6 @@ import (
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
-type MockCache struct {
-	GetFn      func(u string, kset *jwk.Set) (jwk.Set, error)
-	RegisterFn func(*MockCache) error
-
-	keyset jwk.Set
-}
-
-func (m *MockCache) Get(ctx context.Context, u string) (jwk.Set, error) {
-	return m.GetFn(u, &m.keyset)
-}
-
-func (m *MockCache) Register(u string, options ...jwk.RegisterOption) error {
-	m.keyset = jwk.NewSet()
-	return m.RegisterFn(m)
-}
-
 func NamespaceAdContainsPath(ns []server_structs.NamespaceAdV2, path string) bool {
 	for _, v := range ns {
 		if v.Path == path {
@@ -148,12 +132,10 @@ func TestGetLinkDepth(t *testing.T) {
 	}
 }
 
+// Tests the RegisterOrigin endpoint. Specifically it creates a keypair and
+// corresponding token and invokes the registration endpoint, it then does
+// so again with an invalid token and confirms that the correct error is returned
 func TestDirectorRegistration(t *testing.T) {
-	/*
-	* Tests the RegisterOrigin endpoint. Specifically it creates a keypair and
-	* corresponding token and invokes the registration endpoint, it then does
-	* so again with an invalid token and confirms that the correct error is returned
-	 */
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -258,56 +240,37 @@ func TestDirectorRegistration(t *testing.T) {
 		c.Request.Header.Set("User-Agent", "pelican-origin/7.0.0")
 	}
 
-	// Inject into the cache, using a mock cache to avoid dealing with
-	// real namespaces
-	setupMockCache := func(t *testing.T, publicKey jwk.Key) MockCache {
-		return MockCache{
-			GetFn: func(key string, keyset *jwk.Set) (jwk.Set, error) {
-				expectedKey := ts.URL + "/api/v1.0/registry/foo/bar/.well-known/issuer.jwks"
-				if key != expectedKey {
-					t.Errorf("expecting: %q, got %q", expectedKey, key)
-				}
-				return *keyset, nil
-			},
-			RegisterFn: func(m *MockCache) error {
-				err := jwk.Set.AddKey(m.keyset, publicKey)
-				if err != nil {
-					t.Error(err)
-				}
-				return nil
-			},
-		}
-	}
-
-	// Perform injections (ar.Register will create a jwk.keyset with the publickey in it)
-	useMockCache := func(ar MockCache, issuerURL url.URL) {
-		if err := ar.Register(issuerURL.String(), jwk.WithMinRefreshInterval(15*time.Minute)); err != nil {
-			t.Errorf("this should never happen, should actually be impossible, including check for the linter")
-		}
-		namespaceKeysMutex.Lock()
-		defer namespaceKeysMutex.Unlock()
-		namespaceKeys.Set("/foo/bar", &ar, ttlcache.DefaultTTL)
+	setupJwksCache := func(t *testing.T, ns string, key jwk.Key) {
+		jwks := jwk.NewSet()
+		err := jwks.AddKey(key)
+		require.NoError(t, err)
+		namespaceKeys.Set(ts.URL+"/api/v1.0/registry"+ns+"/.well-known/issuer.jwks", jwks, ttlcache.DefaultTTL)
 	}
 
 	teardown := func() {
-		serverAdMutex.Lock()
-		defer serverAdMutex.Unlock()
 		serverAds.DeleteAll()
+		namespaceKeys.DeleteAll()
 	}
 
 	t.Run("valid-token-V1", func(t *testing.T) {
 		c, r, w := setupContext()
-		pKey, token, issuerURL := generateToken()
+		pKey, token, _ := generateToken()
 		publicKey, err := jwk.PublicKeyOf(pKey)
 		assert.NoError(t, err, "Error creating public key from private key")
 
-		ar := setupMockCache(t, publicKey)
-		useMockCache(ar, issuerURL)
+		setupJwksCache(t, "/foo/bar", publicKey)
 
 		isurl := url.URL{}
 		isurl.Path = ts.URL
 
-		ad := server_structs.OriginAdvertiseV1{Name: "test", URL: "https://or-url.org", Namespaces: []server_structs.NamespaceAdV1{{Path: "/foo/bar", Issuer: isurl}}}
+		ad := server_structs.OriginAdvertiseV1{
+			Name: "test",
+			URL:  "https://or-url.org",
+			Namespaces: []server_structs.NamespaceAdV1{{
+				Path:   "/foo/bar",
+				Issuer: isurl,
+			}},
+		}
 
 		jsonad, err := json.Marshal(ad)
 		assert.NoError(t, err, "Error marshalling OriginAdvertise")
@@ -320,19 +283,18 @@ func TestDirectorRegistration(t *testing.T) {
 		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
 
 		namaspaceADs := listNamespacesFromOrigins()
-		// If the origin was successfully registed at director, we should be able to find it in director's originAds
+		// If the origin was successfully registered at director, we should be able to find it in director's originAds
 		assert.True(t, NamespaceAdContainsPath(namaspaceADs, "/foo/bar"), "Coudln't find namespace in the director cache.")
 		teardown()
 	})
 
 	t.Run("valid-token-V2", func(t *testing.T) {
 		c, r, w := setupContext()
-		pKey, token, issuerURL := generateToken()
+		pKey, token, _ := generateToken()
 		publicKey, err := jwk.PublicKeyOf(pKey)
 		assert.NoError(t, err, "Error creating public key from private key")
 
-		ar := setupMockCache(t, publicKey)
-		useMockCache(ar, issuerURL)
+		setupJwksCache(t, "/foo/bar", publicKey)
 
 		isurl := url.URL{}
 		isurl.Path = ts.URL
@@ -358,7 +320,7 @@ func TestDirectorRegistration(t *testing.T) {
 		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
 
 		namaspaceADs := listNamespacesFromOrigins()
-		// If the origin was successfully registed at director, we should be able to find it in director's originAds
+		// If the origin was successfully registered at director, we should be able to find it in director's originAds
 		assert.True(t, NamespaceAdContainsPath(namaspaceADs, "/foo/bar"), "Coudln't find namespace in the director cache.")
 		teardown()
 	})
@@ -368,17 +330,24 @@ func TestDirectorRegistration(t *testing.T) {
 		c, r, w := setupContext()
 		wrongPrivateKey, err := ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
 		assert.NoError(t, err, "Error creating another private key")
-		_, token, issuerURL := generateToken()
+		_, token, _ := generateToken()
 
 		wrongPublicKey, err := jwk.PublicKeyOf(wrongPrivateKey)
 		assert.NoError(t, err, "Error creating public key from private key")
-		ar := setupMockCache(t, wrongPublicKey)
-		useMockCache(ar, issuerURL)
+		setupJwksCache(t, "/foo/bar", wrongPublicKey)
 
 		isurl := url.URL{}
 		isurl.Path = ts.URL
 
-		ad := server_structs.OriginAdvertiseV1{Name: "test", URL: "https://or-url.org", Namespaces: []server_structs.NamespaceAdV1{{Path: "/foo/bar", Issuer: isurl}}}
+		ad := server_structs.OriginAdvertiseV1{
+			Name: "test",
+			URL:  "https://or-url.org",
+			Namespaces: []server_structs.NamespaceAdV1{
+				{
+					Path:   "/foo/bar",
+					Issuer: isurl,
+				},
+			}}
 
 		jsonad, err := json.Marshal(ad)
 		assert.NoError(t, err, "Error marshalling OriginAdvertise")
@@ -400,12 +369,11 @@ func TestDirectorRegistration(t *testing.T) {
 		c, r, w := setupContext()
 		wrongPrivateKey, err := ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
 		assert.NoError(t, err, "Error creating another private key")
-		_, token, issuerURL := generateToken()
+		_, token, _ := generateToken()
 
 		wrongPublicKey, err := jwk.PublicKeyOf(wrongPrivateKey)
 		assert.NoError(t, err, "Error creating public key from private key")
-		ar := setupMockCache(t, wrongPublicKey)
-		useMockCache(ar, issuerURL)
+		setupJwksCache(t, "/foo/bar", wrongPublicKey)
 
 		isurl := url.URL{}
 		isurl.Path = ts.URL
@@ -433,16 +401,23 @@ func TestDirectorRegistration(t *testing.T) {
 
 	t.Run("valid-token-with-web-url-V1", func(t *testing.T) {
 		c, r, w := setupContext()
-		pKey, token, issuerURL := generateToken()
+		pKey, token, _ := generateToken()
 		publicKey, err := jwk.PublicKeyOf(pKey)
 		assert.NoError(t, err, "Error creating public key from private key")
-		ar := setupMockCache(t, publicKey)
-		useMockCache(ar, issuerURL)
+		setupJwksCache(t, "/foo/bar", publicKey)
 
 		isurl := url.URL{}
 		isurl.Path = ts.URL
 
-		ad := server_structs.OriginAdvertiseV1{URL: "https://or-url.org", WebURL: "https://localhost:8844", Namespaces: []server_structs.NamespaceAdV1{{Path: "/foo/bar", Issuer: isurl}}}
+		ad := server_structs.OriginAdvertiseV1{
+			URL:    "https://or-url.org",
+			WebURL: "https://localhost:8844",
+			Namespaces: []server_structs.NamespaceAdV1{
+				{
+					Path:   "/foo/bar",
+					Issuer: isurl,
+				},
+			}}
 
 		jsonad, err := json.Marshal(ad)
 		assert.NoError(t, err, "Error marshalling OriginAdvertise")
@@ -452,23 +427,22 @@ func TestDirectorRegistration(t *testing.T) {
 		r.ServeHTTP(w, c.Request)
 
 		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
-		assert.Equal(t, 1, len(serverAds.Keys()), "Origin fail to register at serverAds")
-		assert.Equal(t, "https://localhost:8844", serverAds.Keys()[0].WebURL.String(), "WebURL in serverAds does not match data in origin registration request")
+		assert.NotNil(t, serverAds.Get("https://or-url.org"), "Origin fail to register at serverAds")
+		assert.Equal(t, "https://localhost:8844", serverAds.Get("https://or-url.org").Value().WebURL.String(), "WebURL in serverAds does not match data in origin registration request")
 		teardown()
 	})
 
 	t.Run("valid-token-with-web-url-V2", func(t *testing.T) {
 		c, r, w := setupContext()
-		pKey, token, issuerURL := generateToken()
+		pKey, token, _ := generateToken()
 		publicKey, err := jwk.PublicKeyOf(pKey)
 		assert.NoError(t, err, "Error creating public key from private key")
-		ar := setupMockCache(t, publicKey)
-		useMockCache(ar, issuerURL)
+		setupJwksCache(t, "/foo/bar", publicKey)
 
 		isurl := url.URL{}
 		isurl.Path = ts.URL
 
-		ad := server_structs.OriginAdvertiseV2{DataURL: "https://or-url.org", WebURL: "https://localhost:8844", Namespaces: []server_structs.NamespaceAdV2{{
+		ad := server_structs.OriginAdvertiseV2{DataURL: "https://data-url.org", WebURL: "https://localhost:8844", Namespaces: []server_structs.NamespaceAdV2{{
 			Path:   "/foo/bar",
 			Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
 		}}}
@@ -481,19 +455,18 @@ func TestDirectorRegistration(t *testing.T) {
 		r.ServeHTTP(w, c.Request)
 
 		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
-		assert.Equal(t, 1, len(serverAds.Keys()), "Origin fail to register at serverAds")
-		assert.Equal(t, "https://localhost:8844", serverAds.Keys()[0].WebURL.String(), "WebURL in serverAds does not match data in origin registration request")
+		assert.NotNil(t, serverAds.Get("https://data-url.org"), "Origin fail to register at serverAds")
+		assert.Equal(t, "https://localhost:8844", serverAds.Get("https://data-url.org").Value().WebURL.String(), "WebURL in serverAds does not match data in origin registration request")
 		teardown()
 	})
 
 	// We want to ensure backwards compatibility for WebURL
 	t.Run("valid-token-without-web-url-V1", func(t *testing.T) {
 		c, r, w := setupContext()
-		pKey, token, issuerURL := generateToken()
+		pKey, token, _ := generateToken()
 		publicKey, err := jwk.PublicKeyOf(pKey)
 		assert.NoError(t, err, "Error creating public key from private key")
-		ar := setupMockCache(t, publicKey)
-		useMockCache(ar, issuerURL)
+		setupJwksCache(t, "/foo/bar", publicKey)
 
 		isurl := url.URL{}
 		isurl.Path = ts.URL
@@ -508,18 +481,17 @@ func TestDirectorRegistration(t *testing.T) {
 		r.ServeHTTP(w, c.Request)
 
 		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
-		assert.Equal(t, 1, len(serverAds.Keys()), "Origin fail to register at serverAds")
-		assert.Equal(t, "", serverAds.Keys()[0].WebURL.String(), "WebURL in serverAds isn't empty with no WebURL provided in registration")
+		assert.NotNil(t, 1, serverAds.Get("https://or-url.org"), "Origin fail to register at serverAds")
+		assert.Equal(t, "", serverAds.Get("https://or-url.org").Value().WebURL.String(), "WebURL in serverAds isn't empty with no WebURL provided in registration")
 		teardown()
 	})
 
 	t.Run("valid-token-without-web-url-V2", func(t *testing.T) {
 		c, r, w := setupContext()
-		pKey, token, issuerURL := generateToken()
+		pKey, token, _ := generateToken()
 		publicKey, err := jwk.PublicKeyOf(pKey)
 		assert.NoError(t, err, "Error creating public key from private key")
-		ar := setupMockCache(t, publicKey)
-		useMockCache(ar, issuerURL)
+		setupJwksCache(t, "/foo/bar", publicKey)
 
 		isurl := url.URL{}
 		isurl.Path = ts.URL
@@ -535,20 +507,19 @@ func TestDirectorRegistration(t *testing.T) {
 		r.ServeHTTP(w, c.Request)
 
 		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
-		assert.Equal(t, 1, len(serverAds.Keys()), "Origin fail to register at serverAds")
-		assert.Equal(t, "", serverAds.Keys()[0].WebURL.String(), "WebURL in serverAds isn't empty with no WebURL provided in registration")
+		assert.NotNil(t, serverAds.Get("https://or-url.org"), "Origin fail to register at serverAds")
+		assert.Equal(t, "", serverAds.Get("https://or-url.org").Value().WebURL.String(), "WebURL in serverAds isn't empty with no WebURL provided in registration")
 		teardown()
 	})
 
 	// Determines if the broker URL set in the advertisement is the same one received on redirect
 	t.Run("broker-url-redirect", func(t *testing.T) {
 		c, r, w := setupContext()
-		pKey, token, issuerURL := generateToken()
+		pKey, token, _ := generateToken()
 		publicKey, err := jwk.PublicKeyOf(pKey)
 		assert.NoError(t, err, "Error creating public key from private key")
 
-		ar := setupMockCache(t, publicKey)
-		useMockCache(ar, issuerURL)
+		setupJwksCache(t, "/foo/bar", publicKey)
 
 		isurl := url.URL{}
 		isurl.Path = ts.URL
@@ -693,6 +664,7 @@ func TestDiscoverOriginCache(t *testing.T) {
 	kfile := filepath.Join(tDir, "testKey")
 	viper.Set("IssuerKey", kfile)
 
+	viper.Set("ConfigDir", t.TempDir())
 	config.InitConfig()
 	err := config.InitServer(ctx, config.DirectorType)
 	require.NoError(t, err)
@@ -771,7 +743,7 @@ func TestDiscoverOriginCache(t *testing.T) {
 		r.ServeHTTP(w, req)
 
 		assert.Equal(t, 403, w.Code)
-		assert.Equal(t, `{"error":"Authentication is required but no token is present."}`, w.Body.String())
+		assert.Equal(t, `{"status":"error","msg":"Authentication is required but no token is present."}`, w.Body.String())
 	})
 	t.Run("token-present-with-wrong-issuer-should-give-403", func(t *testing.T) {
 		req, err := http.NewRequest(http.MethodGet, "/test", nil)
@@ -785,7 +757,7 @@ func TestDiscoverOriginCache(t *testing.T) {
 		r.ServeHTTP(w, req)
 
 		assert.Equal(t, 403, w.Code)
-		assert.Equal(t, `{"error":"Cannot verify token: Cannot verify token with server issuer:  Token issuer https://wrong-issuer.org does not match the local issuer on the current server. Expecting https://fake-director.org:8888\n"}`, w.Body.String())
+		assert.Equal(t, `{"status":"error","msg":"Cannot verify token: Cannot verify token with server issuer:  Token issuer https://wrong-issuer.org does not match the local issuer on the current server. Expecting https://fake-director.org:8888\n"}`, w.Body.String())
 	})
 	t.Run("token-present-valid-should-give-200-and-empty-array", func(t *testing.T) {
 		req, err := http.NewRequest(http.MethodGet, "/test", nil)
@@ -807,15 +779,20 @@ func TestDiscoverOriginCache(t *testing.T) {
 			t.Fatalf("Could not make a GET request: %v", err)
 		}
 
-		func() {
-			serverAdMutex.Lock()
-			defer serverAdMutex.Unlock()
-			serverAds.DeleteAll()
-			serverAds.Set(mockPelicanOriginServerAd, []server_structs.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
-			// Server fetched from topology should not be present in SD response
-			serverAds.Set(mockTopoOriginServerAd, []server_structs.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
-			serverAds.Set(mockCacheServerAd, []server_structs.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
-		}()
+		serverAds.DeleteAll()
+		serverAds.Set(mockPelicanOriginServerAd.URL.String(), &server_structs.Advertisement{
+			ServerAd:     mockPelicanOriginServerAd,
+			NamespaceAds: []server_structs.NamespaceAdV2{mockNamespaceAd},
+		}, ttlcache.DefaultTTL)
+		// Server fetched from topology should not be present in SD response
+		serverAds.Set(mockTopoOriginServerAd.URL.String(), &server_structs.Advertisement{
+			ServerAd:     mockTopoOriginServerAd,
+			NamespaceAds: []server_structs.NamespaceAdV2{mockNamespaceAd},
+		}, ttlcache.DefaultTTL)
+		serverAds.Set(mockCacheServerAd.URL.String(), &server_structs.Advertisement{
+			ServerAd:     mockCacheServerAd,
+			NamespaceAds: []server_structs.NamespaceAdV2{mockNamespaceAd},
+		}, ttlcache.DefaultTTL)
 
 		expectedRes := []PromDiscoveryItem{{
 			Targets: []string{mockCacheServerAd.WebURL.Hostname() + ":" + mockCacheServerAd.WebURL.Port()},
@@ -861,17 +838,25 @@ func TestDiscoverOriginCache(t *testing.T) {
 			t.Fatalf("Could not make a GET request: %v", err)
 		}
 
-		func() {
-			serverAdMutex.Lock()
-			defer serverAdMutex.Unlock()
-			serverAds.DeleteAll()
-			// Add multiple same serverAds
-			serverAds.Set(mockPelicanOriginServerAd, []server_structs.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
-			serverAds.Set(mockPelicanOriginServerAd, []server_structs.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
-			serverAds.Set(mockPelicanOriginServerAd, []server_structs.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
-			// Server fetched from topology should not be present in SD response
-			serverAds.Set(mockTopoOriginServerAd, []server_structs.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
-		}()
+		serverAds.DeleteAll()
+		// Add multiple same serverAds
+		serverAds.Set(mockPelicanOriginServerAd.URL.String(), &server_structs.Advertisement{
+			ServerAd:     mockPelicanOriginServerAd,
+			NamespaceAds: []server_structs.NamespaceAdV2{mockNamespaceAd},
+		}, ttlcache.DefaultTTL)
+		serverAds.Set(mockPelicanOriginServerAd.URL.String(), &server_structs.Advertisement{
+			ServerAd:     mockPelicanOriginServerAd,
+			NamespaceAds: []server_structs.NamespaceAdV2{mockNamespaceAd},
+		}, ttlcache.DefaultTTL)
+		serverAds.Set(mockPelicanOriginServerAd.URL.String(), &server_structs.Advertisement{
+			ServerAd:     mockPelicanOriginServerAd,
+			NamespaceAds: []server_structs.NamespaceAdV2{mockNamespaceAd},
+		}, ttlcache.DefaultTTL)
+		// Server fetched from topology should not be present in SD response
+		serverAds.Set(mockTopoOriginServerAd.URL.String(), &server_structs.Advertisement{
+			ServerAd:     mockTopoOriginServerAd,
+			NamespaceAds: []server_structs.NamespaceAdV2{mockNamespaceAd},
+		}, ttlcache.DefaultTTL)
 
 		expectedRes := []PromDiscoveryItem{{
 			Targets: []string{mockPelicanOriginServerAd.WebURL.Hostname() + ":" + mockPelicanOriginServerAd.WebURL.Port()},
@@ -895,7 +880,7 @@ func TestDiscoverOriginCache(t *testing.T) {
 		r.ServeHTTP(w, req)
 
 		assert.Equal(t, 200, w.Code)
-		assert.Equal(t, string(resStr), w.Body.String(), "Reponse doesn't match expected")
+		assert.Equal(t, string(resStr), w.Body.String(), "Response doesn't match expected")
 	})
 }
 
@@ -1180,7 +1165,7 @@ func TestHandleFilterServer(t *testing.T) {
 		require.Equal(t, 400, w.Code)
 		resB, err := io.ReadAll(w.Body)
 		require.NoError(t, err)
-		assert.Contains(t, string(resB), "name is a required path parameter")
+		assert.Contains(t, string(resB), "'name' is a required path parameter")
 	})
 }
 
@@ -1206,7 +1191,7 @@ func TestHandleAllowServer(t *testing.T) {
 		require.Equal(t, 400, w.Code)
 		resB, err := io.ReadAll(w.Body)
 		require.NoError(t, err)
-		assert.Contains(t, string(resB), "Can't allow a server that is not being filtered.")
+		assert.Contains(t, string(resB), "Can't allow server mock-dne that is not being filtered")
 	})
 	t.Run("allow-server-w-permFiltered", func(t *testing.T) {
 		// Create a request to the endpoint
@@ -1258,7 +1243,7 @@ func TestHandleAllowServer(t *testing.T) {
 
 		resB, err := io.ReadAll(w.Body)
 		require.NoError(t, err)
-		assert.Contains(t, string(resB), "Can't allow a server that is not being filtered.")
+		assert.Contains(t, string(resB), "Can't allow server mock-ta that is not being filtered")
 	})
 	t.Run("allow-with-invalid-name", func(t *testing.T) {
 		// Create a request to the endpoint
@@ -1270,6 +1255,6 @@ func TestHandleAllowServer(t *testing.T) {
 		require.Equal(t, 400, w.Code)
 		resB, err := io.ReadAll(w.Body)
 		require.NoError(t, err)
-		assert.Contains(t, string(resB), "name is a required path parameter")
+		assert.Contains(t, string(resB), "'name' is a required path parameter")
 	})
 }

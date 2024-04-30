@@ -146,7 +146,7 @@ func TestCodeBasedLogin(t *testing.T) {
 
 		//Check the HTTP response code
 		assert.Equal(t, 401, recorder.Code)
-		assert.JSONEq(t, `{"error":"Invalid login code"}`, recorder.Body.String())
+		assert.JSONEq(t, `{"msg":"Invalid login code", "status":"error"}`, recorder.Body.String())
 	})
 }
 
@@ -192,10 +192,10 @@ func TestPasswordResetAPI(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, req)
 
-	//Check ok http reponse
+	//Check ok http response
 	assert.Equal(t, http.StatusOK, recorder.Code)
 	//Check that success message returned
-	require.JSONEq(t, `{"msg":"Success"}`, recorder.Body.String())
+	require.JSONEq(t, `{"msg":"success", "status":"success"}`, recorder.Body.String())
 	//Get the cookie to pass to password reset
 	loginCookie := recorder.Result().Cookies()
 	cookieValue := loginCookie[0].Value
@@ -217,10 +217,10 @@ func TestPasswordResetAPI(t *testing.T) {
 		recorderReset := httptest.NewRecorder()
 		router.ServeHTTP(recorderReset, reqReset)
 
-		//Check ok http reponse
+		//Check ok http response
 		assert.Equal(t, 200, recorderReset.Code)
 		//Check that success message returned
-		assert.JSONEq(t, `{"msg":"Success"}`, recorderReset.Body.String())
+		assert.JSONEq(t, `{"msg":"success", "status":"success"}`, recorderReset.Body.String())
 
 		//After password reset, test authorization with newly generated password
 		loginWithNewPasswordPayload := `{"user": "admin", "password": "newpassword"}`
@@ -237,7 +237,7 @@ func TestPasswordResetAPI(t *testing.T) {
 		assert.Equal(t, http.StatusOK, recorderLoginWithNewPassword.Code)
 
 		//Check that the response body contains the success message
-		assert.JSONEq(t, `{"msg":"Success"}`, recorderLoginWithNewPassword.Body.String())
+		assert.JSONEq(t, `{"msg":"success", "status":"success"}`, recorderLoginWithNewPassword.Body.String())
 	})
 
 	//Invoking password reset without a cookie should result in failure
@@ -267,10 +267,10 @@ func TestPasswordResetAPI(t *testing.T) {
 		recorderReset := httptest.NewRecorder()
 		router.ServeHTTP(recorderReset, reqReset)
 
-		//Check ok http reponse
+		//Check ok http response
 		assert.Equal(t, 403, recorderReset.Code)
 		//Check that success message returned
-		assert.JSONEq(t, `{"error":"Server.UIAdminUsers is not set, and user is not root user. Admin check returns false"}`, recorderReset.Body.String())
+		assert.JSONEq(t, `{"msg":"Server.UIAdminUsers is not set, and user is not root user. Admin check returns false", "status":"error"}`, recorderReset.Body.String())
 	})
 
 	//Invoking password reset without a cookie should result in failure
@@ -284,10 +284,10 @@ func TestPasswordResetAPI(t *testing.T) {
 		recorderReset := httptest.NewRecorder()
 		router.ServeHTTP(recorderReset, reqReset)
 
-		//Check ok http reponse
+		//Check ok http response
 		assert.Equal(t, 401, recorderReset.Code)
 		//Check that success message returned
-		assert.JSONEq(t, `{"error":"Authentication required to perform this operation"}`, recorderReset.Body.String())
+		assert.JSONEq(t, `{"msg":"Authentication required to perform this operation", "status":"error"}`, recorderReset.Body.String())
 	})
 
 }
@@ -332,10 +332,10 @@ func TestPasswordBasedLoginAPI(t *testing.T) {
 
 		recorder := httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
-		//Check ok http reponse
+		//Check ok http response
 		assert.Equal(t, http.StatusOK, recorder.Code)
 		//Check that success message returned
-		assert.JSONEq(t, `{"msg":"Success"}`, recorder.Body.String())
+		assert.JSONEq(t, `{"msg":"success", "status":"success"}`, recorder.Body.String())
 		//Check for a cookie being returned
 		cookies := recorder.Result().Cookies()
 		foundCookie := false
@@ -357,9 +357,9 @@ func TestPasswordBasedLoginAPI(t *testing.T) {
 
 		recorder := httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
-		//Check http reponse code 400
+		//Check http response code 400
 		assert.Equal(t, 400, recorder.Code)
-		assert.JSONEq(t, `{"error":"Password is required"}`, recorder.Body.String())
+		assert.JSONEq(t, `{"msg":"Password is required", "status":"error"}`, recorder.Body.String())
 	})
 
 	//Invoke with incorrect password should fail
@@ -372,9 +372,9 @@ func TestPasswordBasedLoginAPI(t *testing.T) {
 
 		recorder := httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
-		//Check http reponse code 401
+		//Check http response code 401
 		assert.Equal(t, 401, recorder.Code)
-		assert.JSONEq(t, `{"error":"Password and user didn't match"}`, recorder.Body.String())
+		assert.JSONEq(t, `{"msg":"Password and user didn't match", "status":"error"}`, recorder.Body.String())
 	})
 
 	//Invoke with incorrect user should fail
@@ -387,9 +387,9 @@ func TestPasswordBasedLoginAPI(t *testing.T) {
 
 		recorder := httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
-		//Check http reponse code 401
+		//Check http response code 401
 		assert.Equal(t, 401, recorder.Code)
-		assert.JSONEq(t, `{"error":"Password and user didn't match"}`, recorder.Body.String())
+		assert.JSONEq(t, `{"msg":"Password and user didn't match", "status":"error"}`, recorder.Body.String())
 	})
 
 	//Invoke with invalid user, should fail
@@ -402,9 +402,9 @@ func TestPasswordBasedLoginAPI(t *testing.T) {
 
 		recorder := httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
-		//Check http reponse code 400
+		//Check http response code 400
 		assert.Equal(t, 400, recorder.Code)
-		assert.JSONEq(t, `{"error":"User is required"}`, recorder.Body.String())
+		assert.JSONEq(t, `{"msg":"User is required", "status":"error"}`, recorder.Body.String())
 	})
 }
 
@@ -449,10 +449,10 @@ func TestWhoamiAPI(t *testing.T) {
 
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, req)
-	//Check ok http reponse
+	//Check ok http response
 	assert.Equal(t, http.StatusOK, recorder.Code)
 	//Check that success message returned
-	assert.JSONEq(t, `{"msg":"Success"}`, recorder.Body.String())
+	assert.JSONEq(t, `{"msg":"success", "status":"success"}`, recorder.Body.String())
 	//Get the cookie to test 'whoami'
 	loginCookie := recorder.Result().Cookies()
 	cookieValue := loginCookie[0].Value
@@ -476,7 +476,7 @@ func TestWhoamiAPI(t *testing.T) {
 		resStr, err := json.Marshal(expectedRes)
 		require.NoError(t, err)
 
-		//Check for http reponse code 200
+		//Check for http response code 200
 		assert.Equal(t, 200, recorder.Code)
 		assert.JSONEq(t, string(resStr), recorder.Body.String())
 		assert.NotZero(t, recorder.Header().Get("X-CSRF-Token"))
@@ -493,7 +493,7 @@ func TestWhoamiAPI(t *testing.T) {
 		resStr, err := json.Marshal(expectedRes)
 		require.NoError(t, err)
 
-		//Check for http reponse code 200
+		//Check for http response code 200
 		assert.Equal(t, 200, recorder.Code)
 		assert.JSONEq(t, string(resStr), recorder.Body.String())
 	})
@@ -627,10 +627,10 @@ func TestLogoutAPI(t *testing.T) {
 
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, req)
-	//Check ok http reponse
+	//Check ok http response
 	assert.Equal(t, http.StatusOK, recorder.Code)
 	//Check that success message returned
-	assert.JSONEq(t, `{"msg":"Success"}`, recorder.Body.String())
+	assert.JSONEq(t, `{"msg":"success", "status":"success"}`, recorder.Body.String())
 	//Get the cookie to test 'logout'
 	loginCookie := recorder.Result().Cookies()
 	cookieValue := loginCookie[0].Value
@@ -650,7 +650,7 @@ func TestLogoutAPI(t *testing.T) {
 		recorder = httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
 
-		//Check for http reponse code 200
+		//Check for http response code 200
 		assert.Equal(t, 200, recorder.Code)
 		assert.Equal(t, 1, len(recorder.Result().Cookies()))
 		assert.Equal(t, "login", recorder.Result().Cookies()[0].Name)
@@ -664,7 +664,7 @@ func TestLogoutAPI(t *testing.T) {
 		recorder = httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
 
-		//Check for http reponse code 200
+		//Check for http response code 200
 		assert.Equal(t, 401, recorder.Code)
 	})
 }
@@ -740,11 +740,34 @@ func TestListOIDCEnabledServersHandler(t *testing.T) {
 		assert.Equal(t, expected, getResult)
 	})
 
+	t.Run("director-included-if-flag-is-on", func(t *testing.T) {
+		viper.Reset()
+		viper.Set("Director.EnableOIDC", true)
+		expected := OIDCEnabledServerRes{ODICEnabledServers: []string{"registry", "director"}}
+		req, err := http.NewRequest("GET", "/oauth", nil)
+		assert.NoError(t, err)
+
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusOK, recorder.Result().StatusCode)
+
+		body, err := io.ReadAll(recorder.Result().Body)
+		require.NoError(t, err)
+
+		getResult := OIDCEnabledServerRes{}
+		err = json.Unmarshal(body, &getResult)
+		require.NoError(t, err)
+
+		assert.Equal(t, expected, getResult)
+	})
+
 	t.Run("origin-cache-both-included-if-flags-are-on", func(t *testing.T) {
 		viper.Reset()
 		viper.Set("Origin.EnableOIDC", true)
 		viper.Set("Cache.EnableOIDC", true)
-		expected := OIDCEnabledServerRes{ODICEnabledServers: []string{"registry", "origin", "cache"}}
+		viper.Set("Director.EnableOIDC", true)
+		expected := OIDCEnabledServerRes{ODICEnabledServers: []string{"registry", "origin", "cache", "director"}}
 		req, err := http.NewRequest("GET", "/oauth", nil)
 		assert.NoError(t, err)
 

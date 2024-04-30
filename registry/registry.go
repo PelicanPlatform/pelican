@@ -38,6 +38,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path"
 	"strings"
 	"sync"
 
@@ -235,7 +236,11 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 	if err != nil {
 		return false, nil, badRequestError{Message: err.Error()}
 	}
-	registryUrl := param.Federation_RegistryUrl.GetString()
+	fedInfo, err := config.GetFederation(ctx)
+	if err != nil {
+		return false, nil, err
+	}
+	registryUrl := fedInfo.NamespaceRegistrationEndpoint
 
 	var rawkey interface{} // This is the raw key, like *rsa.PrivateKey or *ecdsa.PrivateKey
 	if err := key.Raw(&rawkey); err != nil {
@@ -300,7 +305,7 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 			return false, nil, sysErr
 		}
 
-		var ns Namespace
+		var ns server_structs.Namespace
 		ns.Prefix = data.Prefix
 
 		pubkeyData, err := json.Marshal(data.Pubkey)
@@ -368,7 +373,7 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 		ns.AdminMetadata.SiteName = ctx.ClientIP()
 
 		// Overwrite status to Pending to filter malicious request
-		ns.AdminMetadata.Status = Pending
+		ns.AdminMetadata.Status = server_structs.RegPending
 
 		err = AddNamespace(&ns)
 		if err != nil {
@@ -422,7 +427,9 @@ func cliRegisterNamespace(ctx *gin.Context) {
 	var reqData registrationData
 	if err := ctx.BindJSON(&reqData); err != nil {
 		log.Errorln("Bad request: ", err)
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Bad Request"})
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprint("Bad Request: ", err.Error())})
 		return
 	}
 
@@ -433,11 +440,21 @@ func cliRegisterNamespace(ctx *gin.Context) {
 		created, res, err := keySignChallenge(ctx, &reqData)
 		if err != nil {
 			if errors.As(err, &permissionDeniedError{}) {
-				ctx.JSON(http.StatusForbidden, gin.H{"error": "You don't have permission to register the prefix: " + err.Error()})
+				ctx.JSON(http.StatusForbidden,
+					server_structs.SimpleApiResp{
+						Status: server_structs.RespFailed,
+						Msg:    fmt.Sprintf("You don't have permission to register the prefix: %v", err),
+					})
 			} else if errors.As(err, &badRequestError{}) {
-				ctx.JSON(http.StatusBadRequest, gin.H{"error": "Bad request for key-sign challenge: " + err.Error()})
+				ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    fmt.Sprintf("Bad request for key-sign challenge: %v", err),
+				})
 			} else {
-				ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Server encountered an error during key-sign challenge: " + err.Error()})
+				ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    fmt.Sprintf("Server encountered an error during key-sign challenge: %v", err),
+				})
 				log.Warningf("Failed to complete key sign challenge without identity requirement: %v", err)
 			}
 		} else {
@@ -453,12 +470,20 @@ func cliRegisterNamespace(ctx *gin.Context) {
 	// Load OIDC client for the following steps as they both require OIDC to set up
 	oidcConfig, provider, err := oauth2.ServerOIDCClient()
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server has malformed OIDC configuration"})
+		ctx.JSON(http.StatusInternalServerError,
+			server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("server has malformed OIDC configuration: %v", err),
+			})
 		log.Errorf("Failed to load OIDC information for registration with identity: %v", err)
 		return
 	}
 	if provider == oauth2.Globus {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server has malformed OIDC configuration. It's using Globus as the authentication server which is not supported by Pelican registry"})
+		ctx.JSON(http.StatusInternalServerError,
+			server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "server has malformed OIDC configuration. It's using Globus as the authentication server which is not supported by Pelican registry",
+			})
 		log.Errorf("Failed to load OIDC, authentication server is Globus which is not supported by Pelican registry")
 		return
 	}
@@ -472,7 +497,9 @@ func cliRegisterNamespace(ctx *gin.Context) {
 
 		resp, err := client.PostForm(oidcConfig.Endpoint.UserInfoURL, payload)
 		if err != nil {
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error making request to user info endpoint"})
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "server encountered an error making request to user info endpoint"})
 			log.Errorf("Failed to execute post form to user info endpoint %s: %v", oidcConfig.Endpoint.UserInfoURL, err)
 			return
 		}
@@ -480,14 +507,18 @@ func cliRegisterNamespace(ctx *gin.Context) {
 
 		// Check the status code
 		if resp.StatusCode != 200 {
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server received non-200 status from user info endpoint"})
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "server received non-200 status from user info endpoint"})
 			log.Errorf("The user info endpoint %s responded with status code %d", oidcConfig.Endpoint.UserInfoURL, resp.StatusCode)
 			return
 		}
 
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Server encountered an error reading response from user info endpoint"})
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Server encountered an error reading response from user info endpoint"})
 			log.Errorf("Failed to read body from user info endpoint %s: %v", oidcConfig.Endpoint.UserInfoURL, err)
 			return
 		}
@@ -496,11 +527,17 @@ func cliRegisterNamespace(ctx *gin.Context) {
 		created, res, err := keySignChallenge(ctx, &reqData)
 		if err != nil {
 			if errors.As(err, &permissionDeniedError{}) {
-				ctx.JSON(http.StatusForbidden, gin.H{"error": "You don't have permission to register the prefix: " + err.Error()})
+				ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    "You don't have permission to register the prefix: " + err.Error()})
 			} else if errors.As(err, &badRequestError{}) {
-				ctx.JSON(http.StatusBadRequest, gin.H{"error": "Bad request for key-sign challenge: " + err.Error()})
+				ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    "Bad request for key-sign challenge: " + err.Error()})
 			} else {
-				ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Server encountered an error during key-sign challenge: " + err.Error()})
+				ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    "Server encountered an error during key-sign challenge: " + err.Error()})
 				log.Warningf("Failed to complete key sign challenge with identity requirement: %v", err)
 			}
 		} else {
@@ -525,7 +562,9 @@ func cliRegisterNamespace(ctx *gin.Context) {
 
 		response, err := client.PostForm(oidcConfig.Endpoint.DeviceAuthURL, payload)
 		if err != nil {
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered error requesting device code"})
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "server encountered error requesting device code"})
 			log.Errorf("Failed to execute post form to device auth endpoint %s: %v", oidcConfig.Endpoint.DeviceAuthURL, err)
 			return
 		}
@@ -533,20 +572,26 @@ func cliRegisterNamespace(ctx *gin.Context) {
 
 		// Check the response code
 		if response.StatusCode != 200 {
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server received non-200 status code from OIDC device auth endpoint"})
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "server received non-200 status code from OIDC device auth endpoint"})
 			log.Errorf("The device auth endpoint %s responded with status code %d", oidcConfig.Endpoint.DeviceAuthURL, response.StatusCode)
 			return
 		}
 		body, err := io.ReadAll(response.Body)
 		if err != nil {
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered error reading response from device auth endpoint"})
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "server encountered error reading response from device auth endpoint"})
 			log.Errorf("Failed to read body from device auth endpoint %s: %v", oidcConfig.Endpoint.DeviceAuthURL, err)
 			return
 		}
 		var res Response
 		err = json.Unmarshal(body, &res)
 		if err != nil {
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server could not parse response from device auth endpoint"})
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "server could not parse response from device auth endpoint"})
 			log.Errorf("Failed to unmarshal body from device auth endpoint %s: %v", oidcConfig.Endpoint.DeviceAuthURL, err)
 			return
 		}
@@ -569,7 +614,9 @@ func cliRegisterNamespace(ctx *gin.Context) {
 
 		response, err := client.PostForm(oidcConfig.Endpoint.TokenURL, payload)
 		if err != nil {
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error while making request to token endpoint"})
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "server encountered an error while making request to token endpoint"})
 			log.Errorf("Failed to execute post form to token endpoint %s: %v", oidcConfig.Endpoint.TokenURL, err)
 			return
 		}
@@ -578,14 +625,18 @@ func cliRegisterNamespace(ctx *gin.Context) {
 		// Check the status code
 		// We accept either a 200, or a 400.
 		if response.StatusCode != 200 && response.StatusCode != 400 {
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server received bad status code from token endpoint"})
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "server received bad status code from token endpoint"})
 			log.Errorf("The token endpoint %s responded with status code %d", oidcConfig.Endpoint.TokenURL, response.StatusCode)
 			return
 		}
 
 		body, err := io.ReadAll(response.Body)
 		if err != nil {
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error reading response from token endpoint"})
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "server encountered an error reading response from token endpoint"})
 			log.Errorf("Failed to read body from token endpoint %s: %v", oidcConfig.Endpoint.TokenURL, err)
 			return
 		}
@@ -593,7 +644,9 @@ func cliRegisterNamespace(ctx *gin.Context) {
 		var tokenResponse TokenResponse
 		err = json.Unmarshal(body, &tokenResponse)
 		if err != nil {
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server could not parse error from token endpoint"})
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "server could not parse error from token endpoint"})
 			log.Errorf("Failed to unmarshal body from token endpoint %s: %v", oidcConfig.Endpoint.TokenURL, err)
 			return
 		}
@@ -606,8 +659,10 @@ func cliRegisterNamespace(ctx *gin.Context) {
 					"status": "PENDING",
 				})
 			} else {
-				ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered unknown error waiting for token"})
-				log.Errorf("Token endpoint did not provide a token, and responded with unkown error: %s", string(body))
+				ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    "server encountered unknown error waiting for token"})
+				log.Errorf("Token endpoint did not provide a token, and responded with unknown error: %s", string(body))
 				return
 			}
 		} else {
@@ -631,19 +686,25 @@ func deleteNamespaceHandler(ctx *gin.Context) {
 	prefix := ctx.Param("wildcard")
 	log.Debug("Attempting to delete namespace prefix ", prefix)
 	if prefix == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "prefix is required to delete"})
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "prefix is required to delete"})
 		return
 	}
 
 	// Check if prefix exists before trying to delete it
 	exists, err := namespaceExistsByPrefix(prefix)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error checking if namespace already exists"})
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "server encountered an error checking if namespace already exists"})
 		log.Errorf("Failed to check if the namespace already exists: %v", err)
 		return
 	}
 	if !exists {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "the prefix does not exist so it cannot be deleted"})
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "the prefix does not exist so it cannot be deleted"})
 		log.Errorln("prefix could not be deleted because it does not exist")
 	}
 
@@ -658,7 +719,9 @@ func deleteNamespaceHandler(ctx *gin.Context) {
 	// Have the token, now we need to load the JWKS for the prefix
 	originJwks, _, err := getNamespaceJwksByPrefix(prefix)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error loading the prefix's stored jwks"})
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "server encountered an error loading the prefix's stored jwks"})
 		log.Errorf("Failed to get prefix's stored jwks: %v", err)
 		return
 	}
@@ -666,7 +729,9 @@ func deleteNamespaceHandler(ctx *gin.Context) {
 	// Use the JWKS to verify the token -- verification means signature integrity
 	parsed, err := jwt.Parse([]byte(delTokenStr), jwt.WithKeySet(originJwks))
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server could not verify/parse the provided deletion token"})
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "server could not verify/parse the provided deletion token"})
 		log.Errorf("Failed to parse the token: %v", err)
 		return
 	}
@@ -674,7 +739,9 @@ func deleteNamespaceHandler(ctx *gin.Context) {
 	scopeValidator := token_scopes.CreateScopeValidator([]token_scopes.TokenScope{token_scopes.Pelican_NamespaceDelete}, true)
 
 	if err = jwt.Validate(parsed, jwt.WithValidator(scopeValidator)); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server could not validate the provided deletion token"})
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "server could not validate the provided deletion token"})
 		log.Errorf("Failed to validate the token: %v", err)
 		return
 	}
@@ -682,12 +749,18 @@ func deleteNamespaceHandler(ctx *gin.Context) {
 	// If we get to this point in the code, we've passed all the security checks and we're ready to delete
 	err = deleteNamespaceByPrefix(prefix)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error deleting namespace from database"})
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "server encountered an error deleting namespace from database"})
 		log.Errorf("Failed to delete namespace from database: %v", err)
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"status": "success"})
+	ctx.JSON(http.StatusOK,
+		server_structs.SimpleApiResp{
+			Status: server_structs.RespOK,
+			Msg:    "success",
+		})
 }
 
 /**
@@ -697,7 +770,9 @@ func cliListNamespaces(c *gin.Context) {
 	log.Debugf("Trying to get namespace data for prefix %s", prefix)
 	ns, err := getNamespace(prefix)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			 Msg: err.Error()})
 		return
 	}
 
@@ -708,7 +783,9 @@ func cliListNamespaces(c *gin.Context) {
 func getAllNamespacesHandler(ctx *gin.Context) {
 	nss, err := getAllNamespaces()
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error trying to list all namespaces"})
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "server encountered an error trying to list all namespaces"})
 		log.Errorln("Failed to get all namespaces: ", err)
 		return
 	}
@@ -734,31 +811,41 @@ func wildcardHandler(ctx *gin.Context) {
 		found, err := namespaceExistsByPrefix(prefix)
 		if err != nil {
 			log.Error("Error checking if prefix ", prefix, " exists: ", err)
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error trying to check if the namespace exists"})
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "server encountered an error trying to check if the namespace exists"})
 			return
 		}
 		if !found {
-			ctx.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("namespace prefix '%s', was not found", prefix)})
+			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("namespace prefix '%s', was not found", prefix)})
 			return
 		}
 
 		jwks, adminMetadata, err := getNamespaceJwksByPrefix(prefix)
 		if err != nil {
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server encountered an error trying to get jwks for prefix"})
 			log.Errorf("Failed to load jwks for prefix %s: %v", prefix, err)
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "server encountered an error trying to get jwks for prefix"})
 			return
 		}
-		if adminMetadata != nil && adminMetadata.Status != Approved {
+		if adminMetadata != nil && adminMetadata.Status != server_structs.RegApproved {
 			if strings.HasPrefix(prefix, "/caches/") { // Caches
 				if param.Registry_RequireCacheApproval.GetBool() {
 					// Use 403 to distinguish between server error
-					ctx.JSON(http.StatusForbidden, gin.H{"error": "The cache has not been approved by federation administrator"})
+					ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+						Status: server_structs.RespFailed,
+						Msg:    "The cache has not been approved by federation administrator"})
 					return
 				}
 			} else { // Origins
 				if param.Registry_RequireOriginApproval.GetBool() {
 					// Use 403 to distinguish between server error
-					ctx.JSON(http.StatusForbidden, gin.H{"error": "The origin has not been approved by federation administrator"})
+					ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+						Status: server_structs.RespFailed,
+						Msg:    "The origin has not been approved by federation administrator"})
 					return
 				}
 			}
@@ -770,12 +857,16 @@ func wildcardHandler(ctx *gin.Context) {
 		prefix := strings.TrimSuffix(path, "/.well-known/openid-configuration")
 		exists, err := namespaceExistsByPrefix(prefix)
 		if err != nil {
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Server encountered an error while checking if the prefix exists"})
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Server encountered an error while checking if the prefix exists"})
 			log.Errorf("Error while checking for existence of prefix %s: %v", prefix, err)
 			return
 		}
 		if !exists {
-			ctx.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("The requested prefix %s does not exist in the registry's database", prefix)})
+			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("The requested prefix %s does not exist in the registry's database", prefix)})
 		}
 		// Construct the openid-configuration JSON and return to the requester
 		// For a given namespace "foo", the jwks should be located at <registry url>/api/v1.0/registry/foo/.well-known/issuer.jwks
@@ -799,9 +890,38 @@ func wildcardHandler(ctx *gin.Context) {
 		ctx.JSON(http.StatusOK, nsCfg)
 		return
 	} else {
-		ctx.String(http.StatusNotFound, "404 Page not found")
+		// Default to get the namespace by its prefix
+		getNamespaceHandler(ctx)
 		return
 	}
+}
+
+func getNamespaceHandler(ctx *gin.Context) {
+	param := ctx.Param("wildcard")
+	prefix := path.Clean(param)
+	exists, err := namespaceExistsByPrefix(prefix)
+	if err != nil {
+		log.Error("Error checking if prefix ", prefix, " exists: ", err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "server encountered an error when checking if the namespace exists"})
+		return
+	}
+	if !exists {
+		ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("namespace prefix '%s', was not found", prefix)})
+		return
+	}
+	ns, err := getNamespaceByPrefix(prefix)
+	if err != nil {
+		log.Errorf("Failed to load namespace for prefix %s: %v", prefix, err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "server encountered an error trying to get the namespace registration for the prefix " + prefix})
+		return
+	}
+	ctx.JSON(http.StatusOK, ns)
 }
 
 // Check if a namespace prefix exists and its public key matches the registry record
@@ -809,37 +929,51 @@ func checkNamespaceExistsHandler(ctx *gin.Context) {
 	req := server_structs.CheckNamespaceExistsReq{}
 	if err := ctx.ShouldBind(&req); err != nil {
 		log.Debug("Failed to parse request body for namespace exits check: ", err)
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse request body"})
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to parse request body"})
 		return
 	}
 	if req.Prefix == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "prefix is required"})
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "prefix is required"})
 		return
 	}
 	if req.PubKey == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "pubkey is required"})
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "pubkey is required"})
 		return
 	}
 	jwksReq, err := jwk.ParseString(req.PubKey)
 	if err != nil {
 		log.Debug("pubkey is not a valid JWK string:", req.PubKey, err)
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("pubkey is not a valid JWK string: %s", req.PubKey)})
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("pubkey is not a valid JWK string: %s", req.PubKey)})
 		return
 	}
 	if jwksReq.Len() != 1 {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("pubkey is a jwks with multiple or zero key: %s", req.PubKey)})
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("pubkey is a jwks with multiple or zero key: %s", req.PubKey)})
 		return
 	}
 	jwkReq, exists := jwksReq.Key(0)
 	if !exists {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("the first key from the pubkey does not exist: %s", req.PubKey)})
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("the first key from the pubkey does not exist: %s", req.PubKey)})
 		return
 	}
 
 	found, err := namespaceExistsByPrefix(req.Prefix)
 	if err != nil {
 		log.Debugln("Failed to check if namespace exists by prefix", err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check if the namespace exists"})
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to check if the namespace exists"})
 		return
 	}
 	if !found {
@@ -853,7 +987,9 @@ func checkNamespaceExistsHandler(ctx *gin.Context) {
 	jwksDb, _, err := getNamespaceJwksByPrefix(req.Prefix)
 	if err != nil {
 		log.Errorf("Error in getNamespaceJwksByPrefix with prefix %s. %v", req.Prefix, err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    err.Error()})
 		return
 	}
 
@@ -878,39 +1014,53 @@ func checkNamespaceStatusHandler(ctx *gin.Context) {
 	req := server_structs.CheckNamespaceStatusReq{}
 	if err := ctx.ShouldBind(&req); err != nil {
 		log.Debug("Failed to parse request body for namespace status check: ", err)
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse request body"})
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to parse request body"})
 		return
 	}
 	if req.Prefix == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "prefix is required"})
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "prefix is required"})
 		return
 	}
 	exists, err := namespaceExistsByPrefix(req.Prefix)
 	if err != nil {
 		log.Errorf("Error in namespaceExistsByPrefix with prefix %s. %v", req.Prefix, err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error checking if namespace %s already exists", req.Prefix)})
+		ctx.JSON(http.StatusInternalServerError,
+			server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Error checking if namespace %s already exists", req.Prefix),
+			})
 		return
 	}
 	// Return 400 if the namespace doesn't exist to spare 404 for the legacy OSDF registry endpoint, which doesn't have this route
 	// and we relies on 404 to check for backward compatibility
 	if !exists {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("The namespace %s does not exist in the registry", req.Prefix)})
+		ctx.JSON(http.StatusBadRequest,
+			server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("The namespace %s does not exist in the registry", req.Prefix),
+			})
 		return
 	}
 
 	ns, err := getNamespaceByPrefix(req.Prefix)
 	if err != nil || ns == nil {
 		log.Errorf("Error in getNamespaceByPrefix with prefix %s. %v", req.Prefix, err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error getting namespace %s: %s", req.Prefix, err.Error())})
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Error getting namespace %s: %s", req.Prefix, err.Error())})
 		return
 	}
-	emptyMetadata := AdminMetadata{}
+	emptyMetadata := server_structs.AdminMetadata{}
 	// If Registry.RequireCacheApproval or Registry.RequireOriginApproval is false
 	// we return Approved == true
 	if ns.AdminMetadata != emptyMetadata {
 		// Caches
 		if strings.HasPrefix(req.Prefix, "/caches") && param.Registry_RequireCacheApproval.GetBool() {
-			res := server_structs.CheckNamespaceStatusRes{Approved: ns.AdminMetadata.Status == Approved}
+			res := server_structs.CheckNamespaceStatusRes{Approved: ns.AdminMetadata.Status == server_structs.RegApproved}
 			ctx.JSON(http.StatusOK, res)
 			return
 		} else if !param.Registry_RequireCacheApproval.GetBool() {
@@ -920,7 +1070,7 @@ func checkNamespaceStatusHandler(ctx *gin.Context) {
 		} else {
 			// Origins
 			if param.Registry_RequireOriginApproval.GetBool() {
-				res := server_structs.CheckNamespaceStatusRes{Approved: ns.AdminMetadata.Status == Approved}
+				res := server_structs.CheckNamespaceStatusRes{Approved: ns.AdminMetadata.Status == server_structs.RegApproved}
 				ctx.JSON(http.StatusOK, res)
 				return
 			} else {

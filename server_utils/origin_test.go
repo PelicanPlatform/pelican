@@ -406,7 +406,7 @@ func TestGetExports(t *testing.T) {
 	})
 }
 
-func TestCheckSentinelLocation(t *testing.T) {
+func TestCheckOriginSentinelLocation(t *testing.T) {
 	tmpDir := t.TempDir()
 	tempStn := filepath.Join(tmpDir, "mock_sentinel")
 	file, err := os.Create(tempStn)
@@ -437,7 +437,7 @@ func TestCheckSentinelLocation(t *testing.T) {
 		exports = append(exports, mockExportNoStn)
 		exports = append(exports, mockExportNoStn)
 
-		ok, err := CheckSentinelLocation(exports)
+		ok, err := CheckOriginSentinelLocations(exports)
 		assert.NoError(t, err)
 		assert.True(t, ok)
 	})
@@ -447,7 +447,7 @@ func TestCheckSentinelLocation(t *testing.T) {
 		exports = append(exports, mockExportNoStn)
 		exports = append(exports, mockExportValidStn)
 
-		ok, err := CheckSentinelLocation(exports)
+		ok, err := CheckOriginSentinelLocations(exports)
 		assert.NoError(t, err)
 		assert.True(t, ok)
 	})
@@ -458,7 +458,7 @@ func TestCheckSentinelLocation(t *testing.T) {
 		exports = append(exports, mockExportValidStn)
 		exports = append(exports, mockExportInvalidStn)
 
-		ok, err := CheckSentinelLocation(exports)
+		ok, err := CheckOriginSentinelLocations(exports)
 		assert.Error(t, err)
 		assert.False(t, ok)
 	})

@@ -19,6 +19,7 @@
 package client
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -62,7 +63,10 @@ func TestDirectorGeneration(t *testing.T) {
 
 	// Discovery works to get URL
 	viper.Reset()
+	viper.Set("ConfigDir", t.TempDir())
+	config.InitConfig()
 	viper.Set("TLSSkipVerify", true)
+	require.NoError(t, config.InitClient())
 	err = config.InitClient()
 	require.NoError(t, err)
 	dUrl, err := getDirectorFromUrl(&objectUrl)
@@ -71,7 +75,10 @@ func TestDirectorGeneration(t *testing.T) {
 
 	// Discovery URL overrides the federation config.
 	viper.Reset()
+	viper.Set("ConfigDir", t.TempDir())
+	config.InitConfig()
 	viper.Set("TLSSkipVerify", true)
+	require.NoError(t, config.InitClient())
 	viper.Set("Federation.DirectorURL", "https://location2.example.com")
 	dUrl, err = getDirectorFromUrl(&objectUrl)
 	require.NoError(t, err)
@@ -79,6 +86,9 @@ func TestDirectorGeneration(t *testing.T) {
 
 	// Fallback to configuration if no discovery present
 	viper.Reset()
+	viper.Set("ConfigDir", t.TempDir())
+	config.InitConfig()
+	require.NoError(t, config.InitClient())
 	viper.Set("Federation.DirectorURL", "https://location2.example.com")
 	objectUrl.Host = ""
 	dUrl, err = getDirectorFromUrl(&objectUrl)
@@ -87,20 +97,29 @@ func TestDirectorGeneration(t *testing.T) {
 
 	// Error if server has an error
 	viper.Reset()
-	returnError = true
+	viper.Set("ConfigDir", t.TempDir())
+	config.InitConfig()
 	viper.Set("TLSSkipVerify", true)
+	require.NoError(t, config.InitClient())
+	returnError = true
 	objectUrl.Host = serverURL.Host
 	_, err = getDirectorFromUrl(&objectUrl)
 	require.Error(t, err)
 
 	// Error if neither config nor hostname provided.
 	viper.Reset()
+	viper.Set("ConfigDir", t.TempDir())
+	config.InitConfig()
+	require.NoError(t, config.InitClient())
 	objectUrl.Host = ""
 	_, err = getDirectorFromUrl(&objectUrl)
 	require.Error(t, err)
 
 	// Error on unknown scheme
 	viper.Reset()
+	viper.Set("ConfigDir", t.TempDir())
+	config.InitConfig()
+	require.NoError(t, config.InitClient())
 	objectUrl.Scheme = "buzzard"
 	_, err = getDirectorFromUrl(&objectUrl)
 	require.Error(t, err)
@@ -170,7 +189,7 @@ func TestSharingUrl(t *testing.T) {
 	testUrl, err := url.Parse("/test/foo/bar")
 	require.NoError(t, err)
 	os.Setenv(config.GetPreferredPrefix().String()+"_SKIP_TERMINAL_CHECK", "true")
-	token, err := CreateSharingUrl(testUrl, true)
+	token, err := CreateSharingUrl(context.Background(), testUrl, true)
 	assert.NoError(t, err)
 	assert.NotEmpty(t, token)
 	fmt.Println(token)

@@ -51,6 +51,10 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 		return nil, err
 	}
 
+	if err := cache.CheckCacheSentinelLocation(); err != nil {
+		return nil, err
+	}
+
 	cache.RegisterCacheAPI(engine, ctx, egrp)
 
 	cacheServer := &cache.CacheServer{}

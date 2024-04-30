@@ -110,8 +110,12 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 	innerTempFile.Close()
 
 	t.Run("testPelicanRecursiveGetAndPutPelicanURL", func(t *testing.T) {
-		_, err := config.SetPreferredPrefix(config.PelicanPrefix)
+		oldPref, err := config.SetPreferredPrefix(config.PelicanPrefix)
 		assert.NoError(t, err)
+		defer func() {
+			_, err := config.SetPreferredPrefix(oldPref)
+			require.NoError(t, err)
+		}()
 
 		for _, export := range fed.Exports {
 			// Set path for object to upload/download
@@ -196,7 +200,11 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 	})
 
 	t.Run("testOsdfRecursiveGetAndPutOsdfURL", func(t *testing.T) {
-		_, err := config.SetPreferredPrefix(config.OsdfPrefix)
+		oldPref, err := config.SetPreferredPrefix(config.OsdfPrefix)
+		defer func() {
+			_, err := config.SetPreferredPrefix(oldPref)
+			require.NoError(t, err)
+		}()
 		assert.NoError(t, err)
 		for _, export := range fed.Exports {
 			// Set path for object to upload/download
@@ -289,8 +297,12 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 	})
 
 	t.Run("testOsdfRecursiveGetAndPutPelicanURL", func(t *testing.T) {
-		_, err := config.SetPreferredPrefix(config.OsdfPrefix)
+		oldPref, err := config.SetPreferredPrefix(config.OsdfPrefix)
 		assert.NoError(t, err)
+		defer func() {
+			_, err := config.SetPreferredPrefix(oldPref)
+			require.NoError(t, err)
+		}()
 
 		for _, export := range fed.Exports {
 			// Set path for object to upload/download

@@ -49,14 +49,10 @@ type (
 		AllScopes bool
 	}
 	AuthChecker interface {
-		federationIssuerCheck(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScopes bool) error
-		localIssuerCheck(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScopes bool) error
+		checkFederationIssuer(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScopes bool) error
+		checkLocalIssuer(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScopes bool) error
 	}
-	AuthCheckImpl     struct{}
-	DiscoveryResponse struct { // This is a duplicate from director/authentication to ensure we don't have cyclic import
-		Issuer  string `json:"issuer"`
-		JwksUri string `json:"jwks_uri"`
-	}
+	AuthCheckImpl struct{}
 )
 
 const (
@@ -80,19 +76,39 @@ func init() {
 }
 
 // Checks that the given token was signed by the federation jwk and also checks that the token has the expected scope
-func (a AuthCheckImpl) federationIssuerCheck(c *gin.Context, strToken string, expectedScopes []token_scopes.TokenScope, allScopes bool) error {
-	fedURL := param.Federation_DiscoveryUrl.GetString()
-	token, err := jwt.Parse([]byte(strToken), jwt.WithVerify(false))
+func (a AuthCheckImpl) checkFederationIssuer(c *gin.Context, strToken string, expectedScopes []token_scopes.TokenScope, allScopes bool) error {
+	dirFallback := false
 
+	fedInfo, err := config.GetFederation(c)
+	if err != nil {
+		return err
+	}
+
+	fedURL := param.Federation_DiscoveryUrl.GetString()
+	if fedURL == "" {
+		dirURL := fedInfo.DirectorEndpoint
+		if dirURL == "" {
+			return errors.New("checkFederationIssuer: Federation.DiscoveryUrl is empty. Failed to fall back to empty Federation.DirectorUrl")
+		}
+		dirFallback = true
+		log.Debugf("checkFederationIssuer: Federation.DiscoveryUrl is empty. Fall back to Federation.DirectorUrl at %s", dirURL)
+		fedURL = dirURL
+	}
+
+	token, err := jwt.Parse([]byte(strToken), jwt.WithVerify(false))
 	if err != nil {
 		return err
 	}
 
 	if fedURL != token.Issuer() {
-		return errors.New(fmt.Sprintf("Token issuer %s does not match the issuer from the federation. Expecting the issuer to be %s", token.Issuer(), fedURL))
+		if dirFallback {
+			return errors.New(fmt.Sprintf("Token issuer %s does not match the issuer from the federation. Expecting the issuer to be %s (Federation issuer falls back to Federation.DirectorUrl due to the empty Federation.DiscoveryUrl)", token.Issuer(), fedURL))
+		} else {
+			return errors.New(fmt.Sprintf("Token issuer %s does not match the issuer from the federation. Expecting the issuer to be %s", token.Issuer(), fedURL))
+		}
 	}
 
-	fedURIFile := param.Federation_JwkUrl.GetString()
+	fedURIFile := fedInfo.JwksUri
 	ctx := context.Background()
 	if federationJWK == nil {
 		client := &http.Client{Transport: config.GetTransport()}
@@ -123,7 +139,7 @@ func (a AuthCheckImpl) federationIssuerCheck(c *gin.Context, strToken string, ex
 }
 
 // Checks that the given token was signed by the local issuer on the server
-func (a AuthCheckImpl) localIssuerCheck(c *gin.Context, strToken string, expectedScopes []token_scopes.TokenScope, allScopes bool) error {
+func (a AuthCheckImpl) checkLocalIssuer(c *gin.Context, strToken string, expectedScopes []token_scopes.TokenScope, allScopes bool) error {
 	token, err := jwt.Parse([]byte(strToken), jwt.WithVerify(false))
 	if err != nil {
 		return errors.Wrap(err, "Invalid JWT")
@@ -216,13 +232,13 @@ func Verify(ctx *gin.Context, authOption AuthOption) (status int, verified bool,
 	for _, iss := range authOption.Issuers {
 		switch iss {
 		case FederationIssuer:
-			if err := authChecker.federationIssuerCheck(ctx, token, authOption.Scopes, authOption.AllScopes); err != nil {
+			if err := authChecker.checkFederationIssuer(ctx, token, authOption.Scopes, authOption.AllScopes); err != nil {
 				errMsg += fmt.Sprintln("Cannot verify token with federation issuer: ", err)
 			} else {
 				return http.StatusOK, true, nil
 			}
 		case LocalIssuer:
-			if err := authChecker.localIssuerCheck(ctx, token, authOption.Scopes, authOption.AllScopes); err != nil {
+			if err := authChecker.checkLocalIssuer(ctx, token, authOption.Scopes, authOption.AllScopes); err != nil {
 				errMsg += fmt.Sprintln("Cannot verify token with server issuer: ", err)
 			} else {
 				return http.StatusOK, true, nil
@@ -261,7 +277,11 @@ func GetNSIssuerURL(prefix string) (string, error) {
 	if prefix == "" || !strings.HasPrefix(prefix, "/") {
 		return "", errors.New(fmt.Sprintf("the prefix \"%s\" is invalid", prefix))
 	}
-	registryUrlStr := param.Federation_RegistryUrl.GetString()
+	fedInfo, err := config.GetFederation(context.Background())
+	if err != nil {
+		return "", err
+	}
+	registryUrlStr := fedInfo.NamespaceRegistrationEndpoint
 	if registryUrlStr == "" {
 		return "", errors.New("federation registry URL is not set and was not discovered")
 	}

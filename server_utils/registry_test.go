@@ -21,13 +21,19 @@ package server_utils
 import (
 	"testing"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestGetNSIssuerURL(t *testing.T) {
 	viper.Reset()
+	viper.Set("ConfigDir", t.TempDir())
+	config.InitConfig()
+	require.NoError(t, config.InitClient())
+
 	viper.Set("Federation.RegistryUrl", "https://registry.com:8446")
 	url, err := GetNSIssuerURL("/test-prefix")
 	assert.Equal(t, nil, err)
@@ -37,6 +43,10 @@ func TestGetNSIssuerURL(t *testing.T) {
 
 func TestGetJWKSURLFromIssuerURL(t *testing.T) {
 	viper.Reset()
+	viper.Set("ConfigDir", t.TempDir())
+	config.InitConfig()
+	require.NoError(t, config.InitClient())
+
 	registry := test_utils.RegistryMockup(t, "/test-prefix")
 	defer registry.Close()
 	viper.Set("Federation.RegistryUrl", registry.URL)

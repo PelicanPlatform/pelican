@@ -54,12 +54,12 @@ func handleCLI(args []string) error {
 	} else {
 		// * We assume that os.Args should have minimum length of 1, so skipped empty check
 		// * Version flag is captured manually to ensure it's available to all the commands and subcommands
-		// 		This is becuase there's no gracefuly way to do it through Cobra
+		// 		This is because there's no gracefully way to do it through Cobra
 		// * Note that append "--version" to CLI as the last argument will give the
 		// version info regardless of the commands and whether they are defined
 		// * Remove the -v shorthand since in "origin serve" flagset it's already used for "volume" flag
 		if args[len(args)-1] == "--version" {
-			config.PrintPelicanVersion()
+			config.PrintPelicanVersion(os.Stdout)
 			return nil
 		}
 		err := Execute()

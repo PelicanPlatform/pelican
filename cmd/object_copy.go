@@ -104,7 +104,7 @@ func copyMain(cmd *cobra.Command, args []string) {
 	}
 
 	if val, err := cmd.Flags().GetBool("version"); err == nil && val {
-		config.PrintPelicanVersion()
+		config.PrintPelicanVersion(os.Stdout)
 		os.Exit(0)
 	}
 
@@ -120,7 +120,7 @@ func copyMain(cmd *cobra.Command, args []string) {
 	}
 
 	if val, err := cmd.Flags().GetBool("namespaces"); err == nil && val {
-		namespaces, err := namespaces.GetNamespaces()
+		namespaces, err := namespaces.GetNamespaces(ctx)
 		if err != nil {
 			fmt.Println("Failed to get namespaces:", err)
 			os.Exit(1)

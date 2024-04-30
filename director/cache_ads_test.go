@@ -89,11 +89,25 @@ func TestGetAdsForPath(t *testing.T) {
 		},
 	}
 
+	nsAdTopo1 := server_structs.NamespaceAdV2{
+		PublicRead:   true,
+		Caps:         server_structs.Capabilities{PublicReads: true},
+		Path:         "/chtc",
+		FromTopology: true,
+		Issuer: []server_structs.TokenIssuer{{
+			IssuerUrl: url.URL{
+				Scheme: "https",
+				Host:   "wisc.edu",
+			},
+		},
+		},
+	}
+
 	cacheAd1 := server_structs.ServerAd{
 		Name: "cache1",
 		URL: url.URL{
 			Scheme: "https",
-			Host:   "wisc.edu",
+			Host:   "cache1.wisc.edu",
 		},
 		Type: server_structs.CacheType,
 	}
@@ -102,7 +116,7 @@ func TestGetAdsForPath(t *testing.T) {
 		Name: "cache2",
 		URL: url.URL{
 			Scheme: "https",
-			Host:   "wisc.edu",
+			Host:   "cache2.wisc.edu",
 		},
 		Type: server_structs.CacheType,
 	}
@@ -111,7 +125,7 @@ func TestGetAdsForPath(t *testing.T) {
 		Name: "origin1",
 		URL: url.URL{
 			Scheme: "https",
-			Host:   "wisc.edu",
+			Host:   "origin1.wisc.edu",
 		},
 		Type: server_structs.OriginType,
 	}
@@ -120,63 +134,82 @@ func TestGetAdsForPath(t *testing.T) {
 		Name: "origin2",
 		URL: url.URL{
 			Scheme: "https",
-			Host:   "wisc.edu",
+			Host:   "origin2.wisc.edu",
 		},
 		Type: server_structs.OriginType,
+	}
+
+	originAdTopo1 := server_structs.ServerAd{
+		Name: "topology origin 1",
+		URL: url.URL{
+			Scheme: "https",
+			Host:   "topology.wisc.edu",
+		},
+		Type:         server_structs.OriginType,
+		FromTopology: true,
 	}
 
 	o1Slice := []server_structs.NamespaceAdV2{nsAd1}
 	o2Slice := []server_structs.NamespaceAdV2{nsAd2, nsAd3}
 	c1Slice := []server_structs.NamespaceAdV2{nsAd1, nsAd2}
+	topoSlice := []server_structs.NamespaceAdV2{nsAdTopo1}
 	recordAd(originAd2, &o2Slice)
 	recordAd(originAd1, &o1Slice)
+	// Add a server from Topology that serves /chtc namespace
+	recordAd(originAdTopo1, &topoSlice)
 	recordAd(cacheAd1, &c1Slice)
 	recordAd(cacheAd2, &o1Slice)
 
+	// If /chtc is served both from topology and Pelican, the Topology server/namespace should be ignored
 	nsAd, oAds, cAds := getAdsForPath("/chtc")
-	assert.Equal(t, nsAd.Path, "/chtc")
-	assert.Equal(t, len(oAds), 1)
-	assert.Equal(t, len(cAds), 2)
+	assert.Equal(t, "/chtc", nsAd.Path)
+	// Make sure it's not from Topology
+	assert.False(t, nsAd.FromTopology)
+	assert.False(t, nsAd.PublicRead) // Topology one has public read turned on while Pelican one doesn't
+
+	assert.Equal(t, 1, len(oAds))
+	assert.Equal(t, 2, len(cAds))
 	assert.True(t, hasServerAdWithName(oAds, "origin1"))
 	assert.True(t, hasServerAdWithName(cAds, "cache1"))
 	assert.True(t, hasServerAdWithName(cAds, "cache2"))
+	assert.False(t, oAds[0].FromTopology)
 
 	nsAd, oAds, cAds = getAdsForPath("/chtc/")
-	assert.Equal(t, nsAd.Path, "/chtc")
-	assert.Equal(t, len(oAds), 1)
-	assert.Equal(t, len(cAds), 2)
+	assert.Equal(t, "/chtc", nsAd.Path)
+	assert.Equal(t, 1, len(oAds))
+	assert.Equal(t, 2, len(cAds))
 	assert.True(t, hasServerAdWithName(oAds, "origin1"))
 	assert.True(t, hasServerAdWithName(cAds, "cache1"))
 	assert.True(t, hasServerAdWithName(cAds, "cache2"))
 
 	nsAd, oAds, cAds = getAdsForPath("/chtc/PUBLI")
-	assert.Equal(t, nsAd.Path, "/chtc")
-	assert.Equal(t, len(oAds), 1)
-	assert.Equal(t, len(cAds), 2)
+	assert.Equal(t, "/chtc", nsAd.Path)
+	assert.Equal(t, 1, len(oAds))
+	assert.Equal(t, 2, len(cAds))
 	assert.True(t, hasServerAdWithName(oAds, "origin1"))
 	assert.True(t, hasServerAdWithName(cAds, "cache1"))
 	assert.True(t, hasServerAdWithName(cAds, "cache2"))
 
 	nsAd, oAds, cAds = getAdsForPath("/chtc/PUBLIC")
-	assert.Equal(t, nsAd.Path, "/chtc/PUBLIC")
-	assert.Equal(t, len(oAds), 1)
-	assert.Equal(t, len(cAds), 1)
+	assert.Equal(t, "/chtc/PUBLIC", nsAd.Path)
+	assert.Equal(t, 1, len(oAds))
+	assert.Equal(t, 1, len(cAds))
 	assert.True(t, hasServerAdWithName(oAds, "origin2"))
 	assert.True(t, hasServerAdWithName(cAds, "cache1"))
 
 	nsAd, oAds, cAds = getAdsForPath("/chtc/PUBLIC2")
 	// since the stored path is actually /chtc/PUBLIC2/, the extra / is returned
-	assert.Equal(t, nsAd.Path, "/chtc/PUBLIC2/")
-	assert.Equal(t, len(oAds), 1)
-	assert.Equal(t, len(cAds), 0)
+	assert.Equal(t, "/chtc/PUBLIC2/", nsAd.Path)
+	assert.Equal(t, 1, len(oAds))
+	assert.Equal(t, 0, len(cAds))
 	assert.True(t, hasServerAdWithName(oAds, "origin2"))
 
 	// Finally, let's throw in a test for a path we know shouldn't exist
 	// in the ttlcache
 	nsAd, oAds, cAds = getAdsForPath("/does/not/exist")
-	assert.Equal(t, nsAd.Path, "")
-	assert.Equal(t, len(oAds), 0)
-	assert.Equal(t, len(cAds), 0)
+	assert.Equal(t, "", nsAd.Path)
+	assert.Equal(t, 0, len(oAds))
+	assert.Equal(t, 0, len(cAds))
 
 	// Filtered server should not be included
 	filteredServersMutex.Lock()
@@ -189,10 +222,12 @@ func TestGetAdsForPath(t *testing.T) {
 		filteredServersMutex.Unlock()
 	}()
 
+	// /chtc has two servers, one is from topology the other is from Pelican
 	nsAd, oAds, cAds = getAdsForPath("/chtc")
-	assert.Equal(t, nsAd.Path, "/chtc")
-	assert.Equal(t, len(oAds), 0)
-	assert.Equal(t, len(cAds), 1)
+	assert.Equal(t, "/chtc", nsAd.Path)
+	assert.Equal(t, 1, len(cAds))
+	require.Equal(t, 1, len(oAds))
+	assert.True(t, oAds[0].FromTopology)
 	assert.False(t, hasServerAdWithName(oAds, "origin1"))
 	assert.False(t, hasServerAdWithName(cAds, "cache1"))
 	assert.True(t, hasServerAdWithName(cAds, "cache2"))
@@ -242,10 +277,11 @@ func TestConfigCacheEviction(t *testing.T) {
 		ctx, cancelFunc := context.WithDeadline(errgrpCtx, time.Now().Add(time.Second*5))
 
 		func() {
-			serverAdMutex.Lock()
-			defer serverAdMutex.Unlock()
 			serverAds.DeleteAll()
-			serverAds.Set(mockPelicanOriginServerAd, []server_structs.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
+			serverAds.Set(mockPelicanOriginServerAd.URL.String(), &server_structs.Advertisement{
+				ServerAd:     mockPelicanOriginServerAd,
+				NamespaceAds: []server_structs.NamespaceAdV2{mockNamespaceAd},
+			}, ttlcache.DefaultTTL)
 			healthTestUtilsMutex.Lock()
 			defer healthTestUtilsMutex.Unlock()
 			// Clear the map for the new test
@@ -256,7 +292,7 @@ func TestConfigCacheEviction(t *testing.T) {
 				ErrGrpContext: errgrpCtx,
 			}
 
-			require.True(t, serverAds.Has(mockPelicanOriginServerAd), "serverAds failed to register the originAd")
+			require.True(t, serverAds.Has(mockPelicanOriginServerAd.URL.String()), "serverAds failed to register the originAd")
 		}()
 
 		cancelChan := make(chan int)
@@ -268,11 +304,9 @@ func TestConfigCacheEviction(t *testing.T) {
 		}()
 
 		func() {
-			serverAdMutex.Lock()
-			defer serverAdMutex.Unlock()
-			serverAds.Delete(mockPelicanOriginServerAd) // This should call onEviction handler and close the context
+			serverAds.Delete(mockPelicanOriginServerAd.URL.String()) // This should call onEviction handler and close the context
 
-			require.False(t, serverAds.Has(mockPelicanOriginServerAd), "serverAds didn't delete originAd")
+			require.False(t, serverAds.Has(mockPelicanOriginServerAd.URL.String()), "serverAds didn't delete originAd")
 		}()
 
 		// OnEviction is handled on a different goroutine than the cache management
@@ -288,7 +322,7 @@ func TestConfigCacheEviction(t *testing.T) {
 }
 
 func TestServerAdsCacheEviction(t *testing.T) {
-	mockServerAd := server_structs.ServerAd{Name: "foo", Type: server_structs.OriginType, URL: url.URL{}}
+	mockServerAd := server_structs.ServerAd{Name: "foo", Type: server_structs.OriginType, URL: url.URL{Host: "mock.server.org"}}
 
 	t.Run("evict-after-expire-time", func(t *testing.T) {
 		// Start cache eviction
@@ -305,12 +339,13 @@ func TestServerAdsCacheEviction(t *testing.T) {
 		cancelChan := make(chan int)
 
 		func() {
-			serverAdMutex.Lock()
-			defer serverAdMutex.Unlock()
 			serverAds.DeleteAll()
 
-			serverAds.Set(mockServerAd, []server_structs.NamespaceAdV2{}, time.Second*2)
-			require.True(t, serverAds.Has(mockServerAd), "Failed to register server Ad")
+			serverAds.Set(mockServerAd.URL.String(), &server_structs.Advertisement{
+				ServerAd:     mockServerAd,
+				NamespaceAds: []server_structs.NamespaceAdV2{},
+			}, time.Second*2)
+			require.True(t, serverAds.Has(mockServerAd.URL.String()), "Failed to register server Ad")
 		}()
 
 		// Keep checking if the cache item is present until absent or cancelled
@@ -320,7 +355,7 @@ func TestServerAdsCacheEviction(t *testing.T) {
 				case <-cancelChan:
 					return
 				default:
-					if !serverAds.Has(mockServerAd) {
+					if !serverAds.Has(mockServerAd.URL.String()) {
 						deletedChan <- 1
 						return
 					}

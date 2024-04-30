@@ -57,24 +57,62 @@ func TestReadMultiTransfer(t *testing.T) {
 	t.Parallel()
 
 	// Test with multiple transfers
-	stdin := "[ LocalFileName = \"/path/to/local/copy/of/foo\"; Url = \"url://server/some/directory//foo\" ]\n[ LocalFileName = \"/path/to/local/copy/of/bar\"; Url = \"url://server/some/directory//bar\" ]\n[ LocalFileName = \"/path/to/local/copy/of/qux\"; Url = \"url://server/some/directory//qux\" ]"
-	transfers, err := readMultiTransfers(*bufio.NewReader(strings.NewReader(stdin)))
-	assert.NoError(t, err)
-	assert.Equal(t, 3, len(transfers))
-	assert.Equal(t, "/path/to/local/copy/of/foo", transfers[0].localFile)
-	assert.Equal(t, "url://server/some/directory//foo", transfers[0].url.String())
-	assert.Equal(t, "/path/to/local/copy/of/bar", transfers[1].localFile)
-	assert.Equal(t, "url://server/some/directory//bar", transfers[1].url.String())
-	assert.Equal(t, "/path/to/local/copy/of/qux", transfers[2].localFile)
-	assert.Equal(t, "url://server/some/directory//qux", transfers[2].url.String())
+	t.Run("TestMultiTransfers", func(t *testing.T) {
+		stdin := "[ LocalFileName = \"/path/to/local/copy/of/foo\"; Url = \"url://server/some/directory//foo\" ]\n[ LocalFileName = \"/path/to/local/copy/of/bar\"; Url = \"url://server/some/directory//bar\" ]\n[ LocalFileName = \"/path/to/local/copy/of/qux\"; Url = \"url://server/some/directory//qux\" ]"
+		transfers, err := readMultiTransfers(*bufio.NewReader(strings.NewReader(stdin)))
+		assert.NoError(t, err)
+		assert.Equal(t, 3, len(transfers))
+		assert.Equal(t, "/path/to/local/copy/of/foo", transfers[0].localFile)
+		assert.Equal(t, "url://server/some/directory//foo", transfers[0].url.String())
+		assert.Equal(t, "/path/to/local/copy/of/bar", transfers[1].localFile)
+		assert.Equal(t, "url://server/some/directory//bar", transfers[1].url.String())
+		assert.Equal(t, "/path/to/local/copy/of/qux", transfers[2].localFile)
+		assert.Equal(t, "url://server/some/directory//qux", transfers[2].url.String())
+	})
 
 	// Test with single transfers
-	stdin = "[ LocalFileName = \"/path/to/local/copy/of/blah\"; Url = \"url://server/some/directory//blah\" ]"
-	transfers, err = readMultiTransfers(*bufio.NewReader(strings.NewReader(stdin)))
-	assert.NoError(t, err)
-	assert.Equal(t, 1, len(transfers))
-	assert.Equal(t, "url://server/some/directory//blah", transfers[0].url.String())
-	assert.Equal(t, "/path/to/local/copy/of/blah", transfers[0].localFile)
+	t.Run("TestSingleTransfer", func(t *testing.T) {
+		stdin := "[ LocalFileName = \"/path/to/local/copy/of/blah\"; Url = \"url://server/some/directory//blah\" ]"
+		transfers, err := readMultiTransfers(*bufio.NewReader(strings.NewReader(stdin)))
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(transfers))
+		assert.Equal(t, "url://server/some/directory//blah", transfers[0].url.String())
+		assert.Equal(t, "/path/to/local/copy/of/blah", transfers[0].localFile)
+	})
+
+	// Test that we fail if we do not have a Url or LocalFileName
+	t.Run("TestNoUrlOrLocalFileNameSet", func(t *testing.T) {
+		stdin := "[ SomeAttributeHereOfSomeImportance = \"This/is/some/junk/for/a/test\" ] "
+		_, err := readMultiTransfers(*bufio.NewReader(strings.NewReader(stdin)))
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "No transfers found")
+	})
+
+	// Test that we fail when we only have a Url
+	t.Run("TestNoLocalFileNameSet", func(t *testing.T) {
+		stdin := "[ Url = \"url://server/some/directory//blah\" ]"
+		_, err := readMultiTransfers(*bufio.NewReader(strings.NewReader(stdin)))
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "No transfers found")
+	})
+
+	// Test that we fail when we only have a LocalFileName
+	t.Run("TestNoUrlSet", func(t *testing.T) {
+		stdin := "[ LocalFileName = \"/path/to/local/copy/of/blah\" ]"
+		_, err := readMultiTransfers(*bufio.NewReader(strings.NewReader(stdin)))
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "No transfers found")
+	})
+
+	// Test that we do not fail if we have some attributes before the Url and LocalFileName
+	t.Run("TestSomeAttrBeforeUrlAndLocalFileName", func(t *testing.T) {
+		stdin := "[ SomeAttributeHereOfSomeImportance = \"This/is/some/junk/for/a/test\" ]\n[ LocalFileName = \"/path/to/local/copy/of/blah\"; Url = \"url://server/some/directory//blah\" ]"
+		transfers, err := readMultiTransfers(*bufio.NewReader(strings.NewReader(stdin)))
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(transfers))
+		assert.Equal(t, "url://server/some/directory//blah", transfers[0].url.String())
+		assert.Equal(t, "/path/to/local/copy/of/blah", transfers[0].localFile)
+	})
 }
 
 type FedTest struct {
@@ -203,6 +241,12 @@ func TestStashPluginMain(t *testing.T) {
 	// and leaves xrootd running. To work with this, we wrap the test in its own command and parse the output for successful run
 	if os.Getenv("RUN_STASHPLUGIN") == "1" {
 		viper.Set("Origin.EnablePublicReads", true)
+		// Since we have the prefix as STASH, we need to unset various osg-htc.org URLs to
+		// avoid real web lookups.
+		viper.Set("Federation.DiscoveryUrl", "")
+		viper.Set("Xrootd.SummaryMonitoringHost", "")
+		viper.Set("Xrootd.DetailedMonitoringHost", "")
+		viper.Set("Logging.Level", "debug")
 		fed := FedTest{T: t}
 		fed.Spinup()
 		defer fed.Teardown()
@@ -225,8 +269,6 @@ func TestStashPluginMain(t *testing.T) {
 		// Download a test file
 		args := []string{uploadURL, tempDir}
 		stashPluginMain(args)
-		os.Unsetenv("STASH_LOGGING_LEVEL")
-		os.Unsetenv("RUN_STASHPLUGIN")
 		return
 	}
 
@@ -237,9 +279,11 @@ func TestStashPluginMain(t *testing.T) {
 	// Create buffers for stderr (the output we want for test)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
 
 	err = cmd.Run()
-	assert.NoError(t, err, stderr.String())
+	assert.NoError(t, err, stderr.String()+"\n=====\n"+stdout.String())
 
 	// changing output for "\\" since in windows there are excess "\" printed in debug logs
 	output := strings.Replace(stderr.String(), "\\\\", "\\", -1)
@@ -335,6 +379,7 @@ func TestWriteOutfile(t *testing.T) {
 			resultAd.Set("TransferLocalMachineName", "abcdefghijk")
 			resultAd.Set("TransferFileBytes", 12)
 			resultAd.Set("TransferTotalBytes", 27538253)
+			resultAd.Set("TransferUrl", "foo.txt")
 			resultAds = append(resultAds, resultAd)
 		}
 		success, retryable := writeOutfile(nil, resultAds, tempFile)
@@ -347,6 +392,7 @@ func TestWriteOutfile(t *testing.T) {
 		assert.Contains(t, string(tempFileContent), "TransferFileBytes = 12;")
 		assert.Contains(t, string(tempFileContent), "TransferTotalBytes = 27538253;")
 		assert.Contains(t, string(tempFileContent), "TransferSuccess = true;")
+		assert.Contains(t, string(tempFileContent), "TransferUrl = \"foo.txt\";")
 	})
 
 	t.Run("TestOutfileFailureNoRetry", func(t *testing.T) {
@@ -366,6 +412,7 @@ func TestWriteOutfile(t *testing.T) {
 			resultAd.Set("TransferLocalMachineName", "abcdefghijk")
 			resultAd.Set("TransferFileBytes", 12)
 			resultAd.Set("TransferTotalBytes", 27538253)
+			resultAd.Set("TransferUrl", "foo.txt")
 			resultAds = append(resultAds, resultAd)
 		}
 		success, retryable := writeOutfile(nil, resultAds, tempFile)
@@ -378,6 +425,7 @@ func TestWriteOutfile(t *testing.T) {
 		assert.Contains(t, string(tempFileContent), "TransferFileBytes = 12;")
 		assert.Contains(t, string(tempFileContent), "TransferSuccess = false;")
 		assert.Contains(t, string(tempFileContent), "TransferRetryable = false;")
+		assert.Contains(t, string(tempFileContent), "TransferUrl = \"foo.txt\";")
 	})
 
 	t.Run("TestOutfileFailureWithRetry", func(t *testing.T) {
@@ -397,6 +445,7 @@ func TestWriteOutfile(t *testing.T) {
 			resultAd.Set("TransferLocalMachineName", "abcdefghijk")
 			resultAd.Set("TransferFileBytes", 12)
 			resultAd.Set("TransferTotalBytes", 27538253)
+			resultAd.Set("TransferUrl", "foo.txt")
 			resultAds = append(resultAds, resultAd)
 		}
 		success, retryable := writeOutfile(nil, resultAds, tempFile)
@@ -409,6 +458,7 @@ func TestWriteOutfile(t *testing.T) {
 		assert.Contains(t, string(tempFileContent), "TransferFileBytes = 12;")
 		assert.Contains(t, string(tempFileContent), "TransferSuccess = false;")
 		assert.Contains(t, string(tempFileContent), "TransferRetryable = true;")
+		assert.Contains(t, string(tempFileContent), "TransferUrl = \"foo.txt\";")
 	})
 
 }

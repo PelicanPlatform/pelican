@@ -49,6 +49,7 @@ var (
 
 func TestHttpOriginConfig(t *testing.T) {
 	viper.Reset()
+	viper.Set("ConfigDir", t.TempDir())
 	server_utils.ResetOriginExports()
 	defer viper.Reset()
 	defer server_utils.ResetOriginExports()
@@ -110,8 +111,9 @@ func TestHttpOriginConfig(t *testing.T) {
 	_, err = tempToken.WriteString(token)
 	assert.NoError(t, err, "Error writing to temp token file")
 
-	fedStr := config.GetFederation().DirectorEndpoint
-	fedUrl, err := url.Parse(fedStr)
+	fedInfo, err := config.GetFederation(fed.Ctx)
+	require.NoError(t, err)
+	fedUrl, err := url.Parse(fedInfo.DirectorEndpoint)
 	require.NoError(t, err)
 
 	// Download the test file

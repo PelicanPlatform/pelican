@@ -27,6 +27,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pkg/errors"
 
 	"github.com/pelicanplatform/pelican/config"
@@ -199,4 +200,35 @@ func HeaderParser(values string) (retMap map[string]string) {
 	}
 
 	return retMap
+}
+
+func GetJwks(ctx context.Context, location string) (jwk.Set, error) {
+	if location == "" {
+		return nil, errors.New("jwks location is empty")
+	}
+	client := http.Client{Transport: config.GetTransport()}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, location, nil)
+	if err != nil {
+		return nil, err
+	}
+	res, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	bodyByte, err := io.ReadAll(res.Body)
+	if err != nil {
+		return nil, err
+	}
+	if res.StatusCode != 200 {
+		return nil, fmt.Errorf("request failed with response code %d and response body: %s", res.StatusCode, string(bodyByte))
+	}
+	if len(bodyByte) == 0 {
+		return nil, fmt.Errorf("request failed with response returns 200 but with empty response body")
+	}
+	key, err := jwk.Parse(bodyByte)
+	if err != nil {
+		return nil, err
+	} else {
+		return key, nil
+	}
 }

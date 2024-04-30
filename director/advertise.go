@@ -130,11 +130,12 @@ func AdvertiseOSDF() error {
 			Writes:      write,
 		}
 		nsAd := server_structs.NamespaceAdV2{
-			Path:       ns.Path,
-			PublicRead: !ns.UseTokenOnRead,
-			Caps:       caps,
-			Generation: []server_structs.TokenGen{tGen},
-			Issuer:     tokenIssuers,
+			Path:         ns.Path,
+			PublicRead:   !ns.UseTokenOnRead,
+			Caps:         caps,
+			Generation:   []server_structs.TokenGen{tGen},
+			Issuer:       tokenIssuers,
+			FromTopology: true,
 		}
 
 		// We assume each namespace may have multiple origins, although most likely will not
@@ -143,11 +144,13 @@ func AdvertiseOSDF() error {
 		// same useless origin ad, resulting in a 404 for queries to those namespaces
 		for _, origin := range ns.Origins {
 			originAd := parseServerAd(origin, server_structs.OriginType)
+			originAd.FromTopology = true
 			originAdMap[originAd] = append(originAdMap[originAd], nsAd)
 		}
 
 		for _, cache := range ns.Caches {
 			cacheAd := parseServerAd(cache, server_structs.CacheType)
+			cacheAd.FromTopology = true
 			cacheAdMap[cacheAd] = append(cacheAdMap[cacheAd], nsAd)
 		}
 	}

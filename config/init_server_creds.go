@@ -39,9 +39,10 @@ import (
 
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
-	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/pelicanplatform/pelican/param"
 )
 
 var (
@@ -145,6 +146,10 @@ func GeneratePrivateKey(keyLocation string, curve elliptic.Curve, allowRSA bool)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return errors.Wrap(err, "Failed to load private key due to I/O error")
 	}
+
+	// If we're generating a new key, log a warning in case the user intended to pass an existing key (maybe they made a typo)
+	log.Warningf("IssuerKey is set to %v but the file does not exist. Will generate a new private key", param.IssuerKey.GetString())
+
 	keyDir := filepath.Dir(keyLocation)
 	if err := MkdirAll(keyDir, 0750, -1, gid); err != nil {
 		return err

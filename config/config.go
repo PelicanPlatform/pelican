@@ -152,6 +152,14 @@ var (
 	transport     *http.Transport
 	onceTransport sync.Once
 
+	// Global discovery info.  Using the "once" allows us to delay discovery
+	// until it's first needed, avoiding a web lookup for invoking configuration
+	// Note the 'once' object is a pointer so we can reset the client multiple
+	// times during unit tests
+	fedDiscoveryOnce *sync.Once
+	globalFedInfo    FederationDiscovery
+	globalFedErr     error
+
 	// Global struct validator
 	validate *validator.Validate
 
@@ -251,7 +259,7 @@ func (sType *ServerType) Clear() {
 
 // setEnabledServer sets the global variable config.EnabledServers to include newServers.
 // Since this function should only be called in config package, we mark it "private" to avoid
-// reset value in other pacakge
+// reset value in other package
 //
 // This will only be called once in a single process
 func setEnabledServer(newServers ServerType) {
@@ -443,7 +451,7 @@ func DiscoverUrlFederation(ctx context.Context, federationDiscoveryUrl string) (
 	log.Debugln("Performing federation service discovery for specified url against endpoint", federationDiscoveryUrl)
 	federationUrl, err := url.Parse(federationDiscoveryUrl)
 	if err != nil {
-		err = errors.Wrapf(err, "Invalid federation value %s:", federationDiscoveryUrl)
+		err = errors.Wrapf(err, "invalid federation value %s:", federationDiscoveryUrl)
 		return
 	}
 	federationUrl.Scheme = "https"
@@ -481,7 +489,7 @@ func DiscoverUrlFederation(ctx context.Context, federationDiscoveryUrl string) (
 			err = MetadataTimeoutErr.Wrap(err)
 			return
 		} else {
-			err = NewMetadataError(err, "Error occured when querying for metadata")
+			err = NewMetadataError(err, "Error occurred when querying for metadata")
 			return
 		}
 	}
@@ -518,50 +526,46 @@ func DiscoverUrlFederation(ctx context.Context, federationDiscoveryUrl string) (
 	return metadata, nil
 }
 
-func DiscoverFederation(ctx context.Context) error {
+// Global implementation of Discover Federation, outside any caching or
+// delayed discovery
+func discoverFederationImpl(ctx context.Context) (fedInfo FederationDiscovery, err error) {
 	federationStr := param.Federation_DiscoveryUrl.GetString()
 	externalUrlStr := param.Server_ExternalWebUrl.GetString()
 	defer func() {
 		// Set default guesses if these values are still unset.
-		if param.Federation_DirectorUrl.GetString() == "" && enabledServers.IsEnabled(DirectorType) {
-			viper.Set("Federation.DirectorUrl", externalUrlStr)
+		if fedInfo.DirectorEndpoint == "" && enabledServers.IsEnabled(DirectorType) {
+			fedInfo.DirectorEndpoint = externalUrlStr
 		}
-		if param.Federation_RegistryUrl.GetString() == "" && enabledServers.IsEnabled(RegistryType) {
-			viper.Set("Federation.RegistryUrl", externalUrlStr)
+		if fedInfo.NamespaceRegistrationEndpoint == "" && enabledServers.IsEnabled(RegistryType) {
+			fedInfo.NamespaceRegistrationEndpoint = externalUrlStr
 		}
-		if param.Federation_JwkUrl.GetString() == "" && enabledServers.IsEnabled(DirectorType) {
-			viper.Set("Federation.JwkUrl", externalUrlStr+"/.well-known/issuer.jwks")
+		if fedInfo.JwksUri == "" && enabledServers.IsEnabled(DirectorType) {
+			fedInfo.JwksUri = externalUrlStr + "/.well-known/issuer.jwks"
 		}
-		if param.Federation_BrokerUrl.GetString() == "" && enabledServers.IsEnabled(BrokerType) {
-			viper.Set("Federation.BrokerUrl", externalUrlStr)
+		if fedInfo.BrokerEndpoint == "" && enabledServers.IsEnabled(BrokerType) {
+			fedInfo.BrokerEndpoint = externalUrlStr
 		}
 	}()
-	if len(federationStr) == 0 {
-		log.Debugln("Federation URL is unset; skipping discovery")
-		return nil
-	}
-	if federationStr == externalUrlStr {
-		log.Debugln("Current web engine hosts the federation; skipping auto-discovery of services")
-		return nil
-	}
 
 	log.Debugln("Federation URL:", federationStr)
-	curDirectorURL := param.Federation_DirectorUrl.GetString()
-	curRegistryURL := param.Federation_RegistryUrl.GetString()
-	curFederationJwkURL := param.Federation_JwkUrl.GetString()
-	curBrokerURL := param.Federation_BrokerUrl.GetString()
-	if curDirectorURL != "" && curRegistryURL != "" && curFederationJwkURL != "" && curBrokerURL != "" {
-		return nil
+	fedInfo.DirectorEndpoint = viper.GetString("Federation.DirectorUrl")
+	fedInfo.NamespaceRegistrationEndpoint = viper.GetString("Federation.RegistryUrl")
+	fedInfo.JwksUri = viper.GetString("Federation.JwkUrl")
+	fedInfo.BrokerEndpoint = viper.GetString("Federation.BrokerUrl")
+	if fedInfo.DirectorEndpoint != "" && fedInfo.NamespaceRegistrationEndpoint != "" && fedInfo.JwksUri != "" && fedInfo.BrokerEndpoint != "" {
+		return
 	}
 
 	federationUrl, err := url.Parse(federationStr)
 	if err != nil {
-		return errors.Wrapf(err, "Invalid federation value %s:", federationStr)
+		err = errors.Wrapf(err, "invalid federation value %s:", federationStr)
+		return
 	}
 
 	if federationUrl.Path != "" && federationUrl.Host != "" {
 		// If the host is nothing, then the url is fine, but if we have a host and a path then there is a problem
-		return errors.New("Invalid federation discovery url is set. No path allowed for federation discovery url. Provided url: " + federationStr)
+		err = errors.New("Invalid federation discovery url is set. No path allowed for federation discovery url. Provided url: " + federationStr)
+		return
 	}
 
 	federationUrl.Scheme = "https"
@@ -570,40 +574,60 @@ func DiscoverFederation(ctx context.Context) error {
 		federationUrl.Path = ""
 	}
 
-	metadata, err := DiscoverUrlFederation(ctx, federationStr)
-	if err != nil {
-		return errors.Wrapf(err, "Invalid federation value %s:", federationStr)
+	var metadata FederationDiscovery
+	if federationStr == "" {
+		log.Debugln("Federation URL is unset; skipping discovery")
+	} else if federationStr == externalUrlStr {
+		log.Debugln("Current web engine hosts the federation; skipping auto-discovery of services")
+	} else {
+		metadata, err = DiscoverUrlFederation(ctx, federationStr)
+		if err != nil {
+			err = errors.Wrapf(err, "invalid federation value (%s)", federationStr)
+			return
+		}
 	}
 
 	// Set our globals
-	if curDirectorURL == "" {
+	if fedInfo.DirectorEndpoint == "" {
 		log.Debugln("Setting global director url to", metadata.DirectorEndpoint)
-		viper.Set("Federation.DirectorUrl", metadata.DirectorEndpoint)
+		fedInfo.DirectorEndpoint = metadata.DirectorEndpoint
 	}
-	if curRegistryURL == "" {
+	if fedInfo.NamespaceRegistrationEndpoint == "" {
 		log.Debugln("Setting global registry url to", metadata.NamespaceRegistrationEndpoint)
-		viper.Set("Federation.RegistryUrl", metadata.NamespaceRegistrationEndpoint)
+		fedInfo.NamespaceRegistrationEndpoint = metadata.NamespaceRegistrationEndpoint
 	}
-	if curFederationJwkURL == "" {
+	if fedInfo.JwksUri == "" {
 		log.Debugln("Setting global jwks url to", metadata.JwksUri)
-		viper.Set("Federation.JwkUrl", metadata.JwksUri)
+		fedInfo.JwksUri = metadata.JwksUri
 	}
-	if curBrokerURL == "" && metadata.BrokerEndpoint != "" {
+	if fedInfo.BrokerEndpoint == "" && metadata.BrokerEndpoint != "" {
 		log.Debugln("Setting global broker url to", metadata.BrokerEndpoint)
-		viper.Set("Federation.BrokerUrl", metadata.BrokerEndpoint)
+		fedInfo.BrokerEndpoint = metadata.BrokerEndpoint
 	}
 
-	return nil
+	return
 }
 
-// Return a struct representing the current (global) federation metadata
-func GetFederation() FederationDiscovery {
-	return FederationDiscovery{
-		DirectorEndpoint:              param.Federation_DirectorUrl.GetString(),
-		NamespaceRegistrationEndpoint: param.Federation_RegistryUrl.GetString(),
-		JwksUri:                       param.Federation_JwkUrl.GetString(),
-		BrokerEndpoint:                param.Federation_BrokerUrl.GetString(),
+// Reset the fedDiscoveryOnce to update federation metadata values for GetFederation().
+// Should only used for unit tests
+func ResetFederationForTest() {
+	fedDiscoveryOnce = &sync.Once{}
+}
+
+// Retrieve the federation service information from the configuration.
+//
+// The calculation of the federation info is delayed until needed.  As
+// long as this is invoked after `InitClient` / `InitServer`, it is thread-safe.
+// If invoked before things are configured, it must be done from a single-threaded
+// context.
+func GetFederation(ctx context.Context) (FederationDiscovery, error) {
+	if fedDiscoveryOnce == nil {
+		fedDiscoveryOnce = &sync.Once{}
 	}
+	fedDiscoveryOnce.Do(func() {
+		globalFedInfo, globalFedErr = discoverFederationImpl(ctx)
+	})
+	return globalFedInfo, globalFedErr
 }
 
 // Set the current global federation metadata
@@ -862,7 +886,9 @@ func InitConfig() {
 		viper.SetConfigName("pelican")
 	}
 
-	viper.SetEnvPrefix(string(prefix))
+	bindNonPelicanEnv() // Deprecate OSDF env prefix but be compatible for now
+
+	viper.SetEnvPrefix("pelican")
 	viper.AutomaticEnv()
 	// This line allows viper to use an env var like ORIGIN_VALUE to override the viper string "Origin.Value"
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
@@ -976,11 +1002,11 @@ func setXrootdRunLocations(currentServers ServerType, dir string) error {
 	return nil
 }
 
-func PrintPelicanVersion() {
-	fmt.Fprintln(os.Stderr, "Version:", GetVersion())
-	fmt.Fprintln(os.Stderr, "Build Date:", GetBuiltDate())
-	fmt.Fprintln(os.Stderr, "Build Commit:", GetBuiltCommit())
-	fmt.Fprintln(os.Stderr, "Built By:", GetBuiltBy())
+func PrintPelicanVersion(out *os.File) {
+	fmt.Fprintln(out, "Version:", GetVersion())
+	fmt.Fprintln(out, "Build Date:", GetBuiltDate())
+	fmt.Fprintln(out, "Build Commit:", GetBuiltCommit())
+	fmt.Fprintln(out, "Built By:", GetBuiltBy())
 }
 
 // Print Pelican configuration to stderr
@@ -1130,11 +1156,12 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 	if err != nil {
 		return err
 	}
-	viper.SetDefault("Server.Hostname", hostname)
-	viper.SetDefault("Xrootd.Sitename", hostname)
+	viper.SetDefault(param.Server_Hostname.GetName(), hostname)
 	// For the rest of the function, use the hostname provided by the admin if
 	// they have overridden the defaults.
-	hostname = viper.GetString("Server.Hostname")
+	hostname = param.Server_Hostname.GetString()
+	// We default to the value of Server.Hostname, which defaults to os.Hostname but can be overwritten
+	viper.SetDefault(param.Xrootd_Sitename.GetName(), hostname)
 
 	// XRootD port usage logic:
 	// - Origin.Port and Cache.Port take precedence for their respective types
@@ -1324,7 +1351,14 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 	// Sets up the server log filter mechanism
 	initFilterLogging()
 
-	return DiscoverFederation(ctx)
+	// Sets (or resets) the federation info.  Unlike in clients, we do this at startup
+	// instead of deferring it
+	fedDiscoveryOnce = &sync.Once{}
+	if _, err := GetFederation(ctx); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func InitClient() error {
@@ -1450,5 +1484,8 @@ func InitClient() error {
 		return err
 	}
 
-	return DiscoverFederation(context.Background())
+	// Sets (or resets) the deferred federation lookup
+	fedDiscoveryOnce = &sync.Once{}
+
+	return nil
 }

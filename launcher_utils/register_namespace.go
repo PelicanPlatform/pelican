@@ -30,15 +30,16 @@ import (
 
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/origin"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/registry"
 	"github.com/pelicanplatform/pelican/server_structs"
-	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
-	"golang.org/x/sync/errgroup"
 )
 
 type (
@@ -175,7 +176,7 @@ func keyIsRegistered(privkey jwk.Key, registryUrlStr string, prefix string) (key
 		}
 	}
 
-	var ns *registry.Namespace
+	var ns *server_structs.Namespace
 	err = json.Unmarshal(OSDFBody, &ns)
 	if err != nil {
 		log.Error(fmt.Sprintf("Failed unmarshal namespace from response: %v, body: %v, response code: %v, URL: %v", err, OSDFBody, resp.StatusCode, registryUrl))
@@ -198,7 +199,7 @@ func keyIsRegistered(privkey jwk.Key, registryUrlStr string, prefix string) (key
 	}
 }
 
-func registerNamespacePrep(prefix string) (key jwk.Key, registrationEndpointURL string, isRegistered bool, err error) {
+func registerNamespacePrep(ctx context.Context, prefix string) (key jwk.Key, registrationEndpointURL string, isRegistered bool, err error) {
 	// TODO: We eventually want to be able to export multiple prefixes; at that point, we'll
 	// refactor to loop around all the namespaces
 	if prefix == "" {
@@ -210,7 +211,11 @@ func registerNamespacePrep(prefix string) (key jwk.Key, registrationEndpointURL 
 		return
 	}
 
-	namespaceEndpoint := param.Federation_RegistryUrl.GetString()
+	fedInfo, err := config.GetFederation(ctx)
+	if err != nil {
+		return
+	}
+	namespaceEndpoint := fedInfo.NamespaceRegistrationEndpoint
 	if namespaceEndpoint == "" {
 		err = errors.New("No namespace registry specified; try passing the `-f` flag specifying the federation name")
 		return
@@ -267,7 +272,7 @@ func RegisterNamespaceWithRetry(ctx context.Context, egrp *errgroup.Group, prefi
 		retryInterval = 10 * time.Second
 	}
 
-	key, url, isRegistered, err := registerNamespacePrep(prefix)
+	key, url, isRegistered, err := registerNamespacePrep(ctx, prefix)
 	if err != nil {
 		return err
 	}

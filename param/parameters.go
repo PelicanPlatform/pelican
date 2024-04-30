@@ -122,6 +122,7 @@ var (
 	Cache_HighWaterMark = StringParam{"Cache.HighWaterMark"}
 	Cache_LowWatermark = StringParam{"Cache.LowWatermark"}
 	Cache_RunLocation = StringParam{"Cache.RunLocation"}
+	Cache_SentinelLocation = StringParam{"Cache.SentinelLocation"}
 	Cache_Url = StringParam{"Cache.Url"}
 	Cache_XRootDPrefix = StringParam{"Cache.XRootDPrefix"}
 	Director_DefaultResponse = StringParam{"Director.DefaultResponse"}
@@ -129,11 +130,7 @@ var (
 	Director_MaxMindKeyFile = StringParam{"Director.MaxMindKeyFile"}
 	Director_SupportContactEmail = StringParam{"Director.SupportContactEmail"}
 	Director_SupportContactUrl = StringParam{"Director.SupportContactUrl"}
-	Federation_BrokerUrl = StringParam{"Federation.BrokerUrl"}
-	Federation_DirectorUrl = StringParam{"Federation.DirectorUrl"}
 	Federation_DiscoveryUrl = StringParam{"Federation.DiscoveryUrl"}
-	Federation_JwkUrl = StringParam{"Federation.JwkUrl"}
-	Federation_RegistryUrl = StringParam{"Federation.RegistryUrl"}
 	Federation_TopologyNamespaceUrl = StringParam{"Federation.TopologyNamespaceUrl"}
 	Federation_TopologyUrl = StringParam{"Federation.TopologyUrl"}
 	IssuerKey = StringParam{"IssuerKey"}
@@ -292,6 +289,7 @@ var (
 	Client_DisableProxyFallback = BoolParam{"Client.DisableProxyFallback"}
 	Debug = BoolParam{"Debug"}
 	Director_EnableBroker = BoolParam{"Director.EnableBroker"}
+	Director_EnableOIDC = BoolParam{"Director.EnableOIDC"}
 	DisableHttpProxy = BoolParam{"DisableHttpProxy"}
 	DisableProxyFallback = BoolParam{"DisableProxyFallback"}
 	Logging_DisableProgressBars = BoolParam{"Logging.DisableProgressBars"}

@@ -44,9 +44,9 @@ const (
 )
 
 var (
-	serverAds            = ttlcache.New(ttlcache.WithTTL[server_structs.ServerAd, []server_structs.NamespaceAdV2](15 * time.Minute))
-	serverAdMutex        = sync.RWMutex{}
-	filteredServers      = map[string]filterType{}
+	// The in-memory cache of xrootd server advertisement, with the key being ServerAd.URL.String()
+	serverAds            = ttlcache.New(ttlcache.WithTTL[string, *server_structs.Advertisement](15 * time.Minute))
+	filteredServers      = map[string]filterType{} // The map holds servers that are disabled, with the key being the ServerAd.Name
 	filteredServersMutex = sync.RWMutex{}
 )
 
@@ -54,14 +54,16 @@ func recordAd(ad server_structs.ServerAd, namespaceAds *[]server_structs.Namespa
 	if err := updateLatLong(&ad); err != nil {
 		log.Debugln("Failed to lookup GeoIP coordinates for host", ad.URL.Host)
 	}
-	serverAdMutex.Lock()
-	defer serverAdMutex.Unlock()
 
+	if ad.URL.String() == "" {
+		log.Errorf("The URL of the serverAd %#v is empty. Cannot set the TTL cache.", ad)
+		return
+	}
 	customTTL := param.Director_AdvertisementTTL.GetDuration()
 	if customTTL == 0 {
-		serverAds.Set(ad, *namespaceAds, ttlcache.DefaultTTL)
+		serverAds.Set(ad.URL.String(), &server_structs.Advertisement{ServerAd: ad, NamespaceAds: *namespaceAds}, ttlcache.DefaultTTL)
 	} else {
-		serverAds.Set(ad, *namespaceAds, customTTL)
+		serverAds.Set(ad.URL.String(), &server_structs.Advertisement{ServerAd: ad, NamespaceAds: *namespaceAds}, customTTL)
 	}
 }
 
@@ -129,8 +131,7 @@ func matchesPrefix(reqPath string, namespaceAds []server_structs.NamespaceAdV2) 
 }
 
 func getAdsForPath(reqPath string) (originNamespace server_structs.NamespaceAdV2, originAds []server_structs.ServerAd, cacheAds []server_structs.ServerAd) {
-	serverAdMutex.RLock()
-	defer serverAdMutex.RUnlock()
+	skippedServers := []server_structs.ServerAd{}
 
 	// Clean the path, but re-append a trailing / to deal with some namespaces
 	// from topo that have a trailing /
@@ -141,37 +142,58 @@ func getAdsForPath(reqPath string) (originNamespace server_structs.NamespaceAdV2
 	// is the server ad itself (either cache or origin), and the value
 	// is a slice of namespace prefixes are supported by that server
 	var best *server_structs.NamespaceAdV2
+	ads := []*server_structs.Advertisement{}
 	for _, item := range serverAds.Items() {
-		if item == nil {
+		ads = append(ads, item.Value())
+	}
+	sortedAds := sortServerAdsByTopo(ads)
+	for _, ad := range sortedAds {
+		if filtered, ft := checkFilter(ad.Name); filtered {
+			log.Debugf("Skipping %s server %s as it's in the filtered server list with type %s", ad.Type, ad.Name, ft)
 			continue
 		}
-		serverAd := item.Key()
-		if filtered, ft := checkFilter(serverAd.Name); filtered {
-			log.Debugf("Skipping %s server %s as it's in the filtered server list with type %s", serverAd.Type, serverAd.Name, ft)
-			continue
-		}
-		if serverAd.Type == server_structs.OriginType {
-			if ns := matchesPrefix(reqPath, item.Value()); ns != nil {
-				if best == nil || len(ns.Path) > len(best.Path) {
-					best = ns
-					// If anything was previously set by a namespace that constituted a shorter
-					// prefix, we overwrite that here because we found a better ns. We also clear
-					// the other slice of server ads, because we know those aren't good anymore
-					originAds = append(originAds[:0], serverAd)
+		if ns := matchesPrefix(reqPath, ad.NamespaceAds); ns != nil {
+			if best == nil || len(ns.Path) > len(best.Path) {
+				best = ns
+				// If anything was previously set by a namespace that constituted a shorter
+				// prefix, we overwrite that here because we found a better ns. We also clear
+				// the other slice of server ads, because we know those aren't good anymore
+				if ad.Type == server_structs.OriginType {
+					originAds = []server_structs.ServerAd{ad.ServerAd}
 					cacheAds = []server_structs.ServerAd{}
-				} else if ns.Path == best.Path {
-					originAds = append(originAds, serverAd)
-				}
-			}
-			continue
-		} else if serverAd.Type == server_structs.CacheType {
-			if ns := matchesPrefix(reqPath, item.Value()); ns != nil {
-				if best == nil || len(ns.Path) > len(best.Path) {
-					best = ns
-					cacheAds = append(cacheAds[:0], serverAd)
+				} else if ad.Type == server_structs.CacheType {
 					originAds = []server_structs.ServerAd{}
-				} else if ns.Path == best.Path {
-					cacheAds = append(cacheAds, serverAd)
+					cacheAds = []server_structs.ServerAd{ad.ServerAd}
+				}
+			} else if ns.Path == best.Path {
+				// If the current is from Pelican but the best is from topology
+				// then replace the topology best by Pelican best
+				if !ns.FromTopology && best.FromTopology {
+					best = ns
+				}
+				// We treat serverAds differently from namespace
+				if ad.Type == server_structs.OriginType {
+					// For origin, if there's no origin in the list yet, and there's a matched one from topology, then add it
+					// However, if the first one is from Topology but the second matched one is from Pelican, replace it (repeat this process)
+					if len(originAds) == 0 {
+						originAds = append(originAds, ad.ServerAd)
+					} else {
+						if originAds[len(originAds)-1].FromTopology == ad.FromTopology {
+							originAds = append(originAds, ad.ServerAd)
+						} else if !ad.FromTopology {
+							// Incoming ad is from Pelican and current last item in originAd is from Topology:
+							// clear originAds and put Pelican server in
+							skippedServers = append(skippedServers, originAds...)
+							originAds = []server_structs.ServerAd{ad.ServerAd}
+						} else {
+							// Incoming ad is from Topology but current last item in originAd is from Pelican: skip
+							skippedServers = append(skippedServers, ad.ServerAd)
+							continue
+						}
+					}
+				} else if ad.Type == server_structs.CacheType {
+					// For caches, we allow both server from Topology and Pelican to serve the same namespace
+					cacheAds = append(cacheAds, ad.ServerAd)
 				}
 			}
 		}
@@ -179,6 +201,13 @@ func getAdsForPath(reqPath string) (originNamespace server_structs.NamespaceAdV2
 
 	if best != nil {
 		originNamespace = *best
+	}
+	if len(skippedServers) > 0 {
+		log.Debugf(
+			"getAdsForPath: The following matched servers from OSDF topology are skipped for the request path %s: %s",
+			reqPath,
+			server_structs.ServerAdsToServerNameURL(skippedServers),
+		)
 	}
 	return
 }

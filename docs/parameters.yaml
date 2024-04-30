@@ -291,6 +291,7 @@ description: |+
 type: url
 osdf_default: Default is determined dynamically through metadata at <Federation.DiscoveryUrl>/.well-known/pelican-configuration
 default: none
+direct_access: false
 components: ["client", "origin", "cache"]
 ---
 name: Federation.RegistryUrl
@@ -299,6 +300,7 @@ description: |+
 type: url
 osdf_default: Default is determined dynamically through metadata at <federation URL>/.well-known/pelican-configuration
 default: none
+direct_access: false
 components: ["client", "director", "origin", "cache"]
 ---
 name: Federation.JwkUrl
@@ -307,6 +309,7 @@ description: |+
 type: url
 osdf_default: Default is determined dynamically through metadata at <Federation.DiscoveryUrl>/.well-known/pelican-configuration
 default: none
+direct_access: false
 components: ["*"]
 ---
 name: Federation.TopologyUrl
@@ -341,6 +344,7 @@ description: |+
   If left unset, it will be populated by the federation metadata discovery.
 type: url
 default: none
+direct_access: false
 components: ["origin"]
 ---
 ############################
@@ -455,7 +459,9 @@ description: |+
       where each of these has the same effect as the corresponding "Origin.Enable*" configuration, except scoped to the
       given export. If "PublicReads" is included, "Reads" is inferred.
   - SentinelLocation: A filename under `StoragePrefix` path for Pelican to check the storage directory exists and is correctly mounted.
-      Leave it empty to skip the check. You should always choose a distinguished name for `SentinelLocation`. It should not be reused for other servers.
+      The value must be a file and contain no directory. Leave it empty to skip the check.
+
+      You should always choose a distinct name for `SentinelLocation`. It should not be reused for other servers.
       If running in a containerized environment it should not be the name of the underlying physical host as that may change and lead to confusion.
       You need to manually create a file under path to `StoragePrefix` with the same name as `SentinelLocation`. Note that this parameter will be ignored
       if the origin StorageType is S3.
@@ -484,8 +490,8 @@ name: Origin.FederationPrefix
 description: |+
   The namespace prefix of the origin's contents within the federation.
 
-  NOTE: This config option is incompatible with multiple exports defined via `Origin.Exports` and requires that the origin exports
-  only a single path.
+  NOTE: This config option is incompatible with multiple exports defined via `Origin.Exports` and is ignored when the origin
+  exports multiple prefixes.
 type: string
 default: none
 components: ["origin"]
@@ -496,8 +502,8 @@ description: |+
   of "posix", this constitutes the path on disk exported by the origin for the federation. If the origin has a StorageType of "s3",
   this value is not currently used.
 
-  NOTE: This config option is incompatible with multiple exports defined via `Origin.Exports` and requires that the origin exports
-  only a single path.
+  NOTE: This config option is incompatible with multiple exports defined via `Origin.Exports` and is ignored when the origin
+  exports multiple prefixes.
 type: string
 default: none
 components: ["origin"]
@@ -516,8 +522,8 @@ description: |+
   A boolean indicating whether the origin permits reads without valid authorization. When false, reads from the origin will require a
   properly-scoped authorization token signed by the origin's issuer.
 
-  NOTE: This config option is incompatible with multiple exports defined via `Origin.Exports` and requires that the origin exports
-  only a single path.
+  NOTE: This config option is meant to configure an _origin's_ capabilities, but can be used to configure a namespace when the origin
+  exports only a single prefix or when every exported namespace should inherit the same configuration.
 type: bool
 default: false
 components: ["origin"]
@@ -526,8 +532,8 @@ name: Origin.EnableReads
 description: |+
   A boolean indicating whether the origin permits any reads. When false, the origin may still allow writes.
 
-  NOTE: This config option is incompatible with multiple exports defined via `Origin.Exports` and requires that the origin exports
-  only a single path.
+  NOTE: This config option is meant to configure an _origin's_ capabilities, but can be used to configure a namespace when the origin
+  exports only a single prefix or when every exported namespace should inherit the same configuration.
 type: bool
 default: true
 components: ["origin"]
@@ -536,8 +542,8 @@ name: Origin.EnableWrites
 description: |+
   A boolean indicating whether the origin permits writes. All writes require authorization.
 
-  NOTE: This config option is incompatible with multiple exports defined via `Origin.Exports` and requires that the origin exports
-  only a single path.type: bool.
+  NOTE: This config option is meant to configure an _origin's_ capabilities, but can be used to configure a namespace when the origin
+  exports only a single prefix or when every exported namespace should inherit the same configuration.
 type: bool
 default: true
 components: ["origin"]
@@ -546,8 +552,8 @@ name: Origin.EnableListings
 description: |+
   A boolean indicating whether the origin permits object listings. When true, clients can list the contents of the origin.
 
-  NOTE: This config option is incompatible with multiple exports defined via `Origin.Exports` and requires that the origin exports
-  only a single path.
+  NOTE: This config option is meant to configure an _origin's_ capabilities, but can be used to configure a namespace when the origin
+  exports only a single prefix or when every exported namespace should inherit the same configuration.
 type: bool
 default: true
 components: ["origin"]
@@ -557,8 +563,8 @@ description: |+
   A boolean indicating whether the origin permits direct reads. When true, the origin indicates that it is willing to interact directly with clients.
   When false, the origin is indicating it is only willing to interact with clients via a cache service.
 
-  NOTE: This config option is incompatible with multiple exports defined via `Origin.Exports` and requires that the origin exports
-  only a single path.
+  NOTE: This config option is meant to configure an _origin's_ capabilities, but can be used to configure a namespace when the origin
+  exports only a single prefix or when every exported namespace should inherit the same configuration.
 type: bool
 default: true
 components: ["origin"]
@@ -659,7 +665,7 @@ components: ["origin"]
 ---
 name: Origin.EnableOIDC
 description: >-
-  Indicate whether the origin should allow user login to the admin website via OAuth2/OIDC with third-party
+  Indicate whether the origin should allow users to login to the admin website via OAuth2/OIDC with third-party
   authentication providers such as CILogon.
 
   If set to true, it is recommended that you also set `Server.UIAdminUsers` to a list of users
@@ -935,6 +941,18 @@ root_default: /run/pelican/xrootd/cache
 default: $XDG_RUNTIME_DIR/pelican/cache
 components: ["cache"]
 ---
+name: Cache.SentinelLocation
+description: |+
+  A filename under `Cache.DataLocation` path for Pelican to check the storage directory exists and is correctly mounted.
+  The value must be a file and contain no directory. Leave it empty to skip the check.
+
+  You should always choose a distinct name for `Cache.SentinelLocation`. It should not be reused for other servers.
+  If running in a containerized environment it should not be the name of the underlying physical host as that may change and lead to confusion.
+  You need to manually create a file under path to `Cache.DataLocation` with the same name as `Cache.SentinelLocation`.
+type: filename
+default: none
+components: ["cache"]
+---
 name: Cache.XRootDPrefix
 description: |+
   The directory prefix for the XRootD cache configuration files.
@@ -1030,7 +1048,7 @@ components: ["cache"]
 ---
 name: Cache.EnableOIDC
 description: >-
-  Indicate whether the cache should allow user login to the admin website via OAuth2/OIDC with third-party
+  Indicate whether the cache should allow users to login to the admin website via OAuth2/OIDC with third-party
   authentication providers such as CILogon.
 
   If set to true, it is recommended that you also set `Server.UIAdminUsers` to a list of users
@@ -1171,6 +1189,19 @@ type: string
 default: none
 components: ["director"]
 ---
+name: Director.EnableOIDC
+description: >-
+  Indicate whether the director should allow users to login to the admin website via OAuth2/OIDC with third-party
+  authentication providers such as CILogon.
+
+  If set to true, it is recommended that you also set `Server.UIAdminUsers` to a list of users
+  to give admin privilege. This is because origin admin website doesn't have a public, non-admin view,
+  and an empty AdminUsers list will lead to "permission denied" error
+  for all users logged into origin admin website via OAuth.
+type: bool
+default: false
+components: ["director"]
+---
 ############################
 #  Registry-level configs  #
 ############################
@@ -1229,7 +1260,7 @@ description: |+
 
   The schema of the object is as follows:
   ```
-  - name: department
+  - name: department_name
     type: enum
     required: true
     options:
@@ -1238,12 +1269,13 @@ description: |+
       - name: Computer Science
         id: cs
     optionsUrl: https://example.com/options
-    validationUrl: https://example.com/validate
     description: The department of the organization that holds this namespace
   ```
 
   Note the following requirements:
-  - "name" must be snake case with underline connecting words, i.e. site_name.
+  - "name" must be snake case with underline connecting words, i.e. department_name.
+    The name displayed in the registration table will be converted from this field
+    into a human-readble, space-separated name with the first letter(s) capitalized. i.e. department_name -> Department Name
   - "type" must be one of "string", "int", "bool", "datetime" (Unix time in seconds), or "enum".
   - "options" must be a non-empty yaml array for field with type "enum". "optionsUrl" will be ignored if "options" is set.
 
@@ -1255,6 +1287,8 @@ description: |+
           id: "optionA"
       ```
   - "description" will show up in the web UI as helper text to help user understand the field
+  - "optionsUrl": a URL to provide a list of options for "enum" type field.
+    The URL should respond to an anonymous GET request and return JSON response in the same format as the options field above
 type: object
 default: none
 components: ["registry"]
@@ -1638,11 +1672,12 @@ description: |+
   override the value of `OIDC.ClientIDFile` if both are set.
 
   This is a required parameter for the registry server.
-  This is a required parameter for the origin server if `Origin.EnableOIDC` is set to `true`.
+  This is a required parameter for the origin/cache/director server if
+  `Origin.EnableOIDC`/`Cache.EnableOIDC`/`Director.EnableOIDC` is set to `true`, respectively.
 type: filename
 root_default: /etc/pelican/oidc-client-id
 default: $ConfigBase/oidc-client-id
-components: ["registry", "origin"]
+components: ["registry", "origin", "cache", "director"]
 ---
 name: OIDC.ClientID
 description: |+
@@ -1650,10 +1685,11 @@ description: |+
   override the value of OIDC.ClientIDFile if both are set.
 
   This is a required parameter for the registry server.
-  This is also a required parameter for the origin server if `Origin.EnableOIDC` is set to `true`.
+  This is a required parameter for the origin/cache/director server if
+  `Origin.EnableOIDC`/`Cache.EnableOIDC`/`Director.EnableOIDC` is set to `true`, respectively.
 type: string
 default: none
-components: ["registry", "origin"]
+components: ["registry", "origin", "cache", "director"]
 ---
 name: OIDC.ClientSecretFile
 description: |+
@@ -1661,11 +1697,12 @@ description: |+
   for authenticated registration.
 
   This is a required parameter for the registry server.
-  This is also a required parameter for the origin server if `Origin.EnableOIDC` is set to `true`.
+  This is a required parameter for the origin/cache/director server if
+  `Origin.EnableOIDC`/`Cache.EnableOIDC`/`Director.EnableOIDC` is set to `true`, respectively.
 type: filename
 root_default: /etc/pelican/oidc-client-secret
 default: $ConfigBase/oidc-client-secret
-components: ["registry", "origin"]
+components: ["registry", "origin", "cache", "director"]
 ---
 name: OIDC.DeviceAuthEndpoint
 description: |+
@@ -1673,7 +1710,7 @@ description: |+
   for authenticated registration. The default value is set to the URL from CILogon.
 type: url
 default: "https://cilogon.org/oauth2/device_authorization"
-components: ["registry", "origin"]
+components: ["registry", "origin", "cache", "director"]
 ---
 name: OIDC.TokenEndpoint
 description: |+
@@ -1681,7 +1718,7 @@ description: |+
   for authenticated registration. The default value is set to the URL from CILogon.
 type: url
 default: "https://cilogon.org/oauth2/token"
-components: ["registry", "origin"]
+components: ["registry", "origin", "cache", "director"]
 ---
 name: OIDC.UserInfoEndpoint
 description: |+
@@ -1689,14 +1726,14 @@ description: |+
   for authenticated registration. The default value is set to the URL from CILogon.
 type: url
 default: "https://cilogon.org/oauth2/userinfo"
-components: ["registry", "origin"]
+components: ["registry", "origin", "cache", "director"]
 ---
 name: OIDC.AuthorizationEndpoint
 description: |+
   A URL containing the OIDC authorization endpoint. The default value is set to the URL from CILogon.
 type: url
 default: "https://cilogon.org/authorize"
-components: ["registry", "origin"]
+components: ["registry", "origin", "cache", "director"]
 ---
 name: OIDC.Issuer
 description: |+
@@ -1710,7 +1747,7 @@ description: |+
   For Globus, it's https://auth.globus.org
 type: url
 default: none
-components: ["registry", "origin"]
+components: ["registry", "origin", "cache", "director"]
 ---
 name: OIDC.ClientRedirectHostname
 description: |+
@@ -1720,7 +1757,7 @@ description: |+
   instead of container hostname to your OAuth provider.
 type: string
 default: none
-components: ["registry", "director"]
+components: ["registry", "origin", "cache", "director"]
 ---
 ############################
 #   XRootD-level Configs   #

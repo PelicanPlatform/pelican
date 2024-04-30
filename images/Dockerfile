@@ -265,6 +265,11 @@ CMD [ "serve" ]
 
 FROM osdf-base AS osdf-origin
 
+# Add support for SSSD
+# sssd UID must match between the origin and SSSD sidecar containers
+RUN groupadd -r -g 990 sssd \
+    && useradd -r -g sssd -u 990 -d / -s /usr/sbin/nologin -c "System user for sssd" sssd
+
 ENTRYPOINT [ "/entrypoint.sh" ,"osdf", "origin"]
 CMD [ "serve" ]
 

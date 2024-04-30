@@ -19,6 +19,7 @@
 package client
 
 import (
+	"context"
 	"net"
 	"net/url"
 	"os"
@@ -31,6 +32,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/mock"
 	"github.com/pelicanplatform/pelican/namespaces"
 )
 
@@ -58,7 +60,6 @@ func TestGetIps(t *testing.T) {
 
 // TestGetToken tests getToken
 func TestGetToken(t *testing.T) {
-
 	// Need a namespace for token acquisition
 	defer os.Unsetenv("PELICAN_FEDERATION_TOPOLOGYNAMESPACEURL")
 	os.Setenv("PELICAN_TOPOLOGY_NAMESPACE_URL", "https://topology.opensciencegrid.org/osdf/namespaces")
@@ -66,7 +67,9 @@ func TestGetToken(t *testing.T) {
 	err := config.InitClient()
 	assert.Nil(t, err)
 
-	namespace, err := namespaces.MatchNamespace("/user/foo")
+	mock.MockTopology(t, config.GetTransport())
+
+	namespace, err := namespaces.MatchNamespace(context.Background(), "/user/foo")
 	assert.NoError(t, err)
 
 	url, err := url.Parse("osdf:///user/foo")
@@ -138,7 +141,7 @@ func TestGetToken(t *testing.T) {
 	os.Setenv("_CONDOR_CREDS", tmpDir)
 	renamedUrl, err := url.Parse("renamed+osdf:///user/ligo/frames")
 	assert.NoError(t, err)
-	renamedNamespace, err := namespaces.MatchNamespace("/user/ligo/frames")
+	renamedNamespace, err := namespaces.MatchNamespace(context.Background(), "/user/ligo/frames")
 	assert.NoError(t, err)
 	token, err = getToken(renamedUrl, renamedNamespace, false, "", "", false)
 	assert.NoError(t, err)
@@ -157,7 +160,7 @@ func TestGetToken(t *testing.T) {
 	renamedUrl, err = url.Parse("renamed.handle1+osdf:///user/ligo/frames")
 	renamedUrl.Scheme = "renamed_handle1+osdf"
 	assert.NoError(t, err)
-	renamedNamespace, err = namespaces.MatchNamespace("/user/ligo/frames")
+	renamedNamespace, err = namespaces.MatchNamespace(context.Background(), "/user/ligo/frames")
 	assert.NoError(t, err)
 	token, err = getToken(renamedUrl, renamedNamespace, false, "", "", false)
 	assert.NoError(t, err)
@@ -174,7 +177,7 @@ func TestGetToken(t *testing.T) {
 	os.Setenv("_CONDOR_CREDS", tmpDir)
 	renamedUrl, err = url.Parse("renamed.handle2+osdf:///user/ligo/frames")
 	assert.NoError(t, err)
-	renamedNamespace, err = namespaces.MatchNamespace("/user/ligo/frames")
+	renamedNamespace, err = namespaces.MatchNamespace(context.Background(), "/user/ligo/frames")
 	assert.NoError(t, err)
 	token, err = getToken(renamedUrl, renamedNamespace, false, "", "", false)
 	assert.NoError(t, err)
@@ -191,7 +194,7 @@ func TestGetToken(t *testing.T) {
 	os.Setenv("_CONDOR_CREDS", tmpDir)
 	renamedUrl, err = url.Parse("renamed.handle3+osdf:///user/ligo/frames")
 	assert.NoError(t, err)
-	renamedNamespace, err = namespaces.MatchNamespace("/user/ligo/frames")
+	renamedNamespace, err = namespaces.MatchNamespace(context.Background(), "/user/ligo/frames")
 	assert.NoError(t, err)
 	token, err = getToken(renamedUrl, renamedNamespace, false, "", "", false)
 	assert.NoError(t, err)
@@ -208,7 +211,7 @@ func TestGetToken(t *testing.T) {
 	os.Setenv("_CONDOR_CREDS", tmpDir)
 	renamedUrl, err = url.Parse("/user/ligo/frames")
 	assert.NoError(t, err)
-	renamedNamespace, err = namespaces.MatchNamespace("/user/ligo/frames")
+	renamedNamespace, err = namespaces.MatchNamespace(context.Background(), "/user/ligo/frames")
 	assert.NoError(t, err)
 	token, err = getToken(renamedUrl, renamedNamespace, false, "renamed", "", false)
 	assert.NoError(t, err)
@@ -319,36 +322,6 @@ func TestCorrectURLWithUnderscore(t *testing.T) {
 			}
 		})
 	}
-}
-
-// Test that the project name is correctly extracted from the job ad file
-func TestGetProjectName(t *testing.T) {
-	// Create a temporary file
-	tempFile, err := os.CreateTemp("", "test")
-	assert.NoError(t, err)
-	defer os.Remove(tempFile.Name())
-
-	// Write a project name to the file
-	_, err = tempFile.WriteString("ProjectName = \"testProject\"")
-	assert.NoError(t, err)
-	tempFile.Close()
-	t.Run("TestNoJobAd", func(t *testing.T) {
-		// Unset this environment var
-		os.Unsetenv("_CONDOR_JOB_AD")
-		// Call GetProjectName and check the result
-		projectName := GetProjectName()
-		assert.Equal(t, "", projectName)
-	})
-
-	t.Run("TestJobAd", func(t *testing.T) {
-		// Set the _CONDOR_JOB_AD environment variable to the temp file's name
-		os.Setenv("_CONDOR_JOB_AD", tempFile.Name())
-		defer os.Unsetenv("_CONDOR_JOB_AD")
-
-		// Call GetProjectName and check the result
-		projectName := GetProjectName()
-		assert.Equal(t, "testProject", projectName)
-	})
 }
 
 func TestSchemeUnderstood(t *testing.T) {

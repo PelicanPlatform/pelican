@@ -95,14 +95,14 @@ func Setup(t *testing.T, ctx context.Context, egrp *errgroup.Group) {
 	keysetBytes, err := json.Marshal(keyset)
 	require.NoError(t, err)
 
-	err = registry.AddNamespace(&registry.Namespace{
+	err = registry.AddNamespace(&server_structs.Namespace{
 		ID:       1,
 		Prefix:   "/caches/" + param.Server_Hostname.GetString(),
 		Pubkey:   string(keysetBytes),
 		Identity: "test_data",
 	})
 	require.NoError(t, err)
-	err = registry.AddNamespace(&registry.Namespace{
+	err = registry.AddNamespace(&server_structs.Namespace{
 		ID:       2,
 		Prefix:   "/foo",
 		Pubkey:   string(keysetBytes),
@@ -129,7 +129,9 @@ func doRetrieveRequest(t *testing.T, ctx context.Context, dur time.Duration) (*h
 
 	reqReader := bytes.NewReader(reqBytes)
 
-	brokerAud, err := url.Parse(param.Federation_BrokerUrl.GetString())
+	fedInfo, err := config.GetFederation(ctx)
+	require.NoError(t, err)
+	brokerAud, err := url.Parse(fedInfo.BrokerEndpoint)
 	require.NoError(t, err)
 	brokerAud.Path = ""
 

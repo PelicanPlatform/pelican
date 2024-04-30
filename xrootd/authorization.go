@@ -27,6 +27,7 @@ package xrootd
 import (
 	"bufio"
 	"bytes"
+	"context"
 	_ "embed"
 	"encoding/json"
 	"io"
@@ -487,11 +488,15 @@ func GenerateOriginIssuer(exportedPaths []string) (issuer Issuer, err error) {
 
 // We have a special issuer just for director-based monitoring of the origin.
 func GenerateDirectorMonitoringIssuer() (issuer Issuer, err error) {
-	if val := param.Federation_DirectorUrl.GetString(); val == "" {
+	fedInfo, err := config.GetFederation(context.Background())
+	if err != nil {
+		return
+	}
+	if val := fedInfo.DirectorEndpoint; val == "" {
 		return
 	}
 	issuer.Name = "Director-based Monitoring"
-	issuer.Issuer = param.Federation_DirectorUrl.GetString()
+	issuer.Issuer = fedInfo.DirectorEndpoint
 	issuer.BasePaths = []string{"/pelican/monitoring"}
 	issuer.DefaultUser = "xrootd"
 

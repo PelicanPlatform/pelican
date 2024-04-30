@@ -57,9 +57,6 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 
 	viper.Set("Federation.DirectorURL", "https://director-url.org")
 
-	config.InitConfig()
-	err := config.InitServer(ctx, config.DirectorType)
-	require.NoError(t, err)
 	// Mock registry server
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if req.Method == "POST" && req.URL.Path == "/api/v1.0/registry/checkNamespaceStatus" {
@@ -81,31 +78,16 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 	}))
 	defer ts.Close()
 
+	// Mock cached jwks
 	viper.Set("Federation.RegistryUrl", ts.URL)
+	viper.Set("ConfigDir", t.TempDir())
+	config.InitConfig()
+	err := config.InitServer(ctx, config.DirectorType)
+	require.NoError(t, err)
 
 	kSet, err := config.GetIssuerPublicJWKS()
-	ar := MockCache{
-		GetFn: func(key string, keyset *jwk.Set) (jwk.Set, error) {
-			if key != ts.URL+"/api/v1.0/registry/test-namespace/.well-known/issuer.jwks" {
-				t.Errorf("expecting: %s/api/v1.0/registry/test-namespace/.well-known/issuer.jwks, got %q", ts.URL, key)
-			}
-			return *keyset, nil
-		},
-		RegisterFn: func(m *MockCache) error {
-			m.keyset = kSet
-			return nil
-		},
-	}
-
-	// Perform injections (ar.Register will create a jwk.keyset with the publickey in it)
-	func() {
-		if err = ar.Register("", jwk.WithMinRefreshInterval(15*time.Minute)); err != nil {
-			t.Errorf("this should never happen, should actually be impossible, including check for the linter")
-		}
-		namespaceKeysMutex.Lock()
-		defer namespaceKeysMutex.Unlock()
-		namespaceKeys.Set("/test-namespace", &ar, ttlcache.DefaultTTL)
-	}()
+	require.NoError(t, err)
+	namespaceKeys.Set(ts.URL+"/api/v1.0/registry/test-namespace/.well-known/issuer.jwks", kSet, ttlcache.DefaultTTL)
 
 	issuerUrl, err := server_utils.GetNSIssuerURL("/test-namespace")
 	assert.NoError(t, err)
@@ -168,18 +150,14 @@ func TestNamespaceKeysCacheEviction(t *testing.T) {
 		}()
 
 		mockNamespaceKey := "foo"
-		mockCtx := context.Background()
-		mockAr := jwk.NewCache(mockCtx)
 
 		deletedChan := make(chan int)
 		cancelChan := make(chan int)
 
 		go func() {
-			namespaceKeysMutex.Lock()
-			defer namespaceKeysMutex.Unlock()
 			namespaceKeys.DeleteAll()
 
-			namespaceKeys.Set(mockNamespaceKey, mockAr, time.Second*2)
+			namespaceKeys.Set(mockNamespaceKey, jwk.NewSet(), time.Second*2)
 			require.True(t, namespaceKeys.Has(mockNamespaceKey), "Failed to register namespace key")
 		}()
 

@@ -38,6 +38,7 @@ type Config struct {
 		RunLocation string
 		SelfTest bool
 		SelfTestInterval time.Duration
+		SentinelLocation string
 		Url string
 		XRootDPrefix string
 	}
@@ -58,6 +59,7 @@ type Config struct {
 		CacheResponseHostnames []string
 		DefaultResponse string
 		EnableBroker bool
+		EnableOIDC bool
 		FilteredServers []string
 		GeoIPLocation string
 		MaxMindKeyFile string
@@ -304,6 +306,7 @@ type configWithType struct {
 		RunLocation struct { Type string; Value string }
 		SelfTest struct { Type string; Value bool }
 		SelfTestInterval struct { Type string; Value time.Duration }
+		SentinelLocation struct { Type string; Value string }
 		Url struct { Type string; Value string }
 		XRootDPrefix struct { Type string; Value string }
 	}
@@ -324,6 +327,7 @@ type configWithType struct {
 		CacheResponseHostnames struct { Type string; Value []string }
 		DefaultResponse struct { Type string; Value string }
 		EnableBroker struct { Type string; Value bool }
+		EnableOIDC struct { Type string; Value bool }
 		FilteredServers struct { Type string; Value []string }
 		GeoIPLocation struct { Type string; Value string }
 		MaxMindKeyFile struct { Type string; Value string }

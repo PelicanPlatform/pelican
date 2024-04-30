@@ -41,9 +41,16 @@ func RegistryServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 		return errors.Wrap(err, "Unable to initialize the namespace registry database")
 	}
 
-	err = registry.InitCustomRegistrationFields()
-	if err != nil {
-		return err
+	if param.Server_EnableUI.GetBool() {
+		registry.InitOptionsCache(ctx, egrp)
+
+		if err = registry.InitCustomRegistrationFields(); err != nil {
+			return err
+		}
+
+		if err := registry.InitInstConfig(ctx, egrp); err != nil {
+			return err
+		}
 	}
 
 	if config.GetPreferredPrefix() == config.OsdfPrefix {
@@ -55,12 +62,6 @@ func RegistryServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 
 		// Checks topology for updates every 10 minutes
 		go registry.PeriodicTopologyReload()
-	}
-
-	if param.Server_EnableUI.GetBool() {
-		if err := registry.InitInstConfig(ctx, egrp); err != nil {
-			return err
-		}
 	}
 
 	rootRouterGroup := engine.Group("/")

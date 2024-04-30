@@ -338,7 +338,7 @@ func ConnectToOrigin(ctx context.Context, brokerUrl, prefix, originName string) 
 		conn, _, err = hj.Hijack()
 		tlsConn, ok := conn.(*tls.Conn)
 		if ok {
-			// Once the cache recieves the HTTP response, it'll close the TLS connection
+			// Once the cache receives the HTTP response, it'll close the TLS connection
 			// That will cause a "close notify" to be sent back to the origin (this goroutine),
 			// which indicates the last TLS record has been received.  That will cause an EOF
 			// to be read from the TLS socket.
@@ -549,7 +549,12 @@ func doCallback(ctx context.Context, brokerResp reversalRequest) (listener net.L
 // closes itself.  It is the result of a successful connection reversal to
 // a cache.
 func LaunchRequestMonitor(ctx context.Context, egrp *errgroup.Group, resultChan chan any) (err error) {
-	brokerUrl := param.Federation_BrokerUrl.GetString()
+	fedInfo, err := config.GetFederation(ctx)
+	if err != nil {
+		return err
+	}
+
+	brokerUrl := fedInfo.BrokerEndpoint
 	if brokerUrl == "" {
 		return errors.New("Broker service is not set or discovered; cannot enable broker functionality.  Try setting Federation.BrokerUrl")
 	}
@@ -588,7 +593,7 @@ func LaunchRequestMonitor(ctx context.Context, egrp *errgroup.Group, resultChan 
 				req.Header.Set("Content-Type", "application/json")
 				req.Header.Set("User-Agent", "pelican-origin/"+config.GetVersion())
 
-				brokerAud, err := url.Parse(param.Federation_BrokerUrl.GetString())
+				brokerAud, err := url.Parse(fedInfo.BrokerEndpoint)
 				if err != nil {
 					log.Errorln("Failure when parsing broker URL:", err)
 					break

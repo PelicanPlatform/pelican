@@ -19,6 +19,7 @@
 package origin
 
 import (
+	"context"
 	"net/url"
 
 	"github.com/pkg/errors"
@@ -134,7 +135,11 @@ func (server *OriginServer) CreateAdvertisement(name string, originUrlStr string
 	if len(prefixes) == 1 {
 		if param.Origin_EnableBroker.GetBool() {
 			var brokerUrl *url.URL
-			brokerUrl, err = url.Parse(param.Federation_BrokerUrl.GetString())
+			fedInfo, err := config.GetFederation(context.Background())
+			if err != nil {
+				return nil, err
+			}
+			brokerUrl, err = url.Parse(fedInfo.BrokerEndpoint)
 			if err != nil {
 				err = errors.Wrap(err, "Invalid Broker URL")
 				return nil, err

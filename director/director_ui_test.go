@@ -26,6 +26,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/jellydator/ttlcache/v3"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -35,15 +36,18 @@ func TestListServers(t *testing.T) {
 
 	router.GET("/servers", listServers)
 
-	func() {
-		serverAdMutex.Lock()
-		defer serverAdMutex.Unlock()
-		serverAds.DeleteAll()
-		serverAds.Set(mockOriginServerAd, mockNamespaceAds(5, "origin1"), ttlcache.DefaultTTL)
-		serverAds.Set(mockCacheServerAd, mockNamespaceAds(4, "cache1"), ttlcache.DefaultTTL)
-		require.True(t, serverAds.Has(mockOriginServerAd))
-		require.True(t, serverAds.Has(mockCacheServerAd))
-	}()
+	serverAds.DeleteAll()
+	serverAds.Set(mockOriginServerAd.URL.String(),
+		&server_structs.Advertisement{
+			ServerAd:     mockOriginServerAd,
+			NamespaceAds: mockNamespaceAds(5, "origin1"),
+		}, ttlcache.DefaultTTL)
+	serverAds.Set(mockCacheServerAd.URL.String(), &server_structs.Advertisement{
+		ServerAd:     mockCacheServerAd,
+		NamespaceAds: mockNamespaceAds(4, "cache1"),
+	}, ttlcache.DefaultTTL)
+	require.True(t, serverAds.Has(mockOriginServerAd.URL.String()))
+	require.True(t, serverAds.Has(mockCacheServerAd.URL.String()))
 
 	mocklistOriginRes := listServerResponse{
 		Name:        mockOriginServerAd.Name,

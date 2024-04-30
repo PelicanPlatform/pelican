@@ -32,6 +32,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 var (
@@ -42,6 +43,8 @@ var (
 // TestMatchNamespace calls MatchNamespace with a hostname, checking
 // for a valid return value.
 func TestMatchNamespace(t *testing.T) {
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+
 	namespaces = nil
 	namespacesJson = []byte(`
 {
@@ -112,18 +115,18 @@ func TestMatchNamespace(t *testing.T) {
 	err = config.InitClient()
 	assert.Nil(t, err)
 
-	ns, err := MatchNamespace("/osgconnect/private/path/to/file.txt")
+	ns, err := MatchNamespace(ctx, "/osgconnect/private/path/to/file.txt")
 	assert.NoError(t, err, "Failed to parse namespace")
 
 	assert.Equal(t, "/osgconnect/private", ns.Path)
 	assert.Equal(t, true, ns.ReadHTTPS)
 
 	// Check for empty
-	ns, err = MatchNamespace("/does/not/exist.txt")
+	ns, err = MatchNamespace(ctx, "/does/not/exist.txt")
 	assert.Error(t, err)
 
 	// Check for not private
-	ns, err = MatchNamespace("/osgconnect/public/path/to/file.txt")
+	ns, err = MatchNamespace(ctx, "/osgconnect/public/path/to/file.txt")
 	assert.NoError(t, err, "Failed to parse namespace")
 	assert.Equal(t, "/osgconnect", ns.Path)
 	assert.Equal(t, false, ns.ReadHTTPS)
@@ -137,6 +140,7 @@ func TestMatchNamespace(t *testing.T) {
 }
 
 func TestMatchNamespaceSpecific(t *testing.T) {
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 	var namesspacesBackup = namespaces
 	defer func() {
 		namespaces = namesspacesBackup
@@ -172,7 +176,7 @@ func TestMatchNamespaceSpecific(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		ns, err := MatchNamespace(c.path)
+		ns, err := MatchNamespace(ctx, c.path)
 		assert.NoError(t, err, "Failed to parse namespace")
 		assert.Equal(t, c.want, ns.Path, "Writeback host does not match when matching namespace for path %s", c.path)
 	}
@@ -180,12 +184,13 @@ func TestMatchNamespaceSpecific(t *testing.T) {
 }
 
 func TestFullNamespace(t *testing.T) {
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 	os.Setenv("PELICAN_NAMESPACE_URL", "https://topology.opensciencegrid.org/osdf/namespaces")
 	viper.Reset()
 	err := config.InitClient()
 	assert.Nil(t, err)
 
-	ns, err := MatchNamespace("/ospool/PROTECTED/dweitzel/test.txt")
+	ns, err := MatchNamespace(ctx, "/ospool/PROTECTED/dweitzel/test.txt")
 	assert.NoError(t, err, "Failed to parse namespace")
 	assert.Equal(t, true, ns.ReadHTTPS)
 	assert.Equal(t, true, ns.UseTokenOnRead)
@@ -196,6 +201,8 @@ func TestFullNamespace(t *testing.T) {
 
 // TestDownloadNamespaces tests the download of the namespaces JSON
 func TestDownloadNamespaces(t *testing.T) {
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+
 	svr := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "GET" {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -232,24 +239,26 @@ func TestDownloadNamespaces(t *testing.T) {
 	})
 
 	defer os.Unsetenv("PELICAN_TOPOLOGY_NAMESPACE_URL")
-	namespaceBytes, err := downloadNamespace()
+	namespaceBytes, err := downloadNamespace(ctx)
 	assert.NoError(t, err, "Failed to download namespaces")
 	assert.NotNil(t, namespaceBytes, "Namespace bytes is nil")
 
 }
 
 func TestDownloadNamespacesFail(t *testing.T) {
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 	os.Setenv("PELICAN_TOPOLOGY_NAMESPACE_URL", "https://doesnotexist.org.blah/namespaces.json")
 	viper.Reset()
 	err := config.InitClient()
 	assert.Nil(t, err)
 	defer os.Unsetenv("PELICAN_TOPOLOGY_NAMESPACE_URL")
-	namespaceBytes, err := downloadNamespace()
+	namespaceBytes, err := downloadNamespace(ctx)
 	assert.Error(t, err, "Failed to download namespaces")
 	assert.Nil(t, namespaceBytes, "Namespace bytes is nil")
 }
 
 func TestGetNamespaces(t *testing.T) {
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 	// Set the environment to an invalid URL, so it is forced to use the "built-in" namespaces.json
 	os.Setenv("OSDF_TOPOLOGY_NAMESPACE_URL", "https://doesnotexist.org.blah/namespaces.json")
 	oldPrefix, err := config.SetPreferredPrefix(config.OsdfPrefix)
@@ -262,7 +271,7 @@ func TestGetNamespaces(t *testing.T) {
 	err = config.InitClient()
 	assert.Nil(t, err)
 	defer os.Unsetenv("OSDF_TOPOLOGY_NAMESPACE_URL")
-	namespaces, err := GetNamespaces()
+	namespaces, err := GetNamespaces(ctx)
 	assert.NoError(t, err, "Failed to get namespaces")
 	assert.NotNil(t, namespaces, "Namespaces is nil")
 	assert.Equal(t, 3, len(namespaces))

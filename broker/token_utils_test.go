@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/lestrrat-go/jwx/v2/jwt"
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -30,6 +31,9 @@ import (
 
 func TestGetCacheHostnameFromToken(t *testing.T) {
 	viper.Reset()
+	viper.Set("ConfigDir", t.TempDir())
+	config.InitConfig()
+	require.NoError(t, config.InitClient())
 
 	viper.Set("Federation.RegistryUrl", "https://your-registry.com")
 

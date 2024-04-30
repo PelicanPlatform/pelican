@@ -37,6 +37,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/lestrrat-go/option"
 	"github.com/pelicanplatform/pelican/client"
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token_scopes"
@@ -259,7 +260,11 @@ func NewLocalCache(ctx context.Context, egrp *errgroup.Group, options ...LocalCa
 	lowWater := (cacheSize / 100) * uint64(lowWaterPercentage)
 	log.Infof("Cache size is %d bytes; for purge, high water mark is %d bytes, low water mark is %d bytes", cacheSize, highWater, lowWater)
 
-	directorUrl, err := url.Parse(param.Federation_DirectorUrl.GetString())
+	fedInfo, err := config.GetFederation(ctx)
+	if err != nil {
+		return
+	}
+	directorUrl, err := url.Parse(fedInfo.DirectorEndpoint)
 	if err != nil {
 		return
 	}
@@ -509,7 +514,7 @@ func (sc *LocalCache) runMux() error {
 			sourceURL := *sc.directorURL
 			sourceURL.Path = path.Join(sourceURL.Path, path.Clean(req.request.path))
 			sourceURL.Scheme = "pelican"
-			tj, err := sc.tc.NewTransferJob(req.ctx, &sourceURL, localPath, false, false, "localcache", client.WithToken(req.request.token))
+			tj, err := sc.tc.NewTransferJob(req.ctx, &sourceURL, localPath, false, false, client.WithToken(req.request.token))
 			if err != nil {
 				ds := &downloadStatus{}
 				ds.err.Store(&err)
@@ -707,7 +712,11 @@ func (sc *LocalCache) updateConfig() error {
 	// Get the endpoint of the director
 	var respNS []server_structs.NamespaceAdV2
 
-	directorEndpoint := param.Federation_DirectorUrl.GetString()
+	fedInfo, err := config.GetFederation(sc.ctx)
+	if err != nil {
+		return err
+	}
+	directorEndpoint := fedInfo.DirectorEndpoint
 	if directorEndpoint == "" {
 		return errors.New("No director specified; give the federation name (-f)")
 	}

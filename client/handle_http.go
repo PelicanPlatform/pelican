@@ -88,6 +88,8 @@ var (
 )
 
 type (
+	classAd string
+
 	cacheItem struct {
 		url pelicanUrl
 		err error
@@ -293,6 +295,9 @@ type (
 
 const (
 	ewmaInterval = 15 * time.Second
+
+	projectName classAd = "ProjectName"
+	jobId       classAd = "GlobalJobId"
 )
 
 // The progress container object creates several
@@ -508,13 +513,17 @@ func (te *TransferEngine) newPelicanURL(remoteUrl *url.URL) (pelicanURL pelicanU
 		// If we are using an osdf/stash binary, we discovered the federation already --> load into local url metadata
 		if config.GetPreferredPrefix() == config.OsdfPrefix {
 			log.Debugln("In OSDF mode with osdf:// url; populating metadata with OSDF defaults")
-			if param.Federation_DirectorUrl.GetString() == "" || param.Federation_DiscoveryUrl.GetString() == "" || param.Federation_RegistryUrl.GetString() == "" {
+			fedInfo, err := config.GetFederation(te.ctx)
+			if fedInfo.DirectorEndpoint == "" {
+				if err != nil {
+					return pelicanUrl{}, errors.Wrap(err, "no OSDF metadata available")
+				}
 				return pelicanUrl{}, fmt.Errorf("OSDF default metadata is not populated in config")
 			} else {
-				pelicanURL.directorUrl = param.Federation_DirectorUrl.GetString()
+				pelicanURL.directorUrl = fedInfo.DirectorEndpoint
 			}
 		} else if config.GetPreferredPrefix() == config.PelicanPrefix {
-			// We hit this case when we are using a pelican binary but an osdf:// url, therefore we need to disover the osdf federation
+			// We hit this case when we are using a pelican binary but an osdf:// url, therefore we need to discover the osdf federation
 			log.Debugln("In Pelican mode with an osdf:// url, populating metadata with OSDF defaults")
 			// Check if cache has key of federationURL, if not, loader will add it:
 			pelicanUrlItem := te.pelicanURLCache.Get("osg-htc.org")
@@ -528,21 +537,24 @@ func (te *TransferEngine) newPelicanURL(remoteUrl *url.URL) (pelicanURL pelicanU
 	} else if scheme == "pelican" && remoteUrl.Host == "" {
 		// We hit this case when we do not have a hostname with a pelican:// url
 		if param.Federation_DiscoveryUrl.GetString() == "" {
-			return pelicanUrl{}, fmt.Errorf("Pelican url scheme without discovery-url detected, please provide a federation discovery-url " +
+			return pelicanUrl{}, errors.Errorf("pelican url scheme without discovery-url detected, please provide a federation discovery-url " +
 				"(e.g. pelican://<federation-url-in-hostname.org></namespace></path/to/file>) within the hostname or with the -f flag")
+		}
+		// Check if cache has key of federationURL, if not, loader will add it:
+		pelicanUrlItem := te.pelicanURLCache.Get(param.Federation_DiscoveryUrl.GetString())
+		if pelicanUrlItem != nil {
+			pelicanURL = pelicanUrlItem.Value().url
 		} else {
-			// Check if cache has key of federationURL, if not, loader will add it:
-			pelicanUrlItem := te.pelicanURLCache.Get(param.Federation_DiscoveryUrl.GetString())
-			if pelicanUrlItem != nil {
-				pelicanURL = pelicanUrlItem.Value().url
-			} else {
-				return pelicanUrl{}, fmt.Errorf("Issue getting metadata information from cache")
-			}
+			return pelicanUrl{}, errors.Errorf("issue getting metadata information from cache")
 		}
 	} else if scheme == "" {
 		// If we don't have a url scheme, then our metadata information should be in the config
 		log.Debugln("No url scheme detected, getting metadata information from configuration")
-		pelicanURL.directorUrl = param.Federation_DirectorUrl.GetString()
+		if fedInfo, err := config.GetFederation(te.ctx); err == nil {
+			pelicanURL.directorUrl = fedInfo.DirectorEndpoint
+		} else {
+			return pelicanUrl{}, errors.Wrap(err, "failed to lookup pelican metadata from configuration")
+		}
 
 		// If the values do not exist, exit with failure
 		if pelicanURL.directorUrl == "" {
@@ -983,12 +995,15 @@ func (te *TransferEngine) runJobHandler() error {
 //
 // The returned object can be further customized as desired.
 // This function does not "submit" the job for execution.
-func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL, localPath string, upload bool, recursive bool, project string, options ...TransferOption) (tj *TransferJob, err error) {
+func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL, localPath string, upload bool, recursive bool, options ...TransferOption) (tj *TransferJob, err error) {
 
 	id, err := uuid.NewV7()
 	if err != nil {
 		return
 	}
+
+	// See if we have a projectName defined
+	project := searchJobAd(projectName)
 
 	pelicanURL, err := tc.engine.newPelicanURL(remoteUrl)
 	if err != nil {
@@ -1040,7 +1055,7 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 	}
 
 	tj.useDirector = pelicanURL.directorUrl != ""
-	ns, err := getNamespaceInfo(remoteUrl.Path, pelicanURL.directorUrl, upload)
+	ns, err := getNamespaceInfo(tj.ctx, remoteUrl.Path, pelicanURL.directorUrl, upload)
 	if err != nil {
 		log.Errorln(err)
 		err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", remoteUrl.String())
@@ -1706,6 +1721,9 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	// Set the headers
 	req.HTTPRequest.Header.Set("X-Transfer-Status", "true")
 	req.HTTPRequest.Header.Set("X-Pelican-Timeout", headerTimeout.Round(time.Millisecond).String())
+	if searchJobAd(jobId) != "" {
+		req.HTTPRequest.Header.Set("X-Pelican-JobId", searchJobAd(jobId))
+	}
 	req.HTTPRequest.Header.Set("TE", "trailers")
 	req.HTTPRequest.Header.Set("User-Agent", getUserAgent(project))
 	req = req.WithContext(ctx)
@@ -2052,9 +2070,12 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 		transferResult.Error = err
 		return transferResult, err
 	}
-	// Set the authorization header
+	// Set the authorization header as well as other headers
 	request.Header.Set("Authorization", "Bearer "+transfer.token)
 	request.Header.Set("User-Agent", getUserAgent(transfer.project))
+	if searchJobAd(jobId) != "" {
+		request.Header.Set("X-Pelican-JobId", searchJobAd(jobId))
+	}
 	var lastKnownWritten int64
 	t := time.NewTicker(20 * time.Second)
 	defer t.Stop()
@@ -2431,4 +2452,76 @@ func statHttp(ctx context.Context, dest *url.URL, namespace namespaces.Namespace
 		err = nil
 	}
 	return
+}
+
+// This function searches the condor job ad for a specific classad and returns the value of that classad
+func searchJobAd(classad classAd) string {
+
+	// Look for the condor job ad file
+	condorJobAd, isPresent := os.LookupEnv("_CONDOR_JOB_AD")
+	var filename string
+	if isPresent {
+		filename = condorJobAd
+	} else if _, err := os.Stat(".job.ad"); err == nil {
+		filename = ".job.ad"
+	} else {
+		return ""
+	}
+
+	b, err := os.ReadFile(filename)
+	if err != nil {
+		log.Warningln("Can not read .job.ad file", err)
+	}
+
+	switch classad {
+	// The regex sections of the code below come partially from:
+	// https://stackoverflow.com/questions/28574609/how-to-apply-regexp-to-content-in-file-go
+	case projectName:
+		// Get all matches from file
+		// Note: This appears to be invalid regex but is the only thing that appears to work. This way it successfully finds our matches
+		classadRegex, e := regexp.Compile(`^*\s*(ProjectName)\s=\s"*(.*)"*`)
+		if e != nil {
+			log.Fatal(e)
+		}
+
+		matches := classadRegex.FindAll(b, -1)
+		for _, match := range matches {
+			matchString := strings.TrimSpace(string(match))
+			if strings.HasPrefix(matchString, "ProjectName") {
+				matchParts := strings.Split(strings.TrimSpace(matchString), "=")
+
+				if len(matchParts) == 2 { // just confirm we get 2 parts of the string
+					matchValue := strings.TrimSpace(matchParts[1])
+					matchValue = strings.Trim(matchValue, "\"") //trim any "" around the match if present
+					return matchValue
+				}
+			}
+		}
+	case jobId:
+		// Get all matches from file
+		// Note: This appears to be invalid regex but is the only thing that appears to work. This way it successfully finds our matches
+		classadRegex, e := regexp.Compile(`^*\s*(GlobalJobId)\s=\s"*(.*)"*`)
+		if e != nil {
+			log.Fatal(e)
+		}
+
+		matches := classadRegex.FindAll(b, -1)
+		for _, match := range matches {
+			matchString := strings.TrimSpace(string(match))
+			if strings.HasPrefix(matchString, "GlobalJobId") {
+				matchParts := strings.Split(strings.TrimSpace(matchString), "=")
+
+				if len(matchParts) == 2 { // just confirm we get 2 parts of the string
+					matchValue := strings.TrimSpace(matchParts[1])
+					matchValue = strings.Trim(matchValue, "\"") //trim any "" around the match if present
+					return matchValue
+				}
+			}
+		}
+	default:
+		log.Errorln("Invalid classad requested")
+		return ""
+	}
+
+	return ""
 }

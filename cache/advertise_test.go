@@ -24,6 +24,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/require"
@@ -122,7 +123,8 @@ func TestFilterNsAdsForCache(t *testing.T) {
 
 	for _, testInput := range tests {
 		t.Run(testInput.desc, func(t *testing.T) {
-
+			err := config.InitClient()
+			require.NoError(t, err)
 			viper.Set("Federation.DirectorURL", ts.URL)
 			if testInput.permittedNS != nil {
 				viper.Set("Cache.PermittedNamespaces", testInput.permittedNS)
@@ -130,7 +132,7 @@ func TestFilterNsAdsForCache(t *testing.T) {
 			defer viper.Reset()
 
 			cacheServer.SetFilters()
-			err := cacheServer.GetNamespaceAdsFromDirector()
+			err = cacheServer.GetNamespaceAdsFromDirector()
 			require.NoError(t, err)
 			filteredNS := cacheServer.GetNamespaceAds()
 

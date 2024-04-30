@@ -26,6 +26,7 @@ import (
 	"github.com/prometheus/common/route"
 
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
@@ -68,7 +69,11 @@ func promMetricAuthHandler(ctx *gin.Context) {
 
 		status, ok, err := token.Verify(ctx, authOption)
 		if !ok {
-			ctx.AbortWithStatusJSON(status, gin.H{"error": err.Error()})
+			ctx.AbortWithStatusJSON(status,
+				server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    err.Error(),
+				})
 		}
 		// Valid director/self request, pass to the next handler
 		ctx.Next()
@@ -91,7 +96,11 @@ func promQueryEngineAuthHandler(av1 *route.Router) gin.HandlerFunc {
 			if ok {
 				av1.ServeHTTP(c.Writer, c.Request)
 			} else {
-				c.JSON(status, gin.H{"error": "Correct authorization required to access Prometheus query engine APIs. " + err.Error()})
+				c.JSON(status,
+					server_structs.SimpleApiResp{
+						Status: server_structs.RespFailed,
+						Msg:    "Correct authorization required to access Prometheus query engine APIs. " + err.Error(),
+					})
 				return
 			}
 		} else {

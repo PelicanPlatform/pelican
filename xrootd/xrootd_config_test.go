@@ -53,17 +53,18 @@ type xrootdTest struct {
 func (x *xrootdTest) setup() {
 	viper.Reset()
 	server_utils.ResetOriginExports()
-	config.InitConfig()
 	dirname, err := os.MkdirTemp("", "tmpDir")
 	require.NoError(x.T, err)
 	x.T.Cleanup(func() {
 		os.RemoveAll(dirname)
 	})
+	viper.Set("ConfigDir", dirname)
 	viper.Set("Xrootd.RunLocation", dirname)
 	viper.Set("Cache.RunLocation", dirname)
 	viper.Set("Origin.RunLocation", dirname)
 	viper.Set("Origin.StoragePrefix", "/")
 	viper.Set("Origin.FederationPrefix", "/")
+	config.InitConfig()
 	var cancel context.CancelFunc
 	var egrp *errgroup.Group
 	x.ctx, cancel, egrp = test_utils.TestContext(context.Background(), x.T)
@@ -85,6 +86,7 @@ func TestXrootDOriginConfig(t *testing.T) {
 	server_utils.ResetOriginExports()
 	defer viper.Reset()
 	defer server_utils.ResetOriginExports()
+	viper.Set("Configdir", dirname)
 	viper.Set("Origin.RunLocation", dirname)
 	viper.Set("Xrootd.RunLocation", dirname)
 	viper.Set("Origin.StoragePrefix", "/")
@@ -241,6 +243,58 @@ func TestXrootDOriginConfig(t *testing.T) {
 		assert.NotNil(t, configPath)
 		viper.Reset()
 	})
+
+	t.Run("TestOsdfWithXRDHOSTAndPort", func(t *testing.T) {
+		xrootd := xrootdTest{T: t}
+		defer os.Unsetenv("XRDHOST")
+		xrootd.setup()
+
+		_, err := config.SetPreferredPrefix(config.OsdfPrefix)
+		require.NoError(t, err, "Failed to set preferred prefix to OSDF")
+		viper.Set("Server.ExternalWebUrl", "https://my-xrootd.com:8443")
+
+		configPath, err := ConfigXrootd(ctx, true)
+		require.NoError(t, err)
+		assert.NotNil(t, configPath)
+		assert.Equal(t, "my-xrootd.com", os.Getenv("XRDHOST"))
+
+		viper.Reset()
+	})
+
+	t.Run("TestOsdfWithXRDHOSTAndNoPort", func(t *testing.T) {
+		xrootd := xrootdTest{T: t}
+		defer os.Unsetenv("XRDHOST")
+		xrootd.setup()
+
+		_, err := config.SetPreferredPrefix(config.OsdfPrefix)
+		require.NoError(t, err, "Failed to set preferred prefix to OSDF")
+		viper.Set("Server.ExternalWebUrl", "https://my-xrootd.com")
+
+		configPath, err := ConfigXrootd(ctx, true)
+		require.NoError(t, err)
+		assert.NotNil(t, configPath)
+		assert.Equal(t, "my-xrootd.com", os.Getenv("XRDHOST"))
+
+		viper.Reset()
+	})
+
+	t.Run("TestPelicanWithXRDHOST", func(t *testing.T) {
+		// We don't expect XRDHOST to be set for Pelican proper
+		xrootd := xrootdTest{T: t}
+		xrootd.setup()
+
+		_, err := config.SetPreferredPrefix(config.PelicanPrefix)
+		require.NoError(t, err, "Failed to set preferred prefix to Pelican")
+		viper.Set("Server.ExternalWebUrl", "https://my-xrootd.com:8443")
+
+		configPath, err := ConfigXrootd(ctx, true)
+		require.NoError(t, err)
+		assert.NotNil(t, configPath)
+		_, xrdhostIsSet := os.LookupEnv("XRDHOST")
+		assert.False(t, xrdhostIsSet, "XRDHOST should only be set in OSDF mode")
+
+		viper.Reset()
+	})
 }
 
 func TestXrootDCacheConfig(t *testing.T) {
@@ -256,6 +310,7 @@ func TestXrootDCacheConfig(t *testing.T) {
 	viper.Reset()
 	server_utils.ResetOriginExports()
 	viper.Set("Cache.RunLocation", dirname)
+	viper.Set("ConfigDir", dirname)
 	config.InitConfig()
 	configPath, err := ConfigXrootd(ctx, false)
 	require.NoError(t, err)

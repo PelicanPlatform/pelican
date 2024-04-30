@@ -36,12 +36,12 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/mock"
 	"github.com/pelicanplatform/pelican/namespaces"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
@@ -511,6 +511,48 @@ func TestTimeoutHeaderSetForDownload(t *testing.T) {
 	viper.Reset()
 }
 
+func TestJobIdHeaderSetForDownload(t *testing.T) {
+	viper.Reset()
+	config.InitConfig()
+	require.NoError(t, config.InitClient())
+
+	// Create a test .job.ad file
+	jobAdFile, err := os.CreateTemp("", ".job.ad")
+	assert.NoError(t, err)
+
+	// Write the job ad to the file
+	_, err = jobAdFile.WriteString("GlobalJobId = 12345")
+	assert.NoError(t, err)
+	jobAdFile.Close()
+
+	os.Setenv("_CONDOR_JOB_AD", jobAdFile.Name())
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+
+	// We have this flag because our server will get a few requests throughout its lifetime and the other
+	// requests do not contain the X-Pelican-Timeout header
+	timeoutHeaderFound := false
+
+	// Create a mock server to download from
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Check if the "X-Pelican-Timeout" header is set
+		if !timeoutHeaderFound {
+			if r.Header.Get("X-Pelican-JobId") == "" {
+				t.Error("X-Pelican-JobId header is not set")
+			}
+			assert.Equal(t, "12345", r.Header.Get("X-Pelican-JobId"))
+			timeoutHeaderFound = true
+		}
+	}))
+	defer server.Close()
+
+	serverURL, err := url.Parse(server.URL)
+	assert.NoError(t, err)
+	_, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: serverURL, Proxy: false}, filepath.Join(t.TempDir(), "test.txt"), -1, "", "")
+	assert.NoError(t, err)
+	viper.Reset()
+	os.Unsetenv("_CONDOR_JOB_AD")
+}
+
 // Server test object for testing user agent
 type (
 	server_test struct {
@@ -550,16 +592,20 @@ func TestProjInUserAgent(t *testing.T) {
 func TestNewPelicanURL(t *testing.T) {
 	// Set up our federation and context
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
-	viper.Set("Client.WorkerCount", 5)
-	te := NewTransferEngine(ctx)
 	config.InitConfig()
 
 	t.Run("TestOsdfOrStashSchemeWithOSDFPrefixNoError", func(t *testing.T) {
 		viper.Reset()
 		_, err := config.SetPreferredPrefix(config.OsdfPrefix)
+		viper.Set("ConfigDir", t.TempDir())
 		assert.NoError(t, err)
 		// Init config to get proper timeouts
 		config.InitConfig()
+
+		te := NewTransferEngine(ctx)
+		defer func() {
+			require.NoError(t, te.Shutdown())
+		}()
 
 		remoteObject := "osdf:///something/somewhere/thatdoesnotexist.txt"
 		remoteObjectURL, err := url.Parse(remoteObject)
@@ -568,7 +614,6 @@ func TestNewPelicanURL(t *testing.T) {
 		// Instead of relying on osdf, let's just set our global metadata (osdf prefix does this for us)
 		viper.Set("Federation.DirectorUrl", "someDirectorUrl")
 		viper.Set("Federation.DiscoveryUrl", "someDiscoveryUrl")
-		viper.Set("Federation.RegistryUrl", "someRegistryUrl")
 
 		pelicanURL, err := te.newPelicanURL(remoteObjectURL)
 		assert.NoError(t, err)
@@ -581,15 +626,22 @@ func TestNewPelicanURL(t *testing.T) {
 	t.Run("TestOsdfOrStashSchemeWithOSDFPrefixWithError", func(t *testing.T) {
 		viper.Reset()
 		_, err := config.SetPreferredPrefix(config.OsdfPrefix)
-		assert.NoError(t, err)
+		viper.Set("ConfigDir", t.TempDir())
+		require.NoError(t, err)
 		config.InitConfig()
+		require.NoError(t, config.InitClient())
+
+		te := NewTransferEngine(ctx)
+		require.NotNil(t, te)
+		defer func() {
+			require.NoError(t, te.Shutdown())
+		}()
 
 		remoteObject := "osdf:///something/somewhere/thatdoesnotexist.txt"
 		remoteObjectURL, err := url.Parse(remoteObject)
 		assert.NoError(t, err)
 
 		// Instead of relying on osdf, let's just set our global metadata but don't set one piece
-		viper.Set("Federation.DirectorUrl", "someDirectorUrl")
 		viper.Set("Federation.DiscoveryUrl", "someDiscoveryUrl")
 
 		_, err = te.newPelicanURL(remoteObjectURL)
@@ -600,6 +652,16 @@ func TestNewPelicanURL(t *testing.T) {
 
 	t.Run("TestOsdfOrStashSchemeWithPelicanPrefixNoError", func(t *testing.T) {
 		viper.Reset()
+		viper.Set("ConfigDir", t.TempDir())
+		config.InitConfig()
+		require.NoError(t, config.InitClient())
+		te := NewTransferEngine(ctx)
+		require.NotNil(t, te)
+		defer func() {
+			require.NoError(t, te.Shutdown())
+		}()
+
+		mock.MockOSDFDiscovery(t, config.GetTransport())
 		_, err := config.SetPreferredPrefix(config.PelicanPrefix)
 		config.InitConfig()
 		assert.NoError(t, err)
@@ -619,8 +681,17 @@ func TestNewPelicanURL(t *testing.T) {
 	t.Run("TestPelicanSchemeNoError", func(t *testing.T) {
 		viper.Reset()
 		viper.Set("TLSSkipVerify", true)
+		viper.Set("ConfigDir", t.TempDir())
 		config.InitConfig()
 		err := config.InitClient()
+		require.NoError(t, err)
+
+		te := NewTransferEngine(ctx)
+		require.NotNil(t, te)
+		defer func() {
+			require.NoError(t, te.Shutdown())
+		}()
+
 		assert.NoError(t, err)
 		// Create a server that gives us a mock response
 		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -663,7 +734,14 @@ func TestNewPelicanURL(t *testing.T) {
 
 	t.Run("TestPelicanSchemeWithError", func(t *testing.T) {
 		viper.Reset()
+		viper.Set("ConfigDir", t.TempDir())
 		config.InitConfig()
+
+		te := NewTransferEngine(ctx)
+		require.NotNil(t, te)
+		defer func() {
+			require.NoError(t, te.Shutdown())
+		}()
 
 		remoteObject := "pelican://some-host/something/somewhere/thatdoesnotexist.txt"
 		remoteObjectURL, err := url.Parse(remoteObject)
@@ -677,11 +755,18 @@ func TestNewPelicanURL(t *testing.T) {
 	t.Run("TestPelicanSchemeMetadataTimeoutError", func(t *testing.T) {
 		viper.Reset()
 		viper.Set("TLSSkipVerify", true)
+		viper.Set("ConfigDir", t.TempDir())
 		oldResponseHeaderTimeout := viper.Get("transport.ResponseHeaderTimeout")
 		viper.Set("transport.ResponseHeaderTimeout", 0.1*float64(time.Millisecond))
 		viper.Set("Client.WorkerCount", 5)
 		err := config.InitClient()
-		assert.NoError(t, err)
+		require.NoError(t, err)
+
+		te := NewTransferEngine(ctx)
+		defer func() {
+			require.NoError(t, te.Shutdown())
+		}()
+
 		// Create a server that gives us a mock response
 		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// make our response:
@@ -722,10 +807,47 @@ func TestNewPelicanURL(t *testing.T) {
 		if err := egrp.Wait(); err != nil && err != context.Canceled && err != http.ErrServerClosed {
 			require.NoError(t, err)
 		}
-		if err := te.Shutdown(); err != nil {
-			log.Errorln("Failure when shutting down transfer engine:")
-		}
 		// Throw in a viper.Reset for good measure. Keeps our env squeaky clean!
 		viper.Reset()
+	})
+}
+
+// Test that the project name is correctly extracted from the job ad file
+func TestSearchJobAd(t *testing.T) {
+	// Create a temporary file
+	tempFile, err := os.CreateTemp("", "test")
+	assert.NoError(t, err)
+	defer os.Remove(tempFile.Name())
+
+	// Write a project name and job id to the file
+	_, err = tempFile.WriteString("ProjectName = \"testProject\"\nGlobalJobId = 12345")
+	assert.NoError(t, err)
+	tempFile.Close()
+	t.Run("TestNoJobAd", func(t *testing.T) {
+		// Unset this environment var
+		os.Unsetenv("_CONDOR_JOB_AD")
+		// Call GetProjectName and check the result
+		projectName := searchJobAd(projectName)
+		assert.Equal(t, "", projectName)
+	})
+
+	t.Run("TestProjectNameAd", func(t *testing.T) {
+		// Set the _CONDOR_JOB_AD environment variable to the temp file's name
+		os.Setenv("_CONDOR_JOB_AD", tempFile.Name())
+		defer os.Unsetenv("_CONDOR_JOB_AD")
+
+		// Call GetProjectName and check the result
+		projectName := searchJobAd(projectName)
+		assert.Equal(t, "testProject", projectName)
+	})
+
+	t.Run("TestGlobalJobIdAd", func(t *testing.T) {
+		// Set the _CONDOR_JOB_AD environment variable to the temp file's name
+		os.Setenv("_CONDOR_JOB_AD", tempFile.Name())
+		defer os.Unsetenv("_CONDOR_JOB_AD")
+
+		// Call GetProjectName and check the result
+		jobId := searchJobAd(jobId)
+		assert.Equal(t, "12345", jobId)
 	})
 }

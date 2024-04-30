@@ -27,6 +27,7 @@ package namespaces
 
 import (
 	"bytes"
+	"context"
 	_ "embed"
 	"encoding/json"
 	"errors"
@@ -153,11 +154,11 @@ type NamespaceFull struct {
 }
 
 // GetNamespaces returns the list of namespaces
-func GetNamespaces() ([]Namespace, error) {
+func GetNamespaces(ctx context.Context) ([]Namespace, error) {
 	// Allocate the namespaces
 	var nsfull NamespaceFull
 	// Try downloading the namespaces, if it fails, use the embedded namespaces
-	namespacesFromUrl, err := downloadNamespace()
+	namespacesFromUrl, err := downloadNamespace(ctx)
 	if err != nil {
 		log.Debugf("Failed to download namespaces: %s", err)
 		if config.GetPreferredPrefix() == config.PelicanPrefix {
@@ -187,7 +188,7 @@ func GetNamespaces() ([]Namespace, error) {
 }
 
 // downloadNamespace downloads the namespace information with timeouts
-func downloadNamespace() ([]byte, error) {
+func downloadNamespace(ctx context.Context) ([]byte, error) {
 	// Get the namespace url from the environment
 	topoNamespaceUrl := param.Federation_TopologyNamespaceUrl.GetString()
 	if len(topoNamespaceUrl) == 0 {
@@ -195,7 +196,7 @@ func downloadNamespace() ([]byte, error) {
 	}
 	log.Debugln("Downloading namespaces information from", topoNamespaceUrl)
 
-	req, err := http.NewRequest("GET", topoNamespaceUrl, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", topoNamespaceUrl, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -218,10 +219,10 @@ func downloadNamespace() ([]byte, error) {
 }
 
 // MatchNamespace matches the namespace passed in to the namespaces in the list
-func MatchNamespace(path string) (Namespace, error) {
+func MatchNamespace(ctx context.Context, path string) (Namespace, error) {
 	var err error
 	if namespaces == nil {
-		namespaces, err = GetNamespaces()
+		namespaces, err = GetNamespaces(ctx)
 		if err != nil {
 			return Namespace{}, err
 		}

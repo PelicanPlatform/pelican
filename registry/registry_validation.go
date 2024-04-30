@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/jellydator/ttlcache/v3"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
@@ -166,24 +167,24 @@ func validateInstitution(instID string) (bool, error) {
 	if instID == "" {
 		return false, errors.New("Institution ID is required")
 	}
-	institutions := []Institution{}
+
+	institutions := []registrationFieldOption{}
 	if err := param.Registry_Institutions.Unmarshal(&institutions); err != nil {
 		return false, err
 	}
 
 	if len(institutions) == 0 {
-		if institutionsCache == nil || institutionsCache.Len() == 0 {
+		instUrl := param.Registry_InstitutionsUrl.GetString()
+		instUrlTTL := param.Registry_InstitutionsUrlReloadMinutes.GetDuration()
+		if instUrl == "" {
 			// We don't check if config and Registry.InstitutionsUrl was both unpopulated
 			return true, nil
 		} else {
-			cachedInsts, intErr, extErr := getCachedInstitutions()
-			if intErr != nil {
-				log.Warning(intErr)
+			insts, err := getCachedOptions(instUrl, instUrlTTL)
+			if err != nil {
+				return false, errors.Wrap(err, "Error fetching instituions from TTL cache")
 			}
-			if extErr != nil {
-				return false, errors.Wrap(extErr, "Error fetching instituions from TTL cache")
-			}
-			for _, availableInst := range cachedInsts {
+			for _, availableInst := range insts {
 				// We required full equality, as we expect the value is from the institution API
 				if instID == availableInst.ID {
 					return true, nil
@@ -204,76 +205,103 @@ func validateInstitution(instID string) (bool, error) {
 
 // Validates if customFields are valid based on config. Set exactMatch to false to be
 // backward compatible with legacy custom fields that were once defined but removed
-func validateCustomFields(customFields map[string]interface{}, exactMatch bool) (bool, error) {
+func validateCustomFields(customFields map[string]interface{}) (bool, error) {
 	if len(customRegFieldsConfigs) == 0 {
 		if len(customFields) > 0 {
 			return false, errors.New("Bad configuration, Registry.CustomRegistrationFields is not set while validate against custom fields")
 		} else {
 			return true, nil
 		}
-	} else {
-		if customFields == nil {
-			return false, errors.New("Can't validate against nil customFields")
-		}
 	}
-	for _, conf := range customRegFieldsConfigs {
-		val, ok := customFields[conf.Name]
-		if !ok && conf.Required {
-			return false, errors.New(fmt.Sprintf("%q is required", conf.Name))
+	// We initialized all registration fields in registrationFields variable and
+	// this is the source of truth for validation
+	for idx, regField := range registrationFields {
+		// This is how we mark the field is a custom field
+		if !strings.HasPrefix(regField.Name, "custom_fields.") {
+			continue
 		}
-		if ok {
-			switch conf.Type {
-			case "string":
-				if _, ok := val.(string); !ok {
-					return false, errors.New(fmt.Sprintf("%q is expected to be a string, but got %v", conf.Name, val))
-				}
-			case "int":
-				if _, ok := val.(int); !ok {
-					return false, errors.New(fmt.Sprintf("%q is expected to be an int, but got %v", conf.Name, val))
-				}
-			case "bool":
-				if _, ok := val.(bool); !ok {
-					return false, errors.New(fmt.Sprintf("%q is expected to be a boolean, but got %v", conf.Name, val))
-				}
-			case "datetime":
-				switch val.(type) {
-				case int:
-					break
-				case int32:
-					break
-				case int64:
-					break
-				default:
-					return false, fmt.Errorf("%q is expected to be a Unix timestamp, but got %v", conf.Name, val)
-				}
-			case "enum":
-				inOpt := false
-				for _, item := range conf.Options {
-					if item.ID == val {
-						inOpt = true
+		// This is the key of customFields
+		custFieldName := strings.TrimPrefix(regField.Name, "custom_fields.")
+
+		if regField.Required && customFields == nil {
+			return false, fmt.Errorf("%q is required", regField.DisplayedName)
+		} else if !regField.Required && customFields == nil { // Not required,and no input, pass
+			continue
+		} else { // input is not nil, do the validation first, then do the requirement check
+			inField, ok := customFields[custFieldName]
+			if !ok && regField.Required {
+				return false, fmt.Errorf("%q is required", regField.DisplayedName)
+			}
+			if ok { // found, do the validation check
+				switch regField.Type {
+				case "string":
+					if _, ok := inField.(string); !ok {
+						return false, errors.New(fmt.Sprintf("%q is expected to be a string, but got %v", regField.DisplayedName, inField))
 					}
+				case "int":
+					if _, ok := inField.(int); !ok {
+						return false, errors.New(fmt.Sprintf("%q is expected to be an int, but got %v", regField.DisplayedName, inField))
+					}
+				case "bool":
+					if _, ok := inField.(bool); !ok {
+						return false, errors.New(fmt.Sprintf("%q is expected to be a boolean, but got %v", regField.DisplayedName, inField))
+					}
+				case "datetime":
+					switch inField.(type) {
+					case int:
+						break
+					case int32:
+						break
+					case int64:
+						break
+					default:
+						return false, fmt.Errorf("%q is expected to be a Unix timestamp, but got %v", regField.DisplayedName, inField)
+					}
+				case "enum":
+					// Get the options from optionsCache if OptionsUrl is set
+					// and update the registrationFields accordingly
+					options := regField.Options
+					if regField.OptionsUrl != "" {
+						fetchedOptions, err := getCachedOptions(regField.OptionsUrl, ttlcache.DefaultTTL)
+						if err != nil {
+							log.Errorf("Error getting/fetching options for the field %s. Use cached options instead", regField.DisplayedName)
+						} else {
+							options = fetchedOptions
+							registrationFields[idx].Options = options
+						}
+					}
+
+					// Check the provided option is in the list of available options
+					if len(options) == 0 {
+						return false, fmt.Errorf("Bad configuration, the custom field %q has empty options", regField.DisplayedName)
+					}
+					inOpt := false
+					for _, item := range options {
+						if item.ID == inField {
+							inOpt = true
+							break
+						}
+					}
+					if !inOpt {
+						return false, fmt.Errorf("%q is an enumeration type, but the value (ID) is not in the options. Got %v. Available options are: %s", regField.DisplayedName, inField, optionsToString(regField.Options))
+					}
+				default:
+					return false, errors.New(fmt.Sprintf("field %q has unsupported type %s", regField.DisplayedName, regField.Type))
 				}
-				if !inOpt {
-					return false, fmt.Errorf("%q is an enumeration type, but the value is not in the options. Got %v", conf.Name, val)
-				}
-			default:
-				return false, errors.New(fmt.Sprintf("The type of %q is not supported", conf.Name))
 			}
 		}
 	}
-	// Optioanlly check if the customFields are defined in config
-	if exactMatch {
-		for key := range customFields {
-			found := false
-			for _, conf := range customRegFieldsConfigs {
-				if conf.Name == key {
-					found = true
-					break
-				}
+	// Check the custom fields exists in the configured fields
+	for key := range customFields {
+		found := false
+		for _, conf := range registrationFields {
+			if strings.TrimPrefix(conf.Name, "custom_fields.") == key {
+				found = true
+				break
 			}
-			if !found {
-				return false, errors.New(fmt.Sprintf("%q is not a valid custom field", key))
-			}
+		}
+		if !found {
+			return false, errors.New(fmt.Sprintf("%q is not a valid custom field", key))
 		}
 	}
 	return true, nil
