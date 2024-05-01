@@ -317,8 +317,8 @@ var (
 	}, []string{"path", "type"}) // type: hit/miss/bypass
 
 	CacheIO = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "xrootd_cache_io",
-		Help: "I/O statistics for the cache server, including active I/O, total I/O, and IO wait time (in seconds)",
+		Name: "xrootd_server_io",
+		Help: "I/O statistics for the origin/cache server, including active I/O, total I/O, and IO wait time (in seconds)",
 	}, []string{"type"}) // type: active/total/wait_time
 
 	lastStats SummaryStat

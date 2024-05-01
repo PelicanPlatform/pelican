@@ -55,6 +55,8 @@ func DirectorServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 
 	director.ConfigFilterdServers()
 
+	director.ConfigServerIOQuery(ctx, egrp)
+
 	// Configure the shortcut middleware to either redirect to a cache
 	// or to an origin
 	defaultResponse := param.Director_DefaultResponse.GetString()

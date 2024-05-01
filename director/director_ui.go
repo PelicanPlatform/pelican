@@ -51,6 +51,7 @@ type (
 		Filtered     bool                      `json:"filtered"`
 		FilteredType filterType                `json:"filteredType"`
 		Status       HealthTestStatus          `json:"status"`
+		IOLoad       float64                   `json:"ioLoad"`
 	}
 
 	statResponse struct {
@@ -132,6 +133,7 @@ func listServers(ctx *gin.Context) {
 			Filtered:     filtered,
 			FilteredType: ft,
 			Status:       healthStatus,
+			IOLoad:       server.IOLoad,
 		}
 		resList = append(resList, res)
 	}

@@ -91,6 +91,7 @@ func queryPromtheus(query string, withToken bool) (promParsed promQLParsed, err 
 		tc := token.NewWLCGToken()
 		tc.Issuer = extWebUrl
 		tc.Lifetime = time.Minute
+		tc.Subject = "director"
 		tc.AddAudiences(extWebUrl)
 		tc.AddScopes(token_scopes.Monitoring_Query)
 		tk, err = tc.CreateToken()

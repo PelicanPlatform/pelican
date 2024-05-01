@@ -78,6 +78,7 @@ type (
 		Writes       bool       `json:"enable_write"`
 		DirectReads  bool       `json:"enable_fallback_read"` // True if reads from the origin are permitted when no cache is available
 		FromTopology bool       `json:"from_topology"`
+		IOLoad       float64    `json:"io_load"`
 	}
 
 	// The struct holding a server's advertisement (including ServerAd and NamespaceAd)

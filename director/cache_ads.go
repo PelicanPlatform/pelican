@@ -50,21 +50,25 @@ var (
 	filteredServersMutex = sync.RWMutex{}
 )
 
-func recordAd(ad server_structs.ServerAd, namespaceAds *[]server_structs.NamespaceAdV2) {
-	if err := updateLatLong(&ad); err != nil {
-		log.Debugln("Failed to lookup GeoIP coordinates for host", ad.URL.Host)
+func recordAd(sAd server_structs.ServerAd, namespaceAds *[]server_structs.NamespaceAdV2) {
+	if err := updateLatLong(&sAd); err != nil {
+		log.Debugln("Failed to lookup GeoIP coordinates for host", sAd.URL.Host)
 	}
 
-	if ad.URL.String() == "" {
-		log.Errorf("The URL of the serverAd %#v is empty. Cannot set the TTL cache.", ad)
+	if sAd.URL.String() == "" {
+		log.Errorf("The URL of the serverAd %#v is empty. Cannot set the TTL cache.", sAd)
 		return
 	}
-	customTTL := param.Director_AdvertisementTTL.GetDuration()
-	if customTTL == 0 {
-		serverAds.Set(ad.URL.String(), &server_structs.Advertisement{ServerAd: ad, NamespaceAds: *namespaceAds}, ttlcache.DefaultTTL)
-	} else {
-		serverAds.Set(ad.URL.String(), &server_structs.Advertisement{ServerAd: ad, NamespaceAds: *namespaceAds}, customTTL)
+	if serverAds.Has(sAd.URL.String()) {
+		ext := serverAds.Get(sAd.URL.String())
+		sAd.IOLoad = ext.Value().IOLoad // we copy the value from the existing serverAD to be consistent
 	}
+	ad := server_structs.Advertisement{ServerAd: sAd, NamespaceAds: *namespaceAds}
+
+	customTTL := param.Director_AdvertisementTTL.GetDuration()
+
+	// FIXME: with the new ttl key (using server URL), if the server from topology has the same serverURL as the Pelican server, then there will be overwritting conflicts
+	serverAds.Set(sAd.URL.String(), &ad, customTTL) // if customTTL == 0, TTL will fall back to default TTL
 }
 
 func updateLatLong(ad *server_structs.ServerAd) error {

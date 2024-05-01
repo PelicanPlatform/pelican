@@ -21,6 +21,8 @@ package director
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"time"
 
 	"github.com/jellydator/ttlcache/v3"
 	log "github.com/sirupsen/logrus"
@@ -28,6 +30,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 // List all namespaces from origins registered at the director
@@ -153,4 +156,58 @@ func ConfigFilterdServers() {
 	for _, sn := range param.Director_FilteredServers.GetStringSlice() {
 		filteredServers[sn] = permFiltered
 	}
+}
+
+// Start a goroutine to query director's Prometheus endpoint for origin/cache server I/O stats
+// and save the value to the corresponding serverAd
+func ConfigServerIOQuery(ctx context.Context, egrp *errgroup.Group) {
+	egrp.Go(func() error {
+		for {
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-time.After(1 * time.Minute):
+				items := serverAds.Items()
+				for _, item := range items {
+					if item.IsExpired() {
+						continue
+					}
+					serverUrl := item.Key()
+					serverAd := item.Value()
+					if serverAd.FromTopology {
+						// Topology servers have no Prometheus metrics
+						continue
+					}
+					query := fmt.Sprintf(`deriv(xrootd_server_io{job="origin_cache_servers", type="total", server_auth_url="%s"}[5m])`, serverUrl)
+					queryResult, err := queryPromtheus(query, true)
+					if err != nil {
+						log.Debugf("Failed to update IO stat for server %s: %v", serverUrl, err)
+						continue
+					}
+					if queryResult.ResultType != "vector" {
+						log.Debugf("Failed to update IO stat for server %s: Prometheus response returns type %s not vector", serverUrl, queryResult.ResultType)
+						continue
+					}
+					if len(queryResult.Result) != 1 {
+						log.Debugf("Failed to update IO stat for server %s: Prometheus response contains more or less than 1 result: %d", serverUrl, len(queryResult.Result))
+						continue
+					}
+					ioDerivStr := queryResult.Result[0].Values[0].Value
+					if ioDerivStr == "" {
+						continue
+					} else {
+						ioDeriv, err := strconv.ParseFloat(ioDerivStr, 64)
+						if err != nil {
+							log.Debugf("Failed to update IO stat for server %s: failed to convert Prometheus response to a float number: %s", serverUrl, ioDerivStr)
+							continue
+						}
+						// Here we use a sigmoid function
+						sigmoidIO := utils.Sigmoid(ioDeriv)
+						serverAd.IOLoad = sigmoidIO
+					}
+				}
+				log.Debug("Successfully updated server IO stat")
+			}
+		}
+	})
 }
