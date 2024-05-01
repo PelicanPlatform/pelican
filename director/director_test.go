@@ -1258,3 +1258,60 @@ func TestHandleAllowServer(t *testing.T) {
 		assert.Contains(t, string(resB), "'name' is a required path parameter")
 	})
 }
+
+func TestGetRedirectUrl(t *testing.T) {
+	adFromTopo := server_structs.ServerAd{
+		URL: url.URL{
+			Host: "fake-topology-ad.org:8443",
+		},
+		AuthURL: url.URL{
+			Host: "fake-topology-ad.org:8444",
+		},
+		FromTopology: true,
+	}
+	adFromPelican := server_structs.ServerAd{
+		URL: url.URL{
+			Host: "fake-pelican-ad.org:8443",
+		},
+		AuthURL: url.URL{
+			Host: "fake-pelican-ad.org:8444",
+		},
+		FromTopology: false,
+	}
+	adWithTopoNotSet := server_structs.ServerAd{
+		URL: url.URL{
+			Host: "fake-ad.org:8443",
+		},
+		AuthURL: url.URL{
+			Host: "fake-ad.org:8444",
+		},
+		FromTopology: false,
+	}
+
+	t.Run("get-redirect-url-topology", func(t *testing.T) {
+		// Public object from topology
+		url := getRedirectURL("/some/path", adFromTopo, false)
+		assert.Equal(t, "http://fake-topology-ad.org:8443/some/path", url.String())
+
+		// Protected object from topology
+		url = getRedirectURL("/some/path", adFromTopo, true)
+		assert.Equal(t, "https://fake-topology-ad.org:8444/some/path", url.String())
+	})
+	t.Run("get-redirect-url-pelican", func(t *testing.T) {
+		// Public object from pelican
+		url := getRedirectURL("/some/path", adFromPelican, false)
+		assert.Equal(t, "https://fake-pelican-ad.org:8443/some/path", url.String())
+
+		// Protected object from pelican
+		url = getRedirectURL("/some/path", adFromPelican, true)
+		assert.Equal(t, "https://fake-pelican-ad.org:8444/some/path", url.String())
+	})
+	t.Run("get-redirect-url-topo-not-set", func(t *testing.T) {
+		// When the FromTopology field is not set, we assume the ad is from Pelican
+		url := getRedirectURL("/some/path", adWithTopoNotSet, false)
+		assert.Equal(t, "https://fake-ad.org:8443/some/path", url.String())
+
+		url = getRedirectURL("/some/path", adWithTopoNotSet, true)
+		assert.Equal(t, "https://fake-ad.org:8444/some/path", url.String())
+	})
+}
