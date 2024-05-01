@@ -57,6 +57,7 @@ type Config struct {
 	Director struct {
 		AdvertisementTTL time.Duration
 		CacheResponseHostnames []string
+		CacheSortMethod string
 		DefaultResponse string
 		EnableBroker bool
 		EnableOIDC bool
@@ -325,6 +326,7 @@ type configWithType struct {
 	Director struct {
 		AdvertisementTTL struct { Type string; Value time.Duration }
 		CacheResponseHostnames struct { Type string; Value []string }
+		CacheSortMethod struct { Type string; Value string }
 		DefaultResponse struct { Type string; Value string }
 		EnableBroker struct { Type string; Value bool }
 		EnableOIDC struct { Type string; Value bool }

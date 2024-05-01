@@ -125,6 +125,7 @@ var (
 	Cache_SentinelLocation = StringParam{"Cache.SentinelLocation"}
 	Cache_Url = StringParam{"Cache.Url"}
 	Cache_XRootDPrefix = StringParam{"Cache.XRootDPrefix"}
+	Director_CacheSortMethod = StringParam{"Director.CacheSortMethod"}
 	Director_DefaultResponse = StringParam{"Director.DefaultResponse"}
 	Director_GeoIPLocation = StringParam{"Director.GeoIPLocation"}
 	Director_MaxMindKeyFile = StringParam{"Director.MaxMindKeyFile"}

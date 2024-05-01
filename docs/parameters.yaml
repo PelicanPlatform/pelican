@@ -1082,6 +1082,21 @@ type: stringSlice
 default: none
 components: ["director"]
 ---
+name: Director.CacheSortMethod
+description: |+
+  When the director recieves a client request that needs to be redirected to a cache, it will use this method to
+  determine the ordering of the caches. The default method is "distance", which sorts caches by their spherical distance
+  from the client.
+
+  Available methods include:
+  - "distance": Sorts caches by their spherical distance from the client.
+  - "distanceAndLoad": Sorts caches according to both their distance and a calculated load. This is currently a placeholder,
+    and returns the same ordering as "distance".
+  - "random": Sorts caches randomly.
+type: string
+default: distance
+components: ["director"]
+---
 name: Director.OriginResponseHostnames
 description: |+
   A list of virtual hostnames for the director. If a request is sent by the client to one of these hostnames,
