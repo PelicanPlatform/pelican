@@ -187,19 +187,22 @@ func handleWebUIAuth(ctx *gin.Context) {
 	user, err := GetUser(ctx)
 
 	// Skip auth check for static files other than html pages
-	if path.Ext(requestPath) != ".html" {
+	if path.Ext(requestPath) != "" && path.Ext(requestPath) != ".html" {
 		ctx.Next()
 		return
 	}
 
 	// Handle initialization. If db is nill, then redirect user to the initialization page
 	if strings.HasPrefix(requestPath, "/initialization") {
-		if db != nil {
+		if db != nil { // Password initialized, redirect away from the init page
 			ctx.Redirect(http.StatusFound, "/view/")
 			ctx.Abort()
 			return
+		} else { // If not init, pass the auth handler and render the page
+			ctx.Next()
+			return
 		}
-	} else if db == nil {
+	} else if db == nil { // For all other paths, if the password is not initialized
 		ctx.Redirect(http.StatusFound, "/view/initialization/code/")
 		ctx.Abort()
 		return
