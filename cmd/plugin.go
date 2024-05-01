@@ -36,6 +36,7 @@ import (
 	"github.com/pelicanplatform/pelican/classads"
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -383,18 +384,12 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 		}
 	}()
 
-	caches := make([]*url.URL, 0, 1)
-	var nearestCacheURL *url.URL
+	// Check for local cache
+	var caches []*url.URL
 	if nearestCache, ok := os.LookupEnv("NEAREST_CACHE"); ok && nearestCache != "" {
-		cacheList := strings.Split(nearestCache, ",")
-		for _, cache := range cacheList {
-			if nearestCacheURL, err = url.Parse(cache); err != nil {
-				err = errors.Wrapf(err, "unable to parse preferred cache (%s) as URL", nearestCacheURL)
-				return
-			} else {
-				caches = append(caches, nearestCacheURL)
-				log.Debugln("Setting nearest cache to", nearestCacheURL.String())
-			}
+		caches, err = utils.GetPreferredCaches(nearestCache)
+		if err != nil {
+			return
 		}
 	}
 

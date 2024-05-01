@@ -21,11 +21,11 @@ package main
 import (
 	"net/url"
 	"os"
-	"strings"
 
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -98,18 +98,11 @@ func getMain(cmd *cobra.Command, args []string) {
 	} else if cache, _ := cmd.Flags().GetString("cache"); cache != "" {
 		preferredCache = cache
 	}
-	caches := make([]*url.URL, 0, 1)
-	if preferredCache != "" {
-		cacheList := strings.Split(preferredCache, ",")
-		for _, cache := range cacheList {
-			if preferredCacheURL, err := url.Parse(cache); err != nil {
-				log.Errorf("Unable to parse preferred cache (%s) as URL: %s", cache, err.Error())
-				os.Exit(1)
-			} else {
-				caches = append(caches, preferredCacheURL)
-				log.Debugln("Preferred cache for transfer:", preferredCacheURL)
-			}
-		}
+	var caches []*url.URL
+	caches, err = utils.GetPreferredCaches(preferredCache)
+	if err != nil {
+		log.Errorln(err)
+		os.Exit(1)
 	}
 
 	if len(source) > 1 {

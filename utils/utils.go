@@ -19,9 +19,12 @@
 package utils
 
 import (
+	"net/url"
 	"strings"
 	"unicode"
 
+	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )
@@ -50,4 +53,20 @@ func SnakeCaseToHumanReadable(input string) string {
 		words[i] = cases.Title(language.English).String(word)
 	}
 	return strings.Join(words, " ")
+}
+
+// GetPreferredCaches parses the caches it is given and returns it as a list of url's
+func GetPreferredCaches(preferredCaches string) (caches []*url.URL, err error) {
+	if preferredCaches != "" {
+		cacheList := strings.Split(preferredCaches, ",")
+		for _, cache := range cacheList {
+			if preferredCacheURL, err := url.Parse(cache); err != nil {
+				return nil, errors.Errorf("Unable to parse preferred cache (%s) as URL: %s", cache, err.Error())
+			} else {
+				caches = append(caches, preferredCacheURL)
+				log.Debugln("Preferred cache for transfer:", preferredCacheURL)
+			}
+		}
+	}
+	return
 }
