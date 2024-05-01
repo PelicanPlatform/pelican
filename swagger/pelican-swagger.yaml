@@ -396,6 +396,14 @@ definitions:
         type: string
         description: The status of director file transfer test against the server. Can be Initializing|Unknown|OK|Error
         default: Unknown
+      namespacePrefixes:
+        type: array
+        items:
+          type: string
+          minItems: 1
+        default: []
+        example: ["/foo", "/bar"]
+        description: The namespaces the returned server provides
   OriginExportCapabilities:
     type: object
     description: The access control of an origin exported namespace
