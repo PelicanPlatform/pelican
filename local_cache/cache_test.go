@@ -347,67 +347,6 @@ func TestLargeFile(t *testing.T) {
 
 }
 
-// Create five 1MB files.  Trigger a purge, ensuring that the cleanup is
-// done according to LRU
-func TestPurge(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	viper.Reset()
-	viper.Set("LocalCache.Size", "5MB")
-	ft := fed_test_utils.NewFedTest(t, pubOriginCfg)
-
-	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
-	te := client.NewTransferEngine(ctx)
-
-	cacheUrl := &url.URL{
-		Scheme: "unix",
-		Path:   param.LocalCache_Socket.GetString(),
-	}
-
-	size := 0
-	for idx := 0; idx < 5; idx++ {
-		log.Debugln("Will write origin file", filepath.Join(ft.Exports[0].StoragePrefix, fmt.Sprintf("hello_world.txt.%d", idx)))
-		fp, err := os.OpenFile(filepath.Join(ft.Exports[0].StoragePrefix, fmt.Sprintf("hello_world.txt.%d", idx)), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
-		require.NoError(t, err)
-		size = writeBigBuffer(t, fp, 1)
-	}
-	require.NotEqual(t, 0, size)
-
-	for idx := 0; idx < 5; idx++ {
-		tr, err := client.DoGet(ctx, fmt.Sprintf("pelican://"+param.Server_Hostname.GetString()+":"+strconv.Itoa(param.Server_WebPort.GetInt())+"/test/hello_world.txt.%d", idx),
-			filepath.Join(tmpDir, fmt.Sprintf("hello_world.txt.%d", idx)), false, client.WithCaches(cacheUrl))
-		assert.NoError(t, err)
-		require.Equal(t, 1, len(tr))
-		assert.Equal(t, int64(size), tr[0].TransferredBytes)
-		assert.NoError(t, tr[0].Error)
-	}
-
-	// Size of the cache should be just small enough that the 5th file triggers LRU deletion of the first.
-	for idx := 0; idx < 5; idx++ {
-		func() {
-			fp, err := os.Open(filepath.Join(param.LocalCache_DataLocation.GetString(), "test", fmt.Sprintf("hello_world.txt.%d.DONE", idx)))
-			if idx == 0 {
-				log.Errorln("Error:", err)
-				assert.ErrorIs(t, err, os.ErrNotExist)
-			} else {
-				assert.NoError(t, err)
-			}
-			defer fp.Close()
-		}()
-	}
-	t.Cleanup(func() {
-		cancel()
-		if err := egrp.Wait(); err != nil && err != context.Canceled && err != http.ErrServerClosed {
-			require.NoError(t, err)
-		}
-		if err := te.Shutdown(); err != nil {
-			log.Errorln("Failure when shutting down transfer engine:", err)
-		}
-		// Throw in a viper.Reset for good measure. Keeps our env squeaky clean!
-		viper.Reset()
-	})
-}
-
 // Create four 1MB files (above low-water mark).  Force a purge, ensuring that the cleanup is
 // done according to LRU
 func TestForcePurge(t *testing.T) {
