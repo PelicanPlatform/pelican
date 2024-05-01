@@ -103,7 +103,10 @@ func getRedirectURL(reqPath string, ad server_structs.ServerAd, requiresAuth boo
 	if requiresAuth {
 		redirectURL.Scheme = "https"
 	} else {
-		redirectURL.Scheme = "http"
+		redirectURL.Scheme = "https"
+		if ad.FromTopology {
+			redirectURL.Scheme = "http"
+		}
 	}
 	redirectURL.Host = serverURL.Host
 	redirectURL.Path = reqPath
