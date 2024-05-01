@@ -209,7 +209,8 @@ func sortServerAdsByIP(addr netip.Addr, ads []server_structs.ServerAd) ([]server
 		case "random":
 			weights[idx] = SwapMap{rand.Float64(), idx}
 		default:
-			return nil, errors.Errorf("Invalid sort method '%s' set in Director.CacheSortMethod", param.Director_CacheSortMethod.GetString())
+			return nil, errors.Errorf("Invalid sort method '%s' set in Director.CacheSortMethod. Valid methods are 'distance',"+
+				"'distanceAndLoad', and 'random.'", param.Director_CacheSortMethod.GetString())
 		}
 	}
 
