@@ -58,7 +58,7 @@ var (
 type (
 	SwapMap struct {
 		Weight float64
-		Index    int
+		Index  int
 	}
 
 	SwapMaps []SwapMap
