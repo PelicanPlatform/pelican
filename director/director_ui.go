@@ -48,6 +48,7 @@ type (
 		Longitude    float64                   `json:"longitude"`
 		Writes       bool                      `json:"enableWrite"`
 		DirectReads  bool                      `json:"enableFallbackRead"`
+		Listings     bool                      `json:"enableListing"`
 		Filtered     bool                      `json:"filtered"`
 		FilteredType filterType                `json:"filteredType"`
 		Status       HealthTestStatus          `json:"status"`
@@ -129,6 +130,7 @@ func listServers(ctx *gin.Context) {
 			Longitude:    server.Longitude,
 			Writes:       server.Writes,
 			DirectReads:  server.DirectReads,
+			Listings:     server.Listings,
 			Filtered:     filtered,
 			FilteredType: ft,
 			Status:       healthStatus,

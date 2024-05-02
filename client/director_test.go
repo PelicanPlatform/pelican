@@ -47,7 +47,7 @@ func TestGetCachesFromDirectorResponse(t *testing.T) {
 	}
 
 	// Call the function in question
-	caches, err := GetCachesFromDirectorResponse(directorResponse, true)
+	caches, err := getCachesFromDirectorResponse(directorResponse, true)
 
 	// Test for expected outputs
 	assert.NoError(t, err, "Error getting caches from the Director's response")

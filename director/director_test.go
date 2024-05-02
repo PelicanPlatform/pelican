@@ -987,6 +987,19 @@ func TestRedirects(t *testing.T) {
 		expectedPath = "/api/v1.0/director/origin/foo/bar"
 		assert.Equal(t, expectedPath, c.Request.URL.Path)
 
+		// Test PROPFIND works for both base path and API path
+		req = httptest.NewRequest("PROPFIND", "/foo/bar", nil)
+		c.Request = req
+		ShortcutMiddleware("origin")(c)
+		expectedPath = "/api/v1.0/director/origin/foo/bar"
+		assert.Equal(t, expectedPath, c.Request.URL.Path)
+
+		req = httptest.NewRequest("PROPFIND", "/api/v1.0/director/origin/foo/bar", nil)
+		c.Request = req
+		ShortcutMiddleware("origin")(c)
+		expectedPath = "/api/v1.0/director/origin/foo/bar"
+		assert.Equal(t, expectedPath, c.Request.URL.Path)
+
 		// Host-aware tests
 		// Test that we can turn on host-aware redirects and get one appropriate redirect from each
 		// type of header (as we've already tested that hostname redirects function)

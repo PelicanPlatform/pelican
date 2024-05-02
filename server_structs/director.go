@@ -76,6 +76,7 @@ type (
 		Latitude     float64    `json:"latitude"`
 		Longitude    float64    `json:"longitude"`
 		Writes       bool       `json:"enable_write"`
+		Listings     bool       `json:"enable_listing"`       // True if the origin allows directory listings
 		DirectReads  bool       `json:"enable_fallback_read"` // True if reads from the origin are permitted when no cache is available
 		FromTopology bool       `json:"from_topology"`
 	}
