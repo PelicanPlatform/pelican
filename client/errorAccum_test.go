@@ -48,13 +48,20 @@ func TestErrorsRetryableFalse(t *testing.T) {
 	te.AddError(&SlowTransferError{})
 	te.AddError(&SlowTransferError{})
 	assert.True(t, te.AllErrorsRetryable(), "ErrorsRetryable should be true")
+	te.resetErrors()
 
 	te.AddError(&ConnectionSetupError{})
 	assert.True(t, te.AllErrorsRetryable(), "ErrorsRetryable should be true")
+	te.resetErrors()
 
 	// Now add a non-retryable error
 	te.AddError(errors.New("Non retryable error"))
 	assert.False(t, te.AllErrorsRetryable(), "ErrorsRetryable should be false")
+	te.resetErrors()
+
+	te.AddError(&dirListingNotSupportedError{})
+	assert.False(t, te.AllErrorsRetryable(), "ErrorsRetryable should be false")
+	te.resetErrors()
 
 }
 

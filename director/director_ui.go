@@ -48,7 +48,7 @@ type (
 		Longitude    float64                   `json:"longitude"`
 		Writes       bool                      `json:"enableWrite"`
 		DirectReads  bool                      `json:"enableFallbackRead"`
-		Listings     bool                      `json:"enableListings"`
+		Listings     bool                      `json:"enableListing"`
 		Filtered     bool                      `json:"filtered"`
 		FilteredType filterType                `json:"filteredType"`
 		Status       HealthTestStatus          `json:"status"`

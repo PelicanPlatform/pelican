@@ -118,6 +118,10 @@ type (
 		Err error
 	}
 
+	dirListingNotSupportedError struct {
+		Err error
+	}
+
 	// Transfer attempt error wraps an error with information about the service/proxy used
 	TransferAttemptError struct {
 		serviceHost string
@@ -335,6 +339,19 @@ func (e *allocateMemoryError) Unwrap() error {
 
 func (e *allocateMemoryError) Is(target error) bool {
 	_, ok := target.(*allocateMemoryError)
+	return ok
+}
+
+func (e *dirListingNotSupportedError) Error() string {
+	return e.Err.Error()
+}
+
+func (e *dirListingNotSupportedError) Unwrap() error {
+	return e.Err
+}
+
+func (e *dirListingNotSupportedError) Is(target error) bool {
+	_, ok := target.(*dirListingNotSupportedError)
 	return ok
 }
 
@@ -1088,14 +1105,15 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 			// Check for a dir list host in namespace
 			if tj.namespace.DirListHost == "" {
 				// Both methods to get directory listings failed
-				return nil, errors.New("Origin and/or namespace does not support directory listings")
+				err = &dirListingNotSupportedError{Err: errors.New("origin and/or namespace does not support directory listings")}
+				return nil, err
 			}
 		} else if resp.StatusCode == http.StatusTemporaryRedirect {
 			// If the director responds with a 307 (temporary redirect), we're working with a new Director.
 			// In that event, we can get the collections URL from our redirect
 			collections := resp.Header.Get("Location")
 			if collections == "" {
-				return nil, errors.New("Collections URL not found in director response")
+				return nil, errors.New("collections URL not found in director response")
 			}
 			// The resp redirect includes the full path to the object from the origin, we are only interested in the scheme and host
 			collectionsURL, err := url.Parse(collections)
@@ -1108,7 +1126,7 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 			}
 			tj.namespace.DirListHost = dirlisthost.String()
 		} else {
-			return nil, fmt.Errorf("Unexpected response from director when requesting collections url from origin: %v", resp.Status)
+			return nil, fmt.Errorf("unexpected response from director when requesting collections url from origin: %v", resp.Status)
 		}
 	}
 

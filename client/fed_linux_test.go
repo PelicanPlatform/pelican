@@ -412,10 +412,10 @@ func TestFailureOnOriginDisablingListings(t *testing.T) {
 	log.Debugln("Will create origin file at", destDir)
 	err := os.WriteFile(filepath.Join(destDir, "test.txt"), []byte("test file content"), fs.FileMode(0644))
 	require.NoError(t, err)
-	uploadURL := fmt.Sprintf("pelican://%s:%s%s/%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
+	downloadURL := fmt.Sprintf("pelican://%s:%s%s/%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
 		fed.Exports[0].FederationPrefix, "test")
 
-	_, err = client.DoGet(fed.Ctx, uploadURL, t.TempDir(), true)
+	_, err = client.DoGet(fed.Ctx, downloadURL, t.TempDir(), true)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "Origin and/or namespace does not support directory listings")
+	assert.Contains(t, err.Error(), "origin and/or namespace does not support directory listings")
 }
