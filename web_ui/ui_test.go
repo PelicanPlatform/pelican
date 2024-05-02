@@ -133,7 +133,7 @@ func TestHandleWebUIAuth(t *testing.T) {
 	route := gin.New()
 	route.GET("/view/*requestPath", handleWebUIAuth, func(ctx *gin.Context) { ctx.Status(200) })
 
-	t.Run("html-redirect-to-init-without-db", func(t *testing.T) {
+	t.Run("redirect-to-init-without-db", func(t *testing.T) {
 		cleanupAuthDB()
 		r := httptest.NewRecorder()
 		req, err := http.NewRequest("GET", "/view/test.html", nil)
@@ -143,9 +143,34 @@ func TestHandleWebUIAuth(t *testing.T) {
 		assert.Equal(t, "/view/initialization/code/", r.Result().Header.Get("Location"))
 	})
 
-	t.Run("no-redirect-for-unauthed-users", func(t *testing.T) {
-		// We don't redirect unauthed user at the backend, so that frontend can
-		// properly handle the redirect
+	t.Run("init-page-no-redirct-without-db", func(t *testing.T) {
+		cleanupAuthDB()
+		r := httptest.NewRecorder()
+		req, err := http.NewRequest("GET", "/view/initialization/code/", nil)
+		require.NoError(t, err)
+		route.ServeHTTP(r, req)
+
+		assert.Equal(t, http.StatusOK, r.Result().StatusCode)
+
+		r = httptest.NewRecorder()
+		req, err = http.NewRequest("GET", "/view/initialization/password/", nil)
+		require.NoError(t, err)
+		route.ServeHTTP(r, req)
+
+		assert.Equal(t, http.StatusOK, r.Result().StatusCode)
+	})
+
+	t.Run("no-redirect-without-db-on-init-page", func(t *testing.T) {
+		cleanupAuthDB()
+		r := httptest.NewRecorder()
+		req, err := http.NewRequest("GET", "/view/initialization/code/", nil)
+		require.NoError(t, err)
+		route.ServeHTTP(r, req)
+
+		assert.Equal(t, http.StatusOK, r.Result().StatusCode)
+	})
+
+	t.Run("redirect-to-login-with-db-initialzied", func(t *testing.T) {
 		setupTestAuthDB(t)
 		t.Cleanup(cleanupAuthDB)
 
@@ -155,6 +180,34 @@ func TestHandleWebUIAuth(t *testing.T) {
 		route.ServeHTTP(r, req)
 
 		assert.Equal(t, http.StatusOK, r.Result().StatusCode)
+
+		r = httptest.NewRecorder()
+		req, err = http.NewRequest("GET", "/view/origin/", nil)
+		require.NoError(t, err)
+		route.ServeHTTP(r, req)
+
+		assert.Equal(t, "/view/login/", r.Result().Header.Get("Location"))
+
+		authDB.Store(nil)
+	})
+
+	t.Run("init-page-redirect-to-root-with-db-initialized", func(t *testing.T) {
+		setupTestAuthDB(t)
+		t.Cleanup(cleanupAuthDB)
+
+		r := httptest.NewRecorder()
+		req, err := http.NewRequest("GET", "/view/initialization/code/", nil)
+		require.NoError(t, err)
+		route.ServeHTTP(r, req)
+
+		assert.Equal(t, "/view/", r.Result().Header.Get("Location"))
+
+		r = httptest.NewRecorder()
+		req, err = http.NewRequest("GET", "/view/initialization/password/", nil)
+		require.NoError(t, err)
+		route.ServeHTTP(r, req)
+
+		assert.Equal(t, "/view/", r.Result().Header.Get("Location"))
 
 		authDB.Store(nil)
 	})

@@ -21,6 +21,7 @@ package client
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -172,6 +173,13 @@ func IsRetryable(err error) bool {
 			return false
 		}
 	}
+
+	// If we have a timeout error, we are retryable
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+
 	return false
 }
 

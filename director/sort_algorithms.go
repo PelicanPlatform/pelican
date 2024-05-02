@@ -20,10 +20,13 @@ package director
 
 import (
 	"math"
+
+	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 // Mathematical function, not implementation, came from
 // http://www.johndcook.com/python_longitude_latitude.html
+// Returned values are not actual distances, but normalized between [0,1]
 func distanceOnSphere(lat1 float64, long1 float64, lat2 float64, long2 float64) float64 {
 
 	if (lat1 == lat2) && (long1 == long2) {
@@ -54,5 +57,28 @@ func distanceOnSphere(lat1 float64, long1 float64, lat2 float64, long2 float64) 
 		math.Cos(phi1)*math.Cos(phi2))
 	arc := math.Acos(cos)
 
-	return arc
+	// Finally, standardize the distance to be between [0,1]
+	return arc / math.Pi
+}
+
+// Create a weight between [0,1] that indicates a priority. The returned weight is directly correlated
+// with priority (higher weight is higher priority is lower distance)
+func distanceWeight(coord Coordinate, ad server_structs.ServerAd) float64 {
+	return 1 - distanceOnSphere(coord.Lat, coord.Long, ad.Latitude, ad.Longitude)
+}
+
+// Create a weight between [0,1] that indicates a priority. The returned weight is directly correlated
+// with priority (higher weight is higher priority)
+func distanceAndLoadWeight(coord Coordinate, sAd server_structs.ServerAd) float64 {
+	distance := distanceOnSphere(coord.Lat, coord.Long, sAd.Latitude, sAd.Longitude)
+
+	// For now, load is always 0.5. Eventually we'll pull this value from the server ad. Furthermore,
+	// assume a server's load has more impact on its performance than its distance does. As long as load is
+	// hard coded, this function should act exactly like distanceWeight.
+	// TODO: Come up with a better function once we have an actual load value and know how it works
+	load := 0.5
+	a1 := 1.0 / 3.0
+	a2 := 2.0 / 3.0
+
+	return 1 - a1*distance - a2*load
 }

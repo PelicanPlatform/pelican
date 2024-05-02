@@ -18,6 +18,12 @@
 
 # Configuration options used to test Geo Overrides in sort_test.go
 GeoIPOverrides:
+  # Override for clientIP for sorting tests. This is a UW Madison IP and here we
+  # pin it to UW Madison's coordinates to avoid needing the GeoIP database
+  - IP: "128.104.153.60"
+    Coordinate:
+      Lat: 43.073904
+      Long: -89.384859
   # Valid IPv4
   - IP: "192.168.0.1"
     Coordinate:
