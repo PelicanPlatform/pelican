@@ -1040,7 +1040,14 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 		if currentServers.IsEnabled(CacheType) {
 			viper.SetDefault("Cache.RunLocation", filepath.Join("/run", "pelican", "xrootd", "cache"))
 		}
-		viper.SetDefault("Cache.DataLocation", "/run/pelican/xcache")
+		viper.SetDefault("Cache.LocalRoot", "/run/pelican/cache")
+		if viper.IsSet("Cache.DataLocation") {
+			viper.SetDefault("Cache.DataLocations", []string{filepath.Join(param.Cache_DataLocation.GetString(), "data")})
+			viper.SetDefault("Cache.MetaLocations", []string{filepath.Join(param.Cache_DataLocation.GetString(), "meta")})
+		} else {
+			viper.SetDefault("Cache.DataLocations", []string{"/run/pelican/cache/data"})
+			viper.SetDefault("Cache.MetaLocations", []string{"/run/pelican/cache/meta"})
+		}
 		viper.SetDefault("LocalCache.RunLocation", filepath.Join("/run", "pelican", "localcache"))
 
 		viper.SetDefault("Origin.Multiuser", true)
@@ -1084,7 +1091,14 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 			}
 			cleanupDirOnShutdown(ctx, runtimeDir)
 		}
-		viper.SetDefault("Cache.DataLocation", filepath.Join(runtimeDir, "xcache"))
+		viper.SetDefault("Cache.LocalRoot", filepath.Join(runtimeDir, "cache"))
+		if viper.IsSet("Cache.DataLocation") {
+			viper.SetDefault("Cache.DataLocations", []string{filepath.Join(param.Cache_DataLocation.GetString(), "data")})
+			viper.SetDefault("Cache.MetaLocations", []string{filepath.Join(param.Cache_DataLocation.GetString(), "meta")})
+		} else {
+			viper.SetDefault("Cache.DataLocations", []string{filepath.Join(runtimeDir, "pelican/cache/data")})
+			viper.SetDefault("Cache.MetaLocations", []string{filepath.Join(runtimeDir, "pelican/cache/meta")})
+		}
 		viper.SetDefault("LocalCache.RunLocation", filepath.Join(runtimeDir, "cache"))
 		viper.SetDefault("Origin.Multiuser", false)
 	}
