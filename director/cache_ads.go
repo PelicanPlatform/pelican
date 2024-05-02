@@ -59,6 +59,20 @@ func recordAd(ad server_structs.ServerAd, namespaceAds *[]server_structs.Namespa
 		log.Errorf("The URL of the serverAd %#v is empty. Cannot set the TTL cache.", ad)
 		return
 	}
+
+	// There's an existing ad in the cache
+	if existing := serverAds.Get(ad.URL.String()); existing != nil {
+		if ad.FromTopology && !existing.Value().FromTopology {
+			// if the incoming is from topology but the existing is from Pelican
+			log.Debugf("ServerAd from the topology server %s (url: %s) was ignored. There's an existing Pelican serverAd in the director", ad.Name, ad.URL.String())
+			return
+		}
+		if !ad.FromTopology && existing.Value().FromTopology {
+			// Pelican server will overwrite topology one. We leave a message to let admin know
+			log.Debugf("Existing topology server %s (url: %s) is replaced by the Pelican server %s", existing.Value().Name, existing.Value().URL.String(), ad.Name)
+		}
+	}
+
 	customTTL := param.Director_AdvertisementTTL.GetDuration()
 	if customTTL == 0 {
 		serverAds.Set(ad.URL.String(), &server_structs.Advertisement{ServerAd: ad, NamespaceAds: *namespaceAds}, ttlcache.DefaultTTL)
