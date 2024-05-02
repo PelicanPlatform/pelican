@@ -420,9 +420,16 @@ definitions:
     properties:
       status:
         type: string
-        description:
+        description: >
           The registration status of the federation prefix.
-          Can be "Not Supported"|"Completed"|"Incomplete"|"Registration Error"
+          Can be "Not Supported" | "Completed" | "Incomplete" | "Registration Error"
+
+          * "Not Supported": the Pelican registry is below v7.8.0 and does not support checking registration status.
+            In this case, `edit_url` is empty.
+          * "Completed": the registration is completed
+          * "Incomplete": the registration is not completed. `edit_url` will takes the user to the correspoding registration page
+            to finish the registration. `status_description` contains detail information of which field(s) are missing.
+          * "Registration Error": there is an error registering the namespace. `edit_url` is empty and the user cannot edit the registration.
         example: Incomplete
       status_description:
         type: string
