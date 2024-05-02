@@ -380,8 +380,9 @@ func TestRecordAd(t *testing.T) {
 		serverAds.DeleteAll()
 	})
 
-	topologyServerUrl := url.URL{Scheme: "https", Host: "origin.chtc.wisc.edu"}
-	pelicanServerUrl := url.URL{Scheme: "https", Host: "pelican.chtc.wisc.edu"}
+	topologyServerUrl := url.URL{Scheme: "http", Host: "origin.chtc.wisc.edu"} // Topology server URL is always in http
+	pelicanServerUrl := url.URL{Scheme: "https", Host: "origin.chtc.wisc.edu"} // Pelican server URL is always in https
+
 	mockTopology := &server_structs.Advertisement{
 		ServerAd: server_structs.ServerAd{
 			URL:          topologyServerUrl,
@@ -399,13 +400,13 @@ func TestRecordAd(t *testing.T) {
 
 	t.Run("topology-server-added-if-no-duplicate", func(t *testing.T) {
 		recordAd(mockTopology.ServerAd, &mockTopology.NamespaceAds)
-
+		assert.Len(t, serverAds.Items(), 1)
 		assert.True(t, serverAds.Has(topologyServerUrl.String()))
 	})
 
-	t.Run("topology-server-added-if-no-duplicate", func(t *testing.T) {
+	t.Run("pelican-server-added-if-no-duplicate", func(t *testing.T) {
 		recordAd(mockPelican.ServerAd, &mockPelican.NamespaceAds)
-
+		assert.Len(t, serverAds.Items(), 1)
 		assert.True(t, serverAds.Has(pelicanServerUrl.String()))
 	})
 
@@ -413,6 +414,7 @@ func TestRecordAd(t *testing.T) {
 		recordAd(mockTopology.ServerAd, &mockTopology.NamespaceAds)
 		recordAd(mockPelican.ServerAd, &mockPelican.NamespaceAds)
 
+		assert.Len(t, serverAds.Items(), 1)
 		assert.True(t, serverAds.Has(pelicanServerUrl.String()))
 		getAd := serverAds.Get(pelicanServerUrl.String())
 		assert.NotNil(t, getAd)
@@ -423,6 +425,7 @@ func TestRecordAd(t *testing.T) {
 		recordAd(mockPelican.ServerAd, &mockPelican.NamespaceAds)
 		recordAd(mockTopology.ServerAd, &mockTopology.NamespaceAds)
 
+		assert.Len(t, serverAds.Items(), 1)
 		assert.True(t, serverAds.Has(pelicanServerUrl.String()))
 		getAd := serverAds.Get(pelicanServerUrl.String())
 		assert.NotNil(t, getAd)
