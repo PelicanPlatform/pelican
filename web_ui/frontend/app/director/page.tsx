@@ -25,7 +25,7 @@ import useSWR from "swr";
 import {Server} from "@/components/Main";
 import CardList from "@/components/Namespace/CardList";
 import DirectorCard, {DirectorCardProps} from "@/components/Namespace/DirectorCard";
-import {Authenticated, getAuthenticated, isLoggedIn} from "@/helpers/login";
+import {getUser} from "@/helpers/login";
 
 
 const getServers = async () => {
@@ -43,18 +43,9 @@ const getServers = async () => {
 
 export default function Home() {
 
-    const [error, setError] = useState<string | undefined>(undefined);
-    const [authenticated, setAuthenticated] = useState<Authenticated | undefined>(undefined)
-
     const {data} = useSWR<Server[]>("getServers", getServers)
 
-    useEffect(() => {
-        (async () => {
-            if(await isLoggedIn()){
-                setAuthenticated(getAuthenticated() as Authenticated)
-            }
-        })();
-    }, [])
+    const {data: user, error} = useSWR("getUser", getUser)
 
     const cacheData = useMemo(() => {
         return data?.filter((server) => server.type === "Cache")
@@ -70,7 +61,7 @@ export default function Home() {
                 <Grid item xs={12} lg={8} xl={6}>
                     <Typography variant={"h4"} pb={2}>Origins</Typography>
                     {originData ?
-                        <CardList<DirectorCardProps> Card={DirectorCard} cardProps={{authenticated: authenticated}} data={originData.map(x => {return {server: x}})}/> :
+                        <CardList<DirectorCardProps> Card={DirectorCard} cardProps={{authenticated: user}} data={originData.map(x => {return {server: x}})}/> :
                         <Box>
                             <Skeleton variant="rectangular" height={118} />
                         </Box>
@@ -79,7 +70,7 @@ export default function Home() {
                 <Grid item xs={12} lg={8} xl={6}>
                     <Typography variant={"h4"} pb={2}>Caches</Typography>
                     {cacheData ?
-                        <CardList<DirectorCardProps> Card={DirectorCard} cardProps={{authenticated: authenticated}} data={cacheData.map(x => {return {server: x}})}/> :
+                        <CardList<DirectorCardProps> Card={DirectorCard} cardProps={{authenticated: user}} data={cacheData.map(x => {return {server: x}})}/> :
                         <Box>
                             <Skeleton variant="rectangular" height={118} />
                         </Box>
