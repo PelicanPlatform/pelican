@@ -94,7 +94,7 @@ func TestFetchRegStatus(t *testing.T) {
 		assert.Equal(t, "https://mockurl.org", foo.EditUrl)
 	})
 
-	t.Run("fetch-with-registry-404", func(t *testing.T) {
+	t.Run("fetch-with-registry-404/405", func(t *testing.T) {
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			if req.Method != http.MethodPost {

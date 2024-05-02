@@ -279,6 +279,8 @@ func handleWebUIAuth(ctx *gin.Context) {
 				return
 			}
 			// For other pages, pass the check so that the frontend can handle it
+			ctx.Next()
+			return
 		}
 
 		// If rootPage requires admin privilege

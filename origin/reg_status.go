@@ -106,8 +106,8 @@ func FetchRegStatus(prefixes []string) (*server_structs.CheckNamespaceCompleteRe
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to read the response body")
 	}
-	if res.StatusCode == 404 {
-		log.Warningf("fetch namespace registration status returns 404, the Pelican registry version is likely < 7.8.0. Fall back to unknown status")
+	if res.StatusCode == 404 || res.StatusCode == 405 {
+		log.Warningf("Fetch namespace registration status returns %d, the Pelican registry version is likely < 7.8.0. Fall back to unknown status", res.StatusCode)
 		return nil, RegistryNotImplErr
 	}
 	if res.StatusCode != 200 {
@@ -130,6 +130,7 @@ func FetchAndSetRegStatus(prefix string) error {
 			RegistrationStatus{Status: RegStatusNotSupported, Msg: RegistryNotImplErr.Error()},
 			ttlcache.DefaultTTL,
 		)
+		return nil // If not implemented, we simply set the status to unknown and return
 	} else if err != nil {
 		return err
 	}

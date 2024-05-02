@@ -170,11 +170,13 @@ func TestHandleWebUIAuth(t *testing.T) {
 		assert.Equal(t, http.StatusOK, r.Result().StatusCode)
 	})
 
-	t.Run("redirect-to-login-with-db-initialzied", func(t *testing.T) {
+	t.Run("no-redirect-to-login-with-db-initialzied", func(t *testing.T) {
+		// We let the frontend to handle unauthorized user (if the password is initialzied)
 		setupTestAuthDB(t)
 		t.Cleanup(cleanupAuthDB)
 
 		r := httptest.NewRecorder()
+		// This route is not in ui.go/adminAccessPages, so we will pass the admin check and return 200
 		req, err := http.NewRequest("GET", "/view/test.html", nil)
 		require.NoError(t, err)
 		route.ServeHTTP(r, req)
@@ -182,11 +184,19 @@ func TestHandleWebUIAuth(t *testing.T) {
 		assert.Equal(t, http.StatusOK, r.Result().StatusCode)
 
 		r = httptest.NewRecorder()
-		req, err = http.NewRequest("GET", "/view/origin/", nil)
+		// This route is not in ui.go/adminAccessPages, so we will pass the admin check and return 200
+		req, err = http.NewRequest("GET", "/view/registry/origin", nil)
 		require.NoError(t, err)
 		route.ServeHTTP(r, req)
 
-		assert.Equal(t, "/view/login/", r.Result().Header.Get("Location"))
+		r = httptest.NewRecorder()
+		// This route **is** in ui.go/adminAccessPages,
+		// but the user is not logged in, so we will hand it over to the frontend for the redirect
+		req, err = http.NewRequest("GET", "/view/origin", nil)
+		require.NoError(t, err)
+		route.ServeHTTP(r, req)
+
+		assert.Equal(t, http.StatusOK, r.Result().StatusCode)
 
 		authDB.Store(nil)
 	})
