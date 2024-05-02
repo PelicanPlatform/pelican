@@ -19,7 +19,6 @@
 package utils
 
 import (
-	"fmt"
 	"net/url"
 	"strings"
 	"unicode"
@@ -77,16 +76,21 @@ func CheckValidQuery(transferUrl *url.URL, isPlugin bool) (err error) {
 	query := transferUrl.Query()
 	_, hasRecursive := query["recursive"]
 	_, hasPack := query["pack"]
-	_, hasDirectRead := query["directread"]
+	directRead, hasDirectRead := query["directread"]
 
-	// If we are not the plugin, we should not use ?recursive (we should pass a -r flag)
+	// // If we are not the plugin, we should not use ?recursive (we should pass a -r flag)
 	if !isPlugin && hasRecursive {
-		return fmt.Errorf("Cannot use the recursive query parameter when not utilizing the pelican plugin")
+		return errors.New("cannot use the recursive query parameter when not utilizing the pelican plugin")
 	}
 
 	// If we have both recursive and pack, we should return a failure
 	if hasRecursive && hasPack {
-		return fmt.Errorf("Cannot have both recursive and pack query parameters")
+		return errors.New("cannot have both recursive and pack query parameters")
+	}
+
+	// If we have both recursive and pack, we should return a failure
+	if hasDirectRead && directRead[0] != "" {
+		return errors.New("directread query parameter should not have any values assigned to it")
 	}
 
 	// If we have no query, or we have recursive or pack, we are good
@@ -94,5 +98,5 @@ func CheckValidQuery(transferUrl *url.URL, isPlugin bool) (err error) {
 		return nil
 	}
 
-	return fmt.Errorf("Invalid query parameters provided in url: %s", transferUrl)
+	return errors.New("invalid query parameter(s) " + transferUrl.RawQuery + " provided in url " + transferUrl.String())
 }

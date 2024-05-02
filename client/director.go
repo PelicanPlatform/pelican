@@ -112,20 +112,8 @@ func CreateNsFromDirectorResp(dirResp *http.Response) (namespace namespaces.Name
 
 // Make a request to the director for a given verb/resource; return the
 // HTTP response object only if a 307 is returned.
-func queryDirector(ctx context.Context, verb, sourceUrlStr, directorUrl string) (resp *http.Response, err error) {
-	// Parse the source URL, this way we can get any queries and pieces from the URL (or just accept the path)
-	var source string
-	sourceUrl, err := url.Parse(sourceUrlStr)
-	if err != nil {
-		return
-	}
-	if sourceUrl.RawQuery != "" {
-		source = sourceUrl.Path + "?" + sourceUrl.RawQuery
-	} else {
-		source = sourceUrl.Path
-	}
-
-	resourceUrl := directorUrl + source
+func queryDirector(ctx context.Context, verb, sourcePath, directorUrl string) (resp *http.Response, err error) {
+	resourceUrl := directorUrl + sourcePath
 	// Here we use http.Transport to prevent the client from following the director's
 	// redirect. We use the Location url elsewhere (plus we still need to do the token
 	// dance!)

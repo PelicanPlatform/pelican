@@ -65,7 +65,7 @@ func TestValidQuery(t *testing.T) {
 
 		err = CheckValidQuery(transferUrl, false)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "Invalid query parameters provided in url: pelican://something/here?recrustive=true")
+		assert.Contains(t, err.Error(), "invalid query parameter(s) recrustive=true provided in url pelican://something/here?recrustive=true")
 	})
 
 	// Test that both pack and recursive queries are not allowed together (only in plugin case)
@@ -76,7 +76,7 @@ func TestValidQuery(t *testing.T) {
 
 		err = CheckValidQuery(transferUrl, true)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "Cannot have both recursive and pack query parameters")
+		assert.Contains(t, err.Error(), "cannot have both recursive and pack query parameters")
 	})
 
 	// Test that a recursive query fails when not the plugin
@@ -87,7 +87,7 @@ func TestValidQuery(t *testing.T) {
 
 		err = CheckValidQuery(transferUrl, false)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "Cannot use the recursive query parameter when not utilizing the pelican plugin")
+		assert.Contains(t, err.Error(), "cannot use the recursive query parameter when not utilizing the pelican plugin")
 	})
 
 	// Test we pass with both pack and directread
@@ -108,5 +108,16 @@ func TestValidQuery(t *testing.T) {
 
 		err = CheckValidQuery(transferUrl, true)
 		assert.NoError(t, err)
+	})
+
+	// Test if we have a value assigned to directread, we fail
+	t.Run("testValueOnDirectReadFailure", func(t *testing.T) {
+		transferStr := "pelican://something/here?directread=false"
+		transferUrl, err := url.Parse(transferStr)
+		assert.NoError(t, err)
+
+		err = CheckValidQuery(transferUrl, false)
+		assert.Error(t, err)
+		assert.Equal(t, err.Error(), "directread query parameter should not have any values assigned to it")
 	})
 }

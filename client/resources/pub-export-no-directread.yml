@@ -1,4 +1,5 @@
-# Origin export configuration to test full multi-export capabilities
+# Origin export configuration to test direct read functionality,
+# testing how we handle origin direct reads enabled but namespace direct reads disabled
 
 Origin:
   # Things that configure the origin itself

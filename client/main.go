@@ -194,7 +194,7 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 		return 0, errors.Wrap(err, "Failed to generate pelicanURL object")
 	}
 
-	ns, err := getNamespaceInfo(ctx, destUri.Path, pelicanURL.directorUrl, false)
+	ns, err := getNamespaceInfo(ctx, destUri.Path, pelicanURL.directorUrl, false, "")
 	if err != nil {
 		return 0, err
 	}
@@ -231,7 +231,7 @@ func GetCacheHostnames(ctx context.Context, testFile string) (urls []string, err
 	if err != nil {
 		return
 	}
-	ns, err := getNamespaceInfo(ctx, testFile, fedInfo.DirectorEndpoint, false)
+	ns, err := getNamespaceInfo(ctx, testFile, fedInfo.DirectorEndpoint, false, "")
 	if err != nil {
 		return
 	}
@@ -405,13 +405,16 @@ func discoverHTCondorToken(tokenName string) string {
 // Retrieve federation namespace information for a given URL.
 // If OSDFDirectorUrl is non-empty, then the namespace information will be pulled from the director;
 // otherwise, it is pulled from topology.
-func getNamespaceInfo(ctx context.Context, resourcePath, OSDFDirectorUrl string, isPut bool) (ns namespaces.Namespace, err error) {
+func getNamespaceInfo(ctx context.Context, resourcePath, OSDFDirectorUrl string, isPut bool, query string) (ns namespaces.Namespace, err error) {
 	// If we have a director set, go through that for namespace info, otherwise use topology
 	if OSDFDirectorUrl != "" {
 		log.Debugln("Will query director at", OSDFDirectorUrl, "for object", resourcePath)
 		verb := "GET"
 		if isPut {
 			verb = "PUT"
+		}
+		if query != "" {
+			resourcePath += "?" + query
 		}
 		var dirResp *http.Response
 		dirResp, err = queryDirector(ctx, verb, resourcePath, OSDFDirectorUrl)

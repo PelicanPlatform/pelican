@@ -58,7 +58,7 @@ var (
 	//go:embed resources/pub-export-no-directread.yml
 	pubExportNoDirectRead string
 
-	//go:embed resources/pub-export-no-directread.yml
+	//go:embed resources/pub-origin-no-directread.yml
 	pubOriginNoDirectRead string
 )
 
@@ -540,15 +540,19 @@ func TestDirectReads(t *testing.T) {
 
 		// Download the file with GET. Shouldn't need a token to succeed
 		transferResults, err := client.DoGet(fed.Ctx, uploadURL, t.TempDir(), false)
-		assert.NoError(t, err)
-		if err == nil {
-			assert.Equal(t, transferResults[0].TransferredBytes, int64(17))
-		}
+		require.NoError(t, err)
+		assert.Equal(t, transferResults[0].TransferredBytes, int64(17))
+
 		// Assert that the file was not cached
 		cacheDataLocation := param.Cache_DataLocation.GetString() + export.FederationPrefix
 		filepath := filepath.Join(cacheDataLocation, filepath.Base(tempFile.Name()))
 		_, err = os.Stat(filepath)
 		assert.True(t, os.IsNotExist(err))
+
+		// Assert our endpoint was the origin and not the cache
+		for _, attempt := range transferResults[0].Attempts {
+			assert.Equal(t, "https://"+attempt.Endpoint, param.Origin_Url.GetString())
+		}
 	})
 
 	// Test that direct reads fail if DirectReads=false is set for origin config but true for namespace/export
@@ -557,7 +561,6 @@ func TestDirectReads(t *testing.T) {
 		server_utils.ResetOriginExports()
 		fed := fed_test_utils.NewFedTest(t, pubOriginNoDirectRead)
 		export := fed.Exports[0]
-		export.Capabilities.DirectReads = true
 		testFileContent := "test file content"
 		// Drop the testFileContent into the origin directory
 		tempFile, err := os.Create(filepath.Join(export.StoragePrefix, "test.txt"))
@@ -577,7 +580,7 @@ func TestDirectReads(t *testing.T) {
 
 		// Download the file with GET. Shouldn't need a token to succeed
 		_, err = client.DoGet(fed.Ctx, uploadURL, t.TempDir(), false)
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "No origins on specified endpoint have direct reads enabled")
 	})
 
@@ -607,7 +610,7 @@ func TestDirectReads(t *testing.T) {
 
 		// Download the file with GET. Shouldn't need a token to succeed
 		_, err = client.DoGet(fed.Ctx, uploadURL, t.TempDir(), false)
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "No origins on specified endpoint have direct reads enabled")
 	})
 }

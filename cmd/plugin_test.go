@@ -398,6 +398,7 @@ func TestPluginDirectRead(t *testing.T) {
 		return runPluginWorker(fed.Ctx, false, workChan, results)
 	})
 
+	var developerData map[string]interface{}
 	done := false
 	for !done {
 		select {
@@ -414,13 +415,24 @@ func TestPluginDirectRead(t *testing.T) {
 			boolVal, ok := transferSuccess.(bool)
 			require.True(t, ok)
 			assert.True(t, boolVal)
+
+			// Assert that our endpoint is always the origin and not the cache
+			data, err := resultAd.Get("DeveloperData")
+			assert.NoError(t, err)
+			developerData, ok = data.(map[string]interface{})
+			require.True(t, ok)
+
+			attempts, ok := developerData["Attempts"].(int)
+			require.True(t, ok)
+
+			for i := 0; i < attempts; i++ {
+				key := fmt.Sprintf("Endpoint%d", i)
+				endpoint, ok := developerData[key].(string)
+				require.True(t, ok)
+				assert.Equal(t, param.Origin_Url.GetString(), "https://"+endpoint)
+			}
 		}
 	}
-	// Assert that the file was not cached
-	cacheDataLocation := param.Cache_DataLocation.GetString() + fed.Exports[0].FederationPrefix
-	filepath := filepath.Join(cacheDataLocation, "test.txt")
-	_, err = os.Stat(filepath)
-	assert.True(t, os.IsNotExist(err))
 }
 
 func TestWriteOutfile(t *testing.T) {

@@ -442,6 +442,10 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		ginCtx.JSON(http.StatusMethodNotAllowed, gin.H{"error": "No origins on specified endpoint allow directory listings"})
 	}
 
+	// We know this can be easily bypassed, we need to eventually enforce this
+	// Origin should only be redirected to if it allows direct reads or the cache is the one it is talking to.
+	// Any client that uses this api that doesn't set directreads can talk directly to an origin
+
 	// Check if we are doing a DirectRead and if it is allowed
 	if ginCtx.Request.URL.Query().Has("directread") {
 		for idx, originAd := range originAds {
