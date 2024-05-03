@@ -17,7 +17,7 @@
 # ***************************************************************
 
 ARG BASE_YUM_REPO=release
-ARG BASE_OSG_SERIES=3.6
+ARG BASE_OSG_SERIES=23
 
 FROM goreleaser/goreleaser:v1.21.0 AS pelican-build
 ARG IS_NONRELEASE_BUILD="true"
@@ -49,8 +49,7 @@ RUN useradd -o -u 10940 -g 10940 -s /bin/sh xrootd
 # FIXME: We install xrootd from the osg-test repo to incorporate patch for the throttle plugin
 # We should come back and remove it once xrootd 5.7.0 is released
 RUN yum -y update \
-    && yum -y install https://repo.opensciencegrid.org/osg/23-main/osg-23-main-el8-release-latest.rpm\
-    && yum -y --enablerepo=osg-testing install tini xrootd xrootd-client xrdcl-http xrootd-server xrootd-scitokens xrootd-voms curl java-17-openjdk-headless \
+    && yum -y install --enablerepo osg-testing tini curl java-17-openjdk-headless xrootd xrootd-client xrdcl-http xrootd-server xrootd-scitokens xrootd-voms \
     && yum clean all \
     && rm -rf /var/cache/yum/
 
