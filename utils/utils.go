@@ -78,9 +78,9 @@ func CheckValidQuery(transferUrl *url.URL, isPlugin bool) (err error) {
 	_, hasPack := query["pack"]
 	directRead, hasDirectRead := query["directread"]
 
-	// // If we are not the plugin, we should not use ?recursive (we should pass a -r flag)
+	// If we are not the plugin, we should not use ?recursive (we should pass a -r flag)
 	if !isPlugin && hasRecursive {
-		return errors.New("cannot use the recursive query parameter when not utilizing the pelican plugin")
+		return errors.New("recursive query parameter is not yet supported in URLs outside of the plugin")
 	}
 
 	// If we have both recursive and pack, we should return a failure
@@ -88,9 +88,10 @@ func CheckValidQuery(transferUrl *url.URL, isPlugin bool) (err error) {
 		return errors.New("cannot have both recursive and pack query parameters")
 	}
 
-	// If we have both recursive and pack, we should return a failure
+	// If there is an argument in the directread query param, inform the user this is deprecated and their argument will be ignored
 	if hasDirectRead && directRead[0] != "" {
-		return errors.New("directread query parameter should not have any values assigned to it")
+		log.Warnln("Arguments (true/false) for the directread query have been deprecated and will be disallowed in a future release. The argument provided will be ignored")
+		return nil
 	}
 
 	// If we have no query, or we have recursive or pack, we are good
