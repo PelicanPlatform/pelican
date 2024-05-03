@@ -76,7 +76,10 @@ func distanceAndLoadWeight(coord Coordinate, sAd server_structs.ServerAd) float6
 	// assume a server's load has more impact on its performance than its distance does. As long as load is
 	// hard coded, this function should act exactly like distanceWeight.
 	// TODO: Come up with a better function once we have an actual load value and know how it works
-	load := 0.5
+	load := sAd.IOLoad
+	if load == 0 { // Make sure an empty value won't give the server a very high priority
+		load = 0.5
+	}
 	a1 := 1.0 / 3.0
 	a2 := 2.0 / 3.0
 

@@ -19,6 +19,7 @@
 package director
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -74,7 +75,7 @@ type (
 // where the only arg is the query to execute, without "?query="
 //
 // Example: queryPromtheus("up") // Get metric of the running Prometheus instances
-func queryPromtheus(query string, withToken bool) (promParsed promQLParsed, err error) {
+func queryPromtheus(ctx context.Context, query string, withToken bool) (promParsed promQLParsed, err error) {
 	if strings.HasPrefix(query, "?query=") {
 		err = fmt.Errorf("query argument should not contain \"?query=\"")
 		return
@@ -102,7 +103,7 @@ func queryPromtheus(query string, withToken bool) (promParsed promQLParsed, err 
 	}
 
 	client := http.Client{Transport: config.GetTransport()}
-	req, err := http.NewRequest(http.MethodGet, queryUrl, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, queryUrl, nil)
 	if err != nil {
 		return
 	}
