@@ -154,7 +154,7 @@ func TestListServerAds(t *testing.T) {
 		func() {
 			serverAds.DeleteAll()
 		}()
-		ads := listServerAds([]server_structs.ServerType{server_structs.OriginType, server_structs.CacheType})
+		ads := listAdvertisement([]server_structs.ServerType{server_structs.OriginType, server_structs.CacheType})
 		assert.Equal(t, 0, len(ads))
 	})
 
@@ -162,26 +162,31 @@ func TestListServerAds(t *testing.T) {
 		func() {
 			serverAds.DeleteAll()
 		}()
+		mockOriginAd := server_structs.Advertisement{
+			ServerAd:     mockOriginServerAd,
+			NamespaceAds: []server_structs.NamespaceAdV2{},
+		}
+		mockCacheAd := server_structs.Advertisement{
+			ServerAd:     mockCacheServerAd,
+			NamespaceAds: []server_structs.NamespaceAdV2{},
+		}
+
 		serverAds.Set(mockOriginServerAd.URL.String(),
-			&server_structs.Advertisement{
-				ServerAd:     mockOriginServerAd,
-				NamespaceAds: []server_structs.NamespaceAdV2{},
-			}, ttlcache.DefaultTTL)
+			&mockOriginAd, ttlcache.DefaultTTL)
 		serverAds.Set(mockCacheServerAd.URL.String(),
-			&server_structs.Advertisement{
-				ServerAd:     mockCacheServerAd,
-				NamespaceAds: []server_structs.NamespaceAdV2{}},
+			&mockCacheAd,
 			ttlcache.DefaultTTL)
-		adsAll := listServerAds([]server_structs.ServerType{server_structs.OriginType, server_structs.CacheType})
+
+		adsAll := listAdvertisement([]server_structs.ServerType{server_structs.OriginType, server_structs.CacheType})
 		assert.Equal(t, 2, len(adsAll))
 
-		adsOrigin := listServerAds([]server_structs.ServerType{server_structs.OriginType})
+		adsOrigin := listAdvertisement([]server_structs.ServerType{server_structs.OriginType})
 		require.Equal(t, 1, len(adsOrigin))
-		assert.True(t, adsOrigin[0] == mockOriginServerAd)
+		assert.EqualValues(t, mockOriginAd, adsOrigin[0])
 
-		adsCache := listServerAds([]server_structs.ServerType{server_structs.CacheType})
+		adsCache := listAdvertisement([]server_structs.ServerType{server_structs.CacheType})
 		require.Equal(t, 1, len(adsCache))
-		assert.True(t, adsCache[0] == mockCacheServerAd)
+		assert.EqualValues(t, mockCacheAd, adsCache[0])
 	})
 }
 
