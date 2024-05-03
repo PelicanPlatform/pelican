@@ -42,6 +42,7 @@ Server:
   UILoginRateLimit: 1
 Director:
   DefaultResponse: cache
+  CacheSortMethod: "distance"
   MinStatResponse: 1
   MaxStatResponse: 1
   StatTimeout: 200ms
@@ -66,7 +67,7 @@ Origin:
   EnablePublicReads: false
   EnableReads: true
   EnableWrites: true
-  EnableListings: false
+  EnableListings: true
   EnableDirectReads: false
   SelfTest: true
   Port: 8443

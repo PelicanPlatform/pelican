@@ -21,6 +21,7 @@ package client
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -145,6 +146,11 @@ func IsRetryable(err error) bool {
 	if errors.Is(err, &allocateMemoryError{}) {
 		return true
 	}
+	if errors.Is(err, &dirListingNotSupportedError{}) {
+		// false because we cannot automatically retry, the user must change the url to use a different origin/namespace
+		// that enables dirlistings or the admin must enable dirlistings on the origin/namespace
+		return false
+	}
 	var cse *ConnectionSetupError
 	if errors.As(err, &cse) {
 		if sce, ok := cse.Unwrap().(grab.StatusCodeError); ok {
@@ -172,6 +178,13 @@ func IsRetryable(err error) bool {
 			return false
 		}
 	}
+
+	// If we have a timeout error, we are retryable
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+
 	return false
 }
 

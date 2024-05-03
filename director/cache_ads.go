@@ -59,15 +59,47 @@ func recordAd(sAd server_structs.ServerAd, namespaceAds *[]server_structs.Namesp
 		log.Errorf("The URL of the serverAd %#v is empty. Cannot set the TTL cache.", sAd)
 		return
 	}
-	if serverAds.Has(sAd.URL.String()) {
-		ext := serverAds.Get(sAd.URL.String())
-		sAd.IOLoad = ext.Value().IOLoad // we copy the value from the existing serverAD to be consistent
+	// Since servers from topology always use http, while servers from Pelican always use https
+	// we want to ignore the scheme difference when checking duplicates (only consider hostname:port)
+	rawURL := sAd.URL.String() // could be http (topology) or https (Pelican or some topology ones)
+	httpURL := sAd.URL.String()
+	httpsURL := sAd.URL.String()
+	if strings.HasPrefix(rawURL, "https") {
+		httpURL = "http" + strings.TrimPrefix(rawURL, "https")
 	}
+	if strings.HasPrefix(rawURL, "http://") {
+		httpsURL = "https://" + strings.TrimPrefix(rawURL, "http://")
+	}
+
+	existing := serverAds.Get(httpURL)
+	if existing == nil {
+		existing = serverAds.Get(httpsURL)
+	}
+	if existing == nil {
+		existing = serverAds.Get(rawURL)
+	}
+
+	// There's an existing ad in the cache
+	if existing != nil {
+		if sAd.FromTopology && !existing.Value().FromTopology {
+			// if the incoming is from topology but the existing is from Pelican
+			log.Debugf("The ServerAd generated from topology with name %s and URL %s was ignored because there's already a Pelican ad for this server", sAd.Name, sAd.URL.String())
+			return
+		}
+		if !sAd.FromTopology && existing.Value().FromTopology {
+			// Pelican server will overwrite topology one. We leave a message to let admin know
+			log.Debugf("The existing ServerAd generated from topology with name %s and URL %s is replaced by the Pelican server with name %s", existing.Value().Name, existing.Value().URL.String(), sAd.Name)
+			serverAds.Delete(existing.Value().URL.String())
+		}
+		if !sAd.FromTopology && !existing.Value().FromTopology { // Only copy the IO Load value for Pelican server
+			sAd.IOLoad = existing.Value().IOLoad // we copy the value from the existing serverAD to be consistent11
+		}
+	}
+
 	ad := server_structs.Advertisement{ServerAd: sAd, NamespaceAds: *namespaceAds}
 
 	customTTL := param.Director_AdvertisementTTL.GetDuration()
 
-	// FIXME: with the new ttl key (using server URL), if the server from topology has the same serverURL as the Pelican server, then there will be overwritting conflicts
 	serverAds.Set(sAd.URL.String(), &ad, customTTL) // if customTTL == 0, TTL will fall back to default TTL
 }
 

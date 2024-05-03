@@ -400,6 +400,14 @@ definitions:
         type: number
         description: The I/O load of the server, which is a float number with range [0,1]
         default: 0
+      namespacePrefixes:
+        type: array
+        items:
+          type: string
+          minItems: 1
+        default: []
+        example: ["/foo", "/bar"]
+        description: The namespaces the returned server provides
   OriginExportCapabilities:
     type: object
     description: The access control of an origin exported namespace

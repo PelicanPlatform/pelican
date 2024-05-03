@@ -36,6 +36,7 @@ import (
 	"github.com/pelicanplatform/pelican/classads"
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -383,15 +384,12 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 		}
 	}()
 
-	caches := make([]*url.URL, 0, 1)
+	// Check for local cache
+	var caches []*url.URL
 	if nearestCache, ok := os.LookupEnv("NEAREST_CACHE"); ok && nearestCache != "" {
-		var nearestCacheURL *url.URL
-		if nearestCacheURL, err = url.Parse(nearestCache); err != nil {
-			err = errors.Wrapf(err, "unable to parse preferred cache (%s) as URL", nearestCacheURL)
+		caches, err = utils.GetPreferredCaches(nearestCache)
+		if err != nil {
 			return
-		} else {
-			caches = append(caches, nearestCacheURL)
-			log.Debugln("Setting nearest cache to", nearestCacheURL.String())
 		}
 	}
 
@@ -577,6 +575,11 @@ func writeOutfile(err error, resultAds []*classads.ClassAd, outputFile *os.File)
 			resultAd := classads.NewClassAd()
 			resultAd.Set("TransferSuccess", false)
 			resultAd.Set("TransferError", err.Error())
+			if client.ShouldRetry(err) {
+				resultAd.Set("TransferRetryable", true)
+			} else {
+				resultAd.Set("TransferRetryable", false)
+			}
 			resultAds = append(resultAds, resultAd)
 		}
 	}

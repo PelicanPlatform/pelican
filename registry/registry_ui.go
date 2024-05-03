@@ -129,6 +129,11 @@ func populateRegistrationFields(prefix string, data interface{}) []registrationF
 			fields = append(fields, regField)
 		case reflect.String:
 			regField.Type = String
+
+			// Institution is a special case
+			if regField.Name == "admin_metadata.institution" {
+				regField.Type = Enum
+			}
 			fields = append(fields, regField)
 		case reflect.Struct:
 			// Check if the struct is of type time.Time

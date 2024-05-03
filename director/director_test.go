@@ -164,6 +164,7 @@ func TestDirectorRegistration(t *testing.T) {
 	defer ts.Close()
 
 	viper.Set("Federation.RegistryUrl", ts.URL)
+	viper.Set("Director.CacheSortMethod", "distance")
 
 	setupContext := func() (*gin.Context, *gin.Engine, *httptest.ResponseRecorder) {
 		// Setup httptest recorder and context for the the unit test
@@ -986,6 +987,19 @@ func TestRedirects(t *testing.T) {
 		expectedPath = "/api/v1.0/director/origin/foo/bar"
 		assert.Equal(t, expectedPath, c.Request.URL.Path)
 
+		// Test PROPFIND works for both base path and API path
+		req = httptest.NewRequest("PROPFIND", "/foo/bar", nil)
+		c.Request = req
+		ShortcutMiddleware("origin")(c)
+		expectedPath = "/api/v1.0/director/origin/foo/bar"
+		assert.Equal(t, expectedPath, c.Request.URL.Path)
+
+		req = httptest.NewRequest("PROPFIND", "/api/v1.0/director/origin/foo/bar", nil)
+		c.Request = req
+		ShortcutMiddleware("origin")(c)
+		expectedPath = "/api/v1.0/director/origin/foo/bar"
+		assert.Equal(t, expectedPath, c.Request.URL.Path)
+
 		// Host-aware tests
 		// Test that we can turn on host-aware redirects and get one appropriate redirect from each
 		// type of header (as we've already tested that hostname redirects function)
@@ -1256,5 +1270,62 @@ func TestHandleAllowServer(t *testing.T) {
 		resB, err := io.ReadAll(w.Body)
 		require.NoError(t, err)
 		assert.Contains(t, string(resB), "'name' is a required path parameter")
+	})
+}
+
+func TestGetRedirectUrl(t *testing.T) {
+	adFromTopo := server_structs.ServerAd{
+		URL: url.URL{
+			Host: "fake-topology-ad.org:8443",
+		},
+		AuthURL: url.URL{
+			Host: "fake-topology-ad.org:8444",
+		},
+		FromTopology: true,
+	}
+	adFromPelican := server_structs.ServerAd{
+		URL: url.URL{
+			Host: "fake-pelican-ad.org:8443",
+		},
+		AuthURL: url.URL{
+			Host: "fake-pelican-ad.org:8444",
+		},
+		FromTopology: false,
+	}
+	adWithTopoNotSet := server_structs.ServerAd{
+		URL: url.URL{
+			Host: "fake-ad.org:8443",
+		},
+		AuthURL: url.URL{
+			Host: "fake-ad.org:8444",
+		},
+		FromTopology: false,
+	}
+
+	t.Run("get-redirect-url-topology", func(t *testing.T) {
+		// Public object from topology
+		url := getRedirectURL("/some/path", adFromTopo, false)
+		assert.Equal(t, "http://fake-topology-ad.org:8443/some/path", url.String())
+
+		// Protected object from topology
+		url = getRedirectURL("/some/path", adFromTopo, true)
+		assert.Equal(t, "https://fake-topology-ad.org:8444/some/path", url.String())
+	})
+	t.Run("get-redirect-url-pelican", func(t *testing.T) {
+		// Public object from pelican
+		url := getRedirectURL("/some/path", adFromPelican, false)
+		assert.Equal(t, "https://fake-pelican-ad.org:8443/some/path", url.String())
+
+		// Protected object from pelican
+		url = getRedirectURL("/some/path", adFromPelican, true)
+		assert.Equal(t, "https://fake-pelican-ad.org:8444/some/path", url.String())
+	})
+	t.Run("get-redirect-url-topo-not-set", func(t *testing.T) {
+		// When the FromTopology field is not set, we assume the ad is from Pelican
+		url := getRedirectURL("/some/path", adWithTopoNotSet, false)
+		assert.Equal(t, "https://fake-ad.org:8443/some/path", url.String())
+
+		url = getRedirectURL("/some/path", adWithTopoNotSet, true)
+		assert.Equal(t, "https://fake-ad.org:8444/some/path", url.String())
 	})
 }

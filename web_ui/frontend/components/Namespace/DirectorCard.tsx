@@ -18,10 +18,11 @@ import {Language} from "@mui/icons-material";
 import {NamespaceIcon} from "@/components/Namespace/index";
 import useSWR from "swr";
 import Link from "next/link";
+import {User} from "@/index";
 
 export interface DirectorCardProps {
     server: Server
-    authenticated?: Authenticated
+    authenticated?: User
 }
 
 export const DirectorCard = ({ server, authenticated } : DirectorCardProps) => {

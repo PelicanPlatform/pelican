@@ -373,3 +373,62 @@ func TestServerAdsCacheEviction(t *testing.T) {
 		}
 	})
 }
+
+func TestRecordAd(t *testing.T) {
+	serverAds.DeleteAll()
+	t.Cleanup(func() {
+		serverAds.DeleteAll()
+	})
+
+	topologyServerUrl := url.URL{Scheme: "http", Host: "origin.chtc.wisc.edu"} // Topology server URL is always in http
+	pelicanServerUrl := url.URL{Scheme: "https", Host: "origin.chtc.wisc.edu"} // Pelican server URL is always in https
+
+	mockTopology := &server_structs.Advertisement{
+		ServerAd: server_structs.ServerAd{
+			URL:          topologyServerUrl,
+			FromTopology: true,
+		},
+		NamespaceAds: []server_structs.NamespaceAdV2{},
+	}
+	mockPelican := &server_structs.Advertisement{
+		ServerAd: server_structs.ServerAd{
+			URL:          pelicanServerUrl,
+			FromTopology: false,
+		},
+		NamespaceAds: []server_structs.NamespaceAdV2{},
+	}
+
+	t.Run("topology-server-added-if-no-duplicate", func(t *testing.T) {
+		recordAd(mockTopology.ServerAd, &mockTopology.NamespaceAds)
+		assert.Len(t, serverAds.Items(), 1)
+		assert.True(t, serverAds.Has(topologyServerUrl.String()))
+	})
+
+	t.Run("pelican-server-added-if-no-duplicate", func(t *testing.T) {
+		recordAd(mockPelican.ServerAd, &mockPelican.NamespaceAds)
+		assert.Len(t, serverAds.Items(), 1)
+		assert.True(t, serverAds.Has(pelicanServerUrl.String()))
+	})
+
+	t.Run("pelican-server-overwrites-topology", func(t *testing.T) {
+		recordAd(mockTopology.ServerAd, &mockTopology.NamespaceAds)
+		recordAd(mockPelican.ServerAd, &mockPelican.NamespaceAds)
+
+		assert.Len(t, serverAds.Items(), 1)
+		assert.True(t, serverAds.Has(pelicanServerUrl.String()))
+		getAd := serverAds.Get(pelicanServerUrl.String())
+		assert.NotNil(t, getAd)
+		assert.False(t, getAd.Value().FromTopology) // it's updated
+	})
+
+	t.Run("topology-server-is-ignored-with-dup-pelican-server", func(t *testing.T) {
+		recordAd(mockPelican.ServerAd, &mockPelican.NamespaceAds)
+		recordAd(mockTopology.ServerAd, &mockTopology.NamespaceAds)
+
+		assert.Len(t, serverAds.Items(), 1)
+		assert.True(t, serverAds.Has(pelicanServerUrl.String()))
+		getAd := serverAds.Get(pelicanServerUrl.String())
+		assert.NotNil(t, getAd)
+		assert.False(t, getAd.Value().FromTopology) // topology ad is ignored
+	})
+}

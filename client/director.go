@@ -100,7 +100,7 @@ func CreateNsFromDirectorResp(dirResp *http.Response) (namespace namespaces.Name
 	}
 
 	// Create the caches slice
-	namespace.SortedDirectorCaches, err = GetCachesFromDirectorResponse(dirResp, namespace.UseTokenOnRead || namespace.ReadHTTPS)
+	namespace.SortedDirectorCaches, err = getCachesFromDirectorResponse(dirResp, namespace.UseTokenOnRead || namespace.ReadHTTPS)
 	if err != nil {
 		log.Errorln("Unable to construct ordered cache list:", err)
 		return
@@ -154,6 +154,9 @@ func queryDirector(ctx context.Context, verb, source, directorUrl string) (resp 
 	// If we get a 404, the director will hopefully tell us why. It might be that the namespace doesn't exist
 	if resp.StatusCode == 404 {
 		return nil, errors.New("404: " + string(body))
+	} else if resp.StatusCode == http.StatusMethodNotAllowed && verb == "PROPFIND" {
+		// If we get a 405 with a PROPFIND, the client will handle it
+		return
 	} else if resp.StatusCode != 307 {
 		var respErr directorResponse
 		if unmarshalErr := json.Unmarshal(body, &respErr); unmarshalErr != nil { // Error creating json
@@ -165,7 +168,7 @@ func queryDirector(ctx context.Context, verb, source, directorUrl string) (resp 
 	return
 }
 
-func GetCachesFromDirectorResponse(resp *http.Response, needsToken bool) (caches []namespaces.DirectorCache, err error) {
+func getCachesFromDirectorResponse(resp *http.Response, needsToken bool) (caches []namespaces.DirectorCache, err error) {
 	// Get the Link header
 	linkHeader := resp.Header.Values("Link")
 	if len(linkHeader) == 0 {
