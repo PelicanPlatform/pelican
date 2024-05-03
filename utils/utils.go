@@ -70,3 +70,34 @@ func GetPreferredCaches(preferredCaches string) (caches []*url.URL, err error) {
 	}
 	return
 }
+
+// This function checks if we have a valid query (or no query) for the transfer URL
+func CheckValidQuery(transferUrl *url.URL, isPlugin bool) (err error) {
+	query := transferUrl.Query()
+	_, hasRecursive := query["recursive"]
+	_, hasPack := query["pack"]
+	directRead, hasDirectRead := query["directread"]
+
+	// If we are not the plugin, we should not use ?recursive (we should pass a -r flag)
+	if !isPlugin && hasRecursive {
+		return errors.New("recursive query parameter is not yet supported in URLs outside of the plugin")
+	}
+
+	// If we have both recursive and pack, we should return a failure
+	if hasRecursive && hasPack {
+		return errors.New("cannot have both recursive and pack query parameters")
+	}
+
+	// If there is an argument in the directread query param, inform the user this is deprecated and their argument will be ignored
+	if hasDirectRead && directRead[0] != "" {
+		log.Warnln("Arguments (true/false) for the directread query have been deprecated and will be disallowed in a future release. The argument provided will be ignored")
+		return nil
+	}
+
+	// If we have no query, or we have recursive or pack, we are good
+	if len(query) == 0 || hasRecursive || hasPack || hasDirectRead {
+		return nil
+	}
+
+	return errors.New("invalid query parameter(s) " + transferUrl.RawQuery + " provided in url " + transferUrl.String())
+}

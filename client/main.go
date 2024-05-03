@@ -39,6 +39,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/namespaces"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 // Number of caches to attempt to use in any invocation
@@ -193,7 +194,7 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 		return 0, errors.Wrap(err, "Failed to generate pelicanURL object")
 	}
 
-	ns, err := getNamespaceInfo(ctx, destUri.Path, pelicanURL.directorUrl, false)
+	ns, err := getNamespaceInfo(ctx, destUri.Path, pelicanURL.directorUrl, false, "")
 	if err != nil {
 		return 0, err
 	}
@@ -230,7 +231,7 @@ func GetCacheHostnames(ctx context.Context, testFile string) (urls []string, err
 	if err != nil {
 		return
 	}
-	ns, err := getNamespaceInfo(ctx, testFile, fedInfo.DirectorEndpoint, false)
+	ns, err := getNamespaceInfo(ctx, testFile, fedInfo.DirectorEndpoint, false, "")
 	if err != nil {
 		return
 	}
@@ -404,13 +405,16 @@ func discoverHTCondorToken(tokenName string) string {
 // Retrieve federation namespace information for a given URL.
 // If OSDFDirectorUrl is non-empty, then the namespace information will be pulled from the director;
 // otherwise, it is pulled from topology.
-func getNamespaceInfo(ctx context.Context, resourcePath, OSDFDirectorUrl string, isPut bool) (ns namespaces.Namespace, err error) {
+func getNamespaceInfo(ctx context.Context, resourcePath, OSDFDirectorUrl string, isPut bool, query string) (ns namespaces.Namespace, err error) {
 	// If we have a director set, go through that for namespace info, otherwise use topology
 	if OSDFDirectorUrl != "" {
 		log.Debugln("Will query director at", OSDFDirectorUrl, "for object", resourcePath)
 		verb := "GET"
 		if isPut {
 			verb = "PUT"
+		}
+		if query != "" {
+			resourcePath += "?" + query
 		}
 		var dirResp *http.Response
 		dirResp, err = queryDirector(ctx, verb, resourcePath, OSDFDirectorUrl)
@@ -485,6 +489,13 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 		log.Errorln("Failed to parse remote destination URL:", err)
 		return nil, err
 	}
+
+	// Check if we have a query and that it is understood
+	err = utils.CheckValidQuery(remoteDestUrl, false)
+	if err != nil {
+		return
+	}
+
 	remoteDestUrl.Scheme = remoteDestScheme
 
 	remoteDestScheme, _ = getTokenName(remoteDestUrl)
@@ -549,6 +560,13 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 		log.Errorln("Failed to parse source URL:", err)
 		return nil, err
 	}
+
+	// Check if we have a query and that it is understood
+	err = utils.CheckValidQuery(remoteObjectUrl, false)
+	if err != nil {
+		return
+	}
+
 	remoteObjectUrl.Scheme = remoteObjectScheme
 
 	// This is for condor cases:
@@ -669,6 +687,11 @@ func DoCopy(ctx context.Context, sourceFile string, destination string, recursiv
 		log.Errorln("Failed to parse source URL:", err)
 		return nil, err
 	}
+	// Check if we have a query and that it is understood
+	err = utils.CheckValidQuery(sourceURL, false)
+	if err != nil {
+		return
+	}
 	sourceURL.Scheme = source_scheme
 
 	destination, dest_scheme := correctURLWithUnderscore(destination)
@@ -677,6 +700,13 @@ func DoCopy(ctx context.Context, sourceFile string, destination string, recursiv
 		log.Errorln("Failed to parse destination URL:", err)
 		return nil, err
 	}
+
+	// Check if we have a query and that it is understood
+	err = utils.CheckValidQuery(destURL, false)
+	if err != nil {
+		return
+	}
+
 	destURL.Scheme = dest_scheme
 
 	// Check for scheme here for when using condor

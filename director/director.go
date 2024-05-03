@@ -439,7 +439,26 @@ func redirectToOrigin(ginCtx *gin.Context) {
 				return
 			}
 		}
-		ginCtx.String(http.StatusMethodNotAllowed, "No origins on specified endpoint allow directory listings")
+		ginCtx.JSON(http.StatusMethodNotAllowed, gin.H{"error": "No origins on specified endpoint allow directory listings"})
+	}
+
+	// We know this can be easily bypassed, we need to eventually enforce this
+	// Origin should only be redirected to if it allows direct reads or the cache is the one it is talking to.
+	// Any client that uses this api that doesn't set directreads can talk directly to an origin
+
+	// Check if we are doing a DirectRead and if it is allowed
+	if ginCtx.Request.URL.Query().Has("directread") {
+		for idx, originAd := range originAds {
+			if originAd.DirectReads && namespaceAd.Caps.DirectReads {
+				redirectURL = getRedirectURL(reqPath, originAds[idx], !namespaceAd.PublicRead)
+				if brokerUrl := originAds[idx].BrokerURL; brokerUrl.String() != "" {
+					ginCtx.Header("X-Pelican-Broker", brokerUrl.String())
+				}
+				ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, authzBearerEscaped))
+				return
+			}
+		}
+		ginCtx.JSON(http.StatusMethodNotAllowed, gin.H{"error": "No origins on specified endpoint have direct reads enabled"})
 		return
 	}
 
@@ -455,7 +474,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 				return
 			}
 		}
-		ginCtx.String(http.StatusMethodNotAllowed, "No origins on specified endpoint are writeable")
+		ginCtx.JSON(http.StatusMethodNotAllowed, gin.H{"error": "No origins on specified endpoint have direct reads enabled"})
 		return
 	} else { // Otherwise, we are doing a GET
 		redirectURL := getRedirectURL(reqPath, originAds[0], !namespaceAd.PublicRead)
@@ -536,6 +555,15 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 				c.Abort()
 				return
 			}
+		}
+
+		// Check for the DirectRead query paramater and redirect to the origin if it's set if the origin allows DirectReads
+		if c.Request.URL.Query().Has("directread") {
+			log.Debugln("directread query parameter detected, redirecting to origin")
+			// We'll redirect to origin here and the origin will decide if it can serve the request (if direct reads are enabled)
+			redirectToOrigin(c)
+			c.Abort()
+			return
 		}
 
 		// If we're configured for cache mode or we haven't set the flag,

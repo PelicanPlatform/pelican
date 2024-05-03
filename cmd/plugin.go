@@ -418,7 +418,7 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 				break
 			}
 			// Check we have valid query parameters
-			err := checkValidQuery(transfer.url)
+			err := utils.CheckValidQuery(transfer.url, true)
 			if err != nil {
 				return err
 			}
@@ -535,25 +535,6 @@ func parseDestination(transfer PluginTransfer) (parsedDest string) {
 		return parsedDest
 	}
 	return transfer.localFile
-}
-
-// This function checks if we have a valid query (or no query) for the transfer URL
-func checkValidQuery(transferUrl *url.URL) (err error) {
-	query := transferUrl.Query()
-	_, hasRecursive := query["recursive"]
-	_, hasPack := query["pack"]
-
-	// If we have both recursive and pack, we should return a failure
-	if hasRecursive && hasPack {
-		return fmt.Errorf("Cannot have both recursive and pack query parameters")
-	}
-
-	// If we have no query, or we have recursive or pack, we are good
-	if len(query) == 0 || hasRecursive || hasPack {
-		return nil
-	}
-
-	return fmt.Errorf("Invalid query parameters procided in url: %s", transferUrl)
 }
 
 // WriteOutfile takes in the result ads from the job and the file to be outputted, it returns a boolean indicating:

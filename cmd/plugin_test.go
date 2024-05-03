@@ -362,6 +362,79 @@ func TestPluginMulti(t *testing.T) {
 	}
 }
 
+// Test multiple downloads from the plugin
+func TestPluginDirectRead(t *testing.T) {
+	viper.Reset()
+	server_utils.ResetOriginExports()
+
+	dirName := t.TempDir()
+
+	viper.Set("Logging.Level", "debug")
+	viper.Set("Origin.StorageType", "posix")
+	viper.Set("Origin.FederationPrefix", "/test")
+	viper.Set("Origin.StoragePrefix", "/<SOMETHING THAT WILL BE OVERRIDDEN>")
+	viper.Set("Origin.EnablePublicReads", true)
+	viper.Set("Origin.EnableDirectReads", true)
+	fed := fed_test_utils.NewFedTest(t, "")
+	host := param.Server_Hostname.GetString() + ":" + strconv.Itoa(param.Server_WebPort.GetInt())
+
+	log.Debugln("Will create origin file at", fed.Exports[0].StoragePrefix)
+	err := os.WriteFile(filepath.Join(fed.Exports[0].StoragePrefix, "test.txt"), []byte("test file content"), fs.FileMode(0644))
+	require.NoError(t, err)
+	downloadUrl := url.URL{
+		Scheme:   "pelican",
+		Host:     host,
+		Path:     "/test/test.txt",
+		RawQuery: "directread",
+	}
+	localPath := filepath.Join(dirName, "test.txt")
+
+	workChan := make(chan PluginTransfer, 2)
+	workChan <- PluginTransfer{url: &downloadUrl, localFile: localPath}
+	close(workChan)
+
+	results := make(chan *classads.ClassAd, 5)
+	fed.Egrp.Go(func() error {
+		return runPluginWorker(fed.Ctx, false, workChan, results)
+	})
+
+	var developerData map[string]interface{}
+	done := false
+	for !done {
+		select {
+		case <-fed.Ctx.Done():
+			break
+		case resultAd, ok := <-results:
+			if !ok {
+				done = true
+				break
+			}
+			// Process results as soon as we get them
+			transferSuccess, err := resultAd.Get("TransferSuccess")
+			assert.NoError(t, err)
+			boolVal, ok := transferSuccess.(bool)
+			require.True(t, ok)
+			assert.True(t, boolVal)
+
+			// Assert that our endpoint is always the origin and not the cache
+			data, err := resultAd.Get("DeveloperData")
+			assert.NoError(t, err)
+			developerData, ok = data.(map[string]interface{})
+			require.True(t, ok)
+
+			attempts, ok := developerData["Attempts"].(int)
+			require.True(t, ok)
+
+			for i := 0; i < attempts; i++ {
+				key := fmt.Sprintf("Endpoint%d", i)
+				endpoint, ok := developerData[key].(string)
+				require.True(t, ok)
+				assert.Equal(t, param.Origin_Url.GetString(), "https://"+endpoint)
+			}
+		}
+	}
+}
+
 func TestWriteOutfile(t *testing.T) {
 	t.Run("TestOutfileSuccess", func(t *testing.T) {
 		// Drop the testFileContent into the origin directory
@@ -461,48 +534,6 @@ func TestWriteOutfile(t *testing.T) {
 		assert.Contains(t, string(tempFileContent), "TransferUrl = \"foo.txt\";")
 	})
 
-}
-
-// This test checks if query parameters in the url are correct
-// We want invalid or > 1 query to cause an error
-func TestQuery(t *testing.T) {
-	t.Run("TestValidRecursive", func(t *testing.T) {
-		transferStr := "pelican://something/here?recursive=true"
-		transferUrl, err := url.Parse(transferStr)
-		assert.NoError(t, err)
-
-		err = checkValidQuery(transferUrl)
-		assert.NoError(t, err)
-	})
-
-	t.Run("TestValidPack", func(t *testing.T) {
-		transferStr := "pelican://something/here?pack=tar.gz"
-		transferUrl, err := url.Parse(transferStr)
-		assert.NoError(t, err)
-
-		err = checkValidQuery(transferUrl)
-		assert.NoError(t, err)
-	})
-
-	t.Run("TestInvalidQuery", func(t *testing.T) {
-		transferStr := "pelican://something/here?recrustive=true"
-		transferUrl, err := url.Parse(transferStr)
-		assert.NoError(t, err)
-
-		err = checkValidQuery(transferUrl)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "Invalid query parameters procided in url: pelican://something/here?recrustive=true")
-	})
-
-	t.Run("TestBothQueryCheckFailure", func(t *testing.T) {
-		transferStr := "pelican://something/here?pack=tar.gz&recursive=true"
-		transferUrl, err := url.Parse(transferStr)
-		assert.NoError(t, err)
-
-		err = checkValidQuery(transferUrl)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "Cannot have both recursive and pack query parameters")
-	})
 }
 
 // This test checks if the destination (local file) is parsed correctly
