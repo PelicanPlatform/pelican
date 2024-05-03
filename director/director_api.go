@@ -85,8 +85,7 @@ func checkFilter(serverName string) (bool, filterType) {
 
 // Configure TTL caches to enable cache eviction and other additional cache events handling logic
 //
-// The `ctx` is the context for listening to server shutdown event in order to cleanup internal cache eviction
-// goroutine and `wg` is the wait group to notify when the clean up goroutine finishes
+// The `ctx` is the context for listening to server shutdown event in order to cleanup internal cache eviction goroutine
 func ConfigTTLCache(ctx context.Context, egrp *errgroup.Group) {
 	// Start automatic expired item deletion
 	go serverAds.Start()

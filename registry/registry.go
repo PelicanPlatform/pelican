@@ -43,15 +43,17 @@ import (
 	"sync"
 
 	"github.com/gin-gonic/gin"
+	"github.com/go-playground/validator/v10"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
+	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
+
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/oauth2"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token_scopes"
-	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 )
 
 var OIDC struct {
@@ -1008,7 +1010,8 @@ func checkNamespaceExistsHandler(ctx *gin.Context) {
 	}
 }
 
-func checkNamespaceStatusHandler(ctx *gin.Context) {
+// Check the approval status of namespace registration
+func checkApprovalHandler(ctx *gin.Context) {
 	req := server_structs.CheckNamespaceStatusReq{}
 	if err := ctx.ShouldBind(&req); err != nil {
 		log.Debug("Failed to parse request body for namespace status check: ", err)
@@ -1084,6 +1087,70 @@ func checkNamespaceStatusHandler(ctx *gin.Context) {
 	}
 }
 
+// Check namespace registration completeness
+func checkStatusHandler(ctx *gin.Context) {
+	nssReq := server_structs.CheckNamespaceCompleteReq{}
+	results := map[string]server_structs.NamespaceCompletenessResult{}
+
+	err := ctx.BindJSON(&nssReq)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "failed to parse request body: " + err.Error()})
+	}
+	for _, prefix := range nssReq.Prefixes {
+		isCache := false
+		if strings.HasPrefix(prefix, "/caches") {
+			isCache = true
+		}
+		complete := server_structs.NamespaceCompletenessResult{}
+		exists, err := namespaceExistsByPrefix(prefix)
+		if err != nil {
+			complete.Msg = fmt.Sprintf("Failed to check if %s exists: %v", prefix, err)
+			results[prefix] = complete
+			continue
+		}
+		if !exists {
+			complete.Msg = fmt.Sprintf("Namespace %s does not exist", prefix)
+			results[prefix] = complete
+			continue
+		}
+		ns, err := getNamespaceByPrefix(prefix)
+		if err != nil {
+			complete.Msg = fmt.Sprintf("Failed to retrieve namespace %s: %v", prefix, err)
+			results[prefix] = complete
+			continue
+		}
+		fed, err := config.GetFederation(ctx)
+		if err != nil {
+			log.Error("checkNamespaceCompleteHandler: failed to get federaion:", err)
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Server error when getting federation information: " + err.Error(),
+			})
+		}
+		if isCache {
+			complete.EditUrl = fmt.Sprintf("%s/view/registry/cache/edit/?id=%d", fed.NamespaceRegistrationEndpoint, ns.ID)
+		} else {
+			complete.EditUrl = fmt.Sprintf("%s/view/registry/origin/edit/?id=%d", fed.NamespaceRegistrationEndpoint, ns.ID)
+		}
+		err = config.GetValidate().Struct(ns)
+		if err != nil {
+			// translate validation error to human readable
+			errs := err.(validator.ValidationErrors)
+			complete.Msg = "Incomplete registration: "
+			for _, err := range errs {
+				complete.Msg += err.Translate(config.GetEnTranslator()) + "\n"
+			}
+			results[prefix] = complete
+			continue
+		} else {
+			complete.Completed = true
+			results[prefix] = complete
+			continue
+		}
+	}
+	ctx.JSON(http.StatusOK, server_structs.CheckNamespaceCompleteRes{Results: results})
+}
+
 func RegisterRegistryAPI(router *gin.RouterGroup) {
 	registryAPI := router.Group("/api/v1.0/registry")
 
@@ -1097,7 +1164,16 @@ func RegisterRegistryAPI(router *gin.RouterGroup) {
 		// Handle everything under "/" route with GET method
 		registryAPI.GET("/*wildcard", wildcardHandler)
 		registryAPI.POST("/checkNamespaceExists", checkNamespaceExistsHandler)
-		registryAPI.POST("/checkNamespaceStatus", checkNamespaceStatusHandler)
+		registryAPI.POST("/checkNamespaceStatus", checkApprovalHandler)
+
 		registryAPI.DELETE("/*wildcard", deleteNamespaceHandler)
+	}
+
+	checkApis := registryAPI.Group("/namespaces/check")
+	{
+		// We should deprecate the above /checkNamespace* routes and replace them by the following
+		// endpoints to comply to RESTful spec
+		checkApis.POST("/status", checkStatusHandler)     // registration completeness status
+		checkApis.POST("/approval", checkApprovalHandler) // approval status
 	}
 }

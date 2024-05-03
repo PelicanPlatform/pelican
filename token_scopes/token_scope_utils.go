@@ -143,7 +143,9 @@ func ScopeContains(tokenScopes []string, expectedScopes []TokenScope, all bool) 
 	}
 }
 
-// Creates a validator that checks if a token's scope matches the given scope: expectedScopes.
+// Creates a validator that checks if a token's scope matches the expectedScopes.
+// If all=false, it checks if the tokenScopes have any one scope in expectedScopes;
+// If all=true, it checks if tokenScopes is the same set as expectedScopes
 // See `scopeContains` for detailed checking mechanism
 func CreateScopeValidator(expectedScopes []TokenScope, all bool) jwt.ValidatorFunc {
 

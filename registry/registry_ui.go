@@ -28,13 +28,18 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/go-playground/validator/v10"
 	"github.com/jellydator/ttlcache/v3"
+	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/lestrrat-go/jwx/v2/jwt"
+	log "github.com/sirupsen/logrus"
+
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pelicanplatform/pelican/web_ui"
-	log "github.com/sirupsen/logrus"
 )
 
 type (
@@ -315,6 +320,9 @@ func getNamespaceRegFields(ctx *gin.Context) {
 // PUT /namespaces/:id
 func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 	user := ctx.GetString("User")
+	accessToken := ctx.Query("access_token")
+	isAdmin, _ := web_ui.CheckAdmin(user)
+
 	id := 0 // namespace ID when doing update, will be populated later
 	if user == "" {
 		ctx.JSON(http.StatusUnauthorized, server_structs.SimpleApiResp{
@@ -342,22 +350,18 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 			Msg:    "Invalid create or update namespace request"})
 		return
 	}
+	if !isUpdate { // create
+		ns.AdminMetadata.UserID = user
+	}
 	// Assign ID from path param because the request data doesn't have ID set
 	ns.ID = id
-	// Basic validation (type, required, etc)
-	errs := config.GetValidate().Struct(ns)
-	if errs != nil {
-		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    errs.Error()})
-		return
-	}
+
 	// Check that Prefix is a valid prefix
 	updated_prefix, err := validatePrefix(ns.Prefix)
 	if err != nil {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Error: Field validation for prefix failed: %v", err)})
+			Msg:    fmt.Sprintf("Validation for Prefix failed: %v", err)})
 		return
 	}
 	ns.Prefix = updated_prefix
@@ -379,12 +383,13 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 			return
 		}
 	}
+
 	// Check if pubKey is a valid JWK
 	pubkey, err := validateJwks(ns.Pubkey)
 	if err != nil {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Error: Field validation for pubkey failed: %v", err)})
+			Msg:    fmt.Sprintf("Validation for Pubkey failed: %v", err)})
 		return
 	}
 
@@ -398,18 +403,20 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 		return
 	}
 	if sysErr != nil {
-		log.Errorln("Error validating key chaining", sysErr)
+		log.Errorln("Validation for key chaining failed", sysErr)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    sysErr.Error()})
 		return
 	}
 
-	if validInst, err := validateInstitution(ns.AdminMetadata.Institution); !validInst {
+	validInst, err := validateInstitution(ns.AdminMetadata.Institution)
+
+	if !validInst {
 		if err != nil {
 			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
-				Msg:    fmt.Sprintf("Error validating institution: %v", err)})
+				Msg:    fmt.Sprintf("Validation for Institution failed: %v", err)})
 			return
 		}
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
@@ -435,11 +442,24 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 	}
 
 	if !isUpdate { // Create
-		ns.AdminMetadata.UserID = user
 		// Overwrite status to Pending to filter malicious request
 		ns.AdminMetadata.Status = server_structs.RegPending
 		if inTopo {
 			ns.AdminMetadata.Description = fmt.Sprintf("[ Attention: A superspace or subspace of this prefix exists in OSDF topology: %s ] ", GetTopoPrefixString(topoNss))
+		}
+		// Basic validation (type, required, etc)
+		errs := config.GetValidate().Struct(ns)
+		if errs != nil {
+			validationErrs := errs.(validator.ValidationErrors)
+			errMsg := "Validation failed: "
+			for _, err := range validationErrs {
+				errMsg += err.Translate(config.GetEnTranslator()) + "\n"
+			}
+			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    errMsg,
+			})
+			return
 		}
 		if err := AddNamespace(&ns); err != nil {
 			log.Errorf("Failed to insert namespace with id %d. %v", ns.ID, err)
@@ -480,9 +500,10 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 		}
 
 		// Then check if the user has previlege to update
-		isAdmin, _ := web_ui.CheckAdmin(user)
+		belongsTo := false
+
 		if !isAdmin { // Not admin, need to check if the namespace belongs to the user
-			found, err := namespaceBelongsToUserId(ns.ID, user)
+			belongsTo, err = namespaceBelongsToUserId(ns.ID, user)
 			if err != nil {
 				log.Error("Error checking if namespace belongs to the user: ", err)
 				ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -490,12 +511,18 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 					Msg:    "Error checking if namespace belongs to the user"})
 				return
 			}
-			if !found {
-				log.Errorf("Namespace not found for id: %d", ns.ID)
-				ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
-					Status: server_structs.RespFailed,
-					Msg:    "Namespace not found. Check the id or if you own the namespace"})
-				return
+			if !belongsTo {
+				// If the user doen's own the namespace, they can't edit it
+				// but if they have an access token generated by the private key
+				// that corresponds to the public key of the namespace they are trying to access,
+				//  we allow them to do it so that admin can fill out the rest of the registration if the user_id is empty
+				if accessToken == "" {
+					log.Errorf("Access denied from user %s for namespace with id=%d", user, id)
+					ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+						Status: server_structs.RespFailed,
+						Msg:    "You do not have permissions to access this namespace registration. Check the id or if you own the namespace"})
+					return
+				}
 			}
 			existingStatus, err := getNamespaceStatusById(ns.ID)
 			if err != nil {
@@ -512,7 +539,73 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 					Msg:    "You don't have permission to modify an approved registration. Please contact your federation administrator"})
 				return
 			}
+
+			// If non-admin user accesses a namespace with user_id != user but with access_token
+			if !isAdmin && !belongsTo && accessToken != "" {
+				jwks, err := jwk.Parse([]byte(ns.Pubkey))
+				if err != nil {
+					log.Errorf("Error parsing the public key of the namespace %s with ID %d: %v", ns.Prefix, ns.ID, err)
+					ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+						Status: server_structs.RespFailed,
+						Msg:    fmt.Sprintf("Error parsing the public key of the namespace %s with ID %d: %v", ns.Prefix, ns.ID, err),
+					})
+					return
+				}
+
+				accessJWT, err := jwt.Parse(
+					[]byte(accessToken),
+					jwt.WithKeySet(jwks),
+					jwt.WithVerify(true),
+				)
+				if err != nil {
+					ctx.JSON(http.StatusForbidden,
+						server_structs.SimpleApiResp{
+							Status: server_structs.RespFailed,
+							Msg:    fmt.Sprint("Invalid access token: ", err),
+						})
+					return
+				}
+
+				scopeValidator := token_scopes.CreateScopeValidator([]token_scopes.TokenScope{token_scopes.Registry_EditRegistration}, false)
+				if err = jwt.Validate(accessJWT, jwt.WithValidator(scopeValidator)); err != nil {
+					log.Errorf("Failed to verify the scope of the token: %v", err)
+					ctx.JSON(http.StatusForbidden,
+						server_structs.SimpleApiResp{
+							Status: server_structs.RespFailed,
+							Msg:    fmt.Sprintf("Failed to verify the scope of the token. Require %s", token_scopes.Registry_EditRegistration.String()),
+						})
+				}
+
+				if ns.AdminMetadata.UserID == "" {
+					ns.AdminMetadata.UserID = user
+				}
+			}
 		}
+
+		// Basic validation (type, required, etc)
+		errs := config.GetValidate().Struct(ns)
+		if errs != nil {
+			validationErrs := errs.(validator.ValidationErrors)
+			errMsg := "Validation failed: "
+			totalErr := 0
+			for _, err := range validationErrs {
+				// Skip UserID check for the admin otherwise they won't be
+				// able to update a namespace without userID
+				if err.Field() == "UserID" && err.Tag() == "required" && isAdmin {
+					continue
+				}
+				errMsg += err.Translate(config.GetEnTranslator()) + "\n"
+				totalErr += 1
+			}
+			if totalErr > 0 {
+				ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    errMsg,
+				})
+				return
+			}
+		}
+
 		// If the user has previlege to udpate, go ahead
 		if err := updateNamespace(&ns); err != nil {
 			log.Errorf("Failed to update namespace with id %d. %v", ns.ID, err)
@@ -531,6 +624,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 func getNamespace(ctx *gin.Context) {
 	user := ctx.GetString("User")
 	idStr := ctx.Param("id")
+	accessToken := ctx.Query("access_token")
 	id, err := strconv.Atoi(idStr)
 	if err != nil || id <= 0 {
 		// Handle the error if id is not a valid integer
@@ -556,8 +650,10 @@ func getNamespace(ctx *gin.Context) {
 	}
 
 	isAdmin, _ := web_ui.CheckAdmin(user)
+	belongsTo := false
+
 	if !isAdmin { // Not admin, need to check if the namespace belongs to the user
-		found, err := namespaceBelongsToUserId(id, user)
+		belongsTo, err = namespaceBelongsToUserId(id, user)
 		if err != nil {
 			log.Error("Error checking if namespace belongs to the user: ", err)
 			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -565,12 +661,18 @@ func getNamespace(ctx *gin.Context) {
 				Msg:    "Error checking if namespace belongs to the user"})
 			return
 		}
-		if !found { // If the user doen's own the namespace, they can't update it
-			log.Errorf("Namespace not found for id: %d", id)
-			ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    "Namespace not found. Check the id or if you own the namespace"})
-			return
+		if !belongsTo {
+			// If the user doen's own the namespace, they can't view it
+			// but if they have an access token generated by the private key
+			// that corresponds to the public key of the namespace they are trying to access,
+			//  we allow them to do it so that admin can fill out the rest of the registration if the user_id is empty
+			if accessToken == "" {
+				log.Errorf("Access denied from user %s for namespace with id=%d", user, id)
+				ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    "You do not have permissions to access this namespace registration. Check the id or if you own the namespace"})
+				return
+			}
 		}
 	}
 
@@ -582,6 +684,44 @@ func getNamespace(ctx *gin.Context) {
 			Msg:    "Error getting namespace"})
 		return
 	}
+
+	// If non-admin user accesses a namespace with user_id != user but with access_token
+	if !isAdmin && !belongsTo && accessToken != "" {
+		jwks, err := jwk.Parse([]byte(ns.Pubkey))
+		if err != nil {
+			log.Errorf("Error parsing the public key of the namespace %s with ID %d: %v", ns.Prefix, ns.ID, err)
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Error parsing the public key of the namespace %s with ID %d: %v", ns.Prefix, ns.ID, err),
+			})
+			return
+		}
+
+		accessJWT, err := jwt.Parse(
+			[]byte(accessToken),
+			jwt.WithKeySet(jwks),
+			jwt.WithVerify(true),
+		)
+		if err != nil {
+			ctx.JSON(http.StatusForbidden,
+				server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    fmt.Sprint("Invalid access token: ", err),
+				})
+			return
+		}
+
+		scopeValidator := token_scopes.CreateScopeValidator([]token_scopes.TokenScope{token_scopes.Registry_EditRegistration}, false)
+		if err = jwt.Validate(accessJWT, jwt.WithValidator(scopeValidator)); err != nil {
+			log.Errorf("Failed to verify the scope of the token: %v", err)
+			ctx.JSON(http.StatusForbidden,
+				server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    fmt.Sprintf("Failed to verify the scope of the token. Require %s", token_scopes.Registry_EditRegistration.String()),
+				})
+		}
+	}
+
 	ctx.JSON(http.StatusOK, ns)
 }
 
