@@ -518,9 +518,9 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 				//  we allow them to do it so that admin can fill out the rest of the registration if the user_id is empty
 				if accessToken == "" {
 					log.Errorf("Access denied from user %s for namespace with id=%d", user, id)
-					ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+					ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
 						Status: server_structs.RespFailed,
-						Msg:    "Namespace not found. Check the id or if you own the namespace"})
+						Msg:    "You do not have permissions to access this namespace registration. Check the id or if you own the namespace"})
 					return
 				}
 			}
@@ -670,7 +670,7 @@ func getNamespace(ctx *gin.Context) {
 				log.Errorf("Access denied from user %s for namespace with id=%d", user, id)
 				ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
 					Status: server_structs.RespFailed,
-					Msg:    "Namespace not found. Check the id or if you own the namespace"})
+					Msg:    "You do not have permissions to access this namespace registration. Check the id or if you own the namespace"})
 				return
 			}
 		}

@@ -1172,7 +1172,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 		assert.JSONEq(t, `{"msg":"Can't update namespace: namespace not found", "status":"error"}`, string(body))
 	})
 
-	t.Run("valid-request-not-owner-gives-404", func(t *testing.T) {
+	t.Run("valid-request-not-owner-gives-403", func(t *testing.T) {
 		resetNamespaceDB(t)
 		mockInsts := []registrationFieldOption{{ID: "1000"}}
 		viper.Set("Registry.Institutions", mockInsts)
@@ -1198,8 +1198,8 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 
 		body, err := io.ReadAll(w.Result().Body)
 		require.NoError(t, err)
-		assert.Equal(t, http.StatusNotFound, w.Result().StatusCode)
-		assert.JSONEq(t, `{"msg":"Namespace not found. Check the id or if you own the namespace", "status":"error"}`, string(body))
+		assert.Equal(t, http.StatusForbidden, w.Result().StatusCode)
+		assert.JSONEq(t, `{"msg":"You do not have permissions to access this namespace registration. Check the id or if you own the namespace", "status":"error"}`, string(body))
 	})
 
 	t.Run("reg-user-cant-change-after-approv", func(t *testing.T) {
