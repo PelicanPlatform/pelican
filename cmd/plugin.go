@@ -335,7 +335,10 @@ func stashPluginMain(args []string) {
 		err = waitErr
 	}
 
-	tmpSuccess, retryable := writeOutfile(err, resultAds, outputFile)
+	tmpSuccess, retryable, err := writeOutfile(err, resultAds, outputFile)
+	if err != nil {
+		os.Exit(FailedOutfile)
+	}
 	success = tmpSuccess && success
 
 	if success {
@@ -365,7 +368,10 @@ func writeClassadOutputAndBail(exitCode int, resultAds []*classads.ClassAd) {
 	}
 
 	// We'll exit 3 in here if anything fails to write the file
-	_, retryable := writeOutfile(nil, resultAds, outputFile)
+	_, retryable, err := writeOutfile(nil, resultAds, outputFile)
+	if err != nil {
+		exitCode = FailedOutfile
+	}
 
 	if retryable {
 		exitCode = 11
@@ -423,6 +429,7 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 			// Check we have valid query parameters
 			err := utils.CheckValidQuery(transfer.url, true)
 			if err != nil {
+				failTransfer(transfer.url.String(), transfer.localFile, results, upload, err)
 				return err
 			}
 
@@ -569,7 +576,7 @@ func parseDestination(transfer PluginTransfer) (parsedDest string) {
 // true: all result ads indicate transfer success
 // false: at least one result ad has failed
 // As well as a boolean letting us know if errors are retryable
-func writeOutfile(err error, resultAds []*classads.ClassAd, outputFile *os.File) (success bool, retryable bool) {
+func writeOutfile(err error, resultAds []*classads.ClassAd, outputFile *os.File) (success bool, retryable bool, writeErr error) {
 
 	if err != nil {
 		alreadyFailed := false
@@ -598,21 +605,18 @@ func writeOutfile(err error, resultAds []*classads.ClassAd, outputFile *os.File)
 		// Condor expects the plugin to always return a TransferUrl and TransferFileName. Therefore,
 		// we should populate them even if they are empty. If empty, the url/filename is most likely
 		// included in the error stack already or it is not relevant to the error
-		url, _ := resultAd.Get("TransferUrl")
-		if url == nil {
+		if url, _ := resultAd.Get("TransferUrl"); url == nil {
 			log.Debugln("No URL found in result ad")
 			resultAd.Set("TransferUrl", "")
 		}
-		fileName, _ := resultAd.Get("TransferFileName")
-		if fileName == nil {
+		if fileName, _ := resultAd.Get("TransferFileName"); fileName == nil {
 			log.Debugln("No TransferFileName found in result ad")
 			resultAd.Set("TransferFileName", "")
 		}
 
 		_, err = outputFile.WriteString(resultAd.String() + "\n")
 		if err != nil {
-			log.Errorln("Failed to write to outfile:", err)
-			os.Exit(FailedOutfile)
+			return false, false, errors.Wrap(err, "failed to write to outfile")
 		}
 		transferSuccess, err := resultAd.Get("TransferSuccess")
 		if err != nil {
@@ -646,10 +650,10 @@ func writeOutfile(err error, resultAds []*classads.ClassAd, outputFile *os.File)
 			} else {
 				log.Errorf("Failed to sync output file (%s): %s", outputFile.Name(), err)
 			}
-			os.Exit(FailedOutfile) // Unique error code to let us know the outfile could not be created
+			return false, false, errors.Wrap(err, "failed to sync output file")
 		}
 	}
-	return success, retryable
+	return success, retryable, nil
 }
 
 // readMultiTransfers reads the transfers from a Reader, such as stdin
@@ -671,6 +675,11 @@ func readMultiTransfers(stdin bufio.Reader) (transfers []PluginTransfer, err err
 			continue
 		}
 
+		if adUrlStr == nil {
+			log.Debugln("Url attribute not set for transfer, skipping...")
+			continue
+		}
+
 		adUrl, err := url.Parse(adUrlStr.(string))
 		if err != nil {
 			return nil, err
@@ -680,6 +689,11 @@ func readMultiTransfers(stdin bufio.Reader) (transfers []PluginTransfer, err err
 		if err != nil {
 			// If we don't find a local filename, we are assuming it is a classad used for other purposes
 			// so keep searching for local filename
+			log.Debugln("LocalFileName attribute not set for transfer, skipping...")
+			continue
+		}
+
+		if destination == nil {
 			log.Debugln("LocalFileName attribute not set for transfer, skipping...")
 			continue
 		}
