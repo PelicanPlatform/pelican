@@ -158,7 +158,7 @@ func validateJwks(jwksStr string) (jwk.Key, error) {
 }
 
 // Validates if the instID, the id of the institution, matches institution options
-// provided through Registry.InstitutionsUrl or Registy.Institutions. If both are set,
+// provided through Registry.InstitutionsUrl or Registry.Institutions. If both are set,
 // content of Registry.InstitutionsUrl will be ignored
 func validateInstitution(instID string) (bool, error) {
 	institutions := []registrationFieldOption{}
