@@ -109,7 +109,7 @@ func retrieveDeviceAuth(ctx context.Context, c *Config, v url.Values) (*DeviceAu
 	req.SetBasicAuth(url.QueryEscape(c.ClientID), url.QueryEscape(c.ClientSecret))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	r, err := ctxhttp.Do(ctx, nil, req)
+	r, err := ctxhttp.Do(ctx, ContextClient(ctx), req)
 	if err != nil {
 		return nil, err
 	}
