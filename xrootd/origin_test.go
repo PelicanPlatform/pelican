@@ -86,7 +86,7 @@ func originMockup(ctx context.Context, egrp *errgroup.Group, t *testing.T) conte
 	engine, err := web_ui.GetEngine()
 	require.NoError(t, err)
 
-	server_utils.RegisterOIDCAPI(engine)
+	server_utils.RegisterOIDCAPI(engine.Group("/"), false)
 
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 	defer func() {
