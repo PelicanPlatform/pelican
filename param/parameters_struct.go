@@ -95,6 +95,7 @@ type Config struct {
 		GroupFile string
 		GroupRequirements []string
 		GroupSource string
+		IssuerClaim string
 		OIDCAuthenticationRequirements interface{}
 		OIDCAuthenticationUserClaim string
 		QDLLocation string
@@ -367,6 +368,7 @@ type configWithType struct {
 		GroupFile struct { Type string; Value string }
 		GroupRequirements struct { Type string; Value []string }
 		GroupSource struct { Type string; Value string }
+		IssuerClaim struct { Type string; Value string }
 		OIDCAuthenticationRequirements struct { Type string; Value interface{} }
 		OIDCAuthenticationUserClaim struct { Type string; Value string }
 		QDLLocation struct { Type string; Value string }

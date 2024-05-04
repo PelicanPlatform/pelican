@@ -32,6 +32,7 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/utils"
+	"github.com/pelicanplatform/pelican/web_ui"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
@@ -60,11 +61,34 @@ func getTransport() *http.Transport {
 }
 
 func oa4mpProxy(ctx *gin.Context) {
+	var user string
+	if ctx.Request.URL.Path == "/api/v1.0/issuer/device" {
+		web_ui.RequireAuthMiddleware(ctx)
+		if ctx.IsAborted() {
+			return
+		}
+		user = ctx.GetString("User")
+		if user == "" {
+			// Should be impossible; proxy ought to be called via a middleware which always
+			// sets this variable
+			ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "User authentication not set",
+			})
+			return
+		}
+	}
+
 	origPath := ctx.Request.URL.Path
 	origPath = strings.TrimPrefix(origPath, "/api/v1.0/issuer")
 	ctx.Request.URL.Path = "/scitokens-server" + origPath
 	ctx.Request.URL.Scheme = "http"
 	ctx.Request.URL.Host = "localhost"
+	if user == "" {
+		ctx.Request.Header.Del("X-Pelican-User")
+	} else {
+		ctx.Request.Header.Set("X-Pelican-User", user)
+	}
 
 	log.Debugln("Will proxy request to URL", ctx.Request.URL.String())
 	transport = getTransport()

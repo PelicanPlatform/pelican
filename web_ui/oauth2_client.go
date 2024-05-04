@@ -60,6 +60,7 @@ type (
 )
 
 const (
+	oauthLoginPath    = "/api/v1.0/auth/oauth/login"
 	oauthCallbackPath = "/api/v1.0/auth/oauth/callback"
 )
 

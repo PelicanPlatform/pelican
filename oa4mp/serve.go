@@ -156,10 +156,9 @@ func ConfigureOA4MP() (launcher daemon.Launcher, err error) {
 		}
 	}
 
-	oidcIssuerURL := param.OIDC_Issuer.GetString()
+	oidcIssuerURL := param.Issuer_IssuerClaim.GetString()
 	if oidcIssuerURL == "" {
-		err = errors.New("OIDC.Issuer not set in the configuration")
-		return
+		oidcIssuerURL = param.Server_ExternalWebUrl.GetString()
 	}
 	oidcAuthzURL, err := config.GetOIDCAuthorizationEndpoint()
 	if err != nil {

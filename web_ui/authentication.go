@@ -22,6 +22,7 @@ import (
 	"bufio"
 	"context"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"strings"
@@ -194,6 +195,26 @@ func AuthHandler(ctx *gin.Context) {
 				Status: server_structs.RespFailed,
 				Msg:    "Authentication required to perform this operation",
 			})
+	} else {
+		ctx.Set("User", user)
+		ctx.Next()
+	}
+}
+
+// Require auth; if missing, redirect to the login endpoint.
+//
+// The current implementation forces the OAuth2 endpoint; future work may instead use a generic
+// login page.
+func RequireAuthMiddleware(ctx *gin.Context) {
+	user, err := GetUser(ctx)
+	if user == "" || err != nil {
+		origPath := ctx.Request.URL.RequestURI()
+		redirUrl := url.URL{
+			Path:     oauthLoginPath,
+			RawQuery: "next_url=" + url.QueryEscape(origPath),
+		}
+		ctx.Redirect(http.StatusTemporaryRedirect, redirUrl.String())
+		ctx.Abort()
 	} else {
 		ctx.Set("User", user)
 		ctx.Next()

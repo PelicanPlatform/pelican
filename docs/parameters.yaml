@@ -1604,6 +1604,13 @@ type: string
 default: /opt/qdl
 components: ["origin"]
 ---
+name: Issuer.IssuerClaim
+description: |+
+  Contents of the issuer (`iss`) claim in the generated tokens
+type: string
+default: $(Server.ExternalWebUrl)
+components: ["origin"]
+---
 name: Issuer.AuthenticationSource
 description: |+
   How users should authenticate with the issuer.  Currently-supported values are:

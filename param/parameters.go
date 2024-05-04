@@ -140,6 +140,7 @@ var (
 	Issuer_AuthenticationSource = StringParam{"Issuer.AuthenticationSource"}
 	Issuer_GroupFile = StringParam{"Issuer.GroupFile"}
 	Issuer_GroupSource = StringParam{"Issuer.GroupSource"}
+	Issuer_IssuerClaim = StringParam{"Issuer.IssuerClaim"}
 	Issuer_OIDCAuthenticationUserClaim = StringParam{"Issuer.OIDCAuthenticationUserClaim"}
 	Issuer_QDLLocation = StringParam{"Issuer.QDLLocation"}
 	Issuer_ScitokensServerLocation = StringParam{"Issuer.ScitokensServerLocation"}
