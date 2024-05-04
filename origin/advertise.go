@@ -76,12 +76,6 @@ func (server *OriginServer) CreateAdvertisement(name string, originUrlStr string
 		return nil, err
 	}
 
-	originUrlURL, err := url.Parse(originUrlStr)
-	if err != nil {
-		err = errors.Wrap(err, "Invalid Origin Url")
-		return nil, err
-	}
-
 	var nsAds []server_structs.NamespaceAdV2
 	var prefixes []string
 	originExports, err := server_utils.GetOriginExports()
@@ -105,7 +99,7 @@ func (server *OriginServer) CreateAdvertisement(name string, originUrlStr string
 			Generation: []server_structs.TokenGen{{
 				Strategy:         server_structs.StrategyType("OAuth2"),
 				MaxScopeDepth:    3,
-				CredentialIssuer: *originUrlURL,
+				CredentialIssuer: *issuerUrl,
 			}},
 			Issuer: []server_structs.TokenIssuer{{
 				BasePaths: []string{export.FederationPrefix},
