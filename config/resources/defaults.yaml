@@ -103,6 +103,7 @@ Transport:
   ExpectContinueTimeout: 1s
   ResponseHeaderTimeout: 10s
 OIDC:
+  Issuer: "https://cilogon.org"
   AuthorizationEndpoint: "https://cilogon.org/authorize"
   DeviceAuthEndpoint: "https://cilogon.org/oauth2/device_authorization"
   TokenEndpoint: "https://cilogon.org/oauth2/token"
