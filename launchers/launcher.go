@@ -213,6 +213,13 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 		log.Errorln("Web engine check failed: ", err)
 		return
 	}
+	if param.Origin_EnableIssuer.GetBool() {
+		oa4mpHealthCheckUrl := param.Server_ExternalWebUrl.GetString() + "/api/v1.0/issuer/.well-known/openid-configuration"
+		if err = server_utils.WaitUntilWorking(ctx, "GET", oa4mpHealthCheckUrl, "Issuer", http.StatusOK, true); err != nil {
+			log.Errorln("Failed to startup issuer component: ", err)
+			return
+		}
+	}
 
 	if modules.IsEnabled(config.OriginType) {
 		log.Debug("Finishing origin server configuration")
