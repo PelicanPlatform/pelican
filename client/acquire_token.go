@@ -121,7 +121,7 @@ func RegisterClient(namespace namespaces.Namespace) (*config.PrefixEntry, error)
 		return nil, fmt.Errorf("Issuer %s does not support dynamic client registration", *namespace.CredentialGen.Issuer)
 	}
 
-	drcp := oauth2.DCRPConfig{ClientRegistrationEndpointURL: issuer.RegistrationURL, Metadata: oauth2.Metadata{
+	drcp := oauth2.DCRPConfig{ClientRegistrationEndpointURL: issuer.RegistrationURL, Transport: config.GetTransport(), Metadata: oauth2.Metadata{
 		RedirectURIs:            []string{"https://localhost/osdf-client"},
 		TokenEndpointAuthMethod: "client_secret_basic",
 		GrantTypes:              []string{"refresh_token", "urn:ietf:params:oauth:grant-type:device_code"},
