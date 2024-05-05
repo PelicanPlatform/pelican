@@ -221,7 +221,7 @@ func handleWebUIRedirect(ctx *gin.Context) {
 func handleWebUIAuth(ctx *gin.Context) {
 	requestPath := ctx.Param("requestPath")
 	db := authDB.Load()
-	user, err := GetUser(ctx)
+	user, _, err := GetUserGroups(ctx)
 
 	// Skip auth check for static files other than html pages
 	if path.Ext(requestPath) != "" && path.Ext(requestPath) != ".html" {

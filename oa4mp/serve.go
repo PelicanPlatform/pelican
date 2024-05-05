@@ -156,7 +156,7 @@ func ConfigureOA4MP() (launcher daemon.Launcher, err error) {
 		}
 	}
 
-	oidcIssuerURL := param.Issuer_IssuerClaim.GetString()
+	oidcIssuerURL := param.Issuer_IssuerClaimValue.GetString()
 	if oidcIssuerURL == "" {
 		oidcIssuerURL = param.Server_ExternalWebUrl.GetString()
 	}

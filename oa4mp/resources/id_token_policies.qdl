@@ -16,6 +16,18 @@
  *
  ***************************************************************/
 
+/* Unpack the user information from pelican.
+
+   This is a workaround for the fact that the HTTP header claim source
+   doesn't function with the device code flow.
+ */
+if [exec_phase == 'post_token'] [
+     userInfo. := from_json(decode(claims.sub));
+     claims.sub := userInfo.u;
+     claims.groups := userInfo.g;
+     say('Got user name from pelican: ' + claims.sub);
+];
+
 if [0 == size(proxy_claims.)] then
 [
      /* Fallback: OA4MP 5.4.1 doesn't set proxy_claims at all.

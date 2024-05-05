@@ -20,6 +20,8 @@ package oa4mp
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"io"
 	"net"
 	"net/http"
@@ -61,7 +63,9 @@ func getTransport() *http.Transport {
 }
 
 func oa4mpProxy(ctx *gin.Context) {
+	var userEncoded string
 	var user string
+	var groupsList []string
 	if ctx.Request.URL.Path == "/api/v1.0/issuer/device" {
 		web_ui.RequireAuthMiddleware(ctx)
 		if ctx.IsAborted() {
@@ -77,6 +81,27 @@ func oa4mpProxy(ctx *gin.Context) {
 			})
 			return
 		}
+		groupsList = ctx.GetStringSlice("Groups")
+		if groupsList == nil {
+			groupsList = make([]string, 0)
+		}
+		// WORKAROUND: OA4MP 5.4.x does not provide a mechanism to pass data through headers (the
+		// existing mechanism only works with the authorization code grant, not the device authorization
+		// grant).  Therefore, all the data we want passed we stuff into the username (which *is* copied
+		// through); a small JSON struct is created and base64-encoded.  The policy files on the other
+		// side will appropriately unwrap this information.
+		userInfo := make(map[string]interface{})
+		userInfo["u"] = user
+		userInfo["g"] = groupsList
+		userBytes, err := json.Marshal(userInfo)
+		if err != nil {
+			ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Unable to serialize user authentication",
+			})
+			return
+		}
+		userEncoded = base64.StdEncoding.EncodeToString(userBytes)
 	}
 
 	origPath := ctx.Request.URL.Path
@@ -84,13 +109,17 @@ func oa4mpProxy(ctx *gin.Context) {
 	ctx.Request.URL.Path = "/scitokens-server" + origPath
 	ctx.Request.URL.Scheme = "http"
 	ctx.Request.URL.Host = "localhost"
-	if user == "" {
+	if userEncoded == "" {
 		ctx.Request.Header.Del("X-Pelican-User")
 	} else {
-		ctx.Request.Header.Set("X-Pelican-User", user)
+		ctx.Request.Header.Set("X-Pelican-User", userEncoded)
 	}
 
-	log.Debugln("Will proxy request to URL", ctx.Request.URL.String())
+	if user != "" {
+		log.Debugf("Will proxy request to URL %s with user '%s' and groups '%s'", ctx.Request.URL.String(), user, strings.Join(groupsList, ","))
+	} else {
+		log.Debugln("Will proxy request to URL", ctx.Request.URL.String())
+	}
 	transport = getTransport()
 	resp, err := transport.RoundTrip(ctx.Request)
 	if err != nil {

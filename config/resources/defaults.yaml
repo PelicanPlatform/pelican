@@ -113,4 +113,5 @@ Issuer:
   ScitokensServerLocation: /opt/scitokens-server
   QDLLocation: /opt/qdl
   OIDCAuthenticationUserClaim: sub
+  OIDCGroupClaim: groups
   AuthenticationSource: OIDC

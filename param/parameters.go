@@ -140,8 +140,9 @@ var (
 	Issuer_AuthenticationSource = StringParam{"Issuer.AuthenticationSource"}
 	Issuer_GroupFile = StringParam{"Issuer.GroupFile"}
 	Issuer_GroupSource = StringParam{"Issuer.GroupSource"}
-	Issuer_IssuerClaim = StringParam{"Issuer.IssuerClaim"}
+	Issuer_IssuerClaimValue = StringParam{"Issuer.IssuerClaimValue"}
 	Issuer_OIDCAuthenticationUserClaim = StringParam{"Issuer.OIDCAuthenticationUserClaim"}
+	Issuer_OIDCGroupClaim = StringParam{"Issuer.OIDCGroupClaim"}
 	Issuer_QDLLocation = StringParam{"Issuer.QDLLocation"}
 	Issuer_ScitokensServerLocation = StringParam{"Issuer.ScitokensServerLocation"}
 	Issuer_TomcatLocation = StringParam{"Issuer.TomcatLocation"}
@@ -298,6 +299,7 @@ var (
 	Director_EnableOIDC = BoolParam{"Director.EnableOIDC"}
 	DisableHttpProxy = BoolParam{"DisableHttpProxy"}
 	DisableProxyFallback = BoolParam{"DisableProxyFallback"}
+	Issuer_UserStripDomain = BoolParam{"Issuer.UserStripDomain"}
 	Logging_DisableProgressBars = BoolParam{"Logging.DisableProgressBars"}
 	Lotman_EnableAPI = BoolParam{"Lotman.EnableAPI"}
 	Monitoring_MetricAuthorization = BoolParam{"Monitoring.MetricAuthorization"}

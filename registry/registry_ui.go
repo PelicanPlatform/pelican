@@ -182,7 +182,7 @@ func populateRegistrationFields(prefix string, data interface{}) []registrationF
 // GET /namespaces
 func listNamespaces(ctx *gin.Context) {
 	// Directly call GetUser as we want this endpoint to also be able to serve unauthed users
-	user, err := web_ui.GetUser(ctx)
+	user, _, err := web_ui.GetUserGroups(ctx)
 	if err != nil {
 		log.Error("Failed to check user login status: ", err)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{

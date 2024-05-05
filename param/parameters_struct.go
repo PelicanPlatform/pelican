@@ -95,12 +95,14 @@ type Config struct {
 		GroupFile string
 		GroupRequirements []string
 		GroupSource string
-		IssuerClaim string
+		IssuerClaimValue string
 		OIDCAuthenticationRequirements interface{}
 		OIDCAuthenticationUserClaim string
+		OIDCGroupClaim string
 		QDLLocation string
 		ScitokensServerLocation string
 		TomcatLocation string
+		UserStripDomain bool
 	}
 	IssuerKey string
 	LocalCache struct {
@@ -368,12 +370,14 @@ type configWithType struct {
 		GroupFile struct { Type string; Value string }
 		GroupRequirements struct { Type string; Value []string }
 		GroupSource struct { Type string; Value string }
-		IssuerClaim struct { Type string; Value string }
+		IssuerClaimValue struct { Type string; Value string }
 		OIDCAuthenticationRequirements struct { Type string; Value interface{} }
 		OIDCAuthenticationUserClaim struct { Type string; Value string }
+		OIDCGroupClaim struct { Type string; Value string }
 		QDLLocation struct { Type string; Value string }
 		ScitokensServerLocation struct { Type string; Value string }
 		TomcatLocation struct { Type string; Value string }
+		UserStripDomain struct { Type string; Value bool }
 	}
 	IssuerKey struct { Type string; Value string }
 	LocalCache struct {
