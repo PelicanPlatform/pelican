@@ -81,6 +81,9 @@ func TestFedServePosixOrigin(t *testing.T) {
 	viper.Set("Origin.StoragePrefix", t.TempDir())
 	viper.Set("Origin.FederationPrefix", "/test")
 	viper.Set("Origin.StorageType", "posix")
+	viper.Set("Origin.Port", 0)
+	viper.Set("Server.WebPort", 0)
+
 	// Disable functionality we're not using (and is difficult to make work on Mac)
 	viper.Set("Origin.EnableCmsd", false)
 	viper.Set("Origin.EnableMacaroons", false)
