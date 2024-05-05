@@ -163,7 +163,7 @@ func AcquireToken(destination *url.URL, namespace namespaces.Namespace, opts con
 		return "", fmt.Errorf("Issuer for prefix %s is unknown", namespace.Path)
 	}
 
-	osdfConfig, err := config.GetConfigContents()
+	osdfConfig, err := config.GetCredentialConfigContents()
 	if err != nil {
 		return "", err
 	}
