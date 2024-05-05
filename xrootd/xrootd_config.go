@@ -852,9 +852,9 @@ func mapXrootdLogLevels(xrdConfig *XrootdConfig) error {
 	// https://github.com/xrootd/xrootd/blob/8f8498d66aa583c54c0875bb1cfe432f4be040f4/src/XrdSciTokens/XrdSciTokensAccess.cc#L951-L963
 	xrdConfig.Logging.OriginScitokens, err = genLoggingConfig("scitokens", xrdConfig, param.Logging_Origin_Scitokens.GetString(), loggingMap{
 		Trace: "all",
-		Debug: "debug",
-		Info:  "info",
-		Warn:  "warning",
+		Debug: "debug info warning error",
+		Info:  "info warning error",
+		Warn:  "warning error",
 		Error: "error",
 		Fatal: "none",
 	})
