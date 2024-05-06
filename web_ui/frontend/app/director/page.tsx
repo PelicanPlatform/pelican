@@ -87,11 +87,9 @@ export default function Home() {
                         </Box>
                     }
                 </Grid>
-                <AuthenticatedContent>
-                    <Grid item xs={12} lg={6}>
-                        <FederationOverview/>
-                    </Grid>
-                </AuthenticatedContent>
+                <Grid item xs={12} lg={8} xl={6}>
+                    <FederationOverview/>
+                </Grid>
             </Grid>
         </Box>
     )
