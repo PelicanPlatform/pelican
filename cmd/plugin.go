@@ -414,6 +414,7 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 
 	jobMap := make(map[string]PluginTransfer)
 	var recursive bool
+	var tj *client.TransferJob
 
 	for {
 		select {
@@ -452,7 +453,6 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 				transfer.localFile = parseDestination(transfer)
 			}
 
-			var tj *client.TransferJob
 			urlCopy := *transfer.url
 			tj, err = tc.NewTransferJob(context.Background(), &urlCopy, transfer.localFile, upload, recursive, client.WithAcquireToken(false), client.WithCaches(caches...))
 			if err != nil {
@@ -468,6 +468,12 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 		case result, ok := <-tc.Results():
 			if !ok {
 				log.Debugln("Client has no more results")
+				// Check to be sure we did not have a lookup error
+				ok, err = tj.GetLookupStatus()
+				// If we did not complete lookup, something went wrong
+				if !ok {
+					err = errors.New("error occurred during job lookup")
+				}
 				return
 			}
 			log.Debugln("Got result from transfer client")

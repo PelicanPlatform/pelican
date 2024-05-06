@@ -656,40 +656,9 @@ func TestPluginRecursiveDownload(t *testing.T) {
 		close(workChan)
 
 		results := make(chan *classads.ClassAd, 5)
-		fed.Egrp.Go(func() error {
-			return runPluginWorker(fed.Ctx, false, workChan, results)
-		})
-
-		resultAds := []*classads.ClassAd{}
-		done := false
-		for !done {
-			select {
-			case <-fed.Ctx.Done():
-				break
-			case resultAd, ok := <-results:
-				if !ok {
-					done = true
-					break
-				}
-				// Process results as soon as we get them
-				transferSuccess, err := resultAd.Get("TransferSuccess")
-				assert.NoError(t, err)
-				boolVal, ok := transferSuccess.(bool)
-				require.True(t, ok)
-				assert.False(t, boolVal)
-				resultAds = append(resultAds, resultAd)
-
-				// Check our error message is returned and correct
-				transferError, err := resultAd.Get("TransferError")
-				assert.NoError(t, err)
-				strVal, ok := transferError.(string)
-				require.True(t, ok)
-				assert.Contains(t, strVal, "Pelican Client Error: failed to read remote directory: PROPFIND /test/test/test.txt/: 500")
-			}
-		}
-		// Check we get 1 result ad back (we should fail after first file)
-		assert.Equal(t, 1, len(resultAds))
-
+		err = runPluginWorker(fed.Ctx, false, workChan, results)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to read remote directory: PROPFIND /test/test/test.txt/: 500")
 	})
 
 	t.Run("TestRecursiveFailureDirNotFound", func(t *testing.T) {
@@ -706,40 +675,9 @@ func TestPluginRecursiveDownload(t *testing.T) {
 		close(workChan)
 
 		results := make(chan *classads.ClassAd, 5)
-		fed.Egrp.Go(func() error {
-			return runPluginWorker(fed.Ctx, false, workChan, results)
-		})
-
-		resultAds := []*classads.ClassAd{}
-		done := false
-		for !done {
-			select {
-			case <-fed.Ctx.Done():
-				break
-			case resultAd, ok := <-results:
-				if !ok {
-					done = true
-					break
-				}
-				// Process results as soon as we get them
-				transferSuccess, err := resultAd.Get("TransferSuccess")
-				assert.NoError(t, err)
-				boolVal, ok := transferSuccess.(bool)
-				require.True(t, ok)
-				assert.False(t, boolVal)
-				resultAds = append(resultAds, resultAd)
-
-				// Check our error message is returned and correct
-				transferError, err := resultAd.Get("TransferError")
-				assert.NoError(t, err)
-				strVal, ok := transferError.(string)
-				require.True(t, ok)
-				assert.Contains(t, strVal, "failed to read remote directory: PROPFIND /test/SomeDirectoryThatDoesNotExist:)/: 404")
-			}
-		}
-		// Check we get 1 result ad back (we should fail after first file)
-		assert.Equal(t, 1, len(resultAds))
-
+		err = runPluginWorker(fed.Ctx, false, workChan, results)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to read remote directory: PROPFIND /test/SomeDirectoryThatDoesNotExist:)/: 404")
 	})
 }
 
