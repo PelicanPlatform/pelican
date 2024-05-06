@@ -59,7 +59,7 @@ type (
 // A TTL cache to save namespace registration status
 // The TTL depends on the Status: For Status == StatusRegistrationError, the cache item won't expire,
 // meaning a failure registration stays in the cache, until the registration is successful.
-// For other Status, TTL is set to 5min
+// For other Status, TTL is set to 1 min
 var registrationsStatus = ttlcache.New(ttlcache.WithTTL[string, RegistrationStatus](1 * time.Minute))
 
 var RegistryNotImplErr = errors.New("the running version of the registry didn't implmenet this function")
