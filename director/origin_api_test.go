@@ -142,7 +142,7 @@ func TestNamespaceKeysCacheEviction(t *testing.T) {
 		// Start cache eviction
 		shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 		egrp, ctx := errgroup.WithContext(shutdownCtx)
-		ConfigTTLCache(ctx, egrp)
+		LaunchTTLCache(ctx, egrp)
 		defer func() {
 			shutdownCancel()
 			err := egrp.Wait()
