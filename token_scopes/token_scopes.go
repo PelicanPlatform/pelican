@@ -27,28 +27,28 @@ import (
 type TokenScope string
 
 const (
-	Pelican_Advertise                TokenScope = "pelican.advertise"
-	Pelican_DirectorTestReport       TokenScope = "pelican.director_test_report"
+	Pelican_Advertise TokenScope = "pelican.advertise"
+	Pelican_DirectorTestReport TokenScope = "pelican.director_test_report"
 	Pelican_DirectorServiceDiscovery TokenScope = "pelican.director_service_discovery"
-	Pelican_NamespaceDelete          TokenScope = "pelican.namespace_delete"
-	WebUi_Access                     TokenScope = "web_ui.access"
-	Registry_EditRegistration        TokenScope = "registry.edit_registration"
-	Monitoring_Scrape                TokenScope = "monitoring.scrape"
-	Monitoring_Query                 TokenScope = "monitoring.query"
-	Broker_Reverse                   TokenScope = "broker.reverse"
-	Broker_Retrieve                  TokenScope = "broker.retrieve"
-	Broker_Callback                  TokenScope = "broker.callback"
-	Localcache_Purge                 TokenScope = "localcache.purge"
+	Pelican_NamespaceDelete TokenScope = "pelican.namespace_delete"
+	WebUi_Access TokenScope = "web_ui.access"
+	Registry_EditRegistration TokenScope = "registry.edit_registration"
+	Monitoring_Scrape TokenScope = "monitoring.scrape"
+	Monitoring_Query TokenScope = "monitoring.query"
+	Broker_Reverse TokenScope = "broker.reverse"
+	Broker_Retrieve TokenScope = "broker.retrieve"
+	Broker_Callback TokenScope = "broker.callback"
+	Localcache_Purge TokenScope = "localcache.purge"
 
 	// Storage Scopes
-	Storage_Read   TokenScope = "storage.read"
+	Storage_Read TokenScope = "storage.read"
 	Storage_Create TokenScope = "storage.create"
 	Storage_Modify TokenScope = "storage.modify"
-	Storage_Stage  TokenScope = "storage.stage"
+	Storage_Stage TokenScope = "storage.stage"
 
 	// Lotman Scopes
 	Lot_Create TokenScope = "lot.create"
-	Lot_Read   TokenScope = "lot.read"
+	Lot_Read TokenScope = "lot.read"
 	Lot_Modify TokenScope = "lot.modify"
 	Lot_Delete TokenScope = "lot.delete"
 )
