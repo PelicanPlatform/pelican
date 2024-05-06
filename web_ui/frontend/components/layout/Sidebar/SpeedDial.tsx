@@ -96,7 +96,7 @@ const PelicanSpeedDial = () => {
                             position: 'absolute',
                             top: 0,
                             left: 0,
-                            display: 'flex',
+                            display: open ? 'flex' : 'none',
                             flexDirection: 'row'
                         }}
                     >

@@ -5,7 +5,7 @@ export const stringSort = (a: string, b: string) => {
 }
 
 export const createId = (name: string) => {
-    return name.toLowerCase().split(".").join("-");
+    return name.replace(/[^a-zA-Z0-9]/g, "_")
 }
 
 const buildPatchHelper = (keys: string[], value: any) : any => {

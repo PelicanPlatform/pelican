@@ -12,7 +12,7 @@ const verifyForm = (x: CustomRegistrationField) => {
         x.type as string != "" &&
         x.description != "" &&
         x.validationurl != "" &&
-        (x.type != "enum" || x.optionurl != "" || ( x.options && x.options.length > 0 ))
+        (x.type != "enum" || x.optionsurl != "" || ( x.options && x.options.length > 0 ))
     )
 }
 
@@ -24,7 +24,7 @@ const CustomRegistrationFieldForm = ({ onSubmit, value }: FormProps<CustomRegist
     const [options, setOptions] = React.useState<Option[]>(value?.options || [])
     const [description, setDescription] = React.useState<string>(value?.description || "")
     const [validationUrl, setValidationUrl] = React.useState<string>(value?.validationurl || "")
-    const [optionUrl, setOptionUrl] = React.useState<string>(value?.optionurl || "")
+    const [optionsUrl, setOptionsUrl] = React.useState<string>(value?.optionsurl || "")
 
     const submitHandler = (event: React.FormEvent<HTMLFormElement>) => {
         event.preventDefault();
@@ -35,7 +35,7 @@ const CustomRegistrationFieldForm = ({ onSubmit, value }: FormProps<CustomRegist
             options: options,
             description: description,
             validationUrl: validationUrl,
-            optionUrl: optionUrl
+            optionsUrl: optionsUrl
         }
 
         if(!verifyForm(value)) {
@@ -64,7 +64,7 @@ const CustomRegistrationFieldForm = ({ onSubmit, value }: FormProps<CustomRegist
             </Box>
             {type === "enum" &&
                 <Box mb={2}>
-                    <StringField onChange={setOptionUrl} name={"Option URL"} value={optionUrl} />
+                    <StringField onChange={setOptionsUrl} name={"Option URL"} value={optionsUrl} />
                 </Box>
             }
             {type === "enum" &&
