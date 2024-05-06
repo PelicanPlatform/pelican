@@ -1,6 +1,7 @@
 import React from "react";
 import {secureFetch} from "@/helpers/login";
 import {Alert, Namespace} from "@/components/Main";
+import {getErrorMessage} from "@/helpers/util";
 
 export const populateKey = (o: any, key: string[], value: any) => {
     let i = 0;
@@ -54,12 +55,8 @@ const handleRequestAlert = async (url: string, options: any) : Promise<Alert | u
         const response = await secureFetch(url, options)
 
         if(!response.ok){
-            try {
-                let data = await response.json()
-                return {severity: "error", message: response.status + ": " + data['error']}
-            } catch (e) {
-                return {severity: "error", message: `Failed to make request`}
-            }
+            let errorMessage = await getErrorMessage(response)
+            return {severity: "error", message: errorMessage}
         }
 
     } catch (e) {
@@ -88,12 +85,7 @@ export const getNamespace = async (id: string | number) : Promise<Namespace | un
     if (response.ok) {
         return await response.json()
     } else {
-        try {
-            let data = await response.json()
-            throw new Error(data?.error)
-        } catch (e) {
-            throw new Error(`Failed to fetch namespace: ${id}`)
-        }
+        throw new Error(await getErrorMessage(response))
     }
 }
 

@@ -17,6 +17,7 @@ import {Skeleton} from "@mui/material";
 import {TableCellOverflow} from "@/components/Cell";
 import {Edit, Warning, Check, Clear} from "@mui/icons-material";
 import useSWR from "swr";
+import {getErrorMessage} from "@/helpers/util";
 
 interface Capabilities {
     PublicReads: boolean;
@@ -228,14 +229,7 @@ const getExportData = async () : Promise<ExportRes> => {
         const responseData = await response.json()
         return responseData
     } else {
-        let message;
-        try {
-            const data = await response.json()
-            message = data['msg']
-        } catch (e) {
-            message = response.statusText
-        }
-        throw new Error(`${response.status}: ${message}`)
+        throw new Error(await getErrorMessage(response))
     }
 }
 
