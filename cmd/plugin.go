@@ -428,13 +428,13 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 			}
 
 			// Check we have valid query parameters
-			err := utils.CheckValidQuery(transfer.url, true)
+			err := utils.CheckValidQuery(transfer.url)
 			if err != nil {
 				failTransfer(transfer.url.String(), transfer.localFile, results, upload, err)
 				return err
 			}
 
-			if transfer.url.Query().Get("recursive") != "" {
+			if transfer.url.Query().Has("recursive") {
 				recursive = true
 			} else {
 				recursive = false

@@ -491,9 +491,12 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 	}
 
 	// Check if we have a query and that it is understood
-	err = utils.CheckValidQuery(remoteDestUrl, false)
+	err = utils.CheckValidQuery(remoteDestUrl)
 	if err != nil {
 		return
+	}
+	if remoteDestUrl.Query().Has("recursive") {
+		recursive = true
 	}
 
 	remoteDestUrl.Scheme = remoteDestScheme
@@ -562,9 +565,12 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 	}
 
 	// Check if we have a query and that it is understood
-	err = utils.CheckValidQuery(remoteObjectUrl, false)
+	err = utils.CheckValidQuery(remoteObjectUrl)
 	if err != nil {
 		return
+	}
+	if remoteObjectUrl.Query().Has("recursive") {
+		recursive = true
 	}
 
 	remoteObjectUrl.Scheme = remoteObjectScheme
@@ -688,10 +694,14 @@ func DoCopy(ctx context.Context, sourceFile string, destination string, recursiv
 		return nil, err
 	}
 	// Check if we have a query and that it is understood
-	err = utils.CheckValidQuery(sourceURL, false)
+	err = utils.CheckValidQuery(sourceURL)
 	if err != nil {
 		return
 	}
+	if sourceURL.Query().Has("recursive") {
+		recursive = true
+	}
+
 	sourceURL.Scheme = source_scheme
 
 	destination, dest_scheme := correctURLWithUnderscore(destination)
@@ -702,9 +712,12 @@ func DoCopy(ctx context.Context, sourceFile string, destination string, recursiv
 	}
 
 	// Check if we have a query and that it is understood
-	err = utils.CheckValidQuery(destURL, false)
+	err = utils.CheckValidQuery(destURL)
 	if err != nil {
 		return
+	}
+	if destURL.Query().Has("recursive") {
+		recursive = true
 	}
 
 	destURL.Scheme = dest_scheme
