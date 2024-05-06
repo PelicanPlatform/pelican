@@ -127,36 +127,8 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 
 			// Upload the file with PUT
 			transferDetailsUpload, err := client.DoPut(fed.Ctx, tempDir, uploadURL, true, client.WithTokenLocation(tempToken.Name()))
-			assert.NoError(t, err)
-			if err == nil && len(transferDetailsUpload) == 3 {
-				countBytes17 := 0
-				countBytes23 := 0
-				countBytes35 := 0
-				// Verify we got the correct files back (have to do this since files upload in different orders at times)
-				for _, transfer := range transferDetailsUpload {
-					transferredBytes := transfer.TransferredBytes
-					switch transferredBytes {
-					case int64(17):
-						countBytes17++
-						continue
-					case int64(23):
-						countBytes23++
-						continue
-					case int64(35):
-						countBytes35++
-						continue
-					default:
-						// We got a byte amount we are not expecting
-						t.Fatal("did not upload proper amount of bytes")
-					}
-				}
-				if countBytes17 != 1 || countBytes23 != 1 || countBytes35 != 1 {
-					// We would hit this case if 1 counter got hit twice for some reason
-					t.Fatal("One of the files was not uploaded correctly")
-				}
-			} else if len(transferDetailsUpload) != 3 {
-				t.Fatalf("Amount of transfers results returned for upload was not correct. Transfer details returned: %d", len(transferDetailsUpload))
-			}
+			require.NoError(t, err)
+			verifySuccessfulTransfer(t, transferDetailsUpload)
 
 			// Download the files we just uploaded
 			var transferDetailsDownload []client.TransferResults
@@ -165,38 +137,8 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 			} else {
 				transferDetailsDownload, err = client.DoGet(fed.Ctx, uploadURL, t.TempDir(), true, client.WithTokenLocation(tempToken.Name()))
 			}
-			assert.NoError(t, err)
-			if err == nil && len(transferDetailsDownload) == 3 {
-				countBytesDownloadIdx0 := 0
-				countBytesDownloadIdx1 := 0
-				countBytesDownloadIdx2 := 0
-
-				// Verify we got the correct files back (have to do this since files upload in different orders at times)
-				// In this case, we want to match them to the sizes of the uploaded files
-				for _, transfer := range transferDetailsDownload {
-					transferredBytes := transfer.TransferredBytes
-					switch transferredBytes {
-					case transferDetailsDownload[0].TransferredBytes:
-						countBytesDownloadIdx0++
-						continue
-					case transferDetailsDownload[1].TransferredBytes:
-						countBytesDownloadIdx1++
-						continue
-					case transferDetailsDownload[2].TransferredBytes:
-						countBytesDownloadIdx2++
-						continue
-					default:
-						// We got a byte amount we are not expecting
-						t.Fatal("did not download proper amount of bytes")
-					}
-				}
-				if countBytesDownloadIdx0 != 1 || countBytesDownloadIdx1 != 1 || countBytesDownloadIdx2 != 1 {
-					// We would hit this case if 1 counter got hit twice for some reason
-					t.Fatal("One of the files was not downloaded correctly")
-				} else if len(transferDetailsDownload) != 3 {
-					t.Fatalf("Amount of transfers results returned for download was not correct. Transfer details returned: %d", len(transferDetailsDownload))
-				}
-			}
+			require.NoError(t, err)
+			verifySuccessfulTransfer(t, transferDetailsDownload)
 		}
 	})
 
@@ -223,36 +165,8 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 
 			// Upload the file with PUT
 			transferDetailsUpload, err := client.DoPut(fed.Ctx, tempDir, uploadURL, true, client.WithTokenLocation(tempToken.Name()))
-			assert.NoError(t, err)
-			if err == nil && len(transferDetailsUpload) == 3 {
-				countBytes17 := 0
-				countBytes23 := 0
-				countBytes35 := 0
-				// Verify we got the correct files back (have to do this since files upload in different orders at times)
-				for _, transfer := range transferDetailsUpload {
-					transferredBytes := transfer.TransferredBytes
-					switch transferredBytes {
-					case int64(17):
-						countBytes17++
-						continue
-					case int64(23):
-						countBytes23++
-						continue
-					case int64(35):
-						countBytes35++
-						continue
-					default:
-						// We got a byte amount we are not expecting
-						t.Fatal("did not upload proper amount of bytes")
-					}
-				}
-				if countBytes17 != 1 || countBytes23 != 1 || countBytes35 != 1 {
-					// We would hit this case if 1 counter got hit twice for some reason
-					t.Fatal("One of the files was not uploaded correctly")
-				}
-			} else if len(transferDetailsUpload) != 3 {
-				t.Fatalf("Amount of transfers results returned for upload was not correct. Transfer details returned: %d", len(transferDetailsUpload))
-			}
+			require.NoError(t, err)
+			verifySuccessfulTransfer(t, transferDetailsUpload)
 
 			// Download the files we just uploaded
 			tmpDir := t.TempDir()
@@ -262,38 +176,8 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 			} else {
 				transferDetailsDownload, err = client.DoGet(fed.Ctx, uploadURL, tmpDir, true, client.WithTokenLocation(tempToken.Name()))
 			}
-			assert.NoError(t, err)
-			if err == nil && len(transferDetailsDownload) == 3 {
-				countBytesDownloadIdx0 := 0
-				countBytesDownloadIdx1 := 0
-				countBytesDownloadIdx2 := 0
-
-				// Verify we got the correct files back (have to do this since files upload in different orders at times)
-				// In this case, we want to match them to the sizes of the uploaded files
-				for _, transfer := range transferDetailsDownload {
-					transferredBytes := transfer.TransferredBytes
-					switch transferredBytes {
-					case transferDetailsDownload[0].TransferredBytes:
-						countBytesDownloadIdx0++
-						continue
-					case transferDetailsDownload[1].TransferredBytes:
-						countBytesDownloadIdx1++
-						continue
-					case transferDetailsDownload[2].TransferredBytes:
-						countBytesDownloadIdx2++
-						continue
-					default:
-						// We got a byte amount we are not expecting
-						t.Fatal("did not download proper amount of bytes")
-					}
-				}
-				if countBytesDownloadIdx0 != 1 || countBytesDownloadIdx1 != 1 || countBytesDownloadIdx2 != 1 {
-					// We would hit this case if 1 counter got hit twice for some reason
-					t.Fatal("One of the files was not downloaded correctly")
-				} else if len(transferDetailsDownload) != 3 {
-					t.Fatalf("Amount of transfers results returned for download was not correct. Transfer details returned: %d", len(transferDetailsDownload))
-				}
-			}
+			require.NoError(t, err)
+			verifySuccessfulTransfer(t, transferDetailsDownload)
 		}
 	})
 
@@ -313,36 +197,9 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 				export.FederationPrefix, "osdf_osdf", dirName)
 			// Upload the file with PUT
 			transferDetailsUpload, err := client.DoPut(fed.Ctx, tempDir, uploadURL, true, client.WithTokenLocation(tempToken.Name()))
-			assert.NoError(t, err)
-			if err == nil && len(transferDetailsUpload) == 3 {
-				countBytes17 := 0
-				countBytes23 := 0
-				countBytes35 := 0
-				// Verify we got the correct files back (have to do this since files upload in different orders at times)
-				for _, transfer := range transferDetailsUpload {
-					transferredBytes := transfer.TransferredBytes
-					switch transferredBytes {
-					case int64(17):
-						countBytes17++
-						continue
-					case int64(23):
-						countBytes23++
-						continue
-					case int64(35):
-						countBytes35++
-						continue
-					default:
-						// We got a byte amount we are not expecting
-						t.Fatal("did not upload proper amount of bytes")
-					}
-				}
-				if countBytes17 != 1 || countBytes23 != 1 || countBytes35 != 1 {
-					// We would hit this case if 1 counter got hit twice for some reason
-					t.Fatal("One of the files was not uploaded correctly")
-				}
-			} else if len(transferDetailsUpload) != 3 {
-				t.Fatalf("Amount of transfers results returned for upload was not correct. Transfer details returned: %d", len(transferDetailsUpload))
-			}
+			require.NoError(t, err)
+			verifySuccessfulTransfer(t, transferDetailsUpload)
+
 			// Download the files we just uploaded
 			var transferDetailsDownload []client.TransferResults
 			if export.Capabilities.PublicReads {
@@ -350,38 +207,8 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 			} else {
 				transferDetailsDownload, err = client.DoGet(fed.Ctx, uploadURL, t.TempDir(), true, client.WithTokenLocation(tempToken.Name()))
 			}
-			assert.NoError(t, err)
-			if err == nil && len(transferDetailsDownload) == 3 {
-				countBytesDownloadIdx0 := 0
-				countBytesDownloadIdx1 := 0
-				countBytesDownloadIdx2 := 0
-
-				// Verify we got the correct files back (have to do this since files upload in different orders at times)
-				// In this case, we want to match them to the sizes of the uploaded files
-				for _, transfer := range transferDetailsDownload {
-					transferredBytes := transfer.TransferredBytes
-					switch transferredBytes {
-					case transferDetailsDownload[0].TransferredBytes:
-						countBytesDownloadIdx0++
-						continue
-					case transferDetailsDownload[1].TransferredBytes:
-						countBytesDownloadIdx1++
-						continue
-					case transferDetailsDownload[2].TransferredBytes:
-						countBytesDownloadIdx2++
-						continue
-					default:
-						// We got a byte amount we are not expecting
-						t.Fatal("did not download proper amount of bytes")
-					}
-				}
-				if countBytesDownloadIdx0 != 1 || countBytesDownloadIdx1 != 1 || countBytesDownloadIdx2 != 1 {
-					// We would hit this case if 1 counter got hit twice for some reason
-					t.Fatal("One of the files was not downloaded correctly")
-				} else if len(transferDetailsDownload) != 3 {
-					t.Fatalf("Amount of transfers results returned for download was not correct. Transfer details returned: %d", len(transferDetailsDownload))
-				}
-			}
+			require.NoError(t, err)
+			verifySuccessfulTransfer(t, transferDetailsDownload)
 		}
 	})
 
@@ -395,6 +222,19 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 	})
 }
 
+// Helper function to verify a successful transfer by looking at the total bytes transferred and amount of results sent back
+func verifySuccessfulTransfer(t *testing.T, transferResults []client.TransferResults) {
+	expectedBytes := int64(75)
+	var totalBytes int64 // we expect this to be 17+23+35 = 75
+	for _, transfer := range transferResults {
+		totalBytes += transfer.TransferredBytes
+	}
+
+	require.Equal(t, 3, len(transferResults), fmt.Sprintf("incorrect number of transfers reported %d", len(transferResults)))
+	require.Equal(t, expectedBytes, totalBytes, fmt.Sprintf("incorrect number of transferred bytes: %d", totalBytes))
+
+}
+
 // Test that recursive uploads and downloads work with the ?recursive query
 func TestRecursiveUploadsAndDownloadsWithQuery(t *testing.T) {
 	// Create instance of test federation
@@ -404,6 +244,15 @@ func TestRecursiveUploadsAndDownloadsWithQuery(t *testing.T) {
 	fed := fed_test_utils.NewFedTest(t, mixedAuthOriginCfg)
 
 	te := client.NewTransferEngine(fed.Ctx)
+
+	t.Cleanup(func() {
+		if err := te.Shutdown(); err != nil {
+			log.Errorln("Failure when shutting down transfer engine:", err)
+		}
+		// Throw in a viper.Reset for good measure. Keeps our env squeaky clean!
+		viper.Reset()
+		server_utils.ResetOriginExports()
+	})
 
 	// Create a token file
 	issuer, err := config.GetServerIssuerURL()
@@ -433,7 +282,6 @@ func TestRecursiveUploadsAndDownloadsWithQuery(t *testing.T) {
 	assert.NoError(t, err)
 	innerTempDir, err := os.MkdirTemp(tempDir, "InnerUploadDir")
 	assert.NoError(t, err)
-	defer os.RemoveAll(tempDir)
 	defer os.RemoveAll(tempDir)
 	permissions := os.FileMode(0755)
 	err = os.Chmod(tempDir, permissions)
@@ -466,12 +314,8 @@ func TestRecursiveUploadsAndDownloadsWithQuery(t *testing.T) {
 
 	// Test we work with just the query
 	t.Run("testRecursiveGetAndPutWithQuery", func(t *testing.T) {
-		oldPref, err := config.SetPreferredPrefix(config.PelicanPrefix)
+		_, err := config.SetPreferredPrefix(config.PelicanPrefix)
 		assert.NoError(t, err)
-		defer func() {
-			_, err := config.SetPreferredPrefix(oldPref)
-			require.NoError(t, err)
-		}()
 
 		for _, export := range fed.Exports {
 			// Set path for object to upload/download
@@ -482,36 +326,8 @@ func TestRecursiveUploadsAndDownloadsWithQuery(t *testing.T) {
 
 			// Upload the file with PUT
 			transferDetailsUpload, err := client.DoPut(fed.Ctx, tempDir, uploadURL, false, client.WithTokenLocation(tempToken.Name()))
-			assert.NoError(t, err)
-			if err == nil && len(transferDetailsUpload) == 3 {
-				countBytes17 := 0
-				countBytes23 := 0
-				countBytes35 := 0
-				// Verify we got the correct files back (have to do this since files upload in different orders at times)
-				for _, transfer := range transferDetailsUpload {
-					transferredBytes := transfer.TransferredBytes
-					switch transferredBytes {
-					case int64(17):
-						countBytes17++
-						continue
-					case int64(23):
-						countBytes23++
-						continue
-					case int64(35):
-						countBytes35++
-						continue
-					default:
-						// We got a byte amount we are not expecting
-						t.Fatal("did not upload proper amount of bytes")
-					}
-				}
-				if countBytes17 != 1 || countBytes23 != 1 || countBytes35 != 1 {
-					// We would hit this case if 1 counter got hit twice for some reason
-					t.Fatal("One of the files was not uploaded correctly")
-				}
-			} else if len(transferDetailsUpload) != 3 {
-				t.Fatalf("Amount of transfers results returned for upload was not correct. Transfer details returned: %d", len(transferDetailsUpload))
-			}
+			require.NoError(t, err)
+			verifySuccessfulTransfer(t, transferDetailsUpload)
 
 			// Download the files we just uploaded
 			var transferDetailsDownload []client.TransferResults
@@ -520,49 +336,15 @@ func TestRecursiveUploadsAndDownloadsWithQuery(t *testing.T) {
 			} else {
 				transferDetailsDownload, err = client.DoGet(fed.Ctx, uploadURL, t.TempDir(), false, client.WithTokenLocation(tempToken.Name()))
 			}
-			assert.NoError(t, err)
-			if err == nil && len(transferDetailsDownload) == 3 {
-				countBytesDownloadIdx0 := 0
-				countBytesDownloadIdx1 := 0
-				countBytesDownloadIdx2 := 0
-
-				// Verify we got the correct files back (have to do this since files upload in different orders at times)
-				// In this case, we want to match them to the sizes of the uploaded files
-				for _, transfer := range transferDetailsDownload {
-					transferredBytes := transfer.TransferredBytes
-					switch transferredBytes {
-					case transferDetailsDownload[0].TransferredBytes:
-						countBytesDownloadIdx0++
-						continue
-					case transferDetailsDownload[1].TransferredBytes:
-						countBytesDownloadIdx1++
-						continue
-					case transferDetailsDownload[2].TransferredBytes:
-						countBytesDownloadIdx2++
-						continue
-					default:
-						// We got a byte amount we are not expecting
-						t.Fatal("did not download proper amount of bytes")
-					}
-				}
-				if countBytesDownloadIdx0 != 1 || countBytesDownloadIdx1 != 1 || countBytesDownloadIdx2 != 1 {
-					// We would hit this case if 1 counter got hit twice for some reason
-					t.Fatal("One of the files was not downloaded correctly")
-				} else if len(transferDetailsDownload) != 3 {
-					t.Fatalf("Amount of transfers results returned for download was not correct. Transfer details returned: %d", len(transferDetailsDownload))
-				}
-			}
+			require.NoError(t, err)
+			verifySuccessfulTransfer(t, transferDetailsDownload)
 		}
 	})
 
 	// Test we work with a value assigned to it (we print deprecation warning)
 	t.Run("testRecursiveGetAndPutWithQueryWithValueTrue", func(t *testing.T) {
-		oldPref, err := config.SetPreferredPrefix(config.PelicanPrefix)
+		_, err := config.SetPreferredPrefix(config.PelicanPrefix)
 		assert.NoError(t, err)
-		defer func() {
-			_, err := config.SetPreferredPrefix(oldPref)
-			require.NoError(t, err)
-		}()
 
 		for _, export := range fed.Exports {
 			// Set path for object to upload/download
@@ -573,36 +355,8 @@ func TestRecursiveUploadsAndDownloadsWithQuery(t *testing.T) {
 
 			// Upload the file with PUT
 			transferDetailsUpload, err := client.DoPut(fed.Ctx, tempDir, uploadURL, false, client.WithTokenLocation(tempToken.Name()))
-			assert.NoError(t, err)
-			if err == nil && len(transferDetailsUpload) == 3 {
-				countBytes17 := 0
-				countBytes23 := 0
-				countBytes35 := 0
-				// Verify we got the correct files back (have to do this since files upload in different orders at times)
-				for _, transfer := range transferDetailsUpload {
-					transferredBytes := transfer.TransferredBytes
-					switch transferredBytes {
-					case int64(17):
-						countBytes17++
-						continue
-					case int64(23):
-						countBytes23++
-						continue
-					case int64(35):
-						countBytes35++
-						continue
-					default:
-						// We got a byte amount we are not expecting
-						t.Fatal("did not upload proper amount of bytes")
-					}
-				}
-				if countBytes17 != 1 || countBytes23 != 1 || countBytes35 != 1 {
-					// We would hit this case if 1 counter got hit twice for some reason
-					t.Fatal("One of the files was not uploaded correctly")
-				}
-			} else if len(transferDetailsUpload) != 3 {
-				t.Fatalf("Amount of transfers results returned for upload was not correct. Transfer details returned: %d", len(transferDetailsUpload))
-			}
+			require.NoError(t, err)
+			verifySuccessfulTransfer(t, transferDetailsUpload)
 
 			// Download the files we just uploaded
 			var transferDetailsDownload []client.TransferResults
@@ -611,49 +365,15 @@ func TestRecursiveUploadsAndDownloadsWithQuery(t *testing.T) {
 			} else {
 				transferDetailsDownload, err = client.DoGet(fed.Ctx, uploadURL, t.TempDir(), false, client.WithTokenLocation(tempToken.Name()))
 			}
-			assert.NoError(t, err)
-			if err == nil && len(transferDetailsDownload) == 3 {
-				countBytesDownloadIdx0 := 0
-				countBytesDownloadIdx1 := 0
-				countBytesDownloadIdx2 := 0
-
-				// Verify we got the correct files back (have to do this since files upload in different orders at times)
-				// In this case, we want to match them to the sizes of the uploaded files
-				for _, transfer := range transferDetailsDownload {
-					transferredBytes := transfer.TransferredBytes
-					switch transferredBytes {
-					case transferDetailsDownload[0].TransferredBytes:
-						countBytesDownloadIdx0++
-						continue
-					case transferDetailsDownload[1].TransferredBytes:
-						countBytesDownloadIdx1++
-						continue
-					case transferDetailsDownload[2].TransferredBytes:
-						countBytesDownloadIdx2++
-						continue
-					default:
-						// We got a byte amount we are not expecting
-						t.Fatal("did not download proper amount of bytes")
-					}
-				}
-				if countBytesDownloadIdx0 != 1 || countBytesDownloadIdx1 != 1 || countBytesDownloadIdx2 != 1 {
-					// We would hit this case if 1 counter got hit twice for some reason
-					t.Fatal("One of the files was not downloaded correctly")
-				} else if len(transferDetailsDownload) != 3 {
-					t.Fatalf("Amount of transfers results returned for download was not correct. Transfer details returned: %d", len(transferDetailsDownload))
-				}
-			}
+			require.NoError(t, err)
+			verifySuccessfulTransfer(t, transferDetailsDownload)
 		}
 	})
 
 	// Test we work with a value assigned to it but says recursive=false (we print deprecation warning and ignore arguments in query so we still work)
 	t.Run("testRecursiveGetAndPutWithQueryWithValueFalse", func(t *testing.T) {
-		oldPref, err := config.SetPreferredPrefix(config.PelicanPrefix)
+		_, err := config.SetPreferredPrefix(config.PelicanPrefix)
 		assert.NoError(t, err)
-		defer func() {
-			_, err := config.SetPreferredPrefix(oldPref)
-			require.NoError(t, err)
-		}()
 
 		for _, export := range fed.Exports {
 			// Set path for object to upload/download
@@ -664,36 +384,8 @@ func TestRecursiveUploadsAndDownloadsWithQuery(t *testing.T) {
 
 			// Upload the file with PUT
 			transferDetailsUpload, err := client.DoPut(fed.Ctx, tempDir, uploadURL, false, client.WithTokenLocation(tempToken.Name()))
-			assert.NoError(t, err)
-			if err == nil && len(transferDetailsUpload) == 3 {
-				countBytes17 := 0
-				countBytes23 := 0
-				countBytes35 := 0
-				// Verify we got the correct files back (have to do this since files upload in different orders at times)
-				for _, transfer := range transferDetailsUpload {
-					transferredBytes := transfer.TransferredBytes
-					switch transferredBytes {
-					case int64(17):
-						countBytes17++
-						continue
-					case int64(23):
-						countBytes23++
-						continue
-					case int64(35):
-						countBytes35++
-						continue
-					default:
-						// We got a byte amount we are not expecting
-						t.Fatal("did not upload proper amount of bytes")
-					}
-				}
-				if countBytes17 != 1 || countBytes23 != 1 || countBytes35 != 1 {
-					// We would hit this case if 1 counter got hit twice for some reason
-					t.Fatal("One of the files was not uploaded correctly")
-				}
-			} else if len(transferDetailsUpload) != 3 {
-				t.Fatalf("Amount of transfers results returned for upload was not correct. Transfer details returned: %d", len(transferDetailsUpload))
-			}
+			require.NoError(t, err)
+			verifySuccessfulTransfer(t, transferDetailsUpload)
 
 			// Download the files we just uploaded
 			var transferDetailsDownload []client.TransferResults
@@ -702,49 +394,15 @@ func TestRecursiveUploadsAndDownloadsWithQuery(t *testing.T) {
 			} else {
 				transferDetailsDownload, err = client.DoGet(fed.Ctx, uploadURL, t.TempDir(), false, client.WithTokenLocation(tempToken.Name()))
 			}
-			assert.NoError(t, err)
-			if err == nil && len(transferDetailsDownload) == 3 {
-				countBytesDownloadIdx0 := 0
-				countBytesDownloadIdx1 := 0
-				countBytesDownloadIdx2 := 0
-
-				// Verify we got the correct files back (have to do this since files upload in different orders at times)
-				// In this case, we want to match them to the sizes of the uploaded files
-				for _, transfer := range transferDetailsDownload {
-					transferredBytes := transfer.TransferredBytes
-					switch transferredBytes {
-					case transferDetailsDownload[0].TransferredBytes:
-						countBytesDownloadIdx0++
-						continue
-					case transferDetailsDownload[1].TransferredBytes:
-						countBytesDownloadIdx1++
-						continue
-					case transferDetailsDownload[2].TransferredBytes:
-						countBytesDownloadIdx2++
-						continue
-					default:
-						// We got a byte amount we are not expecting
-						t.Fatal("did not download proper amount of bytes")
-					}
-				}
-				if countBytesDownloadIdx0 != 1 || countBytesDownloadIdx1 != 1 || countBytesDownloadIdx2 != 1 {
-					// We would hit this case if 1 counter got hit twice for some reason
-					t.Fatal("One of the files was not downloaded correctly")
-				} else if len(transferDetailsDownload) != 3 {
-					t.Fatalf("Amount of transfers results returned for download was not correct. Transfer details returned: %d", len(transferDetailsDownload))
-				}
-			}
+			require.NoError(t, err)
+			verifySuccessfulTransfer(t, transferDetailsDownload)
 		}
 	})
 
 	// Test we work with both recursive and directread query params
 	t.Run("testRecursiveGetAndPutWithQueryAndDirectread", func(t *testing.T) {
-		oldPref, err := config.SetPreferredPrefix(config.PelicanPrefix)
+		_, err := config.SetPreferredPrefix(config.PelicanPrefix)
 		assert.NoError(t, err)
-		defer func() {
-			_, err := config.SetPreferredPrefix(oldPref)
-			require.NoError(t, err)
-		}()
 
 		for _, export := range fed.Exports {
 			// Set path for object to upload/download
@@ -755,36 +413,8 @@ func TestRecursiveUploadsAndDownloadsWithQuery(t *testing.T) {
 
 			// Upload the file with PUT
 			transferDetailsUpload, err := client.DoPut(fed.Ctx, tempDir, uploadURL, false, client.WithTokenLocation(tempToken.Name()))
-			assert.NoError(t, err)
-			if err == nil && len(transferDetailsUpload) == 3 {
-				countBytes17 := 0
-				countBytes23 := 0
-				countBytes35 := 0
-				// Verify we got the correct files back (have to do this since files upload in different orders at times)
-				for _, transfer := range transferDetailsUpload {
-					transferredBytes := transfer.TransferredBytes
-					switch transferredBytes {
-					case int64(17):
-						countBytes17++
-						continue
-					case int64(23):
-						countBytes23++
-						continue
-					case int64(35):
-						countBytes35++
-						continue
-					default:
-						// We got a byte amount we are not expecting
-						t.Fatal("did not upload proper amount of bytes")
-					}
-				}
-				if countBytes17 != 1 || countBytes23 != 1 || countBytes35 != 1 {
-					// We would hit this case if 1 counter got hit twice for some reason
-					t.Fatal("One of the files was not uploaded correctly")
-				}
-			} else if len(transferDetailsUpload) != 3 {
-				t.Fatalf("Amount of transfers results returned for upload was not correct. Transfer details returned: %d", len(transferDetailsUpload))
-			}
+			require.NoError(t, err)
+			verifySuccessfulTransfer(t, transferDetailsUpload)
 
 			// Download the files we just uploaded
 			var transferDetailsDownload []client.TransferResults
@@ -793,51 +423,9 @@ func TestRecursiveUploadsAndDownloadsWithQuery(t *testing.T) {
 			} else {
 				transferDetailsDownload, err = client.DoGet(fed.Ctx, uploadURL, t.TempDir(), false, client.WithTokenLocation(tempToken.Name()))
 			}
-			assert.NoError(t, err)
-			if err == nil && len(transferDetailsDownload) == 3 {
-				countBytesDownloadIdx0 := 0
-				countBytesDownloadIdx1 := 0
-				countBytesDownloadIdx2 := 0
-
-				// Verify we got the correct files back (have to do this since files upload in different orders at times)
-				// In this case, we want to match them to the sizes of the uploaded files
-				for _, transfer := range transferDetailsDownload {
-					for _, attempt := range transfer.Attempts {
-						assert.Equal(t, "https://"+attempt.Endpoint, param.Origin_Url.GetString())
-					}
-					transferredBytes := transfer.TransferredBytes
-					switch transferredBytes {
-					case transferDetailsDownload[0].TransferredBytes:
-						countBytesDownloadIdx0++
-						continue
-					case transferDetailsDownload[1].TransferredBytes:
-						countBytesDownloadIdx1++
-						continue
-					case transferDetailsDownload[2].TransferredBytes:
-						countBytesDownloadIdx2++
-						continue
-					default:
-						// We got a byte amount we are not expecting
-						t.Fatal("did not download proper amount of bytes")
-					}
-				}
-				if countBytesDownloadIdx0 != 1 || countBytesDownloadIdx1 != 1 || countBytesDownloadIdx2 != 1 {
-					// We would hit this case if 1 counter got hit twice for some reason
-					t.Fatal("One of the files was not downloaded correctly")
-				} else if len(transferDetailsDownload) != 3 {
-					t.Fatalf("Amount of transfers results returned for download was not correct. Transfer details returned: %d", len(transferDetailsDownload))
-				}
-			}
+			require.NoError(t, err)
+			verifySuccessfulTransfer(t, transferDetailsDownload)
 		}
-	})
-
-	t.Cleanup(func() {
-		if err := te.Shutdown(); err != nil {
-			log.Errorln("Failure when shutting down transfer engine:", err)
-		}
-		// Throw in a viper.Reset for good measure. Keeps our env squeaky clean!
-		viper.Reset()
-		server_utils.ResetOriginExports()
 	})
 }
 
