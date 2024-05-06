@@ -7,6 +7,7 @@ import {IconButton, Menu, MenuItem, Tooltip} from "@mui/material";
 import {Login, AccountCircle, CloudSync, AdminPanelSettings} from "@mui/icons-material";
 import StatusSnackBar from "@/components/StatusSnackBar";
 import {getUser} from "@/helpers/login";
+import {getErrorMessage} from "@/helpers/util";
 
 const UserMenu = () => {
 
@@ -38,16 +39,7 @@ const UserMenu = () => {
             if(response.ok) {
                 await mutate(getUser)
             } else {
-                try {
-                    let data = await response.json()
-                    if (data?.error) {
-                        setError(response.status + ": " + data['error'])
-                    } else {
-                        setError("Server error with status code " + response.status)
-                    }
-                } catch {
-                    setError("Server error with status code " + response.status)
-                }
+                setError(await getErrorMessage(response))
             }
         } catch {
             setError("Could not connect to server")

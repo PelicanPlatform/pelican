@@ -31,3 +31,14 @@ export const getOauthEnabledServers = async () => {
         return servers
     }
 }
+
+export const getErrorMessage = async (response: Response) : Promise<string> =>  {
+    let message;
+    try {
+        let data = await response.json()
+        message = response.status + ": " + data['msg']
+    } catch (e) {
+        message = response.status + ": " + response.statusText
+    }
+    return message
+}

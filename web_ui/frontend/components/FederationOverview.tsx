@@ -6,6 +6,7 @@ import {Config} from "./Config/index.d";
 import {Box, Typography} from "@mui/material";
 import AuthenticatedContent from "@/components/layout/AuthenticatedContent";
 import Link from "next/link";
+import {getErrorMessage} from "@/helpers/util";
 
 
 const LinkBox = ({href, text} : {href: string, text: string}) => {
@@ -40,7 +41,7 @@ const FederationOverview = () => {
                 DiscoveryUrl: (responseData?.Federation as Config)?.DiscoveryUrl?.Value as undefined | string,
             })
         } else {
-            console.error("Failed to fetch config for Federation Overview, response status: " + response.status)
+            console.error(await getErrorMessage(response))
         }
     }
 

@@ -1,3 +1,4 @@
+import {getErrorMessage} from "@/helpers/util";
 
 
 export const stringSort = (a: string, b: string) => {
@@ -31,18 +32,9 @@ export const submitConfigChange = async (data: any) => {
 
     if( response.ok ) {
         return response.json()
+    } else {
+        throw new Error(await getErrorMessage(response))
     }
-
-    // Throw the best possible error message
-    let responseData = undefined;
-    try {
-        responseData = await response.json()
-    } catch {
-        throw new Error(`Failed to path config: Status ${response.status}`)
-    }
-
-    // Throw the server provided error
-    throw new Error(`${response.status}: ${responseData['error']}`)
 }
 
 export const verifyIpAddress = (ip: string) => {

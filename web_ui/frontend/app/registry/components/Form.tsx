@@ -10,6 +10,7 @@ import {Namespace} from "@/components/Main";
 import CustomRegistrationField from "@/app/registry/components/CustomRegistrationField/index";
 import {calculateKeys, deleteKey, getValue, populateKey, submitNamespaceForm} from "@/app/registry/components/util";
 import {CustomRegistrationPropsEnum} from "./CustomRegistrationField/index.d";
+import {getErrorMessage} from "@/helpers/util";
 
 interface FormProps {
     namespace?: Namespace;
@@ -23,14 +24,7 @@ const getRegistrationFields = async (): Promise<CustomRegistrationPropsEnum[]> =
     if (response.ok) {
         return await response.json()
     } else {
-        let message;
-        try {
-            let data = await response.json()
-            message = data['msg']
-        } catch (e) {
-            message = response.statusText
-        }
-        throw new Error(`${response.status}: ${message}`)
+        throw new Error(await getErrorMessage(response))
     }
 }
 

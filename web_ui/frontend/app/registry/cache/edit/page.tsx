@@ -19,18 +19,6 @@
 "use client"
 
 import {PutPage} from "@/app/registry/components/PutPage";
-
-            if(!response.ok){
-                try {
-                    let data = await response.json()
-                    setAlert({severity: "error", message: response.status + ": " + data['error']})
-                } catch (e) {
-                    setAlert({severity: "error", message: `Failed to edit namespace: ${formData.get("prefix")}`})
-                }
-            } else {
-                setAlert({severity: "success", message: `Successfully edited namespace: ${formData.get("prefix")}`})
-                setTimeout(() => {window.location.href = "/view/registry/"}, 3000)
-            }
 import {namespaceToCache, putGeneralNamespace} from "@/app/registry/components/util";
 import {Box, Grid, Typography} from "@mui/material";
 import React from "react";
