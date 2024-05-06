@@ -91,7 +91,6 @@ export default function Home() {
                             Denied Namespaces
                         </Typography>
                         { deniedNamespaces !== undefined ? <CardList<CardProps> data={deniedNamespaces} Card={DeniedCard} cardProps={{authenticated: user}} /> : <CardSkeleton/> }
-
                     </AuthenticatedContent>
                 </Grid>
                 <Grid item lg={6} xl={8}>

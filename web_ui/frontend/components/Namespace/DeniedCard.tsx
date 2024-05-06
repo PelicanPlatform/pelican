@@ -1,4 +1,5 @@
 import React, {useMemo, useRef, useState} from "react";
+import {green, red} from "@mui/material/colors";
 import {Authenticated, secureFetch} from "@/helpers/login";
 import {Avatar, Box, IconButton, Tooltip, Typography} from "@mui/material";
 import {Block, Check, Delete, Edit, Person} from "@mui/icons-material";
@@ -25,12 +26,14 @@ const deleteNamespace = async (id: number) => {
         let alertMessage;
         try {
             let data = await response.json()
-            if (data?.message) {
-                alertMessage = data?.message
+            if (data?.msg) {
+                alertMessage = data?.msg
             }
             alertMessage = "Details not provided"
         } catch (e) {
-            alertMessage = e
+            if(e instanceof Error) {
+                alertMessage = e.message
+            }
         }
 
         throw new Error("Failed to delete namespace: " + alertMessage)
@@ -46,12 +49,14 @@ const approveNamespace = async (id: number) => {
         let alertMessage;
         try {
             let data = await response.json()
-            if (data?.message) {
-                alertMessage = data?.message
+            if (data?.msg) {
+                alertMessage = data?.msg
             }
             alertMessage = "Details not provided"
         } catch (e) {
-            alertMessage = e
+            if(e instanceof Error) {
+                alertMessage = e.message
+            }
         }
 
         throw new Error("Failed to approve namespace: " + alertMessage)
@@ -79,8 +84,10 @@ export const DeniedCard = ({
                     justifyContent: "space-between",
                     border: "solid #ececec 1px",
                     borderRadius: transition ? "10px 10px 0px 0px" : 2,
+                    transition: "background-color .3s ease-out",
+                    bgcolor: alert?.severity == "success" ? green[100] : alert?.severity == "error" ? red[100] : "inherit",
                     "&:hover": {
-                        bgcolor: "#ececec"
+                        bgcolor: alert ? undefined : "#ececec"
                     },
                     p: 1
                 }}
@@ -112,7 +119,8 @@ export const DeniedCard = ({
                                                 e.stopPropagation()
                                                 try {
                                                     await deleteNamespace(namespace.id)
-                                                    await mutate("getNamespaces")
+                                                    setAlert({severity: "success", message: "Namespace deleted"})
+                                                    setTimeout(() =>  mutate("getNamespaces"), 600)
                                                 } catch (e) {
                                                     if(e instanceof Error){
                                                         setAlert({severity: "error", message: e.message})
@@ -131,7 +139,8 @@ export const DeniedCard = ({
                                                 e.stopPropagation()
                                                 try {
                                                     await approveNamespace(namespace.id)
-                                                    await mutate("getNamespaces")
+                                                    setAlert({severity: "success", message: "Namespace Approved"})
+                                                    setTimeout(() =>  mutate("getNamespaces"), 600)
                                                 } catch (e) {
                                                     if(e instanceof Error){
                                                         setAlert({severity: "error", message: e.message})
@@ -151,7 +160,9 @@ export const DeniedCard = ({
                     <InformationDropdown adminMetadata={namespace.admin_metadata} transition={transition} parentRef={ref}/>
                 </Box>
             </Box>
-            <AlertPortal alert={alert} onClose={() => setAlert(undefined)} />
+            { alert?.severity == "error" &&
+                <AlertPortal key={JSON.stringify(alert)} alert={alert} onClose={() => setAlert(undefined)} />
+            }
         </>
 
     )
