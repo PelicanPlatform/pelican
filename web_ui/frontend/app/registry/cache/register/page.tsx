@@ -18,90 +18,29 @@
 
 "use client"
 
-import {
-    Box,
-    Grid,
-    Typography,
-    Collapse,
-    Alert
-} from "@mui/material";
-import React, {ReactNode, useEffect, useMemo, useState} from "react";
+import {namespaceToCache, postGeneralNamespace} from "@/app/registry/components/util";
+import {PostPage} from "@/app/registry/components/PostPage";
+import {Box, Grid, Typography} from "@mui/material";
+import React from "react";
 
-import Link from "next/link";
+export default function Page () {
 
-import {Alert as AlertType} from "@/components/Main";
-import CacheForm from "@/app/registry/components/CacheForm";
-import AuthenticatedContent from "@/components/layout/AuthenticatedContent";
-import {secureFetch} from "@/helpers/login";
-
-export default function Register() {
-
-    const [alert, setAlert] = useState<AlertType | undefined>(undefined)
-
-    const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) : Promise<boolean> => {
-
-        e.preventDefault()
-
-        const formData = new FormData(e.currentTarget);
-
-        try {
-            const response = await secureFetch("/api/v1.0/registry_ui/namespaces", {
-                body: JSON.stringify({
-                    prefix: `/caches/${formData.get("prefix")}`,
-                    pubkey: formData.get("pubkey"),
-                    admin_metadata: {
-                        description: formData.get("description"),
-                        site_name: formData.get("site-name"),
-                        institution: formData.get("institution"),
-                        security_contact_user_id: formData.get("security-contact-user-id")
-                    }
-                }),
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json"
-                },
-                credentials: "include"
-            })
-
-            if(!response.ok){
-                try {
-                    let data = await response.json()
-                    setAlert({severity: "error", message: response.status + ": " + data['error']})
-                } catch (e) {
-                    setAlert({severity: "error", message: `Failed to register namespace: ${formData.get("prefix")}`})
-                }
-            } else {
-                setAlert({severity: "success", message: `Successfully registered namespace: ${formData.get("prefix")}`})
-                return true
-            }
-
-        } catch (e) {
-            setAlert({severity: "error", message: `Fetch error: ${e}`})
-        }
-
-        return false
+    const postCache = async (data: any) => {
+        const cache = namespaceToCache(structuredClone(data))
+        return postGeneralNamespace(cache)
     }
 
     return (
-        <AuthenticatedContent redirect={true} boxProps={{width:"100%"}}>
-            <Grid container spacing={2}>
-                <Grid item xs={12} lg={7}>
-                    <Typography variant={"h4"} pb={3}>Register Cache</Typography>
-                    <Typography variant={"body1"} pb={2}>
-                        Registering a Cache allows the federation to cache its data there.
-                    </Typography>
+        <Box width={"100%"}>
+            <Grid container>
+                <Grid item xs={12}>
+                    <Typography variant={"h4"} pb={3}>Namespace Registry</Typography>
+                    <Typography variant={"h5"} pb={3}>Register New Cache</Typography>
                 </Grid>
-                <Grid item xs={12} lg={7} justifyContent={"space-between"}>
-                    <Collapse in={alert !== undefined}>
-                        <Box mb={2}>
-                            <Alert severity={alert?.severity}>{alert?.message}</Alert>
-                        </Box>
-                    </Collapse>
-                    <CacheForm handleSubmit={handleSubmit}/>
-                </Grid>
-                <Grid item lg={2}>
+                <Grid item xs={12}>
+                    <PostPage update={postCache}/>
                 </Grid>
             </Grid>
-        </AuthenticatedContent>
+        </Box>
     )
 }

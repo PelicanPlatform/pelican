@@ -27,7 +27,7 @@ import PasswordInput from "../components/PasswordInput";
 import useSWR from "swr";
 import {getUser} from "@/helpers/login";
 import {ServerType} from "@/index";
-import {getEnabledServers, getOauthEnabledServers} from "@/helpers/util";
+import {getEnabledServers, getErrorMessage, getOauthEnabledServers} from "@/helpers/util";
 
 const AdminLogin = () => {
 
@@ -73,14 +73,8 @@ const AdminLogin = () => {
                 returnUrl = returnUrl.replace(`/view`, "")
                 router.push(returnUrl ? returnUrl : "../")
             } else {
-                try {
-                    let data = await response.json()
-                    setLoading(false)
-                    setError(response.status + ": " + data['error'])
-                } catch {
-                    setLoading(false)
-                    setError(response.status + ": " + response.statusText)
-                }
+                setLoading(false)
+                setError(await getErrorMessage(response))
             }
 
         } catch (e) {

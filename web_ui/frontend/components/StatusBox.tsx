@@ -22,6 +22,7 @@ import {Box, Grid, Skeleton, Typography} from "@mui/material";
 import React, {useEffect, useState} from "react";
 import {DateTime} from "luxon";
 import { alpha, useTheme } from "@mui/material";
+import {getErrorMessage} from "@/helpers/util";
 
 interface StatusDisplayProps {
     component: string;
@@ -108,7 +109,7 @@ export default function StatusBox() {
             setUpdated(DateTime.now())
             setStatus(data)
         } else {
-            setError("Error fetching status json: " + response.status)
+            setError(await getErrorMessage(response))
         }
 
     }

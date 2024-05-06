@@ -20,13 +20,14 @@
 import {Box, Tooltip} from "@mui/material";
 import Link from "next/link";
 import Image from "next/image";
-import {Add, Build, TripOrigin, Storage} from "@mui/icons-material";
+import {Add, Build, TripOrigin, Storage, Block} from "@mui/icons-material";
 
 import {Sidebar} from "@/components/layout/Sidebar";
 import PelicanLogo from "@/public/static/images/PelicanPlatformLogo_Icon.png";
 import IconButton from "@mui/material/IconButton";
 import {Main} from "@/components/layout/Main"
 import SpeedDial, {SpeedButtonControlledProps} from "@/components/layout/SidebarSpeedDial";
+import AuthenticatedContent from "@/components/layout/AuthenticatedContent";
 
 export const metadata = {
     title: 'Pelican Registry',
@@ -60,6 +61,17 @@ export default function RootLayout({
                 <Box pt={1}>
                     <SpeedDial actions={actions}/>
                 </Box>
+                <AuthenticatedContent>
+                    <Box pt={1}>
+                        <Tooltip title={"Denied Namespaces"} placement={"right"}>
+                            <Link href={"/registry/denied/"}>
+                                <IconButton>
+                                    <Block/>
+                                </IconButton>
+                            </Link>
+                        </Tooltip>
+                    </Box>
+                </AuthenticatedContent>
                 <Box pt={1}>
                     <Tooltip title={"Config"} placement={"right"}>
                         <Link href={"/config/"}>

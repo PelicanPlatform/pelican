@@ -39,3 +39,14 @@ export function getObjectValue<T>(obj: any, keys: string[]): T | undefined {
     }
     return getObjectValue(currentValue, keys.slice(1))
 }
+
+export const getErrorMessage = async (response: Response) : Promise<string> =>  {
+    let message;
+    try {
+        let data = await response.json()
+        message = response.status + ": " + data['msg']
+    } catch (e) {
+        message = response.status + ": " + response.statusText
+    }
+    return message
+}

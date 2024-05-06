@@ -51,7 +51,9 @@ func DirectorServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 		go director.PeriodicCacheReload(ctx)
 	}
 
-	director.ConfigTTLCache(ctx, egrp)
+	director.LaunchTTLCache(ctx, egrp)
+
+	director.LaunchMapMetrics(ctx, egrp)
 
 	director.ConfigFilterdServers()
 

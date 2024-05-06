@@ -367,6 +367,8 @@ func TestPluginMulti(t *testing.T) {
 // Test multiple downloads from the plugin
 func TestPluginDirectRead(t *testing.T) {
 	viper.Reset()
+	defer viper.Reset()
+	defer server_utils.ResetOriginExports()
 	server_utils.ResetOriginExports()
 
 	dirName := t.TempDir()
@@ -566,6 +568,116 @@ func TestFailTransfer(t *testing.T) {
 		transferErrorStr, ok := transferError.(string)
 		require.True(t, ok)
 		assert.Equal(t, "cancelled transfer, too slow.  Detected speed: 0 B/s, total transferred: 0 B, total transfer time: 0s", transferErrorStr)
+	})
+}
+
+// Test recursive downloads from the plugin
+func TestPluginRecursiveDownload(t *testing.T) {
+	viper.Reset()
+	defer viper.Reset()
+	defer server_utils.ResetOriginExports()
+	server_utils.ResetOriginExports()
+
+	dirName := t.TempDir()
+
+	viper.Set("Logging.Level", "debug")
+	viper.Set("Origin.StorageType", "posix")
+	viper.Set("Origin.FederationPrefix", "/test")
+	viper.Set("Origin.StoragePrefix", "/<THIS WILL BE OVERRIDDEN>")
+	viper.Set("Origin.EnablePublicReads", true)
+	fed := fed_test_utils.NewFedTest(t, "")
+	host := param.Server_Hostname.GetString() + ":" + strconv.Itoa(param.Server_WebPort.GetInt())
+
+	// Drop the testFileContent into the origin directory
+	destDir := filepath.Join(fed.Exports[0].StoragePrefix, "test")
+	require.NoError(t, os.MkdirAll(destDir, os.FileMode(0755)))
+	log.Debugln("Will create origin file at", destDir)
+	err := os.WriteFile(filepath.Join(destDir, "test.txt"), []byte("test file content"), fs.FileMode(0644))
+	require.NoError(t, err)
+	downloadUrl1 := url.URL{
+		Scheme:   "pelican",
+		Host:     host,
+		Path:     "/test/test",
+		RawQuery: "recursive=true",
+	}
+	localPath1 := filepath.Join(dirName, "test.txt")
+	err = os.WriteFile(filepath.Join(destDir, "test2.txt"), []byte("second test file content"), fs.FileMode(0644))
+	require.NoError(t, err)
+
+	// Test recursive download succeeds
+	t.Run("TestRecursiveSuccess", func(t *testing.T) {
+		workChan := make(chan PluginTransfer, 1)
+		workChan <- PluginTransfer{url: &downloadUrl1, localFile: localPath1}
+		//workChan <- PluginTransfer{url: &downloadUrl2, localFile: localPath2}
+		close(workChan)
+
+		results := make(chan *classads.ClassAd, 5)
+		fed.Egrp.Go(func() error {
+			return runPluginWorker(fed.Ctx, false, workChan, results)
+		})
+
+		resultAds := []*classads.ClassAd{}
+		done := false
+		for !done {
+			select {
+			case <-fed.Ctx.Done():
+				break
+			case resultAd, ok := <-results:
+				if !ok {
+					done = true
+					break
+				}
+				// Process results as soon as we get them
+				transferSuccess, err := resultAd.Get("TransferSuccess")
+				assert.NoError(t, err)
+				boolVal, ok := transferSuccess.(bool)
+				require.True(t, ok)
+				assert.True(t, boolVal)
+				resultAds = append(resultAds, resultAd)
+			}
+		}
+		// Check we get 2 result ads back (each file has been downloaded)
+		assert.Equal(t, 2, len(resultAds))
+	})
+
+	// Check to make sure the plugin properly fails when setting recursive=true on a file
+	// instead of a directory
+	t.Run("TestRecursiveFailureOnRecursiveSetForFile", func(t *testing.T) {
+		// Change the downloadUrl to be a path to a file instead of a directory
+		downloadUrl1 := url.URL{
+			Scheme:   "pelican",
+			Host:     host,
+			Path:     "/test/test/test.txt",
+			RawQuery: "recursive=true",
+		}
+
+		workChan := make(chan PluginTransfer, 1)
+		workChan <- PluginTransfer{url: &downloadUrl1, localFile: localPath1}
+		close(workChan)
+
+		results := make(chan *classads.ClassAd, 5)
+		err = runPluginWorker(fed.Ctx, false, workChan, results)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to read remote directory: PROPFIND /test/test/test.txt/: 500")
+	})
+
+	t.Run("TestRecursiveFailureDirNotFound", func(t *testing.T) {
+		// Change the downloadUrl to be a path to a file instead of a directory
+		downloadUrl1 := url.URL{
+			Scheme:   "pelican",
+			Host:     host,
+			Path:     "/test/SomeDirectoryThatDoesNotExist:)",
+			RawQuery: "recursive=true",
+		}
+
+		workChan := make(chan PluginTransfer, 1)
+		workChan <- PluginTransfer{url: &downloadUrl1, localFile: localPath1}
+		close(workChan)
+
+		results := make(chan *classads.ClassAd, 5)
+		err = runPluginWorker(fed.Ctx, false, workChan, results)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to read remote directory: PROPFIND /test/SomeDirectoryThatDoesNotExist:)/: 404")
 	})
 }
 
