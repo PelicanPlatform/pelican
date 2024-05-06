@@ -16,6 +16,7 @@ import {Skeleton} from "@mui/material";
 
 import {TableCellOverflow} from "@/components/Cell";
 import {Edit, Warning, Check, Clear} from "@mui/icons-material";
+import useSWR from "swr";
 
 interface Capabilities {
     PublicReads: boolean;
@@ -221,30 +222,31 @@ export const RecordTable = ({ data }: { data: ExportRes }): ReactElement  => {
     }
 }
 
+const getExportData = async () : Promise<ExportRes> => {
+    let response = await fetch("/api/v1.0/origin_ui/exports")
+    if (response.ok) {
+        const responseData = await response.json()
+        return responseData
+    } else {
+        let message;
+        try {
+            const data = await response.json()
+            message = data['msg']
+        } catch (e) {
+            message = response.statusText
+        }
+        throw new Error(`${response.status}: ${message}`)
+    }
+}
+
 export const DataExportTable = ({boxProps}: {boxProps?: BoxProps}) => {
 
-    const [data, setData] = useState<ExportRes | undefined>(undefined);
-    const [error, setError] = useState<string | undefined>(undefined);
-
-
-    const getData = async () => {
-        let response = await fetch("/api/v1.0/origin_ui/exports")
-        if (response.ok) {
-            const responseData = await response.json()
-            setData(responseData)
-        } else {
-            setError("Failed to fetch config, response status: " + response.status)
-        }
-    }
-
-    useEffect(() => {
-        getData()
-    }, [])
+    const {data, error} = useSWR("getDataExport", getExportData)
 
     if(error){
         return (
             <Box p={1}>
-                <Typography sx={{color: "red"}} variant={"subtitle2"}>{error}</Typography>
+                <Typography sx={{color: "red"}} variant={"subtitle2"}>{error.toString()}</Typography>
             </Box>
         )
     }
