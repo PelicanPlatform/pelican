@@ -97,7 +97,7 @@ export const CapabilitiesTable = ({capabilities}: {capabilities: Capabilities}) 
         <Box>
             {Object.entries(capabilities).map(([key, value]) => {
                 return (
-                    <Tooltip title={value.toString()}>
+                    <Tooltip title={value.toString()} key={key}>
                         <Box
                             sx={{
                                 borderRadius: 1,
@@ -201,8 +201,8 @@ export const RecordTable = ({ data }: { data: ExportRes }): ReactElement  => {
             return (
                 <>
                     {entryPage.map((entry, index) => (
-                        <Box pb={1}>
-                            <S3DataExportCard key={entry.federation_prefix} entry={entry as S3ExportEntry}/>
+                        <Box key={entry.federation_prefix} pb={1}>
+                            <S3DataExportCard entry={entry as S3ExportEntry}/>
                         </Box>
                     ))}
                     <Paginator data={data.exports} page={page} pageSize={2} setPage={setPage}/>
@@ -212,8 +212,8 @@ export const RecordTable = ({ data }: { data: ExportRes }): ReactElement  => {
             return (
                 <>
                     {entryPage.map((entry, index) => (
-                        <Box  pb={1}>
-                            <PosixDataExportCard key={entry.federation_prefix} entry={entry as PosixExportEntry}/>
+                        <Box key={entry.federation_prefix} pb={1}>
+                            <PosixDataExportCard entry={entry as PosixExportEntry}/>
                         </Box>
                     ))}
                     <Paginator data={data.exports} page={page} pageSize={2} setPage={setPage}/>
